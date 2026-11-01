@@ -13,7 +13,7 @@ fn assembly() -> Session {
 }
 
 fn warm(session: &Session) {
-    for body in &session.world_state().bodies {
+    for body in &session.world_state().unwrap().bodies {
         body.mesh();
     }
 }

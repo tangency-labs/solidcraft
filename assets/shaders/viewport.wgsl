@@ -18,6 +18,8 @@ struct U {
     depth: vec4<f32>,  // x = 1: reversed depth (1 near, 0 far); y, z: the faces' push (`FACE_BIAS`)
     tint: vec4<f32>,   // xyz added to a whole hovered body's colour before lighting
     sel: vec4<f32>,    // xyz a whole selected body's colour before lighting
+    // the section hatch colours by part (`solidcraft_render::hatch`), the first the cap's own
+    hatch: array<vec4<f32>, 3>,
     product_lights_meta: vec4<f32>, // explicit preview flag and bounded count
     product_lights: array<vec4<f32>,84>, // position/kind, radiance, axis/cone, attenuation
     sky: vec4<f32>,    // xyz = world up; w = 1: shade in linear light with a sky fill (#7974)
@@ -40,14 +42,23 @@ fn clipped(p: vec3<f32>) -> bool {
     return length(u.clip.xyz) > 0.5 && dot(u.clip.xyz, p) > u.clip.w;
 }
 @group(0) @binding(0) var<uniform> u: U;
-// The scene's colours, 2048 entries to a row: an R32Uint texture rather than a storage buffer,
-// so the viewport draws on WebGL2 (which has no storage buffers) as well.
+// The scene's colours, 2048 entries to a row: an Rg32Uint texture rather than a storage buffer,
+// so the viewport draws on WebGL2 (which has no storage buffers) as well. Each entry is the
+// colour's bytes, then 1 + the section hatch of the body it colours (0: the cap's own).
 @group(0) @binding(1) var pal: texture_2d<u32>;
 
-/// The colour at palette entry `i`, as byte/255 (the old Unorm8x4 conversion, bit for bit).
-fn palette(i: u32) -> vec4<f32> {
-    let v = textureLoad(pal, vec2<i32>(i32(i & 2047u), i32(i >> 11u)), 0).x;
+fn palette_entry(i: u32) -> vec2<u32> {
+    return textureLoad(pal, vec2<i32>(i32(i & 2047u), i32(i >> 11u)), 0).xy;
+}
+
+/// A palette entry's colour bytes as byte/255 (the old Unorm8x4 conversion, bit for bit).
+fn unpack_color(v: u32) -> vec4<f32> {
     return vec4<f32>(f32(v & 255u), f32((v >> 8u) & 255u), f32((v >> 16u) & 255u), f32((v >> 24u) & 255u)) / 255.0;
+}
+
+/// The colour at palette entry `i`.
+fn palette(i: u32) -> vec4<f32> {
+    return unpack_color(palette_entry(i).x);
 }
 
 fn to_linear(c: vec3<f32>) -> vec3<f32> {
@@ -66,6 +77,8 @@ struct TOut {
     @location(0) n: vec3<f32>,
     @location(1) c: vec4<f32>,
     @location(2) wp: vec3<f32>,
+    // 1 + the section hatch of the body (0: the cap's own), from the palette.
+    @location(3) @interpolate(flat) h: u32,
 };
 
 @vertex
@@ -73,7 +86,9 @@ fn vs_tri(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: 
     var o: TOut;
     o.pos = u.vp * vec4<f32>(p, 1.0);
     o.n = n;
-    o.c = palette(c);
+    let e = palette_entry(c);
+    o.c = unpack_color(e.x);
+    o.h = e.y;
     o.wp = p;
     return o;
 }
@@ -95,7 +110,9 @@ fn vs_tri_inst(
     var o: TOut;
     o.pos = u.vp * vec4<f32>(wp, 1.0);
     o.n = vec3<f32>(dot(r0.xyz, n), dot(r1.xyz, n), dot(r2.xyz, n));
-    o.c = palette(c);
+    let e = palette_entry(c);
+    o.c = unpack_color(e.x);
+    o.h = e.y;
     o.wp = wp;
     return o;
 }
@@ -110,6 +127,7 @@ struct FOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) rp: vec3<f32>,
     @location(1) c: vec4<f32>,
+    @location(2) @interpolate(flat) h: u32,
 };
 
 @vertex
@@ -125,7 +143,9 @@ fn vs_tri_inst_flat(
     var o: FOut;
     o.pos = u.vp * vec4<f32>(wp, 1.0);
     o.rp = wp - u.eye.xyz;
-    o.c = palette(c);
+    let e = palette_entry(c);
+    o.c = unpack_color(e.x);
+    o.h = e.y;
     return o;
 }
 
@@ -141,6 +161,7 @@ fn flat_fragment(i: FOut, front: bool) -> TOut {
     o.pos = i.pos;
     o.n = n;
     o.c = i.c;
+    o.h = i.h;
     o.wp = i.rp + u.eye.xyz;
     return o;
 }
@@ -216,13 +237,43 @@ fn fs_solid(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f3
     return c;
 }
 
+/// A section's crossing count (`Cut::count` in `view.rs`): nothing but the cut itself, so the
+/// stencil counts only the faces behind the section plane. The colour is not written.
+@fragment
+fn fs_clip(i: TOut) -> @location(0) vec4<f32> {
+    if (clipped(i.wp)) { discard; }
+    return vec4<f32>(0.0);
+}
+
+@fragment
+fn fs_clip_flat(i: FOut) -> @location(0) vec4<f32> {
+    if (clipped(i.rp + u.eye.xyz)) { discard; }
+    return vec4<f32>(0.0);
+}
+
+/// Faces where the section plane is outside every closed body (`Cut::rest`): a back face seen
+/// there is the inside of an open body (a surface body, a solid with faces left out), lit as it
+/// is without a section rather than hatched, since there is no cut face to show.
+@fragment
+fn fs_solid_open(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let c = solid(i, true);
+    return c;
+}
+
+@fragment
+fn fs_solid_open_flat(i: FOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let t = flat_fragment(i, front);
+    let c = solid(t, true);
+    return c;
+}
+
 struct CutOut {
     @location(0) c: vec4<f32>,
     @builtin(frag_depth) depth: f32,
 };
 
-/// The section cap (the inside seen through the cut, drawn on the far walls' back faces where
-/// they are the visible surface) again, at the depth of the section plane rather than of the
+/// The section cap (where the section plane lies inside a body, drawn on the far walls' back
+/// faces) again, at the depth of the section plane rather than of the
 /// far wall, so the cut face hides what lies inside the body instead of showing it like a
 /// pane of glass.
 @fragment
@@ -242,44 +293,6 @@ fn pushed(z: f32) -> f32 {
     let step = select(1.0 / 16777216.0, abs(z) * 1.1920929e-7, reversed());
     let push = slope * u.depth.z + step * u.depth.y;
     return clamp(z - select(-push, push, reversed()), 0.0, 1.0);
-}
-
-/// A far wall seen through the cut where another body's face lying on it was drawn in front of
-/// it (a shaft in its bore, #9407): its cap colour again, at its depth pulled toward the eye by
-/// `touch_depth`, so it wins over that face, which is faceted another way.
-@fragment
-fn fs_solid_touch(i: TOut, @builtin(front_facing) front: bool) -> CutOut {
-    var o: CutOut;
-    // Derivatives (in `touch_depth`) first, before `solid` may discard.
-    o.depth = touch_depth(i.wp, i.pos.z);
-    o.c = solid(i, front);
-    return o;
-}
-
-@fragment
-fn fs_solid_touch_flat(i: FOut, @builtin(front_facing) front: bool) -> CutOut {
-    let t = flat_fragment(i, front);
-    var o: CutOut;
-    o.depth = touch_depth(t.wp, t.pos.z);
-    o.c = solid(t, front);
-    return o;
-}
-
-/// The depth of `wp` (depth `z`) pulled toward the eye by what may part two faceted copies of
-/// one surface: 3 pixels' width along the view ray (display refinement keeps a facet's sag about
-/// a pixel) and 2 pixels of the face's own depth slope (more where it turns from the eye).
-fn touch_depth(wp: vec3<f32>, z: f32) -> f32 {
-    let px = min(length(dpdx(wp)), length(dpdy(wp)));
-    let slope = max(abs(dpdx(z)), abs(dpdy(z)));
-    var dir = -u.back.xyz;
-    if (u.eye.w > 0.5) { dir = wp - u.eye.xyz; }
-    let len = length(dir);
-    if (len < 1e-12) { return z; }
-    let c = u.vp * vec4<f32>(wp - dir * (3.0 * px / len), 1.0);
-    if (c.w <= 0.0) { return z; }
-    let pulled = c.z / c.w;
-    if (reversed()) { return clamp(max(pulled, z) + 2.0 * slope, 0.0, 1.0); }
-    return clamp(min(pulled, z) - 2.0 * slope, 0.0, 1.0);
 }
 
 /// Depth of the section plane on the view ray through `wp` (a far wall seen through the cut),
@@ -305,11 +318,19 @@ fn solid(i: TOut, front: bool) -> vec4<f32> {
     if (clipped(i.wp)) { discard; }
     if (!front && length(u.clip.xyz) > 0.5) {
         // The cut face in its body's colour ("from component" colouring), tinted toward the
-        // cap colour so it reads as a cut, hatched at 45 degrees on screen; with the hatch off
+        // cap colour so it reads as a cut, hatched at 45 degrees on screen; by part, toward the
+        // body's own hatch colour and at its angle (45 or 135 degrees). With the hatch off
         // (`u.cap.a` 0), plain in the body's own colour.
         if (u.cap.a < 0.5) { return out_color(vec4<f32>(i.c.rgb, 1.0)); }
-        let base = mix(i.c.rgb, u.cap.rgb, 0.35);
-        let h = fract((i.pos.x + i.pos.y) / 9.0);
+        var tint = u.cap.rgb;
+        var turn = 1.0;
+        if (i.h > 0u) {
+            let k = i.h - 1u;
+            tint = u.hatch[min(k >> 1u, 2u)].rgb;
+            turn = select(1.0, -1.0, (k & 1u) == 1u);
+        }
+        let base = mix(i.c.rgb, tint, 0.35);
+        let h = fract((i.pos.x + turn * i.pos.y) / 9.0);
         return out_color(vec4<f32>(select(base, base * 0.6, h < 0.22), 1.0));
     }
     if (u.ana.x > 0.5 && length(i.n) > 0.5) {

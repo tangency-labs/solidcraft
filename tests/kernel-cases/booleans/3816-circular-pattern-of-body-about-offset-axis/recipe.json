@@ -1,0 +1,40 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     37.5,
+     13,
+     -50
+    ],
+    "length": 4,
+    "width": 4,
+    "height": 4,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.pattern.circular",
+   "params": {
+    "bodies": [
+     "Part"
+    ],
+    "axis": {
+     "origin": [
+      17.5,
+      15,
+      -48
+     ],
+     "dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "count": 9,
+    "angle": "360 deg"
+   }
+  }
+ ]
+}

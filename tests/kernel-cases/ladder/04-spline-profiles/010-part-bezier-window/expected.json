@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "the running part: a Bezier-arched window cut through the back wall",
+ "source": "analytic",
+ "method": "the arch over z=22 from x=20 to 40 rises to z = 22 + 0.75*12 = 31, under the wall top (35): removed 10 * 133.200000000; + window floor and arch faces",
+ "body_count": 1,
+ "volume_mm3": 54273.309649149,
+ "faces": 16
+}

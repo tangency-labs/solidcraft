@@ -232,15 +232,54 @@ fn help_x(report: Rect) -> f32 {
     report.left() - 18.0
 }
 
-/// The Report a bug button: labelled when there is room for its text (`label_width`, measured in
-/// the current language), otherwise just the icon. `version_width` is the measured version.
-fn report_rect(bar: Rect, captions: f32, tabs_start: f32, label_width: f32, version_width: f32) -> (Rect, bool) {
-    let right = bar.right() - captions - version_room(bar, captions, tabs_start, version_width).unwrap_or(8.0);
+/// The command whose tool or dialog is open right now, shown pressed in the toolbar.
+fn running_command(app: &SolveApp) -> Option<String> {
+    match (&app.tool, &app.dialog) {
+        (Some(tool), _) => Some(tool.cmd.to_string()),
+        // Create Sketch never lands in last_command (it is not repeatable).
+        (None, Some(d)) if matches!(d.kind, crate::dialogs::Kind::Sketch) => Some("sketch.create".to_string()),
+        (None, Some(_)) => app.last_command.as_ref().map(|(id, _)| id.clone()),
+        _ => None,
+    }
+}
+
+/// Whether the toolbar shows command `id` pressed: its tool or dialog is open, or it turned on
+/// the view analysis on now (one at a time, `Session::active_analysis`), its tool running or not.
+pub(crate) fn shows_pressed(app: &SolveApp, id: &str) -> bool {
+    running_command(app).as_deref() == Some(id) || app.session.active_analysis() == Some(id)
+}
+
+/// [`shows_pressed`] for a ribbon button: a command with a persistent effect is pressed only while
+/// its tool runs, since `persistent_ribbon_pressed` alone decides how its effect is shown.
+fn ribbon_shows_pressed(app: &SolveApp, id: &str) -> bool {
+    if persistent_available(app, id) { running_command(app).as_deref() == Some(id) } else { shows_pressed(app, id) }
+}
+
+/// The Report a bug button: labelled when the layout asks for it and there is room for its text
+/// (`label_width`, measured in the current language), otherwise just the icon. An icon-only
+/// layout gives it a square the size of Settings and Help. `version_width` is the measured version.
+fn report_rect(bar: Rect, captions: f32, tabs_start: f32, label_width: f32, version_width: f32, layout: HeaderLayout) -> (Rect, bool) {
+    let room = if layout.version == VersionPlace::Header { version_room(bar, captions, tabs_start, version_width) } else { None };
+    let right = bar.right() - captions - room.unwrap_or(8.0);
+    if layout.report == ReportButton::Icon {
+        return (Rect::from_min_size(pos2(right - 32.0, bar.center().y - 16.0), vec2(32.0, 32.0)), false);
+    }
     // Icon, text and a margin that mirrors the icon side.
     let full = REPORT_TEXT_X + label_width + 11.0;
     let labeled = right - CLUSTER_BUTTONS - tabs_start >= 216.0 + full;
     let width = if labeled { full } else { 28.0 };
     (Rect::from_min_size(pos2(right - width, bar.center().y - 13.0), vec2(width, 26.0)), labeled)
+}
+
+/// The closed search field in the application bar, ending `right`: whole when the document tabs
+/// keep the room Report a bug's label leaves them (`tabs_room`: theirs without the field), else
+/// just its magnifier.
+fn header_search_rect(ctx: &egui::Context, bar: Rect, right: f32, tabs_room: f32) -> Rect {
+    let height = 26.0;
+    let full = crate::ui_kit::CommandSearch::closed_width(ctx);
+    let whole = bar.width() >= 640.0 && tabs_room - full - HEADER_SEARCH_GAP >= 216.0;
+    let width = if whole { full } else { crate::ui_kit::CommandSearch::compact_width(height) };
+    Rect::from_min_size(pos2(right - width, bar.center().y - height / 2.0), vec2(width, height))
 }
 
 /// The height of an application-bar pill ([`offer_pill`]), a little under the bar's 26 px buttons.
@@ -300,6 +339,64 @@ const REPORT_TEXT_X: f32 = 29.0;
 
 /// The application bar's height: the window's title bar on desktop builds.
 pub const APP_BAR_HEIGHT: f32 = 34.0;
+
+/// Where the application bar puts command search, Report a bug and the version: chosen by the
+/// app that hosts the UI ([`SolveApp::header`]) before the first frame. The default is the
+/// desktop layout.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HeaderLayout {
+    pub search: SearchPlace,
+    pub report: ReportButton,
+    pub version: VersionPlace,
+}
+
+impl HeaderLayout {
+    /// Search in the ribbon's tab row, a labelled Report a bug, the version in the bar.
+    pub const DESKTOP: HeaderLayout = HeaderLayout { search: SearchPlace::Ribbon, report: ReportButton::Labelled, version: VersionPlace::Header };
+    /// Search in the bar beside Settings, Report a bug as an icon, the version in the Help menu.
+    pub const COMPACT: HeaderLayout = HeaderLayout { search: SearchPlace::Header, report: ReportButton::Icon, version: VersionPlace::HelpMenu };
+}
+
+/// Where the closed command search field sits.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SearchPlace {
+    /// At the right end of the ribbon's tab row.
+    #[default]
+    Ribbon,
+    /// In the application bar, immediately left of Settings; just its magnifier when the bar is
+    /// short of room. The ribbon keeps it where the bar has no Settings button of its own (a
+    /// system File menu) or is not shown (an embedded view).
+    Header,
+}
+
+/// How the application bar shows Report a bug.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ReportButton {
+    /// A button with its label when there is room for it (the icon alone otherwise).
+    #[default]
+    Labelled,
+    /// Always the icon alone, drawn like Settings and Help; its name stays the tooltip and the
+    /// accessible label.
+    Icon,
+}
+
+/// Where the version is shown.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum VersionPlace {
+    /// At the application bar's right end, linking to the release notes.
+    #[default]
+    Header,
+    /// As a row of the Help menu, opening the release notes.
+    HelpMenu,
+}
+
+/// The closed search field goes in the application bar rather than the ribbon.
+pub(crate) fn search_in_header(app: &SolveApp) -> bool {
+    app.header.search == SearchPlace::Header && !app.embedded
+}
+
+/// Space between the header search field and Settings.
+const HEADER_SEARCH_GAP: f32 = 4.0;
 
 pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
@@ -432,7 +529,18 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         // The version links to its release notes; measured here so Report a bug leaves it room.
         let version =
             ui.painter().layout_no_wrap(format!("v{}", crate::update::current_version()), FontId::proportional(t.font_small), t.app_bar_text);
-        let (report, report_label) = report_rect(r, captions, tabs_start, label_width, version.size().x);
+        let (report, report_label) = report_rect(r, captions, tabs_start, label_width, version.size().x, app.header);
+        // Settings' left edge; command search, when the bar holds it, sits just before it and
+        // moves the assistant button and the end of the document tabs left by its width.
+        let gear_left = report.left() - 68.0;
+        let search = (search_in_header(app) && design_shown(app))
+            .then(|| header_search_rect(ui.ctx(), r, gear_left - HEADER_SEARCH_GAP, report.left() - CLUSTER_BUTTONS - tabs_start));
+        let search_shift = search.map_or(0.0, |s| s.width() + HEADER_SEARCH_GAP);
+        if let Some(search) = search {
+            // shortcut_box::show draws the one search editor wherever this rectangle is.
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("sc_ribbon_search"), search));
+            crate::scenario::publish_target("titlebar:search", search);
+        }
         // Assistant, Settings, Help and Report a bug form the right-hand cluster.
         if click(ui, help_x(report), "help", app.tr("ui.help"), true) {
             app.help.menu = !app.help.menu;
@@ -444,9 +552,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         // A newer release: its Update button stays before the right cluster, in the space up to
         // the bar's own file actions on the left.
-        let controls_left = report.left() - CLUSTER_BUTTONS;
+        let controls_left = report.left() - CLUSTER_BUTTONS - search_shift;
         let span = Rect::from_min_max(pos2(x, report.top()), pos2(controls_left - 2.0, report.bottom()));
-        let update_labeled = report_label;
+        // Labelled where Report a bug is (an icon-only Report a bug leaves the pill to fit by room).
+        let update_labeled = report_label || (app.header.report == ReportButton::Icon && r.width() >= 640.0);
         let update = crate::update::button(app, ui, span, update_labeled);
         let tabs_end = update.map_or(controls_left, |u| u.left()) - 8.0;
         // Narrow title bars can fit only part of the tab strip. Its hit regions must not
@@ -458,14 +567,31 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let response = ui.interact(report, ui.id().with("sc_report_button"), Sense::click());
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), report_text));
         crate::scenario::publish_target("titlebar:report", report);
-        ui.painter().rect_filled(report, t.radius_sm, if response.hovered() || response.has_focus() { t.app_bar_hover_button } else { t.app_bar });
-        ui.painter().rect_stroke(report, t.radius_sm, Stroke::new(1.0, t.app_bar_separator), egui::StrokeKind::Inside);
-        let icon = Rect::from_center_size(pos2(report.left() + 14.0, report.center().y), vec2(18.0, 18.0));
-        icons::paint_app_bar(ui.painter(), icon, "bug_report", 1.0);
-        if report_label {
-            ui.painter().text(pos2(report.left() + REPORT_TEXT_X, report.center().y), Align2::LEFT_CENTER, report_text, report_font, t.app_bar_text);
-        }
-        if response.on_hover_text(crate::i18n::tr_label("Report a bug — review a screenshot and open a GitHub draft")).clicked() {
+        let hot = response.hovered() || response.has_focus();
+        let tip = if app.header.report == ReportButton::Icon {
+            // Drawn like Settings and Help beside it.
+            if hot {
+                ui.painter().rect_filled(report.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
+            }
+            icons::paint_app_bar(ui.painter(), report.shrink(7.0), "bug_report", 1.0);
+            report_text
+        } else {
+            ui.painter().rect_filled(report, t.radius_sm, if hot { t.app_bar_hover_button } else { t.app_bar });
+            ui.painter().rect_stroke(report, t.radius_sm, Stroke::new(1.0, t.app_bar_separator), egui::StrokeKind::Inside);
+            let icon = Rect::from_center_size(pos2(report.left() + 14.0, report.center().y), vec2(18.0, 18.0));
+            icons::paint_app_bar(ui.painter(), icon, "bug_report", 1.0);
+            if report_label {
+                ui.painter().text(
+                    pos2(report.left() + REPORT_TEXT_X, report.center().y),
+                    Align2::LEFT_CENTER,
+                    report_text,
+                    report_font,
+                    t.app_bar_text,
+                );
+            }
+            crate::i18n::tr_label("Report a bug — review a screenshot and open a GitHub draft")
+        };
+        if response.on_hover_text(tip).clicked() {
             crate::help::run(app, &ui.ctx().clone(), "report");
         }
         // Settings sits immediately left of Help (also Ctrl+,).
@@ -477,7 +603,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         icons::paint_app_bar(ui.painter(), gear.shrink(7.0), "settings", 1.0);
         crate::scenario::publish_rect("titlebar:preferences", gear);
         if crate::agent_chat::app_bar_button_shown(app) {
-            assistant_button(app, ui, Rect::from_center_size(pos2(report.left() - 86.0, r.center().y), vec2(32.0, 32.0)));
+            assistant_button(app, ui, Rect::from_center_size(pos2(report.left() - 86.0 - search_shift, r.center().y), vec2(32.0, 32.0)));
         }
         crate::scenario::publish_handle("titlebar:preferences", gear.center());
         let prefs_tip = if cfg!(target_os = "macos") {
@@ -488,7 +614,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         if gresp.on_hover_text(prefs_tip).clicked() {
             crate::prefs::open_at(app, 0);
         }
-        if version_room(r, captions, tabs_start, version.size().x).is_some() {
+        if app.header.version == VersionPlace::Header && version_room(r, captions, tabs_start, version.size().x).is_some() {
             let galley = version;
             let vrect = Align2::RIGHT_CENTER.anchor_size(pos2(r.right() - 12.0 - captions, r.center().y), galley.size());
             let vresp = ui.interact(
@@ -1200,7 +1326,10 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
         + tabs.len().saturating_sub(1) as f32 * 2.0
         + tabs.iter().filter(|tab| contextual_tab(app, tab)).count() as f32 * 6.0
         + if add { 2.0 + add_size } else { 0.0 };
-    let search_width = crate::ui_kit::CommandSearch::closed_width(ui.ctx());
+    // The application bar may hold the search field instead ([`HeaderLayout`]): the tabs then
+    // run to the row's end.
+    let in_ribbon = !search_in_header(app);
+    let search_width = if in_ribbon { crate::ui_kit::CommandSearch::closed_width(ui.ctx()) } else { 0.0 };
     // The first tab and the search field sit the same distance from the card's top, left and right
     // edges, so their outer corners are concentric with the card's corners.
     let floating = Container::for_layout(app.ui.layout, Surface::Panel).floating();
@@ -1234,7 +1363,9 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
     }
     // The single editor is drawn on the foreground layer by shortcut_box::show, so it
     // can grow over the ribbon without being clipped to the tab row.
-    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("sc_ribbon_search"), search));
+    if in_ribbon {
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("sc_ribbon_search"), search));
+    }
     let changed = ui.ctx().data_mut(|d| {
         let id = egui::Id::new("sc_ribbon_visible_tab");
         let state = (app.ui.tab.clone(), row.width());
@@ -1242,7 +1373,8 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
         d.insert_temp(id, state);
         changed
     });
-    let span = Rect::from_min_max(row.left_top() + vec2(inset, 0.0), pos2((search.left() - 6.0).max(row.left() + inset), row.bottom()));
+    let end = if in_ribbon { search.left() - 6.0 } else { row.right() - inset };
+    let span = Rect::from_min_max(row.left_top() + vec2(inset, 0.0), pos2(end.max(row.left() + inset), row.bottom()));
     ui.scope_builder(egui::UiBuilder::new().max_rect(span), |ui| {
         ui.set_clip_rect(span);
         egui::ScrollArea::horizontal()
@@ -1454,13 +1586,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         // Panels.
         let tab = app.ui.tab.clone();
         // The command whose tool or dialog is open right now, shown pressed in the toolbar.
-        let running: Option<String> = match (&app.tool, &app.dialog) {
-            (Some(tool), _) => Some(tool.cmd.to_string()),
-            // Create Sketch never lands in last_command (it is not repeatable).
-            (None, Some(d)) if matches!(d.kind, crate::dialogs::Kind::Sketch) => Some("sketch.create".to_string()),
-            (None, Some(_)) => app.last_command.as_ref().map(|(id, _)| id.clone()),
-            _ => None,
-        };
+        let running = running_command(app);
         // The command the search points out (#7287): a preview while a result is hovered, or the
         // short pulse after starting one.
         let now = ui.input(|i| i.time);
@@ -1669,7 +1795,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let family_open = family.is_some_and(|f| egui::Popup::is_id_open(ui.ctx(), ui.id().with(("family", f.label)).with("popup")));
                 let neutral = if !finish
                     && (resp.is_pointer_button_down_on()
-                        || (running.as_deref() == Some(selected.id) && !(persistent && app.preferences.persistent_ribbon_pressed))
+                        || (ribbon_shows_pressed(app, selected.id) && !(persistent && app.preferences.persistent_ribbon_pressed))
                         || family_open
                         || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip))
                 {
@@ -1787,7 +1913,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     );
                     let info = crate::render_workspace::interactive_command_info(app, c);
                     let resp = ui.interact(cell, ui.id().with(("cmd", c.id)), Sense::click_and_drag());
-                    let active = running.as_deref() == Some(c.id);
+                    let active = ribbon_shows_pressed(app, c.id);
                     let accent = crate::theme::TabAccent::for_tab(&t, &tab);
                     painter.rect(
                         cell,
@@ -3869,13 +3995,17 @@ mod header_report_tests {
                 let bar = Rect::from_min_size(egui::Pos2::ZERO, vec2(width, APP_BAR_HEIGHT));
                 for captions in [0.0, crate::titlebar::WIDTH] {
                     // The English label, and a longer one (Russian is about 125 px).
-                    for label_width in [80.0, 125.0] {
-                        let (report, labeled) = report_rect(bar, captions, 354.0, label_width, 40.0);
+                    for (label_width, layout) in [80.0, 125.0].into_iter().flat_map(|w| [(w, HeaderLayout::DESKTOP), (w, HeaderLayout::COMPACT)]) {
+                        let (report, labeled) = report_rect(bar, captions, 354.0, label_width, 40.0, layout);
                         assert!(bar.contains_rect(report));
                         let prefs = Rect::from_center_size(pos2(report.left() - 52.0, APP_BAR_HEIGHT / 2.0), vec2(32.0, 32.0));
                         let help = Rect::from_center_size(pos2(help_x(report), APP_BAR_HEIGHT / 2.0), vec2(32.0, 32.0));
                         assert!(!report.intersects(prefs) && !report.intersects(help) && !help.intersects(prefs));
                         assert!(prefs.right() < help.left() && help.right() < report.left());
+                        if layout.report == ReportButton::Icon {
+                            assert!(!labeled && report.size() == vec2(32.0, 32.0));
+                            continue;
+                        }
                         let full = REPORT_TEXT_X + label_width + 11.0;
                         assert_eq!(
                             labeled,
@@ -3982,6 +4112,107 @@ mod header_report_tests {
         }
     }
 
+    /// The desktop app shows the default header layout: search in the ribbon's tab row, a
+    /// labelled Report a bug, the version at the bar's right end and not in the Help menu.
+    #[test]
+    fn the_default_header_layout_is_the_desktop_one() {
+        assert_eq!(HeaderLayout::default(), HeaderLayout::DESKTOP);
+        assert_eq!(
+            HeaderLayout::DESKTOP,
+            HeaderLayout { search: SearchPlace::Ribbon, report: ReportButton::Labelled, version: VersionPlace::Header }
+        );
+        let mut h = crate::scenario::Harness::new();
+        assert_eq!(h.app.header, HeaderLayout::DESKTOP, "a new app has the desktop layout");
+        h.app.home.open = false;
+        h.app.custom_titlebar = true;
+        h.call("ui.resize", json!({"width":1400.0,"height":720}));
+        h.frames(3);
+        let rect = |name: &str| crate::scenario::rect_of(name).unwrap_or_else(|| panic!("{name}"));
+        let search = rect("ribbon:search");
+        assert!(search.top() >= APP_BAR_HEIGHT, "search is in the ribbon: {search:?}");
+        assert_eq!(search.height(), TAB_ROW_HEIGHT - 2.0 * RIBBON_TAB_INSET);
+        assert_eq!(search.width(), crate::ui_kit::CommandSearch::closed_width(&h.ctx));
+        assert!(crate::scenario::rect_of("titlebar:search").is_none());
+        let report = rect("titlebar:report");
+        assert_eq!(report.right(), 1400.0 - crate::titlebar::WIDTH - RIGHT_GROUP);
+        assert_eq!(report.height(), 26.0);
+        assert!(report.width() > 100.0, "Report a bug carries its label: {report:?}");
+        assert_eq!(rect("titlebar:preferences").center().x, report.left() - 52.0);
+        assert!(crate::scenario::handle_at("titlebar:version").is_some(), "the version is in the bar");
+        h.step(&json!({"click":{"handle":"appbar:help"}})).unwrap();
+        assert!(h.app.help.menu);
+        let version = crate::i18n::format("help.version", &[("version", crate::update::current_version())]);
+        assert!(h.widget("About SolidCraft").is_some());
+        assert!(h.widget(&version).is_none(), "the Help menu has no version row");
+    }
+
+    /// The alternative header layout: search in the bar just left of Settings, Report a bug as an
+    /// icon like Settings and Help, and the version as a Help menu row.
+    #[test]
+    fn a_host_can_move_search_report_and_version_in_the_header() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.header = HeaderLayout::COMPACT;
+        h.app.home.open = false;
+        h.app.custom_titlebar = true;
+        h.call("ui.resize", json!({"width":1400.0,"height":720}));
+        h.frames(3);
+        let rect = |name: &str| crate::scenario::rect_of(name).unwrap_or_else(|| panic!("{name}"));
+        let (search, prefs) = (rect("titlebar:search"), rect("titlebar:preferences"));
+        assert_eq!(search.right(), prefs.left() - HEADER_SEARCH_GAP, "search sits immediately left of Settings");
+        assert!(search.bottom() <= APP_BAR_HEIGHT && (search.center().y - prefs.center().y).abs() < 0.5);
+        assert_eq!(search.width(), crate::ui_kit::CommandSearch::closed_width(&h.ctx), "the whole field where there is room");
+        assert_eq!(rect("ribbon:search"), search, "the one search field is drawn in the bar");
+        // Report a bug: an icon the size of Settings and Help, still named for assistive tools.
+        let report = rect("titlebar:report");
+        assert_eq!(report.size(), vec2(32.0, 32.0));
+        assert_eq!(report.right(), 1400.0 - crate::titlebar::WIDTH - 8.0, "no room is kept for the version");
+        assert_eq!(rect("appbar:help").size(), report.size());
+        assert!(h.widget("Report a bug").is_some(), "the icon keeps its accessible name");
+        assert!(crate::scenario::handle_at("titlebar:version").is_none(), "the version left the bar");
+        // The ribbon's tabs run to its end.
+        let card = rect("ribbon:card");
+        assert!(rect("toolbar_tab:MODEL").left() < card.left() + 10.0);
+        // Clicking the field opens command search.
+        h.step(&json!({"click":{"handle":"titlebar:search"}})).unwrap();
+        assert!(h.app.ui.palette_open, "the header field opens search");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        assert!(!h.app.ui.palette_open);
+        // The version is a Help menu row, right after About.
+        h.step(&json!({"click":{"handle":"appbar:help"}})).unwrap();
+        assert!(h.app.help.menu);
+        let version = crate::i18n::format("help.version", &[("version", crate::update::current_version())]);
+        let [_, about] = h.widget("About SolidCraft").unwrap();
+        let [_, row] = h.widget(&version).expect("the Help menu lists the version");
+        let [_, shortcuts] = h.widget("Keyboard Shortcuts").unwrap();
+        assert!(about < row && row < shortcuts, "between About and Keyboard Shortcuts");
+        h.step(&json!({"widget":version})).unwrap();
+        assert!(!h.app.help.menu, "choosing the row closes the menu");
+        // In a narrow bar the field folds to its magnifier and still opens search.
+        h.call("ui.resize", json!({"width":700.0,"height":720}));
+        h.frames(3);
+        let search = rect("titlebar:search");
+        assert_eq!(search.width(), crate::ui_kit::CommandSearch::compact_width(26.0));
+        assert_eq!(search.right(), rect("titlebar:preferences").left() - HEADER_SEARCH_GAP);
+        h.step(&json!({"click":{"handle":"titlebar:search"}})).unwrap();
+        assert!(h.app.ui.palette_open, "the magnifier opens search");
+    }
+
+    /// With native menus the bar keeps its own Settings, so search the host put in the bar sits
+    /// just left of it there too.
+    #[test]
+    fn search_in_the_bar_beside_native_menus() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.header = HeaderLayout::COMPACT;
+        h.app.native_file_menu = true;
+        h.app.integrated_titlebar = true;
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1400.0,"height":720}));
+        h.frames(3);
+        let search = crate::scenario::rect_of("titlebar:search").expect("search in the bar");
+        let gear = crate::scenario::rect_of("titlebar:preferences").expect("Settings in the bar");
+        assert!(search.bottom() <= APP_BAR_HEIGHT && search.right() <= gear.left(), "{search:?} {gear:?}");
+    }
+
     /// A release candidate's version is wider than a release's: the button moves left for it
     /// instead of lying under it, and where that would crowd out the document tabs the version is
     /// hidden, as on a narrow bar (#5621).
@@ -3998,7 +4229,7 @@ mod header_report_tests {
                 // A release keeps the button where it always was.
                 assert_eq!(version_room(bar, captions, 354.0, release), Some(RIGHT_GROUP), "{width} {captions}");
                 for (k, version_width) in [release, candidate, 2.0 * candidate].into_iter().enumerate() {
-                    let (report, _) = report_rect(bar, captions, 354.0, 80.0, version_width);
+                    let (report, _) = report_rect(bar, captions, 354.0, 80.0, version_width, HeaderLayout::DESKTOP);
                     let shown = version_room(bar, captions, 354.0, version_width).is_some();
                     if shown {
                         let version_left = bar.right() - 12.0 - captions - version_width;
@@ -5203,10 +5434,12 @@ mod fill_width_tests {
     /// and neither the tab row nor the title bar's own controls run into each other.
     #[test]
     fn toolbar_fills_its_width_from_wide_to_narrow_windows() {
-        for sketch in [false, true] {
+        // Either header layout: the ribbon fits the same way with search in the bar.
+        for (sketch, layout) in [false, true].into_iter().flat_map(|s| [(s, HeaderLayout::DESKTOP), (s, HeaderLayout::COMPACT)]) {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
             h.app.custom_titlebar = true;
+            h.app.header = layout;
             h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
             if sketch {
                 h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
@@ -5216,7 +5449,7 @@ mod fill_width_tests {
             for w in [1920.0, 1600.0, 1440.0, 1366.0, 1280.0, 1100.0, 900.0, 700.0] {
                 h.call("ui.resize", json!({"width":w,"height":900}));
                 h.frames(3);
-                let at = format!("{tab} at {w}");
+                let at = format!("{tab} at {w}, {layout:?}");
                 let bar = crate::scenario::rect_of("toolbar").unwrap();
                 let finish = crate::scenario::rect_of("panel:SKETCH:FINISH SKETCH");
                 // The room for the other panels: the bar less the Finish group kept for it.
@@ -5275,11 +5508,14 @@ mod fill_width_tests {
                     }
                     assert!(crate::scenario::handle_at("button:sketch.finish").is_some(), "{at}: Finish stays reachable");
                 }
-                // The assistant lives in the title bar; visible ribbon tabs fit before search.
+                // The assistant lives in the title bar; visible ribbon tabs fit before search (or,
+                // with search in the title bar, within the ribbon card).
                 let search = crate::scenario::rect_of("ribbon:search").unwrap();
+                let card = crate::scenario::rect_of("ribbon:card").unwrap_or(bar);
                 for t in TABS.iter().chain(["SKETCH"].iter()) {
                     if let Some(r) = crate::scenario::rect_of(&format!("toolbar_tab:{t}")) {
-                        assert!(r.right() < search.left(), "{at}: the {t} tab runs into search");
+                        assert!(r.right() < search.left() || search.bottom() <= APP_BAR_HEIGHT, "{at}: the {t} tab runs into search");
+                        assert!(r.right() <= card.right(), "{at}: the {t} tab runs past the ribbon");
                     }
                 }
                 // The title bar keeps document tabs before Assistant, Preferences, Help and Report.
@@ -5294,6 +5530,10 @@ mod fill_width_tests {
                     assistant.right() <= prefs.left() && prefs.right() <= help.left() && help.right() <= report.left(),
                     "{at}: the title bar's right-hand controls overlap"
                 );
+                if layout.search == SearchPlace::Header {
+                    assert!(assistant.right() <= search.left() && search.right() <= prefs.left(), "{at}: search sits between Assistant and Settings");
+                    assert!(tabs_end < search.left(), "{at}: the document tabs run into search");
+                }
             }
         }
     }

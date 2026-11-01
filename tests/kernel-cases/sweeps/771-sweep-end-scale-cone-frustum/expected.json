@@ -1,0 +1,24 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#771",
+  "tangency-labs/solidcraft#1269"
+ ],
+ "what": "a circle of radius 5 swept 30 mm along a straight path with end scale 2",
+ "source": "analytic",
+ "method": "the section scales linearly with the path, so the solid is a cone frustum from r 5 to r 10 over 30 mm: V = h/3 (A1 + A2 + sqrt(A1 A2)) = 10 pi (25 + 100 + 50) = 5497.8; faces: cone and two disc caps.",
+ "body_count": 1,
+ "volume_mm3": 5497.787143782138,
+ "faces": 3,
+ "bbox": {
+  "min": [
+   -10,
+   -10,
+   0
+  ],
+  "max": [
+   10,
+   10,
+   30
+  ]
+ }
+}

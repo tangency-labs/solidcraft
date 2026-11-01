@@ -1,0 +1,25 @@
+{
+ "sources": [],
+ "what": "component.paste_new in place of an arm turned 90 degrees, 20 mm up",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); hinge at 90 puts Arm at (0,20,5), box x -5..5, y 0..40; in_place puts the copy where it is in the world, moved (0,0,20): centres (0,0,-5), (0,20,5), (0,20,25): mean (0,13.333,8.333)",
+ "body_count": 3,
+ "volume_mm3": 12000.0,
+ "center_of_mass": [
+  0,
+  13.333333,
+  8.333333
+ ],
+ "bbox": {
+  "min": [
+   -10,
+   -10,
+   -10
+  ],
+  "max": [
+   10,
+   40,
+   30
+  ]
+ }
+}

@@ -10,6 +10,9 @@ mod external_corpus;
 mod features;
 mod i18n;
 mod icons;
+mod kernel_cases;
+mod kernel_ladder;
+mod known_failing;
 mod layers;
 mod licences;
 mod lists;
@@ -45,6 +48,33 @@ commands:
                   replay the reference tests (tests/oracle/*/recipe.json), compare with each
                   case's expected.json and write docs/oracle.md (--cli: a solidcraft-cli
                   already built, instead of cargo run --release)
+  kernel-cases [--area AREA] [--cli BIN] [--timeout S] [--jobs N] [--out DIR] [--known-failing FILE] [--validation MODE] [--coverage]
+                  the kernel regression rig: run every case in tests/kernel-cases/<area>/<id>/ on
+                  SMLib (one process each, killed after --timeout, default 180 s), grade it against
+                  the case's own answer and write docs/kernel-cases.md; DIR (default
+                  target/kernel-cases) gets results.json and dumps/<area>-<case>/, the inputs of
+                  each failing SMLib call (--cli: a solidcraft-cli built with --features smlib)
+                  --known-failing FILE: a regression gate instead of the report: fails on a case
+                  that fails and FILE does not list, and on a listed case that passes
+                  (tests/kernel-cases/<area>/KNOWN_FAILING, CI's Kernel rig workflow)
+                  --validation MODE: when SMLib's full check runs on the cases' features:
+                  each_step, each_feature (the default) or off (solidcraft-cli kernel-cases
+                  --validation=MODE); with --ladder too
+                  --ladder [--record REASON | --gate]: the complexity ladder instead
+                  (tests/kernel-cases/ladder/ladder.json, tiers in order), graded and compared
+                  with its timing golden (one case at a time unless --jobs), into
+                  docs/kernel-ladder.md (DIR default target/kernel-ladder); --record re-measures
+                  the golden and re-sorts each tier by time; --gate fails on any case whose status
+                  or counts differ from the golden, instead of the report
+                  --coverage: instead of running cases, fail on a registry command (the CLI's
+                  `commands`, planned ones aside) that no recipe.json under tests/kernel-cases/
+                  uses and tests/kernel-cases/EXEMPT does not list, and on a stale EXEMPT line
+  known-failing --junit PATH... [--list FILE]
+                  grade a nextest run's junit report (a file, or every .xml under a directory)
+                  against the tests known to fail today, tests/KNOWN_FAILING_TESTS (FILE): fails
+                  on a test that failed and is not listed, and on a listed test that passed
+                  (fixed: take its line off); a listed test that did not run is neither. CI's
+                  test jobs run it after nextest
   action-matrix [--bless] [--results FILE] [--from DIR]
                   try every ordinary action on every face, edge, vertex and body of the design
                   corpus and compare with tests/action_matrix/baseline.json (--bless rewrites it;
@@ -68,7 +98,8 @@ commands:
                   into ATTRIBUTION.md, and delete them (the Generated files workflow runs this on
                   main; pull requests add the pending files instead of editing the shared ones)
   lists [--fix]   check that files many changes add to are sorted one item per line (the
-                  message catalogs in assets/locales); --fix sorts them
+                  message catalogs in assets/locales, tests/KNOWN_FAILING_TESTS); --fix sorts
+                  the catalogs
   skills          check that AGENTS.md and skills/*/SKILL.md cite files, `cargo xtask` commands and skills
                   that exist, that the router table lists exactly the skills there are, and that
                   AGENTS.md and new skills stay short
@@ -102,6 +133,8 @@ fn main() -> ExitCode {
         Some("app-icons") => app_icons::run(&root()),
         Some("features") => features::run(&root()),
         Some("i18n") => i18n::run(&root(), &rest),
+        Some("kernel-cases") => kernel_cases::run(&rest),
+        Some("known-failing") => known_failing::run(&root(), &rest),
         Some("oracle") => cmd_oracle(rest.iter().position(|a| *a == "--cli").and_then(|i| rest.get(i + 1)).copied()),
         Some("action-matrix") => {
             let arg = |name: &str| rest.iter().position(|a| *a == name).and_then(|i| rest.get(i + 1)).copied();

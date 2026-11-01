@@ -33,6 +33,8 @@
 # `ci` job still runs and reports the commit's real result (see the `ci` job): the merge queue
 # reads `ci` from the newest run of a commit, so a run without it would block a PR that passed.
 # Cross-compilation is opt-in through Run workflow; release builds remain in release.yml.
+# The release gate (release-gate.yml) calls this workflow (workflow_call) as a Run workflow with
+# cross-compilation on.
 # Every Linux job runs on Blacksmith's Ubuntu 24.04 runners (blacksmith-<N>vcpu-ubuntu-2404), sized
 # per job: 32 vCPU for the tests, 16 for Clippy, the GPU path tests, the archive build (nightly) and the merge queue's, 8 for compiles, doc and reference tests, 4 for the light checks, 2 for Select checks and ci.
 # The Windows shader job runs on Blacksmith's Windows Server 2025 runners (blacksmith-8vcpu-windows-2025);
@@ -50,13 +52,25 @@ on:
   # only (other labels are skipped, see the top of this file).
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
+    # The kernel-smlib branch (ADR 0002) runs no CI for now (owner, 2026-10-21). Drop this
+    # line before the branch merges back into main.
+    branches-ignore: [kernel-smlib]
   # The merge queue: each queued group runs the full suite before it lands on main.
   merge_group:
   push:
-    branches: [main]
+    # develop: the SMLib kernel's trunk until it merges into main (its PRs land there).
+    branches: [main, develop]
   schedule:
     - cron: "17 6 * * *"
   workflow_dispatch:
+    inputs:
+      cross_compile:
+        description: "Also check WebAssembly and RISC-V (before a release)"
+        type: boolean
+        default: false
+  # The release gate (release-gate.yml): the event stays the caller's (workflow_dispatch), so a
+  # call runs exactly what Run workflow runs.
+  workflow_call:
     inputs:
       cross_compile:
         description: "Also check WebAssembly and RISC-V (before a release)"
@@ -117,7 +131,6 @@ jobs:
     outputs:
       native: ${{ steps.paths.outputs.native }}
       kernel: ${{ steps.paths.outputs.kernel }}
-      goldens: ${{ steps.paths.outputs.goldens }}
       windows: ${{ steps.paths.outputs.windows }}
       # The GPU path tests run (see the rule where it is computed). The job's `if` and the `ci` job's check both read this, so they cannot disagree.
       gpu: ${{ steps.paths.outputs.gpu }}
@@ -156,7 +169,6 @@ jobs:
         run: |
           native=false
           kernel=false
-          goldens=false
           windows=false
           gpu_paths=false
           deps=false
@@ -238,12 +250,12 @@ jobs:
             if [ "${tested:-0}" -gt 0 ]; then
               echo "The merge queue already tested $PUSH_SHA: repository checks only."
             elif tested=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?event=push&branch=main&status=success&per_page=1" \
+                "https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?event=push&branch=$GITHUB_REF_NAME&status=success&per_page=1" \
                 | grep -o '"head_sha": *"[0-9a-f]*"' | head -n 1 | grep -o '[0-9a-f]\{40\}') \
               && [ -n "$tested" ] && git merge-base --is-ancestor "$tested" "$PUSH_SHA" \
               && git diff --no-renames --name-only -z "$tested" "$PUSH_SHA" > "$RUNNER_TEMP/ci-paths" \
               && select_packages "$RUNNER_TEMP/ci-paths" && [ "$full" != true ] && [ -z "$packages" ]; then
-              # Nothing a build reads changed since the last push to main whose run passed (the
+              # Nothing a build reads changed since the last push to this branch whose run passed (the
               # push before may never have run: a newer push cancels a waiting one).
               echo "$tested..$PUSH_SHA changes no code: repository checks only."
             else
@@ -282,13 +294,6 @@ jobs:
             git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/ci-paths"
             while IFS= read -r -d '' path; do
               case "$path" in crates/kernel/*|vendor/truck-*) kernel=true ;; esac
-              # What a pull request re-checks the goldens for: the kernel, truck and the goldens
-              # themselves (a re-record is checked before it is queued). The goldens are frozen, so
-              # on any other change they would only re-check unchanged results; the merge queue,
-              # main and the nightly run every seed before anything lands.
-              case "$path" in
-                crates/kernel/*|vendor/truck-*|tests/robustness/*) goldens=true ;;
-              esac
             done < "$RUNNER_TEMP/ci-paths"
             # Computed as for a merge group, then turned off below (the fast lane).
             windows_paths "$RUNNER_TEMP/ci-paths" "$BASE_SHA...$HEAD_SHA"
@@ -300,10 +305,6 @@ jobs:
             # selected means no code changed.
             select_packages "$RUNNER_TEMP/ci-paths"
             if [ "$full" = true ] || [ -n "$packages" ]; then native=true; fi
-            # The goldens are solidcraft-engine tests: its tests must be in the archive.
-            if [ "$goldens" = true ] && [ "$full" != true ]; then
-              case " $packages " in *" solidcraft-engine "*) ;; *) packages="$packages solidcraft-engine" ;; esac
-            fi
           fi
           # The reference tests replay recipes through solidcraft-cli: needed when it, or anything
           # it depends on, is selected.
@@ -318,13 +319,12 @@ jobs:
           doctests=$native
           if [ "$EVENT_NAME" = pull_request ]; then windows=false; oracle=false; doctests=false; fi
           # Until a maintainer adds approved-for-ci, a pull request gets a quick compile instead of
-          # Clippy, the tests, the doc tests and the goldens.
+          # Clippy, the tests and the doc tests.
           quick=false
           if [ "$EVENT_NAME" = pull_request ] && [ "$APPROVED" != true ]; then
             quick=$native
             native=false
             oracle=false
-            goldens=false
           fi
           # A push that only merges main into the change (Merge branch 'main', Update branch) when
           # the change itself already passed: nothing new to test here, and main tests the merged
@@ -337,7 +337,6 @@ jobs:
             if [ -n "$carried" ]; then
               echo "Only a merge of main into a change that passed in $carried: repository checks only."
               native=false
-              goldens=false
             fi
           fi
           # The GPU path tests (their own job, about 56 runner-minutes) are for render changes only:
@@ -363,7 +362,6 @@ jobs:
             echo "native=$native"
             echo "gpu=$gpu"
             echo "kernel=$kernel"
-            echo "goldens=$goldens"
             echo "windows=$windows"
             echo "oracle=$oracle"
             echo "doctests=$doctests"
@@ -389,7 +387,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: repo-checks
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: Format
         run: cargo fmt --all -- --check
       - name: Asset attribution
@@ -439,7 +437,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: quick-compile
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - name: Cargo check
         run: cargo check --workspace --all-targets --locked
 
@@ -458,7 +459,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: native-clippy
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - name: Clippy
         env:
           FULL: ${{ needs.changes.outputs.full }}
@@ -501,7 +505,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: native-tests
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -572,7 +579,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: native-tests
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -583,13 +593,8 @@ jobs:
       - name: Run tests
         env:
           EVENT_NAME: ${{ github.event_name }}
-          GOLDENS: ${{ needs.changes.outputs.goldens }}
           FULL: ${{ needs.changes.outputs.full }}
           PACKAGES: ${{ needs.changes.outputs.packages }}
-          # The robustness golden seeds a pull request skips: each takes one to twenty minutes under
-          # CI load, together about four fifths of the goldens' time. Pushes to main, the merge
-          # queue and the nightly run every seed.
-          SLOW_SEEDS: 81|45|20|24|95|02|57|40|18|48|32|46|85|61|77|34|14
         run: |
           # Pull requests skip the heavy tests (default-filter in .config/nextest.toml); `default()`
           # below is that filter, so a pull request still runs only what it ran before.
@@ -603,29 +608,23 @@ jobs:
             # The boolean property tests draw new random inputs every run; they run only in the
             # nightly property-tests job, so a known kernel bug cannot turn main red at random.
             base='not (package(solidcraft-kernel) & binary(boolean_props))'
-          elif [ "$GOLDENS" = true ]; then
-            # A pull request that can change a robustness golden (tests/robustness/goldens.json)
-            # also checks every seed but the slow ones, in the same run so they share its cores.
-            base="(default() & not (binary(action_matrix) & test(=action_matrix_sample))) | (package(solidcraft-engine) & test(/^tests::robustness_goldens::/) & not test(/^tests::robustness_goldens::seed_($SLOW_SEEDS)\$/))"
           fi
           junit=${CARGO_TARGET_DIR:-target}/nextest/ci/junit.xml
           rm -f "$junit"
           # Pull requests test the affected packages (scripts/ci/affected.py).
           scope=(--workspace)
           if [ "$FULL" != true ]; then scope=(); for p in $PACKAGES; do scope+=(-p "$p"); done; fi
-          status=0
           # The GPU path tracer's tests run in their own job (GPU path tests): one at a time, they
           # took about 36 of this job's 45 minutes.
+          # A failed test does not fail the step by itself: the tests known to fail today
+          # (tests/KNOWN_FAILING_TESTS) may fail, any other fails it, and so does a listed test
+          # that passes. nextest's exit code 100 is "tests failed"; any other is its own error
+          # (a build error, a bad filter) and fails the step at once.
+          status=0
           cargo nextest run "${scope[@]}" --cargo-profile ci --locked --profile ci --no-tests=pass \
-            --ignore-default-filter -E "($base) & not (package(=solidcraft-gpu) & test(/^path::/))" || status=1
-          if [ "$status" != 0 ]; then
-            # A failed golden gets the hint to re-record it (junit.xml lists the failures).
-            if [ -f "$junit" ] && tr '\n' ' ' < "$junit" | grep -q '<testcase name="tests::robustness_goldens::[^"]*"[^>]*>[[:space:]]*<failure'; then
-              echo "::error::A robustness golden changed. If the new result is intended, re-record it in this pull request and say why:"
-              echo "::error::ROBUSTNESS_GOLDENS_BLESS=\"why it changed\" cargo test --profile ci -p solidcraft-engine --lib robustness_goldens::   (see docs/robustness.md)"
-            fi
-            exit 1
-          fi
+            --ignore-default-filter -E "($base) & not (package(=solidcraft-gpu) & test(/^path::/))" || status=$?
+          if [ "$status" -ne 0 ] && [ "$status" -ne 100 ]; then exit "$status"; fi
+          cargo xtask known-failing --junit "$junit"
       - name: Compiler cache statistics
         if: always()
         run: sccache --show-stats
@@ -699,7 +698,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: native-gpu
-          save-if: ${{ github.ref == 'refs/heads/main' && matrix.shard == 1 }}
+          save-if: ${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && matrix.shard == 1 }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -714,8 +716,14 @@ jobs:
           # None of these is in the default filter (the heavy tests), so pull requests, the merge
           # queue, main and nightly all run every one of them, as before. `count` deals the tests
           # out in turn (27 each); `hash` split them 41/40/27 across three shards.
+          # Graded against tests/KNOWN_FAILING_TESTS, as in Native Linux tests.
+          junit=${CARGO_TARGET_DIR:-target}/nextest/ci/junit.xml
+          rm -f "$junit"
+          status=0
           cargo nextest run -p solidcraft-gpu --cargo-profile ci --locked --profile ci --no-tests=pass \
-            --ignore-default-filter -E 'test(/^path::/)' --partition "count:$SHARD/4"
+            --ignore-default-filter -E 'test(/^path::/)' --partition "count:$SHARD/4" || status=$?
+          if [ "$status" -ne 0 ] && [ "$status" -ne 100 ]; then exit "$status"; fi
+          cargo xtask known-failing --junit "$junit"
       - name: Compiler cache statistics
         if: always()
         run: sccache --show-stats
@@ -849,7 +857,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: doc-tests
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -907,7 +918,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: oracle
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -946,7 +960,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: windows-fxc
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       # One test at a time: WARP's shader JIT crashes now and then (a null read in
       # d3d10warp.dll's JIT optimizer, about 1 run in 60) when several devices compile compute
       # pipelines at once, which the parallel tests do. Minidumps showed it in WARP itself, not
@@ -970,7 +987,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: windows-startup
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - name: Backend order and probing on Windows
         run: cargo test -p solidcraft --profile ci --locked -- startup::tests native_crash::tests native_frame::tests
       - name: Build the app
@@ -1107,7 +1127,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: wasm
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh wasm32-unknown-unknown
       - run: cargo xtask wasm
 
   riscv64-gates:
@@ -1129,7 +1152,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: riscv64
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh riscv64gc-unknown-linux-gnu
       - name: Install cross-compilation dependencies
         run: |
           # Ubuntu's regular archive serves amd64; RISC-V packages live in ports.
@@ -1145,11 +1171,13 @@ jobs:
           EOF
           sudo dpkg --add-architecture riscv64
           sudo apt-get update
-          sudo apt-get install -y gcc-riscv64-linux-gnu libasound2-dev:riscv64 libxkbcommon-dev:riscv64 \
+          sudo apt-get install -y gcc-riscv64-linux-gnu g++-riscv64-linux-gnu libasound2-dev:riscv64 libxkbcommon-dev:riscv64 \
             libwayland-dev:riscv64 libx11-dev:riscv64 libxrandr-dev:riscv64 libxi-dev:riscv64 libgl1-mesa-dev:riscv64
       - name: Cargo check on RISC-V
         env:
           CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
+          # SMLib has no prebuilt library for RISC-V: its sources are compiled with this.
+          CXX_riscv64gc_unknown_linux_gnu: riscv64-linux-gnu-g++
           PKG_CONFIG_SYSROOT_DIR: /
           PKG_CONFIG_PATH: /usr/lib/riscv64-linux-gnu/pkgconfig:/usr/share/pkgconfig
           PKG_CONFIG_ALLOW_CROSS: 1

@@ -3,6 +3,7 @@ use super::*;
 use crate::ui_kit::{Container, Surface};
 use crate::{scenario, theme::Tokens};
 use egui::{Ui, vec2};
+use solidcraft_engine::kernel::Continuity;
 
 struct Sample {
     value: String,
@@ -1317,6 +1318,35 @@ const ELEMENTS: &[Element] = &[
             hint_field(ui, &mut s.value, "Length");
         });
     }),
+    element!("checked_field", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
+        row(ui, "Gallery", |ui| {
+            checked_field(ui, &mut s.value, "Length", s.checked);
+        });
+    }),
+    element!("checked_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
+        checked_row(ui, "Gallery", &mut s.value, "Length", Some("Too small"));
+    }),
+    element!("warning_caption", "dialog:caption:Gallery", None, |ui, _| {
+        warning_caption(ui, "Gallery", "Too small");
+    }),
+    element!("text_field_tip", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
+        row(ui, "Gallery", |ui| {
+            text_field_tip(ui, &mut s.value, "Name", "What it is called");
+        });
+    }),
+    element!("continuity_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, _| {
+        let mut order = Continuity::G1;
+        continuity_row(ui, "Gallery", "gallery_continuity", &mut order, &[Continuity::G0, Continuity::G1, Continuity::G2]);
+    }),
+    element!("continuity_row_explained", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, _| {
+        let mut order = Continuity::G2;
+        let allowed = [Continuity::G1, Continuity::G2];
+        continuity_row_explained(ui, "Gallery", "gallery_continuity", &mut order, &allowed, &continuity_tip(&allowed));
+    }),
+    element!("continuity_tip", "dialog:row:Gallery", None, |ui, _| {
+        let tip = continuity_tip(&[Continuity::G0, Continuity::G1]);
+        row(ui, "Gallery", |ui| ui.label(tip));
+    }),
     element!("text_field", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         row(ui, "Gallery", |ui| {
             text_field(ui, &mut s.value, "Name");
@@ -1529,6 +1559,9 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("progress", "dialog:progress:gallery", None, |ui, _| {
         progress(ui, "gallery", 0.4);
+    }),
+    element!("steps", "dialog:step:gallery:0:done", None, |ui, _| {
+        steps(ui, "gallery", &["Read", "Mesh", "Show"], 1, Some("40%"));
     }),
     element!("hint", "dialog:hint:gallery", Some("dialog:hint:gallery"), |ui, _| {
         text(ui, "Pick a point", Text::Hint("gallery"));

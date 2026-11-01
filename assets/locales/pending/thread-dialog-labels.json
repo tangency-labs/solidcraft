@@ -1,0 +1,42 @@
+{
+  "en": {
+    "thread.fits_the_face": "fits the face, e.g. {example}",
+    "ui.chamfer_angle": "Chamfer Angle",
+    "ui.chamfer_depth": "Chamfer Depth",
+    "ui.ends": "Ends",
+    "ui.extent": "Extent",
+    "ui.iso_4753": "ISO 4753"
+  },
+  "ar": {
+    "thread.fits_the_face": "يناسب الوجه، مثلاً {example}",
+    "ui.chamfer_angle": "زاوية الشطف",
+    "ui.chamfer_depth": "عمق الشطف",
+    "ui.ends": "الطرفان",
+    "ui.extent": "الامتداد",
+    "ui.iso_4753": "ISO 4753"
+  },
+  "he": {
+    "thread.fits_the_face": "מתאים לפאה, למשל {example}",
+    "ui.chamfer_angle": "זווית פאזה",
+    "ui.chamfer_depth": "עומק פאזה",
+    "ui.ends": "קצוות",
+    "ui.extent": "גבול",
+    "ui.iso_4753": "ISO 4753"
+  },
+  "ja": {
+    "thread.fits_the_face": "面に合うサイズ。例: {example}",
+    "ui.chamfer_angle": "面取り角度",
+    "ui.chamfer_depth": "面取り深さ",
+    "ui.ends": "端部",
+    "ui.extent": "範囲",
+    "ui.iso_4753": "ISO 4753"
+  },
+  "zh": {
+    "thread.fits_the_face": "适合该面，例如 {example}",
+    "ui.chamfer_angle": "倒角角度",
+    "ui.chamfer_depth": "倒角深度",
+    "ui.ends": "端部",
+    "ui.extent": "范围",
+    "ui.iso_4753": "ISO 4753"
+  }
+}

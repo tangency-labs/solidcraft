@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#978"
+ ],
+ "what": "a 90 degree inside flange of radius 1 on an edge that has a ledge beside it exactly as tall as the flange's setback (3 mm): sew failed with a degenerate edge",
+ "source": "analytic",
+ "method": "T = 2, flange R = 1, inside: the setback R + T = 3 strips y 0..3 off the base, and the ledge (x 97..100, y 0..3) lies wholly in that strip, so the base left is x 0..97, y 3..60 (11058). The bend (a quarter annulus of radii 1..3, 2 pi a mm) and the panel (leg 20 - 3 = 17, 34 a mm) run along the edge either as far as the base's remaining edge (97) or the picked edge (100), the reading the case leaves open: V lies between 11058 + 97 (2 pi + 34) = 14965.468975 and 11058 + 100 (2 pi + 34) = 15086.318531; a flange missing, or the base left untrimmed by the setback, falls outside",
+ "body_count": 1,
+ "volume_mm3": [
+  14965.468,
+  15086.319
+ ]
+}

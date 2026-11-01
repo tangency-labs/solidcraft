@@ -244,7 +244,7 @@ pub(super) fn encode(body: &Body) -> Result<w::Metadata> {
             .paint
             .as_ref()
             .map(|p| {
-                Ok(w::Paint {
+                Ok::<_, crate::KernelError>(w::Paint {
                     opacity: p.opacity,
                     faces: p
                         .faces

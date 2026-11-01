@@ -3,20 +3,23 @@
 //! the surface's natural parameter bounds: a free-form surface's own parameter box, and for an
 //! analytic surface (a plane, cylinder, cone, sphere or torus, which has no natural bounds of
 //! its own, or bounds that go all the way round) the box of the face's own span. The restored
-//! boundary runs along the surface's parameter lines, each edge exact: a line, an arc about a
-//! revolved surface's axis, a rotated profile, or a B-spline iso-curve.
+//! boundary runs along the surface's parameter lines.
 //!
-//! Which loop is the outer one is worked out from the face's parameters ([`FaceLoops`]).
+//! SMLib does it (`smlib_untrim_face`): holes are deleted from the face, the outer boundary is
+//! the face SMLib makes from the surface over that box, the holes kept rebuilt in it from their
+//! own edges. The body goes to SMLib tagged as operand 0, so the result's history comes from
+//! SMLib's tags: the untrimmed face is the face it was, trimmed differently.
 
-use mt::{BoundedCurve, MetricSpace, ParametricCurve, ParametricSurface};
 use solidcraft_geom::Vec3;
-use truck_modeling as mt;
+use solidcraft_smlib::trim::Holes;
 
 use crate::body::Body;
-use crate::face_params::{FaceLoops, iso_curve, natural_span, passes};
-use crate::record::{Rebuild, rebuilt_body};
-use crate::surfaces::surface_body;
-use crate::{KernelError, Result, guard};
+use crate::history::{Change, FaceOrigin};
+use crate::native::{body_from_smlib_ordered, smlib_body_ordered};
+use crate::{KernelError, Result};
+
+/// Most hole picks.
+const MAX_PICKS: usize = 10_000;
 
 /// The inner loops Untrim takes away.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -36,128 +39,85 @@ pub enum UntrimHoles<'a> {
 pub fn untrim(body: &Body, face: usize, holes: UntrimHoles, outer: bool, in_place: bool) -> Result<Body> {
     body.require_brep("untrim")?;
     if let UntrimHoles::At(points) = holes {
-        if points.len() > 10_000 {
+        if points.len() > MAX_PICKS {
             return Err(KernelError::Invalid("too many holes picked".into()));
         }
-        if points.iter().any(|p| !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite())) {
+        if points.iter().any(|p| !p.is_finite()) {
             return Err(KernelError::Invalid("a hole point is not finite".into()));
         }
     }
-    let faces: Vec<&mt::Face> = body.solid.face_iter().collect();
-    let original = *faces.get(face).ok_or_else(|| KernelError::Invalid(format!("the body has no face {face}")))?;
-    let size = body.size().max(1e-6);
-    let untrimmed = guard("untrim", || untrimmed_face(original, holes, outer, size))?;
-    let mut rec = Rebuild::default();
-    rec.face(&untrimmed, original);
-    let result = if in_place && body.is_surface() {
-        surface_body(faces.iter().map(|f| if f.id() == original.id() { untrimmed.clone() } else { (*f).clone() }).collect())
-    } else {
-        surface_body(vec![untrimmed])
+    let record = crate::native::brep_record(body)?;
+    let f = record.faces.get(face).ok_or_else(|| KernelError::Invalid(format!("the body has no face {face}")))?;
+    let inner = f.loops.len().saturating_sub(1);
+    let removes = match holes {
+        UntrimHoles::All => inner > 0,
+        UntrimHoles::At(points) => !points.is_empty(),
     };
-    Ok(rebuilt_body(result, &[&body.solid], &rec))
-}
-
-/// The face untrimmed (see [`untrim`]).
-fn untrimmed_face(face: &mt::Face, holes: UntrimHoles, outer: bool, size: f64) -> Result<mt::Face> {
-    let surface = face.surface();
-    let accept = (size * 1e-5).max(1e-6);
-    let FaceLoops { eval, dom, wires, loops, outer: outer_index } = FaceLoops::of(face, accept, "untrimming")?;
-    let inner: Vec<usize> = (0..wires.len()).filter(|i| *i != outer_index).collect();
-    let removed: Vec<usize> = match holes {
-        UntrimHoles::All => inner.clone(),
-        UntrimHoles::At(points) => {
-            let mut picked = Vec::new();
-            for p in points {
-                let (i, d) = inner
-                    .iter()
-                    .filter_map(|i| loops.get(*i).map(|l| (*i, l.dist(*p))))
-                    .min_by(|a, b| a.1.total_cmp(&b.1))
-                    .ok_or_else(|| KernelError::Invalid("the face has no holes".into()))?;
-                if d > size * 0.05 + 1e-6 {
-                    return Err(KernelError::Invalid(format!("no hole of the face at {p:?}")));
-                }
-                if !picked.contains(&i) {
-                    picked.push(i);
-                }
-            }
-            picked
-        }
-    };
-    if !outer && removed.is_empty() {
-        return Err(KernelError::Invalid(if inner.is_empty() {
+    if !outer && !removes {
+        return Err(KernelError::Invalid(if inner == 0 {
             "the face has no holes to remove (restore its outer boundary instead)".into()
         } else {
             "nothing to untrim: pick holes to remove or restore the outer boundary".into()
         }));
     }
-    let (Some(outer_wire), Some(outer_loop)) = (wires.get(outer_index), loops.get(outer_index)) else {
-        return Err(KernelError::Invalid("the face has no boundary".into()));
-    };
-    let first = if outer {
-        let analytic = crate::offset::surf_of(face, (size * 1e-7).max(1e-9) * 100.0).is_some();
-        let span = natural_span(&eval, &dom, outer_loop, analytic, accept)?;
-        bounds_wire(&surface, span, outer_loop.area() > 0.0, size)?
-    } else {
-        outer_wire.clone()
-    };
-    let kept = inner.iter().filter(|i| !removed.contains(i)).filter_map(|i| wires.get(*i).cloned());
-    let boundaries: Vec<mt::Wire> = std::iter::once(first).chain(kept).collect();
-    let mut f = mt::Face::try_new(boundaries, surface).map_err(|e| KernelError::Failed(format!("untrimmed face: {e}")))?;
-    if !face.orientation() {
-        f.invert();
+    if matches!(holes, UntrimHoles::At(p) if !p.is_empty()) && inner == 0 {
+        return Err(KernelError::Invalid("the face has no holes".into()));
     }
-    Ok(f)
+    let size = body.size().max(1e-6);
+    let at = face_point(body, face)?;
+    let picks: Vec<[f64; 3]> = match holes {
+        UntrimHoles::All => Vec::new(),
+        UntrimHoles::At(points) => points.iter().map(|p| [p.x, p.y, p.z]).collect(),
+    };
+    let which = match holes {
+        UntrimHoles::All => Holes::All,
+        UntrimHoles::At(_) => Holes::At(&picks),
+    };
+    let in_place = in_place && body.is_surface();
+    let (sb, ob) = smlib_body_ordered(body)?;
+    let tagged = sb.tagged(0).map_err(|e| failed("tag", e))?;
+    // A hole is picked within a twentieth of the body's size of its edges, the face by a point
+    // inside it.
+    let reach = size * 0.05 + 1e-6;
+    let r = tagged.untrim_face([at.x, at.y, at.z], reach, which, outer, in_place).map_err(|e| match e {
+        solidcraft_smlib::Error::NoMatch { .. } => KernelError::Invalid("no hole of the face at a picked point".into()),
+        solidcraft_smlib::Error::Unsupported => {
+            KernelError::Failed("not supported yet: untrimming this face in place (another face uses its hole's edges)".into())
+        }
+        e => failed("untrim", e),
+    })?;
+    let (out, order) = body_from_smlib_ordered(&r)?;
+    let history = match (ob, order) {
+        (Some(ob), Some(or)) => r.history().map_err(|e| failed("history", e))?.history(&[ob], &or).ok().map(|mut h| {
+            // The untrimmed face is the face it was, bounded differently.
+            for p in &mut h.faces {
+                if p.origins.contains(&FaceOrigin::Face { operand: 0, face }) {
+                    p.change = Change::Modified;
+                }
+            }
+            h
+        }),
+        _ => None,
+    };
+    Ok(out.with_checked_history(history, &crate::record::counts(&[body])))
 }
 
-/// The closed boundary of the parameter box `span` on `surface`, counter-clockwise in its
-/// parameters when `ccw`: four parameter-line edges, fewer where a side shrinks to a point (a
-/// pole: the corners at its ends are one vertex).
-fn bounds_wire(surface: &mt::Surface, span: [(f64, f64); 2], ccw: bool, size: f64) -> Result<mt::Wire> {
-    let [(u0, u1), (v0, v1)] = span;
-    let tol = size * 1e-6 + 1e-9;
-    // The corners counter-clockwise from (u0, v0); each side runs between two of them.
-    let mut corners = [(u0, v0), (u1, v0), (u1, v1), (u0, v1)];
-    if !ccw {
-        corners.reverse();
-    }
-    let points: Vec<mt::Point3> = corners.iter().map(|(u, v)| surface.subs(*u, *v)).collect();
-    if points.iter().any(|p| !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite())) {
-        return Err(KernelError::Failed("the surface cannot be evaluated at its bounds".into()));
-    }
-    // Corners at one point (a pole) are one vertex.
-    let mut vertices: Vec<mt::Vertex> = Vec::with_capacity(4);
-    for (i, p) in points.iter().enumerate() {
-        let same = points.iter().take(i).position(|q| q.distance(*p) <= tol).and_then(|j| vertices.get(j).cloned());
-        vertices.push(same.unwrap_or_else(|| mt::Vertex::new(*p)));
-    }
-    let mut edges = Vec::with_capacity(4);
-    for i in 0..4 {
-        let j = (i + 1) % 4;
-        let (Some(&(ua, va)), Some(&(ub, vb)), Some(a), Some(b)) = (corners.get(i), corners.get(j), vertices.get(i), vertices.get(j)) else {
-            continue;
-        };
-        let along_u = va == vb;
-        let (w, from, to) = if along_u { (va, ua, ub) } else { (ua, va, vb) };
-        let mid = if along_u { surface.subs(0.5 * (from + to), w) } else { surface.subs(w, 0.5 * (from + to)) };
-        if a.id() == b.id() {
-            // A side shrunk to a pole is no edge; one that closes on itself can't be bounded.
-            if mid.distance(a.point()) > tol {
-                return Err(KernelError::TooLarge("a surface that closes on itself within the face's bounds".into()));
-            }
-            continue;
-        }
-        let curve = iso_curve(surface, along_u, w, from, to)?;
-        let close = |p: mt::Point3, q: mt::Point3| p.distance(q) <= tol * 10.0;
-        let (t0, t1) = curve.range_tuple();
-        if !close(curve.subs(t0), a.point()) || !close(curve.subs(t1), b.point()) || !passes(&curve, mid, tol * 10.0) {
-            return Err(KernelError::Failed("a restored boundary edge does not follow its surface".into()));
-        }
-        edges.push(mt::Edge::try_new(a, b, curve).map_err(|e| KernelError::Failed(format!("restored boundary edge: {e}")))?);
-    }
-    if edges.len() < 2 {
-        return Err(KernelError::Invalid("the face's bounds shrink to a point".into()));
-    }
-    Ok(edges.into())
+fn failed(what: &str, e: impl std::fmt::Display) -> KernelError {
+    KernelError::Failed(format!("SMLib untrim: {what}: {e}"))
+}
+
+/// A point inside face `face` of `body`: the centre of its largest mesh triangle.
+pub(crate) fn face_point(body: &Body, face: usize) -> Result<Vec3> {
+    let m = body.mesh(&crate::MeshTolerance::chord((body.size() * 1e-3).max(1e-3)))?;
+    let area = |[a, b, c]: &[Vec3; 3]| (*b - *a).cross(*c - *a).len();
+    m.triangles
+        .iter()
+        .zip(&m.tri_face)
+        .filter(|(_, f)| **f as usize == face)
+        .filter_map(|(t, _)| m.tri(t))
+        .max_by(|x, y| area(x).total_cmp(&area(y)))
+        .map(|[a, b, c]| (a + b + c) / 3.0)
+        .ok_or_else(|| KernelError::Failed(format!("untrim: face {face} has no triangles")))
 }
 
 #[cfg(test)]
@@ -172,7 +132,7 @@ mod tests {
     }
 
     fn inner_loops(b: &Body) -> usize {
-        b.solid.face_iter().map(|f| f.boundaries().len().saturating_sub(1)).sum()
+        crate::native::brep_record(b).unwrap().faces.iter().map(|f| f.loops.len().saturating_sub(1)).sum()
     }
 
     /// A 40 × 20 × 2 plate with three holes of radius 2 at x = 10, 20, 30 on y = 10.
@@ -206,32 +166,11 @@ mod tests {
         let h = all.history().unwrap();
         assert_eq!(h.faces.first().map(|f| f.change), Some(crate::history::Change::Modified));
         // Nothing to do: a face without holes, a point on no hole, an empty pick.
-        let side = b.solid.face_iter().position(|f| f.boundaries().len() == 1).unwrap();
+        let side = crate::native::brep_record(&b).unwrap().faces.iter().position(|f| f.loops.len() == 1).unwrap();
         assert!(untrim(&b, side, UntrimHoles::All, false, false).is_err());
         assert!(untrim(&b, top, UntrimHoles::At(&[Vec3::new(5.0, 5.0, 2.0)]), false, false).is_err());
         assert!(untrim(&b, top, UntrimHoles::At(&[]), false, false).is_err());
         assert!(untrim(&b, 99, UntrimHoles::All, false, false).is_err());
-    }
-
-    /// A face whose hole is stored before its outer loop (as an imported face may list them):
-    /// the outer loop is the one enclosing the most, so the 10 × 10 square comes back whole.
-    #[test]
-    fn the_outer_loop_is_found_whatever_order_the_loops_are_in() {
-        let r = Region2 {
-            outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0), Vec2::new(0.0, 10.0)]),
-            holes: vec![Loop2::polygon(&[Vec2::new(4.0, 4.0), Vec2::new(4.0, 6.0), Vec2::new(6.0, 6.0), Vec2::new(6.0, 4.0)])],
-        };
-        let sheet = crate::patch_region(&Plane::XY, &r).unwrap();
-        let f = sheet.solid.face_iter().next().unwrap().clone();
-        let mut loops = f.absolute_boundaries().clone();
-        loops.reverse();
-        let swapped = mt::Face::new_unchecked(loops, f.surface());
-        let swapped = if f.orientation() { swapped } else { swapped.inverse() };
-        let b = surface_body(vec![swapped]);
-        assert!(rel(measure(&b).unwrap().area, 96.0) < 1e-9);
-        let back = untrim(&b, 0, UntrimHoles::All, false, true).unwrap();
-        assert!(back.face_count() == 1 && inner_loops(&back) == 0);
-        assert!(rel(measure(&back).unwrap().area, 100.0) < 1e-9, "{}", measure(&back).unwrap().area);
     }
 
     /// A half cylinder sheet (radius 10, angles 0…π, height 20) trimmed by the slanted plane
@@ -262,10 +201,10 @@ mod tests {
     }
 
     /// A revolved face: the cone frustum swept by the line from radius 5 at z = 0 to radius 10
-    /// at z = −10 (slant √125), its first face (angles 0…½), trimmed by the plane z = −8 + y/2.
+    /// at z = −10 (slant √125), one face over angles 0…1, trimmed by the plane z = −8 + y/2.
     /// The cut reaches lowest (profile parameter 0.8) at angle 0, so the face's own span is
-    /// angles 0…½ by parameters 0…0.8, restored with arcs about the axis and straight sides:
-    /// ½ · √125 · ∫₀^0.8 (5 + 5t) dt = ½ · √125 · 5.6.
+    /// angles 0…1 by parameters 0…0.8, restored with arcs about the axis and straight sides:
+    /// 1 · √125 · ∫₀^0.8 (5 + 5t) dt = √125 · 5.6.
     #[test]
     fn a_trimmed_cone_face_is_restored_to_its_span() {
         let line = vec![Seg2::Line { a: Vec2::new(5.0, 0.0), b: Vec2::new(10.0, 10.0) }];
@@ -275,7 +214,7 @@ mod tests {
         let cut = crate::trim(&sheet, &tool, Vec3::new(5.0 * c, 5.0 * s, 0.0)).unwrap();
         let face = face_at(&cut, Vec3::new(5.5 * c, 5.5 * s, -1.0));
         let restored = untrim(&cut, face, UntrimHoles::All, true, false).unwrap();
-        let want = 0.5 * 125f64.sqrt() * 5.6;
+        let want = 125f64.sqrt() * 5.6;
         let a = measure(&restored).unwrap().area;
         assert!(rel(a, want) < 1e-3, "{a} vs {want}"); // (measured on meshes)
         let bb = measure(&restored).unwrap().bbox;
@@ -283,14 +222,13 @@ mod tests {
         assert!(matches!(crate::face_surface(&restored, 0), Some(crate::FaceSurface::Cone { .. })));
     }
 
-    /// A torus face (a revolved arc) with a piece of its outer equator cut off by the plane
-    /// x = 12: the cut touches one side of the face only, so its span is the face's whole span
-    /// and the restored face is the face as it was before the cut.
+    /// A torus face with a piece of its outer equator cut off by the plane x = 12: the cut
+    /// touches one side of the face only, so its span is the face's whole span and the restored
+    /// face is the face as it was before the cut.
     #[test]
     fn a_torus_face_cut_at_one_side_is_restored_whole() {
         let torus = crate::torus(Vec3::ZERO, 10.0, 3.0).unwrap();
-        let f = torus.solid.face_iter().next().unwrap().clone();
-        let face = surface_body(vec![f]);
+        let face = crate::copy_faces(&torus, &[Vec3::new(13.0, 0.0, 0.0)]).unwrap();
         let before = measure(&face).unwrap().area;
         let tool = crate::SplitTool::Plane(Plane::from_normal(Vec3::new(12.0, 0.0, 0.0), Vec3::X).unwrap());
         let cut = crate::trim(&face, &tool, Vec3::new(0.0, 13.0, 0.0)).unwrap();
@@ -305,26 +243,25 @@ mod tests {
         ));
     }
 
-    /// A free-form face goes back to its surface's own parameter box: half of the saddle
-    /// z = x y / 10 over 0…10 × 0…10 (a bilinear patch, its iso-lines straight), x from 0 to 5,
+    /// A free-form face goes back to its surface's own parameter box: the saddle z = x y / 10
+    /// over 0…10 × 0…10 (ruled between two straight lines, sketched on planes y = 0 and 10 whose sketch y is −z: a
+    /// bilinear patch), cut at x = 5 and
     /// restored to the whole patch: x and y 0…10, z 0…10.
     #[test]
     fn a_free_form_face_is_restored_to_its_surfaces_bounds() {
-        let pt = |x: f64, y: f64| mt::Point3::new(x, y, x * y / 10.0);
-        let knots = mt::KnotVec::bezier_knot(1);
-        let saddle = mt::BSplineSurface::new((knots.clone(), knots), vec![vec![pt(0.0, 0.0), pt(0.0, 10.0)], vec![pt(10.0, 0.0), pt(10.0, 10.0)]]);
-        let corners = [pt(0.0, 0.0), pt(5.0, 0.0), pt(5.0, 10.0), pt(0.0, 10.0)];
-        let v: Vec<mt::Vertex> = corners.iter().map(|p| mt::Vertex::new(*p)).collect();
-        let edges: Vec<mt::Edge> =
-            (0..4).map(|i| mt::Edge::new_unchecked(&v[i], &v[(i + 1) % 4], mt::Curve::Line(mt::Line(corners[i], corners[(i + 1) % 4])))).collect();
-        let half = surface_body(vec![mt::Face::new_unchecked(vec![edges.into()], mt::Surface::BSplineSurface(saddle))]);
+        let front = (Plane::XZ, vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, 0.0) }]);
+        let back = (Plane { origin: Vec3::new(0.0, 10.0, 0.0), ..Plane::XZ }, vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, -10.0) }]);
+        let saddle = crate::loft_sheet(&[front, back]).unwrap();
+        let tool = crate::SplitTool::Plane(Plane::from_normal(Vec3::new(5.0, 0.0, 0.0), Vec3::X).unwrap());
+        let half = crate::trim(&saddle, &tool, Vec3::new(1.0, 5.0, 0.5)).unwrap();
         assert!(crate::face_surface(&half, 0).is_none(), "not analytic");
         assert!((measure(&half).unwrap().bbox.max.x - 5.0).abs() < 1e-9);
         let whole = untrim(&half, 0, UntrimHoles::All, true, false).unwrap();
         let bb = measure(&whole).unwrap().bbox;
         assert!(bb.min.x.abs() < 1e-9 && bb.min.y.abs() < 1e-9 && bb.min.z.abs() < 1e-9, "{bb:?}");
         assert!((bb.max.x - 10.0).abs() < 1e-9 && (bb.max.y - 10.0).abs() < 1e-9 && (bb.max.z - 10.0).abs() < 1e-9, "{bb:?}");
-        assert_eq!(whole.solid.face_iter().next().unwrap().boundaries().first().map(|w| w.len()), Some(4));
+        let record = crate::native::brep_record(&whole).unwrap();
+        assert!(matches!(record.faces.first().and_then(|f| f.loops.first()), Some(solidcraft_geom::brep::Loop::Edges { edges }) if edges.len() == 4));
     }
 
     /// The plate exported to STEP and read back: its imported top face untrims to the whole
@@ -335,7 +272,7 @@ mod tests {
         let imported = crate::step_import(&text).unwrap();
         let b = &imported.bodies.first().unwrap().body;
         let top = face_at(b, Vec3::new(5.0, 5.0, 2.0));
-        assert_eq!(b.solid.face_iter().nth(top).unwrap().boundaries().len(), 4);
+        assert_eq!(crate::native::brep_record(b).unwrap().faces.get(top).unwrap().loops.len(), 4);
         let all = untrim(b, top, UntrimHoles::All, false, false).unwrap();
         assert!(all.face_count() == 1 && inner_loops(&all) == 0);
         assert!(rel(measure(&all).unwrap().area, 800.0) < 1e-9);
@@ -368,7 +305,7 @@ mod tests {
         let b = plate();
         let top = face_at(&b, Vec3::new(5.0, 5.0, 2.0));
         assert!(untrim(&b, top, UntrimHoles::At(&[Vec3::new(f64::NAN, 0.0, 0.0)]), false, false).is_err());
-        let many = vec![Vec3::ZERO; 10_001];
+        let many = vec![Vec3::ZERO; MAX_PICKS + 1];
         assert!(untrim(&b, top, UntrimHoles::At(&many), false, false).is_err());
     }
 }

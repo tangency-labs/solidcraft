@@ -335,7 +335,7 @@ fn touched_bodies(app: &SolveApp) -> Vec<String> {
 }
 
 fn body_feature(app: &SolveApp, body: &str) -> Option<u64> {
-    app.session.world_state().body(body).map(|b| b.feature)
+    crate::open_meshing::session_world(&app.session).body(body).map(|b| b.feature)
 }
 
 /// Bodies in a component and its subcomponents.
@@ -576,7 +576,7 @@ fn picked_face_feature(app: &SolveApp) -> Option<u64> {
 
 /// The feature that made face `index` of `body` (by its world name).
 pub(crate) fn face_feature(app: &SolveApp, body: &str, index: usize) -> Option<u64> {
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let body = state.body(body)?;
     let names = solidcraft_engine::doc::naming::face_names(body);
     let name = names.get(index)?;
@@ -804,6 +804,11 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
             v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": b })));
         }
         v.push(act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "body": b })));
+        // A part the modelling kernel refuses can be repaired.
+        if crate::open_meshing::session_world(&app.session).body(&b).is_some_and(|m| m.body.smlib_refused().is_some()) {
+            v.push(Item::sep());
+            v.push(cmd(app, crate::refused_part::REPAIR, "Repair Part").with(json!({ "body": b })));
+        }
     }
     v
 }
@@ -813,7 +818,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let profiles = !app.session.visibility.hidden_profiles.contains(&id);
     let dims = app.session.visibility.shown_dimensions.contains(&id);
     let editing = app.session.active_sketch == Some(id);
-    let has_profiles = app.session.world_state().sketch(id).is_some_and(|s| !s.profiles.is_empty());
+    let has_profiles = crate::open_meshing::session_world(&app.session).sketch(id).is_some_and(|s| !s.profiles.is_empty());
     // This sketch, or every selected sketch when it is one of them, to the part it is on (#10218).
     let selected: Vec<String> = app
         .session
@@ -1145,7 +1150,7 @@ fn alignment_items(selection: &[Sel]) -> Vec<Item> {
 fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     use solidcraft_engine::sketch::{ConstraintKind, CurveKind};
     let Some(sid) = app.session.active_sketch else { return Vec::new() };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = st.sketch(sid) else { return Vec::new() };
     if app.session.selection.iter().any(|sel| matches!(sel, Sel::SketchMidpoint { .. })) {
         // A midpoint with a point or curve can also be made coincident with it (#10311).
@@ -1489,7 +1494,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.isolate" => {
             // The picked bodies stay (shown first if they were hidden), everything else goes.
-            let others: Vec<String> = app.session.world_state().bodies.iter().map(|b| b.name.clone()).filter(|b| !bodies.contains(b)).collect();
+            let others: Vec<String> =
+                crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).filter(|b| !bodies.contains(b)).collect();
             if !bodies.is_empty() {
                 let _ = app.run("browser.visibility", json!({ "items": bodies, "visible": true }));
             }
@@ -1795,14 +1801,14 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.extrudeSketch" => {
             if let Some(id) = id_of(&p, "sketch") {
-                let n = app.session.world_state().sketch(id).map_or(0, |s| s.profiles.len());
+                let n = crate::open_meshing::session_world(&app.session).sketch(id).map_or(0, |s| s.profiles.len());
                 let items: Vec<Value> = (0..n).map(|i| json!({"type": "profile", "sketch": id, "index": i})).collect();
                 let _ = app.run("select.set", json!({ "items": items }));
                 app.start("solid.extrude");
             }
         }
         "ui.lookAt" => {
-            let st = app.session.world_state();
+            let st = crate::open_meshing::session_world(&app.session);
             if let Some(ss) = id_of(&p, "sketch").and_then(|id| st.sketch(id)) {
                 let to = crate::dialogs::onto_sketch(app.cam.looking_from(ss.plane.normal()), ss);
                 app.animate_to(to);
@@ -1987,7 +1993,7 @@ pub fn rename_selection(app: &mut SolveApp, at: Pos2) -> bool {
 
 /// Add the edges that continue the selected edges smoothly to the selection.
 fn tangent_chain(app: &mut SolveApp) {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let mut out: Vec<Sel> = Vec::new();
     for s in &app.session.selection {
         let Sel::Edge { body, index, .. } = s else { continue };
@@ -2615,7 +2621,7 @@ mod tests {
             .to_owned();
         let horiz = h.app.run("sketch.constrainer", json!({"entities":[l]})).unwrap()["constraint"].as_str().unwrap().to_owned();
         let is_driven = |h: &crate::scenario::Harness| {
-            h.app.session.world_state().sketch(sid).unwrap().sketch.constraints.iter().any(|c| c.id == dim && c.driven)
+            crate::open_meshing::session_world(&h.app.session).sketch(sid).unwrap().sketch.constraints.iter().any(|c| c.id == dim && c.driven)
         };
 
         // A selected dimension offers the toggle, aimed at that constraint.
@@ -2657,7 +2663,15 @@ mod tests {
         let pc = h.app.run("sketch.dimension", json!({"entities":[c]})).unwrap()["param"].as_str().unwrap().to_owned();
         let pl = h.app.run("sketch.dimension", json!({"entities":[l],"value":20})).unwrap()["param"].as_str().unwrap().to_owned();
         let dim = |h: &crate::scenario::Harness, p: &str| {
-            h.app.session.world_state().sketch(sid).unwrap().sketch.constraints.iter().find(|c| c.param.as_deref() == Some(p)).unwrap().clone()
+            crate::open_meshing::session_world(&h.app.session)
+                .sketch(sid)
+                .unwrap()
+                .sketch
+                .constraints
+                .iter()
+                .find(|c| c.param.as_deref() == Some(p))
+                .unwrap()
+                .clone()
         };
         let did = dim(&h, &pc).id;
 
@@ -2801,7 +2815,7 @@ mod tests {
             h.app.run("sketch.offset", json!({"curves":[source],"distance":2,"chain":false})).unwrap()["curves"][0].as_str().unwrap().to_owned();
         h.app.run("sketch.line", json!({"points":[[10,-5],[10,5]],"connect":false,"infer":false})).unwrap();
         let sid = h.app.session.active_sketch.unwrap();
-        let state = h.app.session.world_state();
+        let state = crate::open_meshing::session_world(&h.app.session);
         let sk = &state.sketch(sid).unwrap().sketch;
         let Shape::Line { a, b } = sk.shape(sk.curve_index(&output).unwrap()).unwrap() else { panic!("offset must be a line") };
         let cut = Vec2::new(15.0, a.y);
@@ -2819,9 +2833,9 @@ mod tests {
         assert!(item.enabled);
         assert_eq!(item.params, Some(json!({"curve":output})));
         h.step(&json!({"click":{"handle":"menu:sketch.offset.break"}})).unwrap();
-        assert!(h.app.session.world_state().sketch(sid).unwrap().sketch.offset_distance(&output).is_none());
+        assert!(crate::open_meshing::session_world(&h.app.session).sketch(sid).unwrap().sketch.offset_distance(&output).is_none());
         h.app.run("sketch.trim", json!({"curve":output,"at":[cut.x,cut.y]})).unwrap();
-        let state = h.app.session.world_state();
+        let state = crate::open_meshing::session_world(&h.app.session);
         let sk = &state.sketch(sid).unwrap().sketch;
         let remaining = sk.shape(sk.curve_index(&output).unwrap()).unwrap();
         assert!(matches!(remaining, Shape::Line { a, b } if (a.dist(b) - 10.0).abs() < 1e-6), "{remaining:?}");
@@ -2846,7 +2860,7 @@ mod tests {
         let sid = h.app.session.active_sketch.unwrap();
         let cut = Vec2::new(15.0, 0.0);
         let edge = {
-            let state = h.app.session.world_state();
+            let state = h.app.session.world_state().unwrap();
             let sk = &state.sketch(sid).unwrap().sketch;
             (0..sk.curves.len())
                 .find(|i| sk.curves[*i].link.is_some() && sk.shape(*i).is_some_and(|shape| shape.dist(cut) < 1e-6))
@@ -2870,7 +2884,8 @@ mod tests {
         assert!(item.enabled);
         assert_eq!(item.params, Some(json!({"entities":[edge]})));
         h.step(&json!({"click":{"handle":"menu:sketch.break_link"}})).unwrap();
-        let unlinked = h.app.session.world_state().sketch(sid).unwrap().sketch.curves.iter().find(|c| c.id == edge).is_some_and(|c| c.link.is_none());
+        let unlinked =
+            h.app.session.world_state().unwrap().sketch(sid).unwrap().sketch.curves.iter().find(|c| c.id == edge).is_some_and(|c| c.link.is_none());
         assert!(unlinked, "Break Link makes the edge normal sketch geometry");
         h.app.run("sketch.trim", json!({"curve":edge,"at":[cut.x,cut.y]})).unwrap();
     }
@@ -2893,12 +2908,12 @@ mod tests {
             .to_owned();
         let sid = h.app.session.active_sketch.unwrap();
         let spot = |h: &crate::scenario::Harness, id: &str, piece: usize| {
-            let state = h.app.session.world_state();
+            let state = crate::open_meshing::session_world(&h.app.session);
             let sk = &state.sketch(sid).unwrap().sketch;
             sk.exact_segs(sk.curve_index(id).unwrap()).unwrap()[piece].point_at(0.5)
         };
         let count = |h: &crate::scenario::Harness, id: &str| {
-            let state = h.app.session.world_state();
+            let state = crate::open_meshing::session_world(&h.app.session);
             let sk = &state.sketch(sid).unwrap().sketch;
             sk.curves[sk.curve_index(id).unwrap()].kind.point_ids().len()
         };
@@ -2914,7 +2929,7 @@ mod tests {
         let item = menu.iter().find(|item| item.id == "sketch.spline.reverse").expect("a control point spline offers Reverse Spline Direction");
         assert_eq!((item.label.as_str(), item.params.clone()), ("Reverse Spline Direction", Some(json!({"curve": control}))));
         let points = |h: &crate::scenario::Harness, id: &str| {
-            let state = h.app.session.world_state();
+            let state = crate::open_meshing::session_world(&h.app.session);
             let sk = &state.sketch(sid).unwrap().sketch;
             sk.curves[sk.curve_index(id).unwrap()].kind.point_ids()
         };
@@ -2937,7 +2952,7 @@ mod tests {
         assert!(clicked.dist(at) < 0.5, "the item carries the clicked spot: {clicked:?} for {at:?}");
         h.step(&json!({"click":{"handle":"menu:sketch.spline.insert_point"}})).unwrap();
         assert_eq!(count(&h, &fit), 5);
-        let state = h.app.session.world_state();
+        let state = crate::open_meshing::session_world(&h.app.session);
         let sk = &state.sketch(sid).unwrap().sketch;
         let added = sk.point(sk.curves[sk.curve_index(&fit).unwrap()].kind.point_ids()[2]).unwrap();
         assert!(added.dist(at) < 0.5, "the new fit point is where the menu was opened: {added:?}");
@@ -2948,7 +2963,7 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.app.run("solid.cylinder", json!({"diameter":30,"height":20})).unwrap();
-        let state = h.app.session.world_state();
+        let state = crate::open_meshing::session_world(&h.app.session);
         let body = state.bodies.first().unwrap();
         let faces = body.body.faces(0.1).unwrap();
         let flat = faces.iter().find(|f| f.plane_normal.is_some()).unwrap();

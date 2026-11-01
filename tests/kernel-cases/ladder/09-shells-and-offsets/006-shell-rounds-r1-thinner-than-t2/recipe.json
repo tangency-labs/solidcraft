@@ -1,0 +1,46 @@
+{
+ "base": "../../01-primitives/001-box",
+ "commands": [
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      0,
+      0,
+      10
+     ],
+     [
+      60,
+      0,
+      10
+     ],
+     [
+      60,
+      40,
+      10
+     ],
+     [
+      0,
+      40,
+      10
+     ]
+    ],
+    "radius": 1
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      30,
+      20,
+      20
+     ]
+    ],
+    "thickness": 2
+   }
+  }
+ ]
+}

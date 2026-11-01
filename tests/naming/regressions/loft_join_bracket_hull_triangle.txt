@@ -1,0 +1,48 @@
+# regressions/loft_join_bracket_hull_triangle: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body DT2: 13 faces, 33 edges
+DT2 face F7:end
+DT2 face F7:side:a1
+DT2 face F7:side:a2
+DT2 face F7:side:a3
+DT2 face F7:side:a4
+DT2 face F7:side:l1
+DT2 face F7:side:l2
+DT2 face F7:side:l3
+DT2 face F7:side:l4
+DT2 face F8:bottom
+DT2 face F8:side#1
+DT2 face F8:side#2
+DT2 face F8:top
+DT2 edge F7:end|F7:side:a1
+DT2 edge F7:end|F7:side:a2
+DT2 edge F7:end|F7:side:a3
+DT2 edge F7:end|F7:side:a4
+DT2 edge F7:end|F7:side:l1
+DT2 edge F7:end|F7:side:l2
+DT2 edge F7:end|F7:side:l3
+DT2 edge F7:end|F7:side:l4
+DT2 edge F7:side:a1|F7:side:l1
+DT2 edge F7:side:a1|F7:side:l4
+DT2 edge F7:side:a1|F8:side#1
+DT2 edge F7:side:a1|F8:side#2
+DT2 edge F7:side:a2|F7:side:l1
+DT2 edge F7:side:a2|F7:side:l2
+DT2 edge F7:side:a2|F8:side#1
+DT2 edge F7:side:a2|F8:side#2
+DT2 edge F7:side:a3|F7:side:l2
+DT2 edge F7:side:a3|F7:side:l3
+DT2 edge F7:side:a3|F8:side#1
+DT2 edge F7:side:a4|F7:side:l3
+DT2 edge F7:side:a4|F7:side:l4
+DT2 edge F7:side:a4|F8:side#1
+DT2 edge F7:side:l1|F8:side#2
+DT2 edge F7:side:l2|F8:side#1
+DT2 edge F7:side:l3|F8:side#1
+DT2 edge F7:side:l4|F8:side#1
+DT2 edge F8:bottom|F8:side#1
+DT2 edge F8:bottom|F8:side#2
+DT2 edge F8:side#1|F8:side#2~1 [geometric]
+DT2 edge F8:side#1|F8:side#2~2 [geometric]
+DT2 edge F8:side#1|F8:side#2~3 [geometric]
+DT2 edge F8:side#1|F8:top
+DT2 edge F8:side#2|F8:top

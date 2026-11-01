@@ -1,0 +1,14 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4101"
+ ],
+ "what": "the four edges of a block end face chamfered where the block sides are 1 degree off square: exact volume of the plane-clipped prism (the corner edges of about 0.0001 mm are real geometry)",
+ "source": "analytic",
+ "method": "prism over the quadrilateral (0,0),(14.8,0),(14.6,12),(0.2,12), height 6.5, convex. The chamfered body is the prism cut by 4 half-spaces, one per chamfered edge of the y=12 face: each plane passes through the edge direction and the points at distance 0.8 from the edge along each adjacent face (along the slanted side faces for the two slanted edges). V = convex polytope volume of the prism clipped by those 4 planes (exact clipping, no kernel). Faces: 6 + 4 = 10. The exact polytope has four extra edges about 0.0001 mm long, one per corner (the chamfer along a slanted side is 0.8 along that side, and 0.8 along the end face, so the neighbouring chamfers meet the bottom face at points 0.00011 mm apart): they are real geometry, so vertex and edge counts are not graded.",
+ "body_count": 1,
+ "volume_mm3": 1126.1015080310985,
+ "faces": 10,
+ "continuity": {
+  "order": "g0"
+ }
+}

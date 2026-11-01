@@ -160,19 +160,15 @@ The Hole dialog draws a section through the hole as its options make it (type, e
 point, tapped) and puts each size in a field beside the dimension it sets; hovering a field, or
 typing in it, lights its dimension.
 
-Tapped holes and **Thread** features have a **Thread direction** choice: **Right-hand**
-(the default) or **Left-hand**. Editing and reopening keep the chosen direction. Tapped
-holes carry a cosmetic thread; the separate Thread feature can also cut a **Modeled**
-left-hand helix. Cosmetic direction is recorded with the thread annotation and does not
-change the body. Scripts use `handedness: "left"` or `"right"` on `solid.hole` (with `thread`)
-and `solid.thread`. Existing designs and omitted values remain right-handed. Changing the
-direction keeps the pitch, thread length and axis; it does not change a hole's drill size.
+The **Thread** feature's **Hand** is **Right** (the default), **Left**, or **Both** (a right- and
+a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "left"` (or `"right"`,
+`"both"`) on `solid.thread`; omitted, a thread is right-handed. Tapped holes are right-handed.
 
 Fillets and chamfers handle straight edges between planar faces, whole smooth loops, runs of
 neighbouring edges with mitred or spherical corners, and closed chains of curved edges (a rolling
 ball). See the roadmap's known limitations for the rest.
 
-**Curvature (G2)** in the Fillet dialog's **Radius Type** blends straight edges between two
+**Curvature continuous** (G2) in the Fillet dialog's **Type** blends straight edges between two
 planar faces with an exact quintic section. The tangent plane and curvature match each side
 face: curvature goes to zero at both contact rails, unlike a circular G1 fillet. Each end
 must meet one planar face; perpendicular and sloped planar ends are supported. Curved
@@ -187,6 +183,14 @@ Scripts and MCP use the same command, for example on a 20 mm box:
 {"command": "solid.fillet", "params": {"edges": [[20, 0, 10]], "radius": 2, "type": "curvature"}}
 ```
 `type: "g2"` is an alias. Existing fillets still default to circular, constant-radius G1 blends.
+
+Where three or more rounded edges meet at a corner, the Fillet dialog shows **Corners**: **Ball**
+(the default, a piece of the rolling ball's sphere, tangent (G1) to each round) or **Smooth
+patch** (`corner: "g2"`: the corner is set back along each edge and filled with a
+curvature-continuous (G2) patch, so reflections run through it without a kink). A smooth patch
+takes **Constant radius** and **Exact** fit. Its **Setback** is how far along each edge from the
+corner the patch starts, one distance for every corner (`setbacks`); left empty, it is 1.5 × the
+radius.
 
 Feature references to faces and edges are stored by name, so an upstream edit that moves geometry
 keeps them on the right face (see [Persistent naming](../dev/naming.md)). When a reference can't
@@ -219,12 +223,15 @@ gives the largest and the mean distance each way. Samples further than `toleranc
 the **regions**: `only_in_a` where `a` has material and `b` has none, `only_in_b` the other way
 round. Each region gives its volume, the deviating surface area, the largest deviation and where
 it is, its centre and box, and the faces of each body it lies on (`faces_a`, `faces_b`, numbered
-as `model.faces` lists them), largest volume first. The volume is integrated along a grid of
-parallel lines through the region (`resolution` gives their spacing), so a thin sliver is
-measured as well as a block. `identical` is true when no region is found, and `verdict` says it in
-one line. `warnings` lists what makes the result less certain: a body whose surface does not
-enclose the volume it measures (open, or with faces that failed to import), and lines left out of
-a region's volume because they crossed a gap. With `color`, the faces that hold a region turn
+as `model.faces` lists them), largest volume first. The volume, centre and box are exact
+(`measured_by: "boolean"`): the pieces of the cut a − b (or b − a) that lie in the region,
+measured as `inspect.measure` measures a body. When the cut cannot be made, the region's volume
+and centre are not measured (`measured_by: "not measured"`, null values, `not_measured` gives the
+cut's error), and never estimated; its deviation, area, faces and box are still given, and the
+side's total is null. `identical` is true when no region is found, and `verdict` says it in one
+line. `warnings` lists what makes the result less certain: a body whose surface does not enclose
+the volume it measures (open, or with faces that failed to import), and a cut that could not be
+made. With `color`, the faces that hold a region turn
 red where only `a` has material and green where only `b` has, on both bodies: the faces mostly
 beyond the tolerance (a small change on a large face leaves the face alone), or, for a region
 with none, the face with the largest share.

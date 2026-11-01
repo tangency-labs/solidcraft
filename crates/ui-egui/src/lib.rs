@@ -218,6 +218,7 @@ mod quick_measure_tests;
 pub(crate) mod recent_colors;
 pub mod recovery_ui;
 pub mod ref_images;
+pub(crate) mod refused_part;
 mod render_ui;
 pub mod render_workspace;
 pub mod resume_ui;
@@ -698,6 +699,8 @@ pub struct SolveApp {
     pub integrated_titlebar: bool,
     /// The desktop host installed native menus alongside the application bar controls.
     pub native_file_menu: bool,
+    /// Where the application bar puts search, Report a bug and the version (set by the host).
+    pub header: toolbar::HeaderLayout,
     /// Build bodies' display meshes on the CPU even where the GPU could (safe mode). Read by
     /// [`SolveApp::set_wgpu`].
     pub cpu_meshing: bool,
@@ -876,6 +879,7 @@ impl SolveApp {
             native_resize_border: false,
             integrated_titlebar: false,
             native_file_menu: false,
+            header: toolbar::HeaderLayout::DESKTOP,
             cpu_meshing: false,
             frame_ms: 0.0,
             frame_rate: frame_rate::FrameRate::default(),
@@ -1159,6 +1163,7 @@ impl SolveApp {
         if matches!(id, "file.save_mesh" | "file.send_to_slicer") {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);
         }
+        self.session.set_validation(self.preferences.validation);
         if id == "timeline.play" {
             let reply = self.session.execute(id, &params).map_err(|e| e.to_string())?;
             let action = serde_json::from_value(reply["action"].clone()).map_err(|e| e.to_string())?;
@@ -1242,6 +1247,8 @@ impl SolveApp {
                         self.ui.visual_style = index;
                     }
                 }
+                // The command and the preference are one setting.
+                "diagnostics.validation" => self.preferences.validation = self.session.validation(),
                 "view.grid" => self.ui.show_grid = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.show_grid),
                 "view.ground_shadow" => self.ui.ground_shadow = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.ground_shadow),
                 "view.navigation_bar" => {
@@ -1929,7 +1936,7 @@ impl SolveApp {
             return;
         }
         if let Some(mut t) = tools::Tool::for_command(id) {
-            let state = self.session.world_state();
+            let state = crate::open_meshing::session_world(&self.session);
             let sketch = self.session.active_sketch.and_then(|s| state.sketch(s)).map(|ss| &ss.sketch);
             if let Some(params) = tools::constraint_preselection(id, &self.session.selection, sketch) {
                 if self.run(id, params).is_ok() {
@@ -2370,11 +2377,13 @@ impl SolveApp {
     /// Insert CAD bodies, meshes or sketch drawing geometry into the current design.
     pub fn insert_path(&mut self, path: &str) {
         let cmd = if solidcraft_engine::io::is_point_cloud_path(path) { "pointcloud.insert" } else { file_load::insert_command(path) };
-        let before: Vec<String> = self.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+        let before: Vec<String> = crate::open_meshing::session_world(&self.session).bodies.iter().map(|b| b.name.clone()).collect();
         if let Ok(r) = self.run(cmd, json!({ "path": path })) {
             self.fit_view();
             stand_up::offer(self, path, &before, Some(&r));
-            if let Some(w) = r["warnings"].as_array().filter(|w| !w.is_empty()) {
+            if let Some(summary) = timeline::import_status(self, &r) {
+                self.set_status(summary, false);
+            } else if let Some(w) = r["warnings"].as_array().filter(|w| !w.is_empty()) {
                 self.set_status(format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or("")), false);
             }
         }
@@ -2598,7 +2607,7 @@ impl SolveApp {
     /// Move to `to` and frame the whole model from there at Home's zoom (animated): the
     /// navigators' Home, faces, corners, arrows and axes (`navigator_fitted`).
     pub fn animate_to_fitted(&mut self, to: Camera) {
-        let bounds = solidcraft_engine::view::bounds(&self.session);
+        let Ok(bounds) = solidcraft_engine::view::bounds(&self.session) else { return };
         let shared = self.preferences.navigator_fit;
         let framed = if shared { self.navigator_fitted(to) } else { self.fitted(to) };
         self.animate_to(framed);
@@ -2673,6 +2682,15 @@ impl SolveApp {
         self.pending_fit = request;
     }
 
+    /// Frame `bounds` as Fit frames the selection, leaving the selection as it is.
+    pub(crate) fn frame_bounds(&mut self, bounds: solidcraft_engine::geom::Aabb3) {
+        let from = self.cam;
+        let to = self.fitted_bounds(from, &bounds);
+        self.pending_fit = None;
+        self.animate_to(to);
+        self.pending_fit = Some((from, bounds, true, false));
+    }
+
     /// Move the viewport to the camera a command asked for (`view.apply`): animated like a view
     /// change, or at once (control requests, so a screenshot right after shows it).
     pub fn follow_view_request(&mut self, animate: bool) {
@@ -2730,6 +2748,7 @@ impl SolveApp {
             resume_ui::after_long_pause(ctx);
         }
         frame_watch::begin(self);
+        refused_part::next_frame(self, ctx);
         gpu::tick_tessellation(self);
         file_picker::tick(self, ctx);
         dialogs_save_mesh::tick_wait(self, ctx);

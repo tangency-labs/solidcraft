@@ -1,0 +1,44 @@
+# regressions/closed_sweep_torus_cut: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Torus: 14 faces, 28 edges
+Torus face F3:side:c1#1
+Torus face F3:side:c1#2
+Torus face F3:side:c1#3
+Torus face F3:side:c1#4
+Torus face F3:side:c1#5
+Torus face F3:side:c1#6
+Torus face F5:side:l1#1
+Torus face F5:side:l1#2
+Torus face F5:side:l2#1
+Torus face F5:side:l2#2
+Torus face F5:side:l3#1
+Torus face F5:side:l3#2
+Torus face F5:side:l4#1
+Torus face F5:side:l4#2
+Torus edge F3:side:c1#1|F3:side:c1#2~1 [geometric]
+Torus edge F3:side:c1#1|F3:side:c1#2~2 [geometric]
+Torus edge F3:side:c1#1|F3:side:c1#3
+Torus edge F3:side:c1#1|F3:side:c1#5
+Torus edge F3:side:c1#2|F3:side:c1#4
+Torus edge F3:side:c1#2|F3:side:c1#6
+Torus edge F3:side:c1#3|F3:side:c1#4~1 [geometric]
+Torus edge F3:side:c1#3|F3:side:c1#4~2 [geometric]
+Torus edge F3:side:c1#3|F3:side:c1#5
+Torus edge F3:side:c1#4|F3:side:c1#6
+Torus edge F3:side:c1#5|F3:side:c1#6~1 [geometric]
+Torus edge F3:side:c1#5|F3:side:c1#6~2 [geometric]
+Torus edge F5:side:l1#1|F5:side:l1#2
+Torus edge F5:side:l1#1|F5:side:l2#2
+Torus edge F5:side:l1#1|F5:side:l3#1
+Torus edge F5:side:l1#1|F5:side:l4#1
+Torus edge F5:side:l1#2|F5:side:l2#1
+Torus edge F5:side:l1#2|F5:side:l3#2
+Torus edge F5:side:l1#2|F5:side:l4#2
+Torus edge F5:side:l2#1|F5:side:l2#2
+Torus edge F5:side:l2#1|F5:side:l3#1
+Torus edge F5:side:l2#1|F5:side:l4#1
+Torus edge F5:side:l2#2|F5:side:l3#2
+Torus edge F5:side:l2#2|F5:side:l4#2
+Torus edge F5:side:l3#1|F5:side:l3#2
+Torus edge F5:side:l3#1|F5:side:l4#2
+Torus edge F5:side:l3#2|F5:side:l4#1
+Torus edge F5:side:l4#1|F5:side:l4#2

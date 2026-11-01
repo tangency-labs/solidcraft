@@ -10,6 +10,7 @@ use std::cell::{Cell, RefCell};
 use egui::{Pos2, Stroke};
 use serde_json::{Value, json};
 use solidcraft_engine::geom::{Plane, Vec2, Vec3};
+use solidcraft_engine::kernel::Continuity;
 
 use crate::SolveApp;
 use crate::tool_modifiers::{Audit, Binding, Match, ModAction, ModifierCombo, Scope, ToolModifiers, Trigger};
@@ -95,19 +96,17 @@ thread_local! {
     static PICKED: RefCell<Option<String>> = const { RefCell::new(None) };
     /// The inference the cursor snapped to last (label, sketch point), for the hint.
     static SNAP: RefCell<Option<(&'static str, Vec2)>> = const { RefCell::new(None) };
+    /// The comb tool's options: comb length (a multiplier on the automatic length) and teeth.
+    static COMB_OPTIONS: Cell<CombOptions> = const { Cell::new(CombOptions::DEFAULT) };
     /// The points that snap lined the cursor up with, and where it went (#7828).
     static LINED: RefCell<Option<(Vec2, Vec<Lined>)>> = const { RefCell::new(None) };
     /// The drawing tool's points so far and whether it is the Line tool, from the last hover: a
     /// click takes the tool out of the app while it runs, and must place what the hover showed.
     static TOOL: RefCell<(Vec<Vec2>, bool)> = const { RefCell::new((Vec::new(), true)) };
-    /// Curvature comb teeth (foot, tip) shown while the comb tool is active.
-    static COMBS: RefCell<Vec<Vec<[Vec3; 2]>>> = const { RefCell::new(Vec::new()) };
     /// The image file a Canvas or Decal tool places.
     static IMAGE: RefCell<Option<String>> = const { RefCell::new(None) };
     /// Analysis markers shown while an analysis tool is active: (where, label).
     static MARKS: RefCell<Vec<(Vec3, String)>> = const { RefCell::new(Vec::new()) };
-    /// Isocurve analysis polylines (as segments) while the tool is active.
-    static ISO: RefCell<Vec<Vec<[Vec3; 2]>>> = const { RefCell::new(Vec::new()) };
     /// Center of Mass has just started: measure everything on the next frame.
     static DEFERRED: Cell<bool> = const { Cell::new(false) };
     /// A Trim drag: the pieces its path would remove (sketch polylines), and where the path's
@@ -121,7 +120,7 @@ const TRIM_STEP_PX: f32 = 4.0;
 
 /// The sketch-plane position under screen position `pos`.
 fn on_sketch_plane(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Vec2> {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let ss = st.sketch(active_sketch(app)?)?;
     let (o, d) = proj.ray(pos);
     ss.plane.intersect_ray(o, d).map(|w| ss.plane.to_local(w))
@@ -198,38 +197,42 @@ fn analysis(app: &mut SolveApp, cmd: &str, p: Value) {
     }
 }
 
-/// A seam from an `inspect.continuity` reply as a marker label: its class and the measure that
-/// decided it (the gap, the angle between the faces' normals, or the curvature jump).
-fn continuity_label(app: &SolveApp, seam: &Value) -> String {
-    let deg = |key: &str| seam[key]["value"].as_f64().map(|x| format!("{x:.3}\u{b0}")).unwrap_or_default();
-    let jump = seam["curvature_jump_per_mm"]["value"].as_f64().map(|k| format!("\u{394}k {k:.4}/mm")).unwrap_or_default();
-    match seam["verdict"].as_str().unwrap_or_default() {
-        "gap" => format!("Gap {}", seam["gap_mm"]["value"].as_f64().map(|g| crate::prefs::show_mm(app, g, 1)).unwrap_or_default()),
-        "sharp" => format!("G0 {}", deg("normal_angle_deg")),
-        "curvature_jump" => format!("G1 {} {jump}", deg("normal_angle_deg")),
-        "smooth" => format!("G2 {} {jump}", deg("normal_angle_deg")),
-        other => other.to_string(),
+/// The message id of the class a seam whose highest order met is `order` reads as: a gap, a
+/// crease (G0 only), or the word of its order (Tangent … Smooth curvature change).
+pub(crate) fn order_class(order: Option<Continuity>) -> &'static str {
+    match order {
+        None => "ui.continuity_gap",
+        Some(Continuity::G0) => "ui.continuity_crease",
+        Some(g) => g.label_id(),
     }
 }
 
-/// The Continuity Analysis legend in the viewport's lower left corner: each class in its
-/// colour, while seams are shaded.
-/// Isocurve analysis lines.
-fn iso_lines(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
-    if app.tool.as_ref().map(|t| t.cmd) != Some("inspect.isocurve") {
-        ISO.with(|i| i.borrow_mut().clear());
-        return;
+/// The measure a seam of `order` fails the next order on: its reply key, symbol and unit.
+fn next_measure(order: Continuity) -> Option<(&'static str, &'static str, &'static str)> {
+    match order {
+        Continuity::G1 => Some(("curvature_jump_per_mm", "\u{394}k", "/mm")),
+        Continuity::G2 => Some(("curvature_change_jump_per_mm2", "\u{394}k\u{2032}", "/mm\u{b2}")),
+        Continuity::G3 => Some(("curvature_change_rate_jump_per_mm3", "\u{394}k\u{2033}", "/mm\u{b3}")),
+        Continuity::G0 | Continuity::G4 => None,
     }
-    let tk = crate::theme::Tokens::get();
-    ISO.with(|i| {
-        for c in i.borrow().iter() {
-            for [a, b] in c {
-                if let (Some(p), Some(q)) = (proj.to_screen(*a), proj.to_screen(*b)) {
-                    painter.line_segment([p, q], Stroke::new(1.2, tk.accent));
-                }
-            }
+}
+
+/// A seam from an `inspect.continuity` reply as a marker label: its class in words and the
+/// measure that keeps it from the next order (the gap, the angle between the faces' normals, or
+/// the jump of the curvature, of its change, or of that change's rate).
+fn continuity_label(app: &SolveApp, seam: &Value) -> String {
+    let deg = |key: &str| seam[key]["value"].as_f64().map(|x| format!("{x:.3}\u{b0}")).unwrap_or_default();
+    let order = seam["order"].as_str().and_then(Continuity::parse);
+    let class = crate::i18n::tr(order_class(order));
+    match order {
+        None => format!("{class} {}", seam["gap_mm"]["value"].as_f64().map(|g| crate::prefs::show_mm(app, g, 1)).unwrap_or_default()),
+        Some(g) => {
+            let next = next_measure(g)
+                .and_then(|(key, symbol, unit)| seam[key]["value"].as_f64().map(|x| format!(" {symbol} {x:.4}{unit}")))
+                .unwrap_or_default();
+            format!("{class} {}{next}", deg("normal_angle_deg"))
         }
-    });
+    }
 }
 
 /// Analysis markers: a target with its label.
@@ -316,12 +319,37 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         }
         let Ok(v) = app.run(id, json!({})) else { return false };
         let summary = &v["summary"];
-        let counts: Vec<String> = [("smooth", "G2"), ("curvature_jump", "G1"), ("sharp", "G0"), ("gap", "gap")]
-            .iter()
-            .filter_map(|(key, class)| summary[*key].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {class}")))
+        // Each class in the legend's words, best first.
+        let gaps = summary["gap"].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", crate::i18n::tr(order_class(None))));
+        let counts: Vec<String> = Continuity::ALL
+            .into_iter()
+            .rev()
+            .filter_map(|g| {
+                summary["orders"][g.as_str()].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", crate::i18n::tr(order_class(Some(g)))))
+            })
+            .chain(gaps)
             .collect();
         app.set_status(format!("Continuity: {} (click the button again to turn it off)", counts.join(", ")), false);
         return true;
+    }
+    if id == "inspect.curvature_comb" {
+        // With combs shown the button turns the analysis off; otherwise it turns it on (any other
+        // view analysis off) and the tool combs the curves clicked.
+        if app.session.comb.is_some() {
+            if app.run(id, json!({"clear": true})).is_ok() {
+                app.set_status("Analysis off", false);
+            }
+            return false;
+        }
+        comb(app, json!({}));
+        return app.session.comb.is_some();
+    }
+    if id == "inspect.isocurve" && !app.session.isocurves.is_empty() {
+        // With curves shown, the button turns the analysis off; otherwise the tool picks faces.
+        if app.run(id, json!({"clear": true})).is_ok() {
+            app.set_status("Analysis off", false);
+        }
+        return false;
     }
     if id == "inspect.center_of_mass" {
         // The whole model at once; the tool stays for picking single bodies.
@@ -355,24 +383,116 @@ fn v3(v: &Value) -> Option<Vec3> {
     Some(Vec3::new(v.get(0)?.as_f64()?, v.get(1)?.as_f64()?, v.get(2)?.as_f64()?))
 }
 
-/// Curvature combs: teeth and the envelope through their tips.
-fn combs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+/// The Curvature Comb tool's options: how long the teeth are, as a multiple of the automatic
+/// length (`inspect.curvature_comb`'s `length`), and how many each comb has (`density`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct CombOptions {
+    pub length: f64,
+    pub teeth: usize,
+}
+
+impl CombOptions {
+    const DEFAULT: CombOptions = CombOptions { length: 1.0, teeth: 40 };
+    const LENGTH: std::ops::RangeInclusive<f64> = 0.25..=8.0;
+    const TEETH: std::ops::RangeInclusive<usize> = 4..=200;
+}
+
+/// The comb tool's options now.
+pub(crate) fn comb_options() -> CombOptions {
+    COMB_OPTIONS.with(Cell::get)
+}
+
+/// The combs shown, each as its teeth (foot, tip).
+#[cfg(test)]
+pub(crate) fn shown_combs(app: &SolveApp) -> Vec<Vec<[Vec3; 2]>> {
+    app.session.comb.as_ref().map(|v| v.teeth.clone()).unwrap_or_default()
+}
+
+/// Comb `picks` (the comb command's parameters for curves or edges; none: draw those shown
+/// again) beside the combs already shown, every comb at one scale with the tool's options. A
+/// failure leaves those shown as they were (the status line says why).
+fn comb(app: &mut SolveApp, picks: Value) {
+    let options = comb_options();
+    let mut params = picks;
+    params["add"] = json!(true);
+    params["density"] = json!(options.teeth);
+    params["length"] = json!(options.length);
+    let _ = app.run("inspect.curvature_comb", params);
+}
+
+/// Change the comb tool's options and draw the combs shown again with them.
+pub(crate) fn set_comb_options(app: &mut SolveApp, options: CombOptions) {
+    let options = CombOptions {
+        length: options.length.clamp(*CombOptions::LENGTH.start(), *CombOptions::LENGTH.end()),
+        teeth: options.teeth.clamp(*CombOptions::TEETH.start(), *CombOptions::TEETH.end()),
+    };
+    if COMB_OPTIONS.with(|o| o.replace(options)) == options {
+        return;
+    }
+    if app.session.comb.is_some() {
+        comb(app, json!({}));
+    }
+}
+
+/// The comb tool's options at the top left of the free viewport while it runs (the analysis and
+/// continuity legends keep the lower left): Comb length and Teeth. Changing either draws the
+/// combs shown again.
+fn comb_options_card(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
     if app.tool.as_ref().map(|t| t.cmd) != Some("inspect.curvature_comb") {
-        COMBS.with(|c| c.borrow_mut().clear());
         return;
     }
     let tk = crate::theme::Tokens::get();
-    COMBS.with(|c| {
-        for comb in c.borrow().iter() {
-            let mut tips: Vec<Pos2> = Vec::new();
-            for [a, b] in comb {
-                let (Some(p), Some(q)) = (proj.to_screen(*a), proj.to_screen(*b)) else { continue };
-                painter.line_segment([p, q], Stroke::new(1.0, tk.warning.gamma_multiply(0.8)));
-                tips.push(q);
-            }
-            painter.add(egui::Shape::line(tips, Stroke::new(1.4, tk.warning)));
+    let available = crate::shell::workspace_content(app, crate::shell::content_rect(app, proj.rect));
+    let width = tk.form_card_width.min(available.width() - 2.0 * tk.space_16).max(0.0);
+    let mut options = comb_options();
+    let (length_tip, teeth_tip) = (app.tr("ui.comb_length_tip").to_string(), app.tr("ui.comb_teeth_tip").to_string());
+    let shown = crate::ui_kit::Container::new(ctx, crate::ui_kit::Surface::Canvas)
+        .area(egui::Id::new("sc_comb_options"))
+        .fixed_pos(available.left_top() + egui::vec2(tk.space_16, tk.space_16))
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            crate::ui_kit::Container::popup_frame(ui.style()).fill(tk.dialog_body).inner_margin(tk.space_8).show(ui, |ui| {
+                crate::ui_kit::scope(ui, |ui| {
+                    ui.set_width(width);
+                    let length = crate::ui_kit::row(ui, "ui.comb_length", |ui| {
+                        let format = |v: f64| format!("{v:.2}\u{d7}");
+                        crate::ui_kit::slider(
+                            ui,
+                            &mut options.length,
+                            CombOptions::LENGTH,
+                            crate::ui_kit::Slider { step: Some(0.25), format, ..Default::default() },
+                        )
+                    });
+                    length.on_hover_text(&length_tip);
+                    let teeth = crate::ui_kit::row(ui, "ui.comb_teeth", |ui| {
+                        crate::ui_kit::slider(
+                            ui,
+                            &mut options.teeth,
+                            CombOptions::TEETH,
+                            crate::ui_kit::Slider { integer: true, format: |v| format!("{v:.0}"), ..Default::default() },
+                        )
+                    });
+                    teeth.on_hover_text(&teeth_tip);
+                });
+            });
+        });
+    crate::scenario::publish_rect("comb_options", shown.response.rect);
+    set_comb_options(app, options);
+}
+
+/// Curvature combs (`Session::comb`): teeth and the envelope through their tips.
+fn combs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    let Some(shown) = &app.session.comb else { return };
+    let tk = crate::theme::Tokens::get();
+    for comb in &shown.teeth {
+        let mut tips: Vec<Pos2> = Vec::new();
+        for [a, b] in comb {
+            let (Some(p), Some(q)) = (proj.to_screen(*a), proj.to_screen(*b)) else { continue };
+            painter.line_segment([p, q], Stroke::new(1.0, tk.comb_teeth));
+            tips.push(q);
         }
-    });
+        painter.add(egui::Shape::line(tips, Stroke::new(1.4, tk.comb_envelope)));
+    }
 }
 
 /// A point the cursor lined up with while drawing (#7828): its sketch point id (none for a point
@@ -424,7 +544,7 @@ pub(crate) fn lined_at(at: Vec2) -> Vec<Lined> {
 
 /// The active sketch's point ids, to tell the points a command makes from those it had.
 pub(crate) fn point_ids(app: &SolveApp) -> Vec<String> {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     app.session.active_sketch.and_then(|id| st.sketch(id)).map(|ss| ss.sketch.points.iter().map(|p| p.id.clone()).collect()).unwrap_or_default()
 }
 
@@ -434,7 +554,7 @@ pub(crate) fn point_ids(app: &SolveApp) -> Vec<String> {
 pub(crate) fn constrain_lined(app: &mut SolveApp, tool: &mut Tool, placed: &[Vec2], before: &[String]) {
     let lined = std::mem::take(&mut tool.lined);
     let new: Vec<(String, Vec2)> = {
-        let st = app.session.world_state();
+        let st = crate::open_meshing::session_world(&app.session);
         let Some(ss) = app.session.active_sketch.and_then(|id| st.sketch(id)) else { return };
         ss.sketch.points.iter().filter(|p| !before.contains(&p.id)).map(|p| (p.id.clone(), p.pos)).collect()
     };
@@ -676,7 +796,7 @@ pub fn glyph_deletion(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> Vec<s
 
 /// [`glyph_deletion`] in the active sketch.
 pub fn active_glyph_deletion(app: &SolveApp, id: &str) -> Vec<solidcraft_engine::Sel> {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     match active_sketch(app).and_then(|s| st.sketch(s)) {
         Some(ss) => glyph_deletion(&ss.sketch, id),
         None => vec![solidcraft_engine::Sel::SketchConstraint { id: id.to_string() }],
@@ -888,7 +1008,7 @@ pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, a
 /// Corner tools accept endpoints shared by two editable curves. Pick among those endpoints
 /// directly so the origin, a circle centre or an overlapping loose point cannot hide a corner.
 pub(crate) fn corner_point(app: &SolveApp, proj: &Proj, pos: Pos2, arcs_ok: bool) -> Option<(Vec2, String)> {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let ss = st.sketch(active_sketch(app)?)?;
     let sk = &ss.sketch;
     sk.points
@@ -919,7 +1039,7 @@ fn arg(p: &(Vec2, Option<String>)) -> Value {
 
 /// Length of a curve (for default sizes).
 fn curve_len(app: &SolveApp, id: &str) -> f64 {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = active_sketch(app).and_then(|s| st.sketch(s)) else { return 10.0 };
     ss.sketch.curve_index(id).map(|c| ss.sketch.polyline(c).windows(2).map(|w| w[0].dist(w[1])).sum::<f64>()).unwrap_or(10.0)
 }
@@ -968,7 +1088,7 @@ pub fn periodic_start_snap(app: &SolveApp, tool: &Tool, proj: &Proj, pos: Pos2) 
     if distinct.len() < 3 {
         return None;
     }
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let plane = &state.sketch(app.session.active_sketch?)?.plane;
     let screen = proj.to_screen(plane.to_world(first))?;
     (screen.distance(pos) <= 8.0).then_some(first)
@@ -987,26 +1107,16 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 Hit::Edge { mid, .. } => Some(json!({"edges": [[mid.x, mid.y, mid.z]]})),
                 _ => None,
             });
-            if let Some(p) = params
-                && let Ok(v) = app.run(cmd, p)
-            {
-                for comb in v["combs"].as_array().into_iter().flatten() {
-                    let teeth: Vec<[Vec3; 2]> =
-                        comb["teeth"].as_array().into_iter().flatten().filter_map(|t| Some([v3(t.get(0)?)?, v3(t.get(1)?)?])).collect();
-                    COMBS.with(|c| c.borrow_mut().push(teeth));
-                }
+            if let Some(p) = params {
+                comb(app, p);
             }
         }
         Mode::ModelRef if cmd == "inspect.isocurve" => {
             let face = hits.iter().find_map(|h| if let Hit::Face { point, .. } = h { Some(*point) } else { None });
-            if let Some(at) = face
-                && let Ok(v) = app.run(cmd, json!({"faces": [[at.x, at.y, at.z]]}))
-            {
-                for c in v["curves"].as_array().into_iter().flatten() {
-                    let pts: Vec<Vec3> = c.as_array().into_iter().flatten().filter_map(v3).collect();
-                    let teeth: Vec<[Vec3; 2]> = pts.windows(2).map(|w| [w[0], w[1]]).collect();
-                    ISO.with(|i| i.borrow_mut().push(teeth));
-                }
+            // The face's curves join those shown (the viewport draws them, `Session::isocurves`); a
+            // failure says why on the status line.
+            if let Some(at) = face {
+                let _ = app.run(cmd, json!({"faces": [[at.x, at.y, at.z]], "add": true}));
             }
         }
         Mode::ModelRef if cmd == "inspect.continuity" => {
@@ -1054,7 +1164,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
             });
             // Empty space while sketching: the sketch plane.
             let target = target.or_else(|| {
-                let st = app.session.world_state();
+                let st = crate::open_meshing::session_world(&app.session);
                 let ss = st.sketch(app.session.active_sketch?)?;
                 let (o, d) = proj.ray(pos);
                 let w = ss.plane.intersect_ray(o, d)?;
@@ -1333,6 +1443,11 @@ fn run_entities(app: &mut SolveApp, t: &Tool) -> bool {
 /// Right-click with an extra tool: finish a chain or move to the next stage. Returns false
 /// when the tool should be dropped.
 pub fn finish(app: &mut SolveApp, tool: &mut Tool) -> bool {
+    // Esc or a right click ends the comb tool and turns its analysis off.
+    if tool.cmd == "inspect.curvature_comb" {
+        let _ = app.run(tool.cmd, json!({"clear": true}));
+        return false;
+    }
     let Some(m) = mode(tool.cmd) else { return false };
     match m {
         Mode::Points(0) if tool.pts.len() >= 2 => {
@@ -1380,7 +1495,7 @@ pub(crate) fn trim_hover_piece(app: &SolveApp, sketch: u64, id: &str) -> Option<
     if let Some(piece) = TRIM_PIECE.with(|c| c.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, p)| p.clone())) {
         return piece;
     }
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let piece = solidcraft_engine::cmd::trim_piece(&st.sketch(sketch)?.sketch, id, *at);
     TRIM_PIECE.with(|c| *c.borrow_mut() = Some((key, piece.clone())));
     piece
@@ -1396,7 +1511,7 @@ fn extend_preview_piece(app: &SolveApp, sketch: u64, id: &str) -> Option<Vec<Vec
     if active_sketch(app) != Some(sketch) {
         return None;
     }
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let sk = st.sketch(sketch)?;
     let hover_pos = hover.0;
     let ci = sk.sketch.curve_index(id)?;
@@ -1419,7 +1534,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
         return;
     }
     let Some(sid) = active_sketch(app) else { return };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = st.sketch(sid) else { return };
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     let tk = crate::theme::Tokens::get();
@@ -1527,7 +1642,7 @@ fn sketch_px_per_mm(plane: &Plane, proj: &Proj) -> Option<f32> {
 
 fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Pos2>) {
     let Some(sid) = active_sketch(app) else { return };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = st.sketch(sid) else { return };
     if ss.sketch.view.hide_constraints {
         GLYPHS.with(|g| g.borrow_mut().clear());
@@ -1762,7 +1877,7 @@ fn snap_hint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         return;
     }
     let Some((label, p)) = SNAP.with(|s| *s.borrow()) else { return };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = active_sketch(app).and_then(|s| st.sketch(s)) else { return };
     let Some(sp) = proj.to_screen(ss.plane.to_world(p)) else { return };
     let tk = crate::theme::Tokens::get();
@@ -1788,11 +1903,11 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     glyphs(app, painter, proj, ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(proj.rect)));
     snap_hint(app, painter, proj);
     combs(app, painter, proj);
+    comb_options_card(app, ui.ctx(), proj);
     if DEFERRED.with(|d| d.replace(false)) {
         analysis(app, "inspect.center_of_mass", json!({}));
     }
     marks(app, painter, proj);
-    iso_lines(app, painter, proj);
 }
 
 #[cfg(test)]

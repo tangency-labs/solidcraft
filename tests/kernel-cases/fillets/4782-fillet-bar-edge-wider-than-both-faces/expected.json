@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4782"
+ ],
+ "what": "the long top edge of a 5x5 bar rounded r10, wider than both faces it rounds",
+ "source": "analytic",
+ "method": "a convex round past its faces' far edges is built on the faces continued and its removal subtracted (smlib_fillet): the section keeps the bar's 5x5 square within the round's circle, centre (y,z) = (10,-5), radius 10: area 7.87866 (grid quadrature 4000^2); V = 80 area",
+ "body_count": 1,
+ "volume_mm3": 630.293125,
+ "continuity": {
+  "order": "g1"
+ }
+}

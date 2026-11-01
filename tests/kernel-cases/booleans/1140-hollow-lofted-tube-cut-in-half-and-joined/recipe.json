@@ -1,0 +1,5665 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      95.8,
+      2.655469341214533e-16,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.9778390190471183,
+      -0.20935819264831554,
+      0
+     ]
+    },
+    "name": "B1O0"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 87.7861567367653
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      96.45477585603997,
+      43.238749952718,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.9816128358689195,
+      0.19088279246013232,
+      0
+     ]
+    },
+    "name": "B1O1"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 91.81257203466235
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      82.05097986150973,
+      80.2635317824951,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.8551108637745893,
+      0.5184451857763515,
+      0
+     ]
+    },
+    "name": "B1O2"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 95.5034527244013
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      53.3193356670589,
+      112.70780083008277,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.6219466839893834,
+      0.7830595905003719,
+      0
+     ]
+    },
+    "name": "B1O3"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 99.52986802229834
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      15.370495640852331,
+      133.7059708910593,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.3370667937506587,
+      0.9414807361548355,
+      0
+     ]
+    },
+    "name": "B1O4"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 103.55628332019538
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -23.62150146707303,
+      141.70900272627287,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.06412572409344888,
+      0.9979418277181746,
+      0
+     ]
+    },
+    "name": "B1O5"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 107.24716400993434
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -66.89921186800757,
+      138.22944661501538,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.21960052319698317,
+      0.9755898780797243,
+      0
+     ]
+    },
+    "name": "B1O6"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 111.27357930783138
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "B1O0"
+     },
+     {
+      "sketch": "B1O1"
+     },
+     {
+      "sketch": "B1O2"
+     },
+     {
+      "sketch": "B1O3"
+     },
+     {
+      "sketch": "B1O4"
+     },
+     {
+      "sketch": "B1O5"
+     },
+     {
+      "sketch": "B1O6"
+     }
+    ],
+    "operation": "new",
+    "name": "LoftB1O",
+    "body_name": "Band1"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      94.75320903675842,
+      -4.889195095235592,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.9778390190471183,
+      -0.20935819264831554,
+      0
+     ]
+    },
+    "name": "B1I0"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 75.7861567367653
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      95.8,
+      2.655469341214533e-16,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.9778390190471183,
+      -0.20935819264831554,
+      0
+     ]
+    },
+    "name": "B1I1"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 75.7861567367653
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      96.45477585603997,
+      43.238749952718,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.9816128358689195,
+      0.19088279246013232,
+      0
+     ]
+    },
+    "name": "B1I2"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 79.81257203466235
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      82.05097986150973,
+      80.2635317824951,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.8551108637745893,
+      0.5184451857763515,
+      0
+     ]
+    },
+    "name": "B1I3"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 83.5034527244013
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      53.3193356670589,
+      112.70780083008277,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.6219466839893834,
+      0.7830595905003719,
+      0
+     ]
+    },
+    "name": "B1I4"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 87.52986802229834
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      15.370495640852331,
+      133.7059708910593,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.3370667937506587,
+      0.9414807361548355,
+      0
+     ]
+    },
+    "name": "B1I5"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 91.55628332019538
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -23.62150146707303,
+      141.70900272627287,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.06412572409344888,
+      0.9979418277181746,
+      0
+     ]
+    },
+    "name": "B1I6"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 95.24716400993434
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -66.89921186800757,
+      138.22944661501538,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.21960052319698317,
+      0.9755898780797243,
+      0
+     ]
+    },
+    "name": "B1I7"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 99.27357930783138
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -71.7771612584062,
+      137.13144399903047,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.21960052319698317,
+      0.9755898780797243,
+      0
+     ]
+    },
+    "name": "B1I8"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 99.27357930783138
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "B1I0"
+     },
+     {
+      "sketch": "B1I1"
+     },
+     {
+      "sketch": "B1I2"
+     },
+     {
+      "sketch": "B1I3"
+     },
+     {
+      "sketch": "B1I4"
+     },
+     {
+      "sketch": "B1I5"
+     },
+     {
+      "sketch": "B1I6"
+     },
+     {
+      "sketch": "B1I7"
+     },
+     {
+      "sketch": "B1I8"
+     }
+    ],
+    "operation": "new",
+    "name": "LoftB1I",
+    "body_name": "Bore1"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band1",
+    "tools": [
+     "Bore1"
+    ],
+    "operation": "cut",
+    "name": "Hollow1"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 2000,
+    "width": 2000,
+    "height": 400,
+    "corner": [
+     -1000,
+     -1000,
+     -400
+    ],
+    "operation": "new",
+    "name": "Bx1",
+    "body_name": "Below1"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band1",
+    "tools": [
+     "Below1"
+    ],
+    "operation": "cut",
+    "name": "Half1"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -66.89921186800757,
+      138.22944661501538,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.21960052319698317,
+      0.9755898780797243,
+      0
+     ]
+    },
+    "name": "B2O0"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 111.27357930783138
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -91.1443189139442,
+      130.70270636239795,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.3705508896132618,
+      0.9288121651910145,
+      0
+     ]
+    },
+    "name": "B2O1"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 113.62232156493799
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -110.78673184817546,
+      121.32302358461159,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.4887880028901956,
+      0.8724025952681561,
+      0
+     ]
+    },
+    "name": "B2O2"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 115.63552921388651
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -131.95222993939302,
+      107.29926571343087,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.6121235465551148,
+      0.7907621410720092,
+      0
+     ]
+    },
+    "name": "B2O3"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 117.98427147099312
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -150.86125223431026,
+      90.35316469671429,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.7186375352489345,
+      0.6953848523884716,
+      0
+     ]
+    },
+    "name": "B2O4"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 120.33301372809973
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -165.0380364177088,
+      73.83222416616032,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.796088001778129,
+      0.60518087661864,
+      0
+     ]
+    },
+    "name": "B2O5"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 122.34622137704824
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -179.0023444385297,
+      52.62268907858179,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.8701674308482993,
+      0.4927561692063025,
+      0
+     ]
+    },
+    "name": "B2O6"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 124.69496363415485
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "B2O0"
+     },
+     {
+      "sketch": "B2O1"
+     },
+     {
+      "sketch": "B2O2"
+     },
+     {
+      "sketch": "B2O3"
+     },
+     {
+      "sketch": "B2O4"
+     },
+     {
+      "sketch": "B2O5"
+     },
+     {
+      "sketch": "B2O6"
+     }
+    ],
+    "operation": "new",
+    "name": "LoftB2O",
+    "body_name": "Band2"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -62.02126247760895,
+      139.3274492310003,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.21960052319698317,
+      0.9755898780797243,
+      0
+     ]
+    },
+    "name": "B2I0"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 99.27357930783138
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -66.89921186800757,
+      138.22944661501538,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.21960052319698317,
+      0.9755898780797243,
+      0
+     ]
+    },
+    "name": "B2I1"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 99.27357930783138
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -91.1443189139442,
+      130.70270636239795,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.3705508896132618,
+      0.9288121651910145,
+      0
+     ]
+    },
+    "name": "B2I2"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 101.62232156493799
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -110.78673184817546,
+      121.32302358461159,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.4887880028901956,
+      0.8724025952681561,
+      0
+     ]
+    },
+    "name": "B2I3"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 103.63552921388651
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -131.95222993939302,
+      107.29926571343087,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.6121235465551148,
+      0.7907621410720092,
+      0
+     ]
+    },
+    "name": "B2I4"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 105.98427147099312
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -150.86125223431026,
+      90.35316469671429,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.7186375352489345,
+      0.6953848523884716,
+      0
+     ]
+    },
+    "name": "B2I5"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 108.33301372809973
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -165.0380364177088,
+      73.83222416616032,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.796088001778129,
+      0.60518087661864,
+      0
+     ]
+    },
+    "name": "B2I6"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 110.34622137704824
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -179.0023444385297,
+      52.62268907858179,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.8701674308482993,
+      0.4927561692063025,
+      0
+     ]
+    },
+    "name": "B2I7"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 112.69496363415485
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -181.4661252845612,
+      48.2718519243403,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.8701674308482993,
+      0.4927561692063025,
+      0
+     ]
+    },
+    "name": "B2I8"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 112.69496363415485
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "B2I0"
+     },
+     {
+      "sketch": "B2I1"
+     },
+     {
+      "sketch": "B2I2"
+     },
+     {
+      "sketch": "B2I3"
+     },
+     {
+      "sketch": "B2I4"
+     },
+     {
+      "sketch": "B2I5"
+     },
+     {
+      "sketch": "B2I6"
+     },
+     {
+      "sketch": "B2I7"
+     },
+     {
+      "sketch": "B2I8"
+     }
+    ],
+    "operation": "new",
+    "name": "LoftB2I",
+    "body_name": "Bore2"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band2",
+    "tools": [
+     "Bore2"
+    ],
+    "operation": "cut",
+    "name": "Hollow2"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 2000,
+    "width": 2000,
+    "height": 400,
+    "corner": [
+     -1000,
+     -1000,
+     -400
+    ],
+    "operation": "new",
+    "name": "Bx2",
+    "body_name": "Below2"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band2",
+    "tools": [
+     "Below2"
+    ],
+    "operation": "cut",
+    "name": "Half2"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -179.0023444385297,
+      52.62268907858179,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.8701674308482993,
+      0.4927561692063025,
+      0
+     ]
+    },
+    "name": "B3O0"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 124.69496363415485
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -191.3701726225188,
+      26.373848736148236,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.9336646810507,
+      0.3581483817616586,
+      0
+     ]
+    },
+    "name": "B3O1"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 127.37924049941955
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -200.54516247725138,
+      -4.9483833556232035,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.979130100671876,
+      0.20323446055795222,
+      0
+     ]
+    },
+    "name": "B3O2"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 130.39905197284233
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -204.44854364345042,
+      -33.70486793904541,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.9978266643152259,
+      0.06589345932298263,
+      0
+     ]
+    },
+    "name": "B3O3"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 133.08332883810704
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -204.40196713815885,
+      -62.726463942492494,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.997659822840046,
+      -0.0683730786989148,
+      0
+     ]
+    },
+    "name": "B3O4"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 135.76760570337171
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -199.78201014876512,
+      -95.04268198030005,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.9770365922648285,
+      -0.21307157805660326,
+      0
+     ]
+    },
+    "name": "B3O5"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 138.7874171767945
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -191.8161883863708,
+      -122.9524357686813,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.9425247617186499,
+      -0.33413630983058745,
+      0
+     ]
+    },
+    "name": "B3O6"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 141.4716940420592
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "B3O0"
+     },
+     {
+      "sketch": "B3O1"
+     },
+     {
+      "sketch": "B3O2"
+     },
+     {
+      "sketch": "B3O3"
+     },
+     {
+      "sketch": "B3O4"
+     },
+     {
+      "sketch": "B3O5"
+     },
+     {
+      "sketch": "B3O6"
+     }
+    ],
+    "operation": "new",
+    "name": "LoftB3O",
+    "body_name": "Band3"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -176.53856359249818,
+      56.97352623282329,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.8701674308482993,
+      0.4927561692063025,
+      0
+     ]
+    },
+    "name": "B3I0"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 112.69496363415485
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -179.0023444385297,
+      52.62268907858179,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.8701674308482993,
+      0.4927561692063025,
+      0
+     ]
+    },
+    "name": "B3I1"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 112.69496363415485
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -191.3701726225188,
+      26.373848736148236,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.9336646810507,
+      0.3581483817616586,
+      0
+     ]
+    },
+    "name": "B3I2"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 115.37924049941955
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -200.54516247725138,
+      -4.9483833556232035,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.979130100671876,
+      0.20323446055795222,
+      0
+     ]
+    },
+    "name": "B3I3"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 118.39905197284233
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -204.44854364345042,
+      -33.70486793904541,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.9978266643152259,
+      0.06589345932298263,
+      0
+     ]
+    },
+    "name": "B3I4"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 121.08332883810702
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -204.40196713815885,
+      -62.726463942492494,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.997659822840046,
+      -0.0683730786989148,
+      0
+     ]
+    },
+    "name": "B3I5"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 123.76760570337171
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -199.78201014876512,
+      -95.04268198030005,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.9770365922648285,
+      -0.21307157805660326,
+      0
+     ]
+    },
+    "name": "B3I6"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 126.78741717679449
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -191.8161883863708,
+      -122.9524357686813,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.9425247617186499,
+      -0.33413630983058745,
+      0
+     ]
+    },
+    "name": "B3I7"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 129.4716940420592
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -190.14550683721788,
+      -127.66505957727455,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.9425247617186499,
+      -0.33413630983058745,
+      0
+     ]
+    },
+    "name": "B3I8"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 129.4716940420592
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "B3I0"
+     },
+     {
+      "sketch": "B3I1"
+     },
+     {
+      "sketch": "B3I2"
+     },
+     {
+      "sketch": "B3I3"
+     },
+     {
+      "sketch": "B3I4"
+     },
+     {
+      "sketch": "B3I5"
+     },
+     {
+      "sketch": "B3I6"
+     },
+     {
+      "sketch": "B3I7"
+     },
+     {
+      "sketch": "B3I8"
+     }
+    ],
+    "operation": "new",
+    "name": "LoftB3I",
+    "body_name": "Bore3"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band3",
+    "tools": [
+     "Bore3"
+    ],
+    "operation": "cut",
+    "name": "Hollow3"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 2000,
+    "width": 2000,
+    "height": 400,
+    "corner": [
+     -1000,
+     -1000,
+     -400
+    ],
+    "operation": "new",
+    "name": "Bx3",
+    "body_name": "Below3"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band3",
+    "tools": [
+     "Below3"
+    ],
+    "operation": "cut",
+    "name": "Half3"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -191.8161883863708,
+      -122.9524357686813,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.9425247617186499,
+      -0.33413630983058745,
+      0
+     ]
+    },
+    "name": "B4O0"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 141.4716940420592
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -180.45505008367158,
+      -149.66190897276107,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.8946892869165073,
+      -0.4466890192033286,
+      0
+     ]
+    },
+    "name": "B4O1"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 144.15597090732388
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -163.94324249371368,
+      -177.82850888260663,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.8272073265965436,
+      -0.5618968222236173,
+      0
+     ]
+    },
+    "name": "B4O2"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 147.17578238074668
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -146.26949966356332,
+      -200.85517068762513,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.757026526055894,
+      -0.653384143400913,
+      0
+     ]
+    },
+    "name": "B4O3"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 149.86005924601136
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -126.09382695434554,
+      -221.72569904934002,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.6790051406624947,
+      -0.734133515754393,
+      0
+     ]
+    },
+    "name": "B4O4"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 152.54433611127604
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -100.7987030868386,
+      -242.37507546753895,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.5838351974145035,
+      -0.8118721957672697,
+      0
+     ]
+    },
+    "name": "B4O5"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 155.56414758469884
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -76.35867605453984,
+      -258.0407357718634,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.4943016877608849,
+      -0.8692904241257583,
+      0
+     ]
+    },
+    "name": "B4O6"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 158.24842444996352
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "B4O0"
+     },
+     {
+      "sketch": "B4O1"
+     },
+     {
+      "sketch": "B4O2"
+     },
+     {
+      "sketch": "B4O3"
+     },
+     {
+      "sketch": "B4O4"
+     },
+     {
+      "sketch": "B4O5"
+     },
+     {
+      "sketch": "B4O6"
+     }
+    ],
+    "operation": "new",
+    "name": "LoftB4O",
+    "body_name": "Band4"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -193.48686993552374,
+      -118.23981196008805,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.9425247617186499,
+      -0.33413630983058745,
+      0
+     ]
+    },
+    "name": "B4I0"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 129.4716940420592
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -191.8161883863708,
+      -122.9524357686813,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.9425247617186499,
+      -0.33413630983058745,
+      0
+     ]
+    },
+    "name": "B4I1"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 129.4716940420592
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -180.45505008367158,
+      -149.66190897276107,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.8946892869165073,
+      -0.4466890192033286,
+      0
+     ]
+    },
+    "name": "B4I2"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 132.15597090732388
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -163.94324249371368,
+      -177.82850888260663,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.8272073265965436,
+      -0.5618968222236173,
+      0
+     ]
+    },
+    "name": "B4I3"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 135.17578238074668
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -146.26949966356332,
+      -200.85517068762513,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.757026526055894,
+      -0.653384143400913,
+      0
+     ]
+    },
+    "name": "B4I4"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 137.86005924601136
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -126.09382695434554,
+      -221.72569904934002,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.6790051406624947,
+      -0.734133515754393,
+      0
+     ]
+    },
+    "name": "B4I5"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 140.54433611127604
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -100.7987030868386,
+      -242.37507546753895,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.5838351974145035,
+      -0.8118721957672697,
+      0
+     ]
+    },
+    "name": "B4I6"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 143.56414758469884
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -76.35867605453984,
+      -258.0407357718634,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.4943016877608849,
+      -0.8692904241257583,
+      0
+     ]
+    },
+    "name": "B4I7"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 146.24842444996352
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -72.01222393391105,
+      -260.51224421066786,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.4943016877608849,
+      -0.8692904241257583,
+      0
+     ]
+    },
+    "name": "B4I8"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 146.24842444996352
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "B4I0"
+     },
+     {
+      "sketch": "B4I1"
+     },
+     {
+      "sketch": "B4I2"
+     },
+     {
+      "sketch": "B4I3"
+     },
+     {
+      "sketch": "B4I4"
+     },
+     {
+      "sketch": "B4I5"
+     },
+     {
+      "sketch": "B4I6"
+     },
+     {
+      "sketch": "B4I7"
+     },
+     {
+      "sketch": "B4I8"
+     }
+    ],
+    "operation": "new",
+    "name": "LoftB4I",
+    "body_name": "Bore4"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band4",
+    "tools": [
+     "Bore4"
+    ],
+    "operation": "cut",
+    "name": "Hollow4"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 2000,
+    "width": 2000,
+    "height": 400,
+    "corner": [
+     -1000,
+     -1000,
+     -400
+    ],
+    "operation": "new",
+    "name": "Bx4",
+    "body_name": "Below4"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band4",
+    "tools": [
+     "Below4"
+    ],
+    "operation": "cut",
+    "name": "Half4"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -76.35867605453984,
+      -258.0407357718634,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.4943016877608849,
+      -0.8692904241257583,
+      0
+     ]
+    },
+    "name": "B5O0"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 158.24842444996352
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -50.40932366138249,
+      -271.0559973274862,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.40153966522966666,
+      -0.9158416332790551,
+      0
+     ]
+    },
+    "name": "B5O1"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 160.93270131522823
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -19.800640888714224,
+      -282.43754860295365,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.29486628408430393,
+      -0.95553852591631,
+      0
+     ]
+    },
+    "name": "B5O2"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 163.952512788651
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      8.330335097573867,
+      -289.6129570889351,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.1992257862218893,
+      -0.9799536142615476,
+      0
+     ]
+    },
+    "name": "B5O3"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 166.63678965391568
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      37.027277954085726,
+      -294.0123078006056,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.10385737574755657,
+      -0.9945922006042632,
+      0
+     ]
+    },
+    "name": "B5O4"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 169.3210665191804
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      69.64375606844109,
+      -295.67050586276036,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.0020054868765695543,
+      -0.9999979890091719,
+      0
+     ]
+    },
+    "name": "B5O5"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 172.34087799260317
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      98.64320190364025,
+      -294.27072034510513,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.09397907685427262,
+      -0.9955741725826452,
+      0
+     ]
+    },
+    "name": "B5O6"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 175.02515485786788
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "B5O0"
+     },
+     {
+      "sketch": "B5O1"
+     },
+     {
+      "sketch": "B5O2"
+     },
+     {
+      "sketch": "B5O3"
+     },
+     {
+      "sketch": "B5O4"
+     },
+     {
+      "sketch": "B5O5"
+     },
+     {
+      "sketch": "B5O6"
+     }
+    ],
+    "operation": "new",
+    "name": "LoftB5O",
+    "body_name": "Band5"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -80.70512817516864,
+      -255.569227333059,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.4943016877608849,
+      -0.8692904241257583,
+      0
+     ]
+    },
+    "name": "B5I0"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 146.24842444996352
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -76.35867605453984,
+      -258.0407357718634,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.4943016877608849,
+      -0.8692904241257583,
+      0
+     ]
+    },
+    "name": "B5I1"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 146.24842444996352
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -50.40932366138249,
+      -271.0559973274862,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.40153966522966666,
+      -0.9158416332790551,
+      0
+     ]
+    },
+    "name": "B5I2"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 148.93270131522823
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -19.800640888714224,
+      -282.43754860295365,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.29486628408430393,
+      -0.95553852591631,
+      0
+     ]
+    },
+    "name": "B5I3"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 151.952512788651
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      8.330335097573867,
+      -289.6129570889351,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.1992257862218893,
+      -0.9799536142615476,
+      0
+     ]
+    },
+    "name": "B5I4"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 154.63678965391568
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      37.027277954085726,
+      -294.0123078006056,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.10385737574755657,
+      -0.9945922006042632,
+      0
+     ]
+    },
+    "name": "B5I5"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 157.3210665191804
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      69.64375606844109,
+      -295.67050586276036,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.0020054868765695543,
+      -0.9999979890091719,
+      0
+     ]
+    },
+    "name": "B5I6"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 160.34087799260317
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      98.64320190364025,
+      -294.27072034510513,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.09397907685427262,
+      -0.9955741725826452,
+      0
+     ]
+    },
+    "name": "B5I7"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 163.02515485786788
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      103.62107276655347,
+      -293.8008249608338,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.09397907685427262,
+      -0.9955741725826452,
+      0
+     ]
+    },
+    "name": "B5I8"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 163.02515485786788
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "B5I0"
+     },
+     {
+      "sketch": "B5I1"
+     },
+     {
+      "sketch": "B5I2"
+     },
+     {
+      "sketch": "B5I3"
+     },
+     {
+      "sketch": "B5I4"
+     },
+     {
+      "sketch": "B5I5"
+     },
+     {
+      "sketch": "B5I6"
+     },
+     {
+      "sketch": "B5I7"
+     },
+     {
+      "sketch": "B5I8"
+     }
+    ],
+    "operation": "new",
+    "name": "LoftB5I",
+    "body_name": "Bore5"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band5",
+    "tools": [
+     "Bore5"
+    ],
+    "operation": "cut",
+    "name": "Hollow5"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 2000,
+    "width": 2000,
+    "height": 400,
+    "corner": [
+     -1000,
+     -1000,
+     -400
+    ],
+    "operation": "new",
+    "name": "Bx5",
+    "body_name": "Below5"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band5",
+    "tools": [
+     "Below5"
+    ],
+    "operation": "cut",
+    "name": "Half5"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      98.64320190364025,
+      -294.27072034510513,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.09397907685427262,
+      -0.9955741725826452,
+      0
+     ]
+    },
+    "name": "B6O0"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 175.02515485786788
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      127.39532911874578,
+      -290.23745018317413,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.18325010227919997,
+      -0.9830663253385616,
+      0
+     ]
+    },
+    "name": "B6O1"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 177.70943172313258
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      159.16496312335696,
+      -282.6612282111907,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.2797354167601577,
+      -0.9600771305525514,
+      0
+     ]
+    },
+    "name": "B6O2"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 180.72924319655533
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      186.6625323027201,
+      -273.34008848612984,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.36145813676842464,
+      -0.9323883393543158,
+      0
+     ]
+    },
+    "name": "B6O3"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 183.41352006182004
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      213.26452019950884,
+      -261.70588602627925,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.4389586575335184,
+      -0.8985072603915737,
+      0
+     ]
+    },
+    "name": "B6O4"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 186.09779692708474
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      241.9089577222985,
+      -246.01169542225568,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.520697631134279,
+      -0.8537411650676979,
+      0
+     ]
+    },
+    "name": "B6O5"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 189.1176084005075
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      266.0615455709856,
+      -229.89609344252332,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.588229751201586,
+      -0.8086938603707341,
+      0
+     ]
+    },
+    "name": "B6O6"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 191.80188526577223
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "B6O0"
+     },
+     {
+      "sketch": "B6O1"
+     },
+     {
+      "sketch": "B6O2"
+     },
+     {
+      "sketch": "B6O3"
+     },
+     {
+      "sketch": "B6O4"
+     },
+     {
+      "sketch": "B6O5"
+     },
+     {
+      "sketch": "B6O6"
+     }
+    ],
+    "operation": "new",
+    "name": "LoftB6O",
+    "body_name": "Band6"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      93.66533104072703,
+      -294.7406157293765,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.09397907685427262,
+      -0.9955741725826452,
+      0
+     ]
+    },
+    "name": "B6I0"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 163.02515485786788
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      98.64320190364025,
+      -294.27072034510513,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.09397907685427262,
+      -0.9955741725826452,
+      0
+     ]
+    },
+    "name": "B6I1"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 163.02515485786788
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      127.39532911874578,
+      -290.23745018317413,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.18325010227919997,
+      -0.9830663253385616,
+      0
+     ]
+    },
+    "name": "B6I2"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 165.70943172313258
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      159.16496312335696,
+      -282.6612282111907,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.2797354167601577,
+      -0.9600771305525514,
+      0
+     ]
+    },
+    "name": "B6I3"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 168.72924319655533
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      186.6625323027201,
+      -273.34008848612984,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.36145813676842464,
+      -0.9323883393543158,
+      0
+     ]
+    },
+    "name": "B6I4"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 171.41352006182004
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      213.26452019950884,
+      -261.70588602627925,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.4389586575335184,
+      -0.8985072603915737,
+      0
+     ]
+    },
+    "name": "B6I5"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 174.09779692708474
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      241.9089577222985,
+      -246.01169542225568,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.520697631134279,
+      -0.8537411650676979,
+      0
+     ]
+    },
+    "name": "B6I6"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 177.1176084005075
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      266.0615455709856,
+      -229.89609344252332,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.588229751201586,
+      -0.8086938603707341,
+      0
+     ]
+    },
+    "name": "B6I7"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 179.80188526577223
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      270.10501487283926,
+      -226.9549446865154,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.588229751201586,
+      -0.8086938603707341,
+      0
+     ]
+    },
+    "name": "B6I8"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 179.80188526577223
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "B6I0"
+     },
+     {
+      "sketch": "B6I1"
+     },
+     {
+      "sketch": "B6I2"
+     },
+     {
+      "sketch": "B6I3"
+     },
+     {
+      "sketch": "B6I4"
+     },
+     {
+      "sketch": "B6I5"
+     },
+     {
+      "sketch": "B6I6"
+     },
+     {
+      "sketch": "B6I7"
+     },
+     {
+      "sketch": "B6I8"
+     }
+    ],
+    "operation": "new",
+    "name": "LoftB6I",
+    "body_name": "Bore6"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band6",
+    "tools": [
+     "Bore6"
+    ],
+    "operation": "cut",
+    "name": "Hollow6"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 2000,
+    "width": 2000,
+    "height": 400,
+    "corner": [
+     -1000,
+     -1000,
+     -400
+    ],
+    "operation": "new",
+    "name": "Bx6",
+    "body_name": "Below6"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band6",
+    "tools": [
+     "Below6"
+    ],
+    "operation": "cut",
+    "name": "Half6"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      266.0615455709856,
+      -229.89609344252332,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.588229751201586,
+      -0.8086938603707341,
+      0
+     ]
+    },
+    "name": "B7O0"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 191.80188526577223
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      288.84132294640716,
+      -211.891678858242,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.6507393531419156,
+      -0.7593011881147305,
+      0
+     ]
+    },
+    "name": "B7O1"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 194.4861621310369
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      312.6812562061733,
+      -189.56334267600312,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.7148934608846607,
+      -0.6992333942142296,
+      0
+     ]
+    },
+    "name": "B7O2"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 197.50597360445968
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      332.1715528353842,
+      -168.0403589576508,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.7663442196302308,
+      -0.6424301806728359,
+      0
+     ]
+    },
+    "name": "B7O3"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 200.1902504697244
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      349.9719935116469,
+      -145.0998011362973,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.8125087488148883,
+      -0.5829489969965338,
+      0
+     ]
+    },
+    "name": "B7O4"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 202.87452733498907
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      367.89010683680976,
+      -117.7884416509778,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.8581295736170687,
+      -0.5134331844395997,
+      0
+     ]
+    },
+    "name": "B7O5"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 205.89433880841185
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      381.88190029083586,
+      -92.34472366802525,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.8931113931759692,
+      -0.4498355692686822,
+      0
+     ]
+    },
+    "name": "B7O6"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 208.57861567367655
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "B7O0"
+     },
+     {
+      "sketch": "B7O1"
+     },
+     {
+      "sketch": "B7O2"
+     },
+     {
+      "sketch": "B7O3"
+     },
+     {
+      "sketch": "B7O4"
+     },
+     {
+      "sketch": "B7O5"
+     },
+     {
+      "sketch": "B7O6"
+     }
+    ],
+    "operation": "new",
+    "name": "LoftB7O",
+    "body_name": "Band7"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      262.0180762691319,
+      -232.83724219853124,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.588229751201586,
+      -0.8086938603707341,
+      0
+     ]
+    },
+    "name": "B7I0"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 179.80188526577223
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      266.0615455709856,
+      -229.89609344252332,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.588229751201586,
+      -0.8086938603707341,
+      0
+     ]
+    },
+    "name": "B7I1"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 179.80188526577223
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      288.84132294640716,
+      -211.891678858242,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.6507393531419156,
+      -0.7593011881147305,
+      0
+     ]
+    },
+    "name": "B7I2"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 182.4861621310369
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      312.6812562061733,
+      -189.56334267600312,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.7148934608846607,
+      -0.6992333942142296,
+      0
+     ]
+    },
+    "name": "B7I3"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 185.50597360445968
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      332.1715528353842,
+      -168.0403589576508,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.7663442196302308,
+      -0.6424301806728359,
+      0
+     ]
+    },
+    "name": "B7I4"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 188.1902504697244
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      349.9719935116469,
+      -145.0998011362973,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.8125087488148883,
+      -0.5829489969965338,
+      0
+     ]
+    },
+    "name": "B7I5"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 190.87452733498907
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      367.89010683680976,
+      -117.7884416509778,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.8581295736170687,
+      -0.5134331844395997,
+      0
+     ]
+    },
+    "name": "B7I6"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 193.89433880841185
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      381.88190029083586,
+      -92.34472366802525,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.8931113931759692,
+      -0.4498355692686822,
+      0
+     ]
+    },
+    "name": "B7I7"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 196.57861567367655
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      384.13107813717926,
+      -87.87916670214541,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.8931113931759692,
+      -0.4498355692686822,
+      0
+     ]
+    },
+    "name": "B7I8"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 196.57861567367655
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "B7I0"
+     },
+     {
+      "sketch": "B7I1"
+     },
+     {
+      "sketch": "B7I2"
+     },
+     {
+      "sketch": "B7I3"
+     },
+     {
+      "sketch": "B7I4"
+     },
+     {
+      "sketch": "B7I5"
+     },
+     {
+      "sketch": "B7I6"
+     },
+     {
+      "sketch": "B7I7"
+     },
+     {
+      "sketch": "B7I8"
+     }
+    ],
+    "operation": "new",
+    "name": "LoftB7I",
+    "body_name": "Bore7"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band7",
+    "tools": [
+     "Bore7"
+    ],
+    "operation": "cut",
+    "name": "Hollow7"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 2000,
+    "width": 2000,
+    "height": 400,
+    "corner": [
+     -1000,
+     -1000,
+     -400
+    ],
+    "operation": "new",
+    "name": "Bx7",
+    "body_name": "Below7"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band7",
+    "tools": [
+     "Below7"
+    ],
+    "operation": "cut",
+    "name": "Half7"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      381.88190029083586,
+      -92.34472366802525,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.8931113931759692,
+      -0.4498355692686822,
+      0
+     ]
+    },
+    "name": "B8O0"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 208.57861567367655
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      392.5949282141308,
+      -69.30468673442883,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.9194761408146943,
+      -0.3931458081583938,
+      0
+     ]
+    },
+    "name": "B8O1"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 210.92735793078316
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      400.62407459813073,
+      -49.058595368662004,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.9389710346714351,
+      -0.34399621516530465,
+      0
+     ]
+    },
+    "name": "B8O2"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 212.94056557973167
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      408.63271173109905,
+      -24.944596144560478,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.9581611769594863,
+      -0.286229207048498,
+      0
+     ]
+    },
+    "name": "B8O3"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 215.28930783683828
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      415.1698993907177,
+      -0.3906971818584473,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.9736067132906941,
+      -0.22823226729648055,
+      0
+     ]
+    },
+    "name": "B8O4"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 217.6380500939449
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      419.5996620850111,
+      20.934339154114436,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.9839383268648864,
+      -0.1785087362745253,
+      0
+     ]
+    },
+    "name": "B8O5"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 219.6512577428934
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      423.40053744185553,
+      46.057870609729946,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.992183176636745,
+      -0.12478999959539062,
+      0
+     ]
+    },
+    "name": "B8O6"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 222.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "B8O0"
+     },
+     {
+      "sketch": "B8O1"
+     },
+     {
+      "sketch": "B8O2"
+     },
+     {
+      "sketch": "B8O3"
+     },
+     {
+      "sketch": "B8O4"
+     },
+     {
+      "sketch": "B8O5"
+     },
+     {
+      "sketch": "B8O6"
+     }
+    ],
+    "operation": "new",
+    "name": "LoftB8O",
+    "body_name": "Band8"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      379.63272244449246,
+      -96.8102806339051,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.8931113931759692,
+      -0.4498355692686822,
+      0
+     ]
+    },
+    "name": "B8I0"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 196.57861567367655
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      381.88190029083586,
+      -92.34472366802525,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.8931113931759692,
+      -0.4498355692686822,
+      0
+     ]
+    },
+    "name": "B8I1"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 196.57861567367655
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      392.5949282141308,
+      -69.30468673442883,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.9194761408146943,
+      -0.3931458081583938,
+      0
+     ]
+    },
+    "name": "B8I2"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 198.92735793078316
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      400.62407459813073,
+      -49.058595368662004,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.9389710346714351,
+      -0.34399621516530465,
+      0
+     ]
+    },
+    "name": "B8I3"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 200.94056557973167
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      408.63271173109905,
+      -24.944596144560478,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.9581611769594863,
+      -0.286229207048498,
+      0
+     ]
+    },
+    "name": "B8I4"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 203.28930783683828
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      415.1698993907177,
+      -0.3906971818584473,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.9736067132906941,
+      -0.22823226729648055,
+      0
+     ]
+    },
+    "name": "B8I5"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 205.6380500939449
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      419.5996620850111,
+      20.934339154114436,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.9839383268648864,
+      -0.1785087362745253,
+      0
+     ]
+    },
+    "name": "B8I6"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 207.6512577428934
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      423.40053744185553,
+      46.057870609729946,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.992183176636745,
+      -0.12478999959539062,
+      0
+     ]
+    },
+    "name": "B8I7"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 210.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      424.0244874398325,
+      51.01878649291367,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.992183176636745,
+      -0.12478999959539062,
+      0
+     ]
+    },
+    "name": "B8I8"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 210.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "B8I0"
+     },
+     {
+      "sketch": "B8I1"
+     },
+     {
+      "sketch": "B8I2"
+     },
+     {
+      "sketch": "B8I3"
+     },
+     {
+      "sketch": "B8I4"
+     },
+     {
+      "sketch": "B8I5"
+     },
+     {
+      "sketch": "B8I6"
+     },
+     {
+      "sketch": "B8I7"
+     },
+     {
+      "sketch": "B8I8"
+     }
+    ],
+    "operation": "new",
+    "name": "LoftB8I",
+    "body_name": "Bore8"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band8",
+    "tools": [
+     "Bore8"
+    ],
+    "operation": "cut",
+    "name": "Hollow8"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 2000,
+    "width": 2000,
+    "height": 400,
+    "corner": [
+     -1000,
+     -1000,
+     -400
+    ],
+    "operation": "new",
+    "name": "Bx8",
+    "body_name": "Below8"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band8",
+    "tools": [
+     "Below8"
+    ],
+    "operation": "cut",
+    "name": "Half8"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band1",
+    "tools": [
+     "Band2"
+    ],
+    "operation": "join",
+    "name": "Join2"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band1",
+    "tools": [
+     "Band3"
+    ],
+    "operation": "join",
+    "name": "Join3"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band1",
+    "tools": [
+     "Band4"
+    ],
+    "operation": "join",
+    "name": "Join4"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band1",
+    "tools": [
+     "Band5"
+    ],
+    "operation": "join",
+    "name": "Join5"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band1",
+    "tools": [
+     "Band6"
+    ],
+    "operation": "join",
+    "name": "Join6"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band1",
+    "tools": [
+     "Band7"
+    ],
+    "operation": "join",
+    "name": "Join7"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Band1",
+    "tools": [
+     "Band8"
+    ],
+    "operation": "join",
+    "name": "Join8"
+   }
+  }
+ ]
+}

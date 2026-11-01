@@ -1,0 +1,58 @@
+{
+ "commands": [
+  {
+   "command": "parameters.change",
+   "params": {
+    "name": "wall",
+    "expression": "2 mm"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 80,
+    "width": 50,
+    "height": 30
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      40,
+      25,
+      30
+     ]
+    ],
+    "thickness": "wall"
+   }
+  },
+  {
+   "command": "plastic.lip",
+   "params": {
+    "face": [
+     1,
+     25,
+     30
+    ],
+    "width": 1,
+    "height": 2
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      0,
+      50,
+      15
+     ]
+    ],
+    "distance": 3,
+    "body": "Body1"
+   }
+  }
+ ]
+}

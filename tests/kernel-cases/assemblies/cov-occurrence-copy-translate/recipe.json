@@ -1,0 +1,92 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 20,
+    "width": 20,
+    "height": 10,
+    "corner": [
+     -10,
+     -10,
+     -10
+    ],
+    "operation": "new",
+    "body_name": "BaseBox"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     0,
+     -5,
+     0
+    ],
+    "operation": "new",
+    "body_name": "ArmBox"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Base",
+    "parent": "root",
+    "activate": false
+   }
+  },
+  {
+   "command": "component.move_bodies",
+   "params": {
+    "bodies": [
+     "BaseBox"
+    ],
+    "component": "Base"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Arm",
+    "parent": "root",
+    "activate": false
+   }
+  },
+  {
+   "command": "component.move_bodies",
+   "params": {
+    "bodies": [
+     "ArmBox"
+    ],
+    "component": "Arm"
+   }
+  },
+  {
+   "command": "occurrence.ground",
+   "params": {
+    "occurrence": "Base:1",
+    "grounded": true
+   }
+  },
+  {
+   "command": "occurrence.copy",
+   "params": {
+    "component": "Arm",
+    "translate": [
+     0,
+     0,
+     20
+    ]
+   }
+  },
+  {
+   "command": "occurrence.properties",
+   "params": {
+    "occurrence": "Arm:2"
+   }
+  }
+ ]
+}

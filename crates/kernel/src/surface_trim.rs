@@ -4,14 +4,12 @@
 //! when one stops short of the other.
 
 use solidcraft_geom::Vec3;
-use truck_modeling as mt;
+use solidcraft_geom::brep::eval::CurveEval;
 
 use crate::body::Body;
-use crate::record::{Rebuild, rebuilt_body};
 use crate::splitface::{SplitTool, ToolSide};
 use crate::surface_extend::{ExtendLimit, ExtendMode, ExtendOptions};
-use crate::surfaces::surface_body;
-use crate::{KernelError, Result, guard};
+use crate::{KernelError, Result};
 
 /// Most points one trim picks with.
 const MAX_PICKS: usize = 10_000;
@@ -58,58 +56,68 @@ pub fn trim(body: &Body, tool: &SplitTool, keep: Vec3) -> Result<Body> {
 
 /// A surface body trimmed by a tool, keeping what `keep` says. Each kept face is the face it is
 /// a piece of (its history is over `[body]`).
+///
+/// The body is split where the tool meets it ([`crate::splitface::split_any`]), each piece's side
+/// read at a point inside it ([`face_sides`]), and the pieces not kept are taken away ([`crate::remove_faces`]); both carry their history, so the kept
+/// faces are the body's own, cut.
 pub fn trim_keep(body: &Body, tool: &SplitTool, keep: TrimKeep) -> Result<Body> {
     body.require_brep("trim")?;
     keep.check()?;
-    let total = body.solid.face_iter().count();
-    let all: Vec<usize> = (0..total).collect();
+    let all: Vec<usize> = (0..body.face_count()).collect();
     let (split, _) = crate::splitface::split_any(body, &all, tool)?;
-    let one_side = match keep {
-        TrimKeep::Side(p) if crate::splitface::field_count(tool)? == 1 => Some(crate::splitface::side_of_point(tool, p)?),
-        _ => None,
-    };
-    let picked = match one_side {
-        Some(_) => Vec::new(),
-        None => nearest_faces(&split, keep.points())?,
-    };
-    guard("trim", || {
-        let mut kept = Vec::new();
-        match one_side {
-            Some(side) => {
-                for f in split.solid.face_iter() {
-                    let x = crate::splitface::face_side(f, tool, split.size())?;
-                    if (x >= 0.0) == (side >= 0.0) {
-                        kept.push(f.clone());
-                    }
+    let kept: Vec<bool> = match keep {
+        TrimKeep::Side(p) if crate::splitface::field_count(tool)? == 1 => {
+            let side = ToolSide::of(tool, body)?;
+            let want = side.at(p);
+            if !want.is_finite() {
+                return Err(KernelError::Invalid("the side of the tool the point is on can't be told".into()));
+            }
+            face_sides(&split, &side)?.into_iter().map(|x| (x >= 0.0) == (want >= 0.0)).collect()
+        }
+        _ => {
+            let picked = nearest_faces(&split, keep.points())?;
+            let (region, count) = crate::splitface::regions(&split, tool)?;
+            let mut wanted = vec![false; count];
+            for f in &picked {
+                if let Some(w) = region.get(*f).and_then(|r| wanted.get_mut(*r)) {
+                    *w = true;
                 }
             }
-            None => {
-                let (region, count) = crate::splitface::regions(&split, tool)?;
-                let mut wanted = vec![false; count];
-                for f in &picked {
-                    if let Some(w) = region.get(*f).and_then(|r| wanted.get_mut(*r)) {
-                        *w = true;
-                    }
-                }
-                for (f, r) in split.solid.face_iter().zip(&region) {
-                    if wanted.get(*r).copied().unwrap_or(false) {
-                        kept.push(f.clone());
-                    }
-                }
-            }
+            region.iter().map(|r| wanted.get(*r).copied().unwrap_or(false)).collect()
         }
-        if kept.is_empty() {
-            return Err(KernelError::Invalid("nothing is left on that side of the tool".into()));
-        }
-        // The kept pieces are the split's own; its history carries them back to `body`.
-        let trimmed = rebuilt_body(surface_body(kept), &[&split.solid], &Rebuild::default());
-        Ok(crate::record::after(trimmed, &split, &crate::record::counts(&[body])))
-    })
+    };
+    if !kept.iter().any(|k| *k) {
+        return Err(KernelError::Invalid("nothing is left on that side of the tool".into()));
+    }
+    let dropped: Vec<usize> = kept.iter().enumerate().filter(|(_, k)| !**k).map(|(i, _)| i).collect();
+    let trimmed = if dropped.is_empty() { split.clone() } else { crate::remove_faces(&split, &dropped)? };
+    // The kept pieces are the split's own; its history carries them back to `body`.
+    Ok(crate::record::after(trimmed, &split, &crate::record::counts(&[body])))
+}
+
+/// The side of the tool each face of `body` (in its face order) lies on: the tool's field at a
+/// point inside the face, on its surface and inside its trims (SMLib's
+/// `CalculateAnInternalPoint`). Once the tool has cut the body each piece lies on one side, so
+/// one such point says which.
+fn face_sides(body: &Body, side: &ToolSide) -> Result<Vec<f64>> {
+    let (sm, order) = crate::native::smlib_body_ordered(body)?;
+    let order = order.ok_or_else(|| KernelError::Failed("trim: SMLib numbers the pieces' faces differently from their record".into()))?;
+    let points = sm.face_points().map_err(|e| KernelError::Failed(format!("SMLib trim: a point inside each piece: {e}")))?;
+    let mut sides = vec![f64::NAN; points.len()];
+    for (i, p) in points.iter().enumerate() {
+        let face = if order.faces.is_empty() { i } else { order.faces.get(i).copied().unwrap_or(usize::MAX) };
+        let slot = sides.get_mut(face).ok_or_else(|| KernelError::Failed("trim: a piece's face lies outside the body".into()))?;
+        *slot = side.at(Vec3::new(p[0], p[1], p[2]));
+    }
+    if sides.iter().any(|x| !x.is_finite()) {
+        return Err(KernelError::Failed("trim: the side of a piece can't be told".into()));
+    }
+    Ok(sides)
 }
 
 /// For each point, the face of `body` nearest it (over one tessellation).
 fn nearest_faces(body: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
-    let m = body.tessellate(body.size() * 2e-3)?;
+    let m = body.mesh(&crate::MeshTolerance::chord(body.size() * 2e-3))?;
     at.iter()
         .map(|p| {
             let mut best: Option<(f64, u32)> = None;
@@ -154,10 +162,10 @@ pub fn mutual_trim(a: &Body, b: &Body, keep_a: TrimKeep, keep_b: TrimKeep, exten
 /// `x` trimmed by `tool` where the tool crosses it; whole where it ends on the tool; extended to
 /// the tool first (when `extend`) where it stops short of it.
 fn cut_by(x: &Body, tool: &SplitTool, keep: TrimKeep, extend: bool, name: &str) -> Result<Body> {
-    let side = ToolSide::of(tool)?;
+    let side = ToolSide::of(tool, x)?;
     let size = x.size();
     let touch = size * 1e-6 + 1e-9;
-    let m = x.tessellate(size * 2e-3)?;
+    let m = x.mesh(&crate::MeshTolerance::chord(size * 2e-3))?;
     let (mut lo, mut hi, mut near) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY);
     for p in &m.positions {
         let v = side.at(*p);
@@ -182,31 +190,20 @@ fn cut_by(x: &Body, tool: &SplitTool, keep: TrimKeep, extend: bool, name: &str) 
     crate::extend_surface(x, &[edge], &opts)
 }
 
-/// A point in the middle of the boundary edge of `x` nearest the tool.
+/// A point in the middle of the boundary edge of `x` nearest the tool: of the record's edges
+/// that one face uses once, the one whose middle (half-way along its interval) is nearest.
 fn nearest_boundary_edge(x: &Body, side: &ToolSide) -> Result<Vec3> {
-    guard("trim", || {
-        let mut uses: std::collections::HashMap<mt::EdgeID, (usize, mt::Edge)> = std::collections::HashMap::new();
-        for f in x.solid.face_iter() {
-            for e in f.boundaries().iter().flat_map(|w| w.edge_iter()) {
-                uses.entry(e.id()).or_insert((0, e.clone())).0 += 1;
-            }
+    let record = crate::native::brep_record(x)?;
+    let mut best: Option<(f64, Vec3)> = None;
+    for e in record.edges.iter().filter(|e| e.uses.len() == 1) {
+        let curve = CurveEval::new(e.parameters()).map_err(|err| KernelError::Failed(format!("trim: an edge's curve: {err}")))?;
+        let Some(mid) = curve.point(0.5 * (e.interval[0] + e.interval[1])) else { continue };
+        let d = side.at(mid).abs();
+        if d.is_finite() && best.is_none_or(|(b, _)| d < b) {
+            best = Some((d, mid));
         }
-        let mut best: Option<(f64, Vec3)> = None;
-        for (count, e) in uses.values() {
-            if *count != 1 {
-                continue;
-            }
-            use mt::{BoundedCurve, ParametricCurve};
-            let c = e.curve();
-            let (t0, t1) = c.range_tuple();
-            let mid = crate::body::from_p3(c.subs(0.5 * (t0 + t1)));
-            let d = side.at(mid).abs();
-            if d.is_finite() && best.is_none_or(|(b, _)| d < b) {
-                best = Some((d, mid));
-            }
-        }
-        best.map(|(_, p)| p).ok_or_else(|| KernelError::Invalid("the surface has no boundary edge to extend".into()))
-    })
+    }
+    best.map(|(_, p)| p).ok_or_else(|| KernelError::Invalid("the surface has no boundary edge to extend".into()))
 }
 
 #[cfg(test)]

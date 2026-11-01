@@ -632,6 +632,23 @@ fn a_channel_with_its_bends_modelled_folds_back_into_itself_under_its_own_radius
     assert!((volume(&mut s) - solid).abs() < 1e-3 * solid);
 }
 
+/// A rule's values follow the sheet's own thickness (#4328): an L shell 2 thick, its bend
+/// modelled R 2 inside, converted under the default rule (2.5 thick, bends R `Thickness`) is a
+/// sheet 2 thick bent R 2, the solid unchanged; an edge flange added to it bends R 2 as well.
+#[test]
+fn a_converted_shell_takes_its_rules_values_at_its_own_thickness() {
+    let mut s = Session::default();
+    let (outer, _) = bent_section(&mut s, &[(0.0, 40.0), (0.0, 0.0), (60.0, 0.0)], 2.0, 2.0, 100.0)[0];
+    let solid = volume(&mut s);
+    run(&mut s, "sheet.convert", json!({"body": "Section", "face": [30, 0, 50], "bends": [outer]}));
+    assert!((volume(&mut s) - solid).abs() < 1e-6 * solid, "{} vs {solid}", volume(&mut s));
+    let f = flat(&mut s);
+    assert_eq!((f["thickness"].as_f64(), f["bends"][0]["radius"].as_f64()), (Some(2.0), Some(2.0)), "{f}");
+    run(&mut s, "sheet.flange", json!({"edges": [[0, 40, 50]], "height": 10}));
+    let f = flat(&mut s);
+    assert_eq!(f["bends"][1]["radius"].as_f64(), Some(2.0), "{f}");
+}
+
 #[test]
 fn a_filleted_edge_of_a_solid_block_is_a_bend() {
     // A block's bottom edge rounded R 5: the faces either side meet at the old sharp edge,
@@ -1109,7 +1126,11 @@ fn label_rectangle(s: &mut Session) {
 }
 
 fn contains(s: &Session, p: [f64; 3]) -> bool {
-    s.model.state().bodies.first().is_some_and(|b| b.body.contains(solidcraft_geom::Vec3::new(p[0], p[1], p[2])))
+    s.model
+        .state()
+        .bodies
+        .first()
+        .is_some_and(|b| b.body.classify_point(solidcraft_geom::Vec3::new(p[0], p[1], p[2])).unwrap() == solidcraft_kernel::PointClass::Inside)
 }
 
 /// The LINE entities a DXF draws on `layer` (group codes and values alternate, a line each).

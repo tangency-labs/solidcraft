@@ -1,0 +1,28 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 100,
+    "width": 60,
+    "height": 2,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "sheet.convert",
+   "params": {
+    "body": "Plate",
+    "face": [
+     40,
+     15,
+     2
+    ]
+   }
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

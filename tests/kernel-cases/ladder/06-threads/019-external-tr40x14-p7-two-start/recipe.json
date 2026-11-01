@@ -1,0 +1,29 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "radius": 20.0,
+    "height": 42,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     20.0,
+     0,
+     21
+    ],
+    "modeled": true,
+    "designation": "Tr40x14(P7)"
+   }
+  }
+ ]
+}

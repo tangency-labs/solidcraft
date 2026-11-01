@@ -1,0 +1,14 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2719"
+ ],
+ "what": "a 1 mm chamfer round a bottom loop whose corners are R1 rounds: each corner cone closes to a point on the bottom face",
+ "source": "analytic",
+ "method": "block 40x40x20 with the four vertical edges rounded R1: V0 = 32000 - 4*(1-pi/4)*20. A 1 mm chamfer on the bottom loop (4 straights of 38 mm and 4 quarter arcs R1): straights 4 * 1/2 * 38 = 76; each quarter arc is a quarter revolution of the 1 mm right triangle about the corner axis, centroid radius R - c/3 = 2/3 (Pappus): 1/2 * (pi/2) * (2/3) = pi/6 each. Because c = R the chamfer cone has its apex on the axis at z=0. V = V0 - 76 - 4*pi/6 = 31904.738. Faces: top, bottom, 4 sides, 4 R1 cylinders, 4 chamfer planes, 4 chamfer cones = 18.",
+ "body_count": 1,
+ "volume_mm3": 31904.7374579694,
+ "faces": 18,
+ "continuity": {
+  "order": "g0"
+ }
+}

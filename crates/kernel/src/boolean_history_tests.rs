@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 use solidcraft_geom::{Mesh, Vec3};
 
 use crate::body::Body;
+use crate::history::BodyHistory;
 use crate::history::{Change, EdgeOrigin, FaceOrigin, History, Side};
 use crate::{BoolOp, boolean, box_solid};
 
@@ -89,8 +90,8 @@ fn verified<'a>(r: &'a Body, operands: &[&Body], tol: f64) -> &'a History {
 pub(crate) fn checked<'a>(r: &'a Body, operands: &[&Body], tol: f64, at: Reach, generated: &dyn Fn(usize) -> bool) -> &'a History {
     let h = r.history().expect("the operation reports its history");
     h.check(r, operands).unwrap();
-    let rm = r.tessellate(tol).unwrap();
-    let ms: Vec<Mesh> = operands.iter().map(|b| b.tessellate(tol).unwrap()).collect();
+    let rm = r.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
+    let ms: Vec<Mesh> = operands.iter().map(|b| b.mesh(&crate::MeshTolerance::chord(tol)).unwrap()).collect();
     let near = 4.0 * tol + r.size() * 1e-6;
     let on = |o: &FaceOrigin, p: Vec3| match *o {
         FaceOrigin::Face { operand, face } => to_face(&ms[operand], face, p) < near.max(at.moved),
@@ -186,16 +187,17 @@ fn faces_of(h: &History) -> Vec<(Change, Vec<FaceOrigin>)> {
     h.faces.iter().map(|f| (f.change, f.origins.clone())).collect()
 }
 
-/// Truck's boolean with a sphere (no prism, no coincident faces): a box with a corner taken
-/// off by a sphere. The three faces at the corner get a notch, the sphere's patches inside the
-/// box bound it, meeting the box's faces along new edges.
+/// A boolean with a sphere (no prism, no coincident faces): a box with a corner taken
+/// off by a sphere. The three faces at the corner get a notch, the sphere's one face (SMLib's
+/// sphere is one periodic face) bounds it inside the box, meeting each notched face along a new
+/// edge.
 #[test]
-fn box_minus_sphere_through_truck() {
+fn box_minus_sphere() {
     let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
     let b = crate::sphere(Vec3::new(10.0, 10.0, 10.0), 4.0).unwrap();
     let r = boolean(&a, &b, BoolOp::Cut).unwrap().unwrap();
     let h = verified(&r, &[&a, &b], 0.02);
-    assert_eq!(changes(h), [3, 6, 0, 0, 0], "{}", show(h));
+    assert_eq!(changes(h), [3, 4, 0, 0, 0], "{}", show(h));
     let from_b: BTreeSet<usize> = h
         .faces
         .iter()
@@ -205,34 +207,10 @@ fn box_minus_sphere_through_truck() {
             _ => None,
         })
         .collect();
-    assert_eq!(from_b.len(), 3);
-    // Each notched box face meets two of the sphere's patches.
-    assert_eq!(meets(h).len(), 6, "{}", show(h));
+    assert_eq!(from_b.len(), 1);
+    // Each notched box face meets the sphere.
+    assert_eq!(meets(h).len(), 3, "{}", show(h));
     assert!(meets(h).iter().all(|(x, y)| matches!((x, y), (FaceOrigin::Face { operand: 0, .. }, FaceOrigin::Face { operand: 1, .. }))));
-}
-
-/// The jitter retries move both operands and the result back: the history holds for the
-/// operands themselves, the same faces coming from the same operand faces.
-#[test]
-fn shifted_truck_attempt_keeps_the_history() {
-    let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
-    let b = crate::sphere(Vec3::new(10.0, 10.0, 10.0), 4.0).unwrap();
-    let counts = crate::record::counts(&[&a, &b]);
-    let mut compared = 0;
-    for op in [BoolOp::Cut, BoolOp::Union, BoolOp::Intersect] {
-        let Ok((_, Some((plain, _)))) = crate::ops::truck_boolean(&a, &b, op, None, 0.035) else { continue };
-        // The shifts the retries use (a hundredth of the size along each).
-        for j in [[0.1373, 0.2719, 0.3911], [-0.5127, 0.0833, 0.2291], [0.6911, -0.3337, -0.6127]] {
-            let shift = truck_modeling::Vector3::new(j[0], j[1], j[2]) * 0.17;
-            let Ok((s, h)) = crate::ops::truck_boolean(&a, &b, op, Some(shift), 0.035) else { continue };
-            let faces = h.as_ref().map(|(f, _)| f.clone());
-            assert_eq!(faces, Some(plain.clone()), "{op:?}");
-            let r = crate::boolean_record::truck_result(s, h, 17.4, &[], &counts).unwrap();
-            verified(&r, &[&a, &b], 0.02);
-            compared += 1;
-        }
-    }
-    assert!(compared > 0);
 }
 
 /// Two prisms along x, the tool's section inside the target's, overlapping in part: sewn slab by
@@ -254,9 +232,10 @@ fn box_union_box_prism() {
         })
         .collect();
     origins.sort();
-    // All of a's faces, and b's but the end inside a.
+    // All of a's faces, and b's but the end inside a (its face at x = 5).
     let mut want: Vec<FaceOrigin> = (0..6).map(|i| face(0, i)).chain((0..6).map(|i| face(1, i))).collect();
-    let inside = face(1, 4);
+    let inside =
+        face(1, b.faces(1e-3).unwrap().iter().position(|f| (f.centroid.x - 5.0).abs() < 1e-6 && f.plane_normal.is_some_and(|n| n.x < -0.9)).unwrap());
     want.retain(|o| *o != inside);
     assert_eq!(origins, want, "{}", show(h));
     // b's four sides meet a's face at x = 10.
@@ -266,22 +245,22 @@ fn box_union_box_prism() {
     assert!(h.edges.iter().all(|e| e.origins.len() == 1));
 }
 
-/// A through hole: the box's sides are kept, top and bottom get the hole, the cylinder's two
-/// half walls line it, meeting top and bottom along its rims, and meet each other along the
-/// cylinder's own seams.
+/// A through hole: the box's sides are kept, top and bottom get the hole, the cylinder's wall
+/// (one periodic face) lines it, meeting top and bottom along its rims, and closes on itself
+/// along the cylinder's own seam.
 #[test]
 fn box_minus_cylinder_prism() {
     let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
     let b = crate::cylinder(Vec3::new(5.0, 5.0, -1.0), Vec3::Z, 2.0, 12.0).unwrap();
     let r = boolean(&a, &b, BoolOp::Cut).unwrap().unwrap();
     let h = verified(&r, &[&a, &b], 0.01);
-    assert_eq!(changes(h), [4, 4, 0, 0, 0], "{}", show(h));
-    let walls = from(h, face(1, 1)).len() + from(h, face(1, 2)).len();
-    assert_eq!(walls, 2, "{}", show(h));
-    // Rims: each wall meets top and bottom.
-    assert_eq!(meets(h).len(), 4, "{}", show(h));
+    assert_eq!(changes(h), [4, 3, 0, 0, 0], "{}", show(h));
+    let side = (0..b.face_count()).find(|i| b.planar_face(*i).is_none()).unwrap();
+    assert_eq!(from(h, face(1, side)).len(), 1, "{}", show(h));
+    // Rims: the wall meets top and bottom.
+    assert_eq!(meets(h).len(), 2, "{}", show(h));
     let seams = h.edges.iter().filter(|e| matches!(e.origins.as_slice(), [EdgeOrigin::Edge { operand: 1, .. }])).count();
-    assert_eq!(seams, 2);
+    assert_eq!(seams, 1);
     // Every other edge is one of the box's twelve.
     let boxed_edges: BTreeSet<_> = h.edges.iter().flat_map(|e| &e.origins).filter(|o| matches!(o, EdgeOrigin::Edge { operand: 0, .. })).collect();
     assert_eq!(boxed_edges.len(), 12);
@@ -333,87 +312,28 @@ fn trivial_paths() {
     assert!(h.faces.iter().all(|f| f.change == Change::Kept));
 }
 
-/// A body in two pieces, cut a piece at a time: each piece's faces are the body's own.
+/// A body in two pieces, cut: each piece's faces are the body's own.
 #[test]
-fn by_lumps_composes_the_pieces() {
+fn a_cut_of_two_pieces_composes_the_pieces() {
     let left = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
     let right = boxed(20.0, 0.0, 0.0, 30.0, 10.0, 10.0);
     let a = boolean(&left, &right, BoolOp::Union).unwrap().unwrap();
     assert_eq!(a.shell_count(), 2);
     let b = crate::sphere(Vec3::new(15.0, 5.0, 10.0), 7.0).unwrap();
-    let r = crate::ops::by_lumps(&a, &b, a.lumps().unwrap(), b.lumps().unwrap(), BoolOp::Cut).unwrap().unwrap();
+    let r = boolean(&a, &b, BoolOp::Cut).unwrap().unwrap();
     let h = verified(&r, &[&a, &b], 0.02);
-    // Both pieces are bitten: the sphere's patches inside each line its bite.
-    let bites: BTreeSet<_> = h.faces.iter().flat_map(|f| &f.origins).filter(|o| matches!(o, FaceOrigin::Face { operand: 1, .. })).collect();
-    assert!(bites.len() >= 2, "{}", show(h));
+    // Both pieces are bitten: a piece of the sphere's face lines each bite.
+    let bites = h.faces.iter().filter(|f| matches!(f.origins.as_slice(), [FaceOrigin::Face { operand: 1, .. }])).count();
+    assert!(bites >= 2, "{}", show(h));
     let targets: BTreeSet<_> = h.faces.iter().flat_map(|f| &f.origins).filter(|o| matches!(o, FaceOrigin::Face { operand: 0, .. })).collect();
     assert_eq!(targets.len(), 12);
-}
-
-/// Two bodies touching along one whole face, back to back: glued, the two faces gone, the
-/// coplanar sides each side of the seam merged.
-#[test]
-fn glue_merges_across_the_seam() {
-    let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
-    let b = boxed(10.0, 0.0, 0.0, 20.0, 10.0, 10.0);
-    let r = crate::coplanar::glue(&a, &b).unwrap().unwrap();
-    let h = verified(&r, &[&a, &b], 0.02);
-    assert_eq!(changes(h), [2, 0, 0, 4, 0], "{}", show(h));
-    // The four seam edges went with the merged faces; the ends' edges are each box's.
-    assert_eq!(h.edges.len(), 12);
-    assert!(h.edges.iter().all(|e| !e.origins.is_empty()));
-}
-
-/// Coincident faces pushed apart: a cut flush with the target's top, and a union of bodies
-/// standing on one floor (the floor that is cut back is both operands' floors).
-#[test]
-fn faces_pushed_apart() {
-    let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
-    let tool = boxed(2.0, 2.0, 5.0, 8.0, 8.0, 10.0);
-    let r = crate::coplanar::boolean_apart(&a, &tool, BoolOp::Cut).unwrap().unwrap().unwrap();
-    let h = verified(&r, &[&a, &tool], 0.02);
-    // The pocket: its floor and four sides are the tool's.
-    let tool_faces: BTreeSet<_> = h.faces.iter().flat_map(|f| &f.origins).filter(|o| matches!(o, FaceOrigin::Face { operand: 1, .. })).collect();
-    assert_eq!(tool_faces.len(), 5, "{}", show(h));
-    let left = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
-    let right = boxed(5.0, 3.0, 0.0, 15.0, 7.0, 4.0);
-    let r = crate::coplanar::boolean_apart(&left, &right, BoolOp::Union).unwrap().unwrap().unwrap();
-    let h = verified(&r, &[&left, &right], 0.02);
-    assert!(h.faces.iter().any(|f| f.change == Change::Merged && f.origins.len() == 2), "{}", show(h));
-}
-
-/// The exact polygon boolean: pieces of planar faces joined back into faces.
-#[test]
-fn planar_fallback() {
-    let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
-    let b = boxed(5.0, 5.0, 5.0, 15.0, 15.0, 15.0);
-    for (op, count) in [(BoolOp::Cut, 9), (BoolOp::Union, 12), (BoolOp::Intersect, 6)] {
-        let r = crate::polybool::planar_boolean(&a, &b, op).unwrap().unwrap();
-        let h = verified(&r, &[&a, &b], 0.02);
-        assert_eq!(h.faces.len(), count, "{op:?}\n{}", show(h));
-        assert!(h.faces.iter().all(|f| f.origins.len() == 1));
-        // Three faces of each meet three of the other's.
-        assert_eq!(meets(h).len(), 6, "{op:?}\n{}", show(h));
-        assert!(h.edges.iter().all(|e| e.origins.len() == 1), "{op:?}\n{}", show(h));
-    }
-}
-
-/// The nudged retry: a boolean with the tool moved a hair, composed with the move.
-#[test]
-fn nudged_tool_composes() {
-    let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
-    let b = crate::sphere(Vec3::new(10.0, 10.0, 10.0), 4.0).unwrap();
-    let nb = crate::transform(&b, Vec3::new(1e-5, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0).unwrap();
-    let r = boolean(&a, &nb, BoolOp::Cut).unwrap().unwrap();
-    let r = crate::ops::nudged(r, &nb, &crate::record::counts(&[&a, &b]));
-    verified(&r, &[&a, &b], 0.02);
 }
 
 /// A boolean with a triangle mesh: the mesh's faces are its triangles (and it has no edges).
 #[test]
 fn faceted_tool() {
     let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
-    let tool = boxed(5.0, 5.0, 5.0, 15.0, 15.0, 15.0).tessellate(0.1).unwrap();
+    let tool = boxed(5.0, 5.0, 5.0, 15.0, 15.0, 15.0).mesh(&crate::MeshTolerance::chord(0.1)).unwrap();
     let r = crate::faceted_boolean(&a, &tool, BoolOp::Cut, 0.01).unwrap().unwrap();
     let h = r.history().expect("the faceted boolean reports its history");
     h.check_counts((r.face_count(), r.edge_count()), &[(a.face_count(), a.edge_count()), (tool.triangles.len(), 0)]).unwrap();
@@ -423,10 +343,10 @@ fn faceted_tool() {
     assert_eq!(h.faces.iter().filter(|f| matches!(f.origins.first(), Some(FaceOrigin::Face { operand: 1, .. }))).count(), 3);
 }
 
-/// A partial-depth cut of stepped prisms: walls over one segment through successive slabs are
-/// sewn as one face (coalesced), which comes from the operand walls under it in every slab.
+/// A partial-depth cut of a prism by a narrower one: the stock's walls run whole from 0 to 20,
+/// one face each past the cutter's floor, untouched (Kept).
 #[test]
-fn coalesced_stepped_walls() {
+fn stepped_cut_keeps_the_stock_walls_whole() {
     use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
     for curved in [true, false] {
         let (outer, inner) = if curved {
@@ -439,20 +359,19 @@ fn coalesced_stepped_walls() {
         let cutter = crate::extrude(&Plane::XY, &[Region2 { outer: inner, holes: vec![] }], 2.0, 22.0).unwrap().pop().unwrap();
         let r = boolean(&stock, &cutter, BoolOp::Cut).unwrap().unwrap();
         let h = verified(&r, &[&stock, &cutter], 0.01);
-        // The stock's walls run whole from 0 to 20, one face each, past the cutter's floor.
-        let walls: Vec<usize> = (0..r.face_count()).filter(|i| r.face_was_coalesced(*i)).collect();
-        assert_eq!(walls.len(), if curved { 2 } else { 4 }, "{}", show(h));
+        let walls: Vec<usize> =
+            stock.faces(1e-3).unwrap().iter().enumerate().filter(|(_, f)| f.plane_normal.is_none_or(|n| n.z.abs() < 0.5)).map(|(i, _)| i).collect();
+        assert_eq!(walls.len(), if curved { 1 } else { 4 });
         for i in walls {
-            assert!(matches!(h.faces[i].origins.as_slice(), [FaceOrigin::Face { operand: 0, .. }]), "{}", show(h));
-            assert_eq!(h.faces[i].change, Change::Modified, "{}", show(h));
+            let pieces = from(h, face(0, i));
+            assert_eq!(pieces.len(), 1, "{}", show(h));
+            assert_eq!(h.faces[pieces[0]].change, Change::Kept, "{}", show(h));
         }
     }
 }
 
-/// A step cut into a box: the stepped prism path sews the box's face 3 in pieces at the
-/// slab stations, and the joining of generated walls on their common supports makes it one face
-/// again; the joined body keeps the sewn body's history composed through the join. A certified
-/// box (whose planar regularization would join the same pieces) gets the same history.
+/// A step cut into a box: the box's top (z = 7.5) loses the step's corner, one face still
+/// (Modified). A certified box gets the same history as a plain one.
 #[test]
 fn regularized_step_cut() {
     let (pa, pb) = (boxed(0.0, 0.0, 0.0, 30.0, 35.0, 7.5), boxed(0.0, 30.0, 2.5, 22.5, 50.0, 25.0));
@@ -461,28 +380,11 @@ fn regularized_step_cut() {
     let h = verified(&r, &[&a, &b], 0.01);
     let plain = boolean(&pa, &pb, BoolOp::Cut).unwrap().unwrap();
     let ph = verified(&plain, &[&pa, &pb], 0.01);
-    let joined = from(ph, face(0, 3));
+    let top = pa.faces(1e-3).unwrap().iter().position(|f| (f.centroid.z - 7.5).abs() < 1e-9).unwrap();
+    let joined = from(ph, face(0, top));
     assert_eq!(joined.len(), 1, "{}", show(ph));
-    assert_eq!(faces_of(ph)[joined[0]], (Change::Modified, vec![face(0, 3)]));
+    assert_eq!(faces_of(ph)[joined[0]], (Change::Modified, vec![face(0, top)]));
     assert_eq!(faces_of(h), faces_of(ph), "{}", show(h));
-}
-
-/// A ring joined under a floor, its bore on the floor's hole (coincident cylinders): the ring's
-/// bore is narrowed, the bodies joined, and the bore cut out again. The ring's bore is a circle
-/// built in two arcs, and the recut wall is split where the cutting cylinder's own construction
-/// splits it, so which arc each piece of it restores is not known: no history.
-#[test]
-fn bore_union_of_a_bore_in_two_arcs_has_no_history() {
-    let hole = crate::cylinder(Vec3::new(50.0, 40.0, -5.0), Vec3::Z, 10.0, 30.0).unwrap();
-    let floor = boolean(&boxed(0.0, 0.0, 0.0, 100.0, 80.0, 10.0), &hole, BoolOp::Cut).unwrap().unwrap();
-    let centre = solidcraft_geom::Vec2::new(50.0, 40.0);
-    let annulus = solidcraft_geom::Region2 {
-        outer: solidcraft_geom::Loop2::circle(centre, 20.0),
-        holes: vec![solidcraft_geom::Loop2::circle(centre, 10.0).reversed()],
-    };
-    let ring = crate::extrude(&solidcraft_geom::Plane::XY, &[annulus], -5.0, 2.0).unwrap().remove(0);
-    let r = crate::coplanar::bore_union(&floor, &ring, &|_| true).expect("the bores are recut");
-    assert!(r.history().is_none());
 }
 
 /// Bodies clearly apart, joined as one body of several pieces (`union_apart`): every face and
@@ -522,5 +424,102 @@ fn stacked_pieces_of_one_cylinder_keep_their_walls() {
         for f in 0..arm.face_count() {
             assert!(!from(h, face(0, f)).is_empty(), "{op:?}: face {f} of the plate and boss is lost\n{}", show(h));
         }
+    }
+}
+
+/// The same booleans through SMLib: its tags, renumbered into the operands' and the result's
+/// face and edge order, give a history that holds against the geometry.
+#[cfg(feature = "smlib")]
+mod smlib {
+    use super::*;
+    use crate::smlib_boolean::smlib_boolean;
+
+    fn through_smlib(a: &Body, b: &Body, op: BoolOp) -> Body {
+        smlib_boolean(a, b, op).unwrap().expect("a result")
+    }
+
+    #[test]
+    fn operands_number_as_their_records() {
+        let bodies = [
+            boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0),
+            crate::cylinder(Vec3::new(5.0, 5.0, -1.0), Vec3::Z, 2.0, 12.0).unwrap(),
+            crate::sphere(Vec3::new(10.0, 10.0, 10.0), 4.0).unwrap(),
+            crate::torus(Vec3::new(0.0, 0.0, 0.0), 10.0, 2.0).unwrap(),
+        ];
+        // SMLib imports a record's faces and edges in the record's order, and the record is
+        // already canonical: SMLib's face and edge i are the record's i (the order is the
+        // identity, or empty, which says the same), with no edge split into pieces.
+        for (i, b) in bodies.iter().enumerate() {
+            let (_, order) = crate::native::smlib_body_ordered(b).unwrap();
+            let order = order.unwrap_or_else(|| panic!("body {i}: no order"));
+            let identity = |to: &[usize], n: usize| to.is_empty() || to.iter().copied().eq(0..n);
+            assert!(identity(&order.faces, b.face_count()), "body {i}: faces {:?}", order.faces);
+            assert!(identity(&order.edges, b.edge_count()), "body {i}: edges {:?}", order.edges);
+            assert!(order.pieces.is_empty(), "body {i}: {:?}", order.pieces);
+        }
+    }
+
+    /// Cubes sharing an edge, and cubes sharing a vertex: SMLib's union touches itself there;
+    /// it comes back as two closed shells, the shared edge and vertices split into one copy per
+    /// cube, each copy with its edge's history (verified against the geometry). The copies say
+    /// how the two meet.
+    #[test]
+    fn cubes_touching_along_an_edge_or_at_a_vertex_unite_into_two_solids() {
+        use solidcraft_geom::brep::part::{Contact, RegionContact};
+        let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
+        for (name, b, contact) in [
+            ("edge", boxed(10.0, 10.0, 0.0, 20.0, 20.0, 10.0), Contact::Edge),
+            ("vertex", boxed(10.0, 10.0, 10.0, 20.0, 20.0, 20.0), Contact::Vertex),
+        ] {
+            let r = through_smlib(&a, &b, BoolOp::Union);
+            assert_eq!(r.shell_count(), 2, "{name}");
+            assert_eq!(r.region_contacts().unwrap(), vec![RegionContact { regions: [0, 1], contact }], "{name}");
+            assert_eq!((r.face_count(), r.edge_count()), (12, 24), "{name}");
+            let v = crate::measure(&r).unwrap().volume;
+            assert!((v - 2000.0).abs() < 1e-6 * 2000.0, "{name}: {v}");
+            let h = verified(&r, &[&a, &b], 0.02);
+            assert!(h.faces.iter().all(|f| f.origins.len() == 1), "{name}: {}", show(h));
+        }
+    }
+
+    /// Pieces of a cut meeting along a line (two opposite quarters of a slab cut away) come
+    /// back as separate solids rather than a refusal.
+    #[test]
+    fn a_cut_leaving_pieces_along_a_line_gives_two_solids() {
+        let a = boxed(0.0, 0.0, 0.0, 20.0, 20.0, 10.0);
+        let once = through_smlib(&a, &boxed(10.0, -1.0, -1.0, 21.0, 10.0, 11.0), BoolOp::Cut);
+        let r = through_smlib(&once, &boxed(-1.0, 10.0, -1.0, 10.0, 21.0, 11.0), BoolOp::Cut);
+        assert_eq!(r.shell_count(), 2);
+        let v = crate::measure(&r).unwrap().volume;
+        assert!((v - 2000.0).abs() < 1e-6 * 2000.0, "{v}");
+    }
+
+    /// A block touching itself along a line: a through hole tangent to its side from inside, and
+    /// a blind hole tangent to its side (the side then on both sides of the line). SMLib's
+    /// result uses the tangent line four times; it comes back as one solid whose edges each bound
+    /// two faces, of the block's volume less the hole's, every face and edge's history verified
+    /// against the geometry.
+    #[test]
+    fn holes_tangent_to_the_side_come_back_as_one_solid() {
+        let a = boxed(0.0, 0.0, 0.0, 30.0, 20.0, 10.0);
+        for (name, z0, depth) in [("through", -1.0, 12.0), ("blind", 2.0, 9.0)] {
+            let b = crate::cylinder(Vec3::new(10.0, 15.0, z0), Vec3::Z, 5.0, depth).unwrap();
+            let r = through_smlib(&a, &b, BoolOp::Cut);
+            assert_eq!(r.shell_count(), 1, "{name}");
+            let record = crate::brep_record(&r).unwrap();
+            assert!(record.edges.iter().all(|e| e.uses.len() == 2), "{name}");
+            let hole = std::f64::consts::PI * 25.0 * (10.0 - z0.max(0.0));
+            let v = crate::measure(&r).unwrap().volume;
+            assert!((v - (6000.0 - hole)).abs() < 1e-4 * 6000.0, "{name}: {v}");
+            assert!(r.validity().is_empty(), "{name}: {:?}", r.validity());
+            verified(&r, &[&a, &b], 0.02);
+        }
+    }
+
+    #[test]
+    fn disjoint_intersection_is_empty() {
+        let a = boxed(0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
+        let b = boxed(5.0, 5.0, 5.0, 6.0, 6.0, 6.0);
+        assert!(smlib_boolean(&a, &b, BoolOp::Intersect).unwrap().is_none());
     }
 }

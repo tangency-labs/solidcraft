@@ -36,7 +36,7 @@ impl OpenSteps {
     /// Read the design file `doc.open` would open with parameters `p`, without evaluating it.
     /// `None` when `p` names a file `doc.open` reads in another way (a CAD, mesh or drawing file,
     /// or a point cloud), or asks for something only those take: run `doc.open` for it.
-    pub fn start(p: &Value) -> Result<Option<OpenSteps>> {
+    pub fn start(p: &Value, validation: solidcraft_kernel::Validation) -> Result<Option<OpenSteps>> {
         let Some(path) = p.get("path").and_then(Value::as_str) else { return Ok(None) };
         let other = solidcraft_io::is_step_path(path)
             || solidcraft_io::is_mesh_path(path)
@@ -57,7 +57,8 @@ impl OpenSteps {
         let doc = Arc::new(doc);
         let marker = doc.marker;
         let stop = marker.unwrap_or(usize::MAX).min(doc.features.len());
-        let adopted = Session::saved_model(&doc, saved.as_ref());
+        // A model saved under another check mode holds that mode's results: evaluated again.
+        let adopted = Session::saved_model(&doc, saved.as_ref()).filter(|model| model.validation() == validation);
         let steps = OpenSteps {
             path: path.to_string(),
             read_only,
@@ -68,7 +69,7 @@ impl OpenSteps {
             next: if adopted.is_some() { stop } else { 0 },
             stop,
             adopted: adopted.is_some(),
-            model: adopted.unwrap_or_default(),
+            model: adopted.unwrap_or_else(|| under(validation)),
         };
         Ok(Some(steps))
     }
@@ -114,6 +115,11 @@ impl OpenSteps {
     /// yet evaluated are evaluated now.
     pub fn finish(mut self, s: &mut Session) -> Result<Value> {
         Arc::make_mut(&mut self.doc).marker = self.marker;
+        // The results so far hold another mode's checks: evaluated again, as `Session::opened` would.
+        if self.model.validation() != s.validation() {
+            self.model = under(s.validation());
+            self.adopted = false;
+        }
         if !self.adopted {
             // Every result is current: this takes them all and keeps the placement proof
             // `Session::opened` keeps.
@@ -122,4 +128,11 @@ impl OpenSteps {
         let opened = Session::with_model(self.doc, self.visibility, self.model).located(Some(&self.path));
         opened_design(s, opened, &self.path, self.read_only, self.disk)
     }
+}
+
+/// A model with no results yet, checking its features under `validation`.
+fn under(validation: solidcraft_kernel::Validation) -> Model {
+    let mut model = Model::default();
+    model.set_validation(validation);
+    model
 }

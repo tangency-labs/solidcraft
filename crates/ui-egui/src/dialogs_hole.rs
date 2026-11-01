@@ -71,7 +71,10 @@ fn bore_diameter(diameter: &str, opts: &HoleOpts, eval: &dyn Fn(&str, ValueKind)
         if opts.custom_thread.as_ref().is_some_and(|draft| draft.error.is_some()) {
             return None;
         }
-        solidcraft_engine::doc::parse_tapped_thread(&opts.thread).map(|size| size.tap_drill)
+        match opts.drill.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+            Some(drill) => eval(drill, ValueKind::Length).filter(|v| v.is_finite() && *v > 0.0),
+            None => solidcraft_engine::doc::parse_tapped_thread(&opts.thread).map(|size| size.tap_drill),
+        }
     } else {
         eval(diameter, ValueKind::Length).filter(|v| v.is_finite() && *v > 0.0)
     }
@@ -492,7 +495,7 @@ mod tests {
     fn tapped_section_uses_the_current_nominal_size_and_pitch() {
         let mut opts = HoleOpts { tapped: true, thread: "M8".into(), ..HoleOpts::default() };
         let stale_diameter = |_: &str, _: ValueKind| Some(4.0);
-        assert_eq!(bore_diameter("4 mm", &opts, &stale_diameter), Some(6.75));
+        assert_eq!(bore_diameter("4 mm", &opts, &stale_diameter), Some(6.8));
         opts.thread = "M8x1.2".into();
         assert_eq!(bore_diameter("4 mm", &opts, &stale_diameter), Some(6.8));
         for (designation, drill) in [("G 1/4", 11.75), ("Rp 1/4", 11.4), ("1/4-20 UNC", 5.1054)] {

@@ -1,0 +1,42 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "radius": 30,
+    "height": 10,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     20,
+     0,
+     10
+    ],
+    "diameter": 5,
+    "type": "counterbore",
+    "cb_diameter": 9,
+    "cb_depth": 3,
+    "name": "CB"
+   }
+  },
+  {
+   "command": "solid.pattern.circular",
+   "params": {
+    "features": [
+     "CB"
+    ],
+    "axis": "Z",
+    "count": 6
+   }
+  }
+ ]
+}

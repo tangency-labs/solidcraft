@@ -1,0 +1,13 @@
+{
+ "what": "as report-fillet-curvature-three-edges-at-bar-corner, with the sketch solver's residues of the reported design; reported from the app (2026-10-30, test-peg part)",
+ "source": "analytic",
+ "method": "the same bar with the sketch solver's residues of the reported design (~1e-10 mm: the front side's ends differ by 3.0e-10 in y, the arc's centre 5.7e-11 off the disc's), corner (0.489294, 0.057925), length L = 41.160417754, V0 = L * 16.0000000000762 * 10 + 960 pi; the curvature section of setback 2: the quintic Bezier from (2, 0) on the top to (0, 2) on the side (y from the front face, depth below the top), control points at thirds along each face, area A2 = 0.5978835979 (= 3.73677 * 4 / 25, fillets/2708 at s = 5); removed 38.8597794204 if each round ran whole to the vertex (the front one L long); the patch within the setback cube, so V is graded with 3^3 as its tolerance; every seam of the rounds and the patch G2",
+ "body_count": 1,
+ "volume_mm3": 9562.736008711847,
+ "tolerance": {
+  "rel": 0.0028234597269445115
+ },
+ "continuity": {
+  "order": "g2"
+ }
+}

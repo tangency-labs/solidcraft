@@ -49,7 +49,7 @@ fn undoing_the_edited_feature_closes_its_editor_and_preserves_redo() {
     h.app.run("edit.redo", json!({})).unwrap();
     assert!(h.app.session.doc.feature(feature).is_some());
     assert!(h.app.dialog.is_none(), "redo does not resurrect the old editor");
-    assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds().max.z, 10.0);
+    assert_eq!(crate::open_meshing::session_world(&h.app.session).body("Main").unwrap().mesh().bounds().max.z, 10.0);
     open(&mut h);
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!(h.app.dialog.is_none(), "the restored feature can be edited normally");
@@ -85,7 +85,7 @@ fn deleting_the_edited_feature_closes_its_editor_and_undo_restores_the_design() 
     assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
     h.app.run("edit.undo", json!({})).unwrap();
     assert!(std::sync::Arc::ptr_eq(&original, &h.app.session.doc), "Undo restores the document before the temporary editor rollback");
-    assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds().max.z, 10.0);
+    assert_eq!(crate::open_meshing::session_world(&h.app.session).body("Main").unwrap().mesh().bounds().max.z, 10.0);
 }
 
 #[test]
@@ -98,7 +98,7 @@ fn unchanged_all_profiles_includes_profiles_added_after_edit() {
     h.app.run("sketch.edit", json!({"sketch":"Base"})).unwrap();
     h.app.run("sketch.rectangle.two_point", json!({"p0":[20,0],"p1":[25,5]})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let volume: f64 = state.bodies.iter().map(|b| solidcraft_engine::doc::kernel::measure(&b.body).unwrap().volume).sum();
     assert!((volume - 1250.0).abs() < 1e-7, "{volume}");
 }
@@ -120,13 +120,13 @@ fn unchanged_actual_editor_preserves_all_extents_and_parameter_identities() {
         let mut h = make(p.clone());
         let original = extent(&h);
         let names = h.app.session.doc.find_feature("Depth").unwrap().param_names.clone();
-        let before = h.app.session.world_state().body("Main").unwrap().mesh().bounds();
+        let before = h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds();
         open(&mut h);
         h.step(&json!({"widget":"OK"})).unwrap();
         assert!(h.app.dialog.is_none(), "{p}: {:?}", h.app.session.log);
         assert_eq!(extent(&h), original, "{p}");
         assert_eq!(h.app.session.doc.find_feature("Depth").unwrap().param_names, names, "{p}");
-        assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds(), before, "{p}");
+        assert_eq!(h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds(), before, "{p}");
     }
 }
 
@@ -137,7 +137,7 @@ fn negative_edit_keeps_downstream_distance_reference_positive() {
     open(&mut h);
     h.step(&json!({"widget":"OK"})).unwrap();
     assert_eq!(h.app.session.doc.eval("d1", solidcraft_engine::doc::expr::Kind::Length).unwrap(), 10.0);
-    assert_eq!(h.app.session.world_state().body("Dependent").unwrap().mesh().bounds().max.z, 10.0);
+    assert_eq!(h.app.session.world_state().unwrap().body("Dependent").unwrap().mesh().bounds().max.z, 10.0);
 }
 
 #[test]
@@ -165,7 +165,7 @@ fn to_offset_canvas_edit_changes_offset_and_one_undo_restores_extent() {
     h.step(&json!({"widget":"OK"})).unwrap();
     assert_eq!(extent(&h).to_offset.as_deref(), Some("4 mm"));
     assert_eq!(extent(&h).distance, original.distance);
-    assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds().max.z, 19.0);
+    assert_eq!(h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds().max.z, 19.0);
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(extent(&h), original);
 }
@@ -187,7 +187,7 @@ fn moved_owner_references_survive_actual_edit_with_another_component_active() {
     h.step(&json!({"widget":"OK"})).unwrap();
     assert_eq!(extent(&h), original);
     assert_eq!(h.app.session.active_component, active);
-    assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds().max.z, 37.0);
+    assert_eq!(h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds().max.z, 37.0);
 }
 
 #[test]
@@ -199,7 +199,7 @@ fn dragged_to_object_handle_edits_offset_not_dormant_distance() {
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
     assert_eq!(extent(&h).distance, original.distance);
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let z = state.body("Main").unwrap().mesh().bounds().max.z;
     assert!((z - 21.0).abs() < 0.1, "dragged end {z}");
 }
@@ -213,12 +213,12 @@ fn referenced_offset_recomputes_after_edit_and_save_reopen() {
     h.step(&json!({"widget":"OK"})).unwrap();
     assert_eq!(extent(&h).to_offset.as_deref(), Some("clearance"));
     h.app.run("parameters.change", json!({"name":"clearance","expression":"6 mm"})).unwrap();
-    assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds().max.z, 21.0);
+    assert_eq!(h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds().max.z, 21.0);
     let path = h.dir.join("extent.solidcraft");
     h.app.run("file.save", json!({"path":path})).unwrap();
     h.app.run("doc.open", json!({"path":path})).unwrap();
     assert_eq!(extent(&h).to_offset.as_deref(), Some("clearance"));
-    assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds().max.z, 21.0);
+    assert_eq!(h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds().max.z, 21.0);
 }
 
 #[test]
@@ -229,7 +229,7 @@ fn from_object_start_can_be_explicitly_changed_to_profile_plane() {
     h.step(&json!({"click":{"handle":"dialog:Start:Profile Plane"}})).unwrap();
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!(extent(&h).from.is_none());
-    assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds().min.z, 0.0);
+    assert_eq!(h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds().min.z, 0.0);
 }
 
 #[test]
@@ -241,7 +241,7 @@ fn explicit_reverse_keeps_original_expression_and_parameter_sign() {
     assert_eq!(extent(&h).distance, "10");
     assert_eq!(extent(&h).direction, solidcraft_engine::doc::Direction::Negative);
     assert_eq!(h.app.session.doc.eval("d1", solidcraft_engine::doc::expr::Kind::Length).unwrap(), 10.0);
-    assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds().min.z, -10.0);
+    assert_eq!(h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds().min.z, -10.0);
 }
 
 #[test]
@@ -273,7 +273,7 @@ fn failed_edit_and_cancel_keep_full_history_and_existing_redo() {
     assert_eq!(h.app.session.redo.len(), redo);
     assert_eq!(h.app.session.selection, selection);
     h.app.run("edit.redo", json!({})).unwrap();
-    assert!(h.app.session.world_state().body("RedoBody").is_some());
+    assert!(h.app.session.world_state().unwrap().body("RedoBody").is_some());
 }
 
 #[test]
@@ -285,7 +285,7 @@ fn tapered_from_and_signed_to_have_correct_start_volume_and_preview_parity() {
         (json!({"from":[0,0,5],"to":[0,0,-5],"direction":"positive","taper":"atan(0.1)"}), -5.0, 5.0),
     ] {
         let mut h = make(params.clone());
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let body = state.body("Main").unwrap();
         let bounds = body.mesh().bounds();
         assert!((bounds.min.z - lo).abs() < 1e-8 && (bounds.max.z - hi).abs() < 1e-8, "{params}: {bounds:?}");
@@ -299,7 +299,7 @@ fn tapered_from_and_signed_to_have_correct_start_volume_and_preview_parity() {
         assert_eq!(preview.after.body("Main").unwrap().mesh().bounds(), bounds);
         h.step(&json!({"widget":"OK"})).unwrap();
         assert_eq!(extent(&h), original);
-        assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds(), bounds);
+        assert_eq!(h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds(), bounds);
     }
 }
 
@@ -315,7 +315,7 @@ fn adjacent_profiles_from_slanted_face_use_same_merged_centre_as_geometry() {
     let angle = 0.1f64.atan();
     let point = [2.0 * angle.sin(), 0.0, 10.0 + 2.0 * angle.cos()];
     h.app.run("solid.extrude", json!({"sketch":"Adjacent","distance":10,"from":point,"name":"Depth","body_name":"Main","operation":"new"})).unwrap();
-    let min_z = h.app.session.world_state().body("Main").unwrap().mesh().bounds().min.z;
+    let min_z = h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds().min.z;
     open(&mut h);
     let base = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().0;
     assert!((base.z - min_z).abs() < 1e-7, "displayed start{} geometry start{min_z}", base.z);
@@ -324,7 +324,7 @@ fn adjacent_profiles_from_slanted_face_use_same_merged_centre_as_geometry() {
     let unmerged_height = 10.0 + 2.0 / angle.cos() - 3.5 * angle.tan();
     assert!((base.z - unmerged_height).abs() > 0.01, "fixture must distinguish the raw-profile centre");
     h.step(&json!({"widget":"OK"})).unwrap();
-    assert!((h.app.session.world_state().body("Main").unwrap().mesh().bounds().min.z - min_z).abs() < 1e-7);
+    assert!((h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds().min.z - min_z).abs() < 1e-7);
 }
 
 #[test]
@@ -336,11 +336,11 @@ fn rotated_second_occurrence_keeps_saved_from_and_to_points_exact() {
     h.app.run("occurrence.move", json!({"occurrence":second,"axis":[1,0,0],"angle":"17 deg"})).unwrap();
     h.app.run("component.activate", json!({"component":owner["component"],"occurrence":second,"path":[second]})).unwrap();
     let original = extent(&h);
-    let before: Vec<_> = h.app.session.world_state().bodies.iter().map(|b| (b.name.clone(), b.mesh().bounds())).collect();
+    let before: Vec<_> = h.app.session.world_state().unwrap().bodies.iter().map(|b| (b.name.clone(), b.mesh().bounds())).collect();
     open(&mut h);
     h.step(&json!({"widget":"OK"})).unwrap();
     assert_eq!(extent(&h), original);
-    let after: Vec<_> = h.app.session.world_state().bodies.iter().map(|b| (b.name.clone(), b.mesh().bounds())).collect();
+    let after: Vec<_> = h.app.session.world_state().unwrap().bodies.iter().map(|b| (b.name.clone(), b.mesh().bounds())).collect();
     assert_eq!(after, before);
 }
 
@@ -382,14 +382,14 @@ fn symmetric_total_distance_preview_handle_drag_apply_and_reopen_agree() {
         let preview_bounds = preview.after.body("Main").unwrap().mesh().bounds();
         assert!((preview_bounds.min.z + 60.0).abs() < 1e-7 && (preview_bounds.max.z - 60.0).abs() < 1e-7);
         h.step(&json!({"widget":"OK"})).unwrap();
-        assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds(), preview_bounds);
+        assert_eq!(h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds(), preview_bounds);
         let path = h.dir.join("symmetric.solidcraft");
         h.app.run("file.save_as", json!({"path":path})).unwrap();
         h.app.run("doc.open", json!({"path":path})).unwrap();
-        assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds(), preview_bounds);
+        assert_eq!(h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds(), preview_bounds);
         open(&mut h);
         h.step(&json!({"widget":"OK"})).unwrap();
-        assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds(), preview_bounds);
+        assert_eq!(h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds(), preview_bounds);
     }
 }
 
@@ -405,7 +405,7 @@ fn switching_one_side_to_symmetric_in_actual_editor_keeps_total_thickness() {
         let bounds = preview.after.body("Main").unwrap().mesh().bounds();
         assert!((bounds.min.z + 5.0).abs() < 1e-7 && (bounds.max.z - 5.0).abs() < 1e-7);
         h.step(&json!({"widget":"OK"})).unwrap();
-        assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds(), bounds);
+        assert_eq!(h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds(), bounds);
         assert_eq!(extent(&h).convention, solidcraft_engine::doc::ExtrudeConvention::TotalDistance);
     }
 }
@@ -424,7 +424,7 @@ fn symmetric_through_all_handle_drag_switches_to_total_distance() {
     assert!(!all);
     assert_eq!(h.app.session.doc.eval(distance, solidcraft_engine::doc::expr::Kind::Length).unwrap(), 120.0);
     h.step(&json!({"widget":"OK"})).unwrap();
-    let bounds = h.app.session.world_state().body("Main").unwrap().mesh().bounds();
+    let bounds = h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds();
     assert!((bounds.min.z + 60.0).abs() < 1e-7 && (bounds.max.z - 60.0).abs() < 1e-7);
 }
 
@@ -485,7 +485,7 @@ fn the_extrude_arrow_drags_from_its_stem() {
     h.step(&json!({"drag":[from, to]})).unwrap();
     assert!((dialog_distance(&h) - 15.0).abs() < 1e-9, "{}", dialog_distance(&h));
     h.step(&json!({"widget":"OK"})).unwrap();
-    let bounds = h.app.session.world_state().body("Main").unwrap().mesh().bounds();
+    let bounds = h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds();
     assert!((bounds.max.z - 15.0).abs() < 1e-7, "{bounds:?}");
 }
 
@@ -522,7 +522,7 @@ fn a_click_on_the_extrude_arrow_stem_keeps_the_profile() {
 
 /// The volume of the body `name`.
 fn volume(h: &Harness, name: &str) -> f64 {
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     solidcraft_engine::doc::kernel::measure(&state.body(name).unwrap().body).unwrap().volume
 }
 
@@ -601,7 +601,7 @@ fn editing_face_extrusion_temporarily_shows_its_hidden_source_body() {
         assert!(h.app.body_visible("Source"));
         assert!(!h.app.session.body_visible("Source"), "the editor must not change persistent visibility");
         assert!(h.app.body_visible("Other"));
-        assert!(h.app.session.world_state().body("Extension").is_none(), "the feature's result is rolled off");
+        assert!(crate::open_meshing::session_world(&h.app.session).body("Extension").is_none(), "the feature's result is rolled off");
         assert_eq!(h.app.session.undo.len(), undo);
         h.app.session.visibility.hidden_bodies.push("Other".into());
         h.step(&json!({"widget":finish})).unwrap();
@@ -610,7 +610,7 @@ fn editing_face_extrusion_temporarily_shows_its_hidden_source_body() {
         assert!(!h.app.body_visible("Other"), "unrelated visibility edits are preserved");
         assert_eq!(h.app.session.visibility.hidden_sketches, visibility.hidden_sketches);
         assert_eq!(h.app.session.visibility.shown_sketches, visibility.shown_sketches);
-        assert!(h.app.session.world_state().body("Extension").is_some());
+        assert!(crate::open_meshing::session_world(&h.app.session).body("Extension").is_some());
     }
 }
 

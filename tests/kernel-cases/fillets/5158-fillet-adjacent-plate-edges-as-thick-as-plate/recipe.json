@@ -1,0 +1,100 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Plate"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -15,
+     -15.5
+    ],
+    "p1": [
+     15,
+     15.5
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Plate",
+    "distance": 2
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "face": [
+      0,
+      0,
+      2
+     ]
+    },
+    "name": "Holes",
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     -10.8,
+     8.2
+    ],
+    "radius": 3.175
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     3.2,
+     6.4
+    ],
+    "radius": 3.175
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Holes",
+    "distance": 7.5,
+    "direction": "negative",
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      0,
+      15.5,
+      2
+     ],
+     [
+      -15,
+      0,
+      2
+     ]
+    ],
+    "radius": 2
+   }
+  }
+ ]
+}

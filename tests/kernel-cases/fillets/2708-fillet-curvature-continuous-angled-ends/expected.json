@@ -1,0 +1,14 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2708",
+  "tangency-labs/solidcraft#2739"
+ ],
+ "what": "a curvature-continuous (G2) fillet of size 5 on a straight edge that ends on two slanted planar faces",
+ "source": "analytic",
+ "method": "prism over the polygon (0,0),(40,0),(30,20),(10,20), 20 tall: V0 = 600 * 20 = 12000. Fillet type curvature, size 5 on the top front edge (y=0, z=20, length 40): section is the quintic Bezier (control points at thirds of the setback s = 5 on each face, zero curvature at both contacts), area A = 3.73677 between the corner and the curve and first moment of y over it 3.52297. The end faces are the planes x = y/2 and x = 40 - y/2, so the strip at depth y is 40 - y long: removed = 40 A - int y dA = 145.9479. V = 12000 - removed = 11854.0521.",
+ "body_count": 1,
+ "volume_mm3": 11854.052069321415,
+ "continuity": {
+  "order": "g2"
+ }
+}

@@ -1,0 +1,30 @@
+{
+ "sources": [],
+ "what": "three r5 rounds at a corner with the g2 corner patch",
+ "source": "invariants",
+ "method": "the corner set back 1.5 r = 7.5 and filled with one patch G2 to the three rounds and the three faces; no closed-form volume; one valid body, the same faces as 009, within the box; across the patch's seams the curvature jump is at most 1e-3 per mm (the ball's corner, 009, jumps 1/r = 0.2) clear of the six points where a round's section ends on a face, where the round's own G1 seam with the face ends (the patch passes from one curvature to the other within 15% of each side: 1.2 mm covers it)",
+ "body_count": 1,
+ "faces": 10,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   20
+  ]
+ },
+ "continuity": {
+  "near": [
+   60,
+   40,
+   20
+  ],
+  "within_mm": 15,
+  "clear_mm": 1.2,
+  "curvature_jump_per_mm": 0.001
+ }
+}

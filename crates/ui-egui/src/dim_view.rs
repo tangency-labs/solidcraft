@@ -118,7 +118,7 @@ impl DimensionDraft {
         let mut scratch = app.session.scratch();
         let result = scratch.execute("sketch.dimension", &self.params(expr)).map_err(|e| shown_error("sketch.dimension", &e.to_string()))?;
         let param = result.get("param").and_then(serde_json::Value::as_str).ok_or("The dimension value is unavailable")?;
-        let state = scratch.world_state();
+        let state = crate::open_meshing::session_world(&scratch);
         let solved = state.sketch(self.sketch).ok_or("The dimension sketch is unavailable")?;
         if !solved.report.ok() {
             return Err("That value conflicts with the sketch constraints".into());
@@ -255,7 +255,7 @@ fn reevaluate(app: &SolveApp, draft: &mut DimensionDraft, expr: &str) {
     draft.checked_expr = expr.to_string();
     match draft.evaluate(app, expr) {
         Ok(scratch) => {
-            draft.preview = scratch.world_state();
+            draft.preview = crate::open_meshing::session_world(&scratch);
             draft.preview_doc = scratch.doc.clone();
             draft.error = None;
         }
@@ -314,7 +314,7 @@ fn draft_of(app: &SolveApp, sketch: u64, entities: &[String], at: Option<Vec2>, 
         entities: entities.to_vec(),
         at,
         checked_expr: expr.clone(),
-        preview: scratch.world_state(),
+        preview: crate::open_meshing::session_world(&scratch),
         preview_doc: scratch.doc.clone(),
         error: None,
         driven,
@@ -680,7 +680,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     });
     let placing = !editing();
     let draft = editor_draft.or_else(|| placing.then(|| placement_preview(app)).flatten());
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else {
         DRAWN.with(|d| d.borrow_mut().clear());
         // Only a finished sketch's dimension edited from the model view stays open, at its text.
@@ -1402,7 +1402,7 @@ mod tests {
         h.settle();
         h.app.run("parameters.change", json!({"name":param,"expression":"30"})).unwrap();
         h.settle();
-        let state = h.app.session.world_state();
+        let state = crate::open_meshing::session_world(&h.app.session);
         let solved = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
         let c = solved.sketch.constraints.iter().find(|c| c.param.as_deref() == Some(param.as_str())).unwrap();
         // The placed offset (15 above the measured line) is kept with the dimension.

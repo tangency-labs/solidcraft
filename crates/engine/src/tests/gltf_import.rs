@@ -62,6 +62,7 @@ impl Cube {
 fn shown_boxes(s: &Session) -> Vec<[i64; 6]> {
     let mut out: Vec<[i64; 6]> = s
         .world_state()
+        .unwrap()
         .bodies
         .iter()
         .map(|b| {

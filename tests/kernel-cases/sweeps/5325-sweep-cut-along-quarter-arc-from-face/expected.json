@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5325"
+ ],
+ "what": "a sweep cut of a circle r5 on a 50x50x45 block's bottom face along a quarter arc r20 that leaves the face square to it and bends into the block: truck closed the entry hole with a disc and left a void shell behind it",
+ "source": "analytic",
+ "method": "the tube's centre line has length 10 pi: V = 50*50*45 - 25 pi * 10 pi = 110032.599. Faces: the six block faces (the bottom with the entry hole), the tube wall and its end disc inside the block = 8; one shell. Area = 14000 - 25 pi + 2 pi 5 * 10 pi + 25 pi = 14986.960",
+ "body_count": 1,
+ "shells": 1,
+ "faces": 8,
+ "volume_mm3": 110032.5989,
+ "area_mm2": 14986.9604
+}

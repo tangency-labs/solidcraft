@@ -18,7 +18,7 @@ fn near(a: Vec3, b: Vec3) -> bool {
 }
 
 fn world_bbox(s: &Session, body: &str) -> (Vec3, Vec3) {
-    let w = s.world_state();
+    let w = s.world_state().unwrap();
     let b = w.body(body).unwrap_or_else(|| panic!("no body {body}")).mesh().bounds();
     (b.min, b.max)
 }
@@ -72,9 +72,13 @@ fn sketches_and_planes_move_with_the_component() {
 fn world_picks_map_into_the_component() {
     let mut s = moved_part();
     let v0 = volume(&mut s);
+    assert!((v0 - 6000.0).abs() < 1e-6, "{v0}"); // 30 x 20 x 10
     // The edge along X at the top front: world (65, 0, 10).
     run(&mut s, "solid.fillet", json!({"edges": [[65, 0, 10]], "radius": 2}));
-    assert!(volume(&mut s) < v0 - 1.0, "the fillet cut material");
+    let filleted = volume(&mut s);
+    // A round of radius 2 along the 30 mm edge removes r²(1 − π/4) of section along its length.
+    let round = 4.0 * (1.0 - std::f64::consts::PI / 4.0) * 30.0;
+    assert!((v0 - filleted - round).abs() < 4e-7 * v0, "the fillet cut {} against {round}", v0 - filleted);
     // The modified face has no certified lineage; explicitly freeze its picked plane.
     // Its world pick still maps into the moved component exactly once.
     run(&mut s, "sketch.create", json!({"plane": {"face": [70, 10, 10],"fixed":true}, "name": "Pad"}));
@@ -88,7 +92,10 @@ fn world_picks_map_into_the_component() {
     assert!(near(pad, Vec3::new(70.0, 10.0, 10.0)), "{pad:?}");
     let v1 = volume(&mut s);
     let h = run(&mut s, "solid.hole", json!({"position": [60, 10, 10], "diameter": 4, "depth": 5}));
-    assert!(volume(&mut s) < v1 - 1.0, "the hole cut material: {h}");
+    // A simple (flat-bottomed) hole: a cylinder of radius 2, 5 deep, clear of the round at y < 2.
+    let bore = std::f64::consts::PI * 4.0 * 5.0;
+    let v2 = volume(&mut s);
+    assert!((v1 - v2 - bore).abs() < 4e-7 * v1, "the hole cut {} against {bore}: {h}", v1 - v2);
     // A box made at world (100, 0, 0) in the active (moved) component shows there.
     run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0], "operation": "new"}));
     let last = s.model.state().bodies.last().map(|b| b.name.clone()).unwrap();
@@ -108,7 +115,11 @@ fn picks_on_an_instance_map_through_its_placement() {
     // An edge of the second instance only (world y = 40).
     run(&mut s, "solid.fillet", json!({"edges": [[5, 40, 10]], "radius": 2}));
     let v1 = volume(&mut s);
-    assert!(v1 < v0 - 1.0, "{v0} {v1}");
+    // Two 10 mm cubes; the round of radius 2 along one 10 mm edge of the component removes
+    // r²(1 − π/4)·10 from every instance, the picked one and the other.
+    assert!((v0 - 2000.0).abs() < 1e-6, "{v0}");
+    let round = 4.0 * (1.0 - std::f64::consts::PI / 4.0) * 10.0;
+    assert!((v0 - v1 - 2.0 * round).abs() < 4e-7 * v0, "{v0} {v1}");
 }
 
 /// (c) Moving a body into a moved component keeps it where it is in the world.
@@ -415,4 +426,30 @@ fn an_explicit_sketch_plane_is_read_in_the_frame_asked_for() {
         let e = s.execute("sketch.create", &p).expect_err("refused").to_string();
         assert!(e.contains(why), "{p}: {e}");
     }
+}
+
+/// #3383: a root body joined into a body of a component turned a quarter turn about X stays where
+/// it is in the world: the join overlaps the plate by 10 x 5 x 5 and is one solid. When the
+/// component moves on, the join follows where both bodies are placed.
+#[test]
+fn a_combine_tool_stays_where_it_is_placed() {
+    let mut s = Session::default();
+    // The design's first part is grounded when it is made (#2804); this one is moved.
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-20, -20, 0], "body_name": "Plate"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "axis": [1, 0, 0], "angle": "90 deg"}));
+    run(&mut s, "component.capture_position", json!({}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-5, -5, -25], "operation": "new", "body_name": "Boss"}));
+    run(&mut s, "solid.combine", json!({"target": "Plate", "tools": ["Boss"]}));
+    let lumps = |s: &Session| s.model.state().body("Plate").map(|b| b.body.lumps().unwrap().len());
+    assert_eq!(lumps(&s), Some(1), "the boss overlaps the plate where it is shown");
+    assert!((volume(&mut s) - 16750.0).abs() < 1e-6, "{}", volume(&mut s));
+    let (lo, hi) = world_bbox(&s, "Plate");
+    assert!(near(lo, Vec3::new(-20.0, -10.0, -25.0)) && near(hi, Vec3::new(20.0, 5.0, 20.0)), "{lo:?} {hi:?}");
+    // Raised 10 mm, the plate (z -10..30) clears the boss (z -25..-15).
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [0, 0, 10]}));
+    run(&mut s, "component.capture_position", json!({}));
+    assert_eq!(lumps(&s), Some(2), "the boss stays where it is in the world");
+    assert!((volume(&mut s) - 17000.0).abs() < 1e-6, "{}", volume(&mut s));
 }

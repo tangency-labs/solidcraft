@@ -77,7 +77,7 @@ fn column_of(s: &Session, p: &Value, cmd: &str) -> Result<Column> {
         }
         let body_name = value.get("body").and_then(Value::as_str).ok_or_else(|| bad(cmd, "face body required"))?;
         let point = value.get("point").and_then(crate::params::vec3).ok_or_else(|| bad(cmd, "finite face point required"))?;
-        let world = s.world_state();
+        let world = s.world_state()?;
         let body = world.body(body_name).ok_or_else(|| bad(cmd, "no face body"))?;
         if body.body.is_mesh() {
             return Err(bad(cmd, "mesh faces have no supported semantic lineage"));

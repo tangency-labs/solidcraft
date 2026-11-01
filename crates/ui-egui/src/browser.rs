@@ -39,7 +39,9 @@ pub(crate) fn reveal_body(app: &mut SolveApp, body: &str) {
     app.tree.reveal_feature = None;
     app.tree.reveal = Some(body.to_string());
     let state = app.session.model.state();
-    let Some(source) = app.session.world_state().body(body).map(|selected| selected.definition_name().to_string()) else { return };
+    let Some(source) = crate::open_meshing::session_world(&app.session).body(body).map(|selected| selected.definition_name().to_string()) else {
+        return;
+    };
     let Some(component) = state.body(&source).map(|definition| definition.component) else { return };
     // Every component's first placement keeps the definition's name, so the owner must match too.
     let Some((_, path, _)) = app
@@ -267,7 +269,7 @@ fn find_group(app: &SolveApp, id: u64) -> Option<&solidcraft_engine::doc::Browse
 /// World bodies of a component picked in the tree. The root is the whole design; a nested
 /// component is its own placement, including bodies inside it.
 pub(crate) fn bodies_of_component(app: &SolveApp, id: u64) -> Vec<String> {
-    let present: Vec<String> = app.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    let present: Vec<String> = crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).collect();
     let mut names = if id == 0 {
         present.clone()
     } else {
@@ -306,7 +308,7 @@ fn offer_bodies(app: &mut SolveApp, names: &[String], take: Take) -> bool {
     if !dialog_takes_body(app) || app.dialog.as_ref().is_some_and(|d| d.takes_components()) {
         return false;
     }
-    let world = app.session.world_state();
+    let world = crate::open_meshing::session_world(&app.session);
     let picked: Vec<Sel> =
         names.iter().filter(|n| world.body(n).is_some() && !app.session.body_removed_later(n)).map(|n| Sel::Body { name: n.clone() }).collect();
     if picked.is_empty() {
@@ -328,7 +330,7 @@ fn offer_bodies(app: &mut SolveApp, names: &[String], take: Take) -> bool {
 
 /// The bodies in a group (none for sketch and plane groups).
 pub fn group_bodies(app: &SolveApp, id: u64) -> Vec<String> {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     find_group(app, id)
         .filter(|g| g.folder == "bodies")
         .map(|_| app.session.doc.group_item_keys(id).into_iter().filter(|b| st.body(b).is_some()).collect())
@@ -514,7 +516,7 @@ pub(crate) fn toggle_picked_folder(app: &mut SolveApp) -> bool {
 pub fn selection_group(app: &SolveApp, target: &Target) -> Option<Value> {
     let (comp, folder) = match target {
         Target::Body { name } => {
-            let st = app.session.world_state();
+            let st = crate::open_meshing::session_world(&app.session);
             let b = st.body(name)?;
             (b.component, "bodies")
         }
@@ -2315,12 +2317,13 @@ impl Entry {
             key: b.name.clone(),
             row_key: format!("b:{world}"),
             patterns: None,
-            label: b.name.clone(),
+            // A part the modelling kernel refuses says so (Repair Part is in its menu).
+            label: if b.body.smlib_refused().is_some() { crate::i18n::format("browser.needs_repair", &[("name", &b.name)]) } else { b.name.clone() },
             icon,
             tip: Some(tip),
             visible: app.body_visible(&world),
             selected: app.session.selection.iter().any(|s| matches!(s, Sel::Body { name } if name == &world)),
-            color: None,
+            color: b.body.smlib_refused().map(|_| Tokens::get().warning),
             sketch_state: None,
             locked: app.session.visibility.locked_bodies.contains(&world),
             sel: Some(Sel::Body { name: world.clone() }),
@@ -2898,6 +2901,14 @@ fn entry_row(
             ..Default::default()
         },
     );
+    // A part that needs repair, under the pointer: its refused face is ringed in the view.
+    if r.hovered
+        && folder == "bodies"
+        && let Some(Sel::Body { name }) = &e.sel
+        && let Some(face) = app.session.model.state().body(&e.key).and_then(|b| b.body.smlib_refused()).and_then(|r| r.face)
+    {
+        crate::refused_part::ring(app, name, face);
+    }
     if r.fold
         && let Some(key) = pattern_key
     {
@@ -3259,7 +3270,7 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
     let tk = Tokens::get();
     let proj = crate::viewport::projection(app, rect);
     let painter = ctx.layer_painter(egui::LayerId::background()).with_clip_rect(rect);
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     for id in app
         .session
         .visibility

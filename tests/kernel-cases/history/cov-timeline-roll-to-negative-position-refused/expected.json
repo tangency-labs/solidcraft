@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "timeline.roll_to a negative position",
+ "source": "invariants",
+ "method": "a position counts the features to keep active (0 to 2): -1 is refused, not read as 0",
+ "outcome": "refused",
+ "refusal": "`position` -1 is negative"
+}

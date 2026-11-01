@@ -1,0 +1,25 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4492"
+ ],
+ "what": "the top face of a 40x30x10 block whose four top edges are rounded r3, offset 19 mm up: truck refused it ('a corner whose faces don't meet the same way after the move')",
+ "source": "analytic",
+ "method": "the top face's neighbours are the rounds, tangent to it, which cannot extend to meet a plane 19 mm higher; how the gap closes (the rounds carried up with the face, or walls standing on the old face) is the method's choice, so the volume is bounded, not fixed. The block before: 12000 less the four r3 rounds, 2 (40 + 30) 9 (1 - pi/4) less the four corners where two rounds' removals overlap, int_0^3 (3 - sqrt(9 - w^2))^2 dw = 45 - 13.5 pi each: 11739.9557. The result holds the block and the 34 x 24 face's sweep up to z = 29 (+15504: the walls standing on the old face, 27243.9557) and lies within the block's sides and the moved face's plane, 40 x 30 x 29 = 34800 (the rounds carried up give 34539.9557). The unchanged block (11740) falls outside",
+ "body_count": 1,
+ "volume_mm3": [
+  27243.9,
+  34800.0
+ ],
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   30,
+   29
+  ]
+ }
+}

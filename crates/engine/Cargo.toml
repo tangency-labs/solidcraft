@@ -13,10 +13,16 @@ default = []
 # Optional authored texture/HDR bytes; the command registry and metadata remain available.
 bundled-render-library = []
 raytrace-cpu = ["solidcraft-render/raytrace-cpu"]
+# Link SMLib into the kernel (solidcraft-kernel/smlib; needs scripts/fetch-smlib.sh).
+smlib = ["solidcraft-kernel/smlib"]
 # Turns on the parameter-contract audit recorder (`SOLIDCRAFT_PARAM_AUDIT`, see
 # `src/schema/record.rs`), for checking a new contract against the whole test suite.
 param-audit = []
 solver-profiling = ["solidcraft-sketch/solver-profiling"]
+# Compile the profiler in (solidcraft-profile/enabled): every app turns it on by default, so any
+# build can be profiled; it records only once switched on (SOLIDCRAFT_PROFILE=1, the CLI's
+# --profile, the app's preference, diagnostics.profile).
+profile = ["solidcraft-profile/enabled"]
 
 [[example]]
 name = "sketch_analysis_bench"
@@ -37,6 +43,7 @@ solidcraft-kernel = { workspace = true }
 solidcraft-doc = { workspace = true }
 solidcraft-io = { workspace = true }
 solidcraft-render = { workspace = true }
+solidcraft-profile = { workspace = true }
 image = { workspace = true, features = ["jpeg"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -48,6 +55,7 @@ log = { workspace = true }
 web-time = { workspace = true }
 
 [dev-dependencies]
+solidcraft-profile = { workspace = true, features = ["enabled"] }
 # Model-cache tests also run in a source tarball build (no git commit).
 solidcraft-io = { workspace = true, features = ["trust-unknown-source"] }
 # Normal CI exercises profiling assertions without enabling the production feature.

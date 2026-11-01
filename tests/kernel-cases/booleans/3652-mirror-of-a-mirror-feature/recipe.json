@@ -1,0 +1,83 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -50,
+     -30,
+     0
+    ],
+    "length": 100,
+    "width": 60,
+    "height": 10,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      10
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     20,
+     10
+    ],
+    "radius": 3
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 10,
+    "direction": "negative",
+    "operation": "cut",
+    "targets": [
+     "Plate"
+    ]
+   }
+  },
+  {
+   "command": "solid.mirror",
+   "params": {
+    "features": [
+     "Extrude1"
+    ],
+    "plane": "YZ"
+   }
+  },
+  {
+   "command": "solid.mirror",
+   "params": {
+    "features": [
+     "Mirror1"
+    ],
+    "plane": "XZ"
+   }
+  }
+ ]
+}

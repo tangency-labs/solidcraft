@@ -28,6 +28,7 @@ pub mod linalg;
 mod link;
 mod loci;
 mod model;
+mod nurbs;
 mod offset;
 mod offset_topology;
 mod pattern;
@@ -60,6 +61,7 @@ pub use model::{
     Constraint, ConstraintKind, Curve, CurveKind, MAX_CONSTRAINTS, MAX_COORD, MAX_CURVES, MAX_POINTS, PointExprs, SPoint, Sketch, SketchError,
     SketchView, TwoCircles,
 };
+pub use nurbs::Nurbs;
 pub use offset::OffsetChain;
 pub use offset_topology::{OffsetCreated, OffsetRole, OffsetRoleFlags, OffsetRoleKind, OffsetTopology};
 pub use pattern::{PatternAlignment, PatternInstance, SketchPattern, SketchPatternKind};
@@ -77,7 +79,7 @@ pub use solver::{
 };
 pub use text::{MAX_TEXT_CHARS, TextAlign, TextMetrics, TextStyle, text_geometry, text_geometry_in, text_geometry_styled};
 pub use thin::{MAX_THIN_SEGMENTS, thin_wall_regions};
-pub use wire::{MAX_FIT_POINTS, MAX_WIRE_POINTS, Wire, WireArc, WireSpace, arc_from_3_points, arc_polyline, arc_sweep, fit_polyline};
+pub use wire::{MAX_FIT_POINTS, MAX_WIRE_POINTS, Wire, WireArc, WireCurve, WireSpace, arc_from_3_points, arc_polyline, arc_sweep, fit_polyline};
 
 #[cfg(test)]
 mod circle_edge_tests;

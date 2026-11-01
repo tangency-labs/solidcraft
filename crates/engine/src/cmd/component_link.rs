@@ -173,11 +173,11 @@ fn read_link(file: &Path, own: Option<&str>) -> Result<Vec<u8>> {
     })
 }
 
-/// The solid bodies of the design at `file`, evaluated, as an Import feature, with the digest of
+/// The solid bodies of the design at `file`, evaluated under `validation`, as an Import feature, with the digest of
 /// the bytes read, which the link keeps ([`DesignLink::file_sha256`], #9739).
-fn linked_bodies_read(file: &Path, own: Option<&str>) -> Result<(Linked, String)> {
+fn linked_bodies_read(file: &Path, own: Option<&str>, validation: solidcraft_kernel::Validation) -> Result<(Linked, String)> {
     let bytes = read_link(file, own)?;
-    Ok((design_bodies(file, &bytes)?, DesignLink::file_digest(&bytes)))
+    Ok((design_bodies(file, &bytes, validation)?, DesignLink::file_digest(&bytes)))
 }
 
 /// Linked files' digests as [`file_sha256`] last worked them out, by file, with the time and
@@ -209,7 +209,7 @@ pub(super) fn file_sha256(file: &Path, own: Option<&str>) -> Option<String> {
 
 /// The solid bodies of `bytes`, the design at `file`, as an Import feature. The model the file
 /// keeps is its evaluation when this build saved it for exactly that design, as when it is opened.
-fn design_bodies(file: &Path, bytes: &[u8]) -> Result<Linked> {
+fn design_bodies(file: &Path, bytes: &[u8], validation: solidcraft_kernel::Validation) -> Result<Linked> {
     #[cfg(test)]
     EVALUATED.with(|n| n.set(n.get() + 1));
     let shown = file.display().to_string();
@@ -221,7 +221,8 @@ fn design_bodies(file: &Path, bytes: &[u8]) -> Result<Linked> {
     } else {
         (solidcraft_io::read_design(bytes).map_err(fail)?, None)
     };
-    let (name, feature, faces, metadata, properties) = session_bodies(&Session::opened_at(doc, saved.as_ref(), Some(&shown)), &shown)?;
+    let (name, feature, faces, metadata, properties) =
+        session_bodies(&Session::opened_at_validating(doc, saved.as_ref(), Some(&shown), validation), &shown)?;
     remember_read(file, digest(bytes), &feature, &faces, &properties);
     Ok((name, feature, faces, metadata, properties))
 }
@@ -232,7 +233,7 @@ fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
     if let Some(e) = part.model.results.iter().find_map(|r| r.error.clone()) {
         return Err(EngineError::Other(format!("{shown}: the design has a feature that fails ({e}); fix it before linking it")));
     }
-    let world = part.world_state();
+    let world = part.world_state()?;
     let solids: Vec<String> = world.bodies.iter().filter(|b| !b.body.is_mesh()).map(|b| b.name.clone()).collect();
     if solids.is_empty() {
         return Err(EngineError::Other(format!("{shown}: the design has no solid bodies to link")));
@@ -510,7 +511,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
             return super::component::copy_occurrence(s, &json!({"component": component, "parent": parent, "translate": translate}));
         }
     }
-    let ((design_name, sf, faces, metadata, properties), read) = linked_bodies_read(&file, s.path.as_deref())?;
+    let ((design_name, sf, faces, metadata, properties), read) = linked_bodies_read(&file, s.path.as_deref(), s.validation())?;
     let name = str_(p, "name").filter(|n| !n.trim().is_empty()).map(str::to_string).unwrap_or(design_name);
     let mut create = json!({"name": name, "activate": false});
     // Clipboard insertion uses reuse even for the first paste, which must stay movable.
@@ -619,7 +620,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             }
             continue;
         }
-        let (_, sf, faces, _, properties) = match design_bodies(&file, &bytes) {
+        let (_, sf, faces, _, properties) = match design_bodies(&file, &bytes, s.validation()) {
             Ok(read) => read,
             Err(e) if go_on => {
                 // It keeps its bodies, so it has not taken this file in yet.
@@ -736,7 +737,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Read/evaluate the candidate before changing anything. Session::execute owns the single
     // undo step and restores both the document and evaluated state on any later failure.
-    let ((_, sf, faces, _, properties), read) = linked_bodies_read(&file, s.path.as_deref()).map_err(|e| bad(cmd, e.to_string()))?;
+    let ((_, sf, faces, _, properties), read) = linked_bodies_read(&file, s.path.as_deref(), s.validation()).map_err(|e| bad(cmd, e.to_string()))?;
     let geometry_changed = match (s.doc.feature(link.feature).map(|f| &f.kind), &sf.kind) {
         (Some(FeatureKind::Import { step: old, .. }), FeatureKind::Import { step, .. }) => old != step,
         _ => true,

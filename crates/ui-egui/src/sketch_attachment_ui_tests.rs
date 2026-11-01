@@ -59,8 +59,8 @@ fn lost_attachment_ghost_rebind_preview_cancel_apply_and_undo_preserve_sketch() 
     h.app.run("solid.extrude", json!({"sketch":sketch,"distance":2,"operation":"new_body","body_name":"Boss"})).unwrap();
     h.app.run("timeline.suppress", json!({"feature":"Original","suppressed":true})).unwrap();
     assert!(h.app.session.model.result(sketch).unwrap().error.is_some());
-    assert!(h.app.session.world_state().body("Boss").is_none(), "lost attachment cannot produce a Boss on ControlBox");
-    assert!(h.app.session.world_state().sketch(sketch).is_none(), "saved repair guides are not solved sketch geometry");
+    assert!(h.app.session.world_state().unwrap().body("Boss").is_none(), "lost attachment cannot produce a Boss on ControlBox");
+    assert!(h.app.session.world_state().unwrap().sketch(sketch).is_none(), "saved repair guides are not solved sketch geometry");
     let raw = raw_sketch(&h, sketch);
     let before = h.app.session.doc.to_json();
     h.app.edit_sketch(sketch);
@@ -111,7 +111,7 @@ fn lost_attachment_ghost_rebind_preview_cancel_apply_and_undo_preserve_sketch() 
     assert_eq!(raw_sketch(&h, sketch), raw, "curves, dimensions and expressions remain exact");
     assert_eq!(h.app.session.undo.len(), undo + 1);
     assert!(h.app.session.model.result(sketch).unwrap().error.is_none());
-    let boss = h.app.session.world_state().body("Boss").unwrap().mesh().bounds();
+    let boss = h.app.session.world_state().unwrap().body("Boss").unwrap().mesh().bounds();
     assert!((boss.min.z - 30.0).abs() < 1e-7 && (boss.max.z - 32.0).abs() < 1e-7);
     let repaired = h.app.session.doc.to_json();
     let path = h.dir.join("rebound-face.solidcraft");
@@ -263,7 +263,7 @@ fn nested_anchor_saved_fixed_conversion_preserves_rotated_second_author_plane() 
     h.app.run("component.activate", json!({"component":component,"path":[second],"occurrence":second})).unwrap();
     let doc = h.app.session.placed_document();
     let body_name = doc.body_frames_with_source(&h.app.session.model.state()).into_iter().find(|(_, _, _, path, _)| path == &[second]).unwrap().0;
-    let world = h.app.session.world_state();
+    let world = h.app.session.world_state().unwrap();
     let face = world
         .body(&body_name)
         .unwrap()

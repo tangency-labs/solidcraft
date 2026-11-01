@@ -27,6 +27,18 @@ pub(crate) fn hint_field(ui: &mut Ui, value: &mut String, hint: &str) -> bool {
     editor(ui, value, hint, true).0
 }
 
+/// [`hint_field`] for a value the form checks before it runs: `flagged`, it is outlined in the
+/// warning colour (the caller says why in words under it, [`super::warning_caption`]). Returns
+/// accepted Enter and the editor's response. Tokens: `same as field, warning`.
+pub(crate) fn checked_field(ui: &mut Ui, value: &mut String, hint: &str, flagged: bool) -> (bool, Response) {
+    let (enter, _, response) = editor(ui, value, hint, true);
+    if flagged {
+        let t = Tokens::get();
+        ui.painter().rect_stroke(response.rect, t.control_radius, egui::Stroke::new(1.5, t.warning), egui::StrokeKind::Inside);
+    }
+    (enter, response)
+}
+
 /// The whole numbers a count field may hold, and how its text evaluates (parameters and
 /// expressions included). `eval` returns None for text that is not a value.
 pub(crate) struct Count<'a> {
@@ -112,6 +124,13 @@ fn step_count(text: &str, delta: i64, limits: &Count<'_>) -> Option<String> {
 /// Plain text editor without expression completion; returns (Enter, changed). Tokens: `same as field`.
 pub(crate) fn text_field(ui: &mut Ui, value: &mut String, hint: &str) -> (bool, bool) {
     let (enter, changed, _) = editor(ui, value, hint, false);
+    (enter, changed)
+}
+
+/// [`text_field`] with a tooltip; returns (Enter, changed). Tokens: `same as field`.
+pub(crate) fn text_field_tip(ui: &mut Ui, value: &mut String, hint: &str, tip: &str) -> (bool, bool) {
+    let (enter, changed, response) = editor(ui, value, hint, false);
+    response.on_hover_text(tip);
     (enter, changed)
 }
 

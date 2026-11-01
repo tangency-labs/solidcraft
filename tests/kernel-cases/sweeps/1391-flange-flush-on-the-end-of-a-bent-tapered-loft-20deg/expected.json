@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1391",
+  "tangency-labs/solidcraft#1556"
+ ],
+ "what": "a half tube (6 mm wall, inner radius tapering 60 to 75 mm) lofted through 5 sections along an R300 bend of 20 degrees, with an 8 mm half-annulus flange (inner radius +3 into the wall, outer +25 beyond it) extruded from the end plane outward and joined: the flange face lies in the end plane (\"Union: no result\")",
+ "source": "analytic",
+ "method": "each section is a half annulus in a plane through the bend axis, centred on the path, so Pappus holds with the section area A(t) = pi/2 (12 r(t) + 36), r(t) = 60 + 15 t: V_tube = R theta * pi/2 (12 * 67.5 + 36), R = 300, theta = 20 degrees = 139161.4. The flange stands outside the tube end plane and touches the tube only along the coplanar end face, so V = V_tube + V_flange, V_flange = pi/2 (106^2 - 78^2) 8 = 64741.9. One body.",
+ "body_count": 1,
+ "volume_mm3": 203903.36346053838
+}

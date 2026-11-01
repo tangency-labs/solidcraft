@@ -1,0 +1,120 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     41.5,
+     -21
+    ]
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l2"
+    ],
+    "text_at": [
+     36.5,
+     -8.5
+    ],
+    "value": "21 mm"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "infer": true,
+    "points": [
+     "p2",
+     [
+      61.5,
+      -21
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l5"
+    ],
+    "text_at": [
+     54.5,
+     -26.5
+    ],
+    "value": "21"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": "l5.end",
+    "radius": 21
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "infer": true,
+    "points": [
+     "p3",
+     [
+      62.166666666666664,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.constraint.tangent",
+   "params": {
+    "a": "c1",
+    "b": "l6"
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "direction": "positive",
+    "distance": "10 mm",
+    "operation": "new",
+    "profiles": [
+     0,
+     1
+    ],
+    "sketch": 1
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      62.166666666666664,
+      0,
+      5
+     ]
+    ],
+    "distance": 2,
+    "tangent_chain": false
+   }
+  }
+ ]
+}

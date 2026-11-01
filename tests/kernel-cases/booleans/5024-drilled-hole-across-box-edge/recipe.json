@@ -1,0 +1,26 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 20
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     0,
+     15,
+     20
+    ],
+    "diameter": 8,
+    "depth": 10,
+    "type": "drilled",
+    "tip_angle": 118
+   }
+  }
+ ]
+}

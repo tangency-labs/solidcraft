@@ -1,0 +1,28 @@
+{
+ "sources": [],
+ "what": "a modelled M10 thread over 15 of the 30 mm from the top end (`from`): it stops square in the middle of the face",
+ "source": "analytic",
+ "method": "ISO 68-1 basic profile (60 deg, root flat P/4 at d - 5H/4 ... minor d1 = d - 1.0825 P, crest flat P/8): a helical groove of fixed section is a screw motion, so averaged over the turn every meridian half-plane holds the same section and V = 2 pi int int r m(r) dr dz over the stock's section, m the material fraction per pitch; the groove runs out past free ends. ; the thread runs from the top end (z=30, out past it into the air) down to z=15, where it stops square: there the groove's section is symmetric about its centre line, so the sweep's last section cuts behind the stop what it leaves ahead of it, and the stop removes exactly as if the groove ended at z=15: V = pi 5^2 15 + 2 pi int_15^30 int r m(r) dr dz. The centre of mass is on the axis (ten whole turns; the stop's pieces are under 0.02 mm off it) at z = (pi 25 15 x 7.5 + V_threaded x 22.5) / V; the stop's first moment, O(w^2), moves it under 0.002 mm. A pick at z=15 alone would be refused: both ends are free. Tolerance 0.05%: the groove is SMLib's exact screw sweep",
+ "body_count": 1,
+ "volume_mm3": 2155.220203721,
+ "center_of_mass": [
+  0,
+  0,
+  14.300624991390395
+ ],
+ "bbox": {
+  "min": [
+   -5,
+   -5,
+   0
+  ],
+  "max": [
+   5,
+   5,
+   30
+  ]
+ },
+ "tolerance": {
+  "rel": 0.0005
+ }
+}

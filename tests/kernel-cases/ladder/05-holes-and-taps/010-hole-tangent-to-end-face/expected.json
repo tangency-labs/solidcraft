@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a d10 through hole tangent to the end face x=0",
+ "source": "analytic",
+ "method": "the wall touches x=0 along a line: removed pi 5^2 20, one body",
+ "body_count": 1,
+ "volume_mm3": 46429.203673205
+}

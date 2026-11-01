@@ -497,8 +497,8 @@ const JSON_STEPS: [JsonStep; HAND_WRITTEN as usize - 1] = [
 ];
 
 /// Stored face and edge names were worked out from geometry before format 14; they get the
-/// legacy mark (`?`, see `naming::LEGACY_MARK`) so they are found again as those builds found
-/// them, and an older design evaluates as it was saved. The step marks the fields that store
+/// legacy mark (`?`, see `naming::LEGACY_MARK`), which finds no face or edge: a feature holding
+/// one fails, asking for its reference to be picked again. The step marks the fields that store
 /// such a name, by their place in the schema:
 /// - each feature's `face_names`, and fillets' and chamfers' `edge_names` (other features' edge
 ///   names are sheet metal's own);
@@ -756,10 +756,14 @@ pub fn read(s: &str) -> Result<Document> {
     if let Some(id) = crate::non_contiguous_timeline_group(&d.features, &d.timeline_groups) {
         return Err(DocError::Invalid(format!("damaged design: timeline folder {id} is not contiguous")));
     }
-    for o in &d.occurrences {
-        if !rigid(&o.transform) {
-            return Err(DocError::Invalid(format!("damaged design: occurrence `{}` has an invalid placement", o.name)));
-        }
+    // Every occurrence whose placement is not a rigid motion within range, by name.
+    let unplaced: Vec<String> = d.occurrences.iter().filter(|o| !crate::is_placement(&o.transform)).map(|o| format!("`{}`", o.name)).collect();
+    if !unplaced.is_empty() {
+        return Err(DocError::Invalid(format!(
+            "damaged design: {} not placed by a rigid motion within 1e9 mm: {}",
+            if unplaced.len() == 1 { "an occurrence is" } else { "occurrences are" },
+            unplaced.join(", ")
+        )));
     }
     if !all_unique(d.features.iter().map(|f| f.id))
         || !all_unique(d.components.iter().map(|c| c.id))
@@ -774,6 +778,7 @@ pub fn read(s: &str) -> Result<Document> {
             sketch.validate_wires().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_patterns().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_periodic_splines().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+            sketch.validate_spline_knots().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
         }
         if let crate::FeatureKind::BodyTransfer { from, to, .. } = &feature.kind
             && [from, to].into_iter().any(|id| !component_ids.contains(id))
@@ -1223,26 +1228,6 @@ fn check_numbers(v: &Value, noun: &str, depth: usize) -> Result<()> {
         _ => {}
     }
     Ok(())
-}
-
-/// A placement: rotation (orthonormal, not mirrored) and a translation in range.
-fn rigid(m: &crate::Mat) -> bool {
-    let row = |i: usize| m.get(i).copied().unwrap_or_default();
-    let (x, y, z, t) = (row(0), row(1), row(2), row(3));
-    let dot = |a: [f64; 4], b: [f64; 4]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    let unit = |a: [f64; 4]| (dot(a, a) - 1.0).abs() < 1e-6;
-    let det = x[0] * (y[1] * z[2] - y[2] * z[1]) - x[1] * (y[0] * z[2] - y[2] * z[0]) + x[2] * (y[0] * z[1] - y[1] * z[0]);
-    m.iter().flatten().all(|v| v.is_finite())
-        && unit(x)
-        && unit(y)
-        && unit(z)
-        && dot(x, y).abs() < 1e-6
-        && dot(y, z).abs() < 1e-6
-        && dot(x, z).abs() < 1e-6
-        && det > 0.0
-        && [x[3], y[3], z[3]].iter().all(|v| v.abs() < 1e-9)
-        && (t[3] - 1.0).abs() < 1e-9
-        && t[..3].iter().all(|v| v.abs() <= MAX_REAL)
 }
 
 /// Feature input names and component occurrences, which format 1 files may predate.
@@ -1909,6 +1894,7 @@ mod tests {
                         start_offset: None,
                         through_all: false,
                         taper: Some("0 deg".into()),
+                        corner: Default::default(),
                         to: Some(crate::FacePick(solidcraft_geom::Vec3::new(0.0, 0.0, 10.0))),
                         to_offset: Some("offset + 1 mm".into()),
                         from: Some(crate::FacePick(solidcraft_geom::Vec3::new(0.0, 0.0, 5.0))),
@@ -2105,7 +2091,7 @@ mod tests {
         let first = pts[0];
         let neighbor = pts[1];
         let closing = pts[3];
-        sketch.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true }, None).unwrap();
+        sketch.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true, nurbs: None }, None).unwrap();
         let mut document = Document::new("periodic file validation");
         document.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
         assert_eq!(read(&document.to_json()).unwrap(), document);

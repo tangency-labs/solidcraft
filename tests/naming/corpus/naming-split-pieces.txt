@@ -1,0 +1,47 @@
+# corpus/naming-split-pieces: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Body1: 12 faces, 30 edges
+Body1 face F2:side:l1
+Body1 face F2:side:l2
+Body1 face F2:side:l3
+Body1 face F2:side:l4
+Body1 face F2:start
+Body1 face F2:top#[F2:side:l2,F4:side:l2]
+Body1 face F2:top#[F2:side:l4,F4:side:l4]
+Body1 face F4:side:l2
+Body1 face F4:side:l4
+Body1 face F4:top
+Body1 face F5:blend:F2:side:l2|F2:top#[F2:side:l2,F4:side:l2]
+Body1 face F6:blend:F2:side:l4|F2:top#[F2:side:l4,F4:side:l4]
+Body1 edge F2:side:l1|F2:side:l2
+Body1 edge F2:side:l1|F2:side:l4
+Body1 edge F2:side:l1|F2:start
+Body1 edge F2:side:l1|F2:top#[F2:side:l2,F4:side:l2]
+Body1 edge F2:side:l1|F2:top#[F2:side:l4,F4:side:l4]
+Body1 edge F2:side:l1|F4:side:l2
+Body1 edge F2:side:l1|F4:side:l4
+Body1 edge F2:side:l1|F4:top
+Body1 edge F2:side:l1|F5:blend:F2:side:l2|F2:top#[F2:side:l2,F4:side:l2]
+Body1 edge F2:side:l1|F6:blend:F2:side:l4|F2:top#[F2:side:l4,F4:side:l4]
+Body1 edge F2:side:l2|F2:side:l3
+Body1 edge F2:side:l2|F2:start
+Body1 edge F2:side:l2|F5:blend:F2:side:l2|F2:top#[F2:side:l2,F4:side:l2]
+Body1 edge F2:side:l3|F2:side:l4
+Body1 edge F2:side:l3|F2:start
+Body1 edge F2:side:l3|F2:top#[F2:side:l2,F4:side:l2]
+Body1 edge F2:side:l3|F2:top#[F2:side:l4,F4:side:l4]
+Body1 edge F2:side:l3|F4:side:l2
+Body1 edge F2:side:l3|F4:side:l4
+Body1 edge F2:side:l3|F4:top
+Body1 edge F2:side:l3|F5:blend:F2:side:l2|F2:top#[F2:side:l2,F4:side:l2]
+Body1 edge F2:side:l3|F6:blend:F2:side:l4|F2:top#[F2:side:l4,F4:side:l4]
+Body1 edge F2:side:l4|F2:start
+Body1 edge F2:side:l4|F6:blend:F2:side:l4|F2:top#[F2:side:l4,F4:side:l4]
+Body1 edge F2:top#[F2:side:l2,F4:side:l2]|F4:side:l2
+Body1 edge F2:top#[F2:side:l2,F4:side:l2]|F5:blend:F2:side:l2|F2:top#[F2:side:l2,F4:side:l2]
+Body1 edge F2:top#[F2:side:l4,F4:side:l4]|F4:side:l4
+Body1 edge F2:top#[F2:side:l4,F4:side:l4]|F6:blend:F2:side:l4|F2:top#[F2:side:l4,F4:side:l4]
+Body1 edge F4:side:l2|F4:top
+Body1 edge F4:side:l4|F4:top
+ref Round (5) edge 0 `?F2:side:l2|F2:top#2` -> Body1 edge F2:side:l2|F2:top#[F2:side:l2,F4:side:l2] [geometric, legacy]
+ref Bevel (6) edge 0 `?F2:side:l4|F2:top#1` -> Body1 edge F2:side:l4|F2:top#[F2:side:l4,F4:side:l4] [geometric, legacy]
+ref Raise (7) face 0 `?F2:top#1` -> Body1 face F2:top#[F2:side:l4,F4:side:l4] [geometric, legacy]

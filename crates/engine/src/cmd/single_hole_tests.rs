@@ -20,7 +20,7 @@ fn volume(s: &mut Session) -> f64 {
 }
 
 fn solid_at(s: &Session, p: Vec3) -> bool {
-    s.model.state().bodies.iter().any(|b| b.body.contains(p))
+    s.model.state().bodies.iter().any(|b| b.body.classify_point(p).unwrap() == solidcraft_kernel::PointClass::Inside)
 }
 
 /// The circle `c1`'s centre: its point id and where it is in the world.
@@ -132,4 +132,30 @@ fn a_far_body_does_not_change_a_countersunk_hole() {
     assert!((small - large).abs() < 1e-3, "lid volume {small} with a 1 mm far body, {large} with a large one");
     assert_eq!(small_changed, large_changed, "bodies changed");
     assert_eq!(large_changed, json!(["lid"]), "only the lid is drilled");
+}
+
+/// #5041: a countersunk Ø6.4 hole (Ø13.7, 90°) 0.15 mm from a wall standing on the plate cuts
+/// nothing above the entry face: the countersink's rim (y 29.85) stays clear of the wall (y 30).
+/// 10 faces: bottom, the two L-shaped ends, front and back, the plate top, the wall's front and
+/// top, the cone and the bore.
+#[test]
+fn a_countersink_beside_a_wall_stays_below_the_face() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 8, "corner": [0, 0, 0]}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 10, "height": 30, "corner": [0, 30, 8], "operation": "join"}));
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [20, 23, 8], "direction": [0, 0, -1], "diameter": 6.4, "type": "countersink", "cs_diameter": 13.7, "cs_angle": 90}),
+    );
+    let st = s.model.state();
+    let [body] = st.bodies.as_slice() else { panic!("one body, got {}", st.bodies.len()) };
+    assert_eq!(body.body.face_count(), 10, "the wall is not notched");
+    // In the wall's foot, 0.4 mm above the face: still solid.
+    assert!(solid_at(&s, Vec3::new(20.0, 30.2, 8.4)), "the wall's foot is cut");
+    let (rr, r, h) = (6.85_f64, 3.2_f64, 3.65_f64);
+    let removed = PI * h / 3.0 * (rr * rr + rr * r + r * r) + PI * r * r * (8.0 - h);
+    let want = 24800.0 - removed;
+    let got = volume(&mut s);
+    assert!((got - want).abs() < 1e-3, "volume {got}, want {want}");
 }

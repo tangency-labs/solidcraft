@@ -1,0 +1,26 @@
+{
+ "sources": [],
+ "what": "a 3 mm chamfer on the top front edge, then r2 rounds on the front vertical edges that meet it",
+ "source": "analytic",
+ "method": "the chamfer removes 3^2/2 60. The front vertical edges then run z 0..17; each r2 round removes (1-pi/4) 2^2 17 below and runs on up into the chamfer face z = 17 + y: over its section it removes a column y high, int y dA = (1-pi/4) 2^2 x 2 (10-3pi)/(12-3pi) (the section's centroid). Faces 6 + chamfer + 2 rounds; vertices: 6 round the bottom, 4 of the top face, the front face's 2 top corners, the 2 tops of the rounds' tangent lines on the ends (z = 19): 14; edges 21 (Euler)",
+ "body_count": 1,
+ "volume_mm3": 47700.047187503,
+ "faces": 9,
+ "edges": 21,
+ "vertices": 14,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   20
+  ]
+ },
+ "tolerance": {
+  "rel": 1e-05
+ }
+}

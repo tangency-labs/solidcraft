@@ -249,7 +249,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     h.frames(3);
 
     let body = h.app.session.model.state().bodies.first().unwrap().name.clone();
-    let sketch = h.app.session.world_state().sketches.first().unwrap().feature;
+    let sketch = h.app.session.world_state().unwrap().sketches.first().unwrap().feature;
     for target in [
         json!({"type":"viewport"}),
         json!({"type":"body","name":body}),

@@ -1,0 +1,17 @@
+{
+ "base": "../../10-patterns-and-mirrors/008-part-vents",
+ "commands": [
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     23,
+     15,
+     25
+    ],
+    "modeled": true,
+    "designation": "M16"
+   }
+  }
+ ]
+}

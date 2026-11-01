@@ -1,0 +1,34 @@
+# oracle/04-revolve-vase: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Vase: 11 faces, 21 edges
+Vase face F2:side:a1#1
+Vase face F2:side:a1#2
+Vase face F2:side:a1#3
+Vase face F2:side:l1
+Vase face F2:side:l2#1
+Vase face F2:side:l2#2
+Vase face F2:side:l2#3
+Vase face F2:side:l3#1
+Vase face F2:side:l3#2
+Vase face F2:side:l3#3
+Vase face F2:side:l4
+Vase edge F2:side:a1#1|F2:side:a1#2
+Vase edge F2:side:a1#1|F2:side:a1#3
+Vase edge F2:side:a1#1|F2:side:l2#1
+Vase edge F2:side:a1#1|F2:side:l3#1
+Vase edge F2:side:a1#2|F2:side:a1#3
+Vase edge F2:side:a1#2|F2:side:l2#2
+Vase edge F2:side:a1#2|F2:side:l3#2
+Vase edge F2:side:a1#3|F2:side:l2#3
+Vase edge F2:side:a1#3|F2:side:l3#3
+Vase edge F2:side:l1|F2:side:l2#1
+Vase edge F2:side:l1|F2:side:l2#2
+Vase edge F2:side:l1|F2:side:l2#3
+Vase edge F2:side:l2#1|F2:side:l2#2
+Vase edge F2:side:l2#1|F2:side:l2#3
+Vase edge F2:side:l2#2|F2:side:l2#3
+Vase edge F2:side:l3#1|F2:side:l3#2
+Vase edge F2:side:l3#1|F2:side:l3#3
+Vase edge F2:side:l3#1|F2:side:l4
+Vase edge F2:side:l3#2|F2:side:l3#3
+Vase edge F2:side:l3#2|F2:side:l4
+Vase edge F2:side:l3#3|F2:side:l4

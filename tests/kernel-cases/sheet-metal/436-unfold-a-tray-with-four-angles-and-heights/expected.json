@@ -1,0 +1,23 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#436",
+  "tangency-labs/solidcraft#447",
+  "tangency-labs/solidcraft#501"
+ ],
+ "what": "one edge flange feature whose four edges carry 75, 90, 105 and 120 degrees and heights 38.6, 38.6, 30 and 25, with corners between unequal angles closed, unfolded",
+ "source": "analytic",
+ "method": "a flange of angle th, outer leg length Hf (height, from the virtual sharp along the flange) bends with allowance BA = th(R+Kt) and bend deduction BD = 2(R+t)tan(th/2) - BA; unfolded it lies in the base's plane and reaches Hf - BD beyond the base's edge. T = 2, R = 1, K = 0.5. BD = 1.9860, 2.8584, 4.1542, 6.2035 for 75, 90, 105, 120 degrees, so the flat reaches 36.6140 below, 35.7416 right of, 25.8458 above and 18.7965 left of the 120 x 90 base",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   -18.79648535937313,
+   -36.614031950117734,
+   0
+  ],
+  "max": [
+   155.7415926535898,
+   115.84583919214086,
+   2
+  ]
+ }
+}

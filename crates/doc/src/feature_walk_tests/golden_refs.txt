@@ -239,3 +239,5 @@ import
 mesh_convert
   remap_bodies: body
 mesh_import
+repair
+  remap_bodies: body

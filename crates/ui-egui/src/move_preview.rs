@@ -79,7 +79,7 @@ impl MovePreview {
             .as_ref()
             .is_none_or(|c| c.revision != app.session.revision || !Arc::ptr_eq(&c.document, &app.session.doc) || c.bodies != bodies)
         {
-            let state = app.session.world_state();
+            let state = crate::open_meshing::session_world(&app.session);
             let meshes: Vec<Arc<Mesh>> = bodies.iter().map(|n| state.body(n).map(|b| b.mesh())).collect::<Option<_>>()?;
             if meshes.iter().map(|m| m.triangles.len()).sum::<usize>() > MAX_TRIANGLES {
                 return None;
@@ -180,7 +180,7 @@ mod tests {
         // The Move feature on the same body: the preview's extent is the moved body's.
         let mut s = app.session.scratch();
         s.execute("solid.move", &cmds[0].1).unwrap();
-        let moved = s.world_state().body("Plate").unwrap().mesh().bounds();
+        let moved = crate::open_meshing::session_world(&s).body("Plate").unwrap().mesh().bounds();
         assert!(near(built.bounds.min, moved.min) && near(built.bounds.max, moved.max), "{:?} vs {moved:?}", built.bounds);
         // A copy keeps the original shown.
         let copy = [("solid.move".to_string(), json!({"bodies": ["Plate"], "translate": [0, 0, 10], "copy": true}))];

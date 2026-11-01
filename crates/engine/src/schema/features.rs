@@ -7,11 +7,12 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use super::types::{
     AngleExpr, AxisDir, AxisLine, ConventionParam, DirectionParam, ExtentKeyword, ExtrudeOperation, FacesParam, FeatureCommon, FromPoint,
     GeoRefParam, IdOrName, LengthExpr, NumberExpr, OperationParam, PlaneCommon, PlaneOrFace, Point3, PointExpr3, ProfilesParam, ScaleFactors,
-    SketchRef, StringList, ThinSideParam, ToPoint, feature_common, present,
+    SketchRef, StringList, ThinSideParam, ToPoint, TouchingParam, feature_common, present,
 };
 
 /// Add a box primitive.
@@ -41,6 +42,9 @@ pub struct BoxParams {
     /// `participants` lists bodies.
     #[serde(default)]
     pub targets: Option<StringList>,
+    /// What a join makes of pieces that share no face. Default: separate.
+    #[serde(default)]
+    pub touching: Option<TouchingParam>,
     /// The bodies a join, cut or intersect works on, in place of `targets`.
     #[serde(default)]
     pub participants: Option<StringList>,
@@ -138,6 +142,9 @@ pub struct ExtrudeParams {
     /// that body.
     #[serde(default)]
     pub targets: Option<StringList>,
+    /// What a join makes of pieces that share no face. Default: separate.
+    #[serde(default)]
+    pub touching: Option<TouchingParam>,
     /// The bodies taking part; overrides the default scope.
     #[serde(default)]
     pub participants: Option<StringList>,
@@ -167,6 +174,29 @@ pub struct ExtrudeParams {
     /// With `thin` and `side: two_sides`: the thickness outside.
     #[serde(default)]
     pub thickness2: Option<LengthExpr>,
+}
+
+/// Something a feature's result tells the user without stopping them, with an action to take.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct FeatureNotice {
+    /// The text to show.
+    pub message: String,
+    /// How the bodies split off touched the others: `along_edge`, `at_point` or `touching` (along
+    /// a line or at a point their boundaries don't hold).
+    pub contact: String,
+    /// The command that changes the feature as the notice offers.
+    pub action: NoticeAction,
+}
+
+/// A command a notice offers to run.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct NoticeAction {
+    /// The action's label.
+    pub label: String,
+    /// The command's id.
+    pub command: String,
+    /// Its parameters.
+    pub params: Value,
 }
 
 /// Add a cylinder primitive.
@@ -420,6 +450,12 @@ pub struct FeatureResult {
     /// A warning from the evaluation (a Boolean that needed a retry, a reference found again
     /// elsewhere), or `null`.
     pub warning: Option<String>,
+    /// A join that split pieces into bodies of their own because they touch the others only along
+    /// an edge or at a point (its `touching: separate`): what to tell the user, and the edit that
+    /// makes them one body instead. Left out otherwise, also when the join kept pieces that touch
+    /// nothing in one body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<FeatureNotice>,
     /// How long the feature took to evaluate, in milliseconds.
     pub ms: Option<f64>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

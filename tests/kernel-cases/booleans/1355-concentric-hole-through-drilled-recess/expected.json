@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1355",
+  "tangency-labs/solidcraft#1736"
+ ],
+ "what": "a drilled O8.5 recess (118 deg drill point) in a plate, then a O4 hole through its centre: the second cut 'does not work'",
+ "source": "analytic",
+ "method": "plate 30x30x10 = 9000. Hole 1: cylinder O8.5 depth 5 plus the drill point cone (height r/tan(59deg) = 2.55366): V1 = pi r^2 (5 + H/3) = 332.0275. Hole 2: O4 through all, V2 = 40 pi = 125.664. Their overlap = the O4 cylinder over the 5 mm of the recess plus, below it, the part of the cone inside r=2: cone of height 2/(r/H) = 1.20180 (volume pi*4*1.2018/3) and the O4 cylinder over the rest of the cone height: total 84.8545. Removed = V1 + V2 - overlap = 372.8367; V = 9000 - 372.8367 = 8627.1633",
+ "body_count": 1,
+ "volume_mm3": 8627.163303492243
+}

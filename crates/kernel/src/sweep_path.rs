@@ -1,40 +1,21 @@
-//! Sweeps along 3D point paths (3D sketch curves: projected, intersection and included curves).
-//! The profile follows the path with a rotation-minimising frame. Smooth paths get one B-spline
-//! wall per profile segment; paths with sharp corners (or profiles with holes) get ruled walls
-//! between stations, mitred at the corners. Sweep options (orientation, twist, end scale, guide
-//! rails; see [`SweepControl`]) reshape the stations; their default leaves them exactly as
-//! described.
+//! Sweeps along 3D point paths (3D sketch curves: projected, intersection and included curves)
+//! and the laws that place a profile along a path: the rotation-minimising frame and the sweep
+//! options (orientation, twist, end scale, guide rails; see [`SweepControl`]) give the stations
+//! SMLib's controlled sweeps skin through ([`crate::smlib_sweeps`]). A solid along points is
+//! SMLib's sweep along the lines between them ([`sweep_path_with`]).
 
-use mt::builder;
-use solidcraft_geom::{Grid, Plane, Region2, Seg2, Vec2, Vec3};
-use truck_modeling as mt;
+use solidcraft_geom::{Plane, Region2, Seg2, Vec2, Vec3};
 
-use crate::body::{Body, p3};
-use crate::build::{NetFit, cap_and_close, close_sweep, interpolate_net, smooth_loft_faces, uniform_wire};
-use crate::numbered::{NumberedLoop, NumberedRegion};
-use crate::record::{self, Side};
-use crate::{KernelError, Result, guard};
+use crate::body::Body;
+use crate::numbered::NumberedLoop;
+use crate::{KernelError, Result};
 
 /// Most path points accepted.
 const MAX_PATH_POINTS: usize = 100_000;
-/// Stations of a smooth sweep (the B-spline walls interpolate them).
-const MAX_SMOOTH_STATIONS: usize = 120;
-/// Stations of a ruled sweep.
-const MAX_RULED_STATIONS: usize = 2000;
 /// A turn sharper than this between path segments is a corner (radians).
 const CORNER: f64 = 0.35;
-/// Samples per profile segment of the smooth walls.
+/// Samples per profile segment where a closed sweep checks that its last section lands on its first.
 const SEG_SAMPLES: usize = 12;
-/// Stations of a smooth sweep that twists or scales, at the least.
-const MIN_CONTROLLED_STATIONS: usize = 16;
-/// Stations of a smooth sweep that twists or scales, at the most.
-const MAX_CONTROLLED_STATIONS: usize = 160;
-/// Stations of a ruled sweep that twists or scales, at the least.
-const MIN_CONTROLLED_RULED: usize = 64;
-/// The most twist one station of a smooth sweep may carry (radians).
-const SMOOTH_TWIST_STEP: f64 = std::f64::consts::PI / 18.0;
-/// The most twist one station of a ruled sweep may carry (radians).
-const RULED_TWIST_STEP: f64 = std::f64::consts::PI / 36.0;
 
 /// How the profile turns as it follows a sweep path.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -104,7 +85,7 @@ impl SweepControl {
     }
 
     /// Whether the profile changes along the path (it twists, scales or follows rails).
-    fn varies(&self) -> bool {
+    pub(crate) fn varies(&self) -> bool {
         self.twist != 0.0 || self.scale != 1.0 || !self.rails.is_empty()
     }
 
@@ -141,13 +122,13 @@ impl SweepControl {
 
 /// A linear map of world vectors (columns) plus the station it is centred at.
 #[derive(Clone, Copy)]
-struct Station {
-    at: Vec3,
-    m: [Vec3; 3],
+pub(crate) struct Station {
+    pub at: Vec3,
+    pub m: [Vec3; 3],
 }
 
 impl Station {
-    fn apply(&self, v: Vec3) -> Vec3 {
+    pub(crate) fn apply(&self, v: Vec3) -> Vec3 {
         self.m[0] * v.x + self.m[1] * v.y + self.m[2] * v.z
     }
 }
@@ -171,13 +152,9 @@ pub(crate) fn clean(path: &[Vec3]) -> Result<Vec<Vec3>> {
     Ok(out)
 }
 
-pub(crate) fn closed_path(pts: &[Vec3]) -> bool {
-    pts.len() > 3 && pts.first().zip(pts.last()).is_some_and(|(a, b)| a.dist(*b) <= 1e-7)
-}
-
 /// The cyclic correspondence of a loop's last section to its first. Matching whole curves
 /// (rather than vertices alone) prevents sewing an incompatible twist or scale shut.
-fn closing_offset(plane: &Plane, profile: &NumberedLoop, st: &[Station]) -> Result<usize> {
+pub(crate) fn closing_offset(plane: &Plane, profile: &NumberedLoop, st: &[Station]) -> Result<usize> {
     let fail =
         || KernelError::Invalid("a sweep along a closed path must return to its starting profile; adjust the twist, end scale or rails".into());
     let (Some(first), Some(last)) = (st.first(), st.last()) else { return Err(fail()) };
@@ -204,39 +181,6 @@ fn closing_offset(plane: &Plane, profile: &NumberedLoop, st: &[Station]) -> Resu
         .ok_or_else(fail)
 }
 
-fn rotated_wire(wire: &mt::Wire, offset: usize) -> mt::Wire {
-    wire.edge_iter().skip(offset).chain(wire.edge_iter().take(offset)).cloned().collect()
-}
-
-fn turn(a: Vec3, b: Vec3) -> f64 {
-    match (a.normalized(), b.normalized()) {
-        (Some(a), Some(b)) => a.dot(b).clamp(-1.0, 1.0).acos(),
-        _ => 0.0,
-    }
-}
-
-/// Points evenly spaced by arc length along the polyline (ends kept).
-fn resample(p: &[Vec3], n: usize) -> Vec<Vec3> {
-    let mut cum = vec![0.0];
-    for w in p.windows(2) {
-        let l = cum.last().copied().unwrap_or(0.0) + w[0].dist(w[1]);
-        cum.push(l);
-    }
-    let total = cum.last().copied().unwrap_or(0.0);
-    let mut out = Vec::with_capacity(n + 1);
-    let mut k = 0;
-    for i in 0..=n {
-        let s = total * i as f64 / n as f64;
-        while k + 2 < cum.len() && cum.get(k + 1).is_some_and(|c| *c < s) {
-            k += 1;
-        }
-        let (Some(a), Some(b), Some(ca), Some(cb)) = (p.get(k), p.get(k + 1), cum.get(k), cum.get(k + 1)) else { break };
-        let t = if cb - ca > 1e-15 { ((s - ca) / (cb - ca)).clamp(0.0, 1.0) } else { 0.0 };
-        out.push(*a + (*b - *a) * t);
-    }
-    out
-}
-
 /// Rotation-minimising frames (double reflection) at the points, for the given unit tangents;
 /// each station maps the first frame onto its own.
 fn frames(pts: &[Vec3], tangents: &[Vec3]) -> Option<Vec<[Vec3; 3]>> {
@@ -259,26 +203,6 @@ fn frames(pts: &[Vec3], tangents: &[Vec3]) -> Option<Vec<[Vec3; 3]>> {
     Some(out)
 }
 
-/// Stations: each maps a world vector at the first station to the same vector at its own,
-/// optionally stretched across a corner (mitre).
-fn stations(pts: &[Vec3], tangents: &[Vec3], mitre: &[Option<(Vec3, f64)>]) -> Result<Vec<Station>> {
-    let f = frames(pts, tangents).ok_or_else(|| KernelError::Invalid("the sweep path doubles back".into()))?;
-    let f0 = *f.first().ok_or_else(|| KernelError::Invalid("sweep path".into()))?;
-    let mut out = Vec::with_capacity(f.len());
-    for (i, fi) in f.iter().enumerate() {
-        // Rotation taking f0 to fi: columns are the images of the world axes.
-        let col = |e: Vec3| fi[0] * f0[0].dot(e) + fi[1] * f0[1].dot(e) + fi[2] * f0[2].dot(e);
-        let mut m = [col(Vec3::X), col(Vec3::Y), col(Vec3::Z)];
-        if let Some(Some((b, s))) = mitre.get(i) {
-            for c in &mut m {
-                *c += *b * ((s - 1.0) * c.dot(*b));
-            }
-        }
-        out.push(Station { at: *pts.get(i).ok_or_else(|| KernelError::Invalid("sweep path".into()))?, m });
-    }
-    Ok(out)
-}
-
 /// Frames square to the path whose turn about it keeps `d`'s projection: none where the path
 /// runs along `d`.
 fn frames_toward(tangents: &[Vec3], d: Vec3) -> Result<Vec<[Vec3; 3]>> {
@@ -297,11 +221,32 @@ fn frames_toward(tangents: &[Vec3], d: Vec3) -> Result<Vec<[Vec3; 3]>> {
         .collect()
 }
 
+/// Kept as drawn (parallel), the profile flattens to nothing where the path runs along its
+/// plane: the path, by its directions of travel `tangents` (the first leaving the profile), has to
+/// cross the plane at 5 degrees or more all the way.
+pub(crate) fn crossing_check(plane: &Plane, tangents: &[Vec3]) -> Result<()> {
+    let n = plane.normal().normalized().ok_or_else(|| KernelError::Invalid("sweep frame".into()))?;
+    let t0 = *tangents.first().ok_or_else(|| KernelError::Invalid("sweep path".into()))?;
+    let axis = if n.dot(t0) < 0.0 { n * -1.0 } else { n };
+    if tangents.iter().any(|t| t.dot(axis) < 5f64.to_radians().sin()) {
+        return Err(KernelError::Invalid(
+            "kept parallel, the profile would lie along the sweep path: the path must keep crossing the profile's plane (by 5 deg or more)".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Stations shaped by sweep options: each maps a world vector at the first station to its image
 /// at its own (twisted and scaled about the profile's normal through the first station, then
 /// turned by the orientation's frames), optionally stretched across a corner (mitre). Twist and
 /// scale grow with the length run along `pts`.
-fn controlled_stations(plane: &Plane, pts: &[Vec3], tangents: &[Vec3], mitre: &[Option<(Vec3, f64)>], ctl: &SweepControl) -> Result<Vec<Station>> {
+pub(crate) fn controlled_stations(
+    plane: &Plane,
+    pts: &[Vec3],
+    tangents: &[Vec3],
+    mitre: &[Option<(Vec3, f64)>],
+    ctl: &SweepControl,
+) -> Result<Vec<Station>> {
     if !ctl.rails.is_empty() {
         return railed_stations(pts, tangents, mitre, ctl);
     }
@@ -316,12 +261,8 @@ fn controlled_stations(plane: &Plane, pts: &[Vec3], tangents: &[Vec3], mitre: &[
     // Twist and scale act about the profile's normal, pointing the way the path leaves it.
     let n = plane.normal().normalized().ok_or_else(|| KernelError::Invalid("sweep frame".into()))?;
     let axis = if n.dot(t0) < 0.0 { n * -1.0 } else { n };
-    // Kept as drawn, the profile flattens to nothing where the path runs along its plane: the
-    // path has to cross it at 5 degrees or more all the way.
-    if ctl.orientation == SweepOrientation::Parallel && tangents.iter().any(|t| t.dot(axis) < 5f64.to_radians().sin()) {
-        return Err(KernelError::Invalid(
-            "kept parallel, the profile would lie along the sweep path: the path must keep crossing the profile's plane (by 5 deg or more)".into(),
-        ));
+    if ctl.orientation == SweepOrientation::Parallel {
+        crossing_check(plane, tangents)?;
     }
     let mut run = Vec::with_capacity(pts.len());
     let mut total = 0.0;
@@ -470,378 +411,31 @@ pub(crate) fn rail_frame(along: Vec3, across: Vec3, along_to: Vec3, across_to: V
     [map(Vec3::X), map(Vec3::Y), map(Vec3::Z)]
 }
 
-/// The volume a profile of `area` on `plane` sweeps through the stations: each station's
-/// section area times how squarely the path crosses it, summed along the path (trapezoids).
-fn swept_volume(plane: &Plane, area: f64, st: &[Station], tangents: &[Vec3]) -> f64 {
-    let rate = |i: usize| match (st.get(i), tangents.get(i)) {
-        (Some(s), Some(t)) => area * s.apply(plane.x).cross(s.apply(plane.y)).dot(*t).abs(),
-        _ => 0.0,
-    };
-    st.windows(2).enumerate().map(|(i, w)| 0.5 * (rate(i) + rate(i + 1)) * w[0].at.dist(w[1].at)).sum()
-}
-
-/// The stations of a smooth sweep: as many as the path has points (4…[`MAX_SMOOTH_STATIONS`]),
-/// more when the profile twists or scales.
-fn smooth_count(points: usize, ctl: &SweepControl) -> usize {
-    let n = points.saturating_sub(1).clamp(4, MAX_SMOOTH_STATIONS);
-    if !ctl.varies() {
-        return n;
-    }
-    let twist = (ctl.twist.abs() / SMOOTH_TWIST_STEP).ceil() as usize;
-    n.max(MIN_CONTROLLED_STATIONS).max(twist).min(MAX_CONTROLLED_STATIONS)
-}
-
-/// The path with points added along its straight runs (its corners kept) when the profile
-/// twists or scales, so ruled walls follow the change.
-fn densify(pts: &[Vec3], ctl: &SweepControl) -> Vec<Vec3> {
-    if !ctl.varies() {
-        return pts.to_vec();
-    }
-    let total: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
-    let want = MIN_CONTROLLED_RULED.max((ctl.twist.abs() / RULED_TWIST_STEP).ceil() as usize).min(MAX_RULED_STATIONS / 2);
-    let mut out = Vec::with_capacity(want + pts.len());
-    out.extend(pts.first().copied());
-    for w in pts.windows(2) {
-        let pieces = if total > 0.0 { ((w[0].dist(w[1]) / total) * want as f64).ceil() as usize } else { 1 };
-        let pieces = pieces.clamp(1, want.max(1));
-        out.extend((1..=pieces).map(|j| w[0].lerp(w[1], j as f64 / pieces as f64)));
-    }
-    out
-}
-
-/// The profile plane carried to a station.
-fn station_plane(plane: &Plane, s0: Vec3, st: &Station) -> Plane {
-    Plane { origin: st.at + st.apply(plane.origin - s0), x: st.apply(plane.x), y: st.apply(plane.y) }
-}
-
 /// Sweep a planar region along a 3D polyline path. The profile keeps its relation to the path
 /// (it need not touch it); the path should start near the profile.
 pub fn sweep_path(plane: &Plane, region: &Region2, path: &[Vec3]) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "sweep_path");
     sweep_path_with(plane, region, path, &SweepControl::default())
 }
 
 /// [`sweep_path`] with sweep options: orientation, twist and end scale.
 pub fn sweep_path_with(plane: &Plane, region: &Region2, path: &[Vec3], ctl: &SweepControl) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "sweep_path_with");
     ctl.check()?;
-    if region.area().abs() < 1e-9 {
-        return Err(KernelError::Invalid("profile has no area".into()));
-    }
-    let pts = clean(path)?;
-    let corner = pts.windows(3).any(|w| turn(w[1] - w[0], w[2] - w[1]) > CORNER);
-    let profile = crate::numbered::number_regions(std::slice::from_ref(region))
-        .pop()
-        .map(|r| r.oriented())
-        .ok_or_else(|| KernelError::Invalid("profile".into()))?;
-    if !corner && region.holes.is_empty() {
-        // Smooth: evenly spaced stations, tangents from neighbours.
-        let len: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
-        let n = smooth_count(pts.len(), ctl);
-        let sp = resample(&pts, n);
-        let tangents = central_tangents(&sp)?;
-        let (st, expected) = if ctl.is_default() {
-            (stations(&sp, &tangents, &[])?, region.area().abs() * len * start_cos(plane, &tangents))
-        } else {
-            let st = controlled_stations(plane, &sp, &tangents, &[], ctl)?;
-            let v = swept_volume(plane, region.area().abs(), &st, &tangents);
-            (st, v)
-        };
-        if closed_path(&pts) {
-            let offset = closing_offset(plane, &profile.outer, &st)?;
-            if let Ok(b) = smooth_closed_walls(plane, &profile.outer, &st, offset, expected) {
-                return Ok(b);
-            }
-        } else if let Ok(b) = smooth_walls(plane, &profile.outer, &st, expected) {
-            return Ok(b);
-        }
-    }
-    ruled(plane, &profile, &pts, ctl)
+    smlib_sweep_points(plane, region, &crate::PointPath::polyline(path.to_vec()), ctl)
 }
 
-fn central_tangents(p: &[Vec3]) -> Result<Vec<Vec3>> {
-    let n = p.len();
-    let closed = closed_path(p);
-    (0..n)
-        .map(|i| {
-            let a = p.get(if closed && (i == 0 || i + 1 == n) { n - 2 } else { i.saturating_sub(1) }).copied().unwrap_or_default();
-            let b = p.get(if closed && (i == 0 || i + 1 == n) { 1 } else { (i + 1).min(n - 1) }).copied().unwrap_or_default();
-            (b - a).normalized().ok_or_else(|| KernelError::Invalid("the sweep path has no direction".into()))
-        })
-        .collect()
-}
-
-/// How squarely the path leaves the profile (volume = area × length × this).
-fn start_cos(plane: &Plane, tangents: &[Vec3]) -> f64 {
-    tangents.first().map(|t| t.dot(plane.normal()).abs()).unwrap_or(1.0).max(1e-3)
-}
-
-/// Stations at the path's points (at most [`MAX_RULED_STATIONS`]), mitred at corners, with the
-/// points they stand at.
-fn ruled_stations(plane: &Plane, pts: &[Vec3], ctl: &SweepControl) -> Result<(Vec<Vec3>, Vec<Station>)> {
-    let pts = densify(pts, ctl);
-    let pts: Vec<Vec3> = if pts.len() > MAX_RULED_STATIONS { resample(&pts, MAX_RULED_STATIONS) } else { pts };
-    let n = pts.len();
-    let closed = closed_path(&pts);
-    let seg_dir = |i: usize| -> Option<Vec3> { (*pts.get(i + 1)? - *pts.get(i)?).normalized() };
-    let mut tangents = Vec::with_capacity(n);
-    let mut mitre = Vec::with_capacity(n);
-    for i in 0..n {
-        let d_in = if i > 0 {
-            seg_dir(i - 1)
-        } else if closed {
-            seg_dir(n - 2)
-        } else {
-            None
-        };
-        let d_out = if i + 1 < n {
-            seg_dir(i)
-        } else if closed {
-            seg_dir(0)
-        } else {
-            None
-        };
-        let (t, m) = match (d_in, d_out) {
-            (Some(a), Some(b)) => {
-                let t = (a + b).normalized().ok_or_else(|| KernelError::Invalid("the sweep path turns back on itself".into()))?;
-                let half = turn(a, b) / 2.0;
-                // Across the bend the section stretches by 1 / cos(half the turn).
-                let m = (b - a).normalized().map(|bend| (bend, 1.0 / half.cos().max(0.2)));
-                (t, m)
-            }
-            (Some(a), None) => (a, None),
-            (None, Some(b)) => (b, None),
-            (None, None) => return Err(KernelError::Invalid("sweep path".into())),
-        };
-        tangents.push(t);
-        mitre.push(m);
+/// [`crate::sweep_point_path_with`] through SMLib: each curve held exactly as its segments (a
+/// drawn 3D spline's spans, a sketch curve's or an edge's curve), each polyline as the lines
+/// between its points ([`crate::PointPath::segs`]), swept by [`crate::sweep_with`], which mitres
+/// the corners. A polyline is the path its points make, however smooth they run: a curve that
+/// reaches the kernel only as points is followed as those points.
+pub(crate) fn smlib_sweep_points(plane: &Plane, region: &Region2, path: &crate::PointPath, ctl: &SweepControl) -> Result<Body> {
+    let segs = path.segs()?;
+    if segs.is_empty() || segs.len() > 1000 {
+        return Err(KernelError::Invalid("the path needs 1…1000 segments".into()));
     }
-    let st = if ctl.is_default() { stations(&pts, &tangents, &mitre)? } else { controlled_stations(plane, &pts, &tangents, &mitre, ctl)? };
-    Ok((pts, st))
-}
-
-/// Walls of chains of sketch segments on `plane` (open, or closed) carried along a 3D polyline
-/// path that starts near them: ruled between stations at the path's points, mitred at corners,
-/// with no caps. Neighbouring walls share their edges.
-pub(crate) fn ruled_sheet(plane: &Plane, chains: &[Vec<Seg2>], path: &[Vec3], ctl: &SweepControl) -> Result<Vec<Side>> {
-    ctl.check()?;
-    let (pts, st) = ruled_stations(plane, &clean(path)?, ctl)?;
-    let edges: usize = chains.iter().map(Vec::len).sum();
-    if st.len().saturating_mul(edges) > 400_000 {
-        return Err(KernelError::Invalid("the sweep is too detailed (curves × path points)".into()));
-    }
-    let s0 = pts.first().copied().unwrap_or_default();
-    // Each chain's segments are numbered on from the last chain's; every station's wire of a
-    // chain has the same edges, each over the same segment.
-    let offsets: Vec<usize> = chains.iter().scan(0, |o, c| Some(std::mem::replace(o, *o + c.len()))).collect();
-    let mut wires: Vec<Vec<mt::Wire>> = Vec::with_capacity(st.len());
-    let mut numbers: Vec<Vec<Vec<usize>>> = Vec::new();
-    for s in &st {
-        let pl = station_plane(plane, s0, s);
-        let mut at = Vec::with_capacity(chains.len());
-        for (c, offset) in chains.iter().zip(&offsets) {
-            let (wire, seeds) = crate::build::chain_wire_seeds(&pl, c)?;
-            if numbers.len() < chains.len() {
-                numbers.push(seeds.iter().map(|(_, i)| vec![offset + i]).collect());
-            }
-            at.push(wire);
-        }
-        wires.push(at);
-    }
-    guard("path sweep", || {
-        let mut faces: Vec<Side> = Vec::new();
-        for w in wires.windows(2) {
-            let (Some(w0), Some(w1)) = (w.first(), w.get(1)) else { continue };
-            for ((a, b), n) in w0.iter().zip(w1).zip(&numbers) {
-                let sides: mt::Shell = builder::try_wire_homotopy(a, b).map_err(|e| KernelError::Failed(format!("path sweep: {e}")))?;
-                faces.extend(record::ruled(&sides, a, b, n, n));
-            }
-        }
-        Ok(faces)
-    })
-}
-
-/// Walls of chains of sketch segments on `plane` carried along a smooth 3D polyline path (no
-/// turn sharper than [`CORNER`]): one B-spline wall per segment through evenly spaced,
-/// rotation-minimising stations, neighbouring walls sharing their seam edges; no caps. `None`
-/// for a path with corners (see [`ruled_sheet`]).
-pub(crate) fn smooth_sheet(plane: &Plane, chains: &[Vec<Seg2>], path: &[Vec3], ctl: &SweepControl) -> Result<Option<Vec<Side>>> {
-    ctl.check()?;
-    let pts = clean(path)?;
-    if pts.windows(3).any(|w| turn(w[1] - w[0], w[2] - w[1]) > CORNER) {
-        return Ok(None);
-    }
-    let fail = |w: &str| KernelError::Failed(format!("path sweep: {w}"));
-    if chains.iter().map(Vec::len).sum::<usize>() > 4096 {
-        return Err(fail("too many curves for a smooth sweep"));
-    }
-    let n = smooth_count(pts.len(), ctl);
-    let sp = resample(&pts, n);
-    let tangents = central_tangents(&sp)?;
-    let st = if ctl.is_default() { stations(&sp, &tangents, &[])? } else { controlled_stations(plane, &sp, &tangents, &[], ctl)? };
-    let s0 = st.first().map(|s| s.at).unwrap_or_default();
-    let at = |i: usize, q: Vec2| st.get(i).map(|s| s.at + s.apply(plane.to_world(q) - s0)).unwrap_or_default();
-    let n = st.len() - 1;
-    let mut faces: Vec<Side> = Vec::new();
-    let mut offset = 0;
-    for chain in chains {
-        let closed = chain.first().zip(chain.last()).is_some_and(|(f, l)| l.end().dist(f.start()) <= 1e-6);
-        // Each segment: its curve at the first and last station, the columns through its start
-        // and end, and the wall surface.
-        let mut data = Vec::with_capacity(chain.len());
-        for s in chain {
-            let samples =
-                Grid::from_fn([n + 1, SEG_SAMPLES], |i, j| at(i, s.point_at(j as f64 / (SEG_SAMPLES - 1) as f64))).ok_or_else(|| fail("samples"))?;
-            data.push(interpolate_net(&samples).ok_or_else(|| fail("wall surface"))?);
-        }
-        let walls: Vec<mt::Face> = guard("path sweep", || {
-            let m = chain.len();
-            // Vertices along the chain (an open chain has one more than it has segments).
-            let corners: Vec<Vec2> = chain.iter().map(Seg2::start).chain(chain.last().map(Seg2::end).filter(|_| !closed)).collect();
-            let start: Vec<mt::Vertex> = corners.iter().map(|q| builder::vertex(p3(at(0, *q)))).collect();
-            let end: Vec<mt::Vertex> = corners.iter().map(|q| builder::vertex(p3(at(n, *q)))).collect();
-            let next = |j: usize| if closed { (j + 1) % m } else { j + 1 };
-            let mut seams = Vec::with_capacity(corners.len());
-            for (k, (a, b)) in start.iter().zip(&end).enumerate() {
-                // The column through each corner: the start column of the segment leaving it, or
-                // the end column of the last segment.
-                let col = match data.get(k) {
-                    Some(NetFit { v_ends: [first, _], .. }) => first,
-                    None => data.last().map(|NetFit { v_ends: [_, last], .. }| last).ok_or_else(|| fail("seam"))?,
-                };
-                seams.push(mt::Edge::try_new(a, b, mt::Curve::BSplineCurve(col.clone())).map_err(|e| fail(&e.to_string()))?);
-            }
-            let mut walls = Vec::with_capacity(m);
-            for (j, NetFit { surface: surf, u_ends: [c0, c1], .. }) in data.iter().enumerate() {
-                let (Some(a0), Some(b0), Some(a1), Some(b1), Some(sa), Some(sb)) =
-                    (start.get(j), start.get(next(j)), end.get(j), end.get(next(j)), seams.get(j), seams.get(next(j)))
-                else {
-                    return Err(fail("edges"));
-                };
-                let e0 = mt::Edge::try_new(a0, b0, mt::Curve::BSplineCurve(c0.clone())).map_err(|e| fail(&e.to_string()))?;
-                let e1 = mt::Edge::try_new(a1, b1, mt::Curve::BSplineCurve(c1.clone())).map_err(|e| fail(&e.to_string()))?;
-                let w: mt::Wire = vec![sa.clone(), e1, sb.inverse(), e0.inverse()].into();
-                walls.push(mt::Face::try_new(vec![w], mt::Surface::BSplineSurface(surf.clone())).map_err(|e| fail(&e.to_string()))?);
-            }
-            Ok(walls)
-        })?;
-        // Wall j comes from segment j of the chain.
-        faces.extend(walls.into_iter().enumerate().map(|(j, w)| (w, Some(record::profile(&[offset + j])))));
-        offset += chain.len();
-    }
-    Ok(Some(faces))
-}
-
-/// Ruled walls between stations at the path's points (mitred at corners), every loop of the
-/// (oriented) profile.
-fn ruled(plane: &Plane, profile: &NumberedRegion, pts: &[Vec3], ctl: &SweepControl) -> Result<Body> {
-    let (pts, st) = ruled_stations(plane, pts, ctl)?;
-    let s0 = pts.first().copied().unwrap_or_default();
-    let loops: Vec<&NumberedLoop> = profile.loops().collect();
-    let mut wires: Vec<Vec<mt::Wire>> = Vec::with_capacity(st.len());
-    for s in &st {
-        let pl = station_plane(plane, s0, s);
-        wires.push(loops.iter().map(|l| uniform_wire(&pl, &l.lp)).collect::<Result<Vec<_>>>()?);
-    }
-    let closed = closed_path(&pts);
-    if closed {
-        let offsets = loops.iter().map(|l| closing_offset(plane, l, &st)).collect::<Result<Vec<_>>>()?;
-        let first = wires.first().ok_or_else(|| KernelError::Invalid("sweep path".into()))?;
-        let end: Vec<mt::Wire> = first.iter().zip(offsets).map(|(w, k)| rotated_wire(w, k)).collect();
-        if let Some(last) = wires.last_mut() {
-            *last = end;
-        }
-    }
-    guard("path sweep", || {
-        // Every station's wires have the loops' segments, edge for edge.
-        let mut faces: Vec<Side> = Vec::new();
-        for w in wires.windows(2) {
-            let (Some(w0), Some(w1)) = (w.first(), w.get(1)) else { continue };
-            for ((a, b), l) in w0.iter().zip(w1).zip(&loops) {
-                let sides = builder::try_wire_homotopy(a, b).map_err(|e| KernelError::Failed(format!("path sweep: {e}")))?;
-                faces.extend(record::ruled(&sides, a, b, &l.from, &l.from));
-            }
-        }
-        if closed {
-            return close_sweep(faces);
-        }
-        let (Some(first), Some(last)) = (wires.first(), wires.last()) else { return Err(KernelError::Failed("path sweep".into())) };
-        cap_and_close(faces, first, last, false)
-    })
-}
-
-/// Two smooth runs share their middle section and the closing section. Splitting the run
-/// avoids edges from a vertex back to itself when the profile returns without a permutation.
-fn smooth_closed_walls(plane: &Plane, profile: &NumberedLoop, st: &[Station], offset: usize, expected: f64) -> Result<Body> {
-    let fail = || KernelError::Failed("closed path sweep: the walls do not close a solid".into());
-    if profile.lp.segs.len() > 64 || st.len() < 7 {
-        return Err(fail());
-    }
-    guard("closed path sweep", || {
-        let first = st.first().ok_or_else(fail)?;
-        let mut wires = st.iter().map(|s| uniform_wire(&station_plane(plane, first.at, s), &profile.lp)).collect::<Result<Vec<_>>>()?;
-        let end = rotated_wire(wires.first().ok_or_else(fail)?, offset);
-        if let Some(last) = wires.last_mut() {
-            *last = end;
-        }
-        let middle = (wires.len() - 1) / 2;
-        let numbers = vec![profile.from.clone(); wires.len()];
-        let mut sides = smooth_loft_faces(wires.get(..=middle).ok_or_else(fail)?, numbers.get(..=middle).ok_or_else(fail)?, true)?;
-        sides.extend(smooth_loft_faces(wires.get(middle..).ok_or_else(fail)?, numbers.get(middle..).ok_or_else(fail)?, true)?);
-        let b = close_sweep(sides)?;
-        let tol = (profile.lp.signed_area().abs().sqrt() * 0.05).max(1e-3);
-        if b.tessellate(tol).is_ok_and(|m| (m.measure().volume - expected).abs() <= 0.15 * expected.abs()) { Ok(b) } else { Err(fail()) }
-    })
-}
-
-/// One B-spline wall per profile segment through the stations, capped; checked by volume.
-fn smooth_walls(plane: &Plane, profile: &NumberedLoop, st: &[Station], expected: f64) -> Result<Body> {
-    let lp = &profile.lp;
-    let nseg = lp.segs.len();
-    let fail = |w: &str| KernelError::Failed(format!("path sweep: {w}"));
-    if nseg == 0 || nseg > 64 || st.len() < 4 {
-        return Err(fail("profile"));
-    }
-    let s0 = st.first().map(|s| s.at).unwrap_or_default();
-    let at = |i: usize, q: Vec2| st.get(i).map(|s| s.at + s.apply(plane.to_world(q) - s0)).unwrap_or_default();
-    let n = st.len() - 1;
-    let mut data = Vec::with_capacity(nseg);
-    for s in &lp.segs {
-        let samples =
-            Grid::from_fn([n + 1, SEG_SAMPLES], |i, j| at(i, s.point_at(j as f64 / (SEG_SAMPLES - 1) as f64))).ok_or_else(|| fail("samples"))?;
-        data.push(interpolate_net(&samples).ok_or_else(|| fail("wall surface"))?);
-    }
-    guard("path sweep", || {
-        let start: Vec<mt::Vertex> = lp.segs.iter().map(|s| builder::vertex(p3(at(0, s.start())))).collect();
-        let end: Vec<mt::Vertex> = lp.segs.iter().map(|s| builder::vertex(p3(at(n, s.start())))).collect();
-        let (mut e0, mut e1, mut seams) = (Vec::with_capacity(nseg), Vec::with_capacity(nseg), Vec::with_capacity(nseg));
-        for (j, NetFit { u_ends: [c0, c1], v_ends: [seam, _], .. }) in data.iter().enumerate() {
-            let (Some(a0), Some(b0), Some(a1), Some(b1)) = (start.get(j), start.get((j + 1) % nseg), end.get(j), end.get((j + 1) % nseg)) else {
-                return Err(fail("vertices"));
-            };
-            e0.push(mt::Edge::try_new(a0, b0, mt::Curve::BSplineCurve(c0.clone())).map_err(|e| fail(&e.to_string()))?);
-            e1.push(mt::Edge::try_new(a1, b1, mt::Curve::BSplineCurve(c1.clone())).map_err(|e| fail(&e.to_string()))?);
-            seams.push(mt::Edge::try_new(a0, a1, mt::Curve::BSplineCurve(seam.clone())).map_err(|e| fail(&e.to_string()))?);
-        }
-        let mut walls = Vec::with_capacity(nseg);
-        for (j, NetFit { surface: surf, .. }) in data.iter().enumerate() {
-            let (Some(a), Some(b), Some(sa), Some(sb)) = (e0.get(j), e1.get(j), seams.get(j), seams.get((j + 1) % nseg)) else {
-                return Err(fail("edges"));
-            };
-            let w: mt::Wire = vec![sa.clone(), b.clone(), sb.inverse(), a.inverse()].into();
-            let wall = mt::Face::try_new(vec![w], mt::Surface::BSplineSurface(surf.clone())).map_err(|e| fail(&e.to_string()))?;
-            walls.push((wall, Some(record::profile(profile.numbers(j)))));
-        }
-        let w0: mt::Wire = e0.iter().cloned().collect();
-        let w1: mt::Wire = e1.iter().cloned().collect();
-        let tol = (lp.signed_area().abs().sqrt() * 0.05).max(1e-3);
-        for ws in [walls.clone(), walls.iter().map(|(f, prov)| (f.inverse(), prov.clone())).collect()] {
-            if let Ok(b) = cap_and_close(ws, std::slice::from_ref(&w0), std::slice::from_ref(&w1), false)
-                && b.tessellate(tol).is_ok_and(|m| (m.measure().volume - expected).abs() <= 0.15 * expected.abs())
-            {
-                return Ok(b);
-            }
-        }
-        Err(fail("the walls do not close a solid"))
-    })
+    crate::sweep_with(plane, region, &segs, ctl)
 }
 
 #[cfg(test)]
@@ -858,7 +452,8 @@ mod tests {
 
     #[test]
     fn sweeps_along_3d_paths() {
-        // A quarter of a helix-like 3D curve: a smooth wall, volume ≈ area × length.
+        // A polyline through 41 points of a quarter of a helix-like 3D curve: the profile swept
+        // along its 40 lines, mitred at each point, so volume = area × length.
         let path: Vec<Vec3> = (0..=40)
             .map(|i| {
                 let t = i as f64 / 40.0 * std::f64::consts::FRAC_PI_2;
@@ -869,22 +464,48 @@ mod tests {
         let plane = Plane::from_normal(path[0], t0).unwrap();
         let b = sweep_path(&plane, &circle(2.0), &path).unwrap();
         let len: f64 = path.windows(2).map(|w| w[0].dist(w[1])).sum();
-        let v = b.tessellate(0.01).unwrap().measure().volume;
+        let v = b.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().volume;
         let want = std::f64::consts::PI * 4.0 * len;
         assert!((v - want).abs() < 0.02 * want, "{v} vs {want}");
-        // One wall per profile segment and two caps (ruled walls would give dozens).
-        assert!(b.faces(0.01).unwrap().len() <= 8, "smooth walls: {}", b.faces(0.01).unwrap().len());
+        // The path is its lines (no wall is fitted through the points): a wall per profile
+        // segment (the circle is one closed arc, one edge in SMLib) along each of the 40 lines,
+        // and two caps.
+        assert_eq!(b.faces(0.01).unwrap().len(), 40 + 2, "walls along each line");
         // An L-shaped path (a sharp corner) with a holed square: mitred ruled walls.
         let path = [Vec3::ZERO, Vec3::new(0.0, 0.0, 20.0), Vec3::new(20.0, 0.0, 20.0)];
         let plane = Plane::from_normal(Vec3::ZERO, Vec3::Z).unwrap();
         let sq = |h: f64| Loop2::polygon(&[Vec2::new(-h, -h), Vec2::new(h, -h), Vec2::new(h, h), Vec2::new(-h, h)]);
         let region = Region2 { outer: sq(3.0), holes: vec![sq(1.0).reversed()] };
         let b = sweep_path(&plane, &region, &path).unwrap();
-        let v = b.tessellate(0.01).unwrap().measure().volume;
+        let v = b.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().volume;
         let want = 32.0 * 40.0;
         assert!((v - want).abs() < 0.03 * want, "{v} vs {want}");
         assert!(sweep_path(&plane, &region, &[Vec3::ZERO]).is_err());
         assert!(sweep_path(&plane, &region, &[Vec3::ZERO, Vec3::new(f64::NAN, 0.0, 0.0)]).is_err());
+    }
+
+    /// A profile at a slant to its path (drawn flat, the path rising steeply from it) swept
+    /// along a polyline whose lines are shorter than the slant: each section reaches past both
+    /// mitres of its line, so each line's walls are carried on far enough past the corner for
+    /// all of it to meet the mitre. The square's centre is on the path, so the volume is the
+    /// section square to the path times the path's length, `16 cos(slant) L`; a line carried
+    /// short of a mitre leaves a notch with a face of its section in it. Every face is named.
+    #[test]
+    fn a_slanted_profile_meets_itself_at_every_mitre() {
+        use crate::history::FaceOrigin;
+        let path: Vec<Vec3> = (0..=20).map(|i| Vec3::new((f64::from(i) * 0.2).sin() * 10.0, 0.0, f64::from(i))).collect();
+        let b = sweep_path(&Plane::XY, &square(2.0), &path).unwrap();
+        let len: f64 = path.windows(2).map(|w| w[0].dist(w[1])).sum();
+        let slant = (path[1] - path[0]).normalized().unwrap().z;
+        let want = 16.0 * slant * len;
+        let v = b.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().volume;
+        assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
+        let h = b.history().unwrap();
+        let caps = |end: bool| h.faces.iter().filter(|f| f.origins == [FaceOrigin::Cap { end }]).count();
+        assert_eq!((caps(false), caps(true)), (1, 1));
+        for (i, f) in h.faces.iter().enumerate() {
+            assert!(matches!(f.origins[..], [FaceOrigin::Profile { .. }] | [FaceOrigin::Cap { .. }]), "face {i}: {f:?}");
+        }
     }
 
     fn square(h: f64) -> Region2 {
@@ -903,14 +524,21 @@ mod tests {
         let small = big * k;
         let ctl = SweepControl { scale: k, ..SweepControl::default() };
         let b = crate::sweep_with(&Plane::XY, &circle(big), &up(h), &ctl).unwrap();
-        let m = b.tessellate(0.005).unwrap().measure();
+        let m = b.mesh(&crate::MeshTolerance::chord(0.005)).unwrap().measure();
         let volume = PI * h * (big * big + big * small + small * small) / 3.0;
         let lateral = PI * (big + small) * (h * h + (big - small).powi(2)).sqrt();
         let caps = PI * (big * big + small * small);
         assert!((m.volume - volume).abs() < 2e-3 * volume, "volume {} vs {volume}", m.volume);
         assert!((m.area - caps - lateral).abs() < 2e-3 * lateral, "lateral {} vs {lateral}", m.area - caps);
         // The end cap is the scaled circle.
-        let top = b.tessellate(0.005).unwrap().positions.iter().filter(|p| (p.z - h).abs() < 1e-6).map(|p| p.x.hypot(p.y)).fold(0.0, f64::max);
+        let top = b
+            .mesh(&crate::MeshTolerance::chord(0.005))
+            .unwrap()
+            .positions
+            .iter()
+            .filter(|p| (p.z - h).abs() < 1e-6)
+            .map(|p| p.x.hypot(p.y))
+            .fold(0.0, f64::max);
         assert!((top - small).abs() < 1e-3, "end radius {top}");
         // The surface sweep of the circle's curve: the frustum's lateral face alone.
         let sheet = crate::sweep_sheet_with(&Plane::XY, std::slice::from_ref(&circle(big).outer.segs), &up(h), &ctl).unwrap();
@@ -920,7 +548,7 @@ mod tests {
 
     /// The corners of a twisted square: each seam edge's angle at `z`.
     fn corner_angles(b: &crate::Body, z: f64) -> Vec<f64> {
-        let mesh = b.tessellate(0.002).unwrap();
+        let mesh = b.mesh(&crate::MeshTolerance::chord(0.002)).unwrap();
         let mut out = Vec::new();
         for e in &mesh.edges {
             for w in e.windows(2) {
@@ -942,7 +570,7 @@ mod tests {
         let ctl = SweepControl { twist, ..SweepControl::default() };
         let b = crate::sweep_with(&Plane::XY, &square(5.0), &up(h), &ctl).unwrap();
         // Twisted walls are saddles: a fine mesh to measure them.
-        let v = b.tessellate(0.0005).unwrap().measure().volume;
+        let v = b.mesh(&crate::MeshTolerance::chord(0.0005)).unwrap().measure().volume;
         assert!((v - 100.0 * h).abs() < 2e-3 * 100.0 * h, "volume {v}");
         // Corners start at 45 deg (and 135, -45, -135): each seam turns by the twist so far.
         let off = |a: f64, want: f64| {
@@ -979,7 +607,7 @@ mod tests {
         let rise = r * FRAC_PI_4.sin();
         let ctl = SweepControl { orientation: SweepOrientation::Parallel, ..SweepControl::default() };
         let b = sweep_path_with(&Plane::XY, &square(3.0), &path, &ctl).unwrap();
-        let mesh = b.tessellate(0.005).unwrap();
+        let mesh = b.mesh(&crate::MeshTolerance::chord(0.005)).unwrap();
         let v = mesh.measure().volume;
         let want = 36.0 * rise;
         assert!((v - want).abs() < 5e-3 * want, "volume {v} vs {want}");
@@ -1010,7 +638,7 @@ mod tests {
             .collect();
         let ctl = SweepControl { orientation: SweepOrientation::Direction(Vec3::Y), ..SweepControl::default() };
         let b = sweep_path_with(&Plane::XY, &square(3.0), &path, &ctl).unwrap();
-        let mesh = b.tessellate(0.005).unwrap();
+        let mesh = b.mesh(&crate::MeshTolerance::chord(0.005)).unwrap();
         let len = r * FRAC_PI_2;
         assert!((mesh.measure().volume - 36.0 * len).abs() < 5e-3 * 36.0 * len);
         // The sides facing ±Y stay at y = ±3.

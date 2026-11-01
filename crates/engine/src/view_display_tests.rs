@@ -154,8 +154,8 @@ fn scene_sampler_uses_exact_active_occurrence_plane_and_preserves_other_scene_co
     s.execute("sketch.circle.center", &json!({"center":[2,3],"radius":1})).unwrap();
     s.section = Some((Vec3::new(0., 0., 3.), Vec3::Z));
     let cam = Camera::default();
-    let old = scene(&s, &cam);
-    let default = scene_with_sketch_sampler(&s, &cam, world_curve_parts);
+    let old = scene(&s, &cam).unwrap();
+    let default = scene_with_sketch_sampler(&s, &cam, world_curve_parts).unwrap();
     assert_eq!(old.lines.len(), default.lines.len());
     for (a, b) in old.lines.iter().zip(&default.lines) {
         assert_eq!((&a.points, a.color, a.width, a.on_top), (&b.points, b.color, b.width, b.on_top));
@@ -165,7 +165,8 @@ fn scene_sampler_uses_exact_active_occurrence_plane_and_preserves_other_scene_co
     let sampled = scene_with_sketch_sampler(&s, &cam, |_, _, plane| {
         planes.push(*plane);
         parts.clone()
-    });
+    })
+    .unwrap();
     assert_eq!(planes.len(), 1);
     assert!(planes[0].origin.dist(Vec3::new(20., 30., 40.)) < 1e-9);
     assert!(planes[0].x.dist(Vec3::X) < 1e-9);
@@ -186,7 +187,7 @@ fn scene_sampler_uses_exact_active_occurrence_plane_and_preserves_other_scene_co
     let active = s.active_sketch.unwrap();
     s.execute("sketch.finish", &json!({})).unwrap();
     s.visibility.hidden_sketches.push(active);
-    let hidden = scene_with_sketch_sampler(&s, &cam, |_, _, _| panic!("hidden sketch sampled"));
+    let hidden = scene_with_sketch_sampler(&s, &cam, |_, _, _| panic!("hidden sketch sampled")).unwrap();
     assert!(hidden.lines.iter().all(|line| !line.on_top));
 }
 
@@ -221,19 +222,19 @@ fn colored_components_override_appearances_and_restore_them() {
     }
     s.selection.clear();
     let cam = Camera::default();
-    let original = scene(&s, &cam);
+    let original = scene(&s, &cam).unwrap();
     s.execute("inspect.colored_components", &json!({"enabled": true})).unwrap();
     s.colored_components = Some(());
-    let colored = scene(&s, &cam);
+    let colored = scene(&s, &cam).unwrap();
     assert_eq!(colored.meshes.len(), 2);
     assert_ne!(colored.meshes[0].color, colored.meshes[1].color);
-    for (body, mesh) in s.world_state().bodies.iter().zip(&colored.meshes) {
+    for (body, mesh) in s.world_state().unwrap().bodies.iter().zip(&colored.meshes) {
         let [r, g, b] = component_color(&s, body.component).unwrap();
         assert_eq!(mesh.color, Rgb(r, g, b));
         assert!(mesh.face_colors.is_empty());
     }
     s.execute("inspect.colored_components", &json!({"enabled": false})).unwrap();
-    let restored = scene(&s, &cam);
+    let restored = scene(&s, &cam).unwrap();
     for (a, b) in original.meshes.iter().zip(restored.meshes) {
         assert_eq!(a.color, b.color);
         assert_eq!(a.face_colors, b.face_colors);
@@ -259,7 +260,7 @@ fn cycling_component_color_is_saved_undoable_and_shared_by_instances() {
     assert_eq!(s.doc.appearances, appearances);
     let loaded = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
     assert_eq!(loaded.doc.component_identification_color(component), custom);
-    let copies: Vec<_> = s.world_state().bodies.iter().map(|b| b.component).collect();
+    let copies: Vec<_> = s.world_state().unwrap().bodies.iter().map(|b| b.component).collect();
     assert_eq!(copies, [component, component]);
     s.execute("edit.undo", &json!({})).unwrap();
     assert_eq!(component_color(&s, component), Some(automatic));

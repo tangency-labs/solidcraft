@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "a 10 x 10 sheet on XY thickened 2 along its normal: a slab",
+ "source": "analytic",
+ "method": "the box 10 x 10 x 2 at z 0..2 (the patch faces +z): V = 200, A = 280, 6 faces",
+ "body_count": 1,
+ "faces": 6,
+ "volume_mm3": 200.0,
+ "area_mm2": 280.0,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   10,
+   10,
+   2
+  ]
+ }
+}

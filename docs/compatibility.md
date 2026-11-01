@@ -189,3 +189,12 @@ The #303 draft used `solvecraft-container/1`. `crates/io/src/design.rs` accepts 
 marker alongside `solidcraft-container/1`, and writes only the new marker. Optional
 old previews are discarded; required document/blob validation is unchanged. The
 `draft_container_marker_remains_readable` regression covers this shim.
+
+## Split pieces in designs saved before format 14
+
+Builds before format 14 named the pieces a cut splits a body into in the old kernel's shell
+order, and the design's later features name the piece they work on by that name (`Body1`,
+`Body1 (1)`). SMLib orders pieces otherwise. Such a feature (`shell_piece_order` in the file)
+names its pieces so its later features find them: each name goes to the piece the points those
+features picked lie on. A name no later feature uses keeps SMLib's order. Designs saved since
+format 14 name pieces after their faces and are not affected.

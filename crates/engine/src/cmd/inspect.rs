@@ -109,6 +109,8 @@ pub fn measure_json(b: &solidcraft_doc::ModelBody) -> Value {
                 "vertices": m.merged.vertices,
                 "face_types": m.merged.face_types,
                 "kernel": {"faces": m.faces, "edges": m.edges, "vertices": m.vertices, "shells": m.shells},
+                "measured_by": m.measured_by,
+                "notes": m.notes,
             })
         }
         Err(e) => json!({"name": b.name, "error": e.to_string()}),
@@ -121,7 +123,7 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
         return super::measure_sel::measure_items(s, items);
     }
     let want = string_list(cmd, p, "bodies")?;
-    let st = s.world_state();
+    let st = s.world_state()?;
     let selected: Vec<_> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).collect();
     if !want.is_empty() && selected.len() != want.len() {
         return Err(bad(cmd, "unknown body name"));
@@ -189,11 +191,10 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
-fn sketch_json(s: &Session, id: u64) -> Option<Value> {
+/// Sketch `id`, placed where the placed model `world` has it (its component's placement).
+fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Option<Value> {
     let state = s.model.state();
     let ss = state.sketch(id)?;
-    // Where the sketch is in the world (its component's placement).
-    let world = s.world_state();
     let plane = world.sketch(id).map(|w| w.plane).unwrap_or(ss.plane);
     let sk = &ss.sketch;
     let curves: Vec<Value> = sk
@@ -208,7 +209,17 @@ fn sketch_json(s: &Session, id: u64) -> Option<Value> {
                 CurveKind::Circle { c: cc, r } => json!({"id": c.id, "type": "circle", "center": pid(cc), "center_at": sk.point(cc), "radius": r, "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),
                 CurveKind::Arc { c: cc, a, b } => json!({"id": c.id, "type": "arc", "center": pid(cc), "start": pid(a), "end": pid(b), "center_at": sk.point(cc), "start_at": sk.point(a), "end_at": sk.point(b), "radius": sk.radius(i), "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),
                 CurveKind::Ellipse { c: cc, m, r } => json!({"id": c.id, "type": "ellipse", "center": pid(cc), "major": pid(m), "center_at": sk.point(cc), "major_at": sk.point(m), "minor_radius": r, "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),
-                CurveKind::Spline { ref pts, control, degree, periodic } => json!({"id": c.id, "type": "spline", "points": pts.iter().map(|q| pid(*q)).collect::<Vec<_>>(), "points_at": pts.iter().map(|q| sk.point(*q)).collect::<Vec<_>>(), "control": control, "degree": degree, "periodic": periodic, "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),
+                CurveKind::Spline { ref pts, control, degree, periodic, ref nurbs } => {
+                    let mut v = json!({"id": c.id, "type": "spline", "points": pts.iter().map(|q| pid(*q)).collect::<Vec<_>>(), "points_at": pts.iter().map(|q| sk.point(*q)).collect::<Vec<_>>(), "control": control, "degree": degree, "periodic": periodic, "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det});
+                    // A control spline with its own knots (a projected free-form edge) says them.
+                    if let (Some(n), Some(o)) = (nurbs, v.as_object_mut()) {
+                        o.insert("knots".into(), json!(n.knots));
+                        if !n.weights.is_empty() {
+                            o.insert("weights".into(), json!(n.weights));
+                        }
+                    }
+                    v
+                }
                 CurveKind::Conic { a, b, apex, rho } => json!({"id": c.id, "type": "conic", "start": pid(a), "end": pid(b), "apex": pid(apex), "start_at": sk.point(a), "end_at": sk.point(b), "apex_at": sk.point(apex), "rho": rho, "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),
             };
             if let (Some(l), Some(o)) = (&c.link, v.as_object_mut()) {
@@ -271,7 +282,7 @@ fn sketch_json(s: &Session, id: u64) -> Option<Value> {
 
 fn sketch_inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let id = super::sketch_store::target(s, p, "sketch.inspect")?;
-    sketch_json(s, id).ok_or_else(|| EngineError::Other("that sketch is not evaluated (rolled back or not a sketch)".into()))
+    sketch_json(s, &*s.world_state()?, id).ok_or_else(|| EngineError::Other("that sketch is not evaluated (rolled back or not a sketch)".into()))
 }
 
 /// Revisions of every design of this run (#6646).
@@ -347,7 +358,6 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             json!({
                 "id": f.id, "name": f.name, "type": f.kind.type_name(), "suppressed": f.suppressed, "rolled_back": i >= marker,
                 "error": r.and_then(|r| r.error.clone()), "warning": r.and_then(|r| r.warning.clone()), "ms": r.map(|r| r.ms),
-                "boolean_diagnostics": r.map(|r| &r.boolean_diagnostics),
             })
         })
         .collect();
@@ -391,7 +401,7 @@ fn body_of<'a>(st: &'a solidcraft_doc::ModelState, p: &Value, cmd: &str) -> Resu
 }
 
 fn model_edges(s: &mut Session, p: &Value) -> Result<Value> {
-    let st = s.world_state();
+    let st = s.world_state()?;
     let b = body_of(&st, p, "model.edges")?;
     let tol = (b.body.size() * 2e-3).max(1e-3);
     let names = solidcraft_doc::naming::edge_names(b);
@@ -405,7 +415,7 @@ fn model_edges(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
-    let st = s.world_state();
+    let st = s.world_state()?;
     let b = body_of(&st, p, "model.faces")?;
     let names = solidcraft_doc::naming::face_names(b);
     let tol = (b.body.size() * 2e-3).max(1e-3);
@@ -458,7 +468,7 @@ fn commands(s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 fn model_threads(s: &mut Session, _p: &Value) -> Result<Value> {
-    let st = s.world_state();
+    let st = s.world_state()?;
     Ok(json!({ "threads": st.threads }))
 }
 

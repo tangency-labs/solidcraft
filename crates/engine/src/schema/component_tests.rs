@@ -102,7 +102,7 @@ fn sketches_move_to_the_part_whose_face_they_are_on() {
     run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Base"}));
     run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[30,0,0]}));
     run(&mut s, "component.activate", json!({"component":0}));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let base = world.body("Base").unwrap();
     let top = base.body.faces(0.01).unwrap().into_iter().max_by(|a, b| a.centroid.z.total_cmp(&b.centroid.z)).unwrap();
     let pick = json!({"body": base.name, "index": top.index, "face": [top.centroid.x, top.centroid.y, top.centroid.z], "path": [occurrence]});
@@ -110,7 +110,7 @@ fn sketches_move_to_the_part_whose_face_they_are_on() {
     sketch_square(&mut s);
     let on_xy = run(&mut s, "sketch.create", json!({"name":"OnXY","plane":"XY"}))["sketch"].as_u64().unwrap();
     sketch_square(&mut s);
-    let world_plane = |s: &Session| s.world_state().sketch(on_face).unwrap().plane;
+    let world_plane = |s: &Session| s.world_state().unwrap().sketch(on_face).unwrap().plane;
     let before = world_plane(&s);
     assert_eq!(s.doc.feature(on_face).unwrap().component, 0);
     let doc_before = s.doc.to_json();

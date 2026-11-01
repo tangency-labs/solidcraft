@@ -76,6 +76,30 @@ impl Linear for Vec3 {
     }
 }
 
+/// Homogeneous points as they are: a rational spline's control values `(x·w, y·w, z·w, w)`
+/// combine linearly, so carrying one into a larger space (degree elevation, knot insertion) is
+/// exact on them.
+impl Linear for HPoint {
+    fn zero() -> Self {
+        HPoint::ZERO
+    }
+    fn plus(self, o: Self) -> Self {
+        self + o
+    }
+    fn times(self, s: f64) -> Self {
+        self * s
+    }
+    fn to_h(self) -> HPoint {
+        self
+    }
+    fn from_h(h: HPoint) -> Self {
+        h
+    }
+    fn is_finite(self) -> bool {
+        self.x.is_finite() && self.y.is_finite() && self.z.is_finite() && self.w.is_finite()
+    }
+}
+
 /// A clamped B-spline space: a degree and a knot vector whose first and last `degree + 1` knots
 /// are the domain's ends, interior knots repeated at most `degree` times (the space's splines
 /// are continuous).
@@ -165,6 +189,27 @@ impl Space {
         let first = span - p;
         let values =
             (first..=span).map(|i| self.knots.get(i..i + p + 2).map_or(0.0, |k| local_basis(k, t, side, der).get(der).copied().unwrap_or(0.0)));
+        Ok((first, values.collect()))
+    }
+
+    /// [`Space::basis`] from the left of `t`: at an interior knot, the derivatives of the
+    /// polynomial piece that ends there (elsewhere the same as from the right).
+    pub fn basis_left(&self, t: f64, der: usize) -> SplineResult<(usize, Vec<f64>)> {
+        let [a, b] = self.domain();
+        if !t.is_finite() {
+            return invalid("a parameter is not a finite number");
+        }
+        let t = t.clamp(a, b);
+        if t <= a {
+            return self.basis(t, der);
+        }
+        let p = self.degree;
+        // The span [k_s, k_{s+1}) with k_s < t ≤ k_{s+1}.
+        let below = self.knots.partition_point(|&x| x < t);
+        let span = below.checked_sub(1).filter(|s| *s >= p).ok_or_else(|| SplineError::Invalid(format!("{t} is outside the domain")))?;
+        let first = span - p;
+        let values =
+            (first..=span).map(|i| self.knots.get(i..i + p + 2).map_or(0.0, |k| local_basis(k, t, Side::Left, der).get(der).copied().unwrap_or(0.0)));
         Ok((first, values.collect()))
     }
 

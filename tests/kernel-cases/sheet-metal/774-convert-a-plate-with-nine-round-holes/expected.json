@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#774",
+  "tangency-labs/solidcraft#977"
+ ],
+ "what": "a 30 x 30 x 2 plate with nine 4 mm holes converted to sheet metal (refused as not a plate of even thickness: the holes were read as polygons)",
+ "source": "analytic",
+ "method": "the plate keeps its thickness 2: V = (30*30 - 9*pi*2^2)*2 = 1800 - 72*pi",
+ "body_count": 1,
+ "volume_mm3": 1573.805328941535
+}

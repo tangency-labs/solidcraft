@@ -8,7 +8,7 @@ use solidcraft_geom::{Aabb3, Plane, Vec3};
 use solidcraft_render::{AnalysisColors, Camera, Rgb, Scene, SceneAnalysis, SceneLine, SceneMesh};
 use solidcraft_sketch::Sketch;
 
-use crate::{Sel, Session};
+use crate::{Result, Sel, Session};
 
 /// Colours (shared with the GPU viewport).
 pub mod colors {
@@ -23,6 +23,8 @@ pub mod colors {
     /// Fixed (locked) geometry.
     pub const SKETCH_LOCKED: Rgb = Rgb(0, 140, 60);
     pub const SKETCH_CENTERLINE: Rgb = Rgb(200, 110, 60);
+    /// Isocurve Analysis curves: the light theme's accent.
+    pub const ISOCURVE: Rgb = Rgb(38, 120, 218);
     /// Linked (projected) reference geometry.
     pub const SKETCH_PROJECTED: Rgb = Rgb(150, 60, 190);
     /// Linked geometry whose reference was lost.
@@ -70,6 +72,10 @@ pub struct Palette {
     pub axes: [Rgb; 3],
     /// What the section cap is tinted toward.
     pub cap: Rgb,
+    /// The section hatch's other colours, after the cap's (`Scene::part_hatch`).
+    pub hatch: [Rgb; 2],
+    /// Isocurve Analysis: the faces' isoparametric curves.
+    pub isocurve: Rgb,
     /// The surface analysis colours.
     pub analysis: AnalysisColors,
 }
@@ -93,6 +99,8 @@ impl Palette {
         sketch_centerline: colors::SKETCH_CENTERLINE,
         axes: [colors::AXIS_X, colors::AXIS_Y, colors::AXIS_Z],
         cap: colors::SECTION_CAP,
+        hatch: solidcraft_render::SECTION_HATCH,
+        isocurve: colors::ISOCURVE,
         analysis: AnalysisColors::DEFAULT,
     };
 }
@@ -105,8 +113,9 @@ impl Default for Palette {
 
 /// Bounds of everything visible now, in world space: shown bodies where their occurrences,
 /// joints and moves place them, and the sketches the view draws (not ones used by a feature,
-/// hidden ones, or ones in hidden components). What Home, Fit and the orbit pivot frame.
-pub fn bounds(s: &Session) -> Aabb3 {
+/// hidden ones, or ones in hidden components). What Home, Fit and the orbit pivot frame. A model
+/// that cannot be placed is the error.
+pub fn bounds(s: &Session) -> Result<Aabb3> {
     bounds_by(s, |body| body.mesh_bounds())
 }
 
@@ -122,12 +131,12 @@ pub fn shown_point_clouds(s: &Session) -> impl Iterator<Item = &solidcraft_doc::
 /// [`bounds`] without meshing anything: a body not meshed yet counts with its outline
 /// ([`solidcraft_kernel::Body::outline_bounds`]), which a face curving out past all of its edges
 /// can exceed. Frames a design whose bodies are still being meshed.
-pub fn unmeshed_bounds(s: &Session) -> Aabb3 {
+pub fn unmeshed_bounds(s: &Session) -> Result<Aabb3> {
     bounds_by(s, |body| body.cached_mesh().map(|m| m.bounds()).unwrap_or_else(|| body.outline_bounds()))
 }
 
-fn bounds_by(s: &Session, of: impl Fn(&solidcraft_doc::ModelBody) -> Aabb3) -> Aabb3 {
-    let st = s.world_state();
+fn bounds_by(s: &Session, of: impl Fn(&solidcraft_doc::ModelBody) -> Aabb3) -> Result<Aabb3> {
+    let st = s.world_state()?;
     let mut b = Aabb3::EMPTY;
     for body in st.bodies.iter().filter(|x| s.body_visible(&x.name)) {
         b = b.union(&of(body));
@@ -150,7 +159,7 @@ fn bounds_by(s: &Session, of: impl Fn(&solidcraft_doc::ModelBody) -> Aabb3) -> A
             b.add(p);
         }
     }
-    b
+    Ok(b)
 }
 
 /// The origin plane a grid lies on.
@@ -655,23 +664,24 @@ pub fn component_color(s: &Session, component: u64) -> Option<[u8; 3]> {
     Some(s.doc.component_identification_color(component))
 }
 
-/// The scene for a headless render, cut by the session's section.
-pub fn scene(s: &Session, cam: &Camera) -> Scene {
+/// The scene for a headless render, cut by the session's section. A model that cannot be placed
+/// is the error.
+pub fn scene(s: &Session, cam: &Camera) -> Result<Scene> {
     scene_with_section(s, cam, s.section)
 }
 
 /// The scene for a headless render, cut by `section` (origin, normal) instead of the session's:
 /// the app passes the cut its viewport shows (an open Section Analysis dialog's preview, a
 /// sketch's Slice), so model renders match the window.
-pub fn scene_with_section(s: &Session, cam: &Camera, section: Option<(Vec3, Vec3)>) -> Scene {
+pub fn scene_with_section(s: &Session, cam: &Camera, section: Option<(Vec3, Vec3)>) -> Result<Scene> {
     scene_with_guides(s, cam, section, Guides::default())
 }
 
 /// The plane of the sketch that is open, if any: it always shows a grid, whatever the Grid switch
 /// says (outside a sketch the grid is the user's choice).
-pub fn open_sketch_plane(s: &Session) -> Option<Plane> {
-    let id = s.active_sketch?;
-    s.world_state().sketch(id).map(|ss| ss.plane)
+pub fn open_sketch_plane(s: &Session) -> Result<Option<Plane>> {
+    let Some(id) = s.active_sketch else { return Ok(None) };
+    Ok(s.world_state()?.sketch(id).map(|ss| ss.plane))
 }
 
 /// The grid on a sketch plane: its centre (the view target's foot on the plane, snapped to the
@@ -699,14 +709,14 @@ impl Default for Guides {
 }
 
 /// [`scene_with_section`] with the grid and the axes shown or left out.
-pub fn scene_with_guides(s: &Session, cam: &Camera, section: Option<(Vec3, Vec3)>, guides: Guides) -> Scene {
+pub fn scene_with_guides(s: &Session, cam: &Camera, section: Option<(Vec3, Vec3)>, guides: Guides) -> Result<Scene> {
     scene_with_palette_and_guides(s, cam, section, world_curve_parts, &Palette::DEFAULT, guides)
 }
 
 /// A headless scene using supplied display paths for its visible sketch curves.
 /// Callers can use the same pixel sampler as a GPU viewport without changing the
 /// body, grid, appearance, section or sketch styling policies of [`scene`].
-pub fn scene_with_sketch_sampler(s: &Session, cam: &Camera, sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>) -> Scene {
+pub fn scene_with_sketch_sampler(s: &Session, cam: &Camera, sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>) -> Result<Scene> {
     scene_with_section_and_sketch_sampler(s, cam, s.section, sampler)
 }
 
@@ -716,7 +726,7 @@ pub fn scene_with_section_and_sketch_sampler(
     cam: &Camera,
     section: Option<(Vec3, Vec3)>,
     sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
-) -> Scene {
+) -> Result<Scene> {
     scene_with_palette(s, cam, section, sampler, &Palette::DEFAULT)
 }
 
@@ -727,7 +737,7 @@ pub fn scene_with_palette(
     section: Option<(Vec3, Vec3)>,
     sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
-) -> Scene {
+) -> Result<Scene> {
     build_scene(s, cam, section, Guides::default(), sampler, p, false)
 }
 
@@ -739,7 +749,7 @@ pub fn scene_with_palette_and_guides(
     sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
     guides: Guides,
-) -> Scene {
+) -> Result<Scene> {
     build_scene(s, cam, section, guides, sampler, p, false)
 }
 
@@ -753,7 +763,7 @@ pub fn scene_with_thread_markings(
     p: &Palette,
     guides: Guides,
     cosmetic_threads: bool,
-) -> Scene {
+) -> crate::Result<Scene> {
     build_scene(s, cam, section, guides, sampler, p, cosmetic_threads)
 }
 
@@ -765,25 +775,26 @@ fn build_scene(
     mut sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
     cosmetic_threads: bool,
-) -> Scene {
-    let st = s.world_state();
+) -> Result<Scene> {
+    let st = s.world_state()?;
     let section = section.filter(|(o, n)| o.is_finite() && n.is_finite() && n.len() > 1e-9);
     let mut sc = Scene {
         background: Some(p.background),
         clip: section.map(|(o, n)| (n, n.dot(o))),
         cap: Some(p.cap),
         plain_cap: !s.section_hatch,
+        part_hatch: Some([p.cap, p.hatch[0], p.hatch[1]]),
         analysis: s.analysis.map(|a| SceneAnalysis { mode: a.mode(), colors: p.analysis }),
         ..Default::default()
     };
-    let b = bounds(s);
+    let b = bounds(s)?;
     sc.radius = (b.diagonal() * 0.5).max(cam.half_height()).max(10.0) + b.center().dist(cam.target);
     // Grid on the ground plane (XY with Z up, XZ with Y up), drawn under the model as in the viewport.
     if guides.grid {
         let major = grid_step(cam.half_height()).1;
         // Headless pictures keep the grid on the ground, the viewport's default; an open sketch
         // has its own plane's grid (world coordinates, no camera frame).
-        let (c, u, v, slant, w): (Vec3, Vec3, Vec3, f64, Box<dyn Fn(Vec3) -> Vec3>) = if let Some(pl) = open_sketch_plane(s) {
+        let (c, u, v, slant, w): (Vec3, Vec3, Vec3, f64, Box<dyn Fn(Vec3) -> Vec3>) = if let Some(pl) = open_sketch_plane(s)? {
             let (c, u, v) = sketch_grid_frame(&pl, cam.target, major);
             let n = u.cross(v);
             (c, u, v, cam.back().dot(n), Box::new(|p| p))
@@ -803,7 +814,7 @@ fn build_scene(
         let fade = GridFade::new(cam.half_height(), slant, ext, far_reach);
         // The grid's centre on each axis, from the plane's origin (the world's, or the sketch
         // plane's): a level fading in near a switch of the spacing lies on its own places (#9570).
-        let origin = open_sketch_plane(s).map_or(Vec3::ZERO, |pl| pl.origin);
+        let origin = open_sketch_plane(s)?.map_or(Vec3::ZERO, |pl| pl.origin);
         let (at_u, at_v) = ((c - origin).dot(u), (c - origin).dot(v));
         // Two lines through the point `c + u * t`: one along v, one along u.
         for (along, across, at) in [(v, u, at_u), (u, v, at_v)] {
@@ -847,6 +858,8 @@ fn build_scene(
         .flatten()
         .collect();
     let mut thread_budget = crate::cosmetic_threads::Budget::default();
+    // Where the section cuts each closed solid body, by its mesh in `sc.meshes`: their hatches.
+    let mut cuts: Vec<(usize, u64, Vec<(Vec3, Vec3)>)> = Vec::new();
     for body in st.bodies.iter().filter(|b| s.body_visible(&b.name)) {
         let selected = selected_occurrences.contains(&body.name) || s.selection.iter().any(|x| matches!(x, Sel::Body { name } if *name == body.name));
         let mesh = body.mesh();
@@ -868,7 +881,9 @@ fn build_scene(
         // A see-through appearance is drawn see-through, as the viewport draws it; a selected
         // body is drawn solid, so the selection colour reads.
         let opacity = if selected { 1.0 } else { s.doc.model_body_opacity(body) as f32 };
-        sc.meshes.push(SceneMesh { mesh: Arc::clone(&mesh), color, face_colors, opacity });
+        let cut_solid = section.is_some() && body.is_closed() && opacity >= solidcraft_render::SEE_THROUGH;
+        sc.meshes.push(SceneMesh { mesh: Arc::clone(&mesh), color, face_colors, opacity, closed: body.is_closed(), hatch: Default::default() });
+        let at = sc.meshes.len() - 1;
         if cosmetic_threads
             && thread_budget.available()
             && s.doc.model_body_opacity(body) >= 0.999
@@ -886,10 +901,27 @@ fn build_scene(
         }
         // The outline of the body where the section cuts it.
         if let Some((o, n)) = section {
-            for (a, b) in section_segments(&mesh, o, n) {
-                sc.lines.push(SceneLine { points: vec![a, b], color: p.edge, alpha: 1.0, width: 1.6, on_top: false });
+            let segments = section_segments(&mesh, o, n);
+            for (a, b) in &segments {
+                sc.lines.push(SceneLine { points: vec![*a, *b], color: p.edge, alpha: 1.0, width: 1.6, on_top: false });
+            }
+            if cut_solid && !segments.is_empty() {
+                cuts.push((at, solidcraft_render::hatch::seed(&body.name), segments));
             }
         }
+    }
+    if let Some((_, n)) = section {
+        let parts: Vec<solidcraft_render::hatch::CutPart> =
+            cuts.iter().map(|(_, seed, segments)| solidcraft_render::hatch::CutPart { seed: *seed, segments }).collect();
+        for ((at, _, _), hatch) in cuts.iter().zip(solidcraft_render::hatch::hatches(&parts, n)) {
+            if let Some(m) = sc.meshes.get_mut(*at) {
+                m.hatch = hatch;
+            }
+        }
+    }
+    // Isocurve Analysis: the isoparametric curves of each face it shows, on the faces.
+    for line in s.isocurve_lines().iter().flat_map(|lines| lines.iter()) {
+        sc.lines.push(SceneLine { points: line.points.clone(), color: p.isocurve, alpha: 1.0, width: 1.4, on_top: false });
     }
     for ss in &st.sketches {
         let active = s.active_sketch == Some(ss.feature);
@@ -900,7 +932,7 @@ fn build_scene(
             sc.lines.push(SceneLine { points: pts, color: col, alpha: 1.0, width: if cons { 1.0 } else { 1.6 }, on_top: active });
         }
     }
-    sc
+    Ok(sc)
 }
 
 /// Where the plane through `o` with normal `n` cuts a mesh: one segment per crossed triangle,
@@ -1093,15 +1125,15 @@ pub(crate) mod sketch_work {
 }
 
 /// Camera framing the model (iso view).
-pub fn home_camera(s: &Session) -> Camera {
+pub fn home_camera(s: &Session) -> Result<Camera> {
     let mut c = Camera::default();
-    let b = bounds(s);
+    let b = bounds(s)?;
     if !b.is_empty() {
         c.fit(&b);
     } else {
         c.distance = 150.0;
     }
-    c
+    Ok(c)
 }
 
 /// Construction planes of the timeline, as evaluated: (feature id, name, plane).
@@ -1175,8 +1207,8 @@ mod tests {
         s.execute("solid.cylinder", &json!({"diameter": 14, "height": 30, "base": [50, 15, 0], "operation": "new"})).unwrap();
         s.execute("appearance.assign", &json!({"bodies": ["Body2"], "color": [220, 60, 40]})).unwrap();
         s.execute("appearance.assign", &json!({"faces": [[20, 15, 20]], "body": "Body1", "color": [40, 170, 80]})).unwrap();
-        let cam = home_camera(&s);
-        let sc = scene(&s, &cam);
+        let cam = home_camera(&s).unwrap();
+        let sc = scene(&s, &cam).unwrap();
         assert!(sc.meshes.iter().any(|m| m.color == Rgb(220, 60, 40)));
         assert!(sc.meshes.iter().any(|m| m.face_colors.iter().any(|(_, c)| *c == Rgb(40, 170, 80))));
     }
@@ -1187,16 +1219,16 @@ mod tests {
     fn guides_leave_the_grid_and_the_axes_out() {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20, "corner": [10, -15, -10]})).unwrap();
-        let cam = home_camera(&s);
+        let cam = home_camera(&s).unwrap();
         let grid = [colors::GRID, colors::GRID_MAJOR];
         let axes = [colors::AXIS_X, colors::AXIS_Y, colors::AXIS_Z];
         let count = |sc: &Scene, colours: &[Rgb]| sc.grid.iter().chain(&sc.lines).filter(|l| colours.contains(&l.color)).count();
-        let all = scene(&s, &cam);
+        let all = scene(&s, &cam).unwrap();
         let (grid_lines, edges) = (count(&all, &grid), count(&all, &[colors::EDGE]));
         assert!(grid_lines > 20 && edges >= 12, "{grid_lines} grid lines, {edges} edges");
         assert_eq!(count(&all, &axes), 3);
-        assert_eq!(all.lines.len(), scene_with_guides(&s, &cam, s.section, Guides::default()).lines.len());
-        let render = |g: Guides| scene_with_guides(&s, &cam, s.section, g);
+        assert_eq!(all.lines.len(), scene_with_guides(&s, &cam, s.section, Guides::default()).unwrap().lines.len());
+        let render = |g: Guides| scene_with_guides(&s, &cam, s.section, g).unwrap();
         let no_grid = render(Guides { grid: false, axes: true });
         assert_eq!((count(&no_grid, &grid), count(&no_grid, &axes), count(&no_grid, &[colors::EDGE])), (0, 3, edges));
         let no_axes = render(Guides { grid: true, axes: false });
@@ -1211,10 +1243,10 @@ mod tests {
     fn hidden_origin_axes_stay_out_of_renders() {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
-        let cam = home_camera(&s);
+        let cam = home_camera(&s).unwrap();
         let axes = [colors::AXIS_X, colors::AXIS_Y, colors::AXIS_Z];
         let shown = |s: &Session| -> Vec<Rgb> {
-            let sc = scene(s, &cam);
+            let sc = scene(s, &cam).unwrap();
             axes.into_iter().filter(|c| sc.lines.iter().any(|l| l.color == *c)).collect()
         };
         assert_eq!(shown(&s), axes);
@@ -1222,7 +1254,7 @@ mod tests {
         assert_eq!(shown(&s), [colors::AXIS_X, colors::AXIS_Z]);
         s.execute("browser.visibility", &json!({"folder": "origin", "visible": false})).unwrap();
         assert!(shown(&s).is_empty());
-        let sc = scene_with_guides(&s, &cam, None, Guides { grid: true, axes: true });
+        let sc = scene_with_guides(&s, &cam, None, Guides { grid: true, axes: true }).unwrap();
         assert!(sc.grid.iter().any(|l| l.color == colors::GRID), "the grid is not part of the origin");
         s.execute("browser.visibility", &json!({"folder": "origin", "visible": true})).unwrap();
         assert_eq!(shown(&s), axes);
@@ -1234,14 +1266,14 @@ mod tests {
     fn the_section_cuts_the_scene() {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
-        let cam = home_camera(&s);
-        assert!(scene(&s, &cam).clip.is_none());
+        let cam = home_camera(&s).unwrap();
+        assert!(scene(&s, &cam).unwrap().clip.is_none());
         s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
-        let sc = scene(&s, &cam);
+        let sc = scene(&s, &cam).unwrap();
         let (n, d) = sc.clip.unwrap();
         assert!((n - Vec3::new(0.0, -1.0, 0.0)).len() < 1e-12 && (d + 15.0).abs() < 1e-12, "{n:?} {d}");
         assert_eq!(sc.cap, Some(colors::SECTION_CAP));
-        assert!(!section_segments(&s.world_state().bodies[0].mesh(), Vec3::new(0.0, 15.0, 0.0), -Vec3::Y).is_empty());
+        assert!(!section_segments(&s.world_state().unwrap().bodies[0].mesh(), Vec3::new(0.0, 15.0, 0.0), -Vec3::Y).is_empty());
     }
 
     /// The surface analysis shades the headless scene too, in the palette's colours.
@@ -1249,10 +1281,10 @@ mod tests {
     fn the_surface_analysis_shades_the_scene() {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
-        let cam = home_camera(&s);
-        assert!(scene(&s, &cam).analysis.is_none());
+        let cam = home_camera(&s).unwrap();
+        assert!(scene(&s, &cam).unwrap().analysis.is_none());
         s.analysis = Some(crate::SurfaceAnalysis::Curvature { radius: 5.0 });
-        let a = scene(&s, &cam).analysis.unwrap();
+        let a = scene(&s, &cam).unwrap().analysis.unwrap();
         assert_eq!((a.mode, a.colors), (solidcraft_render::AnalysisMode::Curvature { radius: 5.0 }, Palette::DEFAULT.analysis));
     }
 
@@ -1262,8 +1294,8 @@ mod tests {
     fn cpu_pictures_draw_silhouettes_on_curved_surfaces() {
         let mut s = Session::default();
         s.execute("solid.sphere", &json!({"diameter": 20})).unwrap();
-        let cam = home_camera(&s);
-        let img = solidcraft_render::render(&scene(&s, &cam), &cam, 400, 400);
+        let cam = home_camera(&s).unwrap();
+        let img = solidcraft_render::render(&scene(&s, &cam).unwrap(), &cam, 400, 400);
         let dark = img.rgba.chunks(4).filter(|p| p[0] < 70 && p[1] < 70 && p[2] < 75).count();
         assert!(dark > 40, "silhouette pixels: {dark}");
     }
@@ -1273,10 +1305,10 @@ mod tests {
     fn cpu_pictures_show_the_section() {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
-        let cam = home_camera(&s);
-        let whole = solidcraft_render::render(&scene(&s, &cam), &cam, 200, 140).rgba;
+        let cam = home_camera(&s).unwrap();
+        let whole = solidcraft_render::render(&scene(&s, &cam).unwrap(), &cam, 200, 140).rgba;
         s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
-        let sc = scene(&s, &cam);
+        let sc = scene(&s, &cam).unwrap();
         assert!(sc.clip.is_some());
         let cut = solidcraft_render::render(&sc, &cam, 200, 140).rgba;
         let changed = whole.chunks(4).zip(cut.chunks(4)).filter(|(a, b)| a != b).count();
@@ -1293,10 +1325,12 @@ mod tests {
         // Cut away the front half (y < 15), so the iso camera looks into the cut.
         s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
         for fov in [0.0, 0.6] {
-            let mut cam = home_camera(&s);
+            let mut cam = home_camera(&s).unwrap();
             cam.fov = fov;
-            let mut sc = scene(&s, &cam);
-            assert!(!section_segments(&s.world_state().bodies[0].mesh(), Vec3::new(0.0, 15.0, 0.0), -Vec3::Y).is_empty());
+            let mut sc = scene(&s, &cam).unwrap();
+            // The cap in the cap colour: a part's hatch colour is the one its name picks.
+            sc.part_hatch = None;
+            assert!(!section_segments(&s.world_state().unwrap().bodies[0].mesh(), Vec3::new(0.0, 15.0, 0.0), -Vec3::Y).is_empty());
             // A marker inside the body, behind the cut face.
             let red = Rgb(255, 0, 0);
             sc.lines.push(SceneLine {
@@ -1323,11 +1357,11 @@ mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
         s.execute("appearance.assign", &json!({"bodies": ["Body1"], "color": [40, 160, 90]})).unwrap();
-        let cam = home_camera(&s);
+        let cam = home_camera(&s).unwrap();
         let mut picture = |hatch: bool| {
             let plane = json!({"origin": [0, 15, 0], "normal": [0, -1, 0]});
             s.execute("inspect.section", &json!({"plane": plane, "hatch": hatch})).unwrap();
-            solidcraft_render::render(&scene(&s, &cam), &cam, 300, 220).rgba
+            solidcraft_render::render(&scene(&s, &cam).unwrap(), &cam, 300, 220).rgba
         };
         // Pixels in the body's exact colour: only a plain cut has them (lit faces are shaded).
         let solid = |img: &[u8]| img.chunks(4).filter(|p| p[..3] == [40, 160, 90]).count();

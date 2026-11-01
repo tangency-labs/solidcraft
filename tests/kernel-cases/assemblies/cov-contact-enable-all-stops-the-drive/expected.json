@@ -1,0 +1,39 @@
+{
+ "sources": [],
+ "what": "contact.enable_all and a 90 degree drive into the block",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); Stop: box 50x10x10 from (-10,30,0), grounded; the arm's corner (40,5) turned \u03b8 reaches y = 40 sin \u03b8 + 5 cos \u03b8, which is 30 at \u03b8 = asin(30/\u221a1625) - atan(5/40) = 40.9676; every occurrence in one set: the block stops the arm at \u03b8 = 40.97 (Base, which Arm only touches, does not)",
+ "body_count": 3,
+ "volume_mm3": 13000.0,
+ "results": [
+  {
+   "step": 14,
+   "json": {
+    "all": true,
+    "enabled": true
+   }
+  },
+  {
+   "step": 15,
+   "json": {
+    "values": [
+     {
+      "value": 40.966136
+     }
+    ]
+   }
+  },
+  {
+   "step": 16,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      15.101944,
+      13.112257,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

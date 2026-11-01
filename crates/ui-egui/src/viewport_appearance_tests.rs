@@ -99,7 +99,7 @@ fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
     let mut app = SolveApp::new(session, Services::default());
     app.ui.ground_shadow = false;
     app.set_origin_shown(false);
-    let placed = app.session.world_state().bodies.iter().find(|b| b.name != source).unwrap().name.clone();
+    let placed = app.session.world_state().unwrap().bodies.iter().find(|b| b.name != source).unwrap().name.clone();
     app.session.selection = vec![solidcraft_engine::Sel::Body { name: placed }];
     app.start("appearance.assign");
     let crate::dialogs::Kind::Appearance(appearance) = &app.dialog.as_ref().unwrap().kind else { panic!("appearance dialog") };
@@ -112,7 +112,7 @@ fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
         scene.tris.is_empty(),
         "opaque triangles {}, bodies {:?}",
         scene.tris.len(),
-        app.session.world_state().bodies.iter().map(|b| (&b.name, b.body.paint(), &b.imported)).collect::<Vec<_>>()
+        app.session.world_state().unwrap().bodies.iter().map(|b| (&b.name, b.body.paint(), &b.imported)).collect::<Vec<_>>()
     );
     let (vertices, remainder) = scene.glass.as_chunks::<{ crate::gpu::TRI_SIZE }>();
     assert!(remainder.is_empty());
@@ -161,7 +161,7 @@ fn selection_does_not_rebuild_the_model_scene() {
     let highlight = h.app.viewport.hl_key;
     // Clear the scene the first frame uploaded; an untouched model must not upload another.
     let _ = h.app.viewport.slot.lock().unwrap().take();
-    let name = h.app.session.world_state().bodies[0].name.clone();
+    let name = h.app.session.world_state().unwrap().bodies[0].name.clone();
     h.app.session.selection = vec![solidcraft_engine::Sel::Body { name }];
     h.frame();
     assert_eq!(h.app.viewport.key, key, "a selection does not change the model scene key");
@@ -190,7 +190,7 @@ fn a_colour_edit_reuses_every_block_vertex() {
     app.ui.ground_shadow = false;
     app.set_origin_shown(false);
     app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
-    let name = app.session.world_state().bodies[0].name.clone();
+    let name = app.session.world_state().unwrap().bodies[0].name.clone();
     let first = build_scene(&app);
     let block = first.blocks.iter().find(|b| !b.bytes.vertices.is_empty()).expect("the box has a block");
     let (key, vertices) = (block.key, block.bytes.vertices.clone());
@@ -207,7 +207,7 @@ fn a_material_colour_edit_its_undo_and_redo_reach_the_viewport() {
     app.ui.ground_shadow = false;
     app.set_origin_shown(false);
     app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
-    let name = app.session.world_state().bodies[0].name.clone();
+    let name = crate::open_meshing::session_world(&app.session).bodies[0].name.clone();
     app.run("material.create", json!({"name": "Wood dark", "density_g_cm3": 0.7, "color": "#c8a573"})).unwrap();
     app.run("material.assign", json!({"bodies": [name], "material": "Wood dark"})).unwrap();
     let colour = |app: &SolveApp| {
@@ -230,7 +230,7 @@ fn an_opacity_class_change_keeps_vertices_and_rewrites_only_the_runs() {
     app.ui.ground_shadow = false;
     app.set_origin_shown(false);
     app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
-    let name = app.session.world_state().bodies[0].name.clone();
+    let name = app.session.world_state().unwrap().bodies[0].name.clone();
     let first = build_scene(&app);
     let block = first.blocks.iter().find(|b| !b.bytes.vertices.is_empty()).expect("the box has a block");
     let (key, bytes) = (block.key, block.bytes.clone());
@@ -242,7 +242,9 @@ fn an_opacity_class_change_keeps_vertices_and_rewrites_only_the_runs() {
     assert!(block.bytes.opaque.is_empty() && !block.bytes.glass.is_empty(), "the triangles moved to the glass runs");
     let triangles: u32 = block.bytes.glass.iter().map(|r| r.len() as u32).sum::<u32>() / 3;
     assert_eq!(block.bytes.glass.len(), 1, "one body of one class is one run, drawn with no index buffer");
-    assert_eq!(triangles, 12, "every triangle of the box");
+    // The planner's grids, no side longer than a fifth of the box's 26.9 mm diagonal: edges in
+    // 4, 3 and 2 pieces, faces of 4 × 3, 4 × 2 and 3 × 2 cells, 2 · (12 + 8 + 6) · 2 triangles.
+    assert_eq!(triangles, 104, "every triangle of the box");
     let vertex = block.bytes.glass.first().map_or(0, |r| r.start) as usize;
     let at = vertex * crate::gpu::TRI_SIZE;
     let colour = first_vertex(&second, block.bytes.vertices.get(at..).unwrap_or_default()).1;
@@ -266,7 +268,7 @@ fn appearance_edits_upload_palette_rows_only() {
         Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
     app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
     app.fit_view();
-    let name = app.session.world_state().bodies[0].name.clone();
+    let name = app.session.world_state().unwrap().bodies[0].name.clone();
     let highlight: crate::gpu::SceneSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
     let mut key = 0;
     let mut draw = |app: &SolveApp| {
@@ -336,11 +338,11 @@ fn theme_switches_refresh_cached_viewport_colours_without_remeshing() {
     h.app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
     h.app.viewport.gpu =
         Some(super::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
-    let body = h.app.session.world_state().bodies[0].name.clone();
+    let body = crate::open_meshing::session_world(&h.app.session).bodies[0].name.clone();
     h.app.session.selection = vec![solidcraft_engine::Sel::Body { name: body.clone() }];
     h.frame();
     let revision = h.app.session.revision;
-    let mesh = h.app.session.world_state().bodies[0].cached_mesh().unwrap();
+    let mesh = crate::open_meshing::session_world(&h.app.session).bodies[0].cached_mesh().unwrap();
     let mut previous: Option<(u64, u64, u64)> = None;
     for theme in ["dark", "gruvbox-dark", "blueprint", "dark", "light", "solidcraft-95", "cupertino", "light"] {
         let result = h.call("ui.prefs", json!({"theme": theme}));
@@ -359,7 +361,7 @@ fn theme_switches_refresh_cached_viewport_colours_without_remeshing() {
         let colour = super::c4(crate::theme::Tokens::get().body);
         assert!(vertices.iter().all(|v| vertex_color(&scene, v) == colour), "{theme}: stale body colour");
         assert_eq!(h.app.session.revision, revision, "theme changes must not edit the design");
-        assert!(std::sync::Arc::ptr_eq(&mesh, &h.app.session.world_state().bodies[0].cached_mesh().unwrap()));
+        assert!(std::sync::Arc::ptr_eq(&mesh, &crate::open_meshing::session_world(&h.app.session).bodies[0].cached_mesh().unwrap()));
         h.frame();
         assert_eq!((h.app.viewport.key, h.app.viewport.sketch_key, h.app.viewport.hl_key), keys);
         assert!(h.app.viewport.slot.lock().unwrap().is_none(), "an unchanged theme reuses its scene");
@@ -498,7 +500,7 @@ fn conflicting_curves_points_glyphs_and_dimensions_take_the_conflict_colour_unti
         h.app.edit_sketch(reach);
         h.settle();
         assert_eq!(h.app.session.active_sketch, Some(reach));
-        let st = h.app.session.world_state();
+        let st = crate::open_meshing::session_world(&h.app.session);
         let ss = st.sketch(reach).unwrap();
         assert_eq!(!ss.report.ok(), conflicting, "w = {w}: {:?}", ss.report);
         let conflict = super::Conflict::of(&h.app, &ss.sketch, &ss.report);

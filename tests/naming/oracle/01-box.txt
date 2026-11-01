@@ -1,0 +1,20 @@
+# oracle/01-box: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Box: 6 faces, 12 edges
+Box face F2:side:l1
+Box face F2:side:l2
+Box face F2:side:l3
+Box face F2:side:l4
+Box face F2:start
+Box face F2:top
+Box edge F2:side:l1|F2:side:l2
+Box edge F2:side:l1|F2:side:l4
+Box edge F2:side:l1|F2:start
+Box edge F2:side:l1|F2:top
+Box edge F2:side:l2|F2:side:l3
+Box edge F2:side:l2|F2:start
+Box edge F2:side:l2|F2:top
+Box edge F2:side:l3|F2:side:l4
+Box edge F2:side:l3|F2:start
+Box edge F2:side:l3|F2:top
+Box edge F2:side:l4|F2:start
+Box edge F2:side:l4|F2:top

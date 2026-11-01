@@ -39,7 +39,7 @@ fn assert_seam_sphere(text: &str, radius: f64) {
     let want_area = 4.0 * std::f64::consts::PI * radius.powi(2);
     assert!(rel(m.volume, want_volume) < 1e-3, "volume {} vs {want_volume}", m.volume);
     assert!(rel(m.area, want_area) < 1e-3, "area {} vs {want_area}", m.area);
-    let mesh = body.body.display_mesh(radius * 1e-3).unwrap();
+    let mesh = body.body.mesh(&crate::MeshTolerance::chord(radius * 1e-3)).unwrap();
     assert!(!mesh.positions.is_empty() && !mesh.triangles.is_empty());
 }
 
@@ -135,11 +135,61 @@ fn a_void_reads_as_a_cavity_whichever_way_its_shell_flag_points() {
     }
 }
 
+/// A ball whose one face is bounded by a meridian edge from the north pole that stops short of
+/// the south pole (at 2.5 rad), run out and back: the face is the whole sphere less a slit of no
+/// area, so it is the same 2 mm ball as when the seam runs pole to pole.
 #[test]
-fn non_antipodal_seam_sphere_does_not_panic() {
+fn non_antipodal_seam_sphere_imports_as_a_whole_ball() {
     let text = seam_sphere_step(Vec3::ZERO, 2.0, Vec3::Z, Vec3::X, 0.0, false, 2.5);
-    let result = std::panic::catch_unwind(|| step_import(&text));
-    assert!(result.is_ok());
+    assert_seam_sphere(&text, 2.0);
+}
+
+/// A whole ring torus (major radius 10, minor 3, about Z) written as one face bounded only by
+/// seams: its tube circle at u = 0 and its ring circle at v = 0, each run out and back, in
+/// either order round the loop; or only a slit along the tube circle, from the outer equator 2.5
+/// rad towards the top and back, the torus less a slit of no area. Each is the whole torus,
+/// volume 2π²Rr² and area 4π²Rr.
+#[test]
+fn seam_only_torus_imports_as_a_whole_ring() {
+    use std::f64::consts::PI;
+    let (major, minor) = (10.0_f64, 3.0_f64);
+    let outer = major + minor;
+    let (end_x, end_z) = (major + minor * 2.5_f64.cos(), minor * 2.5_f64.sin());
+    let tube = format!(
+        "#14=CARTESIAN_POINT('',({major:.16},0.,0.));\n#15=DIRECTION('',(0.,-1.,0.));\n#16=AXIS2_PLACEMENT_3D('',#14,#15,#3);\n#17=CIRCLE('',#16,{minor:.16});\n"
+    );
+    let ring = format!("#18=CIRCLE('',#4,{outer:.16});\n#19=EDGE_CURVE('',#11,#11,#18,.T.);\n");
+    let cases = [
+        ("tube then ring", format!("{tube}#20=EDGE_CURVE('',#11,#11,#17,.T.);\n{ring}#30=EDGE_LOOP('',(#21,#22,#23,#24));\n")),
+        ("ring then tube", format!("{tube}#20=EDGE_CURVE('',#11,#11,#17,.T.);\n{ring}#30=EDGE_LOOP('',(#22,#21,#24,#23));\n")),
+        (
+            "a slit along the tube",
+            format!(
+                "#12=CARTESIAN_POINT('',({end_x:.16},0.,{end_z:.16}));\n#13=VERTEX_POINT('',#12);\n{tube}#20=EDGE_CURVE('',#11,#13,#17,.T.);\n#30=EDGE_LOOP('',(#21,#23));\n"
+            ),
+        ),
+    ];
+    for (what, edges) in cases {
+        let mut t = String::from(HEAD);
+        t += "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n";
+        t += &format!(
+            "#5=TOROIDAL_SURFACE('',#4,{major:.16},{minor:.16});\n#10=CARTESIAN_POINT('',({outer:.16},0.,0.));\n#11=VERTEX_POINT('',#10);\n"
+        );
+        t += &edges;
+        t += "#21=ORIENTED_EDGE('',*,*,#20,.T.);\n#22=ORIENTED_EDGE('',*,*,#19,.T.);\n#23=ORIENTED_EDGE('',*,*,#20,.F.);\n#24=ORIENTED_EDGE('',*,*,#19,.F.);\n";
+        t += "#31=FACE_OUTER_BOUND('',#30,.T.);\n#32=ADVANCED_FACE('',(#31),#5,.T.);\n#33=CLOSED_SHELL('',(#32));\n#34=MANIFOLD_SOLID_BREP('Ring',#33);\n";
+        t += "#35=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#34),#70);\n";
+        t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        t += TAIL;
+        let imp = step_import(&t).unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!(imp.bodies.len(), 1, "{what}: {:?}", imp.warnings);
+        assert!(imp.warnings.is_empty(), "{what}: {:?}", imp.warnings);
+        assert!(imp.bodies[0].closed, "{what}");
+        let m = measure(&imp.bodies[0].body).unwrap();
+        let (volume, area) = (2.0 * PI * PI * major * minor * minor, 4.0 * PI * PI * major * minor);
+        assert!(rel(m.volume, volume) < 1e-3, "{what}: volume {} vs {volume}", m.volume);
+        assert!(rel(m.area, area) < 1e-3, "{what}: area {} vs {area}", m.area);
+    }
 }
 
 #[test]
@@ -164,15 +214,14 @@ fn benchmark_independent_step_solids() {
     let start = std::time::Instant::now();
     let ex = p21::parse(&text).unwrap();
     let parse = start.elapsed();
-    let cx = Ctx { ex: &ex, len: 1.0, ang: 1.0, tol: 0.01, snap: 0.01 };
     let mut items: Vec<_> = ex.entities.iter().filter(|(_, e)| e.name() == "MANIFOLD_SOLID_BREP").map(|(id, _)| *id).collect();
     items.sort();
     let start = std::time::Instant::now();
-    let solids: Vec<_> = items.iter().map(|id| guard("benchmark read", || brep::read_item(&cx, *id).map_err(KernelError::Failed)).unwrap()).collect();
+    let solids: Vec<_> = items.iter().map(|id| solidcraft_step::topology::read_solid(&ex, *id, Units::default()).unwrap()).collect();
     let read = start.elapsed();
     let start = std::time::Instant::now();
     for solid in solids {
-        std::hint::black_box(Body::new(solid.solid).unwrap().unmeshed_faces());
+        std::hint::black_box(Body::from_record(solid.brep).unwrap().unmeshed_faces());
     }
     println!(
         "STEP_PHASE parse_ms={:.3} brep_ms={:.3} body_ms={:.3}",
@@ -214,7 +263,7 @@ fn assert_same_import(serial: &StepImport, parallel: &StepImport) {
         assert_eq!(a.body.paint(), b.body.paint());
         assert_eq!(a.body.face_sources, b.body.face_sources);
         assert_same_measure(&measure(&a.body).unwrap(), &measure(&b.body).unwrap());
-        let (a, b) = (a.body.display_mesh(0.05).unwrap(), b.body.display_mesh(0.05).unwrap());
+        let (a, b) = (a.body.mesh(&crate::MeshTolerance::chord(0.05)).unwrap(), b.body.mesh(&crate::MeshTolerance::chord(0.05)).unwrap());
         assert_eq!(a.positions, b.positions);
         assert_eq!(a.normals, b.normals);
         assert_eq!(a.triangles, b.triangles);
@@ -266,12 +315,12 @@ fn parallel_body_preparation_reports_errors_in_place_and_preserves_placement() {
     let body = cylinder(Vec3::new(2.0, 2.0, 0.0), Vec3::Z, 2.0, 4.0).unwrap();
     let ex = p21::parse(&step_export(&[&body], "test").unwrap()).unwrap();
     let solid = *ex.entities.iter().find(|(_, e)| e.name() == "MANIFOLD_SOLID_BREP").map(|(id, _)| id).unwrap();
-    let units = DEFAULT_UNITS;
-    let placement = mt::Matrix4::from_translation(mt::Vector3::new(10.0, 20.0, 30.0));
+    let units = Units::default();
+    let placement = translation([10.0, 20.0, 30.0]);
     // The second item is not in the file.
     let jobs: Vec<_> = [solid, 999_999_999, solid, solid]
         .into_iter()
-        .map(|item| parallel::Job { source: parallel::Source::Item { item, units }, placement, check_mesh: true, tol: units.tol })
+        .map(|item| parallel::Job { source: parallel::Source::Item { item, units }, placement, check_mesh: true })
         .collect();
     let serial = parallel::bodies(&ex, &jobs, 1);
     let threaded = parallel::bodies(&ex, &jobs, 4);
@@ -329,7 +378,7 @@ fn parallel_import_does_not_prepare_past_body_budget_with_duplicates_or_mapped_i
         reader.bodies = vec![seed.clone(); MAX_BODIES - 2];
         reader.node_items.insert(2000);
         let mut out = Vec::new();
-        reader.rep_bodies(60, &mt::Matrix4::from_scale(1.0), &[], "Budget", None, &mut out, 0);
+        reader.rep_bodies(60, &IDENTITY, &[], "Budget", None, &mut out, 0);
         assert!(reader.oriented.is_empty() && reader.unreadable.is_empty(), "the walk only plans the solids");
         while reader.convert_next(workers == 1) {}
         let out = reader.remap(&out);
@@ -355,8 +404,8 @@ fn round_trip(b: &Body) -> StepImport {
     let (m0, m1) = (measure(b).unwrap(), measure(&imp.bodies[0].body).unwrap());
     assert!(rel(m1.volume, m0.volume) < 1e-3, "volume {} vs {}", m1.volume, m0.volume);
     assert!(rel(m1.area, m0.area) < 1e-3, "area {} vs {}", m1.area, m0.area);
-    // Pieces of one analytic surface are written as one face (volume and area above check
-    // that nothing was lost).
+    // The file has no more faces than the body (volume and area above check that nothing was
+    // lost).
     assert!(imp.bodies[0].file_faces <= b.face_count());
     assert!(imp.bodies[0].closed);
     imp
@@ -383,11 +432,9 @@ fn round_trip_features() {
     round_trip(&donut[0]);
 }
 
-/// Robustness seed 17: a thin three-quarter tube shelled with its bottom open. truck writes each
-/// wall as three quarter-turn B-spline pieces; the export merges them into one 270° face and must
-/// write that face's cylinder, not the first piece's quarter sheet. The seam direction came from
-/// the mean direction of the face's vertices, which is zero at 0°, 90°, 180° and 270°, so the
-/// merged face kept the quarter sheet and read back about 7% short with no warning.
+/// Robustness seed 17: a thin three-quarter tube shelled with its bottom open reads back whole
+/// (an export once wrote a 270° wall on a quarter of its surface, and the part read back about
+/// 7% short with no warning).
 #[test]
 fn shelled_three_quarter_tube_round_trips() {
     let rect =
@@ -395,6 +442,38 @@ fn shelled_three_quarter_tube_round_trips() {
     let tube = revolve(&Plane::XZ, &[rect], Vec2::ZERO, Vec2::Y, 1.5 * std::f64::consts::PI).unwrap().pop().unwrap();
     let b = crate::shell(&tube, &[Vec3::new(-7.182422893157272, 7.182422893245109, 0.0)], 1.0).unwrap();
     round_trip(&b);
+}
+
+/// A half tube (half a torus's tube, half way round, closed by a flat annulus and
+/// two flat ends) whose torus the file places 5 nm off the rest, well within the file's
+/// accuracy: the torus face's boundary then projects a hair past both ends of its half of the
+/// tube, and its NURBS form once took the quarter past each end too, going round the whole tube,
+/// which SMLib does not take for a torus: the part came in as a mesh of its faces.
+#[test]
+fn half_tube_a_hair_off_its_torus_imports_as_a_solid() {
+    use solidcraft_geom::Seg2;
+    use std::f64::consts::PI;
+    let (major, minor) = (10.75, 1.25);
+    let d = Loop2 {
+        segs: vec![
+            Seg2::Arc { center: Vec2::new(major, 0.0), radius: minor, start: 0.0, sweep: PI },
+            Seg2::Line { a: Vec2::new(major - minor, 0.0), b: Vec2::new(major + minor, 0.0) },
+        ],
+    };
+    let tube = revolve(&Plane::XZ, &[Region2 { outer: d, holes: vec![] }], Vec2::ZERO, Vec2::Y, PI).unwrap().pop().unwrap();
+    let text = step_export(&[&tube], "test").unwrap();
+    // The torus's placement moved to a point of its own, 5 nm along the axis, off the face's side.
+    let torus = text.lines().find_map(|l| l.split_once("=TOROIDAL_SURFACE('',#")).unwrap().1.split(',').next().unwrap().to_string();
+    let place = text.lines().find(|l| l.starts_with(&format!("#{torus}=AXIS2_PLACEMENT_3D('',#"))).unwrap();
+    let (_, axes) = place.split_once("('',#").unwrap().1.split_once(',').unwrap();
+    let mut low = text.replace(place, &format!("#{torus}=AXIS2_PLACEMENT_3D('',#900000,{axes}"));
+    let data_end = low.rfind("ENDSEC;").unwrap();
+    low.insert_str(data_end, "#900000=CARTESIAN_POINT('',(0.0,0.0,-5.E-6));\n");
+    let imp = step_import(&low).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let b = &imp.bodies[0];
+    assert!(b.refused.is_none() && b.closed && !b.body.is_mesh() && !b.body.is_surface(), "{:?} {:?}", b.refused, imp.warnings);
+    assert!(rel(measure(&b.body).unwrap().volume, measure(&tube).unwrap().volume) < 1e-3);
 }
 
 #[test]
@@ -426,72 +505,6 @@ fn imported_bodies_take_features() {
 
 const HEAD: &str = "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('t','',(''),(''),'','hand','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));\nENDSEC;\nDATA;\n";
 const TAIL: &str = "ENDSEC;\nEND-ISO-10303-21;\n";
-
-/// Original fixtures: elementary basis surfaces plus offsets, with no external CAD files.
-fn offset_geometry(definition: &str, offset: &str, len: f64, sense: bool, points: &[mt::Point3]) -> crate::Result<mt::Surface> {
-    let text = format!(
-        "{HEAD}#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=AXIS2_PLACEMENT_3D('',#1,$,$);\n#3={definition};\n#4=OFFSET_SURFACE('',#3,{offset},.U.);\n{TAIL}"
-    );
-    let ex = p21::parse(&text).unwrap();
-    let cx = Ctx { ex: &ex, len, ang: 1.0, tol: 1e-6, snap: 1e-6 };
-    crate::guard("test offset surface", || geom::surface(&cx, 4, points, &[], sense, 0).map_err(KernelError::Failed))
-}
-
-#[test]
-fn offset_surface_analytic_geometry_and_orientation() {
-    use mt::{InnerSpace, MetricSpace, ParametricSurface, ParametricSurface3D, SearchNearestParameter};
-    let angle: f64 = 0.4;
-    let cases = [
-        ("PLANE('',#2)".to_string(), mt::Point3::new(2.0, 3.0, 1.0), mt::Vector3::unit_z()),
-        ("CYLINDRICAL_SURFACE('',#2,5.)".to_string(), mt::Point3::new(6.0, 0.0, 2.0), mt::Vector3::unit_x()),
-        ("SPHERICAL_SURFACE('',#2,5.)".to_string(), mt::Point3::new(6.0, 0.0, 0.0), mt::Vector3::unit_x()),
-        ("TOROIDAL_SURFACE('',#2,10.,2.)".to_string(), mt::Point3::new(13.0, 0.0, 0.0), mt::Vector3::unit_x()),
-        (
-            format!("CONICAL_SURFACE('',#2,5.,{angle})"),
-            mt::Point3::new(5.0 + 1.0 / angle.cos() + 2.0 * angle.tan(), 0.0, 2.0),
-            mt::Vector3::new(angle.cos(), 0.0, -angle.sin()),
-        ),
-    ];
-    for (definition, point, normal) in cases {
-        for sense in [true, false] {
-            let extent = [point, point + mt::Vector3::unit_z()];
-            let surface = offset_geometry(&definition, "1.", 1.0, sense, &extent).unwrap();
-            let uv = surface.search_nearest_parameter(point, None, 100).unwrap();
-            assert!(surface.subs(uv.0, uv.1).distance(point) < 1e-6, "{definition}");
-            assert!(surface.normal(uv.0, uv.1).dot(normal) * if sense { 1.0 } else { -1.0 } > 0.99, "{definition}, sense {sense}");
-        }
-    }
-    let p = mt::Point3::new(40.0, 0.0, 2.0);
-    let surface = offset_geometry("CYLINDRICAL_SURFACE('',#2,5.)", "-1.", 10.0, true, &[p, p + mt::Vector3::unit_z()]).unwrap();
-    let uv = surface.search_nearest_parameter(p, None, 100).unwrap();
-    assert!(surface.subs(uv.0, uv.1).distance(p) < 1e-6);
-}
-
-#[test]
-fn offset_surfaces_nested_and_hostile() {
-    let points = [mt::Point3::new(0.0, 0.0, 0.0), mt::Point3::new(0.0, 0.0, 1.0)];
-    for (basis, offset) in [
-        ("CYLINDRICAL_SURFACE('',#2,5.)", "-5."),
-        ("SPHERICAL_SURFACE('',#2,5.)", "-6."),
-        ("TOROIDAL_SURFACE('',#2,10.,2.)", "8."),
-        ("TOROIDAL_SURFACE('',#2,10.,2.)", "-2."),
-        ("CONICAL_SURFACE('',#2,5.,0.4)", "-10."),
-        ("PLANE('',#2)", "1.E100"),
-        ("PLANE('',#2)", "$"),
-    ] {
-        assert!(offset_geometry(basis, offset, 1.0, true, &points).is_err(), "{basis}, {offset}");
-    }
-    let text = format!("{HEAD}#1=OFFSET_SURFACE('',#1,1.,.F.);{TAIL}");
-    let ex = p21::parse(&text).unwrap();
-    let cx = Ctx { ex: &ex, len: 1.0, ang: 1.0, tol: 1e-6, snap: 1e-6 };
-    assert!(geom::surface(&cx, 1, &points, &[], true, 0).unwrap_err().contains("nested too deeply"));
-    let text = format!(
-        "{HEAD}#1=CARTESIAN_POINT('',(0.,0.,0.));#2=AXIS2_PLACEMENT_3D('',#1,$,$);#3=CYLINDRICAL_SURFACE('',#2,5.);#4=OFFSET_SURFACE('',#3,-6.,.F.);#5=OFFSET_SURFACE('',#4,6.,.F.);{TAIL}"
-    );
-    let ex = p21::parse(&text).unwrap();
-    let cx = Ctx { ex: &ex, len: 1.0, ang: 1.0, tol: 1e-6, snap: 1e-6 };
-    assert!(geom::surface(&cx, 5, &points, &[], true, 0).is_err());
-}
 
 #[test]
 fn offset_surface_cube_import_is_closed_and_editable() {
@@ -527,6 +540,17 @@ fn offset_surface_cube_import_is_closed_and_editable() {
     assert!(rel(measure(&result).unwrap().volume, 1000.0 - 40.0 * std::f64::consts::PI) < 1e-3);
 }
 
+/// A solid whose B-rep SMLib refuses, its faces too (here every SMLib call: the build has no
+/// SMLib), is refused with the kernel's reason, naming the solid. It once came in as a mesh of
+/// its faces, which the planner could still triangulate.
+#[cfg(not(feature = "smlib"))]
+#[test]
+fn a_solid_smlib_refuses_with_its_faces_is_refused_not_meshed() {
+    let text = format!("{HEAD}{}#60=SHAPE_REPRESENTATION('',(#101),$);\n{TAIL}", cube_entities());
+    let why = step_import(&text).map(|imp| imp.warnings).unwrap_err().to_string();
+    assert!(why.contains("solid 'Cube': not imported: ") && why.contains("SMLib"), "{why}");
+}
+
 /// A hand-written unit cube brep (`#100`…) in a representation with the given unit and items.
 fn cube_entities() -> String {
     let mut s = String::new();
@@ -534,11 +558,23 @@ fn cube_entities() -> String {
     for (i, (x, y, z)) in pts.iter().enumerate() {
         s += &format!("#{}=CARTESIAN_POINT('',({x}.,{y}.,{z}.));\n#{}=VERTEX_POINT('',#{});\n", 200 + i, 210 + i, 200 + i);
     }
-    // 12 edges as lines (direction vector filler; trimmed by vertices).
+    // 12 edges, each on the line through its two vertices (trimmed by them). Their directions
+    // and vectors are #340 to #363, clear of the ids the assembly fixtures add (#600 on).
     let edges = [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7)];
-    s += "#290=DIRECTION('',(1.,0.,0.));\n#291=VECTOR('',#290,1.);\n";
     for (k, (a, b)) in edges.iter().enumerate() {
-        s += &format!("#{}=LINE('',#{},#291);\n#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n", 300 + k, 200 + a, 320 + k, 210 + a, 210 + b, 300 + k);
+        let (p, q) = (pts[*a], pts[*b]);
+        let d = (q.0 - p.0, q.1 - p.1, q.2 - p.2);
+        s += &format!("#{}=DIRECTION('',({}.,{}.,{}.));\n#{}=VECTOR('',#{},1.);\n", 340 + 2 * k, d.0, d.1, d.2, 341 + 2 * k, 340 + 2 * k);
+        s += &format!(
+            "#{}=LINE('',#{},#{});\n#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n",
+            300 + k,
+            200 + a,
+            341 + 2 * k,
+            320 + k,
+            210 + a,
+            210 + b,
+            300 + k
+        );
     }
     // Faces: (edge, forward?) loops counter-clockwise seen from outside, and plane frames.
     let faces: [(&[(usize, bool)], (i32, i32, i32), (i32, i32, i32)); 6] = [
@@ -594,6 +630,46 @@ fn product(pd: u64, name: &str) -> String {
         pd + 3,
         pd + 4
     )
+}
+
+/// A surface model of a closed shell and an open one beside it (Poppy Humanoid's thighs: the
+/// part, and a sheet of two faces on it) comes in as two bodies: the closed shell a solid of its
+/// own, the open one a surface body, each in the model's colour. It once came in as one body,
+/// open for its sheet's edges.
+#[test]
+fn a_surface_models_closed_shell_beside_a_sheet_is_a_solid_of_its_own() {
+    let mut t = String::from(HEAD);
+    t += &cube_entities();
+    // A unit square sheet at z = 5.
+    let corners = [(0, 0), (1, 0), (1, 1), (0, 1)];
+    for (i, (x, y)) in corners.iter().enumerate() {
+        t += &format!("#{}=CARTESIAN_POINT('',({x}.,{y}.,5.));\n#{}=VERTEX_POINT('',#{});\n", 800 + i, 810 + i, 800 + i);
+    }
+    let mut oes = Vec::new();
+    for i in 0..4 {
+        let (a, b) = (corners[i], corners[(i + 1) % 4]);
+        t += &format!("#{}=DIRECTION('',({}.,{}.,0.));\n#{}=VECTOR('',#{},1.);\n", 820 + 2 * i, b.0 - a.0, b.1 - a.1, 821 + 2 * i, 820 + 2 * i);
+        t += &format!("#{}=LINE('',#{},#{});\n", 830 + i, 800 + i, 821 + 2 * i);
+        t += &format!("#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n", 840 + i, 810 + i, 810 + (i + 1) % 4, 830 + i);
+        t += &format!("#{}=ORIENTED_EDGE('',*,*,#{},.T.);\n", 850 + i, 840 + i);
+        oes.push(format!("#{}", 850 + i));
+    }
+    t += &format!("#860=EDGE_LOOP('',({}));\n#861=FACE_OUTER_BOUND('',#860,.T.);\n", oes.join(","));
+    t += "#862=CARTESIAN_POINT('',(0.,0.,5.));\n#863=DIRECTION('',(0.,0.,1.));\n#864=AXIS2_PLACEMENT_3D('',#862,#863,$);\n#865=PLANE('',#864);\n";
+    t += "#866=ADVANCED_FACE('',(#861),#865,.T.);\n#130=OPEN_SHELL('',(#866));\n#110=SHELL_BASED_SURFACE_MODEL('Thigh',(#100,#130));\n";
+    t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += "#60=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#110),#20);\n";
+    t += "#70=STYLED_ITEM('',(#71),#110);\n#71=PRESENTATION_STYLE_ASSIGNMENT((#72));\n#72=SURFACE_STYLE_USAGE(.BOTH.,#73);\n#73=SURFACE_SIDE_STYLE('',(#74));\n#74=SURFACE_STYLE_FILL_AREA(#75);\n#75=FILL_AREA_STYLE('',(#76));\n#76=FILL_AREA_STYLE_COLOUR('',#77);\n#77=COLOUR_RGB('',1.,0.5,0.);\n";
+    t += TAIL;
+    let imp = step_import(&t).unwrap();
+    assert_eq!(imp.bodies.len(), 2, "{:?}", imp.warnings);
+    let (solid, sheet) = (&imp.bodies[0], &imp.bodies[1]);
+    assert!(solid.closed && solid.refused.is_none() && !solid.body.is_surface(), "{:?}", imp.warnings);
+    assert_eq!((solid.source_item, solid.file_faces), (100, 6));
+    assert!(rel(measure(&solid.body).unwrap().volume, 1.0) < 1e-9);
+    assert!(!sheet.closed && sheet.body.is_surface() && sheet.body.face_count() == 1);
+    assert_eq!((sheet.source_item, sheet.name.as_str()), (110, "Thigh"));
+    assert!(imp.bodies.iter().all(|b| b.color == Some([1.0, 0.5, 0.0])));
 }
 
 #[test]
@@ -743,9 +819,7 @@ fn instanced_assembly_of(parts: u64, n: u64) -> String {
 fn instanced_parts_are_oriented_once() {
     let n = 24;
     let t = instanced_assembly(n);
-    crate::body::ORIENTED.with(|c| c.set(0));
     let imp = step_import_with_workers(&t, 1).unwrap();
-    assert_eq!(crate::body::ORIENTED.with(|c| c.get()), 1, "one distinct part");
     assert_eq!(imp.bodies.len(), n as usize);
     assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
     for (k, b) in imp.bodies.iter().enumerate() {
@@ -760,9 +834,9 @@ fn instanced_parts_are_oriented_once() {
 }
 
 /// Distinct parts are oriented together, not one occurrence at a time: an assembly placing
-/// two parts in turn converts in a few steps of many solids (the first finds both parts'
-/// orientations side by side on the workers, the next places every other instance), where
-/// converting instance by instance took one step each.
+/// two parts in turn converts in one step (both parts' orientations found side by side on the
+/// workers, every other instance placed after its part's first), where converting instance by
+/// instance took one step each, and stopping the step at a part's second instance two.
 #[test]
 fn distinct_parts_convert_together_across_instances() {
     let n = 24;
@@ -772,13 +846,11 @@ fn distinct_parts_convert_together_across_instances() {
     while reading.step() {
         steps += 1;
     }
-    assert_eq!(steps, 2, "both parts in the first step, every other instance in the second");
+    assert_eq!(steps, 1, "both parts and every other instance in one step");
     let threaded = reading.finish().unwrap();
     assert_eq!(threaded.bodies.len(), n as usize);
     assert!(threaded.warnings.is_empty(), "{:?}", threaded.warnings);
-    crate::body::ORIENTED.with(|c| c.set(0));
     let serial = step_import_with_workers(&t, 1).unwrap();
-    assert_eq!(crate::body::ORIENTED.with(|c| c.get()), 2, "two parts");
     assert_same_import(&serial, &threaded);
     assert_eq!(threaded.bodies[1].name, "Cube1");
     assert_eq!(threaded.bodies[1].path, vec!["Assembly".to_string(), "Block1".to_string()]);
@@ -794,8 +866,8 @@ fn later_instances_show_the_first_instances_mesh_placed() {
     // The first instance shows the shared mesh as well (meshing its own would mesh the part twice).
     let (Some(a), Some(b)) = (first.display_of.as_deref(), second.display_of.as_deref()) else { panic!("both instances share a display") };
     assert!(std::sync::Arc::ptr_eq(&a.0, &b.0));
-    let a = first.reference_display_mesh_angular(0.01, crate::DISPLAY_ANGLE).unwrap();
-    let b = second.reference_display_mesh_angular(0.01, crate::DISPLAY_ANGLE).unwrap();
+    let a = first.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap();
+    let b = second.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap();
     assert_eq!(a.triangles, b.triangles);
     assert_eq!(a.tri_face, b.tri_face);
     assert_eq!(a.edges.len(), b.edges.len());
@@ -887,10 +959,13 @@ fn repeated_items_are_shared_and_one_use_items_are_not() {
     assert!(boxes[1].bbox.min.dist(Vec3::new(90.0, 0.0, 0.0)) < 1e-6, "{:?}", boxes[1].bbox);
 }
 
+/// A face on a surface the reader does not know is left out and named; the rest of the solid
+/// comes in as a surface body of the faces that read, with no "open body" warning on top (as
+/// `a_refused_solid_comes_in_as_a_surface_body_of_the_faces_that_read`).
 #[test]
 fn unsupported_face_is_left_out_and_reported() {
     let mut t = String::from(HEAD);
-    let cube = cube_entities().replace("#410=PLANE('',#409);", "#410=OFFSET_SURFACE('',#409,1.,.F.);");
+    let cube = cube_entities().replace("#410=PLANE('',#409);", "#410=CURVE_BOUNDED_SURFACE('',#409,(),.F.);");
     t += &cube;
     t += "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);\n";
     t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
@@ -899,77 +974,11 @@ fn unsupported_face_is_left_out_and_reported() {
     assert_eq!(imp.bodies.len(), 1);
     assert!(!imp.bodies[0].closed);
     assert_eq!(imp.bodies[0].body.face_count(), 5);
-    assert!(imp.warnings.iter().any(|w| w.contains("OFFSET_SURFACE")), "{:?}", imp.warnings);
-    assert!(imp.warnings.iter().any(|w| w.contains("open body")), "{:?}", imp.warnings);
-}
-
-/// A flat square sheet `size` mm across in millimetres (declared accuracy 1e-6 mm) whose right
-/// edge is a straight spline ending `gap` mm beside the corner vertex it runs to, as exporters
-/// write two curves meeting at a vertex between them. `stray` adds an unused vertex that far
-/// out, which makes the model look that large.
-fn gapped_sheet(size: f64, gap: f64, stray: Option<f64>) -> String {
-    let mut t = String::from(HEAD);
-    for (k, (x, y)) in [(0.0, 0.0), (size, 0.0), (size, size), (0.0, size)].iter().enumerate() {
-        t += &format!("#{}=CARTESIAN_POINT('',({x:.6},{y:.6},0.));\n#{}=VERTEX_POINT('',#{});\n", 20 + k, 30 + k, 20 + k);
-    }
-    if let Some(far) = stray {
-        t += &format!("#38=CARTESIAN_POINT('',({far:.6},0.,0.));\n#39=VERTEX_POINT('',#38);\n");
-    }
-    t += &format!(
-        "#46=CARTESIAN_POINT('',({:.6},{size:.6},0.));\n#47=B_SPLINE_CURVE_WITH_KNOTS('',1,(#21,#46),.UNSPECIFIED.,.F.,.F.,(2,2),(0.,1.),.UNSPECIFIED.);\n",
-        size + gap
-    );
-    t += "#40=DIRECTION('',(1.,0.,0.));\n#41=VECTOR('',#40,1.);\n#50=LINE('',#20,#41);\n#52=LINE('',#22,#41);\n#53=LINE('',#23,#41);\n";
-    for (k, curve) in [50, 47, 52, 53].iter().enumerate() {
-        t += &format!(
-            "#{}=EDGE_CURVE('',#{},#{},#{curve},.T.);\n#{}=ORIENTED_EDGE('',*,*,#{},.T.);\n",
-            60 + k,
-            30 + k,
-            30 + (k + 1) % 4,
-            70 + k,
-            60 + k
-        );
-    }
-    t += "#80=EDGE_LOOP('',(#70,#71,#72,#73));\n#81=FACE_OUTER_BOUND('',#80,.T.);\n#90=CARTESIAN_POINT('',(0.,0.,0.));\n#91=DIRECTION('',(0.,0.,1.));\n";
-    t += "#92=AXIS2_PLACEMENT_3D('',#90,#91,#40);\n#93=PLANE('',#92);\n#82=ADVANCED_FACE('',(#81),#93,.T.);\n";
-    t += "#110=OPEN_SHELL('',(#82));\n#111=SHELL_BASED_SURFACE_MODEL('Sheet',(#110));\n#112=SHAPE_REPRESENTATION('',(#111),#10);\n";
-    t += &context(10, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
-    t += TAIL;
-    t
-}
-
-#[test]
-fn a_vertex_off_its_curve_by_a_small_share_of_the_model_is_moved_onto_it() {
-    // 0.19 mm on a 1 m sheet: 190 000 times the file's declared accuracy, 1.3e-4 of its size.
-    let imp = step_import(&gapped_sheet(1000.0, 0.19, None)).unwrap();
-    assert!(!imp.warnings.iter().any(|w| w.contains("off their curve")), "{:?}", imp.warnings);
-    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
-    let body = &imp.bodies[0].body;
-    assert_eq!(body.face_count(), 1);
-    // Every edge meets its vertices exactly: the spline's end was moved onto the corner.
-    use mt::{BoundedCurve as _, MetricSpace as _};
-    for e in body.solid.edge_iter() {
-        let c = e.curve();
-        assert!(c.front().distance(e.front().point()) < 1e-9 && c.back().distance(e.back().point()) < 1e-9);
-    }
-    let m = measure(body).unwrap();
-    assert!(rel(m.area, 1e6) < 1e-4, "area {}", m.area);
-}
-
-#[test]
-fn a_vertex_further_off_its_curve_than_the_model_allows_leaves_the_face_out() {
-    // 0.19 mm on a 10 mm sheet is 1.3 % of the part; and a stray point a kilometre out cannot
-    // stretch the limit past 1 mm.
-    for text in [gapped_sheet(10.0, 0.19, None), gapped_sheet(1000.0, 2.0, Some(1e6))] {
-        let warnings = match step_import(&text) {
-            Ok(imp) => {
-                assert!(imp.bodies.is_empty());
-                imp.warnings.join("\n")
-            }
-            Err(e) => e.to_string(),
-        };
-        assert!(warnings.contains("off their curve"), "{warnings}");
-    }
+    assert!(imp.bodies[0].body.is_surface() && !imp.bodies[0].body.is_mesh());
+    let unsupported = "face #411: not supported yet: surface CURVE_BOUNDED_SURFACE";
+    assert!(imp.warnings.iter().any(|w| w.contains("'Cube': imported as surfaces: ") && w.contains(unsupported)), "{:?}", imp.warnings);
+    assert!(imp.warnings.iter().any(|w| w.contains("'Cube': left out: ") && w.contains(unsupported)), "{:?}", imp.warnings);
+    assert!(!imp.warnings.iter().any(|w| w.contains("open body")), "{:?}", imp.warnings);
 }
 
 #[test]
@@ -1055,238 +1064,6 @@ fn validator_catches_broken_files() {
     assert!(step_validate(&format!("{HEAD}#1=SHAPE_DEFINITION_REPRESENTATION(#2);\n#2=B();\n#2=C();\n{TAIL}")).unwrap_err().contains("duplicate"));
     assert!(step_validate(&format!("{HEAD}#1=A((#7));\n{TAIL}")).unwrap_err().contains("undefined"));
     assert!(step_validate(&format!("{HEAD}#1=SHAPE_DEFINITION_REPRESENTATION(#5);\n#5=B();\n{TAIL}")).unwrap_err().contains("dense"));
-}
-
-#[test]
-fn split_band_edges_are_seams() {
-    // A quarter pipe (torus R 10, r 3) whose face wraps around the tube with a seam edge: it is
-    // split for the kernel, and the split edge is drawn as a seam.
-    let mut t = String::from(HEAD);
-    t += "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n";
-    t += "#5=TOROIDAL_SURFACE('',#4,10.,3.);\n";
-    t += "#10=CARTESIAN_POINT('',(13.,0.,0.));\n#11=CARTESIAN_POINT('',(0.,13.,0.));\n#12=VERTEX_POINT('',#10);\n#13=VERTEX_POINT('',#11);\n";
-    // Tube circles at azimuth 0 (plane XZ) and 90 degrees (plane YZ), the seam around Z.
-    t += "#20=CARTESIAN_POINT('',(10.,0.,0.));\n#21=DIRECTION('',(0.,-1.,0.));\n#22=AXIS2_PLACEMENT_3D('',#20,#21,#3);\n#23=CIRCLE('',#22,3.);\n";
-    t += "#24=CARTESIAN_POINT('',(0.,10.,0.));\n#25=DIRECTION('',(1.,0.,0.));\n#26=DIRECTION('',(0.,1.,0.));\n#27=AXIS2_PLACEMENT_3D('',#24,#25,#26);\n#28=CIRCLE('',#27,3.);\n";
-    t += "#29=CIRCLE('',#4,13.);\n";
-    t += "#30=EDGE_CURVE('',#12,#12,#23,.T.);\n#31=EDGE_CURVE('',#13,#13,#28,.T.);\n#32=EDGE_CURVE('',#12,#13,#29,.T.);\n";
-    t += "#40=ORIENTED_EDGE('',*,*,#30,.T.);\n#41=ORIENTED_EDGE('',*,*,#32,.T.);\n#42=ORIENTED_EDGE('',*,*,#31,.F.);\n#43=ORIENTED_EDGE('',*,*,#32,.F.);\n";
-    t += "#44=EDGE_LOOP('',(#40,#41,#42,#43));\n#45=FACE_OUTER_BOUND('',#44,.T.);\n#46=ADVANCED_FACE('',(#45),#5,.F.);\n";
-    t += "#47=PLANE('',#22);\n#48=ORIENTED_EDGE('',*,*,#30,.F.);\n#49=EDGE_LOOP('',(#48));\n#50=FACE_OUTER_BOUND('',#49,.T.);\n#51=ADVANCED_FACE('',(#50),#47,.T.);\n";
-    t += "#52=PLANE('',#27);\n#53=ORIENTED_EDGE('',*,*,#31,.T.);\n#54=EDGE_LOOP('',(#53));\n#55=FACE_OUTER_BOUND('',#54,.T.);\n#56=ADVANCED_FACE('',(#55),#52,.T.);\n";
-    t += "#60=CLOSED_SHELL('',(#46,#51,#56));\n#61=MANIFOLD_SOLID_BREP('Pipe',#60);\n#62=SHAPE_REPRESENTATION('',(#61),$);\n";
-    t += TAIL;
-    let imp = step_import(&t).unwrap();
-    let ib = &imp.bodies[0];
-    assert_eq!(ib.file_faces, 3);
-    assert_eq!(ib.body.face_count(), 4, "{:?}", imp.warnings);
-    // The two halves of the tube face make a quarter torus: area π²·R·r.
-    let curved: f64 = ib.body.faces(1e-3).unwrap().iter().filter(|f| f.plane_normal.is_none()).map(|f| f.area).sum();
-    let want = std::f64::consts::PI.powi(2) * 30.0;
-    assert!(rel(curved, want) < 2e-3, "{curved} vs {want}");
-    let m = ib.body.display_mesh(ib.body.size() * 1e-3).unwrap();
-    // Seams: the file's own seam (inside the tube face) and the split edge.
-    assert!(m.seams.iter().filter(|s| **s).count() >= 2, "{:?}", m.seams);
-}
-
-/// A five-sided tube on a B-spline surface closed around (radius `r`, height `h`), as one band
-/// face bounded by ring edges `off` mm outside the surface, with a seam edge up one corner used
-/// both ways; plus the two flat ends on the planes the rings lie in. The file declares
-/// `uncertainty` mm of uncertainty of its own, which is what tells a reader how far the rings
-/// may lie off the surface.
-///
-/// The part's size, the rings' off-surface distance and the declared uncertainty are separate on
-/// purpose: a real file's slop stays a few micrometres whether the part is 20 mm or 2 m across
-/// (see `off_surface_budget_follows_the_file_not_the_part_size`).
-#[derive(Clone, Copy)]
-struct RingEdgeTube {
-    /// Radius of the surface (mm).
-    r: f64,
-    /// Height of the tube (mm).
-    h: f64,
-    /// How far outside the surface the ring edges run (mm).
-    off: f64,
-    /// The uncertainty the file declares for itself (mm).
-    uncertainty: f64,
-}
-
-impl RingEdgeTube {
-    /// A 20 mm part with a few micrometres of slop and a micrometre of declared uncertainty:
-    /// what a well-behaved writer puts out.
-    fn small() -> RingEdgeTube {
-        RingEdgeTube { r: 10.0, h: 8.0, off: 0.004, uncertainty: 1e-3 }
-    }
-
-    /// The same part, and the same slop, scaled to about 2 m across.
-    fn large() -> RingEdgeTube {
-        RingEdgeTube { r: 1000.0, h: 800.0, ..RingEdgeTube::small() }
-    }
-
-    /// The volume the closed pentagon prism encloses (mm³).
-    fn volume(&self) -> f64 {
-        2.5 * self.r * self.r * (std::f64::consts::TAU / 5.0).sin() * self.h
-    }
-
-    /// The area of the five sides and the two five-sided ends together (mm²).
-    fn area(&self) -> f64 {
-        let side = 2.0 * self.r * (std::f64::consts::TAU / 10.0).sin();
-        5.0 * side * self.h + 5.0 * side * self.r * (std::f64::consts::TAU / 10.0).cos()
-    }
-
-    fn step(&self) -> String {
-        ring_edge_tube_step(self.r, self.h, self.off, self.uncertainty)
-    }
-}
-
-fn ring_edge_tube_step(r: f64, h: f64, off: f64, uncertainty: f64) -> String {
-    let corner = |k: usize, radius: f64| {
-        let a = std::f64::consts::TAU * (k % 5) as f64 / 5.0;
-        (radius * a.cos(), radius * a.sin())
-    };
-    let mut t = String::from(HEAD);
-    // Control net: the corners around (the first repeated to close it) x the two ends.
-    let mut rows = Vec::new();
-    for k in 0..=5 {
-        let (x, y) = corner(k, r);
-        let id = 100 + 2 * k as u64;
-        t += &format!("#{id}=CARTESIAN_POINT('',({x:.9},{y:.9},0.));\n#{}=CARTESIAN_POINT('',({x:.9},{y:.9},{h:.9}));\n", id + 1);
-        rows.push(format!("(#{id},#{})", id + 1));
-    }
-    t += &format!(
-        "#200=B_SPLINE_SURFACE_WITH_KNOTS('',1,1,({}),.UNSPECIFIED.,.T.,.F.,.F.,(2,1,1,1,1,2),(2,2),(0.,1.,2.,3.,4.,5.),(0.,1.),.UNSPECIFIED.);\n",
-        rows.join(",")
-    );
-    // The rings, `off` mm outside the surface: each is one closed polyline edge.
-    for k in 0..5u64 {
-        let (x, y) = corner(k as usize, r + off);
-        t += &format!("#{}=CARTESIAN_POINT('',({x:.9},{y:.9},0.));\n#{}=CARTESIAN_POINT('',({x:.9},{y:.9},{h:.9}));\n", 300 + k, 310 + k);
-    }
-    t += "#320=VERTEX_POINT('',#300);\n#321=VERTEX_POINT('',#310);\n";
-    t += "#330=POLYLINE('',(#300,#301,#302,#303,#304,#300));\n#331=POLYLINE('',(#310,#311,#312,#313,#314,#310));\n";
-    t += "#340=DIRECTION('',(0.,0.,1.));\n#341=VECTOR('',#340,1.);\n#342=LINE('',#300,#341);\n";
-    t += "#350=EDGE_CURVE('',#320,#320,#330,.T.);\n#351=EDGE_CURVE('',#321,#321,#331,.T.);\n#352=EDGE_CURVE('',#320,#321,#342,.T.);\n";
-    // The band's loop: around the bottom ring, up the seam, back around the top, down the seam.
-    t += "#360=ORIENTED_EDGE('',*,*,#350,.T.);\n#361=ORIENTED_EDGE('',*,*,#352,.T.);\n#362=ORIENTED_EDGE('',*,*,#351,.F.);\n#363=ORIENTED_EDGE('',*,*,#352,.F.);\n";
-    t += "#364=EDGE_LOOP('',(#360,#361,#362,#363));\n#365=FACE_OUTER_BOUND('',#364,.T.);\n#366=ADVANCED_FACE('',(#365),#200,.T.);\n";
-    // The two ends, on the planes the rings lie in.
-    t += "#370=CARTESIAN_POINT('',(0.,0.,0.));\n#371=DIRECTION('',(1.,0.,0.));\n#372=AXIS2_PLACEMENT_3D('',#370,#340,#371);\n#373=PLANE('',#372);\n";
-    t += "#374=ORIENTED_EDGE('',*,*,#350,.F.);\n#375=EDGE_LOOP('',(#374));\n#376=FACE_OUTER_BOUND('',#375,.T.);\n#377=ADVANCED_FACE('',(#376),#373,.F.);\n";
-    t += &format!("#380=CARTESIAN_POINT('',(0.,0.,{h:.9}));\n#381=AXIS2_PLACEMENT_3D('',#380,#340,#371);\n#382=PLANE('',#381);\n");
-    t += "#383=ORIENTED_EDGE('',*,*,#351,.T.);\n#384=EDGE_LOOP('',(#383));\n#385=FACE_OUTER_BOUND('',#384,.T.);\n#386=ADVANCED_FACE('',(#385),#382,.T.);\n";
-    t += "#390=CLOSED_SHELL('',(#366,#377,#386));\n#391=MANIFOLD_SOLID_BREP('Tube',#390);\n#392=SHAPE_REPRESENTATION('',(#391),#20);\n";
-    // What the file declares about its own numbers. This, and not the part's size, is how far a
-    // reader may let the ring edges lie off the surface.
-    t += "#20=(GEOMETRIC_REPRESENTATION_CONTEXT(3)GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#21))GLOBAL_UNIT_ASSIGNED_CONTEXT((#22,#23))REPRESENTATION_CONTEXT('',''));\n";
-    t += &format!("#21=UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE({uncertainty:.9}),#22,'','');\n");
-    t += "#22=(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.));\n#23=(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.));\n";
-    t += TAIL;
-    t
-}
-
-/// Every check the split band must pass, at whatever size the part is: the band comes in as two
-/// faces, every face has triangles at every chord tolerance from coarse to fine, and the four
-/// faces together cover the tube once and close it.
-///
-/// Every tolerance here is a fraction of the body, so the same mesh is asked for at every scale;
-/// the rings' off-surface distance is the one thing that stays absolute.
-fn assert_ring_edge_tube_meshes(tube: &RingEdgeTube) {
-    let imp = step_import(&tube.step()).unwrap();
-    assert!(!imp.warnings.iter().any(|w| w.contains("kept whole")), "{:?}", imp.warnings);
-    let ib = &imp.bodies[0];
-    assert_eq!(ib.file_faces, 3);
-    assert_eq!(ib.body.face_count(), 4, "the band face is split in two: {:?}", imp.warnings);
-    assert_eq!(ib.body.unmeshed_faces(), 0, "{:?}", imp.warnings);
-    let size = ib.body.size();
-    // Every face is meshed, and the four together cover the tube once: five sides of
-    // 2*R*sin(36 deg) by the height, plus the two five-sided ends.
-    let m = ib.body.display_mesh(size * 2e-3).unwrap();
-    let mut area = vec![0.0f64; ib.body.face_count()];
-    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-        let (a, b, c) = (m.positions[t[0] as usize], m.positions[t[1] as usize], m.positions[t[2] as usize]);
-        if let Some(sum) = area.get_mut(*f as usize) {
-            *sum += 0.5 * (b - a).cross(c - a).len();
-        }
-    }
-    let side = 2.0 * tube.r * (std::f64::consts::TAU / 10.0).sin();
-    let want = tube.area();
-    assert!(rel(area.iter().sum::<f64>(), want) < 5e-3, "{area:?} sums to {} not {want}", area.iter().sum::<f64>());
-    // Neither half of the split is a sliver: the split line runs from ring to ring.
-    assert!(area.iter().all(|a| *a > 0.2 * side * tube.h), "a face of the split tube is nearly empty: {area:?}");
-    // The body closes: its volume is the pentagon prism's. `measure` tessellates far finer than
-    // any display does, and the planner used to give up on a boundary running off its surface
-    // once the chord tolerance came near the gap. One face without a plan costs the whole body
-    // its plan, and the reference mesher cannot mesh a face on a closed B-spline surface at all,
-    // so both halves of the band came out with no triangles: the volume was the top cap's alone.
-    let vol = measure(&ib.body).unwrap().volume;
-    let want_vol = tube.volume();
-    assert!(rel(vol, want_vol) < 1e-3, "the split band does not close the body: {vol} not {want_vol}");
-    // Every face keeps its triangles at every tolerance, coarse to fine.
-    for frac in [2e-3, 4e-4, 4e-5, 1.1e-5, 4e-6] {
-        let t = size * frac;
-        let plan = ib.body.display_plan(t).unwrap_or_else(|e| panic!("no display plan at tol {t}: {e}"));
-        let bare: Vec<u32> = plan.faces.iter().filter(|f| f.triangles.is_empty()).map(|f| f.face).collect();
-        assert!(bare.is_empty(), "faces {bare:?} have no triangles at tol {t}");
-    }
-    // What the viewport and a snapshot actually draw: the display tolerance with a facet angle.
-    // The angle divides an edge wherever it kinks, far below the chord tolerance, which is what
-    // used to crowd the boundary against a corner of the surface and leave the band undrawn.
-    let tol = (size * 1e-3).max(1e-3);
-    let shown = ib.body.reference_display_mesh_angular(tol, crate::DISPLAY_ANGLE).unwrap();
-    let mut drawn = vec![0.0f64; ib.body.face_count()];
-    for (t, f) in shown.triangles.iter().zip(&shown.tri_face) {
-        let (a, b, c) = (shown.positions[t[0] as usize], shown.positions[t[1] as usize], shown.positions[t[2] as usize]);
-        if let Some(sum) = drawn.get_mut(*f as usize) {
-            *sum += 0.5 * (b - a).cross(c - a).len();
-        }
-    }
-    assert!(drawn.iter().all(|a| *a > 0.2 * side * tube.h), "a face of the split tube is not drawn: {drawn:?}");
-    assert!(rel(drawn.iter().sum::<f64>(), want) < 5e-3, "{drawn:?} sums to {} not {want}", drawn.iter().sum::<f64>());
-}
-
-/// A band face is split although its ring edges run a little off its surface. A file writes
-/// edges and surfaces to its own uncertainty, so the two disagree by a few micrometres; the
-/// split line lies on the surface and can only reach the surface points below the rings.
-#[test]
-fn band_faces_split_when_ring_edges_run_off_their_surface() {
-    assert_ring_edge_tube_meshes(&RingEdgeTube::small());
-}
-
-/// The very same fixture, the very same few micrometres of slop in the file, scaled to a part
-/// about 2 m across: it meshes the same way (#1721).
-#[test]
-fn band_faces_split_when_a_scaled_copy_runs_off_its_surface() {
-    assert_ring_edge_tube_meshes(&RingEdgeTube::large());
-}
-
-/// How far a boundary may lie off its surface is a hundredth of the part, at every chord
-/// tolerance, and more only where the file declares more. A writer's declared accuracy is what it
-/// aimed for, not a bound its edges keep (a robot assembly declaring 0.01 µm has edges 10 to
-/// 30 µm off), so it never tightens the bound; and it must not depend on the mesh asked for, or a
-/// face accepted while the model is far away would drop out when the user zooms in (#1721).
-#[test]
-fn off_surface_budget_is_a_hundredth_of_the_part_at_every_chord_tolerance() {
-    let accepted = |tube: &RingEdgeTube| -> bool {
-        let imp = step_import(&tube.step()).unwrap();
-        let ib = &imp.bodies[0];
-        let size = ib.body.size();
-        [2e-3, 4e-6].iter().all(|fraction| ib.body.display_plan(size * fraction).is_ok())
-    };
-    // A few micrometres, whatever the file declares, at either size.
-    for uncertainty in [1e-3, 1e-5] {
-        for tube in [RingEdgeTube { uncertainty, ..RingEdgeTube::small() }, RingEdgeTube { uncertainty, ..RingEdgeTube::large() }] {
-            assert!(accepted(&tube), "a part {} mm across, {} mm off on {uncertainty} declared", 2.0 * tube.r, tube.off);
-        }
-    }
-    // Within a hundredth of the part: a 20 mm part takes 0.15 mm, a 2 m part 2 mm; past it, no.
-    assert!(accepted(&RingEdgeTube { off: 0.15, ..RingEdgeTube::small() }));
-    assert!(accepted(&RingEdgeTube { off: 2.0, ..RingEdgeTube::large() }));
-    assert!(!accepted(&RingEdgeTube { off: 2.0, ..RingEdgeTube::small() }), "a 20 mm part accepts a boundary 2 mm off its surface");
-    assert!(!accepted(&RingEdgeTube { off: 100.0, ..RingEdgeTube::large() }), "a 2 m part accepts a boundary 100 mm off its surface");
-    // A file declaring more raises it: half a millimetre on a 20 mm part, refused on a declared
-    // micrometre, accepted on a declared 60 µm (ten times which is 0.6 mm).
-    let tight = RingEdgeTube { off: 0.5, ..RingEdgeTube::small() };
-    assert!(!accepted(&tight));
-    assert!(accepted(&RingEdgeTube { uncertainty: 0.06, ..tight }));
 }
 
 /// Revolved faces of a mirrored tool keep their orientation through STEP (the writer used to
@@ -1377,7 +1154,7 @@ fn hostile_boundaries_mesh_in_bounded_time() {
 
 /// A cylinder written as a surface of revolution, oriented the ISO 10303-42 way (normal
 /// ∂S/∂angle × ∂S/∂profile, outward here, so `same_sense` .T.). Strict readers read such faces this
-/// way; reading them with truck's profile-first normal turned faces inside out.
+/// way; reading them with the profile's parameter first turned faces inside out.
 #[test]
 fn surface_of_revolution_sense_follows_iso() {
     let mut t = String::from(HEAD);
@@ -1399,6 +1176,9 @@ fn surface_of_revolution_sense_follows_iso() {
     let m = measure(&imp.bodies[0].body).unwrap();
     let want = std::f64::consts::PI * 25.0 * 10.0;
     assert!(rel(m.volume, want) < 1e-3, "{} vs {want}", m.volume);
+    // Read into schema 4 (a placed revolution), the same cylinder, outward.
+    let v = schema_4_volume(&t);
+    assert!(rel(v, want) < 1e-3, "schema 4: {v} vs {want}");
     // The same face with the opposite sense is inside out.
     let flipped = t.replace("#36=ADVANCED_FACE('',(#35),#8,.T.);", "#36=ADVANCED_FACE('',(#35),#8,.F.);");
     let bad = step_import(&flipped).unwrap();
@@ -1408,7 +1188,8 @@ fn surface_of_revolution_sense_follows_iso() {
 
 /// A tube revolved about a line it touches (a horn torus, as a tight sweep makes) is written as
 /// one rational B-spline face whose loop passes the pole twice, with no zero-length edge there:
-/// no TOROIDAL_SURFACE (it would be degenerate) and no surface of revolution.
+/// no TOROIDAL_SURFACE (it would be degenerate) and no surface of revolution. (Its volume, built
+/// and read back, is the rig's import/cov-step-horn-torus-quarter-round-trip.)
 #[test]
 fn horn_torus_written_as_one_spline_face() {
     let prof = Region2 { outer: Loop2::circle(Vec2::new(5.0, 0.0), 5.0), holes: vec![] };
@@ -1416,13 +1197,220 @@ fn horn_torus_written_as_one_spline_face() {
     let text = step_export(&[&b], "t").unwrap();
     assert!(!text.contains("TOROIDAL_SURFACE") && !text.contains("SURFACE_OF_REVOLUTION"));
     assert_eq!(text.matches("ADVANCED_FACE(").count(), 3, "{text}");
-    let imp = round_trip(&b);
-    let v = std::f64::consts::PI * 25.0 * std::f64::consts::TAU * 5.0 / 4.0;
-    assert!(rel(measure(&imp.bodies[0].body).unwrap().volume, v) < 1e-3);
+}
+
+/// How a torus-capped cylinder ([`torus_capped_cylinder`]) ends.
+enum Tip {
+    /// The tube's quarter from its outside over to its top, at `z`, and a disc there of radius `r`.
+    Disc { z: f64, r: f64 },
+    /// The tube on to where it meets the axis: the pole, a vertex at height `apex` on the axis
+    /// reached by the tube's meridian as the torus face's seam, or (`seam` false) not, its one
+    /// bound the circle at z = 0.
+    Pole { apex: f64, seam: bool },
+}
+
+/// A cylinder about Z of radius `major + minor` from z = -2 to 0, its top a torus about Z with
+/// those radii (`torus`: the surface entity at #5 on placement #4) ending as `tip` says.
+fn torus_capped_cylinder(torus: &str, major: f64, minor: f64, tip: Tip) -> String {
+    let outer = major + minor;
+    let mut t = String::from(HEAD);
+    t += "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n";
+    t += &format!("{torus}\n#6=CYLINDRICAL_SURFACE('',#4,{outer:.16});\n");
+    t += "#7=CARTESIAN_POINT('',(0.,0.,-2.));\n#8=AXIS2_PLACEMENT_3D('',#7,#2,#3);\n#9=PLANE('',#8);\n";
+    t += &format!(
+        "#13=CARTESIAN_POINT('',({outer:.16},0.,-2.));\n#14=VERTEX_POINT('',#13);\n#15=CARTESIAN_POINT('',({outer:.16},0.,0.));\n#16=VERTEX_POINT('',#15);\n"
+    );
+    t += &format!(
+        "#19=CIRCLE('',#8,{outer:.16});\n#20=EDGE_CURVE('',#14,#14,#19,.T.);\n#21=CIRCLE('',#4,{outer:.16});\n#22=EDGE_CURVE('',#16,#16,#21,.T.);\n"
+    );
+    t += "#25=VECTOR('',#2,1.);\n#26=LINE('',#13,#25);\n#27=EDGE_CURVE('',#14,#16,#26,.T.);\n";
+    t += "#40=ORIENTED_EDGE('',*,*,#20,.F.);\n#41=EDGE_LOOP('',(#40));\n#42=FACE_OUTER_BOUND('',#41,.T.);\n#43=ADVANCED_FACE('',(#42),#9,.F.);\n";
+    t += "#44=ORIENTED_EDGE('',*,*,#20,.T.);\n#45=ORIENTED_EDGE('',*,*,#27,.T.);\n#46=ORIENTED_EDGE('',*,*,#22,.F.);\n#47=ORIENTED_EDGE('',*,*,#27,.F.);\n";
+    t += "#48=EDGE_LOOP('',(#44,#45,#46,#47));\n#49=FACE_OUTER_BOUND('',#48,.T.);\n#50=ADVANCED_FACE('',(#49),#6,.T.);\n#51=ORIENTED_EDGE('',*,*,#22,.T.);\n";
+    // The tube's meridian at u = 0 from (outer, 0, 0) to `end`, the torus face's seam: centre
+    // (major, 0, 0), angle from X towards Z (its axis -Y).
+    let meridian = |t: &mut String, end: [f64; 2]| {
+        *t += &format!("#17=CARTESIAN_POINT('',({:.16},0.,{:.16}));\n#18=VERTEX_POINT('',#17);\n", end[0], end[1]);
+        *t += &format!(
+            "#28=CARTESIAN_POINT('',({major:.16},0.,0.));\n#29=DIRECTION('',(0.,-1.,0.));\n#30=AXIS2_PLACEMENT_3D('',#28,#29,#3);\n#31=CIRCLE('',#30,{minor:.16});\n#32=EDGE_CURVE('',#16,#18,#31,.T.);\n"
+        );
+        *t += "#52=ORIENTED_EDGE('',*,*,#32,.T.);\n#54=ORIENTED_EDGE('',*,*,#32,.F.);\n";
+    };
+    let faces = match tip {
+        Tip::Disc { z, r } => {
+            meridian(&mut t, [r, z]);
+            t += &format!("#10=CARTESIAN_POINT('',(0.,0.,{z:.16}));\n#11=AXIS2_PLACEMENT_3D('',#10,#2,#3);\n#12=PLANE('',#11);\n");
+            t += &format!("#23=CIRCLE('',#11,{r:.16});\n#24=EDGE_CURVE('',#18,#18,#23,.T.);\n#53=ORIENTED_EDGE('',*,*,#24,.F.);\n");
+            t += "#55=EDGE_LOOP('',(#51,#52,#53,#54));\n#56=FACE_OUTER_BOUND('',#55,.T.);\n#57=ADVANCED_FACE('',(#56),#5,.T.);\n";
+            t += "#58=ORIENTED_EDGE('',*,*,#24,.T.);\n#59=EDGE_LOOP('',(#58));\n#60=FACE_OUTER_BOUND('',#59,.T.);\n#61=ADVANCED_FACE('',(#60),#12,.T.);\n";
+            "#43,#50,#57,#61"
+        }
+        Tip::Pole { apex, seam } => {
+            if seam {
+                meridian(&mut t, [0.0, apex]);
+                t += "#55=EDGE_LOOP('',(#51,#52,#54));\n";
+            } else {
+                t += "#55=EDGE_LOOP('',(#51));\n";
+            }
+            t += "#56=FACE_OUTER_BOUND('',#55,.T.);\n#57=ADVANCED_FACE('',(#56),#5,.T.);\n";
+            "#43,#50,#57"
+        }
+    };
+    t += &format!("#62=CLOSED_SHELL('',({faces}));\n#63=MANIFOLD_SOLID_BREP('Pin',#62);\n#64=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#63),#70);\n");
+    t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    t
+}
+
+/// The one closed body of `text`, its volume and area against the closed forms; `warnings`
+/// the import's warnings.
+fn assert_closed_measures(text: &str, volume: f64, area: f64, warnings: &[&str]) {
+    let imp = step_import(text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert_eq!(imp.warnings, warnings, "{:?}", imp.warnings);
+    assert!(imp.bodies[0].closed);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert!(rel(m.volume, volume) < 1e-3, "volume {} vs {volume}", m.volume);
+    assert!(rel(m.area, area) < 1e-3, "area {} vs {area}", m.area);
+}
+
+/// A horn torus (major radius = minor, its tube touching its axis) as a round of radius 1 on a
+/// cylinder of radius 2, from the cylinder's top edge over to a disc of radius 1 at z = 1 (a
+/// round pin tip). Under the round, the solid's radius at height z is 1 + √(1 − z²):
+/// V = 8π + π∫₀¹(1 + √(1 − z²))² dz = 8π + π(5/3 + π/2); the round's area is
+/// 2π∫₀^{π/2}(1 + cos v) dv = π² + 2π, with the cylinder's 8π and the discs' 4π and π.
+#[test]
+fn horn_torus_round_on_a_pin_imports_whole() {
+    use std::f64::consts::PI;
+    let t = torus_capped_cylinder("#5=TOROIDAL_SURFACE('',#4,1.,1.);", 1.0, 1.0, Tip::Disc { z: 1.0, r: 1.0 });
+    assert_closed_measures(&t, 8.0 * PI + PI * (5.0 / 3.0 + PI / 2.0), 15.0 * PI + PI * PI, &[]);
+}
+
+/// The volume and area of a spindle torus's pin end ([`Tip::Pole`]): in the meridian plane the
+/// disc of radius `r` about (`major`, 0) above z = 0 and right of the axis, which the tube meets
+/// at z = c = √(r² − R²) (cos v = −R/r). With s = √(r² − z²) and S(a) = ∫₀^a s dz =
+/// (a√(r² − a²) + r² asin(a/r))/2: V = π∫₀^c (R + s)² dz + π∫_c^r 4Rs dz =
+/// π(R²c + r²c − c³/3 + 2R·S(c)) + 4πR(S(r) − S(c)); area 2πr(R·acos(−R/r) + c).
+fn pin_end(major: f64, r: f64) -> (f64, f64) {
+    use std::f64::consts::PI;
+    let c = (r * r - major * major).sqrt();
+    let s = |a: f64| 0.5 * (a * (r * r - a * a).max(0.0).sqrt() + r * r * (a / r).asin());
+    let volume = PI * (major * major * c + r * r * c - c.powi(3) / 3.0 + 2.0 * major * s(c)) + 4.0 * PI * major * (s(r) - s(c));
+    (volume, 2.0 * PI * r * (major * (-major / r).acos() + c))
+}
+
+/// A spindle torus (major radius below the minor, its tube across its axis) as a pin's end: the
+/// apple's part from the cylinder at z = 0 up over the tube's top and down to where the tube
+/// meets the axis, a pole in a dimple ([`pin_end`], with the cylinder's side and its disc).
+/// Major 1, minor 2 (the tube meets the axis at z = √3: V = 3√3π + 8π²/3, area
+/// 4π(2π/3 + √3)), written as a TOROIDAL_SURFACE (as SolidWorks writes it) and as the schema's
+/// DEGENERATE_TOROIDAL_SURFACE, its apple selected; with a seam to the pole, and with the
+/// circle at z = 0 its one bound (the reader adds the seam).
+#[test]
+fn spindle_torus_pin_tip_imports_whole() {
+    use std::f64::consts::PI;
+    let s3 = 3f64.sqrt();
+    let (volume, area) = pin_with_cylinder(1.0, 2.0);
+    assert!(rel(volume, 18.0 * PI + 3.0 * s3 * PI + 8.0 * PI * PI / 3.0) < 1e-12 && rel(area, 21.0 * PI + 4.0 * PI * (2.0 * PI / 3.0 + s3)) < 1e-12);
+    for torus in ["#5=TOROIDAL_SURFACE('',#4,1.,2.);", "#5=DEGENERATE_TOROIDAL_SURFACE('',#4,1.,2.,.T.);"] {
+        for (seam, warnings) in [(true, &[][..]), (false, &["solid 'Pin': 1 seam edges added to faces that wind around their surface"][..])] {
+            let t = torus_capped_cylinder(torus, 1.0, 2.0, Tip::Pole { apex: s3, seam });
+            assert_closed_measures(&t, volume, area, warnings);
+        }
+    }
+}
+
+/// [`pin_end`] on its cylinder from z = -2 ([`torus_capped_cylinder`]): its volume and area.
+fn pin_with_cylinder(major: f64, minor: f64) -> (f64, f64) {
+    use std::f64::consts::PI;
+    let (v, a) = pin_end(major, minor);
+    let outer = major + minor;
+    (v + 2.0 * PI * outer * outer, a + 4.0 * PI * outer + PI * outer * outer)
+}
+
+/// A nearly round pin end as SolidWorks writes it: a spindle torus of major radius 0.005 and
+/// minor 0.345 on a cylinder of radius 0.35, its apple's part in two halves (u in [0, π] and
+/// [π, 2π]) between the meridians at u = 0 and π, which meet at an apex vertex written at the
+/// tube's top, z = 0.345: 3.6e-5 mm above the pole (z = √(0.345² − 0.005²)), in a file of
+/// uncertainty 1e-5 mm. The meridians end 1.7e-6 rad short of the pole, where the tube's
+/// circle about the axis is 1.2e-6 mm across: a pole to within the uncertainty, so each half's
+/// loop jumps from one meridian to the other there. Volume and area as [`pin_end`].
+#[test]
+fn nearly_round_spindle_torus_pin_end_in_halves_imports_whole() {
+    let (major, minor) = (0.005, 0.345);
+    let outer = major + minor;
+    let mut t = String::from(HEAD);
+    t += "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n";
+    // The torus's angle from 45° below X: the halves are u in [π/4, 5π/4] and [5π/4, 9π/4] on
+    // it, three quarters of its NURBS form each, the meridians two apart.
+    t += "#88=DIRECTION('',(0.7071067811865476,-0.7071067811865476,0.));\n#89=AXIS2_PLACEMENT_3D('',#1,#2,#88);\n";
+    t += &format!("#5=TOROIDAL_SURFACE('',#89,{major:.16},{minor:.16});\n#6=CYLINDRICAL_SURFACE('',#4,{outer:.16});\n");
+    t += "#7=CARTESIAN_POINT('',(0.,0.,-2.));\n#8=AXIS2_PLACEMENT_3D('',#7,#2,#3);\n#9=PLANE('',#8);\n";
+    t += &format!(
+        "#13=CARTESIAN_POINT('',({outer:.16},0.,-2.));\n#14=VERTEX_POINT('',#13);\n#15=CARTESIAN_POINT('',({outer:.16},0.,0.));\n#16=VERTEX_POINT('',#15);\n"
+    );
+    t += &format!(
+        "#65=CARTESIAN_POINT('',({:.16},0.,0.));\n#66=VERTEX_POINT('',#65);\n#17=CARTESIAN_POINT('',(0.,0.,{minor:.16}));\n#18=VERTEX_POINT('',#17);\n",
+        -outer
+    );
+    t += &format!("#19=CIRCLE('',#8,{outer:.16});\n#20=EDGE_CURVE('',#14,#14,#19,.T.);\n#21=CIRCLE('',#4,{outer:.16});\n");
+    t += "#22=EDGE_CURVE('',#16,#66,#21,.T.);\n#67=EDGE_CURVE('',#66,#16,#21,.T.);\n#25=VECTOR('',#2,1.);\n#26=LINE('',#13,#25);\n#27=EDGE_CURVE('',#14,#16,#26,.T.);\n";
+    // The meridians, each angle from -Z: at u = 0 about (major, 0, 0) towards X (axis -Y); at
+    // u = π about (-major, 0, 0) towards -X (axis +Y).
+    t += "#82=DIRECTION('',(0.,0.,-1.));\n";
+    t += &format!(
+        "#28=CARTESIAN_POINT('',({major:.16},0.,0.));\n#29=DIRECTION('',(0.,-1.,0.));\n#30=AXIS2_PLACEMENT_3D('',#28,#29,#82);\n#31=CIRCLE('',#30,{minor:.16});\n#32=EDGE_CURVE('',#16,#18,#31,.T.);\n"
+    );
+    t += &format!(
+        "#80=CARTESIAN_POINT('',({:.16},0.,0.));\n#81=DIRECTION('',(0.,1.,0.));\n#83=AXIS2_PLACEMENT_3D('',#80,#81,#82);\n#84=CIRCLE('',#83,{minor:.16});\n#85=EDGE_CURVE('',#66,#18,#84,.T.);\n",
+        -major
+    );
+    t += "#40=ORIENTED_EDGE('',*,*,#20,.F.);\n#41=EDGE_LOOP('',(#40));\n#42=FACE_OUTER_BOUND('',#41,.T.);\n#43=ADVANCED_FACE('',(#42),#9,.F.);\n";
+    t += "#44=ORIENTED_EDGE('',*,*,#20,.T.);\n#45=ORIENTED_EDGE('',*,*,#27,.T.);\n#46=ORIENTED_EDGE('',*,*,#67,.F.);\n#47=ORIENTED_EDGE('',*,*,#22,.F.);\n#48=ORIENTED_EDGE('',*,*,#27,.F.);\n";
+    t += "#49=EDGE_LOOP('',(#44,#45,#46,#47,#48));\n#50=FACE_OUTER_BOUND('',#49,.T.);\n#51=ADVANCED_FACE('',(#50),#6,.T.);\n";
+    t += "#52=ORIENTED_EDGE('',*,*,#22,.T.);\n#53=ORIENTED_EDGE('',*,*,#85,.T.);\n#54=ORIENTED_EDGE('',*,*,#32,.F.);\n#55=EDGE_LOOP('',(#52,#53,#54));\n#56=FACE_OUTER_BOUND('',#55,.T.);\n#57=ADVANCED_FACE('',(#56),#5,.T.);\n";
+    t += "#58=ORIENTED_EDGE('',*,*,#67,.T.);\n#59=ORIENTED_EDGE('',*,*,#32,.T.);\n#60=ORIENTED_EDGE('',*,*,#85,.F.);\n#61=EDGE_LOOP('',(#58,#59,#60));\n#62=FACE_OUTER_BOUND('',#61,.T.);\n#63=ADVANCED_FACE('',(#62),#5,.T.);\n";
+    t += "#64=CLOSED_SHELL('',(#43,#51,#57,#63));\n#86=MANIFOLD_SOLID_BREP('Pin',#64);\n#87=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#86),#70);\n";
+    t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))").replace("LENGTH_MEASURE(1.E-6)", "LENGTH_MEASURE(1.E-5)");
+    t += TAIL;
+    let (volume, area) = pin_with_cylinder(major, minor);
+    assert_closed_measures(&t, volume, area, &[]);
+}
+
+/// The lemon of a spindle torus (the tube's part across the axis: a closed surface with a pole
+/// at each end), one face bounded by its meridian used both ways, written with a negative major
+/// radius (-1, minor 2: the tube's centre on the other side of the axis, as some writers have
+/// it) and as the schema's DEGENERATE_TOROIDAL_SURFACE with its lemon selected (major radius 1,
+/// where the lemon is the tube's far side, R + r cos v < 0, and the surface's normal
+/// ∂S/∂u × ∂S/∂v points into it: `same_sense` .F.). Its radius at height z is √(4 − z²) − 1
+/// for |z| ≤ √3: V = π∫(5 − z² − 2√(4 − z²)) dz = π(6√3 − 8π/3); area
+/// 2π∫_{−π/3}^{π/3}(2 cos v − 1)·2 dv = 4π(2√3 − 2π/3).
+#[test]
+fn spindle_torus_lemon_with_a_negative_major_radius_imports_whole() {
+    use std::f64::consts::PI;
+    let s3 = 3f64.sqrt();
+    for (torus, sense) in [("#5=TOROIDAL_SURFACE('',#4,-1.,2.);", "T"), ("#5=DEGENERATE_TOROIDAL_SURFACE('',#4,1.,2.,.F.);", "F")] {
+        let mut t = String::from(HEAD);
+        t += "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n";
+        t += torus;
+        // The meridian at u = 0: the circle about (-1, 0, 0) from v = -π/3 to π/3, angle from X
+        // towards Z (its axis -Y).
+        t += &format!(
+            "\n#6=CARTESIAN_POINT('',(0.,0.,{:.16}));\n#7=VERTEX_POINT('',#6);\n#8=CARTESIAN_POINT('',(0.,0.,{s3:.16}));\n#9=VERTEX_POINT('',#8);\n",
+            -s3
+        );
+        t += "#10=CARTESIAN_POINT('',(-1.,0.,0.));\n#11=DIRECTION('',(0.,-1.,0.));\n#12=AXIS2_PLACEMENT_3D('',#10,#11,#3);\n#13=CIRCLE('',#12,2.);\n#14=EDGE_CURVE('',#7,#9,#13,.T.);\n";
+        t += "#15=ORIENTED_EDGE('',*,*,#14,.T.);\n#16=ORIENTED_EDGE('',*,*,#14,.F.);\n#17=EDGE_LOOP('',(#15,#16));\n#18=FACE_OUTER_BOUND('',#17,.T.);\n";
+        t += &format!("#19=ADVANCED_FACE('',(#18),#5,.{sense}.);\n");
+        t += "#20=CLOSED_SHELL('',(#19));\n#21=MANIFOLD_SOLID_BREP('Lemon',#20);\n#22=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#21),#70);\n";
+        t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        t += TAIL;
+        assert_closed_measures(&t, PI * (6.0 * s3 - 8.0 * PI / 3.0), 4.0 * PI * (2.0 * s3 - 2.0 * PI / 3.0), &[]);
+    }
 }
 
 /// Booleans and blends build the same body every time, so an export is byte-identical from
-/// run to run (truck used to emit a boolean's faces in hash order of their addresses). The
+/// run to run (an export once listed a boolean's faces in hash order of their addresses). The
 /// tee of oracle 35 with its rolling-ball fillet round the junction.
 #[test]
 fn tee_fillet_exports_byte_identical() {
@@ -1459,10 +1447,10 @@ fn glued_halves_export_as_whole_faces() {
     assert_eq!(imp.bodies[0].file_faces, 8);
 }
 
-/// A slot plate with a round on its top outline (issue #612): the extruded arc ends and the
-/// rounds along the straight edges are lone B-spline sheets, written as cylinders bounded by
-/// their faces. The rounds' sheets reach far past their edges, and a reader bounding the part by
-/// its surfaces saw a 60 mm part as 130 mm long.
+/// A slot plate with a round on its top outline (issue #612): every surface the file writes is
+/// bounded by its face, whatever kind it is written as. The rounds' sheets once reached far past
+/// their edges, and a reader bounding the part by its surfaces saw a 60 mm part as 130 mm long.
+/// Read back, the part has its exact volume.
 #[test]
 fn rounded_slot_exports_cylinders() {
     use solidcraft_geom::Seg2;
@@ -1479,10 +1467,7 @@ fn rounded_slot_exports_cylinders() {
     let edges = [Vec3::new(30.0, -10.0, 4.0), Vec3::new(30.0, 10.0, 4.0), Vec3::new(0.0, 0.0, 4.0), Vec3::new(60.0, 0.0, 4.0)];
     let b = fillet(&plate, &edges, 1.0).unwrap();
     let text = step_export(&[&b], "t").unwrap();
-    assert!(!text.contains("B_SPLINE_SURFACE"), "{text}");
-    assert_eq!(text.matches("CYLINDRICAL_SURFACE(").count(), 4);
-    assert_eq!(text.matches("TOROIDAL_SURFACE(").count(), 2);
-    // No point of the file (surface placements included) lies outside the part.
+    // No point of the file (control points and surface placements included) lies outside the part.
     let imp = round_trip(&b);
     for line in text.lines().filter(|l| l.contains("CARTESIAN_POINT")) {
         let Some(xyz) = line.split("((").nth(1).and_then(|r| r.split("))").next()) else { continue };
@@ -1498,10 +1483,9 @@ fn rounded_slot_exports_cylinders() {
 }
 
 /// A slot plate rounded along its top and bottom outlines, with a ramp cut across one end
-/// (issue #1198). The other end's half turn is still written as a cylinder (its corners alone
-/// point both ways: the seam comes from points along its edges). The faces the ramp crosses keep
-/// their B-spline sheets, cut down to the faces: the rounds' sheets reached 35 mm past both ends,
-/// and readers bounding the part by its surfaces saw a 60 mm part as 130 mm long.
+/// (issue #1198): every surface the file writes is cut down to its face, so nothing reaches past
+/// the part's ends (the rounds' sheets once reached 35 mm past both, and readers bounding the part
+/// by its surfaces saw a 60 mm part as 130 mm long), and the part reads back whole.
 #[test]
 fn ramp_cut_slot_exports_sheets_bounded_by_their_faces() {
     use solidcraft_geom::Seg2;
@@ -1524,10 +1508,6 @@ fn ramp_cut_slot_exports_sheets_bounded_by_their_faces() {
     let tool = extrude(&side, &[ramp], -12.0, 0.0).unwrap().pop().unwrap();
     let b = boolean(&rounded, &tool, BoolOp::Cut).unwrap().unwrap();
     let text = step_export(&[&b], "t").unwrap();
-    // Both ends' walls and the three rounds along the sides it leaves whole; the two the ramp
-    // crosses stay sheets.
-    assert_eq!(text.matches("CYLINDRICAL_SURFACE(").count(), 5, "{text}");
-    assert_eq!(text.matches("B_SPLINE_SURFACE(").count(), 2, "{text}");
     // No point of the file (control points and placements included) lies past the part's ends.
     for line in text.lines().filter(|l| l.contains("CARTESIAN_POINT")) {
         let Some(xyz) = line.split("((").nth(1).and_then(|r| r.split("))").next()) else { continue };
@@ -1549,7 +1529,7 @@ fn countersink_exports_one_cone() {
     // A 90° countersink, radius 4 at the top face, down from 1 mm above it to radius 1.8, and the
     // 2 mm drill through.
     let disc = Region2 { outer: Loop2::circle(Vec2::ZERO, 5.0), holes: vec![] };
-    let cone = crate::extrude_tapered(&Plane::XY.offset(5.0), &disc, 3.2, -1.0, -FRAC_PI_4).unwrap();
+    let cone = crate::extrude_tapered(&Plane::XY.offset(5.0), &disc, 3.2, -1.0, -FRAC_PI_4, crate::DraftCorner::default()).unwrap();
     let drill = cylinder(Vec3::new(0.0, 0.0, -1.0), Vec3::Z, 2.0, 6.0).unwrap();
     let b = boolean(&boolean(&plate, &cone, BoolOp::Cut).unwrap().unwrap(), &drill, BoolOp::Cut).unwrap().unwrap();
     let text = step_export(&[&b], "t").unwrap();
@@ -1561,10 +1541,10 @@ fn countersink_exports_one_cone() {
     assert_eq!(imp.bodies[0].file_faces, 8);
 }
 
-/// Knot multiplicities are expanded into one value each before the knot count is compared with
-/// the control points, so the sum has to be checked first: 1,000,000 knots of multiplicity 64
-/// against two control points asked for a 500 MB vector (20,000,000 for 10 GB) only to reject
-/// it afterwards, and an allocation failure aborts the process where an error does not.
+/// Knot multiplicities are checked before anything is expanded: 1,000,000 knots of multiplicity
+/// 64 against two control points asked for a 500 MB vector (20,000,000 for 10 GB) only to reject
+/// it afterwards, and an allocation failure aborts the process where an error does not. A knot
+/// above degree + 1 is refused on its own; knots each within it are refused by their sum.
 #[test]
 fn knot_multiplicities_are_checked_before_they_are_expanded() {
     let curve = |n: usize, mult: usize| {
@@ -1579,60 +1559,17 @@ fn knot_multiplicities_are_checked_before_they_are_expanded() {
     };
     let read = |text: &str| {
         let ex = p21::parse(text).unwrap();
-        let cx = Ctx { ex: &ex, len: 1.0, ang: 1.0, tol: 1e-6, snap: 1e-6 };
-        geom::curve(&cx, 3, 0)
+        solidcraft_step::read::Reader::new(&ex, Default::default()).curve(3).map(|_| ())
     };
+    // These diagnostics come from the checks before expansion; wall-clock time depends on CI load.
     let error = read(&curve(1_000_000, 64)).unwrap_err();
-    // This diagnostic comes from the check before expansion; wall-clock time depends on CI load.
+    assert!(error.contains("bad knot multiplicity"), "{error}");
+    let error = read(&curve(1_000_000, 2)).unwrap_err();
     assert!(error.contains("knot multiplicities do not match"), "{error}");
     // A degree-1 curve with two control points needs exactly four knot values.
     assert!(read(&curve(2, 2)).is_ok());
     assert!(read(&curve(4, 1)).is_ok());
     assert!(read(&curve(2, 3)).is_err());
-}
-
-/// A spline written over a parameter range of a few millionths (as if in metres of a part drawn
-/// in millimetres: piecewise cubic Bézier over 5.4e-6, as a STEP part of a humanoid robot
-/// writes its edges) is read over a range of 1. Over the file's own range the kernel took knots
-/// a millionth apart for one, so trimming an edge to its vertices dropped a control point and
-/// left a curve no exact store could keep (every reopen of that design imported it again).
-#[test]
-fn a_spline_over_a_tiny_parameter_range_is_read_over_one() {
-    use mt::{BoundedCurve, Cut, MetricSpace, ParametricCurve};
-    let a = 1.8024e-6;
-    let knots = [0.0, a, 3.0304e-6, 3.8749e-6, 4.7103e-6, 5.0653e-6, 5.4274e-6];
-    let n = 3 * (knots.len() - 1) + 1;
-    let points: String = (0..n).map(|i| format!("#{}=CARTESIAN_POINT('',({}.,{}.,0.));\n", 10 + i, i, (i * i) % 7)).collect();
-    let refs: Vec<String> = (0..n).map(|i| format!("#{}", 10 + i)).collect();
-    let mults: Vec<String> = (0..knots.len()).map(|i| if i == 0 || i + 1 == knots.len() { "4".into() } else { "3".into() }).collect();
-    let text = format!(
-        "{HEAD}{points}#3=B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,({}),({}),.UNSPECIFIED.);\n{TAIL}",
-        refs.join(","),
-        mults.join(","),
-        knots.iter().map(|k| format!("{k:e}")).collect::<Vec<_>>().join(",")
-    );
-    let ex = p21::parse(&text).unwrap();
-    let cx = Ctx { ex: &ex, len: 1.0, ang: 1.0, tol: 1e-6, snap: 1e-6 };
-    let Ok(geom::CurveGeo::BSpline(c)) = geom::curve(&cx, 3, 0) else { panic!("a B-spline") };
-    let (t0, t1) = c.range_tuple();
-    assert_eq!((t0, t1), (0.0, 1.0));
-    // The same curve: its ends are the first and last control points.
-    assert!(c.subs(t0).distance(mt::Point3::new(0.0, 0.0, 0.0)) < 1e-12);
-    assert!(c.subs(t1).distance(mt::Point3::new((n - 1) as f64, ((n - 1) * (n - 1) % 7) as f64, 0.0)) < 1e-12);
-    // Cut between knots, as an edge is trimmed to its vertices: both pieces keep clamped ends
-    // and every control point, and meet where the curve was cut.
-    for t in [0.3, 0.33, 0.9, 0.95] {
-        let mut head = c.clone();
-        let tail = head.cut(t);
-        for piece in [&head, &tail] {
-            let k: Vec<f64> = piece.knot_vec().iter().copied().collect();
-            let d = piece.degree();
-            assert_eq!(piece.control_points().len() + d + 1, k.len());
-            assert!(k.iter().take(d + 1).all(|x| *x == k[0]) && k.iter().rev().take(d + 1).all(|x| Some(x) == k.last()), "{t}: {k:?}");
-        }
-        assert!(head.subs(head.range_tuple().1).distance(c.subs(t)) < 1e-9);
-        assert!(tail.subs(tail.range_tuple().0).distance(c.subs(t)) < 1e-9);
-    }
 }
 
 /// One `ADVANCED_FACE` may list any number of bounds, and each one clones its edge handles into
@@ -1654,62 +1591,8 @@ fn faces_with_too_many_bounds_are_refused() {
 
     let start = std::time::Instant::now();
     let imp = step_import(&text).unwrap();
-    assert!(imp.warnings.iter().any(|w| w.contains("boundary loops")), "{:?}", imp.warnings);
+    assert!(imp.warnings.iter().any(|w| w.contains("face #900000 with 100000 bounds")), "{:?}", imp.warnings);
     assert!(start.elapsed() < std::time::Duration::from_secs(10), "took {:?}", start.elapsed());
-}
-
-/// A board-like assembly for issue #883: `SOLIDCRAFT_STEP_PCB_FIXTURE=path` writes it (with
-/// `SOLIDCRAFT_STEP_PCB_COMPONENTS` and `SOLIDCRAFT_STEP_PCB_PINS`; 600 and 15 give 52 MB). Every component is
-/// its own product with a package body and its own pins (nothing shared), the worst case for
-/// a large import.
-#[test]
-#[ignore = "manual fixture generator for large STEP imports"]
-fn generate_board_assembly_fixture() {
-    use crate::step_out::{ExportBody, ExportProduct, StepHeader, step_export_products};
-    let count: usize = solidcraft_geom::env::var("STEP_PCB_COMPONENTS").map(|s| s.parse().unwrap()).unwrap_or(500);
-    let pins: usize = solidcraft_geom::env::var("STEP_PCB_PINS").map(|s| s.parse().unwrap()).unwrap_or(16);
-    let mut owned: Vec<Vec<Body>> = Vec::new();
-    for c in 0..count {
-        let w = 4.0 + (c % 7) as f64 * 0.37;
-        let d = 3.0 + (c % 5) as f64 * 0.29;
-        let mut bodies = vec![fillet_box(w, d, 1.2 + (c % 3) as f64 * 0.1)];
-        for p in 0..pins {
-            let side = if p % 2 == 0 { -0.6 } else { d + 0.6 };
-            let x = 0.3 + (p / 2) as f64 * (w - 0.6) / (pins / 2).max(1) as f64 + c as f64 * 1e-4;
-            bodies.push(cylinder(Vec3::new(x, side, -1.5), Vec3::Z, 0.25, 2.0 + (p % 3) as f64 * 0.01).unwrap());
-        }
-        owned.push(bodies);
-    }
-    let mut products: Vec<ExportProduct> = owned
-        .iter()
-        .enumerate()
-        .map(|(c, bodies)| ExportProduct {
-            name: format!("U{c}"),
-            bodies: bodies.iter().enumerate().map(|(k, b)| ExportBody { name: format!("U{c}_{k}"), body: b, color: Some([0.2, 0.2, 0.2]) }).collect(),
-            children: Vec::new(),
-        })
-        .collect();
-    let side = (count as f64).sqrt().ceil() as usize;
-    let children = (0..count)
-        .map(|c| {
-            let (x, y) = ((c % side) as f64 * 12.0, (c / side) as f64 * 10.0);
-            (c, [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [x, y, 1.6, 1.0]], format!("U{c}"))
-        })
-        .collect();
-    products.push(ExportProduct { name: "Board".into(), bodies: Vec::new(), children });
-    let root = products.len() - 1;
-    let text = step_export_products(&products, root, &StepHeader { file_name: "board.step".into(), ..Default::default() }).unwrap();
-    let path = solidcraft_geom::env::var("STEP_PCB_FIXTURE").unwrap_or_else(|| "board.step".into());
-    std::fs::write(&path, &text).unwrap();
-    println!("wrote {path}: {} bytes, {} components", text.len(), count);
-}
-
-fn fillet_box(w: f64, d: f64, h: f64) -> Body {
-    let b = box_solid(Vec3::ZERO, Vec3::new(w, d, h)).unwrap();
-    let vertical = [Vec3::new(0.0, 0.0, h / 2.0), Vec3::new(w, 0.0, h / 2.0), Vec3::new(w, d, h / 2.0), Vec3::new(0.0, d, h / 2.0)];
-    let top = [Vec3::new(w / 2.0, 0.0, h), Vec3::new(w, d / 2.0, h), Vec3::new(w / 2.0, d, h), Vec3::new(0.0, d / 2.0, h)];
-    let b = fillet(&b, &vertical, 0.3).unwrap_or(b);
-    fillet(&b, &top, 0.1).unwrap_or(b)
 }
 
 /// Independent boxes as one STEP file (about 3 KB a box).
@@ -1772,189 +1655,6 @@ fn large_imports_are_freed_with_their_last_user() {
     let weak = Arc::downgrade(&first);
     drop((first, again));
     assert!(weak.upgrade().is_none(), "the cache must not keep a large import alive after its design is gone");
-}
-
-/// A face that runs all the way around a closed (but not periodic) B-spline surface and carries
-/// a zero-width slit of its own: a pair of curves a hundredth of a micrometre apart between the
-/// same two vertices, which the loop walks up and straight back down. STEP writers leave such a
-/// slit where two surfaces were trimmed apart. It stands away from the surface's join, so the
-/// band splitter leaves the face whole and the mesher has to draw it; the boundary then runs
-/// along itself in (u, v). That used to fail the planner, and with it the whole body's plan, so
-/// the body fell back to the reference mesher, which drew bands folded over themselves and left
-/// holes in others.
-#[test]
-fn band_face_with_a_zero_width_slit_is_still_meshed() {
-    const R: f64 = 10.0;
-    const H: f64 = 8.0;
-    /// How far the slit's two sides stand apart (a hundredth of a micrometre).
-    const LENS: f64 = 1.0e-5;
-    let corner = |k: usize, r: f64| {
-        let a = std::f64::consts::TAU * (k % 5) as f64 / 5.0;
-        (r * a.cos(), r * a.sin())
-    };
-    let mut t = String::from(HEAD);
-    // Control net: the five corners around (the first repeated to close it) × the two ends.
-    let mut rows = Vec::new();
-    for k in 0..=5 {
-        let (x, y) = corner(k, R);
-        let id = 100 + 2 * k as u64;
-        t += &format!("#{id}=CARTESIAN_POINT('',({x:.12},{y:.12},0.));\n#{}=CARTESIAN_POINT('',({x:.12},{y:.12},{H:.1}));\n", id + 1);
-        rows.push(format!("(#{id},#{})", id + 1));
-    }
-    t += &format!(
-        "#200=B_SPLINE_SURFACE_WITH_KNOTS('',1,1,({}),.UNSPECIFIED.,.T.,.F.,.F.,(2,1,1,1,1,2),(2,2),(0.,1.,2.,3.,4.,5.),(0.,1.),.UNSPECIFIED.);\n",
-        rows.join(",")
-    );
-    // The seam runs up corner 0; the slit stands at corner 2, where each ring is cut in two.
-    let (mx, my) = corner(2, R + LENS);
-    t += &format!("#210=CARTESIAN_POINT('',({mx:.12},{my:.12},{:.1}));\n", H * 0.5);
-    t += "#300=VERTEX_POINT('',#100);\n#301=VERTEX_POINT('',#101);\n#302=VERTEX_POINT('',#104);\n#303=VERTEX_POINT('',#105);\n";
-    t += "#310=DIRECTION('',(0.,0.,1.));\n#311=VECTOR('',#310,1.);\n#312=LINE('',#100,#311);\n";
-    // The slit's two sides: straight up corner 2, and back down a hair outside it.
-    t += "#313=POLYLINE('',(#104,#105));\n#314=POLYLINE('',(#105,#210,#104));\n";
-    t += "#320=POLYLINE('',(#100,#102,#104));\n#321=POLYLINE('',(#104,#106,#108,#100));\n";
-    t += "#322=POLYLINE('',(#101,#103,#105));\n#323=POLYLINE('',(#105,#107,#109,#101));\n";
-    t += "#330=EDGE_CURVE('',#300,#301,#312,.T.);\n";
-    t += "#331=EDGE_CURVE('',#302,#303,#313,.T.);\n#332=EDGE_CURVE('',#303,#302,#314,.T.);\n";
-    t += "#333=EDGE_CURVE('',#300,#302,#320,.T.);\n#334=EDGE_CURVE('',#302,#300,#321,.T.);\n";
-    t += "#335=EDGE_CURVE('',#301,#303,#322,.T.);\n#336=EDGE_CURVE('',#303,#301,#323,.T.);\n";
-    // The band: round the bottom to the slit, up one side of it and down the other, on round the
-    // bottom, up the seam, back along the top to the slit, down it and up again, on to the seam.
-    t += "#340=ORIENTED_EDGE('',*,*,#333,.T.);\n#341=ORIENTED_EDGE('',*,*,#331,.T.);\n#342=ORIENTED_EDGE('',*,*,#332,.T.);\n";
-    t += "#343=ORIENTED_EDGE('',*,*,#334,.T.);\n#344=ORIENTED_EDGE('',*,*,#330,.T.);\n#345=ORIENTED_EDGE('',*,*,#336,.F.);\n";
-    t += "#346=ORIENTED_EDGE('',*,*,#331,.F.);\n#347=ORIENTED_EDGE('',*,*,#332,.F.);\n#348=ORIENTED_EDGE('',*,*,#335,.F.);\n";
-    t += "#349=ORIENTED_EDGE('',*,*,#330,.F.);\n";
-    t += "#350=EDGE_LOOP('',(#340,#341,#342,#343,#344,#345,#346,#347,#348,#349));\n#351=FACE_OUTER_BOUND('',#350,.T.);\n";
-    t += "#352=ADVANCED_FACE('',(#351),#200,.T.);\n";
-    // The two ends, on the planes the rings lie in.
-    t += "#360=CARTESIAN_POINT('',(0.,0.,0.));\n#361=DIRECTION('',(1.,0.,0.));\n#362=AXIS2_PLACEMENT_3D('',#360,#310,#361);\n#363=PLANE('',#362);\n";
-    t += "#364=ORIENTED_EDGE('',*,*,#334,.F.);\n#365=ORIENTED_EDGE('',*,*,#333,.F.);\n#366=EDGE_LOOP('',(#364,#365));\n";
-    t += "#367=FACE_OUTER_BOUND('',#366,.T.);\n#368=ADVANCED_FACE('',(#367),#363,.F.);\n";
-    t += &format!("#370=CARTESIAN_POINT('',(0.,0.,{H:.1}));\n#371=AXIS2_PLACEMENT_3D('',#370,#310,#361);\n#372=PLANE('',#371);\n");
-    t += "#373=ORIENTED_EDGE('',*,*,#335,.T.);\n#374=ORIENTED_EDGE('',*,*,#336,.T.);\n#375=EDGE_LOOP('',(#373,#374));\n";
-    t += "#376=FACE_OUTER_BOUND('',#375,.T.);\n#377=ADVANCED_FACE('',(#376),#372,.T.);\n";
-    t += "#390=CLOSED_SHELL('',(#352,#368,#377));\n#391=MANIFOLD_SOLID_BREP('Slit tube',#390);\n#392=SHAPE_REPRESENTATION('',(#391),#20);\n";
-    t += "#20=(GEOMETRIC_REPRESENTATION_CONTEXT(3)GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#21))GLOBAL_UNIT_ASSIGNED_CONTEXT((#22,#23))REPRESENTATION_CONTEXT('',''));\n";
-    t += "#21=UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-3),#22,'','');\n";
-    t += "#22=(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.));\n#23=(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.));\n";
-    t += TAIL;
-    let imp = step_import(&t).unwrap();
-    assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
-    let ib = &imp.bodies[0];
-    assert_eq!(ib.file_faces, 3);
-    assert_eq!(ib.body.unmeshed_faces(), 0);
-    // Every face is planned: one face the planner gives up on costs the whole body its plan.
-    let tol = 0.05;
-    assert!(ib.body.display_plan(tol).is_ok(), "{:?}", ib.body.display_plan(tol).err());
-    // The mesh covers the tube once: five sides of 2·R·sin(36°) by the height, plus the ends.
-    let m = ib.body.display_mesh(tol).unwrap();
-    let mut area = vec![0.0f64; ib.body.face_count()];
-    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-        let (a, b, c) = (m.positions[t[0] as usize], m.positions[t[1] as usize], m.positions[t[2] as usize]);
-        if let Some(sum) = area.get_mut(*f as usize) {
-            *sum += 0.5 * (b - a).cross(c - a).len();
-        }
-    }
-    let side = 2.0 * R * (std::f64::consts::TAU / 10.0).sin();
-    let want = 5.0 * side * H + 5.0 * side * R * (std::f64::consts::TAU / 10.0).cos();
-    assert!(rel(area.iter().sum::<f64>(), want) < 5e-3, "{area:?} sums to {} not {want}", area.iter().sum::<f64>());
-    // The band itself is drawn once over: not folded over itself, and with no gap left in it.
-    let band: f64 = (0..ib.body.face_count()).filter(|i| ib.face_origin.get(*i) == Some(&352)).map(|i| area[i]).sum();
-    assert!(rel(band, 5.0 * side * H) < 5e-3, "the band covers {band} not {}", 5.0 * side * H);
-}
-
-/// A face so thin that its whole boundary is two chords: a lens between a straight edge and an
-/// arc that bows away from it by a ten-thousandth of a millimetre. The edge sampler rightly
-/// leaves each side as one segment, so the boundary comes to two nodes — too few to hold a
-/// triangle. The planner used to give up on such a face, and one face it gives up on costs the
-/// whole body its plan, so every other face fell back to the reference mesher. STEP writers
-/// leave these slivers where two surfaces were trimmed apart.
-#[test]
-fn a_sliver_face_too_thin_to_triangulate_does_not_cost_the_body_its_plan() {
-    /// The lens is shorter than one facet of the body it sits on: its whole boundary is then
-    /// two chords, however finely the rest of the body is meshed.
-    const L: f64 = 0.05;
-    const H: f64 = 60.0;
-    /// How far the arc bows away from the straight side, at its middle (above the file's own
-    /// uncertainty, so the two sides are not the same curve).
-    const BOW: f64 = 5.0e-3;
-    let mut t = String::from(HEAD);
-    // The lens lies in the xy plane: straight along y = 0, the arc bowing to y = BOW.
-    t += &format!("#100=CARTESIAN_POINT('',(0.,0.,0.));\n#101=CARTESIAN_POINT('',(0.,0.,{H:.1}));\n");
-    t += &format!("#102=CARTESIAN_POINT('',({L:.6},0.,0.));\n#103=CARTESIAN_POINT('',({L:.6},0.,{H:.1}));\n");
-    // A degree-2 spline through the ends with this middle control point bows by BOW (half of it).
-    t += &format!(
-        "#104=CARTESIAN_POINT('',({:.6},{:.9},0.));\n#105=CARTESIAN_POINT('',({:.6},{:.9},{H:.1}));\n",
-        L * 0.5,
-        2.0 * BOW,
-        L * 0.5,
-        2.0 * BOW
-    );
-    t += "#110=VERTEX_POINT('',#100);\n#111=VERTEX_POINT('',#101);\n#112=VERTEX_POINT('',#102);\n#113=VERTEX_POINT('',#103);\n";
-    t += "#114=DIRECTION('',(1.,0.,0.));\n#115=DIRECTION('',(0.,0.,1.));\n#116=DIRECTION('',(0.,1.,0.));\n";
-    t += "#120=VECTOR('',#114,1.);\n#121=LINE('',#100,#120);\n#122=LINE('',#101,#120);\n";
-    t += "#123=VECTOR('',#115,1.);\n#124=LINE('',#100,#123);\n#125=LINE('',#102,#123);\n";
-    t += "#126=B_SPLINE_CURVE_WITH_KNOTS('',2,(#100,#104,#102),.UNSPECIFIED.,.F.,.F.,(3,3),(0.,1.),.UNSPECIFIED.);\n";
-    t += "#127=B_SPLINE_CURVE_WITH_KNOTS('',2,(#101,#105,#103),.UNSPECIFIED.,.F.,.F.,(3,3),(0.,1.),.UNSPECIFIED.);\n";
-    t += "#130=EDGE_CURVE('',#110,#112,#121,.T.);\n#131=EDGE_CURVE('',#111,#113,#122,.T.);\n";
-    t += "#132=EDGE_CURVE('',#110,#112,#126,.T.);\n#133=EDGE_CURVE('',#111,#113,#127,.T.);\n";
-    t += "#134=EDGE_CURVE('',#110,#111,#124,.T.);\n#135=EDGE_CURVE('',#112,#113,#125,.T.);\n";
-    // The four surfaces: the two lens ends, the flat side and the bowed side.
-    t += "#140=AXIS2_PLACEMENT_3D('',#100,#115,#114);\n#141=PLANE('',#140);\n";
-    t += &format!("#142=CARTESIAN_POINT('',(0.,0.,{H:.1}));\n#143=AXIS2_PLACEMENT_3D('',#142,#115,#114);\n#144=PLANE('',#143);\n");
-    t += "#145=AXIS2_PLACEMENT_3D('',#100,#116,#114);\n#146=PLANE('',#145);\n";
-    t += "#147=B_SPLINE_SURFACE_WITH_KNOTS('',2,1,((#100,#101),(#104,#105),(#102,#103)),.UNSPECIFIED.,.F.,.F.,.F.,(3,3),(2,2),(0.,1.),(0.,1.),.UNSPECIFIED.);\n";
-    // The lens ends: two edges each, and so two nodes. Every edge of the shell is walked once
-    // each way, and each face's ring turns anticlockwise seen from outside the solid.
-    t += "#150=ORIENTED_EDGE('',*,*,#132,.T.);\n#151=ORIENTED_EDGE('',*,*,#130,.F.);\n#152=EDGE_LOOP('',(#150,#151));\n";
-    t += "#153=FACE_OUTER_BOUND('',#152,.T.);\n#154=ADVANCED_FACE('',(#153),#141,.F.);\n";
-    t += "#155=ORIENTED_EDGE('',*,*,#131,.T.);\n#156=ORIENTED_EDGE('',*,*,#133,.F.);\n#157=EDGE_LOOP('',(#155,#156));\n";
-    t += "#158=FACE_OUTER_BOUND('',#157,.T.);\n#159=ADVANCED_FACE('',(#158),#144,.T.);\n";
-    // The flat side and the bowed side, each a four-edge ring.
-    t += "#160=ORIENTED_EDGE('',*,*,#130,.T.);\n#161=ORIENTED_EDGE('',*,*,#135,.T.);\n#162=ORIENTED_EDGE('',*,*,#131,.F.);\n#163=ORIENTED_EDGE('',*,*,#134,.F.);\n";
-    t += "#164=EDGE_LOOP('',(#160,#161,#162,#163));\n#165=FACE_OUTER_BOUND('',#164,.T.);\n#166=ADVANCED_FACE('',(#165),#146,.F.);\n";
-    t += "#170=ORIENTED_EDGE('',*,*,#134,.T.);\n#171=ORIENTED_EDGE('',*,*,#133,.T.);\n#172=ORIENTED_EDGE('',*,*,#135,.F.);\n#173=ORIENTED_EDGE('',*,*,#132,.F.);\n";
-    t += "#174=EDGE_LOOP('',(#170,#171,#172,#173));\n#175=FACE_OUTER_BOUND('',#174,.T.);\n#176=ADVANCED_FACE('',(#175),#147,.F.);\n";
-    t += "#180=CLOSED_SHELL('',(#154,#159,#166,#176));\n#181=MANIFOLD_SOLID_BREP('Sliver lens',#180);\n#182=SHAPE_REPRESENTATION('',(#181),#20);\n";
-    t += "#20=(GEOMETRIC_REPRESENTATION_CONTEXT(3)GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#21))GLOBAL_UNIT_ASSIGNED_CONTEXT((#22,#23))REPRESENTATION_CONTEXT('',''));\n";
-    t += "#21=UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-3),#22,'','');\n";
-    t += "#22=(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.));\n#23=(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.));\n";
-    t += TAIL;
-    let imp = step_import(&t).unwrap();
-    assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
-    let ib = &imp.bodies[0];
-    assert_eq!(ib.file_faces, 4);
-    // Nothing is left unshown, and the body keeps its plan although one face cannot hold a
-    // triangle until its boundary is sampled again.
-    assert_eq!(ib.body.unmeshed_faces(), 0);
-    let tol = 0.05;
-    let plan = ib.body.display_plan(tol).expect("a sliver face must not cost the body its plan");
-    for f in &plan.faces {
-        assert!(!f.triangles.is_empty(), "face {} has no triangles", f.face);
-    }
-    // The sides carry the area: L by H flat, a shade more over the bow. The lens ends are
-    // slivers, so what matters is that they are drawn at all, not how wide they come out.
-    let m = ib.body.display_mesh(tol).unwrap();
-    let mut area = vec![0.0f64; ib.body.face_count()];
-    for (tri, f) in m.triangles.iter().zip(&m.tri_face) {
-        if let Some([p, q, r]) = m.tri(tri)
-            && let Some(sum) = area.get_mut(*f as usize)
-        {
-            *sum += 0.5 * (q - p).cross(r - p).len();
-        }
-    }
-    let mut sides: Vec<f64> = area.iter().copied().filter(|a| *a > 0.1).collect();
-    sides.sort_by(|a, b| a.total_cmp(b));
-    assert_eq!(sides.len(), 2, "two sides carry the area: {area:?}");
-    // The flat side is exactly L by H; the bowed one is longer by the bow, within a tenth.
-    assert!(rel(sides[0], L * H) < 1e-6, "the flat side covers {} not {}", sides[0], L * H);
-    assert!((1.0..1.1).contains(&(sides[1] / (L * H))), "the bowed side covers {}", sides[1]);
-    // Both lens ends are drawn, each a sliver no wider than its own bow.
-    let ends: Vec<f64> = area.iter().copied().filter(|a| *a <= 0.1).collect();
-    assert_eq!(ends.len(), 2, "two lens ends: {area:?}");
-    for e in ends {
-        assert!(e > 0.0 && e < L * BOW, "a lens end covers {e}, not a sliver under {}", L * BOW);
-    }
 }
 
 /// A three-quarter turn of a rectangle about Z: planar end caps, revolved cylinders and annuli.
@@ -2052,51 +1752,12 @@ fn periodic_knot_tube(first: u64, x: f64, r: f64, h: f64) -> (String, u64) {
     (s, face)
 }
 
-/// A B-spline whose end knots repeat fewer than degree + 1 times (an unclamped knot vector,
-/// as OpenCascade writes closed curves and surfaces) is defined only between knot `degree`
-/// and knot `len - degree - 1`. Read over the whole knot range, the circle and the tube went
-/// on past their domain, and the rational ones divided by zero at the outermost knots.
-#[test]
-fn periodic_knot_bsplines_are_read_on_their_domain() {
-    use mt::{BoundedCurve, ParametricCurve, ParametricSurface};
-    let (r, h) = (1.7, 1.5);
-    let (tube, face) = periodic_knot_tube(100, 0.0, r, h);
-    let (circle, row) = circle_net(10, 0.0, r, 0.0);
-    let text = format!(
-        "{HEAD}{tube}{circle}#30=(BOUNDED_CURVE()B_SPLINE_CURVE(2,({}),.CIRCULAR_ARC.,.T.,.F.)B_SPLINE_CURVE_WITH_KNOTS(({PERIODIC_MULTS}),({PERIODIC_KNOTS}),.UNSPECIFIED.)CURVE()GEOMETRIC_REPRESENTATION_ITEM()RATIONAL_B_SPLINE_CURVE(({CIRCLE_WEIGHTS}))REPRESENTATION_ITEM(''));\n{TAIL}",
-        row.join(",")
-    );
-    let ex = p21::parse(&text).unwrap();
-    let cx = Ctx { ex: &ex, len: 1.0, ang: 1.0, tol: 1e-6, snap: 1e-6 };
-    let pi = std::f64::consts::PI;
-    let on_tube = |p: mt::Point3| (p.x.hypot(p.y) - r).abs() < 1e-9 && p.z > -1e-9 && p.z < h + 1e-9;
-
-    let surface_id = ex.get(face).and_then(|e| e.params().get(2)).and_then(Param::as_ref_id).unwrap();
-    let surface = geom::bspline_surface(&cx, ex.get(surface_id).unwrap()).unwrap();
-    let (Some((u0, u1)), Some((v0, v1))) = surface.try_range_tuple() else { panic!("unbounded surface") };
-    // Along the tube the file's range (h / r) is shorter than one: it is read over one.
-    assert!(h / r < 1.0 && u0.abs() < 1e-12 && (u1 - 1.0).abs() < 1e-12, "u range {u0} .. {u1}");
-    assert!((v0 + pi).abs() < 1e-9 && (v1 - pi).abs() < 1e-9, "v range {v0} .. {v1}");
-    for i in 0..=8 {
-        for j in 0..=16 {
-            let (u, v) = (u0 + (u1 - u0) * i as f64 / 8.0, v0 + (v1 - v0) * j as f64 / 16.0);
-            assert!(on_tube(surface.subs(u, v)), "S({u}, {v}) = {:?}", surface.subs(u, v));
-        }
-    }
-
-    let geom::CurveGeo::Nurbs(curve) = geom::curve(&cx, 30, 0).unwrap() else { panic!("not a rational B-spline") };
-    let (t0, t1) = curve.range_tuple();
-    assert!((t0 + pi).abs() < 1e-9 && (t1 - pi).abs() < 1e-9, "curve range {t0} .. {t1}");
-    for j in 0..=16 {
-        let t = t0 + (t1 - t0) * j as f64 / 16.0;
-        assert!(on_tube(curve.subs(t)), "C({t}) = {:?}", curve.subs(t));
-    }
-}
-
 /// Two such tubes far apart in one body: the body's size sets a chord tolerance coarse beside
 /// the tubes, and meshing a face at it divided the surface's whole parameter box, whose
 /// corners lay outside the domain. The division never converged there (#1374's recursion),
-/// and the import grew by gigabytes without end.
+/// and the import grew by gigabytes without end. The sheet comes in as SMLib's B-rep of its two
+/// faces, each the file's face (SMLib lists the seam edges in another canonical order than the
+/// file, and keeps the file's own order), each a cylinder's side.
 #[test]
 fn periodic_knot_tube_faces_import_and_mesh() {
     let t0 = std::time::Instant::now();
@@ -2108,9 +1769,16 @@ fn periodic_knot_tube_faces_import_and_mesh() {
     );
     let imp = step_import(&text).unwrap();
     assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
-    let m = measure(&imp.bodies[0].body).unwrap();
+    let tubes = &imp.bodies[0];
+    assert!(tubes.refused.is_none() && !tubes.body.is_mesh() && tubes.body.is_surface(), "{:?} {:?}", tubes.refused, imp.warnings);
+    assert_eq!(tubes.face_origin, vec![fa, fb], "{:?}", imp.warnings);
+    // Each face is the file's quadratic circle of radius r (corner weights √2/2 to 12 digits,
+    // a radius off by under 1e-12 of r) moved straight along its axis by h: a cylinder's side,
+    // 2π r h. SMLib integrates to 1e-8.
+    let m = measure(&tubes.body).unwrap();
     let area = 2.0 * std::f64::consts::TAU * r * h;
-    assert!(rel(m.area, area) < 0.02, "area {} (expected {area})", m.area);
+    assert!(rel(m.area, area) < 1e-6, "area {} (expected {area})", m.area);
+    assert_eq!(tubes.body.unmeshed_faces(), 0);
     assert!(t0.elapsed().as_secs_f64() < 60.0, "took {:?}", t0.elapsed());
 }
 
@@ -2176,9 +1844,9 @@ fn explicit_outer_bound_keeps_shallow_cylinder_patch_trimmed() {
         assert_eq!(b.file_faces, 1);
         assert!(!b.closed);
         for mesh in [
-            b.body.tessellate(0.01).unwrap(),
-            b.body.reference_display_mesh_angular(0.01, crate::DISPLAY_ANGLE).unwrap(),
-            b.body.display_mesh_angular(0.01, crate::DISPLAY_ANGLE).unwrap(),
+            b.body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap(),
+            b.body.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap(),
+            b.body.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap(),
         ] {
             assert!(!mesh.triangles.is_empty());
             assert!(mesh.bounds().diagonal() < 10.0, "sense={sense}: {:?}", mesh.bounds());
@@ -2188,11 +1856,17 @@ fn explicit_outer_bound_keeps_shallow_cylinder_patch_trimmed() {
     }
 }
 
+/// The strip's one bound, not marked outer, on a face whose same_sense runs against it: the
+/// loop bounds the face and the face is turned over. Its complement is no face: the cylinder is
+/// unbounded along its axis, so the loop as a hole would leave a face with no outer boundary.
 #[test]
-fn implicit_bound_can_still_describe_the_complement_of_a_patch() {
+fn implicit_bound_against_its_face_sense_turns_the_face_over() {
     let imp = step_import(&shallow_cylinder_patch(false, false)).unwrap();
-    let mesh = imp.bodies[0].body.tessellate(0.1).unwrap();
-    assert!(mesh.bounds().diagonal() > 5000.0, "without an explicit outer bound the loop is a hole");
+    assert!(imp.warnings.iter().any(|w| w.contains("1 faces turned over: their loops disagree with their same_sense")), "{:?}", imp.warnings);
+    let mesh = imp.bodies[0].body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
+    assert!(mesh.bounds().diagonal() < 10.0, "{:?}", mesh.bounds());
+    assert!((mesh.measure().area - 42.0).abs() < 0.01, "area {}", mesh.measure().area);
+    assert!(mesh.normals.iter().all(|n| n.x > 0.99), "the loop determines the face normal");
 }
 
 #[test]
@@ -2224,7 +1898,7 @@ fn explicit_outer_bound_crossing_a_closed_nurbs_seam_stays_trimmed() {
         let text = text.replacen(old, &surface, 1).replace(TAIL, &format!("{points}{TAIL}"));
         let imp = step_import(&text).unwrap();
         let body = &imp.bodies[0].body;
-        let mesh = body.reference_display_mesh_angular(0.01, crate::DISPLAY_ANGLE).unwrap();
+        let mesh = body.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap();
         assert!(!mesh.triangles.is_empty(), "{:?}", imp.warnings);
         assert!(mesh.bounds().diagonal() < 10.0, "sense={sense}: {:?}", mesh.bounds());
         assert!((mesh.measure().area - 42.0).abs() < 0.01, "sense={sense}: area {}", mesh.measure().area);
@@ -2249,16 +1923,20 @@ fn extruded_ellipse_patch_crossing_profile_seam_stays_trimmed() {
             assert!(text.contains(&old));
             let text = text.replacen(&old, &surface, 1);
             let imported = step_import(&text).unwrap();
-            assert_eq!(imported.warnings, ["solid 'Strip': imported as an open body (the shell is not closed)"]);
+            // Against its loop (same_sense false) the face is turned over, and the import says so.
+            let open = "solid 'Strip': imported as an open body (the shell is not closed)";
+            let turned = "solid 'Strip': 1 faces turned over: their loops disagree with their same_sense";
+            let want: &[&str] = if sense { &[open] } else { &[turned, open] };
+            assert_eq!(imported.warnings, want, "sense={sense}, outer={outer}, radius={radius}");
             assert_eq!(imported.bodies.len(), 1);
             let body = &imported.bodies[0].body;
             assert_eq!(imported.bodies[0].file_faces, 1);
-            let plan = body.display_plan(0.01).unwrap();
+            let plan = body.mesh_plan(&crate::MeshTolerance::chord(0.01)).unwrap();
             for mesh in [
                 plan.evaluate(),
-                body.display_mesh_angular(0.01, crate::DISPLAY_ANGLE).unwrap(),
-                body.reference_display_mesh_angular(0.01, crate::DISPLAY_ANGLE).unwrap(),
-                body.tessellate(0.01).unwrap(),
+                body.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap(),
+                body.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap(),
+                body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap(),
             ] {
                 assert!(!mesh.triangles.is_empty());
                 assert!(mesh.bounds().diagonal() < 10.0, "radius={radius}, sense={sense}, outer={outer}: {:?}", mesh.bounds());
@@ -2275,30 +1953,38 @@ fn extruded_ellipse_patch_crossing_profile_seam_stays_trimmed() {
 /// tessellation work) and the 1.4 MB `plate_900_holes`.
 #[test]
 fn step_conformance_parts_read_back_their_exact_shape() {
-    // (file, exact volume (mm³), box (min, max), kernel faces, bodies)
+    // (file, exact volume (mm³), box (min, max), kernel faces, bodies, seam edges the reader adds
+    // to the items it reads: `cylinder_twice` places one item twice)
     #[rustfmt::skip]
-    let parts: [(&str, &str, f64, [f64; 6], usize, usize); 17] = [
-        ("cone_point", include_str!("../../../../tests/step-conformance/cone_point.step"), 1000.0 * std::f64::consts::PI, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 2, 1),
-        ("cone_point_vertex", include_str!("../../../../tests/step-conformance/cone_point_vertex.step"), 1000.0 * std::f64::consts::PI, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 2, 1),
-        ("cylinder", include_str!("../../../../tests/step-conformance/cylinder.step"), 9424.778, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 3, 1),
-        ("cylinder_inch", include_str!("../../../../tests/step-conformance/cylinder_inch.step"), 9424.778, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 3, 1),
-        ("cylinder_nurbs", include_str!("../../../../tests/step-conformance/cylinder_nurbs.step"), 9424.778, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 3, 1),
-        ("cylinder_placed", include_str!("../../../../tests/step-conformance/cylinder_placed.step"), 9424.778, [31.835, -33.165, 1.835, 65.485, 0.485, 35.485], 3, 1),
-        ("cylinder_seam", include_str!("../../../../tests/step-conformance/cylinder_seam.step"), 9424.778, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 3, 1),
-        ("cylinder_twice", include_str!("../../../../tests/step-conformance/cylinder_twice.step"), 18849.556, [-10.0, -10.0, 0.0, 90.0, 10.0, 30.0], 6, 2),
-        ("dome", include_str!("../../../../tests/step-conformance/dome.step"), 16755.161, [-20.0, -20.0, 0.0, 20.0, 20.0, 20.0], 2, 1),
-        ("dome_nurbs", include_str!("../../../../tests/step-conformance/dome_nurbs.step"), 16755.161, [-20.0, -20.0, 0.0, 20.0, 20.0, 20.0], 2, 1),
-        ("far_cylinder", include_str!("../../../../tests/step-conformance/far_cylinder.step"), 9424.778, [99990.0, -10.0, 0.0, 100010.0, 10.0, 30.0], 3, 1),
-        ("grooved_shaft", include_str!("../../../../tests/step-conformance/grooved_shaft.step"), 153532.251, [-10.0, -10.0, 0.0, 10.0, 10.0, 501.0], 753, 1),
-        ("plate_100_holes", include_str!("../../../../tests/step-conformance/plate_100_holes.step"), 71588.321, [0.0, 0.0, 0.0, 100.0, 100.0, 10.0], 110, 1),
-        ("sheet_disc", include_str!("../../../../tests/step-conformance/sheet_disc.step"), 193396443.755, [-1800.0, -1800.0, 0.0, 1800.0, 1800.0, 19.0], 3, 1),
-        ("tiny_pin", include_str!("../../../../tests/step-conformance/tiny_pin.step"), std::f64::consts::FRAC_PI_8, [-0.25, -0.25, 0.0, 0.25, 0.25, 2.0], 3, 1),
-        ("torus_ring_nurbs", include_str!("../../../../tests/step-conformance/torus_ring_nurbs.step"), 4934.802, [-25.0, -25.0, 0.0, 25.0, 25.0, 5.0], 2, 1),
-        ("washer", include_str!("../../../../tests/step-conformance/washer.step"), 3534.292, [-20.0, -20.0, 0.0, 20.0, 20.0, 3.0], 4, 1),
+    let parts: [(&str, &str, f64, [f64; 6], usize, usize, usize); 17] = [
+        ("cone_point", include_str!("../../../../tests/step-conformance/cone_point.step"), 1000.0 * std::f64::consts::PI, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 2, 1, 1),
+        ("cone_point_vertex", include_str!("../../../../tests/step-conformance/cone_point_vertex.step"), 1000.0 * std::f64::consts::PI, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 2, 1, 1),
+        ("cylinder", include_str!("../../../../tests/step-conformance/cylinder.step"), 9424.778, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 3, 1, 1),
+        ("cylinder_inch", include_str!("../../../../tests/step-conformance/cylinder_inch.step"), 9424.778, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 3, 1, 1),
+        ("cylinder_nurbs", include_str!("../../../../tests/step-conformance/cylinder_nurbs.step"), 9424.778, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 3, 1, 1),
+        ("cylinder_placed", include_str!("../../../../tests/step-conformance/cylinder_placed.step"), 9424.778, [31.835, -33.165, 1.835, 65.485, 0.485, 35.485], 3, 1, 1),
+        ("cylinder_seam", include_str!("../../../../tests/step-conformance/cylinder_seam.step"), 9424.778, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 3, 1, 0),
+        ("cylinder_twice", include_str!("../../../../tests/step-conformance/cylinder_twice.step"), 18849.556, [-10.0, -10.0, 0.0, 90.0, 10.0, 30.0], 6, 2, 1),
+        ("dome", include_str!("../../../../tests/step-conformance/dome.step"), 16755.161, [-20.0, -20.0, 0.0, 20.0, 20.0, 20.0], 2, 1, 1),
+        ("dome_nurbs", include_str!("../../../../tests/step-conformance/dome_nurbs.step"), 16755.161, [-20.0, -20.0, 0.0, 20.0, 20.0, 20.0], 2, 1, 1),
+        ("far_cylinder", include_str!("../../../../tests/step-conformance/far_cylinder.step"), 9424.778, [99990.0, -10.0, 0.0, 100010.0, 10.0, 30.0], 3, 1, 1),
+        ("grooved_shaft", include_str!("../../../../tests/step-conformance/grooved_shaft.step"), 153532.251, [-10.0, -10.0, 0.0, 10.0, 10.0, 501.0], 753, 1, 0),
+        ("plate_100_holes", include_str!("../../../../tests/step-conformance/plate_100_holes.step"), 71588.321, [0.0, 0.0, 0.0, 100.0, 100.0, 10.0], 110, 1, 0),
+        ("sheet_disc", include_str!("../../../../tests/step-conformance/sheet_disc.step"), 193396443.755, [-1800.0, -1800.0, 0.0, 1800.0, 1800.0, 19.0], 3, 1, 1),
+        ("tiny_pin", include_str!("../../../../tests/step-conformance/tiny_pin.step"), std::f64::consts::FRAC_PI_8, [-0.25, -0.25, 0.0, 0.25, 0.25, 2.0], 3, 1, 1),
+        ("torus_ring_nurbs", include_str!("../../../../tests/step-conformance/torus_ring_nurbs.step"), 4934.802, [-25.0, -25.0, 0.0, 25.0, 25.0, 5.0], 2, 1, 1),
+        ("washer", include_str!("../../../../tests/step-conformance/washer.step"), 3534.292, [-20.0, -20.0, 0.0, 20.0, 20.0, 3.0], 4, 1, 2),
     ];
-    for (name, text, volume, bbox, faces, bodies) in parts {
+    for (name, text, volume, bbox, faces, bodies, seams) in parts {
         let imp = step_import(text).unwrap_or_else(|e| panic!("{name}: {e}"));
-        assert!(imp.warnings.is_empty(), "{name}: {:?}", imp.warnings);
+        // A face that winds around its surface without a seam edge (a cone or a dome bounded by
+        // its base circle alone, a cylinder by its two rims) gets one, and the import says so.
+        let added: Option<usize> = imp
+            .warnings
+            .iter()
+            .map(|w| w.strip_suffix(" seam edges added to faces that wind around their surface")?.rsplit(": ").next()?.parse::<usize>().ok())
+            .sum();
+        assert_eq!(added, Some(seams), "{name}: {:?}", imp.warnings);
         assert_eq!(imp.bodies.len(), bodies, "{name}");
         let (mut v, mut n) = (0.0, 0);
         let mut b = solidcraft_geom::Aabb3::EMPTY;
@@ -2318,15 +2004,765 @@ fn step_conformance_parts_read_back_their_exact_shape() {
     }
 }
 
-/// #4598: a file whose bore rim runs back and forth across the bore (as main exported a moved
-/// body's edge before) imports whole: the crossings of the rim's own pieces are left out of the
-/// triangulation, not asserted on, so the face meshes a little off the exact rod.
+/// The volume of the one solid `solidcraft_step::topology` reads from `text` into schema 4,
+/// measured as the body of that record.
+pub(super) fn schema_4_volume(text: &str) -> f64 {
+    let ex = solidcraft_step::p21::parse(text).unwrap();
+    let r = solidcraft_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibTrims);
+    assert!(r.failures.is_empty() && r.solids.len() == 1, "{:?}", r.failures);
+    measure(&Body::from_record(r.solids[0].brep.clone()).unwrap()).unwrap().volume
+}
+
+/// The step-conformance parts read into SMLib (`SOLIDCRAFT_KERNEL=smlib`): the STEP reader's
+/// schema 4 record, SMLib's body of it, back as a kernel body. Each has its exact volume and
+/// face count, and every face is traced to a face of the file (the NURBS cylinder, dome and
+/// torus ring among them: their faces wind around a spline closed on itself, and get a seam).
+#[cfg(feature = "smlib")]
 #[test]
-fn a_rim_that_runs_back_and_forth_imports_whole() {
-    let imp = step_import(include_str!("../../../../tests/step-regressions/rod_doubled_edge.step")).unwrap();
+fn step_conformance_parts_read_into_smlib() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    // (file, exact volume (mm³) and faces of its solid items: cylinder_twice places its one
+    // cylinder twice)
+    #[rustfmt::skip]
+    let parts: [(&str, f64, usize); 17] = [
+        ("cone_point", 1000.0 * std::f64::consts::PI, 2), ("cone_point_vertex", 1000.0 * std::f64::consts::PI, 2),
+        ("cylinder", 9424.778, 3), ("cylinder_inch", 9424.778, 3), ("cylinder_nurbs", 9424.778, 3),
+        ("cylinder_placed", 9424.778, 3), ("cylinder_seam", 9424.778, 3), ("cylinder_twice", 9424.778, 3),
+        ("dome", 16755.161, 2), ("dome_nurbs", 16755.161, 2), ("far_cylinder", 9424.778, 3),
+        ("grooved_shaft", 153532.251, 753), ("plate_100_holes", 71588.321, 110), ("sheet_disc", 193396443.755, 3),
+        ("tiny_pin", std::f64::consts::FRAC_PI_8, 3), ("torus_ring_nurbs", 4934.802, 2), ("washer", 3534.292, 4),
+    ];
+    for (name, volume, faces) in parts {
+        let text = std::fs::read_to_string(dir.join(format!("{name}.step"))).unwrap();
+        let ex = solidcraft_step::p21::parse(&text).unwrap();
+        // The file's one representation context, as the import reads it.
+        let ctx = ex.entities.iter().find(|(_, e)| e.record("GLOBAL_UNIT_ASSIGNED_CONTEXT").is_some()).map(|(id, _)| *id);
+        let units = context_units(&ex, ctx, &mut HashMap::new());
+        let mut items: Vec<u64> = ex.entities.iter().filter(|(_, e)| e.name() == "MANIFOLD_SOLID_BREP").map(|(id, _)| *id).collect();
+        items.sort_unstable();
+        let (mut v, mut n) = (0.0, 0);
+        for item in items {
+            let (part, _) = parallel::smlib_part(&ex, item, units).unwrap_or_else(|f| panic!("{name}: {}", f.msg));
+            assert_eq!(part.face_origin.len(), part.body.face_count(), "{name}");
+            assert!(part.face_origin.iter().all(|f| ex.get(*f).is_some_and(|e| e.name() == "ADVANCED_FACE")), "{name}: {:?}", part.face_origin);
+            let m = measure(&part.body).unwrap_or_else(|e| panic!("{name}: {e}"));
+            v += m.volume;
+            n += m.faces;
+        }
+        assert!(rel(v, volume) < 1e-3, "{name}: volume {v} vs {volume}");
+        assert_eq!(n, faces, "{name}: faces");
+    }
+}
+
+/// A domed cubic patch 30 mm across whose four edges, cubic B-splines on its boundary rows,
+/// are written `dz` mm above it, in a file that states 1e-6 mm: an intersection curve written
+/// looser than its context. The patch has no closed-form pcurves for them, so SMLib makes them,
+/// on the surface, and they lie `dz` from their edges.
+fn dome_with_edges_raised(dz: f64) -> String {
+    patch_with_edges_raised(dz, false)
+}
+
+/// [`dome_with_edges_raised`], or with `flat` the plane z = 0 in its place: its edges' pcurves
+/// are then their control points' projections onto it, in closed form.
+fn patch_with_edges_raised(dz: f64, flat: bool) -> String {
+    let z = |i: usize, j: usize| if !flat && (1..=2).contains(&i) && (1..=2).contains(&j) { 6.0 } else { 0.0 };
+    let mut t = String::from(HEAD);
+    let mut rows = Vec::new();
+    for i in 0..4 {
+        let row: Vec<String> = (0..4).map(|j| format!("#{}", 100 + i * 4 + j)).collect();
+        for j in 0..4 {
+            t += &format!("#{}=CARTESIAN_POINT('',({}.,{}.,{}));\n", 100 + i * 4 + j, i * 10, j * 10, z(i, j));
+        }
+        rows.push(format!("({})", row.join(",")));
+    }
+    if flat {
+        t += "#10=PLANE('',#13);\n#11=CARTESIAN_POINT('',(0.,0.,0.));\n#12=DIRECTION('',(0.,0.,1.));\n#14=DIRECTION('',(1.,0.,0.));\n#13=AXIS2_PLACEMENT_3D('',#11,#12,#14);\n";
+    } else {
+        t += &format!(
+            "#10=B_SPLINE_SURFACE_WITH_KNOTS('',3,3,({}),.UNSPECIFIED.,.F.,.F.,.F.,(4,4),(4,4),(0.,1.),(0.,1.),.UNSPECIFIED.);\n",
+            rows.join(",")
+        );
+    }
+    // The boundary, counter-clockwise from above: (i, j) runs i = 0 → 3 at j = 0, j = 0 → 3 at
+    // i = 3, then back; each side's control points are the patch's, raised.
+    let sides: [[(usize, usize); 4]; 4] =
+        [[(0, 0), (1, 0), (2, 0), (3, 0)], [(3, 0), (3, 1), (3, 2), (3, 3)], [(3, 3), (2, 3), (1, 3), (0, 3)], [(0, 3), (0, 2), (0, 1), (0, 0)]];
+    let p = |(i, j): (usize, usize)| format!("({}.,{}.,{})", i * 10, j * 10, z(i, j) + dz);
+    for (k, side) in sides.iter().enumerate() {
+        t += &format!("#{}=CARTESIAN_POINT('',{});\n#{}=VERTEX_POINT('',#{});\n", 200 + k, p(side[0]), 210 + k, 200 + k);
+        let pts: Vec<String> = (0..4).map(|m| format!("#{}", 300 + k * 4 + m)).collect();
+        for (m, &q) in side.iter().enumerate() {
+            t += &format!("#{}=CARTESIAN_POINT('',{});\n", 300 + k * 4 + m, p(q));
+        }
+        t += &format!("#{}=B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,(4,4),(0.,1.),.UNSPECIFIED.);\n", 400 + k, pts.join(","));
+    }
+    for k in 0..4 {
+        t += &format!(
+            "#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n#{}=ORIENTED_EDGE('',*,*,#{},.T.);\n",
+            500 + k,
+            210 + k,
+            210 + (k + 1) % 4,
+            400 + k,
+            510 + k,
+            500 + k
+        );
+    }
+    t += "#520=EDGE_LOOP('',(#510,#511,#512,#513));\n#521=FACE_OUTER_BOUND('',#520,.T.);\n#522=ADVANCED_FACE('',(#521),#10,.T.);\n";
+    t += "#530=OPEN_SHELL('',(#522));\n#531=SHELL_BASED_SURFACE_MODEL('Dome',(#530));\n#532=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#531),#540);\n";
+    t += &context(540, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    t
+}
+
+#[test]
+fn edges_written_off_their_spline_face_carry_their_gap_as_their_tolerance() {
+    // 0.2 µm off, 200 times the file's stated uncertainty: each edge's tolerance covers its
+    // gap and the face imports, its notes saying how many edges and how far.
+    let imp = step_import(&dome_with_edges_raised(2e-4)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(imp.warnings.iter().any(|w| w.contains("4 edges lie off their faces' surfaces")), "{:?}", imp.warnings);
+    let r = imp.bodies[0].body.record();
+    assert!(r.edges.iter().all(|e| e.tolerance >= 2e-4 && e.tolerance < 1e-3), "{:?}", r.edges.iter().map(|e| e.tolerance).collect::<Vec<_>>());
+    // Far off (1.5 mm) is refused, naming the gap.
+    let far = step_import(&dome_with_edges_raised(1.5));
+    let refused = match &far {
+        Ok(i) => i.bodies.is_empty() && i.warnings.iter().any(|w| w.contains("off the face's surface")),
+        Err(e) => e.to_string().contains("off the face's surface"),
+    };
+    assert!(refused, "{far:?}");
+}
+
+#[test]
+fn spline_edges_off_their_plane_by_less_than_the_file_states_get_their_closed_form() {
+    // 0.8e-6 mm off, inside the file's 1e-6 mm but past the half of it a closed-form pcurve is
+    // checked within: each edge's distance from the plane, measured first, is its tolerance
+    // (with margin), and the face reads with its pcurves the edges' projections. A plane has no
+    // parameter box for SMLib to make pcurves in, so without them the face is refused.
+    let imp = step_import(&patch_with_edges_raised(0.8e-6, true)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(imp.warnings.iter().any(|w| w.contains("4 edges lie off their faces' surfaces")), "{:?}", imp.warnings);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert!(rel(m.area, 900.0) < 1e-6, "{}", m.area);
+}
+
+/// A spherical triangle (radius 0.5) whose edge runs from the equator over the sphere's pole to
+/// a vertex 1.8° past it, as a corner ball meets its rounds (Poppy Humanoid writes one): on the
+/// sphere's parameters the pole is a line where that edge's pcurve would jump half a turn. The
+/// edge is split at the pole, and the face reads with its area by the spherical excess.
+#[test]
+fn an_edge_over_a_spheres_pole_is_split_there() {
+    let r = 0.5f64;
+    let over = (91.8f64).to_radians();
+    let a = [r, 0.0, 0.0];
+    let b = [0.0, r, 0.0];
+    let p = [r * over.cos(), 0.0, r * over.sin()];
+    let f = |x: f64| format!("{x:.17E}");
+    let pt = |id: u64, q: [f64; 3]| format!("#{id}=CARTESIAN_POINT('',({},{},{}));\n", f(q[0]), f(q[1]), f(q[2]));
+    let dir = |id: u64, q: [f64; 3]| format!("#{id}=DIRECTION('',({},{},{}));\n", f(q[0]), f(q[1]), f(q[2]));
+    let mut t = String::from(HEAD);
+    t += &pt(1, [0.0; 3]);
+    t += &dir(2, [0.0, 0.0, 1.0]);
+    t += &dir(3, [1.0, 0.0, 0.0]);
+    t += "#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n#5=SPHERICAL_SURFACE('',#4,0.5);\n";
+    t += &pt(10, a);
+    t += &pt(11, b);
+    t += &pt(12, p);
+    t += "#13=VERTEX_POINT('',#10);\n#14=VERTEX_POINT('',#11);\n#15=VERTEX_POINT('',#12);\n";
+    // A to P in the x–z plane over the pole (normal −y, from x towards z); P to B (normal P × B,
+    // from P); B to A on the equator (normal −z, from y towards x).
+    let n = |u: [f64; 3], v: [f64; 3]| {
+        let c = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+        let l = (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt();
+        [c[0] / l, c[1] / l, c[2] / l]
+    };
+    let unit = |u: [f64; 3]| [u[0] / r, u[1] / r, u[2] / r];
+    t += &dir(20, [0.0, -1.0, 0.0]);
+    t += "#21=AXIS2_PLACEMENT_3D('',#1,#20,#3);\n#22=CIRCLE('',#21,0.5);\n#23=EDGE_CURVE('',#13,#15,#22,.T.);\n";
+    t += &dir(30, n(p, b));
+    t += &dir(31, unit(p));
+    t += "#32=AXIS2_PLACEMENT_3D('',#1,#30,#31);\n#33=CIRCLE('',#32,0.5);\n#34=EDGE_CURVE('',#15,#14,#33,.T.);\n";
+    t += &dir(40, [0.0, 0.0, -1.0]);
+    t += &dir(41, [0.0, 1.0, 0.0]);
+    t += "#42=AXIS2_PLACEMENT_3D('',#1,#40,#41);\n#43=CIRCLE('',#42,0.5);\n#44=EDGE_CURVE('',#14,#13,#43,.T.);\n";
+    // Counter-clockwise seen from outside: A, B, P, so every edge the other way round.
+    t += "#50=ORIENTED_EDGE('',*,*,#44,.F.);\n#51=ORIENTED_EDGE('',*,*,#34,.F.);\n#52=ORIENTED_EDGE('',*,*,#23,.F.);\n";
+    t += "#53=EDGE_LOOP('',(#50,#51,#52));\n#54=FACE_OUTER_BOUND('',#53,.T.);\n#55=ADVANCED_FACE('',(#54),#5,.T.);\n";
+    t += "#60=OPEN_SHELL('',(#55));\n#61=SHELL_BASED_SURFACE_MODEL('Ball corner',(#60));\n#62=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#61),#70);\n";
+    t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    let imp = step_import(&t).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(imp.warnings.iter().any(|w| w.contains("1 edges split where they pass through a face's pole")), "{:?}", imp.warnings);
+    // The spherical excess of the unit vectors' triangle, tan(E/2) = |a·(b×c)| / (1 + a·b + b·c + c·a).
+    let (ua, ub, up) = (unit(a), unit(b), unit(p));
+    let dot = |u: [f64; 3], v: [f64; 3]| u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    let triple = dot(ua, n(ub, up)) * (1.0 - dot(ub, up).powi(2)).sqrt();
+    let excess = 2.0 * triple.abs().atan2(1.0 + dot(ua, ub) + dot(ub, up) + dot(up, ua));
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert!(rel(m.area, excess * r * r) < 1e-3, "{} vs {}", m.area, excess * r * r);
+}
+
+/// A planar bicubic patch whose v = 0 side is shrunk to `side` mm (a corner of a round written as
+/// a four-sided patch, Poppy Humanoid's connectors write them), bounded by three edges, its
+/// boundary iso curves counter-clockwise in (u, v): up the u = 1 side, back across v = 1, down
+/// the u = 0 side. The two side edges end `side` apart at one vertex, the end of the u = 0 side,
+/// whose tolerance covers that gap; the face tolerance (the file's 1e-6 mm) does not.
+fn patch_with_a_side_shrunk(side: f64) -> String {
+    let f = |x: f64| format!("{x:.17E}");
+    // (i, j), i along u: the v = 0 row runs over `side`, the v = 1 row over 30 mm.
+    let p = |i: usize, j: usize| {
+        let v = j as f64 / 3.0;
+        [(1.0 - v) * side * i as f64 / 3.0 + v * 10.0 * i as f64, 30.0 * v, 0.0]
+    };
+    let pt = |id: usize, q: [f64; 3]| format!("#{id}=CARTESIAN_POINT('',({},{},{}));\n", f(q[0]), f(q[1]), f(q[2]));
+    let mut t = String::from(HEAD);
+    let mut rows = Vec::new();
+    for i in 0..4 {
+        rows.push(format!("({})", (0..4).map(|j| format!("#{}", 100 + i * 4 + j)).collect::<Vec<_>>().join(",")));
+        for j in 0..4 {
+            t += &pt(100 + i * 4 + j, p(i, j));
+        }
+    }
+    t += &format!(
+        "#10=B_SPLINE_SURFACE_WITH_KNOTS('',3,3,({}),.UNSPECIFIED.,.F.,.F.,.F.,(4,4),(4,4),(0.,1.),(0.,1.),.UNSPECIFIED.);\n",
+        rows.join(",")
+    );
+    // A at (0, 0), C at (1, 1), B at (0, 1).
+    for (k, q) in [p(0, 0), p(3, 3), p(0, 3)].into_iter().enumerate() {
+        t += &pt(200 + k, q);
+        t += &format!("#{}=VERTEX_POINT('',#{});\n", 210 + k, 200 + k);
+    }
+    let sides: [[(usize, usize); 4]; 3] = [[(3, 0), (3, 1), (3, 2), (3, 3)], [(3, 3), (2, 3), (1, 3), (0, 3)], [(0, 3), (0, 2), (0, 1), (0, 0)]];
+    for (k, side) in sides.iter().enumerate() {
+        for (m, &(i, j)) in side.iter().enumerate() {
+            t += &pt(300 + k * 4 + m, p(i, j));
+        }
+        let pts: Vec<String> = (0..4).map(|m| format!("#{}", 300 + k * 4 + m)).collect();
+        t += &format!("#{}=B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,(4,4),(0.,1.),.UNSPECIFIED.);\n", 400 + k, pts.join(","));
+        t += &format!(
+            "#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n#{}=ORIENTED_EDGE('',*,*,#{},.T.);\n",
+            500 + k,
+            210 + k,
+            210 + (k + 1) % 3,
+            400 + k,
+            510 + k,
+            500 + k
+        );
+    }
+    t += "#520=EDGE_LOOP('',(#510,#511,#512));\n#521=FACE_OUTER_BOUND('',#520,.T.);\n#522=ADVANCED_FACE('',(#521),#10,.T.);\n";
+    t += "#530=OPEN_SHELL('',(#522));\n#531=SHELL_BASED_SURFACE_MODEL('Corner',(#530));\n#532=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#531),#540);\n";
+    t += &context(540, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    t
+}
+
+#[test]
+fn a_patch_side_shrunk_within_its_vertexs_tolerance_is_a_pole_of_the_loop() {
+    // 4 µm: four times the face's tolerance, within the vertex's (1.5 × its 4 µm gap). The loop
+    // runs along the shrunk side between the side edges' ends, a pole for it, and the face reads
+    // with the patch's area: a trapezoid 30 mm high, 30 mm and `side` wide.
+    let side = 4e-3 * 1e-3;
+    let imp = step_import(&patch_with_a_side_shrunk(side)).unwrap();
     assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
     let m = measure(&imp.bodies[0].body).unwrap();
-    // The exact rod is 74 898.5 mm³; the rim's crossings left out shave a little off.
-    assert!(rel(m.volume, 74_898.5) < 2e-3, "volume {}", m.volume);
-    assert_eq!(m.merged.faces, 5);
+    let area = 0.5 * (30.0 + side) * 30.0;
+    assert!(rel(m.area, area) < 1e-6, "{} vs {area}", m.area);
+}
+
+/// A can of radius 5 and height 10: its bottom (on a plane facing up, the face against it), its
+/// wall, and its lid on the plane `lid_z` (10 where the lid's rim lies on it).
+fn can_with_its_lid_at(lid_z: f64) -> String {
+    format!(
+        "{HEAD}
+#1=CARTESIAN_POINT('',(0.,0.,0.));
+#2=DIRECTION('',(0.,0.,1.));
+#3=DIRECTION('',(1.,0.,0.));
+#4=DIRECTION('',(0.,0.,-1.));
+#5=AXIS2_PLACEMENT_3D('',#1,#2,#3);
+#6=AXIS2_PLACEMENT_3D('',#1,#4,#3);
+#7=CARTESIAN_POINT('',(5.,0.,0.));
+#8=VERTEX_POINT('',#7);
+#9=CIRCLE('',#5,5.);
+#10=EDGE_CURVE('',#8,#8,#9,.T.);
+#11=ORIENTED_EDGE('',*,*,#10,.F.);
+#12=EDGE_LOOP('',(#11));
+#13=FACE_OUTER_BOUND('',#12,.T.);
+#14=PLANE('',#5);
+#15=ADVANCED_FACE('Bottom',(#13),#14,.F.);
+#16=ORIENTED_EDGE('',*,*,#10,.T.);
+#17=EDGE_LOOP('',(#16));
+#18=FACE_BOUND('',#17,.T.);
+#19=CYLINDRICAL_SURFACE('',#5,5.);
+#20=ADVANCED_FACE('Wall',(#18,#37),#19,.T.);
+#30=CARTESIAN_POINT('',(0.,0.,10.));
+#31=AXIS2_PLACEMENT_3D('',#30,#2,#3);
+#32=CARTESIAN_POINT('',(5.,0.,10.));
+#33=VERTEX_POINT('',#32);
+#34=CIRCLE('',#31,5.);
+#35=EDGE_CURVE('',#33,#33,#34,.T.);
+#36=ORIENTED_EDGE('',*,*,#35,.F.);
+#37=FACE_BOUND('',#38,.T.);
+#38=EDGE_LOOP('',(#36));
+#39=ORIENTED_EDGE('',*,*,#35,.T.);
+#40=EDGE_LOOP('',(#39));
+#41=FACE_OUTER_BOUND('',#40,.T.);
+#42=CARTESIAN_POINT('',(0.,0.,{lid_z:?}));
+#43=AXIS2_PLACEMENT_3D('',#42,#2,#3);
+#44=PLANE('',#43);
+#45=ADVANCED_FACE('Lid',(#41),#44,.T.);
+#21=CLOSED_SHELL('',(#15,#20,#45));
+#22=MANIFOLD_SOLID_BREP('Can',#21);
+#23=SHAPE_REPRESENTATION('',(#22),$);
+{TAIL}"
+    )
+}
+
+/// A solid no B-rep can be made of comes in as an open surface body of its exact faces, the
+/// faces that make it refused left out and named, as Poppy Humanoid's stock head (a face around
+/// an open surface of revolution with one bound) and Congé19 (an edge further off its face than
+/// any tolerance SMLib takes) do. A can whose lid lies 1.5 mm off its rim: the lid is left out,
+/// the bottom and the wall come in sharing their rim, and the existing surface tools close the
+/// can again (the rim patched, the patch stitched on): a solid with the can's volume.
+#[test]
+fn a_refused_solid_comes_in_as_a_surface_body_of_the_faces_that_read() {
+    let pi = std::f64::consts::PI;
+    let whole = step_import(&can_with_its_lid_at(10.0)).unwrap();
+    assert_eq!(whole.bodies.len(), 1, "{:?}", whole.warnings);
+    assert!(whole.bodies[0].closed && whole.bodies[0].refused.is_none(), "{:?}", whole.warnings);
+    assert!(rel(measure(&whole.bodies[0].body).unwrap().volume, 250.0 * pi) < 1e-6);
+
+    let imp = step_import(&can_with_its_lid_at(11.5)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let can = &imp.bodies[0];
+    assert!(!can.body.is_mesh() && can.body.is_surface() && !can.closed, "{:?}", imp.warnings);
+    let why = can.refused.as_deref().unwrap_or_default();
+    assert!(why.contains("face #45") && why.contains("off the face's surface"), "{why}");
+    assert_eq!((can.file_faces, can.body.face_count()), (3, 2));
+    assert_eq!(can.face_origin, [15, 20]);
+    // The bottom faces down as the file has it, against its plane's natural normal (SMLib gives
+    // a sheet's faces back on their natural side; the import turns it back).
+    let r = can.body.record();
+    let bottom = can.face_origin.iter().position(|f| *f == 15).unwrap();
+    let uses: Vec<bool> = r
+        .shells
+        .iter()
+        .flat_map(|s| match s {
+            solidcraft_geom::brep::Shell::Faces { faces, .. } => faces.iter().filter(|f| f.face as usize == bottom).map(|f| f.forward).collect(),
+            _ => Vec::new(),
+        })
+        .collect();
+    assert_eq!(uses, [false], "the bottom's use");
+    // The report keeps the refusal and names the face left out; no "open body" warning on top.
+    assert!(imp.warnings.iter().any(|w| w.contains("'Can': imported as surfaces: ") && w.contains(why)), "{:?}", imp.warnings);
+    assert!(imp.warnings.iter().any(|w| w.contains("'Can': left out: ") && w.contains("face #45")), "{:?}", imp.warnings);
+    assert!(!imp.warnings.iter().any(|w| w.contains("open body")), "{:?}", imp.warnings);
+    // Exact: the bottom's disk and the wall's 10 mm of cylinder.
+    assert!(rel(measure(&can.body).unwrap().area, 125.0 * pi) < 1e-6, "{}", measure(&can.body).unwrap().area);
+    // Closed again with the existing tools.
+    let lid = crate::patch_edges(&can.body, &[Vec3::new(0.0, 5.0, 10.0)]).unwrap();
+    let back = crate::stitch(&[&can.body, &lid], 0.0).unwrap();
+    assert!(!back.is_surface(), "closed");
+    assert!(rel(measure(&back).unwrap().volume, 250.0 * pi) < 1e-6, "{}", measure(&back).unwrap().volume);
+}
+
+/// A sector of a cylinder (radius 5, height 10) about z, `sweep` radians from `start` on the
+/// wall's frame: a pie slice of the cylinder, its two sides through the axis.
+fn cylinder_sector(start: f64, sweep: f64) -> String {
+    let (r, h) = (5.0, 10.0);
+    let p = |x: f64, y: f64, z: f64| format!("({x:.17},{y:.17},{z:.17})");
+    let (a0, a1) = (start, start + sweep);
+    let (c0, s0, c1, s1) = (a0.cos(), a0.sin(), a1.cos(), a1.sin());
+    let line = |id: u32, from: (f64, f64, f64), to: (f64, f64, f64)| {
+        let d = Vec3::new(to.0 - from.0, to.1 - from.1, to.2 - from.2);
+        let u = d.normalized().unwrap();
+        format!(
+            "#{id}=LINE('',#{},#{});\n#{}=CARTESIAN_POINT('',{});\n#{}=VECTOR('',#{},{:.17});\n#{}=DIRECTION('',{});\n",
+            id + 1,
+            id + 2,
+            id + 1,
+            p(from.0, from.1, from.2),
+            id + 2,
+            id + 3,
+            d.len(),
+            id + 3,
+            p(u.x, u.y, u.z)
+        )
+    };
+    let (a_0, a_1, p0, p1, q0, q1) =
+        ((0.0, 0.0, 0.0), (0.0, 0.0, h), (r * c0, r * s0, 0.0), (r * c0, r * s0, h), (r * c1, r * s1, 0.0), (r * c1, r * s1, h));
+    let mut lines = String::new();
+    for (id, from, to) in [(100, a_0, a_1), (110, a_0, p0), (120, a_0, q0), (130, a_1, p1), (140, a_1, q1), (150, p0, p1), (160, q0, q1)] {
+        lines.push_str(&line(id, from, to));
+    }
+    format!(
+        "{HEAD}
+#1=CARTESIAN_POINT('',(0.,0.,0.));
+#2=DIRECTION('',(0.,0.,1.));
+#3=DIRECTION('',(1.,0.,0.));
+#4=DIRECTION('',(0.,0.,-1.));
+#5=AXIS2_PLACEMENT_3D('',#1,#2,#3);
+#6=AXIS2_PLACEMENT_3D('',#1,#4,#3);
+#7=CARTESIAN_POINT('',(0.,0.,{h:?}));
+#8=AXIS2_PLACEMENT_3D('',#7,#2,#3);
+#10=VERTEX_POINT('',#11);
+#11=CARTESIAN_POINT('',{});
+#12=VERTEX_POINT('',#13);
+#13=CARTESIAN_POINT('',{});
+#14=VERTEX_POINT('',#15);
+#15=CARTESIAN_POINT('',{});
+#16=VERTEX_POINT('',#17);
+#17=CARTESIAN_POINT('',{});
+#18=VERTEX_POINT('',#19);
+#19=CARTESIAN_POINT('',{});
+#20=VERTEX_POINT('',#21);
+#21=CARTESIAN_POINT('',{});
+{lines}#30=CIRCLE('',#5,{r:?});
+#31=CIRCLE('',#8,{r:?});
+#40=EDGE_CURVE('',#10,#12,#100,.T.);
+#41=EDGE_CURVE('',#10,#14,#110,.T.);
+#42=EDGE_CURVE('',#10,#18,#120,.T.);
+#43=EDGE_CURVE('',#12,#16,#130,.T.);
+#44=EDGE_CURVE('',#12,#20,#140,.T.);
+#45=EDGE_CURVE('',#14,#16,#150,.T.);
+#46=EDGE_CURVE('',#18,#20,#160,.T.);
+#47=EDGE_CURVE('',#14,#18,#30,.T.);
+#48=EDGE_CURVE('',#16,#20,#31,.T.);
+#50=CYLINDRICAL_SURFACE('',#5,{r:?});
+#51=EDGE_LOOP('',(#200,#201,#202,#203));
+#200=ORIENTED_EDGE('',*,*,#47,.T.);
+#201=ORIENTED_EDGE('',*,*,#46,.T.);
+#202=ORIENTED_EDGE('',*,*,#48,.F.);
+#203=ORIENTED_EDGE('',*,*,#45,.F.);
+#52=FACE_OUTER_BOUND('',#51,.T.);
+#53=ADVANCED_FACE('Wall',(#52),#50,.T.);
+#54=PLANE('',#6);
+#55=EDGE_LOOP('',(#204,#205,#206));
+#204=ORIENTED_EDGE('',*,*,#42,.T.);
+#205=ORIENTED_EDGE('',*,*,#47,.F.);
+#206=ORIENTED_EDGE('',*,*,#41,.F.);
+#56=FACE_OUTER_BOUND('',#55,.T.);
+#57=ADVANCED_FACE('Bottom',(#56),#54,.T.);
+#58=PLANE('',#8);
+#59=EDGE_LOOP('',(#207,#208,#209));
+#207=ORIENTED_EDGE('',*,*,#43,.T.);
+#208=ORIENTED_EDGE('',*,*,#48,.T.);
+#209=ORIENTED_EDGE('',*,*,#44,.F.);
+#60=FACE_OUTER_BOUND('',#59,.T.);
+#61=ADVANCED_FACE('Top',(#60),#58,.T.);
+#62=DIRECTION('',{});
+#63=AXIS2_PLACEMENT_3D('',#1,#62,#2);
+#64=PLANE('',#63);
+#65=EDGE_LOOP('',(#210,#211,#212,#213));
+#210=ORIENTED_EDGE('',*,*,#41,.T.);
+#211=ORIENTED_EDGE('',*,*,#45,.T.);
+#212=ORIENTED_EDGE('',*,*,#43,.F.);
+#213=ORIENTED_EDGE('',*,*,#40,.F.);
+#66=FACE_OUTER_BOUND('',#65,.T.);
+#67=ADVANCED_FACE('Start',(#66),#64,.T.);
+#68=DIRECTION('',{});
+#69=AXIS2_PLACEMENT_3D('',#1,#68,#2);
+#70=PLANE('',#69);
+#71=EDGE_LOOP('',(#214,#215,#216,#217));
+#214=ORIENTED_EDGE('',*,*,#40,.T.);
+#215=ORIENTED_EDGE('',*,*,#44,.T.);
+#216=ORIENTED_EDGE('',*,*,#46,.F.);
+#217=ORIENTED_EDGE('',*,*,#42,.F.);
+#72=FACE_OUTER_BOUND('',#71,.T.);
+#73=ADVANCED_FACE('End',(#72),#70,.T.);
+#80=CLOSED_SHELL('',(#53,#57,#61,#67,#73));
+#81=MANIFOLD_SOLID_BREP('Sector',#80);
+#82=SHAPE_REPRESENTATION('',(#81),$);
+{TAIL}",
+        p(a_0.0, a_0.1, a_0.2),
+        p(a_1.0, a_1.1, a_1.2),
+        p(p0.0, p0.1, p0.2),
+        p(p1.0, p1.1, p1.2),
+        p(q0.0, q0.1, q0.2),
+        p(q1.0, q1.1, q1.2),
+        p(s0, -c0, 0.0),
+        p(-s1, c1, 0.0),
+    )
+}
+
+/// A round face of less than one turn that does not start on a quarter line of its frame (a
+/// 300° sector of a cylinder from 75°, or 350° from 200°) needed a fifth quarter on the frame's quarter grid, so its
+/// form ran past one turn and SMLib refused the solid (it came in as surfaces, an edge "12 mm off
+/// the face's surface"). Its frame is turned about its axis to start on a quarter line: the same
+/// cylinder, a form of four quarters, and the solid with its exact volume and area. One that fits
+/// in four quarters as it is (300° from 37°) keeps its frame.
+#[test]
+fn a_round_face_off_its_frames_quarter_lines_is_formed_within_one_turn() {
+    for (start, sweep) in
+        [(75f64.to_radians(), 300f64.to_radians()), (37f64.to_radians(), 300f64.to_radians()), (200f64.to_radians(), 350f64.to_radians())]
+    {
+        let imp = step_import(&cylinder_sector(start, sweep)).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+        let b = &imp.bodies[0];
+        assert!(b.closed && b.refused.is_none(), "{start} {sweep}: {:?} {:?}", b.refused, imp.warnings);
+        let wall = b.face_origin.iter().position(|f| *f == 53).unwrap();
+        let Some(solidcraft_geom::brep::Surface::RationalSpline { u_knots, .. }) = &b.body.record().faces[wall].nurbs else {
+            panic!("the wall's form")
+        };
+        assert!(u_knots[u_knots.len() - 1] - u_knots[0] <= 4.0, "{start}: the wall's form spans {u_knots:?}");
+        let m = measure(&b.body).unwrap();
+        let (volume, area) = (0.5 * sweep * 25.0 * 10.0, sweep * 25.0 + sweep * 5.0 * 10.0 + 2.0 * 5.0 * 10.0);
+        assert!(rel(m.volume, volume) < 1e-6, "{start}: volume {} vs {volume}", m.volume);
+        assert!(rel(m.area, area) < 1e-6, "{start}: area {} vs {area}", m.area);
+    }
+}
+
+/// A circle edge between two vertices its file's uncertainty does not tell apart is the short arc
+/// between them, not a full turn (the engine assembly's water pump housing has a 20.4 um arc
+/// between two vertices in a part whose uncertainty is 20.5 um). A can whose wall is
+/// split by two rulings 0.6 um apart, under the default 1 um: read as turns, the sliver of wall
+/// between them wound once round the can with no second bound and the can came in as surfaces.
+#[test]
+fn a_circle_edge_between_two_vertices_closer_than_the_tolerance_is_the_arc_between_them() {
+    let (r, h) = (5.0f64, 10.0f64);
+    let delta = 0.6e-3 / r;
+    let (c, s) = (r * delta.cos(), r * delta.sin());
+    let text = format!(
+        "{HEAD}
+#1=CARTESIAN_POINT('',(0.,0.,0.));
+#2=DIRECTION('',(0.,0.,1.));
+#3=DIRECTION('',(1.,0.,0.));
+#5=AXIS2_PLACEMENT_3D('',#1,#2,#3);
+#6=CARTESIAN_POINT('',(0.,0.,{h:?}));
+#7=AXIS2_PLACEMENT_3D('',#6,#2,#3);
+#10=CARTESIAN_POINT('',({r:?},0.,0.));
+#11=CARTESIAN_POINT('',({c:?},{s:?},0.));
+#12=CARTESIAN_POINT('',({r:?},0.,{h:?}));
+#13=CARTESIAN_POINT('',({c:?},{s:?},{h:?}));
+#14=VERTEX_POINT('',#10);
+#15=VERTEX_POINT('',#11);
+#16=VERTEX_POINT('',#12);
+#17=VERTEX_POINT('',#13);
+#20=CIRCLE('',#5,{r:?});
+#21=CIRCLE('',#7,{r:?});
+#22=VECTOR('',#2,1.);
+#23=LINE('',#10,#22);
+#24=LINE('',#11,#22);
+#30=EDGE_CURVE('',#14,#15,#20,.T.);
+#31=EDGE_CURVE('',#15,#14,#20,.T.);
+#32=EDGE_CURVE('',#16,#17,#21,.T.);
+#33=EDGE_CURVE('',#17,#16,#21,.T.);
+#34=EDGE_CURVE('',#14,#16,#23,.T.);
+#35=EDGE_CURVE('',#15,#17,#24,.T.);
+#40=ORIENTED_EDGE('',*,*,#31,.F.);
+#41=ORIENTED_EDGE('',*,*,#30,.F.);
+#42=EDGE_LOOP('',(#40,#41));
+#43=FACE_OUTER_BOUND('',#42,.T.);
+#44=PLANE('',#5);
+#45=ADVANCED_FACE('Bottom',(#43),#44,.F.);
+#50=ORIENTED_EDGE('',*,*,#32,.T.);
+#51=ORIENTED_EDGE('',*,*,#33,.T.);
+#52=EDGE_LOOP('',(#50,#51));
+#53=FACE_OUTER_BOUND('',#52,.T.);
+#54=PLANE('',#7);
+#55=ADVANCED_FACE('Top',(#53),#54,.T.);
+#60=ORIENTED_EDGE('',*,*,#30,.T.);
+#61=ORIENTED_EDGE('',*,*,#35,.T.);
+#62=ORIENTED_EDGE('',*,*,#32,.F.);
+#63=ORIENTED_EDGE('',*,*,#34,.F.);
+#64=EDGE_LOOP('',(#60,#61,#62,#63));
+#65=FACE_OUTER_BOUND('',#64,.T.);
+#66=CYLINDRICAL_SURFACE('',#5,{r:?});
+#67=ADVANCED_FACE('Sliver',(#65),#66,.T.);
+#70=ORIENTED_EDGE('',*,*,#31,.T.);
+#71=ORIENTED_EDGE('',*,*,#34,.T.);
+#72=ORIENTED_EDGE('',*,*,#33,.F.);
+#73=ORIENTED_EDGE('',*,*,#35,.F.);
+#74=EDGE_LOOP('',(#70,#71,#72,#73));
+#75=FACE_OUTER_BOUND('',#74,.T.);
+#77=ADVANCED_FACE('Wall',(#75),#66,.T.);
+#80=CLOSED_SHELL('',(#45,#55,#67,#77));
+#81=MANIFOLD_SOLID_BREP('Can',#80);
+#82=SHAPE_REPRESENTATION('',(#81),$);
+{TAIL}"
+    );
+    let imp = step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let can = &imp.bodies[0];
+    assert!(can.closed && can.refused.is_none() && !can.body.is_surface(), "{:?} {:?}", can.refused, imp.warnings);
+    let pi = std::f64::consts::PI;
+    let m = measure(&can.body).unwrap();
+    assert!(rel(m.volume, pi * r * r * h) < 1e-6, "{}", m.volume);
+    assert!(rel(m.area, 2.0 * pi * r * r + 2.0 * pi * r * h) < 1e-6, "{}", m.area);
+}
+
+/// A ring torus (R 10, r 3) about z, as a closed solid: with `tube` its whole turn about the axis
+/// and its tube from `tube.0` for `tube.1` radians, the gap across the tube closed by a cone
+/// through the two circles where the tube ends (face #53, its seam a tube arc, the cone #57);
+/// without it the whole tube for `sweep` radians from `start` about the axis, closed by two discs
+/// (its seam an arc of the outer equator).
+fn torus_part(tube: Option<(f64, f64)>, (start, sweep): (f64, f64)) -> String {
+    let (big, small) = (10.0, 3.0);
+    let p = |x: f64, y: f64, z: f64| format!("({x:.17},{y:.17},{z:.17})");
+    let head = format!(
+        "{HEAD}#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n#50=TOROIDAL_SURFACE('',#4,{big:?},{small:?});\n"
+    );
+    let tail = "#80=CLOSED_SHELL('',(#53,#57,#61));\n#81=MANIFOLD_SOLID_BREP('Torus part',#80);\n#82=SHAPE_REPRESENTATION('',(#81),$);\n";
+    if let Some((v0, dv)) = tube {
+        // The circles about the axis at the tube's two ends, and the cone through them from the
+        // narrower one, its axis toward the wider; its sense outward from the tube.
+        let v1 = v0 + dv;
+        let ring = |v: f64| (big + small * v.cos(), small * v.sin());
+        let ((ra, za), (rb, zb)) = (ring(v0), ring(v1));
+        let ((r_near, z_near), (r_far, z_far)) = if ra < rb { ((ra, za), (rb, zb)) } else { ((rb, zb), (ra, za)) };
+        let k = (z_far - z_near).signum();
+        let semi = ((r_far - r_near) / (z_far - z_near).abs()).atan();
+        // The cone's natural normal at u = 0, (1, 0, −k tan) in (radial, axial), against the way
+        // out of the tube at the chord's middle.
+        let (mx, mz) = (0.5 * (ra + rb) - big, 0.5 * (za + zb));
+        let sense = if mx - k * semi.tan() * mz > 0.0 { "T" } else { "F" };
+        format!(
+            "{head}#5=DIRECTION('',(0.,0.,{k:.1}));
+#6=CARTESIAN_POINT('',{});
+#7=AXIS2_PLACEMENT_3D('',#6,#2,#3);
+#8=CARTESIAN_POINT('',{});
+#9=AXIS2_PLACEMENT_3D('',#8,#2,#3);
+#10=VERTEX_POINT('',#11);
+#11=CARTESIAN_POINT('',{});
+#12=VERTEX_POINT('',#13);
+#13=CARTESIAN_POINT('',{});
+#30=CIRCLE('',#7,{ra:.17});
+#31=CIRCLE('',#9,{rb:.17});
+#40=EDGE_CURVE('',#10,#10,#30,.T.);
+#41=EDGE_CURVE('',#12,#12,#31,.T.);
+#14=CARTESIAN_POINT('',({big:?},0.,0.));
+#15=DIRECTION('',(0.,-1.,0.));
+#16=AXIS2_PLACEMENT_3D('',#14,#15,#3);
+#32=CIRCLE('',#16,{small:?});
+#42=EDGE_CURVE('',#10,#12,#32,.T.);
+#200=ORIENTED_EDGE('',*,*,#40,.T.);
+#201=ORIENTED_EDGE('',*,*,#41,.F.);
+#204=ORIENTED_EDGE('',*,*,#42,.T.);
+#205=ORIENTED_EDGE('',*,*,#42,.F.);
+#51=EDGE_LOOP('',(#200,#204,#201,#205));
+#54=FACE_OUTER_BOUND('',#51,.T.);
+#53=ADVANCED_FACE('Tube',(#54),#50,.T.);
+#202=ORIENTED_EDGE('',*,*,#40,.F.);
+#203=ORIENTED_EDGE('',*,*,#41,.T.);
+#56=EDGE_LOOP('',(#202));
+#58=EDGE_LOOP('',(#203));
+#59=FACE_OUTER_BOUND('',#56,.T.);
+#60=FACE_BOUND('',#58,.T.);
+#62=CARTESIAN_POINT('',{});
+#63=AXIS2_PLACEMENT_3D('',#62,#5,#3);
+#64=CONICAL_SURFACE('',#63,{r_near:.17},{semi:.17});
+#57=ADVANCED_FACE('Gap',(#59,#60),#64,.{sense}.);
+#80=CLOSED_SHELL('',(#53,#57));
+#81=MANIFOLD_SOLID_BREP('Torus part',#80);
+#82=SHAPE_REPRESENTATION('',(#81),$);
+{TAIL}",
+            p(0.0, 0.0, za),
+            p(0.0, 0.0, zb),
+            p(ra, 0.0, za),
+            p(rb, 0.0, zb),
+            p(0.0, 0.0, z_near),
+        )
+    } else {
+        // A tube circle in each end's meridian plane, run with the tube angle, and the discs.
+        let end = |u: f64| {
+            let (c, s) = (u.cos(), u.sin());
+            ((big * c, big * s), (c, s), (s, -c))
+        };
+        let (((x0, y0), (c0, s0), (a0x, a0y)), ((x1, y1), (c1, s1), (a1x, a1y))) = (end(start), end(start + sweep));
+        format!(
+            "{head}#6=CARTESIAN_POINT('',{});
+#7=DIRECTION('',{});
+#8=DIRECTION('',{});
+#9=AXIS2_PLACEMENT_3D('',#6,#7,#8);
+#14=CARTESIAN_POINT('',{});
+#15=DIRECTION('',{});
+#16=DIRECTION('',{});
+#17=AXIS2_PLACEMENT_3D('',#14,#15,#16);
+#10=VERTEX_POINT('',#11);
+#11=CARTESIAN_POINT('',{});
+#12=VERTEX_POINT('',#13);
+#13=CARTESIAN_POINT('',{});
+#30=CIRCLE('',#9,{small:?});
+#31=CIRCLE('',#17,{small:?});
+#40=EDGE_CURVE('',#10,#10,#30,.T.);
+#41=EDGE_CURVE('',#12,#12,#31,.T.);
+#32=CIRCLE('',#4,{:.17});
+#43=EDGE_CURVE('',#10,#12,#32,.T.);
+#200=ORIENTED_EDGE('',*,*,#40,.F.);
+#201=ORIENTED_EDGE('',*,*,#41,.T.);
+#204=ORIENTED_EDGE('',*,*,#43,.T.);
+#205=ORIENTED_EDGE('',*,*,#43,.F.);
+#51=EDGE_LOOP('',(#204,#201,#205,#200));
+#54=FACE_OUTER_BOUND('',#51,.T.);
+#53=ADVANCED_FACE('Tube',(#54),#50,.T.);
+#202=ORIENTED_EDGE('',*,*,#40,.T.);
+#56=EDGE_LOOP('',(#202));
+#59=FACE_OUTER_BOUND('',#56,.T.);
+#64=PLANE('',#9);
+#57=ADVANCED_FACE('Start',(#59),#64,.T.);
+#203=ORIENTED_EDGE('',*,*,#41,.F.);
+#58=EDGE_LOOP('',(#203));
+#60=FACE_OUTER_BOUND('',#58,.T.);
+#65=DIRECTION('',{});
+#66=AXIS2_PLACEMENT_3D('',#14,#65,#16);
+#67=PLANE('',#66);
+#61=ADVANCED_FACE('End',(#60),#67,.T.);
+{tail}{TAIL}",
+            p(x0, y0, 0.0),
+            p(a0x, a0y, 0.0),
+            p(c0, s0, 0.0),
+            p(x1, y1, 0.0),
+            p(a1x, a1y, 0.0),
+            p(c1, s1, 0.0),
+            p(x0 + small * c0, y0 + small * s0, 0.0),
+            p(x1 + small * c1, y1 + small * s1, 0.0),
+            big + small,
+            p(-a1x, -a1y, 0.0),
+        )
+    }
+}
+
+/// A torus face round most of its tube off the tube's quarter lines (326° of the tube from
+/// −113.8°, as an exhaust collector has it) needed a fifth quarter along the tube: its form ran
+/// past a full turn of the tube and SMLib refused the solid. Its tube start moves to where the
+/// face's tube begins: the same torus, a form of four quarters along the tube, and the solid with
+/// its exact volume and area. A face round the whole tube (300° about the axis from 75°, which
+/// turns its frame instead) keeps its tube start and its four quarters.
+#[test]
+fn a_torus_face_round_most_of_its_tube_is_formed_within_one_turn_of_it() {
+    use std::f64::consts::PI;
+    let (big, small) = (10.0f64, 3.0f64);
+    let (v0, dv) = ((-113.8f64).to_radians(), 326f64.to_radians());
+    for (tube, about) in [(Some((v0, dv)), (0.0, 2.0 * PI)), (None, (75f64.to_radians(), 300f64.to_radians()))] {
+        let imp = step_import(&torus_part(tube, about)).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+        let b = &imp.bodies[0];
+        assert!(b.closed && b.refused.is_none(), "{tube:?}: {:?} {:?}", b.refused, imp.warnings);
+        let face = b.face_origin.iter().position(|f| *f == 53).unwrap();
+        let record = b.body.record();
+        let Some(solidcraft_geom::brep::Surface::RationalSpline { v_knots, .. }) = &record.faces[face].nurbs else { panic!("the tube's form") };
+        assert!(v_knots[v_knots.len() - 1] - v_knots[0] <= 4.0, "{tube:?}: the tube's form spans {v_knots:?}");
+        let m = measure(&b.body).unwrap();
+        let (volume, area) = match tube {
+            Some((v0, dv)) => {
+                // The whole torus less the segment of the tube the cone cuts off, revolved
+                // (Pappus); the tube's face and the cone's.
+                let gap = 2.0 * PI - dv;
+                let segment = 0.5 * small * small * (gap - gap.sin());
+                let centroid = 4.0 * small * (0.5 * gap).sin().powi(3) / (3.0 * (gap - gap.sin()));
+                let middle = v0 + dv + 0.5 * gap;
+                let volume = 2.0 * PI * PI * big * small * small - segment * 2.0 * PI * (big + centroid * middle.cos());
+                let ring = |v: f64| big + small * v.cos();
+                let chord = 2.0 * small * (0.5 * gap).sin();
+                let area = 2.0 * PI * small * (big * dv + small * ((v0 + dv).sin() - v0.sin())) + PI * (ring(v0) + ring(v0 + dv)) * chord;
+                (volume, area)
+            }
+            None => {
+                assert_eq!(v_knots[v_knots.len() - 1] - v_knots[0], 4.0, "a whole tube is four quarters");
+                let sweep = about.1;
+                (PI * small * small * big * sweep, sweep * 2.0 * PI * small * big + 2.0 * PI * small * small)
+            }
+        };
+        assert!(rel(m.volume, volume) < 1e-6, "{tube:?}: volume {} vs {volume}", m.volume);
+        assert!(rel(m.area, area) < 1e-6, "{tube:?}: area {} vs {area}", m.area);
+    }
 }

@@ -279,7 +279,7 @@ fn sketch_on_a_turned_occurrence() -> (Document, Model, u64, u64, FaceAnchor, Pl
     let state = model.state();
     let raw = state.bodies.first().unwrap();
     let index = raw.body.face_sources().unwrap().iter().position(|s| matches!(s, Some(kernel::FaceSource::Box { axis: 2, high: true, .. }))).unwrap();
-    let world = world_state(&doc, &state);
+    let world = world_state(&doc, &state).unwrap();
     let shown = world.bodies.first().unwrap();
     let picked = shown.body.face_plane(index).unwrap();
     let anchor = doc.capture_face_anchor(raw, index, &picked, &path, 0, &[]).unwrap();
@@ -657,9 +657,9 @@ fn placed_bodies_taken_as_before_keep_their_measure() {
     let mut state = ModelState::default();
     state.bodies.push(ModelBody::new("Pin".into(), kernel::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 8.0).unwrap(), 1));
     let mut cache = PlacedBodies::default();
-    let before = world_state_reusing(&doc, &state, &mut cache);
+    let before = world_state_reusing(&doc, &state, &mut cache).unwrap();
     let centroid = before.bodies[0].measure().unwrap().centroid;
-    let again = world_state_reusing(&doc, &state, &mut cache);
+    let again = world_state_reusing(&doc, &state, &mut cache).unwrap();
     assert_eq!(counted(|| assert_eq!(again.bodies[0].measure().unwrap().centroid, centroid)).measures, 0);
 }
 
@@ -1026,11 +1026,13 @@ fn placed_parts(comps: usize, bodies: usize, sketches: usize, taps: usize, copie
                 radius: 3.0,
                 pitch: 1.0,
                 internal: true,
-                handedness: Default::default(),
                 axis_point: Vec3::new(1.0, 1.0, 0.0),
                 axis: solidcraft_geom::UnitVec3::Z,
                 start: 0.0,
                 end: 4.0,
+                form: Default::default(),
+                hand: Default::default(),
+                starts: 1,
             });
         }
     }
@@ -1044,7 +1046,7 @@ fn placing_parts_looks_each_sketch_and_tap_up_once() {
     let searches = |sketches: usize, taps: usize| {
         let (doc, state) = placed_parts(4, 2, sketches, taps, 3);
         let mut world = ModelState::default();
-        let n = searched(|| world = world_state(&doc, &state));
+        let n = searched(|| world = world_state(&doc, &state).unwrap());
         assert_eq!(world.bodies.len(), 4 * 2 * 3);
         assert_eq!(world.sketches.len(), 4 * sketches);
         assert_eq!(world.threads.len(), 4 * taps * 3);
@@ -1058,7 +1060,7 @@ fn a_placed_tap_follows_its_body_offset() {
     let (mut doc, state) = placed_parts(1, 1, 0, 1, 1);
     let comp = doc.components[0].id;
     doc.body_offsets.insert("B0_0".into(), rigid(Vec3::new(0.0, 0.0, 7.0), Vec3::ZERO, Vec3::Z, 0.0));
-    let world = world_state(&doc, &state);
+    let world = world_state(&doc, &state).unwrap();
     let tap = world.threads.first().unwrap();
     let expected =
         apply_point(&mat_mul(&doc.component_transform(comp), &rigid(Vec3::new(0.0, 0.0, 7.0), Vec3::ZERO, Vec3::Z, 0.0)), Vec3::new(1.0, 1.0, 0.0));

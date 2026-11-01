@@ -8,9 +8,15 @@ publish = false
 default-run = "solidcraft"
 
 [features]
-default = ["raytrace-cpu", "bundled-render-library"]
+default = ["raytrace-cpu", "bundled-render-library", "smlib", "profile"]
 bundled-render-library = ["solidcraft-engine/bundled-render-library"]
 raytrace-cpu = ["solidcraft-engine/raytrace-cpu"]
+# Link SMLib into the kernel (solidcraft-engine/smlib; needs scripts/fetch-smlib.sh). SMLib is the
+# only kernel, so without it the app models nothing.
+smlib = ["solidcraft-engine/smlib"]
+# The profiler, compiled in so any build can say where its time goes (the Profile operations
+# preference, SOLIDCRAFT_PROFILE=1, diagnostics.profile); it records nothing until asked.
+profile = ["solidcraft-engine/profile"]
 
 # The workspace lints, except unsafe_code: denied, not forbidden, so that src/open_documents.rs
 # (macOS file-open events), src/native_crash.rs (Windows exception filter), src/native_crash_macos.rs

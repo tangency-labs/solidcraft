@@ -147,7 +147,12 @@ fn quarter_turn_x() -> solidcraft_doc::Mat {
 
 /// Add an Import feature for a STEP file to the session's design, in a new component named
 /// after the file (#1386).
+///
+/// While the profiler records, the reply's `profile` is the import's share of it (reading,
+/// building the solids in SMLib, placing, meshing and evaluating them), as
+/// `diagnostics.profile` reports it.
 fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptions) -> Result<Value> {
+    let profiled = solidcraft_profile::enabled().then(solidcraft_profile::mark);
     let sf = read_step(path, options.names)?;
     let fname = name.filter(|n| !n.trim().is_empty()).unwrap_or(&sf.name).to_string();
     let cname = import::component_name(path, name);
@@ -165,6 +170,10 @@ fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptio
     placed.report(&mut out);
     if let Some(turned) = turned {
         out["stand_up"] = json!(turned);
+    }
+    if let Some(mark) = profiled {
+        let report = crate::schema::diagnostics::ProfileReport::new(&mark.report(), 20);
+        out["profile"] = serde_json::to_value(report).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     }
     Ok(out)
 }
@@ -268,7 +277,11 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(m) = placement {
         let occ = out["occurrence"].as_u64().ok_or_else(|| EngineError::Other("the import has no placement to move".into()))?;
         if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occ) {
-            o.transform = solidcraft_doc::mat_mul(&m, &o.transform);
+            let placed = solidcraft_doc::mat_mul(&m, &o.transform);
+            if !solidcraft_doc::is_placement(&placed) {
+                return Err(bad(cmd, "`matrix` moves the import out of a rigid placement within 1e9 mm"));
+            }
+            o.transform = placed;
             out["transform"] = json!(o.transform);
         }
         s.refresh();
@@ -287,6 +300,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(command) = super::drawing_import_command(path) {
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
         let mut fresh = Session::new(Document::new(&stem));
+        fresh.set_validation(s.validation());
         let mut out = fresh.execute(command, &json!({"path": path}))?;
         fresh.undo.clear();
         s.replace_design(fresh);
@@ -318,6 +332,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         // A new, unsaved design holding the file's bodies.
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
         let mut fresh = Session::new(Document::new(&stem));
+        fresh.set_validation(s.validation());
         let r = if solidcraft_io::is_step_path(path) {
             add_step(&mut fresh, path, None, &step_options(p, "doc.open")?)?
         } else {
@@ -343,7 +358,8 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     // Stamped before it is read: a write while it is being read is a change too.
     let disk = solidcraft_io::design_lock::stamp(path);
     let (doc, saved) = read_design(s, path)?;
-    opened_design(s, Session::opened_at(doc, saved.as_ref(), Some(path)), path, read_only, disk)
+    let opened = Session::opened_at_validating(doc, saved.as_ref(), Some(path), s.validation());
+    opened_design(s, opened, path, read_only, disk)
 }
 
 /// Read the design file at `path` for `doc.open`, under its file's name if it has none of its own.
@@ -494,9 +510,19 @@ fn write_bytes(
 impl Session {
     /// Open a design with its file location, resolving component links before history keeps
     /// them. Absolute in-memory targets survive Save As, undo, redo and recovery unchanged.
-    pub fn opened_at(mut doc: Document, saved: Option<&solidcraft_doc::SavedModel>, path: Option<&str>) -> Self {
+    pub fn opened_at(doc: Document, saved: Option<&solidcraft_doc::SavedModel>, path: Option<&str>) -> Self {
+        Self::opened_at_validating(doc, saved, path, solidcraft_kernel::Validation::default())
+    }
+
+    /// [`Self::opened_at`], its features evaluated under `validation` ([`Session::set_validation`]).
+    pub fn opened_at_validating(
+        mut doc: Document,
+        saved: Option<&solidcraft_doc::SavedModel>,
+        path: Option<&str>,
+        validation: solidcraft_kernel::Validation,
+    ) -> Self {
         super::component_link::resolve_design_links(&mut doc, path);
-        Self::opened(doc, saved).located(path)
+        Self::opened_validating(doc, saved, validation).located(path)
     }
 
     /// This session, just opened, as the design in the file at `path`.
@@ -722,7 +748,7 @@ fn export_to(
     } else {
         // Bodies carry the colour they are shown in (appearance, material or imported), and the
         // file the design's properties where the format has a place for them.
-        solidcraft_io::export_with_parts(&s.doc.painted(&s.world_state()), bodies, parts, format, &name, &s.doc.metadata, quality)?
+        solidcraft_io::export_with_parts(&s.doc.painted(&*s.world_state()?), bodies, parts, format, &name, &s.doc.metadata, quality)?
     };
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{format:?}")}))
@@ -739,7 +765,7 @@ fn export_laid_to(
     quality: solidcraft_io::MeshQuality,
 ) -> Result<Value> {
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
-    let mut state = s.doc.painted(&s.world_state());
+    let mut state = s.doc.painted(&*s.world_state()?);
     let laid = print_face::lay_on_print_faces(s, &mut state, bodies, parts);
     let bytes = solidcraft_io::export_with_parts(&state, bodies, parts, format, &name, &s.doc.metadata, quality)?;
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
@@ -766,7 +792,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
 fn export_obj(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io::MeshQuality) -> Result<Value> {
     let mtl_path = std::path::Path::new(path).with_extension("mtl");
     let mtl_name = mtl_path.file_name().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| String::from("model.mtl"));
-    let files = solidcraft_io::export_obj(&s.doc.painted(&s.world_state()), bodies, &mtl_name, quality)?;
+    let files = solidcraft_io::export_obj(&s.doc.painted(&*s.world_state()?), bodies, &mtl_name, quality)?;
     let mut targets: Vec<(String, &[u8])> = Vec::new();
     if !files.mtl.is_empty() {
         targets.push((mtl_path.to_string_lossy().to_string(), files.mtl.as_bytes()));
@@ -807,13 +833,15 @@ fn export_urdf(s: &Session, path: &str, p: &Value) -> Result<Value> {
     // their links.
     let st = s.model.state();
     let mut held = Vec::new();
-    let doc = if s.pending_moves.is_empty() {
+    // The exploded view is shown only: the links are where the design places them.
+    let moves = s.uncaptured_moves();
+    let doc = if moves.is_empty() {
         std::borrow::Cow::Borrowed(&*s.doc)
     } else {
         let placed = solidcraft_doc::joints::solve(&s.doc, &st).world;
         let mut doc = (*s.doc).clone();
         for o in &mut doc.occurrences {
-            match s.pending_moves.get(&o.id) {
+            match moves.get(&o.id) {
                 Some(_) if placed.contains_key(&o.id) => held.push(o.name.clone()),
                 Some(t) => o.transform = *t,
                 None => {}
@@ -963,7 +991,7 @@ fn recover(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(stem) = entry.path.as_deref().and_then(|path| default_name_for(&doc.name, path)) {
         doc.name = stem;
     }
-    s.replace_design(Session::opened_at(doc, None, entry.path.as_deref()));
+    s.replace_design(Session::opened_at_validating(doc, None, entry.path.as_deref(), s.validation()));
     s.mark_unsaved();
     if bool_(p, "discard").unwrap_or(false) {
         crate::recovery::remove(&dir, id)?;
@@ -993,6 +1021,31 @@ mod urdf_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// While the profiler records, a STEP import's reply carries its own profile: the import's
+    /// stages and SMLib's calls, as diagnostics.profile reports them.
+    #[cfg(feature = "smlib")]
+    #[test]
+    fn a_step_import_reports_its_profile_while_the_profiler_records() {
+        let _serial = crate::schema::diagnostics::PROFILE_TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = std::env::temp_dir().join(format!("solidcraft-import-profile-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("block.step").to_string_lossy().to_string();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5})).unwrap();
+        s.execute("file.export", &json!({"path": path})).unwrap();
+        // The first read of the file (a second one finds it in the import cache).
+        solidcraft_profile::set_enabled(true);
+        let out = Session::default().execute("file.insert_step", &json!({"path": path})).unwrap();
+        solidcraft_profile::set_enabled(false);
+        let plain = Session::default().execute("file.insert_step", &json!({"path": path})).unwrap();
+        assert!(plain.get("profile").is_none(), "nothing recorded, nothing reported: {plain}");
+        let p = &out["profile"];
+        let rows = p["rows"].as_array().unwrap();
+        let has = |cat: &str| rows.iter().any(|r| r["category"] == cat);
+        assert!(has("import") && has("smlib"), "{p}");
+        assert!(p["by_category"].as_array().is_some_and(|c| !c.is_empty()) && p["wall_ms"].as_f64().is_some_and(|w| w > 0.0), "{p}");
+    }
 
     /// #8139: with `objects: "component"` a 3MF has one object for each placement of a component
     /// with two or more bodies, its bodies the object's parts; the design's own bodies stay objects
@@ -1251,7 +1304,7 @@ mod tests {
         let input = target.join("issue303-step.json");
         let doc = solidcraft_io::read_design(&std::fs::read(input).unwrap()).unwrap();
         let mut session = Session::new(doc);
-        for body in &session.world_state().bodies {
+        for body in &session.world_state().unwrap().bodies {
             body.mesh();
         }
         let mut samples = [Vec::new(), Vec::new()];
@@ -1290,7 +1343,7 @@ mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length":10,"width":20,"height":30})).unwrap();
         assert!(saved_preview(&s).is_none(), "save must not triangulate a cold body");
-        let state = s.world_state();
+        let state = s.world_state().unwrap();
         for body in &state.bodies {
             body.mesh();
         }
@@ -1341,19 +1394,19 @@ mod tests {
         assert!(saved_preview(&s).is_none());
         assert!(saved_geometry(&s, &s.doc).is_some(), "the timeline's bodies need no placement");
         assert!(s.world_cache.lock().unwrap().is_none(), "saving must not prepare cold placements");
-        for body in &s.world_state().bodies {
+        for body in &s.world_state().unwrap().bodies {
             body.mesh();
         }
         assert!(saved_preview(&s).is_some());
         s.execute("occurrence.move", &json!({"occurrence":occurrence,"translate":[10,0,0],"capture":false})).unwrap();
-        for body in &s.world_state().bodies {
+        for body in &s.world_state().unwrap().bodies {
             body.mesh();
         }
         assert!(!s.pending_moves.is_empty());
         assert!(saved_preview(&s).is_none(), "uncaptured positions are not in the saved document");
         assert!(saved_geometry(&s, &s.doc).is_none());
         s.execute("component.capture_position", &json!({})).unwrap();
-        for body in &s.world_state().bodies {
+        for body in &s.world_state().unwrap().bodies {
             body.mesh();
         }
         let preview = saved_preview(&s).unwrap();
@@ -1361,7 +1414,7 @@ mod tests {
         assert!((min_x - 10.0).abs() < 1e-9);
         let mut editing = s.scratch();
         editing.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
-        for body in &editing.world_state().bodies {
+        for body in &editing.world_state().unwrap().bodies {
             body.mesh();
         }
         assert!(editing.active_sketch.is_some());
@@ -1375,7 +1428,7 @@ mod tests {
         crate::capture::install_test_renderer();
         let mut session = Session::new(Document::new("Cache opt-in"));
         session.execute("solid.box", &json!({"length":10,"width":20,"height":30})).unwrap();
-        let world = session.world_state();
+        let world = session.world_state().unwrap();
         for body in &world.bodies {
             body.mesh();
         }
@@ -1399,30 +1452,6 @@ mod tests {
         }
         std::fs::remove_file(&path).unwrap();
         std::fs::remove_file(format!("{}.bak", path.display())).unwrap();
-    }
-
-    /// #5286: a saved model whose feature records the boolean retries it took (as the kernel
-    /// writes them, with no `rejected` list when there were none) is taken on opening, not
-    /// refused and evaluated again.
-    #[test]
-    fn a_saved_model_with_boolean_retries_is_adopted() {
-        let mut session = Session::new(Document::new("Retried"));
-        session.execute("solid.box", &json!({"length":10,"width":20,"height":30})).unwrap();
-        let mut saved = saved_geometry(&session, &session.doc).unwrap();
-        // What a coplanar-face retry leaves in the file (a user's design, #5286).
-        let retry = json!({"events": [{"face_shift_mm": 0.6477, "rotation_rad": 0.0, "strategy": "coplanar_separation", "tolerance_mm": 0.0, "translation_mm": 0.0}], "truncated": false});
-        saved.records["features"][0]["diagnostics"] = retry;
-        let bytes =
-            solidcraft_io::write_design_container_with_cache(&session.doc, solidcraft_io::DesignCompression::Fast, None, Some(&saved)).unwrap();
-        let path = std::env::temp_dir().join(format!("solidcraft-saved-retries-{}.solidcraft", std::process::id()));
-        std::fs::write(&path, &bytes).unwrap();
-        let mut reopened = Session::default();
-        reopened.execute("doc.open", &json!({"path": path})).unwrap();
-        std::fs::remove_file(&path).unwrap();
-        assert!(reopened.model.results.iter().all(|r| r.ms == session.model.results[0].ms), "taken from the file, not evaluated");
-        let d = &reopened.model.results[0].boolean_diagnostics;
-        assert_eq!(d.events.len(), 1, "{d:?}");
-        assert!(d.rejected.is_empty());
     }
 
     /// The model a save keeps writes each distinct sheet-metal body once, and every state names
@@ -1514,7 +1543,7 @@ mod tests {
     fn saved_model_needs_no_meshes_and_is_adopted_only_for_its_document() {
         let mut session = Session::new(Document::new("Saved model"));
         session.execute("solid.box", &json!({"length":10,"width":20,"height":30})).unwrap();
-        let world = session.world_state();
+        let world = session.world_state().unwrap();
         assert!(world.bodies.iter().all(|b| b.cached_mesh().is_none()));
         let bytes = session.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
         assert!(world.bodies.iter().all(|b| b.cached_mesh().is_none()), "saving the model must not triangulate");
@@ -1687,7 +1716,7 @@ mod tests {
         let target = std::env::var_os("CARGO_TARGET_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from("target"));
         let input = std::env::var_os("SOLIDCRAFT_BENCH_FILE").map(std::path::PathBuf::from).unwrap_or_else(|| target.join("issue303-step.json"));
         let mut session = Session::new(solidcraft_io::read_design(&std::fs::read(input).unwrap()).unwrap());
-        for body in &session.world_state().bodies {
+        for body in &session.world_state().unwrap().bodies {
             body.mesh();
         }
         let modes = [("json", false, "fast"), ("container", false, "fast"), ("container", true, "fast"), ("container", true, "compact")];
@@ -1729,7 +1758,7 @@ mod tests {
         assert_eq!(result["errors"], 0);
         let reconstructed = start.elapsed().as_secs_f64() * 1000.;
         let mut triangles = 0;
-        let world = session.world_state();
+        let world = session.world_state().unwrap();
         for body in &world.bodies {
             triangles += body.mesh().triangles.len();
         }
@@ -1905,14 +1934,14 @@ mod tests {
         let mut opened = Session::default();
         watch(progress.clone(), || opened.execute("doc.open", &json!({"path":path}))).unwrap();
         assert_eq!(progress.features(), (3, 3));
-        assert_eq!(opened.world_state().bodies.len(), 3);
+        assert_eq!(opened.world_state().unwrap().bodies.len(), 3);
 
         let progress = Arc::new(Progress::default());
         progress.cancel();
         let mut stopped = Session::default();
         watch(progress, || stopped.execute("doc.open", &json!({"path":path}))).unwrap();
         assert!(stopped.model.results.iter().all(|r| r.skipped), "no feature was rebuilt after Cancel");
-        assert!(stopped.world_state().bodies.is_empty());
+        assert!(stopped.world_state().unwrap().bodies.is_empty());
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -1939,7 +1968,8 @@ mod tests {
         let mut whole = Session::default();
         let opened = whole.execute("doc.open", &json!({"path": path, "read_only": true})).unwrap();
 
-        let mut steps = OpenSteps::start(&json!({"path": path, "read_only": true})).unwrap().expect("a design is opened in steps");
+        let mut steps =
+            OpenSteps::start(&json!({"path": path, "read_only": true}), Default::default()).unwrap().expect("a design is opened in steps");
         assert_eq!(steps.path(), path);
         assert_eq!(steps.progress(), (0, features - 1), "the saved marker is where evaluation stops");
         let mut imports = 0;
@@ -1964,17 +1994,62 @@ mod tests {
         assert_eq!((stepped.path.as_deref(), stepped.read_only), (Some(path.as_str()), true));
         let summary = |s: &Session| -> Vec<(u64, bool, bool)> { s.model.results.iter().map(|r| (r.id, r.skipped, r.error.is_some())).collect() };
         assert_eq!(summary(&stepped), summary(&whole));
-        let bodies =
-            |s: &Session| -> Vec<(String, usize)> { s.world_state().bodies.iter().map(|b| (b.name.clone(), b.mesh().triangles.len())).collect() };
+        let bodies = |s: &Session| -> Vec<(String, usize)> {
+            s.world_state().unwrap().bodies.iter().map(|b| (b.name.clone(), b.mesh().triangles.len())).collect()
+        };
         assert_eq!(bodies(&stepped), bodies(&whole));
-        assert_eq!(stepped.world_state().bodies.len(), 3, "the box, the cylinder and the box before the marker");
+        assert_eq!(stepped.world_state().unwrap().bodies.len(), 3, "the box, the cylinder and the box before the marker");
         assert!(stepped.model.is_current(&stepped.doc));
 
         // Other files, and STEP-only options, are opened by `doc.open`.
         for p in [json!({"path": step}), json!({"path": "part.stl"}), json!({"path": path, "up": "y"}), json!({})] {
-            assert!(OpenSteps::start(&p).unwrap().is_none(), "{p}");
+            assert!(OpenSteps::start(&p, Default::default()).unwrap().is_none(), "{p}");
         }
-        assert!(OpenSteps::start(&json!({"path": dir.join("missing.sc").to_string_lossy()})).is_err());
+        assert!(OpenSteps::start(&json!({"path": dir.join("missing.sc").to_string_lossy()}), Default::default()).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A design opened a feature at a time is evaluated under the session's check mode, as
+    /// `doc.open` is. Started under another mode than the session's (the mode changed meanwhile),
+    /// nothing evaluated under it stands: every feature is evaluated again. The bar's last round
+    /// is one the check refuses on solidcore (kernel case
+    /// fillets/1207-fillet-bar-top-edge-after-boss-arc-round-r0-5), so there the modes differ in
+    /// their errors too.
+    #[test]
+    fn a_design_opened_a_feature_at_a_time_is_checked_under_the_sessions_mode() {
+        use super::open_steps::OpenSteps;
+        use solidcraft_kernel::Validation;
+        let dir = std::env::temp_dir().join(format!("solidcraft-open-steps-mode-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("steps.sc").to_string_lossy().to_string();
+        let mut s = Session::default();
+        s.set_validation(Validation::Off);
+        s.execute("solid.box", &json!({"length": 100, "width": 30, "height": 10, "corner": [0, -15, 0], "body_name": "Arm"})).unwrap();
+        s.execute("solid.cylinder", &json!({"diameter": 40, "height": 20, "base": [0, 0, 0], "operation": "join", "targets": ["Arm"]})).unwrap();
+        s.execute("solid.fillet", &json!({"edges": [[16, 12, 10]], "radius": 2})).unwrap();
+        s.execute("solid.fillet", &json!({"edges": [[60, -15, 10]], "radius": 0.5})).unwrap();
+        s.execute("file.save", &json!({"path": path, "cache": false})).unwrap();
+        let errors = |s: &Session| s.model.results.iter().filter(|r| r.error.is_some()).count();
+        let open = |mode: Validation| {
+            let mut whole = Session::default();
+            whole.set_validation(mode);
+            whole.execute("doc.open", &json!({"path": path})).unwrap();
+            errors(&whole)
+        };
+        for mode in Validation::ALL {
+            for started in [mode, Validation::EachFeature, Validation::Off] {
+                let mut steps = OpenSteps::start(&json!({"path": path}), started).unwrap().expect("a design is opened in steps");
+                while steps.step() {}
+                let mut stepped = Session::default();
+                stepped.set_validation(mode);
+                steps.finish(&mut stepped).unwrap();
+                assert_eq!(stepped.validation(), mode);
+                assert_eq!(errors(&stepped), open(mode), "started under {started:?}, the session's mode {mode:?}");
+                let again = if started == mode { 0 } else { stepped.doc.features.len() };
+                assert_eq!(stepped.model.last_recomputed, again, "started under {started:?}, the session's mode {mode:?}");
+                assert!(stepped.model.is_current(&stepped.doc));
+            }
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
 

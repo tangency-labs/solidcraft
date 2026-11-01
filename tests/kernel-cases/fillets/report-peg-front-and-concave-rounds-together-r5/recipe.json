@@ -1,0 +1,175 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Peg"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      40,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     40,
+     8
+    ],
+    "start": [
+     40,
+     0
+    ],
+    "end": [
+     40,
+     16
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      40,
+      16
+     ],
+     [
+      0,
+      16
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      16
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Peg",
+    "distance": 10,
+    "body_name": "Peg"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      10
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "Top"
+   }
+  },
+  {
+   "command": "sketch.project",
+   "params": {
+    "refs": [
+     {
+      "face": [
+       2,
+       8,
+       10
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     40,
+     8
+    ],
+    "radius": 8
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Top",
+    "distance": 10,
+    "operation": "join",
+    "targets": [
+     "Peg"
+    ],
+    "profiles": [
+     {
+      "point": [
+       40,
+       8
+      ]
+     }
+    ],
+    "exact_regions": true
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      20,
+      0,
+      10
+     ],
+     [
+      32,
+      8,
+      10
+     ]
+    ],
+    "radius": 5,
+    "tangent_chain": true
+   }
+  }
+ ]
+}

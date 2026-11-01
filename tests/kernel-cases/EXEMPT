@@ -1,0 +1,285 @@
+# Registry commands with no kernel rig case (`cargo xtask kernel-cases --coverage`). Every other
+# command of `solidcraft-cli commands` (planned ones aside) must be run by some recipe.json under
+# tests/kernel-cases/. One line a command: `<id>  <why it has no case>`; `#` starts a comment.
+# Each section is sorted, with no id twice.
+#
+# Commands with no geometry to grade: the view, rendering, appearance, materials, selection, the
+# browser, files and saving, documents, diagnostics, and component, parameter and timeline
+# bookkeeping. Each is covered by the engine's and the UI's own tests.
+
+appearance.assign                 appearance only: colours and textures
+appearance.library                appearance only: colours and textures
+appearance.list                   appearance only: colours and textures
+assembly.bom                      a bill of materials report
+body.rename                       a body name
+browser.collapse_all              the browser tree: order, groups and folding
+browser.expand_all                the browser tree: order, groups and folding
+browser.group                     the browser tree: order, groups and folding
+browser.move                      the browser tree: order, groups and folding
+browser.order                     the browser tree: order, groups and folding
+browser.rename_group              the browser tree: order, groups and folding
+browser.ungroup                   the browser tree: order, groups and folding
+canvas.calibrate                  reference images, and sketches traced from them (sketch only)
+canvas.decal                      reference images, and sketches traced from them (sketch only)
+canvas.delete                     reference images, and sketches traced from them (sketch only)
+canvas.edit                       reference images, and sketches traced from them (sketch only)
+canvas.insert                     reference images, and sketches traced from them (sketch only)
+canvas.to_sketch                  reference images, and sketches traced from them (sketch only)
+component.break_link              component links
+component.copies                  a listing of identical copies
+component.cycle_color             component colours
+component.delete                  removes a component: no geometry built
+component.links                   component links
+component.list                    a listing
+component.metadata                component metadata
+component.metadata.set            component metadata
+component.properties              component properties
+component.relink                  component links
+component.rename                  a component name
+component.replace_with_link       component links
+component.unlock                  component locking
+component.update_links            component links
+diagnostics.crash_report          crash reports
+diagnostics.crash_reports         crash reports
+diagnostics.crash_reports.clear   crash reports
+diagnostics.crash_test            crash reports
+diagnostics.profile               timing: where a command's time goes
+diagnostics.validation            a setting: when the body check runs
+doc.open                          opening and recovering documents
+doc.recover                       opening and recovering documents
+doc.recovery_discard              opening and recovering documents
+doc.recovery_list                 opening and recovering documents
+document.metadata                 document metadata and revisions
+document.metadata.remove          document metadata and revisions
+document.metadata.set             document metadata and revisions
+document.revision                 document metadata and revisions
+edit.checkpoint                   undo, redo and checkpoints: an earlier state restored, no new geometry
+edit.redo                         undo, redo and checkpoints: an earlier state restored, no new geometry
+edit.restore_checkpoint           undo, redo and checkpoints: an earlier state restored, no new geometry
+edit.undo                         undo, redo and checkpoints: an earlier state restored, no new geometry
+engine.commands                   the command registry itself
+engine.describe                   the command registry itself
+explode.delete                    exploded views: display offsets
+explode.list                      exploded views: display offsets
+expr.evaluate                     expression evaluation
+file.open_in_easyprint            hands the file to another program
+file.save                         saving the design
+file.save_as                      saving the design
+file.save_mesh                    saving a display mesh
+file.send_to_slicer               hands the file to a slicer
+file.slicers                      a listing of slicers
+frame.profile.list                a listing of the profile library
+frame.profile.properties          a profile's section properties from the library
+inspect.accessibility             display analysis: shading
+inspect.analysis                  display analysis: which one is on
+inspect.colored_components        display: component colours
+inspect.curvature_map             display analysis: shading
+inspect.environment_map           display analysis: shading
+inspect.silhouette                display analysis: outline
+inspect.zebra                     display analysis: shading
+library.apply                     material and appearance libraries
+library.export                    material and appearance libraries
+library.inspect                   material and appearance libraries
+material.assign                   materials and their properties
+material.create                   materials and their properties
+material.delete                   materials and their properties
+material.edit                     materials and their properties
+material.inspect                  materials and their properties
+material.list                     materials and their properties
+material.properties.directional   materials and their properties
+material.properties.validate      materials and their properties
+model.edges                       a listing of the model's topology
+model.faces                       a listing of the model's topology
+model.threads                     a listing of the model's topology
+motion.delete                     removes a motion study
+motion.export                     writes a study's results to a file
+motion.export_animation           writes an animation
+motion.list                       a listing of motion studies
+parameters.comment                parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
+parameters.complete               parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
+parameters.delete                 parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
+parameters.export                 parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
+parameters.favorite               parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
+parameters.graph                  parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
+parameters.import                 parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
+parameters.list                   parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
+parameters.move                   parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
+parameters.rename                 parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
+parameters.users                  parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
+parts.library                     a listing of the parts library
+render.aging.describe             rendering: images, cameras, stages
+render.backends                   rendering: images, cameras, stages
+render.camera.fit                 rendering: images, cameras, stages
+render.camera.get                 rendering: images, cameras, stages
+render.camera.set                 rendering: images, cameras, stages
+render.cancel                     rendering: images, cameras, stages
+render.effects.describe           rendering: images, cameras, stages
+render.export                     rendering: images, cameras, stages
+render.hdr.inspect                rendering: images, cameras, stages
+render.library.appearance.apply   rendering: images, cameras, stages
+render.library.describe           rendering: images, cameras, stages
+render.library.environment.apply  rendering: images, cameras, stages
+render.library.list               rendering: images, cameras, stages
+render.library.physical.prepare   rendering: images, cameras, stages
+render.library.preview            rendering: images, cameras, stages
+render.library.studio.apply       rendering: images, cameras, stages
+render.library.studio.prepare     rendering: images, cameras, stages
+render.library.surface.bind       rendering: images, cameras, stages
+render.library.surface.prepare    rendering: images, cameras, stages
+render.library.surface.unbind     rendering: images, cameras, stages
+render.library.targets            rendering: images, cameras, stages
+render.optics.bind                rendering: images, cameras, stages
+render.optics.unbind              rendering: images, cameras, stages
+render.preflight                  rendering: images, cameras, stages
+render.preset.apply               rendering: images, cameras, stages
+render.preset.resolve             rendering: images, cameras, stages
+render.quality.prepare            rendering: images, cameras, stages
+render.result.pin                 rendering: images, cameras, stages
+render.result.regrade             rendering: images, cameras, stages
+render.scene                      rendering: images, cameras, stages
+render.settings.apply             rendering: images, cameras, stages
+render.settings.capture_hdr       rendering: images, cameras, stages
+render.settings.get               rendering: images, cameras, stages
+render.settings.set               rendering: images, cameras, stages
+render.shot.duplicate             rendering: images, cameras, stages
+render.shot.remove                rendering: images, cameras, stages
+render.shot.rename                rendering: images, cameras, stages
+render.stage.backdrop             rendering: images, cameras, stages
+render.stage.clear                rendering: images, cameras, stages
+render.stage.ground               rendering: images, cameras, stages
+render.start                      rendering: images, cameras, stages
+render.status                     rendering: images, cameras, stages
+select.clear                      the selection
+select.set                        the selection
+selection.delete                  deletes what is selected through the commands that own each kind
+sheet.rules                       a listing of sheet metal rules
+sketch.arc.tangent                2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.auto_constrain             2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.auto_constrain_from_datum  2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.break                      2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.break_link                 2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.cancel                     2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.centerline                 2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.chain                      2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.chamfer.distance_angle     2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.chamfer.equal_distance     2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.chamfer.two_distance       2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.circle.three_point         2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.circle.three_tangent       2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.circle.two_point           2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.circle.two_tangent         2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.constrainer                2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.constraint.coincident      2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.constraint.collinear       2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.constraint.concentric      2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.constraint.curvature       2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.constraint.equal           2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.constraint.midpoint        2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.constraint.parallel        2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.constraint.perpendicular   2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.constraint.polygon         2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.constraint.symmetry        2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.construction               2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.copy                       2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.cut                        2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.delete                     2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.dimension_text             2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.drag                       2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.drag_end                   2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.draw.dimensioned           2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.drawing_bounds             2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.edit_text                  2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.export_dxf                 2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.extend                     2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.fillet                     2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.finish_auto_constrain      2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.glyphs                     2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.infinite                   2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.insert_dxf                 2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.insert_svg                 2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.inspect                    2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.line.midpoint              2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.loose_ends                 2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.loose_ends.tie             2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.mirror                     2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.move                       2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.move3d                     2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.offset                     2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.offset.break               2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.paste                      2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.pattern.rectangular        2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.point3d                    2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.polygon.edge               2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.rectangle.three_point      2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.redefine                   2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.scale                      2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.slot.arc_center            2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.slot.arc_three_point       2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.slot.center_point          2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.snap                       2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.solve                      2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.toggle_driven              2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.transform                  2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.trim                       2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.trim.path                  2D sketch only (the sketch solver and engine tests); no kernel operation
+timeline.dependents               a listing of dependents
+timeline.export_script            writes the history as a script
+timeline.inspect                  a listing of the timeline
+timeline.rename                   a feature name
+timeline.rename_group             a group name
+view.ambient_occlusion            the view: camera, layout, display
+view.apply                        the view: camera, layout, display
+view.back                         the view: camera, layout, display
+view.bottom                       the view: camera, layout, display
+view.delete                       the view: camera, layout, display
+view.fit                          the view: camera, layout, display
+view.front                        the view: camera, layout, display
+view.graphics_preset              the view: camera, layout, display
+view.grid                         the view: camera, layout, display
+view.ground_shadow                the view: camera, layout, display
+view.history_layout               the view: camera, layout, display
+view.home                         the view: camera, layout, display
+view.isometric                    the view: camera, layout, display
+view.layout                       the view: camera, layout, display
+view.left                         the view: camera, layout, display
+view.list                         the view: camera, layout, display
+view.navigate                     the view: camera, layout, display
+view.navigation_bar               the view: camera, layout, display
+view.normal_to                    the view: camera, layout, display
+view.perspective                  the view: camera, layout, display
+view.rename                       the view: camera, layout, display
+view.right                        the view: camera, layout, display
+view.save                         the view: camera, layout, display
+view.spin                         the view: camera, layout, display
+view.tool                         the view: camera, layout, display
+view.top                          the view: camera, layout, display
+view.visual_style                 the view: camera, layout, display
+
+# Commands that make or change geometry and have no case yet. This section only shrinks:
+# the pull request that adds a case for one removes its line (the check fails on a listed command
+# that a case uses), and a new geometry command gets a case, not a line here.
+[to cover]
+body.repair                       repair: the solid a refused or open part becomes
+component.move_sketches           assemblies: sketches moved between components
+component.revert_position         assemblies: a placement reverted
+file.export_view_dxf              drawings: the projection of the model a view DXF holds
+inspect.draft                     inspect: the number or curves it reports
+inspect.parameter_sweep           inspect: results rebuilt over a parameter range
+inspect.section                   inspect: the number or curves it reports
+motion.trace.edit                 assemblies: motion results
+motion.trace.keep                 assemblies: motion results
+parts.fastener                    standard parts: a fastener body
+parts.insert                      standard parts: a part body
+parts.resize                      standard parts: a part resized
+sketch.arc3d                      sketch: a curve kind no case profiles yet
+sketch.auto_project               sketch from the model: curves the kernel computes from bodies
+sketch.conic                      sketch: a curve kind no case profiles yet
+sketch.fit_curves_to_section      sketch from the model: curves the kernel computes from bodies
+sketch.include_3d                 sketch from the model: curves the kernel computes from bodies
+sketch.intersect                  sketch from the model: curves the kernel computes from bodies
+sketch.intersection_curve         sketch from the model: curves the kernel computes from bodies
+sketch.isoparametric_curve        sketch from the model: curves the kernel computes from bodies
+sketch.project_to_surface         sketch from the model: curves the kernel computes from bodies
+sketch.spline.control_point_5     sketch: a curve kind no case profiles yet
+sketch.spline3d                   sketch: a curve kind no case profiles yet
+sketch.spun_profile               sketch from the model: curves the kernel computes from bodies

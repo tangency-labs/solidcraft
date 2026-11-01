@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2552"
+ ],
+ "what": "a square-wire coil (diameter 10, section 0.9 inside, pitch 1.5, height 10) cut as a helical groove into the wall of a bore of radius 4.1 in a 30 x 30 x 12 block (crash report: unclean exit in solid.coil)",
+ "source": "analytic",
+ "method": "the coil section is 0.9 x 0.9 with centre radius 5 - 0.45 = 4.55, so it spans r 4.1 to 5.0 (its inner face is the bore wall) and turns 10/1.5 = 6.667 times: V_groove = 0.81 * 2 pi 4.55 * 6.667 = 154.4; V = 30 * 30 * 12 - pi 4.1^2 12 - V_groove = 10011.9. The groove opens into the bore (one body).",
+ "body_count": 1,
+ "volume_mm3": 10011.900066920465
+}

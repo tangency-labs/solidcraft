@@ -1,0 +1,8 @@
+{
+  "sources": ["tangency-labs/solidcraft#3702"],
+  "what": "a 0.2 mm board lying in the open cavity of a case with a filleted circular rim: cutting it from the case must leave the case unchanged (it was taken for wholly inside)",
+  "source": "analytic",
+  "method": "case = cylinder R25 H10 minus cavity R21.5 x 8 deep (floor 2 mm): pi*25^2*10 - pi*21.5^2*8 = 8017.344; rim fillet r1.5 on the outer top edge removes 2*pi*(2.25*24.25 - (pi*1.5^2/4)*(23.5+4*1.5/(3*pi))) = 74.830 (square 1.5x1.5 at radius 24.25 minus the quarter disc, Pappus); case = 7942.514. The 20x15x0.2 board (60 mm3, centre z=5, clear of the walls and floor) does not touch the case, is kept as a tool, and the cut changes nothing: two bodies, 7942.514 + 60 = 8002.514",
+  "body_count": 2,
+  "volume_mm3": 8002.514
+}

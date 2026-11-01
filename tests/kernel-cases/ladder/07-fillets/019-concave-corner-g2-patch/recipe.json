@@ -1,0 +1,53 @@
+{
+ "base": "../../01-primitives/001-box",
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     40,
+     20,
+     10
+    ],
+    "length": 30,
+    "width": 30,
+    "height": 20,
+    "body_name": "Notch"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Part",
+    "tools": [
+     "Notch"
+    ],
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      50,
+      20,
+      10
+     ],
+     [
+      40,
+      30,
+      10
+     ],
+     [
+      40,
+      20,
+      15
+     ]
+    ],
+    "radius": 5,
+    "corner": "g2"
+   }
+  }
+ ]
+}

@@ -1,14 +1,9 @@
 # cargo-mutants (docs/mutation-testing.md). Mutants are judged by the black-box suites that will
-# outlive the kernel backend: the reference tests (tests/oracle, through the oracle_cases test)
-# and the pull-request sample of the robustness goldens (every 8th seed, as ci.yml). The
-# kernel's own unit tests are left out on purpose: a mutant only they catch is a behaviour the
+# outlive the kernel backend: the reference tests (tests/oracle, through the oracle_cases test).
+# The kernel's own unit tests are left out on purpose: a mutant only they catch is a behaviour the
 # backend-neutral suites would miss when the kernel is swapped.
 profile = "mutants"
 additional_cargo_test_args = [
-    "--test", "oracle_cases", "--lib", "--", "--include-ignored",
+    "--test", "oracle_cases", "--", "--include-ignored",
     "oracle_suite",
-    "robustness_goldens::seed_00", "robustness_goldens::seed_08", "robustness_goldens::seed_16",
-    "robustness_goldens::seed_24", "robustness_goldens::seed_32", "robustness_goldens::seed_40",
-    "robustness_goldens::seed_48", "robustness_goldens::seed_56", "robustness_goldens::seed_64",
-    "robustness_goldens::seed_72", "robustness_goldens::seed_80", "robustness_goldens::seed_88",
 ]

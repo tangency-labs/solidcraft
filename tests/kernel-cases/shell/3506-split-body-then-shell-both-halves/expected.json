@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3506"
+ ],
+ "what": "a box split in two at z=10, then each half shelled 2 mm open on the mating face",
+ "source": "analytic",
+ "method": "two 40x30x10 halves; each shelled 2 mm open on the cut face: cavity 36x26x8 (the open side has no wall). V=2*(12000-7488)=9024; two bodies; faces 5+1 ring... each half has outer 5 + open-face ring 1 + cavity 5 = 11, so 22",
+ "body_count": 2,
+ "volume_mm3": 9024,
+ "faces": 22
+}

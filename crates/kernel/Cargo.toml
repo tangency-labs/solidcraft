@@ -1,6 +1,6 @@
 [package]
 name = "solidcraft-kernel"
-description = "SolidCraft B-rep kernel boundary: solids, extrude/revolve/booleans/fillets, tessellation, measures and STEP, behind our own API (implemented with truck)"
+description = "SolidCraft B-rep kernel boundary: solids, extrude/revolve/booleans/fillets, meshes, measures and STEP, behind our own API (implemented with SMLib)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,17 +8,21 @@ license.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Link NVIDIA's SMLib (tangency-labs/smlib) into the kernel; needs a C++ toolchain and
+# scripts/fetch-smlib.sh (ADR 0002). Without it every geometric operation answers that SMLib
+# was not built.
+smlib = ["solidcraft-smlib/native"]
+
 [dependencies]
 solidcraft-geom = { workspace = true }
+solidcraft-smlib = { workspace = true }
+solidcraft-profile = { workspace = true }
+solidcraft-step = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
-truck-modeling = { workspace = true }
-truck-shapeops = { workspace = true }
-truck-meshalgo = { workspace = true }
-truck-stepio = { workspace = true }
-truck-topology = { workspace = true }
 spade = { workspace = true }
 web-time = { workspace = true }
 
@@ -26,7 +30,5 @@ web-time = { workspace = true }
 rayon = { workspace = true }
 
 [dev-dependencies]
-# The vendored crate tests never build in CI, so its equivalence checks run from kernel tests.
-# Resolver 3 keeps this dev-only feature out of shipped builds.
-truck-meshalgo = { workspace = true, features = ["test-hooks"] }
+solidcraft-profile = { workspace = true, features = ["enabled"] }
 proptest = { version = "1", default-features = false, features = ["std"] }

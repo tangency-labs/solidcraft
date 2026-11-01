@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "the bounding box of two boxes (0..10 cube, 20..25 x 0..5 x 0..5) with a 2 mm margin",
+ "source": "analytic",
+ "method": "the boxes span (0,0,0)-(25,10,10); with 2 mm: (-2,-2,-2)-(27,12,12) = 29x14x14 = 5684; with both boxes kept: V = 1000 + 125 + 5684",
+ "body_count": 3,
+ "volume_mm3": 6809,
+ "bbox": {
+  "min": [
+   -2,
+   -2,
+   -2
+  ],
+  "max": [
+   27,
+   12,
+   12
+  ]
+ }
+}

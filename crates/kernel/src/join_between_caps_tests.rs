@@ -9,7 +9,6 @@ use std::f64::consts::PI;
 
 use solidcraft_geom::Vec3;
 
-use crate::body::from_p3;
 use crate::*;
 
 /// A 40 × 20 × 6 plate (z 5 … 11) with a 14 × 10 × 6 leaf under its back edge, 1 mm into it:
@@ -23,7 +22,7 @@ fn plate_with_leaf() -> Body {
 /// Barrels along x with their axis on the leaf's back bottom edge (y 20, z 0): radius 5 (its top
 /// meets the plate's back edge) and 4.9, ends flush with both of the leaf's sides, with one, and
 /// running on past both under the plate. A quarter of the barrel lies in the leaf (where the
-/// leaf is). Each join is exact: no retry, one solid, and every vertex on a level along x of the
+/// leaf is). Each join is exact: one solid, and every vertex on a level along x of the
 /// plate, the leaf or the barrel.
 #[test]
 fn a_barrel_between_the_sides_of_a_leaf_joins_exactly() {
@@ -31,16 +30,14 @@ fn a_barrel_between_the_sides_of_a_leaf_joins_exactly() {
     for (r, x0, x1) in [(5., 10., 24.), (4.9, 10., 24.), (5., 10., 23.), (5., 8.5, 25.5)] {
         let what = format!("radius {r}, x {x0} … {x1}");
         let barrel = cylinder(Vec3::new(x0, 20., 0.), Vec3::X, r, x1 - x0).unwrap();
-        let (joined, d) = capture_boolean_diagnostics(|| boolean(&part, &barrel, BoolOp::Union));
-        let joined = joined.unwrap().unwrap();
-        assert!(d.events.is_empty(), "{what}: {d:?}");
+        let joined = boolean(&part, &barrel, BoolOp::Union).unwrap().unwrap();
         assert_eq!(joined.shell_count(), 1, "{what}");
         assert!(joined.validity().is_empty(), "{what}: {:?}", joined.validity());
         let inside = (x1.min(24.) - x0.max(10.)) / 4.;
         let want = 5500. + PI * r * r * (x1 - x0 - inside);
-        let v = joined.tessellate(1e-4).unwrap().measure().volume;
+        let v = joined.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
         assert!((v - want).abs() < want * 1e-5, "{what}: volume {v} vs {want}");
-        for p in joined.solid.vertex_iter().map(|v| from_p3(v.point())) {
+        for p in joined.record().vertices.iter().map(|v| Vec3::from(v.point)) {
             assert!([0., 10., 24., 40., x0, x1].iter().any(|x| (p.x - x).abs() < 1e-9), "{what}: a vertex at {p:?}");
         }
     }

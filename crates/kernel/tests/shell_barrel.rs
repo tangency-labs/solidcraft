@@ -43,17 +43,26 @@ fn check_volume(body: &Body, lo: f64, hi: f64) {
 #[test]
 fn shell_of_a_revolved_barrel() {
     let barrel = barrel();
-    let side = (0..barrel.face_count())
-        .find_map(|i| match face_surface(&barrel, i) {
-            Some(s @ FaceSurface::Torus { major, minor, .. }) if (major - CENTRE).abs() < 1e-6 && (minor - RADIUS).abs() < 1e-6 => Some(s),
-            _ => None,
-        })
-        .expect("barrel side is the inner sheet of a spindle torus");
-    assert!(side.nearest(Vec3::new(15.0, 0.0, HALF_HEIGHT)).unwrap().dist(Vec3::new(14.0, 0.0, HALF_HEIGHT)) < 1e-6);
+    // The side is the inner (lemon) zone of a spindle torus: SMLib's torus describes only its
+    // outer zone, so the side is the exact rational surface of revolution of the arc. Two flat
+    // caps and that side; the solid is the closed-form barrel, 14 mm round at mid height (`contains` asks the display mesh, so a margin round it).
+    assert_eq!(barrel.face_count(), 3);
+    let planes = (0..barrel.face_count()).filter(|i| matches!(face_surface(&barrel, *i), Some(FaceSurface::Plane { .. }))).count();
+    assert_eq!(planes, 2, "two caps and the curved side");
+    let full = integral(RADIUS, 2.0 * HALF_HEIGHT) - integral(RADIUS, 0.0);
+    let volume = measure(&barrel).unwrap().volume;
+    assert!((volume - full).abs() < full * 1e-3, "{volume} vs {full}");
+    for turn in [0.0, 1.0, 2.5, 4.0] {
+        let (c, s) = (f64::cos(turn), f64::sin(turn));
+        assert!(
+            barrel.classify_point(Vec3::new(13.8 * c, 13.8 * s, HALF_HEIGHT)).unwrap() == solidcraft_kernel::PointClass::Inside
+                && barrel.classify_point(Vec3::new(14.2 * c, 14.2 * s, HALF_HEIGHT)).unwrap() == solidcraft_kernel::PointClass::Outside
+        );
+    }
     let result = shell(&barrel, &[Vec3::new(0.0, 0.0, 2.0 * HALF_HEIGHT)], 2.0).unwrap();
     assert!(result.validity().is_empty(), "{:?}", result.validity());
     assert_eq!(result.shell_count(), 1);
-    let mesh = result.tessellate(0.005).unwrap();
+    let mesh = result.mesh(&crate::MeshTolerance::chord(0.005)).unwrap();
     assert!(mesh.contains(Vec3::new(0.0, 0.0, 1.0)), "closed floor");
     assert!(!mesh.contains(Vec3::new(0.0, 0.0, 3.0)), "open cavity");
     assert!(mesh.contains(Vec3::new(13.0, 0.0, HALF_HEIGHT)), "barrel wall");
@@ -62,7 +71,8 @@ fn shell_of_a_revolved_barrel() {
     check_volume(&result, 2.0, 2.0 * HALF_HEIGHT);
     let history = result.history().expect("exact shell face history");
     assert_eq!(history.operands, 1);
-    assert_eq!(history.faces.iter().filter(|f| matches!(f.origins.as_slice(), [FaceOrigin::Offset { operand: 0, .. }])).count(), 4);
+    // The inner wall and the inner floor, offsets of the barrel's side and bottom (the top opened).
+    assert_eq!(history.faces.iter().filter(|f| matches!(f.origins.as_slice(), [FaceOrigin::Offset { operand: 0, .. }])).count(), 2);
     let step = step_export(&[&result], "barrel shell").unwrap();
     let imported = step_import(&step).unwrap();
     assert_eq!(imported.bodies.len(), 1);
@@ -81,7 +91,7 @@ fn barrel_shell_opens_either_or_both_caps_and_refuses_a_vanished_cavity() {
         }
         let result = shell(&barrel, &opened, 2.0).unwrap();
         assert!(result.validity().is_empty());
-        let mesh = result.tessellate(0.005).unwrap();
+        let mesh = result.mesh(&crate::MeshTolerance::chord(0.005)).unwrap();
         assert!(!mesh.contains(Vec3::new(0.0, 0.0, 1.0)));
         assert_eq!(mesh.contains(Vec3::new(0.0, 0.0, 25.8)), !both);
         check_volume(&result, 0.0, 2.0 * HALF_HEIGHT - if both { 0.0 } else { 2.0 });

@@ -7,6 +7,7 @@ use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 use crate::body::Body;
 use crate::build::PathSeg;
+use crate::history::BodyHistory;
 use crate::history::{Change, EdgeOrigin, FaceOrigin, FaceProv, History, Side};
 
 const P: fn(usize) -> FaceOrigin = |segment| FaceOrigin::Profile { segment };
@@ -20,7 +21,7 @@ fn sketch_made(b: &Body) -> &History {
     h.check(b, &[]).unwrap();
     assert!(h.faces.iter().all(|f| f.change == Change::Generated && !f.origins.is_empty()));
     assert!(h.edges.iter().all(|e| e.origins.is_empty()));
-    assert_eq!(h.edges.iter().map(|e| e.faces.clone()).collect::<Vec<_>>(), crate::history::edge_faces(&b.solid));
+    assert_eq!(h.edges.iter().map(|e| e.faces.clone()).collect::<Vec<_>>(), crate::history::edge_faces(b.record()));
     h
 }
 
@@ -37,7 +38,7 @@ fn points(b: &Body) -> Vec<Vec<Vec3>> {
 /// Mesh vertices of each face, and its triangles' centres (off a curved face by up to the
 /// mesh's tolerance).
 fn mesh_points(b: &Body) -> (Vec<Vec<Vec3>>, Vec<Vec<Vec3>>) {
-    let m = b.tessellate(b.size() * 1e-3).unwrap();
+    let m = b.mesh(&crate::MeshTolerance::chord(b.size() * 1e-3)).unwrap();
     let (mut corners, mut centres) = (vec![Vec::new(); b.face_count()], vec![Vec::new(); b.face_count()]);
     for (t, f) in m.triangles.iter().zip(&m.tri_face) {
         let c = t.map(|i| m.positions[i as usize]);
@@ -48,7 +49,9 @@ fn mesh_points(b: &Body) -> (Vec<Vec<Vec3>>, Vec<Vec<Vec3>>) {
 }
 
 /// The segments a face lies over: its vertices on them within `tol`, its triangles' centres
-/// near them (`to_2d` takes a point into the profile's plane).
+/// near them (`to_2d` takes a point into the profile's plane). A face over one segment has all
+/// of them on it; a face over several (the one wall a circle drawn in arcs sweeps) has each
+/// centre near one of them and each vertex on one of them.
 fn swept_from(b: &Body, loops: &[&Loop2], to_2d: impl Fn(Vec3) -> Vec2, tol: f64) -> Vec<Vec<usize>> {
     let (corners, centres) = mesh_points(b);
     let flat = |pts: &Vec<Vec3>| pts.iter().map(|p| to_2d(*p)).collect::<Vec<_>>();
@@ -56,8 +59,19 @@ fn swept_from(b: &Body, loops: &[&Loop2], to_2d: impl Fn(Vec3) -> Vec2, tol: f64
         .iter()
         .zip(&centres)
         .map(|(v, c)| {
-            let near = under(loops, &flat(c), b.size() * 3e-3);
-            under(loops, &flat(v), tol).into_iter().filter(|k| near.contains(k)).collect()
+            let (v, c) = (flat(v), flat(c));
+            let near = under(loops, &c, b.size() * 3e-3);
+            let one: Vec<usize> = under(loops, &v, tol).into_iter().filter(|k| near.contains(k)).collect();
+            if !one.is_empty() {
+                return one;
+            }
+            let each = |pts: &[Vec2], tol: f64| pts.iter().map(|q| under(loops, std::slice::from_ref(q), tol)).collect::<Vec<_>>();
+            let centre_segs = each(&c, b.size() * 3e-3);
+            let mut over: Vec<usize> = centre_segs.iter().flatten().copied().collect();
+            over.sort_unstable();
+            over.dedup();
+            let covered = |segs: &[Vec<usize>]| segs.iter().all(|s| s.iter().any(|k| over.contains(k)));
+            if over.len() > 1 && covered(&centre_segs) && covered(&each(&v, tol)) { over } else { Vec::new() }
         })
         .collect()
 }
@@ -140,24 +154,30 @@ fn extrude_sides_follow_profile_segments_in_any_order() {
         // The certificates are produced as before.
         assert!(b.face_sources().unwrap().iter().all(Option::is_some));
     }
-    // The +x side is whichever segment of the given loop runs along x = 40.
+    // The +x side is whichever segment of the given loop runs along x = 40 (the hole's wall at
+    // x = 10 faces +x too).
     let r = &variants[2];
     let b = crate::extrude(&Plane::XY, std::slice::from_ref(r), 0.0, 10.0).unwrap().pop().unwrap();
     let k = r.outer.segs.iter().position(|s| s.start().x == 40.0 && s.end().x == 40.0).unwrap();
-    let side = b.faces(1e-3).unwrap().iter().position(|f| f.plane_normal.is_some_and(|n| n.dist(Vec3::X) < 1e-9)).unwrap();
+    let side = b
+        .faces(1e-3)
+        .unwrap()
+        .iter()
+        .position(|f| f.plane_normal.is_some_and(|n| n.dist(Vec3::X) < 1e-9) && (f.centroid.x - 40.0).abs() < 1e-6)
+        .unwrap();
     assert_eq!(origins(&b)[side], [P(k)]);
 }
 
-/// A big arc is built as two edges: both faces come from it.
+/// A big arc sweeps one face, as every segment does.
 #[test]
-fn extrude_a_big_arc_gives_two_faces_of_one_segment() {
+fn extrude_a_big_arc_gives_one_face_of_one_segment() {
     let (a, b) = (Vec2::new(10.0 * (0.3f64).cos(), -10.0 * (0.3f64).sin()), Vec2::new(10.0 * (0.3f64).cos(), 10.0 * (0.3f64).sin()));
     let arc = Seg2::Arc { center: Vec2::ZERO, radius: 10.0, start: 0.3, sweep: TAU - 0.6 };
     let r = Region2 { outer: Loop2 { segs: vec![arc, Seg2::Line { a, b }] }, holes: vec![] };
     let body = crate::extrude(&Plane::XY, std::slice::from_ref(&r), 0.0, 5.0).unwrap().pop().unwrap();
     let got = origins(&body);
     assert_eq!(got, expected_extrusion(&body, &Plane::XY, &r, 5.0));
-    assert_eq!(got.iter().filter(|o| **o == [P(0)]).count(), 2);
+    assert_eq!(got.iter().filter(|o| **o == [P(0)]).count(), 1);
     assert_eq!(got.iter().filter(|o| **o == [P(1)]).count(), 1);
 }
 
@@ -176,18 +196,18 @@ fn primitives_report_their_construction() {
         assert_eq!(o, &[want]);
     }
     assert!(b.face_sources().unwrap().iter().all(|s| matches!(s, Some(crate::FaceSource::Box { .. }))));
-    // Cylinder: a circle of two arcs, extruded.
+    // Cylinder: a circle (one arc), extruded.
     let c = crate::cylinder(Vec3::ZERO, Vec3::Z, 5.0, 8.0).unwrap();
     let r = Region2 { outer: Loop2::circle_from(Vec2::ZERO, 5.0, crate::build::SEAM_ANGLE), holes: vec![] };
     let frame = Plane::from_normal(Vec3::ZERO, Vec3::Z).unwrap();
     let want = expected_extrusion(&c, &frame, &r, 8.0);
     assert_eq!(origins(&c), want);
-    // Sphere: six patches, all from the arc of the half disc it revolves.
+    // Sphere: one face, from the arc of the half disc it revolves.
     let s = crate::sphere(Vec3::ZERO, 5.0).unwrap();
-    assert_eq!(origins(&s), vec![vec![P(0)]; 6]);
-    // Torus: a circle re-split for its seam, turned in three: each face from both arcs.
+    assert_eq!(origins(&s), vec![vec![P(0)]]);
+    // Torus: one face, from the circle (segment 0) it turns.
     let t = crate::torus(Vec3::ZERO, 10.0, 2.0).unwrap();
-    assert_eq!(origins(&t), vec![vec![P(0), P(1)]; 6]);
+    assert_eq!(origins(&t), vec![vec![P(0)]]);
 }
 
 /// The plane the revolve tests sketch in (x across, y up the world z axis, the revolve axis).
@@ -208,31 +228,29 @@ fn expected_revolution(b: &Body, r: &Region2) -> Vec<Vec<FaceOrigin>> {
 #[test]
 fn revolve_partial_and_full() {
     let r = Region2 { outer: rect(10.0, 0.0, 20.0, 5.0), holes: vec![rect(12.0, 1.0, 14.0, 2.0).reversed()] };
-    // Under half a turn truck sweeps in two parts, beyond it in three; a full turn has no caps,
-    // and its planar faces (from the segments square to the axis) are whole (#726), as a partial
+    // SMLib turns each segment into one face whatever the angle; a full turn has no caps, and
+    // its planar faces (from the segments square to the axis) are whole (#726), as a partial
     // turn's are when it is final (`revolve_whole`).
     let segs: Vec<Seg2> = r.outer.segs.iter().chain(r.holes.iter().flat_map(|h| &h.segs)).cloned().collect();
     for whole in [false, true] {
-        for (angle, parts, caps) in [(FRAC_PI_2, 2, 2), (1.5 * PI, 3, 2), (TAU, 3, 0)] {
+        for (angle, caps) in [(FRAC_PI_2, 2), (1.5 * PI, 2), (TAU, 0)] {
             let revolve = if whole { crate::revolve_whole } else { crate::revolve };
             let b = revolve(&SIDE, std::slice::from_ref(&r), Vec2::ZERO, Vec2::Y, angle).unwrap().pop().unwrap();
             let got = origins(&b);
             assert_eq!(got, expected_revolution(&b, &r), "angle {angle}, whole {whole}");
-            for (k, s) in segs.iter().enumerate() {
-                let square = matches!(s, Seg2::Line { a, b } if (a.y - b.y).abs() < 1e-12);
-                let want = if (angle == TAU || whole) && square { 1 } else { parts };
-                assert_eq!(got.iter().filter(|o| **o == [P(k)]).count(), want, "segment {k} at angle {angle}, whole {whole}");
+            for k in 0..segs.len() {
+                assert_eq!(got.iter().filter(|o| **o == [P(k)]).count(), 1, "segment {k} at angle {angle}, whole {whole}");
             }
             assert_eq!(got.iter().filter(|o| **o == [START] || **o == [END]).count(), caps);
         }
     }
 }
 
-/// Loops given clockwise, a hole that is a full circle of three arcs: extrude numbers every
-/// face by the segment as given; revolve re-seams the circle into two half circles, each from
-/// every given arc it runs over.
+/// Loops given clockwise, a hole that is a full circle of three arcs: extrude and revolve
+/// number every face by the segments as given. Extruded, the circle's arcs sweep one wall,
+/// made from all three; the rectangle's sides one face each.
 #[test]
-fn clockwise_loops_and_a_reseamed_circle_keep_their_numbers() {
+fn clockwise_loops_and_a_circle_of_arcs_keep_their_numbers() {
     let (c, rad) = (Vec2::new(20.0, 10.0), 4.0);
     let arcs = [(0.3, 2.0), (2.3, 2.5), (4.8, TAU - 4.5)];
     let ccw = Loop2 { segs: arcs.iter().map(|&(start, sweep)| Seg2::Arc { center: c, radius: rad, start, sweep }).collect() };
@@ -241,31 +259,19 @@ fn clockwise_loops_and_a_reseamed_circle_keep_their_numbers() {
     let b = crate::extrude(&Plane::XY, std::slice::from_ref(&r), 0.0, 10.0).unwrap().pop().unwrap();
     let got = origins(&b);
     assert_eq!(got, expected_extrusion(&b, &Plane::XY, &r, 10.0));
-    for k in 0..7 {
+    for k in 0..4 {
         assert_eq!(got.iter().filter(|o| **o == [P(k)]).count(), 1, "segment {k}");
     }
-    // Revolved, the circle restarts at 0.4142 rad: the half from there runs over the first two
-    // arcs (6, 5), the other half over all three (it ends past the first arc's start).
-    let first_half = |q: Vec2| (q - c).angle().rem_euclid(TAU);
+    assert_eq!(got.iter().filter(|o| **o == [P(4), P(5), P(6)]).count(), 1, "the circle's one wall");
+    assert_eq!(got.len(), 7, "four sides, the wall, two caps");
+    // Revolved, each arc turns into a face of its own, as the rectangle's sides do.
     for angle in [FRAC_PI_2, TAU] {
         let b = crate::revolve(&SIDE, std::slice::from_ref(&r), Vec2::ZERO, Vec2::Y, angle).unwrap().pop().unwrap();
         let got = origins(&b);
-        let want = expected_revolution(&b, &r);
-        let (_, centres) = mesh_points(&b);
-        let mut halves = [0, 0];
-        for ((g, w), centres) in got.iter().zip(&want).zip(&centres) {
-            let flat: Vec<Vec2> = centres.iter().map(|p| Vec2::new(p.x.hypot(p.y), p.z)).collect();
-            if flat.iter().all(|q| (q.dist(c) - rad).abs() < 0.1) {
-                let first = flat.iter().all(|q| (0.4142 - 1e-3..=0.4142 + PI + 1e-3).contains(&first_half(*q)));
-                assert_eq!(g, &if first { vec![P(5), P(6)] } else { vec![P(4), P(5), P(6)] }, "angle {angle}");
-                halves[usize::from(!first)] += 1;
-            } else {
-                assert_eq!(g, w, "angle {angle}");
-            }
+        assert_eq!(got, expected_revolution(&b, &r), "angle {angle}");
+        for k in 0..7 {
+            assert_eq!(got.iter().filter(|o| **o == [P(k)]).count(), 1, "segment {k} at angle {angle}");
         }
-        // Truck turns each half in as many parts as each rectangle side.
-        let parts = got.iter().filter(|o| **o == [P(0)]).count();
-        assert_eq!(halves, [parts, parts], "angle {angle}");
     }
 }
 
@@ -277,11 +283,11 @@ fn revolve_with_an_edge_on_the_axis() {
     let got = origins(&partial);
     assert_eq!(got, expected_revolution(&partial, &r));
     assert_eq!(got.len(), 5);
-    // A full turn: the radial segments 0 and 2 sweep discs, segment 1 the cylinder (three parts).
+    // A full turn: the radial segments 0 and 2 sweep discs, segment 1 the cylinder (one face).
     let full = crate::revolve(&SIDE, std::slice::from_ref(&r), Vec2::ZERO, Vec2::Y, TAU).unwrap().pop().unwrap();
     let got = origins(&full);
     assert_eq!(got, expected_revolution(&full, &r));
-    assert_eq!(got.iter().filter(|o| **o == [P(1)]).count(), 3);
+    assert_eq!(got.iter().filter(|o| **o == [P(1)]).count(), 1);
     assert_eq!(got.iter().filter(|o| **o == [P(0)] || **o == [P(2)]).count(), 2);
     // A cone: the slanted segment ends on the axis (the apex), the base disc.
     let tri = Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(0.0, 8.0)]), holes: vec![] };
@@ -291,7 +297,7 @@ fn revolve_with_an_edge_on_the_axis() {
     let turned = Region2 { outer: rotated(&tri.outer.reversed(), 1), holes: vec![] };
     let cone = crate::revolve(&SIDE, std::slice::from_ref(&turned), Vec2::ZERO, Vec2::Y, TAU).unwrap().pop().unwrap();
     assert_eq!(origins(&cone), expected_revolution(&cone, &turned));
-    // A half disc: a sphere, every patch from the arc (segment 1 here).
+    // A half disc: a sphere, its one face from the arc (segment 1 here).
     let half = Region2 {
         outer: Loop2 {
             segs: vec![
@@ -302,13 +308,13 @@ fn revolve_with_an_edge_on_the_axis() {
         holes: vec![],
     };
     let ball = crate::revolve(&SIDE, std::slice::from_ref(&half), Vec2::ZERO, Vec2::Y, TAU).unwrap().pop().unwrap();
-    assert_eq!(origins(&ball), vec![vec![P(1)]; 6]);
+    assert_eq!(origins(&ball), vec![vec![P(1)]]);
 }
 
 #[test]
 fn tapered_extrusion() {
     let r = Region2 { outer: rotated(&rect(0.0, 0.0, 20.0, 10.0).reversed(), 1), holes: vec![] };
-    let b = crate::extrude_tapered(&Plane::XY, &r, 10.0, 1.0, 0.1).unwrap();
+    let b = crate::extrude_tapered(&Plane::XY, &r, 10.0, 1.0, 0.1, crate::DraftCorner::default()).unwrap();
     let want: Vec<Vec<FaceOrigin>> = points(&b)
         .iter()
         .map(|pts| {
@@ -403,9 +409,10 @@ fn loft_sections() {
     assert_eq!(origins(&b), want);
 }
 
-/// Faces of a sweep: the start cap in the profile's plane; each segment's faces run the whole
-/// path, the first one standing on that segment.
-fn check_sweep(b: &Body, plane: &Plane, r: &Region2, faces_per_segment: Option<usize>) {
+/// Faces of a sweep: the start cap in the profile's plane; each segment's faces run along the
+/// path, the first one standing on that segment; `faces_per_segment`, if given, the number of
+/// faces each segment sweeps, in segment order.
+fn check_sweep(b: &Body, plane: &Plane, r: &Region2, faces_per_segment: Option<&[usize]>) {
     let loops: Vec<&Loop2> = std::iter::once(&r.outer).chain(&r.holes).collect();
     let n: usize = loops.iter().map(|l| l.segs.len()).sum();
     let got = origins(b);
@@ -430,7 +437,7 @@ fn check_sweep(b: &Body, plane: &Plane, r: &Region2, faces_per_segment: Option<u
     }
     let counts: Vec<usize> = (0..n).map(|k| got.iter().filter(|o| **o == [P(k)]).count()).collect();
     match faces_per_segment {
-        Some(c) => assert!(counts.iter().all(|x| *x == c), "{counts:?}"),
+        Some(c) => assert_eq!(counts, c),
         None => assert!(counts.windows(2).all(|w| w[0] == w[1] && w[0] > 0), "{counts:?}"),
     }
 }
@@ -438,14 +445,16 @@ fn check_sweep(b: &Body, plane: &Plane, r: &Region2, faces_per_segment: Option<u
 #[test]
 fn sweeps_along_paths() {
     let r = Region2 { outer: rotated(&rect(-2.0, -2.0, 2.0, 2.0).reversed(), 1), holes: vec![] };
-    // A line then a quarter turn (two parts): three faces per segment.
+    // A line then a quarter turn: a face per segment along each path segment.
     let path = [
         PathSeg::Line { a: Vec3::ZERO, b: Vec3::new(0.0, 0.0, 10.0) },
         PathSeg::Arc { a: Vec3::new(0.0, 0.0, 10.0), center: Vec3::new(20.0, 0.0, 10.0), axis: Vec3::Y, angle: FRAC_PI_2 },
     ];
     let b = crate::sweep(&Plane::XY, &r, &path).unwrap();
-    check_sweep(&b, &Plane::XY, &r, Some(3));
-    // Along a smooth 3D path: one wall per segment.
+    check_sweep(&b, &Plane::XY, &r, Some(&[2; 4]));
+    // Along 41 points of a smooth 3D curve: a point path is the polyline its points make, swept
+    // line by line and mitred at each point (43e8b0349), so the circle (one segment, one closed
+    // arc in SMLib) has a wall along each of the 40 lines.
     let curve: Vec<Vec3> = (0..=40)
         .map(|i| {
             let t = i as f64 / 40.0 * FRAC_PI_2;
@@ -455,19 +464,23 @@ fn sweeps_along_paths() {
     let plane = Plane::from_normal(curve[0], (curve[1] - curve[0]).normalized().unwrap()).unwrap();
     let circle = Region2 { outer: Loop2::circle(Vec2::ZERO, 2.0), holes: vec![] };
     let b = crate::sweep_path(&plane, &circle, &curve).unwrap();
-    check_sweep(&b, &plane, &circle, Some(1));
-    // A path with a corner, a holed profile: ruled walls station to station.
+    check_sweep(&b, &plane, &circle, Some(&[40]));
+    // A path with a corner, a holed profile: a wall along each leg, mitred at the corner. The
+    // corner turns the profile about Y, so each line at a constant y (segments 0 and 2 of the
+    // outer loop, 1 and 3 of the hole, drawn the other way round) sweeps the plane it lies in
+    // along both legs: one L-shaped planar face. The lines at a constant x make two each.
     let holed = Region2 { outer: rect(-3.0, -3.0, 3.0, 3.0), holes: vec![rect(-1.0, -1.0, 1.0, 1.0).reversed()] };
     let b = crate::sweep_path(&Plane::XY, &holed, &[Vec3::ZERO, Vec3::new(0.0, 0.0, 20.0), Vec3::new(20.0, 0.0, 20.0)]).unwrap();
-    check_sweep(&b, &Plane::XY, &holed, Some(2));
+    check_sweep(&b, &Plane::XY, &holed, Some(&[1, 2, 1, 2, 2, 1, 2, 1]));
     // A coil: a smooth wall per segment.
     let side = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
     let ring = Region2 { outer: Loop2::circle(Vec2::new(20.0, 0.0), 2.0), holes: vec![] };
     let b = crate::sweep_helix(&side, &ring, Vec3::ZERO, Vec3::Z, 8.0, 3.0).unwrap();
-    check_sweep(&b, &side, &ring, Some(1));
+    check_sweep(&b, &side, &ring, Some(&[1]));
 }
 
-/// Kept faces are their origins, unchanged; each edge an operand still owns is that edge.
+/// Kept faces are their origins, unchanged; each edge an operand still owns is that edge (a new
+/// edge, where two faces meet, has a Meet origin instead).
 fn check_kept(result: &Body, input: &Body) {
     let h = result.history().unwrap();
     h.check(result, &[input]).unwrap();
@@ -481,7 +494,11 @@ fn check_kept(result: &Body, input: &Body) {
     let mut owned = 0;
     for (e, p) in re.iter().zip(&h.edges) {
         for o in &p.origins {
-            let crate::history::EdgeOrigin::Edge { operand: 0, edge } = o else { panic!("{o:?}") };
+            let edge = match o {
+                crate::history::EdgeOrigin::Edge { operand: 0, edge } => edge,
+                crate::history::EdgeOrigin::Meet { .. } => continue,
+                _ => panic!("{o:?}"),
+            };
             assert!(e.mid.dist(ie[*edge].mid) < 1e-6, "edge {}", e.index);
             owned += 1;
         }
@@ -505,12 +522,14 @@ fn thicken_reports_copies_offsets_and_walls() {
     let h = t.history().unwrap();
     assert_eq!(h.faces[0].origins, [FaceOrigin::Face { operand: 0, face: 0 }]);
     assert_eq!(h.faces[1].origins, [FaceOrigin::Offset { operand: 0, face: 0 }]);
-    let free: Vec<usize> = (0..half.edge_count()).collect();
+    // A wall along each free edge of the sheet: the side's two rims, not its seam (an edge the
+    // one face meets itself along, no boundary).
+    let free: Vec<usize> = (0..half.edge_count()).filter(|e| half.record().edges[*e].uses.len() == 1).collect();
     for (i, f) in h.faces.iter().enumerate().skip(2) {
         let [FaceOrigin::Edge { operand: 0, edge }] = f.origins.as_slice() else { panic!("{f:?}") };
         assert_eq!(*edge, nearest_edge(&t, i, &half, &free));
     }
-    assert_eq!(h.faces.len(), 2 + half.edge_count());
+    assert_eq!(h.faces.len(), 2 + free.len());
 }
 
 #[test]
@@ -524,7 +543,7 @@ fn raised_band_reports_kept_trimmed_and_new_faces() {
     let [FaceOrigin::Face { operand: 0, face: rim }] = rim.origins.as_slice() else { panic!() };
     // The rim's inner loop: the edges the walls stand on.
     let loop_edges: Vec<usize> =
-        crate::history::edge_faces(&sh.solid).iter().enumerate().filter(|(_, fs)| fs.contains(rim)).map(|(i, _)| i).collect();
+        crate::history::edge_faces(sh.record()).iter().enumerate().filter(|(_, fs)| fs.contains(rim)).map(|(i, _)| i).collect();
     let mut walls = 0;
     for (i, f) in h.faces.iter().enumerate() {
         if let [FaceOrigin::Edge { operand: 0, edge }] = f.origins.as_slice() {

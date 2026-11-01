@@ -1,0 +1,26 @@
+{
+ "commands": [
+  {
+   "command": "construct.point.three_planes",
+   "params": {
+    "a": "XY",
+    "b": {
+     "plane": {
+      "origin": [
+       0,
+       0,
+       5
+      ],
+      "normal": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "c": "YZ",
+    "name": "P"
+   }
+  }
+ ]
+}

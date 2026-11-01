@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "an L block: r5 on its inner (concave) vertical edge and on an outer (convex) one",
+ "source": "analytic",
+ "method": "the concave round adds (1-pi/4) r^2 20, the convex one removes the same: V = 700*20",
+ "body_count": 1,
+ "volume_mm3": 14000,
+ "faces": 10
+}

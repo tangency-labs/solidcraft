@@ -1,0 +1,39 @@
+{
+ "sources": [],
+ "what": "a sheet 2 mm short of a coplanar sheet's edge, matched G2 onto it and stitched: flat, x 10..20",
+ "source": "analytic",
+ "method": "target x 0..10, skirt x 12..20, both in z = 0; the skirt's near boundary (x = 12) moves to the picked edge x = 10 repeating the plane's tangent and zero curvature, the far one (x = 20) stays with its plane: every condition is in z = 0, so the rebuilt face is the flat 10 x 20 strip; stitched: area 200 + 200 = 400, 4 to 6 free edges round the 20 x 20 outline, the seam at least G2",
+ "valid": false,
+ "body_count": 1,
+ "faces": [
+  1,
+  2
+ ],
+ "area_mm2": 400.0,
+ "boundary_edges": [
+  4,
+  6
+ ],
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   20,
+   20,
+   0
+  ]
+ },
+ "continuity": {
+  "order": "g2",
+  "edges": [
+   [
+    10,
+    10,
+    0
+   ]
+  ]
+ }
+}

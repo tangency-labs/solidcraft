@@ -1,0 +1,28 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 20,
+    "body_name": "Box"
+   }
+  },
+  {
+   "command": "construct.plane.at_angle",
+   "params": {
+    "base": {
+     "face": [
+      5,
+      5,
+      20
+     ]
+    },
+    "axis": "X",
+    "angle": "45 deg",
+    "name": "P"
+   }
+  }
+ ]
+}

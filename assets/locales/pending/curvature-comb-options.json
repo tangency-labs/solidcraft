@@ -1,0 +1,44 @@
+{
+  "en": {
+    "ui.comb_length": "Comb length",
+    "ui.comb_length_tip": "How long the teeth are: a multiple of the automatic length, which makes the longest tooth a fifth of the size of the curves shown.",
+    "ui.comb_teeth": "Teeth",
+    "ui.comb_teeth_tip": "How many teeth each comb has, evenly spaced along the curve. More teeth show more detail of how the curvature changes."
+  },
+  "ar": {
+    "ui.comb_length": "طول المشط",
+    "ui.comb_length_tip": "طول الأسنان: مضاعف للطول التلقائي الذي يجعل أطول سنّ خُمس حجم المنحنيات المعروضة.",
+    "ui.comb_teeth": "الأسنان",
+    "ui.comb_teeth_tip": "عدد أسنان كل مشط، موزّعة بالتساوي على طول المنحنى. كلما زادت الأسنان ظهرت تفاصيل أكثر عن تغيّر الانحناء."
+  },
+  "de": {
+    "ui.comb_length": "Kammlänge",
+    "ui.comb_length_tip": "Wie lang die Zähne sind: ein Vielfaches der automatischen Länge, bei der der längste Zahn ein Fünftel der Größe der gezeigten Kurven ist.",
+    "ui.comb_teeth": "Zähne",
+    "ui.comb_teeth_tip": "Wie viele Zähne jeder Kamm hat, gleichmäßig entlang der Kurve verteilt. Mehr Zähne zeigen genauer, wie sich die Krümmung ändert."
+  },
+  "he": {
+    "ui.comb_length": "אורך המסרק",
+    "ui.comb_length_tip": "אורך השיניים: כפולה של האורך האוטומטי, שבו השן הארוכה ביותר היא חמישית מגודל העקומות המוצגות.",
+    "ui.comb_teeth": "שיניים",
+    "ui.comb_teeth_tip": "כמה שיניים יש לכל מסרק, במרווחים שווים לאורך העקומה. יותר שיניים מראות בפירוט רב יותר איך העקמומיות משתנה."
+  },
+  "ja": {
+    "ui.comb_length": "コームの長さ",
+    "ui.comb_length_tip": "歯の長さ: 自動の長さの倍率です。自動の長さでは、いちばん長い歯が表示中の曲線の大きさの 5 分の 1 になります。",
+    "ui.comb_teeth": "歯の数",
+    "ui.comb_teeth_tip": "各コームの歯の数です。曲線に沿って等間隔に並びます。歯を増やすと、曲率の変わり方がより細かく見えます。"
+  },
+  "ko": {
+    "ui.comb_length": "빗 길이",
+    "ui.comb_length_tip": "빗살의 길이: 자동 길이의 배수입니다. 자동 길이에서는 가장 긴 빗살이 표시된 곡선 크기의 5분의 1이 됩니다.",
+    "ui.comb_teeth": "빗살 수",
+    "ui.comb_teeth_tip": "각 빗의 빗살 수이며, 곡선을 따라 같은 간격으로 놓입니다. 빗살이 많을수록 곡률이 어떻게 바뀌는지 더 자세히 보입니다."
+  },
+  "zh": {
+    "ui.comb_length": "梳长",
+    "ui.comb_length_tip": "梳齿的长度：自动长度的倍数。自动长度使最长的梳齿为所示曲线尺寸的五分之一。",
+    "ui.comb_teeth": "梳齿数",
+    "ui.comb_teeth_tip": "每个梳的梳齿数，沿曲线均匀分布。梳齿越多，越能看清曲率如何变化。"
+  }
+}

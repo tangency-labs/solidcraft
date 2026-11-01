@@ -63,8 +63,8 @@ fn fixture() -> Harness {
 fn representative(h: &Harness, command: &str) -> Dialog {
     let mut d = Dialog::for_command(&h.app, command).unwrap();
     let s = &h.app.session;
-    let profiles: Vec<_> = s.world_state().sketches.iter().take(2).map(|sk| Sel::Profile { sketch: sk.feature, index: 0 }).collect();
-    let path = s.world_state().sketches.last().unwrap().sketch.curves.first().unwrap().id.clone();
+    let profiles: Vec<_> = s.world_state().unwrap().sketches.iter().take(2).map(|sk| Sel::Profile { sketch: sk.feature, index: 0 }).collect();
+    let path = s.world_state().unwrap().sketches.last().unwrap().sketch.curves.first().unwrap().id.clone();
     for (index, input) in d.inputs.iter_mut().enumerate() {
         if command == "joint.gear" {
             continue;
@@ -97,7 +97,7 @@ fn representative(h: &Harness, command: &str) -> Dialog {
         } else if input.accept & PLANES != 0 {
             vec![Sel::Plane { name: if index == 1 { "XZ" } else { "XY" }.into() }]
         } else if input.accept & crate::selection::SKETCH_LINES != 0 {
-            vec![Sel::ExternalSketchCurve { sketch: s.world_state().sketches.last().unwrap().feature, id: path.clone() }]
+            vec![Sel::ExternalSketchCurve { sketch: crate::open_meshing::session_world(s).sketches.last().unwrap().feature, id: path.clone() }]
         } else if input.accept & CURVES != 0 || command == "sheet.fold" && index == 0 {
             vec![Sel::SketchCurve { id: path.clone(), sketch: None }]
         } else if input.accept & AXES != 0 {
@@ -113,7 +113,7 @@ fn representative(h: &Harness, command: &str) -> Dialog {
         };
     }
     if let Kind::PathPlane { sketch, .. } = &mut d.kind {
-        *sketch = Some(s.world_state().sketches.last().unwrap().feature);
+        *sketch = Some(s.world_state().unwrap().sketches.last().unwrap().feature);
     }
     if let Kind::Mirror = &d.kind {
         d.extra.insert("combine".into(), json!(false));
@@ -183,7 +183,7 @@ fn check_form(command: &str, labels: &[&str]) {
         "inspect.section" => &["Flip", "Hatch"],
         "solid.move" => &["Create Copy"],
         "solid.combine" => &["Keep Tools", "New Component"],
-        "solid.thread" => &["Modeled", "Full Length", "Automatic size"],
+        "solid.thread" => &["Modeled", "Automatic size"],
         "solid.boundary_fill" => &["Remove Tools"],
         "surface.offset" => &["Tangent chain"],
         "surface.trim" => &["Extend to meet", "Stitch the kept pieces"],
@@ -240,7 +240,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         | "Bend Line Position" | "From Snap" | "To Snap" | "Joint" | "Joint 1" | "Joint 2" | "Gear 1" | "Gear 2" | "Pinion" | "Rack" | "Screw"
         | "Nut" | "Cam" | "Follower" | "Anchor" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
-        "Pitch" if command == "solid.thread" => Role::ComboBox,
+        "Pitch" | "Form" | "Hand" | "Starts" | "Extent" | "Start" | "End" if command == "solid.thread" => Role::ComboBox,
         "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" => Role::CheckBox,
         "Animate" => Role::Button,
         "Ratio" if command.starts_with("joint.") && command != "joint.motion_link" => return None,
@@ -328,7 +328,7 @@ fn mirror_object_type_switch_back_restores_preselected_feature() {
     for (command, params) in commands {
         h.app.run(&command, params).unwrap();
     }
-    assert_eq!(h.app.session.world_state().bodies.len(), 2);
+    assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 2);
 }
 
 #[test]
@@ -439,7 +439,7 @@ fn align_components_mode_switches_and_aligns_only_selected_instance() {
         h.app.run(&command, params).unwrap();
     }
 
-    let st = h.app.session.world_state();
+    let st = crate::open_meshing::session_world(&h.app.session);
     let b1 = st.body("Beam").unwrap().mesh().bounds();
     assert!((b1.min.x - 0.0).abs() < 1e-5 && (b1.max.x - 10.0).abs() < 1e-5, "{b1:?}");
     let b2 = st.body("Beam (Extrusion:2)").unwrap().mesh().bounds();
@@ -450,7 +450,7 @@ form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity
 form_case!(pipe, "solid.pipe", ["Diameter", "Wall", "Operation"]);
 form_case!(stock, "solid.bounding_solid", ["Margin"]);
 form_case!(frame_member, "frame.member", ["All Lines", "Anchor", "Angle", "Mirror", "Name"]);
-form_case!(thread, "solid.thread", ["Profile", "Size", "Pitch", "Designation"]);
+form_case!(thread, "solid.thread", ["Form", "Size", "Pitch", "Designation", "Hand", "Starts", "Extent", "Start", "End"]);
 form_case!(primitive_box, "solid.box", ["ui.length", "ui.width", "ui.height", "Operation"]);
 form_case!(cylinder, "solid.cylinder", ["ui.diameter", "ui.height", "Operation"]);
 form_case!(sphere, "solid.sphere", ["ui.diameter", "Operation"]);
@@ -672,7 +672,7 @@ fn top_dialog_buttons_apply_and_cancel_like_the_footer() {
         h.app.dialog = Some(representative(&h, "solid.revolve"));
         h.settle();
         assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(1.0));
-        let (design, bodies) = (h.app.session.doc.to_json(), h.app.session.world_state().bodies.len());
+        let (design, bodies) = (h.app.session.doc.to_json(), h.app.session.world_state().unwrap().bodies.len());
         let step = match how {
             "click" => json!({"click":{"handle":"dialog:OK"}}),
             "enter" => json!({"key":"Enter"}),
@@ -684,7 +684,7 @@ fn top_dialog_buttons_apply_and_cancel_like_the_footer() {
         if how == "escape" {
             assert_eq!(h.app.session.doc.to_json(), design, "Esc leaves the design as it was");
         } else {
-            assert_eq!(h.app.session.world_state().bodies.len(), bodies + 1, "{how}: the revolve is made");
+            assert_eq!(h.app.session.world_state().unwrap().bodies.len(), bodies + 1, "{how}: the revolve is made");
         }
     }
 }
@@ -702,12 +702,12 @@ fn view_corner_ok_and_cancel_answer_the_dialog_like_its_own_buttons() {
         h.settle();
         assert_eq!(scenario::count_of("view:confirm:ok:enabled"), scenario::count_of("dialog:ok:enabled"));
         assert_eq!(scenario::count_of("view:confirm:ok:enabled"), Some(1.0));
-        let (design, bodies) = (h.app.session.doc.to_json(), h.app.session.world_state().bodies.len());
+        let (design, bodies) = (h.app.session.doc.to_json(), crate::open_meshing::session_world(&h.app.session).bodies.len());
         h.step(&json!({"click":{"handle":format!("view:confirm:{how}")}})).unwrap();
         h.settle();
         assert!(h.app.dialog.is_none(), "{how}: the dialog closes");
         if how == "ok" {
-            assert_eq!(h.app.session.world_state().bodies.len(), bodies + 1, "the check made the revolve");
+            assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), bodies + 1, "the check made the revolve");
         } else {
             assert_eq!(h.app.session.doc.to_json(), design, "the cross leaves the design as it was");
         }
@@ -763,11 +763,11 @@ fn top_dialog_buttons_and_the_view_corner_agree() {
     }
     for handle in ["dialog:ok", "view:confirm:ok"] {
         let mut h = open("solid.revolve");
-        let bodies = h.app.session.world_state().bodies.len();
+        let bodies = h.app.session.world_state().unwrap().bodies.len();
         h.step(&json!({"click":{"handle":handle}})).unwrap();
         h.settle();
         assert!(h.app.dialog.is_none(), "{handle}: the dialog closes");
-        assert_eq!(h.app.session.world_state().bodies.len(), bodies + 1, "{handle}: the revolve is made");
+        assert_eq!(h.app.session.world_state().unwrap().bodies.len(), bodies + 1, "{handle}: the revolve is made");
     }
 }
 
@@ -843,7 +843,10 @@ fn face_editor_refills_named_faces_after_sketch_resize() {
 fn draft_uses_the_picked_solid_beside_a_hidden_overlapping_mesh() {
     use solidcraft_engine::doc::{Document, MeshData, naming};
 
-    let mesh = solidcraft_engine::kernel::box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 10.0)).unwrap().tessellate(0.01).unwrap();
+    let mesh = solidcraft_engine::kernel::box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 10.0))
+        .unwrap()
+        .mesh(&solidcraft_engine::kernel::MeshTolerance::chord(0.01))
+        .unwrap();
     let mut doc = Document::default();
     doc.add_feature(
         FeatureKind::MeshImport {
@@ -862,13 +865,13 @@ fn draft_uses_the_picked_solid_beside_a_hidden_overlapping_mesh() {
     h.app.session = Session::new(doc);
     h.app.run("solid.box", json!({"length":20,"width":20,"height":10})).unwrap();
     h.app.run("browser.visibility", json!({"items":["Hidden mesh"],"visible":false})).unwrap();
-    let state = h.app.session.world_state();
+    let state = crate::open_meshing::session_world(&h.app.session);
     let hidden_mesh = state.body("Hidden mesh").unwrap().mesh();
     let body = state.bodies.iter().find(|body| !body.body.is_mesh()).unwrap();
     let target = body.name.clone();
     let point = Vec3::new(20.0, 10.0, 5.0);
     let name = naming::face_name_at_body(body, point).unwrap();
-    let (index, _, _) = naming::face_on_body(body, &name, point).unwrap();
+    let (index, _) = naming::face_on_body(body, &name, point).unwrap();
     h.app.session.selection = vec![Sel::Face { body: target.clone(), index, point }];
     let mut d = Dialog::for_command(&h.app, "solid.draft").unwrap();
     d.inputs[1].items = vec![Sel::Plane { name: "XY".into() }];
@@ -950,7 +953,7 @@ fn solid_pattern_quantity_arrows_step_the_count_the_command_receives() {
 fn coil_from_a_profile_hides_the_primitive_section() {
     let h = fixture();
     let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
-    let sketch = h.app.session.world_state().sketches[0].feature;
+    let sketch = crate::open_meshing::session_world(&h.app.session).sketches[0].feature;
     d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
     let commands = apply_commands(&h.app, &d).unwrap();
     let (id, p) = &commands[0];
@@ -988,7 +991,7 @@ fn viewport_profile_click_returns_extrude_value_focus() {
     h.step(&json!({"key":"Enter"})).unwrap();
     h.settle();
     assert!(h.app.dialog.is_none());
-    let bounds = h.app.session.world_state().bodies.first().unwrap().mesh().bounds();
+    let bounds = crate::open_meshing::session_world(&h.app.session).bodies.first().unwrap().mesh().bounds();
     assert!((bounds.max.z - bounds.min.z - 30.0).abs() < 1e-7);
 }
 
@@ -1015,7 +1018,7 @@ fn a_dialog_field_typed_as_a_definition_defines_the_parameter() {
     let extrude = doc.features.iter().rev().find(|f| f.name.starts_with("Extrude")).unwrap();
     assert!(extrude.kind.inputs().iter().any(|(label, e, _)| *label == "Distance" && e == "depth"), "{:?}", extrude.kind.inputs());
     assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
-    let bounds = h.app.session.world_state().bodies.first().unwrap().mesh().bounds();
+    let bounds = crate::open_meshing::session_world(&h.app.session).bodies.first().unwrap().mesh().bounds();
     assert!((bounds.max.z - bounds.min.z - 30.0).abs() < 1e-7);
 }
 
@@ -1062,7 +1065,7 @@ fn extrude_builds_the_one_region_clicked_where_the_face_outline_cuts_a_profile()
         let sketch = h.app.run("sketch.create", json!({"plane": {"face": [0, 0, 10]}})).unwrap()["sketch"].as_u64().unwrap();
         h.app.run("sketch.circle.center", json!({"center": [10, 0], "radius": 6})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let ss = state.sketch(sketch).unwrap();
         assert_eq!(ss.profiles.len(), 3, "the lens, the crescent past the face and the rest of the face");
         let index = ss.profiles.iter().position(|p| p.region.contains(solidcraft_engine::geom::Vec2::new(x, 0.0))).unwrap();
@@ -1080,7 +1083,7 @@ fn extrude_builds_the_one_region_clicked_where_the_face_outline_cuts_a_profile()
         let before = h.app.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
         let made = h.app.run(id, p.clone()).unwrap()["feature"].as_u64().unwrap();
         let Some(FeatureKind::Extrude { profiles, .. }) = h.app.session.doc.feature(made).map(|f| f.kind.clone()) else { panic!("an extrude") };
-        let after = h.app.session.world_state();
+        let after = h.app.session.world_state().unwrap();
         let used = solidcraft_engine::doc::profile_selection_indices(after.sketch(sketch).unwrap(), &profiles).unwrap();
         assert_eq!(used, vec![index], "the region clicked at x = {x}, and only it");
         let volume = h.app.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
@@ -1116,7 +1119,7 @@ fn align_components_picks_the_placement_under_the_active_component_and_warns_whe
     let bracket = h.app.run("component.create", json!({"name": "Bracket", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
     h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 4, "body_name": "Plate"})).unwrap();
     h.app.run("component.activate", json!({"component": "root"})).unwrap();
-    let plate = h.app.session.world_state().bodies.first().map(|b| b.name.clone()).unwrap();
+    let plate = crate::open_meshing::session_world(&h.app.session).bodies.first().map(|b| b.name.clone()).unwrap();
 
     // With the design active, a click on the part inside Frame picks the Frame placement.
     assert_eq!(occurrence_path_of_body(&h.app.session, &plate), Some(vec![a]));

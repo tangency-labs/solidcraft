@@ -1,0 +1,29 @@
+# regressions/blind_hole_in_long_d_profile: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Slat: 9 faces, 18 edges
+Slat face F2:side:a1
+Slat face F2:side:l1
+Slat face F2:side:l2
+Slat face F2:side:l3
+Slat face F2:start
+Slat face F2:top
+Slat face F4:side:c1#1
+Slat face F4:side:c1#2
+Slat face F4:top
+Slat edge F2:side:a1|F2:side:l1
+Slat edge F2:side:a1|F2:side:l3
+Slat edge F2:side:a1|F2:start
+Slat edge F2:side:a1|F2:top
+Slat edge F2:side:l1|F2:side:l2
+Slat edge F2:side:l1|F2:start
+Slat edge F2:side:l1|F2:top
+Slat edge F2:side:l2|F2:side:l3
+Slat edge F2:side:l2|F2:start
+Slat edge F2:side:l2|F2:top
+Slat edge F2:side:l2|F4:side:c1#1
+Slat edge F2:side:l2|F4:side:c1#2
+Slat edge F2:side:l3|F2:start
+Slat edge F2:side:l3|F2:top
+Slat edge F4:side:c1#1|F4:side:c1#2~1 [geometric]
+Slat edge F4:side:c1#1|F4:side:c1#2~2 [geometric]
+Slat edge F4:side:c1#1|F4:top
+Slat edge F4:side:c1#2|F4:top

@@ -1,5 +1,8 @@
-//! Bounded, chronological checks of a joint trajectory. This samples tessellated geometry;
-//! it is deliberately not advertised as exact continuous collision detection.
+//! Bounded, chronological checks of a joint trajectory. The motion is sampled, so this is not
+//! continuous collision detection. A joint drive decides on the exact bodies whether they pass
+//! into each other at a sample ([`ContactGeometry::overlaps`]) and closes in on where they first
+//! touch through placements known to be clear ([`ContactGeometry::gap`]); gaps and interference
+//! depths are measured on the bodies' contact meshes.
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
@@ -16,6 +19,9 @@ const MAX_PLACEMENTS: usize = 4096;
 const MAX_BODIES: usize = 256;
 const MAX_TRIANGLES: usize = 50_000;
 const MAX_WORK: usize = 50_000_000;
+/// Most exact intersections one joint drive works out: one per pair of bodies whose exact boxes
+/// meet, at each sample and bisection step.
+const MAX_INTERSECTIONS: usize = 2048;
 
 fn limit(message: &str) -> crate::EngineError {
     bad("contact.sweep", message)
@@ -25,6 +31,9 @@ fn limit(message: &str) -> crate::EngineError {
 struct CachedBody {
     path: Vec<u64>,
     offset: Mat,
+    /// The body itself, for the exact checks, and its exact box in its own frame.
+    body: solidcraft_kernel::Body,
+    exact_box: Aabb3,
     mesh: Arc<Mesh>,
     size: f64,
     /// How far its mesh may stray from its faces: 0 when every face is flat (the mesh is the
@@ -52,7 +61,7 @@ pub(crate) struct ContactMeshes(HashMap<u64, ContactMesh>);
 /// Tessellate `body` for contact checks and measure how thin it is.
 fn contact_mesh(body: &solidcraft_doc::ModelBody) -> Result<ContactMesh> {
     let tolerance = (body.body.size() * 1e-3).max(1e-3);
-    let mesh = body.body.tessellate(tolerance)?;
+    let mesh = body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tolerance))?;
     if mesh.triangles.len() > MAX_TRIANGLES || mesh.positions.len().saturating_add(mesh.triangles.len().saturating_mul(4)) > 200_000 {
         return Err(limit("body exceeds contact sweep tessellation budget"));
     }
@@ -93,6 +102,14 @@ fn contact_mesh(body: &solidcraft_doc::ModelBody) -> Result<ContactMesh> {
 
 /// A member of a contact set: (occurrence id, name).
 pub(super) type Member = (u64, String);
+
+/// Two set members whose bodies pass into each other: their names, and the bodies (indices in
+/// [`ContactGeometry`]) that do.
+pub(super) struct Overlap {
+    pub(super) a: String,
+    pub(super) b: String,
+    bodies: (usize, usize),
+}
 
 pub(super) struct ContactGeometry {
     bodies: Vec<CachedBody>,
@@ -171,6 +188,8 @@ impl ContactGeometry {
                 out.bodies.push(CachedBody {
                     path: path.clone(),
                     offset: s.doc.model_body_offset(body).copied().unwrap_or(IDENTITY),
+                    body: body.body.clone(),
+                    exact_box: body.body.exact_bounds()?,
                     mesh,
                     size: body.body.size(),
                     chord,
@@ -301,8 +320,119 @@ impl ContactGeometry {
             .collect()
     }
 
-    pub(super) fn first_hit(&self, s: &Session, work: &mut usize) -> Result<Option<(String, String, f64)>> {
-        Ok(self.hits(s, work, MAX_WORK, false)?.into_iter().next().map(|(a, b, depth)| (a.1, b.1, depth)))
+    /// The pairs of bodies of set members that pass into each other in `s` (every pair, or the
+    /// first found when `all` is false), decided on the exact bodies: their intersection holds
+    /// volume. Bodies that only touch, such as a cam and its follower, share none. Only bodies
+    /// whose exact boxes meet are intersected; `intersections` counts them, refused past the
+    /// drive's budget.
+    pub(super) fn overlaps(&self, s: &Session, intersections: &mut usize, all: bool) -> Result<Vec<Overlap>> {
+        let frames = self.frames(s)?;
+        let boxes: Vec<Aabb3> = self.bodies.iter().zip(&frames).map(|(b, f)| placed_box(&b.exact_box, f)).collect();
+        let mut placed: Vec<Option<solidcraft_kernel::Body>> = vec![None; self.bodies.len()];
+        let mut out = Vec::new();
+        for (a, b, oa, ob) in &self.pairs {
+            let (Some(xa), Some(xb)) = (boxes.get(*a), boxes.get(*b)) else {
+                return Err(limit("invalid contact geometry pair"));
+            };
+            if !xa.meets(xb) {
+                continue;
+            }
+            *intersections = intersections.saturating_add(1);
+            if *intersections > MAX_INTERSECTIONS {
+                return Err(limit("motion exceeds contact sweep intersection budget; simplify the contact set or use smaller increments"));
+            }
+            let undecided = |e: &dyn std::fmt::Display| {
+                bad("contact.sweep", format!("whether {} and {} pass into each other could not be decided ({e})", oa.1, ob.1))
+            };
+            let (pa, pb) = (self.placed_body(*a, &frames, &mut placed)?, self.placed_body(*b, &frames, &mut placed)?);
+            let Some(shared) = solidcraft_kernel::boolean(&pa, &pb, solidcraft_kernel::BoolOp::Intersect).map_err(|e| undecided(&e))? else {
+                continue;
+            };
+            if solidcraft_kernel::measure_mass(&shared).map_err(|e| undecided(&e))?.volume > 0.0 {
+                out.push(Overlap { a: oa.1.clone(), b: ob.1.clone(), bodies: (*a, *b) });
+                if !all {
+                    break;
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// The least gap between the bodies of `pairs` in `s`, where they are clear of each other: their
+    /// exact distance ([`solidcraft_kernel::body_distance`]), less the meshes' chord tolerances
+    /// where it could only be measured on the meshes, so the gap is never more than the bodies'.
+    /// Between bodies that pass into each other it means nothing (a distance does not tell them
+    /// from touching ones): it is asked only of placements known to be clear.
+    pub(super) fn gap(&self, s: &Session, pairs: &[Overlap]) -> Result<f64> {
+        let frames = self.frames(s)?;
+        let mut placed: Vec<Option<solidcraft_kernel::Body>> = vec![None; self.bodies.len()];
+        let mut least = f64::INFINITY;
+        for pair in pairs {
+            let (a, b) = pair.bodies;
+            let (Some(ca), Some(cb), Some(fa), Some(fb)) = (self.bodies.get(a), self.bodies.get(b), frames.get(a), frames.get(b)) else {
+                return Err(limit("invalid contact geometry pair"));
+            };
+            let (pa, pb) = (self.placed_body(a, &frames, &mut placed)?, self.placed_body(b, &frames, &mut placed)?);
+            let mesh = |c: &CachedBody, f: &Mat| Mesh {
+                positions: c.mesh.positions.iter().map(|p| apply_point(f, *p)).collect(),
+                triangles: c.mesh.triangles.clone(),
+                ..Mesh::default()
+            };
+            let (ma, mb) = (mesh(ca, fa), mesh(cb, fb));
+            let (sa, sb) = (solidcraft_kernel::DistanceShape::new(&pa, &ma, ca.chord), solidcraft_kernel::DistanceShape::new(&pb, &mb, cb.chord));
+            let Some(d) = solidcraft_kernel::body_distance(&sa, &sb, f64::INFINITY)? else {
+                return Err(limit("invalid contact geometry pair"));
+            };
+            let gap = if d.exact { d.distance } else { d.distance - ca.chord - cb.chord };
+            least = least.min(gap.max(0.0));
+        }
+        Ok(least)
+    }
+
+    /// The furthest a point of the bodies of `pairs` moves toward the other body of its pair
+    /// from where `from` ([`ContactGeometry::frames`]) placed them to where `to` has them
+    /// (bounded by the two bodies' own furthest moves, each by the corners of its exact box,
+    /// which a rigid move takes furthest).
+    pub(super) fn pair_travel(&self, from: &[Mat], to: &Session, pairs: &[Overlap]) -> Result<f64> {
+        let moved = |i: usize| -> Result<f64> {
+            let (Some(body), Some(fa)) = (self.bodies.get(i), from.get(i)) else {
+                return Err(limit("invalid contact geometry pair"));
+            };
+            let fb = Self::frame(body, to)?;
+            let local = &body.exact_box;
+            let mut most = 0.0_f64;
+            for c in 0..8 {
+                let pick = |bit: usize, lo: f64, hi: f64| if c & bit == 0 { lo } else { hi };
+                let corner = Vec3::new(pick(1, local.min.x, local.max.x), pick(2, local.min.y, local.max.y), pick(4, local.min.z, local.max.z));
+                most = most.max(apply_point(fa, corner).dist(apply_point(&fb, corner)));
+            }
+            Ok(most)
+        };
+        let mut most = 0.0_f64;
+        for pair in pairs {
+            most = most.max(moved(pair.bodies.0)? + moved(pair.bodies.1)?);
+        }
+        Ok(most)
+    }
+
+    /// Where `s` places each body.
+    pub(super) fn frames(&self, s: &Session) -> Result<Vec<Mat>> {
+        self.bodies.iter().map(|b| Self::frame(b, s)).collect()
+    }
+
+    /// Body `i` placed by `frames`, made once per check.
+    fn placed_body(&self, i: usize, frames: &[Mat], placed: &mut [Option<solidcraft_kernel::Body>]) -> Result<solidcraft_kernel::Body> {
+        if let Some(Some(done)) = placed.get(i) {
+            return Ok(done.clone());
+        }
+        let (Some(body), Some(frame)) = (self.bodies.get(i), frames.get(i)) else {
+            return Err(limit("invalid contact geometry pair"));
+        };
+        let moved = solidcraft_kernel::transform_matrix(&body.body, *frame)?;
+        if let Some(slot) = placed.get_mut(i) {
+            *slot = Some(moved.clone());
+        }
+        Ok(moved)
     }
 
     /// The pairs of set members whose bodies pass through each other in `s`, with how deep the
@@ -429,6 +559,20 @@ impl ContactGeometry {
         }
         Ok(most)
     }
+}
+
+/// The box holding `local` placed by `frame` (its corners' box: a rigid motion keeps the box's
+/// contents inside it).
+fn placed_box(local: &Aabb3, frame: &Mat) -> Aabb3 {
+    let mut world = Aabb3::EMPTY;
+    for c in 0..8 {
+        let pick = |bit: usize, lo: f64, hi: f64| if c & bit == 0 { lo } else { hi };
+        world.add(apply_point(
+            frame,
+            Vec3::new(pick(1, local.min.x, local.max.x), pick(2, local.min.y, local.max.y), pick(4, local.min.z, local.max.z)),
+        ));
+    }
+    world
 }
 
 fn limit_error(message: &str) -> crate::EngineError {

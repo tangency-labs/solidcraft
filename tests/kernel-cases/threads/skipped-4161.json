@@ -1,0 +1,102 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#4183",
+  "why": "no reproduction: a thread failure shown by screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4281",
+  "why": "duplicate of threads/3311-two-tapped-holes-both-modelled-threaded: a modelled thread facets the body; no sizes"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4378",
+  "why": "duplicate of threads/3311-two-tapped-holes-both-modelled-threaded: a modelled M12 thread facets the body; no steps"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4414",
+  "why": "no geometry: left-handed threads (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4494",
+  "why": "duplicate of threads/3311-two-tapped-holes-both-modelled-threaded: a modelled thread re-faceting the body's other faces (a fillet here)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4537",
+  "why": "duplicate of threads/3311-two-tapped-holes-both-modelled-threaded: a second modelled thread on the same body finds no cylinder"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4577",
+  "why": "no geometry: custom thread designations exist (M33.25x1.25 works)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4665",
+  "why": "no geometry: the GPU pick buffer (render)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4672",
+  "why": "duplicate of threads/3311-two-tapped-holes-both-modelled-threaded: a modelled thread facets the other round faces; no sizes"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4684",
+  "why": "no geometry: gear generator and offsettable threads (feature requests)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4727",
+  "why": "duplicate of threads/3311-two-tapped-holes-both-modelled-threaded: modelled threads are faceted; no sizes"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4734",
+  "why": "no geometry: see-through bodies sorted per triangle (render)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4735",
+  "why": "no geometry: a tapered coil (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4736",
+  "why": "duplicate of threads/3311-two-tapped-holes-both-modelled-threaded: a modelled thread facets the body; no sizes"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4799",
+  "why": "no geometry: cosmetic threads don't cut the model, by design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4913",
+  "why": "duplicate of threads/3311-two-tapped-holes-both-modelled-threaded: a second modelled thread after the first"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4963",
+  "why": "no geometry: a modelled thread needs the tap-drill hole, by design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4971",
+  "why": "no geometry: no coarse M28 in ISO metric (designation; M28x2 works)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5055",
+  "why": "no geometry: no coarse thread past M56 (designation; M75x2 works)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5238",
+  "why": "duplicate of threads/3311-two-tapped-holes-both-modelled-threaded: a second modelled thread on the same body"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5277",
+  "why": "no reproduction: a slow modelled M8x1 thread on an unknown large part, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5282",
+  "why": "no geometry: a 20 mm hole is refused for a modelled M20 by design (drill 17.5)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5382",
+  "why": "duplicate of threads/3311-two-tapped-holes-both-modelled-threaded: a second modelled M8 thread on the same body"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5384",
+  "why": "duplicate of threads/3311-two-tapped-holes-both-modelled-threaded (and #5382)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5417",
+  "why": "no reproduction: \"tree too deep\" on an M12x1.5 modelled thread in an unknown hole (dup of #2892)"
+ }
+]

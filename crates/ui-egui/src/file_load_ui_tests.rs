@@ -79,10 +79,10 @@ fn scratch(name: &str) -> std::path::PathBuf {
 
 /// What two sessions must agree on after opening the same file.
 fn fingerprint(s: &Session) -> serde_json::Value {
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let bodies: Vec<_> = world.bodies.iter().map(|b| (b.name.clone(), b.mesh().triangles.len())).collect();
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
-    let b = solidcraft_engine::view::bounds(s);
+    let b = solidcraft_engine::view::bounds(s).unwrap();
     json!({
         "name": s.doc.name,
         "path": s.path,
@@ -410,7 +410,7 @@ fn a_control_import_passes_up_and_names_on() {
         assert_eq!(reply["ok"], true, "{params}: {reply}");
         let mut sync = Session::default();
         assert_eq!(reply["result"], sync.execute("file.insert_step", &params).unwrap(), "the window's reply is the session's");
-        let b = solidcraft_engine::view::bounds(&w.app.session);
+        let b = solidcraft_engine::view::bounds(&w.app.session).unwrap();
         (reply, [b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z], w.app.stand_up.is_some())
     };
 
@@ -454,7 +454,7 @@ fn a_control_import_passes_its_matrix_and_name_on() {
     assert_eq!(reply["ok"], true, "{reply}");
     let mut sync = Session::default();
     assert_eq!(reply["result"], sync.execute("file.insert_step", &params).unwrap(), "the window's reply is the session's");
-    let b = solidcraft_engine::view::bounds(&w.app.session);
+    let b = solidcraft_engine::view::bounds(&w.app.session).unwrap();
     assert!((b.min.x - 100.0).abs() < 1e-6 && (b.max.x - 160.0).abs() < 1e-6, "moved by the matrix: {b:?}");
     assert!(w.app.session.doc.components.iter().any(|c| c.name == "Bracket"), "named as asked");
     let _ = std::fs::remove_dir_all(&dir);
@@ -486,7 +486,7 @@ fn an_opened_design_is_drawn_whole_when_meshing_has_no_thread() {
         }
     });
     assert!(!crate::open_meshing::active(&w.app), "the parts are in: {:?}", crate::open_meshing::progress(&w.app));
-    let world = w.app.session.world_state();
+    let world = w.app.session.world_state().unwrap();
     assert!(!world.bodies.is_empty());
     assert_eq!(crate::open_meshing::shown_world(&w.app).bodies.len(), world.bodies.len(), "the whole design is drawn");
 }
@@ -513,12 +513,12 @@ fn an_opened_design_shows_its_bodies_as_they_are_meshed() {
         let shown = crate::open_meshing::shown_world(&w.app);
         assert!(shown.bodies.iter().all(|b| b.cached_mesh().is_some()), "only meshed bodies are drawn");
         let (done, total) = crate::open_meshing::progress(&w.app).unwrap();
-        assert!(done <= total && total == w.app.session.world_state().bodies.len(), "Loading parts {done}/{total}");
+        assert!(done <= total && total == w.app.session.world_state().unwrap().bodies.len(), "Loading parts {done}/{total}");
         seen.push(shown.bodies.len());
         w.frame(vec![]);
     }
     assert!(seen.windows(2).all(|p| p[0] <= p[1]), "the picture only grows: {seen:?}");
-    let world = w.app.session.world_state();
+    let world = w.app.session.world_state().unwrap();
     // Then the whole design (in the order its bodies came, kept until the design changes).
     let names = |st: &solidcraft_engine::doc::ModelState| {
         let mut n: Vec<String> = st.bodies.iter().map(|b| b.name.clone()).collect();
@@ -541,7 +541,7 @@ fn an_opened_design_shows_its_bodies_as_they_are_meshed() {
     // An edit after that: the viewport draws the session's world again.
     w.app.session.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "operation": "new"})).unwrap();
     w.frame(vec![]);
-    assert!(std::sync::Arc::ptr_eq(&crate::open_meshing::shown_world(&w.app), &w.app.session.world_state()));
+    assert!(std::sync::Arc::ptr_eq(&crate::open_meshing::shown_world(&w.app), &w.app.session.world_state().unwrap()));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -624,7 +624,7 @@ fn open_timed(path: &str) -> (Win, (f64, &'static str)) {
         assert!(std::time::Instant::now() < deadline, "{path} opens");
     }
     let slowest = w.app.frame_watch.slowest;
-    eprintln!("{path}: slowest frame {:.1} ms while {}, {} bodies", slowest.0, slowest.1, w.app.session.world_state().bodies.len());
+    eprintln!("{path}: slowest frame {:.1} ms while {}, {} bodies", slowest.0, slowest.1, w.app.session.world_state().unwrap().bodies.len());
     (w, slowest)
 }
 
@@ -645,7 +645,7 @@ fn opening_a_large_design_never_stalls_the_window() {
     let step = step_assembly(&dir);
     let (mut w, (ms, phase)) = open_timed(&step);
     assert!(ms < BUDGET_MS, "STEP import: a {ms:.0} ms frame while {phase}");
-    assert!(w.app.session.world_state().bodies.len() >= 200);
+    assert!(w.app.session.world_state().unwrap().bodies.len() >= 200);
     for (name, cache) in [("cached.solidcraft", true), ("plain.solidcraft", false)] {
         let path = dir.join(name).to_string_lossy().to_string();
         w.app.session.execute("file.save_as", &json!({"path": path, "cache": cache})).unwrap();

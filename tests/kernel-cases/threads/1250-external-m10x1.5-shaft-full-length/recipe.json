@@ -1,0 +1,24 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 5.0,
+    "height": 12,
+    "body_name": "Shaft"
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     5.0,
+     0,
+     6.0
+    ],
+    "designation": "M10x1.5",
+    "modeled": true
+   }
+  }
+ ]
+}

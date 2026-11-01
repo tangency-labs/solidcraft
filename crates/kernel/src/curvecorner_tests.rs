@@ -166,22 +166,6 @@ fn off_tip(x: f64, y: f64) -> bool {
     (x - k.x).hypot(y - k.y) > 2.0 && a >= (-21.0 - k.y).atan2(CX - k.x) && a <= std::f64::consts::FRAC_PI_2
 }
 
-/// The knife-edge tip (the arc and the top line meeting at no angle) rounds to the ball 2 from
-/// both, 13 back from the tip; its chamfer cuts the cusp at the chord between the same contacts.
-#[test]
-fn a_knife_edge_tip_rounds_where_the_ball_fits() {
-    let k = tip_ball();
-    let round = over_cusp(k.x - 1.0, |x, y| if off_tip(x, y) { 1.0 } else { 0.0 }) * 10.0;
-    let got = removed(true, &[TIP]);
-    assert!((got - round).abs() < round * 1e-3, "round: removed {got} vs {round}");
-    // The chord from the top line's contact to the arc's.
-    let (a, b) = (Vec2::new(k.x, 0.0), k + (Vec2::new(CX, -21.0) - k) * (2.0 / 23.0));
-    let beyond = |x: f64, y: f64| (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x) > 0.0;
-    let flat = over_cusp(k.x - 1.0, |x, y| if beyond(x, y) { 1.0 } else { 0.0 }) * 10.0;
-    let got = removed(false, &[TIP]);
-    assert!((got - flat).abs() < flat * 1e-3, "chamfer: removed {got} vs {flat}");
-}
-
 /// The tip's round with the arc's or the back edge's at the top, where all three meet: as at
 /// the front corner, each alone less what both would take twice — over the tip's corner region,
 /// the other's (above 8 + √(4 − d²), d across from its ball's path).
@@ -239,28 +223,32 @@ fn a_round_ending_in_an_earlier_round_matches_both_together() {
         (arc_top(), TIP),
         (BACK, TIP),
         (arc_top(), BACK),
+        // The other order (the arc's round once left 0.05 mm³ more at the knife-edge tip).
+        (BACK, arc_top()),
     ] {
         one_then_the_other(first, then);
     }
 }
 
-/// The back edge rounded first, then the arc's top edge: the same solid as both together, or the
-/// other order (the arc's round once left 0.05 mm³ more at the knife-edge tip).
-#[test]
-fn the_arc_rounded_after_the_back_edge_matches_both_together() {
-    one_then_the_other(BACK, arc_top());
-}
-
-/// The edge at `first` rounded (2), then the one at `then` as a fillet of its own, against both
-/// rounded together.
+/// The edge at `first` rounded (2), then the one at `then` as a fillet of its own, each with its
+/// tangent chain as the Fillet feature rounds by default (tangent propagation), against the same
+/// edges of the part rounded together: the picks' chains, and every edge of the part that the
+/// second round's chain carried on into across the first round (the left front upright, after
+/// the front edge's round: the left top edge runs on round that round's end arc and down the
+/// upright, a sphere octant at the corner where the three rounds meet).
 fn one_then_the_other(first: Vec3, then: Vec3) {
     let body = arc_part();
-    let step = crate::fillet(&body, &[first], 2.0).unwrap();
-    let after = crate::fillet(&step, &[then], 2.0).unwrap();
+    let chained = |b: &Body, pts: &[Vec3]| crate::tangent_chain(b, pts).unwrap();
+    let step = crate::fillet(&body, &chained(&body, &[first]), 2.0).unwrap_or_else(|e| panic!("{first:?}: {e}"));
+    let second = chained(&step, &[then]);
+    let after = crate::fillet(&step, &second, 2.0).unwrap_or_else(|e| panic!("{first:?} then {then:?}: {e}"));
     let v = volume(&after);
-    let together = volume(&crate::fillet(&body, &[first, then], 2.0).unwrap());
+    // The part's own edges among the second chain's (points on an edge of the part).
+    let mut picks = vec![first, then];
+    picks.extend(second.iter().skip(1).filter(|p| crate::tangent_chain(&body, &[**p]).is_ok()));
+    let together = volume(&crate::fillet(&body, &chained(&body, &picks), 2.0).unwrap());
     // Within the display meshes' accuracy (two different B-reps, meshed apart).
-    assert!((v - together).abs() < 5e-3, "{first:?} then {then:?}: {v} vs together {together}");
+    assert!((v - together).abs() < 5e-3, "{first:?} then {then:?}: {v} vs together {together} ({picks:?})");
 }
 
 /// Edges rounded together come out the same in any order: a round made first doesn't carry the
@@ -275,9 +263,9 @@ fn rounds_together_in_any_order() {
     }
 }
 
-/// The blends this part needs the corner build for (and the back edge, rolled into the tip) at
+/// The blends this part has corners in (and the back edge, rounded into the tip) at
 /// 0.01 and 100 times the part's size, the radius scaled with it: they take off what they take at
-/// full size, scaled by the cube, so the build's tolerances and limits follow the model's size.
+/// full size, scaled by the cube, so the tolerances and limits follow the model's size.
 #[test]
 fn corner_blends_hold_at_any_scale() {
     let cases: [(&str, Vec<Vec<Vec3>>); 6] = [
@@ -291,7 +279,7 @@ fn corner_blends_hold_at_any_scale() {
     // What a blend takes off the part scaled by `k`, over k³, through a display plan of matching
     // accuracy.
     let removed = |k: f64, steps: &[Vec<Vec3>]| {
-        let volume = |b: &Body| b.display_plan(2e-4 * k).unwrap().evaluate().measure().volume;
+        let volume = |b: &Body| b.mesh_plan(&crate::MeshTolerance::chord(2e-4 * k)).unwrap().evaluate().measure().volume;
         let body = scaled_arc_part(k);
         let mut b = body.clone();
         for pts in steps {

@@ -281,7 +281,7 @@ impl DisplayCache {
 }
 
 pub fn profile_region(app: &SolveApp, sketch: u64, index: usize, plane: &Plane, proj: &Proj) -> Arc<Option<Region2>> {
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let ppp = app.viewport.pixels_per_point();
     match app.viewport.display.lock() {
         Ok(mut cache) => cache.profile(state, sketch, index, plane, proj, ppp),
@@ -290,7 +290,7 @@ pub fn profile_region(app: &SolveApp, sketch: u64, index: usize, plane: &Plane, 
 }
 
 pub fn curve_sample(app: &SolveApp, sketch: u64, index: usize, plane: &Plane, proj: &Proj) -> Arc<SampledPath> {
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let ppp = app.viewport.pixels_per_point();
     match app.viewport.display.lock() {
         Ok(mut cache) => cache.curve(state, sketch, index, plane, proj, ppp),

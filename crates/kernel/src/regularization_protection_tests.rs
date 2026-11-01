@@ -15,28 +15,26 @@ fn stamped_shell_keeps_authored_painted_and_split_boundaries() {
     let ordinary = cup(&stock);
     assert!(!ordinary.regularization_protected);
     let painted = stock.clone().with_paint(Some(Paint { opacity: 1., faces: vec![FacePaint { face: 0, color: [1., 0., 0.], opacity: 1. }] }));
-    let side = stock
-        .solid
-        .face_iter()
-        .enumerate()
-        .find(|(i, _)| stock.planar_face(*i).is_some_and(|p| p.normal().dot(Vec3::X) > 0.999 && p.origin.x == 20.))
-        .unwrap()
-        .0;
+    let side = (0..stock.face_count()).find(|i| stock.planar_face(*i).is_some_and(|p| p.normal().dot(Vec3::X) > 0.999 && p.origin.x == 20.)).unwrap();
     let split = crate::split_faces(&stock, &[side], &crate::SplitTool::Plane(Plane { origin: Vec3::new(0., 0., 8.), ..Plane::XY })).unwrap();
     assert!(split.split_lines().is_some());
-    for protected in [painted, split] {
+    // SMLib's shell makes no section strips: the ordinary cup is the stock's five kept faces,
+    // their five linings and the rim (11). A paint over a whole face authors no boundary inside
+    // it, so the painted cup has those same faces; the split side's line stays an edge on both
+    // walls (13).
+    for (protected, faces) in [(painted, ordinary.face_count()), (split, ordinary.face_count() + 2)] {
         let result = cup(&protected);
         assert!(result.regularization_protected);
-        assert!(result.face_count() > ordinary.face_count(), "authored boundaries must survive both Shell regularizers");
+        assert_eq!(result.face_count(), faces, "authored boundaries must survive Shell");
+        assert_eq!(result.split_lines(), protected.split_lines());
         assert!(result.validity().is_empty());
         let expected = 40. * 30. * 24. - 38. * 28. * 23.;
-        let mesh = result.tessellate(1e-5).unwrap();
+        let mesh = result.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap();
         assert!((mesh.measure().volume - expected).abs() < 1e-6);
         assert!(mesh.contains(Vec3::new(19.5, 0., 12.)));
         assert!(!mesh.contains(Vec3::new(0., 0., 12.)));
         let count = result.face_count();
         assert_eq!(result.clone().regularize_certified_planar_faces().unwrap().face_count(), count);
-        assert_eq!(result.clone().regularize_generated_planar_faces().unwrap().face_count(), count);
         let placed = crate::transform(&result, Vec3::new(30., -40., 7.), Vec3::ZERO, Vec3::Z, 0.3).unwrap();
         assert!(placed.regularization_protected);
         for lump in placed.lumps().unwrap() {

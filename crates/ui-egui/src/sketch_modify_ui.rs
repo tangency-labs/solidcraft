@@ -282,7 +282,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 /// OK runs `sketch.equation_curve.edit` on it.
 pub fn edit_equation(app: &mut SolveApp, id: &str) -> bool {
     let Some(sid) = app.session.active_sketch else { return false };
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let Some(eq) = state.sketch(sid).and_then(|s| s.sketch.equation_of(id)).cloned() else { return false };
     let kind = Mod::Equation {
         form: usize::from(eq.x.is_none()),
@@ -304,7 +304,7 @@ pub fn edit_equation(app: &mut SolveApp, id: &str) -> bool {
 pub(crate) fn selected_equation(app: &SolveApp) -> Option<String> {
     let [Sel::SketchCurve { id, .. }] = app.session.selection.as_slice() else { return None };
     let sid = app.session.active_sketch?;
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     state.sketch(sid)?.sketch.equation_of(id).map(|e| e.curve.clone())
 }
 
@@ -315,7 +315,7 @@ pub fn candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) ->
     match hit {
         Hit::SketchCurve { sketch, .. } | Hit::SketchPoint { sketch, .. } | Hit::Profile { sketch, .. } if *sketch != active => None,
         Hit::SketchCurve { id, .. } if matches!(d.kind, Kind::SketchModify(Mod::Corner { .. })) => {
-            let state = session.world_state();
+            let state = crate::open_meshing::session_world(session);
             let sk = &state.sketch(active)?.sketch;
             if sk.is_spatial_corner_curve(id) {
                 return None;
@@ -332,7 +332,7 @@ pub fn candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) ->
 pub fn edit_pattern(app: &mut SolveApp, id: &str) -> bool {
     use solidcraft_engine::sketch::SketchPatternKind;
     let Some(sid) = app.session.active_sketch else { return false };
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let Some(sk) = state.sketch(sid).map(|s| &s.sketch) else { return false };
     let Some(pattern) = sk.patterns.iter().find(|p| p.id == id) else { return false };
     let input = |key: &str, fallback: String| pattern.expressions.get(key).cloned().unwrap_or(fallback);
@@ -392,9 +392,7 @@ pub fn edit_pattern(app: &mut SolveApp, id: &str) -> bool {
 pub fn double_click_pattern(app: &mut SolveApp, pos: Pos2) -> bool {
     let Some(glyph) = crate::sketch_tools::glyph_at(pos) else { return false };
     let Some(sid) = app.session.active_sketch else { return false };
-    let id = app
-        .session
-        .world_state()
+    let id = crate::open_meshing::session_world(&app.session)
         .sketch(sid)
         .and_then(|ss| ss.sketch.patterns.iter().find(|p| p.instances.iter().any(|i| i.constraints.contains(&glyph))).map(|p| p.id.clone()));
     id.is_some_and(|id| edit_pattern(app, &id))
@@ -625,7 +623,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
 /// in it.
 fn sketch_dir(app: &SolveApp, sel: &Sel) -> Option<Vec2> {
     let dir = crate::dialogs::axis_of(app, sel)?.1;
-    let plane = app.session.world_state().sketch(app.session.active_sketch?)?.plane;
+    let plane = crate::open_meshing::session_world(&app.session).sketch(app.session.active_sketch?)?.plane;
     Vec2::new(dir.dot(plane.x), dir.dot(plane.y)).normalized()
 }
 
@@ -638,7 +636,7 @@ pub fn arrow(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
     let Kind::SketchModify(k) = &d.kind else { return None };
     match k {
         Mod::PatternRect { alignment, reversed, .. } => {
-            let plane = app.session.world_state().sketch(app.session.active_sketch?)?.plane;
+            let plane = crate::open_meshing::session_world(&app.session).sketch(app.session.active_sketch?)?.plane;
             let dir = pattern_dir(app, d)?;
             Some(plane.dir_to_world(if (*alignment == PatternAlignment::Left) ^ *reversed { -dir } else { dir }))
         }
@@ -662,7 +660,7 @@ fn pattern_dir(app: &SolveApp, d: &Dialog) -> Option<Vec2> {
 /// the first, as the command does.
 pub fn arrow2(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
     let Kind::SketchModify(Mod::PatternRect { alignment2, reversed2, .. }) = &d.kind else { return None };
-    let plane = app.session.world_state().sketch(app.session.active_sketch?)?.plane;
+    let plane = crate::open_meshing::session_world(&app.session).sketch(app.session.active_sketch?)?.plane;
     let dir = match d.inputs.get(2).and_then(|i| i.items.first()) {
         Some(sel) => sketch_dir(app, sel)?,
         None => match d.extra.get("dir2").and_then(|v| serde_json::from_value::<Vec2>(v.clone()).ok()).and_then(Vec2::normalized) {
@@ -712,7 +710,7 @@ pub(crate) fn point_id<'a>(session: &solidcraft_engine::Session, sel: &'a Sel) -
     let active = session.active_sketch?;
     // Custom local ids may themselves contain ':'. Preserve them before interpreting a
     // legacy qualified selection, whose owner must match the sketch being edited.
-    if session.world_state().sketch(active).is_some_and(|sk| sk.sketch.point_index(id).is_some()) {
+    if crate::open_meshing::session_world(session).sketch(active).is_some_and(|sk| sk.sketch.point_index(id).is_some()) {
         Some(id)
     } else {
         (owner.parse::<u64>().ok() == Some(active)).then_some(point)
@@ -727,7 +725,9 @@ fn entity_ids(session: &solidcraft_engine::Session, inputs: &[SelInput], i: usiz
         match x {
             Sel::SketchCurve { id, .. } => out.push(id.clone()),
             Sel::Profile { sketch, index } => {
-                if let Some(ids) = session.world_state().sketch(*sketch).and_then(|ss| ss.profiles.get(*index)).map(|p| p.curve_ids()) {
+                if let Some(ids) =
+                    crate::open_meshing::session_world(session).sketch(*sketch).and_then(|ss| ss.profiles.get(*index)).map(|p| p.curve_ids())
+                {
                     out.extend(ids);
                 }
             }
@@ -847,7 +847,7 @@ fn corner_ref(app: &SolveApp, point: &str, flip: bool) -> Result<Value, String> 
     }
     let gone = || "that corner is no longer in the sketch".to_string();
     let sketch = app.session.active_sketch.ok_or("open a sketch first")?;
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let sk = &state.sketch(sketch).ok_or_else(gone)?.sketch;
     let index = sk.resolve_point(point).ok_or_else(gone)?;
     let (a, b) = crate::sketch_tools::corner_curves(sk, index, false).ok_or("a chamfer needs a corner of exactly two lines")?;
@@ -939,7 +939,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                         json!(axis)
                     } else {
                         let (origin, dir) = crate::dialogs::axis_of(app, sel).ok_or("Select an origin axis")?;
-                        let st = app.session.world_state();
+                        let st = crate::open_meshing::session_world(&app.session);
                         let plane =
                             st.sketch(app.session.active_sketch.ok_or("No sketch is being edited")?).ok_or("The sketch no longer exists")?.plane;
                         if plane.normal().dot(dir).abs() > 1e-9 || plane.normal().dot(origin - plane.origin).abs() > 1e-6 {
@@ -1014,8 +1014,10 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             }
             let center = match items(inputs, 1).first() {
                 Some(Sel::Vertex { body, point }) if body.is_empty() => {
-                    let plane =
-                        app.session.world_state().sketch(app.session.active_sketch.ok_or("open a sketch first")?).ok_or("sketch is missing")?.plane;
+                    let plane = crate::open_meshing::session_world(&app.session)
+                        .sketch(app.session.active_sketch.ok_or("open a sketch first")?)
+                        .ok_or("sketch is missing")?
+                        .plane;
                     let p = plane.to_local(*point);
                     json!([p.x, p.y])
                 }

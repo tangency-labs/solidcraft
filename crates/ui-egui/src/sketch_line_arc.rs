@@ -58,7 +58,7 @@ pub fn rejoin(app: &SolveApp, t: &mut Tool) {
         return;
     }
     let Some(Some(current)) = t.pts.last().map(|p| p.1.clone()) else { return };
-    let state = app.session.world_state();
+    let Ok(state) = app.session.world_state() else { return };
     let Some(ss) = app.session.active_sketch.and_then(|id| state.sketch(id)) else { return };
     let at = |id: &str| ss.sketch.resolve_point(id).and_then(|p| ss.sketch.point(p));
     if at(&current).is_some() {
@@ -109,7 +109,7 @@ pub fn follow_pointer(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj, poin
         return;
     }
     let screen = {
-        let state = app.session.world_state();
+        let state = crate::open_meshing::session_world(&app.session);
         let plane = app.session.active_sketch.and_then(|s| state.sketch(s)).map(|ss| ss.plane);
         let last = app.tool.as_ref().and_then(|t| t.pts.first()).map(|p| p.0);
         plane.zip(last).and_then(|(plane, last)| proj.to_screen(plane.to_world(last)))
@@ -177,7 +177,7 @@ pub fn place_arc(app: &mut SolveApp, tool: &mut Tool, end: &(Vec2, Option<String
     // On an existing point the arc ends on that point, so an outline closes. The other snaps
     // (a midpoint, a place on a curve) name no point: their coordinates.
     let on_point = |id: &&String| {
-        let state = app.session.world_state();
+        let state = crate::open_meshing::session_world(&app.session);
         app.session.active_sketch.and_then(|s| state.sketch(s)).is_some_and(|ss| ss.sketch.resolve_point(id).is_some())
     };
     let to = end.1.as_ref().filter(on_point).map_or_else(|| json!([end.0.x, end.0.y]), |id| json!(id));

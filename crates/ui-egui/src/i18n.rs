@@ -250,8 +250,12 @@ impl Locale {
     }
 
     /// Evaluation errors stay English for scripts; the empty Cut/Intersect hint that names
-    /// another component is translated where it is shown. Other text is returned unchanged.
+    /// another component, and a feature's request to reselect a reference it lost, are translated
+    /// where they are shown. Other text is returned unchanged.
     pub fn diagnostic(self, text: &str) -> String {
+        if let Some((feature, reference)) = solidcraft_engine::doc::reselect_parts(text) {
+            return self.format("diagnostic.reselect_reference", &[("feature", &self.given_name(feature)), ("reference", reference)]);
+        }
         const PREFIX: &str = "there is no body to cut or intersect in component '";
         if let Some((before, detail)) = text.split_once(PREFIX)
             && let Some((component, detail)) = detail.split_once("'; the tool may overlap '")
@@ -532,6 +536,18 @@ mod tests {
         }
         let plain = "there is no body to cut or intersect";
         assert_eq!(Locale::for_language("ja").diagnostic(plain), plain);
+    }
+
+    #[test]
+    fn reselect_reference_diagnostic_translates_with_the_feature_and_reference_as_given() {
+        let message = solidcraft_engine::doc::DocError::reselect("F4:side:c1#1|F4:top").in_feature("Fillet {2}").to_string();
+        assert_eq!(Locale::for_language("en").diagnostic(&message), message);
+        for language in ["ar", "de", "he", "ja", "ko", "zh"] {
+            let translated = Locale::for_language(language).diagnostic(&message);
+            assert_ne!(translated, message, "{language}");
+            // Right-to-left text comes back in display order, so only what it holds is checked.
+            assert!(translated.contains("Fillet {2}") && translated.contains("`F4:side:c1#1|F4:top`"), "{language}: {translated}");
+        }
     }
 
     /// English first, then by id, so adding a locale edits only its own line.

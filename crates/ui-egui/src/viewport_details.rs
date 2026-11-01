@@ -281,14 +281,16 @@ pub(crate) fn legacy_legends(app: &SolveApp, ui: &mut egui::Ui, viewport: egui::
     }
     if (!app.preferences.viewport_analysis_status || !app.preferences.viewport_status_details) && !app.session.continuity.is_empty() {
         let t = crate::theme::Tokens::get();
-        let key = ["ui.continuity_g2", "ui.continuity_g1", "ui.continuity_g0", "ui.continuity_gap"]
+        // Best to worst: the curvature-continuous orders share a colour, then a gap between faces.
+        let mut classes: Vec<Option<solidcraft_engine::kernel::Continuity>> =
+            solidcraft_engine::kernel::Continuity::ALL.into_iter().rev().map(Some).collect();
+        classes.push(None);
+        let key = classes
             .into_iter()
-            .zip(t.continuity)
-            .enumerate()
-            .map(|(index, (label, colour))| DetailKey {
-                colour,
-                label: tr(label),
-                pattern: index == 3,
+            .map(|order| DetailKey {
+                colour: crate::viewport::continuity_color(&t, order),
+                label: tr(crate::sketch_tools::order_class(order)),
+                pattern: order.is_none(),
                 value: String::new(),
                 numeric: false,
                 pattern_colour: None,

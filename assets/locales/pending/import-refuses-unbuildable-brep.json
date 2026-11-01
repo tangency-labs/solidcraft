@@ -1,0 +1,30 @@
+{
+  "en": {
+    "import_report.refused_one": "1 part couldn't be made into a solid and was not imported.",
+    "import_report.refused_other": "{count} parts couldn't be made into solids and were not imported."
+  },
+  "ar": {
+    "import_report.refused_one": "تعذّر تحويل جزء واحد إلى مجسم، فلم يُستورد.",
+    "import_report.refused_other": "تعذّر تحويل {count} أجزاء إلى مجسمات، فلم تُستورد."
+  },
+  "de": {
+    "import_report.refused_one": "1 Teil konnte nicht zu einem Volumenkörper werden und wurde nicht importiert.",
+    "import_report.refused_other": "{count} Teile konnten nicht zu Volumenkörpern werden und wurden nicht importiert."
+  },
+  "he": {
+    "import_report.refused_one": "לא ניתן היה להפוך חלק אחד לגוף מוצק והוא לא יובא.",
+    "import_report.refused_other": "לא ניתן היה להפוך {count} חלקים לגופים מוצקים והם לא יובאו."
+  },
+  "ja": {
+    "import_report.refused_one": "1 個のパーツをソリッドにできず、読み込みませんでした。",
+    "import_report.refused_other": "{count} 個のパーツをソリッドにできず、読み込みませんでした。"
+  },
+  "ko": {
+    "import_report.refused_one": "부품 1개를 솔리드로 만들지 못해 가져오지 않았습니다.",
+    "import_report.refused_other": "부품 {count}개를 솔리드로 만들지 못해 가져오지 않았습니다."
+  },
+  "zh": {
+    "import_report.refused_one": "1 个零件无法生成实体，未导入。",
+    "import_report.refused_other": "{count} 个零件无法生成实体，未导入。"
+  }
+}

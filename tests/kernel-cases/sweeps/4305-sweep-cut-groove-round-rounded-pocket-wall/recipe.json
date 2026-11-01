@@ -1,0 +1,265 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 60,
+    "width": 40,
+    "height": 20,
+    "body_name": "Box"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "face": [
+      30,
+      20,
+      20
+     ]
+    },
+    "name": "Pocket",
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.rectangle.rounded",
+   "params": {
+    "p0": [
+     5,
+     5
+    ],
+    "p1": [
+     55,
+     35
+    ],
+    "radius": 5
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Pocket",
+    "distance": 15,
+    "direction": "negative",
+    "operation": "cut",
+    "targets": [
+     "Box"
+    ]
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Path",
+    "offset": 10,
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      10,
+      5
+     ],
+     [
+      50,
+      5
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     50,
+     5
+    ],
+    "through": [
+     53.535534,
+     6.464466
+    ],
+    "end": [
+     55,
+     10
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      55,
+      10
+     ],
+     [
+      55,
+      30
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     55,
+     30
+    ],
+    "through": [
+     53.535534,
+     33.535534
+    ],
+    "end": [
+     50,
+     35
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      50,
+      35
+     ],
+     [
+      10,
+      35
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     10,
+     35
+    ],
+    "through": [
+     6.464466,
+     33.535534
+    ],
+    "end": [
+     5,
+     30
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      5,
+      30
+     ],
+     [
+      5,
+      10
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     5,
+     10
+    ],
+    "through": [
+     6.464466,
+     6.464466
+    ],
+    "end": [
+     10,
+     5
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      10,
+      0,
+      0
+     ],
+     "x_dir": [
+      0,
+      1,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Groove",
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     4.4,
+     9.5
+    ],
+    "p1": [
+     5,
+     10.5
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.sweep",
+   "params": {
+    "sketch": "Groove",
+    "path_sketch": "Path",
+    "path": [
+     "l1",
+     "a1",
+     "l2",
+     "a2",
+     "l3",
+     "a3",
+     "l4",
+     "a4"
+    ],
+    "operation": "cut",
+    "targets": [
+     "Box"
+    ]
+   }
+  }
+ ]
+}

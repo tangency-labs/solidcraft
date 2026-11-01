@@ -1,0 +1,17 @@
+{
+ "commands": [
+  {
+   "command": "construct.point.vertex",
+   "params": {
+    "point": {
+     "vertex": [
+      1,
+      2,
+      3
+     ]
+    },
+    "name": "P"
+   }
+  }
+ ]
+}

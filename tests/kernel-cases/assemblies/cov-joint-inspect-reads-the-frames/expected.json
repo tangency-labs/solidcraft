@@ -1,0 +1,58 @@
+{
+ "sources": [],
+ "what": "joint.inspect of a revolute about z at (0,0,0)",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); the hinge's frames are at the origin with z up on both sides, revolute, its one value 'angle' at 0",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 9,
+   "json": {
+    "joints": [
+     {
+      "name": "Hinge",
+      "type": "revolute",
+      "flip": true,
+      "a": {
+       "occurrence_name": "Base:1",
+       "frame": {
+        "origin": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "z": [
+         0.0,
+         0.0,
+         1.0
+        ]
+       }
+      },
+      "b": {
+       "occurrence_name": "Arm:1",
+       "frame": {
+        "origin": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "z": [
+         0.0,
+         0.0,
+         1.0
+        ]
+       }
+      },
+      "values": [
+       {
+        "name": "angle",
+        "value": 0.0
+       }
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

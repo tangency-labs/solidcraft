@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5037"
+ ],
+ "what": "a box wall swept round a rounded-rectangle rim (lines and r5 arcs) from a profile standing square to the path at its start, joined to the floor: the sweep didn't follow the path (synthetic: the report's card box had a stepped profile)",
+ "source": "analytic",
+ "method": "floor 94x64 r7 x 2 (z -2..0). The wall section 2 x 10 is centred on the path, so by Pappus it adds 20 x the path's length 2*80 + 2*50 + 2 pi 5; it stands inside the floor's outline. V = floor + wall",
+ "body_count": 1,
+ "volume_mm3": 17776.1946
+}

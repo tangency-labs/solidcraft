@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "unstitch on a body of one face: nothing to take apart, refused",
+ "source": "invariants",
+ "method": "a single face is already as far apart as it goes",
+ "outcome": "refused",
+ "refusal": "the body has one face: nothing to unstitch"
+}

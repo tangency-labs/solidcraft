@@ -1,0 +1,22 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#96"
+ ],
+ "what": "an 8 x 5 rectangle swept along a path of a 30 mm vertical line and a 40 mm horizontal line meeting at a sharp corner (walls mitred)",
+ "source": "analytic",
+ "method": "in the bend plane the mitred joint keeps the area w (l1 + l2): the outer side gains exactly what the inner side loses, so V = A (l1 + l2) = 40 * 70 = 2800. bbox: x -4..40, y +-2.5, z 0..34 (the mitred outer corner reaches 30 + 4).",
+ "body_count": 1,
+ "volume_mm3": 2800.0,
+ "bbox": {
+  "min": [
+   -4,
+   -2.5,
+   0
+  ],
+  "max": [
+   40,
+   2.5,
+   34
+  ]
+ }
+}

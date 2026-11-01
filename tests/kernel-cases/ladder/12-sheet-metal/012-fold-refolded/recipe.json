@@ -1,0 +1,9 @@
+{
+ "base": "../../12-sheet-metal/011-fold-unfolded",
+ "commands": [
+  {
+   "command": "sheet.refold",
+   "params": {}
+  }
+ ]
+}

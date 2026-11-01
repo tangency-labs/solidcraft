@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "a cut tool that shares only the top front edge of the stock",
+ "source": "analytic",
+ "method": "the tool touches the stock only along the edge y=0, z=20: nothing is removed, the box stays as it was",
+ "body_count": 1,
+ "volume_mm3": 48000,
+ "faces": 6,
+ "edges": 12,
+ "vertices": 8
+}

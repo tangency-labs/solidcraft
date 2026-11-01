@@ -86,7 +86,7 @@ fn the_construction_line_is_the_symmetry_line_whatever_the_pick_order() {
 fn three_selected_lines_take_the_construction_line_as_the_symmetry_line() {
     use solidcraft_engine::Sel::SketchCurve;
     let h = between_two_lines();
-    let state = h.app.session.world_state();
+    let state = crate::open_meshing::session_world(&h.app.session);
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     let sel = |ids: [&str; 3]| ids.map(|id| SketchCurve { id: id.into(), sketch: None });
     for ids in [["mid", "left", "right"], ["right", "mid", "left"]] {

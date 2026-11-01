@@ -1,0 +1,37 @@
+{
+  "en": {
+    "thread.drill_range": "The tap maker's drill is {drill} mm. The internal thread's standard minor diameter is {minor} mm. A drill from {low} to {high} mm is accepted.",
+    "thread.drill_range_custom": "The drill is the major diameter less the pitch, {drill} mm. The internal thread's standard minor diameter is {minor} mm. A drill from {low} to {high} mm is accepted.",
+    "thread.drill_range_taper": "The tap maker's drill is {drill} mm. The standard's minor diameter where the thread ends is {minor} mm. A drill from {low} to {high} mm is accepted."
+  },
+  "ar": {
+    "thread.drill_range": "مثقاب صانع اللقمة {drill} مم. القطر الأصغر القياسي للسن الداخلي {minor} مم. يُقبل مثقاب من {low} إلى {high} مم.",
+    "thread.drill_range_custom": "المثقاب هو القطر الأكبر ناقص الخطوة، {drill} مم. القطر الأصغر القياسي للسن الداخلي {minor} مم. يُقبل مثقاب من {low} إلى {high} مم.",
+    "thread.drill_range_taper": "مثقاب صانع اللقمة {drill} مم. القطر الأصغر القياسي عند نهاية السن {minor} مم. يُقبل مثقاب من {low} إلى {high} مم."
+  },
+  "he": {
+    "thread.drill_range": "מקדח יצרן המברז הוא {drill} מ\"מ. הקוטר הקטן התקני של התבריג הפנימי הוא {minor} מ\"מ. מתקבל מקדח מ-{low} עד {high} מ\"מ.",
+    "thread.drill_range_custom": "המקדח הוא הקוטר הגדול פחות הפסיעה, {drill} מ\"מ. הקוטר הקטן התקני של התבריג הפנימי הוא {minor} מ\"מ. מתקבל מקדח מ-{low} עד {high} מ\"מ.",
+    "thread.drill_range_taper": "מקדח יצרן המברז הוא {drill} מ\"מ. הקוטר הקטן התקני בסוף התבריג הוא {minor} מ\"מ. מתקבל מקדח מ-{low} עד {high} מ\"מ."
+  },
+  "ja": {
+    "thread.drill_range": "タップメーカーの下穴ドリルは {drill} mm です。めねじの規格の内径は {minor} mm です。{low}～{high} mm のドリルを使用できます。",
+    "thread.drill_range_custom": "下穴ドリルは外径からピッチを引いた {drill} mm です。めねじの規格の内径は {minor} mm です。{low}～{high} mm のドリルを使用できます。",
+    "thread.drill_range_taper": "タップメーカーの下穴ドリルは {drill} mm です。ねじ終端での規格の内径は {minor} mm です。{low}～{high} mm のドリルを使用できます。"
+  },
+  "zh": {
+    "thread.drill_range": "丝锥制造商的钻头为 {drill} mm。内螺纹的标准小径为 {minor} mm。可使用 {low} 至 {high} mm 的钻头。",
+    "thread.drill_range_custom": "钻头为大径减螺距，{drill} mm。内螺纹的标准小径为 {minor} mm。可使用 {low} 至 {high} mm 的钻头。",
+    "thread.drill_range_taper": "丝锥制造商的钻头为 {drill} mm。螺纹终端处的标准小径为 {minor} mm。可使用 {low} 至 {high} mm 的钻头。"
+  },
+  "de": {
+    "thread.drill_range": "Der Bohrer des Gewindebohrerherstellers ist {drill} mm. Der genormte Kerndurchmesser des Innengewindes ist {minor} mm. Ein Bohrer von {low} bis {high} mm wird angenommen.",
+    "thread.drill_range_custom": "Der Bohrer ist der Nenndurchmesser minus Steigung, {drill} mm. Der genormte Kerndurchmesser des Innengewindes ist {minor} mm. Ein Bohrer von {low} bis {high} mm wird angenommen.",
+    "thread.drill_range_taper": "Der Bohrer des Gewindebohrerherstellers ist {drill} mm. Der genormte Kerndurchmesser am Gewindeende ist {minor} mm. Ein Bohrer von {low} bis {high} mm wird angenommen."
+  },
+  "ko": {
+    "thread.drill_range": "탭 제조사의 드릴은 {drill} mm입니다. 암나사의 규격 골지름은 {minor} mm입니다. {low}~{high} mm 드릴을 사용할 수 있습니다.",
+    "thread.drill_range_custom": "드릴은 바깥지름에서 피치를 뺀 {drill} mm입니다. 암나사의 규격 골지름은 {minor} mm입니다. {low}~{high} mm 드릴을 사용할 수 있습니다.",
+    "thread.drill_range_taper": "탭 제조사의 드릴은 {drill} mm입니다. 나사 끝에서의 규격 골지름은 {minor} mm입니다. {low}~{high} mm 드릴을 사용할 수 있습니다."
+  }
+}

@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a notch 40x20 through the height, its end flush with the stock's end face: a U",
+ "source": "analytic",
+ "method": "the tool's end face is x=60, the stock's: V = 48000 - 16000; the U outline has 8 sides, + top + bottom",
+ "body_count": 1,
+ "volume_mm3": 32000,
+ "faces": 10
+}

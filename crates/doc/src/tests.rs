@@ -40,6 +40,7 @@ fn plate_doc() -> (Document, u64) {
                 start_offset: None,
                 through_all: false,
                 taper: None,
+                corner: Default::default(),
                 to: None,
                 to_offset: None,
                 from: None,
@@ -277,6 +278,8 @@ fn box_fillet_cut_timeline() {
             style: Default::default(),
             fit: Default::default(),
             corner: Default::default(),
+            setbacks: Vec::new(),
+            tangent_chain: true,
         },
         None,
     )
@@ -297,6 +300,7 @@ fn box_fillet_cut_timeline() {
                 start_offset: None,
                 through_all: false,
                 taper: None,
+                corner: Default::default(),
                 to: None,
                 to_offset: None,
                 from: None,
@@ -348,6 +352,8 @@ fn errors_are_reported_not_fatal() {
             style: Default::default(),
             fit: Default::default(),
             corner: Default::default(),
+            setbacks: Vec::new(),
+            tangent_chain: true,
         },
         None,
     )
@@ -701,6 +707,104 @@ fn empty_boolean_targets_without_overlap_keep_plain_message() {
         model.evaluate(&doc);
         assert_eq!(model.result(cut).unwrap().error.as_deref(), Some("there is no body to cut or intersect"));
     }
+}
+
+/// A box of `size` at `corner`, made with `operation`.
+fn cube(doc: &mut Document, corner: Vec3, size: [f64; 3], operation: Operation) -> u64 {
+    let [length, width, height] = size.map(|x| Expr::new(x.to_string()));
+    doc.add_feature(FeatureKind::Box { corner: point_expr(corner), length, width, height, operation }, None).unwrap()
+}
+
+/// The bodies of `doc` evaluated, by name with their volumes and pieces, and how feature
+/// `feature`'s join touched the pieces it split off.
+fn joined(doc: &Document, feature: u64) -> (Vec<(String, f64, usize)>, Option<KeptSeparate>) {
+    let mut m = Model::new();
+    m.evaluate(doc);
+    assert!(m.results.iter().all(|r| r.error.is_none()), "{:?}", m.results);
+    let kept = m.results.iter().find(|r| r.id == feature).and_then(|r| r.state.kept_separate(feature));
+    let bodies = m.state().bodies.iter().map(|b| (b.name.clone(), measure(&b.body).unwrap().volume, b.body.lumps().unwrap().len())).collect();
+    (bodies, kept)
+}
+
+/// Two blocks joined along an edge cannot be one solid: the join splits them into two bodies and
+/// says they touch along an edge.
+#[test]
+fn a_join_splits_blocks_touching_along_an_edge() {
+    let mut doc = Document::new("edge");
+    cube(&mut doc, Vec3::ZERO, [10.0; 3], Operation::NewBody);
+    let join = cube(&mut doc, Vec3::new(10.0, 10.0, 0.0), [10.0; 3], Operation::Join);
+    let (bodies, kept) = joined(&doc, join);
+    assert_eq!(bodies.len(), 2, "{bodies:?}");
+    assert!(bodies.iter().all(|(_, v, lumps)| rel(*v, 1000.0) < 1e-6 && *lumps == 1), "{bodies:?}");
+    assert_eq!(kept, Some(KeptSeparate::AlongEdge));
+    assert!(KeptSeparate::AlongEdge.notice().contains("along an edge"));
+}
+
+/// Two blocks apart joined stay one body of two pieces, and the join says nothing.
+#[test]
+fn a_join_keeps_blocks_apart_in_one_body() {
+    let mut doc = Document::new("apart");
+    cube(&mut doc, Vec3::ZERO, [10.0; 3], Operation::NewBody);
+    let join = cube(&mut doc, Vec3::new(20.0, 0.0, 0.0), [10.0; 3], Operation::Join);
+    let (bodies, kept) = joined(&doc, join);
+    assert_eq!(bodies.len(), 1, "{bodies:?}");
+    assert!(rel(bodies[0].1, 2000.0) < 1e-6 && bodies[0].2 == 2, "{bodies:?}");
+    assert_eq!(kept, None);
+}
+
+/// A square ring joined with an arm touching its outer corner along an edge and a hub apart in
+/// its hole: the ring and the hub stay one body under the ring's name, the arm is split off, and
+/// the join says it touched along an edge.
+#[test]
+fn a_join_splits_off_only_what_touches_along_an_edge() {
+    let mut doc = Document::new("ring");
+    cube(&mut doc, Vec3::new(-30.0, -30.0, 0.0), [60.0, 60.0, 6.0], Operation::NewBody);
+    cube(&mut doc, Vec3::new(-24.0, -24.0, -1.0), [48.0, 48.0, 8.0], Operation::Cut);
+    cube(&mut doc, Vec3::new(-5.0, -5.0, 0.0), [10.0, 10.0, 6.0], Operation::NewBody);
+    cube(&mut doc, Vec3::new(30.0, 30.0, 0.0), [20.0, 20.0, 6.0], Operation::NewBody);
+    let combine = doc
+        .add_feature(
+            FeatureKind::Combine {
+                target: "Body1".into(),
+                tools: vec!["Body3".into(), "Body2".into()],
+                operation: Operation::Join,
+                keep_tools: false,
+            },
+            None,
+        )
+        .unwrap();
+    let (bodies, kept) = joined(&doc, combine);
+    let (ring, hub, arm) = (60.0 * 60.0 * 6.0 - 48.0 * 48.0 * 6.0, 600.0, 2400.0);
+    assert_eq!(bodies.len(), 2, "{bodies:?}");
+    let named = |name: &str| bodies.iter().find(|(n, _, _)| n == name).cloned();
+    let one = named("Body1").unwrap_or_else(|| panic!("{bodies:?}"));
+    assert!(rel(one.1, ring + hub) < 1e-6 && one.2 == 2, "the ring and the hub: {bodies:?}");
+    let other = bodies.iter().find(|(n, _, _)| n != "Body1").cloned().unwrap_or_else(|| panic!("{bodies:?}"));
+    assert!(rel(other.1, arm) < 1e-6 && other.2 == 1, "the arm: {bodies:?}");
+    assert_eq!(kept, Some(KeptSeparate::AlongEdge));
+}
+
+/// A fillet saved before corner setbacks reads with none and writes no `setbacks`; one with a
+/// setback keeps it through a save, its distance an expression.
+#[test]
+fn fillet_setbacks_default_to_none_and_round_trip() {
+    let old = serde_json::json!({"type": "fillet", "edges": [[30.0, 40.0, 20.0]], "radius": "5"});
+    let kind: FeatureKind = serde_json::from_value(old).unwrap();
+    let FeatureKind::Fillet { setbacks, .. } = &kind else { panic!("{kind:?}") };
+    assert!(setbacks.is_empty());
+    assert!(serde_json::to_value(&kind).unwrap().get("setbacks").is_none());
+    let set = FeatureKind::Fillet {
+        edges: vec![Position(Vec3::new(30.0, 40.0, 20.0))],
+        radius: "5".into(),
+        body: None,
+        style: Default::default(),
+        fit: Default::default(),
+        corner: Default::default(),
+        setbacks: vec![CornerSetback { vertex: Position(Vec3::new(60.0, 40.0, 20.0)), distance: "8 mm".into() }],
+        tangent_chain: true,
+    };
+    let back: FeatureKind = serde_json::from_value(serde_json::to_value(&set).unwrap()).unwrap();
+    assert_eq!(back, set);
 }
 
 #[test]

@@ -1,17 +1,22 @@
 //! Topology counts comparable with kernels that use periodic faces and closed edges.
 //!
-//! Our kernel splits a full cylinder into two half faces and a circle into two arcs. Faces
-//! are classified from their tessellation (plane, cylinder, sphere, other); adjacent faces on
-//! the same analytic surface are merged, edges between merged faces disappear, and chains of
-//! edges through vertices that only join two pieces of the same edge are counted once.
+//! A body may hold a surface in several faces (a full cylinder as two half faces, a circle as two
+//! arcs). Each face's surface is the record's own ([`crate::offset::surf_of`]: plane, cylinder,
+//! sphere, cone, torus; free-form faces by their surface record); adjacent faces on one surface
+//! are merged, edges between merged faces disappear, and chains of edges through vertices that
+//! only join two pieces of one edge are counted once.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::Serialize;
+use solidcraft_geom::brep::{Brep, Loop};
 use solidcraft_geom::{Mesh, UnitVec3, Vec3};
 
 use crate::Result;
-use crate::body::{Body, from_p3};
+use crate::body::Body;
+use crate::heal::{edge_points, find, on_split_line};
+use crate::history::edge_faces;
+use crate::offset::{Surf, surf_of};
 
 #[derive(Clone, Debug, Default, Serialize, PartialEq)]
 pub struct TopoCounts {
@@ -21,399 +26,89 @@ pub struct TopoCounts {
     pub face_types: BTreeMap<String, usize>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Surf {
-    Plane { n: Vec3, d: f64 },
-    Cylinder { axis: UnitVec3, p: Vec3, r: f64 },
-    Sphere { c: Vec3, r: f64 },
-    Cone { axis: Vec3, apex: Vec3, cos: f64 },
-    Other(usize),
-}
-
-impl Surf {
-    fn name(&self) -> &'static str {
-        match self {
-            Surf::Plane { .. } => "plane",
-            Surf::Cylinder { .. } => "cylinder",
-            Surf::Sphere { .. } => "sphere",
-            Surf::Cone { .. } => "cone",
-            Surf::Other(_) => "other",
-        }
-    }
-    fn same(&self, o: &Surf, tol: f64) -> bool {
-        match (*self, *o) {
-            (Surf::Plane { n, d }, Surf::Plane { n: n2, d: d2 }) => n.dot(n2) > 1.0 - 1e-9 && (d - d2).abs() < tol,
-            (Surf::Cylinder { axis, p, r }, Surf::Cylinder { axis: a2, p: p2, r: r2 }) => {
-                let off = p2 - p;
-                axis.dot(a2).abs() > 1.0 - 1e-6 && (r - r2).abs() < tol && (off - axis * off.dot(axis)).len() < tol
-            }
-            (Surf::Sphere { c, r }, Surf::Sphere { c: c2, r: r2 }) => c.dist(c2) < tol && (r - r2).abs() < tol,
-            (Surf::Cone { axis, apex, cos }, Surf::Cone { axis: a2, apex: p2, cos: c2 }) => {
-                axis.dot(a2) > 1.0 - 1e-5 && (cos - c2).abs() < 1e-4 && apex.dist(p2) < tol * 10.0
-            }
-            _ => false,
-        }
+/// The kind of a face's surface, as counted.
+fn name(s: Option<&Surf>) -> &'static str {
+    match s {
+        Some(Surf::Plane { .. }) => "plane",
+        Some(Surf::Cylinder { .. }) => "cylinder",
+        Some(Surf::Sphere { .. }) => "sphere",
+        Some(Surf::Cone { .. }) => "cone",
+        Some(Surf::Torus { .. }) | None => "other",
     }
 }
 
-/// Least-squares circle through 2D points (Kåsa fit): centre and radius.
-fn fit_circle(pts: &[(f64, f64)]) -> Option<(f64, f64, f64)> {
-    let n = pts.len() as f64;
-    if pts.len() < 3 {
-        return None;
-    }
-    let (mx, my) = pts.iter().fold((0.0, 0.0), |a, p| (a.0 + p.0 / n, a.1 + p.1 / n));
-    let (mut suu, mut suv, mut svv, mut suuu, mut svvv, mut suvv, mut svuu) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-    for (x, y) in pts {
-        let (u, v) = (x - mx, y - my);
-        suu += u * u;
-        suv += u * v;
-        svv += v * v;
-        suuu += u * u * u;
-        svvv += v * v * v;
-        suvv += u * v * v;
-        svuu += v * u * u;
-    }
-    let det = suu * svv - suv * suv;
-    if det.abs() < 1e-18 {
-        return None;
-    }
-    let b1 = 0.5 * (suuu + suvv);
-    let b2 = 0.5 * (svvv + svuu);
-    let uc = (b1 * svv - b2 * suv) / det;
-    let vc = (suu * b2 - suv * b1) / det;
-    let r = (uc * uc + vc * vc + (suu + svv) / n).sqrt();
-    Some((uc + mx, vc + my, r))
+/// The faces of a record with their surfaces, for telling which lie on one surface.
+struct Faces<'a> {
+    record: &'a Brep,
+    surfs: Vec<Option<Surf>>,
+    tol: f64,
 }
 
-fn classify(pts: &[Vec3], nrm: &[Vec3], tol: f64, id: usize) -> Surf {
-    let Some(&n0) = nrm.first() else { return Surf::Other(id) };
-    let Some(&p0) = pts.first() else { return Surf::Other(id) };
-    if nrm.iter().all(|n| n.dot(n0) > 1.0 - 1e-5) {
-        let n = n0.normalized().unwrap_or(Vec3::Z);
-        if pts.iter().all(|p| (p.dot(n) - p0.dot(n)).abs() < tol) {
-            return Surf::Plane { n, d: p0.dot(n) };
-        }
+impl<'a> Faces<'a> {
+    fn new(record: &'a Brep, tol: f64) -> Faces<'a> {
+        Faces { record, surfs: (0..record.faces.len()).map(|f| surf_of(record, f)).collect(), tol }
     }
-    // Cylinder: all normals perpendicular to one axis.
-    let far = nrm.iter().copied().min_by(|a, b| a.dot(n0).abs().total_cmp(&b.dot(n0).abs())).unwrap_or(n0);
-    if let Some(axis) = n0.cross(far).unit()
-        && nrm.iter().all(|n| n.dot(axis).abs() < 2e-3)
-    {
-        let u = axis.any_perp();
-        let v = axis.cross(u);
-        let pl: Vec<(f64, f64)> = pts.iter().map(|p| (p.dot(u), p.dot(v))).collect();
-        if let Some((cu, cv, r)) = fit_circle(&pl)
-            && pl.iter().all(|(x, y)| ((x - cu).hypot(y - cv) - r).abs() < tol.max(r * 2e-3))
-        {
-            let axis = if axis.x + axis.y * 1e-3 + axis.z * 1e-6 < 0.0 { -axis } else { axis };
-            return Surf::Cylinder { axis, p: u * cu + v * cv, r };
-        }
-    }
-    // Cone: normals at a constant angle to one axis; the apex lies on every tangent plane.
-    if let Some((axis, cos)) = cone_signature(&pts.iter().copied().zip(nrm.iter().copied()).collect::<Vec<_>>())
-        && cos.abs() > 1e-3
-        && cos.abs() < 1.0 - 1e-3
-    {
-        // Least squares: n_i · v = n_i · p_i.
-        let mut m = [[0.0f64; 3]; 3];
-        let mut r = [0.0f64; 3];
-        for (p, n) in pts.iter().zip(nrm) {
-            let nv = [n.x, n.y, n.z];
-            let k = n.dot(*p);
-            for i in 0..3 {
-                for j in 0..3 {
-                    m[i][j] += nv[i] * nv[j];
-                }
-                r[i] += nv[i] * k;
-            }
-        }
-        if let Some(v) = solve3(m, r) {
-            let apex = Vec3::new(v[0], v[1], v[2]);
-            if pts.iter().zip(nrm).all(|(p, n)| (*p - apex).dot(*n).abs() < tol.max(1e-6) * 10.0) {
-                return Surf::Cone { axis, apex, cos };
-            }
-        }
-    }
-    // Sphere: algebraic least-squares fit |p|² = 2c·p + k, then every point at the same distance.
-    if let Some((c, r)) = fit_sphere(pts) {
-        let spread = pts.iter().map(|p| p.dist(p0)).fold(0.0, f64::max);
-        // Normals radial too (a torus strip can fit a sphere's points closely).
-        let radial = pts.iter().zip(nrm).all(|(p, n)| (*p - c).normalized().is_some_and(|d| d.dot(*n).abs() > 1.0 - 2e-3));
-        if spread > tol && radial && pts.iter().all(|p| (p.dist(c) - r).abs() < tol.max(r * 2e-3)) && r < spread * 1e4 {
-            return Surf::Sphere { c, r };
-        }
-    }
-    Surf::Other(id)
-}
 
-/// Per-face vertex samples (position, normal) from the tessellation.
-///
-/// A vertex is listed once per face, where its first triangle lists it: the triangles around
-/// it would repeat it about six times, and every reader (nearest normal, cone signature) gives
-/// the same answer without the repeats, which only multiplied their work.
-fn face_vertices(mesh: &Mesh, nf: usize) -> Vec<Vec<(Vec3, Vec3)>> {
-    let mut out: Vec<Vec<(Vec3, Vec3)>> = vec![Vec::new(); nf];
-    // The face that last listed each vertex (a vertex shared by faces may be listed again).
-    let mut listed = vec![u32::MAX; mesh.positions.len()];
-    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
-        for &k in t {
-            if listed.get(k as usize) == Some(f) {
-                continue;
-            }
-            if let (Some(p), Some(n), Some(v)) = (mesh.positions.get(k as usize), mesh.normals.get(k as usize), out.get_mut(*f as usize)) {
-                v.push((*p, *n));
-                if let Some(slot) = listed.get_mut(k as usize) {
-                    *slot = *f;
-                }
-            }
-        }
+    fn surf(&self, f: usize) -> Option<&Surf> {
+        self.surfs.get(f).and_then(Option::as_ref)
     }
-    out
-}
 
-/// Normal of face `f` nearest to `p` (the first of equally near vertices).
-fn normal_near(verts: &[(Vec3, Vec3)], p: Vec3) -> Option<Vec3> {
-    let mut best: Option<(f64, Vec3)> = None;
-    for (q, n) in verts {
-        let d = q.dist(p);
-        if best.is_none_or(|(b, _)| d.total_cmp(&b).is_lt()) {
-            best = Some((d, *n));
-        }
+    fn planar(&self, f: usize) -> bool {
+        matches!(self.surf(f), Some(Surf::Plane { .. }))
     }
-    best.map(|(_, n)| n)
-}
 
-/// Cone signature of a non-analytic face: (axis, cos of the normal/axis angle) when all normals
-/// make the same angle with one axis.
-fn cone_signature(verts: &[(Vec3, Vec3)]) -> Option<(Vec3, f64)> {
-    let n0 = verts.first()?.1;
-    let n1 = verts.iter().map(|v| v.1).max_by(|a, b| (*a - n0).len().total_cmp(&(*b - n0).len()))?;
-    let n2 = verts.iter().map(|v| v.1).max_by(|a, b| (*a - n0).cross(n1 - n0).len().total_cmp(&(*b - n0).cross(n1 - n0).len()))?;
-    let mut a = (n1 - n0).cross(n2 - n0).normalized()?;
-    if a.x + a.y * 1e-3 + a.z * 1e-6 < 0.0 {
-        a = -a;
-    }
-    let c = n0.dot(a);
-    verts.iter().all(|v| (v.1.dot(a) - c).abs() < 2e-3).then_some((a, c))
-}
-
-/// Do adjacent faces `a` and `b` (sharing the edge polyline `edge`) lie on one surface?
-/// Analytic classes compare parameters; other faces must join smoothly along the edge and have
-/// the same cone signature (or both have none).
-fn same_surface(surfs: &[Surf], verts: &[Vec<(Vec3, Vec3)>], edge: Option<&Vec<Vec3>>, a: usize, b: usize, tol: f64) -> bool {
-    let (Some(sa), Some(sb)) = (surfs.get(a), surfs.get(b)) else { return false };
-    match (sa, sb) {
-        (Surf::Other(_), Surf::Other(_)) => {}
-        _ => return sa.same(sb, tol),
-    }
-    let (Some(va), Some(vb), Some(e)) = (verts.get(a), verts.get(b), edge) else { return false };
-    let smooth = e.iter().all(|p| match (normal_near(va, *p), normal_near(vb, *p)) {
-        (Some(na), Some(nb)) => na.dot(nb) > 1.0 - 2e-3,
-        _ => false,
-    });
-    if !smooth {
-        return false;
-    }
-    match (cone_signature(va), cone_signature(vb)) {
-        (Some((xa, ca)), Some((xb, cb))) => xa.dot(xb) > 1.0 - 1e-4 && (ca - cb).abs() < 1e-3,
-        (None, None) => true,
-        _ => false,
-    }
-}
-
-/// Solve a 3×3 system (Cramer's rule).
-fn solve3(m: [[f64; 3]; 3], r: [f64; 3]) -> Option<[f64; 3]> {
-    let det = |a: [[f64; 3]; 3]| {
-        a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
-            + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0])
-    };
-    let d = det(m);
-    if d.abs() < 1e-12 {
-        return None;
-    }
-    let mut out = [0.0; 3];
-    for (k, o) in out.iter_mut().enumerate() {
-        let mut mk = m;
-        for (row, rv) in mk.iter_mut().zip(r) {
-            row[k] = rv;
-        }
-        *o = det(mk) / d;
-    }
-    Some(out)
-}
-
-fn find(p: &mut [usize], mut i: usize) -> usize {
-    while let Some(&q) = p.get(i) {
-        if q == i {
-            break;
-        }
-        i = q;
-    }
-    i
-}
-
-/// Per edge (in `Body::edges` order): is it a seam between two pieces of the same surface?
-pub fn seam_flags(b: &Body, mesh: &Mesh) -> Vec<bool> {
-    let solid = &*b.solid;
-    let nf = solid.face_iter().count();
-    let tol = (b.size() * 1e-4).max(1e-6);
-    let surfs = classify_faces(b, mesh, nf, tol);
-    let verts = face_vertices(mesh, nf);
-    // Faces cut from one surface (an imported face split where it wraps around a closed
-    // surface) carry the very same surface: the edge between them is a seam.
-    let surf_keys: Vec<String> = solid.face_iter().map(|f| format!("{:?}", f.surface())).collect();
-    let mut faces_of: HashMap<String, Vec<usize>> = HashMap::new();
-    let mut order: Vec<String> = Vec::new();
-    for (fi, f) in solid.face_iter().enumerate() {
-        for e in f.edge_iter() {
-            let k = format!("{:?}", e.id());
-            let v = faces_of.entry(k.clone()).or_insert_with(|| {
-                order.push(k);
-                Vec::new()
-            });
-            if !v.contains(&fi) {
-                v.push(fi);
-            }
-        }
-    }
-    order
-        .iter()
-        .enumerate()
-        .map(|(ei, k)| match faces_of.get(k).map(Vec::as_slice) {
-            Some([a, b2]) => {
-                (!matches!(surfs.get(*a), Some(Surf::Plane { .. })) && same_surface(&surfs, &verts, mesh.edges.get(ei), *a, *b2, tol * 10.0))
-                    || (surf_keys.get(*a).is_some_and(|k| Some(k) == surf_keys.get(*b2)) && !matches!(surfs.get(*a), Some(Surf::Plane { .. })))
-            }
-            _ => false,
-        })
-        .collect()
-}
-
-/// Least-squares sphere through points: centre and radius.
-fn fit_sphere(pts: &[Vec3]) -> Option<(Vec3, f64)> {
-    if pts.len() < 4 {
-        return None;
-    }
-    // Centre the data for conditioning.
-    let m = pts.iter().fold(Vec3::ZERO, |a, p| a + *p) / pts.len() as f64;
-    let mut a = [[0.0f64; 5]; 4];
-    for p in pts {
-        let q = *p - m;
-        let row = [2.0 * q.x, 2.0 * q.y, 2.0 * q.z, 1.0];
-        let rhs = q.dot(q);
-        for i in 0..4 {
-            for j in 0..4 {
-                a[i][j] += row[i] * row[j];
-            }
-            a[i][4] += row[i] * rhs;
-        }
-    }
-    for col in 0..4 {
-        let piv = (col..4).max_by(|x, y| a[*x][col].abs().total_cmp(&a[*y][col].abs()))?;
-        if a[piv][col].abs() < 1e-18 {
-            return None;
-        }
-        a.swap(col, piv);
-        for r in 0..4 {
-            if r != col {
-                let f = a[r][col] / a[col][col];
-                let prow = a[col];
-                for (x, v) in a[r].iter_mut().zip(prow) {
-                    *x -= f * v;
-                }
-            }
-        }
-    }
-    let c = Vec3::new(a[0][4] / a[0][0], a[1][4] / a[1][1], a[2][4] / a[2][2]);
-    let k = a[3][4] / a[3][3];
-    let r2 = k + c.dot(c);
-    (r2 > 0.0 && r2.is_finite()).then(|| (c + m, r2.sqrt()))
-}
-
-fn classify_faces(b: &Body, mesh: &Mesh, nf: usize, tol: f64) -> Vec<Surf> {
-    let mut pts: Vec<Vec<Vec3>> = vec![Vec::new(); nf];
-    let mut nrm: Vec<Vec<Vec3>> = vec![Vec::new(); nf];
-    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
-        for &k in t {
-            if let (Some(p), Some(n), Some(pv), Some(nv)) =
-                (mesh.positions.get(k as usize), mesh.normals.get(k as usize), pts.get_mut(*f as usize), nrm.get_mut(*f as usize))
-            {
-                pv.push(*p);
-                nv.push(*n);
-            }
-        }
-    }
-    // A point where one face's corners disagree on the normal is singular (a cone's apex):
-    // leave it out of the fit.
-    for (pv, nv) in pts.iter_mut().zip(nrm.iter_mut()) {
-        let key = |p: &Vec3| ((p.x / tol).round() as i64, (p.y / tol).round() as i64, (p.z / tol).round() as i64);
-        let mut first: HashMap<(i64, i64, i64), Vec3> = HashMap::new();
-        let mut bad: std::collections::HashSet<(i64, i64, i64)> = std::collections::HashSet::new();
-        for (p, n) in pv.iter().zip(nv.iter()) {
-            let k = key(p);
-            match first.get(&k) {
-                Some(m) if m.dot(*n) < 0.999 => {
-                    bad.insert(k);
-                }
-                Some(_) => {}
-                None => {
-                    first.insert(k, *n);
-                }
-            }
-        }
-        if !bad.is_empty() && bad.len() * 4 < first.len() {
-            let keep: Vec<bool> = pv.iter().map(|p| !bad.contains(&key(p))).collect();
-            let mut it = keep.iter();
-            pv.retain(|_| it.next().copied().unwrap_or(true));
-            let mut it = keep.iter();
-            nv.retain(|_| it.next().copied().unwrap_or(true));
-        }
-    }
-    let fitted = (0..nf).map(|i| classify(pts.get(i).map(Vec::as_slice).unwrap_or(&[]), nrm.get(i).map(Vec::as_slice).unwrap_or(&[]), tol * 10.0, i));
-    // A sliver (a strip one triangle wide) has too few distinct samples to fit: its points
-    // can fit a sphere or nothing. Where the fit finds no plane or cylinder, take the face's
-    // exact surface when that is a plane, cylinder or sphere.
-    let exact_tol = (b.size() * 1e-7).max(1e-9) * 100.0;
-    let faces: Vec<_> = b.solid.face_iter().collect();
-    fitted
-        .enumerate()
-        .map(|(i, fit)| match (fit, faces.get(i)) {
-            (Surf::Sphere { .. } | Surf::Other(_), Some(face)) => match crate::offset::surf_of(face, exact_tol) {
-                Some(crate::offset::Surf::Plane { n, d }) => Surf::Plane { n, d },
-                Some(crate::offset::Surf::Cylinder { o, a, r, .. }) => match a.unit() {
-                    Some(a) => Surf::Cylinder { axis: if a.x + a.y * 1e-3 + a.z * 1e-6 < 0.0 { -a } else { a }, p: o, r },
-                    None => fit,
-                },
-                Some(crate::offset::Surf::Sphere { c, r, .. }) => Surf::Sphere { c, r },
-                _ => fit,
+    /// Do faces `a` and `b` lie on one surface: the same analytic surface, or the very same
+    /// free-form surface record (pieces cut from one surface)?
+    fn same(&self, a: usize, b: usize) -> bool {
+        match (self.surf(a), self.surf(b)) {
+            (Some(x), Some(y)) => x.same(y, self.tol),
+            (None, None) => match (self.record.faces.get(a), self.record.faces.get(b)) {
+                (Some(x), Some(y)) => x.surface == y.surface,
+                _ => false,
             },
-            _ => fit,
+            _ => false,
+        }
+    }
+
+    /// The record vertices on face `f`'s loops.
+    fn vertices(&self, f: usize) -> Vec<Vec3> {
+        let Some(face) = self.record.faces.get(f) else { return Vec::new() };
+        face.loops
+            .iter()
+            .flat_map(|l| match l {
+                Loop::Edges { edges } => edges.iter().filter_map(|u| self.record.edges.get(u.edge as usize)).flat_map(|e| e.vertices).collect(),
+                Loop::Vertex { vertex } => vec![*vertex],
+            })
+            .filter_map(|v| self.record.vertices.get(v as usize).map(|v| Vec3::from(v.point)))
+            .collect()
+    }
+}
+
+/// Per edge (in `Body::edges` order): is it a seam of a curved surface, between two pieces of it
+/// or where one face of it meets itself (a whole turn of a cylinder, its seam used twice)?
+/// `mesh` is the body's tessellation, whose edges are the record's.
+pub fn seam_flags(b: &Body, _mesh: &Mesh) -> Vec<bool> {
+    let record = b.record();
+    let faces = Faces::new(record, (b.size() * 1e-4).max(1e-6) * 10.0);
+    record
+        .edges
+        .iter()
+        .zip(edge_faces(record))
+        .map(|(e, fs)| match fs[..] {
+            [x, y] => !faces.planar(x) && faces.same(x, y),
+            [x] => e.uses.len() == 2 && !faces.planar(x),
+            _ => false,
         })
         .collect()
 }
 
-/// Merged face/edge/vertex counts (see module docs). `mesh` must be `b.tessellate(..)`.
-/// The point halfway along a polyline (by length).
-fn halfway(pl: &[Vec3]) -> Option<Vec3> {
-    let total: f64 = pl.windows(2).map(|w| w[0].dist(w[1])).sum();
-    let mut left = total * 0.5;
-    for w in pl.windows(2) {
-        let l = w[0].dist(w[1]);
-        if l >= left && l > 0.0 {
-            return Some(w[0] + (w[1] - w[0]) * (left / l));
-        }
-        left -= l;
-    }
-    pl.first().copied()
-}
-
+/// Merged face/edge/vertex counts (see module docs). `mesh` must be `b.mesh(..)`: faces of no
+/// area in it don't count.
 pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
-    let solid = &*b.solid;
-    let nf = solid.face_iter().count();
+    let record = b.record();
+    let nf = record.faces.len();
     let tol = (b.size() * 1e-4).max(1e-6);
-    let surfs = classify_faces(b, mesh, nf, tol);
-    let verts = face_vertices(mesh, nf);
+    let faces = Faces::new(record, tol * 10.0);
     // Zero-area faces (a revolved profile edge lying on the axis) don't count.
     let mut area = vec![0.0f64; nf];
     for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
@@ -422,111 +117,72 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
         }
     }
     let tiny = (b.size() * 1e-6).powi(2);
-    let degenerate: Vec<bool> = area.iter().map(|a| *a < tiny).collect();
-    let is_deg = |f: usize| degenerate.get(f).copied().unwrap_or(false);
+    let is_deg = |f: usize| area.get(f).is_some_and(|a| *a < tiny);
 
     // Edge → faces, edge → vertices. Vertices and edges lying on each other count once (two
     // tangent holes touch along a line that both bodies' pieces carry): welded by position,
-    // edges by their ends and the point halfway along them.
+    // edges by their ends and their middle point.
     let q = (b.size() * 1e-6).max(1e-9);
     let cell = |p: Vec3| ((p.x / q).round() as i64, (p.y / q).round() as i64, (p.z / q).round() as i64);
-    let mut edge_faces: HashMap<usize, Vec<usize>> = HashMap::new();
-    let mut edge_verts: HashMap<usize, (usize, usize)> = HashMap::new();
-    // Welded edge → a truck edge index (for its sampled polyline in `mesh.edges`).
-    let mut edge_rep: HashMap<usize, usize> = HashMap::new();
-    let mut eid: HashMap<String, usize> = HashMap::new();
-    let mut weld_e: HashMap<(usize, usize, (i64, i64, i64)), usize> = HashMap::new();
     let mut weld_v: HashMap<(i64, i64, i64), usize> = HashMap::new();
-    for (fi, f) in solid.face_iter().enumerate() {
-        for e in f.edge_iter() {
-            let key = format!("{:?}", e.id());
-            let n = eid.len();
-            let ei = *eid.entry(key).or_insert(n);
-            let mut vix = |v: &truck_modeling::Vertex| {
-                let n = weld_v.len();
-                *weld_v.entry(cell(from_p3(v.point()))).or_insert(n)
-            };
-            let (a, bb) = (vix(e.front()), vix(e.back()));
-            let mid = mesh.edges.get(ei).and_then(|pl| halfway(pl)).unwrap_or_else(|| (from_p3(e.front().point()) + from_p3(e.back().point())) * 0.5);
-            let n = weld_e.len();
-            let we = *weld_e.entry((a.min(bb), a.max(bb), cell(mid))).or_insert(n);
-            edge_rep.entry(we).or_insert(ei);
-            let faces = edge_faces.entry(we).or_default();
-            if !faces.contains(&fi) {
-                faces.push(fi);
-            }
-            edge_verts.insert(we, (a, bb));
-        }
-    }
-    let poly = |we: usize| edge_rep.get(&we).and_then(|ei| mesh.edges.get(*ei));
-    // Merge faces. Free-form faces meeting along an edge: smooth by their exact normals.
-    let flist: Vec<&truck_modeling::Face> = solid.face_iter().collect();
-    let exact_smooth = |a: usize, b: usize, edge: Option<&Vec<Vec3>>| -> bool {
-        use truck_modeling::{ParametricSurface3D, SearchNearestParameter};
-        let (Some(fa), Some(fb), Some(e)) = (flist.get(a), flist.get(b), edge) else { return false };
-        let (sa, sb) = (fa.oriented_surface(), fb.oriented_surface());
-        let step = (e.len() / 8).max(1);
-        // Points where a surface has no normal (a horn torus pinched to its axis) don't count;
-        // nor do an edge's ends when it has points between (they can be such a pinch).
-        let inner: &[Vec3] = if e.len() > 2 { e.get(1..e.len() - 1).unwrap_or(e) } else { e };
-        let mut seen = 0;
-        let smooth = inner.iter().step_by(step).all(|p| {
-            let q = crate::body::p3(*p);
-            match (sa.search_nearest_parameter(q, None, 50), sb.search_nearest_parameter(q, None, 50)) {
-                (Some((u, v)), Some((s, t))) => {
-                    let (x, y) = (sa.normal(u, v), sb.normal(s, t));
-                    let d = x.x * y.x + x.y * y.y + x.z * y.z;
-                    if !d.is_finite() {
-                        return true;
-                    }
-                    seen += 1;
-                    d > 1.0 - 1e-3
-                }
-                _ => false,
-            }
-        });
-        smooth && seen > 0
+    let mut vix = |v: u32| -> Option<usize> {
+        let p = Vec3::from(record.vertices.get(v as usize)?.point);
+        let n = weld_v.len();
+        Some(*weld_v.entry(cell(p)).or_insert(n))
     };
-    // Pieces of a face split on purpose count apart.
-    let b_keep = b.split_keep();
-    let keep_split = !b_keep.is_empty();
-    let mut fp: Vec<usize> = (0..nf).collect();
-    for (ei, faces) in &edge_faces {
-        let other = |f: usize| matches!(surfs.get(f), Some(Surf::Other(_)));
-        if let [a, b] = faces[..]
-            && !(keep_split && poly(*ei).is_some_and(|pl| crate::heal::on_split_line(pl, b_keep)))
-            && (same_surface(&surfs, &verts, poly(*ei), a, b, tol * 10.0)
-                || (other(a) && other(b) && exact_smooth(a, b, poly(*ei)) && {
-                    let (Some(va), Some(vb)) = (verts.get(a), verts.get(b)) else { return Ok(TopoCounts::default()) };
-                    match (cone_signature(va), cone_signature(vb)) {
-                        (Some((xa, ca)), Some((xb, cb))) => xa.dot(xb) > 1.0 - 1e-4 && (ca - cb).abs() < 1e-3,
-                        (None, None) => true,
-                        _ => false,
-                    }
-                }))
-        {
-            let (ra, rb) = (find(&mut fp, a), find(&mut fp, b));
-            if let Some(s) = fp.get_mut(ra) {
-                *s = rb;
+    let mut weld_e: HashMap<(usize, usize, (i64, i64, i64)), usize> = HashMap::new();
+    let mut welded_faces: Vec<Vec<usize>> = Vec::new();
+    let mut welded_ends: Vec<(usize, usize)> = Vec::new();
+    // A record edge standing for each welded edge (for its points).
+    let mut rep: Vec<u32> = Vec::new();
+    for (ei, (e, between)) in record.edges.iter().zip(edge_faces(record)).enumerate() {
+        let (Some(a), Some(z)) = (vix(e.vertices[0]), vix(e.vertices[1])) else { continue };
+        let pts = edge_points(record, ei as u32);
+        let mid = pts.get(2).copied().unwrap_or(Vec3::ZERO);
+        let n = weld_e.len();
+        let we = *weld_e.entry((a.min(z), a.max(z), cell(mid))).or_insert(n);
+        if we == welded_faces.len() {
+            welded_faces.push(Vec::new());
+            welded_ends.push((a, z));
+            rep.push(ei as u32);
+        }
+        if let Some(fs) = welded_faces.get_mut(we) {
+            for f in between {
+                if !fs.contains(&f) {
+                    fs.push(f);
+                }
             }
         }
     }
-    // Two tangent holes touch along a line that both carry: there four faces meet, two on
-    // each hole's surface. Each surface's two pieces are one face, as for any other edge.
-    for (ei, faces) in &edge_faces {
-        if faces.len() <= 2 || faces.len() > 8 || (keep_split && poly(*ei).is_some_and(|pl| crate::heal::on_split_line(pl, b_keep))) {
+    let points = |we: usize| rep.get(we).map(|e| edge_points(record, *e)).unwrap_or_default();
+    // Pieces of a face split on purpose count apart.
+    let keep = b.split_keep();
+    let split = |we: usize| !keep.is_empty() && on_split_line(&points(we), keep);
+    let mut fp: Vec<usize> = (0..nf).collect();
+    let union = |fp: &mut Vec<usize>, a: usize, b: usize| {
+        let (ra, rb) = (find(fp, a), find(fp, b));
+        if let Some(s) = fp.get_mut(ra) {
+            *s = rb;
+        }
+    };
+    for (we, fs) in welded_faces.iter().enumerate() {
+        if split(we) {
             continue;
         }
-        for (i, &a) in faces.iter().enumerate() {
-            for &b in faces.iter().skip(i + 1) {
-                let analytic = !matches!(surfs.get(a), Some(Surf::Other(_)) | None);
-                if analytic && same_surface(&surfs, &verts, poly(*ei), a, b, tol * 10.0) {
-                    let (ra, rb) = (find(&mut fp, a), find(&mut fp, b));
-                    if let Some(s) = fp.get_mut(ra) {
-                        *s = rb;
+        match fs[..] {
+            [a, b] if faces.same(a, b) => union(&mut fp, a, b),
+            // Two tangent holes touch along a line that both carry: there four faces meet, two
+            // on each hole's surface. Each surface's two pieces are one face.
+            _ if fs.len() > 2 && fs.len() <= 8 => {
+                for (i, &a) in fs.iter().enumerate() {
+                    for &b in fs.iter().skip(i + 1) {
+                        if faces.surf(a).is_some() && faces.same(a, b) {
+                            union(&mut fp, a, b);
+                        }
                     }
                 }
             }
+            _ => {}
         }
     }
     let mut groups: BTreeMap<usize, usize> = BTreeMap::new();
@@ -536,31 +192,25 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
             continue;
         }
         let r = find(&mut fp, f);
-        if groups.insert(r, f).is_none()
-            && let Some(s) = surfs.get(f)
-        {
-            *face_types.entry(s.name().into()).or_insert(0) += 1;
+        if groups.insert(r, f).is_none() {
+            *face_types.entry(name(faces.surf(f)).into()).or_insert(0) += 1;
         }
     }
     // Remaining edges, keyed by merged face pair.
-    let mut remaining: Vec<(usize, (usize, usize), (usize, usize))> = Vec::new(); // (edge, verts, face pair)
+    let mut remaining: Vec<((usize, usize), (usize, usize))> = Vec::new(); // (verts, face pair)
     let mut pinches: Vec<Vec3> = Vec::new();
-    let mut eids: Vec<&usize> = edge_faces.keys().collect();
-    eids.sort();
-    for e in eids {
-        let faces = edge_faces.get(e).cloned().unwrap_or_default();
-        if faces.iter().any(|f| is_deg(*f)) {
+    for (we, fs) in welded_faces.iter().enumerate() {
+        if fs.iter().any(|f| is_deg(*f)) {
             continue;
         }
-        let gs: Vec<usize> = faces.iter().map(|f| find(&mut fp, *f)).collect();
+        let gs: Vec<usize> = fs.iter().map(|f| find(&mut fp, *f)).collect();
         // A free-form face pinched to a point (a horn torus at its axis): a zero-length edge
         // inside one face. A degenerate loop is kept there (two edges and a vertex).
-        if let Some(g) = gs.first()
+        let pts = points(we);
+        if let (Some(g), Some(p0)) = (gs.first(), pts.first())
             && gs.iter().all(|x| x == g)
-            && matches!(surfs.get(*g), Some(Surf::Other(_)))
-            && let Some(pl) = poly(*e)
-            && let Some(p0) = pl.first()
-            && pl.iter().all(|p| p.dist(*p0) < tol * 10.0)
+            && faces.surf(*g).is_none()
+            && pts.iter().all(|p| p.dist(*p0) < tol * 10.0)
         {
             if !pinches.iter().any(|q: &Vec3| q.dist(*p0) < tol * 10.0) {
                 pinches.push(*p0);
@@ -573,38 +223,33 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
             [a] => (a, a),
             _ => (usize::MAX, usize::MAX),
         };
-        if let Some(v) = edge_verts.get(e) {
-            remaining.push((*e, *v, pair));
+        if let Some(v) = welded_ends.get(we) {
+            remaining.push((*v, pair));
         }
     }
     // Vertex degree among remaining edges.
     let mut deg: HashMap<usize, Vec<usize>> = HashMap::new();
-    for (i, (_, (a, b), _)) in remaining.iter().enumerate() {
+    for (i, ((a, b), _)) in remaining.iter().enumerate() {
         deg.entry(*a).or_default().push(i);
         if b != a {
             deg.entry(*b).or_default().push(i);
         }
     }
     let mut ep: Vec<usize> = (0..remaining.len()).collect();
-    let mut merge_vertex: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    let mut merge_vertex: HashSet<usize> = HashSet::new();
     for (v, es) in &deg {
         if let [i, j] = es[..]
             && let (Some(a), Some(b)) = (remaining.get(i), remaining.get(j))
-            && a.2 == b.2
+            && a.1 == b.1
         {
-            let (ri, rj) = (find(&mut ep, i), find(&mut ep, j));
-            if let Some(s) = ep.get_mut(ri) {
-                *s = rj;
-            }
+            union(&mut ep, i, j);
             merge_vertex.insert(*v);
         }
     }
     let mut edge_groups: BTreeMap<usize, bool> = BTreeMap::new(); // root → has a real end vertex
-    for (i, (_, (a, b), _)) in remaining.iter().enumerate() {
+    for (i, ((a, b), _)) in remaining.iter().enumerate() {
         let r = find(&mut ep, i);
-        let real = !merge_vertex.contains(a) || !merge_vertex.contains(b);
-        let e = edge_groups.entry(r).or_insert(false);
-        *e |= real;
+        *edge_groups.entry(r).or_insert(false) |= !merge_vertex.contains(a) || !merge_vertex.contains(b);
     }
     let real_vertices = deg.keys().filter(|v| !merge_vertex.contains(v)).count();
     let closed_loops = edge_groups.values().filter(|r| !**r).count();
@@ -612,10 +257,8 @@ pub fn merged_topology(b: &Body, mesh: &Mesh) -> Result<TopoCounts> {
     // count them).
     let mut apexes = 0;
     for (root, f) in &groups {
-        if let Some(Surf::Cone { apex, .. }) = surfs.get(*f) {
-            let reaches = (0..nf)
-                .filter(|g| find(&mut fp.clone(), *g) == *root)
-                .any(|g| verts.get(g).is_some_and(|v| v.iter().any(|(p, _)| p.dist(*apex) < tol * 10.0)));
+        if let Some(Surf::Cone { v: apex, .. }) = faces.surf(*f) {
+            let reaches = (0..nf).filter(|g| find(&mut fp, *g) == *root).any(|g| faces.vertices(g).iter().any(|p| p.dist(*apex) < tol * 10.0));
             if reaches {
                 apexes += 1;
             }
@@ -643,37 +286,46 @@ pub struct CylinderFace {
     pub internal: bool,
 }
 
+/// A face's cylinder (its axis pointing the one way for every face of that cylinder), if it
+/// lies on one.
+fn cylinder_of(faces: &Faces, face: usize) -> Option<(UnitVec3, Vec3, f64, bool)> {
+    let Some(Surf::Cylinder { o, a, r, convex }) = faces.surf(face) else { return None };
+    let a = a.unit()?;
+    let a = if a.x + a.y * 1e-3 + a.z * 1e-6 < 0.0 { -a } else { a };
+    Some((a, *o, *r, !*convex))
+}
+
 pub fn cylinder_face_at(b: &Body, p: Vec3) -> Option<CylinderFace> {
     let size = b.size();
     let tol = (size * 1e-3).max(1e-3);
-    let mesh = b.tessellate(tol).ok()?;
+    let mesh = b.mesh(&crate::MeshTolerance::chord(tol)).ok()?;
     // Each face's distance from the point (its nearest triangle).
     let mut near: HashMap<u32, f64> = HashMap::new();
     for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
         let Some([a, bb, c]) = mesh.tri(t) else { continue };
-        let d = crate::boolean_guard::point_triangle_dist(p, a, bb, c);
+        let d = solidcraft_geom::compare::closest_on_triangle(p, a, bb, c).dist(p);
         near.entry(*f).and_modify(|x| *x = x.min(d)).or_insert(d);
     }
     let nearest = near.values().copied().fold(f64::INFINITY, f64::min);
     if nearest > size * 0.05 {
         return None;
     }
-    let surfs = classify_faces(b, &mesh, b.face_count(), (size * 1e-4).max(1e-6));
+    let faces = Faces::new(b.record(), (size * 1e-4).max(1e-6) * 10.0);
     // The facets of a curved face lie off it by up to the mesh's tolerance, so the triangle
     // nearest a point on a hole's wall can be one of the face round its rim (they share the
     // rim's points; in a thin plate the wall is a few long facets). Of the faces within that
     // tolerance of the nearest, the point lies on the one whose own surface it is nearest (a
     // cylinder: within its extent).
-    let mut faces: Vec<(u32, f64)> = near.into_iter().filter(|(_, d)| *d <= nearest + tol).collect();
-    faces.sort_by_key(|(f, _)| *f);
+    let mut candidates: Vec<(u32, f64)> = near.into_iter().filter(|(_, d)| *d <= nearest + tol).collect();
+    candidates.sort_by_key(|(f, _)| *f);
     let mut best: Option<(f64, Option<CylinderFace>)> = None;
-    for (face, d) in faces {
-        let (off, cyl) = match surfs.get(face as usize) {
-            Some(Surf::Plane { n, d: k }) => (d.min((n.dot(p) - k).abs()), None),
-            Some(Surf::Cylinder { axis, p: ap, r }) => {
-                let c = cylinder_extent(&mesh, face, *axis, *ap, *r);
+    for (face, d) in candidates {
+        let (off, cyl) = match (faces.surf(face as usize), cylinder_of(&faces, face as usize)) {
+            (_, Some((axis, o, r, internal))) => {
+                let c = CylinderFace { internal, ..cylinder_extent(&mesh, face, axis, o, r) };
                 (d.min(c.off(p)), Some(c))
             }
+            (Some(Surf::Plane { n, d: k }), None) => (d.min((n.dot(p) - k).abs()), None),
             _ => (d, None),
         };
         if best.as_ref().is_none_or(|(bo, _)| off < *bo) {
@@ -701,17 +353,38 @@ impl CylinderFace {
     }
 }
 
+/// Whether any of `b`'s material lies in the ring between radii `r_in` and `r_out` about the
+/// face's axis, over `along` (an interval of the axis coordinate the face's `start` and `end`
+/// are in): the exact intersection of the body with that ring, by an SMLib boolean.
+///
+/// A thread asks this past a face's end: a free end has nothing there (a cap, a chamfer the
+/// groove runs out through), a shoulder, a head or a blind hole's bottom has.
+pub fn material_in_ring(b: &Body, c: &CylinderFace, r_in: f64, r_out: f64, along: (f64, f64)) -> Result<bool> {
+    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    let (a0, a1) = along;
+    if !(r_in >= 0.0 && r_out > r_in && a1 > a0 && r_out.is_finite() && a0.is_finite() && a1.is_finite()) {
+        return Err(crate::KernelError::Invalid(format!("ring r {r_in}..{r_out} over {a0}..{a1}")));
+    }
+    let plane = Plane::from_normal(c.axis_point + c.axis * a0, *c.axis).ok_or_else(|| crate::KernelError::Invalid("ring axis".into()))?;
+    // Circles started at the primitives' odd seam angle, off the frame's axes (as `cylinder`).
+    let seam = crate::build::SEAM_ANGLE;
+    let holes = if r_in > 0.0 { vec![Loop2::circle_from(Vec2::ZERO, r_in, seam).reversed()] } else { Vec::new() };
+    let region = Region2 { outer: Loop2::circle_from(Vec2::ZERO, r_out, seam), holes };
+    let ring = crate::extrude(&plane, &[region], 0.0, a1 - a0)?.pop().ok_or_else(|| crate::KernelError::Failed("ring".into()))?;
+    Ok(crate::boolean(b, &ring, crate::BoolOp::Intersect)?.is_some())
+}
+
 /// The cylindrical face one of whose end circles is centred at `p` (a circle given by its
 /// centre, where no face lies), the nearest when several are.
 pub fn cylinder_end_at(b: &Body, p: Vec3) -> Option<CylinderFace> {
     let size = b.size();
     let tol = (size * 1e-3).max(1e-3);
-    let mesh = b.tessellate(tol).ok()?;
-    let surfs = classify_faces(b, &mesh, b.face_count(), (size * 1e-4).max(1e-6));
+    let mesh = b.mesh(&crate::MeshTolerance::chord(tol)).ok()?;
+    let faces = Faces::new(b.record(), (size * 1e-4).max(1e-6) * 10.0);
     let mut best: Option<(f64, CylinderFace)> = None;
-    for (face, s) in surfs.iter().enumerate() {
-        let Surf::Cylinder { axis, p: ap, r } = *s else { continue };
-        let c = cylinder_extent(&mesh, u32::try_from(face).ok()?, axis, ap, r);
+    for face in 0..b.record().faces.len() {
+        let Some((axis, o, r, internal)) = cylinder_of(&faces, face) else { continue };
+        let c = CylinderFace { internal, ..cylinder_extent(&mesh, u32::try_from(face).ok()?, axis, o, r) };
         let v = p - c.axis_point;
         let along = v.dot(c.axis);
         let off = (v - c.axis * along).len() + (along - c.start).abs().min((c.end - along).abs());
@@ -722,7 +395,8 @@ pub fn cylinder_end_at(b: &Body, p: Vec3) -> Option<CylinderFace> {
     best.map(|(_, c)| c)
 }
 
-/// The extent along its axis, and the side, of a cylindrical face of a tessellated body.
+/// The extent along its axis of a cylindrical face of a tessellated body, and its side as the
+/// mesh's normals have it.
 fn cylinder_extent(mesh: &Mesh, face: u32, axis: UnitVec3, ap: Vec3, r: f64) -> CylinderFace {
     let mut lo = f64::INFINITY;
     let mut hi = f64::NEG_INFINITY;

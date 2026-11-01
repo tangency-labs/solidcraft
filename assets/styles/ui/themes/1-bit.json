@@ -29,6 +29,8 @@
     "chip": "#000000",
     "construction_geom": "#000000",
     "construction_plane": "#ffffff",
+    "comb_envelope": "#000000",
+    "comb_teeth": "#000000",
     "continuity": [
       "#000000",
       "#000000",
@@ -132,6 +134,10 @@
     "render_soft": "#ffffff",
     "rubber_band": "#000000",
     "section_cap": "#000000",
+    "section_hatch": [
+      "#000000",
+      "#000000"
+    ],
     "sel_edge": "#ffffff",
     "sel_edge_rim": "#ffffff",
     "sel_face": "#000000",

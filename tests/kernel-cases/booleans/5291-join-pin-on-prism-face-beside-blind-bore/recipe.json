@@ -1,0 +1,93 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Wedge"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      -15,
+      0
+     ],
+     [
+      -15,
+      20
+     ]
+    ],
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Wedge",
+    "distance": 13,
+    "body_name": "Wedge"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 2.5,
+    "height": 11,
+    "base": [
+     -10,
+     -6.5,
+     10
+    ],
+    "axis": "X",
+    "operation": "cut",
+    "targets": [
+     "Wedge"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 2.1,
+    "height": 11,
+    "base": [
+     -11.8,
+     0,
+     10.8
+    ],
+    "axis": "Y",
+    "operation": "join",
+    "targets": [
+     "Wedge"
+    ]
+   }
+  }
+ ]
+}

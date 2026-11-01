@@ -1,0 +1,25 @@
+# The sources whose change must rerun the surfaces area: one git pathspec glob a line.
+# The commands.
+crates/engine/src/cmd/surface.rs
+crates/engine/src/cmd/surface_boundary.rs
+crates/engine/src/cmd/surface_match.rs
+crates/engine/src/params.rs
+# Their evaluation.
+crates/doc/src/eval_surface.rs
+# The kernel code they call.
+crates/kernel/src/boundary.rs
+crates/kernel/src/boundary_network.rs
+crates/kernel/src/bridge.rs
+crates/kernel/src/fair.rs
+crates/kernel/src/fill*.rs
+crates/kernel/src/loft*.rs
+crates/kernel/src/matchsurf.rs
+crates/kernel/src/surface_extend.rs
+crates/kernel/src/surface_offset.rs
+crates/kernel/src/surface_ruled.rs
+crates/kernel/src/surface_trim.rs
+crates/kernel/src/surface_untrim.rs
+crates/kernel/src/surfaces.rs
+crates/kernel/src/sweep*.rs
+# SMLib and the rig itself.
+tests/kernel-cases/surfaces/**

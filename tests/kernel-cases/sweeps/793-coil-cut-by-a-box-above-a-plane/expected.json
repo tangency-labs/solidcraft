@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#793"
+ ],
+ "what": "the same coil trimmed flat by cutting away everything above z = 12.5 with a box (trimming a coil to length)",
+ "source": "analytic",
+ "method": "a disc of radius 1 whose centre rises with the screw (z0 = 4 theta / 2 pi) keeps the part below z = 12.5, symmetric about its vertical diameter, so its centroid stays at radius R = 20: V = R (2 pi / p) integral over z0 in [0,24] of Ak(12.5 - z0) dz0 with Ak(h) = rs^2 (t sqrt(1-t^2) + asin t + pi/2), t = h/rs, clamped to 0 below -rs and pi rs^2 above rs: V = 1234.893 (Gauss-Legendre).",
+ "body_count": 1,
+ "volume_mm3": 1234.8927457642485
+}

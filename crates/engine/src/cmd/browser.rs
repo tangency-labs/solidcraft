@@ -14,11 +14,24 @@ use serde_json::{Value, json};
 use solidcraft_doc::{BrowserEntry, FeatureKind, MAX_GROUP_NESTING};
 
 use super::CommandSpec;
-use crate::params::{bad, bool_, str_};
+use super::features::{add_feature, check_expr};
+use crate::params::{bad, bool_, expr, str_};
+use crate::schema::browser::{RepairDone, RepairFace, RepairHole, RepairParams, RepairResult, RepairSewn};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
+
+const REPAIR_CONTRACT: TypedContract<RepairParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("body.rename", "Rename Body", rename_body).icon("rename").params("body: its name, name: the new name (features that use the body follow)"),
+    // The import and failed operations offer it for a part the modelling kernel refuses.
+    CommandSpec::new("body.repair", "Repair Part", crate::checked!("body.repair", repair_body))
+        .icon("body")
+        .contract(&REPAIR_CONTRACT)
+        .output(output_schema_for::<RepairResult>)
+        .params(
+            "body: its name (a part the modelling kernel refuses, or an open part that should be a solid); gap?: expr (default 0.2 mm, at most 1 mm: free edges that pair up within it are sewn, each sewn edge carrying its own gap as its tolerance); patch_holes?: bool (default false: loops of free edges left are patched, in the plane of the faces around them where those are that plane, else tangent to them, and sewn in; otherwise the reply offers the patches); name? → the feature, and repair: what changed face by face (rebuilt and refused faces, sewn gaps, holes with their surface.patch), faces and largest edge tolerance before and after, closed, modelling, volume. Refused with why when nothing applies",
+        ),
     CommandSpec::new("sketch.redefine", "Redefine Sketch Plane", redefine_sketch)
         .icon("plane")
         .params("sketch: id or name; plane: as sketch.create; frame?: as sketch.create; author_path?: exact owner occurrence ids; explicitly rebinds or freezes the plane while preserving geometry and dimension names"),
@@ -351,29 +364,30 @@ fn is_construction(k: &FeatureKind) -> bool {
     matches!(k, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
 }
 
-/// The item a key names, or `None` when it names none.
+/// The item a key names, or `None` when it names none; bodies are looked for in the placed model
+/// `world`.
 ///
 /// The rule, the same for showing and for hiding: an exact name wins over a name that only
 /// matches it by case, so the body called "Back Lid" is not the sketch called "Back lid"
 /// (#6967). Among the exact matches the order is the one there always was: a feature (by id
 /// or by name), then a body, then a joint. With no exact match the name is compared without
 /// regard to case, as it always was: a feature first, then an origin item.
-fn shown_item(s: &Session, key: &str) -> Option<Shown> {
-    shown_item_exact(s, key).or_else(|| shown_item_ignore_case(s, key))
+fn shown_item(s: &Session, world: &solidcraft_doc::ModelState, key: &str) -> Option<Shown> {
+    shown_item_exact(s, world, key).or_else(|| shown_item_ignore_case(s, world, key))
 }
 
 /// The item a key names exactly: a feature, a body or a joint whose name is the key itself.
-fn shown_item_exact(s: &Session, key: &str) -> Option<Shown> {
+fn shown_item_exact(s: &Session, world: &solidcraft_doc::ModelState, key: &str) -> Option<Shown> {
     // A feature is found by id or by name, as `find_feature` does, but the name must be the
     // key itself here.
     let feature = match key.parse::<u64>() {
         Ok(id) => s.doc.feature(id).or_else(|| s.doc.features.iter().find(|f| f.name == key)),
         Err(_) => s.doc.features.iter().find(|f| f.name == key),
     };
-    if let Some(shown) = feature.and_then(|f| shown_feature(s, f, key)) {
+    if let Some(shown) = feature.and_then(|f| shown_feature(world, f, key)) {
         return Some(shown);
     }
-    if s.world_state().bodies.iter().any(|b| b.name == key) {
+    if world.bodies.iter().any(|b| b.name == key) {
         return Some(Shown::Body(key.to_string()));
     }
     s.doc.assembly.joints.iter().find(|j| j.name == key).map(|j| Shown::Joint(j.id))
@@ -381,8 +395,8 @@ fn shown_item_exact(s: &Session, key: &str) -> Option<Shown> {
 
 /// The item a key names when nothing matches it exactly: the name is compared without regard to
 /// case, as it always was.
-fn shown_item_ignore_case(s: &Session, key: &str) -> Option<Shown> {
-    if let Some(shown) = s.doc.find_feature(key).and_then(|f| shown_feature(s, f, key)) {
+fn shown_item_ignore_case(s: &Session, world: &solidcraft_doc::ModelState, key: &str) -> Option<Shown> {
+    if let Some(shown) = s.doc.find_feature(key).and_then(|f| shown_feature(world, f, key)) {
         return Some(shown);
     }
     ORIGIN.iter().find(|o| o.eq_ignore_ascii_case(key)).map(|o| Shown::Origin(o.to_string()))
@@ -391,12 +405,12 @@ fn shown_item_ignore_case(s: &Session, key: &str) -> Option<Shown> {
 /// The item a feature is: a sketch, or construction geometry by name. A feature that is neither
 /// (an extrude, a fillet) is not an item of its own, and the key goes on to the next kind. A
 /// sketch that shares its name with a body is the body's (#7206).
-fn shown_feature(s: &Session, f: &solidcraft_doc::Feature, key: &str) -> Option<Shown> {
+fn shown_feature(world: &solidcraft_doc::ModelState, f: &solidcraft_doc::Feature, key: &str) -> Option<Shown> {
     if matches!(f.kind, FeatureKind::Sketch { .. }) {
         // A sketch and a body with exactly the same name, a sketch named after the body it
         // makes (#7206): the name is the body's. The browser names a sketch by its id and a
         // body only by its name, so the body could not be reached otherwise.
-        if f.name == key && s.world_state().bodies.iter().any(|b| b.name == key) {
+        if f.name == key && world.bodies.iter().any(|b| b.name == key) {
             return Some(Shown::Body(key.to_string()));
         }
         return Some(Shown::Sketch(f.id));
@@ -527,7 +541,7 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
             list.iter().map(|j| super::joints::joint_id(s, Some(j), cmd).map(Shown::Joint)).collect::<Result<_>>()?
         }
         (Some(_), Some(_)) => return Err(bad(cmd, "give `items` or `folder`, not both")),
-        (Some("bodies"), None) => s.world_state().bodies.iter().map(|b| Shown::Body(b.name.clone())).collect(),
+        (Some("bodies"), None) => s.world_state()?.bodies.iter().map(|b| Shown::Body(b.name.clone())).collect(),
         (Some("sketches"), None) => s.model.state().sketches.iter().map(|x| Shown::Sketch(x.feature)).collect(),
         (Some("construction"), None) => s.doc.features.iter().filter(|f| is_construction(&f.kind)).map(|f| Shown::Origin(f.name.clone())).collect(),
         (Some("origin"), None) => ORIGIN.iter().map(|o| Shown::Origin(o.to_string())).collect(),
@@ -535,7 +549,7 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
         // Everything at once, for a single "show all" step: every body, sketch, construction
         // item, origin item and joint.
         (Some("all"), None) => {
-            let mut all: Vec<Shown> = s.world_state().bodies.iter().map(|b| Shown::Body(b.name.clone())).collect();
+            let mut all: Vec<Shown> = s.world_state()?.bodies.iter().map(|b| Shown::Body(b.name.clone())).collect();
             all.extend(s.model.state().sketches.iter().map(|x| Shown::Sketch(x.feature)));
             all.extend(s.doc.features.iter().filter(|f| is_construction(&f.kind)).map(|f| Shown::Origin(f.name.clone())));
             all.extend(ORIGIN.iter().map(|o| Shown::Origin(o.to_string())));
@@ -549,8 +563,9 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
                 return Err(bad(cmd, "`items` must list sketches, bodies or construction geometry"));
             }
             // Every item is found before anything changes.
+            let world = s.world_state()?;
             keys.iter()
-                .map(|k| shown_item(s, k).ok_or_else(|| bad(cmd, format!("no sketch, body, construction item or joint `{k}`"))))
+                .map(|k| shown_item(s, &world, k).ok_or_else(|| bad(cmd, format!("no sketch, body, construction item or joint `{k}`"))))
                 .collect::<Result<_>>()?
         }
         (None, None) => return Err(bad(cmd, "`items` or `folder` is required")),
@@ -923,9 +938,9 @@ fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
         // Standard view names come first, as in the browser's Named Views folder.
         (Some(name), None) => match crate::render::StandardView::parse(name) {
             Some(sv) => {
-                let mut c = crate::view::home_camera(s);
+                let mut c = crate::view::home_camera(s)?;
                 c.set_view(sv);
-                c.fit(&crate::view::bounds(s));
+                c.fit(&crate::view::bounds(s)?);
                 c
             }
             None => s.doc.named_views.iter().find(|v| v.name == name).map(camera_of).ok_or_else(|| bad(cmd, format!("no named view `{name}`")))?,
@@ -1009,6 +1024,76 @@ fn member_pins(s: &Session, fid: u64) -> Option<BTreeMap<String, String>> {
 pub(crate) fn counted(f: &solidcraft_doc::Feature, i: usize) -> bool {
     let first = f.body_names.first().is_some_and(|n| !n.trim().is_empty());
     f.body_names.get(i).is_none_or(|n| n.trim().is_empty()) && (f.shell_piece_order || i < f.body_names.len() || !first)
+}
+
+/// Repair Part (#8371): a feature, which repairs the part as it evaluates (a part with nothing
+/// to repair fails it, with why, and the command changes nothing); the reply is what that
+/// evaluation changed, face by face.
+fn repair_body(s: &mut Session, p: &Value) -> Result<Value> {
+    use solidcraft_doc::expr::Kind;
+    use solidcraft_kernel::{Continuity, SurfaceKind};
+    let cmd = "body.repair";
+    let name = str_(p, "body").filter(|b| !b.trim().is_empty()).ok_or_else(|| bad(cmd, "`body` must name the part to repair"))?.to_string();
+    let state = s.model.state();
+    let source = state.body(&name).ok_or_else(|| bad(cmd, format!("no body `{name}`")))?;
+    if source.body.is_mesh() {
+        return Err(bad(cmd, "a mesh body has no faces to repair: convert it first"));
+    }
+    let gap = expr(p, "gap").unwrap_or_else(|| "0.2 mm".into());
+    check_expr(s, &gap, Kind::Length, cmd, "gap")?;
+    let patch_holes = bool_(p, "patch_holes").unwrap_or(false);
+    let v = add_feature(s, p, FeatureKind::Repair { body: name.clone().into(), gap, patch_holes })?;
+    let field = |k: &str| v.get(k).cloned().unwrap_or(Value::Null);
+    let feature = field("feature").as_u64().unwrap_or(0);
+    let report = s
+        .model
+        .result(feature)
+        .and_then(|r| r.repair.clone())
+        .ok_or_else(|| crate::EngineError::Other(format!("{cmd}: the feature kept no report of the repair")))?;
+    let repaired = s.model.state().body(&name).map(|b| b.body.clone());
+    let volume = repaired.filter(|_| report.closed).and_then(|b| solidcraft_kernel::measure(&b).ok()).map(|m| m.volume);
+    let surface = |k: SurfaceKind| format!("{k:?}").to_lowercase();
+    let face = |face: usize, k: SurfaceKind, why: &str| RepairFace { face, surface: surface(k), why: why.to_string() };
+    let done = RepairDone {
+        rebuilt: report.rebuilt.iter().map(|r| face(r.face, r.surface, &r.why)).collect(),
+        refused: report.refused.iter().map(|r| face(r.face, r.surface, &r.why)).collect(),
+        sewn: report.sewn.iter().map(|g| RepairSewn { faces: g.faces, gap: g.gap, at: [g.at.x, g.at.y, g.at.z] }).collect(),
+        holes: report
+            .holes
+            .iter()
+            .map(|h| {
+                let g = if h.continuity == Continuity::G0 { "g0" } else { "g1" };
+                let edges: Vec<[f64; 3]> = h.edges.iter().map(|q| [q.x, q.y, q.z]).collect();
+                RepairHole {
+                    faces: h.faces.clone(),
+                    continuity: g.into(),
+                    patched: h.patched,
+                    why: h.why.clone(),
+                    patch: json!({"command": "surface.patch", "params": {"body": name, "edges": edges, "continuity": g}}),
+                }
+            })
+            .collect(),
+        faces: report.faces,
+        largest_edge_tolerance: report.largest_edge_tolerance,
+        closed: report.closed,
+        modelling: report.modelling,
+        volume,
+    };
+    let list =
+        |k: &str| v.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
+    let reply = RepairResult {
+        feature,
+        name: field("name").as_str().unwrap_or_default().to_string(),
+        bodies: list("bodies"),
+        created_bodies: list("created_bodies"),
+        changed_bodies: list("changed_bodies"),
+        removed_bodies: list("removed_bodies"),
+        warning: field("warning").as_str().map(str::to_string),
+        ms: field("ms").as_f64(),
+        repair: done,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
 }
 
 fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1287,7 +1372,7 @@ mod tests {
         run(&mut s, "browser.visibility", json!({"items": ["KB (K:2)"], "visible": false}));
         let r = run(&mut s, "body.rename", json!({"body": "KB (K:2)", "name": "Lid"}));
         assert_eq!((r["body"].as_str(), r["name"].as_str()), (Some("KB"), Some("Lid")), "{r}");
-        let world = |s: &Session| s.world_state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+        let world = |s: &Session| s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
         let renamed = world(&s);
         assert!(renamed.iter().any(|n| n == "Lid") && renamed.iter().any(|n| n == "Lid (K:2)"), "{renamed:?}");
         assert!(!renamed.iter().any(|n| n.starts_with("KB")), "{renamed:?}");
@@ -1296,6 +1381,44 @@ mod tests {
         run(&mut s, "edit.undo", json!({}));
         let back = world(&s);
         assert!(back.iter().any(|n| n == "KB") && back.iter().any(|n| n == "KB (K:2)"), "{back:?}");
+    }
+
+    #[test]
+    fn repair_part_patches_a_missing_face_as_one_undoable_feature() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Box"}));
+        run(&mut s, "surface.unstitch", json!({"body": "Box", "faces": [[5, 5, 10]]}));
+        let open = |s: &Session| s.model.state().body("Box").is_some_and(|b| b.body.is_surface());
+        assert!(open(&s));
+        // A hole alone: nothing is sewn, and the reason names the hole.
+        let err = s.execute("body.repair", &json!({"body": "Box"})).unwrap_err().to_string();
+        assert!(err.contains("a loop of 4 edges"), "{err}");
+        let features = s.doc.features.len();
+        let v = run(&mut s, "body.repair", json!({"body": "Box", "patch_holes": true}));
+        assert_eq!(s.doc.features.len(), features + 1);
+        let done = &v["repair"];
+        assert_eq!(done["holes"][0]["patched"], json!(true), "{v}");
+        assert_eq!(done["holes"][0]["continuity"], json!("g0"), "{v}");
+        assert_eq!(done["holes"][0]["patch"]["command"], json!("surface.patch"), "{v}");
+        assert_eq!(done["faces"], json!([5, 6]));
+        assert_eq!((done["closed"].clone(), done["modelling"].clone()), (json!(true), json!(true)));
+        assert!((done["volume"].as_f64().unwrap() - 1000.0).abs() < 1e-6, "{v}");
+        assert_eq!(v["changed_bodies"], json!(["Box"]));
+        assert!(!open(&s));
+        // Saved and opened again, the feature repairs the part again.
+        let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert!(cold.model.state().body("Box").is_some_and(|b| !b.body.is_surface()));
+        run(&mut s, "edit.undo", json!({}));
+        assert!(open(&s));
+        // A solid with nothing to repair, an unknown body, a gap out of range: refused, nothing added.
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "Solid"}));
+        for p in
+            [json!({"body": "Solid"}), json!({"body": "Nope"}), json!({}), json!({"body": "Box", "gap": "5 mm"}), json!({"body": "Box", "gap": "-1"})]
+        {
+            let n = s.doc.features.len();
+            assert!(s.execute("body.repair", &p).is_err(), "{p}");
+            assert_eq!(s.doc.features.len(), n, "{p}");
+        }
     }
 
     #[test]
@@ -2303,7 +2426,7 @@ mod tests {
         let body = s.model.state().bodies[0].name.clone();
         let drain_name = s.doc.feature(drain).unwrap().name.clone();
         let cam = solidcraft_render::Camera::default();
-        let lines = |s: &Session| crate::view::scene(s, &cam).lines.len();
+        let lines = |s: &Session| crate::view::scene(s, &cam).unwrap().lines.len();
         let shown = |s: &mut Session| {
             let d = run(s, "document.inspect", json!({}));
             d["sketches"].as_array().unwrap().iter().filter(|x| x["visible"] == true).count()
@@ -2331,7 +2454,7 @@ mod tests {
         run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/sketches"], "visible": true}));
         // Bodies (following a rename) and construction planes.
         run(&mut s, "browser.visibility", json!({"items": [body.clone(), "Floor", "xy"], "visible": false}));
-        assert!(crate::view::scene(&s, &cam).meshes.is_empty());
+        assert!(crate::view::scene(&s, &cam).unwrap().meshes.is_empty());
         assert_eq!(s.visibility.hidden_origin, vec!["Floor".to_string(), "XY".to_string()]);
         run(&mut s, "body.rename", json!({"body": body, "name": "Tray"}));
         assert_eq!(s.visibility.hidden_bodies, vec!["Tray".to_string()]);
@@ -2398,7 +2521,7 @@ mod tests {
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Box"}));
         s.mark_saved();
         let cam = solidcraft_render::Camera::default();
-        let drawn = |s: &Session| crate::view::scene(s, &cam).meshes.len();
+        let drawn = |s: &Session| crate::view::scene(s, &cam).unwrap().meshes.len();
         assert!(drawn(&s) > 0, "the box is drawn");
         assert!(!s.is_dirty());
         let steps = s.undo.len();

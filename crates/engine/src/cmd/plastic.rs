@@ -509,8 +509,7 @@ mod tests {
         let before = s.model.state_before(feature.id);
         let name = feature.face_names.first().unwrap();
         let point = solidcraft_doc::naming::point_on_face(&before, name, Vec3::new(0., -28., 20.))
-            .expect("the original wall identity survives merged pieces")
-            .0;
+            .expect("the original wall identity survives merged pieces");
         assert!((point - Vec3::new(0., -33., 20.)).len() < 1e-8, "{point:?}");
         assert!(s.model.results.iter().all(|result| result.error.is_none()));
         let check = |session: &Session| {

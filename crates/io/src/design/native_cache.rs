@@ -6,8 +6,8 @@
 use super::*;
 use solidcraft_doc::{ModelState, SavedModel};
 
-const FORMAT: &str = "solidcraft-model-cache/5";
-const PRODUCER: &str = "solidcraft-truck-adapter/3";
+const FORMAT: &str = "solidcraft-model-cache/8";
+const PRODUCER: &str = "solidcraft-truck-adapter/4";
 const MANIFEST: &str = "cache/model.json";
 const PAYLOAD: &str = "cache/bodies.bin";
 /// Body records (a placed copy is one record; its part is stored once).
@@ -454,7 +454,7 @@ fn matrix_of(numbers: &[f64]) -> Result<[[f64; 4]; 4]> {
 
 pub(super) fn geometry_preview(document: &[u8], model: &SavedModel) -> Result<DesignPreview> {
     let doc = Document::from_json(std::str::from_utf8(document).map_err(invalid)?)?;
-    let world = solidcraft_doc::world_state(&doc, &*model.final_state()?);
+    let world = solidcraft_doc::world_state(&doc, &*model.final_state()?)?;
     let mut preview = DesignPreview::default();
     let mut triangles = 0usize;
     let mut display_bytes = 0usize;

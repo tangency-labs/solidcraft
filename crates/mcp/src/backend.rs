@@ -684,7 +684,7 @@ impl Backend for Headless {
                 match v {
                     // Fit keeps the orientation, also of a camera `view.apply` chose.
                     "fit" => {
-                        let b = solidcraft_engine::view::bounds(s);
+                        let b = solidcraft_engine::view::bounds(s).map_err(|e| e.to_string())?;
                         if let Some(c) = s.camera.as_mut() {
                             c.fit(&b);
                         }
@@ -699,18 +699,21 @@ impl Backend for Headless {
             "ui.render" => {
                 let (w, h) = (dim(&p, "width", 1280.0), dim(&p, "height", 800.0));
                 // The camera `view.apply` chose, else the standard view framing the model.
-                let cam = s.camera.unwrap_or_else(|| {
-                    let mut cam = solidcraft_engine::view::home_camera(s);
-                    cam.set_view(self.view);
-                    cam
-                });
+                let cam = match s.camera {
+                    Some(cam) => cam,
+                    None => {
+                        let mut cam = solidcraft_engine::view::home_camera(s).map_err(|e| e.to_string())?;
+                        cam.set_view(self.view);
+                        cam
+                    }
+                };
                 // The grid and the axes are drawn unless the request leaves them out.
                 let shown = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(true);
                 let guides = Guides { grid: shown("grid"), axes: shown("axes") };
                 let path = str_p("path").ok_or("missing `path`")?;
                 // A path outside the agent's folders is refused before anything is drawn.
                 solidcraft_engine::io::vfs::check(path).map_err(|e| format!("{path}: {e}"))?;
-                let scene = solidcraft_engine::view::scene_with_guides(s, &cam, s.section, guides);
+                let scene = solidcraft_engine::view::scene_with_guides(s, &cam, s.section, guides).map_err(|e| e.to_string())?;
                 // Drawn on the GPU by the renderer the host installed (`solidcraft-cli mcp`).
                 let png = solidcraft_engine::capture::png(&scene, &cam, w, h)?;
                 solidcraft_engine::io::vfs::write(path, &png.bytes).map_err(|e| format!("{path}: {e}"))?;

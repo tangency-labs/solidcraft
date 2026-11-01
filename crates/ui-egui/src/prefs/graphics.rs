@@ -169,6 +169,15 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let response = ui_kit::checkbox(ui, app.tr("ui.cosmetic_thread_markings"), &mut app.preferences.cosmetic_threads)
             .on_hover_text(app.tr("ui.cosmetic_thread_markings_help"));
         crate::scenario::publish_handle("prefs:cosmetic_threads", response.rect.center());
+        ui_kit::row(ui, app.tr("prefs.section_hatch"), |ui| {
+            let styles = [crate::prefs::SectionHatch::One, crate::prefs::SectionHatch::ByPart];
+            let mut selected = styles.iter().position(|s| *s == app.preferences.section_hatch).unwrap_or(1);
+            if ui_kit::segmented(ui, &mut selected, &[app.tr("prefs.section_hatch_one"), app.tr("prefs.section_hatch_by_part")], Default::default())
+                && let Some(style) = styles.get(selected)
+            {
+                app.preferences.section_hatch = *style;
+            }
+        });
         ui.columns(2, |columns| {
             if let Some(left) = columns.get_mut(0) {
                 ui_kit::checkbox(left, crate::i18n::tr_label("Grid"), &mut app.ui.show_grid);
@@ -179,6 +188,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui_kit::checkbox(ui, app.tr("ui.frame_rate_details"), &mut app.preferences.frame_rate_details)
                         .on_hover_text(app.tr("settings.frame_rate_details_note"));
                 });
+                setting::profile_operations(app, left).on_hover_text(app.tr("prefs.profile_operations_note"));
                 crate::prefs::view_angles_checkbox(app, left);
                 setting::reference_geometry_through_bodies(app, left).on_hover_text(app.tr("settings.reference_geometry_through_bodies_help"));
                 setting::sketch_halo(app, left);

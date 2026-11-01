@@ -3,8 +3,6 @@
 //! approximation.
 
 use super::*;
-use crate::body::from_p3;
-use truck_modeling::ParametricSurface;
 
 /// The angle between two vectors, in degrees.
 fn angle_deg(a: Vec3, b: Vec3) -> f64 {
@@ -28,9 +26,8 @@ fn shape_of(d1: Vec3, d2: Vec3, d3: Vec3) -> (Vec3, Vec3, Vec3) {
 /// read back as the position, the unit tangent, the curvature vector and the change of curvature
 /// along that inward direction.
 fn across(body: &Body, uv: (f64, f64), into: (f64, f64), h: f64) -> (Vec3, Vec3, Vec3, Vec3) {
-    let face = body.solid.face_iter().next().unwrap();
-    let surf = face.surface();
-    let q: Vec<Vec3> = (0..5).map(|k| from_p3(surf.subs(uv.0 + k as f64 * h * into.0, uv.1 + k as f64 * h * into.1))).collect();
+    let (surf, _) = crate::bridge::the_face(body).unwrap();
+    let q: Vec<Vec3> = (0..5).map(|k| surf.point([uv.0 + k as f64 * h * into.0, uv.1 + k as f64 * h * into.1]).unwrap()).collect();
     let (f0, f1, f2, f3, f4) = (q[0], q[1], q[2], q[3], q[4]);
     let d1 = (f0 * -25.0 + f1 * 48.0 + f2 * -36.0 + f3 * 16.0 + f4 * -3.0) * (1.0 / (12.0 * h));
     let d2 = (f0 * 35.0 + f1 * -104.0 + f2 * 114.0 + f3 * -56.0 + f4 * 11.0) * (1.0 / (12.0 * h * h));

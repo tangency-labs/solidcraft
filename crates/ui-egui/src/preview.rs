@@ -548,7 +548,7 @@ pub(crate) fn extrusion_target_error(s: &Session, cmds: &[(String, Value)], befo
                     before.bodies.iter().any(|body| s.doc.model_body_component(body) == s.active_component)
                         || (matches!(op, "cut" | "intersect") && s.cut_takes_every_body(before))
                 },
-                |name| s.world_state().body(name).is_some(),
+                |name| crate::open_meshing::session_world(s).body(name).is_some(),
             );
         }
         if !found && matches!(op, "cut" | "intersect") {
@@ -708,7 +708,16 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             continue;
         }
         let m = b.mesh();
+        // A changed body's surface it keeps is not removed material: drawn as ghost there it
+        // lies on the new body's face, and where that face is curved and meshed anew (its
+        // boundary moved) the two triangulations cross by up to their chord error, far past the
+        // ghost's depth bias, so the ghost showed through the new face in slivers.
+        let kept = if gone { None } else { after.body(&b.name).and_then(|a| SurfaceIndex::new(&a.mesh())) };
         for t in &m.triangles {
+            let Some(corners) = m.tri(t) else { continue };
+            if kept.as_ref().is_some_and(|k| on_surface(k, corners)) {
+                continue;
+            }
             for k in t {
                 let i = *k as usize;
                 if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {
@@ -753,6 +762,12 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         })
         .collect();
     Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None }
+}
+
+/// Does the triangle lie on the surface `index` holds: its corners, the middles of its sides
+/// and its centroid all on it?
+fn on_surface(index: &SurfaceIndex, [a, b, c]: [Vec3; 3]) -> bool {
+    [a, b, c, (a + b) / 2.0, (b + c) / 2.0, (c + a) / 2.0, (a + b + c) / 3.0].into_iter().all(|p| index.contains(p))
 }
 
 /// Which of the `nf` faces of `m` are new surface, i.e. not on the old mesh? Each is decided by
@@ -1343,6 +1358,29 @@ mod tests {
         assert!(!b.scene.ghost.is_empty());
         assert_eq!(s.revision, rev);
         assert_eq!(s.undo.len(), undo);
+    }
+
+    /// A fillet running into a boss: the boss's cylinder face keeps its surface but is meshed
+    /// anew (the fillet's end moves its boundary), so the ghost leaves it out. Drawn as ghost it
+    /// crossed the new triangulation and showed through the face in slivers.
+    #[test]
+    fn a_fillet_preview_ghosts_only_the_removed_material() {
+        let s = session_of(&[
+            ("solid.box", json!({"length": 60, "width": 40, "height": 30, "center": [0, 0, 15]})),
+            ("solid.cylinder", json!({"radius": 12, "height": 50, "base": [10, -20, 0], "operation": "join"})),
+        ]);
+        let b = compute(&s, &[("solid.fillet".into(), json!({"edges": [[-16, -20, 30]], "radius": 4}))], colors()).unwrap();
+        assert_eq!(b.replaced, vec!["Body1".to_string()]);
+        // Ghost triangles on the boss's side, well away from the fillet.
+        let on_boss = b.scene.ghost.as_chunks::<28>().0.as_chunks::<3>().0.iter().filter(|t| {
+            t.iter().all(|v| {
+                let f = |k: usize| f32::from_le_bytes([v[4 * k], v[4 * k + 1], v[4 * k + 2], v[4 * k + 3]]) as f64;
+                let (x, y, z) = (f(0), f(1), f(2));
+                (((x - 10.0).powi(2) + (y + 20.0).powi(2)).sqrt() - 12.0).abs() < 1e-3 && z > 36.0
+            })
+        });
+        assert_eq!(on_boss.count(), 0, "the boss keeps its surface: no ghost on it");
+        assert!(!b.scene.ghost.is_empty(), "the edge the fillet removes is still shown as ghost");
     }
 
     /// A cut shows its tool see-through and replaces nothing.

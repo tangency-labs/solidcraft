@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "isocurves with a count of 0",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin: a count is a whole number 1 to 100: 0 is refused",
+ "outcome": "refused",
+ "refusal": "`count` must be a whole number of curves each way"
+}

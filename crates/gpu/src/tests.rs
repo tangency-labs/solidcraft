@@ -57,7 +57,7 @@ fn a_pipeline_the_device_rejects_is_an_error_not_a_crash() {
     // The same device then builds the real pipeline and evaluates on it.
     let gpu = ok(TessGpu::new(name, device, queue));
     let body = ok(solidcraft_kernel::torus(Vec3::ZERO, 6.0, 1.5));
-    let plan = ok(body.display_plan(0.01));
+    let plan = ok(body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.01)));
     assert_eq!(ok(gpu.evaluate(&plan)).positions.len(), plan.evaluate().positions.len());
 }
 
@@ -96,6 +96,14 @@ fn the_hlsl_for_fxc_has_no_arrays_fxc_must_unroll_loops_for() {
     }
 }
 
+/// The shader's basis slots hold the highest degree the CPU evaluator takes, so every surface
+/// the CPU evaluates the GPU evaluates too.
+#[test]
+fn the_shader_takes_every_degree_the_cpu_evaluator_does() {
+    let slots = format!("const W: u32 = {}u;", solidcraft_geom::bspline::MAX_SPLINE_DEGREE + 1);
+    assert!(SHADER.contains(&slots), "tess.wgsl must declare `{slots}`");
+}
+
 fn ok<T, E: std::fmt::Debug>(r: std::result::Result<T, E>) -> T {
     match r {
         Ok(v) => v,
@@ -125,7 +133,7 @@ fn bodies() -> Vec<(&'static str, Body)> {
 fn gpu_evaluation_matches_the_cpu() {
     let Some(gpu) = gpu() else { return };
     for (name, body) in bodies() {
-        let plan = ok(body.display_plan(0.01));
+        let plan = ok(body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.01)));
         let cpu = plan.evaluate();
         let got = ok(gpu.evaluate(&plan));
         assert_eq!(got.triangles, cpu.triangles, "{name}");
@@ -155,7 +163,7 @@ fn gpu_evaluation_matches_the_cpu() {
 fn a_resident_mesh_matches_the_cpu() {
     let Some(gpu) = gpu() else { return };
     for (name, body) in bodies() {
-        let plan = ok(body.display_plan_angular(0.01, std::f64::consts::PI / 9.0));
+        let plan = ok(body.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: 0.01, angle: Some(std::f64::consts::PI / 9.0) }));
         let cpu = plan.evaluate();
         let mesh = ok(gpu.prepare(&plan));
         assert_eq!(mesh.vertex_count as usize, cpu.positions.len(), "{name}");
@@ -196,7 +204,10 @@ fn a_resident_mesh_matches_the_cpu() {
 #[test]
 fn a_scene_in_one_dispatch_matches_each_body_on_the_cpu() {
     let Some(gpu) = gpu() else { return };
-    let plans: Vec<TessPlan> = bodies().iter().map(|(_, b)| ok(b.display_plan_angular(0.01, std::f64::consts::PI / 9.0))).collect();
+    let plans: Vec<TessPlan> = bodies()
+        .iter()
+        .map(|(_, b)| ok(b.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: 0.01, angle: Some(std::f64::consts::PI / 9.0) })))
+        .collect();
     let refs: Vec<&TessPlan> = plans.iter().collect();
     let mesh = ok(gpu.prepare_many(&refs));
     assert_eq!(mesh.parts.len(), plans.len());
@@ -300,11 +311,11 @@ fn bench_plate() {
         let (mut nr, mut np) = (0, 0);
         for _ in 0..5 {
             let t = std::time::Instant::now();
-            let m = ok(plate.tessellate(tol));
+            let m = ok(plate.mesh(&solidcraft_kernel::MeshTolerance::chord(tol)));
             r.push(ms(t));
             nr = m.triangles.len();
             let t = std::time::Instant::now();
-            let plan = ok(plate.display_plan(tol));
+            let plan = ok(plate.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(tol)));
             p.push(ms(t));
             let t = std::time::Instant::now();
             let m = plan.evaluate();

@@ -1,0 +1,10 @@
+{
+ "what": "the peg's front top edge alone chamfered 2 into the cylinder: the chamfer's end on the cylinder's wall leaves the front face's contact line tangentially (a zero-angle corner of the chamfer face) where the front face runs tangent into the cylinder; reported from the app (2026-10-30, test-peg part)",
+ "source": "analytic",
+ "method": "a bar 40 x 16 x 10 whose far end is a half disc R8 about (40, 8), a disc R8 about the same centre sketched on its top (the top's outline projected) and extruded 10 up, joined: the bar's front face y = 0 runs tangent into the cylinder along x = 40, V0 = 6400 + 960 pi; the 2 x 2 chamfer of the front top edge removes its triangle along x up to the cylinder's wall, x = 40 - sqrt(64 - (8 - y)^2): removed = integral over y in [0, 2] of (2 - y)(40 - sqrt(64 - (8 - y)^2)) dy = 74.1305705753 (tanh-sinh quadrature)",
+ "body_count": 1,
+ "volume_mm3": 9341.798376870891,
+ "continuity": {
+  "order": "g0"
+ }
+}

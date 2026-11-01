@@ -158,7 +158,7 @@ fn state_for_sketch<'a>(
     });
     match attachment {
         Some(anchor) => solidcraft_doc::state_in_face_anchor_frame(doc, st, anchor, comp),
-        None => Ok(solidcraft_doc::state_in_frame_at(doc, st, comp, owner_frame(s, doc, comp))),
+        None => solidcraft_doc::state_in_frame_at(doc, st, comp, owner_frame(s, doc, comp)),
     }
 }
 
@@ -208,9 +208,15 @@ pub(super) fn refresh(s: &Session, doc: &Document, id: u64, sk: &mut Sketch) -> 
         return vec!["lost face attachment; reattach explicitly".into()];
     };
     let Ok(plane) = sketch_plane(&doc, id, &st) else { return Vec::new() };
-    let warnings = match attachment {
+    let refreshed = match attachment {
         Some(anchor) => solidcraft_doc::project::refresh_face_anchor_links(&doc, &vals, &st, &plane, sk, anchor),
         None => solidcraft_doc::project::refresh_links(&doc, &vals, &st, &plane, sk),
+    };
+    // A link whose named face or edge is gone fails the sketch when it is evaluated; while it is
+    // edited, that is what the refresh says.
+    let warnings = match refreshed {
+        Ok(warnings) => warnings,
+        Err(e) => return vec![e.in_feature(&doc.feature(id).map(|f| f.name.clone()).unwrap_or_default()).to_string()],
     };
     if let Ok(stored) = sketch_store::read(&doc, id)
         && sk.positions_in(stored).is_some()
@@ -307,6 +313,9 @@ fn add_link_unless_present(
     // The link is the edge that was picked, not whichever is nearest the picked point later.
     let edge_name = solidcraft_doc::project::resolved_edge_name(&st, &r);
     let link = sk.add_link_with_wires(kind, r.source, &r.geom, &r.wires)?;
+    // The wires' exact curves, as a refresh of the link gives them (an included edge's record
+    // curve): a link made now is the one its sketch would resolve.
+    sk.set_link_wire_curves(&link, &r.exact)?;
     if let Some(l) = sk.links.iter_mut().find(|l| l.id == link) {
         l.face_name = name;
         l.edge_name = edge_name;
@@ -752,7 +761,7 @@ pub(super) fn project_internal_faces(s: &mut Session, id: u64, body: &str, indic
     let mut doc = (*s.doc).clone();
     let raw = s.model.state_before(id);
     let component = doc.feature(id).map(|feature| feature.component).unwrap_or(0);
-    let state = solidcraft_doc::state_in_frame_at(&doc, &raw, component, owner_frame(s, &doc, component));
+    let state = solidcraft_doc::state_in_frame_at(&doc, &raw, component, owner_frame(s, &doc, component))?;
     let plane = sketch_plane(&doc, id, &state)?;
     let names = state.body(body).map(solidcraft_doc::naming::face_names).unwrap_or_default();
 

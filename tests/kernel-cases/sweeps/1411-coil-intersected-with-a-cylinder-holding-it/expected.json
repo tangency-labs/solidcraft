@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1411"
+ ],
+ "what": "a 4-turn coil (centre diameter 40, wire 3 mm, pitch 8) intersected with a cylinder of radius 25 and height 40 that holds it (crash report: unclean exit in solid.coil)",
+ "source": "analytic",
+ "method": "the wire (radius 20 +- 1.5, z -1.5..33.5) lies wholly inside the cylinder (r 25, z -2..38), so the intersection is the coil: V = pi 1.5^2 * 2 pi 20 * 4 = 3553.1.",
+ "body_count": 1,
+ "volume_mm3": 3553.057584392169
+}

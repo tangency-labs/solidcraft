@@ -1,0 +1,23 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2847",
+  "tangency-labs/solidcraft#3452"
+ ],
+ "what": "a loft through 19 identical 6 x 4 rectangles on planes turning about the Z axis every 10 degrees from 0 to 180 degrees, centred 30 mm from the axis (volume came out 6 % of the expected at 180 degrees, no error)",
+ "source": "analytic",
+ "method": "every section is in a half-plane through the Z axis with its centroid at distance 30, so the loft is a bent bar of constant section: Pappus V = A * R * theta = 24 * 30 * pi. bbox: the rectangle reaches radius 33 at 0, 90 and 180 degrees and z = +-2.",
+ "body_count": 1,
+ "volume_mm3": 2261.946710584651,
+ "bbox": {
+  "min": [
+   -33,
+   0,
+   -2
+  ],
+  "max": [
+   33,
+   33,
+   2
+  ]
+ }
+}

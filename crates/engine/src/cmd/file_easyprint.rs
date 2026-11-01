@@ -33,7 +33,7 @@ pub(super) fn export_bodies(s: &Session, cmd: &str, named: &[String], format: Fo
     if bodies.is_empty() {
         return Err(bad(cmd, "select the bodies to send, or give `bodies`"));
     }
-    let mut doc = s.doc.painted(&s.world_state());
+    let mut doc = s.doc.painted(&*s.world_state()?);
     let laid = super::print_face::lay_on_print_faces(s, &mut doc, &bodies, &[]);
     let write = |format| solidcraft_io::export_with_metadata(&doc, &bodies, format, &s.doc.name, &s.doc.metadata);
     let mut fell_back = false;

@@ -1,0 +1,18 @@
+{
+ "sources": [],
+ "what": "a point half way along a cubic spline symmetric about x = 20",
+ "source": "analytic",
+ "method": "the Bezier (0,0), (10,10), (30,10), (40,0) is its own mirror image in x = 20 (the parameter running backwards), so half its length is reached at its middle, u = 1/2: B(1/2) = (P0 + 3 P1 + 3 P2 + P3) / 8 = (20, 7.5, 0). Graded to 1e-9 mm: the point by the spline's own arc length, not a polyline's",
+ "tolerance": {
+  "abs_mm": 1e-09
+ },
+ "construction": {
+  "P": {
+   "point": [
+    20.0,
+    7.5,
+    0.0
+   ]
+  }
+ }
+}

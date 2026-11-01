@@ -1,0 +1,23 @@
+{
+ "sources": [],
+ "what": "two identical boxes",
+ "source": "analytic",
+ "method": "boxes 40 x 30 x 20 on the same corner: identical, no region, B - A = 0",
+ "results": [
+  {
+   "step": 3,
+   "pointer": "/identical",
+   "json": true
+  },
+  {
+   "step": 3,
+   "pointer": "/regions",
+   "json": []
+  },
+  {
+   "step": 3,
+   "pointer": "/difference/volume_mm3",
+   "json": 0.0
+  }
+ ]
+}

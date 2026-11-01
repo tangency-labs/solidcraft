@@ -1,0 +1,113 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XZ"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      24,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      24,
+      0
+     ],
+     [
+      24,
+      -60
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      24,
+      -60
+     ],
+     [
+      0,
+      -60
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      -60
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "axis": "y",
+    "body_name": "Can"
+   }
+  },
+  {
+   "command": "solid.sphere",
+   "params": {
+    "radius": 2,
+    "center": [
+     0,
+     0,
+     30
+    ],
+    "operation": "cut",
+    "targets": [
+     "Can"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 20,
+    "height": 15,
+    "corner": [
+     20,
+     -10,
+     -5
+    ],
+    "operation": "cut",
+    "targets": [
+     "Can"
+    ]
+   }
+  }
+ ]
+}

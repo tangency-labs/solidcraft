@@ -52,7 +52,7 @@ fn enclosure_datums_follow_wall_height_and_board_depth_with_material_proofs() {
         s.doc.features.iter().find(|feature| feature.name == "USB" && matches!(feature.kind, solidcraft_doc::FeatureKind::Sketch { .. })).unwrap();
     assert!((s.model.state().sketch(usb.id).unwrap().plane.origin.y + 35.5).abs() < 1e-6);
     let assert_material = |session: &Session| {
-        let state = session.world_state();
+        let state = session.world_state().unwrap();
         let case = state.body("Case").unwrap().mesh();
         let lid = state.body("Lid").unwrap().mesh();
         assert!(case.contains(solidcraft_geom::Vec3::new(-24.5, -21.5, 7.)));
@@ -144,7 +144,7 @@ fn enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen
         assert!((regions[0].area() - 332.570619298295).abs() < 1e-7, "area {}", regions[0].area());
         let ring = solidcraft_kernel::extrude(&solved.plane, &regions, 0., 2.).unwrap();
         assert_eq!(ring.len(), 1);
-        let precise_ring = ring[0].tessellate(1e-6).unwrap();
+        let precise_ring = ring[0].mesh(&solidcraft_kernel::MeshTolerance::chord(1e-6)).unwrap();
         let bounds = precise_ring.bounds();
         for (actual, expected) in
             [(bounds.min.x, -37.8), (bounds.max.x, 37.8), (bounds.min.y, -32.8), (bounds.max.y, 32.8), (bounds.min.z, 28.), (bounds.max.z, 30.)]
@@ -178,7 +178,7 @@ fn enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen
             (measured - analytic_volume).abs() <= discretization_bound,
             "ring mesh volume {measured}, analytic {analytic_volume}, bound {discretization_bound}"
         );
-        let lid = state.body("Lid").unwrap().body.tessellate(1e-4).unwrap();
+        let lid = state.body("Lid").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap();
         for (point, material) in [
             (Vec3::new(0., 32.2, 29.), true),
             (Vec3::new(0., 32.9, 29.), false),

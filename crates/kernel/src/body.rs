@@ -1,8 +1,8 @@
 use serde::Serialize;
+use solidcraft_geom::brep::{self, Brep, Curve, Loop, Shell, Surface};
 use solidcraft_geom::{Aabb3, Mesh, Vec3};
-use truck_meshalgo::prelude::*;
-use truck_modeling as mt;
 
+use crate::history::BodyHistory;
 use crate::{KernelError, Result, guard};
 
 #[path = "planar_regularize.rs"]
@@ -12,34 +12,26 @@ mod planar_sources;
 #[path = "shell_groups.rs"]
 pub(crate) mod shell_groups;
 
-pub(crate) type Solid = mt::Solid;
-
 /// A solid body (one or more closed shells), or a mesh body (triangles only, like an imported
 /// 3MF or STL: it renders, measures and exports, but B-rep features cannot use it). Cheap to
 /// clone; never mutated in place.
+///
+/// A solid body is its schema 4 record ([`solidcraft_geom::brep`]): faces, edges and vertices
+/// in the record's canonical order are the body's own, everywhere (history, naming, meshes).
+/// SMLib works on the same body built from that record, made once and shared by clones.
 #[derive(Clone, Debug)]
 pub struct Body {
-    pub(crate) solid: std::sync::Arc<Solid>,
-    /// Bounding-box diagonal, measured by [`Body::new`] while it read the vertices anyway; 0
-    /// means "not measured, walk the geometry". Every kernel tolerance is a fraction of it.
+    pub(crate) record: std::sync::Arc<Brep>,
+    /// The body in SMLib, built from `record` on first use (or kept from the operation that
+    /// made it), shared by clones because they share the record.
+    pub(crate) smlib: std::sync::Arc<std::sync::OnceLock<std::result::Result<solidcraft_smlib::Brep, Refusal>>>,
+    /// Bounding-box diagonal of the vertices, measured when the body was made; 0 means "not
+    /// measured, walk the geometry". Every kernel tolerance is a fraction of it.
     pub(crate) size: f64,
-    /// How far this body's face boundaries may lie off their surfaces (mm) and still be taken as
-    /// lying on them. `Some` for a body read from a file that declares its own numeric
-    /// uncertainty (a STEP file's `GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT`, see
-    /// `crate::step_in::Units::tol`); `None` for a body this kernel built, which has no such
-    /// declaration.
-    ///
-    /// A band face's ring edges are held to it when the importer splits the band (see
-    /// `crate::step_in::split`). The display planner takes it only where it is more than its own
-    /// bound, a hundredth of the body (see `accept` in [`crate::tess::plan_face`]).
-    pub(crate) boundary_tol: Option<f64>,
-    /// The last volume measured for this solid and the tolerance it was measured at, shared by
-    /// clones because they share the solid. A boolean measures its operands, and a later boolean
-    /// takes the result as an operand again, so the same body is measured twice otherwise.
+    /// The last volume measured for this record and the tolerance it was measured at, shared by
+    /// clones because they share the record.
     pub(crate) volume: Option<std::sync::Arc<std::sync::Mutex<Option<(u64, f64)>>>>,
-    /// Missing-face check from the orientation mesh, reusable at exactly its tolerance.
-    pub(crate) coarse_missing: Option<(f64, usize)>,
-    /// Set for mesh bodies (`solid` is then empty).
+    /// Set for mesh bodies (`record` is then empty).
     pub(crate) mesh: Option<std::sync::Arc<crate::meshbody::TriMesh>>,
     /// Display colour (linear RGB 0..1) from an imported file; operations drop it.
     pub(crate) color: Option<[f32; 3]>,
@@ -55,44 +47,72 @@ pub struct Body {
     /// Exact history of the operation that made this body, relative to that operation's
     /// operands; `None` when the operation does not report one.
     pub(crate) history: Option<std::sync::Arc<crate::history::History>>,
-    /// A placed copy of a solid that another body shows already (an instance of a part a STEP
+    /// A placed copy of a body that another body shows already (an instance of a part a STEP
     /// assembly lists many times): its display mesh is that body's, placed by the matrix, so the
-    /// part is tessellated once rather than once per instance. Dropped by anything that changes
-    /// what the body shows (its geometry is never changed in place).
+    /// part is meshed once rather than once per instance. Dropped by anything that changes what
+    /// the body shows (its geometry is never changed in place).
     pub(crate) display_of: Option<std::sync::Arc<(std::sync::Arc<SharedDisplay>, [[f64; 4]; 4])>>,
-    /// Meshes of this solid kept for reuse, set by [`Body::keeping_meshes`]: a check that
+    /// Meshes of this record kept for reuse, set by [`Body::keeping_meshes`]: a check that
     /// intersects one large body with many small ones meshes it at the same tolerance each time.
     pub(crate) meshes: Option<std::sync::Arc<MeshMemo>>,
-    /// Its revolved faces were turned away from their seams (see `rephase_revolved`), so a
-    /// placed copy, which keeps them where they are, need not turn them again: searching every
-    /// revolved face of every placed occurrence was most of the time moving an assembly took.
-    pub(crate) phased: bool,
+    /// The SMLib result this body was decoded from, when the step that made it left SMLib's
+    /// check to the end of its feature ([`crate::validation`]): checked there as the step's own
+    /// check would have, then let go. Answers only for this record.
+    pub(crate) unchecked: Option<std::sync::Arc<crate::validation::Unchecked>>,
+    /// The constant-radius rounds that made this body from another, when they did
+    /// ([`crate::blend_corner::Rounds`]): a later round at a corner where they meet blends them
+    /// again with it. Anything else that makes a body leaves it out, and so does every new
+    /// history: the rounds are over the body its history is over.
+    pub(crate) rounds: Option<std::sync::Arc<crate::blend_corner::Rounds>>,
 }
 
-/// The meshes made of one solid (see [`Body::keeping_meshes`]), by tolerance, angle and
-/// refinement. They answer only for that solid: a copy whose solid was replaced makes its own.
+/// The meshes made of one record (see [`Body::keeping_meshes`]), by tolerance and angle. They
+/// answer only for that record: a copy whose record was replaced makes its own.
 #[derive(Debug)]
 pub(crate) struct MeshMemo {
-    solid: std::sync::Arc<Solid>,
-    made: std::sync::Mutex<Vec<((u64, u64, bool), std::sync::Arc<Mesh>)>>,
-    /// The meshes a boolean makes of the solid's shells, by tolerance.
-    shells: std::sync::Mutex<Vec<(u64, std::sync::Arc<Vec<truck_shapeops::MeshedShell>>)>>,
+    record: std::sync::Arc<Brep>,
+    made: Remembered,
 }
 
 /// Meshes a [`MeshMemo`] keeps at most (the oldest goes first).
 const MEMO_MESHES: usize = 4;
 
+/// Meshes (or their plans) kept for reuse, by tolerance (see [`remembered`]).
+type Remembered<T = Mesh> = std::sync::Mutex<Vec<((u64, u64), std::sync::Arc<T>)>>;
+
+/// The mesh (or plan) at `t` from `kept`, made by `make` and kept (at most [`MEMO_MESHES`]) if
+/// it isn't there. The lock is held while meshing: threads asking for the same mesh wait for it
+/// rather than make it too.
+fn remembered<T>(kept: &Remembered<T>, t: &MeshTolerance, make: impl FnOnce() -> Result<T>) -> Result<std::sync::Arc<T>> {
+    let Ok(mut made) = kept.lock() else { return make().map(std::sync::Arc::new) };
+    let key = t.key();
+    if let Some((_, m)) = made.iter().find(|(k, _)| *k == key) {
+        return Ok(m.clone());
+    }
+    let m = std::sync::Arc::new(make()?);
+    if made.len() >= MEMO_MESHES {
+        made.remove(0);
+    }
+    made.push((key, m.clone()));
+    Ok(m)
+}
+
 /// The display mesh of a body that several placed copies show (see `Body::display_of`): the
-/// body, and its mesh once made.
+/// body, and its mesh and plan once made.
 #[derive(Debug)]
 pub(crate) struct SharedDisplay {
     pub(crate) original: Body,
-    mesh: std::sync::OnceLock<Option<Mesh>>,
+    meshes: Remembered,
+    plans: Remembered<solidcraft_geom::tess::TessPlan>,
 }
 
 impl SharedDisplay {
     pub(crate) fn new(original: Body) -> Self {
-        SharedDisplay { original: Body { display_of: None, meshes: None, ..original }, mesh: std::sync::OnceLock::new() }
+        SharedDisplay {
+            original: Body { display_of: None, meshes: None, ..original },
+            meshes: std::sync::Mutex::new(Vec::new()),
+            plans: std::sync::Mutex::new(Vec::new()),
+        }
     }
 }
 
@@ -127,11 +147,7 @@ fn placed_mesh(m: &Mesh, t: &[[f64; 4]; 4]) -> Option<Mesh> {
             t[0][2] * v.x + t[1][2] * v.y + t[2][2] * v.z + w * t[3][2],
         )
     };
-    let det = t[0][0] * (t[1][1] * t[2][2] - t[1][2] * t[2][1]) - t[0][1] * (t[1][0] * t[2][2] - t[1][2] * t[2][0])
-        + t[0][2] * (t[1][0] * t[2][1] - t[1][1] * t[2][0]);
-    if !(det > 0.0 && (det - 1.0).abs() < 1e-6) || t.iter().flatten().any(|x| !x.is_finite()) {
-        return None;
-    }
+    brep::placement::Rigid::of_matrix(t)?;
     Some(Mesh {
         positions: m.positions.iter().map(|p| r(*p, 1.0)).collect(),
         normals: m.normals.iter().map(|n| r(*n, 0.0)).collect(),
@@ -246,8 +262,6 @@ pub struct FaceInfo {
     pub plane_normal: Option<Vec3>,
 }
 
-type MeshedShell = truck_topology::Shell<mt::Point3, PolylineCurve<mt::Point3>, Option<PolygonMesh>>;
-
 /// The most one facet of the display mesh turns (radians): a curved face or edge is divided
 /// until no facet spans more of it than this, however small its radius is beside the body.
 /// 20 degrees: a quarter turn is drawn with at least five facets, a full circle with at least 18.
@@ -262,273 +276,63 @@ const DISPLAY_ANGLE_FLOOR: f64 = 1e-3;
 /// The finest angle a display mesh is divided by (one degree).
 const MIN_DISPLAY_ANGLE: f64 = std::f64::consts::PI / 180.0;
 
-/// Triangulate each shell (not the solid: truck's solid constructor panics on the open or
-/// non-manifold shells an import can produce). Boundaries that lie on their surface only within
-/// tolerance (imports, boolean results) are projected onto it.
-fn mesh_shells(solid: &Solid, tol: f64) -> Vec<MeshedShell> {
-    mesh_shells_within(solid, Deflection { display: true, ..Deflection::chord(tol) })
+/// How closely [`Body::mesh`] follows the exact surfaces.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MeshTolerance {
+    /// The farthest a facet or an edge segment may stand off the surface or curve it stands for
+    /// (mm). Not finite or not positive: 0.05 mm. Never finer than a millionth of the body.
+    pub chord: f64,
+    /// The most a facet may turn (radians, at least one degree) where its sag is above a
+    /// thousandth of `chord`; `None`: `chord` alone.
+    pub angle: Option<f64>,
 }
 
-/// [`mesh_shells`] divided by a chord tolerance and, when it has one, a bound on the angle a
-/// facet spans. Each edge is divided once for both its faces, so the faces still share its
-/// points.
-fn mesh_shells_within(solid: &Solid, deflection: Deflection) -> Vec<MeshedShell> {
-    solid
-        .boundaries()
-        .iter()
-        // The robust search tries the exact one first, so exact geometry costs nothing extra; a
-        // face can also come back as an empty mesh rather than none (boolean results with
-        // approximate intersection curves), so always use it.
-        .map(|sh| sh.robust_triangulation_within(deflection))
-        .collect()
-}
+impl MeshTolerance {
+    /// `chord` alone.
+    pub const fn chord(chord: f64) -> Self {
+        MeshTolerance { chord, angle: None }
+    }
 
-/// A face's triangles (corner positions and normals, in the mesh's winding) with every edge
-/// whose middle sags more than `tol` from the surface split there, found through the mesh's
-/// surface parameters. A split depends on the edge alone, so neighbours stay conforming.
-/// `None` when nothing needs splitting or the parameters don't match the surface.
-#[allow(clippy::type_complexity)]
-fn refined(pm: &PolygonMesh, surf: &mt::Surface, tol: f64) -> Option<Vec<[(Vec3, Vec3); 3]>> {
-    refined_with_cache(pm, surf, tol, true)
-}
+    /// What the viewport draws: `chord`, and no facet turning more than [`DISPLAY_ANGLE`], so
+    /// small radii on a large body look round too.
+    pub const fn display(chord: f64) -> Self {
+        MeshTolerance { chord, angle: Some(DISPLAY_ANGLE) }
+    }
 
-#[allow(clippy::type_complexity)]
-fn refined_with_cache(pm: &PolygonMesh, surf: &mt::Surface, tol: f64, memoize: bool) -> Option<Vec<[(Vec3, Vec3); 3]>> {
-    use mt::{ParametricSurface, ParametricSurface3D};
-    let (pos, uvs, nor) = (pm.positions(), pm.uv_coords(), pm.normals());
-    if uvs.is_empty() {
-        return None;
+    /// The application's display mesh of a body of size `size` (its box diagonal): 1/1000 of
+    /// it, at least 1 µm, at [`DISPLAY_ANGLE`].
+    pub fn display_of(size: f64) -> Self {
+        MeshTolerance::display((size * 1e-3).max(1e-3))
     }
-    type V = (Vec3, (f64, f64), Vec3);
-    let mut tris: Vec<[V; 3]> = Vec::new();
-    for tri in pm.faces().triangle_iter() {
-        let mut t = [(Vec3::ZERO, (0.0, 0.0), Vec3::Z); 3];
-        for (slot, v) in t.iter_mut().zip(tri.iter()) {
-            let p = pos.get(v.pos)?;
-            let uv = uvs.get(v.uv?)?;
-            let n = v.nor.and_then(|i| nor.get(i)).map(|n| Vec3::new(n.x, n.y, n.z)).unwrap_or(Vec3::Z);
-            *slot = (Vec3::new(p.x, p.y, p.z), (uv.x, uv.y), n);
-        }
-        tris.push(t);
-    }
-    // The parameters must be the surface's own.
-    let check = tris.iter().take(8).flat_map(|t| t.iter()).all(|(p, (u, v), _)| from_p3(surf.subs(*u, *v)).dist(*p) < tol * 4.0 + 1e-9);
-    // Bounded work: a face may grow to a few times its triangles (wild surfaces sag
-    // everywhere and are left as meshed).
-    let cap = (tris.len() * 8).clamp(2_000, 60_000);
-    if !check || tris.len() > 50_000 {
-        return None;
-    }
-    // Edges on the face's boundary are shared with the next face: never split them.
-    let k = |x: &V| ((x.1.0 * 1e9).round() as i64, (x.1.1 * 1e9).round() as i64);
-    let ek = |a: &V, b: &V| if k(a) < k(b) { (k(a), k(b)) } else { (k(b), k(a)) };
-    // Only exact finite values identify reusable evaluations. In particular,
-    // the rounded UV keys used for boundary incidence cannot identify a point
-    // whose derivatives or midpoint may be reused.
-    let vertex_key = |v: &V| {
-        let values = [v.0.x, v.0.y, v.0.z, v.1.0, v.1.1, v.2.x, v.2.y, v.2.z];
-        values.iter().all(|x| x.is_finite()).then(|| values.map(f64::to_bits))
-    };
-    let cache_limit = cap * 3;
-    let mut singular_cache = std::collections::HashMap::<(u64, u64), bool>::new();
-    let mut changed = false;
-    for _ in 0..4 {
-        let mut uses: std::collections::HashMap<((i64, i64), (i64, i64)), u32> = std::collections::HashMap::new();
-        for [a, b, c] in &tris {
-            for e in [ek(a, b), ek(b, c), ek(c, a)] {
-                *uses.entry(e).or_default() += 1;
-            }
-        }
-        let mut edge_cache = std::collections::HashMap::<([u64; 8], [u64; 8]), Option<V>>::new();
-        let mut at = |a: &V, b: &V| -> Option<V> {
-            let key = if memoize { vertex_key(a).zip(vertex_key(b)).map(|(a, b)| if a < b { (a, b) } else { (b, a) }) } else { None };
-            if let Some(key) = key
-                && let Some(value) = edge_cache.get(&key)
-            {
-                return *value;
-            }
-            let mut calculate = || -> Option<V> {
-                if uses.get(&ek(a, b)).copied().unwrap_or(0) < 2 {
-                    return None;
-                }
-                // Not at a degenerate point (a cone's apex: its parameters there are arbitrary).
-                let mut singular = |x: &V| {
-                    let key = (x.1.0.to_bits(), x.1.1.to_bits());
-                    let cacheable = memoize && x.1.0.is_finite() && x.1.1.is_finite();
-                    if cacheable && let Some(value) = singular_cache.get(&key) {
-                        return *value;
-                    }
-                    let (du, dv) = (surf.uder(x.1.0, x.1.1), surf.vder(x.1.0, x.1.1));
-                    let c = du.cross(dv);
-                    let value = c.x * c.x + c.y * c.y + c.z * c.z
-                        <= 1e-12 * (du.x * du.x + du.y * du.y + du.z * du.z + dv.x * dv.x + dv.y * dv.y + dv.z * dv.z).powi(2) + 1e-300;
-                    if cacheable && singular_cache.len() < cache_limit {
-                        singular_cache.insert(key, value);
-                    }
-                    value
-                };
-                if singular(a) || singular(b) {
-                    return None;
-                }
-                let (u, v) = ((a.1.0 + b.1.0) / 2.0, (a.1.1 + b.1.1) / 2.0);
-                let q = from_p3(surf.subs(u, v));
-                // Within tolerance, or so far off that the parameters wrapped (a seam).
-                let sag = q.dist((a.0 + b.0) * 0.5);
-                if sag <= tol || sag >= 0.5 * a.0.dist(b.0) {
-                    return None;
-                }
-                let n = surf.normal(u, v);
-                let mut n = Vec3::new(n.x, n.y, n.z);
-                // Keep the mesh's normal side.
-                if n.dot(a.2 + b.2) < 0.0 {
-                    n = -n;
-                }
-                Some((q, (u, v), n))
-            };
-            let value = calculate();
-            if let Some(key) = key
-                && edge_cache.len() < cache_limit
-                && value.is_none_or(|v| vertex_key(&v).is_some())
-            {
-                edge_cache.insert(key, value);
-            }
-            value
-        };
-        let mut next = Vec::with_capacity(tris.len());
-        let mut any = false;
-        for t in &tris {
-            let [a, b, c] = t;
-            let m = [at(a, b), at(b, c), at(c, a)];
-            any |= m.iter().any(Option::is_some);
-            match m {
-                [None, None, None] => next.push(*t),
-                [Some(x), Some(y), Some(z)] => {
-                    next.extend([[*a, x, z], [x, *b, y], [z, y, *c], [x, y, z]]);
-                }
-                [Some(x), None, None] => next.extend([[*a, x, *c], [x, *b, *c]]),
-                [None, Some(y), None] => next.extend([[*a, *b, y], [*a, y, *c]]),
-                [None, None, Some(z)] => next.extend([[*a, *b, z], [z, *b, *c]]),
-                [Some(x), Some(y), None] => next.extend([[*a, x, *c], [x, *b, y], [x, y, *c]]),
-                [None, Some(y), Some(z)] => next.extend([[*a, *b, z], [z, *b, y], [z, y, *c]]),
-                [Some(x), None, Some(z)] => next.extend([[*a, x, z], [x, *b, *c], [x, *c, z]]),
-            }
-        }
-        tris = next;
-        changed |= any;
-        if !any || tris.len() > cap {
-            break;
-        }
-    }
-    changed.then(|| tris.into_iter().map(|t| t.map(|(p, _, n)| (p, n))).collect())
-}
 
-/// Revolved surfaces are periodic in their angle; a face whose angles start at 0 is found at 0
-/// or 2π, which confuses the boolean's loop projection. Each revolved face's surface is turned
-/// (same geometry) so the face sits around angle π, well away from the wrap.
-fn rephase_revolved(solid: Solid) -> Solid {
-    use mt::{BoundedCurve, ParametricCurve, SearchNearestParameter};
-    #[cfg(test)]
-    REPHASED.with(|n| n.set(n.get() + 1));
-    let r = guard("rephase", || {
-        let mut changed = false;
-        let mut shells = Vec::new();
-        for sh in solid.boundaries() {
-            let mut faces = Vec::new();
-            for f in sh.face_iter() {
-                let mt::Surface::RevolutedCurve(proc_) = f.surface() else {
-                    faces.push(f.clone());
-                    continue;
-                };
-                let surf = f.surface();
-                // The face's middle angle.
-                let mut acc = Vec3::ZERO;
-                let mut n = 0.0f64;
-                for w in f.absolute_boundaries() {
-                    for e in w.edge_iter() {
-                        let c = e.oriented_curve();
-                        let (t0, t1) = c.range_tuple();
-                        for k in 0..4 {
-                            acc += from_p3(c.subs(t0 + (t1 - t0) * k as f64 / 4.0));
-                            n += 1.0;
-                        }
-                    }
-                }
-                let Some((_, v)) = surf.search_nearest_parameter(p3(acc / n.max(1.0)), None, 100) else {
-                    faces.push(f.clone());
-                    continue;
-                };
-                let phi = v.rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
-                if phi.abs() < 0.3 {
-                    faces.push(f.clone());
-                    continue;
-                }
-                let new_proc = proc_.map_ref(|rc| {
-                    let (o, a) = (rc.origin(), rc.axis());
-                    let rot = mt::Matrix4::from_translation(mt::EuclideanSpace::to_vec(o))
-                        * mt::Matrix4::from_axis_angle(a, mt::Rad(phi))
-                        * mt::Matrix4::from_translation(-mt::EuclideanSpace::to_vec(o));
-                    mt::RevolutedCurve::by_revolution(mt::Transformed::transformed(rc.entity_curve(), rot), o, a)
-                });
-                match mt::Face::try_new(f.absolute_boundaries().clone(), mt::Surface::RevolutedCurve(new_proc)) {
-                    Ok(mut nf) => {
-                        if !f.orientation() {
-                            nf.invert();
-                        }
-                        faces.push(nf);
-                        changed = true;
-                    }
-                    Err(_) => faces.push(f.clone()),
-                }
-            }
-            shells.push(mt::Shell::from(faces));
-        }
-        if !changed {
-            return Ok(None);
-        }
-        Ok(Solid::try_new(shells).ok())
-    });
-    match r {
-        Ok(Some(s)) => s,
-        _ => solid,
+    /// For export to a mesh format (STL, 3MF, OBJ) of a body of size `size`: 1/5000 of it, at
+    /// least 1 µm, the chord alone.
+    pub fn export_of(size: f64) -> Self {
+        MeshTolerance::chord((size * 2e-4).max(1e-3))
+    }
+
+    /// The planner's chord tolerance and facet angle for a body of size `size`.
+    pub(crate) fn rules(&self, size: f64) -> (f64, Option<crate::tess::size::Turn>) {
+        let tol = if self.chord.is_finite() && self.chord > 0.0 { self.chord } else { 0.05 };
+        let tol = tol.max(size * 1e-6);
+        let turn = self
+            .angle
+            .filter(|a| a.is_finite() && *a > 0.0)
+            .map(|a| crate::tess::size::Turn { angle: a.max(MIN_DISPLAY_ANGLE), floor: tol * DISPLAY_ANGLE_FLOOR });
+        (tol, turn)
+    }
+
+    /// The key a kept mesh is found by.
+    fn key(&self) -> (u64, u64) {
+        (self.chord.to_bits(), self.angle.map_or(u64::MAX, f64::to_bits))
     }
 }
 
-pub(crate) fn p3(v: Vec3) -> mt::Point3 {
-    mt::Point3::new(v.x, v.y, v.z)
-}
-pub(crate) fn v3(v: Vec3) -> mt::Vector3 {
-    mt::Vector3::new(v.x, v.y, v.z)
-}
-pub(crate) fn from_p3(p: mt::Point3) -> Vec3 {
-    Vec3::new(p.x, p.y, p.z)
+pub(crate) fn v3(p: [f64; 3]) -> Vec3 {
+    Vec3::new(p[0], p[1], p[2])
 }
 
-/// The distinct edges of `faces` in order of first use, and the faces (by position) each one
-/// bounds: the one edge order of a body, used by [`Body::edges`], tessellations and
-/// [`crate::history`].
-pub(crate) fn edge_order<'a, P: 'a, C: 'a, S: 'a>(
-    faces: impl IntoIterator<Item = &'a truck_topology::Face<P, C, S>>,
-) -> (Vec<truck_topology::Edge<P, C>>, Vec<Vec<usize>>) {
-    let mut index = std::collections::HashMap::new();
-    let (mut edges, mut bounds): (Vec<truck_topology::Edge<P, C>>, Vec<Vec<usize>>) = (Vec::new(), Vec::new());
-    for (fi, f) in faces.into_iter().enumerate() {
-        for e in f.edge_iter() {
-            let i = *index.entry(e.id()).or_insert_with(|| {
-                edges.push(e.clone());
-                bounds.push(Vec::new());
-                edges.len() - 1
-            });
-            if let Some(slot) = bounds.get_mut(i)
-                && !slot.contains(&fi)
-            {
-                slot.push(fi);
-            }
-        }
-    }
-    (edges, bounds)
-}
-
-fn polyline_mid(pts: &[Vec3]) -> (Vec3, f64) {
+pub(crate) fn polyline_mid(pts: &[Vec3]) -> (Vec3, f64) {
     let len: f64 = pts.windows(2).map(|w| w.first().zip(w.get(1)).map(|(a, b)| a.dist(*b)).unwrap_or(0.0)).sum();
     let mut acc = 0.0;
     for w in pts.windows(2) {
@@ -543,66 +347,33 @@ fn polyline_mid(pts: &[Vec3]) -> (Vec3, f64) {
     (pts.first().copied().unwrap_or_default(), len)
 }
 
-#[cfg(test)]
-thread_local! {
-    /// Solids [`Body::new`] meshed on this thread to orient them (tests count the work an import does).
-    pub(crate) static ORIENTED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    /// Solids `rephase_revolved` searched on this thread.
-    pub(crate) static REPHASED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-/// The volume one closed shell encloses, signed by the way its faces face (positive when they
-/// face out of it), from a mesh as coarse as the orientation mesh of a solid of its size.
-/// `None` when it cannot be meshed.
-pub(crate) fn shell_volume(shell: &mt::Shell) -> Option<f64> {
-    let bounds: Aabb3 = shell.vertex_iter().map(|v| from_p3(v.point())).collect();
-    let span = if bounds.is_empty() { 1.0 } else { bounds.diagonal() };
-    let deflection = Deflection { display: true, ..Deflection::chord(orientation_tolerance(span)) };
-    let v = guard("shell volume", || Ok(shell.robust_triangulation_within(deflection).to_polygon().volume())).ok()?;
-    v.is_finite().then_some(v)
-}
-
-/// A solid's volume off a mesh at `tol`, negative when it faces inwards, and how many faces that
-/// mesh left out.
-fn signed_volume(solid: &Solid, tol: f64) -> Result<(f64, usize)> {
-    let orient = |tol: f64| {
-        guard("orient", || {
-            let shells = mesh_shells(solid, tol);
-            let volume = shells.iter().map(|s| s.to_polygon().volume()).sum::<f64>();
-            let missing =
-                shells.iter().flat_map(|s| s.face_iter()).filter(|f| f.surface().is_none_or(|m| m.faces().triangle_iter().next().is_none())).count();
-            Ok((volume, missing))
-        })
-    };
-    let (mut v, missing) = orient(tol)?;
-    // A long thin round part (a through hole's tool: a cylinder whose vertices all lie on
-    // its seam, so they span its length only) meshed that coarsely can come out with a
-    // negative volume when it is outward already: check finely before turning it inside out.
-    let fine = (tol * 0.02).max(1e-4);
-    if v < 0.0 && fine < tol {
-        (v, _) = orient(fine)?;
-    }
-    Ok((v, missing))
-}
-
-/// Whether a closed shell faces inwards (a void), by the check [`Body::new`] orients a solid by.
-/// Unlike [`shell_volume`], a negative coarse volume is checked again on a finer mesh.
-pub(crate) fn faces_inward(shell: &mt::Shell) -> Result<bool> {
-    let solid = guard("shell", || Solid::try_new(vec![shell.clone()]).map_err(|e| KernelError::Failed(format!("shell: {e}"))))?;
-    Ok(signed_volume(&solid, orientation_tolerance(span_of(&solid)))?.0 < 0.0)
-}
-
-/// Deflection the orientation mesh uses: coarse enough for a large solid, fine enough that a
-/// small one still tessellates. `unmeshed_faces` counts at the same value, so the count the
-/// orientation mesh produced is reused instead of meshing the body again.
-fn orientation_tolerance(span: f64) -> f64 {
+/// Deflection of the coarse mesh `unmeshed_faces` counts on: coarse enough for a large body,
+/// fine enough that a small one still meshes.
+fn coarse_tolerance(span: f64) -> f64 {
     (span * 0.01).clamp(1e-3, 1.0)
 }
 
-/// Bounding-box diagonal of a solid's vertices (1 when it has no finite extent).
-fn span_of(solid: &Solid) -> f64 {
-    let bounds: Aabb3 = solid.vertex_iter().map(|v| from_p3(v.point())).collect();
-    if bounds.is_empty() { 1.0 } else { bounds.diagonal() }
+/// Box diagonal of a record's vertices and points along its edges (0 when it has none or no
+/// finite extent). The edges count: SMLib closes a sphere, a cylinder or a torus along seams, so
+/// its vertices alone can be two poles or a single point (a torus came out 1 mm across, and its
+/// display mesh at a hundredth of that took 214 720 triangles). Points on the edges, not their
+/// control hulls: a rational edge's control points can lie far off it.
+fn span_of(record: &Brep) -> f64 {
+    let mut bounds: Aabb3 = record.vertices.iter().map(|v| v3(v.point)).collect();
+    for e in &record.edges {
+        if let Ok(c) = brep::eval::CurveEval::new(e.parameters()) {
+            let [t0, t1] = e.interval;
+            for i in 1..4 {
+                if let Some(p) = c.point(t0 + (t1 - t0) * f64::from(i) / 4.0)
+                    && p.is_finite()
+                {
+                    bounds.add(p);
+                }
+            }
+        }
+    }
+    let d = if bounds.is_empty() { 0.0 } else { bounds.diagonal() };
+    if d.is_finite() && d > 0.0 { d } else { 0.0 }
 }
 
 /// Equal shared values: the same allocation (a clone of the body), else equal contents.
@@ -614,7 +385,182 @@ fn same_shared<T: PartialEq>(a: &Option<std::sync::Arc<T>>, b: &Option<std::sync
     }
 }
 
+/// `record`, checked to be a body's: valid structure (references, loops, regions,
+/// canonical order) and at least one face. A solid's faces bound material; a surface body's lie
+/// in open shells.
+fn solid_record(record: Brep) -> Result<Brep> {
+    record.validate_built().map_err(|e| KernelError::Invalid(e.to_string()))?;
+    if record.faces.is_empty() {
+        return Err(KernelError::Failed("empty result".into()));
+    }
+    Ok(record)
+}
+
+/// The record of no solid: only the infinite region.
+pub(crate) fn empty_record() -> Brep {
+    Brep {
+        version: brep::VERSION,
+        tolerance: 1e-6,
+        regions: vec![brep::Region { shells: Vec::new(), void: false }],
+        shells: Vec::new(),
+        faces: Vec::new(),
+        edges: Vec::new(),
+        vertices: Vec::new(),
+    }
+}
+
+/// Why SMLib refuses a body, and the face it refuses on its own when one does: SMLib's import
+/// says only that it refuses the body, so each face is then sent on its own to find which.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Refusal {
+    /// The first face (in the body's face order) SMLib refuses on its own; `None` when it takes
+    /// each face alone (the faces do not fit together) or the body has too many to try.
+    pub face: Option<usize>,
+    /// That face's surface.
+    pub surface: Option<SurfaceKind>,
+    /// SMLib's reason for the whole body, as the log words it.
+    pub why: String,
+}
+
+/// Where a point lies against a body ([`Body::classify_point`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PointClass {
+    /// In the body's material.
+    Inside,
+    /// Outside the material, or in a cavity.
+    Outside,
+    /// Within the body's tolerance of a face, an edge or a vertex.
+    OnBoundary,
+}
+
+/// The kind of surface a face lies on, as a person modelling would name it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SurfaceKind {
+    Plane,
+    Cylinder,
+    Cone,
+    Sphere,
+    Torus,
+    /// A B-spline or NURBS surface, or a revolution of a spline.
+    Freeform,
+}
+
+/// Most faces sent into SMLib one by one to find the one it refuses.
+const MAX_REFUSAL_PROBES: usize = 20_000;
+
+impl Refusal {
+    /// The refusal of `record` for `error`, with the face SMLib refuses on its own.
+    fn of(record: &Brep, error: &solidcraft_smlib::Error) -> Refusal {
+        let _span = solidcraft_profile::span("kernel", "smlib_refusal_face");
+        let alone = |f: usize| crate::surfaces::Parts::of(record, &[(f, false)]).and_then(|p| p.canonical()).map(|c| c.brep);
+        let face = (record.faces.len() <= MAX_REFUSAL_PROBES)
+            .then(|| (0..record.faces.len()).find(|&f| alone(f).is_ok_and(|r| solidcraft_smlib::Brep::from_record(&r, true).is_err())))
+            .flatten();
+        let surface = face.and_then(|f| record.faces.get(f)).map(|f| SurfaceKind::of(&f.surface));
+        Refusal { face, surface, why: error.to_string() }
+    }
+}
+
+impl SurfaceKind {
+    pub(crate) fn of(surface: &solidcraft_geom::brep::Surface) -> SurfaceKind {
+        use solidcraft_geom::brep::Surface as S;
+        match surface {
+            S::Plane { .. } | S::PlaneThrough { .. } => SurfaceKind::Plane,
+            S::Cylinder { .. } => SurfaceKind::Cylinder,
+            S::Cone { .. } => SurfaceKind::Cone,
+            S::Sphere { .. } => SurfaceKind::Sphere,
+            S::Torus { .. } => SurfaceKind::Torus,
+            S::Spline { .. } | S::RationalSpline { .. } | S::PlacedRevolution { .. } => SurfaceKind::Freeform,
+        }
+    }
+}
+
 impl Body {
+    /// A body with `record` and nothing else set.
+    fn bare(record: Brep, mesh: Option<std::sync::Arc<crate::meshbody::TriMesh>>) -> Body {
+        let size = span_of(&record);
+        Body {
+            record: std::sync::Arc::new(record),
+            smlib: std::sync::Arc::new(std::sync::OnceLock::new()),
+            size,
+            volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
+            mesh,
+            color: None,
+            paint: None,
+            splits: None,
+            face_sources: None,
+            regularization_protected: false,
+            history: None,
+            display_of: None,
+            meshes: None,
+            unchecked: None,
+            rounds: None,
+        }
+    }
+
+    /// This body with `result`, the SMLib result of the step `what` it was decoded from, whose
+    /// check that step left to the end of its feature ([`crate::validation::check_kept`]).
+    pub(crate) fn left_unchecked(self, what: &str, how: crate::validation::Checked, result: solidcraft_smlib::Brep) -> Body {
+        let unchecked = crate::validation::Unchecked::new(&self.record, what, how, result);
+        Body { unchecked: Some(std::sync::Arc::new(unchecked)), ..self }
+    }
+
+    /// The body of a schema 4 record (a solid, or a surface body of open shells): checked for
+    /// structure (references, loops, regions, canonical order; a record from a file is checked
+    /// against the file budgets where it is read). Its faces face as the
+    /// record says.
+    pub(crate) fn from_record(record: Brep) -> Result<Body> {
+        Ok(Body::bare(solid_record(record)?, None))
+    }
+
+    /// The body of SMLib's export of a B-rep (its record, in canonical order). The SMLib body
+    /// the export came from is not kept: the export is not exact to the bit (its parameters,
+    /// radians, pcurves), so that body measures and operates a little differently from the
+    /// record's import, and a body evaluated afresh would then differ from the same body read
+    /// back from a file. Every operation starts from the record's import ([`Body::smlib`]).
+    pub(crate) fn from_smlib_record(record: Brep) -> Result<Body> {
+        Ok(Body::bare(solid_record(record)?, None))
+    }
+
+    /// A mesh body of `mesh`.
+    pub(crate) fn of_mesh(mesh: crate::meshbody::TriMesh) -> Body {
+        Body::bare(empty_record(), Some(std::sync::Arc::new(mesh)))
+    }
+
+    /// The body's record: faces, edges and vertices in the body's own order. Empty for a mesh body.
+    pub fn record(&self) -> &Brep {
+        &self.record
+    }
+
+    /// The body in SMLib, built from its record the first time it is asked for. The record is
+    /// SMLib's own form (`SmBrepData`), imported as given: a record SMLib refuses is an error that
+    /// names why, never repaired here.
+    pub fn smlib(&self) -> Result<&solidcraft_smlib::Brep> {
+        self.require_brep("an SMLib operation")?;
+        self.smlib
+            .get_or_init(|| solidcraft_smlib::Brep::from_record(&self.record, true).map_err(|e| Refusal::of(&self.record, &e)))
+            .as_ref()
+            .map_err(|r| KernelError::Failed(format!("SMLib: {}", r.why)))
+    }
+
+    /// Why SMLib refuses the body, if it does: the body is sent into SMLib as an operation
+    /// would send it (and kept there for the operations to come). `None` for a body SMLib takes,
+    /// and for a mesh body (no operation sends one).
+    pub fn smlib_refusal(&self) -> Option<&Refusal> {
+        if self.is_mesh() {
+            return None;
+        }
+        let _ = self.smlib();
+        self.smlib_refused()
+    }
+
+    /// Why SMLib refused the body when it was last sent there (by an operation, or by
+    /// [`Self::smlib_refusal`]); `None` when it took it or the body was not sent yet. Sends
+    /// nothing.
+    pub fn smlib_refused(&self) -> Option<&Refusal> {
+        self.smlib.get().and_then(|r| r.as_ref().err())
+    }
+
     /// The very same body (shared data), not just an equal-looking one. Its history (how an
     /// operation made it) is not part of it: an operation that leaves a body as it is (a cut by
     /// a tool clear of it) gives the same body, with that operation's history.
@@ -627,9 +573,9 @@ impl Body {
             && self.regularization_protected == other.regularization_protected
     }
 
-    /// The very same shape (shared solid or mesh), whatever its colour, paint or face splits.
+    /// The very same shape (shared record or mesh), whatever its colour, paint or face splits.
     pub fn same_shape(&self, other: &Body) -> bool {
-        std::sync::Arc::ptr_eq(&self.solid, &other.solid)
+        std::sync::Arc::ptr_eq(&self.record, &other.record)
             && match (&self.mesh, &other.mesh) {
                 (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
                 (None, None) => true,
@@ -637,109 +583,40 @@ impl Body {
             }
     }
 
-    pub(crate) fn new(solid: Solid) -> Result<Body> {
-        if solid.boundaries().is_empty() {
-            return Err(KernelError::Failed("empty result".into()));
-        }
-        let mut solid = rephase_revolved(solid);
-        // Orient outward: a closed solid must have positive volume (meshed finely enough that
-        // every face comes out: a face missing from a coarse mesh can flip the sign).
-        let span = span_of(&solid);
-        let tol = orientation_tolerance(span);
-        #[cfg(test)]
-        ORIENTED.with(|n| n.set(n.get() + 1));
-        // The faces missing from the coarse mesh are the same whichever way the solid turns out
-        // to face, so the count is kept for `unmeshed_faces` either way.
-        let (v, missing) = signed_volume(&solid, tol)?;
-        if v < 0.0 {
-            solid.not();
-        }
-        Ok(Body {
-            solid: std::sync::Arc::new(solid),
-            size: if span.is_finite() && span > 0.0 { span } else { 0.0 },
-            boundary_tol: None,
-            volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
-            coarse_missing: Some((tol, missing)),
-            mesh: None,
-            color: None,
-            paint: None,
-            splits: None,
-            face_sources: None,
-            regularization_protected: false,
-            history: None,
-            display_of: None,
-            meshes: None,
-            phased: true,
-        })
-    }
-
-    /// Like [`Body::new`], for a solid made by placing an already-oriented body (see
-    /// [`crate::ops::transform_matrix`]): a placement keeps the faces pointing the way they did
-    /// unless it mirrors them, so its orientation is read from the matrix rather than meshed
-    /// again. Only for closed solids; `coarse` is the input's cached missing-face count, which a
-    /// rigid placement preserves exactly.
-    /// `phased`: the solid was placed from a body whose revolved faces are turned already.
-    pub(crate) fn new_placed(solid: Solid, flip: bool, coarse: Option<(f64, usize)>, phased: bool) -> Result<Body> {
-        if solid.boundaries().is_empty() {
-            return Err(KernelError::Failed("empty result".into()));
-        }
-        Body::placed_as_is(if phased { solid } else { rephase_revolved(solid) }, flip, coarse)
-    }
-
-    /// [`Body::new_placed`] for a solid whose revolved faces were already turned away from
-    /// their seam (a placement of an oriented body keeps them where they were).
-    fn placed_as_is(mut solid: Solid, flip: bool, coarse: Option<(f64, usize)>) -> Result<Body> {
-        if solid.boundaries().is_empty() {
-            return Err(KernelError::Failed("empty result".into()));
-        }
-        let span = span_of(&solid);
-        if flip {
-            solid.not();
-        }
-        Ok(Body {
-            solid: std::sync::Arc::new(solid),
-            size: if span.is_finite() && span > 0.0 { span } else { 0.0 },
-            boundary_tol: None,
-            volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
-            coarse_missing: coarse,
-            mesh: None,
-            color: None,
-            paint: None,
-            splits: None,
-            face_sources: None,
-            regularization_protected: false,
-            history: None,
-            display_of: None,
-            meshes: None,
-            phased: true,
-        })
-    }
-
-    /// This oriented body's solid moved by `m` (an affine placement), as [`Body::new_placed`]
-    /// makes it: the orientation comes from the matrix, so a part placed many times (assembly
-    /// instances) is meshed to orient it only once. Topology only; appearance is the caller's.
-    pub(crate) fn placed(&self, m: &mt::Matrix4) -> Result<Body> {
-        use mt::SquareMatrix as _;
-        if *m == mt::Matrix4::from_scale(1.0) {
-            return Ok(self.clone());
-        }
-        let a = [[m.x.x, m.x.y, m.x.z, m.x.w], [m.y.x, m.y.y, m.y.z, m.y.w], [m.z.x, m.z.y, m.z.z, m.z.w], [m.w.x, m.w.y, m.w.z, m.w.w]];
-        let det = m.determinant();
-        if !det.is_finite() || det.abs() < 1e-12 {
-            return Err(KernelError::Invalid("degenerate placement".into()));
-        }
-        let rigid = crate::ops::rigid_placement(&a);
-        let out = Body::placed_as_is(mt::builder::transformed(&*self.solid, *m), det < 0.0, rigid.then_some(self.coarse_missing).flatten())?;
-        // A placement that does not change distances leaves the boundaries exactly as far off
-        // their surfaces as they were, so the file's own figure still describes them (see
-        // [`Body::boundary_tol`]); one that scales the part does not, and the copy declares
-        // nothing. The same rule as the mesh count above.
-        Ok(if rigid { out.with_boundary_tol(self.boundary_tol) } else { out })
+    /// Whether face `index`'s normal in its body is its surface's natural normal (its first
+    /// oriented face's `forward`, the side the record walks it by).
+    pub(crate) fn face_forward(&self, index: usize) -> bool {
+        self.record
+            .shells
+            .iter()
+            .filter_map(|s| match s {
+                Shell::Faces { faces, .. } => Some(faces),
+                _ => None,
+            })
+            .flatten()
+            .find(|f| f.face as usize == index)
+            .is_none_or(|f| f.forward)
     }
 
     pub(crate) fn inherit_regularization_protection(mut self, input: &Body) -> Self {
         self.regularization_protected |= input.regularization_protected;
         self
+    }
+
+    /// This body with the lines `inputs`' faces were split along on purpose added to its own:
+    /// an operation combining bodies keeps their authored splits (each line once), as it keeps
+    /// their regularization protection.
+    pub(crate) fn inherit_split_lines(self, inputs: &[&Body]) -> Self {
+        let mut lines: Vec<Vec<Vec3>> = self.split_keep().to_vec();
+        for line in inputs.iter().flat_map(|input| input.split_keep()) {
+            if !lines.contains(line) {
+                lines.push(line.clone());
+            }
+        }
+        if lines.len() == self.split_keep().len() {
+            return self;
+        }
+        self.with_split_lines(Some(std::sync::Arc::new(lines)))
     }
 
     /// Exact history of the operation that made this body, relative to that operation's
@@ -753,6 +630,7 @@ impl Body {
     pub(crate) fn with_history(mut self, history: crate::history::History, operands: &[&Body]) -> Result<Self> {
         history.check(&self, operands)?;
         self.history = Some(std::sync::Arc::new(history));
+        self.rounds = None;
         Ok(self)
     }
 
@@ -760,6 +638,7 @@ impl Body {
     pub(crate) fn with_history_counts(mut self, history: crate::history::History, operands: &[(usize, usize)]) -> Result<Self> {
         history.check_counts((self.face_count(), self.edge_count()), operands)?;
         self.history = Some(std::sync::Arc::new(history));
+        self.rounds = None;
         Ok(self)
     }
 
@@ -775,12 +654,45 @@ impl Body {
                 None
             }
         });
+        self.rounds = None;
         self
+    }
+
+    /// This body as the rounds of `edges` (each an edge of `before`, in its edge order, with its
+    /// radius) made it from `before` ([`crate::blend_corner::Rounds`]).
+    pub(crate) fn with_rounds(mut self, before: &Body, edges: Vec<(usize, f64)>) -> Self {
+        self.rounds = Some(std::sync::Arc::new(crate::blend_corner::Rounds { before: before.clone(), edges }));
+        self
+    }
+
+    /// The constant-radius rounds that made this body, when they did: the body they were made
+    /// on, and each edge they rounded (its index in that body's edge order) with its radius. A
+    /// later round at a corner where they meet blends them again with it, so a saved model
+    /// keeps this with the body ([`Body::with_rounds_of`]).
+    pub fn rounds(&self) -> Option<(&Body, &[(usize, f64)])> {
+        self.rounds.as_deref().map(|r| (&r.before, r.edges.as_slice()))
+    }
+
+    /// This body as the rounds of `edges` made it from `before`, as [`Body::rounds`] gave them
+    /// (read back from a saved model). Refused unless every edge is one of `before`'s, every
+    /// radius a fillet's, and this body's history is over `before`.
+    pub fn with_rounds_of(self, before: &Body, edges: Vec<(usize, f64)>) -> Result<Body> {
+        let bad = |what: &str| KernelError::Invalid(format!("rounds: {what}"));
+        if edges.is_empty() || edges.len() > before.edge_count() {
+            return Err(bad("no edges, or more than the body has"));
+        }
+        if edges.iter().any(|(e, r)| *e >= before.edge_count() || !(r.is_finite() && *r > 1e-6 && *r < 1e6)) {
+            return Err(bad("an edge the body before them does not have, or a radius no fillet takes"));
+        }
+        let history = self.history().filter(|h| h.operands == 1).ok_or_else(|| bad("the body has no history over the body before them"))?;
+        history.check_counts((self.face_count(), self.edge_count()), &[(before.face_count(), before.edge_count())])?;
+        Ok(self.with_rounds(before, edges))
     }
 
     /// This body with no history: an operation whose history is not known.
     pub(crate) fn without_history(mut self) -> Self {
         self.history = None;
+        self.rounds = None;
         self
     }
 
@@ -811,24 +723,20 @@ impl Body {
         }
     }
 
-    /// Exact current planar surface for an explicitly fixed snapshot, without source lineage.
+    /// Exact current planar surface for an explicitly fixed snapshot, without source lineage: the
+    /// face's plane as the face faces (out of the material in a closed shell).
     pub fn planar_face(&self, index: usize) -> Option<solidcraft_geom::Plane> {
-        if index >= 50_000 {
-            return None;
-        }
-        guard("exact planar face", || {
-            let plane = self.solid.face_iter().nth(index).and_then(|face| match face.oriented_surface() {
-                mt::Surface::Plane(plane) => {
-                    let u = plane.u_axis();
-                    let v = plane.v_axis();
-                    solidcraft_geom::Plane::new(from_p3(plane.origin()), Vec3::new(u.x, u.y, u.z), Vec3::new(v.x, v.y, v.z))
-                }
-                _ => None,
-            });
-            Ok(plane)
-        })
-        .ok()
-        .flatten()
+        let face = self.record.faces.get(index)?;
+        let (o, u, v) = match &face.surface {
+            Surface::Plane { origin, u_axis, v_axis } => (v3(*origin), v3(*u_axis), v3(*v_axis)),
+            Surface::PlaneThrough { origin, u_point, v_point } => {
+                let o = v3(*origin);
+                (o, v3(*u_point) - o, v3(*v_point) - o)
+            }
+            _ => return None,
+        };
+        let v = if self.face_forward(index) { v } else { -v };
+        solidcraft_geom::Plane::new(o, u, v)
     }
 
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
@@ -996,11 +904,6 @@ impl Body {
         self
     }
 
-    /// A deep copy of the solid that can be mutated without affecting other bodies.
-    pub(crate) fn deep_copy(&self) -> Solid {
-        mt::builder::clone(&*self.solid)
-    }
-
     /// Is this a mesh body (no B-rep)?
     pub fn is_mesh(&self) -> bool {
         self.mesh.is_some()
@@ -1018,14 +921,6 @@ impl Body {
     /// Display colour from an imported file.
     pub fn color(&self) -> Option<[f32; 3]> {
         self.color
-    }
-
-    /// The same body, with how far its boundaries may lie off their surfaces (mm) as the file it
-    /// was read from declares (see [`Body::boundary_tol`]). A value that is not finite and above
-    /// zero clears the declaration, which puts the body back on the kernel's own bound.
-    pub(crate) fn with_boundary_tol(mut self, tol: Option<f64>) -> Body {
-        self.boundary_tol = tol.filter(|t| t.is_finite() && *t > 0.0);
-        self
     }
 
     /// The same body with a display colour.
@@ -1066,7 +961,7 @@ impl Body {
     /// Identity of the solid: clones of a body (and bodies a feature passed through unchanged)
     /// share it.
     pub fn solid_id(&self) -> usize {
-        std::sync::Arc::as_ptr(&self.solid) as usize
+        std::sync::Arc::as_ptr(&self.record) as usize
     }
 
     pub fn with_split_lines(mut self, s: Option<std::sync::Arc<Vec<Vec<Vec3>>>>) -> Body {
@@ -1104,21 +999,20 @@ impl Body {
         self
     }
 
-    /// Characteristic size (bounding box diagonal) for tolerances. [`Body::new`] measured it
-    /// while it read the vertices anyway, and a mesh body when it was made, so the answer is
-    /// cached; a body built by hand carries 0 and is walked here.
+    /// Characteristic size (bounding box diagonal of its vertices) for tolerances, measured
+    /// when the body was made; mesh bodies measure their triangles.
     pub fn size(&self) -> f64 {
         if self.size > 0.0 {
             return self.size;
         }
-        let mut b = solidcraft_geom::Aabb3::EMPTY;
+        let mut b = Aabb3::EMPTY;
         if let Some(m) = &self.mesh {
             for p in &m.positions {
                 b.add(*p);
             }
         }
-        for v in self.solid.vertex_iter() {
-            b.add(from_p3(v.point()));
+        for v in &self.record.vertices {
+            b.add(v3(v.point));
         }
         let d = b.diagonal();
         if d.is_finite() && d > 0.0 { d } else { 1.0 }
@@ -1128,51 +1022,38 @@ impl Body {
     /// points (a spline lies in the hull of its controls; a face's surface does not count, as an
     /// imported face is often trimmed from a far larger one). A face curving out beyond all of
     /// its edges (a dome on a circle) can reach past it, so it frames a view while the body is
-    /// still being meshed; [`Mesh::bounds`] is the exact one.
-    /// A mesh body's box is its triangles'.
-    pub fn outline_bounds(&self) -> solidcraft_geom::Aabb3 {
-        crate::guard("outline bounds", || Ok(self.outline_bounds_unguarded())).unwrap_or(solidcraft_geom::Aabb3::EMPTY)
-    }
-
-    fn outline_bounds_unguarded(&self) -> solidcraft_geom::Aabb3 {
-        use mt::BoundedCurve;
-        let mut b = solidcraft_geom::Aabb3::EMPTY;
+    /// still being meshed; [`Body::exact_bounds`] is the exact one. A mesh body's box is its
+    /// triangles'.
+    pub fn outline_bounds(&self) -> Aabb3 {
+        let mut b = Aabb3::EMPTY;
         if let Some(m) = &self.mesh {
             for p in &m.positions {
                 b.add(*p);
             }
             return b;
         }
-        let homogeneous = |b: &mut solidcraft_geom::Aabb3, v: mt::Vector4| {
-            if v.w > 0.0 {
-                b.add(Vec3::new(v.x / v.w, v.y / v.w, v.z / v.w));
-            }
-        };
-        for v in self.solid.vertex_iter() {
-            b.add(from_p3(v.point()));
+        for v in &self.record.vertices {
+            b.add(v3(v.point));
         }
-        for e in self.solid.edge_iter() {
-            match e.curve() {
-                mt::Curve::Line(l) => {
-                    b.add(from_p3(l.0));
-                    b.add(from_p3(l.1));
-                }
-                mt::Curve::BSplineCurve(c) => c.control_points().iter().for_each(|p| b.add(from_p3(*p))),
-                mt::Curve::NurbsCurve(c) => c.control_points().iter().for_each(|p| homogeneous(&mut b, *p)),
-                mt::Curve::IntersectionCurve(c) => {
-                    let (t0, t1) = c.range_tuple();
-                    for i in 0..=8 {
-                        b.add(from_p3(mt::ParametricCurve::subs(&e.curve(), t0 + (t1 - t0) * f64::from(i) / 8.0)));
-                    }
-                }
-            }
+        for e in &self.record.edges {
+            curve_hull(e.parameters(), e.interval, &mut b);
         }
         b
     }
 
-    /// The body's volume from a mesh at `tol`, measured once per (solid, tolerance): clones of
-    /// a body share the measurement, so an operand a later boolean takes again is not meshed
-    /// twice for the same number. `None` when the body cannot be meshed.
+    /// The exact box of the body's faces, edges and vertices (SMLib's tight box); a mesh body's
+    /// is its triangles'.
+    pub fn exact_bounds(&self) -> Result<Aabb3> {
+        if self.is_mesh() {
+            return Ok(self.outline_bounds());
+        }
+        let (lo, hi) = self.smlib()?.bounds().map_err(|e| KernelError::Failed(format!("SMLib bounds: {e}")))?;
+        Ok(Aabb3 { min: v3(lo), max: v3(hi) })
+    }
+
+    /// The body's volume from a mesh at `tol`, measured once per (record, tolerance): clones of
+    /// a body share the measurement. `None` when the body cannot be meshed, or a face of it was
+    /// left out of the mesh (an open mesh has no volume).
     pub fn volume_at(&self, tol: f64) -> Option<f64> {
         let key = if tol.is_finite() && tol > 0.0 { tol } else { 0.05 };
         let key = key.to_bits();
@@ -1183,7 +1064,11 @@ impl Body {
         {
             return Some(volume);
         }
-        let volume = self.tessellate(f64::from_bits(key)).ok()?.measure().volume;
+        let mesh = self.mesh(&MeshTolerance::chord(f64::from_bits(key))).ok()?;
+        if self.faces_without_triangles(&mesh) > 0 {
+            return None;
+        }
+        let volume = mesh.measure().volume;
         if let Some(cell) = &self.volume
             && let Ok(mut slot) = cell.lock()
         {
@@ -1198,207 +1083,84 @@ impl Body {
         if let Some(m) = &self.mesh {
             return m.positions.len() * 24 + m.triangles.len() * 12;
         }
-        // Counted on the borrowed boundaries: `Solid::edge_iter` and `vertex_iter` clone every
-        // face's wires to walk them, which made this estimate (taken after every feature, over
-        // every body) cost more than evaluating most features. Each edge use is one edge and
-        // one vertex in those iterators, so the counts are the same.
-        let (mut faces, mut uses) = (0usize, 0usize);
-        for face in self.solid.face_iter() {
-            faces += 1;
-            uses += face.absolute_boundaries().iter().map(|w| w.len()).sum::<usize>();
+        let uses: usize = self.record.faces.iter().flat_map(|f| &f.loops).map(|l| if let Loop::Edges { edges } = l { edges.len() } else { 1 }).sum();
+        self.record.faces.len() * 2048 + uses * (512 + 96)
+    }
+
+    /// The body's triangles, `t` from its exact surfaces: SolidCraft's one mesher (the planner,
+    /// [`crate::tess`]), evaluated on the CPU, with its edges flagged for display (seams, tangent
+    /// joins, protected creases). Triangles carry their face index and the edges their polylines,
+    /// in the record's order; neighbouring faces share every boundary node, so the mesh is
+    /// watertight wherever the B-rep is. A mesh body gives its own triangles. A face the planner
+    /// cannot mesh is left out (logged with why; [`Body::unmeshed_faces`] counts it) and the rest
+    /// meshed; a body none of whose faces mesh is an error that names the first and why.
+    pub fn mesh(&self, t: &MeshTolerance) -> Result<Mesh> {
+        crate::profile::timed(crate::profile::Kind::Tessellate, "mesh", || self.mesh_untimed(t))
+    }
+
+    fn mesh_untimed(&self, t: &MeshTolerance) -> Result<Mesh> {
+        if let Some(m) = &self.mesh {
+            return Ok(m.to_mesh());
         }
-        faces * 2048 + uses * (512 + 96)
-    }
-
-    /// Distinct edges in a stable order (the order of `edges()` and `tessellate().edges`).
-    pub(crate) fn unique_edges(solid: &Solid) -> Vec<mt::Edge> {
-        let mut seen = std::collections::HashSet::new();
-        solid.edge_iter().filter(|e| seen.insert(e.id())).collect()
-    }
-
-    /// Triangulate with chord tolerance `tol` (mm). Triangles carry their face index.
-    pub fn tessellate(&self, tol: f64) -> Result<Mesh> {
-        self.tessellate_with(tol, false)
-    }
-
-    /// Like [`Body::tessellate`]; with `refine`, triangles that cut through curved faces are
-    /// split until within `tol` of the surface (for measuring).
-    pub fn tessellate_with(&self, tol: f64, refine: bool) -> Result<Mesh> {
-        self.tessellate_within(tol, f64::INFINITY, refine)
-    }
-
-    /// [`Body::tessellate_with`] in which no facet turns more than `angle` radians either
-    /// (infinite: the chord tolerance alone).
-    fn tessellate_within(&self, tol: f64, angle: f64, refine: bool) -> Result<Mesh> {
-        let mesh = || crate::profile::timed(crate::profile::Kind::Tessellate, || self.tessellate_within_untimed(tol, angle, refine));
-        let memo = self.meshes.as_ref().filter(|m| std::sync::Arc::ptr_eq(&m.solid, &self.solid));
-        // Held while meshing: threads asking for the same mesh wait for it rather than make it too.
-        let Some(Ok(mut made)) = memo.map(|m| m.made.lock()) else { return mesh() };
-        let key = (tol.to_bits(), angle.to_bits(), refine);
-        if let Some((_, m)) = made.iter().find(|(k, _)| *k == key) {
-            return Ok(Mesh::clone(m));
+        // A placed copy shows its original's mesh, moved: the part is meshed once for every copy.
+        if let Some((shared, m)) = self.display_of.as_deref() {
+            let made = remembered(&shared.meshes, t, || shared.original.mesh_untimed(t))?;
+            if let Some(placed) = placed_mesh(&made, m) {
+                return Ok(placed);
+            }
         }
-        let m = mesh()?;
-        if made.len() >= MEMO_MESHES {
-            made.remove(0);
+        match self.meshes.as_ref().filter(|m| std::sync::Arc::ptr_eq(&m.record, &self.record)) {
+            Some(memo) => {
+                let kept: std::sync::Arc<Mesh> = remembered(&memo.made, t, || self.mesh_of(&self.mesh_plan_untimed(t)?))?;
+                Ok(Mesh::clone(&kept))
+            }
+            None => self.mesh_of(&self.mesh_plan_untimed(t)?),
         }
-        made.push((key, std::sync::Arc::new(m.clone())));
-        Ok(m)
+    }
+
+    /// The plan [`Body::mesh`] evaluates: every face's triangulation in its own parameters, each
+    /// edge sampled once so faces meet exactly. For an evaluator of its own (the GPU viewport);
+    /// [`Body::mesh_of`] gives its mesh without planning again.
+    pub fn mesh_plan(&self, t: &MeshTolerance) -> Result<solidcraft_geom::tess::TessPlan> {
+        crate::profile::timed(crate::profile::Kind::Tessellate, "mesh_plan", || self.mesh_plan_untimed(t))
+    }
+
+    fn mesh_plan_untimed(&self, t: &MeshTolerance) -> Result<solidcraft_geom::tess::TessPlan> {
+        if self.is_mesh() {
+            return Err(KernelError::Invalid("a mesh body has no surfaces to mesh".into()));
+        }
+        // A placed copy is planned as its original, moved (as `Body::mesh` shows the original's
+        // mesh): the part is planned once for every copy.
+        if let Some((shared, m)) = self.display_of.as_deref()
+            && brep::placement::Rigid::of_matrix(m).is_some()
+        {
+            return Ok(remembered(&shared.plans, t, || shared.original.mesh_plan_untimed(t))?.transformed(m));
+        }
+        let (tol, turn) = t.rules(self.size());
+        let (plan, stats) = guard("mesh", || crate::tess::plan(&self.record, tol, turn))?;
+        // A face filled leniently has no hole on screen, but its pcurves or seams are still wrong:
+        // it is reported, never silent.
+        for f in &stats.lenient {
+            log::warn!("display plan: face {} filled leniently in (u, v), a defect in its pcurves or seams: {}", f.face, f.reason);
+        }
+        // A face no method plans is left out (no triangles; `unmeshed_faces` counts it) and named.
+        for f in &stats.unmeshed {
+            log::warn!("display plan: face {} left out of the mesh: {}", f.face, f.reason);
+        }
+        Ok(plan)
+    }
+
+    /// The mesh of `plan`, a plan [`Body::mesh_plan`] made of this body: what [`Body::mesh`]
+    /// gives at the plan's tolerance.
+    pub fn mesh_of(&self, plan: &solidcraft_geom::tess::TessPlan) -> Result<Mesh> {
+        self.flagged(plan.evaluate())
     }
 
     /// A copy of this body that keeps the meshes made of it for reuse, for as long as the copy
     /// (or a clone of it) lives: for many operations on one large body at the same tolerance,
     /// such as cutting it down to the region of each of many contacts.
     pub fn keeping_meshes(&self) -> Body {
-        let (made, shells) = (std::sync::Mutex::new(Vec::new()), std::sync::Mutex::new(Vec::new()));
-        Body { meshes: Some(std::sync::Arc::new(MeshMemo { solid: self.solid.clone(), made, shells })), ..self.clone() }
-    }
-
-    /// The meshes of this body's shells a boolean at `tol` makes, when the body keeps its meshes
-    /// ([`Body::keeping_meshes`]); `None` otherwise.
-    pub(crate) fn boolean_meshes(&self, tol: f64) -> Option<std::sync::Arc<Vec<truck_shapeops::MeshedShell>>> {
-        let memo = self.meshes.as_ref().filter(|m| std::sync::Arc::ptr_eq(&m.solid, &self.solid))?;
-        // Held while meshing, as in `tessellate_within`.
-        let mut shells = memo.shells.lock().ok()?;
-        if let Some((_, m)) = shells.iter().find(|(k, _)| *k == tol.to_bits()) {
-            return Some(m.clone());
-        }
-        let made = std::sync::Arc::new(guard("boolean meshes", || Ok(truck_shapeops::meshes(&*self.solid, tol))).ok()?);
-        if shells.len() >= MEMO_MESHES {
-            shells.remove(0);
-        }
-        shells.push((tol.to_bits(), made.clone()));
-        Some(made)
-    }
-
-    fn tessellate_within_untimed(&self, tol: f64, angle: f64, refine: bool) -> Result<Mesh> {
-        let tol = if tol.is_finite() && tol > 0.0 { tol } else { 0.05 };
-        let tol = tol.max(self.size() * 1e-6);
-        if let Some(m) = &self.mesh {
-            return Ok(m.to_mesh());
-        }
-        // Two kinds of face truck cannot mesh in its surface's parameters: one trimmed by a
-        // helix, which turns more than once around its cylinder and comes out with triangles
-        // across the solid (#1289), and one that runs across the join of a B-spline surface that
-        // closes on itself, which comes out folded over itself or with a hole in it.
-        // Such a body is meshed from its display plan, which cuts and unwraps those faces.
-        let planned =
-            guard("tessellate", || Ok(crate::tess::seam::turns_more_than_once(&self.solid) || crate::tess::seam::closes_on_itself(&self.solid)));
-        if planned.unwrap_or(false) {
-            let turn = (angle.is_finite() && angle > 0.0)
-                .then(|| crate::tess::size::Turn { angle: angle.max(MIN_DISPLAY_ANGLE), floor: tol * DISPLAY_ANGLE_FLOOR });
-            match guard("tessellate", || crate::tess::plan(&self.solid, tol, turn, self.boundary_tol)) {
-                Ok((plan, _)) => return Ok(plan.evaluate()),
-                Err(e) => log::debug!("no display plan ({e}); meshing the reference way"),
-            }
-        }
-        let deflection = if angle.is_finite() && angle > 0.0 {
-            Deflection { chord: tol, angle: angle.max(MIN_DISPLAY_ANGLE), floor: tol * DISPLAY_ANGLE_FLOOR, display: true }
-        } else {
-            Deflection { display: true, ..Deflection::chord(tol) }
-        };
-        guard("tessellate", || {
-            let meshed = mesh_shells_within(&self.solid, deflection);
-            let mut out = Mesh::default();
-            let solid_faces: Vec<&mt::Face> = self.solid.face_iter().collect();
-            for (fi, face) in meshed.iter().flat_map(|s| s.face_iter()).enumerate() {
-                let Some(pm) = face.surface() else { continue };
-                let flip = !face.orientation();
-                let base = u32::try_from(out.positions.len()).unwrap_or(u32::MAX);
-                // Curved faces: split triangles that cut through the surface.
-                let refinement = if refine {
-                    solid_faces.get(fi).and_then(|sf| {
-                        let surface = sf.surface();
-                        if matches!(surface, mt::Surface::Plane(_)) { None } else { refined(&pm, &surface, tol) }
-                    })
-                } else {
-                    None
-                };
-                if let Some(tris) = refinement {
-                    let fid = u32::try_from(fi).unwrap_or(u32::MAX);
-                    for t in tris {
-                        let mut idx = [0u32; 3];
-                        for (slot, (p, n)) in idx.iter_mut().zip(t) {
-                            out.positions.push(p);
-                            out.normals.push(if flip { -n } else { n });
-                            *slot = u32::try_from(out.positions.len() - 1).unwrap_or(0);
-                        }
-                        out.triangles.push(if flip { [idx[0], idx[2], idx[1]] } else { idx });
-                        out.tri_face.push(fid);
-                    }
-                    continue;
-                }
-                let pos = pm.positions();
-                let nor = pm.normals();
-                // Expand to per-corner vertices so normals stay per face (crisp edges).
-                for tri in pm.faces().triangle_iter() {
-                    let mut idx = [0u32; 3];
-                    for (k, v) in tri.iter().enumerate() {
-                        let Some(p) = pos.get(v.pos) else { continue };
-                        let n = v.nor.and_then(|ni| nor.get(ni)).map(|n| Vec3::new(n.x, n.y, n.z)).unwrap_or(Vec3::Z);
-                        let n = if flip { -n } else { n };
-                        out.positions.push(Vec3::new(p.x, p.y, p.z));
-                        out.normals.push(n);
-                        if let Some(slot) = idx.get_mut(k) {
-                            *slot = u32::try_from(out.positions.len() - 1).unwrap_or(0);
-                        }
-                    }
-                    let t = if flip { [idx[0], idx[2], idx[1]] } else { idx };
-                    out.triangles.push(t);
-                    out.tri_face.push(u32::try_from(fi).unwrap_or(u32::MAX));
-                }
-                let _ = base;
-            }
-            // Fill missing normals from geometry.
-            for t in &out.triangles {
-                let (Some(a), Some(b), Some(c)) =
-                    (out.positions.get(t[0] as usize), out.positions.get(t[1] as usize), out.positions.get(t[2] as usize))
-                else {
-                    continue;
-                };
-                let fnrm = (b - a).cross(c - a).normalized().unwrap_or(Vec3::Z);
-                for k in t {
-                    if let Some(n) = out.normals.get_mut(*k as usize)
-                        && (n.dot(fnrm) < -0.2 || n.len() < 0.5)
-                    {
-                        *n = fnrm;
-                    }
-                }
-            }
-            let (edges, faces) = edge_order(meshed.iter().flat_map(|s| s.face_iter()));
-            out.edges = edges.iter().map(|e| e.oriented_curve().0.iter().map(|p| Vec3::new(p.x, p.y, p.z)).collect()).collect();
-            out.edge_faces = faces.into_iter().map(|fs| fs.into_iter().map(|f| u32::try_from(f).unwrap_or(u32::MAX)).collect()).collect();
-            Ok(out)
-        })
-    }
-
-    /// The display tessellation as a plan for the CPU or GPU evaluator: every face's
-    /// triangulation in its own parameters, with each edge sampled once (chord tolerance
-    /// `tol`, mm) so faces meet exactly.
-    pub fn display_plan(&self, tol: f64) -> Result<solidcraft_geom::tess::TessPlan> {
-        self.plan_within(tol, None)
-    }
-
-    /// Like [`Body::display_plan`], and no facet turns more than `angle` radians (see
-    /// [`Body::display_mesh_angular`]).
-    pub fn display_plan_angular(&self, tol: f64, angle: f64) -> Result<solidcraft_geom::tess::TessPlan> {
-        self.plan_within(tol, Some(angle))
-    }
-
-    fn plan_within(&self, tol: f64, angle: Option<f64>) -> Result<solidcraft_geom::tess::TessPlan> {
-        crate::profile::timed(crate::profile::Kind::Tessellate, || self.plan_within_untimed(tol, angle))
-    }
-
-    fn plan_within_untimed(&self, tol: f64, angle: Option<f64>) -> Result<solidcraft_geom::tess::TessPlan> {
-        if self.is_mesh() {
-            return Err(KernelError::Invalid("a mesh body has no surfaces to tessellate".into()));
-        }
-        let tol = if tol.is_finite() && tol > 0.0 { tol } else { 0.05 };
-        let tol = tol.max(self.size() * 1e-6);
-        // The same angle and floor as the reference mesher's angular display mesh.
-        let turn =
-            angle.filter(|a| a.is_finite()).map(|a| crate::tess::size::Turn { angle: a.max(MIN_DISPLAY_ANGLE), floor: tol * DISPLAY_ANGLE_FLOOR });
-        guard("tessellate", || crate::tess::plan(&self.solid, tol, turn, self.boundary_tol).map(|(plan, _)| plan))
+        Body { meshes: Some(std::sync::Arc::new(MeshMemo { record: self.record.clone(), made: std::sync::Mutex::new(Vec::new()) })), ..self.clone() }
     }
 
     /// Planar faces whose boundary crosses itself: two of its loops crossing each other, or a
@@ -1413,7 +1175,6 @@ impl Body {
     /// The faces [`Body::crossed_face_loops`] counts, each as the mean of its boundary's
     /// points: the same for a face an operation carried over unchanged.
     pub fn crossed_faces(&self) -> Result<Vec<Vec3>> {
-        use mt::{BoundedCurve, ParameterDivision1D};
         if self.is_mesh() {
             return Ok(Vec::new());
         }
@@ -1422,32 +1183,22 @@ impl Body {
         let tol = (size * 1e-6).max(1e-9);
         let chord = (size * 1e-3).max(1e-4);
         let mut crossed = Vec::new();
-        for f in self.solid.face_iter() {
-            let mt::Surface::Plane(pl) = f.oriented_surface() else { continue };
-            let o = from_p3(pl.origin());
-            let (Some(u), Some(n)) = (
-                Vec3::new(pl.u_axis().x, pl.u_axis().y, pl.u_axis().z).normalized(),
-                Vec3::new(pl.normal().x, pl.normal().y, pl.normal().z).normalized(),
-            ) else {
-                continue;
-            };
-            let v = n.cross(u);
-            let flat = |p: mt::Point3| {
-                let d = from_p3(p) - o;
+        for (fi, f) in self.record.faces.iter().enumerate() {
+            let Some(plane) = self.planar_face(fi) else { continue };
+            let (o, u, v) = (plane.origin, plane.x, plane.y);
+            let flat = |p: Vec3| {
+                let d = p - o;
                 (d.dot(u), d.dot(v))
             };
             // Each loop's segments, in the face's plane.
             let mut loops: Vec<Vec<((f64, f64), (f64, f64))>> = Vec::new();
             let mut total = 0usize;
-            for w in f.boundaries() {
+            for l in &f.loops {
+                let Loop::Edges { edges } = l else { continue };
                 let mut segs = Vec::new();
-                for e in w.edge_iter() {
-                    let pts = guard("face loops", || {
-                        Ok(match e.curve() {
-                            mt::Curve::Line(_) => vec![e.front().point(), e.back().point()],
-                            c => c.parameter_division(c.range_tuple(), chord).1,
-                        })
-                    })?;
+                for u in edges {
+                    let e = self.record.edges.get(u.edge as usize).ok_or_else(|| KernelError::Invalid("edge reference".into()))?;
+                    let pts = edge_points(e, chord)?;
                     segs.extend(pts.windows(2).filter_map(|q| Some((flat(*q.first()?), flat(*q.get(1)?)))));
                 }
                 total = total.saturating_add(segs.len());
@@ -1470,137 +1221,42 @@ impl Body {
                 let (d3, d4) = (side(t.0, t.1, s.0), side(t.0, t.1, s.1));
                 ((d1 > tol && d2 < -tol) || (d1 < -tol && d2 > tol)) && ((d3 > tol && d4 < -tol) || (d3 < -tol && d4 > tol))
             };
-            let all: Vec<(usize, &((f64, f64), (f64, f64)))> =
-                loops.iter().enumerate().flat_map(|(l, segs)| segs.iter().map(move |s| (l, s))).collect();
-            let bad = all.iter().enumerate().any(|(i, (_, s))| all.iter().skip(i + 1).any(|(_, t)| cross(s, t)));
+            let all: Vec<&((f64, f64), (f64, f64))> = loops.iter().flatten().collect();
+            let bad = all.iter().enumerate().any(|(i, s)| all.iter().skip(i + 1).any(|t| cross(s, t)));
             if bad {
-                let ends: Vec<(f64, f64)> = all.iter().map(|(_, s)| s.0).collect();
-                let k = ends.len().max(1) as f64;
-                let (su, sv) = ends.iter().fold((0.0, 0.0), |acc, p| (acc.0 + p.0, acc.1 + p.1));
+                let k = all.len().max(1) as f64;
+                let (su, sv) = all.iter().fold((0.0, 0.0), |acc, s| (acc.0 + s.0.0, acc.1 + s.0.1));
                 crossed.push(o + u * (su / k) + v * (sv / k));
             }
         }
         Ok(crossed)
     }
 
-    /// Faces with no triangles of their own, and so not shown: none in a coarse tessellation,
-    /// and none in the display plan either (the plan is what the viewport draws, and it meshes
-    /// faces the reference mesher gives up on). Only faces the coarse tessellation misses are
-    /// looked for in the plan, so a sound body costs no planning.
+    /// Faces with no triangles in a coarse mesh (the mesher failed or gave up), counted on the
+    /// mesh's plan: the mesh itself is not made.
     pub fn unmeshed_faces(&self) -> usize {
         if self.is_mesh() {
             return 0;
         }
-        let tol = orientation_tolerance(self.size());
-        // The count [`Body::new`] already took at this tolerance, else the same count made now.
-        let missing = match self.coarse_missing {
-            Some((cached_tol, missing)) if cached_tol == tol => missing,
-            _ => {
-                let Ok(m) = self.tessellate(tol) else { return self.face_count() };
-                let mut has = vec![false; self.face_count()];
-                for f in &m.tri_face {
-                    if let Some(h) = has.get_mut(*f as usize) {
-                        *h = true;
-                    }
-                }
-                has.iter().filter(|h| !**h).count()
-            }
-        };
-        // A body the coarse mesh covers whole is shown whole: no plan is made for it, whether the
-        // count came from the cache or from the mesh above.
-        if missing == 0 {
-            return 0;
-        }
-        self.unmeshed_in_plan(tol).unwrap_or(missing)
+        let Ok(plan) = self.mesh_plan(&MeshTolerance::chord(coarse_tolerance(self.size()))) else { return self.face_count() };
+        plan.faces_with_triangles(self.face_count()).iter().filter(|h| !**h).count()
     }
 
-    /// Faces the display plan leaves without triangles; `None` when the body has no plan.
-    fn unmeshed_in_plan(&self, tol: f64) -> Option<usize> {
-        let plan = self.display_plan(tol).ok()?;
+    /// Faces of the body with no triangles in its mesh `m` (left out by the mesher).
+    fn faces_without_triangles(&self, m: &Mesh) -> usize {
+        if self.is_mesh() {
+            return 0;
+        }
         let mut has = vec![false; self.face_count()];
-        for f in &plan.faces {
-            if !f.triangles.is_empty()
-                && let Some(h) = has.get_mut(f.face as usize)
-            {
+        for f in &m.tri_face {
+            if let Some(h) = has.get_mut(*f as usize) {
                 *h = true;
             }
         }
-        Some(has.iter().filter(|h| !**h).count())
+        has.iter().filter(|h| !**h).count()
     }
 
-    /// Display mesh: like [`Body::tessellate`], with seam edges flagged. Meshed from the
-    /// body's [`Body::display_plan`] (shared edge nodes, structured grids), or the way
-    /// [`Body::tessellate`] meshes when no plan can be made.
-    pub fn display_mesh(&self, tol: f64) -> Result<Mesh> {
-        crate::profile::timed(crate::profile::Kind::Tessellate, || self.display_mesh_untimed(tol))
-    }
-
-    fn display_mesh_untimed(&self, tol: f64) -> Result<Mesh> {
-        if self.is_mesh() {
-            return self.flagged(self.tessellate(tol)?);
-        }
-        let m = match self.display_plan(tol) {
-            Ok(plan) => plan.evaluate(),
-            Err(e) => {
-                log::debug!("display mesh: {e}; meshing the reference way");
-                self.tessellate(tol)?
-            }
-        };
-        self.flagged(m)
-    }
-
-    /// Display mesh whose curved faces and edges look curved whatever the body's size: like
-    /// [`Body::display_mesh`], and no facet turns more than `angle` radians (see
-    /// [`DISPLAY_ANGLE`]). A chord tolerance that follows the body's size is larger than the
-    /// sagitta of a small radius on a large body (a sheet-metal bend, a small hole), which the
-    /// tolerance alone leaves as one flat facet.
-    pub fn display_mesh_angular(&self, tol: f64, angle: f64) -> Result<Mesh> {
-        crate::profile::timed(crate::profile::Kind::Tessellate, || self.display_mesh_angular_untimed(tol, angle))
-    }
-
-    fn display_mesh_angular_untimed(&self, tol: f64, angle: f64) -> Result<Mesh> {
-        if self.is_mesh() {
-            return self.flagged(self.tessellate(tol)?);
-        }
-        match self.display_plan_angular(tol, angle) {
-            Ok(plan) => self.display_mesh_of(&plan),
-            Err(e) => {
-                log::debug!("display mesh: {e}; meshing the reference way");
-                self.reference_display_mesh_angular(tol, angle)
-            }
-        }
-    }
-
-    /// The display mesh of a plan made from this body ([`Body::display_plan`],
-    /// [`Body::display_plan_angular`]): evaluated on the CPU, with its edges flagged.
-    pub fn display_mesh_of(&self, plan: &solidcraft_geom::tess::TessPlan) -> Result<Mesh> {
-        crate::profile::timed(crate::profile::Kind::Tessellate, || self.display_mesh_of_untimed(plan))
-    }
-
-    fn display_mesh_of_untimed(&self, plan: &solidcraft_geom::tess::TessPlan) -> Result<Mesh> {
-        self.flagged(plan.evaluate())
-    }
-
-    /// The reference mesher's angular display mesh: what [`Body::display_mesh_angular`] falls
-    /// back to when no plan can be made.
-    pub fn reference_display_mesh_angular(&self, tol: f64, angle: f64) -> Result<Mesh> {
-        crate::profile::timed(crate::profile::Kind::Tessellate, || self.reference_display_mesh_angular_untimed(tol, angle))
-    }
-
-    fn reference_display_mesh_angular_untimed(&self, tol: f64, angle: f64) -> Result<Mesh> {
-        if let Some((shared, t)) = self.display_of.as_deref()
-            && let Some(placed) =
-                shared.mesh.get_or_init(|| shared.original.reference_display_mesh_angular(tol, angle).ok()).as_ref().and_then(|m| placed_mesh(m, t))
-        {
-            return Ok(placed);
-        }
-        if self.is_mesh() {
-            return self.flagged(self.tessellate(tol)?);
-        }
-        self.flagged(self.tessellate_within(tol, angle, false)?)
-    }
-
-    /// A tessellation with its edges flagged for display (seams, tangent joins, protected creases).
+    /// A mesh with its edges flagged for display (seams, tangent joins, protected creases).
     fn flagged(&self, mut m: Mesh) -> Result<Mesh> {
         if self.is_mesh() {
             return Ok(m);
@@ -1610,9 +1266,9 @@ impl Body {
         Ok(m)
     }
 
-    /// Edges with polylines (index = position in [`Body::tessellate`]'s `edges`).
+    /// Edges with polylines (index = the record's edge index).
     pub fn edges(&self, tol: f64) -> Result<Vec<EdgeInfo>> {
-        let m = self.tessellate(tol)?;
+        let m = self.mesh(&MeshTolerance::chord(tol))?;
         Ok(m.edges
             .into_iter()
             .enumerate()
@@ -1623,32 +1279,35 @@ impl Body {
             .collect())
     }
 
-    /// Edges `indices` (as in [`Body::tessellate`]'s `edges`) in `plane`'s coordinates,
-    /// exactly: lines, circular arcs, and free-form curves as the Bézier spans they are, for a
-    /// sketch to project them. `None` for an edge that doesn't lie in a plane parallel to
-    /// `plane`, isn't read exactly or isn't there, and for every edge of a mesh body.
-    pub fn planar_edges(&self, plane: &solidcraft_geom::Plane, indices: &[usize]) -> Vec<Option<Vec<solidcraft_geom::Seg2>>> {
-        let none = || vec![None; indices.len()];
+    /// How far [`Body::planar_edges`] lets a piece it reads as a line or an arc lie from the
+    /// edge's curve (a NURBS within this of a circle is that arc), so how far a piece's ends may
+    /// lie from the edge's vertices.
+    pub fn planar_edges_tolerance(&self) -> f64 {
+        (self.size() * 1e-7).max(1e-9) * 10.0
+    }
+
+    /// Edges `indices` (record edge indices) in `plane`'s coordinates, exactly: lines, circular
+    /// arcs, single free-form segments, and a free-form curve of several spans as the one
+    /// B-spline it is, for a sketch to project them. `None` for an edge that doesn't lie in a
+    /// plane parallel to `plane`, isn't read exactly or isn't there, and for every edge of a mesh
+    /// body.
+    pub fn planar_edges(&self, plane: &solidcraft_geom::Plane, indices: &[usize]) -> Vec<Option<Vec<crate::PlanarPiece>>> {
         if self.is_mesh() {
-            return none();
+            return vec![None; indices.len()];
         }
-        let tol = (self.size() * 1e-7).max(1e-9) * 10.0;
-        guard("planar edges", || {
-            let edges = Self::unique_edges(&self.solid);
-            Ok(indices
-                .iter()
-                .map(|i| {
-                    let mut work = 262_144usize;
-                    edges.get(*i).and_then(|e| crate::prism_curve::projected(e, plane, tol, &mut work))
-                })
-                .collect())
-        })
-        .unwrap_or_else(|_| none())
+        let tol = self.planar_edges_tolerance();
+        indices
+            .iter()
+            .map(|i| {
+                let mut work = 262_144usize;
+                crate::prism_curve::Run::of(&self.record, *i, true).and_then(|run| crate::prism_curve::projected_curves(&run, plane, tol, &mut work))
+            })
+            .collect()
     }
 
     /// Faces with area and centroid.
     pub fn faces(&self, tol: f64) -> Result<Vec<FaceInfo>> {
-        let m = self.tessellate(tol)?;
+        let m = self.mesh(&MeshTolerance::chord(tol))?;
         let nf = self.face_count();
         let mut acc: Vec<(f64, Vec3, Vec3, bool)> = vec![(0.0, Vec3::ZERO, Vec3::ZERO, true); nf];
         for (t, f) in m.triangles.iter().zip(&m.tri_face) {
@@ -1696,44 +1355,64 @@ impl Body {
         Ok(best)
     }
 
-    /// Is the point inside the solid?
-    pub fn contains(&self, p: Vec3) -> bool {
-        self.tessellate(self.size() * 2e-3).map(|m| m.contains(p)).unwrap_or(false)
+    /// Where `p` lies against the body, decided exactly on its faces' surfaces and edges' curves
+    /// (SMLib's point classification at the body's own tolerance, no mesh): on the boundary when
+    /// within that tolerance of a face, an edge or a vertex, else inside its material or outside
+    /// (a cavity is outside). A mesh body's triangles are its exact shape: on its boundary
+    /// within the record's tolerance of a triangle, else inside when rays from the point cross
+    /// it an odd number of times.
+    pub fn classify_point(&self, p: Vec3) -> Result<PointClass> {
+        if !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite()) {
+            return Err(KernelError::Invalid(format!("point classification: the point {p:?} is not finite")));
+        }
+        if let Some(m) = &self.mesh {
+            let mesh = m.to_mesh();
+            let near = mesh
+                .triangles
+                .iter()
+                .filter_map(|t| mesh.tri(t))
+                .any(|[a, b, c]| solidcraft_geom::compare::closest_on_triangle(p, a, b, c).dist(p) <= self.record.tolerance);
+            return Ok(if near {
+                PointClass::OnBoundary
+            } else if mesh.contains(p) {
+                PointClass::Inside
+            } else {
+                PointClass::Outside
+            });
+        }
+        let class = self.smlib()?.classify_point([p.x, p.y, p.z]).map_err(|e| KernelError::Failed(format!("SMLib point classification: {e}")))?;
+        Ok(match class {
+            solidcraft_smlib::PointClass::Inside => PointClass::Inside,
+            solidcraft_smlib::PointClass::Outside => PointClass::Outside,
+            solidcraft_smlib::PointClass::OnBoundary => PointClass::OnBoundary,
+        })
     }
 
     /// B-rep faces (a mesh body is one face; [`crate::measure`] counts its triangles).
     pub fn face_count(&self) -> usize {
-        match &self.mesh {
-            Some(_) => 1,
-            None => self.solid.face_iter().count(),
-        }
+        if self.mesh.is_some() { 1 } else { self.record.faces.len() }
     }
     /// B-rep edges (none for a mesh body).
     pub fn edge_count(&self) -> usize {
-        match &self.mesh {
-            Some(_) => 0,
-            None => Self::unique_edges(&self.solid).len(),
-        }
+        self.record.edges.len()
     }
     /// B-rep vertices (none for a mesh body).
     pub fn vertex_count(&self) -> usize {
-        if self.mesh.is_some() {
-            return 0;
-        }
-        let mut seen = std::collections::HashSet::new();
-        self.solid.vertex_iter().filter(|v| seen.insert(v.id())).count()
+        self.record.vertices.len()
     }
-    /// What is wrong with the body as a solid: shells that aren't closed and consistently
-    /// oriented, faces that don't mesh, a volume that isn't positive. Empty when it is sound.
+
+    /// What is wrong with the body as a solid: face shells that aren't closed, faces that don't
+    /// mesh, a volume that isn't positive. Empty when it is sound.
     pub fn validity(&self) -> Vec<String> {
         if let Some(m) = &self.mesh {
             return if crate::meshbody::is_closed(m) { Vec::new() } else { vec!["the mesh is not closed".into()] };
         }
         let mut out = Vec::new();
-        for (i, sh) in self.solid.boundaries().iter().enumerate() {
-            let c = sh.shell_condition();
-            if c != truck_topology::shell::ShellCondition::Closed {
-                out.push(format!("shell {i} is {c:?}, not closed"));
+        for (i, shell) in self.record.shells.iter().enumerate() {
+            if let Shell::Faces { .. } = shell
+                && !self.record.regions.iter().skip(1).any(|r| r.shells.first() == Some(&(i as u32)))
+            {
+                out.push(format!("shell {i} is open, not closed"));
             }
         }
         let missing = self.unmeshed_faces();
@@ -1748,26 +1427,60 @@ impl Body {
         out
     }
 
+    /// Face shells (a mesh body is one).
     pub fn shell_count(&self) -> usize {
-        match &self.mesh {
-            Some(_) => 1,
-            None => self.solid.boundaries().len(),
-        }
+        if self.mesh.is_some() { 1 } else { self.record.shells.iter().filter(|s| matches!(s, Shell::Faces { .. })).count() }
     }
-}
 
-impl Body {
-    /// The separate pieces of a body: each outer shell with the voids inside it. A body in one
-    /// piece comes back as itself. Pieces of a body in several carry their history over
-    /// `[self]` (their faces and edges are its own), so whoever names them can follow it.
+    /// The separate pieces of a body: each material region with the voids inside it, read from
+    /// the record's regions. A body in one piece comes back as itself. Pieces of a body in
+    /// several carry their history over `[self]` (their faces and edges are its own), so
+    /// whoever names them can follow it.
     pub fn lumps(&self) -> Result<Vec<Body>> {
-        let pieces = self.lumps_with_clearance(0.0)?;
-        if pieces.len() < 2 {
-            return Ok(pieces);
+        let regions = self.record.material_regions();
+        if self.is_mesh() || regions.len() < 2 {
+            return Ok(vec![self.clone()]);
         }
+        self.parts(&(0..regions.len()).map(|k| vec![k]).collect::<Vec<_>>())
+    }
+
+    /// How the body's lumps meet (positions as in [`Body::lumps`]): each pair that shares a face,
+    /// an edge or a vertex, with the most it shares, read from the record. Pairs not listed are
+    /// apart. Empty for a mesh body or a body in one piece.
+    pub fn region_contacts(&self) -> Result<Vec<brep::part::RegionContact>> {
+        if self.is_mesh() {
+            return Ok(Vec::new());
+        }
+        self.record.region_contacts().map_err(|e| KernelError::Invalid(format!("region contacts: {e}")))
+    }
+
+    /// The body cut into parts: one per group of its lumps (positions as in [`Body::lumps`]),
+    /// each the lumps listed with the voids inside them. The parts carry their history over
+    /// `[self]`, as lumps do.
+    pub fn parts(&self, groups: &[Vec<usize>]) -> Result<Vec<Body>> {
+        let regions = self.record.material_regions();
         let counts = [(self.face_count(), self.edge_count())];
-        let histories = crate::boolean_record::parts_of(&pieces, self);
-        Ok(pieces.into_iter().zip(histories).map(|(piece, history)| piece.with_checked_history(history, &counts)).collect())
+        // Sources are by face position: a table of another length belongs to another body.
+        if self.face_sources.as_ref().is_some_and(|all| all.len() != self.face_count()) {
+            return Err(KernelError::Invalid("lumps: face source table does not match the body".into()));
+        }
+        groups
+            .iter()
+            .map(|group| {
+                let picked = group
+                    .iter()
+                    .map(|&k| regions.get(k).copied().ok_or_else(|| KernelError::Invalid(format!("no lump {k}"))))
+                    .collect::<Result<Vec<_>>>()?;
+                let part = self.record.part(&picked).map_err(|e| KernelError::Failed(format!("lump: {e}")))?;
+                let sources = self
+                    .face_sources
+                    .as_ref()
+                    .map(|all| std::sync::Arc::new(part.faces.iter().map(|&f| all.get(f as usize).cloned().flatten()).collect::<Vec<_>>()));
+                let history = crate::history::of_part(&part, &counts);
+                let piece = Body::from_record(part.brep)?.with_face_sources(sources).inherit_regularization_protection(self);
+                Ok(piece.with_checked_history(Some(history), &counts))
+            })
+            .collect()
     }
 
     /// Whether this body and `other` share material or touch (within a fine mesh tolerance).
@@ -1775,7 +1488,7 @@ impl Body {
         self.require_brep("contact test")?;
         other.require_brep("contact test")?;
         let tol = (self.size().max(other.size()) * 1e-4).max(1e-6);
-        let (a, b) = (self.tessellate(tol)?, other.tessellate(tol)?);
+        let (a, b) = (self.mesh(&MeshTolerance::chord(tol))?, other.mesh(&MeshTolerance::chord(tol))?);
         shell_groups::meshes_meet(&a, &b, 2.0 * tol)
     }
 
@@ -1798,134 +1511,65 @@ impl Body {
                 if meshes.len() == 16 {
                     meshes.clear();
                 }
-                meshes.insert(key, self.tessellate(tol)?);
+                meshes.insert(key, self.mesh(&MeshTolerance::chord(tol))?);
             }
             let mesh = meshes.get(&key).ok_or_else(|| KernelError::Internal("contact mesh disappeared".into()))?;
-            contacts.push(shell_groups::meshes_meet(mesh, &other.tessellate(tol)?, 2.0 * tol)?);
+            contacts.push(shell_groups::meshes_meet(mesh, &other.mesh(&MeshTolerance::chord(tol))?, 2.0 * tol)?);
         }
         Ok(contacts)
     }
+}
 
-    /// A boolean shortcut needs clearance larger than both shell mesh deflections.
-    pub(crate) fn separated_lumps(&self) -> Result<Vec<Body>> {
-        self.lumps_with_clearance(4.0 * (self.size() * 1e-3).max(1e-3))
+/// Points of an edge's curve over its interval, within `chord` of it: lines by their ends, the
+/// rest at the evaluator's points (capped).
+fn edge_points(e: &brep::Edge, chord: f64) -> Result<Vec<Vec3>> {
+    const MAX_POINTS: usize = 4096;
+    let curve = brep::eval::CurveEval::new(e.parameters()).map_err(|err| KernelError::Invalid(err.to_string()))?;
+    let [t0, t1] = e.interval;
+    let at = |t: f64| curve.point(t).ok_or_else(|| KernelError::Invalid(format!("edge curve has no point at {t}")));
+    if let Curve::Line { .. } = e.curve {
+        return Ok(vec![at(t0)?, at(t1)?]);
     }
-
-    /// A union's pieces must be clear of each other by the contact distance of [`Body::meets`];
-    /// closer shells are touching material that was never fused (#396).
-    pub(crate) fn union_lumps(&self) -> Result<Vec<Body>> {
-        self.lumps_with_clearance(2.0 * (self.size() * 1e-4).max(1e-6))
-    }
-
-    fn lumps_with_clearance(&self, clearance: f64) -> Result<Vec<Body>> {
-        if self.mesh.is_some() || self.solid.boundaries().len() < 2 {
-            return Ok(vec![self.clone()]);
+    // Halve until every chord's midpoint is within `chord` of the curve.
+    let mut ts = vec![t0, t1];
+    let mut k = 0;
+    while k + 1 < ts.len() && ts.len() < MAX_POINTS {
+        let (a, b) = (ts[k], ts[k + 1]);
+        let m = 0.5 * (a + b);
+        let (pa, pb, pm) = (at(a)?, at(b)?, at(m)?);
+        if pm.dist(pa.lerp(pb, 0.5)) > chord {
+            ts.insert(k + 1, m);
+        } else {
+            k += 1;
         }
-        let tol = (self.size() * 1e-3).max(1e-3);
-        guard("lumps", || {
-            let shells: Vec<mt::Shell> = self.solid.boundaries().clone();
-            if shells.len() > shell_groups::MAX_SHELLS
-                || shells.iter().flat_map(mt::Shell::vertex_iter).take(shell_groups::MAX_POINTS + 1).count() > shell_groups::MAX_POINTS
-                || shells.iter().flat_map(mt::Shell::face_iter).take(shell_groups::MAX_TRIANGLES + 1).count() > shell_groups::MAX_TRIANGLES
-            {
-                return Err(KernelError::Failed("lumps: topology exceeds the shell grouping limit".into()));
-            }
-            let (mut point_count, mut triangle_count) = (0usize, 0usize);
-            let data: Vec<(f64, Mesh)> = shells
-                .iter()
-                .map(|sh| {
-                    let meshed = sh.robust_triangulation(tol);
-                    if meshed.face_iter().any(|f| f.surface().is_none_or(|m| m.faces().triangle_iter().next().is_none())) {
-                        return Err(KernelError::Failed("lumps: cannot mesh a complete shell boundary".into()));
-                    }
-                    let pm = meshed.to_polygon();
-                    point_count = point_count
-                        .checked_add(pm.positions().len())
-                        .ok_or_else(|| KernelError::Failed("lumps: mesh exceeds the shell grouping limit".into()))?;
-                    triangle_count = triangle_count
-                        .checked_add(pm.faces().triangle_iter().take(shell_groups::MAX_TRIANGLES + 1).count())
-                        .ok_or_else(|| KernelError::Failed("lumps: mesh exceeds the shell grouping limit".into()))?;
-                    if point_count > shell_groups::MAX_POINTS || triangle_count > shell_groups::MAX_TRIANGLES {
-                        return Err(KernelError::Failed("lumps: mesh exceeds the shell grouping limit".into()));
-                    }
-                    let mut m = Mesh::default();
-                    for p in pm.positions() {
-                        m.positions.push(Vec3::new(p.x, p.y, p.z));
-                    }
-                    for t in pm.faces().triangle_iter() {
-                        let idx = |k: usize| {
-                            t.get(k).and_then(|x| u32::try_from(x.pos).ok()).ok_or_else(|| KernelError::Failed("lumps: invalid mesh index".into()))
-                        };
-                        let indices = [idx(0)?, idx(1)?, idx(2)?];
-                        let [a, b, c] = m.tri(&indices).ok_or_else(|| KernelError::Failed("lumps: invalid mesh triangle".into()))?;
-                        // STEP sphere poles can produce zero-area duplicate triangles.
-                        // They have no boundary area or volume and are not ray crossings.
-                        if (b - a).cross(c - a) == Vec3::ZERO {
-                            continue;
-                        }
-                        m.triangles.push(indices);
-                        m.tri_face.push(0);
-                    }
-                    let origin = m.positions.first().copied().ok_or_else(|| KernelError::Failed("lumps: empty mesh".into()))?;
-                    let v = m
-                        .triangles
-                        .iter()
-                        .map(|t| {
-                            m.tri(t)
-                                .map(|[a, b, c]| (a - origin).dot((b - origin).cross(c - origin)) / 6.0)
-                                .ok_or_else(|| KernelError::Failed("lumps: invalid mesh triangle".into()))
-                        })
-                        .collect::<Result<Vec<_>>>()?
-                        .into_iter()
-                        .sum();
-                    Ok((v, m))
-                })
-                .collect::<Result<_>>()?;
-            let (volumes, meshes): (Vec<_>, Vec<_>) = data.into_iter().unzip();
-            let groups = shell_groups::groups(&meshes, &volumes, (self.size() * 1e-8).max(1e-9).max(clearance))?;
-            if groups.len() == 1 {
-                return Ok(vec![self.clone()]);
-            }
-            // Grouping keeps existing shells; certificates belong to their
-            // exact face identities, not the new lump's positional face index.
-            // This is not propagation through a geometry-changing operation.
-            let sources_by_face = if let Some(sources) = &self.face_sources {
-                if sources.len() != self.solid.face_iter().count() {
-                    return Err(KernelError::Invalid("lumps: face source table does not match the body".into()));
-                }
-                let mut by_id = std::collections::HashMap::new();
-                for (face, source) in self.solid.face_iter().zip(sources.iter()) {
-                    if by_id.insert(face.id(), Some((face.orientation(), source))).is_some() {
-                        // A repeated identity has no unique source association.
-                        by_id.insert(face.id(), None);
+    }
+    ts.into_iter().map(at).collect()
+}
+
+/// Grow `b` by a curve's hull over `interval`: its control points for splines, its points for
+/// lines, circles and ellipses (their exact extreme points), the leader's hull for an
+/// intersection curve.
+fn curve_hull(c: &Curve, interval: [f64; 2], b: &mut Aabb3) {
+    match c {
+        Curve::Line { .. } | Curve::Circle { .. } | Curve::Ellipse { .. } => {
+            if let Ok(e) = brep::eval::CurveEval::new(c) {
+                let [t0, t1] = interval;
+                for i in 0..=16 {
+                    if let Some(p) = e.point(t0 + (t1 - t0) * f64::from(i) / 16.0) {
+                        b.add(p);
                     }
                 }
-                Some(by_id)
-            } else {
-                None
-            };
-            groups
-                .into_iter()
-                .map(|g| {
-                    let shells = g
-                        .into_iter()
-                        .map(|i| shells.get(i).cloned().ok_or_else(|| KernelError::Failed("lumps: missing shell".into())))
-                        .collect::<Result<Vec<_>>>()?;
-                    let result = Solid::try_new(shells).map_err(|e| KernelError::Failed(format!("lump: {e}"))).and_then(Body::new)?;
-                    let sources = sources_by_face.as_ref().map(|old| {
-                        result
-                            .solid
-                            .face_iter()
-                            .map(|face| match old.get(&face.id()) {
-                                Some(Some((orientation, source))) if *orientation == face.orientation() => (*source).clone(),
-                                _ => None,
-                            })
-                            .collect()
-                    });
-                    Ok(result.with_face_sources(sources.map(std::sync::Arc::new)).inherit_regularization_protection(self))
-                })
-                .collect()
-        })
+            }
+        }
+        Curve::Polyline { points } | Curve::Spline { points, .. } => points.iter().for_each(|p| b.add(v3(*p))),
+        Curve::RationalSpline { homogeneous, .. } => {
+            for h in homogeneous {
+                if h[3] > 0.0 {
+                    b.add(Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]));
+                }
+            }
+        }
+        Curve::SurfaceIntersection { leader, .. } => curve_hull(leader, interval, b),
     }
 }
 
@@ -1936,10 +1580,6 @@ mod lump_tests;
 #[cfg(test)]
 #[path = "mesh_memo_tests.rs"]
 mod mesh_memo_tests;
-
-#[cfg(test)]
-#[path = "refine_cache_tests.rs"]
-mod refine_cache_tests;
 
 #[cfg(test)]
 #[path = "display_mesh_tests.rs"]

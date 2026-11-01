@@ -203,7 +203,10 @@ pub fn collisions(s: &Session) -> Vec<(String, String, f64)> {
 /// Edges are tested for crossing the other's surface too: plates crossing face to face have
 /// no sample point inside (#3323).
 fn overlap(a: &Body, b: &Body) -> Option<f64> {
-    let (ma, mb) = (a.tessellate((a.size() * 1e-3).max(1e-3)).ok()?, b.tessellate((b.size() * 1e-3).max(1e-3)).ok()?);
+    let (ma, mb) = (
+        a.mesh(&solidcraft_kernel::MeshTolerance::chord((a.size() * 1e-3).max(1e-3))).ok()?,
+        b.mesh(&solidcraft_kernel::MeshTolerance::chord((b.size() * 1e-3).max(1e-3))).ok()?,
+    );
     mesh_overlap(&ma, &mb, 1e-4 * a.size().max(b.size()).max(1.0))
 }
 
@@ -409,30 +412,62 @@ fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSe
         let mut end = s.scratch();
         set(&mut end, 1.0);
         let samples = cache.samples(s, &end)?;
-        let mut work = 0;
+        let mut intersections = 0;
         set(s, 0.0);
         // Keep the existing recovery behaviour: an initially overlapping assembly may move
         // out of its invalid placement. Sweeps constrain motions that start collision-free.
-        if cache.first_hit(s, &mut work)?.is_none() {
+        if cache.overlaps(s, &mut intersections, false)?.is_empty() {
             let mut lo = 0.0;
             let mut bracket = None;
             for sample in 1..=samples {
                 let hi = sample as f64 / samples as f64;
                 set(s, hi);
-                if let Some(hit) = cache.first_hit(s, &mut work)? {
-                    bracket = Some((lo, hi, hit));
+                let hits = cache.overlaps(s, &mut intersections, true)?;
+                if !hits.is_empty() {
+                    bracket = Some((lo, hi, hits));
                     break;
                 }
                 lo = hi;
             }
-            if let Some((mut lo, mut hi, hit)) = bracket {
-                for _ in 0..14 {
-                    let mid = (lo + hi) / 2.0;
-                    set(s, mid);
-                    if cache.first_hit(s, &mut work)?.is_none() { lo = mid } else { hi = mid }
+            // Where the bodies found passing into each other first touch, closed in on from the
+            // clear side (conservative advancement): from a clear placement, a move in which no
+            // point of a pair goes further than the pair's gap keeps it clear. Only clear
+            // placements are measured, so no intersection is asked to tell touching bodies from
+            // overlapping ones within its tolerance.
+            if let Some((lo, hi, hits)) = bracket {
+                let touch = 1e-9 * cache.scale();
+                let mut t = lo;
+                set(s, t);
+                for _ in 0..MAX_ADVANCES {
+                    let gap = cache.gap(s, &hits)?;
+                    if gap <= touch {
+                        break;
+                    }
+                    let from = cache.frames(s)?;
+                    // The furthest step whose move stays within the gap: guessed from the move to
+                    // `hi` (nearly proportional over a sample), then halved until it does.
+                    set(s, hi);
+                    let whole = cache.pair_travel(&from, s, &hits)?;
+                    let mut step = if whole > 0.0 { (hi - t) * (0.5 * gap / whole).min(1.0) } else { hi - t };
+                    let mut next = None;
+                    for _ in 0..64 {
+                        set(s, t + step);
+                        if cache.pair_travel(&from, s, &hits)? < gap {
+                            next = Some(t + step);
+                            break;
+                        }
+                        step *= 0.5;
+                    }
+                    match next {
+                        Some(n) if n > t => t = n,
+                        _ => break,
+                    }
+                    set(s, t);
                 }
+                let lo = t;
                 sol = set(s, lo);
-                stopped = Some(json!({"a": hit.0, "b": hit.1, "fraction": lo}));
+                let (a, b) = hits.first().map(|h| (h.a.clone(), h.b.clone())).unwrap_or_default();
+                stopped = Some(json!({"a": a, "b": b, "fraction": lo}));
             } else {
                 sol = set(s, 1.0);
             }
@@ -462,6 +497,10 @@ fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSe
     let out = json!({"values": values, "stopped_by_contact": stopped, "stopped_by_loop": stopped_by_loop, "conflicts": sol.conflicts.len()});
     Ok((out, sol))
 }
+
+/// Most steps a joint drive takes closing in on a contact. Each moves the pair by up to half its
+/// gap; past the last, the drive stops at the last clear placement, short of the touch.
+const MAX_ADVANCES: usize = 200;
 
 /// Drive one joint (joint.drive), honouring contact sets.
 pub fn drive_joint(s: &mut Session, id: u64, q: Vec<f64>, given: usize) -> Result<Value> {
@@ -1048,7 +1087,7 @@ fn centres(s: &Session) -> Vec<(u64, Vec3)> {
     for o in s.doc.occurrences.iter().filter(|o| o.parent == 0) {
         let mut bounds = Aabb3::EMPTY;
         for (_, b) in bodies.iter().filter(|(path, _)| path.first() == Some(&o.id)) {
-            if let Ok(m) = b.tessellate((b.size() * 1e-2).max(1e-2)) {
+            if let Ok(m) = b.mesh(&solidcraft_kernel::MeshTolerance::chord((b.size() * 1e-2).max(1e-2))) {
                 bounds = bounds.union(&m.bounds());
             }
         }
@@ -1106,12 +1145,19 @@ fn explode_show(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "explode.show";
     if p.get("view").is_none_or(|v| v.is_null() || v.as_str().is_some_and(|x| x.eq_ignore_ascii_case("none"))) {
         s.pending_moves.clear();
+        s.exploded.clear();
         s.revision += 1;
         return Ok(json!({"view": null}));
     }
     let i = view_index(s, p, cmd)?;
     let v = s.doc.assembly.exploded.get(i).cloned().ok_or_else(|| bad(cmd, "view"))?;
-    s.pending_moves = exploded_at(&explode_moves(s, &v), 1.0);
+    let moves = exploded_at(&explode_moves(s, &v), 1.0);
+    if !moves.values().all(solidcraft_doc::is_placement) {
+        return Err(bad(cmd, format!("exploded view `{}` moves an occurrence out of range", v.name)));
+    }
+    // Shown only: `exploded` marks these as the view's, so the design's placements leave them out.
+    s.exploded.clone_from(&moves);
+    s.pending_moves = moves;
     s.revision += 1;
     Ok(json!({"view": v.id, "name": v.name}))
 }

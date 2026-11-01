@@ -1,0 +1,36 @@
+{
+ "sources": [],
+ "what": "component.from_bodies on two root bodies",
+ "source": "analytic",
+ "method": "boxes P 10x10x10 from (0,0,0) and Q 20x10x10 from (30,0,0): one component each, named after its body, in place: P:1 (5,5,5), Q:1 (40,5,5)",
+ "body_count": 2,
+ "volume_mm3": 3000.0,
+ "results": [
+  {
+   "step": 4,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      5.0,
+      5.0,
+      5.0
+     ],
+     "volume_mm3": 1000.0
+    }
+   }
+  },
+  {
+   "step": 5,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      40.0,
+      5.0,
+      5.0
+     ],
+     "volume_mm3": 2000.0
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,316 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 60,
+    "width": 20,
+    "height": 2,
+    "corner": [
+     -10,
+     -10,
+     -12
+    ],
+    "operation": "new",
+    "body_name": "BedBox"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 14,
+    "width": 4,
+    "height": 2,
+    "corner": [
+     -2,
+     -2,
+     0
+    ],
+    "operation": "new",
+    "body_name": "CrankBox"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 34,
+    "width": 2,
+    "height": 2,
+    "corner": [
+     8,
+     -1,
+     2
+    ],
+    "operation": "new",
+    "body_name": "RodBox"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 6,
+    "width": 6,
+    "height": 2,
+    "corner": [
+     37,
+     -3,
+     4
+    ],
+    "operation": "new",
+    "body_name": "SliderBox"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Bed",
+    "parent": "root",
+    "activate": false
+   }
+  },
+  {
+   "command": "component.move_bodies",
+   "params": {
+    "bodies": [
+     "BedBox"
+    ],
+    "component": "Bed"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Crank",
+    "parent": "root",
+    "activate": false
+   }
+  },
+  {
+   "command": "component.move_bodies",
+   "params": {
+    "bodies": [
+     "CrankBox"
+    ],
+    "component": "Crank"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Rod",
+    "parent": "root",
+    "activate": false
+   }
+  },
+  {
+   "command": "component.move_bodies",
+   "params": {
+    "bodies": [
+     "RodBox"
+    ],
+    "component": "Rod"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Slider",
+    "parent": "root",
+    "activate": false
+   }
+  },
+  {
+   "command": "component.move_bodies",
+   "params": {
+    "bodies": [
+     "SliderBox"
+    ],
+    "component": "Slider"
+   }
+  },
+  {
+   "command": "occurrence.ground",
+   "params": {
+    "occurrence": "Bed:1",
+    "grounded": true
+   }
+  },
+  {
+   "command": "joint.create",
+   "params": {
+    "type": "revolute",
+    "name": "Crank pin",
+    "flip": true,
+    "a": {
+     "occurrence": "Bed",
+     "point": [
+      0,
+      0,
+      0
+     ],
+     "z": [
+      0,
+      0,
+      1
+     ]
+    },
+    "b": {
+     "occurrence": "Crank",
+     "point": [
+      0,
+      0,
+      0
+     ],
+     "z": [
+      0,
+      0,
+      1
+     ]
+    },
+    "quiet": true
+   }
+  },
+  {
+   "command": "joint.create",
+   "params": {
+    "type": "revolute",
+    "name": "Big end",
+    "flip": true,
+    "a": {
+     "occurrence": "Crank",
+     "point": [
+      10,
+      0,
+      0
+     ],
+     "z": [
+      0,
+      0,
+      1
+     ]
+    },
+    "b": {
+     "occurrence": "Rod",
+     "point": [
+      10,
+      0,
+      0
+     ],
+     "z": [
+      0,
+      0,
+      1
+     ]
+    },
+    "quiet": true
+   }
+  },
+  {
+   "command": "joint.create",
+   "params": {
+    "type": "slider",
+    "name": "Guide",
+    "flip": true,
+    "a": {
+     "occurrence": "Bed",
+     "point": [
+      40,
+      0,
+      5
+     ],
+     "z": [
+      1,
+      0,
+      0
+     ]
+    },
+    "b": {
+     "occurrence": "Slider",
+     "point": [
+      40,
+      0,
+      5
+     ],
+     "z": [
+      1,
+      0,
+      0
+     ]
+    },
+    "quiet": true
+   }
+  },
+  {
+   "command": "joint.create",
+   "params": {
+    "type": "revolute",
+    "name": "Small end",
+    "flip": true,
+    "a": {
+     "occurrence": "Rod",
+     "point": [
+      40,
+      0,
+      0
+     ],
+     "z": [
+      0,
+      0,
+      1
+     ]
+    },
+    "b": {
+     "occurrence": "Slider",
+     "point": [
+      40,
+      0,
+      0
+     ],
+     "z": [
+      0,
+      0,
+      1
+     ]
+    },
+    "quiet": true
+   }
+  },
+  {
+   "command": "motion.study",
+   "params": {
+    "name": "Turn",
+    "steps": 12,
+    "keys": [
+     {
+      "joint": "Crank pin",
+      "points": [
+       [
+        0,
+        0
+       ],
+       [
+        12,
+        360
+       ]
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "command": "motion.plot",
+   "params": {
+    "study": "Turn",
+    "joints": [
+     "Guide"
+    ],
+    "occurrence": "Slider",
+    "point": [
+     40,
+     0,
+     5
+    ]
+   }
+  }
+ ]
+}

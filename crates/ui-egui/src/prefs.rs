@@ -627,6 +627,19 @@ pub enum HistorySketches {
     UnderFeature,
 }
 
+/// How a section hatches the faces it cuts (Preferences: "Section hatch").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SectionHatch {
+    /// Each body in its own hatch (`solidcraft_render::hatch`): 45 or 135 degrees in one of the
+    /// theme's hatch colours, touching bodies never alike. Also what a value this version doesn't
+    /// know reads as (`lenient`).
+    #[default]
+    ByPart,
+    /// Every cut face in the cap colour at 45 degrees (how it was before by part).
+    One,
+}
+
 /// What the interface calls the origin planes (Preferences › Interface). Only the names shown
 /// change: the planes' ids (`XY`, `XZ`, `YZ`), commands, scripts and saved designs keep theirs.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1093,6 +1106,9 @@ preference_settings! {
     dark_parts_shading: bool = false, PAGE_GRAPHICS => check_id("prefs.dark_parts_shading");
     /// Optional schematic markings on threaded cylindrical walls; off for new and older preferences.
     cosmetic_threads: bool = false, PAGE_GRAPHICS;
+    /// A section hatches each cut body its own way (the default), or every one alike, in the cap
+    /// colour at 45 degrees, as before.
+    section_hatch: SectionHatch = SectionHatch::ByPart, PAGE_GRAPHICS;
     /// The grid turns to the upright origin plane facing a side view (#1470). Off by default: the
     /// grid stays on the ground plane (XY) whatever the view.
     grid_follows_view: bool = false => check("Grid follows the view", "Side views show the grid on the upright plane facing them instead of the ground");
@@ -1114,6 +1130,9 @@ preference_settings! {
     supersampling_adaptive: bool = true, PAGE_GRAPHICS => check_tr("ui.supersampling_adaptive");
     /// Show the frame rate in the view's corner (the view then redraws every frame).
     show_frame_rate: bool = false, PAGE_GRAPHICS => check_id("ui.frame_rate");
+    /// Record where the time goes (SMLib's calls, kernel operations, features, commands, imports)
+    /// for `diagnostics.profile` (docs/perf.md). Off by default: nothing is recorded.
+    profile_operations: bool = false, PAGE_GRAPHICS => check_tr("prefs.profile_operations");
     /// With the frame rate: a frame-time graph, a histogram and what the GPU drew (#2548).
     frame_rate_details: bool = false, PAGE_GRAPHICS;
     /// Draw a wider rim under finished sketch curves to improve contrast on shaded faces.
@@ -1135,6 +1154,10 @@ preference_settings! {
     /// Up/Down and the wheel over a focused value field step its plain number (`value_step`,
     /// #2320). Off by default: the keys move the text cursor and the wheel scrolls, as before.
     step_values: bool = false, PAGE_DESIGN => check_id("ui.step_values");
+    /// When SMLib's full check runs while features are computed (`diagnostics.validation`):
+    /// `each_feature` (the default) checks the bodies each feature keeps once; `each_step`, as
+    /// before, checks after every sweep, boolean and blend; `off` (experimental) never does.
+    validation: solidcraft_engine::kernel::Validation = solidcraft_engine::kernel::Validation::EachFeature, PAGE_DESIGN;
     /// A command's value (Extrude's Distance, Fillet's Radius…) in a box beside its handle in the
     /// view (`canvas::boxes_shown`). Off: it is typed in the command window only, which takes the
     /// keyboard after a pick instead, and nothing covers the model (#9479).
@@ -1587,6 +1610,9 @@ pub struct PrefsWindow {
     snapshot: Option<Snapshot>,
     /// The up axis preference the view follows now (applied when it changes, and at startup).
     applied_up: Option<String>,
+    /// The Profile operations preference the profiler last followed: applied when it changes,
+    /// so `diagnostics.profile` (an agent) and SOLIDCRAFT_PROFILE can switch it in between.
+    applied_profile: Option<bool>,
     /// The appearance last asked of the native window ([`sync_window_theme`]).
     window_theme: Option<egui::SystemTheme>,
     /// The perspective angle the view was last drawn with ([`follow_view_fov`]); 0 before the first.
@@ -2199,6 +2225,17 @@ fn sync_window_theme(app: &mut SolveApp, ctx: &egui::Context, follows_system: bo
 pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     sync_surface_analysis(app);
     apply_network(&app.preferences);
+    // The features computed from now on are checked as the preference says.
+    app.session.set_validation(app.preferences.validation);
+    // The profiler records while the preference is on (switched when it changes; at start-up only
+    // when on, so SOLIDCRAFT_PROFILE=1 is not undone by the default).
+    let profile = app.preferences.profile_operations;
+    if app.prefs_window.applied_profile != Some(profile) {
+        if profile || app.prefs_window.applied_profile.is_some() {
+            solidcraft_engine::profile::set_enabled(profile);
+        }
+        app.prefs_window.applied_profile = Some(profile);
+    }
     apply_file_limits(&app.preferences);
     // The viewport's display quality (an unknown saved value draws at Normal).
     solidcraft_engine::doc::display_quality::set_current(
@@ -4056,6 +4093,11 @@ fn prepare_preferences(
     {
         return Err("`viewport_theme` must be theme, light or dark".into());
     }
+    if let Some(v) = p.get("validation")
+        && v.as_str().and_then(solidcraft_engine::kernel::Validation::parse).is_none()
+    {
+        return Err("`validation` must be each_step, each_feature or off".into());
+    }
     if let Some(value) = p.get("navigation_bar") {
         crate::navigation_bar::validate(value)?;
     }
@@ -4227,6 +4269,38 @@ pub(crate) fn reveal_preference(h: &mut crate::scenario::Harness, handle: &str) 
 
 #[cfg(test)]
 mod tests {
+    /// Profile operations switches the profiler when it changes, and only then: an agent's
+    /// diagnostics.profile in between is not undone next frame.
+    #[test]
+    fn the_profile_preference_switches_the_profiler_when_it_changes() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.frames(1);
+        h.call("ui.prefs", json!({"profile_operations": true}));
+        h.frames(2);
+        assert!(solidcraft_engine::profile::enabled());
+        h.app.session.execute("diagnostics.profile", &json!({"enabled": false})).unwrap();
+        h.frames(2);
+        assert!(!solidcraft_engine::profile::enabled(), "the command's choice stands");
+        h.call("ui.prefs", json!({"profile_operations": false}));
+        h.frames(2);
+        assert!(!solidcraft_engine::profile::enabled());
+    }
+
+    /// Preferences saved with a setting this version no longer has still load, every other
+    /// setting kept: the removed key is ignored like any unknown one.
+    #[test]
+    fn saved_preferences_with_a_removed_setting_still_load() {
+        use serde_json::json;
+        for removed in ["metric_tap_drill_major_less_pitch", "surface_extrude_symmetric_per_side"] {
+            let saved = json!({"length_decimals": 4, removed: true});
+            let p = serde_json::from_value::<super::Prefs>(saved.clone()).unwrap();
+            assert_eq!(p.length_decimals, 4, "{removed}");
+            assert_eq!(super::lenient(&saved).length_decimals, 4, "{removed}");
+            assert!(serde_json::to_value(&p).unwrap().get(removed).is_none(), "{removed} is not written back");
+        }
+    }
+
     /// #10254: the invert toggle is off by default, persists, and the Navigation page's
     /// Defaults resets it.
     #[test]
@@ -6005,10 +6079,10 @@ mod tests {
         use serde_json::json;
         let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
         let mut row = hole_preset_row("Fixture");
-        row["thread_options"] = json!({"handedness":"left","full_length":false,"depth":"4 mm"});
+        row["thread_options"] = json!({"full_length":false,"depth":"4 mm"});
         super::set(&mut app, &json!({"hole_presets":[row]})).unwrap();
         let expected = serde_json::to_value(&app.preferences.hole_presets).unwrap();
-        assert_eq!(expected[0]["thread_options"]["handedness"], "left");
+        assert_eq!(expected[0]["thread_options"]["depth"], "4 mm");
         for page in 0..super::PAGES.len() {
             super::reset_preferences(&mut app.preferences, page);
         }
@@ -6315,7 +6389,7 @@ mod tests {
             let (t, white) = (Tokens::get(), egui::Color32::WHITE);
             assert_eq!((t.viewport_top, t.viewport_bottom, Tokens::view().viewport_top), (white, white, white), "{theme}");
             assert_eq!(t.panel, Tokens::themed(view_dark, ColorVision::Off).panel, "{theme}: the window");
-            let scene = crate::control::view_scene(&h.app, solidcraft_engine::view::Guides::default());
+            let scene = crate::control::view_scene(&h.app, solidcraft_engine::view::Guides::default()).unwrap();
             let white = solidcraft_engine::render::Rgb(255, 255, 255);
             assert_eq!(scene.background, Some((white, white)), "{theme}: a picture of the view");
         }
@@ -7417,6 +7491,30 @@ mod tests {
         assert_eq!(super::lenient(&json!({"display_quality": "ultra"})).display_quality, "ultra");
         super::defaults(&mut app, super::PAGE_GRAPHICS);
         assert_eq!(app.preferences.display_quality, "normal");
+    }
+
+    /// The validation mode is once per feature by default; set by name or by the command, the
+    /// two stay one setting, the session computes under it, and Restore Defaults on Design brings
+    /// each_feature back. A saved unknown mode reads as the default.
+    #[test]
+    fn validation_defaults_to_each_feature_and_follows_the_command() {
+        use serde_json::json;
+        use solidcraft_engine::kernel::Validation;
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        assert_eq!(app.preferences.validation, Validation::EachFeature);
+        assert_eq!(super::lenient(&json!({"validation": "sometimes"})).validation, Validation::EachFeature);
+        assert!(super::set(&mut app, &json!({"validation": "never"})).unwrap_err().contains("each_step, each_feature or off"));
+        let out = super::set(&mut app, &json!({"validation": "each_step"})).unwrap();
+        assert_eq!(out["validation"], "each_step");
+        assert_eq!(super::lenient(&out).validation, Validation::EachStep);
+        // A command runs under the preference.
+        app.run("diagnostics.validation", json!({})).unwrap();
+        assert_eq!(app.session.validation(), Validation::EachStep);
+        // The command sets the preference too.
+        app.run("diagnostics.validation", json!({"mode": "off"})).unwrap();
+        assert_eq!((app.preferences.validation, app.session.validation()), (Validation::Off, Validation::Off));
+        super::defaults(&mut app, super::PAGE_DESIGN);
+        assert_eq!(app.preferences.validation, Validation::EachFeature);
     }
 
     #[test]
@@ -8954,7 +9052,7 @@ mod tests {
         app.open_path(&path);
         let offered = app.stand_up.clone().unwrap_or_default();
         assert_eq!(offered.len(), 1, "the file's body is offered");
-        let size = |app: &SolveApp| solidcraft_engine::view::bounds(&app.session);
+        let size = |app: &SolveApp| solidcraft_engine::view::bounds(&app.session).unwrap();
         assert!((size(&app).max.y - size(&app).min.y - 40.0).abs() < 1e-6);
         control(&mut app, &json!({"stand_up": true})).unwrap();
         let b = size(&app);
@@ -9043,7 +9141,7 @@ mod tests {
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
         app.fit_view();
         let proj = crate::viewport::projection(&app, rect);
-        let st = app.session.world_state();
+        let st = crate::open_meshing::session_world(&app.session);
         let m = st.bodies[0].mesh();
         // A spot a fifth of the way along a visible edge, well away from its middle on screen.
         let found = m.edges.iter().filter(|e| e.len() >= 2).find_map(|e| {

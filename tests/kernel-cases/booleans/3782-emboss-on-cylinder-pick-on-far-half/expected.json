@@ -1,0 +1,25 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3782",
+    "tangency-labs/solidcraft#3425"
+  ],
+  "what": "emboss on a cylinder with the face pick on the half of the wall opposite the sketch",
+  "source": "analytic",
+  "method": "the cylinder wall is one logical face, so a pick anywhere on it (between the caps) must be accepted. Emboss on a cylinder wraps the sketch's arc length round the wall from the sketch plane's line of tangency (y = 10) and raises it radially: the 4 x 5 badge spans 4 / 10 = 0.4 rad about +y, z 5..10, from r 10 to r 11. Volume: pi*10^2*20 + (0.4/2)*(11^2 - 10^2)*5 = 2000 pi + 21 = 6304.185. Area: 600 pi, less the wall under the badge 0.4*10*5 = 20, plus its cap 0.4*11*5 = 22, two radial side walls 1*5 each and two end walls (0.4/2)*(11^2 - 10^2) = 4.2 each: 600 pi + 20.4 = 1905.356. Faces: the wall (with the badge's hole), two caps, the badge's cap and its four walls = 8. Box: the cylinder's, with y to 11 (the badge's cap at its middle; it spans x = +-11 sin 0.2 = +-2.19)",
+  "body_count": 1,
+  "volume_mm3": 6304.185,
+  "area_mm2": 1905.356,
+  "faces": 8,
+  "bbox": {
+    "min": [
+      -10.0,
+      -10.0,
+      0.0
+    ],
+    "max": [
+      10.0,
+      11.0,
+      20.0
+    ]
+  }
+}

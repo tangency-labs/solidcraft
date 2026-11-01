@@ -1,0 +1,17 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#485",
+  "tangency-labs/solidcraft#604"
+ ],
+ "what": "an R0.5 round on both top perimeter edges (the arc and the flat) of a D-shaped prism, the two edges meeting at sharp 90 degree corners",
+ "source": "analytic",
+ "method": "D prism: half disc R10 (line from (-10,0) to (10,0) plus the arc), 15 tall: V0 = pi*100/2*15 = 2356.19. The R0.5 round of the top edges leaves a crease where the two rounds meet at each corner, so the top surface height at a point of the D is set by its distance d to the boundary, d = min(y, R - rho): the removed height is r - sqrt(r^2 - (r-d)^2) for d < r. Removed volume = integral over the D of that height = 2.715582 (polar integral, split where the nearest boundary changes; agrees with the 2.7155784 inward-offset value computed in the source PR to 1e-6 relative). The tolerance is tightened to 5e-5 (0.12 mm^3) so that a round that removes 0.5 mm^3 too little is caught.",
+ "body_count": 1,
+ "volume_mm3": 2353.478908251137,
+ "tolerance": {
+  "rel": 5e-05
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

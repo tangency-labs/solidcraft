@@ -31,11 +31,16 @@ fn check_centered(s: &Session, opposed: bool) {
     let volume: f64 = state.bodies.iter().map(|mb| solidcraft_kernel::measure(&mb.body).unwrap().volume).sum();
     assert!((volume - expected).abs() < 0.03, "{volume} vs {expected}");
     for sign in if opposed { vec![1.0, -1.0] } else { vec![1.0] } {
-        let body = &state.bodies.iter().find(|mb| mb.body.contains(Vec3::new(sign * 3.0, 5.0, 0.0))).unwrap().body;
-        assert!(!body.contains(Vec3::new(0.0, 5.0, 3.0)));
-        assert!(body.contains(Vec3::new(sign * 3.0 * (PI / 6.0).cos(), 5.0, 1.5)));
-        assert!(body.contains(Vec3::new(sign * 3.0 * (PI / 6.0).cos(), 5.0, -1.5)));
-        let bounds = body.tessellate(1e-4).unwrap().bounds();
+        let body = &state
+            .bodies
+            .iter()
+            .find(|mb| mb.body.classify_point(Vec3::new(sign * 3.0, 5.0, 0.0)).unwrap() == solidcraft_kernel::PointClass::Inside)
+            .unwrap()
+            .body;
+        assert_eq!(body.classify_point(Vec3::new(0.0, 5.0, 3.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
+        assert_eq!(body.classify_point(Vec3::new(sign * 3.0 * (PI / 6.0).cos(), 5.0, 1.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(Vec3::new(sign * 3.0 * (PI / 6.0).cos(), 5.0, -1.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        let bounds = body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().bounds();
         assert!((bounds.min.z + 2.0 * SQRT_2).abs() < 1e-6, "{bounds:?}");
         assert!((bounds.max.z - 2.0 * SQRT_2).abs() < 1e-6, "{bounds:?}");
         let inner_x = if sign > 0.0 { bounds.min.x } else { -bounds.max.x };
@@ -80,13 +85,13 @@ fn two_sided_revolves_use_the_canonical_negative_and_positive_limits() {
         turn(&mut s, sign, json!({"direction":"positive","angle":"60 deg","angle2":"30 deg"}));
         let state = s.model.state();
         let body = &state.bodies[0].body;
-        let bounds = body.tessellate(1e-4).unwrap().bounds();
+        let bounds = body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().bounds();
         assert!((bounds.min.x - 1.0).abs() < 1e-6, "{bounds:?}");
         assert!((bounds.max.x - 4.0).abs() < 1e-4);
         assert!((bounds.min.z + 2.0).abs() < 1e-6);
         assert!((bounds.max.z - 2.0 * 3.0f64.sqrt()).abs() < 1e-6);
-        assert!(body.contains(Vec3::new(3.0, 5.0, 0.0)));
-        assert!(!body.contains(Vec3::new(0.0, 5.0, 3.0)));
+        assert_eq!(body.classify_point(Vec3::new(3.0, 5.0, 0.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(Vec3::new(0.0, 5.0, 3.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
         assert!((solidcraft_kernel::measure(body).unwrap().volume - 30.0 * PI).abs() < 0.03);
     }
 }
@@ -107,9 +112,9 @@ fn legacy_missing_convention_keeps_geometry_through_edit_redefine_undo_and_reope
         assert_eq!(s.doc.find_feature("Turn").unwrap().kind, original);
         let state = s.model.state();
         let body = &state.bodies[0].body;
-        assert!(body.contains(Vec3::new(0.0, 5.0, 3.0)));
-        assert!(!body.contains(Vec3::new(3.0, 5.0, 0.0)));
-        let bounds = body.tessellate(1e-4).unwrap().bounds();
+        assert_eq!(body.classify_point(Vec3::new(0.0, 5.0, 3.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(Vec3::new(3.0, 5.0, 0.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
+        let bounds = body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().bounds();
         assert!((bounds.min.x + 2.0 * SQRT_2).abs() < 1e-6);
         assert!((bounds.max.x - 2.0 * SQRT_2).abs() < 1e-6);
         assert!((bounds.min.z - SQRT_2).abs() < 1e-6);
@@ -118,8 +123,8 @@ fn legacy_missing_convention_keeps_geometry_through_edit_redefine_undo_and_reope
     let angle_input = s.doc.find_feature("Turn").unwrap().param_names[0].clone();
     run(&mut s, "parameters.change", json!({"name":angle_input,"expression":"60 deg"}));
     let changed = s.model.state();
-    assert!(changed.bodies[0].body.contains(Vec3::new(1.5, 5.0, 3.0 * 3.0f64.sqrt() / 2.0)));
-    assert!(!changed.bodies[0].body.contains(Vec3::new(3.0, 5.0, 0.0)));
+    assert_eq!(changed.bodies[0].body.classify_point(Vec3::new(1.5, 5.0, 3.0 * 3.0f64.sqrt() / 2.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
+    assert_eq!(changed.bodies[0].body.classify_point(Vec3::new(3.0, 5.0, 0.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
     run(&mut s, "edit.undo", json!({}));
     check(&s);
     run(&mut s, "timeline.edit", json!({"feature":"Turn","set":{"angle":"90 deg"}}));
@@ -175,11 +180,11 @@ fn symmetric_revolve_preserves_a_translated_rotated_sketch_frame() {
     run(&mut s, "solid.revolve", json!({"sketch":"Profile","axis":{"origin":[10,20,30],"dir":[-1,0,0]},"angle":"90 deg","direction":"symmetric"}));
     let state = s.model.state();
     let body = &state.bodies[0].body;
-    let bounds = body.tessellate(1e-4).unwrap().bounds();
+    let bounds = body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().bounds();
     assert!(bounds.min.dist(Vec3::new(10.0, 20.0 - 2.0 * SQRT_2, 30.0 + SQRT_2)) < 1e-6, "{bounds:?}");
     assert!(bounds.max.dist(Vec3::new(20.0, 20.0 + 2.0 * SQRT_2, 34.0)) < 1e-4, "{bounds:?}");
-    assert!(body.contains(Vec3::new(15.0, 20.0, 33.0)));
-    assert!(!body.contains(Vec3::new(15.0, 23.0, 30.0)));
+    assert_eq!(body.classify_point(Vec3::new(15.0, 20.0, 33.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
+    assert_eq!(body.classify_point(Vec3::new(15.0, 23.0, 30.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
     assert!((solidcraft_kernel::measure(body).unwrap().volume - 30.0 * PI).abs() < 0.03);
 }
 
@@ -193,7 +198,7 @@ fn copied_revolves_keep_their_convention_and_angular_material() {
         run(&mut s, "timeline.paste", json!({"translate":[0,20,0]}));
         let state = s.model.state();
         let probe = if convention == "sketch_normal" { Vec3::new(3.0, 25.0, 0.0) } else { Vec3::new(0.0, 25.0, 3.0) };
-        assert!(state.bodies.iter().any(|mb| mb.body.contains(probe)));
+        assert!(state.bodies.iter().any(|mb| mb.body.classify_point(probe).unwrap() == solidcraft_kernel::PointClass::Inside));
         let modes: Vec<_> = s
             .doc
             .features
@@ -203,7 +208,7 @@ fn copied_revolves_keep_their_convention_and_angular_material() {
         assert_eq!(modes.len(), 2);
         assert_eq!(modes[0], modes[1]);
         let reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
-        assert!(reopened.model.state().bodies.iter().any(|mb| mb.body.contains(probe)));
+        assert!(reopened.model.state().bodies.iter().any(|mb| mb.body.classify_point(probe).unwrap() == solidcraft_kernel::PointClass::Inside));
     }
 }
 
@@ -222,7 +227,7 @@ fn centered_coplanar_cut_uses_the_actual_angular_interval() {
     assert!((total - expected).abs() < 0.05, "{volumes:?}: total{total}, expected{expected}");
     assert_eq!(state.bodies.len(), 2);
     assert!(volumes.iter().all(|v| (*v - expected / 2.0).abs() < 0.025));
-    let contains = |p| state.bodies.iter().any(|mb| mb.body.contains(p));
+    let contains = |p| state.bodies.iter().any(|mb| mb.body.classify_point(p).unwrap() == solidcraft_kernel::PointClass::Inside);
     assert!(!contains(Vec3::new(3.0, 5.0, 0.0)));
     assert!(contains(Vec3::new(3.0, 5.0, 3.5)));
     assert!(contains(Vec3::new(3.0, 5.0, -3.5)));
@@ -238,8 +243,11 @@ fn one_sided_and_full_revolves_keep_the_existing_material() {
                 turn(&mut s, sign, json!({"angle":angle,"direction":"positive","convention":convention}));
                 let state = s.model.state();
                 let body = &state.bodies[0].body;
-                assert!(body.contains(Vec3::new(3.0 / SQRT_2, 5.0, 3.0 / SQRT_2)));
-                assert_eq!(body.contains(Vec3::new(-3.0 / SQRT_2, 5.0, -3.0 / SQRT_2)), angle == "360 deg");
+                assert_eq!(body.classify_point(Vec3::new(3.0 / SQRT_2, 5.0, 3.0 / SQRT_2)).unwrap(), solidcraft_kernel::PointClass::Inside);
+                assert_eq!(
+                    body.classify_point(Vec3::new(-3.0 / SQRT_2, 5.0, -3.0 / SQRT_2)).unwrap() == solidcraft_kernel::PointClass::Inside,
+                    angle == "360 deg"
+                );
                 let expected = if angle == "360 deg" { 120.0 * PI } else { 30.0 * PI };
                 assert!((solidcraft_kernel::measure(body).unwrap().volume - expected).abs() < 0.08);
             }
@@ -258,10 +266,31 @@ fn point_targets_use_each_profiles_canonical_axis_for_both_axis_signs() {
             let expected = 30.0 * PI * if opposed { 2.0 } else { 1.0 };
             let volume: f64 = state.bodies.iter().map(|mb| solidcraft_kernel::measure(&mb.body).unwrap().volume).sum();
             assert!((volume - expected).abs() < 0.05, "{volume}");
-            assert!(state.bodies.iter().any(|mb| mb.body.contains(Vec3::new(3.0 / SQRT_2, 5.0, 3.0 / SQRT_2))));
-            assert!(!state.bodies.iter().any(|mb| mb.body.contains(Vec3::new(3.0 / SQRT_2, 5.0, -3.0 / SQRT_2))));
-            assert_eq!(state.bodies.iter().any(|mb| mb.body.contains(Vec3::new(-3.0 / SQRT_2, 5.0, 3.0 / SQRT_2))), opposed);
-            assert!(!state.bodies.iter().any(|mb| mb.body.contains(Vec3::new(-3.0 / SQRT_2, 5.0, -3.0 / SQRT_2))));
+            assert!(
+                state
+                    .bodies
+                    .iter()
+                    .any(|mb| mb.body.classify_point(Vec3::new(3.0 / SQRT_2, 5.0, 3.0 / SQRT_2)).unwrap() == solidcraft_kernel::PointClass::Inside)
+            );
+            assert!(
+                !state
+                    .bodies
+                    .iter()
+                    .any(|mb| mb.body.classify_point(Vec3::new(3.0 / SQRT_2, 5.0, -3.0 / SQRT_2)).unwrap() == solidcraft_kernel::PointClass::Inside)
+            );
+            assert_eq!(
+                state
+                    .bodies
+                    .iter()
+                    .any(|mb| mb.body.classify_point(Vec3::new(-3.0 / SQRT_2, 5.0, 3.0 / SQRT_2)).unwrap() == solidcraft_kernel::PointClass::Inside),
+                opposed
+            );
+            assert!(
+                !state
+                    .bodies
+                    .iter()
+                    .any(|mb| mb.body.classify_point(Vec3::new(-3.0 / SQRT_2, 5.0, -3.0 / SQRT_2)).unwrap() == solidcraft_kernel::PointClass::Inside)
+            );
         }
     }
 }
@@ -295,9 +324,15 @@ fn curved_targets_keep_only_the_material_before_the_post_for_both_axis_signs() {
             assert_eq!(arcs.len(), if opposed { 2 } else { 1 });
             for side in if opposed { vec![1.0, -1.0] } else { vec![1.0] } {
                 let probe = Vec3::new(side * 12.0 * (PI / 6.0).cos(), 6.0, -2.5);
-                let arc = &arcs.iter().find(|mb| mb.body.contains(probe)).unwrap().body;
-                assert!(!arc.contains(Vec3::new(-side * 12.0 * (PI / 6.0).cos(), 6.0, -2.5)));
-                assert!(!arc.contains(Vec3::new(side * 12.0 * (PI / 6.0).cos(), -6.0, -2.5)));
+                let arc = &arcs.iter().find(|mb| mb.body.classify_point(probe).unwrap() == solidcraft_kernel::PointClass::Inside).unwrap().body;
+                assert_eq!(
+                    arc.classify_point(Vec3::new(-side * 12.0 * (PI / 6.0).cos(), 6.0, -2.5)).unwrap(),
+                    solidcraft_kernel::PointClass::Outside
+                );
+                assert_eq!(
+                    arc.classify_point(Vec3::new(side * 12.0 * (PI / 6.0).cos(), -6.0, -2.5)).unwrap(),
+                    solidcraft_kernel::PointClass::Outside
+                );
                 let full = PI * (225.0 - 100.0) * 5.0;
                 let angle = solidcraft_kernel::measure(arc).unwrap().volume / full * 360.0;
                 assert!(angle > 60.0 && angle < 90.0, "{angle}");

@@ -1,0 +1,17 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1213",
+  "tangency-labs/solidcraft#1291"
+ ],
+ "what": "an R3 round on the end circle of a lofted tube whose axis bends (a 60 degree torus section)",
+ "source": "analytic",
+ "method": "five circles R20 square to a centre arc of radius 100 turning 60 degrees, lofted: the tube is a torus section, V = pi*20^2*100*(pi/3) = 131594.7. The R3 round on the start circle removes the spandrel (1-pi/4) r^2 revolved about the tube axis (the end circle is a plain circle in the plane x=0) at its centroid radius R - r (5/6-pi/4)/(1-pi/4) = 19.33 (Pappus): 234.58. V = 131360.1. The loft passes through only five sections, so the tolerance is relaxed to 5e-4.",
+ "body_count": 1,
+ "volume_mm3": 131360.14839866068,
+ "tolerance": {
+  "rel": 0.0005
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

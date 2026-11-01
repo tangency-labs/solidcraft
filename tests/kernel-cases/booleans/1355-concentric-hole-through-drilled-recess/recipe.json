@@ -1,0 +1,56 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "center": [
+     0,
+     0,
+     5
+    ],
+    "length": 30,
+    "width": 30,
+    "height": 10,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": 10,
+    "name": "Pt"
+   }
+  },
+  {
+   "command": "sketch.point",
+   "params": {
+    "point": [
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "sketch": "Pt",
+    "type": "drilled",
+    "diameter": 8.5,
+    "depth": 5,
+    "tip_angle": "118 deg"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "sketch": "Pt",
+    "diameter": 4
+   }
+  }
+ ]
+}

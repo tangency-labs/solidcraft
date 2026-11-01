@@ -1,0 +1,34 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XZ",
+    "name": "Tube"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     5,
+     0
+    ],
+    "radius": 5
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "sketch": "Tube",
+    "axis": "Z",
+    "angle": "90 deg",
+    "body_name": "Horn"
+   }
+  }
+ ]
+}

@@ -1,0 +1,23 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1797",
+  "tangency-labs/solidcraft#1799"
+ ],
+ "what": "a tray whose flanges lean at 72 degrees with the tear corner relief: the torn ends are helices over slanted bends",
+ "source": "analytic",
+ "method": "T = 2, R = 1, K = 0.5, gap 0.5. A 72 deg flange leans out 18 deg, its outer face from the virtual sharp on the base's edge line (z = 0): it stands back s = (R+T) tan 36 = 2.179628, its bend has the allowance BA = 0.4 pi (R + T/2) = 2.513274 and its panel the leg 38.6 - s = 36.420372. With K = 0.5 every bend is bent about mid-thickness, so the folded volume is the flat area times T. The base is (120 - 2s) x (90 - 2s); the bends run along its edges to its corners, BA wide. Each corner is closed on the vertical plane halving it (x = y at the origin's): a panel's end is square to the sheet and keeps half the gap from that plane on its nearer, inner face, so at sigma along the panel it lies u(sigma) = g/sqrt2 + T sin72 - (s + sigma) cos72 from the sketch's corner along the edge (1.582124 at the bend, -9.672390 at the top): each panel is a trapezoid of mean length L - 2 u(leg/2) = L + 8.090265. The tear cuts nothing out of the base either and keeps the bends running to the corner where their start lines meet, cutting each bend's end straight in the flat from there to where its panel's closed end starts, s - u(0) = 0.597503 past the trimmed base's corner: each of the 8 bend ends gains a triangle BA x 0.597503 / 2 (folded, a helical end of the same volume at K = 0.5). Flat area 27390.468926 + 6.006757, V = 54792.951364 (the tear adds 12 mm3 to the notch's 405-tray-with-72-degree-flanges-folded, under the volume's tolerance: what tells them apart is validity). Bbox: the walls' outer top edges stand 38.6 cos72 = 11.928056 outside the base's edge lines, their inner top edges 38.6 sin72 + 2 cos72 = 37.328816 above the underside.",
+ "body_count": 1,
+ "volume_mm3": 54792.95136427714,
+ "bbox": {
+  "min": [
+   -11.928055982872973,
+   -11.928055982872973,
+   0
+  ],
+  "max": [
+   131.92805598287296,
+   101.92805598287298,
+   37.32881551774282
+  ]
+ }
+}

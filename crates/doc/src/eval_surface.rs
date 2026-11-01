@@ -20,6 +20,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             if !edges.is_empty() {
                 let i = body_at(st, body, &crate::plain(edges))?;
                 let b = st.bodies.get(i).ok_or_else(|| DocError::Invalid("body".into()))?;
+                // A design may carry an order the fill does not build yet: refused, not built lower.
+                for g in std::iter::once(continuity.all).chain(continuity.edges.iter().map(|e| e.g)) {
+                    g.built_by(kernel::Construction::Patch)?;
+                }
                 let spec = kernel::PatchSpec {
                     continuity: continuity.all,
                     edges: continuity.edges.iter().map(|e| (e.edge.0, e.g)).collect(),
@@ -304,7 +308,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
                 f.component,
             )?;
-            let (o, d) = revolve_axis(&ss, axis, &super::axis_state(doc, st, f.component, axis), &|name| {
+            let (o, d) = revolve_axis(&ss, axis, &*super::axis_state(doc, st, f.component, axis)?, &|name| {
                 construction_axis_in(Some(doc), st, name, f.component)
             })?;
             let a = val(vals, angle, Kind::Angle)?;
@@ -371,17 +375,15 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let pts: Vec<Vec2> = chains.iter().flatten().flat_map(|s| s.polyline(1e-2)).collect();
             let start = ss.plane.to_world(pts.iter().fold(Vec2::default(), |a, p| a + *p) * (1.0 / pts.len().max(1) as f64));
             let body = match path_points(ps, path, start)? {
-                Some(pts) => {
+                Some(path) => {
+                    let pts = path.points();
                     let rails = crate::eval::rail_polylines(doc, st, rails, f.component, pts.first().copied().unwrap_or(start))?;
                     let ctl = crate::eval::sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
                     kernel::sweep_sheet_points_with(&ss.plane, &chains, &pts, &ctl)?
                 }
                 None => {
-                    let segs = path_segments(ps, path, start)?;
-                    let path_start = match segs.first() {
-                        Some(kernel::PathSeg::Line { a, .. } | kernel::PathSeg::Arc { a, .. }) => *a,
-                        None => start,
-                    };
+                    let segs = path_segments_at(ps, path, start, Some(&ss.plane))?;
+                    let path_start = segs.first().map_or(start, kernel::PathSeg::start);
                     let rails = crate::eval::rail_polylines(doc, st, rails, f.component, path_start)?;
                     let ctl = crate::eval::sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
                     kernel::sweep_sheet_with(&ss.plane, &chains, &segs, &ctl)?
@@ -459,7 +461,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             st.bodies.push(ModelBody::traced_new(name, made, f.id));
             Ok(())
         }
-        FeatureKind::SurfaceRuled { body, edges, distance, mode, angle, direction, flip, corners, face } => {
+        FeatureKind::SurfaceRuled { body, edges, distance, mode, angle, direction, flip, corners, face, far } => {
             let d = val(vals, distance, Kind::Length)?;
             let mode = match mode {
                 RuledMode::Normal => kernel::RuledMode::Normal,
@@ -478,7 +480,8 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             };
             let mb = st.body(body).cloned().ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let r = kernel::Ruled { distance: d, mode, flip: *flip, corners, face: face.map(Vec3::from) };
-            let made = Traced::step(kernel::ruled_surface(&mb.body, &crate::plain(edges), &r)?, &[&mb.traced()]);
+            let handles: Vec<Option<Vec<Vec3>>> = far.iter().map(|h| h.as_ref().map(|pts| crate::plain(pts))).collect();
+            let made = Traced::step(kernel::ruled_surface_with(&mb.body, &crate::plain(edges), &r, &handles)?, &[&mb.traced()]);
             let name = new_name(st, f, 0);
             st.bodies.push(ModelBody::traced_new(name, made, f.id));
             Ok(())
@@ -611,7 +614,7 @@ fn network_sources(
             // 3D sketch curves are followed through their points; planar ones exactly.
             let mapped = path_in_frame(doc, raw, f.component)?;
             match path_points(&mapped, &c.curves, Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
-                Some(pts) => NetSource::Points(pts),
+                Some(path) => NetSource::Points(path.points()),
                 None => {
                     let ss = sketch_in_feature_frame(doc, raw, f.component)?;
                     let mut chains = curve_chains(&ss, &c.curves)?.into_iter();

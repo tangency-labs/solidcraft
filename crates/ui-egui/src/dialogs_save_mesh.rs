@@ -317,7 +317,7 @@ fn paint_icon(ui: &egui::Ui, rect: egui::Rect, tex: Option<egui::TextureId>, nam
 
 /// Every body of the design, in model order; with `visible`, only the bodies the viewport shows.
 pub(crate) fn body_picks(app: &SolveApp, visible: bool) -> Vec<Sel> {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let shown = |name: &str| !visible || app.session.body_visible(name);
     st.bodies.iter().filter(|b| shown(&b.name)).map(|b| Sel::Body { name: b.name.clone() }).collect()
 }
@@ -974,7 +974,7 @@ mod tests {
         // A click on the face of `body` at `point` in the Print face input; that face's index.
         let pick = |h: &mut crate::scenario::Harness, body: &str, point: [f64; 3]| {
             let p = solidcraft_engine::geom::Vec3::new(point[0], point[1], point[2]);
-            let index = solidcraft_engine::doc::appearance::face_index_at(h.app.session.world_state().body(body).unwrap(), p).unwrap();
+            let index = solidcraft_engine::doc::appearance::face_index_at(h.app.session.world_state().unwrap().body(body).unwrap(), p).unwrap();
             let d = h.app.dialog.as_mut().unwrap();
             d.active = 1;
             d.pick(&h.app.session, Sel::Face { body: body.into(), index, point: p });

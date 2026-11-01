@@ -4,7 +4,6 @@
 //! answers the pairs of parts that pass through each other along the way.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use serde_json::{Value, json};
 use solidcraft_doc::joints;
@@ -32,8 +31,10 @@ pub const INTERFERENCE_DOC: &str = "study: id|name; occurrences?: [ids or names]
      as an arm against the parts it must miss), or contact_sets?: true (the pairs of the design's contact sets); samples? \
      (2…1000, default the study's steps + 1); budget_s?: seconds (above 0, at most 86400; default a fixed work budget): the \
      time the check may take instead, looked at between samples, for a mechanism such as a gear train that needs longer → collisions: [{a, b, first_step, last_step, steps: [[from, to]…] (the step ranges where they overlap), \
-     depth_mm (how far into each other, the most at deepest_step), volume_mm3 (their overlap there; null when it was not \
-     cheap to work out)}], clear (every sample checked and none collide; never while truncated), \
+     volume_mm3 (the most volume they share at a sample, worked out exactly from the bodies), deepest_step (the first sample \
+     sharing that volume), not_measured (null, or why the volume was not worked out at every sample they overlap, such as \
+     a budget it ran past: then volume_mm3 and deepest_step are null, never an estimate), depth_mm (how far into each \
+     other at most: an estimate from points of the bodies' contact meshes, not exact)}], clear (every sample checked and none collide; never while truncated), \
      pairs (checked), samples (taken), truncated (the work budget, or budget_s, ran out; checked_to: the last step checked), budget_s \
      (when given), stopped_at, \
      stopped_by_loop. The study plays as motion.play plays it but contact sets do not stop it, on a copy (the design is not \
@@ -47,9 +48,10 @@ const MAX_SERIES: usize = 256;
 const MAX_WORK: usize = 500_000_000;
 /// Longest time an interference check may be given (`budget_s`): a day, as `inspect.interference`.
 const MAX_BUDGET_S: f64 = 86_400.0;
-/// Most colliding pairs whose overlap volume is worked out, and most body booleans that takes.
+/// Most colliding pairs whose overlap volume is worked out, and most body booleans that takes
+/// over the whole study (one per pair of overlapping bodies at each sample a pair collides).
 const MAX_VOLUMES: usize = 16;
-const MAX_BOOLEANS: usize = 64;
+const MAX_BOOLEANS: usize = 256;
 
 /// How many samples `p` asks for (`min`…`MAX_SAMPLES`, default the study's steps + 1).
 fn samples(p: &Value, m: &MotionStudy, min: usize, cmd: &str) -> Result<usize> {
@@ -254,15 +256,26 @@ struct Collision {
     names: (String, String),
     /// The samples where they overlap, in order.
     samples: Vec<usize>,
+    /// The most sampled mesh depth.
     depth: f64,
-    deepest: usize,
-    /// The design at the deepest sample (its placements).
-    at_deepest: Arc<Document>,
+    /// The most exact shared volume and the first sample sharing it, or why it is not measured
+    /// (a sample's volume was not worked out).
+    most_volume: std::result::Result<(f64, usize), String>,
 }
 
-/// The volume the parts under occurrences `a` and `b` share, placed as in `doc` (`None`: not
-/// worked out). Only bodies whose boxes overlap are intersected, at most `booleans` of them.
-fn shared_volume(s: &Session, doc: &Document, a: u64, b: u64, booleans: &mut usize) -> Option<f64> {
+impl Collision {
+    /// Takes the exact shared volume at sample `k`, or why it was not worked out. A volume
+    /// larger by no more than the booleans' rounding is a tie, which keeps the earlier sample.
+    fn take_volume(&mut self, k: usize, volume: std::result::Result<f64, String>) {
+        if let Ok((best, at)) = self.most_volume {
+            self.most_volume = volume.map(|v| if v > best + 1e-9 * best.max(1.0) { (v, k) } else { (best, at) });
+        }
+    }
+}
+
+/// The volume the parts under occurrences `a` and `b` share, placed as in `doc`, or why it was
+/// not worked out. Only bodies whose boxes overlap are intersected, at most `booleans` of them.
+fn shared_volume(s: &Session, doc: &Document, a: u64, b: u64, booleans: &mut usize) -> std::result::Result<f64, String> {
     let st = s.model.state();
     // The bodies under each (and not under the other), with their world frames and boxes.
     let mut sides: [Vec<(Mat, Aabb3, &solidcraft_doc::ModelBody)>; 2] = Default::default();
@@ -282,24 +295,31 @@ fn shared_volume(s: &Session, doc: &Document, a: u64, b: u64, booleans: &mut usi
                 let corner = Vec3::new(pick(1, local.min.x, local.max.x), pick(2, local.min.y, local.max.y), pick(4, local.min.z, local.max.z));
                 world.add(apply_point(&frame, corner));
             }
-            sides.get_mut(side)?.push((frame, world, body));
+            if let Some(list) = sides.get_mut(side) {
+                list.push((frame, world, body));
+            }
         }
     }
+    let [first, second] = &sides;
     let mut total = 0.0;
-    for (fa, xa, ba) in sides.first()? {
-        for (fb, xb, bb) in sides.get(1)? {
+    for (fa, xa, ba) in first {
+        for (fb, xb, bb) in second {
             if xa.max.x < xb.min.x || xb.max.x < xa.min.x || xa.max.y < xb.min.y || xb.max.y < xa.min.y || xa.max.z < xb.min.z || xb.max.z < xa.min.z
             {
                 continue;
             }
-            *booleans = booleans.checked_sub(1)?;
-            let (pa, pb) = (solidcraft_kernel::transform_matrix(&ba.body, *fa).ok()?, solidcraft_kernel::transform_matrix(&bb.body, *fb).ok()?);
-            if let Some(shared) = solidcraft_kernel::boolean(&pa, &pb, solidcraft_kernel::BoolOp::Intersect).ok()? {
-                total += solidcraft_kernel::measure(&shared).ok()?.volume;
+            *booleans = booleans.checked_sub(1).ok_or_else(|| format!("the check's {MAX_BOOLEANS} body intersections ran out"))?;
+            let failed = |e: &dyn std::fmt::Display| format!("the intersection of {} and {} could not be made ({e})", ba.name, bb.name);
+            let (pa, pb) = (
+                solidcraft_kernel::transform_matrix(&ba.body, *fa).map_err(|e| failed(&e))?,
+                solidcraft_kernel::transform_matrix(&bb.body, *fb).map_err(|e| failed(&e))?,
+            );
+            if let Some(shared) = solidcraft_kernel::boolean(&pa, &pb, solidcraft_kernel::BoolOp::Intersect).map_err(|e| failed(&e))? {
+                total += solidcraft_kernel::measure(&shared).map_err(|e| failed(&e))?.volume;
             }
         }
     }
-    Some(total)
+    Ok(total)
 }
 
 /// Contiguous runs of samples, as study step ranges.
@@ -385,6 +405,7 @@ fn interference_within(s: &mut Session, p: &Value, budget: usize, seconds: Optio
     let geometry = checked_pairs(s, p, cmd)?;
     let mut found: BTreeMap<(u64, u64), Collision> = BTreeMap::new();
     let (mut work, mut checked, mut truncated) = (0usize, 0usize, false);
+    let mut booleans = MAX_BOOLEANS;
     let stop = play(s, &m, n, false, |t, k| {
         if deadline.is_some_and(|d| web_time::Instant::now() >= d) {
             truncated = true;
@@ -408,18 +429,25 @@ fn interference_within(s: &mut Session, p: &Value, budget: usize, seconds: Optio
         for ((a, an), (b, bn), depth) in hits {
             // Each pair once, the older occurrence (the lower id) first.
             let ((a, an), (b, bn)) = if a <= b { ((a, an), (b, bn)) } else { ((b, bn), (a, an)) };
+            // The first MAX_VOLUMES pairs found have their shared volume worked out.
+            let slots = found.len() < MAX_VOLUMES;
             let c = found.entry((a, b)).or_insert_with(|| Collision {
                 names: (an, bn),
                 samples: Vec::new(),
                 depth: 0.0,
-                deepest: k,
-                at_deepest: t.doc.clone(),
+                most_volume: if slots {
+                    Ok((0.0, k))
+                } else {
+                    Err(format!("more than {MAX_VOLUMES} pairs collide: only the first {MAX_VOLUMES} found have their volumes worked out"))
+                },
             });
-            if c.samples.last() != Some(&k) {
-                c.samples.push(k);
+            if c.samples.last() == Some(&k) {
+                continue;
             }
-            if depth > c.depth {
-                (c.depth, c.deepest, c.at_deepest) = (depth, k, t.doc.clone());
+            c.samples.push(k);
+            c.depth = c.depth.max(depth);
+            if c.most_volume.is_ok() {
+                c.take_volume(k, shared_volume(s, &t.doc, a, b, &mut booleans));
             }
         }
         Ok(true)
@@ -436,16 +464,17 @@ fn interference_within(s: &mut Session, p: &Value, budget: usize, seconds: Optio
     }
     let mut list: Vec<(&(u64, u64), &Collision)> = found.iter().collect();
     list.sort_by_key(|(_, c)| c.samples.first().copied().unwrap_or(usize::MAX));
-    let mut booleans = MAX_BOOLEANS;
     let collisions: Vec<Value> = list
         .iter()
-        .enumerate()
-        .map(|(i, ((a, b), c))| {
-            let volume = if i < MAX_VOLUMES { shared_volume(s, &c.at_deepest, *a, *b, &mut booleans) } else { None };
+        .map(|(_, c)| {
+            let (volume, deepest, not_measured) = match &c.most_volume {
+                Ok((v, at)) => (Some(*v), Some(step_of(&m, *at, n)), None),
+                Err(why) => (None, None, Some(why.clone())),
+            };
             let first = c.samples.first().map(|k| step_of(&m, *k, n));
             let last = c.samples.last().map(|k| step_of(&m, *k, n));
             json!({"a": c.names.0, "b": c.names.1, "first_step": first, "last_step": last, "steps": ranges(&m, &c.samples, n),
-                "depth_mm": c.depth, "deepest_step": step_of(&m, c.deepest, n), "volume_mm3": volume})
+                "depth_mm": c.depth, "deepest_step": deepest, "volume_mm3": volume, "not_measured": not_measured})
         })
         .collect();
     // A check cut short says nothing about the steps it did not reach, so it is not clear (#7855).

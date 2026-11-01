@@ -42,7 +42,13 @@ pub const TABLE: &[(&str, Class)] = &[
     ("derive", Class::Standalone),
     // the 3Dconnexion driver's client API on macOS (no workspace dependencies)
     ("3dx-client", Class::Standalone),
+    // the profiler: timed spans for every layer, SMLib's calls to commands (no workspace dependencies)
+    ("profile", Class::Standalone),
     ("sketch", Class::Layer(1)),
+    // NVIDIA's SMLib behind its C API (kernel-smlib branch, ADR 0002); only the kernel uses it
+    ("smlib", Class::Layer(1)),
+    // STEP (ISO 10303) exchange structure and geometry, no modelling backend
+    ("step", Class::Layer(1)),
     ("kernel", Class::Layer(1)),
     ("render", Class::Layer(1)),
     ("doc", Class::Layer(2)),
@@ -61,8 +67,8 @@ pub const TABLE: &[(&str, Class)] = &[
 
 /// Explicit orderings *within* a layer (earlier may be used by later).
 /// The viewport draws display plans the GPU crate evaluates and draws with its pipelines; the MCP
-/// server's tests draw screenshots with them.
-pub const INTRA_LAYER_ORDER: &[&[&str]] = &[&["gpu", "ui-egui"], &["gpu", "mcp"]];
+/// server's tests draw screenshots with them. The kernel reads and writes STEP through `step`.
+pub const INTRA_LAYER_ORDER: &[&[&str]] = &[&["gpu", "ui-egui"], &["gpu", "mcp"], &["smlib", "kernel"], &["step", "kernel"]];
 
 fn intra_layer_allowed(from: &str, to: &str) -> bool {
     let (from, to) = (short_name(from), short_name(to));

@@ -1,0 +1,12 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#1615",
+    "tangency-labs/solidcraft#1653"
+  ],
+  "what": "two lofted tubes that cross and are joined (the bike-frame case): the trimmed loft faces along the intersection curves used to mesh with a flat sheet across the tube and slivers inside it",
+  "source": "analytic",
+  "method": "Each tube is a loft between two r=10 circles 100 mm apart, i.e. a circular cylinder of length 100; the vertical one (z -50..50) and the horizontal one (x -50..50) cross at their middles. The common part of two perpendicular equal cylinders is the Steinmetz bicylinder, V = 16 r^3/3 = 5333.33, whose surface is 16 r^2 (8 r^2 of it on each cylinder). Union V = 2 pi r^2 L - 16 r^3/3 = 57498.520. Union area = 2 (2 pi r L - 8 r^2) + 4 pi r^2 (the four end caps) = 12223.008.",
+  "body_count": 1,
+  "volume_mm3": 57498.52,
+  "area_mm2": 12223.008
+}

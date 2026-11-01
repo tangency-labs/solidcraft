@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "the top rim of a cylindrical boss on a plate rounded r2",
+ "source": "analytic",
+ "method": "plate 60x40x10 with a boss R8 x 10 on its top at (30, 20): V0 = 24000 + 640 pi = 26010.6193. The convex top rim (rho = 8, z = 20) rounded r2 removes the spandrel A = 0.858407, centroid inside the wall (first moment 0.383481), revolved once: 2 pi (8 A - M) = 40.7388. V = 25969.8805. Faces 9.",
+ "body_count": 1,
+ "volume_mm3": 25969.88052332866,
+ "faces": 9,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   20
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

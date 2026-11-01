@@ -1,0 +1,74 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 30,
+    "height": 6,
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "body_name": "Ring"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 24,
+    "height": 6,
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "operation": "cut",
+    "targets": [
+     "Ring"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 35,
+    "width": 10,
+    "height": 6,
+    "corner": [
+     34.9,
+     -5,
+     0
+    ],
+    "operation": "new",
+    "body_name": "Arm"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 5,
+    "height": 6,
+    "base": [
+     34.9,
+     0,
+     0
+    ],
+    "operation": "join",
+    "targets": [
+     "Arm"
+    ]
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Ring",
+    "tools": [
+     "Arm"
+    ],
+    "operation": "join"
+   }
+  }
+ ]
+}

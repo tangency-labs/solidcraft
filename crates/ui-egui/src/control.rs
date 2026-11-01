@@ -266,7 +266,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
         )
         && !id.starts_with("settings.")
         && app.session.active_sketch.is_none()
-        && app.session.world_state().bodies.len() == 1
+        && crate::open_meshing::session_world(&app.session).bodies.len() == 1
         && app.session.undo.len() <= 2
     {
         app.fit_view();
@@ -425,7 +425,7 @@ pub fn request_scope(app: &SolveApp, params: &Value) -> Result<Option<vfs::PathS
 /// What a picture of the view shows: the model as the window shows it (theme and colour vision
 /// mode, the section the viewport shows: an open Section Analysis dialog's preview, a sketch's
 /// Slice), with the grid and the origin's axes as `guides` says.
-pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides) -> solidcraft_engine::render::Scene {
+pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides) -> Result<solidcraft_engine::render::Scene, String> {
     let mut palette = crate::viewport::scene_palette(app.viewport_dark(), app.preferences.color_vision);
     // The view's own background colour (#7688).
     if let Some([r, g, b]) = app.preferences.viewport_background {
@@ -439,9 +439,13 @@ pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides
         &palette,
         guides,
         app.preferences.cosmetic_threads,
-    );
+    )
+    .map_err(|e| e.to_string())?;
     scene.plain_cap = !crate::viewport::section_hatch(app);
-    scene
+    if app.preferences.section_hatch == crate::prefs::SectionHatch::One {
+        scene.part_hatch = None;
+    }
+    Ok(scene)
 }
 
 /// The grid and the origin's axes as the window shows them (the Grid and Origin switches).
@@ -455,7 +459,7 @@ pub(crate) fn window_guides(app: &SolveApp) -> solidcraft_engine::view::Guides {
 /// A picture of the view as the window shows it, RGBA, drawn on the GPU with the viewport's
 /// pipelines (the renderer the app installs).
 pub(crate) fn view_rgba(app: &SolveApp, w: u32, h: u32) -> Result<Vec<u8>, String> {
-    solidcraft_engine::capture::rgba(&view_scene(app, window_guides(app)), &app.cam, w, h).map(|p| p.rgba)
+    solidcraft_engine::capture::rgba(&view_scene(app, window_guides(app))?, &app.cam, w, h).map(|p| p.rgba)
 }
 
 /// [`view_rgba`] as PNG.
@@ -1005,7 +1009,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             let world = if let Some(w) = p.get("world") {
                 Some(solidcraft_engine::geom::Vec3::new(num(w, 0), num(w, 1), num(w, 2)))
             } else if let Some(s) = p.get("sketch") {
-                let st = app.session.world_state();
+                let st = crate::open_meshing::session_world(&app.session);
                 app.session
                     .active_sketch
                     .and_then(|id| st.sketch(id))
@@ -1047,7 +1051,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         }
         "ui.sketchToScreen" => {
             // Screen points of active-sketch coordinates (for driving sketch interaction).
-            let st = app.session.world_state();
+            let st = crate::open_meshing::session_world(&app.session);
             let (Some(rect), Some(ss)) = (app.viewport.rect, app.session.active_sketch.and_then(|s| st.sketch(s))) else {
                 return err("no active sketch in a drawn viewport");
             };
@@ -1247,7 +1251,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             if let Some(Err(e)) = s("path").map(vfs::check) {
                 return err(e);
             }
-            let scene = view_scene(app, guides);
+            let scene = match view_scene(app, guides) {
+                Ok(scene) => scene,
+                Err(e) => return err(e),
+            };
             let png = match solidcraft_engine::capture::png(&scene, &app.cam, w, h) {
                 Ok(png) => png,
                 Err(e) => return err(format!("render failed: {e}")),
@@ -1789,7 +1796,7 @@ mod tests {
             app.preferences.cosmetic_threads = cosmetic_threads;
             for hatch in [false, true] {
                 app.session.section_hatch = hatch;
-                assert_eq!(view_scene(&app, Default::default()).plain_cap, !hatch);
+                assert_eq!(view_scene(&app, Default::default()).unwrap().plain_cap, !hatch);
                 app.session.selection = vec![Sel::Plane { name: "XZ".into() }];
                 app.start("inspect.section");
                 let Some(crate::dialogs::Kind::Section { hatch: preview_hatch, .. }) = app.dialog.as_mut().map(|d| &mut d.kind) else {
@@ -1797,7 +1804,7 @@ mod tests {
                 };
                 *preview_hatch = !hatch;
                 assert_eq!(
-                    view_scene(&app, Default::default()).plain_cap,
+                    view_scene(&app, Default::default()).unwrap().plain_cap,
                     hatch,
                     "the preview's hatch overrides the session with cosmetic_threads={cosmetic_threads}"
                 );

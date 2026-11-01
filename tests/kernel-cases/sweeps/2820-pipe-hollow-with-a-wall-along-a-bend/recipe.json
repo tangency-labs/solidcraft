@@ -1,0 +1,101 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Path"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      0,
+      30
+     ]
+    ],
+    "infer": false,
+    "ids": [
+     "p1"
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     0,
+     30
+    ],
+    "through": [
+     5.857864376269049,
+     44.14213562373095
+    ],
+    "end": [
+     20,
+     50
+    ],
+    "id": "p2"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      20,
+      50
+     ],
+     [
+      50,
+      50
+     ]
+    ],
+    "infer": false,
+    "ids": [
+     "p3"
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.pipe",
+   "params": {
+    "path_sketch": "Path",
+    "path": [
+     "p1",
+     "p2",
+     "p3"
+    ],
+    "diameter": 10,
+    "wall": 2,
+    "operation": "new"
+   }
+  }
+ ]
+}

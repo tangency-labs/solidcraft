@@ -132,8 +132,8 @@ fn shallow_sheet_pocket_preserves_material_depth_export_undo_and_reopen() {
         assert!((volume(&mut s) - 14900.0).abs() < 1e-6);
         let state = s.model.state();
         let body = &state.bodies[0].body;
-        assert!(!body.contains(solidcraft_geom::Vec3::new(25.0, 25.0, 0.5)));
-        assert!(body.contains(solidcraft_geom::Vec3::new(25.0, 25.0, 1.5)));
+        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(25.0, 25.0, 0.5)).unwrap(), solidcraft_kernel::PointClass::Outside);
+        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(25.0, 25.0, 1.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
     }
     let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
     assert!((volume(&mut reopened) - 14900.0).abs() < 1e-6);
@@ -286,10 +286,10 @@ fn intersect_preserves_both_material_regions_of_a_logical_ring_sheet() {
         let area: f64 = regions.iter().map(|r| r.area()).sum();
         assert!((area - (900.0 - PI * 75.0)).abs() < 1e-8, "area={area}");
         let body = &state.bodies[0].body;
-        assert!(body.contains(solidcraft_geom::Vec3::new(50.0, 30.0, 1.0)));
-        assert!(!body.contains(solidcraft_geom::Vec3::new(57.0, 30.0, 1.0)));
-        assert!(body.contains(solidcraft_geom::Vec3::new(64.0, 30.0, 1.0)));
-        assert!(!body.contains(solidcraft_geom::Vec3::new(70.0, 30.0, 1.0)));
+        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(50.0, 30.0, 1.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(57.0, 30.0, 1.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
+        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(64.0, 30.0, 1.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(70.0, 30.0, 1.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
         assert!((volume(&mut s) - (900.0 - PI * 75.0) * 2.5).abs() < 0.2);
     }
     let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap().to_string();
@@ -322,8 +322,8 @@ fn machining_a_folded_parallel_panel_preserves_its_pocket_on_unfold() {
     run(&mut s, "sheet.unfold", json!({}));
     let state = s.model.state();
     let body = &state.bodies[0].body;
-    assert!(!body.contains(Vec3::new(c.x, c.y, 0.5)));
-    assert!(body.contains(Vec3::new(c.x, c.y, 1.5)));
+    assert_eq!(body.classify_point(Vec3::new(c.x, c.y, 0.5)).unwrap(), solidcraft_kernel::PointClass::Outside);
+    assert_eq!(body.classify_point(Vec3::new(c.x, c.y, 1.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
     assert_eq!(flat(&mut s)["pockets"][0]["depth_mm"], 1.0);
     run(&mut s, "sheet.refold", json!({}));
     assert!((volume(&mut s) - (18972.62196081845 - 16.0)).abs() < 0.2);
@@ -342,8 +342,11 @@ fn flipped_sheet_pocket_keeps_depth_in_the_local_thickness_direction() {
         }
         assert!((volume(&mut s) - 14900.0).abs() < 1e-6);
         let state = s.model.state();
-        assert!(!state.bodies[0].body.contains(solidcraft_geom::Vec3::new(25.0, 25.0, -0.5)));
-        assert!(state.bodies[0].body.contains(solidcraft_geom::Vec3::new(25.0, 25.0, -1.5)));
+        assert_eq!(
+            state.bodies[0].body.classify_point(solidcraft_geom::Vec3::new(25.0, 25.0, -0.5)).unwrap(),
+            solidcraft_kernel::PointClass::Outside
+        );
+        assert_eq!(state.bodies[0].body.classify_point(solidcraft_geom::Vec3::new(25.0, 25.0, -1.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
     }
 }
 
@@ -374,10 +377,21 @@ fn multiple_profile_intersect_keeps_tool_union_for_solids_and_sheet_groups() {
         }
         let state = s.model.state();
         for x in [25.0, 65.0] {
-            assert!(state.bodies.iter().any(|b| b.body.contains(solidcraft_geom::Vec3::new(x, 25.0, 1.0))));
+            assert!(
+                state
+                    .bodies
+                    .iter()
+                    .any(|b| b.body.classify_point(solidcraft_geom::Vec3::new(x, 25.0, 1.0)).unwrap() == solidcraft_kernel::PointClass::Inside)
+            );
         }
-        assert!(!state.bodies.iter().any(|b| b.body.contains(solidcraft_geom::Vec3::new(50.0, 25.0, 1.0))));
-        assert!(state.bodies.iter().any(|b| b.name == "Control" && b.body.contains(solidcraft_geom::Vec3::new(205.0, 5.0, 5.0))));
+        assert!(
+            !state
+                .bodies
+                .iter()
+                .any(|b| b.body.classify_point(solidcraft_geom::Vec3::new(50.0, 25.0, 1.0)).unwrap() == solidcraft_kernel::PointClass::Inside)
+        );
+        assert!(state.bodies.iter().any(|b| b.name == "Control"
+            && b.body.classify_point(solidcraft_geom::Vec3::new(205.0, 5.0, 5.0)).unwrap() == solidcraft_kernel::PointClass::Inside));
     }
 }
 
@@ -396,7 +410,7 @@ fn deleting_sheet_material_prunes_cosmetic_threads_and_undo_restores_them() {
     assert!(s.model.state().bodies.is_empty());
     assert!(s.model.state().sheets.is_empty());
     assert!(s.model.state().threads.is_empty());
-    assert!(solidcraft_doc::world_state(&s.doc, &s.model.state()).threads.is_empty());
+    assert!(solidcraft_doc::world_state(&s.doc, &s.model.state()).unwrap().threads.is_empty());
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(s.model.state().threads.len(), 1);
 }
@@ -417,15 +431,15 @@ fn sheet_pocket_transfer_keeps_local_depth_world_pose_and_history() {
         assert_eq!((sh.pockets[0].z0, sh.pockets[0].z1), (0.0, 1.0));
         let cut = sh.frame.to_world(solidcraft_geom::Vec2::new(25.0, 25.0)) + sh.frame.normal() * 0.5;
         let floor = sh.frame.to_world(solidcraft_geom::Vec2::new(25.0, 25.0)) + sh.frame.normal() * 1.5;
-        assert!(!mb.body.contains(cut));
-        assert!(mb.body.contains(floor));
-        let world = s.world_state();
+        assert_eq!(mb.body.classify_point(cut).unwrap(), solidcraft_kernel::PointClass::Outside);
+        assert_eq!(mb.body.classify_point(floor).unwrap(), solidcraft_kernel::PointClass::Inside);
+        let world = s.world_state().unwrap();
         let body = &world.body(name).unwrap().body;
-        let bounds = body.tessellate(1e-3).unwrap().bounds();
+        let bounds = body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap().bounds();
         assert!(bounds.min.dist(Vec3::ZERO) < 1e-6, "{bounds:?}");
         assert!(bounds.max.dist(Vec3::new(100.0, 60.0, 2.5)) < 1e-6, "{bounds:?}");
-        assert!(!body.contains(Vec3::new(25.0, 25.0, 0.5)));
-        assert!(body.contains(Vec3::new(25.0, 25.0, 1.5)));
+        assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 0.5)).unwrap(), solidcraft_kernel::PointClass::Outside);
+        assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 1.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
         assert!((solidcraft_kernel::measure(body).unwrap().volume - 14900.0).abs() < 1e-6);
     }
     let mut s = Session::default();
@@ -1234,7 +1248,11 @@ fn cut_through(s: &mut Session, sketch: &str) {
 }
 
 fn contains(s: &Session, p: [f64; 3]) -> bool {
-    s.model.state().bodies.first().is_some_and(|b| b.body.contains(solidcraft_geom::Vec3::new(p[0], p[1], p[2])))
+    s.model
+        .state()
+        .bodies
+        .first()
+        .is_some_and(|b| b.body.classify_point(solidcraft_geom::Vec3::new(p[0], p[1], p[2])).unwrap() == solidcraft_kernel::PointClass::Inside)
 }
 
 #[test]
@@ -1640,6 +1658,46 @@ fn plate_with_a_cut(s: &mut Session, cut: [[f64; 2]; 2]) {
     run(s, "solid.extrude", json!({"sketch": "Cut", "through_all": true, "direction": "symmetric", "operation": "cut"}));
 }
 
+/// A flange picked on the edge inside a notch is on that edge (#5306): the notch's bottom (y 30,
+/// x 80 … 120) bends 90° up, inside (setback 3), its outer face on the edge (y 30 … 32), the base
+/// set back under it; the plate's outer edge beside the notch keeps no flange. An edge of a hole
+/// (a cut-out inside the plate) is refused, not taken for the outline's nearest edge.
+#[test]
+fn an_edge_flange_picked_inside_a_notch_is_on_the_notchs_edge() {
+    let mut s = Session::default();
+    plate_with_a_cut(&mut s, [[80.0, -10.0], [120.0, 30.0]]);
+    run(&mut s, "sheet.flange", json!({"edges": [[100, 30, 2]], "height": 40, "angle": 90, "position": "inside"}));
+    let f = flat(&mut s);
+    let bends = f["bends"].as_array().cloned().unwrap_or_default();
+    let span = |b: &Value| {
+        let (x0, x1) = (b["start"][0].as_f64().unwrap_or(f64::NAN), b["end"][0].as_f64().unwrap_or(f64::NAN));
+        (x0.min(x1), x0.max(x1), b["start"][1].as_f64().unwrap_or(f64::NAN))
+    };
+    assert_eq!(bends.len(), 1, "{f}");
+    let (lo, hi, y) = span(&bends[0]);
+    assert!((lo - 80.0).abs() < 1e-9 && (hi - 120.0).abs() < 1e-9 && y > 30.0, "{f}");
+    assert_eq!(f["outline"].as_array().map(Vec::len), Some(1), "{f}");
+    for (p, inside) in [
+        ([100.0, 31.0, 20.0], true),
+        ([100.0, 30.5, 0.5], false),
+        ([100.0, 34.0, 1.0], true),
+        ([40.0, 1.0, 20.0], false),
+        ([160.0, 1.0, 20.0], false),
+        ([40.0, 0.2, 0.2], true),
+    ] {
+        assert_eq!(contains(&s, p), inside, "{p:?}");
+    }
+    let state = s.model.state();
+    let body = &state.bodies[0].body;
+    assert!(body.validity().is_empty() && body.shell_count() == 1);
+    drop(state);
+
+    let mut s = Session::default();
+    plate_with_a_cut(&mut s, [[80.0, 30.0], [120.0, 60.0]]);
+    let error = s.execute("sheet.flange", &json!({"edges": [[100, 30, 2]], "height": 40, "angle": 90})).unwrap_err().to_string();
+    assert!(error.contains("not supported yet: a flange on the edge of a hole"), "{error}");
+}
+
 #[test]
 fn edge_flanges_on_either_side_of_a_notch_span_the_side_they_were_picked_on() {
     // A notch 40 wide and 30 deep in the middle of the bottom edge leaves x 0 … 80 and 120 … 200 of
@@ -1804,7 +1862,9 @@ fn a_flange_bent_inside_keeps_the_base_sketchs_arcs_in_the_flat_pattern_and_the_
     // bottom edge (2 mm, R 1, K 0.5: setback 3 inside, half of it in the middle; BA π, panel
     // 37). With the bend inside or in the middle the base is cut back through the two lower
     // arcs: the DXF's outline was about 150 LINEs then, every arc as chords a quarter
-    // millimetre long, where the bend outside gives 8 LINEs and 4 ARCs.
+    // millimetre long, where the bend outside gives 6 LINEs and 4 ARCs: each of the flange's
+    // sides is one line through its bend and its panel (their union has no vertex where the
+    // two sides meet in line).
     let h = 8.0 * (1.0 - 0.5f64.sqrt());
     // ∫ √(64 − z²): the area under an arc of radius 8, from its centre's height on.
     let under = |z: f64| z / 2.0 * (64.0 - z * z).sqrt() + 32.0 * (z / 8.0).asin();
@@ -1829,8 +1889,9 @@ fn a_flange_bent_inside_keeps_the_base_sketchs_arcs_in_the_flat_pattern_and_the_
         let lines = shapes.iter().filter(|g| matches!(g, solidcraft_io::Geom2::Line(..))).count();
         let radii: Vec<f64> =
             shapes.iter().filter_map(|g| if let solidcraft_io::Geom2::Arc { c, a, .. } = g { Some(c.dist(*a)) } else { None }).collect();
-        // Eight lines of outline and the bend's centre line; the four corners.
-        assert_eq!((lines, radii.len(), shapes.len()), (9, 4, 13), "{position}");
+        // Six lines of outline (the plate's top, left and right; the flange's two sides and its
+        // end) and the bend's centre line; the four corners.
+        assert_eq!((lines, radii.len(), shapes.len()), (7, 4, 11), "{position}");
         assert!(radii.iter().all(|r| (r - 8.0).abs() < 1e-9), "{position}: {radii:?}");
         // The plate less what lies below the bend line, ∫ 184 + 2·√(64 − (8 − y)²) from 0 to the
         // setback, and the flange along the trimmed edge, which runs from arc to arc.
@@ -2281,32 +2342,38 @@ fn cut_across_a_concave_notch_uses_crossings_not_just_contained_corners() {
     assert!((volume(&mut s) - 10500.0).abs() < 1e-6);
 }
 
+/// A round flange stays an exact circle through unfold, refold and DXF (never a polyline), and a
+/// cut close to its rim stays a hole in the flat pattern.
 #[test]
-fn tiny_cut_inside_exact_circle_survives_unfold_refold_and_dxf() {
+fn a_round_flange_stays_a_circle_and_keeps_a_cut_near_its_rim_through_unfold_refold_and_dxf() {
     for initially_flat in [false, true] {
         let mut s = Session::default();
         run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Disc"}));
         run(&mut s, "sketch.circle.center", json!({"center": [0,0], "radius": 10}));
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "sheet.flange", json!({"sketch": "Disc"}));
-        let circle = s.model.state().sheets[0].base.outer.clone();
-        let displayed = circle.polyline(1e-3);
-        let at = (displayed[0] + displayed[1]).normalized().unwrap() * 9.9998;
-        assert!(!circle.contains(at));
         if initially_flat {
             run(&mut s, "sheet.unfold", json!({}));
         }
-        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "TinyCut"}));
-        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [at.x-0.000025,at.y-0.000025], "p1": [at.x+0.000025,at.y+0.000025]}));
+        // A 1 mm square whose outer side is 0.5 mm inside the rim.
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Cut"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [8.5,-0.5], "p1": [9.5,0.5]}));
         run(&mut s, "sketch.finish", json!({}));
-        run(&mut s, "solid.extrude", json!({"sketch": "TinyCut", "through_all": true, "operation": "cut", "direction": "symmetric"}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Cut", "through_all": true, "operation": "cut", "direction": "symmetric"}));
         for stage in ["sheet.unfold", "sheet.refold"] {
             let regions = s.model.state().sheets[0].flat_regions().unwrap();
+            let rim = &regions[0].outer.segs;
+            assert!(
+                !rim.is_empty() && rim.iter().all(|seg| matches!(seg, solidcraft_geom::Seg2::Arc { radius, .. } if (*radius - 10.0).abs() < 1e-12)),
+                "{rim:?}"
+            );
             assert_eq!(regions[0].holes.len(), 1);
-            assert!((regions[0].holes[0].signed_area().abs() - 2.5e-9).abs() < 1e-13);
+            assert!((regions[0].holes[0].signed_area().abs() - 1.0).abs() < 1e-12);
             assert_eq!(s.model.state().bodies.len(), 1);
             let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap().to_string();
-            assert_eq!(solidcraft_io::read_dxf(&dxf).unwrap().len(), 5);
+            let drawn = solidcraft_io::read_dxf(&dxf).unwrap();
+            assert!(drawn.iter().any(|g| matches!(g, solidcraft_io::Geom2::Circle(_, r) if (*r - 10.0).abs() < 1e-12)), "{drawn:?}");
+            assert_eq!(drawn.len(), 5, "the circle and the square's four sides: {drawn:?}");
             if stage == "sheet.unfold" && initially_flat {
                 run(&mut s, "sheet.refold", json!({}));
             }
@@ -2348,8 +2415,8 @@ fn unrelated_box_cut_preserves_logical_ring_sheet_compound() {
         assert_eq!(s.model.state().bodies.len(), 2);
         let state = s.model.state();
         let body = &state.bodies.iter().find(|b| b.name == sheet_name).unwrap().body;
-        assert!(body.contains(solidcraft_geom::Vec3::new(50.0, 30.0, 1.25)));
-        assert!(!body.contains(solidcraft_geom::Vec3::new(57.0, 30.0, 1.25)));
+        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(50.0, 30.0, 1.25)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(57.0, 30.0, 1.25)).unwrap(), solidcraft_kernel::PointClass::Outside);
     }
 }
 
@@ -2384,9 +2451,9 @@ fn specialized_sheet_cuts_respect_component_and_explicit_participants() {
 fn ring_cut_preserves_retained_island_through_unfold_and_refold() {
     fn material_probes(s: &Session) {
         let body = &s.model.state().bodies[0].body;
-        assert!(body.contains(solidcraft_geom::Vec3::new(50.0, 30.0, 1.25)));
-        assert!(!body.contains(solidcraft_geom::Vec3::new(57.0, 30.0, 1.25)));
-        assert!(body.contains(solidcraft_geom::Vec3::new(65.0, 30.0, 1.25)));
+        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(50.0, 30.0, 1.25)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(57.0, 30.0, 1.25)).unwrap(), solidcraft_kernel::PointClass::Outside);
+        assert_eq!(body.classify_point(solidcraft_geom::Vec3::new(65.0, 30.0, 1.25)).unwrap(), solidcraft_kernel::PointClass::Inside);
     }
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
@@ -2427,10 +2494,14 @@ fn retained_depth_check(s: &mut Session, want: f64, z0: f64, z1: f64) {
     let state = s.model.state();
     assert_eq!(state.sheets.len(), 1);
     assert_eq!(state.sheets[0].t, 2.5, "rule stock gauge is preserved");
-    assert!(state.bodies.iter().any(|b| b.body.contains(Vec3::new(25.0, 25.0, (z0 + z1) * 0.5))));
-    assert!(!state.bodies.iter().any(|b| b.body.contains(Vec3::new(25.0, 25.0, z0 - 0.1))));
-    assert!(!state.bodies.iter().any(|b| b.body.contains(Vec3::new(25.0, 25.0, z1 + 0.1))));
-    assert!(!state.bodies.iter().any(|b| b.body.contains(Vec3::new(10.0, 25.0, (z0 + z1) * 0.5))));
+    assert!(
+        state.bodies.iter().any(|b| b.body.classify_point(Vec3::new(25.0, 25.0, (z0 + z1) * 0.5)).unwrap() == solidcraft_kernel::PointClass::Inside)
+    );
+    assert!(!state.bodies.iter().any(|b| b.body.classify_point(Vec3::new(25.0, 25.0, z0 - 0.1)).unwrap() == solidcraft_kernel::PointClass::Inside));
+    assert!(!state.bodies.iter().any(|b| b.body.classify_point(Vec3::new(25.0, 25.0, z1 + 0.1)).unwrap() == solidcraft_kernel::PointClass::Inside));
+    assert!(
+        !state.bodies.iter().any(|b| b.body.classify_point(Vec3::new(10.0, 25.0, (z0 + z1) * 0.5)).unwrap() == solidcraft_kernel::PointClass::Inside)
+    );
     let bounds = state.bodies[0].mesh().bounds();
     assert!((bounds.min.z - z0).abs() < 1e-8 && (bounds.max.z - z1).abs() < 1e-8, "{bounds:?}");
 }
@@ -2441,8 +2512,8 @@ fn depth_step_reopen(s: &mut Session, suffix: &str, want: f64, inside: solidcraf
     let mut imported = Session::default();
     run(&mut imported, "doc.open", json!({"path":path.to_string_lossy()}));
     assert!((volume(&mut imported) - want).abs() < 1e-6);
-    assert!(imported.model.state().bodies.iter().any(|b| b.body.contains(inside)));
-    assert!(!imported.model.state().bodies.iter().any(|b| b.body.contains(outside)));
+    assert!(imported.model.state().bodies.iter().any(|b| b.body.classify_point(inside).unwrap() == solidcraft_kernel::PointClass::Inside));
+    assert!(!imported.model.state().bodies.iter().any(|b| b.body.classify_point(outside).unwrap() == solidcraft_kernel::PointClass::Inside));
     std::fs::remove_file(path).unwrap();
 }
 
@@ -2534,10 +2605,10 @@ fn partial_depth_intersect_preserves_prior_pockets_and_actual_interval_intersect
         assert!((volume(&mut s) - 75.0).abs() < 1e-6);
         let state = s.model.state();
         let body = &state.bodies[0].body;
-        assert!(!body.contains(Vec3::new(22.0, 25.0, 0.75)));
-        assert!(body.contains(Vec3::new(22.0, 25.0, 1.25)));
-        assert!(body.contains(Vec3::new(27.0, 25.0, 0.75)));
-        assert!(!body.contains(Vec3::new(27.0, 25.0, 0.25)));
+        assert_eq!(body.classify_point(Vec3::new(22.0, 25.0, 0.75)).unwrap(), solidcraft_kernel::PointClass::Outside);
+        assert_eq!(body.classify_point(Vec3::new(22.0, 25.0, 1.25)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(Vec3::new(27.0, 25.0, 0.75)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(Vec3::new(27.0, 25.0, 0.25)).unwrap(), solidcraft_kernel::PointClass::Outside);
     }
     let records = s.model.state().sheets[0].pockets.clone();
     run(&mut s, "solid.extrude", json!({"sketch":"RetainDepth","distance":1.5,"start_offset":0.25,"operation":"intersect"}));
@@ -2569,9 +2640,9 @@ fn partial_depth_intersect_keeps_disconnected_tool_islands_and_annular_curves() 
         assert!((volume(&mut s) - 200.0).abs() < 1e-6);
         assert_eq!(s.model.state().sheets[0].flat_regions().unwrap().len(), 2);
         for x in [25.0, 65.0] {
-            assert!(s.model.state().bodies[0].body.contains(Vec3::new(x, 25.0, 0.5)));
+            assert_eq!(s.model.state().bodies[0].body.classify_point(Vec3::new(x, 25.0, 0.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
         }
-        assert!(!s.model.state().bodies[0].body.contains(Vec3::new(45.0, 25.0, 0.5)));
+        assert_eq!(s.model.state().bodies[0].body.classify_point(Vec3::new(45.0, 25.0, 0.5)).unwrap(), solidcraft_kernel::PointClass::Outside);
     }
     depth_step_reopen(&mut s, "islands", 200.0, Vec3::new(65.0, 25.0, 0.5), Vec3::new(45.0, 25.0, 0.5));
     let mut ring = Session::default();
@@ -2590,9 +2661,9 @@ fn partial_depth_intersect_keeps_disconnected_tool_islands_and_annular_curves() 
         let area: f64 = state.sheets[0].flat_regions().unwrap().iter().map(|r| r.area()).sum();
         assert!((area - 75.0 * PI).abs() < 1e-8);
         assert!((volume(&mut ring) - 75.0 * PI).abs() < 0.1);
-        assert!(state.bodies[0].body.contains(Vec3::new(57.0, 30.0, 0.5)));
-        assert!(!state.bodies[0].body.contains(Vec3::new(50.0, 30.0, 0.5)));
-        assert!(!state.bodies[0].body.contains(Vec3::new(57.0, 30.0, 1.5)));
+        assert_eq!(state.bodies[0].body.classify_point(Vec3::new(57.0, 30.0, 0.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(state.bodies[0].body.classify_point(Vec3::new(50.0, 30.0, 0.5)).unwrap(), solidcraft_kernel::PointClass::Outside);
+        assert_eq!(state.bodies[0].body.classify_point(Vec3::new(57.0, 30.0, 1.5)).unwrap(), solidcraft_kernel::PointClass::Outside);
     }
     let dxf = run(&mut ring, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap().to_string();
     assert!(dxf.contains("POCKET_TOP_Z1.000000_TO_2.500000_MM"));
@@ -2629,7 +2700,7 @@ fn partial_depth_intersect_flipped_tool_and_transferred_sheet_keep_depth_side_an
     base(&mut s, 100.0, 60.0);
     rectangle_tool(&mut s, "RetainDepth", [20.0, 20.0], [30.0, 30.0]);
     run(&mut s, "solid.extrude", json!({"sketch":"RetainDepth","distance":1,"start_offset":0.5,"operation":"intersect","name":"RetainSlab"}));
-    let before = s.world_state().bodies[0].mesh().bounds();
+    let before = s.world_state().unwrap().bodies[0].mesh().bounds();
     let name = s.model.state().sheets[0].body.clone();
     let destination = run(&mut s, "component.create", json!({"name":"Destination","parent":0,"grounded":false}));
     let owner = destination["component"].as_u64().unwrap();
@@ -2648,26 +2719,26 @@ fn partial_depth_intersect_flipped_tool_and_transferred_sheet_keep_depth_side_an
         assert_eq!(sh.pockets.len(), 2);
         assert_eq!(state.body(&name).unwrap().component, owner);
         assert!(state.body(&name).unwrap().transferred);
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let body = &world.body(&name).unwrap().body;
-        assert!(body.contains(Vec3::new(25.0, 25.0, 1.0)));
-        assert!(!body.contains(Vec3::new(25.0, 25.0, 0.25)));
-        assert!(!body.contains(Vec3::new(25.0, 25.0, 2.0)));
+        assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 1.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 0.25)).unwrap(), solidcraft_kernel::PointClass::Outside);
+        assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 2.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
         let bounds = world.body(&name).unwrap().mesh().bounds();
         assert!(before.min.dist(bounds.min) < 1e-8 && before.max.dist(bounds.max) < 1e-8);
         assert!((solidcraft_kernel::measure(body).unwrap().volume - 100.0).abs() < 1e-6);
     }
     let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
-    let reopened_world = reopened.world_state();
+    let reopened_world = reopened.world_state().unwrap();
     let body = &reopened_world.body(&name).unwrap().body;
-    assert!(body.contains(Vec3::new(25.0, 25.0, 1.0)));
+    assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 1.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
     assert!((solidcraft_kernel::measure(body).unwrap().volume - 100.0).abs() < 1e-6);
     run(&mut reopened, "timeline.edit", json!({"feature":"RetainSlab","set":{"extent":{"distance":"1.5"}}}));
-    let world = reopened.world_state();
+    let world = reopened.world_state().unwrap();
     let body = &world.body(&name).unwrap().body;
     assert!((solidcraft_kernel::measure(body).unwrap().volume - 150.0).abs() < 1e-6);
-    assert!(body.contains(Vec3::new(25.0, 25.0, 1.75)));
-    assert!(!body.contains(Vec3::new(25.0, 25.0, 2.25)));
+    assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 1.75)).unwrap(), solidcraft_kernel::PointClass::Inside);
+    assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 2.25)).unwrap(), solidcraft_kernel::PointClass::Outside);
 }
 
 #[test]
@@ -2715,12 +2786,12 @@ fn partial_depth_intersect_full_gauge_in_rotated_frames_does_not_invent_pockets(
                 run(&mut s, command, json!({}));
             }
             assert!(s.model.state().sheets[0].pockets.is_empty(), "full gauge must not acquire roundoff-depth pockets");
-            let world = s.world_state();
+            let world = s.world_state().unwrap();
             let body = &world.body(&name).unwrap().body;
             assert!((solidcraft_kernel::measure(body).unwrap().volume - 250.0).abs() < 1e-5);
-            assert!(body.contains(Vec3::new(25.0, 25.0, 0.1)));
-            assert!(body.contains(Vec3::new(25.0, 25.0, 2.4)));
-            assert!(!body.contains(Vec3::new(10.0, 25.0, 1.0)));
+            assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 0.1)).unwrap(), solidcraft_kernel::PointClass::Inside);
+            assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 2.4)).unwrap(), solidcraft_kernel::PointClass::Inside);
+            assert_eq!(body.classify_point(Vec3::new(10.0, 25.0, 1.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
         }
         let mut cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
         assert!(cold.model.state().sheets[0].pockets.is_empty());
@@ -2731,20 +2802,20 @@ fn partial_depth_intersect_full_gauge_in_rotated_frames_does_not_invent_pockets(
                 run(&mut s, command, json!({}));
             }
             assert_eq!(s.model.state().sheets[0].pockets.len(), 2);
-            let world = s.world_state();
+            let world = s.world_state().unwrap();
             let body = &world.body(&name).unwrap().body;
             let measured = solidcraft_kernel::measure(body).unwrap().volume;
             assert!((measured - 100.0).abs() < 1e-5, "retained volume {measured}");
-            assert!(body.contains(Vec3::new(25.0, 25.0, 1.0)));
-            assert!(!body.contains(Vec3::new(25.0, 25.0, 0.1)));
-            assert!(!body.contains(Vec3::new(25.0, 25.0, 2.4)));
+            assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 1.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
+            assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 0.1)).unwrap(), solidcraft_kernel::PointClass::Outside);
+            assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 2.4)).unwrap(), solidcraft_kernel::PointClass::Outside);
         }
         let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
-        let world = cold.world_state();
+        let world = cold.world_state().unwrap();
         let body = &world.body(&name).unwrap().body;
         assert!((solidcraft_kernel::measure(body).unwrap().volume - 100.0).abs() < 1e-5);
-        assert!(body.contains(Vec3::new(25.0, 25.0, 1.0)));
-        assert!(!body.contains(Vec3::new(25.0, 25.0, 0.1)));
+        assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 1.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 0.1)).unwrap(), solidcraft_kernel::PointClass::Outside);
     }
 }
 
@@ -2764,9 +2835,9 @@ fn partial_depth_intersect_planar_to_object_retains_current_target_depth() {
         let state = s.model.state();
         let body = &state.body(&name).unwrap().body;
         assert!((solidcraft_kernel::measure(body).unwrap().volume - 100.0).abs() < 1e-6);
-        assert!(body.contains(Vec3::new(25.0, 25.0, 1.0)));
-        assert!(!body.contains(Vec3::new(25.0, 25.0, 0.1)));
-        assert!(!body.contains(Vec3::new(25.0, 25.0, 2.0)));
+        assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 1.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 0.1)).unwrap(), solidcraft_kernel::PointClass::Outside);
+        assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 2.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
         assert_eq!(state.sheets[0].pockets.len(), 2);
         assert!((solidcraft_kernel::measure(&state.body("Roof").unwrap().body).unwrap().volume - 100.0).abs() < 1e-6);
     }
@@ -2811,8 +2882,8 @@ fn partial_depth_intersect_curved_to_object_preserves_current_trimmed_cap_footpr
     let ts = tool_session.model.state();
     let witness = &ts.body("TrimWitness").unwrap().body;
     assert!((solidcraft_kernel::measure(witness).unwrap().volume - (100.0 - 4.0 * std::f64::consts::PI)).abs() < 0.01);
-    assert!(witness.contains(Vec3::new(21.0, 21.0, 0.5)));
-    assert!(!witness.contains(Vec3::new(25.0, 25.0, 0.5)));
+    assert_eq!(witness.classify_point(Vec3::new(21.0, 21.0, 0.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
+    assert_eq!(witness.classify_point(Vec3::new(25.0, 25.0, 0.5)).unwrap(), solidcraft_kernel::PointClass::Outside);
     run(&mut s, "solid.extrude", json!({"sketch":"Tool","to":[27,25,10],"operation":"intersect","participants":[name]}));
     for command in [None, Some("sheet.unfold"), Some("sheet.refold")] {
         if let Some(command) = command {
@@ -2824,12 +2895,15 @@ fn partial_depth_intersect_curved_to_object_preserves_current_trimmed_cap_footpr
         assert!((measured - (100.0 - 4.0 * std::f64::consts::PI)).abs() < 0.01);
         let area: f64 = state.sheets[0].flat_regions().unwrap().iter().map(|r| r.area()).sum();
         assert!((area - (100.0 - 4.0 * std::f64::consts::PI)).abs() < 1e-8);
-        assert!(body.contains(Vec3::new(21.0, 21.0, 0.5)));
-        assert!(!body.contains(Vec3::new(25.0, 25.0, 0.5)));
-        assert!(!body.contains(Vec3::new(21.0, 21.0, 1.5)));
+        assert_eq!(body.classify_point(Vec3::new(21.0, 21.0, 0.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(Vec3::new(25.0, 25.0, 0.5)).unwrap(), solidcraft_kernel::PointClass::Outside);
+        assert_eq!(body.classify_point(Vec3::new(21.0, 21.0, 1.5)).unwrap(), solidcraft_kernel::PointClass::Outside);
     }
     let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
-    assert!(!cold.model.state().body(&name).unwrap().body.contains(Vec3::new(25.0, 25.0, 0.5)));
+    assert_eq!(
+        cold.model.state().body(&name).unwrap().body.classify_point(Vec3::new(25.0, 25.0, 0.5)).unwrap(),
+        solidcraft_kernel::PointClass::Outside
+    );
     let dxf = run(&mut s, "sheet.export_dxf", json!({"body":name}))["dxf"].as_str().unwrap().to_string();
     assert!(dxf.contains("POCKET_TOP_Z1.000000_TO_2.500000_MM"));
     let outline = dxf_outline_only(&dxf);
@@ -2839,13 +2913,16 @@ fn partial_depth_intersect_curved_to_object_preserves_current_trimmed_cap_footpr
     run(&mut outline_import, "sketch.finish", json!({}));
     run(&mut outline_import, "solid.extrude", json!({"distance":1,"profiles":[{"point":[21,21]}]}));
     assert!((volume(&mut outline_import) - (100.0 - 4.0 * std::f64::consts::PI)).abs() < 0.01);
-    assert!(!outline_import.model.state().bodies[0].body.contains(Vec3::new(25.0, 25.0, 0.5)));
+    assert_eq!(
+        outline_import.model.state().bodies[0].body.classify_point(Vec3::new(25.0, 25.0, 0.5)).unwrap(),
+        solidcraft_kernel::PointClass::Outside
+    );
     let path = std::env::temp_dir().join(format!("solidcraft-current-trim-cap-{}.step", std::process::id()));
     run(&mut s, "file.export", json!({"path":path.to_string_lossy(),"bodies":[name]}));
     let mut imported = Session::default();
     run(&mut imported, "doc.open", json!({"path":path.to_string_lossy()}));
     assert!((volume(&mut imported) - (100.0 - 4.0 * std::f64::consts::PI)).abs() < 0.01);
-    assert!(!imported.model.state().bodies[0].body.contains(Vec3::new(25.0, 25.0, 0.5)));
+    assert_eq!(imported.model.state().bodies[0].body.classify_point(Vec3::new(25.0, 25.0, 0.5)).unwrap(), solidcraft_kernel::PointClass::Outside);
     std::fs::remove_file(path).unwrap();
 }
 
@@ -2875,7 +2952,7 @@ fn partial_depth_intersect_sub_extrusion_resolution_layers_refuse_atomically() {
         assert!(error.contains("resolution") || error.contains("distance is zero") || error.contains("sheet machining"), "{error}");
         assert_eq!(s.doc.to_json(), before);
         assert!(s.model.state().sheets[0].pockets.is_empty());
-        assert!((solidcraft_kernel::measure(&s.world_state().body(&name).unwrap().body).unwrap().volume - 15000.0).abs() < 1e-5);
+        assert!((solidcraft_kernel::measure(&s.world_state().unwrap().body(&name).unwrap().body).unwrap().volume - 15000.0).abs() < 1e-5);
     }
 }
 
@@ -3112,7 +3189,13 @@ fn hole_beside_two_adjacent_edge_flanges_cuts_and_bends_stay_guarded() {
     let mut s = Session::default();
     build(&mut s);
     let before = volume(&mut s);
-    assert!((before - 14057.2).abs() < 0.1, "{before}");
+    // Folded, the sheet (2.5 mm, R 2.5, K 0.44) holds its flat area times the thickness, less
+    // each bend's flat strip (its length times the allowance (R + K·t)·π/2) and plus its sector
+    // (R + t/2)·π/2: t·A + t²·(½ − K)·(π/2)·L for the bends' length L.
+    let flat_area: f64 = s.model.state().sheets[0].flat_regions().unwrap().iter().map(|r| r.area()).sum();
+    let bends: f64 = flat(&mut s)["bends"].as_array().unwrap().iter().map(|b| b["length"].as_f64().unwrap()).sum();
+    let want = 2.5 * flat_area + 2.5 * 2.5 * (0.5 - 0.44) * FRAC_PI_2 * bends;
+    assert!(rel(before, want) < 1e-9, "{before} vs {want}");
     if let Err(e) = hole(&mut s, "Hole", [25.0, 20.0]) {
         panic!("hole beside two flanges: {e}");
     }
@@ -4881,7 +4964,7 @@ fn fold_fixed_point_must_touch_the_sheet_but_any_face_will_do() {
 fn flat_face_points(s: &Session) -> Vec<(usize, solidcraft_geom::Vec3, solidcraft_geom::Vec3)> {
     let state = s.model.state();
     let body = &state.bodies[0].body;
-    let mesh = body.tessellate(0.01).unwrap();
+    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
     (0..body.face_count())
         .filter_map(|index| {
             let normal = body.planar_face(index)?.normal();
@@ -4975,7 +5058,9 @@ fn a_hole_drilled_into_a_rim_is_a_bore_the_sheet_keeps_when_it_unfolds() {
     let f = flat(&mut s);
     assert_eq!(f["bores"].as_array().map(Vec::len), Some(1), "{f}");
     assert_eq!(f["cutouts"], json!([]));
-    let inside = |s: &Session, p: [f64; 3]| s.model.state().bodies[0].body.contains(solidcraft_geom::Vec3::new(p[0], p[1], p[2]));
+    let inside = |s: &Session, p: [f64; 3]| {
+        s.model.state().bodies[0].body.classify_point(solidcraft_geom::Vec3::new(p[0], p[1], p[2])).unwrap() == solidcraft_kernel::PointClass::Inside
+    };
     // The flat pattern loses the same bore (the bends unroll to their own length).
     let flat_after = unfolded_volume(&mut s);
     assert!(rel(flat_before - flat_after, removed) < 0.02, "flat: removed {} of {removed}", flat_before - flat_after);
@@ -5002,7 +5087,9 @@ fn a_rim_hole_in_a_flange_follows_it_into_the_flat_pattern() {
     let t = l_bracket(&mut s);
     let before = volume(&mut s);
     let flat_before = unfolded_volume(&mut s);
-    let inside = |s: &Session, p: [f64; 3]| s.model.state().bodies[0].body.contains(solidcraft_geom::Vec3::new(p[0], p[1], p[2]));
+    let inside = |s: &Session, p: [f64; 3]| {
+        s.model.state().bodies[0].body.classify_point(solidcraft_geom::Vec3::new(p[0], p[1], p[2])).unwrap() == solidcraft_kernel::PointClass::Inside
+    };
     // Halfway up the flange, in the middle of its thickness (whichever way the rule put it).
     let mid = [[40.0 - t / 2.0, 15.0], [40.0 - t / 2.0, -15.0], [40.0 + t / 2.0, 15.0], [40.0 + t / 2.0, -15.0]]
         .into_iter()
@@ -5373,6 +5460,68 @@ fn flat_exports(s: &mut Session) -> Vec<std::result::Result<Value, String>> {
     calls.iter().map(|(id, p)| s.execute(id, p).map_err(|e| e.to_string())).collect()
 }
 
+/// A sheet metal body mirrored, or patterned, into new bodies makes sheet metal bodies (#3353):
+/// each copy has a flat pattern and a bend table, and a sheet metal feature on a copy rebuilds it
+/// from its moved model where it is. A mirrored copy's model is its source's mirrored in the
+/// flat (x → −x) with the same thickness side (`SheetBody::copied`, d9d6af51c, as
+/// `a_mirrored_sheet_copy_is_the_opposite_hand_with_the_mirror_image_flat_pattern` has it): the
+/// opposite hand's blank, each bend turning the same way, its pocket on the same face.
+#[test]
+fn a_mirrored_or_patterned_sheet_body_is_sheet_metal_with_its_flat_pattern() {
+    use solidcraft_geom::Vec3;
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "S", "thickness": "2 mm", "active": true, "bend_radius": "2 mm", "k_factor": 0.4}));
+    base(&mut s, 100.0, 60.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20}));
+    rectangle_tool(&mut s, "Pocket", [20.0, 20.0], [30.0, 30.0]);
+    run(&mut s, "solid.extrude", json!({"sketch": "Pocket", "distance": 1, "operation": "cut"}));
+    let source = s.model.state().sheets[0].body.clone();
+    let before = volume(&mut s);
+    let blank = run(&mut s, "sheet.flat_pattern", json!({"body": source}));
+
+    run(&mut s, "solid.mirror", json!({"bodies": [source], "plane": "YZ"}));
+    let copy = s.model.state().bodies[1].name.clone();
+    assert!(rel(volume(&mut s), 2.0 * before) < 1e-9);
+    let mirrored = run(&mut s, "sheet.flat_pattern", json!({"body": copy}));
+    // The source's blank and pocket mirrored, the same size, bend and pocket side.
+    assert_eq!(mirrored["flat_size_mm"], blank["flat_size_mm"], "{mirrored}");
+    assert_eq!(flat_points(&mirrored["outline"], 1.0), flat_points(&blank["outline"], -1.0), "the mirrored blank: {mirrored}");
+    let pocket = |f: &Value| json!([f["pockets"][0]["outline"]]);
+    assert_eq!(flat_points(&pocket(&mirrored), 1.0), flat_points(&pocket(&blank), -1.0), "{mirrored}");
+    assert_eq!((&blank["pockets"][0]["side"], &mirrored["pockets"][0]["side"]), (&json!("bottom"), &json!("bottom")), "{mirrored}");
+    assert_eq!((&blank["bends"][0]["direction"], &mirrored["bends"][0]["direction"]), (&json!("up"), &json!("up")), "{mirrored}");
+    run(&mut s, "sheet.export_bend_table", json!({"body": copy}));
+
+    // The copy's model is where its body is: a flange on the copy rebuilds it in place, its
+    // first flange still up on the y = 0 edge and its pocket still from below.
+    run(&mut s, "sheet.flange", json!({"body": copy, "edges": [[-100, 30, 2]], "height": 10}));
+    let state = s.model.state();
+    let body = &state.body(&copy).expect("the copy").body;
+    for (p, inside) in [
+        (Vec3::new(-50.0, 1.0, 15.0), true),
+        (Vec3::new(-50.0, 1.0, -15.0), false),
+        (Vec3::new(-25.0, 25.0, 0.5), false),
+        (Vec3::new(-25.0, 25.0, 1.5), true),
+        (Vec3::new(-99.0, 30.0, 8.0), true),
+        (Vec3::new(-99.0, 30.0, -8.0), false),
+    ] {
+        assert_eq!(body.classify_point(p).unwrap() == solidcraft_kernel::PointClass::Inside, inside, "{p:?}");
+    }
+    drop(state);
+
+    let mut s = Session::default();
+    base(&mut s, 100.0, 60.0);
+    let source = s.model.state().sheets[0].body.clone();
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": [source], "dir1": [1, 0, 0], "count1": 2, "spacing1": 150}));
+    let state = s.model.state();
+    assert_eq!(state.sheets.len(), state.bodies.len(), "every copy is sheet metal");
+    let names: Vec<String> = state.bodies.iter().map(|b| b.name.clone()).collect();
+    drop(state);
+    for n in names {
+        run(&mut s, "sheet.flat_pattern", json!({"body": n}));
+    }
+}
+
 /// A mirror combined into a sheet, or a tab extruded onto it and joined, makes a part its
 /// flat pattern does not have (the mirrored half, the tab): the flat pattern, the DXF and the
 /// bend table are refused with the feature's name instead of writing the sheet without it.
@@ -5530,9 +5679,12 @@ fn a_mirrored_sheet_copy_is_the_opposite_hand_with_the_mirror_image_flat_pattern
     assert_eq!(bends(&mirrored), bends(&original));
     assert_eq!(bends(&mirrored).len(), 2);
     // The hole is where the mirror put it, on the copy and in its flat pattern.
-    let in_copy = |p: [f64; 3]| {
-        s.model.state().bodies.iter().find(|b| b.name == "Body1 (2)").is_some_and(|b| b.body.contains(solidcraft_geom::Vec3::new(p[0], p[1], p[2])))
-    };
+    let in_copy =
+        |p: [f64; 3]| {
+            s.model.state().bodies.iter().find(|b| b.name == "Body1 (2)").is_some_and(|b| {
+                b.body.classify_point(solidcraft_geom::Vec3::new(p[0], p[1], p[2])).unwrap() == solidcraft_kernel::PointClass::Inside
+            })
+        };
     assert!(!in_copy([-25.0, 40.0, 1.0]) && in_copy([-35.0, 40.0, 1.0]));
     let hole = flat_points(&mirrored["cutouts"], 1.0);
     let cx = hole.iter().map(|p| p.0 as f64).sum::<f64>() / hole.len().max(1) as f64 * 1e-6;

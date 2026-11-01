@@ -42,6 +42,25 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let tip = app.tr("prefs.value_boxes_in_view_tip").to_string();
         setting::value_boxes_in_view(app, ui).on_hover_text(tip);
     });
+    // When SMLib's full check runs while features are computed (`diagnostics.validation`).
+    ui_kit::settings_section(ui, "validation", app.tr("prefs.validation"), |ui| {
+        use solidcraft_engine::kernel::Validation;
+        let label = |v: &Validation| match v {
+            Validation::EachStep => "prefs.validation.each_step",
+            Validation::EachFeature => "prefs.validation.each_feature",
+            Validation::Off => "prefs.validation.off",
+        };
+        let labels: Vec<String> = Validation::ALL.iter().map(|v| app.tr(label(v)).to_string()).collect();
+        let options: Vec<&str> = labels.iter().map(String::as_str).collect();
+        let mut selected = Validation::ALL.iter().position(|v| *v == app.preferences.validation).unwrap_or(1);
+        ui_kit::row(ui, app.tr("prefs.validation.label"), |ui| {
+            ui_kit::segmented(ui, &mut selected, &options, ui_kit::Segments { intrinsic: true, ..Default::default() });
+        });
+        if let Some(v) = Validation::ALL.get(selected) {
+            app.preferences.validation = *v;
+        }
+        ui_kit::text(ui, app.tr("prefs.validation_note"), ui_kit::Text::Hint("validation"));
+    });
     ui_kit::settings_section(ui, "orientation", app.tr("prefs.orientation"), |ui| {
         ui.horizontal_wrapped(|ui| {
             for (id, label, y_up) in [("z", "Z up", false), ("y", "Y up", true)] {

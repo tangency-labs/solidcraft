@@ -545,7 +545,7 @@ fn rule_value(app: &SolveApp, rule: usize) -> Option<String> {
 fn path_chain(app: &SolveApp, inputs: &mut [SelInput]) {
     let edge = inputs.first().and_then(|i| i.items.edge_points().first().copied());
     let Some(input) = inputs.get_mut(1) else { return };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     // The path is in the sketch its picks name (#3726).
     let Some(ss) = crate::dialogs::picks_sketch(app, &input.items, None).and_then(|k| st.sketch(k)) else { return };
     let mut ids: Vec<String> = Vec::new();
@@ -583,7 +583,7 @@ fn path_chain(app: &SolveApp, inputs: &mut [SelInput]) {
 
 /// The lengths of the path's lines, in the order picked (mm).
 fn path_lengths(app: &SolveApp, inputs: &[SelInput]) -> Vec<f64> {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let picks = items(inputs, 1);
     let Some(ss) = crate::dialogs::picks_sketch(app, picks, None).and_then(|k| st.sketch(k)) else { return Vec::new() };
     picks
@@ -671,7 +671,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
                 }
                 2 => {
                     let ids: Vec<String> = items(inputs, 0).curve_ids();
-                    let st = s.world_state();
+                    let st = crate::open_meshing::session_world(s);
                     let sketch = items(inputs, 0)
                         .named_sketch()
                         .or_else(|| st.sketches.iter().rev().find(|ss| ids.iter().all(|id| ss.sketch.curve_index(id).is_some())).map(|ss| ss.feature))
@@ -704,7 +704,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             let mut p = json!({});
             match items(inputs, 0).first() {
                 Some(Sel::SketchCurve { id, sketch: named }) => {
-                    let st = s.world_state();
+                    let st = crate::open_meshing::session_world(s);
                     let sketch = named
                         .or_else(|| st.sketches.iter().rev().find(|ss| ss.sketch.curve_index(id).is_some()).map(|ss| ss.feature))
                         .ok_or("the line's sketch is gone")?;
@@ -787,7 +787,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
 /// The dialog editing a sheet metal feature, filled from it.
 pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
     let s = &app.session;
-    let st = s.world_state();
+    let st = crate::open_meshing::session_world(s);
     let rule_index = |r: &Option<String>| r.as_ref().and_then(|n| rule_list(app).iter().position(|x| &x.name == n)).map_or(0, |i| i + 1);
     let mut extra = Map::new();
     let (k, items): (Sm, Vec<Sel>) = match kind {
@@ -955,7 +955,7 @@ pub fn arrow(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
 /// from the sheet), and the sheet's thickness along the first.
 fn edge_frame(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3, f64)> {
     let Sel::Edge { body, index, point } = d.inputs.first()?.items.first()? else { return None };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let m = st.body(body)?.mesh();
     let faces = m.edge_faces.get(*index)?;
     let area = |f: u32| -> f64 {
@@ -1181,7 +1181,7 @@ impl Default for FlatView {
 
 impl FlatView {
     fn cache_perforations(&mut self, session: &solidcraft_engine::Session, body: &str) {
-        let state = session.world_state();
+        let state = crate::open_meshing::session_world(session);
         let state_key = std::sync::Arc::downgrade(&state);
         if self.perforation_key.as_ref().is_some_and(|(cached, name)| cached.ptr_eq(&state_key) && name == body) {
             return;

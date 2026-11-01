@@ -1,0 +1,465 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      0.0,
+      0.0,
+      -1.0
+     ],
+     "y_dir": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    },
+    "name": "Body"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      0,
+      3.4
+     ],
+     [
+      0.6,
+      4
+     ],
+     [
+      23.4,
+      4
+     ],
+     [
+      24,
+      3.4
+     ],
+     [
+      24,
+      0
+     ]
+    ],
+    "closed": true,
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "sketch": "Body",
+    "axis": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "dir": [
+      0.0,
+      0.0,
+      -1.0
+     ]
+    },
+    "angle": 360.0,
+    "operation": "new",
+    "body_name": "Pin"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      0.0,
+      0.0,
+      -1.0
+     ],
+     "y_dir": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    },
+    "name": "Groove1",
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     2,
+     3.3
+    ],
+    "p1": [
+     6,
+     4.5
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "sketch": "Groove1",
+    "axis": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "dir": [
+      0.0,
+      0.0,
+      -1.0
+     ]
+    },
+    "angle": 360.0,
+    "operation": "cut",
+    "targets": [
+     "Pin"
+    ]
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      0.0,
+      0.0,
+      -1.0
+     ],
+     "y_dir": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    },
+    "name": "Groove2",
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     18,
+     3.3
+    ],
+    "p1": [
+     18.8,
+     4.5
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "sketch": "Groove2",
+    "axis": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "dir": [
+      0.0,
+      0.0,
+      -1.0
+     ]
+    },
+    "angle": 360.0,
+    "operation": "cut",
+    "targets": [
+     "Pin"
+    ]
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      0.0,
+      0.0,
+      -1.0
+     ],
+     "y_dir": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    },
+    "name": "Bore",
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      24.5,
+      0
+     ],
+     [
+      24.5,
+      1.9
+     ],
+     [
+      23.7,
+      1.9
+     ],
+     [
+      23.7,
+      1.6
+     ],
+     [
+      13.9,
+      1.6
+     ],
+     [
+      13.0,
+      0
+     ]
+    ],
+    "closed": true,
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "sketch": "Bore",
+    "axis": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "dir": [
+      0.0,
+      0.0,
+      -1.0
+     ]
+    },
+    "angle": 360.0,
+    "operation": "cut",
+    "targets": [
+     "Pin"
+    ]
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      0.0,
+      0.0,
+      -1.0
+     ],
+     "y_dir": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    },
+    "name": "Stud",
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      0,
+      1.75
+     ],
+     [
+      -0.25,
+      2
+     ],
+     [
+      -5.6,
+      2
+     ],
+     [
+      -6,
+      1.6
+     ],
+     [
+      -6,
+      0
+     ]
+    ],
+    "closed": true,
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "sketch": "Stud",
+    "axis": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "dir": [
+      0.0,
+      0.0,
+      -1.0
+     ]
+    },
+    "angle": 360.0,
+    "operation": "join",
+    "targets": [
+     "Pin"
+    ]
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      -13.0
+     ],
+     "x_dir": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y_dir": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    },
+    "name": "Flats",
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     3.3,
+     -2.5980762113533165
+    ],
+    "p1": [
+     5,
+     2.5980762113533165
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -5,
+     -2.5980762113533165
+    ],
+    "p1": [
+     -3.3,
+     2.5980762113533165
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Flats",
+    "distance": 13.0,
+    "operation": "cut",
+    "targets": [
+     "Pin"
+    ]
+   }
+  },
+  {
+   "command": "file.export",
+   "params": {
+    "path": "$OUT/kernel-case-5193.step",
+    "format": "step"
+   }
+  },
+  {
+   "command": "file.new",
+   "params": {
+    "name": "Reimported"
+   }
+  },
+  {
+   "command": "file.insert_step",
+   "params": {
+    "path": "$OUT/kernel-case-5193.step"
+   }
+  }
+ ]
+}

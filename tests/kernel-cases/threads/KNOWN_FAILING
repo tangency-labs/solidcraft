@@ -1,0 +1,4 @@
+# The threads cases that fail today, one a line: `<case> <why it fails today>`. Sorted. The kernel
+# rig gate (.github/workflows/kernel-rig.yml) fails on a case that fails and is not listed here,
+# and on a listed case that passes: a fix removes its line in the same pull request.
+# Baseline: develop 5ada4fc8a with SMLib 90aabff (the run on 60b1c6a, aarch64 Linux).

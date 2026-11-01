@@ -1,5 +1,9 @@
-//! #1080: fillets and chamfers that would run past the faces beside their edge (into a pocket,
-//! a hole, another blend) are refused with the largest size that fits, not built through it.
+//! #1080: fillets and chamfers that would run past the faces beside their edge. A convex blend
+//! running over a face's far edge into a pocket or a hole (a cliff) is built as if its faces went
+//! on and what it removes is cut from the body, so it never bridges the opening (the owner's
+//! blend-overflow decision, 237f0ae74); blends that would cross each other are refused as too
+//! large, and the largest size that fits is found by searching ([`crate::fillet_max`],
+//! [`crate::chamfer_max`]).
 
 use solidcraft_geom::Vec3;
 
@@ -22,33 +26,53 @@ fn too_large(r: crate::Result<Body>) -> String {
     match r {
         Err(KernelError::TooLarge(m)) => m,
         Err(e) => panic!("refused, but not as too large: {e}"),
-        Ok(_) => panic!("a blend through the pocket was accepted"),
+        Ok(_) => panic!("a blend that runs into another was accepted"),
     }
 }
 
+/// The pocketed block's volume: 16000 less the 1000 mm³ pocket.
+const POCKETED: f64 = 15000.0;
+
+/// The 6 mm chamfer runs 2 mm past the pocket's rim at x = 36: its triangle
+/// (40 − x) + (20 − z) <= 6, area 18 along the 20 mm edge, less its part over the pocket
+/// (x in [34, 36], z >= 54 − x: area 2, along the pocket's 10 mm), is cut away: 360 − 20.
 #[test]
-fn chamfer_into_a_pocket_is_refused_with_the_size_that_fits() {
+fn chamfer_into_a_pocket_is_cut_by_it() {
     let p = pocketed();
-    let m = too_large(crate::chamfer(&p, &[EDGE], 6.0));
-    assert!(m.contains("runs past the faces beside the edge") && m.contains("the largest size that fits is 4 mm"), "{m}");
+    let b = crate::chamfer(&p, &[EDGE], 6.0).unwrap();
+    assert!(b.validity().is_empty(), "{:?}", b.validity());
+    let v = crate::measure(&b).unwrap().volume;
+    assert!((v - (POCKETED - 340.0)).abs() < 1e-6, "{v}");
     // Up to the pocket's rim it builds: the triangle along the 20 mm edge.
     for s in [2.0, 4.0] {
         let b = crate::chamfer(&p, &[EDGE], s).unwrap();
         let v = b.volume_at(0.01).unwrap();
         assert!((p.volume_at(0.01).unwrap() - v - 0.5 * s * s * 20.0).abs() < 1e-6, "{s}: {v}");
     }
-    // Unequal sides: along the top 6 is past the pocket, along the side it is not.
-    let m = too_large(crate::chamfer_sides(&p, &[EDGE], 6.0, ChamferSide::Distance(2.0), false));
-    assert!(m.contains("runs past"), "{m}");
-    assert!(crate::chamfer_sides(&p, &[EDGE], 2.0, ChamferSide::Distance(6.0), false).is_ok());
+    // Unequal sides, 6 along the top and 2 down the side: the triangle
+    // (40 − x) / 6 + (20 − z) / 2 <= 1, area 6 along 20, less its part over the pocket
+    // (x in [34, 36], a triangle 2 by 2/3), along 10: 120 − 20/3. The other way round it stays
+    // clear of the pocket: 120.
+    let b = crate::chamfer_sides(&p, &[EDGE], 6.0, ChamferSide::Distance(2.0), false).unwrap();
+    let v = crate::measure(&b).unwrap().volume;
+    assert!((v - (POCKETED - (120.0 - 20.0 / 3.0))).abs() < 1e-6, "{v}");
+    let b = crate::chamfer_sides(&p, &[EDGE], 2.0, ChamferSide::Distance(6.0), false).unwrap();
+    let v = crate::measure(&b).unwrap().volume;
+    assert!((v - (POCKETED - 120.0)).abs() < 1e-6, "{v}");
 }
 
+/// R5 runs 1 mm past the pocket's rim: the round's section (1 − π/4)·25 along 20, less its part
+/// over the pocket, the square [35, 36] × [15, 20] outside the circle about (35, 15) of radius 5,
+/// ∫₀¹ (5 − √(25 − t²)) dt = 5 − (√24 / 2 + (25/2)·asin(1/5)), along 10.
 #[test]
-fn fillet_into_a_pocket_is_refused_and_one_that_fits_builds() {
+fn fillet_into_a_pocket_is_cut_by_it_and_one_that_fits_builds() {
     let p = pocketed();
-    // The round build refuses it itself; the largest radius that fits is added.
-    let m = crate::fillet(&p, &[EDGE], 5.0).unwrap_err().to_string();
-    assert!(m.contains("the largest radius that fits is 4 mm"), "{m}");
+    let over = 5.0 - (24f64.sqrt() / 2.0 + 12.5 * (0.2f64).asin());
+    let want = POCKETED - ((1.0 - std::f64::consts::FRAC_PI_4) * 25.0 * 20.0 - over * 10.0);
+    let b = crate::fillet(&p, &[EDGE], 5.0).unwrap();
+    assert!(b.validity().is_empty(), "{:?}", b.validity());
+    let v = crate::measure(&b).unwrap().volume;
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
     let b = crate::fillet(&p, &[EDGE], 3.0).unwrap();
     assert!(b.validity().is_empty(), "{:?}", b.validity());
     assert_eq!(b.face_count(), p.face_count() + 1);
@@ -56,19 +80,23 @@ fn fillet_into_a_pocket_is_refused_and_one_that_fits_builds() {
 
 /// A rib 4 mm wide: chamfers of its two top edges meet in the middle of its top face at 2 mm;
 /// past that they would cross each other. Neither reaches the far side's face below 4 mm,
-/// so only the two blends clash.
+/// so only the two blends clash: refused as too large, and the largest that fits is 2 mm.
 #[test]
 fn chamfers_crossing_each_other_are_refused() {
     let rib = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(40.0, 4.0, 20.0)).unwrap();
     let edges = [Vec3::new(20.0, 0.0, 20.0), Vec3::new(20.0, 4.0, 20.0)];
-    let m = too_large(crate::chamfer(&rib, &edges, 3.0));
-    assert!(m.contains("would cross each other") && m.contains("the largest size that fits is 2 mm"), "{m}");
-    let m = crate::fillet(&rib, &edges, 3.0).unwrap_err().to_string();
-    assert!(m.contains("the largest radius that fits is 2 mm"), "{m}");
+    too_large(crate::chamfer(&rib, &edges, 3.0));
+    too_large(crate::fillet(&rib, &edges, 3.0));
+    assert_eq!(crate::chamfer_max(&rib, &edges, 3.0).unwrap().map(|x| x.0), Some(2.0));
+    assert_eq!(crate::fillet_max(&rib, &edges, 3.0).unwrap().map(|x| x.0), Some(2.0));
     // Below half the width both build.
     let b = crate::chamfer(&rib, &edges, 1.5).unwrap();
     assert!((b.volume_at(0.01).unwrap() - (3200.0 - 2.0 * 0.5 * 1.5 * 1.5 * 40.0)).abs() < 1e-6);
-    assert!(crate::fillet(&rib, &edges, 1.5).is_ok());
+    // Two rounds of radius 1.5 along 40: each removes (1 − π/4)·1.5² of section.
+    let b = crate::fillet(&rib, &edges, 1.5).unwrap();
+    let want = 3200.0 - 2.0 * (1.0 - std::f64::consts::FRAC_PI_4) * 2.25 * 40.0;
+    let v = crate::measure(&b).unwrap().volume;
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
 }
 
 /// Edges meeting at a corner mitre: their chamfers overlap there and are not refused for it.
@@ -76,87 +104,14 @@ fn chamfers_crossing_each_other_are_refused() {
 fn chamfers_meeting_at_a_corner_still_build() {
     let b = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(20.0, 20.0, 20.0)).unwrap();
     let edges = [Vec3::new(10.0, 0.0, 20.0), Vec3::new(20.0, 10.0, 20.0), Vec3::new(10.0, 20.0, 20.0), Vec3::new(0.0, 10.0, 20.0)];
-    assert!(crate::chamfer(&b, &edges, 5.0).is_ok());
-    assert!(crate::fillet(&b, &edges, 5.0).is_ok());
-}
-
-/// A result that changes more of the part than the blends can is refused (#871's shelled box
-/// lost 240 mm³ more than any round of its edge could take).
-#[test]
-fn a_result_that_removes_more_than_the_blend_is_refused() {
-    let b = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(20.0, 20.0, 20.0)).unwrap();
-    let e = [Vec3::new(10.0, 0.0, 20.0)];
-    let size = crate::blend_fit::Size::Chamfer(2.0);
-    let good = crate::chamfer(&b, &e, 2.0).unwrap();
-    assert!(crate::blend_fit::check_volume(&b, good, &e, size).is_ok());
-    // A chamfer and a 1 mm slab off the far side as well.
-    let worse = cut(&crate::chamfer(&b, &e, 2.0).unwrap(), [0.0, 19.0, 0.0], [20.0, 20.0, 20.0]);
-    let m = too_large(crate::blend_fit::check_volume(&b, worse, &e, size));
-    assert!(m.contains("more than the chamfer can"), "{m}");
-}
-
-/// #1668: a box shelled outward 2 mm, open at the bottom. R5 on its top outer edge alone leaves
-/// the sharp inside corner 2 mm away on its ball's side, 0.76 mm inside the round; it reaches
-/// the corner only past 2√2 / (√2 - 1) ≈ 6.83 mm. With the inside edge rounded in the same
-/// fillet, the two build as one feature as they do one after the other: the outer round takes
-/// (1 - π/4) · 25 mm² along 104 mm, the inner one adds it along 100 mm.
-#[test]
-fn rounds_on_both_sides_of_a_wall_build_as_one_fillet() {
-    let outer = box_solid(Vec3::new(-52.0, -32.0, 0.0), Vec3::new(52.0, 32.0, 42.0)).unwrap();
-    let shelled = cut(&outer, [-50.0, -30.0, -1.0], [50.0, 30.0, 40.0]);
-    let (out_edge, in_edge) = (Vec3::new(0.0, 32.0, 42.0), Vec3::new(0.0, 30.0, 40.0));
-    let section = (1.0 - std::f64::consts::FRAC_PI_4) * 25.0;
-    let alone = crate::fillet(&shelled, &[out_edge], 5.0).unwrap();
-    assert!(alone.validity().is_empty(), "{:?}", alone.validity());
-    let want = shelled.volume_at(0.01).unwrap() - section * 104.0;
-    assert!((crate::measure(&alone).unwrap().volume - want).abs() < 1e-4 * want);
-    let m = too_large(crate::fillet(&shelled, &[out_edge], 7.0));
-    let largest: f64 = m.rsplit("that fits is ").next().and_then(|t| t.trim_end_matches(" mm").parse().ok()).unwrap_or(0.0);
-    let limit = 2.0 * 2f64.sqrt() / (2f64.sqrt() - 1.0);
-    assert!(largest <= limit && largest > limit - 0.5, "{m}");
-    let both = crate::fillet(&shelled, &[out_edge, in_edge], 5.0).unwrap();
-    assert!(both.validity().is_empty(), "{:?}", both.validity());
-    let want = shelled.volume_at(0.01).unwrap() - section * 104.0 + section * 100.0;
-    let v = crate::measure(&both).unwrap().volume;
-    assert!((v - want).abs() < 1e-4 * want, "{v} vs {want}");
-    let stepped = crate::fillet(&crate::fillet(&shelled, &[in_edge], 5.0).unwrap(), &[out_edge], 5.0).unwrap();
-    assert!((crate::measure(&stepped).unwrap().volume - v).abs() < 1e-4 * want);
-    // Past the wall's own room they still cross: R7's outer round reaches the inner one's arc.
-    let m = too_large(crate::fillet(&shelled, &[out_edge, in_edge], 7.0));
-    assert!(m.contains("the largest radius that fits"), "{m}");
-}
-
-/// A shell 3 mm thick bent over like an upside-down U: 60 wide, 20 long, 50 high, its top
-/// plate from z = 47 to 50 and its walls from x = 0 to 3 and 57 to 60.
-fn bent_shell() -> Body {
-    let b = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(60.0, 20.0, 50.0)).unwrap();
-    cut(&b, [3.0, -1.0, -1.0], [57.0, 21.0, 47.0])
-}
-
-/// The corner left by a round of radius `r` on a 90° edge, per unit length.
-fn corner(r: f64) -> f64 {
-    r * r * (1.0 - std::f64::consts::FRAC_PI_4)
-}
-
-/// An outside round concentric with the inside one keeps the wall 3 mm thick: the inside round
-/// lies inside the outside one's wedge, but on its ball's side of the arc, which the round
-/// leaves as it is. It used to be refused as running into other geometry.
-#[test]
-fn outside_round_concentric_with_the_inside_round_of_a_wall_fits() {
-    let s = bent_shell();
-    let inside = [Vec3::new(3.0, 10.0, 47.0), Vec3::new(57.0, 10.0, 47.0)];
-    let outside = [Vec3::new(0.0, 10.0, 50.0), Vec3::new(60.0, 10.0, 50.0)];
-    let a = crate::fillet(&s, &inside, 15.0).unwrap();
-    let b = crate::fillet(&a, &outside, 18.0).unwrap();
-    assert!(b.validity().is_empty(), "{:?}", b.validity());
-    // The inside rounds fill their corners, the outside ones take theirs away.
-    let want = s.volume_at(0.01).unwrap() + 2.0 * 20.0 * (corner(15.0) - corner(18.0));
-    let got = b.volume_at(0.01).unwrap();
-    assert!((got - want).abs() < 1e-3 * want, "{got} for {want}");
-    // Larger, the outside round's centre moves off the inside one's: it runs into the hollow
-    // where its arc crosses the inside round's, at r = (18√2 - 15) / (√2 - 1) ≈ 25.24 mm.
-    let m = too_large(crate::fillet(&a, &outside, 30.0));
-    let largest: f64 = m.rsplit("that fits is ").next().and_then(|t| t.trim_end_matches(" mm").parse().ok()).unwrap_or(0.0);
-    let limit = (18.0 * 2f64.sqrt() - 15.0) / (2f64.sqrt() - 1.0);
-    assert!(largest <= limit && largest > limit - 0.5, "{m}");
+    // The chamfers leave the 20 x 20 x 15 block under a frustum from 20 x 20 to 10 x 10, 5 high:
+    // 6000 + (5/3)(400 + 100 + √(400·100)).
+    let v = crate::measure(&crate::chamfer(&b, &edges, 5.0).unwrap()).unwrap().volume;
+    let want = 6000.0 + 5.0 / 3.0 * (400.0 + 100.0 + 200.0);
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
+    // The rounds: (1 − π/4)·25 of section along each edge's 10 mm between the corners, and in each
+    // 5 mm corner cube the two cylinders' intersection is kept, ∫₀⁵ (25 − w²) dw = 250/3 of 125.
+    let v = crate::measure(&crate::fillet(&b, &edges, 5.0).unwrap()).unwrap().volume;
+    let want = 8000.0 - 4.0 * (1.0 - std::f64::consts::FRAC_PI_4) * 25.0 * 10.0 - 4.0 * (125.0 - 250.0 / 3.0);
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
 }

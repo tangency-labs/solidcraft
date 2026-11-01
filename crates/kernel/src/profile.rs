@@ -74,8 +74,10 @@ pub fn credit(times: KernelTimes) {
     });
 }
 
-/// Time `f` as `kind` when a capture is running and no timed call is.
-pub(crate) fn timed<T>(kind: Kind, f: impl FnOnce() -> T) -> T {
+/// Time `f` as `kind` when a capture is running and no timed call is; it is also the
+/// profiler's span `name` (category `kernel`) whenever the profiler records.
+pub(crate) fn timed<T>(kind: Kind, name: &'static str, f: impl FnOnce() -> T) -> T {
+    let _span = solidcraft_profile::span("kernel", name);
     let st = STATE.with(Cell::get);
     if !st.on || st.busy {
         return f();
@@ -116,7 +118,7 @@ mod tests {
 
     #[test]
     fn nothing_is_timed_outside_a_capture() {
-        timed(Kind::Boolean, || spin(2));
+        timed(Kind::Boolean, "test", || spin(2));
         let ((), t) = capture(|| ());
         assert_eq!(t, KernelTimes::default());
     }
@@ -125,11 +127,11 @@ mod tests {
     fn only_the_outermost_call_counts() {
         let started = web_time::Instant::now();
         let ((), t) = capture(|| {
-            timed(Kind::Boolean, || {
+            timed(Kind::Boolean, "test", || {
                 spin(3);
-                timed(Kind::Tessellate, || spin(3));
+                timed(Kind::Tessellate, "test", || spin(3));
             });
-            timed(Kind::Tessellate, || spin(2));
+            timed(Kind::Tessellate, "test", || spin(2));
         });
         let elapsed = started.elapsed().as_secs_f64() * 1000.0;
         assert!(t.boolean_ms >= 6.0 && t.tessellate_ms >= 2.0, "{t:?}");
@@ -145,7 +147,7 @@ mod tests {
             credit(t);
             credit(KernelTimes { boolean_ms: f64::NAN, tessellate_ms: -3.0 });
             // Inside a timed call it would count twice: it is the call's time already.
-            timed(Kind::Boolean, || credit(t));
+            timed(Kind::Boolean, "test", || credit(t));
         });
         assert_eq!((got.boolean_ms >= 4.0, got.boolean_ms < 8.0, got.tessellate_ms), (true, true, 1.0), "{got:?}");
     }
@@ -153,9 +155,9 @@ mod tests {
     #[test]
     fn inner_captures_add_to_the_outer_one_and_a_panic_restores_it() {
         let ((), outer) = capture(|| {
-            let ((), inner) = capture(|| timed(Kind::Boolean, || spin(2)));
+            let ((), inner) = capture(|| timed(Kind::Boolean, "test", || spin(2)));
             assert!(inner.boolean_ms >= 2.0);
-            let _ = std::panic::catch_unwind(|| capture(|| timed(Kind::Tessellate, || panic!("kernel"))));
+            let _ = std::panic::catch_unwind(|| capture(|| timed(Kind::Tessellate, "test", || panic!("kernel"))));
         });
         assert!(outer.boolean_ms >= 2.0, "{outer:?}");
         let st = STATE.with(Cell::get);
@@ -166,13 +168,33 @@ mod tests {
         use crate::{BoolOp, box_solid, faceted_boolean};
         use solidcraft_geom::Vec3;
         let a = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
-        let tool = box_solid(Vec3::new(5.0, 5.0, 5.0), Vec3::new(15.0, 15.0, 15.0)).unwrap().tessellate(0.1).unwrap();
+        let tool = box_solid(Vec3::new(5.0, 5.0, 5.0), Vec3::new(15.0, 15.0, 15.0)).unwrap().mesh(&crate::MeshTolerance::chord(0.1)).unwrap();
         // The thread groove's route: the faceting it does first is the boolean's time too.
         let (r, t) = capture(|| faceted_boolean(&a, &tool, BoolOp::Cut, 0.01));
         assert!(r.unwrap().is_some());
         assert!(t.boolean_ms > 0.0 && t.tessellate_ms == 0.0, "{t:?}");
-        let (m, t) = capture(|| a.reference_display_mesh_angular(0.01, crate::DISPLAY_ANGLE));
+        let (m, t) = capture(|| a.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }));
         assert!(!m.unwrap().triangles.is_empty());
         assert!(t.tessellate_ms > 0.0 && t.boolean_ms == 0.0, "{t:?}");
+    }
+
+    #[test]
+    fn kernel_operations_are_profiler_spans_with_smlib_calls_inside() {
+        use crate::{BoolOp, boolean, box_solid};
+        use solidcraft_geom::Vec3;
+        solidcraft_profile::set_enabled(true);
+        let mark = solidcraft_profile::mark();
+        let a = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let b = box_solid(Vec3::new(5.0, 5.0, 5.0), Vec3::new(15.0, 15.0, 15.0)).unwrap();
+        let r = boolean(&a, &b, BoolOp::Cut);
+        let rep = mark.report();
+        let row = |cat: &str, name: &str| rep.rows.iter().find(|r| r.category == cat && r.name == name).copied();
+        let k = row("kernel", "boolean").unwrap_or_else(|| panic!("{rep:?}"));
+        assert!(k.count >= 1 && row("kernel", "box_solid").is_some(), "{rep:?}");
+        if r.is_ok() {
+            // With SMLib built, its calls are children of the boolean: their time is not its self time.
+            let smlib: std::time::Duration = rep.rows.iter().filter(|r| r.category == "smlib").map(|r| r.total).sum();
+            assert!(smlib > std::time::Duration::ZERO && k.self_time < k.total, "{rep:?}");
+        }
     }
 }

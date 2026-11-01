@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a d10 through hole in the stock's top",
+ "source": "analytic",
+ "method": "removed pi 5^2 20; + one cylinder face",
+ "body_count": 1,
+ "volume_mm3": 46429.203673205,
+ "faces": 7
+}

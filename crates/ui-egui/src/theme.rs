@@ -1158,6 +1158,9 @@ pub struct Tokens {
     pub chip: Color32,
     /// Inside of bodies cut by a section.
     pub section_cap: Color32,
+    /// The section hatch's other colours by part, after `section_cap` (Preferences > Graphics >
+    /// Section hatch): of its family and lightness, so a cut stays calm.
+    pub section_hatch: [Color32; 2],
     /// Closed sketch profiles (translucent fill).
     pub profile_fill: Color32,
     /// Constraint glyph boxes.
@@ -1208,6 +1211,10 @@ pub struct Tokens {
     pub bend_down: Color32,
     /// Interference: the clash fill, before its shading.
     pub interference: Color32,
+    /// Curvature Comb: the envelope through the teeth tips (purple) and the teeth, the scaled
+    /// normals (orange).
+    pub comb_envelope: Color32,
+    pub comb_teeth: Color32,
     /// Continuity Analysis seams, best to worst as `inspect.continuity` judges them: smooth (G2),
     /// tangent with a curvature jump (G1), a crease (G0) and a gap. Bluish green, blue, yellow
     /// and reddish purple stay apart in every colour vision mode, so no mode changes them.
@@ -1360,6 +1367,7 @@ impl Tokens {
             sketch_point: view.sketch_point,
             sketch_point_free: view.sketch_point_free,
             section_cap: view.section_cap,
+            section_hatch: view.section_hatch,
             profile_fill: view.profile_fill,
             glyph_bg: view.glyph_bg,
             glyph_edge: view.glyph_edge,
@@ -1374,6 +1382,8 @@ impl Tokens {
             bend_up: view.bend_up,
             bend_down: view.bend_down,
             interference: view.interference,
+            comb_envelope: view.comb_envelope,
+            comb_teeth: view.comb_teeth,
             continuity: view.continuity,
             analysis: view.analysis,
             ..self

@@ -1,0 +1,29 @@
+{
+ "sources": [],
+ "what": "a revolute driven 90 degrees, then deleted",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); after joint.delete the design has no joints and no links; Arm keeps the placement it had: (0,20,5)",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 11,
+   "json": {
+    "joints": [],
+    "links": []
+   }
+  },
+  {
+   "step": 12,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      0.0,
+      20.0,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

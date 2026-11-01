@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1949"
+ ],
+ "what": "a profile side drawn as two collinear lines extrudes into one flat face, not two with an edge between them",
+ "source": "analytic",
+ "method": "polyline 0,0 -> 10,0 -> 20,0 -> 20,10 -> 0,10 -> 0,0 is the rectangle 20x10 with a point on the bottom side; extruded 5: V = 1000; merged faces = 6 (the collinear pieces are one side), edges 12, vertices 8",
+ "body_count": 1,
+ "volume_mm3": 1000.0,
+ "faces": 6,
+ "edges": 12,
+ "vertices": 8
+}

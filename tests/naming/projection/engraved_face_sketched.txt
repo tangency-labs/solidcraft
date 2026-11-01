@@ -1,0 +1,168 @@
+# projection/engraved_face_sketched: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Body1: 44 faces, 120 edges
+Body1 face F2:side:l1
+Body1 face F2:side:l2
+Body1 face F2:side:l3
+Body1 face F2:side:l4
+Body1 face F2:start
+Body1 face F2:top
+Body1 face F4:bottom
+Body1 face F4:side:k1 [geometric]
+Body1 face F4:side:k10 [geometric]
+Body1 face F4:side:k11 [geometric]
+Body1 face F4:side:k12 [geometric]
+Body1 face F4:side:k13 [geometric]
+Body1 face F4:side:k14 [geometric]
+Body1 face F4:side:k15 [geometric]
+Body1 face F4:side:k16 [geometric]
+Body1 face F4:side:k17 [geometric]
+Body1 face F4:side:k18 [geometric]
+Body1 face F4:side:k19 [geometric]
+Body1 face F4:side:k2 [geometric]
+Body1 face F4:side:k20 [geometric]
+Body1 face F4:side:k21 [geometric]
+Body1 face F4:side:k22 [geometric]
+Body1 face F4:side:k23 [geometric]
+Body1 face F4:side:k24 [geometric]
+Body1 face F4:side:k25 [geometric]
+Body1 face F4:side:k26 [geometric]
+Body1 face F4:side:k27 [geometric]
+Body1 face F4:side:k28 [geometric]
+Body1 face F4:side:k29 [geometric]
+Body1 face F4:side:k3 [geometric]
+Body1 face F4:side:k30 [geometric]
+Body1 face F4:side:k31 [geometric]
+Body1 face F4:side:k32 [geometric]
+Body1 face F4:side:k4 [geometric]
+Body1 face F4:side:k5 [geometric]
+Body1 face F4:side:k6 [geometric]
+Body1 face F4:side:k7 [geometric]
+Body1 face F4:side:k8 [geometric]
+Body1 face F4:side:k9 [geometric]
+Body1 face F4:side:l5
+Body1 face F4:side:l6
+Body1 face F6:bottom
+Body1 face F6:side:c1#1
+Body1 face F6:side:c1#2
+Body1 edge F2:side:l1|F2:side:l2
+Body1 edge F2:side:l1|F2:side:l4
+Body1 edge F2:side:l1|F2:start
+Body1 edge F2:side:l1|F2:top
+Body1 edge F2:side:l2|F2:side:l3
+Body1 edge F2:side:l2|F2:start
+Body1 edge F2:side:l2|F2:top
+Body1 edge F2:side:l3|F2:side:l4
+Body1 edge F2:side:l3|F2:start
+Body1 edge F2:side:l3|F2:top
+Body1 edge F2:side:l4|F2:start
+Body1 edge F2:side:l4|F2:top
+Body1 edge F2:top|F4:side:k1 [geometric]
+Body1 edge F2:top|F4:side:k10 [geometric]
+Body1 edge F2:top|F4:side:k11 [geometric]
+Body1 edge F2:top|F4:side:k12 [geometric]
+Body1 edge F2:top|F4:side:k13 [geometric]
+Body1 edge F2:top|F4:side:k14 [geometric]
+Body1 edge F2:top|F4:side:k15 [geometric]
+Body1 edge F2:top|F4:side:k16 [geometric]
+Body1 edge F2:top|F4:side:k17 [geometric]
+Body1 edge F2:top|F4:side:k18 [geometric]
+Body1 edge F2:top|F4:side:k19 [geometric]
+Body1 edge F2:top|F4:side:k2 [geometric]
+Body1 edge F2:top|F4:side:k20 [geometric]
+Body1 edge F2:top|F4:side:k21 [geometric]
+Body1 edge F2:top|F4:side:k22 [geometric]
+Body1 edge F2:top|F4:side:k23 [geometric]
+Body1 edge F2:top|F4:side:k24 [geometric]
+Body1 edge F2:top|F4:side:k25 [geometric]
+Body1 edge F2:top|F4:side:k26 [geometric]
+Body1 edge F2:top|F4:side:k27 [geometric]
+Body1 edge F2:top|F4:side:k28 [geometric]
+Body1 edge F2:top|F4:side:k29 [geometric]
+Body1 edge F2:top|F4:side:k3 [geometric]
+Body1 edge F2:top|F4:side:k30 [geometric]
+Body1 edge F2:top|F4:side:k31 [geometric]
+Body1 edge F2:top|F4:side:k32 [geometric]
+Body1 edge F2:top|F4:side:k4 [geometric]
+Body1 edge F2:top|F4:side:k5 [geometric]
+Body1 edge F2:top|F4:side:k6 [geometric]
+Body1 edge F2:top|F4:side:k7 [geometric]
+Body1 edge F2:top|F4:side:k8 [geometric]
+Body1 edge F2:top|F4:side:k9 [geometric]
+Body1 edge F2:top|F4:side:l5
+Body1 edge F2:top|F4:side:l6
+Body1 edge F2:top|F6:side:c1#1
+Body1 edge F2:top|F6:side:c1#2
+Body1 edge F4:bottom|F4:side:k1 [geometric]
+Body1 edge F4:bottom|F4:side:k10 [geometric]
+Body1 edge F4:bottom|F4:side:k11 [geometric]
+Body1 edge F4:bottom|F4:side:k12 [geometric]
+Body1 edge F4:bottom|F4:side:k13 [geometric]
+Body1 edge F4:bottom|F4:side:k14 [geometric]
+Body1 edge F4:bottom|F4:side:k15 [geometric]
+Body1 edge F4:bottom|F4:side:k16 [geometric]
+Body1 edge F4:bottom|F4:side:k17 [geometric]
+Body1 edge F4:bottom|F4:side:k18 [geometric]
+Body1 edge F4:bottom|F4:side:k19 [geometric]
+Body1 edge F4:bottom|F4:side:k2 [geometric]
+Body1 edge F4:bottom|F4:side:k20 [geometric]
+Body1 edge F4:bottom|F4:side:k21 [geometric]
+Body1 edge F4:bottom|F4:side:k22 [geometric]
+Body1 edge F4:bottom|F4:side:k23 [geometric]
+Body1 edge F4:bottom|F4:side:k24 [geometric]
+Body1 edge F4:bottom|F4:side:k25 [geometric]
+Body1 edge F4:bottom|F4:side:k26 [geometric]
+Body1 edge F4:bottom|F4:side:k27 [geometric]
+Body1 edge F4:bottom|F4:side:k28 [geometric]
+Body1 edge F4:bottom|F4:side:k29 [geometric]
+Body1 edge F4:bottom|F4:side:k3 [geometric]
+Body1 edge F4:bottom|F4:side:k30 [geometric]
+Body1 edge F4:bottom|F4:side:k31 [geometric]
+Body1 edge F4:bottom|F4:side:k32 [geometric]
+Body1 edge F4:bottom|F4:side:k4 [geometric]
+Body1 edge F4:bottom|F4:side:k5 [geometric]
+Body1 edge F4:bottom|F4:side:k6 [geometric]
+Body1 edge F4:bottom|F4:side:k7 [geometric]
+Body1 edge F4:bottom|F4:side:k8 [geometric]
+Body1 edge F4:bottom|F4:side:k9 [geometric]
+Body1 edge F4:bottom|F4:side:l5
+Body1 edge F4:bottom|F4:side:l6
+Body1 edge F4:side:k10|F4:side:k11 [geometric]
+Body1 edge F4:side:k10|F4:side:k9 [geometric]
+Body1 edge F4:side:k11|F4:side:k12 [geometric]
+Body1 edge F4:side:k12|F4:side:k13 [geometric]
+Body1 edge F4:side:k13|F4:side:k14 [geometric]
+Body1 edge F4:side:k14|F4:side:k15 [geometric]
+Body1 edge F4:side:k15|F4:side:k16 [geometric]
+Body1 edge F4:side:k16|F4:side:k17 [geometric]
+Body1 edge F4:side:k17|F4:side:k18 [geometric]
+Body1 edge F4:side:k18|F4:side:k19 [geometric]
+Body1 edge F4:side:k19|F4:side:l6 [geometric]
+Body1 edge F4:side:k1|F4:side:k2 [geometric]
+Body1 edge F4:side:k1|F4:side:k32 [geometric]
+Body1 edge F4:side:k20|F4:side:k21 [geometric]
+Body1 edge F4:side:k20|F4:side:l6 [geometric]
+Body1 edge F4:side:k21|F4:side:k22 [geometric]
+Body1 edge F4:side:k22|F4:side:k23 [geometric]
+Body1 edge F4:side:k23|F4:side:k24 [geometric]
+Body1 edge F4:side:k24|F4:side:k25 [geometric]
+Body1 edge F4:side:k25|F4:side:k26 [geometric]
+Body1 edge F4:side:k26|F4:side:k27 [geometric]
+Body1 edge F4:side:k27|F4:side:k28 [geometric]
+Body1 edge F4:side:k28|F4:side:k29 [geometric]
+Body1 edge F4:side:k29|F4:side:k30 [geometric]
+Body1 edge F4:side:k2|F4:side:k3 [geometric]
+Body1 edge F4:side:k30|F4:side:k31 [geometric]
+Body1 edge F4:side:k31|F4:side:k32 [geometric]
+Body1 edge F4:side:k3|F4:side:l5 [geometric]
+Body1 edge F4:side:k4|F4:side:k5 [geometric]
+Body1 edge F4:side:k4|F4:side:l5 [geometric]
+Body1 edge F4:side:k5|F4:side:k6 [geometric]
+Body1 edge F4:side:k6|F4:side:k7 [geometric]
+Body1 edge F4:side:k7|F4:side:k8 [geometric]
+Body1 edge F4:side:k8|F4:side:k9 [geometric]
+Body1 edge F6:bottom|F6:side:c1#1
+Body1 edge F6:bottom|F6:side:c1#2
+Body1 edge F6:side:c1#1|F6:side:c1#2~1 [geometric]
+Body1 edge F6:side:c1#1|F6:side:c1#2~2 [geometric]
+ref Sketch2 (3) plane `F2:cap:high:ed6121d9bed14d3fd103f347231990d103349f33b7874ad292d3c4d3539266c3` on Body1 (extrude_cap) -> healthy: Body1 faces F2:top
+ref Sketch3 (5) plane `F2:cap:high:ed6121d9bed14d3fd103f347231990d103349f33b7874ad292d3c4d3539266c3` on Body1 (extrude_cap) -> healthy: Body1 faces F2:top

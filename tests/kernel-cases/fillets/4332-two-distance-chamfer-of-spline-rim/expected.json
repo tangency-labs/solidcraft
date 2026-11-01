@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4332",
+  "tangency-labs/solidcraft#4469"
+ ],
+ "what": "a two-distance chamfer (1 mm across the top, 7 mm down the wall) round the top rim of a periodic fit-spline outline extruded 10: truck refused it ('loop edges must be lines or arcs'), though an equal chamfer of the same rim worked",
+ "source": "invariants",
+ "method": "the outline is smooth and convex enough everywhere for a 1 x 7 setback, so the chamfer exists round the whole tangent chain: one valid closed body. The spline's chamfer has no closed-form volume (the reporter's script)",
+ "body_count": 1,
+ "continuity": {
+  "order": "g0"
+ }
+}

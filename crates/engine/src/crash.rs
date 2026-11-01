@@ -1028,6 +1028,9 @@ fn write_report(state: &State, kind: &str, p: Option<&Panic>, extra: Extra) -> O
         fs::create_dir_all(&folder).ok()?;
         let mut files = serde_json::Map::new();
         let mut notes = extra.notes;
+        if let Some(call) = solidcraft_kernel::native_call_in_flight() {
+            notes.push(format!("native kernel call in flight: {call}"));
+        }
         if let Some(d) = &extra.design {
             if d.len() <= MAX_DESIGN_BYTES {
                 let name = format!("design.{}", solidcraft_io::DESIGN_EXT);

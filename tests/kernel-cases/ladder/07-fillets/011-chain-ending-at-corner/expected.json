@@ -1,0 +1,26 @@
+{
+ "sources": [],
+ "what": "r5 rounds on two top edges meeting at a corner whose vertical edge stays sharp",
+ "source": "analytic",
+ "method": "the two rounds remove (1-pi/4) 5^2 (60 + 40), less their common part in the corner cube, counted twice: in it (u, v, w from the round axes' corner) both remove where u, v > sqrt(25 - w^2), int_0^5 (5 - sqrt(25 - w^2))^2 dw = 5^3 (5/3 - pi/2). They meet in a mitre (an elliptic arc down to the sharp vertical edge). Faces 6 + 2; edges: 4 bottom, 4 vertical, 4 round the top face, 2 round-wall tangent lines, 2 end arcs, the mitre; vertices 11 (Euler)",
+ "body_count": 1,
+ "volume_mm3": 47475.479200978,
+ "faces": 8,
+ "edges": 17,
+ "vertices": 11,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   20
+  ]
+ },
+ "tolerance": {
+  "rel": 1e-05
+ }
+}

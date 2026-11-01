@@ -1,0 +1,23 @@
+{
+ "sources": [],
+ "what": "the flange with a modelled M30 thread on its hub, between the round and the chamfer, and M8 tapped holes in the disk",
+ "source": "analytic",
+ "method": "the hub's cylinder (r15) runs from the r3 round at its root (z 13) to the 1.5 chamfer at its top (z 28.5): the M30 groove (P 3.5) stops w = 1.632286 clear of the round, a shoulder (06/007's rule), and runs out through the chamfer, a free end (06/006's): it removes the stock less 2 pi int int r m(r) dr dz over z 13 + w..28.5 at r 15 and the chamfer (r 15 - (z - 28.5)); the bore r8 is inside the root r 13.1. The M8 tap drills (6.8, the tap maker's) go through the 10 mm disk at r 28, 90 deg + k 120, clear of the bolt holes (30 deg apart): 3 pi 3.4^2 10. Bbox: the flange's",
+ "body_count": 1,
+ "volume_mm3": 52962.097548983,
+ "bbox": {
+  "min": [
+   -40,
+   -40,
+   0
+  ],
+  "max": [
+   40,
+   40,
+   30
+  ]
+ },
+ "tolerance": {
+  "rel": 0.0001
+ }
+}

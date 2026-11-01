@@ -221,7 +221,7 @@ fn regularized_shell_keeps_legacy_and_explicit_single_face_projections_closed() 
             let mut sketch = solidcraft_sketch::Sketch::new();
             let link = sketch.add_link(solidcraft_sketch::LinkKind::Project, source, &legacy.geom).unwrap();
             sketch.links[0].face_name = Some(crate::naming::face_names(body)[index].clone());
-            let warnings = crate::project::refresh_links(&doc, &values, &state, &plane, &mut sketch);
+            let warnings = crate::project::refresh_links(&doc, &values, &state, &plane, &mut sketch).unwrap();
             assert!(warnings.is_empty(), "{warnings:?}");
             assert!(!sketch.links[0].lost);
             assert!(!sketch.update_link(&link, &explicit.geom).unwrap());
@@ -230,8 +230,8 @@ fn regularized_shell_keeps_legacy_and_explicit_single_face_projections_closed() 
 }
 
 #[test]
-fn saved_former_strip_projection_reports_lost_without_expanding_healthy_material() {
-    let (mut doc, _, shell) = shell_document();
+fn saved_former_strip_projection_asks_for_its_face_again_without_expanding_healthy_material() {
+    let (mut doc, _, _) = shell_document();
     let mut model = Model::new();
     model.evaluate(&doc);
     let state = model.state();
@@ -240,27 +240,10 @@ fn saved_former_strip_projection_reports_lost_without_expanding_healthy_material
     let plane = body.body.face_plane(index).unwrap();
     let stem = crate::naming::face_names(body)[index].clone();
     assert_eq!(crate::naming::strip_piece(&stem), stem);
-    // Reconstruct the original raw shell before certificate stamping/regularization,
-    // and run the unchanged historical naming/capture path on its actual strip.
-    let before = model.state_before(shell);
-    // Legacy Shell did not propagate construction certificates. Omit transient
-    // metadata here; operand paint also disables new wall-run coalescence so
-    // this control retains the actual historical raw pieces.
-    let raw_source = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(20., 12., 10.)).unwrap().with_paint(Some(solidcraft_kernel::Paint {
-        opacity: 1.,
-        faces: vec![solidcraft_kernel::FacePaint { face: 0, color: [1., 0., 0.], opacity: 1. }],
-    }));
-    let raw = solidcraft_kernel::shell(&raw_source, &[Vec3::new(5., 6., 10.)], 2.).unwrap();
-    let mut old_body = ModelBody::new("Case".into(), raw, shell);
-    old_body.names = crate::naming::NameCell::new(Some(std::sync::Arc::new(crate::naming::NamingOrigin {
-        feature: doc.feature(shell).unwrap().clone(),
-        before,
-        depth: 1,
-        mats: vec![],
-        sheets: vec![],
-    })));
-    let captured = crate::naming::face_name_at_body(&old_body, Vec3::new(20., 6., 1.)).unwrap();
-    assert_eq!(crate::naming::parent_piece(&captured), Some(stem.as_str()), "actual strip capture records a piece name");
+    // The builds before format 14 split this wall into strips along the opening and saved a
+    // projection of one of them by its number. The kernel's shell leaves the wall one face now,
+    // so the strip exists only as that saved name and geometry.
+    assert_eq!(crate::naming::face_name_at_body(body, Vec3::new(20., 6., 1.)).as_deref(), Some(stem.as_str()), "the shelled wall is one face");
     // What the builds before format 14 saved for that piece: its number by centroid order.
     let former = format!("{stem}#1");
     let mut sketch = solidcraft_sketch::Sketch::new();
@@ -274,10 +257,9 @@ fn saved_former_strip_projection_reports_lost_without_expanding_healthy_material
         )
         .unwrap();
     sketch.links[0].face_name = Some(former.clone());
-    let original = sketch.clone();
     let sk = doc
         .add_feature(
-            FeatureKind::Sketch { plane: PlaneRef::Face { plane, at: Vec3::new(20., 6., 1.), name: Some(former), anchor: None }, sketch },
+            FeatureKind::Sketch { plane: PlaneRef::Face { plane, at: Vec3::new(20., 6., 1.), name: Some(former.clone()), anchor: None }, sketch },
             Some("Saved strip sketch"),
         )
         .unwrap();
@@ -305,28 +287,19 @@ fn saved_former_strip_projection_reports_lost_without_expanding_healthy_material
         let mut cold = Model::new();
         cold.evaluate(&loaded);
         for current in [&model, &cold] {
-            let warning = current.results.iter().find(|r| r.id == sk).unwrap().warning.as_deref().unwrap();
-            assert!(warning.contains("no longer exists; last geometry retained"), "{warning}");
-            let state = current.state();
-            let solved = state.sketch(sk).unwrap();
-            assert!(solved.sketch.links[0].lost);
-            assert_eq!(solved.sketch.curves, original.curves);
-            assert_eq!(solved.sketch.points, original.points);
-            let material = state.bodies.iter().find(|body| body.feature == boss).unwrap();
-            assert!(
-                (solidcraft_kernel::measure(&material.body).unwrap().volume - 24.).abs() < 1e-8,
-                "old24mm3 profile must not silently become120mm3 wall profile"
-            );
-            let bounds = material.mesh().bounds();
-            assert!((bounds.min.x - width).abs() < 1e-8 && (bounds.max.x - width - 1.).abs() < 1e-8);
-            assert!((bounds.max.y - 12.).abs() < 1e-8 && (bounds.max.z - 2.).abs() < 1e-8);
+            // The name was saved before format 14 (marked): it finds no face, so the sketch on it
+            // fails, asking for its face again, and so does the material made from it.
+            let result = current.results.iter().find(|r| r.id == sk).unwrap();
+            let reference = format!("{}{former}", crate::naming::LEGACY_MARK);
+            assert_eq!(result.error.as_deref().and_then(crate::reselect_parts), Some(("Saved strip sketch", reference.as_str())), "{result:?}");
+            assert!(current.results.iter().find(|r| r.id == boss).unwrap().error.is_some());
+            assert!(current.state().bodies.iter().all(|body| body.feature != boss), "old 24 mm3 profile must not silently become the 120 mm3 wall");
         }
     }
 }
 
 #[test]
-fn saved_curved_strip_projection_is_lost_after_exact_wall_coalescence() {
-    use solidcraft_kernel::{FacePaint, Paint};
+fn saved_curved_strip_projection_asks_for_its_face_again_after_exact_wall_coalescence() {
     use solidcraft_sketch::{LinkKind, LinkSource, Sketch};
     let mut doc = Document::new("saved curved strip");
     doc.set_param("width", "80", Some("mm"), None).unwrap();
@@ -344,90 +317,43 @@ fn saved_curved_strip_projection_is_lost_after_exact_wall_coalescence() {
         Some("Corners"),
     )
     .unwrap();
-    let shell = doc
-        .add_feature(
-            FeatureKind::Shell {
-                faces: vec![crate::FacePick(Vec3::new(0., 0., 30.))],
-                thickness: "wall".into(),
-                body: Some("Case".into()),
-                direction: "inside".into(),
-                tangent_chain: false,
-            },
-            Some("Shell"),
-        )
-        .unwrap();
+    doc.add_feature(
+        FeatureKind::Shell {
+            faces: vec![crate::FacePick(Vec3::new(0., 0., 30.))],
+            thickness: "wall".into(),
+            body: Some("Case".into()),
+            direction: "inside".into(),
+            tangent_chain: false,
+        },
+        Some("Shell"),
+    )
+    .unwrap();
     let mut model = Model::new();
     model.evaluate(&doc);
     assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
-    let before = model.state_before(shell);
-    // Per-face paint disables the construction optimization: this control keeps
-    // the real pre-repair slab faces without forging a name or source witness.
-    let old_source = before
-        .body("Case")
-        .unwrap()
-        .body
-        .clone()
-        .with_paint(Some(Paint { opacity: 1., faces: vec![FacePaint { face: 0, color: [1., 0., 0.], opacity: 1. }] }));
-    let cavity_box = solidcraft_kernel::box_solid(Vec3::new(-38., -28., 2.), Vec3::new(38., 28., 35.)).unwrap();
-    let cavity = solidcraft_kernel::fillet(
-        &cavity_box,
-        &[Vec3::new(38., 28., 15.), Vec3::new(-38., 28., 15.), Vec3::new(-38., -28., 15.), Vec3::new(38., -28., 15.)],
-        4.,
-    )
-    .unwrap();
-    let raw = solidcraft_kernel::boolean(&old_source, &cavity, solidcraft_kernel::BoolOp::Cut).unwrap().unwrap();
-    let mut old_body = ModelBody::new("Case".into(), raw, shell);
-    old_body.names = crate::naming::NameCell::new(Some(std::sync::Arc::new(crate::naming::NamingOrigin {
-        feature: doc.feature(shell).unwrap().clone(),
-        before,
-        depth: 1,
-        mats: vec![],
-        sheets: vec![],
-    })));
+    // A point low on the outer round of the +x+y corner (radius 6 about (34, 24)), below the
+    // cavity's floor at z = 2.
     let t = std::f64::consts::FRAC_1_SQRT_2;
     let at = Vec3::new(34. + 6. * t, 24. + 6. * t, 1.);
-    let former = crate::naming::face_name_at_body(&old_body, at).unwrap();
-    let stem = crate::naming::strip_piece(&former).to_string();
-    assert_ne!(former, stem, "actual old cylindrical strip must have a piece suffix");
     let state = model.state();
     let current = state.body("Case").unwrap();
     let names = crate::naming::face_names(current);
+    let stem = crate::naming::face_name_at_body(current, at).unwrap();
+    assert_eq!(crate::naming::strip_piece(&stem), stem, "the shelled wall's round is one exact face, floor to rim");
     let index = names.iter().position(|name| name == &stem).unwrap();
-    assert!(current.body.face_was_coalesced(index));
     assert!(current.body.face_plane(index).is_none(), "witness grants no planar attachment authority");
-    assert!(old_body.body.face_sources().is_none_or(|sources| sources.iter().enumerate().all(|(index, _)| !old_body.body.face_was_coalesced(index))));
-    let mut old_state = (*model.state()).clone();
-    old_state.bodies = vec![old_body];
+    // What a build that sewed the cut slab by slab saved: the round in two pieces split at the
+    // cavity's floor, the projection made on the lower one, `#1` (pieces numbered up their
+    // longest spread), from z = 0 to 2. Projected on YZ, the quarter round from (40, 24) to
+    // (34, 30) is the rectangle y 24..30, z 0..2: its two arcs and its two straight sides.
+    let former = format!("{stem}#1");
+    let reference = former.clone();
     let source = LinkSource::Face { body: "Case".into(), at };
-    // Recover the saved projection from the old face's complete raw topology.
-    // Display seam suppression must not discard a historical strip boundary.
-    let old_body = old_state.body("Case").unwrap();
-    let old_index = crate::naming::face_on_body(old_body, &former, at).unwrap().0;
-    let mesh = old_body.mesh();
-    let mut geometry = Vec::new();
-    for (index, faces) in mesh.edge_faces.iter().enumerate() {
-        if !faces.contains(&(old_index as u32)) {
-            continue;
-        }
-        let points = &mesh.edges[index];
-        let a = solidcraft_geom::Plane::YZ.to_local(*points.first().unwrap());
-        let b = solidcraft_geom::Plane::YZ.to_local(*points.last().unwrap());
-        let (a, b) = (Vec2::new(a.x, a.y), Vec2::new(b.x, b.y));
-        assert!(a.dist(b) > 1e-6);
-        for point in points {
-            let q = solidcraft_geom::Plane::YZ.to_local(*point);
-            let q = Vec2::new(q.x, q.y);
-            let direction = b - a;
-            let t = ((q - a).dot(direction) / direction.dot(direction)).clamp(0., 1.);
-            assert!(q.dist(a + direction * t) < 1e-7, "exact cylindrical quadrant projects to a straight support");
-        }
-        geometry.push(solidcraft_sketch::LinkGeom::Line(a, b));
-    }
-    assert_eq!(geometry.len(), 4, "historical curved strip has a complete four-edge rectangular projection");
+    let (a, b, c, d) = (Vec2::new(24., 0.), Vec2::new(30., 0.), Vec2::new(30., 2.), Vec2::new(24., 2.));
+    let geometry: Vec<_> = [(a, b), (b, c), (c, d), (d, a)].into_iter().map(|(p, q)| solidcraft_sketch::LinkGeom::Line(p, q)).collect();
     let mut sketch = Sketch::new();
     sketch.add_link(LinkKind::Project, source, &geometry).unwrap();
     sketch.links[0].face_name = Some(former);
-    let original = sketch.clone();
     let sk = doc
         .add_feature(FeatureKind::Sketch { plane: PlaneRef::Custom { plane: solidcraft_geom::Plane::YZ }, sketch }, Some("Saved corner strip"))
         .unwrap();
@@ -452,26 +378,21 @@ fn saved_curved_strip_projection_is_lost_after_exact_wall_coalescence() {
         let mut cold = Model::new();
         cold.evaluate(&loaded);
         for current in [&model, &cold] {
+            // No face is the piece any more, and the whole wall is not it: the sketch fails,
+            // asking for its face again, and so does the material made from it. The case builds.
             let result = current.results.iter().find(|r| r.id == sk).unwrap();
-            assert!(result.error.is_none());
-            assert!(result.warning.as_deref().unwrap().contains("no longer exists; last geometry retained"));
+            assert_eq!(result.error.as_deref().and_then(crate::reselect_parts), Some(("Saved corner strip", reference.as_str())), "{result:?}");
+            assert!(current.results.iter().find(|r| r.id == boss).unwrap().error.is_some());
+            assert!(current.results.iter().filter(|r| r.id != sk && r.id != boss).all(|r| r.error.is_none()), "{:?}", current.results);
             let state = current.state();
-            let solved = state.sketch(sk).unwrap();
-            assert!(solved.sketch.links[0].lost);
-            assert_eq!(solved.sketch.points, original.points);
-            assert_eq!(solved.sketch.curves, original.curves);
-            let material = state.bodies.iter().find(|body| body.feature == boss).unwrap();
-            assert!(
-                (solidcraft_kernel::measure(&material.body).unwrap().volume - 12.).abs() < 1e-7,
-                "two-mm strip cannot expand to a full thirty-mm wall"
-            );
+            assert!(state.body("Case").is_some());
+            assert!(state.bodies.iter().all(|body| body.feature != boss), "two-mm strip cannot expand to a full thirty-mm wall");
         }
     }
 }
 
 #[test]
-fn saved_stepped_tab_cut_piece_projection_is_lost_without_expanding_material() {
-    use solidcraft_kernel::{BoolOp, FacePaint, Paint};
+fn saved_stepped_tab_cut_piece_projection_asks_for_its_face_again_without_expanding_material() {
     use solidcraft_sketch::{LinkKind, LinkSource, Sketch};
     let mut doc = Document::new("public stepped tab case");
     doc.set_param("length", "40", Some("mm"), None).unwrap();
@@ -498,46 +419,26 @@ fn saved_stepped_tab_cut_piece_projection_is_lost_without_expanding_material() {
         )
         .unwrap();
     doc.feature_mut(tool).unwrap().body_names = vec!["Pocket tool".into()];
-    let cut = doc
-        .add_feature(
-            FeatureKind::Combine { target: "Case".into(), tools: vec!["Pocket tool".into()], operation: crate::Operation::Cut, keep_tools: false },
-            Some("Pocket"),
-        )
-        .unwrap();
+    doc.add_feature(
+        FeatureKind::Combine { target: "Case".into(), tools: vec!["Pocket tool".into()], operation: crate::Operation::Cut, keep_tools: false },
+        Some("Pocket"),
+    )
+    .unwrap();
     let mut model = Model::new();
     model.evaluate(&doc);
     assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
-    let before = model.state_before(cut);
-    // A real per-face paint control preserves the former slab construction;
-    // no historical names or geometry are fabricated.
-    let old_stock = before
-        .body("Case")
-        .unwrap()
-        .body
-        .clone()
-        .with_paint(Some(Paint { opacity: 1., faces: vec![FacePaint { face: 0, color: [1., 0., 0.], opacity: 1. }] }));
-    let old_cut = solidcraft_kernel::boolean(&old_stock, &before.body("Pocket tool").unwrap().body, BoolOp::Cut).unwrap().unwrap();
-    let mut old_body = ModelBody::new("Case".into(), old_cut, cut);
-    old_body.names = crate::naming::NameCell::new(Some(std::sync::Arc::new(crate::naming::NamingOrigin {
-        feature: doc.feature(cut).unwrap().clone(),
-        before,
-        depth: 1,
-        mats: vec![],
-        sheets: vec![],
-    })));
+    // Older builds left Case's -x wall split by the Join and the Cut and saved a projection of
+    // the patch y 10..20, z 0..20 by its piece name. The kernel leaves the wall one face now: the
+    // patch is only that saved name and its rectangle on YZ.
     let at = Vec3::new(0., 15., 1.);
-    let former = crate::naming::face_name_at_body(&old_body, at).unwrap();
-    assert_ne!(former, crate::naming::strip_piece(&former), "actual former bounded wall patch has a full piece name");
-    let index = crate::naming::face_on_body(&old_body, &former, at).unwrap().0;
-    let mut old_state = crate::ModelState::default();
-    old_state.bodies.push(old_body);
     let plane = solidcraft_geom::Plane::YZ;
-    let resolved = crate::project::resolve_face_indices(&old_state, &plane, LinkKind::Project, "Case", &[index]).unwrap();
     let current_state = model.state();
     let current = current_state.body("Case").unwrap();
-    let stem = crate::naming::strip_piece(&former);
+    let stem = crate::naming::face_name_at_body(current, at).unwrap();
+    assert_eq!(crate::naming::strip_piece(&stem), stem, "the -x wall is one face");
+    let former = format!("{stem}#1");
     let current_names = crate::naming::face_names(current);
-    let merged = current_names.iter().position(|name| name == stem).unwrap();
+    let merged = current_names.iter().position(|name| name == &stem).unwrap();
     // The Join leaves Case's -x wall on its own support, so the wall keeps its exact box
     // identity through the Join and the Cut: one face again, no longer the saved piece.
     assert!(
@@ -548,11 +449,12 @@ fn saved_stepped_tab_cut_piece_projection_is_lost_without_expanding_material() {
         "the merged wall carries its exact construction identity"
     );
     assert!(!current_names.contains(&former));
+    let corners = [Vec2::new(10., 0.), Vec2::new(20., 0.), Vec2::new(20., 20.), Vec2::new(10., 20.)];
+    let geometry: Vec<_> = (0..4).map(|i| solidcraft_sketch::LinkGeom::Line(corners[i], corners[(i + 1) % 4])).collect();
     let mut sketch = Sketch::new();
-    sketch.add_link(LinkKind::Project, LinkSource::Face { body: "Case".into(), at }, &resolved.geom).unwrap();
-    sketch.links[0].face_name = Some(former);
-    let original = sketch.clone();
-    let captured = original.points.iter().filter(|p| p.link.is_some()).map(|p| p.pos).collect::<Vec<_>>();
+    sketch.add_link(LinkKind::Project, LinkSource::Face { body: "Case".into(), at }, &geometry).unwrap();
+    sketch.links[0].face_name = Some(former.clone());
+    let captured = sketch.points.iter().filter(|p| p.link.is_some()).map(|p| p.pos).collect::<Vec<_>>();
     assert_eq!(captured.len(), 4);
     assert!(captured.iter().all(|p| (p.x == 10. || p.x == 20.) && (p.y == 0. || p.y == 20.)));
     let sk = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Custom { plane }, sketch }, Some("Saved wall patch")).unwrap();
@@ -577,22 +479,13 @@ fn saved_stepped_tab_cut_piece_projection_is_lost_without_expanding_material() {
         let mut cold = Model::new();
         cold.evaluate(&reopened);
         for current in [&model, &cold] {
+            // No face is the patch any more, and the whole wall is not it: the sketch fails,
+            // asking for its face again, and so does the stock made from it.
             let result = current.results.iter().find(|r| r.id == sk).unwrap();
-            assert!(result.error.is_none(), "{result:?}");
-            assert!(result.warning.as_deref().is_some_and(|w| w.contains("no longer exists; last geometry retained")), "{result:?}");
+            assert_eq!(result.error.as_deref().and_then(crate::reselect_parts), Some(("Saved wall patch", former.as_str())), "{result:?}");
+            assert!(current.results.iter().find(|r| r.id == material).unwrap().error.is_some());
             let state = current.state();
-            let saved = state.sketch(sk).unwrap();
-            assert!(saved.sketch.links[0].lost);
-            assert_eq!(saved.sketch.points, original.points);
-            assert_eq!(saved.sketch.curves, original.curves);
-            let stock = state.bodies.iter().find(|b| b.feature == material).unwrap();
-            assert!(
-                (solidcraft_kernel::measure(&stock.body).unwrap().volume - 200.).abs() < 1e-7,
-                "saved10x20 patch must not become30x20 wall; actualvolume={}, bounds={:?}, originalpoints={:?}",
-                solidcraft_kernel::measure(&stock.body).unwrap().volume,
-                stock.mesh().bounds(),
-                original.points
-            );
+            assert!(state.bodies.iter().all(|b| b.feature != material), "saved 10 x 20 patch must not become the 30 x 20 wall");
             let case = state.body("Case").unwrap();
             let expected = length * 30. * 20. + 8. * 10. * 8. - (length - 2. * wall) * (30. - 2. * wall) * (20. - wall);
             assert!((solidcraft_kernel::measure(&case.body).unwrap().volume - expected).abs() < 1e-6);

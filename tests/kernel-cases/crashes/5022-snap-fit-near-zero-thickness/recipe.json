@@ -1,0 +1,32 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 40,
+    "height": 4
+   }
+  },
+  {
+   "command": "plastic.snap_fit",
+   "params": {
+    "position": [
+     20,
+     20,
+     4
+    ],
+    "hook": [
+     1,
+     0,
+     0
+    ],
+    "length": 15,
+    "thickness": 1e-09,
+    "width": 6,
+    "catch_depth": 1,
+    "catch_length": 3
+   }
+  }
+ ]
+}

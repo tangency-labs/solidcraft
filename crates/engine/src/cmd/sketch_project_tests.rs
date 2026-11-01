@@ -36,7 +36,7 @@ fn manual_projection_captures_the_requested_coincident_body_producer() {
         assert!(matches!(&sk.links[0].source,solidcraft_sketch::LinkSource::Face{body,at} if body=="Target" && (at.z-20.).abs()<1e-6));
         assert!(sk.points.iter().any(|point| point.pos.x > 19.));
         assert!(sk.points.iter().any(|point| point.pos.y > 19.));
-        assert!((session.world_state().body("Control").unwrap().mesh().bounds().max.z - 10.).abs() < 1e-6);
+        assert!((session.world_state().unwrap().body("Control").unwrap().mesh().bounds().max.z - 10.).abs() < 1e-6);
     };
     verify(&s);
     verify(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
@@ -380,21 +380,20 @@ fn deleting_one_edge_of_a_projected_face_keeps_the_others_as_they_were() {
     assert!(s.doc.sketch(id).unwrap().links.is_empty());
 }
 
+/// The edge a projection was made from goes with its body: the sketch fails, asking for the edge
+/// again, instead of keeping a lost link.
 #[test]
-fn lost_reference_keeps_geometry_with_a_warning() {
+fn a_reference_whose_body_is_gone_fails_its_sketch_asking_for_it_again() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
     let boxf = s.doc.features.last().unwrap().id;
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     run(&mut s, "sketch.project", json!({"refs": [{"edge": [5, 0, 10]}]}));
     run(&mut s, "sketch.finish", json!({}));
+    let name = s.doc.sketch(s.doc.features.last().unwrap().id).unwrap().links[0].edge_name.clone().unwrap();
     run(&mut s, "timeline.suppress", json!({"feature": boxf, "suppressed": true}));
-    let st = s.model.state();
-    let ss = st.sketches.last().unwrap();
-    assert_eq!(ss.sketch.curves.len(), 1, "geometry kept");
-    assert!(ss.sketch.links[0].lost);
-    let w = s.model.results.last().unwrap().warning.clone().unwrap_or_default();
-    assert!(w.contains("lost"), "{w}");
+    let r = s.model.results.last().unwrap();
+    assert_eq!(r.error.as_deref().and_then(solidcraft_doc::reselect_parts), Some((r.name.as_str(), name.as_str())), "{r:?}");
 }
 
 #[test]
@@ -455,14 +454,28 @@ fn three_d_sketch_curves() {
     let src = s.doc.features.last().unwrap().id;
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     let r = run(&mut s, "sketch.project_to_surface", json!({"curves": [{"sketch": src, "curve": l}], "face": [0, 0, 20]}));
+    // The line's projection where it first meets the sphere: the arc of the great circle in y = 0
+    // from x = -10 to 10 over the top (z = √(400 − x²)), one wire though SMLib splits it at the
+    // pole, and no curve on the far side.
+    assert_eq!(r["links"][0]["wires"].as_array().unwrap().len(), 1, "{r}");
     let wid = r["links"][0]["wires"][0].as_str().unwrap().to_string();
     let st = s.model.state();
     let sk = &st.sketch(s.active_sketch.unwrap()).unwrap().sketch;
     let w = &sk.wires[sk.wire_index(&wid).unwrap()];
-    assert!(w.pts.len() > 20);
-    for p in &w.pts {
-        assert!((p.len() - 20.0).abs() < 0.1, "{p:?}");
-        assert!(p.z > 0.0);
+    assert!(!w.exact.is_empty());
+    // SMLib makes projected curves to a millionth of the body's size (the sphere's 40 mm box).
+    let tol = 40.0 * 1e-6;
+    let ends = [*w.pts.first().unwrap(), *w.pts.last().unwrap()];
+    let top = 300f64.sqrt();
+    assert!(ends.iter().all(|e| (e.x.abs() - 10.0).abs() < tol && e.y.abs() < tol && (e.z - top).abs() < tol), "{ends:?}");
+    assert!((ends[0].x + ends[1].x).abs() < tol, "{ends:?}");
+    // Along its exact curves (the wire's points are its spans' polygon), on the sphere's top.
+    for c in &w.exact {
+        let eval = solidcraft_geom::brep::eval::CurveEval::new(&c.curve).unwrap();
+        for k in 0..=32 {
+            let p = eval.point(c.interval[0] + (c.interval[1] - c.interval[0]) * f64::from(k) / 32.0).unwrap();
+            assert!((p.len() - 20.0).abs() < tol && p.y.abs() < tol && p.z >= top - tol, "{p:?}");
+        }
     }
     // Delete the wire.
     run(&mut s, "sketch.delete", json!({"entities": [wid]}));
@@ -528,10 +541,11 @@ fn tilted_circles_project_to_exact_ellipses_and_splines_stay_splines() {
     run(&mut s, "sketch.create", json!({"plane": "XY", "offset": -10}));
     // The base circle (centred at the origin) seen from above.
     let r = run(&mut s, "sketch.project", json!({"refs": [{"edge": [0, 5, 0]}]}));
-    // One seam half: exact conics (rational quadratic arcs).
+    // The rim is one closed circle edge: an exact ellipse, x semi-axis 5·cos 45° (the tilt), y 5.
     let si = inspect(&mut s);
     let c = si["curves"].as_array().unwrap().iter().find(|c| c["id"] == r["links"][0]["curves"][0]).unwrap().clone();
-    assert_eq!(c["type"], "conic", "{c}");
+    assert_eq!(c["type"], "ellipse", "{c}");
+    assert!((c["minor_radius"].as_f64().unwrap() - 5.0 * std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-9, "{c}");
     let st = s.model.state();
     let sk = &st.sketch(s.active_sketch.unwrap()).unwrap().sketch;
     for ci in sk.link_curves(r["links"][0]["link"].as_str().unwrap()) {
@@ -541,7 +555,7 @@ fn tilted_circles_project_to_exact_ellipses_and_splines_stay_splines() {
             assert!((e - 1.0).abs() < 1e-9, "{q:?}");
         }
     }
-    // The whole face (both halves of its rim, plus its seam) gives the full ellipse.
+    // The whole face (its rim, plus its seam) gives the full ellipse.
     let r = run(&mut s, "sketch.project", json!({"refs": [{"face": [0, 0, 0]}]}));
     let si = inspect(&mut s);
     let types: Vec<String> = r["links"][0]["curves"]
@@ -619,8 +633,8 @@ fn sweeps_and_pipes_follow_3d_sketch_curves() {
 }
 
 /// #47: references to other bodies: an edge, a face's loops and a silhouette of a second body
-/// project into a sketch on the first; they follow an edit of that body (a parameter) and
-/// are reported lost, not crashed on, when it goes away.
+/// project into a sketch on the first; they follow an edit of that body (a parameter), and when
+/// it goes away the sketch fails, asking for the named edge again, not crashed on.
 #[test]
 fn project_and_include_from_other_bodies() {
     let mut s = Session::default();
@@ -650,13 +664,17 @@ fn project_and_include_from_other_bodies() {
     let id = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Sketch { .. })).unwrap().id;
     let si = run(&mut s, "sketch.inspect", json!({"sketch": id}));
     assert!(xs(&si).iter().any(|x| (x - 70.0).abs() < 1e-6), "{:?}", xs(&si));
-    // Remove the cylinder: its silhouette and edge are lost, with a warning and no error.
+    // Remove the cylinder: the edge included from it is gone, and the sketch asks for it again.
     let cyl = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Cylinder { .. })).unwrap().id;
     run(&mut s, "timeline.delete", json!({"feature": cyl}));
     let t = run(&mut s, "document.inspect", json!({}));
     let row = t["timeline"].as_array().unwrap().iter().find(|r| r["id"] == json!(id)).cloned().unwrap();
-    assert!(row["error"].is_null(), "{row}");
-    assert!(row["warning"].as_str().is_some_and(|w| w.contains("lost")), "{row}");
+    let error = row["error"].as_str().unwrap_or_default();
+    assert!(
+        solidcraft_doc::reselect_parts(error)
+            .is_some_and(|(feature, reference)| feature == row["name"] && reference.starts_with(&format!("F{cyl}:"))),
+        "{row}"
+    );
 }
 
 /// A cylinder's wall and the torus of a rounded rim are drawn as one face but stored in halves
@@ -738,7 +756,9 @@ fn a_rectangle_put_onto_a_projected_edge_stays_a_closed_profile() {
     // Picked by a point inside, it extrudes to a 20 x 15 x 10 block of its own.
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch": id, "profiles": [{"point": [15, 7.5]}], "distance": 10, "operation": "new", "body_name": "Pad"}));
-    let volume = |s: &Session, name: &str| s.model.state().body(name).unwrap().body.tessellate_with(1e-4, true).unwrap().measure().volume;
+    let volume = |s: &Session, name: &str| {
+        s.model.state().body(name).unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume
+    };
     assert!((volume(&s, "Pad") - 3000.0).abs() < 1e-6, "{}", volume(&s, "Pad"));
     assert!((volume(&s, &block) - 24000.0).abs() < 1e-6, "{}", volume(&s, &block));
     let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
@@ -782,11 +802,18 @@ fn a_face_engraved_with_text_projects_its_letters_exactly_and_extrudes() {
     assert!(r.error.is_none(), "{r:?}");
     let face = before - volume(&mut s);
     assert!((face - taken).abs() < 1e-6 * before, "{face} {taken}");
-    // Its sketch got the letters as Bézier pieces.
+    // Its sketch got the letters as their exact pieces: the outline's quadratic Béziers, which are
+    // parabolic arcs, come in as conics (or as control-point splines).
     let st = s.model.state();
     let sketch = &st.sketches.last().unwrap().sketch;
-    let pieces =
-        sketch.curves.iter().filter(|c| c.link.is_some() && matches!(c.kind, solidcraft_sketch::CurveKind::Spline { control: true, .. })).count();
+    let pieces = sketch
+        .curves
+        .iter()
+        .filter(|c| {
+            c.link.is_some()
+                && matches!(c.kind, solidcraft_sketch::CurveKind::Spline { control: true, .. } | solidcraft_sketch::CurveKind::Conic { .. })
+        })
+        .count();
     assert!(pieces > 100, "{pieces}");
 }
 
@@ -804,12 +831,23 @@ fn a_face_sketch_saved_with_fitted_letters_reopens_and_builds_the_same() {
         let r = s.model.result(id).unwrap();
         assert!(r.error.is_none(), "{name}: {:?}", r.error);
     }
-    // The build that saved it measured 5916.018831 mm³.
-    assert!((volume - 5916.018830904924).abs() < 1e-3, "{volume}");
+    // The 30 x 20 x 10 block less the "S" 1 deep (its profile's exact area, Sketch2's smaller
+    // region) and the r 2 circle 3 deep, clear of the letter: 5916.010767. (The build that saved
+    // it measured 5916.018831, 8e-3 off; SMLib's integral is within 1e-8 of the closed form.)
+    let letter = s.model.state().sketches.iter().find(|k| k.name == "Sketch2").unwrap().profiles.iter().map(|p| p.area).fold(f64::INFINITY, f64::min);
+    let want = 6000.0 - letter - 3.0 * std::f64::consts::PI * 4.0;
+    assert!((volume - want).abs() < 1e-8 * 6000.0, "{volume} vs {want}");
+    // The letter's exact pieces in the face's link: its quadratic Béziers, as conics (or splines).
     let st = s.model.state();
     let sketch = &st.sketches.last().unwrap().sketch;
-    let pieces =
-        sketch.curves.iter().filter(|c| c.link.is_some() && matches!(c.kind, solidcraft_sketch::CurveKind::Spline { control: true, .. })).count();
+    let pieces = sketch
+        .curves
+        .iter()
+        .filter(|c| {
+            c.link.is_some()
+                && matches!(c.kind, solidcraft_sketch::CurveKind::Spline { control: true, .. } | solidcraft_sketch::CurveKind::Conic { .. })
+        })
+        .count();
     assert!(pieces > 0, "{pieces}");
 }
 
@@ -886,6 +924,21 @@ fn intersect_curves(steps: &[(&str, Value)], plane: Value) -> std::result::Resul
     Ok(linked_curves(&inspect(&mut s)))
 }
 
+/// The lines among `curves` as an outline: each line's ends rounded and the lower first, the lines
+/// sorted. A section's chains are walked from either end (the mesh's triangle order picks which),
+/// so a line's direction says nothing about the cut.
+fn outline(curves: &[Value]) -> Vec<[f64; 4]> {
+    let mut ends: Vec<[f64; 4]> = line_ends(curves)
+        .into_iter()
+        .map(|e| {
+            let e = e.map(f64::round);
+            if [e[2], e[3]] < [e[0], e[1]] { [e[2], e[3], e[0], e[1]] } else { e }
+        })
+        .collect();
+    ends.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    ends
+}
+
 fn line_ends(curves: &[Value]) -> Vec<[f64; 4]> {
     let at = |c: &Value, k: &str, i: usize| c[k][i].as_f64().unwrap_or(f64::NAN);
     curves
@@ -901,10 +954,8 @@ fn line_ends(curves: &[Value]) -> Vec<[f64; 4]> {
 fn intersect_keeps_its_exact_cuts() {
     let block = [("solid.box", json!({"length": 40, "width": 30, "height": 20}))];
     for offset in [10, 0] {
-        let mut ends = line_ends(&intersect_curves(&block, json!({"plane": "XY", "offset": offset})).unwrap());
-        ends.iter_mut().for_each(|e| *e = e.map(|v| v.round()));
-        ends.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        assert_eq!(ends, vec![[0.0, 0.0, 40.0, 0.0], [0.0, 30.0, 0.0, 0.0], [40.0, 0.0, 40.0, 30.0], [40.0, 30.0, 0.0, 30.0]], "offset {offset}");
+        let ends = outline(&intersect_curves(&block, json!({"plane": "XY", "offset": offset})).unwrap());
+        assert_eq!(ends, vec![[0.0, 0.0, 0.0, 30.0], [0.0, 0.0, 40.0, 0.0], [0.0, 30.0, 40.0, 30.0], [40.0, 0.0, 40.0, 30.0]], "offset {offset}");
     }
     for (steps, plane, radius) in [
         (vec![("solid.cylinder", json!({"base": [0, 0, 0], "radius": 7, "height": 30}))], json!({"plane": "XY", "offset": 12}), 7.0),
@@ -913,11 +964,25 @@ fn intersect_keeps_its_exact_cuts() {
         let c = intersect_curves(&steps, plane).unwrap();
         assert!(c.len() == 1 && c[0]["type"] == "circle" && (c[0]["radius"].as_f64().unwrap() - radius).abs() < 1e-4, "{c:?}");
     }
+    // The tilted cylinder's cut is an ellipse the section leaves as the mesh's segments, as many
+    // as the tessellation crosses (21 on truck's mesh, 20 on SMLib's): each end on the cylinder
+    // within the section's own reach of the surface, the display tolerance (a thousandth of the
+    // mesh's size, doc::project::fit_segments), which the old pin of one end to 1e-4 assumed of
+    // one mesh.
     let tilted = [("solid.cylinder", json!({"base": [0, 0, 0], "radius": 5, "height": 40, "axis": [1, 0, 1]}))];
-    let ends = line_ends(&intersect_curves(&tilted, json!({"plane": "XY", "offset": 10})).unwrap());
-    assert_eq!(ends.len(), 21);
-    let first = [2.941, -0.2891, 3.3932, -1.7819];
-    assert!(ends[0].iter().zip(first).all(|(a, b)| (a - b).abs() < 1e-4), "{:?}", ends[0]);
+    let curves = intersect_curves(&tilted, json!({"plane": "XY", "offset": 10})).unwrap();
+    let ends = line_ends(&curves);
+    assert!(ends.len() == curves.len() && ends.len() >= 16, "{curves:?}");
+    let axis = solidcraft_geom::Vec3::new(1.0, 0.0, 1.0).normalized().unwrap();
+    // The cylinder's box: its axis 40 along (1, 0, 1)/√2 and its ends' discs of radius 5 span
+    // (40 + 2·5)/√2 in x and z and 10 in y.
+    let span = 50.0 * std::f64::consts::FRAC_1_SQRT_2;
+    let reach = 1e-3 * (2.0 * span * span + 100.0).sqrt();
+    for e in &ends {
+        for p in [solidcraft_geom::Vec3::new(e[0], e[1], 10.0), solidcraft_geom::Vec3::new(e[2], e[3], 10.0)] {
+            assert!(((p - axis * p.dot(axis)).len() - 5.0).abs() < reach, "{p:?}");
+        }
+    }
 }
 
 /// A plane crossing a curved face's rim cuts it on the surface, not on the mesh's chord: a
@@ -944,10 +1009,43 @@ fn intersect_crosses_a_curved_face_on_the_surface() {
 #[test]
 fn intersect_on_a_top_face_gives_its_outline() {
     let block = [("solid.box", json!({"length": 40, "width": 30, "height": 20}))];
-    let mut ends = line_ends(&intersect_curves(&block, json!({"plane": "XY", "offset": 20})).unwrap());
-    ends.iter_mut().for_each(|e| *e = e.map(|v| v.round()));
-    ends.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    assert_eq!(ends, vec![[0.0, 0.0, 40.0, 0.0], [0.0, 30.0, 0.0, 0.0], [40.0, 0.0, 40.0, 30.0], [40.0, 30.0, 0.0, 30.0]]);
+    let ends = outline(&intersect_curves(&block, json!({"plane": "XY", "offset": 20})).unwrap());
+    assert_eq!(ends, vec![[0.0, 0.0, 0.0, 30.0], [0.0, 0.0, 40.0, 0.0], [0.0, 30.0, 40.0, 30.0], [40.0, 0.0, 40.0, 30.0]]);
+}
+
+/// A free-form edge projects as the one exact spline it is, its knots and weights its own: the
+/// bottom face of a 40 x 20 x 10 box whose upright edges have G2 rounds (each round's bottom
+/// edge a B-spline of several spans) comes into its sketch as four lines and four splines, one a
+/// corner, each meeting the lines at their ends (#3604, where each span was a curve of its own).
+/// The profile they bound, extruded the box's height, is the box: its sides are upright.
+#[test]
+fn a_free_form_edge_projects_as_one_spline_with_its_own_knots() {
+    use solidcraft_sketch::CurveKind;
+    let volume = |s: &Session, body: &str| solidcraft_kernel::measure(&s.world_state().unwrap().body(body).unwrap().body).unwrap().volume;
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner":[0,0,0],"length":40,"width":20,"height":10,"body_name":"B"}));
+    run(&mut s, "solid.fillet", json!({"body":"B","edges":[[0,0,5],[40,0,5],[40,20,5],[0,20,5]],"radius":5,"type":"g2"}));
+    let id = run(&mut s, "sketch.create", json!({"plane":{"face":[20,10,0]},"project_edges":true,"name":"Bottom"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    let st = s.model.state();
+    let sketch = &st.sketch(id).unwrap().sketch;
+    let lines = sketch.curves.iter().filter(|c| matches!(c.kind, CurveKind::Line { .. })).count();
+    let splines: Vec<_> = sketch.curves.iter().filter(|c| matches!(c.kind, CurveKind::Spline { .. })).collect();
+    assert_eq!((lines, splines.len(), sketch.curves.len()), (4, 4, 8), "{:?}", sketch.curves);
+    for c in &splines {
+        let CurveKind::Spline { pts, control: true, nurbs: Some(nurbs), .. } = &c.kind else { panic!("{:?}", c.kind) };
+        assert_eq!(nurbs.knots.len(), pts.len() + 4, "a cubic's knots");
+        let (a, b) = c.kind.ends().unwrap();
+        for end in [a, b] {
+            let meets = sketch.curves.iter().filter(|o| matches!(o.kind, CurveKind::Line { a, b } if a == end || b == end)).count();
+            assert_eq!(meets, 1, "{} end {end}", c.id);
+        }
+    }
+    drop(st);
+    let rounded = volume(&s, "B");
+    run(&mut s, "solid.extrude", json!({"sketch":"Bottom","distance":10,"operation":"new","body_name":"P"}));
+    let prism = volume(&s, "P");
+    assert!((prism - rounded).abs() < rounded * 1e-6, "{prism} vs {rounded}");
 }
 
 #[test]
@@ -1297,4 +1395,22 @@ fn a_thicker_angle_moves_the_projected_face_of_the_sketch_on_it() {
     };
     check(&s);
     check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
+}
+
+/// A sphere's outline from above is its equator: one circle and one profile. Flat triangles beside
+/// the equator can tip the other way from the sphere, and their edges must not join the outline.
+#[test]
+fn a_spheres_silhouette_is_one_circle() {
+    let mut s = Session::default();
+    run(&mut s, "solid.sphere", json!({"radius": 8, "body_name": "Ball"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": -10, "name": "Below"}));
+    let r = run(&mut s, "sketch.project", json!({"refs": [{"body": "Ball"}]}));
+    let curves = r["links"][0]["curves"].as_array().unwrap();
+    assert_eq!(curves.len(), 1, "{r}");
+    let inspected = run(&mut s, "sketch.inspect", json!({}));
+    let circle = inspected["curves"].as_array().unwrap().iter().find(|c| c["id"] == curves[0]).unwrap();
+    assert_eq!(circle["type"], "circle", "{circle}");
+    assert!((circle["radius"].as_f64().unwrap() - 8.0).abs() < 1e-6, "{circle}");
+    let done = run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(done["profiles"], 1, "{done}");
 }

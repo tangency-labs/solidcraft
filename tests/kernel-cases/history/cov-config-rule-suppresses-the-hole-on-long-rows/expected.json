@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "config.rule: a block longer than 50 has no hole; activating Long applies it",
+ "method": "W = 60 > 50: the rule suppresses the hole: V = 60 30 10 = 18000; 6 faces",
+ "body_count": 1,
+ "volume_mm3": 18000.0,
+ "faces": 6,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   30,
+   10
+  ]
+ },
+ "source": "analytic"
+}

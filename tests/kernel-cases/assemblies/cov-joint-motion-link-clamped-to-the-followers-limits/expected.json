@@ -1,0 +1,34 @@
+{
+ "sources": [],
+ "what": "a motion link b = a into a follower limited to -20..20",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); Gear: box 10x10x10 from (60,-5,0), centre (65,0,5), on revolute G2 about z through (50,0,0); b = a clamped to b's limits: Hinge 45 leaves G2 at 20: Gear centre (50 + 15 cos20, 15 sin20, 5)",
+ "body_count": 3,
+ "volume_mm3": 9000.0,
+ "results": [
+  {
+   "step": 15,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      64.095389,
+      5.130302,
+      5.0
+     ]
+    }
+   }
+  },
+  {
+   "step": 16,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      14.142136,
+      14.142136,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

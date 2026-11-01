@@ -1,0 +1,3811 @@
+[
+  {
+    "metadata": {
+      "boundaries": null,
+      "color": null,
+      "face_sources": [
+        {
+          "axis": 2,
+          "high": true,
+          "kind": "box_face",
+          "plane": {
+            "origin": [
+              0.0,
+              0.0,
+              10.0
+            ],
+            "x_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_axis": [
+              0.0,
+              1.0,
+              0.0
+            ]
+          },
+          "producer": null
+        },
+        {
+          "axis": 1,
+          "high": true,
+          "kind": "box_face",
+          "plane": {
+            "origin": [
+              0.0,
+              30.0,
+              0.0
+            ],
+            "x_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_axis": [
+              -0.0,
+              -0.0,
+              -1.0
+            ]
+          },
+          "producer": null
+        },
+        {
+          "axis": 0,
+          "high": false,
+          "kind": "box_face",
+          "plane": {
+            "origin": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "x_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "y_axis": [
+              -0.0,
+              -0.0,
+              -1.0
+            ]
+          },
+          "producer": null
+        },
+        {
+          "axis": 1,
+          "high": false,
+          "kind": "box_face",
+          "plane": {
+            "origin": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "x_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "producer": null
+        },
+        {
+          "axis": 0,
+          "high": true,
+          "kind": "box_face",
+          "plane": {
+            "origin": [
+              40.0,
+              0.0,
+              0.0
+            ],
+            "x_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "y_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "producer": null
+        },
+        {
+          "axis": 2,
+          "high": false,
+          "kind": "box_face",
+          "plane": {
+            "origin": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "x_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_axis": [
+              -0.0,
+              -1.0,
+              -0.0
+            ]
+          },
+          "producer": null
+        }
+      ],
+      "history": {
+        "edges": [
+          {
+            "faces": [
+              0,
+              2
+            ],
+            "origins": []
+          },
+          {
+            "faces": [
+              0,
+              3
+            ],
+            "origins": []
+          },
+          {
+            "faces": [
+              0,
+              4
+            ],
+            "origins": []
+          },
+          {
+            "faces": [
+              0,
+              1
+            ],
+            "origins": []
+          },
+          {
+            "faces": [
+              1,
+              4
+            ],
+            "origins": []
+          },
+          {
+            "faces": [
+              1,
+              5
+            ],
+            "origins": []
+          },
+          {
+            "faces": [
+              1,
+              2
+            ],
+            "origins": []
+          },
+          {
+            "faces": [
+              2,
+              5
+            ],
+            "origins": []
+          },
+          {
+            "faces": [
+              2,
+              3
+            ],
+            "origins": []
+          },
+          {
+            "faces": [
+              3,
+              5
+            ],
+            "origins": []
+          },
+          {
+            "faces": [
+              3,
+              4
+            ],
+            "origins": []
+          },
+          {
+            "faces": [
+              4,
+              5
+            ],
+            "origins": []
+          }
+        ],
+        "faces": [
+          {
+            "change": "generated",
+            "origins": [
+              {
+                "end": true,
+                "kind": "cap"
+              }
+            ]
+          },
+          {
+            "change": "generated",
+            "origins": [
+              {
+                "kind": "profile",
+                "segment": 2
+              }
+            ]
+          },
+          {
+            "change": "generated",
+            "origins": [
+              {
+                "kind": "profile",
+                "segment": 3
+              }
+            ]
+          },
+          {
+            "change": "generated",
+            "origins": [
+              {
+                "kind": "profile",
+                "segment": 0
+              }
+            ]
+          },
+          {
+            "change": "generated",
+            "origins": [
+              {
+                "kind": "profile",
+                "segment": 1
+              }
+            ]
+          },
+          {
+            "change": "generated",
+            "origins": [
+              {
+                "end": false,
+                "kind": "cap"
+              }
+            ]
+          }
+        ],
+        "operands": 0
+      },
+      "paint": null,
+      "preserve_boundaries": false,
+      "version": 1
+    },
+    "runtime": {
+      "coarse_missing": null,
+      "size": 50.99019513592785
+    },
+    "solid": {
+      "edges": [
+        {
+          "curve": {
+            "end": [
+              0.0,
+              0.0,
+              10.0
+            ],
+            "kind": "line",
+            "start": [
+              0.0,
+              30.0,
+              10.0
+            ]
+          },
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 0,
+              "loop": 0,
+              "position": 0,
+              "upper": false
+            },
+            {
+              "face": 2,
+              "loop": 0,
+              "position": 3,
+              "upper": true
+            }
+          ],
+          "vertices": [
+            0,
+            1
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              40.0,
+              0.0,
+              10.0
+            ],
+            "kind": "line",
+            "start": [
+              0.0,
+              0.0,
+              10.0
+            ]
+          },
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 0,
+              "loop": 0,
+              "position": 1,
+              "upper": false
+            },
+            {
+              "face": 3,
+              "loop": 0,
+              "position": 3,
+              "upper": true
+            }
+          ],
+          "vertices": [
+            1,
+            2
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              40.0,
+              30.0,
+              10.0
+            ],
+            "kind": "line",
+            "start": [
+              40.0,
+              0.0,
+              10.0
+            ]
+          },
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 0,
+              "loop": 0,
+              "position": 2,
+              "upper": false
+            },
+            {
+              "face": 4,
+              "loop": 0,
+              "position": 3,
+              "upper": true
+            }
+          ],
+          "vertices": [
+            2,
+            3
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              0.0,
+              30.0,
+              10.0
+            ],
+            "kind": "line",
+            "start": [
+              40.0,
+              30.0,
+              10.0
+            ]
+          },
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 0,
+              "loop": 0,
+              "position": 3,
+              "upper": false
+            },
+            {
+              "face": 1,
+              "loop": 0,
+              "position": 3,
+              "upper": true
+            }
+          ],
+          "vertices": [
+            3,
+            0
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              40.0,
+              30.0,
+              10.0
+            ],
+            "kind": "line",
+            "start": [
+              40.0,
+              30.0,
+              0.0
+            ]
+          },
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 1,
+              "loop": 0,
+              "position": 0,
+              "upper": true
+            },
+            {
+              "face": 4,
+              "loop": 0,
+              "position": 2,
+              "upper": false
+            }
+          ],
+          "vertices": [
+            4,
+            3
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              0.0,
+              30.0,
+              0.0
+            ],
+            "kind": "line",
+            "start": [
+              40.0,
+              30.0,
+              0.0
+            ]
+          },
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 1,
+              "loop": 0,
+              "position": 1,
+              "upper": false
+            },
+            {
+              "face": 5,
+              "loop": 0,
+              "position": 1,
+              "upper": true
+            }
+          ],
+          "vertices": [
+            4,
+            5
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              0.0,
+              30.0,
+              10.0
+            ],
+            "kind": "line",
+            "start": [
+              0.0,
+              30.0,
+              0.0
+            ]
+          },
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 1,
+              "loop": 0,
+              "position": 2,
+              "upper": false
+            },
+            {
+              "face": 2,
+              "loop": 0,
+              "position": 0,
+              "upper": true
+            }
+          ],
+          "vertices": [
+            5,
+            0
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "kind": "line",
+            "start": [
+              0.0,
+              30.0,
+              0.0
+            ]
+          },
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 2,
+              "loop": 0,
+              "position": 1,
+              "upper": false
+            },
+            {
+              "face": 5,
+              "loop": 0,
+              "position": 0,
+              "upper": true
+            }
+          ],
+          "vertices": [
+            5,
+            6
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              0.0,
+              0.0,
+              10.0
+            ],
+            "kind": "line",
+            "start": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 2,
+              "loop": 0,
+              "position": 2,
+              "upper": false
+            },
+            {
+              "face": 3,
+              "loop": 0,
+              "position": 0,
+              "upper": true
+            }
+          ],
+          "vertices": [
+            6,
+            1
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              40.0,
+              0.0,
+              0.0
+            ],
+            "kind": "line",
+            "start": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 3,
+              "loop": 0,
+              "position": 1,
+              "upper": false
+            },
+            {
+              "face": 5,
+              "loop": 0,
+              "position": 3,
+              "upper": true
+            }
+          ],
+          "vertices": [
+            6,
+            7
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              40.0,
+              0.0,
+              10.0
+            ],
+            "kind": "line",
+            "start": [
+              40.0,
+              0.0,
+              0.0
+            ]
+          },
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 3,
+              "loop": 0,
+              "position": 2,
+              "upper": false
+            },
+            {
+              "face": 4,
+              "loop": 0,
+              "position": 0,
+              "upper": true
+            }
+          ],
+          "vertices": [
+            7,
+            2
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              40.0,
+              30.0,
+              0.0
+            ],
+            "kind": "line",
+            "start": [
+              40.0,
+              0.0,
+              0.0
+            ]
+          },
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 4,
+              "loop": 0,
+              "position": 1,
+              "upper": false
+            },
+            {
+              "face": 5,
+              "loop": 0,
+              "position": 2,
+              "upper": true
+            }
+          ],
+          "vertices": [
+            7,
+            4
+          ]
+        }
+      ],
+      "faces": [
+        {
+          "domain": [
+            [
+              0.0,
+              55.0
+            ],
+            [
+              0.0,
+              55.0
+            ]
+          ],
+          "loops": [
+            {
+              "edges": [
+                {
+                  "edge": 0,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        42.5,
+                        47.5
+                      ],
+                      [
+                        12.500000000000002,
+                        47.5
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 1,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        12.500000000000004,
+                        47.5
+                      ],
+                      [
+                        12.500000000000004,
+                        7.499999999999999
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 2,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        12.500000000000004,
+                        7.499999999999999
+                      ],
+                      [
+                        42.5,
+                        7.499999999999999
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 3,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        42.5,
+                        7.499999999999999
+                      ],
+                      [
+                        42.5,
+                        47.5
+                      ]
+                    ]
+                  }
+                }
+              ],
+              "kind": "edges"
+            }
+          ],
+          "surface": {
+            "kind": "plane",
+            "origin": [
+              47.5,
+              -12.500000000000004,
+              10.0
+            ],
+            "u_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "v_axis": [
+              -1.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        {
+          "domain": [
+            [
+              0.0,
+              40.0
+            ],
+            [
+              0.0,
+              10.0
+            ]
+          ],
+          "loops": [
+            {
+              "edges": [
+                {
+                  "edge": 4,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        10.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 5,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        40.0,
+                        0.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 6,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        40.0,
+                        0.0
+                      ],
+                      [
+                        40.0,
+                        10.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 3,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        10.0
+                      ],
+                      [
+                        40.0,
+                        10.0
+                      ]
+                    ]
+                  }
+                }
+              ],
+              "kind": "edges"
+            }
+          ],
+          "surface": {
+            "kind": "plane",
+            "origin": [
+              40.0,
+              30.0,
+              0.0
+            ],
+            "u_axis": [
+              -1.0,
+              0.0,
+              0.0
+            ],
+            "v_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          }
+        },
+        {
+          "domain": [
+            [
+              0.0,
+              30.0
+            ],
+            [
+              0.0,
+              10.0
+            ]
+          ],
+          "loops": [
+            {
+              "edges": [
+                {
+                  "edge": 6,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        10.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 7,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        30.0,
+                        0.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 8,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        30.0,
+                        0.0
+                      ],
+                      [
+                        30.0,
+                        10.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 0,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        10.0
+                      ],
+                      [
+                        30.0,
+                        10.0
+                      ]
+                    ]
+                  }
+                }
+              ],
+              "kind": "edges"
+            }
+          ],
+          "surface": {
+            "kind": "plane",
+            "origin": [
+              0.0,
+              30.0,
+              0.0
+            ],
+            "u_axis": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "v_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          }
+        },
+        {
+          "domain": [
+            [
+              0.0,
+              40.0
+            ],
+            [
+              0.0,
+              10.0
+            ]
+          ],
+          "loops": [
+            {
+              "edges": [
+                {
+                  "edge": 8,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        10.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 9,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        40.0,
+                        0.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 10,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        40.0,
+                        0.0
+                      ],
+                      [
+                        40.0,
+                        10.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 1,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        10.0
+                      ],
+                      [
+                        40.0,
+                        10.0
+                      ]
+                    ]
+                  }
+                }
+              ],
+              "kind": "edges"
+            }
+          ],
+          "surface": {
+            "kind": "plane",
+            "origin": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "u_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "v_axis": [
+              -0.0,
+              0.0,
+              1.0
+            ]
+          }
+        },
+        {
+          "domain": [
+            [
+              0.0,
+              30.0
+            ],
+            [
+              0.0,
+              10.0
+            ]
+          ],
+          "loops": [
+            {
+              "edges": [
+                {
+                  "edge": 10,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        10.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 11,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        30.0,
+                        0.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 4,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        30.0,
+                        0.0
+                      ],
+                      [
+                        30.0,
+                        10.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 2,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        10.0
+                      ],
+                      [
+                        30.0,
+                        10.0
+                      ]
+                    ]
+                  }
+                }
+              ],
+              "kind": "edges"
+            }
+          ],
+          "surface": {
+            "kind": "plane",
+            "origin": [
+              40.0,
+              0.0,
+              0.0
+            ],
+            "u_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "v_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          }
+        },
+        {
+          "domain": [
+            [
+              0.0,
+              55.0
+            ],
+            [
+              0.0,
+              55.0
+            ]
+          ],
+          "loops": [
+            {
+              "edges": [
+                {
+                  "edge": 7,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        47.499999999999986,
+                        42.499999999999986
+                      ],
+                      [
+                        47.5,
+                        12.499999999999991
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 5,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        7.49999999999999,
+                        42.5
+                      ],
+                      [
+                        47.499999999999986,
+                        42.499999999999986
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 11,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        7.4999999999999964,
+                        12.500000000000002
+                      ],
+                      [
+                        7.49999999999999,
+                        42.5
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 9,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        47.5,
+                        12.499999999999993
+                      ],
+                      [
+                        7.4999999999999964,
+                        12.500000000000002
+                      ]
+                    ]
+                  }
+                }
+              ],
+              "kind": "edges"
+            }
+          ],
+          "surface": {
+            "kind": "plane",
+            "origin": [
+              47.5,
+              -12.500000000000004,
+              0.0
+            ],
+            "u_axis": [
+              -1.0,
+              0.0,
+              0.0
+            ],
+            "v_axis": [
+              0.0,
+              1.0,
+              0.0
+            ]
+          }
+        }
+      ],
+      "regions": [
+        {
+          "shells": [
+            0
+          ],
+          "void": false
+        },
+        {
+          "shells": [
+            0
+          ],
+          "void": false
+        }
+      ],
+      "shells": [
+        {
+          "faces": [
+            {
+              "face": 0,
+              "forward": true
+            },
+            {
+              "face": 1,
+              "forward": true
+            },
+            {
+              "face": 2,
+              "forward": true
+            },
+            {
+              "face": 3,
+              "forward": true
+            },
+            {
+              "face": 4,
+              "forward": true
+            },
+            {
+              "face": 5,
+              "forward": true
+            }
+          ],
+          "kind": "faces",
+          "wires": []
+        }
+      ],
+      "tolerance": 0.00002,
+      "version": 4,
+      "vertices": [
+        {
+          "point": [
+            0.0,
+            30.0,
+            10.0
+          ],
+          "tolerance": 0.00002
+        },
+        {
+          "point": [
+            0.0,
+            0.0,
+            10.0
+          ],
+          "tolerance": 0.00002
+        },
+        {
+          "point": [
+            40.0,
+            0.0,
+            10.0
+          ],
+          "tolerance": 0.00002
+        },
+        {
+          "point": [
+            40.0,
+            30.0,
+            10.0
+          ],
+          "tolerance": 0.00002
+        },
+        {
+          "point": [
+            40.0,
+            30.0,
+            0.0
+          ],
+          "tolerance": 0.00002
+        },
+        {
+          "point": [
+            0.0,
+            30.0,
+            0.0
+          ],
+          "tolerance": 0.00002
+        },
+        {
+          "point": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "tolerance": 0.00002
+        },
+        {
+          "point": [
+            40.0,
+            0.0,
+            0.0
+          ],
+          "tolerance": 0.00002
+        }
+      ]
+    }
+  },
+  {
+    "metadata": {
+      "boundaries": null,
+      "color": null,
+      "face_sources": null,
+      "history": {
+        "edges": [
+          {
+            "faces": [
+              0,
+              6
+            ],
+            "origins": [
+              {
+                "kind": "meeting",
+                "sides": [
+                  [
+                    {
+                      "face": 0,
+                      "kind": "face",
+                      "operand": 0
+                    }
+                  ],
+                  [
+                    {
+                      "edge": 1,
+                      "kind": "edge",
+                      "operand": 0
+                    }
+                  ]
+                ]
+              }
+            ]
+          },
+          {
+            "faces": [
+              0,
+              5
+            ],
+            "origins": [
+              {
+                "edge": 2,
+                "kind": "edge",
+                "operand": 0
+              }
+            ]
+          },
+          {
+            "faces": [
+              0,
+              1
+            ],
+            "origins": [
+              {
+                "edge": 3,
+                "kind": "edge",
+                "operand": 0
+              }
+            ]
+          },
+          {
+            "faces": [
+              0,
+              4
+            ],
+            "origins": [
+              {
+                "edge": 0,
+                "kind": "edge",
+                "operand": 0
+              }
+            ]
+          },
+          {
+            "faces": [
+              1,
+              5
+            ],
+            "origins": [
+              {
+                "edge": 4,
+                "kind": "edge",
+                "operand": 0
+              }
+            ]
+          },
+          {
+            "faces": [
+              1,
+              2
+            ],
+            "origins": [
+              {
+                "edge": 5,
+                "kind": "edge",
+                "operand": 0
+              }
+            ]
+          },
+          {
+            "faces": [
+              1,
+              4
+            ],
+            "origins": [
+              {
+                "edge": 6,
+                "kind": "edge",
+                "operand": 0
+              }
+            ]
+          },
+          {
+            "faces": [
+              2,
+              4
+            ],
+            "origins": [
+              {
+                "edge": 7,
+                "kind": "edge",
+                "operand": 0
+              }
+            ]
+          },
+          {
+            "faces": [
+              2,
+              5
+            ],
+            "origins": [
+              {
+                "edge": 11,
+                "kind": "edge",
+                "operand": 0
+              }
+            ]
+          },
+          {
+            "faces": [
+              2,
+              3
+            ],
+            "origins": [
+              {
+                "edge": 9,
+                "kind": "edge",
+                "operand": 0
+              }
+            ]
+          },
+          {
+            "faces": [
+              3,
+              6
+            ],
+            "origins": [
+              {
+                "kind": "meeting",
+                "sides": [
+                  [
+                    {
+                      "face": 3,
+                      "kind": "face",
+                      "operand": 0
+                    }
+                  ],
+                  [
+                    {
+                      "edge": 1,
+                      "kind": "edge",
+                      "operand": 0
+                    }
+                  ]
+                ]
+              }
+            ]
+          },
+          {
+            "faces": [
+              3,
+              4
+            ],
+            "origins": [
+              {
+                "edge": 8,
+                "kind": "edge",
+                "operand": 0
+              }
+            ]
+          },
+          {
+            "faces": [
+              3,
+              5
+            ],
+            "origins": [
+              {
+                "edge": 10,
+                "kind": "edge",
+                "operand": 0
+              }
+            ]
+          },
+          {
+            "faces": [
+              4,
+              6
+            ],
+            "origins": [
+              {
+                "kind": "meeting",
+                "sides": [
+                  [
+                    {
+                      "face": 2,
+                      "kind": "face",
+                      "operand": 0
+                    }
+                  ],
+                  [
+                    {
+                      "edge": 1,
+                      "kind": "edge",
+                      "operand": 0
+                    }
+                  ]
+                ]
+              }
+            ]
+          },
+          {
+            "faces": [
+              5,
+              6
+            ],
+            "origins": [
+              {
+                "kind": "meeting",
+                "sides": [
+                  [
+                    {
+                      "face": 4,
+                      "kind": "face",
+                      "operand": 0
+                    }
+                  ],
+                  [
+                    {
+                      "edge": 1,
+                      "kind": "edge",
+                      "operand": 0
+                    }
+                  ]
+                ]
+              }
+            ]
+          }
+        ],
+        "faces": [
+          {
+            "change": "modified",
+            "origins": [
+              {
+                "face": 0,
+                "kind": "face",
+                "operand": 0
+              }
+            ]
+          },
+          {
+            "change": "kept",
+            "origins": [
+              {
+                "face": 1,
+                "kind": "face",
+                "operand": 0
+              }
+            ]
+          },
+          {
+            "change": "kept",
+            "origins": [
+              {
+                "face": 5,
+                "kind": "face",
+                "operand": 0
+              }
+            ]
+          },
+          {
+            "change": "modified",
+            "origins": [
+              {
+                "face": 3,
+                "kind": "face",
+                "operand": 0
+              }
+            ]
+          },
+          {
+            "change": "modified",
+            "origins": [
+              {
+                "face": 2,
+                "kind": "face",
+                "operand": 0
+              }
+            ]
+          },
+          {
+            "change": "modified",
+            "origins": [
+              {
+                "face": 4,
+                "kind": "face",
+                "operand": 0
+              }
+            ]
+          },
+          {
+            "change": "generated",
+            "origins": [
+              {
+                "edge": 1,
+                "kind": "edge",
+                "operand": 0
+              }
+            ]
+          }
+        ],
+        "operands": 1
+      },
+      "paint": null,
+      "preserve_boundaries": false,
+      "version": 1
+    },
+    "runtime": {
+      "coarse_missing": null,
+      "size": 50.990195135927856
+    },
+    "solid": {
+      "edges": [
+        {
+          "curve": {
+            "end": [
+              60.0,
+              1.9999999999999964,
+              10.0
+            ],
+            "kind": "line",
+            "start": [
+              -20.0,
+              1.9999999999999964,
+              10.0
+            ]
+          },
+          "interval": [
+            0.25,
+            0.75
+          ],
+          "tolerance": 0.00008,
+          "uses": [
+            {
+              "face": 0,
+              "loop": 0,
+              "position": 0,
+              "upper": false
+            },
+            {
+              "face": 6,
+              "loop": 0,
+              "position": 0,
+              "upper": true
+            }
+          ],
+          "vertices": [
+            0,
+            1
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              40.0,
+              30.0,
+              10.0
+            ],
+            "kind": "line",
+            "start": [
+              40.0,
+              0.0,
+              10.0
+            ]
+          },
+          "interval": [
+            0.06666666666666655,
+            1.0
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 0,
+              "loop": 0,
+              "position": 1,
+              "upper": false
+            },
+            {
+              "face": 5,
+              "loop": 0,
+              "position": 4,
+              "upper": true
+            }
+          ],
+          "vertices": [
+            1,
+            2
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              0.0,
+              30.0,
+              10.0
+            ],
+            "kind": "line",
+            "start": [
+              40.0,
+              30.0,
+              10.0
+            ]
+          },
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 0,
+              "loop": 0,
+              "position": 2,
+              "upper": false
+            },
+            {
+              "face": 1,
+              "loop": 0,
+              "position": 3,
+              "upper": true
+            }
+          ],
+          "vertices": [
+            2,
+            3
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              0.0,
+              0.0,
+              10.0
+            ],
+            "kind": "line",
+            "start": [
+              0.0,
+              30.0,
+              10.0
+            ]
+          },
+          "interval": [
+            0.0,
+            0.9333333333333335
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 0,
+              "loop": 0,
+              "position": 3,
+              "upper": false
+            },
+            {
+              "face": 4,
+              "loop": 0,
+              "position": 1,
+              "upper": true
+            }
+          ],
+          "vertices": [
+            3,
+            0
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              40.0,
+              30.0,
+              10.0
+            ],
+            "kind": "line",
+            "start": [
+              40.0,
+              30.0,
+              0.0
+            ]
+          },
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 1,
+              "loop": 0,
+              "position": 0,
+              "upper": true
+            },
+            {
+              "face": 5,
+              "loop": 0,
+              "position": 3,
+              "upper": false
+            }
+          ],
+          "vertices": [
+            4,
+            2
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              0.0,
+              30.0,
+              0.0
+            ],
+            "kind": "line",
+            "start": [
+              40.0,
+              30.0,
+              0.0
+            ]
+          },
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 1,
+              "loop": 0,
+              "position": 1,
+              "upper": false
+            },
+            {
+              "face": 2,
+              "loop": 0,
+              "position": 1,
+              "upper": true
+            }
+          ],
+          "vertices": [
+            4,
+            5
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              0.0,
+              30.0,
+              10.0
+            ],
+            "kind": "line",
+            "start": [
+              0.0,
+              30.0,
+              0.0
+            ]
+          },
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 1,
+              "loop": 0,
+              "position": 2,
+              "upper": false
+            },
+            {
+              "face": 4,
+              "loop": 0,
+              "position": 2,
+              "upper": true
+            }
+          ],
+          "vertices": [
+            5,
+            3
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "kind": "line",
+            "start": [
+              0.0,
+              30.0,
+              0.0
+            ]
+          },
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 2,
+              "loop": 0,
+              "position": 0,
+              "upper": true
+            },
+            {
+              "face": 4,
+              "loop": 0,
+              "position": 3,
+              "upper": false
+            }
+          ],
+          "vertices": [
+            5,
+            6
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              40.0,
+              30.0,
+              0.0
+            ],
+            "kind": "line",
+            "start": [
+              40.0,
+              0.0,
+              0.0
+            ]
+          },
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 2,
+              "loop": 0,
+              "position": 2,
+              "upper": true
+            },
+            {
+              "face": 5,
+              "loop": 0,
+              "position": 2,
+              "upper": false
+            }
+          ],
+          "vertices": [
+            7,
+            4
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              40.0,
+              0.0,
+              0.0
+            ],
+            "kind": "line",
+            "start": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 2,
+              "loop": 0,
+              "position": 3,
+              "upper": true
+            },
+            {
+              "face": 3,
+              "loop": 0,
+              "position": 2,
+              "upper": false
+            }
+          ],
+          "vertices": [
+            6,
+            7
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              60.0,
+              0.0,
+              8.0
+            ],
+            "kind": "line",
+            "start": [
+              -20.0,
+              0.0,
+              8.0
+            ]
+          },
+          "interval": [
+            0.25,
+            0.75
+          ],
+          "tolerance": 0.00008,
+          "uses": [
+            {
+              "face": 3,
+              "loop": 0,
+              "position": 0,
+              "upper": true
+            },
+            {
+              "face": 6,
+              "loop": 0,
+              "position": 2,
+              "upper": false
+            }
+          ],
+          "vertices": [
+            8,
+            9
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              0.0,
+              0.0,
+              10.0
+            ],
+            "kind": "line",
+            "start": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "interval": [
+            0.0,
+            0.8
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 3,
+              "loop": 0,
+              "position": 1,
+              "upper": true
+            },
+            {
+              "face": 4,
+              "loop": 0,
+              "position": 4,
+              "upper": false
+            }
+          ],
+          "vertices": [
+            6,
+            8
+          ]
+        },
+        {
+          "curve": {
+            "end": [
+              40.0,
+              0.0,
+              10.0
+            ],
+            "kind": "line",
+            "start": [
+              40.0,
+              0.0,
+              0.0
+            ]
+          },
+          "interval": [
+            0.0,
+            0.8
+          ],
+          "tolerance": 0.00002,
+          "uses": [
+            {
+              "face": 3,
+              "loop": 0,
+              "position": 3,
+              "upper": false
+            },
+            {
+              "face": 5,
+              "loop": 0,
+              "position": 1,
+              "upper": true
+            }
+          ],
+          "vertices": [
+            7,
+            9
+          ]
+        },
+        {
+          "curve": {
+            "frame": {
+              "origin": [
+                0.0,
+                2.000000000000002,
+                7.999999999999997
+              ],
+              "x_axis": [
+                0.0,
+                -2.886579864025403e-15,
+                1.0
+              ],
+              "y_axis": [
+                0.0,
+                -1.0,
+                -2.886579864025403e-15
+              ]
+            },
+            "kind": "circle",
+            "radius": 2.000000000000003
+          },
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "nurbs": {
+            "homogeneous": [
+              [
+                0.0,
+                1.9999999999999964,
+                10.0,
+                1.0
+              ],
+              [
+                0.0,
+                1.0638579009562312e-15,
+                7.071067811865485,
+                0.7071067811865489
+              ],
+              [
+                0.0,
+                -8.881784197001252e-16,
+                7.999999999999999,
+                1.0
+              ]
+            ],
+            "kind": "rational_spline",
+            "knots": [
+              0.0,
+              0.0,
+              0.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "tolerance": 0.00008,
+          "uses": [
+            {
+              "face": 4,
+              "loop": 0,
+              "position": 0,
+              "upper": true
+            },
+            {
+              "face": 6,
+              "loop": 0,
+              "position": 1,
+              "upper": false
+            }
+          ],
+          "vertices": [
+            0,
+            8
+          ]
+        },
+        {
+          "curve": {
+            "frame": {
+              "origin": [
+                40.0,
+                2.000000000000002,
+                7.999999999999997
+              ],
+              "x_axis": [
+                0.0,
+                -2.886579864025403e-15,
+                1.0
+              ],
+              "y_axis": [
+                0.0,
+                1.0,
+                2.886579864025403e-15
+              ]
+            },
+            "kind": "circle",
+            "radius": 2.000000000000003
+          },
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "nurbs": {
+            "homogeneous": [
+              [
+                40.0,
+                -8.881784197001252e-16,
+                7.999999999999999,
+                1.0
+              ],
+              [
+                28.284271247461955,
+                1.0638579009562312e-15,
+                7.071067811865485,
+                0.7071067811865489
+              ],
+              [
+                40.0,
+                1.9999999999999964,
+                10.0,
+                1.0
+              ]
+            ],
+            "kind": "rational_spline",
+            "knots": [
+              0.0,
+              0.0,
+              0.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "tolerance": 0.00008,
+          "uses": [
+            {
+              "face": 5,
+              "loop": 0,
+              "position": 0,
+              "upper": true
+            },
+            {
+              "face": 6,
+              "loop": 0,
+              "position": 3,
+              "upper": false
+            }
+          ],
+          "vertices": [
+            9,
+            1
+          ]
+        }
+      ],
+      "faces": [
+        {
+          "domain": [
+            [
+              0.0,
+              55.0
+            ],
+            [
+              0.0,
+              55.0
+            ]
+          ],
+          "loops": [
+            {
+              "edges": [
+                {
+                  "edge": 0,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.25,
+                      0.25,
+                      0.75,
+                      0.75
+                    ],
+                    "points": [
+                      [
+                        14.5,
+                        47.5
+                      ],
+                      [
+                        14.5,
+                        7.5
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 1,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.06666666666666655,
+                      0.06666666666666655,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        14.5,
+                        7.5
+                      ],
+                      [
+                        42.5,
+                        7.5
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 2,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        42.5,
+                        7.5
+                      ],
+                      [
+                        42.5,
+                        47.5
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 3,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      0.9333333333333335,
+                      0.9333333333333335
+                    ],
+                    "points": [
+                      [
+                        42.5,
+                        47.5
+                      ],
+                      [
+                        14.5,
+                        47.5
+                      ]
+                    ]
+                  }
+                }
+              ],
+              "kind": "edges"
+            }
+          ],
+          "surface": {
+            "kind": "plane",
+            "origin": [
+              47.5,
+              -12.500000000000004,
+              10.0
+            ],
+            "u_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "v_axis": [
+              -1.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        {
+          "domain": [
+            [
+              0.0,
+              40.0
+            ],
+            [
+              0.0,
+              10.0
+            ]
+          ],
+          "loops": [
+            {
+              "edges": [
+                {
+                  "edge": 4,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        10.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 5,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        40.0,
+                        0.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 6,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        40.0,
+                        0.0
+                      ],
+                      [
+                        40.0,
+                        10.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 2,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        10.0
+                      ],
+                      [
+                        40.0,
+                        10.0
+                      ]
+                    ]
+                  }
+                }
+              ],
+              "kind": "edges"
+            }
+          ],
+          "surface": {
+            "kind": "plane",
+            "origin": [
+              40.0,
+              30.0,
+              0.0
+            ],
+            "u_axis": [
+              -1.0,
+              0.0,
+              0.0
+            ],
+            "v_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          }
+        },
+        {
+          "domain": [
+            [
+              0.0,
+              55.0
+            ],
+            [
+              0.0,
+              55.0
+            ]
+          ],
+          "loops": [
+            {
+              "edges": [
+                {
+                  "edge": 7,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        47.5,
+                        42.5
+                      ],
+                      [
+                        47.5,
+                        12.500000000000004
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 5,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        7.5,
+                        42.5
+                      ],
+                      [
+                        47.5,
+                        42.5
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 8,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        7.5,
+                        12.500000000000004
+                      ],
+                      [
+                        7.5,
+                        42.5
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 9,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        47.5,
+                        12.500000000000004
+                      ],
+                      [
+                        7.5,
+                        12.500000000000004
+                      ]
+                    ]
+                  }
+                }
+              ],
+              "kind": "edges"
+            }
+          ],
+          "surface": {
+            "kind": "plane",
+            "origin": [
+              47.5,
+              -12.500000000000004,
+              0.0
+            ],
+            "u_axis": [
+              -1.0,
+              0.0,
+              0.0
+            ],
+            "v_axis": [
+              0.0,
+              1.0,
+              0.0
+            ]
+          }
+        },
+        {
+          "domain": [
+            [
+              0.0,
+              40.0
+            ],
+            [
+              0.0,
+              10.0
+            ]
+          ],
+          "loops": [
+            {
+              "edges": [
+                {
+                  "edge": 10,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.25,
+                      0.25,
+                      0.75,
+                      0.75
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        8.0
+                      ],
+                      [
+                        40.0,
+                        8.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 11,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      0.8,
+                      0.8
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        8.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 9,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        40.0,
+                        0.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 12,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      0.8,
+                      0.8
+                    ],
+                    "points": [
+                      [
+                        40.0,
+                        0.0
+                      ],
+                      [
+                        40.0,
+                        8.0
+                      ]
+                    ]
+                  }
+                }
+              ],
+              "kind": "edges"
+            }
+          ],
+          "surface": {
+            "kind": "plane",
+            "origin": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "u_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "v_axis": [
+              -0.0,
+              0.0,
+              1.0
+            ]
+          }
+        },
+        {
+          "domain": [
+            [
+              0.0,
+              30.0
+            ],
+            [
+              0.0,
+              10.0
+            ]
+          ],
+          "loops": [
+            {
+              "edges": [
+                {
+                  "edge": 13,
+                  "forward": false,
+                  "pcurve": {
+                    "homogeneous": [
+                      [
+                        28.000000000000004,
+                        10.0,
+                        1.0
+                      ],
+                      [
+                        21.213203435596466,
+                        7.071067811865485,
+                        0.7071067811865489
+                      ],
+                      [
+                        30.0,
+                        7.999999999999999,
+                        1.0
+                      ]
+                    ],
+                    "kind": "rational_spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0,
+                      1.0
+                    ]
+                  }
+                },
+                {
+                  "edge": 3,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      0.9333333333333335,
+                      0.9333333333333335
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        10.0
+                      ],
+                      [
+                        28.000000000000004,
+                        10.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 6,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        10.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 7,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        30.0,
+                        0.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 11,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      0.8,
+                      0.8
+                    ],
+                    "points": [
+                      [
+                        30.0,
+                        0.0
+                      ],
+                      [
+                        30.0,
+                        8.0
+                      ]
+                    ]
+                  }
+                }
+              ],
+              "kind": "edges"
+            }
+          ],
+          "surface": {
+            "kind": "plane",
+            "origin": [
+              0.0,
+              30.0,
+              0.0
+            ],
+            "u_axis": [
+              0.0,
+              -1.0,
+              0.0
+            ],
+            "v_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          }
+        },
+        {
+          "domain": [
+            [
+              0.0,
+              30.0
+            ],
+            [
+              0.0,
+              10.0
+            ]
+          ],
+          "loops": [
+            {
+              "edges": [
+                {
+                  "edge": 14,
+                  "forward": false,
+                  "pcurve": {
+                    "homogeneous": [
+                      [
+                        0.0,
+                        7.999999999999999,
+                        1.0
+                      ],
+                      [
+                        1.0638579009562312e-15,
+                        7.071067811865485,
+                        0.7071067811865489
+                      ],
+                      [
+                        1.9999999999999964,
+                        10.0,
+                        1.0
+                      ]
+                    ],
+                    "kind": "rational_spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0,
+                      1.0
+                    ]
+                  }
+                },
+                {
+                  "edge": 12,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      0.8,
+                      0.8
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        0.0,
+                        8.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 8,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        0.0,
+                        0.0
+                      ],
+                      [
+                        30.0,
+                        0.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 4,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        30.0,
+                        0.0
+                      ],
+                      [
+                        30.0,
+                        10.0
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 1,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.06666666666666655,
+                      0.06666666666666655,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        1.9999999999999967,
+                        10.0
+                      ],
+                      [
+                        30.0,
+                        10.0
+                      ]
+                    ]
+                  }
+                }
+              ],
+              "kind": "edges"
+            }
+          ],
+          "surface": {
+            "kind": "plane",
+            "origin": [
+              40.0,
+              0.0,
+              0.0
+            ],
+            "u_axis": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "v_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          }
+        },
+        {
+          "domain": [
+            [
+              0.0,
+              1.0
+            ],
+            [
+              0.25000000000000006,
+              0.7500000000000002
+            ]
+          ],
+          "loops": [
+            {
+              "edges": [
+                {
+                  "edge": 0,
+                  "forward": false,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.25,
+                      0.25,
+                      0.75,
+                      0.75
+                    ],
+                    "points": [
+                      [
+                        -5.551115123125784e-17,
+                        0.25000000000000006
+                      ],
+                      [
+                        -1.6653345369377353e-16,
+                        0.7500000000000002
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 13,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        -5.551115123125784e-17,
+                        0.25000000000000006
+                      ],
+                      [
+                        0.9999999999999999,
+                        0.24999999999999983
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 10,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.25,
+                      0.25,
+                      0.75,
+                      0.75
+                    ],
+                    "points": [
+                      [
+                        0.9999999999999999,
+                        0.24999999999999983
+                      ],
+                      [
+                        0.9999999999999998,
+                        0.75
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "edge": 14,
+                  "forward": true,
+                  "pcurve": {
+                    "kind": "spline",
+                    "knots": [
+                      0.0,
+                      0.0,
+                      1.0,
+                      1.0
+                    ],
+                    "points": [
+                      [
+                        0.9999999999999998,
+                        0.75
+                      ],
+                      [
+                        -1.6653345369377353e-16,
+                        0.7500000000000002
+                      ]
+                    ]
+                  }
+                }
+              ],
+              "kind": "edges"
+            }
+          ],
+          "nurbs": {
+            "homogeneous": [
+              [
+                [
+                  0.0,
+                  1.9999999999999964,
+                  10.0,
+                  1.0
+                ],
+                [
+                  40.00000000000001,
+                  1.9999999999999964,
+                  10.0,
+                  1.0
+                ]
+              ],
+              [
+                [
+                  0.0,
+                  1.3778763926929864e-15,
+                  7.071067811865485,
+                  0.7071067811865489
+                ],
+                [
+                  28.284271247461962,
+                  1.3778763926929864e-15,
+                  7.071067811865485,
+                  0.7071067811865489
+                ]
+              ],
+              [
+                [
+                  0.0,
+                  -4.440892098500626e-16,
+                  8.0,
+                  1.0
+                ],
+                [
+                  40.00000000000001,
+                  -4.440892098500626e-16,
+                  8.0,
+                  1.0
+                ]
+              ]
+            ],
+            "kind": "rational_spline",
+            "u_knots": [
+              0.0,
+              0.0,
+              0.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "v_knots": [
+              0.25000000000000006,
+              0.25000000000000006,
+              0.7500000000000002,
+              0.7500000000000002
+            ]
+          },
+          "surface": {
+            "frame": {
+              "origin": [
+                0.0,
+                2.0000000000000027,
+                7.9999999999999964
+              ],
+              "x_axis": [
+                0.0,
+                -3.1086244689504328e-15,
+                1.0
+              ],
+              "y_axis": [
+                0.0,
+                -1.0,
+                -3.1086244689504328e-15
+              ]
+            },
+            "kind": "cylinder",
+            "radius": 2.0000000000000036
+          }
+        }
+      ],
+      "regions": [
+        {
+          "shells": [
+            0
+          ],
+          "void": false
+        },
+        {
+          "shells": [
+            0
+          ],
+          "void": false
+        }
+      ],
+      "shells": [
+        {
+          "faces": [
+            {
+              "face": 0,
+              "forward": true
+            },
+            {
+              "face": 1,
+              "forward": true
+            },
+            {
+              "face": 2,
+              "forward": true
+            },
+            {
+              "face": 3,
+              "forward": true
+            },
+            {
+              "face": 4,
+              "forward": true
+            },
+            {
+              "face": 5,
+              "forward": true
+            },
+            {
+              "face": 6,
+              "forward": true
+            }
+          ],
+          "kind": "faces",
+          "wires": []
+        }
+      ],
+      "tolerance": 0.00002,
+      "version": 4,
+      "vertices": [
+        {
+          "point": [
+            0.0,
+            1.9999999999999964,
+            10.0
+          ],
+          "tolerance": 0.00008
+        },
+        {
+          "point": [
+            40.0,
+            1.9999999999999964,
+            10.0
+          ],
+          "tolerance": 0.00008
+        },
+        {
+          "point": [
+            40.0,
+            30.0,
+            10.0
+          ],
+          "tolerance": 0.00002
+        },
+        {
+          "point": [
+            0.0,
+            30.0,
+            10.0
+          ],
+          "tolerance": 0.00002
+        },
+        {
+          "point": [
+            40.0,
+            30.0,
+            0.0
+          ],
+          "tolerance": 0.00002
+        },
+        {
+          "point": [
+            0.0,
+            30.0,
+            0.0
+          ],
+          "tolerance": 0.00002
+        },
+        {
+          "point": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "tolerance": 0.00002
+        },
+        {
+          "point": [
+            40.0,
+            0.0,
+            0.0
+          ],
+          "tolerance": 0.00002
+        },
+        {
+          "point": [
+            0.0,
+            0.0,
+            8.0
+          ],
+          "tolerance": 0.00008
+        },
+        {
+          "point": [
+            40.0,
+            -8.881784197001252e-16,
+            7.999999999999999
+          ],
+          "tolerance": 0.00008
+        }
+      ]
+    }
+  }
+]

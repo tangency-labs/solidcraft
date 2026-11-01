@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a point at t 1.5, past the end of a sketch line, is refused",
+ "source": "analytic",
+ "method": "t runs 0..1 along the path (the command's contract: `t: expr, 0\u20261 along it`); 1.5 is past its end, and a point along the path can go no further, so it is refused rather than moved back to the end",
+ "outcome": "refused",
+ "refusal": "0 (its start) to 1 (its end)"
+}

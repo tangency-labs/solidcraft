@@ -8,7 +8,9 @@ use crate::{Result, guard};
 /// thread. Waking the pool's workers costs tens of microseconds, so callers ask for it only
 /// when the items carry more work than that (decided from the work, not the item count).
 pub(crate) fn map<T: Sync, R: Send>(what: &'static str, items: &[T], parallel: bool, f: impl Fn(&T) -> Result<R> + Sync) -> Vec<Result<R>> {
-    let one = |item: &T| guard(what, || f(item));
+    // The workers run under the caller's validation mode (`crate::validation`).
+    let scope = crate::validation::current();
+    let one = |item: &T| crate::validation::within(scope.clone(), || guard(what, || f(item)));
     // The browser build has no worker pool: everything runs on the calling thread.
     #[cfg(target_arch = "wasm32")]
     let _ = parallel;
@@ -53,7 +55,8 @@ pub fn map_with_local_pools<T: Sync, R: Send>(items: &[T], max_threads: usize, f
                 let _ = cell.set(pool);
             }
             let pool = cell.get().ok_or_else(|| crate::KernelError::Failed("missing mesh worker".into()))?;
-            pool.install(|| guard("mesh worker", || f(item)))
+            let scope = crate::validation::current();
+            pool.install(|| crate::validation::within(scope, || guard("mesh worker", || f(item))))
         })
     };
     #[cfg(target_arch = "wasm32")]
@@ -67,7 +70,9 @@ pub fn map_with_local_pools<T: Sync, R: Send>(items: &[T], max_threads: usize, f
 /// `f` over `items` as [`for_each_on_threads`] runs it, results in item order (`None` where an
 /// item panicked).
 pub fn map_on_threads<T: Sync, R: Send>(items: &[T], max_threads: usize, f: impl Fn(&T) -> R + Sync) -> Vec<Option<R>> {
-    let one = |item: &T| guard("parallel item", || Ok(f(item))).ok();
+    // The threads run under the caller's validation mode (`crate::validation`).
+    let scope = crate::validation::current();
+    let one = |item: &T| crate::validation::within(scope.clone(), || guard("parallel item", || Ok(f(item))).ok());
     #[cfg(not(target_arch = "wasm32"))]
     {
         use std::sync::atomic::{AtomicUsize, Ordering};

@@ -1,0 +1,166 @@
+# demo/enclosure_steps: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Enclosure: 47 faces, 108 edges
+Enclosure face F10:hole:base
+Enclosure face F10:hole:side:0
+Enclosure face F10:hole:side:1
+Enclosure face F10:post:side:0
+Enclosure face F10:post:side:1
+Enclosure face F10:post:top
+Enclosure face F2:side:l1
+Enclosure face F2:side:l2
+Enclosure face F2:side:l3
+Enclosure face F2:side:l4
+Enclosure face F2:start
+Enclosure face F2:top
+Enclosure face F3:blend:F2:side:l1|F2:side:l2
+Enclosure face F3:blend:F2:side:l1|F2:side:l4
+Enclosure face F3:blend:F2:side:l2|F2:side:l3
+Enclosure face F3:blend:F2:side:l3|F2:side:l4
+Enclosure face F4:inner:F2:side:l1
+Enclosure face F4:inner:F2:side:l2
+Enclosure face F4:inner:F2:side:l3
+Enclosure face F4:inner:F2:side:l4
+Enclosure face F4:inner:F2:start
+Enclosure face F4:inner:F3:blend:F2:side:l1|F2:side:l2
+Enclosure face F4:inner:F3:blend:F2:side:l1|F2:side:l4
+Enclosure face F4:inner:F3:blend:F2:side:l2|F2:side:l3
+Enclosure face F4:inner:F3:blend:F2:side:l3|F2:side:l4
+Enclosure face F6:side:l1
+Enclosure face F6:side:l2
+Enclosure face F6:side:l3
+Enclosure face F6:side:l4
+Enclosure face F7:hole:base
+Enclosure face F7:hole:side:0
+Enclosure face F7:hole:side:1
+Enclosure face F7:post:side:0
+Enclosure face F7:post:side:1
+Enclosure face F7:post:top
+Enclosure face F8:hole:base
+Enclosure face F8:hole:side:0
+Enclosure face F8:hole:side:1
+Enclosure face F8:post:side:0
+Enclosure face F8:post:side:1
+Enclosure face F8:post:top
+Enclosure face F9:hole:base
+Enclosure face F9:hole:side:0
+Enclosure face F9:hole:side:1
+Enclosure face F9:post:side:0
+Enclosure face F9:post:side:1
+Enclosure face F9:post:top
+Enclosure edge F10:hole:base|F10:hole:side:0
+Enclosure edge F10:hole:base|F10:hole:side:1
+Enclosure edge F10:hole:side:0|F10:hole:side:1~1 [geometric]
+Enclosure edge F10:hole:side:0|F10:hole:side:1~2 [geometric]
+Enclosure edge F10:hole:side:0|F10:post:top
+Enclosure edge F10:hole:side:1|F10:post:top
+Enclosure edge F10:post:side:0|F10:post:side:1~1 [geometric]
+Enclosure edge F10:post:side:0|F10:post:side:1~2 [geometric]
+Enclosure edge F10:post:side:0|F10:post:top
+Enclosure edge F10:post:side:0|F4:inner:F2:start
+Enclosure edge F10:post:side:1|F10:post:top
+Enclosure edge F10:post:side:1|F4:inner:F2:start
+Enclosure edge F2:side:l1|F2:start
+Enclosure edge F2:side:l1|F2:top
+Enclosure edge F2:side:l1|F3:blend:F2:side:l1|F2:side:l2
+Enclosure edge F2:side:l1|F3:blend:F2:side:l1|F2:side:l4
+Enclosure edge F2:side:l2|F2:start
+Enclosure edge F2:side:l2|F2:top
+Enclosure edge F2:side:l2|F3:blend:F2:side:l1|F2:side:l2
+Enclosure edge F2:side:l2|F3:blend:F2:side:l2|F2:side:l3
+Enclosure edge F2:side:l2|F6:side:l1
+Enclosure edge F2:side:l2|F6:side:l2
+Enclosure edge F2:side:l2|F6:side:l3
+Enclosure edge F2:side:l2|F6:side:l4
+Enclosure edge F2:side:l3|F2:start
+Enclosure edge F2:side:l3|F2:top
+Enclosure edge F2:side:l3|F3:blend:F2:side:l2|F2:side:l3
+Enclosure edge F2:side:l3|F3:blend:F2:side:l3|F2:side:l4
+Enclosure edge F2:side:l4|F2:start
+Enclosure edge F2:side:l4|F2:top
+Enclosure edge F2:side:l4|F3:blend:F2:side:l1|F2:side:l4
+Enclosure edge F2:side:l4|F3:blend:F2:side:l3|F2:side:l4
+Enclosure edge F2:start|F3:blend:F2:side:l1|F2:side:l2
+Enclosure edge F2:start|F3:blend:F2:side:l1|F2:side:l4
+Enclosure edge F2:start|F3:blend:F2:side:l2|F2:side:l3
+Enclosure edge F2:start|F3:blend:F2:side:l3|F2:side:l4
+Enclosure edge F2:top|F3:blend:F2:side:l1|F2:side:l2
+Enclosure edge F2:top|F3:blend:F2:side:l1|F2:side:l4
+Enclosure edge F2:top|F3:blend:F2:side:l2|F2:side:l3
+Enclosure edge F2:top|F3:blend:F2:side:l3|F2:side:l4
+Enclosure edge F2:top|F4:inner:F2:side:l1
+Enclosure edge F2:top|F4:inner:F2:side:l2
+Enclosure edge F2:top|F4:inner:F2:side:l3
+Enclosure edge F2:top|F4:inner:F2:side:l4
+Enclosure edge F2:top|F4:inner:F3:blend:F2:side:l1|F2:side:l2
+Enclosure edge F2:top|F4:inner:F3:blend:F2:side:l1|F2:side:l4
+Enclosure edge F2:top|F4:inner:F3:blend:F2:side:l2|F2:side:l3
+Enclosure edge F2:top|F4:inner:F3:blend:F2:side:l3|F2:side:l4
+Enclosure edge F4:inner:F2:side:l1|F4:inner:F2:start
+Enclosure edge F4:inner:F2:side:l1|F4:inner:F3:blend:F2:side:l1|F2:side:l2
+Enclosure edge F4:inner:F2:side:l1|F4:inner:F3:blend:F2:side:l1|F2:side:l4
+Enclosure edge F4:inner:F2:side:l2|F4:inner:F2:start
+Enclosure edge F4:inner:F2:side:l2|F4:inner:F3:blend:F2:side:l1|F2:side:l2
+Enclosure edge F4:inner:F2:side:l2|F4:inner:F3:blend:F2:side:l2|F2:side:l3
+Enclosure edge F4:inner:F2:side:l2|F6:side:l1
+Enclosure edge F4:inner:F2:side:l2|F6:side:l2
+Enclosure edge F4:inner:F2:side:l2|F6:side:l3
+Enclosure edge F4:inner:F2:side:l2|F6:side:l4
+Enclosure edge F4:inner:F2:side:l3|F4:inner:F2:start
+Enclosure edge F4:inner:F2:side:l3|F4:inner:F3:blend:F2:side:l2|F2:side:l3
+Enclosure edge F4:inner:F2:side:l3|F4:inner:F3:blend:F2:side:l3|F2:side:l4
+Enclosure edge F4:inner:F2:side:l4|F4:inner:F2:start
+Enclosure edge F4:inner:F2:side:l4|F4:inner:F3:blend:F2:side:l1|F2:side:l4
+Enclosure edge F4:inner:F2:side:l4|F4:inner:F3:blend:F2:side:l3|F2:side:l4
+Enclosure edge F4:inner:F2:start|F4:inner:F3:blend:F2:side:l1|F2:side:l2
+Enclosure edge F4:inner:F2:start|F4:inner:F3:blend:F2:side:l1|F2:side:l4
+Enclosure edge F4:inner:F2:start|F4:inner:F3:blend:F2:side:l2|F2:side:l3
+Enclosure edge F4:inner:F2:start|F4:inner:F3:blend:F2:side:l3|F2:side:l4
+Enclosure edge F4:inner:F2:start|F7:post:side:0
+Enclosure edge F4:inner:F2:start|F7:post:side:1
+Enclosure edge F4:inner:F2:start|F8:post:side:0
+Enclosure edge F4:inner:F2:start|F8:post:side:1
+Enclosure edge F4:inner:F2:start|F9:post:side:0
+Enclosure edge F4:inner:F2:start|F9:post:side:1
+Enclosure edge F6:side:l1|F6:side:l2
+Enclosure edge F6:side:l1|F6:side:l4
+Enclosure edge F6:side:l2|F6:side:l3
+Enclosure edge F6:side:l3|F6:side:l4
+Enclosure edge F7:hole:base|F7:hole:side:0
+Enclosure edge F7:hole:base|F7:hole:side:1
+Enclosure edge F7:hole:side:0|F7:hole:side:1~1 [geometric]
+Enclosure edge F7:hole:side:0|F7:hole:side:1~2 [geometric]
+Enclosure edge F7:hole:side:0|F7:post:top
+Enclosure edge F7:hole:side:1|F7:post:top
+Enclosure edge F7:post:side:0|F7:post:side:1~1 [geometric]
+Enclosure edge F7:post:side:0|F7:post:side:1~2 [geometric]
+Enclosure edge F7:post:side:0|F7:post:top
+Enclosure edge F7:post:side:1|F7:post:top
+Enclosure edge F8:hole:base|F8:hole:side:0
+Enclosure edge F8:hole:base|F8:hole:side:1
+Enclosure edge F8:hole:side:0|F8:hole:side:1~1 [geometric]
+Enclosure edge F8:hole:side:0|F8:hole:side:1~2 [geometric]
+Enclosure edge F8:hole:side:0|F8:post:top
+Enclosure edge F8:hole:side:1|F8:post:top
+Enclosure edge F8:post:side:0|F8:post:side:1~1 [geometric]
+Enclosure edge F8:post:side:0|F8:post:side:1~2 [geometric]
+Enclosure edge F8:post:side:0|F8:post:top
+Enclosure edge F8:post:side:1|F8:post:top
+Enclosure edge F9:hole:base|F9:hole:side:0
+Enclosure edge F9:hole:base|F9:hole:side:1
+Enclosure edge F9:hole:side:0|F9:hole:side:1~1 [geometric]
+Enclosure edge F9:hole:side:0|F9:hole:side:1~2 [geometric]
+Enclosure edge F9:hole:side:0|F9:post:top
+Enclosure edge F9:hole:side:1|F9:post:top
+Enclosure edge F9:post:side:0|F9:post:side:1~1 [geometric]
+Enclosure edge F9:post:side:0|F9:post:side:1~2 [geometric]
+Enclosure edge F9:post:side:0|F9:post:top
+Enclosure edge F9:post:side:1|F9:post:top
+ref Fillet1 (3) edge 0 `F2:side:l2|F2:side:l3` -> Enclosure edge F2:side:l2|F2:side:l3
+ref Fillet1 (3) edge 1 `F2:side:l3|F2:side:l4` -> Enclosure edge F2:side:l3|F2:side:l4
+ref Fillet1 (3) edge 2 `F2:side:l1|F2:side:l4` -> Enclosure edge F2:side:l1|F2:side:l4
+ref Fillet1 (3) edge 3 `F2:side:l1|F2:side:l2` -> Enclosure edge F2:side:l1|F2:side:l2
+ref Shell1 (4) face 0 `F2:top` -> Enclosure face F2:top
+ref Boss1 (7) face 0 `F4:inner:F2:start` -> Enclosure face F4:inner:F2:start
+ref Boss2 (8) face 0 `F4:inner:F2:start` -> Enclosure face F4:inner:F2:start
+ref Boss3 (9) face 0 `F4:inner:F2:start` -> Enclosure face F4:inner:F2:start
+ref Boss4 (10) face 0 `F4:inner:F2:start` -> Enclosure face F4:inner:F2:start

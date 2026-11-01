@@ -1,0 +1,50 @@
+{
+ "sources": [],
+ "what": "a ball joint driven to yaw 90 and pitch 90",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); ball with frame z = +z, x = +x: M = Rz(yaw)\u00b7Ry(pitch)\u00b7Rz(roll); Ry(90): (x,y,z) -> (z,y,-x), then Rz(90): (x,y) -> (-y,x): (20,0,5) -> (5,0,-20) -> (0,5,-20); box x -5..5, y 0..10, z -40..0",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 9,
+   "json": {
+    "values": [
+     {
+      "value": 90.0
+     },
+     {
+      "value": 90.0
+     },
+     {
+      "value": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "step": 10,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      0.0,
+      5.0,
+      -20.0
+     ],
+     "bbox": {
+      "min": [
+       -5.0,
+       0.0,
+       -40.0
+      ],
+      "max": [
+       5.0,
+       10.0,
+       0.0
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,103 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      18.5,
+      0
+     ],
+     [
+      40,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "start": [
+     40,
+     0
+    ],
+    "sweep": 180
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -40,
+      0
+     ],
+     [
+      -18.5,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "start": [
+     -18.5,
+     0
+    ],
+    "sweep": -180
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "axis": "x",
+    "body_name": "Tool"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "length": 8,
+    "width": 8,
+    "height": 8,
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Block",
+    "tools": [
+     "Tool"
+    ],
+    "operation": "cut"
+   }
+  }
+ ]
+}

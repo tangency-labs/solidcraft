@@ -1,0 +1,14 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#862"
+ ],
+ "what": "a curvature-continuous (G2) fillet of size 6 on one edge of a 20 mm cube",
+ "source": "analytic",
+ "method": "type curvature: the section is the quintic Bezier with control points p+s t1, p+(2s/3) t1, p+(s/3) t1, p+(s/3) t2, p+(2s/3) t2, p+s t2 with setback s = radius = 6 (perpendicular faces), as documented for the feature (zero curvature where it meets the faces). The area between the corner and that curve, by Green on the Bezier polygon (200000 points), is 5.38095 mm^2; the edge is 20 long between two planar end faces square to it: V = 8000 - 20*5.38095 = 7892.3810. Faces: 6 + 1 = 7.",
+ "body_count": 1,
+ "volume_mm3": 7892.380952374643,
+ "faces": 7,
+ "continuity": {
+  "order": "g2"
+ }
+}

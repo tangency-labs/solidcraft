@@ -113,9 +113,7 @@ settings in `.config/nextest.toml`), the slowest tests first; doc tests run in t
 Pull requests skip a few heavy tests (each takes one to twelve minutes); they run on every push to
 `main`, nightly, and in `cargo xtask test`:
 
-- `solidcraft-engine`: `tests::hostile_params_never_panic`, everything in `tests::robustness` and
-  the seeds of `tests::robustness_goldens` (`seed_00` … `seed_95`; pull requests that change the kernel, truck or
-  the goldens run all but the slowest, `SLOW_SEEDS` in `ci.yml`),
+- `solidcraft-engine`: `tests::hostile_params_never_panic`, everything in `tests::robustness`,
   `pattern_suppress_tests::enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen`,
   `pattern_suppress_tests::enclosure_datums_follow_wall_height_and_board_depth_with_material_proofs`,
   `cmd::plastic::tests::enclosure_snap_fit_follows_resized_front_wall`, the `atomic_commands` contract tests

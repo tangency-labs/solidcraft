@@ -8,7 +8,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
-use solidcraft_doc::{Expr, Operation, ThinSide};
+use solidcraft_doc::{Expr, Operation, ThinSide, Touching};
 use solidcraft_geom::{Vec2, Vec3};
 
 use super::check::{keyed, whole};
@@ -453,6 +453,34 @@ impl JsonSchema for OperationParam {
     }
 }
 
+/// What a join makes of pieces that share no face, as `Touching::parse` reads it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TouchingParam(pub Touching);
+
+/// The feature commands' message for a `touching` they don't know.
+const TOUCHING_MESSAGE: &str = "`touching` must be separate or one_body";
+
+impl<'de> Deserialize<'de> for TouchingParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(s) => Touching::parse(&s).map(TouchingParam).ok_or_else(|| D::Error::custom(whole(TOUCHING_MESSAGE))),
+            _ => Err(D::Error::custom(whole(TOUCHING_MESSAGE))),
+        }
+    }
+}
+
+impl JsonSchema for TouchingParam {
+    fn schema_name() -> Cow<'static, str> {
+        "Touching".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        enum_schema(
+            &["separate", "one_body"],
+            "What a join makes of pieces that share no face: separate (the default) makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body.",
+        )
+    }
+}
+
 /// Extrude's operation: the above or `auto` (matched with `eq_ignore_ascii_case`, as the
 /// handler does).
 #[derive(Clone, Debug, PartialEq)]
@@ -776,8 +804,8 @@ macro_rules! pick_list {
 
 pick_list!(
     /// The `faces` of `solid.shell`, `solid.draft`, `solid.offset_face`, `solid.split_face` and
-    /// `face.delete`, as `features::face_points` reads them. (Extrude's `faces` is a
-    /// [`FacesParam`].)
+    /// `face.delete`, as `features::face_points` reads them; `solid.shell` also takes an empty
+    /// list (a closed hollow body). (Extrude's `faces` is a [`FacesParam`].)
     FaceRefs,
     FaceRef,
     "`faces` must be a list of points or face names",

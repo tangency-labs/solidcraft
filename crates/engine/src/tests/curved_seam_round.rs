@@ -52,7 +52,7 @@ fn core(p: Vec3) -> f64 {
 /// vertices were looked at and the worst error of that distance.
 fn off_the_ball(s: &Session, round: f64) -> (usize, f64) {
     let body = &s.model.state().bodies[0].body;
-    let mesh = body.tessellate(0.01).unwrap();
+    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
     let centres: Vec<Vec3> = (0..720)
         .map(|i| {
             let a = 2.0 * PI * i as f64 / 720.0;

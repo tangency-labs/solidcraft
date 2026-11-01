@@ -93,7 +93,7 @@ fn frames(s: &mut Session, n: usize, live: bool) -> Vec<Value> {
 }
 
 fn body_contains(s: &Session, p: Vec3) -> bool {
-    s.model.state().bodies.first().expect("a body").body.contains(p)
+    s.model.state().bodies.first().expect("a body").body.classify_point(p).unwrap() == solidcraft_kernel::PointClass::Inside
 }
 
 fn pt(s: &Session, id: &str) -> solidcraft_geom::Vec2 {
@@ -103,7 +103,7 @@ fn pt(s: &Session, id: &str) -> solidcraft_geom::Vec2 {
 
 fn corner(s: &Session) -> solidcraft_geom::Vec2 {
     let id = s.active_sketch.expect("sketch mode");
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     let sk = &st.sketch(id).expect("the shown sketch").sketch;
     sk.resolve_point("l1.start").and_then(|i| sk.point(i)).expect("the corner")
 }

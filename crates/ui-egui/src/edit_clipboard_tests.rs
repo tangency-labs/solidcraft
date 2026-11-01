@@ -690,13 +690,13 @@ fn design_with_cube(name: &str) -> solidcraft_engine::Session {
 #[test]
 fn copied_bodies_paste_into_another_design_as_imported_bodies() {
     let mut app = crate::SolveApp::new(design_with_cube("Bracket"), crate::Services::default());
-    let was = app.session.world_state().body("Cube").unwrap().mesh().bounds();
+    let was = crate::open_meshing::session_world(&app.session).body("Cube").unwrap().mesh().bounds();
     select(&mut app, json!({"type": "body", "name": "Cube"}));
     assert!(super::copy(&mut app));
     crate::documents::open_tab(&mut app, design_with_cube("Frame")).unwrap();
     assert!(super::can_paste(&app) && super::pasting_bodies(&app));
     assert!(super::paste(&mut app, None));
-    let is = app.session.world_state().body("Cube (2)").unwrap().mesh().bounds();
+    let is = crate::open_meshing::session_world(&app.session).body("Cube (2)").unwrap().mesh().bounds();
     assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
     let feature = app.session.doc.find_feature("Import1").expect("one Import feature");
     assert!(matches!(feature.kind, solidcraft_engine::doc::FeatureKind::Import { .. }));
@@ -880,7 +880,7 @@ fn a_second_placements_body_copies_but_is_not_cut() {
     select(&mut app, json!({"type": "body", "name": seen}));
     assert!(super::copy(&mut app));
     assert!(super::paste(&mut app, None), "{:?}", app.status);
-    let world = app.session.world_state();
+    let world = app.session.world_state().unwrap();
     let (there, copy) = (world.body(&seen).unwrap().mesh().bounds(), world.body("Cube (2)").expect("the copy").mesh().bounds());
     assert!(there.min.dist(copy.min) < 1e-6 && there.max.dist(copy.max) < 1e-6, "{there:?} vs {copy:?}");
 }

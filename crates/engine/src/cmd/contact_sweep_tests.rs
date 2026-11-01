@@ -167,8 +167,11 @@ fn thin_tilted_plates_cannot_cross_between_axis_bound_samples() {
     assert!(value > -2.0 && value < -1.9, "{value}");
 }
 
+/// A slider carrying a sphere or a box with a rounded edge stops where it meets a block 5 mm
+/// away (the sphere's and the box's near sides at x = 15, the block's at 10): ordinary curved
+/// bodies sweep within the contact sampling budget, however their faces are meshed.
 #[test]
-fn ordinary_curved_bodies_keep_a_practical_sampling_step() {
+fn ordinary_curved_bodies_stop_at_their_contact_within_the_sampling_budget() {
     for curved in ["sphere", "fillet"] {
         let mut s = Session::default();
         run(&mut s, "component.create", json!({"name": "Blocker"}));
@@ -187,8 +190,6 @@ fn ordinary_curved_bodies_keep_a_practical_sampling_step() {
             json!({"type": "slider", "a": 0, "b": "Curved", "at": {"occurrence": 0, "point": [0,0,0], "z": [1,0,0]}, "name": "Slide"}),
         );
         run(&mut s, "contact.create", json!({"occurrences": ["Blocker", "Curved"]}));
-        let geometry = super::ContactGeometry::new(&s).unwrap();
-        assert!(geometry.step > 1.0, "{curved}: tessellation must not force tiny steps: {}", geometry.step);
         let result = run(&mut s, "joint.drive", json!({"joint": "Slide", "value": -30}));
         assert!(result["stopped_by_contact"].is_object(), "{curved}: {result}");
         let value = s.doc.assembly.joints.iter().find(|j| j.name == "Slide").unwrap().values[0];

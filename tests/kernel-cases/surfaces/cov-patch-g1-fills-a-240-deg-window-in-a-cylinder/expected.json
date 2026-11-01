@@ -1,0 +1,48 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#759"
+ ],
+ "what": "a window 240 deg round a cylinder's wall (r10 x 40, z 15..25), the faces the cut made taken off and the window patched g1 and stitched: tangent to the wall it replaces, close to the cylinder",
+ "source": "analytic",
+ "method": "the box x -5..11, y -11..11, z 15..25 cuts the wall where 10 cos a >= -5, |a| <= 120 deg: seen from any direction the window folds over itself, so it bounds no height field. G1 to the wall all round, the fill stays close to the cylinder it replaces: the sealed part is the whole cylinder, pi 100 40 = 12566.370614, within 0.5 % (the fill's own shape is not the cylinder's, so that is a bound, not an identity)",
+ "body_count": 1,
+ "volume_mm3": 12566.370614359172,
+ "tolerance": {
+  "rel": 0.005
+ },
+ "continuity": {
+  "order": "g1",
+  "edges": [
+   [
+    8.660254037844387,
+    -5,
+    15
+   ],
+   [
+    0,
+    10,
+    15
+   ],
+   [
+    8.660254037844387,
+    -5,
+    25
+   ],
+   [
+    0,
+    10,
+    25
+   ],
+   [
+    -5,
+    -8.660254037844387,
+    20
+   ],
+   [
+    -5,
+    8.660254037844387,
+    20
+   ]
+  ]
+ }
+}

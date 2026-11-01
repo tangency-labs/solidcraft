@@ -597,10 +597,11 @@ fn end_at_wall(base: &mut Face, wall: &mut Face, ids: (usize, usize), by: f64, b
     if let Some(x) = wall.pts.get_mut((k + 1) % m) {
         *x = q1;
     }
-    let kept = |j: usize, out: &[usize]| !out.contains(&((j + m - k) % m));
-    wall.pts = wall.pts.iter().enumerate().filter(|(j, _)| kept(*j, &corners_out)).map(|(_, x)| *x).collect();
-    wall.across = wall.across.iter().enumerate().filter(|(j, _)| kept(*j, &edges_out)).map(|(_, x)| *x).collect();
-    wall.round = wall.round.iter().enumerate().filter(|(j, _)| kept(*j, &edges_out)).map(|(_, x)| *x).collect();
+    // Counted from the bend's edge, so each kept corner is still followed by its own edge
+    // wherever the face's loop starts.
+    wall.pts = kept_from(&wall.pts, k, &corners_out);
+    wall.across = kept_from(&wall.across, k, &edges_out);
+    wall.round = kept_from(&wall.round, k, &edges_out);
     // The fixed face's edge: the bend from `p1` to `q1` (it runs the other way along it), no bend
     // beside it.
     let (Some(&a), Some(&b)) = (base.pts.get(i), base.pts.get((i + 1) % n)) else { return };
@@ -618,6 +619,15 @@ fn end_at_wall(base: &mut Face, wall: &mut Face, ids: (usize, usize), by: f64, b
     base.pts.splice(i..=i, pieces.iter().map(|(x, _)| *x));
     base.across.splice(i..=i, pieces.iter().map(|(_, g)| *g));
     base.round.splice(i..=i, std::iter::repeat_n(None, count));
+}
+
+/// The items of a loop's per-corner or per-edge list `of`, counted from item `k` on, less those
+/// at the places `out` (counted from `k`). Corners and edges taken out at the same places counted
+/// from one start stay paired (edge `j` from corner `j`); taken out at their places in the list
+/// they would not where the places run across the list's start.
+fn kept_from<T: Copy>(of: &[T], k: usize, out: &[usize]) -> Vec<T> {
+    let m = of.len();
+    (0..m).filter(|j| !out.contains(j)).filter_map(|j| of.get((k + j) % m).copied()).collect()
 }
 
 /// Give flange `i` its panel: `outline` in flat coordinates, counter-clockwise, its edge at the
@@ -691,15 +701,16 @@ pub fn bend_edge_names(st: &crate::ModelState, body: &str, pts: &[Vec3]) -> Vec<
     pts.iter().zip(crate::naming::edge_names_at(b, pts)).map(|(p, name)| if on(p) { name } else { String::new() }).collect()
 }
 
-/// Convert body `mb` to a sheet under the rule `rule` with values `rv`: `face` is a point on the
-/// fixed face and `bends` are points on the sharp edges that become bends, in the middle of
-/// chamfers or on bend cylinders that do (the body's coordinates, mm). See the module docs.
-/// `body_to_world` places diagnostic points in world coordinates. Geometry and picks stay local.
-/// Returns the sheet and a note for every corner or end of a bend not finished as the rule says.
+/// Convert body `mb` to a sheet under the rule `rule`, whose values for a sheet of a thickness
+/// (`None`: the rule's own) are `values`: `face` is a point on the fixed face and `bends` are
+/// points on the sharp edges that become bends, in the middle of chamfers or on bend cylinders
+/// that do (the body's coordinates, mm). See the module docs. `body_to_world` places diagnostic
+/// points in world coordinates. Geometry and picks stay local. Returns the sheet and a note for
+/// every corner or end of a bend not finished as the rule says.
 pub fn convert_body(
     mb: &ModelBody,
     rule: &str,
-    rv: &RuleValues,
+    values: &dyn Fn(Option<f64>) -> Result<RuleValues>,
     face: Vec3,
     bends: &[Vec3],
     body_to_world: &crate::Mat,
@@ -708,9 +719,7 @@ pub fn convert_body(
     if bends.is_empty() || bends.len() > MAX_BENDS {
         return err(format!("pick 1…{MAX_BENDS} bend edges"));
     }
-    if !(rv.gap >= 0.0 && rv.bend_radius >= 0.0) {
-        return err("the rule's gap and bend radius must not be negative");
-    }
+    let rv = values(None)?;
     let (b, mesh) = (&mb.body, mb.mesh());
     let size = b.size();
     if !(size.is_finite() && size > 0.0) {
@@ -763,6 +772,12 @@ pub fn convert_body(
         .flatten()
         .collect();
     let t = shell.map_or(rv.thickness, |d| (d * 1e9).round() / 1e9);
+    // A shell's sheet is as thick as its walls: the rule's values that follow its thickness (a
+    // bend radius of `Thickness`, the gap, the reliefs) follow the walls', not the rule's own.
+    let rv = if shell.is_some() { values(Some(t))? } else { rv };
+    if !(rv.gap >= 0.0 && rv.bend_radius >= 0.0) {
+        return err("the rule's gap and bend radius must not be negative");
+    }
     let r = rv.bend_radius;
     let joined = |x: usize, y: usize| {
         mesh.edge_faces.iter().any(|faces| faces.contains(&(x as u32)) && faces.contains(&(y as u32)))
@@ -841,7 +856,7 @@ pub fn convert_body(
         }
         panels.insert(g, wall);
     }
-    let mut sh = base_flange(&mb.name, rule, &RuleValues { thickness: t, ..*rv }, frame, Region2::default());
+    let mut sh = base_flange(&mb.name, rule, &RuleValues { thickness: t, ..rv }, frame, Region2::default());
     // How far behind a face of the sheet the body's face `g` starts and ends: a hole's wall
     // reaches through the sheet, a pocket's ends on its floor, an island's starts at the face.
     let mut points: BTreeMap<usize, Vec<Vec3>> = BTreeMap::new();

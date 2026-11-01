@@ -1,0 +1,24 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#757",
+  "tangency-labs/solidcraft#824"
+ ],
+ "what": "a line from (5,0) to (10,20) revolved a full turn into a surface body (a cone frustum wall, no caps)",
+ "source": "analytic",
+ "method": "lateral area of a frustum: pi (r1 + r2) slant = pi 15 sqrt(5^2 + 20^2) = 971.48; one conical face; open at both ends, so not a solid (valid false); bbox r 10, z 0..20.",
+ "valid": false,
+ "area_mm2": 971.4838757561392,
+ "faces": 1,
+ "bbox": {
+  "min": [
+   -10,
+   -10,
+   0
+  ],
+  "max": [
+   10,
+   10,
+   20
+  ]
+ }
+}

@@ -1,0 +1,23 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3368"
+ ],
+ "what": "booleans of a finely faceted body (a 1200-sided prism, 1202 flat faces, the kind of body a modelled thread leaves) with box tools: they must finish in bounded time with the exact result, not run for minutes",
+ "source": "analytic",
+ "method": "A regular N-gon of circumradius R (one vertex on +x) has area N/2 R^2 sin(2 pi/N). Plate: 1200-gon R=30, h=10: V0 = 600 * 900 * sin(0.3 deg) * 10 = 28274.2047. Cut: a 10x10 square pocket through the full thickness, entirely inside the plate: -10*10*10 = -1000. Join: a 12x12x5 box standing on the top face (z 10 to 15, x and y 8 to 20, inside the outline, touching the top face only in its base): +720. V = 27994.2047 mm3.",
+ "outcome": "solid",
+ "body_count": 1,
+ "volume_mm3": 27994.2047,
+ "bbox": {
+  "min": [
+   -30,
+   -30,
+   0
+  ],
+  "max": [
+   30,
+   30,
+   15
+  ]
+ }
+}

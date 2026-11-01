@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "the box with r1 vertical rounds shelled 2 mm: the inner corners close sharp",
+ "source": "analytic",
+ "method": "an inward offset of r1 by 2 vanishes: the cavity is a sharp 56x36x18 box",
+ "body_count": 1,
+ "volume_mm3": 11694.831853072,
+ "faces": 15
+}

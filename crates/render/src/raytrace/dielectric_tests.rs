@@ -129,6 +129,31 @@ fn closed_box_certification_requires_complete_outward_boundary() {
     assert!(certify(&scene(body), &input(DielectricBoundary::ClosedBox)).is_err());
 }
 
+/// A box's boundary in more triangles than two a face (its top fanned from a point in its
+/// middle, as a mesher with interior points makes it) is the same box; the fan's middle off the
+/// face's plane, or a face covered twice, is not.
+#[test]
+fn closed_box_certification_takes_any_tiling_of_the_faces() {
+    let fanned = |middle: Vec3| {
+        let mut body = box_body(2.0);
+        let mesh = Arc::make_mut(&mut body.mesh);
+        mesh.positions.push(middle);
+        mesh.triangles.retain(|t| *t != [4, 5, 7] && *t != [4, 7, 6]);
+        mesh.triangles.extend([[8, 4, 5], [8, 5, 7], [8, 7, 6], [8, 6, 4]]);
+        body
+    };
+    let Ok(Certificate::ClosedBox(bounds)) = certify(&scene(fanned(Vec3::new(1.0, -3.0, 2.0))), &input(DielectricBoundary::ClosedBox)) else {
+        panic!("a fanned top is still the box")
+    };
+    assert_eq!((bounds.min(), bounds.max()), (Vec3::new(-10.0, -10.0, 0.0), Vec3::new(10.0, 10.0, 2.0)));
+    assert!(certify(&scene(fanned(Vec3::new(1.0, -3.0, 2.0 - 1e-9))), &input(DielectricBoundary::ClosedBox)).is_err());
+    // The top once more, split along its other diagonal: covered twice.
+    let mut body = box_body(2.0);
+    let mesh = Arc::make_mut(&mut body.mesh);
+    mesh.triangles.extend([[4, 5, 6], [5, 7, 6]]);
+    assert!(certify(&scene(body), &input(DielectricBoundary::ClosedBox)).is_err());
+}
+
 #[test]
 fn captured_occurrence_identity_and_unsupported_boundary_are_refused() {
     let scene = scene(box_body(2.0));

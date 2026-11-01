@@ -1,0 +1,25 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#616"
+ ],
+ "what": "#616's lid (a 2.4 mm plate with R3 corners, a 3 mm skirt, three openings and four 1.6 mm ribs, all boxes) shelled 0.5 mm with a rib's outer side face open (action matrix (apps/solidcraft-cli/tests/action_matrix.rs): corpus/issue-616-lid-ribs, Lid/F8:-x face.shell)",
+ "source": "analytic",
+ "method": "every wall is at least 1.4 thick, so a 0.5 shell fits everywhere. The lid is boxes but for the plate's four R3 corners: as sharp boxes, plate 76.8 x 89.3 x 2.4 + skirt 71.5 x 84 x 3 less the openings (68 x 61 and 44 x 10 through, 22 x 2.65 x 3 in the skirt) + the ribs above the skirt (4 x 1.6 x 6 x 8.7): 9861.756, less the corners 4 (1 - pi/4) 9 x 2.4: V = 9843.2144. Cavity, every kept face moved 0.5 in and extended to meet (the open rib face's plane bounding it): for the boxes the points more than 0.5 from the outside in the max norm, with a 0.5 slab laid over the open face, summed exactly over the grid of the body's coordinates and those +-0.5: 5865.246 (one region, open at the rib), less the corners where the plate's margin cavity (z 0.5..1.9) follows the r2.5 offsets, 4 (1 - pi/4) 6.25 x 1.4: 5857.7349; material 3985.4795. Rounding the cavity at the 413.4 mm of concave edges instead (the true offset) enlarges it by at most (1 - pi/4) 0.25 per mm, with 0.125 at each of the 92 edge ends: 33.6791, so material 3951.8004 .. 3985.4795. A shell that fails to open leaves 2 shells; the full solid is 9843.2",
+ "body_count": 1,
+ "volume_mm3": [
+  3951.8,
+  3985.5
+ ],
+ "bbox": {
+  "min": [
+   100,
+   0,
+   0
+  ],
+  "max": [
+   176.8,
+   89.3,
+   14.1
+  ]
+ }
+}

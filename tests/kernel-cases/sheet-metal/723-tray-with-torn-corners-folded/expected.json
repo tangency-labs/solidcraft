@@ -1,0 +1,24 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#723",
+  "tangency-labs/solidcraft#809",
+  "tangency-labs/solidcraft#1797",
+  "tangency-labs/solidcraft#1799"
+ ],
+ "what": "a 120 x 90 tray with four 20 mm 90 degree flanges and the tear corner relief: each torn bend end is a helical cut across the bend",
+ "source": "invariants",
+ "method": "one valid closed body; the outer faces of the walls stand on the base's edge lines, the walls rise 20 above the base's underside, so the bounding box is exactly 120 x 90 x 20 (x 0..120, y 0..90, z 0..20)",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   120,
+   90,
+   20
+  ]
+ }
+}

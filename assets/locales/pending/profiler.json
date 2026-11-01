@@ -1,0 +1,37 @@
+{
+  "en": {
+    "cmd.diagnostics_profile": "Profile",
+    "prefs.profile_operations": "Profile operations",
+    "prefs.profile_operations_note": "Records how long SMLib calls, kernel operations, features, commands and imports take. Agents read it with diagnostics.profile."
+  },
+  "ar": {
+    "cmd.diagnostics_profile": "التحليل الزمني",
+    "prefs.profile_operations": "تحليل زمن العمليات",
+    "prefs.profile_operations_note": "يسجّل المدة التي تستغرقها استدعاءات SMLib وعمليات النواة والميزات والأوامر وعمليات الاستيراد. يقرؤه الوكلاء عبر diagnostics.profile."
+  },
+  "de": {
+    "cmd.diagnostics_profile": "Profil",
+    "prefs.profile_operations": "Vorgänge profilieren",
+    "prefs.profile_operations_note": "Zeichnet auf, wie lange SMLib-Aufrufe, Kernel-Vorgänge, Features, Befehle und Importe dauern. Agenten lesen es mit diagnostics.profile."
+  },
+  "he": {
+    "cmd.diagnostics_profile": "פרופיל ביצועים",
+    "prefs.profile_operations": "מדידת זמני פעולות",
+    "prefs.profile_operations_note": "מתעד כמה זמן לוקחות קריאות SMLib, פעולות ליבה, תכונות, פקודות וייבוא. סוכנים קוראים זאת עם diagnostics.profile."
+  },
+  "ja": {
+    "cmd.diagnostics_profile": "プロファイル",
+    "prefs.profile_operations": "処理をプロファイル",
+    "prefs.profile_operations_note": "SMLib の呼び出し、カーネル処理、フィーチャー、コマンド、インポートにかかる時間を記録します。エージェントは diagnostics.profile で読み取ります。"
+  },
+  "ko": {
+    "cmd.diagnostics_profile": "프로파일",
+    "prefs.profile_operations": "작업 프로파일링",
+    "prefs.profile_operations_note": "SMLib 호출, 커널 작업, 피처, 명령, 가져오기에 걸리는 시간을 기록합니다. 에이전트는 diagnostics.profile로 읽습니다."
+  },
+  "zh": {
+    "cmd.diagnostics_profile": "性能分析",
+    "prefs.profile_operations": "分析操作耗时",
+    "prefs.profile_operations_note": "记录 SMLib 调用、内核操作、特征、命令和导入所用的时间。智能体通过 diagnostics.profile 读取。"
+  }
+}

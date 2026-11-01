@@ -1,0 +1,31 @@
+{
+ "sources": [],
+ "what": "a loft from a 40 square at z=0 to a circle r10 at z=30",
+ "source": "analytic",
+ "method": "two sections loft ruled; the circle is split at the square's corner directions (45 deg + k 90 deg) into four quarter arcs, and each side is ruled to its arc at equal parameter (the side's linear one, the arc's standard rational quadratic, weights 1, cos45, 1). A section at height s h is the curve (1-s) C0 + s C1, whose area is (1-s)^2 A0 + 2 s (1-s) M + s^2 A1 (M = 1/4 loop int (C0 x dC1 + C1 x dC0), Gauss) = 716.895118350: V = h (A0 + M + A1)/3, z_c = h (A0/12 + M/6 + A1/4) / ((A0 + M + A1)/3), A0 = 1600, A1 = 100 pi. (Pairing the side with the arc by its angle instead gives M = 720.2, V 0.13% more; by the arc's weights 727.1, 0.39% more.) Faces: the two caps and four ruled sides; edges 4 + 4 + the four rulings from the corners; vertices 4 + 4; on the axis by the four-fold symmetry",
+ "body_count": 1,
+ "tolerance": {
+  "rel": 1e-05
+ },
+ "volume_mm3": 26310.543837086,
+ "center_of_mass": [
+  0,
+  0,
+  11.334623271369178
+ ],
+ "faces": 6,
+ "edges": 12,
+ "vertices": 8,
+ "bbox": {
+  "min": [
+   -20,
+   -20,
+   0
+  ],
+  "max": [
+   20,
+   20,
+   30
+  ]
+ }
+}

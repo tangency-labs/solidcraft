@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a sphere r10 sitting in a through hole r10 at the top edge (tangent along the hole's top circle), cut",
+ "source": "analytic",
+ "method": "the lower half of the sphere lies inside the hole, tangent to its wall along the circle z=20, the upper half is outside: the sphere removes nothing more; V = 48000 - pi 100 20",
+ "body_count": 1,
+ "volume_mm3": 41716.81469282,
+ "faces": 7
+}

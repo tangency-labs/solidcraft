@@ -202,7 +202,7 @@ fn xy(p: &(Vec2, Option<String>)) -> Value {
 /// Shift exposes a line midpoint as a point target, only in the alignment tool.
 fn midpoint_at(app: &SolveApp, proj: &Proj, pos: Pos2, radius: f32) -> Option<(Vec2, String)> {
     let sid = app.session.active_sketch?;
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let ss = state.sketch(sid)?;
     pick(app, proj, pos).into_iter().find_map(|hit| {
         let Hit::SketchCurve { sketch, id, straight: true, .. } = hit else { return None };
@@ -330,7 +330,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                 let params = match first {
                     None => Some(json!({"line": id})),
                     Some(point) => {
-                        let state = app.session.world_state();
+                        let state = crate::open_meshing::session_world(&app.session);
                         app.session.active_sketch.and_then(|sid| state.sketch(sid)).and_then(|ss| point_line_alignment(&ss.sketch, &point, id))
                     }
                 };
@@ -377,7 +377,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                 if id.starts_with("mid:") { return Some(id); }
                 // An earlier dimension may already have materialized this midpoint.
                 // Picking that point retains the same midpoint intent on subsequent dimensions.
-                let state = app.session.world_state();
+                let state = crate::open_meshing::session_world(&app.session);
                 let ss = app.session.active_sketch.and_then(|sid| state.sketch(sid))?;
                 let point = ss.sketch.resolve_point(&id)?;
                 ss.sketch.constraints.iter().find_map(|c| match c.kind {
@@ -388,7 +388,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                 })
             }).filter(|id| {
                 let Some(line) = id.strip_prefix("mid:") else { return false };
-                let state = app.session.world_state();
+                let state = crate::open_meshing::session_world(&app.session);
                 app.session
                     .active_sketch
                     .and_then(|sid| state.sketch(sid))
@@ -807,7 +807,7 @@ pub(crate) fn sketch_axis_of(app: &SolveApp, name: &str) -> Option<&'static str>
         "Z" => Vec3::Z,
         _ => return None,
     };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let plane = st.sketch(app.session.active_sketch?)?.plane;
     let o = plane.origin;
     if (o - dir * o.dot(dir)).len() > 1e-6 {
@@ -855,7 +855,7 @@ fn run_pick(app: &mut SolveApp, t: &Tool) {
         "sketch.constraint.midpoint" => json!({"a": k[0], "b": k[1]}),
         "sketch.constraint.symmetry" => {
             let params = {
-                let state = app.session.world_state();
+                let state = crate::open_meshing::session_world(&app.session);
                 symmetry_args(&k, app.session.active_sketch.and_then(|id| state.sketch(id)).map(|ss| &ss.sketch))
             };
             let Some(params) = params else {
@@ -1103,6 +1103,7 @@ pub(crate) fn preview_curve(
                     control: t.cmd != "sketch.spline.fit_point",
                     degree: if t.cmd == "sketch.spline.control_point_5" { 5 } else { 3 },
                     periodic,
+                    nurbs: None,
                 },
                 None,
             )
@@ -1163,7 +1164,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
         return crate::sketch_tools::preview(app, t, painter, proj);
     }
     let Some(sid) = app.session.active_sketch else { return };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = st.sketch(sid) else { return };
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     // Drawn straight onto the view: its side's colours (#4146).

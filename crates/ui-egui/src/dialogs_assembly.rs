@@ -345,7 +345,7 @@ fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
     let at =
         if o.occurrence == 0 { solidcraft_engine::doc::IDENTITY } else { solidcraft_engine::doc::joints::occurrence_world(&s.doc, o.occurrence) };
     let p = solidcraft_engine::doc::apply_point(&at, pick);
-    let st = s.world_state();
+    let st = crate::open_meshing::session_world(s);
     let own: Vec<&solidcraft_engine::doc::ModelBody> = st.bodies.iter().filter(|b| occurrence_of_body(s, &b.name) == Some(o.occurrence)).collect();
     let named = match (face, edge) {
         (Some(name), _) => own.iter().filter_map(|b| named_face(b, name, p)).min_by(|a, b| a.0.total_cmp(&b.0)),
@@ -390,7 +390,7 @@ fn named_edge(b: &solidcraft_engine::doc::ModelBody, name: &str, p: Vec3) -> Opt
     let index = match names.iter().position(|n| n == name) {
         Some(i) => i,
         None => {
-            let (at, _) = solidcraft_engine::doc::naming::find_edge(b, name, p).ok()?;
+            let at = solidcraft_engine::doc::naming::find_edge(b, name, p).ok()?;
             (0..m.edges.len())
                 .min_by(|x, y| edge_dist(&m, *x, at).unwrap_or(f64::INFINITY).total_cmp(&edge_dist(&m, *y, at).unwrap_or(f64::INFINITY)))?
         }
@@ -479,7 +479,7 @@ pub fn find_joint(app: &mut SolveApp, id: u64) {
 /// are placed; occurrence 0 is the root, holding the bodies outside every occurrence.
 pub fn occurrence_bounds(s: &Session, occs: &[u64]) -> Aabb3 {
     let model = s.model.state();
-    let world = s.world_state();
+    let world = crate::open_meshing::session_world(s);
     let mut bb = Aabb3::default();
     for (name, _, path, _) in s.doc.body_frames(&model) {
         let on = occs.iter().any(|o| if *o == 0 { path.is_empty() } else { path.contains(o) });
@@ -517,7 +517,7 @@ pub struct SnapPt {
 /// The occurrence placing a world body (0: the root design), the instance its name says.
 pub(crate) fn occurrence_of_body(s: &Session, body: &str) -> Option<u64> {
     // The world name tells the instance: a further occurrence of a component is not its first.
-    let st = s.world_state();
+    let st = crate::open_meshing::session_world(s);
     let b = st.body(body)?;
     if s.doc.model_body_component(b) == 0 {
         return Some(0);
@@ -576,7 +576,7 @@ fn face_normal_near(m: &Mesh, f: u32, p: Vec3) -> Option<Vec3> {
 
 /// The snap a picked item stands for (world coordinates, as the viewport shows them).
 pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
-    let st = s.world_state();
+    let st = crate::open_meshing::session_world(s);
     let (body, mut snap) = match sel {
         Sel::Face { body, index, point } => {
             let b = st.body(body)?;
@@ -924,12 +924,12 @@ fn interference(app: &mut SolveApp, picked: &[Sel], clearance: &str) -> (Value, 
         Ok(v) => v,
         Err(e) => return (json!({ "error": e }), Vec::new()),
     };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let mut meshes = Vec::new();
     for hit in r["overlaps"].as_array().into_iter().flatten() {
         let (Some(a), Some(b)) = (hit["a"].as_str().and_then(|n| st.body(n)), hit["b"].as_str().and_then(|n| st.body(n))) else { continue };
         if let Ok(Some(o)) = solidcraft_engine::kernel::boolean(&a.body, &b.body, solidcraft_engine::kernel::BoolOp::Intersect)
-            && let Ok(m) = o.tessellate((o.size() * 2e-3).max(1e-3))
+            && let Ok(m) = o.mesh(&solidcraft_engine::kernel::MeshTolerance::chord((o.size() * 2e-3).max(1e-3)))
         {
             meshes.push(m);
         }

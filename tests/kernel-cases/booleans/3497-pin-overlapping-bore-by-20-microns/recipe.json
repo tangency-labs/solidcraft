@@ -1,0 +1,48 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 6,
+    "height": 6,
+    "body_name": "Tube"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 3,
+    "height": 6,
+    "body_name": "Bore"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Tube",
+    "tools": [
+     "Bore"
+    ],
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 3.02,
+    "height": 6,
+    "body_name": "Pin"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Tube",
+    "tools": [
+     "Pin"
+    ],
+    "operation": "intersect"
+   }
+  }
+ ]
+}

@@ -2,6 +2,7 @@
 use super::{metrics::*, text::paint_text};
 use crate::{scenario, theme::Tokens};
 use egui::{Response, RichText, Ui, vec2};
+use solidcraft_engine::kernel::Continuity;
 
 pub(super) const FORM: &str = "sc_dense_form";
 
@@ -208,6 +209,18 @@ pub(crate) fn hint_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str)
     row(ui, label, |ui| super::hint_field(ui, value, hint))
 }
 
+/// Expression row with an empty-value hint whose value the form checks: with `warning`, the
+/// field is outlined in the warning colour and the message sits under it in that colour, so the
+/// colour is never the only cue. Returns accepted Enter and the field's response. Tokens: `row,
+/// checked_field, warning_caption`.
+pub(crate) fn checked_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str, warning: Option<&str>) -> (bool, Response) {
+    let out = row(ui, label, |ui| super::checked_field(ui, value, hint, warning.is_some()));
+    if let Some(message) = warning {
+        warning_caption(ui, label, message);
+    }
+    out
+}
+
 /// Plain text row; the caller retains Enter/change ownership. Tokens: `row, text_field`.
 pub(crate) fn text_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> (bool, bool) {
     row(ui, label, |ui| super::text_field(ui, value, hint))
@@ -216,6 +229,31 @@ pub(crate) fn text_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str)
 /// Indexed choice row with the caller's unchanged dropdown ID. Tokens: `row, dropdown`.
 pub(crate) fn choice_row(ui: &mut Ui, label: &str, id: &str, selected: &mut usize, options: &[&str]) -> Response {
     row(ui, label, |ui| super::dropdown(ui, id, selected, options))
+}
+
+/// The one control that chooses a continuity order, wherever one is chosen: a dropdown of
+/// `allowed` (what the construction builds, `Construction::offered`). Its labels are the orders'
+/// plain words and its hover text a line per order naming its code, both from the kernel's one
+/// table of orders; a value not in `allowed` shows the first. Tokens: `row, dropdown`.
+pub(crate) fn continuity_row(ui: &mut Ui, label: &str, id: &str, value: &mut Continuity, allowed: &[Continuity]) -> Response {
+    continuity_row_explained(ui, label, id, value, allowed, &continuity_tip(allowed))
+}
+
+/// [`continuity_row`] whose hover text says what each order builds there (`tip`, which names
+/// each order's code), for a choice whose orders stand for constructions (a fillet's corners).
+pub(crate) fn continuity_row_explained(ui: &mut Ui, label: &str, id: &str, value: &mut Continuity, allowed: &[Continuity], tip: &str) -> Response {
+    let labels: Vec<&str> = allowed.iter().map(|g| g.label_id()).collect();
+    let mut index = allowed.iter().position(|g| g == value).unwrap_or(0);
+    let response = choice_row(ui, label, id, &mut index, &labels);
+    if let Some(g) = allowed.get(index) {
+        *value = *g;
+    }
+    response.on_hover_text(tip)
+}
+
+/// The hover text of a continuity choice: each order's own line, which names its code.
+pub(crate) fn continuity_tip(allowed: &[Continuity]) -> String {
+    allowed.iter().map(|g| crate::i18n::tr(g.tip_id())).collect::<Vec<_>>().join("\n")
 }
 
 /// Internal form geometry for controls which need several lines (e.g. text areas).
@@ -292,6 +330,16 @@ fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(
 /// row's control. It says in words what a colour or an icon shows, so colour is never the only cue.
 /// Dim helper beneath a row control. Tokens: `form_icon_size, font_small, text_dim, space_8; label-column tokens`.
 pub(crate) fn caption(ui: &mut Ui, aligned_to: &str, text: &str) {
+    caption_in(ui, aligned_to, text, Tokens::get().form_dim);
+}
+
+/// [`caption`] in the warning colour, for what is wrong with the row's value (a value the
+/// operation would refuse). Tokens: `caption tokens, warning`.
+pub(crate) fn warning_caption(ui: &mut Ui, aligned_to: &str, text: &str) {
+    caption_in(ui, aligned_to, text, Tokens::get().warning);
+}
+
+fn caption_in(ui: &mut Ui, aligned_to: &str, text: &str, color: egui::Color32) {
     if crate::prefs_search::suppress_chrome(ui) {
         return;
     }
@@ -300,7 +348,7 @@ pub(crate) fn caption(ui: &mut Ui, aligned_to: &str, text: &str) {
     let (rect, _) = ui.allocate_exact_size(vec2(width, t.form_icon_size), egui::Sense::hover());
     let left = (rect.left() + label_column(ui, aligned_to, width) + label_gap(ui, width)).min(rect.right());
     let text_rect = egui::Rect::from_min_max(egui::pos2(left, rect.top()), rect.max);
-    paint_text(ui, text_rect, text, egui::FontId::proportional(t.font_small), t.form_dim, false);
+    paint_text(ui, text_rect, text, egui::FontId::proportional(t.font_small), color, false);
     scenario::publish_rect(&format!("dialog:caption:{aligned_to}"), text_rect);
 }
 
@@ -628,7 +676,13 @@ pub(super) fn named_control<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut U
 /// Publish geometry without replacing native accessibility. Tokens: `none`.
 pub(super) fn publish_geometry(ui: &Ui, response: &Response) {
     let label = label(ui);
-    scenario::publish_target_as(&format!("dialog:{label}"), &format!("dialog:widget:{label}"), response.rect);
+    scenario::publish_rect(&format!("dialog:widget:{label}"), response.rect);
+    // A click lands where the field shows: a field scrolled out of a dialog's field area, under
+    // its footer, has no handle (a click at its centre would press the button over it).
+    let shown = response.rect.intersect(ui.clip_rect());
+    if shown.is_positive() {
+        scenario::publish_handle(&format!("dialog:{label}"), shown.center());
+    }
 }
 
 #[cfg(test)]

@@ -1,0 +1,61 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "P"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      10,
+      0
+     ],
+     [
+      10,
+      20
+     ]
+    ],
+    "infer": false,
+    "ids": [
+     "l1"
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "surface.revolve",
+   "params": {
+    "sketch": "P",
+    "curves": [
+     "l1"
+    ],
+    "axis": "y",
+    "body_name": "Tube"
+   }
+  }
+ ]
+}

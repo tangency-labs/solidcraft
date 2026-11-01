@@ -8,10 +8,10 @@
 use std::collections::HashMap;
 
 use solidcraft_geom::Vec3;
-use truck_meshalgo::prelude::*;
-use truck_modeling as mt;
+use solidcraft_geom::brep::{Curve, Loop, Surface};
 
-use crate::body::p3;
+use crate::body::Body;
+use crate::sew::{PartEdge, PartFace, PartUse, Parts, assemble};
 use crate::{BoolOp, build::box_solid, build::sphere, ops::boolean};
 
 /// Triangle sides in the mesh with no triangle on the other side of them, with the points
@@ -41,7 +41,7 @@ fn a_lens_thinner_than_the_tolerance_is_meshed() {
     assert!(union.validity().is_empty(), "{:?}", union.validity());
     let size = union.size();
     for tol in [size * 1e-2, size * 2.5e-3, size * 1e-3] {
-        let mesh = union.tessellate(tol).unwrap();
+        let mesh = union.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
         let faces: std::collections::HashSet<u32> = mesh.tri_face.iter().copied().collect();
         assert_eq!(faces.len(), union.face_count(), "faces with triangles at {tol}");
         assert_eq!(open_sides(&mesh), 0, "open sides at {tol}");
@@ -49,7 +49,7 @@ fn a_lens_thinner_than_the_tolerance_is_meshed() {
 }
 
 /// Twice the signed area of a closed polyline in the XY plane.
-fn area2(points: &[mt::Point3]) -> f64 {
+fn area2(points: &[Vec3]) -> f64 {
     points.iter().zip(points.iter().cycle().skip(1)).map(|(p, q)| p.x * q.y - q.x * p.y).sum()
 }
 
@@ -59,26 +59,44 @@ fn area2(points: &[mt::Point3]) -> f64 {
 #[test]
 fn a_face_touching_its_own_edge_meshes() {
     let (h, dip) = (0.3175, 2.8e-7);
-    let v = |x: f64, y: f64| mt::builder::vertex(p3(Vec3::new(x, y, 0.0)));
-    let (lb, rb, rt, lt) = (v(0.0, 0.0), v(5.0, 0.0), v(5.0, h), v(0.0, h));
-    let control = vec![p3(Vec3::new(5.0, h, 0.0)), p3(Vec3::new(2.5, -h - 2.0 * dip, 0.0)), p3(Vec3::new(0.0, h, 0.0))];
-    let arch = mt::BSplineCurve::new(mt::KnotVec::bezier_knot(2), control);
-    let arch = mt::Edge::new(&rt, &lt, mt::Curve::BSplineCurve(arch));
-    let wire: mt::Wire = vec![mt::builder::line(&lb, &rb), mt::builder::line(&rb, &rt), arch, mt::builder::line(&lt, &lb)].into();
-    let plane = mt::Plane::new(p3(Vec3::ZERO), p3(Vec3::X), p3(Vec3::Y));
-    let face = mt::Face::new(vec![wire], mt::Surface::Plane(plane));
-    let shell: mt::Shell = vec![face].into();
+    let vertices = vec![[0.0, 0.0, 0.0], [5.0, 0.0, 0.0], [5.0, h, 0.0], [0.0, h, 0.0]];
+    let line = |a: usize, b: usize| PartEdge {
+        nurbs: None,
+        curve: Curve::Line { start: vertices[a], end: vertices[b] },
+        interval: [0.0, 1.0],
+        vertices: [a as u32, b as u32],
+    };
+    let arch = PartEdge {
+        nurbs: None,
+        curve: Curve::Spline { knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], points: vec![[5.0, h, 0.0], [2.5, -h - 2.0 * dip, 0.0], [0.0, h, 0.0]] },
+        interval: [0.0, 1.0],
+        vertices: [2, 3],
+    };
+    let edges = vec![line(0, 1), line(1, 2), arch, line(3, 0)];
+    let uses = (0..4).map(|e| PartUse { edge: e, forward: true, given: None }).collect();
+    let surface = Surface::Plane { origin: [0.0; 3], u_axis: [1.0, 0.0, 0.0], v_axis: [0.0, 1.0, 0.0] };
+    let made =
+        assemble(Parts { vertices, edges, faces: vec![PartFace { surface, forward: true, loops: vec![uses] }], tolerance: 1e-7 }, false).unwrap();
+    let body = Body::from_record(made.brep).unwrap();
     for tol in [0.3, 0.08, 0.02, 0.005] {
-        let meshed = shell.robust_triangulation_within(Deflection { display: true, ..Deflection::chord(tol) });
-        let face = meshed.face_iter().next().unwrap();
-        let boundary: Vec<mt::Point3> = face.boundaries()[0].edge_iter().flat_map(|e| e.oriented_curve().0.into_iter().skip(1)).collect();
-        let mesh = face.surface().unwrap();
+        let mesh = body.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
+        // The face's boundary polygon: its edges' polylines round its loop.
+        let r = body.record();
+        let Loop::Edges { edges } = &r.faces[0].loops[0] else { panic!("an edge loop") };
+        let mut boundary: Vec<Vec3> = Vec::new();
+        for u in edges {
+            let mut line = mesh.edges[u.edge as usize].clone();
+            if !u.forward {
+                line.reverse();
+            }
+            boundary.extend(line.into_iter().skip(1));
+        }
         let area: f64 = mesh
-            .faces()
-            .triangle_iter()
+            .triangles
+            .iter()
             .map(|t| {
-                let [a, b, c] = [0, 1, 2].map(|i| mesh.positions()[t[i].pos]);
-                (b - a).cross(c - a).magnitude() / 2.0
+                let [a, b, c] = mesh.tri(t).unwrap();
+                (b - a).cross(c - a).len() / 2.0
             })
             .sum();
         // The triangles cover the face's boundary polygon, the parts on both sides of the pinch.
@@ -96,7 +114,7 @@ fn sphere_touching_a_box_edge_unites_soundly() {
     assert!(union.validity().is_empty(), "{:?}", union.validity());
     let size = union.size();
     for tol in [size * 1e-2, size * 2.5e-3, size * 6e-4] {
-        let faces: std::collections::HashSet<u32> = union.tessellate(tol).unwrap().tri_face.into_iter().collect();
+        let faces: std::collections::HashSet<u32> = union.mesh(&crate::MeshTolerance::chord(tol)).unwrap().tri_face.into_iter().collect();
         assert_eq!(faces.len(), union.face_count(), "at {tol}");
     }
 }

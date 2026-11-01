@@ -1,0 +1,79 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "Target sketch"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     10,
+     20
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "surface.patch",
+   "params": {
+    "sketch": "Target sketch",
+    "body_name": "Target"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 8,
+    "width": 20,
+    "height": 5,
+    "corner": [
+     12,
+     0,
+     0
+    ],
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "surface.match",
+   "params": {
+    "body": "Block",
+    "target": "Target",
+    "edges": [
+     [
+      10,
+      10,
+      0
+     ]
+    ]
+   }
+  }
+ ]
+}

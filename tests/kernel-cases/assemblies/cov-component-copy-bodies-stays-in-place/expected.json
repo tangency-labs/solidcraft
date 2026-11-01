@@ -1,0 +1,23 @@
+{
+ "sources": [],
+ "what": "the arm's body copied into the base's component",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); a copy stays where its body is: Base then holds 4000 at (0,0,-5) and 4000 at (20,0,5): 8000, centre (10,0,0); the world has 3 bodies, 12000",
+ "body_count": 3,
+ "volume_mm3": 12000.0,
+ "results": [
+  {
+   "step": 9,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      10.0,
+      0.0,
+      0.0
+     ],
+     "volume_mm3": 8000.0
+    }
+   }
+  }
+ ]
+}

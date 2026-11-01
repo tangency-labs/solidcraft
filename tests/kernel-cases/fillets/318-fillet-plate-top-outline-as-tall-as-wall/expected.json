@@ -1,0 +1,14 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#318",
+  "tangency-labs/solidcraft#190"
+ ],
+ "what": "a 40 x 30 x 5 plate's whole top outline rounded R5, as tall as its walls: each round uses its wall up, the four mitred at the corners",
+ "source": "analytic",
+ "method": "each round removes the spandrel (1-pi/4) r^2 = 5.365046; at a convex corner the two prisms end on the 45 deg mitre, so each is as long as its edge less twice its centroid's distance from the faces, c = r (10-3pi)/(3(4-pi)) = 1.116840: removed = (1-pi/4) 25 (140 - 8c). V = 6000 - removed.",
+ "body_count": 1,
+ "volume_mm3": 5296.828741826954,
+ "continuity": {
+  "order": "g1"
+ }
+}

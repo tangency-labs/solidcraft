@@ -1,0 +1,74 @@
+# The release gate: everything, in full and in parallel, on one branch's head, before that branch
+# replaces main as a release (develop, rebased onto main). Run it by hand:
+#   gh workflow run release-gate.yml --ref develop
+# It calls the workflows that own each check instead of copying their jobs:
+# - ci.yml as Run workflow with cross-compilation: every native suite in full (not scoped), the
+#   reference tests, the doc tests, the GPU path tests, the action matrix (all 16 shards) and its
+#   determinism check, the property tests, the repository checks (web-offline among them),
+#   WebAssembly and RISC-V, Windows D3D12 FXC and Windows app startup;
+# - kernel-rig.yml: every rig area against its KNOWN_FAILING and the ladder against its golden;
+# - release.yml as a dry run (draft false, packages_only): the Linux, Flatpak, Snap, FreeBSD,
+#   macOS, Windows and web packages with their smoke tests and package checks, unsigned (no
+#   secrets are passed, so no signing secret or SignPath quota is used) and without the release
+#   job (checksums, update signing, publishing).
+# The gate passes only when all three pass. Before main is replaced, tag the old main
+# (main-before-develop-<date>) and push the tag.
+name: Release gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-gate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+      # Select checks reads this commit's other runs.
+      actions: read
+    with:
+      cross_compile: true
+
+  kernel-rig:
+    name: Kernel rig
+    uses: ./.github/workflows/kernel-rig.yml
+    permissions:
+      contents: read
+
+  packages:
+    name: Packages
+    uses: ./.github/workflows/release.yml
+    # No secrets: the signing steps skip without them. GitHub checks a called workflow's job
+    # permissions before the run, skipped jobs included, so the release job's contents: write must
+    # be granted here; packages_only skips that job, and no step that runs writes to the
+    # repository. actions: read is the Windows job's.
+    permissions:
+      contents: write
+      actions: read
+    with:
+      draft: false
+      packages_only: true
+
+  release-gate:
+    name: release-gate
+    needs: [ci, kernel-rig, packages]
+    if: always()
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - name: Every part passed
+        env:
+          CI: ${{ needs.ci.result }}
+          KERNEL_RIG: ${{ needs.kernel-rig.result }}
+          PACKAGES: ${{ needs.packages.result }}
+        run: |
+          echo "ci=$CI kernel-rig=$KERNEL_RIG packages=$PACKAGES"
+          test "$CI" = success
+          test "$KERNEL_RIG" = success
+          test "$PACKAGES" = success

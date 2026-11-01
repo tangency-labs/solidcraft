@@ -98,7 +98,7 @@ fn confirming_coplanar_body_faces_uses_one_atomic_extrusion() {
     h.app.run("sketch.finish", json!({})).unwrap();
     h.app.run("solid.extrude", json!({"distance":6,"operation":"join"})).unwrap();
     h.app.run("component.activate", json!({"component":parent})).unwrap();
-    let world = h.app.session.world_state();
+    let world = h.app.session.world_state().unwrap();
     let body = world.body("Plate").unwrap();
     h.app.session.selection = body
         .body
@@ -172,7 +172,7 @@ fn a_body_mirror_reopens_with_its_bodies_and_operation() {
         let mut app = app_with(json!([
             {"command":"solid.box","params":{"corner":[40,0,0],"length":2,"width":2,"height":2,"name":"Base"}}
         ]));
-        let body = app.session.world_state().bodies[0].name.clone();
+        let body = crate::open_meshing::session_world(&app.session).bodies[0].name.clone();
         app.session.execute("solid.mirror", &json!({"bodies":[body],"plane":"YZ","combine":combine})).unwrap();
         let feature = app.session.doc.features.last().unwrap().clone();
         app.session = Session::new(solidcraft_engine::doc::Document::from_json(&app.session.doc.to_json()).unwrap());
@@ -193,7 +193,7 @@ fn a_body_mirror_reopens_with_its_bodies_and_operation() {
     let mut app = app_with(json!([
         {"command":"solid.box","params":{"corner":[40,0,0],"length":2,"width":2,"height":2,"name":"Base"}}
     ]));
-    let body = app.session.world_state().bodies[0].name.clone();
+    let body = crate::open_meshing::session_world(&app.session).bodies[0].name.clone();
     app.session.execute("solid.pattern.rectangular", &json!({"bodies":[body],"dir1":[1,0,0],"count1":3,"spacing1":5})).unwrap();
     let feature = app.session.doc.features.last().unwrap().clone();
     app.session.selection = vec![Sel::Feature { id: feature.id }];
@@ -348,9 +348,9 @@ fn feature_mirror_picks_clear_preview_and_replay_the_source_cut() {
     wait_feature_preview(&mut h);
     h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
     h.step(&json!({"until":{"dialog":null,"features":4}})).unwrap();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     assert_eq!(state.bodies.len(), 1, "a mirrored hole cuts the plate instead of copying it");
-    assert!(!state.bodies[0].body.contains(Vec3::new(70.0, 25.0, 2.5)));
+    assert_eq!(state.bodies[0].body.classify_point(Vec3::new(70.0, 25.0, 2.5)).unwrap(), solidcraft_engine::kernel::PointClass::Outside);
     let mirror = h.app.session.doc.features.last().unwrap().id;
     let reopened = crate::dialogs::for_feature(&h.app, mirror, None).unwrap();
     assert_eq!(reopened.inputs[0].accept, crate::selection::FEATURES);
@@ -372,7 +372,7 @@ fn a_face_extrude_keeps_the_picked_body_when_faces_coincide() {
     let after = app.session.model.state();
     assert_eq!(after.bodies.len(), 2);
     assert!(after.body("Other").unwrap().body.same(&before.body("Other").unwrap().body));
-    assert!(after.body("Wall").unwrap().body.contains(Vec3::new(49.0, 15.0, 10.0)));
+    assert_eq!(after.body("Wall").unwrap().body.classify_point(Vec3::new(49.0, 15.0, 10.0)).unwrap(), solidcraft_engine::kernel::PointClass::Inside);
 }
 
 #[test]
@@ -432,7 +432,18 @@ fn cylinder_emboss_empty_target_face_applies_automatic_wrap_and_deboss() {
     for deboss in [false, true] {
         let mut h = crate::scenario::Harness::new();
         h.app.run("solid.cylinder", json!({"radius":10,"height":20,"body_name":"Sleeve"})).unwrap();
-        let initial = h.app.session.model.state().body("Sleeve").unwrap().body.tessellate_with(1e-4, true).unwrap().measure().volume;
+        let initial = h
+            .app
+            .session
+            .model
+            .state()
+            .body("Sleeve")
+            .unwrap()
+            .body
+            .mesh(&solidcraft_engine::kernel::MeshTolerance::chord(1e-4))
+            .unwrap()
+            .measure()
+            .volume;
         let sketch =
             h.app.run("sketch.create", json!({"plane":{"origin":[0,10,0],"x_dir":[-1,0,0],"y_dir":[0,0,1]},"name":"Badge"})).unwrap()["sketch"]
                 .as_u64()
@@ -453,7 +464,9 @@ fn cylinder_emboss_empty_target_face_applies_automatic_wrap_and_deboss() {
         assert!(commands[0].1.get("face").is_none());
         let preview = h.app.session.preview_world(&commands).unwrap();
         let expected = if deboss { -19.0 } else { 21.0 };
-        let preview_delta = preview.after.body("Sleeve").unwrap().body.tessellate_with(1e-4, true).unwrap().measure().volume - initial;
+        let preview_delta =
+            preview.after.body("Sleeve").unwrap().body.mesh(&solidcraft_engine::kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume
+                - initial;
         assert!(
             (preview_delta - expected).abs() < 0.05,
             "deboss={deboss}, preview delta={preview_delta}, expected={expected}, commands={commands:?}"
@@ -467,7 +480,19 @@ fn cylinder_emboss_empty_target_face_applies_automatic_wrap_and_deboss() {
         assert_eq!(*actual, deboss);
         assert_eq!(face.body, "Sleeve");
         assert!(
-            (h.app.session.model.state().body("Sleeve").unwrap().body.tessellate_with(1e-4, true).unwrap().measure().volume - initial - expected)
+            (h.app
+                .session
+                .model
+                .state()
+                .body("Sleeve")
+                .unwrap()
+                .body
+                .mesh(&solidcraft_engine::kernel::MeshTolerance::chord(1e-4))
+                .unwrap()
+                .measure()
+                .volume
+                - initial
+                - expected)
                 .abs()
                 < 0.05
         );
@@ -775,7 +800,7 @@ fn profile_use_not_curve_use_stops_the_pre_pick() {
         {"command": "timeline.roll_to", "params": {"position": 1}},
     ]));
     let base = app.session.doc.features.first().unwrap().id;
-    assert_eq!(app.session.world_state().sketch(base).map(|s| s.profiles.len()), Some(1));
+    assert_eq!(app.session.world_state().unwrap().sketch(base).map(|s| s.profiles.len()), Some(1));
     assert!(start(&mut app, vec![], "solid.extrude").inputs[0].items.is_empty(), "the rolled-back extrude's profile is taken");
     // A pipe follows the circle; the disc inside it is used by nothing.
     let mut app = app_with(json!([
@@ -891,8 +916,8 @@ fn press_pull_then_curved_face_offsets_it() {
     crate::viewport::dialog_pick(&mut app, &hit, Sel::Face { body: "Body1".into(), index: wall, point: p });
     let d = app.dialog.clone().unwrap();
     assert!(matches!(d.kind, Kind::OffsetFaces { .. }));
-    // Both halves of the hole's wall.
-    assert_eq!(d.inputs[0].items.len(), 2);
+    // The hole's wall: one face, closed along its seam.
+    assert_eq!(d.inputs[0].items.len(), 1);
 
     let mut app = app_with(script);
     app.start("solid.press_pull");
@@ -1073,7 +1098,7 @@ fn path_pattern_editor_restores_sources_path_expressions_and_options() {
             let original = h.app.session.doc.find_feature("Copies").unwrap().clone();
             let seed = h.app.session.doc.find_feature("Seed").unwrap().id;
             let path = h.app.session.doc.find_feature("Path").unwrap().id;
-            let bounds: Vec<_> = h.app.session.world_state().bodies.iter().map(|b| b.mesh().bounds()).collect();
+            let bounds: Vec<_> = crate::open_meshing::session_world(&h.app.session).bodies.iter().map(|b| b.mesh().bounds()).collect();
             h.step(&json!({"call":"ui.editFeature","params":{"feature":"Copies"}})).unwrap();
             h.frames(8);
             assert!(!h.app.ui.palette_open, "Edit Feature must open the existing pattern dialog");
@@ -1092,7 +1117,7 @@ fn path_pattern_editor_restores_sources_path_expressions_and_options() {
             assert_eq!(edited.id, original.id);
             assert_eq!(edited.kind, original.kind);
             assert_eq!(edited.param_names, original.param_names);
-            assert_eq!(h.app.session.world_state().bodies.iter().map(|b| b.mesh().bounds()).collect::<Vec<_>>(), bounds);
+            assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.iter().map(|b| b.mesh().bounds()).collect::<Vec<_>>(), bounds);
         }
     }
 }
@@ -1123,15 +1148,19 @@ fn path_pattern_editor_applies_in_place_cancels_and_undoes() {
             if cancel {
                 assert_eq!(edited.kind, original.kind);
                 assert_eq!(h.app.session.undo.len(), undo);
-                assert_eq!(h.app.session.world_state().bodies.len(), 3);
+                assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 3);
             } else {
-                assert_eq!(h.app.session.world_state().bodies.len(), 5);
-                let max_x = h.app.session.world_state().bodies.iter().map(|b| b.mesh().bounds().max.x).fold(f64::NEG_INFINITY, f64::max);
+                assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 5);
+                let max_x = crate::open_meshing::session_world(&h.app.session)
+                    .bodies
+                    .iter()
+                    .map(|b| b.mesh().bounds().max.x)
+                    .fold(f64::NEG_INFINITY, f64::max);
                 let expected = if distance_key == "distance" { 16.0 } else { 52.0 };
                 assert!((max_x - expected).abs() < 1e-7, "five 4 mm bodies, {distance_key} 12 mm: {max_x}");
                 h.app.run("edit.undo", json!({})).unwrap();
                 assert_eq!(h.app.session.doc.find_feature("Copies").unwrap().kind, original.kind);
-                assert_eq!(h.app.session.world_state().bodies.len(), 3);
+                assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 3);
             }
         }
     }
@@ -1362,8 +1391,8 @@ fn variable_fillet_mid_radii_round_trip() {
 
 /// Use an actual mesh point, as a viewport pick does; analytic cylinder points need not lie
 /// on the display mesh's facets.
-fn thread_face(app: &SolveApp, body: &str) -> Sel {
-    let state = app.session.world_state();
+pub(crate) fn thread_face(app: &SolveApp, body: &str) -> Sel {
+    let state = app.session.world_state().unwrap();
     let body_state = state.body(body).unwrap();
     let index = solidcraft_engine::doc::naming::face_spots(body_state)
         .into_iter()
@@ -1493,69 +1522,17 @@ fn thread_size_suggestion_can_be_cleared_and_edited_in_the_dialog() {
 }
 
 #[test]
-fn thread_handedness_choices_create_edit_and_restore_the_saved_direction() {
-    use solidcraft_engine::doc::{FeatureKind, ThreadHandedness};
-    let mut h = crate::scenario::Harness::new();
-    h.app.run("solid.cylinder", json!({"radius":3,"height":6})).unwrap();
-    h.app.session.selection = vec![thread_face(&h.app, "Body1")];
-    h.step(&json!({"start":"solid.thread"})).unwrap();
-    h.frames(2);
-    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, crate::dialogs::Kind::Thread { handedness: ThreadHandedness::Right, .. }));
-    h.step(&json!({"click":{"handle":"dialog:thread.direction"}})).unwrap();
-    h.step(&json!({"click":{"handle":"dialog:thread.direction:thread.left_hand"}})).unwrap();
-    let command = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
-    assert_eq!(command[0].1["handedness"], "left");
-    h.step(&json!({"widget":"OK"})).unwrap();
-    let id = h.app.session.doc.features.last().unwrap().id;
-    h.call("ui.editFeature", json!({"feature":id}));
-    h.frames(2);
-    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, crate::dialogs::Kind::Thread { handedness: ThreadHandedness::Left, .. }));
-    h.step(&json!({"click":{"handle":"dialog:thread.direction"}})).unwrap();
-    h.step(&json!({"click":{"handle":"dialog:thread.direction:thread.right_hand"}})).unwrap();
-    h.step(&json!({"widget":"OK"})).unwrap();
-    assert!(matches!(&h.app.session.doc.feature(id).unwrap().kind, FeatureKind::Thread { handedness: ThreadHandedness::Right, .. }));
-    assert_eq!(h.app.session.model.state().threads[0].handedness, ThreadHandedness::Right);
-}
-
-#[test]
-fn thread_handedness_tapped_hole_edit_retains_and_changes_direction() {
-    use solidcraft_engine::doc::{FeatureKind, ThreadHandedness};
-    let mut h = crate::scenario::Harness::new();
-    h.app.run("solid.box", json!({"length":20,"width":20,"height":10})).unwrap();
-    let id =
-        h.app.run("solid.hole", json!({"position":[10,10,10],"thread":"M6","depth":6,"thread_depth":"3 mm","handedness":"left"})).unwrap()["feature"]
-            .as_u64()
-            .unwrap();
-    h.call("ui.editFeature", json!({"feature":id}));
-    h.frames(2);
-    assert!(
-        matches!(&h.app.dialog.as_ref().unwrap().kind, crate::dialogs::Kind::Hole { opts, .. } if opts.handedness == ThreadHandedness::Left && !opts.thread_full_depth && opts.thread_depth == "3 mm")
-    );
-    h.step(&json!({"click":{"handle":"dialog:thread.direction"}})).unwrap();
-    h.step(&json!({"click":{"handle":"dialog:thread.direction:thread.right_hand"}})).unwrap();
-    let command = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
-    assert_eq!(command[0].0, "timeline.redefine");
-    assert_eq!(command[0].1["command"], "solid.hole");
-    assert_eq!(command[0].1["params"]["thread_depth"], "3 mm", "editing direction must retain the independent thread depth");
-    h.step(&json!({"widget":"OK"})).unwrap();
-    assert!(matches!(&h.app.session.doc.feature(id).unwrap().kind, FeatureKind::Hole { handedness: ThreadHandedness::Right, .. }));
-    let state = h.app.session.model.state();
-    assert_eq!(state.threads[0].handedness, ThreadHandedness::Right);
-    assert!((state.threads[0].end - state.threads[0].start - 3.0).abs() < 1e-8);
-}
-
-#[test]
 fn modeled_thread_survives_timeline_double_click_and_ok() {
     for (analytic_pick, change_length) in [(false, false), (false, true), (true, false), (true, true)] {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.app.apply_off_thread = Some(std::time::Duration::ZERO);
         h.app.run("solid.cylinder", json!({"radius":4,"height":4})).unwrap();
-        let smooth_volume = h.app.session.world_state().body("Body1").unwrap().mesh().measure().volume;
+        let smooth_volume = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().measure().volume;
         let Sel::Face { point, .. } = thread_face(&h.app, "Body1") else { panic!("face") };
         let point = if analytic_pick { Vec3::new(4.0, 0.0, 2.0) } else { point };
         let id = h.app.run("solid.thread", json!({"face":point,"designation":"M8x1","modeled":true})).unwrap()["feature"].as_u64().unwrap();
-        let threaded_volume = h.app.session.world_state().body("Body1").unwrap().mesh().measure().volume;
+        let threaded_volume = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().measure().volume;
         assert!(smooth_volume - threaded_volume > 1.0);
         h.frames(4);
         h.step(&json!({"click":{"handle":"timeline:Thread1"},"double":true})).unwrap();
@@ -1564,10 +1541,15 @@ fn modeled_thread_survives_timeline_double_click_and_ok() {
         assert_eq!(h.app.dialog.as_ref().unwrap().editing, Some((id, None)));
         assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "the cylinder stays selected");
         if change_length {
-            h.step(&json!({"click":{"handle":"dialog:Full Length"}})).unwrap();
-            h.step(&json!({"click":{"handle":"dialog:Length"}})).unwrap();
+            for handle in ["dialog:Extent", "dialog:Extent:Length", "dialog:Length"] {
+                h.step(&json!({"click":{"handle":handle}})).unwrap();
+            }
             h.step(&json!({"key":"A","cmd":true})).unwrap();
             h.step(&json!({"text":"2 mm"})).unwrap();
+            // Both ends of the shaft are free: a length starts from the end picked.
+            let top = crate::dialogs::edge_sel(&h.app.session, Vec3::new(4.0, 0.0, 4.0)).unwrap();
+            let d = h.app.dialog.as_mut().unwrap();
+            d.inputs.iter_mut().find(|i| i.label == "Start end (optional)").unwrap().items = vec![top];
         }
         if h.app.dialog.as_ref().unwrap().previews() {
             wait_feature_preview(&mut h);
@@ -1586,7 +1568,7 @@ fn modeled_thread_survives_timeline_double_click_and_ok() {
         assert!(matches!(h.app.session.doc.feature(id).unwrap().kind, solidcraft_engine::doc::FeatureKind::Thread { modeled: true, .. }));
         let result = h.app.session.model.result(id).unwrap();
         assert!(!result.skipped && result.error.is_none(), "{result:?}");
-        let edited_volume = h.app.session.world_state().body("Body1").unwrap().mesh().measure().volume;
+        let edited_volume = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().measure().volume;
         assert!(smooth_volume - edited_volume > 1.0, "the modeled cut disappeared: {smooth_volume} -> {edited_volume}");
         if change_length {
             assert!(edited_volume - threaded_volume > 1.0, "shortening the thread restores some material");
@@ -1595,7 +1577,7 @@ fn modeled_thread_survives_timeline_double_click_and_ok() {
         }
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.marker, None);
-        let restored = h.app.session.world_state().body("Body1").unwrap().mesh().measure().volume;
+        let restored = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().measure().volume;
         assert!((restored - threaded_volume).abs() < 1e-6, "one undo restores the original modeled thread");
     }
 }
@@ -1618,7 +1600,7 @@ fn planar_face_reopen_keeps_the_tight_pick_tolerance() {
         params["height"] = json!(99.99);
         h.app.run("timeline.redefine", json!({"feature":base,"command":command,"params":params})).unwrap();
         h.app.edit_feature(feature);
-        assert!(h.app.session.world_state().body("Body1").unwrap().display_tol() > 0.01);
+        assert!(h.app.session.world_state().unwrap().body("Body1").unwrap().display_tol() > 0.01);
         assert!(crate::dialogs::face_sel(&h.app.session, point - Vec3::Z * 0.01).is_some());
         assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty(), "{command}: a stale planar pick must stay empty");
     }
@@ -1642,7 +1624,7 @@ fn thread_choices_apply_a_fine_pitch_and_partial_modelled_thread() {
     h.app.session.selection = vec![thread_face(&h.app, "Body1")];
     h.step(&json!({"start":"solid.thread"})).unwrap();
     let saved = h.app.session.doc.to_json();
-    for handle in ["dialog:Pitch", "dialog:Pitch:1 mm", "dialog:Full Length", "dialog:Length"] {
+    for handle in ["dialog:Pitch", "dialog:Pitch:1 mm", "dialog:Extent", "dialog:Extent:Length", "dialog:Length"] {
         h.step(&json!({"click":{"handle":handle}})).unwrap();
     }
     h.step(&json!({"key":"A","cmd":true})).unwrap();
@@ -1653,9 +1635,9 @@ fn thread_choices_apply_a_fine_pitch_and_partial_modelled_thread() {
     assert_eq!(params["length"], "4 mm");
     assert_eq!(params["modeled"], true);
     assert_eq!(h.app.session.doc.to_json(), saved, "changing options only previews");
-    let before = h.app.session.world_state().body("Body1").unwrap().mesh().measure().volume;
+    let before = h.app.session.world_state().unwrap().body("Body1").unwrap().mesh().measure().volume;
     let result = h.app.session.execute(&command, &params).unwrap();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let after = state.body("Body1").unwrap().mesh().measure().volume;
     assert!(before - after > 1.0, "the selected fine pitch must cut the shaft");
     let id = result["feature"].as_u64().unwrap();
@@ -1709,7 +1691,7 @@ fn thread_choices_preserve_custom_saved_pairs_and_offer_large_fine_pitches() {
             // before checking the complete saved design.
             reopened.marker = None;
             let session = Session::new(reopened);
-            assert_eq!(session.world_state().threads[0].designation, "M56x2");
+            assert_eq!(session.world_state().unwrap().threads[0].designation, "M56x2");
         }
     }
 }
@@ -1732,6 +1714,7 @@ fn thread_choices_can_start_without_a_face_and_recover_from_invalid_text() {
     h.call("ui.scroll", json!({"x":first.x,"y":first.y,"delta":-60}));
     h.frames(12);
     h.step(&json!({"click":{"handle":"dialog:Size:8 mm"}})).unwrap();
+    // The coarse pitch is written as ISO 261 writes it: without the pitch.
     assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Thread { designation, .. } if designation == "M8"));
     if let Kind::Thread { designation, .. } = &h.app.dialog.as_ref().unwrap().kind {
         assert_eq!(solidcraft_engine::doc::parse_metric_thread(designation), Some((8.0, 1.25)));
@@ -1762,19 +1745,7 @@ fn modelled_thread_preview_updates_reports_errors_and_cancels_without_changes() 
     designation(&mut h, "M8x1.3");
     wait_feature_preview(&mut h);
     assert_ne!(h.app.preview.key, first_key, "changing pitch updates the preview before OK");
-    // An 8 mm shaft is turned down for an M6.
-    let m8_key = h.app.preview.key;
     designation(&mut h, "M6x1.3");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-    while h.app.preview.key == m8_key && std::time::Instant::now() < deadline {
-        h.frames(2);
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    wait_feature_preview(&mut h);
-    assert!(h.app.preview.error.is_none(), "{:?}", h.app.preview.error);
-    assert_eq!(h.app.preview.replaced, ["Body1"]);
-    // A shaft thinner than the thread is still refused.
-    designation(&mut h, "M10x1.5");
     for _ in 0..500 {
         h.frames(2);
         if !h.app.preview.busy && h.app.preview.error.is_some() {
@@ -1784,7 +1755,7 @@ fn modelled_thread_preview_updates_reports_errors_and_cancels_without_changes() 
     }
     assert!(h.app.preview.error.as_deref().is_some_and(|e| e.contains("does not fit")), "{:?}", h.app.preview.error);
     designation(&mut h, "M8x1.3");
-    // The M10 error stays until the new preview starts; wait for it to go, or
+    // The M6 error stays until the new preview starts; wait for it to go, or
     // `wait_feature_preview` would stop at the stale error on a host that schedules the
     // preview a few frames later.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
@@ -2230,7 +2201,7 @@ fn trim_dialog_takes_curves_several_keep_points_and_another_surface() {
     assert_eq!(p["curves"]["curves"], json!(["c1"]), "{p}");
     assert_eq!(p["keep"], json!([[1.0, 5.0, 0.0], [-5.0, 5.0, 0.0]]), "{p}");
     app.session.execute(&id, &p).unwrap();
-    let area = |app: &SolveApp, n: &str| app.session.world_state().body(n).unwrap().mesh().measure().area;
+    let area = |app: &SolveApp, n: &str| app.session.world_state().unwrap().body(n).unwrap().mesh().measure().area;
     assert!((area(&app, "Floor") - 130.0).abs() < 1e-6, "{}", area(&app, "Floor"));
     app.session.execute("edit.undo", &json!({})).unwrap();
     // Mutual: the other surface replaces the tool; stitched into an L.
@@ -2246,7 +2217,7 @@ fn trim_dialog_takes_curves_several_keep_points_and_another_surface() {
     assert_eq!((&p["with"], &p["keep_with"], &p["stitch"]), (&json!("Wall"), &json!([0.0, 5.0, 5.0]), &json!(true)), "{p}");
     assert!(p.get("extend").is_none() && p.get("plane").is_none(), "{p}");
     app.session.execute(&id, &p).unwrap();
-    assert!((area(&app, "Floor") - 200.0).abs() < 1e-6 && app.session.world_state().body("Wall").is_none());
+    assert!((area(&app, "Floor") - 200.0).abs() < 1e-6 && app.session.world_state().unwrap().body("Wall").is_none());
     let fid = app.session.doc.features.last().unwrap().id;
     let back = crate::dialogs::for_feature(&app, fid, None).unwrap();
     assert!(matches!(back.kind, Kind::Surface(crate::dialogs_surface::Surf::Trim { stitch: true, extend: false, direction: None })));
@@ -2482,7 +2453,7 @@ fn patch_dialog_takes_continuity_and_points_and_brings_them_back() {
     d.inputs[0].items = rim;
     d.inputs[1].items = vec![Sel::Vertex { body: "Tube".into(), point: Vec3::new(0.0, 0.0, 36.0) }];
     if let Kind::Surface(crate::dialogs_surface::Surf::Patch { continuity }) = &mut d.kind {
-        *continuity = 1;
+        *continuity = solidcraft_engine::kernel::Continuity::G1;
     }
     let (id, p) = apply_commands(&app, &d).unwrap().remove(0);
     assert_eq!((id.as_str(), &p["continuity"], &p["points"]), ("surface.patch", &json!("g1"), &json!([[0.0, 0.0, 36.0]])), "{p}");
@@ -2492,14 +2463,15 @@ fn patch_dialog_takes_continuity_and_points_and_brings_them_back() {
     // Edit Feature: G1 again, and the point (on no face) kept as it was.
     let fid = app.session.doc.features.last().unwrap().id;
     let back = crate::dialogs::for_feature(&app, fid, None).unwrap();
-    assert!(matches!(back.kind, Kind::Surface(crate::dialogs_surface::Surf::Patch { continuity: 1 })));
+    assert!(matches!(back.kind, Kind::Surface(crate::dialogs_surface::Surf::Patch { continuity: solidcraft_engine::kernel::Continuity::G1 })));
     let (_, p) = apply_commands(&app, &back).unwrap().remove(0);
     assert_eq!((&p["params"]["continuity"], &p["params"]["points"]), (&json!("g1"), &json!([[0.0, 0.0, 36.0]])), "{p}");
 }
 
 #[test]
 fn patch_dialog_rows_are_translated() {
-    for (lang, continuity, through) in [("en", "Continuity", "Pass through"), ("de", "Stetigkeit", "Durch Punkte"), ("ja", "連続性", "通過点")]
+    for (lang, continuity, through, tangent) in
+        [("en", "Continuity", "Pass through", "Tangent"), ("de", "Stetigkeit", "Durch Punkte", "Tangential"), ("ja", "連続性", "通過点", "接線")]
     {
         let mut h = crate::scenario::Harness::new();
         h.app.preferences.language = lang.into();
@@ -2508,6 +2480,12 @@ fn patch_dialog_rows_are_translated() {
         h.frames(3);
         assert!(h.widget(continuity).is_some(), "{lang}: the Continuity row must show {continuity:?}");
         assert!(h.widget(through).is_some(), "{lang}: the points input must show {through:?}");
+        // The continuity in the language too, in words (the code is in the hover text).
+        if let Some(crate::dialogs::Dialog { kind: Kind::Surface(crate::dialogs_surface::Surf::Patch { continuity }), .. }) = h.app.dialog.as_mut() {
+            *continuity = solidcraft_engine::kernel::Continuity::G1;
+        }
+        h.frames(2);
+        assert!(h.widget(tangent).is_some(), "{lang}: the Tangent choice must show {tangent:?}");
     }
 }
 
@@ -2613,7 +2591,7 @@ fn delete_face_asks_for_faces_and_takes_the_preselected_one() {
     let mut h = crate::scenario::Harness::new();
     h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"B"})).unwrap();
     h.app.run("solid.fillet", json!({"edges":[[40,15,20]],"radius":5})).unwrap();
-    let volume = |h: &crate::scenario::Harness| h.app.session.world_state().body("B").unwrap().mesh().measure().volume;
+    let volume = |h: &crate::scenario::Harness| h.app.session.world_state().unwrap().body("B").unwrap().mesh().measure().volume;
     let filleted = volume(&h);
 
     h.app.session.selection.clear();
@@ -2784,7 +2762,7 @@ fn point_along_path_has_its_position_and_missing_picks_are_named() {
 fn convert_mesh_asks_for_the_body_and_converts_the_selected_one() {
     use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
     let body = solidcraft_engine::kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
-    let mesh = body.tessellate(0.01).unwrap();
+    let mesh = body.mesh(&solidcraft_engine::kernel::MeshTolerance::chord(0.01)).unwrap();
     let mut doc = Document::default();
     doc.add_feature(
         FeatureKind::MeshImport {
@@ -2860,7 +2838,7 @@ fn hovering_a_large_body_does_not_wait_for_its_pick_index() {
     let path = h.dir.join("ball.stl");
     std::fs::write(&path, stl).unwrap();
     h.app.run("file.insert_mesh", json!({"path": path.to_string_lossy()})).unwrap();
-    let mesh = h.app.session.world_state().bodies[0].mesh();
+    let mesh = h.app.session.world_state().unwrap().bodies[0].mesh();
     assert!(mesh.triangles.len() > 250_000, "{}", mesh.triangles.len());
     let gate = h.app.viewport.pick_index.gate();
     gate.set_closed(true);
@@ -2960,7 +2938,7 @@ fn face_then_revolve_turns_the_face() {
     for (cmd, p) in cmds {
         app.run(&cmd, p).unwrap();
     }
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let made = st.bodies.iter().find(|b| b.name != "Body1").expect("the revolve makes a new body");
     let v = solidcraft_engine::doc::kernel::measure(&made.body).unwrap().volume;
     let want = std::f64::consts::PI * 40.0 * 40.0 * 20.0;
@@ -2991,7 +2969,7 @@ fn a_loft_from_a_profile_to_a_sketch_point_is_a_pyramid() {
     for (cmd, p) in cmds {
         app.run(&cmd, p).unwrap();
     }
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let v = solidcraft_engine::doc::kernel::measure(&st.bodies[0].body).unwrap().volume;
     assert!((v - 4000.0).abs() < 4.0, "{v}");
 }
@@ -3013,7 +2991,7 @@ fn a_pipe_cuts_from_its_window_and_keeps_the_cut_when_edited() {
     let cmds = apply_commands(&app, &d).unwrap();
     assert_eq!(cmds[0].1["operation"], "cut", "{:?}", cmds[0].1);
     let volume = |app: &SolveApp| {
-        let st = app.session.world_state();
+        let st = crate::open_meshing::session_world(&app.session);
         assert_eq!(st.bodies.len(), 1, "one body: {:?}", st.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
         solidcraft_engine::doc::kernel::measure(&st.bodies[0].body).unwrap().volume
     };

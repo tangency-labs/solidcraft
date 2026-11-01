@@ -251,7 +251,7 @@ fn intersect_dialog_takes_a_line_of_another_sketch() {
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
     h.settle();
     assert!(h.app.dialog.is_none());
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     let link = &sk.sketch.links[0].id;
     let at: Vec<_> = sk.sketch.link_points(link).iter().filter_map(|p| sk.sketch.point(*p)).map(|p| sk.plane.to_world(p)).collect();
@@ -295,7 +295,7 @@ fn project_dialog_keeps_geometry_targets_and_can_project_whole_bodies_unlinked()
     h.settle();
     assert!(h.app.dialog.is_none());
     let sketch = h.app.session.active_sketch.expect("Project leaves the sketch active");
-    let state = h.app.session.world_state();
+    let state = crate::open_meshing::session_world(&h.app.session);
     let sketch = &state.sketch(sketch).unwrap().sketch;
     assert!(sketch.links.is_empty());
     assert!(!sketch.curves.is_empty());
@@ -595,7 +595,7 @@ fn transform_handles_and_fields_scale_move_and_turn_the_picks() {
     h.step(&json!({"key": "Enter"})).unwrap();
     h.settle();
     assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     let (mut lo, mut hi) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
     for p in (0..sk.curves.len()).flat_map(|i| sk.polyline(i)) {
@@ -606,7 +606,7 @@ fn transform_handles_and_fields_scale_move_and_turn_the_picks() {
     assert!((hi.0 - 55.0).abs() < 1.5 && (hi.1 - 40.0).abs() < 1.5, "the far corner went to (55, 40): {hi:?}");
     h.app.run("edit.undo", json!({})).unwrap();
     h.settle();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     let top = (0..sk.curves.len()).flat_map(|i| sk.polyline(i)).fold(f64::MIN, |m, p| m.max(p.x));
     assert!((top - 40.0).abs() < 1e-6, "one undo puts it back: {top}");

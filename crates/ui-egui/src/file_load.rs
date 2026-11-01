@@ -467,9 +467,13 @@ fn start(app: &mut SolveApp) {
         return;
     }
     let insert = request.insert();
-    let before = if insert { app.session.world_state().bodies.iter().map(|b| b.name.clone()).collect() } else { Vec::new() };
+    let before = if insert { crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).collect() } else { Vec::new() };
     let update = request.kind == Kind::UpdateLinks;
     let mut scratch = if insert || update || request.kind == Kind::ExportDxf { app.session.scratch() } else { Session::default() };
+    // A design opened or recovered here is run through the host's pre-command check too, and
+    // evaluated under the user's validation mode.
+    scratch.set_command_check(app.session.command_check());
+    scratch.set_validation(app.preferences.validation);
     if insert {
         scratch.selection = app.session.selection.clone();
     }
@@ -594,8 +598,10 @@ fn start_staged(app: &mut SolveApp) {
     }
     let Some(request) = app.file_load.queued.pop_front() else { return };
     let insert = request.insert();
-    let before = if insert { app.session.world_state().bodies.iter().map(|b| b.name.clone()).collect() } else { Vec::new() };
+    let before = if insert { crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).collect() } else { Vec::new() };
     let mut session = if insert { app.session.scratch() } else { Session::default() };
+    session.set_command_check(app.session.command_check());
+    session.set_validation(app.preferences.validation);
     if insert {
         session.selection = app.session.selection.clone();
     }
@@ -665,7 +671,7 @@ fn step_staged(running: &mut Running) {
     let in_budget = || began.elapsed().as_secs_f64() * 1000.0 < STAGED_FRAME_MS;
     if staged.ran.is_some() {
         let Some(session) = staged.session.as_ref() else { return };
-        let world = session.world_state();
+        let world = crate::open_meshing::session_world(session);
         while staged.warmed < world.bodies.len() && in_budget() {
             if let Some(body) = world.bodies.get(staged.warmed) {
                 staged.triangles += body.mesh().triangles.len();
@@ -760,7 +766,8 @@ fn step_opening(
     let session = staged.session.as_mut()?;
     let Some(opening) = staged.opening.as_mut() else {
         let params = staged.params.clone();
-        match scoped(scope.clone(), || watch(progress.clone(), || solidcraft_engine::OpenSteps::start(&params))) {
+        let validation = session.validation();
+        match scoped(scope.clone(), || watch(progress.clone(), || solidcraft_engine::OpenSteps::start(&params, validation))) {
             Ok(Some(opening)) => staged.opening = Some(opening),
             // Options only `doc.open` takes: it opens the file at once.
             Ok(None) => {
@@ -969,7 +976,7 @@ fn compute(
     let geometry_ms = began.elapsed().as_secs_f64() * 1000.0;
     let view_began = std::time::Instant::now();
     phase.store(1, Ordering::Relaxed);
-    let world = session.world_state();
+    let world = crate::open_meshing::session_world(&session);
     let placement_ms = view_began.elapsed().as_secs_f64() * 1000.0;
     // The display meshes are made once the design is in the window, which shows its bodies as
     // they come ([`crate::open_meshing`]): framing, picking and drawing never mesh on the UI.
@@ -1088,6 +1095,8 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                     app.set_status(
                         if made.result.get("read_only").and_then(Value::as_bool) == Some(true) {
                             crate::i18n::tr("document.opened_read_only").to_string()
+                        } else if let Some(summary) = crate::timeline::import_status(app, &made.result) {
+                            summary
                         } else if let Some(w) = warnings.filter(|w| !w.is_empty()) {
                             format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or(""))
                         } else {
@@ -1138,6 +1147,39 @@ pub(crate) fn phase(app: &SolveApp) -> Option<&'static str> {
         (_, 1) => "preparing the view",
         _ => "finishing the open",
     })
+}
+
+/// The three steps the card lists for an open or an import (`cad`: a STEP or IGES file), the one
+/// under way and how far it is. A STEP file is read, its parts checked and repaired one by one
+/// (the kernel's `converting`), then the model is built and shown; a design is read, its
+/// features rebuilt, then shown. `work` is the kernel's last report, which stays at its end
+/// once the step is over; `features` is (built, total).
+fn load_steps(
+    cad: bool,
+    phase: u8,
+    work: Option<(&'static str, usize, usize)>,
+    features: (usize, usize),
+) -> ([&'static str; 3], usize, Option<String>) {
+    let (done, total) = features;
+    let labels = if cad {
+        ["file_load.step_read", "file_load.step_repair", "file_load.step_build"]
+    } else {
+        ["file_load.step_read", "file_load.step_rebuild", "file_load.step_show"]
+    };
+    let count = |key: &str, done: usize, total: usize| {
+        Some(crate::i18n::format(key, &[("done", &(done + 1).min(total).to_string()), ("total", &total.to_string())]))
+    };
+    let percent = |d: usize, t: usize| Some(crate::i18n::format("file_load.step_percent", &[("percent", &(d * 100 / t.max(1)).to_string())]));
+    let (current, detail) = match (phase, work) {
+        (1.., _) => (2, None),
+        (_, Some(("reading", d, t))) if cad => (0, percent(d, t)),
+        (_, Some((_, d, t))) if cad && d < t => (1, count("file_load.step_part", d, t)),
+        (_, Some(_)) if cad => (2, None),
+        _ if total == 0 => (0, None),
+        _ if cad => (1, None),
+        _ => (1, count("file_load.step_feature", done, total)),
+    };
+    (labels, current, detail)
 }
 
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
@@ -1222,29 +1264,40 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 };
                 ui_kit::text(ui, &note, ui_kit::Text::Note("preview"));
             }
-            let status = if cancelled && export {
-                crate::i18n::tr_label("dxf.cancel_wait").to_string()
-            } else if cancelled {
-                crate::i18n::tr("file_load.stopping").to_string()
+            // An open or an import goes through three steps the card lists; the other operations
+            // (and a cancelled one) say what they are doing in a line.
+            let stepped = !cancelled && matches!(r.request.kind, Kind::Open | Kind::Insert | Kind::Recover { .. });
+            if stepped {
+                let cad = matches!(r.request.kind, Kind::Open | Kind::Insert)
+                    && (solidcraft_engine::io::is_step_path(&r.request.path) || solidcraft_engine::io::is_iges_path(&r.request.path));
+                let (labels, current, detail) = load_steps(cad, phase, r.progress.work(), (done, total));
+                let labels = labels.map(crate::i18n::tr);
+                ui_kit::steps(ui, "file_load", &labels, current, detail.as_deref());
             } else {
-                match (phase, work) {
-                    (_, work) if r.request.kind == Kind::ExportDxf => crate::dialogs_view_dxf::progress_text(work),
-                    (_, Some(("reading", d, t))) => {
-                        crate::i18n::format("file_load.reading_percent", &[("percent", &(d * 100 / t.max(1)).to_string())])
+                let status = if cancelled && export {
+                    crate::i18n::tr_label("dxf.cancel_wait").to_string()
+                } else if cancelled {
+                    crate::i18n::tr("file_load.stopping").to_string()
+                } else {
+                    match (phase, work) {
+                        (_, work) if r.request.kind == Kind::ExportDxf => crate::dialogs_view_dxf::progress_text(work),
+                        (_, Some(("reading", d, t))) => {
+                            crate::i18n::format("file_load.reading_percent", &[("percent", &(d * 100 / t.max(1)).to_string())])
+                        }
+                        (_, Some((_, d, t))) => {
+                            crate::i18n::format("file_load.converting", &[("done", &(d + 1).to_string()), ("total", &t.to_string())])
+                        }
+                        (1, _) => crate::i18n::tr("file_load.preparing_view").to_string(),
+                        (2, _) => crate::i18n::tr("file_load.preparing_thumbnail").to_string(),
+                        _ if total > 0 => crate::i18n::format(
+                            "file_load.rebuilding",
+                            &[("done", &(done + 1).min(total).to_string()), ("total", &total.to_string())],
+                        ),
+                        _ => crate::i18n::tr("file_load.reading").to_string(),
                     }
-                    (_, Some((_, d, t))) => crate::i18n::format("file_load.converting", &[("done", &(d + 1).to_string()), ("total", &t.to_string())]),
-                    (1, _) => crate::i18n::tr("file_load.preparing_view").to_string(),
-                    (2, _) => crate::i18n::tr("file_load.preparing_thumbnail").to_string(),
-                    _ if total > 0 => {
-                        crate::i18n::format("file_load.rebuilding", &[("done", &(done + 1).min(total).to_string()), ("total", &total.to_string())])
-                    }
-                    _ => crate::i18n::tr("file_load.reading").to_string(),
-                }
-            };
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui_kit::text(ui, &status, ui_kit::Text::Report("status", false));
-            });
+                };
+                ui_kit::steps(ui, "file_load", &[status.as_str()], 0, None);
+            }
             // Always there, so the card keeps its height as the phases change.
             let fraction = if cancelled {
                 0.0
@@ -1280,6 +1333,23 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A STEP file goes through its three steps in order as the kernel reports them, and stays
+    /// on the last once the parts are done; a design's steps follow its features.
+    #[test]
+    fn the_card_follows_an_import_through_its_three_steps() {
+        let step = |phase, work, features| {
+            let (_, current, detail) = load_steps(true, phase, work, features);
+            (current, detail)
+        };
+        assert_eq!(step(0, None, (0, 0)), (0, None));
+        assert_eq!(step(0, Some(("reading", 40, 80)), (0, 0)), (0, Some("50%".into())));
+        assert_eq!(step(0, Some(("converting", 11, 140)), (0, 1)), (1, Some("Part 12 of 140".into())));
+        assert_eq!(step(0, Some(("converting", 140, 140)), (0, 1)), (2, None));
+        assert_eq!(step(1, Some(("converting", 140, 140)), (1, 1)), (2, None));
+        let (labels, current, detail) = load_steps(false, 0, None, (2, 5));
+        assert_eq!((labels[1], current, detail.as_deref()), ("file_load.step_rebuild", 1, Some("Feature 3 of 5")));
+    }
 
     fn completed_open(app: &mut SolveApp, request: Request, session: Session) {
         let (tx, rx) = std::sync::mpsc::channel();
@@ -1679,7 +1749,7 @@ mod tests {
         part.execute("file.export", &serde_json::json!({"path": path})).unwrap();
         let ctx = crate::fonts::test_context();
         let mut app = SolveApp::new(Session::default(), Default::default());
-        let bodies = |app: &SolveApp| app.session.world_state().bodies.len();
+        let bodies = |app: &SolveApp| app.session.world_state().unwrap().bodies.len();
         assert!(staged_kind(&Request::new(&path, Kind::Insert)) && staged_kind(&Request::new(&path, Kind::Open)));
         assert!(!staged_kind(&Request::new("part.igs", Kind::Insert)) && !staged_kind(&Request::new("part.solidcraft", Kind::Insert)));
         app.file_load.queued.push_back(Request::new(&path, Kind::Insert));
@@ -1738,7 +1808,7 @@ mod tests {
         part.execute("file.save", &serde_json::json!({"path": path, "cache": false})).unwrap();
         let mut whole = Session::default();
         whole.execute("doc.open", &serde_json::json!({"path": path})).unwrap();
-        let names = |s: &Session| s.world_state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+        let names = |s: &Session| s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
 
         let ctx = crate::fonts::test_context();
         let mut app = SolveApp::new(Session::default(), Default::default());

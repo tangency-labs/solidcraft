@@ -4,7 +4,7 @@ use solidcraft_geom::Vec3;
 
 fn imported_box() -> Session {
     let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
-    let mesh = body.tessellate(0.01).unwrap();
+    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
     let mut doc = Document::default();
     doc.add_feature(
         FeatureKind::MeshImport {
@@ -141,7 +141,8 @@ fn exported_binary_stl_with_a_bore_reconstructs_analytic_faces() {
     assert!(!body.is_mesh());
     assert!(body.validity().is_empty());
     assert_eq!(solidcraft_kernel::measure(body).unwrap().merged.face_types.get("cylinder"), Some(&1));
-    assert_eq!(body.faces(0.01).unwrap().len(), 10);
+    // The L's six sides, the two caps and the bore, one full-turn wall.
+    assert_eq!(body.faces(0.01).unwrap().len(), 9);
     std::fs::remove_file(path).unwrap();
 }
 
@@ -504,8 +505,31 @@ fn open_in_easyprint_hands_the_host_a_3mf_or_an_stl_that_reads_back() {
     let seen = seen.lock().unwrap();
     assert_eq!((seen[0].0.ends_with(".3mf"), seen[1].0.ends_with(".stl")), (true, true), "{:?}", seen.iter().map(|u| &u.0).collect::<Vec<_>>());
     assert!(seen[0].1.starts_with(b"PK"), "a 3MF is a zip");
-    // A binary STL: 80-byte header, a count, 50 bytes a triangle, and a box has 12.
-    assert_eq!(seen[1].1.len(), 84 + 50 * 12);
+    // The STL reads back as the imported mesh: its triangles, closed (every side shared by two
+    // triangles, each way once), enclosing the 10 × 20 × 30 box's 6000 mm³.
+    let imported = match &s.doc.features[0].kind {
+        FeatureKind::MeshImport { meshes, .. } => meshes[0].triangles.len() / 3,
+        other => panic!("{other:?}"),
+    };
+    let tris = solidcraft_io::read_stl(&seen[1].1).unwrap();
+    assert_eq!(tris.len(), imported);
+    let key = |p: [f32; 3]| p.map(f32::to_bits);
+    let mut sides = std::collections::HashMap::<_, i32>::new();
+    for t in &tris {
+        for i in 0..3 {
+            let (a, b) = (key(t[i]), key(t[(i + 1) % 3]));
+            *sides.entry(if a < b { (a, b) } else { (b, a) }).or_default() += if a < b { 1 } else { -1 };
+        }
+    }
+    assert!(sides.values().all(|n| *n == 0), "an open or inconsistently wound STL");
+    let at = |p: [f32; 3]| Vec3::new(p[0].into(), p[1].into(), p[2].into());
+    let volume: f64 = tris.iter().map(|t| at(t[0]).dot(at(t[1]).cross(at(t[2]))) / 6.0).sum();
+    assert!((volume - 6000.0).abs() < 1e-6, "{volume}");
+    let (lo, hi) = tris
+        .iter()
+        .flatten()
+        .fold(([f32::MAX; 3], [f32::MIN; 3]), |(lo, hi), p| (std::array::from_fn(|i| lo[i].min(p[i])), std::array::from_fn(|i| hi[i].max(p[i]))));
+    assert_eq!((lo, hi), ([0.0; 3], [10.0, 20.0, 30.0]));
 }
 
 #[test]

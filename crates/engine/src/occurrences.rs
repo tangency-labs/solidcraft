@@ -381,13 +381,42 @@ impl Session {
         }
         std::borrow::Cow::Owned(doc)
     }
-    /// Resolve only the supplied path, never an exponentially expanded assembly. The placement
-    /// index answers from lookups; the plain walk stays as the fallback and the error reporter.
-    pub fn occurrence_placement(&self, path: &[u64]) -> Result<OccurrencePlacement> {
-        if path.is_empty() || path.len() > 64 {
-            return Err(invalid("occurrence path must contain 1..64 ids"));
+    /// The occurrence moves of the design not captured yet: `pending_moves` without the
+    /// placements the exploded view shows ([`Session::exploded`]), which are display only. An
+    /// entry the exploded view put there and nothing has moved since is left out; one moved since
+    /// (dragged, played) is a move like any other.
+    pub fn uncaptured_moves(&self) -> std::borrow::Cow<'_, std::collections::BTreeMap<u64, Mat>> {
+        if !self.pending_moves.iter().any(|(id, m)| self.exploded.get(id) == Some(m)) {
+            return std::borrow::Cow::Borrowed(&self.pending_moves);
         }
-        if let Some(placement) = self.occurrence_placement_indexed(path) {
+        std::borrow::Cow::Owned(self.pending_moves.iter().filter(|(id, m)| self.exploded.get(id) != Some(*m)).map(|(id, m)| (*id, *m)).collect())
+    }
+
+    /// The document with the design's own uncaptured moves applied ([`Session::uncaptured_moves`]):
+    /// [`Session::placed_document`] without the exploded view, for what reports the design's
+    /// placements or works a new placement out from them.
+    pub fn design_document(&self) -> std::borrow::Cow<'_, solidcraft_doc::Document> {
+        let moves = self.uncaptured_moves();
+        if moves.is_empty() {
+            return std::borrow::Cow::Borrowed(&self.doc);
+        }
+        let mut doc = (*self.doc).clone();
+        for o in &mut doc.occurrences {
+            if let Some(transform) = moves.get(&o.id) {
+                o.transform = *transform;
+            }
+        }
+        std::borrow::Cow::Owned(doc)
+    }
+
+    /// Resolve only the supplied path, never an exponentially expanded assembly: placed where
+    /// it is shown (uncaptured moves and the exploded view included).
+    /// The placement index answers from lookups; the plain walk stays as the fallback and the error reporter.
+    pub fn occurrence_placement(&self, path: &[u64]) -> Result<OccurrencePlacement> {
+        if !path.is_empty()
+            && path.len() <= 64
+            && let Some(placement) = self.occurrence_placement_indexed(path)
+        {
             return Ok(placement);
         }
         self.occurrence_placement_walk(path)
@@ -447,6 +476,13 @@ impl Session {
     /// The plain walk over `doc.occurrences`, kept as the fallback for paths the index can't
     /// answer and as the reference the indexed answers are checked against (#7502).
     pub(crate) fn occurrence_placement_walk(&self, path: &[u64]) -> Result<OccurrencePlacement> {
+        self.occurrence_placement_with(path, &self.pending_moves)
+    }
+
+    /// [`Session::occurrence_placement`] with the occurrences moved by `moves` instead of
+    /// `pending_moves` (the design's own, [`Session::uncaptured_moves`], for what reports the
+    /// design's placements). The placement index holds `pending_moves`, so this walks the path.
+    pub fn occurrence_placement_with(&self, path: &[u64], moves: &std::collections::BTreeMap<u64, Mat>) -> Result<OccurrencePlacement> {
         if path.is_empty() || path.len() > 64 {
             return Err(invalid("occurrence path must contain 1..64 ids"));
         }
@@ -468,7 +504,7 @@ impl Session {
                 return Err(invalid("occurrence path has a missing component"));
             }
             parent_world = world;
-            world = mat_mul(&world, self.pending_moves.get(id).unwrap_or(&o.transform));
+            world = mat_mul(&world, moves.get(id).unwrap_or(&o.transform));
             if world.iter().flatten().any(|x| !x.is_finite()) {
                 return Err(invalid("occurrence path has a non-finite transform"));
             }
@@ -489,7 +525,7 @@ impl Session {
             path: path.to_vec(),
             name: leaf.name.clone(),
             world,
-            local: self.pending_moves.get(&leaf.id).copied().unwrap_or(leaf.transform),
+            local: moves.get(&leaf.id).copied().unwrap_or(leaf.transform),
             parent_world,
             grounded: leaf.grounded,
             bodies,
@@ -947,6 +983,7 @@ impl Session {
 
     pub(crate) fn prune_occurrence_state(&mut self) {
         self.pending_moves.retain(|id, _| self.doc.occurrences.iter().any(|o| o.id == *id));
+        self.exploded.retain(|id, _| self.doc.occurrences.iter().any(|o| o.id == *id));
         if self.active_component != 0 && !self.doc.components.iter().any(|c| c.id == self.active_component) {
             self.active_component = 0;
             self.active_occurrence_path = None;
@@ -958,8 +995,9 @@ impl Session {
         self.selection = selection.into_iter().filter(|s| !matches!(s, Sel::Occurrence {path} if self.occurrence_placement(path).is_err())).collect();
         // A selected body that is gone cannot be deleted, measured or shown: drop it, so a
         // later body taking its name is never deleted in its place (#9737).
-        if self.selection.iter().any(|s| s.body_name().is_some()) {
-            let world = self.world_state();
+        if self.selection.iter().any(|s| s.body_name().is_some())
+            && let Ok(world) = self.world_state()
+        {
             self.selection.retain(|s| match s.body_name() {
                 Some(name) => world.body(name).is_some(),
                 None => true,

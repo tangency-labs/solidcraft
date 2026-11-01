@@ -167,7 +167,7 @@ impl Resources {
         for (batch, bind) in batches.into_iter().zip(binds) {
             pass.set_bind_group(0, bind, &[]);
             pass.set_pipeline(&self.pipeline);
-            if let Some(tris) = &batch.tris {
+            for tris in [&batch.tris, &batch.open_tris].into_iter().flatten() {
                 for (buffer, count) in &tris.parts {
                     pass.set_vertex_buffer(0, buffer.slice(..));
                     pass.draw(0..*count, 0..1);

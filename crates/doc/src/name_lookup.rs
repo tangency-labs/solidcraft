@@ -1,25 +1,27 @@
 //! Finding a face or edge again by the name a feature stored for it.
 //!
-//! The face with that name is the face; else the one face answering to it (a face merged into
-//! it, or the named piece told apart by the faces around it, which still bound it); else, when
-//! several faces are pieces of the named one, the piece nearest the reference's point, and the
-//! feature says the face was split. Names saved before format 14 ([`LEGACY_MARK`]) are found
-//! among the names geometry gives, as the builds that saved them found them. A face whose name
-//! was worked out from geometry, found where the reference's point no longer lies, is reported:
-//! only geometry decided.
+//! The face with that name is the face (a face its feature made from several of its roles, a
+//! side drawn in collinear pieces, has each as a name); else the one face answering to it as
+//! exactly: the named piece told apart by the faces around it, which still bound it. Nothing
+//! else is: when the named face was split into several pieces, when it was merged into another
+//! face, when only a face of the same stem is left, when the name is on several bodies, or when
+//! the name was saved before format 14 ([`LEGACY_MARK`]), the name finds nothing and the feature
+//! that uses it fails, asking for the reference to be picked again
+//! ([`crate::DocError::Reselect`]). A face whose name was worked out from geometry, found where
+//! the reference's point no longer lies, is reported: only geometry decided.
 
 use solidcraft_geom::{Mesh, Vec3};
 
 use crate::history_names::{Match, Names};
-use crate::naming::{self, closest, edge_names, face_names, legacy_edge_names, legacy_face_names, strip_piece};
-use crate::piece_names::{strip_edge_number, strip_edge_piece};
+use crate::naming::{self, closest, edge_names, face_names, strip_piece};
+use crate::piece_names::strip_edge_number;
 use crate::{ModelBody, ModelState};
 
 /// The mark on a name saved before format 14 (`?F2:top#2`). Those names were worked out from
-/// geometry, and a few of them name a face that exact history names differently (a tube's outer
-/// wall was named after the nearest sketch curve to its centre, its inner circle): such a name is
-/// found again among the names that geometry gives today, as the build that saved it did, so an
-/// older design evaluates as it was saved. Picking the face again stores its exact name.
+/// geometry, and some of them name a face that exact history names differently (a tube's outer
+/// wall was named after the nearest sketch curve to its centre, its inner circle): such a name
+/// finds no face, and the feature using it asks for the face to be picked again, which stores
+/// its exact name.
 pub const LEGACY_MARK: char = '?';
 
 /// A name saved before format 14, without its mark (`None`: an exact name).
@@ -34,23 +36,19 @@ pub struct EdgeHit {
     pub edge: usize,
     /// A point on the edge: the reference's own point when it lies on it, else the edge's middle.
     pub point: Vec3,
-    /// The named edge is not one edge any more: the piece nearest the point was taken.
-    pub split: bool,
     /// Whether the names of the faces it separates follow exact history (and the edge is not
     /// one of several between them, numbered by where they lie).
     pub verified: bool,
     /// Whether the reference's point still lies on the edge.
     pub on_point: bool,
-    /// The name was saved before format 14 and found as that build did ([`LEGACY_MARK`]).
-    pub legacy: bool,
 }
 
 /// The edge of a body a stored edge name finds: the edge with that name; else the one edge
-/// between the faces it names (followed through splits and merges of those faces); else the
-/// piece of it nearest `near` (`split`). `Err` explains when there is none.
+/// between the faces it names exactly (see [`exactly`]). `Err` explains when there is none: no
+/// such edge, the named edge split into several, or a name saved before format 14.
 pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, String> {
-    if let Some(old) = legacy_name(name) {
-        return legacy_locate_edge(b, old, near).map_err(|_| format!("edge `{name}` no longer exists"));
+    if legacy_name(name).is_some() {
+        return Err(format!("edge `{name}` was named by a build before format 14"));
     }
     let m = b.mesh();
     let names = edge_names(b);
@@ -63,9 +61,7 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
     };
     let exact = |i: usize| -> Result<EdgeHit, String> {
         let on = edge_near(b, &m, i, near);
-        mid(i)
-            .map(|p| EdgeHit { edge: i, point: if on { near } else { p }, split: false, verified: verified(i), on_point: on, legacy: false })
-            .ok_or_else(|| "edge".into())
+        mid(i).map(|p| EdgeHit { edge: i, point: if on { near } else { p }, verified: verified(i), on_point: on }).ok_or_else(|| "edge".into())
     };
     if let Some(i) = names.iter().position(|n| n == name) {
         return exact(i);
@@ -75,19 +71,22 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
     let mut best: Option<(Match, Vec<usize>)> = None;
     for (i, fs) in m.edge_faces.iter().enumerate() {
         let [fa, fb] = fs.as_slice() else { continue };
-        let Some(level) = edge_match(&faces, *fa as usize, *fb as usize, wanted) else { continue };
+        let Some(level) = edge_match(&faces, *fa as usize, *fb as usize, wanted).filter(|level| exactly(*level)) else { continue };
         keep_best(&mut best, level, i);
     }
-    let (level, cands) = best.ok_or_else(|| format!("edge `{name}` no longer exists"))?;
-    if let ([i], true) = (cands.as_slice(), level >= Match::Piece) {
-        return exact(*i);
+    let (_, cands) = best.ok_or_else(|| format!("edge `{name}` no longer exists"))?;
+    match cands.as_slice() {
+        [i] => exact(*i),
+        _ => Err(format!("edge `{name}` is no longer one edge")),
     }
-    cands
-        .iter()
-        .filter_map(|i| mid(*i).map(|p| (p, *i)))
-        .min_by(|a, b| a.0.dist(near).total_cmp(&b.0.dist(near)))
-        .map(|(p, i)| EdgeHit { edge: i, point: p, split: true, verified: verified(i), on_point: false, legacy: false })
-        .ok_or_else(|| format!("edge `{name}` no longer exists"))
+}
+
+/// Whether a face found at `level` is exactly the face a name named: the very name (or another
+/// name of that very face: a face its feature made from several roles has each), or the named
+/// piece told apart by the faces around it. A face the named one was merged into, or a face of
+/// the same stem, is not.
+fn exactly(level: Match) -> bool {
+    matches!(level, Match::Exact | Match::Piece)
 }
 
 /// Whether the picked point `near` lies on edge `i` of body `b` (whose mesh is `m`): then a
@@ -130,27 +129,6 @@ fn edge_mid(m: &Mesh, i: usize) -> Option<Vec3> {
     e.first().copied()
 }
 
-/// [`locate_edge`] for a name saved before format 14 (without its mark), as those builds found
-/// it: the edge with that name among the names geometry gives, else the piece of it nearest
-/// `near`.
-fn legacy_locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, ()> {
-    let m = b.mesh();
-    let names = legacy_edge_names(b);
-    if let Some(i) = names.iter().position(|n| n == name) {
-        let on = edge_near(b, &m, i, near);
-        return edge_mid(&m, i)
-            .map(|p| EdgeHit { edge: i, point: if on { near } else { p }, split: false, verified: false, on_point: on, legacy: true })
-            .ok_or(());
-    }
-    let stem = strip_edge_piece(name);
-    (0..names.len())
-        .filter(|i| names.get(*i).is_some_and(|n| strip_edge_piece(n) == stem))
-        .filter_map(|i| edge_mid(&m, i).map(|p| (p, i)))
-        .min_by(|a, b| a.0.dist(near).total_cmp(&b.0.dist(near)))
-        .map(|(p, i)| EdgeHit { edge: i, point: p, split: true, verified: false, on_point: false, legacy: true })
-        .ok_or(())
-}
-
 /// How well the stored edge name `wanted` (without its own number) names the edge between faces
 /// `a` and `b`: the weaker of its two faces' matches, read every way the name splits into two
 /// face names (a face name may hold `|` itself: a fillet face is named after its edge).
@@ -185,32 +163,28 @@ pub struct FaceHit {
     pub face: usize,
     /// The point on the face nearest the reference's point.
     pub point: Vec3,
-    /// The named face is not one face any more (split, or found on several bodies): the piece
-    /// nearest the point was taken.
-    pub split: bool,
-    /// The named face was merged into this one.
-    pub merged: bool,
     /// Whether the face's name follows exact history.
     pub verified: bool,
     /// Whether the reference's point still lies on the face (so a name worked out from geometry
     /// and the pick agree).
     pub on_point: bool,
-    /// The name was saved before format 14 and found as that build did ([`LEGACY_MARK`]).
-    pub legacy: bool,
+}
+
+/// Why a stored face name finds no face.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Miss {
+    /// No face has the name, or only a face it was merged into or a face of the same stem is
+    /// left, or the name was saved before format 14.
+    Gone,
+    /// Several faces answer to it as well: the pieces of a split face, or the same face on
+    /// several bodies.
+    Several,
 }
 
 impl FaceHit {
     /// What a feature says about how it found a face by its stored name `name` (`None`: exactly).
     pub fn note(&self, name: &str) -> Option<String> {
-        if self.split {
-            Some(format!("face `{name}` was split; using the piece nearest the picked point"))
-        } else if self.merged {
-            Some(format!("face `{name}` was merged into another face; using that face"))
-        } else if !self.verified && !self.on_point && !self.legacy {
-            Some(format!("face `{name}` was found by geometry, not exact history; check it"))
-        } else {
-            None
-        }
+        if !self.verified && !self.on_point { Some(format!("face `{name}` was found by geometry, not exact history; check it")) } else { None }
     }
 }
 
@@ -241,181 +215,196 @@ impl FaceHit {
         }
         best.map(|t| p + d * t)
     }
+
+    /// A point that picks the face found again by itself: [`point`](Self::point) when the
+    /// reference's point still lies on the face clear of its edges; else the point of the face
+    /// nearest `p` that keeps clear of every edge of it. The nearest point of a face the
+    /// reference's point no longer lies on is on the face's boundary (a parameter moved the face
+    /// away from the pick), where a pick by point finds the face beside it as well (#2531).
+    pub fn pick_point(&self, st: &ModelState, p: Vec3) -> Vec3 {
+        let Some(b) = st.bodies.get(self.body) else { return self.point };
+        let m = b.mesh();
+        // Clear of the edges by a few pick tolerances, or by half the face's roomiest triangle
+        // on a face narrower than that.
+        let Some(margin) = roomiest_inradius(&m, self.face).map(|r| (4.0 * (b.body.size() * 1e-3).max(1e-3)).min(r * 0.5)) else {
+            return self.point;
+        };
+        if self.on_point && edge_clearance(&m, self.face, self.point) >= margin {
+            return self.point;
+        }
+        inside_nearest(&m, self.face, p, margin).unwrap_or(self.point)
+    }
+}
+
+/// The incentre and inradius of triangle abc (`None`: degenerate).
+fn incircle(a: Vec3, b: Vec3, c: Vec3) -> Option<(Vec3, f64)> {
+    // The incentre weighs each corner by the side opposite it; the inradius is area / half the perimeter.
+    let (la, lb, lc) = (b.dist(c), c.dist(a), a.dist(b));
+    let perimeter = la + lb + lc;
+    let radius = (b - a).cross(c - a).len() / perimeter;
+    let centre = (a * la + b * lb + c * lc) / perimeter;
+    (radius.is_finite() && radius > 0.0 && centre.is_finite()).then_some((centre, radius))
+}
+
+/// The triangles of face `face` of a mesh.
+fn face_triangles(m: &Mesh, face: usize) -> impl Iterator<Item = [Vec3; 3]> + '_ {
+    m.triangles.iter().zip(&m.tri_face).filter(move |(_, f)| **f as usize == face).filter_map(|(t, _)| m.tri(t))
+}
+
+/// The greatest inradius of the triangles of face `face` of a mesh (`None`: it has none).
+fn roomiest_inradius(m: &Mesh, face: usize) -> Option<f64> {
+    face_triangles(m, face).filter_map(|[a, b, c]| incircle(a, b, c)).map(|(_, r)| r).reduce(f64::max)
+}
+
+/// How far `q` is from the nearest edge bounding face `face` of a mesh (infinite: it has none).
+fn edge_clearance(m: &Mesh, face: usize, q: Vec3) -> f64 {
+    m.edges
+        .iter()
+        .zip(&m.edge_faces)
+        .filter(|(_, fs)| fs.iter().any(|f| *f as usize == face))
+        .flat_map(|(e, _)| e.windows(2).map(|w| q.dist_to_segment(w[0], w[1])))
+        .filter(|d| d.is_finite())
+        .fold(f64::INFINITY, f64::min)
+}
+
+/// The point of face `face` of a mesh nearest `p` among the points at least `margin` inside one
+/// of its triangles (each triangle shrunk about its incentre by `margin`): such a point is at
+/// least `margin` from every edge of the face, which runs along the sides of its triangles.
+/// `None`: no triangle of the face is roomier than `margin`.
+fn inside_nearest(m: &Mesh, face: usize, p: Vec3, margin: f64) -> Option<Vec3> {
+    let mut best: Option<(f64, Vec3)> = None;
+    for [a, b, c] in face_triangles(m, face) {
+        let Some((centre, radius)) = incircle(a, b, c).filter(|(_, r)| *r > margin) else { continue };
+        // Shrunk about the incentre so each side moves in by `margin`.
+        let s = (radius - margin) / radius;
+        let shrink = |v: Vec3| centre + (v - centre) * s;
+        let q = closest(p, shrink(a), shrink(b), shrink(c));
+        let d = q.dist(p);
+        if d.is_finite() && best.is_none_or(|(old, _)| d < old) {
+            best = Some((d, q));
+        }
+    }
+    best.map(|(_, q)| q)
 }
 
 impl EdgeHit {
     /// What a feature says about how it found an edge by its stored name `name` (`None`: exactly).
     pub fn note(&self, name: &str) -> Option<String> {
-        if self.split {
-            Some(format!("edge `{name}` was split; using the piece nearest the picked point"))
-        } else if !self.verified && !self.on_point && !self.legacy {
-            Some(format!("edge `{name}` was found by geometry, not exact history; check it"))
-        } else {
-            None
-        }
+        if !self.verified && !self.on_point { Some(format!("edge `{name}` was found by geometry, not exact history; check it")) } else { None }
     }
 }
 
-/// The face a stored face name finds, on any body: the face with that name, or the one face
-/// answering to it (merged into it, or the named piece told apart by the faces around it); else
-/// the piece of it nearest `p` (`split`).
+/// The face a stored face name finds, on any body: the face with that name, or the named piece
+/// told apart by the faces around it. `None` when no face does, or several do.
 pub fn locate_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
     if crate::sheet::split_sheet_face_name(name).is_some() {
-        return sheet_locate(st, name, p);
+        return sheet_locate(st, name, p).ok();
+    }
+    if legacy_name(name).is_some() {
+        return None;
     }
     // Every body's names are read below: work out the ones not known yet on all cores first
     // (each body's names are its own, whichever thread works them out).
-    if legacy_name(name).is_none() {
-        naming::warm_names(st.bodies.iter().filter(|b| !b.body.is_mesh()));
-    }
-    locate_in(st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()), name, p)
+    naming::warm_names(st.bodies.iter().filter(|b| !b.body.is_mesh()));
+    locate_in(st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()), name, p).ok()
 }
 
 /// [`locate_face`] for a feature that works on the faces of the body called `body` (a shell, a
-/// draft…): the one face of that body with the very name, found without working out the names
-/// of every other body (a body named from geometry is meshed for it: seconds in a large model).
-/// Else as [`locate_face`], over every body: the name moved to another body (a combine took the
-/// face), or on this body it names a piece of a split face or a merged one. The same face on
-/// another body (a copy of this one) is not a piece of this body's face.
-pub(crate) fn locate_face_on_body(st: &ModelState, body: Option<&str>, name: &str, p: Vec3) -> Option<FaceHit> {
-    if crate::sheet::split_sheet_face_name(name).is_some() {
-        return sheet_locate(st, name, p);
+/// draft…): the face of that body the name finds, found without working out the names of every
+/// other body (a body named from geometry is meshed for it: seconds in a large model). When
+/// that body has no such face, as [`locate_face`] over every body: the name moved to another
+/// body (a combine took the face). The same face on another body (a copy of this one) does not
+/// make this body's face ambiguous.
+pub fn locate_face_on_body(st: &ModelState, body: Option<&str>, name: &str, p: Vec3) -> Option<FaceHit> {
+    if crate::sheet::split_sheet_face_name(name).is_some() || legacy_name(name).is_some() {
+        return locate_face(st, name, p);
     }
-    if legacy_name(name).is_none()
-        && let Some(i) = body.and_then(|n| st.bodies.iter().position(|b| b.name == n))
+    if let Some(i) = body.and_then(|n| st.bodies.iter().position(|b| b.name == n))
         && let Some(b) = st.bodies.get(i).filter(|b| !b.body.is_mesh())
-        && let Some(hit) = locate_in(std::iter::once((i, b)), name, p)
-        && !hit.split
-        && naming::names(b).faces.get(hit.face).is_some_and(|n| n == name)
     {
-        return Some(hit);
+        match locate_in(std::iter::once((i, b)), name, p) {
+            Ok(hit) => return Some(hit),
+            Err(Miss::Several) => return None,
+            Err(Miss::Gone) => {}
+        }
     }
     locate_face(st, name, p)
 }
 
 /// [`locate_face`] for a sheet face's readable name (`sheet:<body>:<panel>:<side>`, see
-/// [`crate::sheet::body_sheet_face_names`]): the face of that body the sheet names so, else the
-/// piece of it nearest `p` (`split`). The sheet itself says which face it is, so the name holds
-/// however the faces of the body are numbered.
-fn sheet_locate(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
-    let (body, _) = crate::sheet::split_sheet_face_name(name)?;
-    let (bi, b) = st.bodies.iter().enumerate().find(|(_, b)| b.name == body && !b.body.is_mesh())?;
+/// [`crate::sheet::body_sheet_face_names`]): the face of that body the sheet names so. The sheet
+/// itself says which face it is, so the name holds however the faces of the body are numbered.
+fn sheet_locate(st: &ModelState, name: &str, p: Vec3) -> Result<FaceHit, Miss> {
+    let (body, _) = crate::sheet::split_sheet_face_name(name).ok_or(Miss::Gone)?;
+    let (bi, b) = st.bodies.iter().enumerate().find(|(_, b)| b.name == body && !b.body.is_mesh()).ok_or(Miss::Gone)?;
     let names = crate::sheet::body_sheet_face_names(st, b);
     let faces: Vec<usize> = names.iter().enumerate().filter(|(_, n)| n.as_deref() == Some(name)).map(|(i, _)| i).collect();
-    let m = b.mesh();
-    let (distance, face, point) =
-        faces.iter().filter_map(|f| nearest_on_face(&m, *f, p).map(|(d, q)| (d, *f, q))).min_by(|a, c| a.0.total_cmp(&c.0))?;
-    Some(FaceHit {
-        body: bi,
-        face,
-        point,
-        split: faces.len() > 1,
-        merged: false,
-        verified: true,
-        on_point: distance <= (b.body.size() * 1e-3).max(1e-3),
-        legacy: false,
-    })
+    let face = match faces.as_slice() {
+        [face] => *face,
+        [] => return Err(Miss::Gone),
+        _ => return Err(Miss::Several),
+    };
+    let (distance, point) = nearest_on_face(&b.mesh(), face, p).ok_or(Miss::Gone)?;
+    Ok(FaceHit { body: bi, face, point, verified: true, on_point: distance <= (b.body.size() * 1e-3).max(1e-3) })
 }
 
-/// [`locate_face`] among `bodies` (with their indices).
-fn locate_in<'a>(bodies: impl Iterator<Item = (usize, &'a ModelBody)>, name: &str, p: Vec3) -> Option<FaceHit> {
-    if let Some(old) = legacy_name(name) {
-        return legacy_locate(bodies, old, p);
+/// [`locate_face`] among `bodies` (with their indices): the one face the name finds there.
+fn locate_in<'a>(bodies: impl Iterator<Item = (usize, &'a ModelBody)>, name: &str, p: Vec3) -> Result<FaceHit, Miss> {
+    if legacy_name(name).is_some() {
+        return Err(Miss::Gone);
     }
     let mut best: Option<(Match, Vec<(usize, &ModelBody, usize)>)> = None;
     for (bi, b) in bodies {
         let names = naming::names(b);
         for face in 0..names.faces.len() {
-            if let Some(level) = crate::history_names::matches(&names, face, name) {
+            if let Some(level) = crate::history_names::matches(&names, face, name).filter(|level| exactly(*level)) {
                 keep_best(&mut best, level, (bi, b, face));
             }
         }
     }
-    let (level, faces) = best?;
-    let unique = faces.len() == 1 && level >= Match::Piece;
-    let mut nearest: Option<(f64, usize, &ModelBody, usize, Vec3)> = None;
-    for (bi, b, face) in faces {
-        if let Some((d, q)) = nearest_on_face(&b.mesh(), face, p)
-            && nearest.as_ref().is_none_or(|n| d < n.0)
-        {
-            nearest = Some((d, bi, b, face, q));
-        }
-    }
-    let (distance, body, b, face, point) = nearest?;
-    let on_point = distance <= (b.body.size() * 1e-3).max(1e-3);
-    Some(FaceHit {
-        body,
-        face,
-        point,
-        split: !unique,
-        merged: level == Match::Alias,
-        verified: naming::names(b).verified(face),
-        on_point,
-        legacy: false,
-    })
-}
-
-/// [`locate_face`] for a name saved before format 14 (without its mark), as those builds found
-/// it: among the names geometry gives, the face with that name (or a piece of the same face, if
-/// nearer `p`), the nearest point on it.
-fn legacy_locate<'a>(bodies: impl Iterator<Item = (usize, &'a ModelBody)>, name: &str, p: Vec3) -> Option<FaceHit> {
-    let stem = strip_piece(name);
-    let mut best: Option<(f64, usize, usize, Vec3, bool, f64)> = None;
-    for (bi, b) in bodies {
-        let names = legacy_face_names(b);
-        let tol = (b.body.size() * 1e-3).max(1e-3);
-        let m = b.mesh();
-        for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-            let Some(n) = names.get(*f as usize) else { continue };
-            let exact = n == name;
-            if !exact && strip_piece(n) != stem {
-                continue;
-            }
-            let Some([a, bb, c]) = m.tri(t) else { continue };
-            let q = closest(p, a, bb, c);
-            let d = q.dist(p) - if exact { 1e-9 } else { 0.0 };
-            if d.is_finite() && best.is_none_or(|x| d < x.0) {
-                best = Some((d, bi, *f as usize, q, !exact, tol));
-            }
-        }
-    }
-    best.map(|(d, body, face, point, split, tol)| FaceHit {
-        body,
-        face,
-        point,
-        split,
-        merged: false,
-        verified: false,
-        on_point: d <= tol,
-        legacy: true,
-    })
-}
-
-/// Whether face `index` of a body is the face a stored name names: that name (or one merged into
-/// it); for a name saved before format 14, that name among the names those builds gave.
-pub fn face_has_name(b: &ModelBody, index: usize, name: &str) -> bool {
-    match legacy_name(name) {
-        Some(old) => legacy_face_names(b).get(index).is_some_and(|n| n == old),
-        None => crate::history_names::matches(&naming::names(b), index, name).is_some_and(|m| m >= Match::Alias),
-    }
-}
-
-/// The faces of a body that are the stored name's face or pieces of it (by stem), as the name's
-/// own era names them.
-pub fn faces_with_stem(b: &ModelBody, name: &str) -> Vec<usize> {
-    let (names, wanted) = match legacy_name(name) {
-        Some(old) => (legacy_face_names(b), old),
-        None => (face_names(b), name),
+    let (level, faces) = best.ok_or(Miss::Gone)?;
+    let found = |(body, b, face): (usize, &ModelBody, usize)| {
+        let (distance, point) = nearest_on_face(&b.mesh(), face, p)?;
+        Some(FaceHit { body, face, point, verified: naming::names(b).verified(face), on_point: distance <= (b.body.size() * 1e-3).max(1e-3) })
     };
-    let stem = strip_piece(wanted);
-    let aliases =
-        |i: usize| legacy_name(name).is_none() && naming::names(b).info.get(i).is_some_and(|x| x.aliases.iter().any(|a| strip_piece(a) == stem));
+    if let [one] = faces.as_slice() {
+        return found(*one).ok_or(Miss::Gone);
+    }
+    // The very face on several bodies (a body and its copies, whose faces keep their names): the
+    // one the reference's point lies on. Pieces of one face are never told apart by a point.
+    let mut bodies: Vec<usize> = faces.iter().map(|(bi, _, _)| *bi).collect();
+    bodies.dedup();
+    if level != Match::Exact || bodies.len() < faces.len() {
+        return Err(Miss::Several);
+    }
+    let mut on = faces.into_iter().filter_map(found).filter(|hit| hit.on_point);
+    match (on.next(), on.next()) {
+        (Some(hit), None) => Ok(hit),
+        _ => Err(Miss::Several),
+    }
+}
+
+/// Whether face `index` of a body is exactly the face a stored name names (see [`exactly`]). A
+/// name saved before format 14 names no face.
+pub fn face_has_name(b: &ModelBody, index: usize, name: &str) -> bool {
+    legacy_name(name).is_none() && crate::history_names::matches(&naming::names(b), index, name).is_some_and(exactly)
+}
+
+/// The faces of a body that are the stored name's face or pieces of it (by stem). A name saved
+/// before format 14 has none.
+pub fn faces_with_stem(b: &ModelBody, name: &str) -> Vec<usize> {
+    if legacy_name(name).is_some() {
+        return Vec::new();
+    }
+    let names = face_names(b);
+    let stem = strip_piece(name);
+    let aliases = |i: usize| naming::names(b).info.get(i).is_some_and(|x| x.synonyms.iter().chain(&x.aliases).any(|a| strip_piece(a) == stem));
     (0..names.len()).filter(|i| names.get(*i).is_some_and(|n| strip_piece(n) == stem) || aliases(*i)).collect()
 }
 
 /// [`locate_face`] on one body.
 pub(crate) fn locate_on(body: &ModelBody, name: &str, p: Vec3) -> Option<FaceHit> {
-    locate_in(std::iter::once((0, body)), name, p)
+    locate_in(std::iter::once((0, body)), name, p).ok()
 }
 
 /// The one face a name `model.faces` lists finds, on the body called `body` or, without one, on
@@ -432,11 +421,10 @@ pub fn locate_one(st: &ModelState, body: Option<&str>, name: &str) -> Result<Fac
         if body.is_some_and(|n| n != sheet_body) {
             return Err(format!("`{name}` is a face of `{sheet_body}`"));
         }
-        let hit = sheet_locate(st, name, Vec3::ZERO).ok_or_else(|| format!("no face is named `{name}` (`model.faces` lists the names)"))?;
-        if hit.split {
-            return Err(format!("`{name}` names more than one face (pieces of a split face): give the name of one piece"));
-        }
-        return Ok(hit);
+        return sheet_locate(st, name, Vec3::ZERO).map_err(|miss| match miss {
+            Miss::Gone => format!("no face is named `{name}` (`model.faces` lists the names)"),
+            Miss::Several => format!("`{name}` names more than one face (pieces of a split face): give the name of one piece"),
+        });
     }
     let bodies: Vec<(usize, &ModelBody)> =
         st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh() && body.is_none_or(|n| b.name == n)).collect();
@@ -444,11 +432,10 @@ pub fn locate_one(st: &ModelState, body: Option<&str>, name: &str) -> Result<Fac
     if bodies.len() > 1 && legacy_name(name).is_none() {
         naming::warm_names(bodies.iter().map(|(_, b)| *b));
     }
-    let hit = locate_in(bodies.into_iter(), name, Vec3::ZERO).ok_or_else(|| format!("no face is named `{name}` (`model.faces` lists the names)"))?;
-    if hit.split {
-        return Err(format!(
-            "`{name}` names more than one face (pieces of a split face, or faces of several bodies): give `body`, or the name of one piece"
-        ));
-    }
-    Ok(hit)
+    locate_in(bodies.into_iter(), name, Vec3::ZERO).map_err(|miss| match miss {
+        Miss::Gone => format!("no face is named `{name}` (`model.faces` lists the names)"),
+        Miss::Several => {
+            format!("`{name}` names more than one face (pieces of a split face, or faces of several bodies): give `body`, or the name of one piece")
+        }
+    })
 }

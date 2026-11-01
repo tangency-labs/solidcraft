@@ -55,6 +55,7 @@ pub use solidcraft_doc::Visibility;
 pub use solidcraft_geom as geom;
 pub use solidcraft_io as io;
 pub use solidcraft_kernel as kernel;
+pub use solidcraft_profile as profile;
 pub use solidcraft_render as render;
 pub use solidcraft_sketch as sketch;
 
@@ -72,6 +73,10 @@ pub enum EngineError {
     BadParams { cmd: String, msg: String },
     #[error("{0}")]
     Other(String),
+    /// The host's pre-command check ([`Session::set_command_check`]) refused the command; the
+    /// message is the reason it gave.
+    #[error("{reason}")]
+    Refused { cmd: String, reason: String },
     /// A command panicked; the document was kept as it was (a bug: please report it).
     #[error("internal error in `{0}` (the design was kept as it was): {1}")]
     Internal(String, String),
@@ -242,14 +247,14 @@ pub struct ForeignCopy {
 
 impl ForeignCopy {
     /// What `session` copies when `bodies` and `placements` are copied in it now.
-    pub fn of(session: &Session, bodies: Vec<String>, placements: Vec<Vec<u64>>) -> ForeignCopy {
+    pub fn of(session: &Session, bodies: Vec<String>, placements: Vec<Vec<u64>>) -> Result<ForeignCopy> {
         let frames = session.placed_document().body_frames_with_source(&session.model.state());
         let names = bodies.iter().map(|b| frames.iter().find(|f| f.0 == *b).map_or_else(|| b.clone(), |f| f.1.clone())).collect();
         let placed = placements.iter().filter_map(|p| session.occurrence_placement(p).ok()).map(|p| (p.component, p.occurrence, p.world)).collect();
-        ForeignCopy {
+        Ok(ForeignCopy {
             design: session.doc.name.clone(),
             features: Vec::new(),
-            world: session.world_state(),
+            world: session.world_state()?,
             bodies,
             names,
             placements,
@@ -257,7 +262,7 @@ impl ForeignCopy {
             doc: session.doc.clone(),
             model: session.model.clone(),
             pending_moves: session.pending_moves.clone(),
-        }
+        })
     }
 
     /// Timeline Copy's snapshot. No placed body geometry is needed to paste sketches.
@@ -322,7 +327,7 @@ impl Ahead {
     /// front end can say how far a batch has got.
     pub fn evaluate_counting(self, commands: &[(String, Value)], step: &std::sync::atomic::AtomicUsize) -> Result<Evaluated> {
         let (after, _) = self.0.preview_in_place(commands, Some(step))?;
-        after.world_state().warm_display();
+        after.world_state()?.warm_display();
         Ok(Evaluated(after.model))
     }
 
@@ -359,7 +364,9 @@ struct WorldCache {
     pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
     active_component: u64,
     active_occurrence_path: Option<Vec<u64>>,
-    world: Arc<solidcraft_doc::ModelState>,
+    /// The placed model, or why it could not be placed (kept too, so a model that cannot be
+    /// placed is not placed again on every read).
+    world: std::result::Result<Arc<solidcraft_doc::ModelState>, String>,
     /// The moved components' bodies as placed for `world`, reused by the next world state.
     placed: Arc<std::sync::Mutex<solidcraft_doc::PlacedBodies>>,
     /// Every placed body's world name, own name and frame for `world` ([`Session::body_frames`]),
@@ -407,17 +414,24 @@ impl ComputedCommands {
         session.same_document_context(source) && session.selection == source.selection
     }
 
-    /// Prepare display tessellation before returning the transaction to the window.
-    pub fn warm_meshes(&self, keep_going: impl Fn() -> bool + Sync) {
-        self.warm_display(solidcraft_doc::display_quality::DisplayQuality::Normal, keep_going);
+    /// Prepare display tessellation before returning the transaction to the window; a model that
+    /// cannot be placed is the error.
+    pub fn warm_meshes(&self, keep_going: impl Fn() -> bool + Sync) -> Result<()> {
+        self.warm_display(solidcraft_doc::display_quality::DisplayQuality::Normal, keep_going)
     }
 
     /// Prepare both the reference picking mesh and the GPU plan/highlight mesh at the
     /// selected quality. Warming only the reference mesh leaves cold planning on the UI.
-    pub fn warm_display(&self, quality: solidcraft_doc::display_quality::DisplayQuality, keep_going: impl Fn() -> bool + Sync) {
-        self.computed.world_state().warm_display_at(quality, keep_going);
+    pub fn warm_display(&self, quality: solidcraft_doc::display_quality::DisplayQuality, keep_going: impl Fn() -> bool + Sync) -> Result<()> {
+        self.computed.world_state()?.warm_display_at(quality, keep_going);
+        Ok(())
     }
 }
+
+/// A check an app that embeds the engine runs before every command ([`Session::set_command_check`]):
+/// it is shown the command's id, its parameters and the session (read only), and returns `Ok` to
+/// let the command run or `Err(reason)` to refuse it.
+pub type CommandCheck = Arc<dyn Fn(&str, &Value, &Session) -> std::result::Result<(), String> + Send + Sync>;
 
 /// An editing session on one design.
 /// Starts an upload of a file (its name, its bytes) to EasyPrint and returns at once; the host
@@ -491,6 +505,11 @@ pub struct Session {
     pub active_occurrence_path: Option<Vec<u64>>,
     /// Occurrence moves not captured yet (Capture Position keeps them, a recompute drops them).
     pub pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    /// The placements the exploded view (`explode.show`) put in `pending_moves` to be shown:
+    /// display only. An entry of `pending_moves` still equal to its one here is the exploded view's,
+    /// not a move of the design's, so the placements the design reports and Capture Position
+    /// keeps leave it out ([`Session::uncaptured_moves`]).
+    pub exploded: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
     world_cache: std::sync::Mutex<Option<WorldCache>>,
     /// The design the joints were last solved for, as the solve left it, and the model it read
     /// (see [`Session::solve_joints`]).
@@ -542,6 +561,12 @@ pub struct Session {
     /// The seams `inspect.continuity` last measured, for the viewport to shade. View state: not
     /// part of the design and not an undo step.
     pub continuity: Vec<ContinuitySeam>,
+    /// The faces Isocurve Analysis shows the isoparametric curves of, for the viewport to draw
+    /// ([`Session::isocurve_lines`]). View state: not part of the design and not an undo step.
+    pub isocurves: Vec<IsoPick>,
+    /// The curvature combs `inspect.curvature_comb` shows, for the viewport to draw; `None` when
+    /// the analysis is off. View state: not part of the design and not an undo step.
+    pub comb: Option<CombView>,
     /// Oldest active slot first; replacing an effect retains its row position.
     status_order: Vec<status_items::StatusId>,
     /// Successful source activations, independently of row order and sharing policy.
@@ -569,6 +594,9 @@ pub struct Session {
     /// that did is no edit of the design before it, so [`Session::execute`] never takes it for a
     /// change of render intent or part properties alone.
     replacements: u64,
+    /// The host's pre-command check (none by default: every command may run). It belongs to the
+    /// host, not the design: opening or starting a design keeps it, and scratch copies carry it.
+    command_check: Option<CommandCheck>,
     /// Record this session's top-level commands in the crash journal (the app's own design;
     /// never previews or other scratch sessions). See [`crash`].
     pub crash_journal: bool,
@@ -630,8 +658,49 @@ pub struct ContinuitySeam {
     pub points: Vec<Vec3>,
     /// The seam's worst verdict along its length.
     pub verdict: kernel::SeamVerdict,
+    /// The highest continuity order it meets along its whole length (`None`: the faces do not
+    /// meet).
+    pub order: Option<kernel::Continuity>,
     /// Successful measurement settings and diagnostics, owned by this particular seam.
     pub details: status_details::ContinuityDetail,
+}
+
+/// A face Isocurve Analysis shows: the body, the picked point on the face (its face is found
+/// from it again whenever the body changes) and how many curves each way. View state only.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct IsoPick {
+    pub body: String,
+    pub at: Vec3,
+    pub count: usize,
+}
+
+/// What Curvature Comb Analysis shows: the picks, the options every comb is drawn with, and
+/// the teeth drawn, all at one scale so their lengths compare. View state only.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct CombView {
+    pub picks: Vec<CombPick>,
+    /// Teeth per curve.
+    pub density: usize,
+    /// The multiplier on the automatic scale.
+    pub length: f64,
+    /// A fixed comb length per unit curvature, in place of the automatic one.
+    pub fixed_scale: Option<f64>,
+    /// The comb length per unit curvature the teeth are drawn at, shared by every comb.
+    pub scale: f64,
+    /// Each comb's teeth as (foot, tip), in world coordinates.
+    pub teeth: Vec<Vec<[Vec3; 2]>>,
+}
+
+/// A curve Curvature Comb Analysis shows, as it was picked (found again whenever it is drawn).
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CombPick {
+    /// A sketch curve.
+    Curve { sketch: u64, curve: String },
+    /// The body edge whose exact curve passes nearest `at`.
+    Edge { at: Vec3 },
+    /// The face at `at`, combed along `count` iso curves each way.
+    Face { at: Vec3, count: usize },
 }
 
 impl SurfaceAnalysis {
@@ -670,14 +739,21 @@ impl Session {
     /// `doc`'s evaluation ([`Model::adopt`]); otherwise the timeline is evaluated.
     /// Use [`Self::opened_at`] when the document's file location is known.
     /// `SOLIDCRAFT_NO_MODEL_CACHE` set always evaluates.
-    pub fn opened(mut doc: Document, saved: Option<&solidcraft_doc::SavedModel>) -> Self {
+    pub fn opened(doc: Document, saved: Option<&solidcraft_doc::SavedModel>) -> Self {
+        Self::opened_validating(doc, saved, solidcraft_kernel::Validation::default())
+    }
+
+    /// [`Self::opened`], its features evaluated under `validation` ([`Session::set_validation`]).
+    pub fn opened_validating(mut doc: Document, saved: Option<&solidcraft_doc::SavedModel>, validation: solidcraft_kernel::Validation) -> Self {
         // A design's font files are checked like its other paths before it is evaluated.
         solidcraft_io::vfs::install_checks();
         // The session keeps what is hidden (an undo step of its own); the design file carries it.
         let visibility = std::mem::take(&mut doc.visibility);
         let doc = Arc::new(doc);
-        let model = Self::saved_model(&doc, saved).unwrap_or_else(|| {
+        // A model saved under another check mode holds that mode's results: evaluated again.
+        let model = Self::saved_model(&doc, saved).filter(|model| model.validation() == validation).unwrap_or_else(|| {
             let mut model = Model::new();
+            model.set_validation(validation);
             model.evaluate_shared(&doc);
             model
         });
@@ -722,6 +798,7 @@ impl Session {
             active_component: 0,
             active_occurrence_path: None,
             pending_moves: Default::default(),
+            exploded: Default::default(),
             world_cache: Default::default(),
             joints_settled: None,
             occurrence_visibility_cache: Default::default(),
@@ -744,6 +821,8 @@ impl Session {
             colored_components: None,
             analysis: None,
             continuity: Vec::new(),
+            isocurves: Vec::new(),
+            comb: None,
             status_order: Vec::new(),
             status_activation: Vec::new(),
             single_surface_analysis: true,
@@ -759,6 +838,7 @@ impl Session {
             #[cfg(test)]
             evaluations: 0,
             motion_traces: Default::default(),
+            command_check: None,
             crash_journal: false,
         }
     }
@@ -771,6 +851,7 @@ impl Session {
     /// checkpoint keeps, not the replaced session's file path (docs/mcp.md).
     pub fn replace_design(&mut self, fresh: Session) {
         let auto_project = self.auto_project;
+        let validation = self.validation();
         let single_surface_analysis = self.single_surface_analysis;
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
@@ -782,9 +863,14 @@ impl Session {
         // next frame, so commands sent right after `doc.open` or `file.new` are kept.
         let crash_journal = self.crash_journal;
         let replacements = self.replacements.wrapping_add(1);
+        let command_check = self.command_check.take();
         *self = fresh;
         self.crash_journal = crash_journal;
+        self.command_check = command_check;
         self.auto_project = auto_project;
+        // The user's, like `auto_project`: the commands that open a design evaluate it under it
+        // already (`Session::opened_validating`).
+        self.set_validation(validation);
         self.set_single_surface_analysis(single_surface_analysis);
         self.param_check = param_check;
         self.easyprint_upload = easyprint_upload;
@@ -793,6 +879,32 @@ impl Session {
         self.checkpoints = checkpoints;
         self.next_checkpoint = next_checkpoint;
         self.replacements = replacements;
+    }
+
+    /// Install (or with `None` remove) the check [`Session::execute`] runs before every command,
+    /// for an app that embeds the engine and decides which commands may run. A refusal comes back
+    /// as [`EngineError::Refused`] and leaves the session as it was.
+    pub fn set_command_check(&mut self, check: Option<CommandCheck>) {
+        self.command_check = check;
+    }
+
+    /// The check installed with [`Session::set_command_check`], to hand on to another session.
+    pub fn command_check(&self) -> Option<CommandCheck> {
+        self.command_check.clone()
+    }
+
+    /// Ask the host's check, if any, whether `spec` may run with `params`. A check that panics
+    /// refuses the command as an internal error instead of taking the session down.
+    fn check_command(&self, spec: &CommandSpec, params: &Value) -> Result<()> {
+        let Some(check) = &self.command_check else { return Ok(()) };
+        // The check sees the parameters as the command will (no parameters: an empty object).
+        let empty = Value::Object(Default::default());
+        let params = if params.is_null() { &empty } else { params };
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(spec.id, params, self))) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(reason)) => Err(EngineError::Refused { cmd: spec.id.to_string(), reason }),
+            Err(_) => Err(EngineError::Internal(spec.id.to_string(), "the host's command check failed".into())),
+        }
     }
 
     /// The design has changes not in its file: in the document, or in what is hidden.
@@ -969,29 +1081,30 @@ impl Session {
         if self.doc.occurrences.is_empty() {
             return Some(state);
         }
-        self.world_cache.lock().ok()?.as_ref().filter(|cache| cache.matches(self, &state)).map(|cache| cache.world.clone())
+        self.world_cache.lock().ok()?.as_ref().filter(|cache| cache.matches(self, &state)).and_then(|cache| cache.world.clone().ok())
     }
 
     /// Re-evaluate the model after a document change.
     /// The model placed in the world through component occurrences (and uncaptured moves): what
     /// to display, measure, pick and export. The same as `model.state()` without components.
-    pub fn world_state(&self) -> Arc<solidcraft_doc::ModelState> {
+    /// An error when the model cannot be placed (see [`solidcraft_doc::world_state`]).
+    pub fn world_state(&self) -> Result<Arc<solidcraft_doc::ModelState>> {
         let st = self.model.state();
         if self.doc.occurrences.is_empty() {
-            return st;
+            return Ok(st);
         }
         if let Ok(c) = self.world_cache.lock()
             && let Some(cached) = c.as_ref()
             && cached.matches(self, &st)
         {
-            return cached.world.clone();
+            return cached.world.clone().map_err(EngineError::Other);
         }
         // The bodies the last world state placed: unchanged ones are not transformed and meshed
         // again (a design built command by command changed one body at a time).
         let placed = self.world_cache.lock().ok().and_then(|c| c.as_ref().map(|c| c.placed.clone())).unwrap_or_default();
         // Taken out while placing, so a scratch copy of the session sharing it never waits.
         let mut reuse = placed.lock().map(|mut p| std::mem::take(&mut *p)).unwrap_or_default();
-        let mut w = {
+        let w = {
             if self.pending_moves.is_empty() {
                 solidcraft_doc::world_state_reusing(&self.doc, &st, &mut reuse)
             } else {
@@ -1007,21 +1120,40 @@ impl Session {
         if let Ok(mut p) = placed.lock() {
             *p = reuse;
         }
+        let w = w.map_err(EngineError::from).and_then(|w| self.authored_sketches(w)).map(Arc::new);
+        if let Ok(mut c) = self.world_cache.lock() {
+            *c = Some(WorldCache {
+                doc: self.doc.clone(),
+                model: st,
+                pending_moves: self.pending_moves.clone(),
+                active_component: self.active_component,
+                active_occurrence_path: self.active_occurrence_path.clone(),
+                world: w.as_ref().map(Arc::clone).map_err(ToString::to_string),
+                placed,
+                frames: Arc::default(),
+            });
+        }
+        w
+    }
+
+    /// `w` with the active component's sketches shown at the placement being authored.
+    fn authored_sketches(&self, mut w: solidcraft_doc::ModelState) -> Result<solidcraft_doc::ModelState> {
         // Sketch definitions are displayed once, at the placement currently being authored.
         if self.active_occurrence_path.is_some() && self.active_component != 0 {
             let first = self.occurrence_placement(&self.doc.first_path(self.active_component)).map(|p| p.world).unwrap_or(solidcraft_doc::IDENTITY);
-            if let Some(inverse) = solidcraft_doc::mat_inverse(&first) {
+            let inverse = solidcraft_doc::mat_inverse(&first)
+                .ok_or_else(|| EngineError::Other(format!("the placement of component {} cannot be inverted", self.active_component)))?;
+            {
                 let delta = solidcraft_doc::mat_mul(&self.active_component_frame(), &inverse);
                 for sketch in w.sketches.iter_mut().filter(|sk| self.doc.feature(sk.feature).is_some_and(|f| f.component == self.active_component)) {
                     let sketch = Arc::make_mut(sketch);
                     let plane = sketch.plane;
-                    if let Some(mapped) = solidcraft_geom::Plane::new(
+                    sketch.plane = solidcraft_geom::Plane::new(
                         solidcraft_doc::apply_point(&delta, plane.origin),
                         solidcraft_doc::apply_vector(&delta, plane.x),
                         solidcraft_doc::apply_vector(&delta, plane.y),
-                    ) {
-                        sketch.plane = mapped;
-                    }
+                    )
+                    .ok_or_else(|| EngineError::Other("a sketch plane cannot be placed at the authored placement".into()))?;
                     for wire in &mut sketch.sketch.wires {
                         if wire.space == solidcraft_doc::sketch::WireSpace::Component {
                             solidcraft_doc::map_wire(wire, &delta);
@@ -1030,20 +1162,7 @@ impl Session {
                 }
             }
         }
-        let w = Arc::new(w);
-        if let Ok(mut c) = self.world_cache.lock() {
-            *c = Some(WorldCache {
-                doc: self.doc.clone(),
-                model: st,
-                pending_moves: self.pending_moves.clone(),
-                active_component: self.active_component,
-                active_occurrence_path: self.active_occurrence_path.clone(),
-                world: w.clone(),
-                placed,
-                frames: Arc::default(),
-            });
-        }
-        w
+        Ok(w)
     }
 
     /// Every placed body's world name, own name and frame. Kept with the world state while it is
@@ -1058,6 +1177,20 @@ impl Session {
             Some(cell) => cell.get_or_init(compute).clone(),
             None => compute(),
         }
+    }
+
+    /// When SMLib's check runs on the features evaluated: after every sweep, boolean and blend,
+    /// once on the bodies each feature keeps (the default), or not at all. A user's setting,
+    /// kept when another design is opened (`diagnostics.validation`, the app's preference).
+    pub fn validation(&self) -> solidcraft_kernel::Validation {
+        self.model.validation()
+    }
+
+    /// Evaluate the features computed from now on under `validation` ([`Session::validation`]);
+    /// the results already there stand until their features are computed again
+    /// (`timeline.compute_all` computes every one).
+    pub fn set_validation(&mut self, validation: solidcraft_kernel::Validation) {
+        self.model.set_validation(validation);
     }
 
     /// The model body a name means: one of the model's own bodies as it is named, else the body
@@ -1437,7 +1570,9 @@ impl Session {
     }
 
     /// Run a command with JSON parameters (no dialogs). Undoable commands record an undo step
-    /// when they change the document; a failing or panicking command leaves it unchanged.
+    /// when they change the document; a failing or panicking command leaves it unchanged. The
+    /// host's check ([`Session::set_command_check`]) is asked first, on every call (commands that
+    /// a command runs through `execute` included).
     ///
     /// A command that takes `live` ([`CommandSpec::live`]) run with `live: true` is one frame of
     /// an interactive gesture: the model shows its sketch's new solution and keeps every later
@@ -1447,6 +1582,8 @@ impl Session {
     /// the model up to date before anything reads it.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        // The command, the evaluation it causes and the refresh after it: one profiler span.
+        let _span = solidcraft_profile::span("command", spec.id);
         let host_viewport = self.render_viewport.clone();
         let host_jobs = self.render_jobs.host.clone();
         let additional_jobs = self.render_jobs.additional.clone();
@@ -1458,6 +1595,8 @@ impl Session {
             }
         }
         (spec.enabled)(self).map_err(|why| EngineError::Disabled(spec.id.to_string(), why))?;
+        // Before anything changes: a refusal leaves the session exactly as it was.
+        self.check_command(spec, params)?;
         let before = Snapshot {
             label: spec.label.to_string(),
             doc: self.doc.clone(),
@@ -1476,7 +1615,7 @@ impl Session {
         let (_nested, outermost) = frames::Nested::enter(spec.id);
         let mapped = if outermost {
             frames::forget_picks();
-            frames::to_local(self, spec.id, params)
+            frames::to_local(self, spec.id, params)?
         } else {
             None
         };
@@ -1718,6 +1857,7 @@ impl Session {
             active_component: self.active_component,
             active_occurrence_path: self.active_occurrence_path.clone(),
             pending_moves: self.pending_moves.clone(),
+            exploded: self.exploded.clone(),
             world_cache: std::sync::Mutex::new(self.world_cache.lock().ok().and_then(|cache| cache.clone())),
             joints_settled: self.joints_settled.clone(),
             // Read again by the copy: handing it these references measured more peak memory on a
@@ -1742,6 +1882,8 @@ impl Session {
             colored_components: None,
             analysis: None,
             continuity: Vec::new(),
+            isocurves: Vec::new(),
+            comb: None,
             status_order: Vec::new(),
             status_activation: Vec::new(),
             single_surface_analysis: self.single_surface_analysis,
@@ -1757,6 +1899,7 @@ impl Session {
             #[cfg(test)]
             evaluations: 0,
             motion_traces: self.motion_traces.clone(),
+            command_check: self.command_check.clone(),
             crash_journal: false,
         }
     }
@@ -1946,6 +2089,7 @@ impl Session {
         self.active_component = computed.active_component;
         self.active_occurrence_path = computed.active_occurrence_path;
         self.pending_moves = computed.pending_moves;
+        self.exploded = computed.exploded;
         // Joints the computation hid (an import's rigid group) stay hidden.
         for j in computed.visibility.hidden_joints {
             if !self.visibility.hidden_joints.contains(&j) {
@@ -1971,22 +2115,20 @@ impl Session {
 
     /// The same evaluated preview in occurrence coordinates, including uncaptured moves.
     pub fn preview_world(&self, commands: &[(String, Value)]) -> Result<Preview> {
-        self.scratch().preview_in_place(commands, None).map(|(after, replies)| Preview {
-            before: self.world_state(),
-            after: after.world_state(),
-            replies,
-        })
+        let (after, replies) = self.scratch().preview_in_place(commands, None)?;
+        Ok(Preview { before: self.world_state()?, after: after.world_state()?, replies })
     }
 
     /// World preview with each session's visibility applied, including new body placements.
     pub fn preview_visible_world(&self, commands: &[(String, Value)]) -> Result<Preview> {
-        let visible = |session: &Session| {
-            let world = session.world_state();
+        let visible = |session: &Session| -> Result<Arc<solidcraft_doc::ModelState>> {
+            let world = session.world_state()?;
             let mut shown = (*world).clone();
             shown.bodies.retain(|body| session.body_visible(&body.name));
-            Arc::new(shown)
+            Ok(Arc::new(shown))
         };
-        self.scratch().preview_in_place(commands, None).map(|(after, replies)| Preview { before: visible(self), after: visible(&after), replies })
+        let (after, replies) = self.scratch().preview_in_place(commands, None)?;
+        Ok(Preview { before: visible(self)?, after: visible(&after)?, replies })
     }
 
     /// Run `commands` on a [`Session::scratch`] copy that keeps the undo and redo stacks: what

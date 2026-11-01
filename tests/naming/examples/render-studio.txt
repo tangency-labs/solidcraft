@@ -1,0 +1,244 @@
+# examples/render-studio: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Base: 6 faces, 12 edges
+Base face F3:+x
+Base face F3:+y
+Base face F3:+z
+Base face F3:-x
+Base face F3:-y
+Base face F3:-z
+Base edge F3:+x|F3:+y
+Base edge F3:+x|F3:+z
+Base edge F3:+x|F3:-y
+Base edge F3:+x|F3:-z
+Base edge F3:+y|F3:+z
+Base edge F3:+y|F3:-x
+Base edge F3:+y|F3:-z
+Base edge F3:+z|F3:-x
+Base edge F3:+z|F3:-y
+Base edge F3:-x|F3:-y
+Base edge F3:-x|F3:-z
+Base edge F3:-y|F3:-z
+body LeftWall: 6 faces, 12 edges
+LeftWall face F4:+x
+LeftWall face F4:+y
+LeftWall face F4:+z
+LeftWall face F4:-x
+LeftWall face F4:-y
+LeftWall face F4:-z
+LeftWall edge F4:+x|F4:+y
+LeftWall edge F4:+x|F4:+z
+LeftWall edge F4:+x|F4:-y
+LeftWall edge F4:+x|F4:-z
+LeftWall edge F4:+y|F4:+z
+LeftWall edge F4:+y|F4:-x
+LeftWall edge F4:+y|F4:-z
+LeftWall edge F4:+z|F4:-x
+LeftWall edge F4:+z|F4:-y
+LeftWall edge F4:-x|F4:-y
+LeftWall edge F4:-x|F4:-z
+LeftWall edge F4:-y|F4:-z
+body RightWall: 6 faces, 12 edges
+RightWall face F5:+x
+RightWall face F5:+y
+RightWall face F5:+z
+RightWall face F5:-x
+RightWall face F5:-y
+RightWall face F5:-z
+RightWall edge F5:+x|F5:+y
+RightWall edge F5:+x|F5:+z
+RightWall edge F5:+x|F5:-y
+RightWall edge F5:+x|F5:-z
+RightWall edge F5:+y|F5:+z
+RightWall edge F5:+y|F5:-x
+RightWall edge F5:+y|F5:-z
+RightWall edge F5:+z|F5:-x
+RightWall edge F5:+z|F5:-y
+RightWall edge F5:-x|F5:-y
+RightWall edge F5:-x|F5:-z
+RightWall edge F5:-y|F5:-z
+body FrontWall: 6 faces, 12 edges
+FrontWall face F6:+x
+FrontWall face F6:+y
+FrontWall face F6:+z
+FrontWall face F6:-x
+FrontWall face F6:-y
+FrontWall face F6:-z
+FrontWall edge F6:+x|F6:+y
+FrontWall edge F6:+x|F6:+z
+FrontWall edge F6:+x|F6:-y
+FrontWall edge F6:+x|F6:-z
+FrontWall edge F6:+y|F6:+z
+FrontWall edge F6:+y|F6:-x
+FrontWall edge F6:+y|F6:-z
+FrontWall edge F6:+z|F6:-x
+FrontWall edge F6:+z|F6:-y
+FrontWall edge F6:-x|F6:-y
+FrontWall edge F6:-x|F6:-z
+FrontWall edge F6:-y|F6:-z
+body BackWall: 6 faces, 12 edges
+BackWall face F7:+x
+BackWall face F7:+y
+BackWall face F7:+z
+BackWall face F7:-x
+BackWall face F7:-y
+BackWall face F7:-z
+BackWall edge F7:+x|F7:+y
+BackWall edge F7:+x|F7:+z
+BackWall edge F7:+x|F7:-y
+BackWall edge F7:+x|F7:-z
+BackWall edge F7:+y|F7:+z
+BackWall edge F7:+y|F7:-x
+BackWall edge F7:+y|F7:-z
+BackWall edge F7:+z|F7:-x
+BackWall edge F7:+z|F7:-y
+BackWall edge F7:-x|F7:-y
+BackWall edge F7:-x|F7:-z
+BackWall edge F7:-y|F7:-z
+body Insert: 6 faces, 12 edges
+Insert face F10:+x
+Insert face F10:+y
+Insert face F10:+z
+Insert face F10:-x
+Insert face F10:-y
+Insert face F10:-z
+Insert edge F10:+x|F10:+y
+Insert edge F10:+x|F10:+z
+Insert edge F10:+x|F10:-y
+Insert edge F10:+x|F10:-z
+Insert edge F10:+y|F10:+z
+Insert edge F10:+y|F10:-x
+Insert edge F10:+y|F10:-z
+Insert edge F10:+z|F10:-x
+Insert edge F10:+z|F10:-y
+Insert edge F10:-x|F10:-y
+Insert edge F10:-x|F10:-z
+Insert edge F10:-y|F10:-z
+body Pad1: 4 faces, 6 edges
+Pad1 face F11:bottom
+Pad1 face F11:side#1
+Pad1 face F11:side#2
+Pad1 face F11:top
+Pad1 edge F11:bottom|F11:side#1
+Pad1 edge F11:bottom|F11:side#2
+Pad1 edge F11:side#1|F11:side#2~1 [geometric]
+Pad1 edge F11:side#1|F11:side#2~2 [geometric]
+Pad1 edge F11:side#1|F11:top
+Pad1 edge F11:side#2|F11:top
+body Pad2: 4 faces, 6 edges
+Pad2 face F12:bottom
+Pad2 face F12:side#1
+Pad2 face F12:side#2
+Pad2 face F12:top
+Pad2 edge F12:bottom|F12:side#1
+Pad2 edge F12:bottom|F12:side#2
+Pad2 edge F12:side#1|F12:side#2~1 [geometric]
+Pad2 edge F12:side#1|F12:side#2~2 [geometric]
+Pad2 edge F12:side#1|F12:top
+Pad2 edge F12:side#2|F12:top
+body Pad3: 4 faces, 6 edges
+Pad3 face F13:bottom
+Pad3 face F13:side#1
+Pad3 face F13:side#2
+Pad3 face F13:top
+Pad3 edge F13:bottom|F13:side#1
+Pad3 edge F13:bottom|F13:side#2
+Pad3 edge F13:side#1|F13:side#2~1 [geometric]
+Pad3 edge F13:side#1|F13:side#2~2 [geometric]
+Pad3 edge F13:side#1|F13:top
+Pad3 edge F13:side#2|F13:top
+body Pad4: 4 faces, 6 edges
+Pad4 face F14:bottom
+Pad4 face F14:side#1
+Pad4 face F14:side#2
+Pad4 face F14:top
+Pad4 edge F14:bottom|F14:side#1
+Pad4 edge F14:bottom|F14:side#2
+Pad4 edge F14:side#1|F14:side#2~1 [geometric]
+Pad4 edge F14:side#1|F14:side#2~2 [geometric]
+Pad4 edge F14:side#1|F14:top
+Pad4 edge F14:side#2|F14:top
+body Pad5: 4 faces, 6 edges
+Pad5 face F15:bottom
+Pad5 face F15:side#1
+Pad5 face F15:side#2
+Pad5 face F15:top
+Pad5 edge F15:bottom|F15:side#1
+Pad5 edge F15:bottom|F15:side#2
+Pad5 edge F15:side#1|F15:side#2~1 [geometric]
+Pad5 edge F15:side#1|F15:side#2~2 [geometric]
+Pad5 edge F15:side#1|F15:top
+Pad5 edge F15:side#2|F15:top
+body Pad6: 4 faces, 6 edges
+Pad6 face F16:bottom
+Pad6 face F16:side#1
+Pad6 face F16:side#2
+Pad6 face F16:top
+Pad6 edge F16:bottom|F16:side#1
+Pad6 edge F16:bottom|F16:side#2
+Pad6 edge F16:side#1|F16:side#2~1 [geometric]
+Pad6 edge F16:side#1|F16:side#2~2 [geometric]
+Pad6 edge F16:side#1|F16:top
+Pad6 edge F16:side#2|F16:top
+body Post1: 4 faces, 6 edges
+Post1 face F19:bottom
+Post1 face F19:side#1
+Post1 face F19:side#2
+Post1 face F19:top
+Post1 edge F19:bottom|F19:side#1
+Post1 edge F19:bottom|F19:side#2
+Post1 edge F19:side#1|F19:side#2~1 [geometric]
+Post1 edge F19:side#1|F19:side#2~2 [geometric]
+Post1 edge F19:side#1|F19:top
+Post1 edge F19:side#2|F19:top
+body Post2: 4 faces, 6 edges
+Post2 face F20:bottom
+Post2 face F20:side#1
+Post2 face F20:side#2
+Post2 face F20:top
+Post2 edge F20:bottom|F20:side#1
+Post2 edge F20:bottom|F20:side#2
+Post2 edge F20:side#1|F20:side#2~1 [geometric]
+Post2 edge F20:side#1|F20:side#2~2 [geometric]
+Post2 edge F20:side#1|F20:top
+Post2 edge F20:side#2|F20:top
+body Post3: 4 faces, 6 edges
+Post3 face F21:bottom
+Post3 face F21:side#1
+Post3 face F21:side#2
+Post3 face F21:top
+Post3 edge F21:bottom|F21:side#1
+Post3 edge F21:bottom|F21:side#2
+Post3 edge F21:side#1|F21:side#2~1 [geometric]
+Post3 edge F21:side#1|F21:side#2~2 [geometric]
+Post3 edge F21:side#1|F21:top
+Post3 edge F21:side#2|F21:top
+body Post4: 4 faces, 6 edges
+Post4 face F22:bottom
+Post4 face F22:side#1
+Post4 face F22:side#2
+Post4 face F22:top
+Post4 edge F22:bottom|F22:side#1
+Post4 edge F22:bottom|F22:side#2
+Post4 edge F22:side#1|F22:side#2~1 [geometric]
+Post4 edge F22:side#1|F22:side#2~2 [geometric]
+Post4 edge F22:side#1|F22:top
+Post4 edge F22:side#2|F22:top
+body ClearLid: 6 faces, 12 edges
+ClearLid face F25:+x
+ClearLid face F25:+y
+ClearLid face F25:+z
+ClearLid face F25:-x
+ClearLid face F25:-y
+ClearLid face F25:-z
+ClearLid edge F25:+x|F25:+y
+ClearLid edge F25:+x|F25:+z
+ClearLid edge F25:+x|F25:-y
+ClearLid edge F25:+x|F25:-z
+ClearLid edge F25:+y|F25:+z
+ClearLid edge F25:+y|F25:-x
+ClearLid edge F25:+y|F25:-z
+ClearLid edge F25:+z|F25:-x
+ClearLid edge F25:+z|F25:-y
+ClearLid edge F25:-x|F25:-y
+ClearLid edge F25:-x|F25:-z
+ClearLid edge F25:-y|F25:-z

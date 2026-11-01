@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4377"
+ ],
+ "what": "a cone frustum (r 10 at the bottom, 20 at the top, 38.1 high) shelled 0.125 with both its ends removed, leaving a conical tube: truck refused it ('a corner whose faces don't meet the same way after the move')",
+ "source": "analytic",
+ "method": "the wall is the side offset 0.125 normal to the cone, inward: half-angle a = atan(10/38.1), inner radii r - 0.125/cos(a) at both ends; both ends are open, so V = pi h/3 (R1^2+R1R2+R2^2) - pi h/3 (r1^2+r1r2+r2^2). Faces: outer and inner cones, the two end rings = 4",
+ "body_count": 1,
+ "faces": 4,
+ "volume_mm3": 462.0591
+}

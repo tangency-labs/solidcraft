@@ -1,0 +1,212 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 20,
+    "width": 20,
+    "height": 10,
+    "corner": [
+     -10,
+     -10,
+     -10
+    ],
+    "operation": "new",
+    "body_name": "BaseBox"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 5,
+    "base": [
+     5,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "operation": "new",
+    "body_name": "Disc"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 4,
+    "height": 5,
+    "corner": [
+     15,
+     -2,
+     0
+    ],
+    "operation": "new",
+    "body_name": "Tappet"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Base",
+    "parent": "root",
+    "activate": false
+   }
+  },
+  {
+   "command": "component.move_bodies",
+   "params": {
+    "bodies": [
+     "BaseBox"
+    ],
+    "component": "Base"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Cam",
+    "parent": "root",
+    "activate": false
+   }
+  },
+  {
+   "command": "component.move_bodies",
+   "params": {
+    "bodies": [
+     "Disc"
+    ],
+    "component": "Cam"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Follower",
+    "parent": "root",
+    "activate": false
+   }
+  },
+  {
+   "command": "component.move_bodies",
+   "params": {
+    "bodies": [
+     "Tappet"
+    ],
+    "component": "Follower"
+   }
+  },
+  {
+   "command": "occurrence.ground",
+   "params": {
+    "occurrence": "Base:1",
+    "grounded": true
+   }
+  },
+  {
+   "command": "joint.create",
+   "params": {
+    "type": "revolute",
+    "name": "Shaft",
+    "flip": true,
+    "a": {
+     "occurrence": "Base",
+     "point": [
+      0,
+      0,
+      0
+     ],
+     "z": [
+      0,
+      0,
+      1
+     ]
+    },
+    "b": {
+     "occurrence": "Cam",
+     "point": [
+      0,
+      0,
+      0
+     ],
+     "z": [
+      0,
+      0,
+      1
+     ]
+    },
+    "quiet": true
+   }
+  },
+  {
+   "command": "joint.create",
+   "params": {
+    "type": "slider",
+    "name": "Lift",
+    "flip": true,
+    "a": {
+     "occurrence": "Base",
+     "point": [
+      15,
+      0,
+      2.5
+     ],
+     "z": [
+      1,
+      0,
+      0
+     ]
+    },
+    "b": {
+     "occurrence": "Follower",
+     "point": [
+      15,
+      0,
+      2.5
+     ],
+     "z": [
+      1,
+      0,
+      0
+     ]
+    },
+    "quiet": true
+   }
+  },
+  {
+   "command": "joint.cam",
+   "params": {
+    "a": "Shaft",
+    "b": "Lift",
+    "profile": {
+     "edges": [
+      [
+       15,
+       0,
+       0
+      ]
+     ],
+     "occurrence": "Cam"
+    }
+   }
+  },
+  {
+   "command": "joint.drive",
+   "params": {
+    "joint": "Shaft",
+    "quiet": true,
+    "value": 90
+   }
+  },
+  {
+   "command": "occurrence.properties",
+   "params": {
+    "occurrence": "Follower:1"
+   }
+  }
+ ]
+}

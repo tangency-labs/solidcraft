@@ -1,0 +1,17 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4702"
+ ],
+ "what": "a disc (r16 x 5) with a radial slot cut 3.2 down (65..115 deg, r 10 out through the rim): the vertical edge where a slot wall meets the outer cylinder chamfered 0.4: refused ('both faces next to the edge must be planar')",
+ "source": "analytic",
+ "method": "disc pi 256 5 less the slot sector (50/360) pi (16^2 - 10^2) 3.2. The chamfer cuts the corner between the radial wall and the cylinder: from 0.4 in along the wall to 0.4 round the cylinder, i.e. the triangle (corner, the two points) plus the circular segment r^2/2 (d - sin d), d = 0.4/16, over the 3.2 mm edge. Faces: top, bottom, outer cylinder, slot floor, two walls, inner wall, chamfer = 8. Graded to 1e-5 relative: the chamfer is 7e-5 of the volume, and how a distance is measured round the cylinder (along it, or to the offset surfaces' intersection) moves it by up to 4% of itself",
+ "body_count": 1,
+ "faces": 8,
+ "volume_mm3": 3803.164466,
+ "tolerance": {
+  "rel": 1e-05
+ },
+ "continuity": {
+  "order": "g0"
+ }
+}

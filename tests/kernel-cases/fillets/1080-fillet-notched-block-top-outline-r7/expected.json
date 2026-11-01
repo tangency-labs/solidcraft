@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1080"
+ ],
+ "what": "a 40 x 30 x 10 block with a 5 x 5 x 3 notch at a bottom corner, its top outline rounded R7: the round uses up the 7 mm wall over the notch",
+ "source": "analytic",
+ "method": "block 12000 less the notch 75: 11925. The outline's mitred round takes (1-pi/4) r^2 (140 - 8c), c = r (10-3pi)/(3(4-pi)) (the prisms ending on the 45 deg mitres). R7 reaches z = 3, the notch's top: it uses the 7 mm wall over the notch up and none of it lies in the notch. V = 10584.365507",
+ "body_count": 1,
+ "volume_mm3": 10584.365507210565,
+ "continuity": {
+  "order": "g1"
+ }
+}

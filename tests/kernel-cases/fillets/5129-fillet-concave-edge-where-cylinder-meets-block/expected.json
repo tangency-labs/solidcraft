@@ -1,0 +1,16 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5129"
+ ],
+ "what": "the concave vertical edge where a taller cylinder (r8 x 15) meets a block's side (10 high), filleted r1: refused ('a vertex of the edge chain where other faces meet: both faces next to the edge must be planar'); it worked when both were the same height",
+ "source": "analytic",
+ "method": "block 20x20x10 + cylinder pi 64 15 less their overlap (half the cylinder over the block's height, pi 64/2 10). The round fills the corner between the plane x = 20 and the cylinder: its circle (r1) has its centre at (21, 10 - sqrt80), tangent to both; the region between the plane, the cylinder and that circle (polygon clipping, 8192 segments a quarter circle) times the edge's 10 mm, the block's top closing it. Graded to 1e-5 relative, as the round adds 3e-4",
+ "body_count": 1,
+ "volume_mm3": 6012.41426,
+ "tolerance": {
+  "rel": 1e-05
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

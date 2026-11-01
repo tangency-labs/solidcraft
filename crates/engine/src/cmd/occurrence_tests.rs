@@ -280,7 +280,7 @@ fn instance_selection_delete_removes_only_selected_instance() {
     run(&mut s, "selection.delete", json!({"items": items}));
     assert!(s.doc.occurrences.iter().any(|o| o.id == first));
     assert!(!s.doc.occurrences.iter().any(|o| o.id == second));
-    assert_eq!(s.world_state().bodies.len(), 1);
+    assert_eq!(s.world_state().unwrap().bodies.len(), 1);
     assert!(s.doc.components.iter().any(|c| c.id == component));
 }
 
@@ -375,7 +375,7 @@ fn synthesized_name_collision_keeps_source_and_instance_separate() {
     let instance = s.occurrence_bodies(&[second], false).unwrap()[0].clone();
     assert_ne!(instance, candidate);
     let frames = s.doc.body_frames(&s.model.state());
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     assert!(frames.iter().all(|(name, _, _, _)| world.body(name).is_some()));
     assert_eq!(world.bodies.len(), world.bodies.iter().map(|b| &b.name).collect::<std::collections::BTreeSet<_>>().len());
     run(&mut s, "browser.visibility", json!({"visible":false,"paths":[[second]]}));
@@ -588,10 +588,10 @@ fn instance_styles_follow_source_identity_after_collision_rename_and_pending_mov
     let instance = s.occurrence_bodies(&[second], false).unwrap()[0].clone();
     let source = s.occurrence_placement(&[second]).unwrap().bodies[0].source.clone();
     run(&mut s, "material.assign", json!({"bodies":[instance],"material":"Brass"}));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     assert_eq!(s.doc.body_color(world.body(&instance).unwrap()), s.doc.body_color(world.body(&source).unwrap()));
     run(&mut s, "appearance.assign", json!({"components":[component.to_string()],"color":"#0000ff","opacity":0.7}));
-    assert_eq!(s.doc.body_color(s.world_state().body(&instance).unwrap()), Some([0.0, 0.0, 1.0]));
+    assert_eq!(s.doc.body_color(s.world_state().unwrap().body(&instance).unwrap()), Some([0.0, 0.0, 1.0]));
     run(&mut s, "appearance.assign", json!({"bodies":[instance],"color":"#ff0000","opacity":0.5}));
     run(&mut s, "appearance.assign", json!({"faces":[{"body":instance,"point":[21,1,2]}],"color":"#00ff00","opacity":0.4}));
     // Exercise the point-based face fallback as well as persistent face-name matching.
@@ -600,7 +600,7 @@ fn instance_styles_follow_source_identity_after_collision_rename_and_pending_mov
     }
     run(&mut s, "body.rename", json!({"body":source,"name":"Shared Renamed"}));
     run(&mut s, "occurrence.move", json!({"occurrence":second,"translate":[5,0,0],"capture":false}));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     for id in [first, second] {
         let bodyname = s.occurrence_bodies(&[id], false).unwrap()[0].clone();
         let body = world.body(&bodyname).unwrap();
@@ -913,8 +913,8 @@ fn a_stood_up_nested_step_part_is_cut_and_joined_from_its_face() {
             .unwrap();
         run(&mut s, "sketch.circle.center", json!({"center": [centre.x, centre.y], "radius": 3}));
         run(&mut s, "sketch.finish", json!({}));
-        assert_eq!(crate::auto_operation(&s, &json!({"distance": -5})), Some("cut"), "top level {top_level}");
-        assert_eq!(crate::auto_operation(&s, &json!({"distance": 5})), Some("join"), "top level {top_level}");
+        assert_eq!(crate::auto_operation(&s, &json!({"distance": -5})).unwrap(), Some("cut"), "top level {top_level}");
+        assert_eq!(crate::auto_operation(&s, &json!({"distance": 5})).unwrap(), Some("join"), "top level {top_level}");
         let volume = |s: &mut Session| run(s, "inspect.measure", json!({"bodies": ["NestedBlock"]}))["total"]["volume_mm3"].as_f64().unwrap();
         let block = 40.0 * 24.0 * 10.0;
         let hole = std::f64::consts::PI * 3.0 * 3.0;
@@ -1383,10 +1383,10 @@ fn pasted_and_moved_things_survive_reopening() {
     run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "corner": [50, 0, 0], "body_name": "Pin"}));
     run(&mut s, "component.activate", json!({"component": 0}));
     run(&mut s, "occurrence.reparent", json!({"occurrence": b_at, "parent": a}));
-    let before = s.world_state();
+    let before = s.world_state().unwrap();
     let mut reopened = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Session::default() };
     reopened.refresh();
-    let after = reopened.world_state();
+    let after = reopened.world_state().unwrap();
     for name in ["Cube", "Cube (2)", "Pin"] {
         let (was, is) = (before.body(name).unwrap().mesh().bounds(), after.body(name).unwrap().mesh().bounds());
         assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{name}: {was:?} → {is:?}");
@@ -1409,7 +1409,7 @@ fn a_body_seen_in_another_placement_copies_from_there() {
     assert_ne!(shown, "Cube");
     let out = run(&mut s, "component.copy_bodies", json!({"bodies": [shown.clone()], "component": 0}));
     assert_eq!(out["bodies"], json!(["Cube (2)"]));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let (seen, copy) = (world.body(&shown).unwrap().mesh().bounds(), world.body("Cube (2)").unwrap().mesh().bounds());
     assert!(seen.min.dist(copy.min) < 1e-6 && seen.max.dist(copy.max) < 1e-6, "{seen:?} vs {copy:?}");
     let state = s.model.state();
@@ -1566,7 +1566,7 @@ fn occurrence_align_moves_only_selected_instance_including_90_degree_face_mate()
     );
     assert_eq!(s.doc.features.len(), features_before, "aligning an occurrence must not add a body feature to the shared component");
 
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     let b1 = st.body("Beam").unwrap().mesh().bounds();
     assert!((b1.min.x - 0.0).abs() < 1e-5 && (b1.max.x - 10.0).abs() < 1e-5, "{b1:?}");
     assert!((b1.min.y - 0.0).abs() < 1e-5 && (b1.max.y - 10.0).abs() < 1e-5, "{b1:?}");
@@ -1594,7 +1594,7 @@ fn occurrence_align_supports_snaps_planes_flip_nested_paths_and_pending_capture(
     run(&mut s, "component.activate", json!({"component": "root"}));
 
     // Align the child under a 90-deg rotated parent onto XY plane along plane normal only (capture: false).
-    let before = s.world_state().body("Plate").unwrap().mesh().bounds();
+    let before = s.world_state().unwrap().body("Plate").unwrap().mesh().bounds();
     run(
         &mut s,
         "occurrence.align",
@@ -1605,13 +1605,13 @@ fn occurrence_align_supports_snaps_planes_flip_nested_paths_and_pending_capture(
             "capture": false
         }),
     );
-    let moved = s.world_state().body("Plate").unwrap().mesh().bounds();
+    let moved = s.world_state().unwrap().body("Plate").unwrap().mesh().bounds();
     assert!((moved.min.z - 0.0).abs() < 1e-5 && (moved.max.z - 4.0).abs() < 1e-5, "{moved:?}");
     assert!((moved.center().x - before.center().x).abs() < 1e-5 && (moved.center().y - before.center().y).abs() < 1e-5, "{moved:?}");
 
     // Revert drops the pending alignment; re-align with capture: true and vertex snap to origin.
     run(&mut s, "component.revert_position", json!({}));
-    assert!((s.world_state().body("Plate").unwrap().mesh().bounds().min.z - 10.0).abs() < 1e-5);
+    assert!((s.world_state().unwrap().body("Plate").unwrap().mesh().bounds().min.z - 10.0).abs() < 1e-5);
 
     run(
         &mut s,
@@ -1623,7 +1623,7 @@ fn occurrence_align_supports_snaps_planes_flip_nested_paths_and_pending_capture(
             "to": "origin"
         }),
     );
-    let at_origin = s.world_state().body("Plate").unwrap().mesh().bounds();
+    let at_origin = s.world_state().unwrap().body("Plate").unwrap().mesh().bounds();
     assert!(at_origin.min.dist(solidcraft_geom::Vec3::ZERO) < 1e-5, "{at_origin:?}");
 
     // Hostile / invalid parameters never panic.
@@ -1681,8 +1681,8 @@ fn a_body_copied_in_another_design_pastes_as_an_imported_body() {
     let (_, holder) = created(&mut source, "Holder");
     run(&mut source, "occurrence.move", json!({"occurrence": holder, "translate": [0,50,0]}));
     run(&mut source, "solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"}));
-    let was = source.world_state().body("Cube").unwrap().mesh().bounds();
-    let copy = crate::ForeignCopy::of(&source, vec!["Cube".into()], Vec::new());
+    let was = source.world_state().unwrap().body("Cube").unwrap().mesh().bounds();
+    let copy = crate::ForeignCopy::of(&source, vec!["Cube".into()], Vec::new()).unwrap();
 
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": "Cube"}));
@@ -1694,7 +1694,7 @@ fn a_body_copied_in_another_design_pastes_as_an_imported_body() {
     assert_eq!(out["bodies"], json!(["Cube (2)"]));
     assert_eq!(out["feature"], "Import1");
     assert_eq!(s.undo.len(), undo + 1);
-    let is = s.world_state().body("Cube (2)").unwrap().mesh().bounds();
+    let is = s.world_state().unwrap().body("Cube (2)").unwrap().mesh().bounds();
     assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
     let state = s.model.state();
     assert_eq!(s.doc.model_body_component(state.body("Cube (2)").unwrap()), a);
@@ -1716,13 +1716,13 @@ fn a_body_seen_in_another_placement_pastes_into_another_design_under_its_own_nam
     run(&mut source, "occurrence.move", json!({"occurrence": second, "translate": [0,40,0]}));
     let seen = source.placed_document().world_body_name(&source.model.state(), "Cube", holder, &[second]);
     assert_ne!(seen, "Cube");
-    let was = source.world_state().body(&seen).unwrap().mesh().bounds();
-    let copy = crate::ForeignCopy::of(&source, vec![seen], Vec::new());
+    let was = source.world_state().unwrap().body(&seen).unwrap().mesh().bounds();
+    let copy = crate::ForeignCopy::of(&source, vec![seen], Vec::new()).unwrap();
     assert_eq!(copy.names, vec!["Cube".to_string()]);
 
     let mut s = Session { foreign_copy: Some(std::sync::Arc::new(copy)), ..Default::default() };
     let out = run(&mut s, "component.paste_from_design", json!({}));
     assert_eq!(out["bodies"], json!(["Cube"]));
-    let is = s.world_state().body("Cube").unwrap().mesh().bounds();
+    let is = s.world_state().unwrap().body("Cube").unwrap().mesh().bounds();
     assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
 }

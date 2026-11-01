@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "the axis of a cylinder's side",
+ "source": "analytic",
+ "method": "cylinder r 5, h 10 on (60,0,0) along +Z: the line through (60,0,0) along Z",
+ "construction": {
+  "A": {
+   "axis": {
+    "through": [
+     60,
+     0,
+     0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   }
+  }
+ }
+}

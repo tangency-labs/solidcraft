@@ -1,0 +1,74 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 100,
+    "width": 40,
+    "height": 12,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     10,
+     20,
+     12
+    ],
+    "thread": "M3"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     25,
+     20,
+     12
+    ],
+    "thread": "M5"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     45,
+     20,
+     12
+    ],
+    "thread": "M8"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     65,
+     20,
+     12
+    ],
+    "thread": "M8.5x1"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     88,
+     20,
+     12
+    ],
+    "thread": "M12",
+    "depth": 8
+   }
+  }
+ ]
+}

@@ -1,6 +1,7 @@
 use solidcraft_geom::Vec3;
 
 use super::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, History, Side};
+use crate::history::BodyHistory;
 use crate::{Body, box_solid, transform};
 
 fn face(operand: usize, face: usize) -> FaceOrigin {
@@ -32,11 +33,11 @@ fn a_transform_keeps_every_face_and_edge_in_place() {
         assert!(rot(before).dist(after) < 1e-6, "{before:?} → {after:?}");
     }
     // Each edge separates the same faces it did.
-    let (ea, em) = (super::edge_faces(&a.solid), super::edge_faces(&moved.solid));
+    let (ea, em) = (super::edge_faces(a.record()), super::edge_faces(moved.record()));
     assert_eq!(ea, em);
     assert!(h.edges.iter().all(|e| e.faces.len() == 2 && e.origins.len() == 1));
     // The history's edges are the tessellation's edges, bounding the same faces.
-    let mesh = moved.tessellate(1e-3).unwrap();
+    let mesh = moved.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap();
     let mesh_faces: Vec<Vec<usize>> = mesh.edge_faces.iter().map(|fs| fs.iter().map(|f| *f as usize).collect()).collect();
     assert_eq!(mesh_faces, h.edges.iter().map(|e| e.faces.clone()).collect::<Vec<_>>());
 }
@@ -65,7 +66,7 @@ fn substitute_a_body_made_from_a_sketch() {
 #[test]
 fn bodies_without_reported_history_have_none() {
     let a = box_solid(Vec3::ZERO, Vec3::new(4.0, 3.0, 1.0)).unwrap();
-    let bare = Body::new(a.deep_copy()).unwrap();
+    let bare = Body::from_record(a.record().clone()).unwrap();
     assert!(bare.history().is_none());
 }
 
@@ -289,8 +290,8 @@ fn collinear_profile_lines_taper_into_one_side_face() {
     let whole = polygon(&[(0.0, 0.0), (20.0, 0.0), (20.0, 10.0), (0.0, 10.0)]);
     let taper = 5f64.to_radians();
     for (from, to, foot) in [(0.0, 5.0, 0.0), (-1.0, 5.0, 1.0)] {
-        let body = crate::extrude_tapered_between(&Plane::XY, &split, from, to, foot, 1.0, taper).unwrap();
-        let reference = crate::extrude_tapered_between(&Plane::XY, &whole, from, to, foot, 1.0, taper).unwrap();
+        let body = crate::extrude_tapered_between(&Plane::XY, &split, from, to, foot, 1.0, taper, crate::DraftCorner::default()).unwrap();
+        let reference = crate::extrude_tapered_between(&Plane::XY, &whole, from, to, foot, 1.0, taper, crate::DraftCorner::default()).unwrap();
         assert_eq!(body.face_count(), reference.face_count(), "{from}..{to} foot {foot}: as many faces as one piece");
         let (v, w) = (crate::measure(&body).unwrap().volume, crate::measure(&reference).unwrap().volume);
         assert!((v - w).abs() < 1e-9 * w, "{v} vs {w}");

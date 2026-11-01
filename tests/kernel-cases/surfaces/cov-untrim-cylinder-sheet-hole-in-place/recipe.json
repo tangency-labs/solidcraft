@@ -1,0 +1,128 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "Arc"
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "start": [
+     10,
+     0
+    ],
+    "end": [
+     0,
+     10
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "surface.extrude",
+   "params": {
+    "sketch": "Arc",
+    "curves": [
+     "a1"
+    ],
+    "distance": 20,
+    "body_name": "Quarter"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      -0.7071067811865476,
+      0.7071067811865476,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Window"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -2,
+     8
+    ],
+    "p1": [
+     2,
+     12
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "surface.trim",
+   "params": {
+    "body": "Quarter",
+    "curves": {
+     "sketch": "Window"
+    },
+    "keep": [
+     9.84807753012208,
+     1.7364817766693033,
+     2
+    ]
+   }
+  },
+  {
+   "command": "surface.untrim",
+   "params": {
+    "face": {
+     "body": "Quarter",
+     "point": [
+      9.84807753012208,
+      1.7364817766693033,
+      2
+     ]
+    },
+    "holes": "all",
+    "in_place": true
+   }
+  }
+ ]
+}

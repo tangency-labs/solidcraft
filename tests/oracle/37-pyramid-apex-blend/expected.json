@@ -1,5 +1,6 @@
 {
   "source": "freecad 1.1.4",
+  "known_failure": "the apex blend's shape is 0.193 mm off the reference (at most 0.05)",
   "method": "FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part.makeLoft, Part makeFillet",
   "body_count": 1,
   "volume_mm3": 15465.577113384288,

@@ -3,17 +3,16 @@
 use crate::{Body, KernelError, Result, guard};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Number, Value};
-use std::sync::Arc;
 
-mod adapter;
 mod binary;
 mod metadata;
 mod preview;
 pub use preview::native_preview_mesh;
 
 // 01/02 were development-only prototypes; independent metadata records start at 03; 04 stores
-// procedural intersections and placed revolutions exactly, and the measured runtime values.
-const MAGIC: &[u8; 8] = b"SCBREP04";
+// procedural intersections and placed revolutions exactly, and the measured runtime values; 05
+// nests geometry schema 4 (regions, unbounded geometry, pcurves, canonical order).
+const MAGIC: &[u8; 8] = b"SCBREP05";
 // A body's own limits. A design's cache holds many bodies within the container's budgets, and
 // decoding is linear in the bytes, so one large part (an imported casting) fits.
 const MAX_BYTES: usize = 256 << 20;
@@ -35,20 +34,18 @@ struct SavedBody {
 struct Runtime {
     /// [`Body::size`] as stored (0: not measured).
     size: f64,
-    /// The orientation mesh's missing-face count at its tolerance.
+    /// Saved by earlier versions (an orientation mesh's missing-face count); read and ignored.
     coarse_missing: Option<(f64, u64)>,
-    /// [`Body::boundary_tol`]: the accuracy the file it was read from declares. Written only
-    /// when there is one, so a body without it is stored as before.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    boundary_tol: Option<f64>,
 }
 fn invalid(detail: impl std::fmt::Display) -> KernelError {
     KernelError::Invalid(format!("native B-rep: {detail}"))
 }
 
-/// Explicit topology, spatial geometry, construction certificates and history, exactly.
-/// Failure is a cache miss at the IO boundary, never a failed document save.
+/// Explicit topology, spatial geometry, construction certificates and history, exactly: the
+/// body's own record and what it carries. Failure is a cache miss at the IO boundary, never a
+/// failed document save.
 pub fn encode_native_body(body: &Body) -> Result<Vec<u8>> {
+    let _span = solidcraft_profile::span("kernel", "encode_native_body");
     guard("encode native B-rep", || {
         for source in body.face_sources.iter().flat_map(|s| s.iter()).flatten() {
             let mut at = source;
@@ -61,34 +58,42 @@ pub fn encode_native_body(body: &Body) -> Result<Vec<u8>> {
                 at = source;
             }
         }
-        if body.face_count() > MAX_ITEMS
-            || body.solid.edge_iter().take(MAX_ITEMS + 1).count() > MAX_ITEMS
-            || body.mesh.as_ref().is_some_and(|m| m.positions.len() > MAX_ITEMS || m.triangles.len() > MAX_ITEMS)
-        {
-            return Err(invalid("native geometry budget"));
-        }
         if body.mesh.is_some() {
             return Err(invalid("mesh bodies are source blobs, not B-rep"));
         }
-        let runtime =
-            Runtime { size: body.size, coarse_missing: body.coarse_missing.map(|(tol, n)| (tol, n as u64)), boundary_tol: body.boundary_tol };
-        let saved = SavedBody { solid: adapter::encode(&body.solid)?, metadata: metadata::encode(body)?, runtime };
+        if body.face_count() > MAX_ITEMS || body.edge_count() > MAX_ITEMS {
+            return Err(invalid("native geometry budget"));
+        }
+        let runtime = Runtime { size: body.size, coarse_missing: None };
+        let saved = SavedBody { solid: body.record().clone(), metadata: metadata::encode(body)?, runtime };
         // Structural validation does not invoke another geometric reconstruction.
         validate_topology(&saved)?;
-        let value = serde_json::to_value(saved).map_err(invalid)?;
-        validate_value(&value, 0)?;
-        if value_nodes(&value) > MAX_VALUES {
-            return Err(invalid("value budget"));
-        }
         let mut out = MAGIC.to_vec();
-        binary::write(&value, &mut out, 0)?;
+        binary::write_serialized(&saved, &mut out)?;
         Ok(out)
     })
+}
+
+/// The schema 4 record of a solid body, in canonical order with its pcurves: the body itself.
+/// Mesh bodies have none.
+pub fn brep_record(body: &Body) -> Result<solidcraft_geom::brep::Brep> {
+    let _span = solidcraft_profile::span("kernel", "brep_record");
+    if body.mesh.is_some() {
+        return Err(invalid("mesh bodies are source blobs, not B-rep"));
+    }
+    Ok(body.record().clone())
+}
+
+/// The body in SMLib (see [`Body::smlib`]), as an owned copy.
+pub fn smlib_body(body: &Body) -> Result<solidcraft_smlib::Brep> {
+    let _span = solidcraft_profile::span("kernel", "smlib_body");
+    body.smlib()?.try_clone().map_err(|e| KernelError::Failed(format!("SMLib: {e}")))
 }
 
 /// Decode bounded untrusted data. Validate indices before topology extraction.
 /// Only a caller that has checked who produced the data may treat it as evaluated geometry.
 pub fn decode_native_body(bytes: &[u8]) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "decode_native_body");
     if bytes.len() > MAX_BYTES || bytes.get(..8) != Some(MAGIC.as_slice()) {
         return Err(invalid("version or size"));
     }
@@ -102,40 +107,166 @@ pub fn decode_native_body(bytes: &[u8]) -> Result<Body> {
         validate_value(&value, 0)?;
         let saved: SavedBody = serde_json::from_value(value).map_err(invalid)?;
         validate_topology(&saved)?;
-        let solid = adapter::decode(saved.solid)?;
-        let Runtime { size, coarse_missing, boundary_tol } = saved.runtime;
-        if !(size.is_finite() && size >= 0.0)
-            || coarse_missing.is_some_and(|(tol, n)| !tol.is_finite() || n > MAX_ITEMS as u64)
-            || boundary_tol.is_some_and(|t| !(t.is_finite() && t > 0.0))
-        {
+        let Runtime { size, .. } = saved.runtime;
+        if !(size.is_finite() && size >= 0.0) {
             return Err(invalid("runtime values"));
         }
-        let mut body = Body {
-            solid: Arc::new(solid),
-            size,
-            boundary_tol,
-            volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
-            coarse_missing: coarse_missing.map(|(tol, n)| (tol, n as usize)),
-            mesh: None,
-            color: None,
-            paint: None,
-            splits: None,
-            face_sources: None,
-            history: None,
-            display_of: None,
-            meshes: None,
-            phased: false,
-            regularization_protected: false,
-        };
+        let mut body = Body::from_record(saved.solid)?;
+        if size > 0.0 {
+            body.size = size;
+        }
         metadata::apply(&mut body, saved.metadata)?;
         Ok(body)
     })
 }
 
+/// An SMLib body as a kernel body: SMLib's export mapped by `solidcraft_smlib` (canonical order,
+/// radians, pcurves) is the body's record ([`Body::from_smlib_record`]).
+pub fn body_from_smlib(brep: &solidcraft_smlib::Brep) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "body_from_smlib");
+    body_from_smlib_ordered(brep).map(|(body, _)| body)
+}
+
+/// [`body_from_smlib`], with where each of SMLib's faces and edges is in the body's face and
+/// edge order ([`crate::history`]).
+pub(crate) fn body_from_smlib_ordered(brep: &solidcraft_smlib::Brep) -> Result<(Body, Option<solidcraft_smlib::history::Order>)> {
+    let _span = solidcraft_profile::span("kernel", "body_from_smlib_ordered");
+    let (record, order) = brep.to_native_ordered().map_err(|e| KernelError::Failed(e.to_string()))?;
+    Ok((Body::from_smlib_record(record)?, Some(order)))
+}
+
+/// `body` in SMLib, with where each of SMLib's faces and edges is in the body's face and edge
+/// order: SMLib's export of the imported body, checked to number every face, edge and vertex as
+/// the body's record does. `None` where it does not.
+pub(crate) fn smlib_body_ordered(body: &Body) -> Result<(solidcraft_smlib::Brep, Option<solidcraft_smlib::history::Order>)> {
+    let brep = smlib_body(body)?;
+    Ok((brep.try_clone().map_err(|e| KernelError::Failed(format!("SMLib: {e}")))?, numbering(body.record(), &brep)))
+}
+
+/// `record` in SMLib, imported as given (SMLib's own form; a record it refuses is an error that
+/// names why), with where each of SMLib's faces and edges is in the record's order.
+pub(crate) fn smlib_record_ordered(
+    record: &solidcraft_geom::brep::Brep,
+) -> Result<(solidcraft_smlib::Brep, Option<solidcraft_smlib::history::Order>)> {
+    let _span = solidcraft_profile::span("kernel", "smlib_record_ordered");
+    let brep = solidcraft_smlib::Brep::from_record(record, true).map_err(|e| KernelError::Failed(format!("SMLib: {e}")))?;
+    let order = numbering(record, &brep);
+    Ok((brep, order))
+}
+
+/// Where SMLib's faces and edges of `brep` (imported from `record`) are in the record's order:
+/// `None` where SMLib's export does not number them as the record does.
+///
+/// SMLib's export is in canonical order, and `order` says where SMLib's own face and edge `i`
+/// went in it. Where the canonical record numbers them as `record` does, `order` maps SMLib's
+/// to the record's. Otherwise SMLib may still keep the record's own order (an import lists
+/// SMLib's faces and edges in the record's order, and canonical order can list them otherwise,
+/// a tube's seam edges among them): the export put back in SMLib's order then numbers them as
+/// `record` does, and SMLib's face and edge `i` are the record's `i`.
+fn numbering(record: &solidcraft_geom::brep::Brep, brep: &solidcraft_smlib::Brep) -> Option<solidcraft_smlib::history::Order> {
+    match brep.to_native_ordered() {
+        Ok((back, order)) => {
+            if same_numbering(record, &back) {
+                return Some(order);
+            }
+            let in_smlib_order = in_smlib_order(&back, &order)?;
+            same_numbering(record, &in_smlib_order).then(solidcraft_smlib::history::Order::default)
+        }
+        Err(e) => {
+            log::debug!(target: "smlib", "no order for an operand: {e}");
+            None
+        }
+    }
+}
+
+/// The canonical record `back` with its faces and edges in SMLib's own order (`order`: where
+/// SMLib's face and edge `i` are in `back`), each loop naming its edges by SMLib's numbers.
+/// `None` where `order` is not a renumbering of `back`'s faces and edges (an edge split into
+/// pieces where solids touch along it is more than one record edge).
+fn in_smlib_order(back: &solidcraft_geom::brep::Brep, order: &solidcraft_smlib::history::Order) -> Option<solidcraft_geom::brep::Brep> {
+    use solidcraft_geom::brep::Loop;
+    let permutation = |to: &[usize], n: usize| -> Option<Vec<usize>> {
+        if to.is_empty() {
+            return Some((0..n).collect());
+        }
+        let mut from = vec![usize::MAX; n];
+        for (i, &k) in to.iter().enumerate() {
+            let slot = from.get_mut(k)?;
+            if *slot != usize::MAX {
+                return None;
+            }
+            *slot = i;
+        }
+        (to.len() == n).then_some(from)
+    };
+    if !order.pieces.is_empty() {
+        return None;
+    }
+    // `faces_from[k]`: SMLib's number of `back`'s face k; likewise for edges.
+    let faces_from = permutation(&order.faces, back.faces.len())?;
+    let edges_from = permutation(&order.edges, back.edges.len())?;
+    let mut out = back.clone();
+    for (k, face) in back.faces.iter().enumerate() {
+        let mut face = face.clone();
+        for l in &mut face.loops {
+            if let Loop::Edges { edges } = l {
+                for e in edges.iter_mut() {
+                    e.edge = u32::try_from(*edges_from.get(usize::try_from(e.edge).ok()?)?).ok()?;
+                }
+            }
+        }
+        *out.faces.get_mut(*faces_from.get(k)?)? = face;
+    }
+    for (k, edge) in back.edges.iter().enumerate() {
+        *out.edges.get_mut(*edges_from.get(k)?)? = edge.clone();
+    }
+    Some(out)
+}
+
+/// Whether two records of one body number its faces, edges and vertices alike: the same loops of
+/// the same edges, the same edge ends, and each vertex where the other's is.
+fn same_numbering(a: &solidcraft_geom::brep::Brep, b: &solidcraft_geom::brep::Brep) -> bool {
+    use solidcraft_geom::brep::Loop;
+    if a.faces.len() != b.faces.len() || a.edges.len() != b.edges.len() || a.vertices.len() != b.vertices.len() {
+        return false;
+    }
+    let loops_alike = a.faces.iter().zip(&b.faces).all(|(fa, fb)| {
+        fa.loops.len() == fb.loops.len()
+            && fa.loops.iter().zip(&fb.loops).all(|pair| match pair {
+                (Loop::Edges { edges: x }, Loop::Edges { edges: y }) => same_cycle(x, y),
+                (Loop::Vertex { vertex: x }, Loop::Vertex { vertex: y }) => x == y,
+                _ => false,
+            })
+    });
+    let ends_alike = a.edges.iter().zip(&b.edges).all(|(x, y)| x.vertices == y.vertices);
+    let at_same_place = a.vertices.iter().zip(&b.vertices).all(|(x, y)| {
+        let d = (0..3).map(|k| (x.point[k] - y.point[k]).powi(2)).sum::<f64>().sqrt();
+        d <= x.tolerance + y.tolerance + a.tolerance + b.tolerance
+    });
+    loops_alike && ends_alike && at_same_place
+}
+
+/// Whether two loops walk the same edges: in the same order from some edge on, or in the
+/// opposite order with each edge the other way round. SMLib walks a face whose surface it turned
+/// (a hole's wall) the other way, starting where it likes; its faces and edges are numbered
+/// alike all the same.
+fn same_cycle(x: &[solidcraft_geom::brep::OrientedEdge], y: &[solidcraft_geom::brep::OrientedEdge]) -> bool {
+    let n = x.len();
+    if n != y.len() {
+        return false;
+    }
+    let Some(first) = x.first() else { return true };
+    let at = |k: usize| y.get(k % n);
+    (0..n).filter(|k| at(*k).is_some_and(|e| e.edge == first.edge)).any(|k| {
+        let ahead = x.iter().enumerate().all(|(i, u)| at(k + i).is_some_and(|w| w.edge == u.edge && w.forward == u.forward));
+        let back = x.iter().enumerate().all(|(i, u)| at(k + n - i).is_some_and(|w| w.edge == u.edge && w.forward != u.forward));
+        ahead || back
+    })
+}
+
 fn validate_topology(saved: &SavedBody) -> Result<()> {
     saved.solid.validate().map_err(invalid)?;
-    let faces: usize = saved.solid.shells.iter().map(|s| s.faces.len()).sum();
-    let edges: usize = saved.solid.shells.iter().map(|s| s.edges.len()).sum();
+    let (faces, edges) = (saved.solid.faces.len(), saved.solid.edges.len());
     let saved = &saved.metadata;
     if saved.version != solidcraft_geom::brep::envelope::VERSION {
         return Err(invalid("metadata version"));
@@ -196,6 +327,8 @@ fn validate_value(v: &Value, depth: usize) -> Result<()> {
     Ok(())
 }
 
+/// How many values `v` is (a collection and each of its items): [`MAX_VALUES`] at most.
+#[cfg(test)]
 fn value_nodes(v: &Value) -> usize {
     match v {
         Value::Array(a) => a.iter().fold(1usize, |n, v| n.saturating_add(value_nodes(v))),
@@ -204,9 +337,13 @@ fn value_nodes(v: &Value) -> usize {
     }
 }
 #[cfg(test)]
+mod smlib_import_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use solidcraft_geom::Vec3;
+    use std::sync::Arc;
     fn equal(a: &Body, b: &Body) {
         assert_eq!(a.face_count(), b.face_count());
         assert_eq!(a.face_sources, b.face_sources);
@@ -237,18 +374,6 @@ mod tests {
             assert!((crate::measure(&a).unwrap().volume - crate::measure(&b).unwrap().volume).abs() < 1e-7);
         }
     }
-    /// A body read from a file keeps the accuracy the file declares through the model cache, so
-    /// a reopened design plans its faces as the import did; one without it is stored as before.
-    #[test]
-    fn a_files_declared_accuracy_survives_the_model_cache() {
-        let cube = crate::box_solid(Vec3::ZERO, Vec3::new(4., 3., 1.)).unwrap();
-        let plain = encode_native_body(&cube).unwrap();
-        assert_eq!(decode_native_body(&plain).unwrap().boundary_tol, None);
-        let read = cube.with_boundary_tol(Some(1e-5));
-        let bytes = encode_native_body(&read).unwrap();
-        assert_ne!(bytes, plain);
-        assert_eq!(decode_native_body(&bytes).unwrap().boundary_tol, Some(1e-5));
-    }
     #[test]
     fn native_spheres_tori_and_open_faces_round_trip_without_conversion() {
         let cube = crate::box_solid(Vec3::ZERO, Vec3::new(40., 30., 10.)).unwrap();
@@ -267,6 +392,63 @@ mod tests {
         }
     }
 
+    /// The encoding as it was made before the encoder wrote as it serialized: the whole record as
+    /// a JSON value, checked, then written.
+    fn encoded_through_a_value(body: &Body) -> Result<Vec<u8>> {
+        let runtime = Runtime { size: body.size, coarse_missing: None };
+        let saved = SavedBody { solid: body.record().clone(), metadata: metadata::encode(body)?, runtime };
+        validate_topology(&saved)?;
+        let value = serde_json::to_value(saved).map_err(invalid)?;
+        validate_value(&value, 0)?;
+        if value_nodes(&value) > MAX_VALUES {
+            return Err(invalid("value budget"));
+        }
+        let mut out = MAGIC.to_vec();
+        binary::write(&value, &mut out, 0)?;
+        Ok(out)
+    }
+
+    /// Written as it serializes, a body's encoding is the bytes its JSON value gave, byte for
+    /// byte: plain, blended, cut (history), extruded (face sources), coloured, painted, split
+    /// along lines, round (spline forms), open, and placed far off.
+    #[test]
+    fn the_encoding_is_the_bytes_of_the_record_as_a_json_value() {
+        use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+        let cube = crate::box_solid(Vec3::ZERO, Vec3::new(40., 30., 10.)).unwrap();
+        let rounded = crate::fillet(&cube, &[Vec3::new(20., 0., 10.)], 2.).unwrap();
+        let bore = crate::cylinder(Vec3::new(10., 10., -1.), Vec3::Z, 3., 12.).unwrap();
+        let cut = crate::boolean(&rounded, &bore, crate::BoolOp::Cut).unwrap().unwrap();
+        let region = Region2 {
+            outer: Loop2::polygon(&[Vec2::ZERO, Vec2::new(20., 0.), Vec2::new(20., 20.), Vec2::new(0., 20.)]),
+            holes: vec![Loop2::circle(Vec2::new(10., 10.), 4.)],
+        };
+        let extruded = crate::extrude(&Plane::XY, &[region], 0., 5.).unwrap().remove(0);
+        assert!(extruded.face_sources().is_some_and(|s| s.iter().any(Option::is_some)), "an extrusion carries its face sources");
+        assert!(cut.history().is_some(), "a cut carries its history");
+        let paint = crate::Paint { opacity: 0.5, faces: vec![crate::FacePaint { face: 1, color: [0.9, 0.1, 0.2], opacity: 0.75 }] };
+        let painted = cube.clone().with_color(Some([0.1, 0.5, 0.9])).with_paint(Some(paint));
+        let top = (0..cube.face_count()).find(|f| cube.planar_face(*f).is_some_and(|p| p.normal().z > 0.5 && p.origin.z > 9.)).unwrap();
+        let split =
+            crate::split_faces(&cube, &[top], &crate::SplitTool::Plane(Plane::from_normal(Vec3::new(20., 0., 0.), Vec3::X).unwrap())).unwrap();
+        let surface = crate::copy_faces(&cube, &[Vec3::new(20., 15., 10.)]).unwrap();
+        let far = crate::transform(&cut, Vec3::new(1.0e6, -2.5e5, 3.0e4), Vec3::ZERO, Vec3::Z, 0.7).unwrap();
+        let bodies = [
+            cube,
+            rounded,
+            cut,
+            extruded,
+            painted,
+            split,
+            surface,
+            crate::sphere(Vec3::ZERO, 12.).unwrap(),
+            crate::torus(Vec3::ZERO, 20., 4.).unwrap(),
+            far,
+        ];
+        for (i, body) in bodies.iter().enumerate() {
+            assert_eq!(encode_native_body(body).unwrap(), encoded_through_a_value(body).unwrap(), "body {i}");
+        }
+    }
+
     #[test]
     fn box_and_fillet_have_stable_wire_records() {
         let cube = crate::box_solid(Vec3::ZERO, Vec3::new(40., 30., 10.)).unwrap();
@@ -275,7 +457,7 @@ mod tests {
             .iter()
             .map(|body| {
                 let bytes = encode_native_body(body).unwrap();
-                assert_eq!(&bytes[..8], b"SCBREP04");
+                assert_eq!(&bytes[..8], b"SCBREP05");
                 let mut raw = &bytes[8..];
                 let value = binary::read(&mut raw, 0, &mut 2_000_000).unwrap();
                 assert!(raw.is_empty());
@@ -283,7 +465,12 @@ mod tests {
             })
             .collect();
         let actual = serde_json::json!(records);
-        let expected: Value = serde_json::from_str(include_str!("native/fixtures/box-fillet-v4.json")).unwrap();
+        // An intended change to the wire records rewrites the fixture with NATIVE_BREP_BLESS=1.
+        if std::env::var_os("NATIVE_BREP_BLESS").is_some() {
+            let path = concat!(env!("CARGO_MANIFEST_DIR"), "/src/native/fixtures/box-fillet-v5.json");
+            std::fs::write(path, serde_json::to_string_pretty(&actual).unwrap() + "\n").unwrap();
+        }
+        let expected: Value = serde_json::from_str(include_str!("native/fixtures/box-fillet-v5.json")).unwrap();
         compare_wire(&expected, &actual);
     }
 
@@ -326,9 +513,9 @@ mod tests {
         for key in ["vertices", "index"] {
             let mut v = value.clone();
             if key == "vertices" {
-                v["solid"]["shells"][0]["edges"][0]["vertices"] = serde_json::json!([u64::MAX, 0]);
+                v["solid"]["edges"][0]["vertices"] = serde_json::json!([u64::MAX, 0]);
             } else {
-                v["solid"]["shells"][0]["faces"][0]["loops"][0][0]["edge"] = serde_json::json!(u64::MAX);
+                v["solid"]["faces"][0]["loops"][0]["edges"][0]["edge"] = serde_json::json!(u64::MAX);
             }
             let mut bad = MAGIC.to_vec();
             binary::write(&v, &mut bad, 0).unwrap();
@@ -338,6 +525,23 @@ mod tests {
         huge.push(7);
         huge.extend(u32::MAX.to_le_bytes());
         assert!(decode_native_body(&huge).is_err());
+    }
+
+    #[test]
+    fn a_kernel_body_past_the_file_item_budget_is_taken_and_a_file_of_it_refused() {
+        // The box with its first edge a polyline of the file item budget's worth of points: a
+        // record the kernel's own operations may make (#3992), and more than a file may carry.
+        let body = crate::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
+        let mut record = body.record().clone();
+        let [t0, t1] = record.edges[0].interval;
+        let n = solidcraft_geom::brep::MAX_ITEMS;
+        let points = (0..n).map(|i| [i as f64 * 1e-6, 0., 0.]).collect();
+        record.edges[0].curve = solidcraft_geom::brep::Curve::Polyline { points };
+        assert!(t0 >= 0.0 && t1 <= (n - 1) as f64);
+        Body::from_record(record.clone()).unwrap();
+        let saved = SavedBody { solid: record, metadata: metadata::encode(&body).unwrap(), runtime: Runtime { size: 0.0, coarse_missing: None } };
+        let refused = validate_topology(&saved).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(refused.contains("item budget"), "{refused}");
     }
 
     #[test]

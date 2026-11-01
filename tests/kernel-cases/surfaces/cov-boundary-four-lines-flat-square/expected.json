@@ -1,0 +1,23 @@
+{
+ "sources": [],
+ "what": "a boundary surface through the four sides of a 20 x 20 square: the flat square",
+ "source": "analytic",
+ "method": "the Coons patch of a planar loop of four lines is the bilinear patch of its corners, here the square itself: area 400 in z = 0, one face with 4 free edges",
+ "valid": false,
+ "body_count": 1,
+ "faces": 1,
+ "boundary_edges": 4,
+ "area_mm2": 400.0,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   20,
+   20,
+   0
+  ]
+ }
+}

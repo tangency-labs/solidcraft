@@ -1,0 +1,65 @@
+{
+  "ar": {
+    "cmd.diagnostics_validation": "التحقق",
+    "prefs.validation": "التحقق من الأجسام",
+    "prefs.validation.each_feature": "مرة لكل ميزة",
+    "prefs.validation.each_step": "بعد كل خطوة",
+    "prefs.validation.label": "فحص النواة الكامل",
+    "prefs.validation.off": "متوقف (تجريبي)",
+    "prefs.validation_note": "بعد كل خطوة: يفحص كل عملية سحب ودمج وتقويس.\nمرة لكل ميزة: يفحص ناتج كل ميزة مرة واحدة.\nمتوقف (تجريبي): لا فحص."
+  },
+  "de": {
+    "cmd.diagnostics_validation": "Prüfung",
+    "prefs.validation": "Körperprüfung",
+    "prefs.validation.each_feature": "Einmal je Feature",
+    "prefs.validation.each_step": "Nach jedem Schritt",
+    "prefs.validation.label": "Vollständige Kernel-Prüfung",
+    "prefs.validation.off": "Aus (experimentell)",
+    "prefs.validation_note": "Nach jedem Schritt: prüft jeden Sweep, jede Boolesche Operation und jede Rundung.\nEinmal je Feature: prüft das Ergebnis jedes Features einmal.\nAus (experimentell): keine Prüfung."
+  },
+  "en": {
+    "cmd.diagnostics_validation": "Validation",
+    "prefs.validation": "Body check",
+    "prefs.validation.each_feature": "Once per feature",
+    "prefs.validation.each_step": "After every step",
+    "prefs.validation.label": "Full kernel check",
+    "prefs.validation.off": "Off (experimental)",
+    "prefs.validation_note": "After every step: checks each sweep, boolean and blend.\nOnce per feature: checks each feature's result once.\nOff (experimental): no check."
+  },
+  "he": {
+    "cmd.diagnostics_validation": "אימות",
+    "prefs.validation": "בדיקת גופים",
+    "prefs.validation.each_feature": "פעם אחת לכל תכונה",
+    "prefs.validation.each_step": "אחרי כל שלב",
+    "prefs.validation.label": "הבדיקה המלאה של הקרנל",
+    "prefs.validation.off": "כבוי (ניסיוני)",
+    "prefs.validation_note": "אחרי כל שלב: בודק כל סחיפה, פעולה בוליאנית ועיגול.\nפעם אחת לכל תכונה: בודק את התוצאה של כל תכונה פעם אחת.\nכבוי (ניסיוני): אין בדיקה."
+  },
+  "ja": {
+    "cmd.diagnostics_validation": "検証",
+    "prefs.validation": "ボディのチェック",
+    "prefs.validation.each_feature": "フィーチャーごとに 1 回",
+    "prefs.validation.each_step": "各ステップの後",
+    "prefs.validation.label": "カーネルの完全チェック",
+    "prefs.validation.off": "オフ (試験的)",
+    "prefs.validation_note": "各ステップの後: スイープ、ブーリアン、ブレンドのたびにチェックします。\nフィーチャーごとに 1 回: 各フィーチャーの結果を 1 回チェックします。\nオフ (試験的): チェックしません。"
+  },
+  "ko": {
+    "cmd.diagnostics_validation": "검증",
+    "prefs.validation": "바디 검사",
+    "prefs.validation.each_feature": "피처마다 한 번",
+    "prefs.validation.each_step": "모든 단계 후",
+    "prefs.validation.label": "커널 전체 검사",
+    "prefs.validation.off": "끄기 (실험적)",
+    "prefs.validation_note": "모든 단계 후: 스윕, 불리언, 블렌드마다 검사합니다.\n피처마다 한 번: 각 피처의 결과를 한 번 검사합니다.\n끄기 (실험적): 검사하지 않습니다."
+  },
+  "zh": {
+    "cmd.diagnostics_validation": "验证",
+    "prefs.validation": "实体检查",
+    "prefs.validation.each_feature": "每个特征一次",
+    "prefs.validation.each_step": "每一步之后",
+    "prefs.validation.label": "内核完整检查",
+    "prefs.validation.off": "关闭（实验性）",
+    "prefs.validation_note": "每一步之后：检查每次扫掠、布尔运算和倒圆。\n每个特征一次：每个特征的结果检查一次。\n关闭（实验性）：不检查。"
+  }
+}

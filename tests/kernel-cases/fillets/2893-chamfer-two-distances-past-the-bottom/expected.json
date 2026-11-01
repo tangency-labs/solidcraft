@@ -1,0 +1,23 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2893"
+ ],
+ "what": "the top rim of a cylinder r10 x 20 chamfered 2 across the top and 25 down a 20 mm wall: the leg down the wall runs 5 past the bottom rim, so it builds as if the wall went on and is cut by the bottom face, a cone frustum",
+ "source": "analytic",
+ "method": "The chamfer's line in (rho, z) runs from (8, 20) on the top to (10, -5) on the wall continued past the bottom face z = 0 (the owner's ruling of 2026-10-30 (d7): a chamfer that reaches or runs past a rim builds): built as if the wall went on and cut by the bottom face, it takes the whole wall, leaving the frustum from r 8 at z = 20 to r 8 + 2 (20/25) = 9.6 at z = 0: pi h (R1^2 + R1 R2 + R2^2) / 3 = pi 20 (64 + 76.8 + 92.16) / 3 = 4879.102831. Faces: the top, the cone and the bottom: 3.",
+ "body_count": 1,
+ "volume_mm3": 4879.102830535188,
+ "faces": 3,
+ "bbox": {
+  "min": [
+   -9.6,
+   -9.6,
+   0
+  ],
+  "max": [
+   9.6,
+   9.6,
+   20
+  ]
+ }
+}

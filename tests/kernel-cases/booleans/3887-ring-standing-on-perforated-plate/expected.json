@@ -1,0 +1,11 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3887",
+    "tangency-labs/solidcraft#2844"
+  ],
+  "what": "a ring (r19.6/20.8, 20 tall) joined onto an 80x80x1.2 plate with a 9x9 grid of 6.4 mm square holes; the ring's foot crosses the holes",
+  "source": "analytic",
+  "method": "plate 80x80x1.2 minus 81 holes 6.4x6.4 (pitch 8, centred): 7680 - 81*6.4^2*1.2; ring standing on the top face (touching, no overlap): pi(20.8^2-19.6^2)*20. One body. The ring's walls must stay whole cylinder faces (the old kernel cut them into full-height strips at every hole edge); the total face count is not graded because the ring's foot over the holes is not worked out here",
+  "body_count": 1,
+  "volume_mm3": 6744.7762
+}

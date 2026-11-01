@@ -19,7 +19,7 @@ fn file(tag: &str, name: &str, bytes: &[u8]) -> (std::path::PathBuf, String) {
 }
 
 fn extent(s: &Session) -> ([f64; 3], [f64; 3]) {
-    let b = crate::view::bounds(s);
+    let b = crate::view::bounds(s).unwrap();
     ([b.min.x, b.min.y, b.min.z], [b.max.x, b.max.y, b.max.z])
 }
 

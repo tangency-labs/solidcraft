@@ -1,0 +1,31 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3276"
+ ],
+ "what": "three extrudes joined into an L-shaped body with a 1 mm protrusion, then a chamfer on the protrusion's outer edge (the report: the corners are no longer 90 degrees and the chamfer fails)",
+ "source": "analytic",
+ "method": "Base 40x20x10 (8000). A wall 40x5x20 extruded up from the base's top face at y 0..5 (4000): an L section. A 20x10 pad extruded 1 mm out of the wall's front face (y 5..6, z 10..20, x 10..30) (200). A 0.5 mm chamfer on its top outer edge (y=6, z=20, length 20) removes a right triangle 0.5x0.5/2 x 20 = 2.5. V = 12200 - 2.5 = 12197.5 mm3. Centre of mass from the pieces: base (20,10,5), wall (20,2.5,20), pad (20,5.5,15), minus the removed wedge at (20, 17/3, 59.5/3).",
+ "outcome": "solid",
+ "body_count": 1,
+ "volume_mm3": 12197.5,
+ "center_of_mass": [
+  20.0,
+  7.4676,
+  10.08
+ ],
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   20,
+   30
+  ]
+ },
+ "continuity": {
+  "order": "g0"
+ }
+}

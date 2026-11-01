@@ -282,8 +282,8 @@ fn face_slot(b: &solidcraft_doc::ModelBody, m: &Mesh, shape: &Shape, pts: &[Vec3
     super::measure_shape::slot_from_faces(shape, pts, &surfaces)
 }
 
-fn describe(s: &Session, sel: &Sel) -> Option<Item> {
-    let st = s.world_state();
+/// `sel` in the placed model `st`.
+fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<Item> {
     let plain = |geo, dir, json| Some(Item { geo, dir, json, shape: Shape::Other, slot: None });
     match sel {
         Sel::Plane { name } => {
@@ -379,8 +379,8 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
             let v = m.measure().volume;
             plain(Geo::Tris(tris), None, json!({"type": "body", "name": name, "closed": closed, "volume_mm3": closed.then_some(v)}))
         }
-        Sel::SketchCurve { id, sketch } => sketch_curve(sketch_of(s, &st, *sketch, |sk| sk.curve_index(id).is_some())?, id),
-        Sel::ExternalSketchCurve { sketch, id } => sketch_curve(sketch_of(s, &st, Some(*sketch), |_| true)?, id),
+        Sel::SketchCurve { id, sketch } => sketch_curve(sketch_of(s, st, *sketch, |sk| sk.curve_index(id).is_some())?, id),
+        Sel::ExternalSketchCurve { sketch, id } => sketch_curve(sketch_of(s, st, Some(*sketch), |_| true)?, id),
         Sel::SketchPoint { id } | Sel::ExternalSketchPoint { id, .. } => {
             let given = match sel {
                 Sel::ExternalSketchPoint { sketch, .. } => Some(*sketch),
@@ -391,7 +391,7 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
                 Some((k, p)) if given.is_none() => (Some(k), p),
                 _ => (given, id.as_str()),
             };
-            let ss = sketch_of(s, &st, given, |sk| sk.point_index(id).is_some())?;
+            let ss = sketch_of(s, st, given, |sk| sk.point_index(id).is_some())?;
             let p = ss.plane.to_world(ss.sketch.points.get(ss.sketch.point_index(id)?)?.pos);
             Some(Item {
                 geo: Geo::Points(vec![p]),
@@ -409,7 +409,8 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
 /// A picked item's exact shape with its points (an edge's polyline) and triangles (a face's),
 /// as Measure sees it: what [`crate::snap`] takes an item's centres, middle and ends from.
 pub(crate) fn shape_of(s: &Session, sel: &Sel) -> Option<(Shape, Vec<Vec3>, Vec<[Vec3; 3]>)> {
-    let item = describe(s, sel)?;
+    let world = s.world_state().ok()?;
+    let item = describe(s, &world, sel)?;
     Some(match item.geo {
         Geo::Points(p) => (item.shape, p, Vec::new()),
         Geo::Tris(t) => (item.shape, Vec::new(), t),
@@ -632,7 +633,7 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
     if list.is_empty() || list.len() > 1000 {
         return Err(bad(cmd, "measure one or two items"));
     }
-    let st = s.world_state();
+    let st = s.world_state()?;
     let mut sels = Vec::new();
     for value in list {
         let sel = match value.get("type").and_then(Value::as_str) {
@@ -651,10 +652,12 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
             return Err(bad(cmd, "measure one or two items"));
         }
     }
+    let world = s.world_state()?;
     let mut described = Vec::new();
     for x in &sels {
         described.push(
-            describe(s, x).ok_or_else(|| bad(cmd, "an item can't be measured (pick vertices, edges, faces, bodies, sketch curves or profiles)"))?,
+            describe(s, &world, x)
+                .ok_or_else(|| bad(cmd, "an item can't be measured (pick vertices, edges, faces, bodies, sketch curves or profiles)"))?,
         );
     }
     let mut out = json!({"items": described.iter().map(|d| d.json.clone()).collect::<Vec<_>>()});

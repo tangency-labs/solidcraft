@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a scale factor of 0 flattens the body to a sheet: refused",
+ "source": "analytic",
+ "method": "a zero factor maps the cube onto a plane: no solid, a clean refusal",
+ "outcome": "refused",
+ "refusal": "scale factors must be positive"
+}

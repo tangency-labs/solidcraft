@@ -1,0 +1,20 @@
+# oracle/05-taper-extrude: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Frustum: 6 faces, 12 edges
+Frustum face F2:side:l1
+Frustum face F2:side:l2
+Frustum face F2:side:l3
+Frustum face F2:side:l4
+Frustum face F2:start
+Frustum face F2:top
+Frustum edge F2:side:l1|F2:side:l2
+Frustum edge F2:side:l1|F2:side:l4
+Frustum edge F2:side:l1|F2:start
+Frustum edge F2:side:l1|F2:top
+Frustum edge F2:side:l2|F2:side:l3
+Frustum edge F2:side:l2|F2:start
+Frustum edge F2:side:l2|F2:top
+Frustum edge F2:side:l3|F2:side:l4
+Frustum edge F2:side:l3|F2:start
+Frustum edge F2:side:l3|F2:top
+Frustum edge F2:side:l4|F2:start
+Frustum edge F2:side:l4|F2:top

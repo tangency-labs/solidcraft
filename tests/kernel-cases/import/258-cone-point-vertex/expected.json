@@ -1,0 +1,26 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#258",
+    "tangency-labs/solidcraft#3871",
+    "tangency-labs/solidcraft#3901"
+  ],
+  "what": "the same STEP cone with a VERTEX_LOOP at the apex: the mesh stopped 30 mm short of the apex",
+  "source": "analytic",
+  "method": "as the cone without apex vertex: V = 1000*pi, area = pi*10*sqrt(1000) + pi*100, bbox [-10,-10,0]..[10,10,30]",
+  "body_count": 1,
+  "volume_mm3": 3141.592653589793,
+  "area_mm2": 1307.6180919385895,
+  "faces": 2,
+  "bbox": {
+    "min": [
+      -10,
+      -10,
+      0
+    ],
+    "max": [
+      10,
+      10,
+      30
+    ]
+  }
+}

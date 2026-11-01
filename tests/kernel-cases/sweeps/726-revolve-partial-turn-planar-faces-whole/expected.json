@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#726",
+  "tangency-labs/solidcraft#1718"
+ ],
+ "what": "the same flanged hub profile revolved 240 degrees: its planar faces (three annular sectors and two end faces) must come out whole",
+ "source": "analytic",
+ "method": "a 240 degree turn is 2/3 of the full body: V = 2/3 * pi [(30^2 - 8^2) 6 + (18^2 - 8^2) 16]; area = 2/3 of the full-turn walls and annuli plus two end faces, each the profile (22 x 6 + 10 x 16 = 292 mm2). Eight faces: three annular sectors, three cylinder sectors, two end faces.",
+ "body_count": 1,
+ "volume_mm3": 19218.169459559962,
+ "area_mm2": 6783.409503083858,
+ "faces": 8
+}

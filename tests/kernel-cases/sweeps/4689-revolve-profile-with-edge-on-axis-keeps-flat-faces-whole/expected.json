@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4689",
+  "tangency-labs/solidcraft#5317",
+  "tangency-labs/solidcraft#4521"
+ ],
+ "what": "an L profile whose long leg lies on the revolve axis (the axis is the profile's own line), revolved 360 deg: the flat faces came out split into three 120 deg sectors",
+ "source": "analytic",
+ "method": "a disc r20 x 5 under a post r5 x 25: V = pi 400 5 + pi 25 25 = 8246.681. Faces: bottom, disc side, the ring on its top, post side, post top = 5 (each flat face one face)",
+ "body_count": 1,
+ "faces": 5,
+ "volume_mm3": 8246.6807
+}

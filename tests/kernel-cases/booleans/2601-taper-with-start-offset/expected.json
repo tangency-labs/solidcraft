@@ -1,0 +1,11 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#2601"
+  ],
+  "what": "a tapered extrude whose start is offset along the sketch normal (the app says: not supported yet: taper with two-sided, symmetric or offset extents)",
+  "source": "analytic",
+  "method": "the profile 20x10 is moved to z=-8 and extruded 8 along +z, so the solid spans z -8..0, tapered from the offset plane; positive taper grows outward: sections (20+2d)x(10+2d), d = t*tan5deg, t = 0..8 from the offset plane; V = Int (200 + 60d + 4d^2) dt = 200*8 + 30*tan5*64 + 4*tan5^2*512/3 = 1773.204. Faces 6. Sign of the offset and taper reading is from the command docs",
+  "body_count": 1,
+  "volume_mm3": 1773.2035463934044,
+  "faces": 6
+}

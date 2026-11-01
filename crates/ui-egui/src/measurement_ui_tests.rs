@@ -31,7 +31,7 @@ fn measure_starts_with_selected_vertices_edges_and_faces() {
                 .map(|point| match kind {
                     "vertex" => json!({"type":kind,"body":"Box","point":point}),
                     _ => {
-                        let st = h.app.session.world_state();
+                        let st = crate::open_meshing::session_world(&h.app.session);
                         let mesh = st.body("Box").unwrap().mesh();
                         let point = solidcraft_engine::geom::Vec3::from(point);
                         let index = if kind == "edge" {

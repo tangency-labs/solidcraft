@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1984"
+ ],
+ "what": "the overlap of a pin 0.00056 mm off the axis of a bore of its own radius (r=3, 9.65 long): a thin crescent. The report's STEP round trip is left out; this is the geometry",
+ "source": "analytic",
+ "method": "the overlap of the pin and the bush wall is the part of the pin outside the bore circle: crescent area = pi r^2 - lens, lens = 2 r^2 acos(d/2r) - (d/2) sqrt(4 r^2 - d^2) with r=3, d=0.00056 (= 0.0033600); V = 9.65 x crescent = 0.032424 (the PR's 9.65 mm x crescent = 0.032424). One body",
+ "body_count": 1,
+ "volume_mm3": 0.03242399995
+}

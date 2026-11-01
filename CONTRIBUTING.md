@@ -160,9 +160,11 @@ the most complete description of the house style.
 | UI scenarios | `crates/ui-egui/tests/scenarios/*.json` | part of `cargo test` |
 | Reference tests | `cargo xtask oracle` | `tests/oracle/` (see below) |
 
-A geometry change that changes the robustness goldens re-records them in the same pull request:
-`ROBUSTNESS_GOLDENS_BLESS="why it changed" cargo test --profile ci -p solidcraft-engine --lib robustness_goldens::`
-(see [docs/robustness.md](docs/robustness.md)); CI runs every seed on pull requests that touch geometry.
+The reference for what the kernel builds is the kernel-cases ladder (`tests/kernel-cases/ladder/`,
+`cargo xtask kernel-cases --ladder`, [docs/kernel-ladder.md](docs/kernel-ladder.md)).
+The naming corpus checks persistent names: every name a corpus design stores still finds a face or
+an edge, and two builds name its faces and edges alike
+(`cargo test --profile ci -p solidcraft-cli --test naming_corpus`).
 [docs/mutation-testing.md](docs/mutation-testing.md) shows how to find kernel behaviour these
 black-box suites miss.
 
@@ -221,8 +223,7 @@ Pull requests skip a few heavy tests (one to twelve minutes each), which run in 
 Check that validation after merging. They are listed in
 `.config/nextest.toml` and the [testing page](docs/book/src/dev/testing.md):
 
-- `solidcraft-engine`: `tests::hostile_params_never_panic`, everything in `tests::robustness` and
-  the seeds of `tests::robustness_goldens` (`seed_00` … `seed_95`; pull requests that change the kernel, truck or the goldens run all but the slowest, `SLOW_SEEDS` in `ci.yml`),
+- `solidcraft-engine`: `tests::hostile_params_never_panic`, everything in `tests::robustness`,
   `pattern_suppress_tests::enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen`,
   `pattern_suppress_tests::enclosure_datums_follow_wall_height_and_board_depth_with_material_proofs`,
   `cmd::plastic::tests::enclosure_snap_fit_follows_resized_front_wall`, the `atomic_commands` contract tests
@@ -242,7 +243,8 @@ the surface itself). Expected values are either worked out in closed form
 (`tools/oracle-analytic/`) or computed by building the same recipe in FreeCAD, run as a separate
 program (`tools/freecad-oracle/`); each file says which. The generated
 [reference test report](docs/oracle.md) has the current case count and results. The reference-test
-CI job runs `cargo xtask oracle` during full validation; pull-request runs skip it. A case that
+CI job runs `cargo xtask oracle` during full validation, and on pull requests that reach
+`solidcraft-cli`. A case that
 fails because of a known bug names its issue in `expected.json` (`"known_failure": "#123"`);
 never change an expected value to match SolidCraft's output.
 

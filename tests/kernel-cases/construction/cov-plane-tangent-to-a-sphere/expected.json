@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "the tangent plane to a sphere",
+ "source": "analytic",
+ "method": "sphere r 5 on (0,0,60); towards (0,3,64), (0,0.6,0.8) from the centre: it touches at (0,3,64) with normal (0,3,4)",
+ "construction": {
+  "T": {
+   "plane": {
+    "through": [
+     0,
+     3,
+     64
+    ],
+    "normal": [
+     0,
+     3,
+     4
+    ]
+   }
+  }
+ }
+}

@@ -14,8 +14,15 @@ name = "solidcraft-web"
 path = "src/main.rs"
 
 [features]
-default = []
+default = ["smlib", "profile"]
 bundled-render-library = ["solidcraft-engine/bundled-render-library"]
+# Link SMLib into the kernel (solidcraft-engine/smlib; needs scripts/fetch-smlib.sh
+# wasm32-unknown-unknown, or the sources and wasi-sdk in WASI_SDK_PATH, crates/smlib/build.rs). SMLib
+# is the only kernel, so without it the web app models nothing.
+smlib = ["solidcraft-engine/smlib"]
+# The profiler, compiled in so any build can say where its time goes (the Profile operations
+# preference, SOLIDCRAFT_PROFILE=1, diagnostics.profile); it records nothing until asked.
+profile = ["solidcraft-engine/profile"]
 
 [dependencies]
 solidcraft-engine = { workspace = true }

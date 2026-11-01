@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "sheet.hem with its own gap of 1 mm (an open hem), flipped, on the top edge of a 100 x 60 x 2 base, 10 long",
+ "source": "analytic",
+ "method": "gap g = 1 is the inner radius; flip turns a top-edge hem over the top face: bend axis at (y 0, z T + g = 3), outer radius g + T = 3 (to y = -3), the leg 10 - 3 = 7 long at z T + 2g .. 2T + 2g = 4 .. 6. V = 100*60*2 + (pi/2)(3^2 - 1^2)*100 + 7*100*2 = 14656.637061",
+ "body_count": 1,
+ "volume_mm3": 14656.637061435917,
+ "faces": 10,
+ "bbox": {
+  "min": [
+   0,
+   -3,
+   0
+  ],
+  "max": [
+   100,
+   60,
+   6
+  ]
+ }
+}

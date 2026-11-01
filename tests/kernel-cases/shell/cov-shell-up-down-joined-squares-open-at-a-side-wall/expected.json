@@ -1,0 +1,23 @@
+{
+ "sources": [],
+ "what": "four squares drawn edge to edge, three extruded 10 up and three 10 down and joined, shelled 0.346 mm open at a side wall (action matrix (apps/solidcraft-cli/tests/action_matrix.rs): typical/up-down-join, Body1/F2:side:l1 face.shell)",
+ "source": "analytic",
+ "method": "every wall is 10 x 10 or more and the shell thin; the body is four 10 x 10 columns, two 20 tall (x<0<y and y<0<x) and two 10 tall (x,y<0 up, x,y>0 down): V = 6000. Its faces are all axis planes, so the cavity with every kept face moved 0.346 in and extended to meet (the open face's own plane bounding it) is the set of points more than 0.346 from the outside in the max norm, with a 0.346 slab laid over the open face; summed exactly over the grid of the body's coordinates and those +-0.346: cavity 5232.76615, material 767.23385. Rounding the cavity at the 59.654 mm of concave edges instead (the true offset; where the up and down parts meet only along an edge, at the origin) enlarges it by at most (1 - pi/4) 0.346^2 per mm, with 0.346^3 at each of the 8 edge ends: 1.86396, so material 765.36989 .. 767.23385. A shell that fails to open leaves 2 shells; the full solid is 6000",
+ "body_count": 1,
+ "volume_mm3": [
+  765.36,
+  767.24
+ ],
+ "bbox": {
+  "min": [
+   -10,
+   -10,
+   -10
+  ],
+  "max": [
+   10,
+   10,
+   10
+  ]
+ }
+}

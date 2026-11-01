@@ -1,0 +1,52 @@
+# oracle/56-holes-on-curved-face: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Cyl: 16 faces, 32 edges
+Cyl face F2:side:c1#1
+Cyl face F2:side:c1#2
+Cyl face F2:start
+Cyl face F2:top
+Cyl face F3:bore:side:1#1
+Cyl face F3:bore:side:1#2
+Cyl face F3:bore:side:1#3
+Cyl face F3:bore:side:2#1
+Cyl face F3:bore:side:2#2
+Cyl face F3:bore:side:2#3
+Cyl face F4:bore:side:1#1
+Cyl face F4:bore:side:1#2
+Cyl face F4:bore:side:1#3
+Cyl face F4:bore:side:2#1
+Cyl face F4:bore:side:2#2
+Cyl face F4:bore:side:2#3
+Cyl edge F2:side:c1#1|F2:side:c1#2~1 [geometric]
+Cyl edge F2:side:c1#1|F2:side:c1#2~2 [geometric]
+Cyl edge F2:side:c1#1|F2:side:c1#2~3 [geometric]
+Cyl edge F2:side:c1#1|F2:start
+Cyl edge F2:side:c1#1|F2:top
+Cyl edge F2:side:c1#1|F3:bore:side:1#2
+Cyl edge F2:side:c1#1|F3:bore:side:1#3
+Cyl edge F2:side:c1#1|F4:bore:side:1#1
+Cyl edge F2:side:c1#1|F4:bore:side:1#2
+Cyl edge F2:side:c1#1|F4:bore:side:1#3
+Cyl edge F2:side:c1#2|F2:start
+Cyl edge F2:side:c1#2|F2:top
+Cyl edge F2:side:c1#2|F3:bore:side:1#1
+Cyl edge F2:side:c1#2|F3:bore:side:1#2
+Cyl edge F3:bore:side:1#1|F3:bore:side:1#2
+Cyl edge F3:bore:side:1#1|F3:bore:side:1#3
+Cyl edge F3:bore:side:1#1|F3:bore:side:2#1
+Cyl edge F3:bore:side:1#2|F3:bore:side:1#3
+Cyl edge F3:bore:side:1#2|F3:bore:side:2#2
+Cyl edge F3:bore:side:1#3|F3:bore:side:2#3
+Cyl edge F3:bore:side:2#1|F3:bore:side:2#2
+Cyl edge F3:bore:side:2#1|F3:bore:side:2#3
+Cyl edge F3:bore:side:2#2|F3:bore:side:2#3
+Cyl edge F4:bore:side:1#1|F4:bore:side:1#2
+Cyl edge F4:bore:side:1#1|F4:bore:side:1#3
+Cyl edge F4:bore:side:1#1|F4:bore:side:2#1
+Cyl edge F4:bore:side:1#2|F4:bore:side:1#3
+Cyl edge F4:bore:side:1#2|F4:bore:side:2#2
+Cyl edge F4:bore:side:1#3|F4:bore:side:2#3
+Cyl edge F4:bore:side:2#1|F4:bore:side:2#2
+Cyl edge F4:bore:side:2#1|F4:bore:side:2#3
+Cyl edge F4:bore:side:2#2|F4:bore:side:2#3
+ref Hole1 (3) face 0 `F2:side:c1#1` -> Cyl face F2:side:c1#1
+ref Hole2 (4) face 0 `F2:side:c1#1` -> Cyl face F2:side:c1#1

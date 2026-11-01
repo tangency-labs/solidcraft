@@ -333,7 +333,10 @@ cargo run --release -p solidcraft-cli -- eval examples/bracket.json --json-out m
 To find the slow steps of a script, `--timings` prints how long each command took instead of
 the measurement: `{"timings": [{"index", "command", "ms"}], "total_ms"}`, with `index` counted
 from 0. `--profile` adds each command's `profile: {"boolean_ms", "tessellate_ms", "other_ms"}`,
-its wall time in the kernel's booleans, in tessellation and in everything else. With
+its wall time in the kernel's booleans, in tessellation and in everything else, and prints the
+profiler's table on stderr: where the time went, SMLib's calls to the commands
+(`docs/perf.md`, "Where the time goes"); `--profile-out trace.json` also writes the spans as a
+Chrome trace. `--profile` works on a design or STEP file too. With
 `--results` as well, the results go in the same object as `results`; `--results` alone still
 prints a plain array.
 

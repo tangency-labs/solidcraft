@@ -1,0 +1,72 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Steps"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      10,
+      0
+     ],
+     [
+      20,
+      0
+     ],
+     [
+      20,
+      10
+     ],
+     [
+      30,
+      10
+     ],
+     [
+      30,
+      20
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "surface.revolve",
+   "params": {
+    "sketch": "Steps",
+    "curves": [
+     "l1",
+     "l2",
+     "l3",
+     "l4"
+    ],
+    "axis": "y",
+    "angle": "360 deg"
+   }
+  }
+ ]
+}

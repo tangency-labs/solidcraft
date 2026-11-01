@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a blind hole r10 10 deep, then a sphere r10 centred on its floor: the floor disk vanishes exactly",
+ "source": "analytic",
+ "method": "the sphere's equator is the floor's edge circle (tangent to the hole wall along it): removed = pi r^2 10 + 2/3 pi r^3; faces 6 + wall + bowl",
+ "body_count": 1,
+ "volume_mm3": 42764.012244017,
+ "faces": 8
+}

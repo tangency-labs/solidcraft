@@ -1,0 +1,21 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#634"
+ ],
+ "what": "a 160 x 30 bar with a 20 x 30 leg past its top edge at the left end, and a 90 degree 15 mm inside flange on the bar's top edge (x 20..160), unfolded: the flange's trim cut the leg away",
+ "source": "analytic",
+ "method": "T = 2, R = 1, K = 0.5, BD(90) = 2*3 - pi = 2.8584. The setback strip is taken off the flange's own edge only, so the leg (y up to 60) stays and the flat reaches 15 - BD = 12.1416 past the bar's top edge, which is below the leg's top: bbox x 0..160, y 0..60, z 0..2",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   160,
+   60,
+   2
+  ]
+ }
+}

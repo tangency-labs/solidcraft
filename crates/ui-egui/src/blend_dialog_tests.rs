@@ -47,7 +47,7 @@ fn edges_at_each_end_make_a_blend_and_come_back_in_an_edit() {
     d.inputs[0].items = vec![from];
     d.inputs[1].items = vec![to];
     let Kind::Surface(Surf::Blend { continuity, bulge, .. }) = &mut d.kind else { panic!("{:?}", d.kind) };
-    *continuity = [2, 1];
+    *continuity = [Continuity::G2, Continuity::G1];
     *bulge = [0.5, 0.0];
     ok(&mut h);
     let name = h.app.session.doc.features.last().unwrap().name.clone();
@@ -55,7 +55,7 @@ fn edges_at_each_end_make_a_blend_and_come_back_in_an_edit() {
     assert_eq!((a.as_str(), b.as_str()), ("A", "B"));
     assert_eq!(continuity, [Continuity::G2, Continuity::G1]);
     assert_eq!((bulge, seam, stitch), ([0.5, 0.0], None, false));
-    assert_eq!(h.app.session.world_state().bodies.len(), 3, "a new surface body beside the boxes");
+    assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 3, "a new surface body beside the boxes");
     // A blend made by the command with a seam the dialog does not show: an edit keeps it.
     h.app.session.execute("edit.undo", &json!({})).unwrap();
     h.app
@@ -69,7 +69,7 @@ fn edges_at_each_end_make_a_blend_and_come_back_in_an_edit() {
     h.step(&json!({"call":"ui.editFeature","params":{"feature":name}})).unwrap();
     h.frames(8);
     let d = h.app.dialog.as_mut().unwrap();
-    assert!(matches!(d.kind, Kind::Surface(Surf::Blend { continuity: [2, 1], stitch: false, .. })), "{:?}", d.kind);
+    assert!(matches!(d.kind, Kind::Surface(Surf::Blend { continuity: [Continuity::G2, Continuity::G1], stitch: false, .. })), "{:?}", d.kind);
     assert_eq!((d.inputs[0].items.len(), d.inputs[1].items.len()), (1, 1), "{:?}", d.inputs);
     let Kind::Surface(Surf::Blend { stitch, .. }) = &mut d.kind else { panic!() };
     *stitch = true;
@@ -78,5 +78,5 @@ fn edges_at_each_end_make_a_blend_and_come_back_in_an_edit() {
     assert_eq!(continuity, [Continuity::G2, Continuity::G1]);
     assert_eq!(seam, Some([Vec3::new(0.0, 10.0, 10.0), Vec3::new(0.0, 20.0, 15.0)]));
     assert!(stitch);
-    assert_eq!(h.app.session.world_state().bodies.len(), 1, "stitched onto both boxes");
+    assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1, "stitched onto both boxes");
 }

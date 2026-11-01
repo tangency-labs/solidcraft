@@ -1,0 +1,23 @@
+# The cargo tests that fail today, one a line: `<test> <why it fails today>`, with the issue that
+# tracks it when there is one. Sorted. `<test>` is nextest's `<binary id>::<test name>`, as the
+# junit report names it. CI's test jobs (`cargo xtask known-failing`) fail on a test that fails
+# and is not listed here, and on a listed test that passes: a fix removes its line in the same
+# pull request. The tests stay un-ignored, so every run shows whether they still fail.
+# Refresh (after an SMLib pin bump): download the junit artifacts of develop's latest CI run, one
+# directory each (`gh run download <run> -R tangency-labs/solidcraft -n <artifact> -D <dir>/<artifact>`
+# for junit and junit-gpu-1..4), run `cargo xtask known-failing --junit <dir>`, then drop each
+# FIXED line and add each REGRESSION line with its cause, from the test's failure message.
+# Baseline: develop 38fd4a4f6 (CI run 41157648345, x86_64 Linux), after the SMLib eaa998a pin.
+solidcraft-cli::action_matrix::action_matrix_sample 3 baseline actions fail on SMLib: 2 shells (Bad Loop Orient on issue-616-lid-ribs; status 1001 on filleted-shelled-box, shelled again open at an inner wall), 1 fillet (SmSurfOfRevolution Test #7 on oblique_cut_of_cylinder)
+solidcraft-cli::naming_corpus::corpus_designs_name_alike_every_build_and_fail_where_a_reference_is_gone oracle/83-boundary-loop-thicken does not load: step 8, SMLib thicken status 1001
+solidcraft-engine::cmd::sketch::face::tests::a_sketch_on_the_ring_of_a_lid_underside_parted_by_its_lip_keeps_the_cap main's test: on SMLib the ring is named F14:start#[...], the lid's own start, not F2:top, the case's top it rests on, so the lookup finds no ring
+solidcraft-engine::cmd::sketch::ids_tests::a_curve_id_that_cannot_be_written_into_a_name_is_refused main's test: an extruded circle on SMLib has a seam edge, the side face on both its sides, named F2:side:c1 with no second face
+solidcraft-engine::tests::fillet_fit_taper_closes_to_a_point SMLib fillet status 1001 on the taper fit (radius 16 closing to 0)
+solidcraft-kernel::blend::corner_tests::a_round_ending_in_an_earlier_round_matches_both_together SMLib fillet status 1001 on the round that ends in the earlier one
+solidcraft-kernel::blend::corner_tests::corner_blends_hold_at_any_scale at 0.01x the arc case's rounds remove 72.783 (scaled back) against 72.713 at 1x (9.6e-4 off, 1e-4 allowed)
+solidcraft-kernel::blend_corner::tests::issue2422_vertical_after_separate_bottom_rounds SMLib's check refuses the fillet: edge and vertex tolerance 0.97 against the body's 0.01 (#2422)
+solidcraft-kernel::corner_g2::tests::a_long_setback_keeps_the_g2_patch_inside_the_box at set backs 11 to 15 the G2 corner patch bulges 2.6e-6 to 1.33e-3 past the box (the explicit corner is in progress)
+solidcraft-kernel::corner_g2::tests::the_box_corner_g2_patch_is_a_closed_solid_curvature_continuous_to_its_neighbours the fitted G2 corner patch bulges 1.7e-5 past the box, which SMLib's exact tight box now sees (the explicit G2 corner builds it inside)
+solidcraft-kernel::tests::fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole the arc and tab rounds together remove 9.20067 against 9.20420 (3.8e-4 off, 1e-5 allowed)
+solidcraft-ui-egui::timeline::tests::each_chip_finds_its_own_result main's test: its radius 20 fillet with fit reduce on a 10 mm box builds on SMLib without a reduced-radius warning, so the fixture has no warned feature (same reply on develop's kernel)
+solidcraft-ui-egui::viewport::appearance_tests::bodies_out_of_the_view_are_not_drawn main's test counts 12 triangles a box; SMLib's mesher gives a 10 mm box 108, so it stops at 216 against 24 before it reaches the culling

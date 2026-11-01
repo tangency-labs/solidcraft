@@ -1,5 +1,6 @@
 {
   "source": "freecad 1.1.4",
+  "known_failure": "SMLib fillet: STEP export finds edges 4.6e-5 to 6.1e-5 off their surfaces against 2e-5",
   "method": "FreeCAD (OpenCASCADE) build of recipe.json by tools/freecad-oracle/build.py: Part extrude, Part extrude join, Part makeFillet",
   "body_count": 1,
   "volume_mm3": 63171.61517720092,

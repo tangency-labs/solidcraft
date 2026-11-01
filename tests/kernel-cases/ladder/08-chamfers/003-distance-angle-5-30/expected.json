@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a chamfer 5 mm at 30 deg on the top front edge",
+ "source": "analytic",
+ "method": "legs 5 and 5 tan30: removed 5 * 5 tan30 / 2 * 60",
+ "body_count": 1,
+ "volume_mm3": 47566.987298108,
+ "faces": 7
+}

@@ -1,0 +1,46 @@
+{
+ "sources": [],
+ "what": "motion.trace of the arm's tip as the hinge turns 0 to 90, 3 samples",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); radius 40 about z: (40,0,5), (40 cos45, 40 sin45, 5), (0,40,5); the design is not changed",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 9,
+   "json": {
+    "samples": 3,
+    "stopped_at": null,
+    "points": [
+     [
+      40.0,
+      0.0,
+      5.0
+     ],
+     [
+      28.284271,
+      28.284271,
+      5.0
+     ],
+     [
+      0.0,
+      40.0,
+      5.0
+     ]
+    ]
+   }
+  },
+  {
+   "step": 10,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      20.0,
+      0.0,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

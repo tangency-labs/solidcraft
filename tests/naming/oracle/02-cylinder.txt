@@ -1,0 +1,12 @@
+# oracle/02-cylinder: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Cylinder: 4 faces, 6 edges
+Cylinder face F2:side:c1#1
+Cylinder face F2:side:c1#2
+Cylinder face F2:start
+Cylinder face F2:top
+Cylinder edge F2:side:c1#1|F2:side:c1#2~1 [geometric]
+Cylinder edge F2:side:c1#1|F2:side:c1#2~2 [geometric]
+Cylinder edge F2:side:c1#1|F2:start
+Cylinder edge F2:side:c1#1|F2:top
+Cylinder edge F2:side:c1#2|F2:start
+Cylinder edge F2:side:c1#2|F2:top

@@ -1,0 +1,26 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2209"
+ ],
+ "what": "a full-diameter M44x1.5 modelled thread on the hub of a flange, which once failed to rebuild a closed shell",
+ "source": "analytic",
+ "method": "ISO 68-1 basic profile: H = P sqrt3/2, basic depth 5H/8. External groove (the space between teeth): a trapezoid P/4 wide at the root radius d/2 - 5H/8, widening by 2 tan30 per unit of radius to 7P/8 at d/2. Internal groove: P/8 wide at the major radius d/2, widening to 3P/4 at the minor radius, cut only where there is material (r >= hole radius). Pappus: volume per turn = 2 pi A rc (A the trapezoid area, rc its centroid radius from the axis); a helical sweep of L/P turns removes exactly (L/P) x that, where each end of the thread is a free end or lies inside material. Flange R=40 h=8 plus a hub R=22 h=10, M44x1.5 over 6 mm from the free top end, ending inside the hub (4 turns, no end effect): V = pi 40^2 8 + pi 22^2 10 - 4 x V_turn = 40212.3860 + 15205.3084 - 4 x 93.26935 = 55044.6170 mm3. Tolerance 1%: a modelled thread is a faceted helical solid (radial chord error up to 1% of the pitch on every wall, i.e. a volume deficit of about 4/3 x sag/R).",
+ "outcome": "solid",
+ "body_count": 1,
+ "volume_mm3": 55044.617,
+ "tolerance": {
+  "rel": 0.01
+ },
+ "bbox": {
+  "min": [
+   -40,
+   -40,
+   0
+  ],
+  "max": [
+   40,
+   40,
+   18
+  ]
+ }
+}
