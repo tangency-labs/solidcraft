@@ -336,7 +336,7 @@ pub(crate) fn history(app: &SolveApp, strip: &Strip) -> History {
     let view = View::of(doc, within.map(|c| crate::timeline_scope::components_within(app, c)).as_ref(), app.tree.history_show_hidden);
     let n = view.len();
     // Off, the bar shows each feature and starts folders open, as it did before (Preferences >
-    // Interface, "Fold the History bar into groups").
+    // Layout, "Fold the History bar into groups").
     let folds = n > FOLD_FROM && app.preferences.history_bar_groups;
     if !folds && doc.timeline_groups.is_empty() {
         return History { entries: (0..n).map(Entry::Feature).collect(), marks: Vec::new(), folders: Default::default(), view, within };

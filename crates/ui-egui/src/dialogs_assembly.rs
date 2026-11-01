@@ -1457,7 +1457,7 @@ impl JointRun<'_> {
 }
 
 /// Whether `count` joints group as one button: from the second joint, once the preference is on
-/// (Preferences > Interface, "Group joints in the History"; off by default, which shows each joint).
+/// (Preferences > Layout, "Group joints in the History"; off by default, which shows each joint).
 fn grouped(app: &SolveApp, count: usize) -> bool {
     count > JOINT_GROUP_MIN && app.preferences.history_group_joints
 }
