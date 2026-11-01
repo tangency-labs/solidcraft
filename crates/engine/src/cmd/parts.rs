@@ -1,5 +1,6 @@
-//! Standard parts: ISO metric fasteners, dowel pins and ball bearings, generated in code from
-//! the dimensions in the public standards tables (no vendor geometry). Each part is inserted as
+//! Standard parts: ISO metric and ASME/ANSI inch fasteners, dowel pins and ball bearings,
+//! generated in code from the dimensions in the public standards tables (no vendor geometry).
+//! Inch parts are tabled in inches and built in millimetres like the rest. Each part is inserted as
 //! its own component, built by ordinary features (so it stays parametric and editable), with a
 //! cosmetic thread where it has one; at a hole it gets a rigid joint that puts its axis on the
 //! hole's and seats it on the face. Inserted at several holes it is still one component, placed
@@ -16,20 +17,24 @@ use crate::params::{bad, num, str_, vec3};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("parts.library", "Standard Parts", library).icon("library")
+    CommandSpec::new("parts.library", "Standard Parts", library)
+        .icon("library")
         .noundo()
-        .params("family? → families (name, standard, sizes, lengths) and, with family, each size's dimensions (mm)"),
-    CommandSpec::new("parts.fastener", "Insert Fastener", insert_atomic).at("SOLID", "INSERT").icon("fastener").params(
-        "the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction?, name?",
-    ),
+        .params("family? → families (name, standard, system: metric|inch, sizes, lengths) and, with family, each size's dimensions (mm)"),
+    CommandSpec::new("parts.fastener", "Insert Fastener", insert_atomic)
+        .at("SOLID", "INSERT")
+        .icon("fastener")
+        .params("the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction?, name?"),
     CommandSpec::new("parts.insert", "Insert Part", insert_atomic).icon("fastener").params(
-        "family (socket_head_cap_screw | button_head_cap_screw | hex_bolt | hex_nut | washer | set_screw | dowel_pin | bearing); size (\"M6\", or \"608\" for bearings); \
-         length? (mm; screws, bolts, set screws, pins; default a standard length near 2.5 d); \
+        "family (socket_head_cap_screw | button_head_cap_screw | hex_bolt | hex_nut | washer | set_screw | dowel_pin | bearing | \
+         hex_cap_screw_inch | hex_nut_inch | washer_sae | washer_uss); size (\"M6\", \"608\" for bearings, \"1/2-13 UNC\" for inch screws and nuts, \
+         \"1/2\" for inch washers); length? (mm, inch parts too; screws, bolts, set screws, pins; default a standard length near 2.5 d); \
          at?: [x,y,z] on a hole's rim or wall (the part seats on the hole's face with a rigid joint), or a list of them (one component, \
          placed and seated once per hole) | point?: [x,y,z] with direction?: [x,y,z] (no joint); name? → component, occurrence, joint?, \
          and with at: occurrences, joints (one per hole, in pick order)",
     ),
-    CommandSpec::new("parts.resize", "Change Part Size", resize_atomic).icon("scale")
+    CommandSpec::new("parts.resize", "Change Part Size", resize_atomic)
+        .icon("scale")
         .params("component: id|name of an inserted part; size?; length? — rebuilds it (joints keep it seated)"),
 ];
 
@@ -43,6 +48,10 @@ const FAMILIES: &[(&str, &str, &str)] = &[
     ("set_screw", "Hex socket set screw, flat point", "ISO 4026"),
     ("dowel_pin", "Parallel pin (dowel)", "ISO 8734"),
     ("bearing", "Deep groove ball bearing (envelope)", "ISO 15 (6000/6200/600 series)"),
+    ("hex_cap_screw_inch", "Hex cap screw (inch)", "ASME B18.2.1"),
+    ("hex_nut_inch", "Hex nut (inch)", "ASME B18.2.2"),
+    ("washer_sae", "Plain washer, SAE (narrow)", "ANSI B18.22.1 Type A"),
+    ("washer_uss", "Plain washer, USS (wide)", "ANSI B18.22.1 Type A"),
 ];
 
 /// ISO metric coarse: (size, d, pitch).
@@ -190,6 +199,127 @@ const BEARINGS: [(&str, f64, f64, f64); 13] = [
 const LENGTHS: [f64; 22] =
     [4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0, 65.0, 70.0, 80.0, 90.0, 100.0, 120.0];
 
+/// Millimetres per inch.
+const INCH: f64 = 25.4;
+
+/// ASME B18.2.1 hex cap screw, in inches: (nominal size, width across flats F, head height H).
+/// 9/16 is left out until the thread catalogue has its UNC and UNF threads.
+const INCH_HEX_CAP: [(&str, f64, f64); 9] = [
+    ("1/4", 0.4375, 0.156),
+    ("5/16", 0.5, 0.203),
+    ("3/8", 0.5625, 0.234),
+    ("7/16", 0.625, 0.281),
+    ("1/2", 0.75, 0.312),
+    ("5/8", 0.9375, 0.391),
+    ("3/4", 1.125, 0.469),
+    ("7/8", 1.3125, 0.547),
+    ("1", 1.5, 0.609),
+];
+
+/// ASME B18.2.2 hex nut, in inches: (nominal size, width across flats F, thickness H).
+const INCH_HEX_NUT: [(&str, f64, f64); 9] = [
+    ("1/4", 0.4375, 0.219),
+    ("5/16", 0.5, 0.266),
+    ("3/8", 0.5625, 0.328),
+    ("7/16", 0.6875, 0.375),
+    ("1/2", 0.75, 0.438),
+    ("5/8", 0.9375, 0.547),
+    ("3/4", 1.125, 0.641),
+    ("7/8", 1.3125, 0.75),
+    ("1", 1.5, 0.859),
+];
+
+/// ANSI B18.22.1 Type A plain washers, in inches: (nominal size, inside diameter, outside
+/// diameter, thickness). SAE is the standard's narrow (N) series, USS its wide (W) one.
+const WASHER_SAE: [(&str, f64, f64, f64); 9] = [
+    ("1/4", 0.281, 0.625, 0.065),
+    ("5/16", 0.344, 0.688, 0.065),
+    ("3/8", 0.406, 0.812, 0.065),
+    ("7/16", 0.469, 0.922, 0.065),
+    ("1/2", 0.531, 1.062, 0.095),
+    ("5/8", 0.656, 1.312, 0.095),
+    ("3/4", 0.812, 1.469, 0.134),
+    ("7/8", 0.938, 1.75, 0.134),
+    ("1", 1.062, 2.0, 0.134),
+];
+const WASHER_USS: [(&str, f64, f64, f64); 9] = [
+    ("1/4", 0.312, 0.734, 0.065),
+    ("5/16", 0.375, 0.875, 0.083),
+    ("3/8", 0.438, 1.0, 0.083),
+    ("7/16", 0.5, 1.25, 0.083),
+    ("1/2", 0.562, 1.375, 0.109),
+    ("5/8", 0.688, 1.75, 0.134),
+    ("3/4", 0.812, 2.0, 0.148),
+    ("7/8", 0.938, 2.25, 0.165),
+    ("1", 1.062, 2.5, 0.165),
+];
+
+/// Standard lengths for inch cap screws (inches).
+const INCH_LENGTHS: [f64; 19] = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 7.0, 8.0];
+
+fn inch_lengths() -> Vec<f64> {
+    INCH_LENGTHS.iter().map(|l| l * INCH).collect()
+}
+
+/// The first standard length at or above 2.5 d. Both sides are inches turned into mm, so the
+/// comparison allows for rounding: a 1/2 screw's 2.5 d is exactly 1-1/4.
+fn default_inch_length(d: f64) -> f64 {
+    inch_lengths().into_iter().find(|l| *l >= 2.5 * d - 1e-9).unwrap_or(8.0 * INCH)
+}
+
+fn is_inch(family: &str) -> bool {
+    matches!(family, "hex_cap_screw_inch" | "hex_nut_inch" | "washer_sae" | "washer_uss")
+}
+
+/// A unified inch thread from the catalogue (`1/2-13 UNC`): its nominal size (`1/2`), and its
+/// major diameter and pitch (mm).
+fn unified(size: &str) -> Option<(String, f64, f64)> {
+    use solidcraft_doc::TappedThreadFamily::{Unc, Unf};
+    let t = solidcraft_doc::parse_tapped_thread(size).filter(|t| matches!(t.family, Unc | Unf))?;
+    let nominal = t.designation.split('-').next()?.to_string();
+    Some((nominal, t.major_diameter, t.pitch))
+}
+
+/// The catalogue's threads for a nominal inch size, UNC before UNF.
+fn unified_sizes(nominal: &str) -> Vec<solidcraft_doc::TappedThread> {
+    use solidcraft_doc::TappedThreadFamily::{Unc, Unf};
+    [Unc, Unf].into_iter().flat_map(solidcraft_doc::tapped_thread_sizes).filter(|t| t.designation.split('-').next() == Some(nominal)).collect()
+}
+
+/// A length (mm) in fractional inches to the nearest 1/64 (`1-1/2`), or none off that grid.
+fn inch_fraction(mm: f64) -> Option<String> {
+    let n = mm / INCH * 64.0;
+    let r = n.round();
+    if !r.is_finite() || r <= 0.0 || r > 1e6 || (n - r).abs() > 1e-6 {
+        return None;
+    }
+    let r = r as u64;
+    let (whole, mut num, mut den) = (r / 64, r % 64, 64);
+    while num > 0 && num % 2 == 0 {
+        num /= 2;
+        den /= 2;
+    }
+    Some(match (whole, num) {
+        (w, 0) => w.to_string(),
+        (0, n) => format!("{n}/{den}"),
+        (w, n) => format!("{w}-{n}/{den}"),
+    })
+}
+
+/// How a part's length (mm) is shown where its family has a unit of its own: `1-1/2 in` for an
+/// inch family, none for a metric one (shown in the design's units).
+pub fn part_length_label(family: &str, mm: f64) -> Option<String> {
+    is_inch(family).then(|| inch_fraction(mm)).flatten().map(|f| format!("{f} in"))
+}
+
+/// A part's size with its length, as names and part numbers write it: `M6x20`, `1/2-13 UNC x 2`.
+fn size_with_length(family: &str, size: &str, len: f64) -> String {
+    match is_inch(family).then(|| inch_fraction(len)).flatten() {
+        Some(l) => format!("{size} x {l}"),
+        None => format!("{size}x{len}"),
+    }
+}
+
 fn metric(size: &str) -> Option<(f64, f64)> {
     METRIC.iter().find(|(s, _, _)| s.eq_ignore_ascii_case(size)).map(|(_, d, p)| (*d, *p))
 }
@@ -202,9 +332,11 @@ fn default_length(d: f64) -> f64 {
 #[derive(Clone, Debug, PartialEq)]
 enum Shape {
     /// A head (round, domed or hex), a shank down −z, an optional hex socket in the head's top.
-    Screw { d: f64, pitch: f64, len: f64, head: Head, socket: Option<(f64, f64)> },
+    /// `pitch` is that of a metric cosmetic thread; inch parts have none, as `solid.thread` takes
+    /// only metric designations (#9571).
+    Screw { d: f64, pitch: Option<f64>, len: f64, head: Head, socket: Option<(f64, f64)> },
     /// A hex prism with a through hole (nut), z 0…m.
-    Nut { d: f64, pitch: f64, s: f64, m: f64 },
+    Nut { d: f64, pitch: Option<f64>, s: f64, m: f64 },
     /// A ring (washer, bearing envelope), z 0…h.
     Ring { d_in: f64, d_out: f64, h: f64 },
     /// A cylinder down −z with a socket in its top (set screw), or plain (pin).
@@ -237,22 +369,43 @@ fn shape(family: &str, size: &str, length: Option<f64>) -> std::result::Result<S
         "socket_head_cap_screw" => {
             let (d, pitch) = metric(size).ok_or_else(|| need("metric"))?;
             let (_, dk, k, s, t) = SHCS.iter().find(|r| r.0.eq_ignore_ascii_case(size)).copied().ok_or_else(|| need("ISO 4762"))?;
-            Shape::Screw { d, pitch, len: len(d), head: Head::Round { dk, k }, socket: Some((s, t)) }
+            Shape::Screw { d, pitch: Some(pitch), len: len(d), head: Head::Round { dk, k }, socket: Some((s, t)) }
         }
         "button_head_cap_screw" => {
             let (d, pitch) = metric(size).ok_or_else(|| need("metric"))?;
             let (_, dk, k, s, t) = BHCS.iter().find(|r| r.0.eq_ignore_ascii_case(size)).copied().ok_or_else(|| need("ISO 7380-1"))?;
-            Shape::Screw { d, pitch, len: len(d), head: Head::Dome { dk, k, flat: BUTTON_FLAT * s }, socket: Some((s, t)) }
+            Shape::Screw { d, pitch: Some(pitch), len: len(d), head: Head::Dome { dk, k, flat: BUTTON_FLAT * s }, socket: Some((s, t)) }
         }
         "hex_bolt" => {
             let (d, pitch) = metric(size).ok_or_else(|| need("metric"))?;
             let (_, s, k) = HEX_BOLT.iter().find(|r| r.0.eq_ignore_ascii_case(size)).copied().ok_or_else(|| need("ISO 4014"))?;
-            Shape::Screw { d, pitch, len: len(d), head: Head::Hex { s, k }, socket: None }
+            Shape::Screw { d, pitch: Some(pitch), len: len(d), head: Head::Hex { s, k }, socket: None }
         }
         "hex_nut" => {
             let (d, pitch) = metric(size).ok_or_else(|| need("metric"))?;
             let (_, s, m) = HEX_NUT.iter().find(|r| r.0.eq_ignore_ascii_case(size)).copied().ok_or_else(|| need("ISO 4032"))?;
-            Shape::Nut { d, pitch, s, m }
+            Shape::Nut { d, pitch: Some(pitch), s, m }
+        }
+        "hex_cap_screw_inch" => {
+            let (nominal, d, _) = unified(size).ok_or_else(|| need("UNC/UNF"))?;
+            let (_, f, h) = INCH_HEX_CAP.iter().find(|r| r.0 == nominal).copied().ok_or_else(|| need("ASME B18.2.1"))?;
+            Shape::Screw {
+                d,
+                pitch: None,
+                len: length.unwrap_or_else(|| default_inch_length(d)),
+                head: Head::Hex { s: f * INCH, k: h * INCH },
+                socket: None,
+            }
+        }
+        "hex_nut_inch" => {
+            let (nominal, d, _) = unified(size).ok_or_else(|| need("UNC/UNF"))?;
+            let (_, f, h) = INCH_HEX_NUT.iter().find(|r| r.0 == nominal).copied().ok_or_else(|| need("ASME B18.2.2"))?;
+            Shape::Nut { d, pitch: None, s: f * INCH, m: h * INCH }
+        }
+        "washer_sae" | "washer_uss" => {
+            let table = if family == "washer_sae" { &WASHER_SAE } else { &WASHER_USS };
+            let (_, d1, d2, h) = table.iter().find(|r| r.0 == size.trim()).copied().ok_or_else(|| need("ANSI B18.22.1"))?;
+            Shape::Ring { d_in: d1 * INCH, d_out: d2 * INCH, h: h * INCH }
         }
         "washer" => {
             let (_, d1, d2, h) = WASHER.iter().find(|r| r.0.eq_ignore_ascii_case(size)).copied().ok_or_else(|| need("ISO 7089"))?;
@@ -390,12 +543,16 @@ fn build(s: &mut Session, sh: &Shape) -> Result<()> {
             if let Some((af, t)) = socket {
                 hex(s, af, k, k - t, "cut")?;
             }
-            thread(s, d, pitch, Vec3::new(d / 2.0, 0.0, -len / 2.0));
+            if let Some(p) = pitch {
+                thread(s, d, p, Vec3::new(d / 2.0, 0.0, -len / 2.0));
+            }
         }
         Shape::Nut { d, pitch, s: af, m } => {
             hex(s, af, 0.0, m, "new")?;
             cyl(s, d, -1.0, m + 1.0, "cut")?;
-            thread(s, d, pitch, Vec3::new(d / 2.0, 0.0, m / 2.0));
+            if let Some(p) = pitch {
+                thread(s, d, p, Vec3::new(d / 2.0, 0.0, m / 2.0));
+            }
         }
         Shape::Ring { d_in, d_out, h } => {
             revolve(s, &[(d_in / 2.0, 0.0), (d_out / 2.0, 0.0), (d_out / 2.0, h), (d_in / 2.0, h)], "new")?;
@@ -424,11 +581,26 @@ fn library(_s: &mut Session, p: &Value) -> Result<Value> {
             "set_screw" => SET_SCREW.iter().map(|r| json!({"size": r.0, "d": metric(r.0).map(|m| m.0), "pitch": metric(r.0).map(|m| m.1), "socket": r.1, "socket_depth": r.2})).collect(),
             "dowel_pin" => DOWEL.iter().map(|d| json!({"size": format!("{d}"), "d": d})).collect(),
             "bearing" => BEARINGS.iter().map(|r| json!({"size": r.0, "bore": r.1, "outer": r.2, "width": r.3})).collect(),
+            "hex_cap_screw_inch" => INCH_HEX_CAP
+                .iter()
+                .flat_map(|r| unified_sizes(r.0).into_iter().map(move |t| json!({"size": t.designation, "d": t.major_diameter, "pitch": t.pitch, "across_flats": r.1 * INCH, "head_height": r.2 * INCH})))
+                .collect(),
+            "hex_nut_inch" => INCH_HEX_NUT
+                .iter()
+                .flat_map(|r| unified_sizes(r.0).into_iter().map(move |t| json!({"size": t.designation, "d": t.major_diameter, "pitch": t.pitch, "across_flats": r.1 * INCH, "height": r.2 * INCH})))
+                .collect(),
+            "washer_sae" | "washer_uss" => {
+                let table = if id == "washer_sae" { &WASHER_SAE } else { &WASHER_USS };
+                table.iter().map(|r| json!({"size": r.0, "inner": r.1 * INCH, "outer": r.2 * INCH, "thickness": r.3 * INCH})).collect()
+            }
             _ => Vec::new(),
         };
         let (_, name, standard) = FAMILIES.iter().find(|f| f.0 == id).copied().unwrap_or(("", "", ""));
-        let lengths =
-            matches!(id, "socket_head_cap_screw" | "button_head_cap_screw" | "hex_bolt" | "set_screw" | "dowel_pin").then_some(LENGTHS.to_vec());
+        let lengths = match id {
+            "socket_head_cap_screw" | "button_head_cap_screw" | "hex_bolt" | "set_screw" | "dowel_pin" => Some(LENGTHS.to_vec()),
+            "hex_cap_screw_inch" => Some(inch_lengths()),
+            _ => None,
+        };
         if lengths.is_some() {
             for row in &mut sizes {
                 let Some(size) = row.get("size").and_then(Value::as_str).map(str::to_string) else { continue };
@@ -438,7 +610,8 @@ fn library(_s: &mut Session, p: &Value) -> Result<Value> {
                 }
             }
         }
-        json!({"family": id, "name": name, "standard": standard, "sizes": sizes, "lengths": lengths})
+        let system = if is_inch(id) { "inch" } else { "metric" };
+        json!({"family": id, "name": name, "standard": standard, "system": system, "sizes": sizes, "lengths": lengths})
     };
     match str_(p, "family") {
         Some(f) if FAMILIES.iter().any(|x| x.0 == f) => Ok(fam(f)),
@@ -449,16 +622,17 @@ fn library(_s: &mut Session, p: &Value) -> Result<Value> {
 
 fn part_name(family: &str, size: &str, sh: &Shape) -> String {
     match sh {
-        Shape::Screw { len, .. } | Shape::Rod { len, .. } => format!("{} {size}x{len}", label(family)),
+        Shape::Screw { len, .. } | Shape::Rod { len, .. } => format!("{} {}", label(family), size_with_length(family, size, *len)),
         _ => format!("{} {size}", label(family)),
     }
 }
 
-/// A standard part's part number and description: its standard and size (`ISO 4762 M6x20`), or
-/// a bearing's designation, and the family's name with the size.
+/// A standard part's part number and description: its standard and size (`ISO 4762 M6x20`,
+/// `ASME B18.2.1 1/2-13 UNC x 2`, an inch washer with its series: `ANSI B18.22.1 1/2 N`), or a
+/// bearing's designation, and the family's name with the size.
 fn identity(family: &str, size: &str, sh: &Shape) -> (String, String) {
     let size = match sh {
-        Shape::Screw { len, .. } | Shape::Rod { len, .. } => format!("{size}x{len}"),
+        Shape::Screw { len, .. } | Shape::Rod { len, .. } => size_with_length(family, size, *len),
         _ => size.to_string(),
     };
     let standard = match family {
@@ -469,10 +643,18 @@ fn identity(family: &str, size: &str, sh: &Shape) -> (String, String) {
         "washer" => "ISO 7089",
         "set_screw" => "ISO 4026",
         "dowel_pin" => "ISO 8734",
+        "hex_cap_screw_inch" => "ASME B18.2.1",
+        "hex_nut_inch" => "ASME B18.2.2",
+        "washer_sae" | "washer_uss" => "ANSI B18.22.1",
+        _ => "",
+    };
+    let series = match family {
+        "washer_sae" => " N",
+        "washer_uss" => " W",
         _ => "",
     };
     let name = FAMILIES.iter().find(|f| f.0 == family).map_or("Part", |f| f.1);
-    let part_number = if standard.is_empty() { size.clone() } else { format!("{standard} {size}") };
+    let part_number = if standard.is_empty() { size.clone() } else { format!("{standard} {size}{series}") };
     (part_number, format!("{name} {size}"))
 }
 
@@ -503,6 +685,10 @@ fn label(family: &str) -> &'static str {
         "washer" => "Washer",
         "set_screw" => "Set Screw",
         "dowel_pin" => "Dowel Pin",
+        "hex_cap_screw_inch" => "Hex Cap Screw",
+        "hex_nut_inch" => "Hex Nut",
+        "washer_sae" => "SAE Washer",
+        "washer_uss" => "USS Washer",
         _ => "Bearing",
     }
 }
@@ -776,6 +962,93 @@ mod tests {
         }
     }
 
+    /// #10316: ASME/ANSI inch hex cap screws, hex nuts and SAE/USS washers, tabled in inches and
+    /// built in millimetres, with sizes from the UNC/UNF thread catalogue and fractional-inch names.
+    #[test]
+    fn inch_parts_follow_the_asme_and_ansi_tables() {
+        const IN: f64 = 25.4;
+        let across_corners = |af: f64| af / (std::f64::consts::PI / 6.0).cos();
+        let part_number = |s: &Session, out: &Value| {
+            let comp = out["component"].as_u64().unwrap_or(0);
+            s.doc.components.iter().find(|c| c.id == comp).and_then(|c| c.metadata.text(solidcraft_doc::metadata::PART_NUMBER)).map(str::to_string)
+        };
+        // Every nominal size 1/4 to 1 but 9/16, coarse and fine.
+        let l = run(&mut Session::default(), "parts.library", json!({"family": "hex_cap_screw_inch"}));
+        let sizes: Vec<&str> = l["sizes"].as_array().map(|a| a.iter().filter_map(|x| x["size"].as_str()).collect()).unwrap_or_default();
+        assert_eq!(sizes.len(), 18, "{sizes:?}");
+        assert_eq!(sizes[..2], ["1/4-20 UNC", "1/4-28 UNF"]);
+        assert_eq!(sizes[16..], ["1-8 UNC", "1-12 UNF"]);
+        assert_eq!((l["standard"].as_str(), l["system"].as_str()), (Some("ASME B18.2.1"), Some("inch")));
+        let all = run(&mut Session::default(), "parts.library", json!({}));
+        let inch: Vec<&str> = all["families"]
+            .as_array()
+            .map(|a| a.iter().filter(|f| f["system"] == "inch").filter_map(|f| f["family"].as_str()).collect())
+            .unwrap_or_default();
+        assert_eq!(inch, ["hex_cap_screw_inch", "hex_nut_inch", "washer_sae", "washer_uss"]);
+        let lengths: Vec<f64> = l["lengths"].as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
+        assert_eq!((lengths.first().copied(), lengths.last().copied(), lengths.len()), (Some(0.5 * IN), Some(8.0 * IN), 19));
+        // A 1/2-13 x 2 cap screw: 3/4 across flats, head 0.312 high, shank 2 in long, no thread mark.
+        let mut s = Session::default();
+        let out = run(&mut s, "parts.insert", json!({"family": "hex_cap_screw_inch", "size": "1/2-13 UNC", "length": 2.0 * IN}));
+        assert_eq!(out["name"], "Hex Cap Screw 1/2-13 UNC x 2");
+        assert_eq!(part_number(&s, &out).as_deref(), Some("ASME B18.2.1 1/2-13 UNC x 2"));
+        let (lo, hi) = bbox(&s, "Hex Cap Screw 1/2-13 UNC x 2");
+        let w = (hi.x - lo.x).max(hi.y - lo.y);
+        assert!((w - across_corners(0.75 * IN)).abs() < 1e-6 && (lo.z + 2.0 * IN).abs() < 1e-6 && (hi.z - 0.312 * IN).abs() < 1e-6, "{lo:?} {hi:?}");
+        assert!(s.model.state().threads.is_empty(), "solid.thread takes only metric designations (#9571)");
+        // Its default length is the first standard length at or above 2.5 d: 1-1/4 for a 1/2.
+        let mut d = Session::default();
+        assert_eq!(
+            run(&mut d, "parts.insert", json!({"family": "hex_cap_screw_inch", "size": "1/2-20 UNF"}))["name"],
+            "Hex Cap Screw 1/2-20 UNF x 1-1/4"
+        );
+        // A 1/2-13 nut: 3/4 across flats, 0.438 thick, with the 1/2 in hole through it.
+        let mut n = Session::default();
+        let out = run(&mut n, "parts.insert", json!({"family": "hex_nut_inch", "size": "1/2-13 UNC"}));
+        assert_eq!(part_number(&n, &out).as_deref(), Some("ASME B18.2.2 1/2-13 UNC"));
+        let (lo, hi) = bbox(&n, "Hex Nut 1/2-13 UNC");
+        let (w, h) = ((hi.x - lo.x).max(hi.y - lo.y), hi.z - lo.z);
+        assert!((w - across_corners(0.75 * IN)).abs() < 1e-6 && (h - 0.438 * IN).abs() < 1e-6, "{w} {h}");
+        // 1/2 washers: SAE 1.062 x 0.095, USS 1.375 x 0.109, the series in the part number.
+        for (family, label, od, t, number) in [
+            ("washer_sae", "SAE Washer 1/2", 1.062, 0.095, "ANSI B18.22.1 1/2 N"),
+            ("washer_uss", "USS Washer 1/2", 1.375, 0.109, "ANSI B18.22.1 1/2 W"),
+        ] {
+            let mut w = Session::default();
+            let out = run(&mut w, "parts.insert", json!({"family": family, "size": "1/2"}));
+            assert_eq!(part_number(&w, &out).as_deref(), Some(number));
+            let (lo, hi) = bbox(&w, label);
+            assert!((hi.x - lo.x - od * IN).abs() < 1e-6 && (hi.z - lo.z - t * IN).abs() < 1e-6, "{family}: {lo:?} {hi:?}");
+        }
+        // Resizing keeps it inch, and sizes the tables don't have are refused.
+        let r = run(&mut s, "parts.resize", json!({"component": "Hex Cap Screw 1/2-13 UNC x 2", "size": "3/8-16 UNC", "length": 1.0 * IN}));
+        assert_eq!(r["name"], "Hex Cap Screw 3/8-16 UNC x 1");
+        for (family, size) in [
+            ("hex_cap_screw_inch", "9/16-12 UNC"),
+            ("hex_cap_screw_inch", "#10-24 UNC"),
+            ("hex_cap_screw_inch", "M12"),
+            ("hex_cap_screw_inch", "1/2-20 UNC"),
+            ("hex_nut_inch", "1/2"),
+            ("washer_sae", "9/16"),
+            ("washer_uss", "1/2-13 UNC"),
+        ] {
+            assert!(Session::default().execute("parts.insert", &json!({"family": family, "size": size})).is_err(), "{family} {size}");
+        }
+    }
+
+    #[test]
+    fn inch_lengths_read_as_fractions() {
+        assert_eq!(super::part_length_label("hex_cap_screw_inch", 1.5 * 25.4).as_deref(), Some("1-1/2 in"));
+        assert_eq!(super::part_length_label("hex_cap_screw_inch", 0.75 * 25.4).as_deref(), Some("3/4 in"));
+        assert_eq!(super::part_length_label("hex_cap_screw_inch", 8.0 * 25.4).as_deref(), Some("8 in"));
+        // Off the 1/64 grid, or a metric family: shown as millimetres in the design's units.
+        assert_eq!(super::part_length_label("hex_cap_screw_inch", 20.0), None);
+        assert_eq!(super::part_length_label("socket_head_cap_screw", 25.4), None);
+        for bad in [f64::NAN, f64::INFINITY, -25.4, 0.0, 1e300] {
+            assert_eq!(super::part_length_label("hex_cap_screw_inch", bad), None, "{bad}");
+        }
+    }
+
     /// #7692: a button head cap screw (ISO 7380-1) takes the same parameters as a socket head
     /// cap screw, with a domed crown in place of the cylindrical head.
     #[test]
@@ -918,6 +1191,10 @@ mod tests {
             ("set_screw", "M6", "M8"),
             ("dowel_pin", "6", "8"),
             ("bearing", "608", "6200"),
+            ("hex_cap_screw_inch", "1/2-13 UNC", "5/8-11 UNC"),
+            ("hex_nut_inch", "1/2-13 UNC", "5/8-18 UNF"),
+            ("washer_sae", "1/2", "5/8"),
+            ("washer_uss", "1/2", "5/8"),
         ] {
             let mut s = Session::default();
             let part = run(&mut s, "parts.insert", json!({"family": family, "size": size}));
