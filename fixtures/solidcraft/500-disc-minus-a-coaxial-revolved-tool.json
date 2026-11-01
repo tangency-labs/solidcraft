@@ -1,0 +1,158 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/500",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992); geometry is the issue's",
+ "summary": "A disc on the x axis minus a coaxial r 20 tool, revolved from a rectangle with an edge on the axis, lost 2.6 % of its volume on SolidCraft's truck kernel (#500). The disc is r 40 from x = -1; the tool runs from x = 0 to 60. A thicker disc to x = 2 is the issue's control.",
+ "cases": [
+  {
+   "name": "disc_to_x_1",
+   "note": "Disc x -1..1.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      -1,
+      0,
+      0
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 40,
+     "height": 2
+    },
+    {
+     "op": "revolve",
+     "id": "tool",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0,
+         0
+        ],
+        [
+         60,
+         0
+        ],
+        [
+         60,
+         20
+        ],
+        [
+         0,
+         20
+        ]
+       ]
+      }
+     ],
+     "plane": "xz",
+     "axis_point": [
+      0,
+      0,
+      0
+     ],
+     "axis_dir": [
+      1,
+      0,
+      0
+     ],
+     "angle_deg": 360
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "disc",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 8796.459430051422,
+     "tol": 0.0001,
+     "formula": "pi*40^2*2 - pi*20^2*1 (the r 20 tool starts at x = 0)"
+    }
+   }
+  },
+  {
+   "name": "disc_to_x_2_control",
+   "note": "Control: disc x -1..2.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      -1,
+      0,
+      0
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 40,
+     "height": 3
+    },
+    {
+     "op": "revolve",
+     "id": "tool",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0,
+         0
+        ],
+        [
+         60,
+         0
+        ],
+        [
+         60,
+         20
+        ],
+        [
+         0,
+         20
+        ]
+       ]
+      }
+     ],
+     "plane": "xz",
+     "axis_point": [
+      0,
+      0,
+      0
+     ],
+     "axis_dir": [
+      1,
+      0,
+      0
+     ],
+     "angle_deg": 360
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "disc",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 12566.370614359172,
+     "tol": 0.0001,
+     "formula": "pi*40^2*3 - pi*20^2*2 (the r 20 tool starts at x = 0)"
+    }
+   }
+  }
+ ]
+}
