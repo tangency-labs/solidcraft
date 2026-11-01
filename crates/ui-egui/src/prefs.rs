@@ -985,7 +985,8 @@ preference_settings! {
     mouse_gestures: crate::mouse_gesture::Config = Default::default(), PAGE_NAVIGATION;
     /// The wheel zooms out when turned forward.
     zoom_reverse: bool = false, PAGE_NAVIGATION => check("Reverse zoom direction");
-    /// What an orbit turns around.
+    /// What an orbit turns around: a drag's, and the 3D mouse's when its Orbit is Classic (the 3D
+    /// mouse's Traced orbit picks the model in the middle of the view instead, #10452).
     orbit_around: OrbitAround = OrbitAround::default(), PAGE_NAVIGATION;
     /// The cursor preference as releases before the origin option saved it (`true` = the point
     /// under the cursor). [`migrate`] folds it into `orbit_around` when saved preferences are
