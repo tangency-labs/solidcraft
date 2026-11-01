@@ -398,8 +398,7 @@ pub(crate) fn figure_rows(
 
 /// Memory belongs to the enclosing dialog ID; animation is avoided so each row keeps its fixed height.
 /// Persisted disclosure with a rule and uppercase title. Tokens: `control_height, space_2, radius_sm, hover, dialog_rule, form_section_icon_size, form_gap_y, font_caption, font_section_tracking, text_dim`.
-/// Static section caption for an Inspector group that stays expanded.
-#[cfg(test)]
+/// Static section caption for an expanded group or a Preferences subheading.
 pub(crate) fn section_heading(ui: &mut Ui, title: &str) {
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_16), egui::Sense::hover());

@@ -591,6 +591,28 @@ fn keywords(text: &str) -> &'static [&'static str] {
         "far-axis step" => &["far-axis rotation step (°)", "fine rotation"],
         "axis distances in measure" => &["show x/y/z distances"],
         "tool at the cursor" => &["show tool at cursor"],
+        "center and midpoint guides" | "centre and midpoint guides" => {
+            &["center and midpoint alignment guides", "centre and midpoint alignment guides"]
+        }
+        "guides from sketch points too" => &["alignment guides from end points and corners while drawing"],
+        "snap to where two guides cross" => &["auto snap to recent centers and midpoints", "auto snap to recent centres and midpoints"],
+        "line up with other sketch points" => &["line up with other sketch points while drawing"],
+        "center-point arc follows the cursor" | "centre-point arc follows the cursor" => {
+            &["center point arc follows the cursor's direction", "centre point arc follows the cursor's direction"]
+        }
+        "dimension new shapes fully" => &["dimension new shapes"],
+        "place from the sketch origin" => &["also place them from the origin (fully constrained)"],
+        "shortcut again switches mode" => &["pressing a tool's shortcut again switches its mode"],
+        "ask for project options first" => &["project options dialog"],
+        "return to the view before" => &["return to the previous view"],
+        "keep" => &["keep the current view"],
+        "unless turned" => &["return unless rotated"],
+        "state icons" => &["sketch icons in the color of their state", "sketch icons in the colour of their state"],
+        "conflict color" | "conflict colour" => &["conflicting geometry in the conflict color", "conflicting geometry in the conflict colour"],
+        "hide glyphs zoomed out" => &["hide constraint glyphs when zoomed out"],
+        "prefer movable points where they overlap" => &["prefer movable sketch points when points overlap"],
+        "select other reaches hidden geometry" => &["select hidden geometry with select other"],
+        "whole bodies" => &["click selects whole bodies"],
         _ => &[],
     }
 }
@@ -801,6 +823,57 @@ mod tests {
     }
 
     #[test]
+    fn sketch_picture_groups_and_options_have_one_real_search_hit_and_enter_reveals_the_cards() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", serde_json::json!({"width":1600,"height":1100}));
+            h.call("ui.prefs", serde_json::json!({"language":"en","theme":theme}));
+            let original = (h.app.preferences.sketch_exit_view, h.app.ui.pick_bodies);
+            for (query, target, option) in [
+                ("When a sketch ends", "prefs:sketch_exit_view:choices", "Keep"),
+                ("Return to the view before", "prefs:sketch_exit_view:previous", "Return to the view before"),
+                ("Keep", "prefs:sketch_exit_view:keep", "Keep"),
+                ("Unless turned", "prefs:sketch_exit_view:unless_rotated", "Unless turned"),
+                ("Click selects", "prefs:pick_bodies:choices", "Whole bodies"),
+                ("Faces and edges", "prefs:pick_bodies:faces_edges", "Faces and edges"),
+                ("Whole bodies", "prefs:pick_bodies:bodies", "Whole bodies"),
+            ] {
+                h.call("ui.prefs", serde_json::json!({"open":"General"}));
+                h.app.prefs_window.filter = query.into();
+                h.frames(5);
+                let (_, _, hits) = nav(&h.ctx);
+                let matching: Vec<_> = hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_SKETCH).collect();
+                assert_eq!(matching.len(), 1, "{theme}: {query} has exactly one real Sketch setting hit");
+                assert_eq!(matching[0].1.label, query);
+                let tree = h.output.accesskit_update.as_ref().unwrap();
+                assert!(
+                    tree.nodes.iter().any(|(_, node)| {
+                        node.role() == egui::accesskit::Role::RadioButton && node.label() == Some(option) && !node.is_disabled()
+                    }),
+                    "{query} exposes the enabled native card"
+                );
+                set_cursor(&h.ctx, matching[0].0);
+                h.frames(2);
+                h.step(&serde_json::json!({"key":"Enter"})).unwrap();
+                h.frames(3);
+                assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_SKETCH);
+                assert!(h.app.prefs_window.filter.is_empty());
+                let body = crate::scenario::rect_of("dialog:page_body").unwrap();
+                let actual = crate::scenario::rect_of(target).unwrap();
+                let revealed = crate::scenario::handle_at("prefs:revealed").expect("Enter publishes an actual reveal target");
+                assert!(body.contains_rect(actual), "{theme}: {query} reveals the actual cards inside the body");
+                assert!(revealed.distance(actual.center()) <= 1.0, "{theme}: {query} outlines its real group/card");
+                if target.ends_with(":choices") {
+                    let group = crate::scenario::rect_of(&format!("dialog:row:{query}")).unwrap();
+                    assert!((actual.left() - group.left()).abs() <= 1.0, "{theme}: {query} has no phantom label column beside its cards");
+                }
+                assert_eq!((h.app.preferences.sketch_exit_view, h.app.ui.pick_bodies), original, "navigation does not change a choice");
+            }
+        }
+    }
+
+    #[test]
     fn graphics_cards_tiles_and_short_status_labels_keep_search_paths_and_reveal() {
         for theme in ["light", "dark"] {
             let mut h = crate::scenario::Harness::new();
@@ -884,6 +957,35 @@ mod tests {
                         assert!(crate::scenario::handle_at("prefs:font_builtin").is_some(), "real searchable font picker opens at either width");
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn sketch_short_labels_keep_the_legacy_search_terms_in_every_complete_locale() {
+        let cases = [
+            ("prefs.sketch_tracking_guides", "Center and midpoint alignment guides"),
+            ("prefs.sketch_tracking_points", "Alignment guides from end points and corners while drawing"),
+            ("prefs.sketch_recent_snap", "Auto snap to recent centers and midpoints"),
+            ("prefs.sketch_align_points", "Line up with other sketch points while drawing"),
+            ("ui.center_arc_follows_cursor", "Center point arc follows the cursor's direction"),
+            ("Also place them from the origin (fully constrained)", "Also place them from the origin (fully constrained)"),
+            ("ui.shortcut_cycles_modes", "Pressing a tool's shortcut again switches its mode"),
+            ("prefs.project_options_dialog", "Project options dialog"),
+            ("prefs.sketch_exit_view.previous", "Return to the previous view"),
+            ("prefs.sketch_exit_view.keep", "Keep the current view"),
+            ("prefs.sketch_exit_view.unless_rotated", "Return unless rotated"),
+            ("prefs.sketch_state_icons", "Sketch icons in the color of their state"),
+            ("prefs.sketch_conflict_colour", "Conflicting geometry in the conflict color"),
+            ("prefs.hide_constraint_glyphs_zoomed_out", "Hide constraint glyphs when zoomed out"),
+            ("prefs.prefer_free_sketch_points", "Prefer movable sketch points when points overlap"),
+            ("prefs.select_other_hidden", "Select hidden geometry with Select Other"),
+            ("prefs.sketch.whole_bodies", "Click selects whole bodies"),
+        ];
+        for lang in ["en", "en-GB", "ar", "de", "he", "ja", "ko", "vi", "zh"] {
+            let _language = crate::i18n::scope(lang);
+            for (id, legacy) in cases {
+                assert!(matches_text(legacy, &[crate::i18n::tr(id)]), "{lang}: {legacy} still finds {id}");
             }
         }
     }

@@ -1481,51 +1481,45 @@ preference_settings! {
     manipulator_free_alt: bool = true, PAGE_SKETCH;
     /// A sketch's icon in History and the browser takes the colour of its solve state, and its
     /// tooltip names the state (#7245). Off: every sketch has the same icon, as before.
-    sketch_state_icons: bool = true, PAGE_SKETCH => check_id("prefs.sketch_state_icons");
+    sketch_state_icons: bool = true, PAGE_SKETCH;
     /// Show the construction-line family in Sketch CREATE; off restores the earlier menu.
-    sketch_construction_lines: bool = true, PAGE_SKETCH => check_id("prefs.sketch_construction_lines");
+    sketch_construction_lines: bool = true, PAGE_SKETCH;
     /// A sketch tool's shortcut pressed again before the first point steps to the tool's next
     /// creation mode (#2459). Off (the default): the key starts the tool again, as it always has.
     shortcut_cycles_modes: bool = false, PAGE_SKETCH;
     /// A click on the ribbon button of the sketch tool that is running ends the tool, so clicks
     /// in the view select again (#10151). Off: the click starts the tool again, as before.
-    ribbon_click_ends_tool: bool = true, PAGE_SKETCH => check_id("prefs.ribbon_click_ends_tool");
+    ribbon_click_ends_tool: bool = true, PAGE_SKETCH;
     /// Opening or editing a sketch turns the view to face it (the default). Off: the view stays as
     /// it is, and Look At faces the sketch when asked.
     sketch_open_look_at: bool = true, PAGE_SKETCH;
     /// A sketch started on a face of a body in another component than the active one activates
     /// that component first, so the sketch belongs to it (`sketch.create` `activate_part`,
     /// #10215). Off (the default): the sketch belongs to the active component, as before.
-    sketch_face_activates_part: bool = false, PAGE_SKETCH => check_id("prefs.sketch_face_activates_part");
+    sketch_face_activates_part: bool = false, PAGE_SKETCH;
     /// Where the view goes when a sketch ends (#7038). Keep (the default) leaves it as it is.
     sketch_exit_view: SketchExitView = SketchExitView::default(), PAGE_SKETCH;
     /// A shape drawn in a sketch gets all its dimensions at once: the typed values, and every
     /// other size the shape has at its size as drawn (`sketch.draw.dimensioned` with `as_drawn`).
     /// Shapes `solidcraft_engine::dimension_roles` doesn't list are drawn as before.
-    sketch_auto_dimensions: bool = false, PAGE_SKETCH => check(
-        "Dimension new shapes",
-        "Each shape you draw gets all its dimensions, at the sizes you drew (typed values win). A size the sketch already sets is left out."
-    );
+    sketch_auto_dimensions: bool = false, PAGE_SKETCH;
     /// With `sketch_auto_dimensions`: new shapes are also placed from the sketch origin until they
     /// are fully constrained (`sketch.draw.dimensioned` with `locate`). A shape already anchored to
     /// the origin or to placed geometry gets nothing more.
-    sketch_auto_locate: bool = false, PAGE_SKETCH => check(
-        "Also place them from the origin (fully constrained)",
-        "Each new shape is also dimensioned from the sketch origin until nothing of it is left free. A shape already attached to the origin or to placed geometry gets none."
-    );
+    sketch_auto_locate: bool = false, PAGE_SKETCH;
     /// A centre-point arc runs the way the cursor goes round its centre from the start (#6645).
     /// Off: it always runs counter-clockwise from the start, as it did before.
     center_arc_follows_cursor: bool = true, PAGE_SKETCH;
     /// In the Line tool, a press, a drag and the release draw one line from the press to the
     /// release and end there (#7247); clicks still draw a chain. Off (the default): a drag is a
     /// click that moved on the way, placing a point where it is let go (#2448).
-    line_drag_draws_one: bool = false, PAGE_SKETCH => check_id("prefs.line_drag_draws_one");
+    line_drag_draws_one: bool = false, PAGE_SKETCH;
     /// In the Line tool, leaving the chain's last point and resting back on it switches to a
     /// tangent arc, and the same again back to lines (#9489). Off (the default): resting there
     /// does nothing, and tangent arcs are the Arc tool's.
-    line_hover_tangent_arc: bool = false, PAGE_SKETCH => check_id("prefs.line_hover_tangent_arc");
+    line_hover_tangent_arc: bool = false, PAGE_SKETCH;
     /// Include hidden geometry and a small pointer neighbourhood in Select Other.
-    select_other_hidden: bool = true, PAGE_SKETCH => check_id("prefs.select_other_hidden");
+    select_other_hidden: bool = true, PAGE_SKETCH;
     /// When true: Shift+click adds without removing; Primary toggles.
     /// When false (default): Shift and Primary both toggle.
     selection_shift_add_only: bool = false, PAGE_SKETCH;
@@ -1534,11 +1528,11 @@ preference_settings! {
     /// While the open sketch's constraints conflict, the curves and points a failing constraint
     /// holds, and its glyph or dimension, are drawn in `sketch_conflict` (#7244). Off: only the
     /// glyphs and dimensions are red, in `error`, as before.
-    sketch_conflict_colour: bool = true, PAGE_SKETCH => check_id("prefs.sketch_conflict_colour");
+    sketch_conflict_colour: bool = true, PAGE_SKETCH;
     /// Hide constraint glyphs when the sketch is zoomed out so far that a millimetre of the plane
     /// is smaller than `sketch_tools::MIN_GLYPH_PX_PER_MM` on screen (#8980). Off: glyphs stay at a
     /// fixed screen size at every zoom, as before.
-    hide_constraint_glyphs_zoomed_out: bool = true, PAGE_SKETCH => check_id("prefs.hide_constraint_glyphs_zoomed_out");
+    hide_constraint_glyphs_zoomed_out: bool = true, PAGE_SKETCH;
     /// Drive Joints shows the moved parts' old place as a ghost (its Show ghost box, #5905).
     drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
     /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
@@ -5961,6 +5955,189 @@ mod tests {
         }
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert!(!h.app.preferences.extrude_view_isometric && !h.app.preferences.extrude_view_return);
+    }
+
+    #[test]
+    fn sketch_checkbox_bindings_edit_only_their_own_fields() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.prefs", json!({"language":"en","theme":theme,"open":"Sketch"}));
+            let original = h.app.preferences.clone();
+            let session = (h.app.session.auto_project, h.app.ui.pick_bodies);
+            let mut expected = serde_json::to_value(&original).unwrap();
+            for (field, label) in [
+                ("sketch_tracking_points", "prefs.sketch_tracking_points"),
+                ("sketch_tracking_guides", "prefs.sketch_tracking_guides"),
+                ("sketch_recent_snap", "prefs.sketch_recent_snap"),
+                ("sketch_align_points", "prefs.sketch_align_points"),
+                ("line_drag_draws_one", "prefs.line_drag_draws_one"),
+                ("line_hover_tangent_arc", "prefs.line_hover_tangent_arc"),
+                ("center_arc_follows_cursor", "ui.center_arc_follows_cursor"),
+                ("sketch_construction_lines", "prefs.sketch_construction_lines"),
+                ("sketch_auto_dimensions", "Dimension new shapes"),
+                ("sketch_auto_locate", "Also place them from the origin (fully constrained)"),
+                ("shortcut_cycles_modes", "ui.shortcut_cycles_modes"),
+                ("ribbon_click_ends_tool", "prefs.ribbon_click_ends_tool"),
+                ("project_options_dialog", "prefs.project_options_dialog"),
+                ("sketch_face_activates_part", "prefs.sketch_face_activates_part"),
+                ("sketch_open_look_at", "prefs.sketch_open_look_at"),
+                ("selection_shift_add_only", "prefs.shift_add_ctrl_toggle"),
+                ("prefer_free_sketch_points", "prefs.prefer_free_sketch_points"),
+                ("select_other_hidden", "prefs.select_other_hidden"),
+                ("manipulator_free_alt", "prefs.alt_frees_manipulators"),
+            ] {
+                h.app.prefs_window.filter = h.app.tr(label).into();
+                h.frames(5);
+                let handle = format!("prefs:{field}");
+                super::reveal_preference(&mut h, &handle);
+                h.step(&json!({"click":{"handle":handle}})).unwrap();
+                expected[field] = json!(!expected[field].as_bool().unwrap());
+                assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "{theme}: {field}");
+                assert_eq!((h.app.session.auto_project, h.app.ui.pick_bodies), session, "{field} leaves session values alone");
+            }
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert_eq!(h.app.preferences, original);
+        }
+    }
+
+    #[test]
+    fn sketch_cards_tiles_and_session_controls_preserve_apply_defaults_and_cancel() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.prefs", json!({"language":"en","theme":theme,"quick_measure":true}));
+            // Opening the page must retain a non-default session, too.
+            h.app.session.auto_project = false;
+            h.app.ui.pick_bodies = true;
+            let original = Snapshot::take(&h.app);
+            h.call("ui.prefs", json!({"open":"Sketch"}));
+            assert!(original.matches(&h.app));
+            let mut expected = serde_json::to_value(&h.app.preferences).unwrap();
+            for (key, choice) in
+                [("previous", SketchExitView::Previous), ("keep", SketchExitView::Keep), ("unless_rotated", SketchExitView::UnlessRotated)]
+            {
+                h.app.prefs_window.filter = h.app.tr("prefs.sketch_exit_view").into();
+                h.frames(5);
+                let handle = format!("prefs:sketch_exit_view:{key}");
+                super::reveal_preference(&mut h, &handle);
+                h.step(&json!({"click":{"handle":handle}})).unwrap();
+                expected["sketch_exit_view"] = serde_json::to_value(choice).unwrap();
+                assert_eq!(h.app.preferences.sketch_exit_view, choice);
+                assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "only the exit enum changes");
+            }
+            for (key, label) in [
+                ("sketch_state_icons", "prefs.sketch_state_icons"),
+                ("sketch_conflict_colour", "prefs.sketch_conflict_colour"),
+                ("hide_constraint_glyphs_zoomed_out", "prefs.hide_constraint_glyphs_zoomed_out"),
+            ] {
+                h.app.prefs_window.filter = h.app.tr(label).into();
+                h.frames(5);
+                let handle = format!("prefs:{key}");
+                super::reveal_preference(&mut h, &handle);
+                h.step(&json!({"click":{"handle":handle}})).unwrap();
+                expected[key] = json!(false);
+                assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "{key} changes only its field");
+            }
+            for (key, bodies) in [("faces_edges", false), ("bodies", true), ("faces_edges", false)] {
+                h.app.prefs_window.filter = h.app.tr("prefs.sketch.click_selects").into();
+                h.frames(5);
+                let handle = format!("prefs:pick_bodies:{key}");
+                super::reveal_preference(&mut h, &handle);
+                h.step(&json!({"click":{"handle":handle}})).unwrap();
+                assert_eq!(h.app.ui.pick_bodies, bodies);
+                assert!(!h.app.session.auto_project);
+                assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected);
+            }
+            h.app.prefs_window.filter = h.app.tr("ui.project_face_edges_sketch").into();
+            h.frames(5);
+            super::reveal_preference(&mut h, "prefs:auto_project");
+            h.step(&json!({"click":{"handle":"prefs:auto_project"}})).unwrap();
+            assert!(h.app.session.auto_project);
+            assert!(!h.app.ui.pick_bodies);
+            assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected);
+            assert_eq!(saved_prefs(&h.app)["preferences"], serde_json::to_value(&original.prefs).unwrap(), "unapplied tile choices are held back");
+            h.call("ui.prefs", json!({"button":"apply"}));
+            let applied = Snapshot::take(&h.app);
+            let mut reloaded = SolveApp::new(Default::default(), Default::default());
+            reloaded.load_prefs(&h.app.prefs());
+            assert_eq!(reloaded.preferences, h.app.preferences, "card and tile values survive the existing saved representation");
+
+            h.call("ui.prefs", json!({"button":"defaults"}));
+            let reset = serde_json::to_value(&h.app.preferences).unwrap();
+            let defaults = serde_json::to_value(Prefs::default()).unwrap();
+            for (field, owner) in FIELD_PAGES {
+                assert_eq!(
+                    &reset[*field],
+                    if *owner == Some(PAGE_SKETCH) { &defaults[*field] } else { &expected[*field] },
+                    "{field}: only Sketch resets"
+                );
+            }
+            assert_eq!((h.app.session.auto_project, h.app.ui.pick_bodies), (true, false));
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert!(applied.matches(&h.app), "Cancel after Defaults returns to Apply");
+
+            // The session fields also roll back when the page was opened with the opposite values.
+            original.clone().restore(&mut h.app);
+            h.call("ui.prefs", json!({"open":"Sketch","button":"defaults"}));
+            assert_eq!((h.app.session.auto_project, h.app.ui.pick_bodies), (true, false));
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert!(original.matches(&h.app));
+        }
+    }
+
+    #[test]
+    fn sketch_disabled_dependencies_keep_their_stored_choices() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"language":"en","open":"Sketch","sketch_auto_locate":true}));
+        for (query, parent, child) in [
+            ("prefs.sketch.drawing", "sketch_auto_dimensions", "sketch_auto_locate"),
+            ("prefs.sketch.snapping_guides", "sketch_tracking_guides", "sketch_tracking_points"),
+        ] {
+            h.app.prefs_window.filter = h.app.tr(query).into();
+            h.frames(5);
+            for enabled in [false, true, false] {
+                set(&mut h.app, &json!({(parent):enabled, (child):true})).unwrap();
+                h.frames(5);
+                let handle = format!("prefs:{child}");
+                super::reveal_preference(&mut h, &handle);
+                h.step(&json!({"click":{"handle":handle}})).unwrap();
+                let prefs = serde_json::to_value(&h.app.preferences).unwrap();
+                assert_eq!(prefs[parent], enabled);
+                assert_eq!(prefs[child], !enabled, "a disabled {child} retains true; an enabled one toggles");
+            }
+        }
+    }
+
+    #[test]
+    fn sketch_shift_legend_updates_in_the_checkbox_release_frame() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.prefs", json!({"language":"en","theme":theme,"open":"Sketch"}));
+            h.app.prefs_window.filter = h.app.tr("prefs.selecting").into();
+            h.frames(5);
+            super::reveal_preference(&mut h, "prefs:selection_shift_add_only");
+            for enabled in [true, false] {
+                let at = crate::scenario::rect_of("prefs:selection_shift_add_only").unwrap().center();
+                h.frame_with(crate::test_support::pointer(at, true));
+                h.frame_with(crate::test_support::pointer(at, false));
+                assert_eq!(h.app.preferences.selection_shift_add_only, enabled);
+                let mut actions = Vec::new();
+                for shape in &h.shapes {
+                    crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                        if let egui::Shape::Text(text) = shape {
+                            actions.push(text.galley.job.text.clone());
+                        }
+                    });
+                }
+                assert_eq!(actions.iter().filter(|text| text.as_str() == h.app.tr("prefs.add_item")).count(), usize::from(enabled));
+                assert_eq!(actions.iter().filter(|text| text.as_str() == h.app.tr("prefs.toggle_item")).count(), if enabled { 1 } else { 2 });
+                let primary = crate::tool_modifiers::ctrl_name_for(crate::tool_modifiers::Platform::of(&h.ctx));
+                assert!(actions.iter().any(|text| text == primary), "the live platform keycap remains visible");
+            }
+        }
     }
 
     #[test]

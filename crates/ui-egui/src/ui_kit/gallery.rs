@@ -1667,6 +1667,13 @@ const ELEMENTS: &[Element] = &[
     element!("checkbox_off", |ui, _| {
         checkbox(ui, "Option", &mut false);
     }),
+    element!("checkbox_wrapped", |ui, s| {
+        ui.scope(|ui| {
+            ui.set_width(Tokens::get().space_24 * 8.0);
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+            checkbox(ui, "A long translated checkbox label stays readable on several lines", &mut s.checked);
+        });
+    }),
     element!("checkbox_disabled_on", |ui, _| {
         ui.add_enabled_ui(false, |ui| checkbox(ui, "Option", &mut true));
     }),

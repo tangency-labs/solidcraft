@@ -188,30 +188,25 @@ pub(crate) fn settings_chip(ui: &mut Ui, label: &str, chip: SettingsChip<'_>) ->
 
 /// A labelled form block whose control column can contain several natural-height rows.
 pub(crate) fn settings_block<R>(ui: &mut Ui, label: &str, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
-    settings_block_content(ui, label, None, label_width, add)
+    settings_block_content(ui, label, label_width, add)
 }
 
-/// A form block whose explanatory hint belongs below its label, beside the controls.
-pub(crate) fn settings_block_hint<R>(ui: &mut Ui, label: &str, hint: &str, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
-    settings_block_content(ui, label, Some(hint), label_width, add)
-}
-
-fn settings_block_content<R>(ui: &mut Ui, label: &str, hint: Option<&str>, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
-    if let Some(gate) = crate::prefs_search::block_gate(ui, label, hint) {
+fn settings_block_content<R>(ui: &mut Ui, label: &str, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
+    if let Some(gate) = crate::prefs_search::block_gate(ui, label, None) {
         let before = crate::prefs_search::hits(ui);
         if !gate.show {
             let result = crate::prefs_search::run_hidden(ui, label, add);
             crate::prefs_search::block_finish(ui, &gate, false, before);
             return result;
         }
-        let result = settings_block_body(ui, label, hint, label_width, add);
+        let result = settings_block_body(ui, label, label_width, add);
         crate::prefs_search::block_finish(ui, &gate, true, before);
         return result;
     }
-    settings_block_body(ui, label, hint, label_width, add)
+    settings_block_body(ui, label, label_width, add)
 }
 
-fn settings_block_body<R>(ui: &mut Ui, label: &str, hint: Option<&str>, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
+fn settings_block_body<R>(ui: &mut Ui, label: &str, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
     let t = Tokens::get();
     let width = super::metrics::dimension(ui.available_width());
     let label_width = label_width.min(width * 0.45);
@@ -222,9 +217,6 @@ fn settings_block_body<R>(ui: &mut Ui, label: &str, hint: Option<&str>, label_wi
             ui.spacing_mut().item_spacing.y = t.space_2;
             ui.add_space(t.form_gap_y);
             super::text(ui, label, super::Text::Inline);
-            if let Some(hint) = hint {
-                super::text(ui, hint, super::Text::Hint(label));
-            }
         });
         let control_width = (width - label_width - t.space_14).max(0.0);
         ui.scope_builder(

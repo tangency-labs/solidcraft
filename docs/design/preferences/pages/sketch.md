@@ -22,11 +22,13 @@ Two columns of checkboxes.
 | Label | Control | Edits | Default | Hover | Figure | Notes |
 |---|---|---|---|---|---|---|
 | Press and drag draws one line | Checkbox | `Prefs.line_drag_draws_one` | `false` | none | none | |
+| Rest on a line's last point to switch to a tangent arc | Checkbox | `Prefs.line_hover_tangent_arc` | `false` | Existing `prefs.line_hover_tangent_arc_note`: leaving, returning to and resting on the last point toggles line / tangent arc. | none | Retained newer control; immediately after press-and-drag, before centre-point arc. |
 | Centre-point arc follows the cursor | Checkbox | `Prefs.center_arc_follows_cursor` | `true` | none | none | |
 | Extended construction line tools | Checkbox | `Prefs.sketch_construction_lines` | `true` | none | none | |
 | Dimension new shapes fully | Checkbox | `Prefs.sketch_auto_dimensions` | `false` | "Typed values plus every dimension that fixes the shape." | none | |
 | Place from the sketch origin | Checkbox (dimmed on the board while the one above is off) | `Prefs.sketch_auto_locate` | `false` | "With full dimensions." | none | Dimmed unless "Dimension new shapes fully" is on. |
 | Shortcut again switches mode | Checkbox | `Prefs.shortcut_cycles_modes` | `false` | "Off: it starts the tool again." | none | |
+| Clicking the running tool's button ends it | Checkbox | `Prefs.ribbon_click_ends_tool` | `true` | Existing `prefs.ribbon_click_ends_tool_note`: the lit ribbon button ends the tool and restores selection; off restarts it. | none | Retained newer control; immediately after shortcut cycling, before the Project pair. |
 | Project face edges into new sketches | Checkbox | `app.session.auto_project` (session; in the Snapshot) | per session | none | none | Not a `Prefs` field. |
 | Ask for Project options first | Checkbox | `Prefs.project_options_dialog` | `true` | none | none | |
 
@@ -34,6 +36,7 @@ Two columns of checkboxes.
 
 | Label | Control | Edits | Default | Hover | Figure | Notes |
 |---|---|---|---|---|---|---|
+| Sketching on a part's face makes that part active | Checkbox | `Prefs.sketch_face_activates_part` | `false` | Existing `prefs.sketch_face_activates_part_note`: activate the other component before creating the sketch; it stays active. Off keeps the active component. | none | Retained newer control; first row, immediately before turn-to-face. |
 | Turn to face a sketch when it opens | Checkbox | `Prefs.sketch_open_look_at` | `true` | none | none | |
 | When a sketch ends: Return to the view before / Keep (default) / Unless turned (return if not rotated) | Three picture cards (196 x 152.5), a before / sketch / after trio each | `Prefs.sketch_exit_view` (`SketchExitView`: Previous, Keep, UnlessRotated) | Keep | none | `sketch-exit-previous`, `sketch-exit-keep`, `sketch-exit-unless-turned` | Card labels: "Return to the view before" / "Keep" with sub-label "default" / "Unless turned" with sub-label "return if not rotated". The 30x30 panels are nested SVGs inside the figure. |
 
@@ -59,6 +62,11 @@ Three toggle tiles (208.8 x 140).
 | Alt / Option also frees manipulator arrows | Checkbox | `Prefs.manipulator_free_alt` | `true` | none | none | |
 
 ## Mismatches
+
+* The three retained newer controls above are absent from the old board. Their placements were
+  accepted in #9881 from source-only recommendations; existing labels, help, defaults, profile
+  membership and behavior remain authoritative. Drawing flows down the first column through
+  origin placement, then down the second from shortcut cycling; dependent pairs stay together.
 
 * "Hold to stop snapping" default differs between the board sample and the code (see above).
 * "Project face edges into new sketches" and "Click selects" are session values, not `Prefs`.
