@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Network folder</title>
+  <path d="M9 10.5Q9 6 13.5 6L25.5 6L30.5 11L50.5 11Q55 11 55 15.5L55 35.5Q55 40 50.5 40L13.5 40Q9 40 9 35.5Z" fill="#8e9faf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M9 22.5Q9 18 13.5 18L50.5 18Q55 18 55 22.5L55 35.5Q55 40 50.5 40L13.5 40Q9 40 9 35.5Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 41.5L32 47.5" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8 53L24.5 53M39.5 53L56 53" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="32" cy="53" r="5.5" fill="#328bd3" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

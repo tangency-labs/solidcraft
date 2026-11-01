@@ -607,3 +607,216 @@ fn conversion_from_another_branch_names_the_component_to_activate() {
     assert_eq!(s.doc.to_json(), before);
     assert_eq!((s.active_component, s.active_occurrence_path.clone()), context);
 }
+
+/// The size cap of a copy to a network folder (#2304) is process-wide: a test that sends to one
+/// holds this, and leaves the cap as it was however it ends.
+struct NetworkFolders {
+    _turn: std::sync::MutexGuard<'static, ()>,
+    root: std::path::PathBuf,
+}
+
+impl NetworkFolders {
+    fn new(tag: &str) -> NetworkFolders {
+        let turn = crate::remote_slicers::TEST_TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let root = std::env::temp_dir().join(format!("solidcraft-network-folder-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("share")).unwrap();
+        NetworkFolders { _turn: turn, root }
+    }
+
+    fn share(&self) -> std::path::PathBuf {
+        self.root.join("share")
+    }
+
+    fn files(&self) -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(self.share()).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        v.sort();
+        v
+    }
+}
+
+impl Drop for NetworkFolders {
+    fn drop(&mut self) {
+        *crate::remote_slicers::TEST_MAX_BYTES.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+#[test]
+fn network_folders_are_added_listed_tested_and_removed_by_command() {
+    let net = NetworkFolders::new("commands");
+    let mut s = imported_box();
+    let share = net.share().to_string_lossy().into_owned();
+    let added = s.execute("file.slicers.add_remote", &json!({"name": " Orca on homelab ", "folder": share})).unwrap();
+    assert_eq!(added["id"], "remote:Orca on homelab");
+    assert_eq!((added["kind"].as_str(), added["replaced"].as_bool()), (Some("folder"), Some(false)));
+    let listed = s.execute("file.slicers", &json!({})).unwrap();
+    let first = &listed["slicers"][0];
+    assert_eq!(
+        (first["id"].as_str(), first["remote"].as_bool(), first["folder"].as_str()),
+        (Some("remote:Orca on homelab"), Some(true), Some(share.as_str()))
+    );
+    let again = s.execute("file.slicers.add_remote", &json!({"name": "orca on HOMELAB", "folder": share})).unwrap();
+    assert_eq!(again["replaced"], true, "the same name in another case replaces it");
+    assert_eq!(s.network_folders.len(), 1);
+
+    let ok = s.execute("file.slicers.test", &json!({"name": "remote:orca on homelab"})).unwrap();
+    assert_eq!((ok["ok"].as_bool(), ok["error"].is_null()), (Some(true), true));
+    assert!(net.files().is_empty(), "the test file is deleted");
+    let gone = net.root.join("not-mounted").to_string_lossy().into_owned();
+    let missing = s.execute("file.slicers.test", &json!({"folder": gone})).unwrap();
+    assert_eq!(missing["ok"], false);
+    assert!(missing["error"].as_str().unwrap().contains("mounted"), "{missing}");
+
+    for bad in [
+        json!({"name": "", "folder": share}),
+        json!({"name": "x".repeat(65), "folder": share}),
+        json!({"name": "Relative", "folder": "some/folder"}),
+        json!({"name": "No folder"}),
+    ] {
+        assert!(s.execute("file.slicers.add_remote", &bad).is_err(), "{bad}");
+    }
+    // A key the command doesn't take is kept nowhere: warned about, or refused when checks are strict.
+    let extra = json!({"name": "Extra", "folder": share, "password": "never"});
+    s.param_check = crate::schema::ParamCheck::Warn;
+    let warned = s.execute("file.slicers.add_remote", &extra).unwrap();
+    assert!(warned["param_warnings"].to_string().contains("password"), "{warned}");
+    assert!(!serde_json::to_string(&s.network_folders).unwrap().contains("never"));
+    s.execute("file.slicers.remove_remote", &json!({"name": "remote:Extra"})).unwrap();
+    s.param_check = crate::schema::ParamCheck::Strict;
+    assert!(s.execute("file.slicers.add_remote", &extra).is_err());
+    assert!(crate::remote_slicers::resolve(&s.network_folders, "Extra").is_none());
+    s.param_check = crate::schema::ParamCheck::Off;
+    assert!(s.execute("file.slicers.test", &json!({})).is_err());
+    assert!(s.execute("file.slicers.test", &json!({"name": "Orca on homelab", "folder": share})).is_err());
+    assert!(s.execute("file.slicers.test", &json!({"name": "Nobody"})).is_err());
+
+    // The user's, not the design's: they stay when another design is started.
+    assert!(!s.doc.to_json().contains(&share), "never saved in the design");
+    s.execute("file.new", &json!({})).unwrap();
+    assert_eq!(s.network_folders.len(), 1, "kept across designs");
+
+    let removed = s.execute("file.slicers.remove_remote", &json!({"name": "Orca on homelab"})).unwrap();
+    assert_eq!(removed["removed"], true);
+    assert!(s.execute("file.slicers.remove_remote", &json!({"name": "Orca on homelab"})).is_err());
+    assert!(s.execute("file.slicers", &json!({})).unwrap()["slicers"].as_array().unwrap().iter().all(|t| t["remote"].is_null()));
+}
+
+#[test]
+fn sending_to_a_network_folder_writes_a_readable_name_and_never_replaces_a_file() {
+    let net = NetworkFolders::new("send");
+    let mut s = imported_box();
+    let share = net.share().to_string_lossy().into_owned();
+    s.execute("file.slicers.add_remote", &json!({"name": "Orca", "folder": share})).unwrap();
+    // A file of the readable name is already there, from someone else.
+    std::fs::write(net.share().join("Untitled - Mesh.3mf"), b"theirs").unwrap();
+    let send = |s: &mut Session, p: Value| s.execute("file.send_to_slicer", &p).unwrap();
+    let first = send(&mut s, json!({"slicer": "remote:Orca", "bodies": ["Mesh"]}));
+    assert_eq!((first["remote"].as_bool(), first["slicer"].as_str(), first["renamed"].as_bool()), (Some(true), Some("Orca"), Some(true)));
+    assert!(first["slicer_error"].is_null(), "{first}");
+    let second = send(&mut s, json!({"slicer": "orca", "bodies": ["Mesh"]}));
+    assert!(second["sent_to"].as_str().unwrap().ends_with("Untitled - Mesh (3).3mf"), "{second}");
+    assert_eq!(std::fs::read(net.share().join("Untitled - Mesh.3mf")).unwrap(), b"theirs");
+    let sent = std::fs::read(first["sent_to"].as_str().unwrap()).unwrap();
+    assert!(sent.starts_with(b"PK"), "a 3MF, as the slicer folder's file");
+    assert_eq!(sent, std::fs::read(first["path"].as_str().unwrap()).unwrap(), "the same bytes as the file saved here");
+
+    // Format and STL encoding are kept.
+    let stl = send(&mut s, json!({"slicer": "Orca", "bodies": ["Mesh"], "format": "stl"}));
+    let ascii = send(&mut s, json!({"slicer": "Orca", "bodies": ["Mesh"], "format": "stl", "ascii": true}));
+    assert!(stl["sent_to"].as_str().unwrap().ends_with("Untitled - Mesh.stl"), "{stl}");
+    assert!(ascii["sent_to"].as_str().unwrap().ends_with("Untitled - Mesh (2).stl"), "{ascii}");
+    assert!(!std::fs::read(stl["sent_to"].as_str().unwrap()).unwrap().starts_with(b"solid"));
+    assert!(std::fs::read(ascii["sent_to"].as_str().unwrap()).unwrap().starts_with(b"solid"));
+    assert_eq!(
+        net.files(),
+        ["Untitled - Mesh (2).3mf", "Untitled - Mesh (3).3mf", "Untitled - Mesh (2).stl", "Untitled - Mesh.3mf", "Untitled - Mesh.stl"]
+            .map(String::from)
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>()
+    );
+
+    // file.save_mesh with a network folder keeps the file's own name.
+    let path = net.root.join("bracket v2.stl");
+    let saved = s.execute("file.save_mesh", &json!({"path": path, "slicer": "Orca", "bodies": ["Mesh"]})).unwrap();
+    assert!(saved["sent_to"].as_str().unwrap().ends_with("bracket v2.stl"), "{saved}");
+    assert!(path.exists());
+
+    // wait: return, as the window sends: answered at once, and the copy goes on in the background.
+    let r = send(&mut s, json!({"slicer": "Orca", "bodies": ["Mesh"], "format": "stl", "wait": "return"}));
+    assert!(r["sent_to"].is_null() && r["remote"] == true, "{r}");
+    let ticket = r["sending"].as_u64().unwrap();
+    let done = (0..500)
+        .find_map(|_| {
+            let answer = crate::remote_slicers::poll(ticket);
+            if answer.is_none() {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            answer
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(done.path, net.share().join("Untitled - Mesh (3).stl"));
+}
+
+#[test]
+fn quality_reaches_the_file_sent_to_a_network_folder() {
+    let net = NetworkFolders::new("quality");
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"diameter": 20, "height": 10}));
+    let share = net.share().to_string_lossy().into_owned();
+    s.execute("file.slicers.add_remote", &json!({"name": "Orca", "folder": share})).unwrap();
+    let size = |s: &mut Session, quality: &str| {
+        let r = s.execute("file.send_to_slicer", &json!({"slicer": "Orca", "format": "stl", "quality": quality, "bodies": ["Body1"]})).unwrap();
+        std::fs::metadata(r["sent_to"].as_str().unwrap()).unwrap().len()
+    };
+    let (standard, finest) = (size(&mut s, "standard"), size(&mut s, "finest"));
+    assert!(finest > standard, "finest follows the curve more closely: {finest} > {standard} bytes");
+    assert!(s.execute("file.send_to_slicer", &json!({"slicer": "Orca", "quality": "coarse", "bodies": ["Body1"]})).is_err());
+}
+
+#[test]
+fn a_network_folder_that_cannot_take_the_file_is_reported_and_nothing_crashes() {
+    let net = NetworkFolders::new("errors");
+    let mut s = imported_box();
+    let gone = net.root.join("not-mounted");
+    s.execute("file.slicers.add_remote", &json!({"name": "Gone", "folder": gone})).unwrap();
+    s.execute("file.slicers.add_remote", &json!({"name": "Small", "folder": net.share()})).unwrap();
+
+    // Not mounted: the file is saved here, the folder is not made, and the reply says why.
+    let r = s.execute("file.send_to_slicer", &json!({"slicer": "Gone", "bodies": ["Mesh"]})).unwrap();
+    let e = r["slicer_error"].as_str().unwrap();
+    assert!(e.contains("Gone") && e.contains("mounted"), "{e}");
+    assert!(r["sent_to"].is_null() && std::path::Path::new(r["path"].as_str().unwrap()).exists());
+    assert!(!gone.exists(), "a missing folder is never made");
+
+    // Over the size cap: refused before anything is copied.
+    *crate::remote_slicers::TEST_MAX_BYTES.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(100);
+    let r = s.execute("file.send_to_slicer", &json!({"slicer": "Small", "bodies": ["Mesh"]})).unwrap();
+    assert!(r["slicer_error"].as_str().unwrap().contains("MB"), "{r}");
+    assert!(net.files().is_empty());
+    *crate::remote_slicers::TEST_MAX_BYTES.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+
+    // No permission to write there.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(net.share(), std::fs::Permissions::from_mode(0o555)).unwrap();
+        // Root may write anywhere; the check means nothing then.
+        if std::fs::write(net.share().join("probe"), b"x").is_err() {
+            let r = s.execute("file.send_to_slicer", &json!({"slicer": "Small", "bodies": ["Mesh"]})).unwrap();
+            assert!(r["slicer_error"].as_str().unwrap().contains("no permission"), "{r}");
+        }
+        std::fs::set_permissions(net.share(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    // A network folder that isn't there is refused before anything is written.
+    let before = s.execute("file.slicers", &json!({})).unwrap();
+    assert!(s.execute("file.send_to_slicer", &json!({"slicer": "remote:Nobody", "bodies": ["Mesh"]})).is_err());
+    let path = net.root.join("unknown.stl");
+    assert!(s.execute("file.save_mesh", &json!({"path": path, "slicer": "remote:Nobody"})).is_err());
+    assert!(!path.exists());
+    assert_eq!(s.execute("file.slicers", &json!({})).unwrap(), before);
+}

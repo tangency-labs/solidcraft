@@ -92,6 +92,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let (single, tip) = (app.tr("ui.slicer_single_instance").to_string(), app.tr("ui.slicer_single_instance_tip").to_string());
             ui_kit::checkbox(ui, &single, &mut app.preferences.slicer_single_instance).on_hover_text(tip);
         });
+        // Send to Slicer's network folders (#2304); the browser has none.
+        if crate::network_folder_ui::available(app) {
+            ui_kit::settings_block(ui, app.tr("ui.network_folders"), labels, |ui| crate::network_folder_ui::prefs_rows(app, ui));
+        }
         ui_kit::settings_block(ui, app.tr("prefs.print_face_highlight"), labels, |ui| {
             let tip = app.tr("prefs.print_face_highlight_tip").to_string();
             let response = ui_kit::slider(
