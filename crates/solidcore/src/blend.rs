@@ -6,6 +6,7 @@
 //! `SmFilletRemoval`, `SmCurveFilletExecutive`, `SmFeatureExecutive` in `source/SMLib`, and
 //! `SM_API/SmApiFillets`.
 
+pub mod blend_setback;
 pub mod feature_executive;
 pub mod fillet_classification;
 pub mod fillet_cliff_overflow;
