@@ -972,7 +972,7 @@ fn v_hide_under_cursor_keeps_the_selection_rules() {
         "the whole selection hides, not just the hovered body"
     );
     // The cursor over empty space: the selection, as today.
-    context_menu::run_item(&mut app, &find(&context_menu::items(&app, &Target::Viewport), "Show All"), pos2(0.0, 0.0));
+    app.run("browser.visibility", json!({"items": [b.clone(), "XY"], "visible": true})).unwrap();
     app.viewport.hover = None;
     context_menu::toggle_visibility_key(&mut app);
     assert!(

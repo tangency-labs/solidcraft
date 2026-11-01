@@ -1963,11 +1963,11 @@ pub fn toggle_visibility_key(app: &mut SolveApp) {
         return toggle_visibility(app);
     }
     // The viewport: the hit under the cursor is the pick's own candidate, kept for the highlight.
-    if let Some(hit) = app.viewport.hover.clone() {
-        if !hit_in_selection(app, &hit) {
-            toggle_hit(app, &hit);
-            return;
-        }
+    if let Some(hit) = app.viewport.hover.clone()
+        && !hit_in_selection(app, &hit)
+    {
+        toggle_hit(app, &hit);
+        return;
     }
     toggle_visibility(app)
 }
