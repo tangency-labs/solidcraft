@@ -44,11 +44,17 @@ const TORN_ZONE_TOL: f64 = 0.01;
 
 /// A fold's bend zone (`strip`, from `s0` to `s0 + ba` along `n`) as the run of its start line
 /// and the run of its far edge along `d`, when it ends square across or on a straight line from
-/// the one to the other (within `TORN_ZONE_TOL`): such an end turns evenly along the bend as it
-/// folds, as a torn end does (`SheetFlange::tear`). None for any other shape, and for an end
-/// whose far edge stops short of its start line: a torn end only runs the moving side on, so the
-/// material outside such an end's square would be lost.
+/// the one to the other: such an end turns evenly along the bend as it folds, as a torn end does
+/// (`SheetFlange::tear`). Only the ends may stray from their lines, by `TORN_ZONE_TOL` (a quarter
+/// of a narrower zone); the start line and the far edge are taken as they are, so a notch that
+/// stops a hair inside the zone is not filled. None for any other shape, and for an end whose far
+/// edge stops short of its start line: a torn end only runs the moving side on, so the material
+/// outside such an end's square would be lost.
 fn torn_zone(strip: &[Vec2], n: Vec2, d: Vec2, s0: f64, ba: f64) -> Option<((f64, f64), (f64, f64))> {
+    if !ba.is_finite() || ba <= 0.0 {
+        return None;
+    }
+    let tol = TORN_ZONE_TOL.min(ba / 4.0);
     let run = |s: f64| {
         strip
             .iter()
@@ -57,7 +63,7 @@ fn torn_zone(strip: &[Vec2], n: Vec2, d: Vec2, s0: f64, ba: f64) -> Option<((f64
             .fold(None, |r: Option<(f64, f64)>, u| Some(r.map_or((u, u), |(lo, hi)| (lo.min(u), hi.max(u)))))
     };
     let (start, far) = (run(s0)?, run(s0 + ba)?);
-    if start.1 - start.0 < 1e-6 || far.1 - far.0 < 1e-6 || far.0 > start.0 + TORN_ZONE_TOL || far.1 < start.1 - TORN_ZONE_TOL {
+    if start.1 - start.0 < 1e-6 || far.1 - far.0 < 1e-6 || far.0 > start.0 + 1e-6 || far.1 < start.1 - 1e-6 {
         return None;
     }
     let quad = [n * s0 + d * start.0, n * s0 + d * start.1, n * (s0 + ba) + d * far.1, n * (s0 + ba) + d * far.0];
@@ -66,12 +72,21 @@ fn torn_zone(strip: &[Vec2], n: Vec2, d: Vec2, s0: f64, ba: f64) -> Option<((f64
         let t = ((q - a).dot(ab) / ab.dot(ab).max(1e-300)).clamp(0.0, 1.0);
         q.dist(a + ab * t)
     };
-    let sides = || (0..4).filter_map(|i| Some((*quad.get(i)?, *quad.get((i + 1) % 4)?)));
-    if !strip.iter().all(|&q| sides().any(|(a, b)| to_side(q, a, b) <= TORN_ZONE_TOL)) {
+    // The start line and the far edge (sides 0 and 2) exactly, the ends (1 and 3) within `tol`.
+    let sides = || (0..4).filter_map(|i| Some((i % 2 == 1, *quad.get(i)?, *quad.get((i + 1) % 4)?)));
+    if !strip.iter().all(|&q| sides().any(|(end, a, b)| to_side(q, a, b) <= if end { tol } else { 1e-6 })) {
         return None;
     }
-    let around: f64 = sides().map(|(a, b)| a.dist(b)).sum();
-    ((signed_area(strip).abs() - signed_area(&quad).abs()).abs() <= TORN_ZONE_TOL * around).then_some((start, far))
+    let ends: f64 = sides().filter(|(end, _, _)| *end).map(|(_, a, b)| a.dist(b)).sum();
+    ((signed_area(strip).abs() - signed_area(&quad).abs()).abs() <= tol * ends).then_some((start, far))
+}
+
+/// Where along `n` to read which zone pieces a fold's line (at `l`) runs through: on the line,
+/// kept twice `TORN_ZONE_TOL` inside the zone (`s0..s0 + ba`), or the zone's middle when it is
+/// too narrow for that.
+fn line_level(l: f64, s0: f64, ba: f64) -> f64 {
+    let (lo, hi) = (s0 + 2.0 * TORN_ZONE_TOL, s0 + ba - 2.0 * TORN_ZONE_TOL);
+    if lo < hi { l.max(lo).min(hi) } else { s0 + ba / 2.0 }
 }
 
 /// A fold whose zone is one with the ends of other walls, a corner relief's V meeting the zone's
@@ -87,13 +102,17 @@ fn torn_tab(
     (l, span): (f64, (f64, f64)),
 ) -> Result<Option<(((f64, f64), (f64, f64)), Vec<Vec2>, Vec<Vec2>)>> {
     const EPS: f64 = 1e-6;
+    // A zone too narrow to hold its ends' tolerance on both sides is not torn so.
+    if !ba.is_finite() || ba <= 4.0 * TORN_ZONE_TOL {
+        return Ok(None);
+    }
     let mut work = FlatWork::new();
     let inner = clip(&clip(pts, n * (s0 + TORN_ZONE_TOL), n), n * (s0 + ba - TORN_ZONE_TOL), n * -1.0);
     let pieces = merge_loops(&[inner], &mut work)?;
     let overlap = |a: (f64, f64), b: (f64, f64)| a.1.min(b.1) - a.0.max(b.0);
     // Where each piece meets the line: a wall's end beside the zone may reach past the line's
     // first point, but not along the line itself.
-    let level = l.clamp(s0 + 2.0 * TORN_ZONE_TOL, s0 + ba - 2.0 * TORN_ZONE_TOL);
+    let level = line_level(l, s0, ba);
     let spanned: Vec<&Vec<Vec2>> = pieces.iter().filter(|p| run_at(p, n, d, level).is_some_and(|u| overlap(u, span) > EPS)).collect();
     let (2.., [piece]) = (pieces.len(), spanned.as_slice()) else { return Ok(None) };
     let w = ba - 2.0 * TORN_ZONE_TOL;
@@ -4079,7 +4098,7 @@ impl SheetBody {
         }
         // The pieces where the line runs: a wall's end beside a torn zone may reach past the
         // line's first point, but not along the line itself.
-        let level = l.clamp(s0 + 2.0 * TORN_ZONE_TOL, s0 + ba - 2.0 * TORN_ZONE_TOL);
+        let level = line_level(l, s0, ba);
         let chosen: Vec<usize> =
             (0..strips.len()).filter(|&i| strips.get(i).and_then(|p| run_at(p, n, d, level)).is_some_and(|u| overlap(u, span) > EPS)).collect();
         if chosen.is_empty() {

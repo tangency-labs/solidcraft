@@ -3283,6 +3283,86 @@ fn a_torn_fold_never_drops_material_where_the_blank_narrows() {
     }
 }
 
+/// A bend zone narrower than the torn-end tolerance (a small angle or radius): the folds that
+/// looked for torn tabs read the line inside a zone too narrow to hold it and panicked. Two tabs
+/// fold at 0.5 degrees and R 0.1 with their material; the tabs at R 0 are refused or fold, but
+/// never panic; the tray's wall at 2 degrees and R 0 is refused or folds and unfolds exactly.
+#[test]
+fn a_bend_zone_narrower_than_a_torn_ends_tolerance_never_panics() {
+    let tabs = |angle: &str, radius: &str| {
+        let mut s = Session::default();
+        two_tab_blank(&mut s);
+        let flat = volume(&mut s);
+        let r =
+            s.execute("sheet.fold", &json!({"points": [[107, 5, 0.8], [107, 35, 0.8]], "fixed": [50, 20, 0.8], "angle": angle, "radius": radius}));
+        (r.map(|_| ()).map_err(|e| e.to_string()), rel(volume(&mut s), flat))
+    };
+    let (r, kept) = tabs("0.5 deg", "0.1");
+    assert!(r.is_ok(), "{r:?}");
+    assert!(kept < 1e-4, "the tabs keep their material: {kept}");
+    for angle in ["2 deg", "1 deg"] {
+        let (r, _) = tabs(angle, "0");
+        assert!(!r.as_ref().is_err_and(|e| e.contains("internal error")), "{angle}: {r:?}");
+    }
+    // The wall's ends slant across its 0.03 mm zone: it folds torn, and unfolds to the flat.
+    let (_, outline) = torn_tray();
+    let mut s = torn_tray_session(&outline, 1.5);
+    let flat = volume(&mut s);
+    let r = s.execute("sheet.fold", &json!({"points": torn_tray_walls(1.4)[0].1, "fixed": [100.0, 50.0, 1.5], "angle": "2 deg", "radius": "0"}));
+    match r {
+        Ok(_) => {
+            run(&mut s, "sheet.unfold", json!({}));
+            assert!(rel(volume(&mut s), flat) < 1e-9, "the tray's wall at 2 degrees unfolds to {} vs {flat}", volume(&mut s));
+        }
+        Err(e) => assert!(!e.to_string().contains("internal error"), "the tray's wall at 2 degrees: {e}"),
+    }
+}
+
+/// A side narrowing towards the side that moves by less than the torn ends' tolerance is still a
+/// narrowing: it is refused, or folds and unfolds with every bit of its material.
+#[test]
+fn a_torn_fold_never_drops_material_where_the_blank_narrows_slightly() {
+    let ba = FRAC_PI_2 * (1.5 + 0.5 * 1.5);
+    for k in [0.002, 0.0028] {
+        let blank = [[0.0, 0.0], [100.0, 0.0], [120.0, 20.0 * k], [120.0, 100.0 - 20.0 * k], [100.0, 100.0], [0.0, 100.0]];
+        let mut s = torn_tray_session(&blank, 1.5);
+        let flat = volume(&mut s);
+        let r =
+            s.execute("sheet.fold", &json!({"points": [[100.0, -10.0, 1.5], [100.0, 110.0, 1.5]], "fixed": [20.0, 50.0, 1.5], "position": "start"}));
+        if r.is_ok() {
+            run(&mut s, "sheet.unfold", json!({}));
+            assert!(rel(volume(&mut s), flat) < 1e-9, "slope {k} (ext {}): unfolded {} vs {flat}", k * ba, volume(&mut s));
+        }
+    }
+}
+
+/// A slit that stops a hair inside a fold's zone, from either side: the zone is not taken for a
+/// torn one (that would fill the slit's end); the fold names the slit's corner, as before.
+#[test]
+fn a_slit_ending_a_hair_inside_the_zone_names_its_corner() {
+    let ba = FRAC_PI_2 * (1.5 + 0.5 * 1.5);
+    let (dd, w) = (0.005, 0.5);
+    let from_moving =
+        vec![[0.0, 0.0], [200.0, 0.0], [200.0, 50.0], [100.0 + dd, 50.0], [100.0 + dd, 50.0 + w], [200.0, 50.0 + w], [200.0, 100.0], [0.0, 100.0]];
+    let from_fixed = vec![
+        [0.0, 0.0],
+        [200.0, 0.0],
+        [200.0, 100.0],
+        [0.0, 100.0],
+        [0.0, 50.0 + w],
+        [100.0 + ba - dd, 50.0 + w],
+        [100.0 + ba - dd, 50.0],
+        [0.0, 50.0],
+    ];
+    for (name, blank) in [("from the side that moves", from_moving), ("from the side that stays", from_fixed)] {
+        let mut s = torn_tray_session(&blank, 1.5);
+        let r =
+            s.execute("sheet.fold", &json!({"points": [[100.0, -10.0, 1.5], [100.0, 110.0, 1.5]], "fixed": [20.0, 25.0, 1.5], "position": "start"}));
+        let e = r.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains("reaches a corner of the sheet's outline"), "a slit {name}: {e:?}");
+    }
+}
+
 /// A flange on another wall's end beyond a torn zone stays where it stands when the zone folds:
 /// that end does not hang from the zone. The left wall's end runs on past the bottom wall's zone
 /// and carries an ear, which must not go round with the bottom wall.
