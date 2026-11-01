@@ -16,8 +16,11 @@ use std::collections::HashMap;
 
 /// A model's results and states as records, and the kernel bodies they refer to by index.
 pub struct SavedModel {
+    /// `Null` when the file kept only its imports ([`SavedModel::imports_only`]).
     pub records: Json,
     pub bodies: Vec<Body>,
+    /// The STEP imports a save keeps beside the model, or the file kept (#9456).
+    pub imports: crate::SavedImports,
 }
 
 /// Records refer to these at most.
@@ -286,13 +289,39 @@ impl Model {
                 "features": features, "states": w.states, "model_bodies": w.model_bodies, "names": w.names, "sketches": w.sketches,
                 "sheets": w.sheets, "sketch_key_sets": w.sketch_key_sets,
             });
-            Ok(SavedModel { records, bodies: w.bodies })
+            Ok(SavedModel { records, bodies: w.bodies, imports: self.saved_imports(doc) })
         })
         .ok()
+    }
+
+    /// What a save keeps of the STEP imports of `doc`: kept apart from the model, since another
+    /// release that evaluates the timeline again still reads them with the same importer (#9456).
+    pub fn saved_imports(&self, doc: &Document) -> crate::SavedImports {
+        let mut digests: Vec<String> = Vec::new();
+        for f in &doc.features {
+            if let FeatureKind::Import { step, .. } = &f.kind {
+                let digest = crate::config::payload_digest(step);
+                if !digests.contains(&digest) {
+                    digests.push(digest);
+                }
+            }
+        }
+        self.imports.saved(digests)
     }
 }
 
 impl SavedModel {
+    /// A file's imports without its model: one of another evaluation source, evaluated again
+    /// with these imports ([`Model::take_imports`]).
+    pub fn imports_only(imports: crate::SavedImports) -> SavedModel {
+        SavedModel { records: Json::Null, bodies: Vec::new(), imports }
+    }
+
+    /// Whether it holds a model, not only imports.
+    pub fn has_model(&self) -> bool {
+        !self.records.is_null()
+    }
+
     /// The states the records hold, every record checked.
     fn states(&self) -> Result<Vec<Arc<ModelState>>> {
         let (records, bodies) = (&self.records, &self.bodies);
@@ -620,11 +649,17 @@ impl SavedModel {
         });
         let kept: Vec<usize> = (0..self.bodies.len()).filter(|i| kernel_used.get(*i) == Some(&true)).collect();
         let bodies = kept.iter().filter_map(|i| self.bodies.get(*i).cloned()).collect();
-        Some((SavedModel { records, bodies }, kept, used))
+        Some((SavedModel { records, bodies, imports: self.imports.clone() }, kept, used))
     }
 }
 
 impl Model {
+    /// Take the STEP imports a design file kept, so evaluating its Import features does not read
+    /// those files again (#9456).
+    pub fn take_imports(&mut self, saved: &SavedModel) {
+        self.imports.take(&saved.imports);
+    }
+
     /// The model a design file kept for `doc` ([`Model::saved`]), taken as `doc`'s evaluation:
     /// every feature's result as saved, nothing evaluated but the features whose state the file
     /// did not keep ([`SavedModel::thinned`]). Refused (an error) unless every feature's
@@ -690,6 +725,7 @@ impl Model {
             results.push(result);
         }
         let mut model = Model { results, param_errors, step_digests, context: ctx, frame_bodies, ..Model::default() };
+        model.take_imports(saved);
         let unkept = model.results.iter().filter(|r| r.unkept).count();
         if unkept > 0 {
             // The features whose state the file did not keep, each evaluated again from the state

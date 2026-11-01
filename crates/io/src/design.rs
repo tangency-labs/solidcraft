@@ -6,6 +6,7 @@ use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::sync::Arc;
 
 mod drawing;
+mod import_cache;
 mod native_cache;
 mod thumbnail;
 pub use drawing::{FileKind, file_kind, read_drawing, read_drawing_file, write_drawing_container};
@@ -348,11 +349,18 @@ fn write_container(
     writer.part("container.json", &serde_json::to_vec(&json!({"format": VERSION})).map_err(invalid)?, false)?;
     // The model cache is optional: one that does not fit the container keeps fewer states, or is
     // left out, never a failed save.
-    let cache = geometry.and_then(|g| native_cache::encode_model(g, &metadata, writer.space(2, budget)).ok());
+    let cache = geometry.filter(|g| g.has_model()).and_then(|g| native_cache::encode_model(g, &metadata, writer.space(2, budget)).ok());
     if let Some((manifest, data)) = cache {
         let [manifest_entry, payload_entry] = native_cache::ENTRIES;
         // Deflated whatever the policy: the encoded bodies shrink about fourfold to tenfold, faster
         // than the extra bytes would be written and read.
+        writer.part(manifest_entry, &manifest, true)?;
+        writer.part(payload_entry, &data, true)?;
+    }
+    // The STEP imports, apart from the model: a release that evaluates the timeline again reads
+    // them when its importer is the one that wrote them (#9456). Optional as the model is.
+    if let Some((manifest, data)) = geometry.and_then(|g| import_cache::encode_imports(&g.imports, writer.space(2, budget))) {
+        let [manifest_entry, payload_entry] = import_cache::ENTRIES;
         writer.part(manifest_entry, &manifest, true)?;
         writer.part(payload_entry, &data, true)?;
     }
@@ -715,7 +723,7 @@ impl<R: Read + Seek> DesignContainerReader<R> {
         // fallback, generating a bounded provisional mesh without source imports.
         read_preview(&mut self.reader).ok().or_else(|| {
             let document = self.reader.document(16 << 20).ok()?;
-            native_cache::geometry_preview(&document, &self.geometry()?).ok()
+            native_cache::geometry_preview(&document, &self.model()?).ok()
         })
     }
 
@@ -724,8 +732,24 @@ impl<R: Read + Seek> DesignContainerReader<R> {
         thumbnail::read(&mut self.reader).ok()
     }
 
-    /// The saved model, when this build wrote it for exactly this document.
+    /// The saved model, when this build's evaluation source computed it for exactly this
+    /// document, with the STEP imports the file keeps when this build's importer read them
+    /// (#9456); only those imports ([`solidcraft_doc::SavedModel::imports_only`]) when the model
+    /// is of another evaluation source.
     pub fn geometry(&mut self) -> Option<solidcraft_doc::SavedModel> {
+        let imports = if self.reader.has_part(import_cache::ENTRIES[0]) { import_cache::read_imports_with(&mut self.reader).ok() } else { None };
+        let model = self.model();
+        match (model, imports) {
+            (Some(mut model), Some(imports)) => {
+                model.imports = imports;
+                Some(model)
+            }
+            (model, imports) => model.or_else(|| imports.map(solidcraft_doc::SavedModel::imports_only)),
+        }
+    }
+
+    /// The saved model alone ([`Self::geometry`]).
+    fn model(&mut self) -> Option<solidcraft_doc::SavedModel> {
         let document = self.reader.document(16 << 20).ok()?;
         native_cache::read_geometry_with(&mut self.reader, &document).ok()
     }
@@ -758,7 +782,7 @@ pub fn read_design_file(path: &str, notify: Option<impl FnOnce(DesignPreview)>) 
         // A design with its model opens without a picture first: the model is the session.
         let model = reader.geometry_before_document();
         if let Some(notify) = notify
-            && model.is_none()
+            && model.as_ref().is_none_or(|m| !m.has_model())
             && let Ok(preview) = read_preview(&mut reader.reader)
         {
             notify(preview);
@@ -1101,6 +1125,7 @@ mod tests {
                 "states": [state], "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [], "sheets": [], "sketch_key_sets": [{"set": [], "drop": []}],
             }),
             bodies,
+            imports: Default::default(),
         }
     }
 
@@ -1353,6 +1378,7 @@ mod tests {
         solidcraft_doc::SavedModel {
             records: json!({"features": features, "states": states, "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [], "sheets": [], "sketch_key_sets": [{"set": [], "drop": []}]}),
             bodies,
+            imports: Default::default(),
         }
     }
 
@@ -1541,6 +1567,117 @@ mod tests {
         manifest.as_object_mut().unwrap().remove("evaluation");
         entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
         assert!(read_design_geometry(&package(&entries)).is_none());
+    }
+
+    /// The importer's source is known wherever the evaluation source is (a checkout with git): a
+    /// crate the kernel is built from without a known folder would leave it unknown, and every
+    /// stored import unread. It is not the evaluation source, which changes with the timeline.
+    #[test]
+    fn the_import_key_is_known_where_the_evaluation_key_is() {
+        if env!("SOLIDCRAFT_EVALUATION_SOURCE") != "unknown" {
+            assert_ne!(env!("SOLIDCRAFT_IMPORT_SOURCE"), "unknown");
+            assert_ne!(env!("SOLIDCRAFT_IMPORT_SOURCE"), env!("SOLIDCRAFT_EVALUATION_SOURCE"));
+        }
+    }
+
+    /// #9456: the STEP imports a design read are kept beside its model, keyed by their text and by
+    /// the importer's source, not by the evaluation source: a file whose model is of another
+    /// evaluation source (another release) still gives its imports, exactly as read, and a save
+    /// copies them as they were. Another importer source, or another platform, reads them again.
+    #[test]
+    fn imports_are_kept_apart_from_the_model_and_keyed_by_the_importer() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+        let text = std::fs::read_to_string(root.join("cylinder_twice.step")).unwrap();
+        let imp = Arc::new(solidcraft_kernel::step_import(&text).unwrap());
+        let key = format!("{:x}", Sha256::digest(text.as_bytes()));
+        let saved = solidcraft_doc::SavedImports { digests: vec![key.clone()], read: [(key.clone(), imp.clone())].into(), stored: None };
+        let mut geometry = native_geometry();
+        geometry.imports = saved;
+        let doc = document();
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&geometry)).unwrap();
+        let original = parts(&bytes);
+        let manifest = |entries: &BTreeMap<String, Vec<u8>>| serde_json::from_slice::<Value>(&entries["cache/imports.json"]).unwrap();
+        let with = |entry: &str, key: &str, value: Value| {
+            let mut entries = original.clone();
+            let mut m: Value = serde_json::from_slice(&entries[entry]).unwrap();
+            m[key] = value;
+            entries.insert(entry.into(), serde_json::to_vec(&m).unwrap());
+            package(&entries)
+        };
+        let encoded = |imp: &solidcraft_kernel::StepImport| -> Vec<Vec<u8>> {
+            imp.bodies.iter().map(|b| solidcraft_kernel::encode_native_body(&b.body).unwrap()).collect()
+        };
+        let same = |read: &solidcraft_kernel::StepImport| {
+            assert_eq!(encoded(read), encoded(&imp));
+            assert_eq!(read.tree, imp.tree);
+            assert_eq!(
+                format!(
+                    "{:?}",
+                    read.bodies
+                        .iter()
+                        .map(|b| (&b.name, b.source_item, &b.face_origin, b.color, &b.path, &b.instance, b.closed, b.file_faces))
+                        .collect::<Vec<_>>()
+                ),
+                format!(
+                    "{:?}",
+                    imp.bodies
+                        .iter()
+                        .map(|b| (&b.name, b.source_item, &b.face_origin, b.color, &b.path, &b.instance, b.closed, b.file_faces))
+                        .collect::<Vec<_>>()
+                )
+            );
+            assert_eq!((&read.warnings, &read.schema, &read.system), (&imp.warnings, &imp.schema, &imp.system));
+        };
+        let imports = |bytes: &[u8]| DesignContainerReader::new(Cursor::new(bytes)).unwrap().geometry().and_then(|g| g.imports.stored);
+        // This build's model with the imports.
+        let read = DesignContainerReader::new(Cursor::new(&bytes)).unwrap().geometry().unwrap();
+        assert!(read.has_model());
+        same(&read.imports.stored.as_ref().unwrap().import(&key).unwrap());
+        // A model of another evaluation source, written by another version: only the imports.
+        let other = with("cache/model.json", "evaluation", json!(format!("{}/{}", "0".repeat(64), "x")));
+        let other = parts(&other);
+        let mut entries = other.clone();
+        let mut m = manifest(&entries);
+        m["app"] = json!("0.0.1");
+        m["build"] = json!("0123456789abcdef0123456789abcdef01234567/other-platform");
+        entries.insert("cache/imports.json".into(), serde_json::to_vec(&m).unwrap());
+        let other = package(&entries);
+        let read = DesignContainerReader::new(Cursor::new(&other)).unwrap().geometry().unwrap();
+        assert!(!read.has_model());
+        let stored = read.imports.stored.clone().unwrap();
+        assert!(stored.has(&key) && stored.import(&"0".repeat(64)).is_none());
+        same(&stored.import(&key).unwrap());
+        assert!(read_design_geometry(&other).is_none());
+        assert_eq!(crate::read_design(&other).unwrap().to_json(), doc.to_json());
+        // Saved again without reading them: copied as they were.
+        let copied = solidcraft_doc::SavedImports { digests: vec![key.clone()], read: Default::default(), stored: Some(stored) };
+        let again =
+            write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&solidcraft_doc::SavedModel::imports_only(copied))).unwrap();
+        let again = parts(&again);
+        assert!(!again.contains_key("cache/model.json"));
+        assert_eq!(again["cache/imports.bin"], original["cache/imports.bin"]);
+        assert_eq!(manifest(&again)["imports"], manifest(&original)["imports"]);
+        // Another importer source or platform, another format, a changed payload: read again.
+        let importer = manifest(&original)["importer"].as_str().unwrap().to_string();
+        let platform = importer.rsplit('/').next().unwrap();
+        for (key, value) in [
+            ("importer", json!(format!("{}/{platform}", "0".repeat(64)))),
+            ("importer", json!(format!("{}/other-platform", importer.rsplit_once('/').unwrap().0))),
+            ("format", json!("solidcraft-import-cache/0")),
+            ("producer", json!("unsupported")),
+            ("payload", json!("0".repeat(64))),
+        ] {
+            assert!(imports(&with("cache/imports.json", key, value.clone())).is_none(), "{key}: {value}");
+        }
+        let mut entries = original.clone();
+        entries.get_mut("cache/imports.bin").unwrap()[0] ^= 1;
+        assert!(imports(&package(&entries)).is_none());
+        // A body index outside the import's bodies is a miss, never a panic.
+        let mut m = manifest(&original);
+        m["imports"][&key]["tree"][0]["bodies"] = json!([99]);
+        let mut entries = original.clone();
+        entries.insert("cache/imports.json".into(), serde_json::to_vec(&m).unwrap());
+        assert!(imports(&package(&entries)).unwrap().import(&key).is_none());
     }
 
     #[test]
