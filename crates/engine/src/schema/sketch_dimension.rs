@@ -32,10 +32,11 @@ use super::types::{LengthExpr, Point2, Point3};
 use crate::cmd::{MAX_PROJECTED_ENTITIES, model_ref};
 use crate::params::json_brief;
 
-/// One or two entities to dimension: a curve or point id (`l1`, `p3`, `l1.start`), `x` or `y` (a
-/// sketch axis), `mid:<line id>` (a line's midpoint), or a model edge `{edge: [x, y, z], body?}`
+/// One, two or three entities to dimension: a curve or point id (`l1`, `p3`, `l1.start`), `x` or
+/// `y` (a sketch axis), `mid:<line id>` (a line's midpoint), or a model edge `{edge: [x, y, z], body?}`
 /// or vertex `{vertex: [x, y, z], body?}`, which the handler projects into the sketch first. One
-/// id may be given as text rather than a list.
+/// id may be given as text rather than a list. Three point ids give the angle at the middle one
+/// (the vertex) between the lines running from it to the outer two (#10137).
 #[derive(Clone, Debug, PartialEq)]
 pub struct DimensionEntities(pub Vec<Value>);
 
@@ -59,8 +60,8 @@ impl DimensionEntities {
             }
             other => return Err(format!("`entities` must be a list of names; it is {}", json_brief(other))),
         };
-        if list.is_empty() || list.len() > 2 {
-            return Err("`entities` must list one or two sketch entities".into());
+        if list.is_empty() || list.len() > 3 {
+            return Err("`entities` must list one, two, or three sketch entities".into());
         }
         Ok(DimensionEntities(list))
     }
@@ -81,21 +82,22 @@ impl JsonSchema for DimensionEntities {
         };
         let one = serde_json::json!({"anyOf": [{"type": "string"}, model("edge"), model("vertex")]});
         json_schema!({
-            "description": "One or two entities: a curve or point id (`l1`, `p3`, `l1.start`, `c1.center`), `x` or `y` (a sketch axis), `mid:<line id>` (a line's midpoint), or a model edge `{edge: [x, y, z], body?}` or vertex `{vertex: [x, y, z], body?}`, projected into the sketch first and measured there. One id may be given as text instead of a list.",
-            "anyOf": [{"type": "string"}, {"type": "array", "items": one, "minItems": 1, "maxItems": 2}]
+            "description": "One, two or three entities: a curve or point id (`l1`, `p3`, `l1.start`, `c1.center`), `x` or `y` (a sketch axis), `mid:<line id>` (a line's midpoint), or a model edge `{edge: [x, y, z], body?}` or vertex `{vertex: [x, y, z], body?}`, projected into the sketch first and measured there. Three point ids give the angle at the middle one (the vertex) between the lines running from it to the outer two. One id may be given as text instead of a list.",
+            "anyOf": [{"type": "string"}, {"type": "array", "items": one, "minItems": 1, "maxItems": 3}]
         })
     }
 }
 
-/// Dimension one or two sketch entities: a length, distance, radius, diameter, angle or ellipse
-/// half-axis, driving the sketch (it adds a parameter) or only measuring (`driven: true`). The
-/// kind follows from the entities, `type` and where `text_at` is. One undo step.
+/// Dimension one, two or three sketch entities: a length, distance, radius, diameter, angle or
+/// ellipse half-axis, driving the sketch (it adds a parameter) or only measuring (`driven: true`).
+/// Three points give the angle at the middle one (the vertex). The kind follows from the entities,
+/// `type` and where `text_at` is. One undo step.
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = entities_required)]
 pub struct SketchDimensionParams {
     // Optional in the type and required in the schema (`entities_required`): left out, the
     // handler refuses it with its own message, not the check's "is required".
-    /// The entities to dimension, one or two.
+    /// The entities to dimension, one, two or three (three points give the angle at the middle one).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "DimensionEntities")]
     pub entities: Option<DimensionEntities>,
@@ -209,7 +211,7 @@ impl SketchDimensionParams {
     /// The keys the handler reads, in its order and in the cases it reads them.
     fn read(o: &Map<String, Value>) -> Result<SketchDimensionParams, String> {
         let entities = given(o, "entities").map(DimensionEntities::read).transpose()?;
-        // `entities: null` and a missing one are both "must list one or two sketch entities".
+        // `entities: null` and a missing one are both "must list one, two, or three sketch entities".
         let kind = text(o, "type")?;
         let orientation = text(o, "orientation")?;
         let text_at = typed::<Point2>(o, "text_at")?;
