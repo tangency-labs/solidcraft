@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::{Value, json};
 
+use solidcraft_engine::SectionPlane;
 use solidcraft_engine::doc::{apply_point, is_identity};
 use solidcraft_engine::geom::{Mesh, Vec3};
 
@@ -130,7 +131,7 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     let bounds = crate::viewport::body_bounds(app, &st);
     let active_bodies = app.session.active_occurrence_path.as_ref().and_then(|q| app.session.occurrence_bodies(q, true).ok());
     let replaced: &[String] = app.preview.effective_replaced();
-    let section = crate::viewport::section_plane(app);
+    let section = crate::viewport::section_planes(app);
     let wireframe = app.ui.visual_style == 2;
     let slack = crate::viewport::scene_pick_slack(app);
     let occ = occurrence_map(app);
@@ -140,15 +141,11 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     for input in &inputs {
         let mut cands = face_candidates(app, &st, &bounds, input, &active_bodies, replaced, include_ghosted);
         cands.sort_by(|a, b| a.t.total_cmp(&b.t));
-        // A section hides the material its normal points away from: faces on the removed
-        // side do not stop a pick, and the cut cap answers where the plane crosses material.
-        let kept: Vec<&Cand> = match section {
-            Some((so, sn)) => cands.iter().filter(|c| sn.dot(c.point) <= sn.dot(so) + SECTION_EPS).collect(),
-            None => cands.iter().collect(),
-        };
-        let cap = section
-            .and_then(|(so, sn)| section_cap(app, &st, &bounds, input, so, sn, kept.first().map(|c| c.t), include_ghosted, replaced, &active_bodies));
-        let face_t = kept.first().map(|c| c.t).or(cap.as_ref().map(|(t, _, _)| *t));
+        // A section hides the material on the side any plane's normal points at: faces there do
+        // not stop a pick, and the cut cap answers where the cut crosses material.
+        let kept: Vec<&Cand> = cands.iter().filter(|c| section_keeps(&section, c.point)).collect();
+        let cap = section_cap(app, &st, &bounds, input, &section, kept.first().map(|c| c.t), include_ghosted, replaced, &active_bodies);
+        let face_t = kept.first().map(|c| c.t).or(cap.as_ref().map(|c| c.t));
         let (edge, vertex) = match (edges_on, input.pixel) {
             (true, Some(pos)) => {
                 near_edges(app, &st, &bounds, &proj, input, pos, face_t, edge_px, &active_bodies, replaced, include_ghosted, wireframe, slack)
@@ -158,16 +155,16 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
         hits.push(match (all, cap, kept) {
             (true, cap, kept) => {
                 let mut row: Vec<Value> = Vec::new();
-                if let Some((t, body, sn)) = cap {
-                    row.push(cap_json(input, &body, t, input.o + input.d * t, sn));
+                if let Some(cap) = &cap {
+                    row.push(cap_json(input, cap));
                 }
                 row.extend(kept.iter().map(|c| hit_json(input, c, &occ, &comps, None, None)));
                 Value::Array(row)
             }
-            (false, Some((t, body, sn)), kept) => match kept.first() {
+            (false, Some(cap), kept) => match kept.first() {
                 // The cap is nearer than any kept face: the pick lands on the cut.
-                Some(c) if c.t < t => hit_json(input, c, &occ, &comps, edge.as_ref(), vertex.as_ref()),
-                _ => cap_json(input, &body, t, input.o + input.d * t, sn),
+                Some(c) if c.t < cap.t => hit_json(input, c, &occ, &comps, edge.as_ref(), vertex.as_ref()),
+                _ => cap_json(input, &cap),
             },
             (false, None, kept) => match kept.first() {
                 Some(c) => hit_json(input, c, &occ, &comps, edge.as_ref(), vertex.as_ref()),
@@ -283,32 +280,82 @@ fn barycentric(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> (f64, f64, f64) {
     (1.0 - v - w, v, w)
 }
 
-/// Whether the section plane crosses material at the ray (where a cut cap answers): the
-/// plane crossing lies inside a body, told by an odd number of mesh crossings before it.
-/// The walk re-raycasts each body past every crossing it finds, bounded per body.
+/// Whether the section keeps `p`: every plane keeps it (the section hides what lies on the
+/// positive side of any of them), within [`SECTION_EPS`].
+pub(crate) fn section_keeps(planes: &[SectionPlane], p: Vec3) -> bool {
+    planes.iter().all(|c| c.keeps(p, SECTION_EPS))
+}
+
+/// Where the ray `o + d·t` comes into what the section keeps (inside every plane) ahead of `o`:
+/// `t` and the index of the plane it comes in through, where its cut face is.
+pub(crate) fn section_entry(planes: &[SectionPlane], o: Vec3, d: Vec3) -> Option<(f64, usize)> {
+    let (mut lo, mut hi, mut through) = (f64::NEG_INFINITY, f64::INFINITY, None);
+    for (i, c) in planes.iter().enumerate() {
+        // n·(o + d·t) <= n·origin: t·dn <= s.
+        let (dn, s) = (c.normal.dot(d), c.normal.dot(c.origin - o));
+        if dn.abs() < 1e-12 {
+            if s < 0.0 {
+                return None;
+            }
+        } else if dn > 0.0 {
+            hi = hi.min(s / dn);
+        } else if s / dn > lo {
+            (lo, through) = (s / dn, Some(i));
+        }
+    }
+    let i = through?;
+    (lo > 0.0 && lo < hi).then_some((lo, i))
+}
+
+/// A cut cap under a pick: where, in which body, and the plane it is a cut face of.
+pub(crate) struct CapHit {
+    pub t: f64,
+    pub body: String,
+    pub plane: SectionPlane,
+}
+
+/// Whether the section's cut crosses material at the ray (where a cut cap answers): where the
+/// ray comes into what the section keeps lies inside a body, told by an odd number of mesh crossings
+/// before it. The walk re-raycasts each body past every crossing it finds, bounded per body.
 #[allow(clippy::too_many_arguments)]
 fn section_cap(
     app: &SolveApp,
     st: &solidcraft_engine::doc::ModelState,
     bounds: &[(String, solidcraft_engine::geom::Aabb3)],
     input: &Input,
-    so: Vec3,
-    sn: Vec3,
+    planes: &[SectionPlane],
     first_kept: Option<f64>,
     include_ghosted: bool,
     replaced: &[String],
     active_bodies: &Option<Vec<String>>,
-) -> Option<(f64, String, Vec3)> {
-    let den = sn.dot(input.d);
-    if den.abs() < 1e-12 {
+) -> Option<CapHit> {
+    let (t, i) = section_entry(planes, input.o, input.d)?;
+    if t >= first_kept.unwrap_or(f64::INFINITY) {
         return None;
     }
-    let t_cap = (sn.dot(so) - sn.dot(input.o)) / den;
-    if !(t_cap > 0.0) || t_cap >= first_kept.unwrap_or(f64::INFINITY) {
+    let body = body_cut_at(app, st, bounds, input.o, input.d, t, include_ghosted, replaced, active_bodies)?;
+    Some(CapHit { t, body, plane: *planes.get(i)? })
+}
+
+/// The section plane whose cut face lies under the viewport point `pos` (window points), nearer
+/// than any face the section keeps.
+pub(crate) fn section_plane_at(app: &SolveApp, pos: Pos2) -> Option<SectionPlane> {
+    let section = crate::viewport::section_planes(app);
+    if section.is_empty() {
         return None;
     }
-    let body = body_cut_at(app, st, bounds, input.o, input.d, t_cap, include_ghosted, replaced, active_bodies)?;
-    Some((t_cap, body, sn))
+    let proj = crate::viewport::projection(app, app.viewport.rect?);
+    let (o, d) = proj.ray(pos);
+    let raw = Value::Null;
+    let input = Input { raw: &raw, pixel: Some(pos), o, d };
+    let st = crate::open_meshing::shown_world(app);
+    let bounds = crate::viewport::body_bounds(app, &st);
+    let active_bodies = app.session.active_occurrence_path.as_ref().and_then(|q| app.session.occurrence_bodies(q, true).ok());
+    let replaced = app.preview.effective_replaced();
+    let mut cands = face_candidates(app, &st, &bounds, &input, &active_bodies, replaced, false);
+    cands.sort_by(|a, b| a.t.total_cmp(&b.t));
+    let first_kept = cands.iter().find(|c| section_keeps(&section, c.point)).map(|c| c.t);
+    section_cap(app, &st, &bounds, &input, &section, first_kept, false, replaced, &active_bodies).map(|c| c.plane)
 }
 
 /// The body the ray `o + d·t` is inside of at `t_cap` (where it crosses the section plane): an
@@ -526,8 +573,12 @@ fn hit_json(
     j
 }
 
-fn cap_json(input: &Input, body: &str, t: f64, point: Vec3, normal: Vec3) -> Value {
-    json!({ "pixel": input.raw, "body": body, "face": null, "section_cap": true, "point": v3(point), "normal": v3(normal), "depth": t })
+fn cap_json(input: &Input, cap: &CapHit) -> Value {
+    let point = input.o + input.d * cap.t;
+    json!({
+        "pixel": input.raw, "body": cap.body, "face": null, "section_cap": true, "section_plane": cap.plane.id,
+        "point": v3(point), "normal": v3(cap.plane.normal), "depth": cap.t,
+    })
 }
 
 fn edge_json(e: &EdgeHit) -> Value {

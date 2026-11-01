@@ -595,6 +595,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
     let edge = if op == "cut" { sc.color([c.removed[0], c.removed[1], c.removed[2], 255]) } else { sc.color(c.edge) };
     for a in after.bodies.iter().filter(|a| before.body(&a.name).is_none()) {
         let m = a.mesh();
+        let added_here = added.sheet(a.is_surface());
         for t in &m.triangles {
             for k in t {
                 let i = *k as usize;
@@ -603,7 +604,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
                         "cut" if !c.cut_tint => {}
                         "cut" => sc.xray_tri(p.to_f32(), n.to_f32(), removed),
                         "intersect" => sc.xray_tri(p.to_f32(), n.to_f32(), intersect),
-                        _ => sc.tri(p.to_f32(), n.to_f32(), added),
+                        _ => sc.tri(p.to_f32(), n.to_f32(), added_here),
                     }
                 }
             }
@@ -717,6 +718,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             _ => Vec::new(),
         };
         let kept = if old.is_some() { body_color } else { new_body };
+        let sheet = a.is_surface();
         for (t, f) in am.triangles.iter().zip(&am.tri_face) {
             let new = new_face.get(*f as usize).copied().unwrap_or(false);
             let col = if new && c.tint_new { added_color } else { kept };
@@ -724,7 +726,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             for k in t {
                 let i = *k as usize;
                 if let (Some(p), Some(n)) = (am.positions.get(i), am.normals.get(i)) {
-                    sc.tri(p.to_f32(), n.to_f32(), col);
+                    sc.tri(p.to_f32(), n.to_f32(), col.sheet(sheet));
                     if through {
                         sc.xray_tri(p.to_f32(), n.to_f32(), removed);
                     }

@@ -137,17 +137,23 @@ fn go_to(s: &mut Session, snap: Snapshot) -> Snapshot {
         active_sketch: s.active_sketch,
         pending_moves: s.pending_moves.clone(),
         visibility: s.visibility.clone(),
+        section: snap.section.as_ref().map(|_| s.section_state()),
     };
     let same = std::sync::Arc::ptr_eq(&s.doc, &snap.doc);
-    // Undoing a hide (or a show) leaves the document alone: the model needs no evaluating.
+    // Undoing a hide (or a show) leaves the document alone: the model needs no evaluating, and
+    // a section step needs nothing evaluated or drawn again.
     let display_only = same && s.visibility != snap.visibility;
+    let view_only = same && !display_only && snap.active_sketch == s.active_sketch && snap.pending_moves == s.pending_moves && snap.section.is_some();
+    if let Some(section) = snap.section {
+        s.set_section_state(section);
+    }
     s.doc = snap.doc;
     s.active_sketch = snap.active_sketch;
     s.pending_moves = snap.pending_moves;
     s.visibility = snap.visibility;
     s.selection.clear();
     // A new document is evaluated by `execute`.
-    if same {
+    if same && !view_only {
         if display_only {
             s.refresh_display();
         } else {

@@ -380,6 +380,21 @@ are kept, not deleted.
 - **For translators:** "history" is the undo history, not the timeline. French had three names
   for this marker while English did.
 
+### section plane
+
+A plane of a Section Analysis; the view hides what lies beyond any section plane.
+
+One section plane hides its normal's side, and the view keeps what every plane keeps: two square
+to each other keep a quarter, three an eighth. A section has at most six.
+
+- **In SolidCraft:** `inspect.section` (`plane`, `add`, `replace`, `remove`, `hide`, `show`, `folder`, `clear`); the
+  `section_plane` of a `view.pick` hit on a cut face; the viewport menu's Section View, Edit Section View
+  and Turn Off Section View; the Analysis folder's Section 1, Section 2 rows.
+- **Don't use:** cutting plane, clip plane, section view (for the plane).
+- **Elsewhere:** section plane, cutting plane, clipping plane.
+- **For translators:** a view-only cut that changes no geometry, not a Split Body or a Plane
+  feature.
+
 ### settings profile
 
 A named set of input and interface preferences that can be switched, exported and imported as

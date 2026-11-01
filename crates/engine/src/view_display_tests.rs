@@ -152,7 +152,7 @@ fn scene_sampler_uses_exact_active_occurrence_plane_and_preserves_other_scene_co
     s.execute("component.activate", &json!({"component":component,"occurrence":occurrence,"path":[occurrence]})).unwrap();
     s.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
     s.execute("sketch.circle.center", &json!({"center":[2,3],"radius":1})).unwrap();
-    s.section = Some((Vec3::new(0., 0., 3.), Vec3::Z));
+    s.section = vec![crate::SectionPlane { id: 1, origin: Vec3::new(0., 0., 3.), normal: Vec3::Z }];
     let cam = Camera::default();
     let old = scene(&s, &cam);
     let default = scene_with_sketch_sampler(&s, &cam, world_curve_parts);

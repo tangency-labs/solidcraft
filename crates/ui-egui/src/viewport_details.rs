@@ -182,8 +182,16 @@ pub(crate) fn edit_params(app: &SolveApp, effect: &StatusItem, id: &str, value: 
                 base = base.into_iter().zip(new_n).map(|(o, n)| o - n * projection).collect();
             }
             let flip = normal.iter().zip(n).map(|(a, b)| a * b).sum::<f64>() < 0.0;
-            Some(json!({"plane":{"origin":base,"normal":new_n},"offset":format!("{} mm",if id=="offset"{scalar(value)?}else{old_offset}),
-                "flip":if id=="flip"{check(value)?}else{flip},"hatch":if id=="hatch"{check(value)?}else{hatch}}))
+            // The plane at its offset along the normal shown, and the plane it moves of several:
+            // the one shown, the first on show.
+            let offset = if id == "offset" { scalar(value)? } else { old_offset };
+            let origin: Vec<f64> = base.iter().zip(new_n).map(|(o, n)| o + n * offset).collect();
+            let mut params = json!({"plane":{"origin":origin,"normal":new_n},
+                "flip":if id=="flip"{check(value)?}else{flip},"hatch":if id=="hatch"{check(value)?}else{hatch}});
+            if let Some(plane) = app.session.section.first() {
+                params["replace"] = json!(plane.id);
+            }
+            Some(params)
         }
         StatusSetting::Continuity { .. } => {
             let rows = app.session.continuity_details();

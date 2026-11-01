@@ -412,7 +412,7 @@ fn export_animation(app: &mut SolveApp, params: Value, name: &str) {
         }
         let mut sc = app.session.scratch();
         // Cut as the viewport is (a copy leaves the section out).
-        sc.section = app.session.section;
+        sc.section = app.session.section.clone();
         let made = sc.execute("motion.study", &params).and_then(|r| {
             sc.execute(
                 "motion.export_animation",

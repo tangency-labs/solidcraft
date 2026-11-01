@@ -332,14 +332,14 @@ fn every_scene_colour_comes_from_its_palette_and_appearances_stay() {
     s.execute("sketch.line", &json!({"points": [[0, -20], [30, -20]]})).unwrap();
     s.execute("sketch.finish", &json!({})).unwrap();
     s.selection = vec![Sel::Body { name: "Picked".into() }];
-    s.section = Some((Vec3::new(0., 0., 5.), Vec3::Z));
+    s.section = vec![crate::SectionPlane { id: 1, origin: Vec3::new(0., 0., 5.), normal: Vec3::Z }];
     let cam = home_camera(&s);
     let names: Vec<String> = s.world_state().bodies.iter().filter(|b| s.body_visible(&b.name)).map(|b| b.name.clone()).collect();
     let mesh = |sc: &Scene, name: &str| {
         names.iter().position(|n| n == name).and_then(|i| sc.meshes.get(i)).map(|m| (m.color, m.face_colors.clone())).unwrap()
     };
 
-    let marked = scene_with_palette(&s, &cam, s.section, world_curve_parts, &MARK);
+    let marked = scene_with_palette(&s, &cam, &s.section, world_curve_parts, &MARK);
     assert_eq!((marked.background, marked.cap), (Some(MARK.background), Some(MARK.cap)));
     let allowed = [
         MARK.grid,
@@ -371,11 +371,11 @@ fn every_scene_colour_comes_from_its_palette_and_appearances_stay() {
     assert!(!faces.is_empty() && faces.iter().all(|(_, c)| *c == Rgb(0, 255, 0)), "face colours are the design's: {faces:?}");
 
     // The default palette is the scene everyone else gets, line for line.
-    let default = scene_with_palette(&s, &cam, s.section, world_curve_parts, &Palette::DEFAULT);
+    let default = scene_with_palette(&s, &cam, &s.section, world_curve_parts, &Palette::DEFAULT);
     let plain_scene = scene(&s, &cam);
     assert_eq!(
-        (default.background, default.cap, default.clip, default.radius),
-        (plain_scene.background, plain_scene.cap, plain_scene.clip, plain_scene.radius)
+        (default.background, default.cap, &default.clip, default.radius),
+        (plain_scene.background, plain_scene.cap, &plain_scene.clip, plain_scene.radius)
     );
     assert_eq!((default.lines.len(), default.grid.len()), (plain_scene.lines.len(), plain_scene.grid.len()));
     for (a, b) in default.lines.iter().zip(&plain_scene.lines).chain(default.grid.iter().zip(&plain_scene.grid)) {

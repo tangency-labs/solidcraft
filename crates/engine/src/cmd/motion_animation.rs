@@ -144,7 +144,7 @@ pub(super) fn export_with(s: &Session, p: &Value, renderer: Option<&Renderer>) -
                 t.pending_moves = exploded_at(moves, if *back { 1.0 - (2.0 * u - 1.0).abs() } else { u });
             }
         }
-        let scene = crate::view::scene_with_guides(&t, &cam, s.section, guides);
+        let scene = crate::view::scene_with_guides(&t, &cam, &s.section, guides);
         let picture = capture::rgba_with(Some(renderer), &scene, &cam, width, height).map_err(|e| bad(cmd, e))?;
         drawn_by = picture.renderer;
         if gif {

@@ -722,7 +722,7 @@ fn collect_component_keys(s: &Session, prefix: &str, component: u64, root_extras
         if !s.doc.assembly.joints.is_empty() {
             keys.open.insert("c0/joints".into());
         }
-        if s.section.is_some() {
+        if !s.section.is_empty() || !s.section_hidden.is_empty() {
             keys.open.insert("analysis".into());
         }
     }

@@ -1577,7 +1577,8 @@ fn every_context_target_has_identified_icon_rows_including_submenus() {
         Target::NamedViews,
         Target::NamedView { name: "Top".into() },
         Target::Canvas { id: 1 },
-        Target::Section,
+        Target::Section { plane: 1 },
+        Target::Analysis,
         Target::Folder { component: 0, folder: "bodies".into(), scope: "c0".into() },
     ] {
         let rows = context_menu::items(&app, &target);

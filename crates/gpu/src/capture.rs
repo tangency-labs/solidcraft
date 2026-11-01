@@ -180,17 +180,30 @@ impl Capturer {
     /// [`Capturer::rgba`] with `highlight` drawn as the viewport draws its highlight scene
     /// (selection and hover feedback), over the model scene.
     pub fn rgba_highlighted(&self, scene: &Scene, highlight: Option<GpuScene>, cam: &Camera, width: u32, height: u32) -> Result<Vec<u8>> {
-        self.draw(scene, highlight, cam, width, height).map(|(rgba, _)| rgba)
+        self.draw(scene, highlight, cam, [width, height], 0.0).map(|(rgba, _)| rgba)
+    }
+
+    /// [`Capturer::rgba`] with ambient occlusion of `radius` (world units), as the viewport
+    /// shades with it on.
+    pub fn rgba_occluded(&self, scene: &Scene, cam: &Camera, width: u32, height: u32, radius: f32) -> Result<Vec<u8>> {
+        self.draw(scene, None, cam, [width, height], radius).map(|(rgba, _)| rgba)
     }
 
     /// [`Capturer::rgba`] and what the picture drew ([`DrawStats`]). Both come from the same
     /// turn on the device, so another thread's picture can't put its counts in their place.
     pub fn rgba_with_stats(&self, scene: &Scene, cam: &Camera, width: u32, height: u32) -> Result<(Vec<u8>, DrawStats)> {
-        self.draw(scene, None, cam, width, height)
+        self.draw(scene, None, cam, [width, height], 0.0)
     }
 
     /// The picture and what it drew, both read while this call has the device to itself.
-    fn draw(&self, scene: &Scene, highlight: Option<GpuScene>, cam: &Camera, width: u32, height: u32) -> Result<(Vec<u8>, DrawStats)> {
+    fn draw(
+        &self,
+        scene: &Scene,
+        highlight: Option<GpuScene>,
+        cam: &Camera,
+        [width, height]: [u32; 2],
+        ao_radius: f32,
+    ) -> Result<(Vec<u8>, DrawStats)> {
         if !(1..=self.max_side).contains(&width) || !(1..=self.max_side).contains(&height) {
             return Err(GpuError::Render(format!("a picture is 1 to {} pixels a side, not {width} × {height}", self.max_side)));
         }
@@ -209,6 +222,7 @@ impl Capturer {
             _ => None,
         };
         let mut frame = frame(scene, cam, [width, height], state.key, access);
+        frame.ao_radius = ao_radius;
         // Always a highlight scene of the picture's own, empty without one: the renderer keeps
         // its last highlight scene while the slot is empty (as the viewport does until the next
         // is built), so the previous picture's highlight would show in this one.
@@ -398,7 +412,8 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
         view_proj: cam.view_proj(f64::from(width) / f64::from(height.max(1)), scene.radius.max(1.0)).to_f32(),
         back: cam.back().to_f32(),
         size_px: [width as f32, height as f32],
-        clip: scene.clip.map_or([0.0; 4], |(n, d)| [n.x as f32, n.y as f32, n.z as f32, d as f32]),
+        clip: crate::view::clip_planes(&scene.clip),
+        clip_hatch: crate::view::clip_hatches(&(0..scene.clip.len()).map(|k| scene.clip_hatch.get(k).copied().unwrap_or(k)).collect::<Vec<_>>()),
         cap: [f32::from(cap.0) / 255.0, f32::from(cap.1) / 255.0, f32::from(cap.2) / 255.0, if scene.plain_cap { 0.0 } else { 1.0 }],
         images: Vec::new(),
         clouds: Vec::new(),
@@ -429,7 +444,7 @@ pub fn scene_geometry(scene: &Scene) -> GpuScene {
         let faces: HashMap<u32, Rgb> = m.face_colors.iter().copied().collect();
         let mesh = &m.mesh;
         for (ti, t) in mesh.triangles.iter().enumerate() {
-            let col = sc.color(c4(mesh.tri_face.get(ti).and_then(|f| faces.get(f)).copied().unwrap_or(m.color)));
+            let col = sc.color(c4(mesh.tri_face.get(ti).and_then(|f| faces.get(f)).copied().unwrap_or(m.color))).sheet(m.open);
             let [Some(a), Some(b), Some(c)] = t.map(|k| mesh.positions.get(k as usize).copied()) else { continue };
             let flat = (b - a).cross(c - a).normalized().unwrap_or(Vec3::Z);
             for (k, p) in t.iter().zip([a, b, c]) {
@@ -589,7 +604,7 @@ mod tests {
     /// headless picture of a translucent target shows the tool inside it.
     #[test]
     fn a_see_through_body_is_glass_at_its_own_alpha_and_a_solid_one_is_not() {
-        let mesh = |opacity: f32| SceneMesh { mesh: sheet(), color: Rgb(200, 30, 30), face_colors: Vec::new(), opacity };
+        let mesh = |opacity: f32| SceneMesh { opacity, ..SceneMesh::solid(sheet(), Rgb(200, 30, 30)) };
         let geometry = |opacity: f32| scene_geometry(&Scene { meshes: vec![mesh(opacity)], ..Default::default() });
 
         let solid = geometry(1.0);
@@ -613,7 +628,7 @@ mod tests {
     /// painting one face does not make the body solid again.
     #[test]
     fn a_painted_face_keeps_its_bodys_opacity() {
-        let mesh = SceneMesh { mesh: sheet(), color: Rgb(200, 30, 30), face_colors: vec![(0, Rgb(0, 255, 0))], opacity: 0.5 };
+        let mesh = SceneMesh { face_colors: vec![(0, Rgb(0, 255, 0))], opacity: 0.5, ..SceneMesh::solid(sheet(), Rgb(200, 30, 30)) };
         let sc = scene_geometry(&Scene { meshes: vec![mesh], ..Default::default() });
         assert_eq!(sc.tris.len(), 0);
         assert_eq!(color(&sc, &sc.glass), Some([0, 255, 0, 128]), "the face's own colour at the body's alpha");
