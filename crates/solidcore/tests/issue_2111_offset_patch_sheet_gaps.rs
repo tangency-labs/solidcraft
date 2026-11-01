@@ -8,13 +8,21 @@
 //! (edge/vertex gap over half the vertex tolerance, `ValidateAndUpdateTolerances`)
 //! at d = 0.75, -0.75 and 1.0, none at +-1.5, and at d = 0.5 two edges failing
 //! `ValidateGeometry`, so `ValidatePointers` fails and `AssertValid` is skipped.
-//! This pins that default (upstream) behaviour; an opt-in tolerance fix is to flip it
-//! under its flag.
+//! This pins that default (upstream) behaviour.
+//!
+//! The offset builds its faces' edges and vertices afresh at the B-rep's zone tolerance
+//! (2.08e-5), not the sheet's own edge (4.15e-5) and vertex (8.31e-5) tolerances, so the
+//! gaps (inside the sheet's own zone) fail against half the B-rep's. With the opt-in
+//! `offset_edges_keep_source_tolerance` (WR-671) the offset edges and vertices keep the
+//! original's, and the offsets by +-0.75, 1.0 and +-1.5 check clean with the area of the
+//! default's. At d = 0.5 the offset's vertex/edge gaps (6.0e-5 to 6.8e-5) exceed even the
+//! sheet's own tolerances: the flag clears `ValidateGeometry` there but the gaps remain.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)] // test helpers
 
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
+use solidcore::mass::integrator::properties::brep_area;
 use solidcore::offset::offset_executive::p2::{offset_brep_simple, OffsetOptions};
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p3::brep_copy;
@@ -31,8 +39,16 @@ const SHEET: &str = concat!(
 
 /// The sheet read from its file, copied, offset by `d` and checked at `Level2`.
 fn offset_check(d: f64) -> BrepCheck {
+    offset_checked(d, false).0
+}
+
+/// The sheet read from its file, copied, offset by `d` (with
+/// `offset_edges_keep_source_tolerance` set to `keep`), checked at `Level2`, and the
+/// offset's area.
+fn offset_checked(d: f64, keep: bool) -> (BrepCheck, f64) {
     let bytes = std::fs::read(SHEET).unwrap();
     let mut k = Kernel::default();
+    k.fixes.offset_edges_keep_source_tolerance = keep;
     let mut read = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
@@ -61,7 +77,9 @@ fn offset_check(d: f64) -> BrepCheck {
     )
     .unwrap();
     r.refresh_cached_topology();
-    check_brep(&mut k, &mut r, CheckLevel::Level2).expect("check_brep answers")
+    let check = check_brep(&mut k, &mut r, CheckLevel::Level2).expect("check_brep answers");
+    let area = brep_area(&k, &mut r, 1e-8).unwrap();
+    (check, area)
 }
 
 /// The failure lines that are edge/vertex Bad Gaps of the tolerance pass.
@@ -102,4 +120,33 @@ fn offset_by_a_half_fails_validate_pointers() {
     let c = offset_check(0.5);
     assert_eq!(c.assert_valid, None, "{:?}", c.lines());
     assert_eq!(c.failures().count(), 2, "{:?}", c.lines());
+}
+
+/// WR-671: with the offset edges and vertices keeping the sheet's own tolerances, the
+/// offsets check clean (the default fails at +-0.75 and 1.0, above), and the tolerance
+/// carry-over moves the offset by no more than a gap: its area is the default's.
+#[test]
+fn kept_source_tolerances_check_clean() {
+    for d in [0.75, -0.75, 1.0, 1.5, -1.5] {
+        let (c, area) = offset_checked(d, true);
+        assert_eq!(c.assert_valid, Some(true), "d = {d}: {:?}", c.lines());
+        assert_eq!(c.failures().count(), 0, "d = {d}: {:?}", c.lines());
+        let (_, default_area) = offset_checked(d, false);
+        println!("d = {d}: area {area} default {default_area}");
+        assert!(
+            (area - default_area).abs() <= 1e-6 * default_area,
+            "d = {d}: area {area}, default {default_area}"
+        );
+    }
+}
+
+/// WR-671 at d = 0.5: the kept tolerances clear the two `ValidateGeometry` failures
+/// (so `AssertValid` runs), but the offset's own vertex/edge gaps there, 6.0e-5 to
+/// 6.8e-5, exceed half the sheet's vertex tolerance (4.15e-5) and are still reported.
+#[test]
+fn kept_source_tolerances_at_a_half_leave_the_larger_gaps() {
+    let (c, _) = offset_checked(0.5, true);
+    assert_eq!(c.assert_valid, Some(true), "{:?}", c.lines());
+    assert_eq!(bad_gaps(&c), 4, "{:?}", c.lines());
+    assert_eq!(c.failures().count(), 5, "{:?}", c.lines());
 }

@@ -2636,6 +2636,18 @@ impl OffsetExecutive {
                                 offset_key_of,
                             )
                         })?;
+                        // Not upstream (WR-671, tangency-labs/solidcore#2111), opt-in
+                        // `Kernel::fixes.offset_edges_keep_source_tolerance`: the offset
+                        // edge and its vertices, made at the B-rep's zone tolerance, keep
+                        // the matched original edge's tolerance and its vertices' largest.
+                        if kernel.kernel().fixes.offset_edges_keep_source_tolerance {
+                            keep_source_tolerances(
+                                original,
+                                original_edge,
+                                required(self.offset_brep.as_mut())?,
+                                offset_edge,
+                            )?;
+                        }
                         if let Some(slot) = original_uses.get_mut(slot) {
                             *slot = None;
                         }
@@ -2680,6 +2692,41 @@ impl OffsetExecutive {
             )
         })?
     }
+}
+
+/// (Not upstream, WR-671, `Kernel::fixes.offset_edges_keep_source_tolerance`.) Raises
+/// `offset_edge` of `result` to the tolerance of the original edge it was matched to,
+/// and both its vertices to the larger of the original edge's vertices' tolerances
+/// (matched edge uses may run in opposite directions, so the ends are not paired).
+/// Tolerances only grow (`SetTolerance(.., bUpdateOnlyIfLarger = TRUE)`).
+fn keep_source_tolerances(
+    original: &Brep,
+    original_edge: EdgeId,
+    result: &mut Brep,
+    offset_edge: EdgeId,
+) -> Result<()> {
+    let edge_tolerance = edge::tolerance(original, original_edge)?;
+    let mut vertex_tolerance = 0.0_f64;
+    for v in [
+        edge::start_vertex(original, original_edge)?,
+        edge::end_vertex(original, original_edge)?,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        vertex_tolerance = vertex_tolerance.max(vertex::tolerance(original, v)?);
+    }
+    edge::set_tolerance(result, offset_edge, edge_tolerance, true, true)?;
+    for v in [
+        edge::start_vertex(result, offset_edge)?,
+        edge::end_vertex(result, offset_edge)?,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        vertex::set_tolerance(result, v, vertex_tolerance, true, true)?;
+    }
+    Ok(())
 }
 
 /// The notification environment of offset-side entities: the caller's records,
