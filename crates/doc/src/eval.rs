@@ -8604,7 +8604,10 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
         return st.clone();
     }
     let mut placed_now = PlacedBodies::default();
-    let comp_of_feature = |id: u64| doc.feature(id).map(|f| f.component).unwrap_or(0);
+    // Looked up once: every sketch, construction and tap asked the timeline, and every placement
+    // went through all bodies, each time searching (a large assembly paid this every command).
+    let feature_components: std::collections::HashMap<u64, u64> = doc.features.iter().rev().map(|f| (f.id, f.component)).collect();
+    let comp_of_feature = |id: u64| feature_components.get(&id).copied().unwrap_or(0);
     let first_path = |comp: u64| -> Vec<u64> {
         let mut path = Vec::new();
         let mut c = comp;
@@ -8627,7 +8630,24 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
     let mut jobs = Vec::new();
     let owners = doc.model_body_components(st);
     let names = crate::WorldNames::new(doc, st);
-    let bodies_of = |comp: u64| st.bodies.iter().zip(&owners).filter(move |(_, owner)| **owner == comp).map(|(b, _)| b);
+    let mut by_component: std::collections::HashMap<u64, Vec<&ModelBody>> = std::collections::HashMap::new();
+    for (b, owner) in st.bodies.iter().zip(&owners) {
+        by_component.entry(*owner).or_default().push(b);
+    }
+    let bodies_of = |comp: u64| by_component.get(&comp).into_iter().flatten().copied();
+    // Each tap's component and the offset of the body it is on (the first body of that name).
+    let mut first_body: std::collections::HashMap<&str, (&ModelBody, u64)> = std::collections::HashMap::new();
+    for (b, owner) in st.bodies.iter().zip(&owners).rev() {
+        first_body.insert(b.name.as_str(), (b, *owner));
+    }
+    let tap_frames: Vec<(u64, Option<&crate::Mat>)> = st
+        .threads
+        .iter()
+        .map(|t| match first_body.get(t.body.as_str()) {
+            Some((body, owner)) => (*owner, doc.model_body_offset(body)),
+            None => (comp_of_feature(t.feature), None),
+        })
+        .collect();
     for (comp, path, m) in &placements {
         for b in bodies_of(*comp) {
             let bm = body_matrix(b, m);
@@ -8707,14 +8727,10 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
             }
         }
         // Unlike editable sketch guides, cosmetic surfaces belong to every occurrence.
-        for t in st
-            .threads
-            .iter()
-            .filter(|t| st.body(&t.body).map(|body| doc.model_body_component(body)).unwrap_or_else(|| comp_of_feature(t.feature)) == comp)
-        {
+        for (t, (_, offset)) in st.threads.iter().zip(&tap_frames).filter(|(_, (owner, _))| *owner == comp) {
             let mut t2 = t.clone();
             t2.body = names.name(&t.body, comp, &path);
-            let frame = st.body(&t.body).and_then(|body| doc.model_body_offset(body)).map(|offset| crate::mat_mul(&m, offset)).unwrap_or(m);
+            let frame = offset.map(|offset| crate::mat_mul(&m, offset)).unwrap_or(m);
             t2.axis_point = crate::apply_point(&frame, t.axis_point);
             t2.axis = crate::apply_vector(&frame, *t.axis).unit().unwrap_or(t.axis);
             out.threads.push(t2);
@@ -8899,7 +8915,7 @@ mod chain_tests {
 
 #[cfg(test)]
 #[path = "eval_cost_tests.rs"]
-mod cost_tests;
+pub(crate) mod cost_tests;
 
 #[cfg(test)]
 #[path = "eval_whole_face_tests.rs"]

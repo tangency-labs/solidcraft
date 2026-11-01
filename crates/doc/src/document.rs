@@ -3492,6 +3492,8 @@ impl Document {
     }
 
     pub fn feature(&self, id: u64) -> Option<&Feature> {
+        #[cfg(test)]
+        crate::eval::cost_tests::count_feature_search();
         self.features.iter().find(|f| f.id == id)
     }
     pub fn feature_mut(&mut self, id: u64) -> Option<&mut Feature> {
