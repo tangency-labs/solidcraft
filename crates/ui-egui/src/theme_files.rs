@@ -2342,7 +2342,7 @@ mod tests {
         assert_eq!(values["contrast"], OptionValue::Choice("soft".into()));
         assert_eq!(values["edge_finish"], OptionValue::Choice("etched".into()));
         assert_eq!(values["accent"], OptionValue::Choice("slate".into()));
-        assert_eq!(values["foreground_colours"], OptionValue::Choice("muted".into()));
+        assert_eq!(values["foreground_colours"], OptionValue::Choice("vibrant".into()));
         assert_eq!(
             ordered_options(file).iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
             ["opacity", "blur", "tab_colours", "tab_fade_ms", "contrast", "edge_finish", "accent", "foreground_colours"]
@@ -2407,7 +2407,11 @@ mod tests {
                             assert_eq!(base.agent_busy, ordinary.agent_busy);
                             assert_eq!(base.agent_ok, ordinary.agent_ok);
                             assert_eq!((base.axis_x, base.axis_y, base.axis_z), (ordinary.axis_x, ordinary.axis_y, ordinary.axis_z));
-                            assert_eq!(export_icon_palette(base.icon_palette)["solid"][2], expected);
+                            assert_eq!(
+                                export_icon_palette(base.icon_palette)["solid"][2],
+                                "#4da7ff",
+                                "foreground glyphs retain the default Vibrant palette"
+                            );
                             if contrast == "defined" {
                                 assert_ne!(base.field, ordinary.field, "defined contrast separates recessed fields");
                             }
