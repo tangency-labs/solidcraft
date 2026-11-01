@@ -7709,6 +7709,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             if parts.len() < 2 {
                 return Err(DocError::Invalid("the tool does not split the body".into()));
             }
+            let parts = split_side_lumps(&mb.body, parts);
             let mut it = parts.into_iter();
             if let (Some(first), Some(slot)) = (it.next(), st.bodies.get_mut(i)) {
                 *slot = ModelBody::traced_new(mb.name.clone(), first, mb.feature);
@@ -9070,6 +9071,7 @@ mod coplanar_growth_tests {
 /// Each part's cut face is named `section` after the half-space box that cut it, so it takes an
 /// attachment that follows the plane (#565); the box's other faces never reach the part.
 fn split_by_plane_traced(input: &Traced, plane: &Plane) -> Result<Vec<Traced>> {
+    let plane = &square_to_axes(plane);
     let mut parts = Vec::new();
     for positive in [true, false] {
         let (part, tool) = kernel::half_space(&input.body, plane, positive)?;
@@ -9081,6 +9083,47 @@ fn split_by_plane_traced(input: &Traced, plane: &Plane) -> Result<Vec<Traced>> {
         parts.push(Traced::step(part, &[input, &tool]));
     }
     Ok(parts)
+}
+
+/// `plane` with its directions' parts below rounding (1e-12) along a world axis dropped. A flat
+/// face picked in the viewport gives its plane tilted by rounding, about 2e-15: split by that,
+/// the face lying in the plane no longer meets the cut exactly, and the boolean nudges its tool
+/// and leaves a slab a few µm thick under the face (#6762). A plane with nothing to drop stays
+/// as it is.
+fn square_to_axes(plane: &Plane) -> Plane {
+    let drop = |v: Vec3| {
+        let c = |x: f64| if x.abs() < 1e-12 { 0.0 } else { x };
+        Vec3::new(c(v.x), c(v.y), c(v.z)).normalized().unwrap_or(v)
+    };
+    let (x, y) = (drop(plane.x), drop(plane.y));
+    if x.cross(y).normalized().is_none() {
+        return *plane;
+    }
+    Plane { origin: plane.origin, x, y }
+}
+
+/// The pieces of a split, a side in pieces that do not touch made one body each (#6762): a cap's
+/// skirt and tube above its plate are two pieces, not one. Only a side in more pieces than the
+/// body had is taken apart, so the pieces of a join stay together as a cut keeps them. The
+/// first piece of each side keeps that side's place and the further pieces come after them all,
+/// so the names a split gave its sides before stay on the same pieces. A side whose pieces
+/// cannot be worked out stays one body.
+fn split_side_lumps(whole: &Body, parts: Vec<Traced>) -> Vec<Traced> {
+    let had = whole.lumps().map_or(1, |l| l.len());
+    let (mut sides, mut further) = (Vec::with_capacity(parts.len()), Vec::new());
+    for part in parts {
+        let pieces = part.body.lumps().unwrap_or_default();
+        if pieces.len() <= had {
+            sides.push(part);
+            continue;
+        }
+        let lineages = crate::lineage::Lineage::lumps(&part.body, part.lineage.as_ref(), &pieces);
+        let mut it = pieces.into_iter().zip(lineages).map(|(body, lineage)| Traced { body, lineage });
+        sides.extend(it.next());
+        further.extend(it);
+    }
+    sides.extend(further);
+    sides
 }
 
 /// The plane a straight sketch line sweeps along its sketch's normal: through the line, its x
