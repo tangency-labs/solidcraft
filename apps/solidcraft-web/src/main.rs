@@ -986,8 +986,10 @@ mod web {
                             // The empty design takes Units of new designs (#1205). The sample
                             // part is built in millimetres and is left that way.
                             solidcraft_ui_egui::prefs::apply_new_design(&mut app);
-                            let rev = app.session.revision;
-                            app.home.show(rev);
+                            if app.preferences.home_on_launch(false, false, false) {
+                                let rev = app.session.revision;
+                                app.home.show(rev);
+                            }
                         }
                         let api = Api::install(sender, cc.egui_ctx.clone()).map_err(|e| format!("SolidCraft browser API: {e:?}"))?;
                         let font_language = app.preferences.language.clone();

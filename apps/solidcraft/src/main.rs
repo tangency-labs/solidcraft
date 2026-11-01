@@ -472,6 +472,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
     let open_parent = parent.clone();
     let program_parent = parent.clone();
     let file_parent = parent.clone();
+    let folder_parent = parent.clone();
     let (open_folder, file_folder, save_folder) = (folder.clone(), folder.clone(), folder.clone());
     Services {
         pick_open: Some(Box::new(move |first: &[&str]| {
@@ -508,6 +509,10 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             let future = file_folder.start(file_parent.clone()).add_filter(label, &all).add_filter("All files", &["*"]).pick_file();
             let folder = file_folder.clone();
             Box::pin(async move { folder.answer(future.await) })
+        })),
+        pick_folder: Some(Box::new(move || {
+            let future = folder_parent.clone().set_title("Choose a folder").pick_folder();
+            Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
         })),
         pick_program: Some(Box::new(move || {
             let dialog = program_parent.clone().set_title("Choose your slicer");
@@ -1200,7 +1205,7 @@ fn main() -> eframe::Result {
             }
             // No design given: the start page (not when driven over the control channel, whose
             // clients expect the design view; `ui.home` shows it there).
-            if files.is_empty() && !sample && control_port.is_none() {
+            if app.preferences.home_on_launch(!files.is_empty(), sample, control_port.is_some()) {
                 let rev = app.session.revision;
                 app.home.show(rev);
             }

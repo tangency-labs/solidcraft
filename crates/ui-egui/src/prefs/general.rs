@@ -6,6 +6,25 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let labels = t.space_24 * 6.0 + t.space_6;
     ui_kit::settings_heading_with_tag(ui, app.tr("prefs.general"), app.tr("prefs.general_note"), Some(crate::settings_profiles::tag));
     crate::settings_profiles::section(app, ui, labels);
+    ui_kit::settings_section(ui, "startup", app.tr("ui.on_startup"), |ui| {
+        ui_kit::settings_form(ui, labels, |ui| {
+            ui_kit::row(ui, app.tr("ui.on_startup"), |ui| {
+                let selected = app.tr(if app.preferences.show_home_on_startup { "ui.homeView" } else { "ui.new_design" }).to_string();
+                let choice = ui_kit::dropdown_menu(ui, "pref_startup", &selected, |ui| {
+                    for (home, key) in [(true, "ui.homeView"), (false, "ui.new_design")] {
+                        let response = ui_kit::list_picker(ui, key, crate::i18n::tr(key), app.preferences.show_home_on_startup == home);
+                        crate::scenario::publish_rect(if home { "prefs:startup_home" } else { "prefs:startup_design" }, response.rect);
+                        if response.clicked() {
+                            app.preferences.show_home_on_startup = home;
+                            ui.close();
+                        }
+                    }
+                });
+                crate::scenario::publish_rect("prefs:startup", choice.rect);
+            });
+            ui_kit::text(ui, app.tr("ui.on_startup_note"), ui_kit::Text::Note("startup"));
+        });
+    });
     ui_kit::settings_section(ui, "language", app.tr("ui.language"), |ui| {
         ui_kit::settings_form(ui, labels, |ui| {
             ui_kit::row(ui, app.tr("prefs.interface_language"), |ui| {

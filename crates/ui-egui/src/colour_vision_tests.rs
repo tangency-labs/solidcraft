@@ -409,6 +409,7 @@ const SHADED: [&str; 2] = ["analysis.draft", "analysis.access"];
 /// Tokens no colour vision mode needs to keep apart, and why. A new token fails
 /// `every_token_is_measured_or_carries_no_meaning` until it is in a group above or here.
 const NO_MEANING: &[(&str, &str)] = &[
+    ("library_highlights", "user-assigned named labels, not application status; menu/tooltip name each colour and library tests guard card contrast"),
     ("nav_hover", "neutral hover surface; placement and pointer feedback identify the control"),
     ("nav_press", "neutral pressed/open surface; interaction and menu presence identify the state"),
     ("nav_dim", "neutral secondary ink; the Later label identifies the unavailable option"),

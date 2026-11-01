@@ -523,11 +523,22 @@ pub fn cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, in
 
 /// Stable-ID cell/name editor with a caller-supplied character cap. Tokens: cell_editor tokens.
 pub(crate) fn bounded_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, limit: usize) -> Response {
-    cell_editor_frame(ui, id, value, hint, invalid, limit, true)
+    cell_editor_frame(ui, id, value, hint, invalid, limit, EditorSurface::Form)
 }
 
-fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, limit: usize, frame: bool) -> Response {
-    let t = Tokens::get();
+enum EditorSurface {
+    Form,
+    Frameless,
+    Shell,
+}
+
+fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, limit: usize, surface: EditorSurface) -> Response {
+    let mut t = Tokens::get();
+    let frame = !matches!(surface, EditorSurface::Frameless);
+    if matches!(surface, EditorSurface::Shell) {
+        t.control_fill = t.field;
+        t.form_ink = t.text;
+    }
     let editor = text_input(egui::TextEdit::singleline(value))
         .char_limit(limit)
         .id(id)
@@ -672,6 +683,22 @@ pub(crate) fn search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: 
     crate::icons::paint_ink(ui.painter(), icon, "zoom", t.form_dim);
     super::layout::publish_geometry(ui, &response);
     response
+}
+
+/// Search on application chrome uses the shell palette, including custom themes.
+pub(crate) fn shell_search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -> Response {
+    let t = Tokens::get();
+    ui.scope(|ui| {
+        let visuals = ui.visuals_mut();
+        visuals.weak_text_color = Some(t.text_dim);
+        visuals.selection.bg_fill = t.accent_soft;
+        visuals.selection.stroke = egui::Stroke::new(1.0, t.accent);
+        for state in [&mut visuals.widgets.inactive, &mut visuals.widgets.hovered, &mut visuals.widgets.active] {
+            state.bg_stroke = egui::Stroke::new(1.0, t.border);
+        }
+        cell_editor_frame(ui, id, value, hint, false, usize::MAX, EditorSurface::Shell)
+    })
+    .inner
 }
 
 /// Compact icon action opening the shared searchable menu.
@@ -1160,7 +1187,7 @@ pub(crate) fn library_cell(ui: &mut Ui, id: egui::Id, value: &mut String, hint: 
     let response = ui
         .scope_builder(egui::UiBuilder::new().max_rect(field).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
             ui.set_clip_rect(ui.clip_rect().intersect(field));
-            cell_editor_frame(ui, id, value, hint, false, usize::MAX, false)
+            cell_editor_frame(ui, id, value, hint, false, usize::MAX, EditorSurface::Frameless)
         })
         .inner;
     let button = egui::Rect::from_min_max(egui::pos2(split, rect.top()), rect.max);

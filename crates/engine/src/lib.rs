@@ -2135,6 +2135,11 @@ fn own_values(sk: &solidcraft_sketch::Sketch) -> std::collections::BTreeMap<Stri
     values
 }
 
+/// Whether a saved file is the current design or one of its linked components.
+pub fn session_uses_file(session: &Session, path: &str) -> bool {
+    cmd::file_library_uses_file(session, path)
+}
+
 /// Capabilities are fixed at registration; availability is live device/host state.
 fn image_host_availability(host: Option<&render::job::ImageHost>, expected: &render::ExecutorId) -> render::Availability {
     match host.map(render::job::ImageHost::descriptor) {

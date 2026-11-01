@@ -889,6 +889,8 @@ pub struct IconColors {
 /// other one's colours (#4146): a new colour drawn in the view goes in both.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tokens {
+    /// User-assigned document labels: red, orange, green, blue, purple.
+    pub library_highlights: [Color32; 5],
     /// Navigation chrome from the approved Navbar boards.
     pub nav_hover: Color32,
     pub nav_press: Color32,

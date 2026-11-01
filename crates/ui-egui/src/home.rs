@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use egui::vec2;
+use egui::{Color32, vec2};
 use solidcraft_engine::Session;
 use solidcraft_engine::render::{Camera, StandardView};
 
@@ -40,6 +40,7 @@ pub struct HomeState {
     /// them back. Opening or saving a design clears it from here.
     pub forgotten: std::collections::BTreeSet<String>,
     thumbs: HashMap<String, Option<egui::TextureHandle>>,
+    library_stamps: HashMap<String, crate::library::FileStamp>,
     /// Keys whose picture could not be made (an empty or unreadable design). Terminal: the card
     /// shows a placeholder instead of spinning forever. Cleared when the design is opened or saved
     /// (see `add_recent`), which asks for the picture again.
@@ -154,6 +155,11 @@ fn cache_path(key: &str) -> Option<std::path::PathBuf> {
     key.hash(&mut h);
     meta.len().hash(&mut h);
     meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.hash(&mut h);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        (meta.ctime(), meta.ctime_nsec()).hash(&mut h);
+    }
     let root = std::env::var_os("LOCALAPPDATA")
         .or_else(|| std::env::var_os("XDG_CACHE_HOME"))
         .map(std::path::PathBuf::from)
@@ -523,6 +529,67 @@ fn want(h: &mut HomeState, key: &str) {
         h.queued.push(key.to_string());
         h.thumbs.insert(key.to_string(), None);
     }
+}
+
+/// Draw document-browser thumbnails with a neutral image tint.
+pub(crate) fn paint_document_thumbnail(painter: &egui::Painter, texture: &egui::TextureHandle, rect: egui::Rect, dim: bool) {
+    let tint = if dim { Color32::from_white_alpha(90) } else { Color32::WHITE };
+    painter.image(texture.id(), rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), tint);
+}
+
+/// Invalidate changed paths using metadata already read by the folder worker.
+pub(crate) fn refresh_document_thumbnails(h: &mut HomeState, identities: &std::collections::BTreeMap<std::path::PathBuf, crate::library::FileStamp>) {
+    let changed: Vec<_> = identities
+        .iter()
+        .filter_map(|(path, stamp)| {
+            let key = path.to_str()?;
+            (h.library_stamps.get(key) != Some(stamp) && h.thumbs.contains_key(key)).then(|| key.to_owned())
+        })
+        .collect();
+    if !changed.is_empty() {
+        // Dropped receivers reject late results from before this scan. Requeue interrupted
+        // placeholders on demand, while retaining ready pictures for unchanged files.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            h.rx = None;
+            h.remembering = None;
+        }
+        h.queued.clear();
+        h.thumbs.retain(|key, image| image.is_some() || h.failed.contains(key) || key.starts_with("sample:"));
+        for key in changed {
+            h.thumbs.remove(&key);
+            h.failed.remove(&key);
+        }
+    }
+    h.library_stamps.retain(|key, _| h.thumbs.contains_key(key));
+    for (path, stamp) in identities {
+        if let Some(key) = path.to_str() {
+            h.library_stamps.insert(key.to_owned(), stamp.clone());
+        }
+    }
+}
+
+/// Share the existing background thumbnail cache with the document browser.
+pub(crate) fn document_thumbnail(app: &mut SolveApp, ctx: &egui::Context, path: &str) -> Option<egui::TextureHandle> {
+    poll(app, ctx);
+    if !app.home.thumbs.contains_key(path)
+        && let Some(i) = path.strip_prefix("sample:").and_then(|i| i.parse::<usize>().ok())
+    {
+        install(&mut app.home, ctx, path, sample_picture(i));
+    }
+    if !app.home.thumbs.contains_key(path) {
+        // Library browsing can visit many files; retain Home's recents and samples.
+        if app.home.thumbs.len() >= 256 {
+            let discard: Vec<_> =
+                app.home.thumbs.keys().filter(|key| !key.starts_with("sample:") && !app.home.recent.contains(key)).take(128).cloned().collect();
+            for key in discard {
+                app.home.thumbs.remove(&key);
+            }
+        }
+        want(&mut app.home, path);
+        ctx.request_repaint();
+    }
+    app.home.thumbs.get(path).and_then(Clone::clone)
 }
 
 /// Open a built-in sample (a copy of the design made for its picture).
@@ -1128,6 +1195,63 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn library_cache_identity_tracks_replacements_with_preserved_mtime() {
+        let h = crate::scenario::Harness::new();
+        let path = h.dir.join("replaced.sc");
+        std::fs::write(&path, b"old").unwrap();
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let before = cache_path(path.to_str().unwrap()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        std::fs::write(&path, b"new").unwrap();
+        std::fs::File::options().write(true).open(&path).unwrap().set_times(std::fs::FileTimes::new().set_modified(modified)).unwrap();
+        assert_ne!(cache_path(path.to_str().unwrap()).unwrap(), before);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn library_refresh_invalidates_changed_previews_and_rejects_late_jobs() {
+        let mut h = crate::scenario::Harness::new();
+        let path = h.dir.join("changed.sc");
+        let key = path.to_str().unwrap();
+        let stamp = crate::library::FileStamp {
+            bytes: 1,
+            modified: None,
+            #[cfg(unix)]
+            changed: (1, 0),
+        };
+        let mut identities = std::collections::BTreeMap::from([(path.clone(), stamp.clone())]);
+        refresh_document_thumbnails(&mut h.app.home, &identities);
+        install(&mut h.app.home, &h.ctx, key, Some(egui::ColorImage::filled([2, 2], Color32::WHITE)));
+        let old = h.app.home.thumbs[key].as_ref().unwrap().id();
+        refresh_document_thumbnails(&mut h.app.home, &identities);
+        assert_eq!(h.app.home.thumbs[key].as_ref().unwrap().id(), old, "unchanged files retain their texture");
+        let (tx, rx) = std::sync::mpsc::channel();
+        h.app.home.rx = Some(rx);
+        want(&mut h.app.home, "interrupted.sc");
+        identities.insert(path.clone(), crate::library::FileStamp { bytes: 2, ..stamp });
+        refresh_document_thumbnails(&mut h.app.home, &identities);
+        assert!(!h.app.home.thumbs.contains_key(key));
+        assert!(!h.app.home.thumbs.contains_key("interrupted.sc"));
+        assert!(tx.send((key.into(), Some(egui::ColorImage::filled([2, 2], Color32::RED)), None)).is_err());
+        assert!(h.app.home.rx.is_none());
+        want(&mut h.app.home, key);
+        assert_eq!(h.app.home.queued, [key]);
+    }
+
+    #[test]
+    fn library_sample_previews_do_not_build_or_queue_models() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home = HomeState::default();
+        for i in 0..solidcraft_engine::sample::samples().len() {
+            assert!(document_thumbnail(&mut h.app, &h.ctx, &format!("sample:{i}")).is_some());
+        }
+        assert!(h.app.home.samples.is_empty());
+        assert!(h.app.home.queued.is_empty());
+        assert!(h.app.home.wanted.is_none());
+    }
 
     #[test]
     fn recent_paths_only_abbreviate_complete_home_ancestors() {
