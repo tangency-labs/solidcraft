@@ -665,18 +665,9 @@ fn smlib_global_intersect_at_1e_6() {
     assert_eq!(passed.len(), 111);
 }
 
-/// The cases solidcore does not pass that the C++ kernel does (default-solidcore/bugs/
-/// ssi-self-crossing-curve-not-split.md). Listed so the difference is seen and only shrinks.
-const SOLIDCORE_GSI_1E6_MISSES: [&str; 6] = [
-    "c4_viviani_figure8",
-    "c4n_viviani_nurbs",
-    "y23_fig1a_two_loops_cross",
-    "y23_t2_ex5_two_loops",
-    "y23_t3_ex4_torus_ellipsoid",
-    "y23_t6_ex3_two_crossing_curves",
-];
-
-/// solidcore passes what the C++ kernel passes, but for [`SOLIDCORE_GSI_1E6_MISSES`].
+/// solidcore passes every case the C++ kernel passes ([`GSI_1E6_PASS`]). The self-crossing
+/// curves it missed (Viviani's figure eight, the crossing loops) are split at their crossings
+/// since solidcore's `ssi_split_curves_at_singular_points` (tangency-labs/solidcore#2110).
 #[test]
 fn solidcore_global_intersect_at_1e_6() {
     let Some(scores) = global_intersect_scores(solidcraft_smlib::route::Backend::Solidcore) else { return };
@@ -684,5 +675,5 @@ fn solidcore_global_intersect_at_1e_6() {
     let listed: std::collections::BTreeSet<&str> = GSI_1E6_PASS.iter().copied().collect();
     let lost: Vec<&str> = listed.difference(&passed).copied().collect();
     let extra: Vec<_> = passed.difference(&listed).collect();
-    assert_eq!(lost, SOLIDCORE_GSI_1E6_MISSES, "solidcore's misses against the C++ kernel; extra passes: {extra:?}");
+    assert!(lost.is_empty(), "solidcore misses what the C++ kernel passes: {lost:?}; extra passes: {extra:?}");
 }

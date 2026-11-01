@@ -11,7 +11,6 @@
 5158-fillet-round-just-past-a-10mm-face [unsupported] step 2 (solid.fillet): not supported yet: the fillet is larger than the faces beside its edges allow; the largest radius that fits is 10 mm
 9-fillet-corner-curvature-with-reduce-fit [unsupported] solid.fillet builds `corner: g2` with `fit: exact` only
 9-fillet-corner-curvature-with-taper-fit [unsupported] solid.fillet builds `corner: g2` with `fit: exact` only
-cov-fillet-exact-cylinders-touching-at-a-point-r1 [fail] step 2 (solid.cylinder): body `Pipes`: the operation failed: SMLib boolean: SMLib's check refuses the result: 2 failed tests: SmFace::Test #29 Face cr
 cov-fillet-g2-corner-beside-a-cylinder [fail] step 6 (solid.fillet): invalid input: cannot fill the loop: invalid spline: invalid input: a picked edge is not on the face beside it
 cov-fillet-g2-five-edge-apex-corner [fail] step 12 (solid.fillet): invalid input: the setback must be more than 3.5056 mm at the corner (-0.000, 0.000, 30.000): the rounds' contact lines meet 3
 cov-fillet-g2-four-edge-apex-corner [fail] step 11 (solid.fillet): invalid input: the setback must be more than 3.9027 mm at the corner (0.000, 0.000, 30.000): the rounds' contact lines meet 3.
