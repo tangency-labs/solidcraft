@@ -611,6 +611,11 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     {
         ffi::check_path_extent(&spec(&sweep.path)).map_err(|e| harness(e.to_string()))?;
     }
+    // nor more repetitions than the FFI runs (nightly fuzz00132: 2^31 linear repetitions
+    // ran past the fuzz timeout on the Rust side alone)
+    if let Inputs::LinearReps { reps, .. } | Inputs::RotationalReps { reps, .. } = i {
+        ffi::check_repetitions(*reps).map_err(|e| harness(e.to_string()))?;
+    }
     let mut k = Kernel::default();
     let v = |p: &P3| Vec3::new(p[0], p[1], p[2]);
     // A successful call is compared by its status, presence and counts; a path that
@@ -1524,6 +1529,50 @@ mod tests {
         assert!(r.deferred.is_none(), "{:?}", r.deferred);
         let d = crate::compare(&c, &r, Runner.abs_floors());
         assert!(d.mismatches.is_empty(), "{:?}", d.mismatches);
+    }
+
+    /// The nightly fuzz00132 input (run 41190675541): two circles swept `reps` times,
+    /// linearly or about the Z axis.
+    fn repeated(op: &str, reps: u64) -> Inputs {
+        let circle = |x: f64| {
+            serde_json::json!({"kind": "arc", "center": [x, 0.0, 0.0], "radius": 1.0,
+                               "start_deg": 0.0, "end_deg": 360.0})
+        };
+        let mut v = serde_json::json!({
+            "op": op, "curves": [circle(0.0), circle(5.0)], "reps": reps, "cap": true
+        });
+        if op == "linear_reps" {
+            let d = std::f64::consts::FRAC_1_SQRT_2;
+            v["dir"] = serde_json::json!([d, 0.0, d]);
+            v["dist"] = serde_json::json!(1.0);
+        } else {
+            v["base"] = serde_json::json!([0.0, -3.0, 0.0]);
+            v["axis"] = serde_json::json!([1.0, 0.0, 0.0]);
+            v["angle_deg"] = serde_json::json!(10.0);
+        }
+        serde_json::from_value(v).unwrap()
+    }
+
+    /// The FFI runs at most `2^20` repetitions; the Rust side refuses the same counts
+    /// with the same message instead of running them (fuzz00132: `2^31` linear
+    /// repetitions took the Rust side past the fuzz timeout).
+    #[test]
+    fn repetitions_past_the_ffi_bound_are_refused_on_both_sides() {
+        for op in ["linear_reps", "rotational_reps"] {
+            for reps in [ffi::MAX_REPETITIONS + 1, 1 << 31] {
+                let i = repeated(op, reps);
+                let c = cpp(&i).unwrap_err().to_string();
+                let r = rust(&i).unwrap_err().to_string();
+                assert!(c.contains("more than 2^20 repetitions"), "{c}");
+                assert_eq!(c, r, "{op} {reps}");
+            }
+            let i = repeated(op, 3);
+            let (c, r) = (cpp(&i).unwrap(), rust(&i).unwrap());
+            assert!(r.deferred.is_none(), "{:?}", r.deferred);
+            let d = crate::compare(&c, &r, Runner.abs_floors());
+            assert!(d.mismatches.is_empty(), "{:?}", d.mismatches);
+        }
+        assert!(ffi::check_repetitions(ffi::MAX_REPETITIONS).is_ok());
     }
 
     /// Golden stream executed against the pre-observer runner at 11595407bedc.

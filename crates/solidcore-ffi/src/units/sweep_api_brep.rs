@@ -596,12 +596,23 @@ fn caps_of(caps: i32) -> Result<f64, FfiError> {
     }
 }
 
-fn reps_of(reps: u64) -> Result<f64, FfiError> {
+/// Rejects more than [`MAX_REPETITIONS`] repetitions, as [`run`] does for `LinearReps`
+/// and `RotationalReps`; the difftest runner's Rust side applies it too.
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for such a count.
+pub fn check_repetitions(reps: u64) -> Result<(), FfiError> {
     if reps <= MAX_REPETITIONS {
-        Ok(reps as f64)
+        Ok(())
     } else {
         Err(bad("more than 2^20 repetitions"))
     }
+}
+
+fn reps_of(reps: u64) -> Result<f64, FfiError> {
+    check_repetitions(reps)?;
+    Ok(reps as f64)
 }
 
 /// Validates `call` and encodes it as the shim's program.
