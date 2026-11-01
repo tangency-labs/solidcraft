@@ -8,12 +8,13 @@
 //!
 //! Picks are matched in the order they were made. A picked line looks for an earlier line with a
 //! free end at one of its own ends: a line still waiting in a row of its own takes the new line
-//! into its row, and a line already in a corner starts a second row at its other end. The shared
-//! end becomes the corner and is used up, so a later line cannot pair there again. Two lines in
-//! line with each other make no corner (a fillet and a chamfer both refuse them), so each keeps
-//! a row of its own: selecting A and C with 180 degrees between them shows the two rows A and C.
-//! Unpicking a line recomputes the rows from the picks that remain, which is how unpicking B
-//! from the rows A-B, B-C leaves A and C.
+//! into its row, and a line already in a corner starts a second row at its other end. The end a
+//! line gives to a corner is used up for that line, and only that line: a place may hold more
+//! than one corner, which is how two profiles drawn to meet at one point have a corner each, the
+//! four lines there making two rows of two. Two lines in line with each other make no corner (a
+//! fillet and a chamfer both refuse them), so each keeps a row of its own: selecting A and C with
+//! 180 degrees between them shows the two rows A and C. Unpicking a line recomputes the rows from
+//! the picks that remain, which is how unpicking B from the rows A-B, B-C leaves A and C.
 //!
 //! A place is what the ends are matched on, not a point: two profiles drawn apart and meeting at
 //! one point (each with a corner point of its own, both held on the origin) share that corner.
@@ -32,6 +33,8 @@ const TOGETHER: f64 = 1e-6;
 /// The keys the rows keep their own state under, inside the dialog's extras.
 const OFF: &str = "corner.off";
 const FLIP: &str = "corner.flip";
+/// The prefix every key of the rows' own state carries.
+const CORNER: &str = "corner.";
 
 /// What a click on a row changed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -122,8 +125,11 @@ impl Sites {
 pub(crate) fn rows(sk: &Sketch, picks: &[Sel], extra: &Map<String, Value>) -> Vec<Row> {
     let sites = Sites::new(sk);
     let mut found: Vec<Row> = Vec::new();
-    // The ends a corner already uses: one per pair, and a point picked on its own uses one too.
-    let mut used: Vec<String> = Vec::new();
+    // The ends the corners use, as the line that gave one and the place it met at: a line gives
+    // one end to each corner it is part of, so a place shared by four lines holds two corners,
+    // one per pair, and a line that already gave its end there has none left.
+    let mut used: Vec<(String, String)> = Vec::new();
+    let free = |used: &[(String, String)], line: &str, point: &str| !used.iter().any(|(l, p)| l == line && p == point);
     for pick in picks {
         match pick {
             Sel::SketchCurve { id, .. } => {
@@ -135,18 +141,21 @@ pub(crate) fn rows(sk: &Sketch, picks: &[Sel], extra: &Map<String, Value>) -> Ve
                 };
                 let mut paired = false;
                 for point in [sites.of(a).to_string(), sites.of(b).to_string()] {
-                    if used.contains(&point) {
+                    if !free(&used, id, &point) {
                         continue;
                     }
-                    // The first line picked before this one that ends there, and is not in line
-                    // with it. A line already in a corner can still take a partner at its other end.
+                    // The first line picked before this one that still has an end there, and is
+                    // not in line with it. A line already in a corner can still take a partner
+                    // at its other end, and another pair can take its own at the same place.
                     let partner = found.iter().enumerate().find_map(|(index, row)| {
                         if row.lines.iter().any(|line| line == id) {
                             return None;
                         }
                         row.lines
                             .iter()
-                            .find(|line| ends(sk, line).is_some_and(|(x, y)| sites.of(x) == point || sites.of(y) == point))
+                            .find(|line| {
+                                free(&used, line, &point) && ends(sk, line).is_some_and(|(x, y)| sites.of(x) == point || sites.of(y) == point)
+                            })
                             .filter(|line| !in_line(sk, &sites, line, id, &point))
                             .map(|line| (index, line.clone()))
                     });
@@ -155,11 +164,13 @@ pub(crate) fn rows(sk: &Sketch, picks: &[Sel], extra: &Map<String, Value>) -> Ve
                         // The row waiting for its partner: the two lines now make its corner.
                         found[index].lines.push(id.clone());
                         found[index].point = Some(point.clone());
-                        found[index].key = point.clone();
+                        let key = marker(&found[index].lines, found[index].point.as_deref());
+                        found[index].key = key;
                     } else {
-                        found.push(row(vec![partner, id.clone()], Some(point.clone())));
+                        found.push(row(vec![partner.clone(), id.clone()], Some(point.clone())));
                     }
-                    used.push(point.clone());
+                    used.push((partner, point.clone()));
+                    used.push((id.clone(), point.clone()));
                     paired = true;
                 }
                 if !paired {
@@ -168,23 +179,26 @@ pub(crate) fn rows(sk: &Sketch, picks: &[Sel], extra: &Map<String, Value>) -> Ve
             }
             Sel::SketchPoint { id } => {
                 let point = sites.named(sk, id);
-                if used.contains(&point) {
+                // The point already names a corner here: a second row would say the same thing.
+                if found.iter().any(|row| row.point.as_deref() == Some(point.as_str())) {
                     continue;
                 }
                 // A point joins the row of the line it ends, which is the corner there.
                 let waiting = found.iter().position(|row| {
                     row.lines.len() == 1
                         && row.point.is_none()
+                        && free(&used, &row.lines[0], &point)
                         && ends(sk, &row.lines[0]).is_some_and(|(a, b)| sites.of(a) == point || sites.of(b) == point)
                 });
                 match waiting {
                     Some(index) => {
                         found[index].point = Some(point.clone());
-                        found[index].key = point.clone();
+                        let key = marker(&found[index].lines, found[index].point.as_deref());
+                        found[index].key = key;
+                        used.push((found[index].lines[0].clone(), point));
                     }
-                    None => found.push(row(Vec::new(), Some(point.clone()))),
+                    None => found.push(row(Vec::new(), Some(point))),
                 }
-                used.push(point);
             }
             _ => {}
         }
@@ -253,6 +267,35 @@ pub(crate) fn set_flip(extra: &mut Map<String, Value>, corner: &str, flip: bool)
     listed_set(extra, FLIP, corner, flip);
 }
 
+/// The corner rows' own X and Flip state, kept with the application rather than with one window:
+/// a corner whose lines leave the list and come back is still the corner the user left, so its
+/// cut stays hidden until it is shown again. Another sketch starts with every corner cut.
+#[derive(Default, Debug)]
+pub(crate) struct Kept {
+    /// The sketch the state belongs to.
+    sketch: Option<u64>,
+    /// The rows' state, worded as the window keeps it in its extras.
+    extra: Map<String, Value>,
+}
+
+impl Kept {
+    /// The state of the corner rows of `sketch`, emptied when another sketch is edited.
+    pub(crate) fn of(&mut self, sketch: Option<u64>) -> &Map<String, Value> {
+        if self.sketch != sketch {
+            self.sketch = sketch;
+            self.extra.clear();
+        }
+        &self.extra
+    }
+
+    /// Keep the state the window holds now, which the rows read when they come back.
+    pub(crate) fn remember(&mut self, extra: &Map<String, Value>) {
+        for (key, value) in extra.iter().filter(|(key, _)| key.starts_with(CORNER)) {
+            self.extra.insert(key.clone(), value.clone());
+        }
+    }
+}
+
 fn listed(extra: &Map<String, Value>, key: &str, corner: &str) -> bool {
     extra.get(key).and_then(Value::as_array).is_some_and(|list| list.iter().any(|value| value.as_str() == Some(corner)))
 }
@@ -268,8 +311,23 @@ fn listed_set(extra: &mut Map<String, Value>, key: &str, corner: &str, on: bool)
 }
 
 fn row(lines: Vec<String>, point: Option<String>) -> Row {
-    let key = point.clone().or_else(|| lines.first().cloned()).unwrap_or_default();
+    let key = marker(&lines, point.as_deref());
     Row { lines, point, key, enabled: true, flip: false }
+}
+
+/// The name a row's own X and Flip state is kept under: the two lines of its corner in a fixed
+/// order, so a repick or a flip finds it again, or the line or point of a row that has no pair
+/// yet. Two corners at one place (two profiles meeting there) keep a state each.
+fn marker(lines: &[String], point: Option<&str>) -> String {
+    match lines {
+        [] => point.unwrap_or_default().to_string(),
+        [line] => line.clone(),
+        _ => {
+            let mut names = lines.to_vec();
+            names.sort();
+            names.join("+")
+        }
+    }
 }
 
 /// The point indices at the ends of a curve that has two of them.

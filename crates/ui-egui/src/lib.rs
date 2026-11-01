@@ -669,6 +669,8 @@ pub struct SolveApp {
     /// The slicers the Save as mesh dialog offers.
     pub slicer_menu: dialogs_save_mesh::SlicerMenu,
     pub preview: preview::PreviewState,
+    /// The Fillet and Chamfer window's own X and Flip state, kept while its rows come and go.
+    pub(crate) corner_kept: sketch_corner_rows::Kept,
     /// OK pressed on a feature that takes a while: its evaluation runs off the window thread.
     pub applying: Option<dialogs::Applying>,
     pub(crate) editing_state: Option<dialogs::EditingState>,
@@ -950,6 +952,7 @@ impl SolveApp {
             prefs_window: prefs::PrefsWindow::default(),
             slicer_menu: dialogs_save_mesh::SlicerMenu::default(),
             preview: preview::PreviewState::default(),
+            corner_kept: Default::default(),
             applying: None,
             editing_state: None,
             edit_in_place: Default::default(),
@@ -1696,6 +1699,7 @@ impl SolveApp {
                     // applying cancellation hooks (such as restoring its timeline marker).
                     self.dialog = None;
                     self.applying = None;
+                    self.corner_kept = Default::default();
                     self.editing_state = None;
                     self.pending_feature_edit = None;
                     self.pre_edit_component = None;
