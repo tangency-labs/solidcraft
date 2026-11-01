@@ -11,6 +11,74 @@ fn fixture() -> Harness {
     h
 }
 
+// ---------------------------------------------------------------------------
+// #10181 probe (temporary): what does the reporter's flow leave on screen?
+// ---------------------------------------------------------------------------
+
+#[test]
+fn probe_project_outside_a_sketch() {
+    // S1: the reported flow: a face is selected and "p" is pressed outside a sketch.
+    {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Body1"})).unwrap();
+        h.settle();
+        h.app.set_origin_shown(false);
+        h.call("ui.view", json!({"view":"top"}));
+        h.call("ui.view", json!({"view":"fit"}));
+        h.settle();
+        h.step(&json!({"click":{"world":[20,15,20]}})).unwrap();
+        h.step(&json!({"key":"P"})).unwrap();
+        h.settle();
+        println!("S1 AFTER P: active_sketch={:?} dialog={:?}", h.app.session.active_sketch, h.app.dialog.as_ref().map(|d| format!("{:?}", d.kind)));
+        println!("S1 INPUTS: {:?}", h.app.dialog.as_ref().map(|d| d.inputs.iter().map(|i| i.items.len()).collect::<Vec<_>>()));
+        if h.app.dialog.is_some() {
+            h.step(&json!({"click":{"world":[20,15,20]}})).unwrap();
+            h.settle();
+            println!("S1 PICKED: {:?}", h.app.dialog.as_ref().map(|d| d.inputs.iter().map(|i| i.items.len()).collect::<Vec<_>>()));
+            h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+            h.settle();
+            println!("S1 AFTER OK: error={:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+            println!("S1 CREATE ISSUE: {:?}", scenario::handle_at("dialog:create_issue"));
+        }
+        println!("S1 LOG: {:?}", h.app.session.log);
+    }
+    // S2: the Project panel left open while the sketch it belongs to ends.
+    {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Body1"})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        h.app.session.selection = vec![Sel::Face { body: "Body1".into(), index: 5, point: solidcraft_engine::geom::Vec3::new(20.0, 15.0, 20.0) }];
+        h.app.start("sketch.project");
+        h.frames(4);
+        println!("S2 DIALOG: {:?}", h.app.dialog.as_ref().map(|d| format!("{:?}", d.kind)));
+        h.app.finish_sketch();
+        h.frames(4);
+        println!("S2 AFTER FINISH: active_sketch={:?} dialog={:?}", h.app.session.active_sketch, h.app.dialog.as_ref().map(|d| format!("{:?}", d.kind)));
+        if h.app.dialog.is_some() {
+            h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+            h.settle();
+            println!("S2 AFTER OK: error={:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+            println!("S2 CREATE ISSUE: {:?}", scenario::handle_at("dialog:create_issue"));
+            println!("S2 REPORT OPEN: {:?}", h.app.issue_report.draft.is_some());
+        }
+    }
+    // S3: the same face projected twice.
+    {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Body1"})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        h.app.session.selection = vec![Sel::Face { body: "Body1".into(), index: 5, point: solidcraft_engine::geom::Vec3::new(20.0, 15.0, 20.0) }];
+        h.app.start("sketch.project");
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.settle();
+        println!("S3 AFTER OK: error={:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+        println!("S3 CREATE ISSUE: {:?}", scenario::handle_at("dialog:create_issue"));
+    }
+}
+
 fn picked(h: &Harness, command: &str) -> Dialog {
     let mut d = Dialog::for_command(&h.app, command).unwrap();
     let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
