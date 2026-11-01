@@ -6577,6 +6577,30 @@ fn path_at(segs: &[kernel::PathSeg], d: f64) -> (Vec3, Vec3) {
 }
 
 /// Whether a copy has no material to cut in any of its eligible targets.
+/// Whether hole tool `tool` is clear of every body the hole cuts, by their boxes (#10701). Boxes
+/// only: a probe boolean for every hole of a large hole pattern would double its work, and the
+/// bodies' meshes are there already (the hole found its face on them). A body of another
+/// component is in another frame: the hole is then not known to miss.
+fn hole_misses(st: &ModelState, f: &Feature, tool: &Body) -> bool {
+    let all = f.participants.len() == 1 && f.participants.first().is_some_and(|t| t == "*");
+    let targets: Vec<&ModelBody> = st
+        .bodies
+        .iter()
+        .filter(|b| all || if f.participants.is_empty() { b.component == f.component || b.feature == f.id } else { f.participants.contains(&b.name) })
+        .collect();
+    let bounds = tool.outline_bounds();
+    if targets.is_empty()
+        || targets.iter().any(|b| b.component != f.component)
+        || bounds.is_empty()
+        || !bounds.min.is_finite()
+        || !bounds.max.is_finite()
+    {
+        return false;
+    }
+    let tool_box = Some(bounds.inflated(1e-6));
+    targets.iter().all(|b| more::boxes_apart(&tool_box, &more::mesh_box(b)))
+}
+
 fn copy_misses(st: &ModelState, f: &Feature, targets: &[String], tools: &[Traced]) -> bool {
     let targets = if targets.is_empty() { &f.participants } else { targets };
     let all = targets.len() == 1 && targets.first().is_some_and(|t| t == "*");
@@ -7426,7 +7450,16 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             let handled = sheet_hole_cut(st, f, &tools, warning)?;
             let tools: Vec<Traced> = tools.into_iter().map(|(tool, _)| tool).collect();
             if handled.is_empty() {
+                // A hole moved off the material (a changed position, parameter or sketch point)
+                // cuts nothing: it says so, as a pattern does of its copies (#10701).
+                let missed = tools.iter().filter(|tool| hole_misses(st, f, &tool.body)).count();
+                let total = tools.len();
                 apply_traced(doc, st, f, tools, Operation::Cut, &[])?;
+                match (missed, total) {
+                    (0, _) => {}
+                    (_, 1) => append_warning(warning, "the hole removes no material".into()),
+                    _ => append_warning(warning, format!("{missed} of {total} holes remove no material")),
+                }
             } else {
                 apply_beside_sheet_cut(doc, st, f, tools, Operation::Cut, &[], &handled)?;
             }
