@@ -921,6 +921,193 @@ fn a_scene_with_hidden_lines_or_a_bad_flag_is_refused() {
     }
 }
 
+/// A 40 x 40 x 5 mm part from the origin, and a 20 x 20 x 10 mm part over its right side at
+/// x 30..50, y 10..30, from height `z`, set as reference. The session and the two occurrences.
+fn plate_and_block(z: f64) -> (Session, [u64; 2]) {
+    let mut s = Session::default();
+    let part = |s: &mut Session, name: &str, size: [f64; 3], body: &str| {
+        let occurrence = run(s, "component.create", json!({"name": name}))["occurrence"].as_u64().unwrap();
+        run(s, "solid.box", json!({"length": size[0], "width": size[1], "height": size[2], "body_name": body, "operation": "new"}));
+        run(s, "component.activate", json!({"component": 0}));
+        occurrence
+    };
+    let plate = part(&mut s, "PlatePart", [40.0, 40.0, 5.0], "Plate");
+    let block = part(&mut s, "BlockPart", [20.0, 20.0, 10.0], "Block");
+    run(&mut s, "occurrence.move", json!({"occurrence": block, "translate": [30, 10, z]}));
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": block, "bom_type": "reference"}));
+    (s, [plate, block])
+}
+
+/// How long `v`'s model lines, or its reference lines, at `visibility` are altogether, on the sheet.
+fn role_length(v: &Value, reference: bool, visibility: &str) -> f64 {
+    let lines: Vec<Value> = v["lines"].as_array().unwrap().iter().filter(|l| l["reference"] == reference).cloned().collect();
+    drawn_length(&json!({"lines": lines}), visibility)
+}
+
+fn assert_lengths(v: &Value, reference: bool, visible: f64, hidden: f64) {
+    let got = (role_length(v, reference, "visible"), role_length(v, reference, "hidden"));
+    assert!((got.0 - visible).abs() < 1e-6 && (got.1 - hidden).abs() < 1e-6, "{reference}: {got:?}, not ({visible}, {hidden})");
+}
+
+/// Worked by hand, top view at 1:1 with a margin taking in all of the block. The plate's outline is
+/// 160 mm, 20 of it (x = 40, y 10..30) under the block when the block is above; the block's is 80,
+/// and when it is below, its parts at x 30..40 are under the plate: 40 hidden and 40 visible.
+/// Reference parts cover the model only when told, and the plate always covers the block.
+#[test]
+fn reference_lines_are_their_own_and_cover_the_model_only_when_told() {
+    let view = |hides: bool| {
+        json!({"view": "top", "scale": "1:1", "display_style": "visible_hidden", "reference_style": "visible_hidden",
+               "reference_hides_model": hides, "reference_margin_mm": 20})
+    };
+    let (mut above, _) = plate_and_block(5.0);
+    let v = snap(&mut above, view(false));
+    assert_lengths(&v, false, 160.0, 0.0);
+    assert_lengths(&v, true, 80.0, 0.0);
+    let v = snap(&mut above, view(true));
+    assert_lengths(&v, false, 140.0, 20.0);
+    assert_lengths(&v, true, 80.0, 0.0);
+    let (mut below, _) = plate_and_block(-10.0);
+    for hides in [false, true] {
+        let v = snap(&mut below, view(hides));
+        assert_lengths(&v, false, 160.0, 0.0);
+        assert_lengths(&v, true, 40.0, 40.0);
+    }
+}
+
+/// Each style asks for its own hidden lines: reference ones only with `reference_style`, the
+/// model's only with `display_style`.
+#[test]
+fn each_part_of_a_view_draws_hidden_lines_by_its_own_style() {
+    let (mut above, _) = plate_and_block(5.0);
+    let hides = json!({"view": "top", "scale": "1:1", "reference_hides_model": true, "reference_margin_mm": 20});
+    let v = snap(&mut above, hides.clone());
+    assert_lengths(&v, false, 140.0, 0.0);
+    let (mut below, _) = plate_and_block(-10.0);
+    let v = snap(&mut below, hides);
+    assert_lengths(&v, true, 40.0, 0.0);
+    let v = snap(&mut below, json!({"view": "top", "scale": "1:1", "reference_style": "visible_hidden", "reference_margin_mm": 20}));
+    assert_lengths(&v, true, 40.0, 40.0);
+}
+
+/// With model parts there, the boundary is theirs and the margin's, and reference lines stop at it:
+/// with no margin the block keeps x 30..40 (20 + 10 + 10); with 5 mm, x 30..45 (20 + 15 + 15).
+#[test]
+fn reference_parts_stop_at_the_boundary_of_the_model_and_its_margin() {
+    let (mut s, _) = plate_and_block(5.0);
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1"}));
+    assert_box(&v, [190.0, 128.5], [230.0, 168.5]);
+    assert_eq!(v["source"]["bodies"], 2, "{v}");
+    assert_lengths(&v, true, 40.0, 0.0);
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "reference_margin_mm": 5}));
+    assert_box(&v, [185.0, 123.5], [235.0, 173.5]);
+    assert_lengths(&v, true, 50.0, 0.0);
+}
+
+/// Reference lines test against everything: with both parts reference, the block hides 20 mm of the
+/// plate, the setting off.
+#[test]
+fn reference_parts_hide_each_other_whatever_the_setting() {
+    let (mut s, [plate, _]) = plate_and_block(5.0);
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": plate, "bom_type": "reference"}));
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "reference_style": "visible_hidden"}));
+    assert_lengths(&v, true, 220.0, 20.0);
+}
+
+/// A reference part's edge on a model part's: the block's right edge moved onto the plate's. Merged
+/// apart, each keeps its whole outline, so the model's line is drawn in the model's width.
+#[test]
+fn a_reference_line_never_takes_a_stretch_from_a_model_line() {
+    let (mut s, [_, block]) = plate_and_block(5.0);
+    run(&mut s, "occurrence.move", json!({"occurrence": block, "translate": [-10, 0, 0]}));
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1"}));
+    assert_lengths(&v, false, 160.0, 0.0);
+    assert_lengths(&v, true, 80.0, 0.0);
+}
+
+/// A plate, a hinge holding a pin, and the pin placed again at the top: with the hinge a reference
+/// component, the pin is a reference part through the hinge and a model part on its own.
+#[test]
+fn an_assemblys_type_reaches_its_parts_through_that_path_only() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 3}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "component.create", json!({"name": "Hinge", "activate": false}));
+    run(&mut s, "component.create", json!({"name": "Pin", "parent": "Hinge"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 4, "height": 30}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.copy", json!({"component": "Pin", "translate": [0, 50, 0]}));
+    run(&mut s, "component.metadata.set", json!({"component": "Hinge", "bom_type": "reference"}));
+    let through = |line: &Value| line["occurrence"].as_array().unwrap().len() == 2;
+    let all = snap(&mut s, json!({}));
+    let lines = all["lines"].as_array().unwrap();
+    assert!(lines.iter().any(through) && !lines.iter().all(through), "{all}");
+    assert!(lines.iter().all(|l| l["reference"] == through(l)), "{all}");
+}
+
+/// A view of only reference parts is measured by them and draws them whole.
+#[test]
+fn a_view_of_only_reference_parts_draws_them() {
+    let (mut s, [plate, _]) = plate_and_block(5.0);
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "hide": [[plate]]}));
+    assert_box(&v, [200.0, 138.5], [220.0, 158.5]);
+    assert_lengths(&v, true, 80.0, 0.0);
+    assert!(v["lines"].as_array().unwrap().iter().all(|l| l["reference"] == true), "{v}");
+}
+
+/// An assembly's type reaches every part in it, and so does a component's; a part's own type says
+/// nothing about the assembly round it, or about what else is placed.
+#[test]
+fn a_reference_assembly_makes_its_parts_reference() {
+    let mut s = Session::default();
+    let outer = run(&mut s, "component.create", json!({"name": "Outer"}))["occurrence"].as_u64().unwrap();
+    let inner = run(&mut s, "component.create", json!({"name": "Inner"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube", "operation": "new"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let reference = |s: &Session| crate::drawing_view::shown(s).unwrap().bodies.iter().map(|b| (b.path.clone(), b.reference)).collect::<Vec<_>>();
+    assert_eq!(reference(&s), [(vec![outer, inner], false)]);
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": outer, "bom_type": "reference"}));
+    assert_eq!(reference(&s), [(vec![outer, inner], true)]);
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": outer, "bom_type": null}));
+    assert_eq!(reference(&s), [(vec![outer, inner], false)]);
+    run(&mut s, "component.metadata.set", json!({"component": "Outer", "bom_type": "reference"}));
+    assert_eq!(reference(&s), [(vec![outer, inner], true)]);
+    // Its own type wins over its component's.
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": outer, "bom_type": "normal"}));
+    assert_eq!(reference(&s), [(vec![outer, inner], false)]);
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": inner, "bom_type": "reference"}));
+    assert_eq!(reference(&s), [(vec![outer, inner], true)]);
+}
+
+/// A design's own bodies are never reference, and a view with no reference parts draws the same
+/// lines whichever way the setting is.
+#[test]
+fn no_reference_parts_means_the_setting_changes_nothing() {
+    let (mut s, _) = two_cubes();
+    let plain = snap(&mut s, json!({"scale": "1:1"}));
+    let set = snap(&mut s, json!({"scale": "1:1", "reference_hides_model": true}));
+    assert_eq!(plain["lines"], set["lines"]);
+    assert!(plain["lines"].as_array().unwrap().iter().all(|l| l["reference"] == false), "{plain}");
+}
+
+/// The snapshot's scene draws reference parts as saved views do: thin, and first.
+#[test]
+fn a_scene_draws_reference_parts_thin_under_the_model() {
+    let (mut s, _) = plate_and_block(5.0);
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "scene": true, "reference_margin_mm": 20}));
+    let widths: Vec<f64> = strokes(&v).iter().map(|(_, _, width)| *width).collect();
+    let thin = widths.iter().take_while(|w| **w == crate::drawing_view::REFERENCE_MM).count();
+    assert!(thin > 0 && widths[thin..].iter().all(|w| *w == crate::drawing_view::VISIBLE_MM), "{widths:?}");
+}
+
+/// Hidden reference lines wait for dashed lines on paper as the model's do.
+#[test]
+fn a_scene_with_hidden_reference_lines_is_refused() {
+    let (mut s, _) = plate_and_block(5.0);
+    let e = refused(&mut s, json!({"scene": true, "reference_style": "visible_hidden"}));
+    assert!(e.contains("not supported yet: hidden lines"), "{e}");
+}
+
 /// The occurrence paths `v`'s lines name, each once.
 fn line_paths(v: &Value) -> Vec<Value> {
     let mut paths: Vec<Value> = v["lines"].as_array().unwrap().iter().map(|l| l["occurrence"].clone()).collect();

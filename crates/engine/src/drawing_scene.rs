@@ -29,7 +29,7 @@ use solidcraft_doc::{DocError, ModelState, ids};
 use solidcraft_geom::paper::{Group, Item, MAX_RECORDS, Scene};
 use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
 
-use crate::drawing_view::{CHORD_MM, MIN_MODEL_CHORD_MM, ShownSet, Stats, Unmeasured, paper_group};
+use crate::drawing_view::{CHORD_MM, LineRequest, MIN_MODEL_CHORD_MM, ShownSet, Stats, Unmeasured, paper_group};
 use crate::params::bad;
 use crate::{EngineError, Result, Session};
 
@@ -134,6 +134,7 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
     }
     // Every body the design places, until saved views have `source` and `hide` (V4) to keep a part.
     let measured = shown.as_ref().map_err(|why| *why).and_then(|set| crate::drawing_view::measure(set, &view.basis).map(|e| (set, e)));
+    // Its reference parts draw too, around what the extents measure.
     let (set, extents) = match measured {
         Ok(measured) => measured,
         Err(why) => return none(Status::Placeholder(why)),
@@ -142,8 +143,10 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
     let tangent_edges = view.tangent_edges.value == TangentEdges::Show;
     // The margin keeps the mesh's chord at or above its floor once divided back by the factor.
     let chord_mm = CHORD_MM.max(MIN_MODEL_CHORD_MM * view.scale.value.factor() * (1.0 + 1e-9));
+    let reference_hides_model = view.reference_hides_model.value;
+    let request = LineRequest { shows: around, hidden: false, reference_hidden: false, reference_hides_model, tangent_edges, chord_mm };
     let lines = crate::drawing_view::frame(view.basis, view.scale.value, &around, Vec2::ZERO, CMD)
-        .and_then(|frame| crate::drawing_view::lines(s, set, &frame, false, tangent_edges, chord_mm, CMD));
+        .and_then(|frame| crate::drawing_view::lines(s, set, &frame, &request, CMD));
     match lines {
         Ok(lines) => {
             let group = paper_group(&lines, id);

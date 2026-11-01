@@ -22,6 +22,11 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
 pub(crate) fn front_and_top() -> (Session, u64, [u64; 2]) {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 20, "body_name": "Block"}));
+    front_and_top_of(s)
+}
+
+/// [`front_and_top`]'s drawing of the design `s`.
+fn front_and_top_of(mut s: Session) -> (Session, u64, [u64; 2]) {
     run(&mut s, "drawing.create", json!({}));
     let mut d = (**s.drawing("test").unwrap()).clone();
     let mut id_source = solidcraft_doc::ids::IdSource::seeded(4890);
@@ -412,4 +417,57 @@ fn seeded_edits_and_steps_always_end_at_the_built_scene() {
         assert!(end.stale.is_empty(), "seed {seed}");
         assert_eq!(bytes(&end.scene), bytes(&built(&s, sheet).scene), "seed {seed}");
     }
+}
+
+/// Setting a part as reference evaluates nothing, yet the views of it are out of date: its lines
+/// join the reference parts', so no longer hide what is under them or stop at its own extents.
+#[test]
+fn a_change_of_reference_parts_redraws_the_views() {
+    let mut design = Session::default();
+    let mut part = |name: &str, body: &str| {
+        let occurrence = run(&mut design, "component.create", json!({"name": name}))["occurrence"].as_u64().unwrap();
+        run(&mut design, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": body, "operation": "new"}));
+        run(&mut design, "component.activate", json!({"component": 0}));
+        occurrence
+    };
+    part("Under", "BodyUnder");
+    let over = part("Over", "BodyOver");
+    run(&mut design, "occurrence.move", json!({"occurrence": over, "translate": [10, 0, 10]}));
+    let (mut s, sheet, [front, top]) = front_and_top_of(design);
+    let before = settled(&mut s, sheet);
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    let in_the_model = |s: &mut Session, id: &str, p: Value| {
+        run(s, "drawing.close", json!({}));
+        run(s, id, p);
+        run(s, "drawing.open", drawing.clone());
+    };
+    in_the_model(&mut s, "occurrence.bom_type", json!({"occurrence": over, "bom_type": "reference"}));
+    let stale = extract(&mut s, sheet).unwrap().stale;
+    assert!(stale.len() == 2 && stale.contains(&front) && stale.contains(&top), "{stale:?}");
+    let after = settled(&mut s, sheet);
+    assert_ne!(bytes(&before.scene), bytes(&after.scene));
+    let thin = |scene: &Scene| {
+        let items = scene.groups.iter().filter(|g| g.kind == ObjectKind::View).flat_map(|g| &g.items);
+        items.filter(|i| matches!(i, Item::Stroke { width_mm, .. } if *width_mm == crate::drawing_view::REFERENCE_MM)).count()
+    };
+    assert_eq!(thin(&before.scene), 0);
+    assert!(thin(&after.scene) > 0);
+    let scene = built(&s, sheet);
+    assert_eq!(bytes(&scene.scene), bytes(&after.scene), "the provider and a build draw one thing");
+    // Undone, the views draw again, as they were; redone, as they were then.
+    in_the_model(&mut s, "edit.undo", json!({}));
+    assert_eq!(extract(&mut s, sheet).unwrap().stale.len(), 2);
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&before.scene));
+    in_the_model(&mut s, "edit.redo", json!({}));
+    assert_eq!(extract(&mut s, sheet).unwrap().stale.len(), 2);
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&after.scene));
+    // Set on its component, it draws the same.
+    in_the_model(&mut s, "occurrence.bom_type", json!({"occurrence": over, "bom_type": null}));
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&before.scene));
+    in_the_model(&mut s, "component.metadata.set", json!({"component": "Over", "bom_type": "reference"}));
+    assert_eq!(extract(&mut s, sheet).unwrap().stale.len(), 2);
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&after.scene));
+    // A saved view takes the setting: the reference part now covers what is under it.
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"reference_hides_model": true}}));
+    assert_ne!(bytes(&settled(&mut s, sheet).scene), bytes(&after.scene));
 }

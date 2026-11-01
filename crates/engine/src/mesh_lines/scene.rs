@@ -383,6 +383,8 @@ struct Query<'a, 'b> {
     a: Vec3,
     b: Vec3,
     bounds: Aabb3,
+    /// This line is the model's, in a scene where reference parts don't cover it.
+    sees_through_reference: bool,
     covered: Coverage,
     budget: &'b mut Budget<'a>,
 }
@@ -408,6 +410,9 @@ impl Query<'_, '_> {
             }
         } else {
             for id in self.instances.ids.get(node.start..node.end).ok_or("invalid instance tree")? {
+                if self.sees_through_reference && self.scene.placements.get(*id).is_some_and(|p| p.reference) {
+                    continue;
+                }
                 self.mesh_node(*id, 0)?;
                 if self.covered.contains(0., 1.) {
                     break;
@@ -447,6 +452,11 @@ impl Query<'_, '_> {
         }
         Ok(())
     }
+}
+
+/// Whether `owner` is a reference part of `scene`.
+fn is_reference(scene: &Scene, owner: Owner) -> bool {
+    scene.placements.get(owner.placement as usize).is_some_and(|p| p.reference)
 }
 
 /// The lines of `scene`'s placed meshes and of the `sketch` runs, seen from `view`.
@@ -519,6 +529,7 @@ pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Dra
         let mut budget = Budget::new(&global, &progress);
         let mut lines = Vec::new();
         for &(a, b, owner) in *chunk {
+            let is_reference = owner.is_some_and(|o| is_reference(scene, o));
             let mut query = Query {
                 shared: &shared,
                 scene,
@@ -529,6 +540,7 @@ pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Dra
                 a,
                 b,
                 bounds: bounds([a, b]),
+                sees_through_reference: !scene.reference_hides_model && !is_reference,
                 covered: Coverage::default(),
                 budget: &mut budget,
             };
@@ -556,7 +568,11 @@ pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Dra
         Ok((lines, budget.spent))
     })?;
     let work = results.iter().map(|(_, n)| *n).sum();
-    let lines = merge_lines(results.into_iter().flat_map(|(lines, _)| lines).collect(), eps);
+    // Apart, so a reference line on one stretch with a model line never takes the model's place.
+    let (reference, model): (Vec<Line>, Vec<Line>) =
+        results.into_iter().flat_map(|(lines, _)| lines).partition(|line| line.owner.is_some_and(|o| is_reference(scene, o)));
+    let mut lines = merge_lines(model, eps);
+    lines.extend(merge_lines(reference, eps));
     progress.check()?;
     // Shown sketch curves: finished sketches are split where bodies cover them, like body
     // edges; the active sketch is drawn on top, as in the viewport. Each curve run stays one
@@ -588,6 +604,8 @@ pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Dra
                     a,
                     b,
                     bounds: bounds([a, b]),
+                    // A sketch curve is the model's: a reference part hides it only as it hides the model.
+                    sees_through_reference: !scene.reference_hides_model,
                     covered,
                     budget: &mut budget,
                 };
@@ -692,13 +710,20 @@ mod tests {
         let mut flat = Vec::new();
         for (offset, angle) in [(Vec3::ZERO, 0.), (Vec3::new(3., 2., 4.), 0.3), (Vec3::new(2., 1., -4.), -0.6)] {
             let transform = solidcraft_doc::rigid(offset, Vec3::ZERO, Vec3::Z, angle);
-            placements.push(Placement { mesh: 0, transform, visibility: vec![true; mesh.edges.len()], tangent: Vec::new(), joins: Vec::new() });
+            placements.push(Placement {
+                mesh: 0,
+                transform,
+                visibility: vec![true; mesh.edges.len()],
+                tangent: Vec::new(),
+                joins: Vec::new(),
+                reference: false,
+            });
             let mut placed = mesh.clone();
             placed.positions = placed.positions.iter().map(|p| apply_point(&transform, *p)).collect();
             placed.edges = placed.edges.iter().map(|e| e.iter().map(|p| apply_point(&transform, *p)).collect()).collect();
             flat.push(placed);
         }
-        let scene = Scene { meshes: vec![Arc::new(mesh)], placements, triangles: 36, bytes: 0, sources: false };
+        let scene = Scene { meshes: vec![Arc::new(mesh)], placements, triangles: 36, bytes: 0, sources: false, reference_hides_model: true };
         for (yaw, pitch, roll) in [(0., std::f64::consts::FRAC_PI_2, 0.), (0.7, 0.4, 0.2), (0., 0., 0.)] {
             for fov in [0., 0.6] {
                 let cam = Camera { target: Vec3::new(4., 3., 1.), yaw, pitch, roll, fov, distance: 100., ..Default::default() };
@@ -738,9 +763,10 @@ mod tests {
                 visibility: vec![true; 4],
                 tangent: Vec::new(),
                 joins: Vec::new(),
+                reference: false,
             })
             .collect();
-        let scene = Scene { meshes: vec![Arc::new(mesh)], placements, triangles: 1_200_000, bytes: 0, sources: false };
+        let scene = Scene { meshes: vec![Arc::new(mesh)], placements, triangles: 1_200_000, bytes: 0, sources: false, reference_hides_model: true };
         let mut cam = Camera { target: Vec3::new(95., 55., 0.), fov: 0., distance: 300., ..Default::default() };
         cam.set_view(StandardView::Top);
         let result = drawing(&scene, &[], &View::from_camera(&cam)).unwrap();

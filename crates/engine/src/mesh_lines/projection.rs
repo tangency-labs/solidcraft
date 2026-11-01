@@ -187,7 +187,7 @@ impl Tree {
 }
 
 /// Clip [lo,hi] by the linear inequality f(t) >= 0.
-pub(super) fn clip(lo: &mut f64, hi: &mut f64, f0: f64, f1: f64) -> bool {
+pub(crate) fn clip(lo: &mut f64, hi: &mut f64, f0: f64, f1: f64) -> bool {
     if f0 < 0.0 && f1 < 0.0 {
         return false;
     }
