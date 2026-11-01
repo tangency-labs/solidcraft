@@ -7130,7 +7130,7 @@ mod awaiting_selection_tests {
         for (command, english) in [
             ("solid.move", "select bodies first"),
             ("sheet.flange", "select a profile, edges or sketch lines first"),
-            ("plastic.lip", "select the rim face first"),
+            ("plastic.lip", "select the rim of a shelled body first (Shell a face open, then pick the rim around the opening)"),
         ] {
             let mut h = crate::scenario::Harness::new();
             h.step(&serde_json::json!({"start":command})).unwrap();
