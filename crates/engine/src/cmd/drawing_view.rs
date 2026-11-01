@@ -29,9 +29,10 @@ use solidcraft_geom::Plane;
 use solidcraft_geom::drawing_sheet::{DrawingBorderProfile, Sheet};
 use solidcraft_geom::drawing_view::{NamedView, PRESETS, Scale};
 use solidcraft_geom::hlr::{Source, Visibility};
-use solidcraft_geom::paper::MAX_COORDINATE_MM;
+use solidcraft_geom::paper::{MAX_COORDINATE_MM, Picture};
 use solidcraft_geom::section::CurveAccuracy;
 use solidcraft_geom::{Aabb2, Vec2};
+use solidcraft_io::paper::MAX_PICTURE_DPI;
 use solidcraft_render::VisualStyle;
 
 use super::CommandSpec;
@@ -39,8 +40,8 @@ use crate::drawing_view::{CHORD_RANGE, Extents, LineRequest, Lines, MAX_PATH_IDS
 use crate::params::bad;
 use crate::schema::drawing_view::{
     AccuracyResult, BoxResult, ChoicesResult, CopyParams, DPI_RANGE, EditParams, EditResult, ExtentsResult, FromResult, InspectParams, InspectResult,
-    LineResult, LineSourceResult, LinesStatusResult, MoveParams, OutsideResult, PathSegResult, PieceResult, PlaceParam, ScaleResult, SceneResult,
-    SettingResult, SettingsResult, SnapshotParams, SnapshotResult, SourceResult, ToSheetResult, ViewResult, ViewSet,
+    LineResult, LineSourceResult, LinesStatusResult, MoveParams, OutsideResult, PathSegResult, PictureResult, PieceResult, PlaceParam, ScaleResult,
+    SceneResult, SettingResult, SettingsResult, SnapshotParams, SnapshotResult, SourceResult, ToSheetResult, ViewResult, ViewSet,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -61,7 +62,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
     .noundo()
     .contract(&CONTRACT)
     .output(output_schema_for::<SnapshotResult>)
-    .params("view?: front (default), back, top, bottom, left, right, iso (= iso_front_right), iso_front_left, iso_back_right, iso_back_left, or {direction, up, origin?}; scale?: \"paper:model\" such as \"1:2\" (default: the largest ISO 5455 scale that fits the sheet's drawing area); position_mm?: [x, y] for the view's centre on the sheet (default the sheet's centre); sheet?: {size: {standard: a3} or {custom: {sides_mm: [w, h]}}, orientation?: landscape|portrait, dpi?: 25..2400} (default A3 landscape, 300 dpi); display_style?, reference_style?: visible (default) or visible_hidden (the shaded styles aren't supported yet); reference_hides_model?: false; reference_margin_mm?: 0..100000 model mm on every side; tangent_edges?: hide (default) or show; chord_mm?: 0.001..1 paper mm the lines are sampled at (default 0.01); max_error_mm?: the accuracy the lines must certify on paper (refused while they come from the mesh); scene?: true adds the lines as a paper scene of the sheet (visible lines only for now); source?: {occurrences: [[ids…]]}, the occurrence subtrees drawn ([] the design's own bodies; default every body); hide?: [[ids…]], subtrees left out; at most 1000 paths in each and 4096 ids in all. Every body the design places, whatever the browser shows. Returns {view, scale: {text, factor, fitted}, position_mm, sheet, extents (model mm on the view's plane), boundary_mm (on the sheet), lines: [{occurrence, body, reference, source: {kind: edge, edge, tangent} or {kind: silhouette, face}, pieces: [{visibility, path: [paper mm lines, and arcs for circles facing the view], accuracy}]}], status: {lines: approximate, provenance: mesh_projection, chord_mm, model_chord_mm, uncertain_pieces, covered_pieces}, stats, scene (with scene: true: {size_mm, groups: [{object: 0, kind: view, items: [{kind: stroke, path, closed, width_mm}]}]}), source}. Read-only: saves nothing."),
+    .params("view?: front (default), back, top, bottom, left, right, iso (= iso_front_right), iso_front_left, iso_back_right, iso_back_left, or {direction, up, origin?}; scale?: \"paper:model\" such as \"1:2\" (default: the largest ISO 5455 scale that fits the sheet's drawing area); position_mm?: [x, y] for the view's centre on the sheet (default the sheet's centre); sheet?: {size: {standard: a3} or {custom: {sides_mm: [w, h]}}, orientation?: landscape|portrait, dpi?: 25..2400} (default A3 landscape, 300 dpi); display_style?, reference_style?: visible (default), visible_hidden or shaded (drawn as a picture, without its own lines, and not with scene; shaded_visible and shaded_visible_hidden aren't supported yet); reference_hides_model?: false; reference_margin_mm?: 0..100000 model mm on every side; tangent_edges?: hide (default) or show; chord_mm?: 0.001..1 paper mm the lines are sampled at (default 0.01); max_error_mm?: the accuracy the lines must certify on paper (refused while they come from the mesh); scene?: true adds the lines as a paper scene of the sheet (visible lines only for now); source?: {occurrences: [[ids…]]}, the occurrence subtrees drawn ([] the design's own bodies; default every body); hide?: [[ids…]], subtrees left out; at most 1000 paths in each and 4096 ids in all. Every body the design places, whatever the browser shows. Returns {view, scale: {text, factor, fitted}, position_mm, sheet, extents (model mm on the view's plane), boundary_mm (on the sheet), lines: [{occurrence, body, reference, source: {kind: edge, edge, tangent} or {kind: silhouette, face}, pieces: [{visibility, path: [paper mm lines, and arcs for circles facing the view], accuracy}]}], status: {lines: approximate, provenance: mesh_projection, chord_mm, model_chord_mm, uncertain_pieces, covered_pieces}, stats, scene (with scene: true: {size_mm, groups: [{object: 0, kind: view, items: [{kind: stroke, path, closed, width_mm}]}]}), picture? ({pixels: [w, h], dpi, rect_mm} when something is shaded: the boundary's pixel grid at sheet.dpi or 1200, the lower, which dpi gives), source}. Read-only: saves nothing."),
     CommandSpec::new(INSPECT, "Inspect Drawing View", crate::checked!("drawing.view.inspect", inspect))
         .icon("inspect")
         .in_drawing()
@@ -141,7 +142,10 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
         tangent_edges: settings.tangent_edges == TangentEdges::Show,
         chord_mm,
     };
-    let drawn = crate::drawing_view::lines(s, &set, &frame, &asked, CMD)?;
+    let mut drawn = crate::drawing_view::lines(s, &set, &frame, &asked, CMD)?;
+    // A shaded part is drawn by its picture, so its own lines are left out; it still hides what
+    // lies behind it.
+    drawn.lines.retain(|l| !(if l.reference { settings.reference_style } else { settings.display_style }).is_shaded());
     if let Some(max) = request.max_error_mm {
         certify(&drawn, max, scale)?;
     }
@@ -152,6 +156,9 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         None
     };
+    let flags: Vec<bool> = set.bodies.iter().map(|b| b.reference).collect();
+    let pictures = crate::drawing_picture::pictures(settings.display_style, settings.reference_style, settings.reference_hides_model, &flags);
+    let picture = if pictures.is_empty() { None } else { Some(picture(boundary, request.sheet.dpi)?) };
 
     let named = match settings.view {
         ViewDirection::Named(view) => Some(snake_name(view)),
@@ -184,6 +191,7 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
         },
         stats: drawn.stats.into(),
         scene,
+        picture,
         source: SourceResult { bodies: set.bodies.len(), timeline_at_end: s.doc.marker.is_none() },
         param_warnings: Vec::new(),
     };
@@ -643,6 +651,15 @@ fn fit(size: Vec2, position: Vec2, border: Aabb2) -> Result<Scale> {
         let presets = format!("from {} to {}", name(PRESETS.first()), name(PRESETS.last()));
         bad(CMD, format!("the view fits the sheet's drawing area at no preset scale {presets} here: give a scale, a position or a larger sheet"))
     })
+}
+
+/// The picture of a view whose boundary is `rect`, on its pixel grid at the sheet's `dpi` or the
+/// most a picture is drawn at, the lower (lines may export finer); refused past the grid's side
+/// limit.
+fn picture(rect: Aabb2, dpi: f64) -> Result<PictureResult> {
+    let dpi = dpi.min(MAX_PICTURE_DPI);
+    let grid = Picture { source: 0, rect, opacity: 1.0 }.grid(dpi).map_err(|e| bad(CMD, e.to_string()))?;
+    Ok(PictureResult { pixels: [grid.width, grid.height], dpi, rect_mm: BoxResult { min: rect.min.into(), max: rect.max.into() } })
 }
 
 /// A unit enum's name as it reads and writes (`iso_front_right`, `visible_hidden`).

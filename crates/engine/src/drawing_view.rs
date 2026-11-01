@@ -159,10 +159,14 @@ pub struct OnSheet {
 }
 
 /// Why a view drawing in `display` and `reference` styles can't be drawn yet, if it can't: shaded
-/// views need pictures, and a paper scene (`scene`) has no dashed lines for hidden ones, of the
-/// model or of reference parts. The snapshot and the sheet scene refuse alike.
+/// views with lines need the view's exact lines, and a paper scene (`scene`) has neither pictures
+/// for shaded ones nor dashed lines for hidden ones, of the model or of reference parts. The snapshot
+/// and the sheet scene refuse alike.
 pub fn not_drawable(display: VisualStyle, reference: VisualStyle, scene: bool) -> Option<&'static str> {
-    if display.is_shaded() || reference.is_shaded() {
+    let lined = |style: VisualStyle| style.is_shaded() && style != VisualStyle::Shaded;
+    if lined(display) || lined(reference) {
+        Some("not supported yet: shaded views with lines need the view's exact lines (W06)")
+    } else if scene && (display.is_shaded() || reference.is_shaded()) {
         Some("not supported yet: shaded views need the drawing renderer (#5624)")
     } else if scene && (display == VisualStyle::VisibleHidden || reference == VisualStyle::VisibleHidden) {
         Some("not supported yet: hidden lines in the paper scene need dashed lines (#4890 A5)")

@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
+use solidcraft_doc::drawing::DEFAULT_DPI;
 use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing_view::{ViewDirection, ViewOverrides};
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
-use solidcraft_geom::paper::ObjectKind;
+use solidcraft_geom::paper::{NoPictures, ObjectKind};
 
 use super::*;
 use crate::schema::drawing_scene::SheetSceneResult;
@@ -137,7 +138,7 @@ fn a_sheet_is_its_border_then_its_views_by_id() {
     let replied: Vec<(Value, Value)> = reply["views"].as_array().unwrap().iter().map(|v| (v["view"].clone(), v["status"].clone())).collect();
     assert_eq!(replied, order.map(|id| (json!(ids::encode(id)), json!("drawn"))));
 
-    let (svg, _) = solidcraft_io::paper::paper_svg(&scene.prepare().unwrap()).unwrap();
+    let (svg, _) = solidcraft_io::paper::paper_svg(&scene.prepare().unwrap(), &NoPictures, DEFAULT_DPI).unwrap();
     let svg = String::from_utf8(svg).unwrap();
     let borders: Vec<usize> = svg.match_indices("data-kind=\"drawing_border\"").map(|(at, _)| at).collect();
     let first_view = svg.find("data-kind=\"view\"").unwrap();
@@ -296,6 +297,15 @@ fn a_move_and_its_undo_project_nothing() {
     let undone = extract(&mut s, sheet).unwrap();
     assert_eq!((undone.stale.len(), s.drawing_scenes.projections), (0, projections));
     assert_eq!(bytes(&undone.scene), bytes(&before.scene));
+}
+
+/// A view's picture moves with its lines: its rectangle by exactly the offset, its pixels and
+/// opacity as they were.
+#[test]
+fn a_moved_group_moves_its_picture() {
+    let picture = |min: Vec2, max: Vec2| Item::Picture(Picture { source: 3, rect: Aabb2 { min, max }, opacity: 0.5 });
+    let group = Group { object: 7, kind: ObjectKind::View, items: vec![picture(Vec2::new(1.0, 2.0), Vec2::new(11.0, 7.0))] };
+    assert_eq!(moved(&group, Vec2::new(50.0, -2.0)).items, [picture(Vec2::new(51.0, 0.0), Vec2::new(61.0, 5.0))]);
 }
 
 /// After a model change (going back to a checkpoint taken before a tower was added) both views are

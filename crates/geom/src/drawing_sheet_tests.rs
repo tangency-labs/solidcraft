@@ -622,6 +622,7 @@ fn drawn(group: &Group) -> Vec<(Vec<[i64; 4]>, bool, f64)> {
             Item::Stroke { path, closed, width_mm } => (ends(path), *closed, *width_mm),
             Item::Fill { region } => (ends(&region.outer.segs), true, 0.0),
             Item::Text(_) => panic!("a border has no text"),
+            Item::Picture(_) => panic!("a sheet draws no pictures"),
         })
         .collect()
 }
