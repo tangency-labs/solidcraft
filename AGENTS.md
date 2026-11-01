@@ -366,6 +366,21 @@ is still open in #1018. Until it is settled, the interim rule is the one in that
   of scope.
 - A fixing PR uses a closing keyword (`Fixes #n`) so the issue closes when it merges.
 
+**Root causes, not point solutions.**
+- **A fallback is a code smell.** If a fix ends up as try-then-fallback, a retry on failure, a
+  chain of methods tried in turn, or a branch for one case, stop: that patches a symptom.
+  Find the construction that is wrong for the case and fix it as a whole.
+- **Fillets and chamfers.** These follow the generic rolling-ball blend that is replacing
+  SMLib's fillet code step by step (hub: #2243). A failing case means some part of that one
+  construction is wrong for it: the spine, the rails, the section, an end, a corner, a fold
+  check or the overflow. Never add a special case for it.
+- **Literature first.** Before designing a geometry fix, search the literature for the
+  problem; most kernel failures are known problems with known constructions. Do this before
+  inventing a local remedy.
+- **Ask before you build.** Check open PRs and issues, and the hub issue for the area, for
+  contributors working on something similar. Ask there, and build on their work rather than
+  next to it.
+
 ## 5. Where things go
 
 - `plan/units/<id>.toml`: one unit's plan entry (status, claims, notes). Edit only
