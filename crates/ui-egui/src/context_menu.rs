@@ -2812,6 +2812,53 @@ mod tests {
         assert!(remaining.dist(cut) > 1.0);
     }
 
+    /// #10417: a projected edge's context menu offers Break Link, and the item makes it normal
+    /// sketch geometry that Trim then cuts. A line drawn in the sketch is offered no Break Link.
+    #[test]
+    fn projected_geometry_context_menu_breaks_its_link_and_allows_trim() {
+        use solidcraft_engine::geom::Vec2;
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":10})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.project", json!({"refs":[{"body":"Body1"}],"projection_link":true})).unwrap();
+        let drawn = h.app.run("sketch.line", json!({"points":[[10,-5],[10,5]],"connect":false,"infer":false})).unwrap()["curves"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let sid = h.app.session.active_sketch.unwrap();
+        let cut = Vec2::new(15.0, 0.0);
+        let edge = {
+            let state = h.app.session.world_state();
+            let sk = &state.sketch(sid).unwrap().sketch;
+            (0..sk.curves.len())
+                .find(|i| sk.curves[*i].link.is_some() && sk.shape(*i).is_some_and(|shape| shape.dist(cut) < 1e-6))
+                .map(|i| sk.curves[i].id.clone())
+        }
+        .expect("the box's edge along y = 0 is projected");
+        assert!(h.app.run("sketch.trim", json!({"curve":edge,"at":[cut.x,cut.y]})).is_err(), "a linked edge is not trimmed");
+
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 80.0;
+        h.settle();
+        h.step(&json!({"click":{"world":[10,3,0]},"button":"right"})).unwrap();
+        assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: drawn.clone(), sketch: None }]);
+        assert!(!items(&h.app, &Target::Viewport).iter().any(|item| item.id == "sketch.break_link"), "a drawn line has no link to break");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.step(&json!({"click":{"world":[cut.x,cut.y,0]},"button":"right"})).unwrap();
+        assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: edge.clone(), sketch: None }]);
+        let menu = items(&h.app, &Target::Viewport);
+        let item = menu.iter().find(|item| item.id == "sketch.break_link").expect("a projected edge must offer Break Link");
+        assert_eq!(item.label, "Break Link");
+        assert!(item.enabled);
+        assert_eq!(item.params, Some(json!({"entities":[edge]})));
+        h.step(&json!({"click":{"handle":"menu:sketch.break_link"}})).unwrap();
+        let unlinked = h.app.session.world_state().sketch(sid).unwrap().sketch.curves.iter().find(|c| c.id == edge).is_some_and(|c| c.link.is_none());
+        assert!(unlinked, "Break Link makes the edge normal sketch geometry");
+        h.app.run("sketch.trim", json!({"curve":edge,"at":[cut.x,cut.y]})).unwrap();
+    }
+
     /// #6533: a right-click on a fit point spline offers Add Spline Point at the clicked spot, and
     /// the item puts a fit point there. A control point spline is not offered it. Every spline is
     /// offered Reverse Spline Direction (#8224), which runs it the other way.
