@@ -6,7 +6,8 @@
 use super::curve::C3;
 use super::surface::S3;
 use crate::Vec3;
-use crate::brep::Face;
+use crate::brep::eval::SurfaceEval;
+use crate::brep::{Face, Loop, OrientedEdge};
 
 #[derive(Clone, Debug)]
 pub(crate) struct Trim {
@@ -159,6 +160,27 @@ fn index(segs: &[([f64; 2], [f64; 2])], period: [Option<f64>; 2], r: [f64; 2]) -
     Index { copies, vcross, buckets, v0, dv }
 }
 
+/// Every use of an edge in a face's loops.
+pub(crate) fn uses(face: &Face) -> impl Iterator<Item = &OrientedEdge> {
+    face.loops.iter().flat_map(|l| match l {
+        Loop::Edges { edges } => edges.as_slice(),
+        Loop::Vertex { .. } => &[],
+    })
+}
+
+/// +1 where the chart's normal is the natural normal of the face's parameters, which its loops
+/// are stored against, and -1 where it is the other side (a form turned against its label, a
+/// recognised patch's own chart): the side the face is on, walking its loops in the chart.
+fn loops_left(face: &Face, surface: &S3) -> f64 {
+    let [[u0, u1], [v0, v1]] = face.domain;
+    let natural = SurfaceEval::new(face.parameters()).ok().and_then(|s| s.derivs(0.5 * (u0 + u1), 0.5 * (v0 + v1)));
+    let along = natural.and_then(|(p, su, sv)| {
+        let chart = surface.inverse(p, None).and_then(|uv| surface.normal(uv))?;
+        Some(su.cross(sv).dot(chart))
+    });
+    if along.is_some_and(|a| a < 0.) { -1. } else { 1. }
+}
+
 fn lift(x: f64, near: f64, p: Option<f64>) -> f64 {
     match p {
         Some(p) if p > 0. => x + p * ((near - x) / p).round(),
@@ -173,15 +195,17 @@ pub(crate) fn build(face: &Face, edges: &[C3], surface: &S3, per_break: usize) -
     let mut chords = Vec::new();
     let mut chord_error = 0f64;
     let (mut lo, mut hi) = (Vec3::new(f64::MAX, f64::MAX, f64::MAX), Vec3::new(f64::MIN, f64::MIN, f64::MIN));
-    let mut uses = std::collections::BTreeMap::new();
-    for u in face.loops.iter().flatten() {
-        *uses.entry(u.edge).or_insert(0usize) += 1;
+    let mut counts = std::collections::BTreeMap::new();
+    for u in self::uses(face) {
+        *counts.entry(u.edge).or_insert(0usize) += 1;
     }
     let mut area_u = 0.; // -loop integral of v du
     let mut area_v = 0.; // loop integral of u dv
     let mut wraps = [false; 2];
     let mut unsupported = None;
     for lp in &face.loops {
+        // A vertex loop (a pole) bounds nothing in the chart.
+        let Loop::Edges { edges: lp } = lp else { continue };
         let mut pts: Vec<([f64; 2], bool)> = Vec::new();
         let mut hint: Option<[f64; 2]> = None;
         for u in lp {
@@ -189,7 +213,7 @@ pub(crate) fn build(face: &Face, edges: &[C3], surface: &S3, per_break: usize) -
                 unsupported = Some("edge reference");
                 continue;
             };
-            let is_seam = uses.get(&u.edge).copied().unwrap_or(0) > 1;
+            let is_seam = counts.get(&u.edge).copied().unwrap_or(0) > 1;
             let mut ts = Vec::new();
             let b = c.breaks();
             for w in b.windows(2) {
@@ -253,11 +277,11 @@ pub(crate) fn build(face: &Face, edges: &[C3], surface: &S3, per_break: usize) -
     };
     // Loops that wind once around a periodic direction without coming back (a hemisphere's
     // equator) close against the chart's own edge, so their area depends on where the chart
-    // starts: there the face is taken on the loops' left (the B-rep convention), and below the
-    // side within the surface's domain wins either way.
+    // starts: there the face is taken on the loops' left seen from the natural normal (the B-rep
+    // convention), and below the side within the surface's domain wins either way.
     let net = segs.iter().fold([0f64; 2], |n, (a, b)| [n[0] + b[0] - a[0], n[1] + b[1] - a[1]]);
     let open = (0..2).any(|k| period[k].is_some_and(|p| net[k].abs() > 0.5 * p));
-    let sigma = if open { 1. } else { area.signum() };
+    let sigma = if open { loops_left(face, surface) } else { area.signum() };
     let dom = surface.domain();
     // Inside point: beside the longest non-seam segment, on the face's side.
     let mut inside = None;
