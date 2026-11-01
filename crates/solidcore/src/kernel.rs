@@ -221,6 +221,12 @@ pub struct UpstreamFixes {
     /// `SmCurveLoops::GetLoopStartEnd` starts a later loop after the previous loop
     /// ends, keeping adjacency within that loop (WR-96). Off by default for C++ parity.
     pub curve_loop_start_after_previous_end: bool,
+    /// `SmBSplineCurve::CreateSimpleOffset` passes `false` for `ApproximateCurve`'s
+    /// `bOptCreateAnalytics` and forwards `bOptMatchParameterization` in its own slot
+    /// instead of passing `(bOptMatchParameterization, FALSE)` (WR-37, #2141; see
+    /// `plan/upstream-issues/WR-37--addendum-2026-10-31-simple-offset-match-param.md`).
+    /// Off by default for pinned C++ parity.
+    pub bspline_simple_offset_matches_parameterization: bool,
     /// The generic temporary-radius constructor reports setup failures before filleting (#458, UB-252 follow-up).
     pub temporary_radius_setup_errors: bool,
     /// `SmFilletGeom::Trim` returns the first curve/surface trim or interval-intersection error instead of dropping it and continuing with an unset interval (WR-604, #483). Earlier successful edits remain; off by default for pinned C++ parity.

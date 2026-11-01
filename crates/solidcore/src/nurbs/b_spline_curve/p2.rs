@@ -85,7 +85,10 @@
 //!   calls `SmCurve::IsArc` too. It approximates an [`OffsetCurve`] with
 //!   `SmCurve::ApproximateCurve` ([`Curve::approximate_curve`]), passing the
 //!   caller's `bOptMatchParameterization` as `bOptCreateAnalytics` and `FALSE` for
-//!   matching, as upstream.
+//!   matching, as upstream (WR-37; with
+//!   [`crate::kernel::UpstreamFixes::bspline_simple_offset_matches_parameterization`],
+//!   `bOptCreateAnalytics` is `false` and `bOptMatchParameterization` is forwarded in
+//!   its own slot).
 //! - **Statuses passed on (WR-663).** With the opt-in
 //!   `Kernel::fixes.query_statuses_pass_on`, `CreateAnalyticCurve`'s knot insertion and
 //!   `CreateSimpleOffset`'s frame are passed on, and `IsDegenerate` is `false` without a
@@ -255,7 +258,7 @@ fn curve_is_arc(
 }
 
 /// `SmOffsetCurve(3, curve, ivl, normal, dist)` approximated with
-/// `ApproximateCurve(ctx, {ivl.min, ivl.max}, tol, gap, approx, bMatch, FALSE)`: the
+/// `ApproximateCurve(ctx, {ivl.min, ivl.max}, tol, gap, approx, ...)`: the
 /// approximation and its maximum gap.
 fn offset_curve_approximation(
     k: &Kernel,
@@ -284,10 +287,12 @@ fn offset_curve_approximation(
     )
 }
 
-/// `SmCurve::ApproximateCurve(ctx, breaks, tol, gap, approx, bMatch, FALSE)` of
-/// `curve`: the approximation and its maximum gap. Upstream passes the caller's
+/// `SmCurve::ApproximateCurve(ctx, breaks, tol, gap, approx, ...)` of `curve`: the
+/// approximation and its maximum gap. Upstream passes the caller's
 /// `bOptMatchParameterization` in the `bOptCreateAnalytics` slot and `FALSE` for
-/// matching the parameterization; kept.
+/// matching the parameterization (WR-37); kept by default, or fixed to
+/// `(false, match_parameterization)` with
+/// [`crate::kernel::UpstreamFixes::bspline_simple_offset_matches_parameterization`].
 fn approximate_curve(
     k: &Kernel,
     curve: &Curve,
@@ -296,9 +301,10 @@ fn approximate_curve(
     match_parameterization: bool,
 ) -> Result<(BSplineCurve, f64)> {
     const OP: &str = "nurbs::b_spline_curve::p2::approximate_curve";
+    let fix = k.fixes.bspline_simple_offset_matches_parameterization;
     let opts = crate::curve::curve::p1::ApproximateCurveOptions {
-        create_analytics: match_parameterization,
-        match_parameterization: false,
+        create_analytics: !fix && match_parameterization,
+        match_parameterization: fix && match_parameterization,
         just_copy_bsplines: false,
     };
     let r = curve.approximate_curve(k, breaks, approx_tol_3d, &opts)?;
@@ -1109,6 +1115,12 @@ impl BSplineCurve {
     /// within `approx_tol_3d`, and the maximum gap of the approximation
     /// (`CreateSimpleOffset`). Arcs in the offset plane are offset exactly (a radius
     /// below the tolerance gives a point curve).
+    ///
+    /// Upstream passes `match_parameterization` in `ApproximateCurve`'s
+    /// `bOptCreateAnalytics` slot and `FALSE` for parameterisation matching (WR-37);
+    /// set [`crate::kernel::UpstreamFixes::bspline_simple_offset_matches_parameterization`]
+    /// on `k.fixes` to pass `false` for analytic arc creation there and forward
+    /// `match_parameterization` in its own slot.
     ///
     /// # Errors
     ///
@@ -2288,5 +2300,130 @@ mod tests {
                 .len(),
             15
         );
+    }
+
+    fn wr37_nonuniform_planar_cubic() -> BSplineCurve {
+        let cpts = vec![
+            CPoint::new(0.0, 0.0, 0.0, NOW),
+            CPoint::new(1.2, 0.0, 0.0, NOW),
+            CPoint::new(6.5, 0.0, 0.0, NOW),
+            CPoint::new(7.2, 0.0, 0.0, NOW),
+            CPoint::new(8.0, 0.0, 0.0, NOW),
+            CPoint::new(10.0, 2.0, 0.0, NOW),
+        ];
+        let u = vec![0.0, 0.0, 0.0, 0.0, 0.1, 0.6, 1.0, 1.0, 1.0, 1.0];
+        BSplineCurve::from_nurb(Curve::new(cpts, 3, u).unwrap(), 3, false)
+    }
+
+    fn wr37_exact_offset_point(c: &BSplineCurve, t: f64, normal: Vec3, dist: f64) -> Point3 {
+        let pv = c.evaluate(t, 1, true, true).unwrap();
+        let binorm = pv[1].cross(normal).unitize().unwrap();
+        pv[0] + dist * binorm
+    }
+
+    #[test]
+    fn wr37_bspline_simple_offset_matches_parameterization_when_opted_in() {
+        let c = wr37_nonuniform_planar_cubic();
+        let k_def = Kernel::default();
+        let mut k_fix = Kernel::default();
+        k_fix.fixes.bspline_simple_offset_matches_parameterization = true;
+
+        let tol = 1e-4;
+        let normal = Vec3::Z;
+        let dist = 0.5;
+
+        let (min_cont, _) = c.calculate_continuities(&k_def, ANG_TOL_DEG).unwrap();
+        assert!((min_cont as i32) > (ContinuityType::C0 as i32));
+        assert!(curve_is_arc(&k_def, &c, 11, tol / 100.0).unwrap().is_none());
+
+        let r_def = c.create_simple_offset(&k_def, tol, normal, dist, true);
+        let r_fix = c.create_simple_offset(&k_fix, tol, normal, dist, true);
+        let (off_def, gap_def) = r_def.unwrap();
+        let (off_fix, gap_fix) = r_fix.unwrap();
+        assert!(gap_def <= tol);
+        assert!(gap_fix <= tol);
+
+        // Default (WR-37): match_parameterization is dropped, so [0, 0.5] passes as one
+        // Hermite span on the straight y = -dist locus despite > 0.2 parametric drift.
+        let p_def = off_def.evaluate_point(0.25).unwrap();
+        let p_exact = wr37_exact_offset_point(&c, 0.25, normal, dist);
+        assert!((p_def.y + dist).abs() < 1e-12 && p_def.z.abs() < 1e-12);
+        assert!(p_def.distance(p_exact) > 0.1);
+
+        // Opt-in: parameterization is matched across the natural interval [0, 1].
+        assert_eq!(off_fix.form(), BSplineCurveForm::Unspecified);
+        let n_def = off_def.number_control_points().unwrap();
+        let n_fix = off_fix.number_control_points().unwrap();
+        assert!(n_fix > n_def);
+        let p_fix_quarter = off_fix.evaluate_point(0.25).unwrap();
+        assert!(p_fix_quarter.distance(p_exact) <= tol);
+        for i in 0_u32..=100 {
+            let t = f64::from(i) / 100.0;
+            let p_fix = off_fix.evaluate_point(t).unwrap();
+            let p_ref = wr37_exact_offset_point(&c, t, normal, dist);
+            assert!(p_fix.distance(p_ref) <= 1.5 * tol);
+        }
+    }
+
+    #[test]
+    fn wr37_bspline_simple_offset_unmatched_mode_unchanged_by_opt_in() {
+        let c = wr37_nonuniform_planar_cubic();
+        let k_def = Kernel::default();
+        let mut k_fix = Kernel::default();
+        k_fix.fixes.bspline_simple_offset_matches_parameterization = true;
+
+        let tol = 1e-4;
+        let r_def = c.create_simple_offset(&k_def, tol, Vec3::Z, 0.5, false);
+        let r_fix = c.create_simple_offset(&k_fix, tol, Vec3::Z, 0.5, false);
+        let (off_def, gap_def) = r_def.unwrap();
+        let (off_fix, gap_fix) = r_fix.unwrap();
+        assert_eq!(gap_def.to_bits(), gap_fix.to_bits());
+        assert!(off_def.approx_eq(&off_fix));
+        assert_eq!(off_def.canonical().unwrap(), off_fix.canonical().unwrap());
+    }
+
+    #[test]
+    fn wr37_linear_bspline_and_ellipse_simple_offset_with_match_parameterization() {
+        let k_def = Kernel::default();
+        let mut k_fix = Kernel::default();
+        k_fix.fixes.bspline_simple_offset_matches_parameterization = true;
+        let tol = 1e-4;
+
+        // A linear B-spline produces a single-span cubic Hermite B-spline (not an arc)
+        // under both default (bOptCreateAnalytics = true) and opt-in (false).
+        let l = line(Point3::new(0.0, 0.0, 0.0), Point3::new(4.0, 0.0, 0.0));
+        assert_eq!(l.form(), BSplineCurveForm::PolylineForm);
+        let rl_def = l.create_simple_offset(&k_def, tol, Vec3::Z, 1.0, true);
+        let rl_fix = l.create_simple_offset(&k_fix, tol, Vec3::Z, 1.0, true);
+        let (l_def, l_gap_def) = rl_def.unwrap();
+        let (l_fix, l_gap_fix) = rl_fix.unwrap();
+        assert_eq!(l_gap_def, 0.0);
+        assert_eq!(l_gap_fix, 0.0);
+        assert_eq!(l_def.form(), BSplineCurveForm::Unspecified);
+        assert_eq!(l_fix.form(), BSplineCurveForm::Unspecified);
+        assert_eq!(l_fix.degree().unwrap(), 3);
+        assert_eq!(l_fix.number_control_points().unwrap(), 4);
+        assert!(l_def.approx_eq(&l_fix));
+        for i in 0_u32..=4 {
+            let t = f64::from(i) / 4.0;
+            let expected = Point3::new(4.0 * t, -1.0, 0.0);
+            assert!(l_fix.evaluate_point(t).unwrap().distance(expected) < 1e-12);
+        }
+
+        // Non-circular Ellipse::create_simple_offset delegates to BSplineCurve.
+        let frame = Axis2Placement::IDENTITY;
+        let deg_ivl = Extent1d::from_min_max(0.0, 180.0);
+        let ell = Ellipse::create_canonical(&k_fix, &frame, 6.0, 1.0, Some(&deg_ivl), None);
+        let ell = ell.unwrap();
+        let r_ell = ell.create_simple_offset(&k_fix, tol, Vec3::Z, 0.25, true);
+        let (ell_off, ell_gap) = r_ell.unwrap();
+        assert!(ell_gap <= tol);
+        let ivl = ell.base().natural_interval();
+        for i in 0_u32..=40 {
+            let t = ivl.evaluate(f64::from(i) / 40.0);
+            let p_off = ell_off.evaluate_point(&k_fix, t).unwrap();
+            let p_ref = wr37_exact_offset_point(ell.base(), t, Vec3::Z, 0.25);
+            assert!(p_off.distance(p_ref) <= 2.0 * tol);
+        }
     }
 }
