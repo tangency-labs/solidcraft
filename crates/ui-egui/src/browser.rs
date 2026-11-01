@@ -1690,7 +1690,7 @@ fn occurrence_rows_inner(
     placement: &mut cache::Node,
 ) {
     let key = &placement.key;
-    // While the rows start closed (Preferences › Interface), a design with many components shows
+    // While the rows start closed (Preferences › Layout), a design with many components shows
     // one row per top-level placement until opened. Find in Browser opens the ones holding its body.
     let start_open = rows_start_open(app);
     let open = is_open(app, key, start_open);

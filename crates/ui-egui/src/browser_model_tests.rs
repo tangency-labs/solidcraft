@@ -108,7 +108,7 @@ fn a_face_picked_in_the_viewport_opens_the_browser_to_its_placements_body() {
 }
 
 /// #8768: by default the Browser's rows start open, as before: a placement lists its body at
-/// once. Browser rows start closed (Preferences › Interface) closes the rows nobody opened, and
+/// once. Browser rows start closed (Preferences › Layout) closes the rows nobody opened, and
 /// turning it off again opens them.
 #[test]
 fn browser_rows_start_open_by_default_and_close_only_with_the_preference() {
@@ -127,7 +127,7 @@ fn browser_rows_start_open_by_default_and_close_only_with_the_preference() {
     assert!(h.app.tree.order.contains(&row), "off again, it is open again");
 }
 
-/// #8768: while the Browser's rows start closed (Preferences › Interface), a pick in the 3D view
+/// #8768: while the Browser's rows start closed (Preferences › Layout), a pick in the 3D view
 /// opens, closes and scrolls nothing, and neither the pick nor a body under the pointer has its
 /// placement looked up to mark the rows above it: on a large assembly that lookup names every
 /// placement again after each edit. With the preference off again, the rows above the hovered

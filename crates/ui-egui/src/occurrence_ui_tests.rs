@@ -423,7 +423,7 @@ fn bodies_folders_fold_by_the_preference_but_never_the_designs_or_a_hidden_one()
 /// deep, with no Bodies row, even when that folder was closed while it was still drawn (nothing
 /// could open it again). Always draws the folder, closed as it was left, then open with the body
 /// two levels under the placement.
-/// #8768: while the Browser's rows start closed (Preferences › Interface), a placement's contents
+/// #8768: while the Browser's rows start closed (Preferences › Layout), a placement's contents
 /// stay hidden until its arrow opens it, Find in Browser opens the placements holding its body,
 /// and Collapse All and Expand All close and open them.
 #[test]

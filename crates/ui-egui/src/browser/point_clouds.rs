@@ -189,7 +189,7 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &m
         return;
     }
     let key = "point_clouds";
-    // Like the other folders, it starts closed while the Browser's rows do (Preferences › Interface).
+    // Like the other folders, it starts closed while the Browser's rows do (Preferences › Layout).
     let start_open = rows_start_open(app);
     let open = is_open(app, key, start_open);
     // The folder's eye is its own: each cloud keeps its eye while the folder hides them all.

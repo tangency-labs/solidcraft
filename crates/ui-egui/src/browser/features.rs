@@ -40,7 +40,7 @@ pub(crate) fn reveal(app: &mut SolveApp, id: u64, body: &str) {
 pub(crate) fn reveal_in_history(app: &mut SolveApp, id: u64) {
     let Some(component) = app.session.doc.feature(id).map(|feature| feature.component) else { return };
     app.ui.show_browser = true;
-    // Opened whichever way each row starts (Preferences › Interface can start rows closed).
+    // Opened whichever way each row starts (Preferences › Layout can start rows closed).
     for key in ["c0".to_string(), format!("c{component}"), format!("c{component}/history")] {
         set_open(app, &key, true, true);
     }
@@ -742,7 +742,7 @@ mod tests {
         is_open(app, key, key == "c0" || rows_start_open(app))
     }
 
-    /// While the Browser's rows start closed (Preferences › Interface, #8768), Find in Browser
+    /// While the Browser's rows start closed (Preferences › Layout, #8768), Find in Browser
     /// opens the rows down to the body it finds and no others, and lights them from the path it
     /// found, without walking the placements again. The next find closes the rows the last one
     /// opened, but not rows opened or closed by hand since.

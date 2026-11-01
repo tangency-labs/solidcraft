@@ -1167,7 +1167,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
 }
 
 /// Select what a feature made, so the browser shows it. While the browser's rows start closed
-/// (Preferences › Interface), its first body is also found there, as Find in Browser on a body
+/// (Preferences › Layout), its first body is also found there, as Find in Browser on a body
 /// does: the rows down to it open.
 pub(crate) fn find_in_browser(app: &mut SolveApp, id: u64) {
     let st = app.session.world_state();

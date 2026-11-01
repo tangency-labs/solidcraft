@@ -28,7 +28,7 @@
   puts it back beside the fold arrow; press an eye and drag up or down over other eyes to show or hide them all at once, as one undo step), a component's radio button makes it the active component,
   and right-clicking any row gives that item's menu. Right-click the design or a component and choose **Expand All** or
   **Collapse All** to open or close every folder under that row (the design row stays visible
-  when the whole tree is collapsed). **Preferences › Interface › Browser rows start closed** (off
+  when the whole tree is collapsed). **Preferences › Layout › Browser rows start closed** (off
   by default) starts components and folders closed: they open with their arrow, **Expand All**, or
   **Find in Browser** on a body, face or edge in the view, which opens just the rows down to that
   body, and a pick in the view leaves the Browser as it is. Rows drag into groups and other components. **Preferences ›
