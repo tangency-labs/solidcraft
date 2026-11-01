@@ -1173,15 +1173,15 @@ mod tests {
     }
 
     #[test]
-    fn g2_fillet_has_the_quintics_area() {
+    fn g2_fillet_takes_off_what_the_round_does() {
         let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0)).unwrap();
         let out = fillet_g2(&body, &[Vec3::new(20.0, 0.0, 10.0)], 2.0).unwrap();
         assert!(out.validity().is_empty(), "{:?}", out.validity());
         assert_eq!(out.face_count(), body.face_count() + 1);
-        // Independent analytic area: integrating x(t) y'(t) for the quintic
-        // gives 113/756 times setback² for a right-angle corner.
+        // The curvature section's default thumbweight is equal area: on the round's rails it takes
+        // off what the round does, (1 - pi/4) setback² at a right-angle corner.
         let volume = out.mesh(&crate::MeshTolerance::chord(0.0001)).unwrap().measure().volume;
-        let expected = 8000.0 - (113.0 / 756.0) * 4.0 * 20.0;
+        let expected = 8000.0 - (1.0 - std::f64::consts::FRAC_PI_4) * 4.0 * 20.0;
         assert!((volume - expected).abs() < 0.02, "{volume} vs {expected}");
     }
 
@@ -1199,7 +1199,7 @@ mod tests {
         let out = fillet_g2(&body, &[Vec3::new(10.0, 10.0, 10.0)], 2.0).unwrap();
         assert!(out.validity().is_empty(), "{:?}", out.validity());
         let volume = out.mesh(&crate::MeshTolerance::chord(0.0001)).unwrap().measure().volume;
-        let expected = 6000.0 + (113.0 / 756.0) * 4.0 * 20.0;
+        let expected = 6000.0 + (1.0 - std::f64::consts::FRAC_PI_4) * 4.0 * 20.0;
         assert!((volume - expected).abs() < 0.02, "{volume} vs {expected}");
         let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0)).unwrap();
         let out = fillet_g2(&body, &[Vec3::new(20.0, 0.0, 10.0), Vec3::new(0.0, 20.0, 10.0)], 2.0).unwrap();
@@ -1241,9 +1241,10 @@ mod tests {
                 assert!(out.validity().is_empty(), "{:?}", out.validity());
                 assert_eq!(out.crossed_face_loops().unwrap(), 0);
                 assert_eq!(out.face_count(), 7);
-                // Analytic volume: the removed section has area 113 r² / 756
-                // and first moment ∫y dA = 13711 r³ / 486486. Axial length is 40−(left+right)y.
-                let removed = 40.0 * 113.0 / 756.0 * 25.0 - (left + right) * 13711.0 / 486486.0 * 125.0;
+                // Analytic volume: the equal-area section removes (1 - pi/4) r², and its first
+                // moment ∫y dA is 0.0474559669443 r³ (Green's theorem on the section at the
+                // square corner's equal-area thumbweight). Axial length is 40−(left+right)y.
+                let removed = 40.0 * (1.0 - std::f64::consts::FRAC_PI_4) * 25.0 - (left + right) * 0.0474559669443 * 125.0;
                 let expected = 16000.0 - 4000.0 * (left + right) - removed;
                 let volume = out.mesh(&crate::MeshTolerance::chord(0.0001)).unwrap().measure().volume;
                 assert!((volume - expected).abs() < 0.05, "{volume} vs {expected}");
@@ -1272,7 +1273,7 @@ mod tests {
         assert!(out.validity().is_empty(), "{:?}", out.validity());
         assert_eq!(out.crossed_face_loops().unwrap(), 0);
         let volume = out.mesh(&crate::MeshTolerance::chord(0.0001)).unwrap().measure().volume;
-        let expected = 6000.0 + 113.0 / 756.0 * 4.0 * 20.0;
+        let expected = 6000.0 + (1.0 - std::f64::consts::FRAC_PI_4) * 4.0 * 20.0;
         assert!((volume - expected).abs() < 0.02, "{volume} vs {expected}");
     }
 
@@ -1287,12 +1288,12 @@ mod tests {
         assert!(fillet_g2(&body, &[Vec3::new(f64::NAN, 0.0, 0.0)], 2.0).is_err());
         assert!(fillet_g2(&body, &[Vec3::new(1000.0, 0.0, 0.0)], 2.0).is_err());
         // Wider than the faces (20), over their far edges, cliffs: cut as if they went on. The
-        // section is the quintic from 25 out on each face, its inner control points a third and
-        // two thirds of the way to the corner; it takes the region between it and the corner
-        // inside the 20 x 20 section (clipped polygon of the curve, 2e5 pieces), along 20.
+        // section is the equal-area one from 25 out on each face; it takes the region between it
+        // and the corner inside the 20 x 20 section (the area under the curve clipped to the
+        // square, 2e4 strips on a 4e5-piece polygon of the curve), along 20.
         let wide = fillet_g2(&body, &edge, 25.0).unwrap();
         let v = crate::measure(&wide).unwrap().volume;
-        assert!((v - 6138.1606889014).abs() < 1e-6 * 6138.1606889014, "{v}");
+        assert!((v - 5329.0618943703).abs() < 1e-5 * 5329.0618943703, "{v}");
         assert!(wide.validity().is_empty());
     }
 

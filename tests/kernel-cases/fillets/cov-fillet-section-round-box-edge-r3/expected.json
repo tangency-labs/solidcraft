@@ -1,0 +1,28 @@
+{
+ "sources": [],
+ "what": "a box's top back edge rounded r3: the ball's circle, tangent to each face with the curvature jumping by 1/3",
+ "source": "analytic",
+ "method": "box 40x30x20, the top back edge (y = 30, z = 20, 40 long) between the planar end faces x = 0 and 40, set back s = 3 along both faces (square to each other): the quarter circle cuts (1 - pi/4) s^2 = 1.931417 off the corner: V = 24000 - 40 (1 - pi/4) 9 = 23922.7433. Faces 7; both seams G1, not G2 (curvature 1/3 against 0).",
+ "body_count": 1,
+ "volume_mm3": 23922.743338823086,
+ "faces": 7,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   30,
+   20
+  ]
+ },
+ "continuity": {
+  "order": "g1",
+  "exact": true
+ },
+ "tolerance": {
+  "rel": 1e-07
+ }
+}
