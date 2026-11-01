@@ -21,4 +21,4 @@ report-fillet-concave-arc-and-front-top-edge-together-r7-solver-residues [fail] 
 report-peg-front-and-concave-chamfers-together-d2 [fail] step 13 (solid.chamfer): SMLib chamfer: operation: SMLib failed (status 1001)
 report-peg-front-and-concave-rounds-together-r2 [fail] continuity_order: got {'body': 'Peg', 'edges': 'blend', 'order': 'g0', ' want >= g1 at every blend seam
 report-peg-front-and-concave-rounds-together-r5 [fail] continuity_order: got {'body': 'Peg', 'edges': 'blend', 'order': 'g0', ' want >= g1 at every blend seam
-report-peg-step-front-and-concave-rounds-together-r2 [fail] step 16 (solid.fillet): SMLib fillet: operation: SMLib failed (status 1001)
+report-peg-step-front-and-concave-rounds-together-r2 [fail] continuity_order: got {'body': 'Peg', 'edges': 'blend', 'order': 'g0', ' want >= g1 at every blend seam
