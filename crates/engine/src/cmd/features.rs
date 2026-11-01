@@ -91,7 +91,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.pattern.circular", "Circular Pattern", pattern_circ)
         .at("SOLID", "CREATE")
         .icon("pattern_circ")
-        .params("features: [names] | bodies: [names] | components: [names]; axis: X|Y|Z | construction axis name (followed when edited) | {origin, dir} | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); count; angle? (default 360 deg; partial arcs include both ends); alignment?: left|center|right (default right; original stays fixed); reversed?: bool (Flip; selects the extra side for even centered counts)"),
+        .params("features: [names] | bodies: [names] | components: [names]; axis: X|Y|Z | construction axis name (followed when edited) | {origin, dir} (origin coordinates may be length expressions; the pattern follows them) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); count; angle? (default 360 deg; partial arcs include both ends); alignment?: left|center|right (default right; original stays fixed); reversed?: bool (Flip; selects the extra side for even centered counts)"),
     CommandSpec::new("solid.pattern.path", "Pattern on Path", pattern_path)
         .at("SOLID", "CREATE")
         .icon("pattern_path")
@@ -2046,16 +2046,32 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
     finish_pattern(s, p, features, pattern, bodies)
 }
 
+/// The line a circular pattern turns about, as [`axis_line`] reads it, except that the origin of
+/// `{origin, dir}` may be length expressions, kept so the pattern follows them (#10852).
+fn pattern_axis(s: &Session, p: &Value, cmd: &str) -> Result<(PointExpr, Vec3, Option<solidcraft_doc::construct::GeoRef>, Option<FeatureName>)> {
+    if let Some(a @ Value::Object(o)) = p.get("axis")
+        && o.contains_key("origin")
+        && !super::is_model_axis(a)
+    {
+        // Read under its full name, so a refusal says which origin it means.
+        let origin = point_param(s, &json!({ "axis.origin": o.get("origin") }), "axis.origin", cmd)?;
+        let dir = a.get("dir").and_then(vec3).and_then(|d| d.normalized()).ok_or_else(|| bad(cmd, "axis needs a non-zero `dir`"))?;
+        return Ok((origin.unwrap_or_else(|| solidcraft_doc::point_expr(Vec3::ZERO)), dir, None, None));
+    }
+    let (origin, dir, axis_ref, axis_feature) = axis_line(s, p, cmd)?;
+    Ok((solidcraft_doc::point_expr(origin), dir, axis_ref, axis_feature))
+}
+
 fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.pattern.circular";
     let (features, bodies) = pattern_sources(s, p, cmd)?;
-    let (origin, axis, axis_ref, axis_feature) = axis_line(s, p, cmd)?;
+    let (origin, axis, axis_ref, axis_feature) = pattern_axis(s, p, cmd)?;
     let count = req_expr(cmd, p, "count")?;
     check_count(s, &count, cmd, "count")?;
     let angle = expr(p, "angle").unwrap_or_else(|| "360 deg".into());
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let pattern = solidcraft_doc::PatternKind::Circular {
-        origin: Position(origin),
+        origin,
         axis: Dir(axis),
         count,
         angle,
