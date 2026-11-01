@@ -1592,6 +1592,10 @@ mod tests {
         let mut reopened = Session::default();
         run(&mut reopened, "doc.open", json!({"path": saved.to_string_lossy()}));
         assert_eq!(sorted(names(&reopened)), ["A", "B", "B2", "Cutter"], "the rename must not move to member A on rebuild");
+        // `solidcraft-cli eval` of the saved file rebuilds it from its features alone, with no
+        // saved model to take the names from (#10438).
+        let rebuilt = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert_eq!(sorted(names(&rebuilt)), ["A", "B", "B2", "Cutter"], "a rebuild from the features alone keeps the rename too");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
