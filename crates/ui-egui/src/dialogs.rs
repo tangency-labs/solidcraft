@@ -1588,7 +1588,7 @@ impl Dialog {
         if !object_target(s, &reference, sel) {
             return false;
         }
-        set_to_object(&mut self.inputs, &mut self.active, true);
+        set_object_input(&mut self.inputs, &mut self.active, TO_OBJECT, true);
         let Some(at) = self.inputs.iter().position(|i| i.label == TO_OBJECT) else { return false };
         if let Some(input) = self.inputs.get_mut(at) {
             input.items = vec![sel.clone()];
@@ -2656,7 +2656,21 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
 /// Selection input rows: label, "N selected" (or a hint) and a clear button; clicking a row
 /// makes it the active input.
 fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::prefs::OriginPlaneNames) {
-    input_rows_range(d, ui, s, names, 0..d.inputs.len());
+    if !d.inputs.iter().any(|i| i.under_choice) {
+        return input_rows_range(d, ui, s, names, 0..d.inputs.len());
+    }
+    // The inputs a form draws under the choices that add them are left out here.
+    let listed: Vec<usize> = d.inputs.iter().enumerate().filter(|(_, i)| !i.under_choice).map(|(n, _)| n).collect();
+    for i in listed {
+        input_rows_range(d, ui, s, names, i..i + 1);
+    }
+}
+
+/// The row of the selection input labelled `label`, when the dialog has one.
+fn input_row(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::prefs::OriginPlaneNames, label: &str) {
+    if let Some(i) = d.inputs.iter().position(|x| x.label == label) {
+        input_rows_range(d, ui, s, names, i..i + 1);
+    }
 }
 
 /// Saved vectors/axes are real inputs even when they have no origin-axis selection chip.
@@ -3030,10 +3044,14 @@ fn sync_reach(app: &SolveApp, d: &mut Dialog) {
     }
     // A start offset, a To offset or a From Object move the ends: the distance stays as it is.
     let plain = d.editing.is_none() && start.trim().is_empty() && to_offset.trim().is_empty() && !object_on(&d.inputs, FROM_OBJECT);
-    // Picks and the profiles' plane are both in world space.
+    // Picks and the profiles' plane are both in world space. A face running along the normal is
+    // reached where it begins, not at the pick on it.
     let reach = match &target {
         Some(Sel::Face { point, .. } | Sel::Vertex { point, .. }) if plain => {
-            d.inputs.first().and_then(|i| i.items.first()).and_then(|first| profile_plane(&app.session, first)).map(|plane| plane.height(*point))
+            d.inputs.first().and_then(|i| i.items.first()).and_then(|first| profile_plane(&app.session, first)).map(|plane| {
+                let under = *point - plane.normal() * plane.height(*point);
+                solidcraft_engine::doc::object_height(&app.session.world_state(), &plane, under, *point)
+            })
         }
         _ => None,
     };
@@ -3761,8 +3779,19 @@ pub(crate) fn preset_to_object(d: &mut Dialog, on: bool) {
 }
 
 fn set_object(inputs: &mut Vec<SelInput>, active: &mut usize, label: &'static str, on: bool) {
+    add_object(inputs, active, SelInput::new(label, FACES | selection::VERTICES, false), on);
+}
+
+/// [`set_object`] for an input the form draws itself, under the choice that adds it
+/// ([`SelInput::under_choice`]): an extrude's To Object under Extent Type, its From Object under Start.
+pub(crate) fn set_object_input(inputs: &mut Vec<SelInput>, active: &mut usize, label: &'static str, on: bool) {
+    add_object(inputs, active, SelInput::new(label, FACES | selection::VERTICES, false).under_choice(), on);
+}
+
+fn add_object(inputs: &mut Vec<SelInput>, active: &mut usize, input: SelInput, on: bool) {
+    let label = input.label;
     if on && !object_on(inputs, label) {
-        inputs.push(SelInput::new(label, FACES | selection::VERTICES, false));
+        inputs.push(input);
         *active = inputs.len() - 1;
     } else if !on && object_on(inputs, label) {
         inputs.retain(|i| i.label != label);
@@ -5489,13 +5518,21 @@ pub(crate) fn edge_sel(s: &Session, p0: Vec3) -> Option<Sel> {
 
 /// The body face containing a point (nearest triangle).
 pub(crate) fn face_sel(s: &Session, p0: Vec3) -> Option<Sel> {
+    face_sel_in(s, p0, stored_frames(s))
+}
+
+/// [`face_sel`] of a point already where the model is shown (not on a body's stored frame).
+fn shown_face_sel(s: &Session, p0: Vec3) -> Option<Sel> {
+    face_sel_in(s, p0, None)
+}
+
+fn face_sel_in(s: &Session, p0: Vec3, frames: Option<Vec<(String, solidcraft_engine::doc::Mat)>>) -> Option<Sel> {
     use solidcraft_engine::kernel::{self, FaceSurface};
 
     if !p0.is_finite() {
         return None;
     }
     let st = s.world_state();
-    let frames = stored_frames(s);
     let mut best: Option<(f64, &solidcraft_engine::doc::ModelBody, usize, Vec3)> = None;
     for b in &st.bodies {
         let p = stored_on(&frames, &b.name, p0);
@@ -5782,9 +5819,12 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let frame = feature_frame(s, f.component);
             for (label, point) in [(TO_OBJECT, extent.to), (FROM_OBJECT, extent.from)] {
                 if let Some(point) = point {
-                    set_object(&mut d.inputs, &mut d.active, label, true);
+                    set_object_input(&mut d.inputs, &mut d.active, label, true);
+                    // The face the point is on, as it was picked: a bare point's chip reads
+                    // as sketch coordinates, (0.00, 0.00) mm with no sketch open.
+                    let point = solidcraft_engine::doc::apply_point(&frame, point.0);
                     if let Some(input) = d.inputs.iter_mut().find(|i| i.label == label) {
-                        input.items = vec![Sel::Vertex { body: String::new(), point: solidcraft_engine::doc::apply_point(&frame, point.0) }];
+                        input.items = vec![shown_face_sel(s, point).unwrap_or(Sel::Vertex { body: String::new(), point })];
                     }
                 }
             }
@@ -5826,8 +5866,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             if let Some(point) = to {
                 set_to_object(&mut d.inputs, &mut d.active, true);
+                let point = solidcraft_engine::doc::apply_point(&frame, point.0);
                 if let Some(input) = d.inputs.iter_mut().find(|i| i.label == TO_OBJECT) {
-                    input.items = vec![Sel::Vertex { body: String::new(), point: solidcraft_engine::doc::apply_point(&frame, point.0) }];
+                    input.items = vec![shown_face_sel(s, point).unwrap_or(Sel::Vertex { body: String::new(), point })];
                 }
             }
             let items = st.sketch(sketch.0).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
