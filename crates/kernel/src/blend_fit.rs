@@ -184,7 +184,7 @@ const ARC_PIECES: usize = 8;
 
 /// `poly` clipped to the half-spaces `n·x <= c`, each moved `eps` inwards (empty when nothing
 /// is left).
-fn clip(poly: &[Vec3], planes: &[(Vec3, f64)], eps: f64) -> Vec<Vec3> {
+pub(crate) fn clip(poly: &[Vec3], planes: &[(Vec3, f64)], eps: f64) -> Vec<Vec3> {
     let mut cur: Vec<Vec3> = poly.to_vec();
     for (n, c) in planes {
         let c = c - eps;
