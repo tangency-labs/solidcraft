@@ -16,23 +16,57 @@ pub(super) struct PlacedMesh {
     /// each placement draws them moved, so a part is planned once however often it is placed.
     plans: Arc<[OnceLock<Option<Arc<TessPlan>>>; 4]>,
     plan_meshes: Arc<[OnceLock<Option<Arc<Mesh>>>; 4]>,
+    /// The definition's own opposite hand: a copy of a copy is a rigid move of that.
+    opposite_hand: Arc<OnceLock<OppositeHand>>,
     transform: crate::Mat,
     pub(super) tolerance: f64,
 }
 
+/// A body's opposite hand: the first mirrored copy made of it, and the matrix that made it. A
+/// reflection reverses each face's edge walk, so a copy can't be drawn from its source's triangles.
+/// Two reflections do cancel, though: every later mirrored copy of the body, wherever dragging a
+/// placement puts it, is a proper rigid move of this one, whose triangles are made once.
+#[derive(Debug)]
+pub(super) struct OppositeHand {
+    /// The body it mirrors, to tell a holder whose body was replaced.
+    source: Body,
+    definition: ModelBody,
+    matrix: crate::Mat,
+}
+
 impl PlacedMesh {
+    /// Where `copy` (`source` transformed by `matrix`) stands relative to `source`'s opposite
+    /// hand. `None` shows it from its own mesh: a matrix that isn't a reflection of the first.
+    /// A copy of a copy goes by what its source is drawn from, which outlives that source.
+    pub(super) fn mirrored(source: &ModelBody, copy: &Body, matrix: &crate::Mat) -> Option<Self> {
+        let (cell, body, matrix) = match source.mirrored_mesh.as_deref() {
+            Some(drawn) => (&drawn.opposite_hand, &drawn.body, crate::mat_mul(matrix, &drawn.transform)),
+            None => (&source.opposite_hand, &source.body, *matrix),
+        };
+        let hand = cell.get_or_init(|| OppositeHand {
+            source: body.clone(),
+            definition: ModelBody::new(String::new(), copy.clone(), source.feature),
+            matrix,
+        });
+        if !same_triangles(&hand.source, body) {
+            return None;
+        }
+        Self::new(&hand.definition, &crate::mat_mul(&matrix, &crate::mat_inverse(&hand.matrix)?))
+    }
+
     /// Share the original definition, never a chain of previously placed meshes. A source's
     /// OnceLock lives with its immutable geometry, so edits get a new source automatically.
     pub(super) fn new(source: &ModelBody, transform: &crate::Mat) -> Option<Self> {
         if !proper_rigid(transform) {
             return None;
         }
-        Some(match source.mesh_placement.as_deref() {
+        Some(match source.mesh_placement.as_deref().or(source.mirrored_mesh.as_deref()) {
             Some(original) => Self {
                 body: original.body.clone(),
                 mesh: original.mesh.clone(),
                 plans: original.plans.clone(),
                 plan_meshes: original.plan_meshes.clone(),
+                opposite_hand: original.opposite_hand.clone(),
                 transform: crate::mat_mul(transform, &original.transform),
                 tolerance: original.tolerance,
             },
@@ -41,6 +75,7 @@ impl PlacedMesh {
                 mesh: source.mesh.clone(),
                 plans: source.plan.clone(),
                 plan_meshes: source.plan_mesh.clone(),
+                opposite_hand: source.opposite_hand.clone(),
                 transform: *transform,
                 tolerance: source.display_tol(),
             },
@@ -94,6 +129,29 @@ impl PlacedMesh {
             seams: source.seams.clone(),
             smooth_edges: source.smooth_edges.clone(),
             sharp_edges: source.sharp_edges.clone(),
+        }
+    }
+}
+
+/// Whether two bodies mesh to the same triangles: the same shape, split along the same lines.
+fn same_triangles(a: &Body, b: &Body) -> bool {
+    a.same_shape(b)
+        && match (a.split_lines(), b.split_lines()) {
+            (Some(x), Some(y)) => Arc::ptr_eq(x, y),
+            (None, None) => true,
+            _ => false,
+        }
+}
+
+impl ModelBody {
+    /// Keep the meshes `old` holds when this body is the same shape: a feature evaluated again
+    /// that gives the same solids (an import, from its shared file) doesn't mesh them again.
+    pub(super) fn keep_meshes_of(&mut self, old: &ModelBody) {
+        if same_triangles(&self.body, &old.body) {
+            self.mesh = old.mesh.clone();
+            self.plan = old.plan.clone();
+            self.plan_mesh = old.plan_mesh.clone();
+            self.opposite_hand = old.opposite_hand.clone();
         }
     }
 }
