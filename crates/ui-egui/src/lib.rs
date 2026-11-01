@@ -562,9 +562,6 @@ pub struct SolveApp {
     file_picker: Option<file_picker::Pending>,
     /// A slicer started alone and waited for before the file is sent (Send to Slicer).
     pub(crate) slicer_wait: Option<dialogs_save_mesh::SlicerWait>,
-    /// The ribbon tab Save As Mesh or Send to Slicer was opened from and the one it moved to, to
-    /// go back to on closing it (`dialogs_save_mesh::tick_return_tab`).
-    pub(crate) mesh_return_tab: Option<(String, String)>,
     /// Open with EasyPrint: the upload in flight and the question before the first one.
     pub(crate) easyprint: easyprint_ui::State,
     /// A Save or Save As being written on a worker (see [`save_job`]).
@@ -850,7 +847,6 @@ impl SolveApp {
             services,
             file_picker: None,
             slicer_wait: None,
-            mesh_return_tab: None,
             easyprint: Default::default(),
             saving: None,
             viewport: viewport::ViewportState::default(),
@@ -1859,11 +1855,7 @@ impl SolveApp {
         // a refusal is answered on the tab the user started from, as a disabled command above
         // already is (#10540).
         self.command_tab_before_start = Some(self.ui.tab.clone());
-        let tab_before = self.ui.tab.clone();
         workspace::select_command_tab(self, id);
-        if matches!(id, "file.save_mesh" | "file.send_to_slicer" | "file.open_in_easyprint") {
-            dialogs_save_mesh::remember_tab(self, tab_before, self.ui.tab.clone());
-        }
         if id == "occurrence.move" {
             joint_handles::start(self);
             return;
@@ -3114,7 +3106,6 @@ impl SolveApp {
         gpu::tick_tessellation(self);
         file_picker::tick(self, ctx);
         dialogs_save_mesh::tick_wait(self, ctx);
-        dialogs_save_mesh::tick_return_tab(self);
         easyprint_ui::tick(self, ctx);
         render_workspace::sync_backend(self);
         render_workspace::tick(self, ctx);
