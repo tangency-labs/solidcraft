@@ -5,6 +5,44 @@ use crate::{scenario, theme::Tokens};
 use egui::Ui;
 
 #[test]
+fn layout_picture_choices_wrap_inside_the_indexed_row_and_keep_real_targets() {
+    let previous = crate::theme::is_dark();
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        for width in [140.0, 280.0, 646.0] {
+            let ctx = crate::fonts::test_context();
+            let options = [
+                PictureChoice { key: "bottom", label: "Bottom", figure: paint_history_bottom },
+                PictureChoice { key: "left", label: "Left", figure: paint_history_left },
+                PictureChoice { key: "under_browser", label: "Under browser", figure: paint_history_under_browser },
+                PictureChoice { key: "browser", label: "In browser", figure: paint_history_in_browser },
+            ];
+            frame(&ctx, vec![], |ui| {
+                ui.set_width(width);
+                settings_picture_choices(ui, "geometry_history", "History", &options, 2, true);
+            });
+            let row = scenario::rect_of("dialog:row:History").unwrap();
+            for option in &options {
+                let rect = scenario::rect_of(&format!("prefs:geometry_history:{}", option.key)).unwrap();
+                assert!(row.expand(0.5).contains_rect(rect), "{width}: {rect:?} outside {row:?}");
+                assert!(rect.contains(scenario::handle_at(&format!("dialog:History:{}", option.label)).unwrap()));
+            }
+            let at = scenario::handle_at("prefs:geometry_history:left").unwrap();
+            for down in [true, false] {
+                frame(&ctx, pointer(at, down), |ui| {
+                    ui.set_width(width);
+                    let picked = settings_picture_choices(ui, "geometry_history", "History", &options, 2, true);
+                    if !down {
+                        assert_eq!(picked, Some(1), "the real card selects its option");
+                    }
+                });
+            }
+        }
+    }
+    crate::theme::set_dark(previous);
+}
+
+#[test]
 fn status_lines_wrap_at_form_width_and_leave_room_for_the_next_row() {
     let previous_dark = crate::theme::is_dark();
     for dark in [false, true] {

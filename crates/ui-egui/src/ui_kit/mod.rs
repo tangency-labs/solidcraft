@@ -91,6 +91,9 @@ pub(crate) use preferences::*;
 pub(crate) use preferences_assistant::*;
 #[allow(unused_imports, reason = "composed by the Preferences pages of #9875 to #9883")]
 pub(crate) use preferences_cards::*;
+pub(crate) use preferences_figure_data::{
+    paint_browser_card, paint_browser_column, paint_history_bottom, paint_history_in_browser, paint_history_left, paint_history_under_browser,
+};
 pub(crate) use preferences_figures::{ThemeSample, paint_theme_system, paint_theme_thumbnail};
 pub(crate) use preferences_navigation::*;
 pub(crate) use preferences_small::*;

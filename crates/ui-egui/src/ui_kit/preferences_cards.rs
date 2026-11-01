@@ -195,6 +195,74 @@ pub(crate) fn picture_card(ui: &mut Ui, card: &Card, width: f32) -> Response {
     paint_card(ui, card, width, false)
 }
 
+/// A real radio choice backed by the canonical preference figure painter.
+pub(crate) struct PictureChoice<'a> {
+    pub key: &'a str,
+    pub label: &'a str,
+    pub figure: fn(&Painter, Rect),
+}
+
+impl PictureChoice<'_> {
+    fn card(&self, selected: bool, enabled: bool) -> Card<'_> {
+        Card { label: self.label, sub: None, selected, enabled, options: None, check: selected, aspect: 226.0 / 148.0, figure: &self.figure }
+    }
+}
+
+/// Indexed, wrapping picture choices. The row and every option point at the shipped cards.
+pub(crate) fn settings_picture_choices(
+    ui: &mut Ui,
+    key: &str,
+    label: &str,
+    options: &[PictureChoice<'_>],
+    selected: usize,
+    enabled: bool,
+) -> Option<usize> {
+    let t = Tokens::get();
+    let available = dimension(ui.available_width());
+    let width = options
+        .iter()
+        .map(|o| super::ContentWidth::name(ui, o.label) + t.space_12)
+        .fold(t.space_24 * 4.0 + t.space_16 + t.space_4, f32::max)
+        .min(available);
+    let columns = (((available + t.space_10) / (width + t.space_10).max(1.0)).floor() as usize).max(1);
+    let rows = options.len().div_ceil(columns);
+    let height = options.first().map_or(0.0, |o| card_height(&t, width, &o.card(selected == 0, enabled))) * rows as f32
+        + rows.saturating_sub(1) as f32 * t.space_10
+        + t.space_16
+        + t.space_10;
+    super::settings_form(ui, 0.0, |ui| {
+        super::layout::sized_row(ui, label, height, |ui| {
+            crate::prefs_search::note_current(ui, &options.iter().map(|o| o.label).collect::<Vec<_>>().join(" "));
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing = vec2(t.space_10, t.space_10);
+                super::settings_inline_note(ui, label);
+                let mut picked = None;
+                let mut indexed = crate::prefs_search::texts_hit(ui, &[label]);
+                for (row, choices) in options.chunks(columns).enumerate() {
+                    ui.horizontal(|ui| {
+                        for (column, option) in choices.iter().enumerate() {
+                            let index = row * columns + column;
+                            let response = picture_card(ui, &option.card(selected == index, enabled), width);
+                            scenario::publish_target(&format!("prefs:{key}:{}", option.key), response.rect);
+                            scenario::publish_target(&format!("dialog:{label}:{}", option.label), response.rect);
+                            if !indexed && crate::prefs_search::texts_hit(ui, &[option.label]) {
+                                crate::prefs_search::remember(ui, option.label, response.rect);
+                                indexed = true;
+                            }
+                            crate::prefs_search::follow(ui, option.label, response.rect);
+                            if response.clicked() && enabled {
+                                picked = Some(index);
+                            }
+                        }
+                    });
+                }
+                picked
+            })
+            .inner
+        })
+    })
+}
+
 /// A toggle tile: the same picture with a checkbox in the corner. Click it to flip `card.selected`.
 pub(crate) fn toggle_tile(ui: &mut Ui, card: &Card, width: f32) -> Response {
     paint_card(ui, card, width, true)

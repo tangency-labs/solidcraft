@@ -741,6 +741,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn layout_controls_keep_one_real_search_target_and_native_names() {
+        use egui::accesskit::Role;
+        for width in [600, 1600] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", serde_json::json!({"width":width,"height":1100}));
+            h.call("ui.prefs", serde_json::json!({"language":"en","open":"Layout"}));
+            for (query, native) in [
+                ("History", None),
+                ("Browser", None),
+                ("Menus", None),
+                ("Highlight active commands", Some((Role::CheckBox, "prefs:persistent_ribbon_pressed"))),
+                ("Show navigation bar", Some((Role::CheckBox, "prefs:navbar:show"))),
+                ("Position", None),
+            ] {
+                h.app.prefs_window.filter = query.into();
+                h.frames(5);
+                let (_, _, hits) = nav(&h.ctx);
+                let matching: Vec<_> = hits.iter().filter(|hit| hit.page == crate::prefs::PAGE_LAYOUT && hit.label == query).collect();
+                assert_eq!(matching.len(), 1, "{width}: {query} has one real Layout target");
+                if let Some((role, target)) = native {
+                    let tree = h.output.accesskit_update.as_ref().unwrap();
+                    let nodes: Vec<_> =
+                        tree.nodes.iter().filter(|(_, node)| node.role() == role && node.label() == Some(query) && !node.is_disabled()).collect();
+                    assert_eq!(nodes.len(), 1, "{query} retains its native accessible name");
+                    let bounds = nodes[0].1.bounds().unwrap();
+                    let centre = egui::pos2(((bounds.x0 + bounds.x1) / 2.0) as f32, ((bounds.y0 + bounds.y1) / 2.0) as f32);
+                    assert!(crate::scenario::rect_of(target).unwrap().contains(centre));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn appearance_controls_keep_one_search_result_and_their_page() {
         use egui::accesskit::Role;
         for width in [520, 1600] {
@@ -1103,10 +1137,10 @@ mod tests {
             ("status bar", "Status bar"),
             ("sketch tab shown", "Keep the Sketch tab shown"),
             ("search results", "Show search results in the ribbon"),
-            ("play history", "Play History button in the History controls"),
-            ("view's corner", "OK and Cancel in the view's corner"),
-            ("highlight active", "Highlight active ribbon commands"),
-            ("reveal on hover", "Reveal on hover"),
+            ("play history", "Play History button"),
+            ("view's corner", "Also in the view's corner"),
+            ("highlight active", "Highlight active commands"),
+            ("On hover", "On hover"),
         ];
         for (query, label) in rows {
             h.app.prefs_window.filter = query.into();
@@ -1120,7 +1154,7 @@ mod tests {
         h.app.prefs_window.filter = "sketch tab shown".into();
         h.frames(4);
         assert!(drawn(&h, "Keep the Sketch tab shown"));
-        assert!(!drawn(&h, "Highlight active ribbon commands"), "its neighbour is not a match");
+        assert!(!drawn(&h, "Highlight active commands"), "its neighbour is not a match");
         assert!(!drawn(&h, "Show search results in the ribbon"), "its neighbour is not a match");
         h.app.prefs_window.filter = "zzzz-no-setting".into();
         h.frames(4);

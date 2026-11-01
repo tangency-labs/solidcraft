@@ -498,8 +498,40 @@ const ELEMENTS: &[Element] = &[
                 |ui| {
                     text(ui, "Controls", Text::Inline);
                 },
-                |ui, ()| layout_preview(ui, LayoutPreview { compact: true, labels: false, history: 2, translucent: false }),
+                |ui, ()| layout_preview(ui, LayoutPreview { compact: true, labels: false, history: 2, translucent: false, dialog_left: true }),
             )
+        });
+    }),
+    element!("settings_picture_choices", |ui, _| {
+        settings_picture_choices(
+            ui,
+            "gallery_history",
+            "History",
+            &[
+                PictureChoice { key: "bottom", label: "Bottom", figure: paint_history_bottom },
+                PictureChoice { key: "left", label: "Left", figure: paint_history_left },
+                PictureChoice { key: "under_browser", label: "Under browser", figure: paint_history_under_browser },
+                PictureChoice { key: "browser", label: "In browser", figure: paint_history_in_browser },
+            ],
+            2,
+            true,
+        );
+        settings_picture_choices(
+            ui,
+            "gallery_browser",
+            "Browser",
+            &[
+                PictureChoice { key: "column", label: "Column", figure: paint_browser_column },
+                PictureChoice { key: "card", label: "Card", figure: paint_browser_card },
+            ],
+            0,
+            false,
+        );
+    }),
+    element!("settings_tab_chip", |ui, _| {
+        ui.horizontal_wrapped(|ui| {
+            settings_tab_chip(ui, "MODEL", "Model", crate::workspace::tab_icon("MODEL"), true);
+            settings_tab_chip(ui, "SURFACE", "Surface", crate::workspace::tab_icon("SURFACE"), false);
         });
     }),
     element!("settings_permission_choices", |ui, state| {
