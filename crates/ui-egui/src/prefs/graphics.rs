@@ -63,6 +63,20 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         response.response.on_hover_text(app.tr("ui.graphics_preset_help"));
     });
     ui_kit::text(ui, app.tr("prefs.graphics_presets_note"), ui_kit::Text::Hint("preset"));
+    // While settings are on trial, the question about them comes first (#4015).
+    let on_trial = app.graphics.trial.is_some();
+    if !app.graphics.apis.is_empty() {
+        ui_kit::settings_section(ui, "api", app.tr("ui.graphics_api"), |ui| {
+            ui.horizontal(|ui| {
+                graphics_api(app, ui, on_trial);
+                ui_kit::settings_badge(ui, app.tr("prefs.applies_on_restart"), true);
+            });
+            if let Some(warning) = freeze_warning(app) {
+                ui_kit::text(ui, &warning, ui_kit::Text::Error("graphics_api_freezes"));
+            }
+            restart_now(app, ui, on_trial);
+        });
+    }
     ui_kit::settings_section(ui, "quality", app.tr("prefs.curved_surfaces"), |ui| {
         use solidcraft_engine::doc::display_quality::DisplayQuality;
         ui_kit::text(ui, app.tr("ui.display_quality"), ui_kit::Text::Heading("display_quality"));
@@ -97,17 +111,22 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         ui.horizontal_wrapped(|ui| {
             for m in MSAA {
-                let enabled = app.msaa_supported.is_empty() || app.msaa_supported.contains(&m);
+                let supported = app.msaa_supported.is_empty() || app.msaa_supported.contains(&m);
+                let enabled = supported && !on_trial;
                 let label = if m == 1 { app.tr("ui.colour_vision_off").to_owned() } else { format!("{m}×") };
                 let response = ui_kit::option_card(
                     ui,
                     &label,
-                    if enabled { None } else { Some(app.tr("prefs.not_on_gpu")) },
+                    if supported { None } else { Some(app.tr("prefs.not_on_gpu")) },
                     app.preferences.msaa == m,
                     enabled,
                     ui_kit::PreferenceFigure::Antialiasing(m),
                 )
-                .on_hover_text(app.tr("settings.msaa_applies_on_restart"));
+                .on_hover_text(app.tr(if on_trial {
+                    "settings.graphics_trial_first"
+                } else {
+                    "settings.graphics_applies_on_restart"
+                }));
                 crate::scenario::publish_target(&format!("prefs:msaa:{m}"), response.rect);
                 if enabled && response.clicked() {
                     app.preferences.msaa = m;
@@ -117,6 +136,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::text(ui, app.tr("prefs.anti_aliasing_note"), ui_kit::Text::Hint("msaa"));
         if app.msaa_compatibility {
             ui_kit::text(ui, app.tr("prefs.anti_aliasing_amd_dx12"), ui_kit::Text::Hint("msaa_compatibility"));
+        }
+        // Without an API to choose (macOS), the restart for the anti-aliasing comes here.
+        if app.graphics.apis.is_empty() {
+            restart_now(app, ui, on_trial);
         }
         ui.add_space(t.space_6);
         ui_kit::text(ui, app.tr("ui.supersampling"), ui_kit::Text::Heading("supersampling"));
@@ -248,4 +271,43 @@ fn field_of_view_row(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         response
     });
+}
+
+/// The graphics API (#4015): Automatic or one of [`Graphics::apis`], tried at the next start.
+/// `WGPU_BACKEND` decides it when set, and settings on trial are kept or dropped first.
+fn graphics_api(app: &mut SolveApp, ui: &mut egui::Ui, on_trial: bool) {
+    if let Some(value) = app.graphics.env_override.clone() {
+        let note = crate::i18n::format("settings.graphics_api_env", &[("value", &value)]);
+        ui.add_enabled_ui(false, |ui| ui_kit::dropdown_menu(ui, "pref_graphics_api", &value, |_| {})).response.on_disabled_hover_text(note);
+        return;
+    }
+    let apis: Vec<&str> = std::iter::once("auto").chain(app.graphics.apis.iter().copied()).collect();
+    ui.add_enabled_ui(!on_trial, |ui| {
+        ui_kit::dropdown_menu(ui, "pref_graphics_api", &graphics_api_label(&app.preferences.graphics_api), |ui| {
+            for api in apis {
+                if ui_kit::list_picker(ui, api, &graphics_api_label(api), app.preferences.graphics_api == api).clicked() {
+                    app.preferences.graphics_api = api.into();
+                }
+            }
+        })
+    })
+    .response
+    .on_disabled_hover_text(app.tr("settings.graphics_trial_first"));
+}
+
+/// The graphics API and anti-aliasing apply at start ([`Graphics`]): a note, and Restart now
+/// once the chosen ones differ from the saved ones.
+fn restart_now(app: &mut SolveApp, ui: &mut egui::Ui, on_trial: bool) {
+    if app.services.graphics_path.is_none() {
+        return;
+    }
+    ui_kit::text(ui, app.tr("settings.graphics_applies_on_restart"), ui_kit::Text::Hint("graphics_restart"));
+    if !on_trial
+        && selected_graphics(app) != app.graphics.saved
+        && ui_kit::button(ui, app.tr("settings.graphics_restart_now"), ui_kit::Button::Normal).clicked()
+    {
+        // The choice stays (as OK keeps it) and is tried by the start that follows.
+        close(app, false);
+        restart_for_graphics(app);
+    }
 }
