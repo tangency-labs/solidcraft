@@ -119,6 +119,32 @@ fn quantity_row(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label
     ui_kit::count_row(ui, label, value, &ui_kit::Count { min: 1, max: MAX_PATTERN_INSTANCES, eval: &eval })
 }
 
+/// One rectangular pattern direction (`index` 0 or 1) as its own titled group: the direction's
+/// pick, then its Quantity, Spacing and (for features) Alignment, in the same order for both
+/// directions, so a direction's settings sit together (#9634).
+fn pattern_direction_group(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui, index: usize) -> bool {
+    let (key, title, quantity_label, spacing_label) = if index == 0 {
+        ("pattern_direction1", "Direction 1", "Quantity", "Spacing")
+    } else {
+        ("pattern_direction2", "Direction 2", "Quantity 2", "Spacing 2")
+    };
+    let features = d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES);
+    ui_kit::section(ui, key, title, true, |ui| {
+        let mut enter = false;
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, index + 1..index + 2);
+        if let Kind::PatternRect { count, spacing, count2, spacing2 } = &mut d.kind {
+            let (count, spacing) = if index == 0 { (count, spacing) } else { (count2, spacing2) };
+            enter |= quantity_row(ui, &app.session.doc, quantity_label, count);
+            enter |= expr_row(ui, spacing_label, spacing);
+        }
+        if features {
+            feature_pattern_alignment_row(ui, &mut d.extra, index);
+        }
+        enter
+    })
+    .unwrap_or(false)
+}
+
 fn fillet_type(extra: &serde_json::Map<String, Value>) -> usize {
     let value = extra.get("type").and_then(Value::as_str).unwrap_or("constant");
     if value == "g2" { 3 } else { FILLET_TYPES.iter().position(|(_, key)| *key == value).unwrap_or(0) }
@@ -189,6 +215,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     if crate::hole_refs::takes(d) {
         // Each reference edge with its distance (#37, #6380).
         enter |= crate::hole_refs::input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
+    } else if matches!(d.kind, Kind::PatternRect { .. }) {
+        // Each direction's pick shows in its own group, with its quantity and spacing (#9634).
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..1);
     } else {
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
     }
@@ -507,15 +536,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 });
             }
         }
-        Kind::PatternRect { count, spacing, count2, spacing2 } => {
-            enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
-            enter |= expr_row(ui, "Spacing", spacing);
-            enter |= quantity_row(ui, &app.session.doc, "Quantity 2", count2);
-            enter |= expr_row(ui, "Spacing 2", spacing2);
-            if d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
-                feature_pattern_alignment_row(ui, &mut d.extra, 0);
-                feature_pattern_alignment_row(ui, &mut d.extra, 1);
-            }
+        Kind::PatternRect { .. } => {
+            enter |= pattern_direction_group(app, d, ui, 0);
+            enter |= pattern_direction_group(app, d, ui, 1);
         }
         Kind::PatternCirc { count, angle } => {
             enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
