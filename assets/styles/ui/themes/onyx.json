@@ -1,0 +1,667 @@
+{
+  "order": 260,
+  "provenance": "Original SolidCraft stone-grey palette and semantic icon-role mapping",
+  "format": "solidcraft-theme/1",
+  "name": "Onyx",
+  "base": "dark",
+  "colors": {
+    "accent": "#9eafbd",
+    "accent_soft": "#3b4852",
+    "agent_busy": "#9eafbd",
+    "agent_ok": "#a5b9a5",
+    "app_bar": "#1c1e20",
+    "app_bar_hover": "#dededc16",
+    "app_bar_hover_button": "#dededc1c",
+    "app_bar_hover_strong": "#dededc28",
+    "app_bar_hover_subtle": "#dededc0c",
+    "app_bar_separator": "#383c3f",
+    "app_bar_tab_active": "#303235",
+    "app_bar_text": "#dededc",
+    "axis_x": "#d7938f",
+    "axis_y": "#a5b9a5",
+    "axis_z": "#98b2c8",
+    "bend_down": "#b8a7c3",
+    "bend_up": "#a5b9a5",
+    "body": "#93989c",
+    "body_edge": "#60666b",
+    "body_selected": "#3b4852",
+    "border": "#3d4145",
+    "box_window": "#9eafbd",
+    "chip": "#758b9b",
+    "construction_geom": "#b9a78e",
+    "construction_plane": "#b9a78e24",
+    "continuity": [
+      "#a5b9a5",
+      "#98b2c8",
+      "#c7b28b",
+      "#b8a7c3"
+    ],
+    "control_border": "#4a4f54",
+    "control_fill": "#303235",
+    "cube_border": "#50565b",
+    "cube_face": "#34373a",
+    "cube_hover": "#53616c",
+    "cube_text": "#dededc",
+    "dialog_bg": "#2b2d2f",
+    "dialog_body": "#2b2d2f",
+    "dialog_border": "#3d4145",
+    "dialog_footer": "#27292b",
+    "dialog_label": "#dededc",
+    "dialog_rule": "#383c3f",
+    "dimension": "#c7b28b",
+    "dimension_driven": "#a59474",
+    "error": "#d7938f",
+    "field": "#1c1e20",
+    "form_accent": "#9d8faa",
+    "form_dim": "#c6c8c9",
+    "form_error": "#d7938f",
+    "form_error_fill": "#493334",
+    "form_fill": "#b9abc5",
+    "form_ink": "#dededc",
+    "form_primary": "#9eafbd",
+    "form_primary_fill": "#9eafbd",
+    "form_soft": "#343039",
+    "form_success": "#a5b9a5",
+    "form_success_fill": "#344139",
+    "form_tab_ink": "#b9abc5",
+    "glyph_bg": "#34373a",
+    "glyph_edge": "#d7938f",
+    "glyph_text": "#d7938f",
+    "grid": "#252729",
+    "grid_major": "#2e3235",
+    "hover": "#3b4852",
+    "hover_edge": "#b1c1ce",
+    "hover_edge_halo": "#181a1c",
+    "hover_profile": "#9eafbd30",
+    "hover_profile_edge": "#b1c1ce",
+    "icon": "#dededc",
+    "icons.agent": "#b8a7c3",
+    "icons.highlight": "#dededc",
+    "icons.marker_halo": "#1c1e20cc",
+    "interference": "#d7938f",
+    "joint_axis": "#98b2c8",
+    "joint_manipulator": "#9eafbd",
+    "logo": [
+      "#c9d4dc",
+      "#9eafbd",
+      "#647986"
+    ],
+    "manipulator": "#9eafbd",
+    "mesh_accent": "#a29772",
+    "mesh_fill": "#beb48d",
+    "mesh_ink": "#beb48d",
+    "mesh_soft": "#34332b",
+    "nav_dim": "#b5b7b8",
+    "nav_field": "#1c1e20",
+    "nav_hover": "#43494f",
+    "nav_press": "#59636c",
+    "nav_tip": "#2b2d2f",
+    "nav_tip_ink": "#dededc",
+    "nav_tip_key_border": "#3b3e41",
+    "nav_viewport": "#27292b",
+    "on_accent": "#17191b",
+    "origin_plane": "#b9a78e2c",
+    "origin_plane_edge": "#b9a78e94",
+    "origin_plane_hover": "#9eafbd60",
+    "origin_point": "#b5b7b8",
+    "overlay": "#2b2d2f",
+    "panel": "#2b2d2f",
+    "panel_header": "#303235",
+    "preview_add": "#9eafbd",
+    "preview_cut": "#d7938f68",
+    "preview_new": "#c7b28b",
+    "preview_sketch": "#a5b9a5",
+    "profile_fill": "#9eafbd28",
+    "render_accent": "#a88e88",
+    "render_fill": "#c1a49e",
+    "render_ink": "#c1a49e",
+    "render_soft": "#38302f",
+    "rubber_band": "#9eafbd",
+    "section_cap": "#c7b28b",
+    "sel_edge": "#b1c1ce",
+    "sel_edge_rim": "#d0d9df",
+    "sel_face": "#3b4852",
+    "sel_profile": "#3b4852",
+    "sel_profile_edge": "#b1c1ce",
+    "sel_vertex": "#9eafbd",
+    "selected_bg": "#3b4852",
+    "selected_ink": "#dededc",
+    "sheet_fill": "#9eb9bd",
+    "sheet_ink": "#9eb9bd",
+    "sheet_soft": "#29363a",
+    "sketch": "#9eafbd",
+    "sketch_accent": "#b2b995",
+    "sketch_centerline": "#c7b28b",
+    "sketch_conflict": "#d7938f",
+    "sketch_construction": "#c7b28b",
+    "sketch_fixed": "#dededc",
+    "sketch_halo": "#181a1c",
+    "sketch_ink": "#b2b995",
+    "sketch_locked": "#a5b9a5",
+    "sketch_lost": "#d7938f",
+    "sketch_point": "#dededc",
+    "sketch_point_free": "#9eafbd",
+    "sketch_projected": "#b8a7c3",
+    "sketch_soft": "#32352c",
+    "surface_accent": "#a6947d",
+    "surface_fill": "#c0ae96",
+    "surface_ink": "#c0ae96",
+    "surface_soft": "#35322e",
+    "tab_on_fill_dark": "#17191b",
+    "text": "#dededc",
+    "text_dim": "#c6c8c9",
+    "timeline": "#2b2d2f",
+    "timeline_item": "#303235",
+    "timeline_item_error": "#493334",
+    "timeline_marker": "#b5b7b8",
+    "toolbar": "#2b2d2f",
+    "viewport_bottom": "#1b1d1f",
+    "viewport_top": "#222426",
+    "warning": "#c7b28b"
+  },
+  "radii": {
+    "radius_sm": 3,
+    "radius_md": 6,
+    "radius_lg": 8,
+    "radius_xl": 10,
+    "control_radius": 4,
+    "sketch_mode_radius": 6
+  },
+  "icon_palette": {
+    "ink": "#1b1d1f",
+    "line": "#d7d9d8",
+    "passive-1": "#b9bdc0",
+    "passive-2": "#8d9398",
+    "passive-3": "#646c72",
+    "guide": "#a2a8ac",
+    "solid": [
+      "#c9d4dc",
+      "#b2c1cc",
+      "#9eafbd"
+    ],
+    "surface": [
+      "#d6cab8",
+      "#c0ae96",
+      "#a6947d"
+    ],
+    "mesh": [
+      "#d4ccad",
+      "#beb48d",
+      "#a29772"
+    ],
+    "form": [
+      "#d0c5d9",
+      "#b9abc5",
+      "#9d8faa"
+    ],
+    "sketch": [
+      "#c9cfb3",
+      "#b2b995",
+      "#979f78"
+    ],
+    "constraint": [
+      "#e1b7b2",
+      "#d7938f",
+      "#b77875"
+    ],
+    "construction": [
+      "#d2c6b4",
+      "#b9a78e",
+      "#9f8c73"
+    ]
+  },
+  "options": [
+    {
+      "id": "opacity",
+      "type": "range",
+      "default": 80,
+      "min": 60,
+      "max": 100
+    },
+    {
+      "id": "blur",
+      "type": "range",
+      "default": 60,
+      "max": 60
+    },
+    {
+      "id": "tab_colours",
+      "type": "bool",
+      "default": false
+    },
+    {
+      "id": "tab_fade_ms",
+      "type": "range",
+      "default": 240
+    },
+    {
+      "id": "accent",
+      "type": "choice",
+      "default": "slate",
+      "label": {
+        "en": "Accent",
+        "de": "Akzent",
+        "ja": "アクセント",
+        "ko": "강조색",
+        "zh": "强调色"
+      },
+      "help": {
+        "en": "Selection, highlights and Model controls; workspace and status colours keep their meaning.",
+        "de": "Auswahl, Hervorhebungen und Modell-Steuerung; Arbeitsbereichs- und Statusfarben behalten ihre Bedeutung.",
+        "ja": "選択・強調・モデルの操作色。ワークスペースや状態の色の意味は変えません。",
+        "ko": "선택, 강조 및 모델 조작의 색상입니다. 작업 공간과 상태 색상의 의미는 유지됩니다.",
+        "zh": "更改选择、高亮与模型控件的色调；工作空间和状态色保持原有含义。"
+      },
+      "values": [
+        {
+          "id": "slate",
+          "label": {
+            "en": "Slate blue",
+            "de": "Schieferblau",
+            "ja": "石板の青",
+            "ko": "슬레이트 블루",
+            "zh": "岩蓝"
+          }
+        },
+        {
+          "id": "silver",
+          "label": {
+            "en": "Silver",
+            "de": "Silber",
+            "ja": "シルバー",
+            "ko": "은색",
+            "zh": "银灰"
+          }
+        },
+        {
+          "id": "sage",
+          "label": {
+            "en": "Sage",
+            "de": "Salbei",
+            "ja": "セージ",
+            "ko": "세이지",
+            "zh": "鼠尾草绿"
+          }
+        }
+      ]
+    },
+    {
+      "id": "contrast",
+      "type": "choice",
+      "default": "soft",
+      "label": {
+        "en": "Contrast",
+        "de": "Kontrast",
+        "ja": "コントラスト",
+        "ko": "대비",
+        "zh": "对比度"
+      },
+      "help": {
+        "en": "Soft stone layers or stronger separation between panels and fields.",
+        "de": "Weiche Steinschichten oder stärkere Trennung von Flächen und Feldern.",
+        "ja": "柔らかな石の階調か、パネルと入力欄を明確に分ける階調を選びます。",
+        "ko": "부드러운 석재 톤 또는 패널과 입력란을 더 뚜렷하게 구분합니다.",
+        "zh": "选择柔和的石色层次，或增强面板与输入框的区分。"
+      },
+      "values": [
+        {
+          "id": "soft",
+          "label": {
+            "en": "Soft",
+            "de": "Weich",
+            "ja": "ソフト",
+            "ko": "부드럽게",
+            "zh": "柔和"
+          }
+        },
+        {
+          "id": "defined",
+          "label": {
+            "en": "Defined",
+            "de": "Deutlich",
+            "ja": "くっきり",
+            "ko": "뚜렷하게",
+            "zh": "分明"
+          }
+        }
+      ]
+    },
+    {
+      "id": "brightness",
+      "type": "range",
+      "effect": "surface_brightness",
+      "default": 100,
+      "min": 60,
+      "max": 120,
+      "step": 1,
+      "unit": "%",
+      "label": {
+        "en": "Brightness",
+        "de": "Helligkeit",
+        "ja": "明るさ",
+        "ko": "밝기",
+        "zh": "亮度"
+      },
+      "help": {
+        "en": "Adjust stone surfaces, viewport backgrounds and grid brightness. 100% keeps the authored tones; text and semantic colours stay unchanged.",
+        "de": "Helligkeit von Steinflächen, Ansichtsflächen und Raster. 100% erhält die ursprünglichen Töne; Text und Bedeutungsfarben bleiben unverändert.",
+        "ja": "石調の面・ビューポート背景・グリッドの明るさを調整します。100%は元の階調です。文字と意味のある色は変えません。",
+        "ko": "석재 표면·뷰포트 배경·격자의 밝기를 조절합니다. 100%는 원래 톤을 유지하며 글자와 의미 색상은 바꾸지 않습니다.",
+        "zh": "调整石色表面、视口背景和网格的亮度。100%保留原有色调；文字和语义颜色保持不变。"
+      }
+    },
+    {
+      "id": "foreground_colours",
+      "type": "choice",
+      "default": "vibrant",
+      "label": {
+        "en": "Foreground colours",
+        "de": "Vordergrundfarben",
+        "ja": "前景の色",
+        "ko": "전경 색상",
+        "zh": "前景颜色"
+      },
+      "help": {
+        "en": "Vibrant strengthens axes, icons and guides. Muted keeps the original quiet palette. Accent controls selection.",
+        "de": "Leuchtend verstärkt Achsen, Symbole und Hilfen. Gedämpft behält die ruhige ursprüngliche Palette. Akzent steuert die Auswahl.",
+        "ja": "鮮やかは軸・アイコン・作図ガイドを強調します。落ち着いた配色は元の控えめな色を保ちます。選択の色はアクセントで設定します。",
+        "ko": "선명함은 축·아이콘·가이드를 강조합니다. 차분함은 기존의 은은한 팔레트를 유지합니다. 선택 색상은 강조색 설정을 따릅니다.",
+        "zh": "鲜艳增强轴、图标和辅助线的色彩。柔和保留原有的沉静配色。选择颜色仍由强调色控制。"
+      },
+      "values": [
+        {
+          "id": "muted",
+          "label": {
+            "en": "Muted",
+            "de": "Gedämpft",
+            "ja": "落ち着いた",
+            "ko": "차분함",
+            "zh": "柔和"
+          }
+        },
+        {
+          "id": "vibrant",
+          "label": {
+            "en": "Vibrant",
+            "de": "Leuchtend",
+            "ja": "鮮やか",
+            "ko": "선명함",
+            "zh": "鲜艳"
+          }
+        }
+      ]
+    }
+  ],
+  "overlays": [
+    {
+      "when": {
+        "opt": "contrast",
+        "eq": "defined"
+      },
+      "colors": {
+        "app_bar": "#151719",
+        "panel": "#25282a",
+        "dialog_bg": "#25282a",
+        "dialog_body": "#25282a",
+        "dialog_footer": "#202325",
+        "panel_header": "#373b3e",
+        "field": "#171a1c",
+        "control_fill": "#383d41",
+        "border": "#4e555b",
+        "dialog_border": "#4e555b",
+        "dialog_rule": "#444b51",
+        "control_border": "#626c73",
+        "text": "#eeeeec",
+        "text_dim": "#ced1d2",
+        "form_ink": "#eeeeec",
+        "form_dim": "#ced1d2",
+        "dialog_label": "#eeeeec",
+        "toolbar": "#25282a",
+        "timeline": "#25282a"
+      }
+    },
+    {
+      "when": {
+        "opt": "accent",
+        "eq": "silver"
+      },
+      "colors": {
+        "accent": "#b7bdc2",
+        "manipulator": "#b7bdc2",
+        "joint_manipulator": "#b7bdc2",
+        "preview_add": "#b7bdc2",
+        "rubber_band": "#b7bdc2",
+        "box_window": "#b7bdc2",
+        "form_primary": "#b7bdc2",
+        "form_primary_fill": "#b7bdc2",
+        "sketch": "#b7bdc2",
+        "sketch_point_free": "#b7bdc2",
+        "sel_vertex": "#b7bdc2",
+        "accent_soft": "#454b50",
+        "hover": "#454b50",
+        "selected_bg": "#454b50",
+        "sel_face": "#454b50",
+        "sel_profile": "#454b50",
+        "body_selected": "#454b50",
+        "sel_edge": "#d5dadf",
+        "sel_profile_edge": "#d5dadf",
+        "hover_edge": "#d5dadf",
+        "hover_profile_edge": "#d5dadf",
+        "sel_edge_rim": "#dde0e3",
+        "hover_profile": "#b7bdc230",
+        "origin_plane_hover": "#b7bdc260",
+        "profile_fill": "#b7bdc228",
+        "cube_hover": "#454b50",
+        "chip": "#b7bdc2",
+        "logo": [
+          "#dde0e3",
+          "#c9cfd4",
+          "#b7bdc2"
+        ]
+      },
+      "icon_palette": {
+        "solid": [
+          "#dde0e3",
+          "#c9cfd4",
+          "#b7bdc2"
+        ]
+      }
+    },
+    {
+      "when": {
+        "opt": "accent",
+        "eq": "sage"
+      },
+      "colors": {
+        "accent": "#aabcae",
+        "manipulator": "#aabcae",
+        "joint_manipulator": "#aabcae",
+        "preview_add": "#aabcae",
+        "rubber_band": "#aabcae",
+        "box_window": "#aabcae",
+        "form_primary": "#aabcae",
+        "form_primary_fill": "#aabcae",
+        "sketch": "#aabcae",
+        "sketch_point_free": "#aabcae",
+        "sel_vertex": "#aabcae",
+        "accent_soft": "#414d45",
+        "hover": "#414d45",
+        "selected_bg": "#414d45",
+        "sel_face": "#414d45",
+        "sel_profile": "#414d45",
+        "body_selected": "#414d45",
+        "sel_edge": "#c2d2c5",
+        "sel_profile_edge": "#c2d2c5",
+        "hover_edge": "#c2d2c5",
+        "hover_profile_edge": "#c2d2c5",
+        "sel_edge_rim": "#d1ddd4",
+        "hover_profile": "#aabcae30",
+        "origin_plane_hover": "#aabcae60",
+        "profile_fill": "#aabcae28",
+        "cube_hover": "#414d45",
+        "chip": "#aabcae",
+        "logo": [
+          "#d1ddd4",
+          "#becec2",
+          "#aabcae"
+        ]
+      },
+      "icon_palette": {
+        "solid": [
+          "#d1ddd4",
+          "#becec2",
+          "#aabcae"
+        ]
+      }
+    },
+    {
+      "when": {
+        "opt": "foreground_colours",
+        "eq": "vibrant"
+      },
+      "colors": {
+        "axis_x": "#ff6d79",
+        "axis_y": "#4fd681",
+        "axis_z": "#4da7ff",
+        "agent_busy": "#4da7ff",
+        "agent_ok": "#4fd681",
+        "warning": "#ffd166",
+        "error": "#ff6d79",
+        "form_error": "#ff6d79",
+        "form_success": "#4fd681",
+        "glyph_edge": "#ff6d79",
+        "glyph_text": "#ff6d79",
+        "interference": "#ff6d79",
+        "sketch_conflict": "#ff6d79",
+        "sketch_lost": "#ff6d79",
+        "sketch_locked": "#4fd681",
+        "sketch_projected": "#c78bff",
+        "dimension": "#ffd166",
+        "dimension_driven": "#ffb166",
+        "construction_geom": "#ffb166",
+        "sketch_centerline": "#ffd166",
+        "sketch_construction": "#ffd166",
+        "joint_axis": "#42d9dd",
+        "bend_down": "#c78bff",
+        "bend_up": "#4fd681",
+        "preview_cut": "#ff6d7968",
+        "preview_new": "#ffd166",
+        "preview_sketch": "#4fd681",
+        "section_cap": "#ffd166",
+        "sketch_accent": "#4fd681",
+        "sketch_ink": "#4fd681",
+        "surface_accent": "#ffb166",
+        "surface_fill": "#ffb166",
+        "surface_ink": "#ffb166",
+        "mesh_accent": "#ffd166",
+        "mesh_fill": "#ffd166",
+        "mesh_ink": "#ffd166",
+        "form_accent": "#c78bff",
+        "form_fill": "#c78bff",
+        "form_tab_ink": "#c78bff",
+        "sheet_fill": "#63cbd5",
+        "sheet_ink": "#63cbd5",
+        "render_accent": "#ff6d79",
+        "render_fill": "#ff6d79",
+        "render_ink": "#ff6d79",
+        "icons.agent": "#c78bff",
+        "continuity": [
+          "#4fd681",
+          "#4da7ff",
+          "#ffd166",
+          "#c78bff"
+        ],
+        "origin_plane_edge": "#ffb16694",
+        "sheet_soft": "#283a3e"
+      },
+      "icon_palette": {
+        "ink": "#1b1d1f",
+        "line": "#d7d9d8",
+        "passive-1": "#d3d8dc",
+        "passive-2": "#b2bbc2",
+        "passive-3": "#929fa9",
+        "guide": "#b4c8d6",
+        "solid": [
+          "#82c1ff",
+          "#62b2ff",
+          "#4da7ff"
+        ],
+        "surface": [
+          "#ffc894",
+          "#ffba78",
+          "#ffb166"
+        ],
+        "mesh": [
+          "#ffdf94",
+          "#ffd778",
+          "#ffd166"
+        ],
+        "form": [
+          "#d8aeff",
+          "#ce99ff",
+          "#c78bff"
+        ],
+        "sketch": [
+          "#84e2a7",
+          "#64db90",
+          "#4fd681"
+        ],
+        "constraint": [
+          "#ff99a1",
+          "#ff7f89",
+          "#ff6d79"
+        ],
+        "construction": [
+          "#ffc894",
+          "#ffba78",
+          "#ffb166"
+        ]
+      }
+    }
+  ],
+  "tabs": {
+    "MODEL": {
+      "viewport_top": "#24292d",
+      "viewport_bottom": "#1b2023",
+      "panel": "#303438"
+    },
+    "SURFACE": {
+      "viewport_top": "#292622",
+      "viewport_bottom": "#211e1b",
+      "panel": "#36332f"
+    },
+    "MESH": {
+      "viewport_top": "#282820",
+      "viewport_bottom": "#202019",
+      "panel": "#35352e"
+    },
+    "FORM": {
+      "viewport_top": "#26232b",
+      "viewport_bottom": "#1e1b22",
+      "panel": "#343137"
+    },
+    "SHEET METAL": {
+      "viewport_top": "#22282a",
+      "viewport_bottom": "#1b2022",
+      "panel": "#303638"
+    },
+    "RENDER": {
+      "viewport_top": "#2b2423",
+      "viewport_bottom": "#221c1b",
+      "panel": "#373130"
+    },
+    "SKETCH": {
+      "viewport_top": "#252921",
+      "viewport_bottom": "#1d211a",
+      "panel": "#33362f"
+    }
+  },
+  "borders": {
+    "primary_inset": {
+      "width": 0.5,
+      "gap": 1,
+      "color": "#dce2e70e"
+    }
+  },
+  "requires": 2
+}

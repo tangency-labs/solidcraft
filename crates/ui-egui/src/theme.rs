@@ -1290,11 +1290,86 @@ impl Tokens {
         }
         let scale = percent.clamp(40.0, 100.0) / 100.0;
         let body_inks = [self.text, self.form_ink, self.dialog_label];
-        for fill in [&mut self.panel, &mut self.panel_header, &mut self.dialog_bg, &mut self.dialog_body, &mut self.dialog_footer, &mut self.overlay]
-        {
+        for fill in [
+            &mut self.panel,
+            &mut self.panel_header,
+            &mut self.toolbar,
+            &mut self.timeline,
+            &mut self.dialog_bg,
+            &mut self.dialog_body,
+            &mut self.dialog_footer,
+            &mut self.overlay,
+        ] {
             *fill = readable_fill(*fill, &body_inks, scale);
         }
         self.nav_tip = readable_fill(self.nav_tip, &[self.nav_tip_ink], scale);
+    }
+
+    /// Scale neutral backing colours before opacity protection; semantic ink stays authored.
+    pub(crate) fn apply_surface_brightness(&mut self, percent: f32) {
+        if !percent.is_finite() || percent == 100.0 {
+            return;
+        }
+        let scale = percent.clamp(60.0, 120.0) / 100.0;
+        let adjust = |color: &mut Color32| {
+            let [r, g, b, a] = color.to_srgba_unmultiplied();
+            if a > 0 {
+                let channel = |v: u8| (f32::from(v) * scale).round().clamp(0.0, 255.0) as u8;
+                *color = Color32::from_rgba_unmultiplied(channel(r), channel(g), channel(b), a);
+            }
+        };
+        for color in [
+            &mut self.panel,
+            &mut self.panel_header,
+            &mut self.toolbar,
+            &mut self.timeline,
+            &mut self.timeline_item,
+            &mut self.dialog_bg,
+            &mut self.dialog_body,
+            &mut self.dialog_footer,
+            &mut self.overlay,
+            &mut self.field,
+            &mut self.control_fill,
+            &mut self.app_bar,
+            &mut self.app_bar_tab_active,
+            &mut self.nav_tip,
+            &mut self.nav_field,
+            &mut self.nav_viewport,
+            &mut self.glyph_bg,
+            &mut self.cube_face,
+            &mut self.viewport_top,
+            &mut self.viewport_bottom,
+            &mut self.grid,
+            &mut self.grid_major,
+            &mut self.border,
+            &mut self.dialog_border,
+            &mut self.dialog_rule,
+            &mut self.control_border,
+            &mut self.app_bar_separator,
+            &mut self.nav_tip_key_border,
+            &mut self.cube_border,
+            &mut self.file_background,
+            &mut self.file_surface,
+            &mut self.file_border,
+            &mut self.file_recovery_well,
+        ] {
+            adjust(color);
+        }
+        for stroke in [
+            &mut self.borders.primary,
+            &mut self.borders.secondary,
+            &mut self.borders.tertiary,
+            &mut self.borders.container,
+            &mut self.borders.control,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            adjust(&mut stroke.color);
+        }
+        if let Some(inset) = &mut self.borders.primary_inset {
+            adjust(&mut inset.stroke.color);
+        }
     }
 
     /// These tokens with the 3D view's background one flat colour (#7688), or as they are for `None`.

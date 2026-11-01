@@ -1,0 +1,1 @@
+| assets/styles/ui/themes/onyx.json | SolidCraft contributors | original Onyx stone-grey palette, option overlays and semantic icon-role mapping; existing SolidCraft artwork is unchanged | MIT OR Apache-2.0 |
