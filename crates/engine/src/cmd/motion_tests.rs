@@ -1161,6 +1161,35 @@ fn driving_a_joint_moves_parts_without_evaluating_them() {
     same_bodies(&s.model.state(), &rebuilt(&s));
 }
 
+/// A seat cut from a root sketch on a face of a driven part (cutting every body, as a screw seat
+/// drawn in the assembly does) is evaluated again at each new pose: it reads that part. It cuts
+/// that part the same way wherever it is, and nothing else, so the features after it keep their
+/// results: a drive to a new angle evaluates the sketch and the cut, not the timeline after them.
+#[test]
+fn a_seat_cut_on_a_driven_part_leaves_later_features_alone() {
+    let mut s = pivot(false);
+    run(&mut s, "sketch.create", json!({"plane": {"face": [41, 6, 18]}, "name": "SeatS"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "SeatS", "distance": -1, "operation": "cut", "participants": ["*"], "name": "Seat"}));
+    run(&mut s, "component.activate", json!({"component": "Base"}));
+    for (i, x) in [-15, -5, 5, 15].into_iter().enumerate() {
+        run(
+            &mut s,
+            "solid.cylinder",
+            json!({"base": [x, -15, -1], "axis": [0, 0, 1], "radius": 1, "height": 12, "operation": "cut", "name": format!("Vent{i}")}),
+        );
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let cap = s.model.state().body("Cap").unwrap().body.face_count();
+    for angle in ["20 deg", "-35 deg", "50 deg", "-35 deg", "65 deg"] {
+        let r = run(&mut s, "joint.drive", json!({"joint": "Pivot", "value": angle}));
+        assert_eq!(r["moved"], true, "{r}");
+        assert!(s.model.last_recomputed <= 2, "at {angle}: {} features evaluated, not just the seat sketch and cut", s.model.last_recomputed);
+        assert_eq!(s.model.state().body("Cap").unwrap().body.face_count(), cap, "the seat cuts the cap the same way");
+        same_bodies(&s.model.state(), &rebuilt(&s));
+    }
+}
+
 /// A sketch that projects another part's edge is in-context design: it is evaluated again when
 /// that part moves relative to it (and gives what a full rebuild gives), not when the two move
 /// together.

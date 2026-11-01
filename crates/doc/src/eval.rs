@@ -900,8 +900,10 @@ impl ModelState {
     }
 
     /// A digest of everything later features can read: bodies (by content identity), sketches,
-    /// the body counter, threads and sheet bodies.
-    fn digest(&self) -> u64 {
+    /// the body counter, threads and sheet bodies. For a feature that reads only the sketches
+    /// `sketches` (all: `None`), the others count by id alone: a sketch it cannot read, moved with
+    /// a part (drawn on a face of a driven part), leaves its cache key alone.
+    fn digest(&self, sketches: Option<&std::collections::BTreeSet<u64>>) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         for b in &self.bodies {
             b.name.hash(&mut h);
@@ -912,7 +914,9 @@ impl ModelState {
         }
         for s in &self.sketches {
             s.feature.hash(&mut h);
-            self.sketch_keys.get(&s.feature).hash(&mut h);
+            if sketches.is_none_or(|read| read.contains(&s.feature)) {
+                self.sketch_keys.get(&s.feature).hash(&mut h);
+            }
         }
         self.body_counter.hash(&mut h);
         for n in &self.reserved_body_names {
@@ -1665,6 +1669,136 @@ fn context_digest(doc: &Document, vals: &BTreeMap<String, Value>) -> u64 {
     h.finish()
 }
 
+/// The sketches a feature can read, when they are only the ones it names (`None`: it may read
+/// any). A feature that reads no other sketch keeps its cached result when a sketch drawn on a
+/// driven part moves with it; [`with_current_sketches`] then hands on the sketches as they are now.
+fn sketch_reads(f: &Feature) -> Option<std::collections::BTreeSet<u64>> {
+    fn plane_reads_no_sketch(plane: &PlaneRef) -> bool {
+        match plane {
+            PlaneRef::Origin { .. } | PlaneRef::Custom { .. } | PlaneRef::Placed { .. } | PlaneRef::Face { .. } => true,
+            PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => plane_reads_no_sketch(base),
+            _ => false,
+        }
+    }
+    let named = || Some(f.kind.input_sketches().into_iter().collect());
+    match &f.kind {
+        FeatureKind::Box { .. }
+        | FeatureKind::Cylinder { .. }
+        | FeatureKind::Sphere { .. }
+        | FeatureKind::Fillet { .. }
+        | FeatureKind::Chamfer { .. }
+        | FeatureKind::Thread { .. } => named(),
+        FeatureKind::Extrude { extent, .. } if extent.to.is_none() && extent.from.is_none() => named(),
+        FeatureKind::Revolve {
+            to: None,
+            axis: AxisRef::SketchLine { .. } | AxisRef::SketchAxis { .. } | AxisRef::World { .. } | AxisRef::Line { .. },
+            ..
+        } => named(),
+        FeatureKind::Sketch { plane, sketch } => {
+            let links_bodies = sketch
+                .links
+                .iter()
+                .all(|l| !matches!(l.source, solidcraft_sketch::LinkSource::SketchCurve { .. } | solidcraft_sketch::LinkSource::SketchPoint { .. }));
+            (plane_reads_no_sketch(plane) && links_bodies).then(Default::default)
+        }
+        _ => None,
+    }
+}
+
+/// A cached result restored for a feature that reads only `read` of the sketches: the sketches
+/// it did not make, as they are in `input` (one may have moved with a driven part since).
+fn with_current_sketches(cached: Arc<ModelState>, input: &ModelState, f: &Feature) -> Arc<ModelState> {
+    let made = |s: &&Arc<SolvedSketch>| s.feature == f.id;
+    let sketches: Vec<Arc<SolvedSketch>> = input.sketches.iter().filter(|s| !made(s)).chain(cached.sketches.iter().filter(made)).cloned().collect();
+    let same = sketches.len() == cached.sketches.len() && sketches.iter().zip(&cached.sketches).all(|(a, b)| Arc::ptr_eq(a, b));
+    if same {
+        return cached;
+    }
+    let mut st = cached;
+    let next = Arc::make_mut(&mut st);
+    for s in &sketches {
+        if s.feature != f.id {
+            match input.sketch_keys.get(&s.feature) {
+                Some(k) => next.sketch_keys.insert(s.feature, *k),
+                None => next.sketch_keys.remove(&s.feature),
+            };
+        }
+    }
+    next.sketches = sketches;
+    st
+}
+
+/// After a cut or intersect drawn from a sketch on a part that moves (a feature that read
+/// that part's placement), each body it changed is keyed by what made it: the body it changed,
+/// the feature, the sketch, and where the sketch lay relative to that body. Driving the part to a
+/// new pose cuts it the same way, so the body keeps its key and the features after it keep their
+/// results (#3383 keys them by the state they start from).
+fn rekey_moved_tool(doc: &Document, f: &Feature, local: u64, before: &ModelState, next: &mut ModelState) {
+    // A cut or intersect makes each body from that body and the tool alone (a join can take in
+    // the other bodies it meets).
+    let only_meets = |op: &Operation| matches!(op, Operation::Cut | Operation::Intersect);
+    let sketch = match &f.kind {
+        FeatureKind::Extrude { sketch, extent, operation, .. } if extent.to.is_none() && extent.from.is_none() && !extent.through_all => {
+            only_meets(operation).then_some(sketch.0)
+        }
+        FeatureKind::Revolve { sketch, to: None, operation, axis: AxisRef::SketchLine { .. }, .. } => only_meets(operation).then_some(sketch.0),
+        _ => None,
+    };
+    let Some(sketch) = sketch else { return };
+    // A sketch drawn in the feature's own frame (face-anchored sketches authored there too).
+    let frame = doc.component_transform(f.component);
+    let Some(sf) = doc.feature(sketch).filter(|s| s.component == f.component) else { return };
+    if let FeatureKind::Sketch { plane, .. } = &sf.kind
+        && let Some(anchor) = crate::face_anchor::plane_face_anchor(plane)
+        && anchor.author_frame(doc, f.component).ok() != Some(frame)
+    {
+        return;
+    }
+    let Some(s) = before.sketches.iter().find(|s| s.feature == sketch) else { return };
+    let p = &s.plane;
+    let z = p.x.cross(p.y);
+    let plane = [[p.x.x, p.x.y, p.x.z, 0.0], [p.y.x, p.y.y, p.y.z, 0.0], [z.x, z.y, z.z, 0.0], [p.origin.x, p.origin.y, p.origin.z, 1.0]];
+    let tool = crate::mat_mul(&frame, &plane);
+    // The sketch without where its points lie (those go in by where they lie in each body) or
+    // what its driven dimensions measure: its plane may be placed afresh on the moved face.
+    let mut drawn = s.sketch.clone();
+    quantize(&mut drawn);
+    let points: Vec<Vec3> = drawn.points.iter().map(|p| crate::apply_point(&tool, Vec3::new(p.pos.x, p.pos.y, 0.0))).collect();
+    for p in &mut drawn.points {
+        p.pos = Vec2::new(0.0, 0.0);
+    }
+    for c in drawn.constraints.iter_mut().filter(|c| c.driven) {
+        if c.kind.value().is_some() {
+            c.kind.set_value(0.0);
+        }
+    }
+    // A link picks its face or edge through a point that moves with the part.
+    for l in &mut drawn.links {
+        if let solidcraft_sketch::LinkSource::Edge { at, .. }
+        | solidcraft_sketch::LinkSource::Face { at, .. }
+        | solidcraft_sketch::LinkSource::Vertex { at, .. } = &mut l.source
+        {
+            *at = Vec3::new(0.0, 0.0, 0.0);
+        }
+    }
+    let drawn = serde_json::to_string(&drawn).unwrap_or_default();
+    let old_keys: std::collections::HashSet<u64> = before.bodies.iter().map(|b| b.key).collect();
+    for b in next.bodies.iter_mut().filter(|b| !old_keys.contains(&b.key)) {
+        let Some(old) = before.bodies.iter().find(|o| o.name == b.name) else { continue };
+        let Some(inverse) = crate::mat_inverse(&body_world(doc, old)) else { continue };
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (local, old.key, &b.name, &drawn, s.report.ok()).hash(&mut h);
+        // Which way the plane faces, and each point, as the body sees them.
+        let relative = crate::mat_mul(&inverse, &tool);
+        hash_placement(&[relative[2], [0.0; 4], [0.0; 4], [0.0, 0.0, 0.0, 1.0]], &mut h);
+        for p in &points {
+            let p = crate::apply_point(&inverse, *p);
+            [p.x, p.y, p.z].map(|v| (v / QUANTUM).round()).map(|r| if r == 0.0 { 0.0f64 } else { r }.to_bits()).hash(&mut h);
+        }
+        b.key = h.finish();
+    }
+}
+
 /// The cache key of a feature evaluation: its own inputs, the document context and the state it
 /// starts from. Features that replay other features' definitions (patterns and mirrors of
 /// features) also take the chain fingerprint, which covers every earlier definition.
@@ -1672,7 +1806,7 @@ fn cache_key(f: &Feature, chain_fp: u64, local: u64, ctx: u64, state: &ModelStat
     let mut h = std::collections::hash_map::DefaultHasher::new();
     local.hash(&mut h);
     ctx.hash(&mut h);
-    state.digest().hash(&mut h);
+    state.digest(sketch_reads(f).as_ref()).hash(&mut h);
     f.id.hash(&mut h);
     let replays = match &f.kind {
         FeatureKind::Pattern { features, .. } | FeatureKind::Mirror { features, .. } => !features.is_empty(),
@@ -2313,7 +2447,7 @@ impl Model {
                 }
                 restored += 1;
                 if c.error.is_none() {
-                    state = c.state.clone();
+                    state = if sketch_reads(f).is_some() { with_current_sketches(c.state.clone(), &state, f) } else { c.state.clone() };
                 }
                 // A kept result after a failed one would not be this evaluation's.
                 reuse &= c.error.is_none();
@@ -2420,6 +2554,9 @@ impl Model {
                                 None => feature_component.get(&b.feature).copied().unwrap_or(0),
                             };
                         }
+                    }
+                    if placement_digest(doc, f, Some(&state)) != 0 {
+                        rekey_moved_tool(doc, f, fingerprint(doc, 0, f, &vals, false, &self.step_digests), &state, &mut next);
                     }
                     state = Arc::new(next);
                     // A window opening the design can show what is built so far.
@@ -3132,6 +3269,28 @@ fn empty_boolean_targets(doc: &Document, state: &ModelState, f: &Feature, tools:
     DocError::Invalid(plain.into())
 }
 
+/// Whether every tool (moved by `into`) lies clear of `mb`: their meshes' boxes, each widened
+/// past its chord tolerance, do not meet, or (where they do) the meshes themselves do not.
+fn tools_clear_of(mb: &ModelBody, tools: &[Traced], into: Option<Mat>) -> Result<bool> {
+    let body = mb.mesh().bounds();
+    if body.is_empty() {
+        return Ok(false);
+    }
+    let body = body.inflated(mb.body.size() * 2e-3 + 1e-6);
+    for t in tools {
+        let t = tool_in(t, into)?;
+        let size = t.body.size();
+        let tool = ModelBody::traced_new(String::new(), t.clone(), 0).mesh().bounds();
+        if tool.is_empty() {
+            return Ok(false);
+        }
+        if tool.inflated(size * 2e-3 + 1e-6).meets(&body) && (mb.body.is_mesh() || t.body.is_mesh() || mb.body.meets(&t.body)?) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// [`apply_op`] with tools whose lineage is known: the bodies it makes or changes keep theirs.
 fn apply_traced(doc: &Document, state: &mut ModelState, f: &Feature, tools: Vec<Traced>, op: Operation, targets: &[String]) -> Result<()> {
     apply_traced_with(doc, state, f, tools, op, targets, &[])
@@ -3288,10 +3447,19 @@ fn apply_traced_with(
             let affected: std::collections::BTreeMap<String, usize> =
                 target_idx.iter().filter_map(|i| state.bodies.get(*i)).map(|b| (b.name.clone(), b.body.lumps().map_or(1, |l| l.len()))).collect();
             let mut remove = Vec::new();
+            // A cut that reads where parts are placed leaves a body its tools are clear of as it
+            // is, not as a new body the same shape: driving the parts keeps that body's cache key.
+            let clear_of_tools = op == Operation::Cut && placement_digest(doc, f, Some(state)) != 0;
             for &ti in &target_idx {
                 let Some(mut acc) = state.bodies.get(ti).map(|b| Some(b.traced())) else { continue };
                 // The tools meet the target where it is shown: in its frame (#3383).
                 let into = state.bodies.get(ti).and_then(|b| tool_frame(&b.name));
+                if clear_of_tools
+                    && let Some(mb) = state.bodies.get(ti)
+                    && tools_clear_of(mb, &tools, into)?
+                {
+                    continue;
+                }
                 for t in &tools {
                     let t = &tool_in(t, into)?;
                     acc = match acc {
