@@ -344,6 +344,25 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.surface_parallel_to_vector_checks = true;
     f.fillet_round_ends_at_tangent_continuation = true;
     f.geometric_g2_continuity = true;
+    f.hash_table_grow_preserves_removed_records = true;
+    f.bend_volume_bbox_contains_wide_angle_and_inf_u = true;
+    f.bend_volume_trim_param_box_across_period = true;
+    f.point_set_tight_pbox_projects_points = true;
+    f.degen_param_tiebreak_uses_actual_param = true;
+    f.conic_evaluate_uses_computed_second_deriv = true;
+    f.cylinder_plane_section_trims_exact = true;
+    f.local_surface_intersect_guards_max_boundary_retry = true;
+    f.curve_max_distance_single_sample_midpoint = true;
+    f.curve_sweep_closed_path_joins_ends = true;
+    f.validate_tolerances_fixes_reported_gaps = true;
+    f.edgeuse_convexity_propagates_step_off_failure = true;
+    f.mark_lock_pair_advances_and_locks_second_context = true;
+    f.is_iso_curve_at_propagates_canonical_failure = true;
+    f.database_io_byte_swaps_read_boolean_and_u16 = true;
+    f.is_point_on_curve_propagates_eval_failure = true;
+    f.is_topological_vertex_rejects_cusps_and_tangent_errors = true;
+    f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
+    f.point_class_gap_3d_propagates_no_drop_error = true;
     f
 }
 
