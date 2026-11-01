@@ -39,6 +39,9 @@ pub enum SketchError {
     Invalid(String),
     #[error("sketch is too large")]
     TooLarge,
+    /// Fonts this text falls back to are being looked for beside the window: ask again.
+    #[error("the fonts for this text are still being looked for")]
+    FontPending,
 }
 
 pub(crate) type Result<T> = std::result::Result<T, SketchError>;
