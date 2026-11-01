@@ -25,6 +25,9 @@ const FOLD_POSITIONS: [&str; 4] = ["centerline", "start", "end", "mould"];
 const FOLD_POSITION_LABELS: [&str; 4] = ["Centerline", "Start of Bend", "End of Bend", "Outside Mould Line"];
 /// The flange types' messages, by the type's index (Base, Edge, Contour).
 const FLANGE_TYPES: [&str; 3] = ["sheet.flange_type_base", "sheet.flange_type_edge", "sheet.flange_type_contour"];
+const CONTOUR_ORIENTATIONS: [&str; 3] = ["ui.center", "sheet.flange.side_1", "sheet.flange.side_2"];
+const CONTOUR_ORIENTATION_VALUES: [&str; 3] = ["center", "side1", "side2"];
+const CONTOUR_DIRECTIONS: [&str; 2] = ["ui.one_side", "ui.symmetric"];
 const POSITIONS: [&str; 5] = ["inside", "outside", "middle", "material_outside", "tangent"];
 const POSITION_LABELS: [&str; 5] = ["Inside", "Outside", "Middle", "Material Outside", "Tangent to Edge"];
 /// Where an edge flange's height is measured from (`height_from`; the first is the default).
@@ -91,9 +94,12 @@ crate::dialog_descriptor::dialog_descriptors! {
                 position: usize,
                 /// Edge flanges: where the height is measured from (index into `HEIGHT_FROM`).
                 height_from: usize,
+                /// Contour flange: which side of the sheet thickness the contour follows.
+                orientation: usize,
+                /// Contour flange: split its width equally across the sketch plane.
+                symmetric: bool,
                 flip: bool,
                 distance: String,
-                reverse: bool,
                 rule: usize,
                 /// Edge flanges: the edges with an angle and/or a height of their own (the picked point,
                 /// angle, height; an empty text means the dialog's), from the rows per edge.
@@ -174,9 +180,10 @@ fn new_flange(app: &SolveApp, ty: usize) -> Sm {
         radius: String::new(),
         position: 0,
         height_from: 0,
+        orientation: 1,
+        symmetric: false,
         flip: false,
         distance: crate::dialogs::length_default(&app.session, "20"),
-        reverse: false,
         rule: 0,
         own: Vec::new(),
         relief: 0,
@@ -246,7 +253,23 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
     let t = Tokens::get();
     let mut enter = false;
     match k {
-        Sm::Flange { ty, height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then } => {
+        Sm::Flange {
+            ty,
+            height,
+            angle,
+            radius,
+            position,
+            height_from,
+            orientation,
+            symmetric,
+            flip,
+            distance,
+            rule,
+            own,
+            relief,
+            relief_size,
+            then,
+        } => {
             *ty = flange_type(inputs);
             form_row(ui, "Type", |ui| {
                 ui.label(FLANGE_TYPES.get(*ty).copied().map(crate::i18n::tr).unwrap_or(""));
@@ -332,7 +355,13 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                 _ => rule_combo(app, ui, "sm_rule", rule),
             }
             if *ty == 2 {
-                crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip), ("Other side", reverse)]);
+                crate::ui_kit::section(ui, "sheet_contour_options", "Options", true, |ui| {
+                    choice_row(ui, "ui.orientation", "sm_contour_orientation", orientation, &CONTOUR_ORIENTATIONS);
+                    let mut direction = usize::from(*symmetric);
+                    choice_row(ui, "ui.direction", "sm_contour_direction", &mut direction, &CONTOUR_DIRECTIONS);
+                    *symmetric = direction == 1;
+                    enter |= hint_row(ui, "Bend Radius", radius, crate::i18n::tr_label("from the rule"));
+                });
             } else {
                 crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip)]);
             }
@@ -638,7 +667,23 @@ fn flange_edges(inputs: &[SelInput], own: &[(Vec3, String, String)]) -> Vec<Valu
 pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let s = &app.session;
     let (cmd, mut p): (&str, Value) = match k {
-        Sm::Flange { height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then, .. } => {
+        Sm::Flange {
+            height,
+            angle,
+            radius,
+            position,
+            height_from,
+            orientation,
+            symmetric,
+            flip,
+            distance,
+            rule,
+            own,
+            relief,
+            relief_size,
+            then,
+            ..
+        } => {
             let mut p = match flange_type(inputs) {
                 1 => {
                     let mut p = json!({"type": "edge", "edges": flange_edges(inputs, own), "height": height, "angle": angle,
@@ -676,7 +721,16 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
                         .named_sketch()
                         .or_else(|| st.sketches.iter().rev().find(|ss| ids.iter().all(|id| ss.sketch.curve_index(id).is_some())).map(|ss| ss.feature))
                         .ok_or("pick lines of one sketch")?;
-                    json!({"type": "contour", "sketch": sketch, "curves": ids, "distance": distance, "reverse": reverse})
+                    let mut p = json!({
+                        "type": "contour",
+                        "sketch": sketch,
+                        "curves": ids,
+                        "distance": distance,
+                        "orientation": CONTOUR_ORIENTATION_VALUES.get(*orientation).copied().unwrap_or("side1"),
+                        "symmetric": symmetric,
+                    });
+                    put(&mut p, &[("radius", radius)]);
+                    p
                 }
                 _ => {
                     let ps: Vec<(u64, usize)> = items(inputs, 0).profiles();
@@ -800,13 +854,18 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             (f, ps.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect())
         }
-        FeatureKind::SheetContour { sketch, curves, distance, rule, flip, reverse, .. } => {
+        FeatureKind::SheetContour { sketch, curves, distance, radius, rule, orientation, symmetric, flip, reverse, .. } => {
             let mut f = new_flange(app, 2);
-            if let Sm::Flange { flip: fl, rule: r, distance: d, reverse: rv, .. } = &mut f {
-                *fl = *flip;
+            if let Sm::Flange { flip: fl, rule: r, distance: d, radius: rad, orientation: o, symmetric: sym, .. } = &mut f {
+                *fl = *flip != (*reverse && orientation.is_none());
                 *r = rule_index(rule);
                 *d = distance.to_string();
-                *rv = *reverse;
+                *rad = radius.as_ref().map(ToString::to_string).unwrap_or_default();
+                *o = orientation
+                    .as_deref()
+                    .and_then(|value| CONTOUR_ORIENTATION_VALUES.iter().position(|candidate| *candidate == value))
+                    .unwrap_or(if *reverse { 2 } else { 1 });
+                *sym = *symmetric;
             }
             (f, curves.iter().map(|id| crate::selection::curve_pick(id, sketch.0, app.session.active_sketch)).collect())
         }
@@ -838,9 +897,10 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                     .as_deref()
                     .and_then(|name| HEIGHT_FROM.iter().position(|h| h.eq_ignore_ascii_case(name.trim())))
                     .unwrap_or(0),
+                orientation: 1,
+                symmetric: false,
                 flip: *flip,
                 distance: crate::dialogs::length_default(&app.session, "20"),
-                reverse: false,
                 rule: 0,
                 own,
                 relief: corner_relief_shape

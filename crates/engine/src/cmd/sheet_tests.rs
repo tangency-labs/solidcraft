@@ -519,6 +519,26 @@ fn contour_flange_hem_and_tray() {
     run(&mut s, "sheet.flange", json!({"sketch": "Contour", "curves": ["l1", "l2", "l3"], "distance": 50}));
     assert!(rel(volume(&mut s), 12097.622) < 1e-4, "{}", volume(&mut s));
     assert!((flat(&mut s)["flat_size_mm"][0].as_f64().unwrap_or(0.0) - 96.309734).abs() < 1e-5);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({
+            "type": "contour",
+            "sketch": "Contour",
+            "curves": ["l1", "l2", "l3"],
+            "distance": 50,
+            "radius": "1.5 mm",
+            "orientation": "side2",
+            "symmetric": true
+        }),
+    );
+    let feature = s.doc.features.last().map(|f| &f.kind);
+    assert!(matches!(
+        feature,
+        Some(crate::doc::FeatureKind::SheetContour { radius: Some(radius), orientation: Some(orientation), symmetric: true, .. })
+            if radius == "1.5 mm" && orientation == "side2"
+    ));
+    assert!(s.model.state().sheets.last().is_some_and(|sheet| sheet.flanges.iter().all(|flange| flange.radius == 1.5)));
     // Oracle 73: flange, then a flat hem of 8.
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
