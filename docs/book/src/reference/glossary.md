@@ -162,6 +162,33 @@ They are listed together in the browser's *Construction* folder.
 - **Elsewhere:** construction plane, reference plane, datum plane (and axis, point).
 - **For translators:** not a sketch's construction entity.
 
+### continuous member
+
+One physical length of structural stock following a connected tangent path of straight lines
+and circular bends.
+
+- **In SolidCraft:** `frame.member` with `continuous: true`; the selected curves are saved in
+  path order and produce one body, with its name pinned to the feature's `$path` key.
+- **For translators:** a member group can contain several separate stock pieces; selecting a
+  group does not join those pieces into one length of stock.
+
+### cope
+
+A shaped member end that fits against the outside of one or more mating members.
+
+- **In SolidCraft:** `frame.cope` saves the round-tube member, mating members and original path
+  end in a `FrameCope` feature. The mating bores do not leave material inside the joint.
+- **Elsewhere:** fishmouth, saddle cut, tube notch.
+- **For translators:** a physical end treatment, rather than a drawing of nominal uncut stock.
+
+### cope template
+
+A full-size development of a member's actual end-cut profile onto its outer cylindrical surface.
+
+- **In SolidCraft:** `frame.export_cope_dxf` writes a millimetre DXF with an explicit seam,
+  axial datum, inward direction and scale check.
+- **For translators:** a printable cutting guide; it does not flatten the tube's bends.
+
 ### curve
 
 A sketch entity that is not a point: a line, an arc, a circle, an ellipse, a spline or a conic.

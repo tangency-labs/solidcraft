@@ -331,7 +331,7 @@ fn bad_members_are_refused() {
     rectangle_frame(&mut s);
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Arc"}));
     let arc = run(&mut s, "sketch.arc.three_point", json!({"start": [0, 0], "end": [100, 0], "through": [50, 30]}));
-    let arc_id = arc["created"]["curves"][0].as_str().unwrap().to_string();
+    let _arc_id = arc["created"]["curves"][0].as_str().unwrap().to_string();
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Empty"}));
     run(&mut s, "sketch.finish", json!({}));
@@ -343,7 +343,6 @@ fn bad_members_are_refused() {
         (json!({"sketch": "Frame", "profile": {"kind": "rect_tube", "width": 10, "height": 10, "wall": 5}}), "wall"),
         (json!({"sketch": "Frame", "profile": tube(), "lines": []}), "`lines`"),
         (json!({"sketch": "Frame", "profile": tube(), "lines": ["nope"]}), "nope"),
-        (json!({"sketch": "Arc", "profile": tube(), "lines": [arc_id]}), "not a straight line"),
         (json!({"sketch": "Arc", "profile": tube()}), "no lines"),
         (json!({"sketch": "Empty", "profile": tube()}), "no lines"),
         (json!({"sketch": "Frame", "profile": tube(), "anchor": "middle"}), "`anchor`"),
@@ -637,4 +636,450 @@ fn editing_the_feature_keeps_member_names_until_it_names_them() {
     assert_eq!(boxes(&mut s).into_keys().collect::<Vec<_>>(), ["Rail", "Rail (2)", "Rail (3)", "Rail (4)"]);
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(boxes(&mut s).into_keys().collect::<Vec<_>>(), names);
+}
+
+/// One 100 mm radius quarter bend between a 200 mm and a 300 mm straight.
+fn chassis_path(s: &mut Session) -> Vec<String> {
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Chassis"}));
+    let mut ids = Vec::new();
+    for (cmd, p) in [
+        ("sketch.line", json!({"points": [[100, -200], [100, 0]]})),
+        ("sketch.arc.three_point", json!({"start": [100, 0], "through": [100.0 / 2f64.sqrt(), 100.0 / 2f64.sqrt()], "end": [0, 100]})),
+        // Deliberately drawn backwards: selection order, rather than drawing direction,
+        // decides how the segments connect.
+        ("sketch.line", json!({"points": [[-300, 100], [0, 100]]})),
+    ] {
+        ids.extend(run(s, cmd, p)["created"]["curves"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()));
+    }
+    run(s, "sketch.finish", json!({}));
+    ids
+}
+
+#[test]
+fn explicit_arcs_make_round_and_rectangular_members_without_changing_all_lines() {
+    for (profile, area) in [
+        (json!({"kind": "round_tube", "diameter": 20, "wall": 2}), 36.0 * PI),
+        (json!({"kind": "rect_tube", "width": 20, "height": 10, "wall": 2, "outer_radius": 0}), 200.0 - 16.0 * 6.0),
+    ] {
+        let mut s = Session::default();
+        let ids = chassis_path(&mut s);
+        run(&mut s, "frame.member", json!({"sketch": "Chassis", "lines": [ids[1]], "profile": profile}));
+        assert_eq!(bodies(&mut s).len(), 1);
+        let expected = area * 100.0 * PI / 2.0;
+        assert!(rel(total_volume(&mut s), expected) < MEASURED, "{} vs {expected}", total_volume(&mut s));
+        run(&mut s, "edit.undo", json!({}));
+        run(&mut s, "frame.member", json!({"sketch": "Chassis", "profile": profile}));
+        assert_eq!(bodies(&mut s).len(), 2, "all lines still selects only straight lines");
+        assert!(rel(total_volume(&mut s), area * 500.0) < MEASURED);
+    }
+}
+
+#[test]
+fn continuous_member_keeps_one_identity_through_reversal_edit_reopen_and_undo() {
+    let mut s = Session::default();
+    let ids = chassis_path(&mut s);
+    let profile = json!({"kind": "round_tube", "diameter": 20, "wall": 2});
+    let params = json!({"sketch": "Chassis", "lines": ids, "continuous": true, "profile": profile, "body_name": "Hoop"});
+    let fid = run(&mut s, "frame.member", params)["feature"].clone();
+    let bs = bodies(&mut s);
+    assert_eq!(bs.len(), 1);
+    assert_eq!(bs[0].0, "Hoop");
+    let expected = 36.0 * PI * (500.0 + 100.0 * PI / 2.0);
+    assert!(rel(bs[0].1, expected) < MEASURED, "{} vs {expected}", bs[0].1);
+    assert!(near3(bs[0].2, [-300.0, -200.0, -10.0]) && near3(bs[0].3, [110.0, 110.0, 10.0]), "{bs:?}");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(bodies(&mut s).is_empty());
+    run(&mut s, "edit.redo", json!({}));
+    run(&mut s, "body.rename", json!({"body": "Hoop", "name": "Main hoop"}));
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": fid, "command": "frame.member", "params": {
+            "sketch": "Chassis", "lines": ids, "continuous": true,
+            "profile": {"kind": "round_tube", "diameter": 20, "wall": 3}, "body_name": "Hoop"
+        }}),
+    );
+    let bs = bodies(&mut s);
+    assert_eq!(bs[0].0, "Main hoop");
+    assert!(rel(bs[0].1, 51.0 * PI * (500.0 + 50.0 * PI)) < MEASURED);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(bodies(&mut reopened), bs);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(rel(total_volume(&mut s), expected) < MEASURED);
+    // Reverse the whole traversal, including the bend, without changing its physical volume.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": fid, "command": "frame.member", "params": {
+            "sketch": "Chassis", "lines": ids.into_iter().rev().collect::<Vec<_>>(), "continuous": true, "profile": profile, "body_name": "Hoop"
+        }}),
+    );
+    assert_eq!(bodies(&mut s)[0].0, "Main hoop");
+    assert!(rel(total_volume(&mut s), expected) < MEASURED);
+}
+
+#[test]
+fn compound_spatial_bends_stay_exact_and_carry_a_rectangular_section() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Spatial"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let d = 100.0 / 2f64.sqrt();
+    let mut ids = Vec::new();
+    for (cmd, p) in [
+        ("sketch.line3d", json!({"points": [[100, -200, 0], [100, 0, 0]]})),
+        ("sketch.arc3d", json!({"start": [100, 0, 0], "through": [d, d, 0], "end": [0, 100, 0]})),
+        ("sketch.line3d", json!({"points": [[0, 100, 0], [-200, 100, 0]]})),
+        ("sketch.arc3d", json!({"start": [-200, 100, 0], "through": [-200.0-d, 100, 100.0-d], "end": [-300, 100, 100]})),
+        ("sketch.line3d", json!({"points": [[-300, 100, 100], [-300, 100, 400]]})),
+    ] {
+        ids.extend(run(&mut s, cmd, p)["curves"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "frame.member",
+        json!({"sketch": "Spatial", "lines": ids, "continuous": true,
+        "profile": {"kind": "bar", "width": 20, "height": 10}, "body_name": "Compound"}),
+    );
+    let bs = bodies(&mut s);
+    assert_eq!(bs.len(), 1);
+    // Two quarter bends, one in XY and one in XZ, plus 700 mm of straight stock.
+    assert!(rel(bs[0].1, 200.0 * (700.0 + 100.0 * PI)) < MEASURED, "{bs:?}");
+    // At the final vertical end the 20 mm width remains along Y; the 10 mm height has
+    // transported to X. Restarting the world-up frame here would swap them.
+    assert!((bs[0].2[0] + 305.0).abs() < 1e-6 && (bs[0].3[1] - 110.0).abs() < 1e-6, "{bs:?}");
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(bodies(&mut reopened), bs);
+}
+
+#[test]
+fn invalid_continuous_paths_and_tight_bends_are_atomic() {
+    let mut s = Session::default();
+    let ids = chassis_path(&mut s);
+    let original = s.doc.to_json();
+    for (extra, why) in [
+        (json!({"continuous": true}), "explicit"),
+        (json!({"continuous": 1, "lines": ids}), "continuous"),
+        (json!({"continuous": true, "lines": [ids[0], ids[2]]}), "connected"),
+        (json!({"continuous": true, "lines": [ids[0], ids[1], ids[1]]}), "twice"),
+        (json!({"lines": [ids[1]], "profile": {"kind": "round_tube", "diameter": 250, "wall": 2}}), "radius"),
+    ] {
+        let mut p = json!({"sketch": "Chassis", "profile": {"kind": "round_tube", "diameter": 20, "wall": 2}});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        let err = s.execute("frame.member", &p).unwrap_err().to_string();
+        assert!(err.contains(why), "{p}: {err}");
+        assert_eq!(s.doc.to_json(), original);
+        assert!(bodies(&mut s).is_empty());
+    }
+    rectangle_frame(&mut s);
+    let err = s.execute("frame.member", &json!({"sketch": "Frame", "lines": ["l1", "l2"], "continuous": true, "profile": tube()})).unwrap_err();
+    assert!(err.to_string().contains("tangent"), "{err}");
+}
+
+#[test]
+fn curved_member_follows_radius_parameters_and_a_different_component_frame() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "R", "expression": "100 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Bend"}));
+    let arc = run(
+        &mut s,
+        "sketch.arc.three_point",
+        json!({
+            "start": ["R", 0], "through": ["R * 0.7071067811865476", "R * 0.7071067811865476"], "end": [0, "R"]
+        }),
+    )["created"]["curves"][0]
+        .clone();
+    run(&mut s, "sketch.finish", json!({}));
+    let c = run(&mut s, "component.create", json!({"name": "Bent tube", "grounded": false}))["component"].as_u64().unwrap();
+    let o = s.doc.occurrence_of(c).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence": o, "translate": [0, 0, 100], "capture": true}));
+    run(
+        &mut s,
+        "frame.member",
+        json!({"sketch": "Bend", "lines": [arc], "continuous": true,
+        "profile": {"kind": "round_tube", "diameter": 20, "wall": 2}}),
+    );
+    let b = bodies(&mut s).remove(0);
+    assert!((b.2[2] + 10.0).abs() < 1e-6 && (b.3[2] - 10.0).abs() < 1e-6, "{b:?}");
+    assert!(rel(b.1, 36.0 * PI * 100.0 * PI / 2.0) < MEASURED);
+    run(&mut s, "parameters.change", json!({"name": "R", "expression": "150 mm"}));
+    let after = bodies(&mut s).remove(0);
+    assert_eq!(after.0, b.0);
+    assert!(rel(after.1, 36.0 * PI * 150.0 * PI / 2.0) < MEASURED);
+}
+
+fn round_stock(s: &mut Session, name: &str, a: [f64; 3], b: [f64; 3], diameter: Value) -> Value {
+    run(s, "sketch.create", json!({"plane": "XY", "name": format!("{name} path")}));
+    run(s, "sketch.options", json!({"sketch_3d": true}));
+    run(s, "sketch.line3d", json!({"points": [a, b]}));
+    run(s, "sketch.finish", json!({}));
+    run(
+        s,
+        "frame.member",
+        json!({"sketch": format!("{name} path"), "profile": {"kind": "round_tube", "diameter": diameter, "wall": 2}, "body_name": name}),
+    )
+}
+
+fn coped_joint(mate_diameter: f64, mate_direction: [f64; 3]) -> Session {
+    let mut s = Session::default();
+    round_stock(&mut s, "Tube", [0., 0., 0.], [200., 0., 0.], json!(40));
+    let a = mate_direction.map(|x| -150.0 * x);
+    let b = mate_direction.map(|x| 150.0 * x);
+    round_stock(&mut s, "Mate", a, b, json!(mate_diameter));
+    run(&mut s, "frame.cope", json!({"member":"Tube", "tools":["Mate"], "end":"start", "name":"Joint"}));
+    s
+}
+
+fn cope_export(s: &mut Session, seam: Value) -> Value {
+    run(s, "frame.export_cope_dxf", json!({"member":"Tube", "end":"start", "seam": seam, "tolerance":0.05}))
+}
+
+fn assert_profile_on_brep(s: &Session, out: &Value) {
+    use solidcraft_geom::Vec3;
+    let state = s.model.state();
+    let mb = state.body(out["member"].as_str().unwrap()).unwrap();
+    let edges = mb.body.edges(0.002).unwrap();
+    let v = |p: &Value| Vec3::new(f(&p[0]), f(&p[1]), f(&p[2]));
+    let (origin, axis, radial0) = (v(&out["origin"]), v(&out["axis"]), v(&out["seam_direction"]));
+    let radius = f(&out["outer_diameter"]) / 2.0;
+    let around = axis.cross(radial0);
+    let profile = out["profile"].as_array().unwrap();
+    for p in profile.iter().step_by((profile.len() / 64).max(1)) {
+        let theta = f(&p[0]) / radius;
+        let point = origin + axis * f(&p[1]) + (radial0 * theta.cos() + around * theta.sin()) * radius;
+        let distance = edges
+            .iter()
+            .flat_map(|e| e.points.windows(2))
+            .map(|seg| {
+                let (a, b) = (seg[0], seg[1]);
+                let d = b - a;
+                let t = ((point - a).dot(d) / d.dot(d).max(1e-30)).clamp(0.0, 1.0);
+                point.dist(a + d * t)
+            })
+            .fold(f64::INFINITY, f64::min);
+        assert!(distance < 0.04, "wrapped point {point:?} is {distance} mm from actual cut B-rep");
+    }
+}
+
+#[test]
+fn cope_equal_perpendicular_fishmouth_exports_actual_od_curve_and_datums() {
+    let mut s = coped_joint(40., [0., 1., 0.]);
+    let before = s.doc.to_json();
+    let out = cope_export(&mut s, json!(0));
+    assert_eq!(s.doc.to_json(), before, "export must not alter the design");
+    assert_eq!(out["units"], "mm");
+    assert_eq!(out["scale"], 1.0);
+    assert!((f(&out["circumference"]) - 40.0 * PI).abs() < 1e-10);
+    let points = out["profile"].as_array().unwrap();
+    for p in points {
+        let theta = f(&p[0]) / 20.0;
+        assert!((f(&p[1]) - 20.0 * theta.cos().abs()).abs() < 1e-9, "{p}");
+    }
+    assert_eq!(points.first().unwrap()[1], points.last().unwrap()[1]);
+    assert!((f(&points.last().unwrap()[0]) - 40.0 * PI).abs() < 1e-10);
+    let dxf = out["dxf"].as_str().unwrap();
+    for marker in ["$INSUNITS", "CUT_PROFILE", "SCALE_CHECK", "100 mm", "keep +Y", "Tube", "start end"] {
+        assert!(dxf.contains(marker), "missing {marker}");
+    }
+    let geometry = solidcraft_io::read_dxf(dxf).unwrap();
+    assert!(!geometry.is_empty());
+    assert_profile_on_brep(&s, &out);
+}
+
+#[test]
+fn cope_oblique_unequal_and_rotated_seams_match_analytic_stations_and_brep() {
+    let c = 0.5_f64;
+    let h = (1.0 - c * c).sqrt();
+    let mut s = coped_joint(60., [c, h, 0.]);
+    for seam in [0.0, 0.7, PI, -0.4] {
+        let out = cope_export(&mut s, json!(seam));
+        for p in out["profile"].as_array().unwrap() {
+            let theta = f(&p[0]) / 20.0 + seam;
+            // Cylinder equation: (h*t - c*20*cos(theta))² + (20*sin(theta))² = 30².
+            let expected = (c * 20.0 * theta.cos() + (900.0 - 400.0 * theta.sin().powi(2)).sqrt()) / h;
+            assert!((f(&p[1]) - expected).abs() < 1e-8, "{p}: {expected}");
+        }
+        assert_profile_on_brep(&s, &out);
+    }
+    std::sync::Arc::make_mut(&mut s.doc).units = "in".into();
+    let inch = cope_export(&mut s, json!(0));
+    assert!((f(&inch["circumference"]) - 40.0 * PI).abs() < 1e-10, "DXF remains mm");
+    let numeric = cope_export(&mut s, json!(0.5));
+    let expression = cope_export(&mut s, json!("0.5 rad"));
+    assert_eq!(numeric["profile"], expression["profile"]);
+}
+
+#[test]
+fn cope_multiple_mates_selects_surviving_envelope_without_seam_diagonals() {
+    let mut s = Session::default();
+    round_stock(&mut s, "Tube", [0., 0., 0.], [200., 0., 0.], json!(40));
+    round_stock(&mut s, "Y", [0., -150., 0.], [0., 150., 0.], json!(40));
+    round_stock(&mut s, "Z", [0., 0., -150.], [0., 0., 150.], json!(40));
+    run(&mut s, "frame.cope", json!({"member":"Tube", "tools":["Y","Z"], "end":"start"}));
+    let out = cope_export(&mut s, json!(0.41));
+    let points = out["profile"].as_array().unwrap();
+    for p in points {
+        let theta = f(&p[0]) / 20.0 + 0.41;
+        let expected = 20.0 * theta.sin().abs().max(theta.cos().abs());
+        assert!((f(&p[1]) - expected).abs() < 1e-8, "{p}");
+    }
+    assert!(points.windows(2).all(|w| f(&w[1][0]) > f(&w[0][0]) && f(&w[1][0]) - f(&w[0][0]) < 0.1));
+    assert_profile_on_brep(&s, &out);
+}
+
+#[test]
+fn cope_retains_rename_edit_undo_and_design_cache_reopen() {
+    let mut s = Session::default();
+    round_stock(&mut s, "Tube", [0., 0., 0.], [200., 0., 0.], json!(40));
+    round_stock(&mut s, "Mate", [0., -150., 0.], [0., 150., 0.], json!(60));
+    round_stock(&mut s, "Wide post", [0., -150., 0.], [0., 150., 0.], json!(80));
+    run(&mut s, "frame.cope", json!({"member":"Tube", "tools":["Mate"], "end":"start", "name":"Joint"}));
+    let original = cope_export(&mut s, json!(0));
+    run(&mut s, "body.rename", json!({"body":"Mate", "name":"Post"}));
+    run(&mut s, "body.rename", json!({"body":"Tube", "name":"Main rail"}));
+    let out = run(&mut s, "frame.export_cope_dxf", json!({"member":"Main rail", "end":"start", "tolerance":0.05}));
+    assert_eq!(out["profile"], original["profile"]);
+    let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    let saved = s.model.saved(&s.doc).unwrap();
+    let model = solidcraft_doc::Model::adopt(&doc, &saved).unwrap();
+    let mut opened = Session::new(doc);
+    opened.model = model;
+    let out2 = run(&mut opened, "frame.export_cope_dxf", json!({"member":"Main rail", "end":"start", "tolerance":0.05}));
+    assert_eq!(out2, out);
+    let mut without_cache = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let reopened = run(&mut without_cache, "frame.export_cope_dxf", json!({"member":"Main rail", "end":"start", "tolerance":0.05}));
+    assert_eq!(reopened["profile"], out["profile"]);
+    let mut old_cache = s.model.saved(&s.doc).unwrap();
+    old_cache.records.as_object_mut().unwrap().remove("round_member_records");
+    assert!(solidcraft_doc::Model::adopt(&s.doc, &old_cache).is_err());
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Joint", "command":"frame.cope", "params":{"member":"Main rail", "tools":["Wide post"], "end":"start"}}),
+    );
+    let changed = run(&mut s, "frame.export_cope_dxf", json!({"member":"Main rail", "end":"start", "tolerance":0.05}));
+    assert_ne!(changed["profile"], out["profile"]);
+    assert_profile_on_brep(&s, &changed);
+    run(&mut s, "edit.undo", json!({}));
+    let undone = run(&mut s, "frame.export_cope_dxf", json!({"member":"Main rail", "end":"start", "tolerance":0.05}));
+    assert_eq!(undone["profile"], out["profile"]);
+    run(&mut s, "edit.redo", json!({}));
+    let redone = run(&mut s, "frame.export_cope_dxf", json!({"member":"Main rail", "end":"start", "tolerance":0.05}));
+    assert_eq!(redone["profile"], changed["profile"]);
+}
+
+#[test]
+fn cope_refuses_unsupported_or_modified_stock_without_writing() {
+    let mut s = coped_joint(60., [0., 1., 0.]);
+    let before = s.doc.to_json();
+    for p in [
+        json!({}),
+        json!({"member":"Tube","end":"nearest"}),
+        json!({"member":"Tube","end":"end"}),
+        json!({"member":"Tube","end":"start","tolerance":0}),
+        json!({"member":"Tube","end":"start","seam":1e300}),
+        json!({"member":"Tube","end":"start","tolerance":0.001}),
+        json!({"member":"Tube","end":"start","path":false}),
+    ] {
+        assert!(s.execute("frame.export_cope_dxf", &p).is_err(), "{p}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+    for p in [
+        json!({"member":"Tube","tools":[],"end":"end"}),
+        json!({"member":"Tube","tools":["Tube"],"end":"end"}),
+        json!({"member":"Tube","tools":["Mate","Mate"],"end":"end"}),
+        json!({"member":"Tube","tools":["Mate"],"end":"start"}),
+    ] {
+        assert!(s.execute("frame.cope", &p).is_err(), "{p}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+    // A symmetric rotation keeps a tube's bounds and face counts; it still invalidates its certificate.
+    run(&mut s, "solid.move", json!({"bodies":["Tube"],"axis":[1,0,0],"angle":"180 deg"}));
+    assert!(s.execute("frame.export_cope_dxf", &json!({"member":"Tube","end":"start"})).is_err());
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.execute("frame.export_cope_dxf", &json!({"member":"Tube","end":"start"})).is_ok());
+}
+
+#[test]
+fn cope_follows_stock_parameters_and_checks_real_container_roundtrip() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"OD","expression":"40 mm"}));
+    run(&mut s, "parameters.add", json!({"name":"mate_OD","expression":"60 mm"}));
+    round_stock(&mut s, "Tube", [0., 0., 0.], [200., 0., 0.], json!("OD"));
+    round_stock(&mut s, "Mate", [0., -200., 0.], [0., 200., 0.], json!("mate_OD"));
+    run(&mut s, "frame.cope", json!({"member":"Tube","tools":["Mate"],"end":"start"}));
+    run(&mut s, "parameters.change", json!({"name":"OD","expression":"50 mm"}));
+    run(&mut s, "parameters.change", json!({"name":"mate_OD","expression":"80 mm"}));
+    let out = cope_export(&mut s, json!(0.5));
+    assert!((f(&out["circumference"]) - 50.0 * PI).abs() < 1e-9);
+    for p in out["profile"].as_array().unwrap() {
+        let theta = f(&p[0]) / 25.0 + 0.5;
+        let expected = (1600.0 - 625.0 * theta.sin().powi(2)).sqrt();
+        assert!((f(&p[1]) - expected).abs() < 1e-8);
+    }
+    assert_profile_on_brep(&s, &out);
+    // A path edit changes the joint angle while preserving the physical member and end.
+    let path = s.doc.find_feature("Tube path").unwrap().id;
+    let wire = s.doc.sketch(path).unwrap().wires[0].id.clone();
+    run(&mut s, "sketch.edit", json!({"sketch":"Tube path"}));
+    run(&mut s, "sketch.move3d", json!({"wire":wire,"index":1,"to":[200,80,0]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let edited = cope_export(&mut s, json!(0.5));
+    assert_ne!(edited["profile"], out["profile"]);
+    assert_profile_on_brep(&s, &edited);
+    let saved = s.model.saved(&s.doc).unwrap();
+    let bytes = solidcraft_io::write_design_container_with_cache(&s.doc, solidcraft_io::DesignCompression::default(), None, Some(&saved)).unwrap();
+    let mut reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes)).unwrap();
+    let saved = reader.geometry().unwrap();
+    let doc = reader.read_document().unwrap();
+    let model = solidcraft_doc::Model::adopt(&doc, &saved).unwrap();
+    let mut opened = Session::new(doc);
+    opened.model = model;
+    let back = cope_export(&mut opened, json!(0.5));
+    assert_eq!(back["profile"], edited["profile"]);
+    assert_profile_on_brep(&opened, &back);
+}
+
+#[test]
+fn cope_bent_member_terminal_and_far_end_keep_inward_datums() {
+    let mut s = Session::default();
+    let path = chassis_path(&mut s);
+    run(
+        &mut s,
+        "frame.member",
+        json!({"sketch":"Chassis","lines":path,"continuous":true,"profile":{"kind":"round_tube","diameter":40,"wall":2},"body_name":"Tube"}),
+    );
+    round_stock(&mut s, "Mate", [-300., -50., 0.], [-300., 250., 0.], json!(60));
+    run(&mut s, "frame.cope", json!({"member":"Tube","tools":["Mate"],"end":"end"}));
+    let out = run(&mut s, "frame.export_cope_dxf", json!({"member":"Tube","end":"end","seam":"37 deg","tolerance":0.05}));
+    assert_eq!(out["origin"], json!([-300., 100., 0.]));
+    assert_eq!(out["axis"], json!([1., 0., 0.]));
+    assert_profile_on_brep(&s, &out);
+}
+
+#[test]
+fn cope_dxf_scoped_output_is_atomic_and_errors_leave_old_file() {
+    use solidcraft_io::vfs::{PathScope, scoped};
+    let mut s = coped_joint(60., [0., 1., 0.]);
+    let folder = std::env::temp_dir().join(format!("solidcraft-cope-export-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let folder = std::fs::canonicalize(folder).unwrap();
+    let path = folder.join("template.dxf");
+    let text = path.to_string_lossy().to_string();
+    std::fs::write(&path, "previous drawing").unwrap();
+    scoped(Some(PathScope::new([])), || {
+        assert!(s.execute("frame.export_cope_dxf", &json!({"member":"Tube","end":"start","path":text})).is_err());
+    });
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "previous drawing");
+    scoped(Some(PathScope::new([folder.clone()])), || {
+        assert!(s.execute("frame.export_cope_dxf", &json!({"member":"Tube","end":"start","tolerance":0.001,"path":text})).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "previous drawing");
+        let result = run(&mut s, "frame.export_cope_dxf", json!({"member":"Tube","end":"start","path":text,"tolerance":0.05}));
+        assert!(result.get("dxf").is_none());
+        assert_eq!(result["path"], text);
+    });
+    assert!(std::fs::read_to_string(&path).unwrap().contains("CUT_PROFILE"));
+    assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 1, "no temporary file remains");
+    std::fs::remove_file(path).unwrap();
+    std::fs::remove_dir(folder).unwrap();
 }

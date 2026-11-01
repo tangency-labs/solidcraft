@@ -197,6 +197,9 @@ impl Writer {
         if b.transferred {
             r["transferred"] = json!(true);
         }
+        if let Ok(data) = b.round_member() {
+            r["round_member"] = serde_json::to_value(data).ok()?;
+        }
         if let Some(look) = &b.imported {
             let faces: Vec<Json> = look.faces.iter().map(|(name, (color, opacity))| json!([name, color, opacity])).collect();
             r["imported"] = json!({"color": look.color, "opacity": look.opacity, "faces": faces});
@@ -282,10 +285,13 @@ impl Model {
                 }
                 features.push(f);
             }
-            let records = json!({
+            let mut records = json!({
                 "features": features, "states": w.states, "model_bodies": w.model_bodies, "names": w.names, "sketches": w.sketches,
                 "sheets": w.sheets, "sketch_key_sets": w.sketch_key_sets,
             });
+            if doc.features.iter().any(|f| matches!(f.kind, FeatureKind::FrameMember { .. } | FeatureKind::FrameCope { .. })) {
+                records["round_member_records"] = json!(1);
+            }
             Ok(SavedModel { records, bodies: w.bodies })
         })
         .ok()
@@ -349,6 +355,11 @@ impl SavedModel {
                 b.source_transform = m;
             }
             b.transferred = r.get("transferred").and_then(Json::as_bool).unwrap_or(false);
+            if let Some(record) = r.get("round_member") {
+                let data: crate::frame_cope::RoundMember = serde_json::from_value(record.clone()).map_err(|_| bad("saved model: round member"))?;
+                data.validate()?;
+                b.certify_round_member(data);
+            }
             // Measured once here, so every state holding it adds it up for the cache's budget.
             b.bytes = b.body.retained_bytes();
             if let Some(look) = r.get("imported") {
@@ -614,10 +625,13 @@ impl SavedModel {
             };
             out_features.push(f);
         }
-        let records = json!({
+        let mut records = json!({
             "features": out_features, "states": out_states, "model_bodies": out_bodies, "names": kept_of(names.as_slice(), &names_used),
             "sketches": kept_of(sketches.as_slice(), &sketches_used), "sheets": sheets, "sketch_key_sets": key_sets,
         });
+        if let Some(version) = self.records.get("round_member_records") {
+            records["round_member_records"] = version.clone();
+        }
         let kept: Vec<usize> = (0..self.bodies.len()).filter(|i| kernel_used.get(*i) == Some(&true)).collect();
         let bodies = kept.iter().filter_map(|i| self.bodies.get(*i).cloned()).collect();
         Some((SavedModel { records, bodies }, kept, used))
@@ -630,6 +644,11 @@ impl Model {
     /// did not keep ([`SavedModel::thinned`]). Refused (an error) unless every feature's
     /// fingerprint is the one `doc` gives it now, and every record is well formed.
     pub fn adopt(doc: &Document, saved: &SavedModel) -> Result<Model> {
+        if doc.features.iter().any(|f| matches!(f.kind, FeatureKind::FrameMember { .. } | FeatureKind::FrameCope { .. }))
+            && saved.records.get("round_member_records").and_then(Json::as_u64) != Some(1)
+        {
+            return Err(bad("saved model: member records need reevaluation"));
+        }
         let mut states = saved.states()?;
         let frame_bodies = Arc::new(std::sync::Mutex::new(FrameBodies::default()));
         for state in &mut states {

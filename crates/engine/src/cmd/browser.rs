@@ -974,7 +974,7 @@ fn view_list(s: &mut Session, _p: &Value) -> Result<Value> {
 
 /// The keys whose strings name bodies, alone or in a list (`body`, `targets`…), at any depth of a
 /// feature: its own fields and the face, edge and link references inside it.
-const BODY_KEYS: [&str; 5] = ["body", "bodies", "target", "targets", "tools"];
+const BODY_KEYS: [&str; 6] = ["body", "bodies", "member", "target", "targets", "tools"];
 
 /// Replace the body name `old` with `new` where a string names a body (the value of one of
 /// [`BODY_KEYS`]); other strings equal to it (sketch text, plane and feature names, expressions)

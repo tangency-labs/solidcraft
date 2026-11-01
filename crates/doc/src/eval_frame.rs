@@ -1,10 +1,9 @@
-//! Frame members (#4003): one body per straight line of a frame sketch, its cross-section a
-//! profile laid square to the line (`frame::member_axes`) and run from one end to the other.
+//! Frame members (#4003): separate sketch curves, or one continuous tangent line/arc path.
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashSet};
 
-use solidcraft_geom::{Aabb2, Plane, Region2, Ring, Vec2, Vec3};
+use solidcraft_geom::{Aabb2, Plane, Region2, Ring, Seg2, Vec2, Vec3};
 use solidcraft_kernel as kernel;
 use solidcraft_sketch::CurveKind;
 
@@ -20,17 +19,17 @@ const MIN_LENGTH: f64 = 1e-6;
 /// How far (mm) a 3D sketch curve may stray from the line between its ends and still be a line.
 const STRAIGHT_TOL: f64 = 1e-3;
 
-/// Evaluate a `FrameMember` feature: one new body per line, each named
-/// ([`member_names`], or by position for a copy whose `body_names` were set).
+/// Evaluate a `FrameMember` feature: one body per selected curve, or one for a continuous path.
+/// Bodies use [`member_names`], or positional names for a copy whose `body_names` were set.
 pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
-    let FeatureKind::FrameMember { path_sketch, lines, profile, anchor, angle, mirror, body_name, names } = &f.kind else {
+    let FeatureKind::FrameMember { path_sketch, lines, continuous, profile, anchor, angle, mirror, body_name, names } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
     let ps = st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
     // The frame sketch in this feature's component frame: its plane, and its 3D lines.
     let mapped =
         if ps.sketch.wires.is_empty() { Cow::Owned(sketch_in_feature_frame(doc, ps, f.component)?) } else { path_in_frame(doc, ps, f.component)? };
-    let segments = member_lines(mapped.as_ref(), lines)?;
+    let paths = member_paths(mapped.as_ref(), lines, *continuous)?;
     let (mut regions, description) = profile_regions(vals, st, profile)?;
     if *mirror {
         regions = regions.iter().map(frame::mirrored).collect();
@@ -40,31 +39,154 @@ pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
         Some(e) => val(vals, e, Kind::Angle)?,
         None => 0.0,
     };
-    let mut made = Vec::with_capacity(segments.len());
-    for (id, a, b) in &segments {
-        let (x, y) = frame::member_axes(*b - *a, turn).ok_or_else(|| DocError::Invalid(format!("line `{id}` has no length")))?;
-        let plane = Plane::new(*a - x * at.x - y * at.y, x, y).ok_or_else(|| DocError::Invalid(format!("line `{id}`: no plane square to it")))?;
-        let mut bodies = kernel::extrude(&plane, &regions, 0.0, a.dist(*b))?;
-        let body = match (bodies.pop(), bodies.is_empty()) {
-            (Some(body), true) => body,
-            _ => return Err(DocError::Invalid(format!("the member on line `{id}` is not one solid"))),
+    let mut made = Vec::with_capacity(paths.len());
+    let mut round = Vec::with_capacity(paths.len());
+    for path in &paths {
+        let first = path.first().ok_or_else(|| DocError::Invalid("a member path is empty".into()))?;
+        let (x, y) = frame::member_axes(first.t0, turn).ok_or_else(|| DocError::Invalid("the member has no start direction".into()))?;
+        let plane = Plane::new(first.a - x * at.x - y * at.y, x, y).ok_or_else(|| DocError::Invalid("no plane square to the member".into()))?;
+        let body = if let [Piece { seg: kernel::PathSeg::Line { a, b }, .. }] = path.as_slice() {
+            let mut bodies = kernel::extrude(&plane, &regions, 0.0, a.dist(*b))?;
+            match (bodies.pop(), bodies.is_empty()) {
+                (Some(body), true) => body,
+                _ => return Err(DocError::Invalid("the member is not one solid".into())),
+            }
+        } else {
+            let region = regions.first().ok_or_else(|| DocError::Invalid("the member profile has no area".into()))?;
+            check_bend_clearance(path, region, at, x, y)?;
+            kernel::sweep(&plane, region, &path.iter().map(|p| p.seg).collect::<Vec<_>>())?
         };
+        round.push(round_record(vals, profile, at, path, x, y)?);
         made.push(crate::lineage::numbered_tool(body));
     }
     if !f.body_names.is_empty() {
         // A copy (pasted, or in a copied component) names its members by position, as any
         // feature's bodies.
-        for (k, t) in made.into_iter().enumerate() {
+        for (k, (t, record)) in made.into_iter().zip(round).enumerate() {
             let name = new_name(st, f, k);
-            st.bodies.push(ModelBody::traced_new(name, t, f.id));
+            let mut body = ModelBody::traced_new(name, t, f.id);
+            if let Some(record) = record {
+                body.certify_round_member(record);
+            }
+            st.bodies.push(body);
         }
         return Ok(());
     }
     let base = body_name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map_or(description, str::to_string);
-    let ids: Vec<String> = segments.into_iter().map(|(id, _, _)| id).collect();
-    for (name, t) in member_names(st, &ids, names, &base).into_iter().zip(made) {
-        st.bodies.push(ModelBody::traced_new(name, t, f.id));
+    let ids = path_keys(&paths, *continuous);
+    for ((name, t), record) in member_names(st, &ids, names, &base).into_iter().zip(made).zip(round) {
+        let mut body = ModelBody::traced_new(name, t, f.id);
+        if let Some(record) = record {
+            body.certify_round_member(record);
+        }
+        st.bodies.push(body);
     }
+    Ok(())
+}
+
+/// Nominal section and terminal datums, transported exactly as the sweep transports them.
+fn round_record(
+    vals: &BTreeMap<String, Value>,
+    profile: &MemberProfile,
+    at: Vec2,
+    path: &[Piece],
+    x: Vec3,
+    y: Vec3,
+) -> Result<Option<crate::frame_cope::RoundMember>> {
+    use crate::frame_cope::{RoundMember, Terminal};
+    let MemberProfile::Library { profile } = profile else { return Ok(None) };
+    let frame::Profile::RoundTube { diameter, wall } = profile.resolve(|_, e| val(vals, e, Kind::Length))? else { return Ok(None) };
+    // An off-centre circular profile sweeps about a different centreline at a bend.
+    if at.len() > 1e-9 {
+        return Ok(None);
+    }
+    let radius = diameter / 2.0;
+    let bounds: Vec<solidcraft_geom::Aabb3> = path
+        .iter()
+        .map(|p| match p.seg {
+            kernel::PathSeg::Line { a, b } => solidcraft_geom::Aabb3 { min: a.min(b), max: a.max(b) }.inflated(radius),
+            kernel::PathSeg::Arc { a, center, .. } => solidcraft_geom::Aabb3 { min: center, max: center }.inflated(a.dist(center) + radius),
+        })
+        .collect();
+    let first = path.first().ok_or_else(|| DocError::Invalid("empty member path".into()))?;
+    let last = path.last().ok_or_else(|| DocError::Invalid("empty member path".into()))?;
+    let start = matches!(first.seg, kernel::PathSeg::Line { .. }).then(|| Terminal {
+        origin: first.a,
+        axis: first.t0,
+        x,
+        y,
+        length: first.a.dist(first.b),
+        other: bounds.iter().skip(1).copied().collect(),
+    });
+    let (mut ex, mut ey) = (x, y);
+    for p in path {
+        if let kernel::PathSeg::Arc { axis, angle, .. } = p.seg {
+            ex = rotate(ex, axis, angle);
+            ey = rotate(ey, axis, angle);
+        }
+    }
+    let end = matches!(last.seg, kernel::PathSeg::Line { .. }).then(|| Terminal {
+        origin: last.b,
+        axis: -last.t1,
+        x: ex,
+        y: -ey,
+        length: last.a.dist(last.b),
+        other: bounds.iter().take(bounds.len().saturating_sub(1)).copied().collect(),
+    });
+    Ok(Some(RoundMember {
+        radius,
+        wall,
+        start,
+        end,
+        straight: path.len() == 1 && matches!(first.seg, kernel::PathSeg::Line { .. }),
+        cuts: Vec::new(),
+    }))
+}
+
+/// The mating member's bore is filled for the cut: a cope meets its outside wall and must
+/// never retain the disconnected stub a subtraction of hollow stock would leave inside it.
+pub(super) fn cope(doc: &Document, f: &Feature, st: &mut ModelState) -> Result<()> {
+    use crate::frame_cope::{Cylinder, MAX_CUTTERS};
+    let FeatureKind::FrameCope { member, tools, end } = &f.kind else { return Err(DocError::Invalid("not a cope".into())) };
+    if tools.is_empty() || tools.len() > MAX_CUTTERS {
+        return Err(DocError::Invalid("a cope needs 1..16 mating members".into()));
+    }
+    let mb = st.body(member).ok_or_else(|| DocError::Unknown(format!("member {member}")))?.clone();
+    let mut data = mb.round_member()?.clone();
+    if doc.body_offsets.contains_key(member.as_ref()) {
+        return Err(DocError::Invalid("not supported yet: cope of an offset member".into()));
+    }
+    let mut seen = HashSet::new();
+    let mut cylinders = Vec::new();
+    for name in tools {
+        if name == member || !seen.insert(name.as_ref()) {
+            return Err(DocError::Invalid("cope members must be distinct".into()));
+        }
+        let tool = st.body(name).ok_or_else(|| DocError::Unknown(format!("member {name}")))?;
+        if tool.component != mb.component || doc.body_offsets.contains_key(name.as_ref()) {
+            return Err(DocError::Invalid("not supported yet: cope members must share a component and have no body offsets".into()));
+        }
+        let mate = tool.round_member()?;
+        if !mate.straight || !mate.cuts.is_empty() {
+            return Err(DocError::Invalid("not supported yet: a mating member must be straight and untreated".into()));
+        }
+        let terminal = mate.terminal(crate::frame_cope::End::Start)?;
+        cylinders.push(Cylinder { origin: terminal.origin, axis: terminal.axis, radius: mate.radius, length: terminal.length });
+    }
+    let cut = data.prepare(*end, cylinders)?;
+    let mut traced = mb.traced();
+    for c in &cut.cylinders {
+        let tool = crate::lineage::numbered_tool(kernel::cylinder(c.origin, c.axis, c.radius, c.length)?);
+        let result = kernel::boolean(&traced.body, &tool.body, kernel::BoolOp::Cut)?
+            .ok_or_else(|| DocError::Invalid("the cope removed the whole member".into()))?;
+        traced = crate::lineage::Traced::step(result, &[&traced, &tool]);
+    }
+    data.cuts.push(cut);
+    let mut body = ModelBody::traced_new(mb.name.clone(), traced, mb.feature);
+    body.component = mb.component;
+    body.certify_round_member(data);
+    let slot = st.bodies.iter_mut().find(|b| b.name == mb.name).ok_or(DocError::Unknown(mb.name))?;
+    *slot = body;
     Ok(())
 }
 
@@ -100,67 +222,223 @@ pub fn member_names(st: &ModelState, lines: &[String], pinned: &BTreeMap<String,
     out.into_iter().map(|n| n.unwrap_or_else(|| base.to_string())).collect()
 }
 
-/// The ids of a `FrameMember` feature's lines in `st`, in the order its members are made.
+/// Body-name keys for a `FrameMember` feature in `st`, in the order its members are made:
+/// curve ids for separate members, or `$path` for one continuous member.
 pub fn member_line_ids(st: &ModelState, kind: &FeatureKind) -> Result<Vec<String>> {
-    let FeatureKind::FrameMember { path_sketch, lines, .. } = kind else {
+    let FeatureKind::FrameMember { path_sketch, lines, continuous, .. } = kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
     let ps = st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch}")))?;
-    Ok(member_lines(ps, lines)?.into_iter().map(|(id, _, _)| id).collect())
+    Ok(path_keys(&member_paths(ps, lines, *continuous)?, *continuous))
 }
 
-/// The member lines of the frame sketch, each as (curve id, start, end) in its frame: the lines
-/// asked for, or every straight line drawn in it (not construction, not projected or otherwise
-/// linked, and with a length).
-fn member_lines(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<(String, Vec3, Vec3)>> {
+/// A continuous member belongs to its feature, independently of traversal order or which
+/// end segment is selected first. Keep using per-curve keys for separate members.
+fn path_keys(paths: &[Vec<Piece>], continuous: bool) -> Vec<String> {
+    if continuous { vec!["$path".into()] } else { paths.iter().filter_map(|p| p.first().map(|p| p.id.clone())).collect() }
+}
+
+/// One exact segment, retaining analytic end tangents even for spatial arcs.
+struct Piece {
+    id: String,
+    a: Vec3,
+    b: Vec3,
+    t0: Vec3,
+    t1: Vec3,
+    seg: kernel::PathSeg,
+}
+
+impl Piece {
+    fn line(id: &str, a: Vec3, b: Vec3) -> Result<Self> {
+        let t = (b - a).normalized().filter(|_| a.dist(b) > MIN_LENGTH);
+        let t = t.ok_or_else(|| DocError::Invalid(format!("line `{id}` has no length")))?;
+        if !point_ok(a) || !point_ok(b) {
+            return Err(DocError::Invalid(format!("line `{id}` has invalid coordinates")));
+        }
+        Ok(Self { id: id.into(), a, b, t0: t, t1: t, seg: kernel::PathSeg::Line { a, b } })
+    }
+
+    fn arc(id: &str, a: Vec3, b: Vec3, center: Vec3, axis: Vec3, angle: f64) -> Result<Self> {
+        let k = axis.normalized().ok_or_else(|| DocError::Invalid(format!("arc `{id}` has no normal")))?;
+        let radius = a.dist(center);
+        if !point_ok(a)
+            || !point_ok(b)
+            || !point_ok(center)
+            || !radius.is_finite()
+            || radius <= MIN_LENGTH
+            || !angle.is_finite()
+            || angle <= MIN_LENGTH
+            || angle >= std::f64::consts::TAU - 1e-9
+            || (b.dist(center) - radius).abs() > 1e-6 * radius.max(1.0)
+            || (a - center).dot(k).abs() > 1e-6
+            || (b - center).dot(k).abs() > 1e-6
+            || rotate(a - center, k, angle).dist(b - center) > 1e-6 * radius.max(1.0)
+        {
+            return Err(DocError::Invalid(format!("arc `{id}` needs a finite, open circular path")));
+        }
+        let t0 = k.cross(a - center).normalized().ok_or_else(|| DocError::Invalid(format!("arc `{id}` has no tangent")))?;
+        let t1 = k.cross(b - center).normalized().ok_or_else(|| DocError::Invalid(format!("arc `{id}` has no tangent")))?;
+        Ok(Self { id: id.into(), a, b, t0, t1, seg: kernel::PathSeg::Arc { a, center, axis: k, angle } })
+    }
+
+    fn reverse(&mut self) {
+        self.seg = match self.seg {
+            kernel::PathSeg::Line { a, b } => kernel::PathSeg::Line { a: b, b: a },
+            kernel::PathSeg::Arc { center, axis, angle, .. } => kernel::PathSeg::Arc { a: self.b, center, axis: -axis, angle },
+        };
+        std::mem::swap(&mut self.a, &mut self.b);
+        let old = self.t0;
+        self.t0 = -self.t1;
+        self.t1 = -old;
+    }
+}
+
+fn point_ok(p: Vec3) -> bool {
+    p.is_finite() && p.x.abs().max(p.y.abs()).max(p.z.abs()) <= 1e9
+}
+
+fn rotate(v: Vec3, k: Vec3, angle: f64) -> Vec3 {
+    let (s, c) = angle.sin_cos();
+    v * c + k.cross(v) * s + k * (k.dot(v) * (1.0 - c))
+}
+
+fn curve_piece(ss: &SolvedSketch, id: &str) -> Result<Piece> {
     let sk = &ss.sketch;
-    let mut out = Vec::new();
+    if let Some(w) = sk.wire_index(id).and_then(|i| sk.wires.get(i)) {
+        if let Some(arc) = w.arc {
+            if !arc.radius.is_finite() || (arc.normal.len() - 1.0).abs() > 1e-6 || (arc.start.dist(arc.center) - arc.radius).abs() > 1e-6 {
+                return Err(DocError::Invalid(format!("arc `{id}` has invalid circle data")));
+            }
+            let u = arc.start - arc.center;
+            let v = arc.end - arc.center;
+            let angle = arc.normal.dot(u.cross(v)).atan2(u.dot(v)).rem_euclid(std::f64::consts::TAU);
+            return Piece::arc(id, arc.start, arc.end, arc.center, arc.normal, angle);
+        }
+        if w.pts.len() <= solidcraft_sketch::MAX_WIRE_POINTS
+            && w.pts.iter().copied().all(point_ok)
+            && let Some((a, b)) = straight(&w.pts)
+        {
+            return Piece::line(id, a, b);
+        }
+    } else if let Some(ci) = sk.curve_index(id) {
+        if !sk.curves.get(ci).is_some_and(|c| matches!(c.kind, CurveKind::Line { .. } | CurveKind::Arc { .. })) {
+            return Err(DocError::Invalid(format!("not supported yet: `{id}` must be a straight line or an open circular arc")));
+        }
+        return match sk.segs(ci).as_slice() {
+            [Seg2::Line { a, b }] => Piece::line(id, ss.plane.to_world(*a), ss.plane.to_world(*b)),
+            [s @ Seg2::Arc { center, sweep, .. }] => Piece::arc(
+                id,
+                ss.plane.to_world(s.start()),
+                ss.plane.to_world(s.end()),
+                ss.plane.to_world(*center),
+                ss.plane.normal() * sweep.signum(),
+                sweep.abs(),
+            ),
+            _ => Err(DocError::Invalid(format!("not supported yet: `{id}` must be a straight line or an open circular arc"))),
+        };
+    } else {
+        return Err(DocError::Unknown(format!("path curve `{id}` in {}", ss.name)));
+    }
+    Err(DocError::Invalid(format!("not supported yet: `{id}` must be a straight line or an exact circular arc")))
+}
+
+fn member_paths(ss: &SolvedSketch, ids: &[String], continuous: bool) -> Result<Vec<Vec<Piece>>> {
+    // Preserve the existing meaning of an unselected feature, including on older designs.
     if ids.is_empty() {
-        for (ci, c) in sk.curves.iter().enumerate() {
-            if !c.construction
-                && !c.centerline
-                && c.link.is_none()
-                && matches!(c.kind, CurveKind::Line { .. })
-                && let Some((a, b)) = planar_line(ss, ci)
-                && a.dist(b) > MIN_LENGTH
-            {
-                out.push((c.id.clone(), a, b));
-            }
+        if continuous {
+            return Err(DocError::Invalid("a continuous member needs explicit `lines` in path order".into()));
         }
-        for w in sk.wires.iter().filter(|w| w.link.is_none()) {
-            if let Some((a, b)) = straight(&w.pts)
-                && a.dist(b) > MIN_LENGTH
-            {
-                out.push((w.id.clone(), a, b));
-            }
-        }
-        if out.is_empty() {
-            return Err(DocError::Invalid(format!("{} has no lines for members", ss.name)));
-        }
-        if out.len() > MAX_MEMBERS {
-            return Err(DocError::Invalid(format!("at most {MAX_MEMBERS} members in one feature (pick the lines)")));
-        }
-        return Ok(out);
+        return default_member_lines(ss)?.into_iter().map(|(id, a, b)| Ok(vec![Piece::line(&id, a, b)?])).collect();
     }
     if ids.len() > MAX_MEMBERS {
-        return Err(DocError::Invalid(format!("at most {MAX_MEMBERS} members in one feature")));
+        return Err(DocError::Invalid(format!("at most {MAX_MEMBERS} curves in one member feature")));
     }
     let mut seen = HashSet::new();
+    let mut pieces = Vec::with_capacity(ids.len());
     for id in ids {
         if !seen.insert(id.as_str()) {
-            return Err(DocError::Invalid(format!("line `{id}` is listed twice")));
+            return Err(DocError::Invalid(format!("curve `{id}` is listed twice")));
         }
-        let line = if let Some(wi) = sk.wire_index(id) {
-            sk.wires.get(wi).and_then(|w| straight(&w.pts))
-        } else {
-            let ci = sk.curve_index(id).ok_or_else(|| DocError::Unknown(format!("line `{id}` in {}", ss.name)))?;
-            planar_line(ss, ci)
-        };
-        let (a, b) = line.ok_or_else(|| DocError::Invalid(format!("`{id}` is not a straight line (members run along lines)")))?;
-        if !(a.dist(b) > MIN_LENGTH) {
-            return Err(DocError::Invalid(format!("line `{id}` has no length")));
+        pieces.push(curve_piece(ss, id)?);
+    }
+    if !continuous {
+        return Ok(pieces.into_iter().map(|p| vec![p]).collect());
+    }
+    if let (Some(first), Some(next)) = (pieces.first(), pieces.get(1)) {
+        let flip = first.a.dist(next.a).min(first.a.dist(next.b)) < first.b.dist(next.a).min(first.b.dist(next.b));
+        if flip && let Some(first) = pieces.first_mut() {
+            first.reverse();
         }
-        out.push((id.clone(), a, b));
+    }
+    let mut end = None;
+    for p in &mut pieces {
+        if let Some((b, tangent)) = end {
+            if p.b.dist(b) < p.a.dist(b) {
+                p.reverse();
+            }
+            if p.a.dist(b) > 1e-6 {
+                return Err(DocError::Invalid(format!("continuous member: `{}` is not connected end to end in path order", p.id)));
+            }
+            if p.t0.dot(tangent) < (1e-6_f64).cos() {
+                return Err(DocError::Invalid(format!("continuous member: `{}` is not tangent to the previous curve; draw a bend arc", p.id)));
+            }
+        }
+        end = Some((p.b, p.t1));
+    }
+    if pieces.first().zip(pieces.last()).is_some_and(|(a, b)| a.a.dist(b.b) <= 1e-6) {
+        return Err(DocError::Invalid("not supported yet: a continuous member must have two open ends".into()));
+    }
+    Ok(vec![pieces])
+}
+
+/// Refuse a section crossing a bend axis. Transport the section axes exactly as the sweep
+/// does; an anchored or rotated rectangular section need not be symmetric about the path.
+fn check_bend_clearance(path: &[Piece], region: &Region2, at: Vec2, mut x: Vec3, mut y: Vec3) -> Result<()> {
+    let bb = region.outer.polyline(1e-3).bounds();
+    let corners = [bb.min, Vec2::new(bb.max.x, bb.min.y), bb.max, Vec2::new(bb.min.x, bb.max.y)];
+    for p in path {
+        if let kernel::PathSeg::Arc { center, axis, angle, .. } = p.seg {
+            let radial = (p.a - center).normalized().ok_or_else(|| DocError::Invalid("the bend has no radius".into()))?;
+            let inward = corners.iter().map(|q| (x * (q.x - at.x) + y * (q.y - at.y)).dot(radial)).fold(0.0_f64, f64::min);
+            // The sampled box can undershoot a curved profile by the chord tolerance.
+            if p.a.dist(center) + inward <= MIN_LENGTH + 2e-3 {
+                return Err(DocError::Invalid(format!("arc `{}`: the bend radius is too small for the anchored profile", p.id)));
+            }
+            x = rotate(x, axis, angle);
+            y = rotate(y, axis, angle);
+        }
+    }
+    Ok(())
+}
+
+/// The unchanged all-lines default: drawn straight lines with a length, in the sketch's frame.
+fn default_member_lines(ss: &SolvedSketch) -> Result<Vec<(String, Vec3, Vec3)>> {
+    let sk = &ss.sketch;
+    let mut out = Vec::new();
+    for (ci, c) in sk.curves.iter().enumerate() {
+        if !c.construction
+            && !c.centerline
+            && c.link.is_none()
+            && matches!(c.kind, CurveKind::Line { .. })
+            && let Some((a, b)) = planar_line(ss, ci)
+            && a.dist(b) > MIN_LENGTH
+        {
+            out.push((c.id.clone(), a, b));
+        }
+    }
+    for w in sk.wires.iter().filter(|w| w.link.is_none()) {
+        if w.pts.len() <= solidcraft_sketch::MAX_WIRE_POINTS
+            && let Some((a, b)) = straight(&w.pts)
+            && a.dist(b) > MIN_LENGTH
+        {
+            out.push((w.id.clone(), a, b));
+        }
+    }
+    if out.is_empty() {
+        return Err(DocError::Invalid(format!("{} has no lines for members", ss.name)));
+    }
+    if out.len() > MAX_MEMBERS {
+        return Err(DocError::Invalid(format!("at most {MAX_MEMBERS} members in one feature (pick the lines)")));
     }
     Ok(out)
 }

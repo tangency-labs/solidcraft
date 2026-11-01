@@ -109,6 +109,7 @@ pipe
 frame_member
 frame_member_sketch
   profiles: 2 all
+frame_cope
 emboss
   face points: [5, 5.5, 5.25]
   profiles: 1 all
