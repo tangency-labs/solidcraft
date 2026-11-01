@@ -1,0 +1,68 @@
+{
+  "en": {
+    "prefs.keep_unsaved_in_browser": "Keep unsaved work in this browser instead of asking when the tab closes",
+    "prefs.keep_unsaved_in_browser_label": "Unsaved work",
+    "prefs.keep_unsaved_in_browser_tip": "Each open design's unsaved changes are kept up to date in this browser's private storage. The next visit offers to restore them.",
+    "recovery.open_saved": "Open saved version",
+    "recovery.restore": "Restore",
+    "recovery.restore_intro": "Changes that weren't saved when this page last closed are kept in this browser.",
+    "recovery.restore_row": "{name}, changed {when}",
+    "recovery.restore_title": "Restore unsaved designs?",
+    "recovery.restore_title_one": "Restore unsaved design: {name}, changed {when}?"
+  },
+  "ar": {
+    "prefs.keep_unsaved_in_browser": "الاحتفاظ بالعمل غير المحفوظ في هذا المتصفح بدلاً من السؤال عند إغلاق علامة التبويب",
+    "prefs.keep_unsaved_in_browser_label": "العمل غير المحفوظ",
+    "prefs.keep_unsaved_in_browser_tip": "تُحدَّث التغييرات غير المحفوظة لكل تصميم مفتوح باستمرار في التخزين الخاص بهذا المتصفح. وتعرض الزيارة التالية استعادتها.",
+    "recovery.open_saved": "فتح النسخة المحفوظة",
+    "recovery.restore": "استعادة",
+    "recovery.restore_intro": "التغييرات التي لم تُحفظ عند آخر إغلاق لهذه الصفحة محفوظة في هذا المتصفح.",
+    "recovery.restore_row": "{name}، تغيّر {when}",
+    "recovery.restore_title": "استعادة التصاميم غير المحفوظة؟",
+    "recovery.restore_title_one": "استعادة التصميم غير المحفوظ: {name}، تغيّر {when}؟"
+  },
+  "he": {
+    "prefs.keep_unsaved_in_browser": "לשמור עבודה שלא נשמרה בדפדפן זה במקום לשאול כשהכרטיסייה נסגרת",
+    "prefs.keep_unsaved_in_browser_label": "עבודה שלא נשמרה",
+    "prefs.keep_unsaved_in_browser_tip": "השינויים שלא נשמרו בכל תכן פתוח נשמרים מעודכנים באחסון הפרטי של דפדפן זה. בביקור הבא תוצע שחזורם.",
+    "recovery.open_saved": "פתיחת הגרסה השמורה",
+    "recovery.restore": "שחזור",
+    "recovery.restore_intro": "שינויים שלא נשמרו כשדף זה נסגר לאחרונה שמורים בדפדפן זה.",
+    "recovery.restore_row": "{name}, שונה {when}",
+    "recovery.restore_title": "לשחזר תכנים שלא נשמרו?",
+    "recovery.restore_title_one": "לשחזר תכן שלא נשמר: {name}, שונה {when}?"
+  },
+  "ja": {
+    "prefs.keep_unsaved_in_browser": "タブを閉じるときに確認する代わりに、未保存の作業をこのブラウザーに保持する",
+    "prefs.keep_unsaved_in_browser_label": "未保存の作業",
+    "prefs.keep_unsaved_in_browser_tip": "開いている各デザインの未保存の変更を、このブラウザーのプライベートストレージに常に最新の状態で保持します。次回のアクセス時に復元を提案します。",
+    "recovery.open_saved": "保存済みのバージョンを開く",
+    "recovery.restore": "復元",
+    "recovery.restore_intro": "このページを前回閉じたときに保存されていなかった変更は、このブラウザーに保持されています。",
+    "recovery.restore_row": "{name}、{when}に変更",
+    "recovery.restore_title": "未保存のデザインを復元しますか？",
+    "recovery.restore_title_one": "未保存のデザイン {name}（{when}に変更）を復元しますか？"
+  },
+  "vi": {
+    "prefs.keep_unsaved_in_browser": "Giữ công việc chưa lưu trong trình duyệt này thay vì hỏi khi đóng thẻ",
+    "prefs.keep_unsaved_in_browser_label": "Công việc chưa lưu",
+    "prefs.keep_unsaved_in_browser_tip": "Các thay đổi chưa lưu của mỗi thiết kế đang mở được cập nhật liên tục trong bộ nhớ riêng của trình duyệt này. Lần truy cập sau sẽ đề nghị khôi phục chúng.",
+    "recovery.open_saved": "Mở phiên bản đã lưu",
+    "recovery.restore": "Khôi phục",
+    "recovery.restore_intro": "Các thay đổi chưa được lưu khi trang này đóng lần trước được giữ trong trình duyệt này.",
+    "recovery.restore_row": "{name}, thay đổi {when}",
+    "recovery.restore_title": "Khôi phục các thiết kế chưa lưu?",
+    "recovery.restore_title_one": "Khôi phục thiết kế chưa lưu: {name}, thay đổi {when}?"
+  },
+  "zh": {
+    "prefs.keep_unsaved_in_browser": "在此浏览器中保留未保存的工作，而不是在关闭标签页时询问",
+    "prefs.keep_unsaved_in_browser_label": "未保存的工作",
+    "prefs.keep_unsaved_in_browser_tip": "每个打开的设计的未保存更改都会在此浏览器的私有存储中保持最新。下次访问时会提示恢复。",
+    "recovery.open_saved": "打开已保存的版本",
+    "recovery.restore": "恢复",
+    "recovery.restore_intro": "此页面上次关闭时未保存的更改保留在此浏览器中。",
+    "recovery.restore_row": "{name}，更改于{when}",
+    "recovery.restore_title": "恢复未保存的设计？",
+    "recovery.restore_title_one": "恢复未保存的设计：{name}，更改于{when}？"
+  }
+}

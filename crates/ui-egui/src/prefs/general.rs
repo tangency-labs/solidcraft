@@ -57,6 +57,13 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 &mut app.preferences.reopen_designs,
             );
         });
+        // Only the web app keeps designs in the browser (#10220).
+        if app.services.browser_files.is_some() {
+            ui_kit::settings_block(ui, app.tr("prefs.keep_unsaved_in_browser_label"), labels, |ui| {
+                let tip = app.tr("prefs.keep_unsaved_in_browser_tip").to_string();
+                ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_in_browser"), &mut app.preferences.keep_unsaved_in_browser).on_hover_text(tip);
+            });
+        }
         ui_kit::settings_block(ui, app.tr_label("Crash reports"), labels, |ui| {
             ui.horizontal(|ui| {
                 let count = app.crashes.saved_count();

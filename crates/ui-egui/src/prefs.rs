@@ -1165,6 +1165,10 @@ preference_settings! {
     reopen_designs: bool = true, PAGE_GENERAL;
     /// Those designs' files, in tab order, as the last quit left them.
     open_designs: Vec<String> = Vec::new(), PAGE_GENERAL;
+    /// Web app (#10220): keep each open design's unsaved changes current in the browser's
+    /// private storage, so closing or reloading the tab doesn't ask through the browser's own
+    /// "leave site?" box; the next visit offers them back. Off: the browser asks, as before.
+    keep_unsaved_in_browser: bool = false, PAGE_GENERAL;
     /// The largest STEP or import file opened, in MB (#4086): from the default (512) up to 16 GB.
     /// `--max-file-size` overrides it for one run. The browser keeps the default.
     max_step_file_mb: u64 = DEFAULT_STEP_MB, PAGE_GENERAL;
@@ -4264,6 +4268,31 @@ mod tests {
         assert!(restored.preferences.invert_curved_roll_arrows);
         super::reset_preferences(&mut app.preferences, super::PAGE_NAVIGATION);
         assert!(!app.preferences.invert_curved_roll_arrows);
+    }
+
+    /// #10220: off by default, offered on Preferences › General only where designs are kept in
+    /// a browser (the web app), set through `ui.prefs` and saved with the settings.
+    #[test]
+    fn keep_unsaved_in_browser_is_off_and_only_the_web_app_offers_it() {
+        use serde_json::json;
+        assert!(!crate::prefs::Prefs::default().keep_unsaved_in_browser);
+        let label = crate::i18n::tr("prefs.keep_unsaved_in_browser").to_string();
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open":"General"}));
+        h.frames(5);
+        assert!(h.widget(&label).is_none(), "the desktop app keeps no designs in a browser");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        h.app.services.browser_files = Some(Box::new(|| {}));
+        h.call("ui.prefs", json!({"open":"General"}));
+        h.frames(5);
+        assert!(h.widget(&label).is_some(), "the web app offers it beside the other saving options");
+        let reply = h.call("ui.prefs", json!({"keep_unsaved_in_browser": true}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        h.call("ui.prefs", json!({"button":"ok"}));
+        assert!(h.app.preferences.keep_unsaved_in_browser);
+        let mut restored = crate::SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(restored.preferences.keep_unsaved_in_browser, "it is saved with the settings");
     }
 
     #[test]
