@@ -1,20 +1,8 @@
 {
  "sources": [],
- "what": "rounds r5 and r3 on the two top edges at a corner, then r2 on the vertical edge under them, run on up into the corner",
+ "what": "rounds r5 and r3 on the two top edges at a corner, the r3 with its tangent chain, then a round on the vertical edge under them: the r3 chain has rounded that edge, so the pick takes no edge: refused",
  "source": "invariants",
- "method": "as 016 with a radius that fits (r < 3, the smaller top round): the r2 runs up the vertical edge and on along the side's arc on the r5 round and the seam between the two rounds, tapering to a point where they become tangent. Faces: the box's 6 and the two top rounds, + 3 for the r2 (along the vertical edge, up the arc, along the seam); one valid body inside the box",
- "body_count": 1,
- "faces": 11,
- "bbox": {
-  "min": [
-   0,
-   0,
-   0
-  ],
-  "max": [
-   60,
-   40,
-   20
-  ]
- }
+ "method": "box 60x40x20; the top edge y=40 rounded r5, then the top edge x=60 rounded r3 with its tangent chain: at (60, 35, 20) it runs on tangentially into the r5 round's end arc on x = 60 (a quarter circle about y = 35, z = 15, convex), which runs on at (60, 40, 15) into the vertical edge x=60, y=40, so the r3 rounds all three and the vertical edge is gone: its round is the cylinder r3 about (57, 37), z 0..15, meeting the faces along x=57, y=40 and x=60, y=37. The third pick (60, 40, 8) is 3 from each of those two lines and nearer no other edge: it names neither, and the right answer is a clean refusal asking for a point along one edge. The corner this case was made for, with the r3 on its edge alone, is ladder 07-fillets/021.",
+ "outcome": "refused",
+ "refusal": "give a point along one edge"
 }
