@@ -1,0 +1,70 @@
+{
+  "description": "Issue #4431: 22 letters of sketch text cut 1 mm into the top of a 105 x 26 x 40 mm block with a 5 degree taper. Every point of the intersection curves on the letters' tapered (NURBS) walls was projected without a hint, each starting from a 51 x 51 grid search that evaluated the surface's basis functions at every grid point; the cut took 31 s in a release build where the untapered one takes 1 s.",
+  "commands": [
+    {
+      "command": "sketch.create",
+      "params": {
+        "plane": "XY"
+      }
+    },
+    {
+      "command": "sketch.rectangle.two_point",
+      "params": {
+        "p0": [
+          0,
+          0
+        ],
+        "p1": [
+          105,
+          26
+        ]
+      }
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "solid.extrude",
+      "params": {
+        "distance": 40
+      }
+    },
+    {
+      "command": "sketch.create",
+      "params": {
+        "plane": {
+          "face": [
+            50,
+            13,
+            40
+          ]
+        }
+      }
+    },
+    {
+      "command": "sketch.text",
+      "params": {
+        "text": "textvraiment tres long",
+        "at": [
+          3,
+          9
+        ],
+        "height": 7.81
+      }
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "solid.extrude",
+      "params": {
+        "sketch": "Sketch2",
+        "distance": "-1 mm",
+        "operation": "cut",
+        "taper": "5 deg"
+      }
+    }
+  ]
+}

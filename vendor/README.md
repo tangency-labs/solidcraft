@@ -92,6 +92,29 @@ Changes:
   panic made it, and the kernel goes on to its other tries. Carrying the approximate points on
   made one test's Boolean run for minutes.
 
+- `decorators/revolved_curve.rs`: `Processor::<RevolutedCurve<C>, Matrix4>::presearch`, the grid
+  pre-search of a transformed revolved surface with each grid line's profile point and rotation
+  made once. Same grid, same points (made by the same operations as `subs`), same first minimum
+  as `algo::surface::presearch`; used by truck-modeling below (#4542).
+- `nurbs/bspsurface.rs`, `nurbs/nurbssurface.rs`: nearest-point searches on B-spline and NURBS
+  surfaces without a parameter hint pre-search with `BSplineSurface::grid_presearch`: each grid
+  line's basis functions made once instead of at each of the 51 × 51 points, every point summed
+  exactly as `subs` sums it, the same first minimum as `algo::surface::presearch`. Every point
+  of an intersection curve is projected without a hint, and tapered text cut into a block spent
+  its 40 s there (#4431). The same parameters bit for bit:
+  `crates/kernel/tests/mesh_collision_equivalence.rs`.
+
+## truck-modeling 0.6.0 (Apache-2.0, © RICOS Co. Ltd., https://github.com/ricosjp/truck)
+
+Changes:
+- `geometry.rs`: `Surface::search_nearest_parameter` on a revolved surface without a parameter
+  hint pre-searches with `Processor::<RevolutedCurve<_>, _>::presearch` (truck-geometry above)
+  instead of `algo::surface::presearch`, which evaluated the profile curve and built the rotation
+  at each of the grid's 101 × 101 points for every search. Every point of an intersection curve
+  on a revolved face is projected without a hint, and a join with a spline ring on a revolved
+  base spent most of its time there (#4542). The same parameters bit for bit:
+  `crates/kernel/tests/mesh_collision_equivalence.rs`.
+
 ## truck-stepio 0.3.0 (Apache-2.0, © RICOS Co. Ltd., https://github.com/ricosjp/truck)
 
 Only the writer (`out`) is used; SolidCraft reads STEP with its own reader.
