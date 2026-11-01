@@ -1493,6 +1493,8 @@ preference_settings! {
     sketch_state_icons: bool = true, PAGE_SKETCH => check_id("prefs.sketch_state_icons");
     /// Show the construction-line family in Sketch CREATE; off restores the earlier menu.
     sketch_construction_lines: bool = true, PAGE_SKETCH => check_id("prefs.sketch_construction_lines");
+    /// Use the only straight construction line in the preselection as Mirror's reference.
+    sketch_mirror_auto_line: bool = true, PAGE_SKETCH => check_id("prefs.sketch_mirror_auto_line");
     /// A sketch tool's shortcut pressed again before the first point steps to the tool's next
     /// creation mode (#2459). Off (the default): the key starts the tool again, as it always has.
     shortcut_cycles_modes: bool = false, PAGE_SKETCH;
@@ -5794,6 +5796,7 @@ mod tests {
             ("hide_constraint_glyphs_zoomed_out", json!(false), PAGE_SKETCH),
             ("suppress_sketch_snap", json!(ModifierCombo::NONE), PAGE_SKETCH),
             ("sketch_state_icons", json!(false), PAGE_SKETCH),
+            ("sketch_mirror_auto_line", json!(false), PAGE_SKETCH),
             ("sketch_tracking_guides", json!(false), PAGE_SKETCH),
             ("sketch_tracking_points", json!(false), PAGE_SKETCH),
             ("sketch_align_points", json!(true), PAGE_SKETCH),
