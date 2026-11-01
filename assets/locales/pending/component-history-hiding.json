@@ -1,0 +1,10 @@
+{
+  "en": {
+    "cmd.component_hide_history": "Hide Component History",
+    "cmd.component_show_history": "Show Component History",
+    "ui.hide_component_history": "Hide its History",
+    "ui.show_component_history": "Show its History",
+    "ui.history_show_hidden": "Show Hidden Components",
+    "ui.history_hide_hidden": "Hide Hidden Components"
+  }
+}

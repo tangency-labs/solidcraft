@@ -43,11 +43,18 @@ pub(crate) fn transport_response(app: &mut SolveApp, control: crate::ui_kit::His
     }
 }
 
-/// The History controls' menu: shows or hides the Play button.
+/// The History controls' menu: shows or hides the Play button, and — when the design marks any
+/// component out of the bar — shows or hides those components' entries (#10393).
 pub(crate) fn transport_items(app: &SolveApp) -> Vec<crate::context_menu::Item> {
     let show = !app.preferences.history_play_button;
     let label = crate::i18n::tr(if show { "ui.history_play_button_show" } else { "ui.history_play_button_hide" });
-    vec![crate::context_menu::Item::action("ui.historyPlayButton", label, "timeline_play").with(json!({ "show": show }))]
+    let mut items = vec![crate::context_menu::Item::action("ui.historyPlayButton", label, "timeline_play").with(json!({ "show": show }))];
+    if app.session.doc.components.iter().any(|c| c.history_hidden) {
+        let show_hidden = !app.tree.history_show_hidden;
+        let label = crate::i18n::tr(if show_hidden { "ui.history_show_hidden" } else { "ui.history_hide_hidden" });
+        items.push(crate::context_menu::Item::action("ui.historyShowHidden", label, "eye").with(json!({ "show": show_hidden })));
+    }
+    items
 }
 
 /// The feature that made a face, edge or vertex of `body` (its world name): a face's own creator,
@@ -232,9 +239,16 @@ pub(crate) fn timeline_component(app: &SolveApp, show_all: bool) -> Option<u64> 
 }
 
 /// Indices into the design's features that the timeline shows for `component` (all of them for
-/// `None`): the features of that component and of the components inside it.
-pub(crate) fn shown_feature_indices(doc: &solidcraft_engine::doc::Document, component: Option<u64>) -> Vec<usize> {
-    doc.features.iter().enumerate().filter(|(_, f)| component.is_none_or(|c| doc.component_within(f.component, c))).map(|(i, _)| i).collect()
+/// `None`): the features of that component and of the components inside it, leaving out the
+/// components marked out of the History bar unless `show_hidden` asks for them (#10393).
+pub(crate) fn shown_feature_indices(doc: &solidcraft_engine::doc::Document, component: Option<u64>, show_hidden: bool) -> Vec<usize> {
+    doc.features
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| component.is_none_or(|c| doc.component_within(f.component, c)))
+        .filter(|(_, f)| show_hidden || !doc.component_history_hidden(f.component))
+        .map(|(i, _)| i)
+        .collect()
 }
 
 /// The design's feature position for a slot among the shown features: before the shown feature
@@ -841,7 +855,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             let show_all = ui.data(|d| d.get_temp::<bool>(show_all_id)).unwrap_or(false);
             let only = timeline_component(app, show_all);
             let filtering = only.is_some() || show_all;
-            let shown = shown_feature_indices(&app.session.doc, only);
+            let shown = shown_feature_indices(&app.session.doc, only, app.tree.history_show_hidden);
             if filtering || app.session.doc.features.iter().any(|f| f.component != 0) {
                 // A toggle ahead of the features: this part only, or the whole design.
                 let label = match only {
@@ -1219,6 +1233,69 @@ mod tests {
             h.frames(4);
             assert!(handle_at("timeline-joint:Hinge0").is_none());
         }
+    }
+
+    #[test]
+    fn history_hiding_a_component_leaves_its_features_out_of_the_bar() {
+        use crate::context_menu::{self, Target};
+        use crate::scenario::handle_at;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("component.create", json!({ "name": "Copy" })).unwrap();
+        h.app.run("solid.box", json!({ "length": 10, "width": 10, "height": 10, "name": "CopyBox" })).unwrap();
+        h.app.run("component.activate", json!({ "component": "root" })).unwrap();
+        h.app.run("component.create", json!({ "name": "Part" })).unwrap();
+        h.app.run("solid.box", json!({ "length": 5, "width": 5, "height": 5, "name": "PartBox" })).unwrap();
+        h.app.run("component.activate", json!({ "component": "root" })).unwrap();
+        h.frames(4);
+        assert!(handle_at("timeline:CopyBox").is_some() && handle_at("timeline:PartBox").is_some(), "both parts' features start in the bar");
+        // The Browser menu offers to hide the copy's History, and running it leaves its entries out.
+        let copy = h.app.session.doc.components.iter().find(|c| c.name == "Copy").unwrap().id;
+        let menu = context_menu::items(&h.app, &Target::Component { id: copy });
+        let hide = menu.iter().find(|i| i.id == "component.hide_history").expect("the component menu offers Hide its History");
+        context_menu::run_item(&mut h.app, hide, egui::Pos2::ZERO);
+        h.frames(4);
+        assert!(handle_at("timeline:CopyBox").is_none(), "the hidden copy leaves the bar");
+        assert!(handle_at("timeline:PartBox").is_some(), "the rest of the design stays");
+        // The History controls' menu shows them anyway, and hides them again (#10393).
+        fn toggle(h: &Harness) -> context_menu::Item {
+            let items = context_menu::items(&h.app, &Target::HistoryControls);
+            items.into_iter().find(|i| i.id == "ui.historyShowHidden").expect("the bar offers to show hidden entries").clone()
+        }
+        let item = toggle(&h);
+        context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+        h.frames(4);
+        assert!(handle_at("timeline:CopyBox").is_some(), "the toggle brings the hidden entries back");
+        let item = toggle(&h);
+        context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+        h.frames(4);
+        assert!(handle_at("timeline:CopyBox").is_none(), "and hides them again");
+        // The component menu now offers to show its History back.
+        let menu = context_menu::items(&h.app, &Target::Component { id: copy });
+        assert!(menu.iter().any(|i| i.id == "component.show_history"), "the menu flips to Show its History");
+    }
+
+    #[test]
+    fn shown_feature_indices_leave_out_hidden_components_and_their_children() {
+        let mut h = Harness::new();
+        h.app.run("component.create", json!({ "name": "Copy" })).unwrap();
+        h.app.run("solid.box", json!({ "length": 1, "width": 1, "height": 1, "name": "CopyBox" })).unwrap();
+        h.app.run("component.create", json!({ "name": "Inner" })).unwrap();
+        h.app.run("solid.box", json!({ "length": 1, "width": 1, "height": 1, "name": "InnerBox" })).unwrap();
+        h.app.run("component.activate", json!({ "component": "root" })).unwrap();
+        h.app.run("component.create", json!({ "name": "Part" })).unwrap();
+        h.app.run("solid.box", json!({ "length": 1, "width": 1, "height": 1, "name": "PartBox" })).unwrap();
+        h.app.run("component.activate", json!({ "component": "root" })).unwrap();
+        h.app.run("component.hide_history", json!({ "component": "Copy" })).unwrap();
+        let doc = &h.app.session.doc;
+        let shown = |show_hidden: bool| super::shown_feature_indices(doc, None, show_hidden);
+        let names = |idx: Vec<usize>| idx.iter().map(|i| doc.features[*i].name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(shown(false)), ["PartBox"], "a hidden component takes its own and its children's rows out");
+        assert_eq!(names(shown(true)), ["CopyBox", "InnerBox", "PartBox"], "show-hidden lists everything again");
+        // The same filter applies when the bar narrows to one component.
+        let copy = doc.components.iter().find(|c| c.name == "Copy").unwrap().id;
+        assert!(super::shown_feature_indices(doc, Some(copy), false).is_empty(), "the component filter shows nothing of a hidden component");
+        assert_eq!(super::shown_feature_indices(doc, Some(copy), true).len(), 2, "Copy owns CopyBox and InnerBox");
     }
 
     #[test]
