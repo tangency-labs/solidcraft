@@ -2893,6 +2893,7 @@
   "prefs.plugins_show_folder": "Hiện thư mục plugin",
   "prefs.prefer_free_sketch_points": "Ưu tiên điểm phác thảo có thể di chuyển khi các điểm chồng lên nhau",
   "prefs.preview_choices": "Xem trước các lựa chọn của bạn",
+  "prefs.preview_reselect_modifier": "Ẩn bản xem trước để chọn lại",
   "prefs.preview_tint_new_faces": "Tô màu bề mặt mới trong bản xem trước",
   "prefs.preview_tint_new_faces_help": "Bản xem trước của một đặc trưng làm thay đổi một khối có thể vẽ bề mặt được thêm vào bằng màu xem trước. Khi tắt, khối được vẽ bằng màu của chính nó.",
   "prefs.print_face_highlight": "Tô sáng mặt in",

@@ -2893,6 +2893,7 @@
   "prefs.plugins_show_folder": "プラグインフォルダーを表示",
   "prefs.prefer_free_sketch_points": "スケッチ点が重なったときは移動可能な点を優先する",
   "prefs.preview_choices": "選択した設定のプレビュー",
+  "prefs.preview_reselect_modifier": "再選択のためにプレビューを非表示",
   "prefs.preview_tint_new_faces": "プレビューで新しい面に色を付ける",
   "prefs.preview_tint_new_faces_help": "ボディを変更するフィーチャーのプレビューで、追加される面をプレビュー色で描画できます。オフにすると、ボディはそのままの色で描画されます。",
   "prefs.print_face_highlight": "造形面の強調",

@@ -2893,6 +2893,7 @@
   "prefs.plugins_show_folder": "إظهار مجلد الإضافات",
   "prefs.prefer_free_sketch_points": "تفضيل نقاط الرسم القابلة للتحريك عند تداخل النقاط",
   "prefs.preview_choices": "معاينة اختياراتك",
+  "prefs.preview_reselect_modifier": "إخفاء المعاينة لإعادة التحديد",
   "prefs.preview_tint_new_faces": "تلوين السطح الجديد في المعاينة",
   "prefs.preview_tint_new_faces_help": "يمكن لمعاينة ميزة تغيّر جسمًا أن ترسم السطح المضاف بلون المعاينة. عند الإيقاف يُرسم الجسم بلونه الأصلي.",
   "prefs.print_face_highlight": "إبراز وجه الطباعة",
