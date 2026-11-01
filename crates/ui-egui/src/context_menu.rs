@@ -734,11 +734,11 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.fit", "Fit", "fit"));
         v.push(act("ui.home", "Home View", "home"));
         v.push(Item::sep());
-        let anything_hidden = !app.session.visibility.hidden_bodies.is_empty()
-            || !app.session.visibility.hidden_sketches.is_empty()
-            || !app.session.visibility.hidden_folders.is_empty();
+        let can_unisolate = !app.session.visibility.hidden_bodies.is_empty() || !app.session.visibility.hidden_occurrences.is_empty();
+        let anything_hidden =
+            can_unisolate || !app.session.visibility.hidden_sketches.is_empty() || !app.session.visibility.hidden_folders.is_empty();
         v.push(act("ui.showAll", "Show All", "eye").on(anything_hidden));
-        v.push(act("ui.showAll", "Unisolate", "eye").on(!app.session.visibility.hidden_bodies.is_empty()));
+        v.push(act("ui.showAll", "Unisolate", "eye").on(can_unisolate));
         v.push(Item::sep());
         v.push(cmd(app, "solid.extrude", "Extrude"));
         v.push(cmd(app, "solid.fillet", "Fillet"));
