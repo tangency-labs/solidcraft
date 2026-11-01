@@ -2,8 +2,8 @@ use serde_json::{Value, json};
 
 use super::{
     AxisEdgeParams, AxisNormalToFaceParams, AxisThroughCylinderParams, AxisTwoPlanesParams, AxisTwoPointsParams, MidplaneParams,
-    PlaneAlongPathParams, PlanePerpendicularParams, PlaneTangentParams, PlaneThreePointsParams, PlaneTwoEdgesParams, PointAlongPathParams,
-    PointCenterParams, PointEdgePlaneParams, PointThreePlanesParams, PointTwoEdgesParams, PointVertexParams,
+    PlaneAlongPathParams, PlaneAxisPointParams, PlanePerpendicularParams, PlaneTangentParams, PlaneThreePointsParams, PlaneTwoEdgesParams,
+    PointAlongPathParams, PointCenterParams, PointEdgePlaneParams, PointThreePlanesParams, PointTwoEdgesParams, PointVertexParams,
 };
 use crate::Session;
 use crate::schema::features::FeatureResult;
@@ -24,6 +24,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<PointEdgePlaneParams>(), &["edge", "name", "participants", "plane"]);
     assert_keys(input_schema_for::<PointAlongPathParams>(), &["name", "participants", "path", "t"]);
     assert_keys(input_schema_for::<MidplaneParams>(), &["a", "b", "name", "participants"]);
+    assert_keys(input_schema_for::<PlaneAxisPointParams>(), &["axis", "name", "participants", "point"]);
     assert_keys(input_schema_for::<PlaneTwoEdgesParams>(), &["a", "b", "name", "participants"]);
     assert_keys(input_schema_for::<PlaneThreePointsParams>(), &["a", "b", "c", "name", "participants"]);
     assert_keys(input_schema_for::<PlaneTangentParams>(), &["at", "face", "name", "participants"]);
@@ -88,6 +89,7 @@ fn construction_features_reply_with_feature_result() {
         run("construct.axis.two_points", json!({"a": {"type": "point", "p": [0, 0, 0]}, "b": {"point": {"x": 1, "y": 2, "z": 3}}})),
         run("construct.axis.edge", json!({"edge": {"edge": [5, 0, 0]}, "participants": []})),
         run("construct.plane.midplane", json!({"a": "XY", "b": {"face": [5, 5, 10]}, "name": "Middle"})),
+        run("construct.plane.axis_point", json!({"axis":{"axis":"Z"},"point":{"point":[10,20,30]}})),
         run("construct.plane.two_edges", json!({"a": {"edge": [5, 0, 0]}, "b": {"edge": [0, 5, 0]}})),
         run("construct.plane.three_points", json!({"a": {"point": [0, 0, 0]}, "b": {"vertex": [10, 0, 0]}, "c": {"sketch": sketch, "point": point}})),
         run("construct.plane.tangent", json!({"face": {"face": [35, 0, 5]}})),

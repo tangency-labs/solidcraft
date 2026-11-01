@@ -6,7 +6,9 @@
 use std::time::Instant;
 
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{Analysis, Budget, ConstraintKind, Hold, Sketch, SolveReport, solve, solve_with};
+use solidcraft_sketch::{
+    Analysis, Budget, ConstraintKind, Hold, PatternAlignment, Sketch, SketchPattern, SketchPatternKind, SolveReport, solve, solve_with,
+};
 
 /// A small deterministic generator for the start offsets.
 struct Lcg(u64);
@@ -66,6 +68,33 @@ fn strip(n: usize) -> Result<(Sketch, usize), Box<dyn std::error::Error>> {
     Ok((sk, bottom[0]))
 }
 
+/// A slot (two arcs joined by two lines) copied `count` times around the origin by a circular
+/// pattern. Returns the sketch and the seed's first arc start point.
+fn slot_pattern(count: usize) -> Result<(Sketch, usize), Box<dyn std::error::Error>> {
+    let mut sk = Sketch::new();
+    let center = sk.add_point(Vec2::ZERO, None)?;
+    sk.add_constraint(ConstraintKind::Fix { p: center }, None)?;
+    let (c0, c1) = (Vec2::new(200.0, 0.0), Vec2::new(210.0, 0.0));
+    let p = [c0 + Vec2::new(0.0, -2.0), c0 + Vec2::new(0.0, 2.0), c1 + Vec2::new(0.0, -2.0), c1 + Vec2::new(0.0, 2.0)];
+    let pts: Vec<usize> = p.iter().map(|q| sk.add_point(*q, None)).collect::<Result<_, _>>()?;
+    let left = sk.add_arc(c0, p[1], p[0], [None, Some(pts[1]), Some(pts[0])], None)?;
+    let right = sk.add_arc(c1, p[2], p[3], [None, Some(pts[2]), Some(pts[3])], None)?;
+    let bottom = sk.add_line_pts(pts[0], pts[2], None)?;
+    let top = sk.add_line_pts(pts[1], pts[3], None)?;
+    let entities = [left, right, bottom, top].iter().filter_map(|i| sk.curves.get(*i).map(|c| c.id.clone())).collect();
+    let center_id = sk.points.get(center).map(|q| q.id.clone()).ok_or("missing center")?;
+    let kind = SketchPatternKind::Circular { center: center_id, count, angle: 360.0, alignment: PatternAlignment::Right, reversed: false };
+    let id = sk.fresh("pat")?;
+    sk.patterns.push(SketchPattern { id, entities, kind: kind.clone(), count_expression: None, instances: vec![], expressions: Default::default() });
+    sk.update_pattern(0, kind)?;
+    Ok((sk, pts[1]))
+}
+
+/// A hash of the whole sketch, every number to the bit, to compare solver output between builds.
+fn fingerprint(sk: &Sketch) -> u64 {
+    format!("{sk:?}").bytes().fold(0xcbf29ce484222325, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100000001b3))
+}
+
 /// Best of `reps` solves of a copy of `sk` (ms) and the last report.
 fn time(sk: &Sketch, reps: usize, f: impl Fn(&mut Sketch) -> SolveReport) -> (f64, SolveReport) {
     let mut best = f64::MAX;
@@ -103,6 +132,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (frame, rep) = time(&sk, 5, |k| solve_with(k, &hold, None, Analysis::StatusOnly, Some(&mut Budget::frame())));
         let (full, _) = time(&sk, 5, solve);
         println!("| {n} rectangles | {} | {frame:.2} ({:?}) | {full:.2} |", sk.points.len(), rep.status);
+    }
+    println!();
+    println!("| circular slot pattern | curves | points | drag frame on another line ms | drag frame on the seed ms | output |");
+    println!("|---|---|---|---|---|---|");
+    for count in [100usize, 500] {
+        let (mut sk, seed) = slot_pattern(count)?;
+        let a = sk.add_point(Vec2::new(-500.0, -500.0), None)?;
+        let b = sk.add_point(Vec2::new(-480.0, -500.0), None)?;
+        let l = sk.add_line_pts(a, b, None)?;
+        sk.add_constraint(ConstraintKind::Horizontal { l }, None)?;
+        let drag = |point: usize| -> (f64, u64) {
+            let mut start = sk.clone();
+            if let Some(p) = start.points.get_mut(point) {
+                p.pos += Vec2::new(0.5, 0.3);
+            }
+            let hold = Hold { points: vec![point], radii: vec![] };
+            let frame = |k: &mut Sketch| solve_with(k, &hold, None, Analysis::StatusOnly, Some(&mut Budget::frame()));
+            let (ms, _) = time(&start, 5, frame);
+            frame(&mut start);
+            (ms, fingerprint(&start))
+        };
+        let (other, other_out) = drag(b);
+        // Solving the whole pattern takes seconds at 500 copies.
+        let (on_seed, seed_out) = if count <= 100 { drag(seed) } else { (f64::NAN, 0) };
+        println!("| {count} slots | {} | {} | {other:.2} | {on_seed:.2} | {other_out:016x} {seed_out:016x} |", sk.curves.len(), sk.points.len());
     }
     Ok(())
 }

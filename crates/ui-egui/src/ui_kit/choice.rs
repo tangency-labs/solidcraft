@@ -12,6 +12,8 @@ use egui::{Ui, vec2};
 /// Text segments retain mixed states and optional compact clipping instead of dropdown fallback.
 #[derive(Default)]
 pub(crate) struct Segments<'a> {
+    /// Explicit focus requested by the owning form when a setting is opened for editing.
+    pub focus: Option<usize>,
     /// Per-option availability; omitted entries are enabled. Unavailable options stay faded.
     pub enabled: &'a [bool],
     /// Optional per-option refusal reasons. Disabled options remain visible and explain why.
@@ -41,6 +43,7 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
         crate::prefs_search::reveal(ui);
     }
     let Segments {
+        focus,
         enabled,
         disabled,
         targets,
@@ -127,6 +130,9 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
         let ui = &mut segment_ui;
         let segment_enabled = ui.is_enabled();
         let response = ui.interact(segment, id, egui::Sense::click());
+        if focus == Some(index) && segment_enabled && ui.is_visible() && ui.is_rect_visible(segment) {
+            response.request_focus();
+        }
         let on = states.get(index).copied().unwrap_or(*selected == index);
         let rounding = egui::CornerRadius {
             nw: if index == 0 { t.control_radius } else { 0 },
@@ -337,14 +343,20 @@ pub(crate) fn checkbox_row(ui: &mut egui::Ui, key: &str, label: &str, on: bool) 
 
 /// Compact bold/italic toggles for text. Tokens: scope font/control tokens.
 /// The glyphs keep the familiar B/I treatment; accessible names use translated style names.
-pub(crate) fn text_emphasis(ui: &mut Ui, bold: &mut bool, italic: &mut bool) {
+pub(crate) fn text_emphasis(ui: &mut Ui, bold: &mut bool, italic: &mut bool, bold_enabled: bool) {
     use crate::fonts::RichTextExt as _;
-    for (key, text, value, id) in [
-        ("Bold", egui::RichText::new("B").semibold(), bold, "sketch_text.bold"),
-        ("Italic", egui::RichText::new("I").italics(), italic, "sketch_text.italic"),
+    for (key, text, value, id, enabled) in [
+        ("Bold", egui::RichText::new("B").semibold(), bold, "sketch_text.bold", bold_enabled),
+        ("Italic", egui::RichText::new("I").italics(), italic, "sketch_text.italic", true),
     ] {
-        let response = ui.toggle_value(value, text).on_hover_text(crate::i18n::tr(id));
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), *value, crate::i18n::tr(id)));
+        if !enabled {
+            *value = false;
+        }
+        let mut response = ui.add_enabled_ui(enabled, |ui| ui.toggle_value(value, text).on_hover_text(crate::i18n::tr(id))).inner;
+        if !enabled {
+            response = response.on_disabled_hover_text(crate::i18n::tr("sketch_text.no_bold"));
+        }
+        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled() && enabled, *value, crate::i18n::tr(id)));
         scenario::publish_target_as(&format!("dialog:{key}"), &format!("dialog:emphasis:{key}"), response.rect);
     }
 }

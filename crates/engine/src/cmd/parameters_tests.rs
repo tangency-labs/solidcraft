@@ -1145,3 +1145,53 @@ fn a_feature_on_a_failed_sketch_names_the_sketch() {
     assert_eq!(r["errors"], json!([]), "{r}");
     assert!(rel(volume(&mut s), 40.0 * 20.0 * 5.0 + 500.0) < 1e-9);
 }
+
+/// A finished sketch with one line (0,0)-(30,0) whose length is dimensioned to parameter `L`.
+fn line_dimensioned_by_a_parameter() -> (Session, u64) {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "L", "expression": "30"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "L"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let feature = s.doc.find_feature("Sketch1").map(|f| f.id).unwrap_or_default();
+    (s, feature)
+}
+
+/// #9729: `sketch.dimension` refuses 0 ("that would shrink l1 to a point") but a value edit
+/// let it through: the line collapsed to a point and every later value counted as a conflict,
+/// so only Undo recovered — and after a save and reopen there is no Undo. A value edit now
+/// runs the same shrink/fling checks `settle` runs, so the zero is refused where it happens.
+#[test]
+fn a_parameter_that_shrinks_a_dimensioned_line_to_a_point_is_refused() {
+    let (mut s, feature) = line_dimensioned_by_a_parameter();
+    let e = err(&mut s, "parameters.change", json!({"name": "L", "expression": "0"}));
+    assert!(e.contains("shrink l1 to a point") && e.contains("the values were not changed"), "{e}");
+    // The line is where it was and the sketch still solves.
+    assert!((far_x(&s, feature) - 30.0).abs() < 1e-6);
+    assert!(s.model.state().sketch(feature).unwrap().report.keeps_orientation());
+    // Other values still work, in both directions: the sketch was never stored collapsed.
+    run(&mut s, "parameters.change", json!({"name": "L", "expression": "20"}));
+    assert!((far_x(&s, feature) - 20.0).abs() < 1e-6);
+    run(&mut s, "parameters.change", json!({"name": "L", "expression": "30"}));
+    assert!((far_x(&s, feature) - 30.0).abs() < 1e-6);
+}
+
+/// The largest x among the stored sketch's points: the line's far end.
+fn far_x(s: &Session, feature: u64) -> f64 {
+    stored_points(s, feature).iter().map(|p| p.x).fold(f64::MIN, f64::max)
+}
+
+/// The same through a configuration row: activating a row whose value collapses the line is
+/// refused, and the Default row can still be activated afterwards.
+#[test]
+fn a_configuration_row_that_shrinks_a_dimensioned_line_to_a_point_is_refused() {
+    let (mut s, feature) = line_dimensioned_by_a_parameter();
+    run(&mut s, "config.configure", json!({"params": ["L"]}));
+    run(&mut s, "config.row", json!({"name": "Zero", "values": {"param:L": "0"}}));
+    let e = err(&mut s, "config.activate", json!({"row": "Zero"}));
+    assert!(e.contains("shrink l1 to a point"), "{e}");
+    // The Default row still activates and the line is untouched.
+    run(&mut s, "config.activate", json!({"row": "Default"}));
+    assert!((far_x(&s, feature) - 30.0).abs() < 1e-6);
+}

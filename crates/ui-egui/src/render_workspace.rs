@@ -3,7 +3,7 @@
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
 
-use egui::{Color32, Sense};
+use egui::Sense;
 use serde_json::json;
 use solidcraft_engine::doc::render_settings::RenderSetup;
 #[cfg(test)]
@@ -480,8 +480,9 @@ impl Default for State {
 
 impl State {
     /// Retain the selected viewport adapter, but do not open another device or
-    /// compile shaders until Render is used. A later viewport installation (for
-    /// example safe-mode fallback) replaces only a not-yet-started factory.
+    /// compile shaders until the GPU path image method is used in Render
+    /// ([`wants_path_host`]). A later viewport installation (for example safe-mode
+    /// fallback) replaces only a not-yet-started factory.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn defer_path_host(&mut self, key: String, create: impl FnOnce() -> Result<ImageHost, String> + Send + 'static) {
         if matches!(self.path_host, PathHost::NotStarted) {
@@ -556,9 +557,17 @@ pub fn host_executor(max_dimension: u32, depth: bool, samples: u32) -> Result<Ex
     })
 }
 
+/// Whether the GPU path tracer is wanted now: Render is open with the GPU path image method.
+/// Its setup compiles a large shader that some Vulkan drivers take gigabytes and minutes over,
+/// so Render with the Raster or CPU method never starts it (#9041).
+#[cfg(not(target_arch = "wasm32"))]
+fn wants_path_host(app: &SolveApp) -> bool {
+    active(app) && app.render_workspace.view.method == ImageMethod::GpuRaytrace
+}
+
 pub fn sync_backend(app: &mut SolveApp) {
     #[cfg(not(target_arch = "wasm32"))]
-    if active(app) {
+    if wants_path_host(app) {
         app.render_workspace.start_deferred_path_host();
     }
     if let Some(took) = app.render_workspace.path_host.poll() {
@@ -673,7 +682,9 @@ pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
             }
         }
         #[cfg(not(target_arch = "wasm32"))]
-        app.render_workspace.start_deferred_path_host();
+        if wants_path_host(app) {
+            app.render_workspace.start_deferred_path_host();
+        }
     } else {
         assign::stop(app);
         if let Some((camera, perspective)) = app.render_workspace.design_camera.take() {
@@ -1933,6 +1944,27 @@ pub fn preview_size(executor: Option<&ExecutorDescriptor>, full: (u64, u64)) -> 
     executor.and_then(|e| e.fit(full.0, full.1)).unwrap_or(full)
 }
 
+/// Theme only the untouched, unsaved preview. Saved setups have no background provenance,
+/// so even a saved default-colour backplate remains scene-owned. Never alter image requests.
+fn preview_background(app: &SolveApp) -> Tokens {
+    let view = &app.render_workspace.view;
+    let tokens = Tokens::get();
+    if crate::theme::tab_surfaces_enabled()
+        && !app.session.doc.render.setups.contains_key(&view.name)
+        && view.clean_setup.as_ref().is_some_and(|clean| clean.background == view.draft.background)
+        && !view.transparent
+        && !view.studio.backdrop_enabled
+        && view.studio.environment == studio::Environment::None
+        && view.cpu.environment == cpu::Environment::None
+        && view.raytrace.environment.is_none()
+    {
+        // Includes the current fade and explicit viewport palette/flat-colour preferences.
+        tokens
+    } else {
+        tokens.with_background(Some(view.draft.background))
+    }
+}
+
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if app.render_workspace.view.result {
         app.render_workspace.view.environment_ring = environment::RingView::default();
@@ -1987,8 +2019,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else {
         app.viewport.hover = None;
     }
-    let bg = app.render_workspace.view.draft.background;
-    ui.painter().rect_filled(viewport, 0.0, Color32::from_rgb(bg[0], bg[1], bg[2]));
+    let background = preview_background(app);
+    crate::gpu::paint_background(ui.painter(), viewport, &background);
     let result = (|| -> Result<(), String> {
         if app.viewport.gpu.is_none() {
             return Err(crate::i18n::tr("render.error_gpu_preview").into());
@@ -2084,6 +2116,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             // Product rendering has its own lighting; AO is a Design viewport setting.
             ao_radius: 0.0,
             ao_samples: solidcraft_gpu::view::AO_SAMPLES,
+            sky: [0.0; 4],
             eye: [eye.x as f32, eye.y as f32, eye.z as f32, if camera.fov > 0.0 { 1.0 } else { 0.0 }],
             ssaa: if width < full.0 { width as f32 / full.0 as f32 } else { 1.0 },
             hover_tint: [f32::from(Tokens::get().hover_face_lift) / 255.0; 3],
@@ -2092,7 +2125,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 [f32::from(c.r()) / 255.0, f32::from(c.g()) / 255.0, f32::from(c.b()) / 255.0]
             },
         });
-        ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, callback));
+        crate::blur::viewport(ui.painter(), rect, callback, viewport, [background.viewport_top, background.viewport_bottom]);
         Ok(())
     })();
     if let Err(error) = result {

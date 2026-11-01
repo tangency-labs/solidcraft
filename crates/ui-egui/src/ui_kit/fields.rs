@@ -265,6 +265,9 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
         edit = edit.margin(egui::Margin { left: inset, right: inset.saturating_add(reserve.round() as i8), top: 0, bottom: 0 });
     }
     let mut response = ui.add_sized(vec2(width, row_height()), edit);
+    if response.has_focus() {
+        ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new("sc_focused_editor"), response.id));
+    }
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
     if completion && ui.is_enabled() {
         ui.ctx().data_mut(|data| {
@@ -453,6 +456,7 @@ pub(crate) fn selection_field(ui: &mut Ui, text: &str, options: Selection) -> Re
     publish(ui, &response, egui::WidgetType::Button);
     scenario::publish_rect(&format!("dialog:field:{}", label(ui)), rect);
     scenario::publish_count(&format!("dialog:selection:{}:filled", label(ui)), f64::from(filled));
+    scenario::publish_count(&format!("dialog:selection:{}:active", label(ui)), f64::from(active));
     response
 }
 
@@ -1120,15 +1124,12 @@ fn grown_width(ui: &Ui, value: &str, font: &egui::FontId, base: f32) -> f32 {
 pub(crate) fn placement_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -> Response {
     let t = Tokens::get();
     let font = egui::FontId::proportional(t.font_body);
-    // Canvas editors must retain their native hit target: enlarging it intercepts nearby
-    // sketch picks. Keep the former line + space_2 above/below, with shared galley alignment.
-    let height = ui.fonts_mut(|fonts| fonts.row_height(&font)) + ui.spacing().extra_text_line_spacing + t.space_4;
-    let width = grown_width(ui, value, &font, t.control_height * 3.0 - t.space_6);
+    let size = placement_field_content_size(ui, value);
     let mut response = ui.add(
         text_input(egui::TextEdit::singleline(value))
             .id(id)
-            .min_size(vec2(width, height))
-            .desired_width(width)
+            .min_size(size)
+            .desired_width(size.x)
             .return_key(None)
             .event_filter(egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, ..Default::default() })
             .font(font)
@@ -1185,4 +1186,14 @@ pub(crate) fn inline_name(ui: &mut Ui, rect: egui::Rect, id: egui::Id, value: &m
     );
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
     response
+}
+
+/// The placement editor's content size, before its horizontal text margins and outer frame.
+/// Floating owners use the same measurement to place adjacent editors without overlap.
+pub(crate) fn placement_field_content_size(ui: &Ui, value: &str) -> egui::Vec2 {
+    let t = Tokens::get();
+    let font = egui::FontId::proportional(t.font_body);
+    // Retain the native hit target: a taller editor would intercept nearby sketch picks.
+    let height = ui.fonts_mut(|fonts| fonts.row_height(&font)) + ui.spacing().extra_text_line_spacing + t.space_4;
+    vec2(grown_width(ui, value, &font, t.control_height * 3.0 - t.space_6), height)
 }

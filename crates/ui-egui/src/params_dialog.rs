@@ -527,8 +527,8 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
                     }
                     _ => {
                         let rename = crate::i18n::tr_label("Double-click to rename");
-                        // Always tip the full name: the Name cell clips long identifiers (#8533).
-                        let response = ui_kit::text(ui, &r.name, ui_kit::Text::NameCell(false)).on_hover_text(format!("{}\n{rename}", r.name));
+                        // Keep long identifiers readable (#8533) without stacking the cell's own tooltip.
+                        let response = ui_kit::name_cell_with_hint(ui, &r.name, false, rename);
                         crate::scenario::publish_handle(&format!("param:name:{}", r.name), response.rect.center());
                         if response.double_clicked() {
                             d.renaming = Some((r.name.clone(), r.name.clone()));
@@ -952,6 +952,54 @@ pub fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut String) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parameter_names_show_one_tooltip_and_only_repeat_clipped_names() {
+        fn text_in(shape: &egui::Shape, within: egui::Rect, texts: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(text) if within.contains(text.pos) => texts.push(text.galley.text().to_owned()),
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        text_in(shape, within, texts);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let long = "Driver_MountHole_pitch_diameter_".repeat(2);
+        for name in ["rip_length", long.as_str()] {
+            for favorite in [false, true] {
+                let mut h = crate::scenario::Harness::new();
+                h.app.home.open = false;
+                h.app.run("parameters.add", json!({"name":name,"expression":"140 mm"})).unwrap();
+                h.app.run("parameters.favorite", json!({"name":name,"favorite":favorite})).unwrap();
+                h.step(&json!({"start":"parameters.change"})).unwrap();
+                h.frames(6);
+                let at = crate::scenario::handle_at(&format!("param:name:{name}")).unwrap();
+                h.step(&json!({"move":[at.x,at.y]})).unwrap();
+                h.frames(90);
+                let tooltips: Vec<_> = h.ctx.memory(|m| {
+                    m.areas()
+                        .visible_layer_ids()
+                        .into_iter()
+                        .filter(|layer| layer.order == egui::Order::Tooltip)
+                        .filter_map(|layer| m.area_rect(layer.id))
+                        .collect()
+                });
+                assert_eq!(tooltips.len(), 1, "one name must not stack tooltips: {name}, favorite={favorite}");
+                let mut texts = Vec::new();
+                for shape in &h.shapes {
+                    text_in(&shape.shape, tooltips[0], &mut texts);
+                }
+                let hint = crate::i18n::tr_label("Double-click to rename");
+                let expected = if name == "rip_length" { hint.to_owned() } else { format!("{name}\n{hint}") };
+                assert_eq!(texts, [expected], "only a clipped name needs repeating");
+                h.step(&json!({"click":{"handle":format!("param:name:{name}")},"double":true})).unwrap();
+                assert!(h.app.params.as_ref().unwrap().renaming.is_some(), "the name still renames by double-click");
+            }
+        }
+    }
 
     fn escape_dialog() -> crate::scenario::Harness {
         let mut h = crate::scenario::Harness::new();

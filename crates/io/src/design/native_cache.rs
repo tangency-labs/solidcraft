@@ -289,14 +289,42 @@ impl Encoded {
             slices.push(json!([data.len(), bytes.len()]));
             data.extend_from_slice(bytes);
         }
-        let manifest = serde_json::to_vec(&json!({
-            "format": FORMAT, "producer": PRODUCER, "app": env!("CARGO_PKG_VERSION"), "build": build(),
-            "evaluation": evaluation(), "document": digest(document), "payload": digest(&data),
-            "slices": slices, "shares": shares, "bodies": table, "model": records,
-        }))
+        let manifest = serde_json::to_vec(&Manifest {
+            app: env!("CARGO_PKG_VERSION"),
+            bodies: table,
+            build: build(),
+            document: digest(document),
+            evaluation: evaluation(),
+            format: FORMAT,
+            model: records,
+            payload: digest(&data),
+            producer: PRODUCER,
+            shares,
+            slices,
+        })
         .map_err(invalid)?;
         Ok((manifest, data))
     }
+}
+
+/// A model cache's manifest as written: the model's records are written where they are, not
+/// copied into a JSON tree first (copying a large model's records took as long as writing them,
+/// and a cache too big for the file is written again for each try at fewer states). The fields
+/// are in the order a JSON object keeps its keys (sorted), so the manifest is the one a tree
+/// wrote, byte for byte.
+#[derive(serde::Serialize)]
+struct Manifest<'a> {
+    app: &'a str,
+    bodies: Vec<Value>,
+    build: String,
+    document: String,
+    evaluation: String,
+    format: &'a str,
+    model: &'a Value,
+    payload: String,
+    producer: &'a str,
+    shares: Vec<usize>,
+    slices: Vec<Value>,
 }
 
 /// The final state of the model a design keeps, when this build's evaluation source computed it
@@ -320,6 +348,12 @@ fn current(manifest: &Value, document: &[u8]) -> bool {
         && source_trusted(env!("SOLIDCRAFT_EVALUATION_SOURCE"), cfg!(any(test, feature = "trust-unknown-source")))
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How often reading a model cache validated its document (tests count it).
+    pub(super) static VALIDATED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// A build of unknown source (no git) never trusts a cache, unless `in_tests`: test builds
 /// trust it so the cache tests also pass in a source tarball (the `trust-unknown-source`
 /// feature is only enabled by dev-dependencies).
@@ -328,6 +362,17 @@ pub(super) fn source_trusted(commit: &str, in_tests: bool) -> bool {
 }
 
 pub(super) fn read_geometry_with<R: Read + Seek>(reader: &mut PackageReader<R>, document: &[u8]) -> Result<SavedModel> {
+    read_geometry(reader, document, true)
+}
+
+/// [`read_geometry_with`] for a reader whose document is read next: reading it runs the same
+/// migrations and validation and fails the open when they fail, so validating it here as well
+/// parsed and validated a large design twice (the model is dropped with the failed open).
+pub(super) fn read_geometry_before_document<R: Read + Seek>(reader: &mut PackageReader<R>, document: &[u8]) -> Result<SavedModel> {
+    read_geometry(reader, document, false)
+}
+
+fn read_geometry<R: Read + Seek>(reader: &mut PackageReader<R>, document: &[u8], validate: bool) -> Result<SavedModel> {
     let container: Value = serde_json::from_slice(&reader.limited_part("container.json", 4096)?).map_err(invalid)?;
     if container.get("format").and_then(Value::as_str) != Some(VERSION) {
         return Err(invalid("container version"));
@@ -337,7 +382,11 @@ pub(super) fn read_geometry_with<R: Read + Seek>(reader: &mut PackageReader<R>, 
         return Err(invalid("model cache key"));
     }
     // Validate the small parametric metadata before decoding any geometry.
-    Document::from_json(std::str::from_utf8(document).map_err(invalid)?)?;
+    if validate {
+        #[cfg(test)]
+        VALIDATED.with(|n| n.set(n.get() + 1));
+        Document::from_json(std::str::from_utf8(document).map_err(invalid)?)?;
+    }
     let data = reader.limited_part(PAYLOAD, max_design())?;
     if manifest.get("payload").and_then(Value::as_str) != Some(digest(&data).as_str()) {
         return Err(invalid("model cache payload key"));

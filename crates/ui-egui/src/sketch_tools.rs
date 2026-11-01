@@ -214,30 +214,6 @@ fn continuity_label(app: &SolveApp, seam: &Value) -> String {
 
 /// The Continuity Analysis legend in the viewport's lower left corner: each class in its
 /// colour, while seams are shaded.
-fn continuity_legend(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
-    if app.session.continuity.is_empty() {
-        return;
-    }
-    let tk = crate::theme::Tokens::get();
-    let [smooth, jump, sharp, gap] = tk.continuity;
-    // Stable ids: this Gap is a hole between faces, not the sheet-metal gap (`ui.sheet_gap`).
-    let tr = crate::i18n::tr;
-    let rows = [(tr("ui.continuity_g2"), smooth), (tr("ui.continuity_g1"), jump), (tr("ui.continuity_g0"), sharp), (tr("ui.continuity_gap"), gap)];
-    let font = egui::FontId::proportional(tk.font_body);
-    let (row, pad, swatch) = (18.0, 8.0, 22.0);
-    let text_width = rows.iter().map(|(label, _)| painter.layout_no_wrap(label.to_string(), font.clone(), tk.text).size().x).fold(0.0, f32::max);
-    let size = egui::vec2(pad + swatch + 8.0 + text_width + pad, rows.len() as f32 * row + 2.0 * pad);
-    let available = crate::shell::bottom_overlay_rect(app, proj.rect);
-    let frame = egui::Rect::from_min_size(available.left_bottom() + egui::vec2(16.0, -(size.y + 16.0)), size);
-    painter.rect_filled(frame, tk.radius_sm, tk.panel.gamma_multiply(0.9));
-    crate::scenario::publish_rect("continuity_legend", frame);
-    for (i, (label, col)) in rows.iter().enumerate() {
-        let y = frame.top() + pad + row * (i as f32 + 0.5);
-        painter.line_segment([egui::pos2(frame.left() + pad, y), egui::pos2(frame.left() + pad + swatch, y)], Stroke::new(3.0, *col));
-        painter.text(egui::pos2(frame.left() + pad + swatch + 8.0, y), egui::Align2::LEFT_CENTER, *label, font.clone(), tk.text);
-    }
-}
-
 /// Isocurve analysis lines.
 fn iso_lines(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     if app.tool.as_ref().map(|t| t.cmd) != Some("inspect.isocurve") {
@@ -800,6 +776,8 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         dims_focus: false,
         arc_turn: 0.0,
         lined: Vec::new(),
+        chain: Default::default(),
+        normal: false,
     })
 }
 
@@ -815,7 +793,7 @@ pub fn hint(id: &str) -> Option<String> {
     Some(
         match id {
             "sketch.project" => "Project: click edges, faces, vertices, other sketches' curves, axes or planes",
-            "sketch.intersect" => "Intersect: click faces or edges to cut with the sketch plane",
+            "sketch.intersect" => "Intersect: click faces, edges or other sketches' curves to cut with the sketch plane",
             "sketch.include_3d" => "Include 3D Geometry: click edges or vertices",
             "sketch.fit_curves_to_section" => "Fit Curves to Mesh Section: click a body",
             "sketch.isoparametric_curve" => "Isoparametric Curve: click a point on a face (Shift: along)",
@@ -1270,6 +1248,10 @@ pub(crate) fn place_point(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<
         }
         return;
     }
+    if crate::sketch_line_arc::in_arc_mode(tool) {
+        crate::sketch_line_arc::place_arc(app, tool, &p);
+        return;
+    }
     let Some(Mode::Points(n)) = mode(tool.cmd) else { return };
     if let Err(error) = crate::sketch_dims::validate(app, tool) {
         app.set_status(error, true);
@@ -1490,6 +1472,13 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
                 crate::tools::paint_sketch_path(&[ss.plane.to_world(first.0), hw], mode, painter, proj, faint);
             }
             crate::tools::paint_sketch_path(&[ss.plane.to_world(last.0), hw], mode, painter, proj, faint);
+        } else if crate::sketch_line_arc::in_arc_mode(t) {
+            // The Line tool switched to tangent arcs: the arc a click makes, or (straight ahead,
+            // where there is none) only a faint guide.
+            match crate::sketch_line_arc::preview_arc(&ss.sketch, t, *h) {
+                Some(arc) => crate::tools::paint_preview_curve(arc, &ss.plane, painter, proj, stroke, mode),
+                None => crate::tools::paint_sketch_path(&[ss.plane.to_world(last.0), hw], mode, painter, proj, faint),
+            }
         } else {
             crate::tools::paint_sketch_path(&[ss.plane.to_world(last.0), hw], mode, painter, proj, stroke);
         }
@@ -1804,7 +1793,6 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     }
     marks(app, painter, proj);
     iso_lines(app, painter, proj);
-    continuity_legend(app, painter, proj);
 }
 
 #[cfg(test)]

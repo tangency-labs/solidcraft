@@ -216,6 +216,18 @@ fn key_from(name: &str) -> Option<egui::Key> {
 /// Run one command as `engine.execute` does: through `app.run`, then the first-body fit and the
 /// camera the command asked for.
 fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String> {
+    // User bindings live in the UI. A bridged agent needs the same key the menus show,
+    // including null for a cleared binding; the standalone engine keeps its defaults.
+    if id == "engine.commands" {
+        let mut commands = app.session.execute(id, &params).map_err(|e| e.to_string())?;
+        if let Some(rows) = commands.as_array_mut() {
+            for row in rows.iter_mut().filter_map(Value::as_object_mut) {
+                let key = row.get("id").and_then(Value::as_str).and_then(|id| crate::keymap::effective(app, id));
+                row.insert("shortcut".into(), json!(key));
+            }
+        }
+        return Ok(commands);
+    }
     // `view.pick` is answered by the viewport, not the engine: pixels and rays need the
     // window's camera and pick index, and the command must not touch the document, the
     // selection or the undo stack. Intercepted here so `engine.execute` and `engine.batch`
@@ -453,6 +465,10 @@ pub fn view_png(app: &SolveApp, w: u32, h: u32) -> Result<Vec<u8>, String> {
 }
 
 pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
+    crate::agent_chat::with_tool_request(app, req.chat_turn.as_ref(), |app| handle_request(app, ctx, req))
+}
+
+fn handle_request(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
     let level = match request_param_check(&req.method, &req.params) {
         Ok(level) => level,
         Err(e) => return err(e),
@@ -539,6 +555,43 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
     let f = |k: &str| p.get(k).and_then(Value::as_f64).filter(|x| x.is_finite());
     let b = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(false);
     match method {
+        "ui.blur" => {
+            // Internal rendering harness; deliberately no saved preference or product UI.
+            let radius = if let Some(radius) = p.get("radius_px") {
+                let Some(radius) = radius.as_f64().filter(|v| v.is_finite() && (0.0..=40.0).contains(v)) else {
+                    return err("radius_px must be finite and between 0 and 40");
+                };
+                Some(radius as f32)
+            } else {
+                None
+            };
+            let alpha = if let Some(alpha) = p.get("surface_alpha") {
+                let alpha = if alpha.is_null() {
+                    None
+                } else {
+                    let Some(alpha) = alpha.as_f64().filter(|v| v.is_finite() && (0.0..=1.0).contains(v)) else {
+                        return err("surface_alpha must be null or between 0 and 1");
+                    };
+                    Some((alpha * 255.0).round() as u8)
+                };
+                Some(alpha)
+            } else {
+                None
+            };
+            if let Some(radius) = radius {
+                if let Err(error) = app.blur.set_radius(radius) {
+                    return err(error);
+                }
+                ctx.request_repaint();
+            }
+            if let Some(alpha) = alpha {
+                app.blur.set_surface_alpha(alpha);
+                ctx.request_repaint();
+            }
+            ok(
+                json!({"radius_px":app.blur.radius(), "max_radius_px":40, "capability":app.blur.capability_for(ctx.viewport_id()), "counters":app.blur.counters()}),
+            )
+        }
         "ui.status_fixture" => wrap(crate::viewport_status_fixture::control(app, p)),
         "ui.workspace" => {
             if let Some(workspace) = s("workspace") {
@@ -594,7 +647,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             app.follow_view_request(false);
             wrap(r)
         }
-        "engine.commands" => wrap(app.session.execute("engine.commands", &json!({})).map_err(|e| e.to_string())),
+        "engine.commands" => wrap(execute(app, "engine.commands", json!({}))),
         "document.inspect" => wrap(app.session.execute("document.inspect", p).map_err(|e| e.to_string())),
         "document.revision" => wrap(app.session.execute("document.revision", p).map_err(|e| e.to_string())),
         // The connection already counts as subscribed (`DesignWatch::join`), and its events start
@@ -836,8 +889,22 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 app.synthetic.push(egui::Event::PointerMoved(a));
             }
             let steps = f("steps").unwrap_or(10.0).clamp(1.0, 200.0) as usize;
-            for k in 1..=steps {
-                app.synthetic.push(egui::Event::PointerMoved(a + (z - a) * (k as f32 / steps as f32)));
+            // `via`: [[x, y], ...] the pointer passes through on its way (a lasso's loop, #4376).
+            let via: Vec<egui::Pos2> = p
+                .get("via")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .take(500)
+                .filter_map(|q| Some(egui::pos2(q.get(0)?.as_f64()? as f32, q.get(1)?.as_f64()? as f32)))
+                .filter(|q| q.is_finite())
+                .collect();
+            let mut from = a;
+            for to in via.into_iter().chain([z]) {
+                for k in 1..=steps {
+                    app.synthetic.push(egui::Event::PointerMoved(from + (to - from) * (k as f32 / steps as f32)));
+                }
+                from = to;
             }
             // `hold_end`: frames to keep the button down at the end (to look at a drag's snap).
             for _ in 0..f("hold_end").unwrap_or(0.0).clamp(0.0, 600.0) as usize {
@@ -1340,6 +1407,27 @@ pub(crate) fn write_screenshot(image: &egui::ColorImage, path: &str) -> Result<(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn blur_control_validates_before_mutation_and_reports_no_gpu() {
+        let mut h = crate::scenario::Harness::new();
+        for invalid in [json!(-1), json!(41), json!("18"), json!(null)] {
+            let reply = h.call("ui.blur", json!({"radius_px":invalid}));
+            assert_eq!(reply["ok"], false, "{reply}");
+            assert_eq!(h.app.blur.radius(), 0.0);
+        }
+        let reply = h.call("ui.blur", json!({"radius_px":18,"surface_alpha":2}));
+        assert_eq!(reply["ok"], false);
+        assert_eq!(h.app.blur.radius(), 0.0);
+        let reply = h.call("ui.blur", json!({"radius_px":18,"surface_alpha":0.7}));
+        assert_eq!(reply["ok"], true);
+        assert!(matches!(h.app.blur.capability(), crate::blur::Capability::Unavailable(_)));
+        h.frames(2);
+        assert_eq!(h.app.blur.counters().textures_created, 0);
+        assert_eq!(h.app.blur.counters().markers_emitted, 0);
+        h.call("ui.blur", json!({"radius_px":0,"surface_alpha":null}));
+        assert_eq!(h.app.blur.radius(), 0.0);
+    }
+
     use serde_json::json;
     use solidcraft_engine::{Sel, Session};
 

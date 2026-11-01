@@ -6,6 +6,16 @@ component has its own origin, bodies, sketches and timeline entries. The **activ
 (the radio button in the browser) receives new sketches and features; the others are drawn
 faded.
 
+Sketches drawn on a part's face while the design was active belong to the design, so they
+collect in its Sketches folder. **Move Sketches to Their Parts**
+(`component.move_sketches.to_parts`), on a Sketches folder's menu and on a sketch's menu, moves
+the folder's sketches (or the selected ones) to the part whose face each is drawn on, as dragging
+it onto the part would. Each stays where it is on its face, and the whole move is one undo step.
+A sketch with no single part to go to stays where it is: one on an origin, construction or fixed
+plane, on a body of the design itself, on a face without an exact attachment, or already in its
+part. The status bar says how many moved and why the others stayed; the command's reply lists
+each sketch. With no `sketches` it looks at every sketch in the design.
+
 A component is placed by its **occurrences**. Paste creates another instance of the same
 component, and **Paste New** creates an independent copy. Move an occurrence with the move
 triad, then **Capture Position** to keep it or **Revert** to put it back. SolidCraft asks before
@@ -259,7 +269,9 @@ it where it is), and it moves.
 `joint.drive` answers the joint's values as `joint.list` gives them, in degrees and millimetres
 with their units and limits, and `moved` says whether any part moved. A joint's origins are mated
 by default: B's z axis is turned against A's, as two faces meet. `flip: true` lines them up
-instead, so two origins given at one point with the same z stay as they are. Without an
+instead, so two origins given at one point with the same z and x stay as they are. A point origin
+without `x` takes its x from z alone, so a part turned about z turns back when it is joined: give
+`x` on both origins, or use `joint.as_built`, to keep it where it is. Without an
 `angle`, a new joint (other than a relation, which starts where its parts are) takes no turn or a half turn about its axis, whichever turns B less: two
 faces that already meet, a plate under a panel, stay as they are instead of B spinning about
 their shared normal. For scripts that drive many steps, `quiet: true` leaves the per-part
@@ -383,15 +395,17 @@ Mesh** would. The part's solid bodies come
 in as they sit in that design, and they are kept in the assembly, so it opens even without the
 part file. The link is stored relative to the assembly's folder once the assembly is saved.
 After the part file changes, **Update Links** (`component.update_links`) reads it again.
-An assembly whose tab comes back to the front does that by itself for the parts whose files
+An assembly that opens, or whose tab comes back to the front, does that by itself for the parts whose files
 changed since it last read them, whether the part was saved in another tab, another window or by
-a checkout. A part that cannot be read is tried again the next time, and holds up no other.
+a checkout. The parts it reads come in as one step, so one **Undo** takes them all back. A part
+that cannot be read keeps its bodies, is tried again the next time, and holds up no other.
 **Update changed linked designs when a tab comes back** (Preferences, Design,
 `update_changed_links`) turns this off.
 To edit the source, right-click a linked component or occurrence in the Browser and choose
 **Open Linked Design**. It opens the part in another tab and reports if its file is missing.
 **Break Link** (`component.break_link`) keeps the bodies and forgets the file, and
-`component.links` lists the links and whether their files are found. A linked component holds
+`component.links` lists the links, whether their files are found, and whether they changed since
+the assembly last read them (`changed`). A linked component holds
 the part's bodies only: its timeline, parameters and sheet-metal data (flat pattern, bend
 table) stay in the part's own design.
 
@@ -465,6 +479,8 @@ description; **Change Part Size** renumbers them, keeping a field you changed yo
   under it as `children` (items 1.1, 1.2…, with `each` per bolt and `count` in all) instead of
   rows of their own. Bolts with different contents (one with a nut, one without) are different
   rows. `total_occurrences` counts the children too, so it is the same either way.
+  For an inseparable part, only its purchased descendants become children; a purchased part
+  still has no children listed. Parts without a part number are not grouped this way.
 - `component` lists one subassembly's parts instead of the design's.
 
 A component's **bill of materials type** (`bom_type`, a part property set with
