@@ -1395,6 +1395,30 @@ fn prefer_x11(display: bool, wayland_display: bool, desktop: Option<&str>, wayla
     display && !(niri && wayland_display)
 }
 
+/// Whether the chooser that opens is NOT the desktop's own, and why.
+///
+/// `rfd` opens the file chooser through the XDG desktop portal; when the portal is not there it
+/// falls back to zenity, which opens a window that does not belong to SolidCraft and that the
+/// application never mentions. The application has to know that: this decision is what the warning
+/// is built on.
+///
+/// * `dbus_session`: the session bus is there (`DBUS_SESSION_BUS_ADDRESS`).
+/// * `portal_service`: the file chooser portal answers on it.
+/// * `wayland_display`: a Wayland session runs (`WAYLAND_DISPLAY`).
+/// * `x11_display`: the window is an X11 one (`DISPLAY`, or XWayland).
+///
+/// `None` means the desktop's own chooser is the one that opens and there is nothing to say;
+/// `Some` carries the reason to report.
+#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg_attr(not(test), allow(dead_code))]
+fn desktop_chooser_fallback(dbus_session: bool, portal_service: bool, wayland_display: bool, x11_display: bool) -> Option<&'static str> {
+    // The decision does not exist yet: the application never says that the chooser is not the
+    // desktop's own. The test below states what it has to say, and this body is where the answer
+    // goes.
+    let _ = (dbus_session, portal_service, wayland_display, x11_display);
+    None
+}
+
 #[cfg(all(test, unix, not(target_os = "macos")))]
 mod backend_tests {
     use super::prefer_x11;
@@ -1428,6 +1452,30 @@ mod backend_tests {
         // Wayland chosen on GNOME keeps native Wayland; X11 chosen on niri goes through XWayland.
         assert!(!prefer_x11(true, true, Some("GNOME"), over(Some("wayland"))));
         assert!(prefer_x11(true, true, Some("niri"), over(Some("x11"))));
+    }
+
+    /// The file chooser must say when it is NOT the desktop's own: `rfd` falls back to zenity
+    /// when the XDG portal is not there, and the user gets a foreign window with no explanation.
+    #[test]
+    fn the_file_picker_says_when_it_is_not_the_desktops_own_chooser() {
+        use super::desktop_chooser_fallback;
+        // The normal case: the portal is there, the desktop's own chooser opens, nothing to say.
+        assert_eq!(desktop_chooser_fallback(true, true, true, false), None);
+        // No session bus: the portal can not be reached at all, so `rfd` falls back to zenity.
+        assert!(
+            desktop_chooser_fallback(false, true, true, false).is_some(),
+            "without a D-Bus session bus the file chooser is not the desktop's own: the user has to be told"
+        );
+        // The bus is there but the portal service is not: same fallback, same warning.
+        assert!(
+            desktop_chooser_fallback(true, false, true, false).is_some(),
+            "without the desktop portal service the file chooser is not the desktop's own: the user has to be told"
+        );
+        // XWayland: the parent window is an X11 one and the portal refuses it, so `rfd` falls back.
+        assert!(
+            desktop_chooser_fallback(true, true, true, true).is_some(),
+            "under XWayland the portal rejects the parent window: the user has to be told"
+        );
     }
 
     #[test]
