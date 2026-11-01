@@ -400,3 +400,50 @@ fn a_rejected_size_or_corner_expression_leaves_nothing_behind() {
         assert_eq!(count(&s), before, "{cmd} {p}");
     }
 }
+
+/// A corner typed as an expression that comes to 0 when drawn lands on the origin; it must not
+/// be tied to it by the automatic Coincident a snapped click gets, or the next parameter change
+/// conflicts with the tie (#10703).
+#[test]
+fn a_rectangle_corner_whose_expression_is_zero_when_drawn_is_not_tied_to_the_origin() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "x0", "expression": "0 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": ["x0", 0], "p1": [40, 30]}));
+    assert_eq!(r["constraints"].as_array().map(Vec::len), Some(4), "the four side constraints, no Coincident to the origin: {r}");
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "S", "distance": 10}));
+    no_trouble(&s);
+    assert!((volume(&mut s) - 40.0 * 30.0 * 10.0).abs() < 1e-6);
+    run(&mut s, "parameters.change", json!({"name": "x0", "expression": "15 mm"}));
+    no_trouble(&s);
+    assert!((volume(&mut s) - 25.0 * 30.0 * 10.0).abs() < 1e-6);
+}
+
+/// The same for a lone `sketch.point`: an expression that comes to the origin at draw time
+/// leaves the point free, and it follows the parameter from there (#10703).
+#[test]
+fn a_point_whose_expression_is_zero_when_drawn_is_not_tied_to_the_origin() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "x0", "expression": "0 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let r = run(&mut s, "sketch.point", json!({"point": ["x0", 0], "id": "p"}));
+    assert_eq!(r["constraints"].as_array().map(Vec::len), Some(0), "no Coincident to the origin: {r}");
+    run(&mut s, "sketch.finish", json!({}));
+    no_trouble(&s);
+    run(&mut s, "parameters.change", json!({"name": "x0", "expression": "15 mm"}));
+    no_trouble(&s);
+    assert_eq!(solved(&s, "p"), Vec2::new(15.0, 0.0));
+}
+
+/// A corner given as plain numbers on the origin still snaps to it, as a clicked point does:
+/// only expression-placed points are exempt from the automatic Coincident.
+#[test]
+fn a_plain_corner_on_the_origin_still_snaps_to_it() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    assert_eq!(r["constraints"].as_array().map(Vec::len), Some(5), "the four side constraints plus the Coincident to the origin: {r}");
+    run(&mut s, "sketch.finish", json!({}));
+    no_trouble(&s);
+}

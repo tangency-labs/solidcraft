@@ -472,6 +472,9 @@ const CONNECT_TOL: f64 = 1e-6;
 
 /// New points (index `first` on) that land on an existing point, the origin included, get a
 /// coincident constraint to it, as when a click snaps there; `connect: false` leaves them free.
+/// A point placed by parameter expressions is never tied: it follows its expressions, and a
+/// Coincident to where the expressions happened to come to at draw time conflicts with the
+/// next parameter change (#10703).
 fn connect_points(sk: &mut Sketch, first: usize, p: &Value) -> Result<Vec<String>> {
     if !bool_(p, "connect").unwrap_or(true) {
         return Ok(Vec::new());
@@ -481,6 +484,9 @@ fn connect_points(sk: &mut Sketch, first: usize, p: &Value) -> Result<Vec<String
     old.sort_by(|a, b| a.0.x.total_cmp(&b.0.x));
     let mut ties = Vec::new();
     for q in first..sk.points.len() {
+        if sk.points.get(q).is_some_and(|pt| pt.exprs.is_some()) {
+            continue;
+        }
         let Some(at) = sk.point(q) else { continue };
         let from = old.partition_point(|(o, _)| o.x < at.x - CONNECT_TOL);
         let hit =
