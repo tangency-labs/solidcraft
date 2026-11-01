@@ -229,8 +229,10 @@ pub struct ViewportState {
     pub(crate) grid_plane: std::sync::Mutex<GridPlane>,
 }
 
-/// Something under the cursor.
-#[derive(Clone, Debug, PartialEq)]
+/// Something under the cursor. The control channel reports it in the selection's own form
+/// (`{"type": "edge", "body", "index", …}`, #9087).
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum Hit {
     SketchPoint {
         sketch: u64,

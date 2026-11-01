@@ -187,6 +187,55 @@ fn wrap(r: Result<Value, String>) -> Outcome {
 /// The design's own Sketches folder (`Visibility::hidden_folders`), which `showSketches` sets.
 const SKETCHES_FOLDER: &str = "c0/sketches";
 
+/// The open dialog as `ui.inspect`, `ui.start` and `ui.editFeature` report it: its command, its
+/// picks and what OK runs, in the commands' own terms rather than the form's internals (#9087).
+fn dialog_state(app: &SolveApp) -> Value {
+    let Some(d) = app.dialog.as_ref() else { return Value::Null };
+    let runs = crate::dialogs::apply_commands(app, d);
+    json!({
+        "command": d.command(),
+        "title": crate::dialogs::report_title(d),
+        "editing": d.editing.map(|(feature, _)| feature),
+        "inputs": d.inputs.iter().enumerate().map(|(i, input)| json!({"label": input.label, "items": input.items, "active": i == d.active})).collect::<Vec<_>>(),
+        "error": d.error,
+        "commands": runs.as_ref().ok().map(|cmds| cmds.iter().map(|(command, params)| json!({"command": command, "params": params})).collect::<Vec<_>>()),
+        "waiting": runs.err(),
+    })
+}
+
+/// The windows open beside the model (#9087), each named by what opens it: the command
+/// `ui.start` takes, or the `ui.help` item.
+fn open_windows(app: &SolveApp) -> Vec<&'static str> {
+    [
+        (app.params.is_some(), "parameters.change"),
+        (app.design_properties.is_some(), "document.metadata"),
+        (app.sketch_report.is_some(), "sketch.inspect"),
+        (app.bom.is_some(), "assembly.bom"),
+        (app.material_card_review.is_some(), "material.properties.validate"),
+        (app.help.about, "about"),
+        (app.updater.open, "updates"),
+        (app.keymap.open, "shortcuts"),
+        (app.crashes.open, "crashes"),
+        (app.issue_report.draft.is_some(), "report"),
+        (app.messages.open, "messages"),
+    ]
+    .into_iter()
+    .filter_map(|(open, command)| open.then_some(command))
+    .collect()
+}
+
+/// What a start or an edit opened: the tool, the dialog and the windows. `pending` while it
+/// waits for the history to compute first; it opens on a later frame (`ui.inspect` shows it).
+fn started(app: &SolveApp) -> Value {
+    json!({
+        "tool": app.tool.as_ref().map(|t| t.cmd),
+        "dialog": dialog_state(app),
+        "windows": open_windows(app),
+        "pending": app.pending_feature_edit.is_some() || app.start_after_roll.is_some(),
+        "status": app.status.as_ref().map(|(text, _, error)| json!({"text": text, "error": error})),
+    })
+}
+
 /// `UiState` as `ui.inspect` and `ui.set` report it, with the browser's view of the design
 /// (kept in the session) under the names the UI state used to give it.
 fn ui_state(app: &SolveApp) -> Value {
@@ -665,9 +714,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             "viewport": app.viewport.rect.map(|r| json!([r.left(), r.top(), r.width(), r.height()])),
             "camera": app.cam,
             "tool": app.tool.as_ref().map(|t| t.cmd),
-            "dialog": app.dialog.as_ref().map(|d| format!("{d:?}")),
+            "dialog": dialog_state(app),
+            "windows": open_windows(app),
             "status": app.status.as_ref().map(|(text, _, error)| json!({"text": text, "error": error})),
-            "hover": app.viewport.hover.as_ref().map(|h| format!("{h:?}")),
+            "hover": app.viewport.hover,
             "renderer": if app.viewport.gpu.is_some() { "gpu" } else { "cpu" },
             "frame_ms": app.frame_ms,
             "draw": app.viewport.draw_stats.as_ref().and_then(|s| s.lock().ok().map(|d| json!({
@@ -841,7 +891,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                     return err(e);
                 }
             }
-            ok(json!({"tool": app.tool.as_ref().map(|t| t.cmd), "dialog": app.dialog.as_ref().map(|d| format!("{d:?}"))}))
+            ok(started(app))
         }
         "ui.move" | "ui.click" => {
             let (Some(x), Some(y)) = (f("x"), f("y")) else { return err("missing x/y") };
@@ -921,12 +971,16 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             };
             let Some(id) = app.session.doc.find_feature(&key).map(|f| f.id) else { return err(format!("no feature `{key}`")) };
             app.edit_feature(id);
-            ok(json!({"dialog": app.dialog.as_ref().map(|d| format!("{d:?}")), "marker": app.session.doc.marker}))
+            let mut reply = started(app);
+            if let Some(o) = reply.as_object_mut() {
+                o.insert("marker".into(), json!(app.session.doc.marker));
+            }
+            ok(reply)
         }
         "ui.selection" => ok(json!({
             "selection": app.session.selection,
             "dialog": app.dialog.as_ref().map(|d| d.inputs.iter().map(|i| json!({"label": i.label, "items": i.items})).collect::<Vec<_>>()),
-            "hover": app.viewport.hover.as_ref().map(|h| format!("{h:?}")),
+            "hover": app.viewport.hover,
             "dimensions": crate::dim_view::drawn().into_iter().map(|(id, p)| json!({"id": id, "x": p.x, "y": p.y})).collect::<Vec<_>>(),
             "shown_dimensions": crate::dim_view::model_drawn()
                 .into_iter()
@@ -2494,6 +2548,56 @@ mod tests {
             assert!(r["ok"] == false && r["error"].as_str().unwrap().contains("takes no ui.start params"), "{r}");
             assert!(h.app.dialog.is_none() && h.app.tool.is_none() && h.app.session.analysis.is_none(), "{command} started nothing");
         }
+    }
+
+    /// #9087: the dialog is reported as data (its command, inputs and what OK runs), not as the
+    /// form's Debug text; `ui.start` and `ui.editFeature` reply with what they opened, and the
+    /// tool windows (Parameters, Bill of Materials) are reported by the command that opens them.
+    #[test]
+    fn dialogs_and_tool_windows_are_reported_as_data() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        let mut h = crate::scenario::Harness::new();
+        h.app = SolveApp::new(s, Services::default());
+        let r = h.call("ui.start", json!({"command": "solid.fillet"}));
+        let d = &r["result"]["dialog"];
+        assert_eq!((&d["command"], &d["title"], &d["editing"]), (&json!("solid.fillet"), &json!("FILLET"), &Value::Null), "{r}");
+        assert_eq!((&d["inputs"][0]["active"], &d["inputs"][0]["items"]), (&json!(true), &json!([])), "{r}");
+        assert!(d["commands"].is_null() && d["waiting"].is_string(), "no edge picked yet: {r}");
+        assert_eq!((&r["result"]["pending"], &r["result"]["windows"]), (&json!(false), &json!([])), "{r}");
+        assert_eq!(h.call("ui.inspect", json!({}))["result"]["dialog"], *d, "ui.inspect reports the same");
+        crate::dialogs::cancel(&mut h.app);
+
+        let feature = h.app.session.doc.features[0].id;
+        let r = h.call("ui.editFeature", json!({"feature": feature}));
+        let d = &r["result"]["dialog"];
+        assert_eq!((&d["command"], &d["editing"]), (&json!("solid.box"), &json!(feature)), "{r}");
+        // OK rebuilds the feature in place, from what the form holds.
+        let runs = &d["commands"][0];
+        assert_eq!((&runs["command"], &runs["params"]["command"]), (&json!("timeline.redefine"), &json!("solid.box")), "{r}");
+        assert_eq!((&runs["params"]["feature"], &runs["params"]["params"]["length"]), (&json!(feature), &json!("40")), "{r}");
+        assert!(r["result"].get("marker").is_some(), "{r}");
+        crate::dialogs::cancel(&mut h.app);
+
+        for (command, windows) in
+            [("parameters.change", json!(["parameters.change"])), ("assembly.bom", json!(["parameters.change", "assembly.bom"]))]
+        {
+            let r = h.call("ui.start", json!({"command": command}));
+            assert_eq!((&r["result"]["dialog"], &r["result"]["tool"], &r["result"]["windows"]), (&Value::Null, &Value::Null, &windows), "{r}");
+            assert_eq!(h.call("ui.inspect", json!({}))["result"]["windows"], windows, "{command}");
+        }
+        h.call("ui.help", json!({"item": "about"}));
+        assert_eq!(
+            h.call("ui.inspect", json!({}))["result"]["windows"],
+            json!(["parameters.change", "assembly.bom", "about"]),
+            "the Help menu's windows too"
+        );
+
+        // What is under the pointer is a selection-like item, not the viewport's Debug text.
+        h.app.viewport.hover =
+            Some(crate::viewport::Hit::Face { body: "Body1".into(), index: 2, point: solidcraft_engine::geom::Vec3::new(1.0, 2.0, 3.0) });
+        let hover = json!({"type": "face", "body": "Body1", "index": 2, "point": [1.0, 2.0, 3.0]});
+        assert_eq!(h.call("ui.selection", json!({}))["result"]["hover"], hover);
     }
 
     /// #9087: a sample index that names no sample is refused, so an agent can tell a typo from

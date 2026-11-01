@@ -897,14 +897,16 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                 }
             }
             "dialog" => {
-                let d = &ui["dialog"];
+                // A word of the dialog's state as the code holds it: scenarios check fields that
+                // `ui.inspect` reports only as the command OK runs.
+                let d = h.app.dialog.as_ref().map(|d| format!("{d:?}"));
                 let ok = match v {
-                    Value::Null => d.is_null(),
-                    Value::String(w) => d.as_str().is_some_and(|d| d.contains(w.as_str())),
+                    Value::Null => d.is_none() && ui["dialog"].is_null(),
+                    Value::String(w) => d.as_deref().is_some_and(|d| d.contains(w.as_str())),
                     _ => false,
                 };
                 if !ok {
-                    return Err(format!("dialog: got {d}, want {v}"));
+                    return Err(format!("dialog: got {d:?}, want {v}"));
                 }
             }
             "tool" => {
