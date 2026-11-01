@@ -2554,10 +2554,22 @@ pub fn fillets_kept(before: &Sketch, after: &Sketch) -> bool {
 /// The turns of every filleted arc from `before` to where `sk` is now, applying the swaps.
 fn settle(sk: &mut Sketch, before: &[ArcSense]) -> Vec<(usize, Turn)> {
     let after = arc_senses(sk, &|i| sk.points.get(i).map(|p| p.pos).unwrap_or_default());
+    // A swap gives the corner its arc back when its lines cut back through it. An arc whose lines
+    // all leave it already rounds its corner, whatever the reference it is judged against (a
+    // mirrored start) showed: swapping that one would make the fillet its complement.
     let turns: Vec<(usize, Turn)> = before
         .iter()
-        .filter_map(|b| after.iter().find(|a| a.arc == b.arc).map(|a| (b.arc, turn(b, a))))
-        .filter(|(_, t)| !matches!(t, Turn::Kept))
+        .filter_map(|b| {
+            after.iter().find(|a| a.arc == b.arc).map(|a| {
+                let leave = !a.lines.is_empty() && a.lines.iter().all(|l| l.3 == Some(1.0));
+                (b.arc, turn(b, a), leave)
+            })
+        })
+        .filter_map(|(arc, t, leave)| match t {
+            Turn::Kept => None,
+            Turn::Swap if leave => None,
+            t => Some((arc, t)),
+        })
         .collect();
     for (arc, t) in &turns {
         if matches!(t, Turn::Swap) {
