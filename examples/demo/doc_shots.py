@@ -669,6 +669,34 @@ def fillet(d, label=lambda text: None):
     wait_feature(d, "Fillet1")
 
 
+HOLE_AT = [32, 20, 2]  # on the box's floor, beside the tube
+TUBE_RIM = [HOLE[0] - HOLE[2] / 2, HOLE[1], HEIGHT]  # on the tube's top circle: the pattern's axis
+
+
+def hole(d, label=lambda text: None):
+    label("Hole: click where it goes, set the diameter, OK")
+    d.tool("solid.hole")
+    d.click(d.at(world=HOLE_AT), dur=0.6, settle=1.0)
+    d.click(d.at(handle="dialog:Diameter"), dur=0.6, settle=0.3)
+    d.ui("ui.key", {"key": "A", "cmd": True})
+    d.type("4", enter=False)
+    d.click(d.at(handle="dialog:ok"), dur=0.6, settle=1.0)
+    wait_feature(d, "Hole1")
+
+
+def pattern(d, label=lambda text: None):
+    label("Circular Pattern: Features, pick Hole1 on the timeline")
+    d.tool("solid.pattern.circular", panel="panel:MODEL:ARRANGE")
+    d.click(d.at(handle="dialog:Object Type"), dur=0.6, settle=0.5)
+    d.click(d.at(handle="dialog:Object Type:Features"), dur=0.4, settle=0.5)
+    d.click(d.at(handle="timeline:Hole1"), dur=0.6, settle=0.6)
+    label("Axis: click the tube's rim. Quantity: 4, Enter")
+    d.click(d.at(handle="dialog:Axis"), dur=0.6, settle=0.4)
+    d.click(d.at(world=TUBE_RIM), dur=0.6, settle=1.0)
+    typed(d, "4")
+    wait_feature(d, "CircularPattern1")
+
+
 def sketched(d):
     drawn(d)
     dimension_hole(d)
@@ -690,6 +718,16 @@ def shelled(d):
 def filleted(d):
     shelled(d)
     fillet(d)
+
+
+def holed(d):
+    filleted(d)
+    hole(d)
+
+
+def patterned(d):
+    holed(d)
+    pattern(d)
 
 
 @shot("features/extrude", "clip", setup=sketched)
@@ -715,9 +753,44 @@ def features_fillet(d):
     d.wait(1.5)
 
 
-@shot("features/edit", "clip", setup=filleted)
+@shot("features/hole", "clip", setup=filleted)
+def features_hole(d):
+    """A 4 mm hole in the floor beside the tube."""
+    hole(d, d.caption)
+    d.wait(1.5)
+
+
+@shot("features/pattern", "clip", setup=holed)
+def features_pattern(d):
+    """The hole repeated four times around the tube."""
+    pattern(d, d.caption)
+    d.wait(1.5)
+
+
+@shot("parameters/dialog", "still", setup=patterned)
+def parameters_dialog(d):
+    """Change Parameters, numbered: 1 apply as you go, 2 user parameters, 3 model parameters
+    grouped by feature, 4 an expression, 5 its value."""
+    d.tool("parameters.change")
+    d.wait(1.0)
+    d.ui("ui.move", {"x": 5, "y": 600})
+    n = {h["name"]: (h["x"], h["y"]) for h in d.ui("ui.handles")}
+    x0, y0 = n["dialog:title"][0] - 400, n["dialog:title"][1] - 22
+    d.crop = (int(x0), int(y0), 800, 500)
+    # Wide rows' handles are their middles: each number goes in the gap beside its item, measured
+    # from the rows it belongs to.
+    d.callouts += [
+        (x0 + 290, n["params:apply_live"][1]),
+        (x0 + 165, n["dialog:table:user:add"][1]),
+        (x0 + 165, n["dialog:section:Sketch1"][1]),
+        (n["dialog:Expression"][0] - 95, n["dialog:cell:d1"][1]),
+        (n["dialog:report:value:d1"][0] + 30, n["dialog:report:value:d1"][1] - 32),
+    ]
+
+
+@shot("features/edit", "clip", setup=patterned)
 def features_edit(d):
-    """Double-click Extrude1 on the timeline, make it 20 mm: the shell and the fillet follow."""
+    """Double-click Extrude1 on the timeline, make it 20 mm: everything after it follows."""
     d.caption("Double-click a feature on the timeline")
     t = d.at(handle="timeline:Extrude1")
     d.glide(t, 0.8)
@@ -727,13 +800,17 @@ def features_edit(d):
     d.settle_camera()
     d.caption("Change it: 20, Enter. The features after it follow")
     typed(d, "20")
-    for name in ("Extrude1", "Shell1", "Fillet1"):
+    for name in ("Extrude1", "Shell1", "Fillet1", "Hole1", "CircularPattern1"):
         wait_feature(d, name)
-    if features(d)[-1:] != ["Fillet1"]:
+    if features(d)[-1:] != ["CircularPattern1"]:
         raise RuntimeError(f"the timeline did not rebuild: {features(d)}")
     # Off the timeline (a feature under the pointer lights up its body), nothing selected.
     d.glide((SIZE[0] * 0.55, SIZE[1] * 0.75), 0.8)
-    d.key("Escape")
+    for _ in range(10):
+        d.key("Escape")
+        if not d.ui("ui.selection")["selection"]:
+            break
+        time.sleep(0.5)
     d.wait(2.0)
 
 
