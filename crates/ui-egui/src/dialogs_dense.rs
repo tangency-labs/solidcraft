@@ -1109,6 +1109,57 @@ mod tests {
     }
 
     #[test]
+    fn fillet_and_chamfer_name_the_body_of_their_edges() {
+        // Named, the feature looks for its edges on that body alone instead of meshing every
+        // body of the design on each preview and apply.
+        let h = fillet_harness();
+        let body = h.app.session.world_state().bodies.first().unwrap().name.clone();
+        let p = parameters(&h);
+        assert_eq!(p["body"], json!(body), "{p}");
+        // Edges of two bodies name none: each point finds its own.
+        let mut h = Harness::new();
+        sample(&mut h);
+        h.app.run("solid.box", json!({"length":4,"width":4,"height":4,"corner":[20,0,0],"operation":"new"})).unwrap();
+        let a = edge_sel(&h.app.session, Vec3::new(5.0, 0.0, 5.0)).unwrap();
+        let b = edge_sel(&h.app.session, Vec3::new(22.0, 0.0, 4.0)).unwrap();
+        h.app.session.selection = vec![a, b];
+        h.step(&json!({"start":"solid.chamfer"})).unwrap();
+        h.frames(4);
+        let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        let (cmd, p) = commands.first().unwrap();
+        assert_eq!(*cmd, "solid.chamfer");
+        assert!(p.get("body").is_none(), "{p}");
+    }
+
+    #[test]
+    fn press_pull_on_a_bore_inside_another_part_moves_that_bore() {
+        // A pin standing inside a hollow housing that comes first: by its point alone the face
+        // was looked for on the housing, whose box holds it, and the command failed with
+        // "no face at …". The dialog now names the pin.
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":100,"width":100,"height":100,"body_name":"Housing"})).unwrap();
+        h.app.run("solid.box", json!({"length":80,"width":80,"height":100,"corner":[10,10,10],"operation":"cut","targets":["Housing"]})).unwrap();
+        h.app.run("solid.cylinder", json!({"base":[50,50,20],"radius":5,"height":20,"operation":"new","body_name":"Pin"})).unwrap();
+        let face = face_sel(&h.app.session, Vec3::new(55.0, 50.0, 30.0)).unwrap();
+        assert!(matches!(&face, Sel::Face { body, .. } if body == "Pin"), "{face:?}");
+        h.app.session.selection = vec![face];
+        h.step(&json!({"start":"solid.press_pull"})).unwrap();
+        h.frames(4);
+        let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        let (cmd, mut p) = commands.first().cloned().unwrap();
+        assert_eq!(cmd, "solid.offset_face");
+        assert_eq!(p["body"], json!("Pin"), "{p}");
+        p["distance"] = json!(1);
+        h.app.run(&cmd, p).unwrap();
+        let st = h.app.session.world_state();
+        let pin = st.body("Pin").unwrap().measure().unwrap();
+        let expected = std::f64::consts::PI * 36.0 * 20.0;
+        assert!((pin.volume - expected).abs() < expected * 1e-3, "pin volume {} (expected {expected})", pin.volume);
+        let housing = st.body("Housing").unwrap().measure().unwrap();
+        assert!((housing.volume - (1e6 - 80.0 * 80.0 * 90.0)).abs() < 1.0, "the housing is unchanged: {}", housing.volume);
+    }
+
+    #[test]
     fn every_type_choice_produces_its_supported_command_without_changing_defaults() {
         for (label, key) in FILLET_TYPES {
             let mut h = fillet_harness();
