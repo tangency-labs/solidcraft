@@ -632,6 +632,12 @@ pub struct UpstreamFixes {
     pub mirror_curve_keeps_euclidean_control_points: bool,
     /// A curve sweep caps from the side faces at the sweep's start and end (WR-404, #411).
     pub curve_sweep_caps_at_sweep_ends: bool,
+    /// A curve sweep along a closed path whose end sections lie on its start sections
+    /// (within the B-rep's tolerance) leaves both caps off, so the stitch joins the side
+    /// faces' end edges to their start edges: one closed tube, where upstream caps both
+    /// ends anyway and leaves two coincident caps, a second region, and a body booleans
+    /// cannot use (tangency-labs/solidcore#2192; SolidCraft #2005).
+    pub curve_sweep_closed_path_joins_ends: bool,
     /// `SmPolarBox::AddVector3d` (`PolarBoxState::Region`), when the x span collapses
     /// below `SM_EFF_ZERO_SQRT` and it rotates `(basis[1], basis[2])` to `(basis[2],
     /// -basis[1])` and relabels the box as `SM_PS_ARC`, rotates the polar domain to
