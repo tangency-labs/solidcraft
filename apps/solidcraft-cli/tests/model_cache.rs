@@ -389,6 +389,7 @@ fn a_design_saved_before_names_were_pinned_opens_pinned_and_unchanged() {
 /// A saved model is its kernel's: the two differ in tolerances and in what they refuse, so a design
 /// opened on the other kernel is evaluated on it, in both directions; on the kernel that saved it the
 /// model is taken as it is. A process each, since the kernel is chosen for the process.
+/// It reaches the C++ kernel on purpose: SOLIDCRAFT_KERNEL=smlib is the option under test.
 #[cfg(feature = "smlib")]
 #[test]
 fn a_model_saved_on_one_kernel_is_evaluated_again_on_the_other() {
