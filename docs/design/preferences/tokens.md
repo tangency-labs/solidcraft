@@ -22,16 +22,24 @@ if one fits.
 | Footer fill, page-list fill | `#F4F6F9` | `#2F343E` | `dialog_footer` |
 | Control borders: field, segmented, button, checkbox, card border | `#C3CBD6` | `#4A5262` | `control_border` |
 | Control fill: field, dropdown, button, checkbox box, card face | `#FFFFFF` | `#1C1F26` | `control_fill` |
-| Selected row, selected page, selected card fill | `#E8F1FA` | `#2A466E` | `selected_bg` |
+| Selected segment, row, page, card and tile fill | `#E8F1FA` | `#2A466E` | `selected_bg` |
+
+## Selection (segments, cards, tiles, chips, pages)
+
+The app's own selection look is the reference, not the board's accent fills: a selected item has
+fill `selected_bg`, text `selected_ink` at weight 600, and (cards, tiles, chips) a border in
+`form_primary` (2 px on cards and tiles, 1 px on chips). `Tokens::light()` values: `selected_bg`
+#E8F1FA, `selected_ink` #1A507F, `form_primary` #236EAD; dark: #2A466E, #9CC7F5, #3A88EE. The board's
+`#236EAD` / `#8CBEF5` on selected text and borders is replaced by these.
 
 ## Needing a token, or a mix
 
 | Role | Light | Dark | Token |
 |---|---|---|---|
 | Dialog surface (97 % opaque) | `rgba(255,255,255,0.97)` | `rgba(39,43,52,0.97)` | dark: `dialog_bg` at 0.97. Light: `dialog_body` (#FFFFFF) at 0.97; `dialog_bg` is #FAFBFC, so the board uses the lighter `dialog_body` |
-| Accent: selected borders and text, checks, the figures' accent. Light is `form_primary`; dark `#8CBEF5` is lighter than dark `form_primary` (#3A88EE) | `#236EAD` | `#8CBEF5` | light `form_primary`; dark: **no token: add `pref_accent`** = light `#236EAD` / dark `#8CBEF5` (nearest: `selected_ink` #9CC7F5) |
+| Accent drawn inside figures (and the figures' accent marks only). Light is `form_primary`; dark `#8CBEF5` is lighter than dark `form_primary` (#3A88EE) | `#236EAD` | `#8CBEF5` | light `form_primary`; dark: **no token: add `pref_accent`** = light `#236EAD` / dark `#8CBEF5` (nearest: `selected_ink` #9CC7F5) |
 | Ink on an accent fill (primary button "OK", checked checkbox tick) | `#FFFFFF` | `#0F1620` | light `on_accent`; dark: **no token: add `pref_on_accent`** = light `#FFFFFF` / dark `#0F1620` (dark `on_accent` is white) |
-| Segmented control well, tile and card tint behind a figure | `#EEF1F5` | `#2F343E` | dark `dialog_footer`; light: **no token: add `pref_well`** = light `#EEF1F5` / dark `#2F343E` |
+| Tint behind a figure in a card or tile and behind the theme options panel (not the segmented control, which has no well) | `#EEF1F5` | `#2F343E` | dark `dialog_footer`; light: **no token: add `pref_well`** = light `#EEF1F5` / dark `#2F343E` |
 | Figure ground (the rectangle under every card figure) | `#F7F8FA` | `#1C1F26` | dark `control_fill`; light: **no token: add `figure_ground`** = light `#F7F8FA` / dark `#1C1F26` |
 | Figure outlines (cube edges, geometry strokes) | `#6F7C8F` | `#A3AEC2` | **no token: add `figure_line`** = `#6F7C8F` / `#A3AEC2` |
 | Figure cube, left face | `#E4E9F0` | `#515B72` | **no token: add `figure_face_left`** = `#E4E9F0` / `#515B72` |
