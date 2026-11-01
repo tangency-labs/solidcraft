@@ -1,0 +1,21 @@
+[package]
+name = "solidcraft-cam"
+description = "SolidCraft manufacturing: cutting tools, toolpaths, 2D contour and pocket milling, G-code and post processors"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+solidcraft-geom = { workspace = true }
+# The adaptive-clearing engine (MIT, published on crates.io). The pure Rust
+# core only: no Python bindings, no allocator override. Its C/C++ parts
+# cross-compile for wasm32 with the WASI SDK toolchain (see the wasm job).
+raygeo = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

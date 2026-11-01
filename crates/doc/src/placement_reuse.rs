@@ -142,6 +142,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         named_views,
         visibility,
         point_clouds,
+        // CAM settings never feed the timeline's geometry.
+        cam: _,
     } = a;
     (Arc::ptr_eq(render, &b.render) || *render == b.render)
         && *format == b.format
