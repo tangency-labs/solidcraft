@@ -496,9 +496,9 @@ pub struct Session {
     /// (see [`Session::solve_joints`]).
     joints_settled: Option<(Arc<Document>, std::sync::Weak<solidcraft_doc::ModelState>)>,
     occurrence_visibility_cache: std::sync::Mutex<Option<occurrences::VisibilityCache>>,
-    /// The hidden joints and folders of the view, as sets: the browser asks about every joint
-    /// of the design on every frame (#3892), and an answer that walked the hidden lists made a
-    /// frame cost grow with the size of the design.
+    /// The hidden joints, folders and bodies of the view, as sets: the browser asks about every
+    /// joint of the design on every frame (#3892), the viewport about every body, and an answer
+    /// that walked the hidden lists made a frame cost grow with the size of the design.
     visibility_index_cache: std::sync::Mutex<Option<occurrences::VisibilityIndex>>,
     /// The sketches a feature uses, with the design they were read from
     /// ([`view::sketch_consumed`]): the viewport asks about every sketch several times a frame,

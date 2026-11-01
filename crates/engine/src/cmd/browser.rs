@@ -1424,6 +1424,51 @@ mod tests {
         assert_eq!(s.selection.len(), 2);
     }
 
+    /// The viewport asks whether each body is shown several times a frame: a lookup reads the
+    /// set of hidden bodies, not the list, and follows every change of the list, one written in
+    /// place included.
+    #[test]
+    fn hidden_body_lookups_do_not_walk_the_hidden_body_list() {
+        use crate::occurrences::visibility_work;
+
+        let mut s = Session::default();
+        let hide_many = |s: &mut Session, n: usize| {
+            s.visibility.hidden_bodies.clear();
+            s.visibility.hidden_bodies.extend((0..n).map(|i| format!("Hidden{i}")));
+        };
+        let walked_by = |s: &Session, name: &str| {
+            visibility_work::take();
+            let visible = s.body_visible(name);
+            (visible, visibility_work::take())
+        };
+        hide_many(&mut s, 10);
+        let (_, few) = walked_by(&s, "Shown");
+        hide_many(&mut s, 10_000);
+        visibility_work::built_take();
+        let (visible, many) = walked_by(&s, "Shown");
+        assert!(visible);
+        assert!(many <= few, "a lookup walked {many} entries of 10,000 hidden bodies and {few} of 10");
+        assert_eq!(visibility_work::built_take(), 10_000, "the hidden bodies are read into the set once");
+        for i in 0..300 {
+            assert!(walked_by(&s, &format!("Body{i}")) == (true, 0));
+        }
+        assert_eq!(visibility_work::built_take(), 0, "and not again for the next lookups");
+        assert!(!s.body_visible("Hidden5000") && !s.body_visible("Hidden9999"));
+        s.visibility.hidden_bodies.retain(|name| name != "Hidden5000");
+        assert!(s.body_visible("Hidden5000"), "shown again in place");
+        s.visibility.hidden_bodies.push("Shown".into());
+        assert!(!s.body_visible("Shown"), "hidden in place");
+        s.visibility.hidden_bodies.clear();
+        assert!(s.body_visible("Shown") && s.body_visible("Hidden0"), "all shown");
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Peg"}));
+        run(&mut s, "browser.visibility", json!({"items": ["Peg"], "visible": false}));
+        assert!(!s.body_visible("Peg"));
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.body_visible("Peg"), "undo shows it again");
+        run(&mut s, "edit.redo", json!({}));
+        assert!(!s.body_visible("Peg"), "redo hides it again");
+    }
+
     #[test]
     fn show_all_bodies_clears_stale_hidden_names() {
         for folder in ["bodies", "all"] {
