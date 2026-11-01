@@ -54,6 +54,9 @@
 //!   the next element, cyclically) and `m_lListSize` its length; `ReverseList` keeps
 //!   the head and reverses the rest. `GetPrimaryEdgeuse`, `IsLamina`, `GetBrep` and
 //!   `IsWire` were CO-PORTED by earlier units and are re-exported here.
+//! - **UB-290** (unconditional, the fork's tangency-labs/smlib@8d0fbff): [`is_topological`]
+//!   refuses an edge with one face on both sides whose primary edge use and its radial
+//!   are in two loop uses, which `SmBrep::DeleteEdge` would merge into itself.
 //! - **Surface identity.** Upstream compares `SmSurface*` pointers (the target of
 //!   `GetUVTrimCurveOfSurface`, `IsSeam(const SmSurface&)`, `IsTopological`'s two
 //!   surfaces). A port face owns its surface, so a surface is named by the face holding
@@ -1907,6 +1910,27 @@ pub fn is_topological(
     };
     // 1st edgeuse locals
     let (face1, surf1) = face_of(eu_a)?;
+
+    // UB-290 (the fork's tangency-labs/smlib@8d0fbff), unconditional: the same face on
+    // both sides, and the edge's primary edge use and its radial partner in two loop uses
+    // (the face meeting itself along the edge from its two sides, or its radial pairing
+    // the other way round): `SmBrep::DeleteEdge`, which reads that pair, would take the two
+    // sides for two faces and merge the face into itself, deleting it. Not removable. With
+    // the pair in one loop use it is a slit, which `DeleteEdge` splits off the loop.
+    {
+        let Some(primary) = primary_edgeuse(b, e)? else {
+            return Ok(out);
+        };
+        let Some(radial) = eu1::radial(b, primary)? else {
+            return Ok(out);
+        };
+        if eu1::face(b, primary)? == eu1::face(b, radial)?
+            && eu1::loopuse(b, primary)? != eu1::loopuse(b, radial)?
+        {
+            return Ok(out);
+        }
+    }
+
     // 3rd edgeuse locals = same oriented edgeuse on different face to edgeuse[0]
     let (face2_, surf2) = face_of(eu_c)?;
     let surfs = [&surf1, &surf2];
