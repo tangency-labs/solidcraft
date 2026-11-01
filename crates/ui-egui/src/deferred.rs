@@ -257,11 +257,11 @@ impl SolveApp {
         }
         if self.deferred.is_none()
             && self.deferred_queue.is_empty()
-            && let Some((id, sketch)) = self.start_after_roll.take()
+            && let Some((id, sketch, view)) = self.start_after_roll.take()
             && self.dialog.is_none()
             && self.tool.is_none()
         {
-            self.start_interactive(&id, Some(sketch));
+            self.start_interactive(&id, Some(sketch), view);
         }
     }
 

@@ -559,6 +559,42 @@ mod extrude_view_preference {
             assert_eq!(h.app.cam, iso_of(top), "{close}: isometric again");
         }
     }
+
+    /// Extrude started from an open sketch goes back to the sketch's view, the one on screen when
+    /// Extrude was asked for, also when "When a sketch ends" turns the view back to the one from
+    /// before the sketch: that turn used to be remembered instead, so nothing went back.
+    #[test]
+    fn from_an_open_sketch_ok_cancel_and_escape_go_back_to_the_sketch_view() {
+        use crate::prefs::SketchExitView;
+        for exit in SketchExitView::ALL {
+            for close in ["OK", "Cancel", "Escape"] {
+                let mut h = Harness::new();
+                h.app.preferences.extrude_view_isometric = true;
+                h.app.preferences.extrude_view_return = true;
+                h.app.preferences.sketch_exit_view = exit;
+                h.call("ui.view", json!({"view": "iso"}));
+                h.settle();
+                h.step(&json!({"start": "sketch.create"})).unwrap();
+                h.step(&json!({"click": {"plane": "XY"}})).unwrap();
+                h.settle();
+                h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
+                crate::scenario::check(&mut h, &json!({"sketching": true, "camera": {"yaw_deg": 0, "pitch_deg": 90}})).unwrap();
+                let sketch_view = h.app.cam;
+                open_extrude(&mut h);
+                assert_eq!(h.app.session.active_sketch, None, "{exit:?} {close}: Extrude ended the sketch");
+                crate::scenario::check(&mut h, &json!({"camera": {"yaw_deg": -45, "pitch_deg": 35}}))
+                    .unwrap_or_else(|e| panic!("{exit:?} {close}: isometric while Extrude is open: {e}"));
+                match close {
+                    "Escape" => h.step(&json!({"key": "Escape"})).unwrap(),
+                    other => h.step(&json!({"widget": other})).unwrap(),
+                };
+                h.settle();
+                assert!(h.app.dialog.is_none(), "{exit:?} {close}");
+                assert_eq!(h.app.session.doc.features.len(), if close == "OK" { 2 } else { 1 }, "{exit:?} {close}: OK adds the extrude");
+                assert_eq!(h.app.cam, sketch_view, "{exit:?} {close}: back to the sketch's view");
+            }
+        }
+    }
 }
 
 /// #8127: a sketch inside an inserted fastener, opened from its row in the browser, activates the

@@ -600,7 +600,7 @@ pub struct SolveApp {
     pub deferred_queue: Vec<(String, Value)>,
     /// A feature started from a sketch while the marker rolls back, and that sketch: it starts
     /// once the marker is back.
-    pub start_after_roll: Option<(String, u64)>,
+    pub start_after_roll: Option<(String, u64, Camera)>,
     pub(crate) timeline_playback: Option<timeline::Playback>,
     /// A delete's check of what it takes with it or breaks, computing off the window thread
     /// ([`deferred::DeleteCheck`], #2678).
@@ -1894,19 +1894,21 @@ impl SolveApp {
             dialogs::cancel(self);
         }
         let finished_sketch = self.session.active_sketch.filter(|_| ends_sketch(id) && self.interactive(id));
+        // The view on screen when the command was asked for, before "When a sketch ends" turns it.
+        let view = self.settled_cam();
         if finished_sketch.is_some() {
             self.finish_sketch();
             // A feature committed before the marker is back would go in where the sketch was.
             if self.deferred.is_some() {
-                self.start_after_roll = finished_sketch.map(|sketch| (id.to_string(), sketch));
+                self.start_after_roll = finished_sketch.map(|sketch| (id.to_string(), sketch, view));
                 return;
             }
         }
-        self.start_interactive(id, finished_sketch);
+        self.start_interactive(id, finished_sketch, view);
     }
 
     /// The rest of [`SolveApp::start`], once any sketch `id` ends is finished.
-    pub(crate) fn start_interactive(&mut self, id: &str, finished_sketch: Option<u64>) {
+    pub(crate) fn start_interactive(&mut self, id: &str, finished_sketch: Option<u64>, view: Camera) {
         if let Some(spec) = solidcraft_engine::find_command(id)
             && self.interactive(id)
             && id != "sketch.create"
@@ -1994,7 +1996,7 @@ impl SolveApp {
             let extrude = matches!(d.kind, dialogs::Kind::Extrude { .. });
             self.dialog = Some(d);
             if extrude {
-                self.turn_for_extrude();
+                self.turn_for_extrude(view);
             }
             return;
         }
@@ -2164,14 +2166,14 @@ impl SolveApp {
         turn
     }
 
-    /// Extrude opened: turn the view to isometric when Preferences say so, and remember the view
-    /// from before for when the dialog closes (#9176).
-    fn turn_for_extrude(&mut self) {
+    /// Extrude opened: turn the view to isometric when Preferences say so, and remember `before`,
+    /// the view on screen when Extrude was asked for, for when the dialog closes (#9176). Started
+    /// from an open sketch, that is the sketch's view, not the one "When a sketch ends" turned to.
+    fn turn_for_extrude(&mut self, before: Camera) {
         if !self.preferences.extrude_view_isometric {
             return;
         }
-        let before = self.settled_cam();
-        let mut to = before;
+        let mut to = self.settled_cam();
         to.set_view(StandardView::Iso);
         self.pre_extrude_cam = self.preferences.extrude_view_return.then_some(before);
         self.animate_to(to);
