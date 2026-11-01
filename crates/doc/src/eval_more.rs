@@ -2100,11 +2100,16 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
                 _ => false,
             };
             let (Some(outer), Some(inner), false) = (outer, openings.first().cloned(), alike) else {
+                // A solid box top has no opening: Shell that face first, then pick the rim
+                // around the cavity (#10437).
                 let what = match (loops.len(), openings.len()) {
-                    (0 | 1, _) => "pick the rim face of a shelled body (a face with an inner and an outer edge)".to_string(),
-                    (_, 0) => "pick the rim face of a shelled body: this face's inner edges are where other features stand on it, not an opening"
+                    (0 | 1, _) => "Lip needs the rim of a shelled body: Shell a face open first, then pick the rim around that opening (a face with an outer edge and an inner hole)"
                         .to_string(),
-                    (_, k) => format!("pick the rim face of a shelled body (round one opening): this face has {k} openings alike in size"),
+                    (_, 0) => "Lip needs a rim around an opening: this face's inner edges are where other features stand on it, not a shell cavity. Shell a face open, then pick that rim"
+                        .to_string(),
+                    (_, k) => format!(
+                        "Lip needs one clear opening as the rim: this face has {k} openings alike in size (for example a plate of holes). Shell one cavity, or pick a rim that rings a single opening"
+                    ),
                 };
                 return Err(DocError::Invalid(what));
             };

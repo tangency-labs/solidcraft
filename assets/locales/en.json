@@ -1537,7 +1537,7 @@
   "help.parts.resize": "Changes the size or length of an inserted standard part and rebuilds it; its joints keep it seated. Use it when a screw turns out too long or a hole needs another size.",
   "help.plastic.assign_rule": "Assigns a plastic rule to bodies, so their plastic features take its draft and clearance as defaults. Use it to set up a moulded part once for all its features.",
   "help.plastic.boss": "Adds a screw boss on a face: a post with an optional hole, draft, root fillet and supporting ribs. Use it for screw points in moulded or printed housings.",
-  "help.plastic.lip": "Adds a lip or a matching groove along the rim of a shelled body. Use it so that two housing halves locate on each other and close tightly.",
+  "help.plastic.lip": "Adds a lip or a matching groove along the rim of a shelled body (Shell a face open first, then pick the rim around that opening). Use it so that two housing halves locate on each other and close tightly.",
   "help.plastic.manage_rules": "Creates and edits plastic rules: material, wall thickness, radii, clearance and draft. Use them to keep the features of a moulded part consistent.",
   "help.plastic.rest": "Adds a rest on a face: a round or rectangular pad, solid or hollow, with draft. Use it as a support or standoff in a moulded housing.",
   "help.plastic.snap_fit": "Adds a snap-fit hook on a face, with its length, thickness and catch. Use it to clip parts together without screws.",

@@ -3065,6 +3065,16 @@ fn unequal_chamfers_on_circular_rims() {
     assert!(rel(full - volume(&mut s), flipped) < 5e-3, "{} vs {flipped}", full - volume(&mut s));
 }
 
+/// A solid box top is not a rim: Lip says to Shell first (#10437).
+#[test]
+fn lip_on_a_solid_box_says_to_shell_first() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
+    let err = s.execute("plastic.lip", &json!({"face": [20, 15, 10], "width": 1, "height": 2})).unwrap_err().to_string();
+    assert!(err.contains("Shell"), "{err}");
+    assert!(err.contains("rim") || err.contains("opening"), "{err}");
+}
+
 /// An enclosure built in the usual order: shell, bosses, then the lip on the rim.
 #[test]
 fn lip_after_boss() {
