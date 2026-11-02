@@ -63,3 +63,25 @@ fn a_copy_with_another_solid_makes_its_own_meshes() {
     assert_eq!(m.triangles.len(), other.tessellate_with(0.5, true).unwrap().triangles.len());
     assert!(swapped.boolean_meshes(0.01).is_none());
 }
+
+#[test]
+fn plane_split_reuses_meshes_without_changing_the_halves_or_history() {
+    let sphere = crate::sphere(Vec3::ZERO, 0.5).unwrap();
+    let body = crate::transform_matrix(&sphere, [[20., 0., 0., 0.], [0., 30., 0., 0.], [0., 0., 22., 0.], [0., 0., 0., 1.]]).unwrap();
+    let plane = solidcraft_geom::Plane::YZ;
+    let parts = crate::split_by_plane(&body, &plane).unwrap();
+    assert_eq!(parts.len(), 2);
+    for (part, positive) in parts.iter().zip([true, false]) {
+        let reference = crate::half_space(&body, &plane, positive).unwrap().0.unwrap();
+        assert!(part.validity().is_empty());
+        assert_eq!(part.face_count(), reference.face_count());
+        let actual = part.tessellate_with(0.005, true).unwrap();
+        let expected = reference.tessellate_with(0.005, true).unwrap();
+        assert!((actual.measure().volume - expected.measure().volume).abs() < 1e-6);
+        assert_eq!(actual.contains(Vec3::new(5., 0., 0.)), positive);
+        assert_eq!(actual.contains(Vec3::new(-5., 0., 0.)), !positive);
+        let history = part.history().unwrap();
+        assert_eq!(history.faces.len(), part.face_count());
+        assert_eq!(history.edges.len(), part.edge_count());
+    }
+}
