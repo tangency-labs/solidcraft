@@ -23,6 +23,8 @@ pub const MAX_TRIANGLES: u64 = 262_144;
 pub const MAX_GEOMETRY_BYTES: u64 = 128 * 1024 * 1024;
 pub const MAX_JOB_BYTES: u64 = 384 * 1024 * 1024;
 pub const MAX_PIXEL_TESTS: u64 = 128_000_000;
+/// A picture's, however large: a fixed bound on its time, about a minute at worst on one thread.
+pub const MAX_PICTURE_PIXEL_TESTS: u64 = 400_000_000;
 const MAX_STEP: usize = 16_384;
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -91,7 +93,8 @@ pub(crate) fn admit_base(scene: &ProductScene, request: &ImageRequest) -> Result
     let mut admission = admit_raster(admit_source(scene, request, MAX_TRIANGLES)?)?;
     let projection = Projection::Camera { camera: request.camera, width: request.width, height: request.height };
     let view = projection.view(scene, Supersample::Two.factor())?;
-    admission.projected_pixel_tests = Some(projected_pixel_tests(scene, &view, &[], MAX_PIXEL_TESTS)?);
+    let whole = tile_samples(&[PixelWindow { x0: 0, y0: 0, x1: request.width, y1: request.height }], Supersample::Two.factor());
+    admission.projected_pixel_tests = Some(projected_pixel_tests(scene, &view, &[], whole, MAX_PIXEL_TESTS)?);
     Ok(admission)
 }
 
@@ -295,9 +298,12 @@ fn admit_raster(source: Source) -> Result<Admission> {
     Ok(a)
 }
 
-/// Adds the samples a triangle's whole-canvas `[x0, x1, y0, y1]` bounds test to `sum`, refused
-/// over `max`.
-fn add_pixel_tests(sum: &mut u64, [x0, x1, y0, y1]: [usize; 4], max: u64) -> Result<()> {
+/// Adds the samples a triangle's whole-canvas bounds test inside `within` to `sum`, refused over
+/// `max`.
+fn add_pixel_tests(sum: &mut u64, bounds: [usize; 4], within: [usize; 4], max: u64) -> Result<()> {
+    let Some([x0, x1, y0, y1]) = narrowed(bounds, within) else {
+        return Ok(());
+    };
     let tests = ((x1 - x0 + 1) as u64).checked_mul((y1 - y0 + 1) as u64).ok_or_else(|| limit("pixel work overflow"))?;
     *sum = sum.checked_add(tests).ok_or_else(|| limit("pixel work overflow"))?;
     if *sum > max {
@@ -313,8 +319,22 @@ fn validate_face(face: &FaceAppearance) -> Result<()> {
     Ok(())
 }
 
+/// Where sample bounds `[x0, x1, y0, y1]` (inclusive) meet `within`, if they do.
+fn narrowed([x0, x1, y0, y1]: [usize; 4], [from_x, to_x, from_y, to_y]: [usize; 4]) -> Option<[usize; 4]> {
+    let bounds = [x0.max(from_x), x1.min(to_x), y0.max(from_y), y1.min(to_y)];
+    (bounds[0] <= bounds[1] && bounds[2] <= bounds[3]).then_some(bounds)
+}
+
+/// The sample bounds round `tiles`, each non-empty, at `ss` samples a pixel each way: only these are
+/// drawn, so only these are counted, however large the canvas is.
+fn tile_samples(tiles: &[PixelWindow], ss: usize) -> [usize; 4] {
+    let (x0, x1) = (tiles.iter().map(|t| t.x0).min().unwrap_or(0), tiles.iter().map(|t| t.x1).max().unwrap_or(1));
+    let (y0, y1) = (tiles.iter().map(|t| t.y0).min().unwrap_or(0), tiles.iter().map(|t| t.y1).max().unwrap_or(1));
+    [x0 as usize * ss, x1 as usize * ss - 1, y0 as usize * ss, y1 as usize * ss - 1]
+}
+
 /// A request's pixel tests, counted before a job starts as its raster will count them.
-fn projected_pixel_tests(scene: &ProductScene, view: &View, roles: &[BodyRole], max: u64) -> Result<u64> {
+fn projected_pixel_tests(scene: &ProductScene, view: &View, roles: &[BodyRole], within: [usize; 4], max: u64) -> Result<u64> {
     let mut tests = 0;
     for (role, body) in scene.meshes.iter().enumerate() {
         let mut looks = BTreeMap::new();
@@ -329,7 +349,7 @@ fn projected_pixel_tests(scene: &ProductScene, view: &View, roles: &[BodyRole], 
             if look(body, face, paints(roles, role), normals)?.is_some()
                 && let Some(placed) = view.place(world)?
             {
-                add_pixel_tests(&mut tests, placed.bounds, max)?;
+                add_pixel_tests(&mut tests, placed.bounds, within, max)?;
             }
         }
     }
@@ -509,16 +529,6 @@ pub struct PictureRequest {
     pub background: Option<[u8; 3]>,
 }
 
-impl PictureRequest {
-    /// A picture may be far larger than a product image: it may test each sample as often as the
-    /// largest product image may.
-    fn max_pixel_tests(&self) -> u64 {
-        let (width, height) = self.projection.size();
-        let samples = u64::from(width) * u64::from(height) * (self.supersample.factor() as u64).pow(2);
-        MAX_PIXEL_TESTS.max(samples.saturating_mul(8))
-    }
-}
-
 /// The checks a picture passes before anything is allocated, and what it costs: the prepared
 /// lists as a product image's, the pixel scratch of its largest tile.
 pub fn admit_picture(scene: &ProductScene, request: &PictureRequest) -> Result<Admission> {
@@ -545,7 +555,8 @@ pub fn admit_picture(scene: &ProductScene, request: &PictureRequest) -> Result<A
         budget.image_limits(false),
     )?)?;
     let view = request.projection.view(scene, request.supersample.factor())?;
-    admission.projected_pixel_tests = Some(projected_pixel_tests(scene, &view, &request.roles, request.max_pixel_tests())?);
+    let within = tile_samples(&request.tiles, request.supersample.factor());
+    admission.projected_pixel_tests = Some(projected_pixel_tests(scene, &view, &request.roles, within, MAX_PICTURE_PIXEL_TESTS)?);
     Ok(admission)
 }
 
@@ -763,6 +774,8 @@ struct Raster {
     sort_dst: usize,
     pixels: Vec<[u8; 4]>,
     depth: Vec<f32>,
+    /// The sample bounds round the tiles ([`tile_samples`]).
+    within: [usize; 4],
     pixel_tests: u64,
     max_pixel_tests: u64,
     pixel_done: u64,
@@ -788,6 +801,7 @@ impl Raster {
         let PictureRequest { projection, tiles, supersample, roles, background } = request;
         let ss = supersample.factor();
         let view = projection.view(&scene, ss)?;
+        let within = tile_samples(&tiles, ss);
         let samples = tiles.iter().map(|t| t.width() * t.height()).max().unwrap_or(0) * ss * ss;
         let pixels = tiles.iter().map(|t| t.width() * t.height()).max().unwrap_or(0);
         let looks = reserve(scene.meshes.len())?;
@@ -822,6 +836,7 @@ impl Raster {
             sort_mid: 0,
             sort_end: 0,
             sort_dst: 0,
+            within,
             pixel_tests: 0,
             max_pixel_tests,
             pixel_done: 0,
@@ -848,7 +863,8 @@ impl Raster {
             },
             Stage::Clear | Stage::Opaque | Stage::Glass | Stage::Downsample | Stage::Encode => {
                 // In u64: a large picture's canvas outgrows a 32-bit usize.
-                let samples = self.view.sw as u64 * self.view.sh as u64;
+                let [x0, x1, y0, y1] = self.within;
+                let samples = (x1 - x0 + 1) as u64 * (y1 - y0 + 1) as u64;
                 let total = self.pixel_tests + samples + samples / (self.ss * self.ss) as u64;
                 // Overlapping tiles can draw more than the picture once.
                 Progress { phase: Phase::Running, done: self.pixel_done.min(total), total }
@@ -938,7 +954,7 @@ impl Raster {
         if let Some(look) = self.look(draw, normals)?
             && let Some(placed) = self.view.place(world)?
         {
-            add_pixel_tests(&mut self.pixel_tests, placed.bounds, self.max_pixel_tests)?;
+            add_pixel_tests(&mut self.pixel_tests, placed.bounds, self.within, self.max_pixel_tests)?;
             draw.depth = (world[0] / 3.0 + world[1] / 3.0 + world[2] / 3.0 - self.view.reference).dot(self.view.back);
             if !draw.depth.is_finite() {
                 return Err(invalid("invalid triangle depth"));
@@ -1037,9 +1053,8 @@ impl Raster {
                 // over before it is painted.
                 let (world, normals) = self.corners(draw)?;
                 let inside = self.view.place(world)?.and_then(|mut placed| {
-                    let [x0, x1, y0, y1] = placed.bounds;
-                    placed.bounds = [x0.max(cx0), x1.min(cx1), y0.max(cy0), y1.min(cy1)];
-                    (placed.bounds[0] <= placed.bounds[1] && placed.bounds[2] <= placed.bounds[3]).then_some(placed)
+                    placed.bounds = narrowed(placed.bounds, [cx0, cx1, cy0, cy1])?;
+                    Some(placed)
                 });
                 self.triangle = match inside {
                     Some(placed) => self.look(draw, normals)?.map(|look| Triangle::new(world, look, placed)),
@@ -1130,8 +1145,12 @@ impl PictureTask {
     pub fn new(scene: ProductScene, request: PictureRequest, cancel: CancelToken) -> Result<Self> {
         cancel.check()?;
         let admission = admit_picture(&scene, &request)?;
-        let max_tests = request.max_pixel_tests();
-        Ok(Self { raster: Raster::new(scene, request, None, admission, max_tests, cancel)? })
+        Ok(Self { raster: Raster::new(scene, request, None, admission, MAX_PICTURE_PIXEL_TESTS, cancel)? })
+    }
+
+    /// The pixel tests admission counted for this request.
+    pub fn projected_pixel_tests(&self) -> u64 {
+        self.raster.admission.projected_pixel_tests.unwrap_or(0)
     }
 
     pub fn progress(&self) -> Progress {

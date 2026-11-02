@@ -615,24 +615,103 @@ fn a_picture_is_admitted_under_its_own_pixel_work_cap() {
         roles: Vec::new(),
         background: None,
     };
-    let error = admit_picture(&big(8000), &small).unwrap_err();
-    assert_eq!(error.code, ErrorCode::LimitExceeded);
-    assert!(error.message.contains("128000000 pixel tests"), "{}", error.message);
+    assert!(admit_picture(&big(8000), &small).unwrap().projected_pixel_tests.unwrap() > MAX_PIXEL_TESTS, "over a product image's cap");
+    // The raster holds it to the same figure: it prepares all of that and starts to paint.
+    let mut task = PictureTask::new(big(8000), small.clone(), CancelToken::default()).unwrap();
+    while !matches!(task.step(16_384).unwrap(), PicturePoll::Pending(p) if matches!(p.phase, Phase::Running)) {}
 
     let sheet = OrthoFrame { shift: Vec2::new(594.0, 420.0), ..frame };
+    let a0_grid = PixelGrid::new(0.0, 0.0, 1189.0, 841.0, 1200.0).unwrap();
     let a0 = PictureRequest {
-        projection: Projection::Ortho { frame: sheet, grid: PixelGrid::new(0.0, 0.0, 1189.0, 841.0, 1200.0).unwrap() },
-        tiles: vec![PixelWindow { x0: 0, y0: 0, x1: 4096, y1: 64 }],
+        projection: Projection::Ortho { frame: sheet, grid: a0_grid },
+        tiles: tiles(a0_grid.width, a0_grid.height, 28, 20),
         ..small.clone()
     };
-    let tests = admit_picture(&big(100), &a0).unwrap().projected_pixel_tests.unwrap();
-    assert!(tests > MAX_PIXEL_TESTS, "{tests}");
+    // A larger picture gets no more: the figure bounds the time, whatever the sheet.
+    let error = admit_picture(&big(100), &a0).unwrap_err();
+    assert_eq!(error.code, ErrorCode::LimitExceeded);
+    assert!(error.message.contains("400000000 pixel tests"), "{}", error.message);
+    // A small part of that picture counts only what it draws.
+    let part = PictureRequest { tiles: vec![PixelWindow { x0: 28_000, y0: 19_000, x1: 28_064, y1: 19_064 }], ..a0.clone() };
+    assert!(admit_picture(&big(100), &part).unwrap().projected_pixel_tests.unwrap() <= 100 * 12 * 64 * 64);
 
     let mut unseen = block("Unseen", [100; 3], Vec3::ZERO, Vec3::new(10.0, 2.0, 5.0));
     unseen.opacity = 0.0;
     let count = |request: &PictureRequest| admit_picture(&scene(vec![unseen.clone()]), request).unwrap().projected_pixel_tests.unwrap();
     assert_eq!(count(&small), 0, "a painted body nothing can see draws nothing");
     assert!(count(&PictureRequest { roles: vec![BodyRole::DepthOnly], ..small.clone() }) > 0, "a depth-only one hides what is behind it");
+}
+
+/// One triangle at paper `corners`, in [`front_view`].
+fn one_triangle(corners: [[f64; 2]; 3]) -> ProductScene {
+    let positions = corners.iter().map(|&[x, y]| Vec3::new(x - 50.0, 0.0, y - 25.0)).collect();
+    let mesh = Mesh { positions, normals: vec![Vec3::new(0.0, -1.0, 0.0); 3], triangles: vec![[0, 1, 2]], tri_face: vec![0], ..Default::default() };
+    scene(vec![ProductMesh { mesh: Arc::new(mesh), ..block("One", [100; 3], Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)) }])
+}
+
+/// A triangle counts only where it meets the tiles asked for, on the raster's own bounds, and the
+/// count is the work: a thin one across a tile's edge, one outside, a tile inside a huge one, and a
+/// long sliver. The numbers are bounds' columns times rows, worked by hand on the 100 x 50 canvas.
+#[test]
+fn a_triangle_counts_only_where_it_meets_the_tiles() {
+    let (frame, grid) = front_view();
+    let window = |x0: u32, x1: u32, y0: u32, y1: u32| PixelWindow { x0, y0, x1, y1 };
+    let whole = window(0, 100, 0, 50);
+    let thin = [[29.5, 10.5], [30.5, 10.5], [30.5, 40.5]];
+    let huge = [[-1000.0, -1000.0], [3000.0, -1000.0], [-1000.0, 3000.0]];
+    let sliver = [[0.5, 0.5], [99.5, 49.5], [99.5, 49.6]];
+    let cases = [
+        // Columns 29 to 31, rows 9 to 40: 3 x 32; each side of the edge at 30 has its own part.
+        (thin, vec![whole], 96),
+        (thin, vec![window(0, 30, 0, 50)], 32),
+        (thin, vec![window(30, 100, 0, 50)], 64),
+        (thin, vec![window(0, 30, 0, 50), window(30, 100, 0, 50)], 96),
+        (thin, vec![window(60, 70, 0, 50)], 0),
+        (huge, vec![whole], 5000),
+        (huge, vec![window(10, 20, 10, 20)], 100),
+        (sliver, vec![whole], 5000),
+        (sliver, vec![window(40, 60, 20, 30)], 200),
+    ];
+    for (corners, windows, count) in cases {
+        let request = PictureRequest {
+            projection: Projection::Ortho { frame, grid },
+            tiles: windows,
+            supersample: Supersample::One,
+            roles: Vec::new(),
+            background: None,
+        };
+        let drawn = one_triangle(corners);
+        assert_eq!(admit_picture(&drawn, &request).unwrap().projected_pixel_tests, Some(count), "{corners:?}: {:?}", request.tiles);
+        let mut task = PictureTask::new(drawn, request.clone(), CancelToken::default()).unwrap();
+        // Each tile's samples are cleared and put down, a unit each, and the rest are its tests.
+        let held: u64 = request.tiles.iter().map(|t| 2 * (t.width() * t.height()) as u64).sum();
+        loop {
+            match task.step(1).unwrap() {
+                PicturePoll::Complete => break,
+                PicturePoll::Pending(p) if matches!(p.phase, Phase::Running) => assert_eq!(p.total, count + held, "progress is of the tiles"),
+                _ => {}
+            }
+        }
+        assert_eq!(task.raster.pixel_tests, count, "the raster counts what admission did");
+        assert_eq!(task.raster.pixel_done, count + held, "{corners:?}: the count is the work: {:?}", request.tiles);
+    }
+    // At two samples a pixel, a tile holds four times the samples, from its own first one.
+    let two = PictureRequest {
+        projection: Projection::Ortho { frame, grid },
+        tiles: vec![window(10, 20, 10, 20)],
+        supersample: Supersample::Two,
+        roles: Vec::new(),
+        background: None,
+    };
+    assert_eq!(admit_picture(&one_triangle(huge), &two).unwrap().projected_pixel_tests, Some(400));
+    // A sum at its end is refused by name, not wrapped; no one triangle's count can overflow, its
+    // sides being two samples a pixel of at most 65536 pixels.
+    let drawn = one_triangle(thin);
+    let view = Projection::Ortho { frame, grid }.view(&drawn, 1).unwrap();
+    let placed = view.place(corners(&drawn.meshes[0], 0).unwrap().0).unwrap().unwrap();
+    let mut sum = u64::MAX;
+    let e = add_pixel_tests(&mut sum, placed.bounds, [0, 99, 0, 49], u64::MAX).unwrap_err();
+    assert_eq!(e.message, "pixel work overflow");
 }
 
 /// A picture outside its bounds is refused before anything is allocated.

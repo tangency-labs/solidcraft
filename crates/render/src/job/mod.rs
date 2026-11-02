@@ -46,8 +46,8 @@ pub use host::{
     PreviewInfo, RenderFrame, RenderPreview,
 };
 pub use image::{
-    Admission, BodyRole, ImageTask, MAX_TILES, OrthoFrame, PicturePoll, PictureRequest, PictureTask, PixelWindow, Projection, Supersample, TaskPoll,
-    admit, admit_geometry, admit_geometry_with_limits, admit_picture,
+    Admission, BodyRole, ImageTask, MAX_PICTURE_PIXEL_TESTS, MAX_TILES, OrthoFrame, PicturePoll, PictureRequest, PictureTask, PixelWindow,
+    Projection, Supersample, TaskPoll, admit, admit_geometry, admit_geometry_with_limits, admit_picture,
 };
 pub use lens::ThinLens;
 pub use lighting::{AreaLight, AreaLights, MAX_AREA_LIGHTS, StudioLighting, Sun, ToneMap};
