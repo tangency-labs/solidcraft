@@ -1909,6 +1909,23 @@ fn a_job_is_dropped_when_its_view_or_the_model_changed_unannounced() {
     assert_eq!((s.revision, s.drawing_scenes.projections), (revision, 0), "the model");
 }
 
+/// An occurrence move not captured yet is left out, as dimensions leave it out: a sheet built for
+/// an export and the provider's scene both draw the cube on the block where the design places it,
+/// as before the move. Once the move is captured, both draw it.
+#[test]
+fn an_uncaptured_move_is_drawn_where_the_design_places_the_part() {
+    let (mut s, sheet, cube) = cube_on_block();
+    let placed = settled(&mut s, sheet);
+    in_the_model(&mut s, "occurrence.move", json!({"occurrence": cube, "translate": [30, 0, 0], "capture": false}));
+    assert_eq!(s.pending_moves.len(), 1);
+    assert_eq!(bytes(&built(&s, sheet).scene), bytes(&placed.scene));
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&placed.scene));
+    in_the_model(&mut s, "component.capture_position", json!({}));
+    let captured = settled(&mut s, sheet);
+    assert_ne!(bytes(&captured.scene), bytes(&placed.scene));
+    assert_eq!(bytes(&captured.scene), bytes(&built(&s, sheet).scene));
+}
+
 /// Seeded mixes of edits, undos, redos, steps and jobs begun, run, cancelled and taken in any
 /// order: once nothing is waiting, the provider's scene is always the built one, byte for byte.
 #[test]

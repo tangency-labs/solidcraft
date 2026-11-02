@@ -287,6 +287,9 @@ pub fn sheet_id(drawing: &Drawing, named: &str, cmd: &str) -> Result<u64> {
 pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     let record = sheet_of(drawing, sheet)?;
     let on = views_on(drawing, sheet)?;
+    // Where the design places its parts, as the provider draws them.
+    let copy = (!s.pending_moves.is_empty()).then(|| designed(s));
+    let s = copy.as_ref().unwrap_or(s);
     // Worked out once for the sheet: every view draws from the same one. Each view's lines are
     // placed as they are drawn, so at most one view's are held beside the scene.
     let shown = crate::drawing_view::shown(s);
