@@ -5344,7 +5344,10 @@ mod ribbon_label_tests {
             let finish = solidcraft_engine::find_command("sketch.finish").unwrap();
             let label = crate::workspace::ribbon_button_label(finish);
             let width = ribbon_button_width(&painter, label);
-            assert_eq!(ribbon_button_lines(&painter, label, width - BUTTON_LABEL_PADDING), vec!["Finish", "Sketch"]);
+            // With BUTTON_MAX_WIDTH wide enough for Rectangle/Interference (#9083), Finish Sketch
+            // also fits on one line at its measured width; at a tighter width it still wraps.
+            assert_eq!(ribbon_button_lines(&painter, label, width - BUTTON_LABEL_PADDING), vec!["Finish Sketch"]);
+            assert_eq!(ribbon_button_lines(&painter, label, BUTTON_MIN_WIDTH), vec!["Finish", "Sketch"]);
             // Exercise full labels and pinned commands too, not just compact defaults.
             for (label, width, expected) in [
                 ("Coincident", 50.0, vec!["Coincident"]),
@@ -5366,6 +5369,9 @@ mod ribbon_label_tests {
             assert_eq!(lines.len(), 2);
             assert!(lines[0].ends_with('…'));
             let ja = crate::i18n::Locale::for_language("ja");
+            // Wrap checks use the pre-#9083 button cap so CJK compounds still split; the live
+            // ribbon may keep some of these on one line now that Rectangle needs 100 px.
+            const WRAP_CHECK_MAX: f32 = 76.0;
             for (id, expected) in [
                 ("sketch.create", vec!["新規", "スケッチ"]),
                 ("config.table", vec!["構成", "テーブル"]),
@@ -5378,7 +5384,7 @@ mod ribbon_label_tests {
             ] {
                 let command = solidcraft_engine::find_command(id).unwrap();
                 let label = ja.label(crate::workspace::ribbon_button_label(command));
-                let width = ribbon_button_width(&painter, label) - BUTTON_LABEL_PADDING;
+                let width = WRAP_CHECK_MAX - BUTTON_LABEL_PADDING;
                 assert_eq!(ribbon_button_lines(&painter, label, width), expected, "{id}");
             }
             let comp = solidcraft_engine::find_command("component.create").unwrap();
