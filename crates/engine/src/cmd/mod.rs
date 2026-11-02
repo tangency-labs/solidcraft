@@ -57,6 +57,7 @@ pub use sketch_create::tangent_arc_preview;
 pub use sketch_import::drawing_import_command;
 pub use sketch_modify::{extend_arc_preview, extend_preview, trim_piece};
 pub use view_dxf::sketch::exportable as view_dxf_exportable;
+pub(crate) use view_navigation::camera_form;
 pub use view_navigation::standard_view;
 mod component_link;
 pub use component_link::resolve_design_links;
