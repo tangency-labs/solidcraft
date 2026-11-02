@@ -218,7 +218,7 @@ pub use surfaces::{
     stitch, sweep_sheet, sweep_sheet_points, sweep_sheet_points_with, sweep_sheet_with, thicken, unstitch,
 };
 pub use sweep_path::{RailFit, SweepControl, SweepOrientation, sweep_path, sweep_path_with};
-pub use topo::{CylinderFace, cylinder_end_at, cylinder_face, cylinder_face_at};
+pub use topo::{CylinderFace, cylinder_band_at, cylinder_end_at, cylinder_face, cylinder_face_at};
 pub use topo::{TopoCounts, merged_topology, seam_flags};
 pub use tspline::tspline_sheet;
 pub use whole_face::{WholeFace, cut_takes_only_the_face, cut_tool, face_prism, matching_face};
