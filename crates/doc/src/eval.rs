@@ -3239,7 +3239,7 @@ fn apply_traced_with(
             // Each union keeps the lineage of what it joins, so the joined body's faces keep
             // their names (the tool's new faces are named by their roles).
             let union = |a: &Traced, b: &Traced| -> Result<Traced> {
-                let u = kernel::boolean(&a.body, &b.body, BoolOp::Union)?.ok_or_else(|| DocError::Invalid("join produced nothing".into()))?;
+                let u = crate::flush_join::join_bodies(&a.body, &b.body, "join produced nothing")?;
                 Ok(Traced::step(u, &[a, b]))
             };
             for tool in &tools {
@@ -7827,8 +7827,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 };
                 let mirrored = moved_copy(&mb, kernel::transform_matrix(&mb.body, if *combine { own } else { copy })?, 1);
                 if *combine {
-                    let joined = kernel::boolean(&mb.body, &mirrored.body, BoolOp::Union)?
-                        .ok_or_else(|| DocError::Invalid("the mirror join produced nothing".into()))?;
+                    let joined = crate::flush_join::join_bodies(&mb.body, &mirrored.body, "the mirror join produced nothing")?;
                     let joined = Traced::step(joined, &[&mb.traced(), &mirrored]);
                     let pieces = joined.body.lumps()?;
                     let lineages = crate::lineage::Lineage::lumps(&joined.body, joined.lineage.as_ref(), &pieces);
