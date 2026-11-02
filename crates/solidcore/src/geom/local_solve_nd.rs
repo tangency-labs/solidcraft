@@ -749,7 +749,7 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
                         let ext = self
                             .intervals
                             .and_then(|iv| iv.get(ii))
-                            .ok_or(invalid("out-of-bounds count without an interval"))?;
+                            .ok_or_else(|| invalid("out-of-bounds count without an interval"))?;
                         let step = step_unclamped.get(ii).copied().unwrap_or(0.0);
                         if step.abs() > 1.0e-3 * ext.length() {
                             boundary_hits += 1;

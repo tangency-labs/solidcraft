@@ -332,7 +332,7 @@ fn intersect_with(
             p.analytic
                 .as_ref()
                 .map(Field::Analytic)
-                .or(f.as_ref().map(Field::Algebraic))
+                .or_else(|| f.as_ref().map(Field::Algebraic))
         })
         .collect();
     let fields_b: Vec<Option<Field>> = body_b
@@ -342,7 +342,7 @@ fn intersect_with(
             p.analytic
                 .as_ref()
                 .map(Field::Analytic)
-                .or(f.as_ref().map(Field::Algebraic))
+                .or_else(|| f.as_ref().map(Field::Algebraic))
         })
         .collect();
     // Each patch's Bézier pieces, made once for every use below (five times,

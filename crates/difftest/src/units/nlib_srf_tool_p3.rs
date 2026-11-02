@@ -414,7 +414,7 @@ fn gen_join(rng: &mut Rng) -> Inputs {
                         .iter()
                         .map(|row| {
                             (0..cnt)
-                                .map(|j| row.get(j).or(row.last()).copied().unwrap_or([0.0; 4]))
+                                .map(|j| row.get(j).or_else(|| row.last()).copied().unwrap_or([0.0; 4]))
                                 .collect()
                         })
                         .collect()

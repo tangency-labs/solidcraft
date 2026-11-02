@@ -1317,7 +1317,7 @@ fn near_point(rng: &mut Rng, a: Option<&Ellipse>, c: [f64; 3]) -> [f64; 3] {
             let t = rng.uniform(d.min() - 30.0, d.max() + 30.0);
             el.evaluate_step_point(t).ok()
         })
-        .unwrap_or(v3(c));
+        .unwrap_or_else(|| v3(c));
     let s = *rng.choose(&[0.0, 1e-9, 1e-6, 1e-3, 0.5, 3.0]).unwrap_or(&0.0);
     let d = rng.point3(-1.0, 1.0);
     [base.x + s * d[0], base.y + s * d[1], base.z + s * d[2]]

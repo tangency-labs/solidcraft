@@ -333,7 +333,7 @@ fn db_bytes(d: &DbIn) -> Result<Vec<u8>, HarnessError> {
         .checked_sub(1)
         .ok_or_else(|| harness("empty net row"))? as i64;
     let rational = s.w.is_some();
-    let rat = d.rat.unwrap_or(i16::from(rational));
+    let rat = d.rat.unwrap_or_else(|| i16::from(rational));
     let mut vals: Vec<f64> = Vec::new();
     for (i, row) in s.net.iter().enumerate() {
         for (j, c) in row.iter().enumerate() {

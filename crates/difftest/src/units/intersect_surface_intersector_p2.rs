@@ -865,7 +865,7 @@ fn run_op(
             dom1,
             dom2,
         } => {
-            let [d1, d2] = natural.unwrap_or([ext(*dom1), ext(*dom2)]);
+            let [d1, d2] = natural.unwrap_or_else(|| [ext(*dom1), ext(*dom2)]);
             let mut bp1 = PatchBoundaryBoundingPlanes::new(d1);
             let mut bp2 = PatchBoundaryBoundingPlanes::new(d2);
             let bx = Extent3d::from_bounds(
@@ -957,7 +957,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
     } else {
         None
     };
-    let [dom1, dom2] = natural.unwrap_or([ext(i.dom1), ext(i.dom2)]);
+    let [dom1, dom2] = natural.unwrap_or_else(|| [ext(i.dom1), ext(i.dom2)]);
     let curves = i
         .curves
         .iter()

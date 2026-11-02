@@ -141,10 +141,12 @@ const SINE_10DEG: f64 = 0.173_648_177_666_930_35;
 
 /// An index into a table that upstream reads unchecked.
 fn table(v: &[f64], i: usize, operation: &'static str) -> Result<f64> {
-    v.get(i).copied().ok_or(SolidError::invalid_input(
-        operation,
-        "polar conversion table is shorter than its knot list",
-    ))
+    v.get(i).copied().ok_or_else(|| {
+        SolidError::invalid_input(
+            operation,
+            "polar conversion table is shorter than its knot list",
+        )
+    })
 }
 
 // ---- back-edges -----------------------------------------------------------------------

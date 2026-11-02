@@ -1123,7 +1123,7 @@ impl MergeIntervalBrep<H> for Two {
             target,
             handle: Box::new(move |e| match e {
                 EntityRef::Vertexuse(vu) => hd(b, K_VERTEXUSE, vu.index()),
-                e => Two::entity_h(b, e).unwrap_or(hd(b, K_NULL as u8, 0)),
+                e => Two::entity_h(b, e).unwrap_or_else(|| hd(b, K_NULL as u8, 0)),
             }),
             notifications: solidcore::topology::edge::NotifyEnv {
                 records: &mut store.records,
@@ -2304,7 +2304,7 @@ impl TopologyObjects<H> for Two {
                     .edge(e)
                     .ok()
                     .and_then(|x| x.curve.as_ref())
-                    .map_or(hd(bi, K_EDGE_CURVE, e.index()), |c| {
+                    .map_or_else(|| hd(bi, K_EDGE_CURVE, e.index()), |c| {
                         curve_h(bi, K_EDGE_CURVE, e.index(), c)
                     }),
                 CacheObject::Surface(f) => hd(bi, K_FACE_SURFACE, f.index()),

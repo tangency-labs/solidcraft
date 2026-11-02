@@ -1035,21 +1035,21 @@ impl SurfOfRevolution {
             (
                 Point2::new(
                     iso_parameter,
-                    domain.map_or(nurb_domain.min().y, |d| d.min().y),
+                    domain.map_or_else(|| nurb_domain.min().y, |d| d.min().y),
                 ),
                 Point2::new(
                     iso_parameter,
-                    domain.map_or(nurb_domain.max().y, |d| d.max().y),
+                    domain.map_or_else(|| nurb_domain.max().y, |d| d.max().y),
                 ),
             )
         } else {
             (
                 Point2::new(
-                    domain.map_or(nurb_domain.min().x, |d| d.min().x),
+                    domain.map_or_else(|| nurb_domain.min().x, |d| d.min().x),
                     iso_parameter,
                 ),
                 Point2::new(
-                    domain.map_or(nurb_domain.max().x, |d| d.max().x),
+                    domain.map_or_else(|| nurb_domain.max().x, |d| d.max().x),
                     iso_parameter,
                 ),
             )

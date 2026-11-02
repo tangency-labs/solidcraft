@@ -485,7 +485,7 @@ fn gen_inc_mult(rng: &mut Rng) -> Inputs {
             break;
         }
     }
-    last.unwrap_or(Inputs::IncMult {
+    last.unwrap_or_else(|| Inputs::IncMult {
         u: vec![0.0],
         p: 0,
         t: 0,

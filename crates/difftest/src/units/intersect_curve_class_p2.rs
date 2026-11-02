@@ -865,10 +865,13 @@ fn gen_op(rng: &mut Rng, objs: &[ObjIn], n_cos: usize, ccs: &[CcIn; 2]) -> OpIn 
             let (lo, hi) = curve_range(objs, c.curve);
             let mut ivl = gen_ivls(rng, objs, 1, lo, hi, 0.1, false);
             let jj = if rng.chance(0.3) { size + rng.below(3) as usize } else { j };
+            // (the fallback's gen_pc stays eager: it advances rng)
+            let popped = ivl.pop();
+            let fallback = IvlIn { a: 0.0, b: 1.0, pcs: [gen_pc(rng, objs, 0.0, false); 3] };
             OpIn::Insert {
                 t,
                 j: jj,
-                ivl: ivl.pop().unwrap_or(IvlIn { a: 0.0, b: 1.0, pcs: [gen_pc(rng, objs, 0.0, false); 3] }),
+                ivl: popped.unwrap_or(fallback),
             }
         }
         8..=10 => {

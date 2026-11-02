@@ -362,12 +362,12 @@ pub(crate) fn cone_iso_curve(
     // Nurb Surface size - trimmed to optional domain
     let nurb_domain = rev.base.natural_uv_domain();
     let nurb_span_size = if surf_param == SurfParamType::U {
-        let min_y = domain.map_or(nurb_domain.min().y, |d| d.min().y);
-        let max_y = domain.map_or(nurb_domain.max().y, |d| d.max().y);
+        let min_y = domain.map_or_else(|| nurb_domain.min().y, |d| d.min().y);
+        let max_y = domain.map_or_else(|| nurb_domain.max().y, |d| d.max().y);
         max_y - min_y
     } else {
-        let min_x = domain.map_or(nurb_domain.min().x, |d| d.min().x);
-        let max_x = domain.map_or(nurb_domain.max().x, |d| d.max().x);
+        let min_x = domain.map_or_else(|| nurb_domain.min().x, |d| d.min().x);
+        let max_x = domain.map_or_else(|| nurb_domain.max().x, |d| d.max().x);
         max_x - min_x
     };
 

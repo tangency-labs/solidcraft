@@ -2631,7 +2631,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// the error info and named in the error. The target keeps the merged
     /// topology, as on upstream's other merge failures.
     fn check_closed_manifold(&mut self, access: &impl ExecutiveAccess<O>) -> Result<()> {
-        let target = self.target.ok_or(invalid("missing target B-rep"))?;
+        let target = self.target.ok_or_else(|| invalid("missing target B-rep"))?;
         for edge in access.edges(target)? {
             if access.edge_is_manifold(edge)? {
                 continue;
@@ -2702,12 +2702,12 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     let solver = solvers
                         .first()
                         .copied()
-                        .ok_or(invalid("missing first solver"))?;
+                        .ok_or_else(|| invalid("missing first solver"))?;
                     let edge = access.vertices_solver_edge(solver)?;
                     let (start, end) = access.vertices_curve_ends(k, edge)?;
                     let vertex = access
                         .vertices_corner_vertex(corner)?
-                        .ok_or(invalid("null tangent corner vertex"))?;
+                        .ok_or_else(|| invalid("null tangent corner vertex"))?;
                     let point = access.vertices_point(vertex)?;
                     let distance1 = start.distance(point);
                     let distance2 = end.distance(point);
@@ -3705,7 +3705,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             }
             let fillet = self
                 .fillet
-                .ok_or(invalid("missing constructed fillet B-rep"))?;
+                .ok_or_else(|| invalid("missing constructed fillet B-rep"))?;
             if access.faces(fillet)?.is_empty() {
                 return Err(failure());
             }
@@ -3717,7 +3717,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     "blend.fillet_executive_p3",
                 ));
             }
-            let target = self.target.ok_or(invalid("missing target B-rep"))?;
+            let target = self.target.ok_or_else(|| invalid("missing target B-rep"))?;
             let editing = access.editing_enabled(target)?;
             access.set_editing_enabled(target, true)?;
             let result = self.merge_fillet(k, access, target, fillet, error_out);

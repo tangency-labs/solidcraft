@@ -357,7 +357,7 @@ pub(crate) fn find_tangent_curves(
             continue;
         }
 
-        let (Some(&d0), Some(&d1)) = (dirs.first(), dirs.get(1).or(dirs.first())) else {
+        let (Some(&d0), Some(&d1)) = (dirs.first(), dirs.get(1).or_else(|| dirs.first())) else {
             continue;
         };
         if num_dirs <= 2 {

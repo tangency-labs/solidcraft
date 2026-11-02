@@ -81,7 +81,10 @@ fn rec<R: TopologyRecords + ?Sized>(
     key: ObjectKey,
     operation: &'static str,
 ) -> Result<Topology> {
-    records.topology(key).copied().ok_or(broken_list(operation))
+    records
+        .topology(key)
+        .copied()
+        .ok_or_else(|| broken_list(operation))
 }
 
 fn rec_mut<'r, R: TopologyRecords + ?Sized>(
@@ -89,7 +92,9 @@ fn rec_mut<'r, R: TopologyRecords + ?Sized>(
     key: ObjectKey,
     operation: &'static str,
 ) -> Result<&'r mut Topology> {
-    records.topology_mut(key).ok_or(broken_list(operation))
+    records
+        .topology_mut(key)
+        .ok_or_else(|| broken_list(operation))
 }
 
 fn set_next<R: TopologyRecords + ?Sized>(

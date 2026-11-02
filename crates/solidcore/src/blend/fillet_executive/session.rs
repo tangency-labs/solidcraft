@@ -2274,7 +2274,7 @@ impl<'target> FilletSession<'target> {
             .as_ref()
             .map(MakeSurfaceBlendSih::algorithm_type);
         let curve_blend = self.objects.curve_blend_self_intersection_handler;
-        let algorithm = algorithm.or(curve_blend.map(|h| h.algorithm_type()));
+        let algorithm = algorithm.or_else(|| curve_blend.map(|h| h.algorithm_type()));
         for solver in self.objects.solvers.iter_mut().flatten() {
             let base = solver.base_mut();
             if base.executive.is_some() {

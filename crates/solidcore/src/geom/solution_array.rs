@@ -465,7 +465,7 @@ impl SolutionEnd {
         self.parameters
             .get(index)
             .copied()
-            .ok_or(bad_param("geom::solution_array::SolutionEnd::param"))
+            .ok_or_else(|| bad_param("geom::solution_array::SolutionEnd::param"))
     }
 
     /// Mutable parameter `index` (`operator[]`).
@@ -476,7 +476,7 @@ impl SolutionEnd {
     pub fn param_mut(&mut self, index: usize) -> Result<&mut f64> {
         self.parameters
             .get_mut(index)
-            .ok_or(bad_param("geom::solution_array::SolutionEnd::param_mut"))
+            .ok_or_else(|| bad_param("geom::solution_array::SolutionEnd::param_mut"))
     }
 }
 
@@ -786,7 +786,7 @@ impl<O: SolutionObject> Solution<O> {
             }
             // This is not the index we want, move down to the next start
             // parameter based on the type of the object.
-            let kind = object.ok_or(null_object(OP))?.kind();
+            let kind = object.ok_or_else(|| null_object(OP))?.kind();
             if kind.is_kind_of(ObjectKind::Curve) || kind.is_kind_of(ObjectKind::Edge) {
                 param_index += 1;
             } else if kind.is_kind_of(ObjectKind::Face) || kind.is_kind_of(ObjectKind::Surface) {
@@ -836,7 +836,7 @@ impl<O: SolutionObject> Solution<O> {
 
         // for every object in this solution
         for i in 0..=index {
-            let object = self.object(i, OP)?.ok_or(null_object(OP))?;
+            let object = self.object(i, OP)?.ok_or_else(|| null_object(OP))?;
             let kind = object.kind();
 
             // convert object index into parameter index
@@ -1033,7 +1033,9 @@ impl<O: SolutionObject> Solution<O> {
         else {
             return Ok(None);
         };
-        let object = self.object(object_index, OP)?.ok_or(null_object(OP))?;
+        let object = self
+            .object(object_index, OP)?
+            .ok_or_else(|| null_object(OP))?;
         let kind = object.kind();
 
         // Get the parameter interval from pObject
@@ -1536,7 +1538,7 @@ impl<O: SolutionObject> SolutionArray<O> {
         self.data
             .get(index)
             .copied()
-            .ok_or(bad_index("geom::solution_array::SolutionArray::get_at"))
+            .ok_or_else(|| bad_index("geom::solution_array::SolutionArray::get_at"))
     }
 
     /// Replaces solution `index` (`SetAt`).
@@ -1548,7 +1550,7 @@ impl<O: SolutionObject> SolutionArray<O> {
         let slot = self
             .data
             .get_mut(index)
-            .ok_or(bad_index("geom::solution_array::SolutionArray::set_at"))?;
+            .ok_or_else(|| bad_index("geom::solution_array::SolutionArray::set_at"))?;
         *slot = *solution;
         Ok(())
     }

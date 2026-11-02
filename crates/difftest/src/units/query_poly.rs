@@ -501,12 +501,12 @@ fn build(k: &Kernel, b: &BrepIn) -> Result<Built, Fail> {
         verts
             .get(i)
             .copied()
-            .ok_or(Fail::Harness(harness("vertex index")))
+            .ok_or_else(|| Fail::Harness(harness("vertex index")))
     };
     for f in &b.faces {
         let shell = *shells
             .get(f.shell)
-            .ok_or(Fail::Harness(harness("shell index")))?;
+            .ok_or_else(|| Fail::Harness(harness("shell index")))?;
         let face = rs(p.add_face(k, shell, f.tol, f.normal.map(v3)))?;
         for l in &f.loops {
             let lp = rs(p.start_poly_edge_loop(face))?;
@@ -518,11 +518,11 @@ fn build(k: &Kernel, b: &BrepIn) -> Result<Built, Fail> {
             }
             let ne = if l.mode == 2 { kk - 1 } else { kk };
             for j in 0..ne {
-                let v0 = pick(*l.verts.get(j).ok_or(Fail::Harness(harness("loop")))?)?;
+                let v0 = pick(*l.verts.get(j).ok_or_else(|| Fail::Harness(harness("loop")))?)?;
                 let v1 = pick(
                     *l.verts
                         .get((j + 1) % kk)
-                        .ok_or(Fail::Harness(harness("loop")))?,
+                        .ok_or_else(|| Fail::Harness(harness("loop")))?,
                 )?;
                 let p0 = rs(p.vertex_point(v0))?;
                 let p1 = rs(p.vertex_point(v1))?;
@@ -532,7 +532,7 @@ fn build(k: &Kernel, b: &BrepIn) -> Result<Built, Fail> {
                 // the status is ignored by the shim
                 let _ = p.finish_poly_edge_loop(lp);
             } else if l.mode == 2 {
-                let last = pick(*l.verts.last().ok_or(Fail::Harness(harness("loop")))?)?;
+                let last = pick(*l.verts.last().ok_or_else(|| Fail::Harness(harness("loop")))?)?;
                 rs(p.set_last_end_poly_vertex(lp, Some(last)))?;
             }
         }
@@ -541,7 +541,7 @@ fn build(k: &Kernel, b: &BrepIn) -> Result<Built, Fail> {
         edges
             .get(i)
             .copied()
-            .ok_or(Fail::Harness(harness("edge index")))
+            .ok_or_else(|| Fail::Harness(harness("edge index")))
     };
     for g in &b.radials {
         let ring = g.iter().map(|&i| edge(i)).collect::<Result<Vec<_>, _>>()?;
@@ -555,7 +555,7 @@ fn build(k: &Kernel, b: &BrepIn) -> Result<Built, Fail> {
         ))?);
     }
     for &(e, a) in &b.edge_aux {
-        let a = *aux.get(a).ok_or(Fail::Harness(harness("aux index")))?;
+        let a = *aux.get(a).ok_or_else(|| Fail::Harness(harness("aux index")))?;
         rs(p.edge_set_aux_data(edge(e)?, Some(a)))?;
     }
     for &(v, n) in &b.vertex_normals {

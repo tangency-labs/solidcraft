@@ -755,7 +755,7 @@ fn gen_srf(rng: &mut Rng, evaluable: bool) -> SrfIn {
 
 fn crv_used(c: &CrvIn) -> [usize; 2] {
     c.used
-        .unwrap_or([c.values.len().saturating_sub(1), c.knots.len().saturating_sub(1)])
+        .unwrap_or_else(|| [c.values.len().saturating_sub(1), c.knots.len().saturating_sub(1)])
 }
 
 fn srf_storage(s: &SrfIn) -> [usize; 4] {

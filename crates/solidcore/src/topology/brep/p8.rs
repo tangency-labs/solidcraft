@@ -209,7 +209,7 @@ pub fn create_face_in_region_from_surface(
     let surface = surface.ok_or_else(|| SolidError::null_pointer(OP))?;
 
     // Check for region default.
-    let region = region.or(b.infinite_region());
+    let region = region.or_else(|| b.infinite_region());
 
     // check input - crUVDomain contained within the pSurface->GetNaturalUVDomain()
     if !uv_domain.is_contained_by(&surface.natural_uv_domain_with_nurb(k)?, EFF_ZERO) {
@@ -384,7 +384,7 @@ pub fn create_planar_face_with_3d_curves(
     fenv: &mut FaceBuildEnv<'_, '_>,
 ) -> Result<Option<FaceId>> {
     // Check for region default.
-    let region = region.or(b.infinite_region());
+    let region = region.or_else(|| b.infinite_region());
 
     // create the plane - returns an error for open, degenerate, or nonCoplanar curves
     let plane = Surface::create_plane_with_3d_curves(k, curves, tol_3d).map_err(plane_failed)?;
@@ -462,7 +462,7 @@ pub fn create_planar_faces_with_3d_curves(
     let _ = tol_3d; // SM_REF1(d3DToleranceArg)
 
     // Check for region default.
-    let region = region.or(b.infinite_region());
+    let region = region.or_else(|| b.infinite_region());
     let tol = b.tolerance();
 
     // create the plane - fails for non-planar curves, degenerate curves, open loops,
@@ -517,7 +517,7 @@ pub fn create_faces_with_curves(
     fenv: &mut FaceBuildEnv<'_, '_>,
 ) -> Result<NewFaces> {
     // Check for region default.
-    let region = region.or(b.infinite_region());
+    let region = region.or_else(|| b.infinite_region());
 
     with_editing(b, |b| {
         let mut out = NewFaces::default();
@@ -750,7 +750,7 @@ pub fn make_faces_with_curves(
     let mut out = NewFaces::default();
 
     // set input region (NULL = infinite region)
-    let region = region.or(b.infinite_region());
+    let region = region.or_else(|| b.infinite_region());
 
     // Check continuity of the surface
     let (u_knots, v_knots) = surface.find_knots_by_max_continuity(k, ContinuityType::C0, false)?;

@@ -442,9 +442,9 @@ fn build_poly(
             }
             let lp = b.start_poly_edge_loop(face)?;
             for (j, &i0) in l.iter().enumerate() {
-                let i1 = l.get((j + 1) % l.len()).copied().ok_or(bad("loop"))?;
-                let v0 = *vs.get(i0).ok_or(bad("poly vertex index"))?;
-                let v1 = *vs.get(i1).ok_or(bad("poly vertex index"))?;
+                let i1 = l.get((j + 1) % l.len()).copied().ok_or_else(|| bad("loop"))?;
+                let v0 = *vs.get(i0).ok_or_else(|| bad("poly vertex index"))?;
+                let v1 = *vs.get(i1).ok_or_else(|| bad("poly vertex index"))?;
                 let (p0, p1) = (b.vertex_point(v0)?, b.vertex_point(v1)?);
                 b.add_poly_edge(k, lp, f.tol, p0, p1, v0)?;
             }

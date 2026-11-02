@@ -621,7 +621,7 @@ fn grade(case: &Case, k: &mut Kernel) -> Graded {
         seams: Vec::new(),
     };
     let mut b = (case.build)(k).unwrap();
-    let off_tol = case.off_tol.unwrap_or(100.0 * b.tolerance());
+    let off_tol = case.off_tol.unwrap_or_else(|| 100.0 * b.tolerance());
     let e = pick(k, &b, case.pick);
     let made = match case.blend {
         Blend::Chord(d) => chord(k, &mut b, e, d),

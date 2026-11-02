@@ -391,7 +391,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
         let owner = self
             .curve_edge
             .or(self.curve_face)
-            .or(self.curve.map(|c| c.handle));
+            .or_else(|| self.curve.map(|c| c.handle));
         let named = if self.swap_order {
             [Some(surface_handle), owner]
         } else {

@@ -914,7 +914,7 @@ fn gen_inputs(rng: &mut Rng) -> Inputs {
                 let b = if rng.chance(0.5) {
                     let x = rng.below(2) as usize;
                     let bx = [basis(rng), basis(rng)];
-                    *bx.get(x).unwrap_or(&[axis(0, 1.0), axis(1, 1.0), axis(2, 1.0)])
+                    bx.get(x).copied().unwrap_or_else(|| [axis(0, 1.0), axis(1, 1.0), axis(2, 1.0)])
                 } else {
                     [axis(0, 1.0), axis(1, 1.0), axis(2, 1.0)]
                 };

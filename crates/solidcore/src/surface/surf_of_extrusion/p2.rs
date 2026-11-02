@@ -280,7 +280,9 @@ impl From<ExtrusionIntersection> for SurfaceIntersection {
 impl SurfOfExtrusion {
     /// The generator (`m_pGenCurve`).
     fn gen_or_null(&self, op: &'static str) -> Result<&Curve> {
-        self.gen_curve.as_ref().ok_or(SolidError::null_pointer(op))
+        self.gen_curve
+            .as_ref()
+            .ok_or_else(|| SolidError::null_pointer(op))
     }
 
     // ---- GlobalSurfaceIntersect -------------------------------------------------------

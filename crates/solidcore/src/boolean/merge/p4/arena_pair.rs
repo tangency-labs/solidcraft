@@ -1878,13 +1878,10 @@ impl TopologyObjects<H> for ArenaPair<'_> {
                 CacheObject::Vertex(v) => hd(bi, K_VERTEX, v.index()),
                 CacheObject::Edge(e) => hd(bi, K_EDGE, e.index()),
                 CacheObject::Face(f) => hd(bi, K_FACE, f.index()),
-                CacheObject::Curve(e) => b
-                    .edge(e)
-                    .ok()
-                    .and_then(|x| x.curve.as_ref())
-                    .map_or(hd(bi, K_EDGE_CURVE, e.index()), |c| {
-                        curve_h(bi, K_EDGE_CURVE, e.index(), c)
-                    }),
+                CacheObject::Curve(e) => b.edge(e).ok().and_then(|x| x.curve.as_ref()).map_or_else(
+                    || hd(bi, K_EDGE_CURVE, e.index()),
+                    |c| curve_h(bi, K_EDGE_CURVE, e.index(), c),
+                ),
                 CacheObject::Surface(f) => hd(bi, K_FACE_SURFACE, f.index()),
                 CacheObject::Brep => brep_h(bi),
                 _ => hd(bi, K_NULL, 0),
@@ -2118,7 +2115,7 @@ impl MergeIntervalBrep<H> for ArenaPair<'_> {
             target,
             handle: Box::new(move |e| match e {
                 EntityRef::Vertexuse(vu) => hd(b, K_VERTEXUSE, vu.index()),
-                e => ArenaPair::entity_h(b, e).unwrap_or(hd(b, K_NULL, 0)),
+                e => ArenaPair::entity_h(b, e).unwrap_or_else(|| hd(b, K_NULL, 0)),
             }),
             notifications: ed::NotifyEnv {
                 records: self.records,

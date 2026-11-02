@@ -786,7 +786,7 @@ fn near_point(rng: &mut Rng, e: &EllipseJ) -> [f64; 3] {
         let t = rng.uniform(e.domain[0] - 30.0, e.domain[1] + 30.0);
         el.evaluate_step_point(t).ok()
     })
-    .unwrap_or(Vec3::from_array(e.c));
+    .unwrap_or_else(|| Vec3::from_array(e.c));
     let s = *rng.choose(&[0.0, 1e-9, 1e-6, 1e-3, 0.5, 3.0]).unwrap_or(&0.0);
     let d = rng.point3(-1.0, 1.0);
     let mut p = [base.x + s * d[0], base.y + s * d[1], base.z + s * d[2]];

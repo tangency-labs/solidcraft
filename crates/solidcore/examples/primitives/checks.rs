@@ -258,10 +258,10 @@ impl Evaluation {
         m.counts
             .as_ref()
             .err()
-            .or(m.bbox.as_ref().err())
-            .or(m.manifold_solid.as_ref().err())
-            .or(m.volume.as_ref().err())
-            .or(m.area.as_ref().err())
+            .or_else(|| m.bbox.as_ref().err())
+            .or_else(|| m.manifold_solid.as_ref().err())
+            .or_else(|| m.volume.as_ref().err())
+            .or_else(|| m.area.as_ref().err())
     }
 
     /// `(unit, upstream symbol)` of the first unported call that stopped this primitive.

@@ -304,7 +304,7 @@ fn main() -> Result<()> {
     ints.extend(*lock(&dest_log)?);
     println!(
         "{{\"ints\":{ints:?},\"values\":{values:?},\"deferred\":{}}}",
-        deferred.map_or("null".to_owned(), |s| format!("{s:?}"))
+        deferred.map_or_else(|| "null".to_owned(), |s| format!("{s:?}"))
     );
     Ok(())
 }

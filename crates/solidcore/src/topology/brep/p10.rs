@@ -192,14 +192,14 @@ fn index(i: u64, len: usize, what: &'static str) -> Result<usize> {
     usize::try_from(i)
         .ok()
         .filter(|&i| i < len)
-        .ok_or(SolidError::invalid_input(OP_MAKE, what))
+        .ok_or_else(|| SolidError::invalid_input(OP_MAKE, what))
 }
 
 fn at<T: Copy>(v: &[Option<T>], i: usize, what: &'static str) -> Result<T> {
     v.get(i)
         .copied()
         .flatten()
-        .ok_or(SolidError::invalid_input(OP_MAKE, what))
+        .ok_or_else(|| SolidError::invalid_input(OP_MAKE, what))
 }
 
 /// `sm_AddAttributes` (unit `topology.brep_p1`): adds the attributes listed by index

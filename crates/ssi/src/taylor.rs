@@ -531,7 +531,7 @@ fn compose_piece(piece: &Piece, u: &Bern, v: &Bern) -> [Bern; 4] {
         }
     }
     out.map(|b| {
-        b.unwrap_or(Bern {
+        b.unwrap_or_else(|| Bern {
             du: 0,
             dv: 0,
             c: vec![0.0],

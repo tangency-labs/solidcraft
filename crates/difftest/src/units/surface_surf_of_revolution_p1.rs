@@ -1156,8 +1156,8 @@ fn gen_case(rng: &mut Rng) -> Option<Inputs> {
             }
         }
         6 => {
-            let g = built.as_ref().and_then(|b| b.gen_curve()).map_or(
-                Extent1d::from_min_max(0.0, 1.0),
+            let g = built.as_ref().and_then(|b| b.gen_curve()).map_or_else(
+                || Extent1d::from_min_max(0.0, 1.0),
                 Curve::natural_interval,
             );
             OpIn::Directrix {

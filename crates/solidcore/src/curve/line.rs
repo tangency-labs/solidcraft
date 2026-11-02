@@ -1911,10 +1911,10 @@ impl Line {
         if both_free {
             // init line parameters
             let mut ivl = Extent1d::from_min_max(0.0, 1.0);
-            let start =
-                tgt_start.unwrap_or(self.point + self.scale * self.anal_domain.min() * self.vector);
-            let end =
-                tgt_end.unwrap_or(self.point + self.scale * self.anal_domain.max() * self.vector);
+            let start = tgt_start
+                .unwrap_or_else(|| self.point + self.scale * self.anal_domain.min() * self.vector);
+            let end = tgt_end
+                .unwrap_or_else(|| self.point + self.scale * self.anal_domain.max() * self.vector);
             let mut vec = end - start;
             let mut scale = vec.length();
 

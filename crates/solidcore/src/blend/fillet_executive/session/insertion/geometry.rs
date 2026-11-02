@@ -894,21 +894,24 @@ impl ProtoGeometry<FilletObject> for InsertionGeometry<'_> {
 
 impl ProtoTopology<FilletObject> for InsertionGeometry<'_> {
     fn vertex_use_faces(&self, vertex: FilletObject) -> Result<Vec<Option<FilletObject>>> {
-        let (role, entity) = Self::topology(vertex).ok_or(invalid("unknown topology role"))?;
+        let (role, entity) =
+            Self::topology(vertex).ok_or_else(|| invalid("unknown topology role"))?;
         Ok(ProtoTopology::vertex_use_faces(self.body(role), entity)?
             .into_iter()
             .map(|value| value.map(|entity| Self::handle(role, entity)))
             .collect())
     }
     fn edge_use_faces(&self, edge: FilletObject) -> Result<Vec<Option<FilletObject>>> {
-        let (role, entity) = Self::topology(edge).ok_or(invalid("unknown topology role"))?;
+        let (role, entity) =
+            Self::topology(edge).ok_or_else(|| invalid("unknown topology role"))?;
         Ok(ProtoTopology::edge_use_faces(self.body(role), entity)?
             .into_iter()
             .map(|value| value.map(|entity| Self::handle(role, entity)))
             .collect())
     }
     fn edge_start_vertex(&self, edge: FilletObject) -> Result<Option<FilletObject>> {
-        let (role, entity) = Self::topology(edge).ok_or(invalid("unknown topology role"))?;
+        let (role, entity) =
+            Self::topology(edge).ok_or_else(|| invalid("unknown topology role"))?;
         Ok(ProtoTopology::edge_start_vertex(self.body(role), entity)?
             .map(|entity| Self::handle(role, entity)))
     }
@@ -917,11 +920,12 @@ impl ProtoTopology<FilletObject> for InsertionGeometry<'_> {
         edge: FilletObject,
         vertex: Option<FilletObject>,
     ) -> Result<Option<FilletObject>> {
-        let (role, entity) = Self::topology(edge).ok_or(invalid("unknown topology role"))?;
+        let (role, entity) =
+            Self::topology(edge).ok_or_else(|| invalid("unknown topology role"))?;
         let vertex = vertex
             .map(|vertex| {
                 let (other_role, vertex) =
-                    Self::topology(vertex).ok_or(invalid("unknown vertex role"))?;
+                    Self::topology(vertex).ok_or_else(|| invalid("unknown vertex role"))?;
                 if role != other_role {
                     return Err(invalid("edge and vertex belong to different bodies"));
                 }
@@ -934,18 +938,21 @@ impl ProtoTopology<FilletObject> for InsertionGeometry<'_> {
         )
     }
     fn vertex_point(&self, vertex: FilletObject) -> Result<Point3> {
-        let (role, entity) = Self::topology(vertex).ok_or(invalid("unknown topology role"))?;
+        let (role, entity) =
+            Self::topology(vertex).ok_or_else(|| invalid("unknown topology role"))?;
         ProtoTopology::vertex_point(self.body(role), entity)
     }
     fn edge_brep(&self, edge: FilletObject) -> Result<Option<ObjectKey>> {
-        let (role, entity) = Self::topology(edge).ok_or(invalid("unknown topology role"))?;
+        let (role, entity) =
+            Self::topology(edge).ok_or_else(|| invalid("unknown topology role"))?;
         let actual_body = ProtoTopology::edge_brep(self.body(role), entity)?;
         actual_body
             .map(|_| self.body_identity(role).map(|identity| identity.key))
             .transpose()
     }
     fn edge_faces(&self, edge: FilletObject) -> Result<Vec<FilletObject>> {
-        let (role, entity) = Self::topology(edge).ok_or(invalid("unknown topology role"))?;
+        let (role, entity) =
+            Self::topology(edge).ok_or_else(|| invalid("unknown topology role"))?;
         Ok(ProtoTopology::edge_faces(self.body(role), entity)?
             .into_iter()
             .map(|entity| Self::handle(role, entity))

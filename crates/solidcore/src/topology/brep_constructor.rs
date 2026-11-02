@@ -199,7 +199,8 @@ impl Default for BrepConstructor {
 
 /// The B-rep, or the error upstream's dereference of a `NULL` `m_pBrep` becomes.
 fn open<'a>(brep: &'a mut Option<Brep>, what: &'static str) -> Result<&'a mut Brep> {
-    brep.as_mut().ok_or(SolidError::invalid_input(OP, what))
+    brep.as_mut()
+        .ok_or_else(|| SolidError::invalid_input(OP, what))
 }
 
 fn null(what: &'static str) -> SolidError {
@@ -495,7 +496,7 @@ impl BrepConstructor {
         }
         let outer_region = self
             .outer_region
-            .ok_or(null("B-rep without infinite region"))?;
+            .ok_or_else(|| null("B-rep without infinite region"))?;
 
         // Test for open shell case
         post_insert_shell(b, outer_region, outer)?;
@@ -533,7 +534,10 @@ impl BrepConstructor {
             let mut shell_edges: Vec<EdgeId> = Vec::new();
             let mut shell_vertices: Vec<VertexId> = Vec::new();
             for fu in b.shell(outer)?.get_faceuses()? {
-                let f = b.faceuse(fu)?.face.ok_or(null("face use without face"))?;
+                let f = b
+                    .faceuse(fu)?
+                    .face
+                    .ok_or_else(|| null("face use without face"))?;
                 shell_edges.extend(face4::edges(b, f, None, false, None)?);
                 shell_vertices.extend(face4::vertices(b, f, None, false, None)?);
             }
@@ -627,8 +631,14 @@ impl BrepConstructor {
         }
         let l = self.start_loop(OrientType::Same)?; // default behavior
         let b = open(&mut self.brep, "no B-rep")?;
-        let lu1 = b.loop_(l)?.loopuse.ok_or(null("loop without loop use"))?;
-        let lu2 = b.loopuse(lu1)?.mate.ok_or(null("loop use without mate"))?;
+        let lu1 = b
+            .loop_(l)?
+            .loopuse
+            .ok_or_else(|| null("loop without loop use"))?;
+        let lu2 = b
+            .loopuse(lu1)?
+            .mate
+            .ok_or_else(|| null("loop use without mate"))?;
 
         let vu1 = b.add_vertexuse_record(Vertexuse::default())?;
         let vu2 = b.add_vertexuse_record(Vertexuse::default())?;
@@ -696,8 +706,14 @@ impl BrepConstructor {
         b.loopuse_mut(lu1)?.loop_ = Some(l);
         b.loopuse_mut(lu2)?.loop_ = Some(l);
 
-        let fu1 = b.face(f)?.faceuse.ok_or(null("face without face use"))?;
-        let fu2 = b.faceuse(fu1)?.mate.ok_or(null("face use without mate"))?;
+        let fu1 = b
+            .face(f)?
+            .faceuse
+            .ok_or_else(|| null("face without face use"))?;
+        let fu2 = b
+            .faceuse(fu1)?
+            .mate
+            .ok_or_else(|| null("face use without mate"))?;
         post_insert_loopuse(b, fu1, lu1)?; // connect pLU1 to upward faceuse
         post_insert_loopuse(b, fu2, lu2)?;
         b.face_mut(f)?.loops.push(l);
@@ -737,27 +753,36 @@ impl BrepConstructor {
         let b = open(&mut self.brep, "EndLoop: no B-rep")?;
 
         // Here we need to loop through and create vertices for each vertexuse.
-        let lu = b.loop_(l)?.loopuse.ok_or(null("loop without loop use"))?;
+        let lu = b
+            .loop_(l)?
+            .loopuse
+            .ok_or_else(|| null("loop without loop use"))?;
         let vertexuses = loopuse::vertexuses(b, lu, None)?;
 
         for vu in vertexuses {
-            let vu = vu.ok_or(null("EndLoop: null vertex use"))?;
+            let vu = vu.ok_or_else(|| null("EndLoop: null vertex use"))?;
             let VertexuseOwner::Edgeuse(Some(eu)) = b.vertexuse(vu)?.owner else {
                 return Err(null("EndLoop: vertex use of no edge use"));
             };
             let e = eu1::edge(b, eu)?;
-            let mate = eu1::mate(b, eu)?.ok_or(null("EndLoop: edge use without mate"))?;
-            let mate_ccw = b.edgeuse(mate)?.ccw.ok_or(null("EndLoop: null CCW link"))?;
+            let mate = eu1::mate(b, eu)?.ok_or_else(|| null("EndLoop: edge use without mate"))?;
+            let mate_ccw = b
+                .edgeuse(mate)?
+                .ccw
+                .ok_or_else(|| null("EndLoop: null CCW link"))?;
             let vu_mate_ccw = b
                 .edgeuse(mate_ccw)?
                 .vertexuse
-                .ok_or(null("EndLoop: edge use without vertex use"))?;
+                .ok_or_else(|| null("EndLoop: edge use without vertex use"))?;
             let radial = eu1::radial(b, eu)?;
 
             let mut vu_radial_ccw = None;
             if radial != Some(mate) {
-                let r = radial.ok_or(null("EndLoop: edge use without radial"))?;
-                let r_ccw = b.edgeuse(r)?.ccw.ok_or(null("EndLoop: null CCW link"))?;
+                let r = radial.ok_or_else(|| null("EndLoop: edge use without radial"))?;
+                let r_ccw = b
+                    .edgeuse(r)?
+                    .ccw
+                    .ok_or_else(|| null("EndLoop: null CCW link"))?;
                 vu_radial_ccw = b.edgeuse(r_ccw)?.vertexuse;
             }
 
@@ -776,14 +801,14 @@ impl BrepConstructor {
                     let r_vu = b
                         .edgeuse(r)?
                         .vertexuse
-                        .ok_or(null("EndLoop: edge use without vertex use"))?;
+                        .ok_or_else(|| null("EndLoop: edge use without vertex use"))?;
                     if let Some(rv) = b.vertexuse(r_vu)?.vertex {
-                        let e = e.ok_or(null("EndLoop: edge use without edge"))?;
+                        let e = e.ok_or_else(|| null("EndLoop: edge use without edge"))?;
                         let rec = b.edge(e)?;
                         let curve = rec
                             .curve
                             .as_ref()
-                            .ok_or(null("EndLoop: edge without curve"))?;
+                            .ok_or_else(|| null("EndLoop: edge without curve"))?;
                         if curve.is_closed(k, &rec.interval, rec.tolerance)? {
                             found = Some(rv);
                         }
@@ -798,12 +823,12 @@ impl BrepConstructor {
                         tolerance,
                         ..Vertex::default()
                     })?;
-                    let e = e.ok_or(null("EndLoop: edge use without edge"))?;
+                    let e = e.ok_or_else(|| null("EndLoop: edge use without edge"))?;
                     let rec = b.edge(e)?;
                     let curve = rec
                         .curve
                         .as_ref()
-                        .ok_or(null("EndLoop: edge without curve"))?;
+                        .ok_or_else(|| null("EndLoop: edge without curve"))?;
                     let t = if b.edgeuse(eu)?.orientation == OrientType::Opposite {
                         rec.interval.max()
                     } else {
@@ -826,7 +851,7 @@ impl BrepConstructor {
                     sync_edge_vertices(b, e)?;
                 }
             }
-            let cw = eu1::cw_edgeuse(b, eu)?.ok_or(null("EndLoop: null CW link"))?;
+            let cw = eu1::cw_edgeuse(b, eu)?.ok_or_else(|| null("EndLoop: null CW link"))?;
             let cw_mate = eu1::mate(b, cw)?;
             if cw_mate != Some(mate_ccw) {
                 return Err(SolidError::sm_err(OP));
@@ -902,8 +927,14 @@ impl BrepConstructor {
         b.edgeuse_mut(eu2_)?.orientation = o2;
 
         // Set Loopuse pointers (and the edgeuse and loopuse types)
-        let lu = b.loop_(l)?.loopuse.ok_or(null("loop without loop use"))?;
-        let lu_mate = b.loopuse(lu)?.mate.ok_or(null("loop use without mate"))?;
+        let lu = b
+            .loop_(l)?
+            .loopuse
+            .ok_or_else(|| null("loop without loop use"))?;
+        let lu_mate = b
+            .loopuse(lu)?
+            .mate
+            .ok_or_else(|| null("loop use without mate"))?;
         b.edgeuse_mut(eu1_)?.owner = EdgeuseOwner::Loopuse(Some(lu));
         b.loopuse_mut(lu)?.start = LoopuseStart::Edgeuse(Some(eu1_));
         b.edgeuse_mut(eu2_)?.owner = EdgeuseOwner::Loopuse(Some(lu_mate));
@@ -927,16 +958,16 @@ impl BrepConstructor {
         } else {
             let prev1 = self
                 .edgeuse
-                .ok_or(null("StartEdge: no previous edge use"))?;
-            let prev2 =
-                eu1::mate(b, prev1)?.ok_or(null("StartEdge: previous edge use without mate"))?;
+                .ok_or_else(|| null("StartEdge: no previous edge use"))?;
+            let prev2 = eu1::mate(b, prev1)?
+                .ok_or_else(|| null("StartEdge: previous edge use without mate"))?;
             if self.loop_surface_orientation == OrientType::Same {
                 // If we're walking the loop with the left hand rule for the upward side
                 // of the surface
                 let ccw = b
                     .edgeuse(prev1)?
                     .ccw
-                    .ok_or(null("StartEdge: null CCW link"))?;
+                    .ok_or_else(|| null("StartEdge: null CCW link"))?;
                 set_ccw(b, eu1_, Some(ccw))?;
                 set_cw(b, ccw, Some(eu1_))?;
                 set_ccw(b, prev1, Some(eu1_))?;
@@ -945,7 +976,7 @@ impl BrepConstructor {
                 let cw = b
                     .edgeuse(prev2)?
                     .cw
-                    .ok_or(null("StartEdge: null CW link"))?;
+                    .ok_or_else(|| null("StartEdge: null CW link"))?;
                 set_cw(b, eu2_, Some(cw))?;
                 set_ccw(b, cw, Some(eu2_))?;
                 set_cw(b, prev2, Some(eu2_))?;
@@ -956,7 +987,7 @@ impl BrepConstructor {
                 let cw = b
                     .edgeuse(prev1)?
                     .cw
-                    .ok_or(null("StartEdge: null CW link"))?;
+                    .ok_or_else(|| null("StartEdge: null CW link"))?;
                 set_cw(b, eu1_, Some(cw))?;
                 set_ccw(b, cw, Some(eu1_))?;
                 set_cw(b, prev1, Some(eu1_))?;
@@ -965,7 +996,7 @@ impl BrepConstructor {
                 let ccw = b
                     .edgeuse(prev2)?
                     .ccw
-                    .ok_or(null("StartEdge: null CCW link"))?;
+                    .ok_or_else(|| null("StartEdge: null CCW link"))?;
                 set_ccw(b, eu2_, Some(ccw))?;
                 set_cw(b, ccw, Some(eu2_))?;
                 set_ccw(b, prev2, Some(eu2_))?;
@@ -991,14 +1022,15 @@ impl BrepConstructor {
                 post_insert_edgeuse(b, e, eu1_)?;
             }
         } else {
-            let prim =
-                eu1::primary_edgeuse(b, e)?.ok_or(null("StartEdge: edge without edge use"))?;
-            let prim_mate = eu1::mate(b, prim)?.ok_or(null("StartEdge: edge use without mate"))?;
+            let prim = eu1::primary_edgeuse(b, e)?
+                .ok_or_else(|| null("StartEdge: edge without edge use"))?;
+            let prim_mate =
+                eu1::mate(b, prim)?.ok_or_else(|| null("StartEdge: edge use without mate"))?;
             let vertex_of = |b: &Brep, eu: EdgeuseId| -> Result<Option<VertexId>> {
                 let vu = b
                     .edgeuse(eu)?
                     .vertexuse
-                    .ok_or(null("StartEdge: edge use without vertex use"))?;
+                    .ok_or_else(|| null("StartEdge: edge use without vertex use"))?;
                 Ok(b.vertexuse(vu)?.vertex)
             };
 
@@ -1087,7 +1119,9 @@ impl BrepConstructor {
     /// [`SolidError::InvalidInput`] without open face (upstream dereferences it) or
     /// for a surface a face already owns (see the module notes).
     pub fn set_face_surface(&mut self, mut surface: Surface, uv_domain: &Extent2d) -> Result<()> {
-        let f = self.face.ok_or(null("SetFaceSurface: no open face"))?;
+        let f = self
+            .face
+            .ok_or_else(|| null("SetFaceSurface: no open face"))?;
         let b = open(&mut self.brep, "SetFaceSurface: no B-rep")?;
         // copy surface when pSurface already has a Face owner
         if surface
@@ -1129,14 +1163,14 @@ impl BrepConstructor {
         let (Some(b), Some(e), Some(eu)) = (self.brep.as_mut(), self.edge, self.edgeuse) else {
             return Err(SolidError::sm_err(OP));
         };
-        let f = eu1::face(b, eu)?.ok_or(null("SetEdgeCurve: edge use without face"))?;
+        let f = eu1::face(b, eu)?.ok_or_else(|| null("SetEdgeCurve: edge use without face"))?;
 
         if !uv_curve {
             if b.edge(e)?.curve.is_some() {
                 // Don't need to set curve of this edge it has already been done.
                 return Err(SolidError::sm_err(OP));
             }
-            let mut curve = curve.ok_or(null("SetEdgeCurve: no curve"))?;
+            let mut curve = curve.ok_or_else(|| null("SetEdgeCurve: no curve"))?;
             let edge_ref = notify_ref(EntityRef::Edge(e));
             let _ = curve.set_owner(Some(edge_ref), None);
             b.edge_mut(e)?.curve = Some(curve);
@@ -1164,7 +1198,7 @@ impl BrepConstructor {
         let surface = rec
             .surface
             .as_ref()
-            .ok_or(null("SetEdgeCurve: face without surface"))?;
+            .ok_or_else(|| null("SetEdgeCurve: face without surface"))?;
         // pSurf->SetOwner(NULL): To prevent trimmed surface cache
         let mut ownerless = surface.clone();
         let _ = ownerless.set_owner(None);
@@ -1255,7 +1289,7 @@ fn non_manifold_sector(
         .edge(e)?
         .curve
         .as_ref()
-        .ok_or(null("StartEdge: joined edge without curve"))?
+        .ok_or_else(|| null("StartEdge: joined edge without curve"))?
         .copy(k)?;
     let mut state = ArenaNotifyState::new(b);
     {

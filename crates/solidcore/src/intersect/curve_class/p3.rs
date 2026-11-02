@@ -350,7 +350,7 @@ fn cc_curve<'g, O: ClassObject, G: ClassGeometry<O>>(
 ) -> Result<&'g Curve> {
     let c = cc
         .curve()
-        .ok_or(SolidError::invalid_input(op, "no classification curve"))?;
+        .ok_or_else(|| SolidError::invalid_input(op, "no classification curve"))?;
     geometry.curve(c).ok_or_else(|| unresolved(op))
 }
 
@@ -402,10 +402,10 @@ fn point_and_unit_tangent(
     let d = curve.evaluate(k, param, 1, from_left, true)?;
     let p = *d
         .first()
-        .ok_or(SolidError::invalid_input(op, "no position"))?;
+        .ok_or_else(|| SolidError::invalid_input(op, "no position"))?;
     let t = *d
         .get(1)
-        .ok_or(SolidError::invalid_input(op, "no tangent"))?;
+        .ok_or_else(|| SolidError::invalid_input(op, "no tangent"))?;
     // the status of the in-place Unitize is ignored (a zero tangent becomes (0, 0, 1))
     Ok((p, t.unitize_or_z()))
 }

@@ -1357,7 +1357,7 @@ impl Plane {
                 // the interval is [tStart - 1, tEnd + 1], or the caller's interval
                 let sub_interval = line_interval
                     .copied()
-                    .unwrap_or(Extent1d::from_min_max(t_start - 1.0, t_end + 1.0));
+                    .unwrap_or_else(|| Extent1d::from_min_max(t_start - 1.0, t_end + 1.0));
                 // try global surface/curve solver (SmSurface::GlobalLineIntersect: the
                 // solutions name `surface`)
                 return base(&sub_interval);

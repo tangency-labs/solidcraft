@@ -608,7 +608,7 @@ fn put_curve(k: &Kernel, o: &mut Vec<f64>, c: &Curve) -> Result<(), Fail> {
         pv(o, p);
     }
     if let CurveKind::BSpline(bs) = c.kind() {
-        let nurb = bs.gw_nurb().ok_or(Fail::Status(-1.0))?;
+        let nurb = bs.gw_nurb().ok_or_else(|| Fail::Status(-1.0))?;
         o.push(nurb.cpts().len() as f64);
         for p in nurb.cpts() {
             o.extend([p.x, p.y, p.z, p.w]);

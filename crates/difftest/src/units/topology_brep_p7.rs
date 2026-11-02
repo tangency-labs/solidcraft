@@ -1583,7 +1583,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         let (op, path, input) = encode(&r)?;
         let brep_op = matches!(op, Op::Glue | Op::Copy | Op::MergeSelf);
         let counts = built.as_ref().map(crate::own_builder::counts);
-        if let Some(c) = counts.or((!brep_op).then_some([0; 10])) {
+        if let Some(c) = counts.or_else(|| (!brep_op).then_some([0; 10])) {
             ffi::validate(op, &path, &input, &c).map_err(|e| harness(e.to_string()))?;
         }
     }

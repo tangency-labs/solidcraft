@@ -1236,7 +1236,9 @@ fn run_corpus_inner(root: &Path, opts: &CorpusOptions) -> Result<(), HarnessErro
                 b["verdict"] = json!(v);
                 b["detail"] = detail;
                 for (si, side) in sides().iter().enumerate() {
-                    b[*side] = side_summary(res.get(si).unwrap_or(&Err("not run".into())));
+                    b[*side] = res
+                        .get(si)
+                        .map_or_else(|| side_summary(&Err("not run".into())), side_summary);
                 }
             }
         }

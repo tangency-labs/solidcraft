@@ -155,24 +155,19 @@ const MAX_UNDEF_ARRAY: usize = 1 << 20;
 
 /// `(n+1)^3`, the size of an evaluation array of highest derivative `n`.
 fn eval_size(n: usize, operation: &'static str) -> Result<usize> {
-    let n1 = n.checked_add(1).ok_or(SolidError::invalid_input(
-        operation,
-        "derivative order overflows",
-    ))?;
+    let n1 = n
+        .checked_add(1)
+        .ok_or_else(|| SolidError::invalid_input(operation, "derivative order overflows"))?;
     n1.checked_mul(n1)
         .and_then(|s| s.checked_mul(n1))
-        .ok_or(SolidError::invalid_input(
-            operation,
-            "derivative order overflows",
-        ))
+        .ok_or_else(|| SolidError::invalid_input(operation, "derivative order overflows"))
 }
 
 /// Element `i` of an evaluation array.
 fn at(a: &[Vec3], i: usize, operation: &'static str) -> Result<Vec3> {
-    a.get(i).copied().ok_or(SolidError::invalid_input(
-        operation,
-        "evaluation array too short",
-    ))
+    a.get(i)
+        .copied()
+        .ok_or_else(|| SolidError::invalid_input(operation, "evaluation array too short"))
 }
 
 /// The position of a simple map's evaluation (`EvaluatePointSimple` of a

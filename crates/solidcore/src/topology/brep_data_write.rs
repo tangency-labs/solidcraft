@@ -607,7 +607,9 @@ pub fn write_surface_to_db(
         } else {
             db.write_double(distance);
         }
-        let base = off.extended_base_surface().unwrap_or(off.base_surface());
+        let base = off
+            .extended_base_surface()
+            .unwrap_or_else(|| off.base_surface());
         let b = bspline_surface_part(base)?.ok_or_else(|| SolidError::null_pointer(OP_SURFACE))?;
         b.write_to_db(db, version)?;
     } else {

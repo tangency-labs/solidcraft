@@ -922,7 +922,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: Op, a: &[f64]) -> Result<Vec<f6
             ))?;
             out.push(s);
             out.push(idx(r.as_ref().and_then(|x| x.region), RegionId::index));
-            out.push(r.map_or(f64::from(PointClassType::Unknown as i32), |x| {
+            out.push(r.map_or_else(|| f64::from(PointClassType::Unknown as i32), |x| {
                 f64::from(x.intersection.point_class() as i32)
             }));
         }

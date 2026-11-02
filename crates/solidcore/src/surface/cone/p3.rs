@@ -629,9 +629,10 @@ impl Cone {
         let box1 = bbox(k, self, domain)?;
         let mut box2 = bbox(k, other, other_domain)?;
         let size = box2.size();
-        let tol = approx_tol.map_or(EFF_ZERO_SQRT * (1.0 + size.length()), |t| {
-            approx_tol3d(k, t)
-        });
+        let tol = approx_tol.map_or_else(
+            || EFF_ZERO_SQRT * (1.0 + size.length()),
+            |t| approx_tol3d(k, t),
+        );
         box2.expand_absolute(tol);
         if box1.are_disjoint(&box2, 0.0) {
             return Ok(false);

@@ -761,7 +761,7 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
             .get(index)
             .copied()
             .flatten()
-            .ok_or(null_node("geom::global_solver::GlobalSolver::tree"))
+            .ok_or_else(|| null_node("geom::global_solver::GlobalSolver::tree"))
     }
 
     /// The node of `branch` in tree `index` (`apBranch[index]`).
@@ -772,7 +772,11 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
     /// tree does not hold.
     pub fn branch_node(&self, branch: &Branch, index: usize) -> Result<&'t TreeNode<O>> {
         const OP: &str = "geom::global_solver::GlobalSolver::branch_node";
-        let id = branch.get(index).copied().flatten().ok_or(null_node(OP))?;
+        let id = branch
+            .get(index)
+            .copied()
+            .flatten()
+            .ok_or_else(|| null_node(OP))?;
         self.tree(index)?.node(id)
     }
 
@@ -787,7 +791,7 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
         const OP: &str = "geom::global_solver::GlobalSolver::child";
         let node = self.branch_node(branch, index)?;
         let id = if second { node.child2 } else { node.child1 };
-        self.tree(index)?.node(id.ok_or(null_node(OP))?)
+        self.tree(index)?.node(id.ok_or_else(|| null_node(OP))?)
     }
 
     /// `SmGlobalSolver::BranchMayContainAnswers`: false when the node boxes of
@@ -1204,7 +1208,11 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
         // along the normal by both the min and max distances,
         // then we will catch any case that could 'intersect'.
         // But we have to sample the surface curve.
-        let node2 = branch.get(1).copied().flatten().ok_or(null_node(OP))?;
+        let node2 = branch
+            .get(1)
+            .copied()
+            .flatten()
+            .ok_or_else(|| null_node(OP))?;
         if self.tree(1)?.node_owner_object(node2)?.is_none() {
             return Ok(false);
         }
@@ -1946,7 +1954,7 @@ pub trait GlobalSolve<'t, O: SolutionObject + 't> {
         s.check_num_trees(OP)?;
         let mut start_branch: Branch = [None; MAX_SOLVER_TREES];
         for (i, slot) in start_branch.iter_mut().enumerate().take(s.num_trees) {
-            *slot = Some(s.tree(i)?.top_node().ok_or(null_node(OP))?);
+            *slot = Some(s.tree(i)?.top_node().ok_or_else(|| null_node(OP))?);
         }
 
         // bound the SolveBranch recursion (not upstream: see MAX_SOLVE_DEPTH)

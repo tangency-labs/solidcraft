@@ -2236,8 +2236,8 @@ impl Ellipse {
             (that_c.position, that_c.radius_x, that_c.radius_y);
 
         // Get a tolerance to use.
-        let tol =
-            gap_tol.unwrap_or(max2(self.x_radius(), self.y_radius()) * EFF_ZERO_SQRT * 1000.0);
+        let tol = gap_tol
+            .unwrap_or_else(|| max2(self.x_radius(), self.y_radius()) * EFF_ZERO_SQRT * 1000.0);
 
         // Same curve? Geometry checks:
         if (rad1_this - rad1_that).abs() > tol {

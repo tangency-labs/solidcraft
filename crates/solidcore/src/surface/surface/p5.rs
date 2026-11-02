@@ -153,7 +153,7 @@ fn at(m: &[Vec<Vec3>], i: usize, j: usize, op: &'static str) -> Result<Vec3> {
     m.get(i)
         .and_then(|r| r.get(j))
         .copied()
-        .ok_or(SolidError::invalid_input(op, "evaluation result too short"))
+        .ok_or_else(|| SolidError::invalid_input(op, "evaluation result too short"))
 }
 
 // ---- IsSingularity ----------------------------------------------------------------------------
@@ -2376,12 +2376,12 @@ fn surface_identical_solutions<O: SolutionObject>(
         // evaluated are not shown the same, WR-663, tangency-labs/smlib 21dcf69).
         let not_shown = k.fixes.query_statuses_pass_on;
         let Some(pt1) =
-            ignored(surf.evaluate_point(k, uv1))?.or((!not_shown).then_some(Vec3::UNDEF))
+            ignored(surf.evaluate_point(k, uv1))?.or_else(|| (!not_shown).then_some(Vec3::UNDEF))
         else {
             return Ok((SolutionPairType::DiffParameters, None));
         };
         let Some(pt2) =
-            ignored(surf.evaluate_point(k, uv2))?.or((!not_shown).then_some(Vec3::UNDEF))
+            ignored(surf.evaluate_point(k, uv2))?.or_else(|| (!not_shown).then_some(Vec3::UNDEF))
         else {
             return Ok((SolutionPairType::DiffParameters, None));
         };

@@ -373,10 +373,9 @@ fn seam_frame(frame: &sm::Frame, points: &[Point3], seam: Option<Point3>) -> sm:
             let mut largest = 0.0_f64;
             let mut middle = 0.0_f64;
             for (index, &angle) in angles.iter().enumerate() {
-                let next = angles
-                    .get(index + 1)
-                    .copied()
-                    .unwrap_or(angles.first().copied().unwrap_or(angle) + std::f64::consts::TAU);
+                let next = angles.get(index + 1).copied().unwrap_or_else(|| {
+                    angles.first().copied().unwrap_or(angle) + std::f64::consts::TAU
+                });
                 let gap = (next - angle).rem_euclid(std::f64::consts::TAU);
                 if gap > largest {
                     largest = gap;

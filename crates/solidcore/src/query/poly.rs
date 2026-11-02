@@ -633,13 +633,15 @@ const fn nested_composite(operation: &'static str) -> SolidError {
 }
 
 fn slot<'a, T>(v: &'a [Option<T>], i: u32, op: &'static str) -> Result<&'a T> {
-    v.get(i as usize).and_then(Option::as_ref).ok_or(dead(op))
+    v.get(i as usize)
+        .and_then(Option::as_ref)
+        .ok_or_else(|| dead(op))
 }
 
 fn slot_mut<'a, T>(v: &'a mut [Option<T>], i: u32, op: &'static str) -> Result<&'a mut T> {
     v.get_mut(i as usize)
         .and_then(Option::as_mut)
-        .ok_or(dead(op))
+        .ok_or_else(|| dead(op))
 }
 
 fn push_slot<T>(v: &mut Vec<Option<T>>, item: T, op: &'static str) -> Result<u32> {
@@ -1338,7 +1340,9 @@ impl PolyBrep {
     }
 
     fn edge_vertex(&self, e: PolyEdgeId, op: &'static str) -> Result<PolyVertexId> {
-        self.edge(e)?.vertex.ok_or(SolidError::null_pointer(op))
+        self.edge(e)?
+            .vertex
+            .ok_or_else(|| SolidError::null_pointer(op))
     }
 
     /// The poly vertex record `v`.
@@ -1682,7 +1686,7 @@ impl PolyBrep {
             if out.len() > self.edge_slots.len() {
                 return Err(SolidError::sm_err(op));
             }
-            e = self.edge(e)?.next_at_v.ok_or(dead(op))?;
+            e = self.edge(e)?.next_at_v.ok_or_else(|| dead(op))?;
             if e == h {
                 break;
             }

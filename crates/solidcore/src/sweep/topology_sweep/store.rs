@@ -519,7 +519,7 @@ impl<'a> SweepStore<'a> {
         self.attributes.absorb(own, &|key| {
             crate::topology::loopuse::entity_of_notify_key(key)
                 .map(|e| identities.object(namespace, e).key)
-                .ok_or(invalid("attribute list names no object"))
+                .ok_or_else(|| invalid("attribute list names no object"))
         })
     }
 

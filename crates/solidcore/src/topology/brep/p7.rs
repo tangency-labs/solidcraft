@@ -897,7 +897,7 @@ fn make_face_transfer_attempt_with_state(
         face: None,
     };
     transfer.owned_surface()?;
-    let region = region.or(b.infinite_region());
+    let region = region.or_else(|| b.infinite_region());
     let old_owner = transfer.owned_surface()?.owner();
     let options = p6::FaceTopologyOptions {
         region,
@@ -1333,7 +1333,7 @@ fn make_face_with_curves_transfer_impl(
         return Err(SolidError::invalid_input(OP, "no loops"));
     }
     // GetInfiniteRegion() (an inline field read; NULL when unset)
-    let region = region.or(b.infinite_region());
+    let region = region.or_else(|| b.infinite_region());
     // (the surface tests return flags upstream: a failed test is "no")
     if ignored(surface.is_degenerate_curve(k, EFF_ZERO_DEG, None, DEGENERATE_TOL_3D))?
         .unwrap_or(false)

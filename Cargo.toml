@@ -33,6 +33,8 @@ indexing_slicing = "deny"
 todo = "deny"
 unimplemented = "deny"
 dbg_macro = "deny"
+# Eager `ok_or(SolidError::unported(..))` built every error on every call (batch 50b).
+or_fun_call = "warn"
 # Justified pedantic allows (port fidelity):
 # - upstream compares doubles exactly (e.g. against SM_UNDEF_DOUBLE); keep its semantics
 float_cmp = "allow"

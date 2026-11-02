@@ -1222,7 +1222,10 @@ fn gen_case(k: &Kernel, rng: &mut Rng) -> OpIn {
         3..=7 => {
             let cci = gen_cci(k, rng);
             let (leaf1, leaf2) = if rng.chance(0.8) {
-                overlapping_leaves(rng, &cci).unwrap_or((rng.below(64), rng.below(64)))
+                // (the fallback draws stay eager: they advance rng in this order)
+                let found = overlapping_leaves(rng, &cci);
+                let fallback = (rng.below(64), rng.below(64));
+                found.unwrap_or(fallback)
             } else {
                 (rng.below(64), rng.below(64))
             };
