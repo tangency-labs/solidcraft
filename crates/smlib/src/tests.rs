@@ -155,7 +155,7 @@ static DUMP_DIR_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 const CPP_ONLY: [&str; 8] = ["init", "new", "get_i64", "get_f64", "set_i64", "set_f64", "import", "export"];
 
 /// Entry points that ask no kernel, so have nothing to say here.
-const NO_KERNEL: [&str; 10] = [
+const NO_KERNEL: [&str; 11] = [
     "inertia_tensor",
     "is_valid",
     "failed_tests",
@@ -166,6 +166,8 @@ const NO_KERNEL: [&str; 10] = [
     "to_native_report",
     "to_native_ordered",
     "blends",
+    // The last refusal's fit, read after it: on solidcore, none yet.
+    "blend_fit",
 ];
 
 const ANSWERING: [&str; 62] = [
