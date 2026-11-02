@@ -18,6 +18,7 @@
 //! for equal t).
 
 use super::certificate::{arc_rows, gn_certify_span, law_series, GnLaw, GnVarying, NurbsCurve};
+use super::definition_box::{definition_enclosable, gn_def_face_of, GnDefs};
 use super::form::{gn_form, gn_form_normalized, hermite_knots, hermite_points_sided};
 use super::series::{Ser, Trunc, VSer};
 use super::station::{
@@ -1230,21 +1231,39 @@ impl GnSectionFsg {
         law: Option<&GnLaw<'_>>,
     ) -> Result<(Vec<GnStation>, f64, usize)> {
         let mut nurbs = Vec::new();
-        for f in faces {
-            let Some(bs) = super::station::as_b_spline(k, f)? else {
+        // a face that is a blend by its definition: its definition enclosed over the
+        // certificate's boxes (definition_partials_over_box), its net's knots its stations
+        // (c5b6bb7, WR-714)
+        let mut defs = GnDefs::default();
+        for (f, face) in faces.into_iter().enumerate() {
+            let Some(bs) = super::station::as_b_spline(k, face)? else {
                 // "a face that is not a NURBS surface: its blend of order 2 and up cannot
                 // be certified"
                 return Err(SolidError::sm_err(OP));
             };
-            // a blend by its definition is enclosed only on its net, which is not the
-            // surface the feet are solved on (4a10ed8): "a face that is a blend by its
-            // definition: a blend of order 2 and up on it cannot be certified until its
-            // definition is enclosed"
-            if matches!(f.kind(), SurfaceKind::ProceduralBlend(_)) {
-                return Err(SolidError::sm_err(OP));
+            if matches!(face.kind(), SurfaceKind::ProceduralBlend(_)) {
+                // the certificate takes the face's partials to total order 7 in a round of
+                // one radius (its fourth s-derivatives' Taylor form, gn_fourth_over), which
+                // the definition's feet's series hold (SM_GN_MAXS); a law's touch circle,
+                // or a G^n section, takes more: "a face that is a blend by its definition:
+                // only a round of one radius is certified on it, and only on a round of one
+                // radius between NURBS faces". Without WR-714 a blend by its definition is
+                // enclosed only on its net, which is not the surface the feet are solved on
+                // (4a10ed8)
+                let enclosed = k.fixes.fillet_round_on_round_as_definition
+                    && self.order == 1
+                    && law.is_none()
+                    && definition_enclosable(face);
+                if !enclosed {
+                    return Err(SolidError::sm_err(OP));
+                }
+                if let Some(slot) = defs.faces.get_mut(f) {
+                    *slot = Some(gn_def_face_of(k, face)?);
+                }
             }
             nurbs.push(Nurbs::of(&bs)?);
         }
+        let any_defs = defs.faces.iter().any(Option::is_some);
         let (Some(n0), Some(n1)) = (nurbs.first(), nurbs.get(1)) else {
             return Err(SolidError::sm_err(OP));
         };
@@ -1415,6 +1434,7 @@ impl GnSectionFsg {
                         target,
                         if equal_area { Some(&mut vary) } else { None },
                         law,
+                        if any_defs { Some(&mut defs) } else { None },
                     )?;
                 }
                 let within = *bj <= target;

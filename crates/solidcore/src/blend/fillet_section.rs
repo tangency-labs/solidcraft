@@ -50,6 +50,10 @@
 //! | [`section::GnSectionFsg::contact_order_at`] | `ContactOrderAt` |
 //! | [`section::ArcSection`], [`section::GnSectionFsg::circle`], [`section::GnSectionFsg::build_with_radius`] | `SmArcSection`, `SmGnSectionFSG(const SmArcSection &)` (3aae1c4), `Build`'s `dRadius` and its order 1 (cc08236) |
 //! | [`certificate::arc_rows`], [`certificate::arc_row_terms_over`] | `sm_ArcRows`, `sm_ArcRowTermsOver` (cc08236) |
+//! | [`definition::T2Of`], [`definition::TvOf`], [`definition::T2Scalar`] | `sm_T2Of`, `sm_TVT`, `sm_PositiveFinite`, `sm_PowOf` (c5b6bb7: `sm_T2` and `sm_TV` over `double` or `sm_Ivl`) |
+//! | [`certificate::SpanAt`], [`certificate::gn_enclose_over`], [`certificate::face_partials_over`] | `sm_GnSpanAt`, `sm_GnEncloseOver`, `sm_FacePartialsOver` (c5b6bb7) |
+//! | [`definition_box`] | `sm_GnDefPiece`, `sm_GnDefFace`, `sm_GnDefs`, `sm_DefinitionEnclosable`, `sm_GnDefFaceOf`, `sm_DefPieceAt`, `sm_BernTaylorOver`, `sm_DefinitionPartialsNaive`, `sm_DefinitionPartialsOverBox` (c5b6bb7) |
+//! | [`station::feet_on_knots`] | `sm_FeetOnKnots` (c5b6bb7) |
 //!
 //! Deviations:
 //! - **The equal area thumbweight.** Resolved at every station (the fork's 7102bc5), so
@@ -84,6 +88,7 @@
 
 pub mod certificate;
 pub mod definition;
+pub mod definition_box;
 pub mod form;
 pub mod interval;
 pub mod section;

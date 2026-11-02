@@ -19,6 +19,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+use crate::nurbs::knots::Side;
 use crate::nurbs::math::NOW;
 use crate::surface::surface::{Surface, SurfaceKind};
 
@@ -487,11 +488,14 @@ pub fn surface_partials_sided(
         let kv = sided_span(&n.v, n.q, n.nv, uv.y, sides[1]);
         return Ok(nurbs_partials(&n, ku, kv, uv.x, uv.y, lk));
     }
-    // Evaluate(crUV, lK, lK, TRUE, TRUE, TRUE, sD, FALSE)
+    // Evaluate(crUV, lK, lK, lSideU >= 0, lSideV >= 0, TRUE, sD, FALSE): a side, the upper
+    // interval of a parameter (FromLeft TRUE) or the lower one (c5b6bb7)
+    let side_of = |q: i32| if q < 0 { Side::Right } else { Side::Left };
     let flags = EvaluateFlags {
+        u_side: side_of(sides[0]),
+        v_side: side_of(sides[1]),
         only_upper_half: true,
         non_zero_tangents: false,
-        ..EvaluateFlags::default()
     };
     let d = s.evaluate(k, uv, lk, lk, flags)?;
     let mut out = Partials::default();
@@ -1153,6 +1157,76 @@ fn solve_station_body(
         },
         curves,
     ))
+}
+
+/// `sm_FeetOnKnots` (c5b6bb7): the feet `x` of a station that stand on a knot line of
+/// their face (within the margin a crossing station is placed by, `Build`'s), moving
+/// along s as `dir` says, where the face's partials to order `partials` differ on the
+/// line's two sides (it is `C^(p - multiplicity)` there): the side of that line each foot
+/// coordinate is taken on (+-1, [`sided_span`]'s; 0 off such a line), the piece it moves
+/// into as s grows, or with `before` the one it comes from; and whether some foot's side
+/// is not the piece a solve without sides takes there (the span the foot's value is in,
+/// [`span`]'s), so that the station is solved again with these sides.
+///
+/// # Errors
+///
+/// Those of a face's NURB and its knots.
+pub fn feet_on_knots(
+    k: &Kernel,
+    faces: [&Surface; 2],
+    x: [f64; 4],
+    dir: [f64; 4],
+    before: bool,
+    partials: usize,
+) -> Result<([i32; 4], bool)> {
+    let mut sides = [0_i32; 4];
+    let mut other = false;
+    for (f, face) in faces.into_iter().enumerate() {
+        // SM_CAST_PTR(SmBSplineSurface, apFace[f]) (a blend by its definition: its net)
+        let Some(bs) = as_b_spline(k, face)? else {
+            continue;
+        };
+        for c in 0..2 {
+            let param = if c == 0 {
+                SurfParamType::U
+            } else {
+                SurfParamType::V
+            };
+            // GetKnotsPointers' full knot vector
+            let (knots, mult) = bs.knots(param, None)?;
+            let kv = full_knots(&knots, &mult);
+            let ord = bs.degree(param) + 1;
+            let q = 2 * f + c;
+            let xq = x.get(q).copied().unwrap_or(f64::NAN);
+            let mut m = ord;
+            while m + ord < kv.len() {
+                let km = knot(&kv, m as isize);
+                if (xq - km).abs() <= 1.0e-9 * (1.0 + km.abs()) {
+                    // the face is C^(p - multiplicity) across the line: partials to that
+                    // order agree on its sides
+                    let mult_m = kv.iter().filter(|&&kj| kj == km).count();
+                    let smooth = (partials as i64) <= (ord as i64 - 1) - mult_m as i64;
+                    if smooth {
+                        break;
+                    }
+                    let d = dir.get(q).copied().unwrap_or(f64::NAN);
+                    let mut side = if d < 0.0 { -1 } else { 1 };
+                    if before {
+                        side = -side;
+                    }
+                    if let Some(sq) = sides.get_mut(q) {
+                        *sq = side;
+                    }
+                    if (side < 0 && xq >= km) || (side > 0 && xq < km) {
+                        other = true;
+                    }
+                    break;
+                }
+                m += 1;
+            }
+        }
+    }
+    Ok((sides, other))
 }
 
 /// A unit vector check helper for tests and callers: `Vec3` of a `V3<f64>`.

@@ -11,12 +11,13 @@
 //!
 //! | Rust                                  | Fork (`SmFilletSection.cpp`)                     |
 //! |---------------------------------------|--------------------------------------------------|
-//! | [`T2`] and its operators              | `sm_T2`, `operator+ - *`                         |
+//! | [`T2Of`], [`T2`] and their operators  | `sm_T2Of`, `sm_T2`, `operator+ - *`, `sm_T2Scale` (c5b6bb7: over `double` or `sm_Ivl`) |
+//! | [`T2Scalar`]                          | `sm_PositiveFinite`, `sm_PowOf` (c5b6bb7)        |
 //! | [`t2_pow`]                            | `sm_T2Pow`                                       |
-//! | [`Tv`] and its operators, [`tv_dot`], [`tv_of`] | `sm_TV`, `sm_TVZero`, `operator+ - *`, `sm_TVDot`, `sm_TVOf` |
+//! | [`TvOf`], [`Tv`] and their operators, [`tv_dot`], [`tv_of`] | `sm_TVT`, `sm_TV`, `sm_TVZeroOf`, `operator+ - *`, `sm_TVScale`, `sm_TVDot`, `sm_TVOf` |
 //! | [`bern_taylor`]                       | `sm_BernTaylor`                                  |
 //! | [`StationMemo`], [`STATION_MEMO`]     | `sm_StationMemo`, `t_asMemo`, `t_lMemoNext`, `SM_STATION_MEMO` |
-//! | [`evaluate_definition`]               | `SmProceduralBlend::EvaluateDefinition`          |
+//! | [`evaluate_definition`]               | `SmProceduralBlend::EvaluateDefinition` (its `bBefore`, c5b6bb7) |
 //!
 //! Deviations:
 //! - **The memo.** The fork's `thread_local` 4-slot memo is a field of
@@ -35,10 +36,11 @@
 use core::cmp::Ordering;
 
 use super::form::{gn_form, gn_form_t, Bern};
+use super::interval::Ivl;
 use super::section::gn_equal_area_w;
 use super::series::{Ser, Trunc, VSer, MAX_E, MAX_K, MAX_S};
-use super::station::{gn_solve_station_with, GnStation, StationOptions};
-use super::tay::{gn_area_sum, gn_half_angle, gn_invert, gn_target, gn_wedge_cos, Tay, TAY};
+use super::station::{feet_on_knots, gn_solve_station_with, GnStation, StationOptions};
+use super::tay::{gn_area_sum, gn_half_angle, gn_invert, gn_target, gn_wedge_cos, Ring, Tay, TAY};
 use crate::error::{Result, SolidError};
 use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
@@ -46,37 +48,89 @@ use crate::surface::procedural_blend::{count_evaluation, count_solve, Procedural
 
 const OP: &str = "blend::fillet_section::definition::evaluate_definition";
 
-/// `sm_T2`: a truncated Taylor series in `(sigma, dt)` of orders `(s, e)`:
-/// `c[i (e + 1) + j]` the coefficient of `sigma^i dt^j`.
-#[derive(Clone, Debug, PartialEq)]
-pub struct T2 {
-    s: usize,
-    e: usize,
-    c: Vec<f64>,
+/// The number type of `sm_T2Of`'s template (c5b6bb7): `double`, or `sm_Ivl` for a
+/// definition enclosed over a box.
+pub trait T2Scalar: Ring {
+    /// `sm_PositiveFinite`: positive and finite (every number in it, for an interval).
+    fn positive_finite(self) -> bool;
+    /// `sm_PowOf`: `x^p` (`smos_Pow`); for an interval, p one of -1, -1/2 and 1/2 (the
+    /// whole line for any other).
+    #[must_use]
+    fn pow_of(self, p: f64) -> Self;
 }
 
-impl T2 {
-    /// `sm_T2(lS, lE, d)`: the constant d.
+impl T2Scalar for f64 {
+    fn positive_finite(self) -> bool {
+        self > 0.0 && self.is_finite()
+    }
+    fn pow_of(self, p: f64) -> Self {
+        self.powf(p)
+    }
+}
+
+impl T2Scalar for Ivl {
+    fn positive_finite(self) -> bool {
+        self.lo > 0.0 && self.hi.is_finite()
+    }
+    fn pow_of(self, p: f64) -> Self {
+        if p == -1.0 {
+            return Ivl::from(1.0) / self;
+        }
+        if p == 0.5 {
+            return self.sqrt();
+        }
+        if p == -0.5 {
+            return Ivl::from(1.0) / self.sqrt();
+        }
+        Ivl::whole()
+    }
+}
+
+/// `sm_T2Of`: a truncated Taylor series in `(sigma, dt)` of orders `(s, e)`:
+/// `c[i (e + 1) + j]` the coefficient of `sigma^i dt^j`, kept to total order `n` (`s + e`
+/// unless truncated; the coefficients past it are zero, c5b6bb7).
+#[derive(Clone, Debug, PartialEq)]
+pub struct T2Of<Z> {
+    s: usize,
+    e: usize,
+    n: usize,
+    c: Vec<Z>,
+}
+
+/// `sm_T2`: [`T2Of`] in doubles.
+pub type T2 = T2Of<f64>;
+
+impl<Z: Ring> T2Of<Z> {
+    /// `sm_T2Of(lS, lE, d)`: the constant d, kept to total order `s + e`.
     #[must_use]
-    pub fn new(s: usize, e: usize, d: f64) -> Self {
-        let mut c = vec![0.0; (s + 1) * (e + 1)];
+    pub fn new(s: usize, e: usize, d: Z) -> Self {
+        Self::with_order(s, e, d, s + e)
+    }
+
+    /// `sm_T2Of(lS, lE, d, lN)`: the constant d, kept to total order `n`.
+    #[must_use]
+    pub fn with_order(s: usize, e: usize, d: Z, n: usize) -> Self {
+        let mut c = vec![Z::lift(0.0); (s + 1) * (e + 1)];
         if let Some(c0) = c.first_mut() {
             *c0 = d;
         }
-        Self { s, e, c }
+        Self { s, e, n, c }
     }
 
     /// `at(i, j)`: the coefficient of `sigma^i dt^j` (0 past the orders).
     #[must_use]
-    pub fn at(&self, i: usize, j: usize) -> f64 {
+    pub fn at(&self, i: usize, j: usize) -> Z {
         if i > self.s || j > self.e {
-            return 0.0;
+            return Z::lift(0.0);
         }
-        self.c.get(i * (self.e + 1) + j).copied().unwrap_or(0.0)
+        self.c
+            .get(i * (self.e + 1) + j)
+            .copied()
+            .unwrap_or_else(|| Z::lift(0.0))
     }
 
     /// Sets the coefficient of `sigma^i dt^j` (ignored past the orders).
-    pub fn set(&mut self, i: usize, j: usize, v: f64) {
+    pub fn set(&mut self, i: usize, j: usize, v: Z) {
         if i > self.s || j > self.e {
             return;
         }
@@ -87,14 +141,14 @@ impl T2 {
 
     /// The constant term `c[0]`.
     #[must_use]
-    pub fn constant(&self) -> f64 {
-        self.c.first().copied().unwrap_or(0.0)
+    pub fn constant(&self) -> Z {
+        self.c.first().copied().unwrap_or_else(|| Z::lift(0.0))
     }
 
     /// `a + b` (a's orders).
     #[must_use]
     pub fn add(&self, b: &Self) -> Self {
-        let mut r = Self::new(self.s, self.e, 0.0);
+        let mut r = Self::with_order(self.s, self.e, Z::lift(0.0), self.n);
         for ((x, &p), &q) in r.c.iter_mut().zip(&self.c).zip(b.c.iter()) {
             *x = p + q;
         }
@@ -104,36 +158,38 @@ impl T2 {
     /// `a - b` (a's orders).
     #[must_use]
     pub fn sub(&self, b: &Self) -> Self {
-        let mut r = Self::new(self.s, self.e, 0.0);
+        let mut r = Self::with_order(self.s, self.e, Z::lift(0.0), self.n);
         for ((x, &p), &q) in r.c.iter_mut().zip(&self.c).zip(b.c.iter()) {
             *x = p - q;
         }
         r
     }
 
-    /// `a * d`.
+    /// `sm_T2Scale`: `a * d`.
     #[must_use]
-    pub fn scale(&self, d: f64) -> Self {
-        let mut r = Self::new(self.s, self.e, 0.0);
+    pub fn scale(&self, d: Z) -> Self {
+        let mut r = Self::with_order(self.s, self.e, Z::lift(0.0), self.n);
         for (x, &p) in r.c.iter_mut().zip(&self.c) {
             *x = p * d;
         }
         r
     }
 
-    /// `a * b`, truncated at a's orders.
+    /// `a * b`, truncated at a's orders and its total order.
     #[must_use]
     pub fn mul(&self, b: &Self) -> Self {
-        let mut r = Self::new(self.s, self.e, 0.0);
+        let mut r = Self::with_order(self.s, self.e, Z::lift(0.0), self.n);
         for i in 0..=self.s {
-            for j in 0..=self.e {
-                let mut d = 0.0;
+            let mut j = 0;
+            while j <= self.e && i + j <= self.n {
+                let mut d = Z::lift(0.0);
                 for i1 in 0..=i {
                     for j1 in 0..=j {
-                        d += self.at(i1, j1) * b.at(i - i1, j - j1);
+                        d = d + self.at(i1, j1) * b.at(i - i1, j - j1);
                     }
                 }
                 r.set(i, j, d);
+                j += 1;
             }
         }
         r
@@ -142,44 +198,52 @@ impl T2 {
 
 /// `sm_T2Pow`: `x^p` for a series whose constant term is positive: `x0^p (1 + z)^p`,
 /// `z = x / x0 - 1`, summed as the binomial series in z, which has no constant term (so
-/// `S + E` terms are all there are).
+/// its total order's terms are all there are).
 ///
 /// # Errors
 ///
 /// `SM_ERR` where the constant term is not positive and finite ("its section
 /// degenerates at this point (a weight or a length is zero)").
-pub fn t2_pow(x: &T2, p: f64) -> Result<T2> {
+pub fn t2_pow<Z: T2Scalar>(x: &T2Of<Z>, p: f64) -> Result<T2Of<Z>> {
     let x0 = x.constant();
-    if !(x0 > 0.0 && x0.is_finite()) {
+    if !x0.positive_finite() {
         return Err(SolidError::sm_err(OP));
     }
-    let mut z = x.scale(1.0 / x0);
-    z.set(0, 0, 0.0);
-    let mut pow = T2::new(x.s, x.e, 1.0);
-    let mut sum = T2::new(x.s, x.e, 1.0);
-    let mut binom = 1.0_f64;
-    for m in 1..=(x.s + x.e) {
-        binom *= (p - (m - 1) as f64) / m as f64;
+    let mut z = x.scale(Z::lift(1.0) / x0);
+    z.set(0, 0, Z::lift(0.0));
+    let mut pow = T2Of::with_order(x.s, x.e, Z::lift(1.0), x.n);
+    let mut sum = T2Of::with_order(x.s, x.e, Z::lift(1.0), x.n);
+    let mut binom = Z::lift(1.0);
+    for m in 1..=x.n {
+        binom = binom * (Z::lift(p - (m - 1) as f64) / Z::lift(m as f64));
         pow = pow.mul(&z);
         sum = sum.add(&pow.scale(binom));
     }
-    Ok(sum.scale(x0.powf(p)))
+    Ok(sum.scale(x0.pow_of(p)))
 }
 
-/// `sm_TV`: a vector of three [`T2`]s.
+/// `sm_TVT`: a vector of three [`T2Of`]s.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Tv {
+pub struct TvOf<Z> {
     /// The x, y and z series.
-    pub a: [T2; 3],
+    pub a: [T2Of<Z>; 3],
 }
 
-impl Tv {
-    /// `sm_TVZero`: zero, of orders `(s, e)`.
+/// `sm_TV`: [`TvOf`] in doubles.
+pub type Tv = TvOf<f64>;
+
+impl<Z: Ring> TvOf<Z> {
+    /// `sm_TVZeroOf`: zero, of orders `(s, e)`.
     #[must_use]
     pub fn zero(s: usize, e: usize) -> Self {
-        Self {
-            a: [T2::new(s, e, 0.0), T2::new(s, e, 0.0), T2::new(s, e, 0.0)],
-        }
+        Self::zero_with_order(s, e, s + e)
+    }
+
+    /// Zero, of orders `(s, e)` kept to total order `n`.
+    #[must_use]
+    pub fn zero_with_order(s: usize, e: usize, n: usize) -> Self {
+        let z = || T2Of::with_order(s, e, Z::lift(0.0), n);
+        Self { a: [z(), z(), z()] }
     }
 
     /// `p + q`.
@@ -204,16 +268,16 @@ impl Tv {
 
     /// `p * s`, s a series.
     #[must_use]
-    pub fn times(&self, s: &T2) -> Self {
+    pub fn times(&self, s: &T2Of<Z>) -> Self {
         let [a0, a1, a2] = &self.a;
         Self {
             a: [a0.mul(s), a1.mul(s), a2.mul(s)],
         }
     }
 
-    /// `p * d`.
+    /// `p * d` (`sm_TVScale`).
     #[must_use]
-    pub fn scale(&self, d: f64) -> Self {
+    pub fn scale(&self, d: Z) -> Self {
         let [a0, a1, a2] = &self.a;
         Self {
             a: [a0.scale(d), a1.scale(d), a2.scale(d)],
@@ -223,7 +287,7 @@ impl Tv {
 
 /// `sm_TVDot`: `p.a[0] q.a[0] + p.a[1] q.a[1] + p.a[2] q.a[2]`.
 #[must_use]
-pub fn tv_dot(p: &Tv, q: &Tv) -> T2 {
+pub fn tv_dot<Z: Ring>(p: &TvOf<Z>, q: &TvOf<Z>) -> T2Of<Z> {
     let [a0, a1, a2] = &p.a;
     let [b0, b1, b2] = &q.a;
     a0.mul(b0).add(&a1.mul(b1)).add(&a2.mul(b2))
@@ -301,6 +365,11 @@ struct MemoSlot {
     /// `ts`, `te`: the truncation it was solved to.
     ts: usize,
     te: usize,
+    /// `bBefore` (c5b6bb7): the station's partials on the side before s.
+    before: bool,
+    /// `bSided`: and they differ from the side after it (s is one of the definition's
+    /// stations).
+    sided: bool,
     /// `sStation`.
     station: Option<GnStation>,
     /// `bW`, `sW`: the station's equal area thumbweight series, once resolved.
@@ -320,6 +389,15 @@ pub struct StationMemo {
 
 /// `SmProceduralBlend::EvaluateDefinition`: the blend's definition at `(s, t)` and its
 /// partials to `ls` in s and `lt` in t: `d[i][j] = d^(i+j) S / ds^i dt^j`.
+///
+/// Where s is one of its stations (a support's knot line under a foot, a knot of the
+/// leader or the law) the definition is only as smooth as they are there: its partials on
+/// the side after s, or with `before` on the side before it (c5b6bb7). A foot on a knot
+/// line takes its support's partials on the piece it moves into along s (comes from, with
+/// `before`), the way the seed moves; the station is solved again with those sides where
+/// that is not the piece a solve without sides takes. With
+/// [`crate::kernel::UpstreamFixes::fillet_round_on_round_as_definition`] off, `before` is
+/// not taken and no station is solved again (fork 5e8c9c1, before c5b6bb7).
 ///
 /// One station solve: the feet by Newton from the seeds, then their series in s (and in
 /// tau for the G^n jets) order by order, as the G^n section's stations are built. The
@@ -343,9 +421,13 @@ pub fn evaluate_definition(
     t: f64,
     ls: usize,
     lt: usize,
+    before: bool,
 ) -> Result<Vec<Vec<Vec3>>> {
     let def = pb.definition();
     count_evaluation(k);
+    // the side of s (c5b6bb7): only with WR-714's flag; before it the side after s
+    let sides_taken = k.fixes.fillet_round_on_round_as_definition;
+    let before = before && sides_taken;
     let n = def.order as usize;
     // the station: the jets to order n in tau (G^n), or the rails and the centre one
     // order more in s (the circle's m')
@@ -371,7 +453,7 @@ pub fn evaluate_definition(
     let mut law_ser = Ser::constant(0.0_f64);
     let mut law: Option<&Ser<f64>> = None;
     if let Some(curve) = &def.law {
-        let d = curve.evaluate(s, ts, true, false)?;
+        let d = curve.evaluate(s, ts, !before, false)?;
         let mut fact = 1.0_f64;
         for i in 0..=ts {
             if i > 0 {
@@ -397,7 +479,12 @@ pub fn evaluate_definition(
     {
         let memo = k.blend_station_memo.borrow();
         for (m, e) in memo.slots.iter().enumerate() {
-            if e.serial == serial && e.s == s && e.ts == ts && e.te == te {
+            if e.serial == serial
+                && e.s == s
+                && e.ts == ts
+                && e.te == te
+                && (!e.sided || e.before == before)
+            {
                 at = e.station;
                 memo_w = e.w;
                 slot = Some(m);
@@ -415,20 +502,93 @@ pub fn evaluate_definition(
         // kept only once solved)
         let tol = 1.0e-9 * smax(1.0, l.length());
         // (its jets of order n and up the face curves' normal parts for n >= 2, 3bc54a4)
+        let top = if def.order >= 2 {
+            def.order as usize
+        } else {
+            0
+        };
         let opts = StationOptions {
             law,
-            top: if def.order >= 2 {
-                def.order as usize
-            } else {
-                0
-            },
+            top,
             sides: None,
-            before: false,
+            before,
         };
         let (solved, steps) =
             gn_solve_station_with(k, faces, &def.leader, s, seed, r, def.sides, tr, tol, opts);
         count_solve(k, steps);
-        let st = solved?.0;
+        let mut st = solved?.0;
+        let mut sided = false;
+        if sides_taken {
+            // a foot on a knot line of its support: the support's partials there on the
+            // piece the foot moves into along s (comes from, `before`), as the stations'
+            // series were taken; the way it moves is the seed's (the stations' feet and
+            // their s-derivatives, interpolated)
+            let mut dir = [0.0_f64; 4];
+            for (f, sd) in def.seeds.iter().enumerate() {
+                let w = sd.evaluate(s, 1, !before, false)?;
+                let w1 = w.get(1).copied().ok_or_else(|| SolidError::sm_err(OP))?;
+                if let Some(x) = dir.get_mut(2 * f) {
+                    *x = w1.x;
+                }
+                if let Some(x) = dir.get_mut(2 * f + 1) {
+                    *x = w1.y;
+                }
+            }
+            let on = st.x.map(|x| x.at(0, 0));
+            let (sides, other) = feet_on_knots(k, faces, on, dir, before, tr.s() + tr.e() + 1)?;
+            if other {
+                let opts = StationOptions {
+                    law,
+                    top,
+                    sides: Some(sides),
+                    before,
+                };
+                let (solved, steps) = gn_solve_station_with(
+                    k,
+                    faces,
+                    &def.leader,
+                    s,
+                    on,
+                    r,
+                    def.sides,
+                    tr,
+                    tol,
+                    opts,
+                );
+                count_solve(k, steps);
+                st = solved?.0;
+            }
+            // the side matters only at one of the definition's stations: a foot on a knot
+            // line, or s a knot of the leader or the law; elsewhere the station is the same
+            // from either side
+            sided = sides.iter().any(|&q| q != 0);
+            // (the leader's derivatives to order s + 1 enter, its unit tangent's; the law's
+            // to order s; a curve is C^(p - multiplicity) at a knot, its derivatives to
+            // that order the same either side)
+            let along = [(Some(&def.leader), ts + 1), (def.law.as_ref(), ts)];
+            for (curve, used) in along {
+                if sided {
+                    break;
+                }
+                let Some(curve) = curve else {
+                    continue;
+                };
+                let (knots, mult) = curve.knots(None)?;
+                let deg = curve.degree()?;
+                let mut m = 1;
+                while m + 1 < knots.len() && m < mult.len() {
+                    let (Some(&km), Some(&mm)) = (knots.get(m), mult.get(m)) else {
+                        break;
+                    };
+                    let on_knot = (s - km).abs() <= 1.0e-9 * (1.0 + km.abs());
+                    // used > p - multiplicity, in signed arithmetic
+                    if on_knot && used + mm > deg {
+                        sided = true;
+                    }
+                    m += 1;
+                }
+            }
+        }
         let mut memo = k.blend_station_memo.borrow_mut();
         let m = memo.next;
         memo.next = (memo.next + 1) % STATION_MEMO;
@@ -437,6 +597,8 @@ pub fn evaluate_definition(
             s,
             ts,
             te,
+            before,
+            sided,
             station: Some(st),
             w: None,
         };

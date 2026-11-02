@@ -2643,7 +2643,9 @@ impl CircularCrossSectionFsg {
     /// its definition, the order-1 section's `Build` with the rails and uv curves
     /// replaced ([`GnSectionFsg::build_given_ball`]), unless the rails or the centre line
     /// turn at a knot (`sm_FilletCurveCorners`: the pieces are built as before), a face is
-    /// not an offset of a NURBS surface (or is a blend by its definition), the circle is
+    /// not an offset of a NURBS surface (or is a blend by its definition, unless the ball is
+    /// of one radius, the face a round of one radius between NURBS faces and
+    /// `fixes.fillet_round_on_round_as_definition` on: c5b6bb7, WR-714), the circle is
     /// not exact (approximated, mirrored or the larger arc), the solver is neither a
     /// constant-radius one with one radius above the tolerance nor (0d43b4c, b8e3594) an
     /// edge's variable-radius one whose law is a B-spline or linear one, its base curve a
@@ -2671,6 +2673,7 @@ impl CircularCrossSectionFsg {
         ball: &CircleBall,
     ) -> Result<Option<Surface>> {
         use crate::blend::fillet_section::certificate::{curve_derivs_over, NurbsCurve};
+        use crate::blend::fillet_section::definition_box::definition_enclosable;
         use crate::blend::fillet_section::interval::Ivl;
         use crate::blend::fillet_section::section::{ArcSection, GnLawRound, GnSectionFsg};
         use crate::blend::fillet_standard_solver::touch_circle::{
@@ -2702,17 +2705,26 @@ impl CircularCrossSectionFsg {
             return Ok(None);
         }
         let bases = [o1.base_surface(), o2.base_surface()];
+        // (a face that is itself a blend by its definition takes a ball of one radius, on a
+        // round of one radius between NURBS faces: the definition its certificate encloses;
+        // c5b6bb7, WR-714)
+        let constant_ball = solver_type == FilletSolverType::ConstRadius;
         for b in bases {
-            let nurbs = matches!(
-                b.kind(),
+            let nurbs = match b.kind() {
                 SurfaceKind::BSpline(_)
-                    | SurfaceKind::Plane(_)
-                    | SurfaceKind::SurfOfRevolution(_)
-                    | SurfaceKind::SurfOfExtrusion(_)
-                    | SurfaceKind::Cone(_)
-                    | SurfaceKind::Sphere(_)
-                    | SurfaceKind::Torus(_)
-            );
+                | SurfaceKind::Plane(_)
+                | SurfaceKind::SurfOfRevolution(_)
+                | SurfaceKind::SurfOfExtrusion(_)
+                | SurfaceKind::Cone(_)
+                | SurfaceKind::Sphere(_)
+                | SurfaceKind::Torus(_) => true,
+                SurfaceKind::ProceduralBlend(_) => {
+                    k.fixes.fillet_round_on_round_as_definition
+                        && constant_ball
+                        && definition_enclosable(b)
+                }
+                _ => false,
+            };
             if !nurbs {
                 return Ok(None);
             }

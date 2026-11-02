@@ -28,6 +28,7 @@
 //! | [`law_series_over`]               | `sm_LawSeriesOver` (0d43b4c)            |
 //! | [`inverse4`]                      | `sm_Inverse4`                           |
 //! | [`Enclosure`], [`gn_enclose`]     | `sm_GnEnclose` (its `rF`, `pX`, `pDS`)  |
+//! | [`SpanAt`], [`gn_enclose_over`], [`face_partials_over`] | `sm_GnSpanAt`, `sm_GnEncloseOver`, `sm_FacePartialsOver` (c5b6bb7) |
 //! | [`gn_fourth_over`]                | `sm_GnFourthOver`                       |
 //! | [`gn_certify_span`]               | `sm_GnCertifySpan`                      |
 //! | `gn_try!` (private)               | `SM_GN_TRY`                             |
@@ -47,6 +48,7 @@
 //! - **Indices.** Knots and nets are read by checked indices (a knot or a coordinate
 //!   outside reads NaN, which shows in the result); the fork's indices stay inside.
 
+use super::definition_box::{definition_partials_over_box, GnDefFace, GnDefs};
 use super::form::{binom, gn_form_normalized, GnSectionFormT};
 use super::interval::{cmax, cmin, round_down, round_up, Ivl};
 use super::series::{GnScalar, Ser, Trunc, VSer, MAX_E, MAX_S, TAYLOR, V3};
@@ -411,7 +413,8 @@ pub fn nurbs_partials_over_piece(
 
 /// `sm_LeaderSeriesOver`: the leader's point and unit tangent over `s` as series in sigma
 /// to `tr.s`, enclosed (the span lies in one piece of the leader: the stations hold its
-/// knots).
+/// knots). `piece`: the leader's piece whose polynomial is taken over `s` (`lPiece`,
+/// c5b6bb7; `None`, the fork's -1: the one the middle of `s` lies in).
 ///
 /// # Errors
 ///
@@ -420,9 +423,10 @@ pub fn leader_series_over(
     leader: &NurbsCurve,
     s: Ivl,
     tr: Trunc,
+    piece: Option<usize>,
 ) -> Result<(VSer<Ivl>, VSer<Ivl>)> {
     let sigma = Trunc::new(tr.s(), 0)?;
-    let piece = span(&leader.u, leader.p, leader.n, s.mid());
+    let piece = piece.unwrap_or_else(|| span(&leader.u, leader.p, leader.n, s.mid()));
     let d = curve_derivs_over(leader, s, tr.s() + 1, Some(piece))?;
     let mut l = VSer::constant(VZ);
     let mut d1 = l;
@@ -603,15 +607,64 @@ fn system<'a>(
     }
 }
 
+/// A face's partials over `[ua, ub] x [va, vb]`, enclosed (`sm_FacePartialsOver`,
+/// c5b6bb7): a NURBS face's piece `(ku, kv)`, continued; a blend by its definition's on
+/// the piece of its net along s that `(ku, kv)` is in
+/// ([`super::definition_box::definition_partials_over_box`]).
+///
+/// # Errors
+///
+/// Those of [`nurbs_partials_over_piece`] and
+/// [`super::definition_box::definition_partials_over_box`].
+#[allow(clippy::too_many_arguments)]
+pub fn face_partials_over(
+    k: &Kernel,
+    cn: &Nurbs,
+    def: Option<&mut GnDefFace<'_>>,
+    ku: usize,
+    kv: usize,
+    ua: f64,
+    ub: f64,
+    va: f64,
+    vb: f64,
+    lk: usize,
+) -> Result<Partials<Ivl>> {
+    if let Some(d) = def {
+        return definition_partials_over_box(k, d, cn, ku, kv, ua, ub, va, vb, lk);
+    }
+    nurbs_partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk)
+}
+
+/// A span the feet are enclosed over (`sm_GnSpanAt`, c5b6bb7): S, the feet's guesses at
+/// its ends (their hull, widened, is the first box), each face's polynomial piece over it
+/// and the leader's (`None`: the one the middle of S lies in).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SpanAt {
+    /// `sS`.
+    pub s: Ivl,
+    /// `axA`: the feet's guesses at S's start.
+    pub xa: [f64; 4],
+    /// `axB`: and at its end.
+    pub xb: [f64; 4],
+    /// `aku`: each face's piece in u.
+    pub ku: [usize; 2],
+    /// `akv`: and in v.
+    pub kv: [usize; 2],
+    /// `lLeader`.
+    pub leader: Option<usize>,
+}
+
 /// `sm_GnEnclose`: the feet's series over `S = [a.s, b.s]` (a point when they are one
 /// station), to order `order_s` in s and `n` in tau, enclosed; `None` where Krawczyk's test
-/// fails on S (or an evaluation fails: nothing is proved).
+/// fails on S (or an evaluation fails: nothing is proved). `defs`: the faces that are
+/// blends by their definitions, enclosed over the boxes (c5b6bb7).
 ///
 /// # Errors
 ///
 /// `InvalidInput` when `order_s` or `n` exceeds the series' size.
 #[allow(clippy::too_many_arguments)]
 pub fn gn_enclose(
+    k: &Kernel,
     faces_n: [&Nurbs; 2],
     leader_n: &NurbsCurve,
     a: &GnStation,
@@ -621,25 +674,24 @@ pub fn gn_enclose(
     n: usize,
     order_s: usize,
     law: Option<&GnLaw<'_>>,
+    defs: Option<&mut GnDefs<'_>>,
 ) -> Result<Option<Enclosure>> {
-    let s = Ivl::new(a.s, b.s);
-    let tr = Trunc::new(order_s, n)?;
-    // a ball whose radius varies: its law over the span (0d43b4c)
-    let law_r = match law {
-        Some(l) => Some(gn_try!(law_series_over(l, s, order_s), None)),
-        None => None,
-    };
-    let law_r = law_r.as_ref();
-    let (leader, tangent) = gn_try!(leader_series_over(leader_n, s, tr), None);
     let ax = |c: usize| a.x.get(c).map_or(f64::NAN, |x| x.at(0, 0));
     let bx = |c: usize| b.x.get(c).map_or(f64::NAN, |x| x.at(0, 0));
-
+    let mut at = SpanAt {
+        s: Ivl::new(a.s, b.s),
+        xa: [ax(0), ax(1), ax(2), ax(3)],
+        xb: [bx(0), bx(1), bx(2), bx(3)],
+        ku: [0; 2],
+        kv: [0; 2],
+        leader: None,
+    };
     // each face's polynomial piece over the span: the one its middle lies in. A station
     // stands where a foot crosses a knot line, so every foot over the span lies in that
     // piece, and the piece's polynomial, continued over the rest of a box, is the face
     // wherever a foot can be: the root Krawczyk's test proves unique in a box is the foot
-    let mut ku = [0_usize; 2];
-    let mut kv = [0_usize; 2];
+    // (a definition's piece of its net is one between two of its stations, its polynomial
+    // pieces the ones the faces under it have there)
     for (f, face) in faces_n.iter().enumerate() {
         let su = span(&face.u, face.p, face.nu, 0.5 * (ax(2 * f) + bx(2 * f)));
         let sv = span(
@@ -648,24 +700,67 @@ pub fn gn_enclose(
             face.nv,
             0.5 * (ax(2 * f + 1) + bx(2 * f + 1)),
         );
-        if let (Some(u), Some(v)) = (ku.get_mut(f), kv.get_mut(f)) {
+        if let (Some(u), Some(v)) = (at.ku.get_mut(f), at.kv.get_mut(f)) {
             *u = su;
             *v = sv;
         }
     }
-    let partials_over = |xl: [f64; 4], xh: [f64; 4], lk: usize| -> Result<[Partials<Ivl>; 2]> {
+    gn_enclose_over(k, faces_n, leader_n, &at, r, side, n, order_s, law, defs)
+}
+
+/// `sm_GnEncloseOver` (c5b6bb7): the feet's series over `at.s`, to order `order_s` in s and
+/// `n` in tau, enclosed; `None` where Krawczyk's test fails on S (or an evaluation fails:
+/// nothing is proved). The centre's residual is evaluated once: the iterations keep the
+/// centre.
+///
+/// # Errors
+///
+/// `InvalidInput` when `order_s` or `n` exceeds the series' size.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+pub fn gn_enclose_over(
+    k: &Kernel,
+    faces_n: [&Nurbs; 2],
+    leader_n: &NurbsCurve,
+    at: &SpanAt,
+    r: [f64; 2],
+    side: [f64; 2],
+    n: usize,
+    order_s: usize,
+    law: Option<&GnLaw<'_>>,
+    defs: Option<&mut GnDefs<'_>>,
+) -> Result<Option<Enclosure>> {
+    let s = at.s;
+    let tr = Trunc::new(order_s, n)?;
+    // a ball whose radius varies: its law over the span (0d43b4c)
+    let law_r = match law {
+        Some(l) => Some(gn_try!(law_series_over(l, s, order_s), None)),
+        None => None,
+    };
+    let law_r = law_r.as_ref();
+    let (leader, tangent) = gn_try!(leader_series_over(leader_n, s, tr, at.leader), None);
+    let ax = |c: usize| at.xa.get(c).copied().unwrap_or(f64::NAN);
+    let bx = |c: usize| at.xb.get(c).copied().unwrap_or(f64::NAN);
+    let [ku0, ku1] = at.ku;
+    let [kv0, kv1] = at.kv;
+    let mut defs = defs;
+    let mut partials_over = |xl: [f64; 4], xh: [f64; 4], lk: usize| -> Result<[Partials<Ivl>; 2]> {
         let [n0, n1] = faces_n;
-        let [ku0, ku1] = ku;
-        let [kv0, kv1] = kv;
         let [l0, l1, l2, l3] = xl;
         let [h0, h1, h2, h3] = xh;
+        let (d0, d1) = match defs.as_deref_mut() {
+            Some(d) => {
+                let [a0, a1] = &mut d.faces;
+                (a0.as_mut(), a1.as_mut())
+            }
+            None => (None, None),
+        };
         Ok([
-            nurbs_partials_over_piece(n0, ku0, kv0, l0, h0, l1, h1, lk)?,
-            nurbs_partials_over_piece(n1, ku1, kv1, l2, h2, l3, h3, lk)?,
+            face_partials_over(k, n0, d0, ku0, kv0, l0, h0, l1, h1, lk)?,
+            face_partials_over(k, n1, d1, ku1, kv1, l2, h2, l3, h3, lk)?,
         ])
     };
 
-    // the feet's box: Krawczyk's operator from the two stations' hull
+    // the feet's box: Krawczyk's operator from the guesses' hull
     let mut xm = [0.0_f64; 4];
     let mut bx_ = [IZ; 4];
     for (c, (m, xc)) in xm.iter_mut().zip(bx_.iter_mut()).enumerate() {
@@ -679,16 +774,19 @@ pub fn gn_enclose(
     let mut q = f64::INFINITY;
     let mut proved = false;
     let point = Trunc::new(0, 0)?;
-    let mut it = 0;
-    while it < 8 && !proved {
-        it += 1;
-        // G at the box's centre for every s in the span
+    // G at the box's centre (which the iterations keep) for every s in the span
+    let sg = {
         let pc = gn_try!(partials_over(xm, xm, 2), None);
         let sxc = xm.map(|x| Ser::constant(Ivl::from(x)));
         let (sg, _) = gn_try!(
             gn_evaluate(&system(&pc, &leader, &tangent, r, side, law_r), &sxc, point),
             None
         );
+        sg
+    };
+    let mut it = 0;
+    while it < 8 && !proved {
+        it += 1;
         // the Jacobian over the box
         let pb = gn_try!(partials_over(bx_.map(|x| x.lo), bx_.map(|x| x.hi), 2), None);
         let sxb = bx_.map(Ser::constant);
@@ -912,7 +1010,7 @@ pub fn gn_fourth_over(
     n: usize,
 ) -> Result<Fourth> {
     let (fourth, _) = gn_fourth_over_series(
-        k, faces_n, leader_n, faces, center, a, b, r, side, n, None, 0,
+        k, faces_n, leader_n, faces, center, a, b, r, side, n, None, 0, None,
     )?;
     Ok(fourth)
 }
@@ -937,7 +1035,8 @@ pub struct PieceSeries {
 /// [`gn_fourth_over`] with the series of [`PieceSeries`] (`None` where they are not all
 /// proved, as the fork's out-params are then not all set), and the fork's `pLaw` and
 /// `lExtra` (0d43b4c): a ball whose radius varies, and the orders in s the series take
-/// past `4 + SM_GN_TAYLOR` (the touch circle's m').
+/// past `4 + SM_GN_TAYLOR` (the touch circle's m'); and its `pDefs` (c5b6bb7): the faces
+/// that are blends by their definitions, enclosed over the boxes.
 ///
 /// # Errors
 ///
@@ -956,7 +1055,9 @@ pub fn gn_fourth_over_series(
     n: usize,
     law: Option<&GnLaw<'_>>,
     extra: usize,
+    defs: Option<&mut GnDefs<'_>>,
 ) -> Result<(Fourth, Option<PieceSeries>)> {
+    let mut defs = defs;
     let none: (Fourth, Option<PieceSeries>) = (
         (
             [[f64::INFINITY; MAX_E + 1]; 2],
@@ -967,7 +1068,20 @@ pub fn gn_fourth_over_series(
         None,
     );
     let h = b.s - a.s;
-    let Some(e5) = gn_enclose(faces_n, leader_n, a, b, r, side, n, 4 + TAYLOR + extra, law)? else {
+    let Some(e5) = gn_enclose(
+        k,
+        faces_n,
+        leader_n,
+        a,
+        b,
+        r,
+        side,
+        n,
+        4 + TAYLOR + extra,
+        law,
+        defs.as_deref_mut(),
+    )?
+    else {
         return Ok(none);
     };
     // the middle's station, and the series there
@@ -999,6 +1113,7 @@ pub fn gn_fourth_over_series(
         none
     );
     let Some(e4) = gn_enclose(
+        k,
         faces_n,
         leader_n,
         &smid,
@@ -1008,6 +1123,7 @@ pub fn gn_fourth_over_series(
         n,
         4 + TAYLOR - 1 + extra,
         law,
+        defs,
     )?
     else {
         return Ok(none);
@@ -1458,6 +1574,7 @@ pub fn gn_certify_span(
     target: f64,
     mut vary: Option<&mut GnVarying>,
     law: Option<&GnLaw<'_>>,
+    mut defs: Option<&mut GnDefs<'_>>,
 ) -> Result<f64> {
     // the series' orders are checked once (the fork leaves them to its callers)
     Trunc::new(4 + TAYLOR, n)?;
@@ -1568,6 +1685,7 @@ pub fn gn_certify_span(
                     // the touch circle of a varying ball takes the centre's
                     // s-derivative: one order more
                     usize::from(arc && law.is_some()),
+                    defs.as_deref_mut(),
                 ),
                 bound_out
             );
@@ -1774,9 +1892,21 @@ mod tests {
         let a = station(&k, faces, &leader, sa, [r, len * sa, len * sa, r], rr, side);
         let b = station(&k, faces, &leader, sb, [r, len * sb, len * sb, r], rr, side);
         let n = 2;
-        let e = gn_enclose([&n1, &n2], &ln, &a, &b, rr, side, n, 4 + TAYLOR, None)
-            .unwrap()
-            .expect("proved");
+        let e = gn_enclose(
+            &k,
+            [&n1, &n2],
+            &ln,
+            &a,
+            &b,
+            rr,
+            side,
+            n,
+            4 + TAYLOR,
+            None,
+            None,
+        )
+        .unwrap()
+        .expect("proved");
         assert!(contains(e.x[0].c[0][0], r) && contains(e.x[3].c[0][0], r));
         for q in [1, 2] {
             let x = e.x[q].c[0][0];
@@ -1806,6 +1936,7 @@ mod tests {
             side,
             n,
             1e-6,
+            None,
             None,
             None,
         )
@@ -1935,9 +2066,21 @@ mod tests {
         // hold the closed form's, `(4! c[4][k])`
         let sm = 0.5 * (sa + sb);
         let ms = st(sm);
-        let em = gn_enclose([&np, &nc], &ln, &ms, &ms, rr, side, n, 4 + TAYLOR - 1, None)
-            .unwrap()
-            .expect("proved at a point");
+        let em = gn_enclose(
+            &k,
+            [&np, &nc],
+            &ln,
+            &ms,
+            &ms,
+            rr,
+            side,
+            n,
+            4 + TAYLOR - 1,
+            None,
+            None,
+        )
+        .unwrap()
+        .expect("proved at a point");
         let dm = leader.evaluate(sm, 4, true, false).unwrap()[4];
         let holds = |i: Ivl, x: f64| {
             let j = Ivl::from(24.0) * i;
@@ -1985,6 +2128,7 @@ mod tests {
             target,
             None,
             None,
+            None,
         )
         .unwrap();
         let jets = h * h * h * h / 384.0 * (want[0][0] + want[0][1]);
@@ -2011,7 +2155,20 @@ mod tests {
                 .unwrap();
             l4l = l4l.max(Vec3::new(d[4].x, d[4].y, 0.0).length());
         }
-        let one = gn_enclose([&np, &nc], &ln, &a, &lb, rr, side, n, 4 + TAYLOR, None).unwrap();
+        let one = gn_enclose(
+            &k,
+            [&np, &nc],
+            &ln,
+            &a,
+            &lb,
+            rr,
+            side,
+            n,
+            4 + TAYLOR,
+            None,
+            None,
+        )
+        .unwrap();
         assert!(one.is_none());
         let long = gn_certify_span(
             &k,
@@ -2025,6 +2182,7 @@ mod tests {
             side,
             n,
             target,
+            None,
             None,
             None,
         )
