@@ -814,7 +814,24 @@ impl PolyBoundary {
             }
             _ => {}
         }
-        if !closed.iter().any(|curve| loop_orientation(curve)) {
+        // SolidCraft: a face whose loops all wind clockwise is taken for the surface around them,
+        // with the parameter rectangle for its outer boundary. Not a face on an open surface (no
+        // period) whose loop lies in the rectangle and crosses itself: that is a sliver a boolean
+        // cut along an edge of a face, the cut running a few micrometres outside the edge for most
+        // of its length and inside it near one end, so that its loop winds clockwise for most of
+        // its area. The rectangle around it meshed the whole surface in the sliver's place. Such
+        // a face keeps the region its loop winds around.
+        let crossed = || {
+            let (Some((u0, u1)), Some((v0, v1))) = surface.try_range_tuple() else { return false };
+            let (du, dv) = (0.1 * (u1 - u0), 0.1 * (v1 - v0));
+            let inside = |p: &Point2| p.x >= u0 - du && p.x <= u1 + du && p.y >= v0 - dv && p.y <= v1 + dv;
+            surface.u_period().is_none()
+                && surface.v_period().is_none()
+                && closed.iter().any(|curve| {
+                    curve.iter().all(inside) && crosses_itself(&curve.iter().map(|p| [p.x, p.y]).collect::<Vec<_>>())
+                })
+        };
+        if !closed.iter().any(|curve| loop_orientation(curve)) && !crossed() {
             if let (Some((u0, u1)), Some((v0, v1))) = surface.try_range_tuple() {
                 let p = [
                     Point2::new(u0, v0),
@@ -1166,17 +1183,34 @@ fn turn(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> f64 {
 }
 
 /// SolidCraft: whether two sides of the closed polygon that do not share a corner cross each other.
-/// Ears of a polygon that crosses itself overlap, so it is not triangulated.
+/// Ears of a polygon that crosses itself overlap, so it is not triangulated. The sides are swept
+/// in the order of their least first coordinate, so only those whose ranges in it overlap are
+/// compared (a trimming loop can have thousands of points).
 fn crosses_itself(points: &[[f64; 2]]) -> bool {
     let n = points.len();
     let side = |i: usize| (points[i], points[(i + 1) % n]);
-    (0..n).any(|i| {
+    let low = |i: usize| f64::min(points[i][0], points[(i + 1) % n][0]);
+    let high = |i: usize| f64::max(points[i][0], points[(i + 1) % n][0]);
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&i, &j| low(i).total_cmp(&low(j)));
+    let mut active: Vec<usize> = Vec::new();
+    for &i in &order {
+        active.retain(|&j| high(j) >= low(i));
         let (a, b) = side(i);
-        (i + 2..n).filter(|&j| !(i == 0 && j == n - 1)).any(|j| {
+        let crossed = active.iter().any(|&j| {
+            let (lo, hi) = (i.min(j), i.max(j));
+            if hi - lo < 2 || (lo == 0 && hi == n - 1) {
+                return false;
+            }
             let (c, d) = side(j);
             turn(a, b, c) * turn(a, b, d) < 0.0 && turn(c, d, a) * turn(c, d, b) < 0.0
-        })
-    })
+        });
+        if crossed {
+            return true;
+        }
+        active.push(i);
+    }
+    false
 }
 
 /// SolidCraft: the triangles of a simple polygon, as indices into its points, by clipping ears.
