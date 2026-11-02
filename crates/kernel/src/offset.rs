@@ -373,19 +373,37 @@ fn sphere_or_cone(s: &[(Vec3, Vec3)], tol: f64) -> Option<Surf> {
 /// n_i · δ = s_i for each face's normal n_i at p, then checked against the moved surfaces.
 fn move_point(p: Vec3, old: &[Surf], shifts: &[f64], new: &[Surf], tol: f64) -> Option<Vec3> {
     let ns: Vec<Vec3> = old.iter().map(|sf| sf.normal(p)).collect::<Option<_>>()?;
-    let mut q = p + span_step(&ns, shifts)?;
-    // The step is exact for planes; a curved face meeting another at an angle needs a few
-    // Newton steps onto the moved surfaces.
+    onto(p + span_step(&ns, shifts)?, new, tol)
+}
+
+/// `q` (near all of `surfs`) moved onto them by Newton steps; `None` unless it gets within `tol`.
+fn onto(mut q: Vec3, surfs: &[Surf], tol: f64) -> Option<Vec3> {
+    // The step from `move_point` is exact for planes; a curved face meeting another at an angle
+    // needs a few Newton steps. Keep stepping while they still get closer: a corner left just
+    // inside `tol` off a tilted cylinder puts the edges through it visibly off the face (#3573).
+    // Tangent faces fitted apart by rounding may never all meet exactly, so the closest point
+    // within `tol` is the answer.
+    let worst = |q: Vec3| surfs.iter().map(|sf| sf.dist(q).abs()).fold(0.0, f64::max);
+    let mut best = (worst(q), q);
     for _ in 0..30 {
-        let d: Vec<f64> = new.iter().map(|sf| sf.dist(q)).collect();
-        if d.iter().all(|x| x.abs() < tol) {
-            return Some(q);
+        if best.0 < 1e-13 {
+            break;
         }
-        let gs: Vec<Vec3> = new.iter().map(|sf| sf.grad(q)).collect::<Option<_>>()?;
+        let d: Vec<f64> = surfs.iter().map(|sf| sf.dist(q)).collect();
+        let Some(gs) = surfs.iter().map(|sf| sf.grad(q)).collect::<Option<Vec<Vec3>>>() else { break };
         let rhs: Vec<f64> = d.iter().map(|x| -x).collect();
-        q += span_step(&gs, &rhs)?;
+        let Some(step) = span_step(&gs, &rhs) else { break };
+        q += step;
+        let w = worst(q);
+        if !(w < best.0) {
+            if best.0 < tol {
+                break;
+            }
+            continue;
+        }
+        best = (w, q);
     }
-    new.iter().all(|sf| sf.dist(q).abs() < tol).then_some(q)
+    (best.0 < tol).then_some(best.1)
 }
 
 /// The smallest move `v` (in the span of `ns`) with `n_i · v = s_i` (least squares).
@@ -1069,15 +1087,32 @@ pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Resul
                 let cv = e.curve();
                 let (t0, t1) = cv.range_tuple();
                 let k = 16;
-                let mut pts = vec![from_p3(a.point())];
+                let tol = size * 1e-6;
+                let moved = |t: f64| move_point(from_p3(cv.subs(t)), &o, &s, &n, tol);
+                // The corners also sit on the faces round them, the samples only on the edge's
+                // two: moved alone, the samples slide along the edge away from its moved ends,
+                // and the fit through them bulges near the ends (#3573). Each sample takes its
+                // share of the ends' mismatch, then goes back onto the faces.
+                let (pa, pc) = (from_p3(a.point()), from_p3(c.point()));
+                let along = from_p3(cv.subs(t0)).dist(from_p3(e.absolute_front().point())) < tol;
+                let fix = match (along, moved(t0), moved(t1)) {
+                    (true, Some(m0), Some(m1)) => Some((pa - m0, pc - m1)),
+                    _ => None,
+                };
+                let mut pts = vec![pa];
                 for j in 1..k {
-                    let p = from_p3(cv.subs(t0 + (t1 - t0) * j as f64 / k as f64));
-                    pts.push(
-                        move_point(p, &o, &s, &n, size * 1e-6).ok_or_else(|| fail("an edge whose faces don't meet the same way after the move"))?,
-                    );
+                    let l = j as f64 / k as f64;
+                    let q = moved(t0 + (t1 - t0) * l).ok_or_else(|| fail("an edge whose faces don't meet the same way after the move"))?;
+                    let q = match fix {
+                        Some((d0, d1)) => onto(q + d0 * (1.0 - l) + d1 * l, &n, tol).unwrap_or(q),
+                        None => q,
+                    };
+                    pts.push(q);
                 }
-                pts.push(from_p3(c.point()));
-                let curve = crate::build::interpolate_cubic(&pts).ok_or_else(|| fail("edge curve"))?;
+                pts.push(pc);
+                // By chord length: the samples, even in the old curve's parameter, are uneven
+                // along it (a rational arc), and a uniform fit wobbles off the faces (#3573).
+                let (curve, _) = crate::build::interpolate_cubic_chordal(&pts).ok_or_else(|| fail("edge curve"))?;
                 let ne = mt::Edge::new(a, c, mt::Curve::BSplineCurve(curve));
                 rec.piece(&ne, &e);
                 edges.insert(e.id(), (ne, false));
