@@ -8,6 +8,44 @@ use crate::blend::plane_normal;
 use crate::issue_851_tests::planned_volume;
 use crate::{Body, BoolOp, boolean, cylinder, fillet};
 
+/// #2752: a centre on the R1 spine of a capped R2 sphere is already a
+/// good Newton start. Treating it as an edge point moves it to (0, 0, -1),
+/// where the sphere normal and the cap normal are parallel.
+#[test]
+fn resampled_sphere_sections_keep_their_centre_as_the_solve_start() {
+    let sphere = crate::sphere(Vec3::ZERO, 2.0).unwrap();
+    let block = crate::box_solid(Vec3::new(-3.0, -3.0, -3.0), Vec3::new(3.0, 3.0, 1.0)).unwrap();
+    let cap = block.solid.face_iter().find(|f| plane_normal(f).is_some_and(|n| n.z > 0.9)).unwrap();
+    let walls: Vec<_> = sphere.solid.face_iter().collect();
+    let centre = Vec3::X;
+    let law = RadiusSpline::through(&[(0.0, 1.0), (1.0, 1.0)], false);
+    for size in [Size::Constant(1.0), Size::Chord(2.0f64.sqrt()), Size::Law(&law)] {
+        let sizer = Sizer { size, tol: 1e-6 };
+        let (section, radius) = sizer.section(&[cap], &walls, centre, Vec3::Y, 0.5, -1.0, 0.0, None, Some(centre)).unwrap();
+        assert!((radius - 1.0).abs() < 1e-6);
+        assert!(section.c.dist(centre) < 1e-6);
+        assert!(section.q1.dist(Vec3::new(1.0, 0.0, 1.0)) < 1e-6);
+        assert!(section.q2.dist(Vec3::new(2.0, 0.0, 0.0)) < 1e-6);
+    }
+}
+
+/// A public fillet that reached the exact error reported in #2752 before the
+/// centre was reused: R2 sphere, cut flat at z = 1, then R1 round on its rim.
+#[test]
+fn fillet_a_capped_sphere_without_reoffsetting_the_resampled_spine() {
+    let sphere = crate::sphere(Vec3::ZERO, 2.0).unwrap();
+    let cutter = crate::box_solid(Vec3::new(-3.0, -3.0, 1.0), Vec3::new(3.0, 3.0, 4.0)).unwrap();
+    let body = boolean(&sphere, &cutter, BoolOp::Cut).unwrap().unwrap();
+    let result = fillet(&body, &[Vec3::new(3.0f64.sqrt(), 0.0, 1.0)], 1.0).unwrap();
+    assert!(result.validity().is_empty(), "{:?}", result.validity());
+    // Below z = 0 is a hemisphere (16*pi/3). Above it the radius is
+    // 1 + sqrt(1 - z^2), whose squared integral is 5/3 + pi/2.
+    let pi = std::f64::consts::PI;
+    let want = 7.0 * pi + pi * pi / 2.0;
+    let volume = planned_volume(&result);
+    assert!((volume - want).abs() < 0.01, "volume {volume}, expected {want}");
+}
+
 #[test]
 fn issue_1303_chamfer_open_rim_after_end_chamfer() {
     use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};

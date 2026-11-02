@@ -677,6 +677,7 @@ fn solve_chord(
     cusp: f64,
     extra: Option<Extra<'_>>,
     tol: f64,
+    start: Option<Vec3>,
 ) -> Option<(Section, f64)> {
     let normal = |fs: &[&mt::Face]| fs.iter().filter_map(|f| project(f, p, None)).min_by(|a, b| a.0.dist(p).total_cmp(&b.0.dist(p))).map(|x| x.1);
     let (n1, n2) = (normal(f1)?, normal(f2)?);
@@ -689,7 +690,7 @@ fn solve_chord(
         if !(r.is_finite() && r > 0.0 && r < 1e9) {
             return None;
         }
-        let s = solve(f1, f2, p, t, r, sigma, cusp, extra, tol)?;
+        let s = solve_from(f1, f2, p, t, r, sigma, cusp, extra, tol, start)?;
         let width = s.q1.dist(s.q2);
         if !width.is_finite() || width <= 0.0 {
             return None;
@@ -711,7 +712,8 @@ struct Sizer<'a> {
 
 impl Sizer<'_> {
     /// The section at `p` (tangent `t`, the size law's parameter `s`) holding the third
-    /// condition `extra` when given, with the radius it was solved at.
+    /// condition `extra` when given, with the radius it was solved at. `start` is
+    /// an existing estimate of the ball centre, rather than a point on the edge.
     #[allow(clippy::too_many_arguments)]
     fn section(
         &self,
@@ -723,16 +725,21 @@ impl Sizer<'_> {
         sigma: f64,
         cusp: f64,
         extra: Option<Extra<'_>>,
+        start: Option<Vec3>,
     ) -> Option<(Section, f64)> {
+        let section = |r| match start {
+            Some(_) => solve_from(f1, f2, p, t, r, sigma, cusp, extra, self.tol, start),
+            None => solve(f1, f2, p, t, r, sigma, cusp, extra, self.tol),
+        };
         match self.size {
-            Size::Constant(r) => solve(f1, f2, p, t, r, sigma, cusp, extra, self.tol).map(|x| (x, r)),
-            Size::Chord(chord) => solve_chord(f1, f2, p, t, chord, sigma, cusp, extra, self.tol),
+            Size::Constant(r) => section(r).map(|x| (x, r)),
+            Size::Chord(chord) => solve_chord(f1, f2, p, t, chord, sigma, cusp, extra, self.tol, start),
             Size::Law(law) => {
                 let r = law_beyond(law, s)?;
                 if !(r.is_finite() && (0.0..1e6).contains(&r)) {
                     return None;
                 }
-                solve(f1, f2, p, t, r, sigma, cusp, extra, self.tol).map(|x| (x, r))
+                section(r).map(|x| (x, r))
             }
         }
     }
@@ -1506,7 +1513,7 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
         // longer is (a wall past the round at a corner, which a ball rolling round it pokes
         // through).
         let (a1, a2) = edge_sides(&[k.min(n - 1)]);
-        let (s, r) = sizer.section(&a1, &a2, p, t, law_s, sigma, cusp, extra).ok_or_else(|| sizer.refusal())?;
+        let (s, r) = sizer.section(&a1, &a2, p, t, law_s, sigma, cusp, extra, None).ok_or_else(|| sizer.refusal())?;
         // A seam on the other side too must pass through that side's contact.
         if let Some((side, seam)) = here.get(1).filter(|_| !at_end) {
             let q = if *side == 1 { s.q1 } else { s.q2 };
@@ -1574,7 +1581,7 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
                 let d = step * j as f64;
                 let anchor = *p + out * d;
                 let s = law_s(d);
-                sizer.section(&e1, &e2, anchor, *t, s, sigma, cusp, None).map(|(section, _)| (s, section))
+                sizer.section(&e1, &e2, anchor, *t, s, sigma, cusp, None, None).map(|(section, _)| (s, section))
             });
             match sections.collect::<Option<Vec<_>>>() {
                 Some(all) => {
@@ -1645,7 +1652,7 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
         let (start, end) = offsets.get(k).copied().ok_or_else(|| KernelError::Failed("section offset".into()))?;
         let anchor = p + t * (start * (1.0 - along) + end * along);
         let (a1, a2) = edge_sides(&[k]);
-        sizer.section(&a1, &a2, anchor, t, frac_at(k, along), sigma, cusp, None).ok_or_else(|| sizer.refusal())
+        sizer.section(&a1, &a2, anchor, t, frac_at(k, along), sigma, cusp, None, None).ok_or_else(|| sizer.refusal())
     };
     let mut samples = SAMPLES.min(max_samples);
     let (esec, fits) = loop {
@@ -1703,8 +1710,11 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
             }
             let (anchor, tangent, law_s) = guide.anchor_at(along).ok_or_else(|| unsupported("degenerate rolling-ball spine"))?;
             let (a1, a2) = edge_sides(&[k]);
+            // The guide already estimates the centre. Offsetting it by the radius
+            // again can move the Newton start onto an axis where the supporting
+            // normals are parallel, even though a ball fits at this station.
             sizer
-                .section(&a1, &a2, anchor, tangent, law_s, sigma, cusp, None)
+                .section(&a1, &a2, anchor, tangent, law_s, sigma, cusp, None, Some(anchor))
                 .map(|(section, _)| section)
                 .ok_or_else(|| unsupported("the ball doesn't fit along the resampled spine"))
         };
