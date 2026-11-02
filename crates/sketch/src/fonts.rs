@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::model::{Result, SketchError};
 
+pub mod fallback;
+
 static DEFAULT_FONT: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/liberation-sans/LiberationSans-Regular.ttf"));
 
 /// Family name of the built-in font (also what an empty or absent font name means).
@@ -45,14 +47,23 @@ pub struct FontData {
 #[derive(Clone)]
 enum FontBytes {
     Builtin,
-    File(Arc<Vec<u8>>),
+    /// The file read, and its bytes.
+    File(PathBuf, Arc<Vec<u8>>),
 }
 
 impl FontData {
     pub fn bytes(&self) -> &[u8] {
         match &self.bytes {
             FontBytes::Builtin => DEFAULT_FONT,
-            FontBytes::File(b) => b.as_slice(),
+            FontBytes::File(_, b) => b.as_slice(),
+        }
+    }
+
+    /// The file the face was read from; None for the built-in font.
+    pub fn path(&self) -> Option<&Path> {
+        match &self.bytes {
+            FontBytes::Builtin => None,
+            FontBytes::File(path, _) => Some(path),
         }
     }
 }
@@ -78,7 +89,7 @@ pub fn font_data(name: Option<&str>) -> Result<FontData> {
         let index = 0;
         ttf_parser::Face::parse(&bytes, index)
             .map_err(|e| SketchError::Invalid(format!("font file `{name}` is not a TrueType/OpenType font: {e}")))?;
-        return Ok(FontData { bytes: FontBytes::File(bytes), index, weight: None });
+        return Ok(FontData { bytes: FontBytes::File(path, bytes), index, weight: None });
     }
     find_family_in(&font_dirs(), name)?
         .ok_or_else(|| SketchError::Invalid(format!("unknown font `{name}`: not an installed font family, and not a .ttf/.otf file path")))
@@ -164,7 +175,7 @@ pub fn find_style_in(dirs: &[PathBuf], name: &str, bold: bool, italic: bool) -> 
         }
         if let Some((_, path, index, face_bold, face_italic)) = best {
             let bytes = read_font(&path).map_err(|e| SketchError::Invalid(format!("font file `{}`: {e}", path.display())))?;
-            return Ok(Some((FontData { bytes: FontBytes::File(bytes), index, weight: None }, face_bold, face_italic)));
+            return Ok(Some((FontData { bytes: FontBytes::File(path, bytes), index, weight: None }, face_bold, face_italic)));
         }
     }
     Ok(None)
@@ -334,6 +345,18 @@ pub(crate) fn normalize(s: &str) -> String {
     s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
 }
 
+/// `name` as a font family: empty (the built-in font) or a family's name, never a file. Drawings
+/// name fonts by family, so they travel: the same name finds the font on another computer.
+pub fn check_family(name: &str) -> Result<()> {
+    if name.len() > MAX_FONT_NAME || name.chars().any(char::is_control) {
+        return Err(SketchError::Invalid("a font family's name is at most 1024 bytes on one line".into()));
+    }
+    if is_path(name.trim()) {
+        return Err(SketchError::Invalid(format!("`{name}` is a file: drawings name fonts by family, so they travel")));
+    }
+    Ok(())
+}
+
 fn is_path(name: &str) -> bool {
     name.contains('/') || name.contains('\\') || has_font_extension(name)
 }
@@ -383,9 +406,23 @@ fn home() -> Option<PathBuf> {
     std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from)
 }
 
+/// The font folders named by `SOLIDCRAFT_FONT_DIRS` (a path list), or else by the single folder
+/// in `CRAFT_FONTS_DIR` (the craft-fonts pack).
+pub fn font_override_dirs() -> Vec<PathBuf> {
+    override_dirs(std::env::var_os("SOLIDCRAFT_FONT_DIRS"), std::env::var_os("CRAFT_FONTS_DIR"))
+}
+
+fn override_dirs(dirs: Option<std::ffi::OsString>, pack: Option<std::ffi::OsString>) -> Vec<PathBuf> {
+    match (dirs, pack) {
+        (Some(dirs), _) => std::env::split_paths(&dirs).collect(),
+        (None, Some(pack)) => vec![PathBuf::from(pack)],
+        (None, None) => Vec::new(),
+    }
+}
+
 /// The folders searched for installed fonts, in order.
 pub fn font_dirs() -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = std::env::var_os("SOLIDCRAFT_FONT_DIRS").map(|v| std::env::split_paths(&v).collect()).unwrap_or_default();
+    let mut dirs = font_override_dirs();
     let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
     if cfg!(windows) {
         dirs.push(env("WINDIR").or_else(|| env("SystemRoot")).unwrap_or_else(|| PathBuf::from("C:\\Windows")).join("Fonts"));
@@ -417,13 +454,14 @@ pub fn font_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-/// TrueType/OpenType files under `dirs` (bounded in depth and count).
+/// TrueType/OpenType files under `dirs` (bounded in depth and count): in `dirs`' order, and sorted
+/// within each folder, so the result doesn't depend on how the system lists a folder.
 fn font_files(dirs: &[PathBuf]) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut todo: Vec<(PathBuf, usize)> = dirs.iter().rev().map(|d| (d.clone(), 0)).collect();
     while let Some((dir, depth)) = todo.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else { continue };
-        let mut sub = Vec::new();
+        let (mut files, mut sub) = (Vec::new(), Vec::new());
         for e in entries.flatten() {
             let path = e.path();
             let Ok(kind) = e.file_type() else { continue };
@@ -432,10 +470,14 @@ fn font_files(dirs: &[PathBuf]) -> Vec<PathBuf> {
                     sub.push((path, depth + 1));
                 }
             } else if has_font_extension(&path.to_string_lossy()) {
-                out.push(path);
-                if out.len() >= MAX_FONT_FILES {
-                    return out;
-                }
+                files.push(path);
+            }
+        }
+        files.sort();
+        for path in files {
+            out.push(path);
+            if out.len() >= MAX_FONT_FILES {
+                return out;
             }
         }
         sub.sort();
@@ -487,6 +529,41 @@ mod tests {
         for dir in ["/run/host/fonts", "/run/host/user-fonts"] {
             assert!(dirs.contains(&PathBuf::from(dir)), "missing {dir}");
         }
+    }
+
+    /// `SOLIDCRAFT_FONT_DIRS` wins and may list several folders; `CRAFT_FONTS_DIR` is the fallback.
+    #[test]
+    fn font_folders_from_the_environment() -> std::result::Result<(), std::env::JoinPathsError> {
+        let list = std::env::join_paths(["/a", "/b"])?;
+        assert_eq!(override_dirs(Some(list), Some("/pack".into())), vec![PathBuf::from("/a"), PathBuf::from("/b")]);
+        assert_eq!(override_dirs(None, Some("/pack".into())), vec![PathBuf::from("/pack")]);
+        assert!(override_dirs(None, None).is_empty());
+        Ok(())
+    }
+
+    /// Files sort by their bytes within a folder, whatever order the system lists them in; a
+    /// folder's files come before its subfolders', and `dirs`' order stands.
+    /// A list's known files come row by row, each row's in its order: the order they are tried in.
+    #[test]
+    fn candidate_files_keep_their_rows_and_their_order() {
+        const ROWS: fallback::Candidates = &[("A", &["a1", "a2"]), ("B", &["b1"]), ("A", &["a3"])];
+        assert_eq!(fallback::candidate_files(ROWS).collect::<Vec<_>>(), ["a1", "a2", "b1", "a3"]);
+    }
+
+    #[test]
+    fn font_files_come_in_a_stable_order() {
+        let root = std::env::temp_dir().join(format!("solidcraft-font-files-{}", std::process::id()));
+        let (one, two) = (root.join("one"), root.join("two"));
+        std::fs::create_dir_all(one.join("sub")).unwrap();
+        std::fs::create_dir_all(&two).unwrap();
+        let files = [one.join("B.ttf"), one.join("a.otf"), one.join("sub").join("A.ttf"), two.join("A.ttc")];
+        for file in &files {
+            std::fs::write(file, b"").unwrap();
+        }
+        std::fs::write(one.join("notes.txt"), b"").unwrap();
+        let found = font_files(&[two.clone(), one.clone()]);
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(found, [files[3].clone(), files[0].clone(), files[1].clone(), files[2].clone()]);
     }
 
     /// A face of family "Arial" whose full name is `full`.

@@ -55,7 +55,10 @@ pub use dims::{
 };
 pub use ends::{END_TOL, EndReport, EndTouch, UntiedEnd, loose_ends};
 pub use equation::{EquationCurve, MAX_EQUATION_TEXT};
-pub use fonts::{DEFAULT_FONT_FAMILY, FontData, families_in, find_style_in, font_data, font_data_styled, installed_families, set_font_file_check};
+pub use fonts::{
+    DEFAULT_FONT_FAMILY, FontData, check_family, fallback, families_in, find_style_in, font_data, font_data_styled, font_dirs, font_override_dirs,
+    installed_families, set_font_file_check,
+};
 pub use freeform_offset::{FreeformOffset, FreeformOffsetOutput, OFFSET_TOLERANCE};
 pub use link::{Link, LinkGeom, LinkKind, LinkSource, MAX_LINK_ENTITIES, SKETCH_AXIS_HALF, TextExprs, sketch_axis_geom};
 pub use model::{
@@ -64,7 +67,7 @@ pub use model::{
 };
 pub use offset::OffsetChain;
 pub use offset_topology::{OffsetCreated, OffsetRole, OffsetRoleFlags, OffsetRoleKind, OffsetTopology};
-pub use paper_text::{DRAWING_FONTS, DrawingFont, paper_text};
+pub use paper_text::{paper_font_note, paper_text, paper_text_in};
 pub use pattern::{PatternAlignment, PatternInstance, SketchPattern, SketchPatternKind};
 pub use periodic::periodic_beziers;
 pub use profiles::{
