@@ -132,29 +132,78 @@ pub(crate) fn paint_cube(painter: &egui::Painter, faces: &[Facet], hovered: Opti
         }
     }
 }
+/// How far an orbit arrow's wings reach to either side of its axis, in design units; the arrow's
+/// pointer target is at least this wide.
+pub(crate) const ORBIT_ARROW_WING: f32 = 11.0;
+/// A wide triangle around `at` whose tip points along `direction` (its length is the scale).
 pub(crate) fn arrow(painter: &egui::Painter, at: Pos2, direction: egui::Vec2, hover: bool, t: Tokens) {
     let side = vec2(-direction.y, direction.x);
     painter.add(Shape::convex_polygon(
-        vec![at + direction * 7.0, at - direction * 5.0 + side * 7.0, at - direction * 5.0 - side * 7.0],
+        vec![at + direction * 8.0, at - direction * 6.0 + side * ORBIT_ARROW_WING, at - direction * 6.0 - side * ORBIT_ARROW_WING],
         if hover { t.accent_soft } else { t.cube_face },
         Stroke::new(1.0, if hover { t.accent } else { t.cube_border }),
     ));
 }
-pub(crate) fn curved_arrow(painter: &egui::Painter, at: Pos2, clockwise: bool, hover: bool, t: Tokens, scale: f32) {
-    let (start, end) =
-        if clockwise { (-std::f32::consts::FRAC_PI_4 + 0.12, 0.0) } else { (-std::f32::consts::FRAC_PI_4 - 0.12, -std::f32::consts::FRAC_PI_2) };
-    let points: Vec<_> = (0..=16)
-        .map(|i| {
-            let angle = egui::lerp(start..=end, f32::from(i as u8) / 16.0);
-            at + vec2(angle.cos(), angle.sin()) * (32.0 * scale)
-        })
-        .collect();
-    painter.add(Shape::line(points.clone(), Stroke::new(5.0 * scale, if hover { t.accent } else { t.cube_border })));
-    painter.add(Shape::line(points.clone(), Stroke::new(3.0 * scale, if hover { t.accent_soft } else { t.cube_face })));
-    if let Some(tip) = points.last() {
-        let sign = if clockwise { 1.0 } else { -1.0 };
-        arrow(painter, *tip, vec2(-end.sin(), end.cos()) * (sign * scale), hover, t);
+/// Radius of the curved roll arrows' circle, in design units: clear of the cube in every view.
+pub(crate) const CURVED_ARROW_RADIUS: f32 = 74.0;
+/// Half the band's width, and the head's half width and length along the circle, in design units.
+const CURVED_ARROW_BAND: f32 = 4.0;
+const CURVED_ARROW_HEAD: f32 = 9.0;
+pub(crate) const CURVED_ARROW_HEAD_LENGTH: f32 = 13.0;
+/// A band along a circle around `centre` from angle `from` to `to` (radians, screen y down),
+/// ending in a head at `to`; filled and outlined like the cube's facets.
+pub(crate) fn curved_arrow(painter: &egui::Painter, centre: Pos2, from: f32, to: f32, hover: bool, t: Tokens, scale: f32) {
+    const STEPS: u8 = 12;
+    let (radius, band, head, head_length) =
+        (CURVED_ARROW_RADIUS * scale, CURVED_ARROW_BAND * scale, CURVED_ARROW_HEAD * scale, CURVED_ARROW_HEAD_LENGTH * scale);
+    let at = |angle: f32, r: f32| centre + vec2(angle.cos(), angle.sin()) * r;
+    let angles: Vec<f32> = (0..=STEPS).map(|i| egui::lerp(from..=to, f32::from(i) / f32::from(STEPS))).collect();
+    let fill = if hover { t.accent_soft } else { t.cube_face };
+    let tip = at(to + (to - from).signum() * head_length / radius, radius);
+    let head_points = [at(to, radius + head), tip, at(to, radius - head)];
+    // The band is not convex: fill it as one mesh, so no seams show, and outline it once.
+    let mut mesh = egui::Mesh::default();
+    for &angle in &angles {
+        mesh.colored_vertex(at(angle, radius - band), fill);
+        mesh.colored_vertex(at(angle, radius + band), fill);
     }
+    for i in 0..u32::from(STEPS) {
+        mesh.add_triangle(2 * i, 2 * i + 1, 2 * i + 2);
+        mesh.add_triangle(2 * i + 1, 2 * i + 3, 2 * i + 2);
+    }
+    let head_start = mesh.vertices.len() as u32;
+    for point in head_points {
+        mesh.colored_vertex(point, fill);
+    }
+    mesh.add_triangle(head_start, head_start + 1, head_start + 2);
+    painter.add(Shape::mesh(mesh));
+    let mut outline: Vec<Pos2> = angles.iter().map(|a| at(*a, radius + band)).collect();
+    outline.extend(head_points);
+    outline.extend(angles.iter().rev().map(|a| at(*a, radius - band)));
+    painter.add(Shape::closed_line(outline, Stroke::new(1.0, if hover { t.accent } else { t.cube_border })));
+}
+/// Whether `p` is on the arrow [`curved_arrow`] draws with the same arguments: along the band from
+/// its start to its tip, within the head's half width of the circle on either side.
+pub(crate) fn curved_arrow_contains(centre: Pos2, from: f32, to: f32, scale: f32, p: Pos2) -> bool {
+    let offset = p - centre;
+    if (offset.length() - CURVED_ARROW_RADIUS * scale).abs() > CURVED_ARROW_HEAD * scale {
+        return false;
+    }
+    let along = (to - from).signum();
+    let reach = (to - from).abs() + CURVED_ARROW_HEAD_LENGTH / CURVED_ARROW_RADIUS;
+    ((offset.y.atan2(offset.x) - from) * along).rem_euclid(std::f32::consts::TAU) <= reach
+}
+/// The smallest rectangle that holds [`curved_arrow_contains`]' area.
+pub(crate) fn curved_arrow_bounds(centre: Pos2, from: f32, to: f32, scale: f32) -> Rect {
+    const STEPS: u8 = 24;
+    let along = (to - from).signum();
+    let end = to + along * CURVED_ARROW_HEAD_LENGTH / CURVED_ARROW_RADIUS;
+    let edge = CURVED_ARROW_HEAD * scale;
+    let points = (0..=STEPS).flat_map(|i| {
+        let angle = egui::lerp(from..=end, f32::from(i) / f32::from(STEPS));
+        [CURVED_ARROW_RADIUS * scale - edge, CURVED_ARROW_RADIUS * scale + edge].map(|r| centre + vec2(angle.cos(), angle.sin()) * r)
+    });
+    Rect::from_points(&points.collect::<Vec<_>>()).expand(1.0)
 }
 /// The pointer target around a compass end: larger than the drawn disc, so it is easy to hit.
 pub(crate) const AXIS_RADIUS: f32 = 15.0;

@@ -1,7 +1,9 @@
 //! Original, code-drawn navigation cube with chamfered edges and corners: every one of its
 //! 26 views (6 faces, 12 edges, 8 corners) is one flat facet that picks it.
 use super::*;
-use crate::icons::navigation::{Facet, arrow, curved_arrow, paint_cube};
+use crate::icons::navigation::{
+    CURVED_ARROW_RADIUS, Facet, ORBIT_ARROW_WING, arrow, curved_arrow, curved_arrow_bounds, curved_arrow_contains, paint_cube,
+};
 use solidcraft_engine::geom::Ring;
 
 pub(super) const SIZE: f32 = 112.0;
@@ -194,14 +196,25 @@ pub(super) fn navigate(app: &mut SolveApp, action: Option<&str>, dir: Option<Vec
 }
 
 fn control(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect, action: &str, tooltip: &str) -> bool {
-    crate::scenario::publish_handle(&format!("navigation_cube:control:{action}"), bounds.center());
-    let response = ui.interact(bounds, ui.scope_id().with(("navigation_cube", action)), Sense::click()).backing_on_hover_text(tooltip);
-    let hover = response.hovered();
-    if response.clicked() {
+    control_in(app, ui, bounds, bounds.center(), |_| true, action, tooltip)
+}
+
+/// A control whose target is the part of `bounds` that `inside` accepts (a curved arrow is no
+/// rectangle): only a pointer on that part hovers it, shows its tooltip, clicks or right-clicks it.
+/// `handle` is the point automation clicks.
+fn control_in(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect, handle: Pos2, inside: impl Fn(Pos2) -> bool, action: &str, tooltip: &str) -> bool {
+    crate::scenario::publish_handle(&format!("navigation_cube:control:{action}"), handle);
+    let response = ui.interact(bounds, ui.scope_id().with(("navigation_cube", action)), Sense::click());
+    let over = response.hover_pos().is_none_or(&inside);
+    let response = if over { response.backing_on_hover_text(tooltip) } else { response };
+    let hover = response.hovered() && over;
+    let pressed_inside = response.interact_pointer_pos().is_none_or(&inside);
+    if response.clicked() && pressed_inside {
         navigate(app, Some(action), None);
     }
     // The control takes the right-click from the viewport under it: open the gizmo's menu.
     if response.secondary_clicked()
+        && pressed_inside
         && app.dialog.is_none()
         && let Some(at) = response.interact_pointer_pos()
     {
@@ -225,8 +238,27 @@ fn inverted_arrow(action: &str) -> Option<&'static str> {
     }
 }
 
+/// The orbit an arrow beside the cube's `side` performs, its tooltip, and the screen direction
+/// it points: always inward at the cube, whichever orbit the preference above gives it.
+fn orbit_arrow(side: &'static str, inverted: bool) -> (&'static str, &'static str, egui::Vec2) {
+    let action = if inverted { inverted_arrow(side).unwrap_or(side) } else { side };
+    let tooltip = match action {
+        "left" => "Orbit left 90°",
+        "right" => "Orbit right 90°",
+        "up" => "Orbit up 90°",
+        _ => "Orbit down 90°",
+    };
+    let inward = match side {
+        "left" => vec2(1.0, 0.0),
+        "right" => vec2(-1.0, 0.0),
+        "up" => vec2(0.0, 1.0),
+        _ => vec2(0.0, -1.0),
+    };
+    (action, tooltip, inward)
+}
+
 /// Preferences › Navigation: "Invert the curved roll arrows" (#10483). With it on, the two
-/// curved arrows at the cube's corner roll the view the other way within the screen plane: the
+/// curved arrows above the cube roll the view the other way within the screen plane: the
 /// clockwise arrow rolls counterclockwise and the counterclockwise arrow rolls clockwise. The
 /// arrow keeps its curl; the tooltip names the roll actually performed.
 fn inverted_roll(action: &str) -> Option<&'static str> {
@@ -313,11 +345,11 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
 
 /// The Home button at the top left of a gizmo centred at `c`, painted while it is `active`.
 pub(super) fn home(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, c: Pos2, scale: f32, active: bool, t: Tokens) {
-    let home = Rect::from_center_size(c + vec2(-65.0, -65.0) * scale, vec2(26.0, 26.0) * scale);
+    let home = Rect::from_center_size(c + vec2(-69.0, -69.0) * scale, vec2(24.0, 24.0) * scale);
     crate::scenario::publish_target("axis_view:home", home);
     let home_hover = control(app, ui, home, "home", "Home: isometric view and fit model");
     if active {
-        icons::paint_icon(painter, home.shrink(4.0 * scale), "home", f32::from((if home_hover { t.accent } else { t.cube_face }).a()) / 255.0);
+        icons::paint_icon(painter, home.shrink(1.0 * scale), "home", f32::from((if home_hover { t.accent } else { t.cube_face }).a()) / 255.0);
     }
 }
 
@@ -325,42 +357,35 @@ pub(super) fn home(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
 /// while a cube face is square on, painted while the gizmo is `active`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn arrows(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, c: Pos2, scale: f32, active: bool, square_on: bool, t: Tokens) {
-    let (distance, button_size) = if square_on { (54.0, 20.0) } else { (74.0, 16.0) };
-    for (action, offset, direction, tooltip) in [
-        ("left", vec2(-distance, 0.0), vec2(1.0, 0.0), "Orbit left 90°"),
-        ("right", vec2(distance, 0.0), vec2(-1.0, 0.0), "Orbit right 90°"),
-        ("up", vec2(0.0, -distance), vec2(0.0, 1.0), "Orbit up 90°"),
-        ("down", vec2(0.0, distance), vec2(0.0, -1.0), "Orbit down 90°"),
-    ] {
-        let (action, tooltip) = match app.preferences.invert_navigator_arrows.then(|| inverted_arrow(action)).flatten() {
-            Some(swapped) => (
-                swapped,
-                match swapped {
-                    "right" => "Orbit right 90°",
-                    "left" => "Orbit left 90°",
-                    "down" => "Orbit down 90°",
-                    _ => "Orbit up 90°",
-                },
-            ),
-            None => (action, tooltip),
-        };
+    let distance = if square_on { 54.0 } else { 74.0 };
+    // The target holds the whole drawn triangle, wings included, so it is at least as wide.
+    let button_size = 2.0 * ORBIT_ARROW_WING;
+    for (side, offset) in
+        [("left", vec2(-distance, 0.0)), ("right", vec2(distance, 0.0)), ("up", vec2(0.0, -distance)), ("down", vec2(0.0, distance))]
+    {
+        let (action, tooltip, direction) = orbit_arrow(side, app.preferences.invert_navigator_arrows);
         let at = c + offset * scale;
         let hovered = control(app, ui, Rect::from_center_size(at, vec2(button_size, button_size) * scale), action, tooltip);
         if active {
             arrow(painter, at, direction * scale, hovered, t);
         }
     }
-    for (action, offset, size, clockwise, tooltip) in [
-        ("counterclockwise", vec2(42.0, -72.0), vec2(40.0, 20.0), false, "Rotate view counterclockwise 90°"),
-        ("clockwise", vec2(72.0, -42.0), vec2(20.0, 40.0), true, "Rotate view clockwise 90°"),
-    ] {
+    // Two arcs above the cube, left of the top arrow curling counterclockwise and right of it
+    // clockwise; angles in degrees on the screen, y down.
+    for (action, from, to, tooltip) in
+        [("counterclockwise", -110.0_f32, -155.0_f32, "Rotate view counterclockwise 90°"), ("clockwise", -70.0, -25.0, "Rotate view clockwise 90°")]
+    {
         let (action, tooltip) = match app.preferences.invert_curved_roll_arrows.then(|| inverted_roll(action)).flatten() {
             Some(swapped) => (swapped, if swapped == "clockwise" { "Rotate view clockwise 90°" } else { "Rotate view counterclockwise 90°" }),
             None => (action, tooltip),
         };
-        let hovered = control(app, ui, Rect::from_center_size(c + offset * scale, size * scale), action, tooltip);
+        let (from, to) = (from.to_radians(), to.to_radians());
+        let middle = (from + to) / 2.0;
+        let at = c + vec2(middle.cos(), middle.sin()) * (CURVED_ARROW_RADIUS * scale);
+        let target = curved_arrow_bounds(c, from, to, scale);
+        let hovered = control_in(app, ui, target, at, |p| curved_arrow_contains(c, from, to, scale, p), action, tooltip);
         if active {
-            curved_arrow(painter, c + vec2(42.0, -42.0) * scale, clockwise, hovered, t, scale);
+            curved_arrow(painter, c, from, to, hovered, t, scale);
         }
     }
 }
@@ -368,6 +393,7 @@ pub(super) fn arrows(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::icons::navigation::CURVED_ARROW_HEAD_LENGTH;
     #[cfg(test)]
     use crate::icons::navigation::{LABEL_PIXELS, face_text};
     use solidcraft_engine::render::{StandardView, UpAxis};
@@ -434,6 +460,31 @@ mod tests {
         let parallel = Camera { fov: 0.0, ..cam };
         for fov in [f64::NAN, f64::INFINITY, -1.0] {
             assert_eq!(points(&Camera { fov, ..cam }), points(&parallel));
+        }
+    }
+
+    /// Each orbit arrow points inward at the cube in both settings. By default it shows the way
+    /// the cube turns, so the camera moves against it; with "Invert the view cube rotation arrows"
+    /// the actions trade sides and the camera moves the way the arrow points.
+    #[test]
+    fn orbit_arrows_point_at_the_cube_and_the_preference_picks_cube_or_camera() {
+        let mut h = crate::scenario::Harness::new();
+        for inverted in [false, true] {
+            for (side, outward) in [("left", vec2(-1.0, 0.0)), ("right", vec2(1.0, 0.0)), ("up", vec2(0.0, -1.0)), ("down", vec2(0.0, 1.0))] {
+                let (action, _, direction) = orbit_arrow(side, inverted);
+                let mut from = Camera::default();
+                from.set_view(StandardView::Front);
+                let to: Camera = serde_json::from_value(
+                    h.app.session.execute("view.navigate", &json!({"camera": from, "action": action})).unwrap()["camera"].clone(),
+                )
+                .unwrap();
+                let (r, u, _) = from.basis();
+                let moved = to.back() - from.back();
+                let on_screen = vec2(moved.dot(r) as f32, -moved.dot(u) as f32).normalized();
+                let along = if inverted { 1.0 } else { -1.0 };
+                assert!(on_screen.dot(direction) * along > 0.99, "{side} (inverted {inverted}): drawn {direction:?}, camera moves {on_screen:?}");
+                assert!(direction.dot(outward) < -0.99, "{side} (inverted {inverted}): the arrow points at the cube");
+            }
         }
     }
 
@@ -852,6 +903,82 @@ mod tests {
         let p = crate::scenario::handle_at("navigation_cube:control:clockwise").unwrap();
         h.call("ui.click", json!({"x":p.x,"y":p.y}));
         assert!((h.app.cam.roll - camera.roll - std::f64::consts::FRAC_PI_2).abs() < 1e-6, "clockwise still rolls clockwise");
+    }
+
+    /// An orbit arrow is hit where it is drawn, wings included, whether a cube face is square on
+    /// (the arrows sit nearer) or not.
+    #[test]
+    fn the_wings_of_an_orbit_arrow_are_clickable() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube", "look_at_anim":false}));
+        for (view, distance) in [("front", 54.0_f32), ("iso", 74.0)] {
+            for (side, offset) in [("left", vec2(-1.0, 0.0)), ("right", vec2(1.0, 0.0)), ("up", vec2(0.0, -1.0)), ("down", vec2(0.0, 1.0))] {
+                let (_, _, inward) = orbit_arrow(side, false);
+                let across = vec2(-inward.y, inward.x);
+                for wing in [-1.0_f32, 1.0] {
+                    h.call("ui.view", json!({"view":view}));
+                    h.frames(2);
+                    let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
+                    let scale = outer.width() / DESIGN_SIZE;
+                    // A wing tip, a little inside the drawn corner (see `arrow`).
+                    let tip = offset * distance - inward * 6.0 + across * wing * (ORBIT_ARROW_WING - 0.6);
+                    let p = outer.center() + tip * scale;
+                    let before = h.app.cam.back();
+                    h.call("ui.click", json!({"x":p.x,"y":p.y}));
+                    h.frames(2);
+                    assert!(h.app.cam.back().dist(before) > 1e-3, "{view} {side} wing {wing}: the click did not orbit");
+                }
+            }
+        }
+    }
+
+    /// A roll arrow is hit where it is drawn: its far end and its arrowhead roll the view too,
+    /// not only the middle of the band.
+    #[test]
+    fn the_whole_drawn_roll_arrow_is_clickable() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube", "look_at_anim":false}));
+        let quarter = std::f64::consts::FRAC_PI_2;
+        let rolled = |delta: f64, way: f64| (delta - way).rem_euclid(std::f64::consts::TAU) < 1e-6;
+        // Each arrow, with the angles it is drawn between in `arrows`, and the roll it performs.
+        for (name, from, to, way) in [("counterclockwise", -110.0_f32, -155.0_f32, -quarter), ("clockwise", -70.0, -25.0, quarter)] {
+            let (from, to) = (from.to_radians(), to.to_radians());
+            let along = (to - from).signum();
+            let head_angle = CURVED_ARROW_HEAD_LENGTH / CURVED_ARROW_RADIUS;
+            // Near the start of the band, and in the arrowhead just short of its tip.
+            for (where_, angle) in [("start", from + along * 0.03), ("head", to + along * (head_angle - 0.05))] {
+                h.call("ui.view", json!({"view":"front"}));
+                h.frames(2);
+                let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
+                let radius = CURVED_ARROW_RADIUS * outer.width() / DESIGN_SIZE;
+                let p = outer.center() + vec2(angle.cos(), angle.sin()) * radius;
+                let before = h.app.cam.roll;
+                h.call("ui.click", json!({"x":p.x,"y":p.y}));
+                h.frames(2);
+                assert!(rolled(h.app.cam.roll - before, way), "{name} {where_}: roll went {} -> {}", before, h.app.cam.roll);
+            }
+        }
+    }
+
+    /// The pointer target follows the drawn band and head, and stops there.
+    #[test]
+    fn a_roll_arrow_contains_its_band_and_head_and_nothing_else() {
+        let centre = pos2(200.0, 300.0);
+        let (from, to) = ((-110.0_f32).to_radians(), (-155.0_f32).to_radians());
+        let along = (to - from).signum();
+        let head_angle = CURVED_ARROW_HEAD_LENGTH / CURVED_ARROW_RADIUS;
+        for scale in [1.0, 2.5] {
+            let at = |angle: f32, radius: f32| centre + vec2(angle.cos(), angle.sin()) * (radius * scale);
+            let inside = |p| curved_arrow_contains(centre, from, to, scale, p);
+            let middle = (from + to) / 2.0;
+            assert!(inside(at(middle, CURVED_ARROW_RADIUS)), "the middle of the band, scale {scale}");
+            assert!(inside(at(from + along * 0.02, CURVED_ARROW_RADIUS)), "its start, scale {scale}");
+            assert!(inside(at(to + along * (head_angle - 0.05), CURVED_ARROW_RADIUS)), "its head, scale {scale}");
+            assert!(!inside(at(from - along * 0.3, CURVED_ARROW_RADIUS)), "before its start, scale {scale}");
+            assert!(!inside(at(to + along * (head_angle + 0.3), CURVED_ARROW_RADIUS)), "past its tip, scale {scale}");
+            assert!(!inside(at(middle, CURVED_ARROW_RADIUS * 0.5)), "towards the cube, scale {scale}");
+            assert!(!inside(at(middle, CURVED_ARROW_RADIUS * 1.3)), "outside the band, scale {scale}");
+        }
     }
 
     /// A tooltip that names an edge or a corner joins two or three translated words. Right-to-left
