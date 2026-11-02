@@ -1,0 +1,32 @@
+{
+  "ar": {
+    "ui.nothing_to_redo": "لا شيء لإعادته",
+    "ui.nothing_to_undo": "لا شيء للتراجع عنه",
+    "ui.save_all": "حفظ الكل"
+  },
+  "en": {
+    "ui.nothing_to_redo": "Nothing to redo",
+    "ui.nothing_to_undo": "Nothing to undo",
+    "ui.save_all": "Save All"
+  },
+  "he": {
+    "ui.nothing_to_redo": "אין מה לשחזר",
+    "ui.nothing_to_undo": "אין מה לבטל",
+    "ui.save_all": "שמור הכל"
+  },
+  "ja": {
+    "ui.nothing_to_redo": "やり直す操作はありません",
+    "ui.nothing_to_undo": "元に戻す操作はありません",
+    "ui.save_all": "すべて保存"
+  },
+  "vi": {
+    "ui.nothing_to_redo": "Không có gì để làm lại",
+    "ui.nothing_to_undo": "Không có gì để hoàn tác",
+    "ui.save_all": "Lưu tất cả"
+  },
+  "zh": {
+    "ui.nothing_to_redo": "没有可重做的操作",
+    "ui.nothing_to_undo": "没有可撤销的操作",
+    "ui.save_all": "全部保存"
+  }
+}
