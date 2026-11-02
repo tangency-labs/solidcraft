@@ -396,10 +396,16 @@ pub fn tr_engine_error(error: &str) -> String {
     if error == "nothing to break at there" {
         return tr("sketch.error.nothing_to_break").to_string();
     }
-    if error.starts_with("`") && error.contains(" is an offset, and its ends follow its source curves: ") && error.ends_with(" the source curves instead, or break the offset association first") {
+    if error.starts_with("`")
+        && error.contains(" is an offset, and its ends follow its source curves: ")
+        && error.ends_with(" the source curves instead, or break the offset association first")
+    {
         return tr("sketch.error.offset_trim").to_string();
     }
-    if error.starts_with("`") && error.contains(" is an offset, and its corners follow its source curves: ") && error.ends_with(" the source corners before offsetting, or break the offset association first") {
+    if error.starts_with("`")
+        && error.contains(" is an offset, and its corners follow its source curves: ")
+        && error.ends_with(" the source corners before offsetting, or break the offset association first")
+    {
         return tr("sketch.error.offset_fillet_chamfer").to_string();
     }
     if error == "a closed curve needs two crossings to trim" {
