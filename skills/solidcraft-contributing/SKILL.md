@@ -32,7 +32,14 @@ not modelling a part through MCP.
   at, or a term only makes sense after reading the diff, rewrite it. Keep the terms a user sees in the
   app and explain the others.
   - Unclear: `Send to Slicer: pick one print face per body there, and show print faces only while it is open`
-  - Clear: `Send to Slicer: choose the face each body sits on in that window, not from the face menu`
+  - Clear: `3D printing: choose the face each body rests on in the Send to Slicer window, not the face menu`
+- **Write PR text in plain, literal English.** This follows the spirit of Simplified Technical English,
+  not its approved-word list. Keep the names a user sees in the app, even if they aren't everyday words.
+  - One idea per sentence, and about 20 words at most.
+  - Use active voice: "The view tints the face", not "The face is tinted".
+  - Use one word for one thing, and don't switch to a synonym partway through.
+  - Repeat the noun when "it" or "this" could be unclear.
+  - Don't stack nouns: "the option for picking in the face menu", not "face menu picking option".
 - **Push daily.** A draft with no pushes for 72 hours may be taken over: comment first, then open your
   own claim (you may start from its branch). The bot's automatic cleanup deadlines in CONTRIBUTING.md
   are separate.

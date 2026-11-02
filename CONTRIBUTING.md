@@ -344,7 +344,10 @@ and a fresh CI run:
    which part of the app changes and what a user now sees or can do, and name things rather than
    leaning on "there", "it" or "this".
    - Unclear: `Send to Slicer: pick one print face per body there, and show print faces only while it is open`
-   - Clear: `Send to Slicer: choose the face each body sits on in that window, not from the face menu`
+   - Clear: `3D printing: choose the face each body rests on in the Send to Slicer window, not the face menu`
+
+   Use plain, literal English in PR text: one idea per sentence, active voice, and one word for one
+   thing. This helps everyone, including readers whose first language isn't English.
 
 Commenting `/claim` assigns you, adds the `in progress` label, and replies with its automatic cleanup
 deadline. It frees a claim with no linked PR after 72 hours, or a claim with a PR after 14 days
