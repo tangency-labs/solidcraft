@@ -55,7 +55,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              trace?: path (write the recorded spans as a Chrome trace-event file, for chrome://tracing or Perfetto). Returns what \
              was recorded before enabled and reset apply: {compiled, enabled, wall_ms, spans, dropped, by_category: [{category, \
              self_ms, share}], rows: [{category, name, count, total_ms, self_ms, max_ms}], rows_total, trace?}, the rows the most \
-             self time first. Categories: solidcore (the kernel's calls), smlib (SMLib's C API calls, timed by the C API, when it is asked for), kernel, feature (one per feature \
+             self time first. Categories: solidcore (the kernel's calls), kernel, feature (one per feature \
              computed, by its type), doc, command, import (STEP/IGES stages), io. Self time is a span's time less the spans \
              inside it; total counts its outermost run only. Recording also starts with SOLIDCRAFT_PROFILE=1, the CLI's \
              --profile and the app's preference; off, it costs nothing measurable. Read-only",
