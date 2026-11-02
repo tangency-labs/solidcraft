@@ -219,7 +219,13 @@ fn flat_face_attachments() -> Vec<(String, String, usize, Option<(u32, bool)>, O
             }
             match s.execute("construct.plane.offset", &json!({"base": plane, "offset": 5})) {
                 Ok(_) => undo_to(&mut s, before),
-                Err(e) => problem = Some(problem.map_or(String::new(), |p| p + "; ") + &format!("construct.plane.offset: {e}")),
+                Err(e) => {
+                    let extra = format!("construct.plane.offset: {e}");
+                    problem = Some(match problem {
+                        Some(p) => format!("{p}; {extra}"),
+                        None => extra,
+                    });
+                }
             }
             let known = known_without_attachment(&name, &body, normal, distance);
             out.push((name.clone(), body, index, known, problem));
