@@ -1330,6 +1330,27 @@ fn reparent_carries_a_sketch_on_a_face_inside_the_moved_part() {
     assert!(reopened.model.results.iter().all(|r| r.error.is_none()), "and after reopening");
 }
 
+/// A parent placed twice is one definition: a sketch on the child's face made through the
+/// second placement moves along when the child is moved out through the first one, to the
+/// child's one new place.
+#[test]
+fn reparent_carries_a_face_sketch_made_through_another_placement_of_the_parent() {
+    let mut s = Session::default();
+    let (parent, first_parent) = created(&mut s, "Assembly");
+    let (_, child) = created(&mut s, "Knob");
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Knob"}));
+    let second_parent = run(&mut s, "occurrence.copy", json!({"component": parent, "translate": [20, 0, 0]}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": {"face": [25, 5, 10], "path": [second_parent, child]}, "name": "OnTop"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let out = run(&mut s, "occurrence.reparent", json!({"occurrence": child, "parent": "root", "path": [first_parent, child]}));
+    assert_eq!(out["path"], json!([child]));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "the sketch still finds its face");
+    let sketch = s.doc.features.iter().find(|f| f.name == "OnTop").unwrap();
+    let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &sketch.kind else { panic!("OnTop is no sketch") };
+    let anchor = crate::cmd::sketch::face::anchor(plane).unwrap();
+    assert_eq!(anchor.path, vec![child], "{anchor:?}");
+}
+
 #[test]
 fn reparent_refuses_cycles_and_moves_out_of_a_named_instance() {
     let mut s = Session::default();

@@ -73,8 +73,14 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Face attachments found through it follow it too (#11063): a sketch on a face of a body
     // inside it kept the old path, which no longer starts at the design, and the move was refused.
-    let rebase = |path: &mut Vec<u64>| {
-        if let Some(moved) = rebased(path, &old_path, &new_path) {
+    // A path through it by way of any placement of its old parent (a parent placed more than once
+    // is one definition) now runs through its one new place. A path that would grow past the 64
+    // placements a design keeps is refused here rather than saved where it can't be read back.
+    let mut too_deep = false;
+    let mut rebase = |path: &mut Vec<u64>| {
+        if let Some(at) = path.iter().position(|x| *x == id) {
+            let moved: Vec<u64> = new_path.iter().chain(&path[at + 1..]).copied().collect();
+            too_deep |= moved.len() > 64;
             *path = moved;
         }
     };
@@ -92,6 +98,9 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
             }
             _ => {}
         }
+    }
+    if too_deep {
+        return Err(bad(cmd, format!("moving {} would nest a face attachment more than 64 placements deep", o.name)));
     }
     // The paths through it follow it before the model is worked out again: that drops a selected
     // or active placement whose path no longer leads anywhere.
