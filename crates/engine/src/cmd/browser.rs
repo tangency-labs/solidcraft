@@ -15,7 +15,11 @@ use solidcraft_doc::{BrowserEntry, FeatureKind, MAX_GROUP_NESTING};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_};
+use crate::schema::TypedContract;
+use crate::schema::browser::{DocumentUnitsParams, DocumentUnitsResult};
 use crate::{Result, Session};
+
+const UNITS_CONTRACT: TypedContract<DocumentUnitsParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("body.rename", "Rename Body", rename_body).icon("rename").params("body: its name, name: the new name (features that use the body follow)"),
@@ -29,8 +33,10 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("browser.rename_group", "Rename Group", rename_group).icon("rename").params("group: id, name"),
     CommandSpec::new("browser.move", "Move Browser Items", move_items).icon("reorder")
         .params("folder, component?, items: [keys (strings) and group ids (numbers)]; group?: id (into it; omit for the folder's top level); before?: key or group id (position in it; default the end). A group cannot go into itself or past 8 levels"),
-    CommandSpec::new("document.units", "Change Design Units", document_units)
+    CommandSpec::new("document.units", "Change Design Units", crate::checked!("document.units", document_units))
         .icon("settings")
+        .contract(&UNITS_CONTRACT)
+        .output(crate::schema::output_schema_for::<DocumentUnitsResult>)
         .params("units: mm|cm|m|in|ft (display and unit-less parameters; values keep their meaning)"),
     CommandSpec::new("view.save", "New Named View", view_save)
         .icon("camera")
@@ -829,8 +835,11 @@ fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`units` must be mm, cm, m, in or ft"));
     }
     let old = s.doc.units.clone();
+    let reply = |kept: Vec<String>| {
+        serde_json::to_value(DocumentUnitsResult { units: u.to_string(), kept, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
+    };
     if old == u {
-        return Ok(json!({ "units": u, "kept": [] }));
+        return reply(Vec::new());
     }
     // What the geometry reads: every feature's length inputs.
     let matched_configuration = s.doc.configuration_matches().then(|| s.doc.configs.active.clone()).flatten();
@@ -871,7 +880,7 @@ fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
         s.doc_mut().apply_configuration(&row)?;
     }
     s.settle_value_edit(&solved)?;
-    Ok(json!({ "units": u, "kept": kept }))
+    reply(kept)
 }
 
 fn view_save(s: &mut Session, p: &Value) -> Result<Value> {
