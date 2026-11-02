@@ -56,7 +56,13 @@ anywhere (including dependencies; `deny.toml` bans copyleft crates).
   stack is allowed only if it visits in exactly the same order. Note each bound in the
   file header's Deviations line. `audit.recursion` (last unit) sweeps the whole crate.
 
-**Correctness gate.** A unit is **green** only when difftest runs the Rust and the C++
+**The gate.** solidcore's CI gates on its own checks: fmt, clippy, its tests and the wasm build.
+A pull request is green when they pass. The difftest against the C++ reference is a tool, not
+the gate: maintainers run it on a pull request that needs it, from the CI workflow's Run workflow
+with `difftest` set (`.github/workflows/ci.yml`), and the reference it builds is set in
+`scripts/upstream-pin.env`. When it runs, it holds the rules below.
+
+**Difftest parity.** A unit is **green** only when difftest runs the Rust and the C++
 (via FFI) on the same inputs and topology is identical and every value agrees within
 `1e-9` relative (`|a-b| <= 1e-9 * max(|a|,|b|)`; an absolute floor only where a unit
 documents one per key in `abs_floors()`, recorded in its report). Never loosen a tolerance to get green. The harness never feeds C++ outputs or C++ process state into the Rust side (`crates/difftest/README.md`, No C++ state reaches the Rust side). A disagreement you cannot fix

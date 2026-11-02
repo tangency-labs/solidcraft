@@ -15,6 +15,10 @@ on:
         description: "Explicitly skip the ratchet for a diagnostic manual run"
         type: boolean
         default: false
+      difftest:
+        description: "Run the difftest against the C++ reference (maintainers, when a PR needs it)"
+        type: boolean
+        default: false
 
 # Every job runs on Blacksmith's hosted runners (blacksmith.sh; ephemeral VMs, sponsored
 # minutes, outside the org's 20-runner cap): pushes to main, every pull request (fork or not)
@@ -37,6 +41,13 @@ permissions:
   contents: read
 
 jobs:
+  # The gate is solidcore's own: fmt, clippy, its tests and wasm. The difftest against the C++
+  # reference is a tool, not the gate (AGENTS.md §1): its jobs, the C++-feature clippy and the
+  # difftest runners' tests run only when a maintainer starts this workflow with `difftest`
+  # set (Run workflow on the PR's branch, with the PR's base as `baseline_sha`). On pull
+  # requests, the merge queue and pushes to main they are skipped, and the `difftest`
+  # required check passes as not requested.
+  #
   # What this run must check. `code`: false only when a pull_request or merge_group change
   # touches nothing but docs (DOCS_ONLY below); those skip the build/test/difftest jobs, whose
   # required checks then report "skipped" (passing). `full`: code and not a push to main. A
@@ -90,7 +101,9 @@ jobs:
       # difftest unit runners); lint it too, with the C++ headers in place.
       # difftest/cpp enables solidcore-ffi/cpp and registers the runners.
       - uses: ./.github/actions/cpp-reference
+        if: github.event_name == 'workflow_dispatch' && inputs.difftest
       - name: Clippy with the C++ feature
+        if: github.event_name == 'workflow_dispatch' && inputs.difftest
         run: cargo clippy --workspace --all-targets --features difftest/cpp -- -D warnings
 
   test:
@@ -148,9 +161,9 @@ jobs:
       # [profile.difftest]); here rather than after the difftest run, so they no longer
       # add to its wall time.
       - uses: ./.github/actions/cpp-reference
-        if: needs.changes.outputs.full == 'true'
+        if: needs.changes.outputs.full == 'true' && github.event_name == 'workflow_dispatch' && inputs.difftest
       - name: Difftest runner tests
-        if: needs.changes.outputs.full == 'true'
+        if: needs.changes.outputs.full == 'true' && github.event_name == 'workflow_dispatch' && inputs.difftest
         run: cargo test --profile difftest -p difftest -p solidcore-ffi --features cpp
 
   wasm:
@@ -195,7 +208,7 @@ jobs:
   # `difftest` (the required check's name) fails unless every part succeeded.
   difftest-baseline:
     needs: changes
-    if: needs.changes.outputs.full == 'true'
+    if: needs.changes.outputs.full == 'true' && github.event_name == 'workflow_dispatch' && inputs.difftest
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
       contents: read
@@ -233,11 +246,11 @@ jobs:
           retention-days: 1
 
   difftest-sweep:
-    # Starts right after `changes`: it is the critical path. Clippy with the cpp feature and
-    # the runner tests run in the clippy and test jobs, in parallel with this one. Also runs on
-    # pushes to main, where its reports are main's published set.
+    # Manual runs only (the `difftest` input). Starts right after `changes`: it is the
+    # longest part. Clippy with the cpp feature and the runner tests run in the clippy and test
+    # jobs, in parallel with this one.
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true' && github.event_name == 'workflow_dispatch' && inputs.difftest
     runs-on: blacksmith-16vcpu-ubuntu-2404
     permissions:
       contents: read
@@ -330,7 +343,7 @@ jobs:
   # Mandatory on every pull_request and merge_group run, in parallel with the sweep.
   difftest-perturb:
     needs: changes
-    if: needs.changes.outputs.full == 'true'
+    if: needs.changes.outputs.full == 'true' && github.event_name == 'workflow_dispatch' && inputs.difftest
     runs-on: blacksmith-16vcpu-ubuntu-2404
     env:
       SOLIDCORE_CPP_DIR: ${{ github.workspace }}/.cpp
@@ -369,7 +382,7 @@ jobs:
   # job fails or is skipped, this job is skipped and `difftest` fails.
   difftest-compare:
     needs: [changes, difftest-baseline, difftest-sweep]
-    if: needs.changes.outputs.full == 'true'
+    if: needs.changes.outputs.full == 'true' && github.event_name == 'workflow_dispatch' && inputs.difftest
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
@@ -414,10 +427,14 @@ jobs:
           CHANGES: ${{ needs.changes.result }}
           FULL: ${{ needs.changes.outputs.full }}
           SWEEP: ${{ needs.difftest-sweep.result }}
+          REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.difftest }}
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
           echo "changes difftest-baseline difftest-sweep difftest-perturb difftest-compare: $RESULTS"
           [ "$CHANGES" = success ] || { echo "the changes job did not succeed"; exit 1; }
+          if [ "$REQUESTED" != true ]; then
+            echo "difftest not requested: it runs when a maintainer starts the workflow with difftest set"; exit 0
+          fi
           if [ "$FULL" != true ]; then
             # docs-only change (everything skipped), or a push to main (only the sweep, which
             # publishes main's reports, runs; the merge queue already ran the full gate)
