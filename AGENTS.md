@@ -3,7 +3,9 @@
 solidcore is a port of NVIDIA's SMLib B-rep kernel (C++, Apache-2.0) to idiomatic safe
 Rust. Upstream is cloned (gitignored) at `upstream/`, pinned to v1.0.1, commit `3fd5b95`
 (`scripts/upstream-pin.env` is the single source of truth for scripts, CI and the site). Many
-agents work here at once: read this whole file before your first change.
+agents work here at once: read this whole file before your first change. Where the SMLib
+fork (tangency-labs/smlib) has replaced a construction, the fork is the reference, not upstream
+(§4b). People: [CONTRIBUTING.md](CONTRIBUTING.md) has the same principles in short.
 
 ```
 crates/solidcore       the kernel (pure Rust, no unsafe, wasm-ok)        owner: unit porters
@@ -14,6 +16,11 @@ plan/                  units/<id>.toml, findings/<slug>.md, upstream-issues/<slu
 ```
 
 ## 1. Hard rules
+
+**Read first.** Before changing an area, read its design doc and records: `docs/generic-blend.md`
+for fillets and chamfers, the unit's `plan/units/<id>.toml`, and its `plan/findings/` and
+`plan/upstream-issues/` entries. If the docs and the code don't answer your question, ask the
+maintainers on the area's hub issue before you build.
 
 **Licence.** Read only `upstream/source/SMLib`, `upstream/source/SM_API`,
 `upstream/tests/SM_API_test`, `upstream/tests/prog_test`, `upstream/TestFiles/pt_TestFiles`,
@@ -29,7 +36,8 @@ anywhere (including dependencies; `deny.toml` bans copyleft crates).
 - Deterministic: no clock, no hashing of addresses, no `HashMap` iteration order in
   results (use `Vec`, `BTreeMap`, or sort), randomness only from `kernel.rng`.
 - No global or `static mut`/`thread_local` state. Everything lives in `Kernel`.
-- Must build for `wasm32-unknown-unknown`: no threads, filesystem or `std::time`.
+- Must build for `wasm32-unknown-unknown`: no filesystem or `std::time`, and no threads in
+  library code for now (§4c).
 - Never allocate from an input-declared size unchecked (file headers, counts in data):
   use checked arithmetic and call `DatabaseReader::ensure_available(count, min_bytes,
   op)` before allocating, as `BSplineSurface::read_from_db` does. Upstream `malloc`
@@ -348,15 +356,23 @@ The kernel core is one big call cycle, so the plan dropped ~2,300 calls as *back
 
 ## 4b. Fixing upstream defects
 
-Every unit is ported; most new work fixes SMLib defects in the port. The long-term policy
-is still open in #1018. Until it is settled, the interim rule is the one in that thread:
+Every unit is ported; most new work fixes SMLib defects in the port or ports the fork's new
+constructions. The policy (owner, 2026-11-02; supersedes the interim rule of #1018):
 
-- **Default = the C++ reference.** Default behaviour matches the pinned C++ (usd-brep
-  v1.0.1 since #1277), and difftest keeps gating it at parity.
-- **Result-changing fixes are opt-in.** A fix that changes a result is a
-  `Kernel::fixes` (`UpstreamFixes`) field, off by default, with a regression test of the
-  issue's case and an addendum in `plan/upstream-issues/` naming the field. Examples:
-  #1233, #1285, #1287.
+- **The fork is the reference.** solidcore's default behaviour is the SMLib fork's
+  (tangency-labs/smlib), not upstream usd-brep v1.0.1's. The difftest still builds the pinned
+  upstream, the fork's base. Where the fork hasn't changed a path, the two agree. Where it has
+  replaced a construction (the generic blend: `docs/generic-blend.md` §9), the port matches the
+  fork bit for bit, and its divergence from upstream is recorded as the fork's change, not as
+  a port defect.
+- **Flags only while a port is in progress.** A change of result lands behind its
+  `Kernel::fixes` (`UpstreamFixes`) field with a regression test of its case and an addendum in
+  `plan/upstream-issues/`. Once its construction's ports are in and parity is shown, the flag
+  becomes the default and is removed, and the old path is **deleted** together with the
+  solidcore-only `WR-` patches made to it. No flag is permanent, and nothing is kept as a
+  fallback.
+- **Don't extend code that is going away.** Fix an old path only when a parity gate needs it
+  before its replacement lands; say so in the PR, and it is deleted with the code.
 - **Crash, UB, hang and nondeterminism fixes are unconditional**, e.g. #1160 for UB-87.
 - **Check that the issue is still open work before you claim it.** Many issues were
   fixed by a PR that did not close them (see #1206). Search merged PRs for the issue
@@ -375,11 +391,39 @@ is still open in #1018. Until it is settled, the interim rule is the one in that
   construction is wrong for it: the spine, the rails, the section, an end, a corner, a fold
   check or the overflow. Never add a special case for it.
 - **Literature first.** Before designing a geometry fix, search the literature for the
-  problem; most kernel failures are known problems with known constructions. Do this before
-  inventing a local remedy.
+  problem; most kernel failures are known problems with known constructions. Reading the papers
+  is most often the right way to solve a case; code invented to make one case pass is not.
+- **More than one issue.** Before fixing, look for the other open issues and failing cases
+  with the same cause, and fix the cause for all of them. A fix that closes one case and opens
+  another, or a growing set of per-case branches, means the cause is elsewhere.
+- **Events, not try/catch trains.** Decide from the geometry which case you are in (a tangent
+  end, a fold, a corner type, an empty offset) and build that one construction; never attempt
+  one construction, catch its failure and try the next. The generic blend is written this way:
+  its cases are events of the trace (`docs/generic-blend.md` §3).
+- **No code smells.** No patches, fallbacks, retries, magic tolerances, special-cased inputs,
+  dead flags or commented-out code left behind.
 - **Ask before you build.** Check open PRs and issues, and the hub issue for the area, for
   contributors working on something similar. Ask there, and build on their work rather than
-  next to it.
+  next to it. When the docs and the code can't answer a design question, ask the maintainers
+  there and wait for the answer rather than guessing.
+
+## 4c. Concurrency and parallelism
+
+- **The concurrency unit is the `Kernel`.** A `Kernel` is `Send` and holds no global state
+  (`crates/solidcore/src/kernel.rs`), so independent kernels run on separate threads or workers
+  without interfering: one `Kernel` per thread. Upstream SMLib's unit is the process, because
+  its default `SmContext` holds unlocked mutable state (the fork's
+  `.agents/operations/concurrency.md`); keeping all state in `Kernel` is what removes that limit,
+  so never add global, `static` or `thread_local` state.
+- **Inside an operation: parallel structure, serial for now.** Chains, spines, stations, spans and
+  corners are pure functions of immutable inputs (`docs/generic-blend.md` §5), so they can be spread
+  over threads later with identical results. Library code starts no threads today; wasm32 always
+  runs the same code serially.
+- **Same result, any thread count.** A parallel run must equal the serial one bit for bit: no
+  shared mutable state, no order-dependent reductions, no lazily filled caches without
+  synchronisation. State that latches on first use (ports of C++ function statics kept in
+  `Kernel`) makes a result depend on earlier calls; it goes when its construction is replaced, and
+  nothing new may be added like it.
 
 ## 5. Where things go
 
