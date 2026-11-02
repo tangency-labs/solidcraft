@@ -1374,6 +1374,16 @@ pub struct UpstreamFixes {
     /// turn on) collapses to one NURBS parameter and the surface built on it gets NaN knots
     /// and fails with `SM_ERR` (WR-211, #428; the fork's tangency-labs/smlib@5c0b5ed).
     pub ellipse_adjust_step_interval_keeps_turns: bool,
+    /// `SmPolarConversion::SetUpPolarConversion` (an ellipse's polar converter) takes an
+    /// open arc's end angles as its ends' own polar angles (`atan2(rx / ry * y, x)` in
+    /// `[0, 360)`); `STEPInversion` over the temporary full circle, whose seam rule takes a
+    /// point within tolerance of 360 for 0, is kept for an arc whose NURB is closed.
+    /// Upstream makes an open arc ending 1.2e-6 degrees short of its seam (a round's end
+    /// ellipse trimmed by its trace) end its STEP domain at exactly 360, so its analytic
+    /// form disagrees with its NURB by the gap (1.45e-8 at radius 0.71) and fails
+    /// `SmEllipse`'s own validity test 1 (WR-719; the fork's tangency-labs/smlib@cbeb14b).
+    /// Port in progress.
+    pub ellipse_open_arc_keeps_end_angle: bool,
     /// `SmBrep::DeleteFilletFace` removes a ring fillet (a round all the way round a boss's foot or rim: two closed tangent rails, one vertex each, and at most one seam) with the fork's `SmRingFilletRemoval`: the sharp edge is the intersection of the two tangent faces' surfaces within their natural domains (an exact circle for a boss), the tangent face's seam runs on to it along its line, and the rails become it; a removal that would need a surface or a curved edge continued past its domain is refused before the B-rep changes. Upstream takes four-sided fillets only, and fails on a ring (WR-605; SolidCraft change, tangency-labs/smlib 52bfef0, with 661f79c under `glue_vertices_joins_every_region`).
     pub fillet_removal_takes_ring_fillets: bool,
     /// `SmFeatureExecutive::DoDefeature` refuses a feature whose base patch could not be built (`SmFeature::BuildPatches` leaves `m_bBaseRebuilt` FALSE), with `SM_ERR` (the loop edge of the first unfilled loop in the error), and puts the base B-rep back as it was before the call; the executive is left with no features. Upstream applies no patch, returns success and hands back the base with the feature's faces cut out and the hole open: any face of a box with `SM_RB_EXTEND_SURFACE` gives 5 faces, volume 0 (WR-656; own design, not in the fork). A rebuild type of `SM_RB_NONE`, which asks for the hole, is not refused.

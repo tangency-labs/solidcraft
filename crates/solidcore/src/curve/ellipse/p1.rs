@@ -3208,4 +3208,53 @@ mod tests {
         assert_eq!(lin_pos.y_axis().z, 0.0);
         assert!(lin_pos.x_axis().dot(lin_pos.y_axis()).abs() < 1e-12);
     }
+
+    /// The trimmed arc of the fork's capi test `scenario_ellipse_trimmed_just_short_of_its_seam`
+    /// (tangency-labs/smlib 4e0d0e8): radii 0.5 and sqrt(0.5) over 313.53 to 360 degrees,
+    /// trimmed 2.57e-8 of its NURBS parameter (1.17e-6 degrees) short of its end. Returns
+    /// the STEP domain's end, the trimmed end's own polar angle and the largest distance
+    /// between the STEP and NURBS points at 65 STEP angles.
+    fn trimmed_just_short_of_its_seam(k: &Kernel) -> (f64, f64, f64) {
+        let o = Point3::new(79.95, 1.0, 29.5);
+        let (x, y) = (Vec3::new(0.0, 0.0, 1.0), Vec3::new(1.0, 0.0, 0.0));
+        let (rx, ry) = (0.5, 0.5_f64.sqrt());
+        let arc = Extent1d::from_min_max(313.531_199_289_226_44, 360.0);
+        let mut e = Ellipse::new(k, o, x, y, arc, rx, ry, &EllipseOptions::default()).unwrap();
+        let nat = e.base.natural_interval();
+        let mut piece = Extent1d::from_min_max(nat.min(), nat.evaluate(0.999_999_974_279_909_61));
+        e.trim(k, &mut piece, TrimMode::Notify).unwrap();
+        let (nurb, step) = (e.base.natural_interval(), e.step_interval());
+        let d = e.base.evaluate_point(nurb.max()).unwrap() - o;
+        let mut angle = (rx / ry * d.dot(y)).atan2(d.dot(x)) * 180.0 / PI;
+        if angle < 0.0 {
+            angle += 360.0;
+        }
+        let mut off = 0.0_f64;
+        for i in 0..=64 {
+            let deg = step.evaluate(f64::from(i) / 64.0);
+            let t = e.convert_t_from_step_to_nurbs(k, deg).unwrap();
+            let a = e.base.evaluate_point(t).unwrap();
+            let b = e.evaluate_step_point(deg).unwrap();
+            off = off.max((a - b).length());
+        }
+        (step.max(), angle, off)
+    }
+
+    /// WR-719 (the fork's cbeb14b): with `ellipse_open_arc_keeps_end_angle` an open arc
+    /// trimmed just short of its seam ends its STEP domain at its end's own angle, its
+    /// STEP and NURBS points within the fork test's 1e-10. The pinned set-up snaps the
+    /// end to 360 and the points are ~1.4e-8 apart.
+    #[test]
+    fn open_arc_trimmed_short_of_its_seam_keeps_its_end_angle() {
+        let mut k = kernel();
+        let (end, angle, off) = trimmed_just_short_of_its_seam(&k);
+        assert_eq!(end, 360.0);
+        assert!(angle < 360.0 - 1e-6, "{angle}");
+        assert!(off > 1e-8, "{off}");
+
+        k.fixes.ellipse_open_arc_keeps_end_angle = true;
+        let (end, angle, off) = trimmed_just_short_of_its_seam(&k);
+        assert!((end - angle).abs() <= 1e-9, "{end} against {angle}");
+        assert!(off <= 1e-10, "{off}");
+    }
 }

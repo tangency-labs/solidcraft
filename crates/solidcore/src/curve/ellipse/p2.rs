@@ -68,6 +68,9 @@
 //!   than [`MAX_PERIOD_SHIFTS`] shifts, the set-up returns
 //!   [`SolidError::NotConverged`] with the converter left impossible and the saved
 //!   STEP interval restored, so the temporary full-circle domain does not leak.
+//!   With the opt-in `Kernel::fixes.ellipse_open_arc_keeps_end_angle` (WR-719, the
+//!   fork's cbeb14b) an open arc's end angles are its ends' own polar angles rather than
+//!   `STEPInversion`'s, whose seam rule turns an end just short of 360 into 0.
 //! - **Notifications.** `SmBSplineCurve::SetFromGwNurb` and `Transform` send
 //!   `SM_NO_POST_EDIT`, whose `SmEllipse::Notify` override rebuilds the polar
 //!   converter (status ignored); the port calls [`Ellipse::set_up_polar_conversion`]
@@ -101,6 +104,7 @@
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::{self as curve_base, CIRCLE_TYPE, ELLIPSE_TYPE};
 use crate::curve::curve::p3::local_curve_solve;
+use crate::curve::curve::p4::is_closed_base;
 use crate::curve::line::{CurveLocationType, Line};
 use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::assert_array::labels::POLAR_CONVERSION_TYPE;
@@ -119,7 +123,8 @@ use crate::geom::tol::{
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{
-    max2, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_DEG, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI, TWO_PI,
+    max2, min2, rad_to_deg, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_DEG, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI,
+    TWO_PI,
 };
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
@@ -2091,10 +2096,34 @@ pub(crate) fn set_up_polar_conversion(
 
         // Get Polar angle about ZAxis from XAxis in degrees.
         let pnt1 = e.base.evaluate_point(lowest_angle_param)?;
-        let (mut lowest_deg, _) = e.step_inversion(k, pnt1, false, 0.0);
-
         let pnt2 = e.base.evaluate_point(highest_angle_param)?;
-        let (mut highest_deg, _) = e.step_inversion(k, pnt2, false, 0.0);
+
+        // With the opt-in fix (WR-719, the fork's cbeb14b): STEPInversion() on the full
+        // circle set above takes a point at its seam's end (360, to its zone tolerance /
+        // 100 and 1e-4 deg) as the seam's start (0): right for a closed curve, whose end
+        // is its start, but an open arc ending that near the seam (an ellipse trimmed
+        // 1.2e-6 deg short of 360) had its end angle made 360, its analytic domain then
+        // disagreeing with its NURB by the gap. An open arc's ends are their own polar
+        // angles, as STEPInversion() computes them before that rule.
+        let (mut lowest_deg, mut highest_deg);
+        if !k.fixes.ellipse_open_arc_keeps_end_angle
+            || is_closed_base(k, &e.base, &e.base.natural_interval(), 0.0)?
+        {
+            lowest_deg = e.step_inversion(k, pnt1, false, 0.0).0;
+            highest_deg = e.step_inversion(k, pnt2, false, 0.0).0;
+        } else {
+            let own_angle = |pnt: Point3| {
+                let vec = pnt - e.position.origin();
+                let mut angle = (e.radius_x / e.radius_y * vec.dot(e.position.y_axis()))
+                    .atan2(vec.dot(e.position.x_axis()));
+                if angle < 0.0 {
+                    angle += TWO_PI;
+                }
+                rad_to_deg(angle)
+            };
+            lowest_deg = own_angle(pnt1);
+            highest_deg = own_angle(pnt2);
+        }
 
         // STEPInversion will snap dHighestDeg to Min param according to tolerance.
         // Only account for noise here. [B630]
