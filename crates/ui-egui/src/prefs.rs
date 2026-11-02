@@ -1203,8 +1203,8 @@ preference_settings! {
     /// a double-click in the browser activates every component and one in the view does nothing,
     /// as before.
     double_click_components: bool = true, PAGE_DESIGN => check_id("settings.double_click_components");
-    /// Snap points (#5912): in Move, Align and Measure, hovering an edge, face or sketch curve
-    /// shows its centre, middle and end points to snap to. On by default; off, a pick takes only
+    /// Snap points (#5912): wherever a point is picked (Move, Align and Measure so far, #5881),
+    /// hovering an edge, face or sketch curve shows its centre, middle and end points to snap to. On by default; off, a pick takes only
     /// what is under the pointer, as before.
     snap_points: bool = true, PAGE_TOOLS => check_id("settings.snap_points");
     /// Insert Design lists the designs open in other tabs, each inserted with one click, then

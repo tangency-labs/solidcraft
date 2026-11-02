@@ -1,29 +1,29 @@
 {
   "en": {
-    "settings.snap_points": "Snap to center, middle and end points while picking in Move, Align and Measure"
+    "settings.snap_points": "Snap to center, middle and end points when picking a point"
   },
   "en-GB": {
-    "settings.snap_points": "Snap to centre, middle and end points while picking in Move, Align and Measure"
+    "settings.snap_points": "Snap to centre, middle and end points when picking a point"
   },
   "de": {
-    "settings.snap_points": "Beim Auswählen in Verschieben, Ausrichten und Messen an Mittel- und Endpunkten fangen"
+    "settings.snap_points": "Beim Auswählen eines Punkts an Mittel- und Endpunkten fangen"
   },
   "ja": {
-    "settings.snap_points": "移動、位置合わせ、計測で選択するときに中心点、中点、端点にスナップ"
+    "settings.snap_points": "点を選択するときに中心点、中点、端点にスナップ"
   },
   "ko": {
-    "settings.snap_points": "이동, 정렬, 측정에서 선택할 때 중심점, 중간점, 끝점에 스냅"
+    "settings.snap_points": "점을 선택할 때 중심점, 중간점, 끝점에 스냅"
   },
   "zh": {
-    "settings.snap_points": "在移动、对齐和测量中拾取时捕捉中心点、中点和端点"
+    "settings.snap_points": "拾取点时捕捉中心点、中点和端点"
   },
   "ar": {
-    "settings.snap_points": "الالتقاط إلى نقاط المركز والمنتصف والنهاية عند الاختيار في النقل والمحاذاة والقياس"
+    "settings.snap_points": "الالتقاط إلى نقاط المركز والمنتصف والنهاية عند اختيار نقطة"
   },
   "he": {
-    "settings.snap_points": "הצמדה לנקודות מרכז, אמצע וקצה בעת בחירה בהזזה, יישור ומדידה"
+    "settings.snap_points": "הצמדה לנקודות מרכז, אמצע וקצה בעת בחירת נקודה"
   },
   "vi": {
-    "settings.snap_points": "Bắt dính vào điểm tâm, điểm giữa và điểm đầu mút khi chọn trong Di chuyển, Căn chỉnh và Đo"
+    "settings.snap_points": "Bắt dính vào điểm tâm, điểm giữa và điểm đầu mút khi chọn một điểm"
   }
 }
