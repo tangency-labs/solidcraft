@@ -42,15 +42,13 @@ pub fn boxes_for(cmd: &str, n: usize) -> Vec<DimBox> {
     use ValueKind::*;
     let b = DimBox::new;
     match (cmd, n) {
-        // Length boxes start empty: an empty box keeps the infinite line (#10258).
+        // Length boxes start empty: an empty box keeps the infinite line (#10258). Offset is the
+        // distance from the reference, beside that length.
         ("sketch.construction_line.angle", 1) => vec![b("Angle", Angle), b("Length", Length)],
-        (
-            "sketch.construction_line.horizontal"
-            | "sketch.construction_line.vertical"
-            | "sketch.construction_line.parallel"
-            | "sketch.construction_line.perpendicular",
-            0 | 1,
-        ) => vec![b("Length", Length)],
+        ("sketch.construction_line.horizontal" | "sketch.construction_line.vertical" | "sketch.construction_line.parallel", 0 | 1) => {
+            vec![b("Length", Length), b("Offset", Length)]
+        }
+        ("sketch.construction_line.perpendicular", 0 | 1) => vec![b("Length", Length)],
         ("sketch.line" | "sketch.line.midpoint", n) if n >= 1 => vec![b("Length", Length), b("Angle", Angle)],
         ("sketch.rectangle.two_point" | "sketch.rectangle.center", 1) => vec![b("Width", Length), b("Height", Length)],
         ("sketch.rectangle.rounded", 1) => vec![b("Width", Length), b("Height", Length), b("Radius", Length)],
@@ -87,7 +85,11 @@ fn eval(doc: &Document, text: &str, kind: ValueKind) -> solidcraft_engine::doc::
 /// parameter (sent with the shape); sides and rho are counts and shape factors.
 fn is_dimension(t: &Tool, label: &str) -> bool {
     if solidcraft_engine::cmd::construction_line_mode(t.cmd).is_some() {
-        return (t.cmd == "sketch.construction_line.angle" && label == "Angle") || label == "Length";
+        return matches!(
+            (t.cmd, label),
+            ("sketch.construction_line.angle", "Angle")
+                | ("sketch.construction_line.parallel" | "sketch.construction_line.horizontal" | "sketch.construction_line.vertical", "Offset")
+        ) || label == "Length";
     }
     !matches!(label, "Sides" | "Rho") && !(t.cmd == "sketch.rectangle.rounded" && label == "Radius")
 }
@@ -102,6 +104,9 @@ fn sign(x: f64) -> f64 {
 
 /// The next point the tool would place for the cursor at `h`, honouring locked values.
 pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
+    if let Some(at) = construction_offset_at(app, t, h) {
+        return at;
+    }
     let Some(a) = t.pts.last().map(|p| p.0) else { return h };
     let lk = |l: &str| locked(app, t, l);
     match (t.cmd, t.pts.len()) {
@@ -277,8 +282,16 @@ fn line_boxes(a: Vec2, e: Vec2, px: f64, off: f64) -> Vec<(f64, Vec2)> {
 fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
     let off = 20.0 * px;
     // A one-click construction line's Length box waits beside the pointer before any click.
+    // Offset sits further along, clear of the pointer: on the axis the measured distance is
+    // zero and a box there would take the click that places the line.
     if t.pts.is_empty() && t.dims.first().is_some_and(|b| construction_length(t, b)) {
-        return vec![(0.0, e + Vec2::new(2.5 * off, -1.5 * off))];
+        let length_at = e + Vec2::new(2.5 * off, -1.5 * off);
+        let mut rows = vec![(0.0, length_at)];
+        if t.dims.iter().any(|b| b.label == "Offset") {
+            let distance = construction_offset_live(app, t, e, px).map(|v| v[0].0).unwrap_or(0.0);
+            rows.push((distance, length_at + Vec2::new(6.0 * off, 0.0)));
+        }
+        return rows;
     }
     let Some(a) = t.pts.last().map(|p| p.0) else { return Vec::new() };
     let first = t.pts.first().map(|p| p.0).unwrap_or(a);
@@ -390,9 +403,75 @@ fn fmt(app: &SolveApp, label: &str, kind: ValueKind, v: f64) -> String {
     }
 }
 
-/// Make the tool's boxes match its stage (new boxes when a point was placed).
+/// How far a construction line is into the input that shows its offset box. Other tools use the
+/// point count, which is also the stage those boxes are keyed by.
+fn input_stage(t: &Tool) -> usize {
+    match t.cmd {
+        "sketch.construction_line.horizontal" | "sketch.construction_line.vertical" => 1,
+        "sketch.construction_line.parallel" => usize::from(!t.picks.is_empty()),
+        _ => t.pts.len(),
+    }
+}
+
+/// The straight line a parallel construction offset is measured from.
+fn reference_line(app: &SolveApp, id: &str) -> Option<(Vec2, Vec2)> {
+    let state = app.session.world_state();
+    let sketch = &state.sketch(app.session.active_sketch?)?.sketch;
+    let index = sketch.curve_index(id)?;
+    let solidcraft_engine::sketch::CurveKind::Line { a, b } = sketch.curves.get(index)?.kind else { return None };
+    Some((sketch.point(a)?, sketch.point(b)?))
+}
+
+/// Where a locked offset puts the line: on the cursor's side of the reference, at the typed distance.
+fn construction_offset_at(app: &SolveApp, t: &Tool, h: Vec2) -> Option<Vec2> {
+    let distance = locked(app, t, "Offset")?;
+    match t.cmd {
+        "sketch.construction_line.horizontal" => Some(Vec2::new(h.x, sign(h.y) * distance)),
+        "sketch.construction_line.vertical" => Some(Vec2::new(sign(h.x) * distance, h.y)),
+        "sketch.construction_line.parallel" => {
+            let (a, b) = reference_line(app, t.picks.first()?)?;
+            let dir = (b - a).normalized()?;
+            let normal = dir.perp();
+            let foot = a + dir * ((h - a).dot(dir));
+            Some(foot + normal * (sign(normal.dot(h - a)) * distance))
+        }
+        _ => None,
+    }
+}
+
+/// The offset box: the distance from the reference, beside that measurement.
+fn construction_offset_live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Option<Vec<(f64, Vec2)>> {
+    let off = 20.0 * px;
+    match t.cmd {
+        "sketch.construction_line.horizontal" => Some(vec![(e.y.abs(), Vec2::new(e.x + off, e.y * 0.5))]),
+        "sketch.construction_line.vertical" => Some(vec![(e.x.abs(), Vec2::new(e.x * 0.5, e.y + off))]),
+        "sketch.construction_line.parallel" => {
+            let (a, b) = reference_line(app, t.picks.first()?)?;
+            let dir = (b - a).normalized()?;
+            let foot = a + dir * ((e - a).dot(dir));
+            Some(vec![((e - foot).len(), (foot + e) * 0.5 + dir * off)])
+        }
+        _ => None,
+    }
+}
+
+/// Length, and Offset once that distance has a reference. A parallel offset waits for the picked
+/// line. After the start of a typed length, the offset box steps aside: the next click picks the
+/// side, and a box on that click would take it.
+fn boxes_now(t: &Tool) -> Vec<DimBox> {
+    let mut boxes = boxes_for(t.cmd, t.pts.len());
+    if t.cmd == "sketch.construction_line.parallel" && input_stage(t) == 0 || !t.pts.is_empty() {
+        boxes.retain(|b| b.label != "Offset");
+    }
+    boxes
+}
+
+/// Make the tool's boxes match its stage (new boxes when a point was placed, or a reference was picked).
 pub fn sync(t: &mut Tool) {
-    if t.dims_stage != t.pts.len() {
+    let stage = t.pts.len();
+    let want = boxes_now(t);
+    let labels_differ = t.dims.len() != want.len() || t.dims.iter().zip(&want).any(|(a, b)| a.label != b.label);
+    if t.dims_stage != stage || labels_differ {
         if t.pts.len() == t.dims_stage.saturating_add(1)
             && matches!(
                 t.cmd,
@@ -408,10 +487,10 @@ pub fn sync(t: &mut Tool) {
         } else if t.pts.len() <= t.dims_stage || t.cmd == "sketch.line" {
             t.dim_history.clear();
         }
-        let before = std::mem::replace(&mut t.dims, boxes_for(t.cmd, t.pts.len()));
+        let before = std::mem::replace(&mut t.dims, want);
         let construction = solidcraft_engine::cmd::construction_line_mode(t.cmd).is_some();
-        if construction && t.pts.len() == t.dims_stage.saturating_add(1) {
-            // A length typed before the start click is still the line's length after it.
+        if construction && (t.pts.len() == t.dims_stage.saturating_add(1) || before.iter().any(|b| b.locked)) {
+            // A length or offset typed before the start click is still that value after it.
             for b in &mut t.dims {
                 if let Some(kept) = before.iter().find(|old| old.label == b.label && old.locked) {
                     *b = kept.clone();

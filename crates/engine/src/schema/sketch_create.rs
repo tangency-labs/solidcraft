@@ -32,6 +32,11 @@ pub struct ConstructionLineParams {
     /// A segment of this length from `at` instead of an infinite line, held by a length
     /// dimension. For the horizontal, vertical, angle, parallel and perpendicular methods.
     pub length: Option<LengthExpr>,
+    /// Positive distance from the reference, on the side of `at`. For a parallel line that is
+    /// the picked line; for a horizontal line, the sketch X axis; for a vertical line, the
+    /// sketch Y axis. A typed value becomes a driving dimension.
+    #[serde(default)]
+    pub offset: Option<LengthExpr>,
     /// `false` makes a line with a `length` a normal sketch line, ready for a profile, instead
     /// of construction geometry (default `true`). An infinite line is always construction.
     pub construction: Option<bool>,

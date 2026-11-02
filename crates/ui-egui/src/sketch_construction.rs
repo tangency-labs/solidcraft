@@ -92,9 +92,10 @@ pub fn line_type_switch(ui: &mut egui::Ui, t: &mut Tool) {
 pub fn hint(id: &str) -> String {
     let key = match construction_line_mode(id).unwrap_or("free") {
         "free" => "ui.construction.free_hint",
-        "horizontal" | "vertical" => "ui.construction.point_hint",
+        "horizontal" | "vertical" => "ui.construction.axis_hint",
         "angle" => "ui.construction.angle_hint",
-        "parallel" | "perpendicular" => "ui.construction.reference_hint",
+        "parallel" => "ui.construction.parallel_hint",
+        "perpendicular" => "ui.construction.reference_hint",
         "tangent_external" => "ui.construction.external_hint",
         "tangent_at" => "ui.construction.contact_hint",
         "tangent_two" => "ui.construction.common_hint",
@@ -139,6 +140,14 @@ fn params(app: &SolveApp, t: &Tool, pointer: &(Vec2, Option<String>), preview: b
         p["angle"] = json!(angle.to_degrees());
         if !preview && let Some(expression) = crate::sketch_dims::locked_expression(t, "Angle") {
             p["angle"] = json!(expression);
+        }
+    }
+    if matches!(mode, "parallel" | "horizontal" | "vertical") {
+        if let Some(offset) = crate::sketch_dims::locked_value(app, t, "Offset") {
+            p["offset"] = json!(offset);
+        }
+        if !preview && let Some(expression) = crate::sketch_dims::locked_expression(t, "Offset") {
+            p["offset"] = json!(expression);
         }
     }
     if let Some(expression) = typed_length(t) {

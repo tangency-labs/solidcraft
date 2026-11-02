@@ -86,6 +86,72 @@ fn construction_angle_accepts_inline_value_and_undo_is_one_step() {
 }
 
 #[test]
+fn construction_offset_box_follows_the_modes_that_have_a_distance() {
+    for id in ["sketch.construction_line.horizontal", "sketch.construction_line.vertical"] {
+        let mut h = sketch();
+        h.step(&json!({"start": id})).unwrap();
+        let mut tool = h.app.tool.take().unwrap();
+        crate::sketch_dims::sync(&mut tool);
+        assert_eq!(tool.dims.iter().map(|d| d.label).collect::<Vec<_>>(), vec!["Length", "Offset"], "{id}");
+    }
+    let mut h = sketch();
+    h.step(&json!({"start":"sketch.construction_line.parallel"})).unwrap();
+    let mut tool = h.app.tool.take().unwrap();
+    crate::sketch_dims::sync(&mut tool);
+    assert_eq!(tool.dims.iter().map(|d| d.label).collect::<Vec<_>>(), vec!["Length"], "the offset waits until the reference line is picked");
+    tool.picks.push("a".into());
+    crate::sketch_dims::sync(&mut tool);
+    assert_eq!(tool.dims.iter().map(|d| d.label).collect::<Vec<_>>(), vec!["Length", "Offset"]);
+
+    let mut h = sketch();
+    h.step(&json!({"start":"sketch.construction_line.perpendicular"})).unwrap();
+    let mut tool = h.app.tool.take().unwrap();
+    tool.picks.push("a".into());
+    crate::sketch_dims::sync(&mut tool);
+    assert_eq!(tool.dims.iter().map(|d| d.label).collect::<Vec<_>>(), vec!["Length"], "a perpendicular line has no offset");
+}
+
+#[test]
+fn typed_offset_places_the_line_and_its_dimension() {
+    let mut h = sketch();
+    steps(&mut h, "sketch.construction_line.parallel", &[[10., 0.]]);
+    let tool = h.app.tool.as_mut().unwrap();
+    tool.dims = crate::sketch_dims::boxes_for(tool.cmd, 1);
+    let dim = tool.dims.iter_mut().find(|d| d.label == "Offset").unwrap();
+    dim.locked = true;
+    dim.value = "8".into();
+    let mut tool = h.app.tool.take().unwrap();
+    super::place_point(&mut h.app, &mut tool, (solidcraft_engine::geom::Vec2::new(5., 10.), None));
+    let sid = h.app.session.active_sketch.unwrap();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    let curve = sk.curves.last().unwrap();
+    let CurveKind::Line { a, b } = curve.kind else { panic!("line") };
+    assert!((sk.point(a).unwrap().y - 8.).abs() < 1e-6);
+    assert!((sk.point(b).unwrap().y - 8.).abs() < 1e-6);
+    let distance = sk.constraints.iter().find(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::PointLineDistance { .. })).unwrap();
+    assert!((distance.kind.value().unwrap() - 8.).abs() < 1e-6);
+    assert_eq!(h.app.session.doc.param(distance.param.as_deref().unwrap()).unwrap().expr, "8");
+    let count = sk.curves.len();
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.session.doc.sketch(sid).unwrap().curves.len(), count - 1);
+
+    let mut h = sketch();
+    h.step(&json!({"start":"sketch.construction_line.horizontal"})).unwrap();
+    let tool = h.app.tool.as_mut().unwrap();
+    tool.dims = crate::sketch_dims::boxes_for(tool.cmd, 1);
+    let dim = tool.dims.iter_mut().find(|d| d.label == "Offset").unwrap();
+    dim.locked = true;
+    dim.value = "6".into();
+    let mut tool = h.app.tool.take().unwrap();
+    super::place_point(&mut h.app, &mut tool, (solidcraft_engine::geom::Vec2::new(2., -4.), None));
+    let sid = h.app.session.active_sketch.unwrap();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    let CurveKind::Line { a, .. } = sk.curves.last().unwrap().kind else { panic!("line") };
+    assert!((sk.point(a).unwrap().y + 6.).abs() < 1e-6);
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::DistanceY { .. })));
+}
+
+#[test]
 fn construction_family_menu_and_preference() {
     for enabled in [true, false] {
         let mut h = sketch();
@@ -127,7 +193,14 @@ fn a_waiting_length_box_leaves_letters_to_the_shortcuts_and_takes_a_digit() {
         h.step(&json!({"move":{"sketch":[5,10]}})).unwrap();
         h.settle();
         let tool = h.app.tool.as_ref().unwrap();
-        assert_eq!(tool.dims.iter().map(|b| (b.label, b.value.as_str(), b.locked)).collect::<Vec<_>>(), [("Length", "\u{221e}", false)], "{id}");
+        let labels: Vec<_> = tool.dims.iter().map(|b| b.label).collect();
+        assert_eq!(labels[0], "Length", "{id}");
+        assert_eq!((tool.dims[0].value.as_str(), tool.dims[0].locked), ("\u{221e}", false), "{id}");
+        if id.ends_with("horizontal") {
+            assert_eq!(labels, vec!["Length", "Offset"], "{id}");
+        } else {
+            assert_eq!(labels, vec!["Length"], "{id}");
+        }
         assert!(!length_box_focused(&h), "{id}: no keyboard before a digit");
         h.step(&json!({"key":"L"})).unwrap();
         h.settle();

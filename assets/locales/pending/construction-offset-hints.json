@@ -1,0 +1,22 @@
+{
+  "ar": {
+    "ui.construction.axis_hint": "خط إنشائي: انقر نقطة، أو أدخل بعدها عن محور الرسم",
+    "ui.construction.parallel_hint": "خط إنشائي: اختر خطًا مستقيمًا ثم انقر أو أدخل الإزاحة؛ انقر بزر الفأرة الأيمن لتغيير المرجع"
+  },
+  "he": {
+    "ui.construction.axis_hint": "ישר עזר: לחיצה על נקודה, או הקלדת המרחק מציר הסקיצה",
+    "ui.construction.parallel_hint": "ישר עזר: בחירת ישר, ואז לחיצה או הקלדת ההיסט; לחיצה ימנית להחלפת הייחוס"
+  },
+  "ja": {
+    "ui.construction.axis_hint": "補助直線: 点をクリックするか、スケッチ軸からの距離を入力",
+    "ui.construction.parallel_hint": "補助直線: 直線を選択し、クリックするかオフセットを入力。右クリックで参照を変更"
+  },
+  "vi": {
+    "ui.construction.axis_hint": "Đường dựng hình: nhấp một điểm, hoặc nhập khoảng cách tới trục phác thảo",
+    "ui.construction.parallel_hint": "Đường dựng hình: chọn đường thẳng, rồi nhấp hoặc nhập khoảng dời; nhấp chuột phải để đổi tham chiếu"
+  },
+  "zh": {
+    "ui.construction.axis_hint": "构造直线：单击一点，或输入它到草图轴的距离",
+    "ui.construction.parallel_hint": "构造直线：先选直线，再单击或输入偏移；右键单击更换参照"
+  }
+}
