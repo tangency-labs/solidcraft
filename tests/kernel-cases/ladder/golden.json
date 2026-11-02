@@ -1317,16 +1317,16 @@
       "status": "pass"
     },
     "ladder/07-fillets/012-variable-into-rounded-corner": {
+      "status": "fail",
+      "seconds": 0.03170746,
       "measured": {
-        "area_mm2": 8665.945693079353,
+        "area_mm2": 8680.795661225555,
         "body_count": 1,
-        "edges": 18,
-        "faces": 8,
-        "vertices": 12,
-        "volume_mm3": 47755.118560955016
-      },
-      "seconds": 0.050985104,
-      "status": "pass"
+        "edges": 20,
+        "faces": 9,
+        "vertices": 13,
+        "volume_mm3": 47770.94594656947
+      }
     },
     "ladder/07-fillets/013-corner-setback": {
       "measured": {
@@ -2001,5 +2001,5 @@
       "status": "pass"
     }
   },
-  "reason": "07-fillets/016 and 018 round the r3 with its tangent chain, which takes the vertical edge their third round was to pick (refused: the pick names no edge); 020 and 021 are the same corners with the r3 alone, as 016 and 018 were recorded (021 measured on SMLib f12a101); 06/023 (1/2-14 NPT) passes: a taper thread's groove follows its crest cone, so no sliver of the flanks is left (volume 8226.4042 against the standard's 8226.4049); the other cases as recorded on SMLib 60b1c6a"
+  "reason": "07-fillets/016 and 018 round the r3 with its tangent chain, which takes the vertical edge their third round was to pick (refused: the pick names no edge); 020 and 021 are the same corners with the r3 alone, as 016 and 018 were recorded (021 measured on SMLib f12a101); 06/023 (1/2-14 NPT) passes: a taper thread's groove follows its crest cone, so no sliver of the flanks is left (volume 8226.4042 against the standard's 8226.4049); the other cases as recorded on SMLib 60b1c6a 07-fillets/012 (SMLib v1.1.0-alpha, a18bbe5) fails: the variable round now ends at the smooth vertex (smlib #124, the End at a smooth vertex), which makes 9 faces, 20 edges and 13 vertices against the case's 8, 18 and 12, and 47770.95 mm³ against 47755.12. Recorded as it is while the End's change is established as by design or a defect."
 }
