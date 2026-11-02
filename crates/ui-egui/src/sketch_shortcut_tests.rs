@@ -432,6 +432,103 @@ fn assert_line(line: ([f64; 2], [f64; 2]), start: [f64; 2], end: [f64; 2]) {
     assert!(near(line.0, start) && near(line.1, end), "{line:?}, expected {start:?} to {end:?}");
 }
 
+/// A snap is only materialized when the line is drawn. Hovering between clicks must not
+/// mistake it for a point removed by Undo (#11181), including when Undo restores that start.
+#[test]
+fn a_line_starts_on_a_curve_or_midpoint_and_keeps_that_snap_after_undo() {
+    use solidcraft_engine::sketch::ConstraintKind;
+    for construction in [false, true] {
+        for (start, midpoint) in [([20.0, 10.0], false), ([37.5, 10.0], true)] {
+            let mut h = Harness::new();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.app.run("sketch.line", json!({"points":[[0,10],[75,10]],"ids":["guide"],"construction":construction,"infer":false})).unwrap();
+            h.call("ui.camera", json!({"target":[37.5,10,0],"distance":200}));
+            h.settle();
+            h.step(&json!({"start":"sketch.line"})).unwrap();
+            let before = h.app.session.doc.to_json();
+            h.step(&json!({"click":{"sketch":start}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.to_json(), before, "the first click only remembers its snap");
+            for end in [[70.0, 10.0], [60.0, 30.0]] {
+                h.step(&json!({"click":{"sketch":end}})).unwrap();
+                h.settle();
+                let drawn = lines(&h);
+                assert_eq!(drawn.len(), 2, "construction={construction}, midpoint={midpoint}: {:?}", h.app.status);
+                // An on-curve click is projected from f32 screen coordinates, unlike a grid snap.
+                for (actual, expected) in [(drawn[1].0, start), (drawn[1].1, end)] {
+                    assert!((actual[0] - expected[0]).abs() < 1e-5 && (actual[1] - expected[1]).abs() < 1e-5, "{actual:?}, expected {expected:?}");
+                }
+                let sid = h.app.session.active_sketch.unwrap();
+                let state = h.app.session.world_state();
+                let sketch = &state.sketch(sid).unwrap().sketch;
+                let guide = sketch.curve_index("guide").unwrap();
+                assert!(
+                    sketch.constraints.iter().any(|c| match c.kind {
+                        ConstraintKind::Midpoint { l, .. } => midpoint && l == guide,
+                        ConstraintKind::PointOnCurve { c, .. } => !midpoint && c == guide,
+                        _ => false,
+                    }),
+                    "the line retains its snap constraint"
+                );
+                h.app.run("edit.undo", json!({})).unwrap();
+                h.settle();
+                assert_eq!(h.app.session.doc.to_json(), before, "Undo removes the line and its materialized snap together");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_line_starts_at_a_curve_crossing_and_keeps_it_after_undo() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    for (id, points) in [("across", [[-40, 10], [35, 10]]), ("upright", [[-20, -20], [-20, 40]])] {
+        h.app.run("sketch.line", json!({"points":points,"ids":[id],"construction":true,"infer":false})).unwrap();
+    }
+    h.settle();
+    h.step(&json!({"start":"sketch.line"})).unwrap();
+    h.step(&json!({"click":{"sketch":[-20,10]}})).unwrap();
+    for end in [[20.0, 30.0], [25.0, -10.0]] {
+        h.step(&json!({"click":{"sketch":end}})).unwrap();
+        h.settle();
+        let drawn = lines(&h);
+        assert_eq!(drawn.len(), 3, "{:?}", h.app.status);
+        assert_line(drawn[2], [-20.0, 10.0], end);
+        let state = h.app.session.world_state();
+        let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        assert_eq!(
+            sketch.constraints.iter().filter(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::PointOnCurve { .. })).count(),
+            2,
+            "the new line stays on both crossing curves"
+        );
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.settle();
+        assert_eq!(lines(&h).len(), 2);
+    }
+}
+
+#[test]
+fn a_line_snap_whose_source_curve_is_undone_ends_without_an_error() {
+    for start in [[-20.0, 10.0], [-2.5, 10.0]] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[-40,10],[35,10]],"construction":true,"infer":false})).unwrap();
+        h.settle();
+        h.step(&json!({"start":"sketch.line"})).unwrap();
+        h.step(&json!({"click":{"sketch":start}})).unwrap();
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.settle();
+        h.step(&json!({"click":{"sketch":[-20,-20]}})).unwrap();
+        assert!(lines(&h).is_empty(), "the missing snap must not create a line");
+        h.step(&json!({"click":{"sketch":[-10,-20]}})).unwrap();
+        h.settle();
+        let drawn = lines(&h);
+        assert_eq!(drawn.len(), 1, "{:?}", h.app.status);
+        assert_line(drawn[0], [-20.0, -20.0], [-10.0, -20.0]);
+        h.step(&json!({"expect":{"errors":0}})).unwrap();
+    }
+}
+
 /// The Undo button runs `edit.undo` and leaves the tool on: the chain goes back to the end of the
 /// last segment still there, and the next click draws from it (#10016).
 #[test]
