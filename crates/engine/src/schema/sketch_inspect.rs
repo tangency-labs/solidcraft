@@ -122,7 +122,11 @@ fn flag<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
 fn multiplier<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
     match Value::deserialize(d)? {
         Value::Null => Ok(None),
-        v => v.as_f64().filter(|x| (0.01..=100.0).contains(x)).map(Some).ok_or_else(|| D::Error::custom(whole("`length` must be a multiplier 0.01…100"))),
+        v => v
+            .as_f64()
+            .filter(|x| (0.01..=100.0).contains(x))
+            .map(Some)
+            .ok_or_else(|| D::Error::custom(whole("`length` must be a multiplier 0.01…100"))),
     }
 }
 

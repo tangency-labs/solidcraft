@@ -160,7 +160,10 @@ fn curvature_comb(s: &mut Session, p: &Value) -> Result<Value> {
     if bool_(p, "clear").unwrap_or(false) {
         s.comb = None;
         s.revision += 1;
-        return reply(cmd, CurvatureCombReply::Cleared(AnalysisCleared { analysis: "curvature_comb".into(), cleared: true, param_warnings: Vec::new() }));
+        return reply(
+            cmd,
+            CurvatureCombReply::Cleared(AnalysisCleared { analysis: "curvature_comb".into(), cleared: true, param_warnings: Vec::new() }),
+        );
     }
     let add = bool_(p, "add").unwrap_or(false);
     let shown = if add { s.comb.clone() } else { None };

@@ -1,13 +1,18 @@
 use serde_json::{Value, json};
 
-use super::{CenterOfMassParams, CentersOfMass, CurvatureCombParams, CurvatureCombReply, IsocurveParams, IsocurveReply, MinimumRadii, MinimumRadiusParams};
+use super::{
+    CenterOfMassParams, CentersOfMass, CurvatureCombParams, CurvatureCombReply, IsocurveParams, IsocurveReply, MinimumRadii, MinimumRadiusParams,
+};
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<CurvatureCombParams>(), &["add", "clear", "count", "curves", "density", "edges", "faces", "length", "scale", "sketch"]);
+    assert_keys(
+        input_schema_for::<CurvatureCombParams>(),
+        &["add", "clear", "count", "curves", "density", "edges", "faces", "length", "scale", "sketch"],
+    );
     assert_keys(input_schema_for::<MinimumRadiusParams>(), &["curves", "edges", "faces", "sketch"]);
     assert_keys(input_schema_for::<IsocurveParams>(), &["add", "clear", "count", "faces"]);
     assert_keys(input_schema_for::<CenterOfMassParams>(), &["bodies"]);

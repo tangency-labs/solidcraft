@@ -3058,9 +3058,9 @@ fn apply_traced_with(
             if let Some(mb) = state.bodies.get(i).filter(|b| state.sheets.iter().any(|s| s.body == b.name)) {
                 let m = tool_frame(&mb.name);
                 if op == Operation::Cut && m.is_none() && !mb.body.is_mesh() && !tools.iter().any(|t| t.body.is_mesh()) {
-                    let reach = reach.get_or_insert_with(|| tools.iter().map(|t| more::body_box(&t.body)).collect());
+                    let reach = reach.get_or_insert_with(|| tools.iter().map(|t| more::exact_box(&t.body)).collect());
                     if !reach.is_empty()
-                        && let Some(target) = more::mesh_box(mb)
+                        && let Some(target) = more::exact_box(&mb.body)
                         && reach.iter().all(|tool| more::boxes_apart(&Some(target), tool))
                     {
                         continue;
@@ -4348,7 +4348,7 @@ fn parallel_tapped_wall(st: &ModelState, entry: Vec3, inward: Vec3, radius: f64)
         // (and the slant its axis may have off `inward` over the body's distance), and its
         // faces lie in the body's exact box: a body whose box that line misses by more holds
         // none, and its faces are not read one by one (#10227).
-        let far = more::exact_box(body).map_or(f64::INFINITY, |b| (b.min - entry).len().max((b.max - entry).len()) + b.diagonal());
+        let far = more::exact_box(&body.body).map_or(f64::INFINITY, |b| (b.min - entry).len().max((b.max - entry).len()) + b.diagonal());
         if far.is_finite() && more::line_beyond_reach(body, entry, inward, radius * 1.01 + tol + 1e-3 + 2e-4 * far) {
             continue;
         }

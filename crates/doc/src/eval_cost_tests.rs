@@ -1419,7 +1419,9 @@ fn a_tapped_hole_reads_the_bodies_along_its_drill_line() {
         points: None,
         thread: Some("M6".into()),
         thread_depth: None,
-        handedness: ThreadHandedness::Right,
+        hand: crate::thread_forms::ThreadHand::Right,
+        modeled: false,
+        ease_out: None,
         to: None,
         references: Vec::new(),
     };

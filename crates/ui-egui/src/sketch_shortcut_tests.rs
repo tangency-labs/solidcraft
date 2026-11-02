@@ -459,7 +459,7 @@ fn a_line_starts_on_a_curve_or_midpoint_and_keeps_that_snap_after_undo() {
                     assert!((actual[0] - expected[0]).abs() < 1e-5 && (actual[1] - expected[1]).abs() < 1e-5, "{actual:?}, expected {expected:?}");
                 }
                 let sid = h.app.session.active_sketch.unwrap();
-                let state = h.app.session.world_state();
+                let state = h.app.session.world_state().unwrap();
                 let sketch = &state.sketch(sid).unwrap().sketch;
                 let guide = sketch.curve_index("guide").unwrap();
                 assert!(
@@ -494,7 +494,7 @@ fn a_line_starts_at_a_curve_crossing_and_keeps_it_after_undo() {
         let drawn = lines(&h);
         assert_eq!(drawn.len(), 3, "{:?}", h.app.status);
         assert_line(drawn[2], [-20.0, 10.0], end);
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert_eq!(
             sketch.constraints.iter().filter(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::PointOnCurve { .. })).count(),

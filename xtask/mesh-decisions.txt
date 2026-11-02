@@ -107,9 +107,9 @@ crates/engine/src/cmd/compare.rs:enclosed_volume measures a B-rep body's volume 
 crates/engine/src/cmd/component_clone.rs:build places pasted bodies by meshes
 crates/engine/src/cmd/component_clone.rs:mesh_distance compares pasted bodies by mesh triangles
 crates/engine/src/cmd/component_properties.rs:measure_placed measures a placed component by its display mesh
+crates/engine/src/cmd/contact_sweep.rs:ContactGeometry::depth finds bodies passing through each other by mesh triangles
 crates/engine/src/cmd/contact_sweep.rs:ContactGeometry::gap measures gaps by mesh triangles
 crates/engine/src/cmd/contact_sweep.rs:ContactGeometry::gaps measures gaps by mesh triangles
-crates/engine/src/cmd/contact_sweep.rs:ContactGeometry::hits finds bodies passing through each other by mesh triangles
 crates/engine/src/cmd/contact_sweep.rs:ContactGeometry::placed places meshes for contact checks
 crates/engine/src/cmd/contact_sweep.rs:contact_mesh tessellates bodies for contact checks
 crates/engine/src/cmd/edit.rs:selection_item keeps a selection's face or edge index through the display mesh

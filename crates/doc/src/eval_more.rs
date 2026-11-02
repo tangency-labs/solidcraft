@@ -1743,17 +1743,18 @@ fn sheet_prism_cut(
     Ok(handled)
 }
 
-/// The exact box of `mb`, grown by twice its tolerance. None when it can't be worked out.
-pub(super) fn exact_box(mb: &ModelBody) -> Option<Aabb3> {
-    let b = mb.body.exact_bounds().ok()?;
-    (!b.is_empty() && b.min.is_finite() && b.max.is_finite()).then(|| b.inflated(2.0 * mb.body.record().tolerance + 1e-6))
+/// The exact box of `body`, grown by twice its tolerance: bodies whose boxes are apart do not
+/// meet. None when it can't be worked out.
+pub(super) fn exact_box(body: &Body) -> Option<Aabb3> {
+    let b = body.exact_bounds().ok()?;
+    (!b.is_empty() && b.min.is_finite() && b.max.is_finite()).then(|| b.inflated(2.0 * body.record().tolerance + 1e-6))
 }
 
 /// Whether the line through `at` along `dir` is known to pass farther than `reach` from the
 /// exact box of `mb` ([`exact_box`]) everywhere, and so from every point of the body. Unknown is
 /// never.
 pub(super) fn line_beyond_reach(mb: &ModelBody, at: Vec3, dir: Vec3, reach: f64) -> bool {
-    let Some(b) = exact_box(mb) else { return false };
+    let Some(b) = exact_box(&mb.body) else { return false };
     let b = b.inflated(reach);
     let (mut lo, mut hi) = (f64::NEG_INFINITY, f64::INFINITY);
     for (a, d, min, max) in [(at.x, dir.x, b.min.x, b.max.x), (at.y, dir.y, b.min.y, b.max.y), (at.z, dir.z, b.min.z, b.max.z)] {

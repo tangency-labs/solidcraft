@@ -59,7 +59,7 @@ fn model_lists_reply_with_their_schemas() {
     assert!(r["faces"].as_array().into_iter().flatten().any(|f| f["sheet_face"].as_str().is_some_and(|n| n.starts_with("sheet:"))), "{r}");
     let r = run(&mut s, "model.threads", json!({}));
     matches(&threads, &r, false);
-    assert_eq!((r["threads"][0]["designation"].as_str(), r["threads"][0]["handedness"].as_str()), (Some("M8"), Some("right")), "{r}");
+    assert_eq!((r["threads"][0]["designation"].as_str(), r["threads"][0]["hand"].as_str()), (Some("M8"), Some("right")), "{r}");
 
     matches(&edges, &run(&mut s, "model.edges", json!({"body": "Shaft", "bdy": 1})), true);
     matches(&faces, &run(&mut s, "model.faces", json!({"body": "Shaft", "bdy": 1})), true);
