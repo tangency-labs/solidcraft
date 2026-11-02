@@ -160,3 +160,21 @@ fn outside_round_concentric_with_the_inside_round_of_a_wall_fits() {
     let limit = (18.0 * 2f64.sqrt() - 15.0) / (2f64.sqrt() - 1.0);
     assert!(largest <= limit && largest > limit - 0.5, "{m}");
 }
+
+/// A Ø14 rod with a Ø5.4 boss joined flush on its top: the top face is a ring 4.3 mm wide round
+/// the boss. A round of the rod's top edge wider than the ring ran through the boss and made
+/// the part bigger (#3435); it is refused, and rounds that fit take material away.
+#[test]
+fn a_round_wider_than_the_ring_beside_its_edge_is_refused() {
+    let rod = crate::build::cylinder(Vec3::new(0.0, 0.0, 0.0), Vec3::Z, 7.0, 48.2).unwrap();
+    let boss = crate::build::cylinder(Vec3::new(0.0, 0.0, 48.2), Vec3::Z, 2.7, 2.0).unwrap();
+    let b = boolean(&rod, &boss, BoolOp::Union).unwrap().unwrap();
+    let edge = [Vec3::new(7.0, 0.0, 48.2)];
+    let m = too_large(crate::fillet(&b, &edge, 6.9));
+    assert!(m.contains("6.9 mm is too large for this fillet") && m.contains("grow the part"), "{m}");
+    let before = b.volume_at(0.01).unwrap();
+    for r in [1.0, 4.0] {
+        let after = crate::fillet(&b, &edge, r).unwrap().volume_at(0.01).unwrap();
+        assert!(after < before, "R{r}: {after} mm³, not less than {before} mm³");
+    }
+}
