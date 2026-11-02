@@ -993,3 +993,29 @@ fn a_parameter_value_a_3d_dimension_cannot_take_is_refused() {
         assert_eq!(s.doc.to_json(), before, "{bad}");
     }
 }
+
+#[test]
+fn a_settled_angle_between_long_oblique_lines_is_placed_driven() {
+    // A corner of 53.13010235…° between 300 and 500 mm lines, both fixed: the angle is settled,
+    // and its value must not be rounded into a conflict.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[300,0,0],[0,400,0]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    run(&mut s, "sketch.constraint.fix", json!({"entities": [a, b]}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": [a, b], "if_redundant": "driven"}));
+    assert_eq!((d["driven"].as_bool(), d["redundant"].as_bool()), (Some(true), Some(true)), "{d}");
+}
+
+#[test]
+fn a_new_3d_dimension_s_bad_value_is_refused_as_its_value() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let l = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,1,2]]}))["curves"][0].as_str().unwrap().to_string();
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.dimension", &json!({"entities": [l], "value": "-4 mm"})).unwrap_err().to_string();
+    assert!(e.contains("value:") && !e.contains("k1:") && !e.contains("k2:"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}

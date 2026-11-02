@@ -537,7 +537,8 @@ pub(crate) fn collapse_reason(before: &Sketch, after: &Sketch) -> Option<String>
     if flung(before, after) {
         return Some("that would throw points of the sketch far away: its constraints have no solution near the sketch as it is".into());
     }
-    None
+    // The 3D curves too (#10608).
+    wire_collapse(before, after)
 }
 
 /// Did solving `before` into `after` throw some point further than [`FLUNG`] times the sketch's

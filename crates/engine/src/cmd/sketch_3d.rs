@@ -496,7 +496,9 @@ pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Opti
     // its last edit, from before a parameter changed.
     let mut solved = stored.clone();
     s.doc.apply_wire_values(&s.doc.param_values().0, &mut solved)?;
-    let dof_before = solved.solve_wires(None).dof;
+    let counted = solved.solve_wires(None);
+    // A count the work ran out on says nothing about redundancy.
+    let dof_before = (!counted.uncounted).then_some(counted.dof);
     let sk = &solved;
     let ty = p.get("type").and_then(Value::as_str).unwrap_or("auto").to_ascii_lowercase();
     let axis = match ty.as_str() {
@@ -558,7 +560,8 @@ pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Opti
             return Ok((cid, None));
         }
         let unit_kind = if is_angle { solidcraft_doc::expr::Kind::Angle } else { solidcraft_doc::expr::Kind::Length };
-        let (unit, default_expr) = if is_angle { ("deg".to_string(), format!("{} deg", round6(cur.to_degrees()))) } else { doc.design_length(cur) };
+        // At full precision: a rounded angle is off by more than an angle on long lines holds to.
+        let (unit, default_expr) = if is_angle { ("deg".to_string(), format!("{} deg", cur.to_degrees())) } else { doc.design_length(cur) };
         let expression = match &defines {
             Some((name, rhs)) => {
                 if let Some(problem) = solidcraft_doc::Document::param_name_problem(name) {
@@ -578,9 +581,16 @@ pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Opti
             None => value.as_ref().map(|e| doc.with_design_unit(e, unit_kind)).unwrap_or(default_expr),
         };
         let pname = doc.new_model_param(&expression, &unit);
-        let (_, errs) = doc.param_values();
+        let (vals, errs) = doc.param_values();
         if let Some(err) = errs.get(&pname) {
             return Err(bad(cmd, format!("value: {err}")));
+        }
+        // A value the dimension cannot take, said of the value (the dimension has no id yet).
+        if let Some(v) = vals.get(&pname) {
+            let v = v.to_kind(unit_kind).map_err(|e| bad(cmd, format!("value: {e}")))?;
+            let mut with = kind.clone();
+            with.set_value(v);
+            sk.validate_wire_constraint(&with).map_err(|e| bad(cmd, format!("value: {e}")))?;
         }
         let cid = sk.add_wire_dimension(kind, Some(pname.clone()), false).map_err(|e| bad(cmd, e.to_string()))?;
         Ok((cid, Some(pname)))
@@ -589,7 +599,8 @@ pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Opti
     // A dimension the other 3D constraints already determine removes no freedom: refused, or
     // with `driven: true` placed as a reference dimension instead; with `if_redundant: "driven"`
     // it is placed so without asking.
-    if !driven && sk.clone().solve_wires(None).dof >= dof_before {
+    let after = sk.clone().solve_wires(None);
+    if !driven && dof_before.is_some_and(|before| !after.uncounted && after.dof >= before) {
         s.doc = start;
         if p.get("if_redundant").and_then(Value::as_str).is_some_and(|m| m.eq_ignore_ascii_case("driven")) {
             let mut q = p.clone();
@@ -612,7 +623,7 @@ pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Opti
     let type_name = match ty.as_str() {
         "distance_x" | "distance_y" | "distance_z" => ty.clone(),
         _ if is_angle => "angle".into(),
-        _ if ents.len() == 1 && sk.is_drawn_line(&ents[0]) => "length".into(),
+        _ if ents.len() == 1 && ents.first().is_some_and(|e| sk.is_drawn_line(e)) => "length".into(),
         _ if ents.len() == 1 => "radius".into(),
         _ => "distance".into(),
     };
@@ -652,7 +663,7 @@ pub(super) fn toggle_driven_3d(s: &mut Session, p: &Value, cmd: &str, cid: &str,
             slot.param = if driven {
                 None
             } else {
-                let (unit, e) = if slot.kind.is_angle() { ("deg".into(), format!("{} deg", round6(v.to_degrees()))) } else { doc.design_length(v) };
+                let (unit, e) = if slot.kind.is_angle() { ("deg".into(), format!("{} deg", v.to_degrees())) } else { doc.design_length(v) };
                 Some(doc.new_model_param(&e, &unit))
             };
         }
