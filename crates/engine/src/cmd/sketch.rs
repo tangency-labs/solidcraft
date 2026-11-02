@@ -3611,10 +3611,10 @@ fn drag_frame(s: &mut Session, p: &Value, live: bool) -> Result<(Value, Option<c
         // its degrees of freedom.
         Ok((d, if live && last.is_some() { left } else { left.solve_again() }))
     })?;
-    // Lines retain the grabbed material point through rotation. Other entities report the
-    // average displacement of their moving points, as before.
+    // Lines retain the grabbed material point through rotation. Other entities report how the
+    // moving point that got furthest toward `to` moved (`Dragged::at`).
     let sk = sketch_store::read(&s.doc, id)?;
-    let at = d.at(sk, from);
+    let at = d.at(sk, from, to);
     let rep = rep.or_else(|| last.map(|ss| SolveReport { status: solidcraft_sketch::SolveStatus::Solved, failing: Vec::new(), ..ss.report.clone() }));
     let out = json!({"sketch": rep.as_ref().map(report_json), "reached": d.reached, "at": [at.x, at.y], "retry": d.retry});
     Ok((out, rep.filter(|_| live).map(|report| crate::LiveEdit { sketch: id, report })))

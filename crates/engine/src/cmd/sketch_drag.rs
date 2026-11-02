@@ -533,12 +533,17 @@ pub(super) struct Dragged {
 }
 
 impl Dragged {
-    pub(super) fn at(&self, sk: &Sketch, from: Vec2) -> Vec2 {
+    /// Where the grab went on its way from `from` to `to`: moved as the moving point that got
+    /// furthest toward `to` moved. A selection part of which is held back (a rectangle with a
+    /// corner on the origin) has its free part follow the pointer; the average of all its points
+    /// lagged the grab, and the next frame's catch-up took the free part past the pointer.
+    pub(super) fn at(&self, sk: &Sketch, from: Vec2, to: Vec2) -> Vec2 {
         if let Some(at) = self.line_grab.and_then(|g| g.point(sk)) {
             return at;
         }
-        let moves: Vec<_> = self.moving.iter().filter_map(|&(q, was)| Some(sk.point(q)? - was)).collect();
-        from + moves.iter().fold(Vec2::ZERO, |a, m| a + *m) * (1.0 / moves.len().max(1) as f64)
+        let d = to - from;
+        let furthest = self.moving.iter().filter_map(|&(q, was)| Some(sk.point(q)? - was)).max_by(|a, b| a.dot(d).total_cmp(&b.dot(d)));
+        from + furthest.unwrap_or(Vec2::ZERO)
     }
 }
 
