@@ -1754,6 +1754,21 @@ impl Body {
             None => self.solid.boundaries().len(),
         }
     }
+
+    /// The volume in mm³ of each closed void inside the body (a shell whose faces face inwards),
+    /// or none for a body that is only a mesh.
+    pub fn void_volumes(&self) -> Vec<f64> {
+        if self.mesh.is_some() || self.solid.boundaries().len() < 2 {
+            return Vec::new();
+        }
+        let fine = |shell: &mt::Shell| {
+            let solid = Solid::try_new(vec![shell.clone()]).ok()?;
+            let tol = (span_of(&solid) * 5e-4).clamp(1e-4, 0.05);
+            let (v, _) = signed_volume(&solid, tol).ok()?;
+            (v < 0.0).then_some(-v)
+        };
+        self.solid.boundaries().iter().filter_map(fine).collect()
+    }
 }
 
 impl Body {
