@@ -929,10 +929,22 @@ fn edges_871() -> Vec<[f64; 3]> {
 /// #871's rounds at r 0.5 fit (the wall between the window and the block's side is 1.26 thick):
 /// 38 faces, and the closed form `issue_871_tests::rounds_that_fit_are_closed` derives. At r 1 they
 /// overlap, which is refused. With SMLib built, the C++ kernel gives the same.
+#[cfg(feature = "native")]
 #[test]
 fn rounds_on_the_871_part() {
-    #[cfg(feature = "native")]
     let _cpp = crate::route::on_cpp();
+    rounds_on_the_871_part_check();
+}
+
+/// The same on a build without the C++ kernel: solidcore's half alone. A test of its own, so that
+/// tests/KNOWN_FAILING_TESTS's entry for the C++ comparison (rounds_on_the_871_part) is graded only where it runs.
+#[cfg(not(feature = "native"))]
+#[test]
+fn rounds_on_the_871_part_on_solidcore() {
+    rounds_on_the_871_part_check();
+}
+
+fn rounds_on_the_871_part_check() {
     let p = part_871();
     let e = edges_871();
     let sizes = |r: f64| vec![r; e.len()];

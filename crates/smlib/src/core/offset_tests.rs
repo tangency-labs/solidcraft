@@ -840,10 +840,22 @@ fn offset_faces_close_a_step_wall() {
 /// solidcore refuses to put the rounds back (solidcore#2020, open): SolidCraft says it does not
 /// make that move, where the C++ kernel gives the analytic value, also checked here. With SMLib
 /// built, the C++ kernel gives the same at every other move.
+#[cfg(feature = "native")]
 #[test]
 fn mitred_rounds_follow_a_moved_top() {
-    #[cfg(feature = "native")]
     let _cpp = crate::route::on_cpp();
+    mitred_rounds_follow_a_moved_top_check();
+}
+
+/// The same on a build without the C++ kernel: solidcore's half alone. A test of its own, so that
+/// tests/KNOWN_FAILING_TESTS's entry for the C++ comparison (mitred_rounds_follow_a_moved_top) is graded only where it runs.
+#[cfg(not(feature = "native"))]
+#[test]
+fn mitred_rounds_follow_a_moved_top_on_solidcore() {
+    mitred_rounds_follow_a_moved_top_check();
+}
+
+fn mitred_rounds_follow_a_moved_top_check() {
     use super::blend::{Corners, blend};
     use crate::Blend;
     let edges = [[20.0, 0.0, 10.0], [20.0, 30.0, 10.0], [0.0, 15.0, 10.0], [40.0, 15.0, 10.0]];

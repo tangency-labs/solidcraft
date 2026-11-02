@@ -229,6 +229,15 @@ pub(crate) fn run_all(o: &Options, list: &[PathBuf]) -> Vec<Value> {
 
 /// Every case on each backend, one job pool for all the runs; the results per backend, in order.
 fn run_on(o: &Options, list: &[PathBuf], kernels: &[&str]) -> Vec<Vec<Value>> {
+    // Without --cli each case is `cargo run`: build the CLI once first, so the first cases don't
+    // spend their timeout compiling it (the C++ kernel's build most of all).
+    if o.cli.is_none() {
+        let mut c = cargo();
+        c.args(["build", "-q", "--release", "-p", "solidcraft-cli"]).args(cli_features(kernels));
+        if let Err(e) = c.status().map_err(|e| e.to_string()).and_then(|s| if s.success() { Ok(()) } else { Err(s.to_string()) }) {
+            eprintln!("kernel-cases: building solidcraft-cli failed ({e}); each case will say why");
+        }
+    }
     let jobs = list.len() * kernels.len();
     let next = Arc::new(Mutex::new(0usize));
     let results = Arc::new(Mutex::new(vec![Value::Null; jobs]));

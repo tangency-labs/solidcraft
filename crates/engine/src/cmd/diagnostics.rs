@@ -78,7 +78,10 @@ pub(crate) fn kernel_asked(choice: &Value, built: bool) -> Result<solidcraft_ker
     use solidcraft_kernel::kernel_route::Backend;
     let asked = choice.as_str().and_then(Backend::from_id).ok_or_else(|| bad("diagnostics.kernel", "`choice` is solidcore or smlib"))?;
     if asked == Backend::Smlib && !built {
-        return Err(EngineError::Disabled("diagnostics.kernel".into(), "this build doesn't include the C++ SMLib kernel; build with --features smlib".into()));
+        return Err(EngineError::Disabled(
+            "diagnostics.kernel".into(),
+            "this build doesn't include the C++ SMLib kernel; build with --features smlib".into(),
+        ));
     }
     Ok(asked)
 }
