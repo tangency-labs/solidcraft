@@ -32,7 +32,7 @@
 //! | [`series::V3`], [`series::VSer`] and its methods | `sm_V3`, `sm_V3From`, `sm_VSer`, `sm_VSerConst`, `sm_VSerAdd`, `sm_VSerSub`, `sm_VSerTimes`, `sm_VSerDot`, `sm_VSerCross` |
 //! | [`form::bern_mul`], [`form::bern_pow`] | `sm_BernMul`, `sm_BernPow`                       |
 //! | [`form::GnSectionForm`], [`form::gn_form`] | `sm_GnSectionForm`, `sm_GnForm`              |
-//! | [`form::hermite_points`], [`form::hermite_knots`] | `sm_HermitePoints`, `sm_HermiteKnots` |
+//! | [`form::hermite_points_sided`], [`form::hermite_knots`] | `sm_HermitePoints`, `sm_HermiteKnots` |
 //! | [`station::Partials`], [`station::Nurbs`], [`station::Nurbs::of`] | `sm_Partials`, `sm_Nurbs`, `sm_NurbsOf` |
 //! | [`station::span`], [`station::ders_basis`], [`station::nurbs_partials`] | `sm_Span`, `sm_DersBasis`, `sm_NurbsPartials` |
 //! | [`station::as_b_spline`], [`station::surface_partials`] | `IsKindOf(SmBSplineSurface_TYPE)` and the cast, `sm_SurfacePartials` |

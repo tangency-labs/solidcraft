@@ -142,29 +142,10 @@ pub fn gn_form_normalized<Z: Ring>(n: usize, w: Z) -> GnSectionFormT<Z> {
 }
 
 /// `sm_HermitePoints`: the control points (`3 (N - 1) + 1`) of the piecewise cubic Hermite
-/// curve on the stations `s` through the values `v` with the s-derivatives `d`.
-#[must_use]
-pub fn hermite_points(s: &[f64], v: &[Vec3], d: &[Vec3]) -> Vec<Vec3> {
-    let mut cps = Vec::new();
-    let rows = s.windows(2).zip(v.windows(2)).zip(d.windows(2));
-    for (j, ((sw, vw), dw)) in rows.enumerate() {
-        let (&[s0, s1], &[v0, v1], &[d0, d1]) = (sw, vw, dw) else {
-            continue;
-        };
-        let h = s1 - s0;
-        if j == 0 {
-            cps.push(v0);
-        }
-        cps.push(v0 + d0 * (h / 3.0));
-        cps.push(v1 - d1 * (h / 3.0));
-        cps.push(v1);
-    }
-    cps
-}
-
-/// `sm_HermitePoints` with each station's derivative as the span ending there takes it
-/// (`d_in`) and as the span starting there does (`d`): a station on a face's knot line has
-/// one of each (3bc54a4).
+/// curve on the stations `s` through the values `v`, with each station's s-derivative as
+/// the span ending there takes it (`d_in`) and as the span starting there does (`d`): a
+/// station on a face's knot line has one of each (3bc54a4). The fork's four-argument form,
+/// one derivative per station, was deleted in 9846aa0; pass the same slice twice for it.
 #[must_use]
 pub fn hermite_points_sided(s: &[f64], v: &[Vec3], d: &[Vec3], d_in: &[Vec3]) -> Vec<Vec3> {
     let mut cps = Vec::new();
@@ -267,7 +248,7 @@ mod tests {
     }
 
     #[test]
-    fn hermite_points_interpolate_values_and_derivatives() {
+    fn hermite_points_sided_interpolate_values_and_derivatives() {
         let s = [0.0, 1.0, 3.0];
         let v = [
             Vec3::new(0.0, 0.0, 0.0),
@@ -279,14 +260,26 @@ mod tests {
             Vec3::new(0.0, 3.0, 0.0),
             Vec3::new(1.5, 0.0, 0.0),
         ];
-        let cps = hermite_points(&s, &v, &d);
+        let cps = hermite_points_sided(&s, &v, &d, &d);
         assert_eq!(cps.len(), 3 * (s.len() - 1) + 1);
         assert_eq!(cps[0], v[0]);
         assert_eq!(cps[1], Vec3::new(1.0, 0.0, 0.0));
+        assert_eq!(cps[2], Vec3::new(1.0, 0.0, 0.0));
         assert_eq!(cps[3], v[1]);
         assert_eq!(cps[4], Vec3::new(1.0, 3.0, 0.0));
         assert_eq!(cps[5], Vec3::new(2.0, 0.0, 0.0));
         assert_eq!(cps[6], v[2]);
+        // A different incoming derivative at the middle station moves only the control
+        // point before it; the outgoing one still sets the point after it.
+        let mut d_in = d;
+        d_in[1] = Vec3::new(6.0, 0.0, 0.0);
+        let kinked = hermite_points_sided(&s, &v, &d, &d_in);
+        assert_eq!(kinked[2], Vec3::new(-1.0, 1.0, 0.0));
+        assert_eq!(kinked[4], cps[4]);
+        assert_eq!(
+            [kinked[0], kinked[1], kinked[3], kinked[5], kinked[6]],
+            [cps[0], cps[1], cps[3], cps[5], cps[6]]
+        );
         let (knots, mult) = hermite_knots(&s);
         assert_eq!(knots, s.to_vec());
         assert_eq!(mult, vec![4, 3, 4]);
