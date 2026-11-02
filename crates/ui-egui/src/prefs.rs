@@ -4226,6 +4226,7 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
     app.preferences = new;
     sync_surface_analysis(app);
     apply_file_limits(&app.preferences);
+    apply_revision_history(app);
     if units_changed {
         default_units_changed(app);
     }

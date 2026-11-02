@@ -1231,6 +1231,14 @@ mod urdf_tests;
 mod tests {
     use super::*;
 
+    /// A design file's model: the file without its save history, which an open design's session
+    /// keeps (`Session::document_history`) rather than its document.
+    fn file_model(bytes: &[u8]) -> Document {
+        let mut doc = solidcraft_io::read_design(bytes).unwrap();
+        doc.document_history = DocumentHistory::default();
+        doc
+    }
+
     /// #8139: with `objects: "component"` a 3MF has one object for each placement of a component
     /// with two or more bodies, its bodies the object's parts; the design's own bodies stay objects
     /// of their own. The default (and `objects: "body"`) is one object per body, as before. Read
@@ -1412,7 +1420,11 @@ mod tests {
         assert_eq!(adopted.doc.name, "Bracket copy");
         assert_eq!(direct.doc.name, "Bracket");
         assert_eq!(adopted.undo.iter().map(|u| u.doc.name.clone()).collect::<Vec<_>>(), vec!["Bracket copy".to_string(); adopted.undo.len()]);
-        assert_eq!(solidcraft_io::read_design(&std::fs::read(&b).unwrap()).unwrap(), *adopted.doc);
+        // The file is the design plus the save history the session took up with it.
+        let mut file = solidcraft_io::read_design(&std::fs::read(&b).unwrap()).unwrap();
+        assert_eq!(std::mem::take(&mut file.document_history), *adopted.document_history);
+        assert_eq!(adopted.document_history.revision, 1);
+        assert_eq!(file, *adopted.doc);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1542,7 +1554,7 @@ mod tests {
         }
         let bytes = std::fs::read(target.join("issue303-warm.solidcraft")).unwrap();
         assert!(solidcraft_io::read_design_preview(&bytes).is_some());
-        assert_eq!(solidcraft_io::read_design(&bytes).unwrap(), *session.doc);
+        assert_eq!(file_model(&bytes), *session.doc);
         let mut reads = Vec::new();
         for _ in 0..9 {
             let began = std::time::Instant::now();
@@ -1668,7 +1680,8 @@ mod tests {
                     !bytes.windows(b"cache/preview.bin".len()).any(|entry| entry == b"cache/preview.bin"),
                     "display meshes require preview: true"
                 );
-                assert_eq!(solidcraft_io::read_design(&bytes).unwrap(), *session.doc);
+                assert_eq!(solidcraft_io::read_design(&bytes).unwrap(), *session.design_at(None));
+                assert_eq!(file_model(&bytes), *session.doc, "saving leaves the open document as it was");
             }
         }
         std::fs::remove_file(&path).unwrap();
@@ -1978,7 +1991,7 @@ mod tests {
         for (i, times) in samples.iter_mut().enumerate() {
             times.sort_by(f64::total_cmp);
             let bytes = std::fs::read(target.join(format!("issue303-native-{i}.solidcraft"))).unwrap();
-            assert_eq!(solidcraft_io::read_design(&bytes).unwrap(), *session.doc);
+            assert_eq!(file_model(&bytes), *session.doc);
             assert_eq!(solidcraft_io::read_design_geometry(&bytes).is_some(), modes[i].1);
             eprintln!("native_save mode={i} median_ms={:.3} bytes={}", times[4], bytes.len());
         }

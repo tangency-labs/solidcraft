@@ -1,7 +1,9 @@
 [
   {
-    "note": "File view opens Revisions. Selecting the first save and Restore brings that solid back. Volume returns from 9000 mm3 to 8000 mm3."
+    "note": "With revision snapshots turned on (they are off by default), File view opens Revisions. Selecting the first save and Restore brings that solid back. Volume returns from 9000 mm3 to 8000 mm3."
   },
+  {"call": "ui.prefs", "params": {"revision_history": true}},
+  {"expect": {"prefs": {"revision_history": true}}},
   {
     "call": "engine.execute",
     "params": {
