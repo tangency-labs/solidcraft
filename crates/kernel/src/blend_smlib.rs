@@ -444,7 +444,15 @@ mod imp {
                     "not supported yet: the {what} meets a corner of this kind, which SMLib's blends do not handle yet (where its edges \
                      run on tangentially into each other, or meet in a way no blend corner builds)"
                 )),
-                SmError::NoRoom => KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow")),
+                // A setback too short for its corner's fill (SMLib certifies it convex only from
+                // its least on) names that least; any other is a blend too large for its room.
+                SmError::NoRoom => match solidcraft_smlib::blend_fit() {
+                    Some(solidcraft_smlib::Fit::SetbackAtLeast(least)) => KernelError::Invalid(format!(
+                        "the setback is too short for its corner: {}{least:.4} mm (the corner's patch is convex only from there)",
+                        crate::SETBACK_AT_LEAST
+                    )),
+                    _ => KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow")),
+                },
                 e => failed(what, "operation", e),
             })?;
             // Checked here unless the evaluation's validation mode leaves it to the feature's end
