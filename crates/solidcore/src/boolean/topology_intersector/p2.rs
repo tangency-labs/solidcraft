@@ -1272,6 +1272,13 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // Intersect Topology; if that didn't work, quit before we mess up the Breps.
         let mut deleted = self.intersect_topology(k, brep)?;
 
+        // Not upstream unless opted in (`Kernel::fixes.boolean_coincident_strip_drops_crossing`,
+        // WR-614, tangency-labs/solidcore#1794): the crossing line of two planes within
+        // tolerance of each other across a strip bounded by their edges is not an edge.
+        if k.fixes.boolean_coincident_strip_drops_crossing {
+            deleted.extend(self.drop_crossings_in_coincident_strips(k, brep)?);
+        }
+
         // Resolve Intersections; if that didn't work, quit before we mess up the Breps.
         deleted.extend(self.resolve_intersections(k, brep)?);
 

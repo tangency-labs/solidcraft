@@ -9,6 +9,7 @@
 //! [`p1`] also holds the edge/vertex mate storage of the merge stages
 //! ([`p1::Relations`], co-ported by `boolean.merge_p1`).
 
+mod coincident_strip;
 pub mod p1;
 pub mod p2;
 pub mod p3;

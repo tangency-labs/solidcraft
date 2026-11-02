@@ -2110,6 +2110,25 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             }
         }
 
+        // WR-619 (opt-in): a vertex whose collapsed speck definition was skipped at imprint
+        // stands in for that speck's span, so grow its tolerance to twice the gained gap
+        // (`AssertValid` tests 0-3 check half the vertex tolerance), covering any shift the
+        // WR-306 edge-interval fit above made.
+        if k.fixes.imprint_skips_collapsed_definition {
+            let gain = crate::geom::tol::gap_gain(k);
+            let skipped = mgr.skipped_speck_vertices().to_vec();
+            for (v, imprint_gap, p0, p1) in skipped {
+                if brep.vertex_brep(v)?.is_none() {
+                    continue;
+                }
+                let cur_gap = ClassGeometry::classification_vertex_point(&*brep, v)
+                    .map_or(0.0, |vp| max2(vp.distance(p0), vp.distance(p1)));
+                let gap = max2(imprint_gap, cur_gap);
+                let min_tol = zone_tol3d(k, 2.0 * gain * gap);
+                brep.set_topology_tolerance(k, v, min_tol, true, true)?;
+            }
+        }
+
         // At this point, there might be coincident Vertices and Edges in the Breps.
         // The rest of ManifoldBoolean() expects coincident Vertices to be glued
         // (although not coincident Edges).  So do that.  [Offset demo 2]
