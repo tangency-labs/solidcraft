@@ -374,6 +374,12 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.boolean_coincident_strip_drops_crossing = true;
     f.fillet_overflow_trim_at_creases = true;
     f.fillet_section_end_trim_at_creases = true;
+    f.fillet_refuse_mixed_corner_crossing_rails = true;
+    f.fillet_keep_features = true;
+    f.fillet_blend_corner = true;
+    f.fillet_exact_arc_sections = true;
+    f.fillet_exact_arc_spans = true;
+    f.fillet_refuse_rounds_breaking_through = true;
     f
 }
 
