@@ -86,6 +86,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             _ => k.simple_metadata().map(|(command, _)| command),
         },
         Kind::Assembly(k) => match k {
+            crate::dialogs_assembly::Asm::FromBodies => Some("component.from_bodies"),
             crate::dialogs_assembly::Asm::NewComponent { .. } => Some("component.create"),
             crate::dialogs_assembly::Asm::Joint(f) => Some(if f.as_built { "joint.as_built" } else { "joint.create" }),
             crate::dialogs_assembly::Asm::JointOrigin { .. } => Some("joint.origin"),

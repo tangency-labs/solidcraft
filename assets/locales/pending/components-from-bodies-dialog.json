@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.components_from_bodies_hint": "Create one component per selected body, named after that body, under the active component.",
+    "ui.components_from_bodies_required": "Select at least one body."
+  },
+  "ar": {
+    "ui.components_from_bodies_hint": "أنشئ مكونًا لكل جسم محدد، باسم ذلك الجسم، ضمن المكون النشط.",
+    "ui.components_from_bodies_required": "حدد جسمًا واحدًا على الأقل."
+  },
+  "he": {
+    "ui.components_from_bodies_hint": "יצירת רכיב לכל גוף שנבחר, בשם הגוף, תחת הרכיב הפעיל.",
+    "ui.components_from_bodies_required": "יש לבחור גוף אחד לפחות."
+  },
+  "ja": {
+    "ui.components_from_bodies_hint": "選択した各ボディと同じ名前のコンポーネントを、アクティブなコンポーネントの下に作成します。",
+    "ui.components_from_bodies_required": "ボディを1つ以上選択してください。"
+  },
+  "vi": {
+    "ui.components_from_bodies_hint": "Tạo một thành phần cho mỗi vật thể đã chọn, đặt tên theo vật thể đó, bên dưới thành phần đang hoạt động.",
+    "ui.components_from_bodies_required": "Chọn ít nhất một vật thể."
+  },
+  "zh": {
+    "ui.components_from_bodies_hint": "在活动组件下，为每个选定实体创建一个以该实体命名的组件。",
+    "ui.components_from_bodies_required": "请至少选择一个实体。"
+  },
+  "de": {
+    "ui.components_from_bodies_hint": "Für jeden ausgewählten Körper eine gleichnamige Komponente unter der aktiven Komponente erstellen.",
+    "ui.components_from_bodies_required": "Mindestens einen Körper auswählen."
+  },
+  "ko": {
+    "ui.components_from_bodies_hint": "활성 구성요소 아래에 선택한 각 바디와 같은 이름의 구성요소를 만듭니다.",
+    "ui.components_from_bodies_required": "바디를 하나 이상 선택하세요."
+  }
+}
