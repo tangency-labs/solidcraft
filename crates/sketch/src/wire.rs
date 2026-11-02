@@ -230,7 +230,7 @@ fn clean_wires(wires: &[Vec<Vec3>]) -> Result<Vec<Vec<Vec3>>> {
     wires.iter().map(|w| clean(w).ok_or_else(|| SketchError::Invalid("3D linked curve points out of range or coincident".into()))).collect()
 }
 
-fn drawn_polyline(fit: &[Vec3]) -> Result<Vec<Vec3>> {
+pub(crate) fn drawn_polyline(fit: &[Vec3]) -> Result<Vec<Vec3>> {
     if fit.is_empty() || fit.len() > MAX_FIT_POINTS {
         return Err(SketchError::Invalid(format!("a 3D curve needs 1 to {MAX_FIT_POINTS} points")));
     }
