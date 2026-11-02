@@ -170,8 +170,8 @@ in the full app in a new tab. `?embed` without `open` keeps the normal app layou
 
 The web app is also a container image, `ghcr.io/tangency-labs/solidcraft-web`, for Linux on x86_64
 and ARM64: `latest` is the latest release, `0.14.0` or `0.14` a release, `edge` the newest `main`.
-It serves the app with nginx on port 8080 and keeps nothing on the server: designs stay in each
-visitor's browser.
+It serves the app with nginx on port 8080. By default, designs stay in each visitor's browser;
+an optional shared server folder is described below.
 
 ```sh
 docker run -d --name solidcraft -p 8080:8080 --restart unless-stopped ghcr.io/tangency-labs/solidcraft-web:latest
@@ -191,6 +191,45 @@ Then open `http://localhost:8080/`. On another machine the browser only saves de
 so put a reverse proxy with a certificate in front (Caddy, Traefik, nginx); the app works under
 any URL path, such as `https://example.com/cad/`. To build the image without Compose, from the
 repository root: `docker build -f packaging/docker/Dockerfile -t solidcraft-web .`
+
+#### Shared server folder
+
+The image keeps designs in each browser by default. To share designs between devices,
+mount a writable folder at `/designs` and enable `SOLIDCRAFT_SERVER_FOLDER=1`:
+
+```yaml
+services:
+  solidcraft:
+    image: ghcr.io/tangency-labs/solidcraft-web:latest
+    ports:
+      - "8080:8080"
+    environment:
+      SOLIDCRAFT_SERVER_FOLDER: "1"
+    volumes:
+      - /mnt/nas/solidcraft:/designs:rw
+    read_only: true
+    tmpfs:
+      - /tmp
+```
+
+Mount the NAS share on the host first and give the container's user (uid 101) read/write
+access to the design folder. The container filesystem stays read-only; the design mount
+and `/tmp` are writable. Without the environment variable the folder endpoint stays off.
+
+Open and Save As then offer **Server folder**, beside **Computer** and **Browser storage**.
+Browse folders, create a new folder, and open or save a design. Save writes back to the
+server file and asks before overwriting a version changed elsewhere. A same-origin link
+such as `/?open=/designs/Converted/part.solidcraft` opens that file in place, so Save
+updates it. Other design links still open unsaved copies.
+
+The `/designs/` endpoint provides GET/HEAD, PUT, DELETE, MKCOL and OPTIONS with JSON
+folder listings and ETags; it is not a full WebDAV server. File names cannot contain
+traversal segments, backslashes, URL delimiters or hidden path components. Symlinks are
+not served. Uploads are limited to 256 MiB and listings to 10,000 entries.
+
+The folder has no built-in authentication. Restrict the whole site, including `/designs/`,
+through a reverse proxy with basic authentication, a VPN, or your existing access controls.
+Use HTTPS when accessing it over a network.
 
 ### 3D mouse in the browser
 
