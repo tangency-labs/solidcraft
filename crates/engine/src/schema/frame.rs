@@ -373,8 +373,14 @@ pub struct CreatedIds {
 pub struct SketchSolve {
     /// Whether the constraints solved, keeping the sketch's orientation.
     pub solved: bool,
-    /// The degrees of freedom left.
+    /// The degrees of freedom left, a sketch's drawn 3D curves' included (#10608).
     pub dof: usize,
+    /// For a sketch with drawn 3D curves: the planar sketch's own degrees of freedom.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planar_dof: Option<usize>,
+    /// For a sketch with drawn 3D curves: whether its 3D constraints hold.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wires_solved: Option<bool>,
 }
 
 /// What `frame.profile.insert` returns.

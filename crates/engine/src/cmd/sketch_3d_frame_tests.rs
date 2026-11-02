@@ -574,3 +574,82 @@ fn a_pipe_along_a_constrained_3d_line_follows_its_constraints() {
     run(&mut s, "sketch.finish", json!({}));
     assert!((volume(&s) - area * 60.0).abs() < 0.5, "{}", volume(&s));
 }
+
+#[test]
+fn planar_constraints_and_dimensions_count_without_the_3d_curves() {
+    // A free 3D line beside a planar line: the planar edits measure the planar sketch alone.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,5,5]]}));
+    let l = run(&mut s, "sketch.line", json!({"points":[[2,3],[10,4]]}))["curves"][0].as_str().unwrap().to_string();
+    let r = run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": l, "mode": "horizontal"}));
+    // The planar line's 4 less 1, and the 3D line's 6.
+    assert_eq!(r["sketch"]["dof"], 3 + 6, "{r}");
+    let r = run(&mut s, "sketch.dimension", json!({"entities": [l], "value": 25}));
+    assert_eq!(r["sketch"]["dof"], 2 + 6, "{r}");
+    let sketch = s.active_sketch.unwrap();
+    let st = s.model.state();
+    let ss = st.sketch(sketch).unwrap();
+    assert_eq!((ss.report.dof, ss.report.shown_dof()), (2, 8));
+}
+
+#[test]
+fn lines_drawn_one_segment_at_a_time_stay_joined_through_their_constraints() {
+    // As the 3D Line tool draws: one call per segment.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    let a = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[50,3,4]]}))["curves"][0].as_str().unwrap().to_string();
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[50,3,4],[52,5,40]]}));
+    let b = r["curves"][0].as_str().unwrap().to_string();
+    assert_eq!(r["constraints"].as_array().map(Vec::len), Some(1), "joined to the first: {r}");
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{a}.start")}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": a, "axis": "x"}));
+    let r = run(&mut s, "sketch.constraint.along_axis", json!({"line": b, "axis": "z"}));
+    assert_eq!(r["sketch"]["created"]["constraints"].as_array().map(Vec::len).unwrap_or(1), 1);
+    near(fit(&s, &b, 0), fit(&s, &a, 1));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.pipe", json!({"path_sketch":sketch,"path":[a, b],"diameter":4}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "the path is connected");
+}
+
+#[test]
+fn a_3d_conflict_does_not_block_planar_edits_and_shows() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    let l3 = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,5,5]]}))["curves"][0].as_str().unwrap().to_string();
+    // A design whose 3D constraints conflict (the end fixed off the axis it is held to).
+    let mut doc = (*s.doc).clone();
+    let sk = doc.sketch_mut(sketch).unwrap();
+    let end = sk.wire_point(&format!("{l3}.end")).unwrap();
+    let start = sk.wire_point(&format!("{l3}.start")).unwrap();
+    sk.add_wire_constraint(solidcraft_sketch::WireConstraintKind::Fix { p: start, at: Vec3::ZERO }).unwrap();
+    sk.add_wire_constraint(solidcraft_sketch::WireConstraintKind::Fix { p: end, at: Vec3::new(10.0, 5.0, 5.0) }).unwrap();
+    sk.add_wire_constraint(solidcraft_sketch::WireConstraintKind::AlongAxis { line: l3.clone(), axis: solidcraft_sketch::Axis::X }).unwrap();
+    s.set_doc(doc);
+    let l = run(&mut s, "sketch.line", json!({"points":[[0,0],[10,1]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": l, "mode": "horizontal"}));
+    let info = run(&mut s, "sketch.inspect", json!({}));
+    assert_eq!(info["status"], "solved", "{info}");
+    assert_eq!(info["wires_solve"]["ok"], false, "{info}");
+    let st = s.model.state();
+    assert!(!st.sketch(sketch).unwrap().report.shown_ok());
+}
+
+#[test]
+fn a_3d_curve_and_its_own_constraint_delete_together() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let l = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,1,1]]}))["curves"][0].as_str().unwrap().to_string();
+    let k = run(&mut s, "sketch.constraint.along_axis", json!({"line": l, "axis": "x"}))["constraints"][0].as_str().unwrap().to_string();
+    let info = run(&mut s, "sketch.inspect", json!({}));
+    assert!(info["wire_constraints"].as_array().is_some_and(|a| a.iter().any(|c| c["id"] == k.as_str())), "{info}");
+    run(&mut s, "sketch.delete", json!({"entities": [l, k]}));
+    let sk = s.doc.sketch(s.active_sketch.unwrap()).unwrap();
+    assert!(sk.wires.is_empty() && sk.wire_constraints.is_empty());
+}

@@ -610,8 +610,8 @@ fn glyphs(s: &mut Session, p: &Value) -> Result<Value> {
     let result = GlyphsResult {
         sketch: id,
         glyphs,
-        dof: ss.report.dof,
-        fully_constrained: ss.report.fully_constrained(),
+        dof: ss.report.shown_dof(),
+        fully_constrained: ss.report.shown_dof() == 0,
         conflicts: failing.clone(),
         param_warnings: Vec::new(),
     };

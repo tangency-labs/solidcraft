@@ -967,6 +967,10 @@ pub struct SolveResult {
     pub dof: usize,
     /// The constraints still violated after a failed solve, by id.
     pub failing: Vec<String>,
+    /// The 3D constraints' solve (#10608): `{ok, dof, failing, ...}`, or null for a sketch with no
+    /// drawn 3D curves. Its freedoms are counted in `dof`.
+    #[schemars(with = "Option<serde_json::Map<String, Value>>")]
+    pub wires_solve: Value,
     /// How many profiles the sketch has.
     pub profiles: usize,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

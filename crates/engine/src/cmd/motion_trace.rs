@@ -365,6 +365,8 @@ pub(crate) fn refresh(s: &mut Session) {
                     {
                         wire.pts = solidcraft_sketch::fit_polyline(&points);
                         wire.fit = points;
+                        // Its points are new: 3D constraints on the old ones go (#10608).
+                        sk.drop_wire_constraints_on(&t.wire);
                         changed = true;
                     }
                     None

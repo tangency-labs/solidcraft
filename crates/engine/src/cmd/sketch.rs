@@ -252,7 +252,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&COINCIDENT_CONTRACT)
         .output(output_schema_for::<CoincidentResult>)
-        .params(concat!("a, b: points (or a line's middle as {midpoint: line}, which becomes a point tied there), a point and a curve or sketch axis (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or two distinct lines (joins their closest endpoints), or two circles/arcs (the second lies on the first: concentric and equal, `constraints` lists both)", model_operand_doc!())),
+        .params(concat!("a, b: points (or a line's middle as {midpoint: line}, which becomes a point tied there), a point and a curve or sketch axis (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or two distinct lines (joins their closest endpoints), or two circles/arcs (the second lies on the first: concentric and equal, `constraints` lists both); in a 3D sketch, two 3D points (`<3D curve>.start`, `.end`, `.through`, `.<n>`, or a 3D point's id) or a 3D point and a drawn 3D line", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.tangent", "Tangent", crate::checked!("sketch.constraint.tangent", c_tangent))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_tangent")
@@ -287,7 +287,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&FIX_CONTRACT)
         .output(output_schema_for::<FixResult>)
-        .params("entity: point or curve | entities: [points and curves]; fixed?: bool (default: fix them all unless all are fixed, then unfix)"),
+        .params("entity: point or curve | entities: [points and curves] (3D points and drawn 3D curves too, not mixed with planar ones); fixed?: bool (default: fix them all unless all are fixed, then unfix)"),
     CommandSpec::new("sketch.constraint.midpoint", "MidPoint", crate::checked!("sketch.constraint.midpoint", c_midpoint))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_midpoint")
@@ -413,9 +413,15 @@ pub(super) fn edit_solve<T>(
     Ok((out, rep.as_ref().map(solve_info)))
 }
 
-/// A solve's outcome as commands return it.
+/// A solve's outcome as commands return it: `dof` counts the 3D curves' freedoms too, and a
+/// sketch with drawn 3D curves also gives the planar sketch's alone (`planar_dof`, #10608).
 pub(super) fn solve_info(rep: &SolveReport) -> SketchSolve {
-    SketchSolve { solved: rep.keeps_orientation(), dof: rep.dof }
+    SketchSolve {
+        solved: rep.keeps_orientation() && rep.wires_ok(),
+        dof: rep.shown_dof(),
+        planar_dof: rep.wires.is_some().then_some(rep.dof),
+        wires_solved: None,
+    }
 }
 
 /// A solve's outcome as commands return it, as JSON.
@@ -475,6 +481,9 @@ pub(super) fn edit_solved<T>(
     // The constraints the sketch has before the edit: a conflict message must not name one the
     // edit itself adds (the trial already holds it under the id it would get, #9735).
     let pre: Vec<String> = sk.constraints.iter().map(|c| c.id.clone()).chain(sk.wire_constraints.iter().map(|c| c.id.clone())).collect();
+    // Whether the 3D constraints held before the edit: only then does one that leaves them
+    // failing count as over-constraining (#10608).
+    let wires_held = sk.wire_constraints_hold();
     let (out, left) = f(&mut sk, &mut doc)?;
     // A curve that took an offset spline's generated node (drawn from its end) gets its own point there.
     sk.detach_offset_points()?;
@@ -494,7 +503,7 @@ pub(super) fn edit_solved<T>(
                 sk.refresh_offsets()?;
                 rep = counted_solve(&mut sk, &Hold::default(), Some(&reference), analysis, None);
             }
-            Some(settle(strict, rep, &mut sk, unsolved, &pre)?)
+            Some(settle(strict, rep, &mut sk, unsolved, &pre, wires_held)?)
         }
         // Solved for the document's values, continuing from the stored solved state.
         Left::Solved | Left::Unsolved => {
@@ -504,7 +513,7 @@ pub(super) fn edit_solved<T>(
             #[cfg(test)]
             solve_counts::record(analysis);
             let rep = doc.solve_sketch_with_analysis(&vals, &mut sk, &stored, None, analysis)?;
-            Some(settle(strict, rep, &mut sk, unsolved, &pre)?)
+            Some(settle(strict, rep, &mut sk, unsolved, &pre, wires_held)?)
         }
     };
     sketch_store::checked(&sk)?;
@@ -519,7 +528,20 @@ pub(super) fn edit_solved<T>(
 /// `pre` are the constraint ids the sketch had before the edit: the trial already holds any
 /// constraint the edit adds, under the id it would get, so a conflict list that named it would
 /// name an id the sketch does not have yet (#9735).
-fn settle(strict: bool, mut rep: SolveReport, sk: &mut Sketch, unsolved: Sketch, pre: &[String]) -> Result<SolveReport> {
+/// The 3D constraints (#10608) are settled apart: with `strict`, an edit that leaves them
+/// failing is refused when they held before it (`wires_held`); a planar edit of a sketch whose
+/// 3D constraints already fail goes ahead. A 3D solve that fails moves no 3D curve.
+fn settle(strict: bool, mut rep: SolveReport, sk: &mut Sketch, unsolved: Sketch, pre: &[String], wires_held: bool) -> Result<SolveReport> {
+    if let Some(w) = rep.wires.as_ref().filter(|w| strict && wires_held && !w.ok) {
+        let had: Vec<String> = w.failing.iter().filter(|id| pre.iter().any(|p| p == *id)).cloned().collect();
+        if w.oversized.is_none() && had.is_empty() {
+            return Err(EngineError::Other(
+                "that would over-constrain the 3D sketch (it conflicts with what its other 3D constraints already determine)".into(),
+            ));
+        }
+        let w = solidcraft_sketch::WireReport { failing: had, ..w.clone() };
+        return Err(EngineError::Other(w.failure(|f| format!("that would over-constrain the 3D sketch (conflicts with {f})"))));
+    }
     if strict && !rep.keeps_orientation() {
         if rep.folded.is_empty() && rep.oversized.is_none() && !rep.failing.is_empty() {
             let had: Vec<String> = rep.failing.iter().filter(|id| pre.iter().any(|p| p == *id)).cloned().collect();
@@ -864,6 +886,7 @@ pub(crate) fn created(before: Option<&Sketch>, after: &Sketch) -> Value {
         .chain(before.curves.iter().map(|x| x.id.as_str()))
         .chain(before.constraints.iter().map(|x| x.id.as_str()))
         .chain(before.wires.iter().map(|x| x.id.as_str()))
+        .chain(before.wire_constraints.iter().map(|x| x.id.as_str()))
         .collect();
     let new = |id: &&str| !old.contains(*id);
     let points: Vec<&str> = after.points.iter().map(|x| x.id.as_str()).filter(new).collect();
@@ -872,7 +895,10 @@ pub(crate) fn created(before: Option<&Sketch>, after: &Sketch) -> Value {
     let ids = |v: Vec<&solidcraft_sketch::Constraint>| v.into_iter().map(|c| c.id.clone()).collect::<Vec<_>>();
     let wires: Vec<String> = after.wires.iter().map(|x| x.id.as_str()).filter(new).map(str::to_string).collect();
     let owned = |v: Vec<&str>| v.into_iter().map(str::to_string).collect::<Vec<_>>();
-    let out = Created { points: owned(points), curves: owned(curves), constraints: ids(cons), dimensions: ids(dims), wires };
+    // 3D constraints (#10608) are constraints too.
+    let mut constraints = ids(cons);
+    constraints.extend(after.wire_constraints.iter().map(|c| c.id.clone()).filter(|id| new(&id.as_str())));
+    let out = Created { points: owned(points), curves: owned(curves), constraints, dimensions: ids(dims), wires };
     serde_json::to_value(out).unwrap_or_default()
 }
 
@@ -2462,7 +2488,8 @@ pub(super) fn redundancy(
     residual: Option<f64>,
     cid: &str,
 ) -> Result<Option<Vec<String>>> {
-    let after = info.get("dof").and_then(Value::as_u64).map(|d| d as usize);
+    // The planar sketch's freedoms, as `before` counts them (not its 3D curves', #10608).
+    let after = info.get("planar_dof").or_else(|| info.get("dof")).and_then(Value::as_u64).map(|d| d as usize);
     let (Some(b), Some(a)) = (before, after) else { return Ok(None) };
     if a < b {
         return Ok(None);
@@ -4046,6 +4073,9 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
         let mut curves = Vec::new();
         let mut points = Vec::new();
         let mut cons = Vec::new();
+        // 3D constraints and curves (#10608) go after the loop, so a curve and its own
+        // constraint can be deleted together.
+        let (mut wire_cons, mut wires) = (Vec::new(), Vec::new());
         for id in &ids {
             if let Some(c) = sk.curve_index(id) {
                 curves.push(c);
@@ -4056,10 +4086,10 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
                 points.push(q);
             } else if sk.constraints.iter().any(|c| &c.id == id) {
                 cons.push(id.clone());
-            } else if sk.remove_wire_constraints(std::slice::from_ref(id)) > 0 {
-                // A 3D constraint (#10608): gone, nothing else to do.
+            } else if sk.wire_constraints.iter().any(|c| &c.id == id) {
+                wire_cons.push(id.clone());
             } else if sk.wire_index(id).is_some() {
-                sk.remove_wires(std::slice::from_ref(id));
+                wires.push(id.clone());
             } else if sk.link(id).is_some() {
                 curves.extend(sk.link_curves(id));
                 points.extend(sk.link_points(id));
@@ -4067,6 +4097,8 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
                 return Err(bad(cmd, format!("unknown sketch entity `{id}`")));
             }
         }
+        sk.remove_wire_constraints(&wire_cons);
+        sk.remove_wires(&wires);
         let selected_curves = curves.iter().copied().collect::<std::collections::BTreeSet<_>>();
         let selected_points = points.iter().copied().collect::<std::collections::BTreeSet<_>>();
         let removed = sk
@@ -4367,8 +4399,9 @@ fn solve_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let id = sketch_store::target(s, p, cmd)?;
     let st = s.model.state();
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("the sketch has not been evaluated".into()))?;
-    let (status, dof, failing, profiles) = (ss.report.status.into(), ss.report.dof, ss.report.failing.clone(), ss.profiles.len());
-    reply(cmd, SolveResult { status, dof, failing, profiles, param_warnings: Vec::new() })
+    let (status, dof, failing, profiles) = (ss.report.status.into(), ss.report.shown_dof(), ss.report.failing.clone(), ss.profiles.len());
+    let wires_solve = serde_json::to_value(&ss.report.wires).unwrap_or_default();
+    reply(cmd, SolveResult { status, dof, failing, wires_solve, profiles, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]
