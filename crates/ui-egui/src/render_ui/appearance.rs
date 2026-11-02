@@ -221,7 +221,7 @@ fn ended(response: &egui::Response, ui: &egui::Ui) -> bool {
         || response.changed() && !response.has_focus() && !ui.input(|i| i.pointer.any_down()) && !ui.ctx().egui_wants_keyboard_input()
 }
 
-pub(super) fn scope_label(app: &SolveApp) -> &str {
+pub(in crate::render_workspace) fn scope_label(app: &SolveApp) -> &str {
     app.tr(match app.session.selection.last() {
         Some(Sel::Occurrence { .. }) => "render.pick_component",
         Some(Sel::Face { .. }) => "render.pick_face",
@@ -254,7 +254,7 @@ pub(super) fn reset(app: &mut SolveApp) {
     }
 }
 
-pub(super) fn remove(app: &mut SolveApp) {
+pub(in crate::render_workspace) fn remove(app: &mut SolveApp) {
     let view = &app.render_workspace.view.inspector.selection_appearance;
     let selected = targets(app, view.inspected.unwrap_or(mode_step(view.mode)));
     if let Some(look) = view.draft.clone() {
@@ -265,7 +265,7 @@ pub(super) fn remove(app: &mut SolveApp) {
     }
 }
 
-pub(super) fn footer(app: &mut SolveApp, ui: &mut egui::Ui) {
+pub(in crate::render_workspace) fn footer(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         let enabled = !app.session.selection.is_empty();
         if ui_kit::icon_label_action(ui, app.tr("render.inspector_save_library"), Some("plus"), enabled, false)
@@ -283,7 +283,7 @@ pub(super) fn footer(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 /// Returns false only when the explicit-target fallback should be shown.
-pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
+pub(in crate::render_workspace) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     if app.session.selection.is_empty() {
         app.render_workspace.view.inspector.selection_appearance = View::default();
         return false;

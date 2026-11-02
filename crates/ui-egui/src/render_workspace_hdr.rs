@@ -122,9 +122,7 @@ pub(super) fn pick(app: &mut SolveApp, target: Target) {
         }
         if let Err(error) = inspect(app, target, path) {
             app.set_status(error, true);
-        } else if app.render_workspace.view.selection == super::RenderSelection::Environment
-            || matches!(app.render_workspace.view.inspector.page, super::inspector::Page::Environment | super::inspector::Page::Background)
-        {
+        } else if app.render_workspace.view.selection == super::RenderSelection::Environment {
             super::environment::persist(app);
         }
     });
