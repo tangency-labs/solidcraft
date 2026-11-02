@@ -239,6 +239,40 @@ fn a_sheet_exports_on_its_paper() {
     assert!(refused(&mut s, json!({"sheet": id, "paper": null})).contains("paper"));
 }
 
+/// Each format agrees with the sheet's own size (#4894, W23-3): A3 is 420 x 297 mm in the SVG, and
+/// 2481 x 1754 pixels at 150 dpi in each colour's PNG header (420 and 297 mm are 2480.3 and 1753.9
+/// pixels, and a sheet's grid rounds each side outward). Saved with the design and opened
+/// again, the sheet exports the same bytes in every format and colour. PDF and DXF join as their
+/// writers land.
+#[test]
+fn each_format_agrees_with_the_sheet_and_exports_the_same_once_reopened() {
+    let (mut s, sheet, _) = front_and_top();
+    let id = ids::encode(sheet);
+    let exports = |s: &mut Session| {
+        let mut all = vec![run(s, CMD, json!({"sheet": id}))["svg"].clone()];
+        for colour in ["grey", "black_white", "rgb", "transparent"] {
+            all.push(run(s, CMD, json!({"sheet": id, "format": "png", "dpi": 150, "colour": colour}))["data"].clone());
+        }
+        all
+    };
+    let before = exports(&mut s);
+    let svg = before[0].as_str().unwrap();
+    assert!(svg.contains(r#"width="420mm" height="297mm" viewBox="0 0 420 297""#), "{}", &svg[..svg.len().min(300)]);
+    for data in &before[1..] {
+        let png = data.as_str().and_then(base64_decode).unwrap();
+        // Width and height, big-endian, follow the signature and the header chunk's length and name.
+        let size = [16, 20].map(|at| u32::from_be_bytes(png[at..at + 4].try_into().unwrap()));
+        assert_eq!((&png[12..16], size), (&b"IHDR"[..], [2481, 1754]));
+    }
+    let drawing = ids::encode(s.drawing("test").unwrap().id);
+    let folder = Folder::new("drawing-export-agree");
+    run(&mut s, "file.save", json!({"path": folder.path("sheet.solidcraft")}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": folder.path("sheet.solidcraft")}));
+    run(&mut opened, "drawing.open", json!({"drawing": drawing}));
+    assert!(exports(&mut opened) == before, "a format exports differently once reopened");
+}
+
 /// A document held for the reply takes up to its limit and is refused past it, naming the way out.
 #[test]
 fn a_reply_holds_a_document_up_to_its_limit() {
