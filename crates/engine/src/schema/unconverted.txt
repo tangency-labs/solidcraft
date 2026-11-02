@@ -134,9 +134,6 @@ material.list
 material.properties.directional
 material.properties.validate
 mesh.convert
-model.edges
-model.faces
-model.threads
 motion.delete
 motion.export
 motion.export_animation
