@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "sheet.flat_pattern.no_body": "لا يوجد جسم من الصفائح المعدنية"
+  },
+  "de": {
+    "sheet.flat_pattern.no_body": "Kein Blechkörper vorhanden"
+  },
+  "en": {
+    "sheet.flat_pattern.no_body": "no sheet metal body"
+  },
+  "he": {
+    "sheet.flat_pattern.no_body": "אין גוף פח"
+  },
+  "ja": {
+    "sheet.flat_pattern.no_body": "板金ボディがありません"
+  },
+  "ko": {
+    "sheet.flat_pattern.no_body": "판금 바디가 없습니다"
+  },
+  "vi": {
+    "sheet.flat_pattern.no_body": "Không có khối kim loại tấm"
+  },
+  "zh": {
+    "sheet.flat_pattern.no_body": "没有钣金实体"
+  }
+}

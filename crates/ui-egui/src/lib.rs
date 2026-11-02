@@ -3346,7 +3346,7 @@ pub fn command_label(id: &str) -> &str {
 pub fn friendly_error(id: &str, e: &str) -> String {
     let label = i18n::tr_label(command_label(id));
     let msg = e.replace(&format!("invalid parameters for `{id}`: "), "").replace(&format!("{id}: "), "").replace(&format!("`{id}`"), label);
-    let msg = i18n::tr_label(&msg);
+    let msg = i18n::tr_diagnostic(i18n::tr_label(&msg));
     if msg.starts_with(label) { msg.to_string() } else { format!("{label}: {msg}") }
 }
 

@@ -62,6 +62,23 @@ fn direction_label(d: Vec3) -> String {
         .join(" · ")
 }
 
+// Keep geometry/picking labels stable; localize only their displayed words.
+fn localized_direction_label(label: &str) -> String {
+    label
+        .split(" · ")
+        .map(|part| match part {
+            "TOP" => crate::i18n::tr("ui.heading_top"),
+            "BOTTOM" => crate::i18n::tr("navigation.cube_bottom"),
+            "FRONT" => crate::i18n::tr("ui.heading_front"),
+            "BACK" => crate::i18n::tr("navigation.cube_back"),
+            "LEFT" => crate::i18n::tr("navigation.cube_left"),
+            "RIGHT" => crate::i18n::tr("ui.heading_right"),
+            other => other,
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
 fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
     if !cam.is_valid() {
         return Vec::new();
@@ -222,7 +239,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let active = orbiting || ui.rect_contains_pointer(outer);
     let t = Tokens::get().navigation_cube(active);
     crate::scenario::publish_count("navigation_cube:active", f64::from(u8::from(active)));
-    let faces = facets(&camera(app), c, HALF * f64::from(scale));
+    let mut faces = facets(&camera(app), c, HALF * f64::from(scale));
+    for face in &mut faces {
+        face.label = localized_direction_label(&face.label);
+    }
     let hover = ui.input(|i| i.pointer.hover_pos()).filter(|p| ui.is_enabled() && ui.rect_contains_pointer(rect) && !crate::shell::covered(app, *p));
     let hovered = if orbiting { None } else { hover.and_then(|p| hit(&faces, p)) };
     let painter = ui.painter_at(outer);
@@ -233,7 +253,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         }
         let pieces: Vec<_> = faces.iter().filter(|f| f.direction == face.direction).collect();
         let centre = pieces.iter().fold(egui::Vec2::ZERO, |sum, f| sum + f.centre.to_vec2()) / pieces.len() as f32;
-        crate::scenario::publish_handle(&format!("navigation_cube:{}", face.label.to_ascii_lowercase().replace(" · ", "_")), centre.to_pos2());
+        crate::scenario::publish_handle(
+            &format!("navigation_cube:{}", direction_label(face.direction).to_ascii_lowercase().replace(" · ", "_")),
+            centre.to_pos2(),
+        );
         // Keep principal-axis handles for existing automation, using only visible faces.
         let world = app.cam.from_frame(face.direction);
         let axis = match (world.x, world.y, world.z) {
@@ -253,7 +276,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     if let Some(face) = hovered.and_then(|i| faces.get(i)) {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         ui.interact(Rect::from_center_size(hover.unwrap_or(face.centre), vec2(2.0, 2.0)), ui.id().with("navigation_cube_tip"), Sense::hover())
-            .on_hover_text(format!("{} view. Drag to orbit{}.", face.label, if app.preferences.free_orbit { "" } else { "; hold Shift to snap" }));
+            .on_hover_text(crate::i18n::format(
+                "navigation.cube_view_hint",
+                &[("view", &face.label), ("snap", if app.preferences.free_orbit { "" } else { crate::i18n::tr("navigation.cube_snap_hint") })],
+            ));
         if ui.input(|i| i.pointer.primary_clicked()) {
             navigate(app, None, Some(face.direction));
         }
@@ -330,6 +356,15 @@ mod tests {
         // These tests inspect shapes without uploading textures to a renderer.
         output.textures_delta.clear();
         output
+    }
+
+    #[test]
+    fn cube_labels_are_translated_without_changing_pick_names() {
+        let _language = crate::i18n::scope("de");
+        let raw = direction_label(Vec3::new(1.0, 1.0, 1.0));
+        assert_eq!(raw, "TOP · BACK · RIGHT");
+        assert_eq!(localized_direction_label(&raw), "OBEN · HINTEN · RECHTS");
+        assert_eq!(localized_direction_label("BOTTOM · FRONT · LEFT"), "UNTEN · VORNE · LINKS");
     }
 
     #[test]

@@ -2669,15 +2669,15 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
         }
         Sel::Plane { name } => names.label(name).to_string(),
         Sel::Axis { name } | Sel::ConstructionPoint { name } | Sel::Body { name } => name.clone(),
-        Sel::Face { body, index, .. } if axis => format!("{body} · face {index} axis"),
-        Sel::Face { body, index, .. } => format!("{body} · face {index}"),
-        Sel::Edge { body, .. } if axis => format!("{body} · circle axis"),
+        Sel::Face { body, index, .. } if axis => crate::i18n::format("dialog.selection_face_axis", &[("body", body), ("index", &index.to_string())]),
+        Sel::Face { body, index, .. } => crate::i18n::format("dialog.selection_face", &[("body", body), ("index", &index.to_string())]),
+        Sel::Edge { body, .. } if axis => crate::i18n::format("dialog.selection_circle_axis", &[("body", body)]),
         Sel::Edge { body, index, .. } if d.edge_is_centre(inp) && edge_circle(s, body, *index).is_some() => {
-            format!("{body} · circle centre")
+            crate::i18n::format("dialog.selection_circle_centre", &[("body", body)])
         }
-        Sel::Edge { body, index, .. } => format!("{body} · edge {index}"),
+        Sel::Edge { body, index, .. } => crate::i18n::format("dialog.selection_edge", &[("body", body), ("index", &index.to_string())]),
         // A point of the model: a vertex, or the centre a round edge stands for.
-        Sel::Vertex { body, .. } if !body.is_empty() => format!("{body} · point"),
+        Sel::Vertex { body, .. } if !body.is_empty() => crate::i18n::format("dialog.selection_model_point", &[("body", body)]),
         Sel::Feature { id } => s.doc.feature(*id).map(|f| f.name.clone()).unwrap_or_else(|| format!("Feature {id}")),
         Sel::Occurrence { path } if path.is_empty() => s.doc.name.clone(),
         Sel::Occurrence { path } => s.occurrence_placement(path).map(|p| p.name).unwrap_or_else(|_| "Component".into()),
@@ -2923,7 +2923,7 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
         } else {
             ui.vertical(|ui| {
                 crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Report("error", true));
-                let response = crate::ui_kit::button(ui, "Create Issue…", crate::ui_kit::Button::Normal);
+                let response = crate::ui_kit::button(ui, app.tr_label("Create Issue…"), crate::ui_kit::Button::Normal);
                 crate::scenario::publish_handle("dialog:create_issue", response.rect.center());
                 if response.clicked() {
                     crate::issue_report::begin(app, ctx, Some(d), Some(&error));
