@@ -6,8 +6,18 @@ edition.workspace = true
 license.workspace = true
 default-run = "solidcraft-cli"
 
-[lints]
-workspace = true
+[lints.rust]
+# Denied, not forbidden: xr_info::load_entry opens the OpenXR runtime's loader at run time
+# (loaded feature, no C++/CMake needed) with one #[allow(unsafe_code)]. The 3dx-client crate
+# makes the same trade for the same reason. Keep the rest in sync with [workspace.lints].
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+type_complexity = "allow"
+neg_cmp_op_on_partial_ord = "allow"
 
 [[bin]]
 name = "solidcraft-cli"
@@ -28,6 +38,7 @@ raytrace-cpu = ["solidcraft-engine/raytrace-cpu"]
 solidcraft-engine = { workspace = true }
 solidcraft-gpu = { workspace = true }
 solidcraft-mcp = { workspace = true }
+openxr = { workspace = true }
 log = { workspace = true }
 serde_json = { workspace = true }
 
