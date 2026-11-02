@@ -1,0 +1,53 @@
+{
+  "purpose": "Fixture binding notes only; this is not an application file format or a JSON schema.",
+  "record_status": "K2 format-1 record example bound against CamWight PR3891 source; no application/runtime acceptance claimed. The future harness reconciles format_pending with its pinned writer.",
+  "logical_ids": {
+    "source_a": "The plate source record; one owner-allocated ID reused in C0 and C1.",
+    "source_b": "The block source record; distinct from source_a and reused in C0 and C1.",
+    "sheet_a": "The plate sheet; distinct owner-allocated ID reused in C0 and C1.",
+    "sheet_b": "The block sheet; distinct owner-allocated ID reused in C0 and C1."
+  },
+  "writer_owned": {
+    "format_pending": "Read DRAWING.pending_names from the pinned implementation; omitted here for the published format-1 example. Never invent a pending-change name.",
+    "container": "K3 container APIs and canonical archive encoding are not implemented by this contribution.",
+    "runtime_readers": "Bind dependency/source/session operations to their owners actual APIs."
+  },
+  "source_root_component": "Existing native fixture documents use root component 0. Bind that identity through the agreed Drawing representation; do not guess a new globally unique ID or rewrite the source.",
+  "not_decided_here": [
+    "View/cache record encoding",
+    "Repository resolution API and historical materialization",
+    "K3 container encoding"
+  ],
+  "fixture_ids": {
+    "source_a": "1ge30wkvq38r0",
+    "source_b": "8f47mhx6r2a9c",
+    "sheet_a": "3v8x6k0j9sd2n",
+    "sheet_b": "d4q7a2m6t9w3h"
+  },
+  "id_rule": "13 lowercase Crockford base32 characters encoding a nonzero u64, unique across every drawing object. Fixed sample IDs model retained random identities; they are not a stored counter.",
+  "confirmed_fields": {
+    "units": {
+      "fixed": {
+        "unit": "mm"
+      }
+    },
+    "sheet": {
+      "size": {
+        "standard": "a4"
+      },
+      "orientation": "landscape"
+    },
+    "border": null,
+    "documents": "{source: drawing source ID, component: native design component number; root=0}",
+    "dpi": {
+      "default": 300,
+      "minimum": 25,
+      "maximum": 2400
+    },
+    "excluded": {
+      "count": "Exclude from sheet numbering/count",
+      "print": "Exclude from print/export all sheets"
+    },
+    "maximum_json_bytes": 16777216
+  }
+}
