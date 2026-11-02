@@ -565,7 +565,9 @@ fn strip(
             return guide.sections.last().copied().ok_or_else(|| fail("section"));
         }
         let (anchor, t) = guide.anchor(along).ok_or_else(|| unsupported("degenerate rolling-ball spine"))?;
-        solve_from(&o1, &o2, anchor, t, r, sigma, 0.0, None, tol * 100.0, None)
+        // This anchor is an interpolated ball centre, so keep it as the solve's
+        // initial centre instead of applying another edge-to-centre offset.
+        solve_from(&o1, &o2, anchor, t, r, sigma, 0.0, None, tol * 100.0, Some(anchor))
             .ok_or_else(|| unsupported("the ball doesn't fit along the resampled spine"))
     };
     let mut samples = SAMPLES;
