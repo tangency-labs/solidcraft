@@ -102,10 +102,12 @@
 //! - **Opt-in rational end spans (WR-575, #1529).** With
 //!   [`crate::kernel::UpstreamFixes::bspline_trim_keeps_rational_end_spans`], a
 //!   rational trimmed curve (a conic's NURB) keeps its short end spans: their removal
-//!   stretches the rest of the curve and moves it off its conic. An end span whose
-//!   control points lie within check test #15's pole tolerance (`SM_ZONE_TOL_3D / 10`)
-//!   is not kept: the trim ends at its interior knot instead (#2090). The default
-//!   retains pinned SMLib behavior.
+//!   stretches the rest of the curve and moves it off its conic. A model curve's trim
+//!   end whose span to an interior knot collapses to a pole (its control points within
+//!   check test #15's tolerance `SM_ZONE_TOL_3D / 10`, #2090) is that knot, whichever
+//!   side of the end is kept, so both pieces of a split meet at one parameter (#2424);
+//!   a UV curve's pole end span is cleaned as upstream, as its ends are its edge's.
+//!   The default retains pinned SMLib behavior.
 //! - **Back-edges.** `SetIntersectionCurveThroughPoint` starts with
 //!   `IsIntersectorApprox` ([`BSplineCurve::is_intersector_approx`]) and uses
 //!   `SmCurve::ApproximateLength` ([`crate::curve::curve::p2`]), `SmSurface::LocalPointSolve`
@@ -2229,6 +2231,9 @@ impl BSplineCurve {
     /// [`crate::kernel::UpstreamFixes::bspline_trim_preserves_uv_spans`] enabled,
     /// that removal applies only to dimension-3 model curves, preserving UV spans
     /// exactly, except a short UV end span that collapses to a pole (#2129). With
+    /// [`crate::kernel::UpstreamFixes::bspline_trim_keeps_rational_end_spans`], a
+    /// rational curve keeps its short end spans, and a model curve's end within a pole
+    /// of an interior knot snaps to that knot (WR-575, #2424). With
     /// [`TrimMode::IntervalOnly`] only the interval is computed.
     ///
     /// # Errors
@@ -2323,6 +2328,24 @@ impl BSplineCurve {
             }
         }
 
+        // `fixes.bspline_trim_keeps_rational_end_spans` (WR-575): a rational curve keeps
+        // its short end spans, as removing one moves the conic off its shape. A model
+        // curve's end within a pole of an interior knot (#2090) is that knot whichever
+        // side of it is kept, so pieces split there, and the edge's UV trims split at
+        // its end, all end at the same parameter (#2424)
+        let keeps_rational = k.fixes.bspline_trim_keeps_rational_end_spans
+            && self.nurb.as_ref().is_some_and(Curve::is_rational);
+        if keeps_rational && self.dim == 3 {
+            let this_cur = nurb_of(self, OP)?;
+            let at_min = knot_within_pole(this_cur, &knots, d_min, zone_tol_1d_min, degree)?;
+            let at_max = knot_within_pole(this_cur, &knots, d_max, zone_tol_1d_max, degree)?;
+            // unless nothing is left between them: the end span is then not kept below
+            if at_max - at_min > scaled_zero_min + scaled_zero_max {
+                d_min = at_min;
+                d_max = at_max;
+            }
+        }
+
         // no work - both knots are within tight tol of trim boundary
         let first_knot = vec_at(&knots, 0, OP)?;
         let last_knot = knots
@@ -2359,62 +2382,23 @@ impl BSplineCurve {
                         .ok_or_else(|| invalid(OP, "short knots"))?,
                     OP,
                 )?;
-            // `fixes.bspline_trim_keeps_rational_end_spans` (WR-575): a rational curve's
-            // short end span stays, as removing it moves the conic off its shape
-            let mut keeps_rational =
-                k.fixes.bspline_trim_keeps_rational_end_spans && cur1.is_rational();
-            if keeps_rational && knots.len() > 2 {
-                // (#2090) an end span whose control points all lie within the pole
-                // tolerance of check test #15 (`SM_ZONE_TOL_3D / 10`) is not kept: the
-                // trim ends at its interior knot instead, exactly on the conic, the end
-                // point moving by less than that tolerance
-                let pole_tol = ZONE_TOL_3D / 10.0;
-                let n_cpts = cur1.cpts().len();
-                let head_pole =
-                    head < zone_tol_1d_min && end_span_is_pole(cur1.cpts(), 0, degree, pole_tol);
-                let tail_pole = tail < zone_tol_1d_max
-                    && n_cpts > degree
-                    && end_span_is_pole(cur1.cpts(), n_cpts - 1 - degree, degree, pole_tol);
-                if head_pole || tail_pole {
-                    let p_knots = cur1.knots();
-                    let new_min = if head_pole {
-                        knot_at(p_knots, degree + 1, OP)?
-                    } else {
-                        d_min
-                    };
-                    let new_max = if tail_pole {
-                        knot_at(
-                            p_knots,
-                            max_indx
-                                .checked_sub(degree + 1)
-                                .ok_or_else(|| invalid(OP, "short knots"))?,
-                            OP,
-                        )?
-                    } else {
-                        d_max
-                    };
-                    if new_max - new_min > scaled_zero_min + scaled_zero_max {
-                        d_min = new_min;
-                        d_max = new_max;
-                        let _ = trim_interval.set_min_max(d_min, d_max);
-                        cur1 = crv_trim(this_cur, d_min, d_max).map_err(SolidError::nl_ser(OP))?;
-                    } else {
-                        // nothing is left between the interior knots: clean as upstream
-                        keeps_rational = false;
-                    }
-                }
-            }
+            // an end span that collapses to a pole as check test #15 measures one
+            // (`SM_ZONE_TOL_3D / 10`)
+            let pole_end = short_end_span_is_pole(
+                cur1.cpts(),
+                degree,
+                knots.len() > 2 && head < zone_tol_1d_min,
+                knots.len() > 2 && tail < zone_tol_1d_max,
+            );
+            // (WR-575) a rational curve's short end span stays, unless it is a pole: a
+            // model curve's ends are at the knot then (above), and a UV curve, whose
+            // ends are its edge's, is cleaned as upstream
+            let keeps_rational = keeps_rational && cur1.is_rational() && !pole_end;
             // `fixes.bspline_trim_preserves_uv_spans` (WR-441): a UV curve keeps its
             // short end spans, unless one collapses to a pole that check test #15 would
             // report (`SM_ZONE_TOL_3D / 10`); that curve is cleaned as upstream (#2129)
-            let cleans_spans = !k.fixes.bspline_trim_preserves_uv_spans
-                || self.dim == 3
-                || short_end_span_is_pole(
-                    cur1.cpts(),
-                    degree,
-                    knots.len() > 2 && head < zone_tol_1d_min,
-                    knots.len() > 2 && tail < zone_tol_1d_max,
-                );
+            let cleans_spans =
+                !k.fixes.bspline_trim_preserves_uv_spans || self.dim == 3 || pole_end;
             if cleans_spans
                 && !keeps_rational
                 && ((head < zone_tol_1d_min && knots.len() > 2)
@@ -2448,6 +2432,32 @@ impl BSplineCurve {
             .unwrap_or(Vec3::UNDEF);
         map_to_1d(tol, deriv, &self.natural_interval())
     }
+}
+
+/// The interior knot of `knots` (distinct, ascending) within `zone_tol_1d` of the trim
+/// end `t` whose span to `t` collapses to a pole as check test #15 measures one
+/// ([`end_span_is_pole`] with its tolerance `SM_ZONE_TOL_3D / 10`), else `t`. The
+/// answer is the same whichever side of `t` the trim keeps. Not upstream (#2090, #2424).
+fn knot_within_pole(
+    cur: &Curve,
+    knots: &[f64],
+    t: f64,
+    zone_tol_1d: f64,
+    degree: usize,
+) -> Result<f64> {
+    let pole_tol = ZONE_TOL_3D / 10.0;
+    let interior = knots.get(1..knots.len().saturating_sub(1)).unwrap_or(&[]);
+    for &knot in interior {
+        let gap = (knot - t).abs();
+        if gap > 0.0 && gap < zone_tol_1d {
+            let span =
+                crv_trim(cur, knot.min(t), knot.max(t)).map_err(SolidError::nl_ser(OP_TRIM))?;
+            if end_span_is_pole(span.cpts(), 0, degree, pole_tol) {
+                return Ok(knot);
+            }
+        }
+    }
+    Ok(t)
 }
 
 /// Whether the short head span (`head`) or short tail span (`tail`) of a trimmed curve
@@ -2908,6 +2918,53 @@ mod tests {
         assert_eq!(c.knots(None).unwrap().0, vec![0.5 - 1e-8, 0.9]);
         assert!(off_circle(&c, r) > 1e-9);
         assert!(failed_checks(&default, &c).0);
+    }
+
+    #[test]
+    fn issue_2424_both_pieces_of_a_split_end_at_the_same_parameter() {
+        // #2424: an edge split `d` from the middle knot of a radius 16 half circle. Where
+        // the span between the split and the knot is a pole (#2090), the trim ends at the
+        // knot whichever side of the split it keeps, so the two pieces, and the UV trims
+        // split at the edge's end, meet at one parameter; a longer span is kept on both
+        // sides and the split stays where it was asked
+        let r = 16.0;
+        let mut fixed = Kernel::default();
+        fixed.fixes.bspline_trim_keeps_rational_end_spans = true;
+        // (d, where the pieces meet)
+        for (d, meet) in [
+            (1e-8, 0.5),
+            (-1e-8, 0.5),
+            (1e-7, 0.5 + 1e-7),
+            (-1e-7, 0.5 - 1e-7),
+        ] {
+            let split = 0.5 + d;
+            let mut before = half_circle(r);
+            let mut before_ivl = Extent1d::from_min_max(0.1, split);
+            before
+                .trim(&fixed, &mut before_ivl, TrimMode::Notify)
+                .unwrap();
+            let mut after = half_circle(r);
+            let mut after_ivl = Extent1d::from_min_max(split, 0.9);
+            after
+                .trim(&fixed, &mut after_ivl, TrimMode::Notify)
+                .unwrap();
+            assert_eq!(before_ivl, Extent1d::from_min_max(0.1, meet), "d {d}");
+            assert_eq!(after_ivl, Extent1d::from_min_max(meet, 0.9), "d {d}");
+            assert_eq!(before.natural_interval(), before_ivl, "d {d}");
+            assert_eq!(after.natural_interval(), after_ivl, "d {d}");
+            // the interval alone is the one the trim makes
+            let mut only = Extent1d::from_min_max(split, 0.9);
+            half_circle(r)
+                .trim(&fixed, &mut only, TrimMode::IntervalOnly)
+                .unwrap();
+            assert_eq!(only, after_ivl, "d {d}");
+            for c in [&before, &after] {
+                let off = off_circle(c, r);
+                assert!(off < 1e-12 * r, "d {d}: {off} off the circle");
+                let (ok, idx) = failed_checks(&fixed, c);
+                assert!(ok && !idx.contains(&15), "d {d}: {idx:?}");
+            }
+        }
     }
 
     #[test]
