@@ -16,7 +16,7 @@
 //! solidcraft-cli commands                                     the command registry as JSON
 //! solidcraft-cli recipe <recipe.json>                         translate an oracle recipe to a script
 //! solidcraft-cli oracle <case-dir>...                         replay recipes and compare with expected.json
-//! solidcraft-cli mcp [--headless] [--in design|script] [--connect HOST:PORT [--token T]] [--allow-path DIR]... [--allow-any-path]
+//! solidcraft-cli mcp [--headless] [--in design|script] [--connect HOST:PORT [--token T]] [--allow-path DIR]... [--allow-any-path] [--design-feedback]
 //!                    [--param-check off|warn|strict]
 //!                                                             MCP server on stdio (docs/mcp.md)
 //! solidcraft-cli mcp setup [--dry-run] [--client NAME] [--live] (alias: mcp install) add it to OpenCode, Claude Desktop, Claude Code, Cursor
@@ -85,7 +85,7 @@ const USAGE_ORACLE: &str = "  solidcraft-cli oracle <case-dir>... [--json]\n";
 const USAGE_FUZZ: &str =
     "  solidcraft-cli fuzz [--from N] [--count N] [--jobs J] [--timeout S] [--steps N] [--minimise] [--out DIR] [--report FILE]\n";
 /// `mcp`'s lines in the usage.
-const USAGE_MCP: &str = "  solidcraft-cli mcp [--headless] [--in design.sc|script.json] [--connect 127.0.0.1:PORT [--token T]] [--allow-path DIR]... [--allow-any-path]\n                     [--param-check off|warn|strict] [--render-gpu]\n  solidcraft-cli mcp setup [--dry-run] [--client opencode|claude-desktop|claude-code|cursor] [--live]\n      (adds a `solidcraft` server, with this program's path, to each installed AI client; --live adds `solidcraft-live` for the running app; alias: mcp install)\n";
+const USAGE_MCP: &str = "  solidcraft-cli mcp [--headless] [--in design.sc|script.json] [--connect 127.0.0.1:PORT [--token T]] [--allow-path DIR]... [--allow-any-path] [--design-feedback]\n                     [--param-check off|warn|strict] [--render-gpu]\n  solidcraft-cli mcp setup [--dry-run] [--client opencode|claude-desktop|claude-code|cursor] [--live]\n      (adds a `solidcraft` server, with this program's path, to each installed AI client; --live adds `solidcraft-live` for the running app; alias: mcp install)\n";
 /// `crashes`'s lines in the usage.
 const USAGE_CRASHES: &str = "  solidcraft-cli crashes [list [--json] | show <id> | replay <id> | dir | clear [<id>]]\n";
 /// `licences`'s lines in the usage.
@@ -705,6 +705,8 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
         return Err("mcp: --render-gpu installs a headless image host; a connected application owns its own device".into());
     }
     install_renderer();
+    // `--design-feedback`: end tool results with what the call did to the design (docs/mcp.md), off by default.
+    let feedback = args.iter().any(|a| a == "--design-feedback");
     let scope = (!args.iter().any(|a| a == "--allow-any-path"))
         .then(|| solidcraft_mcp::agent_scope(flags(args, "--allow-path").into_iter().map(std::path::PathBuf::from)));
     if let Some(s) = &scope {
@@ -750,7 +752,7 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
             if auto && let Some(port) = discover_app() {
                 eprintln!("solidcraft mcp: bridged to the running app at 127.0.0.1:{port} (--headless starts a session of its own)");
                 let remote = solidcraft_mcp::Remote::new(&format!("127.0.0.1:{port}"), flag(args, "--token")).with_param_check(param_check);
-                return serve_mcp(Box::new(remote), scope);
+                return serve_mcp(Box::new(remote), scope, feedback);
             }
             let mut headless = solidcraft_mcp::Headless::default();
             headless.session.param_check = param_check;
@@ -765,13 +767,18 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
             }
         }
     };
-    serve_mcp(backend, scope)
+    serve_mcp(backend, scope, feedback)
 }
 
-fn serve_mcp(backend: Box<dyn solidcraft_mcp::Backend>, scope: Option<solidcraft_engine::io::vfs::PathScope>) -> Result<(), String> {
+/// `feedback`: end tool results with what the call did to the design (`--design-feedback`, docs/mcp.md).
+fn serve_mcp(backend: Box<dyn solidcraft_mcp::Backend>, scope: Option<solidcraft_engine::io::vfs::PathScope>, feedback: bool) -> Result<(), String> {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
-    solidcraft_mcp::Server::new(backend).with_path_scope(scope).serve(stdin.lock(), stdout.lock()).map_err(|e| e.to_string())
+    solidcraft_mcp::Server::new(backend)
+        .with_path_scope(scope)
+        .with_design_feedback(feedback)
+        .serve(stdin.lock(), stdout.lock())
+        .map_err(|e| e.to_string())
 }
 
 /// The port of the running desktop app: the one its discovery file names, if something listens
