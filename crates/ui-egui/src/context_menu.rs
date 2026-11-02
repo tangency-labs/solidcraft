@@ -2317,7 +2317,8 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         }
         Target::Canvas { id } => doc.canvases.iter().any(|c| c.id == *id),
         Target::PointCloud { id } => doc.point_clouds.iter().any(|c| c.id == *id),
-        Target::Section => app.session.section.is_some(),
+        // Shown or hidden, the browser lists it.
+        Target::Section => app.session.section.is_some() || app.tree.hidden_section.is_some(),
     };
     if found {
         return Ok(());

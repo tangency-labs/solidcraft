@@ -271,11 +271,21 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         json!({"type":"folder","component":0,"scope":"c0","folder":"bodies"}),
         json!({"type":"folder","component":0,"scope":"c0","folder":"sketches"}),
         json!({"type":"folder","component":0,"scope":"c0","folder":"construction"}),
-        json!({"type":"section"}),
-        json!({"type":"canvas","id":1}),
     ] {
         menu(&mut h, target.clone(), &target.to_string(), &mut requested);
     }
+    // The Section Analysis and a canvas have a menu only while they are there (#10745).
+    h.app.run("inspect.section", json!({"plane": "YZ"})).unwrap();
+    menu(&mut h, json!({"type":"section"}), "section", &mut requested);
+    h.app.run("inspect.section", json!({"clear": true})).unwrap();
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend(400u32.to_be_bytes());
+    png.extend(200u32.to_be_bytes());
+    png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
+    let canvas = h.app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].clone();
+    menu(&mut h, json!({"type":"canvas","id":canvas}), "canvas", &mut requested);
+    h.app.run("selection.delete", json!({"canvases": [canvas]})).unwrap();
     for selection in [
         json!({"type":"face","body":body,"index":0,"point":[0,0,0]}),
         json!({"type":"edge","body":body,"index":0,"point":[0,0,0]}),
