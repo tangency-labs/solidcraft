@@ -61,86 +61,116 @@ fn status_lines_wrap_at_form_width_and_leave_room_for_the_next_row() {
 }
 
 #[test]
-fn theme_rail_cues_follow_hidden_content() {
-    use crate::ui_kit::preferences::theme_rail_cues;
-    assert_eq!(theme_rail_cues(0.0, 0.0), (false, false));
-    assert_eq!(theme_rail_cues(0.0, 300.0), (false, true));
-    assert_eq!(theme_rail_cues(150.0, 300.0), (true, true));
-    assert_eq!(theme_rail_cues(300.0, 300.0), (true, false));
-    assert_eq!(theme_rail_cues(0.25, 0.5), (false, false));
+fn carousel_window_clamps_offsets_and_keeps_a_card_on_narrow_pages() {
+    use crate::ui_kit::preferences_cards::carousel_window;
+    assert_eq!(carousel_window(0, 9, 280.0, 88.0, 8.0, 26.0), (0, 0));
+    assert_eq!(carousel_window(6, 0, 280.0, 88.0, 8.0, 26.0), (0, 2));
+    assert_eq!(carousel_window(6, 2, 280.0, 88.0, 8.0, 26.0), (2, 2));
+    assert_eq!(carousel_window(6, 99, 280.0, 88.0, 8.0, 26.0), (4, 2));
+    assert_eq!(carousel_window(6, 99, 100.0, 88.0, 8.0, 26.0), (5, 1));
 }
 
 #[test]
-fn theme_rail_arrows_scroll_one_card_and_hide_at_ends() {
+fn theme_carousel_moves_one_card_and_disables_its_ends_without_selecting() {
     let ctx = crate::fonts::test_context();
-    let t = Tokens::get();
-    let width = t.form_label_width + t.space_24 + t.space_6;
+    let sample = ThemeSample::from_tokens(&Tokens::light());
     let draw = |ui: &mut Ui| {
-        theme_rail(
-            ui,
-            |ui| {
-                for i in 0..3 {
-                    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 80.0), egui::Sense::click());
-                    scenario::publish_target(&format!("test:theme:{i}"), rect);
-                }
-            },
-            |_| {},
-        );
+        let bounds = ui.max_rect();
+        carousel(ui, "test_themes", 3, 88.0, 96.0, |ui, index| {
+            let label = ["Light", "Dark", "System"][index];
+            let response = picture_card(
+                ui,
+                &Card {
+                    label,
+                    sub: Some("Built in"),
+                    selected: index == 0,
+                    enabled: true,
+                    options: (index == 2).then_some("Has options"),
+                    check: false,
+                    aspect: 124.0 / 76.0,
+                    figure: &|p, r| paint_theme_thumbnail(p, r, &sample),
+                },
+                88.0,
+            );
+            assert!(!response.clicked(), "scrolling must not select a card");
+            assert!(bounds.contains_rect(response.rect));
+            scenario::publish_target(&format!("test:theme:{index}"), response.rect);
+        });
     };
     for _ in 0..3 {
         frame(&ctx, vec![], draw);
     }
-    assert!(scenario::rect_of("prefs:theme_rail:Scroll left").is_none());
+    let previous = format!("prefs:carousel:{}", crate::i18n::tr("prefs.carousel_previous"));
+    let next = format!("prefs:carousel:{}", crate::i18n::tr("prefs.carousel_next"));
+    let click = |handle: &str| {
+        let at = scenario::handle_at(handle).unwrap();
+        frame(&ctx, pointer(at, true), draw);
+        frame(&ctx, pointer(at, false), draw);
+        frame(&ctx, vec![], draw);
+    };
     let start = scenario::rect_of("test:theme:0").unwrap().left();
-    let right = scenario::handle_at("prefs:theme_rail:Scroll right").unwrap();
-    assert!((right.y - scenario::rect_of("test:theme:0").unwrap().center().y).abs() < 1.0);
-    frame(&ctx, pointer(right, true), draw);
-    frame(&ctx, pointer(right, false), draw);
-    frame(&ctx, vec![], draw);
-    let after = scenario::rect_of("test:theme:0").unwrap().left();
-    assert!((start - after - width - t.space_8).abs() < 1.0);
-    assert!(scenario::rect_of("prefs:theme_rail:Scroll left").is_some());
-    for _ in 0..4 {
-        if let Some(pos) = scenario::handle_at("prefs:theme_rail:Scroll right") {
-            frame(&ctx, pointer(pos, true), draw);
-            frame(&ctx, pointer(pos, false), draw);
-            frame(&ctx, vec![], draw);
-        }
-    }
-    assert!(scenario::rect_of("prefs:theme_rail:Scroll right").is_none());
-    for _ in 0..4 {
-        if let Some(pos) = scenario::handle_at("prefs:theme_rail:Scroll left") {
-            frame(&ctx, pointer(pos, true), draw);
-            frame(&ctx, pointer(pos, false), draw);
-            frame(&ctx, vec![], draw);
-        }
-    }
-    assert!(scenario::rect_of("prefs:theme_rail:Scroll left").is_none());
+    click(&previous);
+    assert_eq!(scenario::rect_of("test:theme:0").unwrap().left(), start, "previous is inert at the start");
+    click(&next);
+    assert!(scenario::rect_of("test:theme:0").is_none());
+    assert!((scenario::rect_of("test:theme:1").unwrap().left() - start).abs() < 1.0, "move exactly one item");
+    assert!(scenario::rect_of("test:theme:2").is_some());
+    click(&next);
+    assert!((scenario::rect_of("test:theme:1").unwrap().left() - start).abs() < 1.0, "next is inert at the end");
+    click(&previous);
+    assert!(scenario::rect_of("test:theme:0").is_some());
+    assert!(scenario::rect_of("test:theme:2").is_none());
 }
 
 #[test]
-fn theme_rail_chevrons_have_no_idle_box_and_show_hover_and_focus() {
+fn carousel_arrows_expose_disabled_state_hover_and_keyboard_focus() {
     let ctx = crate::fonts::test_context();
-    let t = Tokens::get();
-    let rect = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(t.control_height, t.control_height));
+    ctx.enable_accesskit();
     let draw = |events| {
-        crate::test_support::frame(&ctx, egui::RawInput { events, focused: true, ..Default::default() }, |ui| {
-            crate::ui_kit::preferences::theme_rail_arrow(ui, rect, 1.0, "Scroll right");
-        })
+        scenario::clear_handles();
+        crate::test_support::frame(
+            &ctx,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 400.0))),
+                events,
+                focused: true,
+                ..Default::default()
+            },
+            |ui| {
+                ui.set_width(280.0);
+                scope(ui, |ui| {
+                    carousel(ui, "keyboard_carousel", 3, 88.0, 96.0, |ui, i| {
+                        let (r, _) = ui.allocate_exact_size(egui::vec2(88.0, 90.0), egui::Sense::hover());
+                        scenario::publish_rect(&format!("keyboard:item:{i}"), r);
+                    });
+                });
+            },
+        )
     };
+    let previous = crate::i18n::tr("prefs.carousel_previous");
+    let next = crate::i18n::tr("prefs.carousel_next");
+    draw(vec![]);
     let idle = draw(vec![]);
-    assert!(!idle.shapes.iter().any(|s| matches!(s.shape, egui::Shape::Rect(_))));
-    assert!(!idle.shapes.iter().any(|s| matches!(s.shape, egui::Shape::Circle(_))), "no backing until hovered");
-    let hover = draw(vec![egui::Event::PointerMoved(rect.center())]);
+    let tree = idle.platform_output.accesskit_update.as_ref().unwrap();
+    for (label, disabled) in [(previous, true), (next, false)] {
+        let nodes: Vec<_> =
+            tree.nodes.iter().filter(|(_, node)| node.role() == egui::accesskit::Role::Button && node.label() == Some(label)).collect();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].1.is_disabled(), disabled);
+    }
+    let at = scenario::handle_at(&format!("prefs:carousel:{next}")).unwrap();
+    let hover = draw(vec![egui::Event::PointerMoved(at)]);
     assert_eq!(hover.platform_output.cursor_icon, egui::CursorIcon::PointingHand);
-    assert!(hover.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Circle(c) if c.fill == t.hover && c.radius == rect.width() / 2.0)));
-    draw(pointer(rect.center(), true));
-    draw(pointer(rect.center(), false));
-    let focus = draw(vec![egui::Event::PointerMoved(egui::pos2(200.0, 200.0))]);
+    draw(vec![egui::Event::PointerMoved(egui::pos2(310.0, 390.0))]);
+    let focus = draw(key(egui::Key::Tab));
     assert!(
-        !focus.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.stroke.color == t.form_primary)),
-        "a mouse click leaves no outline"
+        focus.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.stroke.color == Tokens::get().form_primary)),
+        "keyboard focus uses the standard ring"
     );
+    draw(key(egui::Key::Enter));
+    draw(vec![]);
+    assert!(scenario::rect_of("keyboard:item:0").is_none(), "keyboard activates Next");
+    assert!(scenario::rect_of("keyboard:item:2").is_some());
 }
 
 #[test]

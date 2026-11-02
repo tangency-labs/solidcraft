@@ -1,13 +1,13 @@
 [
-  {"note": "#4146: under the theme tiles, Viewport draws the 3D view in the Light or Dark theme's colours whatever the window uses; it applies at once, and Cancel puts it back."},
+  {"note": "#4146: under the theme carousel, 3D view colors draws the 3D view in the Light or Dark theme's colours whatever the window uses; it applies at once, and Cancel puts it back."},
   {"click": {"handle": "titlebar:preferences"}},
   {"click": {"handle": "prefs:page:Appearance"}},
   {"expect": {"prefs": {"theme": "dark", "dark": true, "viewport_theme": "theme", "viewport_dark": true}}},
-  {"widget": "Light", "near": "Viewport"},
+  {"widget": "Light", "near": "3D view colors"},
   {"expect": {"prefs": {"theme": "dark", "dark": true, "viewport_theme": "light", "viewport_dark": false}}},
-  {"widget": "Dark", "near": "Viewport"},
+  {"widget": "Dark", "near": "3D view colors"},
   {"expect": {"prefs": {"viewport_theme": "dark", "viewport_dark": true}}},
-  {"widget": "Light", "near": "Viewport"},
+  {"widget": "Light", "near": "3D view colors"},
   {"widget": "Cancel"},
   {"expect": {"prefs": {"dialog": null, "theme": "dark", "viewport_theme": "theme", "viewport_dark": true}}}
 ]

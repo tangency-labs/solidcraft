@@ -89,7 +89,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "joint; a?, b?: joint origins as joint.create takes them (a side left out keeps its place; the two must stay on different occurrences); \
              type?, flip?, offset?, angle? (a number, or an expression the joint then follows), suppressed?, name?; the joint re-solves, keeping \
-             its limits and expressions (a relation's values start again where its parts are)",
+             its limits and expressions (a relation's values start again where its parts are); an edit that places it again (not a rename alone) \
+             meets a loop it closes as joint.create does, turning an angle a half turn where only that meets it",
         ),
     CommandSpec::new("joint.delete", "Delete Joint", delete).icon("delete").params("joint: id|name (or origin: name, link: index)"),
     CommandSpec::new("joint.list", "List Joints", list).icon("list").noundo().params(
@@ -792,7 +793,8 @@ const HALF_TURN_TRIALS: usize = 16;
 /// on the shortest joint path between its two parts, or one of each, a half turn, and keep the
 /// first that meets it with no new conflict or error elsewhere than `before` had (stored, for
 /// the caller's resolve). False, and nothing changed, when none does. Values a motion link or an
-/// expression sets, and turns their limits stop short, are left alone.
+/// expression sets, and turns their limits stop short, are left alone. `joint.edit` does the same
+/// for a joint it places again (#9687).
 fn close_by_half_turn(s: &mut Session, id: u64, before: &joints::Solution) -> bool {
     let asm = &s.doc.assembly;
     let Some(new) = asm.joints.iter().find(|j| j.id == id) else { return false };
@@ -1644,7 +1646,14 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
             j.values = q;
         }
     }
-    let sol = resolve(s);
+    let mut sol = resolve(s);
+    // An edit that places the joint again (Edit Joint's OK, Unsuppress) meets a loop it closes as
+    // joint.create does: a joint saved as a conflict before create turned its part (#9687), or
+    // unsuppressed after its part was turned away, is met then. A rename alone moves nothing.
+    let placed = reseat || bool_(p, "suppressed") == Some(false);
+    if placed && sol.conflicts.iter().any(|(c, ..)| *c == id) && close_by_half_turn(s, id, &sol) {
+        sol = resolve(s);
+    }
     Ok(sol_json(&sol, p))
 }
 

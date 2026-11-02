@@ -538,6 +538,19 @@ fn geometric_from(b: &ModelBody, o: &NamingOrigin, nf: usize, names_of: fn(&Mode
             }
         }
     }
+    // A feature that built a tool and reported no history. Two meshes of one curved face are only
+    // as close as their chord tolerances, which follow the body's size: a tool that makes the body
+    // bigger divides its round walls differently, and those walls miss their own faces at `tol`.
+    // Named by role they would become faces of this feature, nowhere near what it built.
+    if matches!(o.feature.kind, FeatureKind::Extrude { .. } | FeatureKind::Revolve { .. } | FeatureKind::Sweep { .. } | FeatureKind::Loft { .. }) {
+        let chord = b.display_tol() + inputs.iter().map(|(x, _, _)| x.display_tol()).fold(0.0, f64::max);
+        for (fi, name) in names.iter_mut().enumerate().filter(|(_, name)| name.is_none()) {
+            let curved = ns.get(fi).is_some_and(|n| n.windows(2).any(|w| w[0].cross(w[1]).len() > 1e-6));
+            if curved && let Some(ps) = pts.get(fi) {
+                *name = vote(ps, &inputs, chord, None);
+            }
+        }
+    }
     let empty = Vec::new();
     let curves = std::cell::OnceCell::new();
     let names: Vec<String> = names

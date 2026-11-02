@@ -3418,7 +3418,7 @@
   "update.check_unavailable": "Sprawdzanie aktualizacji nie jest dostępne dla tej instalacji.",
   "update.checking": "Sprawdzanie…",
   "update.copy": "Kopiuj",
-  "update.dmg_opened": "Obraz dysku jest otwarty i zweryfikowany: przeciągnij SolidCraft do folderu Aplikacje, zastępując starą kopię, a następnie uruchom SolidCraft ponownie.",
+  "update.dmg_opened": "Obraz dysku jest otwarty i zweryfikowany: zakończ SolidCraft, przeciągnij nowy SolidCraft do folderu Aplikacje, zastępując starą kopię, a następnie ponownie otwórz SolidCraft.",
   "update.download": "Pobierz",
   "update.download_open": "Pobierz i otwórz",
   "update.downloading": "Pobieranie i weryfikacja… {done} z {total} MB",

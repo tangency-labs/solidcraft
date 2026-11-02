@@ -265,3 +265,56 @@ fn a_face_name_on_two_bodies_is_no_split_face() {
     run(&mut s, "solid.hole", json!({"position": [30, 10, 10], "diameter": 5, "name": "Hole1", "targets": ["Body1"]}));
     assert_eq!(said(&s, "Hole1"), "");
 }
+
+/// A plate with a round wall on each long side, and a tall tab with a curved notch joined to its
+/// far end, 12 mm from those walls: this join reports no history, and the bigger body meshes the
+/// walls differently. Returns the plate's and the tab's feature ids.
+fn plate_and_notched_tab(s: &mut Session) -> (Option<u64>, Option<u64>) {
+    let reach = 57.0_f64.sqrt(); // Where a circle of radius 11 meets y = ±8.
+    run(s, "sketch.create", json!({"plane": "XY"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [-20, -8], "p1": [20, 8]}));
+    run(s, "sketch.arc.three_point", json!({"start": [-reach, 8], "end": [reach, 8], "through": [0, 11]}));
+    run(s, "sketch.arc.three_point", json!({"start": [-reach, -8], "end": [reach, -8], "through": [0, -11]}));
+    run(s, "sketch.finish", json!({}));
+    let plate = run(s, "solid.extrude", json!({"distance": 10, "name": "Plate"}))["feature"].as_u64();
+    run(s, "sketch.create", json!({"plane": {"face": [20, 0, 5]}, "project_edges": false}));
+    run(s, "sketch.line", json!({"points": [[-8, -5], [8, -5], [8, 23], [-8, 23], [-8, -5]]}));
+    run(s, "sketch.circle.center", json!({"center": [0, 23], "radius": 8.0667}));
+    run(s, "sketch.finish", json!({}));
+    let tab =
+        run(s, "solid.extrude", json!({"distance": 10, "operation": "join", "name": "Tab", "profiles": [{"point": [0, -3]}]}))["feature"].as_u64();
+    (plate, tab)
+}
+
+/// The round walls stay the plate's whole, and an edge picked on one stores no trace of the tab.
+#[test]
+fn a_join_that_makes_the_body_bigger_leaves_round_walls_it_never_touched_alone() {
+    let mut s = Session::default();
+    let (plate, tab) = plate_and_notched_tab(&mut s);
+    let tab_name = format!("F{}", tab.unwrap_or_default());
+    let made_by = |face: &Value| face["name"].as_str().and_then(solidcraft_doc::persistent_name::made_by);
+    let all = faces(&mut s, "Body1");
+    let round: Vec<&Value> = all.iter().filter(|f| f.get("plane_normal").is_none_or(Value::is_null)).collect();
+    let walls: Vec<&&Value> = round.iter().filter(|f| vec(&f["point"]).x < 15.0).collect();
+    assert_eq!(walls.len(), 2, "{all:?}");
+    for wall in walls {
+        assert_eq!(made_by(wall), plate, "{wall}");
+        assert!(wall["name"].as_str().is_some_and(|name| !name.contains(&tab_name)), "{wall}");
+    }
+    assert!(round.iter().filter(|f| vec(&f["point"]).x > 20.0).all(|notch| made_by(notch) == tab), "{all:?}");
+
+    let volume_before = volume(&mut s, "Body1");
+    run(&mut s, "solid.fillet", json!({"edges": [[0, -11, 10]], "radius": 1, "name": "Round"}));
+    assert!(volume(&mut s, "Body1") < volume_before);
+    let filleted = volume(&mut s, "Body1");
+    let round_id = s.doc.features.iter().position(|f| f.name == "Round").unwrap();
+    assert!(s.doc.features[round_id].edge_names.iter().all(|name| !name.contains(&tab_name)), "{:?}", s.doc.features[round_id].edge_names);
+
+    // A design saved while the wall was named after the tab still finds its edge.
+    let mut saved = (*s.doc).clone();
+    saved.features[round_id].edge_names = vec![format!("F2:top|{tab_name}:side:l4#[F2:side:l1]")];
+    let mut reopened = Session::opened_at(saved, None, None);
+    let result = reopened.model.result(reopened.doc.features[round_id].id).unwrap();
+    assert!(!result.skipped && result.error.is_none(), "{:?}", result.error);
+    assert!((volume(&mut reopened, "Body1") - filleted).abs() < 1e-6);
+}
