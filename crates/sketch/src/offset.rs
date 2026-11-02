@@ -248,15 +248,15 @@ impl Sketch {
                     CurveKind::Line { a, b } => {
                         let (a, b) = (self.point(a).ok_or_else(bad)?, self.point(b).ok_or_else(bad)?);
                         let (a, b) = if *forward { (a, b) } else { (b, a) };
-                        outline.push((Shape::Line { a, b }, a, b));
+                        outline.push((Shape::Line { a, b }, a, b, None));
                         let n = (b - a).normalized().ok_or_else(bad)?.perp() * offset.distance;
-                        (Shape::Line { a: a + n, b: b + n }, a + n, b + n, None)
+                        (Shape::Line { a: a + n, b: b + n }, a + n, b + n)
                     }
                     CurveKind::Arc { c, a, b } => {
                         let (c, a, b) = (self.point(c).ok_or_else(bad)?, self.point(a).ok_or_else(bad)?, self.point(b).ok_or_else(bad)?);
                         let start = (a - c).angle();
                         let sweep = ((b - c).angle() - start).rem_euclid(std::f64::consts::TAU);
-                        outline.push((Shape::Round { c, r: c.dist(a), start, sweep }, a, b));
+                        outline.push((Shape::Round { c, r: c.dist(a), start, sweep }, a, b, Some(*forward)));
                         let r = c.dist(a) - if *forward { offset.distance } else { -offset.distance };
                         if r <= 1e-9 {
                             return Err(SketchError::Invalid("the offset collapses an arc".into()));
@@ -264,7 +264,7 @@ impl Sketch {
                         let a = c + (a - c).normalized().ok_or_else(bad)? * r;
                         let b = c + (b - c).normalized().ok_or_else(bad)? * r;
                         let (a, b) = if *forward { (a, b) } else { (b, a) };
-                        (Shape::Round { c, r, start: 0.0, sweep: std::f64::consts::TAU }, a, b, Some(*forward))
+                        (Shape::Round { c, r, start: 0.0, sweep: std::f64::consts::TAU }, a, b)
                     }
                     CurveKind::Circle { c, r } => {
                         let c = self.point(c).ok_or_else(bad)?;
@@ -323,7 +323,7 @@ impl Sketch {
             if !offset.closed {
                 joints.push(pieces.last().ok_or_else(bad)?.2);
             }
-            if offset.closed && !crosses_itself(&outline) && crosses_itself(&cut_to_joints(&pieces, &joints)) {
+            if offset.closed && !crosses_itself(&outline) && crosses_itself(&cut_to_joints(&pieces, &outline, &joints)) {
                 return Err(SketchError::Invalid("the offset curves would cross".into()));
             }
             for (i, id) in offset.outputs.iter().enumerate() {
@@ -360,20 +360,25 @@ impl Sketch {
     }
 }
 
+/// A piece of a closed outline: its shape, its two ends, and for an arc whether the chain follows
+/// it forward.
+type Outline = (Shape, Vec2, Vec2, Option<bool>);
+
 /// The closed offset outline's pieces, each cut to its joints: a line between them, an arc
-/// anticlockwise from one to the other the way the piece runs.
-fn cut_to_joints(pieces: &[(Shape, Vec2, Vec2, Option<bool>)], joints: &[Vec2]) -> Vec<(Shape, Vec2, Vec2)> {
+/// anticlockwise from one to the other the way its source runs (`outline`: anticlockwise when
+/// followed forward).
+fn cut_to_joints(pieces: &[(Shape, Vec2, Vec2)], outline: &[Outline], joints: &[Vec2]) -> Vec<Outline> {
     let n = pieces.len();
     (0..n)
         .filter_map(|i| {
             let (a, b) = (*joints.get(i)?, *joints.get((i + 1) % n)?);
-            Some(match pieces.get(i)? {
-                (Shape::Round { c, r, .. }, _, _, Some(ccw)) => {
-                    let (from, to) = if *ccw { (a, b) } else { (b, a) };
+            Some(match (pieces.get(i)?, outline.get(i)?.3) {
+                ((Shape::Round { c, r, .. }, _, _), Some(ccw)) => {
+                    let (from, to) = if ccw { (a, b) } else { (b, a) };
                     let start = (from - *c).angle();
-                    (Shape::Round { c: *c, r: *r, start, sweep: ((to - *c).angle() - start).rem_euclid(std::f64::consts::TAU) }, a, b)
+                    (Shape::Round { c: *c, r: *r, start, sweep: ((to - *c).angle() - start).rem_euclid(std::f64::consts::TAU) }, a, b, Some(ccw))
                 }
-                _ => (Shape::Line { a, b }, a, b),
+                _ => (Shape::Line { a, b }, a, b, None),
             })
         })
         .collect()
@@ -384,12 +389,12 @@ fn cut_to_joints(pieces: &[(Shape, Vec2, Vec2, Option<bool>)], joints: &[Vec2]) 
 /// wider than a neck of the shape pinches it into two, which one outline can't be (an outline
 /// that already crosses itself, a figure eight, keeps its crossing offset). Outlines of more
 /// than 1000 pieces aren't checked.
-fn crosses_itself(outline: &[(Shape, Vec2, Vec2)]) -> bool {
+fn crosses_itself(outline: &[Outline]) -> bool {
     let n = outline.len();
     if !(2..=1000).contains(&n) {
         return false;
     }
-    let size = outline.iter().fold(1.0f64, |m, (_, a, b)| m.max(a.x.abs()).max(a.y.abs()).max(b.x.abs()).max(b.y.abs()));
+    let size = outline.iter().fold(1.0f64, |m, (_, a, b, _)| m.max(a.x.abs()).max(a.y.abs()).max(b.x.abs()).max(b.y.abs()));
     let tol = 1e-9 * size;
     let bounds = |s: &Shape| match *s {
         Shape::Line { a, b } => (a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y)),
