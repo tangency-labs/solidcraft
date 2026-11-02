@@ -1054,7 +1054,8 @@
         "faces": 204,
         "vertices": 398,
         "volume_mm3": 1804.924132147576
-      }
+      },
+      "unstable": "SMLib v1.1.0-alpha: the union's post-process keeps pointers to edges it has deleted, so the same input makes 597 or 594 edges; fixed in v1.1.0-alpha.1"
     },
     "ladder/06-threads/019-external-tr40x14-p7-two-start": {
       "measured": {
