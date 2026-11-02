@@ -1437,6 +1437,39 @@ fn preview_of_an_edit() {
     assert!(Arc::ptr_eq(&doc, &s.doc));
 }
 
+/// An extrusion too long says so and gives the limit, not `end = 1000000000` (#9625), whether
+/// the distance is typed as text or as a number inside the parameter range.
+#[test]
+fn an_extrude_too_long_says_so() {
+    for distance in [json!("1e9 mm"), json!(5e8), json!("-2e7")] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let e = s.execute("solid.extrude", &json!({"distance": distance})).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(
+            e.contains("the extrusion is too long: its end is") && e.contains("past the limit of 10000000 mm") && !e.contains("end ="),
+            "{distance}: {e}"
+        );
+        assert!(s.model.state().bodies.is_empty(), "{distance}");
+    }
+    // The Edit Extrude dialog previews a redefinition of the feature: the same message.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let fid = run(&mut s, "solid.extrude", json!({"distance": 10}))["feature"].as_u64().unwrap();
+    let idx = s.doc.feature_index(fid).unwrap();
+    run(&mut s, "timeline.roll_to", json!({"position": idx}));
+    let redefine = json!({"feature": fid, "command": "solid.extrude", "params": {"distance": "1e9 mm"}});
+    let e = s.preview(&[("timeline.redefine".into(), redefine)]).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("the extrusion is too long: its end is 1000000000 mm from the sketch plane, past the limit of 10000000 mm"), "{e}");
+    // The kernel's limit on a cylinder, a torus or a revolve is not an extrusion's.
+    let mut s = Session::default();
+    let e = s.execute("solid.cylinder", &json!({"radius": 2e7, "height": 10})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(!e.is_empty() && !e.contains("extrusion"), "{e}");
+}
+
 /// `operation: "auto"`: into a body cuts; additions default to Join when a solid exists.
 #[test]
 fn extrude_auto_operation() {

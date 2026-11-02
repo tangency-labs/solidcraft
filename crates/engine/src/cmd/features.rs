@@ -2363,6 +2363,18 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
     add_feature(s, p, FeatureKind::Split { body: BodyName(body), plane, tool: None, sketch: None, line: None })
 }
 
+/// The fits [`clearance_diameter`] knows (close, normal, loose, and their older names).
+const CLEARANCE_FITS: [&str; 6] = ["close", "fine", "normal", "medium", "loose", "coarse"];
+
+/// A value typed by the user, cut short for a message.
+fn brief(text: &str) -> String {
+    const MAX: usize = 32;
+    match text.char_indices().nth(MAX) {
+        Some((end, _)) => format!("{}…", &text[..end]),
+        None => text.to_string(),
+    }
+}
+
 /// ISO 273 clearance hole diameters (close, normal, loose fit) for metric bolts.
 fn clearance_diameter(size: &str, fit: &str) -> Option<f64> {
     const TABLE: [(f64, f64, f64, f64); 21] = [
@@ -2572,10 +2584,18 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
     let position = if references.is_empty() { position } else { referenced_centre(s, cmd, &references, position, direction)? };
     // The diameter: given, or a metric-estimate/Unified-table tap drill, or an ISO 273
     // clearance hole for a bolt size (close, normal or loose fit).
+    // A diameter number out of range says so, rather than that none was given (#9625).
+    if matches!(p.get("diameter"), Some(Value::Number(_))) && expr(p, "diameter").is_none() {
+        return Err(bad(cmd, format!("`diameter` {}", expr_problem(p.get("diameter")))));
+    }
     let diameter = match (expr(p, "diameter"), &thread, str_(p, "clearance")) {
         (Some(d), _, _) => d,
         (None, _, Some(c)) => {
             let fit = str_(p, "fit").unwrap_or("normal").to_ascii_lowercase();
+            // An unknown fit is not an unknown bolt size (#9625).
+            if !CLEARANCE_FITS.contains(&fit.as_str()) {
+                return Err(bad(cmd, format!("`fit` must be close, normal or loose, not `{}`", brief(&fit))));
+            }
             let d = clearance_diameter(c, &fit).ok_or_else(|| bad(cmd, format!("no clearance hole for `{c}` ({fit} fit): M1.6 to M64")))?;
             Expr::new(format!("{d} mm"))
         }
