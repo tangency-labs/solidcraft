@@ -432,8 +432,11 @@ fn check_design_name(cmd: &str, path: &str) -> Result<()> {
     Err(bad(cmd, format!("{path}: a .{ext} file opens as {kind}, not as a design; save the design as .{}{export}", solidcraft_io::DESIGN_EXT)))
 }
 
-fn write(s: &mut Session, path: &str, format: &str, compression: &str, preview: bool, cache: bool, overwrite: bool) -> Result<Value> {
+#[allow(clippy::too_many_arguments)]
+fn write(s: &mut Session, cmd: &str, path: &str, format: &str, compression: &str, preview: bool, cache: bool, overwrite: bool) -> Result<Value> {
+    // A path outside the agent's folders says so first, whatever its name.
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
+    check_design_name(cmd, path)?;
     if s.path.as_deref() == Some(path) {
         if s.read_only {
             return Err(EngineError::Other(format!("{path}: the design was opened read-only; save it to another file with file.save_as")));
@@ -615,9 +618,9 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
         Some(x) if !x.trim().is_empty() => x.to_string(),
         _ => s.path.clone().ok_or_else(|| bad("file.save", "the design has no file yet: give a `path`"))?,
     };
-    check_design_name("file.save", &path)?;
     write(
         s,
+        "file.save",
         &path,
         str_(p, "format").unwrap_or(default_design_format(&path)),
         str_(p, "compression").unwrap_or("fast"),
@@ -633,9 +636,9 @@ fn default_design_format(path: &str) -> &'static str {
 
 fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
     let path = path_arg(p, "file.save_as")?.to_string();
-    check_design_name("file.save_as", &path)?;
     write(
         s,
+        "file.save_as",
         &path,
         str_(p, "format").unwrap_or(default_design_format(&path)),
         str_(p, "compression").unwrap_or("fast"),
