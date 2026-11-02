@@ -2,6 +2,8 @@
 //! Measure), hovering an edge, a face or a sketch curve wakes the points it offers (`solidcraft_engine::snap`):
 //! a hole's centre, an edge's middle and ends, a face's centre. Woken points are drawn as small
 //! glyphs and picked like vertices from further away, so a centre in empty space can be clicked.
+//! Sketch tools that place points take them too (#11229): a 2D tool's point lands on the
+//! sketch plane where the snap point projects to, a 3D sketch tool's on the point itself.
 //! On by default; the `snap_points` preference turns them off.
 //! They stay awake across empty space and faces, and sleep when another edge or curve is hovered
 //! (a face only replaces a face's points), or when the input stops taking them.
@@ -38,15 +40,30 @@ impl Woken {
     }
 }
 
-/// Whether snap points are on and the active dialog input takes them.
+/// Whether snap points are on and the active dialog input or sketch tool takes them.
 pub fn wanted(app: &SolveApp) -> bool {
-    app.preferences.snap_points && app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::SNAP_POINTS != 0)
+    app.preferences.snap_points
+        && (app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::SNAP_POINTS != 0) || sketch_drawing(app))
+}
+
+/// Whether a sketch tool that places points is active (2D or 3D).
+fn sketch_drawing(app: &SolveApp) -> bool {
+    app.session.active_sketch.is_some() && app.tool.as_ref().is_some_and(|t| crate::sketch_tools::places_points(t) || crate::sketch3d::drawing(app))
+}
+
+/// Whether woken points may be picked or drawn: as [`wanted`], or in a sketch whose tool a click
+/// has taken out of the app while it runs (the woken points are the last hover's; `update`
+/// puts them to sleep once nothing takes them).
+fn usable(app: &SolveApp) -> bool {
+    wanted(app) || (app.preferences.snap_points && app.tool.is_none() && app.session.active_sketch.is_some())
 }
 
 /// The item a hit wakes points of: an edge or a face of a body, or a sketch curve (a line's
-/// middle, a circle's centre).
-fn item_of(h: &Hit) -> Option<Sel> {
+/// middle, a circle's centre). Not a curve of the sketch being edited: its tools snap to its own
+/// points and middles already.
+fn item_of(app: &SolveApp, h: &Hit) -> Option<Sel> {
     match h {
+        Hit::SketchCurve { sketch, .. } if app.tool.is_some() && app.session.active_sketch == Some(*sketch) => None,
         Hit::Edge { body, index, mid, .. } => Some(Sel::Edge { body: body.clone(), index: *index, point: *mid }),
         Hit::Face { body, index, point } => Some(Sel::Face { body: body.clone(), index: *index, point: *point }),
         Hit::SketchCurve { sketch, id, .. } => Some(Sel::ExternalSketchCurve { sketch: *sketch, id: id.clone() }),
@@ -81,8 +98,8 @@ pub fn update(app: &mut SolveApp, hits: &[Hit]) {
     if app.viewport.woken.revision != app.session.revision {
         app.viewport.woken = Woken { revision: app.session.revision, ..Woken::default() };
     }
-    let curve = hits.iter().find_map(item_of).filter(|i| matches!(i, Sel::ExternalSketchCurve { .. }));
-    let Some(item) = curve.or_else(|| app.viewport.hover.as_ref().and_then(item_of)) else { return };
+    let curve = hits.iter().find_map(|h| item_of(app, h)).filter(|i| matches!(i, Sel::ExternalSketchCurve { .. }));
+    let Some(item) = curve.or_else(|| app.viewport.hover.as_ref().and_then(|h| item_of(app, h))) else { return };
     if app.viewport.woken.has(&item) {
         return;
     }
@@ -128,7 +145,7 @@ pub fn shown(app: &SolveApp) -> Vec<(Vec3, &SnapPoint)> {
 /// The woken points within reach of `pos`, nearest first, as vertex hits (with their distance
 /// and kind).
 pub fn hits(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<(f32, Hit, SnapKind)> {
-    if !wanted(app) {
+    if !usable(app) {
         return Vec::new();
     }
     let mut v: Vec<(f32, Hit, SnapKind)> = shown(app)
@@ -145,7 +162,7 @@ pub fn hits(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<(f32, Hit, SnapKind)>
 /// Draw the woken points: a ring with a cross for a centre, a ring with a dot for a face's
 /// centre, a triangle for a middle, a square for an end. Vertices draw as vertices already.
 pub fn draw(app: &SolveApp, painter: &Painter, proj: &Proj) {
-    if !wanted(app) {
+    if !usable(app) {
         return;
     }
     let t = Tokens::get();
@@ -173,6 +190,11 @@ pub fn draw(app: &SolveApp, painter: &Painter, proj: &Proj) {
             SnapKind::Vertex => {}
         }
     }
+}
+
+/// The woken point at `at`, if `at` is one (a vertex hit made by [`hits`]).
+pub fn woken_at(app: &SolveApp, at: Vec3) -> Option<&SnapPoint> {
+    app.viewport.woken.points.iter().find(|p| p.at == at)
 }
 
 /// The woken points for `ui.inspect`: where each shows (as `shown` draws it) and what it is.

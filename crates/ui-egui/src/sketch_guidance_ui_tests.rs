@@ -570,3 +570,46 @@ fn a_horizontal_line_ends_plumb_with_a_point_above_and_keeps_both() {
         "the line stays horizontal"
     );
 }
+
+/// A box with a Ø6 hole at (15, 20), seen from the top, and a sketch on XY under it.
+fn holed_box_sketch() -> Harness {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.set_origin_shown(false);
+    h.app.ui.show_browser = false;
+    h.app.preferences.look_at_anim = false;
+    h.app.run("solid.box", json!({"length": 60, "width": 40, "height": 10})).unwrap();
+    h.app.run("solid.cylinder", json!({"radius": 3, "height": 12, "base": [15, 20, -1], "operation": "cut"})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    // Snap off: only a snap, not the grid, can put the point exactly on the centre.
+    h.app.run("sketch.options", json!({"snap": false})).unwrap();
+    step(&mut h, json!({"call":"ui.view","params":{"view":"top"}}));
+    step(&mut h, json!({"call":"ui.camera","params":{"target":[30,20,0],"distance":160}}));
+    h
+}
+
+fn sketch_points(h: &Harness) -> Vec<solidcore_record::Vec2> {
+    let st = h.app.session.world_state().unwrap();
+    st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.points.iter().map(|p| p.pos).collect()
+}
+
+/// Snap points in sketch tools (#11229): hovering a hole's rim wakes its centre, and a sketch
+/// point clicked near it lands on the centre projected into the sketch. With the preference
+/// off the click stays where it is.
+#[test]
+fn sketch_point_snaps_to_a_model_holes_woken_centre() {
+    let centre = solidcore_record::Vec2::new(15.0, 20.0);
+    for on in [true, false] {
+        let mut h = holed_box_sketch();
+        h.call("ui.prefs", json!({"snap_points": on}));
+        h.app.start("sketch.point");
+        step(&mut h, json!({"move":{"world":[18,20,10]}}));
+        assert_eq!(h.app.viewport.woken.points.is_empty(), !on, "{:?}", h.app.viewport.woken);
+        let before = sketch_points(&h).len();
+        step(&mut h, json!({"click":{"world":[15.4,20.3,10]}}));
+        let pts = sketch_points(&h);
+        assert_eq!(pts.len(), before + 1, "{pts:?}");
+        let placed = pts[before];
+        assert_eq!(placed.dist(centre) < 1e-6, on, "snap points {on}: {placed:?}");
+    }
+}
