@@ -38,6 +38,12 @@
 //! - Degree `p == 0` makes `N_FitSrfToPtsKnots` / `N_FitSrfFuncInterp` request a
 //!   banded matrix of bandwidth `-1` (a negative-sized allocation);
 //!   [`interp_given_knots`] / [`func_interp`] return `InvalidInput` there.
+//! - An overflowing `n + p + 1` / `m + q + 1` knot count cannot equal the knot
+//!   vector's last index, so `N_FitSrfToPtsKnots` reports the same `NL_INP_ERR`
+//!   knot-count mismatch (`NlibCode::Input`) instead of upstream's undefined signed
+//!   `NL_INDEX` sum. The checked sums are compared only; they size no allocation and
+//!   index no array. Every count that fits keeps the upstream sum, comparison order
+//!   and outcome; a count that does not fit the signed index stays `InvalidInput`.
 //! - Upstream's 2D work arrays and banded matrices are single row-major blocks, and
 //!   the port indexes them the same way (a column index may leave its row). Accesses
 //!   outside a whole block return `InvalidInput` instead of undefined behaviour.
@@ -258,9 +264,11 @@ fn interp_matrix(
 /// # Errors
 ///
 /// [`NlibCode::Input`] when `knu` / `knv` do not have `n + p + 2` / `m + q + 2`
-/// knots, `p > n`, `q > m`, or a basis span falls outside the matrix band; errors
-/// of [`KnotVector::basis_eval`] and of the LU decomposition and solves;
-/// `InvalidInput` for an empty grid, a short row, too few parameters, or `p == 0`.
+/// knots (an overflowing `n + p + 1` / `m + q + 1` sum cannot reach the last index,
+/// so it is the same mismatch), `p > n`, `q > m`, or a basis span falls outside the
+/// matrix band; `InvalidInput` for an empty grid, a short row, too few parameters,
+/// `p == 0`, or a count that does not fit the signed index; errors of
+/// [`KnotVector::basis_eval`] and of the LU decomposition and solves.
 pub fn interp_given_knots<P: FitPoint>(
     a: &[Vec<P>],
     u: &[f64],
@@ -277,7 +285,10 @@ pub fn interp_given_knots<P: FitPoint>(
     // Check for surface memory.
     let r = sg(knu.last_index(), OP)?;
     let s = sg(knv.last_index(), OP)?;
-    if r != n + p + 1 || s != m + q + 1 {
+    // An overflowing `n + p + 1` / `m + q + 1` cannot equal the last index.
+    let rs = n.checked_add(p).and_then(|t| t.checked_add(1));
+    let ss = m.checked_add(q).and_then(|t| t.checked_add(1));
+    if Some(r) != rs || Some(s) != ss {
         return Err(SolidError::nlib(OP, NlibCode::Input));
     }
     if p > n || q > m {
@@ -795,6 +806,66 @@ mod tests {
             vec![0.0, 0.0, 1.0]
         );
         assert!(param_values::<Vec3>(&[], ParamMethod::Uniform).is_err());
+    }
+
+    /// `i64::MAX` as a `usize` where `usize` is wide enough; on a 32-bit target every
+    /// `usize` fits the signed index, so the knot-count comparison rejects it.
+    fn huge_count() -> usize {
+        usize::try_from(i64::MAX).unwrap_or(usize::MAX)
+    }
+
+    /// An overflowing u count `n + p + 1` cannot equal `knu`'s last index, so the
+    /// comparison is the `NL_INP_ERR` mismatch (`NlibCode::Input`); `q = 1` makes the
+    /// v count `m + q + 1 = 3` match `knv`, so only the u sum is under test.
+    #[test]
+    fn huge_u_degree_is_rejected_as_input_mismatch() {
+        let a = grid(0, 1, |_, _| [0.0, 0.0, 0.0]);
+        let u = [0.0, 1.0];
+        let v = [0.0, 1.0];
+        let kn = KnotVector::from_slice(&[0.0, 0.0, 1.0, 1.0]).unwrap();
+        assert!(matches!(
+            interp_given_knots(&a, &u, &v, &kn, &kn, huge_count(), 1),
+            Err(SolidError::Nlib {
+                code: NlibCode::Input,
+                ..
+            })
+        ));
+    }
+
+    /// An overflowing v count `m + q + 1` cannot equal `knv`'s last index; `n = 1`,
+    /// `m = 0` and `p = 1` make the u count `n + p + 1 = 3` match `knu`, so the raw
+    /// `||` reaches the v sum. Asserted separately from the u case so one overflow
+    /// cannot mask the other.
+    #[test]
+    fn huge_v_degree_is_rejected_as_input_mismatch() {
+        let a = grid(1, 0, |_, _| [0.0, 0.0, 0.0]);
+        let u = [0.0, 1.0];
+        let v = [0.0, 1.0];
+        let kn = KnotVector::from_slice(&[0.0, 0.0, 1.0, 1.0]).unwrap();
+        assert!(matches!(
+            interp_given_knots(&a, &u, &v, &kn, &kn, 1, huge_count()),
+            Err(SolidError::Nlib {
+                code: NlibCode::Input,
+                ..
+            })
+        ));
+    }
+
+    /// A count that does not fit the signed index is a conversion error
+    /// (`InvalidInput`), not the knot-count mismatch; `usize::MAX` is a safe error on
+    /// every target width.
+    #[test]
+    fn oversized_degrees_are_rejected_by_conversion() {
+        let a = grid(0, 0, |_, _| [0.0, 0.0, 0.0]);
+        let u = [0.0, 1.0];
+        let v = [0.0, 1.0];
+        let kn = KnotVector::from_slice(&[0.0, 0.0, 1.0, 1.0]).unwrap();
+        assert!(interp_given_knots(&a, &u, &v, &kn, &kn, usize::MAX, usize::MAX).is_err());
+        #[cfg(target_pointer_width = "64")]
+        assert!(matches!(
+            interp_given_knots(&a, &u, &v, &kn, &kn, usize::MAX, usize::MAX),
+            Err(SolidError::InvalidInput { .. })
+        ));
     }
 
     #[test]
