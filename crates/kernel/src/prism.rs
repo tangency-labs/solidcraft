@@ -1794,9 +1794,12 @@ fn split_seg(seg: &Seg2, pts: &[Vec2], tol: f64) -> Option<Vec<Seg2>> {
 /// sections, sewn from its faces: each slab between the prisms' end levels has walls over its
 /// section's outline; each level has a face up over the section below less the one above, and
 /// a face down over the one above less the one below. Every outline is split where any other
-/// meets it, so the faces share their edges. `None` when a slab is empty or a curve isn't a
-/// line or an arc.
-fn sew_stack(plane: &Plane, d: Vec3, pa: &Prism, pb: &Prism, tol: f64, history: &lineage::Context) -> Option<Result<Body>> {
+/// meets it, so the faces share their edges. With `flush`, a level where only the tool `pb`
+/// ends, inside the target, with the same section below and above it (the foot of a boss an
+/// extrude's join runs on into a rod's top) has no faces and is left out, so the walls run on
+/// through it whole rather than in a strip per slab (#3062). The target's own end levels stay.
+/// `None` when a slab is empty or a curve isn't a line or an arc.
+fn sew_stack(plane: &Plane, d: Vec3, pa: &Prism, pb: &Prism, tol: f64, flush: bool, history: &lineage::Context) -> Option<Result<Body>> {
     let mut levels = vec![pa.lo, pa.hi, pb.lo, pb.hi];
     levels.sort_by(f64::total_cmp);
     levels.dedup_by(|x, y| (*x - *y).abs() < tol);
@@ -1812,7 +1815,27 @@ fn sew_stack(plane: &Plane, d: Vec3, pa: &Prism, pb: &Prism, tol: f64, history: 
         };
         slabs.push(s.oriented());
     }
+    if flush {
+        // Slab `k` lies between levels `k` and `k + 1`: one the same as the slab below goes
+        // into it, and the level between them with it, where only the tool ends there.
+        let tool_end = |z: f64| [pb.lo, pb.hi].iter().any(|e| (e - z).abs() < tol) && [pa.lo, pa.hi].iter().all(|e| (e - z).abs() >= tol);
+        let mut k = 1;
+        while k < slabs.len() {
+            if tool_end(*levels.get(k)?) && same_section(slabs.get(k - 1)?, slabs.get(k)?, tol)? {
+                slabs.remove(k);
+                levels.remove(k);
+            } else {
+                k += 1;
+            }
+        }
+    }
     sew_sections(plane, d, &levels, &slabs, tol, false, history)
+}
+
+/// Whether neither section sticks out of the other.
+fn same_section(x: &Section, y: &Section, tol: f64) -> Option<bool> {
+    let within = |a: &Section, b: &Section| boolean2d_tagged(a, b, BoolOp::Cut, tol).map(|r| r.regions.is_empty());
+    Some(within(x, y)? && within(y, x)?)
 }
 
 /// Sew the exact sections between successive levels, including empty gaps. With `coalesce`,
@@ -2272,11 +2295,19 @@ fn simple_prism_indexed(a: &Body, b: &Body, op: BoolOp, [ia, ib]: [&LazyIndex; 2
     let (lo, hi) = if stacked {
         // Different sections (a boss hanging over a plate's edge): sewn slab by slab.
         if !alike(x) || !alike(y) {
-            return sew_stack(&plane, d, &pa, &pb, tol, &history).map(|r| r.map(Some));
+            // Walls run on whole through a level with no faces, unless an operand's own face
+            // boundaries are to be kept.
+            let flush = !a.regularization_protected
+                && !b.regularization_protected
+                && a.split_keep().is_empty()
+                && b.split_keep().is_empty()
+                && a.paint().is_none_or(|p| p.faces.is_empty())
+                && b.paint().is_none_or(|p| p.faces.is_empty());
+            return sew_stack(&plane, d, &pa, &pb, tol, flush, &history).map(|r| r.map(Some));
         }
         // One outline end to end: also slab by slab, so the history follows each operand's
         // walls (one longer prism, whose walls are made from both).
-        if let Some(Ok(body)) = sew_stack(&plane, d, &pa, &pb, tol, &history)
+        if let Some(Ok(body)) = sew_stack(&plane, d, &pa, &pb, tol, false, &history)
             && body.history().is_some()
         {
             return Some(Ok(Some(body)));
@@ -2902,6 +2933,30 @@ mod planar_tests {
                 assert!(mesh.contains(Vec3::new(7., 0., 10.)));
             }
         }
+    }
+
+    #[test]
+    fn a_boss_sunk_into_a_rods_top_leaves_the_rods_side_whole() {
+        // #3062: a boss joined on a rod's top runs on 0.5 mm into it. The join was sewn slab by
+        // slab, and the rod's side kept a seam all round at the boss's foot, so a round of the
+        // rod's top edge was "taller than the walls" at any radius over 0.5 mm.
+        let disc = |r: f64| Region2 { outer: Loop2::circle(Vec2::ZERO, r), holes: vec![] };
+        let rod = crate::extrude(&Plane::XY, &[disc(7.)], 0., 48.2).unwrap().pop().unwrap();
+        let boss = crate::extrude(&Plane::XY, &[disc(2.7)], 47.7, 50.2).unwrap().pop().unwrap();
+        let joined = crate::ops::boolean(&rod, &boss, BoolOp::Union).unwrap().unwrap();
+        let heights = |b: &Body| -> Vec<f64> {
+            let mut zs: Vec<f64> = b.edges(0.01).unwrap().iter().flat_map(|e| e.points.iter().map(|p| (p.z * 1e3).round() / 1e3)).collect();
+            zs.sort_by(f64::total_cmp);
+            zs.dedup();
+            zs
+        };
+        assert_eq!(heights(&joined), [0., 48.2, 50.2], "no edge at the boss's foot");
+        assert!(joined.validity().is_empty());
+        let expected = std::f64::consts::PI * (49. * 48.2 + 2.7 * 2.7 * 2.);
+        let volume = |b: &Body| crate::measure_mass(b).unwrap().volume;
+        assert!((volume(&joined) - expected).abs() < 1e-3 * expected, "{} mm³", volume(&joined));
+        let rounded = crate::fillet(&joined, &[Vec3::new(0., 7., 48.2)], 1.).unwrap();
+        assert!(volume(&rounded) < volume(&joined));
     }
 
     #[test]
