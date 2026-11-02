@@ -237,7 +237,6 @@ sketch.auto_project
 sketch.blend_curve
 sketch.break
 sketch.break_link
-sketch.cancel
 sketch.centerline
 sketch.chain
 sketch.chamfer.distance_angle
@@ -273,13 +272,11 @@ sketch.dimension_text
 sketch.drag
 sketch.drag_end
 sketch.draw.dimensioned
-sketch.edit
 sketch.edit_text
 sketch.ellipse
 sketch.export_dxf
 sketch.extend
 sketch.fillet
-sketch.finish
 sketch.finish_auto_constrain
 sketch.fit_curves_to_section
 sketch.glyphs
