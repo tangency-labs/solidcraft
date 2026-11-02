@@ -2170,7 +2170,7 @@
   "prefs.bottom_right": "أسفل اليمين",
   "prefs.browser": "المستعرض",
   "prefs.browser_components_open": "المكوّنات مفتوحة من البداية",
-  "prefs.browser_components_open_note": "يبدأ كل مكوّن في المستعرض مفتوحًا كما كان من قبل، بدلاً من أن يبقى مغلقًا حتى تفتحه.",
+  "prefs.browser_components_open_note": "يبدأ كل مكوّن في المستعرض مفتوحًا كما كان من قبل، بدلًا من أن يبقى مغلقًا حتى تفتحه.",
   "prefs.browser_eye_left": "أيقونة الإظهار بجانب سهم الطي",
   "prefs.browser_eye_left_note": "تعرض صفوف المستعرض أيقونة الإظهار/الإخفاء بجانب سهم الطي كما كانت من قبل، بدلًا من عمود عند نهاية الصفوف.",
   "prefs.browser_reveal_on_hover": "إظهار عند مرور المؤشر",
