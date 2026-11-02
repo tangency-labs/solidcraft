@@ -280,7 +280,7 @@ pub(crate) fn script_steps(doc: &Document) -> Result<(Vec<Value>, Vec<String>)> 
     let mut brings: BTreeMap<u64, Vec<&Param>> = BTreeMap::new();
     for f in &doc.features {
         if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-            for name in sketch.constraints.iter().filter_map(|c| c.param.as_deref()) {
+            for name in sketch.dimension_params().into_iter().map(String::as_str) {
                 if let Some(p) = models.get(name)
                     && owned.insert(name)
                 {

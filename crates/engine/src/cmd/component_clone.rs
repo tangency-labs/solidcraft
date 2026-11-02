@@ -438,9 +438,8 @@ pub(super) fn build(
     // Constraint dimensions own independent generated parameters; public user parameters stay shared.
     for f in &feats {
         if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-            for c in &sketch.constraints {
-                if let Some(name) = &c.param
-                    && !parameters.contains_key(name)
+            for name in sketch.dimension_params() {
+                if !parameters.contains_key(name)
                     && let Some(p) = source_parameters.get(name.as_str())
                     && p.model
                 {
