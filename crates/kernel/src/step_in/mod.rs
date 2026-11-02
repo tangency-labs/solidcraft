@@ -12,6 +12,7 @@ pub(crate) mod geom;
 pub(crate) mod p21;
 mod parallel;
 pub(crate) mod split;
+mod tessellated;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -37,6 +38,11 @@ const MAX_WINDOW: usize = 64;
 /// Most representation entries walked while deciding which items are converted exactly once. A
 /// larger file keeps every conversion instead of paying for the walk.
 const MAX_CLOSURE_WORK: usize = 1 << 16;
+
+/// Geometry to convert, including unsupported tessellations so they produce a warning.
+fn body_item(e: &Entity) -> bool {
+    matches!(e.name(), "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS" | "FACETED_BREP" | "SHELL_BASED_SURFACE_MODEL") || tessellated::is_item(e)
+}
 
 /// A body read from a STEP file.
 #[derive(Clone, Debug)]
@@ -661,6 +667,15 @@ impl Reader {
         if name.is_empty() { format!("solid #{item}") } else { format!("solid '{name}'") }
     }
 
+    fn failure_label(&self, item: u64, batch: usize) -> String {
+        if self.ex.get(item).is_some_and(tessellated::is_item) {
+            let product = self.batches.get(batch).map_or("Import", |b| b.product.as_str());
+            format!("product '{product}', tessellated item #{item}")
+        } else {
+            self.label(item)
+        }
+    }
+
     /// Bodies of a representation's items (following mapped items), placed by `m`.
     fn rep_bodies(&mut self, rep: u64, m: &mt::Matrix4, path: &[String], product: &str, instance: Option<&str>, out: &mut Vec<usize>, depth: usize) {
         if depth > MAX_ASSEMBLY_DEPTH {
@@ -680,18 +695,12 @@ impl Reader {
             }
             let Some(e) = self.ex.get(item) else { continue };
             match e.name() {
-                "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS" | "FACETED_BREP" | "SHELL_BASED_SURFACE_MODEL" => {
+                _ if body_item(e) => {
                     // Only batch consecutive solids: mapped items must retain traversal and
                     // first-use unit/cache order. Bound temporary geometry independently of file size.
                     let mut batch = vec![item];
                     let capacity = MAX_BODIES.saturating_sub(self.bodies_so_far()).min(64);
-                    while batch.len() < capacity
-                        && items.peek().is_some_and(|id| {
-                            self.ex.get(*id).is_some_and(|e| {
-                                matches!(e.name(), "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS" | "FACETED_BREP" | "SHELL_BASED_SURFACE_MODEL")
-                            })
-                        })
-                    {
+                    while batch.len() < capacity && items.peek().is_some_and(|id| self.ex.get(*id).is_some_and(body_item)) {
                         if let Some(next) = items.next() {
                             batch.push(next);
                         }
@@ -778,7 +787,7 @@ impl Reader {
             let (item, units) = (p.item, p.units);
             if let Some(again) = self.unreadable.get(&item) {
                 if let Some(msg) = again.clone() {
-                    let label = self.label(item);
+                    let label = self.failure_label(item, p.batch);
                     self.warn(format!("{label}: not imported: {msg}"));
                 }
                 continue;
@@ -863,11 +872,11 @@ impl Reader {
                     });
                 }
                 Err(parallel::Failure { read, msg }) => {
-                    let label = self.label(item);
+                    let label = if tessellated::is_item(e) { format!("product '{product}', tessellated item #{item}") } else { self.label(item) };
                     self.warn(format!("{label}: not imported: {msg}"));
                     // Later instances don't read the item again.
                     if !self.oriented.contains_key(&item) {
-                        self.unreadable.insert(item, (!read).then_some(msg));
+                        self.unreadable.insert(item, (!read || tessellated::is_item(e)).then_some(msg));
                     }
                 }
             }
@@ -1243,11 +1252,7 @@ impl StepReading {
             Err(e) => return Err(KernelError::Invalid(e)),
         };
         let mut rd = Reader::new(ex.clone(), workers);
-        rd.solid_items = ex
-            .entities
-            .values()
-            .filter(|e| matches!(e.name(), "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS" | "FACETED_BREP" | "SHELL_BASED_SURFACE_MODEL"))
-            .count();
+        rd.solid_items = ex.entities.values().filter(|e| body_item(e)).count();
         rd.watch = watch.clone();
         rd.index();
         // Roots: product definitions that are nobody's component.
@@ -1267,10 +1272,7 @@ impl StepReading {
             .iter()
             .flat_map(|(r, (items, _))| items.iter().map(move |i| (*r, *i)))
             .filter(|(_, i)| !rd.used_items.contains(i))
-            .filter(|(_, i)| {
-                ex.get(*i)
-                    .is_some_and(|e| matches!(e.name(), "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS" | "FACETED_BREP" | "SHELL_BASED_SURFACE_MODEL"))
-            })
+            .filter(|(_, i)| ex.get(*i).is_some_and(body_item))
             .map(|(r, _)| r)
             .collect();
         loose.sort();
