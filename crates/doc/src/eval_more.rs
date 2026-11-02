@@ -1283,12 +1283,23 @@ pub(super) fn sheet_drill(f: &Feature, st: &ModelState, prism: PrimitivePrism) -
 /// sheet bodies it machined; None when the drill is not a plain cylinder or meets no sheet.
 pub(super) fn sheet_bore_cut(f: &Feature, st: &mut ModelState, prism: PrimitivePrism) -> Result<Option<Vec<String>>> {
     let PrimitivePrism::Cylinder { base, axis, radius, height } = prism else { return Ok(None) };
+    // Drilling a sheet builds each of its panels and runs a boolean on it, only to find that a
+    // drill far off meets none (#10226): a sheet whose box lies clear of the drill's is left out.
+    // Both boxes are the exact ones, grown by the bodies' tolerances, as for the other sheet
+    // cuts. A drill a sheet refuses whatever it meets (not a cylinder, or the
+    // sheet holds all the bores it may) is still put to every sheet.
+    let reach = drill_box(base, axis, radius, height);
     let mut plans = Vec::new();
     for original in &st.sheets {
         if !sheet_eligible(f, st, &[], original) {
             continue;
         }
+        if !original.bores_full() && st.body(&original.body).is_some_and(|mb| boxes_apart(&exact_box(&mb.body), &reach)) {
+            continue;
+        }
         let mut sh = original.clone();
+        #[cfg(test)]
+        super::cost_tests::count(|c| c.cut += 1);
         match sh.add_bore(base, axis, radius, height) {
             Ok(true) => {}
             Ok(false) => continue,
@@ -1311,6 +1322,16 @@ pub(super) fn sheet_bore_cut(f: &Feature, st: &mut ModelState, prism: PrimitiveP
         }
     }
     Ok(Some(handled))
+}
+
+/// [`exact_box`] of a hole's drill as [`crate::sheet::SheetBody::add_bore`] makes it; None
+/// (never apart) for a drill it refuses.
+fn drill_box(base: Vec3, axis: Vec3, radius: f64, height: f64) -> Option<Aabb3> {
+    let axis = axis.normalized()?;
+    if ![base.x, base.y, base.z, radius, height].iter().all(|v| v.is_finite()) || !(radius > 0.0) || height == 0.0 {
+        return None;
+    }
+    exact_box(&kernel::cylinder(base, axis, radius, height).ok()?)
 }
 
 /// The most hole tools machined in one pass by [`sheet_drill_cuts`].

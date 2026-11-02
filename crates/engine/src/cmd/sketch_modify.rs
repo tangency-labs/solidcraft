@@ -2703,13 +2703,31 @@ fn offset_group(sk: &mut Sketch, ids: &[String], eligible: &std::collections::Ha
         sel.clone()
     };
     let (order, closed) = chain(sk, first, &pool);
-    // Side: toward `side` (compare both offsets' distance to it), else the sign.
+    // Side: toward `side`, else the sign. A positive distance offsets to the left of the walk.
+    // A line or an arc says directly which side `side` is on (the half-plane; inside or outside
+    // the circle, as for a circle above), so neither rounding of a tiny step nor an arc too small
+    // for the distance can turn it round; other curves compare both offsets' distance to it.
     let d = match side {
         Some(q) => {
-            let dist = |dd: f64| {
-                offset_piece(sk, first, order.iter().find(|x| x.0 == first).is_none_or(|x| x.1), dd).map(|pc| piece_dist(&pc, q)).unwrap_or(f64::MAX)
+            let forward = order.iter().find(|x| x.0 == first).is_none_or(|x| x.1);
+            let left = match sk.curves.get(first).map(|c| c.kind.clone()) {
+                Some(CurveKind::Line { a, b }) => {
+                    let (a, b) = (sk.point(a).unwrap_or_default(), sk.point(b).unwrap_or_default());
+                    let (from, along) = if forward { (a, b - a) } else { (b, a - b) };
+                    Some(along.x * (q - from).y - along.y * (q - from).x >= 0.0)
+                }
+                Some(CurveKind::Arc { c, a, .. }) => {
+                    let (c, a) = (sk.point(c).unwrap_or_default(), sk.point(a).unwrap_or_default());
+                    // Followed forward an arc turns anticlockwise, its centre on the left.
+                    Some((q.dist(c) <= c.dist(a)) == forward)
+                }
+                _ => None,
             };
-            if dist(d0.abs()) <= dist(-d0.abs()) { d0.abs() } else { -d0.abs() }
+            let toward = left.unwrap_or_else(|| {
+                let dist = |dd: f64| offset_piece(sk, first, forward, dd).map(|pc| piece_dist(&pc, q)).unwrap_or(f64::MAX);
+                dist(d0.abs()) <= dist(-d0.abs())
+            });
+            if toward { d0.abs() } else { -d0.abs() }
         }
         None => d0,
     };
@@ -2830,11 +2848,28 @@ fn offset_beyond(sk: &Sketch, rung: &[String]) -> Option<Vec2> {
     // an inward ladder round into a growing one instead of letting it run out of room. Its
     // signed distance already says which way, so leave the side to it.
     let index = sk.curve_index(rung.first()?)?;
-    if matches!(sk.curves.get(index)?.kind, CurveKind::Circle { .. }) {
+    let kind = &sk.curves.get(index)?.kind;
+    if matches!(kind, CurveKind::Circle { .. }) {
         return None;
     }
     let (from, to) = sk.offset_dimension_points(rung.first()?)?;
-    (from.dist(to) > TOL).then(|| to + (to - from))
+    if from.dist(to) <= TOL {
+        return None;
+    }
+    let step = to - from;
+    // An arc's side is inside or outside its circle, and the same trap as the ring's waits
+    // there: a whole step toward the centre past an arc smaller than the distance lands beyond
+    // the centre and reads as outside, so the ladder turned round onto an earlier instance.
+    // Stop halfway to the centre instead, still inside, and let the arc run out of room.
+    if let CurveKind::Arc { c, .. } = *kind
+        && let Some(centre) = sk.points.get(c).map(|p| p.pos)
+    {
+        let r = to.dist(centre);
+        if step.dot(centre - to) > 0.0 && step.len() >= r * 0.5 {
+            return Some(to + step.normalized()? * (r * 0.5));
+        }
+    }
+    Some(to + step)
 }
 
 /// What one side of a rung leaves for the next: the curves to offset again, its own signed

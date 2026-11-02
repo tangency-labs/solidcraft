@@ -2696,6 +2696,59 @@ fn offset_instances_stop_where_the_shape_runs_out() {
     assert_eq!(o["sides"].as_array().map(Vec::len), Some(2), "{o}");
 }
 
+/// Instances picked from an arc keep going inward: a slot with r5 ends, stepped 2 mm in three
+/// times from an end arc. The third step would pass that arc's centre, so the command is
+/// refused there, where the third instance used to turn round onto the first (its side was
+/// read past the centre, outside the arc).
+#[test]
+fn offset_instances_from_an_arc_stop_where_the_arc_runs_out() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[-10, -5], [10, -5]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [10, 0], "start": [10, -5], "end": [10, 5]}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 5], [-10, 5]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [-10, 0], "start": [-10, 5], "end": [-10, -5]}));
+    let before = s.doc.to_json();
+    let error = s.execute("sketch.offset", &json!({"curves": ["a1"], "distance": 2, "side": [10, 0], "instances": 3})).unwrap_err().to_string();
+    assert!(error.contains("instance 3 of 3"), "{error}");
+    assert_eq!(s.doc.to_json(), before, "a refused instance leaves the design alone");
+    let o = run(&mut s, "sketch.offset", json!({"curves": ["a1"], "distance": 2, "side": [10, 0], "instances": 2}));
+    let sk = sketch(&s);
+    let radii: Vec<f64> = o["sides"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|side| {
+            let id = side["curves"].as_array().unwrap().iter().filter_map(|v| v.as_str()).find(|id| id.starts_with('a')).unwrap();
+            let CurveKind::Arc { c, a, .. } = sk.curves[sk.curve_index(id).unwrap()].kind else { panic!("{id} is no arc") };
+            sk.points[c].pos.dist(sk.points[a].pos)
+        })
+        .collect();
+    assert!(radii.len() == 2 && (radii[0] - 3.0).abs() < 1e-6 && (radii[1] - 1.0).abs() < 1e-6, "{radii:?}");
+}
+
+/// `side` is read off the picked curve itself: an arc's end of a slot left a hair of radius by
+/// the first instance still makes the second go on inward, and run out of room, and a tiny
+/// distance far from the origin still goes the way `side` says (a step a thousandth of it is
+/// lost to rounding there).
+#[test]
+fn offset_side_is_read_off_the_picked_curve() {
+    let mut s = new_sketch();
+    let r = 2.0005;
+    run(&mut s, "sketch.line", json!({"points": [[-10, -r], [10, -r]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [10, 0], "start": [10, -r], "end": [10, r]}));
+    run(&mut s, "sketch.line", json!({"points": [[10, r], [-10, r]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [-10, 0], "start": [-10, r], "end": [-10, -r]}));
+    let error = s.execute("sketch.offset", &json!({"curves": ["a1"], "distance": 2, "side": [10, 0], "instances": 2})).unwrap_err().to_string();
+    assert!(error.contains("instance 2 of 2"), "{error}");
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 1e8], [20, 1e8]]}));
+    let o = run(&mut s, "sketch.offset", json!({"curves": ["l1"], "distance": 0.000001, "side": [10, 99999999]}));
+    let sk = sketch(&s);
+    let out = o["curves"][0].as_str().unwrap();
+    let CurveKind::Line { a, .. } = sk.curves[sk.curve_index(out).unwrap()].kind else { panic!("{out} is no line") };
+    assert!(sk.points[a].pos.y < 1e8, "below, toward `side`: {:?}", sk.points[a].pos);
+}
+
 #[test]
 fn offset_instances_count_must_be_a_whole_number_within_the_cap() {
     let mut s = new_sketch();

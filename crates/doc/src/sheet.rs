@@ -1934,6 +1934,11 @@ impl SheetBody {
         Ok(body)
     }
 
+    /// Whether the sheet holds all the bores it may: [`Self::add_bore`] refuses any more.
+    pub(crate) fn bores_full(&self) -> bool {
+        self.bores.len() >= MAX_BORES
+    }
+
     /// The panels a straight drill (the world cylinder from `base` along `axis`) meets, each with
     /// how square the drill is to it: |panel normal · axis|, 1 across the panel and 0 along it.
     /// A drill that meets a bend is refused (a bend's material has no flat place for a hole).
@@ -1975,7 +1980,7 @@ impl SheetBody {
     /// meets no material; an error when it meets a bend, or crosses a panel other than along
     /// its plane (that machining has no exact place in the flat pattern).
     pub(crate) fn add_bore(&mut self, base: Vec3, axis: Vec3, radius: f64, height: f64) -> Result<bool> {
-        if self.bores.len() >= MAX_BORES {
+        if self.bores_full() {
             return Err(flat_budget_error());
         }
         let panels = self.drilled_panels(base, axis, radius, height)?;
