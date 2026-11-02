@@ -63,6 +63,7 @@ pub mod features;
 pub mod file;
 pub mod inspect;
 pub mod joints;
+pub mod libraries;
 pub mod mass_properties;
 pub mod motion;
 pub mod print_face;
