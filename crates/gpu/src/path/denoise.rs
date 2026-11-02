@@ -36,7 +36,7 @@ impl Pipelines {
             module: &guide_shader,
             entry_point: Some("denoise_guides"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: context.cache.as_ref().map(crate::shader_cache::ShaderCache::get),
         });
         let entries: Vec<_> = (0..4)
             .map(|binding| wgpu::BindGroupLayoutEntry {
@@ -64,11 +64,14 @@ impl Pipelines {
             module: &shader,
             entry_point: Some("atrous"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: context.cache.as_ref().map(crate::shader_cache::ShaderCache::get),
         });
         checked(error_scopes)?;
         warm_up(device, &context.queue, &guide, &placeholder_bind(device, &context.layout, 7)?, &context.healthy)?;
         warm_up(device, &context.queue, &filter, &placeholder_bind(device, &filter_layout, 4)?, &context.healthy)?;
+        if let Some(cache) = &context.cache {
+            cache.save();
+        }
         Ok(Self { guide, filter, filter_layout })
     }
 

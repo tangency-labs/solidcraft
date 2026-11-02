@@ -22,6 +22,9 @@ robust = { workspace = true }
 pollster = { workspace = true }
 # Native backends, so tests and the CLI can open a device without a window.
 wgpu = { workspace = true, features = ["metal", "vulkan", "dx12", "gles"] }
+# The persistent pipeline cache (src/shader_cache.rs): wgpu's unsafe call, and the file checksum.
+solidcraft-gpu-native = { workspace = true }
+sha2 = { workspace = true }
 
 [dev-dependencies]
 image = { workspace = true }
