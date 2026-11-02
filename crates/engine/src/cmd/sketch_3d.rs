@@ -517,7 +517,8 @@ pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Opti
     let kind = match (ents.as_slice(), pair, axis) {
         (_, Some((a, b)), Some(axis)) if matches!(ty.as_str(), "distance_x" | "distance_y" | "distance_z") => {
             let d = sk.wire_point_at(&b).zip(sk.wire_point_at(&a)).map(|(q, p)| (q - p).dot(axis.unit())).unwrap_or(0.0);
-            WireConstraintKind::AxisDistance { a, b, axis, reversed: d < 0.0, value: 0.0 }
+            // Behind only when clearly so: rounding left by a solve keeps the front side.
+            WireConstraintKind::AxisDistance { a, b, axis, reversed: d < -SIDE, value: 0.0 }
         }
         (_, Some((a, b)), None) if matches!(ty.as_str(), "auto" | "distance" | "length") => WireConstraintKind::Distance { a, b, value: 0.0 },
         ([a, b], None, None) if matches!(ty.as_str(), "auto" | "angle") && sk.is_drawn_line(a) && sk.is_drawn_line(b) => {
@@ -664,6 +665,9 @@ pub(super) fn toggle_driven_3d(s: &mut Session, p: &Value, cmd: &str, cid: &str,
     s.doc_mut().prune_model_params();
     Ok(Some(json!({"constraint": cid, "driven": driven, "sketch": info})))
 }
+
+/// How far behind (mm) a point must lie for a dimension to keep that side.
+const SIDE: f64 = 1e-9;
 
 fn round6(v: f64) -> f64 {
     (v * 1e6).round() / 1e6
