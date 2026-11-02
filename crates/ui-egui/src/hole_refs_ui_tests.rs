@@ -110,17 +110,68 @@ fn a_hole_is_placed_by_its_distances_from_two_edges() {
     h.frames(4);
     assert!(picked_edge(&h, "Reference 1").is_some_and(|p| p.x.abs() < 1e-6), "{:?}", picked_edge(&h, "Reference 1"));
     assert!(picked_edge(&h, "Reference 2").is_some_and(|p| p.y.abs() < 1e-6), "{:?}", picked_edge(&h, "Reference 2"));
-    assert_eq!(distances(&h), ["10 mm", "12 mm"]);
+    assert_eq!(distances(&h), ["10.00 mm", "12.00 mm"]);
     assert!(place(&h).dist(Vec3::new(10.0, 12.0, 10.0)) < 1e-6, "{:?}", place(&h));
     // The hole moved on its face (a new pick, or its handle dragged): the distances follow.
     if let Some(Sel::Face { point, .. }) = h.app.dialog.as_mut().and_then(|d| d.inputs.first_mut()).and_then(|i| i.items.first_mut()) {
         *point = Vec3::new(20.0, 30.0, 10.0);
     }
     h.frames(2);
-    assert_eq!(distances(&h), ["20 mm", "30 mm"]);
+    assert_eq!(distances(&h), ["20.00 mm", "30.00 mm"]);
     h.step(&json!({"widget": "OK"})).unwrap();
     assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
     assert!(!solid_at(&h, Vec3::new(20.0, 30.0, 8.0)) && solid_at(&h, Vec3::new(10.0, 12.0, 8.0)), "the edit moved the hole to (20, 30)");
+}
+
+/// #10693: a measured distance reads at the document's precision, while OK still sends the
+/// measured value, not the rounded one.
+#[test]
+fn a_measured_distance_shows_the_document_precision_but_keeps_its_model_value() {
+    let mut h = plate();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let at = screen(&mut h, Vec3::new(30.0, 25.0, 10.0));
+    h.step(&json!({"click": at})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Reference 1"}})).unwrap();
+    let left = screen(&mut h, Vec3::new(0.0, 20.0, 10.0));
+    h.step(&json!({"click": left})).unwrap();
+    h.frames(2);
+    // A face pick lands a hair off the whole millimetre, as a real pick does.
+    let exact = 20.000000868569572;
+    if let Some(Sel::Face { point, .. }) = h.app.dialog.as_mut().and_then(|d| d.inputs.first_mut()).and_then(|i| i.items.first_mut()) {
+        *point = Vec3::new(exact, 30.0, 10.0);
+    }
+    h.frames(2);
+    assert_eq!(distances(&h)[0], "20.00 mm");
+    h.step(&json!({"widget": "OK"})).unwrap();
+    let f = h.app.session.doc.features.last().unwrap().clone();
+    let FeatureKind::Hole { references, .. } = &f.kind else { panic!("the last feature is a hole") };
+    let text = references[0].distance.to_string();
+    let value = h.app.session.doc.eval(&text, solidcraft_engine::doc::expr::Kind::Length).unwrap();
+    assert!((value - exact).abs() < 1e-9, "OK keeps the measured distance, not the rounded text: {text}");
+}
+
+/// #10693: a comma decimal literal stored on a reference reads at the document's precision.
+#[test]
+fn a_comma_decimal_reference_distance_shows_the_document_precision() {
+    let mut h = plate();
+    h.app
+        .run(
+            "solid.hole",
+            json!({
+                "position": [30.0, 25.0, 10.0],
+                "diameter": 5,
+                "depth": 6,
+                "references": [
+                    {"edge": [0.0, 20.0, 10.0], "distance": "29,99999999999999 mm"},
+                    {"edge": [25.0, 0.0, 10.0], "distance": "25,000001373022986 mm"},
+                ],
+            }),
+        )
+        .unwrap();
+    let id = h.app.session.doc.features.last().unwrap().id;
+    h.step(&json!({"call": "ui.editFeature", "params": {"feature": id}})).unwrap();
+    h.frames(4);
+    assert_eq!(distances(&h), ["30.00 mm", "25.00 mm"]);
 }
 
 /// Reference edges place one hole: with places on two faces, OK says to pick one.

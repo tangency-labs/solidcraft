@@ -166,6 +166,8 @@ impl AcpBackend {
                                 out.push(Event::TurnEnded { reason: "auth".into() });
                             }
                             out.push(Event::AuthRequired { methods: self.auth.clone() });
+                        } else if what == Pending::SetModel {
+                            out.push(Event::ModelRejected(message));
                         } else if !config_error {
                             if what == Pending::Prompt {
                                 out.push(Event::TurnEnded { reason: "error".into() });
@@ -380,6 +382,28 @@ mod tests {
         backend.handle(Incoming::Reply { id: new_request, result: Ok(snapshot("s2", "smart")) }, &mut events);
         assert!(backend.config_pending.is_none());
         assert!(matches!(events.as_slice(), [Event::ConfigOptionFinished { result: Ok(options), .. }] if options[0].current_value == "smart"));
+        backend.shutdown(true);
+    }
+
+    /// A refused model is the picker's business, not an error of the chat; signing in stays as it was.
+    #[test]
+    fn a_refused_model_is_reported_as_such() {
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let mut backend = AcpBackend::start(&["sh".into(), "-c".into(), "cat >/dev/null".into()], ctx).unwrap();
+        let mut events = Vec::new();
+        backend.handle(Incoming::Reply { id: 1, result: Ok(json!({"agentInfo":{"name":"fake"}})) }, &mut events);
+        backend.handle(Incoming::Reply { id: 2, result: Ok(json!({"sessionId":"s1"})) }, &mut events);
+        events.clear();
+        backend.set_model("zzz");
+        backend.handle(Incoming::Reply { id: backend.next_id, result: Err((-32602, "no such model".into())) }, &mut events);
+        assert!(matches!(events.as_slice(), [Event::ModelRejected(message)] if message == "no such model"), "{events:?}");
+        events.clear();
+        backend.set_model("fast");
+        backend.handle(Incoming::Reply { id: backend.next_id, result: Ok(json!({})) }, &mut events);
+        assert!(events.is_empty(), "{events:?}");
+        backend.set_model("zzz");
+        backend.handle(Incoming::Reply { id: backend.next_id, result: Err((acp::AUTH_REQUIRED, "sign in".into())) }, &mut events);
+        assert!(matches!(events.as_slice(), [Event::AuthRequired { .. }]), "{events:?}");
         backend.shutdown(true);
     }
 }

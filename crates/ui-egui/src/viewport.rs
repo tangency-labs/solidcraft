@@ -235,8 +235,10 @@ pub struct ViewportState {
     pub(crate) grid_plane: std::sync::Mutex<GridPlane>,
 }
 
-/// Something under the cursor.
-#[derive(Clone, Debug, PartialEq)]
+/// Something under the cursor. The control channel reports it in the selection's own form
+/// (`{"type": "edge", "body", "index", …}`, #9087).
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum Hit {
     SketchPoint {
         sketch: u64,
@@ -2019,11 +2021,16 @@ pub fn origin_planes(app: &SolveApp) -> Vec<(&'static str, Vec3, [Vec3; 4])> {
         return Vec::new();
     }
     // While the Origin is hidden, a dialog picking a plane brings the planes back: then every
-    // plane; otherwise only those not hidden one by one.
-    let creating = !app.origin_shown() && app.picking_plane();
+    // plane; otherwise only those not hidden one by one. Project is the exception (#10778):
+    // its pick takes planes too, but each line a plane gives, an axis already gives, so a
+    // hidden Origin stays hidden for it.
+    let reveal = !app.origin_shown() && app.picking_plane() && !app.picking_project_geometry();
+    if !app.origin_shown() && !reveal {
+        return Vec::new();
+    }
     origin_quads(origin_size(app.cam.half_height()))
         .into_iter()
-        .filter(|(n, _, _)| creating || !app.session.visibility.hidden_origin.iter().any(|h| h == n))
+        .filter(|(n, _, _)| reveal || !app.session.visibility.hidden_origin.iter().any(|h| h == n))
         .collect()
 }
 
@@ -2841,22 +2848,25 @@ pub fn section_plane(app: &SolveApp) -> Option<(Vec3, Vec3)> {
         scratch.execute("inspect.section", &p).ok()?;
         return scratch.section;
     }
-    // Slice (Sketch Palette): cut the model at the plane of the sketch being edited.
-    if app.session.section.is_none() {
-        let st = crate::open_meshing::shown_world(app);
-        if let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)).filter(|ss| ss.sketch.view.slice) {
-            return Some((ss.plane.origin, ss.plane.normal()));
-        }
-    }
-    app.session.section
+    slice_plane(app).or(app.session.section)
+}
+
+/// Slice (Sketch Palette): the plane of the sketch being edited, when Slice is on in it. It
+/// stands in for a Section Analysis until it is turned off or the sketch closes: with the
+/// section first, turning Slice on did nothing (#10705).
+fn slice_plane(app: &SolveApp) -> Option<(Vec3, Vec3)> {
+    let id = app.session.active_sketch?;
+    let st = crate::open_meshing::shown_world(app);
+    let ss = st.sketch(id).filter(|ss| ss.sketch.view.slice)?;
+    Some((ss.plane.origin, ss.plane.normal()))
 }
 
 /// Whether the section [`section_plane`] shows has hatched cut faces: an open Section Analysis
-/// dialog's Hatch option, else the section's own.
+/// dialog's Hatch option, a Slice's always, else the section's own.
 pub fn section_hatch(app: &SolveApp) -> bool {
     match app.dialog.as_ref().map(|d| &d.kind) {
         Some(crate::dialogs::Kind::Section { hatch, .. }) => *hatch,
-        _ => app.session.section_hatch,
+        _ => app.session.section_hatch || slice_plane(app).is_some(),
     }
 }
 
@@ -3285,13 +3295,17 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
     if app.applying.is_some() {
         return;
     }
-    // Press Pull's first pick of a curved face or an edge reopens it as an offset or a fillet.
+    // Press Pull's first pick of a curved face, a chamfer's face or an edge reopens it as an
+    // offset, the chamfer or a fillet.
     if let Some(d) = &app.dialog
         && d.press_pull
         && d.inputs.first().is_some_and(|i| i.items.is_empty())
         && match &sel {
             Sel::Edge { .. } => true,
-            Sel::Face { body, index, .. } => crate::dialogs::planar_face(&app.session, body, *index).is_none(),
+            Sel::Face { body, index, .. } => {
+                crate::dialogs::planar_face(&app.session, body, *index).is_none()
+                    || crate::dialogs::blend_feature(&app.session, body, *index).is_some()
+            }
             _ => false,
         }
     {
@@ -4919,6 +4933,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             // the text, also from the space between its letters (#8835).
             let own = matches!(&hit, Some(Hit::SketchPoint { sketch, .. } | Hit::SketchMidpoint { sketch, .. } | Hit::SketchCurve { sketch, .. }) if Some(*sketch) == active);
             let hit = if own { hit } else { crate::sketch_text_handles::grab_inside(app, &proj, a).or(hit) };
+            let hit = hit.map(|hit| point_at_midpoint(app, hit));
             match hit {
                 Some(Hit::SketchPoint { sketch, id, .. }) if Some(sketch) == active => {
                     // A point dragged with the rest of a selection slides with it, from where it
@@ -5444,7 +5459,17 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
     if let Some(since) = app.computing_since() {
         let seconds = ((crate::now_ms() - since) / 1000.0).floor().max(0.0);
         let text = crate::i18n::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))]);
-        if let Some(r) = paint_toast(ui, free, text, false, true) {
+        // A history command or a delete's check can be given up on (#8266); a feature edit
+        // applying has the dialog's Cancel instead.
+        let cancel = app.tr_label("Cancel").to_string();
+        let actions: Vec<(&str, ToastKind)> = if app.can_cancel_computing() { vec![(cancel.as_str(), ToastKind::Secondary)] } else { Vec::new() };
+        if let Some((r, clicked, buttons)) = paint_toast_with(ui, free, text, ToastLead::Spinner, &actions) {
+            if let Some(button) = buttons.first() {
+                crate::scenario::publish_handle("toast:computing:cancel", button.center());
+            }
+            if clicked == Some(0) {
+                app.cancel_computing();
+            }
             obstacles.push(r);
             crate::scenario::publish_rect("toast:computing", r);
             if app.status.is_none() {
@@ -5918,6 +5943,27 @@ pub(crate) fn select(app: &mut SolveApp, sel: Option<Sel>, add: bool, toggle: bo
 
 /// The rest of the selected sketch geometry when the point or curve `id` is part of it (#2621):
 /// a drag that starts on a selected entity moves the whole selection with it.
+/// A drag that starts on a line's middle where a point is held (a centre rectangle's centre on
+/// its diagonal) drags that point, as a drag that starts on the point does. Dragging the line by
+/// its middle instead moved its ends: with the point constrained (on the origin, on a line) the
+/// line turned and stretched about it, and the rectangle round it changed size (#10510).
+fn point_at_midpoint(app: &SolveApp, hit: Hit) -> Hit {
+    let Hit::SketchMidpoint { sketch, id, .. } = &hit else { return hit };
+    let st = crate::open_meshing::session_world(&app.session);
+    let held = st.sketch(*sketch).and_then(|ss| {
+        let sk = &ss.sketch;
+        let line = sk.curve_index(id)?;
+        sk.constraints.iter().filter(|c| !c.driven).find_map(|c| match c.kind {
+            solidcraft_engine::sketch::ConstraintKind::Midpoint { p, l } if l == line => sk.points.get(p).map(|q| (q.id.clone(), q.pos)),
+            _ => None,
+        })
+    });
+    match held {
+        Some((id, at)) => Hit::SketchPoint { sketch: *sketch, id, at },
+        None => hit,
+    }
+}
+
 fn dragged_with(app: &SolveApp, id: &str) -> Vec<String> {
     fn geometry(s: &Sel) -> Option<&str> {
         match s {
@@ -6727,7 +6773,7 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
         app.viewport.axis_drag = origin.filter(|p| match app.preferences.navigator_style {
             crate::prefs::NavigatorStyle::Axes => axis_rect(app, rect).contains(*p),
             crate::prefs::NavigatorStyle::Cube => {
-                navigation_cube::drag_origin(&app.cam, axis_center(app, rect), *p, axis_rect(app, rect).width() / navigation_cube::DESIGN_SIZE)
+                navigation_cube::drag_origin(app, axis_center(app, rect), *p, axis_rect(app, rect).width() / navigation_cube::DESIGN_SIZE)
             }
         });
         if app.viewport.axis_drag.is_some() {
@@ -10140,6 +10186,32 @@ mod tests {
     }
 
     #[test]
+    fn a_sketch_slice_cuts_at_the_sketch_while_a_section_is_on() {
+        // #10705: with a Section Analysis on, turning Slice on in a sketch did nothing.
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Block"})).unwrap();
+        h.app.run("construct.plane.offset", json!({"base":"XY","offset":10,"name":"Mid"})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"Mid"})).unwrap();
+        h.app.run("inspect.section", json!({"plane":"XZ","offset":15,"hatch":false})).unwrap();
+        h.frames(2);
+        let across_y = |h: &crate::scenario::Harness| section_plane(&h.app).is_some_and(|(o, n)| n.y.abs() > 0.99 && (o.y.abs() - 15.0).abs() < 1e-9);
+        assert!(across_y(&h));
+        assert!(!section_hatch(&h.app));
+        h.app.run("sketch.options", json!({"slice":true})).unwrap();
+        h.frames(2);
+        let (o, n) = section_plane(&h.app).expect("the slice");
+        assert!(n.z.abs() > 0.99 && (o.z - 10.0).abs() < 1e-9, "{o:?} {n:?}");
+        assert!(section_hatch(&h.app), "a slice is hatched as it is without a section");
+        // Slice off, or the sketch closed: the section is back.
+        h.app.run("sketch.options", json!({"slice":false})).unwrap();
+        assert!(across_y(&h));
+        h.app.run("sketch.options", json!({"slice":true})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.frames(2);
+        assert!(across_y(&h));
+    }
+
+    #[test]
     fn a_section_leaves_the_origin_planes_and_axes_whole() {
         // #1229: the origin planes and axes are reference geometry; the section plane cuts the
         // model, not them, so they go to the lists the GPU draws without the section clip.
@@ -12866,6 +12938,30 @@ mod grid_plane_tests {
         assert!(!build_highlight(&app).xray.is_empty(), "drawn through the model");
         app.dialog = None;
         assert!(origin_planes(&app).is_empty());
+    }
+
+    /// #10778: Project's pick takes origin planes, but it must not bring hidden origin planes
+    /// back: every line a plane projects, an origin axis already gives. The axes and point stay
+    /// as today; other dialogs that pick a plane keep the reveal (#2581).
+    #[test]
+    fn project_leaves_hidden_origin_planes_hidden() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.run("solid.box", json!({"length":40,"width":40,"height":40})).unwrap();
+        app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        app.set_origin_shown(false);
+        app.start("sketch.project");
+        assert!(app.picking_project_geometry());
+        assert!(app.picking_plane(), "Project's pick takes origin planes");
+        assert!(origin_planes(&app).is_empty(), "Project leaves hidden origin planes hidden");
+        assert!(!origin_axes(&app).is_empty(), "the origin axes stay as today");
+        // Other dialogs that pick a plane keep today's reveal.
+        app.dialog = None;
+        app.start("solid.mirror");
+        app.dialog.as_mut().unwrap().active = 1;
+        assert_eq!(origin_planes(&app).len(), 3, "Mirror still offers every origin plane");
+        app.dialog = None;
+        app.start("sketch.create");
+        assert_eq!(origin_planes(&app).len(), 3, "Create Sketch still offers every origin plane");
     }
 
     /// Primary rolls a live preview back for reselect, but not while a manipulator is dragged

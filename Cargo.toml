@@ -36,6 +36,8 @@ solidcraft-3dx-client = { path = "crates/threedx-client" }
 # local checkout, add `[patch."https://github.com/tangency-labs/solidcore"] solidcore = { path =
 # "../solidcore/crates/solidcore" }` to a `.cargo/config.toml` outside the repository.
 solidcore = { git = "https://github.com/tangency-labs/solidcore", rev = "2dbd88b6e9b858144609690eb2860e0beba27e54" }
+# test tooling: a dev-dependency only (xtask/src/layers.rs)
+solidcraft-testkit = { path = "crates/testkit" }
 
 # foundation
 thiserror = "2"

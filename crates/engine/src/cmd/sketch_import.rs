@@ -245,6 +245,11 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
         let v = (q - pivot) * k;
         Vec2::new(v.x * cos - v.y * sin, v.x * sin + v.y * cos) + off
     };
+    // A dense SVG/DXF (a floorplan) can yield far more entities than a sketch takes; refuse
+    // before adding so the message names the cap (#10874). Scale alone does not shrink the count.
+    if geom.len() > solidcraft_sketch::MAX_POINTS {
+        return Err(solidcraft_sketch::SketchError::TooLarge.into());
+    }
     let ((curves, texts), info) = edit(s, p, cmd, false, |sk, _| {
         let (cs, texts) = add_geometry(sk, &geom, &f, k, tol)?;
         Ok((ids_of(sk, &cs), texts))
@@ -369,6 +374,22 @@ mod tests {
             assert_eq!(r["curves"], 1, "{n} points: {r}");
             s.execute("sketch.finish", &json!({})).unwrap();
         }
+    }
+
+    /// #10874: a drawing with more entities than a sketch can hold is refused with the point
+    /// cap and that scale alone does not help (a floorplan SVG often hits this).
+    #[test]
+    fn a_drawing_with_too_many_entities_names_the_sketch_cap() {
+        let n = solidcraft_sketch::MAX_POINTS + 1;
+        let mut dxf = String::from("0\nSECTION\n2\nENTITIES\n");
+        for i in 0..n {
+            dxf.push_str(&format!("0\nLINE\n10\n{i}\n20\n0\n11\n{}\n21\n1\n", i + 1));
+        }
+        dxf.push_str("0\nENDSEC\n0\nEOF\n");
+        let mut s = Session::default();
+        let e = s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap_err().to_string();
+        assert!(e.contains("20000") && e.contains("scale"), "{e}");
+        assert!(s.active_sketch.is_none(), "a refused insert leaves no empty sketch behind");
     }
 
     /// #9641: an SVG with nothing SolidCraft can draw (here only an embedded picture) is refused
