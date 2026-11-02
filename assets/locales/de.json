@@ -4457,6 +4457,8 @@
   "ui.coming_later": "bald verfügbar",
   "ui.command_done": "{command} fertig",
   "ui.command_palette_hint": "Befehl eingeben, z. B. {example}  — oder S drücken, um zu suchen",
+  "ui.components_from_bodies_hint": "Für jeden ausgewählten Körper eine gleichnamige Komponente unter der aktiven Komponente erstellen.",
+  "ui.components_from_bodies_required": "Mindestens einen Körper auswählen.",
   "ui.concentric": "Konzentrisch",
   "ui.cone": "Kegel",
   "ui.conic_curve": "Kegelschnitt",

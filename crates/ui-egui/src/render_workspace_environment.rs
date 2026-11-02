@@ -55,8 +55,7 @@ fn ring_target(app: &SolveApp) -> bool {
     let view = &app.render_workspace.view;
     super::active(app)
         && !view.result
-        && (view.selection == super::RenderSelection::Environment
-            || matches!(view.inspector.page, super::inspector::Page::Environment | super::inspector::Page::Background))
+        && view.selection == super::RenderSelection::Environment
         && environment_values(app).is_some_and(|(_, _, _, rotates)| rotates)
         && !app.session.model.is_stale()
 }
@@ -268,12 +267,10 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 pub(super) fn open_sources(app: &mut SolveApp) {
-    let page = app.render_workspace.view.inspector.page;
     super::library::open_category(app, "hdr");
     if let Err(error) = app.run("view.render_stage", json!({"stage":Stage::Light.key()})) {
         app.set_status(error, true);
     }
-    app.render_workspace.view.inspector.page = page;
 }
 
 fn note(app: &SolveApp, ui: &mut egui::Ui, key: &str) {

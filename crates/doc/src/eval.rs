@@ -5983,6 +5983,35 @@ fn path_at(segs: &[kernel::PathSeg], d: f64) -> (Vec3, Vec3) {
 }
 
 /// Whether a copy has no material to cut in any of its eligible targets.
+/// The bodies a hole cuts: those its feature names, else its component's and its own (as
+/// `apply_traced` picks a cut's targets).
+fn hole_targets<'a>(st: &'a ModelState, f: &Feature) -> Vec<&'a ModelBody> {
+    let all = f.participants.len() == 1 && f.participants.first().is_some_and(|t| t == "*");
+    st.bodies
+        .iter()
+        .filter(|b| all || if f.participants.is_empty() { b.component == f.component || b.feature == f.id } else { f.participants.contains(&b.name) })
+        .collect()
+}
+
+/// Whether hole tool `tool` is clear of every body the hole cuts, by their boxes (#10701). Boxes
+/// only: a probe boolean for every hole of a large hole pattern would double its work, and the
+/// bodies' meshes are there already (the hole found its face on them). A body of another
+/// component is in another frame: the hole is then not known to miss.
+fn hole_misses(st: &ModelState, f: &Feature, tool: &Body) -> bool {
+    let targets = hole_targets(st, f);
+    let bounds = tool.outline_bounds();
+    if targets.is_empty()
+        || targets.iter().any(|b| b.component != f.component)
+        || bounds.is_empty()
+        || !bounds.min.is_finite()
+        || !bounds.max.is_finite()
+    {
+        return false;
+    }
+    let tool_box = Some(bounds.inflated(1e-6));
+    targets.iter().all(|b| more::boxes_apart(&tool_box, &more::mesh_box(b)))
+}
+
 fn copy_misses(st: &ModelState, f: &Feature, targets: &[String], tools: &[Traced]) -> bool {
     let targets = if targets.is_empty() { &f.participants } else { targets };
     let all = targets.len() == 1 && targets.first().is_some_and(|t| t == "*");
@@ -6828,7 +6857,23 @@ fn eval_feature(
             let handled = sheet_hole_cut(st, f, &tools, warning)?;
             let tools: Vec<Traced> = tools.into_iter().map(|(tool, _)| tool).collect();
             if handled.is_empty() {
+                // A hole moved off the material (a changed position, parameter or sketch point)
+                // cuts nothing: it says so, as a pattern does of its copies (#10701).
+                let missed = tools.iter().filter(|tool| hole_misses(st, f, &tool.body)).count();
+                let total = tools.len();
+                let targets: Vec<String> = hole_targets(st, f).iter().map(|b| b.name.clone()).collect();
                 apply_traced(doc, st, f, tools, Operation::Cut, &[])?;
+                match (missed, total) {
+                    (0, _) => {}
+                    (_, 1) => append_warning(warning, "the hole removes no material".into()),
+                    _ => append_warning(warning, format!("{missed} of {total} holes remove no material")),
+                }
+                // A hole wider than the part takes all of it away (#10702): almost never what a
+                // hole means, so it says which bodies are gone.
+                let gone: Vec<&str> = targets.iter().map(String::as_str).filter(|n| st.body(n).is_none()).collect();
+                if !gone.is_empty() {
+                    append_warning(warning, format!("the hole removes all of {}", gone.join(", ")));
+                }
             } else {
                 apply_beside_sheet_cut(doc, st, f, tools, Operation::Cut, &[], &handled)?;
             }
@@ -6977,25 +7022,38 @@ fn eval_feature(
                 // Picks on bodies of other (moved) components are where those bodies are shown.
                 None => doc.resolve_plane_in(vals, plane, 0, Some(&*construction_state(doc, st, f.component)?))?,
             };
-            st.construct.push(crate::construct::Construct { feature: f.id, name: f.name.clone(), geom: crate::construct::ConstructGeom::Plane(pl) });
+            st.construct.push(crate::construct::Construct {
+                feature: f.id,
+                name: f.name.clone(),
+                geom: crate::construct::ConstructGeom::Plane(pl),
+                bodies: Vec::new(),
+            });
             Ok(())
         }
         FeatureKind::ConstructionAxis { def } => {
-            let (origin, dir) =
-                crate::construct::resolve_axis(&crate::construct::Ctx { doc, vals, st: &*construction_state(doc, st, f.component)?, depth: 0 }, def)?;
+            let cst = construction_state(doc, st, f.component)?;
+            let ctx = crate::construct::Ctx { doc, vals, st: &cst, depth: 0 };
+            let (origin, dir) = crate::construct::resolve_axis(&ctx, def)?;
+            let bodies = crate::construct::source_bodies(&ctx, &def.refs());
             st.construct.push(crate::construct::Construct {
                 feature: f.id,
                 name: f.name.clone(),
                 geom: crate::construct::ConstructGeom::Axis { origin, dir },
+                bodies,
             });
             Ok(())
         }
         FeatureKind::ConstructionPoint { def } => {
-            let p = crate::construct::resolve_point(
-                &crate::construct::Ctx { doc, vals, st: &*construction_state(doc, st, f.component)?, depth: 0 },
-                def,
-            )?;
-            st.construct.push(crate::construct::Construct { feature: f.id, name: f.name.clone(), geom: crate::construct::ConstructGeom::Point(p) });
+            let cst = construction_state(doc, st, f.component)?;
+            let ctx = crate::construct::Ctx { doc, vals, st: &cst, depth: 0 };
+            let p = crate::construct::resolve_point(&ctx, def)?;
+            let bodies = crate::construct::source_bodies(&ctx, &def.refs());
+            st.construct.push(crate::construct::Construct {
+                feature: f.id,
+                name: f.name.clone(),
+                geom: crate::construct::ConstructGeom::Point(p),
+                bodies,
+            });
             Ok(())
         }
         FeatureKind::BoundaryFill { tools, cells, operation, remove_tools } => {
@@ -7496,6 +7554,9 @@ fn eval_feature(
                     *slot = ModelBody::traced_new(mb.name.clone(), Traced::step(nb, &[&mb.traced()]), mb.feature);
                 }
             }
+            if !*copy {
+                move_constructions_with(doc, st, bodies, &crate::rigid(t, Vec3::ZERO, axis, ang));
+            }
             Ok(())
         }
         FeatureKind::MeshConvert { body, tolerance } => {
@@ -7654,6 +7715,36 @@ fn construction_state<'a>(doc: &Document, st: &'a ModelState, comp: u64) -> Resu
         return Ok(std::borrow::Cow::Owned(world_state(doc, st)?));
     }
     state_in_frame(doc, st, comp)
+}
+
+/// Construction axes and points built on bodies a Move moves go with them (#10127): an axis
+/// through a cylinder turns with the cylinder, as its faces do. Only those built from the moved
+/// bodies alone (`Construct::bodies`) follow; one also held by a fixed point, a plane or another
+/// body stays. `m` is the move in the bodies' own frame; each construction is kept in its
+/// component's frame (`construction_state`), so the move is carried over into that frame.
+fn move_constructions_with(doc: &Document, st: &mut ModelState, moved: &[crate::BodyName], m: &Mat) {
+    let frame_of = |feature: u64| {
+        let comp = doc.feature(feature).map(|f| f.component).unwrap_or(0);
+        if comp == 0 && !doc.occurrences.is_empty() { crate::IDENTITY } else { doc.component_transform(comp) }
+    };
+    let world: BTreeMap<&str, Mat> =
+        st.bodies.iter().filter(|b| moved.iter().any(|n| *n == b.name)).map(|b| (b.name.as_str(), body_world(doc, b))).collect();
+    let mut placed = Vec::new();
+    for (k, c) in st.construct.iter().enumerate() {
+        let Some(body) = c.bodies.first().and_then(|b| world.get(b.as_str())) else { continue };
+        if !c.bodies.iter().all(|b| world.contains_key(b.as_str())) {
+            continue;
+        }
+        let frame = frame_of(c.feature);
+        let (Some(body_inv), Some(frame_inv)) = (crate::mat_inverse(body), crate::mat_inverse(&frame)) else { continue };
+        let in_frame = crate::mat_mul(&crate::mat_mul(&frame_inv, body), &crate::mat_mul(m, &crate::mat_mul(&body_inv, &frame)));
+        placed.push((k, c.geom.placed(&in_frame)));
+    }
+    for (k, geom) in placed {
+        if let Some(c) = st.construct.get_mut(k) {
+            c.geom = geom;
+        }
+    }
 }
 
 /// Whether `plane` is given by the origin planes and numbers alone.

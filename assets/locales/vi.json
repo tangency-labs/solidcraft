@@ -4462,6 +4462,8 @@
   "ui.coming_later": "sắp ra mắt",
   "ui.command_done": "Hoàn tất lệnh {command}",
   "ui.command_palette_hint": "Nhập một lệnh, ví dụ: {example}  — hoặc nhấn S để tìm kiếm",
+  "ui.components_from_bodies_hint": "Tạo một thành phần cho mỗi vật thể đã chọn, đặt tên theo vật thể đó, bên dưới thành phần đang hoạt động.",
+  "ui.components_from_bodies_required": "Chọn ít nhất một vật thể.",
   "ui.concentric": "Đồng tâm",
   "ui.cone": "Hình nón",
   "ui.conic_curve": "Đường cong Conic",

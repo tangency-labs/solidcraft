@@ -1057,15 +1057,17 @@ pub(super) fn sheet_primitive_cut(
         return Ok(Vec::new());
     }
     // The first sheet the primitive meets decides the machining direction. Sheets clear of it
-    // by their boxes are passed over; the one sheet left needs no boolean to show it is met (that
-    // boolean came out empty against a sheet carrying a label's cut-outs, and the hole was then
-    // cut into the solid without a place in the flat pattern).
-    let tool_box = body_box(tool);
-    let near: Vec<&sheet::SheetBody> = st
-        .sheets
-        .iter()
-        .filter(|sh| sheet_eligible(f, st, &[], sh) && st.body(&sh.body).is_some_and(|mb| !boxes_apart(&mesh_box(mb), &tool_box)))
-        .collect();
+    // by their exact boxes ([`kernel::apart`]) are passed over; the one sheet left needs no
+    // boolean to show it is met (that boolean came out empty against a sheet carrying a label's
+    // cut-outs, and the hole was then cut into the solid without a place in the flat pattern).
+    let mut near: Vec<&sheet::SheetBody> = Vec::new();
+    for sh in st.sheets.iter().filter(|sh| sheet_eligible(f, st, &[], sh)) {
+        if let Some(mb) = st.body(&sh.body)
+            && !kernel::apart(&mb.body, tool)?
+        {
+            near.push(sh);
+        }
+    }
     let mut normal = None;
     for sh in &near {
         if let Some(mb) = st.body(&sh.body)
@@ -1376,9 +1378,6 @@ fn sheet_prism_cut(
     } else {
         Vec::new()
     };
-    // Boxes around the tools: a tool clear of a bend by its box needs no boolean to show it (a
-    // label's letters against every bend and flange of a tray).
-    let tool_boxes: Vec<Option<Aabb3>> = tools.iter().map(body_box).collect();
     let mut plans = Vec::new();
     let mut notes = Vec::new();
     'sheets: for original in &st.sheets {
@@ -1398,12 +1397,10 @@ fn sheet_prism_cut(
         // is exact, and a cut that machines nothing there is checked against the solid after it.
         // (That boolean cost each label hundreds of milliseconds, and against a sheet already
         // carrying a label's cut-outs it came out empty: the next cut was dropped.)
+        // A tool clear of a bend by its exact box (a label's letters against every bend and
+        // flange of a tray) costs no intersection work: the boolean answers it from the boxes.
         for bends in sh.unmodeled_solids(plane)? {
-            let bends_box = body_box(&bends);
-            for (tool, tool_box) in tools.iter().zip(&tool_boxes) {
-                if boxes_apart(&bends_box, tool_box) {
-                    continue;
-                }
+            for tool in tools {
                 if kernel::boolean(&bends, tool, kernel::BoolOp::Intersect)?.is_some() {
                     return Err(DocError::Invalid(
                         "this machining intersects a folded bend or a nonparallel panel; unfold the sheet before machining that material".into(),

@@ -3238,6 +3238,8 @@
   "ui.coming_later": "추후 지원 예정",
   "ui.command_done": "{command} 완료",
   "ui.command_palette_hint": "명령 입력(예: {example})  — 또는 S 키를 눌러 검색",
+  "ui.components_from_bodies_hint": "활성 구성요소 아래에 선택한 각 바디와 같은 이름의 구성요소를 만듭니다.",
+  "ui.components_from_bodies_required": "바디를 하나 이상 선택하세요.",
   "ui.concentric": "동심",
   "ui.cone": "원뿔",
   "ui.conic_curve": "원뿔 곡선",

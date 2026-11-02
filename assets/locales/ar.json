@@ -4462,6 +4462,8 @@
   "ui.coming_later": "قريبًا",
   "ui.command_done": "تم {command}",
   "ui.command_palette_hint": "اكتب أمرًا، مثل {example}  — أو اضغط S للبحث",
+  "ui.components_from_bodies_hint": "أنشئ مكونًا لكل جسم محدد، باسم ذلك الجسم، ضمن المكون النشط.",
+  "ui.components_from_bodies_required": "حدد جسمًا واحدًا على الأقل.",
   "ui.concentric": "متحد المركز",
   "ui.cone": "مخروط",
   "ui.conic_curve": "منحنى مخروطي",

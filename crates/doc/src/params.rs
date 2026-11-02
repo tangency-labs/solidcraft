@@ -90,7 +90,11 @@ pub struct ParamRow {
     pub name: String,
     pub expression: String,
     pub unit: String,
+    /// Always millimetres for a length, degrees for an angle, whatever the parameter's own
+    /// unit — the same meaning `value` has in every reply (#10747).
     pub value: Option<f64>,
+    /// The value in the parameter's own `unit`, as the Parameters window shows it.
+    pub display_value: Option<f64>,
     pub error: Option<String>,
     pub comment: String,
     /// "user", "sketch" (a dimension) or "feature".
@@ -367,14 +371,20 @@ impl Document {
             }
         }
         let used_by = |n: &str| -> Vec<String> { users.get(n).cloned().unwrap_or_default() };
-        let value = |n: &str, k: Kind| vals.get(n).and_then(|v| v.to_kind(k).ok()).map(|x| if k == Kind::Angle { x.to_degrees() } else { x });
+        let value = |n: &str, k: Kind| {
+            vals.get(n).and_then(|v| v.to_kind(k).ok()).map(|x| if k == Kind::Angle { x.to_degrees() } else { x }).map(expr::round_reported)
+        };
+        // `value` is mm / degrees in every row (#10747); the parameter's own unit goes to
+        // `display_value`. Both carry the number a person would read, not the float noise.
+        let unified = |n: &str| vals.get(n).map(|v| expr::round_reported(expr::reported_value(*v)));
         let mut rows = Vec::new();
         for p in &self.params {
             rows.push(ParamRow {
                 name: p.name.clone(),
                 expression: p.expr.clone(),
                 unit: p.unit.clone(),
-                value: self.param_display_value(&vals, &p.name),
+                value: unified(&p.name),
+                display_value: self.param_display_value(&vals, &p.name).map(expr::round_reported),
                 error: errs.get(&p.name).cloned(),
                 comment: p.comment.clone(),
                 source: if p.model { "sketch" } else { "user" },
@@ -396,6 +406,8 @@ impl Document {
                     expression: e,
                     unit: unit_of(k).into(),
                     value: value(name, k),
+                    // A feature input's own unit is mm / deg, so its display value is its value.
+                    display_value: value(name, k),
                     error: errs.get(name).cloned(),
                     comment: self.param_comments.get(name).cloned().unwrap_or_default(),
                     source: "feature",
@@ -415,6 +427,7 @@ impl Document {
                 expression: p.text.clone(),
                 unit: crate::text_params::TEXT_UNIT.into(),
                 value: None,
+                display_value: None,
                 error: None,
                 comment: p.comment.clone(),
                 source: "user",
@@ -460,7 +473,8 @@ impl Document {
         Ok(())
     }
 
-    /// User parameters as CSV (`name,unit,expression,value,comment`).
+    /// User parameters as CSV (`name,unit,expression,value,comment`). The `value` column is the
+    /// number in the `unit` column, rounded for reading (#10747); import reads `expression`.
     pub fn params_csv(&self) -> String {
         let q = |s: &str| if s.contains([',', '"', '\r', '\n']) { format!("\"{}\"", s.replace('"', "\"\"")) } else { s.to_string() };
         let mut out = String::from("name,unit,expression,value,comment,favorite\n");
@@ -470,7 +484,7 @@ impl Document {
                 q(&r.name),
                 q(&r.unit),
                 q(&r.expression),
-                r.value.map(|v| format!("{v}")).unwrap_or_default(),
+                r.display_value.or(r.value).map(|v| format!("{v}")).unwrap_or_default(),
                 q(&r.comment),
                 r.favorite
             );

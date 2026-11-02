@@ -732,7 +732,7 @@ impl AgentChat {
                     self.push(Item::Plan(entries));
                 }
             }
-            Event::Permission { key, title, options } => return Some(Outcome::Permission { key, title, options }),
+            Event::Permission { key, title, kind, options } => return Some(Outcome::Permission { key, title, kind, options }),
             Event::Modes { current, available } => {
                 if self.config_options.is_none() && !available.is_empty() {
                     self.modes = available;
@@ -860,7 +860,7 @@ enum Outcome {
     /// A message was answered (or the agent stopped): the turn's bookkeeping ends.
     TurnEnd,
     /// The agent asks before running something of its own: answered by the mode, or asked.
-    Permission { key: u64, title: String, options: Vec<PermissionOption> },
+    Permission { key: u64, title: String, kind: Option<String>, options: Vec<PermissionOption> },
 }
 
 /// The AI features are on (the master switch in Settings → AI) and this is the desktop app.
@@ -931,12 +931,6 @@ pub(crate) fn assistant_tip(app: &SolveApp, mark: AssistantMark) -> String {
         None => tr("ui.assistant").to_string(),
     };
     format!("{name} — {state}")
-}
-
-/// Whether a permission question is about one of SolidCraft's own tools (which SolidCraft's own
-/// gate checks): the agents name MCP tools after their server.
-fn solidcraft_tool(title: &str) -> bool {
-    title.to_ascii_lowercase().contains("solidcraft")
 }
 
 /// `solidcraft-cli` next to this program, else on the search path.
@@ -1668,14 +1662,15 @@ pub fn answer_permission(app: &mut SolveApp, index: usize, option: Option<&str>)
     app.agent_chat.answer(index, option);
 }
 
-/// The agent asks before running something of its own. SolidCraft's own tools are checked by
-/// SolidCraft's gate, so they're allowed here (no double question); otherwise the mode or an
-/// earlier "always allow" may answer, and the chat says so; otherwise the user is asked.
-fn on_permission(app: &mut SolveApp, key: u64, title: String, options: Vec<PermissionOption>) {
+/// The agent asks before running something of its own. The chat's own MCP tools are checked by
+/// SolidCraft's gate, so they're allowed here (no double question, see [`acp::is_bridge_tool`]);
+/// otherwise the mode or an earlier "always allow" may answer, and the chat says so; otherwise the
+/// user is asked.
+fn on_permission(app: &mut SolveApp, key: u64, title: String, kind: Option<&str>, options: Vec<PermissionOption>) {
     let agent = app.agent_chat.running_id.clone();
     let mode = agents::mode_for(&app.preferences, &agent);
     let remembered = agents::always_allowed(&app.preferences, &agent, &title);
-    let why = if solidcraft_tool(&title) {
+    let why = if acp::is_bridge_tool(&title, kind) {
         Some("ui.ai_auto_ours")
     } else if remembered {
         Some("ui.ai_auto_remembered")
@@ -1959,7 +1954,7 @@ pub fn poll(app: &mut SolveApp, ctx: &egui::Context) {
                     b.answer_permission(key, None);
                 }
             }
-            Some(Outcome::Permission { key, title, options }) => on_permission(app, key, title, options),
+            Some(Outcome::Permission { key, title, kind, options }) => on_permission(app, key, title, kind.as_deref(), options),
             None => {}
         }
         if let Some(model) = confirmed_model {

@@ -4462,6 +4462,8 @@
   "ui.coming_later": "準備中",
   "ui.command_done": "{command} 完了",
   "ui.command_palette_hint": "コマンドを入力（例: {example}）— または S キーで検索",
+  "ui.components_from_bodies_hint": "選択した各ボディと同じ名前のコンポーネントを、アクティブなコンポーネントの下に作成します。",
+  "ui.components_from_bodies_required": "ボディを1つ以上選択してください。",
   "ui.concentric": "同心",
   "ui.cone": "円錐",
   "ui.conic_curve": "円錐曲線",

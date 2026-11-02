@@ -4462,6 +4462,8 @@
   "ui.coming_later": "coming later",
   "ui.command_done": "{command} done",
   "ui.command_palette_hint": "Type a command, e.g. {example}  — or press S to search",
+  "ui.components_from_bodies_hint": "Create one component per selected body, named after that body, under the active component.",
+  "ui.components_from_bodies_required": "Select at least one body.",
   "ui.concentric": "Concentric",
   "ui.cone": "Cone",
   "ui.conic_curve": "Conic Curve",

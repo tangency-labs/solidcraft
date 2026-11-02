@@ -212,9 +212,13 @@ impl Remote {
         }
     }
 
-    /// Connect now, if the app is there (`new` does not); the error says why not.
+    /// See whether the app is there now (`new` does not); the error says why not. The connection
+    /// doesn't stay open: the app closes one that shows no token within a few seconds, and the
+    /// first call may be long away. That call connects again.
     pub fn try_connect(&mut self) -> std::io::Result<()> {
-        self.reconnect()
+        self.reconnect()?;
+        self.drop_conn();
+        Ok(())
     }
 
     /// Failing to reach the app at all is `NotConnected`, so [`Remote::explain`] can tell it from
