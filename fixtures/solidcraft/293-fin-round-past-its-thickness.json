@@ -62,6 +62,7 @@
    ],
    "expect": {
     "lumps": 1,
+    "manifold": true,
     "removed": {
      "from": "body",
      "value": 92.5956361669492,
