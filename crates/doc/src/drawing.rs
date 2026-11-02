@@ -21,6 +21,7 @@
 //! - **Dimensions** on its views, each measuring named corners or edges of the view's model
 //!   ([`dimension`]).
 //! - **Balloons** on its views, each pointing at a placed part by a named edge of it ([`balloon`]).
+//! - **Images** on its sheets, each file kept once however many places it sits ([`image`]).
 //! - **Revisions**: one revision record for the whole drawing ([`RevisionRecord`]), its rows in the
 //!   order they were added, the newest last.
 //!
@@ -39,8 +40,8 @@
 //!
 //! [`Drawing::from_json`] reads a drawing in this order: at most [`MAX_DRAWING_BYTES`] of text,
 //! the family's format check, every number in range, the upgrade, the typed record with its views,
-//! dimensions and balloons by id, then [`Drawing::validate`]; [`Drawing::from_value`] the same from the
-//! format check on.
+//! dimensions, balloons and images by id, then [`Drawing::validate`] and each image's file
+//! ([`Drawing::check_image_files`]); [`Drawing::from_value`] the same from the format check on.
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
@@ -58,11 +59,15 @@ use crate::ids::{self, IdSource};
 use crate::{DocError, Metadata, Result, expr};
 
 pub mod balloon;
+pub mod by_id;
 pub mod dimension;
+pub mod image;
 pub mod view;
 
 use balloon::Balloon;
+use by_id::ById;
 use dimension::Dimension;
+use image::{ImageFile, SheetImage};
 use view::View;
 
 /// The most drawings a design may hold.
@@ -119,9 +124,14 @@ pub struct Drawing {
     /// By id ([`Drawing::add_dimensions`]), each behind its own `Arc`, as the views are.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dimensions: Vec<Arc<Dimension>>,
-    /// By id ([`Drawing::add_balloons`]), as the dimensions are.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub balloons: Vec<Arc<Balloon>>,
+    #[serde(default, skip_serializing_if = "ById::is_empty")]
+    pub balloons: ById<Balloon>,
+    /// The image files, once each however many places they sit.
+    #[serde(default, skip_serializing_if = "ById::is_empty")]
+    pub images: ById<ImageFile>,
+    /// Where they sit on the sheets.
+    #[serde(default, skip_serializing_if = "ById::is_empty")]
+    pub sheet_images: ById<SheetImage>,
     /// Behind an `Arc` as the sheets are, so an undo step shares it while it doesn't change.
     #[serde(default, skip_serializing_if = "no_revisions")]
     pub revisions: Arc<RevisionRecord>,
@@ -208,12 +218,14 @@ pub struct OnSheet {
     pub dimensions: Vec<u64>,
     /// The balloons in its views.
     pub balloons: Vec<u64>,
+    /// The images placed on it.
+    pub images: Vec<u64>,
 }
 
 impl OnSheet {
     /// Nothing is on the sheet.
     pub fn is_empty(&self) -> bool {
-        self.views.is_empty() && self.dimensions.is_empty() && self.balloons.is_empty()
+        self.views.is_empty() && self.dimensions.is_empty() && self.balloons.is_empty() && self.images.is_empty()
     }
 }
 
@@ -251,7 +263,9 @@ impl Drawing {
             sheets: vec![Arc::new(first)],
             views: Vec::new(),
             dimensions: Vec::new(),
-            balloons: Vec::new(),
+            balloons: ById::default(),
+            images: ById::default(),
+            sheet_images: ById::default(),
             revisions: Arc::default(),
         };
         drawing.validate()?;
@@ -275,11 +289,14 @@ impl Drawing {
         DRAWING.check_numbers(&v, "properties")?;
         DRAWING.upgrade(&mut v, version, applied.as_deref())?;
         let mut d: Drawing = serde_json::from_value(v).map_err(damaged)?;
-        let (views, dimensions, balloons) = (std::mem::take(&mut d.views), std::mem::take(&mut d.dimensions), std::mem::take(&mut d.balloons));
+        let (views, dimensions) = (std::mem::take(&mut d.views), std::mem::take(&mut d.dimensions));
         d.add_views(views);
         d.add_dimensions(dimensions);
-        d.add_balloons(balloons);
+        d.balloons.put_in_order();
+        d.images.put_in_order();
+        d.sheet_images.put_in_order();
         d.validate().map_err(damaged)?;
+        d.check_image_files().map_err(damaged)?;
         Ok(Drawing { format: DRAWING.format_string(DRAWING.current()), format_pending: DRAWING.pending_names(), ..d })
     }
 
@@ -319,7 +336,8 @@ impl Drawing {
         // The views are listed by id, so the sheet's are too.
         let dimensions = self.dimensions.iter().filter(|d| views.binary_search(&d.view).is_ok()).map(|d| d.id).collect();
         let balloons = self.balloons.iter().filter(|b| views.binary_search(&b.view).is_ok()).map(|b| b.id).collect();
-        OnSheet { views, dimensions, balloons }
+        let images = self.sheet_images.iter().filter(|i| i.sheet == id).map(|i| i.id).collect();
+        OnSheet { views, dimensions, balloons, images }
     }
 
     /// Takes sheet `id` out with everything on it ([`Drawing::on_sheet`]), and answers what that
@@ -331,6 +349,8 @@ impl Drawing {
         self.views.retain(|v| v.sheet != id);
         self.dimensions.retain(|d| on.dimensions.binary_search(&d.id).is_err());
         self.balloons.retain(|b| on.balloons.binary_search(&b.id).is_err());
+        self.sheet_images.retain(|i| i.sheet != id);
+        self.drop_unused_images();
         on
     }
 
@@ -343,6 +363,8 @@ impl Drawing {
             .chain(self.views.iter().map(|v| v.id))
             .chain(self.dimensions.iter().map(|d| d.id))
             .chain(self.balloons.iter().map(|b| b.id))
+            .chain(self.images.iter().map(|i| i.id))
+            .chain(self.sheet_images.iter().map(|i| i.id))
             .chain(self.revisions.ids())
     }
 
@@ -373,7 +395,8 @@ impl Drawing {
         self.revisions.validate().map_err(|e| DocError::Invalid(e.to_string()))?;
         self.check_views()?;
         self.check_dimensions()?;
-        self.check_balloons()
+        self.check_balloons()?;
+        self.check_images()
     }
 
     /// A sheet's own rules, and that the source it documents is one of the drawing's.

@@ -83,6 +83,7 @@ fn each_kind_names_its_layer_in_the_capitals_of_its_id() {
         (TitleBlock, "TITLE_BLOCK"),
         (PartsList, "PARTS_LIST"),
         (RevisionTable, "REVISION_TABLE"),
+        (SheetImage, "SHEET_IMAGE"),
         (View, "VIEW"),
     ] {
         assert_eq!(kind.layer(), layer);
