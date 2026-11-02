@@ -2,7 +2,7 @@
  "issue": "https://github.com/tangency-labs/solidcraft/issues/199",
  "pr": "https://github.com/tangency-labs/solidcraft/pull/317",
  "test": "crates/kernel/src/tests.rs: fillet_consuming_a_side_face_makes_a_full_round",
- "summary": "A round that uses up a whole side face must make a full round, not be refused (#199). A 14 x 6 x 10 bar has its four vertical edges rounded r 3: both 6 mm end faces are used up, each end becomes a half cylinder. With one end only, two rounds meet on that end face. A 6 x 6 x 10 post rounded r 3 on all four vertical edges is a cylinder of radius 3. Closed-form volumes; SolidCraft checked 2e-4 relative on a mesh, these check 1e-4 mm^3. The test's past-the-limit refusals are not ported.",
+ "summary": "A round that uses up a whole side face must make a full round, not be refused (#199). A 14 x 6 x 10 bar has its four vertical edges rounded r 3: both 6 mm end faces are used up, each end becomes a half cylinder. With one end only, two rounds meet on that end face. A 6 x 6 x 10 post rounded r 3 on all four vertical edges is a cylinder of radius 3. Closed-form volumes; SolidCraft checked 2e-4 relative on a mesh, these check 1e-4 mm^3. The test's past-the-limit sizes (3.001, 3.5) must be refused (expect.refused); 3.5 needs fillet_refuse_crossing_rails, without which the pinned SMLib returns an empty, non-manifold body. With the generic blend's checks (`fillet_gn_section_generator`, `fillet_refuse_overlapping_bands`) the refusals report the largest radius that builds, 3 (expect.refused.fit_size).",
  "cases": [
   {
    "name": "both_ends_full_round",
@@ -215,6 +215,243 @@
      "value": 282.7433388230814,
      "tol": 0.0001,
      "formula": "pi*3^2*10"
+    }
+   }
+  },
+  {
+   "name": "round_past_the_end_face_is_refused",
+   "note": "r 3.001 on the four vertical edges: past the 6 mm end faces, which have nothing left to use up. SolidCraft refuses it as larger than the neighbouring faces; so does solidcore, with the default flags and with every flag.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "bar",
+     "origin": [
+      14,
+      0,
+      0
+     ],
+     "size": [
+      14,
+      6,
+      10
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "bar",
+     "edges": [
+      [
+       14,
+       0,
+       5
+      ],
+      [
+       28,
+       0,
+       5
+      ],
+      [
+       14,
+       6,
+       5
+      ],
+      [
+       28,
+       6,
+       5
+      ]
+     ],
+     "radius": 3.001
+    }
+   ],
+   "expect": {
+    "refused": {
+     "step": "result",
+     "error": "status 1001"
+    }
+   }
+  },
+  {
+   "name": "round_well_past_the_end_face_is_refused",
+   "note": "r 3.5 on the four vertical edges. With the default flags the pinned SMLib returns success with a non-manifold body and all of the bar's volume gone (WR-460); fillet_refuse_crossing_rails refuses it.",
+   "fixes": [
+    "fillet_refuse_crossing_rails"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "bar",
+     "origin": [
+      14,
+      0,
+      0
+     ],
+     "size": [
+      14,
+      6,
+      10
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "bar",
+     "edges": [
+      [
+       14,
+       0,
+       5
+      ],
+      [
+       28,
+       0,
+       5
+      ],
+      [
+       14,
+       6,
+       5
+      ],
+      [
+       28,
+       6,
+       5
+      ]
+     ],
+     "radius": 3.5
+    }
+   ],
+   "expect": {
+    "refused": {
+     "step": "result",
+     "error": "status 1001"
+    }
+   }
+  },
+  {
+   "name": "round_3_001_refused_with_its_fit",
+   "note": "r 3.001 on the four vertical edges with the generic blend's fold and room checks: refused, and the largest radius that builds, 3 (half the 6 mm end face), comes back on the refusal (WR-696, tangency-labs/solidcore#2278).",
+   "fixes": [
+    "fillet_refuse_overlapping_bands",
+    "fillet_gn_section_generator"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "bar",
+     "origin": [
+      14,
+      0,
+      0
+     ],
+     "size": [
+      14,
+      6,
+      10
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "bar",
+     "edges": [
+      [
+       14,
+       0,
+       5
+      ],
+      [
+       28,
+       0,
+       5
+      ],
+      [
+       14,
+       6,
+       5
+      ],
+      [
+       28,
+       6,
+       5
+      ]
+     ],
+     "radius": 3.001
+    }
+   ],
+   "expect": {
+    "refused": {
+     "step": "result",
+     "error": "refused; the largest size that builds",
+     "fit_size": {
+      "value": 3.0,
+      "tol": 1e-06,
+      "source": "SolidCraft's fit reduces it to 3, half the 6 mm end face (fillet_consuming_a_side_face_makes_a_full_round)"
+     }
+    }
+   }
+  },
+  {
+   "name": "round_3_5_refused_with_its_fit",
+   "note": "r 3.5 on the four vertical edges with the generic blend's fold and room checks: refused, and the largest radius that builds, 3 (half the 6 mm end face), comes back on the refusal (WR-696, tangency-labs/solidcore#2278).",
+   "fixes": [
+    "fillet_refuse_overlapping_bands",
+    "fillet_gn_section_generator"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "bar",
+     "origin": [
+      14,
+      0,
+      0
+     ],
+     "size": [
+      14,
+      6,
+      10
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "bar",
+     "edges": [
+      [
+       14,
+       0,
+       5
+      ],
+      [
+       28,
+       0,
+       5
+      ],
+      [
+       14,
+       6,
+       5
+      ],
+      [
+       28,
+       6,
+       5
+      ]
+     ],
+     "radius": 3.5
+    }
+   ],
+   "expect": {
+    "refused": {
+     "step": "result",
+     "error": "refused; the largest size that builds",
+     "fit_size": {
+      "value": 3.0,
+      "tol": 1e-06,
+      "source": "SolidCraft's fit reduces it to 3, half the 6 mm end face (fillet_consuming_a_side_face_makes_a_full_round)"
+     }
     }
    }
   }

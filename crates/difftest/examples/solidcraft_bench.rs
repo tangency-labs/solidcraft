@@ -30,6 +30,7 @@ fn summary(run: &Run) -> String {
         }
         Run::Deferred(d) => format!("deferred {}: {}", d.blocked_by, d.symbol),
         Run::Error(e) => format!("error {e}"),
+        Run::Refused { message, fit } => format!("refused {message} (fit {})", fit.size),
     }
 }
 

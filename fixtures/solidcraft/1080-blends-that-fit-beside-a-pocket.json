@@ -2,7 +2,7 @@
  "issue": "https://github.com/tangency-labs/solidcraft/issues/1080",
  "pr": "https://github.com/tangency-labs/solidcraft/pull/1124",
  "test": "crates/kernel/src/issue_1080_tests.rs: chamfer_into_a_pocket_is_refused_with_the_size_that_fits, fillet_into_a_pocket_is_refused_and_one_that_fits_builds, chamfers_crossing_each_other_are_refused, chamfers_meeting_at_a_corner_still_build",
- "summary": "On SolidCraft's earlier kernel, fillets and chamfers too large for the faces beside their edge (running into a pocket, or two blends crossing on a narrow face) were built through instead of refused (#1080). The fix refuses them with the largest size that fits; these cases keep the sizes that do fit building, with closed-form volumes: chamfers 2 and 4 and a round 3 on the edge beside a pocket 4 mm in, both top edges of a 4 mm rib at 1.5 (they would meet at 2), and the four top edges of a cube at 5, which mitre at the corners and must not be refused for overlapping there. Two more cases take the test's too-large sizes into the pocket (chamfer 6, round 5) with the cliff overflow (`fillet_refuse_rails_leaving_faces`, `fillet_cliff_overflow`, tangency-labs/solidcore#960): built as if the faces went on, removing exactly what lies in the body. The runner cannot require a refusal, so the rib's crossing chamfer and round of 3 are not ported, nor its SolidCraft-only volume guard; its #1668 and concentric-round tests are already 1668-round-both-sides-of-wall.json and tangency-labs/solidcore#683.",
+ "summary": "On SolidCraft's earlier kernel, fillets and chamfers too large for the faces beside their edge (running into a pocket, or two blends crossing on a narrow face) were built through instead of refused (#1080). The fix refuses them with the largest size that fits; these cases keep the sizes that do fit building, with closed-form volumes: chamfers 2 and 4 and a round 3 on the edge beside a pocket 4 mm in, both top edges of a 4 mm rib at 1.5 (they would meet at 2), and the four top edges of a cube at 5, which mitre at the corners and must not be refused for overlapping there. Two more cases take the test's too-large sizes into the pocket (chamfer 6, round 5) with the cliff overflow (`fillet_refuse_rails_leaving_faces`, `fillet_cliff_overflow`, tangency-labs/solidcore#960): built as if the faces went on, removing exactly what lies in the body. The runner cannot require a refusal, so the rib's crossing chamfer and round of 3 are not ported, nor its SolidCraft-only volume guard; its #1668 and concentric-round tests are already 1668-round-both-sides-of-wall.json and tangency-labs/solidcore#683. The rib's crossing chamfer and round of 3 must be refused, reporting the largest size that builds, 2 (expect.refused with fit_size; `fillet_gn_section_generator`, `fillet_refuse_overlapping_bands`).",
  "cases": [
   {
    "name": "chamfer_beside_pocket_2",
@@ -526,6 +526,112 @@
      "value": 106.96555582789898,
      "tol": 0.0001,
      "formula": "(1 - pi/4)*5^2*20 - 10*(5 - (sqrt(24)/2 + 12.5*asin(1/5))) (the round's corner less its part over the pocket, x 35..36, y 5..15)"
+    }
+   }
+  },
+  {
+   "name": "rib_chamfers_3_cross_and_are_refused",
+   "note": "Both top edges of the 4 mm rib, chamfer 3: past 2 the two blends' rails cross on the top face. With the generic blend's checks they are refused with the largest size that builds, 2 (WR-696, tangency-labs/solidcore#2278). With the pinned defaults they return success with a non-manifold body and the rib's volume gone (WR-460).",
+   "fixes": [
+    "fillet_refuse_overlapping_bands",
+    "fillet_gn_section_generator"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "rib",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      40,
+      4,
+      20
+     ]
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "rib",
+     "edges": [
+      [
+       20,
+       0,
+       20
+      ],
+      [
+       20,
+       4,
+       20
+      ]
+     ],
+     "distance": 3.0
+    }
+   ],
+   "expect": {
+    "refused": {
+     "step": "result",
+     "error": "refused; the largest size that builds",
+     "fit_size": {
+      "value": 2.0,
+      "tol": 1e-06,
+      "source": "SolidCraft refuses it: 'the largest size that fits is 2 mm', half the 4 mm rib (chamfers_crossing_each_other_are_refused)"
+     }
+    }
+   }
+  },
+  {
+   "name": "rib_rounds_3_cross_and_are_refused",
+   "note": "Both top edges of the 4 mm rib, fillet 3: past 2 the two blends' rails cross on the top face. With the generic blend's checks they are refused with the largest size that builds, 2 (WR-696, tangency-labs/solidcore#2278). With the pinned defaults they return success with a non-manifold body and the rib's volume gone (WR-460).",
+   "fixes": [
+    "fillet_refuse_overlapping_bands",
+    "fillet_gn_section_generator"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "rib",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      40,
+      4,
+      20
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "rib",
+     "edges": [
+      [
+       20,
+       0,
+       20
+      ],
+      [
+       20,
+       4,
+       20
+      ]
+     ],
+     "radius": 3.0
+    }
+   ],
+   "expect": {
+    "refused": {
+     "step": "result",
+     "error": "refused; the largest size that builds",
+     "fit_size": {
+      "value": 2.0,
+      "tol": 1e-06,
+      "source": "SolidCraft refuses it: 'the largest size that fits is 2 mm', half the 4 mm rib (chamfers_crossing_each_other_are_refused)"
+     }
     }
    }
   }

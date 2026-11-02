@@ -807,7 +807,18 @@ nice -n 10 cargo run -p difftest -- --solidcraft-cases '3526-*'        # ids (<f
   void is a region of its own), `volume` (`value`, absolute `tol`, the `formula` it came
   from), `removed` (the same with the earlier body `from`: its volume minus `result`'s,
   for a result without a closed-form volume of its own), `cylinder_faces_max`,
-  `sheet_corner` (signed end distances and flat-pattern invariants).
+  `sheet_corner` (signed end distances and flat-pattern invariants), `manifold`
+  (`result` must, or must not, be a closed manifold solid, `SmBrep::IsManifoldSolid`, so a
+  blend that leaves an open body cannot pass on its volume alone), and `refused`
+  (`step`, `error`: the kernel must refuse; the case passes when that step fails with an
+  error containing `error`, fails when every step completes, and takes no other
+  expectation). `refused` is the opposite of `refused_by`: there the refusal is a known
+  defect and defers the case, here it is the right answer (a blend too large for its
+  faces, for example `199-*/round_past_the_end_face_is_refused`). `refused.fit_size`
+  (`value`, `tol`, `kind` `radius` (default), `scale` or `chord`, `source`) also requires the
+  largest size that builds, which a refusal reports with `fillet_gn_section_generator`
+  (`SolidError::FilletRefused`, WR-696): a refusal without a size fails it, and a refusal
+  with one is still an `ERROR` in a case that expects none.
 * **Verdicts**: `PASS`, `FAIL`, `UNCHECKED` (no expectations were supplied, or no check
   failed but one cannot be measured
   yet: `cylinder_faces_max` until solidcore has a cylinder surface kind), `ERROR` (a step
