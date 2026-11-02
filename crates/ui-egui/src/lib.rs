@@ -2930,6 +2930,7 @@ impl SolveApp {
         value_step::set_enabled(ui.ctx(), self.preferences.step_values);
         canvas::set_boxes_shown(ui.ctx(), self.preferences.value_boxes_in_view);
         canvas::share_box_pin(ui.ctx(), &mut self.preferences.value_box_place);
+        canvas::set_box_beside_handle(ui.ctx(), self.preferences.value_box_beside_handle);
         recent_colors::share(ui.ctx(), &mut self.ui.recent_colors);
         let t0 = now_ms();
         // The first frames draw with the bundled faces while the system's CJK, Hangul and Thai

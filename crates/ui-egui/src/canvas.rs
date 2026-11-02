@@ -882,10 +882,18 @@ fn placed(ui: &egui::Ui, at: Pos2) -> (Pos2, egui::Align2) {
     if over && let Some(kept) = ui.ctx().data(|d| d.get_temp::<(Pos2, egui::Align2)>(last)) {
         return kept;
     }
-    let model = ui.ctx().data(|d| d.get_temp::<Option<egui::Rect>>(egui::Id::new(MODEL_OUTLINE))).flatten();
+    let beside = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new(BOX_BESIDE_HANDLE))).unwrap_or(false);
+    let model = ui.ctx().data(|d| d.get_temp::<Option<egui::Rect>>(egui::Id::new(MODEL_OUTLINE))).flatten().filter(|_| !beside);
     let at = clear_of_model(model, ui.clip_rect(), open_dialog(ui.ctx()), at);
     ui.ctx().data_mut(|d| d.insert_temp(last, at));
     at
+}
+
+const BOX_BESIDE_HANDLE: &str = "sc_canvas_box_beside_handle";
+
+/// The Keep the value box beside its handle preference, for [`placed`].
+pub(crate) fn set_box_beside_handle(ctx: &egui::Context, on: bool) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(BOX_BESIDE_HANDLE), on));
 }
 
 /// The command window open now, for the value box to keep out from under.
@@ -2398,6 +2406,18 @@ mod tests {
 #[cfg(test)]
 mod clear_of_model_tests {
     use egui::{Rect, pos2};
+
+    #[test]
+    fn the_preference_keeps_the_box_beside_its_handle() {
+        egui::__run_test_ui(|ui| {
+            let model = Rect::from_min_max(pos2(100.0, 100.0), pos2(200.0, 200.0));
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(super::MODEL_OUTLINE), Some(model)));
+            let at = pos2(190.0, 100.0);
+            assert_ne!(super::placed(ui, at).0, at, "by default it goes outside the model");
+            super::set_box_beside_handle(ui.ctx(), true);
+            assert_eq!(super::placed(ui, at), (at, egui::Align2::LEFT_TOP));
+        });
+    }
 
     #[test]
     fn the_box_keeps_out_from_under_the_command_window() {
