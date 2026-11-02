@@ -1045,16 +1045,16 @@
       "status": "pass"
     },
     "ladder/06-threads/018-external-m10-both-hands": {
+      "status": "pass",
+      "seconds": 14.242543556,
       "measured": {
-        "area_mm2": 1418.5863348764333,
+        "area_mm2": 1418.5863348758135,
         "body_count": 1,
-        "edges": 486,
+        "edges": 597,
         "faces": 204,
-        "vertices": 324,
-        "volume_mm3": 1804.9241321476034
-      },
-      "seconds": 6.515191917,
-      "status": "pass"
+        "vertices": 398,
+        "volume_mm3": 1804.924132147576
+      }
     },
     "ladder/06-threads/019-external-tr40x14-p7-two-start": {
       "measured": {
@@ -1401,16 +1401,16 @@
       "status": "pass"
     },
     "ladder/07-fillets/021-corner-three-sequential-r5-r3-r2-partial-chain": {
+      "status": "pass",
+      "seconds": 0.194793136,
       "measured": {
-        "area_mm2": 8591.674904919324,
+        "area_mm2": 8593.662753726545,
         "body_count": 1,
-        "edges": 24,
+        "edges": 25,
         "faces": 11,
-        "vertices": 15,
-        "volume_mm3": 47589.7705835473
-      },
-      "seconds": 0.06135609,
-      "status": "pass"
+        "vertices": 16,
+        "volume_mm3": 47591.48201241739
+      }
     },
     "ladder/08-chamfers/001-equal-5": {
       "measured": {
@@ -2001,5 +2001,5 @@
       "status": "pass"
     }
   },
-  "reason": "07-fillets/016 and 018 round the r3 with its tangent chain, which takes the vertical edge their third round was to pick (refused: the pick names no edge); 020 and 021 are the same corners with the r3 alone, as 016 and 018 were recorded (021 measured on SMLib f12a101); 06/023 (1/2-14 NPT) passes: a taper thread's groove follows its crest cone, so no sliver of the flanks is left (volume 8226.4042 against the standard's 8226.4049); the other cases as recorded on SMLib 60b1c6a 07-fillets/012 (SMLib v1.1.0-alpha, a18bbe5) fails: the variable round now ends at the smooth vertex (smlib #124, the End at a smooth vertex), which makes 9 faces, 20 edges and 13 vertices against the case's 8, 18 and 12, and 47770.95 mm³ against 47755.12. Recorded as it is while the End's change is established as by design or a defect."
+  "reason": "07-fillets/016 and 018 round the r3 with its tangent chain, which takes the vertical edge their third round was to pick (refused: the pick names no edge); 020 and 021 are the same corners with the r3 alone, as 016 and 018 were recorded (021 measured on SMLib f12a101); 06/023 (1/2-14 NPT) passes: a taper thread's groove follows its crest cone, so no sliver of the flanks is left (volume 8226.4042 against the standard's 8226.4049); the other cases as recorded on SMLib 60b1c6a 07-fillets/012 (SMLib v1.1.0-alpha, a18bbe5) fails: the variable round now ends at the smooth vertex (smlib #124, the End at a smooth vertex), which makes 9 faces, 20 edges and 13 vertices against the case's 8, 18 and 12, and 47770.95 mm³ against 47755.12. Recorded as it is while the End's change is established as by design or a defect. On SMLib v1.1.0-alpha too: 07-fillets/021 (a partial chain) gains an edge and a vertex at its round's End cap (smlib #124), and 06-threads/018 (both hands) makes 597 edges and 398 vertices against 486 and 324, passing its checks. The thread's count change is still being explained."
 }
