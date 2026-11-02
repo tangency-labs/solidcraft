@@ -106,6 +106,31 @@ fn f2_on_a_clicked_browser_group_renames_the_group() {
     }
 }
 
+/// #10654: a refused inline rename keeps the editor open and says why, instead of closing
+/// silently and leaving the old name.
+#[test]
+fn a_refused_inline_rename_keeps_the_editor_and_shows_the_error() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"A"})).unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"B"})).unwrap();
+    h.app.preferences.browser_bodies_folders = crate::prefs::BodiesFolders::Always;
+    h.settle();
+    h.app.menu.rename = Some(crate::context_menu::Rename {
+        what: crate::context_menu::RenameWhat::Body("B".into()),
+        text: "A".into(),
+        at: egui::Pos2::ZERO,
+        focused: true,
+        inline: true,
+    });
+    h.frames(2);
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.frames(2);
+    assert!(h.app.menu.rename.is_some(), "the editor stays open after a refused rename");
+    let (text, _, error) = h.app.status.clone().expect("the refusal is shown");
+    assert!(error && text.contains("another body is called"), "{text}");
+    assert!(h.app.session.world_state().body("B").is_some(), "the body keeps its name");
+}
+
 #[test]
 fn folder_visibility_target_clears_when_the_user_moves_on() {
     for action in ["body click", "selection command", "empty click", "escape", "design tab", "model edit", "tool"] {

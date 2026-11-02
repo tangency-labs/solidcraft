@@ -434,7 +434,8 @@ fn fs_ao_blur(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 fn ao_turn(pos: vec2<f32>) -> f32 {
     let x = u32(pos.x) & 3u;
     let y = u32(pos.y) & 3u;
-    let v = ((x ^ y) & 1u) << 3u | (y & 1u) << 2u | ((x ^ y) >> 1u) << 1u | (y >> 1u);
+    // WGSL won't mix shifts and `|` without parentheses; naga takes it, browsers refuse it (#11080).
+    let v = (((x ^ y) & 1u) << 3u) | ((y & 1u) << 2u) | (((x ^ y) >> 1u) << 1u) | (y >> 1u);
     return (f32(v) + 0.5) / 16.0;
 }
 

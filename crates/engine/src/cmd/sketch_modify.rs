@@ -326,6 +326,54 @@ fn release_extent(sk: &mut Sketch, ci: usize) {
     });
 }
 
+/// Tangencies tied to one of the curve's ends, through a shared point or Coincident
+/// constraints. Record them before splitting: keeping the curve ID alone would leave an
+/// end tangent on the wrong piece and lose the solver's endpoint tangency equation.
+fn endpoint_tangencies(sk: &Sketch, ci: usize) -> Vec<(usize, usize)> {
+    let Some((start, end)) = sk.curves.get(ci).and_then(|c| c.kind.ends()) else { return Vec::new() };
+    let groups = coincident_points(sk);
+    let root = |p: usize| groups.get(p).copied().unwrap_or(p);
+    sk.constraints
+        .iter()
+        .enumerate()
+        .filter_map(|(i, k)| {
+            let ConstraintKind::Tangent { a, b } = k.kind else { return None };
+            let other = if a == ci {
+                b
+            } else if b == ci {
+                a
+            } else {
+                return None;
+            };
+            let (a, b) = sk.curves.get(other)?.kind.ends()?;
+            let joined = |p| root(p) == root(a) || root(p) == root(b);
+            match (joined(start), joined(end)) {
+                (true, false) => Some((i, start)),
+                (false, true) => Some((i, end)),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+/// Follow the original endpoints after the pieces have exchanged geometry to preserve the
+/// original curve ID. A tangent on the removed piece goes with it in `remove_curves`.
+fn rebind_endpoint_tangencies(sk: &mut Sketch, ci: usize, pieces: &[usize], tangencies: &[(usize, usize)]) {
+    for &(constraint, point) in tangencies {
+        let owner = pieces.iter().copied().find(|i| sk.curves.get(*i).and_then(|c| c.kind.ends()).is_some_and(|(a, b)| a == point || b == point));
+        if let Some(owner) = owner
+            && let Some(k) = sk.constraints.get_mut(constraint)
+            && let ConstraintKind::Tangent { a, b } = &mut k.kind
+        {
+            if *a == ci {
+                *a = owner;
+            } else if *b == ci {
+                *b = owner;
+            }
+        }
+    }
+}
+
 /// The cut parameters bracketing `tq` on curve `ci`: (before, after) with their cutter curves.
 fn bracket(sk: &Sketch, ci: usize, tq: f64) -> (Vec<(f64, Vec2, usize)>, bool) {
     let Some(sh) = sk.shape(ci) else { return (Vec::new(), false) };
@@ -549,6 +597,7 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
         })
         .collect();
     release_extent(sk, ci);
+    let tangencies = endpoint_tangencies(sk, ci);
     let ts: Vec<f64> = cuts.iter().map(|c| c.0).collect();
     let (pieces, pts) = split_at(sk, ci, &ts)?;
     // The piece containing tq.
@@ -580,6 +629,7 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
         }
         _ => gone,
     };
+    rebind_endpoint_tangencies(sk, ci, &pieces, &tangencies);
     let keep: Vec<usize> = pieces.iter().copied().filter(|x| *x != gone).collect();
     tie(sk, &keep)?;
     if let Some((a, _)) = sk.curves.get(ci).and_then(|c| c.kind.ends()) {
@@ -719,6 +769,9 @@ fn trim_path(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"trimmed": trimmed, "removed": removed, "skipped": skipped, "sketch": info}))
 }
 
+/// Cuts closer than this to a curve's end or to each other are one place (mm).
+const BREAK_GAP: f64 = 1e-6;
+
 fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.break";
     let points = if p.get("points").is_some() { Some(vec2_list(cmd, p, "points", 1000)?) } else { None };
@@ -754,6 +807,23 @@ fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         if ts.is_empty() || (!sh.is_full() && ts.iter().any(|t| *t <= t0 || *t >= t1)) {
             return Err(bad(cmd, "nothing to break at there"));
         }
+        // A cut on (or a hair from) an end or another cut would make a piece of no length, and
+        // its ties: where a curve ends, or touches a tangent arc, it is already broken.
+        let ends = if sh.is_full() { Vec::new() } else { vec![sh.point(t0), sh.point(t1)] };
+        let mut kept: Vec<(f64, Option<usize>)> = Vec::new();
+        for (t, c) in ts.iter().zip(&cutters) {
+            let q = sh.point(*t);
+            if !ends.iter().chain(kept.iter().map(|k| sh.point(k.0)).collect::<Vec<_>>().iter()).any(|e| e.dist(q) < BREAK_GAP) {
+                kept.push((*t, *c));
+            }
+        }
+        if kept.is_empty() {
+            return Err(bad(cmd, "the curve is already broken there"));
+        }
+        let (ts, cutters): (Vec<f64>, Vec<Option<usize>>) = kept.into_iter().unzip();
+        // Its length (and its midpoint, an equal length) measured the whole curve: left on the
+        // first piece, it would stretch that piece back to the old size and skew the sketch.
+        release_extent(sk, ci);
         let (pieces, pts) = split_at(sk, ci, &ts)?;
         for (pi, c) in pts.iter().zip(&cutters) {
             if let Some(c) = c {

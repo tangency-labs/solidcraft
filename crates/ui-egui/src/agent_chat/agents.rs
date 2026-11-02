@@ -329,14 +329,32 @@ pub fn key_safe_for(url: &str) -> bool {
         return true;
     }
     let Some(rest) = u.strip_prefix("http://") else { return false };
-    let host = rest.split(['/', '?']).next().unwrap_or("");
-    let host = host.rsplit_once('@').map_or(host, |(_, h)| h);
-    let name = if host.starts_with('[') {
-        host.split(']').next().map(|h| format!("{h}]")).unwrap_or_default()
-    } else {
-        host.split(':').next().unwrap_or("").to_string()
+    // The host part ends where the HTTP client ends it, at the first `/`, `?` or `#`.
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    local_authority(authority)
+}
+
+/// `authority` is exactly this computer's name with at most a port. No user name goes before it
+/// and no stray character after it, as URL parsers don't all read those the same way.
+fn local_authority(authority: &str) -> bool {
+    let (host, port) = match authority.strip_prefix('[') {
+        Some(inner) => {
+            let Some((ip, after)) = inner.split_once(']') else { return false };
+            if ip != "::1" {
+                return false;
+            }
+            ("[::1]", after)
+        }
+        None => {
+            let end = authority.find(':').unwrap_or(authority.len());
+            authority.split_at(end)
+        }
     };
-    matches!(name.as_str(), "localhost" | "127.0.0.1" | "[::1]")
+    let port_ok = match port.strip_prefix(':') {
+        Some(digits) => digits.bytes().all(|b| b.is_ascii_digit()) && digits.parse::<u16>().is_ok(),
+        None => port.is_empty(),
+    };
+    port_ok && matches!(host, "localhost" | "127.0.0.1" | "[::1]")
 }
 
 /// A base URL the API backend accepts: `http(s)://host…`, without a trailing slash.
@@ -364,6 +382,56 @@ mod tests {
         assert!(!key_safe_for("http://localhost.evil.example/v1"));
         assert!(!key_safe_for("http://user@evil.example/v1"));
         assert!(!key_safe_for("ftp://x"));
+    }
+
+    /// Plain HTTP only reaches this computer: the check reads the host where the HTTP client does,
+    /// and takes nothing around the name that URL parsers could read differently.
+    #[test]
+    fn a_key_over_http_needs_a_url_that_can_only_mean_this_computer() {
+        for url in [
+            "http://localhost",
+            "HTTP://LOCALHOST:11434/v1",
+            " http://localhost:11434/v1/ ",
+            "http://127.0.0.1:1234/v1?x=1",
+            "http://[::1]/v1",
+            "http://[::1]:8080/v1",
+            "http://localhost:65535/@models",
+        ] {
+            assert!(key_safe_for(url), "{url}");
+        }
+        for url in [
+            "http://evil.example#@localhost/v1",
+            "http://evil.example?@localhost/v1",
+            "http://evil.example/@localhost/v1",
+            "http://evil.example\\@localhost/v1",
+            "http://localhost\\@evil.example/v1",
+            "http://localhost\\.evil.example/v1",
+            "http://localhost@evil.example/v1",
+            "http://localhost:1234@evil.example/v1",
+            "http://user@localhost/v1",
+            "http://user:secret@localhost:1234/v1",
+            "http://[::1]@evil.example/v1",
+            "http://[::1].evil.example/v1",
+            "http://[::1]evil.example/v1",
+            "http://[::2]/v1",
+            "http://[::1/v1",
+            "http://127.0.0.1.evil.example/v1",
+            "http://localhost.evil.example:1234/v1",
+            "http://localhost:80.evil.example/v1",
+            "http://localhost:abc/v1",
+            "http://localhost:/v1",
+            "http://localhost:65536/v1",
+            "http://local\thost.evil.example/v1",
+            "http://localhost evil.example/v1",
+            "http://localhost%2eevil.example/v1",
+            "http://",
+            "http:///localhost/v1",
+            "http:/localhost/v1",
+            "//localhost/v1",
+            "localhost:1234/v1",
+        ] {
+            assert!(!key_safe_for(url), "{url}");
+        }
     }
 
     #[test]

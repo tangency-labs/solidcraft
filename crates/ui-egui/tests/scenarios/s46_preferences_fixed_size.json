@@ -2,7 +2,7 @@
   {"note": "#290: Preferences keeps one size on every page; descriptions wrap inside it, and the kit footer keeps Cancel / Apply / OK flush right inside its action inset."},
   {"click": {"handle": "titlebar:preferences"}},
   {"expect": {"prefs": {"dialog": "General"}, "same_width": "prefs:window", "right_edge": {"inner": "prefs:ok", "outer": "prefs:actions", "tol": 1}, "spans": {"inner": "prefs:footer", "outer": "prefs:window", "axis": "x", "tol": 12}}},
-  {"widget": "Appearance"},
+  {"click": {"handle": "prefs:page:Appearance"}},
   {"expect": {"prefs": {"dialog": "Appearance"}, "same_width": "prefs:window", "right_edge": {"inner": "prefs:ok", "outer": "prefs:actions", "tol": 1}}},
   {"widget": "Layout"},
   {"expect": {"prefs": {"dialog": "Layout"}, "same_width": "prefs:window"}},

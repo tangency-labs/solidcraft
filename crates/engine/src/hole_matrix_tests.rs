@@ -856,3 +856,17 @@ fn recessed_drill_point_through_and_exact_shoulder_keep_the_existing_exit() {
         }
     }
 }
+
+/// A hole on the side of a cone, given no direction, drills along the cone's normal there, not
+/// the nearest mesh facet's, which leaned it up to 2.6° sideways (#10698).
+#[test]
+fn a_hole_on_a_cones_side_drills_along_its_normal() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cone", json!({"radius": 15, "height": 20, "body_name": "Cone"})).unwrap();
+    // The side is r = 15 (1 - z / 20): at (7.5, 0, 10) the outward normal is (0.8, 0, 0.6).
+    run(&mut s, "solid.hole", json!({"position": [7.5, 0, 10], "diameter": 4, "depth": 4, "name": "H"})).unwrap();
+    let f = s.doc.find_feature("H").unwrap();
+    let solidcraft_doc::FeatureKind::Hole { direction, .. } = &f.kind else { panic!("not a hole") };
+    let d = direction.0;
+    assert!((d.x + 0.8).abs() < 1e-6 && d.y.abs() < 1e-6 && (d.z + 0.6).abs() < 1e-6, "{d:?}");
+}

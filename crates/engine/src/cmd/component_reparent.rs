@@ -3,8 +3,8 @@
 //! once is one definition: what goes in it goes in every instance, placed by the one instance
 //! named (`parent_path`, else the active placement) and in the same place in the others. Paths
 //! through the placement change: the session's paths (selection, active and hidden placements,
-//! hidden folders) follow it, and a move that would leave a feature failing that worked before
-//! (a face attachment found through the old path) is refused.
+//! hidden folders) and the design's face attachments found through it follow it, and a move that
+//! would still leave a feature failing that worked before is refused.
 
 use super::placing::{parent_path, placement_of};
 use super::*;
@@ -72,6 +72,37 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
         && let Some(c) = scratch.doc_mut().components.iter_mut().find(|c| c.id == o.component)
     {
         c.parent = to;
+    }
+    // Face attachments found through it follow it too (#11063): a sketch on a face of a body
+    // inside it kept the old path, which no longer starts at the design, and the move was refused.
+    // A path through it by way of any placement of its old parent (a parent placed more than once
+    // is one definition) now runs through its one new place. A path that would grow past the 64
+    // placements a design keeps is refused here rather than saved where it can't be read back.
+    let mut too_deep = false;
+    let mut rebase = |path: &mut Vec<u64>| {
+        if let Some(at) = path.iter().position(|x| *x == id) {
+            let moved: Vec<u64> = new_path.iter().chain(&path[at + 1..]).copied().collect();
+            too_deep |= moved.len() > 64;
+            *path = moved;
+        }
+    };
+    for f in &mut scratch.doc_mut().features {
+        match &mut f.kind {
+            FeatureKind::Emboss { face: Some(face), .. } => {
+                rebase(&mut face.path);
+                rebase(&mut face.author_path);
+            }
+            FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } => {
+                if let Some(anchor) = crate::cmd::sketch::face::anchor_mut(plane) {
+                    rebase(&mut anchor.path);
+                    rebase(&mut anchor.author_path);
+                }
+            }
+            _ => {}
+        }
+    }
+    if too_deep {
+        return Err(bad(cmd, format!("moving {} would nest a face attachment more than 64 placements deep", o.name)));
     }
     // The paths through it follow it before the model is worked out again: that drops a selected
     // or active placement whose path no longer leads anywhere.

@@ -158,6 +158,7 @@ fn a_datum_plane_and_a_point_measure_their_distance() {
 #[test]
 fn measurement_axis_distances_follow_the_upstream_centre_min_and_max_choices() {
     let mut h = Harness::new();
+    h.app.preferences.language = "en".into();
     h.app.home.open = false;
     h.app.set_origin_shown(false);
     h.app.ui.show_browser = false;

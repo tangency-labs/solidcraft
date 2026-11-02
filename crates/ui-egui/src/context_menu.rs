@@ -2042,24 +2042,30 @@ pub fn start_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2) {
     app.menu.rename = Some(Rename { what, text, at, focused: false, inline: false });
 }
 
-pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) {
+pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) -> Result<(), String> {
     let name = r.text.trim().to_string();
     if name.is_empty() {
-        return;
+        return Ok(());
     }
-    match &r.what {
+    let result = match &r.what {
         RenameWhat::Body(old) => {
             // The command renames the body where it is hidden or locked too.
-            drop(app.run_heavy("body.rename", json!({ "body": old, "name": name })));
+            app.run_heavy("body.rename", json!({ "body": old, "name": name })).map(|_| ())
         }
-        RenameWhat::Feature(f) => drop(app.run("timeline.rename", json!({ "feature": f, "name": name }))),
-        RenameWhat::Component(c) => drop(app.run("component.rename", json!({ "component": c, "name": name }))),
-        RenameWhat::Group(g) => crate::browser::group_action(app, "ui.renameGroup", &json!({ "group": g, "name": name })),
-        RenameWhat::TimelineGroup(g) => drop(app.run("timeline.rename_group", json!({ "group": g, "name": name }))),
-        RenameWhat::Canvas(c) => drop(app.run("canvas.edit", json!({ "canvas": c, "name": name }))),
-        RenameWhat::View(v) => drop(app.run("view.rename", json!({ "view": v, "name": name }))),
-        RenameWhat::Joint(j) => drop(app.run("joint.edit", json!({ "joint": j, "name": name }))),
-    }
+        RenameWhat::Feature(f) => app.run("timeline.rename", json!({ "feature": f, "name": name })).map(|_| ()),
+        RenameWhat::Component(c) => app.run("component.rename", json!({ "component": c, "name": name })).map(|_| ()),
+        RenameWhat::Group(g) => {
+            crate::browser::group_action(app, "ui.renameGroup", &json!({ "group": g, "name": name }));
+            Ok(())
+        }
+        RenameWhat::TimelineGroup(g) => app.run("timeline.rename_group", json!({ "group": g, "name": name })).map(|_| ()),
+        RenameWhat::Canvas(c) => app.run("canvas.edit", json!({ "canvas": c, "name": name })).map(|_| ()),
+        RenameWhat::View(v) => app.run("view.rename", json!({ "view": v, "name": name })).map(|_| ()),
+        RenameWhat::Joint(j) => app.run("joint.edit", json!({ "joint": j, "name": name })).map(|_| ()),
+    };
+    // The command's own status line explains a refusal; the caller decides whether to keep the
+    // editor open on it.
+    result
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2589,7 +2595,9 @@ fn show_rename(app: &mut SolveApp, ctx: &egui::Context) {
         done = Some(true);
     }
     match done {
-        Some(true) => commit_rename(app, &r),
+        Some(true) => {
+            let _ = commit_rename(app, &r);
+        }
         Some(false) => {}
         None => app.menu.rename = Some(r),
     }
@@ -2602,7 +2610,7 @@ pub fn finish_rename(app: &mut SolveApp, text: Option<&str>, commit: bool) -> bo
         r.text = s.to_string();
     }
     if commit {
-        commit_rename(app, &r);
+        let _ = commit_rename(app, &r);
     }
     true
 }

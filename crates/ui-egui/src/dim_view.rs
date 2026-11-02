@@ -946,6 +946,31 @@ pub fn pick_reference(ctx: &egui::Context, pos: Pos2, double: bool) -> bool {
     })
 }
 
+/// The gap the value box keeps from the point it belongs to (#11057): a click at the pointer
+/// reaches the sketch (to place the text or pick a second entity) instead of the box.
+const EDIT_GAP: f32 = 30.0;
+/// The box's height as its placement works it out: a name line, the value and a possible error.
+const EDIT_HEIGHT: f32 = 80.0;
+
+/// Where the value box opens: beside the text, or beside the pointer while a value is typed
+/// first. Near the viewport's edge it opens on the point's other side rather than slide back
+/// over it.
+fn edit_anchor(at: Pos2, live: bool, drawable: Option<egui::Rect>, popup_width: f32) -> Pos2 {
+    let mut anchor = if live { at + vec2(EDIT_GAP, EDIT_GAP) } else { at - vec2(45.0, 11.0) };
+    let Some(rect) = drawable else { return anchor };
+    if live {
+        if anchor.x + popup_width > rect.right() - 6.0 {
+            anchor.x = at.x - popup_width - EDIT_GAP;
+        }
+        if anchor.y + EDIT_HEIGHT > rect.bottom() - 6.0 {
+            anchor.y = at.y - EDIT_HEIGHT - EDIT_GAP;
+        }
+    }
+    anchor.x = anchor.x.clamp(rect.left(), (rect.right() - popup_width - 6.0).max(rect.left()));
+    anchor.y = anchor.y.clamp(rect.top(), (rect.bottom() - EDIT_HEIGHT).max(rect.top()));
+    anchor
+}
+
 fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut e) = EDIT.with(|x| x.borrow_mut().take()) else { return };
     if e.at.is_none() {
@@ -962,19 +987,11 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     let id = egui::Id::new("sc_dim_edit");
     let mut done: Option<bool> = None;
     let mut escaped = false;
-    // A type-first value sits beside its text, clear of the pointer, so a click still reaches
-    // the sketch (to place the text or pick a second entity).
-    let mut anchor = if e.live.is_some() { at + vec2(18.0, 10.0) } else { at - vec2(45.0, 11.0) };
-    let mut popup_width = 220.0;
-    if let Some(layout) = &app.viewport.layout
-        && layout.drawable.is_finite()
-        && layout.drawable.is_positive()
-    {
-        let rect = layout.drawable;
-        popup_width = (rect.width() - 8.0).clamp(24.0, 220.0);
-        anchor.x = anchor.x.clamp(rect.left(), (rect.right() - popup_width - 6.0).max(rect.left()));
-        anchor.y = anchor.y.clamp(rect.top(), (rect.bottom() - 80.0).max(rect.top()));
-    }
+    // A type-first value sits beside its text, clear of the pointer and of the target a click
+    // picks next, and it opens on the pointer's other side at the viewport's edge (#11057).
+    let drawable = app.viewport.layout.as_ref().map(|l| l.drawable).filter(|r| r.is_finite() && r.is_positive());
+    let popup_width = drawable.map_or(220.0, |rect| (rect.width() - 8.0).clamp(24.0, 220.0));
+    let anchor = edit_anchor(at, e.live.is_some(), drawable, popup_width);
     // Background: under Preferences and Report a bug (#9016), like canvas value boxes.
     Container::new(ctx, Surface::Canvas).area(egui::Id::new("sc_dim_edit_area")).fixed_pos(anchor).order(egui::Order::Background).show(ctx, |ui| {
         Container::popup_frame(ui.style()).fill(Tokens::get().dialog_body).inner_margin(Tokens::get().space_4).show(ui, |ui| {
@@ -1112,6 +1129,21 @@ pub fn drawn() -> Vec<(String, Pos2)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #11057: a value typed before its target keeps a 30 px gap from the pointer, and near the
+    /// viewport's edge it opens on the pointer's other side instead of sliding back over it.
+    #[test]
+    fn the_value_box_keeps_its_gap_from_the_pointer() {
+        use egui::pos2;
+        let view = egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 600.0));
+        let a = edit_anchor(pos2(300.0, 200.0), true, Some(view), 220.0);
+        assert_eq!(a, pos2(330.0, 230.0), "30 px below and right of the pointer");
+        // Its right and bottom edges stop 30 px short of the pointer.
+        let a = edit_anchor(pos2(960.0, 560.0), true, Some(view), 220.0);
+        assert_eq!((a.x + 220.0, a.y + 80.0), (930.0, 530.0), "left of and above the pointer");
+        // Editing an existing dimension still opens where its text is.
+        assert_eq!(edit_anchor(pos2(300.0, 200.0), false, Some(view), 220.0), pos2(255.0, 189.0));
+    }
 
     #[test]
     fn plain_values_are_numbers_with_an_optional_unit() {

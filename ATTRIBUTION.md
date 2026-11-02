@@ -770,6 +770,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | docs/design/preferences/figures/view-shadow.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
 | docs/design/preferences/figures/view-shadow.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
 | `assets/locales/pending/sketch-offset-instances.json` | SolidCraft contributors | Original offset instance-count label and translations | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/settings_profile.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original analytic head and shoulder geometry for settings profiles | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 
