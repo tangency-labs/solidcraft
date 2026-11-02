@@ -37,8 +37,8 @@ pub const MAX_WIRE_VARS: usize = 1_500;
 /// Most residual rows in one connected group: the freedom count reads a dense Jacobian of
 /// rows by unknowns (at most 36 MB).
 pub const MAX_WIRE_ROWS: usize = 2 * MAX_WIRE_VARS;
-/// The multiply-adds one solve may spend on its linear systems and its freedom count, about a
-/// second's work. A design that asks for more is left where it is and reported as too large to
+/// The multiply-adds one solve may spend on its linear systems and its freedom count, a few
+/// seconds' work at most. A design that asks for more is left where it is and reported as too large to
 /// solve in time, rather than hold the window.
 const WORK_BUDGET: f64 = 4e9;
 /// The most a point moves in one solver step, as a share of its group's size (more when a length
@@ -501,6 +501,20 @@ impl Sketch {
         false
     }
 
+    /// The 3D constraints that hold as the curves are now (no solve).
+    pub fn wire_constraints_holding(&self) -> std::collections::HashSet<String> {
+        let drawn = self.drawn_wires();
+        self.wire_constraints
+            .iter()
+            .filter(|c| {
+                let at: Option<Vec<Vec3>> =
+                    c.kind.points().iter().map(|p| drawn.get(p.wire.as_str()).and_then(|w| w.fit.get(p.index)).copied()).collect();
+                at.is_some_and(|at| c.kind.residuals_at(&at).iter().all(|v| v.abs() <= ACCEPT))
+            })
+            .map(|c| c.id.clone())
+            .collect()
+    }
+
     /// Whether every 3D constraint holds as the curves are now (no solve).
     pub fn wire_constraints_hold(&self) -> bool {
         let drawn = self.drawn_wires();
@@ -613,6 +627,12 @@ impl Sketch {
         let mut solved: HashMap<usize, Vec3> = HashMap::new();
         let mut rank = 0usize;
         let mut work = 0.0;
+        // Each group's classes and constraints, for a curve that fails to rebuild below.
+        let mut group_of: HashMap<usize, usize> = HashMap::new();
+        let mut group_cons: Vec<Vec<String>> = Vec::new();
+        // The solved groups, counted once every group is solved: the count must not use up
+        // the work a later group needs to solve.
+        let mut to_count = Vec::new();
         for members in groups.values() {
             let mut vars: Vec<usize> = Vec::new();
             let mut var_of: HashMap<usize, usize> = HashMap::new();
@@ -636,6 +656,10 @@ impl Sketch {
             }
             let n = vars.len().saturating_mul(3);
             let rows: usize = blocks.iter().map(|b| b.kind.rows()).sum();
+            for c in &vars {
+                group_of.insert(*c, group_cons.len());
+            }
+            group_cons.push(blocks.iter().map(|b| b.id.to_string()).collect());
             if n > MAX_WIRE_VARS || rows > MAX_WIRE_ROWS {
                 rep.ok = false;
                 if rep.oversized.unwrap_or(0) <= n {
@@ -663,10 +687,7 @@ impl Sketch {
                         solved.insert(*c, Block::at(&x, v));
                     }
                     if count {
-                        match group_rank(&blocks, n, rows, &x, &mut work) {
-                            Some(r) => rank = rank.saturating_add(r),
-                            None => rep.uncounted = true,
-                        }
+                        to_count.push((blocks, n, rows, x));
                     }
                 }
                 Lm::Done(x) => {
@@ -689,6 +710,12 @@ impl Sketch {
                 }
             }
         }
+        for (blocks, n, rows, x) in &to_count {
+            match group_rank(blocks, *n, *rows, x, &mut work) {
+                Some(r) => rank = rank.saturating_add(r),
+                None => rep.uncounted = true,
+            }
+        }
         if count {
             let mut classes: Vec<usize> = class.clone();
             classes.sort_unstable();
@@ -697,48 +724,64 @@ impl Sketch {
             rep.dof = free.saturating_mul(3).saturating_sub(rank);
         }
         // Each point where its class is, but for the classes a failure leaves where they were,
-        // rebuilding each curve from its fit points; a curve that can no longer be built (an
-        // arc's points now in a line) fails the solve and nothing moves.
-        let place = |s: usize| match class.get(s) {
-            Some(c) if failed.contains(c) => positions.get(s).copied(),
-            Some(c) => solved.get(c).or_else(|| start.get(c)).copied(),
-            None => positions.get(s).copied(),
-        };
-        let mut rebuilt = Vec::new();
-        for (wi, w) in self.wires.iter().enumerate().filter(|(_, w)| w.link.is_none() && !w.fit.is_empty()) {
-            let Some((s, n)) = first.get(&w.id) else { continue };
-            let fit: Vec<Vec3> = (0..*n).map(|i| place(s + i).unwrap_or(Vec3::ZERO)).collect();
-            if fit == w.fit {
-                continue;
-            }
-            let failed = |rep: &mut WireReport| {
-                rep.ok = false;
-                rep.failing.extend(self.wire_constraints.iter().filter(|c| c.kind.wires().contains(&w.id.as_str())).map(|c| c.id.clone()));
+        // rebuilding each curve from its fit points. A curve that can no longer be built (an
+        // arc's points now in a line) fails its group, which stays where it was; the rest are
+        // placed again without it.
+        for _ in 0..=group_cons.len() {
+            let place = |s: usize| match class.get(s) {
+                Some(c) if failed.contains(c) => positions.get(s).copied(),
+                Some(c) => solved.get(c).or_else(|| start.get(c)).copied(),
+                None => positions.get(s).copied(),
             };
-            if fit.iter().any(|p| !in_range3(*p)) {
-                failed(&mut rep);
-                return rep;
-            }
-            let built = match w.arc {
-                Some(_) => match fit.as_slice() {
-                    [a, b, c] => arc_from_3_points(*a, *b, *c).map(|arc| (Some(arc), arc_polyline(&arc, ARC_TOL))),
-                    _ => None,
-                },
-                None => drawn_polyline(&fit).ok().map(|pts| (None, pts)),
-            };
-            match built {
-                Some((arc, pts)) => rebuilt.push((wi, fit, arc, pts)),
-                None => {
-                    failed(&mut rep);
-                    return rep;
+            let mut rebuilt = Vec::new();
+            let mut broken = None;
+            for (wi, w) in self.wires.iter().enumerate().filter(|(_, w)| w.link.is_none() && !w.fit.is_empty()) {
+                let Some((s, n)) = first.get(&w.id) else { continue };
+                let fit: Vec<Vec3> = (0..*n).map(|i| place(s + i).unwrap_or(Vec3::ZERO)).collect();
+                if fit == w.fit {
+                    continue;
+                }
+                let built = match w.arc {
+                    _ if fit.iter().any(|p| !in_range3(*p)) => None,
+                    Some(_) => match fit.as_slice() {
+                        [a, b, c] => arc_from_3_points(*a, *b, *c).map(|arc| (Some(arc), arc_polyline(&arc, ARC_TOL))),
+                        _ => None,
+                    },
+                    None => drawn_polyline(&fit).ok().map(|pts| (None, pts)),
+                };
+                match built {
+                    Some((arc, pts)) => rebuilt.push((wi, fit, arc, pts)),
+                    None => {
+                        broken = Some((*s, *n));
+                        break;
+                    }
                 }
             }
-        }
-        for (wi, fit, arc, pts) in rebuilt {
-            if let Some(w) = self.wires.get_mut(wi) {
-                w.fit = fit;
-                w.arc = arc;
-                w.pts = pts;
+            let Some((s, n)) = broken else {
+                for (wi, fit, arc, pts) in rebuilt {
+                    if let Some(w) = self.wires.get_mut(wi) {
+                        w.fit = fit;
+                        w.arc = arc;
+                        w.pts = pts;
+                    }
+                }
+                return rep;
+            };
+            rep.ok = false;
+            for c in (s..s + n).filter_map(|i| class.get(i).copied()) {
+                match group_of.get(&c) {
+                    Some(g) => {
+                        failed.extend(group_of.iter().filter(|(_, h)| *h == g).map(|(c, _)| *c));
+                        for id in group_cons.get(*g).into_iter().flatten() {
+                            if !rep.failing.contains(id) {
+                                rep.failing.push(id.clone());
+                            }
+                        }
+                    }
+                    None => {
+                        failed.insert(c);
+                    }
+                }
             }
         }
         rep
@@ -871,7 +914,8 @@ fn lm(blocks: &[Block], n: usize, x0: &[f64], hold: Option<usize>, work: &mut f6
         let mut improved = false;
         for _ in 0..12 {
             if *work > WORK_BUDGET {
-                return Lm::OutOfTime;
+                // Out of work, though perhaps already solved to what is accepted.
+                return if r.iter().all(|v| v.abs() <= ACCEPT) { Lm::Done(x) } else { Lm::OutOfTime };
             }
             let mut damped = a.clone();
             for c in 0..n {
@@ -915,6 +959,9 @@ fn xyz(p: Vec3) -> [f64; 3] {
 /// The rank of a solved group's constraints, the freedoms they take, its work added to `work`;
 /// `None` when the solve's work runs out.
 fn group_rank(blocks: &[Block], n: usize, rows: usize, x: &[f64], work: &mut f64) -> Option<usize> {
+    if *work > WORK_BUDGET {
+        return None;
+    }
     let mut j = Mat::zeros(rows, n);
     let mut row = 0;
     for b in blocks {
