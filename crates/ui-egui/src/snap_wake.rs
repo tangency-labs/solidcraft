@@ -29,8 +29,7 @@ pub struct Woken {
 
 /// Whether snap points are on and the active dialog input takes them.
 pub fn wanted(app: &SolveApp) -> bool {
-    app.preferences.snap_points
-        && app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::SNAP_POINTS != 0)
+    app.preferences.snap_points && app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::SNAP_POINTS != 0)
 }
 
 /// The item a hit wakes points of: an edge or a face of a body, or a sketch curve (a line's
