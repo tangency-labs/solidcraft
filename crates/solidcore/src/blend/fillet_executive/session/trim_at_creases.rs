@@ -427,6 +427,8 @@ impl FilletSession<'_> {
         // wall's top)
         let mut note = None;
         let mut section_ends: Vec<SectionEnd> = Vec::new();
+        // each section end's solver, whose round it ends (#2314)
+        let mut section_solvers: Vec<FilletObject> = Vec::new();
         for end in &open_ends {
             let FilletObject::Solver(id) = end.solver else {
                 return Err(invalid("open end solver is not a solver"));
@@ -455,6 +457,7 @@ impl FilletSession<'_> {
                 let section =
                     section_end(k, target, fil_edge, v)?.ok_or_else(|| SolidError::sm_err(OP))?;
                 section_ends.push(section);
+                section_solvers.push(end.solver);
                 Surface::from(Plane::from_normal(vertex_point, section.normal))
             } else {
                 face::p2::surface(target, end_face)?
@@ -488,8 +491,15 @@ impl FilletSession<'_> {
             for &a in &approx {
                 tol = smos_max(tol, a);
             }
-            for end in &section_ends {
-                let Some(section) = section_edge(k, &sheet, end, 10.0 * tol)? else {
+            for (end, solver) in section_ends.iter().zip(&section_solvers) {
+                // the end's own round's faces, as the cut left them
+                let faces: Vec<FaceId> = faces_of
+                    .get(solver)
+                    .map_or(&[][..], Vec::as_slice)
+                    .iter()
+                    .filter_map(|&(_, f)| f)
+                    .collect();
+                let Some(section) = section_edge(k, &sheet, end, &faces, 10.0 * tol)? else {
                     self.objects.intermediate = Some(sheet);
                     self.note_refusal(refusal(
                         FilletErrorType::NoRoom,

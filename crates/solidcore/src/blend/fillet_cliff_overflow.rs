@@ -2101,9 +2101,13 @@ pub fn section_end(
     }))
 }
 
-/// The lamina edge of `region` that lies on the plane of `end` (four samples within
-/// `on_tol`): the round's section there, once the round is cut by it. `None` when no lamina
-/// edge or more than one does (WR-706).
+/// The lamina edge of the round's faces `faces` (of `region`) that lies on the plane of
+/// `end` (four samples within `on_tol`): the round's section there, once the round is cut by
+/// it. `None` when no lamina edge or more than one does (WR-706).
+///
+/// Only the round's own faces are searched: another round of the same sheet can end at a
+/// section on the same plane (a tab's two corner arcs, each running on into the tab's sides
+/// at the same height, tangency-labs/solidcore#2314), and its section is not this end's.
 ///
 /// # Errors
 /// Those of the samples.
@@ -2111,24 +2115,28 @@ pub fn section_edge(
     k: &Kernel,
     region: &Brep,
     end: &SectionEnd,
+    faces: &[FaceId],
     on_tol: f64,
 ) -> Result<Option<EdgeId>> {
     let mut found = None;
-    for e in crate::topology::brep::p1::edges(region, None)? {
-        if !edge::is_lamina(region, e)? {
-            continue;
-        }
-        let curve = edge_curve(k, region, e)?;
-        let mut points = Vec::new();
-        samples(k, &curve, 4, &mut points)?;
-        if points
-            .iter()
-            .all(|&p| on_section_plane(p, end.at, end.normal, on_tol))
-        {
-            if found.is_some() {
-                return Ok(None);
+    let mut seen: BTreeSet<EdgeId> = BTreeSet::new();
+    for &f in faces {
+        for e in face::p4::edges(region, f, None, false, None)? {
+            if !seen.insert(e) || !edge::is_lamina(region, e)? {
+                continue;
             }
-            found = Some(e);
+            let curve = edge_curve(k, region, e)?;
+            let mut points = Vec::new();
+            samples(k, &curve, 4, &mut points)?;
+            if points
+                .iter()
+                .all(|&p| on_section_plane(p, end.at, end.normal, on_tol))
+            {
+                if found.is_some() {
+                    return Ok(None);
+                }
+                found = Some(e);
+            }
         }
     }
     Ok(found)
