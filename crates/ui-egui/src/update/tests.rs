@@ -622,6 +622,37 @@ fn release_notes_read_as_markdown() {
     assert_eq!(inline("**[x](y)**"), vec![Span::Strong("x".into())]);
 }
 
+#[test]
+fn a_pipe_table_reads_as_one_entry_per_row() {
+    let md = "## Files\n\n| File | Author | Licence |\n|---|---|---|\n| a.png | `cargo xtask` | MIT |\n| b.svg | | [CC0](https://x/cc0) |\n\nAfter.";
+    let b = parse_markdown(md);
+    let text = |s: &str| vec![Span::Text(s.into())];
+    assert_eq!(b.len(), 5, "{b:?}");
+    assert_eq!(b.get(1), Some(&Block::Row { header: true, cells: vec![text("File"), text("Author"), text("Licence")] }));
+    assert_eq!(b.get(2), Some(&Block::Row { header: false, cells: vec![text("a.png"), vec![Span::Code("cargo xtask".into())], text("MIT")] }));
+    assert_eq!(b.get(4), Some(&Block::Paragraph(text("After."))));
+    // A row reads as its first cell in bold, then the others between dots; an empty cell drops out.
+    let Some(Block::Row { header, cells }) = b.get(3) else { panic!("{b:?}") };
+    assert_eq!(
+        row_spans(cells, *header),
+        vec![Span::Strong("b.svg".into()), Span::Text(" · ".into()), Span::Link { text: "CC0".into(), url: Some("https://x/cc0".into()) }]
+    );
+    let Some(Block::Row { header, cells }) = b.get(1) else { panic!("{b:?}") };
+    assert_eq!(
+        row_spans(cells, *header),
+        vec![
+            Span::Text("File".into()),
+            Span::Text(" · ".into()),
+            Span::Text("Author".into()),
+            Span::Text(" · ".into()),
+            Span::Text("Licence".into())
+        ]
+    );
+    for s in ["|", "||", "|---|", "| a", "|-|-", "| é |"] {
+        let _ = parse_markdown(s);
+    }
+}
+
 /// #2943: a release note's links keep where they go, so the window can open them; only web
 /// addresses are kept (a relative or other link shows as text that opens nothing).
 #[test]

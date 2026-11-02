@@ -13,6 +13,8 @@ pub const BUILD_DATE: &str = env!("SOLIDCRAFT_BUILD_DATE");
 /// The user and developer guide (docs/book, published by .github/workflows/pages.yml).
 pub const DOCS_URL: &str = "https://docs.solidcraft.io/";
 const ATTRIBUTION: &str = include_str!("../../../ATTRIBUTION.md");
+/// ATTRIBUTION.md as Markdown, parsed once: its tables run to a thousand rows (#7776).
+static ATTRIBUTION_BLOCKS: std::sync::LazyLock<Vec<crate::update::Block>> = std::sync::LazyLock::new(|| crate::update::parse_markdown(ATTRIBUTION));
 use solidcraft_engine::licences::{LICENSE_APACHE, LICENSE_MIT, NOTICE, THIRD_PARTY};
 
 #[derive(Default)]
@@ -191,7 +193,7 @@ fn about(app: &mut SolveApp, ctx: &egui::Context) {
             }
             egui::ScrollArea::vertical().max_height(crate::theme::Tokens::get().control_height * 15.0).show(ui, |ui| {
                 ui_kit::section(ui, "attributions", crate::i18n::tr("help.attributions"), false, |ui| {
-                    ui_kit::text(ui, ATTRIBUTION, ui_kit::Text::Report("attributions", false));
+                    crate::update::markdown_blocks(ui, &ATTRIBUTION_BLOCKS, &crate::theme::Tokens::get());
                 });
                 ui_kit::section(ui, "fonts", crate::i18n::tr("help.fonts"), false, |ui| {
                     ui_kit::text(ui, crate::i18n::tr("help.font_details"), ui_kit::Text::Report("fonts", false));
@@ -221,6 +223,29 @@ fn about(app: &mut SolveApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_attributions_read_as_formatted_text_not_raw_markdown() {
+        use crate::update::{Block, Span};
+        // #7776: every table line of ATTRIBUTION.md is a row, every `|---|` line marks a header,
+        // and no `#`, `**` or `|` is left in what reads as running text.
+        let lines: Vec<&str> = ATTRIBUTION.lines().map(str::trim).filter(|l| l.starts_with('|')).collect();
+        let rules = lines.iter().filter(|l| l.chars().all(|c| matches!(c, '-' | ':' | '|' | ' '))).count();
+        let rows: Vec<_> = ATTRIBUTION_BLOCKS.iter().filter(|b| matches!(b, Block::Row { .. })).collect();
+        let headers = rows.iter().filter(|b| matches!(b, Block::Row { header: true, .. })).count();
+        assert!(rows.len() > 500 && rules > 5, "{} rows, {rules} rules", rows.len());
+        assert_eq!((rows.len(), headers), (lines.len() - rules, rules));
+        assert!(ATTRIBUTION_BLOCKS.iter().any(|b| matches!(b, Block::Heading(s) if s == &[Span::Text("Attribution".into())])));
+        for block in ATTRIBUTION_BLOCKS.iter() {
+            if let Block::Paragraph(spans) | Block::Item(_, spans) = block {
+                for span in spans {
+                    if let Span::Text(t) = span {
+                        assert!(!t.contains("**") && !t.starts_with('#') && !t.starts_with('|'), "{t}");
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn about_knows_its_build_and_diagnostics_say_where_it_runs() {
