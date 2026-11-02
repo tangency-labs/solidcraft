@@ -859,12 +859,15 @@ fn a_loop_in_a_group_over_the_solvers_values_still_closes_and_drives() {
         assert_eq!(conflicts(&r), Some(0), "{parts} parts: {r}");
         let pin_point = Vec3::new(10.0, 20.0, 0.0);
         assert!(near(place(&s, "P0", Vec3::new(0.0, 20.0, 0.0)), pin_point), "{parts} parts: {:?}", place(&s, "P0", Vec3::new(0.0, 20.0, 0.0)));
+        // P0's point 1 mm along X from its pin point (closing the loop may have turned P0 a little
+        // about the peg), then 30 degrees further round.
+        let (p, q0) = (Vec3::new(1.0, 20.0, 0.0), place(&s, "P0", Vec3::new(1.0, 20.0, 0.0)));
         let turn = s.doc.assembly.joints.iter().find(|j| j.name == "Peg").and_then(|j| j.values.first().copied()).unwrap_or(f64::NAN);
         let r = run(&mut s, "joint.drive", json!({"joint": "Peg", "value": turn.to_degrees() + 30.0}));
         assert!(r["stopped_by_loop"].is_null() && conflicts(&r) == Some(0), "{parts} parts: {r}");
-        // P0's point 1 mm along X from its pin point, now 30 degrees round the peg.
-        let q = place(&s, "P0", Vec3::new(1.0, 20.0, 0.0));
-        assert!((q.dist(pin_point) - 1.0).abs() < 1e-6 && ((q.y - 20.0).abs() - 0.5).abs() < 1e-6, "{parts} parts: {q:?}");
+        let (a, b) = (q0 - pin_point, place(&s, "P0", p) - pin_point);
+        let sin = a.x * b.y - a.y * b.x;
+        assert!((b.len() - 1.0).abs() < 1e-6 && (sin.abs() - 0.5).abs() < 1e-6 && b.z.abs() < 1e-6, "{parts} parts: {a:?} to {b:?}");
     }
 }
 
