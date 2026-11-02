@@ -309,6 +309,30 @@ fn wr_657_fully_chamfered_box_inset_open_at_a_chamfer_is_refused() {
     }
 }
 
+/// An offset asked not to merge leaves its overlapping faces (`OffsetBrep`, `bDoSelfInt`), so a
+/// result that is no closed solid is what was asked for: a 10 mm cube inset 1, convex edges
+/// not extended, comes back as with the flags off, as it does from the fork at d01d7b0.
+#[test]
+fn wr_657_unmerged_offset_is_not_refused() {
+    let faces = |fixed: bool| {
+        let mut k = kernel(fixed);
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let mut n = Notifications::new(&mut b);
+        let options = OffsetOptions {
+            distance: -1.0,
+            extend_convex_edges: false,
+            merge_results: false,
+        };
+        api_offset_brep_full(&mut k, Some(&mut b), options, &mut n.context())
+            .unwrap_or_else(|e| panic!("fixed {fixed}: {e:?}"))
+            .face_list()
+            .len()
+    };
+    let with_flags = faces(true);
+    assert!(with_flags > 0);
+    assert_eq!(with_flags, faces(false));
+}
+
 /// #2092: a sphere of radius 10 offset by -10 (convex edges not extended) leaves nothing.
 /// With both flags on, the empty body comes back as with either off: a result with no
 /// faces is not refused as a broken solid.

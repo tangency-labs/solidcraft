@@ -249,9 +249,12 @@ pub fn offset_brep(
     let original_key = original.key();
     // Opt-in (WR-657): as the shell does with WR-578's opt-in, an offset of a solid that
     // is no closed manifold solid is refused rather than returned (upstream hands back,
-    // e.g., the loop gaps of a box with three chamfers meeting at a corner, volume 0)
+    // e.g., the loop gaps of a box with three chamfers meeting at a corner, volume 0).
+    // Only a merged offset is held to that: without the merge the overlapping offsets
+    // stay as they are, which is what the caller asked for (`OffsetBrep`'s `bDoSelfInt`).
     let refuse_broken = kernel.fixes.offset_closes_loop_gaps
         && kernel.fixes.offset_splits_corner_vertices
+        && options.merge_results
         && brep_is_manifold_solid(original)?;
     let mut executive = configured_executive(original, options);
     executive.use_creator_tangency_tol(kernel);
