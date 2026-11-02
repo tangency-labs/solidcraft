@@ -343,6 +343,9 @@ impl WireConstraintKind {
                 | WireConstraintKind::Parallel { .. }
                 | WireConstraintKind::Perpendicular { .. }
                 | WireConstraintKind::ParallelToPlane { .. }
+                // Their direction rows, weighed into mm, would let a turned line step far.
+                | WireConstraintKind::Collinear { .. }
+                | WireConstraintKind::Tangent { .. }
         )
     }
 
