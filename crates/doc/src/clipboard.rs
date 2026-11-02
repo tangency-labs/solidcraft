@@ -247,10 +247,8 @@ impl crate::Feature {
         match &mut self.kind {
             K::Sketch { plane, sketch } => {
                 remap_plane(plane, ids, bodies, 0)?;
-                for c in &mut sketch.constraints {
-                    if let Some(n) = &mut c.param {
-                        mapped_name(n, parameters);
-                    }
+                for n in sketch.dimension_params_mut().into_iter().flatten() {
+                    mapped_name(n, parameters);
                 }
                 for e in sketch.text_exprs_mut() {
                     *e = clone_expression(e, parameters);

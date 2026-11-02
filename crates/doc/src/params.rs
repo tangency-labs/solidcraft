@@ -754,9 +754,9 @@ impl Document {
                 out.push(ParamUser::Feature { feature: f.id, name: f.name.clone(), input: "Position".into() });
             }
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-                for c in &sketch.constraints {
-                    if c.param.as_deref() == Some(name) {
-                        out.push(ParamUser::Dimension { feature: f.id, name: f.name.clone(), constraint: c.id.clone() });
+                for (id, param) in sketch.dimension_param_ids() {
+                    if param == name {
+                        out.push(ParamUser::Dimension { feature: f.id, name: f.name.clone(), constraint: id.to_string() });
                     }
                 }
                 for pattern in &sketch.patterns {
@@ -879,9 +879,9 @@ impl Document {
                 }
             }
             if let FeatureKind::Sketch { sketch, .. } = &mut f.kind {
-                for c in &mut sketch.constraints {
-                    if c.param.as_deref() == Some(old) {
-                        c.param = Some(new.to_string());
+                for param in sketch.dimension_params_mut() {
+                    if param.as_deref() == Some(old) {
+                        *param = Some(new.to_string());
                         n += 1;
                     }
                 }
@@ -1003,7 +1003,7 @@ impl Document {
         for f in &self.features {
             let mut names: BTreeSet<String> = f.param_names.iter().filter(|n| !n.is_empty()).cloned().collect();
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-                names.extend(sketch.constraints.iter().filter_map(|c| c.param.clone()));
+                names.extend(sketch.dimension_params().into_iter().cloned());
                 names.extend(sketch.patterns.iter().flat_map(|p| p.expressions.values()).flat_map(|e| expr::references(e)));
                 names.extend(sketch.text_exprs().into_iter().flat_map(|(_, e)| expr::references(e)));
                 names.extend(sketch.patterns.iter().filter_map(|p| p.count_expression.as_deref()).flat_map(expr::references));
@@ -1047,7 +1047,7 @@ impl Document {
             hit |= (sheet && f.kind.is_sheet()) || (plastic && f.kind.is_plastic());
             hit |= f.kind.expressions().iter().any(|e| expr::references(e).iter().any(|r| affected.contains(r)));
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-                hit |= sketch.constraints.iter().any(|c| c.param.as_ref().is_some_and(|p| affected.contains(p)));
+                hit |= sketch.dimension_params().into_iter().any(|p| affected.contains(p));
                 hit |= sketch.patterns.iter().flat_map(|p| p.expressions.values()).any(|e| expr::references(e).iter().any(|r| affected.contains(r)));
                 hit |= sketch.text_exprs().iter().any(|(_, e)| expr::references(e).iter().any(|r| affected.contains(r)));
                 hit |= sketch.text_word_exprs().iter().any(|e| crate::text_params::references(e).iter().any(|r| affected.contains(r)));

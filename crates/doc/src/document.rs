@@ -3986,7 +3986,7 @@ impl Document {
                 used.extend(expr::references(e));
             }
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-                used.extend(sketch.constraints.iter().filter_map(|c| c.param.clone()));
+                used.extend(sketch.dimension_params().into_iter().cloned());
                 used.extend(sketch.text_exprs().into_iter().flat_map(|(_, e)| expr::references(e)));
             }
         }
@@ -4218,6 +4218,41 @@ impl Document {
         for c in &sk.constraints {
             sk.validate(&c.kind)?;
         }
+        self.apply_wire_values(vals, sk)
+    }
+
+    /// Apply parameter values to a sketch's 3D dimensions and to its 3D points placed by
+    /// expressions (#10608), in place.
+    pub fn apply_wire_values(&self, vals: &std::collections::BTreeMap<String, expr::Value>, sk: &mut Sketch) -> Result<()> {
+        if sk.wire_constraints.is_empty() {
+            return Ok(());
+        }
+        let mut wires = std::mem::take(&mut sk.wire_constraints);
+        let applied = (|| -> Result<()> {
+            for c in &mut wires {
+                if let (Some(p), false) = (&c.param, c.driven) {
+                    let kind = if c.kind.is_angle() { Kind::Angle } else { Kind::Length };
+                    let v = vals.get(p).copied().ok_or_else(|| DocError::Unknown(format!("parameter `{p}`")))?.to_kind(kind)?;
+                    c.kind.set_value(v);
+                }
+                if let solidcraft_sketch::WireConstraintKind::Fix { at, exprs: Some(e), .. } = &mut c.kind {
+                    let [x, y, z] = e.by_axis();
+                    let value = |e: Option<&String>, keep: f64| -> Result<f64> {
+                        match e {
+                            Some(e) => crate::eval::val(vals, &expr::Expr::new(e.as_str()), Kind::Length),
+                            None => Ok(keep),
+                        }
+                    };
+                    *at = solidcraft_geom::Vec3::new(value(x, at.x)?, value(y, at.y)?, value(z, at.z)?);
+                }
+            }
+            Ok(())
+        })();
+        sk.wire_constraints = wires;
+        applied?;
+        for c in &sk.wire_constraints {
+            sk.validate_wire_constraint(&c.kind).map_err(|e| DocError::Invalid(e.to_string()))?;
+        }
         Ok(())
     }
 
@@ -4422,6 +4457,21 @@ impl Document {
                 && let Some(retried) = sk.solve_after_offset_edit(stored, was(sk).as_deref(), analysis)
             {
                 report = retried;
+            }
+        }
+        // The 3D constraints, with the planar geometry as it now is (#10608). A sketch without
+        // them is left as the planar solve left it.
+        let wires = sk.solve_wires(None);
+        report.dof = report.dof.saturating_add(wires.dof);
+        if !wires.ok {
+            report.status = solidcraft_sketch::SolveStatus::Failed;
+            for id in wires.failing {
+                if !report.failing.contains(&id) {
+                    report.failing.push(id);
+                }
+            }
+            if report.oversized.is_none() {
+                report.oversized = wires.oversized;
             }
         }
         Ok(report)

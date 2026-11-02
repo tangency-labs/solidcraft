@@ -1,0 +1,9 @@
+{
+  "en": {"cmd.sketch_constraint_along_axis": "Along Axis", "cmd.sketch_constraint_on_plane": "On Plane"},
+  "ar": {"cmd.sketch_constraint_along_axis": "على امتداد محور", "cmd.sketch_constraint_on_plane": "على مستوى"},
+  "de": {"cmd.sketch_constraint_along_axis": "Entlang Achse", "cmd.sketch_constraint_on_plane": "Auf Ebene"},
+  "he": {"cmd.sketch_constraint_along_axis": "לאורך ציר", "cmd.sketch_constraint_on_plane": "על מישור"},
+  "ja": {"cmd.sketch_constraint_along_axis": "軸に沿う", "cmd.sketch_constraint_on_plane": "平面上"},
+  "vi": {"cmd.sketch_constraint_along_axis": "Dọc theo trục", "cmd.sketch_constraint_on_plane": "Trên mặt phẳng"},
+  "zh": {"cmd.sketch_constraint_along_axis": "沿轴", "cmd.sketch_constraint_on_plane": "在平面上"}
+}
