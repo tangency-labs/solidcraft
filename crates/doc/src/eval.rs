@@ -6875,7 +6875,8 @@ fn eval_feature(
             // The stored sketch is solved for its stored values, with its links where they
             // were stored: a link that moved must not change the side a dimension from it is on.
             let stored = sk.driving_values();
-            let report = doc.solve_sketch(vals, &mut sk, &stored, Some(sketch))?;
+            let mut report = doc.solve_sketch(vals, &mut sk, &stored, Some(sketch))?;
+            doc.discount_traces(f.id, &sk, &mut report);
             if !report.keeps_orientation() {
                 warns.insert(0, report.failure(|f| format!("the sketch constraints conflict ({f})")));
             } else {

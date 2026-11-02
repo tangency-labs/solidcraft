@@ -715,3 +715,81 @@ fn a_deleted_joint_stays_deleted() {
     };
     assert_eq!(joins(&s), 0, "the deleted joint is not put back");
 }
+
+#[test]
+fn a_drag_cannot_squeeze_a_3d_line_away() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,0,0],[10,0,20]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{a}.start")}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": a, "axis": "x"}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": b, "axis": "z"}));
+    let before = s.doc.to_json();
+    // Dragging the top to x = 1e-6 would leave the run a micron long.
+    let e = s.execute("sketch.move3d", &json!({"wire": b, "index": 1, "to": [0.000001, 0, 20]})).unwrap_err().to_string();
+    assert!(e.contains("shrink"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn an_older_unjoined_path_is_joined_once_and_a_deleted_joint_stays_gone() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,1,1],[10,1,20]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    // As a design saved before 3D constraints: the path, no joints, not joined yet.
+    let mut doc = (*s.doc).clone();
+    let sk = doc.sketch_mut(sketch).unwrap();
+    sk.wire_constraints.clear();
+    sk.wires_joined = false;
+    s.set_doc(doc);
+    // A curve drawn elsewhere joins the old path too; constraining the first line keeps the second on it.
+    run(&mut s, "sketch.line3d", json!({"points":[[50,0,0],[60,0,0]]}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": a, "axis": "x"}));
+    near(fit(&s, &b, 0), fit(&s, &a, 1));
+    // Its only joint deleted (and every other constraint), the next one does not put it back.
+    let ids: Vec<String> = s.doc.sketch(sketch).unwrap().wire_constraints.iter().map(|c| c.id.clone()).collect();
+    run(&mut s, "sketch.delete", json!({"entities": ids}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": b, "axis": "z"}));
+    let joins = s
+        .doc
+        .sketch(sketch)
+        .unwrap()
+        .wire_constraints
+        .iter()
+        .filter(|c| matches!(c.kind, solidcraft_sketch::WireConstraintKind::Coincident { .. }))
+        .count();
+    assert_eq!(joins, 0);
+}
+
+#[test]
+fn a_motion_trace_curve_takes_no_constraints_and_counts_no_freedoms() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    let t = run(&mut s, "sketch.spline3d", json!({"points":[[0,0,0],[5,2,1],[10,0,3]]}))["curves"][0].as_str().unwrap().to_string();
+    let mut doc = (*s.doc).clone();
+    doc.assembly.traces.push(solidcraft_doc::motion::MotionTrace {
+        sketch,
+        wire: t.clone(),
+        occurrence: Vec::new(),
+        point: solidcraft_doc::joints::JointOrigin {
+            occurrence: 0,
+            snap: solidcraft_doc::joints::Snap::Frame { origin: Vec3::ZERO, z: Vec3::new(0.0, 0.0, 1.0), x: None },
+        },
+        motion: solidcraft_doc::motion::TraceMotion::Study { study: 0 },
+        samples: None,
+        seeds: Vec::new(),
+    });
+    s.set_doc(doc);
+    let e = s.execute("sketch.constraint.fix", &json!({"entity": format!("{t}.start")})).unwrap_err().to_string();
+    assert!(e.contains("motion trace"), "{e}");
+    // Its fit points are no freedoms to take away: a line drawn beside it adds its own 6 only.
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[0,20,0],[10,20,5]]}));
+    assert_eq!(r["sketch"]["dof"], 6, "{r}");
+}

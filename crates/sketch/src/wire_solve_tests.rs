@@ -121,7 +121,7 @@ fn conflicting_constraints_fail_name_the_conflict_and_move_nothing() {
     let before = sk.wires.clone();
     let rep = sk.solve_wires(None);
     assert!(!rep.ok);
-    assert!(!rep.failing.is_empty() && rep.failing.iter().any(|f| *f == k || sk.wire_constraints.iter().any(|c| c.id == *f)));
+    assert_eq!(rep.failing, vec![k], "the axis between two fixed ends is the conflict");
     assert_eq!(sk.wires, before);
 }
 
@@ -362,4 +362,26 @@ fn a_saved_constraint_cannot_take_another_entity_s_id() {
     // A direction a hair off an axis is not along it.
     assert_eq!(Axis::along(v(1.0, 1e-5, 0.0)), None);
     assert_eq!(Axis::along(v(0.0, 0.0, -3.0)), Some(Axis::Z));
+}
+
+#[test]
+fn a_curve_that_cannot_be_rebuilt_holds_back_only_its_own_group() {
+    // An arc pulled into a line (as in the test above), and an unrelated line held along Z.
+    let mut sk = Sketch::new();
+    let a = sk.add_drawn_arc_in(&[v(0.0, 0.0, 0.0), v(5.0, 5.0, 0.0), v(10.0, 0.0, 0.0)], WireSpace::Component).unwrap();
+    let l = line(&mut sk, v(0.0, 0.0, 0.0), v(10.0, 0.0, 0.0));
+    for end in ["start", "end"] {
+        let p = sk.wire_point(&format!("{l}.{end}")).unwrap();
+        let at = sk.wire_point_at(&p).unwrap();
+        sk.add_wire_constraint(WireConstraintKind::Fix { p, at }).unwrap();
+    }
+    sk.add_wire_constraint(WireConstraintKind::PointOnLine { p: sk.wire_point(&format!("{a}.through")).unwrap(), line: l.clone() }).unwrap();
+    let good = line(&mut sk, v(20.0, 0.0, 0.0), v(21.0, 1.0, 30.0));
+    sk.add_wire_constraint(WireConstraintKind::AlongAxis { line: good.clone(), axis: Axis::Z }).unwrap();
+    let arc_before = sk.wires[sk.wire_index(&a).unwrap()].clone();
+    let rep = sk.solve_wires(None);
+    assert!(!rep.ok);
+    assert_eq!(sk.wires[sk.wire_index(&a).unwrap()], arc_before, "the arc keeps its shape");
+    let d = at(&sk, &format!("{good}.end")) - at(&sk, &format!("{good}.start"));
+    assert!(d.x.abs() < 1e-9 && d.y.abs() < 1e-9, "the other line still solved: {d:?}");
 }

@@ -3507,10 +3507,16 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
             let (mut m, _) = copy_through(sk, &cs, &ps, &f, false, &|_| false, 1.0)?;
             m.extend(text_curves);
             let mut ids = ids_of(sk, &m);
+            let mut wires = Vec::new();
             for (wire, plane) in &drawn {
                 let fit: Vec<_> = wire.fit.iter().map(|&q| plane.to_world(f(plane.to_local(q))) + plane.normal() * plane.height(q)).collect();
-                ids.push(if wire.arc.is_some() { sk.add_drawn_arc_in(&fit, wire.space)? } else { sk.add_drawn_wire_in(&fit, wire.space)? });
+                wires.push(if wire.arc.is_some() { sk.add_drawn_arc_in(&fit, wire.space)? } else { sk.add_drawn_wire_in(&fit, wire.space)? });
             }
+            // Copied 3D curves are joined where they meet, as drawn ones are (#10608).
+            if !wires.is_empty() {
+                sk.join_drawn_ends(&wires)?;
+            }
+            ids.extend(wires);
             return Ok(ids);
         }
         transform_in_place(sk, &cs, &ps, &f, 1.0, cmd)?;
