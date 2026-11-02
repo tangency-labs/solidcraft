@@ -22,7 +22,7 @@ fn the_radius_offered_beside_a_hole_fits() {
     let edge = Vec3::new(10.0, 20.0, 10.0);
     let m = crate::fillet(&b, &[edge], 4.0).unwrap_err().to_string();
     let offered: f64 = m
-        .split("the largest radius that fits is ")
+        .split("a radius that fits is ")
         .nth(1)
         .and_then(|s| s.split(' ').next())
         .and_then(|s| s.parse().ok())

@@ -1,9 +1,13 @@
 //! #1080: fillets and chamfers that would run past the faces beside their edge (into a pocket,
-//! a hole, another blend) are refused with the largest size that fits, not built through it.
+//! a hole, another blend) are refused; any suggested size is verified by a real blend build.
 
-use solidcraft_geom::Vec3;
+use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
-use crate::{Body, BoolOp, ChamferSide, KernelError, build::box_solid, ops::boolean};
+use crate::{
+    Body, BoolOp, ChamferSide, KernelError,
+    build::{box_solid, extrude},
+    ops::boolean,
+};
 
 fn cut(a: &Body, lo: [f64; 3], hi: [f64; 3]) -> Body {
     let t = box_solid(Vec3::new(lo[0], lo[1], lo[2]), Vec3::new(hi[0], hi[1], hi[2])).unwrap();
@@ -29,8 +33,12 @@ fn too_large(r: crate::Result<Body>) -> String {
 #[test]
 fn chamfer_into_a_pocket_is_refused_with_the_size_that_fits() {
     let p = pocketed();
+    let built = crate::blend::chamfer_built(&p, &[EDGE], 6.0).unwrap();
+    let raw = too_large(crate::blend_fit::accept(&p, built, &[EDGE], crate::blend_fit::Size::Chamfer(6.0)));
+    assert!(raw.ends_with("; the largest size that fits is 4 mm"), "the build succeeds but acceptance refuses it: {raw}");
     let m = too_large(crate::chamfer(&p, &[EDGE], 6.0));
-    assert!(m.contains("runs past the faces beside the edge") && m.contains("the largest size that fits is 4 mm"), "{m}");
+    assert_eq!(m, raw.replace("; the largest size that fits is 4 mm", "; a size that fits is 4 mm"));
+    assert!(m.contains("runs past the faces beside the edge") && m.contains("a size that fits is 4 mm"), "{m}");
     // Up to the pocket's rim it builds: the triangle along the 20 mm edge.
     for s in [2.0, 4.0] {
         let b = crate::chamfer(&p, &[EDGE], s).unwrap();
@@ -46,12 +54,117 @@ fn chamfer_into_a_pocket_is_refused_with_the_size_that_fits() {
 #[test]
 fn fillet_into_a_pocket_is_refused_and_one_that_fits_builds() {
     let p = pocketed();
-    // The round build refuses it itself; the largest radius that fits is added.
+    // The round build refuses it itself; a radius verified by a real build is added.
     let m = crate::fillet(&p, &[EDGE], 5.0).unwrap_err().to_string();
-    assert!(m.contains("the largest radius that fits is 4 mm"), "{m}");
+    assert!(m.contains("a radius that fits is 4 mm"), "{m}");
     let b = crate::fillet(&p, &[EDGE], 3.0).unwrap();
     assert!(b.validity().is_empty(), "{:?}", b.validity());
     assert_eq!(b.face_count(), p.face_count() + 1);
+}
+
+/// The frame of the issue, top face at z = 0, 10 thick, as the sketch extrudes it.
+fn frame() -> crate::Body {
+    let r = 24.0 * std::f64::consts::SQRT_2;
+    let j = (r * r - 26.0 * 26.0).sqrt(); // The arcs meet the sides at (±j, ±26) and (±26, ±j).
+    let (t, u) = (f64::atan2(j, 26.0), f64::atan2(26.0, j)); // ≈ 40° and ≈ 50°.
+    let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+    let arc = |start: f64, sweep: f64| Seg2::Arc { center: Vec2::ZERO, radius: r, start, sweep };
+    let pi = std::f64::consts::PI;
+    // Counter-clockwise from the top-right corner: each side's middle bulges out along an arc
+    // of the circle that passes through the hole's corners; the square's corners stay sharp.
+    let outer = Loop2 {
+        segs: vec![
+            line(Vec2::new(26.0, 26.0), Vec2::new(j, 26.0)),
+            arc(u, pi - 2.0 * u),
+            line(Vec2::new(-j, 26.0), Vec2::new(-26.0, 26.0)),
+            line(Vec2::new(-26.0, 26.0), Vec2::new(-26.0, j)),
+            arc(pi - t, 2.0 * t),
+            line(Vec2::new(-26.0, -j), Vec2::new(-26.0, -26.0)),
+            line(Vec2::new(-26.0, -26.0), Vec2::new(-j, -26.0)),
+            arc(u - pi, pi - 2.0 * u),
+            line(Vec2::new(j, -26.0), Vec2::new(26.0, -26.0)),
+            line(Vec2::new(26.0, -26.0), Vec2::new(26.0, -j)),
+            arc(-t, 2.0 * t),
+            line(Vec2::new(26.0, j), Vec2::new(26.0, 26.0)),
+        ],
+    };
+    let hole = Loop2::polygon(&[Vec2::new(24.0, 24.0), Vec2::new(24.0, -24.0), Vec2::new(-24.0, -24.0), Vec2::new(-24.0, 24.0)]);
+    extrude(&Plane::XY, &[Region2 { outer, holes: vec![hole] }], -10.0, 0.0).unwrap().remove(0)
+}
+
+/// The issue's sixteen points: the frame's every vertical edge, on its top face.
+#[rustfmt::skip]
+const EDGES: [Vec3; 16] = [
+    Vec3::new(21.81742422927142, 25.999999999999993, 0.0),
+    Vec3::new(26.0, 21.81742422927142, 0.0),
+    Vec3::new(26.0, 26.0, 0.0),
+    Vec3::new(-21.81742422927141, 26.0, 0.0),
+    Vec3::new(-26.0, 21.817424229271424, 0.0),
+    Vec3::new(-26.0, 26.0, 0.0),
+    Vec3::new(-21.817424229271424, -25.999999999999993, 0.0),
+    Vec3::new(-26.0, -21.817424229271392, 0.0),
+    Vec3::new(-26.0, -26.0, 0.0),
+    Vec3::new(21.817424229271374, -26.0, 0.0),
+    Vec3::new(25.999999999999993, -21.817424229271428, 0.0),
+    Vec3::new(26.0, -26.0, 0.0),
+    Vec3::new(-24.0, 24.0, 0.0),
+    Vec3::new(-24.0, -24.0, 0.0),
+    Vec3::new(24.0, -24.0, 0.0),
+    Vec3::new(24.0, 24.0, 0.0),
+];
+
+/// The radius a refusal's note names, if it names one.
+fn named_radius(m: &str) -> Option<f64> {
+    m.split("radius that fits is ").nth(1)?.trim_end_matches(" mm").parse().ok()
+}
+
+/// Every radius the frame refuses — this build refuses them all, at 1 mm as at 5 mm — may only
+/// name a radius that itself builds. Before the fix the model named 1.895 mm (the issue
+/// was told 4 mm), which failed like the rest.
+#[test]
+fn the_note_names_only_a_radius_that_builds() {
+    let f = frame();
+    for r in [1.0, 2.0, 3.0, 4.0, 5.0] {
+        let Err(e) = crate::fillet(&f, &EDGES, r) else { continue };
+        let m = e.to_string();
+        assert!(!m.contains("the largest radius that fits"), "a geometric bound is not a verified maximum: {m}");
+        assert!(m.matches("radius that fits is ").count() <= 1, "an old suggestion must be replaced, not appended to: {m}");
+        if let Some(v) = named_radius(&m) {
+            assert!(crate::fillet(&f, &EDGES, v).is_ok(), "r = {r} names {v} mm, which does not build: {m}");
+        }
+    }
+}
+
+/// The corner between two earlier rounds: the build refuses it at every radius while the model
+/// still answers 0.82 mm at a 4 mm ask. The same property holds there.
+#[test]
+fn a_corner_between_rounds_names_only_a_radius_that_builds() {
+    let mut cur = frame();
+    for p in [&EDGES[0], &EDGES[1]] {
+        cur = crate::fillet(&cur, std::slice::from_ref(p), 1.0).unwrap();
+    }
+    for r in [1.0, 2.0, 4.0] {
+        let Err(e) = crate::fillet(&cur, std::slice::from_ref(&EDGES[2]), r) else { continue };
+        let m = e.to_string();
+        assert!(!m.contains("the largest radius that fits"), "a geometric bound is not a verified maximum: {m}");
+        assert!(m.matches("radius that fits is ").count() <= 1, "an old suggestion must be replaced, not appended to: {m}");
+        if let Some(v) = named_radius(&m) {
+            assert!(crate::fillet(&cur, std::slice::from_ref(&EDGES[2]), v).is_ok(), "r = {r} names {v} mm, which does not build: {m}");
+        }
+    }
+}
+
+#[test]
+fn automatic_fitting_skips_the_verified_suggestion() {
+    let p = pocketed();
+    let quiet = crate::fillet_quiet(&p, &[EDGE], 5.0).unwrap_err();
+    assert!(!quiet.to_string().contains("radius that fits"), "{quiet}");
+    let explained = crate::fillet(&p, &[EDGE], 5.0).unwrap_err().to_string();
+    assert_eq!(explained, format!("{quiet}; a radius that fits is 4 mm"));
+    let quiet = crate::fillet_quiet(&p, &[EDGE], 3.0).unwrap();
+    let explained = crate::fillet(&p, &[EDGE], 3.0).unwrap();
+    assert!(quiet.validity().is_empty());
+    assert!((crate::measure(&quiet).unwrap().volume - crate::measure(&explained).unwrap().volume).abs() < 1e-6);
 }
 
 /// A rib 4 mm wide: chamfers of its two top edges meet in the middle of its top face at 2 mm;
@@ -62,9 +175,9 @@ fn chamfers_crossing_each_other_are_refused() {
     let rib = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(40.0, 4.0, 20.0)).unwrap();
     let edges = [Vec3::new(20.0, 0.0, 20.0), Vec3::new(20.0, 4.0, 20.0)];
     let m = too_large(crate::chamfer(&rib, &edges, 3.0));
-    assert!(m.contains("would cross each other") && m.contains("the largest size that fits is 2 mm"), "{m}");
+    assert!(m.contains("would cross each other") && m.contains("a size that fits is 2 mm"), "{m}");
     let m = crate::fillet(&rib, &edges, 3.0).unwrap_err().to_string();
-    assert!(m.contains("the largest radius that fits is 2 mm"), "{m}");
+    assert!(m.contains("a radius that fits is 2 mm"), "{m}");
     // Below half the width both build.
     let b = crate::chamfer(&rib, &edges, 1.5).unwrap();
     assert!((b.volume_at(0.01).unwrap() - (3200.0 - 2.0 * 0.5 * 1.5 * 1.5 * 40.0)).abs() < 1e-6);
@@ -123,7 +236,7 @@ fn rounds_on_both_sides_of_a_wall_build_as_one_fillet() {
     assert!((crate::measure(&stepped).unwrap().volume - v).abs() < 1e-4 * want);
     // Past the wall's own room they still cross: R7's outer round reaches the inner one's arc.
     let m = too_large(crate::fillet(&shelled, &[out_edge, in_edge], 7.0));
-    assert!(m.contains("the largest radius that fits"), "{m}");
+    assert!(m.contains("a radius that fits"), "{m}");
 }
 
 /// A shell 3 mm thick bent over like an upside-down U: 60 wide, 20 long, 50 high, its top
