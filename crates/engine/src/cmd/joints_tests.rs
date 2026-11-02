@@ -832,6 +832,42 @@ fn editing_or_unsuppressing_a_conflicting_second_planar_joint_turns_its_part_to_
     assert!(meets(&s), "unsuppressed: {:?}", pose(&s));
 }
 
+/// #9687: a frame held by many planar joints ties its loops into one group with more values than
+/// the loop solver moves at once, which was then only checked: a new joint closing a loop in it
+/// stayed a conflict, and a drive in it moved nothing. A table on the ground, parts each on the
+/// table and on the ground (11 parts: 70 values with the peg), and a peg 10 mm from where P0's
+/// pin point sits: P0 slides onto it as it does with one part, and turns about it when driven.
+#[test]
+fn a_loop_in_a_group_over_the_solvers_values_still_closes_and_drives() {
+    let conflicts = |r: &Value| r["conflicts"].as_array().map(Vec::len);
+    for parts in [1usize, 11] {
+        let mut s = Session::default();
+        part(&mut s, "Ground", [-1.0, -1.0, -2.0]);
+        let g = occ(&s, "Ground");
+        run(&mut s, "occurrence.ground", json!({"occurrence": g, "grounded": true}));
+        part(&mut s, "Table", [-1.0, -1.0, 0.0]);
+        pin(&mut s, "planar", "Base", "Ground", "Table", Vec3::ZERO, Vec3::Z);
+        for k in 0..parts {
+            let (name, c) = (format!("P{k}"), Vec3::new(10.0 * k as f64, 20.0, 0.0));
+            part(&mut s, &name, [c.x - 1.0, c.y - 1.0, 0.0]);
+            pin(&mut s, "planar", &format!("{name} on table"), "Table", &name, c, Vec3::Z);
+            pin(&mut s, "planar", &format!("{name} on ground"), "Ground", &name, c, Vec3::Z);
+        }
+        let at = |o: &str, p: [f64; 3]| json!({"occurrence": o, "point": p, "z": [0, 0, 1]});
+        let peg = json!({"type": "revolute", "name": "Peg", "a": at("Ground", [10.0, 20.0, 0.0]), "b": at("P0", [0.0, 20.0, 0.0]), "flip": true});
+        let r = run(&mut s, "joint.create", peg);
+        assert_eq!(conflicts(&r), Some(0), "{parts} parts: {r}");
+        let pin_point = Vec3::new(10.0, 20.0, 0.0);
+        assert!(near(place(&s, "P0", Vec3::new(0.0, 20.0, 0.0)), pin_point), "{parts} parts: {:?}", place(&s, "P0", Vec3::new(0.0, 20.0, 0.0)));
+        let turn = s.doc.assembly.joints.iter().find(|j| j.name == "Peg").and_then(|j| j.values.first().copied()).unwrap_or(f64::NAN);
+        let r = run(&mut s, "joint.drive", json!({"joint": "Peg", "value": turn.to_degrees() + 30.0}));
+        assert!(r["stopped_by_loop"].is_null() && conflicts(&r) == Some(0), "{parts} parts: {r}");
+        // P0's point 1 mm along X from its pin point, now 30 degrees round the peg.
+        let q = place(&s, "P0", Vec3::new(1.0, 20.0, 0.0));
+        assert!((q.dist(pin_point) - 1.0).abs() < 1e-6 && ((q.y - 20.0).abs() - 0.5).abs() < 1e-6, "{parts} parts: {q:?}");
+    }
+}
+
 /// A slider-crank: crank 15 about the origin, rod 40, a piston sliding along X. Returns the crank
 /// pin and the wrist pin.
 fn slider_crank() -> (Session, Vec3, Vec3) {
