@@ -602,32 +602,37 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             }
         });
-        ui.horizontal_wrapped(|ui| {
-            let mut draft = std::mem::take(&mut app.settings_profiles.draft);
-            let enter = ui_kit::named_control(ui, app.tr("prefs.general.profile_name"), |ui| {
-                ui_kit::settings_control_width(ui, t.space_24 * 9.0 + t.space_4, |ui| {
-                    ui_kit::text_field(ui, &mut draft, app.tr("prefs.general.name_setup")).0
-                })
-            });
-            app.settings_profiles.draft = draft;
-            let name = app.settings_profiles.draft.trim().to_string();
-            let valid = profile_name(&name).is_some();
-            let save =
-                ui_kit::icon_label_action(ui, app.tr("prefs.general.save_new"), None, valid, true).on_hover_text(app.tr("prefs.profiles_note"));
-            crate::scenario::publish_target("prefs:profile:save", save.rect);
-            if valid && (enter || save.clicked()) {
-                act(app, "settings.profile.save", json!({ "name": name }), "prefs.profile_saved");
-            }
-            let import = ui_kit::icon_label_button(ui, app.tr("prefs.general.import"), "import_tray", true, false);
-            crate::scenario::publish_target("prefs:profile:import", import.rect);
-            if import.clicked() {
-                app.pick_open_for(&["json"], |app, path| {
-                    if let Some(path) = path {
-                        act(app, "settings.profile.import", json!({ "path": path }), "prefs.profile_imported");
-                    }
+        // Searching for "profiles" must keep this entry on the results page; without a hit here the
+        // whole section was dropped and the name field could not be reached with a query active.
+        let entry = [app.tr("prefs.general.profile_name"), app.tr("prefs.general.save_new"), app.tr("prefs.general.import")];
+        if crate::prefs_search::visible(ui, &entry) {
+            ui.horizontal_wrapped(|ui| {
+                let mut draft = std::mem::take(&mut app.settings_profiles.draft);
+                let enter = ui_kit::named_control(ui, app.tr("prefs.general.profile_name"), |ui| {
+                    ui_kit::settings_control_width(ui, t.space_24 * 9.0 + t.space_4, |ui| {
+                        ui_kit::text_field(ui, &mut draft, app.tr("prefs.general.name_setup")).0
+                    })
                 });
-            }
-        });
+                app.settings_profiles.draft = draft;
+                let name = app.settings_profiles.draft.trim().to_string();
+                let valid = profile_name(&name).is_some();
+                let save =
+                    ui_kit::icon_label_action(ui, app.tr("prefs.general.save_new"), None, valid, true).on_hover_text(app.tr("prefs.profiles_note"));
+                crate::scenario::publish_target("prefs:profile:save", save.rect);
+                if valid && (enter || save.clicked()) {
+                    act(app, "settings.profile.save", json!({ "name": name }), "prefs.profile_saved");
+                }
+                let import = ui_kit::icon_label_button(ui, app.tr("prefs.general.import"), "import_tray", true, false);
+                crate::scenario::publish_target("prefs:profile:import", import.rect);
+                if import.clicked() {
+                    app.pick_open_for(&["json"], |app, path| {
+                        if let Some(path) = path {
+                            act(app, "settings.profile.import", json!({ "path": path }), "prefs.profile_imported");
+                        }
+                    });
+                }
+            });
+        }
         ui.scope(|ui| {
             ui.spacing_mut().item_spacing.y = t.space_8;
             for (label, chips, accent) in [
