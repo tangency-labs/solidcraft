@@ -16,6 +16,7 @@
 //! | [`exact_mitre_curve`]        | `SmBlendCorner::ExactMitreCurve`            |
 //! | `foot_on_surface` (private)  | `sm_FootOnSurface`                          |
 //! | `bernstein_product_21` (private) | `sm_BernsteinProduct21`                 |
+//! | [`ball`]                     | the Ball (`ClassifyBall`, `BuildBallSurface`, `CreateBallPatch`; 79d4763, a6243fa, f8e6709, 4241a1b) |
 //! | [`swept`]                    | the Swept turn (`Classify`'s Swept part, `BuildSweptSurface`, `CreateSweptPatch`) |
 //!
 //! Deviations: the blend corner is not its own corner kind here. The fork's `SmBlendCorner`
@@ -51,6 +52,7 @@ use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as face2;
 use crate::topology::{edge, Brep, EdgeId, EdgeuseId, VertexId};
 
+pub mod ball;
 pub mod swept;
 
 const OP_CLASSIFY: &str = "blend::blend_corner::classify";
@@ -66,6 +68,9 @@ pub enum BlendCornerEvent {
     Turn,
     /// `SM_BCE_JOIN`: two blends whose edges continue each other (G1) at the vertex.
     Join,
+    /// `SM_BCE_BALL` (the fork's 79d4763): three rounds of one radius and convexity, the
+    /// common ball's sphere between them ([`ball`]).
+    Ball,
 }
 
 /// `SmBlendTurn`: a Turn's two modes.
@@ -88,6 +93,12 @@ pub struct BlendCorner {
 }
 
 impl BlendCorner {
+    /// `IsBall`: the Ball (the fork's 79d4763).
+    #[must_use]
+    pub fn is_ball(self) -> bool {
+        self.event == BlendCornerEvent::Ball
+    }
+
     /// `IsSwept`: a Turn, Swept.
     #[must_use]
     pub fn is_swept(self) -> bool {

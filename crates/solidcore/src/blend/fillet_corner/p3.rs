@@ -382,8 +382,17 @@ impl FilletExecutiveData {
             let sc_type =
                 corner_of(&self.corners, running.as_ref(), start_corner_id)?.corner_type();
             let ec_type = corner_of(&self.corners, running.as_ref(), end_corner_id)?.corner_type();
+            // the fork's (WR-697, 79d4763): two-blend corners only, not a Ball
+            let is_ball = |id| {
+                corner_of(&self.corners, running.as_ref(), id).map(|c: &FilletCorner| {
+                    c.blend
+                        .is_some_and(crate::blend::blend_corner::BlendCorner::is_ball)
+                })
+            };
             if sc_type != FilletCornerType::NByTwo
                 || ec_type != FilletCornerType::NByTwo
+                || is_ball(start_corner_id)?
+                || is_ball(end_corner_id)?
                 || pseudo.fillet_vertex(sv)?.status() != FilStatus::Processed
                 || pseudo.fillet_vertex(ev)?.status() != FilStatus::Processed
             {
@@ -695,6 +704,9 @@ pub struct FilletCorner {
     /// The fork's Swept turn's own members (`m_pSideEU`, `m_pTurnSurface` and its loop;
     /// WR-697): set by its topology on a blend corner that is a Swept turn.
     pub swept: Option<crate::blend::blend_corner::swept::SweptTurn>,
+    /// The fork's Ball's own members (`m_pBallSurface` and its loop; smlib#79 step 4c,
+    /// WR-697): set by its topology on a blend corner that is a Ball.
+    pub ball: Option<crate::blend::blend_corner::ball::BallCorner>,
 }
 
 /// What the corner methods operate on besides the corner itself.
@@ -1026,6 +1038,7 @@ impl FilletCorner {
             mitre: false,
             blend: None,
             swept: None,
+            ball: None,
         }
     }
 
@@ -2131,10 +2144,11 @@ impl FilletCorner {
         nx2: impl FnOnce(&mut Self, &mut C) -> Result<()>,
         nxn: impl FnOnce(&mut Self, &mut C) -> Result<()>,
     ) -> Result<()> {
-        // the fork's SmBlendCorner::AdjustTopology: a Swept turn adjusts nothing (WR-697)
+        // the fork's SmBlendCorner::AdjustTopology: a Ball or a Swept turn adjusts nothing
+        // (WR-697)
         if self
             .blend
-            .is_some_and(crate::blend::blend_corner::BlendCorner::is_swept)
+            .is_some_and(|blend| blend.is_ball() || blend.is_swept())
         {
             return Ok(());
         }
@@ -2490,10 +2504,11 @@ impl FilletCorner {
         nx2: impl FnOnce(&mut Self, &mut C) -> Result<()>,
         nx1_closed: impl FnOnce(&mut Self, &mut C) -> Result<()>,
     ) -> Result<()> {
-        // the fork's SmBlendCorner::AdjustTangentCorner: nothing at a Swept turn (WR-697)
+        // the fork's SmBlendCorner::AdjustTangentCorner: nothing at a Ball or a Swept turn
+        // (WR-697; the Mitre turn's is the Nx2 port's)
         if self
             .blend
-            .is_some_and(crate::blend::blend_corner::BlendCorner::is_swept)
+            .is_some_and(|blend| blend.is_ball() || blend.is_swept())
         {
             return Ok(());
         }

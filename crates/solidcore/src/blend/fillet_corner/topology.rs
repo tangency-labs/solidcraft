@@ -32,12 +32,15 @@
 //! a tangent side that is a tangent seam is the rail's tangent end (a rail/edge
 //! crossing, the end face across the seam). There is no recursion.
 
+mod ball;
 pub mod closed_nx1;
 mod concave_4x2;
 pub mod concave_nxn;
 pub mod end_corners;
 pub mod mixed_3x2;
 mod swept_turn;
+
+pub(crate) use ball::BallTopologyEnv;
 
 use crate::blend::fillet_corner::p1::{
     check_face_complimentary_corner_concavity, face_by_two_edgeuses, test_g1_continuity,
