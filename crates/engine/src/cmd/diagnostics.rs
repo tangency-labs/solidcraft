@@ -60,7 +60,12 @@ pub static COMMANDS: &[CommandSpec] = &[
              inside it; total counts its outermost run only. Recording also starts with SOLIDCRAFT_PROFILE=1, the CLI's \
              --profile and the app's preference; off, it costs nothing measurable. Read-only",
         ),
-    CommandSpec::new("diagnostics.kernel", "Geometry Kernel", kernel).icon("bug_report").noundo().params(
+    CommandSpec::new("diagnostics.kernel", "Geometry Kernel", crate::checked!("diagnostics.kernel", kernel))
+        .icon("bug_report")
+        .noundo()
+        .contract(&KERNEL_CONTRACT)
+        .output(output_schema_for::<crate::schema::diagnostics::KernelReply>)
+        .params(
         "choice?: solidcore | smlib (sets which kernel answers every operation: solidcore, the default = the Rust port; \
          smlib = the C++ SMLib kernel, refused as not available on a build without it, such as the web app; bodies already \
          computed keep their results). SOLIDCRAFT_KERNEL, when set, wins over it. Returns {choice, environment}: choice is \
@@ -96,7 +101,12 @@ fn kernel(_: &mut Session, p: &Value) -> Result<Value> {
     if let Some(v) = p.get("choice").filter(|v| !v.is_null()) {
         route::set_choice(kernel_asked(v, solidcraft_kernel::smlib_built())?);
     }
-    Ok(json!({ "choice": route::choice().id(), "environment": route::overridden() }))
+    use crate::schema::diagnostics::{KernelChoice, KernelReply};
+    let choice = match route::choice() {
+        route::Backend::Solidcore => KernelChoice::Solidcore,
+        route::Backend::Smlib => KernelChoice::Smlib,
+    };
+    serde_json::to_value(KernelReply { choice, environment: route::overridden() }).map_err(|e| bad("diagnostics.kernel", e.to_string()))
 }
 
 /// The kernel `choice` asks for, on a build that has (`built`) the C++ kernel or doesn't. A choice of
@@ -172,6 +182,7 @@ fn crash_test(_: &mut Session, p: &Value) -> Result<Value> {
 
 const PROFILE_CONTRACT: crate::schema::TypedContract<crate::schema::diagnostics::ProfileParams> = crate::schema::TypedContract::new();
 
+const KERNEL_CONTRACT: crate::schema::TypedContract<crate::schema::diagnostics::KernelParams> = crate::schema::TypedContract::new();
 const VALIDATION_CONTRACT: crate::schema::TypedContract<crate::schema::diagnostics::ValidationParams> = crate::schema::TypedContract::new();
 
 fn validation(s: &mut Session, p: &Value) -> Result<Value> {

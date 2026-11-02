@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 
 use super::{
     CrashReport, CrashReportList, CrashReportParams, CrashReportsClearParams, CrashReportsCleared, CrashReportsParams, CrashTestMode,
-    CrashTestParams, ProfileParams, ValidationParams,
+    CrashTestParams, KernelParams, ProfileParams, ValidationParams,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -16,6 +16,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<CrashTestParams>(), &["mode"]);
     assert_keys(input_schema_for::<ProfileParams>(), &["enabled", "reset", "top", "trace"]);
     assert_keys(input_schema_for::<ValidationParams>(), &["mode"]);
+    assert_keys(input_schema_for::<KernelParams>(), &["choice"]);
 }
 
 #[test]
@@ -29,6 +30,8 @@ fn strict_keeps_todays_errors() {
         ("diagnostics.profile", json!({"trace": 5})),
         ("diagnostics.validation", json!({"mode": "each step"})),
         ("diagnostics.validation", json!({"mode": true})),
+        ("diagnostics.kernel", json!({"choice": "cpp"})),
+        ("diagnostics.kernel", json!({"choice": 1})),
     ]);
 }
 

@@ -330,6 +330,44 @@ impl From<solidcraft_kernel::Validation> for ValidationMode {
     }
 }
 
+/// Read, or set, which kernel answers every operation.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct KernelParams {
+    /// The kernel to use from now on. Default: leave it as it is. `smlib` is refused on a build
+    /// without the C++ kernel; `SOLIDCRAFT_KERNEL`, when set, wins over it.
+    #[serde(default, deserialize_with = "kernel_choice")]
+    pub choice: Option<KernelChoice>,
+}
+
+/// A geometry kernel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum KernelChoice {
+    /// solidcore, the Rust port of SMLib (the default).
+    Solidcore,
+    /// The C++ SMLib kernel.
+    Smlib,
+}
+
+fn kernel_choice<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<KernelChoice>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::String(s) if s == "solidcore" => Ok(Some(KernelChoice::Solidcore)),
+        Value::String(s) if s == "smlib" => Ok(Some(KernelChoice::Smlib)),
+        _ => Err(serde::de::Error::custom(super::check::whole("`choice` is solidcore or smlib"))),
+    }
+}
+
+/// The reply of `diagnostics.kernel`.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct KernelReply {
+    /// The kernel in force now.
+    pub choice: KernelChoice,
+    /// Whether `SOLIDCRAFT_KERNEL` chose it.
+    pub environment: bool,
+}
+
 /// Read, or set, when SMLib's full check runs on the features computed from now on.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
