@@ -883,9 +883,24 @@ fn placed(ui: &egui::Ui, at: Pos2) -> (Pos2, egui::Align2) {
         return kept;
     }
     let model = ui.ctx().data(|d| d.get_temp::<Option<egui::Rect>>(egui::Id::new(MODEL_OUTLINE))).flatten();
-    let at = clear_of_model(model, ui.clip_rect(), at);
+    let at = clear_of_model(model, ui.clip_rect(), open_dialog(ui.ctx()), at);
     ui.ctx().data_mut(|d| d.insert_temp(last, at));
     at
+}
+
+/// The command window open now, for the value box to keep out from under.
+pub(crate) fn note_dialog(ctx: &egui::Context, id: egui::Id) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("sc_canvas_dialog"), (id, pass)));
+}
+
+/// Where the command window noted this frame or last is on screen.
+fn open_dialog(ctx: &egui::Context) -> Option<egui::Rect> {
+    let (id, pass) = ctx.data(|d| d.get_temp::<(egui::Id, u64)>(egui::Id::new("sc_canvas_dialog")))?;
+    if pass + 1 < ctx.cumulative_pass_nr() {
+        return None;
+    }
+    ctx.memory(|m| m.area_rect(id))
 }
 
 /// The egui memory key under which the viewport leaves the model's box on screen this frame.
@@ -899,13 +914,22 @@ const BOX_ROOM: f32 = 150.0;
 /// Where the value box goes for a box the caller would put with its top-left at `at` (just right
 /// of and above the handle it belongs to): just outside the model's outline on screen (`model`),
 /// level with the handle, on the handle's side, so it never covers the edge or face being edited.
-/// Where the model fills the view on that side, it stays beside the handle.
-fn clear_of_model(model: Option<egui::Rect>, view: egui::Rect, at: Pos2) -> (Pos2, egui::Align2) {
+/// Where the model fills the view on that side, or leaves no room before the command window
+/// (`dialog`), it stays beside the handle.
+fn clear_of_model(model: Option<egui::Rect>, view: egui::Rect, dialog: Option<egui::Rect>, at: Pos2) -> (Pos2, egui::Align2) {
     let beside = (at, egui::Align2::LEFT_TOP);
     let Some(m) = model else { return beside };
     let handle = at + vec2(-16.0, 30.0);
     let right = handle.x >= m.center().x;
     let y = handle.y.clamp(view.top() + 12.0, view.bottom() - 12.0);
+    let mut view = view;
+    if let Some(d) = dialog {
+        if d.center().x >= m.center().x {
+            view.max.x = view.max.x.min(d.left());
+        } else {
+            view.min.x = view.min.x.max(d.right());
+        }
+    }
     if right && view.right() - m.right() >= BOX_ROOM + BOX_GAP {
         (egui::pos2(m.right() + BOX_GAP, y), egui::Align2::LEFT_CENTER)
     } else if !right && m.left() - view.left() >= BOX_ROOM + BOX_GAP {
@@ -2368,6 +2392,27 @@ mod tests {
         let side_by_side = egui::Rect::from_min_size(egui::pos2(560.0, 340.0), egui::vec2(280.0, 24.0));
         let kept = clear_of_dialog(side_by_side, BoxPlace { dialog: Some(dialog), view: Some(view), handles: Some(handles) });
         assert!(!kept.intersects(handles), "the box {kept:?} still covers the handles {handles:?}");
+    }
+}
+
+#[cfg(test)]
+mod clear_of_model_tests {
+    use egui::{Rect, pos2};
+
+    #[test]
+    fn the_box_keeps_out_from_under_the_command_window() {
+        let view = Rect::from_min_max(pos2(0.0, 0.0), pos2(2000.0, 1000.0));
+        let model = Some(Rect::from_min_max(pos2(600.0, 200.0), pos2(1400.0, 800.0)));
+        let at = pos2(1200.0, 400.0);
+        let dialog = |left: f32, right: f32| Some(Rect::from_min_max(pos2(left, 300.0), pos2(right, 700.0)));
+        // Room before the window: just outside the model.
+        assert_eq!(super::clear_of_model(model, view, dialog(1700.0, 1990.0), at).0.x, 1424.0);
+        // None: beside the handle, as with a model that fills the view.
+        assert_eq!(super::clear_of_model(model, view, dialog(1450.0, 1740.0), at), (at, egui::Align2::LEFT_TOP));
+        // A window on the other side of the model takes nothing from this one.
+        assert_eq!(super::clear_of_model(model, view, dialog(10.0, 300.0), at).0.x, 1424.0);
+        // No window, no change.
+        assert_eq!(super::clear_of_model(model, view, None, at).0.x, 1424.0);
     }
 }
 
