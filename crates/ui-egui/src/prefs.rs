@@ -24,6 +24,7 @@ pub fn stored(get: impl Fn(&str) -> Option<String>) -> Option<String> {
 mod design;
 mod general;
 mod graphics;
+mod interaction;
 mod interface;
 mod navbar;
 mod navigation;
@@ -319,20 +320,34 @@ pub fn choose_nav_preset(prefs: &mut Prefs, preset: &NavPreset) {
     }
 }
 /// Stable control-channel names; presentation labels may be shorter.
-pub const PAGES: &[&str] =
-    &["General", "Appearance", "Layout", "Graphics", "Design", "Sketch", "Tools", "Navigation", "3D mouse", "Shortcuts", "Assistant", "Plugins"];
+pub const PAGES: &[&str] = &[
+    "General",
+    "Appearance",
+    "Layout",
+    "Graphics",
+    "Design",
+    "Sketch",
+    "Interaction",
+    "Tools",
+    "Navigation",
+    "3D mouse",
+    "Shortcuts",
+    "Assistant",
+    "Plugins",
+];
 pub const PAGE_GENERAL: usize = 0;
 pub const PAGE_APPEARANCE: usize = 1;
 pub const PAGE_LAYOUT: usize = 2;
 pub const PAGE_GRAPHICS: usize = 3;
 pub const PAGE_DESIGN: usize = 4;
 pub const PAGE_SKETCH: usize = 5;
-pub const PAGE_TOOLS: usize = 6;
-pub const PAGE_NAVIGATION: usize = 7;
-pub const PAGE_MOUSE3D: usize = 8;
-pub const PAGE_SHORTCUTS: usize = 9;
-pub const PAGE_ASSISTANT: usize = 10;
-pub const PAGE_PLUGINS: usize = 11;
+pub const PAGE_INTERACTION: usize = 6;
+pub const PAGE_TOOLS: usize = 7;
+pub const PAGE_NAVIGATION: usize = 8;
+pub const PAGE_MOUSE3D: usize = 9;
+pub const PAGE_SHORTCUTS: usize = 10;
+pub const PAGE_ASSISTANT: usize = 11;
+pub const PAGE_PLUGINS: usize = 12;
 /// What Preferences accepts for `parameter_list_rows`: `parameters.complete` answers at most 200.
 pub const PARAMETER_LIST_ROWS: std::ops::RangeInclusive<u16> = 5..=200;
 const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
@@ -383,6 +398,14 @@ const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
         handle: "prefs:page:Sketch",
         scroll: true,
         draw: window_page::<PAGE_SKETCH>,
+    },
+    ui_kit::WindowPage {
+        icon: "eye",
+        label: "prefs.structure.interaction",
+        group: None,
+        handle: "prefs:page:Interaction",
+        scroll: true,
+        draw: window_page::<PAGE_INTERACTION>,
     },
     ui_kit::WindowPage {
         icon: "settings",
@@ -1718,6 +1741,7 @@ struct Snapshot {
     agent: crate::agent_cursor::Settings,
     autosave: f64,
     auto_project: bool,
+    hide_under_cursor: bool,
     keys: std::collections::BTreeMap<String, Vec<String>>,
     /// What a settings profile also switches: the toolbar, the S box favourites and which profile is active.
     toolbar: serde_json::Value,
@@ -1741,6 +1765,7 @@ impl Snapshot {
             agent: app.ui.agent_cursor,
             autosave: app.autosave_minutes,
             auto_project: app.session.auto_project,
+            hide_under_cursor: app.session.hide_under_cursor,
             keys: app.keymap.custom.clone(),
             toolbar: app.toolbar_custom.prefs(),
             favourites: app.sbox.pinned.clone(),
@@ -1771,6 +1796,7 @@ impl Snapshot {
         app.autosave_minutes = self.autosave;
         set_autosave(app);
         app.session.auto_project = self.auto_project;
+        app.session.hide_under_cursor = self.hide_under_cursor;
         app.keymap.custom = self.keys;
         app.toolbar_custom.load(&self.toolbar);
         app.sbox.pinned = self.favourites;
@@ -1797,6 +1823,7 @@ impl Snapshot {
             agent,
             autosave,
             auto_project,
+            hide_under_cursor,
             keys,
             toolbar,
             favourites,
@@ -1815,6 +1842,7 @@ impl Snapshot {
             && *agent == app.ui.agent_cursor
             && *autosave == app.autosave_minutes
             && *auto_project == app.session.auto_project
+            && *hide_under_cursor == app.session.hide_under_cursor
             && *keys == app.keymap.custom
             && *toolbar == app.toolbar_custom.prefs()
             && *favourites == app.sbox.pinned
@@ -1866,6 +1894,7 @@ pub(crate) fn held_overlay(app: &SolveApp) -> Option<serde_json::Map<String, ser
         ("perspective", serde_json::json!(s.perspective)),
         ("pick_bodies", serde_json::json!(s.pick_bodies)),
         ("auto_project", serde_json::json!(s.auto_project)),
+        ("hide_under_cursor", serde_json::json!(s.hide_under_cursor)),
         ("visual_style", serde_json::json!(s.style)),
         ("shortcut_box", shortcut_box),
         ("shortcuts", serde_json::Value::Object(shortcuts)),
@@ -2144,6 +2173,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
             app.session.auto_project = true;
             app.ui.pick_bodies = false;
         }
+        PAGE_INTERACTION => app.session.hide_under_cursor = true,
         _ => {}
     }
 }
@@ -2738,6 +2768,7 @@ fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
         PAGE_NAVIGATION => navigation::show(app, ui, t),
         PAGE_GRAPHICS => graphics::show(app, ui),
         PAGE_SKETCH => sketch::show(app, ui),
+        PAGE_INTERACTION => interaction::show(app, ui),
         _ => {}
     }
 }
@@ -5851,6 +5882,7 @@ mod tests {
                 "Graphics",
                 "Design",
                 "Sketch",
+                "Interaction",
                 "Tools",
                 "Navigation",
                 "3D mouse",
@@ -5954,6 +5986,7 @@ mod tests {
             app.ui.ground_shadow = false;
             app.ui.perspective = true;
             app.session.auto_project = false;
+            app.session.hide_under_cursor = false;
             app.ui.pick_bodies = true;
             app.ui.agent_cursor.show = true;
             app.keymap.custom.insert("solid.extrude".into(), vec!["X".into()]);
@@ -5969,10 +6002,23 @@ mod tests {
             assert_eq!(app.ui.ground_shadow, page == PAGE_GRAPHICS);
             assert_eq!(app.ui.perspective, page != PAGE_GRAPHICS);
             assert_eq!(app.session.auto_project, page == PAGE_SKETCH);
+            assert_eq!(app.session.hide_under_cursor, page == PAGE_INTERACTION);
             assert_eq!(app.ui.pick_bodies, page != PAGE_SKETCH);
             assert_eq!(app.ui.agent_cursor.show, page != PAGE_ASSISTANT);
             assert_eq!(app.keymap.custom.is_empty(), page == PAGE_SHORTCUTS);
         }
+    }
+
+    /// #4128: the Interaction page's preference is on by default and round-trips through the
+    /// saved prefs the same way `auto_project` does.
+    #[test]
+    fn hide_under_cursor_round_trips_through_the_prefs() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        assert!(app.session.hide_under_cursor, "on by default");
+        app.session.hide_under_cursor = false;
+        let mut other = SolveApp::new(Default::default(), Default::default());
+        other.load_prefs(&app.prefs());
+        assert!(!other.session.hide_under_cursor, "saved and read back");
     }
 
     fn hole_preset_row(name: &str) -> serde_json::Value {
