@@ -1364,7 +1364,8 @@ fn one_loop(tree: &Tree, id: u64, asm: &Assembly, linked: &BTreeSet<(u64, usize)
 /// start (beyond what the conflict check lets pass) or reading a held value that moves, and the
 /// closing joints' of the closed loops those values move, when they are few enough. Every loop of
 /// the group is still kept closed. None when no loop needs to move, or those that do have too
-/// many values themselves.
+/// many values themselves. A solve that needs other values of a closed loop (one whose closing
+/// joint is rigid) is not found: that group stays a conflict, as a group this size was before.
 fn moving_loops_values(
     tree: &Tree,
     closing: &[u64],
