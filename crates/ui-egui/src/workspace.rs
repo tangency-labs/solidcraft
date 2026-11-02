@@ -52,6 +52,42 @@ pub struct CommandGroup {
 /// Optional headings for section lists. Unlisted commands retain their order at the end.
 pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
     match (tab, panel) {
+        ("MODEL", "CONSTRUCT") => &[
+            CommandGroup {
+                label: "ui.construct_planes",
+                ids: &[
+                    "construct.plane.offset",
+                    "construct.plane.at_angle",
+                    "construct.plane.midplane",
+                    "construct.plane.two_edges",
+                    "construct.plane.three_points",
+                    "construct.plane.tangent",
+                    "construct.plane.along_path",
+                    "construct.plane.perpendicular",
+                ],
+            },
+            CommandGroup {
+                label: "ui.construct_axes",
+                ids: &[
+                    "construct.axis.through_cylinder",
+                    "construct.axis.normal_to_face",
+                    "construct.axis.two_planes",
+                    "construct.axis.two_points",
+                    "construct.axis.edge",
+                ],
+            },
+            CommandGroup {
+                label: "ui.construct_points",
+                ids: &[
+                    "construct.point.vertex",
+                    "construct.point.two_edges",
+                    "construct.point.three_planes",
+                    "construct.point.center",
+                    "construct.point.edge_plane",
+                    "construct.point.along_path",
+                ],
+            },
+        ],
         ("MODEL", "MODIFY") => &[
             CommandGroup { label: "Edges", ids: &["solid.fillet", "solid.chamfer"] },
             CommandGroup {
@@ -811,6 +847,39 @@ pub fn legacy_buttons(tab: &str, panel: &str) -> Vec<&'static str> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn construct_groups_keep_every_command_in_planes_axes_points_order() {
+        let specs = solidcraft_engine::command_specs();
+        let (commands, _) = layout("MODEL", "CONSTRUCT", &specs).unwrap();
+        let grouped = grouped_commands("MODEL", "CONSTRUCT", &commands);
+        assert_eq!(grouped.iter().filter_map(|(h, _)| *h).collect::<Vec<_>>(), ["ui.construct_planes", "ui.construct_axes", "ui.construct_points"]);
+        assert_eq!(grouped.len(), commands.len());
+        let mut seen = std::collections::BTreeSet::new();
+        let mut previous = 0;
+        for (_, c) in &grouped {
+            assert!(seen.insert(c.id), "duplicate {}", c.id);
+            let rank = if c.id.starts_with("construct.plane.") {
+                0
+            } else if c.id.starts_with("construct.axis.") {
+                1
+            } else if c.id.starts_with("construct.point.") {
+                2
+            } else {
+                panic!("ungrouped {}", c.id)
+            };
+            assert!(rank >= previous, "out of order: {}", c.id);
+            previous = rank;
+        }
+        assert_eq!(grouped[0].1.id, "construct.plane.offset");
+        assert_eq!(grouped[1].1.id, "construct.plane.at_angle");
+        assert!(ungrouped("MODEL", "CONSTRUCT", &commands).is_empty());
+        // Removing pinned tools must not leave an empty heading or lose other commands.
+        let without_planes: Vec<_> = commands.iter().copied().filter(|c| !c.id.starts_with("construct.plane.")).collect();
+        let grouped = grouped_commands("MODEL", "CONSTRUCT", &without_planes);
+        assert_eq!(grouped.iter().filter_map(|(h, _)| *h).collect::<Vec<_>>(), ["ui.construct_axes", "ui.construct_points"]);
+        assert_eq!(grouped.len(), without_planes.len());
+    }
 
     #[test]
     fn modify_groups_order_commands_and_keep_unlisted_commands_at_the_end() {
