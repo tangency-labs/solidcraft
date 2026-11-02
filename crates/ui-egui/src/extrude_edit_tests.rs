@@ -55,19 +55,49 @@ fn undoing_the_edited_feature_closes_its_editor_and_preserves_redo() {
     assert!(h.app.dialog.is_none(), "the restored feature can be edited normally");
 }
 
+// An editor kept open over an Undo refused its OK and Cancel afterwards, and Redo then lost the
+// edited feature's place (#10688): the Undo cancels it first, as starting another tool does.
 #[test]
-fn undo_that_keeps_the_edited_feature_keeps_its_editor() {
+fn undo_that_keeps_the_edited_feature_cancels_its_editor_first() {
     let mut h = make(json!({}));
     let feature = h.app.session.doc.find_feature("Depth").unwrap().id;
     h.app.run("solid.box", json!({"corner":[30,0,0],"length":2,"width":2,"height":2})).unwrap();
+    let full = h.app.session.doc.clone();
     open(&mut h);
     h.app.start("edit.undo");
     h.frames(8);
     assert!(h.app.session.doc.feature(feature).is_some());
-    assert_eq!(h.app.dialog.as_ref().unwrap().editing.map(|(id, _)| id), Some(feature));
-    assert!(h.app.editing_state.is_some());
-    assert!(h.app.session.feature_edit_sketch.is_some());
+    assert!(h.app.dialog.is_none() && h.app.editing_state.is_none());
+    assert!(h.app.session.feature_edit_sketch.is_none());
+    assert_eq!(h.app.session.doc.features.len(), 2);
+    assert_eq!(h.app.session.doc.marker, None, "the editor's rollback is put back before the Undo");
     assert_eq!(h.app.session.redo.len(), 1);
+
+    h.app.start("edit.redo");
+    h.frames(8);
+    assert_eq!(*h.app.session.doc, *full, "Undo then Redo leaves the design as it was");
+    open(&mut h);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "the feature can be edited again");
+    assert!(h.app.status.as_ref().is_none_or(|s| !s.0.contains("changed while the feature editor was open")), "{:?}", h.app.status);
+}
+
+// A History step while an editor is open moved from the editor's rollback and left OK and
+// Cancel refusing the design (#10688): the step cancels the editor, then moves from the marker.
+#[test]
+fn a_history_step_cancels_the_editor_and_steps_from_the_design_marker() {
+    let mut h = make(json!({}));
+    h.app.run("solid.box", json!({"corner":[30,0,0],"length":2,"width":2,"height":2})).unwrap();
+    open(&mut h);
+    assert_eq!(h.app.session.doc.marker, Some(1), "Edit Feature rolls back to the extrude");
+    crate::timeline::run_transport(&mut h.app, crate::ui_kit::HistoryTransport::Back);
+    h.frames(8);
+    assert!(h.app.dialog.is_none() && h.app.editing_state.is_none());
+    assert_eq!(h.app.session.doc.marker, Some(2), "one step back from the end, not from the editor's rollback");
+    crate::timeline::run_transport(&mut h.app, crate::ui_kit::HistoryTransport::Last);
+    h.frames(8);
+    assert_eq!(h.app.session.doc.marker, None);
+    assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds().max.z, 10.0);
 }
 
 #[test]

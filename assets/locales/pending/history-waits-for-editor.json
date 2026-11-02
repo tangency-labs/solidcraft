@@ -1,0 +1,9 @@
+{
+  "ar": { "ui.history_waits_for_editor": "ينتظر التراجع والإعادة والسجل حتى يكتمل فتح محرر الميزة" },
+  "de": { "ui.history_waits_for_editor": "Rückgängig, Wiederholen und Verlauf warten, bis der Feature-Editor geöffnet ist" },
+  "en": { "ui.history_waits_for_editor": "Undo, Redo and History wait until the feature editor has opened" },
+  "he": { "ui.history_waits_for_editor": "ביטול, ביצוע מחדש וציר הזמן ממתינים עד שעורך הפעולה ייפתח" },
+  "ja": { "ui.history_waits_for_editor": "元に戻す、やり直す、履歴は、フィーチャーエディターが開くまで待機します" },
+  "vi": { "ui.history_waits_for_editor": "Hoàn tác, Làm lại và Lịch sử sẽ chờ cho đến khi trình chỉnh sửa tính năng mở xong" },
+  "zh": { "ui.history_waits_for_editor": "撤销、重做和历史将等待特征编辑器打开" }
+}
