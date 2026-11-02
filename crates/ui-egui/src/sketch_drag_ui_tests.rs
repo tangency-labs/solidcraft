@@ -449,6 +449,32 @@ fn a_circle_moves_by_its_edge_and_takes_its_radius_with_ctrl() {
     }
 }
 
+/// A circle moved by its edge snaps its centre to a corner, as dragging the centre does, and
+/// letting go there makes them coincident. Its centre snapped to nothing: only a line's points
+/// counted as moving with a curve.
+#[test]
+fn a_circle_moved_by_its_edge_snaps_its_centre_to_a_corner() {
+    let mut h = Harness::new();
+    run(&mut h, "sketch.create", json!({"plane": "XY"}));
+    run(&mut h, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 20]}));
+    run(&mut h, "sketch.circle.center", json!({"center": [50, 40], "radius": 5, "id": "c1"}));
+    h.call("ui.view", json!({"view": "top"}));
+    h.app.cam.distance = 150.0;
+    h.frames(3);
+    let sid = h.app.session.active_sketch.expect("sketch mode");
+    let constraints = |h: &Harness| h.app.session.doc.sketch(sid).expect("the sketch").constraints.len();
+    let before = constraints(&h);
+    // Grabbed on the edge at (55, 40); let go where the centre is a little off the corner (30, 20).
+    let a = screen(&mut h, 55.0, 40.0);
+    let b = screen(&mut h, 35.3, 20.2);
+    let mut path = vec![a];
+    path.extend(steps(a, b, 6));
+    press_and_move(&mut h, &path);
+    release(&mut h, b);
+    assert!(point(&h, "c1.center").dist(Vec2::new(30.0, 20.0)) < 1e-6, "{:?}", point(&h, "c1.center"));
+    assert_eq!(constraints(&h), before + 1, "the centre and the corner are made coincident");
+}
+
 /// A rectangle's side dragged on a slant moves only across itself: the right side goes right,
 /// not up, and the rest of the rectangle stays where it was. It snaps to nothing on the way.
 #[test]
