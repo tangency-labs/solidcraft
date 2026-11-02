@@ -2554,6 +2554,15 @@ impl FilletCorner {
         }) {
             return Ok(());
         }
+        // and since the fork's smlib#113 (34288e5), nothing at a Mitre turn either: the Nx2
+        // adjustment acts only at four edges whose tangents are parallel within 2 degrees,
+        // and Classify made such a pair a Join (WR-697)
+        if self
+            .blend
+            .is_some_and(|blend| blend.event == crate::blend::blend_corner::BlendCornerEvent::Turn)
+        {
+            return Ok(());
+        }
         match self.kind {
             FilletCornerKind::NByTwo => nx2(self, context),
             FilletCornerKind::NByOneClosed => nx1_closed(self, context),
@@ -3980,5 +3989,39 @@ mod tests {
         let v = b.add_vertex(Point3::new(0.0, 0.0, 0.0)).unwrap();
         let r = FilletCorner::create(&k, &mut b, v, &[], &FilletExecutiveData::default(), &[]);
         assert!(r.is_err());
+    }
+
+    /// The fork's smlib#113 (34288e5): a blend corner's Turn, Mitred or Swept, of three or
+    /// four edges, makes no tangent adjustment; the Join's is the Nx2 port's, as is the
+    /// pinned Nx2 corner's (no `blend`).
+    #[test]
+    fn a_blend_corner_turn_has_no_tangent_adjustment() {
+        use crate::blend::blend_corner::{BlendCorner, BlendCornerEvent, BlendTurn};
+        let reached = |blend: Option<BlendCorner>| {
+            let mut c = FilletCorner::new(FilletCornerKind::NByTwo, None, None, None, 1e-3, 0.1);
+            c.blend = blend;
+            let mut nx2 = false;
+            c.adjust_tangent_corner_with(
+                &mut nx2,
+                |_, nx2| {
+                    *nx2 = true;
+                    Ok(())
+                },
+                |_, _| Ok(()),
+            )
+            .unwrap();
+            nx2
+        };
+        let turn = |turn| BlendCorner {
+            event: BlendCornerEvent::Turn,
+            turn,
+        };
+        assert!(!reached(Some(turn(BlendTurn::Mitre))));
+        assert!(!reached(Some(turn(BlendTurn::Swept))));
+        assert!(reached(Some(BlendCorner {
+            event: BlendCornerEvent::Join,
+            turn: BlendTurn::Mitre,
+        })));
+        assert!(reached(None));
     }
 }

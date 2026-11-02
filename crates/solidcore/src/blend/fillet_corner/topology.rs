@@ -27,7 +27,9 @@
 //! vertex loop; the lookups have no effects), and its unused `GetEdges` read is
 //! omitted. With `Kernel::fixes.fillet_mitre_concave_face_corners` (WR-642, the fork's
 //! tangency-labs/smlib@4f06e72) the Nx2 corner skips its mixed-convexity 3-sided face and
-//! mitres the blends as at a corner of uniform convexity. With WR-600's
+//! mitres the blends as at a corner of uniform convexity. With
+//! `Kernel::fixes.fillet_blend_corner` (WR-697, the fork's smlib#113 e4083c8) a blend
+//! corner's Turn at four edges is mitred without the G1 and mixed-convexity tests. With WR-600's
 //! `fillet_nx1_tangent_side_edge_same_convexity` (the fork's tangency-labs/smlib@856b54e)
 //! a tangent side that is a tangent seam is the rail's tangent end (a rail/edge
 //! crossing, the end face across the seam). There is no recursion.
@@ -840,21 +842,36 @@ impl FilletCorner {
             self.bevel = true;
         }
 
-        // Determine if two edges are tangent at corner vertex.
-        let tangency_tol_deg = crate::math::rad_to_deg(self.tangency_tol_radians);
-        let (is_tangent_case, angle_deg) = test_g1_continuity(
-            k,
-            target,
-            Some(vertex),
-            Some(edge_of(target, base_eu1)?),
-            Some(edge_of(target, base_eu2)?),
-            tangency_tol_deg,
-        )?;
-        // Store this value for later use.
-        self.g1_case = is_tangent_case;
+        // The fork's (WR-697, smlib#113 e4083c8): the blend corner's Turn at four edges is
+        // the two blends mitred, one FILLET_X_FILLET edge. SmBlendCorner::Classify made a
+        // pair that is G1, or within 5 degrees at a face corner of the other convexity, a
+        // Join, with the same tests on the same edges and tolerance, so they are not
+        // repeated (and `m_bG1Case` stays FALSE).
+        let four_edge_turn = total == 4
+            && self.blend.is_some_and(|blend| {
+                blend.event == crate::blend::blend_corner::BlendCornerEvent::Turn
+            });
+        let (is_tangent_case, angle_deg, mixed_convexity) = if four_edge_turn {
+            (false, None, false)
+        } else {
+            // Determine if two edges are tangent at corner vertex.
+            let tangency_tol_deg = crate::math::rad_to_deg(self.tangency_tol_radians);
+            let (is_tangent_case, angle_deg) = test_g1_continuity(
+                k,
+                target,
+                Some(vertex),
+                Some(edge_of(target, base_eu1)?),
+                Some(edge_of(target, base_eu2)?),
+                tangency_tol_deg,
+            )?;
+            // Store this value for later use.
+            self.g1_case = is_tangent_case;
 
-        let mixed_convexity =
-            check_face_complimentary_corner_concavity(k, target, vertex, base_eu1, base_eu2, None)?;
+            let mixed_convexity = check_face_complimentary_corner_concavity(
+                k, target, vertex, base_eu1, base_eu2, None,
+            )?;
+            (is_tangent_case, angle_deg, mixed_convexity)
+        };
         let angle = || angle_deg.ok_or_else(|| invalid("edge angle at the corner is unset"));
 
         // Get Solvers and FilletGeoms for the two filleted edges at this vertex
