@@ -110,6 +110,8 @@ pub struct AgentConfig {
     pub ollama: bool,
     /// API: a key is stored for it in the system keychain.
     pub key: bool,
+    /// OpenAI-compatible API: explicit consent to send the key over HTTP to this endpoint.
+    pub allow_insecure_http: bool,
     /// API: how long one model request may take, in seconds (clamped to
     /// [`MIN_REQUEST_TIMEOUT_S`]..=[`MAX_REQUEST_TIMEOUT_S`] where it is used).
     pub request_timeout_s: u64,
@@ -129,6 +131,7 @@ impl Default for AgentConfig {
             model: String::new(),
             ollama: false,
             key: false,
+            allow_insecure_http: false,
             request_timeout_s: DEFAULT_REQUEST_TIMEOUT_S,
             reasoning_effort: String::new(),
         }
@@ -178,6 +181,7 @@ pub struct Entry {
     pub base_url: String,
     pub model: String,
     pub key: bool,
+    pub allow_insecure_http: bool,
     /// API: seconds one model request may take (in range).
     pub request_timeout_s: u64,
     /// API: the reasoning effort to send, empty for none (trimmed, in length).
@@ -201,6 +205,7 @@ impl Entry {
             base_url: c.base_url.clone(),
             model: c.model.clone(),
             key: c.key,
+            allow_insecure_http: c.kind == Kind::Api && c.allow_insecure_http,
             request_timeout_s: c.request_timeout_s.clamp(MIN_REQUEST_TIMEOUT_S, MAX_REQUEST_TIMEOUT_S),
             reasoning_effort: reasoning_effort(&c.reasoning_effort),
             problem: None,
@@ -246,6 +251,7 @@ pub fn entries(app: &crate::SolveApp) -> Vec<Entry> {
             base_url: String::new(),
             model: String::new(),
             key: false,
+            allow_insecure_http: false,
             request_timeout_s: DEFAULT_REQUEST_TIMEOUT_S,
             reasoning_effort: String::new(),
             problem: f.problem.clone(),
@@ -339,6 +345,11 @@ pub fn key_safe_for(url: &str) -> bool {
     matches!(name.as_str(), "localhost" | "127.0.0.1" | "[::1]")
 }
 
+/// The default key policy, with explicit consent for this endpoint's plain HTTP connection.
+pub fn key_allowed_for(url: &str, allow_insecure_http: bool) -> bool {
+    key_safe_for(url) || (allow_insecure_http && url.trim().to_ascii_lowercase().starts_with("http://"))
+}
+
 /// A base URL the API backend accepts: `http(s)://host…`, without a trailing slash.
 pub fn normalize_url(url: &str) -> Result<String, String> {
     let u = url.trim().trim_end_matches('/').to_string();
@@ -364,6 +375,23 @@ mod tests {
         assert!(!key_safe_for("http://localhost.evil.example/v1"));
         assert!(!key_safe_for("http://user@evil.example/v1"));
         assert!(!key_safe_for("ftp://x"));
+    }
+
+    #[test]
+    fn http_key_consent_defaults_off_and_only_relaxes_http_for_that_entry() {
+        let old: AgentConfig = serde_json::from_value(serde_json::json!({
+            "id":"private", "kind":"api", "base_url":"http://192.168.1.100:8000/v1", "key":true
+        }))
+        .unwrap();
+        assert!(!old.allow_insecure_http);
+        assert!(!key_allowed_for(&old.base_url, Entry::from_config(&old).allow_insecure_http));
+        let opted_in = AgentConfig { allow_insecure_http: true, ..old.clone() };
+        let loaded: AgentConfig = serde_json::from_str(&serde_json::to_string(&opted_in).unwrap()).unwrap();
+        assert!(key_allowed_for(&loaded.base_url, Entry::from_config(&loaded).allow_insecure_http));
+        assert!(!key_allowed_for(&old.base_url, Entry::from_config(&old).allow_insecure_http));
+        assert!(!key_allowed_for("ftp://192.168.1.100", true));
+        let anthropic = AgentConfig { kind: Kind::Anthropic, ..opted_in };
+        assert!(!key_allowed_for(&anthropic.base_url, Entry::from_config(&anthropic).allow_insecure_http));
     }
 
     #[test]

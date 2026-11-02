@@ -37,11 +37,25 @@ pub struct AddState {
     pub editing: Option<String>,
     /// Editing an endpoint whose key is in the keychain: an empty key field keeps it.
     pub saved_key: bool,
+    /// Consent belongs to the normalized URL, never to a different endpoint typed later.
+    insecure_http_url: Option<String>,
+    confirm_insecure_http: Option<String>,
     test: Option<Test>,
     /// The endpoint the model picker lists: what the fields said when they were last left.
     listing: Option<ListingKey>,
     /// The fields were left, or the picker opened: take what they say now.
     list_again: bool,
+}
+
+impl AddState {
+    fn insecure_http_endpoint(&self) -> Option<String> {
+        let url = agents::normalize_url(&self.base_url).ok()?;
+        (self.kind == AddKind::Api && self.protocol == Protocol::OpenAi && !agents::key_safe_for(&url)).then_some(url)
+    }
+
+    fn allow_insecure_http(&self) -> bool {
+        self.insecure_http_url.as_ref().is_some_and(|url| self.insecure_http_endpoint().as_ref() == Some(url))
+    }
 }
 
 /// A connection test running or done.
@@ -93,17 +107,18 @@ pub struct State {
     card_listing: Option<(ListingKey, String)>,
 }
 
-/// What an endpoint's models are listed by: its protocol, its base URL, and whether a key goes along.
-type ListingKey = (Protocol, String, bool);
+/// What an endpoint's models are listed by: protocol, base URL, whether a key goes along, and HTTP consent.
+type ListingKey = (Protocol, String, bool, bool);
 
 /// Most endpoints' listings kept.
 const ENDPOINT_LISTINGS_CAP: usize = 128;
 
 /// The listing of `base_url`, if that is an address. A key goes along only where it may be sent.
-fn listing_key(protocol: Protocol, base_url: &str, with_key: bool) -> Option<ListingKey> {
+fn listing_key(protocol: Protocol, base_url: &str, with_key: bool, allow_insecure_http: bool) -> Option<ListingKey> {
     let url = agents::normalize_url(base_url).ok().filter(|url| url.len() <= 4096)?;
-    let with_key = with_key && agents::key_safe_for(&url);
-    Some((protocol, url, with_key))
+    let allow_insecure_http = protocol == Protocol::OpenAi && allow_insecure_http;
+    let with_key = with_key && agents::key_allowed_for(&url, allow_insecure_http);
+    Some((protocol, url, with_key, allow_insecure_http))
 }
 
 /// The models listed for `key`, and the note for under them: still listing, or why it could not.
@@ -156,13 +171,13 @@ fn start_listing(app: &mut SolveApp, ctx: &egui::Context, key: ListingKey, secre
         return;
     };
     let (tx, rx) = std::sync::mpsc::channel();
-    let (protocol, url) = (key.0, key.1.clone());
+    let (protocol, url, allow_insecure_http) = (key.0, key.1.clone(), key.3);
     let language = crate::i18n::language();
     let wake = ctx.clone();
     let spawned = std::thread::Builder::new().name("endpoint-models".into()).spawn(move || {
         let _language = crate::i18n::scope(language);
         let list = secret().and_then(|secret| match protocol {
-            Protocol::OpenAi => super::api_client::model_list(&http, &url, secret.as_deref()),
+            Protocol::OpenAi => super::api_client::model_list(&http, &url, secret.as_deref(), allow_insecure_http),
             Protocol::Anthropic => super::api_client::anthropic_model_list(&http, &url, secret.as_deref()),
         });
         let _ = tx.send(list);
@@ -207,7 +222,7 @@ fn list_for_dialog(app: &mut SolveApp, ctx: &egui::Context) {
     // Editing an agent whose key is kept: the listing goes with that key, read on its thread.
     let stored = s.editing.clone().filter(|_| s.saved_key && typed.is_none());
     if std::mem::take(&mut s.list_again) {
-        s.listing = listing_key(s.protocol, &s.base_url, typed.is_some() || stored.is_some());
+        s.listing = listing_key(s.protocol, &s.base_url, typed.is_some() || stored.is_some(), s.allow_insecure_http());
         // Asked again: what failed may work now, with another key or the server back up.
         if let Some(key) = &s.listing
             && listing_wants_retry(state.endpoint_models.get(key))
@@ -349,6 +364,7 @@ pub fn open_edit(app: &mut SolveApp, id: &str) -> bool {
         s.base_url = c.base_url.clone();
         s.model = c.model.clone();
         s.saved_key = c.key;
+        s.insecure_http_url = c.allow_insecure_http.then(|| c.base_url.clone());
     } else {
         s.kind = AddKind::Custom;
         s.command = c.command.clone();
@@ -370,6 +386,8 @@ pub(super) fn choose_preset(s: &mut AddState, protocol: Protocol, index: usize) 
     s.error = None;
     s.test = None;
     s.list_again = true;
+    s.insecure_http_url = None;
+    s.confirm_insecure_http = None;
 }
 
 /// Run a connection test in the background (it starts the agent briefly, or asks the endpoint
@@ -387,8 +405,9 @@ fn start_test(app: &SolveApp, e: &agents::Entry, key: Option<String>) -> Test {
         Kind::Api => {
             let Some(http) = app.services.agent_http.clone() else { return Test::Done(Err(TestError::Other(tr("ui.ai_no_http").to_string()))) };
             let (url, model) = (e.base_url.clone(), e.model.clone());
+            let allow_insecure_http = e.allow_insecure_http;
             std::thread::spawn(move || {
-                let _ = tx.send(super::api_client::test_endpoint(&http, &url, key.as_deref(), &model).map_err(TestError::Other));
+                let _ = tx.send(super::api_client::test_endpoint(&http, &url, key.as_deref(), &model, allow_insecure_http).map_err(TestError::Other));
             });
         }
         Kind::Anthropic => {
@@ -698,7 +717,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                             ui_kit::row(ui, tr("ui.ai_model"), |ui| {
                                 let chat = &mut app.agent_chat;
                                 let running = chat.running_id == entry.id && chat.backend.is_some();
-                                let key = listing_key(protocol, &entry.base_url, entry.key);
+                                let key = listing_key(protocol, &entry.base_url, entry.key, entry.allow_insecure_http);
                                 let (models, note) = if running {
                                     (chat.models.as_slice(), chat.models_note.clone())
                                 } else if let Some(models) = chat.models_cache.get(&entry.base_url).filter(|models| !models.is_empty()) {
@@ -852,6 +871,32 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
     if app.agent_chat.settings.add.is_none() {
         return;
     }
+    if let Some(url) = app.agent_chat.settings.add.as_ref().and_then(|s| s.confirm_insecure_http.clone()) {
+        let (closed, action) = ui_kit::Confirm::new(egui::Id::new("sc_ai_http_consent"), "status_warning", tr("ai.http.allow"))
+            .tone(ui_kit::Tone::Warning)
+            .actions(tr("ai.http.confirm"), tr("ui.cancel"), None)
+            .selected(ui_kit::Action::Cancel)
+            .detail(&url)
+            .show(ctx, true, |ui| {
+                ui_kit::text(ui, tr("ai.http.warning"), ui_kit::Text::Report("http_warning", false));
+            });
+        for (handle, target) in [("ai_add:http_accept", "dialog:ok"), ("ai_add:http_cancel", "dialog:cancel")] {
+            if let Some(rect) = crate::scenario::rect_of(target) {
+                crate::scenario::publish_handle(handle, rect.center());
+            }
+        }
+        if let Some(s) = app.agent_chat.settings.add.as_mut() {
+            if !closed && action == ui_kit::Action::Ok && s.insecure_http_endpoint().as_ref() == Some(&url) {
+                s.insecure_http_url = Some(url);
+                s.list_again = true;
+                s.error = None;
+            }
+            if closed || action != ui_kit::Action::None {
+                s.confirm_insecure_http = None;
+            }
+        }
+        return;
+    }
     #[cfg(not(target_arch = "wasm32"))]
     let found: Vec<agents::Entry> = agents::entries(app).into_iter().filter(|e| e.found).collect();
     #[cfg(target_arch = "wasm32")]
@@ -965,8 +1010,14 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                         ui_kit::text_field(ui, &mut s.name, "");
                     });
                     ui_kit::row(ui, tr("ui.ai_base_url"), |ui| {
-                        s.list_again |=
-                            ui_kit::cell_editor(ui, egui::Id::new("sc_ai_add_url"), &mut s.base_url, tr("ui.ai_url_hint"), false).lost_focus();
+                        let r = ui_kit::cell_editor(ui, egui::Id::new("sc_ai_add_url"), &mut s.base_url, tr("ui.ai_url_hint"), false);
+                        s.list_again |= r.lost_focus();
+                        if r.changed() {
+                            s.insecure_http_url = None;
+                            s.confirm_insecure_http = None;
+                            s.listing = None;
+                            s.test = None;
+                        }
                     });
                     ui_kit::row(ui, tr("ui.ai_model"), |ui| {
                         let (models, note) = listed_for(&app.agent_chat.settings.endpoint_models, s.listing.as_ref());
@@ -1009,6 +1060,20 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                         });
                     });
                     ui_kit::text(ui, tr(if has_keychain { "ui.ai_key_note" } else { "ui.ai_no_keychain" }), ui_kit::Text::Note("keychain"));
+                    if let Some(url) = s.insecure_http_endpoint() {
+                        let mut allow = s.allow_insecure_http();
+                        let r = ui_kit::checkbox(ui, tr("ai.http.allow"), &mut allow).on_hover_text(tr("ai.http.warning"));
+                        crate::scenario::publish_target("ai_add:allow_insecure_http", r.rect);
+                        if r.changed() {
+                            if allow {
+                                s.confirm_insecure_http = Some(url);
+                            } else {
+                                s.insecure_http_url = None;
+                                s.list_again = true;
+                            }
+                            s.test = None;
+                        }
+                    }
                     if ui_kit::button(ui, tr("ui.ai_test"), ui_kit::Button::Normal).clicked() {
                         test = true;
                     }
@@ -1019,6 +1084,9 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                 ui_kit::text(ui, e, ui_kit::Text::Report("add_error", true));
             }
         });
+    if app.agent_chat.settings.add.as_ref().is_some_and(|s| s.confirm_insecure_http.is_some()) {
+        return;
+    }
     if let Some(rect) = crate::scenario::rect_of("dialog:ok") {
         crate::scenario::publish_handle("ai_add:add", rect.center());
     }
@@ -1041,18 +1109,22 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                 base_url: url.clone().unwrap_or_default(),
                 model: s.model.trim().to_string(),
                 key: false,
+                allow_insecure_http: s.allow_insecure_http(),
                 request_timeout_s: s.request_timeout_s,
                 reasoning_effort: agents::reasoning_effort(&s.reasoning_effort),
                 problem: None,
                 install: "",
             };
             // Editing with the key field left empty tests with the stored key, which is only ever
-            // sent where a saved key may go (HTTPS or this computer).
+            // read after the endpoint's key policy has been checked.
             let key = Some(s.key.trim().to_string()).filter(|k| !k.is_empty()).or_else(|| {
-                let id = s.editing.as_deref().filter(|_| s.saved_key && url.as_deref().is_ok_and(agents::key_safe_for))?;
+                let id = s.editing.as_deref().filter(|_| s.saved_key && agents::key_allowed_for(&e.base_url, e.allow_insecure_http))?;
                 app.services.secrets.as_ref().and_then(|store| store.get(id).ok().flatten())
             });
             let result = match url {
+                Ok(_) if (s.saved_key || key.is_some()) && !agents::key_allowed_for(&e.base_url, e.allow_insecure_http) => {
+                    Test::Done(Err(TestError::Other(tr("ui.ai_key_needs_https").to_string())))
+                }
                 Ok(_) => start_test(app, &e, key),
                 Err(err) => Test::Done(Err(TestError::Other(err))),
             };
@@ -1104,6 +1176,7 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
             c.kind = s.protocol.kind();
             c.ollama = s.protocol == Protocol::OpenAi && s.preset == 0;
             c.base_url = agents::normalize_url(&s.base_url)?;
+            c.allow_insecure_http = s.allow_insecure_http();
             c.model = s.model.trim().to_string();
             c.request_timeout_s = s.request_timeout_s.clamp(agents::MIN_REQUEST_TIMEOUT_S, agents::MAX_REQUEST_TIMEOUT_S);
             c.reasoning_effort = agents::reasoning_effort(&s.reasoning_effort);
@@ -1113,7 +1186,10 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
             key = Some(s.key.trim().to_string()).filter(|k| !k.is_empty());
             // Editing with the key field left empty keeps the stored key.
             let kept = key.is_none() && editing.is_some() && s.saved_key;
-            if (key.is_some() || kept) && !agents::key_safe_for(&c.base_url) {
+            // Revoking consent keeps the key in the keychain, but disconnects the endpoint.
+            // Subsequent edits to that disabled endpoint must still be possible.
+            let same_endpoint = kept && editing.and_then(|at| app.preferences.agents.get(at)).is_some_and(|old| old.base_url == c.base_url);
+            if (key.is_some() || (kept && !same_endpoint)) && !agents::key_allowed_for(&c.base_url, c.allow_insecure_http) {
                 return Err(tr("ui.ai_key_needs_https").to_string());
             }
             c.key = kept;
@@ -1138,6 +1214,7 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
     match app.preferences.agents.get_mut(at) {
         None => return Err(tr("ui.ai_edit_gone").to_string()),
         Some(old) => {
+            let revoked = old.allow_insecure_http && !c.allow_insecure_http;
             // An endpoint edited into a program (or one whose key was dropped) leaves no key behind.
             if old.key
                 && !c.key
@@ -1154,7 +1231,9 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
             app.agent_chat.login_results.remove(&id);
             // The running conversation takes a new timeout from its next request on; the rest
             // applies the next time the agent connects.
-            if app.agent_chat.running_id == id
+            if revoked {
+                super::disconnect_endpoint(app, &id);
+            } else if app.agent_chat.running_id == id
                 && let Some(b) = app.agent_chat.backend.as_mut()
             {
                 b.set_request_timeout(secs);
@@ -1284,6 +1363,123 @@ mod card_tests {
             self.0.lock().map_err(|e| e.to_string())?.remove(id);
             Ok(())
         }
+    }
+
+    #[test]
+    fn http_authentication_requires_consent_for_the_current_endpoint() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width": 1600.0, "height": 1000.0}));
+        h.app.home.open = false;
+        h.app.preferences.ai_features = true;
+        h.app.agent_chat.detection = Some(Default::default());
+        let keys = std::sync::Arc::new(MemoryKeys::default());
+        h.app.services.secrets = Some(keys.clone());
+        open_add(&mut h.app);
+        let s = h.app.agent_chat.settings.add.as_mut().unwrap();
+        s.kind = AddKind::Api;
+        s.name = "Private endpoint".into();
+        s.base_url = "http://192.168.1.100:8000/v1".into();
+        s.model = "example-model".into();
+        s.key = "test-only-key".into();
+        let seen = listing_http(&mut h);
+        let requests = || seen.lock().unwrap().clone();
+        assert!(add_agent(&mut h.app).is_err(), "HTTP authentication is off by default");
+        list_settled(&mut h);
+        assert_eq!(requests(), [("http://192.168.1.100:8000/v1/models".into(), false)]);
+        h.step(&json!({"click":{"handle":"ai_add:allow_insecure_http"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"ai_add:http_cancel"}})).unwrap();
+        assert!(add_agent(&mut h.app).is_err(), "cancel is not consent");
+        assert!(keys.0.lock().unwrap().is_empty());
+        list_settled(&mut h);
+        assert!(requests().iter().all(|(_, with_key)| !with_key), "cancel must not authenticate a listing");
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"ai_add:allow_insecure_http"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"ai_add:http_accept"}})).unwrap();
+        list_settled(&mut h);
+        assert_eq!(requests().last().cloned(), Some(("http://192.168.1.100:8000/v1/models".into(), true)), "consent applies to the model picker");
+        h.step(&json!({"click":{"handle":"ai_add:add"}})).unwrap();
+        assert!(h.app.agent_chat.settings.add.is_none());
+        let saved = h.app.preferences.agents.last().unwrap();
+        let json = serde_json::to_value(saved).unwrap();
+        assert_eq!(json["allow_insecure_http"], true);
+        assert!(!json.to_string().contains("test-only-key"));
+        assert_eq!(keys.get(&saved.id).unwrap().as_deref(), Some("test-only-key"));
+        let id = saved.id.clone();
+
+        // The saved agent's picker uses its consent and keychain key too.
+        h.app.agent_chat.settings.endpoint_models.clear();
+        h.call("ui.prefs", json!({"open": "AI"}));
+        h.frames(3);
+        let before = requests().len();
+        h.step(&json!({"click":{"handle":format!("prefs:ai_model:{id}")}})).unwrap();
+        list_settled(&mut h);
+        assert_eq!(requests().len(), before + 1);
+        assert_eq!(requests().last().cloned(), Some(("http://192.168.1.100:8000/v1/models".into(), true)));
+        h.step(&json!({"key":"Escape"})).unwrap();
+
+        assert!(open_edit(&mut h.app, &id));
+        assert!(h.app.agent_chat.settings.add.as_ref().unwrap().key.is_empty());
+        list_settled(&mut h);
+        h.app.agent_chat.settings.endpoint_models.clear();
+        h.step(&json!({"click":{"handle":"ai_add:allow_insecure_http"}})).unwrap();
+        list_settled(&mut h);
+        assert_eq!(
+            requests().last().cloned(),
+            Some(("http://192.168.1.100:8000/v1/models".into(), false)),
+            "revocation also refreshes the model picker without the key"
+        );
+        assert!(open_edit(&mut h.app, &id));
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"dialog:Base URL"}})).unwrap();
+        h.step(&json!({"key":"A", "ctrl":true})).unwrap();
+        h.step(&json!({"text":"http://192.168.1.101:8000/v1"})).unwrap();
+        assert!(!h.app.agent_chat.settings.add.as_ref().unwrap().allow_insecure_http());
+        assert!(add_agent(&mut h.app).is_err(), "a changed URL needs its own consent");
+        // Even changing back does not silently restore consent.
+        h.app.agent_chat.settings.add.as_mut().unwrap().base_url = "http://192.168.1.100:8000/v1".into();
+        assert!(!h.app.agent_chat.settings.add.as_ref().unwrap().allow_insecure_http());
+        assert!(open_edit(&mut h.app, &id));
+        choose_preset(h.app.agent_chat.settings.add.as_mut().unwrap(), Protocol::OpenAi, 0);
+        assert!(!h.app.agent_chat.settings.add.as_ref().unwrap().allow_insecure_http());
+
+        // Revoking consent retains the key, stops this endpoint in every tab, and leaves an
+        // unrelated endpoint connected. All requests use a mock transport.
+        h.app.services.agent_http = Some(std::sync::Arc::new(|_| Ok((200, br#"{"data":[]}"#.to_vec()))));
+        h.app.agent_chat.agent_id = Some(id.clone());
+        super::super::connect(&mut h.app, &h.ctx);
+        assert!(h.app.agent_chat.backend.is_some());
+        crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+        h.app.preferences.agents.push(AgentConfig {
+            id: "unrelated".into(),
+            kind: Kind::Api,
+            base_url: "http://localhost:8000/v1".into(),
+            model: "m".into(),
+            ..Default::default()
+        });
+        h.app.agent_chat.agent_id = Some("unrelated".into());
+        super::super::connect(&mut h.app, &h.ctx);
+        assert!(h.app.agent_chat.backend.is_some());
+        crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+        h.app.agent_chat.agent_id = Some(id.clone());
+        super::super::connect(&mut h.app, &h.ctx);
+        assert!(h.app.agent_chat.backend.is_some());
+        assert!(open_edit(&mut h.app, &id));
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"ai_add:allow_insecure_http"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"ai_add:add"}})).unwrap();
+        assert!(!h.app.preferences.agents[0].allow_insecure_http);
+        assert!(h.app.agent_chat.backend.is_none());
+        assert_eq!(keys.get(&id).unwrap().as_deref(), Some("test-only-key"));
+        super::super::connect(&mut h.app, &h.ctx);
+        assert!(h.app.agent_chat.backend.is_none(), "reconnecting without consent refuses the stored key");
+        crate::documents::switch(&mut h.app, 0);
+        assert!(h.app.agent_chat.backend.is_none(), "the hidden conversation was stopped too");
+        crate::documents::switch(&mut h.app, 1);
+        assert!(h.app.agent_chat.backend.is_some(), "other endpoints keep their permission");
+        super::super::disconnect(&mut h.app);
     }
 
     /// Edit on an added agent reopens the dialog filled in; Save changes it in place, keeping its
