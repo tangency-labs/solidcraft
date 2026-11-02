@@ -142,7 +142,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "DRAWING LAYOUT",
         panel: "VIEWS",
         promoted: 3,
-        ids: &["drawing.view.base", "drawing.view.projected", "drawing.view.section", "drawing.view.detail"],
+        ids: &["drawing.view.base.planned", "drawing.view.projected.planned", "drawing.view.section", "drawing.view.detail"],
     },
     Section { tab: "DRAWING LAYOUT", panel: "ARRANGE", promoted: 1, ids: &["drawing.views.align"] },
     Section { tab: "DRAWING LAYOUT", panel: "INSERT", promoted: 1, ids: &["drawing.image", "drawing.line"] },
@@ -480,7 +480,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("drawing.revision_table", "Revision Tbl."),
     ("drawing.table.edit", "Edit Table"),
     ("drawing.update", "Update"),
-    ("drawing.view.projected", "Projected"),
+    ("drawing.view.projected.planned", "Projected"),
     ("drawing.view.section", "Section View"),
     ("document.units", "Units"),
     ("inspect.accessibility", "Access"),
@@ -908,11 +908,11 @@ mod tests {
         for tab in DRAWING_TABS {
             assert!(crate::scenario::handle_at(&format!("tab:{tab}")).is_some(), "{tab}");
         }
-        h.step(&json!({"click":{"handle":"button:drawing.view.base"}})).unwrap();
+        h.step(&json!({"click":{"handle":"button:drawing.view.base.planned"}})).unwrap();
         h.frames(3);
         assert!(crate::scenario::rect_of("drawing:settings").is_some(), "known options open from the shared ribbon");
         assert!(h.widget("Apply (not implemented)").is_some());
-        assert!(h.app.run("drawing.view.base", json!({})).is_err(), "the preview never enables engine execution");
+        assert!(h.app.run("drawing.view.base.planned", json!({})).is_err(), "the preview never enables engine execution");
         h.step(&json!({"click":{"handle":"drawing:settings:close"}})).unwrap();
         h.step(&json!({"click":{"handle":"tab:DRAWING PARTS"}})).unwrap();
         h.step(&json!({"click":{"handle":"button:assembly.bom"}})).unwrap();

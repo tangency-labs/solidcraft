@@ -3,14 +3,15 @@
 //! These entries reserve discoverable homes while the owning Drawing contracts land.
 //! JSON execution always refuses; the UI may show reviewed option layouts separately.
 //! `drawing.export.planned` keeps the disabled UI action separate from `drawing.export`
-//! (the sheet export provider).
+//! (the sheet export provider). View previews likewise use `.planned` ids so the
+//! real base-view and projected-view providers keep their executable contracts.
 
 use super::CommandSpec;
 
 /// Artwork awaiting owner review. Runtime assignments remain the intentional placeholder.
 pub const PENDING_ICONS: &[(&str, &str)] = &[
-    ("drawing.view.base", "drawing_base_view"),
-    ("drawing.view.projected", "drawing_projected_view"),
+    ("drawing.view.base.planned", "drawing_base_view"),
+    ("drawing.view.projected.planned", "drawing_projected_view"),
     ("drawing.view.section", "drawing_section_view"),
     ("drawing.view.detail", "drawing_detail_view"),
     ("drawing.views.align", "drawing_align_views"),
@@ -38,8 +39,8 @@ pub fn pending_icon(id: &str) -> Option<&'static str> {
 }
 
 pub static COMMANDS: &[CommandSpec] = &[
-    planned!("drawing.view.base", "Base View", "4816").at("DRAWING LAYOUT", "VIEWS").icon("placeholder"),
-    planned!("drawing.view.projected", "Projected View", "4816").at("DRAWING LAYOUT", "VIEWS").icon("placeholder"),
+    planned!("drawing.view.base.planned", "Base View", "4816").at("DRAWING LAYOUT", "VIEWS").icon("placeholder"),
+    planned!("drawing.view.projected.planned", "Projected View", "4816").at("DRAWING LAYOUT", "VIEWS").icon("placeholder"),
     planned!("drawing.view.section", "Section View", "4816").at("DRAWING LAYOUT", "VIEWS").icon("placeholder"),
     planned!("drawing.view.detail", "Detail View", "4816").at("DRAWING LAYOUT", "VIEWS").icon("placeholder"),
     planned!("drawing.views.align", "Align Views", "4894").at("DRAWING LAYOUT", "ARRANGE").icon("placeholder"),
@@ -71,7 +72,9 @@ mod tests {
     fn drawing_entries_are_metadata_only() {
         let mut session = crate::Session::new(Default::default());
         let before = serde_json::to_value(&session.doc).unwrap();
-        assert!(crate::find_command("drawing.export").unwrap().planned.is_none(), "the sheet export provider stays registered");
+        for id in ["drawing.export", "drawing.view.base", "drawing.view.projected"] {
+            assert!(crate::find_command(id).unwrap().planned.is_none(), "the executable provider {id} stays registered");
+        }
         assert!(crate::find_command("drawing.export.planned").unwrap().planned.is_some(), "the scaffold export stays disabled");
         for command in super::COMMANDS {
             assert!(command.planned.is_some(), "{}", command.id);

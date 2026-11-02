@@ -897,12 +897,12 @@ mod tests {
         assert!(!search(&app, "").iter().any(|row| row.0.starts_with("drawing.")));
         crate::workspace::enter(&mut app, "drawing").unwrap();
         let rows = search(&app, "");
-        assert!(rows.iter().any(|row| row.0 == "drawing.view.base"));
+        assert!(rows.iter().any(|row| row.0 == "drawing.view.base.planned"));
         assert!(rows.iter().any(|row| row.0 == "assembly.bom"));
         assert!(!rows.iter().any(|row| row.0 == "solid.extrude"));
-        assert!(can_start(&app, "drawing.view.base"), "known options are inspectable");
+        assert!(can_start(&app, "drawing.view.base.planned"), "known options are inspectable");
         assert!(!can_start(&app, "drawing.view.section"), "uncertain tools cannot start");
-        assert!(!solidcraft_engine::find_command("drawing.view.base").unwrap().info(&app.session).enabled);
+        assert!(!solidcraft_engine::find_command("drawing.view.base.planned").unwrap().info(&app.session).enabled);
     }
 
     #[test]

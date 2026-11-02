@@ -48,7 +48,7 @@ pub fn reset_document(app: &mut SolveApp) {
 }
 
 pub fn can_open_options(id: &str) -> bool {
-    matches!(id, "drawing.view.base" | "drawing.view.projected" | "drawing.dimension" | "drawing.note")
+    matches!(id, "drawing.view.base.planned" | "drawing.view.projected.planned" | "drawing.dimension" | "drawing.note")
 }
 
 /// Dismiss the current Drawing inspector without touching source or drawing data.
@@ -66,8 +66,8 @@ pub fn start(app: &mut SolveApp, id: &str) -> bool {
         return false;
     }
     app.drawing_workspace.options = match id {
-        "drawing.view.base" => Some("Base View"),
-        "drawing.view.projected" => Some("Projected View"),
+        "drawing.view.base.planned" => Some("Base View"),
+        "drawing.view.projected.planned" => Some("Projected View"),
         "drawing.dimension" => Some("Dimension"),
         "drawing.note" => Some("Note"),
         _ => None,
@@ -486,7 +486,7 @@ mod tests {
         let undo = h.app.session.undo.len();
         let cam = h.app.cam;
         enter(&mut h.app, true).unwrap();
-        assert!(start(&mut h.app, "drawing.view.base"));
+        assert!(start(&mut h.app, "drawing.view.base.planned"));
         h.frames(2);
         assert!(h.widget("Apply (not implemented)").is_some());
         assert_eq!(h.app.session.undo.len(), undo);
