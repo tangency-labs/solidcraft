@@ -8,7 +8,7 @@
 
 use egui::{Painter, Pos2, Stroke};
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_engine::snap::{SnapKind, SnapPoint, snap_points};
 
 use crate::SolveApp;

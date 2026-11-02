@@ -72,7 +72,7 @@ pub(crate) fn joint_choice(name: &str, kind: JointKind) -> String {
 }
 
 /// What a joint origin input accepts (snaps on faces, edges and vertices).
-pub const SNAPS: u16 = FACES | EDGES | VERTICES;
+pub const SNAPS: crate::selection::Accept = FACES | EDGES | VERTICES;
 /// Commands whose effect is where occurrences sit (previewed on the placed model).
 const MOVES: &[&str] = &[
     "joint.create",
