@@ -90,6 +90,7 @@ const MOVES: &[&str] = &[
 
 #[derive(Clone, Debug)]
 pub enum Asm {
+    FromBodies,
     NewComponent {
         name: String,
         activate: bool,
@@ -196,6 +197,7 @@ impl JointForm {
 impl Asm {
     pub fn title(&self) -> &'static str {
         match self {
+            Asm::FromBodies => "cmd.component_from_bodies",
             Asm::NewComponent { .. } => "NEW COMPONENT",
             Asm::Joint(j) if j.editing.is_some() => "EDIT JOINT",
             Asm::Joint(j) if j.as_built => "AS-BUILT JOINT",
@@ -224,6 +226,7 @@ impl Asm {
 pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     let s = &app.session;
     let (asm, inputs) = match id {
+        "component.from_bodies" => (Asm::FromBodies, vec![SelInput::new("Bodies", BODIES, true)]),
         "component.create" => (Asm::NewComponent { name: String::new(), activate: true }, vec![SelInput::new("Bodies (optional)", BODIES, true)]),
         "joint.create" => (Asm::Joint(Box::new(JointForm::new(false, &app.session.doc))), side_inputs()),
         "joint.as_built" => (
@@ -658,6 +661,16 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
     let mut enter = false;
     let problem = joint_problem(app, k, inputs);
     match k {
+        Asm::FromBodies => {
+            ui.add(egui::Label::new(app.tr("ui.components_from_bodies_hint")).wrap());
+            if crate::ui_kit::button(ui, app.tr("ui.select_all"), crate::ui_kit::Button::Normal).clicked()
+                && let Some(input) = inputs.first_mut()
+            {
+                // Transfers take definition names, rather than the names of repeated placements.
+                input.items = app.session.model.state().bodies.iter().map(|body| Sel::Body { name: body.name.clone() }).collect();
+                *active = 0;
+            }
+        }
         Asm::NewComponent { name, activate } => {
             enter |= text_row(ui, "Name", name, crate::i18n::tr_label("Component1")).0;
             crate::ui_kit::options(ui, "component_options", &mut [("Activate", activate)]);
@@ -1062,6 +1075,13 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
     };
     let cmd = |id: &str, p: Value| vec![(id.to_string(), p)];
     Ok(match k {
+        Asm::FromBodies => {
+            let bodies = sel_items(inputs, 0).body_names();
+            if bodies.is_empty() {
+                return Err(crate::i18n::tr("ui.components_from_bodies_required").into());
+            }
+            cmd("component.from_bodies", json!({ "bodies": bodies }))
+        }
         Asm::NewComponent { name, activate } => {
             let bodies: Vec<String> = sel_items(inputs, 0).body_names();
             if bodies.is_empty() {
