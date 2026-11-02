@@ -33,6 +33,7 @@
 //!   unchanged), four times the curvature-free count a curve of that many Bezier
 //!   segments needs at `tol` (a swept wall of 127 segments at `1e-5` needs 38 227),
 //!   and never more than [`MAX_OFFSET_SAMPLES_ANY`] (about 30 s at opt-level 3).
+//! - Cancellation: `offset_pt_sampling_cancellable` (crate-private) polls a cancel token (#2136, #2372) per sample point and per knot removal step; `offset_pt_sampling` passes none.
 
 use crate::error::{NlibCode, Result, SolidError};
 use crate::math::{max2, Vec3};
@@ -154,6 +155,27 @@ impl Curve {
         tangents: bool,
         par: OffsetParam,
         tol: f64,
+    ) -> Result<Curve> {
+        self.offset_pt_sampling_cancellable(b, d, deg, tangents, par, tol, None)
+    }
+
+    /// [`Curve::offset_pt_sampling`] that polls `cancel` (#2136, #2372) once per sample
+    /// point and per knot removal step and returns `Cancelled` once it fires; `None`, or
+    /// a token that never fires, changes nothing.
+    ///
+    /// # Errors
+    ///
+    /// As [`Curve::offset_pt_sampling`]; `Cancelled` when `cancel` fires.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn offset_pt_sampling_cancellable(
+        &self,
+        b: Vec3,
+        d: f64,
+        deg: usize,
+        tangents: bool,
+        par: OffsetParam,
+        tol: f64,
+        cancel: Option<&crate::kernel::CancelToken>,
     ) -> Result<Curve> {
         check_short_degree(deg, OP)?;
 
@@ -281,6 +303,9 @@ impl Curve {
         // Sample curve.
         let mut pts: Vec<Vec3> = storage(mu, OP)?;
         for i in 0..=mu {
+            if let Some(token) = cancel {
+                token.check(OP)?;
+            }
             let (q, ts) = self.eval_tangent(get(&u, i, OP)?, Side::Left)?;
             let n = b.cross(ts);
             set(&mut pts, i, pt_along_vector(q, d, n), OP)?;
@@ -327,7 +352,12 @@ impl Curve {
 
         // Remove knots.
         let der = usize::from(tangents && deg == 2);
-        cur_q = cur_q.remove_knots_deriv_constraints(tol, ConstrainedEnds::Both, der)?;
+        cur_q = cur_q.remove_knots_deriv_constraints_cancellable(
+            tol,
+            ConstrainedEnds::Both,
+            der,
+            cancel,
+        )?;
 
         // Compact output curve.
         let (n, _) = cur_q.array_sizes();
@@ -496,6 +526,33 @@ mod tests {
             0.01,
         );
         assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+    }
+
+    /// #2372: a fired cancel token ends the sampling and the knot removal with
+    /// `Cancelled`; an unfired one leaves the offset bit for bit as without one.
+    #[test]
+    fn a_cancel_token_ends_the_offset_and_an_unfired_one_changes_nothing() {
+        let b = Vec3::new(0.0, 0.0, 1.0);
+        let par = OffsetParam::Inherited;
+        let plain = cubic()
+            .offset_pt_sampling(b, 0.1, 3, false, par, 1e-4)
+            .unwrap();
+        let token = crate::kernel::CancelToken::new();
+        let unfired = cubic()
+            .offset_pt_sampling_cancellable(b, 0.1, 3, false, par, 1e-4, Some(&token))
+            .unwrap();
+        assert_eq!(plain, unfired);
+        token.cancel();
+        let r = cubic().offset_pt_sampling_cancellable(b, 0.1, 3, false, par, 1e-4, Some(&token));
+        assert!(matches!(r, Err(SolidError::Cancelled { .. })), "{r:?}");
+        // the knot removal on its own
+        let r = plain.remove_knots_deriv_constraints_cancellable(
+            1e-4,
+            ConstrainedEnds::Both,
+            0,
+            Some(&token),
+        );
+        assert!(matches!(r, Err(SolidError::Cancelled { .. })), "{r:?}");
     }
 
     /// HANG-44 addendum 2026-10-29: the bound scales with the segment count and the

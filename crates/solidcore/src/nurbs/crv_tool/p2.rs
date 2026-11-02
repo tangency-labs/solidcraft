@@ -46,6 +46,7 @@
 //!   (impossible upstream, where `NL_DEGREE` is a `short`) is
 //!   [`SolidError::InvalidInput`], so index arithmetic and allocations sized from the
 //!   degree cannot overflow.
+//! - Cancellation: `remove_knots_constrained` takes an optional cancel token (#2136, #2372), polled once per removal step; `None` or an unfired token changes nothing.
 
 // Index arithmetic follows upstream's signed `NL_INDEX` (`isize` here); every access
 // goes through `get`/`set`, which reject negative or too-large indices.
@@ -195,7 +196,7 @@ impl Curve {
     /// was the last one to set upstream's error flag (see the module deviations).
     pub fn remove_knots(&self, tol: f64) -> Result<Curve> {
         const OP: &str = "nurbs::crv_tool::p2::Curve::remove_knots";
-        self.remove_knots_constrained(tol, |_, _| false, OP)
+        self.remove_knots_constrained(tol, |_, _| false, OP, None)
     }
 
     /// The body of `N_CrvRemoveKnots`, shared with `N_CrvRemoveKnotsDerivConstraints`
@@ -208,6 +209,7 @@ impl Curve {
         tol: f64,
         blocked: impl Fn(isize, isize) -> bool,
         op: &'static str,
+        cancel: Option<&crate::kernel::CancelToken>,
     ) -> Result<Curve> {
         let pu = self.degree();
         check_short_degree(pu, op)?;
@@ -279,6 +281,10 @@ impl Curve {
 
         // Try to remove each knot.
         loop {
+            // (not upstream, #2136 / #2372) a cancel ends the removal; none changes nothing
+            if let Some(token) = cancel {
+                token.check(op)?;
+            }
             // Find knot with smallest error.
             let mut b = get(&br, p + 1, op)?;
             let mut s = get(&sr, p + 1, op)?;

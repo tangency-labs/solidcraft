@@ -67,6 +67,7 @@
 //!   (impossible upstream, where `NL_DEGREE` is a `short`) is
 //!   [`SolidError::InvalidInput`], so index arithmetic and allocations sized from the
 //!   degree cannot overflow.
+//! - Cancellation: `remove_knots_deriv_constraints_cancellable` (crate-private) passes a cancel token (#2136, #2372) to the removal loop; the public function passes none.
 
 // Index arithmetic follows upstream's signed `NL_INDEX` (`isize` here); every access
 // goes through `get`/`set`, which reject negative or too-large indices.
@@ -379,6 +380,23 @@ impl Curve {
         whr: ConstrainedEnds,
         der: usize,
     ) -> Result<Curve> {
+        self.remove_knots_deriv_constraints_cancellable(tol, whr, der, None)
+    }
+
+    /// [`Curve::remove_knots_deriv_constraints`] that polls `cancel` (#2136, #2372) once
+    /// per removal step and returns `Cancelled` once it fires; `None`, or a token that
+    /// never fires, changes nothing.
+    ///
+    /// # Errors
+    ///
+    /// As [`Curve::remove_knots_deriv_constraints`]; `Cancelled` when `cancel` fires.
+    pub(crate) fn remove_knots_deriv_constraints_cancellable(
+        &self,
+        tol: f64,
+        whr: ConstrainedEnds,
+        der: usize,
+        cancel: Option<&crate::kernel::CancelToken>,
+    ) -> Result<Curve> {
         const OP: &str = "nurbs::crv_adv::p2::Curve::remove_knots_deriv_constraints";
         check_short_degree(self.degree(), OP)?;
         let p = sx(self.degree(), OP)?;
@@ -390,6 +408,7 @@ impl Curve {
             // sum keeps.
             |r, n| (whr.start() && r <= p.saturating_add(der)) || (whr.end() && r > n - der),
             OP,
+            cancel,
         )
     }
 

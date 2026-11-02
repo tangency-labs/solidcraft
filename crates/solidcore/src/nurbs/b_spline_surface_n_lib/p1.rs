@@ -113,6 +113,7 @@
 //! - Status values upstream ignores stay ignored: the reparametrisation of
 //!   `ApproximateOffsetSurface` and `RebuildSTEPFromNURBParameters`, a no-op for a
 //!   plain B-spline.
+//! - Cancellation: `approximate_offset_surface_cancellable` (crate-private) passes a cancel token (#2136, #2372) to `N_SrfOffset`; the public wrappers pass none.
 
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -1131,6 +1132,31 @@ impl BSplineSurface {
         param_type: OffsetParamType,
         options: crate::nurbs::srf_offset::OffsetOptions,
     ) -> Result<BSplineSurface> {
+        self.approximate_offset_surface_cancellable(
+            offset_distance,
+            approx_tol_3d,
+            param_type,
+            options,
+            None,
+        )
+    }
+
+    /// [`BSplineSurface::approximate_offset_surface_with`] whose NLib offset polls
+    /// `cancel` (#2136, #2372) and returns `Cancelled` once it fires; `None`, or a token
+    /// that never fires, changes nothing.
+    ///
+    /// # Errors
+    ///
+    /// As [`BSplineSurface::approximate_offset_surface_with`]; `Cancelled` when `cancel`
+    /// fires.
+    pub(crate) fn approximate_offset_surface_cancellable(
+        &self,
+        offset_distance: f64,
+        approx_tol_3d: f64,
+        param_type: OffsetParamType,
+        options: crate::nurbs::srf_offset::OffsetOptions,
+        cancel: Option<&crate::kernel::CancelToken>,
+    ) -> Result<BSplineSurface> {
         let nl_surf_p = self
             .nurb
             .as_ref()
@@ -1155,7 +1181,7 @@ impl BSplineSurface {
 
         // pass the call along to NLib
         let mut nl_surf = nl_surf_p
-            .offset_with(
+            .offset_cancellable(
                 offset_distance,
                 ln_deg,
                 ln_deg,
@@ -1163,6 +1189,7 @@ impl BSplineSurface {
                 10.0 * approx_tol_3d,
                 approx_tol_3d,
                 options,
+                cancel,
             )
             .map_err(SolidError::nl_ser(OP_OFFSET))?;
 

@@ -77,6 +77,7 @@
 //!   [`create_curve_sweep_with_placements`], so [`create_curve_sweep`] keeps its
 //!   signature and does no extra work; the fork's `bProfileAtPathStart` is
 //!   [`SweepOptions::profile_at_path_start`] (WR-522), off by default.
+//! - Cancellation: a sweep under a fired cancel token (#2136, #2372) returns `Cancelled`, not `Ok`.
 
 use crate::curve::curve::p2::CurveKind;
 use crate::curve::curve::Curve;
@@ -99,6 +100,7 @@ use crate::topology::brep::p1::is_live_topology_member;
 use crate::topology::{Brep, EdgeId, FaceId, VertexId};
 
 const OP_COPY: &str = "sweep::api_brep::copy_curves_for_consuming_sweep";
+const OP_SWEEP: &str = "sweep::api_brep";
 const OP_PIPE: &str = "sweep::api_brep::create_pipe_sweep";
 const OP_PLANAR_PATH: &str = "sweep::api_brep::create_sweep_along_planar_path";
 const OP_CURVE_SWEEP: &str = "sweep::api_brep::create_curve_sweep";
@@ -936,11 +938,15 @@ fn build(
     k: &mut Kernel,
     body: impl FnOnce(&mut PrimitiveCreation, &mut PrimitiveModel<'_>) -> Result<()>,
 ) -> Result<Brep> {
-    PrimitiveModel::build_new(k, body).map(|(mut brep, ())| {
+    let brep = PrimitiveModel::build_new(k, body).map(|(mut brep, ())| {
         // (not upstream: the port's cached topology fields, true for the caller)
         brep.refresh_cached_topology();
         brep
-    })
+    })?;
+    // (not upstream, #2136 / #2372: a cancel a status-ignoring helper absorbed still
+    // ends the sweep as `Cancelled`, never `Ok`)
+    k.check_cancelled(OP_SWEEP)?;
+    Ok(brep)
 }
 
 /// The start, side and end faces of a curve sweep.
@@ -967,6 +973,8 @@ fn curve_sweep_with<R>(
         })?;
     // (not upstream: the port's cached topology fields, true for the caller)
     brep.refresh_cached_topology();
+    // (not upstream, #2136 / #2372: as in `build`)
+    k.check_cancelled(OP_SWEEP)?;
     Ok((
         CurveSweep {
             brep,

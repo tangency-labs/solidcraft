@@ -39,6 +39,7 @@
 //!   With inherited parameters, fits are checked on cell edges and centers and
 //!   refined for at most 24 iterations, still within the 10000-point grid budget;
 //!   exhausting either bound returns an error instead of an unchecked surface.
+//! - Cancellation: `offset_cancellable` (crate-private) passes a cancel token (#2136, #2372) to its profile offsets; `offset` and `offset_with` pass none.
 
 use crate::error::{NlibCode, Result, SolidError};
 use crate::math::{max2, Vec3};
@@ -276,6 +277,28 @@ impl Surface {
         tol: f64,
         options: OffsetOptions,
     ) -> Result<Surface> {
+        self.offset_cancellable(d, pp, qq, par, eps, tol, options, None)
+    }
+
+    /// [`Surface::offset_with`] whose profile offsets poll `cancel` (#2136, #2372)
+    /// ([`Curve::offset_pt_sampling`]'s sample and knot removal loops) and return
+    /// `Cancelled` once it fires; `None`, or a token that never fires, changes nothing.
+    ///
+    /// # Errors
+    ///
+    /// As [`Surface::offset_with`]; `Cancelled` when `cancel` fires.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn offset_cancellable(
+        &self,
+        d: f64,
+        pp: usize,
+        qq: usize,
+        par: OffsetParam,
+        eps: f64,
+        tol: f64,
+        options: OffsetOptions,
+        cancel: Option<&crate::kernel::CancelToken>,
+    ) -> Result<Surface> {
         // Get surface type.
         let st = self.surface_type(eps)?;
         let stp = st.kind;
@@ -349,7 +372,8 @@ impl Surface {
                 cc = -cc;
             }
 
-            let mut cur_p = cur_a.offset_pt_sampling(cc, d, pq, false, par, tol)?;
+            let mut cur_p =
+                cur_a.offset_pt_sampling_cancellable(cc, d, pq, false, par, tol, cancel)?;
             let sur_q = revolved_srf(&mut cur_p, aa, bb, st.al, ConicType::Quadratic)?;
             return orient(sur_q, np);
         }
@@ -381,7 +405,8 @@ impl Surface {
                     let dot = np.dot(cross);
                     let nn = if dot < 0.0 { -nn } else { nn };
 
-                    let mut cur_p = cur_a.offset_pt_sampling(nn, d, pq, false, par, tol)?;
+                    let mut cur_p =
+                        cur_a.offset_pt_sampling_cancellable(nn, d, pq, false, par, tol, cancel)?;
                     let dir = dir.ok_or(SolidError::nlib(OP, NlibCode::Call))?;
                     let sur_q = extrude_crv(&mut cur_p, aa, st.r1, dir)?;
                     let mut sur_q = orient(sur_q, np)?;
