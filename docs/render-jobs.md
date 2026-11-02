@@ -89,8 +89,9 @@ buffers. Completed frames keep their memory reservation while bytes are retained
 The CPU path shades in linear light, blends sorted triangle alpha approximately, then
 encodes 8-bit sRGB with straight alpha and an sRGB PNG chunk. Transparent shared edges
 use a consistent fill rule. Intersecting transparent surfaces and triangle sorting
-remain raster approximations. This is not a glass/refraction renderer. Native GPU
-preview and CPU export can differ in shading and transparency.
+remain raster approximations. This is not a glass/refraction renderer. The native GPU
+preview shades simple colours the same way (in linear light, encoded once); preview and
+export can still differ in how they blend transparency.
 
 PNG uses the already-transitive Rust `png` crate (MIT OR Apache-2.0), now an explicit
 render dependency. No external render engine or third-party art is introduced.
