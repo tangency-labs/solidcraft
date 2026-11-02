@@ -663,19 +663,39 @@ fn a_setback_corner_left_open_returns_its_hole() {
     assert_eq!(refused, Some(Error::CornerRefused { corner: 0 }));
 }
 
-/// A curvature-continuous round is refused on solidcore, whose only curvature section is the
-/// blend-curve quintic (113/756 r² off a square corner, not the equal-area (1 - π/4) r²), until
-/// its pin has the Gⁿ section generator (solidcore#2250).
+/// A curvature-continuous round at the equal-area thumbweight takes off what the ball's circle
+/// does, r² (cot(α/2) - (π - α)/2) per unit length on a wedge α (solidcore#2261): on a 40 x 30 x 20
+/// box with its top back edge chamfered 5, r 2 along the chamfer's top edge (α 135°) takes
+/// 0.0860579227 per mm, along the bottom front edge (α 90°) 0.8584073464. Both in one call are
+/// refused: every edge takes the first one's thumbweight, so the other would take 17% too little
+/// or 21% too much (solidcore#2250's comment 6563419897), whichever order they come in.
 #[test]
-fn a_curvature_round_is_refused_until_solidcore_has_the_equal_area_section() {
-    let b = BLOCK.core();
-    let r = blend(&b, Blend::Curvature, &[TOP_FRONT], &[2.0], TOL, &[], &[], Corners::Filled).err();
-    assert_eq!(r, Some(Error::Unported(super::blend::CURVATURE_SECTION)));
-    assert!(r.is_some_and(|e| e.to_string().contains("solidcore#2250")));
-    let set_back = blend(&b, Blend::Curvature, &[TOP_FRONT], &[2.0], TOL, &[[0.0, 0.0, 10.0]], &[3.0], Corners::Filled).err();
-    assert_eq!(set_back, Some(Error::Unported(super::blend::CURVATURE_SECTION)));
+fn a_curvature_round_takes_its_wedges_equal_area_and_mixed_wedges_are_refused() {
+    let r = 2.0;
+    let cut = |alpha: f64| r * r * (1.0 / (alpha / 2.0).tan() - (PI - alpha) / 2.0);
+    let chamfered =
+        blend(&Shape::Box([0.0; 3], [40.0, 30.0, 20.0]).core(), Blend::Chamfer, &[[20.0, 30.0, 20.0]], &[5.0], TOL, &[], &[], Corners::Filled)
+            .unwrap();
+    let v0 = volume(&chamfered, 1e-8).unwrap();
+    assert!(rel(v0, 23500.0) < 1e-9, "{v0}");
+    let (a, b) = ([20.0, 25.0, 20.0], [20.0, 0.0, 0.0]);
+    for (at, alpha) in [(a, 0.75 * PI), (b, 0.5 * PI)] {
+        let round = blend(&chamfered, Blend::Curvature, &[at], &[r], TOL, &[], &[], Corners::Filled).unwrap();
+        let (rec, _) = native(&to_arrays(&round).unwrap()).unwrap();
+        rec.validate().unwrap();
+        let removed = v0 - volume(&round, 1e-8).unwrap();
+        assert!(rel(removed, 40.0 * cut(alpha)) < 1e-6, "{removed} vs {}", 40.0 * cut(alpha));
+    }
+    for both in [[a, b], [b, a]] {
+        let refused = blend(&chamfered, Blend::Curvature, &both, &[r], TOL, &[], &[], Corners::Filled).err();
+        assert_eq!(refused, Some(Error::Unported(super::blend::CURVATURE_MIXED_WEDGES)));
+        assert!(refused.is_some_and(|e| e.to_string().contains("issuecomment-6563419897")));
+    }
+    // Edges of one wedge go together.
+    let two = blend(&chamfered, Blend::Curvature, &[b, [20.0, 0.0, 20.0]], &[r], TOL, &[], &[], Corners::Filled).unwrap();
+    assert!(rel(v0 - volume(&two, 1e-8).unwrap(), 80.0 * cut(0.5 * PI)) < 1e-6);
     // A pick that misses is still named first.
-    assert_eq!(blend(&b, Blend::Curvature, &[[90.0; 3]], &[2.0], TOL, &[], &[], Corners::Filled).err(), Some(Error::NoMatch { point: 0 }));
+    assert_eq!(blend(&chamfered, Blend::Curvature, &[[90.0; 3]], &[r], TOL, &[], &[], Corners::Filled).err(), Some(Error::NoMatch { point: 0 }));
 }
 
 /// A variable round is the union of its balls (solidcore#2262, `fillet_gn_section_generator`).

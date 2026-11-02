@@ -28,6 +28,7 @@ use solidcore::blend::fillet_executive::p1::{FilletLaw, FilletLawKind};
 use solidcore::blend::fillet_executive::p3::NoRoomReason;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_geom::p1::{FilletCornerType, FilletErrorType};
+use solidcore::blend::fillet_section::section::GN_THUMBWEIGHT_EQUAL_AREA;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::geom::attribute::{Attribute, AttributeHandlers, Behavior, ids as attribute_ids};
 use solidcore::geom::vector3d::{Point3, Vec3};
@@ -235,6 +236,10 @@ fn chamfer_radius(k: &Kernel, b: &mut Brep, e: EdgeId, distance: f64) -> solidco
 #[derive(Clone, Copy, PartialEq)]
 enum Section<'a> {
     Round,
+    /// The curvature-continuous section (`SM_FSG_BLEND_CURVE`): the Gⁿ generator's order 2 at the
+    /// equal-area thumbweight (`SMLIB_BLEND_THUMBWEIGHT`, fork 6148773; solidcore#2261 under
+    /// `fillet_gn_section_generator`), which takes off what the ball's circle does.
+    Curvature,
     Chord,
     /// A chamfer, with each edge's offset of its second surface (`chamfer_offsets`' `second`;
     /// the sizes are the first's).
@@ -340,6 +345,11 @@ fn blend_edges_stopping(
                 Some(&size) => s.prepare_variable_radius_edges(k, edges, size, law, 1, 1),
                 None => return Ok(Err(Err(Error::Argument))),
             },
+            // The equal-area thumbweight by solidcore's name, never its value: solidcore#2274 moves
+            // it from -2 to 2, after which -2 is an ordinary weight.
+            (Section::Curvature, _) => {
+                s.prepare_per_edge_constant_radius(k, edges, sizes, &[FilletSurfaceGeneratorType::BlendCurve], 2, GN_THUMBWEIGHT_EQUAL_AREA)
+            }
             (Section::Chord, _) => s.prepare_per_edge_constant_distance(k, edges, sizes, &[FilletSurfaceGeneratorType::Circular], 1, 1.0),
             (Section::Chamfer(second), _) => chamfer_parameters(k, &mut s, edges, sizes, second),
         };
@@ -652,13 +662,36 @@ fn untagged(mut b: Brep) -> Out<Brep> {
     Ok(b)
 }
 
-/// Why [`Blend::Curvature`] is refused. The capi's curvature section is the Gⁿ generator's order 2
-/// at the equal-area thumbweight (`SMLIB_BLEND_THUMBWEIGHT`, fork 6148773), which solidcore does
-/// not have yet; the blend-curve quintic it does have takes off another area, so it is not built
-/// in its place. The refusal comes off when the solidcore pin carries #2260 and 6148773 and its
-/// `fillet_gn_section_generator` flag is on.
-pub(crate) const CURVATURE_SECTION: &str = "a curvature-continuous fillet on solidcore: the curvature section's equal-area Gⁿ \
-generator is not in solidcore yet (solidcore#2250, port in progress as #2260)";
+/// Why a curvature fillet over edges of different wedge angles is refused. The equal-area
+/// thumbweight is resolved once per call, from the first blend's wedge, and every edge takes it
+/// (in the fork as in solidcore#2261): an edge of another wedge takes off another area than its
+/// own, and which one depends on the edges' order.
+pub(crate) const CURVATURE_MIXED_WEDGES: &str = "a curvature-continuous fillet on solidcore over edges whose faces meet at different \
+angles: every edge takes the equal-area thumbweight of the first one's angle, so the others take off the wrong area \
+(https://github.com/tangency-labs/solidcore/issues/2250#issuecomment-6563419897)";
+
+/// How far apart, in radians, two edges' wedge angles may be and still share one equal-area
+/// thumbweight.
+const WEDGE_TOLERANCE: f64 = 1e-6;
+
+/// Whether the faces of every edge in `edges` meet at the same angle at its midpoint (the wedge the
+/// equal-area thumbweight is resolved from), within [`WEDGE_TOLERANCE`]. An edge whose angle can't
+/// be read counts as another wedge.
+fn one_wedge(k: &Kernel, b: &mut Brep, edges: &[EdgeId]) -> solidcore::Result<bool> {
+    let mut first: Option<f64> = None;
+    for &e in edges {
+        let Some(u0) = edge::blend_edgeuse(k, b, e)? else { return Ok(false) };
+        let Some(u1) = eu_p1::radial(b, u0)? else { return Ok(false) };
+        let (Some((n0, _)), Some((n1, _))) = (face_frame(k, b, u0)?, face_frame(k, b, u1)?) else { return Ok(false) };
+        let angle = n0.dot(n1).clamp(-1.0, 1.0).acos();
+        match first {
+            None => first = Some(angle),
+            Some(a) if (a - angle).abs() > WEDGE_TOLERANCE => return Ok(false),
+            Some(_) => {}
+        }
+    }
+    Ok(true)
+}
 
 /// [`blend_holes`] without its holes.
 #[allow(clippy::too_many_arguments)] // the capi's blend_call
@@ -751,7 +784,11 @@ fn blend_call(
         let solid_in = brep_p2::is_manifold_solid(&w)?;
         let section = match kind {
             Blend::Round => Section::Round,
-            Blend::Curvature => return Ok(Err(Error::Unported(CURVATURE_SECTION))),
+            // Every edge of one call takes the equal-area thumbweight of the first's wedge
+            // (solidcore#2250's comment 6563419897): edges of other wedges would take off another
+            // area than their own, so they are not built together.
+            Blend::Curvature if !one_wedge(k, &mut w, &picked)? => return Ok(Err(Error::Unported(CURVATURE_MIXED_WEDGES))),
+            Blend::Curvature => Section::Curvature,
             Blend::Chord => Section::Chord,
             // `chamfer_edges`: each edge's offsets from its setback at its midpoint.
             Blend::Chamfer => {
