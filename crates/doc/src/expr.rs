@@ -6,8 +6,16 @@
 //! parameter), else millimetres and degrees. A unit-less final result takes the expected unit
 //! (`2` for an inch parameter is 2 in). Trigonometric functions take an angle; a unit-less
 //! argument is read as degrees.
+//!
+//! The evaluator is generic over its number type ([`Real`]): `f64` for a value, as every caller
+//! uses it, or an enclosure (`Interval`, `Jet`) for the range of an expression over a range of
+//! one of its names, with the same grammar and units (#10414). A check that depends on a value
+//! (dividing by zero, `sqrt` of a negative) applies where the number is known exactly, which a
+//! plain `f64` always is; an enclosure that may break a rule is refused by its own function.
 
 use std::collections::BTreeMap;
+
+use solidcraft_geom::enclosure::{Proven, Real, Unproven};
 
 use crate::DocError;
 
@@ -228,10 +236,10 @@ impl Defaults {
     }
 }
 
-/// A dimensioned value.
+/// A dimensioned value, a plain number unless an enclosure is asked for.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Value {
-    pub v: f64,
+pub struct Value<N = f64> {
+    pub v: N,
     pub len: i8,
     pub ang: i8,
 }
@@ -246,6 +254,41 @@ impl Value {
     pub fn angle(rad: f64) -> Value {
         Value { v: rad, len: 0, ang: 1 }
     }
+    /// The same value in another number type, exactly.
+    pub fn exact<N: Real>(self) -> Result<Value<N>, DocError> {
+        Ok(Value { v: proven(N::exact(self.v))?, len: self.len, ang: self.ang })
+    }
+    /// Convert to the expected kind (mm or radians); unit-less numbers are mm / degrees.
+    pub fn to_kind(self, k: Kind) -> Result<f64, DocError> {
+        self.to_kind_in(k, Defaults::default())
+    }
+}
+
+/// An enclosure's reason as an expression error.
+pub(crate) fn proven<T>(r: Proven<T>) -> Result<T, DocError> {
+    r.map_err(|e| {
+        DocError::Expr(
+            match e {
+                Unproven::Domain => "can't be proven: a value may be outside what a function takes",
+                Unproven::Jump => "can't be proven: a value may jump here",
+                Unproven::Uncertified => "can't be proven: a value is too large to bound",
+            }
+            .into(),
+        )
+    })
+}
+
+/// Whether `x` is known to be one number for which `pred` holds. For an `f64` that is `pred(x)`.
+fn is<N: Real>(x: N, pred: impl Fn(f64) -> bool) -> bool {
+    x.as_point().is_some_and(pred)
+}
+
+/// A unit-less constant.
+fn constant<N: Real>(x: f64) -> Result<Value<N>, DocError> {
+    Ok(Value { v: proven(N::exact(x))?, len: 0, ang: 0 })
+}
+
+impl<N: Real> Value<N> {
     pub fn unitless(&self) -> bool {
         self.len == 0 && self.ang == 0
     }
@@ -258,17 +301,13 @@ impl Value {
             _ => None,
         }
     }
-    /// Convert to the expected kind (mm or radians); unit-less numbers are mm / degrees.
-    pub fn to_kind(self, k: Kind) -> Result<f64, DocError> {
-        self.to_kind_in(k, Defaults::default())
-    }
     /// Convert to the expected kind, reading a unit-less result in the given defaults.
-    pub fn to_kind_in(self, k: Kind, d: Defaults) -> Result<f64, DocError> {
+    pub fn to_kind_in(self, k: Kind, d: Defaults) -> Result<N, DocError> {
         let out = match k {
             Kind::Length if self.len == 1 && self.ang == 0 => self.v,
-            Kind::Length if self.unitless() => self.v * d.len,
+            Kind::Length if self.unitless() => proven(self.v.mul(proven(N::exact(d.len))?))?,
             Kind::Angle if self.ang == 1 && self.len == 0 => self.v,
-            Kind::Angle if self.unitless() => self.v * d.ang,
+            Kind::Angle if self.unitless() => proven(self.v.mul(proven(N::exact(d.ang))?))?,
             Kind::Unitless if self.unitless() => self.v,
             _ => {
                 let hint = if k == Kind::Unitless && self.len == 1 && self.ang == 0 {
@@ -688,17 +727,17 @@ pub fn length_unit_or_mm(units: &str) -> &str {
     if unit_info(u).is_some_and(|(k, _)| k == Kind::Length) { u } else { "mm" }
 }
 
-struct Parser<'a> {
-    toks: Vec<Tok>,
+struct Parser<'a, N> {
+    toks: &'a [Tok],
     /// Each token's byte range in the source: whether a fraction is written closed up.
-    spans: Vec<(usize, usize)>,
+    spans: &'a [(usize, usize)],
     pos: usize,
-    lookup: &'a dyn Fn(&str) -> Result<Value, DocError>,
+    lookup: &'a dyn Fn(&str) -> Result<Value<N>, DocError>,
     depth: usize,
     defaults: Defaults,
 }
 
-impl Parser<'_> {
+impl<N: Real> Parser<'_, N> {
     fn peek(&self) -> Option<&Tok> {
         self.toks.get(self.pos)
     }
@@ -711,7 +750,7 @@ impl Parser<'_> {
         self.depth += 1;
         if self.depth > MAX_DEPTH { Err(DocError::Expr("expression nested too deeply".into())) } else { Ok(()) }
     }
-    fn expr(&mut self) -> Result<Value, DocError> {
+    fn expr(&mut self) -> Result<Value<N>, DocError> {
         self.enter()?;
         let mut a = self.term()?;
         while let Some(Tok::Op(c @ ('+' | '-'))) = self.peek().cloned() {
@@ -722,7 +761,7 @@ impl Parser<'_> {
         self.depth -= 1;
         Ok(a)
     }
-    fn term(&mut self) -> Result<Value, DocError> {
+    fn term(&mut self) -> Result<Value<N>, DocError> {
         let mut a = self.unary()?;
         loop {
             match self.peek().cloned() {
@@ -750,18 +789,18 @@ impl Parser<'_> {
             }
         }
     }
-    fn unary(&mut self) -> Result<Value, DocError> {
+    fn unary(&mut self) -> Result<Value<N>, DocError> {
         self.signed(true)
     }
     /// A signed operand. `glue`: a number takes the unit written after it (not in an exponent).
-    fn signed(&mut self, glue: bool) -> Result<Value, DocError> {
+    fn signed(&mut self, glue: bool) -> Result<Value<N>, DocError> {
         match self.peek() {
             Some(Tok::Op('-')) => {
                 self.pos += 1;
                 self.enter()?;
                 let v = self.signed(glue)?;
                 self.depth -= 1;
-                Ok(Value { v: -v.v, ..v })
+                Ok(Value { v: v.v.neg(), ..v })
             }
             Some(Tok::Op('+')) => {
                 self.pos += 1;
@@ -773,7 +812,7 @@ impl Parser<'_> {
             _ => self.power(glue),
         }
     }
-    fn power(&mut self, glue: bool) -> Result<Value, DocError> {
+    fn power(&mut self, glue: bool) -> Result<Value<N>, DocError> {
         let number = matches!(self.peek(), Some(Tok::Num(_)));
         let at = self.pos;
         let mut base = self.atom()?;
@@ -789,7 +828,7 @@ impl Parser<'_> {
                 && self.unit_at(self.pos + 2)
                 && (!self.after_division(at) || self.closed_up(at, self.pos + 1))
             {
-                let d = Value::num(*d);
+                let d = constant(*d)?;
                 self.pos += 2;
                 base = mul(base, d, true)?;
             }
@@ -812,7 +851,7 @@ impl Parser<'_> {
     }
     /// Feet written with inches after them (`5' 3"`, `5 ft 3 1/2 in`) are one length, as sizes are
     /// said: 5 ft and 3 in, not their product. Anything else after the feet is left to the caller.
-    fn with_inches(&mut self, feet: Value) -> Result<Value, DocError> {
+    fn with_inches(&mut self, feet: Value<N>) -> Result<Value<N>, DocError> {
         let start = self.pos;
         if feet.len != 1 || feet.ang != 0 || !matches!(self.toks.get(start), Some(Tok::Num(_))) {
             return Ok(feet);
@@ -827,7 +866,7 @@ impl Parser<'_> {
             self.pos = start;
             return Ok(feet);
         }
-        Ok(Value { v: feet.v + inches.v, ..feet })
+        Ok(Value { v: proven(feet.v.add(inches.v))?, ..feet })
     }
     /// Whether the operand starting at token `i` is divided by: a `/` before it, past any signs.
     fn after_division(&self, i: usize) -> bool {
@@ -845,9 +884,9 @@ impl Parser<'_> {
     fn unit_at(&self, i: usize) -> bool {
         matches!(self.toks.get(i), Some(Tok::Id(id)) if unit(id).is_some()) && !matches!(self.toks.get(i + 1), Some(Tok::Op('(')))
     }
-    fn atom(&mut self) -> Result<Value, DocError> {
+    fn atom(&mut self) -> Result<Value<N>, DocError> {
         match self.next() {
-            Some(Tok::Num(v)) => Ok(Value::num(v)),
+            Some(Tok::Num(v)) => constant(v),
             Some(Tok::Op('(')) => {
                 let v = self.expr()?;
                 match self.next() {
@@ -877,11 +916,11 @@ impl Parser<'_> {
                     return call(&id, &args, self.defaults);
                 }
                 match id.as_str() {
-                    "pi" | "PI" => return Ok(Value::num(std::f64::consts::PI)),
+                    "pi" | "PI" => return constant(std::f64::consts::PI),
                     _ => {}
                 }
                 if let Some(u) = unit(&id) {
-                    return Ok(u);
+                    return u.exact();
                 }
                 (self.lookup)(&id)
             }
@@ -892,19 +931,19 @@ impl Parser<'_> {
 }
 
 /// A unit-less number next to a dimensioned value, in that value's default unit.
-fn scale_bare(x: Value, len: i8, ang: i8, d: Defaults) -> f64 {
+fn scale_bare<N: Real>(x: Value<N>, len: i8, ang: i8, d: Defaults) -> Result<N, DocError> {
     if !x.unitless() {
-        x.v
+        Ok(x.v)
     } else if len == 1 && ang == 0 {
-        x.v * d.len
+        proven(x.v.mul(proven(N::exact(d.len))?))
     } else if ang == 1 && len == 0 {
-        x.v * d.ang
+        proven(x.v.mul(proven(N::exact(d.ang))?))
     } else {
-        x.v
+        Ok(x.v)
     }
 }
 
-fn add(a: Value, b: Value, sub: bool, d: Defaults) -> Result<Value, DocError> {
+fn add<N: Real>(a: Value<N>, b: Value<N>, sub: bool, d: Defaults) -> Result<Value<N>, DocError> {
     let (len, ang) = if a.unitless() {
         (b.len, b.ang)
     } else if b.unitless() || (a.len == b.len && a.ang == b.ang) {
@@ -912,8 +951,8 @@ fn add(a: Value, b: Value, sub: bool, d: Defaults) -> Result<Value, DocError> {
     } else {
         return Err(DocError::Expr(format!("cannot {} {} and {}", if sub { "subtract" } else { "add" }, a.describe(), b.describe())));
     };
-    let (x, y) = (scale_bare(a, len, ang, d), scale_bare(b, len, ang, d));
-    Ok(Value { v: if sub { x - y } else { x + y }, len, ang })
+    let (x, y) = (scale_bare(a, len, ang, d)?, scale_bare(b, len, ang, d)?);
+    Ok(Value { v: proven(if sub { x.sub(y) } else { x.add(y) })?, len, ang })
 }
 
 fn dims(a: i8, b: i8, sub: bool) -> Result<i8, DocError> {
@@ -921,48 +960,73 @@ fn dims(a: i8, b: i8, sub: bool) -> Result<i8, DocError> {
     r.filter(|x| x.abs() <= 16).ok_or_else(|| DocError::Expr("unit powers too large".into()))
 }
 
-fn mul(a: Value, b: Value, div: bool) -> Result<Value, DocError> {
+fn mul<N: Real>(a: Value<N>, b: Value<N>, div: bool) -> Result<Value<N>, DocError> {
     if div {
-        if b.v == 0.0 {
+        if is(b.v, |x| x == 0.0) {
             return Err(DocError::Expr("division by zero".into()));
         }
-        Ok(Value { v: a.v / b.v, len: dims(a.len, b.len, true)?, ang: dims(a.ang, b.ang, true)? })
+        Ok(Value { v: proven(a.v.div(b.v))?, len: dims(a.len, b.len, true)?, ang: dims(a.ang, b.ang, true)? })
     } else {
-        Ok(Value { v: a.v * b.v, len: dims(a.len, b.len, false)?, ang: dims(a.ang, b.ang, false)? })
+        Ok(Value { v: proven(a.v.mul(b.v))?, len: dims(a.len, b.len, false)?, ang: dims(a.ang, b.ang, false)? })
     }
 }
 
-fn modulo(a: Value, b: Value, d: Defaults) -> Result<Value, DocError> {
+fn modulo<N: Real>(a: Value<N>, b: Value<N>, d: Defaults) -> Result<Value<N>, DocError> {
     let (len, ang) = if a.unitless() { (b.len, b.ang) } else { (a.len, a.ang) };
     if !(a.unitless() || b.unitless() || (a.len == b.len && a.ang == b.ang)) {
         return Err(DocError::Expr(format!("cannot take {} modulo {}", a.describe(), b.describe())));
     }
-    let (x, y) = (scale_bare(a, len, ang, d), scale_bare(b, len, ang, d));
-    if y == 0.0 {
+    let (x, y) = (scale_bare(a, len, ang, d)?, scale_bare(b, len, ang, d)?);
+    if is(y, |y| y == 0.0) {
         return Err(DocError::Expr("modulo by zero".into()));
     }
     // Unit conversion leaves the quotient an ulp or two off a whole number (`3 in % 1 in` divides
     // 76.2 mm by 25.4 mm), and the exact remainder is then almost a whole divisor instead of 0. A
     // quotient that close to a whole number is that number, so the remainder is 0. Past 1e12 the
-    // quotient has no fraction left to judge, so the exact remainder stands.
-    let q = x / y;
-    let nearest = q.round();
-    if nearest != 0.0 && nearest.abs() < 1e12 && (q - nearest).abs() <= 4.0 * f64::EPSILON * nearest.abs() {
-        return Ok(Value { v: 0.0, len, ang });
+    // quotient has no fraction left to judge, so the exact remainder stands. Over a range the
+    // remainder steps at a window's edge, so a quotient that may cross one is refused.
+    let class = proven(proven(x.div(y))?.step(quotient_class))?;
+    if is(class, |c| c.is_finite() && c % 2.0 == 0.0) {
+        return Ok(Value { v: proven(N::exact(0.0))?, len, ang });
     }
-    Ok(Value { v: x.rem_euclid(y), len, ang })
+    Ok(Value { v: proven(x.rem_euclid(y))?, len, ang })
 }
 
-fn pow(base: Value, e: Value) -> Result<Value, DocError> {
+/// Where a quotient `q` falls, a step that never decreases: `2n` within a rounding error of a
+/// whole number `n` (not 0, below 1e12), `2⌊q⌋ + 1` between them, and ±∞ from 1e12 on.
+fn quotient_class(q: f64) -> f64 {
+    let nearest = q.round();
+    if nearest.abs() >= 1e12 {
+        f64::INFINITY.copysign(q)
+    } else if nearest != 0.0 && (q - nearest).abs() <= 4.0 * f64::EPSILON * nearest.abs() {
+        2.0 * nearest
+    } else {
+        2.0 * q.floor() + 1.0
+    }
+}
+
+/// `x`, or the whole number it is within a unit conversion's rounding error of (`3 in / 1 in` is
+/// 2.9999999999999996), so `floor` does not drop to 2. The tolerance is relative to the whole
+/// number, so a tiny value never snaps to 0, and it stays under 1/8 so no real fraction is
+/// absorbed. It never decreases, so a step taken after it is still one.
+fn whole(x: f64) -> f64 {
+    let nearest = x.round();
+    if (x - nearest).abs() <= (4.0 * f64::EPSILON * nearest.abs()).min(0.125) { nearest } else { x }
+}
+
+fn pow<N: Real>(base: Value<N>, e: Value<N>) -> Result<Value<N>, DocError> {
     if !e.unitless() {
         return Err(DocError::Expr(format!("an exponent must be a unit-less number, not {}", e.describe())));
     }
-    let n = e.v;
-    let k = if (n - n.round()).abs() < 1e-12 && n.abs() < 16.0 { n.round() as i8 } else { 0 };
+    // The units' power needs one exponent: one that varies is taken as no whole number.
+    let k = match e.v.as_point() {
+        Some(n) if (n - n.round()).abs() < 1e-12 && n.abs() < 16.0 => n.round() as i8,
+        _ => 0,
+    };
     if !base.unitless() && k == 0 {
         return Err(DocError::Expr("a value with units needs a small whole-number exponent".into()));
     }
-    Ok(Value { v: base.v.powf(n), len: dims(0, base.len.saturating_mul(k), false)?, ang: dims(0, base.ang.saturating_mul(k), false)? })
+    Ok(Value { v: proven(base.v.pow(e.v))?, len: dims(0, base.len.saturating_mul(k), false)?, ang: dims(0, base.ang.saturating_mul(k), false)? })
 }
 
 /// The whole number of quarter turns an angle in radians is, if it is one up to rounding: `90 deg`
@@ -975,7 +1039,18 @@ fn quarter_turns(a: f64) -> Option<i64> {
     (n != 0.0 && n.abs() < 1e12 && (q - n).abs() <= 4.0 * f64::EPSILON * n.abs()).then_some(n as i64)
 }
 
-fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
+/// `f` (`sin`, `cos` or `tan`) of the angle `a`, with `exact` its value at `n` quarter turns where
+/// it has one. An angle that is one number within float noise of a quarter turn takes that value: a
+/// plain number takes it outright, and an enclosure is widened to hold it as well as what it holds.
+fn trig<N: Real>(a: N, f: fn(N) -> Proven<N>, exact: fn(i64) -> Option<f64>) -> Result<N, DocError> {
+    let x = proven(f(a))?;
+    let Some(e) = a.as_point().and_then(quarter_turns).and_then(exact) else { return Ok(x) };
+    let e = proven(N::exact(e))?;
+    // A plain number's `hull` refuses two different numbers.
+    Ok(x.hull(e).unwrap_or(e))
+}
+
+fn call<N: Real>(f: &str, args: &[Value<N>], d: Defaults) -> Result<Value<N>, DocError> {
     let one = || match args {
         [a] => Ok(*a),
         _ => Err(DocError::Expr(format!("`{f}` takes one argument"))),
@@ -984,125 +1059,101 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
         [a, b] => Ok((*a, *b)),
         _ => Err(DocError::Expr(format!("`{f}` takes two arguments"))),
     };
-    let rad = |a: Value| {
+    let rad = |a: Value<N>| {
         if a.ang == 1 && a.len == 0 {
             Ok(a.v)
         } else if a.unitless() {
-            Ok(a.v * d.ang)
+            proven(a.v.mul(proven(N::exact(d.ang))?))
         } else {
             Err(DocError::Expr(format!("`{f}` needs an angle, not {}", a.describe())))
         }
     };
-    let num = |a: Value| if a.unitless() { Ok(a.v) } else { Err(DocError::Expr(format!("`{f}` needs a unit-less number, not {}", a.describe()))) };
-    let same = |a: Value, b: Value| -> Result<(Value, Value), DocError> {
+    let num = |a: Value<N>| if a.unitless() { Ok(a.v) } else { Err(DocError::Expr(format!("`{f}` needs a unit-less number, not {}", a.describe()))) };
+    let zero = proven(N::exact(0.0))?;
+    let same = |a: Value<N>, b: Value<N>| -> Result<(Value<N>, Value<N>), DocError> {
         // Bring a bare number to the other operand's unit (as in `a + b`).
-        let z = add(a, Value { v: 0.0, ..b }, false, d)?;
-        let w = add(b, Value { v: 0.0, ..a }, false, d)?;
+        let z = add(a, Value { v: zero, ..b }, false, d)?;
+        let w = add(b, Value { v: zero, ..a }, false, d)?;
         Ok((z, w))
     };
-    let unit_fn = |x: f64, a: Value| Value { v: x, ..a };
+    let unit_fn = |x: N, a: Value<N>| Value { v: x, ..a };
+    let plain = |x: Proven<N>| proven(x).map(|v| Value { v, len: 0, ang: 0 });
+    let angle = |x: Proven<N>| proven(x).map(|v| Value { v, len: 0, ang: 1 });
     Ok(match f {
-        "sin" => {
-            let a = rad(one()?)?;
-            Value::num(match quarter_turns(a) {
-                Some(n) => [0.0, 1.0, 0.0, -1.0][n.rem_euclid(4) as usize],
-                None => a.sin(),
-            })
-        }
-        "cos" => {
-            let a = rad(one()?)?;
-            Value::num(match quarter_turns(a) {
-                Some(n) => [1.0, 0.0, -1.0, 0.0][n.rem_euclid(4) as usize],
-                None => a.cos(),
-            })
-        }
-        "tan" => {
-            let a = rad(one()?)?;
-            // Only a half turn is exact: the tangent of an odd quarter turn is not a number.
-            Value::num(match quarter_turns(a) {
-                Some(n) if n % 2 == 0 => 0.0,
-                _ => a.tan(),
-            })
-        }
+        "sin" => Value { v: trig(rad(one()?)?, N::sin, |n| Some([0.0, 1.0, 0.0, -1.0][n.rem_euclid(4) as usize]))?, len: 0, ang: 0 },
+        "cos" => Value { v: trig(rad(one()?)?, N::cos, |n| Some([1.0, 0.0, -1.0, 0.0][n.rem_euclid(4) as usize]))?, len: 0, ang: 0 },
+        // Only a half turn is exact: the tangent of an odd quarter turn is not a number.
+        "tan" => Value { v: trig(rad(one()?)?, N::tan, |n| (n % 2 == 0).then_some(0.0))?, len: 0, ang: 0 },
         "asin" | "acos" => {
             let x = num(one()?)?;
-            if !(-1.0..=1.0).contains(&x) {
+            if is(x, |x| !(-1.0..=1.0).contains(&x)) {
                 return Err(DocError::Expr(format!("`{f}` needs a number between -1 and 1")));
             }
-            Value::angle(if f == "asin" { x.asin() } else { x.acos() })
+            angle(if f == "asin" { x.asin() } else { x.acos() })?
         }
-        "atan" => Value::angle(num(one()?)?.atan()),
+        "atan" => angle(num(one()?)?.atan())?,
         "atan2" => {
             let (y, x) = two()?;
             let (y, x) = same(y, x)?;
             if y.len != x.len || y.ang != x.ang {
                 return Err(DocError::Expr("`atan2` needs two values with the same units".into()));
             }
-            Value::angle(y.v.atan2(x.v))
+            angle(y.v.atan2(x.v))?
         }
         "sqrt" => {
             let a = one()?;
             if a.len % 2 != 0 || a.ang % 2 != 0 {
                 return Err(DocError::Expr("sqrt of an odd power of a unit".into()));
             }
-            if a.v < 0.0 {
+            if is(a.v, |x| x < 0.0) {
                 return Err(DocError::Expr("sqrt of a negative number".into()));
             }
-            Value { v: a.v.sqrt(), len: a.len / 2, ang: a.ang / 2 }
+            Value { v: proven(a.v.sqrt())?, len: a.len / 2, ang: a.ang / 2 }
         }
         "abs" => {
             let a = one()?;
-            unit_fn(a.v.abs(), a)
+            unit_fn(proven(a.v.abs())?, a)
         }
-        "sign" => {
-            let x = one()?.v;
-            // `f64::signum` gives 1 for +0 and -1 for -0; the sign of zero is 0.
-            Value::num(if x == 0.0 { 0.0 } else { x.signum() })
-        }
+        // `Real::sign`: the sign of ±0 is 0, where `f64::signum` gives ±1.
+        "sign" => plain(one()?.v.sign())?,
         "floor" | "ceil" | "round" | "trunc" => {
             let a = one()?;
             // Round in the value's own default unit (round(2.4 in) = 2 in for an inch parameter).
-            let scale = scale_bare(Value::num(1.0), a.len, a.ang, d);
-            let x = if scale != 0.0 { a.v / scale } else { a.v };
-            // Unit conversions leave a rounding error of an ulp or two (`3 in / 1 in` is
-            // 2.9999999999999996): a value that close to a whole number is that number, so `floor`
-            // does not drop to 2. The tolerance is relative to the whole number, so a tiny value
-            // never snaps to 0, and it stays under 1/8 so no real fraction is absorbed.
-            let nearest = x.round();
-            let x = if (x - nearest).abs() <= (4.0 * f64::EPSILON * nearest.abs()).min(0.125) { nearest } else { x };
-            let r = match f {
-                "floor" => x.floor(),
-                "ceil" => x.ceil(),
-                "trunc" => x.trunc(),
-                _ => x.round(),
-            };
-            unit_fn(r * if scale != 0.0 { scale } else { 1.0 }, a)
+            let scale = scale_bare(Value { v: 1.0, len: 0, ang: 0 }, a.len, a.ang, d)?;
+            let x = if scale != 0.0 { proven(a.v.div(proven(N::exact(scale))?))? } else { a.v };
+            let r = proven(match f {
+                "floor" => x.step(|x| whole(x).floor()),
+                "ceil" => x.step(|x| whole(x).ceil()),
+                "trunc" => x.step(|x| whole(x).trunc()),
+                _ => x.step(|x| whole(x).round()),
+            })?;
+            unit_fn(proven(r.mul(proven(N::exact(if scale != 0.0 { scale } else { 1.0 }))?))?, a)
         }
-        "exp" => Value::num(num(one()?)?.exp()),
-        "sinh" => Value::num(num(one()?)?.sinh()),
-        "cosh" => Value::num(num(one()?)?.cosh()),
-        "tanh" => Value::num(num(one()?)?.tanh()),
-        "asinh" => Value::num(num(one()?)?.asinh()),
+        "exp" => plain(num(one()?)?.exp())?,
+        "sinh" => plain(num(one()?)?.sinh())?,
+        "cosh" => plain(num(one()?)?.cosh())?,
+        "tanh" => plain(num(one()?)?.tanh())?,
+        "asinh" => plain(num(one()?)?.asinh())?,
         "acosh" => {
             let x = num(one()?)?;
-            if !(x >= 1.0) {
+            if is(x, |x| !(x >= 1.0)) {
                 return Err(DocError::Expr("`acosh` needs a number of at least 1".into()));
             }
-            Value::num(x.acosh())
+            plain(x.acosh())?
         }
         "atanh" => {
             let x = num(one()?)?;
-            if !(x > -1.0 && x < 1.0) {
+            if is(x, |x| !(x > -1.0 && x < 1.0)) {
                 return Err(DocError::Expr("`atanh` needs a number between -1 and 1, both excluded".into()));
             }
-            Value::num(x.atanh())
+            plain(x.atanh())?
         }
         "ln" | "log" | "log10" => {
             let x = num(one()?)?;
-            if x <= 0.0 {
+            if is(x, |x| x <= 0.0) {
                 return Err(DocError::Expr(format!("`{f}` needs a positive number")));
             }
-            Value::num(if f == "ln" { x.ln() } else { x.log10() })
+            plain(if f == "ln" { x.ln() } else { x.log10() })?
         }
         "hypot" => {
             let (a, b) = two()?;
@@ -1110,7 +1161,7 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
             if a.len != b.len || a.ang != b.ang {
                 return Err(DocError::Expr("`hypot` needs two values with the same units".into()));
             }
-            unit_fn(a.v.hypot(b.v), a)
+            unit_fn(proven(a.v.hypot(b.v))?, a)
         }
         "pow" => {
             let (a, b) = two()?;
@@ -1128,7 +1179,8 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
                 if x.len != y.len || x.ang != y.ang {
                     return Err(DocError::Expr(format!("`{f}` needs values with the same units")));
                 }
-                acc = if (f == "min" && x.v < y.v) || (f == "max" && x.v > y.v) { x } else { y };
+                // `x` when it is below (above) `y`, else `y`: what a plain number picks.
+                acc = Value { v: proven(if f == "min" { x.v.min(y.v) } else { x.v.max(y.v) })?, ..y };
             }
             acc
         }
@@ -1161,22 +1213,41 @@ pub fn eval_with(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocError>) -> R
 
 /// Evaluate an expression reading bare numbers next to lengths / angles in `defaults`.
 pub fn eval_with_defaults(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocError>, defaults: Defaults) -> Result<Value, DocError> {
-    let (toks, spans): (Vec<Tok>, Vec<(usize, usize)>) = lex_spans(s)?.into_iter().map(|(t, a, b)| (t, (a, b))).unzip();
-    if toks.is_empty() {
-        if let Some((name, _)) = definition(s) {
-            return Err(DocError::Expr(format!("`{name} =` needs a value after the `=`")));
+    Compiled::new(s)?.eval(lookup, defaults)
+}
+
+/// An expression read into tokens once, to be evaluated many times: in another number type, or
+/// with a name taking many values.
+pub struct Compiled {
+    text: String,
+    toks: Vec<Tok>,
+    spans: Vec<(usize, usize)>,
+}
+
+impl Compiled {
+    pub fn new(s: &str) -> Result<Compiled, DocError> {
+        let (toks, spans): (Vec<Tok>, Vec<(usize, usize)>) = lex_spans(s)?.into_iter().map(|(t, a, b)| (t, (a, b))).unzip();
+        if toks.is_empty() {
+            if let Some((name, _)) = definition(s) {
+                return Err(DocError::Expr(format!("`{name} =` needs a value after the `=`")));
+            }
+            return Err(DocError::Expr("empty expression".into()));
         }
-        return Err(DocError::Expr("empty expression".into()));
+        Ok(Compiled { text: s.to_string(), toks, spans })
     }
-    let mut p = Parser { toks, spans, pos: 0, lookup, depth: 0, defaults };
-    let v = p.expr()?;
-    if p.pos < p.toks.len() {
-        return Err(DocError::Expr(format!("unexpected input in `{s}`")));
+
+    /// Its value, in `N`, with names resolved by `lookup`.
+    pub fn eval<N: Real>(&self, lookup: &dyn Fn(&str) -> Result<Value<N>, DocError>, defaults: Defaults) -> Result<Value<N>, DocError> {
+        let mut p = Parser { toks: &self.toks, spans: &self.spans, pos: 0, lookup, depth: 0, defaults };
+        let v = p.expr()?;
+        if p.pos < p.toks.len() {
+            return Err(DocError::Expr(format!("unexpected input in `{}`", self.text)));
+        }
+        if !v.v.is_finite() {
+            return Err(DocError::Expr(format!("`{}` is not a finite number", self.text)));
+        }
+        Ok(v)
     }
-    if !v.v.is_finite() {
-        return Err(DocError::Expr(format!("`{s}` is not a finite number")));
-    }
-    Ok(v)
 }
 
 /// One parameter to evaluate: name, expression and unit (`mm`, `in`, `deg`, empty…).
@@ -1945,6 +2016,37 @@ mod tests {
         ] {
             assert!((rem(e) - want).abs() < 1e-9 * want.abs().max(1.0), "{e} gave {}", rem(e));
         }
+    }
+
+    /// Over a range the snap to a whole number is part of the function: a range all within a
+    /// rounding error of 3 rounds to 3, and `mod` refuses a quotient that may cross a snap's edge
+    /// rather than claim a remainder the values there don't have.
+    #[test]
+    fn snaps_to_whole_numbers_hold_over_a_range() {
+        use solidcraft_geom::enclosure::Interval;
+        let at = |e: &str, lo: f64, hi: f64| {
+            let x = move |_: &str| Ok(Value { v: Interval::new(lo, hi), len: 0, ang: 0 });
+            Compiled::new(e).unwrap().eval::<Interval>(&x, Defaults::default()).map(|v| v.v)
+        };
+        // `3 in / 1 in` in floats lies either side of 3.
+        let (lo, hi) = (2.9999999999999996, 3.0000000000000004);
+        for e in ["floor(x)", "ceil(x)", "trunc(x)", "round(x)", "floor(-x)"] {
+            let want = if e.contains('-') { -3.0 } else { 3.0 };
+            assert_eq!(at(e, lo, hi).unwrap().as_point(), Some(want), "{e}");
+        }
+        assert_eq!(at("mod(x, 1)", lo, hi).unwrap().as_point(), Some(0.0));
+        // Clear of the snaps: the plain step and remainder.
+        assert_eq!(at("floor(x)", 2.4, 2.6).unwrap().as_point(), Some(2.0));
+        assert_eq!(at("ceil(x)", 2.4, 3.0).unwrap().as_point(), Some(3.0));
+        assert!(at("floor(x)", 2.5, 3.5).is_err());
+        let r = at("mod(x, 1)", 3.25, 3.5).unwrap();
+        assert!(r.contains(0.25) && r.contains(0.5) && !r.contains(0.0), "{r:?}");
+        // A quotient from a whole number on: 0 at the start and just after, then the remainder.
+        assert!(at("mod(x, 1)", 3.0, 3.5).is_err());
+        // A quarter turn given as one number holds both its exact cosine and the float's.
+        let half_pi = std::f64::consts::FRAC_PI_2;
+        let c = at("cos(x * 1 rad)", half_pi, half_pi).unwrap();
+        assert!(c.contains(0.0) && c.contains(half_pi.cos()), "{c:?}");
     }
 
     #[test]

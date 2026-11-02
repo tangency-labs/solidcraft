@@ -10,7 +10,7 @@
 //! library's functions, so code generic over it computes exactly what it did before),
 //! [`Interval`] (the range), and [`Jet`] (a value with its first derivative).
 //!
-//! The functions are the ones the expression language has, with its meanings: `signum(±0) = ±1`,
+//! The functions are the ones the expression language has, with its meanings: `sign(±0) = 0`,
 //! `rem_euclid` for `mod`, `powf` for powers, `log10` for `log`. Where an enclosure can't be
 //! given, the reason is an [`Unproven`]: outside the function's domain, across a jump, or beyond
 //! what is certified.
@@ -34,7 +34,7 @@ pub enum Unproven {
     /// The argument is, or may be, outside the function's domain (`sqrt` of a negative, `ln` of
     /// zero, a division by what may be zero).
     Domain,
-    /// The function may jump inside the range (`floor`, `signum`, `mod`, `tan` at a pole, `atan2`
+    /// The function may jump inside the range (`floor`, `sign`, `mod`, `tan` at a pole, `atan2`
     /// across the negative x-axis).
     Jump,
     /// The value is beyond what is proven: an overflow, `sin` of a huge argument.
@@ -47,10 +47,14 @@ pub type Proven<T> = Result<T, Unproven>;
 pub trait Real: Copy + Debug {
     /// Exactly `x`, a constant.
     fn exact(x: f64) -> Proven<Self>;
+    /// A constant known only to lie in `i`. A plain number takes only an `i` that is one number.
+    fn within(i: Interval) -> Proven<Self>;
     /// How it compares with `c`, when that is decided for every number it stands for.
     fn cmp_f64(self, c: f64) -> Option<Ordering>;
     /// The one number it is, if it is known to be a single number.
     fn as_point(self) -> Option<f64>;
+    /// Whether every number it stands for is finite.
+    fn is_finite(self) -> bool;
     /// The numbers either stands for. `f64` has only one: it refuses two different ones.
     fn hull(self, o: Self) -> Proven<Self>;
 
@@ -81,11 +85,22 @@ pub trait Real: Copy + Debug {
     fn atanh(self) -> Proven<Self>;
     fn hypot(self, o: Self) -> Proven<Self>;
     fn abs(self) -> Proven<Self>;
-    fn signum(self) -> Proven<Self>;
-    fn floor(self) -> Proven<Self>;
-    fn ceil(self) -> Proven<Self>;
-    fn round(self) -> Proven<Self>;
-    fn trunc(self) -> Proven<Self>;
+    fn sign(self) -> Proven<Self>;
+    /// `f(self)` for a step function `f` that never decreases (`floor`, or one that first snaps
+    /// a value to a whole number near it): refused where `f` may step inside `self`.
+    fn step(self, f: fn(f64) -> f64) -> Proven<Self>;
+    fn floor(self) -> Proven<Self> {
+        self.step(f64::floor)
+    }
+    fn ceil(self) -> Proven<Self> {
+        self.step(f64::ceil)
+    }
+    fn round(self) -> Proven<Self> {
+        self.step(f64::round)
+    }
+    fn trunc(self) -> Proven<Self> {
+        self.step(f64::trunc)
+    }
     fn rem_euclid(self, o: Self) -> Proven<Self>;
     /// `self` when it is below `o`, else `o`.
     fn min(self, o: Self) -> Proven<Self>;
@@ -99,11 +114,17 @@ impl Real for f64 {
     fn exact(x: f64) -> Proven<f64> {
         Ok(x)
     }
+    fn within(i: Interval) -> Proven<f64> {
+        i.as_point().ok_or(Unproven::Uncertified)
+    }
     fn cmp_f64(self, c: f64) -> Option<Ordering> {
         self.partial_cmp(&c)
     }
     fn as_point(self) -> Option<f64> {
         Some(self)
+    }
+    fn is_finite(self) -> bool {
+        f64::is_finite(self)
     }
     fn hull(self, o: f64) -> Proven<f64> {
         if self == o { Ok(self) } else { Err(Unproven::Uncertified) }
@@ -183,20 +204,11 @@ impl Real for f64 {
     fn abs(self) -> Proven<f64> {
         Ok(f64::abs(self))
     }
-    fn signum(self) -> Proven<f64> {
-        Ok(f64::signum(self))
+    fn sign(self) -> Proven<f64> {
+        Ok(if self == 0.0 { 0.0 } else { f64::signum(self) })
     }
-    fn floor(self) -> Proven<f64> {
-        Ok(f64::floor(self))
-    }
-    fn ceil(self) -> Proven<f64> {
-        Ok(f64::ceil(self))
-    }
-    fn round(self) -> Proven<f64> {
-        Ok(f64::round(self))
-    }
-    fn trunc(self) -> Proven<f64> {
-        Ok(f64::trunc(self))
+    fn step(self, f: fn(f64) -> f64) -> Proven<f64> {
+        Ok(f(self))
     }
     fn rem_euclid(self, o: f64) -> Proven<f64> {
         Ok(f64::rem_euclid(self, o))
@@ -215,6 +227,9 @@ impl Real for Interval {
     fn exact(x: f64) -> Proven<Interval> {
         elementary::finite(Interval::point(x))
     }
+    fn within(i: Interval) -> Proven<Interval> {
+        elementary::finite(i)
+    }
     fn cmp_f64(self, c: f64) -> Option<Ordering> {
         if self.lo > c {
             Some(Ordering::Greater)
@@ -228,6 +243,9 @@ impl Real for Interval {
     }
     fn as_point(self) -> Option<f64> {
         Interval::as_point(self)
+    }
+    fn is_finite(self) -> bool {
+        Interval::is_finite(self)
     }
     fn hull(self, o: Interval) -> Proven<Interval> {
         Ok(Interval::hull(self, o))
@@ -310,20 +328,11 @@ impl Real for Interval {
     fn abs(self) -> Proven<Interval> {
         Ok(Interval::abs(self))
     }
-    fn signum(self) -> Proven<Interval> {
-        elementary::signum(self)
+    fn sign(self) -> Proven<Interval> {
+        elementary::sign(self)
     }
-    fn floor(self) -> Proven<Interval> {
-        elementary::floor(self)
-    }
-    fn ceil(self) -> Proven<Interval> {
-        elementary::ceil(self)
-    }
-    fn round(self) -> Proven<Interval> {
-        elementary::round(self)
-    }
-    fn trunc(self) -> Proven<Interval> {
-        elementary::trunc(self)
+    fn step(self, f: fn(f64) -> f64) -> Proven<Interval> {
+        elementary::step(self, f)
     }
     fn rem_euclid(self, o: Interval) -> Proven<Interval> {
         elementary::rem_euclid(self, o)

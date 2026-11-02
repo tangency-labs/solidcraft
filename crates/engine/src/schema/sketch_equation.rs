@@ -197,7 +197,8 @@ pub struct EquationCurveResult {
     pub points: usize,
     /// The curve ends where it starts and closes smoothly there.
     pub closed: bool,
-    /// The largest distance (mm) found between the spline and the formulas.
+    /// How far (mm) the spline may be from the formulas: a bound proven between its points, so
+    /// the curve is within it everywhere (#10414).
     pub deviation: f64,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
@@ -218,7 +219,8 @@ pub struct EquationEditResult {
     pub points: usize,
     /// The curve ends where it starts and closes smoothly there.
     pub closed: bool,
-    /// The largest distance (mm) found between the spline and the formulas.
+    /// How far (mm) the spline may be from the formulas: a bound proven between its points, so
+    /// the curve is within it everywhere (#10414).
     pub deviation: f64,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,

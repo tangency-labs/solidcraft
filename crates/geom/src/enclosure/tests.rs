@@ -454,8 +454,8 @@ fn refusals_name_their_reason() {
         ("pow neg", Real::pow(p(-1.0, 1.0), Interval::point(-2.0)), Unproven::Domain),
         ("floor", Real::floor(p(0.5, 1.5)), Unproven::Jump),
         ("round", Real::round(p(0.4, 0.6)), Unproven::Jump),
-        ("signum", Real::signum(p(-1.0, 1.0)), Unproven::Jump),
-        ("signum 0", Real::signum(p(0.0, 0.0)), Unproven::Jump),
+        ("sign", Real::sign(p(-1.0, 1.0)), Unproven::Jump),
+        ("sign up to 0", Real::sign(p(-1.0, 0.0)), Unproven::Jump),
         ("mod", Real::rem_euclid(p(0.5, 1.5), Interval::point(1.0)), Unproven::Jump),
         ("tan", Real::tan(p(1.0, 2.0)), Unproven::Jump),
         ("atan2", Real::atan2(p(-1.0, 1.0), p(-2.0, -1.0)), Unproven::Jump),
@@ -536,7 +536,24 @@ fn plain_numbers_are_the_standard_librarys() {
     assert_eq!(Real::sin(x), Ok(x.sin()));
     assert_eq!(Real::pow(x, 2.5), Ok(x.powf(2.5)));
     assert_eq!(Real::rem_euclid(-1e-20, 1.0), Ok(1.0));
-    assert_eq!(Real::signum(-0.0f64), Ok(-1.0));
+    assert_eq!(Real::sign(-0.0f64), Ok(0.0));
+    assert_eq!(Real::sign(Interval::ZERO), Ok(Interval::ZERO));
+    assert_eq!(Real::sign(Interval::new(0.5, 2.0)), Ok(Interval::ONE));
     assert_eq!(Real::min(2.0f64, 1.0), Ok(1.0));
     assert_eq!(Real::cmp_f64(x, 1.0), Some(Ordering::Less));
+}
+
+/// A power whose exponent varies takes the exponent's derivative even where the exponent's value
+/// is a single number: d(2ˣ)/dx = 2ˣ ln 2 at x = 0 and x = 1, not the fixed-power rule's 0 or 1.
+#[test]
+fn a_varying_exponent_keeps_its_derivative() {
+    use std::f64::consts::LN_2;
+    for (x, want) in [(0.0, LN_2), (1.0, 2.0 * LN_2)] {
+        let jet = Jet::exact(2.0).and_then(|two: Jet<Interval>| two.pow(Jet::variable(Interval::point(x))?));
+        let d = jet.map(|j| j.d).unwrap_or(Interval::ENTIRE);
+        assert!(d.contains(want) && d.width() < 1e-14, "d(2^x) at {x}: {d:?}");
+    }
+    // A fixed exponent still uses the power rule: d(x²) = 2x.
+    let sq = Jet::variable(Interval::point(3.0)).and_then(|x| x.pow(Jet::exact(2.0)?)).map(|j| j.d);
+    assert_eq!(sq, Ok(Interval::point(6.0)));
 }

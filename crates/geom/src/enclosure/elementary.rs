@@ -494,34 +494,21 @@ pub(super) fn pow(x: Interval, y: Interval) -> Proven<Interval> {
     exp(y * ln(x)?)
 }
 
-/// A step function's value where it can't step inside `x`.
-fn step(x: Interval, f: fn(f64) -> f64) -> Proven<Interval> {
+/// A step function's value where it can't step inside `x`: `f` never decreases, so it is
+/// constant on `x` when its ends agree.
+pub(super) fn step(x: Interval, f: fn(f64) -> f64) -> Proven<Interval> {
     let (a, b) = (f(x.lo), f(x.hi));
     if a == b { Ok(Interval::point(a)) } else { Err(Unproven::Jump) }
 }
 
-pub(super) fn floor(x: Interval) -> Proven<Interval> {
-    step(x, f64::floor)
-}
-
-pub(super) fn ceil(x: Interval) -> Proven<Interval> {
-    step(x, f64::ceil)
-}
-
-pub(super) fn round(x: Interval) -> Proven<Interval> {
-    step(x, f64::round)
-}
-
-pub(super) fn trunc(x: Interval) -> Proven<Interval> {
-    step(x, f64::trunc)
-}
-
-/// `signum`: 1 or −1; refused where `x` may be zero, as `signum(±0) = ±1`.
-pub(super) fn signum(x: Interval) -> Proven<Interval> {
+/// `sign`: 1, 0 or −1; refused where `x` may be zero without being only zero.
+pub(super) fn sign(x: Interval) -> Proven<Interval> {
     if x.lo > 0.0 {
         Ok(Interval::ONE)
     } else if x.hi < 0.0 {
         Ok(-Interval::ONE)
+    } else if x == Interval::ZERO {
+        Ok(Interval::ZERO)
     } else {
         Err(Unproven::Jump)
     }
