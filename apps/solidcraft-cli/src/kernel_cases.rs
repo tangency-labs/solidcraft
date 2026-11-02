@@ -695,7 +695,7 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>, validation: solidcraft
         && solidcraft_engine::kernel::kernel_route::backend() == solidcraft_engine::kernel::kernel_route::Backend::Smlib
     {
         out["status"] = json!("unsupported");
-        out["error"] = json!("this build has no SMLib: build solidcraft-cli with --features smlib");
+        out["error"] = json!("this build doesn't include the C++ SMLib kernel; build solidcraft-cli with --features smlib");
         return out;
     }
     // `refused`: only a clean refusal is right; `solid_or_refused`: a clean refusal, or a result

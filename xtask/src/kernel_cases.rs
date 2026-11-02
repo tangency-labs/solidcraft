@@ -166,13 +166,20 @@ fn wait_draining(mut child: std::process::Child, timeout: Duration) -> Result<Op
     Ok(Some(std::process::Output { status, stdout: join(stdout)?, stderr: join(stderr)? }))
 }
 
+/// The features `cargo run` builds the CLI with for a run on `kernels`: the C++ kernel is opt-in at
+/// build time (`--features smlib`), so only a run that asks for it builds it. One build for the
+/// whole run (`both` included), so the cases don't rebuild the CLI between kernels.
+fn cli_features(kernels: &[&str]) -> &'static [&'static str] {
+    if kernels.contains(&"smlib") { &["--features", "smlib"] } else { &[] }
+}
+
 fn run_case(o: &Options, case: &Path, kernel: &str) -> Value {
     let rel = case.strip_prefix(root()).unwrap_or(case).to_path_buf();
     let mut cmd = match &o.cli {
         Some(bin) => Command::new(bin),
         None => {
             let mut c = cargo();
-            c.args(["run", "-q", "--release", "-p", "solidcraft-cli", "--features", "smlib", "--"]);
+            c.args(["run", "-q", "--release", "-p", "solidcraft-cli"]).args(cli_features(&o.kernels)).arg("--");
             c
         }
     };
@@ -825,6 +832,16 @@ mod tests {
         assert_eq!(options(&[], "x").unwrap().kernels, ["solidcore"]);
         assert_eq!(options(&["--kernel", "smlib"], "x").unwrap().kernels, ["smlib"]);
         assert_eq!(options(&["--kernel", "both"], "x").unwrap().kernels, ["smlib", "solidcore"]);
+    }
+
+    /// Only a run that asks for the C++ kernel builds the CLI with it.
+    #[test]
+    fn the_cli_is_built_with_the_cpp_kernel_only_when_a_run_asks_for_it() {
+        let features = |args: &[&str]| cli_features(&options(args, "x").unwrap().kernels).to_vec();
+        assert!(features(&[]).is_empty());
+        assert!(features(&["--kernel", "solidcore"]).is_empty());
+        assert_eq!(features(&["--kernel", "smlib"]), ["--features", "smlib"]);
+        assert_eq!(features(&["--kernel", "both"]), ["--features", "smlib"]);
     }
 
     fn gate_on(text: &str, cases: &[(&str, &str)]) -> Result<String, String> {

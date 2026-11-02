@@ -56,7 +56,7 @@ fn smlib_validity(body: &Body) -> Option<SmlibCheck> {
 
 /// Whether this build links SMLib (the `smlib` feature).
 pub fn smlib_built() -> bool {
-    cfg!(feature = "smlib")
+    solidcraft_smlib::built()
 }
 
 /// Where every kernel call that fails from now on leaves its inputs for replay

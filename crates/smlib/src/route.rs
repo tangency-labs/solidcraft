@@ -4,7 +4,8 @@
 //! The C++ kernel is an opt-in: for a test, a rig or a user who wants the old behaviour. A call that
 //! fails on solidcore fails, and a path solidcore has no answer for says it is not supported: there is
 //! no fallback to the other kernel at run time, which would hide its bugs. Asking for the C++ kernel on
-//! a build without it (wasm included) stays on it too: every call answers [`crate::Error::NotBuilt`].
+//! a build without it (the default, wasm included) stays on it too: every call answers
+//! [`crate::Error::NotBuilt`], which says to build with `--features smlib`.
 //!
 //! `SOLIDCRAFT_KERNEL=smlib|solidcore` chooses for the whole process (the rig, the test matrix);
 //! otherwise the preference ([`set_choice`]) does, and it defaults to solidcore.
@@ -103,6 +104,9 @@ fn environment() -> Option<Backend> {
         let c = Backend::from_id(&v);
         if c.is_none() {
             log::warn!(target: "smlib", "SOLIDCRAFT_KERNEL={v}: not smlib or solidcore; ignored");
+        }
+        if c == Some(Backend::Smlib) && !crate::built() {
+            log::warn!(target: "smlib", "SOLIDCRAFT_KERNEL=smlib: {}; every operation will be refused", crate::NOT_BUILT);
         }
         c
     })

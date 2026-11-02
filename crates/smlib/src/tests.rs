@@ -144,6 +144,9 @@ fn without_native_every_call_says_so() {
     // solidcore builds a box without SMLib; asking the C++ kernel about it says there is none
     let b = core::make_box([0.0; 3], [1.0; 3]).map(Brep::made_core).unwrap();
     assert_eq!(b.cpp().err(), Some(Error::NotBuilt));
+    // and says how to get it
+    assert!(!built());
+    assert!(Error::NotBuilt.to_string().contains("--features smlib"), "{}", Error::NotBuilt);
 }
 
 /// The dump folder is process-wide: the tests that set it take turns.

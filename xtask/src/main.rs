@@ -58,7 +58,9 @@ commands:
                   --kernel solidcore|smlib|both (default solidcore) sets SOLIDCRAFT_KERNEL per case:
                   solidcore keeps results.json, dumps/ and report.md in DIR/solidcore/; smlib
                   writes docs/kernel-cases.md; both runs each case on each, and also writes the
-                  side by side to docs/kernel-cases-backends.md and DIR/backends.json
+                  side by side to docs/kernel-cases-backends.md and DIR/backends.json; smlib and
+                  both need the C++ kernel, so without --cli they build the CLI with --features smlib
+                  (a --cli built without it reports every case as unsupported)
                   --known-failing FILE: a regression gate instead of the report: fails on a case
                   that fails and FILE does not list, and on a listed case that passes
                   (tests/kernel-cases/<area>/KNOWN_FAILING, CI's Kernel rig workflow); it grades

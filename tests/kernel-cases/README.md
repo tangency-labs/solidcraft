@@ -10,12 +10,13 @@ runs them on solidcore; `--kernel smlib` runs them on C++ and writes
 cargo xtask kernel-cases                                    # every case, on solidcore
 cargo xtask kernel-cases --cli target/release/solidcraft-cli --out /tmp/run   # with a CLI already built
 cargo xtask kernel-cases --kernel both --cli target/release/solidcraft-cli  # SMLib and solidcore side by side
-cargo run -p solidcraft-cli --features smlib -- kernel-cases tests/kernel-cases/booleans/<id>   # one case
+cargo run -p solidcraft-cli -- kernel-cases tests/kernel-cases/booleans/<id>   # one case
 ```
 
-The CLI links SMLib by default (`scripts/fetch-smlib.sh` fetches the prebuilt library first);
-built with `--no-default-features`, solidcore still answers every operation, and asking for SMLib
-answers that it is not built. The run's output folder (`--out`, default `target/kernel-cases`)
+The CLI builds with solidcore alone by default. The C++ SMLib kernel is opt-in at build time:
+`--features smlib` links it (`scripts/fetch-smlib.sh` fetches the prebuilt library first), and
+`--kernel smlib` or `both` without `--cli` builds the CLI that way. On a build without it, asking
+for SMLib answers that this build doesn't include it. The run's output folder (`--out`, default `target/kernel-cases`)
 gets `results.json`, every case's full result, and `dumps/<area>-<case>/`: the inputs of each
 SMLib call a case failed in, for replay (the CLI's `--dumps=DIR`, which the rig always passes).
 `--validation MODE` runs the cases' features under that mode of SMLib's check
@@ -137,7 +138,7 @@ the frozen truck-geometry PRs, a `kernel-paused` PR), for the report's coverage 
 Every area is a regression suite: each case is one small case of one issue, with its exact
 answer. `.github/workflows/kernel-rig.yml` runs them, and the ladder, on pull requests (not
 drafts). A plan job (`scripts/ci/kernel_rig_plan.py`) picks the areas from the changed files, one
-job builds `solidcraft-cli` (release, SMLib) and the rig's runner, and a matrix of shards, one per
+job builds `solidcraft-cli` (release, `--features smlib`, for the ladder's `--kernel smlib`) and the rig's runner, and a matrix of shards, one per
 selected area plus the ladder, runs them in parallel; the `kernel-rig` check passes when every
 selected shard does (and when none was selected). Pushes to main and develop, merge groups, the
 release gate (`release-gate.yml`) and a run by hand run every area. Each area's shard runs:

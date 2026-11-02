@@ -6,8 +6,10 @@
 //! the handles, turns status codes into [`Error`], and sends SMLib's one-line-per-call log to the
 //! `log` crate (target `smlib`).
 //!
-//! Built without the `native` feature, the crate needs no C++ toolchain and every call returns
-//! [`Error::NotBuilt`].
+//! The `native` feature (the apps' `smlib`, off by default) compiles and links the C++ kernel.
+//! Without it the crate needs no C++ toolchain, no SMLib sources and no prebuilt library: solidcore
+//! answers every operation, and asking for the C++ kernel (`SOLIDCRAFT_KERNEL=smlib`) makes every
+//! call that would reach it return [`Error::NotBuilt`], never the other kernel's answer.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use std::ffi::CString;
@@ -77,7 +79,8 @@ pub enum Error {
     Exception,
     /// The C API is a different version from the one this crate was written against.
     Version(i32),
-    /// This build has no SMLib (the `native` feature is off).
+    /// The C++ kernel was asked for on a build without it (the `native` feature, which the apps'
+    /// `smlib` feature turns on, is off): [`NOT_BUILT`].
     NotBuilt,
     /// A B-rep record SMLib cannot take (see [`import::Unsupported`]).
     Record(import::Unsupported),
@@ -123,7 +126,7 @@ impl std::fmt::Display for Error {
             }
             Error::Exception => write!(f, "SMLib raised an internal exception"),
             Error::Version(v) => write!(f, "SMLib C API version {v}, expected {}", ffi::ABI_VERSION),
-            Error::NotBuilt => write!(f, "not supported yet: this build has no SMLib"),
+            Error::NotBuilt => write!(f, "{NOT_BUILT}"),
             Error::Record(u) => write!(f, "{u}"),
             Error::Solidcore(e) => write!(f, "solidcore: {e}"),
             Error::Internal(e) => write!(f, "solidcore failed internally in {e}"),
@@ -135,6 +138,14 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// What [`Error::NotBuilt`] says: the C++ kernel is opt-in at build time, and how to opt in.
+pub const NOT_BUILT: &str = "this build doesn't include the C++ SMLib kernel; build with --features smlib";
+
+/// Whether this build links the C++ SMLib kernel (the `native` feature).
+pub const fn built() -> bool {
+    cfg!(feature = "native")
+}
 
 fn error(s: i32) -> Error {
     match s {
