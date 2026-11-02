@@ -6487,7 +6487,7 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
                 }
             }
         }
-        crate::PatternKind::Path { path_sketch, path, count: c, spacing, extent, flip, orient } => {
+        crate::PatternKind::Path { path_sketch, path, count: c, spacing, extent, flip, orient, start, start_fraction } => {
             let n = count(c)?;
             let d = val(vals, spacing, Kind::Length)?;
             let ps = st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("path sketch {path_sketch}")))?;
@@ -6499,25 +6499,43 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
             }
             let total: f64 = segs.iter().map(seg_len).sum();
             let step = if *extent { if n > 1 { d / (n - 1) as f64 } else { 0.0 } } else { d };
-            if (step * (n - 1) as f64).abs() > total * (1.0 + 1e-5) + 1e-6 {
+            // Where the original sits along the path: the start point, a distance or a fraction
+            // of the path's length (so it keeps its place as the path changes).
+            let from = match (start_fraction, start) {
+                (Some(f), _) => {
+                    let f = val(vals, f, Kind::Unitless)?;
+                    if !(0.0..=1.0).contains(&f) {
+                        return Err(DocError::Invalid("the start point must be 0…1 of the path's length".into()));
+                    }
+                    Some(f * total)
+                }
+                (None, Some(s)) => {
+                    let s = val(vals, s, Kind::Length)?;
+                    if !s.is_finite() || s < -1e-6 || s > total * (1.0 + 1e-5) + 1e-6 {
+                        return Err(DocError::Invalid(format!("the start point must lie on the path (0…{total:.3} mm)")));
+                    }
+                    Some(s.clamp(0.0, total))
+                }
+                (None, None) => None,
+            };
+            let last = from.unwrap_or(0.0) + step * n.saturating_sub(1) as f64;
+            // Without a start point, as before: the copies' span must fit the path.
+            let past_end = match from {
+                None => (step * n.saturating_sub(1) as f64).abs() > total * (1.0 + 1e-5) + 1e-6,
+                Some(_) => !last.is_finite() || last > total * (1.0 + 1e-5) + 1e-6,
+            };
+            if past_end {
                 return Err(DocError::Invalid(format!("the instances run past the end of the path ({total:.3} mm long)")));
             }
+            if from.is_some() && last < -1e-6 {
+                return Err(DocError::Invalid(format!("the instances run past the start of the path ({total:.3} mm long)")));
+            }
+            let from = from.unwrap_or(0.0);
             let normal = ps.plane.normal();
-            let (p0, t0) = path_at(&segs, 0.0);
+            let (p0, r0) = path_station(&segs, from, normal);
             for i in 1..n {
-                let (pk, tk) = path_at(&segs, step * i as f64);
-                let mut m = if *orient {
-                    // Signed turn of the tangent about the sketch normal.
-                    let ang = t0.cross(tk).dot(normal).atan2(t0.dot(tk));
-                    rotation(p0, normal, ang)
-                } else {
-                    translation(Vec3::ZERO)
-                };
-                let dv = pk - p0;
-                m[3][0] += dv.x;
-                m[3][1] += dv.y;
-                m[3][2] += dv.z;
-                out.push(m);
+                let (pk, rk) = path_station(&segs, from + step * i as f64, normal);
+                out.push(if *orient { frame_to_frame(p0, &r0, pk, &rk) } else { translation(pk - p0) });
             }
         }
         crate::PatternKind::Circular { origin, axis, count: c, angle, alignment, reversed, axis_ref, axis_feature } => {
@@ -6586,17 +6604,70 @@ fn reverse_seg(s: &kernel::PathSeg) -> kernel::PathSeg {
     }
 }
 
-/// Point and tangent at arc length `d` along a chain (clamped to its ends).
-fn path_at(segs: &[kernel::PathSeg], d: f64) -> (Vec3, Vec3) {
+/// Where a chain is `d` mm along (clamped to its ends), and how it has turned to get there from
+/// its start: a rotation-minimising frame, the turn of each arc about its own axis and, at each
+/// joint, the least turn from one segment's direction to the next one's. The frame turns with
+/// the tangent and never rolls about it, as a swept profile does, so on a 3D path a copy keeps
+/// the relation to the path that the original has; on a planar path it is the turn about the
+/// sketch's normal. `normal` (the sketch's) is the axis of a half turn where the path doubles
+/// back on itself.
+fn path_station(segs: &[kernel::PathSeg], d: f64, normal: Vec3) -> (Vec3, crate::Mat) {
+    let mut r = crate::IDENTITY;
     let mut left = d.max(0.0);
+    let mut came_along: Option<Vec3> = None;
     for (i, s) in segs.iter().enumerate() {
-        let l = seg_len(s);
-        if left <= l + 1e-9 || i + 1 == segs.len() {
-            return seg_at(s, left.min(l));
+        let (_, t_in) = seg_at(s, 0.0);
+        if let Some(t) = came_along {
+            r = crate::mat_mul(&least_turn(t, t_in, normal), &r);
         }
+        let l = seg_len(s);
+        let last = left <= l + 1e-9 || i + 1 == segs.len();
+        let along = if last { left.min(l) } else { l };
+        if let kernel::PathSeg::Arc { a, center, axis, angle } = *s {
+            let radius = (a - center).len().max(1e-12);
+            let turn = along.copysign(angle) / radius;
+            r = crate::mat_mul(&rotation(Vec3::ZERO, axis.normalized().unwrap_or(Vec3::Z), turn), &r);
+        }
+        let (p, t) = seg_at(s, along);
+        if last {
+            return (p, r);
+        }
+        came_along = Some(t);
         left -= l;
     }
-    (Vec3::ZERO, Vec3::X)
+    (Vec3::ZERO, r)
+}
+
+/// The least rotation that turns unit direction `a` onto `b`; a half turn about `normal` (or
+/// any line square to `a`) when they are opposite.
+fn least_turn(a: Vec3, b: Vec3, normal: Vec3) -> crate::Mat {
+    let axis = a.cross(b);
+    let (sin, cos) = (axis.len(), a.dot(b));
+    if sin > 1e-12 {
+        return rotation(Vec3::ZERO, axis, sin.atan2(cos));
+    }
+    if cos >= 0.0 {
+        return crate::IDENTITY;
+    }
+    let square = |k: Vec3| k.cross(a).len() > 0.5;
+    let k = [normal, Vec3::Z, Vec3::X].into_iter().find(|k| square(*k)).unwrap_or(Vec3::Y);
+    rotation(Vec3::ZERO, k, std::f64::consts::PI)
+}
+
+/// The placement that carries a body from the path's frame `r0` at `p0` to its frame `rk` at
+/// `pk`, keeping the body's relation to the path.
+fn frame_to_frame(p0: Vec3, r0: &crate::Mat, pk: Vec3, rk: &crate::Mat) -> crate::Mat {
+    // The frames are rotations, so r0's inverse is its transpose.
+    let mut back = crate::IDENTITY;
+    for (c, col) in back.iter_mut().enumerate().take(3) {
+        for (row, cell) in col.iter_mut().enumerate().take(3) {
+            *cell = r0[row][c];
+        }
+    }
+    let mut m = crate::mat_mul(rk, &back);
+    let moved = pk - crate::apply_vector(&m, p0);
+    m[3] = [moved.x, moved.y, moved.z, 1.0];
+    m
 }
 
 /// Whether a copy has no material to cut in any of its eligible targets.

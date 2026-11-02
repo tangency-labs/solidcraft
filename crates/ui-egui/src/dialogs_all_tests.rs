@@ -194,6 +194,7 @@ fn check_form(command: &str, labels: &[&str]) {
         "joint.rack_pinion" | "joint.screw" => &["Reverse"],
         "joint.cam" => &["Other side"],
         "frame.member" => &["All Lines", "Mirror"],
+        "solid.pattern.path" => &["Flip direction"],
         _ => &[],
     };
     for label in checks {
@@ -233,7 +234,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
     use egui::accesskit::Role;
     Some(match label {
         "Type" if matches!(command, "sheet.flange" | "sheet.hem" | "solid.revolve" | "solid.emboss") => return None,
-        "Direction" => return None, // segmented buttons, labelled by each choice
+        "Direction" | "pattern.start_point" => return None, // segmented buttons, labelled by each choice
         "Continuity" | "Corners" | "Cells" | "Profile" => return None,
         "Operation" if command == "solid.mirror" => return None,
         "Operation" | "Type" | "Orientation" | "Move Type" | "Object Type" | "Rule" | "Rim Edge" | "Catch Direction" | "Shape" | "Holes" | "Size"
@@ -446,7 +447,7 @@ fn align_components_mode_switches_and_aligns_only_selected_instance() {
     assert!((b2.min.x - 10.0).abs() < 1e-5 && (b2.max.x - 70.0).abs() < 1e-5, "{b2:?}");
 }
 form_case!(remove, "solid.remove", []);
-form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing"]);
+form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing", "pattern.start_point", "Orientation"]);
 form_case!(pipe, "solid.pipe", ["Diameter", "Wall", "Operation"]);
 form_case!(stock, "solid.bounding_solid", ["Margin"]);
 form_case!(frame_member, "frame.member", ["All Lines", "Anchor", "Angle", "Mirror", "Name"]);
@@ -975,6 +976,53 @@ fn solid_pattern_quantity_arrows_step_the_count_the_command_receives() {
         assert_eq!(sent(&h), json!("copies + 1"), "{command}");
         h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
         h.settle();
+    }
+}
+
+/// #6054: the Pattern on Path dialog sends its start point (a distance, or a fraction of the
+/// path's length), Orientation and Flip, and editing the pattern opens it with them again.
+#[test]
+fn path_pattern_dialog_sends_the_start_point_orientation_and_flip_and_reopens_with_them() {
+    let mut h = fixture();
+    let mut d = representative(&h, "solid.pattern.path");
+    // The pattern's parameters, also when an edit sends them through timeline.redefine.
+    fn sent(app: &SolveApp, d: &Dialog) -> Value {
+        let commands = apply_commands(app, d).unwrap();
+        let (id, p) = commands.first().cloned().unwrap();
+        if id == "timeline.redefine" { p["params"].clone() } else { p }
+    }
+    fn set(d: &mut Dialog, to: (&str, &str, &str, bool)) {
+        if let Kind::PathPattern { count, spacing, start, fraction } = &mut d.kind {
+            (*count, *spacing, *start, *fraction) = (to.0.into(), to.1.into(), to.2.into(), to.3);
+        }
+    }
+    // By default none of them is sent: the command's defaults keep today's result.
+    let p = sent(&h.app, &d);
+    for key in ["start", "start_fraction", "orientation", "flip"] {
+        assert!(p.get(key).is_none(), "{key}: {p}");
+    }
+    set(&mut d, ("2", "5 mm", "10 mm", false));
+    d.extra.insert("orientation".into(), json!("path"));
+    d.extra.insert("flip".into(), json!(true));
+    let p = sent(&h.app, &d);
+    assert_eq!((&p["start"], &p["orientation"], &p["flip"]), (&json!("10 mm"), &json!("path"), &json!(true)), "{p}");
+    assert!(p.get("start_fraction").is_none(), "{p}");
+    set(&mut d, ("2", "5 mm", "0.25", true));
+    let p = sent(&h.app, &d);
+    assert_eq!(p["start_fraction"], json!("0.25"), "{p}");
+    assert!(p.get("start").is_none(), "{p}");
+
+    h.app.run("solid.pattern.path", p.clone()).unwrap();
+    let id = h.app.session.doc.features.last().map(|f| f.id).unwrap();
+    let reopened = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    assert!(
+        matches!(&reopened.kind, Kind::PathPattern { count, spacing, start, fraction: true } if count == "2" && spacing == "5 mm" && start == "0.25"),
+        "{:?}",
+        reopened.kind
+    );
+    let again = sent(&h.app, &reopened);
+    for key in ["path", "path_sketch", "count", "spacing", "start_fraction", "orientation", "flip"] {
+        assert_eq!(again[key], p[key], "{key}: {again} vs {p}");
     }
 }
 

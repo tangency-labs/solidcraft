@@ -2244,8 +2244,8 @@ pub enum PatternKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         axis_feature: Option<FeatureName>,
     },
-    /// Copies along a chain of sketch curves: instance k moves by path(k·spacing) − path(0),
-    /// measured along the path from its start.
+    /// Copies along a chain of sketch curves: instance k moves by path(s + k·spacing) − path(s),
+    /// measured along the path from its start, where s is the start point (0 by default).
     Path {
         path_sketch: SketchId,
         path: Vec<String>,
@@ -2263,6 +2263,16 @@ pub enum PatternKind {
         /// Turn copies with the path's direction (else they keep their orientation).
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         orient: bool,
+        /// The start point: how far along the path (from the end `flip` starts at) the original
+        /// sits; the copies are measured from there. `None`: the path's start.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Start point")]
+        start: Option<Expr>,
+        /// The start point as a fraction of the path's length (0 to 1), so it keeps its place
+        /// when the path's length changes. Used instead of `start` when set.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Start point (0 to 1)")]
+        start_fraction: Option<Expr>,
     },
 }
 
