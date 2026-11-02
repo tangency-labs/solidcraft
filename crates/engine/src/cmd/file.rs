@@ -474,6 +474,16 @@ fn rename_design(s: &mut Session, from: &str, to: &str) {
 
 fn write(s: &mut Session, path: &str, format: &str, compression: &str, preview: bool, cache: bool, overwrite: bool) -> Result<Value> {
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
+    // A move not captured yet isn't in the document a file holds: refuse, rather than write the
+    // file without it and say nothing (#9736). The app asks the Capture Position question first.
+    // An exploded view shown saves as before: its placements aren't the design's.
+    if s.moved_uncaptured() {
+        let moved: Vec<&str> = s.doc.occurrences.iter().filter(|o| s.pending_moves.contains_key(&o.id)).map(|o| o.name.as_str()).collect();
+        return Err(EngineError::Other(format!(
+            "{path}: {} moved and not captured yet; component.capture_position keeps the move and component.revert_position puts it back, then save",
+            moved.join(", ")
+        )));
+    }
     if s.path.as_deref() == Some(path) {
         if s.read_only {
             return Err(EngineError::Other(format!("{path}: the design was opened read-only; save it to another file with file.save_as")));
@@ -1345,6 +1355,53 @@ mod tests {
         ro.execute("file.save_as", &json!({"path": b.to_string_lossy()})).unwrap();
         assert!(!ro.read_only);
         ro.execute("file.save", &json!({})).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #9736: a component moved and not captured yet is a change the file doesn't hold. The
+    /// design reads as unsaved, and Save and Save As refuse, naming the component, until the move
+    /// is captured (then the file has it) or reverted (then the design is as saved).
+    #[test]
+    fn a_move_not_captured_is_unsaved_and_saving_waits_for_it() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-pending-move-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("two.sc").to_string_lossy().to_string();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 40, "height": 10, "corner": [0, 0, 0], "body_name": "BaseB"})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 30, "corner": [15, 15, 10], "body_name": "ArmB"})).unwrap();
+        s.execute("component.from_bodies", &json!({"bodies": ["BaseB", "ArmB"]})).unwrap();
+        s.execute("file.save_as", &json!({"path": path})).unwrap();
+        assert!(!s.is_dirty());
+        let arm = s.doc.occurrences.iter().find(|o| o.name.starts_with("ArmB")).unwrap().name.clone();
+        let arm_x = |s: &Session| {
+            let world = s.world_state();
+            let body = world.bodies.iter().find(|b| b.name.starts_with("ArmB")).unwrap();
+            solidcraft_kernel::measure(&body.body).unwrap().centroid.x
+        };
+        for answer in ["component.revert_position", "component.capture_position"] {
+            s.execute("occurrence.move", &json!({"occurrence": arm, "translate": [7, 0, 0], "capture": false})).unwrap();
+            assert!(s.is_dirty(), "{answer}: the move is a change to save");
+            for (cmd, p) in [("file.save", json!({})), ("file.save_as", json!({"path": dir.join("other.sc").to_string_lossy()}))] {
+                let e = s.execute(cmd, &p).unwrap_err().to_string();
+                assert!(e.contains(&arm) && e.contains("not captured") && e.contains("component.capture_position"), "{cmd}: {e}");
+            }
+            assert!(!dir.join("other.sc").exists(), "nothing written");
+            s.execute(answer, &json!({})).unwrap();
+            s.execute("file.save", &json!({})).unwrap();
+            assert!(!s.is_dirty(), "{answer}");
+        }
+        let opened = Session::new(crate::io::read_design(&std::fs::read(&path).unwrap()).unwrap());
+        assert!((arm_x(&opened) - 27.0).abs() < 1e-6, "the captured move is in the file: {}", arm_x(&opened));
+        // An exploded view shown places the components only while it is shown: no change to
+        // save, and the design saves as it is. A move on top of it is one.
+        s.execute("explode.create", &json!({"name": "Apart", "moves": [{"occurrence": arm, "translate": [0, 0, 40]}]})).unwrap();
+        s.execute("file.save", &json!({})).unwrap();
+        s.execute("explode.show", &json!({"view": "Apart"})).unwrap();
+        assert!(!s.pending_moves.is_empty() && !s.is_dirty(), "an exploded view shown");
+        s.execute("file.save", &json!({})).unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": arm, "translate": [5, 0, 0], "capture": false})).unwrap();
+        assert!(s.is_dirty());
+        assert!(s.execute("file.save", &json!({})).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

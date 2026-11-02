@@ -811,7 +811,13 @@ fn save_as_with_extension(app: &mut SolveApp, extension: &str) {
     save_as_named(app, &name, extension);
 }
 
-fn save_as_named(app: &mut SolveApp, name: &str, extension: &str) {
+pub(crate) fn save_as_named(app: &mut SolveApp, name: &str, extension: &str) {
+    // The Capture Position question first, as Save asks it: the file can't hold a move not
+    // captured yet (#9736).
+    if crate::browser::needs_capture(app, crate::browser::SAVE) {
+        app.tree.capture_prompt = Some(crate::browser::save_as_question(name, extension));
+        return;
+    }
     let name = format!("{name}.{extension}");
     app.pick_save(&name, &[solidcraft_engine::io::DESIGN_EXT, "json"], |app, path| {
         // A save under way answers a closing tab when it ends.
@@ -825,7 +831,11 @@ fn save_as_named(app: &mut SolveApp, name: &str, extension: &str) {
 }
 
 /// File > Download design (browser build): the open design as a `.sc` file download.
-fn download_design(app: &mut SolveApp) {
+pub(crate) fn download_design(app: &mut SolveApp) {
+    if crate::browser::needs_capture(app, crate::browser::SAVE) {
+        app.tree.capture_prompt = Some(crate::browser::DOWNLOAD.into());
+        return;
+    }
     let name = format!("{}.{}", app.session.doc.name, solidcraft_engine::io::DESIGN_EXT);
     let result = app
         .session

@@ -118,8 +118,9 @@ Engine Save/Save As write the evaluated model with the design by default
 `cache/bodies.bin`. Plain JSON, recovery/autosave and browser downloads do not
 carry it. Saving never forces placement, evaluation or tessellation: the model is
 the session's own evaluation, and only when it is the evaluation of the document
-being saved (`Model::is_current`). An active sketch, uncaptured moves or feature
-errors leave the cache out; the design saves as before. A cache
+being saved (`Model::is_current`). An active sketch or feature errors leave the
+cache out; the design saves as before. A component moved and not captured yet
+stops the save instead, naming it: capture or revert the move first (#9736). A cache
 over its budgets keeps fewer states (below) and is left out only when not even
 the final state fits.
 

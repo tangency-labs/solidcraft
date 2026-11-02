@@ -1116,6 +1116,12 @@ fn explode_show(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"view": v.id, "name": v.name}))
 }
 
+/// Whether the pending moves are an exploded view shown (`explode.show`), which places the
+/// occurrences only while it is shown: not a move to capture or save (#9736).
+pub(crate) fn shows_exploded_view(s: &Session) -> bool {
+    s.doc.assembly.exploded.iter().any(|v| exploded_at(&explode_moves(s, v), 1.0) == s.pending_moves)
+}
+
 /// What exploded view `v` moves: (occurrence, its placement, the translation the view adds). Moves
 /// of occurrences no longer in the design, or not finite (a hostile design file), are left out;
 /// a later move of one occurrence replaces an earlier one.
