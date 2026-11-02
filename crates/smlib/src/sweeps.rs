@@ -6,7 +6,7 @@
 //! With `cap`, the profile's loops close the ends and the result must be a closed manifold solid
 //! ([`Error::NotSolid`] otherwise); without, it is the swept sheet.
 
-use crate::{Brep, Error, Result, error, ffi, init};
+use crate::{Brep, Error, Result, core, error, ffi, init, route};
 
 /// A 3D curve of a profile, path or section.
 #[derive(Clone, Debug, PartialEq)]
@@ -99,13 +99,13 @@ pub const MAX_CURVES: usize = ffi::sweeps::CURVE_MAX_CURVES;
 
 /// The curves as the C API's curve list.
 #[derive(Default)]
-struct List {
+pub(crate) struct List {
     kinds: Vec<i64>,
     reals: Vec<f64>,
 }
 
 impl List {
-    fn of<'a>(curves: impl IntoIterator<Item = &'a Curve>) -> Result<List> {
+    pub(crate) fn of<'a>(curves: impl IntoIterator<Item = &'a Curve>) -> Result<List> {
         let mut l = List::default();
         for c in curves {
             l.push(c)?;
@@ -150,18 +150,36 @@ impl List {
         Ok(())
     }
 
-    fn raw(&self) -> ffi::sweeps::List<'_> {
+    pub(crate) fn raw(&self) -> ffi::sweeps::List<'_> {
         ffi::sweeps::List::new(&self.kinds, &self.reals)
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: this thread's sweeps run on the C++ kernel whatever the choice.
+    pub(crate) static ON_CPP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the sweeps run on solidcore ([`route::backend`]).
+fn on_core() -> bool {
+    #[cfg(test)]
+    if ON_CPP.with(std::cell::Cell::get) {
+        return false;
+    }
+    route::backend() == route::Backend::Solidcore
 }
 
 impl Brep {
     /// A sheet of planar faces bounded by `loops`: closed loops of curves in one plane, in any
     /// order, nested as outer loops, their holes and islands in the holes.
     pub fn planar_faces(loops: &[Curve]) -> Result<Brep> {
+        if on_core() {
+            return core::sweep::planar_faces(loops).map(Brep::made_core);
+        }
         init()?;
         let l = List::of(loops)?;
-        ffi::sweeps::planar_faces(&l.raw()).map(Brep).map_err(error)
+        ffi::sweeps::planar_faces(&l.raw()).map(Brep::made).map_err(error)
     }
 
     /// The planar `profile` extruded `distance` along the unit `direction` (square to its plane).
@@ -172,6 +190,9 @@ impl Brep {
     /// [`DraftCorner::Curvature`], a curve of a profile with a sharp corner is neither a line nor
     /// an arc).
     pub fn extrude(profile: &[Curve], direction: [f64; 3], distance: f64, draft: f64, corner: DraftCorner, cap: bool) -> Result<Brep> {
+        if on_core() {
+            return core::sweep::extrude(profile, direction, distance, draft, corner, cap).map(Brep::made_core);
+        }
         init()?;
         let l = List::of(profile)?;
         let rule = match corner {
@@ -180,7 +201,7 @@ impl Brep {
             DraftCorner::Round => ffi::sweeps::DRAFT_CORNER_ROUND,
         };
         let mut at = [f64::NAN; 3];
-        ffi::sweeps::extrude(&l.raw(), &direction, distance, draft, rule, cap, &mut at).map(Brep).map_err(|s| {
+        ffi::sweeps::extrude(&l.raw(), &direction, distance, draft, rule, cap, &mut at).map(Brep::made).map_err(|s| {
             let why = match s {
                 ffi::sweeps::ERR_CORNER_APART => Some(CornerRefusal::Apart),
                 ffi::sweeps::ERR_WALL_CLOSES => Some(CornerRefusal::WallCloses),
@@ -197,22 +218,28 @@ impl Brep {
     /// The planar `profile` turned `angle` radians (0 < angle <= 2 pi) right-handed about the
     /// axis through `origin` along `direction`, in the profile's plane (touching it at most).
     pub fn revolve(profile: &[Curve], origin: [f64; 3], direction: [f64; 3], angle: f64, cap: bool) -> Result<Brep> {
+        if on_core() {
+            return core::sweep::revolve(profile, origin, direction, angle, cap).map(Brep::made_core);
+        }
         init()?;
         let l = List::of(profile)?;
-        ffi::sweeps::revolve(&l.raw(), &origin, &direction, angle, cap).map(Brep).map_err(error)
+        ffi::sweeps::revolve(&l.raw(), &origin, &direction, angle, cap).map(Brep::made).map_err(error)
     }
 
     /// `profile` swept along `path` (end-to-end curves), carried with the path's start: the
     /// profile keeps its place relative to it. The walls are B-spline approximations, one per
     /// stretch of profile between tangent breaks.
     pub fn sweep(profile: &[Curve], path: &[Curve], frame: SweepFrame, cap: bool) -> Result<Brep> {
+        if on_core() {
+            return core::sweep::sweep_placed(profile, path, frame, cap).map(|(b, _)| Brep::made_core(b));
+        }
         init()?;
         let (l, p) = (List::of(profile)?, List::of(path)?);
         let frame = match frame {
             SweepFrame::Follow => ffi::sweeps::SWEEP_FOLLOW,
             SweepFrame::Translate => ffi::sweeps::SWEEP_TRANSLATE,
         };
-        ffi::sweeps::sweep(&l.raw(), &p.raw(), frame, cap).map(Brep).map_err(error)
+        ffi::sweeps::sweep(&l.raw(), &p.raw(), frame, cap).map(Brep::made).map_err(error)
     }
 
     /// [`Brep::sweep`], with where the sweep placed the profile: the rigid motions carrying the
@@ -221,6 +248,9 @@ impl Brep {
     /// out from point to point along the path); a sweep that carries on from where this one left
     /// the profile starts from the last.
     pub fn sweep_placed(profile: &[Curve], path: &[Curve], frame: SweepFrame, cap: bool) -> Result<(Brep, [Affine; 3])> {
+        if on_core() {
+            return core::sweep::sweep_placed(profile, path, frame, cap).map(|(b, m)| (Brep::made_core(b), m));
+        }
         init()?;
         let (l, p) = (List::of(profile)?, List::of(path)?);
         let frame = match frame {
@@ -228,7 +258,7 @@ impl Brep {
             SweepFrame::Translate => ffi::sweeps::SWEEP_TRANSLATE,
         };
         let mut placed = [0.0; 36];
-        let brep = ffi::sweeps::sweep_placed(&l.raw(), &p.raw(), frame, cap, &mut placed).map(Brep).map_err(error)?;
+        let brep = ffi::sweeps::sweep_placed(&l.raw(), &p.raw(), frame, cap, &mut placed).map(Brep::made).map_err(error)?;
         let motion = |i: usize| {
             let at = |k: usize| placed.get(12 * i + k).copied().unwrap_or(0.0);
             Affine { m: [[at(0), at(1), at(2)], [at(3), at(4), at(5)], [at(6), at(7), at(8)]], t: [at(9), at(10), at(11)] }
@@ -249,9 +279,12 @@ impl Brep {
         direction: [f64; 3],
         tolerance: f64,
     ) -> Result<Vec<(Curve, [f64; 2])>> {
+        if on_core() {
+            return core::sweep::project_curves(self.core()?, face_point, pick_tolerance, curves, direction, tolerance);
+        }
         init()?;
         let l = List::of(curves)?;
-        let out = ffi::sweeps::project_curves(&self.0, &face_point, pick_tolerance, &l.raw(), &direction, tolerance).map_err(picked)?;
+        let out = ffi::sweeps::project_curves(self.cpp()?, &face_point, pick_tolerance, &l.raw(), &direction, tolerance).map_err(picked)?;
         nurbs_list(&out)
     }
 
@@ -265,14 +298,20 @@ impl Brep {
         plane_normal: [f64; 3],
         tolerance: f64,
     ) -> Result<Vec<(Curve, [f64; 2])>> {
+        if on_core() {
+            return core::sweep::face_section(self.core()?, face_point, pick_tolerance, plane_point, plane_normal, tolerance);
+        }
         init()?;
-        let out = ffi::sweeps::face_section(&self.0, &face_point, pick_tolerance, &plane_point, &plane_normal, tolerance).map_err(picked)?;
+        let out = ffi::sweeps::face_section(self.cpp()?, &face_point, pick_tolerance, &plane_point, &plane_normal, tolerance).map_err(picked)?;
         nurbs_list(&out)
     }
 
     /// A loft (skin) through `sections` (at least two closed loops), `degree` (1 ruled, 2 or 3)
     /// across them.
     pub fn loft(sections: &[Vec<Curve>], degree: u32, cap: bool) -> Result<Brep> {
+        if on_core() {
+            return core::sweep::loft(sections, degree, cap).map(Brep::made_core);
+        }
         init()?;
         if sections.len() < 2 || sections.len() > MAX_CURVES || !(1..=3).contains(&degree) {
             return Err(Error::Argument);
@@ -280,13 +319,16 @@ impl Brep {
         let l = List::of(sections.iter().flatten())?;
         let sizes: Vec<i64> = sections.iter().map(|s| i64::try_from(s.len()).map_err(|_| Error::Argument)).collect::<Result<_>>()?;
         let degree = i32::try_from(degree).map_err(|_| Error::Argument)?;
-        ffi::sweeps::loft(&l.raw(), &sizes, degree, cap).map(Brep).map_err(error)
+        ffi::sweeps::loft(&l.raw(), &sizes, degree, cap).map(Brep::made).map_err(error)
     }
 
     /// The planar `profile` placed by each of `stations` in turn (2…[`MAX_STATIONS`], each
     /// section exactly the profile's image), its walls skinned through the sections, cubic
     /// across them: one wall per profile curve. `ends` says how the ends close.
     pub fn sweep_stations(profile: &[Curve], stations: &[Affine], ends: Ends) -> Result<Brep> {
+        if on_core() {
+            return core::sweep::sweep_stations(profile, stations, ends).map(Brep::made_core);
+        }
         init()?;
         if !(2..=MAX_STATIONS).contains(&stations.len()) || profile.len().saturating_mul(stations.len()) > MAX_STATION_CURVES {
             return Err(Error::Argument);
@@ -298,24 +340,30 @@ impl Brep {
             Ends::Capped => ffi::sweeps::ENDS_CAPPED,
             Ends::Joined => ffi::sweeps::ENDS_JOINED,
         };
-        ffi::sweeps::sweep_stations(&l.raw(), &maps, ends).map(Brep).map_err(error)
+        ffi::sweeps::sweep_stations(&l.raw(), &maps, ends).map(Brep::made).map_err(error)
     }
 
     /// A loft from the planar `section` (one closed loop of lines, in order) to the point `apex`
     /// off its plane: a pyramid, its base the section and a triangle on each line.
     pub fn loft_to_point(section: &[Curve], apex: [f64; 3]) -> Result<Brep> {
+        if on_core() {
+            return core::sweep::loft_to_point(section, apex).map(Brep::made_core);
+        }
         init()?;
         let l = List::of(section)?;
-        ffi::sweeps::loft_to_point(&l.raw(), &apex).map(Brep).map_err(error)
+        ffi::sweeps::loft_to_point(&l.raw(), &apex).map(Brep::made).map_err(error)
     }
 
     /// `profile` carried by a screw motion about the axis through `origin` along `direction`:
     /// `turns` right-handed turns about it, rising `pitch` (signed) per turn, capped at both ends,
     /// its walls within about `tolerance` of the true screw surfaces.
     pub fn screw_sweep(profile: &[Curve], origin: [f64; 3], direction: [f64; 3], pitch: f64, turns: f64, tolerance: f64) -> Result<Brep> {
+        if on_core() {
+            return core::sweep::screw_sweep(profile, origin, direction, pitch, turns, None, tolerance).map(Brep::made_core);
+        }
         init()?;
         let l = List::of(profile)?;
-        ffi::sweeps::screw_sweep(&l.raw(), &origin, &direction, pitch, turns, tolerance).map(Brep).map_err(error)
+        ffi::sweeps::screw_sweep(&l.raw(), &origin, &direction, pitch, turns, tolerance).map(Brep::made).map_err(error)
     }
 
     /// [`screw_sweep`](Self::screw_sweep) with the profile moved off the axis as it turns: at turn
@@ -333,10 +381,13 @@ impl Brep {
         law: &[(f64, f64)],
         tolerance: f64,
     ) -> Result<Brep> {
+        if on_core() {
+            return core::sweep::screw_sweep(profile, origin, direction, pitch, turns, Some(law), tolerance).map(Brep::made_core);
+        }
         init()?;
         let l = List::of(profile)?;
         let flat: Vec<f64> = law.iter().flat_map(|(t, o)| [*t, *o]).collect();
-        ffi::sweeps::screw_sweep_radial(&l.raw(), &origin, &direction, pitch, turns, &flat, tolerance).map(Brep).map_err(error)
+        ffi::sweeps::screw_sweep_radial(&l.raw(), &origin, &direction, pitch, turns, &flat, tolerance).map(Brep::made).map_err(error)
     }
 }
 

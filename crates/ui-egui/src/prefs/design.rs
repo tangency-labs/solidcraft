@@ -136,4 +136,28 @@ fn origin_plane_names(app: &mut SolveApp, ui: &mut egui::Ui) {
         setting::hide_origin(app, ui);
         ui_kit::text(ui, app.tr("ui.hide_origin_note"), ui_kit::Text::Hint("hide_origin"));
     });
+    // Which geometry kernel answers; `prefs::apply` applies it through diagnostics.kernel.
+    ui_kit::settings_section(ui, "geometry_kernel", app.tr("prefs.geometry_kernel"), |ui| {
+        // Under SOLIDCRAFT_KERNEL the control shows the environment's choice, disabled.
+        let environment = app.prefs_window.kernel_environment.clone();
+        ui.add_enabled_ui(environment.is_none(), |ui| {
+            let options = ["solidcore", "SMLib"];
+            let shown = environment.as_deref().unwrap_or(&app.preferences.geometry_kernel);
+            let mut selected = KERNELS.iter().position(|k| *k == shown).unwrap_or(0);
+            ui_kit::segmented(ui, &mut selected, &options, ui_kit::Segments { intrinsic: true, ..Default::default() });
+            if let Some(kernel) = KERNELS.get(selected)
+                && environment.is_none()
+                && app.preferences.geometry_kernel != *kernel
+            {
+                app.preferences.geometry_kernel = (*kernel).into();
+            }
+        });
+        ui_kit::text(ui, app.tr("prefs.geometry_kernel_note"), ui_kit::Text::Hint("geometry_kernel"));
+        if environment.is_some() {
+            ui_kit::text(ui, app.tr("prefs.geometry_kernel_environment"), ui_kit::Text::Hint("geometry_kernel_environment"));
+        }
+        if app.prefs_window.kernel_unavailable {
+            ui_kit::text(ui, app.tr("prefs.geometry_kernel_unavailable"), ui_kit::Text::Hint("geometry_kernel_unavailable"));
+        }
+    });
 }

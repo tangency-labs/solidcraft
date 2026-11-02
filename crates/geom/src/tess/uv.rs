@@ -109,11 +109,24 @@ fn clamped(p: usize, n: usize, k: &[f64]) -> bool {
     p >= 1 && k.len() == n + p + 1 && ends(1..=p) && ends(n..=n + p - 1)
 }
 
-/// `x` moved by whole periods `b − a` into `[a, b]` when it lies outside.
+/// How far past an end of the interval, relative to its size, a parameter is still that end:
+/// rounding, not a period away.
+const WRAP_SLACK: f64 = 1e-12;
+
+/// `x` moved by whole periods `b − a` into `[a, b]` when it lies outside. A parameter a rounding
+/// past an end (a pcurve ending on the seam one ulp beyond it) is that end, not moved a period
+/// to the other one: a plan's node there would put its triangles across the whole period.
 pub(crate) fn wrap_into(x: f64, (a, b): (f64, f64)) -> f64 {
     let period = b - a;
     if (a..=b).contains(&x) || !(period > 0.0) {
         return x;
+    }
+    let slack = WRAP_SLACK * period.max(a.abs()).max(b.abs());
+    if x > b && x - b <= slack {
+        return b;
+    }
+    if x < a && a - x <= slack {
+        return a;
     }
     let w = x - ((x - a) / period).floor() * period;
     w.clamp(a, b)
@@ -410,6 +423,9 @@ mod tests {
         }
         assert_eq!(s.wrap([1.0, 0.5]), [1.0, 0.5]);
         assert_eq!(s.wrap([1.25, 2.0]), [0.25, 2.0]);
+        // A rounding past an end is that end, not the other one a period away.
+        assert_eq!(s.wrap([1.0 + f64::EPSILON, 0.5]), [1.0, 0.5]);
+        assert_eq!(s.wrap([-1e-17, 0.5]), [0.0, 0.5]);
         // Projection finds a point near the seam from either side.
         let p = s.derivs(0.02, 0.5).map(|d| d.0).unwrap_or(Vec3::ZERO);
         let dom = domain(&s);

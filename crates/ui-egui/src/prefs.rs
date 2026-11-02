@@ -37,6 +37,8 @@ use crate::ui_kit;
 use crate::viewport::NavMode;
 
 pub const UNITS: &[&str] = &["mm", "cm", "m", "in", "ft"];
+/// The Geometry kernel preference's choices, as `diagnostics.kernel` spells them.
+pub const KERNELS: [&str; 2] = ["solidcore", "smlib"];
 pub const OPENSCAD_NAV: &str = "openscad";
 pub const TOUCHPAD_NAV: &str = "touchpad";
 /// A mouse button that can drag the camera.
@@ -1159,6 +1161,11 @@ preference_settings! {
     /// Up/Down and the wheel over a focused value field step its plain number (`value_step`,
     /// #2320). Off by default: the keys move the text cursor and the wheel scrolls, as before.
     step_values: bool = false, PAGE_DESIGN => check_id("ui.step_values");
+    /// Which geometry kernel answers every operation (one of [`KERNELS`]): `solidcore`, the
+    /// default, or `smlib`, the C++ kernel. A saved `routed`, the old default, reads as
+    /// `solidcore` ([`migrate`]). Applied through
+    /// `diagnostics.kernel`; `SOLIDCRAFT_KERNEL`, when set, wins.
+    geometry_kernel: String = "solidcore".into(), PAGE_DESIGN;
     /// When SMLib's full check runs while features are computed (`diagnostics.validation`):
     /// `each_feature` (the default) checks the bodies each feature keeps once; `each_step`, as
     /// before, checks after every sweep, boolean and blend; `off` (experimental) never does.
@@ -1626,6 +1633,14 @@ pub struct PrefsWindow {
     /// The Profile operations preference the profiler last followed: applied when it changes,
     /// so `diagnostics.profile` (an agent) and SOLIDCRAFT_PROFILE can switch it in between.
     applied_profile: Option<bool>,
+    /// The Geometry kernel preference `diagnostics.kernel` last applied: applied when it changes
+    /// (and at startup), so an agent's `diagnostics.kernel` in between stands.
+    applied_kernel: Option<String>,
+    /// The choice `SOLIDCRAFT_KERNEL` forces when it overrides the preference (the command's
+    /// `environment` and `choice`).
+    pub(crate) kernel_environment: Option<String>,
+    /// The saved kernel is one this build doesn't have (`smlib` without the C++ kernel): the page says so.
+    pub(crate) kernel_unavailable: bool,
     /// The appearance last asked of the native window ([`sync_window_theme`]).
     window_theme: Option<egui::SystemTheme>,
     /// The perspective angle the view was last drawn with ([`follow_view_fov`]); 0 before the first.
@@ -2297,6 +2312,26 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
             solidcraft_engine::profile::set_enabled(profile);
         }
         app.prefs_window.applied_profile = Some(profile);
+    }
+    // The geometry kernel, through its command (an unknown saved value is the default). `smlib` on
+    // a build without it is refused: the preference page and the status line say so.
+    let kernel = KERNELS.iter().copied().find(|k| *k == app.preferences.geometry_kernel).unwrap_or(KERNELS[0]);
+    if app.prefs_window.applied_kernel.as_deref() != Some(kernel) {
+        match app.session.execute("diagnostics.kernel", &json!({ "choice": kernel })) {
+            Ok(v) => {
+                let environment = v.get("environment").and_then(serde_json::Value::as_bool).unwrap_or(false);
+                app.prefs_window.kernel_environment =
+                    environment.then(|| v.get("choice").and_then(serde_json::Value::as_str).unwrap_or_default().to_string());
+                app.prefs_window.kernel_unavailable = false;
+            }
+            Err(e) => {
+                log::warn!("geometry kernel preference `{kernel}`: {e}");
+                app.prefs_window.kernel_unavailable = true;
+                let message = app.tr("prefs.geometry_kernel_unavailable").to_string();
+                app.set_status(message, true);
+            }
+        }
+        app.prefs_window.applied_kernel = Some(kernel.into());
     }
     apply_file_limits(&app.preferences);
     // The viewport's display quality (an unknown saved value draws at Normal).
@@ -4022,6 +4057,10 @@ pub fn migrate(mut p: Prefs) -> Prefs {
         p.orbit_around = OrbitAround::Cursor;
         p.orbit_cursor = false;
     }
+    // `routed`, the old default, ran every operation on solidcore.
+    if p.geometry_kernel == "routed" {
+        p.geometry_kernel = KERNELS[0].into();
+    }
     if !crate::space_mouse::drives_each_once(p.space_mouse_axis_source) {
         log::warn!("preferences: the 3D mouse axis assignment {:?} doesn't drive each axis once; using the default", p.space_mouse_axis_source);
         p.space_mouse_axis_source = crate::space_mouse::SAME_AXES;
@@ -4162,6 +4201,10 @@ fn prepare_preferences(
     {
         return Err("`validation` must be each_step, each_feature or off".into());
     }
+    // Before `migrate`, which reads the old saved `routed` as the default: asked for now, it is refused.
+    if p.get("geometry_kernel").is_some_and(|v| !v.as_str().is_some_and(|k| KERNELS.contains(&k))) {
+        return Err(format!("`geometry_kernel` must be one of {}", KERNELS.join(", ")));
+    }
     if let Some(value) = p.get("navigation_bar") {
         crate::navigation_bar::validate(value)?;
     }
@@ -4184,6 +4227,9 @@ fn prepare_preferences(
     let new = migrate(new);
     if !UNITS.contains(&new.default_units.as_str()) {
         return Err(format!("units must be one of {}", UNITS.join(", ")));
+    }
+    if !KERNELS.contains(&new.geometry_kernel.as_str()) {
+        return Err(format!("`geometry_kernel` must be one of {}", KERNELS.join(", ")));
     }
     if !WINDOW_SYSTEMS.contains(&new.window_system.as_str()) {
         return Err(format!("`window_system` must be one of {}", WINDOW_SYSTEMS.join(", ")));
@@ -4360,6 +4406,61 @@ mod tests {
         h.call("ui.prefs", json!({"profile_operations": false}));
         h.frames(2);
         assert!(!solidcraft_engine::profile::enabled());
+    }
+
+    /// The Geometry kernel preference reaches the kernel through diagnostics.kernel, at startup
+    /// and when it changes, and only a choice the command knows is accepted. `smlib` keeps the C++
+    /// kernel reachable, the behaviour from before solidcore was the default. (The kernel choice is
+    /// process-wide and other tests start harnesses meanwhile, so `smlib` is only set on a build
+    /// without it, where it is refused and nothing moves.)
+    #[test]
+    fn the_geometry_kernel_preference_applies_through_its_command() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.frames(1);
+        assert_eq!(h.app.prefs_window.applied_kernel.as_deref(), Some("solidcore"), "applied at startup");
+        let r = h.app.session.execute("diagnostics.kernel", &json!({})).unwrap();
+        let environment = (r["environment"] == json!(true)).then(|| r["choice"].as_str().unwrap_or_default().to_string());
+        assert_eq!(h.app.prefs_window.kernel_environment, environment);
+        assert!(h.call("ui.prefs", json!({"geometry_kernel": "truck"}))["error"].as_str().is_some_and(|e| e.contains("geometry_kernel")));
+        // `routed` is gone: a saved one reads as solidcore (below), asked for now it is refused.
+        assert!(h.call("ui.prefs", json!({"geometry_kernel": "routed"}))["error"].as_str().is_some_and(|e| e.contains("geometry_kernel")));
+        assert_eq!(h.app.preferences.geometry_kernel, "solidcore");
+        assert_eq!(super::KERNELS, ["solidcore", "smlib"]);
+        h.call("ui.prefs", json!({"geometry_kernel": "solidcore"}));
+        h.frames(2);
+        assert_eq!(h.app.prefs_window.applied_kernel.as_deref(), Some("solidcore"));
+        assert!(!h.app.prefs_window.kernel_unavailable);
+        // Saved with the other preferences.
+        let saved = serde_json::to_value(&h.app.preferences).unwrap();
+        assert_eq!(saved["geometry_kernel"], json!("solidcore"));
+        // On a build without the C++ kernel, asking for it says so: not a switch to the other one.
+        if !solidcraft_engine::kernel::smlib_built() {
+            h.call("ui.prefs", json!({"geometry_kernel": "smlib"}));
+            h.frames(2);
+            assert!(h.app.prefs_window.kernel_unavailable);
+            assert_eq!(h.app.preferences.geometry_kernel, "smlib");
+            assert_ne!(h.app.session.execute("diagnostics.kernel", &json!({})).unwrap()["choice"], json!("smlib"));
+            h.call("ui.prefs", json!({"geometry_kernel": "solidcore"}));
+            h.frames(2);
+            assert!(!h.app.prefs_window.kernel_unavailable);
+        }
+    }
+
+    /// A saved `routed`, the old default, loads as `solidcore`, without an error; any other value
+    /// this version doesn't know stays as it was saved and runs on the default, and nothing panics.
+    #[test]
+    fn a_saved_routed_kernel_loads_as_solidcore() {
+        use serde_json::json;
+        let read = |saved: serde_json::Value| super::migrate(serde_json::from_value::<super::Prefs>(saved).unwrap()).geometry_kernel;
+        assert_eq!(read(json!({"geometry_kernel": "routed"})), "solidcore");
+        assert_eq!(read(json!({})), "solidcore");
+        assert_eq!(read(json!({"geometry_kernel": "smlib"})), "smlib");
+        assert_eq!(read(json!({"geometry_kernel": "truck"})), "truck");
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.geometry_kernel = "truck".into();
+        h.frames(2);
+        assert_eq!(h.app.prefs_window.applied_kernel.as_deref(), Some("solidcore"));
     }
 
     /// Preferences saved with a setting this version no longer has still load, every other

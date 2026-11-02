@@ -22,7 +22,7 @@ impl Trims for SmlibTrims {
 fn trims(face: &TrimFace<'_>) -> Result<Vec<Vec<Curve2>>, String> {
     let (record, bare) = sheet(face)?;
     let mut arrays = crate::import::arrays_with_bare_uses(&record, &bare).map_err(|e| e.to_string())?;
-    let import = |a: &crate::import::Arrays| crate::flat::Flat::from_arrays(a).and_then(|f| f.import()).map_err(|e| e.to_string());
+    let import = |a: &crate::import::Arrays| crate::Brep::from_arrays(a).map_err(|e| e.to_string());
     let mut body = import(&arrays)?;
     if cover_gaps(&body, face, &bare, &mut arrays)? {
         body = import(&arrays)?;

@@ -55,11 +55,22 @@ pub static COMMANDS: &[CommandSpec] = &[
              trace?: path (write the recorded spans as a Chrome trace-event file, for chrome://tracing or Perfetto). Returns what \
              was recorded before enabled and reset apply: {compiled, enabled, wall_ms, spans, dropped, by_category: [{category, \
              self_ms, share}], rows: [{category, name, count, total_ms, self_ms, max_ms}], rows_total, trace?}, the rows the most \
-             self time first. Categories: smlib (SMLib's C API calls, timed by the C API), kernel, feature (one per feature \
+             self time first. Categories: solidcore (the kernel's calls), smlib (SMLib's C API calls, timed by the C API, when it is asked for), kernel, feature (one per feature \
              computed, by its type), doc, command, import (STEP/IGES stages), io. Self time is a span's time less the spans \
              inside it; total counts its outermost run only. Recording also starts with SOLIDCRAFT_PROFILE=1, the CLI's \
              --profile and the app's preference; off, it costs nothing measurable. Read-only",
         ),
+    CommandSpec::new("diagnostics.kernel", "Geometry Kernel", crate::checked!("diagnostics.kernel", kernel))
+        .icon("bug_report")
+        .noundo()
+        .contract(&KERNEL_CONTRACT)
+        .output(output_schema_for::<crate::schema::diagnostics::KernelReply>)
+        .params(
+        "choice?: solidcore | smlib (sets which kernel answers every operation: solidcore, the default = the Rust port; \
+         smlib = the C++ SMLib kernel, refused as not available on a build without it, such as the web app; bodies already \
+         computed keep their results). SOLIDCRAFT_KERNEL, when set, wins over it. Returns {choice, environment}: choice is \
+         the kernel in force, environment whether SOLIDCRAFT_KERNEL chose it",
+    ),
     CommandSpec::new("diagnostics.validation", "Validation", crate::checked!("diagnostics.validation", validation))
         .icon("bug_report")
         .noundo()
@@ -84,6 +95,34 @@ pub static COMMANDS: &[CommandSpec] = &[
              at the next start). Only when the SOLIDCRAFT_CRASH_TEST environment variable is set",
         ),
 ];
+
+fn kernel(_: &mut Session, p: &Value) -> Result<Value> {
+    use solidcraft_kernel::kernel_route as route;
+    if let Some(v) = p.get("choice").filter(|v| !v.is_null()) {
+        route::set_choice(kernel_asked(v, solidcraft_kernel::smlib_built())?);
+    }
+    use crate::schema::diagnostics::{KernelChoice, KernelReply};
+    let choice = match route::choice() {
+        route::Backend::Solidcore => KernelChoice::Solidcore,
+        route::Backend::Smlib => KernelChoice::Smlib,
+    };
+    serde_json::to_value(KernelReply { choice, environment: route::overridden() }).map_err(|e| bad("diagnostics.kernel", e.to_string()))
+}
+
+/// The kernel `choice` asks for, on a build that has (`built`) the C++ kernel or doesn't. A choice of
+/// the wrong type is refused like an unknown one, not read as no choice; `smlib` on a build without
+/// it is refused too, never answered by the other kernel.
+pub(crate) fn kernel_asked(choice: &Value, built: bool) -> Result<solidcraft_kernel::kernel_route::Backend> {
+    use solidcraft_kernel::kernel_route::Backend;
+    let asked = choice.as_str().and_then(Backend::from_id).ok_or_else(|| bad("diagnostics.kernel", "`choice` is solidcore or smlib"))?;
+    if asked == Backend::Smlib && !built {
+        return Err(EngineError::Disabled(
+            "diagnostics.kernel".into(),
+            "this build doesn't include the C++ SMLib kernel; build with --features smlib".into(),
+        ));
+    }
+    Ok(asked)
+}
 
 fn dir(cmd: &str) -> Result<std::path::PathBuf> {
     crash::default_dir().ok_or_else(|| bad(cmd, "no crash folder on this system"))
@@ -143,6 +182,7 @@ fn crash_test(_: &mut Session, p: &Value) -> Result<Value> {
 
 const PROFILE_CONTRACT: crate::schema::TypedContract<crate::schema::diagnostics::ProfileParams> = crate::schema::TypedContract::new();
 
+const KERNEL_CONTRACT: crate::schema::TypedContract<crate::schema::diagnostics::KernelParams> = crate::schema::TypedContract::new();
 const VALIDATION_CONTRACT: crate::schema::TypedContract<crate::schema::diagnostics::ValidationParams> = crate::schema::TypedContract::new();
 
 fn validation(s: &mut Session, p: &Value) -> Result<Value> {

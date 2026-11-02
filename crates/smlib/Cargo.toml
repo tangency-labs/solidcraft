@@ -20,14 +20,17 @@ type_complexity = "allow"
 neg_cmp_op_on_partial_ord = "allow"
 
 [features]
-# Compile and link SMLib. Off, the crate builds without a C++ toolchain or the SMLib sources, and
-# every call returns `Error::NotBuilt`, so workspace-wide builds and checks need neither.
+# Compile and link the C++ SMLib (the apps' and the kernel's `smlib` feature turns it on; off by
+# default). Off, the crate builds without a C++ toolchain, the SMLib sources or a prebuilt library,
+# build.rs does nothing, solidcore answers every operation, and a call asked of the C++ kernel
+# returns `Error::NotBuilt`.
 native = []
 
 [dependencies]
 log = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-profile = { workspace = true }
+solidcore = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # The clocks SMLib's C library asks for in a browser build (src/ffi.rs).
