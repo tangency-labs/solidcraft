@@ -9,7 +9,7 @@ use solidcraft_geom::{Aabb3, Loop2, Ring, Seg2};
 
 pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
     match &f.kind {
-        FeatureKind::Emboss { sketch, profiles, depth, deboss, targets, face } => {
+        FeatureKind::Emboss { sketch, profiles, depth, deboss, targets, face, mapping: _ } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
             let regions = select_profiles(ss, profiles)?;
             let d = val(vals, depth, Kind::Length)?;
@@ -35,13 +35,13 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                     crate::apply_vector(&sketch_transform, ss.plane.y),
                 )
                 .ok_or_else(|| DocError::Invalid("invalid cylinder sketch frame".into()))?;
-                let mut at = crate::apply_point(&crate::mat_mul(&inverse, &author_frame), face.at.0);
+                let at = crate::apply_point(&crate::mat_mul(&inverse, &author_frame), face.at.0);
                 let name = f
                     .face_names
                     .first()
                     .filter(|name| !name.is_empty())
                     .ok_or_else(|| DocError::Invalid("selected cylinder face has no persistent identity".into()))?;
-                {
+                let (at, is_cylinder, target_face) = {
                     let mut scoped = ModelState::default();
                     scoped.bodies.push(mb.clone());
                     let (picked, split) = crate::naming::point_on_face(&scoped, name, at)
@@ -54,9 +54,17 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                     if !crate::naming::face_has_name(&mb, index as usize, name) {
                         return Err(DocError::Invalid("selected cylinder face is ambiguous".into()));
                     }
-                    at = kernel::cylinder_emboss_anchor(&mb.body, index as usize, picked)?;
-                }
-                let result = kernel::emboss_cylinder_at(&mb.body, at, &plane, &regions, if *deboss { -d } else { d })?;
+                    let anchor = kernel::emboss_anchor(&mb.body, index as usize, picked)
+                        .or_else(|_| kernel::cylinder_emboss_anchor(&mb.body, index as usize, picked))?;
+                    let is_cyl = matches!(kernel::face_surface(&mb.body, index as usize), Some(kernel::FaceSurface::Cylinder { .. }));
+                    (anchor, is_cyl, index as usize)
+                };
+                let result = if !is_cylinder {
+                    kernel::emboss_project_face(&mb.body, Some(target_face), at, &plane, &regions, if *deboss { -d } else { d })?
+                } else {
+                    kernel::emboss_cylinder_at(&mb.body, at, &plane, &regions, if *deboss { -d } else { d })
+                        .or_else(|_| kernel::emboss_project_face(&mb.body, Some(target_face), at, &plane, &regions, if *deboss { -d } else { d }))?
+                };
                 if let Some(slot) = st.bodies.get_mut(i) {
                     *slot = ModelBody::new(mb.name, result, mb.feature);
                 }
