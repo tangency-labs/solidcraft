@@ -6005,10 +6005,10 @@ fn hole_targets<'a>(st: &'a ModelState, f: &Feature) -> Vec<&'a ModelBody> {
         .collect()
 }
 
-/// Whether hole tool `tool` is clear of every body the hole cuts, by their boxes (#10701). Boxes
-/// only: a probe boolean for every hole of a large hole pattern would double its work, and the
-/// bodies' meshes are there already (the hole found its face on them). A body of another
-/// component is in another frame: the hole is then not known to miss.
+/// Whether hole tool `tool` is clear of every body the hole cuts, by their exact boxes (#10701).
+/// Boxes only: a probe boolean for every hole of a large hole pattern would double its work. A
+/// body whose exact box is unknown, or one of another component (in another frame), leaves the
+/// hole not known to miss.
 fn hole_misses(st: &ModelState, f: &Feature, tool: &Body) -> bool {
     let targets = hole_targets(st, f);
     let bounds = tool.outline_bounds();
@@ -6021,7 +6021,7 @@ fn hole_misses(st: &ModelState, f: &Feature, tool: &Body) -> bool {
         return false;
     }
     let tool_box = Some(bounds.inflated(1e-6));
-    targets.iter().all(|b| more::boxes_apart(&tool_box, &more::mesh_box(b)))
+    targets.iter().all(|b| more::boxes_apart(&tool_box, &b.body.exact_bounds().ok()))
 }
 
 fn copy_misses(st: &ModelState, f: &Feature, targets: &[String], tools: &[Traced]) -> bool {

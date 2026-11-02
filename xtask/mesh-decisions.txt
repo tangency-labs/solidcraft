@@ -9,10 +9,8 @@ crates/doc/src/config_styles.rs:Document::configuration_face_indices checks a co
 crates/doc/src/construct.rs:GeoRef::name_picks names picked faces and edges through the display mesh
 crates/doc/src/construct.rs:named_vertex finds where named edges meet through the display mesh
 crates/doc/src/document.rs:MeshData::eq compares imported mesh payloads by their triangles
-crates/doc/src/eval.rs:apply_traced_with passes over targets clear of a cut by mesh boxes
 crates/doc/src/eval.rs:blend_edges_on finds a blend's edges on the display mesh
 crates/doc/src/eval.rs:body_at picks the body whose surface is nearest a point by the display mesh
-crates/doc/src/eval.rs:cut_end_past_face finds the gap past a face a cut ends in by the display mesh
 crates/doc/src/eval.rs:edge_refs turns edge picks into references through the display mesh
 crates/doc/src/eval.rs:eval_feature places features by the display mesh (faces, edges, nearness)
 crates/doc/src/eval.rs:face_plane finds a sketch's face plane again on a mesh
@@ -22,7 +20,6 @@ crates/doc/src/eval.rs:feature_tools_with_constructor reaches a To Object extent
 crates/doc/src/eval.rs:height_at measures a point's height on a face by the display mesh
 crates/doc/src/eval.rs:hole_axis_size sizes a hole's tools by the bodies its axis meets on the display mesh
 crates/doc/src/eval.rs:hole_depth_to works out a hole's To Object depth on the display mesh
-crates/doc/src/eval.rs:hole_misses decides a hole misses bodies by their mesh boxes
 crates/doc/src/eval.rs:hole_on_surface moves a hole back onto its face by the display mesh
 crates/doc/src/eval.rs:hole_reaches decides whether a drill reaches material by the display mesh
 crates/doc/src/eval.rs:nearest_object_face picks an extrusion's To Object face by the display mesh
@@ -35,10 +32,7 @@ crates/doc/src/eval.rs:trim_to_body keeps the tool pieces touching the start by 
 crates/doc/src/eval.rs:unrecorded_touches finds touching pieces by a mesh
 crates/doc/src/eval_more.rs:FaceSlice::outline finds the wall an outline runs along by mesh triangles
 crates/doc/src/eval_more.rs:FaceSlice::recesses finds a plate's recesses by mesh triangles
-crates/doc/src/eval_more.rs:beyond_cylinder_reach skips bodies far from a tap marking by their mesh boxes
-crates/doc/src/eval_more.rs:body_box boxes a body by a mesh of it
 crates/doc/src/eval_more.rs:body_under picks the body under a plastic feature's point by the display mesh
-crates/doc/src/eval_more.rs:mesh_box boxes a model body by its display mesh
 crates/doc/src/eval_more.rs:on_sheet_material decides whether a point touches a sheet by the display mesh
 crates/doc/src/eval_more.rs:planar_normal_at finds the planar face through a point by a mesh
 crates/doc/src/eval_more.rs:plastic_eval places plastic features by a mesh

@@ -228,7 +228,9 @@ fn resolve_uncached(
             let (ba, fa) = crate::project3d::part_of(st, a).ok_or_else(|| lost(&a.describe()))?;
             let (bb, fb) = crate::project3d::part_of(st, b).ok_or_else(|| lost(&b.describe()))?;
             let chord = (ba.body.size().max(bb.body.size()) * 1e-3).max(1e-3);
-            for e in crate::kernel::meeting_edges(&ba.body, fa.as_deref(), &bb.body, fb.as_deref(), chord)? {
+            for e in
+                crate::kernel::meeting_edges(&ba.body, fa.as_ref().map(std::slice::from_ref), &bb.body, fb.as_ref().map(std::slice::from_ref), chord)?
+            {
                 wires.push(e.points);
                 exact.push(vec![WireCurve { curve: e.curve, interval: e.interval }]);
             }
