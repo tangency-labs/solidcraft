@@ -5345,7 +5345,12 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
             app.status = None;
         }
     }
-    if let Some(since) = app.computing_since() {
+    // History showing its busy look (this frame, or the last when it is drawn after the view)
+    // already says it is computing, where the change was made; the view doesn't say it twice.
+    let history_says = app.shell.history_busy_frame.is_some_and(|frame| ui.ctx().cumulative_frame_nr().saturating_sub(frame) <= 1);
+    if let Some(since) = app.computing_since()
+        && !history_says
+    {
         let seconds = ((crate::now_ms() - since) / 1000.0).floor().max(0.0);
         let text = crate::i18n::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))]);
         // A history command or a delete's check can be given up on (#8266); a feature edit

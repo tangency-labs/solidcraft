@@ -117,6 +117,8 @@ pub(crate) struct State {
     pub dialog_column: Option<Rect>,
     /// The status bar along the window's bottom edge, while it is shown (#7243).
     pub status_bar: Option<Rect>,
+    /// The frame History last showed its busy look, with its own "Computing…" label.
+    pub history_busy_frame: Option<u64>,
 }
 
 /// Register the actual card, so fitting and pointer shielding use the same rectangle.
