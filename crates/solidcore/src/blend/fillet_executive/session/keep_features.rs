@@ -38,6 +38,12 @@
 //! Deviations:
 //! - **A refusal keeps the target.** The target is copied before its first edit and put back
 //!   when the step fails (the fork leaves whatever it reached), as the subtraction does.
+//! - **Nothing kept, the sheet as built.** When no band reaches a feature after a boss's walls
+//!   were swept into the sheet and deleted again, the sheet the merge takes is the one built
+//!   before the sweep (#2370). The fork's sheet is then the same faces; the port's edits have
+//!   re-owned its faces' geometry under the notification naming, whose keys the target's own
+//!   geometry can carry (a body read or converted under that naming), and the merge refused the
+//!   ambiguous owner (`SM_ERR_INVALID_INPUT`).
 //! - **The trace.** The fork's `SM_ERR_MESSAGE` naming a reached feature isn't kept: the
 //!   port's kernel has no message channel for a step that goes on.
 //! - **Merging on a face.** The fork's `MergeCurvesOnSurface` takes the face's surface; the
@@ -327,6 +333,81 @@ fn domain_from_trims(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<()> {
     face::p2::set_uv_domain(b, f, &found.domain)
 }
 
+/// The owner of each face's surface, edge's curve and edge use's UV trim curve in `b`, with
+/// the producer key recorded for it.
+type GeometryOwners = Vec<(EntityRef, Option<ObjectRef>, Option<ObjectRef>)>;
+
+/// [`GeometryOwners`] of `b`.
+fn geometry_owners(b: &Brep) -> Result<GeometryOwners> {
+    let mut out = Vec::new();
+    for f in b.faces().ids() {
+        let owner = b.face(f)?.surface.as_ref().and_then(Surface::owner);
+        let e = EntityRef::Face(f);
+        out.push((e, owner, b.geometry_owner_key(e)));
+    }
+    for x in b.edges().ids() {
+        let owner = b.edge(x)?.curve.as_ref().and_then(Curve::owner);
+        let e = EntityRef::Edge(x);
+        out.push((e, owner, b.geometry_owner_key(e)));
+    }
+    for eu in b.edgeuses().ids() {
+        let owner = b.edgeuse(eu)?.uv_trim_curve.as_ref().and_then(Curve::owner);
+        let e = EntityRef::Edgeuse(eu);
+        out.push((e, owner, b.geometry_owner_key(e)));
+    }
+    Ok(out)
+}
+
+/// Gives the geometry of `b`'s entities that are still there the owners `built` recorded
+/// (not in the fork, whose owners are pointers): the edits of a step that kept nothing (a
+/// boss's walls swept into the sheet and deleted) rebind the sheet's geometry to the owners
+/// its naming scheme gives (`kernel_named_edit`), which a target named the same way also
+/// gives its own, and the merge refuses an owner two bodies resolve (#2370).
+fn restore_geometry_owners(b: &mut Brep, built: &GeometryOwners) -> Result<()> {
+    for &(e, owner, key) in built {
+        match e {
+            EntityRef::Face(f) => {
+                let Ok(face) = b.face_mut(f) else { continue };
+                let Some(surface) = face.surface.as_mut() else {
+                    continue;
+                };
+                if surface.owner() == owner {
+                    continue;
+                }
+                surface.set_owner(owner);
+                b.set_geometry_owner_key(e, key);
+                b.sync_face_surface_tolerance(f)?;
+            }
+            EntityRef::Edge(x) => {
+                let Ok(edge) = b.edge_mut(x) else { continue };
+                let Some(curve) = edge.curve.as_mut() else {
+                    continue;
+                };
+                if curve.owner() == owner {
+                    continue;
+                }
+                curve.set_owner(owner, None);
+                b.set_geometry_owner_key(e, key);
+            }
+            EntityRef::Edgeuse(eu) => {
+                let Ok(edgeuse) = b.edgeuse_mut(eu) else {
+                    continue;
+                };
+                let Some(curve) = edgeuse.uv_trim_curve.as_mut() else {
+                    continue;
+                };
+                if curve.owner() == owner {
+                    continue;
+                }
+                curve.set_owner(owner, None);
+                b.set_geometry_owner_key(e, key);
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 /// What the refusals say.
 const NOT_UPRIGHT: &str = "Fillet Error: a boss inside a round's band, kept, whose walls are not upright to a planar face it stands on (its walls continued are not built yet)";
 const NO_ROUND: &str = "Fillet Error: a kept boss's wall continued down meets no round";
@@ -409,6 +490,9 @@ impl FilletSession<'_> {
             .intermediate
             .take()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
+        // the owners of the sheet's geometry as built, given back when no feature is kept
+        // (#2370)
+        let built = geometry_owners(&sheet)?;
         let result = self.keep_features_on(
             k,
             &mut sheet,
@@ -419,7 +503,11 @@ impl FilletSession<'_> {
             on_tol,
             crease_tol,
         );
-        // the sheet stays the session's unless it was sewn in
+        // the sheet stays the session's unless it was sewn in; with no feature kept its
+        // geometry is owned as built, for the merge
+        if let Ok(false) = result {
+            restore_geometry_owners(&mut sheet, &built)?;
+        }
         if !matches!(result, Ok(true)) {
             self.objects.intermediate = Some(sheet);
         }
