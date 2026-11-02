@@ -1992,7 +1992,7 @@ fn copy_components(s: &mut Session, p: &Value, paths: Vec<Vec<u64>>) -> Result<V
         object.remove("occurrences");
     }
     // Bodies in differently placed frames split by frame (`frames::split_move`, #9660), as a move of them alone does.
-    let split = crate::frames::split_move(s, &rest);
+    let split = crate::frames::split_move(s, &rest)?;
     let bodies = if has_bodies && split.is_none() { Some(crate::frames::to_local(s, cmd, &rest)?.unwrap_or_else(|| rest.clone())) } else { None };
     let mut copies = Vec::new();
     for path in &paths {
