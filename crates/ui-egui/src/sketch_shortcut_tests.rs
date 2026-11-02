@@ -81,9 +81,26 @@ fn sketch_keys_outside_a_sketch_sketch_on_the_selected_plane_and_start_their_too
         assert!(h.app.session.active_sketch.is_some(), "{key}: no sketch opened");
         assert_eq!(h.app.session.world_state().sketches.len(), 1, "{key}");
         assert!(normal(&h).y.abs() > 0.999, "{key}: not on XZ: {:?}", normal(&h));
-        assert_eq!(tool(&h), Some(cmd), "{key}");
-        assert!(h.app.dialog.is_none(), "{key}: dialog left open");
+        if cmd == "sketch.project" {
+            assert!(h.app.preferences.project_options_dialog, "{key}: options are enabled by default");
+            assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::SketchProject { .. })), "{key}");
+            assert!(tool(&h).is_none(), "{key}: Project should open its options dialog");
+        } else {
+            assert_eq!(tool(&h), Some(cmd), "{key}");
+            assert!(h.app.dialog.is_none(), "{key}: dialog left open");
+        }
     }
+}
+
+#[test]
+fn project_can_keep_its_previous_direct_pick_workflow() {
+    let mut h = Harness::new();
+    h.app.preferences.project_options_dialog = false;
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.start("sketch.project");
+    h.settle();
+    assert!(h.app.dialog.is_none());
+    assert_eq!(tool(&h), Some("sketch.project"));
 }
 
 #[test]
@@ -319,7 +336,7 @@ fn a_feature_started_while_the_marker_rolls_back_waits_for_it() {
     h.app.edit_feature(sketch);
     h.app.apply_off_thread = Some(std::time::Duration::ZERO);
     h.app.start("solid.extrude");
-    assert!(h.app.session.active_sketch.is_none());
+    assert_eq!(h.app.session.active_sketch, Some(sketch), "Finish and the marker restore commit together after evaluation");
     assert!(h.app.deferred.is_some(), "the marker is not rolling back off the window thread");
     assert!(h.app.dialog.is_none(), "Extrude opened before the marker was back");
     for _ in 0..500 {
@@ -330,6 +347,268 @@ fn a_feature_started_while_the_marker_rolls_back_waits_for_it() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     assert_eq!(h.app.session.doc.marker, None);
+    assert_eq!(h.app.session.active_sketch, None);
     let items = h.app.dialog.as_ref().and_then(|d| d.inputs.first()).map(|i| i.items.clone()).unwrap_or_default();
     assert_eq!(items, vec![Sel::Profile { sketch, index: 0 }], "Extrude did not open once the marker was back");
+}
+
+/// The SKETCH tab kept shown (#7904): right after MODEL with no sketch open, its drawing and
+/// reference tools look enabled and start a sketch first (on the selected plane, else on the plane
+/// picked next) with the tool ready; tools that need a sketch's geometry stay disabled. Off, as by
+/// default, the tab waits for a sketch.
+#[test]
+fn the_kept_sketch_tab_sits_after_model_and_its_tools_start_a_sketch() {
+    let mut h = Harness::new();
+    assert!(!crate::workspace::visible_tabs(&h.app).contains(&"SKETCH"), "off by default");
+    h.call("ui.prefs", json!({"sketch_tab_always": true}));
+    assert_eq!(crate::workspace::visible_tabs(&h.app)[..2], ["MODEL", "SKETCH"]);
+    let info = |h: &Harness, id: &str| crate::render_workspace::interactive_command_info(&h.app, solidcraft_engine::find_command(id).unwrap());
+    assert!(info(&h, "sketch.line").enabled && info(&h, "sketch.project").enabled);
+    assert!(!info(&h, "sketch.dimension").enabled && !info(&h, "sketch.trim").enabled && !info(&h, "sketch.finish").enabled);
+
+    // A plane selected first: the sketch opens on it and the tool is out.
+    h.app.session.selection = vec![Sel::Plane { name: "XZ".into() }];
+    h.settle();
+    h.step(&json!({"click":{"handle":"tab:SKETCH"}})).unwrap();
+    h.step(&json!({"click":{"handle":"button:sketch.line"}})).unwrap();
+    h.settle();
+    assert!(normal(&h).y.abs() > 0.999, "on XZ: {:?}", normal(&h));
+    assert_eq!(tool(&h), Some("sketch.line"));
+    assert!(h.app.dialog.is_none());
+    assert_eq!(crate::workspace::visible_tabs(&h.app)[..2], ["MODEL", "SKETCH"], "the same place while sketching");
+    h.app.start("sketch.finish");
+    h.settle();
+    assert!(h.app.session.active_sketch.is_none());
+
+    // Nothing selected, in a fresh window (the view still looks at XZ): Create Sketch asks for
+    // the plane, then the tool starts.
+    let mut h = Harness::new();
+    h.call("ui.prefs", json!({"sketch_tab_always": true}));
+    h.settle();
+    h.step(&json!({"click":{"handle":"tab:SKETCH"}})).unwrap();
+    h.step(&json!({"click":{"handle":"button:sketch.circle.center"}})).unwrap();
+    h.settle();
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Sketch)));
+    assert_eq!(h.app.ui.tab, "SKETCH", "the ribbon stays where the click was");
+    h.step(&json!({"click":{"plane":"XY"}})).unwrap();
+    h.settle();
+    assert!(normal(&h).z.abs() > 0.999, "{:?}", normal(&h));
+    assert_eq!(tool(&h), Some("sketch.circle.center"));
+    h.app.start("sketch.finish");
+    h.settle();
+
+    // Off again: the tab goes, and a drawing tool outside a sketch is refused as before.
+    h.call("ui.prefs", json!({"sketch_tab_always": false}));
+    h.settle();
+    assert!(!crate::workspace::visible_tabs(&h.app).contains(&"SKETCH"));
+    assert!(!info(&h, "sketch.line").enabled);
+    h.app.start("sketch.line");
+    assert!(h.app.dialog.is_none() && tool(&h).is_none());
+}
+
+fn line_chain(h: &mut Harness, points: &[[i32; 3]]) {
+    h.step(&json!({"start":"sketch.line"})).unwrap();
+    for point in points {
+        h.step(&json!({"click":{"world":point}})).unwrap();
+    }
+}
+
+/// Each line of the active sketch, as (start, end).
+fn lines(h: &Harness) -> Vec<([f64; 2], [f64; 2])> {
+    use solidcraft_engine::sketch::Shape;
+    let sid = h.app.session.active_sketch.unwrap();
+    let state = h.app.session.model.state();
+    let sketch = &state.sketch(sid).unwrap().sketch;
+    (0..sketch.curves.len())
+        .filter_map(|c| match sketch.shape(c)? {
+            Shape::Line { a, b } => Some(([a.x, a.y], [b.x, b.y])),
+            _ => None,
+        })
+        .collect()
+}
+
+fn assert_line(line: ([f64; 2], [f64; 2]), start: [f64; 2], end: [f64; 2]) {
+    let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6;
+    assert!(near(line.0, start) && near(line.1, end), "{line:?}, expected {start:?} to {end:?}");
+}
+
+/// A snap is only materialized when the line is drawn. Hovering between clicks must not
+/// mistake it for a point removed by Undo (#11181), including when Undo restores that start.
+#[test]
+fn a_line_starts_on_a_curve_or_midpoint_and_keeps_that_snap_after_undo() {
+    use solidcraft_engine::sketch::ConstraintKind;
+    for construction in [false, true] {
+        for (start, midpoint) in [([20.0, 10.0], false), ([37.5, 10.0], true)] {
+            let mut h = Harness::new();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.app.run("sketch.line", json!({"points":[[0,10],[75,10]],"ids":["guide"],"construction":construction,"infer":false})).unwrap();
+            h.call("ui.camera", json!({"target":[37.5,10,0],"distance":200}));
+            h.settle();
+            h.step(&json!({"start":"sketch.line"})).unwrap();
+            let before = h.app.session.doc.to_json();
+            h.step(&json!({"click":{"sketch":start}})).unwrap();
+            h.settle();
+            assert_eq!(h.app.session.doc.to_json(), before, "the first click only remembers its snap");
+            for end in [[70.0, 10.0], [60.0, 30.0]] {
+                h.step(&json!({"click":{"sketch":end}})).unwrap();
+                h.settle();
+                let drawn = lines(&h);
+                assert_eq!(drawn.len(), 2, "construction={construction}, midpoint={midpoint}: {:?}", h.app.status);
+                // An on-curve click is projected from f32 screen coordinates, unlike a grid snap.
+                for (actual, expected) in [(drawn[1].0, start), (drawn[1].1, end)] {
+                    assert!((actual[0] - expected[0]).abs() < 1e-5 && (actual[1] - expected[1]).abs() < 1e-5, "{actual:?}, expected {expected:?}");
+                }
+                let sid = h.app.session.active_sketch.unwrap();
+                let state = h.app.session.world_state();
+                let sketch = &state.sketch(sid).unwrap().sketch;
+                let guide = sketch.curve_index("guide").unwrap();
+                assert!(
+                    sketch.constraints.iter().any(|c| match c.kind {
+                        ConstraintKind::Midpoint { l, .. } => midpoint && l == guide,
+                        ConstraintKind::PointOnCurve { c, .. } => !midpoint && c == guide,
+                        _ => false,
+                    }),
+                    "the line retains its snap constraint"
+                );
+                h.app.run("edit.undo", json!({})).unwrap();
+                h.settle();
+                assert_eq!(h.app.session.doc.to_json(), before, "Undo removes the line and its materialized snap together");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_line_starts_at_a_curve_crossing_and_keeps_it_after_undo() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    for (id, points) in [("across", [[-40, 10], [35, 10]]), ("upright", [[-20, -20], [-20, 40]])] {
+        h.app.run("sketch.line", json!({"points":points,"ids":[id],"construction":true,"infer":false})).unwrap();
+    }
+    h.settle();
+    h.step(&json!({"start":"sketch.line"})).unwrap();
+    h.step(&json!({"click":{"sketch":[-20,10]}})).unwrap();
+    for end in [[20.0, 30.0], [25.0, -10.0]] {
+        h.step(&json!({"click":{"sketch":end}})).unwrap();
+        h.settle();
+        let drawn = lines(&h);
+        assert_eq!(drawn.len(), 3, "{:?}", h.app.status);
+        assert_line(drawn[2], [-20.0, 10.0], end);
+        let state = h.app.session.world_state();
+        let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        assert_eq!(
+            sketch.constraints.iter().filter(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::PointOnCurve { .. })).count(),
+            2,
+            "the new line stays on both crossing curves"
+        );
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.settle();
+        assert_eq!(lines(&h).len(), 2);
+    }
+}
+
+#[test]
+fn a_line_snap_whose_source_curve_is_undone_ends_without_an_error() {
+    for start in [[-20.0, 10.0], [-2.5, 10.0]] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[-40,10],[35,10]],"construction":true,"infer":false})).unwrap();
+        h.settle();
+        h.step(&json!({"start":"sketch.line"})).unwrap();
+        h.step(&json!({"click":{"sketch":start}})).unwrap();
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.settle();
+        h.step(&json!({"click":{"sketch":[-20,-20]}})).unwrap();
+        assert!(lines(&h).is_empty(), "the missing snap must not create a line");
+        h.step(&json!({"click":{"sketch":[-10,-20]}})).unwrap();
+        h.settle();
+        let drawn = lines(&h);
+        assert_eq!(drawn.len(), 1, "{:?}", h.app.status);
+        assert_line(drawn[0], [-20.0, -20.0], [-10.0, -20.0]);
+        h.step(&json!({"expect":{"errors":0}})).unwrap();
+    }
+}
+
+/// The Undo button runs `edit.undo` and leaves the tool on: the chain goes back to the end of the
+/// last segment still there, and the next click draws from it (#10016).
+#[test]
+fn undo_in_a_line_chain_goes_back_to_the_last_segment_still_there() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.settle();
+    line_chain(&mut h, &[[-20, 0, 0], [0, 0, 0], [0, 15, 0]]);
+    assert_eq!(lines(&h).len(), 2);
+
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    assert_eq!(lines(&h).len(), 1);
+    h.step(&json!({"click":{"world":[20, 15, 0]}})).unwrap();
+    h.settle();
+    let drawn = lines(&h);
+    assert_eq!(drawn.len(), 2, "the click drew a line: {:?}", h.app.session.log.last());
+    assert_line(drawn[0], [-20.0, 0.0], [0.0, 0.0]);
+    assert_line(drawn[1], [0.0, 0.0], [20.0, 15.0]);
+    let chain = h.app.tool.as_ref().unwrap();
+    assert_eq!(chain.cmd, "sketch.line", "the tool stays on");
+    assert_eq!(chain.pts.len(), 1, "and the chain carries on from the new end");
+
+    // Undo twice: back past the first segment, to where the chain began.
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    assert!(lines(&h).is_empty());
+    h.step(&json!({"click":{"world":[5, 5, 0]}})).unwrap();
+    h.settle();
+    let drawn = lines(&h);
+    assert_eq!(drawn.len(), 1, "{:?}", h.app.session.log.last());
+    assert_line(drawn[0], [-20.0, 0.0], [5.0, 5.0]);
+}
+
+/// A chain begun on a point Undo then takes away has nowhere to go back to: it ends, the tool
+/// stays on, and the next click begins a new chain with no error.
+#[test]
+fn a_chain_whose_first_point_is_undone_ends_and_the_tool_stays_on() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[-20, -20], [-10, -20]]})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.line"})).unwrap();
+    h.step(&json!({"click":{"world":[-10, -20, 0]}})).unwrap();
+    assert!(h.app.tool.as_ref().unwrap().pts[0].1.is_some(), "the click snapped to the line's end");
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    assert!(lines(&h).is_empty());
+    h.step(&json!({"click":{"world":[5, 5, 0]}})).unwrap();
+    h.settle();
+    let chain = h.app.tool.as_ref().unwrap();
+    assert_eq!(chain.cmd, "sketch.line");
+    assert_eq!(chain.pts.len(), 1, "the click began a new chain: {:?}", h.app.session.log.last());
+    assert!(chain.pts[0].1.is_none() && (chain.pts[0].0.x - 5.0).abs() < 1e-6, "{:?}", chain.pts);
+    assert!(lines(&h).is_empty());
+    h.step(&json!({"click":{"world":[15, 5, 0]}})).unwrap();
+    h.settle();
+    assert_eq!(lines(&h).len(), 1, "{:?}", h.app.session.log.last());
+}
+
+/// Esc ends a chain for good: a new chain begun on its last point doesn't fall back into the old
+/// one when Undo takes that point away.
+#[test]
+fn undo_does_not_bring_back_a_chain_ended_with_esc() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.settle();
+    line_chain(&mut h, &[[-20, 0, 0], [0, 0, 0], [0, 15, 0]]);
+    press(&mut h, "Escape");
+    assert_eq!(tool(&h), Some("sketch.line"));
+    assert!(h.app.tool.as_ref().unwrap().pts.is_empty());
+    h.step(&json!({"click":{"world":[0, 15, 0]}})).unwrap();
+    assert!(h.app.tool.as_ref().unwrap().pts[0].1.is_some(), "the new chain begins on the old one's end");
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"world":[5, 5, 0]}})).unwrap();
+    h.settle();
+    let chain = h.app.tool.as_ref().unwrap();
+    assert_eq!(chain.pts.len(), 1);
+    assert!(chain.pts[0].1.is_none(), "a new chain, from the click, not the old one's point: {:?}", chain.pts);
+    assert_eq!(lines(&h).len(), 1, "only the first segment is left");
 }

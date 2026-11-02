@@ -1,4 +1,6 @@
 {
+  "order": 75,
+  "provenance": "Original black-and-white palette",
   "base": "light",
   "colors": {
     "accent": "#000000",
@@ -91,6 +93,8 @@
     "icons.highlight": "#ffffff",
     "icons.marker_halo": "#ffffff",
     "interference": "#000000",
+    "joint_axis": "#000000",
+    "joint_manipulator": "#000000",
     "logo": [
       "#000000",
       "#000000",
@@ -101,6 +105,14 @@
     "mesh_fill": "#000000",
     "mesh_ink": "#000000",
     "mesh_soft": "#ffffff",
+    "nav_dim": "#000000",
+    "nav_field": "#ffffff",
+    "nav_hover": "#ffffff",
+    "nav_press": "#000000",
+    "nav_tip": "#000000",
+    "nav_tip_ink": "#ffffff",
+    "nav_tip_key_border": "#ffffff",
+    "nav_viewport": "#ffffff",
     "on_accent": "#ffffff",
     "origin_plane": "#ffffff",
     "origin_plane_edge": "#000000",
@@ -134,6 +146,7 @@
     "sketch": "#000000",
     "sketch_accent": "#000000",
     "sketch_centerline": "#000000",
+    "sketch_conflict": "#000000",
     "sketch_construction": "#000000",
     "sketch_fixed": "#000000",
     "sketch_halo": "#ffffff",

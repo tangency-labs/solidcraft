@@ -51,7 +51,7 @@ fn picks(h: &Harness) -> (Sel, Sel, Sel) {
 fn hit(sel: &Sel) -> Hit {
     match sel {
         Sel::Face { body, index, point } => Hit::Face { body: body.clone(), index: *index, point: *point },
-        Sel::Edge { body, index, point } => Hit::Edge { body: body.clone(), index: *index, mid: *point },
+        Sel::Edge { body, index, point } => Hit::Edge { body: body.clone(), index: *index, mid: *point, point: *point },
         _ => panic!("not a model pick"),
     }
 }

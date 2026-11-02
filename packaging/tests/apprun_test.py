@@ -82,6 +82,21 @@ class AppRunCli(unittest.TestCase):
         self.run_apprun(SOLIDCRAFT_NO_DESKTOP_INTEGRATION="1")
         self.assertFalse(self.wrapper.exists())
 
+    def test_desktop_entry_icon_is_an_absolute_png_path(self):
+        # Ship a hicolor mark so AppRun can copy it and point Icon= at the install (#10673).
+        src = self.appdir / "usr/share/icons/hicolor/256x256/apps"
+        src.mkdir(parents=True)
+        (src / "io.tangencylabs.solidcraft.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (self.appdir / "usr/share/applications/io.tangencylabs.solidcraft.desktop").write_text(
+            "[Desktop Entry]\nExec=solidcraft\nIcon=io.tangencylabs.solidcraft\n"
+        )
+        self.run_apprun()
+        desk = (self.home / ".local/share/applications/io.tangencylabs.solidcraft.desktop").read_text()
+        installed = self.home / ".local/share/icons/hicolor/256x256/apps/io.tangencylabs.solidcraft.png"
+        self.assertTrue(installed.is_file())
+        self.assertIn(f"Icon={installed}", desk)
+        self.assertNotIn("Icon=io.tangencylabs.solidcraft\n", desk)
+
 
 if __name__ == "__main__":
     unittest.main()

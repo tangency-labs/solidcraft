@@ -26,6 +26,7 @@ fn every_slider_option_uses_the_same_token_thumb_in_both_themes() {
                                         format: if formatted { |v| format!("{:.0} %", v * 100.0) } else { |v| format!("{v:.2}") },
                                         show_value,
                                         integer,
+                                        workspace_accent: false,
                                     },
                                 );
                             });

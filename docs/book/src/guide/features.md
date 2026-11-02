@@ -15,23 +15,39 @@ it.
 | Construct | offset plane (at a distance or through a point), plane at angle, plane along path |
 | Inspect | measure, section analysis, interference, compare bodies, curvature comb and map, zebra, draft, minimum radius, isocurves, centre of mass |
 
-Extrude automatically selects **Join** for additions when the active component already has a
-solid, including sideways elbow connections and screw bosses that meet only part of a face.
-Extruding into existing material selects **Cut**. In an empty component it selects **New Body**;
-choose **New Body** explicitly to keep an addition separate. Changing the default does not alter
-operations already saved in a design. A Join (of an extrude, revolve, sweep, loft, primitive…)
-whose material touches none of its target bodies still joins it, to the first one as a separate
-piece, and the feature's warning says so: "`Body1` is now in 2 separate pieces". Combine joins
-the bodies it is given without that warning.
+**Quick measurement** (off by default; turn it on under Preferences › Interface): with edges,
+faces, sketch curves or points selected, the view's bottom right corner, above History, shows
+what they measure: an edge's length (Ø and R for a round one), a face's area, a point's position,
+two items' distance and angle, several edges' or faces' total. A click copies it. The Measure tool
+(I) does more.
 
-**Extrude to a picked target** (Preferences › Design, off by default) lets a pick choose the
+Extrude, Revolve, Sweep, Loft, Coil and the Box, Cylinder, Sphere and Torus choose their
+operation from what their material does, until you pick one: **Join** when it makes one body with
+a body it touches (a block against a wall, a ring round a hole, a boss meeting only part of a
+face), **New Body** when it would be a separate piece, and **Cut** when it goes into a body
+(Extrude) or lies inside one (Revolve and the Box, Cylinder, Sphere and Torus). The window finds
+out by running the Join on a copy of the design in the background, so its choice is what OK
+makes; it changes only when that check is in, and OK waits for it. An operation you pick stays,
+and a feature you edit keeps its own. Pipe, Thicken and Boundary Fill start as a New Body. Only
+shown bodies take part: with some bodies hidden, the feature names the shown ones as its targets,
+so a hidden body is never joined or cut, and showing it again later changes nothing.
+**Choose the operation automatically** (Preferences › Design, on by default) turns this choice
+off: each window then keeps the operation it opens with, Extrude its own Join or Cut, as before.
+
+A Join you pick whose material touches none of its target bodies still joins it, to the first
+one as a separate piece, and the feature's warning says so: "`Body1` is now in 2 separate
+pieces". Combine joins the bodies it is given without that warning. Changing the default does not
+alter operations already saved in a design.
+
+**Extrude to a picked target** (Preferences › Tools, on by default) lets a pick choose the
 extent. With it on and a profile selected in the solid Extrude dialog, picking a face away from
 its plane, a curved face, an off-plane vertex or a parallel plane automatically switches
 **Distance** to **To Object**. Coplanar faces still join the profile selection; non-parallel
-planes are not targets. The extent can still be chosen manually. For a new extrusion without
+planes are not targets. Clicking into the **Profiles** box first makes the next picks profiles
+again, even off the plane. The extent can still be chosen manually. For a new extrusion without
 start or end offsets or a From Object input, the target also sets the stored distance and
 one-sided direction, so returning to **Distance** keeps that reach. Thin Extrude keeps its
-existing picks. With the setting off, picks only add profiles, as before.
+existing picks. With the setting off, picks only add profiles.
 
 A positive extrude taper slopes the side walls outward, so the profile grows along the
 extrusion direction and the far end is larger; a negative taper slopes them inward, making
@@ -221,6 +237,13 @@ across). Large bodies are sampled more coarsely, at about `max_points` (eight mi
 each; `sampling.spacing_mm` says what was used, and a larger `max_points` (up to 50 million)
 samples them finer, at the cost of time.
 
+When editing an Extrude in the UI, the Browser's bodies, sketches, construction objects and
+feature rows follow the history marker before that feature. Later objects return when editing
+ends. Rolling back manually keeps feature rows listed, so they remain available to edit.
+A hidden body supplying the profile's face is shown temporarily during the edit, including
+when a folder or component hides it. OK, Cancel and Escape end that display override; the body's
+saved visibility and unrelated visibility changes are preserved.
+
 ## Editing a feature from a script
 
 For `solid.pattern.circular`, `axis` accepts `X`, `Y`, `Z`, `{origin, dir}`, or an edge or
@@ -260,7 +283,7 @@ edited with the sketch commands. Expressions are text (`"30"`, `"30 mm"`, `"widt
 
 ```json
 {"command": "timeline.inspect", "params": {"feature": "Slab"}}
-→ {"type": "ExtrudeFeature",
+→ {"type": "extrude", "type_name": "ExtrudeFeature",
    "definition": {"sketch": 1, "profiles": {"type": "all"}, "operation": "new_body",
                   "extent": {"distance": "10", "direction": "positive"}},
    "inputs": [{"label": "Distance", "param": "d1", "expression": "10", "unit": "mm"}], …}

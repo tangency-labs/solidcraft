@@ -129,16 +129,16 @@ fn add_column(s: &mut Session, c: Column, cmd: &str) -> Result<()> {
 
 fn configure(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "config.configure";
-    for n in string_list(p, "params") {
+    for n in string_list(cmd, p, "params")? {
         let c = column_of(s, &json!({ "param": n }), cmd)?;
         add_column(s, c, cmd)?;
     }
-    for n in string_list(p, "features") {
+    for n in string_list(cmd, p, "features")? {
         let c = column_of(s, &json!({ "feature": n }), cmd)?;
         add_column(s, c, cmd)?;
     }
     for key in ["materials", "appearances"] {
-        for n in string_list(p, key) {
+        for n in string_list(cmd, p, key)? {
             let field = if key == "materials" { "material" } else { "appearance" };
             let c = column_of(s, &json!({ field: n }), cmd)?;
             add_column(s, c, cmd)?;
@@ -293,6 +293,22 @@ fn row(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if rename.as_ref().is_some_and(|n| n != &name && s.doc.configs.rows.iter().any(|r| &r.name == n)) {
         return Err(bad(cmd, "configuration name already exists"));
+    }
+    let changes: Vec<_> = s
+        .doc
+        .configs
+        .columns
+        .iter()
+        .zip(&cells)
+        .filter_map(|(column, value)| match column {
+            Column::Param(name) => Some((name.clone(), value.clone())),
+            _ => None,
+        })
+        .collect();
+    if !changes.is_empty() {
+        // Check the final parameter graph without activating the row or rebuilding geometry.
+        let mut trial = s.doc.as_ref().clone();
+        trial.change_params_atomic(&changes).map_err(|e| bad(cmd, e.to_string()))?;
     }
     let t = &mut s.doc_mut().configs;
     let validated_name = rename.clone().unwrap_or_else(|| name.clone());
@@ -665,6 +681,52 @@ mod tests {
     }
 
     #[test]
+    fn configuration_rows_reject_invalid_parameter_expressions_without_changes() {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name":"L", "expression":"10 mm"}));
+        run(&mut s, "config.configure", json!({"params":["L"]}));
+        let before = s.doc.clone();
+        let undo_len = s.undo.len();
+        for expression in ["abc", "1/", "1/0"] {
+            for params in [
+                json!({"name":"Bad", "values":{"param:L":expression}}),
+                json!({"name":"Copy", "from":"Default", "values":{"L":expression}}),
+                json!({"name":"Default", "rename":"Renamed", "values":{"L":expression}}),
+            ] {
+                let error = s.execute("config.row", &params).expect_err("invalid expressions must be rejected when saving a row");
+                assert!(error.to_string().contains("parameter `L`"), "{params}: {error}");
+                assert_eq!(s.doc, before, "{params}");
+                assert_eq!(s.undo.len(), undo_len, "{params}");
+            }
+        }
+    }
+
+    #[test]
+    fn configuration_rows_validate_the_final_parameter_graph_without_activating_it() {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name":"L", "expression":"10 mm"}));
+        run(&mut s, "parameters.add", json!({"name":"W", "expression":"L + 2 mm"}));
+        run(&mut s, "config.configure", json!({"params":["L", "W"]}));
+        let before = s.doc.clone();
+        // Changing L first would make a cycle with W's current expression. The final row is valid.
+        run(&mut s, "config.row", json!({"name":"Reordered", "values":{"L":"W + 2 mm", "W":"20 mm"}}));
+        assert_eq!(s.doc.params, before.params);
+        assert_eq!(s.doc.configs.active, before.configs.active);
+        let saved = s.doc.clone();
+        let undo_len = s.undo.len();
+        assert!(s.execute("config.row", &json!({"name":"Cycle", "from":"Reordered", "values":{"W":"L"}})).is_err());
+        assert_eq!(s.doc, saved);
+        assert_eq!(s.undo.len(), undo_len);
+        run(&mut s, "config.activate", json!({"row":"Reordered"}));
+        let (values, errors) = s.doc.param_values();
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(values["L"].v, 22.0);
+        assert_eq!(values["W"].v, 20.0);
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc, saved);
+    }
+
+    #[test]
     fn configured_feature_inputs_and_suppression_match_typed_cells() {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length":10, "width":10, "height":10}));
@@ -746,9 +808,7 @@ mod tests {
         // Bad input.
         assert!(s.execute("config.row", &json!({"name": "X", "values": {"nope": 1}})).is_err());
         assert!(s.execute("config.activate", &json!({"row": "Missing"})).is_err());
-        run(&mut s, "config.row", json!({"name": "Broken", "values": {"length": "1/"}}));
-        assert!(s.execute("config.activate", &json!({"row": "Broken"})).is_err());
-        run(&mut s, "config.row", json!({"name": "Broken", "delete": true}));
+        assert!(s.execute("config.row", &json!({"name": "Broken", "values": {"length": "1/"}})).is_err());
         run(&mut s, "config.column", json!({"feature": fillet, "delete": true}));
         assert_eq!(run(&mut s, "config.table", json!({}))["columns"].as_array().map(Vec::len), Some(1));
     }

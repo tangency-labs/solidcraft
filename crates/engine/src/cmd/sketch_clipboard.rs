@@ -11,7 +11,8 @@ use serde_json::{Value, json};
 use solidcraft_geom::{Aabb2, Vec2};
 use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, Sketch};
 
-use super::sketch::{edit, target_sketch};
+use super::sketch::edit;
+use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, string_list, vec2};
 use crate::{Result, Sel, Session};
@@ -70,18 +71,50 @@ pub struct SketchClip {
     pub pastes: u32,
 }
 
-/// Curve and point ids named by `entities`, or the selected sketch geometry.
-fn chosen(s: &Session, p: &Value) -> Vec<String> {
-    if p.get("entities").is_some() {
-        return string_list(p, "entities");
+impl SketchClip {
+    /// This clipboard as another design pastes it (#9258): at the same sketch coordinates (its
+    /// sketch ids mean nothing there), and with nothing that names the copied design's
+    /// parameters. A dimension whose expression names a parameter keeps its value, in its unit
+    /// (another design's parameter of the same name would be another thing); a text keeps its
+    /// words, height and angle as numbers.
+    pub fn for_another_design(&self) -> SketchClip {
+        let mut clip = self.clone();
+        clip.sketch = u64::MAX;
+        clip.pastes = 0;
+        for c in &mut clip.constraints {
+            let Some((expr, unit)) = c.param.as_mut() else { continue };
+            if solidcraft_doc::expr::references(expr).is_empty() {
+                continue;
+            }
+            let v = c.kind.value().unwrap_or_default();
+            if solidcraft_doc::expr::unit_info(unit).is_none() {
+                *unit = if c.kind.is_angle() { "rad" } else { "mm" }.into();
+            }
+            let value = if c.kind.is_angle() { solidcraft_doc::expr::Value::angle(v) } else { solidcraft_doc::expr::Value::length(v) };
+            let shown = solidcraft_doc::expr::value_in_unit(value, unit);
+            *expr = format!("{}", if shown.is_finite() { shown } else { 0.0 });
+        }
+        for (src, _) in &mut clip.texts {
+            if let LinkSource::Text { exprs, .. } = src {
+                *exprs = Default::default();
+            }
+        }
+        clip
     }
-    s.selection
+}
+
+/// Curve and point ids named by `entities`, or the selected sketch geometry.
+fn chosen(s: &Session, p: &Value, cmd: &str) -> Result<Vec<String>> {
+    if p.get("entities").is_some() {
+        return string_list(cmd, p, "entities");
+    }
+    Ok(s.selection
         .iter()
         .filter_map(|sel| match sel {
             Sel::SketchCurve { id, .. } | Sel::SketchPoint { id } => Some(id.clone()),
             _ => None,
         })
-        .collect()
+        .collect())
 }
 
 fn text_of(sk: &Sketch, ci: usize) -> Option<&str> {
@@ -91,12 +124,12 @@ fn text_of(sk: &Sketch, ci: usize) -> Option<&str> {
 
 fn copy(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.copy";
-    let id = target_sketch(s, p, cmd)?;
-    let ids = chosen(s, p);
+    let id = sketch_store::target(s, p, cmd)?;
+    let ids = chosen(s, p, cmd)?;
     if ids.is_empty() {
         return Err(bad(cmd, "select the sketch curves or points to copy"));
     }
-    let sk = s.doc.sketch(id)?;
+    let sk = sketch_store::read(&s.doc, id)?;
     let (mut cs, mut ps, mut texts): (Vec<usize>, Vec<usize>, Vec<String>) = (Vec::new(), Vec::new(), Vec::new());
     for e in &ids {
         if let Some(c) = sk.curve_index(e) {
@@ -211,7 +244,7 @@ fn cut(s: &mut Session, p: &Value) -> Result<Value> {
     if !(p.is_object() || p.is_null()) {
         return Err(bad("sketch.cut", "params must be an object"));
     }
-    let entities = chosen(s, p);
+    let entities = chosen(s, p, "sketch.cut")?;
     let mut q = if p.is_null() { json!({}) } else { p.clone() };
     q["entities"] = json!(entities);
     let out = copy(s, &q)?;
@@ -244,7 +277,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "params must be an object"));
     }
     let Some(clip) = s.sketch_clipboard.clone() else { return Err(bad(cmd, "nothing copied (sketch.copy first)")) };
-    let target = target_sketch(s, p, cmd)?;
+    let target = sketch_store::target(s, p, cmd)?;
     let positioned = p.get("at").is_some() || p.get("translate").is_some();
     let t = if let Some(v) = p.get("at") {
         vec2(v).ok_or_else(|| bad(cmd, "`at` must be [x, y]"))? - clip.center

@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::{Expr, Operation, ThinSide};
 use solidcraft_geom::{Vec2, Vec3};
 
-use super::check::whole;
+use super::check::{keyed, whole};
 use crate::params;
 
 /// For optional fields whose key may be absent but not `null`: absent is `None` (with
@@ -390,7 +390,7 @@ impl JsonSchema for StringList {
 
 /// The spellings `Operation::parse` accepts, canonical ones first (it also ignores case, spaces,
 /// '_' and '-', which an enum can't say).
-const OPERATIONS: [&str; 13] = [
+const OPERATIONS: &[&str] = &[
     "new",
     "join",
     "cut",
@@ -447,7 +447,7 @@ impl JsonSchema for OperationParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         enum_schema(
-            &OPERATIONS,
+            OPERATIONS,
             "How the feature combines with existing bodies: new, join, cut or intersect. The others are aliases. Matching ignores case, spaces, '_' and '-'.",
         )
     }
@@ -471,7 +471,7 @@ impl JsonSchema for ExtrudeOperation {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         let mut values = vec!["auto"];
-        values.extend(OPERATIONS);
+        values.extend_from_slice(OPERATIONS);
         enum_schema(
             &values,
             "How the extrusion combines with existing bodies: auto (cut into a body, otherwise join; new in an empty component), new, join, cut or intersect. The others are aliases. Matching ignores case, spaces, '_' and '-' (only case for auto).",
@@ -479,7 +479,7 @@ impl JsonSchema for ExtrudeOperation {
     }
 }
 
-const DIRECTIONS: [&str; 6] = ["positive", "negative", "symmetric", "one_side", "reverse", "flip"];
+const DIRECTIONS: &[&str] = &["positive", "negative", "symmetric", "one_side", "reverse", "flip"];
 
 /// Extrude's direction, as `extent_param` reads it (lowercased, not trimmed).
 #[derive(Clone, Debug, PartialEq)]
@@ -500,7 +500,7 @@ impl JsonSchema for DirectionParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         enum_schema(
-            &DIRECTIONS,
+            DIRECTIONS,
             "Which way to extrude: positive (the default), negative, or symmetric (the distance is the total thickness, split evenly around the start plane). one_side is an alias of positive; reverse and flip of negative. Matching ignores case.",
         )
     }
@@ -818,6 +818,311 @@ impl JsonSchema for SketchRef {
     }
 }
 
+/// What `features::plane_param` says about `v` as a plane before it looks anything up, as a
+/// complete message, or `None`. Names and ids are the handler's to look up.
+fn plane_problem(v: &Value) -> Option<String> {
+    let forms = || whole(format!("`plane` must be {}", crate::cmd::PLANE_FORMS));
+    match v {
+        Value::String(_) => None,
+        Value::Number(n) => n.as_u64().map_or_else(|| Some(forms()), |_| None),
+        Value::Object(o) => {
+            // The handler evaluates each coordinate after reading it; an expression that doesn't
+            // evaluate is its to report.
+            if o.get("origin").is_some_and(|origin| PointExpr3::deserialize(origin).is_err()) {
+                return Some(whole("`origin` must be a point [x, y, z] of numbers or length expressions"));
+            }
+            crate::cmd::explicit_plane(v, Vec3::ZERO).map_or_else(|| Some(whole("plane needs x_dir and y_dir, or normal")), |_| None)
+        }
+        _ => Some(forms()),
+    }
+}
+
+/// A plane, as `features::plane_param` reads it: an origin plane's name or alias, a construction
+/// plane's name or feature id, or an explicit plane object. Kept as given, for the handler.
+/// Whether a name or id names a plane is checked by the handler, which has the design.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlaneParam(pub Value);
+
+impl<'de> Deserialize<'de> for PlaneParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        match plane_problem(&v) {
+            Some(why) => Err(D::Error::custom(why)),
+            None => Ok(PlaneParam(v)),
+        }
+    }
+}
+
+impl JsonSchema for PlaneParam {
+    fn schema_name() -> Cow<'static, str> {
+        "Plane".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point3>();
+        let origin = generator.subschema_for::<PointExpr3>();
+        json_schema!({
+            "description": "A plane: XY, XZ or YZ (or Top, Front or Right; any case), a construction plane's name or feature id, or an explicit plane {\"origin\"?, \"x_dir\", \"y_dir\"} or {\"origin\"?, \"normal\"}: directions [x, y, z] (two that aren't parallel, or a normal that isn't zero; the two directions win over normal when both are points) and an origin in mm, each coordinate a number or a length expression (default: the origin).",
+            "anyOf": [
+                {"type": "string"},
+                {"type": "integer", "minimum": 0, "maximum": u64::MAX},
+                {
+                    "type": "object",
+                    "properties": {"origin": origin},
+                    "anyOf": [
+                        {"properties": {"x_dir": point, "y_dir": point}, "required": ["x_dir", "y_dir"]},
+                        {"properties": {"normal": point}, "required": ["normal"]}
+                    ]
+                }
+            ]
+        })
+    }
+}
+
+/// What `construct::geo` says about `v` as a reference before it looks anything up, in the
+/// contract's style (the key goes in front), or `None`. Sketches, axes and construction points
+/// are the handler's to look up.
+fn geo_problem(v: &Value) -> Option<String> {
+    use crate::cmd::{GeoForm, GeoFormError};
+    match crate::cmd::geo_form(v) {
+        Ok(GeoForm::Sketch { sketch, part }) => {
+            if crate::cmd::sketch_key(Some(sketch)).is_none() {
+                Some("must be a sketch id or name".into())
+            } else {
+                part.is_none().then(|| crate::cmd::SKETCH_PART.into())
+            }
+        }
+        Ok(GeoForm::Plane(plane)) => plane_problem(plane),
+        Ok(_) => None,
+        Err(GeoFormError::Saved(why)) => Some(keyed(why)),
+        Err(GeoFormError::Unknown) => Some(format!("must be {}", crate::cmd::GEO_REF_FORMS)),
+    }
+}
+
+/// The reference types a saved reference's `type` names (`solidcraft_doc::construct::GeoRef`).
+const SAVED_REFS: [&str; 11] =
+    ["point", "origin", "vertex", "edge", "face", "plane", "world", "axis", "construct_point", "sketch_point", "sketch_curve"];
+
+/// `{key: point}`, unless it has `type` (then it is a saved reference).
+fn picked_at(key: &str, point: &Schema) -> Value {
+    json!({"type": "object", "properties": {key: point}, "required": [key], "not": {"required": ["type"]}})
+}
+
+/// A reference to geometry for a construction axis, point or plane, as `construct::geo` reads
+/// it. Kept as given, for the handler. What the reference must be (a plane, a line…) depends on
+/// the key and is checked when the feature is evaluated; whether a sketch, axis or construction
+/// point it names exists is checked by the handler.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GeoRefParam(pub Value);
+
+impl<'de> Deserialize<'de> for GeoRefParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        match geo_problem(&v) {
+            Some(why) => Err(D::Error::custom(why)),
+            None => Ok(GeoRefParam(v)),
+        }
+    }
+}
+
+impl JsonSchema for GeoRefParam {
+    fn schema_name() -> Cow<'static, str> {
+        "GeoRef".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point3>();
+        let plane = generator.subschema_for::<PlaneParam>();
+        let sketch = generator.subschema_for::<SketchRef>();
+        let text = json!({"type": "string"});
+        // The reader takes the first form that fits, in the order below; the `not`s keep a later
+        // form from taking an object an earlier one refuses.
+        let earlier = |keys: &[&str]| json!({"anyOf": keys.iter().map(|k| json!({"required": [k]})).collect::<Vec<_>>()});
+        json_schema!({
+            "description": "Geometry to build from, the first of these forms that fits: a reference as saved ({\"type\": …}, as timeline.inspect gives one back); a point in mm on a face, edge or vertex of a body ({\"face\": [x, y, z]}, {\"edge\": …} or {\"vertex\": …}), kept by its persistent name; a sketch's point or curve ({\"sketch\": id or name, \"point\" or \"curve\": its id}); a fixed point {\"point\": [x, y, z]}; a plane {\"plane\": …}; an axis {\"axis\": X, Y, Z or a construction axis's name}; a construction point {\"construct_point\": name}; or a plane's name.",
+            "anyOf": [
+                {"type": "object", "properties": {"type": {"enum": SAVED_REFS}}, "required": ["type"]},
+                picked_at("face", &point),
+                picked_at("edge", &point),
+                picked_at("vertex", &point),
+                {
+                    "type": "object",
+                    "properties": {"sketch": sketch},
+                    "required": ["sketch"],
+                    "anyOf": [{"properties": {"point": text}, "required": ["point"]}, {"properties": {"curve": text}, "required": ["curve"]}],
+                    "not": earlier(&["type"])
+                },
+                {"type": "object", "properties": {"point": point}, "required": ["point"], "not": earlier(&["type", "sketch"])},
+                {"type": "object", "properties": {"plane": plane}, "required": ["plane"], "not": earlier(&["type", "sketch"])},
+                {"type": "object", "properties": {"axis": text}, "required": ["axis"], "not": earlier(&["type", "sketch", "plane"])},
+                {"type": "object", "properties": {"construct_point": text}, "required": ["construct_point"], "not": earlier(&["type", "sketch", "plane"])},
+                text
+            ]
+        })
+    }
+}
+
+/// A construction plane's `base`, as `construct.plane.offset` and `construct.plane.at_angle`
+/// read it: a planar face of a body when it has `face` (as `sketch::face::capture` reads it),
+/// otherwise a [`PlaneParam`]. Kept as given, for the handler.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlaneOrFace(pub Value);
+
+impl<'de> Deserialize<'de> for PlaneOrFace {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let problem = match v.get("face") {
+            Some(_) => crate::cmd::face_pick_form(&v).err().map(whole),
+            None => plane_problem(&v),
+        };
+        match problem {
+            Some(why) => Err(D::Error::custom(why)),
+            None => Ok(PlaneOrFace(v)),
+        }
+    }
+}
+
+impl JsonSchema for PlaneOrFace {
+    fn schema_name() -> Cow<'static, str> {
+        "PlaneOrFace".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point3>();
+        let plane = generator.subschema_for::<PlaneParam>();
+        let index_max = u64::try_from(usize::MAX).unwrap_or(u64::MAX);
+        json_schema!({
+            "description": "A plane, or a planar face of a body {\"face\": [x, y, z] in world coordinates, \"body\"?, \"index\"?, \"path\"?, \"fixed\"?}, which the plane follows as the model changes (\"fixed\": true keeps it where the face is now). \"body\" (the picked body's world name) and \"index\" (the face's index in it) pick the face exactly and go together; \"path\" is the occurrence path of the body's placement, at most 64 ids.",
+            "anyOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "face": point,
+                        "fixed": {"type": "boolean"},
+                        "body": {"type": "string", "minLength": 1},
+                        "index": {"type": "integer", "minimum": 0, "maximum": index_max},
+                        "path": {"type": "array", "maxItems": 64, "items": {"type": "integer", "minimum": 1, "maximum": u64::MAX}}
+                    },
+                    "required": ["face"],
+                    "anyOf": [{"required": ["body", "index"]}, {"not": {"anyOf": [{"required": ["body"]}, {"required": ["index"]}]}}]
+                },
+                {"anyOf": [plane], "not": {"type": "object", "required": ["face"]}}
+            ]
+        })
+    }
+}
+
+/// The line `construct.plane.at_angle` turns about, as `features::axis_line` reads it: an edge or
+/// face of the model (as `construct::model_axis_param` reads it), else X, Y, Z, a construction
+/// axis's name or `{origin?, dir}`. Kept as given, for the handler. Whether a picked edge or face
+/// gives a line, or a name names an axis, is checked by the handler, which has the design.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AxisLine(pub Value);
+
+impl<'de> Deserialize<'de> for AxisLine {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use crate::cmd::GeoForm;
+        use solidcraft_doc::construct::GeoRef;
+        let v = Value::deserialize(d)?;
+        let problem = if crate::cmd::is_model_axis(&v) {
+            geo_problem(&v).or_else(|| match crate::cmd::geo_form(&v) {
+                Ok(GeoForm::Face(_) | GeoForm::Edge(_) | GeoForm::Saved(GeoRef::Face { .. } | GeoRef::Edge { .. })) => None,
+                _ => Some(solidcraft_doc::construct::MODEL_AXIS_REFS.to_string()),
+            })
+        } else {
+            match &v {
+                Value::String(_) => None,
+                Value::Object(_) => crate::cmd::axis_line_object(&v).err().map(whole),
+                _ => Some(whole("`axis` is required")),
+            }
+        };
+        match problem {
+            Some(why) => Err(D::Error::custom(why)),
+            None => Ok(AxisLine(v)),
+        }
+    }
+}
+
+impl JsonSchema for AxisLine {
+    fn schema_name() -> Cow<'static, str> {
+        "AxisLine".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point3>();
+        let saved = json!({"required": ["type"], "properties": {"type": {"enum": ["edge", "face"]}}});
+        json_schema!({
+            "description": "An axis: X, Y or Z (any case), a construction axis's name (where it is now), {\"origin\"?: [x, y, z] in mm (default: the origin), \"dir\": [x, y, z] that isn't zero}, or a straight or circular edge, or a cylinder, cone or torus face, of a body ({\"edge\": [x, y, z]} or {\"face\": [x, y, z]}, a point on it, or as saved: {\"type\": \"edge\" or \"face\", \"at\", \"name\"?}), whose axis the plane follows as the model changes.",
+            "anyOf": [
+                {"type": "string"},
+                {
+                    "type": "object",
+                    "properties": {"origin": point, "dir": point},
+                    "required": ["dir"],
+                    "not": {"anyOf": [{"required": ["edge"]}, {"required": ["face"]}, saved]}
+                },
+                picked_at("face", &point),
+                picked_at("edge", &point),
+                {"type": "object", "properties": {"type": {"enum": ["edge", "face"]}}, "required": ["type"]}
+            ]
+        })
+    }
+}
+
+/// A construction plane's name, which `features::check_plane_name` refuses when it names an
+/// origin plane. Strict gives the same message but names the command that was called, where the
+/// handler (`add_feature`, which isn't given it) says `construct.plane`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlaneName(pub String);
+
+impl<'de> Deserialize<'de> for PlaneName {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(name) => match crate::cmd::plane_name_problem(&name) {
+                Some(why) => Err(D::Error::custom(whole(why))),
+                None => Ok(PlaneName(name)),
+            },
+            _ => Err(D::Error::custom("must be text")),
+        }
+    }
+}
+
+impl JsonSchema for PlaneName {
+    fn schema_name() -> Cow<'static, str> {
+        "PlaneName".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        // The schema can't say which names are refused: a pattern would need a lookahead, which
+        // not every validator has.
+        json_schema!({
+            "description": "The plane's name in the timeline: not XY, XZ, YZ, Top, Front or Right (any case, with or without spaces around it), which name the origin planes.",
+            "type": "string"
+        })
+    }
+}
+
+/// The keys `features::add_feature` reads that a construction axis or point takes besides its
+/// references, flattened into its parameters with [`feature_common`]. Not [`FeatureCommon`]: it
+/// makes no body, so `body_name` and `body_names` would do nothing. `participants` stays because
+/// `timeline.redefine` passes a feature's own back.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, JsonSchema)]
+pub struct ConstructionCommon {
+    /// The feature's name in the timeline.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// The bodies taking part, which every feature records; each an existing body or `*`. A
+    /// construction feature changes no body, whatever this lists.
+    #[serde(default)]
+    pub participants: Option<StringList>,
+}
+
+/// [`ConstructionCommon`] for a construction plane, whose name may not name an origin plane.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, JsonSchema)]
+pub struct PlaneCommon {
+    #[serde(default)]
+    pub name: Option<PlaneName>,
+    /// The bodies taking part, which every feature records; each an existing body or `*`. A
+    /// construction feature changes no body, whatever this lists.
+    #[serde(default)]
+    pub participants: Option<StringList>,
+}
+
 /// The keys `features::add_feature` reads for every feature command, whatever else it takes:
 /// the feature's name, the new bodies' names and the bodies taking part. A feature command's
 /// parameters include it with
@@ -849,11 +1154,12 @@ pub struct FeatureCommon {
     pub participants: Option<StringList>,
 }
 
-/// Deserializes a flattened [`FeatureCommon`] from the keys the parent doesn't take, and reports
-/// a problem as if its fields were the parent's own, with the key in the message and in the
-/// issue's path (serde's flatten otherwise loses the key). serde reads a flattened field after
-/// all the parent's own, so its problems come after theirs, including a missing key.
-pub fn feature_common<'de, D: Deserializer<'de>>(d: D) -> Result<FeatureCommon, D::Error> {
+/// Deserializes a flattened [`FeatureCommon`] (or [`ConstructionCommon`], [`PlaneCommon`]) from
+/// the keys the parent doesn't take, and reports a problem as if its fields were the parent's
+/// own, with the key in the message and in the issue's path (serde's flatten otherwise loses the
+/// key). serde reads a flattened field after all the parent's own, so its problems come after
+/// theirs, including a missing key.
+pub fn feature_common<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(d: D) -> Result<T, D::Error> {
     let v = Value::deserialize(d)?;
     serde_path_to_error::deserialize(&v).map_err(|e| D::Error::custom(super::check::located(&e)))
 }

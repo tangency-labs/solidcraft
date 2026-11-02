@@ -40,6 +40,8 @@ pub enum Intent {
     Open,
     /// Add its bodies to the open design (STEP, 3MF, STL).
     Insert,
+    /// Import it as a theme: it was dropped on Preferences' Import tile (#8226).
+    Theme,
 }
 
 /// A stored design, as the file panel lists it.
@@ -615,13 +617,15 @@ fn choose_file(accept: &str) -> Result<js_sys::Promise, String> {
 }
 
 /// Read files dropped on the page.
-pub fn take_drops(files: &Rc<Files>, raw: &mut egui::RawInput) {
+/// `theme`: the pointer is over Preferences' Import tile, so the files are themes.
+pub fn take_drops(files: &Rc<Files>, raw: &mut egui::RawInput, theme: bool) {
+    let intent = if theme { Intent::Theme } else { Intent::Insert };
     for f in std::mem::take(&mut raw.dropped_files) {
         let files = files.clone();
         spawn_local(async move {
             let name = f.path().file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "dropped".into());
             match f.bytes_async().await {
-                Ok(b) => files.arrive(name, b, Intent::Insert),
+                Ok(b) => files.arrive(name, b, intent),
                 Err(e) => files.say(format!("{name}: {e}"), true),
             }
         });

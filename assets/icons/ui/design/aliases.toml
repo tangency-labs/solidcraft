@@ -27,6 +27,9 @@ error = { master = "status_error", accent = "surface" }
 warning = { master = "status_warning", accent = "mesh" }
 ground = "c_fix"
 
+# Visual style: Shaded with edges is the generic style icon.
+style_shaded_edges = "style"
+
 # Same finished drawing, different semantic operation. Colours live only in palette.toml.
 sketch_break = { master = "break", accent = "sketch" }
 sketch_cancel = { master = "close", accent = "sketch" }

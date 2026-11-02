@@ -37,6 +37,8 @@ struct NavStore {
     query: String,
     cursor: usize,
     hits: Vec<NavHit>,
+    /// The cursor moved this frame, so this frame's passes scroll the selected row into view.
+    scroll: bool,
 }
 
 /// The row to scroll to and outline after a result is chosen.
@@ -63,6 +65,10 @@ struct State {
     /// A heading matched, so the controls under it stay visible until the next heading.
     heading_open: bool,
     hiding: u32,
+    /// Set while a row with no label of its own runs hidden: what its controls say stands in for it.
+    unlabelled: u32,
+    /// Rows drawn this page with no label, so each gets a key of its own.
+    unlabelled_rows: u32,
     key: String,
     hits: u32,
     page_index: usize,
@@ -257,7 +263,9 @@ pub(crate) fn begin_page(ui: &Ui, index: usize, label: &str) {
         state.page_index = index;
         state.page = label.to_string();
         state.page_shown = false;
+        state.unlabelled_rows = 0;
         state.section.clear();
+        state.key.clear();
         state.section_matches = false;
         state.section_shown.clear();
         state.heading_open = false;
@@ -268,8 +276,11 @@ pub(crate) fn begin_section(ui: &Ui, title: &str) {
     let matches = text_hit(ui, title);
     with(ui, |state| {
         state.section = title.to_string();
+        state.unlabelled_rows = 0;
         state.section_matches = matches || state.force > 0;
         state.section_shown.clear();
+        // A dropdown with no row of its own must not store its value under the last row's key.
+        state.key.clear();
         state.heading_open = false;
     });
 }
@@ -328,6 +339,53 @@ pub(crate) fn pop_force(ui: &Ui) {
 
 pub(crate) fn set_control(ui: &Ui, label: &str) {
     with(ui, |state| state.key = format!("{}\n{}\n{}", state.page, state.section, label));
+}
+
+/// Key a row that has no label of its own by its place in the section, so two of them do not share
+/// one stored text. Returns the text to match the row on (still empty).
+pub(crate) fn set_unlabelled_control(ui: &Ui) {
+    with(ui, |state| {
+        state.unlabelled_rows += 1;
+        state.key = format!("{}\n{}\n#{}", state.page, state.section, state.unlabelled_rows);
+    });
+}
+
+pub(crate) fn push_unlabelled(ui: &Ui) {
+    with(ui, |state| state.unlabelled = state.unlabelled.saturating_add(1));
+}
+
+pub(crate) fn pop_unlabelled(ui: &Ui) {
+    with(ui, |state| state.unlabelled = state.unlabelled.saturating_sub(1));
+}
+
+/// A control inside a row with no label says what it is. Stored for the row, so the next pass can
+/// match the row on those words and draw it, as it does for a dropdown's current value.
+pub(crate) fn note_unlabelled(ui: &Ui, texts: &[&str]) {
+    if !querying(ui) {
+        return;
+    }
+    with(ui, |state| {
+        if state.hiding == 0 || state.unlabelled == 0 || state.key.is_empty() {
+            return;
+        }
+        let mut stored = state.extras.get(&state.key).cloned().unwrap_or_default();
+        let was = extra_hit_text(state, Some(stored.as_str()));
+        for text in texts.iter().filter(|text| !text.is_empty()) {
+            if !stored.contains(text) {
+                if !stored.is_empty() {
+                    stored.push(' ');
+                }
+                stored.push_str(text);
+            }
+        }
+        let now = extra_hit_text(state, Some(stored.as_str()));
+        let key = state.key.clone();
+        state.extras.insert(key, stored);
+        if was != now {
+            state.child_matched = true;
+            state.dirty = true;
+        }
+    });
 }
 
 /// Draw this control. A miss returns false and draws nothing; the caller still runs the control
@@ -463,7 +521,13 @@ fn text_hit(ui: &Ui, text: &str) -> bool {
 }
 
 fn text_matches(query: &str, text: &str) -> bool {
-    setting_score(query, text) > 0 || english_hit(query, text) || keywords(text).iter().any(|word| setting_score(query, word) > 0)
+    // A right-to-left label reaches here in display order (see `Catalog::shown`), while the query
+    // is typed in reading order: compare the query in display order too, so a multi-word Hebrew
+    // or Arabic label is found as it is typed (#10471; #7532 fixed only the test's half).
+    setting_score(query, text) > 0
+        || setting_score(&crate::bidi::visual(query), text) > 0
+        || english_hit(query, text)
+        || keywords(text).iter().any(|word| setting_score(query, word) > 0)
 }
 
 /// Prefix, the start of a word, or a run of at least three characters. Scattered letters are not
@@ -592,6 +656,7 @@ pub(crate) fn nav(ctx: &Context) -> (String, usize, Vec<NavHit>) {
 pub(crate) fn set_cursor(ctx: &Context, cursor: usize) {
     ctx.data_mut(|data| {
         let store = data.get_temp_mut_or_default::<NavStore>(Id::new(NAV));
+        store.scroll = store.cursor != cursor;
         store.cursor = cursor;
     });
 }
@@ -619,7 +684,10 @@ pub(crate) fn remember(ui: &mut Ui, label: &str, rect: Rect) {
     if with(ui, |state| state.hiding > 0).unwrap_or(true) {
         return;
     }
-    let cursor = ui.ctx().data(|data| data.get_temp::<NavStore>(Id::new(NAV)).unwrap_or_default().cursor);
+    let (cursor, scroll) = ui.ctx().data(|data| {
+        let store = data.get_temp::<NavStore>(Id::new(NAV)).unwrap_or_default();
+        (store.cursor, store.scroll)
+    });
     let selected = with(ui, |state| {
         let selected = state.nav.len() == cursor;
         state.nav.push(PaintedHit { page: state.page_index, label: label.to_string() });
@@ -631,7 +699,10 @@ pub(crate) fn remember(ui: &mut Ui, label: &str, rect: Rect) {
     }
     let t = Tokens::get();
     ui.painter().rect_stroke(rect, t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
-    ui.scroll_to_rect(rect, Some(egui::Align::Center));
+    // Only when Up/Down moved the cursor: following it every frame pins the list to the match.
+    if scroll {
+        ui.scroll_to_rect(rect, Some(egui::Align::Center));
+    }
     crate::scenario::publish_handle("prefs:search:current", rect.center());
 }
 
@@ -684,6 +755,135 @@ mod tests {
         assert!(!matches_text("dark", &["Units of new designs"]));
     }
 
+    /// A multi-word right-to-left label reaches the search in display order while the query is
+    /// typed in reading order: typing the label's words as written must find the row (#10471).
+    #[test]
+    fn search_finds_right_to_left_labels_typed_in_reading_order() {
+        let _language = crate::i18n::scope("he");
+        let label = crate::i18n::tr("prefs.bodies_folders");
+        assert!(matches_text("תיקיות גופים", &[label]), "the label as it is typed");
+        assert!(matches_text("גופים תיקיות", &[label]), "the words swapped still match");
+        assert!(matches_text("תיקיות", &[label]), "one word still matches");
+        let _language = crate::i18n::scope("ar");
+        let label = crate::i18n::tr("prefs.bodies_folders");
+        assert!(matches_text("مجلدات الأجسام", &[label]), "the label as it is typed");
+        assert!(matches_text("الأجسام مجلدات", &[label]), "the words swapped still match");
+        assert!(matches_text("مجلدات", &[label]), "one word still matches");
+    }
+
+    /// The search field and its empty result name the window they search (#8318): "Search
+    /// settings" under a "Preferences" title read as two names for one window.
+    #[test]
+    fn the_search_field_names_the_window_it_searches() {
+        let name = crate::i18n::tr("ui.preferences").to_lowercase();
+        for id in ["prefs.search", "prefs.search_empty"] {
+            let text = crate::i18n::tr(id).to_lowercase();
+            assert!(text.contains(&name), "`{text}` should name the window `{name}`");
+        }
+    }
+
+    #[test]
+    fn general_redesigned_controls_remain_searchable_without_duplicate_settings() {
+        use egui::accesskit::Role;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
+        for (query, label) in [
+            ("reopen the designs", "Reopen the designs that were open last time"),
+            ("autosave every", "Autosave every"),
+            ("largest file to open: step", "Largest file to open: STEP and import"),
+            ("largest file to open: design", "Largest file to open: Design"),
+            ("allow network locations", "Allow network locations in designs"),
+            ("slicer that is already running", "Open files in a slicer that is already running"),
+            ("print face highlight", "Print face highlight"),
+            ("interface language", "Interface language"),
+        ] {
+            h.app.prefs_window.filter = query.into();
+            h.frames(4);
+            let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+            let at = h.widget(label).unwrap_or_else(|| panic!("{label} must match {query}"));
+            assert!(body.contains(egui::pos2(at[0] as f32, at[1] as f32)), "{label} is drawn in the results");
+            assert!(h.widget(h.app.tr("prefs.search_empty")).is_none(), "{query} has a real result instead of the empty-results message");
+            let (_, _, hits) = nav(&h.ctx);
+            let matching: Vec<_> = hits.iter().filter(|hit| hit.label == label).collect();
+            assert_eq!(matching.len(), 1, "{label} must have one real search result");
+            assert_eq!(matching[0].page, crate::prefs::PAGE_GENERAL);
+            let control = match label {
+                "Autosave every" => Some(("prefs:autosave_minutes", Role::SpinButton, "Minutes", h.app.autosave_minutes)),
+                "Largest file to open: STEP and import" => {
+                    Some(("prefs:max_step_file_mb", Role::SpinButton, label, h.app.preferences.max_step_file_mb as f64))
+                }
+                "Largest file to open: Design" => {
+                    Some(("prefs:max_design_file_mb", Role::SpinButton, label, h.app.preferences.max_design_file_mb as f64))
+                }
+                "Print face highlight" => {
+                    Some(("prefs:print_face_highlight", Role::Slider, label, f64::from(h.app.preferences.print_face_highlight)))
+                }
+                _ => None,
+            };
+            if let Some((identity, role, accessible_label, value)) = control {
+                let field = crate::scenario::rect_of(identity).expect("the matching field retains its stable identity");
+                assert!(body.contains_rect(field), "{identity} is drawn in the results");
+                let tree = h.output.accesskit_update.as_ref().unwrap();
+                // Search also measures invisible, disabled probe UIs. Count the live control.
+                let controls: Vec<_> = tree
+                    .nodes
+                    .iter()
+                    .filter(|(_, node)| !node.is_disabled() && node.role() == role && node.label() == Some(accessible_label))
+                    .collect();
+                assert_eq!(controls.len(), 1, "{identity} must have one real searchable control");
+                let node = &controls[0].1;
+                assert_eq!(node.numeric_value(), Some(value), "{identity} exposes its actual setting value");
+                let bounds = node.bounds().unwrap();
+                assert!(field.contains(egui::pos2(((bounds.x0 + bounds.x1) / 2.0) as f32, ((bounds.y0 + bounds.y1) / 2.0) as f32)));
+            }
+        }
+        // An unavailable control is still a real result. Invisible search probes are also
+        // disabled, so require the live navigation hit and painted label as well as metadata.
+        h.app.updater.kind = Some(crate::update::InstallKind::Dev);
+        assert!(!crate::update::available(&mut h.app));
+        let label = "Check at start and once a day";
+        h.app.prefs_window.filter = label.into();
+        for checked in [false, true] {
+            h.app.preferences.check_updates = checked;
+            h.frames(4);
+            let (_, _, hits) = nav(&h.ctx);
+            let matching: Vec<_> = hits.iter().filter(|hit| hit.label == label).collect();
+            assert_eq!(matching.len(), 1, "the disabled setting has one live result");
+            assert_eq!(matching[0].page, crate::prefs::PAGE_GENERAL);
+            assert!(h.widget(h.app.tr("prefs.search_empty")).is_none());
+            let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+            let field = crate::scenario::rect_of("prefs:check_updates").expect("the real scheduling control");
+            assert!(body.contains_rect(field));
+            let tree = h.output.accesskit_update.as_ref().unwrap();
+            let (_, node) = tree
+                .nodes
+                .iter()
+                .rev()
+                .find(|(_, node)| {
+                    node.role() == Role::CheckBox
+                        && node.label() == Some(label)
+                        && node.bounds().is_some_and(|bounds| {
+                            field.contains(egui::pos2(((bounds.x0 + bounds.x1) / 2.0) as f32, ((bounds.y0 + bounds.y1) / 2.0) as f32))
+                        })
+                })
+                .expect("the disabled checkbox exposes its real state at the rendered control");
+            assert!(node.is_disabled());
+            assert_eq!(node.toggled(), Some(if checked { egui::accesskit::Toggled::True } else { egui::accesskit::Toggled::False }));
+            let painted = h
+                .shapes
+                .iter()
+                .filter(|shape| {
+                    matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == label && body.contains(text.pos) && shape.clip_rect.contains(text.pos))
+                })
+                .count();
+            assert_eq!(painted, 1, "one visible disabled control is painted, beyond probe metadata");
+            h.step(&serde_json::json!({"click":{"handle":"prefs:check_updates"}})).unwrap();
+            assert_eq!(h.app.preferences.check_updates, checked, "the search result cannot edit an unavailable setting");
+        }
+    }
+
     /// Typing focuses the field, Enter opens that setting, and Escape returns to the page
     /// that was up when the search started. Recording a shortcut keeps the key.
     #[test]
@@ -707,6 +907,13 @@ mod tests {
         h.step(&serde_json::json!({"key": "ArrowUp"})).expect("previous match");
         h.frames(1);
         assert_eq!(crate::scenario::handle_at("prefs:search:current"), first, "Up moves back");
+        let (_, _, hits) = nav(&h.ctx);
+        let cursor = hits
+            .iter()
+            .position(|hit| hit.page == crate::prefs::PAGE_NAVIGATION && hit.label == "Reverse zoom direction")
+            .expect("the Navigation setting remains keyboard reachable");
+        set_cursor(&h.ctx, cursor);
+        h.frames(2);
         h.step(&serde_json::json!({"key": "Enter"})).expect("open");
         h.frames(2);
         assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_NAVIGATION, "Enter opens the match's page");
@@ -721,6 +928,59 @@ mod tests {
         h.frames(1);
         assert!(h.app.prefs_window.filter.is_empty());
         assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GRAPHICS, "Escape returns to the page from before the search");
+    }
+
+    /// Typing in a number field (the largest STEP file) edits that field instead of starting
+    /// a search.
+    #[test]
+    fn preferences_number_fields_keep_typed_text() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
+        h.frames(2);
+        crate::prefs::reveal_preference(&mut h, "prefs:max_step_file_mb");
+        let field = crate::scenario::rect_of("prefs:max_step_file_mb").expect("STEP limit field");
+        assert!(crate::scenario::rect_of("prefs:page_body").expect("Preferences body").contains_rect(field));
+        h.step(&serde_json::json!({"click": [field.center().x, field.center().y]})).expect("click the field");
+        h.frames(2);
+        let focused = h.ctx.memory(|memory| memory.focused()).expect("the number editor has focus");
+        assert!(field.contains_rect(h.ctx.read_response(focused).expect("focused editor response").rect));
+        h.step(&serde_json::json!({"text": "7"})).expect("type");
+        h.frames(2);
+        assert!(h.app.prefs_window.filter.is_empty(), "typed `{}` into the search", h.app.prefs_window.filter);
+    }
+
+    /// The selected match is scrolled to when the arrows move it, not on every frame, so the
+    /// wheel can scroll the results away from it.
+    #[test]
+    fn preferences_search_results_scroll_freely() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
+        h.frames(2);
+        h.app.prefs_window.filter = "view".into();
+        h.frames(3);
+        let first = crate::scenario::handle_at("prefs:search:current").expect("first match");
+        let wheel = egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -400.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        };
+        // The wheel scrolls smoothly: give it time to come to rest before each check.
+        h.frame_with(vec![egui::Event::PointerMoved(first), wheel.clone()]);
+        h.frames(60);
+        let scrolled = crate::scenario::handle_at("prefs:search:current").expect("match still drawn");
+        assert!(scrolled.y < first.y - 100.0, "the wheel scrolls past the first match ({} -> {})", first.y, scrolled.y);
+        h.step(&serde_json::json!({"key": "ArrowDown"})).expect("next match");
+        h.frames(60);
+        let next = crate::scenario::handle_at("prefs:search:current").expect("next match");
+        let body = crate::scenario::rect_of("dialog:page_body").expect("page body");
+        assert!(body.contains(next), "Down brings the next match into view ({next:?} in {body:?})");
+        h.frame_with(vec![egui::Event::PointerMoved(next), wheel]);
+        h.frames(60);
+        let after = crate::scenario::handle_at("prefs:search:current").expect("match still drawn");
+        assert!(after.y < next.y - 100.0, "the wheel still scrolls after Down ({} -> {})", next.y, after.y);
     }
 
     #[test]
@@ -758,7 +1018,7 @@ mod tests {
         assert!(h.widget("Mouse mapping").is_some(), "the dropdown's current value counts");
         h.app.prefs_window.filter = "zzzz-no-setting".into();
         h.frames(2);
-        assert!(h.widget("No matching settings").is_some());
+        assert!(h.widget("No matching preferences").is_some());
         h.app.prefs_window.filter = "units".into();
         h.frames(2);
         h.step(&serde_json::json!({"click": {"handle": "prefs:page:Design"}})).expect("design page");
@@ -774,5 +1034,69 @@ mod tests {
         assert!(h.app.prefs_window.filter.is_empty(), "the current tab also clears the search");
         assert!(h.widget("Reverse zoom direction").is_none());
         assert!(h.widget("Units of new designs").is_some());
+    }
+    /// Settings drawn in a row with no label of their own are found by the words they show (#9265).
+    #[test]
+    fn preferences_search_finds_settings_in_rows_without_a_label() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_LAYOUT);
+        h.frames(2);
+        // Drawn, not merely present: a hidden row's controls still exist, far off screen.
+        let drawn = |h: &crate::scenario::Harness, label: &str| {
+            let body = crate::scenario::rect_of("dialog:page_body");
+            h.widget(label).is_some_and(|[x, y]| body.is_none_or(|body| body.contains(egui::pos2(x as f32, y as f32))))
+        };
+        let rows = [
+            ("status bar", "Status bar"),
+            ("sketch tab shown", "Keep the Sketch tab shown"),
+            ("search results", "Show search results in the ribbon"),
+            ("play history", "Play History button in the History controls"),
+            ("view's corner", "OK and Cancel in the view's corner"),
+            ("highlight active", "Highlight active ribbon commands"),
+            ("reveal on hover", "Reveal on hover"),
+        ];
+        for (query, label) in rows {
+            h.app.prefs_window.filter = query.into();
+            h.frames(4);
+            assert!(drawn(&h, label), "searching '{query}' should show '{label}'");
+        }
+        h.app.prefs_window.filter = "status bar".into();
+        h.frames(4);
+        assert!(!drawn(&h, "Keep the Sketch tab shown"), "a row that does not match stays out of the result");
+        // Three unlabelled rows sit under one labelled row: each is found on its own words only.
+        h.app.prefs_window.filter = "sketch tab shown".into();
+        h.frames(4);
+        assert!(drawn(&h, "Keep the Sketch tab shown"));
+        assert!(!drawn(&h, "Highlight active ribbon commands"), "its neighbour is not a match");
+        assert!(!drawn(&h, "Show search results in the ribbon"), "its neighbour is not a match");
+        h.app.prefs_window.filter = "zzzz-no-setting".into();
+        h.frames(4);
+        assert!(!drawn(&h, "Status bar"), "a miss shows nothing");
+    }
+    #[test]
+    fn moved_preferences_search_paths_and_enter_follow_window_groups() {
+        for (query, path, page) in [
+            ("Direct interaction", "Work > Tools", crate::prefs::PAGE_TOOLS),
+            ("Navigate with the 3D mouse", "Input > 3D mouse", crate::prefs::PAGE_MOUSE3D),
+            ("Origin plane names", "Work > Design", crate::prefs::PAGE_DESIGN),
+            ("Status bar", "Look > Layout", crate::prefs::PAGE_LAYOUT),
+        ] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
+            h.app.prefs_window.filter = query.into();
+            h.frames(4);
+            assert!(h.widget(path).is_some(), "{query} shows {path}");
+            let (_, _, hits) = nav(&h.ctx);
+            let index = hits.iter().position(|hit| hit.page == page && hit.label == query).expect("moved control is keyboard reachable");
+            set_cursor(&h.ctx, index);
+            h.frames(2);
+            h.step(&serde_json::json!({"key":"Enter"})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.prefs_window.section, page);
+            assert!(h.app.prefs_window.filter.is_empty());
+            assert!(h.widget(query).is_some());
+        }
     }
 }

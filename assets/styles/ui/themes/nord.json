@@ -1,4 +1,6 @@
 {
+  "order": 160,
+  "provenance": "Original SolidCraft mapping of Nord (MIT palette)",
   "base": "dark",
   "colors": {
     "accent": "#88c0d0",
@@ -50,8 +52,8 @@
     "dialog_footer": "#2e3440",
     "dialog_label": "#eceff4",
     "dialog_rule": "#4c566a",
-    "dimension": "#eceff4",
-    "dimension_driven": "#a4b0c2",
+    "dimension": "#d08770",
+    "dimension_driven": "#a87060",
     "error": "#bf616a",
     "field": "#242933",
     "form_accent": "#cfa7c7",

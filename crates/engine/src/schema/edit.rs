@@ -3,6 +3,15 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Assistant visibility is UI-owned and takes no parameters.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AssistantParams {}
+
+/// Headless sessions refuse Assistant display requests and produce no result.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AssistantResult {}
+
 /// `edit.repeat` takes no parameters: it starts the last tool with its defaults.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -13,14 +22,39 @@ pub struct RepeatParams {}
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RepeatResult {}
 
+/// Display-only timeline playback requests. The connected UI owns the animation clock.
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PlaybackAction {
+    #[default]
+    Toggle,
+    Play,
+    Stop,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct TimelinePlayParams {
+    /// Omit to toggle; explicit play/stop requests are idempotent.
+    #[serde(default)]
+    pub action: PlaybackAction,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct TimelinePlayResult {
+    /// Validated display request. A connected UI applies it; a headless engine has no clock.
+    pub action: PlaybackAction,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::RepeatParams;
+    use super::{AssistantParams, RepeatParams};
     use crate::schema::input_schema_for;
     use crate::schema::tests::assert_keys;
 
     #[test]
     fn schemas_and_the_key_check_agree() {
         assert_keys(input_schema_for::<RepeatParams>(), &[]);
+        assert_keys(input_schema_for::<AssistantParams>(), &[]);
     }
 }

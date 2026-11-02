@@ -162,7 +162,7 @@ pub fn load(dir: &Path, id: &str) -> Result<(Document, Entry)> {
     }
     let entry = read_entry(&file(dir, id, "json")).filter(|e| e.id == id).ok_or_else(|| EngineError::Other(format!("no recovered design `{id}`")))?;
     let path = design_file(dir, id);
-    let bytes = solidcraft_io::vfs::read(&path.to_string_lossy(), solidcraft_io::MAX_DESIGN_BYTES)
+    let bytes = solidcraft_io::limits::read(&path.to_string_lossy(), solidcraft_io::limits::Kind::Design)
         .map_err(|e| EngineError::Other(format!("recovered design `{id}`: {e}")))?;
     Ok((solidcraft_io::read_design(&bytes)?, entry))
 }
@@ -281,6 +281,14 @@ impl Autosaver {
         let written = snapshot.write();
         self.written(s, snapshot.doc, snapshot.visibility, written)?;
         Ok(true)
+    }
+
+    /// Whether the last autosave holds `s` as it is now, with no write still running: what a
+    /// crash now would leave for the next launch to offer. A finished write counts once a
+    /// [`Self::tick`] has taken its outcome.
+    pub fn caught_up(&self, s: &Session) -> bool {
+        self.writing.is_none()
+            && self.last.as_ref().is_some_and(|(doc, visibility)| (Arc::ptr_eq(doc, &s.doc) || **doc == *s.doc) && *visibility == s.visibility)
     }
 
     /// Autosave when the interval has passed, or right away after a big operation. The design

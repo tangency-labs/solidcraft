@@ -22,6 +22,11 @@ up straight away, and again once a day while it stays open.
 **Preferences ▸ General ▸ Updates** has **Check for updates automatically** (on by default) and
 **Check now**, which checks right away and shows the window even for a version you skipped.
 
+**Help ▸ Check for updates** runs the same check, including from the macOS menu bar. The window
+shows progress, offers the installation or download when a newer version exists, or says
+**SolidCraft is up to date.** If the check fails, it shows the error instead. Manual checks work
+even when automatic checks are turned off; builds that cannot check explain that in the window.
+
 ## Updating in one click
 
 Where SolidCraft can replace itself safely, the window also has **Update now**:
@@ -37,11 +42,12 @@ Where SolidCraft can replace itself safely, the window also has **Update now**:
 Every download is verified before anything changes: its SHA-256 must match the release's
 `SHA256SUMS.txt`, fetched over HTTPS from the same release, and, once the project signs its
 releases, that list must carry a valid signature by SolidCraft's release key that names the
-release (see [releasing](https://github.com/bherbruck/solidcraft/blob/main/docs/releasing.md#update-signing)).
+release (see [releasing](https://github.com/tangency-labs/solidcraft/blob/main/docs/releasing.md#update-signing)).
 A download that doesn't verify is deleted and the installed copy is left as it was; **Download**
 still gets the package for a manual install. On macOS SolidCraft opens the disk image rather than
-replacing the app itself, because the app is ad-hoc signed and not notarized: replacing it in the
-background would install code macOS can't vouch for without you seeing it.
+replacing the app itself: you drag the new app to Applications, as you did the first time. The
+app and the disk image are signed with a Developer ID and notarized by Apple, so macOS opens the
+new copy without a warning.
 
 Update now needs write access to the installed file: an AppImage in a folder you can't write to
 fails with a message, and **Download** is the way to update it.
@@ -64,14 +70,14 @@ affected.
 One HTTPS request each time SolidCraft starts, and once a day while it stays open:
 
 ```text
-GET https://api.github.com/repos/bherbruck/solidcraft/releases/latest
+GET https://api.github.com/repos/tangency-labs/solidcraft/releases/latest
 User-Agent: SolidCraft-update-check
 Accept: application/vnd.github+json
 X-GitHub-Api-Version: 2022-11-28
 ```
 
 **Update now** then downloads `SHA256SUMS.txt` (and its signature) and the one package from the
-release's own `github.com/bherbruck/solidcraft/releases/download/…` links, with the same
+release's own `github.com/tangency-labs/solidcraft/releases/download/…` links, with the same
 User-Agent. That's all: no version number, no machine or user identifier, no usage data, no cookies. GitHub
 sees the request like any other visit to the API (your IP address, the time); see
 [GitHub's privacy statement](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement).
@@ -90,9 +96,27 @@ no check controls for them. The browser app updates itself: reload the page to g
 version. When the network is unavailable, or the update can't finish downloading in time, the
 saved version opens instead, and the download continues for the next reload.
 
+## Managed by a launcher
+
+When a launcher such as the ArtCraft Launcher installed SolidCraft, it also updates it. SolidCraft
+notices this in two ways:
+
+- the environment variable `SOLIDCRAFT_MANAGED_BY` is set; its value is the launcher's name, for
+  example `ArtCraft Launcher`, and
+- the ArtCraft Launcher's `installed.json` (in its per-user data folder, read-only) lists this
+  SolidCraft: its recorded path is this executable, this AppImage or `.app`, or the folder this
+  executable was unpacked into.
+
+SolidCraft then still checks for a newer release, and the pill and **Check now** work as before, but
+the window says **Update available: update SolidCraft in ArtCraft Launcher** and offers only
+**Skip this version** and **Remind me later**. There is no **Update now**, **Download** or
+AppImage replacement, so the launcher's record of what is installed stays right. Without the
+variable or a record, nothing changes. Setting `SOLIDCRAFT_UPDATE_CHECK=0` still turns the checks
+off.
+
 ## Which file Download gets
 
-Releases attach the main packages under fixed names (see [releasing](https://github.com/bherbruck/solidcraft/blob/main/docs/releasing.md)),
+Releases attach the main packages under fixed names (see [releasing](https://github.com/tangency-labs/solidcraft/blob/main/docs/releasing.md)),
 and SolidCraft picks the one matching how it was installed:
 
 | Installed as | Detected by | Download | How to update |

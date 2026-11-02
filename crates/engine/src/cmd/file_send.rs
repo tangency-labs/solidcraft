@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use solidcraft_io::Format;
 
 use super::easyprint::{Exported, export_bodies};
-use super::export_to;
+use super::export_laid_to;
 use crate::params::bad;
 use crate::slicers::{self, Slicer, TargetKind};
 use crate::{EngineError, Result, Session};
@@ -53,6 +53,8 @@ pub(super) struct Send<'a> {
     /// The target as the caller named it: an id, a name, or a program path.
     pub spec: &'a str,
     pub bodies: Vec<String>,
+    /// 3MF objects with parts (`objects: "component"`, #8139). Only for [`Dest::Path`].
+    pub parts: Vec<(String, Vec<String>)>,
     pub format: Format,
     /// Only for [`Dest::Path`]; the slicer folder's file is always standard.
     pub quality: solidcraft_io::MeshQuality,
@@ -79,7 +81,7 @@ pub(super) fn send(s: &mut Session, r: Send<'_>) -> Result<Value> {
         return Err(bad(r.cmd, format!("{} does not take {}", target.name, format_name(r.format))));
     }
     let mut out = match r.dest {
-        Dest::Path(path) => export_to(s, path, r.format, &r.bodies, r.quality)?,
+        Dest::Path(path) => export_laid_to(s, path, r.format, &r.bodies, &r.parts, r.quality)?,
         Dest::Folder => write_in_folder(s, &r)?,
     };
     let path = out.get("path").and_then(Value::as_str).unwrap_or_default().to_string();
@@ -90,11 +92,13 @@ pub(super) fn send(s: &mut Session, r: Send<'_>) -> Result<Value> {
 /// Write the bodies into the slicer folder.
 fn write_in_folder(s: &mut Session, r: &Send<'_>) -> Result<Value> {
     use crate::slicer_files;
-    let Exported { bytes, ext, fell_back, bodies } = export_bodies(s, r.cmd, &r.bodies, r.format)?;
+    let Exported { bytes, ext, fell_back, bodies, laid } = export_bodies(s, r.cmd, &r.bodies, r.format)?;
     let dir = slicer_files::dir().ok_or_else(|| bad(r.cmd, "no per-user folder on this system"))?;
     let stem = slicer_files::stem(&s.doc.name, s.path.as_deref(), s.uid, &bodies);
     let (file, numbered) = slicer_files::write(&dir, &stem, ext, &bytes).map_err(|e| EngineError::Other(format!("{}: {e}", dir.display())))?;
-    Ok(json!({"path": file.to_string_lossy(), "bytes": bytes.len(), "format": ext, "numbered": numbered, "stl_fallback": fell_back}))
+    let mut out = json!({"path": file.to_string_lossy(), "bytes": bytes.len(), "format": ext, "numbered": numbered, "stl_fallback": fell_back});
+    laid.report(&mut out);
+    Ok(out)
 }
 
 /// Hand the file at `path` to `target`, starting it first if it has to be, and say what happened in

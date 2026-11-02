@@ -50,7 +50,8 @@ handler and everything it passes `p` to:
   `targets` overrides it), in that key's description; where it has no effect, in the summary or
   in the description of the key it might seem to change (bounding solid's `bodies`). A feature
   that makes no body (scale) declares `name` and `participants` itself instead, as `body_name`
-  and `body_names` would do nothing. It keeps `participants` because `timeline.redefine` passes
+  and `body_names` would do nothing; a construction axis, point or plane flattens
+  `ConstructionCommon` or `PlaneCommon`, which hold just those two. It keeps `participants` because `timeline.redefine` passes
   a feature's own back, though for a scale it changes nothing either; its own description says
   so. For the primitives (box, cylinder, sphere, torus, cone) `add_feature` also reads `targets`;
   a new primitive must join the `primitive` match in `add_feature_in`, and its contract declares
@@ -259,6 +260,12 @@ calling that reader.
 | `ScaleFactors` | scale's `factors`: three `NumberExpr`s (strict words a bad item differently; see its doc) | `features::scale` |
 | `AxisDir` | X, Y or Z, or a non-zero `[x, y, z]` / `{x, y, z}` (cylinder's, cone's and coil's `axis`) | `features::axis_dir_form` |
 | `FeatureCommon` | `name`, `body_name`, `body_names`, `participants`, flattened | `features::add_feature` |
+| `ConstructionCommon`, `PlaneCommon` | `name` and `participants` of a construction axis or point, or of a construction plane (whose `name` is a `PlaneName`), flattened | `features::add_feature` |
+| `PlaneName` | a construction plane's name, which may not be an origin plane's (strict names the command called; see its doc) | `features::check_plane_name` |
+| `PlaneParam` | a plane: an origin or construction plane's name, a construction plane's id, or `{origin?, x_dir, y_dir}` / `{origin?, normal}` | `features::plane_param` |
+| `PlaneOrFace` | a plane, or a planar face of a body `{face, body?, index?, path?, fixed?}` (offset and at-angle planes' `base`) | `features::plane_param`, `sketch::face::face_pick_form` |
+| `GeoRefParam` | geometry a construction feature is built from: a picked face, edge or vertex, a sketch point or curve, a point, a plane, an axis, a construction point | `construct::geo_form` |
+| `AxisLine` | an at-angle plane's `axis`: X, Y, Z, a construction axis, `{origin?, dir}` or a model edge or face | `features::axis_line_object`, `construct::geo_form` |
 
 ### When no shared type fits
 
@@ -274,7 +281,10 @@ Add one to `types.rs`, next to the reader it mirrors:
   sentence, such as the handler's ``unknown operation `x` (…)``, in `whole(…)`, and the check
   passes it on as it is. Otherwise start it with "must": the check names the key, so "must be a
   point [x, y, z] of numbers" becomes ``"`corner` must be a point [x, y, z] of numbers"``. (Any
-  other message comes out as ``"`corner`: …"``.)
+  other message comes out as ``"`corner`: …"``.) Where the handler puts serde's own message
+  after the key (``"`point`: missing field `p`"``), wrap it in `keyed(…)`: the check puts the key
+  and a colon in front and leaves the rest as it is, instead of rewording "missing field" and
+  "invalid type" as it does for the type's own fields.
 - Its `JsonSchema` describes the same values, with a description. Where JSON Schema can't say
   something the reader checks (ignoring case, a byte length), say it in the description. A
   pattern that allows surrounding whitespace must allow exactly what Rust's `trim` removes:
@@ -286,6 +296,11 @@ Add one to `types.rs`, next to the reader it mirrors:
   `face_and_edge_refs_match_the_pick_readers`).
 - A handler that reads a key more leniently than any type can (a wrong-typed value read as if
   the key were absent) gets the stricter type: that difference is what warn and strict report.
+- A reader that tries forms in order, where some forms, once chosen, refuse the value rather
+  than letting a later form take it (`construct::geo`: `{sketch, point: [1, 2, 3]}` is a
+  sketch reference without a point, never a fixed point), needs a schema that keeps that order:
+  give each later form a `not` naming the keys of the earlier forms that refuse, as
+  `GeoRefParam` does, and test values that two forms would read differently.
 
 ## Checklist
 

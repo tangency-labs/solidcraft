@@ -525,6 +525,84 @@ pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
     Ok(out.g)
 }
 
+/// The text of an SVG file's bytes: a UTF-8 byte-order mark is dropped and UTF-16 files (with
+/// their mark, as some Windows tools write them) are decoded. A gzip-compressed file (`.svgz`
+/// under any name) is refused with a clear error instead of being read as text (#9641).
+pub fn decode_svg(bytes: &[u8]) -> Result<String> {
+    if bytes.len() > MAX_DRAWING_BYTES {
+        return Err(IoError::Invalid("the SVG file is too large".into()));
+    }
+    if bytes.starts_with(&[0x1f, 0x8b]) {
+        return Err(IoError::Invalid(
+            "this SVG is gzip-compressed (an .svgz file); SolidCraft reads plain SVG only: save it as plain (uncompressed) SVG in a vector editor first"
+                .into(),
+        ));
+    }
+    let utf16 = |rest: &[u8], le: bool| -> String {
+        let units = rest.as_chunks::<2>().0.iter().map(|&pair| if le { u16::from_le_bytes(pair) } else { u16::from_be_bytes(pair) });
+        char::decode_utf16(units).map(|c| c.unwrap_or(char::REPLACEMENT_CHARACTER)).collect()
+    };
+    Ok(match bytes {
+        [0xEF, 0xBB, 0xBF, rest @ ..] => String::from_utf8_lossy(rest).into_owned(),
+        [0xFF, 0xFE, rest @ ..] => utf16(rest, true),
+        [0xFE, 0xFF, rest @ ..] => utf16(rest, false),
+        _ => String::from_utf8_lossy(bytes).into_owned(),
+    })
+}
+
+/// Why [`read_svg`] found nothing to import in `text`, in words for the person inserting it
+/// (#9641): a picture embedded in an SVG, shapes drawn only from another file, or a file that is
+/// not an SVG drawing at all, rather than a bare "no geometry".
+pub fn svg_nothing_to_import(text: &str) -> String {
+    let mut rd = Reader::from_reader(text.as_bytes());
+    rd.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let (mut svg, mut images, mut external_uses, mut elements) = (false, 0usize, 0usize, 0usize);
+    let mut broken = None;
+    while elements < MAX_ENTITIES {
+        match rd.read_event_into(&mut buf) {
+            Ok(Event::Start(e) | Event::Empty(e)) => {
+                elements += 1;
+                match e.local_name().as_ref() {
+                    b"svg" => svg = true,
+                    b"image" => images += 1,
+                    b"use" => {
+                        let a = attrs(&e);
+                        if attr(&a, "href").is_some_and(|h| !h.trim_start().starts_with('#')) {
+                            external_uses += 1;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(e) => {
+                broken = Some(e.to_string());
+                break;
+            }
+        }
+        buf.clear();
+    }
+    if !svg {
+        return match broken {
+            Some(e) => format!("the file is not a readable SVG drawing ({e})"),
+            None => "the file is not an SVG drawing: it has no <svg> element (it may be a picture or a web page saved with an .svg name)".into(),
+        };
+    }
+    if images > 0 {
+        return format!(
+            "the SVG holds only {} embedded picture{} (<image>), not outlines, so there is nothing to draw in the sketch; trace the picture into paths in a vector editor, or save it as PNG/JPEG and use Insert > Canvas, then Canvas to Sketch",
+            if images == 1 { "an" } else { "several" },
+            if images == 1 { "" } else { "s" }
+        );
+    }
+    if external_uses > 0 {
+        return "the SVG's shapes are drawn with <use> from another file, which SolidCraft does not follow; save the drawing as a single self-contained SVG first".into();
+    }
+    "the SVG has no shapes SolidCraft reads (path, line, rect, circle, ellipse, polyline, polygon or text)".into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -587,6 +665,36 @@ mod tests {
         // Plain pixels.
         let g = read_svg(r#"<svg><line x1="0" y1="0" x2="96" y2="0"/></svg>"#).unwrap();
         assert!(matches!(g[0], Geom2::Line(a, b) if (a.dist(b) - 25.4).abs() < 1e-9));
+    }
+
+    /// #9641: a file with nothing to import says why (an embedded picture, shapes from another
+    /// file, not an SVG at all), and SVG files saved as UTF-16 or with a byte-order mark read.
+    #[test]
+    fn a_drawing_with_nothing_to_import_says_why() {
+        let picture = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="64" height="64">
+            <defs><pattern id="p"><use xlink:href="#i"/></pattern><image id="i" width="64" height="64" xlink:href="data:image/png;base64,iVBORw0KGgo="/></defs>
+            <rect width="0" height="0" fill="url(#p)"/></svg>"##;
+        assert!(read_svg(picture).unwrap().is_empty());
+        let why = svg_nothing_to_import(picture);
+        assert!(why.contains("embedded picture") && why.contains("Canvas"), "{why}");
+        let external = r#"<svg xmlns="http://www.w3.org/2000/svg"><use href="shapes.svg#logo"/></svg>"#;
+        assert!(svg_nothing_to_import(external).contains("another file"), "{}", svg_nothing_to_import(external));
+        assert!(svg_nothing_to_import("<html><body>Not found</body></html>").contains("not an SVG drawing"));
+        assert!(svg_nothing_to_import("<svg><g/></svg>").contains("no shapes"));
+
+        let square = r#"<?xml version="1.0" encoding="UTF-16"?><svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>"#;
+        let le: Vec<u8> = [0xFF, 0xFE].into_iter().chain(square.encode_utf16().flat_map(u16::to_le_bytes)).collect();
+        let be: Vec<u8> = [0xFE, 0xFF].into_iter().chain(square.encode_utf16().flat_map(u16::to_be_bytes)).collect();
+        let bom: Vec<u8> = [0xEF, 0xBB, 0xBF].into_iter().chain(square.bytes()).collect();
+        for bytes in [le, be, bom, square.as_bytes().to_vec()] {
+            let text = decode_svg(&bytes).unwrap();
+            assert_eq!(read_svg(&text).unwrap().len(), 4, "{bytes:?}");
+        }
+        let gz = decode_svg(&[0x1f, 0x8b, 8, 0, 0, 0]).unwrap_err().to_string();
+        assert!(gz.contains("gzip"), "{gz}");
+        for bytes in [&[0xFF, 0xFE, 0x3C][..], &[0xFE, 0xFF, 0xD8, 0x00][..], &[][..]] {
+            assert!(decode_svg(bytes).is_ok());
+        }
     }
 
     /// A transform that scales a shape past the range of `f64` is refused with a clear error

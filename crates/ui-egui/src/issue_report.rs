@@ -954,7 +954,11 @@ mod tests {
     }
 
     fn click_commands(h: &mut crate::scenario::Harness, label: &str) -> Vec<egui::OutputCommand> {
-        let [x, y] = h.widget(label).unwrap();
+        let pos = h.widget(label).unwrap();
+        click_commands_at(h, pos)
+    }
+
+    fn click_commands_at(h: &mut crate::scenario::Harness, [x, y]: [f64; 2]) -> Vec<egui::OutputCommand> {
         assert_eq!(h.call("ui.move", json!({"x":x,"y":y}))["ok"], true);
         let (request, _reply) = crate::control::ControlRequest::new("ui.click", json!({"x":x,"y":y}));
         assert!(matches!(crate::control::handle(&mut h.app, &h.ctx, &request), crate::control::Outcome::Done(value) if value["ok"] == true));
@@ -964,6 +968,85 @@ mod tests {
             commands.extend(h.output.commands.clone());
         }
         commands
+    }
+
+    fn open_commands(h: &mut crate::scenario::Harness) -> Vec<egui::OutputCommand> {
+        let pos = crate::scenario::handle_at("dialog:ok");
+        assert!(pos.is_some(), "the report primary action is drawn");
+        pos.map_or_else(Vec::new, |pos| click_commands_at(h, [f64::from(pos.x), f64::from(pos.y)]))
+    }
+
+    #[test]
+    fn issue_report_explains_browser_submission_and_can_copy_an_incomplete_report() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let draft = draft_for(&h.app, None, None);
+        assert!(draft.description.is_empty());
+        let reviewed = draft.report_body();
+        h.app.issue_report.draft = Some(draft);
+        h.frames(16);
+        for label in [
+            "Open GitHub issue form",
+            "Copy report",
+            "SolidCraft cannot submit reports directly. Submit on GitHub; no token is needed in the app.",
+            "If you are offline or GitHub does not open, use Copy report and keep the text to submit later.",
+        ] {
+            assert!(h.widget(label).is_some(), "missing submission action or explanation: {label}");
+        }
+        let before = (h.app.session.doc.to_json(), h.app.session.revision, h.app.session.undo.len());
+        let commands = click_commands(&mut h, "Copy report");
+        assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &reviewed)));
+        assert!(!commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(_))));
+        let draft = h.app.issue_report.draft.as_ref().unwrap();
+        assert!(!draft.missing_description && !draft.opened_github);
+        assert_eq!(draft.note, "Report copied. Keep this text to submit on GitHub when you are online.");
+        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.revision, h.app.session.undo.len()));
+    }
+
+    #[test]
+    fn issue_report_short_handoff_keeps_a_copy_if_the_browser_cannot_open() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let mut draft = Draft::new("Preview missing".into(), "Synthetic diagnostics".into(), 0);
+        draft.description = "The preview disappeared.".into();
+        let reviewed = draft.report_body();
+        let (url, copy_needed) = draft_url(&draft.report_title(), &reviewed);
+        assert!(!copy_needed, "exercise a report small enough to prefill through the URL");
+        h.app.issue_report.draft = Some(draft);
+        h.frames(16);
+        // The harness consumes no browser or clipboard outputs; a host failure must leave
+        // both a complete copy request and the editable draft available for another attempt.
+        let commands = open_commands(&mut h);
+        assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &reviewed)));
+        assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(open) if open.url == url)));
+        assert_eq!(h.app.issue_report.draft.as_ref().unwrap().report_body(), reviewed);
+        let commands = click_commands(&mut h, "Copy report");
+        assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &reviewed)));
+    }
+
+    #[test]
+    fn issue_report_compact_footer_keeps_both_export_actions_visible_and_clickable() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.ui_scale = 2.0;
+        h.call("ui.resize", json!({"width":640,"height":480}));
+        let mut draft = Draft::new("Preview missing".into(), "Synthetic diagnostics".into(), 0);
+        draft.description = "The preview disappeared.".into();
+        let reviewed = draft.report_body();
+        h.app.issue_report.draft = Some(draft);
+        h.frames(20);
+        let footer = crate::scenario::rect_of("dialog:footer").unwrap();
+        assert!(h.ctx.content_rect().contains_rect(footer), "the footer must fit the viewport: {footer:?}");
+        for target in ["dialog:ok", "dialog:apply"] {
+            let rect = crate::scenario::rect_of(target).unwrap();
+            assert!(footer.contains_rect(rect), "{target} is clipped: {rect:?} outside {footer:?}");
+        }
+        let commands = click_commands(&mut h, "Copy report");
+        assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &reviewed)));
+        let commands = click_commands(&mut h, "Open GitHub");
+        assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(url) if url.url.starts_with(ISSUE_URL))));
+        click_commands(&mut h, "Close");
+        assert!(h.app.issue_report.draft.is_none(), "the header close remains available");
     }
 
     #[test]
@@ -994,7 +1077,8 @@ mod tests {
         h.app.home.open = false;
         h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
         h.frames(4);
-        for label in ["What happened?", "Steps to reproduce (optional)", "Expected result (optional)", "Technical details", "Continue on GitHub"] {
+        for label in ["What happened?", "Steps to reproduce (optional)", "Expected result (optional)", "Technical details", "Open GitHub issue form"]
+        {
             assert!(h.widget(label).is_some(), "missing report form control: {label}");
         }
         assert!(h.widget("Describe the intended result.").is_none(), "Markdown instructions must not be editable answers");
@@ -1028,19 +1112,19 @@ mod tests {
             h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
             h.frames(16);
             let before = (h.app.session.doc.to_json(), h.app.session.revision, h.app.session.undo.len());
-            let commands = click_commands(&mut h, "Continue on GitHub");
+            let commands = open_commands(&mut h);
             assert!(!commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(_))));
             assert!(h.app.issue_report.draft.as_ref().unwrap().missing_description);
             assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("issue_report_body")));
             h.step(&json!({"text":"The preview disappeared"})).unwrap();
-            let commands = click_commands(&mut h, "Continue on GitHub");
+            let commands = open_commands(&mut h);
             assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(url) if url.url.starts_with(ISSUE_URL))));
             assert!(h.app.issue_report.draft.as_ref().unwrap().description.contains("The preview disappeared"));
             assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.revision, h.app.session.undo.len()));
         }
     }
 
-    /// Continue with an empty description gives it the focus once (#7190). It used to take the
+    /// Opening GitHub with an empty description gives it the focus once (#7190). It used to take the
     /// focus back every frame, so what was typed in Summary went into the description.
     #[test]
     fn issue_report_empty_description_takes_the_focus_once() {
@@ -1049,7 +1133,7 @@ mod tests {
         h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
         h.frames(16);
         let description = Some(egui::Id::new("issue_report_body"));
-        click_commands(&mut h, "Continue on GitHub");
+        open_commands(&mut h);
         assert_eq!(h.ctx.memory(|m| m.focused()), description);
         // Click the Summary field (found by its id: it has no label of its own) and type.
         let title = egui::Id::new("issue_report_title").accesskit_id();
@@ -1061,8 +1145,8 @@ mod tests {
         let draft = h.app.issue_report.draft.as_ref().unwrap();
         assert_eq!((draft.title.as_str(), draft.description.as_str()), ("My title", ""));
         assert!(draft.missing_description && h.widget("Describe what happened before continuing.").is_some());
-        // Still empty: the next Continue gives it the focus again.
-        click_commands(&mut h, "Continue on GitHub");
+        // Still empty: opening GitHub again gives it the focus again.
+        open_commands(&mut h);
         assert_eq!(h.ctx.memory(|m| m.focused()), description);
     }
 
@@ -1088,7 +1172,7 @@ mod tests {
                 }
                 h.ctx.memory_mut(|m| m.request_focus(egui::Id::new(field)));
                 h.frames(1);
-                let [x, y] = h.widget("Continue on GitHub").unwrap();
+                let [x, y] = h.widget("Open GitHub issue form").unwrap();
                 let pos = egui::pos2(x as f32, y as f32);
                 let modifiers = egui::Modifiers { ctrl: true, command: true, ..Default::default() };
                 let raw = egui::RawInput {
@@ -1383,7 +1467,7 @@ mod tests {
         h.frames(16);
         assert!(h.widget("Opens your browser and copies the report text for you to paste into GitHub.").is_some());
         assert!(h.widget("Reports are public. A GitHub account is required.").is_some());
-        let commands = click_commands(&mut h, "Continue on GitHub");
+        let commands = open_commands(&mut h);
         assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &reviewed)), "commands: {commands:?}");
         assert!(
             commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(url) if url.url.starts_with(ISSUE_URL) && !url.url.contains("&body=")))
@@ -1393,7 +1477,7 @@ mod tests {
         click_commands(&mut h, "Copy screenshot");
         assert!(!h.app.issue_report.draft.as_ref().unwrap().opened_github, "copying an image replaces the report text on the clipboard");
         assert!(h.widget("Opens your browser and copies the report text for you to paste into GitHub.").is_some());
-        click_commands(&mut h, "Continue on GitHub");
+        open_commands(&mut h);
         click_commands(&mut h, "Remove screenshot");
         assert!(h.app.issue_report.draft.as_ref().unwrap().image.is_none());
         assert!(h.widget("Screenshot removed from this draft.").is_some());
@@ -1414,7 +1498,7 @@ mod tests {
         h.app.issue_report.draft = Some(draft);
         h.frames(16);
         assert!(h.widget("Opens your browser and copies the report text for you to paste into GitHub.").is_some());
-        let commands = click_commands(&mut h, "Continue on GitHub");
+        let commands = open_commands(&mut h);
         assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &reviewed)));
         assert!(h.widget("Report text copied. Paste it into GitHub and submit your report there.").is_some());
     }
@@ -1439,11 +1523,38 @@ mod tests {
                 assert!((idle.width() - settled.width()).abs() < 1.0, "size={size:?}: {settled:?} grew to {idle:?}");
                 assert!(idle.width() <= 790.0, "report must retain its width limit: {idle:?}");
                 assert!(h.ctx.content_rect().shrink(8.0).contains_rect(idle), "size={size:?} scale={scale}: retain an outer margin: {idle:?}");
-                for label in ["Continue on GitHub", "Close draft"] {
+                let open_label = if h.widget("Open GitHub issue form").is_some() { "Open GitHub issue form" } else { "Open GitHub" };
+                for label in [open_label, "Copy report", "Close"] {
                     let [x, y] = h.widget(label).unwrap();
                     assert!(idle.contains(egui::pos2(x as f32, y as f32)), "{label} must stay visible: {idle:?}, {x}, {y}");
                 }
             }
+        }
+    }
+
+    /// #9916: the window opens at the top middle, and dragging its title band moves it off the
+    /// model, in a sketch too.
+    #[test]
+    fn issue_report_window_moves_by_its_title() {
+        for sketch in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1400,"height":800}));
+            if sketch {
+                h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+            }
+            h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
+            h.frames(10);
+            let rect = |h: &crate::scenario::Harness| egui::containers::AreaState::load(&h.ctx, egui::Id::new("sc_issue_report")).unwrap().rect();
+            let at = rect(&h);
+            assert!((at.center().x - h.ctx.content_rect().center().x).abs() < 1.0, "sketch={sketch}: it opens at the top middle: {at:?}");
+            // On the title, clear of the close button.
+            let grip = at.left_top() + egui::vec2(140.0, 18.0);
+            h.call("ui.drag", json!({"x0": grip.x, "y0": grip.y, "x1": grip.x - 250.0, "y1": grip.y, "steps": 20}));
+            h.frames(4);
+            let moved = rect(&h);
+            assert!((moved.min.x - (at.min.x - 250.0)).abs() < 2.0 && (moved.min.y - at.min.y).abs() < 2.0, "sketch={sketch}: {at:?} -> {moved:?}");
+            assert!(h.app.issue_report.draft.is_some(), "still open");
         }
     }
 

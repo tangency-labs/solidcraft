@@ -95,7 +95,9 @@ impl Renderer {
         }
         let slot = |scene| Arc::new(Mutex::new(scene));
         let frame = Frame {
+            product_lights: None,
             product: false,
+            upload_error: None,
             key: 1,
             slot: slot(Some(model)),
             sketch_key: 2,
@@ -111,12 +113,15 @@ impl Renderer {
             clip: [0.0; 4],
             cap: [0.0; 4],
             images: Vec::new(),
+            clouds: Vec::new(),
             analysis: [0.0; 8],
             analysis_colors: [0.0; 36],
             access: None,
             outline: false,
             eye: [0.0, 0.0, 100.0, 0.0],
             ao_radius: 0.0,
+            ao_samples: crate::view::AO_SAMPLES,
+            sky: [0.0; 4],
             ssaa: 1.0,
             hover_tint: [0.0; 3],
             selection_tint: [0.0; 3],

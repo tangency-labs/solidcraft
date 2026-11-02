@@ -109,10 +109,7 @@ impl StagePanel {
         mesh.tri_face.extend([0, 0]);
         // The surface carries exact linear reflectance. This display colour is not
         // used as an additional multiplier by PBR consumers.
-        let color = self.reflectance_linear.map(|x| {
-            let encoded = if x <= 0.0031308 { 12.92 * x } else { 1.055 * x.powf(1.0 / 2.4) - 0.055 };
-            (encoded * 255.0).round() as u8
-        });
+        let color = self.reflectance_linear.map(solidcraft_geom::srgb::encode8);
         Ok(ProductMesh {
             name: format!("__render_stage__/{}", self.id),
             mesh: Arc::new(mesh),
@@ -256,6 +253,8 @@ mod tests {
         assert_eq!(scene.meshes[0].mesh.triangles.len(), 2);
         assert_eq!(scene.meshes[0].surface.unwrap().dielectric_ior(), 1.0);
         assert!(scene.meshes[0].transmission.is_none());
+        // Linear 0.18 shows as sRGB 118.
+        assert_eq!(scene.meshes[0].color, [118; 3]);
         let before = scene.meshes[0].mesh.clone();
         assert!(stage.append_to(&mut scene, &CancelToken::default()).is_err());
         assert_eq!(scene.meshes.len(), 1);

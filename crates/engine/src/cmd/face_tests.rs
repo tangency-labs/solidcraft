@@ -68,6 +68,108 @@ fn generated_face_profiles_keep_exact_links_live_after_edit_and_reopen() {
     }
 }
 #[test]
+fn a_component_extruded_from_another_components_face_moves_independently() {
+    let mut s = Session::default();
+    let reference = run(&mut s, "component.create", json!({"name":"Reference","grounded":false}));
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":20,"name":"Base","body_name":"Stock"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    let part = run(&mut s, "component.create", json!({"name":"Part"}));
+    run(&mut s, "solid.extrude", json!({"face":[10,10,20],"distance":10,"operation":"new","body_name":"Pad"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    let measure = |s: &mut Session, center: [f64; 3], volume: f64| {
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+        let got = run(s, "inspect.center_of_mass", json!({"bodies":["Pad"]}));
+        for (i, want) in center.iter().enumerate() {
+            assert!((got["center"][i].as_f64().unwrap() - want).abs() < 1e-6, "{got}; expected {center:?}");
+        }
+        assert!((got["volume"].as_f64().unwrap() - volume).abs() < 1e-6, "{got}");
+    };
+    measure(&mut s, [10., 10., 25.], 4000.);
+    run(&mut s, "occurrence.move", json!({"occurrence":part["occurrence"],"translate":[40,0,0],"capture":true}));
+    measure(&mut s, [50., 10., 25.], 4000.);
+    run(&mut s, "edit.undo", json!({}));
+    measure(&mut s, [10., 10., 25.], 4000.);
+    run(&mut s, "edit.redo", json!({}));
+    measure(&mut s, [50., 10., 25.], 4000.);
+    // Moving the reference is an assembly placement, not an edit to its shape.
+    run(&mut s, "occurrence.move", json!({"occurrence":reference["occurrence"],"translate":[0,50,0],"capture":true}));
+    measure(&mut s, [50., 10., 25.], 4000.);
+    // Both the attached plane and its projected outline still follow source dimensions.
+    run(&mut s, "timeline.edit", json!({"feature":"Base","set":{"length":"30","height":"25"}}));
+    measure(&mut s, [55., 10., 30.], 6000.);
+    let mut reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    measure(&mut reopened, [55., 10., 30.], 6000.);
+    run(&mut reopened, "occurrence.move", json!({"occurrence":part["occurrence"],"translate":[0,0,10],"capture":true}));
+    measure(&mut reopened, [55., 10., 40.], 6000.);
+    run(&mut reopened, "timeline.copy", json!({"features":["Base","Sketch1","Extrude1"]}));
+    run(&mut reopened, "timeline.paste", json!({"translate":[0,0,50]}));
+    let copy = run(&mut reopened, "inspect.center_of_mass", json!({"bodies":["Pad (2)"]}));
+    for (i, want) in [55., 10., 90.].iter().enumerate() {
+        assert!((copy["center"][i].as_f64().unwrap() - want).abs() < 1e-6, "{copy}");
+    }
+    assert!((copy["volume"].as_f64().unwrap() - 6000.).abs() < 1e-6);
+    // Reorganizing the feature definitions must preserve the captured context too.
+    run(&mut reopened, "component.move_features", json!({"features":["Base","Sketch1","Extrude1"],"component":0}));
+    measure(&mut reopened, [55., 10., 40.], 6000.);
+}
+
+#[test]
+fn a_cross_component_face_profile_keeps_its_rotated_creation_context() {
+    let mut s = Session::default();
+    let source = run(&mut s, "component.create", json!({"name":"Reference","grounded":false}));
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":20,"body_name":"Stock"}));
+    run(&mut s, "occurrence.move", json!({"occurrence":source["occurrence"],"translate":[30,20,0],"angle":"90 deg"}));
+    let part = run(&mut s, "component.create", json!({"name":"Part","parent":0}));
+    run(&mut s, "occurrence.move", json!({"occurrence":part["occurrence"],"translate":[-20,10,0],"angle":"-90 deg","capture":false}));
+    run(&mut s, "solid.extrude", json!({"face":[20,30,20],"distance":10,"operation":"new","body_name":"Pad"}));
+    assert!(s.pending_moves.is_empty(), "face capture records the author's pending placement");
+    run(&mut s, "component.activate", json!({"component":0}));
+    let center = |s: &mut Session, want: [f64; 3]| {
+        let got = run(s, "inspect.center_of_mass", json!({"bodies":["Pad"]}));
+        for (i, want) in want.iter().enumerate() {
+            assert!((got["center"][i].as_f64().unwrap() - want).abs() < 1e-6, "{got}");
+        }
+        assert!((got["volume"].as_f64().unwrap() - 4000.).abs() < 1e-6);
+    };
+    center(&mut s, [20., 30., 25.]);
+    run(&mut s, "occurrence.move", json!({"occurrence":part["occurrence"],"translate":[50,0,5],"angle":"90 deg","capture":false}));
+    center(&mut s, [20., 20., 30.]);
+    run(&mut s, "component.capture_position", json!({}));
+    center(&mut s, [20., 20., 30.]);
+    let mut reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    center(&mut reopened, [20., 20., 30.]);
+}
+
+#[test]
+fn moving_the_original_face_derived_component_does_not_move_its_copies_backwards() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name":"Reference"}));
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":20}));
+    let part = run(&mut s, "component.create", json!({"name":"Part","parent":0}));
+    run(&mut s, "solid.extrude", json!({"face":[10,10,20],"distance":10,"operation":"new","body_name":"Pad"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    let copy = run(&mut s, "occurrence.copy", json!({"component":part["component"],"translate":[0,40,0]}));
+    run(&mut s, "occurrence.copy", json!({"component":part["component"],"translate":[0,80,0]}));
+    run(&mut s, "occurrence.move", json!({"occurrence":copy["occurrence"],"translate":[10,0,0],"capture":true}));
+    let centers = |s: &mut Session, original: [f64; 3]| {
+        for (body, want) in [("Pad", original), ("Pad (Part:2)", [20., 50., 25.]), ("Pad (Part:3)", [10., 90., 25.])] {
+            let got = run(s, "inspect.center_of_mass", json!({"bodies":[body]}));
+            for (i, want) in want.iter().enumerate() {
+                assert!((got["center"][i].as_f64().unwrap() - want).abs() < 1e-6, "{body}: {got}");
+            }
+            assert!((got["volume"].as_f64().unwrap() - 4000.).abs() < 1e-6, "{got}");
+        }
+    };
+    centers(&mut s, [10., 10., 25.]);
+    run(&mut s, "occurrence.move", json!({"occurrence":part["occurrence"],"translate":[40,0,0],"capture":true}));
+    centers(&mut s, [50., 10., 25.]);
+    let mut reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    centers(&mut reopened, [50., 10., 25.]);
+    run(&mut reopened, "occurrence.move", json!({"occurrence":part["occurrence"],"angle":"90 deg","capture":true}));
+    centers(&mut reopened, [-10., 50., 25.]);
+}
+
+#[test]
 fn internal_capture_does_not_bypass_missing_ambiguous_or_invalid_path_picks() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20,"body_name":"A"}));

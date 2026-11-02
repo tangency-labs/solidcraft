@@ -1,6 +1,8 @@
 # Keyboard shortcuts
 
-Command shortcuts can be changed in File › Keyboard Shortcuts; these are the defaults.
+Command shortcuts can be changed in File › Keyboard Shortcuts; these are the defaults. Click a
+key to replace it, or the **+** after it to give the command another key: every key it has
+runs it, and menus and tooltips show the first one.
 
 Click a binding to record a new shortcut. A shortcut can contain Shift, Ctrl/Cmd and
 Alt/Option modifiers plus exactly one other key. Hold the modifiers, then press the final
@@ -59,7 +61,7 @@ Keys handled by the window itself:
 | Key | Action |
 |---|---|
 | S | command search under the ribbon search field |
-| V | show or hide the selected bodies, sketches and planes |
+| V | show or hide the selected bodies, sketches and planes; with a right-click menu open, its Show/Hide (a folder, the Origin folder, an origin plane) |
 | F2 | rename the selected browser or timeline item |
 | F6 | fit the view to the model |
 | ← → ↑ ↓ | turn the view 15° (with Shift, a quarter turn) |

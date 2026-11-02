@@ -1,4 +1,6 @@
 {
+  "order": 170,
+  "provenance": "Original SolidCraft theme",
   "base": "dark",
   "colors": {
     "accent": "#00bfff",
@@ -50,8 +52,8 @@
     "dialog_footer": "#000000",
     "dialog_label": "#ffffff",
     "dialog_rule": "#a0a0a0",
-    "dimension": "#ffffff",
-    "dimension_driven": "#cccccc",
+    "dimension": "#ffff66",
+    "dimension_driven": "#c8c850",
     "error": "#ff6666",
     "field": "#000000",
     "form_accent": "#d98af9",

@@ -27,6 +27,17 @@ impl AssistantTone {
 pub(crate) fn assistant_badge(ui: &mut Ui, label: &str, tone: AssistantTone) -> Response {
     let t = Tokens::get();
     let (ink, fill) = tone.colors(&t);
+    badge(ui, label, ink, fill)
+}
+
+/// A compact informational chip in the active workspace colours.
+pub(crate) fn workspace_chip(ui: &mut Ui, label: &str) -> Response {
+    let accent = crate::theme::TabAccent::current(ui.ctx());
+    badge(ui, label, accent.ink, accent.soft)
+}
+
+fn badge(ui: &mut Ui, label: &str, ink: egui::Color32, fill: egui::Color32) -> Response {
+    let t = Tokens::get();
     let font = egui::FontId::proportional(t.font_caption);
     let width = ui.painter().layout_no_wrap(label.to_owned(), font.clone(), ink).size().x + t.space_12;
     let (rect, response) = ui.allocate_exact_size(vec2(width, t.form_close_size - t.space_4), egui::Sense::hover());
@@ -221,17 +232,35 @@ pub(crate) fn assistant_approval<R>(ui: &mut Ui, title: &str, body: impl FnOnce(
 #[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) fn assistant_input(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -> Response {
     let t = Tokens::get();
-    ui.add(
+    // The hint is painted here, not by the TextEdit: a multiline edit wraps its hint onto
+    // several rows, and the hint must stay on one row, ending in an ellipsis when it does not fit.
+    let mut response = ui.add(
         super::fields::text_input(egui::TextEdit::multiline(value))
             .id(id)
             .frame(egui::Frame::NONE)
             .background_color(egui::Color32::TRANSPARENT)
-            .hint_text(hint)
             .desired_rows(2)
             .desired_width(f32::INFINITY)
             .min_size(vec2(0.0, t.control_height + t.space_8))
             .font(egui::FontId::proportional(t.font_label)),
-    )
+    );
+    super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINES);
+    if value.is_empty() {
+        let width = (response.rect.width() - 2.0 * t.form_inset).max(0.0);
+        let galley = assistant_hint_galley(ui, hint, width);
+        let pos = egui::pos2(response.rect.left() + t.form_inset, response.rect.center().y - galley.size().y / 2.0);
+        ui.painter().galley(pos, galley, ui.visuals().weak_text_color());
+    }
+    response
+}
+
+/// The composer hint laid out on one row of at most `width`, cut with an ellipsis.
+#[cfg(any(not(target_arch = "wasm32"), test))]
+pub(crate) fn assistant_hint_galley(ui: &Ui, hint: &str, width: f32) -> std::sync::Arc<egui::Galley> {
+    let t = Tokens::get();
+    let mut job = egui::text::LayoutJob::simple_singleline(hint.to_owned(), egui::FontId::proportional(t.font_label), ui.visuals().weak_text_color());
+    job.wrap = egui::text::TextWrapping { max_width: width, max_rows: 1, break_anywhere: true, overflow_character: Some('\u{2026}') };
+    ui.fonts_mut(|f| f.layout_job(job))
 }
 
 /// Compact right-aligned approval actions; wrapping grows by control rows, not the remaining card height.
@@ -245,6 +274,13 @@ pub(crate) fn assistant_actions<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) 
     )
 }
 
+/// Bottom corners follow the window; the top meets the footer rule square.
+#[cfg(any(not(target_arch = "wasm32"), test))]
+fn composer_corners(t: &Tokens) -> egui::CornerRadius {
+    let r = t.radius_xl.saturating_sub(1);
+    egui::CornerRadius { nw: 0, ne: 0, sw: r, se: r }
+}
+
 /// Composer's rounded field surface with an accent border only while focused.
 #[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) fn assistant_composer<R>(ui: &mut Ui, focused: bool, add: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
@@ -252,7 +288,7 @@ pub(crate) fn assistant_composer<R>(ui: &mut Ui, focused: bool, add: impl FnOnce
     egui::Frame::NONE
         .fill(t.control_fill)
         .stroke(if focused { egui::Stroke::new(1.0, t.form_primary) } else { t.control_border_stroke(t.control_border) })
-        .corner_radius(t.radius_xl)
+        .corner_radius(composer_corners(&t))
         .inner_margin(egui::Margin::symmetric(t.space_10 as i8, t.space_8 as i8))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width().max(0.0));
@@ -290,8 +326,10 @@ pub(crate) fn assistant_composer_footer<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui
     let t = Tokens::get();
     let output = egui::Frame::NONE
         .fill(t.dialog_footer)
-        .corner_radius(egui::CornerRadius { nw: 0, ne: 0, sw: t.radius_xl.saturating_sub(1), se: t.radius_xl.saturating_sub(1) })
-        .inner_margin(t.space_10)
+        .corner_radius(composer_corners(&t))
+        // No margin: the composer box inside fills this footer edge to edge. The text padding
+        // lives on the box itself, so there is one inset, not two.
+        .inner_margin(0)
         .show(ui, add);
     t.secondary_hline(ui.painter(), output.response.rect.x_range(), output.response.rect.top(), t.dialog_rule);
     output
@@ -319,6 +357,11 @@ pub(crate) fn assistant_empty<R>(ui: &mut Ui, title: &str, body: &str, add: impl
 /// Semantic warning/error/information band with caller-owned text and actions.
 #[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) fn assistant_banner<R>(ui: &mut Ui, tone: AssistantTone, add: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
+    banner(ui, tone, add)
+}
+
+/// Shared semantic notice band, also available to workspace inspectors on wasm.
+pub(crate) fn banner<R>(ui: &mut Ui, tone: AssistantTone, add: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
     let t = Tokens::get();
     let (_, fill) = tone.colors(&t);
     egui::Frame::NONE.fill(fill).stroke(t.container_border(t.dialog_rule)).corner_radius(t.radius_lg).inner_margin(t.space_10).show(ui, |ui| {

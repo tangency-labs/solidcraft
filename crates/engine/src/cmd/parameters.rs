@@ -7,23 +7,24 @@ use solidcraft_doc::FeatureKind;
 use solidcraft_doc::expr::{self, Kind};
 use solidcraft_sketch::{Analysis, ConstraintKind, CurveKind, Hold, Sketch, solve_with};
 
-use super::CommandSpec;
+use super::{CommandSpec, sketch_store};
 use crate::params::{bad, bool_, str_};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("parameters.change", "Change Parameters", change_param).at("SOLID", "MODIFY").icon("params").params(
-        "name, expression (number or text), unit?: mm|cm|m|in|ft|deg|rad|\"\"|text (new parameters default to their value's unit; \
+        "name, expression (number or text), unit?: mm|cm|m|in|ft|deg|rad|\"\"|text (new parameters default to their value's unit, a length the design's units; \
          a text parameter's expression is its text, quotes round it optional: sketch texts' words are built from it), comment?, \
-             favorite?: bool, new_name?: rename (references follow); or delete: name; or changes: {name: expression, …} (existing \
+             favorite?: bool, new_name?: rename (references follow; an expression `new = value` renames to `new` and sets value, \
+         or sets `new` when the expression is just `new`); or delete: name; or changes: {name: expression, …} (existing \
          parameters, checked together and rebuilt once, all or nothing) → changed?: {name: value} (with changes), recomputed: features rebuilt, \
          restored: features whose earlier result for the same inputs was reused (e.g. a value set back), switched?: [{feature, name, suppressed}] \
          (the configuration rules that switch a feature's suppression and read a parameter whose value changed run in their order, as on \
          activation; driven parameters and restrictions wait for a configuration edit or activation)",
     ),
     CommandSpec::new("parameters.list", "List Parameters", list).icon("list").noundo().doc_only().params(
-        "favorites?: bool (only favourites), filter?: all|user|sketch|feature|favorites → parameters (name, expression, unit, value in its unit, \
-         source, feature/input, comment, favorite, uses, used_by, error) and cycles",
+        "favorites?: bool (only favourites), filter?: all|user|sketch|feature|favorites → parameters (name, expression, unit, value (mm/deg in every \
+         reply), display_value (in its own unit), source, feature/input, comment, favorite, uses, used_by, error) and cycles",
     ),
     CommandSpec::new("parameters.add", "Add User Parameter", add)
         .icon("new")
@@ -34,7 +35,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("parameters.delete", "Delete Parameter", delete)
         .icon("delete")
         .params("name (refused while something uses it; the error lists the users)"),
-    CommandSpec::new("parameters.favorite", "Favourite Parameter", favorite).icon("star").params("name, favorite?: bool (default true)"),
+    CommandSpec::new("parameters.favorite", "Favorite Parameter", favorite).icon("star").params("name, favorite?: bool (default true)"),
     CommandSpec::new("parameters.move", "Move Parameter", move_param)
         .icon("reorder")
         .params("name, before | after: another user parameter; the user parameter is listed just before or after it"),
@@ -87,6 +88,11 @@ pub(super) fn known(s: &Session, name: &str) -> bool {
     s.doc.param(name).is_some() || s.doc.text_param(name).is_some() || s.doc.features.iter().any(|f| f.param_names.iter().any(|n| n == name))
 }
 
+/// Whether `name` is (or, with this unit, becomes) a text parameter, whose expression is text.
+fn is_text(s: &Session, name: &str, unit: Option<&str>) -> bool {
+    s.doc.text_param(name).is_some() || unit.is_some_and(solidcraft_doc::text_params::is_text_unit)
+}
+
 fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "parameters.change";
     let solved = s.solved_sketches();
@@ -106,13 +112,41 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
         name = new.trim().to_string();
     }
     let has_expr = p.get("expression").is_some() || p.get("value").is_some();
-    let e = if has_expr {
+    let mut e = if has_expr {
         Some(expr_arg(p, "expression").or_else(|| expr_arg(p, "value")).ok_or_else(|| bad(cmd, "`expression` must be a number or text"))?)
     } else if out.get("renamed").is_some() || p.get("favorite").is_some() || p.get("comment").is_some() {
         None
     } else {
         return Err(bad(cmd, "`expression` must be a number or text"));
     };
+    // `name = expression` names the value being changed (#4071): the parameter (a dimension's
+    // `d7`, a feature input's) is renamed, references following, and takes the expression. A
+    // text parameter's text is only text.
+    if let Some((new, rhs)) = e.as_deref().filter(|_| !is_text(s, &name, str_(p, "unit"))).and_then(expr::definition) {
+        if out.get("renamed").is_some() {
+            return Err(bad(cmd, format!("`{new} = …` renames `{name}` already: give `new_name` or `name = expression`, not both")));
+        }
+        if rhs.is_empty() {
+            return Err(bad(cmd, format!("`{new} =` needs a value after the `=`")));
+        }
+        let (new, rhs) = (new.to_string(), rhs.to_string());
+        // A value that is just a parameter's name changes that parameter: a dimension made as
+        // `w = 20` shows `w`, and `w = 30` typed over it sets `w`.
+        let refers_to = s.doc.all_param_exprs().into_iter().find(|(n, _, _)| *n == name).map(|(_, e, _)| e);
+        if refers_to.as_deref().map(str::trim) == Some(new.as_str()) && s.doc.param(&new).is_some() {
+            out["changed_through"] = json!(name);
+            name = new.clone();
+        }
+        if new != name {
+            if known(s, &new) {
+                return Err(bad(cmd, format!("there is already a parameter `{new}`: type `{new}` to use it, or change it in Parameters")));
+            }
+            let n = s.doc_mut().rename_param(&name, &new)?;
+            out["renamed"] = json!({"from": name, "to": new, "references_updated": n});
+            name = new;
+        }
+        e = Some(rhs);
+    }
     let (unit, comment) = (str_(p, "unit"), str_(p, "comment"));
     let before = s.doc.param_values().0;
     match &e {
@@ -143,8 +177,8 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(t) = s.doc.text_param(&name) {
         out["text"] = json!(t.text);
     }
-    out["value"] = json!(vals.get(&name).map(|v| v.v));
-    out["display_value"] = json!(s.doc.param_display_value(&vals, &name));
+    out["value"] = json!(vals.get(&name).map(|v| expr::round_reported(expr::reported_value(*v))));
+    out["display_value"] = json!(s.doc.param_display_value(&vals, &name).map(expr::round_reported));
     out["recomputed"] = json!(s.model.last_recomputed);
     out["restored"] = json!(s.model.last_restored);
     out["errors"] = json!(failing(s));
@@ -189,22 +223,34 @@ fn keep_dimension_start(s: &mut Session, name: &str) {
     }
     let vals = s.doc.evaluation_values();
     for (id, start) in targets {
-        let Ok(stored) = s.doc.sketch(id) else { continue };
+        let Ok(stored) = sketch_store::read(&s.doc, id) else { continue };
         let mut trial = stored.clone();
         if s.doc.apply_dimension_values(&vals, &mut trial).is_err() {
             continue;
         }
         let reference: Vec<_> = stored.points.iter().map(|p| p.pos).collect();
         let hold = Hold { points: vec![start], radii: Vec::new() };
-        if !solve_with(&mut trial, &hold, Some(&reference), Analysis::StatusOnly, None).keeps_orientation() {
+        let solved = if trial.offsets.is_empty() && trial.freeform_offsets.is_empty() {
+            solve_with(&mut trial, &hold, Some(&reference), Analysis::StatusOnly, None).keeps_orientation()
+        } else {
+            // A solve against stale offset points can stretch an attached cap into a different
+            // tangency branch. Keep the start through the complete solve/refresh sequence.
+            let Some(p) = trial.points.get_mut(start) else { continue };
+            p.fixed = true;
+            s.doc
+                .solve_sketch_with_analysis(&vals, &mut trial, &stored.driving_values(), Some(stored), Analysis::StatusOnly)
+                .is_ok_and(|report| report.keeps_orientation())
+        };
+        if !solved {
             continue;
         }
-        if let Ok(stored) = s.doc_mut().sketch_mut(id)
-            && stored.points.len() == trial.points.len()
-        {
-            for (p, q) in stored.points.iter_mut().zip(&trial.points) {
+        if stored.points.len() == trial.points.len() {
+            // Only the points move: the stored dimensions keep their own values.
+            let mut kept = stored.clone();
+            for (p, q) in kept.points.iter_mut().zip(&trial.points) {
                 p.pos = q.pos;
             }
+            let _ = sketch_store::write(s.doc_mut(), id, kept);
         }
     }
 }
@@ -220,6 +266,10 @@ fn change_many(s: &mut Session, changes: &Value, solved: &crate::SketchValues) -
     let mut list = Vec::with_capacity(map.len());
     for (name, e) in map {
         let e = expr_arg(&json!({"e": e}), "e").ok_or_else(|| bad(cmd, format!("`changes.{name}` must be a number or text")))?;
+        // Renaming is one parameter at a time (#4071).
+        if let Some((new, _)) = expr::definition(&e).filter(|_| !is_text(s, name.trim(), None)) {
+            return Err(bad(cmd, format!("`changes.{name}`: `{new} = …` would rename `{name}`; change it on its own to rename it")));
+        }
         list.push((name.trim().to_string(), e));
     }
     let before = s.doc.param_values().0;
@@ -230,7 +280,8 @@ fn change_many(s: &mut Session, changes: &Value, solved: &crate::SketchValues) -
     }
     s.settle_value_edit(solved)?;
     let (vals, _) = s.doc.param_values();
-    let values: serde_json::Map<String, Value> = list.iter().map(|(n, _)| (n.clone(), json!(vals.get(n).map(|v| v.v)))).collect();
+    let values: serde_json::Map<String, Value> =
+        list.iter().map(|(n, _)| (n.clone(), json!(vals.get(n).map(|v| expr::round_reported(expr::reported_value(*v)))))).collect();
     let mut out = json!({"changed": values, "recomputed": s.model.last_recomputed, "restored": s.model.last_restored, "errors": failing(s)});
     if !switched.is_empty() {
         out["switched"] = json!(switched);
@@ -293,7 +344,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         return Ok(json!({"name": name, "unit": solidcraft_doc::text_params::TEXT_UNIT, "text": t.text, "value": null}));
     }
     Ok(
-        json!({"name": name, "unit": s.doc.param(&name).map(|x| x.unit.clone()), "value": vals.get(&name).map(|v| v.v), "display_value": s.doc.param_display_value(&vals, &name)}),
+        json!({"name": name, "unit": s.doc.param(&name).map(|x| x.unit.clone()), "value": vals.get(&name).map(|v| expr::round_reported(expr::reported_value(*v))), "display_value": s.doc.param_display_value(&vals, &name).map(expr::round_reported)}),
     )
 }
 
@@ -376,7 +427,9 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
                 .param_rows()
                 .into_iter()
                 .filter(|r| r.source == "user")
-                .map(|r| json!({"name": r.name, "expression": r.expression, "unit": r.unit, "value": r.value, "comment": r.comment, "favorite": r.favorite}))
+                // The `value` field keeps the number in the parameter's own unit, as the CSV
+                // column does, rounded for reading (#10747).
+                .map(|r| json!({"name": r.name, "expression": r.expression, "unit": r.unit, "value": r.display_value.or(r.value), "comment": r.comment, "favorite": r.favorite}))
                 .collect();
             serde_json::to_string_pretty(&rows).map_err(|e| bad(cmd, e.to_string()))?
         }
@@ -428,14 +481,18 @@ fn evaluate(s: &mut Session, p: &Value) -> Result<Value> {
         (None, None) => None,
     };
     let (vals, _) = s.doc.param_values();
-    let defaults = expr::Defaults::for_unit(unit.unwrap_or(""), 1.0);
+    // Bare numbers follow the asked-for unit when given, else the design's length unit (#9015).
+    let doc_len = expr::unit_info(s.doc.units.trim()).filter(|(k, _)| *k == Kind::Length).map(|(_, s)| s).unwrap_or(1.0);
+    let defaults = expr::Defaults::for_unit(unit.unwrap_or(""), doc_len);
     let refs = expr::references(&e);
     let lookup = |n: &str| vals.get(n).copied().ok_or_else(|| solidcraft_doc::DocError::Expr(format!("unknown parameter `{n}`")));
     let r = expr::eval_with_defaults(&e, &lookup, defaults).and_then(|v| match kind {
         Some(k) => v.to_kind_in(k, defaults).map(|x| (x, k)),
         None => v.kind().map(|k| (v.v, k)).ok_or_else(|| solidcraft_doc::DocError::Expr(format!("the result is {}", v.describe()))),
     });
-    Ok(match r {
+    // `name = expression` is worth its expression, and names what it would define (#4071).
+    let defines = expr::definition(&e).map(|(n, _)| n);
+    let mut out = match r {
         Ok((v, k)) => {
             let value = match k {
                 Kind::Length => expr::Value::length(v),
@@ -447,10 +504,14 @@ fn evaluate(s: &mut Session, p: &Value) -> Result<Value> {
                 (None, Kind::Angle) => v.to_degrees(),
                 (None, _) => v,
             };
-            json!({"ok": true, "value": v, "kind": k, "display_value": shown, "references": refs})
+            json!({"ok": true, "value": expr::round_reported(v), "kind": k, "display_value": expr::round_reported(shown), "references": refs})
         }
         Err(err) => json!({"ok": false, "error": err.to_string().trim_start_matches("expression: ").to_string(), "references": refs}),
-    })
+    };
+    if let Some(name) = defines {
+        out["defines"] = json!(name);
+    }
+    Ok(out)
 }
 
 fn complete(s: &mut Session, p: &Value) -> Result<Value> {
@@ -468,7 +529,8 @@ fn complete(s: &mut Session, p: &Value) -> Result<Value> {
     // parameters, then the others.
     rows.sort_by_key(|r| (!starts(&r.name), !r.favorite, r.source != "user"));
     for r in rows.into_iter().take(200) {
-        let v = r.value.map(|v| format!("{v:.4} {}", r.unit).trim().to_string()).unwrap_or_else(|| "error".into());
+        // The completion shows the parameter's own unit, so it reads `display_value`.
+        let v = r.display_value.or(r.value).map(|v| format!("{v:.4} {}", r.unit).trim().to_string()).unwrap_or_else(|| "error".into());
         let mut detail = format!("{} = {v}", r.expression);
         if let (Some(f), Some(i)) = (&r.feature, r.input) {
             detail.push_str(&format!(" ({f} {i})"));

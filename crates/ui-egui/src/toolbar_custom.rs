@@ -3,10 +3,11 @@
 //! pins it to the toolbar, removes it, or pins it to the S box's favourites; buttons are dragged
 //! to reorder them within and between panels; a drop-down row dragged onto the toolbar pins it
 //! there, a button dragged off the toolbar (or back into the drop-down) leaves it; the pin icon
-//! on a hovered drop-down row pins or unpins; the toolbar's own menu (right-click its empty
-//! space) has Customize Toolbar… (a window listing every command of the tab with a check box)
-//! and Reset Toolbar; Reset Toolbar restores the tab. Kept with the
-//! preferences and exported or imported with the keyboard shortcuts.
+//! on a hovered drop-down row pins or unpins; the toolbar's own menu (the plus after the tabs,
+//! or right-click its empty space or a tab) shows or hides each tab, and has Customize Toolbar…
+//! (a window listing every command of the tab with a check box) and Reset Toolbar; Reset Toolbar
+//! restores the tab. The buttons are kept with the preferences and exported or imported with the
+//! keyboard shortcuts; hidden tabs are kept in the `hidden_toolbar_tabs` preference.
 
 use std::collections::BTreeMap;
 
@@ -241,12 +242,18 @@ fn home_panel(tab: &str, id: &str) -> Option<&'static str> {
     lists.iter().find(|(_, cmds, _)| cmds.iter().any(|c| c.id == id)).or(lists.first()).map(|(p, ..)| *p)
 }
 
+/// FINISH EDITING, shown only while a linked design is edited in place, keeps its one button:
+/// nothing moves into it, and Finish Edit moves nowhere else.
+fn fixed(tab: &str, panel: &str, id: &str) -> bool {
+    (tab == "MODEL" && panel == "FINISH EDITING") || id == "component.finish_edit"
+}
+
 /// Pin a command to the toolbar of a tab (as a button of its panel, at the end).
 pub fn pin(app: &mut SolveApp, tab: &str, id: &str) -> Result<(), String> {
     if solidcraft_engine::find_command(id).is_none() {
         return Err(format!("no command `{id}`"));
     }
-    if pinned_on(app, tab, id).is_some() {
+    if pinned_on(app, tab, id).is_some() || fixed(tab, "", id) {
         return Ok(());
     }
     let panel = home_panel(tab, id).ok_or_else(|| format!("the {tab} tab has no panels"))?;
@@ -258,7 +265,7 @@ pub fn pin(app: &mut SolveApp, tab: &str, id: &str) -> Result<(), String> {
 
 /// Remove a command's button from a tab (it stays in its panel's drop-down).
 pub fn remove(app: &mut SolveApp, tab: &str, id: &str) {
-    let Some(panel) = pinned_on(app, tab, id) else { return };
+    let Some(panel) = pinned_on(app, tab, id).filter(|panel| !fixed(tab, panel, id)) else { return };
     let mut ids = own(app, tab, panel);
     ids.retain(|x| x != id);
     app.toolbar_custom.panels.insert(key(tab, panel), ids);
@@ -266,6 +273,9 @@ pub fn remove(app: &mut SolveApp, tab: &str, id: &str) {
 
 /// Move a button before another one (`before`: None puts it at the end of `panel`).
 pub fn reorder(app: &mut SolveApp, tab: &str, id: &str, panel: &str, before: Option<&str>) {
+    if fixed(tab, panel, id) {
+        return;
+    }
     // A gallery command dropped on a gallery cell goes (back) into the gallery; dropped anywhere
     // else it becomes a full-size button.
     if tab == "SKETCH" && crate::workspace::CONSTRAINT_GALLERY.contains(&id) {
@@ -322,12 +332,28 @@ pub fn command_items(app: &SolveApp, id: &str) -> Vec<Item> {
     v
 }
 
-/// The toolbar's own menu (right-click on its empty space).
+/// The toolbar's own menu (right-click on its empty space or a tab): every tab that can be shown
+/// or hidden, ticked when on, then the button customisation of the selected tab.
 pub fn toolbar_items(app: &SolveApp) -> Vec<Item> {
-    vec![
-        Item::action("ui.toolbarCustomize", "Customize Toolbar…", "settings"),
-        Item::action("ui.toolbarReset", "Reset Toolbar", "restore").with(json!({ "tab": app.ui.tab })),
-    ]
+    let mut v = Vec::new();
+    if !crate::render_workspace::active(app) {
+        v.push(Item::heading(app.tr("prefs.toolbar_tabs")));
+        for tab in crate::workspace::choosable_tabs() {
+            let on = crate::workspace::tab_turned_on(app, tab);
+            // The row reads as the tab does, in every language.
+            let item = Item::action("ui.toolbarTab", &crate::toolbar::ribbon_label(app, tab), crate::workspace::tab_icon(tab))
+                .with(json!({ "tab": tab, "shown": !on }));
+            v.push(if on { item.key("current") } else { item });
+        }
+        // With every tab hidden there is no tab to customise.
+        if !crate::workspace::visible_tabs(app).contains(&app.ui.tab.as_str()) {
+            return v;
+        }
+        v.push(Item::sep());
+    }
+    v.push(Item::action("ui.toolbarCustomize", "Customize Toolbar…", "settings"));
+    v.push(Item::action("ui.toolbarReset", "Reset Toolbar", "restore").with(json!({ "tab": app.ui.tab })));
+    v
 }
 
 /// Run a toolbar item from a menu.
@@ -343,14 +369,15 @@ pub fn run(app: &mut SolveApp, action: &str, p: &Value) {
         "ui.toolbarRemove" => remove(app, &tab, id),
         "ui.toolbarReset" => reset(app, &tab),
         "ui.toolbarCustomize" => app.toolbar_custom.customizing = true,
+        "ui.toolbarTab" => crate::workspace::set_tab_shown(app, &tab, p.get("shown").and_then(Value::as_bool).unwrap_or(true)),
         "ui.shortcutPin" => app.sbox.toggle_pin(id),
         _ => {}
     }
 }
 
-/// Shortcut keys, S box favourites and the toolbar as one file (Keyboard Shortcuts › Export).
+/// Shortcut keys, S box favourites, toolbar and navigation bar as one file (Keyboard Shortcuts › Export).
 pub fn export(app: &SolveApp) -> Value {
-    json!({ "format": "solidcraft-shortcuts/1", "shortcuts": app.keymap.prefs(), "favourites": app.sbox.pinned, "toolbar": app.toolbar_custom.prefs() })
+    json!({ "format": "solidcraft-shortcuts/1", "shortcuts": app.keymap.prefs(), "favourites": app.sbox.pinned, "toolbar": app.toolbar_custom.prefs(), "navigation_bar": app.preferences.navigation_bar })
 }
 
 /// The largest shortcuts file Import… reads (hostile input; an export is a few tens of KiB).
@@ -360,6 +387,16 @@ pub fn import(app: &mut SolveApp, v: &Value) -> Result<(), String> {
     // "solvecraft-shortcuts/1": files exported before the rename (compatibility shim).
     if !matches!(v.get("format").and_then(Value::as_str), Some("solidcraft-shortcuts/1" | "solvecraft-shortcuts/1")) {
         return Err("not a SolidCraft shortcuts file".into());
+    }
+    let navigation_bar = v
+        .get("navigation_bar")
+        .map(|value| {
+            crate::navigation_bar::validate(value)?;
+            serde_json::from_value::<crate::navigation_bar::NavigationBar>(value.clone()).map_err(|e| e.to_string())
+        })
+        .transpose()?;
+    if let Some(bar) = navigation_bar {
+        app.preferences.navigation_bar = bar;
     }
     if let Some(s) = v.get("shortcuts") {
         app.keymap.load(s);

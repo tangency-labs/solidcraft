@@ -16,7 +16,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("canvas.decal", "Decal", add_decal)
         .at("SKETCH", "INSERT")
         .icon("decal")
-        .params("path | data; face: [x,y,z] on a planar face (the image is centred there); width?: mm; angle?: deg; opacity?: (default 1)"),
+        .params("path | data; face: [x,y,z] on a planar face (the image is centred there), or the picked face as sketch.create's plane takes it ({face, body, index, path?}); width?: mm; angle?: deg; opacity?: (default 1)"),
     CommandSpec::new("canvas.edit", "Edit Canvas", edit_canvas).at("SKETCH", "INSERT").icon("canvas").params("canvas: id or name; center?, width?, angle?: deg, opacity?, flip?, visible?, name?"),
     CommandSpec::new("canvas.calibrate", "Calibrate Canvas", calibrate).icon("measure")
         .params("canvas: id or name; a, b: two points on the canvas plane [x,y]; distance: their true distance (mm): scales the image about a"),
@@ -67,7 +67,7 @@ fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
         id,
         name: name.clone(),
         format: format.into(),
-        data: base64_encode(&bytes),
+        data: base64_encode(&bytes).into(),
         pixels,
         plane,
         center,
@@ -88,9 +88,11 @@ fn add_canvas(s: &mut Session, p: &Value) -> Result<Value> {
 fn add_decal(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "canvas.decal";
     let face = p.get("face").cloned().ok_or_else(|| bad(cmd, "`face` must be a point [x,y,z] on a planar face"))?;
+    // A picked face as `sketch.create` takes it ({face, body, index, path?}) is used as it is.
+    let plane = if face.get("face").is_some() { face } else { json!({"face": face}) };
     let mut q = p.clone();
     if let Some(o) = q.as_object_mut() {
-        o.insert("plane".into(), json!({"face": face}));
+        o.insert("plane".into(), plane);
     }
     make(s, &q, cmd, true)
 }

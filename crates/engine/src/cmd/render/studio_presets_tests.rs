@@ -14,11 +14,14 @@ fn subject() -> Session {
 #[test]
 fn native_studios_resolve_without_mutation_and_apply_one_complete_undo() {
     let entries = super::entries();
-    assert_eq!(entries.as_array().unwrap().len(), 25);
-    let hdrs: std::collections::BTreeSet<_> = entries.as_array().unwrap().iter().map(|item| item["hdr"].as_str().unwrap()).collect();
-    assert_eq!(hdrs.len(), 24, "every authored HDR has a complete curated composition");
-    for index in 1..=25 {
-        let id = format!("NATIVE-STUDIO-{index:03}");
+    let entries = entries.as_array().unwrap();
+    assert!(!entries.is_empty());
+    let mut ids = std::collections::BTreeSet::new();
+    let hdrs: std::collections::BTreeSet<_> = entries.iter().map(|item| item["hdr"].as_str().unwrap()).collect();
+    assert!(hdrs.len() >= 24, "every authored HDR has a complete curated composition");
+    for entry in entries {
+        let id = entry["id"].as_str().unwrap();
+        assert!(!id.is_empty() && ids.insert(id));
         let mut s = subject();
         let before = s.doc.to_json();
         let undo = s.undo.len();

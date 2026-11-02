@@ -79,7 +79,7 @@ pub(super) fn configurations_rows(
     ui_kit::table_custom(ui, "configuration_table", &columns, crate::i18n::tr("manage.empty"), |ui, table| {
         table.headers(ui, |ui, index| {
             if index == labels.len() - 1 {
-                column_menu(app, ui, error, &tb.columns);
+                column_menu(app, ui, error, &tb.columns, rule_editor);
                 true
             } else if index > 0 {
                 if let (Some(column), Some(label)) = (tb.columns.get(index - 1), labels.get(index))
@@ -301,7 +301,13 @@ fn with_units(app: &SolveApp, mut tb: super::Table) -> super::Table {
     tb
 }
 
-fn column_menu(app: &mut SolveApp, ui: &mut egui::Ui, error: &mut Option<String>, columns: &[String]) {
+fn column_menu(
+    app: &mut SolveApp,
+    ui: &mut egui::Ui,
+    error: &mut Option<String>,
+    columns: &[String],
+    rule_editor: &mut configuration_rules_ui::Editor,
+) {
     let run = |app: &mut SolveApp, error: &mut Option<String>, id: &str, params: Value| {
         *error = app.run(id, params).err();
     };
@@ -335,13 +341,40 @@ fn column_menu(app: &mut SolveApp, ui: &mut egui::Ui, error: &mut Option<String>
         }
     }
     let mut pick: Option<Value> = None;
-    ui_kit::plus_header(ui, |ui| {
-        egui::ScrollArea::vertical().max_height(crate::theme::Tokens::get().space_24 * 12.0).show(ui, |ui| {
-            for (label, p) in &options {
+    let filter = &mut rule_editor.column_filter;
+    let was_open = rule_editor.column_menu_open;
+    let face_appearance = crate::i18n::tr_label("Face Appearance");
+    let shown = ui_kit::plus_header(ui, |ui| {
+        // A design has many parameters, features and bodies: a filter narrows the list as the
+        // Parameters dialog's does. It takes focus as the menu opens, so typing filters at once.
+        let search = ui_kit::menu_filter(ui, ui.make_persistent_id("config_column_filter"), filter, "Filter");
+        if !was_open {
+            search.request_focus();
+        }
+        crate::scenario::publish_handle("dialog:menu:Add Column:filter", search.rect.center());
+        let query = filter.trim().to_lowercase();
+        let matching: Vec<&(String, Value)> = options.iter().filter(|(label, _)| query.is_empty() || label.to_lowercase().contains(&query)).collect();
+        // Enter with one match left picks it, as in the command search.
+        if matching.len() == 1 && search.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            pick = matching.first().map(|(_, p)| p.clone());
+            ui.close();
+        }
+        let faces = query.is_empty() || face_appearance.to_lowercase().contains(&query);
+        if matching.is_empty() && !faces {
+            ui_kit::text(ui, crate::i18n::tr("config.column_filter_empty"), ui_kit::Text::Note("column_filter_empty"));
+        }
+        // The popup remembers its size: once the filter has emptied the list, a list that fills
+        // again would be clipped to that small height, so a list that scrolls takes the full one.
+        let list_height = crate::theme::Tokens::get().space_24 * 12.0;
+        egui::ScrollArea::vertical().max_height(list_height).min_scrolled_height(list_height).show(ui, |ui| {
+            for (label, p) in &matching {
                 if ui_kit::button(ui, label.as_str(), ui_kit::Button::Normal).clicked() {
                     pick = Some(p.clone());
                     ui.close();
                 }
+            }
+            if !faces {
+                return;
             }
             ui_kit::action_menu(ui, "Face Appearance", |ui| {
                 ui_kit::text(
@@ -393,6 +426,10 @@ fn column_menu(app: &mut SolveApp, ui: &mut egui::Ui, error: &mut Option<String>
             });
         });
     });
+    rule_editor.column_menu_open = shown.is_some();
+    if shown.is_none() {
+        rule_editor.column_filter.clear();
+    }
     if let Some(p) = pick {
         // The first column starts the table (with a Default row of the current values).
         let (id, p) = if columns.is_empty() {

@@ -71,42 +71,10 @@ fn threaded(backend: wgpu::Backend, fxc: impl FnOnce() -> bool) -> bool {
     }
 }
 
-/// D3D12 compiles with FXC: `WGPU_DX12_COMPILER` says `fxc`, or leaves wgpu's choice (`auto`),
-/// which takes DXC when it can load a `dxcompiler.dll` (#6756) and FXC otherwise. Looked up
-/// once: neither changes while the app runs.
+/// D3D12 compiles with FXC: the compiler every instance starts with ([`crate::dx12_compiler`]).
 #[cfg(not(target_arch = "wasm32"))]
 fn dx12_compiles_with_fxc() -> bool {
-    static FXC: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *FXC.get_or_init(|| fxc_chosen(std::env::var("WGPU_DX12_COMPILER").ok().as_deref(), dxcompiler_found))
-}
-
-/// [`dx12_compiles_with_fxc`] for the variable's value `setting`, read as wgpu reads it;
-/// `dxc_found` looks for the DLL.
-#[cfg(not(target_arch = "wasm32"))]
-fn fxc_chosen(setting: Option<&str>, dxc_found: impl FnOnce() -> bool) -> bool {
-    match setting.map(str::to_lowercase).as_deref() {
-        Some("fxc") => true,
-        Some("dxc" | "dynamicdxc" | "staticdxc") => false,
-        // `auto`, unset, or a value wgpu does not know (it keeps `auto` then).
-        _ => !dxc_found(),
-    }
-}
-
-/// A `dxcompiler.dll` where Windows looks for one: beside the program, in the system folders, the
-/// working folder or `PATH`. Conservative: one found there may be one Windows would not load.
-#[cfg(not(target_arch = "wasm32"))]
-fn dxcompiler_found() -> bool {
-    let program = std::env::current_exe().ok().and_then(|p| p.parent().map(std::path::Path::to_path_buf));
-    let windows = std::env::var_os("SystemRoot").map(std::path::PathBuf::from);
-    let system = windows.as_ref().map(|w| w.join("System32"));
-    let path = std::env::var_os("PATH");
-    program
-        .into_iter()
-        .chain(system)
-        .chain(windows)
-        .chain(std::env::current_dir().ok())
-        .chain(path.iter().flat_map(std::env::split_paths))
-        .any(|folder| folder.join("dxcompiler.dll").is_file())
+    matches!(crate::dx12_compiler(), wgpu::Dx12Compiler::Fxc)
 }
 
 impl<'scope, 'env> Jobs<'scope, 'env> {
@@ -189,18 +157,27 @@ mod tests {
     }
 
     #[test]
-    fn d3d12_compiles_with_fxc_unless_dxc_is_chosen_or_found() {
+    fn d3d12_never_loads_a_dxcompiler_found_on_path_unless_asked_to() {
+        let beside = || Some(std::path::PathBuf::from(r"C:\Program Files\SolidCraft\dxcompiler.dll"));
+        let is_fxc = |c: &wgpu::Dx12Compiler| matches!(c, wgpu::Dx12Compiler::Fxc);
+        let by_name = |c: &wgpu::Dx12Compiler| matches!(c, wgpu::Dx12Compiler::DynamicDxc { dxc_path } if dxc_path == "dxcompiler.dll");
+        let beside_program =
+            |c: &wgpu::Dx12Compiler| matches!(c, wgpu::Dx12Compiler::DynamicDxc { dxc_path } if dxc_path.ends_with(r"SolidCraft\dxcompiler.dll"));
+        // Left to SolidCraft (#6756): FXC, or DXC from the program's folder by its full path,
+        // never a `dxcompiler.dll` Windows would find on PATH. wgpu does not trim the value: " fxc "
+        // is a value it does not know.
+        for setting in [None, Some("auto"), Some("AUTO"), Some(""), Some("unknown"), Some(" fxc ")] {
+            assert!(is_fxc(&crate::dx12_compiler_for(setting, None)), "{setting:?} without DXC beside the program: FXC");
+            assert!(beside_program(&crate::dx12_compiler_for(setting, beside())), "{setting:?} with DXC beside the program: that one");
+        }
+        // Named compilers stay as wgpu reads them; `dxc` keeps loading the DLL by name.
         for setting in [Some("fxc"), Some("FXC")] {
-            assert!(fxc_chosen(setting, || true), "{setting:?} keeps FXC even with a DLL around");
+            assert!(is_fxc(&crate::dx12_compiler_for(setting, beside())), "{setting:?} keeps FXC even with DXC beside the program");
         }
-        for setting in [Some("dxc"), Some("DynamicDxc"), Some("staticdxc")] {
-            assert!(!fxc_chosen(setting, || false), "{setting:?} chooses DXC");
+        for setting in [Some("dxc"), Some("DynamicDxc")] {
+            assert!(by_name(&crate::dx12_compiler_for(setting, None)), "{setting:?} loads dxcompiler.dll by name");
         }
-        // wgpu does not trim the value: " fxc " is a value it does not know, so `auto`.
-        for setting in [None, Some("auto"), Some(""), Some("unknown"), Some(" fxc ")] {
-            assert!(fxc_chosen(setting, || false), "{setting:?} without a DLL: FXC");
-            assert!(!fxc_chosen(setting, || true), "{setting:?} with a DLL: DXC");
-        }
+        assert!(matches!(crate::dx12_compiler_for(Some("staticdxc"), None), wgpu::Dx12Compiler::StaticDxc));
     }
 
     /// A buffer wgpu refuses: mapped for reading and for writing at once.

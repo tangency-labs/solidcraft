@@ -1,4 +1,6 @@
 {
+  "order": 190,
+  "provenance": "Original SolidCraft mapping of Dracula (MIT palette)",
   "base": "dark",
   "colors": {
     "accent": "#bd93f9",
@@ -50,8 +52,8 @@
     "dialog_footer": "#282a36",
     "dialog_label": "#f8f8f2",
     "dialog_rule": "#50546d",
-    "dimension": "#f8f8f2",
-    "dimension_driven": "#a1a4c4",
+    "dimension": "#8be9fd",
+    "dimension_driven": "#62a3b1",
     "error": "#ff5555",
     "field": "#21222c",
     "form_accent": "#c096e8",

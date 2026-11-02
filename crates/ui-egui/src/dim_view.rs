@@ -8,9 +8,10 @@
 //! its dimension line), a double-click (or one click with the Dimension tool) edits its value
 //! in place with parameter completion. A finished sketch's shown dimensions (Show Dimensions,
 //! drawn by `crate::browser::dims_overlay`) take the same double-click from the model view: the
-//! value is edited without editing the sketch.
+//! value is edited without editing the sketch. A driven dimension that nothing else fixes any
+//! more opens at its measured value too, and the value makes it driving.
 //! Everything acts through commands: `sketch.dimension_text`, `sketch.delete`,
-//! `parameters.change`.
+//! `sketch.toggle_driven`, `parameters.change`.
 
 use crate::ui_kit::{Container, Surface};
 use std::cell::RefCell;
@@ -62,6 +63,9 @@ struct Edit {
     /// A shown dimension of a finished sketch, edited from the model view without editing the
     /// sketch (its id). None: a dimension of the sketch being edited.
     sketch: Option<u64>,
+    /// A driven dimension that nothing else fixes any more, which the value makes driving (its
+    /// constraint id; `param` names the parameter it gets).
+    driven: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -104,7 +108,7 @@ impl DimensionDraft {
     }
     fn params(&self, expr: &str) -> serde_json::Value {
         // The first dimension of a sketch scales it rather than distorting it (#1365).
-        let mut params = json!({"entities": self.entities, "value": expr, "scale_sketch": true});
+        let mut params = json!({"entities": entities_value(&self.entities), "value": expr, "scale_sketch": true});
         if let Some(at) = self.at {
             params["text_at"] = json!([at.x, at.y]);
         }
@@ -149,13 +153,24 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
     let (param, expr, draft) = dimension_draft(app, entities, Some(at))?;
     if draft.driven {
         PLACEMENT.with(|preview| *preview.borrow_mut() = None);
-        app.run("sketch.dimension", json!({"entities": draft.entities, "text_at": [at.x, at.y], "driven": true}))?;
-        app.set_status("The sketch already determines that dimension, so it was added as a driven (reference) dimension", false);
+        app.run("sketch.dimension", json!({"entities": entities_value(&draft.entities), "text_at": [at.x, at.y], "driven": true}))?;
+        app.set_status(crate::i18n::tr("sketch.dimension_added_driven"), false);
         return Ok(());
     }
     EDIT.with(|edit| {
-        *edit.borrow_mut() =
-            Some(Edit { param, expr, at: None, fresh: FRESH, wait: 10, draft: Some(draft), live: None, selection: None, picked: None, sketch: None })
+        *edit.borrow_mut() = Some(Edit {
+            param,
+            expr,
+            at: None,
+            fresh: FRESH,
+            wait: 10,
+            draft: Some(draft),
+            live: None,
+            selection: None,
+            picked: None,
+            sketch: None,
+            driven: None,
+        })
     });
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
     Ok(())
@@ -175,8 +190,19 @@ pub fn begin_live(app: &mut SolveApp, entities: Vec<String>, pointer: Option<Pos
     }
     let live = Some(Live { origin: pointer, moved: false, typed: false });
     EDIT.with(|edit| {
-        *edit.borrow_mut() =
-            Some(Edit { param, expr, at: None, fresh: FRESH, wait: 10, draft: Some(draft), live, selection: None, picked: None, sketch: None })
+        *edit.borrow_mut() = Some(Edit {
+            param,
+            expr,
+            at: None,
+            fresh: FRESH,
+            wait: 10,
+            draft: Some(draft),
+            live,
+            selection: None,
+            picked: None,
+            sketch: None,
+            driven: None,
+        })
     });
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
     Ok(true)
@@ -202,8 +228,8 @@ pub fn pin(app: &SolveApp, at: Vec2) {
 }
 
 /// Move a draft's text to `at`. Where the text goes can change what the dimension measures
-/// (two points or a slanted line: across from them the distance between them, above or below
-/// the horizontal one, beside them the vertical one), so a value nothing was typed into yet
+/// (two points or a slanted line: inside the box they span the distance between them, above or
+/// below it the horizontal one, beside it the vertical one), so a value nothing was typed into yet
 /// becomes what the new dimension measures; carrying the old one over would preview, and on
 /// Enter apply, the aligned length as a horizontal or vertical span, moving the picked points.
 fn move_text(app: &SolveApp, e: &mut Edit, at: Vec2) {
@@ -237,6 +263,18 @@ fn reevaluate(app: &SolveApp, draft: &mut DimensionDraft, expr: &str) {
     }
 }
 
+/// The entities a dimension measures, as the command takes them: a sketch entity by its id, a
+/// model edge or vertex by its reference (#7912), read back from the pick's text as the
+/// constraint tools do (#6348).
+fn entities_value(entities: &[String]) -> serde_json::Value {
+    serde_json::Value::Array(
+        entities
+            .iter()
+            .map(|entity| serde_json::from_str(entity).ok().filter(serde_json::Value::is_object).unwrap_or_else(|| json!(entity)))
+            .collect(),
+    )
+}
+
 fn dimension_draft(app: &SolveApp, entities: Vec<String>, at: Option<Vec2>) -> Result<(String, String, DimensionDraft), String> {
     let sketch = app.session.active_sketch.ok_or("Edit a sketch to add a dimension")?;
     if entities.is_empty() || entities.len() > 2 || at.is_some_and(|at| !at.x.is_finite() || !at.y.is_finite()) {
@@ -251,7 +289,7 @@ fn dimension_draft(app: &SolveApp, entities: Vec<String>, at: Option<Vec2>) -> R
 /// has no parameter), the parameter's expression, and the scratch session it was added in.
 fn draft_of(app: &SolveApp, sketch: u64, entities: &[String], at: Option<Vec2>, driven: bool) -> Result<(String, String, DimensionDraft), String> {
     let mut scratch = app.session.scratch();
-    let mut params = json!({"entities": entities, "driven": driven});
+    let mut params = json!({"entities": entities_value(entities), "driven": driven});
     if let Some(at) = at {
         params["text_at"] = json!([at.x, at.y]);
     }
@@ -392,6 +430,7 @@ pub fn model_double_click(app: &mut SolveApp, pos: Pos2) -> bool {
             selection: None,
             picked: None,
             sketch: Some(d.sketch),
+            driven: None,
         })
     });
     true
@@ -465,11 +504,19 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
     let Some(d) = id.and_then(|id| DRAWN.with(|d| d.borrow().iter().find(|x| x.id == id).cloned())) else {
         return false;
     };
-    let Some(param) = d.param else {
-        app.set_status("A driven dimension measures the sketch; it has no value to edit", false);
-        return true;
+    let (param, expr, driven) = match d.param {
+        Some(param) => {
+            let expr = app.session.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
+            (param, expr, None)
+        }
+        None => match freed(app, &d.id) {
+            Some((param, expr)) => (param, expr, Some(d.id.clone())),
+            None => {
+                app.set_status("A driven dimension measures the sketch; it has no value to edit", false);
+                return true;
+            }
+        },
     };
-    let expr = app.session.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
     EDIT.with(|e| {
         *e.borrow_mut() = Some(Edit {
             param,
@@ -482,9 +529,61 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
             selection: None,
             picked: None,
             sketch: None,
+            driven,
         })
     });
     true
+}
+
+/// A driven dimension that nothing else fixes any more, such as one placed while a Tangent
+/// held its circle and left driven when the Tangent was deleted (#10018): the parameter it gets
+/// as a driving one and its measured value, from making it driving on a scratch copy. None
+/// while something still fixes what it measures (it can only measure).
+fn freed(app: &SolveApp, constraint: &str) -> Option<(String, String)> {
+    let sketch = app.session.active_sketch?;
+    let mut scratch = app.session.scratch();
+    scratch.execute("sketch.toggle_driven", &json!({"constraint": constraint, "driven": false})).ok()?;
+    let param = scratch.doc.sketch(sketch).ok()?.constraints.iter().find(|c| c.id == constraint)?.param.clone()?;
+    let expr = scratch.doc.param(&param)?.expr.clone();
+    Some((param, expr))
+}
+
+/// The value typed for a driven dimension (`freed`): it becomes driving at its measured value
+/// (`sketch.toggle_driven`), then takes the value (`parameters.change`), in one undo step. When
+/// the value is refused the design goes back to the checkpoint taken first, so it stays driven.
+fn make_driving(app: &mut SolveApp, constraint: &str, typed: &str) -> Result<serde_json::Value, String> {
+    let depth = app.session.undo.len();
+    let checkpoint = app.run("edit.checkpoint", json!({}))?["checkpoint"].clone();
+    let result = app
+        .run("sketch.toggle_driven", json!({"constraint": constraint, "driven": false}))
+        .map_err(|err| shown_error("sketch.toggle_driven", &err))
+        .and_then(|_| {
+            let param = app
+                .session
+                .active_sketch
+                .and_then(|sketch| app.session.doc.sketch(sketch).ok()?.constraints.iter().find(|c| c.id == constraint)?.param.clone())
+                .ok_or("The dimension value is unavailable")?;
+            change_value(app, &param, typed)
+        });
+    let forget = result.is_ok();
+    let _ = app.run("edit.restore_checkpoint", json!({"checkpoint": checkpoint, "forget": forget}));
+    if forget {
+        app.session.undo.truncate(depth + 1);
+    }
+    result
+}
+
+/// Set dimension parameter `param` to the expression typed for it, in the parameter's unit.
+fn change_value(app: &mut SolveApp, param: &str, typed: &str) -> Result<serde_json::Value, String> {
+    let kind = app
+        .session
+        .doc
+        .param(param)
+        .and_then(|p| solidcraft_engine::doc::expr::unit_info(&p.unit))
+        .map(|(k, _)| k)
+        .unwrap_or(solidcraft_engine::doc::expr::Kind::Unitless);
+    let expression = crate::length_input::expression(&app.session.doc, typed, kind);
+    app.run("parameters.change", json!({"name": param, "expression": expression})).map_err(|err| shown_error("parameters.change", &err))
 }
 
 /// Start dragging the text of the dimension under `press` (true: a dimension took the drag).
@@ -656,7 +755,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         let expr = c.param.as_ref().and_then(|p| display_doc.param(p)).map(|p| p.expr.as_str());
         let failing = source.report.failing.contains(&c.id);
         let col = if failing {
-            tk.error
+            crate::viewport::Conflict::glyph_colour(app, &tk)
         } else if is_sel(&c.id) || hover.as_deref() == Some(c.id.as_str()) {
             tk.accent
         } else if c.driven {
@@ -766,6 +865,7 @@ pub fn edit_param(app: &SolveApp, param: &str) {
             selection: None,
             picked: None,
             sketch: None,
+            driven: None,
         })
     });
 }
@@ -846,6 +946,31 @@ pub fn pick_reference(ctx: &egui::Context, pos: Pos2, double: bool) -> bool {
     })
 }
 
+/// The gap the value box keeps from the point it belongs to (#11057): a click at the pointer
+/// reaches the sketch (to place the text or pick a second entity) instead of the box.
+const EDIT_GAP: f32 = 30.0;
+/// The box's height as its placement works it out: a name line, the value and a possible error.
+const EDIT_HEIGHT: f32 = 80.0;
+
+/// Where the value box opens: beside the text, or beside the pointer while a value is typed
+/// first. Near the viewport's edge it opens on the point's other side rather than slide back
+/// over it.
+fn edit_anchor(at: Pos2, live: bool, drawable: Option<egui::Rect>, popup_width: f32) -> Pos2 {
+    let mut anchor = if live { at + vec2(EDIT_GAP, EDIT_GAP) } else { at - vec2(45.0, 11.0) };
+    let Some(rect) = drawable else { return anchor };
+    if live {
+        if anchor.x + popup_width > rect.right() - 6.0 {
+            anchor.x = at.x - popup_width - EDIT_GAP;
+        }
+        if anchor.y + EDIT_HEIGHT > rect.bottom() - 6.0 {
+            anchor.y = at.y - EDIT_HEIGHT - EDIT_GAP;
+        }
+    }
+    anchor.x = anchor.x.clamp(rect.left(), (rect.right() - popup_width - 6.0).max(rect.left()));
+    anchor.y = anchor.y.clamp(rect.top(), (rect.bottom() - EDIT_HEIGHT).max(rect.top()));
+    anchor
+}
+
 fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut e) = EDIT.with(|x| x.borrow_mut().take()) else { return };
     if e.at.is_none() {
@@ -862,20 +987,13 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     let id = egui::Id::new("sc_dim_edit");
     let mut done: Option<bool> = None;
     let mut escaped = false;
-    // A type-first value sits beside its text, clear of the pointer, so a click still reaches
-    // the sketch (to place the text or pick a second entity).
-    let mut anchor = if e.live.is_some() { at + vec2(18.0, 10.0) } else { at - vec2(45.0, 11.0) };
-    let mut popup_width = 220.0;
-    if let Some(layout) = &app.viewport.layout
-        && layout.drawable.is_finite()
-        && layout.drawable.is_positive()
-    {
-        let rect = layout.drawable;
-        popup_width = (rect.width() - 8.0).clamp(24.0, 220.0);
-        anchor.x = anchor.x.clamp(rect.left(), (rect.right() - popup_width - 6.0).max(rect.left()));
-        anchor.y = anchor.y.clamp(rect.top(), (rect.bottom() - 80.0).max(rect.top()));
-    }
-    Container::new(ctx, Surface::Canvas).area(egui::Id::new("sc_dim_edit_area")).fixed_pos(anchor).order(egui::Order::Foreground).show(ctx, |ui| {
+    // A type-first value sits beside its text, clear of the pointer and of the target a click
+    // picks next, and it opens on the pointer's other side at the viewport's edge (#11057).
+    let drawable = app.viewport.layout.as_ref().map(|l| l.drawable).filter(|r| r.is_finite() && r.is_positive());
+    let popup_width = drawable.map_or(220.0, |rect| (rect.width() - 8.0).clamp(24.0, 220.0));
+    let anchor = edit_anchor(at, e.live.is_some(), drawable, popup_width);
+    // Background: under Preferences and Report a bug (#9016), like canvas value boxes.
+    Container::new(ctx, Surface::Canvas).area(egui::Id::new("sc_dim_edit_area")).fixed_pos(anchor).order(egui::Order::Background).show(ctx, |ui| {
         Container::popup_frame(ui.style()).fill(Tokens::get().dialog_body).inner_margin(Tokens::get().space_4).show(ui, |ui| {
             crate::ui_kit::scope(ui, |ui| {
                 ui.set_max_width(popup_width);
@@ -933,16 +1051,10 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                 } else {
                     Err("The sketch changed; place the dimension again".into())
                 }
+            } else if let Some(constraint) = &e.driven {
+                make_driving(app, constraint, &e.expr)
             } else {
-                let kind = app
-                    .session
-                    .doc
-                    .param(&e.param)
-                    .and_then(|p| solidcraft_engine::doc::expr::unit_info(&p.unit))
-                    .map(|(k, _)| k)
-                    .unwrap_or(solidcraft_engine::doc::expr::Kind::Unitless);
-                let expression = crate::length_input::expression(&app.session.doc, &e.expr, kind);
-                app.run("parameters.change", json!({"name": e.param, "expression": expression})).map_err(|err| shown_error("parameters.change", &err))
+                change_value(app, &e.param, &e.expr)
             };
             match result {
                 Err(err) => {
@@ -951,10 +1063,15 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                 }
                 Ok(reply) => {
                     clear_picks(app);
-                    match reply.get("defined").and_then(serde_json::Value::as_str) {
-                        Some(name) => app.set_status(format!("Dimension applied; parameter `{name}` defined"), false),
-                        None => app.set_status("Dimension applied", false),
-                    }
+                    // A new dimension defines its parameter; an edited one renames its own (#4071).
+                    // The sentence comes from the catalog, so it reads in the interface language (#8863).
+                    let named = reply.get("renamed").and_then(|r| r.get("to")).and_then(serde_json::Value::as_str);
+                    let status = match (reply.get("defined").and_then(serde_json::Value::as_str), named) {
+                        (Some(name), _) => crate::i18n::format("sketch.dimension_applied_defined", &[("name", name)]),
+                        (None, Some(name)) => crate::i18n::format("sketch.dimension_applied_renamed", &[("name", name)]),
+                        (None, None) => crate::i18n::tr("sketch.dimension_applied").to_string(),
+                    };
+                    app.set_status(status, false);
                 }
             }
         }
@@ -1013,6 +1130,21 @@ pub fn drawn() -> Vec<(String, Pos2)> {
 mod tests {
     use super::*;
 
+    /// #11057: a value typed before its target keeps a 30 px gap from the pointer, and near the
+    /// viewport's edge it opens on the pointer's other side instead of sliding back over it.
+    #[test]
+    fn the_value_box_keeps_its_gap_from_the_pointer() {
+        use egui::pos2;
+        let view = egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 600.0));
+        let a = edit_anchor(pos2(300.0, 200.0), true, Some(view), 220.0);
+        assert_eq!(a, pos2(330.0, 230.0), "30 px below and right of the pointer");
+        // Its right and bottom edges stop 30 px short of the pointer.
+        let a = edit_anchor(pos2(960.0, 560.0), true, Some(view), 220.0);
+        assert_eq!((a.x + 220.0, a.y + 80.0), (930.0, 530.0), "left of and above the pointer");
+        // Editing an existing dimension still opens where its text is.
+        assert_eq!(edit_anchor(pos2(300.0, 200.0), false, Some(view), 220.0), pos2(255.0, 189.0));
+    }
+
     #[test]
     fn plain_values_are_numbers_with_an_optional_unit() {
         for t in ["10", " 10 mm ", "12.5", "2,5", "-3", "+4", "45 deg", "45°", "1in"] {
@@ -1021,6 +1153,53 @@ mod tests {
         for t in ["", "10 + ", "2 * (", "Width - ", "width", "d1", "10 mm + d2", "(10)", "mm", "-"] {
             assert!(!is_plain_value(t), "{t:?}");
         }
+    }
+
+    /// A sketch's dimensions draw their lines and arrows in the theme's dimension colours,
+    /// driving and driven, never in the colour of the curves they measure (#7861).
+    #[test]
+    fn dimensions_are_drawn_in_the_dimension_colours() {
+        fn strokes(s: &Shape, out: &mut std::collections::BTreeSet<[u8; 4]>) {
+            match s {
+                Shape::LineSegment { stroke, .. } => {
+                    out.insert(stroke.color.to_array());
+                }
+                Shape::Path(p) => {
+                    if let egui::epaint::ColorMode::Solid(c) = p.stroke.color {
+                        out.insert(c.to_array());
+                    }
+                }
+                Shape::Vec(v) => v.iter().for_each(|s| strokes(s, out)),
+                _ => {}
+            }
+        }
+        cancel();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let mut line = |y: f64| {
+            h.app.run("sketch.line", json!({"points":[[0,y],[30,y]],"connect":false,"infer":false})).unwrap()["curves"][0]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+        let (driving, driven) = (line(0.0), line(20.0));
+        h.app.run("sketch.dimension", json!({"entities":[driving],"value":30})).unwrap();
+        h.app.run("sketch.dimension", json!({"entities":[driven],"driven":true})).unwrap();
+        h.app.session.selection.clear();
+        h.call("ui.view", json!({"view":"top"}));
+        h.settle();
+        h.frames(2);
+        assert_eq!(drawn().len(), 2, "both dimensions are drawn");
+        let tk = Tokens::get();
+        let mut seen = std::collections::BTreeSet::new();
+        h.shapes.iter().for_each(|s| strokes(&s.shape, &mut seen));
+        for (name, c) in [("dimension", tk.dimension), ("dimension_driven", tk.dimension_driven)] {
+            assert!(seen.contains(&c.to_array()), "no line drawn in {name} {c:?}: {seen:?}");
+            assert_ne!(c, tk.sketch, "{name}");
+            assert_ne!(c, tk.sketch_fixed, "{name}");
+        }
+        cancel();
     }
 
     /// Typing `rad` into a new dimension's value lists `radius` although `rad` is itself the

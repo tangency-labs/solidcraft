@@ -1,4 +1,6 @@
 {
+  "order": 200,
+  "provenance": "Original SolidCraft mapping of Catppuccin (MIT palette)",
   "base": "dark",
   "colors": {
     "accent": "#cba6f7",
@@ -50,8 +52,8 @@
     "dialog_footer": "#1e1e2e",
     "dialog_label": "#cdd6f4",
     "dialog_rule": "#45475a",
-    "dimension": "#cdd6f4",
-    "dimension_driven": "#a6adc8",
+    "dimension": "#94e2d5",
+    "dimension_driven": "#6c9d95",
     "error": "#f38ba8",
     "field": "#181825",
     "form_accent": "#a9b2f2",

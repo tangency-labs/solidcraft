@@ -23,6 +23,10 @@ use solidcraft_sketch::linalg;
 
 use crate::{DocError, Document, IDENTITY, Mat, ModelState, Result, apply_point, apply_vector, mat_inverse, mat_mul};
 
+#[path = "joints_handles.rs"]
+mod handles;
+pub use handles::{MotionAxis, motion_axes};
+
 /// Joints the solver (and the URDF export) reads at most.
 pub const MAX_JOINTS: usize = 10_000;
 

@@ -86,6 +86,77 @@ fn a_distance_from_a_projected_line_keeps_its_side_when_the_source_moves_past() 
     assert_p(&s, 15.0, "after an edit");
 }
 
+/// A label's sketch: three points brought in from sketch `A` (a 20 long vertical line whose start
+/// the parameters `x` and `y` place, and its middle), a construction rectangle 5 wide on them
+/// (its near side on the line's ends, its far side 5 from the middle) and a centred text on the
+/// far side whose words the text parameter `Label` gives. Other words are other outlines: the text
+/// is built anew in the evaluated sketch, so its entities are not the stored sketch's. Moved 280
+/// away afterwards (more than one jump can take: the solve walks there from the stored sketch), the
+/// rectangle follows and keeps its side.
+#[test]
+fn a_label_follows_its_source_far_after_a_text_parameter_gave_it_other_words() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "x", "expression": "100 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "y", "expression": "200 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "Label", "expression": "A1", "unit": "text"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "A"}));
+    run(&mut s, "sketch.line", json!({"points": [[100, 200], [100, 180]], "ids": ["rail"]}));
+    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "rail", "mode": "vertical"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "rail.start"], "type": "horizontal", "value": "x"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "rail.start"], "type": "vertical", "value": "y"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["rail"], "value": "20 mm"}));
+    run(&mut s, "sketch.point", json!({"point": [100, 190], "id": "mid"}));
+    run(&mut s, "sketch.constraint.midpoint", json!({"point": "mid", "line": "rail"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let refs = ["rail.start", "rail.end", "mid"].map(|p| json!({"sketch": "A", "point": p}));
+    let r = run(&mut s, "sketch.project", json!({"refs": refs}));
+    let brought: Vec<String> = (0..3).map(|i| r["links"][i]["points"][0].as_str().unwrap().to_string()).collect();
+    let near = 100.0 - 5.0;
+    for (id, a, b) in [
+        ("l1", [100.0, 200.0], [100.0, 180.0]),
+        ("l2", [near, 200.0], [near, 180.0]),
+        ("l3", [100.0, 200.0], [near, 200.0]),
+        ("l4", [100.0, 180.0], [near, 180.0]),
+    ] {
+        run(&mut s, "sketch.line", json!({"points": [a, b], "ids": [id], "construction": true, "connect": false}));
+    }
+    for (a, b) in [
+        ("l1.start", brought[0].as_str()),
+        ("l1.end", &brought[1]),
+        ("l3.start", "l1.start"),
+        ("l3.end", "l2.start"),
+        ("l4.start", "l1.end"),
+        ("l4.end", "l2.end"),
+    ] {
+        run(&mut s, "sketch.constraint.coincident", json!({"a": a, "b": b}));
+    }
+    run(&mut s, "sketch.constraint.parallel", json!({"a": "l2", "b": "l1"}));
+    run(&mut s, "sketch.dimension", json!({"entities": [brought[2], "l2"], "type": "distance", "value": "5 mm"}));
+    run(&mut s, "sketch.constraint.perpendicular", json!({"a": "l3", "b": "l1"}));
+    run(&mut s, "sketch.constraint.perpendicular", json!({"a": "l4", "b": "l1"}));
+    run(&mut s, "sketch.text", json!({"text_expression": "Label + '-1'", "at": [0, 0], "height": 3, "align": "center", "path": "l2"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let far_side = |s: &Session| {
+        let st = s.model.state();
+        let sk = &st.sketch(s.doc.find_feature("S").unwrap().id).unwrap().sketch;
+        sk.point(sk.resolve_point("l2.start").unwrap()).unwrap()
+    };
+    #[track_caller]
+    fn quiet(s: &Session, when: &str) {
+        let feature = s.model.result(s.doc.find_feature("S").unwrap().id).unwrap();
+        assert_eq!((&feature.error, &feature.warning), (&None, &None), "{when}");
+    }
+    quiet(&s, "drawn");
+    run(&mut s, "parameters.change", json!({"name": "Label", "expression": "B2"}));
+    quiet(&s, "relabelled");
+    for (x, y) in [(300.0, 400.0), (100.0, 200.0)] {
+        run(&mut s, "parameters.change", json!({"changes": {"x": format!("{x} mm"), "y": format!("{y} mm")}}));
+        quiet(&s, &format!("moved to ({x}, {y})"));
+        assert!(far_side(&s).dist(Vec2::new(x - 5.0, y)) < 1e-6, "({x}, {y}): {:?}", far_side(&s));
+    }
+}
+
 /// The same from the other side: the point above the line, the source rising past it and
 /// coming back; and with the line brought in by Include 3D Geometry.
 #[test]

@@ -321,7 +321,7 @@ fn untrim(s: &mut Session, p: &Value) -> Result<Value> {
 /// The profiles and curves a surface builder takes: `curves`, and `profiles` (all of them when
 /// neither is given).
 fn sheet_inputs(p: &Value, cmd: &str) -> Result<(Option<solidcraft_doc::ProfileSel>, Vec<String>)> {
-    let curves = string_list(p, "curves");
+    let curves = string_list(cmd, p, "curves")?;
     if curves.len() > 1000 {
         return Err(bad(cmd, "at most 1000 curves"));
     }
@@ -349,7 +349,7 @@ fn surface_sweep(s: &mut Session, p: &Value) -> Result<Value> {
     let sketch = feature_sketch(s, p, cmd)?;
     let (profiles, curves) = sheet_inputs(p, cmd)?;
     let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
-    let path = string_list(p, "path");
+    let path = string_list(cmd, p, "path")?;
     if path.is_empty() || path.len() > 1000 {
         return Err(bad(cmd, "`path` must list 1…1000 curve ids"));
     }
@@ -402,7 +402,7 @@ fn surface_loft(s: &mut Session, p: &Value) -> Result<Value> {
             continue;
         }
         let sketch = sketch_id(s, sec.get("sketch"), cmd, "sections.sketch")?;
-        let curves = string_list(sec, "curves");
+        let curves = string_list(cmd, sec, "curves")?;
         if curves.len() > 1000 {
             return Err(bad(cmd, "at most 1000 curves a section"));
         }
@@ -516,7 +516,7 @@ fn ruled(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn bodies_param(s: &Session, p: &Value, cmd: &str) -> Result<Vec<String>> {
-    let bodies = string_list(p, "bodies");
+    let bodies = string_list(cmd, p, "bodies")?;
     if bodies.is_empty() {
         return Err(bad(cmd, "`bodies` must list bodies"));
     }
@@ -545,7 +545,7 @@ fn thicken(s: &mut Session, p: &Value) -> Result<Value> {
         thickness,
         symmetric: bool_(p, "symmetric").unwrap_or(false),
         operation: operation(p, cmd)?,
-        targets: string_list(p, "targets").into_iter().map(BodyName).collect(),
+        targets: string_list(cmd, p, "targets")?.into_iter().map(BodyName).collect(),
     };
     add_feature(s, p, kind)
 }

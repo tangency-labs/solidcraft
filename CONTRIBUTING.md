@@ -19,12 +19,13 @@ Questions, ideas or want to say what you're working on? Join the [Discord](https
 
 ## Kernel work is paused
 
-We're evaluating a new geometry kernel. Until that's decided, please don't open issues, pull
-requests or discussions about kernel work: booleans, fillets, chamfers, shell, offsets, sweeps and
-lofts, threads and holes, STEP/IGES import and export, tessellation, or anything else that changes
-`crates/kernel/`. The pinned issue on the tracker explains it. New ones get the `kernel-paused`
-label (`.github/workflows/kernel-paused.yml`) and a maintainer answers them. Crashes and data loss
-are still taken as issues, and everything outside the kernel carries on as normal.
+We're moving to a new geometry kernel. Until that's done, please don't open pull requests that
+change `crates/kernel/`, `crates/geom/` or `vendor/truck*`, or issues and discussions about kernel
+work: booleans, fillets, chamfers, shell, offsets, sweeps and lofts, threads and holes, STEP/IGES
+import and export, or tessellation. The pinned issue on the tracker explains it. New ones get the
+`kernel-paused` label (`.github/workflows/kernel-paused.yml`) and a maintainer answers them. Crashes
+and data loss are still taken as issues. Pull requests outside those directories carry on as normal,
+including the dialogs and tools for these features.
 
 ## Get it running (about 10 minutes on a fast machine)
 
@@ -117,7 +118,8 @@ The [architecture page](docs/architecture.md) has the layer table. The short ver
    not.) Permissive
    dependencies are fine. Note which one you're adding and why in the PR. THIRD-PARTY-LICENSES.txt
    lists it once the change lands: the Generated files workflow rewrites it on `main`.
-   Nightly/manual CI also scans advisories, bans and sources with cargo-deny; see
+   Nightly/manual CI also scans advisories, bans and sources with cargo-deny, and a PR that
+   changes Cargo.lock or a Cargo.toml checks the advisories; see
    [the local command and coverage limits](docs/book/src/dev/testing.md#dependency-advisories).
 3. **Every asset is original or openly licensed and has a row in
    [ATTRIBUTION.md](ATTRIBUTION.md).** Icons are drawn in code (`crates/ui-egui/src/icons.rs`).
@@ -268,7 +270,9 @@ a conflict. `crates/doc/src/format/pending/README.md` has an example.
 
 **At release time** the maintainer runs `scripts/fold-format-pending.sh`, which moves the pending
 files into `crates/doc/src/format/v<N>/` and fixes that number for good (see
-[docs/releasing.md](docs/releasing.md)). Never add a file to a `v<N>/` folder afterwards.
+[docs/releasing.md](docs/releasing.md)). Never add a file to a `v<N>/` folder afterwards. Drawings
+follow the same rules with their own numbers, from 1, in `crates/doc/src/drawing/format/` (see its
+`pending/README.md`), and the same script folds them.
 
 ## Lists many changes add to
 
@@ -276,6 +280,11 @@ Some files gain an item in many pull requests at once. They are kept so that two
 each add an item only meet when their items are neighbours, which spares everyone a conflict
 and a fresh CI run:
 
+- **Growing Rust lists**: use slices (`const ITEMS: &[Item] = &[...];`) without a written
+  length. `cargo xtask lists` rejects non-test const/static arrays with more than ten lines
+  of entries, except fixed standard or algorithm tables listed with reasons in `xtask/src/lists.rs`.
+  Built-in themes need only a JSON file in `assets/styles/ui/themes/`, with a unique nonnegative
+  integer `order` (the picker order) and its own `provenance` line; keep existing order values.
 - **Message catalogs** (`assets/locales/*.json`): one message per line, sorted by id. Add your
   message anywhere and run `cargo xtask lists --fix`; `cargo xtask lists` (in `cargo xtask ci`
   and the Lists workflow) fails on an unsorted catalog or an id that appears twice.
@@ -287,6 +296,9 @@ and a fresh CI run:
 - **Toolbar commands without help** (`BACKLOG` in `crates/ui-egui/src/command_help.rs`): sorted,
   one id per line, and it only shrinks. Writing a command's help removes its line; a new command
   is never added to it.
+- **`ui.prefs` settings** (`docs/control-protocol.md`): one line per setting, sorted by name, in
+  the list under the protocol table; add a new setting on its own line rather than editing a shared
+  row.
 - **Languages** (`crates/ui-egui/src/i18n.rs`): one per line, English first, then by id (a test
   checks it).
 - **Generated files**: `THIRD-PARTY-LICENSES.txt` and `docs/features.md` are rewritten on `main`
@@ -295,7 +307,9 @@ and a fresh CI run:
 - **Design format**: one file per change, never an edit to a shared number (above).
 - **New UI strings and attribution rows**: one new file per change, `assets/locales/pending/<slug>.json`
   and `attribution/pending/<slug>.md`, instead of editing the catalogs or the ATTRIBUTION.md table;
-  `cargo xtask fold-pending` folds them on `main` (see the README in each folder).
+  `cargo xtask fold-pending` folds them on `main` (see the README in each folder). A new English
+  message also needs every catalog delivered complete (`COMPLETE` in `crates/ui-egui/src/i18n.rs`:
+  today ar, he, ja, vi, and zh) in the same pending file; `cargo xtask i18n --check` reports any gap.
 
 ## Sending a change
 
@@ -325,6 +339,15 @@ and a fresh CI run:
    PRs in groups by area, so PRs that touch the same code meet a conflict at most once.
 4. Reference the issue (`Fixes #12`). In the PR, say what you tested and how. For geometry work, include the measured numbers (and
    the expected ones).
+5. Write the PR title and first sentence for someone who hasn't seen your chat, the issue or the
+   code. Maintainers pick what to review from the title, and it becomes the commit on `main`. Say
+   which part of the app changes and what a user now sees or can do, and name things rather than
+   leaning on "there", "it" or "this".
+   - Unclear: `Send to Slicer: pick one print face per body there, and show print faces only while it is open`
+   - Clear: `3D printing: choose the face each body rests on in the Send to Slicer window, not the face menu`
+
+   Use plain, literal English in PR text: one idea per sentence, active voice, and one word for one
+   thing. This helps everyone, including readers whose first language isn't English.
 
 Commenting `/claim` assigns you, adds the `in progress` label, and replies with its automatic cleanup
 deadline. It frees a claim with no linked PR after 72 hours, or a claim with a PR after 14 days
@@ -332,6 +355,13 @@ without pushes. These automatic cleanup deadlines are separate from the daily pr
 72-hour takeover policy above. A draft PR that references the issue claims it the same way.
 `/unclaim` releases the bot claim early (only you or a maintainer can). Issues a maintainer has
 taken are never freed automatically.
+
+**A PR has to explain itself.** Start the description with what it is, in plain words someone new
+to the project would understand: what it does and who it's for. Don't assume anyone knows the name
+of your tool, project or feature. If there's anything to look at, show it in the description: a
+picture or video has to be visible there without opening the changed files. "The GIF is the change"
+doesn't count. A PR that doesn't do this waits until it does. For a PR that adds to
+`docs/showcase.md` or `docs/screenshots/`, the Picture check fails until the description shows one.
 
 Help reviewers see what the words mean. For observable CAD, UI or model behavior, please
 include actual descriptive screenshots or a short recording in the issue or PR. This evidence
