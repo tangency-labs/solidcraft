@@ -55,6 +55,7 @@ pub(crate) fn surf_of(b: &Brep, face: usize) -> Option<Surf> {
             Surf::Cylinder { o, a, r: *radius, convex: out }
         }
         Surface::Sphere { frame, radius } => Surf::Sphere { c: Vec3::from(frame.origin), r: *radius, convex: out },
+        Surface::BallPatch { center, radius } => Surf::Sphere { c: Vec3::from(*center), r: *radius, convex: out },
         Surface::Cone { frame, radius_at_origin, half_angle } => {
             let (o, z) = axes(frame)?;
             let apex = o + z * (-radius_at_origin / half_angle.tan());

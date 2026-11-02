@@ -109,6 +109,7 @@ fn kind(s: &brep::Surface) -> &'static str {
         brep::Surface::Cylinder { .. } => "cylinder",
         brep::Surface::Cone { .. } => "cone",
         brep::Surface::Sphere { .. } => "sphere",
+        brep::Surface::BallPatch { .. } => "ball patch",
         brep::Surface::Torus { .. } => "torus",
         brep::Surface::Spline { .. } => "spline",
         brep::Surface::RationalSpline { .. } => "rational spline",

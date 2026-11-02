@@ -1975,10 +1975,11 @@ fn fillet_three_edges_at_a_corner() {
     let want = a * (40.0 + 30.0 + 20.0) - 3.0 * a * r + (r * r * r - PI * r * r * r / 6.0);
     assert!(rel(removed, want) < 2e-3, "removed {removed} vs {want}");
     // The corner is one face: SMLib builds it as a rational patch exactly on the ball's sphere
-    // (not an analytic sphere), between the three cylinders and the six planes.
+    // (a ball patch, not SMLib's sphere), between the three cylinders and the six planes; the
+    // record keeps its sphere, so it counts as one.
     let m = measure(&f).unwrap().merged;
     assert_eq!(
-        (m.faces, m.face_types.get("plane"), m.face_types.get("cylinder"), m.face_types.get("other")),
+        (m.faces, m.face_types.get("plane"), m.face_types.get("cylinder"), m.face_types.get("sphere")),
         (10, Some(&6), Some(&3), Some(&1)),
         "{m:?}"
     );

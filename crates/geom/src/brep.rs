@@ -94,10 +94,10 @@ pub struct Face {
     pub surface: Surface,
     /// The NURBS form the face is parameterised on, when it differs from `surface`'s own
     /// parameters: a cylinder, cone, sphere, torus or placed revolution as SMLib holds it (every
-    /// SMLib analytic surface is a B-spline surface, its trims in that NURBS's parameters). When
-    /// given, `domain` and every pcurve are in this surface's (u, v), and `surface` only says what
-    /// it is; it is a `Spline` or `RationalSpline` and `surface` is a cylinder, cone, sphere, torus
-    /// or placed revolution
+    /// SMLib analytic surface is a B-spline surface, its trims in that NURBS's parameters), and a
+    /// ball patch's own net. When given, `domain` and every pcurve are in this surface's (u, v),
+    /// and `surface` only says what it is; it is a `Spline` or `RationalSpline` and `surface` is a
+    /// cylinder, cone, sphere, ball patch, torus or placed revolution
     /// (docs/native-brep.md, "Surfaces").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nurbs: Option<Surface>,
@@ -247,6 +247,10 @@ pub enum Surface {
         #[serde(default, skip_serializing_if = "is_zero")]
         tube_start: f64,
     },
+    /// A rational patch on the sphere of `center` and `radius`: the corner of three equal rounds as
+    /// SMLib holds it (`SmBallPatch`). It has no (u, v) of its own: the face's `nurbs` is the patch,
+    /// and this says it lies on that sphere, whose offsets are exact and collapse at its centre.
+    BallPatch { center: [f64; 3], radius: f64 },
     /// A tensor-product B-spline: `points[i][j]`, i along u (STEP `B_SPLINE_SURFACE_WITH_KNOTS`).
     Spline { u_knots: Vec<f64>, v_knots: Vec<f64>, points: Vec<Vec<[f64; 3]>> },
     /// A NURBS surface: homogeneous `[x*w, y*w, z*w, w]` coefficients.
@@ -378,6 +382,8 @@ fn surface_natural(s: &Surface) -> [Natural; 2] {
         }
         Surface::Sphere { .. } => [Natural::Periodic, Natural::Range(-FRAC_PI_2, FRAC_PI_2)],
         Surface::Torus { .. } => [Natural::Periodic; 2],
+        // A label: the face's (u, v) are its NURBS form's.
+        Surface::BallPatch { .. } => [UNBOUNDED; 2],
         Surface::Spline { u_knots, v_knots, points } => {
             [knot_domain(u_knots, points.len()), knot_domain(v_knots, points.first().map_or(0, Vec::len))]
         }
@@ -496,6 +502,10 @@ fn surface(s: &Surface, depth: usize, budget: &mut Budget) -> Result<()> {
             require(tube_start.is_finite() && tube_start.abs() <= std::f64::consts::TAU, "torus tube start")?;
             require(major_radius > minor_radius, "ring torus radii")
         }
+        Surface::BallPatch { center, radius: r } => {
+            points(&[*center], budget)?;
+            radius(*r)
+        }
         Surface::Spline { u_knots, v_knots, points: p } => grid(u_knots, v_knots, p, budget),
         Surface::RationalSpline { u_knots, v_knots, homogeneous: p } => {
             grid(u_knots, v_knots, p, budget)?;
@@ -578,6 +588,7 @@ impl Face {
         let outward = match &self.surface {
             Surface::Cylinder { frame, .. } | Surface::Cone { frame, .. } => radial(frame).1,
             Surface::Sphere { frame, .. } => p - v3(frame.origin),
+            Surface::BallPatch { center, .. } => p - v3(*center),
             Surface::Torus { frame, major_radius, .. } => {
                 let (o, r) = radial(frame);
                 p - (o + r.normalized()? * *major_radius)
@@ -651,13 +662,15 @@ impl Brep {
                         Surface::Cylinder { .. }
                             | Surface::Cone { .. }
                             | Surface::Sphere { .. }
+                            | Surface::BallPatch { .. }
                             | Surface::Torus { .. }
                             | Surface::PlacedRevolution { .. }
                     ),
-                    "NURBS form on a surface that is not a cylinder, cone, sphere, torus or revolution",
+                    "NURBS form on a surface that is not a cylinder, cone, sphere, ball patch, torus or revolution",
                 )?;
             }
-            // A cylinder, cone, sphere, torus or revolution is a label: its geometry is its form.
+            // A cylinder, cone, sphere, ball patch, torus or revolution is a label: its geometry is
+            // its form.
             require(
                 f.nurbs.is_some()
                     || !matches!(
@@ -665,10 +678,11 @@ impl Brep {
                         Surface::Cylinder { .. }
                             | Surface::Cone { .. }
                             | Surface::Sphere { .. }
+                            | Surface::BallPatch { .. }
                             | Surface::Torus { .. }
                             | Surface::PlacedRevolution { .. }
                     ),
-                "a cylinder, cone, sphere, torus or revolution without its NURBS form",
+                "a cylinder, cone, sphere, ball patch, torus or revolution without its NURBS form",
             )?;
             let [u, v] = surface_natural(f.parameters());
             interval(&f.domain[0], u)?;
