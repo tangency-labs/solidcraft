@@ -94,11 +94,15 @@ fn rel_of(r: &Value) -> String {
     r["path"].as_str().unwrap_or("").to_string()
 }
 
-/// The golden entry for one result: status, the commands' time, what was made.
-fn golden_entry(r: &Value) -> Value {
+/// The golden entry for one result: status, the commands' time, what was made, and the old
+/// entry's `unstable` reason, which only an edit of the golden removes.
+fn golden_entry(r: &Value, old: Option<&Value>) -> Value {
     let mut g = json!({"status": r["status"], "seconds": r["seconds"]});
     if let Some(m) = r.get("measured").filter(|m| m.is_object()) {
         g["measured"] = m.clone();
+    }
+    if let Some(why) = old.and_then(|o| o.get("unstable")).filter(|w| w.is_string()) {
+        g["unstable"] = why.clone();
     }
     g
 }
@@ -118,12 +122,16 @@ fn flags(r: &Value, g: Option<&Value>) -> Vec<String> {
 
 /// What changed against the golden that the machine does not explain: no golden, a status
 /// change, other counts. Times are left out (they depend on the machine the golden was recorded
-/// on), so these are what the gate fails on.
+/// on), so these are what the gate fails on. A case the golden marks `unstable` (its counts differ
+/// from run to run, with the reason) is compared on its status only.
 fn changes(r: &Value, g: Option<&Value>) -> Vec<String> {
     let Some(g) = g else { return vec!["no golden".into()] };
     let mut out = Vec::new();
     if g["status"] != r["status"] {
         out.push(format!("status was {}", g["status"].as_str().unwrap_or("?")));
+    }
+    if g["unstable"].is_string() {
+        return out;
     }
     for k in ["body_count", "faces", "edges", "vertices"] {
         let (now, then) = (&r["measured"][k], &g["measured"][k]);
@@ -139,8 +147,12 @@ fn changes(r: &Value, g: Option<&Value>) -> Vec<String> {
 /// re-recorded with its reason (`--record`) in the same pull request.
 fn gate(tiers: &[Tier], results: &BTreeMap<String, Value>, golden: &Value) -> Result<String, String> {
     let mut problems = Vec::new();
+    let mut unstable = Vec::new();
     let mut pass = 0;
     for c in tiers.iter().flat_map(|t| &t.cases) {
+        if let Some(why) = golden["cases"][c.as_str()]["unstable"].as_str() {
+            unstable.push(format!("{c} ({why})"));
+        }
         let Some(r) = results.get(c) else {
             problems.push(format!("{c}: no result"));
             continue;
@@ -153,7 +165,11 @@ fn gate(tiers: &[Tier], results: &BTreeMap<String, Value>, golden: &Value) -> Re
     }
     let n: usize = tiers.iter().map(|t| t.cases.len()).sum();
     if problems.is_empty() {
-        Ok(format!("kernel ladder gate: {pass}/{n} pass, every case as the golden records it"))
+        let mut ok = format!("kernel ladder gate: {pass}/{n} pass, every case as the golden records it");
+        for u in &unstable {
+            ok += &format!("\n  unstable, counts not compared: {u}");
+        }
+        Ok(ok)
     } else {
         Err(format!(
             "kernel ladder gate: {} case(s) differ from tests/kernel-cases/ladder/golden.json (re-record with --record \"why\" if the change is right):\n  {}",
@@ -225,7 +241,8 @@ fn record(reason: &str, manifest: &Value, tiers: &[Tier], results: &BTreeMap<Str
     for t in tiers {
         for c in &t.cases {
             if let Some(r) = results.get(c) {
-                cases.insert(c.clone(), golden_entry(r));
+                let entry = golden_entry(r, cases.get(c));
+                cases.insert(c.clone(), entry);
             }
         }
     }
@@ -328,6 +345,22 @@ mod tests {
         assert!(counts.contains("faces 7 (golden 6)"), "{counts}");
         let unrecorded = gate(&t, &BTreeMap::new(), &golden).unwrap_err();
         assert!(unrecorded.contains("ladder/01-a/001-x: no result"), "{unrecorded}");
+    }
+
+    #[test]
+    fn an_unstable_case_is_gated_on_its_status_and_keeps_its_reason() {
+        let t = vec![Tier { tier: "01-a".into(), what: String::new(), cases: vec!["ladder/01-a/001-x".into()] }];
+        let golden = json!({"cases": {
+            "ladder/01-a/001-x": {"status": "pass", "unstable": "why", "measured": {"edges": 597}}
+        }});
+        let run = |x: Value| gate(&t, &BTreeMap::from([("ladder/01-a/001-x".to_string(), x)]), &golden);
+        let ok = run(json!({"status": "pass", "measured": {"edges": 594}})).unwrap();
+        assert!(ok.contains("unstable, counts not compared: ladder/01-a/001-x (why)"), "{ok}");
+        let failed = run(json!({"status": "fail", "measured": {"edges": 594}})).unwrap_err();
+        assert!(failed.contains("status was pass"), "{failed}");
+        let kept = golden_entry(&json!({"status": "pass", "seconds": 1.0}), golden["cases"].get("ladder/01-a/001-x"));
+        assert_eq!(kept["unstable"], "why");
+        assert!(golden_entry(&json!({"status": "pass"}), None).get("unstable").is_none());
     }
 
     #[test]
