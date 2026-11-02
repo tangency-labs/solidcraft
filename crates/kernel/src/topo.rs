@@ -644,6 +644,77 @@ pub struct CylinderFace {
 }
 
 pub fn cylinder_face_at(b: &Body, p: Vec3) -> Option<CylinderFace> {
+    cylinder_face_index_at(b, p).map(|(.., c)| c)
+}
+
+/// [`cylinder_face_at`], and whether that face is a whole band: round its axis all the way and
+/// square to it at both ends, as a drilled hole or a turned shaft is, with no notch, flat, cross
+/// hole or slanted end in it. Faces the kernel split the band into (a blind hole's wall comes in
+/// two halves) count as one.
+pub fn cylinder_band_at(b: &Body, p: Vec3) -> Option<(CylinderFace, bool)> {
+    let (mesh, surfs, face, tol, c) = cylinder_face_index_at(b, p)?;
+    // The faces on the same cylinder over the same extent.
+    let same = |f: u32| match surfs.get(f as usize) {
+        Some(Surf::Cylinder { axis, p: ap, r }) => {
+            let off = *ap - c.axis_point;
+            let e = cylinder_extent(&mesh, f, *axis, *ap, *r);
+            // Its extent along `c`'s axis (the two may point opposite ways).
+            let along = |s: f64| (*ap + *axis * s - c.axis_point).dot(c.axis);
+            let (lo, hi) = (along(e.start).min(along(e.end)), along(e.start).max(along(e.end)));
+            axis.dot(c.axis).abs() > 1.0 - 1e-6
+                && (r - c.radius).abs() <= tol
+                && (off - c.axis * off.dot(c.axis)).len() <= tol
+                && (lo - c.start).abs() <= tol
+                && (hi - c.end).abs() <= tol
+        }
+        _ => false,
+    };
+    let faces: Vec<u32> = (0..u32::try_from(surfs.len()).ok()?).filter(|f| *f == face || same(*f)).collect();
+    Some((c, whole_band(&mesh, &faces, &c, tol)))
+}
+
+/// Whether `faces` of `mesh`, the cylinder `c`, make a whole band: every edge only one of their
+/// triangles has (the two sides of a seam, or of a split, being one edge) lies on one of its end
+/// circles, both its ends on the same one.
+fn whole_band(mesh: &Mesh, faces: &[u32], c: &CylinderFace, tol: f64) -> bool {
+    // Edges by the positions of their ends, so that the two sides of a seam meet.
+    let grid = tol * 1e-3;
+    let key = |q: Vec3| ((q.x / grid).round() as i64, (q.y / grid).round() as i64, (q.z / grid).round() as i64);
+    let mut edges: HashMap<((i64, i64, i64), (i64, i64, i64)), (u32, Vec3, Vec3)> = HashMap::new();
+    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
+        if !faces.contains(f) {
+            continue;
+        }
+        for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+            let (Some(pa), Some(pb)) = (mesh.positions.get(a as usize), mesh.positions.get(b as usize)) else { return false };
+            let (ka, kb) = (key(*pa), key(*pb));
+            if ka != kb {
+                edges.entry(if ka < kb { (ka, kb) } else { (kb, ka) }).or_insert((0, *pa, *pb)).0 += 1;
+            }
+        }
+    }
+    // Which end circle a point lies on: a notch's straight side runs from one to the other.
+    let end = |q: Vec3| {
+        let s = (q - c.axis_point).dot(c.axis);
+        if (s - c.start).abs() <= tol {
+            Some(false)
+        } else if (s - c.end).abs() <= tol {
+            Some(true)
+        } else {
+            None
+        }
+    };
+    let off: Vec<(Vec3, Vec3)> =
+        edges.values().filter(|(n, a, b)| *n == 1 && end(*a).is_none_or(|e| end(*b) != Some(e))).map(|(_, a, b)| (*a, *b)).collect();
+    // What is left must be the two sides of seams that fell into neighbouring cells of the grid.
+    let meets =
+        |(a, b): &(Vec3, Vec3), (p, q): &(Vec3, Vec3)| (a.dist(*p) <= grid && b.dist(*q) <= grid) || (a.dist(*q) <= grid && b.dist(*p) <= grid);
+    !edges.is_empty() && off.len() < 4096 && off.iter().enumerate().all(|(i, e)| off.iter().enumerate().any(|(j, f)| i != j && meets(e, f)))
+}
+
+/// [`cylinder_face_at`] with the tessellation it was read from, the faces' surfaces, the face's
+/// index and the tessellation's tolerance.
+fn cylinder_face_index_at(b: &Body, p: Vec3) -> Option<(Mesh, Vec<Surf>, u32, f64, CylinderFace)> {
     let size = b.size();
     let tol = (size * 1e-3).max(1e-3);
     let mesh = b.tessellate(tol).ok()?;
@@ -666,13 +737,13 @@ pub fn cylinder_face_at(b: &Body, p: Vec3) -> Option<CylinderFace> {
     // cylinder: within its extent).
     let mut faces: Vec<(u32, f64)> = near.into_iter().filter(|(_, d)| *d <= nearest + tol).collect();
     faces.sort_by_key(|(f, _)| *f);
-    let mut best: Option<(f64, Option<CylinderFace>)> = None;
+    let mut best: Option<(f64, Option<(u32, CylinderFace)>)> = None;
     for (face, d) in faces {
         let (off, cyl) = match surfs.get(face as usize) {
             Some(Surf::Plane { n, d: k }) => (d.min((n.dot(p) - k).abs()), None),
             Some(Surf::Cylinder { axis, p: ap, r }) => {
                 let c = cylinder_extent(&mesh, face, *axis, *ap, *r);
-                (d.min(c.off(p)), Some(c))
+                (d.min(c.off(p)), Some((face, c)))
             }
             _ => (d, None),
         };
@@ -680,7 +751,8 @@ pub fn cylinder_face_at(b: &Body, p: Vec3) -> Option<CylinderFace> {
             best = Some((off, cyl));
         }
     }
-    best?.1
+    let (face, c) = best?.1?;
+    Some((mesh, surfs, face, tol, c))
 }
 
 /// Face `face` of a body as a cylinder: the axis and radius of its own surface, and its extent
