@@ -731,7 +731,10 @@ fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
     // A new joint starts shown, even if a stale visibility entry came from an older design.
     s.visibility.hidden_joints.retain(|h| *h != id);
     s.doc_mut().assembly.joints.push(j);
-    let sol = resolve(s);
+    let mut sol = resolve(s);
+    if sol.conflicts.iter().any(|(c, ..)| *c == id) && close_by_half_turn(s, id, &sol) {
+        sol = resolve(s);
+    }
     let mut out = sol_json(&sol, p);
     out["joint"] = json!(id);
     out["name"] = json!(name);
@@ -739,6 +742,95 @@ fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
         out["warnings"] = json!(warnings);
     }
     Ok(out)
+}
+
+/// Sets of angle values a new loop-closing joint tries a half turn round, at most.
+const HALF_TURN_TRIALS: usize = 16;
+
+/// A new joint that closes a loop is met from where the loop's parts sit. Where its parts only
+/// meet with one of them turned a half turn about a joint on the way between them (a second
+/// planar joint mating two faces that point the same way, #10331), the loop solve starts at a
+/// pose turned exactly away and sees no way round, and the joint is left as a conflict. As the
+/// first joint of a chain moves its part into place, turn the new joint's own angle, each angle
+/// on the shortest joint path between its two parts, or one of each, a half turn, and keep the
+/// first that meets it with no new conflict or error elsewhere than `before` had (stored, for
+/// the caller's resolve). False, and nothing changed, when none does. Values a motion link or an
+/// expression sets, and turns their limits stop short, are left alone.
+fn close_by_half_turn(s: &mut Session, id: u64, before: &joints::Solution) -> bool {
+    let asm = &s.doc.assembly;
+    let Some(new) = asm.joints.iter().find(|j| j.id == id) else { return false };
+    let (from, to) = (new.a.occurrence, new.b.occurrence);
+    // Breadth first over the other joints, from A's occurrence to B's.
+    let mut reached: BTreeMap<u64, Option<usize>> = BTreeMap::from([(from, None)]);
+    let mut frontier = vec![from];
+    while !frontier.is_empty() && !reached.contains_key(&to) {
+        let mut next = Vec::new();
+        for at in frontier {
+            for (k, j) in asm.joints.iter().enumerate().filter(|(_, j)| j.id != id && !j.suppressed) {
+                let other = if j.a.occurrence == at {
+                    j.b.occurrence
+                } else if j.b.occurrence == at {
+                    j.a.occurrence
+                } else {
+                    continue;
+                };
+                if let std::collections::btree_map::Entry::Vacant(e) = reached.entry(other) {
+                    e.insert(Some(k));
+                    next.push(other);
+                }
+            }
+        }
+        frontier = next;
+    }
+    let mut path = Vec::new();
+    let mut at = to;
+    while let Some(Some(k)) = reached.get(&at).copied() {
+        let Some(j) = asm.joints.get(k) else { break };
+        path.push(k);
+        at = if j.a.occurrence == at { j.b.occurrence } else { j.a.occurrence };
+    }
+    let linked: BTreeSet<(u64, usize)> = asm.links.iter().map(|l| (l.b, l.ib)).collect();
+    // The angle values that may turn: on the path, and the new joint's own (turned exactly
+    // away about its axis, its own value sees no way round either).
+    let angles = |ks: &[usize]| -> Vec<(usize, usize)> {
+        ks.iter()
+            .filter_map(|k| asm.joints.get(*k).map(|j| (*k, j)))
+            .flat_map(|(k, j)| (0..j.kind.dofs().len()).filter(move |i| j.kind.is_angle(*i)).map(move |i| (k, j, i)))
+            .filter(|(_, j, i)| j.exprs.value(*i).is_none() && !linked.contains(&(j.id, *i)))
+            .map(|(k, _, i)| (k, i))
+            .collect()
+    };
+    let own = asm.joints.iter().position(|j| j.id == id).map(|k| angles(&[k])).unwrap_or_default();
+    let mut trials: Vec<Vec<(usize, usize)>> = own.iter().map(|v| vec![*v]).collect();
+    for v in angles(&path) {
+        trials.push(vec![v]);
+        trials.extend(own.iter().map(|w| vec![v, *w]));
+    }
+    trials.truncate(HALF_TURN_TRIALS);
+    let st = s.model.state();
+    'trial: for turns in trials {
+        let mut doc = (*s.doc).clone();
+        for (k, i) in turns {
+            let Some(j) = doc.assembly.joints.get_mut(k) else { continue 'trial };
+            j.values.resize(j.kind.dofs().len(), 0.0);
+            let Some(q) = j.values.get(i).copied() else { continue 'trial };
+            let mut turned = j.values.clone();
+            if let Some(slot) = turned.get_mut(i) {
+                *slot = q + std::f64::consts::PI;
+            }
+            joints::clamp(j, &mut turned);
+            if turned.get(i).is_none_or(|v| (v - q - std::f64::consts::PI).abs() > 1e-9) {
+                continue 'trial;
+            }
+            j.values = turned;
+        }
+        let sol = joints::solve_holding_with_analysis(&doc, &st, &BTreeMap::new(), joints::Analysis::Placement);
+        if sol.conflicts.len() < before.conflicts.len() && !sol.conflicts.iter().any(|(c, ..)| *c == id) && sol.errors.len() <= before.errors.len() {
+            s.doc_mut().assembly.joints = doc.assembly.joints;
+            return true;
+        }
+    }
+    false
 }
 
 fn joint_origin(s: &mut Session, p: &Value) -> Result<Value> {
