@@ -119,7 +119,8 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
 }
 
 /// Every non-placement field is named, so a new input requires an explicit decision here.
-/// Assembly records do not feed any of the feature kinds accepted by `local_geometry`.
+/// Assembly records do not feed any of the feature kinds accepted by `local_geometry`, and the
+/// saved revisions (`document_history`) are never evaluated.
 fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
     let Document {
         render,
@@ -158,6 +159,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         named_views,
         visibility,
         point_clouds,
+        document_history: _,
     } = a;
     (Arc::ptr_eq(render, &b.render) || *render == b.render)
         && *format == b.format

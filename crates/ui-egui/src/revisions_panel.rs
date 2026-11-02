@@ -211,7 +211,6 @@ fn restore_revision(app: &mut SolveApp, revision: u64, mode: &str) -> Result<(),
     app.run("doc.restore", json!({"revision": revision, "mode": mode}))?;
     app.dialog = None;
     app.tool = None;
-    app.pre_sketch_marker = None;
     app.params = None;
     app.menu.props = None;
     crate::dim_view::cancel();

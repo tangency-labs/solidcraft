@@ -654,6 +654,8 @@ fn restore(s: &mut Session, p: &Value) -> Result<Value> {
     s.visibility = visibility;
     s.selection.clear();
     s.active_sketch = None;
+    // A temporary sketch-edit rollback belonged to the replaced model.
+    s.sketch_entry = None;
     s.active_component = 0;
     s.active_occurrence_path = None;
     s.pending_moves.clear();

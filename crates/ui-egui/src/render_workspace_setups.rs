@@ -288,7 +288,8 @@ fn load_values(view: &mut super::ViewState, setup: RenderSetup) {
     view.draft = setup;
 }
 
-/// Compare the complete authoring source, excluding only saved Render settings.
+/// Compare the complete authoring source, excluding only saved Render settings and the saved
+/// revisions (`document_history`, which a save changes without touching the model).
 /// Stable body labels alone do not prove that geometry or its material is unchanged.
 pub(super) fn same_model_source(app: &SolveApp, document: &std::sync::Weak<solidcraft_engine::doc::Document>) -> bool {
     if app.session.model.is_stale() {
@@ -299,7 +300,7 @@ pub(super) fn same_model_source(app: &SolveApp, document: &std::sync::Weak<solid
     // Match ergonomics bind references, including vectors and point-cloud data.
     macro_rules! compare_authoring_fields {
         ($($field:ident),* $(,)?) => {{
-            let solidcraft_engine::doc::Document { render: _, $($field),* } = source.as_ref();
+            let solidcraft_engine::doc::Document { render: _, document_history: _, $($field),* } = source.as_ref();
             true $(&& $field == &app.session.doc.$field)*
         }};
     }

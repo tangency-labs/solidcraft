@@ -2215,7 +2215,8 @@ fn image_host_availability(host: Option<&render::job::ImageHost>, expected: &ren
 }
 
 /// Whether two designs differ at most in their features. Every field is named, so a new one has
-/// to be decided on here.
+/// to be decided on here. The saved revisions (`document_history`) are left out: the joints
+/// never read them.
 fn same_but_features(a: &Document, b: &Document) -> bool {
     let Document {
         render,
@@ -2254,6 +2255,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         named_views,
         visibility,
         next_component_color_index,
+        document_history: _,
     } = a;
     *render == b.render
         && *format == b.format

@@ -1857,6 +1857,7 @@ impl SolveApp {
         }
         if id == "sketch.edit" {
             self.start_sketch_edit(opener);
+            return;
         }
         if id == "doc.revisions" {
             revisions_panel::open(self);
