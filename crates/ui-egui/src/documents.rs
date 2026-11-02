@@ -448,8 +448,8 @@ pub fn active_is_blank(app: &SolveApp) -> bool {
 }
 
 /// Show `session` (a design built or read elsewhere): in place of a blank active design,
-/// otherwise in a new tab.
-pub fn adopt(app: &mut SolveApp, session: Session) {
+/// otherwise in a new tab. Whether it is shown (no tab left for it: the status says so).
+pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
     if active_is_blank(app) {
         let rev = app.session.revision;
         crate::dialogs::cancel(app);
@@ -467,8 +467,12 @@ pub fn adopt(app: &mut SolveApp, session: Session) {
         // The linked designs that changed while it was closed are read again (#9739): last, as a
         // read is taken up only by the design revision it started from.
         crate::linked_source::update_changed(app);
+        true
     } else if let Err(e) = open_tab(app, session) {
         app.set_status(e, true);
+        false
+    } else {
+        true
     }
 }
 
