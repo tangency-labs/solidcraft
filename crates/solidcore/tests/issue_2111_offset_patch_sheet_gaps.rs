@@ -203,3 +203,109 @@ fn updated_tolerances_at_a_half_cover_the_gaps() {
         println!("fix {fix}: {:?}", c.lines());
     }
 }
+
+/// The sheet read from its file, copied and offset by `d` with the given flags set
+/// before the offset.
+fn offset_with(d: f64, flags: &[&str]) -> (Kernel, Brep) {
+    let bytes = std::fs::read(SHEET).unwrap();
+    let mut k = Kernel::default();
+    for name in flags {
+        *k.fixes.flag_mut(name).unwrap() = true;
+    }
+    let mut read = Brep::new_with_infinite_region().unwrap();
+    let mut records = NotifyRecords::new();
+    let mut attributes = AttributeStore::default();
+    let key = |_: EntityRef| ObjectRef {
+        key: ObjectKey(0),
+        type_code: 0,
+    };
+    let mut env = TopologyEnv {
+        all_attributes: &[],
+        attributes: &mut attributes,
+        key_of: &key,
+        records: &mut records,
+        next_key: 1 << 40,
+    };
+    read_from_file(&mut k, &mut read, bytes, FileType::Ascii, false, &mut env).unwrap();
+    read.refresh_cached_topology();
+    let mut b = brep_copy(&mut k, &read).unwrap();
+    let mut r = offset_brep_simple(
+        &mut k,
+        &mut b,
+        OffsetOptions {
+            distance: d,
+            extend_convex_edges: true,
+            merge_results: true,
+        },
+    )
+    .unwrap();
+    r.refresh_cached_topology();
+    (k, r)
+}
+
+/// WR-705 at d = 0.5: with `offset_updates_result_tolerances` the offset runs the
+/// update on its own result, so with WR-671 and WR-679 its result checks clean as the
+/// caller's update made it (above), with no update by the caller. Closed form: every
+/// vertex/edge and vertex/face gap the validate-only pass measures on the returned
+/// result is within half its vertex's tolerance and every edge/face gap within its
+/// edge's (no report, `violated_or_updated` false), and its largest vertex/edge gap is
+/// held by a vertex of at least twice it.
+#[test]
+fn offset_updates_its_result_tolerances() {
+    let flags = [
+        "offset_edges_keep_source_tolerance",
+        "validate_tolerances_fixes_reported_gaps",
+        "offset_updates_result_tolerances",
+    ];
+    let (mut k, mut r) = offset_with(0.5, &flags);
+    let mut reports = AssertArray::new();
+    let gaps = validate_and_update_tolerances(&mut k, &mut r, true, Some(&mut reports), 0).unwrap();
+    let failed: Vec<_> = reports.reports().iter().filter(|r| !r.ok).collect();
+    assert!(failed.is_empty(), "{failed:?}");
+    assert!(!gaps.violated_or_updated);
+    assert!(
+        (6.0e-5..6.9e-5).contains(&gaps.max_vertex_edge_gap),
+        "{}",
+        gaps.max_vertex_edge_gap
+    );
+    let vu = gaps.max_vertex_edge_use.unwrap();
+    let v = r.vertexuse(vu).unwrap().vertex.unwrap();
+    assert!(r.vertex(v).unwrap().tolerance >= 2.0 * gaps.max_vertex_edge_gap);
+    let c = check_brep(&mut k, &mut r, CheckLevel::Level2).unwrap();
+    assert_eq!(c.assert_valid, Some(true), "{:?}", c.lines());
+    assert_eq!(bad_gaps(&c), 0, "{:?}", c.lines());
+    assert_eq!(c.failures().count(), 0, "{:?}", c.lines());
+    // the update moves no geometry, only tolerances: the area is that of the offset
+    // without it, to the integrator's accuracy (as `kept_source_tolerances_check_clean`)
+    let (_, area) = offset_checked(0.5, true);
+    let updated = brep_area(&k, &mut r, 1e-8).unwrap();
+    assert!((updated - area).abs() <= 1e-6 * area, "{updated} {area}");
+}
+
+/// WR-705 off: the result is the one the offset returned before, the flags of the
+/// other two fixes alone leave the 4 Bad Gaps (5 failures) at d = 0.5, and the
+/// tolerances are those of the offset without either flag of the update.
+#[test]
+fn offset_without_the_update_keeps_its_gaps() {
+    let flags = [
+        "offset_edges_keep_source_tolerance",
+        "validate_tolerances_fixes_reported_gaps",
+    ];
+    let (mut k, mut r) = offset_with(0.5, &flags);
+    let c = check_brep(&mut k, &mut r, CheckLevel::Level2).unwrap();
+    assert_eq!(c.assert_valid, Some(true), "{:?}", c.lines());
+    assert_eq!(bad_gaps(&c), 4, "{:?}", c.lines());
+    assert_eq!(c.failures().count(), 5, "{:?}", c.lines());
+    // WR-705 with WR-671 but upstream's threshold: the update grows no vertex for these
+    // gaps (between half the tolerance and all of it), so they are still reported
+    let (mut k, mut r) = offset_with(
+        0.5,
+        &[
+            "offset_edges_keep_source_tolerance",
+            "offset_updates_result_tolerances",
+        ],
+    );
+    let c = check_brep(&mut k, &mut r, CheckLevel::Level2).unwrap();
+    println!("WR-705 + WR-671: {:?}", c.lines());
+    assert_eq!(bad_gaps(&c), 4, "{:?}", c.lines());
+}

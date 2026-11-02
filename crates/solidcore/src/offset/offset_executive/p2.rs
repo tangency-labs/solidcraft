@@ -28,6 +28,8 @@
 //! upstream); member null is native 1006, API null/invalid selection is native 1007.
 //! Offset/member inputs are mutable so existing queries can populate lazy UV trim
 //! geometry in the same arena; this adds no constructive capability or topology copy.
+//! With the opt-in `offset_updates_result_tolerances` (WR-705, not upstream or the
+//! fork) the two API entry points run the tolerance update on their result.
 //! `sm_OrderEdgeusesByBrep` (void upstream) propagates a dangling-id error from its
 //! face and edge-use queries; only a corrupt B-rep reaches it.
 //! Source faces use the native owning-list order. Temporary allocation uses the real
@@ -1613,6 +1615,7 @@ pub fn api_shell_brep_full(
     let mut result = outcome.result?;
     // (not upstream: the port's cached topology, true again for the caller)
     result.refresh_cached_topology();
+    update_result_tolerances(kernel, &mut result)?;
     Ok(result)
 }
 
@@ -1629,7 +1632,26 @@ pub fn api_offset_brep_full(
     let mut result = offset_brep(kernel, original, options, notifications)?;
     // (not upstream: the port's cached topology, true again for the caller)
     result.refresh_cached_topology();
+    update_result_tolerances(kernel, &mut result)?;
     Ok(result)
+}
+
+/// (Not upstream, WR-705, `Kernel::fixes.offset_updates_result_tolerances`.) The
+/// tolerance update `SmBrep::ValidateAndUpdateTolerances(FALSE)` on an API offset's or
+/// shell's result, with no report list, at level 0: each vertex and edge grows to cover
+/// the gaps it bounds, as the update grows them. Nothing is done with the flag off.
+///
+/// # Errors
+///
+/// Those of [`validate_and_update_tolerances`](crate::topology::brep::validation::validate_and_update_tolerances)
+/// (broken topology links of the result).
+fn update_result_tolerances(kernel: &mut Kernel, result: &mut Brep) -> Result<()> {
+    if kernel.fixes.offset_updates_result_tolerances {
+        crate::topology::brep::validation::validate_and_update_tolerances(
+            kernel, result, false, None, 0,
+        )?;
+    }
+    Ok(())
 }
 
 /// (not upstream) [`api_offset_brep_full`] with notification identities of its own:

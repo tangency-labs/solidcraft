@@ -739,6 +739,16 @@ pub struct UpstreamFixes {
     /// mode reports a gap between the two as bad and never fixes it (WR-679, #2111; the
     /// fork's tangency-labs/smlib@8c4bda5 by bherbruck).
     pub validate_tolerances_fixes_reported_gaps: bool,
+    /// `SmApiOffsetBrepFull` and `SmApiShellBrepFull` (offset, shell and thicken) run
+    /// `SmBrep::ValidateAndUpdateTolerances(FALSE)` on their result before returning it,
+    /// so its vertex and edge tolerances cover the gaps its construction left and it
+    /// passes the check without the caller running the update. Upstream returns the
+    /// result with the tolerances its faces were built at (a patch sheet's offset by 0.5
+    /// fails `check_brep` with 4 vertex/edge Bad Gaps even with
+    /// `offset_edges_keep_source_tolerance`). Neither upstream nor the fork has this
+    /// call; the update grows a vertex for a gap between half its tolerance and all of
+    /// it only with `validate_tolerances_fixes_reported_gaps` (WR-705, #2111).
+    pub offset_updates_result_tolerances: bool,
     /// Before the piecewise merge, `do_extended_offset` rebuilds every offset face whose loops cross from the stretches of its loops that bound it (WR-345, #854).
     pub offset_resolve_crossing_loops: bool,
     /// [`crate::topology::edgeuse::p2::is_convex_radial_sector`]
