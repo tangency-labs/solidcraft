@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use solidcraft_geom::{Seg2, Vec2};
 use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
 
-use super::sketch::{add_c, curve_ref, edit, ids_of, line_or_axis_ref, line_pts, req_parg, result};
+use super::sketch::{CONNECT_TOL, add_c, curve_ref, edit, ids_of, line_or_axis_ref, line_pts, req_parg, result};
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, expr, num, str_, vec2};
 use crate::schema::sketch_create::{ConstructionLineParams, ConstructionLineResult};
@@ -260,6 +260,10 @@ fn run(s: &mut Session, p: &Value, default_mode: &str) -> Result<Value> {
         let first_new = sk.points.len();
         let at = req_parg(sk, doc, &p, "at", CMD)?;
         let through = if mode == "free" { Some(req_parg(sk, doc, &p, "through", CMD)?) } else { None };
+        // A through-point next to the start leaves a line whose direction no constraint holds (#11001).
+        if through.as_ref().is_some_and(|q| q.pos().dist(at.pos()) < CONNECT_TOL) {
+            return Err(bad(CMD, "the through point must lie away from the start point"));
+        }
         let mut params = p.clone();
         params["at"] = json!([at.pos().x, at.pos().y]);
         let angle_expression = if mode == "angle" {

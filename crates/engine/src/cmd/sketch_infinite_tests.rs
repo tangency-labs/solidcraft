@@ -326,6 +326,25 @@ fn construction_tangents_respect_arc_sweeps_and_invalid_inputs_are_atomic() {
 }
 
 #[test]
+fn a_second_point_next_to_the_first_is_refused() {
+    // #11001: a through-point 0.0000001 mm from the start made an infinite line whose direction
+    // Horizontal no longer held, and a line that short collapsed onto the origin.
+    let mut s = new_sketch();
+    for (id, p) in [
+        ("sketch.construction_line", json!({"at":[0,0],"through":[0.0000001,0]})),
+        ("sketch.construction_line", json!({"at":[5,5],"through":[5,5.0000005]})),
+        ("sketch.line", json!({"points":[[0,0],[0.0000001,0]]})),
+        ("sketch.line", json!({"points":[[5,5],[10,5],[10,5.0000005]]})),
+    ] {
+        let before = s.doc.to_json();
+        assert!(s.execute(id, &p).is_err(), "{id} {p}");
+        assert_eq!(s.doc.to_json(), before, "{id} {p}");
+    }
+    run(&mut s, "sketch.construction_line", json!({"at":[0,0],"through":[0.00001,0]}));
+    run(&mut s, "sketch.line", json!({"points":[[5,5],[5.00001,5]]}));
+}
+
+#[test]
 fn construction_relations_follow_source_edits_without_an_auxiliary_dimension() {
     let mut s = new_sketch();
     run(&mut s, "sketch.line", json!({"points":[[0,0],[20,0]],"ids":["a"],"infer":false}));
