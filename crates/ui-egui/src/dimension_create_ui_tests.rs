@@ -574,6 +574,82 @@ fn an_over_constraining_dimension_is_placed_as_a_driven_one() {
     assert_eq!(h.app.session.doc.to_json(), original);
 }
 
+/// A dimension placed while a constraint fixed what it measures is driven; once that constraint
+/// is deleted, a double-click opens its value, and the value makes it driving, in one undo step
+/// (#10018). While the constraint holds it stays read-only, and a value refused leaves it driven.
+#[test]
+fn a_driven_dimension_nothing_fixes_any_more_takes_a_value() {
+    let mut h = line([20., 0.]);
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":"20 mm","text_at":[10,6]})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":15})).unwrap();
+    // The circle's centre is on the origin and the line's end on the circle: its size is fixed.
+    let coincident = h.app.run("sketch.constraint.coincident", json!({"a":"l1.end","b":"c1"})).unwrap()["constraint"].as_str().unwrap().to_owned();
+    h.app.run("sketch.dimension", json!({"entities":["c1"],"driven":true,"text_at":[-14,14]})).unwrap();
+    h.settle();
+    let sketch = h.app.session.active_sketch.unwrap();
+    let dim = |h: &Harness| {
+        let state = h.app.session.world_state();
+        let sk = &state.sketch(sketch).unwrap().sketch;
+        sk.constraints
+            .iter()
+            .find(|c| {
+                matches!(
+                    c.kind,
+                    solidcraft_engine::sketch::ConstraintKind::Diameter { .. } | solidcraft_engine::sketch::ConstraintKind::Radius { .. }
+                )
+            })
+            .cloned()
+            .unwrap()
+    };
+    let id = dim(&h).id;
+    assert!(dim(&h).driven && dim(&h).param.is_none(), "{:?}", dim(&h));
+    let double_click = |h: &mut Harness| {
+        h.frames(40);
+        h.step(&json!({"click":{"dimension":id},"double":true})).unwrap();
+    };
+
+    // The Coincident still fixes the circle: the dimension only measures.
+    let fixed = h.app.session.doc.to_json();
+    double_click(&mut h);
+    assert!(!crate::dim_view::editing(), "a dimension the sketch determines has no value to edit");
+    assert!(h.app.status.as_ref().is_some_and(|s| s.0.contains("driven")), "{:?}", h.app.status);
+    assert_eq!(h.app.session.doc.to_json(), fixed);
+
+    // Without it, the value opens at what the dimension measures, named as the parameter it gets.
+    h.app.run("sketch.delete", json!({"entities":[coincident]})).unwrap();
+    h.settle();
+    let before = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    let name = h.app.session.doc.next_d_name();
+    let measured = dim(&h).kind.value().unwrap();
+    double_click(&mut h);
+    assert!(crate::dim_view::editing(), "{:?}", h.app.status);
+    assert!(h.widget(&format!("Dimension: {name}")).is_some(), "{}", h.call("ui.inspect", json!({})));
+
+    // A value the design refuses leaves it driven, and the design and its history as they were.
+    type_value(&mut h, "nosuch * 2");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(crate::dim_view::editing(), "a refused value keeps the box open");
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert_eq!(h.app.session.undo.len(), undo);
+
+    // A value it takes makes it driving at that value.
+    type_value(&mut h, "30");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(!crate::dim_view::editing(), "{:?}", h.app.status);
+    let driving = dim(&h);
+    assert!(!driving.driven && driving.param.as_deref() == Some(name.as_str()), "{driving:?}");
+    let value = driving.kind.value().unwrap();
+    assert!((value - 30.0).abs() < 1e-6 && (measured - 30.0).abs() > 1.0, "{measured} → {value}");
+    assert!(h.app.session.world_state().sketch(sketch).unwrap().report.ok());
+
+    // One undo step puts the driven dimension back.
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.session.doc.to_json(), before);
+    crate::dim_view::cancel();
+}
+
 // ---- Type-first: D, click, type, Enter ----
 
 /// A sketch with `setup` drawn, the Top view centred on `centre`, and the Dimension tool on.

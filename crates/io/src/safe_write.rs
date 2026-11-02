@@ -1,7 +1,8 @@
 //! Crash-safe file writes: the new content goes to a temporary file next to the target, is
 //! flushed to disk, and replaces the target in one rename. A crash or power cut at any moment
 //! leaves the old file or the new one, never a torn mix. The previous version can be kept as
-//! `<file>.bak` (itself written the same way).
+//! `<file>.bak`: the old file itself under that name (a hard link) where the file system allows,
+//! else a copy written the same way.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -145,6 +146,45 @@ fn rename_with_retry(
     result
 }
 
+/// Keep the file a save is about to replace as its backup without copying it: a second name for
+/// the same file (a hard link) under a temporary name beside it, renamed over the old backup in
+/// one step. The target keeps its name at every moment, and a save never writes into a file it
+/// replaces (it renames a new one over it), so the backup stays the version it was. `Ok(false)`:
+/// this file system refuses links (FAT and exFAT drives, many network shares and synced cloud
+/// folders) or the old file could not be flushed first; the caller copies it then, as before. A
+/// refused rename fails the save, as it does for a copy.
+///
+/// What differs from a copy: the backup is the old file itself, so it keeps that file's
+/// modification time (the previous save's, where a copy has the time of this save), its owner
+/// and its permissions (a copy is given the same permissions), and until the target is replaced
+/// the two names share one file.
+fn link_backup(path: &Path) -> std::io::Result<bool> {
+    #[cfg(test)]
+    if tests::LINKS_REFUSED.with(std::cell::Cell::get) {
+        return Ok(false);
+    }
+    // Flushed first, as a copy is: data still only in memory would be lost with it in a power cut.
+    if open_to_flush(path).and_then(|f| flush(&f)).is_err() {
+        return Ok(false);
+    }
+    let bak_tmp = temp_beside(path, "bak");
+    if fs::hard_link(path, &bak_tmp).is_err() {
+        return Ok(false);
+    }
+    if let Err(e) = replace_synced(&bak_tmp, &backup_path(path)) {
+        // Only the second name this call just made: the old file keeps its own.
+        let _ = fs::remove_file(&bak_tmp);
+        return Err(e);
+    }
+    Ok(true)
+}
+
+/// Open the file a save replaces so it can be flushed. Windows flushes only a file opened for
+/// writing (nothing is written, and it is not truncated); elsewhere reading is enough.
+fn open_to_flush(path: &Path) -> std::io::Result<fs::File> {
+    OpenOptions::new().read(true).write(cfg!(windows)).open(path)
+}
+
 fn write_steps(path: &Path, bytes: &[u8], backup: bool, stop: Option<Step>) -> std::io::Result<()> {
     let permissions = fs::metadata(path).ok().filter(|m| m.is_file()).map(|m| m.permissions());
     let tmp = temp_beside(path, "new");
@@ -156,7 +196,15 @@ fn write_steps(path: &Path, bytes: &[u8], backup: bool, stop: Option<Step>) -> s
     if stop == Some(Step::TempWritten) {
         return Ok(());
     }
-    if backup && path.is_file() {
+    let linked = if backup && path.is_file() { link_backup(path) } else { Ok(false) };
+    let linked = match linked {
+        Ok(linked) => linked,
+        Err(e) => {
+            let _ = fs::remove_file(&tmp);
+            return Err(e);
+        }
+    };
+    if backup && !linked && path.is_file() {
         // Copy (not move) the old file, so the target exists at every moment.
         let old = fs::read(path);
         let bak_tmp = temp_beside(path, "bak");
@@ -244,6 +292,86 @@ pub fn stale_temps(path: &Path) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    thread_local! {
+        /// This thread's saves find hard links refused ([`link_backup`]), as on a FAT drive: the
+        /// backup is copied, exactly as it is there.
+        pub(super) static LINKS_REFUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    /// A new, empty folder of its own for one test (nothing in it is removed).
+    fn fresh_dir(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+        let d = std::env::temp_dir().join(format!("solidcraft-safe-write-{tag}-{}-{nanos}", std::process::id()));
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// The time of a save with its backup, the backup linked against the backup copied (links
+    /// refused, as before hard links were used), taking turns. The file saved is
+    /// `SOLIDCRAFT_SAVE_BENCH_FILE` (a design), in a new folder in `SOLIDCRAFT_SAVE_BENCH_DIR`
+    /// (on the drive to measure; else the temporary folder). Run with `--ignored --nocapture`.
+    #[test]
+    #[ignore = "manual save measurement"]
+    fn save_time_with_the_backup_linked_or_copied() {
+        let Some(file) = std::env::var_os("SOLIDCRAFT_SAVE_BENCH_FILE") else { return };
+        let bytes = fs::read(file).unwrap();
+        let base = std::env::var_os("SOLIDCRAFT_SAVE_BENCH_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+        let d = base.join(format!("save-bench-{}-{nanos}", std::process::id()));
+        fs::create_dir_all(&d).unwrap();
+        let p = d.join("design.solidcraft");
+        write_atomic(&p, &bytes, true).unwrap();
+        let rounds: usize = std::env::var("SOLIDCRAFT_SAVE_BENCH_ROUNDS").ok().and_then(|n| n.parse().ok()).unwrap_or(11);
+        let mut times = [Vec::new(), Vec::new()];
+        for round in 0..2 * rounds {
+            let refused = round % 2 == 1;
+            LINKS_REFUSED.with(|r| r.set(refused));
+            let t = std::time::Instant::now();
+            write_atomic(&p, &bytes, true).unwrap();
+            times[usize::from(refused)].push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        LINKS_REFUSED.with(|r| r.set(false));
+        for (name, mut t) in ["linked", "copied"].into_iter().zip(times) {
+            t.sort_by(f64::total_cmp);
+            println!(
+                "SAVEBENCH bytes={} backup={name} median_ms={:.2} min_ms={:.2} max_ms={:.2} n={}",
+                bytes.len(),
+                t[t.len() / 2],
+                t[0],
+                t[t.len() - 1],
+                t.len()
+            );
+        }
+    }
+
+    /// Saves keep the previous version as the backup, stopped after any step or not, whether the
+    /// file system links the old file as the backup or refuses links (a FAT drive, a share) so it
+    /// is copied: the design file is the old version or the new one, whole, and the backup is
+    /// the version before it, never the one being written.
+    #[test]
+    fn the_backup_is_the_previous_version_linked_or_copied_and_a_stopped_save_keeps_both() {
+        for refused in [false, true] {
+            LINKS_REFUSED.with(|r| r.set(refused));
+            let d = fresh_dir(if refused { "bak-copied" } else { "bak-linked" });
+            let p = d.join("a.solidcraft");
+            write_atomic(&p, b"one", true).unwrap();
+            write_atomic(&p, b"two", true).unwrap();
+            assert_eq!((fs::read(&p).unwrap(), fs::read(backup_path(&p)).unwrap()), (b"two".to_vec(), b"one".to_vec()), "refused {refused}");
+            for stop in [Step::TempWritten, Step::BackupWritten] {
+                write_steps(&p, b"three", true, Some(stop)).unwrap();
+                assert_eq!(fs::read(&p).unwrap(), b"two", "{stop:?}, refused {refused}");
+                let bak = fs::read(backup_path(&p)).unwrap();
+                let want: &[u8] = if stop == Step::TempWritten { b"one" } else { b"two" };
+                assert_eq!(bak, want, "{stop:?}, refused {refused}");
+                assert!(!stale_temps(&p).is_empty(), "the stopped save's temporary file is left over");
+            }
+            write_atomic(&p, b"four", true).unwrap();
+            write_atomic(&p, b"five", true).unwrap();
+            assert_eq!((fs::read(&p).unwrap(), fs::read(backup_path(&p)).unwrap()), (b"five".to_vec(), b"four".to_vec()), "refused {refused}");
+        }
+        LINKS_REFUSED.with(|r| r.set(false));
+    }
 
     /// #5467: a lock is someone else's while it is refreshed; one left by a crash goes stale, and
     /// this app's own lock never counts as the design being open elsewhere. Writing a design's
@@ -469,6 +597,34 @@ mod tests {
                 let _ = fs::set_permissions(&p, fs::Permissions::from_mode(0o644));
             }
             let _ = fs::remove_dir_all(&d);
+        }
+
+        /// Where links work the backup is the old file itself, not a copy: its inode, its
+        /// modification time and its permissions, with one name again once the save is done;
+        /// where they are refused it is a copy with the old file's permissions.
+        #[test]
+        fn the_backup_is_the_old_file_linked_or_a_copy_where_links_are_refused() {
+            use std::os::unix::fs::MetadataExt;
+            for refused in [false, true] {
+                LINKS_REFUSED.with(|r| r.set(refused));
+                let d = fresh_dir(if refused { "inode-copied" } else { "inode-linked" });
+                let p = d.join("a.solidcraft");
+                write_atomic(&p, b"one", true).unwrap();
+                fs::set_permissions(&p, fs::Permissions::from_mode(0o640)).unwrap();
+                let old = fs::metadata(&p).unwrap();
+                write_atomic(&p, b"two", true).unwrap();
+                let bak = fs::metadata(backup_path(&p)).unwrap();
+                let new = fs::metadata(&p).unwrap();
+                assert_ne!(new.ino(), old.ino(), "the design file is a new file");
+                assert_eq!(bak.ino() == old.ino(), !refused, "linked: the backup is the old file");
+                if !refused {
+                    assert_eq!(bak.modified().unwrap(), old.modified().unwrap(), "it keeps the old file's time");
+                }
+                assert_eq!((bak.nlink(), new.nlink()), (1, 1), "one name each once the save is done");
+                assert_eq!((mode(&p), mode(&backup_path(&p))), (0o640, 0o640), "refused {refused}");
+                assert_eq!(fs::read(backup_path(&p)).unwrap(), b"one");
+            }
+            LINKS_REFUSED.with(|r| r.set(false));
         }
 
         #[test]

@@ -579,6 +579,38 @@ fn new_cards_settle_before_the_first_click_in_both_layouts() {
 }
 
 #[test]
+fn the_loft_dialog_widens_its_label_column_for_the_current_language() {
+    // #10620: German "Anpassung an Leitkurve" (Rail Fit) clipped to "Anpassung an Leit…" in
+    // the fixed-width Loft card. The label column now measures the dialog's labels in the
+    // active language and the card widens by the same amount, so the label fits and the
+    // control column keeps its design width. English, whose labels fit the design, is unchanged.
+    let t = Tokens::get();
+    let shoot = |language: &str| {
+        let mut h = fixture();
+        h.call("ui.resize", json!({"width": 1400, "height": 950}));
+        h.app.preferences.language = language.into();
+        h.app.dialog = Some(representative(&h, "solid.loft"));
+        h.frames(4);
+        (h, scenario::rect_of("dialog:card").unwrap(), scenario::rect_of("dialog:label:Rail Fit").unwrap())
+    };
+    let (h, card, label) = shoot("de");
+    let (_, english_card, english_label) = shoot("en");
+    assert!(card.width() > english_card.width(), "the German card widened: {card:?} vs {english_card:?}");
+    assert!(label.width() > t.form_label_width * 1.6, "past the ordinary cap: {label:?}");
+    assert!(english_label.width() <= t.form_label_width * 1.6, "English keeps the design's label column: {english_label:?}");
+    // The drawn galley holds the whole translation: no ellipsis.
+    let drawn = h
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.job.text.contains("Anpassung") => Some(text.galley.job.text.to_string()),
+            _ => None,
+        })
+        .expect("the Rail Fit row drew its German label");
+    assert!(drawn.contains("Leitkurve") && !drawn.contains('…'), "the label is not ellipsized: {drawn:?}");
+}
+
+#[test]
 fn remaining_dialogs_keep_kit_chrome_and_cancel_restores_preview() {
     for command in [
         "contact.create",
@@ -963,6 +995,51 @@ fn coil_from_a_profile_hides_the_primitive_section() {
     assert!(p.get("operation").is_some(), "{p}");
 }
 
+/// The Revolutions field steps by whole turns like the other counts (#7481).
+#[test]
+fn coil_revolutions_arrows_step_whole_turns() {
+    let mut h = fixture();
+    h.app.run("parameters.add", json!({"name":"turns","expression":"3","unit":""})).unwrap();
+    h.app.dialog = Some(Dialog::for_command(&h.app, "solid.coil").unwrap());
+    h.settle();
+    let sent = |h: &Harness| {
+        let cmds = crate::dialogs::preview_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        cmds.iter().find(|(id, _)| id == "solid.coil").map(|(_, p)| p["revolutions"].clone()).unwrap_or_else(|| panic!("{cmds:?}"))
+    };
+    let set = |h: &mut Harness, text: &str| {
+        if let Some(Kind::Primitive { fields, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind)
+            && let Some((_, value)) = fields.iter_mut().find(|(k, _)| *k == "revolutions")
+        {
+            *value = text.into();
+        }
+        h.frames(2);
+    };
+    let click = |h: &mut Harness, arrow: &str| h.step(&json!({"click":{"handle":format!("dialog:ui.revolutions {arrow}")}})).unwrap();
+    assert_eq!(sent(&h), json!("4"));
+    click(&mut h, "up");
+    assert_eq!(sent(&h), json!("5"));
+    click(&mut h, "down");
+    click(&mut h, "down");
+    assert_eq!(sent(&h), json!("3"));
+    // A fraction steps to the next whole turn either way.
+    set(&mut h, "2.5");
+    click(&mut h, "up");
+    assert_eq!(sent(&h), json!("3"));
+    set(&mut h, "2.5");
+    click(&mut h, "down");
+    assert_eq!(sent(&h), json!("2"));
+    // From 1 to the helix's 200 turns.
+    set(&mut h, "1");
+    click(&mut h, "down");
+    assert_eq!(sent(&h), json!("1"));
+    set(&mut h, "200");
+    click(&mut h, "up");
+    assert_eq!(sent(&h), json!("200"));
+    set(&mut h, "turns");
+    click(&mut h, "up");
+    assert_eq!(sent(&h), json!("turns + 1"));
+}
+
 fn extrude_focus_fixture() -> Harness {
     let mut h = Harness::new();
     h.app.home.open = false;
@@ -1172,4 +1249,207 @@ fn ok_on_a_rolled_back_pattern_editor_says_it_is_not_built() {
     let (text, _, error) = h.app.status.clone().unwrap();
     assert!(!error, "{text}");
     assert!(text.starts_with("Pattern changed, but it is after the history marker"), "{text}");
+}
+
+/// #10852: the editor of a circular pattern whose axis origin is length expressions sends them
+/// back as they are, so applying it unchanged keeps the pattern following its parameters.
+#[test]
+fn editing_a_circular_pattern_keeps_its_origin_expressions() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    for (id, params) in [
+        ("parameters.add", json!({"name":"cx","expression":"20 mm"})),
+        ("solid.box", json!({"length":40,"width":30,"height":10,"corner":[0,0,0],"body_name":"Plate"})),
+        ("solid.cylinder", json!({"radius":2,"height":20,"base":["cx - 10 mm",15,-5],"operation":"cut","targets":["Plate"],"name":"Cut"})),
+        ("solid.pattern.circular", json!({"features":["Cut"],"axis":{"origin":["cx",15,0],"dir":[0,0,1]},"count":2,"name":"Pattern"})),
+    ] {
+        h.app.run(id, params).unwrap();
+    }
+    let pattern = h.app.session.doc.features.last().unwrap().id;
+    let origin = |h: &Harness| serde_json::to_value(&h.app.session.doc.feature(pattern).unwrap().kind).unwrap()["pattern"]["origin"].clone();
+    assert_eq!(origin(&h), json!(["cx", 15.0, 0.0]));
+    let d = crate::dialogs::for_feature(&h.app, pattern, None).unwrap();
+    for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    assert_eq!(origin(&h), json!(["cx", 15.0, 0.0]), "the expression is kept, not its value now");
+}
+
+/// The Circular Pattern dialog must show only one field active at a time (#10066): the pick
+/// field's accent ring yields while a text field holds the keyboard, and clicking a pick field
+/// takes the keyboard back.
+#[test]
+fn circular_pattern_dialog_shows_one_active_field_at_a_time() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10})).unwrap();
+    let mut d = Dialog::for_command(&h.app, "solid.pattern.circular").unwrap();
+    d.inputs[1].items = vec![Sel::Axis { name: "Z".into() }];
+    h.app.dialog = Some(d);
+    h.settle();
+    let active = |label: &str| crate::scenario::count_of(&format!("dialog:selection:{label}:active")) == Some(1.0);
+    let keyboard = |h: &Harness| h.ctx.memory(|m| m.focused()).is_some();
+    let click_field = |h: &mut Harness, rect: &str| {
+        let at = crate::scenario::rect_of(rect).unwrap_or_else(|| panic!("{rect} is not drawn")).center();
+        h.step(&json!({"click": [at.x, at.y]})).unwrap();
+        h.frames(2);
+    };
+    // A fresh dialog: the Objects pick field is the one active field, no text field has the keyboard.
+    assert!(!keyboard(&h), "nothing holds the keyboard when the dialog opens");
+    assert_eq!((active("Objects"), active("Axis")), (true, false), "only Objects looks active");
+    // Clicking Quantity: the text field takes the keyboard and no pick field keeps its ring.
+    h.step(&json!({"click": {"handle": "dialog:Quantity"}})).unwrap();
+    h.frames(2);
+    assert!(keyboard(&h), "Quantity holds the keyboard");
+    assert_eq!((active("Objects"), active("Axis")), (false, false), "only the typed field looks active");
+    // Clicking the Axis pick field: it becomes the one active field and takes the keyboard back.
+    click_field(&mut h, "dialog:field:Axis");
+    assert!(!keyboard(&h), "the pick field takes the keyboard from Quantity");
+    assert_eq!((active("Objects"), active("Axis")), (false, true), "only Axis looks active");
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 1, "picks still go to Axis");
+}
+
+/// #10057: a sketch clicked for a pattern's objects is not taken in silence. In the view, the
+/// Browser and the History, with either Object Type, the dialog says a sketch is neither a body
+/// nor a feature and what to do instead, as a hint rather than an error; nothing is picked and
+/// the selection stays as it was.
+#[test]
+fn pattern_says_why_a_clicked_sketch_is_not_taken() {
+    for (dock, ty) in [("bottom", "Bodies"), ("left", "Features"), ("under_browser", "Bodies")] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("view.history_layout", json!({"dock": dock})).unwrap();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center": [20, 0], "radius": 5})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("select.clear", json!({})).unwrap();
+        h.app.start("solid.pattern.circular");
+        h.frames(4);
+        mirror_object_type(&mut h, ty);
+        for click in [json!({"browser": "Sketch1"}), json!({"handle": "timeline:Sketch1"}), json!({"world": [25, 0, 0]})] {
+            h.app.dialog.as_mut().unwrap().error = None;
+            // Out of double-click time: a double click opens the sketch to edit.
+            h.frames(30);
+            h.step(&json!({ "click": click })).unwrap();
+            h.frames(2);
+            let d = h.app.dialog.as_ref().expect("the pattern stays open");
+            assert!(matches!(d.kind, Kind::PatternCirc { .. }), "{dock} {ty} {click}");
+            assert_eq!(d.error.as_deref(), Some(crate::dialogs::SKETCH_NOT_OBJECT), "{dock} {ty} {click}");
+            assert!(d.inputs[0].items.is_empty(), "{dock} {ty} {click}: the sketch is not picked");
+            assert!(h.app.session.selection.is_empty(), "{dock} {ty} {click}: the selection stays as it was");
+        }
+    }
+    assert!(crate::dialogs::missing_pick(crate::dialogs::SKETCH_NOT_OBJECT), "shown as what to pick, with no Create Issue");
+    let _japanese = crate::i18n::scope("ja");
+    assert!(!crate::i18n::tr_label(crate::dialogs::SKETCH_NOT_OBJECT).is_ascii(), "the hint reads in the user's language");
+    assert!(!crate::i18n::tr("ui.pattern_object_type_tip").is_ascii(), "so does the Object Type tooltip");
+}
+
+/// Features stored with bare numbers edit with their units written out, as the Plastic ones do
+/// (#1936): Fillet, Chamfer, Shell, Draft, Offset Face, Stock, Offset Plane and Revolve among them.
+/// OK in the editor keeps the feature in place.
+#[test]
+fn stored_bare_numbers_edit_with_their_units() {
+    use serde_json::{Value, json};
+    let profile = [
+        ("sketch.create", json!({"plane": "XZ", "name": "Profile"})),
+        ("sketch.rectangle.two_point", json!({"p0": [50, 0], "p1": [60, 10]})),
+        ("sketch.finish", json!({})),
+    ];
+    let one = |command: &'static str, params: Value| vec![(command, params)];
+    let cases: Vec<(Vec<(&str, Value)>, &[&str])> = vec![
+        (one("solid.fillet", json!({"edges": [[20, 0, 20]], "radius": 2})), &["2 mm"]),
+        (one("solid.chamfer", json!({"edges": [[20, 0, 20]], "distance": 1, "distance2": 1.5})), &["1 mm", "1.5 mm"]),
+        (one("solid.chamfer", json!({"edges": [[20, 0, 20]], "distance": 1, "angle": 30})), &["1 mm", "30 deg"]),
+        (one("solid.shell", json!({"faces": [[20, 15, 20]], "thickness": 2})), &["2 mm"]),
+        (one("solid.draft", json!({"faces": [[0, 15, 10]], "angle": 3, "neutral": "XY"})), &["3 deg"]),
+        (one("solid.offset_face", json!({"faces": [[20, 15, 20]], "distance": 2})), &["2 mm"]),
+        (one("solid.bounding_solid", json!({"margin": 2})), &["2 mm"]),
+        (one("construct.plane.offset", json!({"base": "XY", "offset": 5})), &["5 mm"]),
+        (profile.iter().cloned().chain([("solid.revolve", json!({"sketch": "Profile", "axis": "Z", "angle": 90}))]).collect(), &["90 deg"]),
+    ];
+    for (cmds, expected) in cases {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        let command = cmds.last().map(|(c, _)| *c).unwrap_or_default();
+        for (c, p) in cmds {
+            h.app.run(c, p).unwrap();
+        }
+        h.frames(2);
+        let id = h.app.session.doc.features.last().unwrap().id;
+        let count = h.app.session.doc.features.len();
+        h.app.edit_feature(id);
+        h.frames(4);
+        let shown = match &h.app.dialog.as_ref().unwrap().kind {
+            Kind::Fillet { radius, ctype: 0, .. } => vec![radius.clone()],
+            Kind::Fillet { radius, distance2, ctype: 1, .. } => vec![radius.clone(), distance2.clone()],
+            Kind::Fillet { radius, angle, ctype: 2, .. } => vec![radius.clone(), angle.clone()],
+            Kind::Shell { thickness } => vec![thickness.clone()],
+            Kind::Draft { angle } => vec![angle.clone()],
+            Kind::OffsetFaces { distance } => vec![distance.clone()],
+            Kind::Stock { margin } => vec![margin.clone()],
+            Kind::OffsetPlane { offset } => vec![offset.clone()],
+            Kind::Revolve { angle, .. } => vec![angle.clone()],
+            other => panic!("{command}: {other:?}"),
+        };
+        assert_eq!(shown, expected, "{command}");
+        h.step(&json!({"widget": "OK"})).unwrap();
+        h.frames(4);
+        assert!(h.app.dialog.is_none(), "{command}: OK applies the unchanged editor");
+        assert_eq!(h.app.session.doc.features.len(), count, "{command}: the feature is redefined in place");
+    }
+}
+
+#[test]
+fn dialog_profile_labels_name_the_sketch_in_coil_and_mirror() {
+    for command in ["solid.coil", "sketch.mirror"] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Panel"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
+        let sketch = h.app.session.active_sketch.unwrap();
+        if command == "solid.coil" {
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        h.call("ui.view", json!({"view": "top"}));
+        h.call("ui.camera", json!({"target": [20, 15, 0], "distance": 100}));
+        h.step(&json!({"click": {"world": [20, 15, 0]}})).unwrap();
+        assert_eq!(h.app.session.selection, vec![Sel::Profile { sketch, index: 0 }]);
+        h.app.start(command);
+        h.app.dialog.as_mut().unwrap().preview_enabled = false;
+        h.frames(3);
+        let d = h.app.dialog.as_ref().unwrap();
+        let input = &d.inputs[0];
+        assert_eq!(input.items, vec![Sel::Profile { sketch, index: 0 }]);
+        assert_eq!(selection_label(&h.app.session, h.app.preferences.origin_plane_names, d, input, &input.items[0]), "Panel · profile 1");
+        let mut painted = false;
+        for clipped in &h.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                if let egui::Shape::Text(text) = shape {
+                    painted |= text.galley.text() == "Panel · profile 1";
+                }
+            });
+        }
+        assert!(painted, "{command}: the painted selection label");
+    }
+}
+
+#[test]
+fn dialog_sketch_selection_labels_translate_and_keep_identifiers() {
+    let mut h = Harness::new();
+    let sketch = h.app.run("sketch.create", json!({"plane": "XY", "name": "Panel"})).unwrap()["sketch"].as_u64().unwrap();
+    let d = Dialog::for_command(&h.app, "sketch.mirror").unwrap();
+    for (sel, english, german) in [
+        (Sel::Profile { sketch, index: 1 }, "Panel · profile 2", "Panel · Profil 2"),
+        (Sel::SketchMidpoint { id: "l7".into() }, "Midpoint · l7", "Mittelpunkt · l7"),
+        (Sel::ExternalSketchCurve { sketch, id: "l7".into() }, "Panel · curve l7", "Panel · Kurve l7"),
+        (Sel::SketchConstraint { id: "k3".into() }, "Constraint k3", "Bedingung k3"),
+    ] {
+        for (language, expected) in [("en", english), ("de", german)] {
+            let _language = crate::i18n::scope(language);
+            assert_eq!(selection_label(&h.app.session, h.app.preferences.origin_plane_names, &d, &d.inputs[0], &sel), expected);
+        }
+    }
+    let missing = Sel::Profile { sketch: 999, index: 0 };
+    assert_eq!(selection_label(&h.app.session, h.app.preferences.origin_plane_names, &d, &d.inputs[0], &missing), "Sketch999 · profile 1");
 }

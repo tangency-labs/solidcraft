@@ -101,6 +101,38 @@ fn renaming_a_parent_preserves_hidden_nested_copies_with_ambiguous_labels() {
     }
 }
 
+#[test]
+fn body_rename_reusing_hidden_names_preserves_each_copy() {
+    let mut s = Session::default();
+    let (component, first) = created(&mut s, "Part");
+    let retired = run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "Retired"}))["feature"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [10, 0, 0], "body_name": "Visible"}));
+    let second = run(&mut s, "occurrence.copy", json!({"component": component, "translate": [20, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let name = |s: &Session, source: &str, path: &[u64]| {
+        s.occurrence_placement(path).unwrap().bodies.iter().find(|b| b.source == source).unwrap().world.clone()
+    };
+    let retired_names = [name(&s, "Retired", &[first]), name(&s, "Retired", &[second])];
+    run(&mut s, "browser.visibility", json!({"items": retired_names, "visible": false}));
+    run(&mut s, "timeline.delete", json!({"feature": retired}));
+    let hidden = name(&s, "Visible", &[second]);
+    run(&mut s, "browser.visibility", json!({"items": [hidden], "visible": false}));
+    let before = s.visibility.clone();
+    for (command, params, source) in [
+        ("body.rename", json!({"body": "Visible", "name": "Retired"}), "Retired"),
+        ("edit.undo", json!({}), "Visible"),
+        ("edit.redo", json!({}), "Retired"),
+    ] {
+        run(&mut s, command, params);
+        assert!(s.body_visible(&name(&s, source, &[first])), "{command}: the first copy stays visible");
+        assert!(!s.body_visible(&name(&s, source, &[second])), "{command}: the second copy stays hidden");
+        if command == "edit.undo" {
+            assert_eq!(s.visibility, before);
+        } else {
+            assert_eq!(s.visibility.hidden_bodies, [name(&s, source, &[second])]);
+        }
+    }
+}
+
 /// The world name of a placed body as `Document::world_body_name` worked it out before
 /// `WorldNames` (each name scanning the whole design), kept to prove the two agree.
 fn world_name_by_scanning(doc: &crate::doc::Document, st: &crate::doc::ModelState, source: &str, component: u64, path: &[u64]) -> String {

@@ -82,66 +82,39 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             },
         );
-        setting::extrude_auto_to_object(app, ui);
-        let auto = setting::auto_operation(app, ui);
-        crate::scenario::publish_handle("prefs:auto_operation", auto.rect.center());
-        ui_kit::text(ui, app.tr("prefs.auto_operation_note"), ui_kit::Text::Hint("auto_operation"));
-        setting::hide_origin(app, ui);
-        ui_kit::text(ui, app.tr("ui.hide_origin_note"), ui_kit::Text::Hint("hide_origin"));
     });
-    ui_kit::settings_section(ui, "joint_move", app.tr("joint_move.settings"), |ui| {
-        setting::assembly_move_handles(app, ui);
-        ui_kit::text(ui, app.tr("joint_move.legacy_hint"), ui_kit::Text::Hint("joint_move_legacy"));
-        ui_kit::settings_form(ui, t.space_24 * 7.0 + t.space_2, |ui| {
-            ui_kit::row(ui, app.tr("joint_move.coarse"), |ui| {
-                ui_kit::settings_number(ui, &mut app.preferences.joint_rotation_coarse, 0.001..=180.0, 0.1);
-            });
-            ui_kit::row(ui, app.tr("joint_move.fine"), |ui| {
-                ui_kit::settings_number(ui, &mut app.preferences.joint_rotation_fine, 0.001..=180.0, 0.01);
-            });
-        });
-        ui_kit::text(ui, app.tr("joint_move.precision"), ui_kit::Text::Hint("joint_move"));
-    });
-    // The Hole command's own settings, under its name.
-    ui_kit::settings_section(ui, "create_hole", crate::i18n::tr_label("Create Hole"), |ui| {
-        setting::hole_snaps(app, ui);
-        ui_kit::text(
-            ui,
-            crate::i18n::tr_label("A Single hole snaps to the middle of its face and to the centres of its round edges"),
-            ui_kit::Text::Hint("hole_snaps"),
-        );
-        setting::hole_moves(app, ui);
-        ui_kit::text(
-            ui,
-            crate::i18n::tr_label(
-                "A placed Single hole has a handle to drag it, and picking its face again moves the hole there instead of taking it out",
-            ),
-            ui_kit::Text::Hint("hole_moves"),
-        );
-    });
-    ui_kit::settings_section(ui, "placement", app.tr("prefs.placement"), |ui| {
-        setting::placement_handles(app, ui);
-    });
+    origin_plane_names(app, ui);
     ui_kit::settings_section(ui, "linked_designs", app.tr("prefs.linked_designs"), |ui| {
         setting::update_changed_links(app, ui);
         setting::double_click_components(app, ui);
         setting::insert_lists_open_designs(app, ui);
     });
-    // Where the files a design names may be: never a network location the user hasn't allowed.
-    ui_kit::settings_section(ui, "network_locations", app.tr("prefs.network_locations_section"), |ui| {
-        setting::network_locations(app, ui);
-        ui_kit::text(ui, app.tr("prefs.network_locations_note"), ui_kit::Text::Hint("network_locations"));
-        let mut remove = None;
-        for (i, host) in app.preferences.network_hosts.iter().enumerate() {
-            ui.horizontal(|ui| {
-                ui_kit::text(ui, &format!("\\\\{host}"), ui_kit::Text::Hint("network_host"));
-                if ui_kit::button(ui, app.tr("prefs.network_host_remove"), ui_kit::Button::Small).clicked() {
-                    remove = Some(i);
-                }
-            });
+}
+
+/// Origin plane names: each choice shows the three names it gives (`XY / XZ / YZ`), with a note
+/// that only the names shown change.
+fn origin_plane_names(app: &mut SolveApp, ui: &mut egui::Ui) {
+    ui_kit::settings_section(ui, "origin_plane_names", app.tr("prefs.origin_plane_names"), |ui| {
+        let choices: Vec<String> =
+            OriginPlaneNames::ALL.iter().map(|names| OriginPlaneNames::PLANES.map(|plane| names.label(plane)).join(" / ")).collect();
+        let options: Vec<&str> = choices.iter().map(String::as_str).collect();
+        let mut selected = OriginPlaneNames::ALL.iter().position(|names| *names == app.preferences.origin_plane_names).unwrap_or(0);
+        if ui_kit::settings_segments(ui, app.tr("prefs.origin_plane_names"), &mut selected, &options)
+            && let Some(names) = OriginPlaneNames::ALL.get(selected)
+        {
+            app.preferences.origin_plane_names = *names;
         }
-        if let Some(i) = remove.filter(|i| *i < app.preferences.network_hosts.len()) {
-            app.preferences.network_hosts.remove(i);
+        // Handles that don't depend on the language, by the choice's saved value.
+        for (choice, key) in choices.iter().zip(["xyz", "top_front_right"]) {
+            if let Some(at) = crate::scenario::handle_at(&format!("dialog:{}:{choice}", app.tr("prefs.origin_plane_names"))) {
+                crate::scenario::publish_handle(&format!("prefs:origin_plane_names:{key}"), at);
+            }
         }
+        let top = OriginPlaneNames::TopFrontRight;
+        let note =
+            crate::i18n::format("prefs.origin_plane_names_note", &[("top", top.label("XY")), ("front", top.label("XZ")), ("right", top.label("YZ"))]);
+        ui_kit::text(ui, &note, ui_kit::Text::Hint("origin_plane_names"));
+        setting::hide_origin(app, ui);
+        ui_kit::text(ui, app.tr("ui.hide_origin_note"), ui_kit::Text::Hint("hide_origin"));
     });
 }

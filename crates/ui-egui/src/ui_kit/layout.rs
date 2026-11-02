@@ -7,6 +7,15 @@ pub(super) const FORM: &str = "sc_dense_form";
 
 pub(super) const LABEL: &str = "sc_form_label";
 pub(super) const FIXED_LABEL: &str = "sc_fixed_label_width";
+pub(super) const GROW_LABEL: &str = "sc_grow_label_column";
+
+/// A form whose card widens so its widest label fits (#10620). Each pass the form publishes,
+/// under `key`, the width its label column needs beyond the design's 1.6x cap; the card's
+/// owner reads that before opening the card, so the card settles one frame later.
+/// Tokens: `form_label_width, font_label, dialog_label, space_4`.
+pub(super) fn scope_grow<R>(ui: &mut Ui, key: egui::Id, add: impl FnOnce(&mut Ui) -> R) -> R {
+    scope_inner(ui, Some(key), add)
+}
 
 /// A deliberate label grid for multi-column settings, inherited by the existing shared rows.
 pub(crate) fn settings_form<R>(ui: &mut Ui, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
@@ -17,7 +26,15 @@ pub(crate) fn settings_form<R>(ui: &mut Ui, label_width: f32, add: impl FnOnce(&
 /// Mark a form without global state: children inherit this tag through their UI stack.
 /// Inherited form styling and label-column identity. Tokens: `space_4/8, form_gap_y, control_height, font_label, accent, selected_bg, dialog_rule, control_fill/border/radius, text`.
 pub(crate) fn scope<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
-    ui.scope_builder(egui::UiBuilder::new().ui_stack_info(egui::UiStackInfo::default().with_tag(FORM)), |ui| {
+    scope_inner(ui, None, add)
+}
+
+fn scope_inner<R>(ui: &mut Ui, grow: Option<egui::Id>, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let mut info = egui::UiStackInfo::default().with_tag(FORM);
+    if let Some(key) = grow {
+        info = info.with_tag_value(GROW_LABEL, key);
+    }
+    ui.scope_builder(egui::UiBuilder::new().ui_stack_info(info), |ui| {
         let t = Tokens::get();
         ui.spacing_mut().item_spacing = vec2(t.space_4, t.form_gap_y);
         ui.spacing_mut().interact_size.y = row_height();
@@ -678,6 +695,15 @@ pub(crate) fn note_height(ui: &Ui, text: &str) -> f32 {
 }
 
 pub(crate) fn text(ui: &mut Ui, text: &str, style: Text<'_>) -> Response {
+    text_impl(ui, text, style, None)
+}
+
+/// One name-cell tooltip: the action hint, with the full name only if the cell clips it.
+pub(crate) fn name_cell_with_hint(ui: &mut Ui, name: &str, strong: bool, hint: &str) -> Response {
+    text_impl(ui, name, Text::NameCell(strong), Some(hint))
+}
+
+fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>) -> Response {
     if crate::prefs_search::querying(ui) {
         let heading = matches!(style, Text::Heading(_));
         if heading {
@@ -718,9 +744,16 @@ pub(crate) fn text(ui: &mut Ui, text: &str, style: Text<'_>) -> Response {
             vec2(dimension(ui.available_width()), row_height()),
             if matches!(style, Text::Value(_, _)) { egui::Sense::hover() } else { egui::Sense::click() },
         );
+        let tooltip = hover_hint.map(|hint| {
+            if ui.painter().layout_no_wrap(text.to_owned(), font.clone(), ink).size().x > rect.width() {
+                format!("{text}\n{hint}")
+            } else {
+                hint.to_owned()
+            }
+        });
         paint_text(ui, rect, text, font, ink, false);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
-        response.on_hover_text(text)
+        response.on_hover_text(tooltip.as_deref().unwrap_or(text))
     } else if matches!(style, Text::Error(_)) {
         egui::Frame::NONE
             .fill(t.form_error_fill)

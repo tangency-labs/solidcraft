@@ -117,6 +117,14 @@ pub static COMMANDS: &[CommandSpec] = &[
 
 const MAX_ITEMS: usize = 10_000;
 
+/// `prefix` and the first number from 1 that no name in `taken` has: a default name never repeats
+/// one in use, after a delete either, as joints' and the app's dialogs' default names (#9738).
+fn free_name<'a>(prefix: &str, taken: impl Iterator<Item = &'a str>) -> String {
+    let taken: BTreeSet<&str> = taken.collect();
+    let n = (1..=taken.len() + 1).find(|n| !taken.contains(format!("{prefix}{n}").as_str())).unwrap_or(1);
+    format!("{prefix}{n}")
+}
+
 fn occurrences(s: &Session, p: &Value, cmd: &str) -> Result<Vec<u64>> {
     let list = p.get("occurrences").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`occurrences` must list occurrences"))?;
     if list.len() > MAX_ITEMS {
@@ -496,7 +504,8 @@ fn new_set(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "too many contact sets"));
     }
     let id = s.doc_mut().allocate_id()?;
-    let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| format!("Contact Set{}", s.doc.assembly.contact_sets.len() + 1));
+    let name =
+        str_(p, "name").map(str::to_string).unwrap_or_else(|| free_name("Contact Set", s.doc.assembly.contact_sets.iter().map(|c| c.name.as_str())));
     let a = &mut s.doc_mut().assembly;
     a.contact_sets.push(ContactSet { id, name: name.clone(), occurrences: occ, suppressed: false });
     a.contact_enabled = true;
@@ -629,7 +638,7 @@ fn study(s: &mut Session, p: &Value) -> Result<Value> {
             }
             let m = MotionStudy {
                 id,
-                name: str_(p, "name").map(str::to_string).unwrap_or_else(|| format!("Motion Study{}", count + 1)),
+                name: str_(p, "name").map(str::to_string).unwrap_or_else(|| free_name("Motion Study", a.studies.iter().map(|m| m.name.as_str()))),
                 steps: steps.unwrap_or(100),
                 keys,
             };
@@ -1087,7 +1096,8 @@ fn explode_create(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "too many exploded views"));
     }
     let id = s.doc_mut().allocate_id()?;
-    let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| format!("Exploded View{}", s.doc.assembly.exploded.len() + 1));
+    let name =
+        str_(p, "name").map(str::to_string).unwrap_or_else(|| free_name("Exploded View", s.doc.assembly.exploded.iter().map(|v| v.name.as_str())));
     s.doc_mut().assembly.exploded.push(ExplodedView { id, name: name.clone(), moves: moves.clone() });
     Ok(json!({"view": id, "name": name, "moves": moves.iter().map(|(o, t)| json!({"occurrence": o, "translate": t})).collect::<Vec<_>>()}))
 }

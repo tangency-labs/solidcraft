@@ -6,6 +6,24 @@ use crate::*;
 
 mod mesh_convert;
 
+/// Counts the copies `Session::doc_mut` makes of a shared document.
+pub(crate) mod doc_copies {
+    use std::cell::Cell;
+
+    thread_local! {
+        static COUNT: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub fn record() {
+        COUNT.with(|c| c.set(c.get() + 1));
+    }
+
+    /// The count since the last call.
+    pub fn take() -> usize {
+        COUNT.with(|c| c.replace(0))
+    }
+}
+
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     match s.execute(id, &p) {
         Ok(v) => v,
@@ -871,8 +889,15 @@ fn hostile_params_never_panic() {
                     while let Some(&id) = ids.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
                         for v in hostile_values() {
                             for k in keys {
-                                if k == "path" && (id.starts_with("parameters.") || id == "timeline.export_script") {
-                                    continue; // parameter and script files: covered by their own tests (no stray files)
+                                if k == "path"
+                                    && (id.starts_with("parameters.")
+                                        || id == "timeline.export_script"
+                                        || matches!(
+                                            id,
+                                            "file.export_3mf" | "file.export_obj" | "file.export_step" | "file.export_stl" | "file.export_urdf"
+                                        ))
+                                {
+                                    continue; // parameter, script and export files: covered by their own tests (no stray files)
                                 }
                                 let mut s = Session::default();
                                 // A model with a sketch, a body and an active sketch, so most commands get far.
@@ -1106,7 +1131,8 @@ fn timeline_inspect_shows_what_timeline_edit_changes() {
     run(&mut s, "solid.extrude", json!({"distance": 10, "name": "Slab"}));
     run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 10]], "radius": 2, "name": "Round"}));
     let i = run(&mut s, "timeline.inspect", json!({"feature": "Slab"}));
-    assert_eq!(i["type"], "ExtrudeFeature", "{i}");
+    assert_eq!(i["type"], "extrude", "{i}");
+    assert_eq!(i["type_name"], "ExtrudeFeature", "{i}");
     assert_eq!(i["definition"]["extent"]["distance"], "10", "{i}");
     assert_eq!(i["definition"]["operation"], "new_body", "{i}");
     assert!(i["definition"].get("type").is_none() && i["definition"].get("param_names").is_none(), "{i}");
@@ -1618,6 +1644,23 @@ fn auto_extrude_starts_new_body_in_empty_component() {
 
 /// Measuring picked geometry: distance between faces, angle, edge length.
 #[test]
+fn measure_origin_planes_axes_and_points() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    let at = |p: [f64; 3]| json!({"type": "vertex", "body": "Body1", "point": p});
+    // A point 10 above the XY plane.
+    let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "plane", "name": "XY"}, at([5.0, 5.0, 10.0])]}));
+    assert!((r["distance_mm"].as_f64().unwrap() - 10.0).abs() < 1e-9, "{r}");
+    assert_eq!(r["from"], json!([5.0, 5.0, 0.0]));
+    // The point's distance from the Z axis.
+    let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "axis", "name": "Z"}, at([3.0, 4.0, 7.0])]}));
+    assert!((r["distance_mm"].as_f64().unwrap() - 5.0).abs() < 1e-9, "{r}");
+    // The XY plane and the Z axis meet: nothing between them.
+    let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "plane", "name": "XY"}, {"type": "axis", "name": "Z"}]}));
+    assert!(r["distance_mm"].as_f64().unwrap().abs() < 1e-9, "{r}");
+}
+
+#[test]
 fn measure_items() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
@@ -1688,8 +1731,10 @@ fn section_analysis() {
     assert_eq!(s.undo.len(), undo);
 }
 
-/// A section index finds the same cut segments, in the same order, as cutting every triangle:
-/// tilted and axis normals, cuts through vertices, at the ends and beyond the part.
+/// A section index finds the same cut segments, in the same order and to the bit, as cutting
+/// every triangle: one index for every normal (tilting a Section Analysis turns it every frame,
+/// #10373), axis and tilted, cuts through vertices, at the ends and beyond the part, and a
+/// triangle with a corner that is not a number.
 #[test]
 fn section_index_cuts_like_every_triangle() {
     let mut s = Session::default();
@@ -1697,18 +1742,30 @@ fn section_index_cuts_like_every_triangle() {
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 8, "operation": "join"}));
     let st = s.model.state();
     let m = st.bodies.first().unwrap().mesh();
-    assert!(m.triangles.len() > 64, "enough triangles for several slabs: {}", m.triangles.len());
-    for n in [Vec3::Z, -Vec3::Y, Vec3::new(1.0, 2.0, 3.0).normalized().unwrap(), Vec3::new(-0.3, 0.1, 0.9).normalized().unwrap()] {
-        let index = view::SectionIndex::new(&m, n);
-        let heights: Vec<f64> = m.positions.iter().map(|p| n.dot(*p)).collect();
-        let (lo, hi) = heights.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), h| (a.min(*h), b.max(*h)));
-        let mut cuts: Vec<f64> = (0..=40).map(|k| lo - 1.0 + (hi - lo + 2.0) * k as f64 / 40.0).collect();
-        cuts.extend(heights.iter().step_by(7).copied());
-        cuts.extend([lo, hi]);
-        for at in cuts {
-            let o = n * at;
-            let segments = view::section_segments(&m, o, n);
-            assert_eq!(index.segments(&m, o), segments, "{n:?} at {at}");
+    assert!(m.triangles.len() > 64, "enough triangles for several cells: {}", m.triangles.len());
+    let bits = |v: Vec<(Vec3, Vec3)>| v.iter().flat_map(|(a, b)| [a.x, a.y, a.z, b.x, b.y, b.z].map(f64::to_bits)).collect::<Vec<_>>();
+    let mut hostile = (*m).clone();
+    hostile.positions.push(Vec3::new(f64::NAN, 0.0, 0.0));
+    let nan = u32::try_from(hostile.positions.len() - 1).unwrap();
+    hostile.triangles.extend([[0, 1, nan], [0, 1, u32::MAX]]);
+    for m in [&*m, &hostile] {
+        let index = view::SectionIndex::new(m);
+        let mut normals = vec![Vec3::Z, -Vec3::Y, Vec3::new(1.0, 2.0, 3.0).normalized().unwrap(), Vec3::new(-0.3, 0.1, 0.9).normalized().unwrap()];
+        // A tilt drag: the normal turns a little every frame.
+        normals.extend((0..30).map(|k| {
+            let a = (5.0 + 3.0 * k as f64).to_radians();
+            Vec3::new(0.1, a.sin(), a.cos()).normalized().unwrap()
+        }));
+        for n in normals {
+            let heights: Vec<f64> = m.positions.iter().map(|p| n.dot(*p)).filter(|h| h.is_finite()).collect();
+            let (lo, hi) = heights.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), h| (a.min(*h), b.max(*h)));
+            let mut cuts: Vec<f64> = (0..=40).map(|k| lo - 1.0 + (hi - lo + 2.0) * k as f64 / 40.0).collect();
+            cuts.extend(heights.iter().step_by(7).copied());
+            cuts.extend([lo, hi]);
+            for at in cuts {
+                let o = n * at;
+                assert_eq!(bits(index.segments(m, o, n)), bits(view::section_segments(m, o, n)), "{n:?} at {at}");
+            }
         }
     }
 }
@@ -2836,6 +2893,60 @@ fn press_pull_on_curved_faces() {
     assert!(err.contains("offset"), "{err}");
 }
 
+/// #4986: Press Pull on a chamfer's flat face changes the chamfer's distance, as on a fillet's
+/// face it changes the radius, rather than extruding the face.
+#[test]
+fn press_pull_on_a_chamfer_face_edits_the_chamfer() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[40, 0, 10]], "distance": 3, "name": "Bevel"}));
+    let cut = |d: f64| d * d / 2.0 * 20.0;
+    assert!(rel(volume(&mut s), 24000.0 - cut(3.0)) < 1e-6);
+    // The chamfer's face runs from (37, 0) to (40, 3); its middle.
+    let out = run(&mut s, "solid.press_pull", json!({"face": [38.5, 1.5, 10], "distance": 2}));
+    assert_eq!(out["edited"], "Bevel", "{out}");
+    assert_eq!(s.doc.features.len(), 2, "no extrude added");
+    assert!(rel(volume(&mut s), 24000.0 - cut(5.0)) < 1e-6, "{}", volume(&mut s));
+    // A point on the flat front face 0.02 mm from its edge with the chamfer (which now runs from
+    // (35, 0) to (40, 5)) is the front face's: it is extruded, the chamfer is left alone.
+    let mut t = Session::default();
+    run(&mut t, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut t, "solid.chamfer", json!({"edges": [[40, 0, 10]], "distance": 3, "name": "Bevel"}));
+    let out = run(&mut t, "solid.press_pull", json!({"face": [36.98, 0, 10], "distance": 1}));
+    assert!(out.get("edited").is_none(), "{out}");
+    assert!(matches!(t.doc.features.last().map(|f| &f.kind), Some(solidcraft_doc::FeatureKind::Extrude { .. })), "an extrude added: {out}");
+    assert!(
+        matches!(&t.doc.features[1].kind, solidcraft_doc::FeatureKind::Chamfer { distance, .. } if distance == "3"),
+        "{:?}",
+        t.doc.features[1].kind
+    );
+    // Too far in (past zero) or too far out: an error, the chamfer as it was.
+    let on = [39.0, 1.0, 10.0];
+    for d in [-10.0, 1e9] {
+        assert!(s.execute("solid.press_pull", &json!({"face": on, "distance": d})).is_err(), "{d}");
+        assert!(rel(volume(&mut s), 24000.0 - cut(5.0)) < 1e-6, "{d}: {}", volume(&mut s));
+    }
+    // An unequal chamfer's first distance changes and its second stays; an angle chamfer keeps
+    // its angle.
+    // Each chamfer's face crosses the corner's bisector at legs a, b: (40 - u, u), u = ab / (a + b).
+    let tan30 = (PI / 6.0).tan();
+    for (extra, u) in [(json!({"distance2": 4}), 8.0 / 6.0), (json!({"angle": "30 deg"}), 2.0 * tan30 / (1.0 + tan30))] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+        let mut p = json!({"edges": [[40, 0, 10]], "distance": 2, "name": "Bevel"});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        run(&mut s, "solid.chamfer", p);
+        let v0 = volume(&mut s);
+        let out = run(&mut s, "solid.press_pull", json!({"face": [40.0 - u, u, 10.0], "distance": 1}));
+        assert_eq!(out["edited"], "Bevel", "{extra}: {out}");
+        assert_eq!(s.doc.features.len(), 2, "{extra}");
+        let Some(solidcraft_doc::FeatureKind::Chamfer { distance2, angle, .. }) = s.doc.features.last().map(|f| &f.kind) else { panic!("{extra}") };
+        assert_eq!(distance2.as_ref().map(|e| e.to_string()), extra.get("distance2").map(|v| v.to_string()), "{extra}");
+        assert_eq!(angle.as_ref().map(|e| e.to_string()), extra.get("angle").and_then(|v| v.as_str()).map(str::to_string), "{extra}");
+        assert!(volume(&mut s) < v0 - 1.0, "{extra}: a bigger chamfer cuts more");
+    }
+}
+
 /// A cut in one component leaves other components' bodies alone unless they are named as
 /// participants; auto join/cut looks at the active component only.
 #[test]
@@ -3435,6 +3546,48 @@ fn computed_import_preserves_file_and_earlier_undo_history() {
     assert!(!s.is_dirty());
     run(&mut s, "edit.undo", json!({}));
     assert!(s.model.state().bodies.is_empty());
+}
+
+/// The unsaved-changes answer is worked out once per pair of documents and revision, and stays
+/// right through every way the design changes: an edit in place (`doc_mut`, which stays in
+/// place), one that bypasses it, a new document equal to the saved one, Save, a change of what
+/// is hidden, and undo back to the saved design. Each answer is checked against the plain
+/// comparison it stands for.
+#[test]
+fn the_unsaved_changes_answer_follows_every_change() {
+    let plain = |s: &Session| (!std::sync::Arc::ptr_eq(&s.doc, &s.saved) && *s.doc != *s.saved) || s.visibility != s.saved_visibility;
+    let check = |s: &Session, want: bool, why: &str| {
+        for _ in 0..2 {
+            assert_eq!(s.is_dirty(), want, "{why}");
+            assert_eq!(plain(s), want, "{why}: the plain comparison");
+        }
+    };
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    s.mark_saved();
+    check(&s, false, "saved");
+    // An edit in place: the cached answer holds the document, yet the edit is not a copy.
+    s.doc = std::sync::Arc::new((*s.doc).clone());
+    check(&s, false, "an equal copy of the saved design");
+    let at = std::sync::Arc::as_ptr(&s.doc);
+    s.doc_mut().name = "Renamed".into();
+    assert_eq!(std::sync::Arc::as_ptr(&s.doc), at, "doc_mut edits in place");
+    check(&s, true, "renamed in place, same revision");
+    s.doc_mut().name = s.saved.name.clone();
+    check(&s, false, "named back in place");
+    // An edit that goes around doc_mut while the answer holds the document copies it.
+    std::sync::Arc::make_mut(&mut s.doc).name = "Elsewhere".into();
+    check(&s, true, "edited past doc_mut");
+    s.mark_saved();
+    check(&s, false, "saved again");
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0]}));
+    check(&s, true, "a command");
+    run(&mut s, "edit.undo", json!({}));
+    check(&s, false, "undone back to the saved design");
+    s.visibility.hidden_bodies.push("Body1".into());
+    check(&s, true, "a body hidden");
+    s.visibility.hidden_bodies.clear();
+    check(&s, false, "shown again");
 }
 
 /// Commands evaluated ahead (off the window thread) and then run for real take what was
@@ -4439,10 +4592,10 @@ fn renaming_a_body_later_features_change_evaluates_nothing() {
     assert_eq!(s.evaluations, 0, "nor do its undo and redo");
 }
 
-/// A body whose name later bodies' names are worked out from (`X` patterned into `X (2)`) is still
-/// renamed by evaluating the design, so the copies follow it as they would on opening it.
+/// A body whose name later bodies' names are worked out from (`X` patterned into `X (2)`) keeps
+/// the same copies and face names as opening the renamed design.
 #[test]
-fn renaming_a_body_whose_copies_take_its_name_evaluates_the_design() {
+fn renaming_a_body_keeps_its_copies_consistent_with_rebuilding() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "X"}));
     run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["X"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20}));
@@ -4452,6 +4605,9 @@ fn renaming_a_body_whose_copies_take_its_name_evaluates_the_design() {
     let mut fresh = Session::new((*s.doc).clone());
     fresh.refresh();
     assert_eq!(names(&fresh), names(&s));
+    for (a, b) in fresh.model.state().bodies.iter().zip(&s.model.state().bodies) {
+        assert_eq!(solidcraft_doc::naming::face_names(a), solidcraft_doc::naming::face_names(b));
+    }
 }
 
 /// #3044: on a design with thousands of bodies the cheap commands stay cheap: showing, hiding,

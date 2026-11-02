@@ -20,7 +20,7 @@ use crate::viewport::{Proj, projected_polygon};
 /// direction a growing value points.
 pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
     let st = app.session.world_state();
-    let first = d.inputs.first()?.items.first()?;
+    let first = &anchor_item(app, d)?;
     let (at, normal) = match first {
         Sel::Profile { sketch, index } => {
             let ss = st.sketch(*sketch)?;
@@ -250,12 +250,44 @@ pub(crate) fn blend_grow_dir(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
     Some(if edge_concave(m, index, p).unwrap_or(false) { n } else { -n })
 }
 
+/// The pick the dialog's arrow sits on: the first, or for a fillet or chamfer reopened from a
+/// click on one of its faces (Press Pull), its edge nearest the click, at the point on it nearest
+/// the click (#4986).
+fn anchor_item(app: &SolveApp, d: &Dialog) -> Option<Sel> {
+    let items = &d.inputs.first()?.items;
+    let first = items.first()?.clone();
+    let (Some(hint), Kind::Fillet { .. }) = (d.anchor_hint, &d.kind) else { return Some(first) };
+    let st = app.session.world_state();
+    let nearest = items
+        .iter()
+        .filter_map(|s| {
+            let Sel::Edge { body, index, .. } = s else { return None };
+            let at = nearest_on_polyline(st.body(body)?.mesh().edges.get(*index)?, hint)?;
+            Some((at.dist(hint), Sel::Edge { body: body.clone(), index: *index, point: at }))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0));
+    Some(nearest.map_or(first, |(_, s)| s))
+}
+
+/// The point of the polyline `pts` nearest `p`.
+fn nearest_on_polyline(pts: &[Vec3], p: Vec3) -> Option<Vec3> {
+    let on = |a: Vec3, b: Vec3| {
+        let ab = b - a;
+        let len2 = ab.dot(ab);
+        a + ab * if len2 > 0.0 { ((p - a).dot(ab) / len2).clamp(0.0, 1.0) } else { 0.0 }
+    };
+    pts.windows(2)
+        .filter_map(|w| if let [a, b] = w { Some(on(*a, *b)) } else { None })
+        .min_by(|x, y| x.dist(p).total_cmp(&y.dist(p)))
+        .or_else(|| pts.first().copied())
+}
+
 /// The directions Distance 1 and Distance 2 of a chamfer of two distances run from its edge at
 /// `at`: along the face that faces up most, or the other one with Flip, and along the remaining
 /// face (the kernel's `chamfer_tool_sides` picks them the same way). None for any other dialog.
 pub(crate) fn chamfer_face_dirs(app: &SolveApp, d: &Dialog, at: Vec3) -> Option<(Vec3, Vec3)> {
     let Kind::Fillet { chamfer: true, ctype: 1, flip, .. } = &d.kind else { return None };
-    let Some(Sel::Edge { body, index, .. }) = d.inputs.first()?.items.first() else { return None };
+    let Some(Sel::Edge { body, index, .. }) = &anchor_item(app, d) else { return None };
     let st = app.session.world_state();
     let mesh = st.body(body)?.mesh();
     let sides = edge_sides(&mesh, *index, at)?;
@@ -614,7 +646,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     let mut dir = dir;
     // Extrude taper: a handle beside the arrow tip; dragging it sideways tilts the walls.
     let cam_right = app.cam.basis().0;
-    if let (Kind::Extrude { direction: 0 | 1, distance, taper, taper_present, to_offset, .. }, Some(n)) = (&mut d.kind, dir) {
+    if let (Kind::Extrude { direction: 0 | 1, distance, taper, taper_present, to_offset, smart, .. }, Some(n)) = (&mut d.kind, dir) {
         let n = n * sign;
         let span =
             to_span.map(|span| span.abs() + crate::length_input::eval(&app.session.doc, to_offset, ValueKind::Length).unwrap_or(0.0)).or(all_span);
@@ -638,7 +670,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
                     _ => None,
                 })
                 .collect();
-            let limits = taper_limits(&regions, l.abs());
+            let limits = taper_limits(taper_radii_kept(&mut smart.taper_radii, &regions), l.abs());
             taper_handle(ui, painter, proj, base - e * (40.0 * px), n * l, -e, ang, limits, taper);
             if *taper != before {
                 *taper_present = true;
@@ -1511,19 +1543,57 @@ fn measure_components(
     }
 }
 
-/// The tapers (degrees, least and most) a drag of the taper handle may reach for `regions`
-/// extruded `height` (#1602): going in, the sides close the material where they have moved its
-/// inradius; going out, they close the smallest hole. Each stops just short, so the drag ends at
-/// the largest taper that builds instead of one that fails. A typed angle is not limited.
-pub(crate) fn taper_limits(regions: &[&solidcraft_engine::geom::Region2], height: f64) -> (f64, f64) {
+/// The tapers (degrees, least and most) a drag of the taper handle may reach for profiles of
+/// `radii` ([`taper_radii`]) extruded `height` (#1602): going in, the sides close the material
+/// where they have moved its inradius; going out, they close the smallest hole. Each stops just
+/// short, so the drag ends at the largest taper that builds instead of one that fails. A typed
+/// angle is not limited.
+pub(crate) fn taper_limits((inward, outward): (f64, f64), height: f64) -> (f64, f64) {
     const MAX: f64 = 89.0;
-    if !(height > 1e-9) || regions.is_empty() {
+    if !(height > 1e-9) {
         return (-MAX, MAX);
     }
     let at = |r: f64| (0.99 * r / height).atan().to_degrees().min(MAX);
+    (if inward.is_finite() { -at(inward) } else { -MAX }, if outward.is_finite() { at(outward) } else { MAX })
+}
+
+/// The smallest inradius of `regions` and of their holes (infinite for none), which
+/// [`taper_limits`] turns into angles. A grid search over every side of every loop, so the
+/// extrude window keeps it while its profiles stay the same ([`taper_radii_kept`]).
+pub(crate) fn taper_radii(regions: &[&solidcraft_engine::geom::Region2]) -> (f64, f64) {
+    #[cfg(test)]
+    TAPER_RADII_WORKED_OUT.with(|n| n.set(n.get() + 1));
     let inward = regions.iter().map(|r| r.inradius(1e-3)).fold(f64::INFINITY, f64::min);
     let outward = regions.iter().flat_map(|r| &r.holes).map(|h| h.inradius(1e-3)).fold(f64::INFINITY, f64::min);
-    (if inward.is_finite() { -at(inward) } else { -MAX }, if outward.is_finite() { at(outward) } else { MAX })
+    (inward, outward)
+}
+
+/// [`taper_radii`] of `regions`, worked out again only when they differ from the ones `kept`
+/// holds: the extrude window draws its taper handle every frame, and only the height changes.
+fn taper_radii_kept(
+    kept: &mut Option<(Vec<solidcraft_engine::geom::Region2>, (f64, f64))>,
+    regions: &[&solidcraft_engine::geom::Region2],
+) -> (f64, f64) {
+    if let Some((was, radii)) = kept
+        && was.len() == regions.len()
+        && was.iter().zip(regions).all(|(a, b)| a == *b)
+    {
+        return *radii;
+    }
+    let radii = taper_radii(regions);
+    *kept = Some((regions.iter().map(|r| (*r).clone()).collect(), radii));
+    radii
+}
+
+#[cfg(test)]
+thread_local! {
+    static TAPER_RADII_WORKED_OUT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How often the taper handle's radii were worked out on this thread.
+#[cfg(test)]
+pub(crate) fn taper_radii_worked_out() -> usize {
+    TAPER_RADII_WORKED_OUT.with(std::cell::Cell::get)
 }
 
 /// The taper handle: a line from `foot` along the extrude (`span`) leaning by `angle` towards
@@ -1792,7 +1862,9 @@ fn revolve_display_extent(app: &SolveApp, d: &Dialog, axis: (Vec3, Vec3)) -> Opt
             .ok()?;
         (angle, other)
     };
-    solidcraft_engine::doc::revolve_extent_with_convention(
+    // The solid refuses 0° and a sweep past a full turn, and the dialog says so. The handle
+    // still uses that boundary, so the grab point stays and the angle can be dragged back.
+    solidcraft_engine::doc::revolve_extent_for_handle(
         &state,
         &plane,
         &regions,
@@ -1924,6 +1996,19 @@ fn arrow(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The arrow's point on a picked edge: one point, a zero-length piece, a click past the end.
+    #[test]
+    fn nearest_on_polyline_handles_short_edges_and_clicks_past_the_end() {
+        let p = |x: f64, y: f64| Vec3::new(x, y, 0.0);
+        assert_eq!(nearest_on_polyline(&[], p(1.0, 1.0)), None);
+        assert_eq!(nearest_on_polyline(&[p(2.0, 3.0)], p(9.0, 9.0)), Some(p(2.0, 3.0)));
+        assert_eq!(nearest_on_polyline(&[p(2.0, 3.0), p(2.0, 3.0)], p(9.0, 9.0)), Some(p(2.0, 3.0)));
+        let edge = [p(0.0, 0.0), p(0.0, 0.0), p(10.0, 0.0)];
+        assert_eq!(nearest_on_polyline(&edge, p(4.0, 2.0)), Some(p(4.0, 0.0)));
+        assert_eq!(nearest_on_polyline(&edge, p(15.0, 1.0)), Some(p(10.0, 0.0)));
+        assert_eq!(nearest_on_polyline(&edge, p(-3.0, -1.0)), Some(p(0.0, 0.0)));
+    }
 
     #[test]
     fn offset_plane_preview_stays_within_its_square() {
@@ -2071,7 +2156,7 @@ mod tests {
 
 #[cfg(test)]
 mod taper_limit_tests {
-    use super::taper_limits;
+    use super::{taper_limits, taper_radii};
     use solidcraft_engine::geom::{Loop2, Region2, Vec2};
 
     /// #1602: a drag stops just short of the taper that closes the profile, either way.
@@ -2084,16 +2169,16 @@ mod taper_limit_tests {
             outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 4.0), Vec2::new(0.0, 4.0)]),
             holes: Vec::new(),
         };
-        let (lo, hi) = taper_limits(&[&rect], 26.0);
+        let (lo, hi) = taper_limits(taper_radii(&[&rect]), 26.0);
         assert!(close(lo, -deg(2.0, 26.0)) && hi == 89.0, "{lo} {hi}");
         // A ring 10 to 6, 10 high: in, its 4 mm wall; out, its hole of radius 6.
         let ring = Region2 { outer: Loop2::circle(Vec2::ZERO, 10.0), holes: vec![Loop2::circle(Vec2::ZERO, 6.0).reversed()] };
-        let (lo, hi) = taper_limits(&[&ring], 10.0);
+        let (lo, hi) = taper_limits(taper_radii(&[&ring]), 10.0);
         assert!(close(lo, -deg(2.0, 10.0)) && close(hi, deg(6.0, 10.0)), "{lo} {hi}");
         // The tightest of several profiles; no profile or no height, no limit.
-        let (lo, _) = taper_limits(&[&ring, &rect], 10.0);
+        let (lo, _) = taper_limits(taper_radii(&[&ring, &rect]), 10.0);
         assert!(close(lo, -deg(2.0, 10.0)));
-        assert_eq!(taper_limits(&[], 10.0), (-89.0, 89.0));
-        assert_eq!(taper_limits(&[&rect], 0.0), (-89.0, 89.0));
+        assert_eq!(taper_limits(taper_radii(&[]), 10.0), (-89.0, 89.0));
+        assert_eq!(taper_limits(taper_radii(&[&rect]), 0.0), (-89.0, 89.0));
     }
 }

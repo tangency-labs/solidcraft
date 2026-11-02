@@ -250,6 +250,33 @@ fn bodies_and_a_component_copied_together_are_one_undo_step() {
     assert_eq!(s.doc, before, "one undo removes both copies");
 }
 
+/// A copying move of a component and of bodies in differently turned frames (a block in the root
+/// and a screw inserted lying down) is one move: the component's copy turns with it, the bodies
+/// split into one feature per frame as a move of them alone does (#9660), in one undo step.
+#[test]
+fn a_copied_component_and_bodies_in_differently_turned_frames_are_one_undo_step() {
+    let mut s = Session::default();
+    let (_, occurrence) = part_with_cube(&mut s);
+    run(&mut s, "solid.box", json!({"length": 30, "width": 30, "height": 10, "center": [0, 0, 5], "body_name": "Block"}));
+    run(
+        &mut s,
+        "parts.insert",
+        json!({"family": "socket_head_cap_screw", "size": "M3", "length": 12, "point": [0, 0, 10], "direction": [1, 0, 0], "name": "screw"}),
+    );
+    let before = s.doc.clone();
+    let reply = run(
+        &mut s,
+        "solid.move",
+        json!({"bodies": ["Block", "Body1"], "occurrences": [[occurrence]], "copy": true, "axis": [0, 0, 1], "angle": "90 deg"}),
+    );
+    assert_eq!(reply["features"].as_array().map(Vec::len), Some(2), "one Move feature per frame");
+    let copy = reply["occurrences"][0].as_u64().expect("the move reports the copy it made");
+    assert!(world_min(&s, &[copy]).dist(Vec3::new(-20.0, 0.0, 0.0)) < 1e-6, "the copy turns with the move");
+    assert!(world_min(&s, &[occurrence]).dist(Vec3::ZERO) < 1e-6, "the original does not turn");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc, before, "one undo removes the copies of the component and of the bodies");
+}
+
 #[test]
 fn a_component_picked_with_its_parent_is_copied_once_inside_the_parents_copy() {
     let mut s = Session::default();

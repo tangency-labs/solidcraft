@@ -24,6 +24,98 @@ fn pointer_on_hover(ui: &Ui, response: &Response) {
     }
 }
 
+#[derive(Clone, Copy)]
+enum ButtonTone {
+    Normal,
+    Primary,
+    Danger,
+    Selected,
+    Ghost,
+}
+
+struct ButtonAppearance {
+    fill: egui::Color32,
+    ink: egui::Color32,
+    stroke: egui::Stroke,
+}
+
+/// Use the theme's hover/selection surfaces for secondary actions. Accent actions retain their
+/// colour, with shades mixed from theme tokens rather than a separate hard-coded palette.
+fn button_appearance(ui: &Ui, response: Option<&Response>, tone: ButtonTone) -> ButtonAppearance {
+    let t = Tokens::get();
+    let enabled = ui.is_enabled();
+    let hovered = enabled && response.is_some_and(Response::hovered);
+    let focused = enabled && response.is_some_and(Response::has_focus);
+    let pressed = enabled
+        && response.is_some_and(|r| {
+            (r.is_pointer_button_down_on() && r.contains_pointer())
+                || (r.has_focus() && ui.input(|i| i.key_down(egui::Key::Space) || i.key_down(egui::Key::Enter)))
+        });
+    let bevel = t.borders.bevel.is_some();
+    let accented = matches!(tone, ButtonTone::Danger) || (!bevel && matches!(tone, ButtonTone::Primary | ButtonTone::Selected));
+    let (mut fill, mut ink) = match tone {
+        ButtonTone::Primary | ButtonTone::Selected if bevel => (t.control_fill, t.form_ink),
+        ButtonTone::Primary => (t.form_primary_fill, t.on_accent),
+        ButtonTone::Danger => (t.form_error, t.on_accent),
+        ButtonTone::Selected => selected_button_palette(&t),
+        ButtonTone::Normal | ButtonTone::Ghost => (t.control_fill, t.form_ink),
+    };
+    if enabled {
+        if accented {
+            let amount = if pressed {
+                0.24
+            } else if hovered {
+                0.12
+            } else {
+                0.0
+            };
+            fill = fill.lerp_to_gamma(t.form_ink, amount);
+        } else if pressed {
+            (fill, ink) = (t.selected_bg, t.selected_ink);
+            // Some built-in themes share their hover and selection colours.
+            if fill == t.hover || fill == t.control_fill {
+                fill = fill.lerp_to_gamma(t.form_ink, 0.24);
+            }
+        } else if hovered {
+            fill = if t.hover == t.control_fill { t.hover.lerp_to_gamma(t.form_ink, 0.12) } else { t.hover };
+        }
+        if matches!(tone, ButtonTone::Ghost) && (hovered || pressed || focused) {
+            ink = if pressed { t.form_primary.lerp_to_gamma(t.form_ink, 0.24) } else { t.form_primary };
+        } else if crate::theme::contrast_ratio(ink, fill) < 4.5 {
+            // Custom themes can use a light accent with light on-accent text. Select a readable
+            // foreground from that same theme for each interaction shade.
+            ink = [t.form_ink, t.on_accent, t.tab_on_fill_dark].into_iter().fold(ink, |best, candidate| {
+                if crate::theme::contrast_ratio(candidate, fill) > crate::theme::contrast_ratio(best, fill) { candidate } else { best }
+            });
+        }
+    }
+    if !enabled {
+        ink = t.form_dim;
+    }
+    let stroke = if focused || hovered || pressed || matches!(tone, ButtonTone::Selected) {
+        t.control_border_stroke(t.form_primary)
+    } else if matches!(tone, ButtonTone::Primary | ButtonTone::Danger) {
+        t.control_border_stroke(fill)
+    } else {
+        t.control_border_stroke(t.control_border)
+    };
+    ButtonAppearance { fill, ink, stroke }
+}
+
+fn styled_button(ui: &Ui, label: egui::WidgetText, tone: ButtonTone) -> egui::Button<'static> {
+    // Match egui's own Button lookup: its previous rectangle is hit-tested with this frame's
+    // input before allocation. No extra UI scope or widget changes the button's identity.
+    let response = ui.ctx().read_response(ui.next_auto_id());
+    let mut appearance = button_appearance(ui, response.as_ref(), tone);
+    if Tokens::get().borders.bevel.is_none() && !matches!(tone, ButtonTone::Selected) {
+        // Native button padding already accounts for this state's border. Preserve its width
+        // when changing the colour, or buttons outside a form grow and make toast actions wrap.
+        let state = response.as_ref().map(Response::widget_state).unwrap_or_default();
+        appearance.stroke.width = ui.style().button_style(&Default::default(), state).frame.stroke.width;
+    }
+    egui::Button::new(label.color(appearance.ink)).fill(appearance.fill).stroke(appearance.stroke)
+}
+
 /// Icon action inside an existing rectangle. Tokens: `form_icon_inset, text, text_dim; icon palette`.
 pub(crate) fn icon_button_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str) -> Response {
     icon_button_colored(ui, rect, icon, label, None)
@@ -182,17 +274,25 @@ pub(super) fn footer_with_left(
     ui.scope_builder(egui::UiBuilder::new().max_rect(left_rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
         if let Some(label) = apply_label.filter(|_| confirm) {
             let marked = selected == Some(Action::Apply);
-            let mut button =
-                egui::Button::new(crate::i18n::tr_label(label)).frame(secondary_left).selected(marked).min_size(vec2(0.0, t.form_button_height));
-            if secondary_left {
-                ui.spacing_mut().button_padding = vec2(t.space_12, 0.0);
-                button = button
-                    .fill(if marked { t.selected_bg } else { t.control_fill })
-                    .stroke(egui::Stroke::new(1.0, if marked { t.form_primary } else { t.control_border }))
-                    .corner_radius(t.control_radius);
-            }
+            let tone = if !secondary_left {
+                ButtonTone::Ghost
+            } else if marked {
+                ButtonTone::Selected
+            } else {
+                ButtonTone::Normal
+            };
             // A confirmation's third choice (Don't Save, Keep) never waited for OK's inputs.
-            let response = ui.add_enabled(!nothing_to_apply, button);
+            let response = ui.add_enabled(!nothing_to_apply, |ui: &mut Ui| {
+                let mut button = styled_button(ui, crate::i18n::tr_label(label).into(), tone)
+                    .frame(secondary_left)
+                    .selected(marked)
+                    .min_size(vec2(0.0, t.form_button_height));
+                if secondary_left {
+                    ui.spacing_mut().button_padding = vec2(t.space_12, 0.0);
+                    button = button.corner_radius(t.control_radius);
+                }
+                ui.add(button)
+            });
             pointer_on_hover(ui, &response);
             scenario::publish_target("dialog:apply", response.rect);
             scenario::publish_handle(&format!("dialog:{label}"), response.rect.center());
@@ -217,28 +317,12 @@ struct ActionLook {
     ok_enabled: bool,
     apply_enabled: bool,
     selected: Option<Action>,
-    primary_fill: egui::Color32,
-    primary_ink: egui::Color32,
+    danger: bool,
 }
 
 impl ActionLook {
     fn new(ok_enabled: bool, apply_enabled: bool, selected: Option<Action>, danger: bool) -> Self {
-        let t = Tokens::get();
-        let primary_fill = if t.borders.bevel.is_some() && !danger {
-            t.control_fill
-        } else if danger {
-            t.form_error
-        } else {
-            t.form_primary_fill
-        };
-        let primary_ink = if t.borders.bevel.is_some() && !danger {
-            t.form_ink
-        } else if danger && crate::theme::contrast_ratio(t.on_accent, primary_fill) < 4.5 {
-            t.tab_on_fill_dark
-        } else {
-            t.on_accent
-        };
-        Self { ok_enabled, apply_enabled, selected, primary_fill, primary_ink }
+        Self { ok_enabled, apply_enabled, selected, danger }
     }
 
     /// Cancel always works; OK and Apply need valid inputs, and Apply also something to apply.
@@ -265,35 +349,24 @@ fn action_button(ui: &mut Ui, label: &str, kind: Action, look: &ActionLook, padd
     let primary = look.primary(kind);
     let live = look.live(kind);
     ui.spacing_mut().button_padding = vec2(padding, 0.0);
-    let text = RichText::new(crate::i18n::tr_label(label)).size(t.font_label).color(if primary && ok_enabled {
-        look.primary_ink
-    } else if primary || !live {
-        t.form_dim
+    let text = RichText::new(crate::i18n::tr_label(label)).size(t.font_label);
+    let tone = if primary && ok_enabled {
+        if look.danger { ButtonTone::Danger } else { ButtonTone::Primary }
+    } else if marked {
+        ButtonTone::Selected
     } else {
-        t.form_ink
+        ButtonTone::Normal
+    };
+    // Style after add_enabled sets the state, preserving the native button's ID and layout.
+    let response = ui.add_enabled(live, |ui: &mut Ui| {
+        ui.add(
+            styled_button(ui, if primary && ok_enabled { text.bold_face().into() } else { text.into() }, tone)
+                .selected(marked && !primary)
+                .wrap_mode(egui::TextWrapMode::Extend)
+                .corner_radius(t.control_radius)
+                .min_size(vec2(min_width, t.form_button_height)),
+        )
     });
-    let response = ui.add_enabled(
-        live,
-        egui::Button::new(if primary && ok_enabled { text.bold_face() } else { text })
-            .selected(marked && !primary)
-            .fill(if primary && ok_enabled {
-                look.primary_fill
-            } else if marked {
-                t.selected_bg
-            } else {
-                t.control_fill
-            })
-            .stroke(if primary && ok_enabled {
-                egui::Stroke::NONE
-            } else if marked && !primary {
-                egui::Stroke::new(1.0, t.form_primary)
-            } else {
-                t.control_border_stroke(t.control_border)
-            })
-            .wrap_mode(egui::TextWrapMode::Extend)
-            .corner_radius(t.control_radius)
-            .min_size(vec2(min_width, t.form_button_height)),
-    );
     t.button_bevel(ui, &response, false);
     pointer_on_hover(ui, &response);
     let key = match kind {
@@ -474,24 +547,16 @@ pub(crate) fn native_button_focus(ui: &Ui, response: &Response, rect: egui::Rect
     egui::Shape::rect_stroke(rect, Tokens::get().radius_sm, visuals.bg_stroke, egui::StrokeKind::Inside)
 }
 
-fn button_widget(label: egui::WidgetText, options: Button) -> egui::Button<'static> {
-    let t = Tokens::get();
-    if t.borders.bevel.is_some() && !matches!(options, Button::Ghost) {
-        let button = egui::Button::new(label.color(t.form_ink)).fill(t.control_fill).stroke(t.control_border_stroke(t.control_border));
-        return if matches!(options, Button::Small | Button::SmallSelected) { button.small() } else { button };
-    }
-    match options {
-        Button::Small => egui::Button::new(label).small(),
-        Button::Primary => {
-            let ink = if crate::theme::contrast_ratio(t.on_accent, t.form_primary_fill) >= 4.5 { t.on_accent } else { t.tab_on_fill_dark };
-            egui::Button::new(label.color(ink)).fill(t.form_primary_fill)
-        }
-        Button::Ghost => egui::Button::new(label).frame(false),
-        Button::SmallSelected => {
-            let (fill, ink) = selected_button_palette(&t);
-            egui::Button::new(label.color(ink)).small().fill(fill).stroke(egui::Stroke::new(1.0, t.form_primary))
-        }
-        _ => egui::Button::new(label),
+fn button_widget(label: egui::WidgetText, options: Button) -> impl egui::Widget {
+    move |ui: &mut Ui| {
+        let widget = match options {
+            Button::Small => styled_button(ui, label, ButtonTone::Normal).small(),
+            Button::Primary => styled_button(ui, label, ButtonTone::Primary),
+            Button::Ghost => styled_button(ui, label, ButtonTone::Ghost).frame(false),
+            Button::SmallSelected => styled_button(ui, label, ButtonTone::Selected).small(),
+            _ => styled_button(ui, label, ButtonTone::Normal),
+        };
+        ui.add(widget)
     }
 }
 
@@ -552,15 +617,11 @@ pub(crate) fn primary_button(ui: &mut Ui, label: &str) -> Response {
 /// `form_primary, on_accent, form_button_height, font_label, control_radius, space_6/10`.
 pub(crate) fn wide_primary_button(ui: &mut Ui, label: &str) -> Response {
     let t = Tokens::get();
-    let bevel = t.borders.bevel.is_some();
-    let text = RichText::new(crate::i18n::tr_label(label)).size(t.font_label).color(if bevel { t.form_ink } else { t.on_accent });
+    let text = RichText::new(crate::i18n::tr_label(label)).size(t.font_label);
     let response = egui::Frame::NONE
         .inner_margin(egui::Margin::symmetric(t.space_10 as i8, t.space_6 as i8))
         .show(ui, |ui| {
-            let button = egui::Button::new(crate::fonts::RichTextExt::bold_face(text))
-                .fill(if bevel { t.control_fill } else { t.form_primary_fill })
-                .stroke(egui::Stroke::NONE)
-                .corner_radius(t.control_radius);
+            let button = styled_button(ui, text.bold_face().into(), ButtonTone::Primary).corner_radius(t.control_radius);
             ui.add_sized(vec2(dimension(ui.available_width()), t.form_button_height), button)
         })
         .inner;

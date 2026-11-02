@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::{DesignLink, Document, FeatureKind, ModelBody, ModelState};
 use solidcraft_geom::Vec3;
 
-use super::{absolute, component_key, inherit_properties, resolve, session_bodies, stored};
+use super::{absolute, component_key, file_sha256, inherit_properties, resolve, session_bodies, stored};
 use crate::params::{bad, str_};
 use crate::{EngineError, Result, Session};
 
@@ -597,7 +597,7 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
         f.link_faces = faces;
     }
     let path = stored(s.path.as_deref(), &file);
-    s.doc_mut().links.insert(comp, DesignLink { path: file.to_string_lossy().into_owned(), feature: id, inherited: Vec::new() });
+    s.doc_mut().links.insert(comp, DesignLink { path: file.to_string_lossy().into_owned(), feature: id, ..Default::default() });
     s.refresh();
     rename_joint_faces(s, &state, id, &sc.own);
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
@@ -611,6 +611,12 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
 
     part.path = s.path.clone();
     part.execute("file.save", &json!({"path": shown}))?;
+    // The link keeps what the new file holds, as Insert Design's does (#9739).
+    if let Some(read) = file_sha256(&file, s.path.as_deref())
+        && let Some(link) = s.doc_mut().links.get_mut(&comp)
+    {
+        link.file_sha256 = Some(read);
+    }
     Ok(json!({"component": comp, "feature": id, "path": path, "file": shown, "bodies": sc.bodies, "notices": notices, "warnings": warnings,
         "copies": named(s, &copies)}))
 }

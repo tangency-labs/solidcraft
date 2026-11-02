@@ -1,8 +1,8 @@
 //! Settings profiles (#6237): the input and interface settings kept together under a name, such
-//! as "Laptop" and "Large monitor", and switched at once. A profile holds the preferences of the
-//! Interface, Navigation and Sketch pages and the language, the keyboard shortcuts, the toolbar
-//! and the S box favourites, and the imported theme it uses. Machine-specific settings stay out:
-//! the 3D mouse, graphics, recent files and the AI pages.
+//! as "Laptop" and "Large monitor", and switched at once. A profile holds the original Interface,
+//! Navigation and Sketch preference keys and the language, keyboard shortcuts, toolbar,
+//! S box favourites, and imported theme it uses. Page moves preserve that stored key set;
+//! device-specific 3D mouse keys, graphics, recent files and Assistant settings stay out.
 //!
 //! A profile is kept, exported and imported as one `solidcraft-profile/1` document. Every
 //! document is checked by [`sanitize`] first: unknown keys are dropped, sizes are capped, and a
@@ -34,24 +34,108 @@ const MAX_THEMES: usize = 4;
 /// Most characters in a command id or a key name.
 const MAX_ID: usize = 200;
 
-/// The Preferences pages whose settings a profile holds.
-const PAGES: [usize; 3] = [prefs::PAGE_INTERFACE, prefs::PAGE_NAVIGATION, prefs::PAGE_SKETCH];
-/// Settings a profile holds from other pages.
-const ALSO: [&str; 1] = ["language"];
-
-/// Settings of those pages that belong to the computer, not the person: the 3D mouse (its
-/// calibration, driver and axes) and the cursor flag older releases saved.
-fn machine_specific(key: &str) -> bool {
-    key.starts_with("space_mouse_") || key == "orbit_cursor"
-}
+/// The 93 stored keys from the pre-split Interface, Navigation and Sketch pages, plus
+/// language, excluding space_mouse_* and orbit_cursor. Page moves and title tags must never
+/// change profile contents (including the bridge, origin names and direct interaction).
+const PROFILE_KEYS: &[&str] = &[
+    "browser_bodies_folders",
+    "browser_collapsed",
+    "browser_eye_left",
+    "browser_float",
+    "browser_share",
+    "browser_show",
+    "browser_width",
+    "center_arc_follows_cursor",
+    "color_vision",
+    "dialog_buttons",
+    "dialog_place",
+    "direct_interaction",
+    "free_orbit",
+    "free_orbit_upright",
+    "hidden_toolbar_tabs",
+    "hide_constraint_glyphs_zoomed_out",
+    "history_in_browser",
+    "history_play_button",
+    "history_sketches",
+    "keep_work_on_tab_switch",
+    "language",
+    "layout",
+    "line_drag_draws_one",
+    "line_hover_tangent_arc",
+    "logo_accent",
+    "look_at_anim",
+    "look_at_speed",
+    "manipulator_free_alt",
+    "middle_double_click",
+    "mouse_gestures",
+    "nav",
+    "nav_bridge_enabled",
+    "nav_bridge_port",
+    "navigation_bar",
+    "navigator_style",
+    "orbit_around",
+    "orbit_reverse",
+    "origin_plane_names",
+    "pan_reverse_x",
+    "pan_reverse_y",
+    "persistent_ribbon_pressed",
+    "prefer_free_sketch_points",
+    "project_options_dialog",
+    "quick_measure",
+    "radial_context_menu",
+    "ribbon_icon_grid",
+    "ribbon_labels",
+    "ribbon_menus_skip_pinned",
+    "ribbon_reveal",
+    "right_drag_orbits",
+    "select_other_hidden",
+    "selection_shift_add_only",
+    "shortcut_cycles_modes",
+    "sketch_align_points",
+    "sketch_auto_dimensions",
+    "sketch_auto_locate",
+    "sketch_conflict_colour",
+    "sketch_construction_lines",
+    "sketch_exit_view",
+    "sketch_open_look_at",
+    "sketch_recent_snap",
+    "sketch_state_icons",
+    "sketch_tab_always",
+    "sketch_tracking_guides",
+    "sketch_tracking_points",
+    "smooth_wheel_zoom",
+    "status_bar",
+    "suppress_sketch_snap",
+    "theme",
+    "theme_follow",
+    "theme_options",
+    "timeline_collapsed",
+    "timeline_left",
+    "timeline_left_browser_collapsed",
+    "timeline_left_width",
+    "timeline_origin_bodies",
+    "timeline_under_browser",
+    "toast_place",
+    "trackpad_pan",
+    "trackpad_zoom_modifier",
+    "ui_font",
+    "ui_scale",
+    "view_confirm_corner",
+    "viewport_analysis_status",
+    "viewport_background",
+    "viewport_section_status",
+    "viewport_status_details",
+    "viewport_status_summary",
+    "viewport_theme",
+    "wheel_zoom_speed",
+    "zoom_reverse",
+    "zoom_stop_at_model",
+    "zoom_to_cursor",
+];
 
 /// The preferences a profile holds, by their stored key.
 pub fn keys() -> impl Iterator<Item = &'static str> {
-    prefs::FIELD_PAGES
-        .iter()
-        .filter(|(key, page)| ALSO.contains(key) || page.is_some_and(|page| PAGES.contains(&page)))
-        .map(|(key, _)| *key)
-        .filter(|key| !machine_specific(key))
+    prefs::FIELD_PAGES.iter().map(|(key, _)| *key).filter(|key| PROFILE_KEYS.contains(key))
 }
 
 /// The kept profiles, which one was applied or saved last, and the Preferences section's state.
@@ -256,24 +340,52 @@ fn apply(app: &mut SolveApp, doc: &Value) -> Vec<String> {
             theme_ids.insert(wanted, id);
         }
     }
+    // Resolve imported identities before migrating retired built-in cards. Migrate the
+    // theme and its option maps together: applying `theme` first and then replacing the
+    // saved maps would otherwise discard the old card's selected contrast.
+    let mut preferences = doc.get("preferences").and_then(Value::as_object).cloned().unwrap_or_default();
+    if let Some(id) = preferences.get("theme").and_then(Value::as_str).and_then(|id| theme_ids.get(id)).cloned() {
+        preferences.insert("theme".into(), json!(id));
+    }
+    if let Some(options) = preferences.get("theme_options").and_then(Value::as_object) {
+        let remapped: Map<String, Value> = options.iter().map(|(id, values)| (theme_ids.get(id).unwrap_or(id).clone(), values.clone())).collect();
+        preferences.insert("theme_options".into(), Value::Object(remapped));
+    }
+    let options = preferences
+        .get("theme_options")
+        .map(|value| serde_json::from_value::<std::collections::BTreeMap<String, std::collections::BTreeMap<String, Value>>>(value.clone()))
+        .transpose();
+    // Leave malformed raw fields intact for the existing per-key skipped reporting.
+    // In particular, a bad option map must not become an empty map that clears saved values.
+    if let Ok(options) = options {
+        let theme = preferences.get("theme").and_then(Value::as_str).map(str::to_owned);
+        let legacy = theme.as_deref().and_then(theme_files::legacy_gruvbox).is_some();
+        let mut migrated = prefs::Prefs {
+            theme: theme.clone().unwrap_or_else(|| "dark".into()),
+            theme_options: options.unwrap_or_else(|| app.preferences.theme_options.clone()),
+            ..Default::default()
+        };
+        prefs::migrate_gruvbox(&mut migrated);
+        if theme.is_some() {
+            preferences.insert("theme".into(), json!(migrated.theme));
+        }
+        if preferences.contains_key("theme_options") || legacy {
+            preferences.insert("theme_options".into(), json!(migrated.theme_options));
+        }
+    }
     let mut skipped = Vec::new();
-    for (key, value) in doc.get("preferences").and_then(Value::as_object).into_iter().flatten() {
+    for (key, value) in &preferences {
         if key == "theme_options" {
             // Restoring saved state keeps stale entries just like loading preferences. The
             // control channel's strict merge is for new edits, not profile restoration.
             match serde_json::from_value::<std::collections::BTreeMap<String, std::collections::BTreeMap<String, Value>>>(value.clone()) {
                 Ok(options) => {
-                    app.preferences.theme_options =
-                        options.into_iter().map(|(id, values)| (theme_ids.get(&id).cloned().unwrap_or(id), values)).collect();
+                    app.preferences.theme_options = options;
                 }
                 Err(_) => skipped.push(key.clone()),
             }
             continue;
         }
-        let value = match value.as_str().and_then(|id| theme_ids.get(id)) {
-            Some(id) if key == "theme" => json!(id),
-            _ => value.clone(),
-        };
         if let Err(e) = prefs::set(app, &json!({ key: value })) {
             log::warn!("settings profile: `{key}` keeps its current value: {e}");
             skipped.push(key.clone());
@@ -491,4 +603,60 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui, labels: f32) {
             None => {}
         }
     });
+}
+
+/// The pinned profile switcher on every Preferences page. Actions use the same commands as
+/// General > Profiles; saving a new name remains in that existing section.
+pub(crate) fn sidebar(ui: &mut egui::Ui, app: &mut SolveApp) {
+    ui_kit::divider(ui, "profile_sidebar");
+    ui_kit::text(ui, app.tr("prefs.structure.profile"), ui_kit::Text::Heading("profile_sidebar"));
+    let active = app.settings_profiles.active.clone();
+    let edited = active.as_ref().is_some_and(|name| app.settings_profiles.get(name).is_ok_and(|doc| *doc != capture(app, name)));
+    let current = active.clone().unwrap_or_else(|| app.tr_label("None").to_string());
+    let names = app.settings_profiles.names();
+    let mut apply = None;
+    let mut save = false;
+    ui.horizontal(|ui| {
+        let t = crate::theme::Tokens::get();
+        let width = ui.available_width() - if edited { t.space_16 + ui.spacing().item_spacing.x } else { 0.0 };
+        let response = ui_kit::settings_control_width(ui, width, |ui| {
+            ui_kit::dropdown_menu(ui, "profile_sidebar", &current, |ui| {
+                for name in &names {
+                    if ui_kit::list_picker(ui, name, name, active.as_ref() == Some(name)).clicked() {
+                        apply = Some(name.clone());
+                    }
+                }
+                if let Some(name) = &active
+                    && ui_kit::button(ui, app.tr("prefs.profile_save"), ui_kit::Button::Normal).clicked()
+                {
+                    save = true;
+                    apply = None;
+                    app.settings_profiles.draft = name.clone();
+                    ui.close();
+                }
+                if ui_kit::button(ui, app.tr("prefs.profiles"), ui_kit::Button::Normal).clicked() {
+                    prefs::open_profiles(app);
+                    ui.close();
+                }
+            })
+        });
+        crate::scenario::publish_target("prefs:profile", response.rect);
+        if edited {
+            let dot = ui_kit::status_line(ui, "●", ui_kit::StatusTone::Warning).on_hover_text(app.tr("prefs.structure.profile_edited"));
+            crate::scenario::publish_target("prefs:profile:edited", dot.rect);
+        }
+    });
+    if let Some(name) = apply {
+        app.settings_profiles.draft = name.clone();
+        act(app, "settings.profile.apply", json!({"name":name}), "prefs.profile_applied");
+    } else if save && let Some(name) = active {
+        act(app, "settings.profile.save", json!({"name":name}), "prefs.profile_saved");
+    }
+}
+
+/// Page-title tag. Membership is descriptive; the stable key list above governs storage.
+pub(crate) fn tag(ui: &mut egui::Ui) {
+    let response =
+        ui_kit::workspace_chip(ui, crate::i18n::tr("prefs.structure.in_profile")).on_hover_text(crate::i18n::tr("prefs.structure.profile_hover"));
+    crate::scenario::publish_target("prefs:in_profile", response.rect);
 }

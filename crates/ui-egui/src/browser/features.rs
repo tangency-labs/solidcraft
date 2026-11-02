@@ -9,6 +9,12 @@ pub(crate) struct Reveal {
     pub path: Vec<u64>,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Folded Features folders whose mark was worked out (the tests count them).
+    static MARKS_WORKED_OUT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Open the Features folder that lists this feature and scroll to its row, without changing the
 /// active component or history marker. The folder is the one of the placement `body` belongs to:
 /// without a body there is no telling which copy of a component was meant.
@@ -82,10 +88,14 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
     let (key, label) =
         if compact { (format!("{scope}/history"), crate::i18n::tr("ui.history_title")) } else { (format!("{scope}/features"), "Features") };
     let open = is_open(app, &key, compact);
-    // Folded, it carries the worst mark of what it holds.
-    let ids: Vec<u64> = if open {
+    // Folded, it carries the worst mark of what it holds. A row scrolled out of view paints
+    // nothing, so its mark is not worked out: in a long tree of placements of a part with a long
+    // history, every folder's mark scanned the design's whole history on every frame (#6083).
+    let ids: Vec<u64> = if open || !ui.is_rect_visible(row_rect(ui)) {
         Vec::new()
     } else {
+        #[cfg(test)]
+        MARKS_WORKED_OUT.with(|n| n.set(n.get() + 1));
         app.session
             .doc
             .features
@@ -250,7 +260,11 @@ fn feature_row(
     let sketch = crate::timeline::TimelineKind::of(&feature.kind).profile_sketch();
     // Behind the history marker or suppressed: not built, drawn faint as in the timeline.
     let dim = feature.suppressed || app.session.doc.marker.is_some_and(|marker| index >= marker);
-    let selected = app.session.selection.contains(&Sel::Feature { id });
+    // A feature picked by its geometry (a face or edge of it chosen in the view) shows as
+    // selected in the tree, as NX marks the feature of a picked face; the session's selection
+    // stays the face or edge.
+    let by_geometry = !app.session.selection.contains(&Sel::Feature { id }) && crate::timeline::picked_feature(app) == Some(id);
+    let selected = app.session.selection.contains(&Sel::Feature { id }) || by_geometry;
     app.tree.remember(&format!("f:{id}"));
     let action = sketch.map(|_| ("sketch", "Edit Profile Sketch"));
     // A sketch row has the eye its Sketches folder row has. A feature's eye shows and hides the
@@ -711,6 +725,29 @@ mod tests {
         }
     }
 
+    /// #6083: in a long tree of placements, only the folded Features folders on screen work out
+    /// their mark (each scanned the design's whole history, every frame); those on screen still
+    /// show it.
+    #[test]
+    fn only_folded_features_folders_on_screen_work_out_their_mark() {
+        let mut h = Harness::new();
+        let component = h.app.run("component.create", json!({"name":"Part"})).unwrap();
+        let feature = h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Plate"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        let first = component["occurrence"].as_u64().unwrap();
+        for i in 1..=80 {
+            h.app.run("occurrence.copy", json!({"occurrence":first,"translate":[20.0 * f64::from(i),0,0]})).unwrap();
+        }
+        h.frames(2);
+        let result = h.app.session.model.results.iter_mut().find(|r| r.id == feature).unwrap();
+        result.error = Some("the blend is larger than the neighbouring faces".into());
+        MARKS_WORKED_OUT.with(|n| n.set(0));
+        h.frame();
+        let worked = MARKS_WORKED_OUT.with(std::cell::Cell::get);
+        assert!(worked > 0 && worked < 40, "{worked} of 81 folded Features folders worked out their mark");
+        assert!(!crate::scenario::handles("status:error:Features").is_empty(), "a folder on screen shows its mark");
+    }
+
     #[test]
     fn browser_find_reveals_a_placed_body_whose_row_is_off_screen() {
         let mut h = Harness::new();
@@ -820,6 +857,58 @@ mod tests {
         assert_eq!(h.app.session.doc.marker, Some(pad_index + 1), "the marker goes right after the feature");
         let labels: Vec<_> = drawn_rows().into_iter().map(|(label, ..)| label).collect();
         assert!(labels.contains(&block_name), "a rolled-back feature stays listed: {labels:?}");
+    }
+
+    /// #10079: three extrusions of one visible sketch, the first renamed. A click just past the end
+    /// of a feature's name, or a press on the name that slips a few points before its release,
+    /// selects the feature; only the sketch button itself opens the sketch.
+    #[test]
+    fn clicking_just_past_a_feature_name_selects_it_without_opening_its_sketch() {
+        let mut h = Harness::new();
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Sketch1"})).unwrap()["sketch"].as_u64().unwrap();
+        for (p0, p1) in [([0, 0], [10, 10]), ([20, 0], [30, 10]), ([40, 0], [50, 10])] {
+            h.app.run("sketch.rectangle.two_point", json!({"p0":p0,"p1":p1})).unwrap();
+        }
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let mut ids = Vec::new();
+        for profile in 0..3 {
+            let made = h.app.run("solid.extrude", json!({"sketch":sketch,"profiles":[profile],"distance":5})).unwrap();
+            ids.push(made["feature"].as_u64().unwrap());
+            if profile == 0 {
+                h.app.run("timeline.rename", json!({"feature":ids[0],"name":"Lid"})).unwrap();
+            }
+        }
+        // The sketch stays shown, as in the report.
+        crate::browser::set_sketch_visible(&mut h.app, sketch, true);
+        h.app.tree.expanded.insert("c0/features".into());
+        h.settle();
+        assert!(crate::browser::sketch_visible(&h.app, sketch));
+        let press = |h: &mut Harness, at: Pos2, pressed: bool| {
+            h.frame_with(vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() }]);
+        };
+        // A press at `from` released at `to`, then long enough that the next click is not a double.
+        let click = |h: &mut Harness, from: Pos2, to: Pos2| {
+            h.frame_with(vec![egui::Event::PointerMoved(from)]);
+            press(h, from, true);
+            h.frame_with(vec![egui::Event::PointerMoved(to)]);
+            press(h, to, false);
+            h.frames(30);
+        };
+        for (round, id) in ids.iter().chain(&ids).enumerate() {
+            let name = h.app.session.doc.feature(*id).unwrap().name.clone();
+            for (from, to) in [(1.0, 1.0), (5.0, 5.0), (-2.0, 4.0)] {
+                // Selected rows draw their name in semibold, wider: measure it each time.
+                let label = crate::scenario::rect_of(&format!("row_label:{name}")).unwrap();
+                let at = |dx: f32| pos2(label.right() + dx, label.center().y);
+                click(&mut h, at(from), at(to));
+                assert_eq!(h.app.session.active_sketch, None, "round {round}: {name} clicked {from}..{to} points past its name opened the sketch");
+                assert!(h.app.dialog.is_none(), "round {round}: {name} opened a dialog");
+                assert_eq!(h.app.session.selection, [Sel::Feature { id: *id }], "round {round}: {name} {from}..{to}");
+            }
+        }
+        h.step(&json!({"click": {"handle": "action:Extrude1"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.active_sketch, Some(sketch), "the sketch button still opens the sketch");
     }
 
     fn settle_heavy(h: &mut Harness) {

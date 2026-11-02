@@ -443,6 +443,13 @@ not record whether their background was explicitly chosen, so even a setup saved
 camera conservatively retains its scene backplate. With tab surfaces absent/off, Render keeps
 its original flat scene background. Theme surfaces never change rendered images or exports.
 
+Gruvbox has two cards, **Gruvbox Dark** and **Gruvbox Light**. Each offers a
+**Contrast** choice: **Soft**, **Standard** (the default), or **Hard**. These are the
+same six palettes as the former separate cards, including their icon colours.
+Saved selections and settings profiles using the former `-soft` and `-hard` ids
+select the corresponding family and contrast. Selecting a family again restores its
+last contrast; Reset returns it to Standard.
+
 Up to 32 overlays apply in file order, after the base palette and the theme's own value tables.
 Later matching entries win by key. Every overlay has one `when`: `{"opt":"id","eq":value}`
 for an exact, correctly typed comparison, or `gte`, `lte`, or both for inclusive range bounds.

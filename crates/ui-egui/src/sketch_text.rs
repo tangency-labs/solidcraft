@@ -493,6 +493,13 @@ pub(crate) fn refresh(app: &SolveApp, k: &mut Tx) -> bool {
     true
 }
 
+/// Whether the font (or built-in font when empty) has a bold face.
+fn font_has_bold_face(name: &str) -> bool {
+    let trimmed = name.trim();
+    let font = if trimmed.is_empty() { None } else { Some(trimmed) };
+    solidcraft_engine::sketch::font_data_styled(font, true, false).is_ok()
+}
+
 /// The dialog's rows; true when Enter was pressed in a value field or in the text (Shift+Enter
 /// starts a new line there). `inputs` and `active`: the dialog's Path input.
 pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], active: &mut usize) -> bool {
@@ -511,8 +518,12 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
         state.store(ui.ctx(), id);
         k.focus = false;
     }
+    let font_has_bold = font_has_bold_face(&k.font);
+    if !font_has_bold && k.style.bold {
+        k.style.bold = false;
+    }
     ui_kit::row(ui, "Font", |ui| font_row(ui, k));
-    ui_kit::row(ui, "Style", |ui| ui_kit::text_emphasis(ui, &mut k.style.bold, &mut k.style.italic));
+    ui_kit::row(ui, "Style", |ui| ui_kit::text_emphasis(ui, &mut k.style.bold, &mut k.style.italic, font_has_bold));
     ui_kit::row(ui, "Alignment", |ui| {
         let mut selected = match k.style.align {
             TextAlign::Left => 0,
@@ -692,9 +703,10 @@ fn edit_params(app: &SolveApp, k: &Tx) -> Result<Value, String> {
         TextAlign::Center => "center",
         TextAlign::Right => "right",
     };
+    let bold = k.style.bold && font_has_bold_face(&k.font);
     let mut params = json!({
         "link": k.link, "at": [sent_x, sent_y], "height": sent_height,
-        "bold": k.style.bold, "italic": k.style.italic, "align": align,
+        "bold": bold, "italic": k.style.italic, "align": align,
         "letter_spacing": letter_spacing, "line_spacing": line_spacing,
         "path": k.style.path.clone().unwrap_or_default(), "reverse": k.style.reverse,
     });
@@ -1528,30 +1540,30 @@ mod tests {
         assert_eq!(tx(&h.app).values[5], "1.25");
     }
 
+    /// #9940: built-in font has no bold face; Bold toggle is disabled so clicking it
+    /// does not set bold or trigger errors, and alignment and other options succeed.
     #[test]
-    fn bold_in_a_font_without_a_bold_face_is_refused_with_the_reason() {
+    fn bold_in_a_font_without_a_bold_face_is_disabled() {
         let (mut h, link, _) = setup();
         let before = (h.app.session.doc.to_json(), h.app.session.undo.len());
         h.app.start("sketch.edit_text");
         h.frames(3);
+        assert!(!font_has_bold_face(&tx(&h.app).font));
+        assert!(!tx(&h.app).style.bold);
+        // Clicking disabled bold does not toggle it, preview stays clean without errors.
         h.step(&json!({"click":{"handle":"dialog:Bold"}})).unwrap();
         h.frames(2);
-        assert!(!style_of(&h, &link).bold, "the canvas keeps the last text it could make");
-        let error = h.app.dialog.as_ref().unwrap().error.clone().unwrap_or_default();
-        assert!(error.contains("no bold face"), "the preview must explain the unchanged text before OK: {error}");
+        assert!(!tx(&h.app).style.bold);
+        assert!(!style_of(&h, &link).bold);
+        assert!(h.app.dialog.as_ref().unwrap().error.is_none());
+        // Changing alignment succeeds without error.
+        h.step(&json!({"click":{"handle":"dialog:Align center"}})).unwrap();
         h.frames(2);
-        assert_eq!(h.app.dialog.as_ref().unwrap().error.as_deref(), Some(error.as_str()), "the reason stays visible on unchanged frames");
-        h.step(&json!({"click":{"handle":"dialog:Bold"}})).unwrap();
-        h.frames(2);
-        assert!(h.app.dialog.as_ref().unwrap().error.is_none(), "a valid preview clears the refusal");
-        h.step(&json!({"click":{"handle":"dialog:Bold"}})).unwrap();
-        h.frames(2);
+        assert_eq!(tx(&h.app).style.align, TextAlign::Center);
         ok(&mut h);
-        assert!(editing(&h.app));
-        let error = h.app.dialog.as_ref().unwrap().error.clone().unwrap_or_default();
-        assert!(error.contains("no bold face"), "{error}");
-        h.step(&json!({"widget":"Cancel"})).unwrap();
-        assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), before);
+        assert!(!editing(&h.app));
+        assert_eq!(style_of(&h, &link).align, TextAlign::Center);
+        assert_eq!(h.app.session.undo.len(), before.1 + 1);
     }
 
     #[test]

@@ -47,8 +47,18 @@ fn placed_doc(s: &Session) -> Document {
 /// A property total must cover the entire assembly. The display traversal intentionally
 /// truncates hostile designs, so use an explicit error instead of accepting its prefix.
 pub(in crate::cmd) fn placements(doc: &Document, cmd: &str) -> Result<Vec<(u64, Vec<u64>, Mat)>> {
-    let mut out = vec![(0, Vec::new(), solidcraft_doc::IDENTITY)];
-    let mut stack = vec![(0, Vec::<u64>::new(), solidcraft_doc::IDENTITY)];
+    subtree(doc, (0, Vec::new(), solidcraft_doc::IDENTITY), true, cmd)
+}
+
+/// `root` and, with `descendants`, every placement under it, each with its world transform.
+/// The occurrences are grouped by parent once: searching all of them at every placement made a
+/// large assembly's traversal quadratic.
+fn subtree(doc: &Document, root: (u64, Vec<u64>, Mat), descendants: bool, cmd: &str) -> Result<Vec<(u64, Vec<u64>, Mat)>> {
+    let mut out = vec![root.clone()];
+    if !descendants {
+        return Ok(out);
+    }
+    let mut stack = vec![root];
     let mut children: std::collections::BTreeMap<u64, Vec<_>> = std::collections::BTreeMap::new();
     for occurrence in &doc.occurrences {
         children.entry(occurrence.parent).or_default().push(occurrence);
@@ -105,6 +115,95 @@ pub(super) fn occurrence(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(out)
 }
 
+/// The linear part of `m` is a rotation (no scale, shear or mirror), to rounding.
+fn proper_rotation(m: &Mat) -> bool {
+    let column = |i: usize| m.get(i).map_or(Vec3::ZERO, |c| Vec3::new(c[0], c[1], c[2]));
+    let (x, y, z) = (column(0), column(1), column(2));
+    m.iter().flatten().all(|v| v.is_finite())
+        && [x, y, z].iter().all(|a| (a.dot(*a) - 1.0).abs() < 1e-9)
+        && x.dot(y).abs() < 1e-9
+        && x.dot(z).abs() < 1e-9
+        && y.dot(z).abs() < 1e-9
+        && x.cross(y).dot(z) > 0.0
+}
+
+/// Every axis of `m` goes to an axis (a quarter turn, or none): a box turned so stays a box.
+fn square_to_axes(m: &Mat) -> bool {
+    m.iter().take(3).all(|c| c.iter().take(3).filter(|v| v.abs() > 1e-12).count() == 1)
+}
+
+/// The box around the corners of `b` placed by `m`.
+fn placed_box(m: &Mat, b: &Aabb3) -> Aabb3 {
+    let mut out = Aabb3::EMPTY;
+    if b.is_empty() {
+        return out;
+    }
+    for i in 0..8 {
+        let pick = |bit: usize, lo: f64, hi: f64| if i & bit == 0 { lo } else { hi };
+        out.add(solidcraft_doc::apply_point(m, Vec3::new(pick(1, b.min.x, b.max.x), pick(2, b.min.y, b.max.y), pick(4, b.min.z, b.max.z))));
+    }
+    out
+}
+
+/// A body's measurements where a placement puts it.
+struct Placed {
+    volume: f64,
+    area: f64,
+    centroid: Vec3,
+    bbox: Aabb3,
+    closed: bool,
+    faces: usize,
+    edges: usize,
+    vertices: usize,
+}
+
+/// `body` measured where `transform` places it. A rigid placement moves nothing but the centre
+/// and the box: the body's own measurement (worked out once and shared by every placement of it,
+/// [`solidcraft_doc::ModelBody::measure`]) is reused, where measuring each placed copy again took
+/// three fine tessellations per copy and made Properties of a large assembly take minutes
+/// (#8706). A placement that turns the body off the axes takes its box from the body's mesh
+/// placed there (shared with the display). Any other placement (scaled or mirrored) is measured
+/// as placed, as before.
+fn measure_placed(body: &solidcraft_doc::ModelBody, transform: Mat) -> Result<Placed> {
+    if proper_rotation(&transform) {
+        let m = body.measure()?;
+        let bbox = if square_to_axes(&transform) {
+            placed_box(&transform, &m.bbox)
+        } else {
+            let mesh = body.mesh();
+            let mut b = Aabb3::EMPTY;
+            for p in &mesh.positions {
+                b.add(solidcraft_doc::apply_point(&transform, *p));
+            }
+            if b.is_empty() { placed_box(&transform, &m.bbox) } else { b }
+        };
+        return Ok(Placed {
+            volume: m.volume,
+            area: m.area,
+            centroid: solidcraft_doc::apply_point(&transform, m.centroid),
+            bbox,
+            closed: crate::cmd::inspect::encloses_volume(&body.body),
+            faces: m.merged.faces,
+            edges: m.merged.edges,
+            vertices: m.merged.vertices,
+        });
+    }
+    #[cfg(test)]
+    work::count(|w| w.placed_measures += 1);
+    let placed = solidcraft_kernel::transform_matrix(&body.body, transform)?;
+    let m = solidcraft_kernel::measure(&placed)?;
+    Ok(Placed {
+        volume: m.volume,
+        area: m.area,
+        centroid: m.centroid,
+        bbox: m.bbox,
+        closed: crate::cmd::inspect::encloses_volume(&placed),
+        faces: m.merged.faces,
+        edges: m.merged.edges,
+        vertices: m.merged.vertices,
+    })
+}
+
 fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, about: Option<Vec3>, cmd: &str) -> Result<Value> {
     let state = s.model.state();
     let mut bodies = Vec::new();
@@ -115,48 +214,54 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
     let mut placement_count = 0;
     let mut skipped = 0;
     let selected_placements = if selected.is_empty() {
-        if descendants { placements(doc, cmd)? } else { vec![(0, Vec::new(), solidcraft_doc::IDENTITY)] }
+        subtree(doc, (0, Vec::new(), solidcraft_doc::IDENTITY), descendants, cmd)?
     } else {
         let placement = s.occurrence_placement(selected).map_err(|e| bad(cmd, e.to_string()))?;
-        let mut out = vec![(placement.component, selected.to_vec(), placement.world)];
-        let mut stack = if descendants { out.clone() } else { Vec::new() };
-        while let Some((component, path, transform)) = stack.pop() {
-            for occurrence in doc.occurrences.iter().filter(|o| o.parent == component) {
-                if path.len() >= 64 || out.len() >= 100_000 {
-                    return Err(bad(cmd, "assembly exceeds physical-properties traversal limits (64 levels or 100000 placements)"));
-                }
-                let mut child = path.clone();
-                child.push(occurrence.id);
-                let world = solidcraft_doc::mat_mul(&transform, &occurrence.transform);
-                out.push((occurrence.component, child.clone(), world));
-                stack.push((occurrence.component, child, world));
-            }
-        }
-        out
+        subtree(doc, (placement.component, selected.to_vec(), placement.world), descendants, cmd)?
     };
+    // Each component's bodies (with their index in the model), the timeline looked up once rather
+    // than for every body at every placement.
+    let mut by_component: std::collections::HashMap<u64, Vec<(usize, &solidcraft_doc::ModelBody)>> = std::collections::HashMap::new();
+    for (index, (body, component)) in state.bodies.iter().zip(doc.model_body_components(&state)).enumerate() {
+        by_component.entry(component).or_default().push((index, body));
+    }
     // How each closed body's volume spreads about its centre of mass (#8095): one tessellation
     // however often it is placed, which each placement then turns.
     let components: BTreeSet<u64> = selected_placements.iter().map(|(component, _, _)| *component).collect();
-    let spread_bodies: Vec<usize> = (0..state.bodies.len())
-        .filter(|&i| {
-            state.bodies.get(i).is_some_and(|b| components.contains(&doc.model_body_component(b)) && crate::cmd::inspect::encloses_volume(&b.body))
-        })
+    let spread_bodies: Vec<usize> = components
+        .iter()
+        .filter_map(|c| by_component.get(c))
+        .flatten()
+        .filter(|(_, b)| crate::cmd::inspect::encloses_volume(&b.body))
+        .map(|(i, _)| *i)
         .collect();
+    #[cfg(test)]
+    work::count(|w| w.spreads += spread_bodies.len());
     let spreads = solidcraft_kernel::map_on_threads(&spread_bodies, 16, |&i| {
         state.bodies.get(i).and_then(|b| solidcraft_io::mass_properties(&b.body).ok().flatten()).and_then(|m| m.gyration())
     });
     let spread: BTreeMap<usize, Tensor3> = spread_bodies.into_iter().zip(spreads).filter_map(|(i, g)| Some((i, g.flatten()?))).collect();
+    // A window waiting for the result (the Properties window) sees how far it is and can stop it.
+    let watch = solidcraft_kernel::watch::current();
+    let total_bodies: usize = selected_placements.iter().map(|(c, _, _)| by_component.get(c).map_or(0, Vec::len)).sum();
+    let mut done = 0;
     // Closed bodies' (mass, centre of mass, inertia about it), all in world axes.
     let mut parts: Vec<(f64, Vec3, Option<Tensor3>)> = Vec::new();
     for (component, path, transform) in selected_placements {
         placement_count += 1;
-        for (index, body) in state.bodies.iter().enumerate().filter(|(_, b)| doc.model_body_component(b) == component) {
+        for &(index, body) in by_component.get(&component).into_iter().flatten() {
+            if let Some(w) = &watch {
+                if w.cancelled() {
+                    return Err(bad(cmd, "cancelled"));
+                }
+                w.progress("measuring", done, total_bodies);
+            }
+            done += 1;
             let transform: Mat = doc.model_body_offset(body).map(|offset| solidcraft_doc::mat_mul(&transform, offset)).unwrap_or(transform);
-            let placed = solidcraft_kernel::transform_matrix(&body.body, transform)?;
-            let measured = solidcraft_kernel::measure(&placed)?;
+            let measured = measure_placed(body, transform)?;
             let density = doc.density(&body.name);
             let body_mass = measured.volume * density / 1000.0;
-            let closed = crate::cmd::inspect::encloses_volume(&placed);
+            let closed = measured.closed;
             // The mesh's spread with the exact mass, so the tensor agrees with the mass shown.
             let body_inertia = spread
                 .get(&index)
@@ -173,9 +278,9 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
             }
             area += measured.area;
             bounds = bounds.union(&measured.bbox);
-            faces += measured.merged.faces;
-            edges += measured.merged.edges;
-            vertices += measured.merged.vertices;
+            faces += measured.faces;
+            edges += measured.edges;
+            vertices += measured.vertices;
             bodies.push(json!({"name": body.name, "component": component, "path": path,
                 "material": doc.body_material(&body.name),
                 "closed": closed, "density_g_cm3": closed.then_some(density),
@@ -184,6 +289,9 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
                 "inertia_g_mm2": body_inertia,
                 "bbox": {"min": measured.bbox.min, "max": measured.bbox.max}}));
         }
+    }
+    if let Some(w) = &watch {
+        w.progress("measuring", done, total_bodies);
     }
     if !(volume.is_finite() && area.is_finite() && mass.is_finite() && moment.is_finite()) {
         return Err(bad(cmd, "physical properties exceed supported numeric range"));
@@ -215,6 +323,46 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
         out["total"]["inertia_about"] = json!({"point": point, "inertia_g_mm2": shifted});
     }
     Ok(out)
+}
+
+/// The tessellating work a properties command did on this thread, for tests: placed copies
+/// measured afresh (transformed, then tessellated) and bodies whose inertia spread was
+/// tessellated. Counted where the work is asked for, on the command's own thread.
+#[cfg(test)]
+pub(super) mod work {
+    use std::cell::Cell;
+
+    #[derive(Clone, Copy, Debug, Default, PartialEq)]
+    pub struct Work {
+        pub placed_measures: usize,
+        pub spreads: usize,
+    }
+
+    thread_local! {
+        static WORK: Cell<Work> = const { Cell::new(Work { placed_measures: 0, spreads: 0 }) };
+    }
+
+    pub(super) fn count(f: impl FnOnce(&mut Work)) {
+        WORK.with(|w| {
+            let mut work = w.get();
+            f(&mut work);
+            w.set(work);
+        });
+    }
+
+    /// `f`'s result and the work it did.
+    pub fn capture<T>(f: impl FnOnce() -> T) -> (T, Work) {
+        let before = WORK.with(Cell::get);
+        let out = f();
+        let after = WORK.with(Cell::get);
+        (
+            out,
+            Work {
+                placed_measures: after.placed_measures.saturating_sub(before.placed_measures),
+                spreads: after.spreads.saturating_sub(before.spreads),
+            },
+        )
+    }
 }
 
 #[cfg(test)]

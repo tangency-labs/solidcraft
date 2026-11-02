@@ -339,6 +339,31 @@ fn a_corner_starts_a_guide_while_drawing_unless_turned_off() {
 }
 
 #[test]
+fn a_rectangle_snaps_to_an_infinite_line_crossing() {
+    use solidcraft_engine::geom::Vec2;
+    let mut h = Harness::new();
+    h.app.preferences.look_at_anim = false;
+    for (command, params) in [
+        ("sketch.create", json!({"plane":"XY"})),
+        ("sketch.construction_line.vertical", json!({"at":[20,40]})),
+        ("sketch.construction_line.horizontal", json!({"at":[40,15]})),
+    ] {
+        h.app.run(command, params).unwrap();
+    }
+    h.call("ui.camera", json!({"target":[20,15,0],"yaw":0,"pitch":std::f64::consts::FRAC_PI_2,"distance":120}));
+    step(&mut h, json!({"start":"sketch.rectangle.two_point"}));
+    step(&mut h, json!({"move":{"sketch":[20.4,15.4]}}));
+    step(&mut h, json!({"click":{"sketch":[20.4,15.4]}}));
+    let corner = h.app.tool.as_ref().unwrap().pts[0].0;
+    assert!(corner.dist(Vec2::new(20.0, 15.0)) < 1e-9, "the infinite lines cross beyond their defining segments: {corner:?}");
+    step(&mut h, json!({"click":{"sketch":[30,25]}}));
+    step(&mut h, json!({"key":"Escape"}));
+    let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+    assert_eq!(sk.curves.len(), 6, "two construction lines and the rectangle");
+    assert!(sk.points.iter().any(|p| p.pos.dist(Vec2::new(20.0, 15.0)) < 1e-9), "the committed rectangle keeps the snapped corner");
+}
+
+#[test]
 fn two_recent_midpoints_snap_where_their_guides_meet() {
     use solidcraft_engine::geom::Vec2;
     let mut h = tracking_fixture();

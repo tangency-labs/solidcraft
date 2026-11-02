@@ -137,8 +137,11 @@ pub struct AdapterChoice {
     pub compatible: bool,
 }
 
-/// Choose only surface-compatible adapters. Names saved in preferences are exact; the
-/// environment override follows wgpu's case-insensitive substring convention.
+/// Choose an adapter by name. The environment override follows wgpu's case-insensitive
+/// substring convention among surface-compatible adapters. A saved preference prefers an
+/// exact (then case-insensitive) name among compatible adapters, and if the named card is
+/// only listed as incompatible with the surface still picks it (#8341: otherwise the
+/// preference is kept in the dialog while wgpu silently uses another GPU).
 /// No match leaves selection to the normal wgpu request.
 pub fn choose_adapter(adapters: &[AdapterChoice], environment: Option<&str>, preference: Option<&str>) -> Option<usize> {
     // wgpu's environment helper panics on a missing name; an override must remain recoverable.
@@ -149,12 +152,14 @@ pub fn choose_adapter(adapters: &[AdapterChoice], environment: Option<&str>, pre
             return Some(index);
         }
     }
-    if let Some(name) = preference.filter(|s| !s.is_empty())
-        && let Some((index, _)) = compatible().find(|(_, a)| a.name == name)
-    {
-        return Some(index);
-    }
-    None
+    let name = preference.filter(|s| !s.is_empty())?;
+    let find = |pred: &dyn Fn(&AdapterChoice) -> bool, only_compatible: bool| {
+        adapters.iter().enumerate().find(|(_, a)| (!only_compatible || a.compatible) && pred(a)).map(|(i, _)| i)
+    };
+    find(&|a| a.name == name, true)
+        .or_else(|| find(&|a| a.name.eq_ignore_ascii_case(name), true))
+        .or_else(|| find(&|a| a.name == name, false))
+        .or_else(|| find(&|a| a.name.eq_ignore_ascii_case(name), false))
 }
 
 /// Leave Automatic on wgpu's normal request path; named choices may defer to it too.
@@ -416,7 +421,8 @@ mod tests {
         assert_eq!(choose_adapter(&cards, None, Some("removed")), None);
         assert_eq!(choose_adapter(&cards, Some("missing"), Some("Discrete small")), Some(1));
         assert_eq!(choose_adapter(&cards, Some(""), Some("Discrete small")), Some(1));
-        assert_eq!(choose_adapter(&cards, None, Some("Discrete")), None, "saved names are exact");
+        assert_eq!(choose_adapter(&cards, None, Some("discrete small")), Some(1), "preference matches without regard to case");
+        assert_eq!(choose_adapter(&cards, None, Some("Discrete")), None, "a preference is the full name, not a substring");
     }
 
     #[test]
@@ -425,9 +431,18 @@ mod tests {
         assert_eq!(choose_adapter(&cards, None, None), None);
         assert_eq!(choose_adapter(&cards, Some(""), Some("")), None);
         cards[2].compatible = false;
-        assert_eq!(choose_adapter(&cards, Some("large"), Some("Discrete large")), None);
+        // Environment still needs a compatible adapter; a preference keeps the named card (#8341).
+        assert_eq!(choose_adapter(&cards, Some("large"), Some("Discrete large")), Some(2));
         assert_eq!(choose_adapter(&cards, Some("small"), None), Some(1));
         assert_eq!(choose_adapter(&[], None, None), None);
+    }
+
+    #[test]
+    fn preference_keeps_a_named_card_even_when_surface_says_incompatible() {
+        let mut cards = cards();
+        cards[1].compatible = false;
+        assert_eq!(choose_adapter(&cards, None, Some("Discrete small")), Some(1));
+        assert_eq!(choose_adapter(&cards, None, Some("discrete SMALL")), Some(1));
     }
 
     #[test]

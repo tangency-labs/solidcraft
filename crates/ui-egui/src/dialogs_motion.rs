@@ -895,11 +895,19 @@ mod tests {
 
     // Kit rows publish identities independently of translated text. Long forms scroll through
     // the same wheel events as a person; assertions still verify the saved rules and geometry.
+    // A table row scrolled out of view is not built, so its handle is missing until the form
+    // scrolls back up to the table above the rules.
     fn reveal_config_handle(h: &mut crate::scenario::Harness, handle: &str) {
         for _ in 0..24 {
-            let at = crate::scenario::handle_at(handle).unwrap_or_else(|| panic!("missing {handle}: {:?}", h.app.dialog));
             let header = crate::scenario::rect_of("dialog:header").unwrap();
             let footer = crate::scenario::rect_of("dialog:footer").unwrap();
+            let at = crate::scenario::handle_at(handle);
+            if handle.starts_with("config:activate:") && at.is_none() {
+                h.call("ui.scroll", json!({"x":header.left()+Tokens::get().space_6,"y":(header.bottom()+footer.top())*0.5,"delta":160.0}));
+                h.frames(6);
+                continue;
+            }
+            let at = at.unwrap_or_else(|| panic!("missing {handle}: {:?}", h.app.dialog));
             if at.y > header.bottom() + 8.0 && at.y < footer.top() - 8.0 {
                 return;
             }

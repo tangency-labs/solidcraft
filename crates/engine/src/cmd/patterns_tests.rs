@@ -240,27 +240,79 @@ fn circular_axis_origin_rejects_invalid_values_atomically() {
     run(&mut s, "parameters.add", json!({"name":"cy","expression":"25 mm"}));
     let before = s.doc.to_json();
     let undo = s.undo.len();
-    for origin in [
-        json!(["cx", "cy", 0]),
-        json!(["50", 25, 0]),
-        json!([0, 0]),
-        json!([0, 0, 0, 0]),
-        json!(null),
-        json!(false),
-        json!({"x":0,"y":0}),
-        json!([1e9, 0, 0]),
-        json!([0, 1e100, 0]),
-    ] {
-        for (cmd, params) in [
-            ("solid.pattern.circular", json!({"features":["Hole1"],"axis":{"origin":origin,"dir":[0,0,1]},"count":4})),
-            ("construct.plane.at_angle", json!({"base":"XY","axis":{"origin":origin,"dir":[1,0,0]},"angle":45})),
-        ] {
-            let error = s.execute(cmd, &params).unwrap_err().to_string();
-            assert!(error.contains("axis.origin") && error.contains("expressions are not supported"), "{error}");
-            assert_eq!(s.doc.to_json(), before);
-            assert_eq!(s.undo.len(), undo);
-        }
+    let invalid = [json!([0, 0]), json!([0, 0, 0, 0]), json!(null), json!(false), json!({"x":0,"y":0}), json!([1e9, 0, 0]), json!([0, 1e100, 0])];
+    // A circular pattern's origin takes length expressions (#10852); an angled plane's doesn't.
+    for origin in invalid.iter().chain(&[json!(["nope", 0, 0]), json!(["2 deg", 0, 0])]) {
+        let params = json!({"features":["Hole1"],"axis":{"origin":origin,"dir":[0,0,1]},"count":4});
+        let error = s.execute("solid.pattern.circular", &params).unwrap_err().to_string();
+        assert!(error.contains("axis.origin"), "{origin}: {error}");
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.undo.len(), undo);
     }
+    for origin in invalid.iter().chain(&[json!(["cx", "cy", 0]), json!(["50", 25, 0])]) {
+        let params = json!({"base":"XY","axis":{"origin":origin,"dir":[1,0,0]},"angle":45});
+        let error = s.execute("construct.plane.at_angle", &params).unwrap_err().to_string();
+        assert!(error.contains("axis.origin") && error.contains("expressions are not supported"), "{error}");
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.undo.len(), undo);
+    }
+}
+
+/// #10852: a circular pattern about `{origin, dir}` with length expressions in the origin turns
+/// about the point they give now, so the copies follow the parameters as the seed does. The
+/// expressions are saved, renamed with their parameter, and can be set by `timeline.edit`.
+#[test]
+fn circular_axis_origin_expressions_follow_their_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"cx","expression":"50 mm"}));
+    run(&mut s, "parameters.add", json!({"name":"cy","expression":"40 mm"}));
+    // A 2 mm cube 20 mm from (cx, cy), turned about the vertical line there.
+    run(&mut s, "solid.box", json!({"length":2,"width":2,"height":2,"corner":["cx + 20 mm","cy",0],"body_name":"Cube"}));
+    run(&mut s, "solid.pattern.circular", json!({"bodies":["Cube"],"axis":{"origin":["cx","cy",0],"dir":[0,0,1]},"count":4}));
+    // The x and y extent of the four cubes: 22 mm either side of the axis while it is 20 mm away.
+    let span = |s: &Session| {
+        let st = s.model.state();
+        assert_eq!(st.bodies.len(), 4);
+        let mut out = [f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY];
+        for b in st.bodies.iter().filter_map(|mb| solidcraft_kernel::measure(&mb.body).ok()).map(|m| m.bbox) {
+            out = [out[0].min(b.min.x), out[1].max(b.max.x), out[2].min(b.min.y), out[3].max(b.max.y)];
+        }
+        out
+    };
+    let about_at = |s: &Session, x: f64, y: f64, half: f64| {
+        for (got, want) in span(s).into_iter().zip([x - half, x + half, y - half, y + half]) {
+            assert!((got - want).abs() < 1e-6, "{:?} is not {half} mm either side of ({x}, {y})", span(s));
+        }
+    };
+    let about = |s: &Session, x: f64, y: f64| about_at(s, x, y, 22.0);
+    // The origin as the pattern saves it.
+    let saved_origin = |s: &Session| match s.doc.features.last().map(|f| &f.kind) {
+        Some(solidcraft_doc::FeatureKind::Pattern { pattern, .. }) => serde_json::to_value(pattern).unwrap_or_default()["origin"].clone(),
+        other => panic!("not a pattern: {other:?}"),
+    };
+    about(&s, 50.0, 40.0);
+    assert_eq!(saved_origin(&s), json!(["cx", "cy", 0.0]), "the expressions are saved");
+    run(&mut s, "parameters.change", json!({"name":"cx","expression":"60 mm"}));
+    about(&s, 60.0, 40.0);
+    // Renaming a parameter renames it in the origin, and the pattern still follows it.
+    run(&mut s, "parameters.rename", json!({"name":"cy","new_name":"py"}));
+    run(&mut s, "parameters.change", json!({"name":"py","expression":"45 mm"}));
+    about(&s, 60.0, 45.0);
+    assert_eq!(saved_origin(&s), json!(["cx", "py", 0.0]));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap_or_else(|e| panic!("{e}")));
+    about(&reopened, 60.0, 45.0);
+    // timeline.edit sets the origin as expressions too: 10 mm back, so the cube is 30 mm away.
+    let pattern = s.doc.features.last().map(|f| f.id).unwrap_or_default();
+    run(&mut s, "timeline.edit", json!({"feature":pattern,"set":{"pattern.origin":["cx - 10 mm","py","0 mm"]}}));
+    about_at(&s, 50.0, 45.0, 32.0);
+    run(&mut s, "edit.undo", json!({}));
+    about(&s, 60.0, 45.0);
+    // Plain numbers are saved as numbers, as before.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":2,"width":2,"height":2,"corner":[70,40,0],"body_name":"Cube"}));
+    run(&mut s, "solid.pattern.circular", json!({"bodies":["Cube"],"axis":{"origin":[50,40,0],"dir":[0,0,1]},"count":4}));
+    about(&s, 50.0, 40.0);
+    assert_eq!(saved_origin(&s), json!([50.0, 40.0, 0.0]));
 }
 
 #[test]

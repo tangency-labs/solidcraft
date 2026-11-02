@@ -113,7 +113,15 @@ pub fn apply_mode(app: &mut SolveApp, id: &str, result: &Value) {
     if m == 0 || !solidcraft_engine::find_command(id).is_some_and(|c| c.tab == "SKETCH" && c.panel == "CREATE") {
         return;
     }
-    let curves: Vec<String> = result["curves"].as_array().into_iter().flatten().filter_map(|c| c.as_str().map(str::to_string)).collect();
+    // Drawing reports its curves as `curves`; Project and the other link commands report them per
+    // link, `links[].curves` (#9945).
+    let links = result["links"].as_array().into_iter().flatten().map(|l| &l["curves"]);
+    let curves: Vec<String> = std::iter::once(&result["curves"])
+        .chain(links)
+        .filter_map(Value::as_array)
+        .flatten()
+        .filter_map(|c| c.as_str().map(str::to_string))
+        .collect();
     if curves.is_empty() {
         return;
     }
@@ -658,6 +666,49 @@ mod tests {
             assert!(sketch.curves.iter().all(|c| c.construction), "{command}");
             h.app.run("edit.undo", json!({})).unwrap();
             assert!(h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty());
+            set_mode(&mut h.app, 0);
+        }
+    }
+
+    /// Project gives the curves it makes the drawing line type, as drawing does (#9945): its
+    /// reply lists them per link, not as `curves`. A projected line becomes construction,
+    /// centerline or infinite; a projected circle, which cannot be either of the last two, becomes
+    /// construction; normal leaves both as they are. One undo takes the projection away whole.
+    #[test]
+    fn project_gives_its_curves_the_drawing_line_type() {
+        let flags = |c: &solidcraft_engine::sketch::Curve| (c.construction, c.centerline, c.infinite);
+        for (m, line, circle) in [
+            (0, (false, false, false), (false, false, false)),
+            (1, (true, false, false), (true, false, false)),
+            (2, (false, true, false), (true, false, false)),
+            // An infinite line is construction too, as when it is drawn.
+            (3, (true, false, true), (true, false, false)),
+        ] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,10]})).unwrap();
+            h.app.run("sketch.circle.center", json!({"center":[40,0],"radius":5})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            set_mode(&mut h.app, m);
+            let history = h.app.session.undo.len();
+            let r = h.app.run("sketch.project", json!({"refs":[{"sketch":1,"curve":"l1"},{"sketch":1,"curve":"c1"}]})).unwrap();
+            assert_eq!(r["links"].as_array().map(Vec::len), Some(2), "mode {m}: {r}");
+            let state = h.app.session.world_state();
+            let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+            let kind = |line: bool| {
+                sketch
+                    .curves
+                    .iter()
+                    .find(|c| matches!(c.kind, solidcraft_engine::sketch::CurveKind::Line { .. }) == line)
+                    .map(flags)
+                    .unwrap_or_else(|| panic!("mode {m}: a projected {}", if line { "line" } else { "circle" }))
+            };
+            assert_eq!(kind(true), line, "mode {m}: the line");
+            assert_eq!(kind(false), circle, "mode {m}: the circle");
+            assert_eq!(h.app.session.undo.len(), history + 1, "mode {m}: one undo step");
+            h.app.run("edit.undo", json!({})).unwrap();
+            assert!(h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty(), "mode {m}");
             set_mode(&mut h.app, 0);
         }
     }

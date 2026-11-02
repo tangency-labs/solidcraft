@@ -10,6 +10,14 @@ use crate::params::{bad, bool_, name_or_id_values, num, str_};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("ui.assistant", "Toggle Assistant", crate::checked!("ui.assistant", assistant))
+        .icon("assistant")
+        .key("Ctrl+Shift+A")
+        .noundo()
+        .doc_only()
+        .contract(&ASSISTANT_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::AssistantResult>)
+        .params("Show or hide Assistant in the app. Headless calls are refused without changing the design"),
     CommandSpec::new("edit.undo", "Undo", undo).icon("undo").key("Ctrl+Z").noundo().doc_only(),
     CommandSpec::new("edit.redo", "Redo", redo).icon("redo").key("Ctrl+Y").noundo().doc_only(),
     CommandSpec::new("edit.repeat", "Repeat Last Command", crate::checked!("edit.repeat", repeat))
@@ -88,7 +96,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("select.set", "Select", select_set).icon("select")
         .noundo()
-        .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …}], add?: bool"),
+        .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …}], add?: bool; face/edge: body plus point [x,y,z] in world mm or index (both also accepted); a point uses Measure's pick tolerance, an index supplies a point on the item; invalid partial picks leave the selection unchanged"),
     CommandSpec::new("select.filter", "Selection filter", select_filter).icon("select").noundo().doc_only()
         .params("mode: body|face|component → validated UI pick granularity; headless echo only, no document edits or undo"),
     CommandSpec::new("select.clear", "Clear Selection", select_clear).icon("select").noundo(),
@@ -117,6 +125,12 @@ fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
     let label = now.label.clone();
     s.undo.push(now);
     Ok(json!({"redone": label}))
+}
+
+const ASSISTANT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::AssistantParams> = crate::schema::TypedContract::new();
+
+fn assistant(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(EngineError::Other("ui.assistant shows or hides Assistant in the app; no assistant panel exists in a headless session".into()))
 }
 
 const REPEAT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::RepeatParams> = crate::schema::TypedContract::new();
@@ -1123,7 +1137,7 @@ fn inspect_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let rolled_back = s.doc.features.iter().position(|x| x.id == id).is_some_and(|i| i >= marker);
     let r = s.model.result(id);
     Ok(json!({
-        "id": f.id, "name": f.name, "type": f.kind.type_name(), "suppressed": f.suppressed, "rolled_back": rolled_back,
+        "id": f.id, "name": f.name, "type": f.kind.kind_key(), "type_name": f.kind.type_name(), "suppressed": f.suppressed, "rolled_back": rolled_back,
         "definition": def, "omitted": omitted, "inputs": inputs,
         "error": r.and_then(|r| r.error.clone()), "warning": r.and_then(|r| r.warning.clone()),
         "boolean_diagnostics": r.map(|r| &r.boolean_diagnostics),
@@ -1225,6 +1239,65 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"feature": id, "recomputed": s.model.last_recomputed, "restored": s.model.last_restored}))
 }
 
+/// Complete a partial script pick without changing the stored selection type or reinterpreting
+/// an existing index-and-point pair. Unlike Measure, selection keeps the exact face/edge index:
+/// it must not merge a cylinder's patches or a circular rim's arcs into a different item.
+fn selection_item(s: &Session, value: Value) -> Result<Sel> {
+    use solidcraft_geom::Vec3;
+
+    let kind = value.get("type").and_then(Value::as_str);
+    if !matches!(kind, Some("face" | "edge")) || (value.get("index").is_some() && value.get("point").is_some()) {
+        return serde_json::from_value(value).map_err(|e| bad("select.set", e.to_string()));
+    }
+    let face = kind == Some("face");
+    #[derive(serde::Deserialize)]
+    struct Pick {
+        body: String,
+        index: Option<usize>,
+        point: Option<Vec3>,
+    }
+    let Pick { body, index, point } = serde_json::from_value(value).map_err(|e| bad("select.set", e.to_string()))?;
+    let state = s.world_state();
+    let b = state.body(&body).ok_or_else(|| bad("select.set", format!("no body `{body}`")))?;
+    let missing = || bad("select.set", format!("no {} of `{body}` at the given index or point", if face { "face" } else { "edge" }));
+    let (index, point) = match (index, point) {
+        (Some(index), None) => {
+            let point = if face {
+                solidcraft_doc::naming::face_spot(b, index).map(|spot| spot.point)
+            } else {
+                let mesh = b.mesh();
+                mesh.edges.get(index).and_then(|edge| match edge.as_slice() {
+                    [a, b] => Some(a.lerp(*b, 0.5)),
+                    // Use a sample on the curve, not the midpoint of a chord inside it.
+                    points if points.len() > 2 => points.get(points.len() / 2).copied(),
+                    _ => None,
+                })
+            };
+            (index, point.filter(|p| p.is_finite()).ok_or_else(missing)?)
+        }
+        (None, Some(point)) if point.is_finite() => {
+            let index = if face {
+                solidcraft_doc::appearance::face_index_at(b, point)
+            } else {
+                let mesh = b.mesh();
+                mesh.edges
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, edge)| {
+                        let distance =
+                            edge.windows(2).filter_map(|w| Some(point.dist_to_segment(*w.first()?, *w.get(1)?))).fold(f64::INFINITY, f64::min);
+                        (distance <= solidcraft_doc::appearance::pick_tolerance(b)).then_some((index, distance))
+                    })
+                    .min_by(|(_, a), (_, b)| a.total_cmp(b))
+                    .map(|(index, _)| index)
+            };
+            (index.ok_or_else(missing)?, point)
+        }
+        _ => return Err(bad("select.set", "a face or edge needs an index or a finite point")),
+    };
+    Ok(if face { Sel::Face { body, index, point } } else { Sel::Edge { body, index, point } })
+}
+
 fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
     let items = p.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
     if items.len() > 10_000 {
@@ -1232,7 +1305,7 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut sel: Vec<Sel> = Vec::new();
     for it in items {
-        let one: Sel = serde_json::from_value(it).map_err(|e| bad("select.set", e.to_string()))?;
+        let one = selection_item(s, it)?;
         match &one {
             Sel::Occurrence { path } => {
                 s.occurrence_bodies(path, true).map_err(|e| bad("select.set", e.to_string()))?;
@@ -1257,7 +1330,7 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
             s.selection.push(x);
         }
     }
-    s.revision += 1;
+    s.refresh_display();
     Ok(json!({"selected": s.selection.len()}))
 }
 
@@ -1314,7 +1387,7 @@ fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
     s.selection.clear();
-    s.revision += 1;
+    s.refresh_display();
     Ok(json!({"selected": 0}))
 }
 
@@ -1349,11 +1422,21 @@ pub(super) fn newly_broken_in_history(
     let whole = |doc: &solidcraft_doc::Document, model: &solidcraft_doc::Model| {
         let mut doc = doc.clone();
         doc.marker = None;
-        let mut model = model.clone();
-        model.evaluate(&doc);
-        model
+        // A copy keeps nothing on its own: it keeps what the model keeps, so a delete checked
+        // ahead finds this build there when it runs (#9917).
+        let mut copy = model.clone();
+        copy.keep(model.kept());
+        copy.evaluate(&doc);
+        copy
     };
-    newly_broken(&whole(before_doc, before), &whole(after_doc, after))
+    // Only a feature that fails after the change can be newly broken: when none does, the
+    // history before it needn't be built again (#9917: each build ran every boolean after the
+    // marker, half a minute on a large design).
+    let after = whole(after_doc, after);
+    if after.results.iter().all(|r| r.error.is_none()) {
+        return Vec::new();
+    }
+    newly_broken(&whole(before_doc, before), &after)
 }
 
 /// Whether `after_doc` differs from `before_doc` only in sketch constraints and dimensions (and
@@ -1668,6 +1751,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     }
     trial.doc_mut().marker = Some(idx + 1);
     trial.refresh();
+    // The edited feature keeps its name. Its temporary replacement needs a fresh one while
+    // the original remains in the trial as a placeholder (including construction planes).
+    if let Some(parameters) = params.as_object_mut() {
+        parameters.remove("name");
+    }
     let r = spec.run_nested(&mut trial, &params)?;
     let made = r.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
     let mut new = trial.doc.feature(made).cloned().ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
@@ -1678,6 +1766,15 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && before.at.dist(after.at.0) < 1e-8
     {
         *after = before.clone();
+    }
+    // A perforation keeps its outline through an edit that names no sketch (the Perforate dialog has no outline).
+    if let (FeatureKind::SheetPerforate { sketch: Some(before), profiles: picked, .. }, FeatureKind::SheetPerforate { sketch, profiles, .. }) =
+        (&old.kind, &mut new.kind)
+        && sketch.is_none()
+        && params.get("sketch").is_none()
+    {
+        *sketch = Some(*before);
+        *profiles = picked.clone();
     }
     // A boundary surface's loop of sketch curves and its curve network are one command's two
     // forms: an edit may turn one into the other.
@@ -1706,6 +1803,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         })
         .collect();
     trial.doc_mut().features.retain(|f| f.id != made);
+    // Made right after the edited feature, the trial joined the timeline folder holding both:
+    // it leaves it too, or its id stays there, and is given out again below (#9373).
+    for group in &mut trial.doc_mut().timeline_groups {
+        group.features.retain(|f| *f != made);
+    }
     let added = trial.doc.features.len().saturating_sub(s.doc.features.len());
     trial.doc_mut().marker = s.doc.marker.map(|marker| if marker > idx { marker.saturating_add(added) } else { marker });
     if made == s.doc.next_id && trial.doc.next_id == made.saturating_add(1) {

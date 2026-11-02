@@ -203,11 +203,11 @@ impl FaceHit {
     /// What a feature says about how it found a face by its stored name `name` (`None`: exactly).
     pub fn note(&self, name: &str) -> Option<String> {
         if self.split {
-            Some(format!("face `{name}` was split; using the piece nearest the picked point"))
+            Some(format!("face `{}` was split; using the piece nearest the picked point", quoted(name)))
         } else if self.merged {
             Some(format!("face `{name}` was merged into another face; using that face"))
         } else if !self.verified && !self.on_point && !self.legacy {
-            Some(format!("face `{name}` was found by geometry, not exact history; check it"))
+            Some(format!("face `{}` was found by geometry, not exact history; check it", quoted(name)))
         } else {
             None
         }
@@ -243,13 +243,29 @@ impl FaceHit {
     }
 }
 
+/// A stored name as a message quotes it: whole up to about 80 characters, else its start and
+/// end around an ellipsis. Generated names grow with the history (a split edge's name holds both
+/// its faces' names), and a chamfer's warning that quoted fourteen of them in full ran to 122,701
+/// characters (#8541).
+pub(crate) fn quoted(name: &str) -> String {
+    const HEAD: usize = 48;
+    const TAIL: usize = 24;
+    let n = name.chars().count();
+    if n <= HEAD + TAIL + 8 {
+        return name.to_string();
+    }
+    let head: String = name.chars().take(HEAD).collect();
+    let tail: String = name.chars().skip(n - TAIL).collect();
+    format!("{head}…{tail}")
+}
+
 impl EdgeHit {
     /// What a feature says about how it found an edge by its stored name `name` (`None`: exactly).
     pub fn note(&self, name: &str) -> Option<String> {
         if self.split {
-            Some(format!("edge `{name}` was split; using the piece nearest the picked point"))
+            Some(format!("edge `{}` was split; using the piece nearest the picked point", quoted(name)))
         } else if !self.verified && !self.on_point && !self.legacy {
-            Some(format!("edge `{name}` was found by geometry, not exact history; check it"))
+            Some(format!("edge `{}` was found by geometry, not exact history; check it", quoted(name)))
         } else {
             None
         }

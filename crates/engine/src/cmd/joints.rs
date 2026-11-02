@@ -697,11 +697,47 @@ fn check_sides(a: &JointOrigin, b: &JointOrigin, cmd: &str) -> Result<()> {
     Ok(())
 }
 
+/// A path already joins the two sides, including paths through grounded occurrences.
+fn closes_loop(s: &Session, j: &Joint) -> bool {
+    let mut at: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
+    for joint in s.doc.assembly.joints.iter().filter(|j| !j.suppressed).take(joints::MAX_JOINTS) {
+        at.entry(joint.a.occurrence).or_default().push(joint.b.occurrence);
+        at.entry(joint.b.occurrence).or_default().push(joint.a.occurrence);
+    }
+    // The solver fixes the root and every grounded occurrence in the same world frame.
+    for o in s.doc.occurrences.iter().filter(|o| o.grounded) {
+        at.entry(0).or_default().push(o.id);
+        at.entry(o.id).or_default().push(0);
+    }
+    let mut seen = BTreeSet::from([j.a.occurrence]);
+    let mut pending = vec![j.a.occurrence];
+    while let Some(occ) = pending.pop() {
+        if occ == j.b.occurrence {
+            return true;
+        }
+        for other in at.get(&occ).into_iter().flatten() {
+            if seen.insert(*other) {
+                pending.push(*other);
+            }
+        }
+    }
+    false
+}
+
 fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
     if s.doc.assembly.joints.len() >= 10_000 {
         return Err(EngineError::Other("too many joints".into()));
     }
     check_sides(&j.a, &j.b, "joint.create")?;
+    // Relations and loop-closing typed joints start where their parts are. A typed joint in
+    // an open chain keeps its usual initial values; explicitly supplied values also keep theirs.
+    if p.get("values").is_none()
+        && p.get("value").is_none()
+        && (j.kind.is_relation() || closes_loop(s, &j))
+        && let Some(q) = joints::relation_values(&s.doc, &s.model.state(), &j)
+    {
+        j.values = q;
+    }
     // It starts at its values inside its limits. A value moved to a limit moves the part as it
     // is joined, which the answer says.
     let mut q = j.values.clone();
@@ -731,7 +767,10 @@ fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
     // A new joint starts shown, even if a stale visibility entry came from an older design.
     s.visibility.hidden_joints.retain(|h| *h != id);
     s.doc_mut().assembly.joints.push(j);
-    let sol = resolve(s);
+    let mut sol = resolve(s);
+    if sol.conflicts.iter().any(|(c, ..)| *c == id) && close_by_half_turn(s, id, &sol) {
+        sol = resolve(s);
+    }
     let mut out = sol_json(&sol, p);
     out["joint"] = json!(id);
     out["name"] = json!(name);
@@ -739,6 +778,95 @@ fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
         out["warnings"] = json!(warnings);
     }
     Ok(out)
+}
+
+/// Sets of angle values a new loop-closing joint tries a half turn round, at most.
+const HALF_TURN_TRIALS: usize = 16;
+
+/// A new joint that closes a loop is met from where the loop's parts sit. Where its parts only
+/// meet with one of them turned a half turn about a joint on the way between them (a second
+/// planar joint mating two faces that point the same way, #10331), the loop solve starts at a
+/// pose turned exactly away and sees no way round, and the joint is left as a conflict. As the
+/// first joint of a chain moves its part into place, turn the new joint's own angle, each angle
+/// on the shortest joint path between its two parts, or one of each, a half turn, and keep the
+/// first that meets it with no new conflict or error elsewhere than `before` had (stored, for
+/// the caller's resolve). False, and nothing changed, when none does. Values a motion link or an
+/// expression sets, and turns their limits stop short, are left alone.
+fn close_by_half_turn(s: &mut Session, id: u64, before: &joints::Solution) -> bool {
+    let asm = &s.doc.assembly;
+    let Some(new) = asm.joints.iter().find(|j| j.id == id) else { return false };
+    let (from, to) = (new.a.occurrence, new.b.occurrence);
+    // Breadth first over the other joints, from A's occurrence to B's.
+    let mut reached: BTreeMap<u64, Option<usize>> = BTreeMap::from([(from, None)]);
+    let mut frontier = vec![from];
+    while !frontier.is_empty() && !reached.contains_key(&to) {
+        let mut next = Vec::new();
+        for at in frontier {
+            for (k, j) in asm.joints.iter().enumerate().filter(|(_, j)| j.id != id && !j.suppressed) {
+                let other = if j.a.occurrence == at {
+                    j.b.occurrence
+                } else if j.b.occurrence == at {
+                    j.a.occurrence
+                } else {
+                    continue;
+                };
+                if let std::collections::btree_map::Entry::Vacant(e) = reached.entry(other) {
+                    e.insert(Some(k));
+                    next.push(other);
+                }
+            }
+        }
+        frontier = next;
+    }
+    let mut path = Vec::new();
+    let mut at = to;
+    while let Some(Some(k)) = reached.get(&at).copied() {
+        let Some(j) = asm.joints.get(k) else { break };
+        path.push(k);
+        at = if j.a.occurrence == at { j.b.occurrence } else { j.a.occurrence };
+    }
+    let linked: BTreeSet<(u64, usize)> = asm.links.iter().map(|l| (l.b, l.ib)).collect();
+    // The angle values that may turn: on the path, and the new joint's own (turned exactly
+    // away about its axis, its own value sees no way round either).
+    let angles = |ks: &[usize]| -> Vec<(usize, usize)> {
+        ks.iter()
+            .filter_map(|k| asm.joints.get(*k).map(|j| (*k, j)))
+            .flat_map(|(k, j)| (0..j.kind.dofs().len()).filter(move |i| j.kind.is_angle(*i)).map(move |i| (k, j, i)))
+            .filter(|(_, j, i)| j.exprs.value(*i).is_none() && !linked.contains(&(j.id, *i)))
+            .map(|(k, _, i)| (k, i))
+            .collect()
+    };
+    let own = asm.joints.iter().position(|j| j.id == id).map(|k| angles(&[k])).unwrap_or_default();
+    let mut trials: Vec<Vec<(usize, usize)>> = own.iter().map(|v| vec![*v]).collect();
+    for v in angles(&path) {
+        trials.push(vec![v]);
+        trials.extend(own.iter().map(|w| vec![v, *w]));
+    }
+    trials.truncate(HALF_TURN_TRIALS);
+    let st = s.model.state();
+    'trial: for turns in trials {
+        let mut doc = (*s.doc).clone();
+        for (k, i) in turns {
+            let Some(j) = doc.assembly.joints.get_mut(k) else { continue 'trial };
+            j.values.resize(j.kind.dofs().len(), 0.0);
+            let Some(q) = j.values.get(i).copied() else { continue 'trial };
+            let mut turned = j.values.clone();
+            if let Some(slot) = turned.get_mut(i) {
+                *slot = q + std::f64::consts::PI;
+            }
+            joints::clamp(j, &mut turned);
+            if turned.get(i).is_none_or(|v| (v - q - std::f64::consts::PI).abs() > 1e-9) {
+                continue 'trial;
+            }
+            j.values = turned;
+        }
+        let sol = joints::solve_holding_with_analysis(&doc, &st, &BTreeMap::new(), joints::Analysis::Placement);
+        if sol.conflicts.len() < before.conflicts.len() && !sol.conflicts.iter().any(|(c, ..)| *c == id) && sol.errors.len() <= before.errors.len() {
+            s.doc_mut().assembly.joints = doc.assembly.joints;
+            return true;
+        }
+    }
+    false
 }
 
 fn joint_origin(s: &mut Session, p: &Value) -> Result<Value> {
@@ -798,13 +926,6 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
         suppressed: false,
         exprs: JointExprs { offset: typed(p.get("offset")), angle: typed(p.get("angle")), values: value_exprs(p) },
     };
-    // A relation given no values starts from where its parts are: B moves no further than it must.
-    if p.get("values").is_none()
-        && p.get("value").is_none()
-        && let Some(q) = joints::relation_values(&s.doc, &s.model.state(), &j)
-    {
-        j.values = q;
-    }
     // No angle given: B keeps its turn about the joint's axis where a half turn would otherwise
     // come only from how its origin's x was chosen. (An angle relation's angle is its tilt.)
     if angle.is_none() && !j.kind.is_relation() {
@@ -1515,7 +1636,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     // A relation whose type, offset, tilt or flip changes starts again from where its parts are.
     let reseat = kind.is_some() || offset.is_some() || angle.is_some() || p.get("flip").is_some() || sides;
     if reseat {
-        let edited = s.doc.assembly.joints.iter().find(|j| j.id == id).cloned();
+        let edited = s.doc.assembly.joints.iter().find(|j| j.id == id).filter(|j| j.kind.is_relation()).cloned();
         if let Some(q) = edited.and_then(|j| joints::relation_values(&s.doc, &s.model.state(), &j))
             && let Some(j) = s.doc_mut().assembly.joints.iter_mut().find(|j| j.id == id)
         {

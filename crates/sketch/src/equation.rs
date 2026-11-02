@@ -12,10 +12,37 @@ use crate::model::{CurveKind, Result, Sketch, SketchError};
 /// Longest formula or range expression an equation curve takes (characters).
 pub const MAX_EQUATION_TEXT: usize = 1024;
 
+/// What the variable of an equation curve is in its formulas (#9333).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VariableUnit {
+    /// A plain number: `sin(t)` reads it in radians, and a range in a unit gives up that unit.
+    #[default]
+    Number,
+    /// A length, as the range is: `a ^ 2 / (4 * t)` is a length when `a` is one.
+    Range,
+}
+
+impl VariableUnit {
+    /// The word a command or a design spells it with.
+    pub fn parse(word: &str) -> Option<VariableUnit> {
+        match word {
+            "number" => Some(VariableUnit::Number),
+            "range" => Some(VariableUnit::Range),
+            _ => None,
+        }
+    }
+
+    fn is_number(&self) -> bool {
+        *self == VariableUnit::Number
+    }
+}
+
 /// A curve drawn from formulas: x(t) and y(t) over t from `start` to `end`, or (with `x` left
 /// out) the explicit y = f(x) over x from `start` to `end`. The formulas use the design's
-/// expression language and parameters; the variable is a plain number, so `sin(t)` reads it in
-/// radians, and a result without a unit is in the design's length unit.
+/// expression language and parameters; the variable is a plain number unless `variable_unit`
+/// says otherwise, so `sin(t)` reads it in radians, and a result without a unit is in the
+/// design's length unit.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EquationCurve {
     /// The fit point spline it places (a curve id of the sketch).
@@ -31,6 +58,9 @@ pub struct EquationCurve {
     /// How far (mm) the spline may stray from the formulas: the number of points was chosen for
     /// it when the curve was made or last edited.
     pub tolerance: f64,
+    /// What the variable is in the formulas. Left out of the file for a plain number.
+    #[serde(default, skip_serializing_if = "VariableUnit::is_number")]
+    pub variable_unit: VariableUnit,
 }
 
 impl EquationCurve {

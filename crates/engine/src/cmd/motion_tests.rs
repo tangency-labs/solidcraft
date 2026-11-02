@@ -38,6 +38,46 @@ fn deleted_motion_item_ids_are_not_reused_after_reopening() {
     }
 }
 
+/// #9738: a default name skips the names in use, after a delete too: contact sets, motion
+/// studies, exploded views, and the placements of a component.
+#[test]
+fn default_names_skip_names_in_use() {
+    for (create, delete, key, params, prefix) in [
+        ("contact.create", "contact.edit", "set", json!({"occurrences": ["A", "B"]}), "Contact Set"),
+        ("motion.study", "motion.delete", "study", json!({"steps": 10}), "Motion Study"),
+        ("explode.create", "explode.delete", "view", json!({"moves": [{"occurrence": "B", "translate": [20, 0, 0]}]}), "Exploded View"),
+    ] {
+        let mut s = Session::default();
+        for name in ["A", "B"] {
+            run(&mut s, "component.activate", json!({"component": "root"}));
+            run(&mut s, "component.create", json!({"name": name}));
+        }
+        let made = |s: &mut Session| {
+            let r = run(s, create, params.clone());
+            (r[key].as_u64().unwrap(), r["name"].as_str().unwrap().to_string())
+        };
+        let (first, one) = made(&mut s);
+        let (_, two) = made(&mut s);
+        assert_eq!([one, two], [format!("{prefix}1"), format!("{prefix}2")]);
+        run(&mut s, delete, json!({key: first, "delete": true}));
+        assert_eq!(made(&mut s).1, format!("{prefix}1"), "{create}: the free name, not {prefix}2 again");
+    }
+    // Placements: with the first deleted, a copy takes a name none has.
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Arm"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let arm = occ(&s, "Arm");
+    for _ in 0..2 {
+        run(&mut s, "occurrence.copy", json!({"occurrence": arm, "translate": [20, 0, 0]}));
+    }
+    let names = |s: &Session| s.doc.occurrences.iter().map(|o| o.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&s), ["Arm:1", "Arm:2", "Arm:3"]);
+    run(&mut s, "selection.delete", json!({"occurrences": ["Arm:1"]}));
+    run(&mut s, "occurrence.copy", json!({"occurrence": "Arm:3", "translate": [20, 0, 0]}));
+    assert_eq!(names(&s), ["Arm:2", "Arm:3", "Arm:1"]);
+}
+
 /// Where B's corner (20, 0, 0) is now.
 fn b_x(s: &Session) -> f64 {
     super::world_point(s, occ(s, "B"), Vec3::new(20.0, 0.0, 0.0)).x

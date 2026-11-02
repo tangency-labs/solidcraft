@@ -254,3 +254,152 @@ fn a_curve_its_parameters_break_is_an_error_not_a_crash() {
     run(&mut s, "parameters.change", json!({"name": "k", "expression": "1 mm"}));
     no_trouble(&s);
 }
+
+/// The issue's curve (#9333): `a = 10 mm`, y = a^2 / (4 t) over t from a to 3a. Each point is on
+/// y = a^2 / (4 x), from (a, a / 4) to (3a, a / 12).
+fn assert_parabola(s: &Session, id: &str, a: f64) {
+    let pts = curve_points(s, id);
+    let (first, last) = (pts[0], *pts.last().unwrap());
+    assert!((first - Vec2::new(a, a / 4.0)).len() < 1e-9, "{first:?}");
+    assert!((last - Vec2::new(3.0 * a, a / 12.0)).len() < 1e-9, "{last:?}");
+    assert!(pts.iter().all(|p| (p.y - a * a / (4.0 * p.x)).abs() < 1e-9), "{pts:?}");
+}
+
+fn range_unit_curve(s: &mut Session) -> String {
+    run(s, "parameters.add", json!({"name": "a", "expression": "10 mm"}));
+    run(s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let r = run(s, "sketch.equation_curve", json!({"x": "t", "y": "a ^ 2 / (4 * t)", "start": "a", "end": "3 * a", "variable_unit": "range"}));
+    assert_eq!(r["closed"], false, "{r}");
+    let id = r["curve"].as_str().unwrap().to_string();
+    run(s, "sketch.finish", json!({}));
+    no_trouble(s);
+    id
+}
+
+#[test]
+fn a_variable_in_its_ranges_unit_follows_the_parameter_and_the_design_unit() {
+    let mut s = Session::default();
+    // Without the flag this very formula is refused, as it always was.
+    run(&mut s, "parameters.add", json!({"name": "b", "expression": "10 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Off"}));
+    let why = s.execute("sketch.equation_curve", &json!({"x": "t", "y": "b ^ 2 / (4 * t)", "start": "b", "end": "3 * b"})).unwrap_err().to_string();
+    assert!(why.contains("length^2"), "{why}");
+    run(&mut s, "sketch.finish", json!({}));
+
+    let id = range_unit_curve(&mut s);
+    assert_parabola(&s, &id, 10.0);
+    run(&mut s, "parameters.change", json!({"name": "a", "expression": "20 mm"}));
+    no_trouble(&s);
+    assert_parabola(&s, &id, 20.0);
+    // In millimetres the parameter's length does not depend on the design's unit, nor the curve.
+    run(&mut s, "document.units", json!({"units": "in"}));
+    no_trouble(&s);
+    assert_parabola(&s, &id, 20.0);
+    // A parameter given in inches, in an inch design.
+    run(&mut s, "parameters.change", json!({"name": "a", "expression": "2 in"}));
+    no_trouble(&s);
+    assert_parabola(&s, &id, 50.8);
+}
+
+/// A plain end is in the design's unit, so it moves when the unit changes (#9333).
+#[test]
+fn a_plain_end_of_the_range_takes_the_design_unit() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "a", "expression": "100 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let r = run(&mut s, "sketch.equation_curve", json!({"x": "t", "y": "t / 2", "start": 1, "end": "a", "variable_unit": "range"}));
+    let id = r["curve"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    assert!((curve_points(&s, &id)[0] - Vec2::new(1.0, 0.5)).len() < 1e-9);
+    run(&mut s, "document.units", json!({"units": "in"}));
+    no_trouble(&s);
+    let pts = curve_points(&s, &id);
+    assert!((pts[0] - Vec2::new(25.4, 12.7)).len() < 1e-9, "{:?}", pts[0]);
+    assert!((*pts.last().unwrap() - Vec2::new(100.0, 50.0)).len() < 1e-9);
+}
+
+#[test]
+fn the_refused_range_says_why_and_changes_nothing() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "a", "expression": "10 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let before = s.doc.to_json();
+    for (start, end) in [("a", "90 deg"), ("90 deg", "a"), ("0", "1")] {
+        let p = json!({"x": "t", "y": "t", "start": start, "end": end, "variable_unit": "range"});
+        let why = s.execute("sketch.equation_curve", &p).unwrap_err().to_string();
+        assert!(
+            why.contains("with the variable in its range's unit, start and end must both be lengths, or one a length and the other a plain number"),
+            "{p}: {why}"
+        );
+        assert_eq!(s.doc.to_json(), before, "{p} changed the design");
+    }
+    for bad in [json!("mm"), json!(1), json!(true), json!({}), json!("Range")] {
+        assert!(s.execute("sketch.equation_curve", &json!({"x": "t", "y": "t", "start": 0, "end": "a", "variable_unit": bad})).is_err(), "{bad}");
+    }
+}
+
+/// A design file is hostile (#9333): a range the rule refuses is reported on the sketch, and a
+/// value that means nothing refuses the file. Neither crashes.
+#[test]
+fn a_hostile_saved_flag_or_range_is_an_error_not_a_crash() {
+    let mut s = Session::default();
+    range_unit_curve(&mut s);
+    let saved = s.doc.to_json();
+    assert!(saved.contains("3 * a") && saved.contains("\"range\""), "{saved}");
+    let angle = saved.replace("3 * a", "90 deg");
+    let r = Session::new(solidcraft_doc::Document::from_json(&angle).unwrap());
+    let res = r.model.results.iter().find(|r| r.name == "S").unwrap();
+    assert!(res.error.as_deref().is_some_and(|e| e.contains("equation curve") && e.contains("must both be lengths")), "{:?}", res.error);
+    assert!(solidcraft_doc::Document::from_json(&saved.replace("\"range\"", "\"furlong\"")).is_err());
+}
+
+#[test]
+fn an_edit_keeps_the_flag_until_told_and_a_saved_design_keeps_it() {
+    use solidcraft_sketch::VariableUnit;
+    let mut s = Session::default();
+    let id = range_unit_curve(&mut s);
+    let f = s.doc.find_feature("S").unwrap().id;
+    // The file says it, and reopening follows it.
+    let saved = s.doc.to_json();
+    assert!(saved.contains("variable_unit"), "not saved");
+    let mut r = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    no_trouble(&r);
+    assert_eq!(r.doc.sketch(f).unwrap().equation_of(&id).unwrap().variable_unit, VariableUnit::Range);
+    assert_parabola(&r, &id, 10.0);
+    run(&mut r, "parameters.change", json!({"name": "a", "expression": "20 mm"}));
+    assert_parabola(&r, &id, 20.0);
+    // An edit that leaves it out keeps it.
+    run(&mut s, "sketch.edit", json!({"sketch": "S"}));
+    run(&mut s, "sketch.equation_curve.edit", json!({"curve": id, "tolerance": 0.005}));
+    assert_eq!(s.doc.sketch(f).unwrap().equation_of(&id).unwrap().variable_unit, VariableUnit::Range);
+    // Off again, that formula is refused and the curve stays as it was.
+    assert!(s.execute("sketch.equation_curve.edit", &json!({"curve": id, "variable_unit": "number"})).is_err());
+    assert_eq!(s.doc.sketch(f).unwrap().equation_of(&id).unwrap().variable_unit, VariableUnit::Range);
+    run(&mut s, "sketch.equation_curve.edit", json!({"curve": id, "y": "t / 2", "start": 0, "end": 10, "variable_unit": "number"}));
+    assert_eq!(s.doc.sketch(f).unwrap().equation_of(&id).unwrap().variable_unit, VariableUnit::Number);
+    assert!(!s.doc.to_json().contains("variable_unit"));
+}
+
+/// A design written without the flag (#9333): nothing in the file changes, and its curve is what
+/// it was, with the variable a plain number over a range in length.
+#[test]
+fn a_design_saved_without_the_flag_reopens_the_same() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let r = run(&mut s, "sketch.equation_curve", json!({"x": "t", "y": "t * t / 20", "start": "0 mm", "end": "40 mm"}));
+    let id = r["curve"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    let saved = s.doc.to_json();
+    assert!(!saved.contains("variable_unit"), "a curve without the flag writes no new key");
+    let want = curve_points(&s, &id);
+    assert!((*want.last().unwrap() - Vec2::new(40.0, 80.0)).len() < 1e-9);
+    // The format before this change, as the last release wrote it.
+    let mut old: Value = serde_json::from_str(&saved).unwrap();
+    old["format"] = json!(solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT - 1));
+    if let Some(o) = old.as_object_mut() {
+        o.remove("format_pending");
+    }
+    let r = Session::new(solidcraft_doc::Document::from_json(&old.to_string()).unwrap());
+    no_trouble(&r);
+    assert_eq!(curve_points(&r, &id), want);
+}

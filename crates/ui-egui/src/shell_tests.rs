@@ -592,7 +592,7 @@ fn compact_layout_is_saved_and_survives_cancel_apply_defaults_and_bad_input() {
     let design = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();
     let camera = h.app.cam;
-    h.call("ui.prefs", json!({"open":"Interface"}));
+    h.call("ui.prefs", json!({"open":"Layout"}));
     crate::prefs::reveal_preference(&mut h, "dialog:Workspace:Compact");
     h.step(&json!({"click":{"handle":"dialog:Workspace:Compact"}})).unwrap();
     h.call("ui.prefs", json!({"button":"ok"}));
@@ -609,15 +609,15 @@ fn compact_layout_is_saved_and_survives_cancel_apply_defaults_and_bad_input() {
     restored.load_prefs(&h.app.prefs());
     assert_eq!(restored.ui.layout, LayoutMode::Docked);
     assert_eq!(restored.preferences.layout, LayoutMode::Docked);
-    h.call("ui.prefs", json!({"open":"Interface","layout":"floating"}));
+    h.call("ui.prefs", json!({"open":"Layout","layout":"floating"}));
     h.call("ui.prefs", json!({"button":"cancel"}));
     assert_eq!(h.app.ui.layout, LayoutMode::Docked);
-    h.call("ui.prefs", json!({"open":"Interface","layout":"floating"}));
+    h.call("ui.prefs", json!({"open":"Layout","layout":"floating"}));
     h.call("ui.prefs", json!({"button":"apply"}));
     h.call("ui.prefs", json!({"layout":"compact"}));
     h.call("ui.prefs", json!({"button":"cancel"}));
     assert_eq!(h.app.ui.layout, LayoutMode::Floating);
-    h.call("ui.prefs", json!({"open":"Interface","layout":"compact"}));
+    h.call("ui.prefs", json!({"open":"Layout","layout":"compact"}));
     h.call("ui.prefs", json!({"button":"defaults"}));
     assert_eq!(h.app.ui.layout, LayoutMode::Floating);
     assert_eq!(h.app.preferences.layout, LayoutMode::Floating);
@@ -929,7 +929,7 @@ fn the_view_corner_answers_a_dialog_in_the_left_column() {
     }
 }
 
-/// Dialogs is an Interface preference: set from the page or the control channel, saved,
+/// Dialogs is a Layout preference: set from the page or the control channel, saved,
 /// refused when unknown, and Cancel and Restore Defaults put it back. A dialog already open
 /// moves with it.
 #[test]
@@ -941,7 +941,7 @@ fn dialog_place_is_saved_and_survives_cancel_defaults_and_bad_input() {
     h.settle();
     let right = h.app.viewport.dialog_rect.unwrap();
     assert_eq!(h.app.preferences.dialog_place, DialogPlace::Edge);
-    h.call("ui.prefs", json!({"open":"Interface"}));
+    h.call("ui.prefs", json!({"open":"Layout"}));
     crate::prefs::reveal_preference(&mut h, "dialog:Dialogs:In the left column");
     h.step(&json!({"click":{"handle":"dialog:Dialogs:In the left column"}})).unwrap();
     assert_eq!(h.app.preferences.dialog_place, DialogPlace::LeftColumn);
@@ -952,10 +952,10 @@ fn dialog_place_is_saved_and_survives_cancel_defaults_and_bad_input() {
     let mut restored = crate::SolveApp::new(Default::default(), Default::default());
     restored.load_prefs(&h.app.prefs());
     assert_eq!(restored.preferences.dialog_place, DialogPlace::LeftColumn);
-    h.call("ui.prefs", json!({"open":"Interface","dialog_place":"edge"}));
+    h.call("ui.prefs", json!({"open":"Layout","dialog_place":"edge"}));
     h.call("ui.prefs", json!({"button":"cancel"}));
     assert_eq!(h.app.preferences.dialog_place, DialogPlace::LeftColumn);
-    h.call("ui.prefs", json!({"open":"Interface"}));
+    h.call("ui.prefs", json!({"open":"Layout"}));
     h.call("ui.prefs", json!({"button":"defaults"}));
     assert_eq!(h.app.preferences.dialog_place, DialogPlace::Edge);
     h.call("ui.prefs", json!({"button":"ok"}));

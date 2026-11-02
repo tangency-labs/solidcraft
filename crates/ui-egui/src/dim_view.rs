@@ -8,9 +8,10 @@
 //! its dimension line), a double-click (or one click with the Dimension tool) edits its value
 //! in place with parameter completion. A finished sketch's shown dimensions (Show Dimensions,
 //! drawn by `crate::browser::dims_overlay`) take the same double-click from the model view: the
-//! value is edited without editing the sketch.
+//! value is edited without editing the sketch. A driven dimension that nothing else fixes any
+//! more opens at its measured value too, and the value makes it driving.
 //! Everything acts through commands: `sketch.dimension_text`, `sketch.delete`,
-//! `parameters.change`.
+//! `sketch.toggle_driven`, `parameters.change`.
 
 use crate::ui_kit::{Container, Surface};
 use std::cell::RefCell;
@@ -62,6 +63,9 @@ struct Edit {
     /// A shown dimension of a finished sketch, edited from the model view without editing the
     /// sketch (its id). None: a dimension of the sketch being edited.
     sketch: Option<u64>,
+    /// A driven dimension that nothing else fixes any more, which the value makes driving (its
+    /// constraint id; `param` names the parameter it gets).
+    driven: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -154,8 +158,19 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
         return Ok(());
     }
     EDIT.with(|edit| {
-        *edit.borrow_mut() =
-            Some(Edit { param, expr, at: None, fresh: FRESH, wait: 10, draft: Some(draft), live: None, selection: None, picked: None, sketch: None })
+        *edit.borrow_mut() = Some(Edit {
+            param,
+            expr,
+            at: None,
+            fresh: FRESH,
+            wait: 10,
+            draft: Some(draft),
+            live: None,
+            selection: None,
+            picked: None,
+            sketch: None,
+            driven: None,
+        })
     });
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
     Ok(())
@@ -175,8 +190,19 @@ pub fn begin_live(app: &mut SolveApp, entities: Vec<String>, pointer: Option<Pos
     }
     let live = Some(Live { origin: pointer, moved: false, typed: false });
     EDIT.with(|edit| {
-        *edit.borrow_mut() =
-            Some(Edit { param, expr, at: None, fresh: FRESH, wait: 10, draft: Some(draft), live, selection: None, picked: None, sketch: None })
+        *edit.borrow_mut() = Some(Edit {
+            param,
+            expr,
+            at: None,
+            fresh: FRESH,
+            wait: 10,
+            draft: Some(draft),
+            live,
+            selection: None,
+            picked: None,
+            sketch: None,
+            driven: None,
+        })
     });
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
     Ok(true)
@@ -404,6 +430,7 @@ pub fn model_double_click(app: &mut SolveApp, pos: Pos2) -> bool {
             selection: None,
             picked: None,
             sketch: Some(d.sketch),
+            driven: None,
         })
     });
     true
@@ -477,11 +504,19 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
     let Some(d) = id.and_then(|id| DRAWN.with(|d| d.borrow().iter().find(|x| x.id == id).cloned())) else {
         return false;
     };
-    let Some(param) = d.param else {
-        app.set_status("A driven dimension measures the sketch; it has no value to edit", false);
-        return true;
+    let (param, expr, driven) = match d.param {
+        Some(param) => {
+            let expr = app.session.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
+            (param, expr, None)
+        }
+        None => match freed(app, &d.id) {
+            Some((param, expr)) => (param, expr, Some(d.id.clone())),
+            None => {
+                app.set_status("A driven dimension measures the sketch; it has no value to edit", false);
+                return true;
+            }
+        },
     };
-    let expr = app.session.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
     EDIT.with(|e| {
         *e.borrow_mut() = Some(Edit {
             param,
@@ -494,9 +529,61 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
             selection: None,
             picked: None,
             sketch: None,
+            driven,
         })
     });
     true
+}
+
+/// A driven dimension that nothing else fixes any more, such as one placed while a Tangent
+/// held its circle and left driven when the Tangent was deleted (#10018): the parameter it gets
+/// as a driving one and its measured value, from making it driving on a scratch copy. None
+/// while something still fixes what it measures (it can only measure).
+fn freed(app: &SolveApp, constraint: &str) -> Option<(String, String)> {
+    let sketch = app.session.active_sketch?;
+    let mut scratch = app.session.scratch();
+    scratch.execute("sketch.toggle_driven", &json!({"constraint": constraint, "driven": false})).ok()?;
+    let param = scratch.doc.sketch(sketch).ok()?.constraints.iter().find(|c| c.id == constraint)?.param.clone()?;
+    let expr = scratch.doc.param(&param)?.expr.clone();
+    Some((param, expr))
+}
+
+/// The value typed for a driven dimension (`freed`): it becomes driving at its measured value
+/// (`sketch.toggle_driven`), then takes the value (`parameters.change`), in one undo step. When
+/// the value is refused the design goes back to the checkpoint taken first, so it stays driven.
+fn make_driving(app: &mut SolveApp, constraint: &str, typed: &str) -> Result<serde_json::Value, String> {
+    let depth = app.session.undo.len();
+    let checkpoint = app.run("edit.checkpoint", json!({}))?["checkpoint"].clone();
+    let result = app
+        .run("sketch.toggle_driven", json!({"constraint": constraint, "driven": false}))
+        .map_err(|err| shown_error("sketch.toggle_driven", &err))
+        .and_then(|_| {
+            let param = app
+                .session
+                .active_sketch
+                .and_then(|sketch| app.session.doc.sketch(sketch).ok()?.constraints.iter().find(|c| c.id == constraint)?.param.clone())
+                .ok_or("The dimension value is unavailable")?;
+            change_value(app, &param, typed)
+        });
+    let forget = result.is_ok();
+    let _ = app.run("edit.restore_checkpoint", json!({"checkpoint": checkpoint, "forget": forget}));
+    if forget {
+        app.session.undo.truncate(depth + 1);
+    }
+    result
+}
+
+/// Set dimension parameter `param` to the expression typed for it, in the parameter's unit.
+fn change_value(app: &mut SolveApp, param: &str, typed: &str) -> Result<serde_json::Value, String> {
+    let kind = app
+        .session
+        .doc
+        .param(param)
+        .and_then(|p| solidcraft_engine::doc::expr::unit_info(&p.unit))
+        .map(|(k, _)| k)
+        .unwrap_or(solidcraft_engine::doc::expr::Kind::Unitless);
+    let expression = crate::length_input::expression(&app.session.doc, typed, kind);
+    app.run("parameters.change", json!({"name": param, "expression": expression})).map_err(|err| shown_error("parameters.change", &err))
 }
 
 /// Start dragging the text of the dimension under `press` (true: a dimension took the drag).
@@ -778,6 +865,7 @@ pub fn edit_param(app: &SolveApp, param: &str) {
             selection: None,
             picked: None,
             sketch: None,
+            driven: None,
         })
     });
 }
@@ -946,16 +1034,10 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                 } else {
                     Err("The sketch changed; place the dimension again".into())
                 }
+            } else if let Some(constraint) = &e.driven {
+                make_driving(app, constraint, &e.expr)
             } else {
-                let kind = app
-                    .session
-                    .doc
-                    .param(&e.param)
-                    .and_then(|p| solidcraft_engine::doc::expr::unit_info(&p.unit))
-                    .map(|(k, _)| k)
-                    .unwrap_or(solidcraft_engine::doc::expr::Kind::Unitless);
-                let expression = crate::length_input::expression(&app.session.doc, &e.expr, kind);
-                app.run("parameters.change", json!({"name": e.param, "expression": expression})).map_err(|err| shown_error("parameters.change", &err))
+                change_value(app, &e.param, &e.expr)
             };
             match result {
                 Err(err) => {

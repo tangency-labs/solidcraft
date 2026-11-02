@@ -9,9 +9,12 @@
 //! about; both are `ui_kit::Window` cards. While the card is open, [`overlay`] marks the centre
 //! of mass in the view with the principal axes standing out of it.
 
+use std::sync::Arc;
+
 use egui::{Align2, FontId, Stroke};
 use serde_json::{Map, Value, json};
 use solidcraft_engine::doc::metadata::{DESCRIPTION, Owner, keys};
+use solidcraft_engine::doc::progress::Progress;
 use solidcraft_engine::geom::Vec3;
 
 use crate::SolveApp;
@@ -127,12 +130,14 @@ pub fn open_object(app: &mut SolveApp, command: &str, params: &Value, fallback: 
     close_object(app);
     // A large assembly takes seconds to measure, which froze the window (#5203): measured on a
     // copy beside it, the card shows when done. Headless and in tests (no wait set), here.
+    // The worker reports how many bodies it has measured, and stops when the card closes (#8706).
+    let progress = Arc::new(Progress::default());
     if let Some(wait) = app.apply_off_thread
-        && let Some(rx) = measure_beside(app.session.scratch(), command, params)
+        && let Some(rx) = measure_beside(app.session.scratch(), command, params, progress.clone())
     {
         match rx.recv_timeout(wait) {
             Ok(reply) => opened(app, reply, fallback),
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => app.menu.props_measuring = Some(Measuring { fallback, rx }),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => app.menu.props_measuring = Some(Measuring { fallback, rx, progress }),
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => app.set_status(app.tr("ui.properties.measuring_failed").to_string(), true),
         }
         return;
@@ -148,10 +153,27 @@ pub fn close_object(app: &mut SolveApp) {
 }
 
 /// A Properties measurement running beside the window (#5203): the card's title when the reply
-/// has no name, and the reply to come.
+/// has no name, the reply to come, and how far the worker is (#8706).
 pub struct Measuring {
     fallback: String,
     rx: std::sync::mpsc::Receiver<Result<Value, String>>,
+    /// The worker's progress; cancelling it stops the measuring at its next body.
+    progress: Arc<Progress>,
+}
+
+impl Measuring {
+    /// Bodies measured so far and how many there are (none before the worker counts them).
+    pub fn bodies(&self) -> Option<(usize, usize)> {
+        self.progress.work().filter(|(stage, _, _)| *stage == "measuring").map(|(_, done, total)| (done, total))
+    }
+}
+
+impl Drop for Measuring {
+    /// A card closed (or a design switched away from) stops its measuring, which on a large
+    /// assembly would otherwise run on for minutes (#8706).
+    fn drop(&mut self) {
+        self.progress.cancel();
+    }
 }
 
 /// Show `reply` in the card, titled with its name (else `fallback`); a refusal goes to the
@@ -166,15 +188,22 @@ fn opened(app: &mut SolveApp, reply: Result<Value, String>, fallback: String) {
     }
 }
 
-/// Run `command` on `copy` on a worker; the reply comes on the returned channel.
+/// Run `command` on `copy` on a worker, watched by `progress`; the reply comes on the returned
+/// channel.
 #[cfg(not(target_arch = "wasm32"))]
-fn measure_beside(mut copy: solidcraft_engine::Session, command: &str, params: &Value) -> Option<std::sync::mpsc::Receiver<Result<Value, String>>> {
+fn measure_beside(
+    mut copy: solidcraft_engine::Session,
+    command: &str,
+    params: &Value,
+    progress: Arc<Progress>,
+) -> Option<std::sync::mpsc::Receiver<Result<Value, String>>> {
     let (tx, rx) = std::sync::mpsc::channel();
     let (command, params) = (command.to_string(), params.clone());
     std::thread::Builder::new()
         .name("properties".into())
         .spawn(move || {
-            let _ = tx.send(copy.execute(&command, &params).map_err(|e| e.to_string()));
+            let reply = solidcraft_engine::doc::progress::watch(progress, || copy.execute(&command, &params));
+            let _ = tx.send(reply.map_err(|e| e.to_string()));
         })
         .ok()?;
     Some(rx)
@@ -182,26 +211,40 @@ fn measure_beside(mut copy: solidcraft_engine::Session, command: &str, params: &
 
 /// No threads on the web: measured here.
 #[cfg(target_arch = "wasm32")]
-fn measure_beside(_copy: solidcraft_engine::Session, _command: &str, _params: &Value) -> Option<std::sync::mpsc::Receiver<Result<Value, String>>> {
+fn measure_beside(
+    _copy: solidcraft_engine::Session,
+    _command: &str,
+    _params: &Value,
+    _progress: Arc<Progress>,
+) -> Option<std::sync::mpsc::Receiver<Result<Value, String>>> {
     None
 }
 
 /// While a measurement runs beside the window: a card saying so (Close drops it), and the
 /// Properties card in its place once the reply is in.
 fn show_measuring(app: &mut SolveApp, ctx: &egui::Context) {
-    let Some(m) = app.menu.props_measuring.take() else { return };
+    let Some(mut m) = app.menu.props_measuring.take() else { return };
     match m.rx.try_recv() {
-        Ok(reply) => return opened(app, reply, m.fallback),
+        Ok(reply) => return opened(app, reply, std::mem::take(&mut m.fallback)),
         Err(std::sync::mpsc::TryRecvError::Disconnected) => return app.set_status(app.tr("ui.properties.measuring_failed").to_string(), true),
         Err(std::sync::mpsc::TryRecvError::Empty) => {}
     }
     ctx.request_repaint_after(std::time::Duration::from_millis(100));
-    let (heading, text) = (app.tr("ui.properties").to_string(), app.tr("ui.properties.measuring").to_string());
+    // How far it is, once the worker has counted the bodies (#8706).
+    let bodies = m.bodies();
+    let heading = app.tr("ui.properties").to_string();
+    let text = match bodies {
+        Some((done, total)) => crate::i18n::format("ui.properties.measuring_bodies", &[("done", &done.to_string()), ("total", &total.to_string())]),
+        None => app.tr("ui.properties.measuring").to_string(),
+    };
     let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
         ui.horizontal(|ui| {
             ui.spinner();
             ui_kit::text(ui, &text, ui_kit::Text::Note("measuring"));
         });
+        if let Some((done, total)) = bodies.filter(|(_, total)| *total > 0) {
+            ui_kit::progress(ui, "properties_measuring", done as f32 / total as f32);
+        }
     });
     if !(closed || action == ui_kit::Action::Cancel) {
         app.menu.props_measuring = Some(m);
@@ -591,7 +634,7 @@ mod tests {
         assert_eq!(m.rx.recv().unwrap().unwrap(), here, "the copy measures what the design here does");
 
         let (tx, rx) = std::sync::mpsc::channel();
-        h.app.menu.props_measuring = Some(super::Measuring { fallback: String::new(), rx });
+        h.app.menu.props_measuring = Some(super::Measuring { fallback: String::new(), rx, progress: Default::default() });
         h.frames(2);
         assert!(h.widget("Measuring…").is_some() && h.app.menu.props.is_none());
         tx.send(Ok(here.clone())).unwrap();
@@ -599,12 +642,54 @@ mod tests {
         assert_eq!(h.app.menu.props.as_ref().map(|(_, v)| v), Some(&here));
         assert!(h.widget("Moment of inertia").is_some());
 
+        // #8706: while it measures, the card says how many bodies are done, and Close stops the
+        // worker rather than leaving it to measure on for minutes.
         let (_tx, rx) = std::sync::mpsc::channel::<Result<serde_json::Value, String>>();
         super::close_object(&mut h.app);
-        h.app.menu.props_measuring = Some(super::Measuring { fallback: String::new(), rx });
+        let progress = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
+        h.app.menu.props_measuring = Some(super::Measuring { fallback: String::new(), rx, progress: progress.clone() });
+        solidcraft_engine::doc::progress::watch(progress.clone(), || {
+            if let Some(w) = solidcraft_engine::kernel::watch::current() {
+                w.progress("measuring", 3, 10);
+            }
+        });
         h.frames(2);
+        assert!(h.widget("Measuring… 3 of 10 bodies").is_some());
         h.step(&json!({"widget": "Close"})).unwrap();
         assert!(h.app.menu.props_measuring.is_none() && h.app.menu.props.is_none(), "Close drops the measurement");
+        assert!(progress.is_cancelled(), "Close stops the worker");
+    }
+
+    /// #8706: Properties of an assembly from the Browser's menu returns at once with the card
+    /// measuring on a copy, and the result (the same a script gets) fills it in.
+    #[test]
+    fn assembly_properties_from_the_menu_measure_off_the_window_thread() {
+        let mut h = Harness::new();
+        let block = h.app.run("component.create", json!({"name": "Block"})).unwrap()["component"].as_u64().unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        for i in 1..12 {
+            h.app.run("occurrence.copy", json!({"component": block, "translate": [20 * i, 0, 0]})).unwrap();
+        }
+        h.app.apply_off_thread = Some(std::time::Duration::ZERO);
+        let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Component { id: 0 });
+        let item = items.iter().find(|i| i.label == "Properties").expect("Properties item");
+        crate::context_menu::run_item(&mut h.app, item, egui::pos2(0.0, 0.0));
+        assert!(h.app.menu.props_measuring.is_some(), "the menu returns at once, the card measuring");
+        assert!(h.app.menu.props.is_none());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
+        while h.app.menu.props.is_none() {
+            assert!(std::time::Instant::now() < deadline, "the measurements never came in");
+            assert!(h.app.menu.props_measuring.is_some(), "still measuring until the result is in");
+            h.frames(1);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(h.app.menu.props_measuring.is_none());
+        let (title, v) = h.app.menu.props.clone().unwrap();
+        assert_eq!(title, h.app.session.doc.name);
+        assert_eq!(v["body_count"], 12);
+        assert!((v["total"]["volume_mm3"].as_f64().unwrap() - 12_000.0).abs() < 1e-6, "{v}");
+        let script = h.app.session.execute("component.properties", &json!({"component": 0})).unwrap();
+        assert_eq!(v, script);
     }
 
     #[test]

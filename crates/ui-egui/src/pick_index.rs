@@ -17,7 +17,30 @@ use crate::viewport::Proj;
 /// Indexes by mesh address, each with its mesh held (so the address stays its own); `None`
 /// while a worker is still making it.
 #[derive(Default)]
-pub(crate) struct PickIndexes(Arc<Mutex<Indexes>>);
+pub(crate) struct PickIndexes(Arc<Mutex<Indexes>>, #[cfg(test)] Arc<TestGate>);
+
+/// Lets a test hold the worker before it starts making an index, so "still being made" can be
+/// observed without racing the clock. Open unless a test closes it.
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct TestGate {
+    closed: Mutex<bool>,
+    changed: std::sync::Condvar,
+}
+
+#[cfg(test)]
+impl TestGate {
+    fn wait_open(&self) {
+        let mut closed = self.closed.lock().unwrap();
+        while *closed {
+            closed = self.changed.wait(closed).unwrap();
+        }
+    }
+    pub(crate) fn set_closed(&self, value: bool) {
+        *self.closed.lock().unwrap() = value;
+        self.changed.notify_all();
+    }
+}
 
 type Indexes = HashMap<usize, (Arc<Mesh>, Option<Arc<MeshIndex>>)>;
 
@@ -39,7 +62,11 @@ impl PickIndexes {
         if size > AT_ONCE {
             map.insert(key, (mesh.clone(), None));
             let (indexes, source) = (self.0.clone(), mesh.clone());
+            #[cfg(test)]
+            let gate = self.1.clone();
             let started = std::thread::Builder::new().name("pick-index".into()).spawn(move || {
+                #[cfg(test)]
+                gate.wait_open();
                 let index = Arc::new(MeshIndex::new(&source));
                 if let Ok(mut map) = indexes.lock()
                     && let Some(slot) = map.get_mut(&key)
@@ -62,6 +89,17 @@ impl PickIndexes {
         if let Ok(mut map) = self.0.lock() {
             map.retain(|k, _| keep(*k));
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn gate(&self) -> Arc<TestGate> {
+        self.1.clone()
+    }
+
+    /// Indexes still being made by a worker.
+    #[cfg(test)]
+    pub(crate) fn pending(&self) -> usize {
+        self.0.lock().map_or(0, |m| m.values().filter(|(_, i)| i.is_none()).count())
     }
 
     #[cfg(test)]
