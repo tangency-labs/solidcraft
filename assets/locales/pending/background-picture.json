@@ -1,31 +1,31 @@
 {
   "en": {
-    "prefs.background_image": "Background picture",
+    "prefs.background_image": "Picture",
     "prefs.background_choose": "Choose picture…",
     "prefs.background_unreadable": "Could not read the background picture"
   },
   "ar": {
-    "prefs.background_image": "صورة الخلفية",
+    "prefs.background_image": "الصورة",
     "prefs.background_choose": "اختيار صورة…",
     "prefs.background_unreadable": "تعذرت قراءة صورة الخلفية"
   },
   "he": {
-    "prefs.background_image": "תמונת רקע",
+    "prefs.background_image": "תמונה",
     "prefs.background_choose": "בחירת תמונה…",
     "prefs.background_unreadable": "לא ניתן לקרוא את תמונת הרקע"
   },
   "ja": {
-    "prefs.background_image": "背景画像",
+    "prefs.background_image": "画像",
     "prefs.background_choose": "画像を選択…",
     "prefs.background_unreadable": "背景画像を読み込めませんでした"
   },
   "vi": {
-    "prefs.background_image": "Ảnh nền",
+    "prefs.background_image": "Ảnh",
     "prefs.background_choose": "Chọn ảnh…",
     "prefs.background_unreadable": "Không đọc được ảnh nền"
   },
   "zh": {
-    "prefs.background_image": "背景图片",
+    "prefs.background_image": "图片",
     "prefs.background_choose": "选择图片…",
     "prefs.background_unreadable": "无法读取背景图片"
   }
