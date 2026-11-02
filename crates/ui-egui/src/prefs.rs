@@ -1583,6 +1583,8 @@ preference_settings! {
     drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
     /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
     disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
+    /// Toggle rounding for the top bar.
+    floating_titlebar_rounded: bool = true, PAGE_LAYOUT;
 }
 
 /// What a middle-button double-click in the view does.
