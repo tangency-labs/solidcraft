@@ -2,6 +2,7 @@
  {
   "note": "User bug 2 (owner solidcraft-params): with two components, a cut made in the active one leaves the other untouched."
  },
+ {"call": "ui.prefs", "params": {"extrude_default_distance": 10}},
  {
   "start": "component.create"
  },

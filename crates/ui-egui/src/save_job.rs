@@ -77,6 +77,7 @@ mod tests {
     #[test]
     fn a_pending_save_blocks_feature_computation_and_completed_transaction_adoption() {
         let mut h = crate::scenario::Harness::new();
+        h.app.preferences.extrude_default_distance = 10.0;
         h.app.home.open = false;
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();

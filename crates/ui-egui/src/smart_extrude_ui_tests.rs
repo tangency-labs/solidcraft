@@ -31,6 +31,7 @@ fn volume(h: &Harness) -> f64 {
 fn a_profile_picked_from_below_extrudes_down() {
     for (view, dir, z) in [("top", 0, (0.0, 10.0)), ("bottom", 1, (-10.0, 0.0))] {
         let mut h = Harness::new();
+        h.app.preferences.extrude_default_distance = 10.0;
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,20]})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();

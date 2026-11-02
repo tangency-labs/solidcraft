@@ -501,6 +501,7 @@ mod tests {
     #[test]
     fn identity_component_feedback_skips_moved_and_repeated_placements() {
         let mut h = Harness::new();
+        h.app.preferences.extrude_default_distance = 10.0;
         let made = h.app.run("component.create", json!({"name":"Imported part","grounded":false})).unwrap();
         h.app.run("solid.box", json!({"length":4,"width":3,"height":5,"body_name":"Stock"})).unwrap();
         let world = h.app.session.world_state();
@@ -540,9 +541,67 @@ mod tests {
         assert_eq!(error, engine, "the same error as the extrusion's own");
     }
 
+    /// Extrude opens at the `extrude_default_distance` preference: 0 by default, so nothing is
+    /// shown and OK waits, without a red refusal; 10 gives the earlier start, drawn at once.
+    #[test]
+    fn extrude_opens_at_the_preferred_distance() {
+        for (preference, shown) in [(None, "0 mm"), (Some(10.0), "10 mm"), (Some(2.5), "2.5 mm")] {
+            let mut h = Harness::new();
+            if let Some(distance) = preference {
+                h.app.preferences.extrude_default_distance = distance;
+            }
+            h.app.run("solid.box", json!({"length":4,"width":3,"height":5,"body_name":"Stock"})).unwrap();
+            let world = h.app.session.world_state();
+            let face = world
+                .body("Stock")
+                .unwrap()
+                .body
+                .faces(0.001)
+                .unwrap()
+                .into_iter()
+                .find(|face| face.plane_normal.is_some_and(|n| n.z > 0.99))
+                .unwrap();
+            h.app.session.selection = vec![Sel::Face { body: "Stock".into(), index: face.index, point: face.centroid }];
+            let before = h.app.session.doc.clone();
+            h.app.start("solid.extrude");
+            h.frames(3);
+            let Kind::Extrude { distance, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("not an Extrude dialog") };
+            assert_eq!(distance, shown);
+            assert!(Arc::ptr_eq(&h.app.session.doc, &before), "{shown}: opening Extrude changes nothing");
+            assert!(crate::scenario::handle_at("dialog:create_issue").is_none(), "{shown}: no red refusal");
+            assert_eq!(h.app.viewport.corner_ok, preference.is_some_and(|d| d > 0.0), "{shown}: OK only with a distance");
+        }
+    }
+
+    /// Typing a distance into the zero start builds the preview; clearing it back to zero returns to
+    /// the quiet start.
+    #[test]
+    fn a_distance_typed_into_the_zero_start_previews_and_zero_again_is_quiet() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":4,"width":3,"height":5,"body_name":"Stock"})).unwrap();
+        let world = h.app.session.world_state();
+        let face =
+            world.body("Stock").unwrap().body.faces(0.001).unwrap().into_iter().find(|face| face.plane_normal.is_some_and(|n| n.z > 0.99)).unwrap();
+        h.app.session.selection = vec![Sel::Face { body: "Stock".into(), index: face.index, point: face.centroid }];
+        h.app.start("solid.extrude");
+        let colors = Colors::from_tokens(&crate::theme::Tokens::get());
+        for (typed, previews) in [("5 mm", true), ("0 mm", false)] {
+            if let Kind::Extrude { distance, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
+                *distance = typed.into();
+            }
+            h.frames(3);
+            let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+            let result = StraightPreview::default().compute(&h.app, &commands, colors);
+            assert_eq!(result.is_some_and(|r| r.is_ok()), previews, "{typed}");
+            assert_eq!(h.app.viewport.corner_ok, previews, "{typed}");
+            assert!(crate::scenario::handle_at("dialog:create_issue").is_none(), "{typed}: no red refusal");
+        }
+    }
+
     #[test]
     fn profile_feedback_keeps_holes_and_skips_unsupported_curves() {
         let mut harness = Harness::new();
+        harness.app.preferences.extrude_default_distance = 10.0;
         harness.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         for (a, b) in [([0., 0.], [10., 10.]), ([3., 3.], [7., 7.])] {
             harness.app.run("sketch.rectangle.two_point", json!({"p0":a,"p1":b})).unwrap();

@@ -18,6 +18,7 @@ fn scene() -> Harness {
 fn scene_with(auto_to_object: bool) -> Harness {
     let mut h = Harness::new();
     h.app.preferences.extrude_auto_to_object = auto_to_object;
+    h.app.preferences.extrude_default_distance = 10.0;
     h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [30, 0, 0]})).unwrap();
     h.app.run("solid.cylinder", json!({"radius": 5, "height": 30, "base": [70, 10, 0], "operation": "new_body"})).unwrap();
     h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 25, "name": "Lid"})).unwrap();

@@ -282,7 +282,7 @@ fn editing_a_coil_reopens_its_dialog_filled_in_and_ok_redefines_it() {
 #[test]
 fn operation_length_defaults_follow_every_design_unit() {
     const CASES: &[(&str, &[&str])] = &[
-        ("solid.extrude", &["10", "10", "", "", "2", "1"]),
+        ("solid.extrude", &["0", "10", "", "", "2", "1"]),
         ("solid.fillet", &["2", "2"]),
         ("solid.chamfer", &["1", "1"]),
         ("solid.shell", &["2"]),

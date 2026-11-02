@@ -1,0 +1,10 @@
+{
+  "ar": { "prefs.extrude_default_distance": "مسافة بدء البثق" },
+  "de": { "prefs.extrude_default_distance": "Startabstand beim Extrudieren" },
+  "en": { "prefs.extrude_default_distance": "Extrude starting distance" },
+  "he": { "prefs.extrude_default_distance": "מרחק התחלתי של שחול" },
+  "ja": { "prefs.extrude_default_distance": "押し出しの開始距離" },
+  "ko": { "prefs.extrude_default_distance": "돌출 시작 거리" },
+  "vi": { "prefs.extrude_default_distance": "Khoảng cách bắt đầu khi đùn" },
+  "zh": { "prefs.extrude_default_distance": "拉伸起始距离" }
+}

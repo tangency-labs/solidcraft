@@ -1,5 +1,6 @@
 [
   {"note": "Interface › Dialog buttons › Top (#6708): a dialog's OK and Cancel sit in its title row, right of the title. The buttons keep their handles, Cancel takes the close button's, and Enter and Esc work as before."},
+  {"call": "ui.prefs", "params": {"extrude_default_distance": 10}},
   {"call": "engine.execute", "params": {"command": "sketch.create", "params": {"plane": "XY", "name": "Sketch1"}}},
   {"call": "engine.execute", "params": {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [40, 30]}}},
   {"call": "engine.execute", "params": {"command": "sketch.finish", "params": {}}},

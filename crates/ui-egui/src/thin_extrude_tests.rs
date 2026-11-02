@@ -19,6 +19,7 @@ fn volume(h: &Harness) -> f64 {
 #[test]
 fn a_thin_extrude_of_a_picked_profile_follows_its_outline() {
     let mut h = Harness::new();
+    h.app.preferences.extrude_default_distance = 10.0;
     let sketch = rectangle(&mut h);
     h.step(&json!({"call":"ui.start","params":{"command":"solid.extrude"}})).unwrap();
     h.frames(3);
