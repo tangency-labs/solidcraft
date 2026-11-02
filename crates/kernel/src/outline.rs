@@ -454,7 +454,15 @@ fn divided(body: &Body, faces: &[usize], other: &[(mt::Edge, Piece)], fr: &Frame
         let mut groups: Vec<(Vec<usize>, f64, Vec<Vec<usize>>)> = outer.into_iter().map(|(lp, a)| (lp, a, Vec::new())).collect();
         for (hole, _) in holes {
             let Some(p) = hole.first().and_then(|i| uses.get(*i)).map(|u| u.piece.at(0.5)) else { return Ok(None) };
-            let Some(g) = groups.iter_mut().filter(|(lp, _, _)| inside(&pieces_of(lp), p)).min_by(|x, y| x.1.total_cmp(&y.1)) else {
+            // A loop running a copy the other way bounds the region inside the hole, never the
+            // face holding it. The point lies on that loop, so asking it could go either way: a
+            // tube's bore copied onto a disc became a hole in the disc inside the bore (#5797).
+            let twins: Vec<usize> = hole.iter().filter_map(|i| uses.get(*i)?.twin).collect();
+            let Some(g) = groups
+                .iter_mut()
+                .filter(|(lp, _, _)| !lp.iter().any(|k| twins.contains(k)) && inside(&pieces_of(lp), p))
+                .min_by(|x, y| x.1.total_cmp(&y.1))
+            else {
                 return Ok(None);
             };
             g.2.push(hole);
