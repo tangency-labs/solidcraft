@@ -478,7 +478,8 @@ fn output_checks(c: &mut Checks, want: &Value, out: &str, results: &[Value], rel
 }
 
 /// The word a `surface_types` check names a face's surface by, as the record holds it: an
-/// analytic kind, `bspline` (a B-spline or NURBS surface) or `revolution` (a revolved curve).
+/// analytic kind, `ball_patch` (a corner's patch on a sphere), `bspline` (a B-spline or NURBS
+/// surface) or `revolution` (a revolved curve).
 fn surface_word(s: &solidcraft_engine::geom::brep::Surface) -> &'static str {
     use solidcraft_engine::geom::brep::Surface as S;
     match s {
@@ -486,6 +487,7 @@ fn surface_word(s: &solidcraft_engine::geom::brep::Surface) -> &'static str {
         S::Cylinder { .. } => "cylinder",
         S::Cone { .. } => "cone",
         S::Sphere { .. } => "sphere",
+        S::BallPatch { .. } => "ball_patch",
         S::Torus { .. } => "torus",
         S::Spline { .. } | S::RationalSpline { .. } => "bspline",
         S::PlacedRevolution { .. } => "revolution",

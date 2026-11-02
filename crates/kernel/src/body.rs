@@ -468,7 +468,7 @@ impl SurfaceKind {
             S::Plane { .. } | S::PlaneThrough { .. } => SurfaceKind::Plane,
             S::Cylinder { .. } => SurfaceKind::Cylinder,
             S::Cone { .. } => SurfaceKind::Cone,
-            S::Sphere { .. } => SurfaceKind::Sphere,
+            S::Sphere { .. } | S::BallPatch { .. } => SurfaceKind::Sphere,
             S::Torus { .. } => SurfaceKind::Torus,
             S::Spline { .. } | S::RationalSpline { .. } | S::PlacedRevolution { .. } => SurfaceKind::Freeform,
         }

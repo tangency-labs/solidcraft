@@ -135,7 +135,8 @@ impl Surface {
                 let degree = [u_knots.len().checked_sub(nu + 1).ok_or(Error::Argument)?, v_knots.len().checked_sub(nv + 1).ok_or(Error::Argument)?];
                 Surface::nurbs(degree, nu, nv, u_knots, v_knots, &flat, Some(&weights))
             }
-            S::PlacedRevolution { .. } => Err(Error::Unsupported),
+            // A ball patch's label has no (u, v): its face's NURBS form is the surface.
+            S::PlacedRevolution { .. } | S::BallPatch { .. } => Err(Error::Unsupported),
         }
     }
 
