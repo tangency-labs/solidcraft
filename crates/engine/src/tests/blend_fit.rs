@@ -47,8 +47,8 @@ fn chamfer_that_fits_still_builds() {
 
 /// #199's bar, 14 x 6 x 10, its four upright edges rounded: past a full round of its 6 mm ends
 /// the two rounds on each end would cross. Refused, naming 3 mm; on solidcore the kernel's refusal
-/// carries that size and the edge it was found for (`SolidError::FilletRefused`), so the message
-/// names the edge and the feature runs no search.
+/// carries a size and the edge it was found for (`SolidError::FilletRefused`), and the message
+/// names the edge.
 #[test]
 fn a_round_past_a_full_round_is_refused_naming_the_largest_that_fits_and_its_edge() {
     let mut s = Session::default();
@@ -58,7 +58,8 @@ fn a_round_past_a_full_round_is_refused_naming_the_largest_that_fits_and_its_edg
     for r in [3.001, 3.5] {
         let e = s.execute("solid.fillet", &json!({"edges": uprights, "radius": r})).unwrap_err().to_string();
         assert!(e.contains("the largest radius that fits is 3 mm"), "{r}: {e}");
-        assert!(!on_solidcore || e.contains("beside the edge at ("), "{r}: {e}");
+        assert!(!on_solidcore || e.contains("allow, at the edge at ("), "{r}: {e}");
+        assert_eq!(e.matches("that fits is").count(), 1, "{r}: {e}");
     }
     assert!((volume(&mut s) - 840.0).abs() < 1e-6, "the part stays as it was");
 }

@@ -444,11 +444,11 @@ fn with_largest_fit(
     size: &str,
     search: impl FnOnce() -> std::result::Result<Option<(f64, kernel::Body)>, kernel::KernelError>,
 ) -> kernel::KernelError {
-    // The kernel's refusal may name it already, sized exactly where it was found.
-    if kernel::names_largest_fit(&why) {
-        return kernel::KernelError::TooLarge(why);
-    }
+    // On solidcore the refusal names a size already, less a margin (34.99 where 35 builds), and
+    // its edge: the edge stays, the size is the largest the search builds, solidcore's where the
+    // search finds none.
     match search() {
+        Ok(Some((largest, _))) if kernel::names_largest_fit(&why) => kernel::KernelError::TooLarge(kernel::with_fit_note(&why, size, largest)),
         Ok(Some((largest, _))) => kernel::KernelError::TooLarge(format!("{why}; {}", kernel::largest_fit_note(size, largest))),
         Ok(None) => kernel::KernelError::TooLarge(why),
         Err(e) => {

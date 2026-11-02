@@ -32,10 +32,19 @@ pub fn largest_fit_note(size: &str, largest: f64) -> String {
     format!("the largest {size} that fits is {} mm", trimmed_mm(largest))
 }
 
-/// Whether a refusal already names the largest size that fits ([`largest_fit_note`]), so no search
-/// for it is needed.
+/// Whether a refusal already names the largest size that fits ([`largest_fit_note`]).
 pub fn names_largest_fit(why: &str) -> bool {
     why.contains("that fits is ")
+}
+
+/// `why` with the largest size that fits it names ([`largest_fit_note`]) replaced by `largest`:
+/// solidcore names the size less a margin (34.99 where 35 builds), a feature's search the
+/// largest it built. `why` itself where it names none.
+pub fn with_fit_note(why: &str, size: &str, largest: f64) -> String {
+    let Some(start) = why.find("the largest ") else { return why.to_owned() };
+    let Some(len) = why.get(start..).and_then(|rest| rest.find(" mm")) else { return why.to_owned() };
+    let (head, tail) = (why.get(..start).unwrap_or_default(), why.get(start + len + 3..).unwrap_or_default());
+    format!("{head}{}{tail}", largest_fit_note(size, largest))
 }
 
 /// `v` to the micrometre, without trailing zeros.

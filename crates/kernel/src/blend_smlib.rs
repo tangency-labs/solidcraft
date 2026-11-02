@@ -447,8 +447,8 @@ mod imp {
                 SmError::NoRoom => KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow")),
                 SmError::TooLarge { size, kind, at } => {
                     let beside = match at {
-                        Some([x, y, z]) => format!("the edge at ({x:.3}, {y:.3}, {z:.3})"),
-                        None => "its edges".to_owned(),
+                        Some([x, y, z]) => format!(", at the edge at ({x:.3}, {y:.3}, {z:.3})"),
+                        None => String::new(),
                     };
                     let fits = match kind {
                         solidcraft_smlib::FitKind::Scale => {
@@ -456,7 +456,7 @@ mod imp {
                         }
                         kind => crate::blend::largest_fit_note(kind.word(), size),
                     };
-                    KernelError::TooLarge(format!("the {what} is larger than the faces beside {beside} allow; {fits}"))
+                    KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow{beside}; {fits}"))
                 }
                 SmError::Unported(why) => KernelError::Invalid(format!("not supported yet: {why}")),
                 e => failed(what, "operation", e),
