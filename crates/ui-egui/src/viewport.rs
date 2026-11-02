@@ -6109,7 +6109,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                         && m.edge_pickable(e)
                         && let Some(p) = m.edges.get(e)
                     {
-                        edge_lines(&mut feedback, p, lit, LIT_EDGE_W, &edge_normals(&m, p));
+                        edge_lines(&mut feedback, p, lit, LIT_EDGE_W, &[]);
                     }
                 }
             }
