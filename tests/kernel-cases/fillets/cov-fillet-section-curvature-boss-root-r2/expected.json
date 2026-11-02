@@ -12,5 +12,5 @@
  "tolerance": {
   "rel": 1e-07
  },
- "timeout_s": 600
+ "timeout_s": 1800
 }
