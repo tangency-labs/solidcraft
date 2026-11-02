@@ -1,4 +1,4 @@
-//! The check every Boolean retry's result must pass before it is returned (issue #616).
+//! Boolean input checks and the checks every retry's result must pass (issue #616).
 //!
 //! A retry moves things about (the tool nudged, faces pushed apart, pieces cut off and glued
 //! back), so its result is held to what a join or a cut can do at all:
@@ -15,8 +15,66 @@ use solidcraft_geom::{Aabb3, Mesh, Vec3};
 use crate::body::Body;
 use crate::{BoolOp, KernelError, Result};
 
-/// Most triangles sampled from each surface (evenly spaced through the mesh).
+/// Maximum boundary samples per input check, or triangle samples per result surface.
 const MAX_SAMPLES: usize = 20_000;
+
+/// A boundary off its planar support cannot be intersected consistently: tracing on the
+/// plane and splitting the edge produce different endpoints. Check only the meeting region,
+/// before numerical retries repeatedly try to close those gaps.
+pub(crate) fn check_planar_boundaries(a: &Body, b: &Body, ma: &Mesh, mb: &Mesh) -> Result<()> {
+    use truck_meshalgo::prelude::TrySubs;
+    use truck_modeling::{BoundedCurve, Surface};
+
+    crate::guard("boolean input boundaries", || {
+        // The finest operand-mesh resolution used by the boolean. Smaller fitting errors
+        // remain eligible for the existing intersection and repair strategies.
+        let tolerance = (a.size().max(b.size()) * 1e-5).max(1e-5);
+        let mut left = MAX_SAMPLES;
+        for (body, other, role) in [(a, mb, "target"), (b, ma, "tool")] {
+            let bounds = other.bounds().inflated(tolerance);
+            let mut proximity = None;
+            for (face_index, face) in body.solid.face_iter().enumerate() {
+                let Surface::Plane(plane) = face.surface() else { continue };
+                let n = plane.normal();
+                let Some(n) = Vec3::new(n.x, n.y, n.z).normalized() else { continue };
+                let origin = crate::body::from_p3(plane.origin());
+                for edge in face.boundaries().iter().flat_map(|wire| wire.edge_iter()) {
+                    let curve = edge.curve();
+                    let (lo, hi) = curve.range_tuple();
+                    if !lo.is_finite() || !hi.is_finite() {
+                        continue;
+                    }
+                    for t in [lo, lo * 0.5 + hi * 0.5, hi] {
+                        if left == 0 {
+                            return Ok(());
+                        }
+                        left -= 1;
+                        let Some(p) = curve.try_subs(t).map(crate::body::from_p3) else { continue };
+                        let offset = (p - origin).dot(n);
+                        let gap = offset.abs();
+                        // The support can meet the tool while its boundary lies just outside.
+                        let projected = p - n * offset;
+                        if gap.is_finite() && gap > tolerance && (bounds.contains(p) || bounds.contains(projected)) {
+                            // A bounding box alone includes holes and spaces between lumps.
+                            // Prepare these indices only for an actual off-plane sample.
+                            let (inside, surface) = proximity.get_or_insert_with(|| (other.inside_index(), Near::new(other, tolerance)));
+                            let meets = |q| inside.contains(q) || surface.as_ref().is_some_and(|s| s.close(q));
+                            if !meets(p) && !meets(projected) {
+                                continue;
+                            }
+                            return Err(KernelError::Invalid(format!(
+                                "boolean: the {role}'s face {face_index} has a boundary {gap:.6} mm off its plane \
+                                 (tolerance {tolerance:.6} mm) where the bodies meet; repair or reimport the body \
+                                 with matching edge and surface geometry, or create the extrusion as a new body"
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    })
+}
 
 /// Distance from `p` to the triangle `abc`.
 pub(crate) fn point_triangle_dist(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {

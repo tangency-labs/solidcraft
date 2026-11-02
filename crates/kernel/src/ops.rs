@@ -933,6 +933,10 @@ fn boolean_untimed(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
         }
     }
     let r = boolean_via(a, b, op, &boolean_whole);
+    // Invalid join operands cannot be repaired by splitting tangent cylinders or moving the tool.
+    if op == BoolOp::Union && matches!(r, Err(KernelError::Invalid(_))) {
+        return r;
+    }
     if r.is_err()
         && op == BoolOp::Cut
         && !APART.with(|c| c.get())
@@ -969,6 +973,7 @@ fn boolean_via(a: &Body, b: &Body, op: BoolOp, whole: &dyn Fn(&Body, &Body, Bool
     let (mut r, mut diagnostics) = capture_boolean_diagnostics(|| whole(a, b, op));
     // Bodies in several pieces: when the whole failed (or came out empty), a piece at a time.
     let retry = match &r {
+        Err(KernelError::Invalid(_)) if op == BoolOp::Union => false,
         Err(_) => true,
         Ok(None) => op != BoolOp::Intersect,
         Ok(Some(_)) => false,
@@ -1442,6 +1447,11 @@ where
             return Ok(r);
         }
         doubted = Some(r);
+    }
+    if op == BoolOp::Union
+        && let (Some(ma), Some(mb)) = &meshes
+    {
+        crate::boolean_guard::check_planar_boundaries(a, b, ma, mb)?;
     }
     let mut last = String::new();
     // Coincident faces make the intersection fail after many retries; push them apart first.
