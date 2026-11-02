@@ -2,13 +2,13 @@
 # changed files to the rig areas they can affect (scripts/ci/kernel_rig_plan.py): an area runs
 # when a file its tests/kernel-cases/<area>/PATHS lists changes, or one of its cases; every area
 # runs when the shared core in tests/kernel-cases/PATHS-ALL changes; the ladder runs whenever any
-# area does. One job then builds solidcraft-cli once (release, SMLib prebuilt), checks that every
+# area does. One job then builds solidcraft-cli once (release), checks that every
 # registry command has a case or an exemption (tests/kernel-cases/EXEMPT), and hands the CLI to a
 # matrix of shards as an artifact, one per selected area plus the ladder, in parallel, so the
 # wall time is the build plus the slowest shard. See tests/kernel-cases/README.md.
 #
-# - An area, on solidcore, fails on a regression (a case that fails and its
-#   tests/kernel-cases/<area>/KNOWN_FAILING.solidcore does not list) or on a listed case that passes (it is fixed: remove its line in the same pull
+# - An area fails on a regression (a case that fails and its tests/kernel-cases/<area>/KNOWN_FAILING
+#   does not list) or on a listed case that passes (it is fixed: remove its line in the same pull
 #   request, so the list only shrinks).
 # - The ladder fails on any case whose status or counts differ from
 #   tests/kernel-cases/ladder/golden.json; a right change is re-recorded (`--record "why"`).
@@ -38,7 +38,6 @@ on:
       - "apps/solidcraft-cli/src/kernel_cases.rs"
       - "xtask/src/kernel_cases.rs"
       - "xtask/src/kernel_ladder.rs"
-      - "scripts/fetch-smlib.sh"
       - "scripts/ci/kernel_rig_plan.py"
       - "scripts/ci/test_kernel_rig_plan.py"
       - ".github/workflows/kernel-rig.yml"
@@ -58,7 +57,6 @@ on:
       - "apps/solidcraft-cli/src/kernel_cases.rs"
       - "xtask/src/kernel_cases.rs"
       - "xtask/src/kernel_ladder.rs"
-      - "scripts/fetch-smlib.sh"
       - "scripts/ci/kernel_rig_plan.py"
       - "scripts/ci/test_kernel_rig_plan.py"
       - ".github/workflows/kernel-rig.yml"
@@ -141,16 +139,13 @@ jobs:
         with:
           key: kernel-rig
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.16.0
-      - name: Build the CLI (release, SMLib) and the rig's runner
+      - name: Build the CLI (release) and the rig's runner
         run: |
-          cargo build --release --locked -p solidcraft-cli --features smlib
+          cargo build --release --locked -p solidcraft-cli
           cargo build --locked -p xtask
       # A tar keeps the executable bits, which an artifact drops. xtask finds the repository from
       # the path it was built in (CARGO_MANIFEST_DIR), which is the same checkout path in every
@@ -199,11 +194,9 @@ jobs:
           SHARD: ${{ matrix.shard }}
         run: |
           if [ "$SHARD" = ladder ]; then
-            # The golden is the C++ kernel's: solidcore differs on one case (shell under mitred
-            # rounds), so this shard stays on it until a solidcore golden is justified.
-            set -- --ladder --gate --kernel smlib
+            set -- --ladder --gate
           else
-            set -- --area "$SHARD" --known-failing "tests/kernel-cases/$SHARD/KNOWN_FAILING.solidcore"
+            set -- --area "$SHARD" --known-failing "tests/kernel-cases/$SHARD/KNOWN_FAILING"
           fi
           target/debug/xtask kernel-cases "$@" --cli target/release/solidcraft-cli --out "$RUNNER_TEMP/kernel-rig"
       - name: Keep the results

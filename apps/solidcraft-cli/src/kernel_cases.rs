@@ -9,9 +9,9 @@ use serde_json::{Value, json};
 use crate::oracle::{ABS_FRAC, Checks, REL_TOL, totals, v3};
 use crate::{read_json, recipe};
 
-/// The kernel the cases run on: SMLib, the only one.
+/// The kernel the cases run on: solidcore, the only one.
 fn kernel() -> String {
-    "smlib".into()
+    "solidcore".into()
 }
 
 /// How many cases a chain of `base` recipes may go through (a ladder case builds on the one

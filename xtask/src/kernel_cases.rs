@@ -1,18 +1,12 @@
 //! `cargo xtask kernel-cases`: the kernel regression rig. Runs every case in
-//! `tests/kernel-cases/<area>/<id>/` through `solidcraft-cli kernel-cases` on solidcore, or the
-//! C++ SMLib kernel when asked for, one process per case (so a crash or a hang is that case's result, not the run's), and writes
-//! its report: results per case, coverage per area and per source, and the issues and PRs looked
-//! at and skipped. Each case is graded against its own answer.
+//! `tests/kernel-cases/<area>/<id>/` through `solidcraft-cli kernel-cases`, one process per case
+//! (so a crash or a hang is that case's result, not the run's), and writes its report,
+//! `docs/kernel-cases.md`: results per case, coverage per area and per source, and the issues and
+//! PRs looked at and skipped. Each case is graded against its own answer.
 //!
 //! The run's output folder (`--out`, default `target/kernel-cases`) holds `results.json`, every
-//! case's full result, and `dumps/<area>-<case>/`, the inputs of each SMLib call a case's run
+//! case's full result, and `dumps/<area>-<case>/`, the inputs of each kernel call a case's run
 //! failed in (`solidcraft-cli kernel-cases --dumps`), for replay.
-//!
-//! `--kernel solidcore|smlib|both` (default solidcore) picks the backend each case's process runs
-//! on (`SOLIDCRAFT_KERNEL`). A solidcore run keeps its results, dumps and report in
-//! `<out>/solidcore/`; an smlib run writes `docs/kernel-cases.md`; `both` runs every case on each,
-//! keeps `docs/kernel-cases.md` as the SMLib report and writes the side by side to
-//! `docs/kernel-cases-backends.md` and `<out>/backends.json`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -26,9 +20,6 @@ use crate::{cargo, root};
 
 const DEFAULT_TIMEOUT_S: u64 = 180;
 
-/// The backends `--kernel` may name, as `SOLIDCRAFT_KERNEL` takes them.
-const BACKENDS: [&str; 2] = ["smlib", "solidcore"];
-
 /// How many cases ended in each status.
 type StatusCounts = BTreeMap<String, usize>;
 
@@ -37,25 +28,13 @@ pub(crate) struct Options {
     area: Option<String>,
     timeout: Duration,
     pub(crate) jobs: usize,
-    /// The run's output folder: `results.json` and the SMLib dumps (`dumps/`).
+    /// The run's output folder: `results.json` and the kernel's dumps (`dumps/`).
     out: PathBuf,
-    /// The backends each case runs on (`--kernel`, default solidcore alone).
-    pub(crate) kernels: Vec<&'static str>,
     /// `--known-failing FILE`: run as a regression gate against that baseline (see [`gate`]).
     known_failing: Option<PathBuf>,
     /// `--validation MODE`: when SMLib's full check runs on the cases' features (each_step,
     /// each_feature, off; the CLI's default, each_feature, when not given).
     validation: Option<String>,
-}
-
-impl Options {
-    /// A backend's output folder: the run's own for SMLib, `<out>/<backend>/` for any other.
-    fn out_of(&self, kernel: &str) -> PathBuf {
-        match kernel {
-            "smlib" => self.out.clone(),
-            other => self.out.join(other),
-        }
-    }
 }
 
 /// The run's options; `out` is its output folder unless `--out` gives one.
@@ -64,28 +43,18 @@ pub(crate) fn options(rest: &[&str], out: &str) -> Result<Options, String> {
     let secs = arg("--timeout").map(|t| t.parse::<u64>().map_err(|e| format!("--timeout: {e}"))).transpose()?.unwrap_or(DEFAULT_TIMEOUT_S);
     let jobs = arg("--jobs").map(|j| j.parse::<usize>().map_err(|e| format!("--jobs: {e}"))).transpose()?.unwrap_or(4).clamp(1, 32);
     let out = arg("--out").map_or_else(|| root().join(out), PathBuf::from);
-    let kernels = match arg("--kernel").as_deref() {
-        Some("smlib") => vec![BACKENDS[0]],
-        None | Some("solidcore") => vec![BACKENDS[1]],
-        Some("both") => BACKENDS.to_vec(),
-        Some(k) => return Err(format!("--kernel: unknown backend '{k}' (smlib, solidcore or both)")),
-    };
-    if rest.contains(&"--route") {
-        return Err("--route is gone: a run has one kernel, --kernel solidcore, smlib or both".into());
+    if rest.contains(&"--route") || rest.contains(&"--kernel") {
+        return Err("--route and --kernel are gone: the cases run on solidcore, the only kernel".into());
     }
     let known_failing = arg("--known-failing").map(|p| {
         let p = PathBuf::from(p);
         if p.is_absolute() { p } else { root().join(p) }
     });
-    // A list is one kernel's: the gate grades the run's one kernel against it.
-    if known_failing.is_some() && kernels.len() != 1 {
-        return Err("--known-failing: a list is one kernel's, so not with --kernel both".into());
-    }
     let validation = arg("--validation");
     if let Some(v) = validation.as_deref().filter(|v| !["each_step", "each_feature", "off"].contains(v)) {
         return Err(format!("--validation must be each_step, each_feature or off, not `{v}`"));
     }
-    Ok(Options { cli: arg("--cli"), area: arg("--area"), timeout: Duration::from_secs(secs), jobs, out, kernels, known_failing, validation })
+    Ok(Options { cli: arg("--cli"), area: arg("--area"), timeout: Duration::from_secs(secs), jobs, out, known_failing, validation })
 }
 
 /// Every case's full result as JSON, into the run's output folder.
@@ -126,8 +95,8 @@ fn cases(dir: &Path, only: Option<&str>) -> Result<Vec<PathBuf>, String> {
 
 /// One case, in its own process, killed after the timeout; `path` is the case's directory under
 /// `tests/kernel-cases/`.
-fn run_one(o: &Options, case: &Path, kernel: &str) -> Value {
-    let mut r = run_case(o, case, kernel);
+fn run_one(o: &Options, case: &Path) -> Value {
+    let mut r = run_case(o, case);
     let base = root().join("tests/kernel-cases");
     r["path"] = json!(case.strip_prefix(&base).unwrap_or(case).to_string_lossy().replace('\\', "/"));
     r
@@ -166,26 +135,19 @@ fn wait_draining(mut child: std::process::Child, timeout: Duration) -> Result<Op
     Ok(Some(std::process::Output { status, stdout: join(stdout)?, stderr: join(stderr)? }))
 }
 
-/// The features `cargo run` builds the CLI with for a run on `kernels`: the C++ kernel is opt-in at
-/// build time (`--features smlib`), so only a run that asks for it builds it. One build for the
-/// whole run (`both` included), so the cases don't rebuild the CLI between kernels.
-fn cli_features(kernels: &[&str]) -> &'static [&'static str] {
-    if kernels.contains(&"smlib") { &["--features", "smlib"] } else { &[] }
-}
-
-fn run_case(o: &Options, case: &Path, kernel: &str) -> Value {
+fn run_case(o: &Options, case: &Path) -> Value {
     let rel = case.strip_prefix(root()).unwrap_or(case).to_path_buf();
     let mut cmd = match &o.cli {
         Some(bin) => Command::new(bin),
         None => {
             let mut c = cargo();
-            c.args(["run", "-q", "--release", "-p", "solidcraft-cli"]).args(cli_features(&o.kernels)).arg("--");
+            c.args(["run", "-q", "--release", "-p", "solidcraft-cli", "--"]);
             c
         }
     };
     let mut dumps = std::ffi::OsString::from("--dumps=");
-    dumps.push(o.out_of(kernel).join("dumps"));
-    cmd.env("SOLIDCRAFT_KERNEL", kernel).current_dir(root()).args(["kernel-cases", "--json"]).arg(dumps);
+    dumps.push(o.out.join("dumps"));
+    cmd.current_dir(root()).args(["kernel-cases", "--json"]).arg(dumps);
     if let Some(v) = &o.validation {
         cmd.arg(format!("--validation={v}"));
     }
@@ -222,27 +184,21 @@ fn run_case(o: &Options, case: &Path, kernel: &str) -> Value {
     }
 }
 
-/// Every case on the run's one backend (the ladder's: it refuses `--kernel both`).
+/// Every case, one job pool for them all; the results in order.
 pub(crate) fn run_all(o: &Options, list: &[PathBuf]) -> Vec<Value> {
-    run_on(o, list, &o.kernels).into_iter().next().unwrap_or_default()
-}
-
-/// Every case on each backend, one job pool for all the runs; the results per backend, in order.
-fn run_on(o: &Options, list: &[PathBuf], kernels: &[&str]) -> Vec<Vec<Value>> {
     // Without --cli each case is `cargo run`: build the CLI once first, so the first cases don't
-    // spend their timeout compiling it (the C++ kernel's build most of all).
+    // spend their timeout compiling it.
     if o.cli.is_none() {
         let mut c = cargo();
-        c.args(["build", "-q", "--release", "-p", "solidcraft-cli"]).args(cli_features(kernels));
+        c.args(["build", "-q", "--release", "-p", "solidcraft-cli"]);
         if let Err(e) = c.status().map_err(|e| e.to_string()).and_then(|s| if s.success() { Ok(()) } else { Err(s.to_string()) }) {
             eprintln!("kernel-cases: building solidcraft-cli failed ({e}); each case will say why");
         }
     }
-    let jobs = list.len() * kernels.len();
     let next = Arc::new(Mutex::new(0usize));
-    let results = Arc::new(Mutex::new(vec![Value::Null; jobs]));
+    let results = Arc::new(Mutex::new(vec![Value::Null; list.len()]));
     std::thread::scope(|s| {
-        for _ in 0..o.jobs.min(jobs.max(1)) {
+        for _ in 0..o.jobs.min(list.len().max(1)) {
             let (next, results) = (Arc::clone(&next), Arc::clone(&results));
             s.spawn(move || {
                 loop {
@@ -252,15 +208,9 @@ fn run_on(o: &Options, list: &[PathBuf], kernels: &[&str]) -> Vec<Vec<Value>> {
                         *n += 1;
                         i
                     };
-                    // Case by case, each on every backend in turn.
-                    let (Some(case), Some(kernel)) = (list.get(i / kernels.len().max(1)), kernels.get(i % kernels.len().max(1))) else { return };
-                    let r = run_one(o, case, kernel);
-                    let tag = if kernels.len() > 1 { format!("{kernel:<10} ") } else { String::new() };
-                    println!(
-                        "{:<11} {tag}{}",
-                        r["status"].as_str().unwrap_or("?").to_uppercase(),
-                        case.strip_prefix(root()).unwrap_or(case).display()
-                    );
+                    let Some(case) = list.get(i) else { return };
+                    let r = run_one(o, case);
+                    println!("{:<11} {}", r["status"].as_str().unwrap_or("?").to_uppercase(), case.strip_prefix(root()).unwrap_or(case).display());
                     if let Ok(mut all) = results.lock()
                         && let Some(slot) = all.get_mut(i)
                     {
@@ -270,8 +220,7 @@ fn run_on(o: &Options, list: &[PathBuf], kernels: &[&str]) -> Vec<Vec<Value>> {
             });
         }
     });
-    let all = Arc::try_unwrap(results).ok().and_then(|m| m.into_inner().ok()).unwrap_or_default();
-    (0..kernels.len()).map(|k| all.iter().skip(k).step_by(kernels.len().max(1)).cloned().collect()).collect()
+    Arc::try_unwrap(results).ok().and_then(|m| m.into_inner().ok()).unwrap_or_default()
 }
 
 /// What went wrong in a result: its failed checks, then its error.
@@ -353,9 +302,8 @@ fn source_kinds(dir: &Path, cited: &BTreeMap<String, Vec<String>>) -> Result<Str
     Ok(md)
 }
 
-/// The report of one backend's run into `to` (relative to the repository root, or absolute);
-/// `kernel` is the backend's label, `env` what its processes were given.
-fn write_report(dir: &Path, list: &[PathBuf], results: &[Value], kernel: &str, env: &str, to: &Path) -> Result<String, String> {
+/// The run's report into `to` (relative to the repository root, or absolute).
+fn write_report(dir: &Path, list: &[PathBuf], results: &[Value], to: &Path) -> Result<String, String> {
     let key = |r: &Value| (r["area"].as_str().unwrap_or("").to_string(), r["case"].as_str().unwrap_or("").to_string());
     let by_case: BTreeMap<(String, String), &Value> = results.iter().map(|r| (key(r), r)).collect();
     // Coverage: per area, cases and their statuses; per source, its cases.
@@ -386,11 +334,8 @@ fn write_report(dir: &Path, list: &[PathBuf], results: &[Value], kernel: &str, e
         );
     }
     let mut md = String::from(
-        "# Kernel regression rig\n\nGenerated by `cargo xtask kernel-cases`. Every geometry case the old kernel (truck) got wrong, as an issue, a PR or a crash report recorded it, is a use case in [`tests/kernel-cases/`](../tests/kernel-cases/) with its own right answer: numbers from analysis or a hand calculation (**analytic**) where the geometry has them, and otherwise the invariants (**invariants**): the operation succeeds, or refuses cleanly where that is the right answer; each body is one closed shell that passes the record's structure and geometry checks and SMLib's own check; the expected face, edge and vertex counts. Never a kernel's output, and never a commercial kernel's.\n\nThe cases run on SMLib, SolidCraft's kernel. A failing case stays failing until the kernel is fixed; there is no workaround on SolidCraft's side. A failed SMLib call leaves its inputs for replay in the run's output folder (`target/kernel-cases/dumps/<area>-<case>/`). See [`tests/kernel-cases/README.md`](../tests/kernel-cases/README.md) for the format. Every area is also a regression gate: CI's Kernel rig workflow runs them on every pull request that touches the kernel and fails on a case that fails and its area's `KNOWN_FAILING` (such as [`fillets/KNOWN_FAILING`](../tests/kernel-cases/fillets/KNOWN_FAILING)) does not list, or a listed case that passes.\n\n",
+        "# Kernel regression rig\n\nGenerated by `cargo xtask kernel-cases`. Every geometry case the old kernel (truck) got wrong, as an issue, a PR or a crash report recorded it, is a use case in [`tests/kernel-cases/`](../tests/kernel-cases/) with its own right answer: numbers from analysis or a hand calculation (**analytic**) where the geometry has them, and otherwise the invariants (**invariants**): the operation succeeds, or refuses cleanly where that is the right answer; each body is one closed shell that passes the record's structure and geometry checks and the kernel's own check; the expected face, edge and vertex counts. Never a kernel's output, and never a commercial kernel's.\n\nThe cases run on solidcore, SolidCraft's kernel. A failing case stays failing until the kernel is fixed; there is no workaround on SolidCraft's side. A failed kernel call leaves its inputs for replay in the run's output folder (`target/kernel-cases/dumps/<area>-<case>/`). See [`tests/kernel-cases/README.md`](../tests/kernel-cases/README.md) for the format. Every area is also a regression gate: CI's Kernel rig workflow runs them on every pull request that touches the kernel and fails on a case that fails and its area's `KNOWN_FAILING` (such as [`fillets/KNOWN_FAILING`](../tests/kernel-cases/fillets/KNOWN_FAILING)) does not list, or a listed case that passes.\n\n",
     );
-    if kernel != "smlib" {
-        md += &format!("**This run: `{env}`.**\n\n");
-    }
     md += "## Coverage\n\n| Area | Cases | Results |\n|---|---|---|\n";
     for (area, (n, statuses)) in &areas {
         md += &format!("| {area} | {n} | {} |\n", statuses.iter().map(|(s, c)| format!("{c} {s}")).collect::<Vec<_>>().join(", "));
@@ -441,92 +386,11 @@ fn write_report(dir: &Path, list: &[PathBuf], results: &[Value], kernel: &str, e
     let shown = path.strip_prefix(root()).unwrap_or(&path).display().to_string();
     std::fs::write(&path, md).map_err(|e| format!("{shown}: {e}"))?;
     let pass = results.iter().filter(|r| r["status"] == "pass").count();
-    let on = if kernel == "smlib" { String::new() } else { format!(" on {kernel}") };
-    Ok(format!("kernel-cases: {pass}/{} pass{on} → {shown} ({skipped} skipped sources listed)", list.len()))
-}
-
-/// pass, fail, or other (crash, hang, not supported yet...), for the summary.
-fn bucket(status: &str) -> &'static str {
-    match status {
-        "pass" => "pass",
-        "fail" => "fail",
-        _ => "other",
-    }
-}
-
-/// A result's commands' time (or, without one, its process's).
-fn seconds(r: &Value) -> Option<f64> {
-    r["seconds"].as_f64().or_else(|| r["process_seconds"].as_f64())
-}
-
-/// The two backends side by side: per case (area, id) each one's status, time and what went wrong,
-/// as JSON, and the Markdown report: a summary, then per area the cases that differ first.
-fn side_by_side(smlib: &[Value], solidcore: &[Value]) -> (Value, String) {
-    let key = |r: &Value| (r["area"].as_str().unwrap_or("").to_string(), r["case"].as_str().unwrap_or("").to_string());
-    let mut pairs: BTreeMap<(String, String), [Option<&Value>; 2]> = BTreeMap::new();
-    for (k, rs) in [smlib, solidcore].iter().enumerate() {
-        for r in rs.iter().filter(|r| !r.is_null()) {
-            if let Some(slot) = pairs.entry(key(r)).or_default().get_mut(k) {
-                *slot = Some(r);
-            }
-        }
-    }
-    let status = |r: Option<&Value>| r.and_then(|r| r["status"].as_str()).unwrap_or("not run").to_string();
-    let mut rows = Vec::new();
-    let (mut counts, mut times, mut agree) = ([StatusCounts::new(), StatusCounts::new()], [0.0f64; 2], 0);
-    for ((area, case), runs) in &pairs {
-        let same = status(runs[0]) == status(runs[1]);
-        agree += usize::from(same);
-        let mut row = json!({"case": case, "area": area, "agree": same});
-        for (k, name) in BACKENDS.iter().enumerate() {
-            let r = runs[k];
-            *counts[k].entry(bucket(&status(r)).to_string()).or_default() += 1;
-            times[k] += r.and_then(seconds).unwrap_or(0.0);
-            let error = r.map(|r| notes(r).join("; ")).filter(|e| !e.is_empty());
-            row[*name] = json!({"status": status(r), "seconds": r.and_then(seconds), "error": error});
-        }
-        rows.push(row);
-    }
-    let differ = pairs.len() - agree;
-    let mut md = String::from(
-        "# Kernel regression rig: SMLib and solidcore\n\nGenerated by `cargo xtask kernel-cases --kernel both`: every case in [`tests/kernel-cases/`](../tests/kernel-cases/) run on each backend (`SOLIDCRAFT_KERNEL`), graded against its own answer. Times are the commands' own. [`kernel-cases.md`](kernel-cases.md) is the SMLib run in full.\n\n",
-    );
-    md += "## Summary\n\n| Backend | Pass | Fail | Other | Time (s) |\n|---|---|---|---|---|\n";
-    for (k, name) in BACKENDS.iter().enumerate() {
-        let n = |b: &str| counts[k].get(b).copied().unwrap_or(0);
-        md += &format!("| {name} | {} | {} | {} | {:.1} |\n", n("pass"), n("fail"), n("other"), times[k]);
-    }
-    md += &format!("\n{} cases: {agree} agree, {differ} differ.\n", pairs.len());
-    let side = |r: &Value| match r["seconds"].as_f64() {
-        Some(s) => format!("{} ({s:.2} s)", r["status"].as_str().unwrap_or("?")),
-        None => r["status"].as_str().unwrap_or("?").to_string(),
-    };
-    let mut by_area: BTreeMap<&str, Vec<&Value>> = BTreeMap::new();
-    for row in &rows {
-        by_area.entry(row["area"].as_str().unwrap_or("")).or_default().push(row);
-    }
-    for (area, mut list) in by_area {
-        list.sort_by_key(|r| (r["agree"].as_bool().unwrap_or(false), r["case"].as_str().unwrap_or("").to_string()));
-        md += &format!("\n## {area}\n\n| Case | {} | {} | |\n|---|---|---|---|\n", BACKENDS[0], BACKENDS[1]);
-        for r in list {
-            let mark = if r["agree"].as_bool().unwrap_or(false) { "" } else { "**differ**" };
-            md += &format!("| {} | {} | {} | {mark} |\n", r["case"].as_str().unwrap_or(""), side(&r["smlib"]), side(&r["solidcore"]));
-        }
-    }
-    let summary: Value = BACKENDS
-        .iter()
-        .enumerate()
-        .map(|(k, name)| (name.to_string(), json!({"counts": counts[k], "seconds": times[k]})))
-        .collect::<serde_json::Map<_, _>>()
-        .into();
-    (json!({"summary": summary, "agree": agree, "differ": differ, "cases": rows}), md)
+    Ok(format!("kernel-cases: {pass}/{} pass → {shown} ({skipped} skipped sources listed)", list.len()))
 }
 
 pub fn run(rest: &[&str]) -> Result<(), String> {
     if rest.contains(&"--ladder") {
-        if options(rest, "target/kernel-ladder")?.kernels.len() != 1 {
-            return Err("--kernel: the ladder runs on one backend, smlib or solidcore".into());
-        }
         return crate::kernel_ladder::run(rest);
     }
     let o = options(rest, "target/kernel-cases")?;
@@ -539,39 +403,19 @@ pub fn run(rest: &[&str]) -> Result<(), String> {
     if list.is_empty() {
         return Err(format!("no cases (recipe.json + expected.json) under {}", dir.display()));
     }
-    let runs = run_on(&o, &list, &o.kernels);
-    for (kernel, results) in o.kernels.iter().zip(&runs) {
-        save_json(&o.out_of(kernel), "results.json", results)?;
-    }
+    let results = run_all(&o, &list);
+    save_results(&o, &results)?;
     if let Some(file) = &o.known_failing {
-        // A gate run grades the run's one kernel against its baseline, and writes no report; its
-        // results.json is still saved above.
+        // A gate run grades the run against its baseline, and writes no report; its results.json
+        // is still saved above.
         let text = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
         let base = file.parent().unwrap_or(&dir);
         let paths: Vec<String> = list.iter().map(|c| c.strip_prefix(base).unwrap_or(c).to_string_lossy().replace('\\', "/")).collect();
-        let graded = runs.first().ok_or("--known-failing: no run to grade")?;
-        let statuses: Vec<&str> = graded.iter().map(|r| r["status"].as_str().unwrap_or("?")).collect();
+        let statuses: Vec<&str> = results.iter().map(|r| r["status"].as_str().unwrap_or("?")).collect();
         println!("{}", gate(&text, &paths, &statuses).map_err(|e| format!("{}: {e}", file.display()))?);
         return Ok(());
     }
-    for (kernel, results) in o.kernels.iter().zip(&runs) {
-        let out = o.out_of(kernel);
-        let to = if *kernel == "smlib" { PathBuf::from("docs/kernel-cases.md") } else { out.join("report.md") };
-        let env = format!("SOLIDCRAFT_KERNEL={kernel}");
-        println!("{}", write_report(&dir, &list, results, kernel, &env, &to)?);
-    }
-    if let [smlib, solidcore] = runs.as_slice() {
-        let (data, md) = side_by_side(smlib, solidcore);
-        let into = o.out.clone();
-        save_json(&into, "backends.json", &data)?;
-        std::fs::write(root().join("docs/kernel-cases-backends.md"), md).map_err(|e| format!("docs/kernel-cases-backends.md: {e}"))?;
-        println!(
-            "kernel-cases: {} agree, {} differ → docs/kernel-cases-backends.md, {}",
-            data["agree"],
-            data["differ"],
-            into.join("backends.json").display()
-        );
-    }
+    println!("{}", write_report(&dir, &list, &results, Path::new("docs/kernel-cases.md"))?);
     Ok(())
 }
 
@@ -790,67 +634,15 @@ mod tests {
         assert!(t.elapsed() < Duration::from_secs(20));
     }
 
+    /// `--route`, the old per-family run, and `--kernel`, the old choice of kernel, are no options:
+    /// passed anyway, they are refused rather than run as something else.
     #[test]
-    fn side_by_side_counts_and_puts_differences_first() {
-        let r = |area: &str, case: &str, status: &str, s: f64| json!({"area": area, "case": case, "status": status, "seconds": s});
-        let smlib = [r("booleans", "a", "pass", 1.0), r("booleans", "b", "pass", 2.0), r("shell", "c", "crash", 0.5)];
-        let mut hang = json!({"area": "booleans", "case": "b", "status": "hang", "error": "no result after 180 s"});
-        hang["process_seconds"] = json!(180.0);
-        let solidcore = [r("booleans", "a", "pass", 0.5), hang, r("shell", "c", "fail", 1.5)];
-        let (data, md) = side_by_side(&smlib, &solidcore);
-        assert_eq!((data["agree"].as_u64(), data["differ"].as_u64()), (Some(1), Some(2)));
-        assert_eq!(data["summary"]["smlib"]["counts"], json!({"pass": 2, "other": 1}));
-        assert_eq!(data["summary"]["solidcore"]["counts"], json!({"pass": 1, "fail": 1, "other": 1}));
-        assert_eq!(data["summary"]["solidcore"]["seconds"].as_f64(), Some(182.0));
-        let b = data["cases"].as_array().and_then(|c| c.iter().find(|c| c["case"] == "b")).cloned().unwrap_or_default();
-        assert_eq!((b["solidcore"]["status"].as_str(), b["solidcore"]["error"].as_str()), (Some("hang"), Some("no result after 180 s")));
-        // In booleans, b (differs) comes before a (agrees).
-        let (pos_a, pos_b) = (md.find("| a |"), md.find("| b |"));
-        assert!(pos_b.is_some() && pos_a.is_some() && pos_b < pos_a, "{md}");
-        assert!(md.contains("| b | pass (2.00 s) | hang (180.00 s) | **differ** |"), "{md}");
-        assert!(md.contains("3 cases: 1 agree, 2 differ."), "{md}");
-    }
-
-    /// `--route`, the old per-family run, is no option: each case's process has one kernel. Passed
-    /// anyway, it is refused rather than run as something else.
-    #[test]
-    fn a_kernel_has_its_own_folder_and_route_is_refused() {
-        let o = options(&["--kernel", "both", "--out", "/r"], "x").unwrap();
-        assert_eq!((o.out_of("smlib"), o.out_of("solidcore")), (PathBuf::from("/r"), PathBuf::from("/r/solidcore")));
+    fn route_and_kernel_are_refused() {
         assert!(options(&["--route", "boolean=solidcore"], "x").is_err());
-        assert!(options(&["--kernel", "both", "--route"], "x").is_err());
-    }
-
-    /// `--known-failing` follows the kernel given, solidcore by default: a list is one kernel's.
-    #[test]
-    fn the_gate_grades_the_kernel_given() {
-        for (args, kernel) in [
-            (&["--known-failing", "/k"][..], "solidcore"),
-            (&["--kernel", "solidcore", "--known-failing", "/k"], "solidcore"),
-            (&["--kernel", "smlib", "--known-failing", "/k"], "smlib"),
-        ] {
-            let o = options(args, "x").unwrap();
-            assert_eq!((o.known_failing, o.kernels), (Some(PathBuf::from("/k")), vec![kernel]), "{args:?}");
-        }
-        assert!(options(&["--kernel", "both", "--known-failing", "/k"], "x").is_err());
-    }
-
-    /// With no `--kernel`, a run is on solidcore; the C++ kernel is asked for.
-    #[test]
-    fn the_rig_defaults_to_solidcore() {
-        assert_eq!(options(&[], "x").unwrap().kernels, ["solidcore"]);
-        assert_eq!(options(&["--kernel", "smlib"], "x").unwrap().kernels, ["smlib"]);
-        assert_eq!(options(&["--kernel", "both"], "x").unwrap().kernels, ["smlib", "solidcore"]);
-    }
-
-    /// Only a run that asks for the C++ kernel builds the CLI with it.
-    #[test]
-    fn the_cli_is_built_with_the_cpp_kernel_only_when_a_run_asks_for_it() {
-        let features = |args: &[&str]| cli_features(&options(args, "x").unwrap().kernels).to_vec();
-        assert!(features(&[]).is_empty());
-        assert!(features(&["--kernel", "solidcore"]).is_empty());
-        assert_eq!(features(&["--kernel", "smlib"]), ["--features", "smlib"]);
-        assert_eq!(features(&["--kernel", "both"]), ["--features", "smlib"]);
+        assert!(options(&["--kernel", "smlib"], "x").is_err());
+        assert!(options(&["--kernel", "solidcore", "--known-failing", "/k"], "x").is_err());
+        let o = options(&["--known-failing", "/k", "--out", "/r"], "x").unwrap();
+        assert_eq!((o.known_failing, o.out), (Some(PathBuf::from("/k")), PathBuf::from("/r")));
     }
 
     fn gate_on(text: &str, cases: &[(&str, &str)]) -> Result<String, String> {
