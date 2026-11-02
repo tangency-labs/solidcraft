@@ -1143,7 +1143,7 @@ mod tests {
         let p = &out["profile"];
         let rows = p["rows"].as_array().unwrap();
         let has = |cat: &str| rows.iter().any(|r| r["category"] == cat);
-        assert!(has("import") && (has("solidcore") || has("smlib")), "{p}");
+        assert!(has("import") && has("solidcore"), "{p}");
         assert!(p["by_category"].as_array().is_some_and(|c| !c.is_empty()) && p["wall_ms"].as_f64().is_some_and(|w| w > 0.0), "{p}");
     }
 
