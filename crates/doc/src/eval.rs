@@ -4593,7 +4593,7 @@ fn hole_spots(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature) -> R
         _ => {
             let dir = direction.normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
             let at = hole_on_surface(st, single_hole_position(vals, st, position, at, points)?, dir, &[]);
-            let at = with_references(vals, st, f, at, dir)?;
+            let at = with_references(vals, st, f, at, dir, true)?;
             let dir = hole_dir_into_face(st, at, dir);
             return Ok((vec![hole_on_surface(st, at, dir, &[])], dir));
         }
@@ -4641,7 +4641,7 @@ fn hole_spots_raw(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature) 
         _ => {
             let dir = direction.normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
             let p = single_hole_position(vals, st, position, at, points)?;
-            let p = if hole_references(f).is_empty() { p } else { with_references(vals, st, f, hole_on_surface(st, p, dir, &[]), dir)? };
+            let p = if hole_references(f).is_empty() { p } else { with_references(vals, st, f, hole_on_surface(st, p, dir, &[]), dir, false)? };
             Ok((vec![p], hole_dir_into_face(st, hole_on_surface(st, p, dir, &[]), dir)))
         }
     }
@@ -4675,13 +4675,15 @@ fn hole_references(f: &Feature) -> &[crate::HoleReference] {
 /// plane of the flat face at its base, square to its axis.
 fn cylinder_base(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature, base: &crate::PointExpr, axis: Vec3) -> Result<Vec3> {
     let at = point(vals, base)?;
-    with_references(vals, st, f, at, -axis)
+    with_references(vals, st, f, at, -axis, true)
 }
 
 /// Where a Single hole (or a cylinder) with reference edges (#37) is placed: at its distances
 /// from the edges' lines, in the plane of the face at `at` (on the surface), the edges found by
-/// their names, else their points. A feature without reference edges stays at `at`.
-fn with_references(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature, at: Vec3, dir: Vec3) -> Result<Vec3> {
+/// their names, else their points. A feature without reference edges stays at `at`. With
+/// `on_face` the centre must lie on that face; a pattern or mirror replaying a hole that is
+/// already drilled finds its centre in the opening and doesn't ask (#8055).
+fn with_references(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature, at: Vec3, dir: Vec3, on_face: bool) -> Result<Vec3> {
     let references = hole_references(f);
     if references.is_empty() {
         return Ok(at);
@@ -4693,7 +4695,7 @@ fn with_references(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature,
     let edges: Vec<(Vec3, Option<&str>)> = references.iter().enumerate().map(|(i, r)| (r.edge.0, f.edge_names.get(i).map(String::as_str))).collect();
     let frame = crate::hole_reference::reference_frame(st, at, dir, &edges, false)?;
     let centre = frame.place(at, &distances)?;
-    if !crate::hole_reference::on_reference_face(st, &frame, centre) {
+    if on_face && !crate::hole_reference::on_reference_face(st, &frame, centre) {
         return Err(DocError::Invalid("the reference distances put the hole's centre off its face".into()));
     }
     Ok(centre)
