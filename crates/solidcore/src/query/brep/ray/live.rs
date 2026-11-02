@@ -41,7 +41,7 @@ use crate::surface::surface::Surface;
 use crate::surface::surface_cache::face_context::FaceQueries;
 use crate::surface::surface_cache::SurfaceCache;
 use crate::topology::brep_cache::{BrepCache, BrepObjects, CacheObject};
-use crate::topology::{Brep, EdgeId, FaceId};
+use crate::topology::{Brep, FaceId};
 
 const OP: &str = "query::brep::ray::live";
 fn borrow_conflict(_: impl core::fmt::Debug) -> SolidError {
@@ -88,18 +88,22 @@ impl<'a, 'i> LiveBrepObjects<'a, 'i> {
         identity: &'a BrepIdentity<'i>,
         cache: Option<&'a BrepCache>,
     ) -> Result<Self> {
-        let curves = brep
-            .edges()
-            .iter()
-            .filter(|(_, edge)| edge.curve.is_some())
-            .map(|(id, _)| (id, OnceCell::new()))
+        let mut curves: Vec<_> = std::iter::repeat_with(|| None)
+            .take(brep.edges().slot_count())
             .collect();
-        let surfaces = brep
-            .faces()
-            .iter()
-            .filter(|(_, face)| face.surface.is_some())
-            .map(|(id, _)| (id, OnceCell::new()))
+        for (id, edge) in brep.edges().iter() {
+            if let (Some(_), Some(slot)) = (&edge.curve, curves.get_mut(slot_of(id.index()))) {
+                *slot = Some(OnceCell::new());
+            }
+        }
+        let mut surfaces: Vec<_> = std::iter::repeat_with(|| None)
+            .take(brep.faces().slot_count())
             .collect();
+        for (id, face) in brep.faces().iter() {
+            if let (Some(_), Some(slot)) = (&face.surface, surfaces.get_mut(slot_of(id.index()))) {
+                *slot = Some(OnceCell::new());
+            }
+        }
         Ok(Self {
             faces: BrepFaceServices::new(brep),
             identity,
@@ -116,11 +120,18 @@ pub struct LiveBrepObjects<'a, 'i> {
     faces: BrepFaceServices<'a>,
     identity: &'a BrepIdentity<'i>,
     cache: Option<&'a BrepCache>,
-    /// The evaluation copy of each edge curve, made on first read (boxed, so the map
-    /// built for every solve holds a pointer per edge, not an empty curve).
-    curves: BTreeMap<EdgeId, OnceCell<Box<Curve>>>,
-    /// The evaluation copy of each face surface, made on first read (boxed, as `curves`).
-    surfaces: BTreeMap<FaceId, OnceCell<Box<Surface>>>,
+    /// The evaluation copy of each edge curve, made on first read, by arena slot: `None`
+    /// for a slot without a live edge that has a curve. Boxed, and a vector rather than a
+    /// map, so what every solve builds is one allocation of a pointer per slot.
+    curves: Vec<Option<OnceCell<Box<Curve>>>>,
+    /// The evaluation copy of each face surface, made on first read, by arena slot (as
+    /// `curves`).
+    surfaces: Vec<Option<OnceCell<Box<Surface>>>>,
+}
+
+/// The index of an arena slot in [`LiveBrepObjects`]' copy vectors.
+fn slot_of(index: u32) -> usize {
+    usize::try_from(index).unwrap_or(usize::MAX)
 }
 
 impl LiveBrepObjects<'_, '_> {
@@ -238,7 +249,11 @@ impl TopologyObjects<CacheObject> for LiveBrepObjects<'_, '_> {
         let CacheObject::Curve(edge) = object else {
             return Err(SolidError::invalid_input(OP, "expected curve handle"));
         };
-        let cell = self.curves.get(&edge).ok_or(SolidError::null_pointer(OP))?;
+        let cell = self
+            .curves
+            .get(slot_of(edge.index()))
+            .and_then(Option::as_ref)
+            .ok_or(SolidError::null_pointer(OP))?;
         if let Some(curve) = cell.get() {
             return Ok(curve.as_ref());
         }
@@ -258,7 +273,8 @@ impl TopologyObjects<CacheObject> for LiveBrepObjects<'_, '_> {
         };
         let cell = self
             .surfaces
-            .get(&face)
+            .get(slot_of(face.index()))
+            .and_then(Option::as_ref)
             .ok_or(SolidError::null_pointer(OP))?;
         if let Some(surface) = cell.get() {
             return Ok(surface.as_ref());
