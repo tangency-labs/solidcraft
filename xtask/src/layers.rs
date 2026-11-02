@@ -45,6 +45,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("sketch", Class::Layer(1)),
     ("kernel", Class::Layer(1)),
     ("render", Class::Layer(1)),
+    // CNC manufacture domain types (serde only; the document stores its settings)
+    ("manufacture", Class::Layer(1)),
     ("doc", Class::Layer(2)),
     ("io", Class::Layer(3)),
     ("engine", Class::Layer(4)),
