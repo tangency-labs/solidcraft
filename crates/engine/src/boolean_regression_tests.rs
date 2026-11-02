@@ -1492,3 +1492,46 @@ fn join_that_meets_no_body_keeps_the_piece_and_says_so() {
     let combine = s.execute("solid.combine", &json!({"target": "A", "tools": ["B"], "operation": "join"})).unwrap();
     assert!(combine["warning"].is_null(), "{combine}");
 }
+
+#[test]
+fn symmetric_through_all_lens_cut_of_a_revolved_ring_survives_reopen() {
+    let mut s = replay(include_str!("../../../examples/regressions/symmetric_lens_cut_of_revolved_ring.json"));
+    let check = |s: &Session| {
+        assert!(s.model.results.iter().all(|result| result.error.is_none() && result.warning.is_none()), "{:?}", s.model.results);
+        let state = s.model.state();
+        assert_eq!(state.bodies.len(), 1);
+        let body = &state.body("Ring").unwrap().body;
+        assert!(body.validity().is_empty(), "{:?}", body.validity());
+        assert_eq!(body.lumps().unwrap().len(), 1);
+        assert!(!body.contains(solidcraft_geom::Vec3::new(-20., 2., 35.)));
+        assert!(body.contains(solidcraft_geom::Vec3::new(30., 2., 0.)));
+        body.tessellate_with(1e-4, true).unwrap().measure().volume
+    };
+    let before = check(&s);
+    let saved = s.doc.to_json();
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(s.model.state().body("Ring").unwrap().body.contains(solidcraft_geom::Vec3::new(-20., 2., 35.)));
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(s.doc.to_json(), saved);
+    assert!((check(&s) - before).abs() < 1e-6);
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    assert!((check(&reopened) - before).abs() < 1e-6);
+}
+
+#[test]
+fn symmetric_through_all_lens_cut_of_an_elliptical_ring() {
+    let mut script: Value = serde_json::from_str(include_str!("../../../examples/regressions/symmetric_lens_cut_of_revolved_ring.json")).unwrap();
+    let commands = script["commands"].as_array_mut().unwrap();
+    commands.splice(1..3, [json!({"command":"sketch.ellipse","params":{"center":[32.5,0],"major":[50,0],"minor_radius":5}})]);
+    let mut s = Session::default();
+    s.run_script(&script).unwrap();
+    assert!(s.model.results.iter().all(|result| result.error.is_none() && result.warning.is_none()), "{:?}", s.model.results);
+    let state = s.model.state();
+    let body = &state.body("Ring").unwrap().body;
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    assert!(!body.contains(solidcraft_geom::Vec3::new(-20., 0., 35.)));
+    assert!(body.contains(solidcraft_geom::Vec3::new(30., 0., 0.)));
+    // Integrate the elliptical section's thickness times the remaining angular span.
+    let volume = body.tessellate_with(1e-4, true).unwrap().measure().volume;
+    assert!((volume - 48_233.096_882).abs() < 1., "{volume}");
+}

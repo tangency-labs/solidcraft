@@ -1,0 +1,115 @@
+{
+  "commands": [
+    {
+      "command": "sketch.create",
+      "params": {
+        "plane": "XY",
+        "name": "Section"
+      }
+    },
+    {
+      "command": "sketch.line",
+      "params": {
+        "points": [
+          [
+            15,
+            0
+          ],
+          [
+            50,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "command": "sketch.arc.three_point",
+      "params": {
+        "start": [
+          50,
+          0
+        ],
+        "end": [
+          15,
+          0
+        ],
+        "through": [
+          32.5,
+          7
+        ]
+      }
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "solid.revolve",
+      "params": {
+        "axis": "Y",
+        "body_name": "Ring"
+      }
+    },
+    {
+      "command": "sketch.create",
+      "params": {
+        "plane": {
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "x_dir": [
+            1,
+            0,
+            0
+          ],
+          "y_dir": [
+            0,
+            0,
+            1
+          ]
+        },
+        "name": "Cut"
+      }
+    },
+    {
+      "command": "sketch.circle.center",
+      "params": {
+        "center": [
+          0,
+          0
+        ],
+        "radius": 50
+      }
+    },
+    {
+      "command": "sketch.circle.center",
+      "params": {
+        "center": [
+          -20,
+          35
+        ],
+        "radius": 20
+      }
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "solid.extrude",
+      "params": {
+        "distance": "10 mm",
+        "direction": "symmetric",
+        "convention": "total_distance",
+        "through_all": true,
+        "operation": "cut",
+        "profiles": [
+          1
+        ]
+      }
+    }
+  ],
+  "description": "Issue #3192: symmetric through-all cut of a shallow crowned ring revolved about Y. The selected lens is the intersection of a radius-50 outer outline with an offset radius-20 circle. Its enclosing wall touches the rim but removes no additional material."
+}

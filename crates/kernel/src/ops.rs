@@ -1652,9 +1652,9 @@ where
                 return Ok(Some(body));
             }
         }
-        // A lens cut from a sphere's projected outline carries a redundant cylinder
-        // tangent to the sphere (#2750). Remove it only after proving that it
-        // encloses the entire target, keeping the other wall and both caps exact.
+        // A lens cut from a projected sphere or ring outline carries a redundant
+        // tangent cylinder (#2750, #3192). Remove it only after proving full
+        // enclosure, keeping the cutting wall and the requested depth exact.
         if attempt == 1 && op == BoolOp::Cut {
             let (lens, diagnostics) = capture_boolean_diagnostics(|| crate::sphere_lens::cut(a, b, &boolean_whole));
             if let Some(Ok(result)) = lens

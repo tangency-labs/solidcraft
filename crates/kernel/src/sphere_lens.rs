@@ -1,11 +1,11 @@
-//! A lens extruded from a sphere's projected outline (#2750). One of its two
-//! cylinders encloses the whole target and only touches the sphere. Removing that
+//! A lens extruded from a projected outline (#2750, #3192). One cylinder
+//! encloses the complete target and only touches its outline. Removing that
 //! redundant constraint gives the same cut without a tangent intersection.
 
 use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 use crate::boolean_record as recorded;
-use crate::history::Change;
+use crate::history::{Change, FaceOrigin, FaceProv};
 use crate::{Body, BoolOp, FaceSource, FaceSurface, Result, face_surface};
 
 /// Maximum signed height of a line or circular arc, including interior extrema.
@@ -99,10 +99,106 @@ fn enclosing_ball(body: &Body, tol: f64) -> Option<(Vec3, f64, Vec<Plane>)> {
     Some((center, radius, caps))
 }
 
+/// Prove containment in an infinite cylinder from complete surface representations.
+/// A revolution preserves distance to its axis; positive rational control hulls
+/// bound its whole generating curve. A planar cap lies in the convex disc that
+/// contains every boundary segment. Unsupported surfaces decline the retry.
+fn enclosed_in_cylinder(body: &Body, frame: Plane, center: Vec2, radius: f64, tol: f64) -> bool {
+    use crate::body::from_p3;
+    use truck_modeling as mt;
+
+    if body.is_mesh()
+        || body.shell_count() != 1
+        || body.face_count() == 0
+        || body.face_count() > 128
+        || !radius.is_finite()
+        || radius <= 0.
+        || !tol.is_finite()
+        || tol <= 0.
+    {
+        return false;
+    }
+    let origin = frame.to_world(center);
+    let axis = frame.normal();
+    if !origin.is_finite() {
+        return false;
+    }
+    let mut work = 2_000_000usize;
+    for face in body.solid.face_iter() {
+        match face.surface() {
+            mt::Surface::RevolutedCurve(processor) => {
+                // The identity placement keeps this proof independent of sampled
+                // analytic surface recognition and of arbitrary affine scales.
+                if *processor.transform() != <mt::Matrix4 as mt::One>::one() {
+                    return false;
+                }
+                let surface = processor.entity();
+                let direction = surface.axis();
+                let Some(direction) = Vec3::new(direction.x, direction.y, direction.z).normalized() else { return false };
+                let source_origin = from_p3(surface.origin());
+                let delta = source_origin - origin;
+                let lean = direction.cross(axis).len();
+                let offset = (delta - axis * delta.dot(axis)).len();
+                if !source_origin.is_finite() || lean > 1e-10 || offset > tol {
+                    return false;
+                }
+                let inside = |point: Vec3| {
+                    let local = point - source_origin;
+                    let height = local.dot(direction);
+                    // Include the placement residual over the whole rotation,
+                    // rather than treating nearly coaxial axes as identical.
+                    let bound = (local - direction * height).len() + offset + height.abs() * lean;
+                    point.is_finite() && bound <= radius + tol
+                };
+                let points: Vec<Vec3> = match surface.entity_curve() {
+                    mt::Curve::Line(line) => vec![from_p3(line.0), from_p3(line.1)],
+                    mt::Curve::BSplineCurve(curve) if curve.control_points().len() <= 4096 => {
+                        curve.control_points().iter().map(|p| from_p3(*p)).collect()
+                    }
+                    mt::Curve::NurbsCurve(curve) if curve.control_points().len() <= 4096 => {
+                        if curve.control_points().iter().any(|p| !p.w.is_finite() || p.w <= 0.) {
+                            return false;
+                        }
+                        curve.control_points().iter().map(|p| Vec3::new(p.x / p.w, p.y / p.w, p.z / p.w)).collect()
+                    }
+                    _ => return false,
+                };
+                let Some(left) = work.checked_sub(points.len()) else { return false };
+                work = left;
+                if points.is_empty() || !points.into_iter().all(inside) {
+                    return false;
+                }
+            }
+            mt::Surface::Plane(plane) => {
+                let normal = plane.normal();
+                let normal = Vec3::new(normal.x, normal.y, normal.z);
+                if normal.cross(axis).len() > 1e-10 || face.edge_iter().count() > 4096 {
+                    return false;
+                }
+                for edge in face.edge_iter() {
+                    let Some(segments) = crate::prism_curve::segment(&edge, &frame, tol, &mut work) else { return false };
+                    for segment in segments {
+                        let contained = match segment {
+                            Seg2::Line { a, b } => a.dist(center).max(b.dist(center)) <= radius + tol,
+                            Seg2::Arc { center: c, radius: r, .. } => c.dist(center) + r <= radius + tol,
+                            _ => false,
+                        };
+                        if !contained {
+                            return false;
+                        }
+                    }
+                }
+            }
+            _ => return false,
+        }
+    }
+    true
+}
+
 /// Replace only a construction-certified, convex two-circle lens. Its cutting cylinder stays exact; a cap moves
-/// only into a halfspace proved to be outside the target. The added tool material is outside the ball.
+/// only into a halfspace proved to be outside the target. Added material is outside the target.
 fn relaxed_tool(a: &Body, b: &Body) -> Option<Body> {
-    if b.is_mesh() || b.shell_count() != 1 || b.face_count() != 4 {
+    if b.is_mesh() || b.shell_count() != 1 || !(4..=18).contains(&b.face_count()) {
         return None;
     }
     let tol = (a.size().max(b.size()) * 1e-9).max(1e-8);
@@ -115,26 +211,50 @@ fn relaxed_tool(a: &Body, b: &Body) -> Option<Body> {
         Some(FaceSource::ExtrudeCap { high: false, region: r, plane }) if r == region => Some(*plane),
         _ => None,
     })?;
-    if !region.holes.is_empty() || region.outer.segs.len() != 2 || !region.outer.is_closed(tol) {
+    if !region.holes.is_empty() || !(2..=16).contains(&region.outer.segs.len()) || !region.outer.is_closed(tol) {
         return None;
     }
-    let circles: Vec<(Vec2, f64)> = region
-        .outer
-        .segs
-        .iter()
-        .map(|s| match *s {
-            Seg2::Arc { center, radius, sweep, .. } if sweep > 0.0 && sweep <= std::f64::consts::PI + 1e-9 => Some((center, radius)),
-            _ => None,
-        })
-        .collect::<Option<_>>()?;
+    // A circular wall may be split at the sketch's seams. Recognize the two
+    // supporting circles across those pieces without changing either circle.
+    let mut circles: Vec<(Vec2, f64)> = Vec::new();
+    for segment in &region.outer.segs {
+        let Seg2::Arc { center, radius, sweep, .. } = *segment else { return None };
+        if !(sweep > 0. && sweep < std::f64::consts::TAU - 1e-9) {
+            return None;
+        }
+        if !circles.iter().any(|(c, r)| c.dist(center) + (r - radius).abs() <= tol) {
+            if circles.len() == 2 {
+                return None;
+            }
+            circles.push((center, radius));
+        }
+    }
+    if circles.len() != 2 {
+        return None;
+    }
     let ((c0, r0), (c1, r1)) = (*circles.first()?, *circles.get(1)?);
     let distance = c0.dist(c1);
     if distance <= (r0 - r1).abs() + tol || distance >= r0 + r1 - tol {
         return None;
     }
-    let (center, radius, caps) = enclosing_ball(a, tol)?;
-    let projected = plane.to_local(center);
-    let redundant = circles.iter().position(|(c, r)| projected.dist(*c) + radius <= *r + tol)?;
+    // Positive arcs alone also describe a union. Prove that every whole arc
+    // lies inside the other disc, including an extremum between its ends.
+    for segment in &region.outer.segs {
+        let Seg2::Arc { center, radius, .. } = *segment else { return None };
+        let other = if center.dist(c0) + (radius - r0).abs() <= tol { (c1, r1) } else { (c0, r0) };
+        let direction = (center - other.0).normalized()?;
+        let probe = center + direction * radius;
+        let far = segment.point_at(segment.closest_param(probe));
+        if segment.start().dist(other.0).max(segment.end().dist(other.0)).max(far.dist(other.0)) > other.1 + tol {
+            return None;
+        }
+    }
+    let (redundant, caps) = if let Some((center, radius, caps)) = enclosing_ball(a, tol) {
+        let projected = plane.to_local(center);
+        (circles.iter().position(|(c, r)| projected.dist(*c) + radius <= *r + tol)?, caps)
+    } else {
+        (circles.iter().position(|(c, r)| enclosed_in_cylinder(a, plane, *c, *r, tol))?, Vec::new())
+    };
     let (c, r) = *circles.get(1 - redundant)?;
     let height = plane.height(bottom.origin);
     if !height.is_finite() || height >= -tol || plane.normal().dot(bottom.normal()) > -1.0 + 1e-9 {
@@ -145,7 +265,7 @@ fn relaxed_tool(a: &Body, b: &Body) -> Option<Body> {
     // paper-thin lid across the opening, without moving the cutting cylinder.
     let on_cap = |end: Plane| caps.iter().any(|cap| cap.normal().dot(end.normal()) > 1.0 - 1e-9 && cap.height(end.origin).abs() <= tol);
     let (low, high) = (on_cap(bottom), on_cap(plane));
-    if !low && !high {
+    if !caps.is_empty() && !low && !high {
         return None;
     }
     let margin = (a.size().max(b.size()) * 0.01).max(1e-5);
@@ -158,14 +278,21 @@ fn relaxed_tool(a: &Body, b: &Body) -> Option<Body> {
     let mut faces = Vec::new();
     for i in 0..tool.face_count() {
         let surface = face_surface(&tool, i)?;
-        let original = (0..b.face_count()).find(|j| match (surface, face_surface(b, *j)) {
-            (FaceSurface::Plane { normal: n, .. }, Some(FaceSurface::Plane { normal: m, .. })) => n.dot(m) > 1.0 - 1e-9,
-            (FaceSurface::Cylinder { origin: p, axis: n, radius: r }, Some(FaceSurface::Cylinder { origin: q, axis: m, radius: s })) => {
-                n.dot(m).abs() > 1.0 - 1e-9 && (p - q).cross(n).len() + (r - s).abs() <= tol
-            }
-            _ => false,
-        })?;
-        faces.push(crate::record::from_face(0, original, Change::Modified));
+        let origins: Vec<_> = (0..b.face_count())
+            .filter(|j| match (surface, face_surface(b, *j)) {
+                (FaceSurface::Plane { normal: n, .. }, Some(FaceSurface::Plane { normal: m, .. })) => n.dot(m) > 1.0 - 1e-9,
+                (FaceSurface::Cylinder { origin: p, axis: n, radius: r }, Some(FaceSurface::Cylinder { origin: q, axis: m, radius: s })) => {
+                    n.dot(m).abs() > 1.0 - 1e-9 && (p - q).cross(n).len() + (r - s).abs() <= tol
+                }
+                _ => false,
+            })
+            .map(|face| FaceOrigin::Face { operand: 0, face })
+            .collect();
+        if origins.is_empty() {
+            return None;
+        }
+        let change = if origins.len() > 1 { Change::Merged } else { Change::Modified };
+        faces.push(FaceProv { origins, change });
     }
     let history = crate::record::from_faces(&tool.solid, 1, faces);
     tool = tool.with_checked_history(Some(history), &crate::record::counts(&[b]));
