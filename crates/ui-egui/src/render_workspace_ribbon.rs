@@ -220,17 +220,31 @@ pub(super) fn presentation(app: &SolveApp) -> solidcraft_engine::render::job::pr
     }
 }
 
-fn focus(app: &mut SolveApp, page: inspector::Page, category: Option<&str>) {
-    app.render_workspace.view.inspector.hidden = false;
-    let kind = match page {
-        inspector::Page::Sampling => "sampling",
-        inspector::Page::Effects => "effects",
-        inspector::Page::Diagnostics => "check",
-        inspector::Page::Output => "output",
-        _ => "nothing",
-    };
-    let _ = app.run("view.render_select", json!({"kind":kind}));
-    app.render_workspace.view.inspector.page = page;
+fn focus(app: &mut SolveApp, selection: super::RenderSelection, category: Option<&str>) {
+    use super::RenderSelection;
+    if matches!(selection, RenderSelection::Object(_)) {
+        // Object shortcuts keep the shared modelling selection.
+        super::selection_editor(app, &selection);
+    } else {
+        let kind = match &selection {
+            RenderSelection::Nothing => "nothing",
+            RenderSelection::Environment => "environment",
+            RenderSelection::Wear => "wear",
+            RenderSelection::Lighting => "lighting",
+            RenderSelection::Light(_) => "light",
+            RenderSelection::Shot(_) => "shot",
+            RenderSelection::Output => "output",
+            RenderSelection::Sampling => "sampling",
+            RenderSelection::Effects => "effects",
+            RenderSelection::Check => "check",
+            RenderSelection::Object(_) => return,
+        };
+        let mut params = json!({"kind":kind});
+        if let RenderSelection::Shot(id) | RenderSelection::Light(id) = &selection {
+            params["id"] = json!(id);
+        }
+        let _ = app.run("view.render_select", params);
+    }
     if let Some(category) = category {
         library::open_category(app, category);
     }
@@ -248,7 +262,7 @@ pub(super) fn start(app: &mut SolveApp, id: &str) -> bool {
             return true;
         }
         // Entering from Design never starts an expensive render with hidden defaults.
-        focus(app, inspector::Page::Output, None);
+        focus(app, super::RenderSelection::Output, None);
         if is_job_action(id) {
             return true;
         }
@@ -262,11 +276,12 @@ pub(super) fn start(app: &mut SolveApp, id: &str) -> bool {
 
 fn navigate(app: &mut SolveApp, id: &str) -> Result<(), String> {
     action_ready(app, id)?;
-    use inspector::Page;
+    use super::RenderSelection;
+    let object = super::object_selection(app);
+    let shot = super::current_shot_selection(app);
     match id {
         "render.aging.describe" => {
-            focus(app, Page::Appearance, None);
-            inspector::reveal(app, "render:appearance:advanced");
+            let _ = app.run("view.render_select", json!({"kind":"wear"}));
         }
         "render.compare" => super::compare::start_default(app)?,
         "render.result.close" => {
@@ -275,35 +290,34 @@ fn navigate(app: &mut SolveApp, id: &str) -> Result<(), String> {
         "render.result.view" => {
             app.run(id, json!({"view":"image"}))?;
         }
-        "render.effects.describe" => focus(app, Page::Effects, None),
-        "render.preset.resolve" | "render.preset.apply" => focus(app, Page::Scene, Some("native_scenes")),
+        "render.effects.describe" => focus(app, RenderSelection::Effects, None),
+        "render.preset.resolve" | "render.preset.apply" => focus(app, RenderSelection::Nothing, Some("native_scenes")),
         "render.settings.get" | "render.shot.duplicate" | "render.shot.rename" | "render.shot.remove" => {
-            focus(app, Page::Scene, None);
-            inspector::reveal(app, "render_shot_manager");
+            focus(app, shot, None);
         }
         "render.settings.set" => app.render_workspace.view.save_shot_name = Some(String::new()),
-        "render.library.appearance.apply" | "render.optics.bind" | "render.optics.unbind" => focus(app, Page::Appearance, Some("surfaces")),
+        "render.library.appearance.apply" | "render.optics.bind" | "render.optics.unbind" => focus(app, object, Some("surfaces")),
         "render.library.surface.bind" | "render.library.surface.prepare" | "render.library.surface.unbind" => {
-            focus(app, Page::Appearance, Some("surfaces"));
+            focus(app, object, Some("surfaces"));
         }
-        "render.library.physical.prepare" => focus(app, Page::Appearance, Some("physical_profiles")),
-        "render.library.studio.prepare" => focus(app, Page::Lighting, Some("rigs")),
-        "render.library.studio.apply" => focus(app, Page::Lighting, None),
-        "render.library.environment.apply" => focus(app, Page::Environment, Some("hdr")),
-        "render.environment.set" | "render.hdr.inspect" | "render.settings.capture_hdr" => focus(app, Page::Environment, None),
-        "render.stage.backdrop" => focus(app, Page::Background, None),
+        "render.library.physical.prepare" => focus(app, object, Some("physical_profiles")),
+        "render.library.studio.prepare" => focus(app, RenderSelection::Lighting, Some("rigs")),
+        "render.library.studio.apply" => focus(app, RenderSelection::Lighting, None),
+        "render.library.environment.apply" => focus(app, RenderSelection::Environment, Some("hdr")),
+        "render.environment.set" | "render.hdr.inspect" | "render.settings.capture_hdr" => focus(app, RenderSelection::Environment, None),
+        "render.stage.backdrop" => focus(app, RenderSelection::Environment, None),
         "render.stage.ground" | "render.stage.clear" => {
-            focus(app, Page::Background, None);
+            focus(app, RenderSelection::Environment, None);
             inspector::reveal(app, "render_ground_details");
         }
         "render.settings.apply" => inspector::restore_camera(app)?,
         "render.camera.fit" => inspector::fit_subject(app)?,
-        "render.camera.get" | "render.camera.set" => focus(app, Page::Camera, None),
+        "render.camera.get" | "render.camera.set" => focus(app, shot, None),
         "render.quality.prepare" => {
-            focus(app, Page::Output, Some("quality"));
+            focus(app, RenderSelection::Sampling, Some("quality"));
             library::review_selected_quality(app)?;
         }
-        "render.status" | "render.backends" => focus(app, Page::Diagnostics, None),
+        "render.status" | "render.backends" => focus(app, RenderSelection::Check, None),
         _ => return Err(crate::i18n::tr("render.error_interactive_command").into()),
     }
     Ok(())

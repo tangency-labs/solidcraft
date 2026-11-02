@@ -38,8 +38,10 @@ mod hdr;
 mod effects;
 #[path = "render_workspace_environment.rs"]
 mod environment;
-#[path = "render_workspace_inspector.rs"]
+#[path = "render_workspace_output.rs"]
 mod inspector;
+#[path = "render_ui/inspector.rs"]
+mod inspector_panel;
 
 #[path = "render_workspace_library.rs"]
 mod library;
@@ -304,14 +306,6 @@ impl Stage {
             Self::Output => "render.stage_output",
         }
     }
-    fn page(self) -> inspector::Page {
-        match self {
-            Self::Look => inspector::Page::Appearance,
-            Self::Light => inspector::Page::Lighting,
-            Self::Frame => inspector::Page::Camera,
-            Self::Output => inspector::Page::Output,
-        }
-    }
 }
 
 /// Browser focus is transient per-document view state, never part of a saved design.
@@ -332,18 +326,18 @@ pub enum RenderSelection {
     Check,
 }
 
-/// Selection-driven homes introduced by E1/E7; remaining editors retain their adapters.
+/// Focus a Render editor without changing the shared modelling selection.
 pub(crate) fn selection_editor(app: &mut SolveApp, selection: &RenderSelection) {
-    app.render_workspace.view.inspector.page = match selection {
-        RenderSelection::Nothing => inspector::Page::Scene,
-        RenderSelection::Shot(_) => inspector::Page::Camera,
-        RenderSelection::Output => inspector::Page::Output,
-        _ => return,
-    };
+    app.render_workspace.view.selection = selection.clone();
+    app.render_workspace.view.inspector.hidden = false;
 }
 
-pub(crate) fn select_lighting(app: &mut SolveApp) {
-    app.render_workspace.view.inspector.page = inspector::Page::Lighting;
+pub(crate) fn object_selection(app: &SolveApp) -> RenderSelection {
+    if app.session.selection.is_empty() { RenderSelection::Nothing } else { RenderSelection::Object(app.session.selection.clone()) }
+}
+pub(crate) fn current_shot_selection(app: &SolveApp) -> RenderSelection {
+    let name = &app.render_workspace.view.name;
+    if app.session.doc.render.setups.contains_key(name) { RenderSelection::Shot(name.clone()) } else { RenderSelection::Nothing }
 }
 
 /// Small per-document editor state; GPU uploads and host capabilities stay outside tabs.
@@ -363,6 +357,7 @@ pub struct ViewState {
     draft: RenderSetup,
     dirty: bool,
     clean_setup: Option<RenderSetup>,
+    clean_name: String,
     job: Option<solidcraft_engine::render::job::JobId>,
     completed: Option<solidcraft_engine::render::job::JobId>,
     retained: Vec<solidcraft_engine::render_jobs::RetainedResult>,
@@ -431,6 +426,7 @@ impl Default for ViewState {
             draft: RenderSetup::default(),
             dirty: false,
             clean_setup: None,
+            clean_name: "Studio".into(),
             job: None,
             completed: None,
             retained: Vec::new(),
@@ -699,9 +695,7 @@ pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
             }
         }
         setups::refresh_dirty(app);
-        if app.render_workspace.revision != app.session.revision && !app.render_workspace.view.dirty {
-            setups::load(app);
-        }
+        setups::sync_revision(app);
         // Fit once the setup in effect is known: the fit frames that image's aspect.
         if entering {
             let scene = solidcraft_engine::product_scene::extract(&app.session).map_err(|e| e.to_string())?;
@@ -742,7 +736,6 @@ pub(crate) fn select_stage(app: &mut SolveApp, key: &str) {
     };
     app.render_workspace.view.stage = stage;
     app.render_workspace.view.inspector.hidden = false;
-    app.render_workspace.view.inspector.page = stage.page();
     let sections: &[&str] = match stage {
         Stage::Look => &["objects"],
         Stage::Light => &["lights", "environment"],
@@ -815,7 +808,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     if crate::render_ui::focused(app) {
         return;
     }
-    inspector::panel(app, ui);
+    inspector_panel::panel(app, ui);
 }
 
 /// Interactive stage-panel review. Direct engine JSON calls remain dialog-free.
@@ -1149,6 +1142,7 @@ fn image_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     completed_image(app, ui);
 }
 
+#[cfg(test)]
 fn job_controls(app: &mut SolveApp, ui: &mut egui::Ui, compact: bool) {
     let params = image_params(app);
     if !compact {
@@ -2392,16 +2386,5 @@ pub(crate) fn comparison_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     compare::controls(app, ui);
 }
 pub(crate) fn start_interactive(app: &mut SolveApp, id: &str) -> bool {
-    let handled = assign::start(app, id) || ribbon::start(app, id);
-    // Opening Appearance Advanced must still reach its atmosphere controls after leaving Wear.
-    if handled
-        && id == "render.aging.describe"
-        && app.render_workspace.view.inspector.page == inspector::Page::Appearance
-        && app.render_workspace.view.selection == RenderSelection::Wear
-    {
-        let _ = app.run("view.render_select", json!({"kind":"nothing"}));
-        // Clearing semantic focus routes to Scene; retain the explicit Advanced destination.
-        app.render_workspace.view.inspector.page = inspector::Page::Appearance;
-    }
-    handled
+    assign::start(app, id) || ribbon::start(app, id)
 }
