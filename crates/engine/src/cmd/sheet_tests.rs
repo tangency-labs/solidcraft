@@ -3094,6 +3094,302 @@ fn fold_at_a_tab_root_names_the_real_cause() {
     run(&mut ok, "sheet.fold", json!({"points": [[40, 51, 0.8], [60, 51, 0.8]], "fixed": [50, 25, 0.8]}));
 }
 
+/// A 200 x 100 tray's flat with 20 mm walls in 1.5 mm sheet, its corner reliefs cut as a CAD
+/// program draws them: a thin V whose sides run straight across both bend zones, from the start
+/// line to the far edge, so a wall's end lies inside the neighbouring wall's zone. Sized for a
+/// 1.5 mm radius at k 0.5; `h` is half that bend's zone.
+fn torn_tray() -> (f64, Vec<[f64; 2]>) {
+    let (t, r, k) = (1.5, 1.5, 0.5);
+    let h = FRAC_PI_2 * (r + k * t) / 2.0;
+    let (w, d, l, g, c) = (200.0, 100.0, 20.0, 0.6, 0.7 * h);
+    let outline = vec![
+        [g, -h - l],
+        [w - g, -h - l],
+        [w - g, -h],
+        [w - h, h],
+        [w + h, -c],
+        [w + h + l, -c],
+        [w + h + l, d + c],
+        [w + h, d + c],
+        [w - h, d - h],
+        [w - g, d + h],
+        [w - g, d + h + l],
+        [g, d + h + l],
+        [g, d + h],
+        [h, d - h],
+        [-h, d + c],
+        [-h - l, d + c],
+        [-h - l, -c],
+        [-h, -c],
+        [h, h],
+        [g, -h],
+    ];
+    (h, outline)
+}
+
+/// A session with `outline` as a base flange in 1.5 mm sheet bent at `radius`.
+fn torn_tray_session(outline: &[[f64; 2]], radius: f64) -> Session {
+    let mut s = Session::default();
+    run(
+        &mut s,
+        "sheet.manage_rules",
+        json!({"name": "Al 1.5", "thickness": "1.5", "k_factor": "0.5", "bend_radius": format!("{radius}"), "active": true}),
+    );
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
+    run(&mut s, "sketch.line", json!({"points": outline, "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Blank"}));
+    s
+}
+
+/// Folds the tray's walls (`lines`, by name) in `order` about the middle of the base: the walls
+/// stand, the material is kept, the sheet unfolds to the flat it came from (its volume within
+/// `kept`) and refolds.
+fn fold_torn_tray(outline: &[[f64; 2]], radius: f64, lines: &[(&str, [[f64; 3]; 2])], order: &[usize], kept: f64) {
+    let (t, k, l) = (1.5, 0.5, 20.0);
+    let (w, d) = (200.0, 100.0);
+    let (h, _) = torn_tray();
+    let hr = FRAC_PI_2 * (radius + k * t) / 2.0;
+    let (face, mid) = (hr - radius - t / 2.0, radius + t + l / 2.0);
+    let mut s = torn_tray_session(outline, radius);
+    let blank = volume(&mut s);
+    for &i in order {
+        let Some(&(name, points)) = lines.get(i) else { panic!("no line {i}") };
+        if let Err(e) = s.execute("sheet.fold", &json!({"points": points, "fixed": [w / 2.0, d / 2.0, t]})) {
+            panic!("{radius} {order:?}: the {name} wall: {e}");
+        }
+    }
+    // Folded, the volume is read from a mesh (a plain bend reads some 3e-6 short of its flat, a
+    // torn end more); unfolded it is exact.
+    assert!(rel(volume(&mut s), blank) < 1e-4, "{radius} {order:?}: folding keeps the material: {} vs {blank}", volume(&mut s));
+    for (name, p) in
+        [("bottom", [w / 2.0, face, mid]), ("top", [w / 2.0, d - face, mid]), ("left", [face, d / 2.0, mid]), ("right", [w - face, d / 2.0, mid])]
+    {
+        assert!(contains(&s, p), "{radius} {order:?}: the {name} wall stands at {p:?}");
+    }
+    run(&mut s, "sheet.unfold", json!({}));
+    assert!(rel(volume(&mut s), blank) < kept, "{radius} {order:?}: unfolded {} vs {blank}", volume(&mut s));
+    let b = bbox(&mut s);
+    for (got, want) in [(&b["min"][0], -h - l), (&b["min"][1], -h - l), (&b["max"][0], w + h + l), (&b["max"][1], d + h + l)] {
+        assert!((got.as_f64().unwrap_or(f64::NAN) - want).abs() < 1e-6, "{radius} {order:?}: the flat's box {b}");
+    }
+    run(&mut s, "sheet.refold", json!({}));
+    assert!(contains(&s, [w / 2.0, face, mid]), "{radius} {order:?}: refolded");
+}
+
+/// The tray's fold lines, `e` in from each corner of the base along the bend line.
+fn torn_tray_walls(e: f64) -> [(&'static str, [[f64; 3]; 2]); 4] {
+    let (t, w, d) = (1.5, 200.0, 100.0);
+    [
+        ("bottom", [[e, 0.0, t], [w - e, 0.0, t]]),
+        ("top", [[e, d, t], [w - e, d, t]]),
+        ("left", [[0.0, e, t], [0.0, d - e, t]]),
+        ("right", [[w, e, t], [w, d - e, t]]),
+    ]
+}
+
+/// Each fold of a flat with slanted corner reliefs tears its zone's ends along the V (`tear`):
+/// the walls stand and the sheet unfolds to the flat it came from, in either order of the folds.
+#[test]
+fn a_flat_with_slanted_corner_reliefs_folds_into_a_tray() {
+    let (_, outline) = torn_tray();
+    let walls = torn_tray_walls(10.0);
+    for order in [[0, 1, 2, 3], [2, 3, 0, 1]] {
+        fold_torn_tray(&outline, 1.5, &walls, &order, 1e-9);
+    }
+    // A bend zone wider than the reliefs were drawn for (a larger radius): the other walls' ends
+    // sit inside it, and the fold says why it can't.
+    let mut s = torn_tray_session(&outline, 2.5);
+    let e = s.execute("sheet.fold", &json!({"points": walls[0].1, "fixed": [100.0, 50.0, 1.5]})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("bend zone") && e.contains("a corner relief must run across the whole zone"), "{e}");
+}
+
+/// The same flat as a CAD program hands it over: the fold lines start inside the reliefs' V, past
+/// the other walls' ends beside the zones; at a slightly tighter radius the V runs on across each
+/// zone, which falls apart into pieces; and a V's sides drawn as arcs a few microns off their
+/// line (unfolded, those slivers of a few square microns are gone).
+#[test]
+fn a_flat_with_corner_reliefs_as_drawn_elsewhere_folds_into_a_tray() {
+    let (h, outline) = torn_tray();
+    let (g, c) = (0.6, 0.7 * h);
+    let mut bowed = outline.clone();
+    bowed.insert(19, [(h + g) / 2.0 - 0.004, 0.0]);
+    bowed.insert(18, [0.003, (h - c) / 2.0 - 0.003]);
+    let walls = torn_tray_walls(1.4);
+    fold_torn_tray(&outline, 1.5, &walls, &[0, 1, 2, 3], 1e-9);
+    fold_torn_tray(&outline, 1.5, &walls, &[2, 3, 0, 1], 1e-9);
+    fold_torn_tray(&outline, 1.45, &walls, &[0, 1, 2, 3], 1e-9);
+    fold_torn_tray(&bowed, 1.5, &walls, &[0, 1, 2, 3], 1e-6);
+}
+
+/// The repro script `examples/regressions/sheet-fold-slanted-corner-reliefs.json` (the tray
+/// above, its numbers rounded to a micron) folds its four walls.
+#[test]
+fn the_slanted_corner_relief_script_folds_its_walls() {
+    let script: Value =
+        serde_json::from_str(include_str!("../../../../examples/regressions/sheet-fold-slanted-corner-reliefs.json")).unwrap_or_default();
+    let mut s = Session::default();
+    if let Err(e) = s.run_script(&script) {
+        panic!("{e}");
+    }
+    let (r, t, l) = (1.5, 1.5, 20.0);
+    let face = FRAC_PI_2 * (r + 0.5 * t) / 2.0 - r - t / 2.0;
+    for p in
+        [[100.0, face, r + t + l / 2.0], [100.0, 100.0 - face, r + t + l / 2.0], [face, 50.0, r + t + l / 2.0], [200.0 - face, 50.0, r + t + l / 2.0]]
+    {
+        assert!(contains(&s, p), "a wall stands at {p:?}");
+    }
+}
+
+/// A lip on a side wall, folded before the tray's walls: its bend runs on into the bottom and top
+/// walls' zones beside them, and stays with its wall when they fold.
+#[test]
+fn a_lip_beside_a_torn_zone_stays_with_its_wall() {
+    let (h, outline) = torn_tray();
+    let [bottom, top, left, right] = torn_tray_walls(1.4);
+    let lip = ("left lip", [[-h - 15.0, 1.4, 1.5], [-h - 15.0, 100.0 - 1.4, 1.5]]);
+    fold_torn_tray(&outline, 1.5, &[bottom, top, left, right, lip], &[4, 0, 1, 2, 3], 1e-9);
+}
+
+/// A corner relief whose V side ends on a corner of the outline that lies on a zone's far line
+/// (the left wall's end running down to it): the folds beside it sew, in either order.
+#[test]
+fn a_fold_beside_a_relief_ending_on_an_outline_corner_sews() {
+    let (h, outline) = torn_tray();
+    let mut on_corner = outline.clone();
+    on_corner.insert(18, [-h, -h]);
+    let walls = torn_tray_walls(1.4);
+    fold_torn_tray(&on_corner, 1.5, &walls, &[0, 1, 2, 3], 1e-9);
+    fold_torn_tray(&on_corner, 1.5, &walls, &[2, 3, 0, 1], 1e-9);
+}
+
+/// A blank whose slanted sides cross a fold's zone: the side that moves may run on past the
+/// zone's start line (a torn end), but where it narrows instead the fold either refuses or keeps
+/// every bit of the material, never dropping the slivers outside a square end.
+#[test]
+fn a_torn_fold_never_drops_material_where_the_blank_narrows() {
+    let blank = [[0.0, 0.0], [200.0, 10.0], [200.0, 90.0], [0.0, 100.0]];
+    // Fixed on the narrow end, the wide end folds; fixed on the wide end, the narrow end folds.
+    for (fixed, must_fold) in [(180.0, true), (20.0, false)] {
+        let mut s = torn_tray_session(&blank, 1.5);
+        let flat = volume(&mut s);
+        match s.execute("sheet.fold", &json!({"points": [[100.0, -10.0, 1.5], [100.0, 110.0, 1.5]], "fixed": [fixed, 50.0, 1.5]})) {
+            Ok(_) => {
+                run(&mut s, "sheet.unfold", json!({}));
+                assert!(rel(volume(&mut s), flat) < 1e-9, "fixed at {fixed}: unfolded {} vs {flat}", volume(&mut s));
+            }
+            Err(e) => assert!(!must_fold, "fixed at {fixed}: {e}"),
+        }
+    }
+}
+
+/// A bend zone narrower than the torn-end tolerance (a small angle or radius): the folds that
+/// looked for torn tabs read the line inside a zone too narrow to hold it and panicked. Two tabs
+/// fold at 0.5 degrees and R 0.1 with their material; the tabs at R 0 are refused or fold, but
+/// never panic; the tray's wall at 2 degrees and R 0 is refused or folds and unfolds exactly.
+#[test]
+fn a_bend_zone_narrower_than_a_torn_ends_tolerance_never_panics() {
+    let tabs = |angle: &str, radius: &str| {
+        let mut s = Session::default();
+        two_tab_blank(&mut s);
+        let flat = volume(&mut s);
+        let r =
+            s.execute("sheet.fold", &json!({"points": [[107, 5, 0.8], [107, 35, 0.8]], "fixed": [50, 20, 0.8], "angle": angle, "radius": radius}));
+        (r.map(|_| ()).map_err(|e| e.to_string()), rel(volume(&mut s), flat))
+    };
+    let (r, kept) = tabs("0.5 deg", "0.1");
+    assert!(r.is_ok(), "{r:?}");
+    assert!(kept < 1e-4, "the tabs keep their material: {kept}");
+    for angle in ["2 deg", "1 deg"] {
+        let (r, _) = tabs(angle, "0");
+        assert!(!r.as_ref().is_err_and(|e| e.contains("internal error")), "{angle}: {r:?}");
+    }
+    // The wall's ends slant across its 0.03 mm zone: it folds torn, and unfolds to the flat.
+    let (_, outline) = torn_tray();
+    let mut s = torn_tray_session(&outline, 1.5);
+    let flat = volume(&mut s);
+    let r = s.execute("sheet.fold", &json!({"points": torn_tray_walls(1.4)[0].1, "fixed": [100.0, 50.0, 1.5], "angle": "2 deg", "radius": "0"}));
+    match r {
+        Ok(_) => {
+            run(&mut s, "sheet.unfold", json!({}));
+            assert!(rel(volume(&mut s), flat) < 1e-9, "the tray's wall at 2 degrees unfolds to {} vs {flat}", volume(&mut s));
+        }
+        Err(e) => assert!(!e.to_string().contains("internal error"), "the tray's wall at 2 degrees: {e}"),
+    }
+}
+
+/// A side narrowing towards the side that moves by less than the torn ends' tolerance is still a
+/// narrowing: it is refused, or folds and unfolds with every bit of its material.
+#[test]
+fn a_torn_fold_never_drops_material_where_the_blank_narrows_slightly() {
+    let ba = FRAC_PI_2 * (1.5 + 0.5 * 1.5);
+    for k in [0.002, 0.0028] {
+        let blank = [[0.0, 0.0], [100.0, 0.0], [120.0, 20.0 * k], [120.0, 100.0 - 20.0 * k], [100.0, 100.0], [0.0, 100.0]];
+        let mut s = torn_tray_session(&blank, 1.5);
+        let flat = volume(&mut s);
+        let r =
+            s.execute("sheet.fold", &json!({"points": [[100.0, -10.0, 1.5], [100.0, 110.0, 1.5]], "fixed": [20.0, 50.0, 1.5], "position": "start"}));
+        if r.is_ok() {
+            run(&mut s, "sheet.unfold", json!({}));
+            assert!(rel(volume(&mut s), flat) < 1e-9, "slope {k} (ext {}): unfolded {} vs {flat}", k * ba, volume(&mut s));
+        }
+    }
+}
+
+/// A slit that stops a hair inside a fold's zone, from either side: the zone is not taken for a
+/// torn one (that would fill the slit's end); the fold names the slit's corner, as before.
+#[test]
+fn a_slit_ending_a_hair_inside_the_zone_names_its_corner() {
+    let ba = FRAC_PI_2 * (1.5 + 0.5 * 1.5);
+    let (dd, w) = (0.005, 0.5);
+    let from_moving =
+        vec![[0.0, 0.0], [200.0, 0.0], [200.0, 50.0], [100.0 + dd, 50.0], [100.0 + dd, 50.0 + w], [200.0, 50.0 + w], [200.0, 100.0], [0.0, 100.0]];
+    let from_fixed = vec![
+        [0.0, 0.0],
+        [200.0, 0.0],
+        [200.0, 100.0],
+        [0.0, 100.0],
+        [0.0, 50.0 + w],
+        [100.0 + ba - dd, 50.0 + w],
+        [100.0 + ba - dd, 50.0],
+        [0.0, 50.0],
+    ];
+    for (name, blank) in [("from the side that moves", from_moving), ("from the side that stays", from_fixed)] {
+        let mut s = torn_tray_session(&blank, 1.5);
+        let r =
+            s.execute("sheet.fold", &json!({"points": [[100.0, -10.0, 1.5], [100.0, 110.0, 1.5]], "fixed": [20.0, 25.0, 1.5], "position": "start"}));
+        let e = r.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains("reaches a corner of the sheet's outline"), "a slit {name}: {e:?}");
+    }
+}
+
+/// A flange on another wall's end beyond a torn zone stays where it stands when the zone folds:
+/// that end does not hang from the zone. The left wall's end runs on past the bottom wall's zone
+/// and carries an ear, which must not go round with the bottom wall.
+#[test]
+fn a_flange_on_a_walls_end_beyond_a_torn_zone_stays() {
+    let (t, k) = (1.5, 0.5);
+    let (h, mut outline) = torn_tray();
+    let (w, d, l) = (200.0, 100.0, 20.0);
+    // The left wall's end runs on 12 mm past the bottom zone.
+    let c2 = h + 12.0;
+    outline.splice(16..18, [[-h - l, -c2], [-h - 0.5, -c2], [-h - 0.5, -h - 0.5]]);
+    // At the radius the reliefs were drawn for the bottom zone is one torn piece; a little tighter
+    // it falls apart into tabs.
+    for radius in [1.5, 1.45] {
+        let mut s = torn_tray_session(&outline, radius);
+        let fixed = [w / 2.0, d / 2.0, t];
+        run(&mut s, "sheet.fold", json!({"points": [[-h - l + 1.0, -h - 4.0, t], [-h - 1.0, -h - 4.0, t]], "fixed": fixed}));
+        let hr = FRAC_PI_2 * (radius + k * t) / 2.0;
+        let ear = [-h - l / 2.0, -h - 4.0 + hr - radius - t / 2.0, radius + t + 2.0];
+        assert!(contains(&s, ear), "{radius}: the ear stands at {ear:?}");
+        run(&mut s, "sheet.fold", json!({"points": [[1.4, 0.0, t], [w - 1.4, 0.0, t]], "fixed": fixed}));
+        assert!(contains(&s, ear), "{radius}: the ear still stands at {ear:?} after the bottom wall folds");
+        let wall = [w / 2.0, hr - radius - t / 2.0, radius + t + l / 2.0];
+        assert!(contains(&s, wall), "{radius}: the bottom wall stands at {wall:?}");
+    }
+}
+
 /// #296: two bends meeting at an open corner relief touch only along an edge, so the folded
 /// material the machining guard checks must not be sewn into one solid.
 #[test]
