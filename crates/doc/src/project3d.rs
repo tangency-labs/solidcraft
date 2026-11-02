@@ -6,15 +6,18 @@ use solidcraft_sketch::LinkSource;
 
 use crate::eval::ModelState;
 
-/// The body of a body or face reference, and the face (its index in the body's face order) for a
-/// face reference: the face nearest its point, on the named body or else the nearest body.
-pub(crate) fn part_of<'a>(st: &'a ModelState, src: &LinkSource) -> Option<(&'a crate::ModelBody, Option<usize>)> {
+/// The body of a body or face reference and, for a face reference, the faces (indices in the
+/// body's face order) of the surface patch of the face nearest its point, on the named body or
+/// else the nearest body: the B-rep pieces joined across hidden seams, as the viewport picks and
+/// highlights it (#9009).
+pub(crate) fn part_of<'a>(st: &'a ModelState, src: &LinkSource) -> Option<(&'a crate::ModelBody, Option<Vec<usize>>)> {
     match src {
         LinkSource::Body { body } => Some((st.body(body)?, None)),
         LinkSource::Face { body, at } => {
             let b = st.body(body).or_else(|| st.bodies.iter().min_by(|x, y| dist_to(&x.mesh(), *at).total_cmp(&dist_to(&y.mesh(), *at))))?;
-            let (f, _, _) = crate::project::nearest_face(&b.mesh(), *at)?;
-            Some((b, usize::try_from(f).ok()))
+            let m = b.mesh();
+            let (f, _, _) = crate::project::nearest_face(&m, *at)?;
+            Some((b, Some(m.surface_patch(usize::try_from(f).ok()?))))
         }
         _ => None,
     }
@@ -24,8 +27,9 @@ fn dist_to(m: &Mesh, p: Vec3) -> f64 {
     crate::project::nearest_face(m, p).map(|x| x.2).unwrap_or(f64::INFINITY)
 }
 
-fn tris(m: &Mesh, face: Option<u32>) -> Vec<[Vec3; 3]> {
-    m.triangles.iter().zip(&m.tri_face).filter(|(_, f)| face.is_none_or(|x| x == **f)).filter_map(|(t, _)| m.tri(t)).collect()
+/// The triangles of the faces in `faces` (sorted ascending), or of the whole mesh for `None`.
+fn tris(m: &Mesh, faces: Option<&[u32]>) -> Vec<[Vec3; 3]> {
+    m.triangles.iter().zip(&m.tri_face).filter(|(_, f)| faces.is_none_or(|fs| fs.binary_search(f).is_ok())).filter_map(|(t, _)| m.tri(t)).collect()
 }
 
 /// Ray–triangle hit parameter (Möller–Trumbore), any sign.
@@ -54,7 +58,7 @@ fn ray_hit(o: Vec3, d: Vec3, t: &[Vec3; 3]) -> Option<f64> {
 /// miss the face split the result.
 pub(crate) fn onto_face(m: &Mesh, f: u32, pts: &[Vec3], dir: Vec3) -> Vec<Vec<Vec3>> {
     let Some(d) = dir.normalized() else { return Vec::new() };
-    let ts = tris(m, Some(f));
+    let ts = tris(m, Some(std::slice::from_ref(&f)));
     let size = m.bounds().diagonal().max(1e-9);
     // Resample so the projected curve follows the surface.
     let step = size / 200.0;

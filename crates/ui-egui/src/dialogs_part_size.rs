@@ -18,12 +18,16 @@ pub(crate) fn configuration(app: &SolveApp, component: u64) -> Option<String> {
     if size.is_empty() {
         return None;
     }
-    Some(configuration_name(size, part.length))
+    Some(configuration_name(&part.family, size, part.length))
 }
 
-fn configuration_name(size: &str, length: Option<f64>) -> String {
+/// An inch family's length is in fractional inches (`1/2-13 UNC×2 in`), a metric one's in mm.
+fn configuration_name(family: &str, size: &str, length: Option<f64>) -> String {
     match length.filter(|length| length.is_finite() && *length > 0.0) {
-        Some(length) => format!("{size}×{length}"),
+        Some(length) => match solidcraft_engine::cmd::part_length_label(family, length) {
+            Some(label) => format!("{size}×{label}"),
+            None => format!("{size}×{length}"),
+        },
         None => size.to_owned(),
     }
 }
@@ -183,14 +187,14 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Resize) -> bool {
     choice_row(ui, "Size", "part_resize_size", &mut k.size, &sizes);
     if let Some(lengths) = k.lengths() {
         let mut index = k.length.and_then(|l| lengths.iter().position(|x| *x == l)).unwrap_or(0);
-        let labels: Vec<String> = lengths.iter().map(|l| crate::prefs::show_mm(app, *l, 1)).collect();
+        let labels: Vec<String> = lengths.iter().map(|l| crate::dialogs_parts::length_label(app, &k.family.id, *l)).collect();
         let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
         choice_row(ui, "Length", "part_resize_length", &mut index, &labels);
         k.length = lengths.get(index).copied();
     }
     if let Some((size, _)) = k.family.sizes.get(k.size) {
         row(ui, "Configuration", |ui| {
-            ui.label(configuration_name(size, k.length));
+            ui.label(configuration_name(&k.family.id, size, k.length));
         });
     }
     crate::ui_kit::text(ui, crate::i18n::tr("ui.part_size_shared"), crate::ui_kit::Text::Hint("part_size_shared"));
@@ -479,6 +483,10 @@ mod tests {
             ("set_screw", "M5", Some(10.0)),
             ("dowel_pin", "6", Some(20.0)),
             ("bearing", "608", None),
+            ("hex_cap_screw_inch", "1/2-13 UNC", Some(2.0 * 25.4)),
+            ("hex_nut_inch", "1/2-13 UNC", None),
+            ("washer_sae", "1/2", None),
+            ("washer_uss", "1/2", None),
         ] {
             let (app, id) = part(family, size, length);
             let k = Resize::new(&app, id).unwrap();
@@ -539,6 +547,23 @@ mod tests {
         change(&mut h.app, "M6", Some(20.5));
         let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
         assert_eq!(commands[0].1["length"], 20.5);
+    }
+
+    /// #10316: an inch part's lengths are fractional inches in a millimetre design too, and the
+    /// command still takes millimetres.
+    #[test]
+    fn part_size_shows_an_inch_part_in_fractional_inches() {
+        let (app, id) = part("hex_cap_screw_inch", "1/2-13 UNC", Some(1.5 * 25.4));
+        assert_eq!(configuration(&app, id).as_deref(), Some("1/2-13 UNC×1-1/2 in"));
+        let mut h = crate::scenario::Harness::new();
+        h.app = app;
+        h.app.home.open = false;
+        menu(&mut h.app, Target::Component { id });
+        h.frames(3);
+        assert!(h.widget_near("1-1/2 in", "Length").is_some());
+        change(&mut h.app, "5/8-11 UNC", Some(2.0 * 25.4));
+        let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        assert_eq!((commands[0].1["size"].as_str(), commands[0].1["length"].as_f64()), (Some("5/8-11 UNC"), Some(50.8)));
     }
 
     #[test]

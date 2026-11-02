@@ -197,6 +197,26 @@ fn chain_with_a_line(on: bool) -> Harness {
     h
 }
 
+/// #10653: Tangent Arc's first click on a line between its ends is refused at once, with the
+/// tool's hint as the error, and picks nothing; a click on the line's end starts the arc.
+#[test]
+fn a_tangent_arc_first_click_off_a_curves_end_is_refused_at_once() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[20,0]],"connect":false,"infer":false})).unwrap();
+    h.app.cam.distance = 120.0;
+    h.settle();
+    h.step(&json!({"start":"sketch.arc.tangent"})).unwrap();
+    click_at(&mut h, [10.0, 0.0]);
+    let refused = h.app.status.as_ref().is_some_and(|s| s.2 && s.0.contains("click the end of a line or arc"));
+    assert!(refused, "{:?}", h.app.status);
+    assert_eq!(h.app.tool.as_ref().map(|t| t.pts.len()), Some(0), "nothing picked");
+    click_at(&mut h, [20.0, 0.0]);
+    click_at(&mut h, [30.0, 10.0]);
+    assert_eq!(curves(&h), 2, "{:?}", h.app.status);
+    assert!(sketch(&h).curves.iter().any(|c| matches!(c.kind, CurveKind::Arc { .. })), "the arc from the line's end");
+}
+
 fn click_at(h: &mut Harness, at: [f64; 2]) {
     h.step(&json!({"move":{"sketch":at}})).unwrap();
     h.frames(2);

@@ -8,6 +8,40 @@
 
 use crate::{Brep, Error, Result, core, error, ffi, init, route};
 
+/// What size builds a blend SMLib refused ([`blend_fit`]): from the refusal's own cause, never by
+/// building again.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Fit {
+    /// The largest size (a round's radius, a chamfer's distance, a chord's width) that builds.
+    Size(f64),
+    /// The largest setback of a set-back corner that fits (the one asked for is too long).
+    Setback(f64),
+    /// The factor (< 1) a two-distance chamfer's distances are both scaled by to build.
+    Scale(f64),
+    /// The smallest setback that builds the corner (the one asked for is too short: its fill is
+    /// certified convex only from there).
+    SetbackAtLeast(f64),
+}
+
+/// The size that builds the last blend this process's SMLib refused as too large
+/// ([`Error::NoRoom`]) or whose setback it refused as too short; `None` where it names no single
+/// size. Read it right after the refused call: SMLib keeps only the last one.
+pub fn blend_fit() -> Option<Fit> {
+    // solidcore names no size that builds yet: its refusals keep their own words, and the C++
+    // kernel's last refusal is never read for one of solidcore's.
+    if route::backend() == route::Backend::Solidcore {
+        return None;
+    }
+    let (size, what) = ffi::ops::blend_fit_size()?;
+    match what {
+        ffi::ops::FIT_SIZE => Some(Fit::Size(size)),
+        ffi::ops::FIT_SETBACK => Some(Fit::Setback(size)),
+        ffi::ops::FIT_SCALE => Some(Fit::Scale(size)),
+        ffi::ops::FIT_SETBACK_AT_LEAST => Some(Fit::SetbackAtLeast(size)),
+        _ => None,
+    }
+}
+
 /// How [`Brep::boolean`] combines two bodies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BooleanOp {

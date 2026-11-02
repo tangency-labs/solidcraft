@@ -1191,6 +1191,7 @@
   "cmd.sketch_spline_control_point_5": "Ohjauspistesplini (aste 5)",
   "cmd.sketch_spline_fit_point": "Sovituspistesplini",
   "cmd.sketch_spline_insert_point": "Lisää splinipiste",
+  "cmd.sketch_spline_remove_point": "Poista splinipiste",
   "cmd.sketch_spline_reverse": "Käännä splinin suunta",
   "cmd.sketch_spun_profile": "Pyöräytysprofiili",
   "cmd.sketch_toggle_diameter": "Vaihda säde / halkaisija",

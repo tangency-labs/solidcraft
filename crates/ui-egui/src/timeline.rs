@@ -17,6 +17,10 @@ use crate::theme::Tokens;
 /// Apply transport actions from the current marker; endpoints stay bounded, including an
 /// empty design. All orientations reach the same rollback command.
 pub(crate) fn run_transport(app: &mut SolveApp, control: crate::ui_kit::HistoryTransport) {
+    // A step moves from the marker the design has, not the one an open editor rolled to (#10688).
+    if app.close_editor_for_history().is_err() {
+        return;
+    }
     let n = app.session.doc.features.len();
     let marker = app.session.doc.marker.unwrap_or(n);
     let position = match control {
@@ -1550,7 +1554,7 @@ mod tests {
             ("axis_point", PlaneRef::AxisPoint { axis: reference(), point: reference() }),
             ("two_edges", PlaneRef::TwoEdges { a: reference(), b: reference() }),
             ("three_points", PlaneRef::ThreePoints { a: reference(), b: reference(), c: reference() }),
-            ("tangent", PlaneRef::Tangent { face: reference(), at: Vec3::ZERO }),
+            ("tangent", PlaneRef::Tangent { face: reference(), at: Vec3::ZERO, reference: None, angle: None }),
             ("along_path", PlaneRef::AlongPath { path: reference(), t: "0.5".into() }),
             ("perpendicular", PlaneRef::Perpendicular { plane: reference(), line: reference() }),
         ] {

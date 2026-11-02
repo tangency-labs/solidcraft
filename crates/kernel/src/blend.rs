@@ -224,6 +224,10 @@ pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64) -> Result<(Body
     Ok((closed(body, b)?, gone))
 }
 
+/// What a refusal of a setback too short for its corner says before the least that builds (in
+/// mm): SMLib certifies the corner's fill convex only from that setback on ([`fillet_setback`]).
+pub const SETBACK_AT_LEAST: &str = "the smallest setback that builds is ";
+
 /// [`fillet`] with corner setbacks: each `(at, distance)` sets back the corner at the vertex
 /// nearest `at`, a vertex where every edge is rounded, so its patch starts `distance` along
 /// each of its edges from the vertex (one distance for all of a corner's edges: SMLib keeps one

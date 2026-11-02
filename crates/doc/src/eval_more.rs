@@ -672,7 +672,7 @@ pub(super) fn sheet_eval(
             tag_flanges(sh, n0, f.id);
             rebuild_sheet(st, i)
         }
-        FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body } => {
+        FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body, sketch, profiles } => {
             // Without a body name the field goes on the newest sheet, as the command's own body lookup does.
             let i = match body {
                 Some(_) => sheet_for(st, body, None)?,
@@ -694,8 +694,18 @@ pub(super) fn sheet_eval(
                     "perforation needs diameter > 0, pitch > diameter and margin >= 0 (diameter {d}, pitch {pitch}, margin {margin})"
                 )));
             }
+            // The outline sketch's profiles, where they lie on the sheet now.
+            let outline = match sketch {
+                Some(sk) => {
+                    let ss = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk}")))?;
+                    let regions = select_profiles(ss, profiles.as_ref().unwrap_or(&ProfileSel::All))?;
+                    let sh = st.sheets.get(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
+                    Some(sh.perforation_outline(&ss.plane, &regions)?)
+                }
+                None => None,
+            };
             let sh = st.sheets.get_mut(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
-            sh.perforations.push(crate::sheet::SheetPerforation { feature: f.id, diameter: d, pitch, margin, square, from_right: false });
+            sh.perforations.push(crate::sheet::SheetPerforation { feature: f.id, diameter: d, pitch, margin, square, from_right: false, outline });
             Ok(())
         }
         FeatureKind::SheetHem { edges, length, gap, flip, body } => {
@@ -1047,15 +1057,17 @@ pub(super) fn sheet_primitive_cut(
         return Ok(Vec::new());
     }
     // The first sheet the primitive meets decides the machining direction. Sheets clear of it
-    // by their boxes are passed over; the one sheet left needs no boolean to show it is met (that
-    // boolean came out empty against a sheet carrying a label's cut-outs, and the hole was then
-    // cut into the solid without a place in the flat pattern).
-    let tool_box = body_box(tool);
-    let near: Vec<&sheet::SheetBody> = st
-        .sheets
-        .iter()
-        .filter(|sh| sheet_eligible(f, st, &[], sh) && st.body(&sh.body).is_some_and(|mb| !boxes_apart(&mesh_box(mb), &tool_box)))
-        .collect();
+    // by their exact boxes ([`kernel::apart`]) are passed over; the one sheet left needs no
+    // boolean to show it is met (that boolean came out empty against a sheet carrying a label's
+    // cut-outs, and the hole was then cut into the solid without a place in the flat pattern).
+    let mut near: Vec<&sheet::SheetBody> = Vec::new();
+    for sh in st.sheets.iter().filter(|sh| sheet_eligible(f, st, &[], sh)) {
+        if let Some(mb) = st.body(&sh.body)
+            && !kernel::apart(&mb.body, tool)?
+        {
+            near.push(sh);
+        }
+    }
     let mut normal = None;
     for sh in &near {
         if let Some(mb) = st.body(&sh.body)
@@ -1366,9 +1378,6 @@ fn sheet_prism_cut(
     } else {
         Vec::new()
     };
-    // Boxes around the tools: a tool clear of a bend by its box needs no boolean to show it (a
-    // label's letters against every bend and flange of a tray).
-    let tool_boxes: Vec<Option<Aabb3>> = tools.iter().map(body_box).collect();
     let mut plans = Vec::new();
     let mut notes = Vec::new();
     'sheets: for original in &st.sheets {
@@ -1388,12 +1397,10 @@ fn sheet_prism_cut(
         // is exact, and a cut that machines nothing there is checked against the solid after it.
         // (That boolean cost each label hundreds of milliseconds, and against a sheet already
         // carrying a label's cut-outs it came out empty: the next cut was dropped.)
+        // A tool clear of a bend by its exact box (a label's letters against every bend and
+        // flange of a tray) costs no intersection work: the boolean answers it from the boxes.
         for bends in sh.unmodeled_solids(plane)? {
-            let bends_box = body_box(&bends);
-            for (tool, tool_box) in tools.iter().zip(&tool_boxes) {
-                if boxes_apart(&bends_box, tool_box) {
-                    continue;
-                }
+            for tool in tools {
                 if kernel::boolean(&bends, tool, kernel::BoolOp::Intersect)?.is_some() {
                     return Err(DocError::Invalid(
                         "this machining intersects a folded bend or a nonparallel panel; unfold the sheet before machining that material".into(),
@@ -1580,13 +1587,13 @@ fn sheet_prism_cut(
 
 /// A box around `body`, grown past its mesh's deflection from the exact faces (and a hair
 /// more): bodies whose boxes are apart do not meet. None when it can't be worked out.
-fn body_box(body: &Body) -> Option<Aabb3> {
+pub(super) fn body_box(body: &Body) -> Option<Aabb3> {
     let tol = (body.size() * 1e-3).max(1e-4);
     padded_box(&body.mesh(&solidcraft_kernel::MeshTolerance::chord(tol)).ok()?, tol)
 }
 
 /// [`body_box`] of a model body, from the mesh it keeps.
-fn mesh_box(mb: &ModelBody) -> Option<Aabb3> {
+pub(super) fn mesh_box(mb: &ModelBody) -> Option<Aabb3> {
     padded_box(&mb.mesh(), mb.display_tol())
 }
 
@@ -1595,8 +1602,25 @@ fn padded_box(mesh: &solidcraft_geom::Mesh, tol: f64) -> Option<Aabb3> {
     (!b.is_empty() && b.min.is_finite() && b.max.is_finite()).then(|| b.inflated(2.0 * tol + 1e-6))
 }
 
+/// Whether [`kernel::cylinder_face_at`] is known to find no face of `mb` at `p`. It takes a
+/// face only when its own mesh of the body comes within a twentieth of the body's size of the
+/// point. That mesh lies in the body's box ([`mesh_box`]) give or take its own deflection, which
+/// the reach allows for, so a box farther away than that holds no face for it. Working that out from the mesh the body keeps
+/// spares a tessellation of every body in the design for each tap marking (#10227). A mesh
+/// body, and a body whose box is unknown, are searched as before.
+pub(super) fn beyond_cylinder_reach(mb: &ModelBody, p: Vec3) -> bool {
+    if mb.body.is_mesh() {
+        return false;
+    }
+    let Some(b) = mesh_box(mb) else { return false };
+    let size = mb.body.size();
+    let reach = size * 0.05 + 2.0 * (size * 1e-3).max(1e-3);
+    let off = (b.min - p).max(p - b.max).max(Vec3::ZERO);
+    off.len() > reach
+}
+
 /// Whether two boxes are known to be apart (an unknown box is never apart).
-fn boxes_apart(a: &Option<Aabb3>, b: &Option<Aabb3>) -> bool {
+pub(super) fn boxes_apart(a: &Option<Aabb3>, b: &Option<Aabb3>) -> bool {
     let (Some(a), Some(b)) = (a, b) else { return false };
     a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y || a.max.z < b.min.z || b.max.z < a.min.z
 }

@@ -1203,6 +1203,7 @@
   "cmd.sketch_spline_control_point_5": "Spline por puntos de control (grao 5)",
   "cmd.sketch_spline_fit_point": "Spline por puntos de paso",
   "cmd.sketch_spline_insert_point": "Engadir punto ao spline",
+  "cmd.sketch_spline_remove_point": "Eliminar punto do spline",
   "cmd.sketch_spline_reverse": "Inverter a dirección do spline",
   "cmd.sketch_spun_profile": "Perfil de revolución",
   "cmd.sketch_toggle_diameter": "Alternar raio / diámetro",

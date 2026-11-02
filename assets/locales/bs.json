@@ -1203,6 +1203,7 @@
   "cmd.sketch_spline_control_point_5": "Splajn kontrolnih tačaka (stepen 5)",
   "cmd.sketch_spline_fit_point": "Splajn kroz tačke",
   "cmd.sketch_spline_insert_point": "Dodaj tačku splajna",
+  "cmd.sketch_spline_remove_point": "Ukloni tačku splajna",
   "cmd.sketch_spline_reverse": "Obrni smjer splajna",
   "cmd.sketch_spun_profile": "Rotirani profil",
   "cmd.sketch_toggle_diameter": "Prebaci poluprečnik / prečnik",

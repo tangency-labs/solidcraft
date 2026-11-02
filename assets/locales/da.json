@@ -1203,6 +1203,7 @@
   "cmd.sketch_spline_control_point_5": "Spline med kontrolpunkter (grad 5)",
   "cmd.sketch_spline_fit_point": "Spline gennem punkter",
   "cmd.sketch_spline_insert_point": "Tilføj splinepunkt",
+  "cmd.sketch_spline_remove_point": "Fjern splinepunkt",
   "cmd.sketch_spline_reverse": "Vend splinens retning",
   "cmd.sketch_spun_profile": "Omdrejningsprofil",
   "cmd.sketch_toggle_diameter": "Skift mellem radius og diameter",

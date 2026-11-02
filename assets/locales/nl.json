@@ -1203,6 +1203,7 @@
   "cmd.sketch_spline_control_point_5": "Spline met controlepunten (graad 5)",
   "cmd.sketch_spline_fit_point": "Spline door punten",
   "cmd.sketch_spline_insert_point": "Splinepunt toevoegen",
+  "cmd.sketch_spline_remove_point": "Splinepunt verwijderen",
   "cmd.sketch_spline_reverse": "Splinerichting omkeren",
   "cmd.sketch_spun_profile": "Gedraaid profiel",
   "cmd.sketch_toggle_diameter": "Straal/diameter omschakelen",

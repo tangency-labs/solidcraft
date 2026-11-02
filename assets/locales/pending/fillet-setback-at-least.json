@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.fillet_error_setback_short": "The setback is too short for this corner's patch: it builds from {least} on. Try a longer Setback."
+  },
+  "ar": {
+    "ui.fillet_error_setback_short": "مسافة الإرجاع قصيرة جدًا على رقعة هذه الزاوية: تُبنى ابتداءً من {least}. جرّب مسافة إرجاع أطول."
+  },
+  "de": {
+    "ui.fillet_error_setback_short": "Der Rücksprung ist für das Eckstück zu kurz: Es lässt sich ab {least} bauen. Versuchen Sie einen längeren Rücksprung."
+  },
+  "he": {
+    "ui.fillet_error_setback_short": "הנסיגה קצרה מדי עבור הטלאי של פינה זו: הוא נבנה החל מ-{least}. נסו נסיגה ארוכה יותר."
+  },
+  "ja": {
+    "ui.fillet_error_setback_short": "このコーナーのパッチにはセットバックが短すぎます。{least} 以上で作れます。より長いセットバックを試してください。"
+  },
+  "ko": {
+    "ui.fillet_error_setback_short": "이 코너의 패치에 비해 셋백이 너무 짧습니다. {least}부터 만들 수 있습니다. 더 긴 셋백을 시도해 보세요."
+  },
+  "vi": {
+    "ui.fillet_error_setback_short": "Khoảng Lùi quá ngắn cho mảng của góc này: mảng được tạo từ {least} trở lên. Hãy thử khoảng Lùi dài hơn."
+  },
+  "zh": {
+    "ui.fillet_error_setback_short": "对于此角点的面片，后退距离太短：从 {least} 起可以构建。请尝试更长的后退距离。"
+  }
+}

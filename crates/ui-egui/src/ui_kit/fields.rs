@@ -686,6 +686,9 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
         ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new("sc_focused_editor"), response.id));
     }
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
+    if response.has_focus() {
+        crate::prefs_search::note_key_sink(ui.ctx());
+    }
     if completion && ui.is_enabled() {
         ui.ctx().data_mut(|data| {
             let id = egui::Id::new("sc_value_fields");
@@ -1330,7 +1333,20 @@ pub(crate) fn bounded_length_field(
 
 /// Angle in degrees, dragged or typed. Tokens: control_height, scope control/font tokens.
 pub(crate) fn angle_field(ui: &mut Ui, value: &mut f64) -> Response {
-    let response = ui.add(egui::DragValue::new(value).speed(1.0).suffix(" deg").custom_parser(crate::prefs::parse_number));
+    // An owner that keeps the angle in radians gives back the value the field set a hair off
+    // (-3 deg as -2.9999999999999996). The field takes that for a change made elsewhere and
+    // rewrites what is being typed from it, which drops a decimal point just typed: "-3." became
+    // "-3", and the 7 after it made -37 (#10582). It is given the value it set instead.
+    let set = ui.next_auto_id().with("angle_field_set");
+    let mut shown = *value;
+    if let Some(last) = ui.data(|d| d.get_temp::<f64>(set)).filter(|last| (last - shown).abs() <= 1e-9 * last.abs().max(1.0)) {
+        shown = last;
+    }
+    let response = ui.add(egui::DragValue::new(&mut shown).speed(1.0).suffix(" deg").custom_parser(crate::prefs::parse_number));
+    if response.changed() {
+        *value = shown;
+        ui.data_mut(|d| d.insert_temp(set, shown));
+    }
     Tokens::get().input_bevel(ui, &response);
     scenario::publish_target(&format!("dialog:angle:{}", label(ui)), response.rect);
     response

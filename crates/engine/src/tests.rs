@@ -109,10 +109,10 @@ fn fillet_as_wide_as_a_face_rounds_it_off() {
 
 /// The owner's ruling of 2026-10-30: two edges of a 20 mm box rounded r2 in one fillet (they
 /// meet in a mitre at the corner (20, 0, 20), the upright edge there sharp), then the upright edge
-/// r3 in a second fillet, whose tangent chain takes the mitre's seam with it. The corner is one
-/// smooth patch, the body rounding all three at once makes (kernel `fillet_radii` of the box with
-/// each edge's radius: 10 faces, 7928.743041 mm³); the r2 rounds keep their names, and the r3
-/// round and the corner patch are the second fillet's.
+/// r3 in a second fillet, whose tangent chain takes the mitre's seam with it. The corner is the
+/// body rounding all three at once makes (kernel `fillet_radii` of the box with each edge's
+/// radius, `three_rounds_at_a_corner`: SMLib's setback corner, 15 faces, 7928.142563938 mm³); the
+/// r2 rounds keep their names, and the r3 round and the corner's patches are the second fillet's.
 #[test]
 fn a_later_round_at_a_mitred_corner_is_blended_with_the_rounds_there() {
     let mut s = Session::default();
@@ -134,16 +134,17 @@ fn a_later_round_at_a_mitred_corner_is_blended_with_the_rounds_there() {
     let second = run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 10]], "radius": 3}))["feature"].as_u64().unwrap();
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
     let v = volume(&mut s);
-    assert!((v - 7928.743041).abs() < 1e-5, "{v}");
+    assert!((v - 7928.142563938).abs() < 1e-6, "{v}");
     let faces = run(&mut s, "model.faces", json!({"body": "Box"}))["faces"].as_array().cloned().unwrap_or_default();
-    assert_eq!(faces.len(), 10);
+    assert_eq!(faces.len(), 15);
     let after: Vec<String> = rounds.iter().map(|p| named(&mut s, *p)).collect();
     assert_eq!(after, before);
-    // The r3 round (halfway up, at 45°) and the corner patch: the two faces the second fillet made.
+    // The r3 round (halfway up, at 45°) and the corner's patches: the faces the second fillet made.
     let k3 = 3.0 - 4.5_f64.sqrt();
     assert!(named(&mut s, solidcraft_geom::Vec3::new(20.0 - k3, k3, 10.0)).starts_with(&format!("F{second}:blend:")));
     let made = faces.iter().filter(|f| f["name"].as_str().is_some_and(|n| n.starts_with(&format!("F{second}:")))).count();
-    assert_eq!(made, 2, "{faces:?}");
+    // the r3 round and the corner's six patches (a setback patch per round, three in the triangle)
+    assert_eq!(made, 7, "{faces:?}");
 }
 
 #[test]
@@ -1930,8 +1931,10 @@ fn section_analysis() {
     assert_eq!(s.undo.len(), undo);
 }
 
-/// A section index finds the same cut segments, in the same order, as cutting every triangle:
-/// tilted and axis normals, cuts through vertices, at the ends and beyond the part.
+/// A section index finds the same cut segments, in the same order and to the bit, as cutting
+/// every triangle: one index for every normal (tilting a Section Analysis turns it every frame,
+/// #10373), axis and tilted, cuts through vertices, at the ends and beyond the part, and a
+/// triangle with a corner that is not a number.
 #[test]
 fn section_index_cuts_like_every_triangle() {
     let mut s = Session::default();
@@ -1939,18 +1942,30 @@ fn section_index_cuts_like_every_triangle() {
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 8, "operation": "join"}));
     let st = s.model.state();
     let m = st.bodies.first().unwrap().mesh();
-    assert!(m.triangles.len() > 64, "enough triangles for several slabs: {}", m.triangles.len());
-    for n in [Vec3::Z, -Vec3::Y, Vec3::new(1.0, 2.0, 3.0).normalized().unwrap(), Vec3::new(-0.3, 0.1, 0.9).normalized().unwrap()] {
-        let index = view::SectionIndex::new(&m, n);
-        let heights: Vec<f64> = m.positions.iter().map(|p| n.dot(*p)).collect();
-        let (lo, hi) = heights.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), h| (a.min(*h), b.max(*h)));
-        let mut cuts: Vec<f64> = (0..=40).map(|k| lo - 1.0 + (hi - lo + 2.0) * k as f64 / 40.0).collect();
-        cuts.extend(heights.iter().step_by(7).copied());
-        cuts.extend([lo, hi]);
-        for at in cuts {
-            let o = n * at;
-            let segments = view::section_segments(&m, o, n);
-            assert_eq!(index.segments(&m, o), segments, "{n:?} at {at}");
+    assert!(m.triangles.len() > 64, "enough triangles for several cells: {}", m.triangles.len());
+    let bits = |v: Vec<(Vec3, Vec3)>| v.iter().flat_map(|(a, b)| [a.x, a.y, a.z, b.x, b.y, b.z].map(f64::to_bits)).collect::<Vec<_>>();
+    let mut hostile = (*m).clone();
+    hostile.positions.push(Vec3::new(f64::NAN, 0.0, 0.0));
+    let nan = u32::try_from(hostile.positions.len() - 1).unwrap();
+    hostile.triangles.extend([[0, 1, nan], [0, 1, u32::MAX]]);
+    for m in [&*m, &hostile] {
+        let index = view::SectionIndex::new(m);
+        let mut normals = vec![Vec3::Z, -Vec3::Y, Vec3::new(1.0, 2.0, 3.0).normalized().unwrap(), Vec3::new(-0.3, 0.1, 0.9).normalized().unwrap()];
+        // A tilt drag: the normal turns a little every frame.
+        normals.extend((0..30).map(|k| {
+            let a = (5.0 + 3.0 * k as f64).to_radians();
+            Vec3::new(0.1, a.sin(), a.cos()).normalized().unwrap()
+        }));
+        for n in normals {
+            let heights: Vec<f64> = m.positions.iter().map(|p| n.dot(*p)).filter(|h| h.is_finite()).collect();
+            let (lo, hi) = heights.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), h| (a.min(*h), b.max(*h)));
+            let mut cuts: Vec<f64> = (0..=40).map(|k| lo - 1.0 + (hi - lo + 2.0) * k as f64 / 40.0).collect();
+            cuts.extend(heights.iter().step_by(7).copied());
+            cuts.extend([lo, hi]);
+            for at in cuts {
+                let o = n * at;
+                assert_eq!(bits(index.segments(m, o, n)), bits(view::section_segments(m, o, n)), "{n:?} at {at}");
+            }
         }
     }
 }

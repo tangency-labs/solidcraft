@@ -1203,6 +1203,7 @@
   "cmd.sketch_spline_control_point_5": "Сплајн контролних тачака (степен 5)",
   "cmd.sketch_spline_fit_point": "Сплајн кроз тачке",
   "cmd.sketch_spline_insert_point": "Додај тачку сплајна",
+  "cmd.sketch_spline_remove_point": "Уклони тачку сплајна",
   "cmd.sketch_spline_reverse": "Обрни смер сплајна",
   "cmd.sketch_spun_profile": "Ротирани профил",
   "cmd.sketch_toggle_diameter": "Пребаци полупречник / пречник",
