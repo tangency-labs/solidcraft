@@ -757,6 +757,7 @@ fn a_dialog_in_the_left_column_takes_the_place_of_browser_and_history() {
         for (dock, close) in [("bottom", "Cancel"), ("left", "Escape"), ("under_browser", "OK")] {
             let what = format!("{mode:?}, History {dock}, {close}");
             let mut h = Harness::new();
+            h.app.preferences.extrude_default_distance = 10.0;
             h.call("ui.resize", json!({"width":1400,"height":900}));
             h.call("ui.set", json!({"layout":mode}));
             h.call("ui.prefs", json!({"dialog_place":"left_column"}));
@@ -906,6 +907,7 @@ fn the_sketch_palette_stays_and_editing_a_feature_opens_in_the_left_column() {
 fn the_view_corner_answers_a_dialog_in_the_left_column() {
     for how in ["ok", "cancel"] {
         let mut h = Harness::new();
+        h.app.preferences.extrude_default_distance = 10.0;
         h.call("ui.resize", json!({"width":1400,"height":900}));
         h.call("ui.prefs", json!({"dialog_place":"left_column","view_confirm_corner":true}));
         sketched(&mut h);

@@ -363,6 +363,7 @@ fn a_face_extrude_keeps_the_picked_body_when_faces_coincide() {
         {"command":"solid.box","params":{"length":40,"width":30,"height":20,"body_name":"Other"}},
         {"command":"solid.box","params":{"length":40,"width":30,"height":20,"body_name":"Wall"}}
     ]));
+    app.preferences.extrude_default_distance = 10.0;
     let before = app.session.model.state();
     let pick = Sel::Face { body: "Wall".into(), index: 2, point: Vec3::new(40.0, 15.0, 10.0) };
     let d = start(&mut app, vec![pick], "solid.extrude");
@@ -704,6 +705,7 @@ fn profiles_then_extrude_takes_them_all() {
 #[test]
 fn used_profile_of_the_last_sketch_is_not_pre_picked() {
     let mut h = crate::scenario::Harness::new();
+    h.app.preferences.extrude_default_distance = 10.0;
     let base = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
     h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,20]})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();

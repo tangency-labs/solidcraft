@@ -1010,6 +1010,7 @@ fn coil_revolutions_arrows_step_whole_turns() {
 
 fn extrude_focus_fixture() -> Harness {
     let mut h = Harness::new();
+    h.app.preferences.extrude_default_distance = 10.0;
     h.app.home.open = false;
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
     h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[50,30]})).unwrap();

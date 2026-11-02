@@ -1,5 +1,6 @@
 [
   {"note": "Interface › OK and Cancel in the view's corner (#6709): a check and a cross at the view's top right. In a sketch they are Finish Sketch and Cancel Sketch; with a dialog open they are its OK and Cancel."},
+  {"call": "ui.prefs", "params": {"extrude_default_distance": 10}},
   {"call": "ui.prefs", "params": {"view_confirm_corner": true}},
   {"start": "sketch.create"},
   {"click": {"plane": "XY"}},

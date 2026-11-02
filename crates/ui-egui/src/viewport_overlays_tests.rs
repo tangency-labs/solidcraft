@@ -1549,6 +1549,7 @@ fn a_huge_extrude_distance_draws_its_handles_at_once() {
 #[test]
 fn an_open_extrude_keeps_its_taper_limits_while_the_profiles_stay() {
     let mut h = Harness::new();
+    h.app.preferences.extrude_default_distance = 10.0;
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
     h.app.run("sketch.rectangle.two_point", json!({"p0":[-20,-20],"p1":[20,20]})).unwrap();
     h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":6})).unwrap();
