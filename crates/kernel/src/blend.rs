@@ -1029,7 +1029,10 @@ fn blend_geometry(
     }
     let wire: mt::Wire = edges_out.into();
     let blend_face = match shape {
-        Shape::Flat => builder::try_attach_plane(&[wire]).map_err(|e| KernelError::Failed(format!("chamfer face: {e}")))?,
+        Shape::Flat => {
+            crate::build::refuse_intersection_curves(std::slice::from_ref(&wire), "a chamfer face")?;
+            builder::try_attach_plane(&[wire]).map_err(|e| KernelError::Failed(format!("chamfer face: {e}")))?
+        }
         Shape::Curvature => {
             let ([plane0], [plane1]) = (&end0.planes[..], &end1.planes[..]) else {
                 return Err(unsupported("G2 fillets require one planar end face at each end"));

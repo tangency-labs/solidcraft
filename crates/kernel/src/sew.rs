@@ -819,6 +819,9 @@ fn sew_impl(faces: &[FaceSpec], touching: bool, sources: Option<&[Option<crate::
                         .map(Into::into)
                 })
                 .collect::<Result<_>>()?;
+            if matches!(f.surface, SurfSpec::Plane) {
+                crate::build::refuse_intersection_curves(&wires, &format!("sew: face {fi}"))?;
+            }
             let face = match &f.surface {
                 SurfSpec::Plane => match builder::try_attach_plane(&wires) {
                     Ok(face) => face,
