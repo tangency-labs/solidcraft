@@ -1,0 +1,22 @@
+{
+  "id": "mesh-reconstruct",
+  "name": "Analytic mesh reconstruction",
+  "version": "0.1.0",
+  "description": "Reconstruct supported imported mechanical meshes as analytic solids using PR #8061.",
+  "runtime": {
+    "api": "solidcraft:plugin@0.1.0",
+    "module": "plugin.wasm",
+    "entries": [
+      "convert"
+    ],
+    "commands": [
+      "model.mesh",
+      "timeline.add"
+    ],
+    "limits": {
+      "fuel": 100000000000,
+      "memory_mib": 128,
+      "deadline_ms": 30000
+    }
+  }
+}
