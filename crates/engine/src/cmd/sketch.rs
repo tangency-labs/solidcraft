@@ -2655,7 +2655,12 @@ fn c_equal(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(reply) = super::sketch_3d::relation_3d(s, p, "sketch.constraint.equal")? {
         return Ok(reply);
     }
-    if p.get("curves").is_some() {
+    if let Some(list) = p.get("curves") {
+        let cmd = "sketch.constraint.equal";
+        let sk = sketch_store::read(&s.doc, sketch_store::target(s, p, cmd)?)?;
+        if list.as_array().into_iter().flatten().filter_map(Value::as_str).any(|id| sk.wire_index(id).is_some()) {
+            return Err(bad(cmd, "3D curves take Equal a pair at a time: give `a` and `b`"));
+        }
         return equal_curves(s, p);
     }
     let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.equal", &["a", "b"])?;

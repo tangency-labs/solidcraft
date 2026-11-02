@@ -1,21 +1,40 @@
 //! Contracts and result types for the 3D sketch constraint commands in `cmd/sketch_3d.rs`.
 
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use super::types::{SketchRef, present};
 
-/// An axis of the sketch's 3D space: `x`, `y` or `z` (either case).
-#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+/// An axis of the sketch's 3D space: `x`, `y` or `z`, in any case.
+#[derive(Clone, Copy, Debug)]
 pub enum AxisName {
-    #[serde(alias = "X")]
     X,
-    #[serde(alias = "Y")]
     Y,
-    #[serde(alias = "Z")]
     Z,
+}
+
+impl<'de> Deserialize<'de> for AxisName {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        match Value::deserialize(d)?.as_str().map(str::to_ascii_lowercase).as_deref() {
+            Some("x") => Ok(AxisName::X),
+            Some("y") => Ok(AxisName::Y),
+            Some("z") => Ok(AxisName::Z),
+            _ => Err(D::Error::custom("must be x, y or z")),
+        }
+    }
+}
+
+impl JsonSchema for AxisName {
+    fn schema_name() -> Cow<'static, str> {
+        "AxisName".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "x, y or z, in any case.", "type": "string", "pattern": "^[XxYyZz]$"})
+    }
 }
 
 /// Make drawn 3D lines parallel to an axis.
@@ -48,10 +67,9 @@ pub struct AlongAxisResult {
     pub param_warnings: Vec<String>,
 }
 
-/// An origin plane of the sketch's 3D space: `xy`, `yz` or `xz` (any case, either order, as
-/// Parallel takes them).
-#[derive(Clone, Copy, Debug, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+/// An origin plane of the sketch's 3D space: `xy`, `yz` or `xz`, in any case and either order, as
+/// Parallel takes them.
+#[derive(Clone, Copy, Debug)]
 pub enum PlaneName {
     Xy,
     Yz,
@@ -59,14 +77,26 @@ pub enum PlaneName {
 }
 
 impl<'de> Deserialize<'de> for PlaneName {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
-        let name = String::deserialize(d)?;
-        match solidcraft_sketch::OriginPlane::from_name(&name) {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        match Value::deserialize(d)?.as_str().and_then(solidcraft_sketch::OriginPlane::from_name) {
             Some(solidcraft_sketch::OriginPlane::Xy) => Ok(PlaneName::Xy),
             Some(solidcraft_sketch::OriginPlane::Yz) => Ok(PlaneName::Yz),
             Some(solidcraft_sketch::OriginPlane::Xz) => Ok(PlaneName::Xz),
-            None => Err(serde::de::Error::custom("`plane` must be xy, yz or xz")),
+            None => Err(D::Error::custom("must be xy, yz or xz")),
         }
+    }
+}
+
+impl JsonSchema for PlaneName {
+    fn schema_name() -> Cow<'static, str> {
+        "PlaneName".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "xy, yz or xz, in any case and either order.",
+            "type": "string",
+            "pattern": "^([XxYy][XxYy]|[YyZz][YyZz]|[XxZz][XxZz])$"
+        })
     }
 }
 

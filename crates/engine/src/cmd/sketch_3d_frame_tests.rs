@@ -1107,3 +1107,42 @@ fn an_upright_set_to_80_degrees_to_xy_and_on_plane_take_plane_names_either_case(
     run(&mut s, "sketch.constraint.on_plane", json!({"point": q, "plane": "XY"}));
     assert!(fit(&s, &q, 0).z.abs() < 1e-9);
 }
+
+#[test]
+fn a_paste_shifted_along_a_plane_keeps_the_distance_from_it_with_the_geometry() {
+    // A point 20 above XY by a dimension (its parameter `h`), a point on XZ; pasted 10 up and
+    // 5 along Y, each lands where the paste put it and stays there when solved.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY", "name": "Path"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let q = run(&mut s, "sketch.point3d", json!({"point":[3,4,20]}))["point"].as_str().unwrap().to_string();
+    let o = run(&mut s, "sketch.point3d", json!({"point":[7,0,6]}))["point"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.dimension", json!({"entities": [q, "xy"], "value": "h = 20"}));
+    run(&mut s, "sketch.constraint.on_plane", json!({"point": o, "plane": "xz"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "timeline.copy", json!({"features": ["Path"]}));
+    // Into another design.
+    let mut t = Session { foreign_copy: s.foreign_copy.clone(), ..Default::default() };
+    let pasted = run(&mut t, "timeline.paste", json!({"from_design": true, "translate": [0, 5, 10]}))["pasted"][0]["id"].as_u64().unwrap();
+    near(solved_fit(&t, pasted, &q, 0), Vec3::new(3.0, 9.0, 30.0));
+    near(solved_fit(&t, pasted, &o, 0), Vec3::new(7.0, 5.0, 16.0));
+    // The pasted distance still follows `h`: 25 above XY, plus the 10 the paste added.
+    let h = t.doc.params.iter().find(|p| !p.model).map(|p| p.name.clone()).unwrap();
+    run(&mut t, "parameters.change", json!({"name": h, "expression": "25 mm"}));
+    near(solved_fit(&t, pasted, &q, 0), Vec3::new(3.0, 9.0, 35.0));
+}
+
+#[test]
+fn a_driven_angle_to_a_plane_made_driving_keeps_the_side_the_line_is_on() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let l = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,0,5]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{l}.start")}));
+    let k = run(&mut s, "sketch.dimension", json!({"entities": [l, "xy"], "driven": true}))["constraint"].as_str().unwrap().to_string();
+    // The line is moved to run down at 30°; its driven angle reads 30°.
+    run(&mut s, "sketch.move3d", json!({"wire": l, "index": 1, "to": [8.660254037844386, 0, -5]}));
+    run(&mut s, "sketch.toggle_driven", json!({"constraint": k, "driven": false}));
+    let end = fit(&s, &l, 1);
+    assert!(end.z < 0.0 && (end.z / end.len() + 0.5).abs() < 1e-6, "still down at 30°: {end:?}");
+}

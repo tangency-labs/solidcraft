@@ -288,6 +288,10 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
             let component: std::collections::HashSet<String> =
                 sketch.wires.iter().filter(|w| w.space == solidcraft_sketch::WireSpace::Component).map(|w| w.id.clone()).collect();
             let matrix = |wire: &str| if component.contains(wire) { transform } else { &world_shift };
+            // Distances from a plane the paste shifts along its normal: their parameter's new
+            // expression, and On Plane constraints turned into such distances, which need one.
+            let mut shifted: Vec<(String, String)> = Vec::new();
+            let mut to_param: Vec<(String, String)> = Vec::new();
             sketch.wire_constraints.retain_mut(|c| match &mut c.kind {
                 solidcraft_sketch::WireConstraintKind::Fix { p, at, exprs } => {
                     let m = matrix(&p.wire);
@@ -337,10 +341,20 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
                     None => false,
                 },
                 solidcraft_sketch::WireConstraintKind::PlaneDistance { p, plane, reversed, value } => match onto_plane(matrix(&p.wire), *plane) {
+                    // Turned only: the value (and the parameter that drives it) stays, the side turns.
+                    Some((to, flip, shift)) if shift.abs() <= 1e-9 => {
+                        (*plane, *reversed) = (to, *reversed ^ flip);
+                        true
+                    }
+                    // Shifted: the signed distance along the new normal is the shift and the old
+                    // distance, on its side; the parameter says so, so a solve keeps it.
                     Some((to, flip, shift)) => {
                         let side = if *reversed != flip { -1.0 } else { 1.0 };
                         let w = shift + side * *value;
-                        (*plane, *reversed, *value) = (to, w < 0.0, w.abs());
+                        (*plane, *reversed, *value) = (to, false, w);
+                        if let Some(name) = &c.param {
+                            shifted.push((name.clone(), format!("{} mm {} ({{old}})", shift, if side < 0.0 { "-" } else { "+" })));
+                        }
                         true
                     }
                     None => false,
@@ -351,18 +365,25 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
                         true
                     }
                     Some((to, _, shift)) => {
-                        c.kind = solidcraft_sketch::WireConstraintKind::PlaneDistance {
-                            p: p.clone(),
-                            plane: to,
-                            reversed: shift < 0.0,
-                            value: shift.abs(),
-                        };
+                        c.kind = solidcraft_sketch::WireConstraintKind::PlaneDistance { p: p.clone(), plane: to, reversed: false, value: shift };
+                        to_param.push((c.id.clone(), format!("{shift} mm")));
                         true
                     }
                     None => false,
                 },
                 _ => true,
             });
+            for (name, expr) in shifted {
+                if let Some(param) = scratch.doc_mut().params.iter_mut().find(|p| p.name == name) {
+                    param.expr = expr.replace("{old}", &param.expr);
+                }
+            }
+            for (id, expr) in to_param {
+                let name = scratch.doc_mut().new_model_param(&expr, "mm");
+                if let Some(c) = sketch.wire_constraints.iter_mut().find(|c| c.id == id) {
+                    c.param = Some(name);
+                }
+            }
             // Patterns and text words have expressions outside FeatureKind's numeric inputs.
             for pattern in &mut sketch.patterns {
                 for e in pattern.count_expression.iter_mut().chain(pattern.expressions.values_mut()) {

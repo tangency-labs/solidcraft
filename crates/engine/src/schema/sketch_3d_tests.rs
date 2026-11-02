@@ -63,3 +63,23 @@ fn strict_takes_plane_and_axis_names_in_any_case() {
         run(&mut s, "sketch.constraint.on_plane", json!({"point": q, "plane": name}));
     }
 }
+
+#[test]
+fn plane_and_axis_names_publish_the_cases_they_take() {
+    use crate::schema::sketch_3d::{AxisName, PlaneName};
+    // The published pattern is any case, as the reader is.
+    let pattern = |v: serde_json::Value| v["pattern"].as_str().unwrap_or_default().to_string();
+    let plane = pattern(serde_json::to_value(schemars::schema_for!(PlaneName)).unwrap_or_default());
+    let axis = pattern(serde_json::to_value(schemars::schema_for!(AxisName)).unwrap_or_default());
+    assert!(plane.contains("[XxYy]") && plane.contains("[XxZz]"), "{plane}");
+    assert_eq!(axis, "^[XxYyZz]$");
+    for name in ["xy", "XY", "yX", "zx", "Zy"] {
+        assert!(serde_json::from_value::<PlaneName>(json!(name)).is_ok(), "{name}");
+    }
+    for name in ["xw", "x", "xyz"] {
+        assert!(serde_json::from_value::<PlaneName>(json!(name)).is_err(), "{name}");
+    }
+    for name in ["x", "Y", "z"] {
+        assert!(serde_json::from_value::<AxisName>(json!(name)).is_ok(), "{name}");
+    }
+}
