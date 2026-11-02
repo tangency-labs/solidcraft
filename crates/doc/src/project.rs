@@ -12,7 +12,7 @@
 
 use std::collections::BTreeMap;
 
-use solidcraft_geom::{Mesh, Plane, Seg2, Vec2, Vec3};
+use solidcraft_geom::{Mesh, Plane, Ring, Seg2, Vec2, Vec3};
 use solidcraft_sketch::{CurveKind, LinkGeom, LinkKind, LinkSource, Sketch};
 
 use crate::eval::ModelState;
@@ -887,6 +887,292 @@ pub(crate) fn closest_on_triangle(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
         .into_iter()
         .min_by(|x, y| x.dist(p).total_cmp(&y.dist(p)))
         .unwrap_or(a)
+}
+
+/// Faces considered when a click asks which hole opening it passed through.
+const HOLE_MAX_FACES: usize = 8_000;
+/// Edges of one body considered for that same question.
+const HOLE_MAX_EDGES: usize = 20_000;
+/// Triangles scanned while deciding which faces are planar.
+const HOLE_MAX_TRIANGLES: usize = 400_000;
+/// Edges in one opening. A circular rim is two semicircles; more than this is not one hole.
+const HOLE_MAX_LOOP_EDGES: usize = 128;
+
+/// The rim of a hole whose opening a ray passes through: each edge named by a point on it,
+/// in world space, on `body`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HoleRim {
+    pub body: String,
+    /// Where the ray crosses the opening.
+    pub at: Vec3,
+    /// One point on each boundary edge of that opening.
+    pub edges: Vec<Vec3>,
+}
+
+/// The nearest hole opening `origin + t·dir` (t > 0) passes through.
+///
+/// A click in the dark centre of a hole hits no face: the opening has no triangles. The rim is
+/// still the boundary of the planar face the hole is cut through. `visible` skips hidden bodies.
+/// `None` when the ray misses every opening, the inputs are not finite, or the body is past the
+/// work limits above.
+pub fn hole_rim_along_ray(st: &ModelState, origin: Vec3, dir: Vec3, visible: impl Fn(&str) -> bool) -> Option<HoleRim> {
+    if !origin.is_finite() || !dir.is_finite() || dir.len2() < 1e-24 {
+        return None;
+    }
+    let mut best: Option<(f64, HoleRim)> = None;
+    for body in &st.bodies {
+        if !visible(&body.name) {
+            continue;
+        }
+        let (mesh, place) = body.mesh_in_place();
+        if mesh.edges.len() > HOLE_MAX_EDGES || mesh.triangles.len() > HOLE_MAX_TRIANGLES || mesh.edges.is_empty() {
+            continue;
+        }
+        let Some((local_origin, local_dir)) = ray_in_place(&place, origin, dir) else { continue };
+        let Some((_, at, edges)) = opening_along_ray(&mesh, local_origin, local_dir) else { continue };
+        let at = point_in_world(&place, at);
+        // World distance along the ray, so a moved body is compared in the same frame as the click.
+        let along = (at - origin).dot(dir);
+        if !at.is_finite() || !(along > 1e-9) {
+            continue;
+        }
+        let edges: Vec<Vec3> = edges.iter().copied().map(|p| point_in_world(&place, p)).filter(|p| p.is_finite()).collect();
+        if edges.is_empty() || edges.len() > HOLE_MAX_LOOP_EDGES {
+            continue;
+        }
+        let rim = HoleRim { body: body.name.clone(), at, edges };
+        if best.as_ref().is_none_or(|(d, _)| along < *d) {
+            best = Some((along, rim));
+        }
+    }
+    best.map(|(_, rim)| rim)
+}
+
+fn ray_in_place(place: &crate::Mat, origin: Vec3, dir: Vec3) -> Option<(Vec3, Vec3)> {
+    if crate::is_identity(place) {
+        return Some((origin, dir));
+    }
+    let back = crate::mat_inverse(place)?;
+    let (o, d) = (crate::apply_point(&back, origin), crate::apply_vector(&back, dir));
+    (o.is_finite() && d.is_finite() && d.len2() > 1e-24).then_some((o, d))
+}
+
+fn point_in_world(place: &crate::Mat, p: Vec3) -> Vec3 {
+    if crate::is_identity(place) { p } else { crate::apply_point(place, p) }
+}
+
+/// Distance along `dir` (not necessarily unit) to the nearest opening, the point there, and one
+/// point on each of its edges. All in the mesh's own coordinates.
+fn opening_along_ray(mesh: &Mesh, origin: Vec3, dir: Vec3) -> Option<(f64, Vec3, Vec<Vec3>)> {
+    let planes = planar_faces(mesh)?;
+    let mut best: Option<(f64, Vec3, Vec<Vec3>)> = None;
+    for (face, plane) in planes.iter().enumerate() {
+        let Some(plane) = plane else { continue };
+        let n = plane.normal();
+        let den = dir.dot(n);
+        if den.abs() < 1e-12 * dir.len().max(1.0) {
+            continue;
+        }
+        let t = (plane.origin - origin).dot(n) / den;
+        if !(t.is_finite() && t > 1e-6) {
+            continue;
+        }
+        if best.as_ref().is_some_and(|(d, _, _)| t >= *d) {
+            continue;
+        }
+        let at = origin + dir * t;
+        if !at.is_finite() {
+            continue;
+        }
+        let Some(edges) = hole_edges(mesh, face, plane, plane.to_local(at)) else { continue };
+        best = Some((t, at, edges));
+    }
+    best
+}
+
+/// One plane per face index, `None` when the face is missing or not planar.
+fn planar_faces(mesh: &Mesh) -> Option<Vec<Option<Plane>>> {
+    let mut max_face = 0usize;
+    for f in &mesh.tri_face {
+        let f = *f as usize;
+        if f >= HOLE_MAX_FACES {
+            return None;
+        }
+        max_face = max_face.max(f);
+    }
+    let n = max_face + 1;
+    let mut normal = vec![Vec3::ZERO; n];
+    let mut origin = vec![None; n];
+    let mut count = vec![0u32; n];
+    for (tri, face) in mesh.triangles.iter().zip(&mesh.tri_face) {
+        let Some([a, b, c]) = mesh.tri(tri) else { continue };
+        let f = *face as usize;
+        normal[f] += (b - a).cross(c - a);
+        if origin[f].is_none() {
+            origin[f] = Some(a);
+        }
+        count[f] = count[f].saturating_add(1);
+    }
+    let tol = (mesh.bounds().diagonal() * 1e-5).max(1e-6);
+    let mut off = vec![0.0f64; n];
+    for (tri, face) in mesh.triangles.iter().zip(&mesh.tri_face) {
+        let f = *face as usize;
+        let Some(o) = origin[f] else { continue };
+        let Some(nn) = normal[f].normalized() else { continue };
+        let Some([a, b, c]) = mesh.tri(tri) else { continue };
+        for p in [a, b, c] {
+            off[f] = off[f].max((p - o).dot(nn).abs());
+        }
+    }
+    let mut planes = Vec::with_capacity(n);
+    for f in 0..n {
+        let plane = (count[f] > 0 && off[f] <= tol).then(|| origin[f]).flatten().and_then(|o| Plane::from_normal(o, normal[f]));
+        planes.push(plane);
+    }
+    Some(planes)
+}
+
+/// Edges of the inner loop of `face` that contains `at` (face-plane coordinates).
+/// A point on the face material is inside only the outer loop, so it is not an opening.
+fn hole_edges(mesh: &Mesh, face: usize, plane: &Plane, at: Vec2) -> Option<Vec<Vec3>> {
+    if !at.is_finite() {
+        return None;
+    }
+    let face = u32::try_from(face).ok()?;
+    let mut edges = Vec::new();
+    for (index, faces) in mesh.edge_faces.iter().enumerate() {
+        if !mesh.edge_pickable(index) || !faces.contains(&face) {
+            continue;
+        }
+        edges.push(index);
+        if edges.len() > HOLE_MAX_EDGES {
+            return None;
+        }
+    }
+    if edges.len() < 2 {
+        return None;
+    }
+    let tol = (mesh.bounds().diagonal() * 1e-6).max(1e-7);
+    let mut loops = Vec::new();
+    let mut used = vec![false; mesh.edges.len()];
+    for &start_edge in &edges {
+        if used.get(start_edge).copied().unwrap_or(true) {
+            continue;
+        }
+        let Some(opening) = walk_loop(mesh, &edges, &mut used, start_edge, plane, tol) else { continue };
+        if opening.ring.len() >= 3 && opening.area.abs() > tol * tol {
+            loops.push(opening);
+        }
+    }
+    let mut containing: Vec<&Opening> = loops.iter().filter(|opening| Ring::new(opening.ring.clone()).contains(at)).collect();
+    if containing.len() < 2 {
+        return None;
+    }
+    containing.sort_by(|a, b| a.area.abs().total_cmp(&b.area.abs()));
+    let hole = *containing.first()?;
+    let mut points = Vec::new();
+    for edge in &hole.edges {
+        let Some(pts) = mesh.edges.get(*edge) else { continue };
+        let Some(mid) = polyline_mid(pts) else { continue };
+        points.push(mid);
+    }
+    (!points.is_empty()).then_some(points)
+}
+
+struct Opening {
+    edges: Vec<usize>,
+    ring: Vec<Vec2>,
+    area: f64,
+}
+
+fn walk_loop(mesh: &Mesh, face_edges: &[usize], used: &mut [bool], start_edge: usize, plane: &Plane, tol: f64) -> Option<Opening> {
+    let pts = mesh.edges.get(start_edge)?;
+    let start = *pts.first()?;
+    if !start.is_finite() {
+        return None;
+    }
+    let mut edge = start_edge;
+    let mut current = start;
+    let mut edges = Vec::new();
+    let mut ring = Vec::new();
+    // A walk that does not close must not consume its edges: the next start may still close them.
+    let mut seen = vec![false; mesh.edges.len()];
+    let mut closed = false;
+    for _ in 0..=face_edges.len() {
+        if used.get(edge).copied().unwrap_or(true) || seen.get(edge).copied().unwrap_or(true) {
+            break;
+        }
+        let pts = mesh.edges.get(edge)?;
+        let (a, b) = (*pts.first()?, *pts.last()?);
+        let forward = current.dist(a) <= current.dist(b);
+        let ordered: Vec<Vec3> = if forward { pts.clone() } else { pts.iter().rev().copied().collect() };
+        for p in ordered.iter().take(ordered.len().saturating_sub(1)) {
+            ring.push(plane.to_local(*p));
+        }
+        if let Some(slot) = seen.get_mut(edge) {
+            *slot = true;
+        }
+        edges.push(edge);
+        if edges.len() > HOLE_MAX_LOOP_EDGES {
+            return None;
+        }
+        current = if forward { b } else { a };
+        if current.dist(start) <= tol {
+            closed = true;
+            break;
+        }
+        let Some(next) = face_edges.iter().copied().find(|&other| {
+            !used.get(other).copied().unwrap_or(true)
+                && !seen.get(other).copied().unwrap_or(true)
+                && mesh
+                    .edges
+                    .get(other)
+                    .is_some_and(|pts| pts.first().is_some_and(|p| p.dist(current) <= tol) || pts.last().is_some_and(|p| p.dist(current) <= tol))
+        }) else {
+            break;
+        };
+        edge = next;
+    }
+    if !closed || ring.iter().any(|p| !p.is_finite()) {
+        return None;
+    }
+    for e in &edges {
+        if let Some(slot) = used.get_mut(*e) {
+            *slot = true;
+        }
+    }
+    let area = ring_area(&ring);
+    area.is_finite().then_some(Opening { edges, ring, area })
+}
+
+fn ring_area(ring: &[Vec2]) -> f64 {
+    let n = ring.len();
+    if n < 3 {
+        return 0.0;
+    }
+    let mut twice = 0.0;
+    for i in 0..n {
+        let (Some(p), Some(q)) = (ring.get(i), ring.get((i + 1) % n)) else { continue };
+        twice += p.x * q.y - p.y * q.x;
+    }
+    twice * 0.5
+}
+
+fn polyline_mid(pts: &[Vec3]) -> Option<Vec3> {
+    let len: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
+    if !(len.is_finite() && len > 0.0) {
+        return pts.first().copied();
+    }
+    let mut acc = 0.0;
+    for w in pts.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let span = a.dist(b);
+        if acc + span >= len * 0.5 && span > 0.0 {
+            return Some(a.lerp(b, (len * 0.5 - acc) / span));
+        }
+        acc += span;
+    }
+    pts.first().copied()
 }
 
 /// Nearest face: (B-rep face index, closest point, distance).
