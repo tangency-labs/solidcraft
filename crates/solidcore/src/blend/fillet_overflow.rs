@@ -19,6 +19,7 @@
 //! | [`edge_on_surface`]          | `sm_EdgeOnSurface`           |
 //! | [`creases`]                  | `sm_Creases`                 |
 //! | [`pieces_in_face`]           | `sm_PiecesInFace`            |
+//! | [`pieces_along_edges`]       | none (WR-717)                |
 //! | [`in_material`]              | `sm_InMaterial`              |
 //! | [`LoopCurve`]                | `sm_LoopCurve`               |
 //! | [`Extension`]                | `sm_Extension`               |
@@ -239,10 +240,42 @@ pub fn pieces_in_face(
     tol: f64,
     pieces: &mut Vec<Curve>,
 ) -> Result<()> {
+    pieces_classed(k, curve, b, f, tol, PointClassType::Face, pieces)
+}
+
+/// Not the fork's (WR-717, #2385): the pieces of `curve` that run along the boundary of
+/// face `f` of `b`, within `tol` of its edges (its runs classified on an edge), as trimmed
+/// copies appended to `pieces`; [`pieces_in_face`] leaves them out. A crease that runs
+/// along an edge of the face it crosses is that edge.
+///
+/// # Errors
+/// Those of the classification, the evaluations and the trims.
+pub fn pieces_along_edges(
+    k: &Kernel,
+    curve: &Curve,
+    b: &mut Brep,
+    f: FaceId,
+    tol: f64,
+    pieces: &mut Vec<Curve>,
+) -> Result<()> {
+    pieces_classed(k, curve, b, f, tol, PointClassType::Edge, pieces)
+}
+
+/// The pieces of `curve` whose runs on face `f` of `b` classify as `class` (a run whose
+/// ends meet is left out unless the curve is closed).
+fn pieces_classed(
+    k: &Kernel,
+    curve: &Curve,
+    b: &mut Brep,
+    f: FaceId,
+    tol: f64,
+    class: PointClassType,
+    pieces: &mut Vec<Curve>,
+) -> Result<()> {
     let natural = curve.natural_interval();
     let runs = classify_free_curve_on_face(k, b, f, curve, natural, tol, true)?;
     for run in runs {
-        if run.mid != PointClassType::Face {
+        if run.mid != class {
             continue;
         }
         let ivl = run.interval;

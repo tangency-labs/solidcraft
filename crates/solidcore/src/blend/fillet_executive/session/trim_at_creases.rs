@@ -26,7 +26,14 @@
 //!   only with `fixes.fillet_section_end_trim_at_creases` (WR-706, #2223): each such end is
 //!   cut by its section's plane and closed by the section's flat face, and a side of that
 //!   face that lies along an edge of the body is sewn to the edge's piece the rail's
-//!   imprint cuts off, not imprinted. Without it the caller subtracts the round, as before.
+//!   imprint cuts off, not imprinted.
+//! - **Creases along an edge (not the fork's).** With
+//!   `fixes.fillet_overflow_crease_along_edge` (WR-717, #2385), a crease that runs along an
+//!   edge of the face it crosses, within the trim's tolerance, is that edge: the sheet is
+//!   split along it, and the edge stands as its imprint, so the material taken off stops
+//!   there and the sheet is sewn to it. The fork drops such a crease as not inside the
+//!   face, leaves the sheet's piece past the face, and refuses at the sewing (a disc 2 high
+//!   rounded 2.001: the crease runs 2.5e-7 inside the bottom edge). Without it the caller subtracts the round, as before.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -37,8 +44,8 @@ use crate::blend::fillet_cliff_overflow::{
 use crate::blend::fillet_executive::p3::NoRoomReason;
 use crate::blend::fillet_geom::p1::{FilletErrorType, FilletGeomId};
 use crate::blend::fillet_overflow::{
-    creases, edge_curve, edge_on_surface, extend, in_material, make_extension_face, pieces_in_face,
-    ExtendOutcome, Extension, Rail,
+    creases, edge_curve, edge_on_surface, extend, in_material, make_extension_face,
+    pieces_along_edges, pieces_in_face, ExtendOutcome, Extension, Rail,
 };
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
@@ -61,6 +68,15 @@ const OP: &str = "blend::fillet_executive::session::trim_at_creases";
 /// `smos_Max` of two doubles.
 fn smos_max(a: f64, b: f64) -> f64 {
     if a > b {
+        a
+    } else {
+        b
+    }
+}
+
+/// `smos_Min` of two doubles.
+fn smos_min(a: f64, b: f64) -> f64 {
+    if a < b {
         a
     } else {
         b
@@ -596,6 +612,10 @@ impl FilletSession<'_> {
         // 1, 2: each sheet face split along its creases, the pieces outside the body
         // (beyond the cliffs, or past an end) deleted, whether a crease split it or not
         let body_tol = self.objects.target.tolerance();
+        // WR-717: the creases that run along an edge of the face they cross
+        let mut edge_creases: Vec<Curve> = Vec::new();
+        // WR-717: the body's edges those creases stand for
+        let mut crease_edges: Vec<EdgeId> = Vec::new();
         for s in crate::topology::brep::p1::faces(&sheet, None)? {
             let mut sheet_box =
                 crate::query::face::p1::calculate_bounding_box(k, &sheet, s, false)?;
@@ -607,6 +627,8 @@ impl FilletSession<'_> {
             // the faces the sheet face rolls on or ends on: each holds one of its boundary
             // edges
             let mut supports: BTreeSet<FaceId> = BTreeSet::new();
+            // WR-717: the supports that hold one of the edges to the trim's own tolerance
+            let mut held: BTreeSet<FaceId> = BTreeSet::new();
             for (&f, bx) in target_faces.iter().zip(&target_boxes) {
                 if bx.are_disjoint(&sheet_box, on_tol) {
                     continue;
@@ -620,13 +642,27 @@ impl FilletSession<'_> {
                         continue;
                     }
                     holds = edge_on_surface(k, &sheet, e, self.objects.target, f, on_tol)?;
+                    if holds
+                        && k.fixes.fillet_overflow_crease_along_edge
+                        && edge_on_surface(k, &sheet, e, self.objects.target, f, tol)?
+                    {
+                        held.insert(f);
+                    }
                 }
                 if holds {
                     supports.insert(f);
                 }
             }
             for (&f, bx) in target_faces.iter().zip(&target_boxes) {
-                if bx.are_disjoint(&sheet_box, on_tol) || supports.contains(&f) {
+                // WR-717: a face that holds a rail only to the looser `on_tol` (a rail that
+                // runs past it by less than that, beside the edge where the sheet crosses
+                // it) is still looked at for creases
+                let skip = if k.fixes.fillet_overflow_crease_along_edge {
+                    held.contains(&f)
+                } else {
+                    supports.contains(&f)
+                };
+                if bx.are_disjoint(&sheet_box, on_tol) || skip {
                     continue;
                 }
                 // fitted to the body's own accuracy, so that creases meeting at a corner of
@@ -637,6 +673,18 @@ impl FilletSession<'_> {
                 let mut in_face = Vec::new();
                 for c in &found {
                     pieces_in_face(k, c, self.objects.target, f, tol, &mut in_face)?;
+                }
+                // Not the fork's (WR-717, #2385): a crease that runs along an edge of the
+                // face, within tolerance, is that edge. The sheet is split along it as along
+                // any crease, and the edge stands as its imprint (below).
+                if k.fixes.fillet_overflow_crease_along_edge {
+                    let first = in_face.len();
+                    for c in &found {
+                        pieces_along_edges(k, c, self.objects.target, f, tol, &mut in_face)?;
+                    }
+                    for c in in_face.get(first..).unwrap_or_default() {
+                        edge_creases.push(c.copy(k)?);
+                    }
                 }
                 let before = pieces.len();
                 for c in &in_face {
@@ -891,7 +939,7 @@ impl FilletSession<'_> {
                     }
                 }
             }
-            if along.is_empty() {
+            if along.is_empty() && edge_creases.is_empty() {
                 continue;
             }
             let curve = edge::curve(target, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
@@ -903,6 +951,45 @@ impl FilletSession<'_> {
                         break;
                     }
                 }
+            }
+            // WR-717: an edge a crease runs along is that crease's imprint
+            for c in &edge_creases {
+                if let Some((_, dist)) = drop_on(k, c, &c.natural_interval(), mid)? {
+                    if dist <= tol {
+                        imprinted.insert(e);
+                        crease_edges.push(e);
+                        break;
+                    }
+                }
+            }
+        }
+        // WR-717: a sheet edge that lies along an edge a crease stands for (the sheet not
+        // split there, the crease within tolerance of its own rail too) is sewn to it across
+        // the gap between them: at twice that gap, as the stitch glues within half its
+        // tolerance, and never past `on_tol`, the distance `edge_on_surface` already took
+        // the sheet edge to be on the face at
+        let mut sew_tol = tol;
+        for &e in &lamina_edges {
+            let curve = edge::curve(&sheet, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let ivl = edge::interval(&sheet, e)?;
+            let mut worst = 0.0_f64;
+            let mut along_one = !crease_edges.is_empty();
+            let mut i = 0_u32;
+            while i <= 4 && along_one {
+                let p = curve.evaluate_point(k, ivl.evaluate(f64::from(i) / 4.0))?;
+                i += 1;
+                let mut best = f64::INFINITY;
+                for &ce in &crease_edges {
+                    let c = edge::curve(target, ce)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+                    if let Some((_, dist)) = drop_on(k, c, &edge::interval(target, ce)?, p)? {
+                        best = smos_min(best, dist);
+                    }
+                }
+                along_one = best <= on_tol;
+                worst = smos_max(worst, best);
+            }
+            if along_one {
+                sew_tol = smos_max(sew_tol, smos_min(on_tol, 2.0 * worst));
             }
         }
         let mut gone: BTreeSet<FaceId> = BTreeSet::new();
@@ -1068,7 +1155,7 @@ impl FilletSession<'_> {
                 crate::topology::brep::p4::stitch_faces_with_context(
                     k,
                     b,
-                    tol,
+                    sew_tol,
                     Some(&listed),
                     false,
                     Some(identity),
@@ -1077,7 +1164,7 @@ impl FilletSession<'_> {
             };
             // the edges the sheet is sewn along hold it to its own accuracy
             let sewn_tol = smos_max(
-                tol,
+                sew_tol,
                 smos_max(
                     stitched.max_vertex_edge_gap,
                     stitched.max_edge_face_trim_curve_gap,

@@ -2,7 +2,7 @@
  "issue": "https://github.com/tangency-labs/solidcraft/issues/190",
  "pr": "https://github.com/tangency-labs/solidcraft/pull/318",
  "test": "crates/kernel/src/tests.rs: loop_fillet_as_tall_as_its_wall_consumes_it",
- "summary": "A round exactly as tall as its wall must use the wall up, not be refused (#190). A disc 13 in radius and 2 high has its top circle rounded by 2: the cylindrical wall goes and the body is top, round and bottom. A 40 x 30 x 5 plate has its whole top outline rounded by 5, mitring at the corners. Both volumes are closed form: the removed section, a square of side r less a quarter disc, swept by Pappus round the disc, and along the plate's outline measured at the section's centroid (the mitred corners make that exact). SolidCraft checked 2e-4 relative on a mesh; these check 1e-4 mm^3 (the plate 1e-3: its result is 1.3e-4 off, 2.4e-8 relative, about twice the runner's 1e-8 relative volume integration accuracy on 5300 mm^3). The test's taller-than-the-wall refusals are not ported. A last case rounds the disc r 2.5, past its height, with the cliff overflow (tangency-labs/solidcore#960): the corner of a round continued below the bottom, above z = 0.",
+ "summary": "A round exactly as tall as its wall must use the wall up, not be refused (#190). A disc 13 in radius and 2 high has its top circle rounded by 2: the cylindrical wall goes and the body is top, round and bottom. A 40 x 30 x 5 plate has its whole top outline rounded by 5, mitring at the corners. Both volumes are closed form: the removed section, a square of side r less a quarter disc, swept by Pappus round the disc, and along the plate's outline measured at the section's centroid (the mitred corners make that exact). SolidCraft checked 2e-4 relative on a mesh; these check 1e-4 mm^3 (the plate 1e-3: its result is 1.3e-4 off, 2.4e-8 relative, about twice the runner's 1e-8 relative volume integration accuracy on 5300 mm^3). The test's taller-than-the-wall refusals are not ported. A last case rounds the disc r 2.5, past its height, with the cliff overflow (tangency-labs/solidcore#960): the corner of a round continued below the bottom, above z = 0. A case at r 2.001 has the round's crease 2.5e-7 inside the bottom edge, which the overflow trim at creases takes as that edge with fillet_overflow_crease_along_edge (tangency-labs/solidcore#2385).",
  "cases": [
   {
    "name": "disc_top_rounded_by_its_height",
@@ -144,6 +144,55 @@
      "value": 104.16607796807153,
      "tol": 0.0001,
      "formula": "2*pi * integral over u in 0..2.5 of (10.5 + u) * min(2, 2.5 - sqrt(2.5^2 - u^2)) du (the r 2.5 round's corner about the wall's continuation, above z = 0; Pappus, evaluated in closed form)"
+    }
+   }
+  },
+  {
+   "name": "disc_top_rounded_just_past_its_height",
+   "note": "r 2.001: the round's crease on the bottom face runs 2.5e-7 inside the bottom edge, within the trim's tolerance. The overflow trim at creases (fork 5e8c9c1 too) drops that crease as not inside the face and refuses at the sewing (tangency-labs/solidcore#2385); fillet_overflow_crease_along_edge takes the crease as the bottom edge.",
+   "fixes": [
+    "fillet_refuse_rails_leaving_faces",
+    "fillet_trace_reaches_rails",
+    "fillet_rail_end_on_continued_surface",
+    "fillet_cliff_overflow",
+    "fillet_run_on_bspline_trims",
+    "fillet_overflow_trim_at_creases",
+    "fillet_overflow_crease_along_edge"
+   ],
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 13,
+     "height": 2
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "disc",
+     "edges": [
+      [
+       0,
+       13,
+       2
+      ]
+     ],
+     "radius": 2.001
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "removed": {
+     "from": "disc",
+     "value": 67.77295453017904,
+     "tol": 0.0001,
+     "formula": "2*pi * integral over u in 0..2.001 of (10.999 + u) * min(2, 2.001 - sqrt(2.001^2 - u^2)) du (the round above z = 0; the bottom face keeps its edge 2.5e-7 outside the crease, so the result is within 2*(2*pi*13*2.5e-7) of it)"
     }
    }
   }
