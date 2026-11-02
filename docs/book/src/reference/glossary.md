@@ -312,6 +312,28 @@ A design property that holds the identifier an organisation gives a design.
 - **Don't use:** part number for a standard part's size.
 - **For translators:** see *Words with more than one meaning*, "part".
 
+### pattern distance type
+
+The choice of what sets how far apart one direction's pattern instances lie: the spacing between
+neighbours, the *pattern extent*, or an object the last instance reaches.
+
+- **In SolidCraft:** the `type1` and `type2` parameters of `solid.pattern.rectangular`
+  (`spacing`, `extent`, `to_object`), with `to1`, `to2`, `to_offset1` and `to_offset2`; the
+  Rectangular Pattern dialog's Distance Type rows.
+- **Don't use:** spacing type, extent type (an extrude's end condition).
+- **For translators:** see *Words with more than one meaning*, "Extent".
+
+### pattern extent
+
+The distance from the first pattern instance to the last along one direction.
+
+- **In SolidCraft:** `type1: extent` / `type2: extent` of `solid.pattern.rectangular`, which
+  read `spacing1` / `spacing2` as the extent; the `extent1` and `extent2` design-file keys; the
+  Extent row of the Rectangular Pattern dialog; the `distance` parameter of `solid.pattern.path`.
+- **Don't use:** total length, span.
+- **For translators:** not an extrude's *extent type*; see *Words with more than one meaning*,
+  "Extent".
+
 ### pattern instance
 
 One copy that a pattern makes of its features, bodies or sketch entities.
@@ -474,6 +496,8 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 |---|---|---|---|
 | Construction | a sketch entity that isn't part of a profile | *construction entity* | sketch drawing commands, `ui.construction` |
 | | the browser folder of construction planes, axes and points | *construction plane, axis, point* | the Construction folder, `construct.*` |
+| Extent | how an extrude's end is set: a distance, an object or through all | extent type | the Extrude dialog's Extent Type row |
+| | the distance from a pattern's first instance to its last | *pattern extent* | the Rectangular Pattern dialog's Extent rows |
 | Instance | one copy a pattern makes | *pattern instance* | pattern commands |
 | | one placed copy of a component | *occurrence* | "Paste (Instance)" on `occurrence.copy` |
 | History | the undo and redo history | history | Undo, Redo |
