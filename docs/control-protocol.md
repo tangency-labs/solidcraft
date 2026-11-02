@@ -79,7 +79,10 @@ launch and writes it, as one line of hex, to a file only the user can read:
 | Windows | `%LOCALAPPDATA%\SolidCraft\control\PORT.token` |
 
 On Unix the folder is `0700` and the file `0600`; on Windows the file's inherited permissions are
-replaced by a single entry for the user. `SOLIDCRAFT_CONTROL_DIR` moves the folder. The file is
+replaced by a single entry for the user. `SOLIDCRAFT_CONTROL_DIR` moves the folder. If Windows
+doesn't finish restricting the file within five seconds, the default folder (private to the user)
+keeps it, but a custom folder gets no token file, and clients then need
+`SOLIDCRAFT_CONTROL_TOKEN`. The file is
 removed when the app exits, unless another launch has written its own token there since, and the
 next launch writes a new token. The token file's path is
 printed to stderr at start-up. Beside it, `<port>.pid` holds the app's process id (and, on Linux,
