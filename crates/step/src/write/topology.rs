@@ -279,7 +279,14 @@ pub fn surface(s: &BSurface) -> R<(Surface, Map)> {
             (bspline_surface(u_knots, v_knots, points, Some(weights))?, Map::IDENTITY)
         }
         BSurface::PlacedRevolution { profile, origin, axis, matrix, forward } => revolution(profile, *origin, *axis, matrix, *forward)?,
+        BSurface::BallPatch { .. } => return Err("a ball patch's label (its face is written as its NURBS form)".into()),
     })
+}
+
+/// Whether a face is written as its NURBS form, pcurves and all: a ball patch, which STEP has no
+/// entity for, is the B-spline surface it is parameterised on.
+fn as_form(face: &Face) -> bool {
+    face.nurbs.is_some() && matches!(face.surface, BSurface::BallPatch { .. })
 }
 
 /// A record pcurve in the STEP surface's parameters: its control points through `map` (a linear
@@ -455,6 +462,13 @@ impl BrepWriter<'_, '_, '_> {
             return Ok(s.clone());
         }
         let face = face_of(self.b, f)?;
+        if as_form(face) {
+            let s = (Arc::new(surface(face.parameters()).map_err(|m| format!("face {f}: {m}"))?.0), Map::IDENTITY);
+            if let Some(slot) = self.surfaces.get_mut(f as usize) {
+                *slot = Some(s.clone());
+            }
+            return Ok(s);
+        }
         let (s, map) = surface(&face.surface).map_err(|m| format!("face {f}: {m}"))?;
         // A face on its NURBS form is written as the analytic surface it is, with no pcurves
         // (STEP's are in the angle); only which way its normal points carries over.
@@ -511,7 +525,7 @@ impl BrepWriter<'_, '_, '_> {
         let mut associated = Vec::with_capacity(edge.uses.len());
         for u in &edge.uses {
             let face = face_of(b, u.face)?;
-            if face.nurbs.is_some() {
+            if face.nurbs.is_some() && !as_form(face) {
                 continue;
             }
             let Some(Loop::Edges { edges }) = face.loops.get(u.r#loop as usize) else {

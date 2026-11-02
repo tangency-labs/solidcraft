@@ -186,17 +186,19 @@ fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool, bare: &HashSet<(u32, 
         a.i(flat::FACE_TRIM_TYPE).push(0);
         // A face with a NURBS form: what it is (its analytic entry), then the NURBS it is
         // parameterised on, whose range and trims these are (FACE_NURBS_FORM). A revolution
-        // (SMLib has no class for one) is that form alone, a NURBS face.
-        let form_is_face = f.nurbs.is_some() && matches!(f.surface, b::Surface::PlacedRevolution { .. });
-        let spline = match &f.nurbs {
-            Some(n) if form_is_face => surface(&mut a, n, f.domain, analytic)?,
-            Some(n) => {
+        // (SMLib has no class for one) is that form alone, a NURBS face. A ball patch is its form
+        // too, as a NURBS face's block under its own kind, with its sphere as its definition.
+        let form_is_face = f.nurbs.is_some() && matches!(f.surface, b::Surface::PlacedRevolution { .. } | b::Surface::BallPatch { .. });
+        let spline = match (&f.nurbs, &f.surface) {
+            (Some(n), b::Surface::BallPatch { center, radius }) => ball_patch(&mut a, n, *center, *radius, f.domain)?,
+            (Some(n), _) if form_is_face => surface(&mut a, n, f.domain, analytic)?,
+            (Some(n), _) => {
                 surface(&mut a, &f.surface, f.domain, analytic)?;
                 nurbs_block(&mut a, n)?;
                 true
             }
             // SMLib's tube angle counts from the outer equator, the record's from its tube start.
-            None => match f.surface {
+            (None, _) => match f.surface {
                 b::Surface::Torus { tube_start, .. } => {
                     let [u, v] = f.domain;
                     surface(&mut a, &f.surface, [u, v.map(|t| t + tube_start)], analytic)?
@@ -337,6 +339,19 @@ fn nurbs_block(a: &mut Arrays, s: &b::Surface) -> R<()> {
     Ok(())
 }
 
+/// A ball patch's face: its net `n` as a NURBS face's block and range under the ball patch's kind,
+/// and its sphere as its definition (SMLib checks the net is on it). True: it carries trims.
+fn ball_patch(a: &mut Arrays, n: &b::Surface, center: [f64; 3], radius: f64, domain: [[f64; 2]; 2]) -> R<bool> {
+    let [[u0, u1], [v0, v1]] = domain;
+    a.i(flat::FACE_SURFACE_TYPE).push(i64::from(flat::SURFACE_BALL_PATCH));
+    nurbs_block(a, n)?;
+    a.r(flat::FACE_RANGE).extend([u0, v0, u1, v1]);
+    a.i(flat::FACE_DEFINITION_REAL_COUNT).push(4);
+    a.r3(flat::FACE_DEFINITION_REALS, center);
+    a.r(flat::FACE_DEFINITION_REALS).push(radius);
+    Ok(true)
+}
+
 /// The face's surface and range; true for a B-spline surface (which carries trims).
 fn surface(a: &mut Arrays, s: &b::Surface, domain: [[f64; 2]; 2], analytic_planes: bool) -> R<bool> {
     let [[u0, u1], [v0, v1]] = domain;
@@ -385,6 +400,7 @@ fn surface(a: &mut Arrays, s: &b::Surface, domain: [[f64; 2]; 2], analytic_plane
             return Ok(true);
         }
         b::Surface::PlacedRevolution { profile, origin, axis, matrix, forward } => revolution(a, profile, *origin, *axis, matrix, *forward, domain)?,
+        b::Surface::BallPatch { .. } => return Err(Unsupported::Invalid("a ball patch without its NURBS form")),
     }
     Ok(false)
 }

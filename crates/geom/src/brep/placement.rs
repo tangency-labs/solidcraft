@@ -96,6 +96,7 @@ impl Rigid {
                 Surface::Cone { frame: self.frame(frame), radius_at_origin: *radius_at_origin, half_angle: *half_angle }
             }
             Surface::Sphere { frame, radius } => Surface::Sphere { frame: self.frame(frame), radius: *radius },
+            Surface::BallPatch { center, radius } => Surface::BallPatch { center: self.point(*center), radius: *radius },
             Surface::Torus { frame, major_radius, minor_radius, tube_start } => {
                 Surface::Torus { frame: self.frame(frame), major_radius: *major_radius, minor_radius: *minor_radius, tube_start: *tube_start }
             }

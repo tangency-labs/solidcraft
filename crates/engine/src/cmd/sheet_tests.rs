@@ -5770,3 +5770,51 @@ fn an_unfolded_sheets_flat_face_is_named_after_its_base_at_every_size() {
         }
     }
 }
+
+/// A primitive cut passes over a sheet its exact box is clear of: that sheet comes back the very
+/// same body, and the sheet the cut meets gets the hole.
+#[test]
+fn a_primitive_cut_passes_over_a_sheet_clear_of_it_by_its_exact_box() {
+    let mut s = Session::default();
+    for (name, x) in [("Left", 0.0), ("Right", 100.2)] {
+        run(&mut s, "solid.box", json!({"corner": [x, 0, 0], "length": 100, "width": 60, "height": 2.5, "body_name": name}));
+        run(&mut s, "sheet.convert", json!({"body": name, "face": [x + 50.0, 30, 2.5]}));
+    }
+    let body = |s: &Session, name: &str| s.model.state().bodies.iter().find(|b| b.name == name).map(|b| b.body.clone()).unwrap();
+    let left = body(&s, "Left");
+    let right_volume = body_volume(&mut s, "Right");
+    // 0.2 mm from the Left sheet's end: within the display mesh's tolerance of it, clear of its exact box.
+    run(&mut s, "solid.cylinder", json!({"base": [102.9, 30, -1], "radius": 2.5, "height": 5, "operation": "cut"}));
+    assert!(body(&s, "Left").same(&left), "the sheet clear of the cut is passed over");
+    let holes = |s: &Session, name: &str| s.model.state().sheets.iter().find(|sh| sh.body == name).map(|sh| sh.holes.len());
+    assert_eq!(holes(&s, "Left"), Some(0));
+    assert_eq!(holes(&s, "Right"), Some(1));
+    assert!((right_volume - body_volume(&mut s, "Right") - PI * 6.25 * 2.5).abs() < 1e-3);
+}
+
+/// A cut that only grazes a bend's curved faces near the edge where the bend meets the base is
+/// checked against the bend and refused (the sheet is unchanged); one clear of the bend's exact
+/// box cuts the base.
+#[test]
+fn a_cut_grazing_a_bend_near_its_edge_is_refused_and_one_clear_of_its_exact_box_cuts() {
+    // `plate_with_flange`: the bend (R 2.5, T 2.5) runs from y = 0 to y = 5, where the base
+    // panel starts.
+    for (y0, grazes) in [(4.9, true), (5.1, false)] {
+        let mut s = Session::default();
+        plate_with_flange(&mut s);
+        let v0 = volume(&mut s);
+        rectangle_tool(&mut s, "Slot", [40.0, y0], [60.0, 15.0]);
+        let cut = json!({"sketch": "Slot", "through_all": true, "direction": "symmetric", "operation": "cut"});
+        if grazes {
+            let before = s.doc.to_json();
+            let e = s.execute("solid.extrude", &cut).unwrap_err().to_string();
+            assert!(e.contains("intersects a folded bend"), "{e}");
+            assert_eq!(s.doc.to_json(), before);
+            assert_eq!(volume(&mut s), v0);
+        } else {
+            run(&mut s, "solid.extrude", cut);
+            assert!((v0 - volume(&mut s) - 20.0 * (15.0 - y0) * 2.5).abs() < 1e-3, "{}", v0 - volume(&mut s));
+            assert_eq!(flat(&mut s)["cutouts"].as_array().map(Vec::len), Some(1));
+        }
+    }
+}

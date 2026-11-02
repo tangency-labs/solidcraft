@@ -55,6 +55,68 @@ mod native_tests {
         }
     }
 
+    /// A 20 mm cube with every edge rounded r 2: its eight corners are SMLib's ball patches
+    /// (`SmBallPatch`, flat kind 6). The record keeps each as a ball patch on the sphere of
+    /// radius 2 about the corner pulled in by 2 along each axis, its net the NURBS form, and
+    /// every point of the net on that sphere. Imported back, the patches are kind 6 again with
+    /// the same definitions, bit for bit, and the body keeps its closed-form volume.
+    #[test]
+    fn a_rounded_cubes_ball_patches_go_round_with_their_spheres() {
+        let (a, r) = (20.0, 2.0);
+        let h = a / 2.0;
+        let mids: Vec<[f64; 3]> =
+            [(0.0, 0.0), (a, 0.0), (0.0, a), (a, a)].iter().flat_map(|&(p, q)| [[h, p, q], [p, h, q], [p, q, h]]).collect();
+        let f = Brep::make_box([0.0; 3], [a; 3]).unwrap().fillet(&mids, 0.1, r).unwrap();
+        let record = f.to_native().unwrap();
+        record.validate().unwrap();
+        let patches: Vec<(&b::Face, [f64; 3], f64)> = record
+            .faces
+            .iter()
+            .filter_map(|face| match face.surface {
+                b::Surface::BallPatch { center, radius } => Some((face, center, radius)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(patches.len(), 8, "one ball patch per corner");
+        let mut centers: Vec<[f64; 3]> = patches.iter().map(|p| p.1).collect();
+        centers.sort_by(|p, q| p.partial_cmp(q).unwrap());
+        let inset = [r, a - r];
+        let want: Vec<[f64; 3]> = (0..8).map(|i| [inset[i >> 2], inset[(i >> 1) & 1], inset[i & 1]]).collect();
+        for (got, want) in centers.iter().zip(&want) {
+            assert!((0..3).all(|k| (got[k] - want[k]).abs() < 1e-9), "centre {got:?}, the corner's {want:?}");
+        }
+        for (face, c, radius) in &patches {
+            assert!((radius - r).abs() < 1e-12, "radius {radius}");
+            assert!(matches!(face.nurbs, Some(b::Surface::RationalSpline { .. })), "a ball patch's form is its rational net");
+            let eval = b::eval::SurfaceEval::new(face.parameters()).unwrap();
+            let [[u0, u1], [v0, v1]] = face.domain;
+            for (s, t) in [(0.25, 0.25), (0.5, 0.5), (0.75, 0.3), (0.1, 0.9)] {
+                let q = eval.point([u0 + s * (u1 - u0), v0 + t * (v1 - v0)]).unwrap();
+                let d = ((q.x - c[0]).powi(2) + (q.y - c[1]).powi(2) + (q.z - c[2]).powi(2)).sqrt();
+                assert!((d - r).abs() < 1e-12 * a, "a point of the patch {} off its sphere", d - r);
+            }
+        }
+        let back = Brep::from_record(&record, true).unwrap();
+        let check = back.check(CheckLevel::All).unwrap();
+        assert!(check.is_valid(), "{check}");
+        let arrays = back.arrays().unwrap();
+        let kinds = arrays.ints.get(&crate::flat::FACE_SURFACE_TYPE).cloned().unwrap_or_default();
+        assert_eq!(kinds.iter().filter(|k| **k == i64::from(crate::flat::SURFACE_BALL_PATCH)).count(), 8);
+        // The record numbers faces in canonical order, not SMLib's: the same definitions, each bit
+        // for bit, in another order.
+        let defs = |b: &Brep| {
+            let reals = b.arrays().unwrap().reals.get(&crate::flat::FACE_DEFINITION_REALS).cloned().unwrap_or_default();
+            let mut d: Vec<[u64; 4]> = reals.chunks(4).map(|c| [0, 1, 2, 3].map(|k| c[k].to_bits())).collect();
+            d.sort_unstable();
+            d
+        };
+        assert_eq!(defs(&back), defs(&f), "the definitions come back bit for bit");
+        let b = a - 2.0 * r;
+        let want = b.powi(3) + 6.0 * b * b * r + 3.0 * PI * r * r * b + 4.0 / 3.0 * PI * r.powi(3);
+        let got = back.mass_properties(MEASURE_ACCURACY).unwrap().volume;
+        assert!((got - want).abs() < 1e-6 * want, "volume {got} vs {want}");
+    }
+
     /// A tagged body's own history, renumbered with its export's order on both sides, is the
     /// identity in canonical order: the order says where each SMLib face and edge went.
     #[test]

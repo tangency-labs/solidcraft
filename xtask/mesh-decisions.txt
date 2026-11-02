@@ -28,10 +28,8 @@ crates/doc/src/eval.rs:tangent_face_chain grows a face pick across tangent edges
 crates/doc/src/eval.rs:through_all_distance sizes a Through All extent by the display mesh
 crates/doc/src/eval.rs:trim_to_body keeps the tool pieces touching the start by a mesh
 crates/doc/src/eval.rs:unrecorded_touches finds touching pieces by a mesh
-crates/doc/src/eval_more.rs:body_box skips sheet-metal booleans by a mesh's box
 crates/doc/src/eval_more.rs:body_under picks the body under a plastic feature's point by the display mesh
 crates/doc/src/eval_more.rs:face_outline finds the wall an outline runs along by mesh triangles
-crates/doc/src/eval_more.rs:mesh_box skips sheet-metal booleans by the display mesh's box
 crates/doc/src/eval_more.rs:on_sheet_material decides whether a point touches a sheet by the display mesh
 crates/doc/src/eval_more.rs:planar_normal_at finds the planar face through a point by a mesh
 crates/doc/src/eval_more.rs:plastic_eval places plastic features by a mesh
@@ -39,8 +37,6 @@ crates/doc/src/eval_more.rs:plate_recesses finds a plate's recesses by mesh tria
 crates/doc/src/eval_more.rs:rib_tool runs a rib to the body by the display mesh
 crates/doc/src/eval_more.rs:rib_tool_normal runs a rib to the body by the display mesh
 crates/doc/src/eval_more.rs:sheet_eval places sheet-metal features by a mesh
-crates/doc/src/eval_more.rs:sheet_primitive_cut skips sheets clear of a primitive cut by mesh boxes
-crates/doc/src/eval_more.rs:sheet_prism_cut skips bends clear of a cut's tools by mesh boxes
 crates/doc/src/history_names.rs:OperandNames::edge names an operand's edge by the display mesh
 crates/doc/src/hole_reference.rs:on_reference_face decides whether a point lies on a hole's reference face by the display mesh
 crates/doc/src/hole_reference.rs:reference_frame finds a hole's reference edges on the display mesh
