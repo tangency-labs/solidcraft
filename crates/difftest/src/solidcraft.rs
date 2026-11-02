@@ -33,6 +33,7 @@ use solidcore::geom::object::ObjectRef;
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::kernel::Kernel;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::offset::offset_faces::OffsetFacesExecutive;
 use solidcore::primitive::api_curves as curves;
 use solidcore::primitive::api_primitives as primitives;
 use solidcore::primitive::primitive_creation::SweepOptions;
@@ -48,7 +49,7 @@ use solidcore::topology::brep::p3;
 use solidcore::topology::proto_topology::p1::api_transform::{
     api_rotate, api_translate, TransformObject,
 };
-use solidcore::topology::Brep;
+use solidcore::topology::{Brep, FaceId};
 use solidcore::SolidError;
 
 use crate::ssi::glob_match;
@@ -329,14 +330,14 @@ pub enum Step {
     /// `SmApiCreateLinearSweep` of the loops of `body`'s face through the point `face`
     /// (their edges' curves, trimmed to the edges), swept `distance` along `direction`
     /// and capped at both ends: the prism of that face, for a cut by a face's own
-    /// boundary (tangency-labs/solidcore#968). The face is the one whose surface holds
-    /// the point (within `1e-6 (1 + |point|)`) and which classifies it inside.
+    /// boundary (tangency-labs/solidcore#968). The face is the one through the point
+    /// ([`face_through`]).
     SweepFace {
         /// Body written.
         id: String,
         /// Body whose face is swept (left as it is).
         body: String,
-        /// A point inside the face.
+        /// A point inside the face (or on its own seam).
         face: P3,
         /// Sweep direction (need not be unit length).
         direction: P3,
@@ -1177,17 +1178,18 @@ fn fillet_edge_at_point(
     selected.ok_or_else(|| Run::Error("fillet edge point matches no eligible edge".into()))
 }
 
-/// The curves of the loops of `body`'s face through `point`, each its edge's curve
-/// trimmed to the edge (a copy), in loop order. The face is the one whose surface holds
-/// the point within `1e-6 (1 + |point|)` and which classifies its parameter point
-/// inside (`SmFace::PointClassify`); exactly one must.
-fn face_boundary_curves(k: &Kernel, body: &mut Brep, point: Point3) -> Result<Vec<Curve>, Run> {
+/// `body`'s face through `point`: the one whose surface holds the point within
+/// `1e-6 (1 + |point|)` and which classifies its parameter point inside
+/// (`SmFace::PointClassify`), or on an edge of its boundary that borders no other face
+/// (`SmEdge::GetFaces` lists it alone: its own seam, or a sheet's free edge); exactly one
+/// must. A point on an edge between two faces or on a vertex picks none.
+fn face_through(k: &Kernel, body: &mut Brep, point: Point3) -> Result<FaceId, Run> {
     use solidcore::intersect::point_class::{PointClassType, PointClassification};
-    use solidcore::nurbs::b_spline_curve_n_lib::TrimMode;
     use solidcore::query::face::p2::{point_classify, PointClassifyOptions};
     use solidcore::surface::surface::p4::NoObject;
     use solidcore::surface::surface::p5::DropPointOptions;
-    use solidcore::topology::{edge, edgeuse, face, loopuse};
+    use solidcore::topology::edge;
+    use solidcore::EntityRef;
 
     if !point.x.is_finite() || !point.y.is_finite() || !point.z.is_finite() {
         return Err(Run::Error("face point is not finite".into()));
@@ -1218,14 +1220,30 @@ fn face_boundary_curves(k: &Kernel, body: &mut Brep, point: Point3) -> Result<Ve
             PointClassifyOptions::default(),
         )
         .map_err(|e| solid(&e))?;
-        if pc.point_class() != PointClassType::Face {
+        let on_face = match (pc.point_class(), pc.edge_object()) {
+            (PointClassType::Face, _) => true,
+            (PointClassType::Edge, Some(EntityRef::Edge(e))) => {
+                edge::faces(body, e, None).map_err(|e| solid(&e))? == [f]
+            }
+            _ => false,
+        };
+        if !on_face {
             continue;
         }
         if selected.replace(f).is_some() {
             return Err(Run::Error("face point matches multiple faces".into()));
         }
     }
-    let f = selected.ok_or_else(|| Run::Error("face point matches no face".into()))?;
+    selected.ok_or_else(|| Run::Error("face point matches no face".into()))
+}
+
+/// The curves of the loops of `body`'s face through `point` ([`face_through`]), each its
+/// edge's curve trimmed to the edge (a copy), in loop order.
+fn face_boundary_curves(k: &Kernel, body: &mut Brep, point: Point3) -> Result<Vec<Curve>, Run> {
+    use solidcore::nurbs::b_spline_curve_n_lib::TrimMode;
+    use solidcore::topology::{edge, edgeuse, face, loopuse};
+
+    let f = face_through(k, body, point)?;
     let mut out = Vec::new();
     for l in face::p2::loops(body, f, false, None).map_err(|e| solid(&e))? {
         for eu in loopuse::loop_edgeuses(body, l).map_err(|e| solid(&e))? {
@@ -1586,8 +1604,6 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
             distance,
             ..
         } => fillet_picked_edges(k, bodies, body, edges, *distance, FILLET_LINEAR)?,
-        // SM_API offsets or shells whole bodies only (SmApiOffsetBrepFull,
-        // SmApiShellBrepFull); nothing offsets selected faces.
         Step::SweepFace {
             body,
             face,
@@ -1602,11 +1618,34 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
             let dir = dir / dir.length();
             sweeps::create_linear_sweep(k, &refs, dir, *distance, true).map_err(|e| solid(&e))?
         }
-        Step::OffsetFaces { .. } => {
-            return Err(Run::Deferred(Deferral {
-                blocked_by: "no SM_API entry point".into(),
-                symbol: "offset of selected faces (SmApiOffsetBrepFull moves every face)".into(),
-            }))
+        // The SolidCraft fork's `SmOffsetFacesExecutive::OffsetFaces` (WR-615; SM_API only
+        // offsets or shells whole bodies): each face through a point moved `distance` along
+        // its outward normal, the tangent blends on it following. A refusal carries the
+        // executive's reason.
+        Step::OffsetFaces {
+            body,
+            faces,
+            distance,
+            ..
+        } => {
+            // On a copy, as the other in-place edits: the executive leaves a B-rep it
+            // fails on unspecified.
+            let source = take(bodies, body)?;
+            let mut moved = copy(k, &source, bodies.len() as u64 + 1)?;
+            let picked = faces
+                .iter()
+                .map(|p| face_through(k, &mut moved, p3(*p)))
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut executive = OffsetFacesExecutive::new();
+            executive
+                .offset_faces(k, &mut moved, &picked, *distance)
+                .map_err(|e| match solid(&e) {
+                    Run::Error(m) if !executive.reason().is_empty() => {
+                        Run::Error(format!("{m}: {}", executive.reason()))
+                    }
+                    r => r,
+                })?;
+            moved
         }
         Step::SheetCorner { .. } => {
             return Err(Run::Deferred(Deferral {
@@ -2802,6 +2841,30 @@ mod tests {
         assert_eq!(verdict(&e, &deferred).0, "DEFERRED");
     }
 
+    /// SolidCraft #3468: Offset Face beside a round moves the round with the face, through
+    /// the fork's `SmOffsetFacesExecutive`. No case defers; the boss's wall moved out and
+    /// in reaches its closed-form volume. (The two box cases reach the executive and stop
+    /// in its blend removal: their verdict is the kernel's, not pinned here.)
+    #[test]
+    fn offset_faces_cases_run_on_the_fork_executive() {
+        let cases = load(&cases_dir(&crate::case::repo_root()), Some("3468-*")).unwrap();
+        assert_eq!(cases.len(), 4);
+        for loaded in cases {
+            let run = run_rust(&loaded.case);
+            assert!(!matches!(run, Run::Deferred(_)), "{}: {run:?}", loaded.id);
+            // every face point picks its face: the executive is reached
+            assert!(
+                !matches!(run, Run::Error(ref m) if m.contains("face point")),
+                "{}: {run:?}",
+                loaded.id
+            );
+            if loaded.id.contains("/boss_wall_") {
+                let (v, checks) = verdict(&loaded.case.expect, &run);
+                assert_eq!(v, "PASS", "{}: {run:?} {checks:?}", loaded.id);
+            }
+        }
+    }
+
     #[test]
     fn sheet_corner_preserves_the_original_matrix_and_defers_explicitly() {
         let cases = load(&cases_dir(&crate::case::repo_root()), Some("3170-*")).unwrap();
@@ -2942,8 +3005,9 @@ mod tests {
         let (v, c) = verdict(&case.expect, &run);
         assert_eq!(v, "PASS", "{run:?} {c:?}");
 
-        // a point on no face, and one on the box's corner (three faces' boundary)
-        for point in [[5.0, 5.0, 11.0], [10.0, 10.0, 10.0]] {
+        // a point on no face, one on the box's corner (three faces' boundary) and one on
+        // the edge between its top and a side
+        for point in [[5.0, 5.0, 11.0], [10.0, 10.0, 10.0], [5.0, 10.0, 10.0]] {
             let mut off = case.clone();
             if let Step::SweepFace { face, .. } = &mut off.steps[1] {
                 *face = point;

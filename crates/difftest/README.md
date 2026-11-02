@@ -786,10 +786,12 @@ nice -n 10 cargo run -p difftest -- --solidcraft-cases '3526-*'        # ids (<f
   the rolling ball of the constant-radius solver, the leg on each face for a right-angle edge
   between planes (`distance * cot(α/2)` for an interior angle `α`, varying along curved
   faces); one distance for all edges; `SmApiChamferFillet` is not used, it chamfers every
-  edge of a body), `offset_faces`
-  (faces by a point on each), `sweep_face` (the prism of a body's face: the face through
-  the point `face`, the one whose surface holds it and which classifies it inside, has its
-  loops' edge curves, trimmed to the edges, swept `distance` along `direction` with
+  edge of a body), `offset_faces` (faces by a point on each, moved by the SolidCraft fork's
+  `SmOffsetFacesExecutive`, `solidcore::offset::offset_faces`, the tangent blends on them
+  following), `sweep_face` (the prism of a body's face: the face through the point `face`,
+  the one whose surface holds it and which classifies it inside or on an edge bordering
+  no other face, such as its own seam, has its loops' edge curves, trimmed to the edges,
+  swept `distance` along `direction` with
   `SmApiCreateLinearSweep` and capped; for a cut by a face's own boundary, #968),
   `sheet_corner` (the deferred sheet-flange recipe below). Each
   writes the body `id`; the last writes `result`.
@@ -824,9 +826,9 @@ nice -n 10 cargo run -p difftest -- --solidcraft-cases '3526-*'        # ids (<f
   yet: `cylinder_faces_max` until solidcore has a cylinder surface kind), `ERROR` (a step
   returned an error other than `Unported`), `DEFERRED`. A step that reaches unported code
   defers the case on the unit in its `SolidError::Unported`; `fillet` has no Rust
-  `SmApiFilletEdges` yet and defers on `blend.fillet_executive_p1`; `offset_faces` defers
-  on `no SM_API entry point`, since `SM_API` only offsets or shells whole bodies
-  (`SmApiOffsetBrepFull`, `SmApiShellBrepFull`).
+  `SmApiFilletEdges` yet and defers on `blend.fillet_executive_p1`; `sheet_corner` defers
+  on `no SM_API entry point` (sheet construction, corner joining and unfolding have no
+  adapter).
 * **Engines.** Rust only for now. A C++ engine (a shim running the same steps through
   `SM_API`) would show which of these bugs upstream SMLib has.
 * **Output.** One line per case, then

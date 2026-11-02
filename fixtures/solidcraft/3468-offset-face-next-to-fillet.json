@@ -2,7 +2,7 @@
  "issue": "https://github.com/tangency-labs/solidcraft/issues/3468",
  "pr": "https://github.com/tangency-labs/solidcraft/pull/3898",
  "test": "crates/engine/src/tests.rs: offset_face_next_to_a_fillet_moves_the_fillet",
- "summary": "Offset Face on a face next to a fillet was refused: the round must move with the face, keep its radius and stay tangent. Geometry is the PR test's; it checks the volume change, here turned into the absolute volume, with its tolerance (1e-3 of the change for the boss, 1e-6 for the boxes). SM_API has no entry point that offsets selected faces (SmApiOffsetBrepFull and SmApiShellBrepFull move every face), so offset_faces is deferred on that missing entry point.",
+ "summary": "Offset Face on a face next to a fillet was refused: the round must move with the face, keep its radius and stay tangent. Geometry is the PR test's; it checks the volume change, here turned into the absolute volume, with its tolerance (1e-3 of the change for the boss, 1e-6 for the boxes). SM_API has no entry point that offsets selected faces (SmApiOffsetBrepFull and SmApiShellBrepFull move every face), so offset_faces runs the SolidCraft fork's SmOffsetFacesExecutive (solidcore::offset::offset_faces, WR-615).",
  "cases": [
   {
    "name": "boss_wall_out_1",
