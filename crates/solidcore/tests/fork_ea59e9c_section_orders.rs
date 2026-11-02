@@ -9,11 +9,10 @@
 //! (degree-7 fits through seven points each side): the order at 1e-9, 1e-7 / mm, 1e-5 / mm^2
 //! and 1e-3 / mm^3, and not the next at Continuity Analysis's tolerances.
 //!
-//! The six order-2 cases aren't built here until the fork's 11ea2d9 is ported, which is also
-//! what the fork's mark says: "status -1105: the order-2 section is not built". There is no
-//! kernel call to run them on. What can be checked now is what their grading will rest on:
-//! the section worked out in `gn_section` gives the areas behind the fork's volumes. The
-//! port of 11ea2d9 adds these cases to [`running_cases`] with the jets already here.
+//! The six order-2 cases run on the port of the fork's 11ea2d9 (#2260,
+//! `fillet_gn_section_generator`), under the same grading: the surface against the section
+//! worked out apart from the kernel in `gn_section`, the volume, the check at level 2 and the
+//! order of contact along each seam, which the G^n tests in `wr685_gn_section.rs` leave out.
 //!
 //! How this test drives the kernel differs from the capi: edges are picked as the nearest
 //! within 0.1 of a point; the chord is `FilletSession` with the linear section and bevelled
@@ -222,6 +221,8 @@ enum Blend {
     Round(f64),
     /// The radius from the first figure at x = 0 to the second at x = 20.
     LinearRound(f64, f64),
+    /// The G^n section: order, thumbweight, radius.
+    Gn(u32, f64, f64),
 }
 
 /// A case: its body, edge, blend and what the blend must be.
@@ -238,6 +239,9 @@ struct Case {
     faces: Vec<Quadric>,
     rails: [usize; 2],
     order: usize,
+    /// The highest order the seams may reach, where it is above `order`: a fitted surface's
+    /// seam may pass the next order's tolerance without its section having that order.
+    order_max: Option<usize>,
     fitted: bool,
     size: f64,
 }
@@ -334,6 +338,7 @@ fn running_cases() -> Vec<Case> {
         faces: box_planes(40.0, 30.0, 20.0),
         rails: [5, 3],
         order,
+        order_max: None,
         fitted: false,
         size: 3.0,
     };
@@ -349,6 +354,7 @@ fn running_cases() -> Vec<Case> {
         faces: boss_faces(),
         rails: [5, 6],
         order,
+        order_max: None,
         fitted: false,
         size: 2.0,
     };
@@ -364,6 +370,7 @@ fn running_cases() -> Vec<Case> {
         faces: pipe_faces(),
         rails: [5, 6],
         order,
+        order_max: None,
         fitted: false,
         size: if order == 0 { 1.0 } else { 2.0 },
     };
@@ -449,6 +456,7 @@ fn running_cases() -> Vec<Case> {
             faces: box_planes(20.0, 30.0, 20.0),
             rails: [5, 3],
             order: 1,
+            order_max: None,
             fitted: true,
             size: 1.0,
         },
@@ -570,6 +578,7 @@ fn grade(case: &Case, k: &mut Kernel) -> Graded {
         Blend::Chord(d) => chord(k, &mut b, e, d),
         Blend::Round(r) => fillet_edges(k, &mut b, &[e], r, 1, 1, 1.0),
         Blend::LinearRound(a, c) => linear_round(k, &mut b, e, a, c),
+        Blend::Gn(n, w, r) => fillet_edges(k, &mut b, &[e], r, 2, n, w),
     };
     if let Err(err) = made {
         g.failed = Some(format!("{err:?}"));
@@ -673,7 +682,7 @@ fn grade(case: &Case, k: &mut Kernel) -> Graded {
             let reached = seam_order(&most, if case.fitted { &loose } else { &tight });
             let at_most = seam_order(&least, &loose);
             g.seams.push((reached, at_most));
-            if reached < case.order || at_most > case.order {
+            if reached < case.order || at_most > case.order_max.unwrap_or(case.order) {
                 g.problems.push(format!(
                     "seam G{reached}, at most G{at_most}, want G{}",
                     case.order
@@ -727,7 +736,8 @@ fn assert_passes(case: &Case, k: &mut Kernel) {
     assert!(
         g.seams
             .iter()
-            .all(|&(reached, at_most)| reached == case.order && at_most == case.order),
+            .all(|&(reached, at_most)| reached >= case.order
+                && at_most <= case.order_max.unwrap_or(case.order)),
         "{}: {g:?}",
         case.name
     );
@@ -753,14 +763,12 @@ fn with_solidcraft_s_fixes_the_chords_and_circles_have_the_fork_s_marks() {
     }
 }
 
-/// The mark is the fork's at ea59e9c, the great circles. #2262's flag brings the fork's later
-/// touch circles, which is that port's to test, so it stays off here wherever it exists.
+/// The mark is the fork's at ea59e9c, the great circles. `fillet_gn_section_generator` brings
+/// the fork's later touch circles, tested with that port, so it stays off here.
 #[test]
 fn with_solidcraft_s_fixes_the_variable_round_has_the_fork_s_mark() {
     let mut k = solidcraft_kernel();
-    if let Some(gn) = k.fixes.flag_mut("fillet_gn_section_generator") {
-        *gn = false;
-    }
+    k.fixes.fillet_gn_section_generator = false;
     assert_variable_mark(&mut k);
 }
 
@@ -914,4 +922,135 @@ fn the_sections_give_the_fork_s_volumes_on_the_pipe() {
         1e-5,
         "order 2, w = 1/2",
     );
+}
+
+// ---- the order-2 cases (the port of 11ea2d9, #2260) ----
+
+const W_STAR: f64 = 0.034_293_402_266_607_321;
+
+fn box_g2(name: &'static str, w: f64, cut: f64) -> Case {
+    Case {
+        name,
+        build: box_40_30_20,
+        pick: [20.0, 30.0, 20.0],
+        blend: Blend::Gn(2, w, 3.0),
+        volume: 24000.0 - 40.0 * 9.0 * cut,
+        volume_rel: 1e-7,
+        off: Box::new(move |x| {
+            distance_to_curve(
+                &|t| gn_section(2, w, &BOX_TOP_JETS, &BOX_BACK_JETS, t),
+                [x.y, x.z],
+            )
+        }),
+        off_tol: Some(1e-9),
+        faces: box_planes(40.0, 30.0, 20.0),
+        rails: [5, 3],
+        order: 3,
+        fitted: false,
+        order_max: None,
+        size: 3.0,
+    }
+}
+
+fn pipe_g2(name: &'static str, w: f64, volume: f64) -> Case {
+    let (plate, pipe) = pipe_jets(2.0);
+    Case {
+        name,
+        build: pipe_on_plate,
+        pick: [30.0, 28.0, 10.0],
+        blend: Blend::Gn(2, w, 2.0),
+        volume,
+        volume_rel: 1e-7,
+        off: Box::new(move |x| {
+            distance_to_curve(&|t| gn_section(2, w, &plate, &pipe, t), [x.y, x.z])
+        }),
+        off_tol: Some(1e-9),
+        faces: pipe_faces(),
+        rails: [5, 6],
+        order: 2,
+        fitted: false,
+        order_max: None,
+        size: 2.0,
+    }
+}
+
+fn boss_g2() -> Case {
+    Case {
+        name: "boss_root_g2",
+        build: boss_on_plate,
+        pick: [30.0 + 4.0 * 2f64.sqrt(), 20.0 + 4.0 * 2f64.sqrt(), 10.0],
+        blend: Blend::Gn(2, 0.0, 2.0),
+        volume: 26043.0880831714,
+        volume_rel: 1e-7,
+        off: Box::new(|x| {
+            distance_to_curve(
+                &|t| gn_section(2, 0.0, &PLATE_JETS, &WALL_JETS, t),
+                rho_z(x),
+            )
+        }),
+        off_tol: Some(4e-6),
+        faces: boss_faces(),
+        rails: [5, 6],
+        order: 2,
+        fitted: true,
+        order_max: Some(3),
+        size: 2.0,
+    }
+}
+
+/// The G^n section's flag and the one its plane rails need, nothing else.
+fn gn_kernel() -> Kernel {
+    let mut k = Kernel::default();
+    k.fixes.fillet_gn_section_generator = true;
+    k.fixes.fillet_surface_plane_curve_on_plane_equation = true;
+    k
+}
+
+/// Each order-2 case on the G^n section's own flags and with SolidCraft's fixes.
+fn assert_order_2(case: &Case) {
+    assert_passes(case, &mut gn_kernel());
+    assert_passes(case, &mut solidcraft_kernel());
+}
+
+#[test]
+fn the_box_edge_at_order_2_is_g3_with_its_planes() {
+    assert_order_2(&box_g2("box_edge_g2", 0.0, 0.154_192_655_384_275));
+}
+
+#[test]
+fn the_box_edge_at_the_equal_area_thumbweight_is_g3_with_its_planes() {
+    assert_order_2(&box_g2(
+        "box_edge_g2_thumbweight_w_star",
+        W_STAR,
+        113.0 / 756.0,
+    ));
+}
+
+#[test]
+fn the_box_edge_at_thumbweight_one_half_is_g3_with_its_planes() {
+    assert_order_2(&box_g2(
+        "box_edge_g2_thumbweight_half",
+        0.5,
+        0.074_437_252_208_692_5,
+    ));
+}
+
+#[test]
+fn the_pipe_root_at_order_2_is_g2_with_its_faces() {
+    assert_order_2(&pipe_g2("pipe_on_plate_g2", 0.0, 40258.5435962825));
+}
+
+#[test]
+fn the_pipe_root_at_thumbweight_one_half_is_g2_with_its_faces() {
+    assert_order_2(&pipe_g2(
+        "pipe_on_plate_g2_thumbweight_half",
+        0.5,
+        40216.5022652017,
+    ));
+}
+
+#[test]
+#[ignore = "slow: 4 min per kernel in the difftest profile, a 227-span certificate"]
+fn the_boss_root_at_order_2_is_at_least_g2_with_its_faces() {
+    assert_order_2(&boss_g2());
 }
