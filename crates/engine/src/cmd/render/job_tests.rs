@@ -102,7 +102,7 @@ fn saved_gpu_job_routes_before_dispatch_and_reaches_preflight_and_start_without_
     let camera = solidcraft_render::Camera { fov: 0.8, ..Default::default() };
     s.execute("render.settings.set", &json!({"name":"GPU","set":{
         "width":4,"height":4,"camera":camera,"exposure_ev":1.75,"job":{"method":"gpu_path","transparent_background":true,"options":{
-            "samples":7,"max_depth":3,"seed":456,"denoise":true,"tone_map":"aces_fitted",
+            "samples":7,"max_depth":3,"seed":456,"denoise":true,"clamp_indirect":8,"tone_map":"aces_fitted",
             "lens":{"aperture_radius_mm":0.5,"focus_distance_mm":20},
             "lighting":{"environment":[0.1,0.3,0.6],"sun":{"direction":[1,-1,-1],"angular_radius_rad":0.05,"radiance":[2,3,4]},"area_lights":[]},
             "environment":{"kind":"sky","rotation_rad":0.75,"intensity":0.5,"gradient":{"zenith":[0.3,0.2,0.1],"horizon":[0.8,0.5,0.3],"ground":[0.1,0.1,0.1]}}
@@ -129,6 +129,9 @@ fn saved_gpu_job_routes_before_dispatch_and_reaches_preflight_and_start_without_
     assert_eq!(checked["options"]["samples"], 7);
     assert_eq!(checked["options"]["lighting"]["environment"], json!([0.1, 0.3, 0.6]));
     assert_eq!(checked["options"]["denoise"], true);
+    assert_eq!(checked["options"]["clamp_indirect"], 8.0);
+    assert_eq!(checked["indirect_clamp"]["limit"], 8.0);
+    assert_eq!(checked["indirect_clamp"]["biased"], true);
     assert_eq!(checked["environment"]["rotation_rad"], 0.75);
     assert_eq!(gpu.admitted_bytes(), 0);
     let started = s.execute("render.start", &named).unwrap();
@@ -374,6 +377,22 @@ fn additional_executor_routes_by_capability_and_survives_document_adoption() {
     studio["progressive"] = json!(false);
     assert!(session.execute("render.preflight", &studio).unwrap_err().to_string().contains("require progressive"));
     studio["progressive"] = json!(true);
+    // The indirect clamp belongs to gpu-path: another progressive executor, an invalid limit
+    // and a request without progressive rendering are each refused before any work.
+    let mut clamped = request.clone();
+    clamped["clamp_indirect"] = json!(8);
+    let error = session.execute("render.preflight", &clamped).unwrap_err().to_string();
+    assert!(error.contains("clamp_indirect requires the native gpu-path executor"), "{error}");
+    clamped["clamp_indirect"] = json!(0);
+    let error = session.execute("render.preflight", &clamped).unwrap_err().to_string();
+    assert!(error.contains("clamp_indirect must be a finite radiance"), "{error}");
+    clamped["clamp_indirect"] = json!(8);
+    clamped["progressive"] = json!(false);
+    assert!(session.execute("render.preflight", &clamped).unwrap_err().to_string().contains("require progressive"));
+    clamped["progressive"] = json!(true);
+    clamped["clamp_indirect"] = Value::Null;
+    assert_eq!(session.execute("render.preflight", &clamped).unwrap(), preflight, "an explicit null clamp is off");
+    assert_eq!(additional.admitted_bytes(), 0);
     studio["lighting"]["area_lights"][0]["u"] = json!([0, 0, 0]);
     assert!(session.execute("render.preflight", &studio).is_err());
     let started = session.execute("render.start", &request).unwrap();

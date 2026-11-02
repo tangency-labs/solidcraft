@@ -14,6 +14,7 @@ struct Start {
     studio_weights: Option<[f64; 3]>,
     progressive: bool,
     denoise: bool,
+    clamp_indirect: Option<f64>,
     samples: Option<u32>,
     max_depth: Option<u32>,
     seed: Option<u32>,
@@ -72,6 +73,7 @@ struct ProgressiveStart {
     tone_map: Option<solidcraft_render::job::ToneMap>,
     environment: Option<super::environment::Input>,
     denoise: bool,
+    clamp_indirect: Option<f64>,
 }
 
 struct Prepared {
@@ -193,7 +195,7 @@ fn normalize_saved_job(s: &Session, params: &Value, command: &str) -> Result<Opt
             "transparent_background":transparent_background,
             "samples":options.samples,"max_depth":options.max_depth,"seed":options.seed,
             "lens":options.lens,"lighting":options.lighting,"tone_map":options.tone_map,
-            "denoise":options.denoise,"environment":options.environment,
+            "denoise":options.denoise,"clamp_indirect":options.clamp_indirect,"environment":options.environment,
             "finishing":options.finishing,"backdrop":options.backdrop,"linear_exr":options.linear_exr,
             "adaptive":options.adaptive,"transmission_samples":options.transmission_samples,"volume":options.volume,"nested_media":options.nested_media,"aging":options.aging
             })
@@ -235,10 +237,11 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<Prepared> {
         || params.get("environment").is_some_and(|e| e.get("kind").is_some())
         || ["lens", "lighting", "tone_map"].iter().any(|key| params.get(*key).is_some())
         || params.get("denoise").is_some_and(|value| value != &json!(false))
+        || params.get("clamp_indirect").is_some_and(|value| !value.is_null())
     {
         return Err(bad(
             command,
-            "runtime GPU transmission, texture, lens, environment, lighting, tone-map and denoise controls require progressive rendering",
+            "runtime GPU transmission, texture, lens, environment, lighting, tone-map, denoise and clamp_indirect controls require progressive rendering",
         ));
     }
     let mut input: Start = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
@@ -251,6 +254,9 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<Prepared> {
     }
     if input.denoise {
         return Err(bad(command, "denoise requires GPU progressive rendering"));
+    }
+    if input.clamp_indirect.is_some() {
+        return Err(bad(command, "clamp_indirect requires GPU progressive rendering"));
     }
     if input.samples.is_some() || input.max_depth.is_some() || input.seed.is_some() {
         return Err(bad(command, "sampling controls require progressive rendering"));
@@ -484,11 +490,12 @@ fn prepare_progressive(
             || input.lighting.is_some()
             || input.tone_map.is_some()
             || input.environment.is_some()
-            || input.denoise)
+            || input.denoise
+            || input.clamp_indirect.is_some())
     {
         return Err(bad(
             command,
-            "runtime transmission, clear-coat, texture, lens, environment, lighting, tone-map and denoise controls require progressive rendering",
+            "runtime transmission, clear-coat, texture, lens, environment, lighting, tone-map, denoise and clamp_indirect controls require progressive rendering",
         ));
     }
     if let Some(bindings) = saved_surfaces.filter(|bindings| !bindings.is_empty()) {
@@ -541,6 +548,7 @@ fn prepare_progressive(
     options.lighting = input.lighting;
     options.tone_map = input.tone_map.unwrap_or_default();
     options.denoise = input.denoise;
+    options.clamp_indirect = input.clamp_indirect;
     options.finishing = input.finishing;
     options.backdrop = input.backdrop;
     options.linear_exr = input.linear_exr;
@@ -610,6 +618,9 @@ fn prepare_progressive(
     if options.denoise && resolved.executor.as_str() != "gpu-path" {
         return Err(bad(command, "denoise requires the native gpu-path executor"));
     }
+    if options.clamp_indirect.is_some() && resolved.executor.as_str() != "gpu-path" {
+        return Err(bad(command, "clamp_indirect requires the native gpu-path executor"));
+    }
     let host = s.render_jobs.host_for(&resolved.executor).ok_or_else(|| bad(command, "resolved executor is not installed as an image job host"))?;
     if !host.is_available() {
         return Err(bad(command, "image host is unavailable"));
@@ -642,6 +653,12 @@ fn prepare_progressive(
             "bypass":"glass, smooth metal/coat, emitter, background and partial coverage first hits",
             "limitation":"first-hit guides do not reconstruct reflection/refraction or depth-of-field correspondences",
             "raw_linear_accumulator_preserved":true, "output_stage":"linear_before_tone_map"
+        });
+    }
+    if let Some(limit) = options.clamp_indirect {
+        reply["indirect_clamp"] = json!({
+            "limit":limit, "from_bounce":1, "keeps_hue":true, "biased":true,
+            "limitation":"dims real caustics and glints; the raw linear EXR master is clamped too"
         });
     }
     Ok(Prepared { replace: input.replace, scene, request, reply, executor: resolved.executor, options, environment: None })

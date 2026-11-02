@@ -108,6 +108,7 @@ fn draft(app: &SolveApp) -> Result<RenderSetup, String> {
                     linear_exr: studio.linear_exr,
                     tone_map: studio.tone_map,
                     denoise: studio.denoise,
+                    clamp_indirect: studio.clamp_indirect,
                     lens: studio.lens_enabled.then_some(studio.lens),
                     lighting: if studio.lighting_enabled {
                         Some(StudioLighting {
@@ -200,6 +201,7 @@ pub(super) fn load(app: &mut SolveApp) {
             view.studio.linear_exr = options.linear_exr;
             view.studio.tone_map = options.tone_map;
             view.studio.denoise = options.denoise;
+            view.studio.clamp_indirect = options.clamp_indirect;
             if let Some(lens) = options.lens {
                 view.studio.lens_enabled = true;
                 view.studio.lens = lens;

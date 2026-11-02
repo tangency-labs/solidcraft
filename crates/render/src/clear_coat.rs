@@ -63,6 +63,17 @@ impl ClearCoat {
     }
 }
 
+/// Probabilities of choosing the diffuse, base specular and coat lobes for a continuation
+/// sample; they sum to one. The coat takes half its weight. Of the rest, the diffuse lobe
+/// takes 0.5 × (1 − metallic): an even split for a dielectric, nothing for a pure metal, whose
+/// diffuse response is zero, so it spends every base sample on its specular lobe. The GPU
+/// path tracer samples with these and [`surface_pdf`] weights its lobes by them.
+pub fn lobe_probabilities(surface: OpaqueSurface) -> [f64; 3] {
+    let coat = surface.clear_coat().map_or(0.0, |coat| coat.weight() * 0.5);
+    let diffuse = 0.5 * (1.0 - surface.metallic());
+    [(1.0 - coat) * diffuse, (1.0 - coat) * (1.0 - diffuse), coat]
+}
+
 /// Conditional opaque-lobe PDF, including the coat and base mixture. Rejected
 /// below-surface microfacet samples retain their mass; never renormalize them.
 pub fn surface_pdf(surface: OpaqueSurface, normal: Vec3, view: Vec3, light: Vec3) -> Result<f64, SurfaceError> {
@@ -81,11 +92,9 @@ pub fn surface_pdf(surface: OpaqueSurface, normal: Vec3, view: Vec3, light: Vec3
         let d = (1.0 - nh * nh) + nh * nh * a2;
         a2 / (PI * d * d) * nh / (4.0 * vh)
     };
-    let base = 0.5 * nl / PI + 0.5 * ggx(surface.roughness());
-    Ok(surface.clear_coat().map_or(base, |coat| {
-        let p = coat.weight() * 0.5;
-        (1.0 - p) * base + p * ggx(coat.roughness())
-    }))
+    let [diffuse, specular, coat] = lobe_probabilities(surface);
+    let base = diffuse * nl / PI + specular * ggx(surface.roughness());
+    Ok(surface.clear_coat().map_or(base, |layer| base + coat * ggx(layer.roughness())))
 }
 
 #[cfg(test)]
@@ -106,6 +115,93 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn diffuse_lobe_probability_follows_metallic() {
+        let surface = |metallic: f64, weight: f64| {
+            OpaqueSurface::new(Vec3::new(0.8, 0.5, 0.2), metallic, 0.5, 1.5).unwrap().with_clear_coat(ClearCoat::new(weight, 0.3, 1.5).unwrap())
+        };
+        // Metallic 0 keeps the even split; a pure metal never picks the diffuse lobe.
+        assert_eq!(lobe_probabilities(surface(0.0, 0.0)), [0.5, 0.5, 0.0]);
+        assert_eq!(lobe_probabilities(surface(0.5, 0.0)), [0.25, 0.75, 0.0]);
+        assert_eq!(lobe_probabilities(surface(1.0, 0.0)), [0.0, 1.0, 0.0]);
+        assert_eq!(lobe_probabilities(surface(0.0, 1.0)), [0.25, 0.25, 0.5]);
+        assert_eq!(lobe_probabilities(surface(1.0, 1.0)), [0.0, 0.5, 0.5]);
+        for metallic in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            for weight in [0.0, 0.4, 1.0] {
+                let p = lobe_probabilities(surface(metallic, weight));
+                assert!(p.iter().all(|p| (0.0..=1.0).contains(p)) && (p.iter().sum::<f64>() - 1.0).abs() < 1e-15, "{p:?}");
+            }
+        }
+        // A pure metal's density has no diffuse term: back toward the viewer, far from its
+        // mirror direction, it falls well below a dielectric's, which keeps the cosine lobe.
+        let v = Vec3::new(0.6, 0.0, 0.8);
+        let metal = surface_pdf(surface(1.0, 0.0), Vec3::Z, v, v).unwrap();
+        let dielectric = surface_pdf(surface(0.0, 0.0), Vec3::Z, v, v).unwrap();
+        assert!(metal < 0.25 * dielectric, "{metal} vs {dielectric}");
+    }
+
+    /// Sampling and density must describe one distribution. Samples drawn the way the GPU path
+    /// tracer draws them (one variate picks the lobe from `lobe_probabilities`) land above the
+    /// surface with the probability `surface_pdf` integrates to there. A density that weighted
+    /// the lobes differently from the sampler disagrees at grazing views, where a specular
+    /// sample often lands below the surface and a diffuse one never does.
+    #[test]
+    fn surface_pdf_matches_the_lobe_sampler() {
+        fn radical_inverse(mut i: u32, base: u32) -> f64 {
+            let (mut value, mut scale) = (0.0, 1.0 / f64::from(base));
+            while i > 0 {
+                value += f64::from(i % base) * scale;
+                i /= base;
+                scale /= f64::from(base);
+            }
+            value
+        }
+        const SAMPLES: u32 = 1 << 16;
+        const GRID: u32 = 384;
+        for metallic in [0.0, 0.5, 1.0] {
+            for weight in [0.0, 1.0] {
+                for cosine in [0.2_f64, 0.6] {
+                    let surface = OpaqueSurface::new(Vec3::new(0.8, 0.5, 0.2), metallic, 0.5, 1.5)
+                        .unwrap()
+                        .with_clear_coat(ClearCoat::new(weight, 0.3, 1.5).unwrap());
+                    let v = Vec3::new((1.0 - cosine * cosine).sqrt(), 0.0, cosine);
+                    let [diffuse, _, coat] = lobe_probabilities(surface);
+                    let mut above = 0_u32;
+                    for i in 0..SAMPLES {
+                        let component = (f64::from(i) + 0.5) / f64::from(SAMPLES);
+                        let x = radical_inverse(i, 2);
+                        let phi = 2.0 * PI * radical_inverse(i, 3);
+                        let l = if component < diffuse {
+                            Vec3::new(x.sqrt() * phi.cos(), x.sqrt() * phi.sin(), (1.0 - x).sqrt())
+                        } else {
+                            let r = if component >= 1.0 - coat { 0.3_f64 } else { 0.5 };
+                            let c = ((1.0 - x) / (1.0 + (r.powi(4) - 1.0) * x)).sqrt();
+                            let radius = (1.0 - c * c).sqrt();
+                            let h = Vec3::new(radius * phi.cos(), radius * phi.sin(), c);
+                            h * (2.0 * v.dot(h)) - v
+                        };
+                        above += u32::from(l.z > 0.0);
+                    }
+                    let sampled = f64::from(above) / f64::from(SAMPLES);
+                    let mut integrated = 0.0;
+                    for i in 0..GRID {
+                        let mu = (f64::from(i) + 0.5) / f64::from(GRID);
+                        let r = (1.0 - mu * mu).sqrt();
+                        for j in 0..GRID {
+                            let phi = 2.0 * PI * (f64::from(j) + 0.5) / f64::from(GRID);
+                            integrated += surface_pdf(surface, Vec3::Z, v, Vec3::new(r * phi.cos(), r * phi.sin(), mu)).unwrap();
+                        }
+                    }
+                    integrated *= 2.0 * PI / f64::from(GRID * GRID);
+                    assert!(
+                        (sampled - integrated).abs() < 0.001,
+                        "metallic={metallic} coat={weight} nv={cosine}: sampled {sampled}, density integrates to {integrated}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn admission_zero_coat_and_reciprocity() {
         for bad in [f64::NAN, f64::INFINITY, -0.1, 1.1] {
@@ -175,12 +271,11 @@ mod tests {
                                 let surface =
                                     OpaqueSurface::new(Vec3::new(1.0, 1.0, 1.0), metallic, base_roughness, 1.5).unwrap().with_clear_coat(coat);
                                 let v = Vec3::new((1.0 - cosine * cosine).sqrt(), 0.0, cosine);
-                                let p = weight * 0.5;
                                 let mut energy = 0.0;
                                 // Integrate each proposal with its mixture probability.
                                 // NDF importance quadrature resolves sharp lobes, unlike
                                 // a uniform hemisphere grid at roughness 0.045.
-                                for (component, probability) in [(0, (1.0 - p) * 0.5), (1, (1.0 - p) * 0.5), (2, p)] {
+                                for (component, probability) in lobe_probabilities(surface).into_iter().enumerate() {
                                     for i in 0..COUNT {
                                         let x = (f64::from(i) + 0.5) / f64::from(COUNT);
                                         let phi = 2.0 * PI * f64::from(i.reverse_bits()) / 4294967296.0;

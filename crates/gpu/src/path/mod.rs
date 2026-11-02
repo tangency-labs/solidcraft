@@ -166,11 +166,28 @@ struct Context {
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::ComputePipeline,
+    // The integrator with the indirect clamp compiled in, built and warmed by the first job
+    // that asks for it, then shared by later ones. Other jobs never compile or use it.
+    clamped: std::sync::OnceLock<wgpu::ComputePipeline>,
     // Built and warmed by the first denoised job, then shared by later ones.
     denoise: std::sync::OnceLock<denoise::Pipelines>,
     layout: wgpu::BindGroupLayout,
 }
 impl Context {
+    fn clamped_pipeline(&self) -> Result<&wgpu::ComputePipeline> {
+        if let Some(pipeline) = self.clamped.get() {
+            return Ok(pipeline);
+        }
+        let scopes = scopes(&self.device);
+        let pipeline = path_pipeline(&self.device, &self.layout, CLAMP_INDIRECT);
+        checked(scopes)?;
+        warm_up(&self.device, &self.queue, &pipeline, &placeholder_bind(&self.device, &self.layout, 7)?, &self.healthy)?;
+        Ok(self.clamped.get_or_init(|| pipeline))
+    }
+    /// The pipeline a job's options select: only an indirect clamp needs the second one.
+    fn pipeline_for(&self, options: &JobOptions) -> Result<&wgpu::ComputePipeline> {
+        if options.clamp_indirect.is_some() { self.clamped_pipeline() } else { Ok(&self.pipeline) }
+    }
     fn ensure_available(&self) -> Result<()> {
         if self.healthy.load(Ordering::Acquire) {
             Ok(())
@@ -218,8 +235,6 @@ impl Executor {
             log::warn!("gpu-path device lost ({reason:?}); executor unavailable: {message}");
         });
         let scopes = scopes(&device);
-        let shader =
-            device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("gpu-path"), source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
         let entries: Vec<_> = (0..7)
             .map(|binding| wgpu::BindGroupLayoutEntry {
                 binding,
@@ -237,23 +252,34 @@ impl Executor {
             })
             .collect();
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("gpu-path"), entries: &entries });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("gpu-path"),
-            bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
-        });
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("gpu-path"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: Some("main"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
+        let pipeline = path_pipeline(&device, &layout, &[]);
         checked(scopes)?;
         warm_up(&device, &queue, &pipeline, &placeholder_bind(&device, &layout, 7)?, &healthy)?;
-        Ok(Self { context: Arc::new(Context { healthy, device, queue, pipeline, layout, denoise: std::sync::OnceLock::new() }) })
+        let (clamped, denoise) = (std::sync::OnceLock::new(), std::sync::OnceLock::new());
+        Ok(Self { context: Arc::new(Context { healthy, device, queue, pipeline, clamped, layout, denoise }) })
     }
+}
+
+/// Pipeline constants that compile the indirect clamp into the integrator (path.wgsl).
+const CLAMP_INDIRECT: &[(&str, f64)] = &[("clamp_indirect", 1.0)];
+
+/// The path integrator's `main` with the given pipeline constants. Callers own the error scopes.
+fn path_pipeline(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, constants: &[(&str, f64)]) -> wgpu::ComputePipeline {
+    let shader =
+        device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("gpu-path"), source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("gpu-path"),
+        bind_group_layouts: &[Some(layout)],
+        immediate_size: 0,
+    });
+    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("gpu-path"),
+        layout: Some(&pipeline_layout),
+        module: &shader,
+        entry_point: Some("main"),
+        compilation_options: wgpu::PipelineCompilationOptions { constants, ..Default::default() },
+        cache: None,
+    })
 }
 
 // Small zeroed bindings: binding 0 is a uniform whose zero work count makes every
@@ -562,16 +588,21 @@ impl Task {
     fn new(context: Arc<Context>, scene: ProductScene, mut request: ImageRequest, options: JobOptions, cancel: CancelToken) -> Result<Self> {
         cancel.check()?;
         let start = Instant::now();
+        // A job with an indirect clamp builds the clamped pipeline here, once per device.
+        context.pipeline_for(&options)?;
         let aging = options.aging.gpu_layers([request.camera.target.x, request.camera.target.y, request.camera.target.z])?;
+        // The albedo row's spare w carries the indirect clamp in both branches: zero is off.
+        // Validation keeps a set limit a normal f32, so it never rounds to zero here.
+        let clamp_indirect = options.clamp_indirect.map_or(0.0, |limit| limit as f32);
         let volume = if let Some(v) = options.volume.filter(|v| v.active()) {
             let bounds = v.relative_bounds([request.camera.target.x, request.camera.target.y, request.camera.target.z])?;
             [
                 [bounds[0][0], bounds[0][1], bounds[0][2], v.extinction_per_mm as f32],
                 [bounds[1][0], bounds[1][1], bounds[1][2], v.anisotropy as f32],
-                [v.scattering_albedo[0] as f32, v.scattering_albedo[1] as f32, v.scattering_albedo[2] as f32, 0.0],
+                [v.scattering_albedo[0] as f32, v.scattering_albedo[1] as f32, v.scattering_albedo[2] as f32, clamp_indirect],
             ]
         } else {
-            [[0.0; 4]; 3]
+            [[0.0; 4], [0.0; 4], [0.0, 0.0, 0.0, clamp_indirect]]
         };
         if let Some(resources) = &request.textures {
             resources.validate_scene(&scene)?;
@@ -777,12 +808,13 @@ impl Task {
         let pixels = self.request.width * self.request.height;
         let count = self.dispatch_budget.count(pixels - self.offset);
         let context = &self.context;
+        let pipeline = context.pipeline_for(&self.options)?;
         let scopes = scopes(&context.device);
         context.queue.write_buffer(&self.uniform, 0, &self.parameters(count));
         let mut encoder = context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("path tile") });
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("path tile"), timestamp_writes: None });
-            pass.set_pipeline(&context.pipeline);
+            pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &self.bind, &[]);
             pass.dispatch_workgroups(count.div_ceil(64), 1, 1);
         }
