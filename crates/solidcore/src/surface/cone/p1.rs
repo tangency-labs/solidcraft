@@ -250,6 +250,24 @@ pub struct Cone {
     pub(crate) cylinder: bool,
 }
 
+/// With `Kernel::fixes.cone_unbounded_parameterized_as_nurb` (WR-713, #2313), whether an
+/// unbounded cone's height maps onto its NURB's linear interval as a bounded cone's does
+/// (reversed when inside out) instead of upstream's negation: when inside out and the
+/// negated STEP height interval is not the NURB's. An inside-out unbounded cone's NURB
+/// runs over the STEP heights reversed, so negation holds only for an interval symmetric
+/// about 0 (the infinite cylinder's), where it is kept.
+fn unbounded_maps_linearly(
+    k: &Kernel,
+    inside_out: bool,
+    step_ivl: &Extent1d,
+    nurb_ivl: &Extent1d,
+) -> bool {
+    k.fixes.cone_unbounded_parameterized_as_nurb
+        && inside_out
+        && (nurb_ivl.min().to_bits() != (-step_ivl.max()).to_bits()
+            || nurb_ivl.max().to_bits() != (-step_ivl.min()).to_bits())
+}
+
 /// The cone's `ConvertUVFromNURBSToSTEP` on its base parts (the virtual the
 /// inherited `UpdateAnalyticalDomain` calls); see [`Cone::convert_uv_from_nurbs_to_step`].
 pub(crate) fn cone_convert_uv_from_nurbs_to_step(
@@ -277,7 +295,8 @@ pub(crate) fn cone_convert_uv_from_nurbs_to_step(
     let (x, _exact) = rev.polar.convert_to_polar_parameter(k, circle, nurb_uv.x)?;
 
     // convert linear coordinate
-    let y = if rev.is_bounded()? {
+    // (WR-713: see `unbounded_maps_linearly`)
+    let y = if rev.is_bounded()? || unbounded_maps_linearly(k, inside_out, &step_ivl, &nurb_ivl) {
         if inside_out {
             step_ivl.min() + ((nurb_uv.y - nurb_ivl.max()) / -nurb_ivl.length() * step_ivl.length())
         } else {
@@ -565,7 +584,14 @@ impl Cone {
         let mut line_vec = z_axis;
         let angle_rad = deg2rad(cone.semi_angle_deg);
         let scale = 1.0 / angle_rad.cos();
-        if angle_rad > EFF_ZERO {
+        // (WR-713: upstream rotates for a positive semi-angle only, leaving the generator
+        // of a negative one parallel to the axis)
+        let rotate = if k.fixes.cone_unbounded_parameterized_as_nurb {
+            angle_rad.abs() > EFF_ZERO
+        } else {
+            angle_rad > EFF_ZERO
+        };
+        if rotate {
             let pnt = origin + z_axis * scale;
             let mut rf = Axis2Placement::IDENTITY; // m_vPosition leads to bug
             rf.rotate_about_axis_at_point(angle_rad, origin, y_axis);
@@ -603,18 +629,20 @@ impl Cone {
 
         // infinite cylinders run between +/- infinity
         // infinite cones     run between apex and +infinity
+        // (WR-713: a negative semi-angle's cone runs from -infinity up to its apex)
         if !apex.is_cylinder {
-            let _ = cone.rev.anal_uv_domain.set_min_max_coords(
-                0.0,
-                apex.param,
-                360.0,
-                INFINITE_PARAMETER,
-            );
+            let (min, max) =
+                if k.fixes.cone_unbounded_parameterized_as_nurb && cone.semi_angle_deg < 0.0 {
+                    (-INFINITE_PARAMETER, apex.param)
+                } else {
+                    (apex.param, INFINITE_PARAMETER)
+                };
+            let _ = cone
+                .rev
+                .anal_uv_domain
+                .set_min_max_coords(0.0, min, 360.0, max);
             // adjust generator curve domain
-            cone.adjust_gen_line_with_owner(
-                k,
-                &Extent1d::from_min_max(apex.param, INFINITE_PARAMETER),
-            )?;
+            cone.adjust_gen_line_with_owner(k, &Extent1d::from_min_max(min, max))?;
         }
         Ok(cone)
     }
@@ -1400,7 +1428,10 @@ impl Cone {
         };
 
         // convert linear coordinate
-        nurbs_uv.y = if self.rev.is_bounded()? {
+        // (WR-713: see `unbounded_maps_linearly`)
+        nurbs_uv.y = if self.rev.is_bounded()?
+            || unbounded_maps_linearly(k, self.inside_out, &step_ivl, &nurb_ivl)
+        {
             if self.inside_out {
                 nurb_ivl.max()
                     + ((step_uv.y - step_ivl.min()) / step_ivl.length() * -nurb_ivl.length())
