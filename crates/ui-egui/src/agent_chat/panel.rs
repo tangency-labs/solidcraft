@@ -83,6 +83,26 @@ pub fn tip(app: &SolveApp) -> String {
     }
 }
 
+/// Selectable transcript labels do not take egui keyboard focus. Keep their keys out of
+/// CAD until a pointer press outside the chat, not merely a move of the pointer. Use the
+/// panel in this window, never label selections belonging to another native viewport.
+/// Called before layout so even a click and a shortcut in the same frame are routed here.
+pub(crate) fn owns_keyboard_input(app: &mut SolveApp, ctx: &egui::Context) -> bool {
+    let rect = app.agent_chat.panel_rect.filter(|_| shown(app) && app.agent_chat.open && !app.preferences.agent_chat_minimized);
+    let Some(rect) = rect else {
+        app.agent_chat.keyboard_owned = false;
+        return false;
+    };
+    ctx.input(|input| {
+        for event in &input.events {
+            if let egui::Event::PointerButton { pos, pressed: true, .. } = event {
+                app.agent_chat.keyboard_owned = rect.contains(*pos);
+            }
+        }
+    });
+    app.agent_chat.keyboard_owned
+}
+
 /// The panel, when the chat is turned on and open. Call before the central viewport is laid out.
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
