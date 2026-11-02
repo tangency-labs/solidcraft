@@ -223,11 +223,15 @@ impl Writer {
     }
 
     fn sheet(&mut self, sheet: &crate::sheet::SheetBody) -> Option<usize> {
-        let record = serde_json::to_value(sheet).ok()?;
-        let key = record.to_string();
+        // Keyed by the sheet written as text, straight from the sheet: every state asks for each
+        // of its sheets, and building the record (a JSON tree) each time only to find it written
+        // already took most of a sheet-metal design's save (906 states, 300 sheets: 0.8 s). Two
+        // sheets are the same text exactly when they are the same record.
+        let key = serde_json::to_string(sheet).ok()?;
         if let Some(i) = self.sheet_index.get(&key) {
             return Some(*i);
         }
+        let record = serde_json::to_value(sheet).ok()?;
         self.sheets.push(record);
         self.sheet_index.insert(key, self.sheets.len() - 1);
         Some(self.sheets.len() - 1)

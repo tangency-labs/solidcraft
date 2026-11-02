@@ -185,11 +185,19 @@ pub(crate) fn fit_product_bounds(cam: Camera, bounds: &Aabb3, layout: &Layout) -
     fit_bounds(cam, bounds, layout, cam.fov)
 }
 
-pub(crate) fn fit_bounds(mut cam: Camera, bounds: &Aabb3, layout: &Layout, fov: f64) -> Option<Camera> {
+pub(crate) fn fit_bounds(cam: Camera, bounds: &Aabb3, layout: &Layout, fov: f64) -> Option<Camera> {
+    fit_bounds_sized(cam, bounds, layout, fov, 1.0)
+}
+
+/// [`fit_bounds`] with the model filling `share` (0.1 to 1) of the room between the panels, the
+/// compass and the navigation bar instead of all of it: the Navigation preference "Home and Fit
+/// size" (#10091). The model stays clear of what covers the view at every size.
+pub(crate) fn fit_bounds_sized(mut cam: Camera, bounds: &Aabb3, layout: &Layout, fov: f64, share: f64) -> Option<Camera> {
     let perspective = fov > 0.0;
     if !fov.is_finite() || !(0.0..std::f64::consts::PI).contains(&fov) {
         return None;
     }
+    let share = if share.is_finite() { share.clamp(0.1, 1.0) } else { 1.0 };
     if bounds.is_empty()
         || !bounds.min.is_finite()
         || !bounds.max.is_finite()
@@ -237,7 +245,7 @@ pub(crate) fn fit_bounds(mut cam: Camera, bounds: &Aabb3, layout: &Layout, fov: 
     if !room.is_positive() || !room.is_finite() {
         return None;
     }
-    let hh = (hx * h / f64::from(room.width())).max(hy * h / f64::from(room.height())).max(0.5);
+    let hh = (hx * h / f64::from(room.width())).max(hy * h / f64::from(room.height())).max(0.5) / share;
     let offset = room.center() - layout.viewport.center();
     let tangent = if perspective { (fov * 0.5).tan() } else { 0.4 };
     cam.distance = hh / tangent + if perspective { depth } else { 0.0 };

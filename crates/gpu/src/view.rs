@@ -3290,7 +3290,7 @@ fn can_reuse(ss_ready: bool, cached: Option<u64>, key: u64) -> bool {
 /// section, images, analysis, accessibility map, ambient occlusion and the theme's hover and
 /// selection tints. The same key draws the same picture (pipelines and shaders are fixed for the
 /// renderer).
-fn frame_key(cb: &Frame) -> u64 {
+pub fn frame_key(cb: &Frame) -> u64 {
     use std::hash::Hash as _;
     let mut h = std::collections::hash_map::DefaultHasher::new();
     cb.product.hash(&mut h);
@@ -3599,7 +3599,7 @@ impl Renderer {
         };
         if phase == Phase::AfterSeeThrough {
             pass.set_bind_group(1, &res.access_bind, &[]);
-            pass.set_bind_group(2, &res.ao.bind, &[]);
+            pass.set_bind_group(2, &res.ao.maps.bind, &[]);
             Self::draw_over(res, pass, sk, h, pv, m, &tris, &lines);
             return;
         }
@@ -3608,7 +3608,7 @@ impl Renderer {
         pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
         lines(pass, &res.overlay, &sk.under);
         pass.set_bind_group(1, &res.access_bind, &[]);
-        pass.set_bind_group(2, &res.ao.bind, &[]);
+        pass.set_bind_group(2, &res.ao.maps.bind, &[]);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         let planned = |pass: &mut wgpu::RenderPass<'static>, p: &wgpu::RenderPipeline| {
             for d in m.planned.iter().filter(|d| d.class == TriClass::Opaque) {

@@ -15,6 +15,23 @@ use crate::SolveApp;
 use crate::theme::Tokens;
 use crate::ui_kit;
 
+/// Continue transient shot queues without adopting their document or view into the active tab.
+pub(crate) fn advance_render_batches(app: &mut SolveApp, ctx: &egui::Context) {
+    let mut error = None;
+    for slot in app.docs.slots.iter_mut().flatten() {
+        if let Err(failure) = slot.session.advance_render_batch() {
+            error = Some(failure.to_string());
+        }
+        let queue = slot.session.render_queue_state();
+        if queue.running != 0 || queue.waiting != 0 {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
+    }
+    if let Some(error) = error {
+        app.set_status(error, true);
+    }
+}
+
 /// Most designs open at once.
 pub const MAX_OPEN: usize = 32;
 
@@ -24,7 +41,6 @@ pub struct DocSlot {
     pub(crate) autosave: Option<solidcraft_engine::recovery::Autosaver>,
     pub(crate) big_operation: bool,
     cam: Camera,
-    pre_sketch_marker: Option<Option<usize>>,
     pub(crate) pending_feature_edit: Option<crate::feature_edit::PendingFeatureEdit>,
     pre_sketch_cam: Option<crate::PreSketchView>,
     pre_sketch_component: Option<crate::PreSketchComponent>,
@@ -118,7 +134,6 @@ impl DocSlot {
             autosave: None,
             big_operation: false,
             cam: Camera::default(),
-            pre_sketch_marker: None,
             pending_feature_edit: None,
             pre_sketch_cam: None,
             pre_sketch_component: None,
@@ -217,12 +232,13 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     crate::agent_chat::leave_document(app);
     app.agent_chat.swap_document(&mut slot.agent_chat);
     let out_rev = app.session.revision;
+    // A click's point means nothing in the other design.
+    app.edit_anchor_hint = None;
     let mut out = DocSlot {
         session: std::mem::replace(&mut app.session, slot.session),
         autosave: app.autosave.as_mut().and_then(|a| std::mem::replace(&mut a.active, slot.autosave)),
         big_operation: std::mem::replace(&mut app.big_operation, slot.big_operation),
         cam: std::mem::replace(&mut app.cam, slot.cam),
-        pre_sketch_marker: std::mem::replace(&mut app.pre_sketch_marker, slot.pre_sketch_marker),
         pending_feature_edit: std::mem::replace(&mut app.pending_feature_edit, slot.pending_feature_edit),
         pre_sketch_cam: std::mem::replace(&mut app.pre_sketch_cam, slot.pre_sketch_cam),
         pre_sketch_component: std::mem::replace(&mut app.pre_sketch_component, slot.pre_sketch_component),

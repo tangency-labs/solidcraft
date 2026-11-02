@@ -6,6 +6,16 @@ component has its own origin, bodies, sketches and timeline entries. The **activ
 (the radio button in the browser) receives new sketches and features; the others are drawn
 faded.
 
+Sketches drawn on a part's face while the design was active belong to the design, so they
+collect in its Sketches folder. **Move Sketches to Their Parts**
+(`component.move_sketches.to_parts`), on a Sketches folder's menu and on a sketch's menu, moves
+the folder's sketches (or the selected ones) to the part whose face each is drawn on, as dragging
+it onto the part would. Each stays where it is on its face, and the whole move is one undo step.
+A sketch with no single part to go to stays where it is: one on an origin, construction or fixed
+plane, on a body of the design itself, on a face without an exact attachment, or already in its
+part. The status bar says how many moved and why the others stayed; the command's reply lists
+each sketch. With no `sketches` it looks at every sketch in the design.
+
 A component is placed by its **occurrences**. Paste creates another instance of the same
 component, and **Paste New** creates an independent copy. Move an occurrence with the move
 triad, then **Capture Position** to keep it or **Revert** to put it back. SolidCraft asks before
@@ -373,6 +383,25 @@ listed in `touching_at_start` and stop the sweep only once they pass into each o
 they start. The sweep runs on a copy (closed loops follow, contact sets don't stop it) and
 leaves the design as it was unless `apply` is true.
 
+**Find Limits.** In **Edit Joint**, the **Limits** section's **Find Limits** button fills in each
+value's Minimum and Maximum from where the parts the joint moves first touch another part,
+turning or sliding each way from where the joint is now, and ticks its limits. It searches the
+joint as the dialog has it (a type, flip or offset changed but not yet applied included), on a
+copy: nothing changes until **OK**, so the values can still be rounded or edited. They are
+rounded toward the joint's value (a tenth of a degree, a hundredth of the length unit) so they
+stay clear, and a line under each value says what stopped each side. An angle is searched a turn
+each way: a side that meets nothing is set a turn from the other side, or half a turn each way
+when nothing is met at all. A distance is searched as far as the parts reach; a side that meets
+nothing there keeps what it had, and the limits stay off until both sides are found. Parts
+already in each other where the joint is now are named, and stop the search only once they go
+deeper. The search runs while the window goes on (Cancel drops it). `joint.find_limits {joint,
+index?, refine?, step?, occurrences?, against?, contact_sets?}` answers the same: for each value
+its `min` and `max` (`null` where a distance meets nothing), what stopped each side (`min_by`,
+`max_by`: the two parts and where they touch, or `"loop"`, `"limit"` (the limit of
+another of its values, or of another joint through a motion link), `"turn"` or `"range"`), the `range` searched, and the parts `touching_at_start`
+and `overlapping_at_start` (with `depth_mm`). The joint's own limits are left out of the search,
+closed loops follow, and each side is bisected to `refine` as `joint.sweep` does.
+
 **Insert Design** (`component.insert_design {path, translate?}`, on the **ASSEMBLE** panel and
 in the **File** menu) adds a component linked to another saved design, so each part can live in
 its own document. When other designs are open in tabs, the button first lists them under
@@ -384,6 +413,11 @@ off. A STEP or mesh file picked there is inserted as **Insert STEP** or **Insert
 Mesh** would. The part's solid bodies come
 in as they sit in that design, and they are kept in the assembly, so it opens even without the
 part file. The link is stored relative to the assembly's folder once the assembly is saved.
+For scripts, `translate: [x,y,z]` places the design's origin in millimetres from the destination
+parent's origin (the active component unless `parent` is supplied). It defaults to `[0,0,0]`.
+With `reuse: true`, insertion reuses the existing linked component but uses the same coordinates;
+it does not inherit another occurrence's position or rotation. For example, inserts at
+`[20,0,0]` and `[40,0,0]` place the two origins at 20 and 40 mm, even when the second reuses the link.
 After the part file changes, **Update Links** (`component.update_links`) reads it again.
 An assembly that opens, or whose tab comes back to the front, does that by itself for the parts whose files
 changed since it last read them, whether the part was saved in another tab, another window or by

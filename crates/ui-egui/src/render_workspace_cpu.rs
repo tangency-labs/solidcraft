@@ -258,6 +258,25 @@ pub(super) fn revalidate(app: &mut SolveApp, name: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub(super) fn refresh_render_revision(app: &mut SolveApp) {
+    let mut sources = super::setups::SourceCache::default();
+    let eligible: Vec<String> = app
+        .render_workspace
+        .view
+        .cpu
+        .bindings
+        .iter()
+        .filter(|(name, binding)| sources.same_model_source(app, &binding.document) && target(app, name).as_ref() == Some(&binding.target))
+        .map(|(name, _)| name.clone())
+        .collect();
+    for name in eligible {
+        if let Some(binding) = app.render_workspace.view.cpu.bindings.get_mut(&name) {
+            binding.revision = app.session.revision;
+            binding.document = std::sync::Arc::downgrade(&app.session.doc);
+        }
+    }
+}
+
 /// A removed, hidden or ambiguous body never silently becomes a different target.
 pub(super) fn set_reflection(app: &mut SolveApp, name: &str, mode: Option<ReflectionMode>) -> Result<(), String> {
     let selected = if mode.is_some() { Some(target(app, name).ok_or_else(|| app.tr("render.cpu_body_missing").to_string())?) } else { None };

@@ -28,7 +28,10 @@
   puts it back beside the fold arrow; press an eye and drag up or down over other eyes to show or hide them all at once, as one undo step), a component's radio button makes it the active component,
   and right-clicking any row gives that item's menu. Right-click the design or a component and choose **Expand All** or
   **Collapse All** to open or close every folder under that row (the design row stays visible
-  when the whole tree is collapsed). Rows drag into groups and other components. **Preferences ›
+  when the whole tree is collapsed). Components start closed, so a large assembly opens as a
+  short list; open one with its fold arrow, or use **Find in Browser** on a body to open the rows
+  down to it (**Preferences › Interface › Components start open** opens every component from the
+  start, as before). Rows drag into groups and other components. **Preferences ›
   Interface › Bodies folders** sets when a component's bodies sit in a Bodies folder of their own:
   **Several bodies only** (the default) lists a component's body straight under it when it has
   only one and no groups, **Never** lists every component's bodies and groups straight under it
@@ -442,6 +445,13 @@ gradient backdrops and saved setups keep their existing background instead. Save
 not record whether their background was explicitly chosen, so even a setup saved only for its
 camera conservatively retains its scene backplate. With tab surfaces absent/off, Render keeps
 its original flat scene background. Theme surfaces never change rendered images or exports.
+
+Gruvbox has two cards, **Gruvbox Dark** and **Gruvbox Light**. Each offers a
+**Contrast** choice: **Soft**, **Standard** (the default), or **Hard**. These are the
+same six palettes as the former separate cards, including their icon colours.
+Saved selections and settings profiles using the former `-soft` and `-hard` ids
+select the corresponding family and contrast. Selecting a family again restores its
+last contrast; Reset returns it to Standard.
 
 Up to 32 overlays apply in file order, after the base palette and the theme's own value tables.
 Later matching entries win by key. Every overlay has one `when`: `{"opt":"id","eq":value}`

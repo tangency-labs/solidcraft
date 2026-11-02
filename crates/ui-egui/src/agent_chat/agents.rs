@@ -76,7 +76,7 @@ impl Kind {
 }
 
 /// The wire protocol of an endpoint the user added.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Protocol {
     /// `{base}/chat/completions`, as Ollama, LM Studio, OpenAI and their kin speak.
     #[default]
@@ -113,6 +113,9 @@ pub struct AgentConfig {
     /// API: how long one model request may take, in seconds (clamped to
     /// [`MIN_REQUEST_TIMEOUT_S`]..=[`MAX_REQUEST_TIMEOUT_S`] where it is used).
     pub request_timeout_s: u64,
+    /// API: the reasoning effort to send as `reasoning_effort`; empty sends nothing and the
+    /// provider's own default applies (trimmed and length-capped by [`reasoning_effort`]).
+    pub reasoning_effort: String,
 }
 
 impl Default for AgentConfig {
@@ -127,6 +130,7 @@ impl Default for AgentConfig {
             ollama: false,
             key: false,
             request_timeout_s: DEFAULT_REQUEST_TIMEOUT_S,
+            reasoning_effort: String::new(),
         }
     }
 }
@@ -148,6 +152,15 @@ pub fn request_timeout_s(secs: f64) -> u64 {
     secs.round().clamp(MIN_REQUEST_TIMEOUT_S as f64, MAX_REQUEST_TIMEOUT_S as f64) as u64
 }
 
+/// The longest reasoning effort an endpoint can be given (no provider names one near this).
+pub const MAX_REASONING_EFFORT_LEN: usize = 64;
+
+/// A reasoning effort as stored: trimmed, and capped so a hand-edited preferences file or the
+/// control channel cannot carry an absurd value into every request. Empty means "send nothing".
+pub fn reasoning_effort(raw: &str) -> String {
+    raw.trim().chars().take(MAX_REASONING_EFFORT_LEN).collect()
+}
+
 /// An agent as the picker and the switcher show it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
@@ -167,6 +180,8 @@ pub struct Entry {
     pub key: bool,
     /// API: seconds one model request may take (in range).
     pub request_timeout_s: u64,
+    /// API: the reasoning effort to send, empty for none (trimmed, in length).
+    pub reasoning_effort: String,
     /// Found installed, but its program didn't start when asked its version: why (#9034).
     pub problem: Option<String>,
     /// Found installed: the command that installs it again.
@@ -187,6 +202,7 @@ impl Entry {
             model: c.model.clone(),
             key: c.key,
             request_timeout_s: c.request_timeout_s.clamp(MIN_REQUEST_TIMEOUT_S, MAX_REQUEST_TIMEOUT_S),
+            reasoning_effort: reasoning_effort(&c.reasoning_effort),
             problem: None,
             install: "",
         }
@@ -231,6 +247,7 @@ pub fn entries(app: &crate::SolveApp) -> Vec<Entry> {
             model: String::new(),
             key: false,
             request_timeout_s: DEFAULT_REQUEST_TIMEOUT_S,
+            reasoning_effort: String::new(),
             problem: f.problem.clone(),
             install: f.install,
         }));
@@ -286,9 +303,11 @@ pub struct ApiPreset {
 pub const OPENAI_PRESETS: &[ApiPreset] = &[
     ApiPreset { name: "Ollama", base_url: "http://localhost:11434/v1" },
     ApiPreset { name: "LM Studio", base_url: "http://localhost:1234/v1" },
+    ApiPreset { name: "OpenClaw", base_url: "http://localhost:18789/v1" },
     ApiPreset { name: "OpenAI", base_url: "https://api.openai.com/v1" },
     ApiPreset { name: "Mammouth AI", base_url: "https://api.mammouth.ai/v1" },
     ApiPreset { name: "OpenCode Go", base_url: "https://opencode.ai/zen/go/v1" },
+    ApiPreset { name: "OpenRouter", base_url: "https://openrouter.ai/api/v1" },
 ];
 
 /// Anthropic-compatible endpoints people use. The base URL is the one their documentation calls
@@ -310,14 +329,32 @@ pub fn key_safe_for(url: &str) -> bool {
         return true;
     }
     let Some(rest) = u.strip_prefix("http://") else { return false };
-    let host = rest.split(['/', '?']).next().unwrap_or("");
-    let host = host.rsplit_once('@').map_or(host, |(_, h)| h);
-    let name = if host.starts_with('[') {
-        host.split(']').next().map(|h| format!("{h}]")).unwrap_or_default()
-    } else {
-        host.split(':').next().unwrap_or("").to_string()
+    // The host part ends where the HTTP client ends it, at the first `/`, `?` or `#`.
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    local_authority(authority)
+}
+
+/// `authority` is exactly this computer's name with at most a port. No user name goes before it
+/// and no stray character after it, as URL parsers don't all read those the same way.
+fn local_authority(authority: &str) -> bool {
+    let (host, port) = match authority.strip_prefix('[') {
+        Some(inner) => {
+            let Some((ip, after)) = inner.split_once(']') else { return false };
+            if ip != "::1" {
+                return false;
+            }
+            ("[::1]", after)
+        }
+        None => {
+            let end = authority.find(':').unwrap_or(authority.len());
+            authority.split_at(end)
+        }
     };
-    matches!(name.as_str(), "localhost" | "127.0.0.1" | "[::1]")
+    let port_ok = match port.strip_prefix(':') {
+        Some(digits) => digits.bytes().all(|b| b.is_ascii_digit()) && digits.parse::<u16>().is_ok(),
+        None => port.is_empty(),
+    };
+    port_ok && matches!(host, "localhost" | "127.0.0.1" | "[::1]")
 }
 
 /// A base URL the API backend accepts: `http(s)://host…`, without a trailing slash.
@@ -345,6 +382,56 @@ mod tests {
         assert!(!key_safe_for("http://localhost.evil.example/v1"));
         assert!(!key_safe_for("http://user@evil.example/v1"));
         assert!(!key_safe_for("ftp://x"));
+    }
+
+    /// Plain HTTP only reaches this computer: the check reads the host where the HTTP client does,
+    /// and takes nothing around the name that URL parsers could read differently.
+    #[test]
+    fn a_key_over_http_needs_a_url_that_can_only_mean_this_computer() {
+        for url in [
+            "http://localhost",
+            "HTTP://LOCALHOST:11434/v1",
+            " http://localhost:11434/v1/ ",
+            "http://127.0.0.1:1234/v1?x=1",
+            "http://[::1]/v1",
+            "http://[::1]:8080/v1",
+            "http://localhost:65535/@models",
+        ] {
+            assert!(key_safe_for(url), "{url}");
+        }
+        for url in [
+            "http://evil.example#@localhost/v1",
+            "http://evil.example?@localhost/v1",
+            "http://evil.example/@localhost/v1",
+            "http://evil.example\\@localhost/v1",
+            "http://localhost\\@evil.example/v1",
+            "http://localhost\\.evil.example/v1",
+            "http://localhost@evil.example/v1",
+            "http://localhost:1234@evil.example/v1",
+            "http://user@localhost/v1",
+            "http://user:secret@localhost:1234/v1",
+            "http://[::1]@evil.example/v1",
+            "http://[::1].evil.example/v1",
+            "http://[::1]evil.example/v1",
+            "http://[::2]/v1",
+            "http://[::1/v1",
+            "http://127.0.0.1.evil.example/v1",
+            "http://localhost.evil.example:1234/v1",
+            "http://localhost:80.evil.example/v1",
+            "http://localhost:abc/v1",
+            "http://localhost:/v1",
+            "http://localhost:65536/v1",
+            "http://local\thost.evil.example/v1",
+            "http://localhost evil.example/v1",
+            "http://localhost%2eevil.example/v1",
+            "http://",
+            "http:///localhost/v1",
+            "http:/localhost/v1",
+            "//localhost/v1",
+            "localhost:1234/v1",
+        ] {
+            assert!(!key_safe_for(url), "{url}");
+        }
     }
 
     #[test]
@@ -383,6 +470,18 @@ mod tests {
         assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://api.anthropic.com/v1"));
     }
 
+    /// The first preset is the one an Add dialog opens with, and the one taken for Ollama.
+    #[test]
+    fn ollama_stays_the_first_preset_and_every_preset_can_take_a_key() {
+        assert_eq!(OPENAI_PRESETS.first().map(|p| p.name), Some("Ollama"));
+        assert_eq!(OPENAI_PRESETS.last().map(|p| p.name), Some("OpenRouter"));
+        assert!(OPENAI_PRESETS.iter().any(|p| p.name == "OpenClaw"));
+        for preset in OPENAI_PRESETS.iter().chain(ANTHROPIC_PRESETS) {
+            assert_eq!(normalize_url(preset.base_url).as_deref(), Ok(preset.base_url), "{}", preset.name);
+            assert!(key_safe_for(preset.base_url), "{}", preset.name);
+        }
+    }
+
     #[test]
     fn request_timeouts_default_to_300_s_and_stay_between_30_s_and_an_hour() {
         assert_eq!(AgentConfig::default().request_timeout_s, 300);
@@ -400,5 +499,24 @@ mod tests {
         let saved = AgentConfig { id: "api-3".into(), kind: Kind::Api, request_timeout_s: 1200, ..Default::default() };
         let back: AgentConfig = serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
         assert_eq!(back, saved);
+    }
+
+    #[test]
+    fn reasoning_effort_defaults_to_empty_and_is_trimmed_and_capped() {
+        assert!(AgentConfig::default().reasoning_effort.is_empty());
+        // An older preferences file has no effort: empty, so nothing is sent.
+        let old: AgentConfig = serde_json::from_str(r#"{"id":"api-1","kind":"api","base_url":"http://localhost:11434/v1","model":"m"}"#).unwrap();
+        assert!(old.reasoning_effort.is_empty());
+        assert_eq!(reasoning_effort("  high "), "high");
+        assert!(reasoning_effort("   ").is_empty());
+        let long = reasoning_effort(&"x".repeat(500));
+        assert_eq!(long.chars().count(), MAX_REASONING_EFFORT_LEN);
+        let saved = AgentConfig { id: "api-2".into(), kind: Kind::Api, reasoning_effort: "max".into(), ..Default::default() };
+        let back: AgentConfig = serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
+        assert_eq!(back, saved);
+        // The entry carries it trimmed; a hand-edited over-long one is capped where used.
+        assert_eq!(Entry::from_config(&saved).reasoning_effort, "max");
+        let wild: AgentConfig = serde_json::from_str(&format!(r#"{{"id":"api-3","kind":"api","reasoning_effort":"{}"}}"#, "y".repeat(500))).unwrap();
+        assert_eq!(Entry::from_config(&wild).reasoning_effort.chars().count(), MAX_REASONING_EFFORT_LEN);
     }
 }

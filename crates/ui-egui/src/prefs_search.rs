@@ -521,7 +521,13 @@ fn text_hit(ui: &Ui, text: &str) -> bool {
 }
 
 fn text_matches(query: &str, text: &str) -> bool {
-    setting_score(query, text) > 0 || english_hit(query, text) || keywords(text).iter().any(|word| setting_score(query, word) > 0)
+    // A right-to-left label reaches here in display order (see `Catalog::shown`), while the query
+    // is typed in reading order: compare the query in display order too, so a multi-word Hebrew
+    // or Arabic label is found as it is typed (#10471; #7532 fixed only the test's half).
+    setting_score(query, text) > 0
+        || setting_score(&crate::bidi::visual(query), text) > 0
+        || english_hit(query, text)
+        || keywords(text).iter().any(|word| setting_score(query, word) > 0)
 }
 
 /// Prefix, the start of a word, or a run of at least three characters. Scattered letters are not
@@ -735,6 +741,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn appearance_controls_keep_one_search_result_and_their_page() {
+        use egui::accesskit::Role;
+        for width in [520, 1600] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", serde_json::json!({"width":width,"height":1100}));
+            h.call("ui.prefs", serde_json::json!({"language":"en","open":"Appearance"}));
+            for (query, label, native) in [
+                ("3D view colors", "3D view colors", None),
+                ("Interface scale", "Interface scale", Some((Role::Slider, "Interface scale", "prefs:scale"))),
+                ("Follow a theme file", "Follow a theme file", None),
+                ("Background", "Background", Some((Role::Button, "Color", "dialog:Background:Color"))),
+                ("Font", "Font", Some((Role::ComboBox, "Interface font", "prefs:ui_font"))),
+            ] {
+                h.app.prefs_window.filter = query.into();
+                h.frames(5);
+                let (_, _, hits) = nav(&h.ctx);
+                let matching: Vec<_> = hits.iter().filter(|hit| hit.label == label).collect();
+                assert_eq!(matching.len(), 1, "width={width}: {query} needs exactly one real navigation hit");
+                assert_eq!(matching[0].page, crate::prefs::PAGE_APPEARANCE);
+                let at = h.widget(label).unwrap();
+                let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+                assert!(body.contains(egui::pos2(at[0] as f32, at[1] as f32)));
+                if let Some((role, name, target)) = native {
+                    let tree = h.output.accesskit_update.as_ref().unwrap();
+                    let controls: Vec<_> =
+                        tree.nodes.iter().filter(|(_, node)| !node.is_disabled() && node.role() == role && node.label() == Some(name)).collect();
+                    assert_eq!(controls.len(), 1, "width={width}: {query} must expose one enabled native {name} control");
+                    let bounds = controls[0].1.bounds().unwrap();
+                    let centre = egui::pos2(((bounds.x0 + bounds.x1) / 2.0) as f32, ((bounds.y0 + bounds.y1) / 2.0) as f32);
+                    let rect = crate::scenario::rect_of(target).unwrap();
+                    assert!(body.contains_rect(rect) && rect.contains(centre), "width={width}: {name} is visible at its real target");
+                    if name == "Interface scale" {
+                        let row = crate::scenario::rect_of("dialog:row:Interface scale").unwrap();
+                        assert!((rect.left() - row.left()).abs() <= 1.0, "accessible-only name reserves no label column");
+                    }
+                    if name == "Color" {
+                        h.step(&serde_json::json!({"click":{"handle":target}})).unwrap();
+                        h.frames(2);
+                        assert_eq!(h.app.preferences.viewport_background, Some([255, 255, 255]), "the search hit edits the real setting");
+                    }
+                    if name == "Interface font" {
+                        h.step(&serde_json::json!({"click":{"handle":target}})).unwrap();
+                        h.frames(2);
+                        assert!(crate::scenario::handle_at("prefs:font_builtin").is_some(), "real searchable font picker opens at either width");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn search_matches_a_label_a_subsequence_and_the_english_source() {
         assert!(matches_text("zoom", &["Reverse zoom direction"]));
         assert!(matches_text("zo", &["Reverse zoom direction"]));
@@ -749,6 +807,22 @@ mod tests {
         assert!(!matches_text("dark", &["Units of new designs"]));
     }
 
+    /// A multi-word right-to-left label reaches the search in display order while the query is
+    /// typed in reading order: typing the label's words as written must find the row (#10471).
+    #[test]
+    fn search_finds_right_to_left_labels_typed_in_reading_order() {
+        let _language = crate::i18n::scope("he");
+        let label = crate::i18n::tr("prefs.bodies_folders");
+        assert!(matches_text("תיקיות גופים", &[label]), "the label as it is typed");
+        assert!(matches_text("גופים תיקיות", &[label]), "the words swapped still match");
+        assert!(matches_text("תיקיות", &[label]), "one word still matches");
+        let _language = crate::i18n::scope("ar");
+        let label = crate::i18n::tr("prefs.bodies_folders");
+        assert!(matches_text("مجلدات الأجسام", &[label]), "the label as it is typed");
+        assert!(matches_text("الأجسام مجلدات", &[label]), "the words swapped still match");
+        assert!(matches_text("مجلدات", &[label]), "one word still matches");
+    }
+
     /// The search field and its empty result name the window they search (#8318): "Search
     /// settings" under a "Preferences" title read as two names for one window.
     #[test]
@@ -757,6 +831,108 @@ mod tests {
         for id in ["prefs.search", "prefs.search_empty"] {
             let text = crate::i18n::tr(id).to_lowercase();
             assert!(text.contains(&name), "`{text}` should name the window `{name}`");
+        }
+    }
+
+    #[test]
+    fn general_redesigned_controls_remain_searchable_without_duplicate_settings() {
+        use egui::accesskit::Role;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
+        for (query, label) in [
+            ("reopen the designs", "Reopen the designs that were open last time"),
+            ("autosave every", "Autosave every"),
+            ("largest file to open: step", "Largest file to open: STEP and import"),
+            ("largest file to open: design", "Largest file to open: Design"),
+            ("allow network locations", "Allow network locations in designs"),
+            ("slicer that is already running", "Open files in a slicer that is already running"),
+            ("print face highlight", "Print face highlight"),
+            ("interface language", "Interface language"),
+        ] {
+            h.app.prefs_window.filter = query.into();
+            h.frames(4);
+            let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+            let at = h.widget(label).unwrap_or_else(|| panic!("{label} must match {query}"));
+            assert!(body.contains(egui::pos2(at[0] as f32, at[1] as f32)), "{label} is drawn in the results");
+            assert!(h.widget(h.app.tr("prefs.search_empty")).is_none(), "{query} has a real result instead of the empty-results message");
+            let (_, _, hits) = nav(&h.ctx);
+            let matching: Vec<_> = hits.iter().filter(|hit| hit.label == label).collect();
+            assert_eq!(matching.len(), 1, "{label} must have one real search result");
+            assert_eq!(matching[0].page, crate::prefs::PAGE_GENERAL);
+            let control = match label {
+                "Autosave every" => Some(("prefs:autosave_minutes", Role::SpinButton, "Minutes", h.app.autosave_minutes)),
+                "Largest file to open: STEP and import" => {
+                    Some(("prefs:max_step_file_mb", Role::SpinButton, label, h.app.preferences.max_step_file_mb as f64))
+                }
+                "Largest file to open: Design" => {
+                    Some(("prefs:max_design_file_mb", Role::SpinButton, label, h.app.preferences.max_design_file_mb as f64))
+                }
+                "Print face highlight" => {
+                    Some(("prefs:print_face_highlight", Role::Slider, label, f64::from(h.app.preferences.print_face_highlight)))
+                }
+                _ => None,
+            };
+            if let Some((identity, role, accessible_label, value)) = control {
+                let field = crate::scenario::rect_of(identity).expect("the matching field retains its stable identity");
+                assert!(body.contains_rect(field), "{identity} is drawn in the results");
+                let tree = h.output.accesskit_update.as_ref().unwrap();
+                // Search also measures invisible, disabled probe UIs. Count the live control.
+                let controls: Vec<_> = tree
+                    .nodes
+                    .iter()
+                    .filter(|(_, node)| !node.is_disabled() && node.role() == role && node.label() == Some(accessible_label))
+                    .collect();
+                assert_eq!(controls.len(), 1, "{identity} must have one real searchable control");
+                let node = &controls[0].1;
+                assert_eq!(node.numeric_value(), Some(value), "{identity} exposes its actual setting value");
+                let bounds = node.bounds().unwrap();
+                assert!(field.contains(egui::pos2(((bounds.x0 + bounds.x1) / 2.0) as f32, ((bounds.y0 + bounds.y1) / 2.0) as f32)));
+            }
+        }
+        // An unavailable control is still a real result. Invisible search probes are also
+        // disabled, so require the live navigation hit and painted label as well as metadata.
+        h.app.updater.kind = Some(crate::update::InstallKind::Dev);
+        assert!(!crate::update::available(&mut h.app));
+        let label = "Check at start and once a day";
+        h.app.prefs_window.filter = label.into();
+        for checked in [false, true] {
+            h.app.preferences.check_updates = checked;
+            h.frames(4);
+            let (_, _, hits) = nav(&h.ctx);
+            let matching: Vec<_> = hits.iter().filter(|hit| hit.label == label).collect();
+            assert_eq!(matching.len(), 1, "the disabled setting has one live result");
+            assert_eq!(matching[0].page, crate::prefs::PAGE_GENERAL);
+            assert!(h.widget(h.app.tr("prefs.search_empty")).is_none());
+            let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+            let field = crate::scenario::rect_of("prefs:check_updates").expect("the real scheduling control");
+            assert!(body.contains_rect(field));
+            let tree = h.output.accesskit_update.as_ref().unwrap();
+            let (_, node) = tree
+                .nodes
+                .iter()
+                .rev()
+                .find(|(_, node)| {
+                    node.role() == Role::CheckBox
+                        && node.label() == Some(label)
+                        && node.bounds().is_some_and(|bounds| {
+                            field.contains(egui::pos2(((bounds.x0 + bounds.x1) / 2.0) as f32, ((bounds.y0 + bounds.y1) / 2.0) as f32))
+                        })
+                })
+                .expect("the disabled checkbox exposes its real state at the rendered control");
+            assert!(node.is_disabled());
+            assert_eq!(node.toggled(), Some(if checked { egui::accesskit::Toggled::True } else { egui::accesskit::Toggled::False }));
+            let painted = h
+                .shapes
+                .iter()
+                .filter(|shape| {
+                    matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == label && body.contains(text.pos) && shape.clip_rect.contains(text.pos))
+                })
+                .count();
+            assert_eq!(painted, 1, "one visible disabled control is painted, beyond probe metadata");
+            h.step(&serde_json::json!({"click":{"handle":"prefs:check_updates"}})).unwrap();
+            assert_eq!(h.app.preferences.check_updates, checked, "the search result cannot edit an unavailable setting");
         }
     }
 
@@ -783,6 +959,13 @@ mod tests {
         h.step(&serde_json::json!({"key": "ArrowUp"})).expect("previous match");
         h.frames(1);
         assert_eq!(crate::scenario::handle_at("prefs:search:current"), first, "Up moves back");
+        let (_, _, hits) = nav(&h.ctx);
+        let cursor = hits
+            .iter()
+            .position(|hit| hit.page == crate::prefs::PAGE_NAVIGATION && hit.label == "Reverse zoom direction")
+            .expect("the Navigation setting remains keyboard reachable");
+        set_cursor(&h.ctx, cursor);
+        h.frames(2);
         h.step(&serde_json::json!({"key": "Enter"})).expect("open");
         h.frames(2);
         assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_NAVIGATION, "Enter opens the match's page");
@@ -807,9 +990,13 @@ mod tests {
         h.app.home.open = false;
         crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
         h.frames(2);
+        crate::prefs::reveal_preference(&mut h, "prefs:max_step_file_mb");
         let field = crate::scenario::rect_of("prefs:max_step_file_mb").expect("STEP limit field");
+        assert!(crate::scenario::rect_of("prefs:page_body").expect("Preferences body").contains_rect(field));
         h.step(&serde_json::json!({"click": [field.center().x, field.center().y]})).expect("click the field");
         h.frames(2);
+        let focused = h.ctx.memory(|memory| memory.focused()).expect("the number editor has focus");
+        assert!(field.contains_rect(h.ctx.read_response(focused).expect("focused editor response").rect));
         h.step(&serde_json::json!({"text": "7"})).expect("type");
         h.frames(2);
         assert!(h.app.prefs_window.filter.is_empty(), "typed `{}` into the search", h.app.prefs_window.filter);
@@ -905,7 +1092,7 @@ mod tests {
     fn preferences_search_finds_settings_in_rows_without_a_label() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_INTERFACE);
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_LAYOUT);
         h.frames(2);
         // Drawn, not merely present: a hidden row's controls still exist, far off screen.
         let drawn = |h: &crate::scenario::Harness, label: &str| {
@@ -938,5 +1125,30 @@ mod tests {
         h.app.prefs_window.filter = "zzzz-no-setting".into();
         h.frames(4);
         assert!(!drawn(&h, "Status bar"), "a miss shows nothing");
+    }
+    #[test]
+    fn moved_preferences_search_paths_and_enter_follow_window_groups() {
+        for (query, path, page) in [
+            ("Direct interaction", "Work > Tools", crate::prefs::PAGE_TOOLS),
+            ("Navigate with the 3D mouse", "Input > 3D mouse", crate::prefs::PAGE_MOUSE3D),
+            ("Origin plane names", "Work > Design", crate::prefs::PAGE_DESIGN),
+            ("Status bar", "Look > Layout", crate::prefs::PAGE_LAYOUT),
+        ] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
+            h.app.prefs_window.filter = query.into();
+            h.frames(4);
+            assert!(h.widget(path).is_some(), "{query} shows {path}");
+            let (_, _, hits) = nav(&h.ctx);
+            let index = hits.iter().position(|hit| hit.page == page && hit.label == query).expect("moved control is keyboard reachable");
+            set_cursor(&h.ctx, index);
+            h.frames(2);
+            h.step(&serde_json::json!({"key":"Enter"})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.prefs_window.section, page);
+            assert!(h.app.prefs_window.filter.is_empty());
+            assert!(h.widget(query).is_some());
+        }
     }
 }

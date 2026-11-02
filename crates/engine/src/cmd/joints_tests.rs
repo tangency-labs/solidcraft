@@ -680,6 +680,197 @@ fn values_left_out_of_a_drive_follow_the_loop() {
     assert!(near(place(&s, "Plate", Vec3::ZERO), Vec3::new(10.0, 10.0, 0.0)), "{:?}", place(&s, "Plate", Vec3::ZERO));
 }
 
+/// Two boards 400 x 100 x 20 for #10331: yellow at the origin, grounded, and red 300 mm along Y.
+fn boards() -> Session {
+    let mut s = Session::default();
+    for (name, corner) in [("Yellow", [0.0, 0.0, 0.0]), ("Red", [0.0, 300.0, 0.0])] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name, "grounded": false}));
+        run(&mut s, "solid.box", json!({"length": 400, "width": 100, "height": 20, "corner": corner}));
+    }
+    let y = occ(&s, "Yellow");
+    run(&mut s, "occurrence.ground", json!({"occurrence": y, "grounded": true}));
+    s
+}
+
+/// #10331: a board on a planar joint, mated by a second planar joint at a face that points the
+/// same way as the face it meets. It meets it turned a half turn on the first joint, the way the
+/// first joint moves its part into place, in either pick order, and still slides along the
+/// line the two planes share. Faces that can never meet stay a conflict, and nothing moves.
+#[test]
+fn a_second_planar_joint_turns_its_part_a_half_turn_to_meet() {
+    // Each case: the yellow face, the red face (world points once red lies on yellow, at
+    // x 0..400, y 0..100, z 20..40), and where red's origin ends up.
+    let cases = [
+        ("fronts", [200.0, 0.0, 10.0], [200.0, 0.0, 30.0], Some(Vec3::new(400.0, 300.0, 20.0))),
+        ("ends", [0.0, 50.0, 10.0], [0.0, 50.0, 30.0], Some(Vec3::new(0.0, 400.0, 20.0))),
+        ("top against front", [200.0, 0.0, 10.0], [200.0, 50.0, 40.0], None),
+    ];
+    for red_first in [false, true] {
+        for (case, yellow_face, red_face, expected) in cases {
+            let mut s = boards();
+            let planar = |s: &mut Session, name: &str, yellow: [f64; 3], red: [f64; 3]| {
+                let (yellow, red) = (json!({"occurrence": "Yellow", "face": yellow}), json!({"occurrence": "Red", "face": red}));
+                let (a, b) = if red_first { (red, yellow) } else { (yellow, red) };
+                run(s, "joint.create", json!({"type": "planar", "a": a, "b": b, "name": name}))
+            };
+            let r = planar(&mut s, "Top", [200.0, 50.0, 20.0], [200.0, 350.0, 0.0]);
+            assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "{case}: {r}");
+            let on_top = place(&s, "Red", Vec3::ZERO);
+            let r = planar(&mut s, "Side", yellow_face, red_face);
+            let label = format!("{case}, red picked first: {red_first}");
+            let Some(expected) = expected else {
+                assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(1), "{label}: {r}");
+                assert!(near(place(&s, "Red", Vec3::ZERO), on_top), "{label}: {:?}", place(&s, "Red", Vec3::ZERO));
+                continue;
+            };
+            assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "{label}: {r}");
+            assert!(place(&s, "Red", Vec3::ZERO).dist(expected) < 1e-6, "{label}: {:?}", place(&s, "Red", Vec3::ZERO));
+            assert_eq!(dof_of(&mut s, "Red"), 1, "{label}");
+            let axes = solidcraft_doc::joints::motion_axes(&s.doc, &s.model.state(), occ(&s, "Red"));
+            assert!(axes.len() == 1 && !axes.iter().any(|a| a.angular), "{label}: {axes:?}");
+        }
+    }
+}
+
+/// #10331, with the board turned on the table first (the report's board was turned 40 degrees):
+/// a second planar joint between any side of the yellow board and any side of the red one meets,
+/// whichever turn the red board needs on the first joint to get there.
+#[test]
+fn any_two_sides_of_turned_boards_meet_on_a_second_planar_joint() {
+    // The sides' centres, the red ones where the red board was made.
+    let reds = [
+        ("red front", Vec3::new(200.0, 300.0, 10.0)),
+        ("red back", Vec3::new(200.0, 400.0, 10.0)),
+        ("red left end", Vec3::new(0.0, 350.0, 10.0)),
+        ("red right end", Vec3::new(400.0, 350.0, 10.0)),
+    ];
+    let yellows = [
+        ("yellow front", [200.0, 0.0, 10.0]),
+        ("yellow back", [200.0, 100.0, 10.0]),
+        ("yellow left end", [0.0, 50.0, 10.0]),
+        ("yellow right end", [400.0, 50.0, 10.0]),
+    ];
+    for turn in [40.0f64, 0.0, 137.0] {
+        for (yn, yp) in yellows {
+            for (rn, rl) in reds {
+                let mut s = boards();
+                run(
+                    &mut s,
+                    "occurrence.move",
+                    json!({"occurrence": "Red:1", "space": "world", "axis": [0, 0, 1], "angle": format!("{turn} deg"), "origin": [200, 350, 0]}),
+                );
+                let top = place(&s, "Red", Vec3::new(200.0, 350.0, 0.0));
+                run(
+                    &mut s,
+                    "joint.create",
+                    json!({"type": "planar", "a": {"occurrence": "Yellow", "face": [200, 50, 20]}, "b": {"occurrence": "Red", "face": [top.x, top.y, top.z]}, "name": "Top"}),
+                );
+                let rp = place(&s, "Red", rl);
+                let r = run(
+                    &mut s,
+                    "joint.create",
+                    json!({"type": "planar", "a": {"occurrence": "Yellow", "face": yp}, "b": {"occurrence": "Red", "face": [rp.x, rp.y, rp.z]}, "name": "Side"}),
+                );
+                assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "turned {turn} degrees, {yn} against {rn}: {r}");
+            }
+        }
+    }
+}
+
+/// #9687: a second planar joint left as a conflict, as a design saved before joint.create turned
+/// its part a half turn keeps it, meets when Edit Joint's OK places it again, and one unsuppressed
+/// after its part was turned away on the first joint meets too. A rename alone moves nothing.
+#[test]
+fn editing_or_unsuppressing_a_conflicting_second_planar_joint_turns_its_part_to_meet() {
+    let conflicts = |r: &Value| r["conflicts"].as_array().map(Vec::len);
+    let values = |s: &Session, name: &str| s.doc.assembly.joints.iter().find(|j| j.name == name).map(|j| j.values.clone()).unwrap_or_default();
+    let pose = |s: &Session| [Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z].map(|p| place(s, "Red", p));
+    let mut s = boards();
+    let planar = |s: &mut Session, name: &str, yellow: [f64; 3], red: [f64; 3]| {
+        run(
+            s,
+            "joint.create",
+            json!({"type": "planar", "a": {"occurrence": "Yellow", "face": yellow}, "b": {"occurrence": "Red", "face": red}, "name": name}),
+        )
+    };
+    planar(&mut s, "Top", [200.0, 50.0, 20.0], [200.0, 350.0, 0.0]);
+    let on_top = values(&s, "Top");
+    // The fronts point the same way: Side meets with Red turned a half turn on Top.
+    let r = planar(&mut s, "Side", [200.0, 0.0, 10.0], [200.0, 0.0, 30.0]);
+    assert_eq!(conflicts(&r), Some(0), "{r}");
+    let met = pose(&s);
+    // Red as it met, slid along the line the two planes share (X) at most.
+    let meets = |s: &Session| {
+        let now = pose(s);
+        let dx = Vec3::new(now[0].x - met[0].x, 0.0, 0.0);
+        now.iter().zip(&met).all(|(p, q)| near(*p, *q + dx))
+    };
+    // As a design saved before joint.create turned Red: Top's values from before Side.
+    if let Some(j) = s.doc_mut().assembly.joints.iter_mut().find(|j| j.name == "Top") {
+        j.values = on_top;
+    }
+    let r = run(&mut s, "joint.solve", json!({}));
+    assert_eq!(conflicts(&r), Some(1), "{r}");
+    let saved = pose(&s);
+    assert!(!meets(&s), "{saved:?}");
+    let r = run(&mut s, "joint.edit", json!({"joint": "Side", "name": "Front"}));
+    assert_eq!(conflicts(&r), Some(1), "a rename: {r}");
+    assert!(pose(&s).iter().zip(&saved).all(|(p, q)| near(*p, *q)), "a rename moved Red: {:?}", pose(&s));
+    // Edit Joint's OK sends the type, flip and offset.
+    let r = run(&mut s, "joint.edit", json!({"joint": "Front", "type": "planar", "flip": false, "offset": 0}));
+    assert_eq!(conflicts(&r), Some(0), "Edit Joint's OK: {r}");
+    assert!(meets(&s), "Edit Joint's OK: {:?}", pose(&s));
+    assert_eq!(dof_of(&mut s, "Red"), 1);
+    // Suppressed, Red turned a half turn away on Top, then unsuppressed.
+    run(&mut s, "joint.edit", json!({"joint": "Front", "suppressed": true}));
+    let angle = values(&s, "Top").get(2).copied().unwrap_or(f64::NAN).to_degrees();
+    run(&mut s, "joint.drive", json!({"joint": "Top", "index": 2, "value": angle + 180.0}));
+    assert!(!meets(&s), "turned away: {:?}", pose(&s));
+    let r = run(&mut s, "joint.edit", json!({"joint": "Front", "suppressed": false}));
+    assert_eq!(conflicts(&r), Some(0), "unsuppressed: {r}");
+    assert!(meets(&s), "unsuppressed: {:?}", pose(&s));
+}
+
+/// #9687: a frame held by many planar joints ties its loops into one group with more values than
+/// the loop solver moves at once, which was then only checked: a new joint closing a loop in it
+/// stayed a conflict, and a drive in it moved nothing. A table on the ground, parts each on the
+/// table and on the ground (11 parts: 70 values with the peg), and a peg 10 mm from where P0's
+/// pin point sits: P0 slides onto it as it does with one part, and turns about it when driven.
+#[test]
+fn a_loop_in_a_group_over_the_solvers_values_still_closes_and_drives() {
+    let conflicts = |r: &Value| r["conflicts"].as_array().map(Vec::len);
+    for parts in [1usize, 11] {
+        let mut s = Session::default();
+        part(&mut s, "Ground", [-1.0, -1.0, -2.0]);
+        let g = occ(&s, "Ground");
+        run(&mut s, "occurrence.ground", json!({"occurrence": g, "grounded": true}));
+        part(&mut s, "Table", [-1.0, -1.0, 0.0]);
+        pin(&mut s, "planar", "Base", "Ground", "Table", Vec3::ZERO, Vec3::Z);
+        for k in 0..parts {
+            let (name, c) = (format!("P{k}"), Vec3::new(10.0 * k as f64, 20.0, 0.0));
+            part(&mut s, &name, [c.x - 1.0, c.y - 1.0, 0.0]);
+            pin(&mut s, "planar", &format!("{name} on table"), "Table", &name, c, Vec3::Z);
+            pin(&mut s, "planar", &format!("{name} on ground"), "Ground", &name, c, Vec3::Z);
+        }
+        let at = |o: &str, p: [f64; 3]| json!({"occurrence": o, "point": p, "z": [0, 0, 1]});
+        let peg = json!({"type": "revolute", "name": "Peg", "a": at("Ground", [10.0, 20.0, 0.0]), "b": at("P0", [0.0, 20.0, 0.0]), "flip": true});
+        let r = run(&mut s, "joint.create", peg);
+        assert_eq!(conflicts(&r), Some(0), "{parts} parts: {r}");
+        let pin_point = Vec3::new(10.0, 20.0, 0.0);
+        assert!(near(place(&s, "P0", Vec3::new(0.0, 20.0, 0.0)), pin_point), "{parts} parts: {:?}", place(&s, "P0", Vec3::new(0.0, 20.0, 0.0)));
+        // P0's point 1 mm along X from its pin point (closing the loop may have turned P0 a little
+        // about the peg), then 30 degrees further round.
+        let (p, q0) = (Vec3::new(1.0, 20.0, 0.0), place(&s, "P0", Vec3::new(1.0, 20.0, 0.0)));
+        let turn = s.doc.assembly.joints.iter().find(|j| j.name == "Peg").and_then(|j| j.values.first().copied()).unwrap_or(f64::NAN);
+        let r = run(&mut s, "joint.drive", json!({"joint": "Peg", "value": turn.to_degrees() + 30.0}));
+        assert!(r["stopped_by_loop"].is_null() && conflicts(&r) == Some(0), "{parts} parts: {r}");
+        let (a, b) = (q0 - pin_point, place(&s, "P0", p) - pin_point);
+        let sin = a.x * b.y - a.y * b.x;
+        assert!((b.len() - 1.0).abs() < 1e-6 && (sin.abs() - 0.5).abs() < 1e-6 && b.z.abs() < 1e-6, "{parts} parts: {a:?} to {b:?}");
+    }
+}
+
 /// A slider-crank: crank 15 about the origin, rod 40, a piston sliding along X. Returns the crank
 /// pin and the wrist pin.
 fn slider_crank() -> (Session, Vec3, Vec3) {
@@ -2471,4 +2662,22 @@ fn driving_one_cylindrical_coordinate_preserves_the_other_expression_and_reports
     for bad in [json!(-1), json!(2), json!(1000000), json!("0")] {
         assert!(s.execute("joint.drive", &json!({"joint":joint,"index":bad,"value":0})).is_err());
     }
+}
+
+/// #10747: driving a joint to 30 reports 30, not 29.999999999999996; the joint keeps
+/// full precision.
+#[test]
+fn driving_an_angle_reports_the_number_a_person_would_read() {
+    let mut s = two_cubes();
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": "A", "point": [5.0, 5.0, 10.0]}, "b": {"occurrence": "B", "point": [25.0, 5.0, 10.0]}, "name": "Turn"}),
+    );
+    let r = run(&mut s, "joint.drive", json!({"joint": "Turn", "value": 30}));
+    assert_eq!(r["values"][0]["value"], json!(30.0), "{r}");
+    assert_eq!(r["requested"][0]["value"], json!(30.0), "{r}");
+    // Only what is reported is rounded: the stored value keeps full precision.
+    let j = s.doc.assembly.joints.iter().find(|j| j.name == "Turn").unwrap();
+    assert_ne!(j.values[0].to_degrees(), 30.0, "the stored angle keeps its bits");
 }

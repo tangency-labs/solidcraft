@@ -134,10 +134,10 @@ impl LinkSource {
     /// Short description for messages and the browser.
     pub fn describe(&self) -> String {
         match self {
-            LinkSource::Edge { body, .. } => format!("edge of {body}"),
-            LinkSource::Face { body, .. } => format!("face of {body}"),
+            LinkSource::Edge { body, .. } => of_body("edge", body),
+            LinkSource::Face { body, .. } => of_body("face", body),
             LinkSource::Body { body } => body.clone(),
-            LinkSource::Vertex { body, .. } => format!("vertex of {body}"),
+            LinkSource::Vertex { body, .. } => of_body("vertex", body),
             LinkSource::SketchCurve { curve, .. } => format!("sketch curve {curve}"),
             LinkSource::SketchPoint { point, .. } => format!("sketch point {point}"),
             LinkSource::Origin => "origin".into(),
@@ -146,8 +146,8 @@ impl LinkSource {
             LinkSource::Plane { name } => format!("{name} plane"),
             LinkSource::OnSurface { curve, .. } => format!("{curve} on a face"),
             LinkSource::Intersection { a, b } => format!("intersection of {} and {}", a.describe(), b.describe()),
-            LinkSource::Spun { body, .. } => format!("spun profile of {body}"),
-            LinkSource::Iso { body, .. } => format!("isoparametric curve of {body}"),
+            LinkSource::Spun { body, .. } => of_body("spun profile", body),
+            LinkSource::Iso { body, .. } => of_body("isoparametric curve", body),
             LinkSource::Text { text, .. } => format!("text \"{}\"", text.chars().take(20).collect::<String>()),
         }
     }
@@ -176,6 +176,13 @@ impl LinkSource {
             | LinkSource::Text { .. } => Vec::new(),
         }
     }
+}
+
+/// The description of a source that names a body: "face of Body1", or the kind alone when the
+/// reference names no body (a picked face is found by its geometry, and the body it belongs
+/// to is not named in the reference).
+fn of_body(kind: &str, body: &str) -> String {
+    if body.is_empty() { kind.to_string() } else { format!("{kind} of {body}") }
 }
 
 /// Half length of the line a sketch axis link produces.
@@ -1128,14 +1135,87 @@ impl Sketch {
         self.points.iter().zip(&was).any(|(p, w)| p.pos != *w).then_some(was)
     }
 
+    /// `stored` as this sketch has its entities, when they differ only by texts built anew
+    /// since (other words, from an expression, are other outlines with new points and curves):
+    /// those texts' entities as this sketch has them, every other point where `stored` has it,
+    /// every other circle and ellipse with its stored radius, arcs with their stored turn and
+    /// constraints with their stored values. Paired so entity by entity, a solve after the links
+    /// moved can walk from the stored state as it does when no text changed. `None` when the
+    /// two are the same entities or differ in anything else.
+    pub fn stored_with_rebuilt_texts(&self, stored: &Sketch) -> Option<Sketch> {
+        let texts: Vec<&str> = self.links.iter().filter(|l| matches!(l.source, LinkSource::Text { .. })).map(|l| l.id.as_str()).collect();
+        let in_text = |link: &Option<String>| link.as_deref().is_some_and(|l| texts.contains(&l));
+        let same = self.points.len() == stored.points.len()
+            && self.curves.len() == stored.curves.len()
+            && self.points.iter().zip(&stored.points).all(|(p, q)| p.id == q.id)
+            && self.curves.iter().zip(&stored.curves).all(|(c, d)| c.id == d.id);
+        let ids = |sk: &Sketch| sk.links.iter().map(|l| l.id.clone()).collect::<Vec<_>>();
+        if same
+            || texts.is_empty()
+            || ids(self) != ids(stored)
+            || !self.points.iter().filter(|p| !in_text(&p.link)).map(|p| &p.id).eq(stored.points.iter().filter(|p| !in_text(&p.link)).map(|p| &p.id))
+            || !self.curves.iter().filter(|c| !in_text(&c.link)).map(|c| &c.id).eq(stored.curves.iter().filter(|c| !in_text(&c.link)).map(|c| &c.id))
+            || !self.constraints.iter().map(|c| &c.id).eq(stored.constraints.iter().map(|c| &c.id))
+        {
+            return None;
+        }
+        let mut out = self.clone();
+        let points: std::collections::BTreeMap<&str, Vec2> =
+            stored.points.iter().filter(|p| !in_text(&p.link)).map(|p| (p.id.as_str(), p.pos)).collect();
+        for p in out.points.iter_mut().filter(|p| !in_text(&p.link)) {
+            if let Some(pos) = points.get(p.id.as_str()) {
+                p.pos = *pos;
+            }
+        }
+        let curves: std::collections::BTreeMap<&str, &Curve> =
+            stored.curves.iter().filter(|c| !in_text(&c.link)).map(|c| (c.id.as_str(), c)).collect();
+        for c in out.curves.iter_mut().filter(|c| !in_text(&c.link)) {
+            let Some(d) = curves.get(c.id.as_str()) else { continue };
+            match (&mut c.kind, &d.kind) {
+                (CurveKind::Circle { r, .. }, CurveKind::Circle { r: s, .. }) | (CurveKind::Ellipse { r, .. }, CurveKind::Ellipse { r: s, .. }) => {
+                    *r = *s
+                }
+                (CurveKind::Conic { rho, .. }, CurveKind::Conic { rho: s, .. }) => *rho = *s,
+                _ => {}
+            }
+            c.reversed = d.reversed;
+        }
+        for (c, d) in out.constraints.iter_mut().zip(&stored.constraints) {
+            if let Some(v) = d.kind.value() {
+                c.kind.set_value(v);
+            }
+        }
+        Some(out)
+    }
+
     fn drop_link_entities(&mut self, id: &str) {
         let curves = self.link_curves(id);
         let keep = self.links.clone();
         self.remove_curves(&curves);
         let pts = self.link_points(id);
+        self.free_own_curves(&pts);
         self.remove_points(&pts);
         // Removal prunes empty links; this one stays.
         self.links = keep;
+    }
+
+    /// The sketch's own curves that use one of `pts` (a circle drawn on a projected hole's
+    /// centre) move onto a free point of their own at the same place, so removing `pts` doesn't
+    /// delete them with the link (#5388). Constraints on `pts` still go with them.
+    fn free_own_curves(&mut self, pts: &[usize]) {
+        for &p in pts {
+            let own: Vec<usize> = self.curves.iter().enumerate().filter(|(_, c)| c.link.is_none() && c.kind.uses(p)).map(|(i, _)| i).collect();
+            if own.is_empty() {
+                continue;
+            }
+            let Some(pos) = self.points.get(p).map(|q| q.pos) else { continue };
+            let Ok(free) = self.add_point(pos, None) else { continue };
+            for ci in own {
+                if let Some(c) = self.curves.get_mut(ci) {
+                    c.kind.map_points(&|q| if q == p { free } else { q });
+                }
+            }
+        }
     }
 
     /// Mark a link as lost (its reference was not found); its geometry stays as it was.

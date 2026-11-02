@@ -278,6 +278,36 @@ fn fit_and_home_json_commands_preserve_design_framing() {
     assert_eq!(h.app.session.undo.len(), undo);
 }
 
+/// #10091: Preferences › Navigation "Home and Fit size" is how much of the view the model fills
+/// when Home and Fit (and an opened design or a navigator view change) frame it; 100 %, the
+/// default, fills the room between the panels and the controls as before.
+#[test]
+fn home_fit_size_scales_the_framed_model() {
+    let mut h = Harness::new();
+    h.app.preferences.look_at_anim = false;
+    moved_block(&mut h);
+    assert_eq!(h.app.preferences.home_fit_size, 1.0, "fills the room by default");
+    h.call("engine.execute", json!({"command":"view.home","params":{}}));
+    h.frames(2);
+    let tight = h.app.cam;
+    h.call("ui.prefs", json!({"home_fit_size":0.8}));
+    for command in ["view.home", "view.fit"] {
+        h.call("engine.execute", json!({"command":command,"params":{}}));
+        h.frames(2);
+        assert!((h.app.cam.distance / tight.distance - 1.25).abs() < 0.02, "{command}: {} vs {}", h.app.cam.distance, tight.distance);
+        assert_eq!((h.app.cam.yaw, h.app.cam.pitch), (tight.yaw, tight.pitch), "{command}: the size only zooms");
+    }
+    for bad in [1.5, 0.05, 0.0, -1.0] {
+        let r = h.call("ui.prefs", json!({"home_fit_size":bad}));
+        assert_eq!(r["ok"], false, "{bad} is outside 10 %…100 %: {r}");
+    }
+    assert!((h.app.preferences.home_fit_size - 0.8).abs() < 1e-6);
+    h.call("ui.prefs", json!({"open":"Navigation"}));
+    h.call("ui.prefs", json!({"button":"defaults"}));
+    assert_eq!(h.app.preferences.home_fit_size, 1.0, "Navigation defaults restore 100 %");
+    h.call("ui.prefs", json!({"button":"cancel"}));
+}
+
 #[test]
 fn fit_json_frames_selection_while_home_frames_everything() {
     let mut h = Harness::new();

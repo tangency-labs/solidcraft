@@ -31,7 +31,8 @@ mod relink_tests;
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.insert_design", "Insert Design", insert_design).at("SOLID", "ASSEMBLE").icon("component").params(
         "path: a .sc design → a new component linked to it, holding its solid bodies as placed in that design and a copy of its design properties; \
-         name? (default: the design's name); parent?: component id or name (default: the active one); translate?: [x,y,z]; \
+         name? (default: the design's name); parent?: component id or name (default: the active one); \
+         translate?: [x,y,z] in mm from the destination parent's origin (default [0,0,0], also with reuse); \
          reuse?: bool (default false): insert a free occurrence, reusing an existing link to the same file when available",
     ),
     CommandSpec::new("component.update_links", "Update Links", update_links).icon("update").params(
@@ -41,7 +42,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          joints whose faces are gone or that no longer solve)",
     ),
     CommandSpec::new("component.relink", "Relink Source", relink).icon("update").params(
-        "component: id or name of a linked component; path: a saved .sc design — replaces the source and linked bodies for all its occurrences, preserving identities and placements; returns path, previous_path, warnings, joint_errors and joint_conflicts",
+        "component: id or name of a linked component; path: a saved design (.sc or .json) — replaces the source and linked bodies for all its occurrences, preserving identities and placements; returns path, previous_path, warnings, joint_errors and joint_conflicts",
     ),
     CommandSpec::new("component.break_link", "Break Link", break_link)
         .icon("break")
@@ -506,8 +507,13 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     if p.get("reuse").and_then(Value::as_bool).unwrap_or(false) {
         let existing = s.doc.links.iter().find(|(_, link)| absolute(&resolve(s.path.as_deref(), &link.path)) == file).map(|(id, _)| *id);
         if let Some(component) = existing {
-            let parent = p.get("parent").cloned().unwrap_or_else(|| json!(s.active_component));
-            return super::component::copy_occurrence(s, &json!({"component": component, "parent": parent, "translate": translate}));
+            let parent = if p.get("parent").is_some() { component_key(s, p, "parent", cmd)? } else { s.active_component };
+            // Reuse the definition, not another placement's captured or pending move.
+            // Insert Design places from the parent origin whether the link is new or reused.
+            let mut transform = solidcraft_doc::IDENTITY;
+            transform[3] = [translate.x, translate.y, translate.z, 1.0];
+            let occurrence = s.doc_mut().add_occurrence(component, parent, transform)?;
+            return Ok(json!({"occurrence": occurrence, "component": component}));
         }
     }
     let ((design_name, sf, faces, metadata, properties), read) = linked_bodies_read(&file, s.path.as_deref())?;
@@ -721,8 +727,9 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))?;
     let file = absolute(Path::new(given));
-    if !solidcraft_io::is_design_container_path(&file) {
-        return Err(bad(cmd, "choose a saved .sc design"));
+    // Any design Insert Design takes: a .sc container (or a legacy one) or a plain JSON design.
+    if !solidcraft_io::is_design_path(given) {
+        return Err(bad(cmd, "choose a saved design (.sc or .json)"));
     }
     // A network or device path is judged from its text before the disk is asked anything.
     link_refused(s.path.as_deref(), given).map_err(|e| bad(cmd, e.to_string()))?;

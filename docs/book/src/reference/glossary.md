@@ -519,8 +519,8 @@ Search lists both under the same name, and the label lookup gives both the same 
 ## A feature's type
 
 A feature type has one name: its design-file key, such as `sheet_flange`. The label (Flange) is
-its display name. Replies and scripts should use the design-file key; today `timeline.inspect`
-reports a different name (`EdgeFlangeFeature`), so a script can't match one against the other.
+its display name. Replies and scripts use the design-file key (`timeline.inspect` reports both
+`type: "sheet_flange"` and `type_name: "EdgeFlangeFeature"`).
 
 ## Open questions for the maintainer
 

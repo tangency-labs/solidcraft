@@ -39,14 +39,15 @@ one as a separate piece, and the feature's warning says so: "`Body1` is now in 2
 pieces". Combine joins the bodies it is given without that warning. Changing the default does not
 alter operations already saved in a design.
 
-**Extrude to a picked target** (Preferences › Design, off by default) lets a pick choose the
+**Extrude to a picked target** (Preferences › Tools, on by default) lets a pick choose the
 extent. With it on and a profile selected in the solid Extrude dialog, picking a face away from
 its plane, a curved face, an off-plane vertex or a parallel plane automatically switches
 **Distance** to **To Object**. Coplanar faces still join the profile selection; non-parallel
-planes are not targets. The extent can still be chosen manually. For a new extrusion without
+planes are not targets. Clicking into the **Profiles** box first makes the next picks profiles
+again, even off the plane. The extent can still be chosen manually. For a new extrusion without
 start or end offsets or a From Object input, the target also sets the stored distance and
 one-sided direction, so returning to **Distance** keeps that reach. Thin Extrude keeps its
-existing picks. With the setting off, picks only add profiles, as before.
+existing picks. With the setting off, picks only add profiles.
 
 A positive extrude taper slopes the side walls outward, so the profile grows along the
 extrusion direction and the far end is larger; a negative taper slopes them inward, making
@@ -282,7 +283,7 @@ edited with the sketch commands. Expressions are text (`"30"`, `"30 mm"`, `"widt
 
 ```json
 {"command": "timeline.inspect", "params": {"feature": "Slab"}}
-→ {"type": "ExtrudeFeature",
+→ {"type": "extrude", "type_name": "ExtrudeFeature",
    "definition": {"sketch": 1, "profiles": {"type": "all"}, "operation": "new_body",
                   "extent": {"distance": "10", "direction": "positive"}},
    "inputs": [{"label": "Distance", "param": "d1", "expression": "10", "unit": "mm"}], …}

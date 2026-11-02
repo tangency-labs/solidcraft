@@ -68,6 +68,27 @@ pub(crate) fn add_round(v: &mut Value, shape: &Shape) {
     });
 }
 
+/// The radius of a toroidal or spherical face, added to its description: a fillet round a
+/// circular edge is a torus whose tube radius is the fillet's (`major_radius` is the ring
+/// through the middle of the rolling ball), a ball or a spherical corner patch a sphere. These
+/// faces have no axis to measure from, so they stay out of [`Shape`].
+pub(crate) fn add_curved(v: &mut Value, surface: Option<solidcraft_kernel::FaceSurface>) {
+    use solidcraft_kernel::FaceSurface;
+    let (radius, kind) = match surface {
+        Some(FaceSurface::Torus { minor, major, .. }) if minor.is_finite() && minor > 0.0 => {
+            if major.is_finite() {
+                v["major_radius"] = json!(major.abs());
+            }
+            (minor, "torus")
+        }
+        Some(FaceSurface::Sphere { radius, .. }) if radius.is_finite() && radius > 0.0 => (radius, "sphere"),
+        _ => return,
+    };
+    v["diameter"] = json!(2.0 * radius);
+    v["radius"] = json!(radius);
+    v["surface"] = json!(kind);
+}
+
 /// Cylinder `axis` through `origin` of radius `radius` over the points of its face: the
 /// round shape, centred level with the middle of the face, with its extent and coverage.
 pub(crate) fn cylinder(origin: Vec3, axis: UnitVec3, radius: f64, pts: &[Vec3]) -> Option<Shape> {

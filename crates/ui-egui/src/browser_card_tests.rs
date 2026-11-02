@@ -43,6 +43,27 @@ fn clicked_browser_folders_toggle_visibility_with_v() {
     }
 }
 
+/// #10526: New Group from the root's context menu in a design with no bodies yet makes a group
+/// the Browser shows, and a body made later can be dropped into it.
+#[test]
+fn a_new_group_in_a_folder_with_nothing_in_it_yet_shows() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.settle();
+    assert!(handle_at("row:Bodies").is_none(), "no bodies, no Bodies folder");
+    // What the root's New Group item runs.
+    group_action(&mut h.app, "ui.newGroup", &json!({"component": 0}));
+    h.settle();
+    let group = h.app.session.doc.browser_groups.first().map(|g| (g.id, g.name.clone())).expect("New Group makes a group");
+    assert!(handle_at(&format!("row:{} (0)", group.1)).is_some(), "the new group shows in the Browser");
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"operation":"new_body","body_name":"One"})).unwrap();
+    h.settle();
+    h.step(&json!({"drag":[{"handle":"row:One"},{"handle":format!("row:{} (0)", group.1)}]})).unwrap();
+    h.settle();
+    let items = h.app.session.doc.browser_group(group.0).map(|g| g.items.len()).unwrap_or(0);
+    assert_eq!(items, 1, "the body went into the group");
+}
+
 /// #10005: F2 on a group picked in the Browser opens its Rename box, as for other rows, and the
 /// typed name renames the group, at the top level and inside a component; a body selected
 /// alongside does not take the rename from the clicked group.
@@ -57,6 +78,8 @@ fn f2_on_a_clicked_browser_group_renames_the_group() {
             h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Body1"})).unwrap();
             (h, 0)
         };
+        // The group's row sits inside a placement, which starts closed (#9274).
+        h.app.preferences.browser_components_open = true;
         let body = h.app.session.model.state().bodies[0].name.clone();
         let group = h.app.run("browser.group", json!({"component":component,"folder":"bodies","items":[body],"name":"Group"})).unwrap()["group"]
             .as_u64()
@@ -83,6 +106,31 @@ fn f2_on_a_clicked_browser_group_renames_the_group() {
         assert_eq!(names, ["Fasteners"], "component {inside_component}: Enter renames the group; status {:?}", h.app.status);
         assert!(h.app.session.world_state().body(&world_body).is_some(), "the body keeps its name");
     }
+}
+
+/// #10654: a refused inline rename keeps the editor open and says why, instead of closing
+/// silently and leaving the old name.
+#[test]
+fn a_refused_inline_rename_keeps_the_editor_and_shows_the_error() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"A"})).unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"B"})).unwrap();
+    h.app.preferences.browser_bodies_folders = crate::prefs::BodiesFolders::Always;
+    h.settle();
+    h.app.menu.rename = Some(crate::context_menu::Rename {
+        what: crate::context_menu::RenameWhat::Body("B".into()),
+        text: "A".into(),
+        at: egui::Pos2::ZERO,
+        focused: true,
+        inline: true,
+    });
+    h.frames(2);
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.frames(2);
+    assert!(h.app.menu.rename.is_some(), "the editor stays open after a refused rename");
+    let (text, _, error) = h.app.status.clone().expect("the refusal is shown");
+    assert!(error && text.contains("another body is called"), "{text}");
+    assert!(h.app.session.world_state().body("B").is_some(), "the body keeps its name");
 }
 
 #[test]
@@ -744,6 +792,8 @@ fn browser_occurrence_clicks_fill_align_components_input() {
 #[test]
 fn row_eyes_line_up_at_the_right_end_unless_the_preference_keeps_them_left() {
     let mut h = Harness::new();
+    // These rows are read with every placement open, as placements started before #9274.
+    h.app.preferences.browser_components_open = true;
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Top"})).unwrap();
     let part = h.app.run("component.create", json!({"name":"Part"})).unwrap()["occurrence"].as_u64().unwrap();
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[20,0,0],"body_name":"Inner"})).unwrap();
@@ -981,4 +1031,23 @@ fn eye_drag_from_the_origin_is_its_own_undo_step_and_leaves_an_earlier_show_alon
     assert!(origin_hidden(&h), "the Origin's eye is not an undo step: it keeps what the drag set");
     h.app.run("edit.undo", json!({})).unwrap();
     assert!(body_hidden(&h, "One"), "the show is its own undo step: undoing it hides One again");
+}
+
+/// #9953: hiding or showing a sketch or body dynamically dims/undims the row without needing a full row rebuild.
+#[test]
+fn hiding_or_showing_body_or_sketch_updates_row_dimming() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"One"})).unwrap();
+    h.app.run("browser.expand_all", json!({})).unwrap();
+    h.settle();
+
+    // Toggle body hidden via eye click
+    h.step(&json!({"click":{"handle":"eye:One"}})).unwrap();
+    h.settle();
+    assert!(body_hidden(&h, "One"));
+
+    // Toggle body shown again via eye click
+    h.step(&json!({"click":{"handle":"eye:One"}})).unwrap();
+    h.settle();
+    assert!(!body_hidden(&h, "One"));
 }

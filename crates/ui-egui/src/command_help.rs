@@ -33,6 +33,7 @@ pub const DOCUMENTED: &[&str] = &[
     "construct.axis.two_points",
     "construct.plane.along_path",
     "construct.plane.at_angle",
+    "construct.plane.axis_point",
     "construct.plane.midplane",
     "construct.plane.offset",
     "construct.plane.perpendicular",

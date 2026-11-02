@@ -42,6 +42,19 @@ pub const MAX_COMPONENT_VARS: usize = 4_000;
 const TOL: f64 = 1e-9;
 /// A solution is accepted when every residual is below this (mm).
 const ACCEPT: f64 = 1e-6;
+/// A solve that only asks whether it succeeds ([`Analysis::StatusOnly`], the held solves of a
+/// drag) gives up on a component once LM has stalled far from a solution: over the last
+/// `STALL_ITERS` iterations the sum of squared residuals fell by at most `STALL_DECREASE` of
+/// itself, and the largest residual is still above `STALL_RESIDUAL` (mm). Such a run sits in a
+/// least-squares valley of constraints that conflict, crawling until `MAX_ITERS`, and a held
+/// solve runs LM up to three times (#6606). Measured on about 62,000 LM runs that succeeded
+/// (the sketch and engine tests and 120 generated sketch scripts with 2,900 drags), the slowest
+/// still fell by 1.4e-3 of itself over any 20 iterations while it was that far off: some cross
+/// a plateau for dozens of iterations and then converge, so the threshold stays a hundred times
+/// below that. Other solves keep iterating: their report names what a failure leaves violated.
+const STALL_ITERS: usize = 20;
+const STALL_DECREASE: f64 = 1e-5;
+const STALL_RESIDUAL: f64 = 1e-4;
 /// How much less it costs a solve to move a point held on a curve than any other point: such a
 /// point is placed relative to the curve, so it follows the curve rather than the curve it.
 const SLIDE_WEIGHT: f64 = 0.01;
@@ -489,11 +502,16 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
         }
         Horizontal { l } => {
             let (a, b) = s.line(l);
-            out.push(b.y - a.y);
+            let scale = if s.sk.curves.get(l).is_some_and(|c| c.infinite) { (b - a).len().max(1e-12) } else { 1.0 };
+            // An infinite line's defining points may be very close together. Its visible
+            // direction must remain horizontal even when their separation is below the
+            // distance tolerance, so measure direction rather than endpoint distance.
+            out.push((b.y - a.y) / scale);
         }
         Vertical { l } => {
             let (a, b) = s.line(l);
-            out.push(b.x - a.x);
+            let scale = if s.sk.curves.get(l).is_some_and(|c| c.infinite) { (b - a).len().max(1e-12) } else { 1.0 };
+            out.push((b.x - a.x) / scale);
         }
         HorizontalPoints { p, q } => out.push(s.p(q).y - s.p(p).y),
         VerticalPoints { p, q } => out.push(s.p(q).x - s.p(p).x),
@@ -596,6 +614,13 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
         LineCircleDistance { l, c, value, inside } => out.push(s.line_circle_gap(l, c, inside) - value),
         PointCircleDistance { p, c, value, inside } => out.push(s.point_circle_gap(p, c, inside) - value),
         CircleCircleDistance { a, b, value, circles } => out.push(s.circle_circle_gap(a, b, circles) - value),
+        // A length within convergence tolerance of zero means the line's two ends meet:
+        // the component rows keep both directions constrained even when they do, the way a
+        // coincidence does (the same treatment a distance of zero gets above).
+        Length { l, value } if value.abs() <= TOL => {
+            let (a, b) = s.line(l);
+            out.extend([b.x - a.x, b.y - a.y]);
+        }
         Length { l, value } => {
             let (a, b) = s.line(l);
             out.push(a.dist(b) - value);
@@ -1028,7 +1053,7 @@ fn system(sk: &Sketch, lay: &Layout, blocks: &[(Block, Vec<usize>)], x: &mut [f6
         for &v in vars {
             let Some(x0) = x.get(v).copied() else { continue };
             let opening = distance_opening_slope(&State { sk, lay, x }, b, v);
-            let h = 1e-7 * x0.abs().max(1.0);
+            let h = direction_difference_step(&State { sk, lay, x }, b, v, x0);
             if let Some(xv) = x.get_mut(v) {
                 *xv = x0 + h;
             }
@@ -1080,7 +1105,7 @@ fn local_system(
             let Some(c) = col.get(v).copied().filter(|c| *c < ncols) else { continue };
             let Some(x0) = x.get(v).copied() else { continue };
             let opening = distance_opening_slope(&State { sk, lay, x }, b, v);
-            let h = 1e-7 * x0.abs().max(1.0);
+            let h = direction_difference_step(&State { sk, lay, x }, b, v, x0);
             if let Some(xv) = x.get_mut(v) {
                 *xv = x0 + h;
             }
@@ -1104,6 +1129,32 @@ fn local_system(
     (r, j, owner)
 }
 
+/// An infinite line's direction derivative must be sampled within its defining span. The
+/// usual coordinate-sized step can cross its other end and measure a half-turn instead
+/// of the local slope when the saved defining points are very close (#11001).
+fn direction_difference_step(s: &State<'_>, block: &Block<'_>, variable: usize, value: f64) -> f64 {
+    let mut step = 1e-7 * value.abs().max(1.0);
+    let Block::User(_, kind) = block else { return step };
+    let lines = match **kind {
+        ConstraintKind::Angle { a, b, .. } => [Some(a), Some(b)],
+        ConstraintKind::LineAngle { l, .. } => [Some(l), None],
+        ConstraintKind::Horizontal { l } | ConstraintKind::Vertical { l } if s.sk.curves.get(l).is_some_and(|c| c.infinite) => [Some(l), None],
+        _ => return step,
+    };
+    for l in lines.into_iter().flatten() {
+        let Some(CurveKind::Line { a, b }) = s.sk.curves.get(l).filter(|c| c.infinite).map(|c| &c.kind) else { continue };
+        let depends = [a, b].into_iter().any(|&p| s.lay.pvar.get(p).copied().flatten().is_some_and(|v| variable == v || variable == v + 1));
+        if depends {
+            let length = (s.p(*b) - s.p(*a)).len();
+            if length > 0.0 {
+                step = step.min(length * 1e-3);
+            }
+        }
+    }
+    // Keep both samples representable when the sketch is far from its origin.
+    step.max(value.abs() * f64::EPSILON * 8.0)
+}
+
 fn max_abs(v: &[f64]) -> f64 {
     v.iter().fold(0.0_f64, |m, x| if x.is_finite() { m.max(x.abs()) } else { f64::INFINITY })
 }
@@ -1112,13 +1163,11 @@ fn norm2(v: &[f64]) -> f64 {
 }
 
 /// Levenberg–Marquardt on one component (variables `vars`, blocks `blocks`). Returns the
-/// iterations and the largest residual left.
-fn lm(sk: &Sketch, lay: &Layout, blocks: &[(Block, Vec<usize>)], vars: &[usize], x: &mut Vec<f64>, col: &[usize]) -> (usize, f64) {
-    lm_capped(sk, lay, blocks, vars, x, col, MAX_ITERS)
-}
-
-/// [`lm`], counting its work against a live drag frame's numerical allowance when `budget` has
-/// one ([`Budget::frame`]). The solve itself runs as it would without it.
+/// iterations and the largest residual left. Its work counts against a live drag frame's
+/// numerical allowance when `budget` has one ([`Budget::frame`]); the solve itself runs as it
+/// would without it. `give_up`: stop once
+/// stalled (see [`STALL_ITERS`]); not in a live frame, whose allowance is measured in the work
+/// the full iteration does.
 fn lm_in(
     sk: &Sketch,
     lay: &Layout,
@@ -1127,9 +1176,10 @@ fn lm_in(
     x: &mut Vec<f64>,
     col: &[usize],
     budget: &mut Budget,
+    give_up: bool,
 ) -> (usize, f64) {
     if !budget.counts_numeric() {
-        return lm(sk, lay, blocks, vars, x, col);
+        return lm_run(sk, lay, blocks, vars, x, col, MAX_ITERS, None, give_up).unwrap_or((0, f64::INFINITY));
     }
     let mut meter = Budget::new(usize::MAX);
     let out = lm_capped_with_budget(sk, lay, blocks, vars, x, col, MAX_ITERS, Some(&mut meter)).unwrap_or((0, f64::INFINITY));
@@ -1161,7 +1211,22 @@ fn lm_capped_with_budget(
     x: &mut Vec<f64>,
     col: &[usize],
     max_iters: usize,
+    budget: Option<&mut Budget>,
+) -> Option<(usize, f64)> {
+    lm_run(sk, lay, blocks, vars, x, col, max_iters, budget, false)
+}
+
+/// [`lm_capped_with_budget`], giving up once stalled when `give_up` (see [`STALL_ITERS`]).
+fn lm_run(
+    sk: &Sketch,
+    lay: &Layout,
+    blocks: &[(Block, Vec<usize>)],
+    vars: &[usize],
+    x: &mut Vec<f64>,
+    col: &[usize],
+    max_iters: usize,
     mut budget: Option<&mut Budget>,
+    give_up: bool,
 ) -> Option<(usize, f64)> {
     #[cfg(feature = "solver-profiling")]
     let _timer = profiling::timer(Phase::Lm);
@@ -1177,11 +1242,24 @@ fn lm_capped_with_budget(
     let mut f = norm2(&r);
     #[cfg(feature = "solver-profiling")]
     let run = profiling::start_run(n, r.len(), max_iters, f);
+    // The sum of squares at the start of each iteration, while giving up is allowed.
+    let mut costs = Vec::new();
     for it in 0..max_iters {
         if max_abs(&r) < TOL {
             #[cfg(feature = "solver-profiling")]
             profiling::finish_run(run, StopReason::ResidualTolerance, max_abs(&r));
             return Some((it, max_abs(&r)));
+        }
+        if give_up {
+            if let Some(&earlier) = it.checked_sub(STALL_ITERS).and_then(|k| costs.get(k))
+                && max_abs(&r) > STALL_RESIDUAL
+                && earlier - f <= STALL_DECREASE * earlier
+            {
+                #[cfg(feature = "solver-profiling")]
+                profiling::finish_run(run, StopReason::Stalled, max_abs(&r));
+                return Some((it, max_abs(&r)));
+            }
+            costs.push(f);
         }
         let normal_work =
             n.saturating_mul(n).saturating_mul(r.len()).saturating_add(evaluation_work.saturating_mul(n.saturating_mul(2).saturating_add(1)));
@@ -1518,7 +1596,7 @@ fn accumulate(sk: &Sketch, lay: &Layout, b: &Block, unit: &[usize], x: &mut [f64
     let (mut plus, mut minus) = (Vec::new(), Vec::new());
     for (&v, dk) in unit.iter().zip(&mut d) {
         let Some(x0) = x.get(v).copied() else { continue };
-        let h = 1e-7 * x0.abs().max(1.0);
+        let h = direction_difference_step(&State { sk, lay, x }, b, v, x0);
         for (at, out) in [(x0 + h, &mut plus), (x0 - h, &mut minus)] {
             if let Some(xv) = x.get_mut(v) {
                 *xv = at;
@@ -2728,6 +2806,10 @@ fn solve_inner(
     }
     // Column of each variable in the system being solved or analysed (usize::MAX outside it).
     let mut col = vec![usize::MAX; lay.n];
+    // Only success matters to a status-only solve: a component LM cannot solve is left as soon
+    // as the iteration stalls (see `STALL_ITERS`). It fails either way, and a failed solve
+    // leaves the geometry as it was.
+    let give_up = analysis == Analysis::StatusOnly;
 
     let mut iterations = 0;
     let mut continuations = 0;
@@ -2763,7 +2845,7 @@ fn solve_inner(
                     let rest = unpinned(vars, &pin, None);
                     let rest_blocks = blocks_reading(&sub, &rest);
                     columns(&mut col, &rest, vars);
-                    let (its, r) = if rest.is_empty() { (0, 0.0) } else { lm_in(sk, &lay, &rest_blocks, &rest, &mut x, &col, budget) };
+                    let (its, r) = if rest.is_empty() { (0, 0.0) } else { lm_in(sk, &lay, &rest_blocks, &rest, &mut x, &col, budget, give_up) };
                     iterations += its;
                     residual = r;
                     solved = residual < ACCEPT;
@@ -2787,7 +2869,7 @@ fn solve_inner(
             // the seed did not move it.
             let reseeded = unseeded.as_ref().filter(|plain| vars.iter().any(|v| plain.get(*v).is_some_and(Option::is_some)));
             if !(solved || pinned_failed && reseeded.is_some()) {
-                let (its, r) = lm_in(sk, &lay, &sub, vars, &mut x, &col, budget);
+                let (its, r) = lm_in(sk, &lay, &sub, vars, &mut x, &col, budget, give_up);
                 iterations += its;
                 residual = r;
             }
@@ -2801,7 +2883,7 @@ fn solve_inner(
                         *s = plain.get(v).copied().flatten().unwrap_or(*s0);
                     }
                 }
-                let (its, r) = lm_in(sk, &lay, &sub, vars, &mut x, &col, budget);
+                let (its, r) = lm_in(sk, &lay, &sub, vars, &mut x, &col, budget, give_up);
                 iterations += its;
                 residual = r;
             }
@@ -2832,7 +2914,7 @@ fn solve_inner(
                 iterations += its;
                 if !done {
                     // The last sub-step's solution, solved for the new values in one jump.
-                    let (its, r) = lm_in(sk, &lay, &sub, vars, &mut from, &col, budget);
+                    let (its, r) = lm_in(sk, &lay, &sub, vars, &mut from, &col, budget, false);
                     iterations += its;
                     done = edit.holds(r, &State { sk, lay: &lay, x: &from });
                 }

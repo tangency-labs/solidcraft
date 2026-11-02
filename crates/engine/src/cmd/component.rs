@@ -12,8 +12,8 @@ use solidcraft_geom::Vec3;
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list, vec3};
 use crate::schema::component::{
-    EditInPlaceParams, EditInPlaceResult, FinishEditParams, FinishEditResult, MoveFeaturesParams, MoveFeaturesResult, OccurrenceAlignParams,
-    OccurrenceAlignResult, ReparentItemsParams, ReparentItemsResult,
+    EditInPlaceParams, EditInPlaceResult, FinishEditParams, FinishEditResult, MoveFeaturesParams, MoveFeaturesResult, MoveSketchesToPartsParams,
+    MoveSketchesToPartsResult, OccurrenceAlignParams, OccurrenceAlignResult, ReparentItemsParams, ReparentItemsResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -21,6 +21,7 @@ use crate::{Result, Session};
 const EDIT_IN_PLACE_CONTRACT: TypedContract<EditInPlaceParams> = TypedContract::new();
 const FINISH_EDIT_CONTRACT: TypedContract<FinishEditParams> = TypedContract::new();
 const MOVE_FEATURES_CONTRACT: TypedContract<MoveFeaturesParams> = TypedContract::new();
+const MOVE_SKETCHES_TO_PARTS_CONTRACT: TypedContract<MoveSketchesToPartsParams> = TypedContract::new();
 const REPARENT_ITEMS_CONTRACT: TypedContract<ReparentItemsParams> = TypedContract::new();
 
 #[path = "component_align.rs"]
@@ -41,9 +42,15 @@ pub(super) mod properties;
 mod reparent;
 #[path = "component_reparent_items.rs"]
 mod reparent_items;
+#[path = "component_sketches_to_parts.rs"]
+mod sketches_to_parts;
 #[path = "component_transfer.rs"]
 mod transfer;
 
+#[cfg(test)]
+#[path = "component_history_tests.rs"]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod history_tests;
 #[cfg(test)]
 #[path = "occurrence_tests.rs"]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
@@ -53,6 +60,12 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.cycle_color", "Cycle Component Color", cycle_color)
         .icon("colored_components").doc_only()
         .params("component: id or name; saves the next identification colour and enables Component Colors; shared by every instance, separate from appearances"),
+    CommandSpec::new("component.hide_history", "Hide Component History", hide_history)
+        .icon("eye").doc_only()
+        .params("component: id or name; keeps the component's features in the design but leaves them out of the History bar (#10393)"),
+    CommandSpec::new("component.show_history", "Show Component History", show_history)
+        .icon("eye").doc_only()
+        .params("component: id or name; puts a component's features back in the History bar after Hide Component History (#10393)"),
     CommandSpec::new("component.create", "New Component", new_component)
         .at("SOLID", "ASSEMBLE")
         .icon("component")
@@ -122,7 +135,21 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("component.move_sketches", "Move Sketches to Component", move_sketches)
         .icon("move")
-        .params("sketches: [ids or names], component; the sketches keep their own coordinates (component.move_features keeps them where they are in the world)"),
+        .params("sketches: [ids or names], component; the sketches keep their own coordinates (component.move_features keeps them where they are in the world), except that a sketch on an exactly attached face stays where it is on the face"),
+    CommandSpec::new(
+        "component.move_sketches.to_parts",
+        "Move Sketches to Their Parts",
+        crate::checked!("component.move_sketches.to_parts", sketches_to_parts::to_parts),
+    )
+    .icon("move")
+    .contract(&MOVE_SKETCHES_TO_PARTS_CONTRACT)
+    .output(output_schema_for::<MoveSketchesToPartsResult>)
+    .params(
+        "sketches?: [ids or names] (default: every sketch in the design) → moved, stayed, sketches [{sketch, name, component, part}], \
+         kept [{sketch, name, code, reason}]. Each sketch whose plane is an exactly attached face of a part's body goes to that part, as \
+         component.move_sketches moves it, and stays where it is on the face; the others (on an origin, construction or fixed \
+         plane, on a body of the design itself, or already in their part) stay where they are. One undo step",
+    ),
     CommandSpec::new("component.move_features", "Move Features to Component", crate::checked!("component.move_features", move_features::move_features))
         .icon("move")
         .contract(&MOVE_FEATURES_CONTRACT)
@@ -520,6 +547,7 @@ fn move_sketches(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`sketches` must list sketches"));
     }
     for id in &ids {
+        sketches_to_parts::reauthor(s, *id, to, cmd)?;
         if let Some(f) = s.doc_mut().feature_mut(*id) {
             f.component = to;
         }
@@ -788,4 +816,22 @@ fn cycle_color(s: &mut Session, p: &Value) -> Result<Value> {
     c.identification_color = Some(next);
     s.colored_components = Some(());
     Ok(json!({"component": id, "color": next}))
+}
+
+/// Mark a component's features out of the History bar, or back in (#10393). The features still
+/// rebuild; only the History bar leaves them out.
+fn set_history_hidden(s: &mut Session, p: &Value, hidden: bool) -> Result<Value> {
+    let cmd = if hidden { "component.hide_history" } else { "component.show_history" };
+    let id = component(s, p, "component", cmd)?;
+    let c = s.doc_mut().components.iter_mut().find(|c| c.id == id).ok_or_else(|| bad(cmd, "choose a component below the design root"))?;
+    c.history_hidden = hidden;
+    Ok(json!({"component": id, "history_hidden": hidden}))
+}
+
+fn hide_history(s: &mut Session, p: &Value) -> Result<Value> {
+    set_history_hidden(s, p, true)
+}
+
+fn show_history(s: &mut Session, p: &Value) -> Result<Value> {
+    set_history_hidden(s, p, false)
 }

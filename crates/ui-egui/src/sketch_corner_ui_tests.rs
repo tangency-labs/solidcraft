@@ -290,11 +290,25 @@ fn retype(h: &mut crate::scenario::Harness, handle: &str, text: &str) {
     h.frames(2);
 }
 
+/// Run frames until the preview of the typed size is in. It computes on its own thread, and
+/// its result (a failure shows its reason in the window, which moves the buttons) arrives on
+/// whichever frame the thread finishes. A test that reads the window or clicks a handle
+/// before then races that frame, and on a loaded machine loses.
+fn preview_in(h: &mut crate::scenario::Harness) {
+    let began = std::time::Instant::now();
+    while h.app.preview.busy && began.elapsed() < std::time::Duration::from_secs(60) {
+        h.frame();
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    h.frames(2);
+}
+
 fn apply(h: &mut crate::scenario::Harness) {
     // Lay the window out once before reading its OK handle. An error line that wraps onto a
     // second row moves the button, and a click on the handle from the frame before then
     // lands above it and commits nothing.
     h.frames(2);
+    preview_in(h);
     h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
     h.frames(2);
 }
@@ -543,6 +557,27 @@ fn escape_leaves_the_sketch_and_the_history_untouched() {
     h.frames(2);
     assert!(h.app.dialog.is_none());
     assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), before);
+}
+
+/// #9316: the refusal of a size being typed (`4 m` on the way to `4 mm`) goes once the size fits.
+#[test]
+fn a_refused_size_gives_way_to_one_that_fits() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,30]})).unwrap();
+    h.frames(2);
+    h.step(&json!({"start":"sketch.fillet"})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click":{"world":[0,0,0]}})).unwrap();
+    h.frames(2);
+    let shown = |h: &mut crate::scenario::Harness, size: &str| {
+        set_size(&mut h.app, size);
+        h.settle();
+        preview_in(h);
+        h.app.dialog.as_ref().and_then(|d| d.error.clone()).or_else(|| h.app.preview.error.clone())
+    };
+    assert!(shown(&mut h, "4 m").is_some_and(|e| e.contains("too large")));
+    assert_eq!(shown(&mut h, "4 mm"), None);
 }
 
 /// A size the corner cannot take is refused with a reason, and the window stays open on it.
@@ -956,5 +991,43 @@ fn corner_candidates_agree_with_engine_spatial_curve_filter() {
             assert_eq!(offered, id == "side", "{cmd}: {id}");
         }
         h.app.dialog = None;
+    }
+}
+
+#[test]
+fn line_arc_fillet_preview_and_apply_work_in_both_pick_orders() {
+    for reverse in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,0],[40,0]],"ids":["l1"]})).unwrap();
+        h.app.run("sketch.arc.center_point", json!({"center":[50,0],"start":[60,0],"end":[40,0],"id":"a1"})).unwrap();
+        h.app.run("sketch.constraint.fix", json!({"entity":"l1.end"})).unwrap();
+        h.app.run("view.fit", json!({})).unwrap();
+        h.settle();
+        let undo = h.app.session.undo.len();
+        h.step(&json!({"start":"sketch.fillet"})).unwrap();
+        h.frames(2);
+        let mut picks = [[32, 0, 0], [50, 10, 0]];
+        if reverse {
+            picks.reverse();
+        }
+        for point in picks {
+            h.step(&json!({"click":{"world":point}})).unwrap();
+            h.frames(2);
+        }
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 2);
+        set_size(&mut h.app, "3 mm");
+        h.step(&json!({"until":{"count":{"name":"sketch_preview_curves","value":3}}})).unwrap();
+        apply(&mut h);
+        assert!(h.app.dialog.is_none(), "reverse {reverse}: {:?}", h.app.status);
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        let st = h.app.session.world_state();
+        let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        assert!(ss.report.ok());
+        assert_eq!(ss.sketch.curves.len(), 3);
+        let want = Vec2::new(50.0 - 160f64.sqrt(), 3.0);
+        assert!(ss.sketch.curves.iter().enumerate().any(|(i, _)| {
+            ss.sketch.radius(i).is_some_and(|r| (r - 3.0).abs() < 1e-7) && ss.sketch.center(i).is_some_and(|c| c.dist(want) < 1e-6)
+        }));
     }
 }

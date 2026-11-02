@@ -734,6 +734,12 @@ impl<R: Read + Seek> DesignContainerReader<R> {
     pub fn read_document(mut self) -> Result<Document> {
         read_document(&mut self.reader)
     }
+
+    /// [`Self::geometry`] when [`Self::read_document`] follows: it validates the document.
+    fn geometry_before_document(&mut self) -> Option<solidcraft_doc::SavedModel> {
+        let document = self.reader.document(16 << 20).ok()?;
+        native_cache::read_geometry_before_document(&mut self.reader, &document).ok()
+    }
 }
 
 pub(super) fn read(bytes: &[u8]) -> Result<Document> {
@@ -750,7 +756,7 @@ pub fn read_design_file(path: &str, notify: Option<impl FnOnce(DesignPreview)>) 
     if is_container_source(&mut source)? {
         let mut reader = DesignContainerReader::new(source)?;
         // A design with its model opens without a picture first: the model is the session.
-        let model = reader.geometry();
+        let model = reader.geometry_before_document();
         if let Some(notify) = notify
             && model.is_none()
             && let Ok(preview) = read_preview(&mut reader.reader)
@@ -857,7 +863,7 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
         if bytes.len() > solidcraft_doc::canvas::MAX_CANVAS_BYTES {
             return Err(invalid("canvas too large"));
         }
-        canvas.data = solidcraft_doc::canvas::base64_encode(bytes);
+        canvas.data = solidcraft_doc::canvas::base64_encode(bytes).into();
     }
     for (index, cloud) in doc.point_clouds.iter_mut().enumerate() {
         if !cloud.points.is_empty() || !cloud.colors.is_empty() {
@@ -1190,6 +1196,25 @@ mod tests {
         }
     }
 
+    /// The model cache's manifest, written straight from the model's records (not copied into a
+    /// JSON tree first), is byte for byte what writing it as a tree wrote: the same keys in the
+    /// same (sorted) order, the same numbers.
+    #[test]
+    fn the_model_cache_manifest_is_what_a_json_tree_writes() {
+        use solidcraft_geom::Vec3;
+        let part = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
+        let share = solidcraft_kernel::DisplayShare::new(part.clone());
+        let t = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [50.5, -0.25, 1e-7, 1.]];
+        let moved = solidcraft_kernel::transform(&part, Vec3::new(50.5, -0.25, 1e-7), Vec3::ZERO, Vec3::Z, 0.).unwrap();
+        let model = saved_model(vec![part.clone(), moved.with_display_share(&share, t)]);
+        let bytes = write_design_container_with_cache(&document(), DesignCompression::Fast, None, Some(&model)).unwrap();
+        let manifest = &parts(&bytes)["cache/model.json"];
+        let tree: Value = serde_json::from_slice(manifest).unwrap();
+        assert_eq!(serde_json::to_vec(&tree).unwrap(), *manifest);
+        assert_eq!(tree["model"], model.records);
+        assert_eq!(tree.as_object().unwrap().len(), 11, "{:?}", tree.as_object().unwrap().keys().collect::<Vec<_>>());
+    }
+
     /// #9170: a mesh body (an imported STL) is kept in the model cache with the rest of the
     /// model, as its own triangles, colour and paint. One mesh body left the whole cache out, so
     /// opening the design evaluated every feature again.
@@ -1259,6 +1284,45 @@ mod tests {
         // With room for it, the same model is kept.
         let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, crate::MAX_DESIGN_BYTES).unwrap();
         assert!(read_design_geometry(&bytes).is_some());
+    }
+
+    /// Opening a design with its model validates its document once, where the document is read
+    /// (`read_document`); reading the model first validated it a second time, a whole parse and
+    /// validation of a large design. A broken document still fails the open, as it did.
+    #[test]
+    fn opening_with_a_model_cache_validates_the_document_once() {
+        let validated = || native_cache::VALIDATED.with(std::cell::Cell::get);
+        let doc = document();
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&native_geometry())).unwrap();
+        let before = validated();
+        let alone = DesignContainerReader::new(Cursor::new(&bytes)).unwrap().geometry().unwrap();
+        assert_eq!(validated(), before + 1, "the model alone checks its document");
+        let mut reader = DesignContainerReader::new(Cursor::new(&bytes)).unwrap();
+        let model = reader.geometry_before_document().unwrap();
+        assert_eq!(validated(), before + 1, "opening leaves it to read_document");
+        assert_eq!(reader.read_document().unwrap().to_json(), doc.to_json());
+        assert_eq!(model.records, alone.records);
+        assert_eq!(model.bodies.len(), alone.bodies.len());
+
+        // A broken document whose cache is signed for it: the open fails with read_document's
+        // error, as when the model was read with the document validated (and so missed).
+        let entries = parts(&bytes);
+        let mut manifest: Value = serde_json::from_slice(&entries["cache/model.json"]).unwrap();
+        let mut metadata: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
+        metadata["features"] = json!(5);
+        let truncated = entries["document.json"][..entries["document.json"].len() / 2].to_vec();
+        for broken in [serde_json::to_vec(&metadata).unwrap(), truncated] {
+            let mut entries = entries.clone();
+            manifest["document"] = json!(digest(&broken));
+            entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
+            entries.insert("document.json".into(), broken);
+            let bytes = package(&entries);
+            assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().geometry().is_none());
+            let expected = read(&bytes).unwrap_err().to_string();
+            let mut reader = DesignContainerReader::new(Cursor::new(&bytes)).unwrap();
+            let _ = reader.geometry_before_document();
+            assert_eq!(reader.read_document().unwrap_err().to_string(), expected);
+        }
     }
 
     /// A saved model of four features (5, 50, 20 and 1 ms) whose states each hold the eight
@@ -1572,7 +1636,7 @@ mod tests {
             id,
             name: "Reference".into(),
             format: "png".into(),
-            data: solidcraft_doc::canvas::base64_encode(b"original image bytes"),
+            data: solidcraft_doc::canvas::base64_encode(b"original image bytes").into(),
             pixels: [1, 1],
             plane: solidcraft_doc::PlaneRef::Origin { name: "XY".into() },
             center: Vec2::new(0.0, 0.0),

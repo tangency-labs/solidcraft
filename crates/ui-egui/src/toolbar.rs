@@ -703,32 +703,36 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     close = true;
                 }
                 ui.separator();
-                if item_if(ui, "Export STL…", "", "mesh_export", shown) {
-                    FileAction::ExportMesh("stl").run(app);
+                // Each format's item runs its own command, so it shows that command's key.
+                let key = |id: &str| crate::keymap::effective(app, id).unwrap_or_default();
+                let (stl_key, mf_key, step_key, obj_key, urdf_key) =
+                    (key("file.export_stl"), key("file.export_3mf"), key("file.export_step"), key("file.export_obj"), key("file.export_urdf"));
+                if item_if(ui, "Export STL…", &stl_key, "mesh_export", shown) {
+                    FileAction::Command("file.export_stl").run(app);
                     close = true;
                 }
-                if item_if(ui, "Export 3MF…", "", "mesh_export", shown) {
-                    FileAction::ExportMesh("3mf").run(app);
+                if item_if(ui, "Export 3MF…", &mf_key, "mesh_export", shown) {
+                    FileAction::Command("file.export_3mf").run(app);
                     close = true;
                 }
                 if item_if(ui, "Send to Slicer", "", "mesh_export", shown && crate::dialogs_save_mesh::available(app)) {
                     app.start("file.send_to_slicer");
                     close = true;
                 }
-                if item_if(ui, "Export STEP…", "", "export", shown) {
-                    FileAction::Export("step").run(app);
+                if item_if(ui, "Export STEP…", &step_key, "export", shown) {
+                    FileAction::Command("file.export_step").run(app);
                     close = true;
                 }
                 if item_if(ui, app.tr_label("Export Current View as DXF…"), "", "export", shown) {
                     FileAction::Command("file.export_view_dxf").run(app);
                     close = true;
                 }
-                if item_if(ui, "Export OBJ…", "", "export", shown) {
-                    FileAction::Export("obj").run(app);
+                if item_if(ui, "Export OBJ…", &obj_key, "export", shown) {
+                    FileAction::Command("file.export_obj").run(app);
                     close = true;
                 }
-                if item_if(ui, "Export URDF…", "", "export", shown) {
-                    FileAction::Export("urdf").run(app);
+                if item_if(ui, "Export URDF…", &urdf_key, "export", shown) {
+                    FileAction::Command("file.export_urdf").run(app);
                     close = true;
                 }
                 if item(ui, "Export Design as JSON…", "", "export") {
@@ -836,6 +840,30 @@ fn download_design(app: &mut SolveApp) {
 
 pub(crate) fn export(app: &mut SolveApp, ext: &str) {
     export_as(app, ext, None);
+}
+
+/// Each format's own export command, started from its key, command search or the File menu,
+/// does what that File › Export item does: STEP, OBJ and URDF ask where to save, STL and 3MF
+/// open the mesh dialog with the format chosen. `false`: `id` is no such command.
+pub(crate) fn start_export(app: &mut SolveApp, id: &str) -> bool {
+    let (extension, mesh) = match id {
+        "file.export_step" => ("step", false),
+        "file.export_obj" => ("obj", false),
+        "file.export_urdf" => ("urdf", false),
+        "file.export_stl" => ("stl", true),
+        "file.export_3mf" => ("3mf", true),
+        _ => return false,
+    };
+    // As the File menu's items: not while a file is being picked or loaded, or behind a bug report.
+    if !FileAction::Export(extension).enabled(app) {
+        return true;
+    }
+    if mesh {
+        crate::dialogs_save_mesh::start_with_format(app, extension);
+    } else {
+        export(app, extension);
+    }
+    true
 }
 
 /// Export to a file with extension `ext`, in `format` when the extension alone doesn't name it.
@@ -1362,7 +1390,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let host = Container::for_layout(layout, Surface::Chrome);
     let ribbon = host.edge("sc_toolbar", Edge::Top);
     let frame = host.edge_frame(fill);
-    let chrome = ribbon.exact_size(height).show_separator_line(false).frame(frame).show(ui, |ui| {
+    let chrome = host.show_edge(ui, ribbon.exact_size(height).show_separator_line(false), frame, |ui| {
         let r = if floating { Rect::from_min_max(cards.workspace.min, cards.ribbon.max) } else { frame.outer_rect(ui.max_rect()) };
         let ws = if floating { cards.workspace } else { Rect::from_min_size(r.left_top(), vec2(WORKSPACE_WIDTH, ribbon_height - 1.0)) };
         let ribbon_left = if floating { cards.ribbon.left() } else { ws.right() };
@@ -1371,7 +1399,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let fill =
                     if crate::render_workspace::active(app) && card == ws { crate::theme::TabAccent::current(ui.ctx()).soft } else { t.toolbar };
                 let frame = host.frame(ui.ctx(), fill, crate::frame::Side::Left);
-                ui.painter().add(frame.paint(card));
+                host.paint_background(ui.painter(), frame, card);
                 // Blank card space owns clicks as well as its buttons.
                 ui.interact(card, ui.id().with(("shell_card", card.left().to_bits())), Sense::click_and_drag());
             }
@@ -1716,7 +1744,9 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         resp.request_focus();
                     }
                     let id = selected.id;
-                    app.start_pinned(id, Some(whole));
+                    if !end_running_tool(app, id) {
+                        app.start_pinned(id, Some(whole));
+                    }
                 }
                 if persistent {
                     let label = persistent_button_name(app, selected);
@@ -1831,7 +1861,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     if resp.secondary_clicked() {
                         menu = Some((resp.interact_pointer_pos().unwrap_or(cell.left_bottom()), c.id));
                     }
-                    if ribbon_tooltip(app, resp, c, info.disabled_reason.as_deref()).clicked() && info.enabled {
+                    if ribbon_tooltip(app, resp, c, info.disabled_reason.as_deref()).clicked() && info.enabled && !end_running_tool(app, c.id) {
                         app.start_at(c.id, Some(cell));
                     }
                 }
@@ -2118,7 +2148,7 @@ fn assistant_button(app: &mut SolveApp, ui: &mut egui::Ui, at: Rect) {
     let resp = ui.interact(at, ui.id().with("assistant_button"), Sense::click());
     crate::scenario::publish_target("titlebar:assistant", at);
     let mark = crate::agent_chat::assistant_mark(app);
-    let tip = crate::agent_chat::assistant_tip(mark);
+    let tip = crate::agent_chat::assistant_tip(app, mark);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &tip));
     let state = match mark {
         AssistantMark::Quiet => crate::ui_kit::AssistantEntryState::Quiet,
@@ -2295,6 +2325,126 @@ fn dropdown_width(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_eng
         .fold(200.0, f32::max)
 }
 
+/// True once the pointer has rested on this drop-down row long enough for its tip. egui's
+/// shared tooltip grace time lets every row after the first show its tip the moment the
+/// pointer reaches it; timing each row's own hover restarts the delay for each newly hovered
+/// row instead (#10481).
+fn dropdown_tip_ready(ui: &egui::Ui, resp: &egui::Response) -> bool {
+    let ctx = ui.ctx();
+    let key = resp.id.with("sc_dropdown_tip");
+    if !resp.hovered() {
+        ctx.data_mut(|d| d.remove::<(f64, u64)>(key));
+        return false;
+    }
+    let pass = ctx.cumulative_pass_nr();
+    let now = ctx.input(|i| i.time);
+    let (mut began, seen) = ctx.data(|d| d.get_temp::<(f64, u64)>(key)).unwrap_or((now, 0));
+    // A drop-down that closed and opened again under the pointer starts the delay afresh.
+    if seen + 1 < pass {
+        began = now;
+    }
+    ctx.data_mut(|d| d.insert_temp(key, (began, pass)));
+    let delay = f64::from(ui.style().interaction.tooltip_delay);
+    if now - began < delay {
+        ctx.request_repaint_after_secs((delay - (now - began)) as f32);
+        return false;
+    }
+    true
+}
+
+/// Show `add` as `resp`'s tip beside the drop-down rather than under the pointer: to the
+/// right of the menu, or to its left when the right has no room, so the tip never covers
+/// the menu's rows (#10481). Returns the tip's rect when it was shown.
+fn dropdown_tip(ui: &egui::Ui, menu: Rect, resp: &egui::Response, add: impl FnOnce(&mut egui::Ui)) -> Option<Rect> {
+    if !dropdown_tip_ready(ui, resp) {
+        return None;
+    }
+    let ctx = ui.ctx();
+    let tip_id = resp.id.with("sc_dropdown_tip_area");
+    // Last pass's size; the first pass assumes the tip fits on the right.
+    let size = ctx.read_response(tip_id).map(|r| r.rect.size()).unwrap_or(egui::Vec2::ZERO);
+    let screen = ctx.content_rect();
+    let gap = 6.0;
+    let x = if menu.right() + gap + size.x <= screen.right() { menu.right() + gap } else { (menu.left() - gap - size.x).max(screen.left()) };
+    let y = resp.rect.top().min((screen.bottom() - size.y).max(screen.top()));
+    let area = Container::new(ctx, Surface::Popup)
+        .area(tip_id)
+        .order(egui::Order::Tooltip)
+        .interactable(false)
+        .fixed_pos(pos2(x, y))
+        .show(ctx, |ui| Container::new(ctx, Surface::Popup).show_frame(ui, Container::menu_frame(), ui.max_rect(), add));
+    Some(area.inner.response.rect)
+}
+
+#[cfg(test)]
+mod dropdown_tip_tests {
+    use super::*;
+    use egui::{Event, RawInput};
+
+    /// One pass of a fake two-row drop-down at `menu`; returns the tips shown this pass.
+    fn tip_pass(ctx: &egui::Context, menu: Rect, time: f64, at: egui::Pos2) -> Vec<(usize, Rect)> {
+        let raw = RawInput { events: vec![Event::PointerMoved(at)], time: Some(time), ..Default::default() };
+        let mut shown: Vec<(usize, Rect)> = Vec::new();
+        crate::test_support::frame(ctx, raw, |ui| {
+            let ctx = ui.ctx();
+            egui::Area::new(egui::Id::new("test_dropdown")).fixed_pos(menu.min).show(ctx, |ui| {
+                for row in 0..2 {
+                    let rect = Rect::from_min_size(menu.min + vec2(0.0, row as f32 * 32.0), vec2(menu.width(), 32.0));
+                    let resp = ui.interact(rect, egui::Id::new(("test_row", row)), Sense::hover());
+                    let tip = if row == 0 {
+                        dropdown_tip(ui, menu, &resp, |ui| {
+                            ui.label("first row");
+                        })
+                    } else {
+                        dropdown_tip(ui, menu, &resp, |ui| {
+                            ui.label("second row");
+                        })
+                    };
+                    if let Some(rect) = tip {
+                        shown.push((row, rect));
+                    }
+                }
+            });
+        });
+        shown
+    }
+
+    /// egui registers hover a pass or two after the pointer arrives (measured), while leaving
+    /// a row drops hover the same pass. Timings below keep a margin around that lag.
+    #[test]
+    fn each_newly_hovered_row_waits_the_full_tip_delay() {
+        let ctx = crate::fonts::test_context();
+        let menu = Rect::from_min_size(pos2(20.0, 20.0), vec2(220.0, 64.0));
+        let a = menu.min + vec2(10.0, 16.0);
+        let b = menu.min + vec2(10.0, 48.0);
+        let mut tips = Vec::new();
+        for (time, at, expect) in [
+            (0.0, a, None),
+            (0.1, a, None),
+            (0.3, a, None), // hover registers around here; the first row's delay starts
+            (0.5, a, None), // still inside the delay
+            (0.9, a, Some(0)),
+            (1.0, b, None),    // the first row lost hover the moment the pointer left it
+            (1.2, b, None),    // the second row must not inherit the open tip's grace (#10481)
+            (1.4, b, None),    // its own delay cannot have elapsed yet, whenever hover registered
+            (2.2, b, Some(1)), // after its own full delay, with margin for late registration
+        ] {
+            let got = tip_pass(&ctx, menu, time, at);
+            match expect {
+                Some(row) => {
+                    assert_eq!(got.len(), 1, "exactly row {row}'s tip at t={time}, got {got:?}");
+                    assert_eq!(got[0].0, row, "wrong row's tip at t={time}");
+                    let tip = got[0].1;
+                    assert!(tip.min.x >= menu.max.x, "the tip sits beside the menu, never over its rows: {tip:?} vs {menu:?}");
+                    tips.push((row, tip));
+                }
+                None => assert!(got.is_empty(), "no tip expected at t={time}, got {got:?}"),
+            }
+        }
+        assert_eq!(tips.len(), 2, "both rows showed a tip after their own delay");
+    }
+}
+
 /// One command row of a panel drop-down: icon, label and shortcut, with the hover background
 /// under the pointer or keyboard focus (like every menu).
 /// `revealed` is the pulse strength when the command search points this row out (#7287).
@@ -2361,19 +2511,31 @@ fn dropdown_row(
         crate::scenario::publish_handle(&format!("dropdown_pin:{}", c.id), pr.center());
     }
     let tip = if pinned { "Remove from Toolbar" } else { "Pin to Toolbar" };
-    if pin.on_hover_text(tip).clicked() {
+    // The drop-down's rect from the last pass: tips sit beside it, never over its rows (#10481).
+    let menu = egui::containers::AreaState::load(ui.ctx(), ui.layer_id().id).map(|state| state.rect()).unwrap_or(rect);
+    if pin.clicked() {
         return RowAction::TogglePin;
     }
+    dropdown_tip(ui, menu, &pin, |ui| {
+        ui.label(crate::i18n::tr_label(tip));
+    });
     // A disabled row says why; a documented command also shows its help (#2758).
     let reason = info.disabled_reason.as_deref().filter(|_| !info.enabled).map(|reason| app.tr_label(reason));
-    let resp = if let Some(hint) = persistent_hint(app, c, info.enabled) {
-        resp.on_hover_text(hint)
-    } else {
-        match crate::command_help::row_tip(c.id, &label, Some(shortcut.as_str()).filter(|k| !k.is_empty()), reason) {
-            Some(tip) => crate::command_help::tooltip(resp, c.id, tip),
-            None => resp,
-        }
-    };
+    if let Some(hint) = persistent_hint(app, c, info.enabled) {
+        dropdown_tip(ui, menu, &resp, move |ui| {
+            ui.label(hint);
+        });
+    } else if let Some(tip) = crate::command_help::row_tip(c.id, &label, Some(shortcut.as_str()).filter(|k| !k.is_empty()), reason) {
+        let help = crate::command_help::help(c.id);
+        dropdown_tip(ui, menu, &resp, move |ui| {
+            ui.set_max_width(300.0);
+            ui.label(tip);
+            if let Some(help) = help {
+                ui.add_space(2.0);
+                ui.label(egui::RichText::new(help).weak());
+            }
+        });
+    }
     if resp.secondary_clicked() {
         return RowAction::Menu(resp.interact_pointer_pos().unwrap_or(rect.left_bottom()));
     }
@@ -2911,6 +3073,22 @@ pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
+    // The selection shape (#4376): a drag draws a freehand lasso instead of the rectangle.
+    let label = app.tr("ui.lasso_select").to_string();
+    ui_kit::checkbox(ui, &label, &mut app.ui.lasso_select);
+}
+
+/// A click on the lit button of the sketch tool that is running ends the tool, as a toggle does,
+/// so clicks in the view select again (#10151). With Preferences › Sketch "Clicking the running
+/// tool's button ends it" off, the click starts the tool again, as it did before. Returns whether
+/// the tool was ended. A persistent analysis button already turns its analysis off its own way.
+fn end_running_tool(app: &mut SolveApp, id: &str) -> bool {
+    if !app.preferences.ribbon_click_ends_tool || persistent_available(app, id) || !app.tool.as_ref().is_some_and(|t| t.cmd == id) {
+        return false;
+    }
+    crate::dim_view::cancel();
+    app.tool = None;
+    true
 }
 
 /// Two Esc presses within this many seconds finish the open sketch.
@@ -2947,7 +3125,8 @@ pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
 pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     crate::viewport_status::reconcile(app, ctx);
     crate::browser::update_folder_pick(app, ctx);
-    if design_shown(app) {
+    let chat_owner = crate::agent_chat::owns_keyboard_input(app, ctx);
+    if design_shown(app) && !chat_owner {
         crate::navigation::step_key_hold(app, ctx);
     } else {
         app.viewport.key_hold = None;
@@ -3023,6 +3202,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     }
     if popup_owner
         || inline_editor
+        || chat_owner
         || (crate::viewport_status::enabled(app) && app.ui.palette_open)
         || (ctx.egui_wants_keyboard_input() && !(crate::viewport_status::enabled(app) && app.viewport_status.owns_focus(ctx)))
     {
@@ -3037,13 +3217,15 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         }
         return;
     }
-    let (keys, mods) = ctx.input(|i| {
-        let keys: Vec<(egui::Key, bool)> = i
-            .events
+    // A quick chord can press and release all modifiers in one frame. Dispatch each key
+    // with its own modifiers, not the final frame state (an unbound Ctrl+Shift+A is not A).
+    let keys: Vec<_> = ctx.input(|i| {
+        i.events
             .iter()
-            .filter_map(|e| if let egui::Event::Key { key, pressed: true, repeat, .. } = e { Some((*key, *repeat)) } else { None })
-            .collect();
-        (keys, i.modifiers)
+            .filter_map(
+                |e| if let egui::Event::Key { key, pressed: true, repeat, modifiers, .. } = e { Some((*key, *repeat, *modifiers)) } else { None },
+            )
+            .collect()
     });
     // A theme pasted on the Interface page is a theme, not copied components (#8226).
     crate::prefs::take_theme_paste(app, ctx);
@@ -3054,7 +3236,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     } else {
         crate::edit_clipboard::flush(app, ctx);
     }
-    for (k, repeat) in keys {
+    for (k, repeat, mods) in keys {
         use egui::Key;
         // Only Esc pressed twice in a row finishes a sketch: any other key in between resets it.
         if k != Key::Escape {
@@ -3163,8 +3345,10 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
             Key::F2 => {
-                let at = ctx.input(|i| i.pointer.latest_pos()).unwrap_or(ctx.content_rect().center());
-                crate::context_menu::rename_selection(app, at);
+                if !crate::context_menu::press_shortcut(app, "F2") {
+                    let at = ctx.input(|i| i.pointer.latest_pos()).unwrap_or(ctx.content_rect().center());
+                    crate::context_menu::rename_selection(app, at);
+                }
             }
             Key::F6 => app.animate_view("fit"),
             Key::Backspace if crate::tools::undo_spline_point(app) => {}
@@ -3312,6 +3496,36 @@ mod header_report_tests {
         h.app.home.open = false;
         assert!(FileAction::Save.enabled(&h.app));
         assert!(FileAction::Export("step").enabled(&h.app));
+    }
+
+    /// File › Export STEP…, STL…, 3MF…, OBJ… and URDF… each run a command of their own, so each
+    /// can be given a key in Keyboard Shortcuts: the key asks where to save the file as the menu
+    /// item does (STL and 3MF open Save As Mesh).
+    #[test]
+    fn each_export_format_has_a_key_that_starts_it() {
+        let mut h = crate::scenario::Harness::new();
+        let offered = std::rc::Rc::new(std::cell::RefCell::new(Vec::<(String, Vec<String>)>::new()));
+        let (seen, dir) = (offered.clone(), h.dir.clone());
+        h.app.services.pick_save = Some(Box::new(move |name, extensions| {
+            seen.borrow_mut().push((name.to_string(), extensions.iter().map(|e| e.to_string()).collect()));
+            Box::pin(std::future::ready(Some(dir.join(name).to_string_lossy().into_owned())))
+        }));
+        h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
+        h.app.session.doc_mut().name = "Bracket".into();
+        for (id, key) in [("file.export_step", "Alt+Shift+F7"), ("file.export_stl", "Alt+Shift+F8")] {
+            crate::keymap::bind(&mut h.app, id, key, false).unwrap();
+            assert_eq!(crate::keymap::effective(&h.app, id).as_deref(), Some(key), "the File menu shows it");
+        }
+        crate::keymap::press(&mut h.app, "Alt+Shift+F7", false);
+        h.frames(3);
+        h.settle();
+        assert_eq!(offered.borrow().last().cloned(), Some(("Bracket.step".to_string(), vec!["step".to_string()])));
+        let step = std::fs::read(h.dir.join("Bracket.step")).unwrap();
+        assert!(step.starts_with(b"ISO-10303-21;"), "a STEP file is written");
+
+        crate::keymap::press(&mut h.app, "Alt+Shift+F8", false);
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("file.save_mesh"), "STL opens Save As Mesh");
+        crate::dialogs::cancel(&mut h.app);
     }
 
     /// New designs are saved as `.sc`. A design opened from a `.solidcraft` file is saved back to
@@ -4572,6 +4786,45 @@ mod dropdown_toggle_tests {
         h.step(&json!({"click": {"handle": "panel:MODEL:CREATE"}})).unwrap();
         h.frames(2);
         assert!(rect_of("toolbar_dropdown").is_none(), "the second click closes it");
+    }
+
+    /// A click on the lit button of the sketch tool in use ends it, so clicks in the view select
+    /// again and Ctrl+click adds lines to the selection (#10151); a constraint in the ribbon's
+    /// grid ends the same way. With the preference off, the click starts the tool again.
+    #[test]
+    fn a_second_click_on_a_running_tools_button_ends_it() {
+        use solidcraft_engine::Sel;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.set_origin_shown(false);
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[-20,-20],"p1":[20,20]})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[-10,-10],"p1":[10,10]})).unwrap();
+        h.app.cam.distance = 100.0;
+        h.settle();
+        let grid = format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[0]);
+        for handle in ["button:sketch.line", "button:sketch.dimension", grid.as_str()] {
+            h.step(&json!({"click": {"handle": handle}})).unwrap();
+            let running = h.app.tool.as_ref().map(|t| t.cmd);
+            assert!(running.is_some(), "{handle}: the first click starts the tool");
+            h.frames(30);
+            h.step(&json!({"click": {"handle": handle}})).unwrap();
+            assert!(h.app.tool.is_none(), "{handle}: the second click ends {running:?}");
+            h.frames(30);
+        }
+        // With no tool running, clicks select, and Ctrl+click adds lines of both rectangles.
+        for (i, p) in [[-15.0, 20.0], [20.0, 15.0], [-5.0, 10.0], [10.0, 5.0]].iter().enumerate() {
+            let at = h.call("ui.at", json!({"sketch": p}))["result"].clone();
+            h.step(&json!({"click": at, "ctrl": i > 0})).unwrap();
+        }
+        let curves = h.app.session.selection.iter().filter(|s| matches!(s, Sel::SketchCurve { .. })).count();
+        assert_eq!(curves, 4, "{:?}", h.app.session.selection);
+        // The old way, behind the preference: the click starts the tool again.
+        h.app.preferences.ribbon_click_ends_tool = false;
+        h.step(&json!({"click": {"handle": "button:sketch.line"}})).unwrap();
+        h.frames(30);
+        h.step(&json!({"click": {"handle": "button:sketch.line"}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.line"));
     }
 
     /// A drop-down row's help tooltip names the key the command runs from now, not its default.
