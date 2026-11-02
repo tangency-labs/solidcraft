@@ -41,10 +41,10 @@ pub const MAX_WIRE_ROWS: usize = 2 * MAX_WIRE_VARS;
 /// second's work. A design that asks for more is left where it is and reported as too large to
 /// solve in time, rather than hold the window.
 const WORK_BUDGET: f64 = 4e9;
-/// The most a point moves in one solver step, as a share of its group's size: a step that turns
-/// a line moves its end along an arc in small steps, rather than straight off to where the
-/// linear model says, which stretches it.
-const MAX_STEP: f64 = 0.25;
+/// The most a point moves in one solver step, as a share of its group's size (more when a length
+/// or a dragged point has further to go): a step that turns a line moves its end along an arc in
+/// small steps, rather than straight off to where the linear model says, which stretches it.
+const MAX_STEP: f64 = 0.05;
 /// A solve gives up on a group once it has stalled far from a solution: over the last
 /// `STALL_ITERS` iterations the sum of squared residuals fell by at most `STALL_DECREASE` of
 /// itself while the largest residual is above `STALL_RESIDUAL` (mm), as the planar solve does.
@@ -792,9 +792,10 @@ enum Lm {
 }
 
 /// Levenberg–Marquardt on one connected group of `n` unknowns from `x0`; with `hold`, that
-/// unknown point is also pulled to where it starts. Each step is damped by the curvature of each
-/// unknown (Marquardt's scaling), so a group solves alike at any size, and no point moves more
-/// than [`MAX_STEP`] of the group's size in one step.
+/// unknown point is also pulled to where it starts. The damping is the same for every unknown
+/// (so a step moves the points as little as it can) and scales with the largest curvature (so a
+/// group solves alike at any size); no point moves more than [`MAX_STEP`] of the group's size
+/// in one step.
 fn lm(blocks: &[Block], n: usize, x0: &[f64], hold: Option<usize>, work: &mut f64) -> Lm {
     let target = hold.map(|h| Block::at(x0, h));
     let residuals = |x: &[f64]| -> Vec<f64> {
@@ -874,7 +875,7 @@ fn lm(blocks: &[Block], n: usize, x0: &[f64], hold: Option<usize>, work: &mut f6
             }
             let mut damped = a.clone();
             for c in 0..n {
-                damped.add(c, c, lambda * (a.get(c, c) + 1e-9 * top + 1e-12));
+                damped.add(c, c, lambda * (top + 1e-12));
             }
             let Some(mut dx) = linalg::solve_counted(damped, g.clone(), work) else {
                 lambda *= 10.0;
