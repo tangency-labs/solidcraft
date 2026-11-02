@@ -1777,3 +1777,216 @@ fn a_wall_on_part_of_an_edge_meets_a_wall_at_a_relieved_corner_and_is_relieved_a
     run(&mut s, "sheet.refold", json!({}));
     assert!((volume(&mut s) - v).abs() < 1e-6 * v);
 }
+
+/// A tray of this build's own sheet metal: a 120 x 90 base, T 1, R 1, K 0.5, gap 0.6, its four
+/// walls 30 high under the rule's corner relief `shape`, made in one edge flange feature or in
+/// two (long walls, then short), written to a STEP and inserted into a new design as a plain
+/// solid. Its bends are picked at mid-length on their outer cylinders, (R + T) out from their
+/// axes 45° round from the base. Returns the new design (with the rule), the picks and the
+/// design the tray was made in.
+fn tray_round_trip(shape: &str, two: bool) -> (Session, Vec<[f64; 3]>, Session) {
+    slotted_tray_round_trip(shape, two, &[])
+}
+
+/// [`tray_round_trip`] with `slots` (x0, y0, x1, y1) cut through the unfolded tray before it is
+/// folded again and written out.
+fn slotted_tray_round_trip(shape: &str, two: bool, slots: &[[f64; 4]]) -> (Session, Vec<[f64; 3]>, Session) {
+    let (t, r) = (1.0, 1.0);
+    let rule = json!({"name": "T", "thickness": "1 mm", "k_factor": "0.5", "bend_radius": "1 mm", "gap": "0.6 mm", "corner_relief_shape": shape, "corner_relief": "3 mm", "active": true});
+    let mut a = Session::default();
+    run(&mut a, "sheet.manage_rules", rule.clone());
+    run(&mut a, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut a, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [120, 90]}));
+    run(&mut a, "sketch.finish", json!({}));
+    run(&mut a, "sheet.flange", json!({"type": "base", "sketch": "Base", "rule": "T"}));
+    let (long, short) = (json!([[60, 0, 1], [60, 90, 1]]), json!([[120, 45, 1], [0, 45, 1]]));
+    if two {
+        run(&mut a, "sheet.flange", json!({"edges": long, "height": 30}));
+        run(&mut a, "sheet.flange", json!({"edges": short, "height": 30}));
+    } else {
+        let mut all = long.as_array().cloned().unwrap_or_default();
+        all.extend(short.as_array().cloned().unwrap_or_default());
+        run(&mut a, "sheet.flange", json!({"edges": all, "height": 30}));
+    }
+    if !slots.is_empty() {
+        run(&mut a, "sheet.unfold", json!({}));
+        for (i, [x0, y0, x1, y1]) in slots.iter().enumerate() {
+            let name = format!("Slot{i}");
+            run(&mut a, "sketch.create", json!({"plane": "XY", "name": name}));
+            run(&mut a, "sketch.rectangle.two_point", json!({"p0": [x0, y0], "p1": [x1, y1]}));
+            run(&mut a, "sketch.finish", json!({}));
+            run(&mut a, "solid.extrude", json!({"sketch": name, "through_all": true, "operation": "cut", "direction": "symmetric"}));
+        }
+        run(&mut a, "sheet.refold", json!({}));
+    }
+    let path = std::env::temp_dir().join(format!("solidcraft-tray-round-trip-{shape}-{two}-{}-{}.step", slots.len(), std::process::id()));
+    run(&mut a, "file.export", json!({"path": path.to_string_lossy()}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path.to_string_lossy()}));
+    let _ = std::fs::remove_file(&path);
+    run(&mut s, "sheet.manage_rules", rule);
+    // Each bend's axis lies R + T in from the base's edge and R + T above its bottom face.
+    let (o, d) = (r + t, (r + t) * std::f64::consts::FRAC_1_SQRT_2);
+    let picks = vec![[60.0, o - d, o - d], [60.0, 90.0 - o + d, o - d], [120.0 - o + d, 45.0, o - d], [o - d, 45.0, o - d]];
+    (s, picks, a)
+}
+
+/// A bent sheet converts from either skin of its base, and without a fixed face (the largest flat
+/// one is fixed; the base's two skins are as large as each other). Picked on its outer skin (the
+/// bottom, z 0), the plate check traced no outline for the base under a flange bent at 45 degrees,
+/// and that was an error instead of no plate.
+#[test]
+fn a_bent_sheet_converts_from_either_skin_or_without_a_fixed_face() {
+    let rule = json!({"name": "T", "thickness": "1 mm", "k_factor": "0.5", "bend_radius": "1 mm", "gap": "0.6 mm", "active": true});
+    let mut a = Session::default();
+    run(&mut a, "sheet.manage_rules", rule.clone());
+    run(&mut a, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut a, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [120, 60]}));
+    run(&mut a, "sketch.finish", json!({}));
+    run(&mut a, "sheet.flange", json!({"type": "base", "sketch": "Base", "rule": "T"}));
+    run(&mut a, "sheet.flange", json!({"edges": [[60, 60, 1]], "height": 20, "angle": 45}));
+    let path = std::env::temp_dir().join(format!("solidcraft-l-round-trip-{}.step", std::process::id()));
+    run(&mut a, "file.export", json!({"path": path.to_string_lossy()}));
+    let v = volume(&mut a);
+    for face in [None, Some([30.0, 20.0, 0.0]), Some([30.0, 20.0, 1.0])] {
+        let mut s = Session::default();
+        run(&mut s, "file.insert_step", json!({"path": path.to_string_lossy()}));
+        run(&mut s, "sheet.manage_rules", rule.clone());
+        let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap_or_default();
+        let mut p = json!({"body": body, "rule": "T"});
+        if let Some(face) = face {
+            p["face"] = json!(face);
+        }
+        let out = s.execute("sheet.convert", &p);
+        let warning = out.as_ref().map(|v| v["warning"].as_str().unwrap_or_default().to_string()).unwrap_or_default();
+        assert!(out.is_ok(), "face {face:?}: {}", out.err().map(|e| e.to_string()).unwrap_or_default());
+        assert!(warning.contains("1 bend found by itself: 1.000 thick, inside radius 1.000"), "face {face:?}: {warning}");
+        assert!((volume(&mut s) - v).abs() < 1e-6 * v, "face {face:?}: {} vs {v}", volume(&mut s));
+        assert!(same_size(flat_size(&mut s), flat_size(&mut a), 1e-6), "face {face:?}: {:?} vs {:?}", flat_size(&mut s), flat_size(&mut a));
+    }
+    let _ = std::fs::remove_file(&path);
+}
+
+/// The flat's outline area and its bends' lengths, longest first.
+fn flat_area_and_bends(s: &mut Session) -> (f64, Vec<f64>) {
+    let f = flat(s);
+    let ring = |l: &Value| {
+        let p: Vec<(f64, f64)> =
+            l.as_array().into_iter().flatten().map(|q| (q[0].as_f64().unwrap_or(f64::NAN), q[1].as_f64().unwrap_or(f64::NAN))).collect();
+        (0..p.len()).map(|i| p[i].0 * p[(i + 1) % p.len()].1 - p[(i + 1) % p.len()].0 * p[i].1).sum::<f64>().abs() / 2.0
+    };
+    let area = f["outline"].as_array().into_iter().flatten().map(ring).sum();
+    let mut bends: Vec<f64> = f["bends"].as_array().into_iter().flatten().map(|b| b["length"].as_f64().unwrap_or(f64::NAN)).collect();
+    bends.sort_by(|x, y| y.total_cmp(x));
+    (area, bends)
+}
+
+/// A tray made with this build's sheet metal converts back to the same tray: the walls that run
+/// on past their bends' ends (a notch, a tear) step down to the bend there, and a round relief's
+/// arc stays; also with the short walls made in a second feature, where the corners are notched
+/// or round (a torn butt corner is torn differently from one feature's corner).
+#[test]
+fn trays_of_its_own_sheet_metal_convert_back() {
+    for shape in ["notch", "tear", "round"] {
+        for two in [false, true].into_iter().filter(|two| !(*two && shape == "tear")) {
+            let what = format!("{shape}, {}", if two { "two features" } else { "one feature" });
+            let (mut s, picks, mut source) = tray_round_trip(shape, two);
+            let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap_or_default();
+            let out = s.execute("sheet.convert", &json!({"body": body, "face": [60, 45, 0], "bends": picks, "rule": "T"}));
+            assert!(out.is_ok(), "{what}: {}", out.err().map(|e| e.to_string()).unwrap_or_default());
+            // The same tray: its solid, and its flat with the same bends.
+            let (v, size, (area, bends)) = (volume(&mut source), flat_size(&mut source), flat_area_and_bends(&mut source));
+            assert!((volume(&mut s) - v).abs() < 1e-9 * v, "{what}: {} vs {v}", volume(&mut s));
+            assert!(same_size(flat_size(&mut s), size, 1e-6), "{what}: {:?} vs {size:?}", flat_size(&mut s));
+            let (got_area, got_bends) = flat_area_and_bends(&mut s);
+            assert!((got_area - area).abs() < 1e-9 * area, "{what}: {got_area} vs {area}");
+            assert!(
+                got_bends.len() == bends.len() && got_bends.iter().zip(&bends).all(|(x, y)| (x - y).abs() < 1e-6),
+                "{what}: {got_bends:?} vs {bends:?}"
+            );
+        }
+    }
+}
+
+/// A bend that slots cross is one bend, however many of its pieces are picked: the pieces of
+/// its cylinder between the slots are all bent, and the slots come back as cut-outs across it.
+#[test]
+fn a_bend_split_by_slots_across_it_converts_as_one_bend() {
+    // Two slots across the long bend at y = 0, one across the short bend at x = 120, from the
+    // base into the walls of the unfolded tray.
+    let slots = [[30.0, -6.0, 40.0, 8.0], [70.0, -6.0, 80.0, 8.0], [112.0, 55.0, 126.0, 65.0]];
+    for shape in ["notch", "tear"] {
+        for every in [false, true] {
+            let what = format!("{shape}, {}", if every { "every piece picked" } else { "one piece picked" });
+            let (mut s, mut picks, mut source) = slotted_tray_round_trip(shape, false, &slots);
+            if every {
+                let (o, d) = (2.0, 2.0 * std::f64::consts::FRAC_1_SQRT_2);
+                picks.extend([[15.0, o - d, o - d], [100.0, o - d, o - d], [120.0 - o + d, 20.0, o - d], [120.0 - o + d, 75.0, o - d]]);
+            }
+            let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap_or_default();
+            let out = s.execute("sheet.convert", &json!({"body": body, "face": [60, 45, 0], "bends": picks, "rule": "T"}));
+            assert!(out.is_ok(), "{what}: {}", out.err().map(|e| e.to_string()).unwrap_or_default());
+            let (v, size, (area, bends)) = (volume(&mut source), flat_size(&mut source), flat_area_and_bends(&mut source));
+            let cutouts = flat(&mut source)["cutouts"].as_array().map(Vec::len);
+            assert_eq!(cutouts, Some(3), "{what}");
+            assert!((volume(&mut s) - v).abs() < 1e-6 * v, "{what}: {} vs {v}", volume(&mut s));
+            assert!(same_size(flat_size(&mut s), size, 1e-6), "{what}: {:?} vs {size:?}", flat_size(&mut s));
+            let (got_area, got_bends) = flat_area_and_bends(&mut s);
+            assert!((got_area - area).abs() < 1e-6 * area, "{what}: {got_area} vs {area}");
+            assert!(
+                got_bends.len() == bends.len() && got_bends.iter().zip(&bends).all(|(x, y)| (x - y).abs() < 1e-6),
+                "{what}: {got_bends:?} vs {bends:?}"
+            );
+            assert_eq!(flat(&mut s)["cutouts"].as_array().map(Vec::len), cutouts, "{what}");
+        }
+    }
+}
+
+/// Without bend points the bends are found by themselves (#1325): every bend cylinder of the
+/// outer skin, bent with the radius and thickness the body is modelled with (the rule gives the
+/// K-factor), so the trays above come back as they were, slots across their bends too, under a
+/// rule of another radius as well; the reply says what was found. Without a fixed face the
+/// largest flat one is fixed (the tray's outer bottom).
+#[test]
+fn a_tray_converts_with_its_bends_found_by_themselves() {
+    let slots = [[30.0, -6.0, 40.0, 8.0], [70.0, -6.0, 80.0, 8.0], [112.0, 55.0, 126.0, 65.0]];
+    let cases: [(&str, bool, &[[f64; 4]], bool, bool); 6] = [
+        ("notch", false, &[], true, true),
+        ("notch", true, &[], true, true),
+        ("round", false, &[], true, true),
+        ("tear", false, &slots, true, true),
+        ("notch", false, &[], false, true),
+        ("tear", false, &slots, true, false),
+    ];
+    for (shape, two, slots, own_rule, face) in cases {
+        let what = format!("{shape}, two features {two}, {} slots, own rule {own_rule}, face given {face}", slots.len());
+        let (mut s, _, mut source) = slotted_tray_round_trip(shape, two, slots);
+        let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap_or_default();
+        let mut p = json!({"body": body});
+        if face {
+            p["face"] = json!([60, 45, 0]);
+        }
+        if own_rule {
+            p["rule"] = json!("T");
+        } else {
+            let wide = json!({"name": "Wide", "thickness": "1 mm", "k_factor": "0.5", "bend_radius": "3 mm", "gap": "0.6 mm", "corner_relief_shape": shape, "corner_relief": "3 mm", "active": true});
+            run(&mut s, "sheet.manage_rules", wide);
+            p["rule"] = json!("Wide");
+        }
+        let out = s.execute("sheet.convert", &p);
+        let warning = out.as_ref().map(|v| v["warning"].as_str().unwrap_or_default().to_string()).unwrap_or_default();
+        assert!(out.is_ok(), "{what}: {}", out.err().map(|e| e.to_string()).unwrap_or_default());
+        assert!(warning.contains("4 bends found by themselves: 1.000 thick, inside radius 1.000"), "{what}: {warning}");
+        let (v, (area, bends)) = (volume(&mut source), flat_area_and_bends(&mut source));
+        assert!((volume(&mut s) - v).abs() < 1e-6 * v, "{what}: {} vs {v}", volume(&mut s));
+        let (got_area, got_bends) = flat_area_and_bends(&mut s);
+        if own_rule {
+            assert!(same_size(flat_size(&mut s), flat_size(&mut source), 1e-6), "{what}: {:?}", flat_size(&mut s));
+            assert!((got_area - area).abs() < 1e-6 * area, "{what}: {got_area} vs {area}");
+            assert!(
+                got_bends.len() == bends.len() && got_bends.iter().zip(&bends).all(|(x, y)| (x - y).abs() < 1e-6),
+                "{what}: {got_bends:?} vs {bends:?}"
+            );
+        }
+    }
+}
