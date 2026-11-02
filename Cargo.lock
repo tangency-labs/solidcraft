@@ -4285,14 +4285,12 @@ dependencies = [
 name = "solidcraft-smlib"
 version = "0.30.1"
 dependencies = [
- "cc",
  "flate2",
  "log",
  "serde_json",
  "solidcore",
  "solidcraft-geom",
  "solidcraft-profile",
- "web-time",
 ]
 
 [[package]]

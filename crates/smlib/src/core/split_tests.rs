@@ -1,8 +1,6 @@
 //! Split Face and Split Body on solidcore, against closed forms: face, edge and vertex counts,
 //! volumes, how many faces each chosen face became, and every result exports to a record that
-//! validates. With SMLib built, the same input converted to the C++ kernel and the same tools
-//! give the same result or the same error (parity only: the expected values are the analytic
-//! ones).
+//! validates.
 //!
 //! The body is a 10 mm cube [0, 10]^3 on solidcore; the tools are described as
 //! [`crate::ssi::Surface`] describes them.
@@ -129,75 +127,8 @@ fn solidcore_case(name: &str) -> Got {
     judge(name, "solidcore", got)
 }
 
-/// The C++ kernel's surface for `spec`.
-#[cfg(feature = "native")]
-fn surface(spec: &Spec) -> crate::ssi::Surface {
-    use crate::ssi::Surface;
-    match spec {
-        Spec::Plane { origin, xaxis, yaxis, u, v } => Surface::plane(*origin, *xaxis, *yaxis, *u, *v),
-        Spec::Cylinder { origin, xaxis, yaxis, radius, angle_deg, height } => {
-            Surface::cylinder(*origin, *xaxis, *yaxis, *radius, *angle_deg, *height)
-        }
-        _ => panic!("no such tool in these cases"),
-    }
-    .unwrap()
-}
 
-/// The case on the C++ kernel, called directly (whatever the choice), on the cube converted
-/// from solidcore's.
-#[cfg(feature = "native")]
-fn cpp_case(name: &str) -> Got {
-    use crate::{Brep, error, ffi};
-    crate::init().unwrap();
-    let (op, _) = case(name);
-    let body = Brep::made_core(cube());
-    let measure = |h: &ffi::Handle| {
-        let (rec, _) = native(&Brep::made(ffi::copy(h).unwrap()).cpp_arrays().unwrap()).unwrap();
-        rec.validate().unwrap();
-        (ffi::volume(h, 1e-8).unwrap(), ffi::counts(h).unwrap().map(|x| usize::try_from(x).unwrap()))
-    };
-    let got = match &op {
-        Op::Faces(faces, tools) => {
-            let made: Vec<crate::ssi::Surface> = tools.iter().map(surface).collect();
-            let handles: Vec<&ffi::ssi::SurfaceHandle> = made.iter().map(|s| s.handle().unwrap()).collect();
-            let faces: Vec<i64> = faces.iter().map(|&f| f as i64).collect();
-            match ffi::split::split_faces(body.cpp().unwrap(), &faces, &handles) {
-                Ok((h, made)) => {
-                    let (volume, counts) = measure(&h);
-                    Ok(Measured::Split { volume, counts, made: made.into_iter().map(|m| usize::try_from(m).unwrap()).collect() })
-                }
-                Err(ffi::ops::ERR_NO_CUT) => Ok(Measured::NoCut),
-                Err(s) => Err(error(s)),
-            }
-        }
-        Op::Body(tool) => match ffi::split::split_body(body.cpp().unwrap(), surface(tool).handle().unwrap()) {
-            Ok((b, f)) => {
-                let (vb, nb) = measure(&b);
-                let (vf, nf) = measure(&f);
-                Ok(Measured::Halves { volumes: [vb, vf], counts: [nb, nf] })
-            }
-            Err(ffi::ops::ERR_NO_CUT) => Ok(Measured::NoCut),
-            Err(s) => Err(error(s)),
-        },
-    };
-    judge(name, "C++", got)
-}
 
-#[cfg(feature = "native")]
-fn parity(name: &str) {
-    match (solidcore_case(name), cpp_case(name)) {
-        (Ok(Measured::Split { volume: a, counts: na, made: ma }), Ok(Measured::Split { volume: b, counts: nb, made: mb })) => {
-            assert!(rel(a, b) < 1e-9, "{name}: solidcore {a} vs C++ {b}");
-            assert_eq!(na, nb, "{name}: counts (solidcore vs C++)");
-            assert_eq!(ma, mb, "{name}: faces made per face (solidcore vs C++)");
-        }
-        (Ok(Measured::Halves { volumes: a, counts: na }), Ok(Measured::Halves { volumes: b, counts: nb })) => {
-            assert!(rel(a[0], b[0]) < 1e-9 && rel(a[1], b[1]) < 1e-9, "{name}: solidcore {a:?} vs C++ {b:?}");
-            assert_eq!(na, nb, "{name}: counts (solidcore vs C++)");
-        }
-        (a, b) => assert_eq!(a, b, "{name}: solidcore vs C++"),
-    }
-}
 
 macro_rules! cases {
     ($($m:ident $(: $ign:meta)?),* $(,)?) => {$(
@@ -206,19 +137,6 @@ macro_rules! cases {
             $(#[$ign])?
             fn solidcore_matches_the_closed_form() {
                 let _ = super::solidcore_case(stringify!($m));
-            }
-            #[cfg(feature = "native")]
-            #[test]
-            $(#[$ign])?
-            fn solidcore_matches_the_cpp_kernel() {
-                let _cpp = crate::route::on_cpp();
-                super::parity(stringify!($m));
-            }
-            #[cfg(feature = "native")]
-            #[test]
-            fn the_cpp_kernel_matches_the_closed_form() {
-                let _cpp = crate::route::on_cpp();
-                let _ = super::cpp_case(stringify!($m));
             }
         }
     )*};
@@ -308,8 +226,6 @@ fn lid(side: bool) -> Body {
 /// the sides are read from; on C++ too.
 #[test]
 fn split_body_by_an_l_sheet() {
-    #[cfg(feature = "native")]
-    let _cpp = crate::route::on_cpp();
     let (c, sheet) = (cube(), lid(true));
     for face in 0..2 {
         let (b, f) = split_body_by_sheet(&c, &sheet, face).unwrap().expect("the sheet divides the cube");
@@ -317,13 +233,6 @@ fn split_body_by_an_l_sheet() {
         valid("L sheet", &f);
         let (vb, vf) = (volume(&b, 1e-8).unwrap(), volume(&f, 1e-8).unwrap());
         assert!(rel(vb.min(vf), 250.0) < 1e-9 && rel(vb.max(vf), 750.0) < 1e-9, "face {face}: {vb} + {vf}");
-        #[cfg(feature = "native")]
-        {
-            let (body, tool) = (crate::Brep::made_core(cube()), crate::Brep::made_core(lid(true)));
-            let (bc, fc) = crate::ffi::split::split_body_by_sheet(body.cpp().unwrap(), tool.cpp().unwrap(), face as i64).unwrap();
-            let (vbc, vfc) = (crate::ffi::volume(&bc, 1e-8).unwrap(), crate::ffi::volume(&fc, 1e-8).unwrap());
-            assert!(rel(vb, vbc) < 1e-9 && rel(vf, vfc) < 1e-9, "face {face}: {vb} + {vf} vs C++ {vbc} + {vfc}");
-        }
     }
 }
 
@@ -349,25 +258,6 @@ fn the_body_stays_as_it_was() {
     assert!(rel(volume(&b, 1e-8).unwrap(), 1000.0) < 1e-12);
 }
 
-/// Face and edge tags (`Brep::tagged`) through a face split on solidcore, as on C++.
-#[cfg(feature = "native")]
-mod history {
-    use crate::{Brep, ffi};
-
-    #[test]
-    fn tags_cross_a_face_split() {
-        let _cpp = crate::route::on_cpp();
-        crate::init().unwrap();
-        let a = Brep::made_core(super::cube()).tagged(0).unwrap();
-        let p = super::plane_x(5.0);
-        let s = super::surface(&p);
-        let faces = [0i64, 1, 2, 3, 4, 5];
-        let cpp = Brep::made(ffi::split::split_faces(a.cpp().unwrap(), &faces, &[s.handle().unwrap()]).unwrap().0).history().unwrap();
-        let core = super::split_faces(a.core().unwrap(), &[0, 1, 2, 3, 4, 5], &[&p]).unwrap().unwrap().0;
-        let core = Brep::made_core(core).history().unwrap();
-        assert_eq!(core.canonical(), cpp.canonical());
-    }
-}
 
 /// A one-face sheet on a B-spline surface (as SolidCraft's extrude of a sketch spline makes it:
 /// the cubic through (0, 0), (13, -8), (27, 8), (40, 0) in x and z, straight along y over

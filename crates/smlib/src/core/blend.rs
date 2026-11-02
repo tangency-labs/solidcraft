@@ -169,10 +169,14 @@ pub(super) fn edge_miss(m: Miss) -> Error {
 /// point's index to `out_failed_corner` only, so the status comes back bare.
 fn corner_miss(m: Miss) -> Error {
     match m {
-        Miss::None(_) => Error::Status(crate::ffi::ops::ERR_PICK_NONE),
-        Miss::Ambiguous(_) => Error::Status(crate::ffi::ops::ERR_PICK_AMBIGUOUS),
+        Miss::None(_) => Error::Status(ERR_PICK_NONE),
+        Miss::Ambiguous(_) => Error::Status(ERR_PICK_AMBIGUOUS),
     }
 }
+
+/// The capi's statuses for a pick that is near nothing, and for one equally near to two.
+const ERR_PICK_NONE: i32 = -1101;
+const ERR_PICK_AMBIGUOUS: i32 = -1102;
 
 /// A corner set back: its vertex and the setback along each of its edges (the capi's
 /// `SetBack`; the entry points take no ease, which is 0).

@@ -1,7 +1,5 @@
 //! Extrusions, revolutions, sweeps, lofts and planar faces on solidcore, against closed forms:
-//! every result exports to a record that validates. With SMLib built, the same case on the C++
-//! kernel gives the same volume (or, for a sheet, area), counts and faces by surface kind, or the
-//! same error (parity only: the expected values are the analytic ones).
+//! every result exports to a record that validates.
 //!
 //! The profiles are built straight into solidcore curves from the curve lists.
 
@@ -357,51 +355,7 @@ fn solidcore_case(name: &'static str) -> Got {
     })
 }
 
-/// The case on the C++ kernel, through the public sweeps forced onto it on this thread.
-#[cfg(feature = "native")]
-fn cpp_case(name: &str) -> Got {
-    use crate::{Brep, ffi};
-    crate::sweeps::ON_CPP.with(|c| c.set(true));
-    let c = case(name);
-    let r = match &c.op {
-        Op::PlanarFaces(l) => Brep::planar_faces(l),
-        Op::Extrude(p, d, dist, draft, corner, cap) => Brep::extrude(p, *d, *dist, *draft, *corner, *cap),
-        Op::Revolve(p, o, a, angle, cap) => Brep::revolve(p, *o, *a, *angle, *cap),
-        Op::Sweep(p, path, frame, cap) => Brep::sweep(p, path, *frame, *cap),
-        Op::Loft(s, d, cap) => Brep::loft(s, *d, *cap),
-        Op::LoftToPoint(s, apex) => Brep::loft_to_point(s, *apex),
-        Op::Stations(p, s, e) => Brep::sweep_stations(p, s, *e),
-        Op::Screw(p, o, a, pitch, turns, tol) => Brep::screw_sweep(p, *o, *a, *pitch, *turns, *tol),
-        Op::ScrewRadial(p, o, a, pitch, turns, law, tol) => Brep::screw_sweep_radial(p, *o, *a, *pitch, *turns, law, *tol),
-    };
-    crate::sweeps::ON_CPP.with(|c| c.set(false));
-    let sheet = matches!(c.expect, Expect::Sheet(_));
-    let got = r.map(|b| {
-        let h = b.cpp().unwrap();
-        let size = if sheet { ffi::measure::area(h, 1e-8) } else { ffi::volume(h, 1e-8) }.unwrap();
-        let n = ffi::counts(h).unwrap().map(|x| usize::try_from(x).unwrap());
-        let (rec, _) = native(&b.cpp_arrays().unwrap()).unwrap();
-        rec.validate().unwrap();
-        Measured { size, counts: n, kinds: kinds(&rec) }
-    });
-    judge(name, "C++", &c.expect, got)
-}
 
-/// solidcore and C++ agree: volume (area) within 1e-9, the same counts and faces by kind, or the
-/// same error.
-#[cfg(feature = "native")]
-fn parity(name: &'static str) {
-    let cpp = cpp_case(name);
-    let ours = solidcore_case(name);
-    match (ours, cpp) {
-        (Ok(a), Ok(b)) => {
-            assert!(rel(a.size, b.size) < 1e-9, "{name}: solidcore {} vs C++ {}", a.size, b.size);
-            assert_eq!(a.counts, b.counts, "{name}: face, edge, vertex counts (solidcore vs C++)");
-            assert_eq!(a.kinds, b.kinds, "{name}: faces by surface kind (solidcore vs C++)");
-        }
-        (a, b) => assert_eq!(a.err(), b.err(), "{name}: errors (solidcore vs C++)"),
-    }
-}
 
 macro_rules! cases {
     ($($m:ident $([$pign:meta])? $(: $ign:meta)?),* $(,)?) => {$(
@@ -411,26 +365,11 @@ macro_rules! cases {
             fn solidcore_matches_the_closed_form() {
                 let _ = super::solidcore_case(stringify!($m));
             }
-            #[cfg(feature = "native")]
-            #[test]
-            $(#[$ign])?
-            $(#[$pign])?
-            fn solidcore_matches_the_cpp_kernel() {
-                let _cpp = crate::route::on_cpp();
-                super::parity(stringify!($m));
-            }
-            #[cfg(feature = "native")]
-            #[test]
-            fn the_cpp_kernel_matches_the_closed_form() {
-                let _cpp = crate::route::on_cpp();
-                let _ = super::cpp_case(stringify!($m));
-            }
         }
     )*};
 }
 
-// Cases marked `[ignore = …]` match the closed form on solidcore but not the C++ kernel's
-// numbers; `: ignore = …` ones fail on solidcore.
+// `: ignore = …` cases fail on solidcore.
 cases!(
     planar_faces_with_a_hole,
     extrude_rectangle,
@@ -461,16 +400,14 @@ cases!(
 /// in two pieces extrudes to the faces, edges and vertices of the whole circle (two caps and one
 /// cylinder: 3 faces, 3 edges with the seam, 2 vertices) and the area 2πr² + 2πrh; a half disc
 /// whose arc is in two quarters to its diameter's plane wall and one cylinder (4 faces, 6 edges,
-/// 4 vertices) and the area πr² + πrh + 2rh. On solidcore, and with SMLib built on the C++ kernel.
+/// 4 vertices) and the area πr² + πrh + 2rh.
 #[test]
 fn arcs_on_one_circle_sweep_one_wall() {
-    #[cfg(feature = "native")]
-    let _cpp = crate::route::on_cpp();
     let cases = [
         ("extrude_circle_in_two_halves", [3, 3, 2], 50.0 * PI + 100.0 * PI, true),
         ("extrude_circle_in_two_frames", [3, 3, 2], 50.0 * PI + 100.0 * PI, true),
         // solidcore sweeps a partial arc, merged or drawn whole, to a surface of extrusion (a
-        // rational spline in the record) where the C++ kernel makes a cylinder: one wall still.
+        // rational spline in the record) where SMLib made a cylinder: one wall still.
         ("extrude_half_disc_split_arc", [4, 6, 4], 25.0 * PI + 50.0 * PI + 100.0, false),
     ];
     let walls = |kinds: &BTreeMap<String, usize>| kinds.iter().filter(|(k, _)| !k.starts_with("plane")).map(|(_, n)| *n).sum::<usize>();
@@ -486,25 +423,6 @@ fn arcs_on_one_circle_sweep_one_wall() {
             assert_eq!(kinds_got.get("cylinder"), Some(&1), "{name}: solidcore walls {kinds_got:?}");
         }
         assert!(rel(area_got, want_area) < 1e-9, "{name}: solidcore area {area_got} vs analytic {want_area}");
-        #[cfg(feature = "native")]
-        {
-            use crate::{Brep, ffi};
-            crate::sweeps::ON_CPP.with(|c| c.set(true));
-            let r = match case(name).op {
-                Op::Extrude(p, d, dist, draft, corner, cap) => Brep::extrude(&p, d, dist, draft, corner, cap),
-                op => panic!("{name}: {op:?}"),
-            };
-            crate::sweeps::ON_CPP.with(|c| c.set(false));
-            let b = r.unwrap_or_else(|e| panic!("{name}: C++: {e}"));
-            let h = b.cpp().unwrap();
-            let n = ffi::counts(h).unwrap().map(|x| usize::try_from(x).unwrap());
-            let (rec, _) = native(&b.cpp_arrays().unwrap()).unwrap();
-            assert_eq!(n, want_counts, "{name}: C++ faces, edges, vertices");
-            assert_eq!(walls(&kinds(&rec)), 1, "{name}: C++ curved walls {:?}", kinds(&rec));
-            assert_eq!(kinds(&rec).get("cylinder"), Some(&1), "{name}: C++ walls {:?}", kinds(&rec));
-            let a = ffi::measure::area(h, 1e-8).unwrap();
-            assert!(rel(a, want_area) < 1e-9, "{name}: C++ area {a} vs analytic {want_area}");
-        }
     }
 }
 
@@ -553,20 +471,6 @@ fn sweep_placed_reports_the_motions() {
     check_motions(&turned, &quarter_turn());
 }
 
-/// The same motions on the C++ kernel.
-#[cfg(feature = "native")]
-#[test]
-fn the_cpp_kernel_places_the_profile_alike() {
-    let _cpp = crate::route::on_cpp();
-    crate::sweeps::ON_CPP.with(|c| c.set(true));
-    let (p, up) = straight_up();
-    let (q, arc) = round_z();
-    let placed = crate::Brep::sweep_placed(&p, &up, SweepFrame::Follow, true).unwrap().1;
-    let turned = crate::Brep::sweep_placed(&q, &arc, SweepFrame::Follow, true).unwrap().1;
-    crate::sweeps::ON_CPP.with(|c| c.set(false));
-    check_motions(&placed, &[0.0, 5.0, 10.0].map(|z| translate([0.0, 0.0, z])));
-    check_motions(&turned, &quarter_turn());
-}
 
 /// A diagonal 10 above a 10 x 10 x 10 box's top, projected down onto the top: the same diagonal
 /// at z = 10.
@@ -669,61 +573,6 @@ fn a_box_top_section_is_the_line_across_it() {
     assert!((len - 10.0).abs() < 1e-6, "{len} against 10");
 }
 
-/// The same sections on the C++ kernel: the lofted wall's line along the same points. On a box's
-/// top and a cylinder's side, whose analytic intersectors make no UV curves, the capi leaves
-/// `bForceUVClassify` FALSE and answers [`Error::Empty`] (solidcore#1769), where the port has the
-/// section.
-#[cfg(feature = "native")]
-#[test]
-fn the_cpp_kernel_sections_a_face_alike() {
-    let _cpp = crate::route::on_cpp();
-    use crate::{Brep, ffi};
-    type Case = (&'static str, Box<dyn Fn() -> Body>, Brep, [[f64; 3]; 3]);
-    let cases: [Case; 3] = [
-        (
-            "loft",
-            Box::new(|| loft(&square_frustum(), 1, true).unwrap()),
-            {
-                crate::sweeps::ON_CPP.with(|c| c.set(true));
-                let b = Brep::loft(&square_frustum(), 1, true).unwrap();
-                crate::sweeps::ON_CPP.with(|c| c.set(false));
-                b
-            },
-            [[5.0, 1.0, 5.0], [0.0, 0.0, 5.0], [0.0, 0.0, 1.0]],
-        ),
-        (
-            "box",
-            Box::new(|| make_box([0.0; 3], [10.0; 3]).unwrap()),
-            ffi::make_box(&[0.0; 3], &[10.0; 3]).map(Brep::made).unwrap(),
-            [[5.0, 5.0, 10.0], [5.0, 5.0, 5.0], [1.0, 0.0, 0.0]],
-        ),
-        (
-            "cylinder",
-            Box::new(|| make_cylinder([0.0; 3], 5.0, 10.0).unwrap()),
-            ffi::make_cylinder(&[0.0; 3], 5.0, 10.0).map(Brep::made).unwrap(),
-            [[5.0, 0.0, 5.0], [0.0, 0.0, 3.0], [0.0, 0.0, 1.0]],
-        ),
-    ];
-    for (name, core, cpp, [face, through, n]) in cases {
-        crate::sweeps::ON_CPP.with(|c| c.set(true));
-        let want = cpp.face_section(face, 0.01, through, n, 1e-6);
-        crate::sweeps::ON_CPP.with(|c| c.set(false));
-        let got = face_section(&core(), face, 0.01, through, n, 1e-6);
-        let (got, want) = match (got, want) {
-            (Ok(g), Ok(w)) => (g, w),
-            (Ok(g), Err(Error::Empty)) if name != "loft" => {
-                assert!(!g.is_empty(), "{name}: the port has the section the capi drops");
-                continue;
-            }
-            (g, w) => panic!("{name}: {:?} against {:?}", g.err(), w.err()),
-        };
-        assert_eq!(got.len(), want.len(), "{name}: {got:?} against {want:?}");
-        let (g, w) = (samples(&got, 64), samples(&want, 64));
-        for (a, b) in g.iter().flatten().zip(w.iter().flatten()) {
-            assert!(a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-9), "{name}: {a:?} against {b:?}");
-        }
-    }
-}
 
 /// The capi's argument checks, before any kernel call.
 #[test]

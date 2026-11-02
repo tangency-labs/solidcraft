@@ -1,6 +1,5 @@
-//! The operations against analytic volumes and topology counts (built with SMLib only). `SMLIB_OPS_SHOTS=<dir>` also
+//! The operations against analytic volumes and topology counts. `SMLIB_OPS_SHOTS=<dir>` also
 //! writes every result there as a native `.smb`, to render.
-#![cfg(feature = "native")]
 
 use super::*;
 use crate::CheckLevel;
@@ -397,20 +396,14 @@ fn draft_tilts_a_side_about_its_line_on_the_neutral_plane() {
 fn a_setback_corner_left_open_returns_its_hole() {
     let b = Brep::make_box([0.0; 3], [60.0, 40.0, 20.0]).unwrap();
     let edges = [[30.0, 40.0, 20.0], [60.0, 20.0, 20.0], [60.0, 40.0, 10.0]];
-    solidcraft_profile::set_enabled(true);
-    let mark = solidcraft_profile::mark();
     let (open, holes) = b.blend_setback_open(Blend::Round, &edges, &[5.0; 3], &[[60.0, 40.0, 20.0]], &[8.0], 0.1).unwrap();
-    // The call is a profiler span like every other, timed by the C API.
-    let report = mark.report();
-    let on_cpp = crate::route::backend() == crate::route::Backend::Smlib;
-    assert!(!on_cpp || report.rows.iter().any(|r| r.category == "smlib" && r.name == "smlib_blend_setback_open"), "{report:?}");
     shot(&open, "setback_open");
     assert_eq!(open.counts().unwrap(), [9, 30, 22]);
     assert!(!open.is_manifold_solid().unwrap());
     let [hole] = holes.as_slice() else { panic!("one corner: {holes:?}") };
     assert_eq!(hole.edges.len(), 12);
-    let flat = open.export().unwrap();
-    let ends = flat.get_i64(crate::flat::EDGE_VERTICES).unwrap();
+    let arrays = open.arrays().unwrap();
+    let ends = &arrays.ints[&crate::flat::EDGE_VERTICES];
     let end = |h: &HoleEdge, last: bool| ends[2 * h.edge + usize::from(h.forward == last)];
     for (k, h) in hole.edges.iter().enumerate() {
         let next = &hole.edges[(k + 1) % 12];

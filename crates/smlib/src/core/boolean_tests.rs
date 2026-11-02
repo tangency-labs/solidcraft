@@ -1,7 +1,5 @@
-//! Booleans on solidcore, against analytic volumes: every result exports to a record that
-//! validates and counts the solids it should. With SMLib built, the same case on the C++ kernel
-//! gives the same volume, counts, faces by surface kind and solids (parity only: the expected
-//! values are the analytic ones).
+//! Booleans on solidcore, against analytic volumes: every result exports to a record that validates
+//! and counts the solids it should.
 //!
 //! Curved operands are built on solidcore itself.
 
@@ -188,65 +186,7 @@ fn solidcore_case(name: &'static str) -> Option<Measured> {
     })
 }
 
-/// The case on the C++ kernel, called directly (whatever the choice): what it measured.
-#[cfg(feature = "native")]
-fn cpp_case(name: &str) -> Option<Measured> {
-    use crate::{Brep, ffi};
-    crate::init().unwrap();
-    let make = |s: Shape| -> Brep {
-        match s {
-            Shape::Box(o, z) => ffi::make_box(&o, &z),
-            Shape::Cylinder(o, r, h) => ffi::make_cylinder(&o, r, h),
-            Shape::Sphere(c, r) => ffi::make_sphere(&c, r),
-        }
-        .map(Brep::made)
-        .unwrap()
-    };
-    let bool_op = |op| match op {
-        BooleanOp::Union => ffi::ops::BOOLEAN_UNION,
-        BooleanOp::Subtract => ffi::ops::BOOLEAN_SUBTRACT,
-        BooleanOp::Intersect => ffi::ops::BOOLEAN_INTERSECT,
-    };
-    let c = case(name);
-    let r = match &c.op {
-        Op::Boolean(a, b, op) => ffi::ops::boolean(make(*a).cpp().unwrap(), make(*b).cpp().unwrap(), bool_op(*op)),
-        Op::UnionAll(shapes) => {
-            let bodies: Vec<Brep> = shapes.iter().map(|s| make(*s)).collect();
-            let handles: Vec<&ffi::Handle> = bodies.iter().map(|b| b.cpp().unwrap()).collect();
-            ffi::ops::boolean_union_all(&handles)
-        }
-        Op::Imprint(a, t) => ffi::ops::imprint(make(*a).cpp().unwrap(), make(*t).cpp().unwrap()),
-    };
-    let h = match r {
-        Ok(h) => h,
-        Err(ffi::ERR_EMPTY) => return None,
-        Err(s) => panic!("{name}: C++ failed: {:?}", crate::error(s)),
-    };
-    let v = ffi::volume(&h, 1e-8).unwrap();
-    let n = ffi::counts(&h).unwrap().map(|x| usize::try_from(x).unwrap());
-    let solids = usize::try_from(ffi::ops::solid_count(&h).unwrap()).unwrap();
-    let b = Brep::made(h);
-    let (rec, _) = native(&b.cpp_arrays().unwrap()).unwrap();
-    rec.validate().unwrap();
-    Some(Measured { volume: v, counts: n, kinds: kinds(&rec), solids })
-}
 
-/// solidcore and C++ agree: volume within 1e-9, the same counts and faces by kind.
-#[cfg(feature = "native")]
-fn parity(name: &'static str) {
-    let ours = solidcore_case(name);
-    let cpp = cpp_case(name);
-    match (ours, cpp) {
-        (None, None) => {}
-        (Some(a), Some(b)) => {
-            assert!(rel(a.volume, b.volume) < 1e-9, "{name}: solidcore {} vs C++ {}", a.volume, b.volume);
-            assert_eq!(a.counts, b.counts, "{name}: face, edge, vertex counts (solidcore vs C++)");
-            assert_eq!(a.kinds, b.kinds, "{name}: faces by surface kind (solidcore vs C++)");
-            assert_eq!(a.solids, b.solids, "{name}: solids (solidcore vs C++)");
-        }
-        (a, b) => panic!("{name}: solidcore {a:?} vs C++ {b:?}"),
-    }
-}
 
 macro_rules! cases {
     ($($m:ident $(: $ign:meta)?),* $(,)?) => {$(
@@ -255,13 +195,6 @@ macro_rules! cases {
             $(#[$ign])?
             fn solidcore_matches_the_analytic_volume() {
                 super::solidcore_case(stringify!($m));
-            }
-            #[cfg(feature = "native")]
-            #[test]
-            $(#[$ign])?
-            fn solidcore_matches_the_cpp_kernel() {
-                let _cpp = crate::route::on_cpp();
-                super::parity(stringify!($m));
             }
         }
     )*};
@@ -390,305 +323,6 @@ fn a_failed_closest_point_counts_as_off_the_piece() {
     .unwrap();
 }
 
-/// Face and edge tags (`Brep::tagged`) through operations on solidcore, as on C++: each
-/// operand is tagged on the C++ kernel, its solidcore body converted from that and tagged the same
-/// way there, and the two results' histories ([`Raw`], each in its own kernel's face and edge
-/// order) must be the same.
-#[cfg(feature = "native")]
-mod history {
-    use crate::history::Raw;
-    use crate::{BooleanOp, Brep, ffi};
-
-    fn tagged_box(origin: [f64; 3], size: [f64; 3], operand: usize) -> Brep {
-        crate::init().unwrap();
-        Brep::made(ffi::make_box(&origin, &size).unwrap()).tagged(operand).unwrap()
-    }
-
-    /// Two 10 mm cubes overlapping in a 5 mm one (the capi's `overlapping_boxes_union`): 12
-    /// faces, each from one face of one box, six from each.
-    fn check(h: &Raw) {
-        assert_eq!(h.faces.len(), 12, "{h:?}");
-        assert!(h.faces.iter().all(|f| f.origins.len() == 1), "a face without exactly one origin: {h:?}");
-        for operand in [0, 1] {
-            assert_eq!(h.faces.iter().filter(|f| f.origins[0].0 == operand).count(), 6, "operand {operand}: {h:?}");
-        }
-    }
-
-    #[test]
-    fn tags_cross_a_cpp_boolean() {
-        let _cpp = crate::route::on_cpp();
-        let (a, b) = (tagged_box([0.0; 3], [10.0; 3], 0), tagged_box([5.0; 3], [10.0; 3], 1));
-        let r = Brep::made(ffi::ops::boolean(a.cpp().unwrap(), b.cpp().unwrap(), ffi::ops::BOOLEAN_UNION).unwrap());
-        check(&r.history().unwrap());
-    }
-
-    #[test]
-    fn tags_cross_a_solidcore_boolean() {
-        let _cpp = crate::route::on_cpp();
-        let (a, b) = (tagged_box([0.0; 3], [10.0; 3], 0), tagged_box([5.0; 3], [10.0; 3], 1));
-        let r = super::boolean(a.core().unwrap(), b.core().unwrap(), BooleanOp::Union).unwrap().unwrap();
-        check(&Brep::made_core(r).history().unwrap());
-    }
-
-    /// `a` op `b` on both kernels: the same history.
-    fn parity(a: &Brep, b: &Brep, op: BooleanOp) {
-        let code = match op {
-            BooleanOp::Union => ffi::ops::BOOLEAN_UNION,
-            BooleanOp::Subtract => ffi::ops::BOOLEAN_SUBTRACT,
-            BooleanOp::Intersect => ffi::ops::BOOLEAN_INTERSECT,
-        };
-        let cpp = Brep::made(ffi::ops::boolean(a.cpp().unwrap(), b.cpp().unwrap(), code).unwrap()).history().unwrap();
-        let core = Brep::made_core(super::boolean(a.core().unwrap(), b.core().unwrap(), op).unwrap().unwrap()).history().unwrap();
-        assert_eq!(core.canonical(), cpp.canonical());
-    }
-
-    #[test]
-    fn an_overlapping_union_has_the_cpp_history() {
-        let _cpp = crate::route::on_cpp();
-        parity(&tagged_box([0.0; 3], [10.0; 3], 0), &tagged_box([5.0; 3], [10.0; 3], 1), BooleanOp::Union);
-    }
-
-    /// A slot across the top of a 20 mm cube: the top is cut in two, the slot's walls and floor
-    /// come from the tool.
-    #[test]
-    fn a_slot_has_the_cpp_history() {
-        let _cpp = crate::route::on_cpp();
-        let (a, b) = (tagged_box([0.0; 3], [20.0; 3], 0), tagged_box([5.0, -1.0, 10.0], [10.0, 22.0, 15.0], 1));
-        parity(&a, &b, BooleanOp::Subtract);
-    }
-
-    /// Two boxes side by side, sharing the face x = 10 and their top and bottom planes: faces
-    /// found lying on each other's (SMLib's coincidences and merges) stand for both.
-    #[test]
-    fn boxes_side_by_side_have_the_cpp_history() {
-        let _cpp = crate::route::on_cpp();
-        let (a, b) = (tagged_box([0.0; 3], [10.0; 3], 0), tagged_box([10.0, 0.0, 0.0], [10.0; 3], 1));
-        parity(&a, &b, BooleanOp::Union);
-    }
-
-    /// A box sharing one corner region with another: the intersection keeps three faces of each.
-    #[test]
-    fn an_intersection_has_the_cpp_history() {
-        let _cpp = crate::route::on_cpp();
-        parity(&tagged_box([0.0; 3], [10.0; 3], 0), &tagged_box([5.0; 3], [10.0; 3], 1), BooleanOp::Intersect);
-    }
-
-    /// `SmApiBrepCopy` (the copy every solidcore operation starts from) keeps every tag: the
-    /// copy's history is the operand's own, every face Kept, as on C++.
-    #[test]
-    fn tags_cross_a_copy() {
-        let _cpp = crate::route::on_cpp();
-        let a = tagged_box([0.0; 3], [10.0, 20.0, 30.0], 0);
-        // Converted (and tagged) before the kernel's lock is taken: the conversion takes it too.
-        let body = a.core().unwrap();
-        let copy = super::run("copy", |k| {
-            let g = body.0.lock().unwrap();
-            solidcore::topology::brep::p3::brep_copy(k, &g)
-        })
-        .unwrap();
-        let core = Brep::made_core(super::Body::new(copy)).history().unwrap();
-        let cpp = Brep::made(ffi::copy(a.cpp().unwrap()).unwrap()).history().unwrap();
-        assert_eq!(core.canonical(), cpp.canonical());
-        assert!(core.faces.iter().all(|f| f.change == solidcraft_geom::brep::history::Change::Kept), "{core:?}");
-    }
-
-    /// A post standing on the top of a cube, imprinted on it: the top is split along the
-    /// post's foot, the other faces are as they were.
-    #[test]
-    fn an_imprint_has_the_cpp_history() {
-        let _cpp = crate::route::on_cpp();
-        let (a, b) = (tagged_box([0.0; 3], [20.0; 3], 0), tagged_box([5.0, 5.0, 10.0], [10.0, 10.0, 20.0], 1));
-        let cpp = Brep::made(ffi::ops::imprint(a.cpp().unwrap(), b.cpp().unwrap()).unwrap()).history().unwrap();
-        let core = Brep::made_core(super::imprint(a.core().unwrap(), b.core().unwrap()).unwrap().unwrap()).history().unwrap();
-        assert_eq!(core.canonical(), cpp.canonical());
-    }
-
-    /// A 10 mm wide bar laid across the top of a 40 x 30 x 20 block, overhanging its front and
-    /// back, imprinted on it: the bar's sides cut the top in three, and cut the top edges of the
-    /// faces y = 0 and y = 30 only by a vertex each (where they cross them at x = 10 and x = 20).
-    /// Those faces are still all of themselves, their boundaries where they were: Kept, as are
-    /// x = 0, x = 40 and the bottom (the fork's 1c7accd; before, y = 0 and y = 30 were Modified).
-    #[test]
-    fn a_face_whose_edge_is_only_cut_by_a_vertex_is_kept() {
-        let _cpp = crate::route::on_cpp();
-        use solidcraft_geom::brep::history::Change;
-        let (a, b) = (tagged_box([0.0; 3], [40.0, 30.0, 20.0], 0), tagged_box([10.0, -5.0, 20.0], [10.0, 40.0, 10.0], 1));
-        let cpp = Brep::made(ffi::ops::imprint(a.cpp().unwrap(), b.cpp().unwrap()).unwrap()).history().unwrap();
-        let core = Brep::made_core(super::imprint(a.core().unwrap(), b.core().unwrap()).unwrap().unwrap()).history().unwrap();
-        assert_eq!(core.canonical(), cpp.canonical());
-        let of_a = |h: &Raw, c: Change| h.faces.iter().filter(|f| f.origins.iter().all(|o| o.0 == 0) && f.change == c).count();
-        for h in [&core, &cpp] {
-            assert_eq!(of_a(h, Change::Kept), 5, "{h:?}");
-            assert_eq!(of_a(h, Change::Modified), 0, "{h:?}");
-        }
-    }
-
-    /// A 10 mm post standing on a 20 mm cube's top against its x = 0 side, imprinted on it: the
-    /// post's foot cuts the top's edge along x = 0 by two vertices. Each piece of that edge is a
-    /// split child, standing for the edge and lying where it lay (the capi's Split gives an untagged
-    /// child the split edge's `at`), so the side x = 0 is still all of itself and Kept.
-    #[test]
-    fn an_imprint_split_edge_lies_where_the_edge_lay() {
-        let _cpp = crate::route::on_cpp();
-        use solidcraft_geom::brep::history::Change;
-        let (a, b) = (tagged_box([0.0; 3], [20.0; 3], 0), tagged_box([0.0, 5.0, 20.0], [10.0; 3], 1));
-        let cpp = Brep::made(ffi::ops::imprint(a.cpp().unwrap(), b.cpp().unwrap()).unwrap()).history().unwrap();
-        let core = Brep::made_core(super::imprint(a.core().unwrap(), b.core().unwrap()).unwrap().unwrap()).history().unwrap();
-        assert_eq!(core.canonical(), cpp.canonical());
-        let of_a = |h: &Raw, c: Change| h.faces.iter().filter(|f| f.origins.iter().all(|o| o.0 == 0) && f.change == c).count();
-        for h in [&core, &cpp] {
-            // The top's edge along x = 0 is in three pieces, each standing for it alone.
-            let pieces = |e: usize| h.edges.iter().filter(|x| x.origins == [(0, e)]).count();
-            assert!((0..12).any(|e| pieces(e) == 3), "{h:?}");
-            assert_eq!(of_a(h, Change::Kept), 5, "{h:?}");
-            assert_eq!(of_a(h, Change::Modified), 0, "{h:?}");
-            assert_eq!(of_a(h, Change::Split), 2, "{h:?}");
-        }
-    }
-
-    /// A 10 mm post standing on a 20 mm cube's top, subtracted from it: the post only touches the
-    /// top, which the boolean copies the post's foot onto (`SmAttribute::Copy`). SMLib's Copy
-    /// leaves a target that already has a tag alone, so the top stands for the cube's top only.
-    #[test]
-    fn a_copy_onto_a_tagged_face_keeps_its_own_tag() {
-        let _cpp = crate::route::on_cpp();
-        use solidcraft_geom::brep::history::Change;
-        let (a, b) = (tagged_box([0.0; 3], [20.0; 3], 0), tagged_box([5.0, 5.0, 20.0], [10.0; 3], 1));
-        parity(&a, &b, BooleanOp::Subtract);
-        let core = Brep::made_core(super::boolean(a.core().unwrap(), b.core().unwrap(), BooleanOp::Subtract).unwrap().unwrap()).history().unwrap();
-        assert_eq!(core.faces.len(), 6, "{core:?}");
-        assert!(core.faces.iter().all(|f| f.change == Change::Kept && f.origins.len() == 1 && f.origins[0].0 == 0), "{core:?}");
-    }
-
-    /// Two 10 mm cubes side by side sharing the face x = 10, the second subtracted from the first:
-    /// the second's edge on that face is copied onto the first's edge it lies on, which keeps its
-    /// own tag (SMLib's Copy), as on C++.
-    #[test]
-    fn a_copy_onto_a_tagged_edge_has_the_cpp_history() {
-        let _cpp = crate::route::on_cpp();
-        parity(&tagged_box([0.0; 3], [10.0; 3], 0), &tagged_box([10.0, 0.0, 0.0], [10.0; 3], 1), BooleanOp::Subtract);
-    }
-
-    fn tagged_cylinder(origin: [f64; 3], radius: f64, height: f64, operand: usize) -> Brep {
-        crate::init().unwrap();
-        Brep::made(ffi::make_cylinder(&origin, radius, height).unwrap()).tagged(operand).unwrap()
-    }
-
-    /// A 40 x 40 x 10 plate with a round hole r 5 at (20, 20), made before tagging: its hole's rims
-    /// are whole circles, edges closed on themselves.
-    fn holed_plate(operand: usize) -> Brep {
-        crate::init().unwrap();
-        let plate = ffi::make_box(&[0.0; 3], &[40.0, 40.0, 10.0]).unwrap();
-        let rod = ffi::make_cylinder(&[20.0, 20.0, -5.0], 5.0, 20.0).unwrap();
-        Brep::made(ffi::ops::boolean(&plate, &rod, ffi::ops::BOOLEAN_SUBTRACT).unwrap()).tagged(operand).unwrap()
-    }
-
-    /// Faces of operand 0 with this change, in a history.
-    fn of_first(h: &Raw, c: solidcraft_geom::brep::history::Change) -> usize {
-        h.faces.iter().filter(|f| f.origins.iter().all(|o| o.0 == 0) && !f.origins.is_empty() && f.change == c).count()
-    }
-
-    /// A hole through a block: the tool's and the block's faces meet along whole circles.
-    #[test]
-    fn a_round_hole_has_the_cpp_history() {
-        let _cpp = crate::route::on_cpp();
-        parity(&tagged_box([0.0; 3], [40.0, 40.0, 10.0], 0), &tagged_cylinder([20.0, 20.0, -5.0], 5.0, 20.0, 1), BooleanOp::Subtract);
-    }
-
-    /// A corner cut far from the hole: the hole's wall keeps its two whole circles, each a closed
-    /// edge still where it lay (`moved`'s `open.is_empty()`), so it is Kept on both kernels.
-    #[test]
-    fn a_face_bounded_by_closed_edges_is_kept() {
-        let _cpp = crate::route::on_cpp();
-        use solidcraft_geom::brep::history::Change;
-        let (a, b) = (holed_plate(0), tagged_box([35.0, 35.0, -5.0], [10.0, 10.0, 20.0], 1));
-        let cpp = Brep::made(ffi::ops::boolean(a.cpp().unwrap(), b.cpp().unwrap(), ffi::ops::BOOLEAN_SUBTRACT).unwrap()).history().unwrap();
-        let core = Brep::made_core(super::boolean(a.core().unwrap(), b.core().unwrap(), BooleanOp::Subtract).unwrap().unwrap()).history().unwrap();
-        assert_eq!(core.canonical(), cpp.canonical());
-        // The hole's wall and the two sides the corner misses.
-        assert_eq!(of_first(&core, Change::Kept), 3, "{core:?}");
-    }
-
-    /// A bar laid on the plate over the hole, imprinted: the bar's sides cross the hole's upper rim
-    /// and cut that closed edge by vertices; the top is split, the wall's rim stays where it lay.
-    #[test]
-    fn an_imprint_cutting_a_closed_edge_has_the_cpp_history() {
-        let _cpp = crate::route::on_cpp();
-        let (a, b) = (holed_plate(0), tagged_box([-5.0, 18.0, 10.0], [50.0, 4.0, 5.0], 1));
-        let cpp = Brep::made(ffi::ops::imprint(a.cpp().unwrap(), b.cpp().unwrap()).unwrap()).history().unwrap();
-        let core = Brep::made_core(super::imprint(a.core().unwrap(), b.core().unwrap()).unwrap().unwrap()).history().unwrap();
-        assert_eq!(core.canonical(), cpp.canonical());
-    }
-
-    /// A cylinder and a sphere cut by a slab across their seams (each kernel's angle 0, along +x):
-    /// each curved face is split in two across its seam.
-    #[test]
-    fn a_curved_face_split_across_its_seam_has_the_cpp_history() {
-        let _cpp = crate::route::on_cpp();
-        use solidcraft_geom::brep::history::Change;
-        let slab = || tagged_box([-20.0, -1.0, -20.0], [40.0, 2.0, 40.0], 1);
-        let sphere = Brep::made(ffi::make_sphere(&[0.0, 0.0, 0.0], 7.0).unwrap()).tagged(0).unwrap();
-        for (name, a) in [("cylinder", tagged_cylinder([0.0, 0.0, -5.0], 5.0, 10.0, 0)), ("sphere", sphere)] {
-            parity(&a, &slab(), BooleanOp::Subtract);
-            let cpp = Brep::made(ffi::ops::boolean(a.cpp().unwrap(), slab().cpp().unwrap(), ffi::ops::BOOLEAN_SUBTRACT).unwrap()).history().unwrap();
-            assert!(of_first(&cpp, Change::Split) >= 2, "{name}: {cpp:?}");
-        }
-    }
-
-    /// A chain of three overlapping boxes in one `union_all`.
-    #[test]
-    fn a_union_of_three_has_the_cpp_history() {
-        let _cpp = crate::route::on_cpp();
-        let (a, b, c) = (tagged_box([0.0; 3], [10.0; 3], 0), tagged_box([5.0; 3], [10.0; 3], 1), tagged_box([10.0; 3], [10.0; 3], 2));
-        let cpp = Brep::made(ffi::ops::boolean_union_all(&[a.cpp().unwrap(), b.cpp().unwrap(), c.cpp().unwrap()]).unwrap()).history().unwrap();
-        let core = Brep::made_core(super::union_all(&[a.core().unwrap(), b.core().unwrap(), c.core().unwrap()]).unwrap()).history().unwrap();
-        assert_eq!(core.canonical(), cpp.canonical());
-        assert_eq!(core.faces.iter().flat_map(|f| f.origins.iter().map(|o| o.0)).max(), Some(2), "{core:?}");
-    }
-
-    /// A row of four boxes sharing their top and bottom planes, united in pairs and the pairs
-    /// united: each top merged with its neighbour's stands for two faces, and the merge of those
-    /// stands for all four, both sources carrying several origins.
-    #[test]
-    fn a_merge_of_several_origins_on_each_side_has_the_cpp_history() {
-        let _cpp = crate::route::on_cpp();
-        let boxes: Vec<Brep> = (0..4u32).map(|i| tagged_box([f64::from(i) * 10.0, 0.0, 0.0], [10.0; 3], i as usize)).collect();
-        let c = |x: usize, y: usize| ffi::ops::boolean(boxes[x].cpp().unwrap(), boxes[y].cpp().unwrap(), ffi::ops::BOOLEAN_UNION).unwrap();
-        let (ab, cd) = (c(0, 1), c(2, 3));
-        let cpp = Brep::made(ffi::ops::boolean(&ab, &cd, ffi::ops::BOOLEAN_UNION).unwrap()).history().unwrap();
-        let s = |x: usize, y: usize| super::boolean(boxes[x].core().unwrap(), boxes[y].core().unwrap(), BooleanOp::Union).unwrap().unwrap();
-        let (ab, cd) = (s(0, 1), s(2, 3));
-        let core = Brep::made_core(super::boolean(&ab, &cd, BooleanOp::Union).unwrap().unwrap()).history().unwrap();
-        assert_eq!(core.canonical(), cpp.canonical());
-        assert!(core.faces.iter().any(|f| f.origins.len() == 4), "{core:?}");
-    }
-
-    /// Two overlapping squares combined as regions of one plane.
-    #[test]
-    fn a_boolean2d_has_the_cpp_history() {
-        let _cpp = crate::route::on_cpp();
-        use crate::sweeps::Curve;
-        let square = |x: f64, y: f64, s: f64, operand: usize| {
-            crate::init().unwrap();
-            let c = [[x, y, 0.0], [x + s, y, 0.0], [x + s, y + s, 0.0], [x, y + s, 0.0]];
-            let l: Vec<Curve> = (0..4).map(|i| Curve::Line { start: c[i], end: c[(i + 1) % 4] }).collect();
-            crate::sweeps::ON_CPP.with(|f| f.set(true));
-            let b = Brep::planar_faces(&l).unwrap();
-            crate::sweeps::ON_CPP.with(|f| f.set(false));
-            b.tagged(operand).unwrap()
-        };
-        let (a, b) = (square(0.0, 0.0, 10.0, 0), square(5.0, 5.0, 10.0, 1));
-        for (op, code) in [
-            (BooleanOp::Union, ffi::ops::BOOLEAN_UNION),
-            (BooleanOp::Subtract, ffi::ops::BOOLEAN_SUBTRACT),
-            (BooleanOp::Intersect, ffi::ops::BOOLEAN_INTERSECT),
-        ] {
-            let cpp = Brep::made(ffi::ops::boolean2d(a.cpp().unwrap(), b.cpp().unwrap(), code).unwrap()).history().unwrap();
-            let core = Brep::made_core(super::boolean2d(a.core().unwrap(), b.core().unwrap(), op).unwrap().unwrap()).history().unwrap();
-            assert_eq!(core.canonical(), cpp.canonical(), "{op:?}");
-        }
-    }
-}
 
 /// Rig case booleans/2928, reduced (fork c2e3d9d): a ring, r 3..5 about (0, 10), z 0..2, unioned
 /// with a half annulus prism, r 4..5 about (e, 10), z 2..20, whose cap sits on the ring's top. Two
@@ -724,5 +358,142 @@ fn a_ring_and_a_lip_with_walls_nearly_together() {
         assert_eq!(solid_count(&u).unwrap(), 1, "e {e}");
         assert!(super::is_manifold_solid(&u).unwrap(), "e {e}");
         assert!((v - 113.0 * PI).abs() < 1e-3, "e {e}: {v}");
+    }
+}
+
+/// Face and edge tags (`Brep::tagged`) through booleans: each operand tagged, the result's history
+/// ([`Raw`]) read back.
+mod history {
+    use solidcraft_geom::brep::history::Change;
+
+    use crate::history::Raw;
+    use crate::{BooleanOp, Brep};
+
+    fn tagged_box(origin: [f64; 3], size: [f64; 3], operand: usize) -> Brep {
+        Brep::make_box(origin, size).unwrap().tagged(operand).unwrap()
+    }
+
+    fn tagged_cylinder(origin: [f64; 3], radius: f64, height: f64, operand: usize) -> Brep {
+        Brep::make_cylinder(origin, radius, height).unwrap().tagged(operand).unwrap()
+    }
+
+    /// A 40 x 40 x 10 plate with a round hole r 5 at (20, 20), made before tagging: its hole's rims
+    /// are whole circles, edges closed on themselves.
+    fn holed_plate(operand: usize) -> Brep {
+        let plate = Brep::make_box([0.0; 3], [40.0, 40.0, 10.0]).unwrap();
+        let rod = Brep::make_cylinder([20.0, 20.0, -5.0], 5.0, 20.0).unwrap();
+        plate.boolean(&rod, BooleanOp::Subtract).unwrap().unwrap().tagged(operand).unwrap()
+    }
+
+    fn boolean(a: &Brep, b: &Brep, op: BooleanOp) -> Raw {
+        a.boolean(b, op).unwrap().unwrap().history().unwrap()
+    }
+
+    fn imprint(a: &Brep, b: &Brep) -> Raw {
+        a.imprint(b).unwrap().unwrap().history().unwrap()
+    }
+
+    /// Faces of operand 0 with this change.
+    fn of_first(h: &Raw, c: Change) -> usize {
+        h.faces.iter().filter(|f| !f.origins.is_empty() && f.origins.iter().all(|o| o.0 == 0) && f.change == c).count()
+    }
+
+    /// Two 10 mm cubes overlapping in a 5 mm one (the capi's `overlapping_boxes_union`): 12
+    /// faces, each from one face of one box, six from each.
+    #[test]
+    fn tags_cross_a_boolean() {
+        let h = boolean(&tagged_box([0.0; 3], [10.0; 3], 0), &tagged_box([5.0; 3], [10.0; 3], 1), BooleanOp::Union);
+        assert_eq!(h.faces.len(), 12, "{h:?}");
+        assert!(h.faces.iter().all(|f| f.origins.len() == 1), "a face without exactly one origin: {h:?}");
+        for operand in [0, 1] {
+            assert_eq!(h.faces.iter().filter(|f| f.origins[0].0 == operand).count(), 6, "operand {operand}: {h:?}");
+        }
+    }
+
+    /// `SmApiBrepCopy` (the copy every solidcore operation starts from) keeps every tag: the
+    /// copy's history is the operand's own, every face Kept.
+    #[test]
+    fn tags_cross_a_copy() {
+        let a = tagged_box([0.0; 3], [10.0, 20.0, 30.0], 0);
+        let h = a.try_clone().unwrap().history().unwrap();
+        assert_eq!(h.faces.len(), 6, "{h:?}");
+        assert!(h.faces.iter().all(|f| f.change == Change::Kept), "{h:?}");
+    }
+
+    /// A 10 mm wide bar laid across the top of a 40 x 30 x 20 block, overhanging its front and
+    /// back, imprinted on it: the bar's sides cut the top in three, and cut the top edges of the
+    /// faces y = 0 and y = 30 only by a vertex each (where they cross them at x = 10 and x = 20).
+    /// Those faces are still all of themselves, their boundaries where they were: Kept, as are
+    /// x = 0, x = 40 and the bottom.
+    #[test]
+    fn a_face_whose_edge_is_only_cut_by_a_vertex_is_kept() {
+        let h = imprint(&tagged_box([0.0; 3], [40.0, 30.0, 20.0], 0), &tagged_box([10.0, -5.0, 20.0], [10.0, 40.0, 10.0], 1));
+        assert_eq!(of_first(&h, Change::Kept), 5, "{h:?}");
+        assert_eq!(of_first(&h, Change::Modified), 0, "{h:?}");
+    }
+
+    /// A 10 mm post standing on a 20 mm cube's top against its x = 0 side, imprinted on it: the
+    /// post's foot cuts the top's edge along x = 0 by two vertices. Each piece of that edge is a
+    /// split child, standing for the edge and lying where it lay (the capi's Split gives an untagged
+    /// child the split edge's `at`), so the side x = 0 is still all of itself and Kept.
+    #[test]
+    fn an_imprint_split_edge_lies_where_the_edge_lay() {
+        let h = imprint(&tagged_box([0.0; 3], [20.0; 3], 0), &tagged_box([0.0, 5.0, 20.0], [10.0; 3], 1));
+        // The top's edge along x = 0 is in three pieces, each standing for it alone.
+        let pieces = |e: usize| h.edges.iter().filter(|x| x.origins == [(0, e)]).count();
+        assert!((0..12).any(|e| pieces(e) == 3), "{h:?}");
+        assert_eq!(of_first(&h, Change::Kept), 5, "{h:?}");
+        assert_eq!(of_first(&h, Change::Modified), 0, "{h:?}");
+        assert_eq!(of_first(&h, Change::Split), 2, "{h:?}");
+    }
+
+    /// A 10 mm post standing on a 20 mm cube's top, subtracted from it: the post only touches the
+    /// top, which the boolean copies the post's foot onto (`SmAttribute::Copy`). SMLib's Copy
+    /// leaves a target that already has a tag alone, so the top stands for the cube's top only.
+    #[test]
+    fn a_copy_onto_a_tagged_face_keeps_its_own_tag() {
+        let h = boolean(&tagged_box([0.0; 3], [20.0; 3], 0), &tagged_box([5.0, 5.0, 20.0], [10.0; 3], 1), BooleanOp::Subtract);
+        assert_eq!(h.faces.len(), 6, "{h:?}");
+        assert!(h.faces.iter().all(|f| f.change == Change::Kept && f.origins.len() == 1 && f.origins[0].0 == 0), "{h:?}");
+    }
+
+    /// A corner cut far from the hole: the hole's wall keeps its two whole circles, each a closed
+    /// edge still where it lay (`moved`'s `open.is_empty()`), so it is Kept, with the two sides the
+    /// corner misses.
+    #[test]
+    fn a_face_bounded_by_closed_edges_is_kept() {
+        let h = boolean(&holed_plate(0), &tagged_box([35.0, 35.0, -5.0], [10.0, 10.0, 20.0], 1), BooleanOp::Subtract);
+        assert_eq!(of_first(&h, Change::Kept), 3, "{h:?}");
+    }
+
+    /// A cylinder and a sphere cut by a slab across their seams (angle 0, along +x): each curved
+    /// face is split in two across its seam.
+    #[test]
+    fn a_curved_face_split_across_its_seam_is_split() {
+        let slab = || tagged_box([-20.0, -1.0, -20.0], [40.0, 2.0, 40.0], 1);
+        let sphere = Brep::make_sphere([0.0; 3], 7.0).unwrap().tagged(0).unwrap();
+        for (name, a) in [("cylinder", tagged_cylinder([0.0, 0.0, -5.0], 5.0, 10.0, 0)), ("sphere", sphere)] {
+            let h = boolean(&a, &slab(), BooleanOp::Subtract);
+            assert!(of_first(&h, Change::Split) >= 2, "{name}: {h:?}");
+        }
+    }
+
+    /// A chain of three overlapping boxes in one `union_all`: the result names all three.
+    #[test]
+    fn a_union_of_three_names_each() {
+        let (a, b, c) = (tagged_box([0.0; 3], [10.0; 3], 0), tagged_box([5.0; 3], [10.0; 3], 1), tagged_box([10.0; 3], [10.0; 3], 2));
+        let h = Brep::union_all(&[&a, &b, &c]).unwrap().history().unwrap();
+        assert_eq!(h.faces.iter().flat_map(|f| f.origins.iter().map(|o| o.0)).max(), Some(2), "{h:?}");
+    }
+
+    /// A row of four boxes sharing their top and bottom planes, united in pairs and the pairs
+    /// united: each top merged with its neighbour's stands for two faces, and the merge of those
+    /// stands for all four.
+    #[test]
+    fn a_merge_of_several_origins_on_each_side_stands_for_all() {
+        let boxes: Vec<Brep> = (0..4u32).map(|i| tagged_box([f64::from(i) * 10.0, 0.0, 0.0], [10.0; 3], i as usize)).collect();
+        let u = |x: &Brep, y: &Brep| x.boolean(y, BooleanOp::Union).unwrap().unwrap();
+        let h = u(&u(&boxes[0], &boxes[1]), &u(&boxes[2], &boxes[3])).history().unwrap();
+        assert!(h.faces.iter().any(|f| f.origins.len() == 4), "{h:?}");
     }
 }

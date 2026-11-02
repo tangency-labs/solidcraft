@@ -523,7 +523,6 @@ fn chamfer_after_box_cuts() {
 
 /// Shell, offset faces and draft straight through `crate::offset_backend`: refusals, and their
 /// histories checked against the geometry and their numbers against the analytic ones.
-#[cfg(feature = "smlib")]
 mod smlib {
     use super::*;
     use crate::offset_backend;

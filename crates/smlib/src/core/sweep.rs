@@ -61,7 +61,8 @@ use super::blend::status;
 use super::offset::{face_miss, pick_faces};
 use super::{Body, run, with_body};
 use crate::sweeps::{Affine, Curve as Profile, DraftCorner, Ends, MAX_CURVES, MAX_STATION_CURVES, MAX_STATIONS, SweepFrame};
-use crate::{Error, Result, ffi};
+use crate::sweeps::{CURVE_MAX_DEGREE, CURVE_MAX_POINTS};
+use crate::{Error, Result};
 
 /// The capi's statuses as SolidCraft errors: an operation's own result.
 type Out<T> = std::result::Result<T, Error>;
@@ -142,7 +143,7 @@ fn arc(k: &Kernel, center: [f64; 3], axis: [f64; 3], reference: [f64; 3], radius
 /// multiplicity degree + 1, inner ones at most degree), non-decreasing.
 fn nurbs(degree: usize, points: &[[f64; 4]], knots: &[f64]) -> Out<Curve> {
     let count = points.len();
-    if !(1..=ffi::sweeps::CURVE_MAX_DEGREE).contains(&degree) || count < degree + 1 || count > ffi::sweeps::CURVE_MAX_POINTS {
+    if !(1..=CURVE_MAX_DEGREE).contains(&degree) || count < degree + 1 || count > CURVE_MAX_POINTS {
         return Err(Error::Argument);
     }
     let mut ps = Vec::with_capacity(count);
@@ -213,7 +214,7 @@ fn parse(k: &Kernel, curves: &[Profile]) -> Out<Vec<Curve>> {
             }
             Profile::Nurbs { degree, points, knots } => {
                 // `parse` reads the kinds first: at least two points.
-                if *degree < 1 || *degree > ffi::sweeps::CURVE_MAX_DEGREE || points.len() < 2 || points.len() > ffi::sweeps::CURVE_MAX_POINTS {
+                if *degree < 1 || *degree > CURVE_MAX_DEGREE || points.len() < 2 || points.len() > CURVE_MAX_POINTS {
                     return Err(Error::Argument);
                 }
                 reals = reals.saturating_add(4 * points.len() + points.len() + degree + 1);
@@ -519,16 +520,21 @@ pub(crate) fn extrude(profile: &[Profile], direction: [f64; 3], distance: f64, d
     })
 }
 
-/// A refused draft corner as the capi reports it: the reason's status with the corner's point,
-/// [`Error::Corner`] when the point is finite and the status's own error otherwise.
+/// The capi's statuses for a draft corner whose continued curves do not meet, and for a wall that
+/// closes before the far end.
+const ERR_CORNER_APART: i32 = -1108;
+const ERR_WALL_CLOSES: i32 = -1109;
+
+/// A refused draft corner as the capi reports it: the reason with the corner's point,
+/// [`Error::Corner`] when the point is finite and the reason's own error otherwise.
 fn refused(r: CornerRefusal) -> Error {
-    let (why, code) = match r.reason {
-        TaperCornerRefusal::Apart => (crate::sweeps::CornerRefusal::Apart, ffi::sweeps::ERR_CORNER_APART),
-        TaperCornerRefusal::WallCloses => (crate::sweeps::CornerRefusal::WallCloses, ffi::sweeps::ERR_WALL_CLOSES),
-        TaperCornerRefusal::NotExact => (crate::sweeps::CornerRefusal::NotExact, ffi::trim::ERR_NOT_EXACT),
+    let (why, otherwise) = match r.reason {
+        TaperCornerRefusal::Apart => (crate::sweeps::CornerRefusal::Apart, Error::Status(ERR_CORNER_APART)),
+        TaperCornerRefusal::WallCloses => (crate::sweeps::CornerRefusal::WallCloses, Error::Status(ERR_WALL_CLOSES)),
+        TaperCornerRefusal::NotExact => (crate::sweeps::CornerRefusal::NotExact, Error::NotExact),
     };
     let at = [r.corner.x, r.corner.y, r.corner.z];
-    if at.iter().all(|x| x.is_finite()) { Error::Corner { why, at } } else { crate::error(code) }
+    if at.iter().all(|x| x.is_finite()) { Error::Corner { why, at } } else { otherwise }
 }
 
 /// `smlib_revolve`: the planar `profile` turned `angle` radians about the axis through `origin`
@@ -1588,9 +1594,9 @@ fn put_curve(c: &Curve) -> solidcore::Result<Out<(Profile, [f64; 2])>> {
         knots.extend(std::iter::repeat_n(u, m));
     }
     let clamped = can.knot_multiplicities.first().is_some_and(|&m| m > degree) && can.knot_multiplicities.last().is_some_and(|&m| m > degree);
-    if !(1..=ffi::sweeps::CURVE_MAX_DEGREE).contains(&degree)
+    if !(1..=CURVE_MAX_DEGREE).contains(&degree)
         || count < degree + 1
-        || count > ffi::sweeps::CURVE_MAX_POINTS
+        || count > CURVE_MAX_POINTS
         || knots.len() != count + degree + 1
         || !clamped
     {

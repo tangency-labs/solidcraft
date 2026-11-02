@@ -45,67 +45,33 @@ use solidcraft_geom::brep as b;
 use crate::flat::{self, *};
 use crate::history::{Order, Piece};
 use crate::import::Arrays;
-use crate::{Brep, Result, error, ffi, init};
+use crate::{Brep, Result};
 
 impl Brep {
     /// A cylinder about +Z: base centre, radius and height (mm, > 0).
     pub fn make_cylinder(origin: [f64; 3], radius: f64, height: f64) -> Result<Brep> {
-        if crate::route::backend() == crate::route::Backend::Solidcore {
-            return crate::core::make_cylinder(origin, radius, height).map(Brep::made_core);
-        }
-        init()?;
-        ffi::make_cylinder(&origin, radius, height).map(Brep::made).map_err(error)
+        crate::core::make_cylinder(origin, radius, height).map(Brep::made_core)
     }
 
     /// A sphere: centre and radius (mm, > 0).
     pub fn make_sphere(center: [f64; 3], radius: f64) -> Result<Brep> {
-        if crate::route::backend() == crate::route::Backend::Solidcore {
-            return crate::core::make_sphere(center, radius).map(Brep::made_core);
-        }
-        init()?;
-        ffi::make_sphere(&center, radius).map(Brep::made).map_err(error)
+        crate::core::make_sphere(center, radius).map(Brep::made_core)
     }
 
     /// A cone or frustum about +Z: base centre, base radius (> 0), top radius (≥ 0, not the base
     /// radius) and height (> 0), in mm.
     pub fn make_cone(origin: [f64; 3], base_radius: f64, top_radius: f64, height: f64) -> Result<Brep> {
-        if crate::route::backend() == crate::route::Backend::Solidcore {
-            return crate::core::make_cone(origin, base_radius, top_radius, height).map(Brep::made_core);
-        }
-        init()?;
-        ffi::make_cone(&origin, base_radius, top_radius, height).map(Brep::made).map_err(error)
+        crate::core::make_cone(origin, base_radius, top_radius, height).map(Brep::made_core)
     }
 
     /// A ring torus about +Z: centre, major radius > minor radius > 0 (mm).
     pub fn make_torus(center: [f64; 3], major_radius: f64, minor_radius: f64) -> Result<Brep> {
-        if crate::route::backend() == crate::route::Backend::Solidcore {
-            return crate::core::make_torus(center, major_radius, minor_radius).map(Brep::made_core);
-        }
-        init()?;
-        ffi::make_torus(&center, major_radius, minor_radius).map(Brep::made).map_err(error)
+        crate::core::make_torus(center, major_radius, minor_radius).map(Brep::made_core)
     }
 
-    /// The flat arrays of this body that the mapping reads, from the kernel in force
-    /// ([`crate::route::backend`]).
+    /// The flat arrays of this body that the mapping reads.
     pub fn arrays(&self) -> Result<Arrays> {
-        match crate::route::backend() {
-            crate::route::Backend::Smlib => self.cpp_arrays(),
-            crate::route::Backend::Solidcore => crate::core::to_arrays(self.core()?),
-        }
-    }
-
-    /// The flat arrays of the C++ kernel's body ([`Brep::export`]), every one copied out: the
-    /// mapping reads some, solidcore's import ([`crate::core::from_arrays`]) all of them.
-    pub(crate) fn cpp_arrays(&self) -> Result<Arrays> {
-        let f = self.export()?;
-        let mut out = Arrays::default();
-        for id in REGION_SHELL_COUNT..=FACE_DEFINITION_REAL_COUNT {
-            out.ints.insert(id, f.get_i64(id)?);
-        }
-        for id in TOLERANCE..=FACE_DEFINITION_REALS {
-            out.reals.insert(id, f.get_f64(id)?);
-        }
-        Ok(out)
+        crate::core::to_arrays(self.core())
     }
 
     /// This body as a schema 4 B-rep, validated.

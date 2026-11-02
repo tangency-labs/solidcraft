@@ -1,6 +1,5 @@
-//! Untrim and extend on solidcore, against closed forms: areas and counts, and every result exports to a
-//! record that validates. With SMLib built, the same input converted to the C++ kernel gives the
-//! same result or the same error (parity only: the expected values are the analytic ones).
+//! Untrim and extend on solidcore, against closed forms: areas and counts, and every result exports
+//! to a record that validates.
 //!
 //! An untrim's body is a 20 x 20 x 5 plate with a 3 mm through hole at (10, 10), made on
 //! solidcore; its top face is a square with a round hole. An extend's is a one-face sheet that is
@@ -133,38 +132,7 @@ fn solidcore_case(name: &str) -> Got {
     judge(name, "solidcore", got)
 }
 
-/// The case on the C++ kernel, called directly (whatever the choice), on the plate converted
-/// from solidcore's.
-#[cfg(feature = "native")]
-fn cpp_case(name: &str) -> Got {
-    use crate::{Brep, error, ffi};
-    crate::init().unwrap();
-    let (c, _) = case(name);
-    let body = Brep::made_core(c.input.core());
-    let r = ffi::trim::untrim_face(body.cpp().unwrap(), &c.point, TOL, c.holes, c.outer, c.in_place).map_err(|s| match s {
-        ffi::ops::ERR_PICK_NONE => Error::NoMatch { point: 0 },
-        s => error(s),
-    });
-    let got = r.map(|h| {
-        let a = ffi::measure::area(&h, 1e-8).unwrap();
-        let n = ffi::counts(&h).unwrap().map(|x| usize::try_from(x).unwrap());
-        let (rec, _) = native(&Brep::made(h).cpp_arrays().unwrap()).unwrap();
-        rec.validate().unwrap();
-        Measured { area: a, counts: n }
-    });
-    judge(name, "C++", got)
-}
 
-#[cfg(feature = "native")]
-fn parity(name: &str) {
-    match (solidcore_case(name), cpp_case(name)) {
-        (Ok(a), Ok(b)) => {
-            assert!(rel(a.area, b.area) < 1e-9, "{name}: solidcore {} vs C++ {}", a.area, b.area);
-            assert_eq!(a.counts, b.counts, "{name}: counts (solidcore vs C++)");
-        }
-        (a, b) => assert_eq!(a.err(), b.err(), "{name}: errors (solidcore vs C++)"),
-    }
-}
 
 macro_rules! cases {
     ($($m:ident $(: $ign:meta)?),* $(,)?) => {$(
@@ -173,19 +141,6 @@ macro_rules! cases {
             $(#[$ign])?
             fn solidcore_matches_the_closed_form() {
                 let _ = super::solidcore_case(stringify!($m));
-            }
-            #[cfg(feature = "native")]
-            #[test]
-            $(#[$ign])?
-            fn solidcore_matches_the_cpp_kernel() {
-                let _cpp = crate::route::on_cpp();
-                super::parity(stringify!($m));
-            }
-            #[cfg(feature = "native")]
-            #[test]
-            fn the_cpp_kernel_matches_the_closed_form() {
-                let _cpp = crate::route::on_cpp();
-                let _ = super::cpp_case(stringify!($m));
             }
         }
     )*};
@@ -230,25 +185,6 @@ fn the_body_stays_as_it_was() {
     assert_eq!(counts(&b).unwrap(), was);
 }
 
-/// Face and edge tags (`Brep::tagged`) through an untrim on solidcore, as on C++.
-#[cfg(feature = "native")]
-mod history {
-    use crate::{Brep, ffi};
-
-    #[test]
-    fn tags_cross_an_untrim() {
-        let _cpp = crate::route::on_cpp();
-        crate::init().unwrap();
-        let a = Brep::made_core(super::holed_sheet()).tagged(0).unwrap();
-        for (holes, outer) in [(None, false), (Some(&[][..]), true)] {
-            let cpp = ffi::trim::untrim_face(a.cpp().unwrap(), &super::SHEET, super::TOL, holes, outer, true).unwrap();
-            let cpp = Brep::made(cpp).history().unwrap();
-            let core = super::untrim_face(a.core().unwrap(), super::SHEET, super::TOL, holes, outer, true).unwrap();
-            let core = Brep::made_core(core).history().unwrap();
-            assert_eq!(core.canonical(), cpp.canonical(), "holes {holes:?}, outer {outer}");
-        }
-    }
-}
 
 /// A one-face sheet on `surface` over `domain`, the face its whole box.
 fn whole_face(surface: solidcore::surface::surface::Surface) -> Body {
@@ -339,41 +275,7 @@ fn extend_solidcore(name: &str) -> Got {
     extend_judge(name, "solidcore", got)
 }
 
-#[cfg(feature = "native")]
-fn extend_cpp(name: &str) -> Got {
-    use crate::{Brep, error, ffi};
-    crate::init().unwrap();
-    let (sheet, point, distance, how, _) = extend_case(name);
-    let mode = match how {
-        Continuation::Natural => ffi::trim::EXTEND_NATURAL,
-        Continuation::Tangent => ffi::trim::EXTEND_TANGENT,
-        Continuation::Curvature => ffi::trim::EXTEND_CURVATURE,
-    };
-    let body = Brep::made_core(sheet.core());
-    let r = ffi::trim::extend_sheet(body.cpp().unwrap(), &point, TOL, distance, mode).map_err(|s| match s {
-        ffi::ops::ERR_PICK_NONE => Error::NoMatch { point: 0 },
-        s => error(s),
-    });
-    let got = r.map(|h| {
-        let a = ffi::measure::area(&h, 1e-8).unwrap();
-        let n = ffi::counts(&h).unwrap().map(|x| usize::try_from(x).unwrap());
-        let (rec, _) = native(&Brep::made(h).cpp_arrays().unwrap()).unwrap();
-        rec.validate().unwrap();
-        Measured { area: a, counts: n }
-    });
-    extend_judge(name, "C++", got)
-}
 
-#[cfg(feature = "native")]
-fn extend_parity(name: &str) {
-    match (extend_solidcore(name), extend_cpp(name)) {
-        (Ok(a), Ok(b)) => {
-            assert!(rel(a.area, b.area) < 1e-9, "{name}: solidcore {} vs C++ {}", a.area, b.area);
-            assert_eq!(a.counts, b.counts, "{name}: counts (solidcore vs C++)");
-        }
-        (a, b) => assert_eq!(a.err(), b.err(), "{name}: errors (solidcore vs C++)"),
-    }
-}
 
 macro_rules! extend_cases {
     ($($m:ident $(: $ign:meta)?),* $(,)?) => {$(
@@ -382,19 +284,6 @@ macro_rules! extend_cases {
             $(#[$ign])?
             fn solidcore_matches_the_closed_form() {
                 let _ = super::extend_solidcore(stringify!($m));
-            }
-            #[cfg(feature = "native")]
-            #[test]
-            $(#[$ign])?
-            fn solidcore_matches_the_cpp_kernel() {
-                let _cpp = crate::route::on_cpp();
-                super::extend_parity(stringify!($m));
-            }
-            #[cfg(feature = "native")]
-            #[test]
-            fn the_cpp_kernel_matches_the_closed_form() {
-                let _cpp = crate::route::on_cpp();
-                let _ = super::extend_cpp(stringify!($m));
             }
         }
     )*};

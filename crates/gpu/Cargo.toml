@@ -26,8 +26,8 @@ wgpu = { workspace = true, features = ["metal", "vulkan", "dx12", "gles"] }
 [dev-dependencies]
 image = { workspace = true }
 solidcraft-kernel = { workspace = true }
-# Headless pictures of real designs (capture tests), built by the real kernel: solidcore, as in the
-# apps (the C++ SMLib kernel only when the build turns on solidcraft-engine/smlib).
+# Headless pictures of real designs (capture tests), built by the real kernel, solidcore, as in the
+# apps.
 solidcraft-engine = { workspace = true, features = ["bundled-render-library"] }
 solidcraft-io = { workspace = true }
 serde_json = { workspace = true }

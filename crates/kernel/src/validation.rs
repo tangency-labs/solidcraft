@@ -226,7 +226,6 @@ mod tests {
     /// A box with one corner moved off its three edges: SMLib's check refuses it. Under each_step
     /// the boolean that takes it refuses its result there; under each_feature it is not checked,
     /// says the check was left for later, and the check of the body kept refuses it.
-    #[cfg(feature = "smlib")]
     #[test]
     fn a_body_the_check_refuses_is_refused_at_the_step_or_at_the_end() {
         use solidcraft_geom::Vec3;

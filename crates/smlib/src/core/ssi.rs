@@ -15,8 +15,7 @@ use solidcore::surface::surface::p2::{SurfaceIntersection, TsectCurveType};
 use super::convert::bspline_curve_part;
 use super::run;
 use super::split::{Tool, tool};
-use crate::ffi::ssi::Nurbs;
-use crate::ssi::{CurveType, Method, Spec, SsiCurve, SsiPoint, SsiResult, curve2, curve3};
+use crate::ssi::{CurveType, Method, Nurbs, Spec, SsiCurve, SsiPoint, SsiResult, curve2, curve3};
 use crate::{Error, Result};
 
 /// The surface of `spec` with its natural UV domain (`construct`).

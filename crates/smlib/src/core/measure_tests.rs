@@ -1,6 +1,5 @@
 //! The Measure and Check families on solidcore's primitives: mass properties, area and bounds
-//! against their closed forms ([`crate::measure::closed`]), one solid each, edges on their faces;
-//! and (with SMLib built) the same answers as the C++ kernel for the same primitive.
+//! against their closed forms ([`crate::measure::closed`]), one solid each, edges on their faces.
 
 use super::{Body, area, bounds, check, edge_face_distance, is_manifold_solid, make_box, make_cone, make_cylinder, make_sphere, make_torus};
 use super::{counts, mass_properties, solid_count};
@@ -109,102 +108,14 @@ fn check_refuses_only_an_unknown_naming() {
     name(NamingScheme::Caller).unwrap();
 }
 
-/// The C++ kernel's body of the same primitive, built by its C API whichever kernel is in
-/// force: a body imported from solidcore's arrays is not the C++ kernel's own (its
-/// `edge_face_distance` measures to each face's surface over its domain, which the import sets).
-#[cfg(feature = "native")]
-fn cpp(name: &str) -> crate::Brep {
-    use crate::{Brep, ffi};
-    crate::init().unwrap();
-    match name {
-        "box" => ffi::make_box(&[1.0, -2.0, 3.0], &[10.0, 20.0, 30.0]),
-        "cylinder" => ffi::make_cylinder(&[1.0, 2.0, -3.0], 5.0, 12.0),
-        "sphere" => ffi::make_sphere(&[1.0, 2.0, 3.0], 7.0),
-        "cone" => ffi::make_cone(&[0.0, 1.0, 2.0], 6.0, 0.0, 9.0),
-        "frustum" => ffi::make_cone(&[0.0, 1.0, 2.0], 6.0, 2.0, 9.0),
-        "torus" => ffi::make_torus(&[1.0, -1.0, 0.5], 10.0, 3.0),
-        _ => panic!("{name}"),
-    }
-    .map(Brep::made)
-    .unwrap()
-}
 
-/// `x` within `TOL` of the C++ kernel's `y`, relative to `scale`.
-#[cfg(feature = "native")]
-fn same(x: f64, y: f64, scale: f64, what: &str) {
-    assert!((x - y).abs() <= TOL * scale, "{what}: solidcore {x} vs C++ {y}");
-}
 
-#[cfg(feature = "native")]
-fn mass_properties_parity(name: &str) {
-    let (b, c) = case(name);
-    let ours = mass_properties(&b, MEASURE_ACCURACY).unwrap();
-    let theirs = cpp(name).mass_properties(MEASURE_ACCURACY).unwrap();
-    same(ours.area, theirs.area, theirs.area, &format!("{name} area"));
-    same(ours.volume, theirs.volume, theirs.volume, &format!("{name} volume"));
-    let imax = theirs.moments.iter().fold(0.0f64, |a, &b| a.max(b));
-    for i in 0..3 {
-        same(ours.centroid[i], theirs.centroid[i], size(&c), &format!("{name} centroid[{i}]"));
-        same(ours.moments[i], theirs.moments[i], theirs.moments[i], &format!("{name} moments[{i}]"));
-        same(ours.products[i], theirs.products[i], imax, &format!("{name} products[{i}]"));
-    }
-}
 
-#[cfg(feature = "native")]
-fn area_parity(name: &str) {
-    let (b, _) = case(name);
-    let theirs = cpp(name).area(MEASURE_ACCURACY).unwrap();
-    same(area(&b, MEASURE_ACCURACY).unwrap(), theirs, theirs, &format!("{name} area"));
-}
 
-#[cfg(feature = "native")]
-fn bounds_parity(name: &str) {
-    let (b, c) = case(name);
-    let (lo, hi) = bounds(&b).unwrap();
-    let (tlo, thi) = cpp(name).bounds().unwrap();
-    for i in 0..3 {
-        same(lo[i], tlo[i], size(&c), &format!("{name} low[{i}]"));
-        same(hi[i], thi[i], size(&c), &format!("{name} high[{i}]"));
-    }
-}
 
-#[cfg(feature = "native")]
-fn solid_count_parity(name: &str) {
-    let (b, _) = case(name);
-    assert_eq!(solid_count(&b).unwrap(), cpp(name).solid_count().unwrap(), "{name}");
-}
 
-#[cfg(feature = "native")]
-fn manifold_parity(name: &str) {
-    let (b, _) = case(name);
-    assert_eq!(is_manifold_solid(&b).unwrap(), cpp(name).is_manifold_solid().unwrap(), "{name}");
-}
 
-/// The whole edge-by-face distance matrix, the C++ kernel's own (both bodies list their edges
-/// and faces in the same order: `convert_tests` shows their arrays are equal).
-#[cfg(feature = "native")]
-fn distance_parity(name: &str) {
-    let (b, c) = case(name);
-    let theirs = cpp(name);
-    let [faces, edges, _] = counts(&b).unwrap();
-    for e in 0..edges {
-        for f in 0..faces {
-            let (x, y) = (edge_face_distance(&b, e, f), theirs.edge_face_distance(e, f));
-            match (x, y) {
-                (Ok(x), Ok(y)) => same(x, y, size(&c), &format!("{name} edge {e} face {f}")),
-                (x, y) => assert_eq!(x.is_ok(), y.is_ok(), "{name} edge {e} face {f}: {x:?} vs {y:?}"),
-            }
-        }
-    }
-}
 
-#[cfg(feature = "native")]
-fn check_parity(name: &str) {
-    let (b, _) = case(name);
-    for level in [CheckLevel::Basic, CheckLevel::Geometry, CheckLevel::All] {
-        assert_eq!(check(&b, level).unwrap(), cpp(name).check(level).unwrap(), "{name}, {level:?}");
-    }
-}
 
 macro_rules! primitive {
     ($m:ident, $name:literal $(, mass: $mass:meta)? $(, area: $area:meta)?) => {
@@ -240,50 +151,6 @@ macro_rules! primitive {
             fn checks_valid() {
                 super::checks_valid($name);
             }
-            #[cfg(feature = "native")]
-            #[test]
-            $(#[$mass])?
-            fn mass_properties_match_the_cpp_kernel() {
-                let _cpp = crate::route::on_cpp();
-                mass_properties_parity($name);
-            }
-            #[cfg(feature = "native")]
-            #[test]
-            $(#[$area])?
-            fn area_matches_the_cpp_kernel() {
-                let _cpp = crate::route::on_cpp();
-                area_parity($name);
-            }
-            #[cfg(feature = "native")]
-            #[test]
-            fn bounds_match_the_cpp_kernel() {
-                let _cpp = crate::route::on_cpp();
-                bounds_parity($name);
-            }
-            #[cfg(feature = "native")]
-            #[test]
-            fn solid_count_matches_the_cpp_kernel() {
-                let _cpp = crate::route::on_cpp();
-                solid_count_parity($name);
-            }
-            #[cfg(feature = "native")]
-            #[test]
-            fn manifold_matches_the_cpp_kernel() {
-                let _cpp = crate::route::on_cpp();
-                manifold_parity($name);
-            }
-            #[cfg(feature = "native")]
-            #[test]
-            fn distances_match_the_cpp_kernel() {
-                let _cpp = crate::route::on_cpp();
-                distance_parity($name);
-            }
-            #[cfg(feature = "native")]
-            #[test]
-            fn check_matches_the_cpp_kernel() {
-                let _cpp = crate::route::on_cpp();
-                check_parity($name);
-            }
         }
     };
 }
@@ -295,35 +162,18 @@ primitive!(cone, "cone");
 primitive!(frustum, "frustum");
 primitive!(torus, "torus");
 
-/// The head of each report line, `<reporting type>::Test #<n>`, or the whole line for the capi's
-/// own lines (a failed status without a report, a skipped AssertValid).
-#[cfg(feature = "native")]
-fn tests_of(text: &str) -> Vec<&str> {
-    text.lines().map(|l| l.find(" #").and_then(|i| l[i + 2..].find(' ').map(|j| &l[..i + 2 + j])).unwrap_or(l)).collect()
-}
 
-/// A valid box passes every test at level 2 (SolidCraft's level), with an empty report, on
-/// solidcore and on the C++ kernel.
+/// A valid box passes every test at level 2 (SolidCraft's level), with an empty report.
 #[test]
 fn a_valid_box_passes_level_2() {
-    #[cfg(feature = "native")]
-    let _cpp = crate::route::on_cpp();
     let (b, _) = case("box");
     let r = check(&b, CheckLevel::All).unwrap();
     assert_eq!((r.failures, r.text.as_str()), (0, ""), "{r}");
-    #[cfg(feature = "native")]
-    {
-        let r = cpp("box").check(CheckLevel::All).unwrap();
-        assert_eq!((r.failures, r.text.as_str()), (0, ""), "{r}");
-    }
 }
 
-/// A box with one corner moved 1 mm off its edges, through the arrays: the check finds it broken,
-/// and the C++ kernel fails the same tests on the same arrays.
+/// A box with one corner moved 1 mm off its edges, through the arrays: the check finds it broken.
 #[test]
 fn a_vertex_off_its_edges_fails_the_check() {
-    #[cfg(feature = "native")]
-    let _cpp = crate::route::on_cpp();
     use crate::flat::VERTEX_POSITION;
     let (b, _) = case("box");
     let mut a = super::to_arrays(&b).unwrap();
@@ -332,13 +182,6 @@ fn a_vertex_off_its_edges_fails_the_check() {
     let r = check(&broken, CheckLevel::All).unwrap();
     assert!(!r.is_valid(), "{r}");
     assert_eq!(r.failures, r.text.lines().filter(|l| l.contains("::Test #")).count(), "{r}");
-    #[cfg(feature = "native")]
-    {
-        let cpp = crate::flat::Flat::from_arrays(&a).unwrap().import().unwrap();
-        let c = cpp.check(CheckLevel::All).unwrap();
-        assert_eq!(tests_of(&r.text), tests_of(&c.text), "solidcore:\n{}\nC++:\n{}", r.text, c.text);
-        assert_eq!(r, c);
-    }
 }
 
 #[test]
@@ -379,31 +222,18 @@ fn sealed_voids() -> [(&'static str, Body); 2] {
 }
 
 /// The sealed void's mass properties: 8000 − 1000 to 1e-9, centroid at the origin, one solid,
-/// in either shell order; with SMLib built, the C++ kernel's own.
+/// in either shell order.
 #[test]
 fn a_sealed_void_measures_its_volume() {
-    #[cfg(feature = "native")]
-    let _cpp = crate::route::on_cpp();
     let want = 8000.0 - 1000.0;
     // Ixx of a cube of side s about its centre: s⁵ / 6.
     let moment = (20.0f64.powi(5) - 10.0f64.powi(5)) / 6.0;
-    #[cfg(feature = "native")]
-    let theirs = {
-        use crate::{Brep, ffi};
-        crate::init().unwrap();
-        let make = |o: f64, s: f64| ffi::make_box(&[o; 3], &[s; 3]).map(Brep::made).unwrap();
-        let (outer, inner) = (make(-10.0, 20.0), make(-5.0, 10.0));
-        let h = ffi::ops::boolean(outer.cpp().unwrap(), inner.cpp().unwrap(), ffi::ops::BOOLEAN_SUBTRACT).unwrap();
-        ffi::volume(&h, 1e-9).unwrap()
-    };
     for (at, b) in sealed_voids() {
         let m = mass_properties(&b, MEASURE_ACCURACY).unwrap();
         assert!(rel(m.volume, want) < TOL, "{at}: volume {}", m.volume);
         assert!(m.centroid.iter().all(|c| c.abs() < TOL * 20.0), "{at}: centroid {:?}", m.centroid);
         assert!(m.moments.iter().all(|&i| rel(i, moment) < TOL), "{at}: moments {:?} vs {moment}", m.moments);
         assert_eq!(solid_count(&b).unwrap(), 1, "{at}");
-        #[cfg(feature = "native")]
-        same(m.volume, theirs, theirs, &format!("{at} volume"));
     }
 }
 
@@ -436,12 +266,9 @@ fn faces_apart_with_a_shell_each_check_valid() {
 /// `smlib_brep_classify_point` (fork 34d6b2b), the capi test's cases: a 10 x 20 x 30 box at
 /// `(1, -2, 3)`: inside, outside, on a face, an edge and a vertex; the cylinder of radius 5 about
 /// the z axis through `(1, 2)`: off its curved wall by 1e-8 on it (within the zone tolerance), by
-/// 1e-4 inside or outside, on its axis inside, on its top's centre on it. With SMLib built, the
-/// C++ kernel's own primitives classify the same.
+/// 1e-4 inside or outside, on its axis inside, on its top's centre on it.
 #[test]
 fn points_classify_as_the_capi() {
-    #[cfg(feature = "native")]
-    let _cpp = crate::route::on_cpp();
     use super::classify_point;
     use crate::measure::PointClass::{Inside, OnBoundary, Outside};
 
@@ -467,17 +294,6 @@ fn points_classify_as_the_capi() {
     for (name, p, want) in cases {
         let body = if name == "box" { &bx } else { &cyl };
         assert_eq!(classify_point(body, p).unwrap(), want, "{name} {p:?}");
-        #[cfg(feature = "native")]
-        {
-            use crate::ffi::measure::{POINT_INSIDE, POINT_ON_BOUNDARY, POINT_OUTSIDE, classify_point as cpp_classify};
-            let theirs = cpp_classify(cpp(name).cpp().unwrap(), p).unwrap();
-            let want_cpp = match want {
-                Inside => POINT_INSIDE,
-                Outside => POINT_OUTSIDE,
-                OnBoundary => POINT_ON_BOUNDARY,
-            };
-            assert_eq!(theirs, want_cpp, "C++ {name} {p:?}");
-        }
     }
     assert_eq!(classify_point(&bx, [f64::NAN, 0.0, 0.0]).unwrap_err(), crate::Error::Argument);
     assert_eq!(classify_point(&bx, [0.0, f64::INFINITY, 0.0]).unwrap_err(), crate::Error::Argument);
@@ -485,11 +301,9 @@ fn points_classify_as_the_capi() {
 
 /// A sheet hung on a solid (fork 9767916's capi test): a 10 mm cube and a 10 x 10 sheet on from its
 /// top front edge, merged into one body. Its area is every face's, the cube's 600 and the sheet's
-/// 100, not the cube's boundary alone; its volume the cube's. The same on the C++ kernel.
+/// 100, not the cube's boundary alone; its volume the cube's.
 #[test]
 fn a_sheet_hung_on_a_solid_counts_in_the_area() {
-    #[cfg(feature = "native")]
-    let _cpp = crate::route::on_cpp();
     use solidcore::boolean::api_brep::boolean_merge;
     use solidcore::geom::vector3d::Vec3;
     use solidcore::primitive::api_primitives::{create_box, create_plane};
@@ -502,10 +316,4 @@ fn a_sheet_hung_on_a_solid_counts_in_the_area() {
     .unwrap();
     let m = mass_properties(&both, 1e-8).unwrap();
     assert!((m.area - 700.0).abs() < 1e-6 && (m.volume - 1000.0).abs() < 1e-6, "{m:?}");
-    #[cfg(feature = "native")]
-    {
-        let cpp = crate::Brep::made_core(both);
-        let c = crate::ffi::measure::mass_properties(cpp.cpp().unwrap(), 1e-8).unwrap();
-        assert!((c[0] - m.area).abs() < 1e-6 && (c[1] - m.volume).abs() < 1e-6, "C++ {c:?} vs {m:?}");
-    }
 }

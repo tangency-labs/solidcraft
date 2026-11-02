@@ -214,8 +214,6 @@ pub use prism_curve::{PlanarPiece, PlanarSpline};
 pub use prism_measure::{PrismSection, certified_prism_equivalent, certified_prism_section};
 pub use repair::{Hole, RebuiltFace, RefusedFace, RepairOptions, RepairReport, SewnGap, repair};
 pub use sew::{EdgeSpec, FaceSpec, SurfSpec, sew, sew_touching};
-/// Which kernel the process runs on, solidcore or SMLib (crates/smlib/src/route.rs).
-pub use solidcraft_smlib::route as kernel_route;
 pub use splitface::{SplitTool, split_body, split_faces, split_faces_with_map};
 pub use step::step_export;
 pub use step_in::{
@@ -238,7 +236,7 @@ pub use topo::{CylinderFace, cylinder_end_at, cylinder_face, cylinder_face_at, m
 pub use topo::{TopoCounts, merged_topology, seam_flags};
 pub use tspline::tspline_sheet;
 pub use validation::{Validation, check_kept, validating};
-pub use validity::{SmlibCheck, Validity, smlib_built, smlib_dump_dir, validity};
+pub use validity::{SmlibCheck, Validity, smlib_dump_dir, validity};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum KernelError {
