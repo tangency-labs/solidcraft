@@ -487,7 +487,8 @@ fn a_projected_view_lines_up_a_gap_past_its_parent() {
 }
 
 /// A base view with no scale fits what its percent shows, the scale the snapshot gives for the same
-/// percent, and stays inside the drawing space on the side the box grows on.
+/// percent on a sheet with no block, as a snapshot has none, and stays inside the drawing space on the
+/// side the box grows on.
 #[test]
 fn a_base_view_fits_what_its_percent_shows() {
     let (mut s, [_, block]) = plate_and_block(5.0);
@@ -495,18 +496,98 @@ fn a_base_view_fits_what_its_percent_shows() {
     let snapshot = |s: &mut Session, percent: f64| snap(s, json!({"view": "top", "reference_shown_percent": percent}))["scale"]["text"].clone();
     let (near, far) = (snapshot(&mut s, 0.0), snapshot(&mut s, 100.0));
     assert_ne!(near, far);
-    // On the snapshot's A3.
+    // On the snapshot's A3, with no block, as a snapshot has none.
     run(&mut s, "drawing.create", json!({"template": "iso-a3-assembly"}));
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": null}));
     for (percent, scale) in [(0.0, near), (100.0, far)] {
         let (made, id) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "view": "top", "reference_shown_percent": percent}));
         assert_eq!((&made["scale"]["text"], made["scale"]["fitted"].as_bool()), (&scale, Some(true)), "{made}");
-        // In the drawing space; it may still lie over the title block, and is listed if it does.
-        let space = s.drawing("test").unwrap().sheets[0].drawing_space().unwrap().inflated(1e-9);
-        let corner =
-            |at: &str| solidcore_record::Vec2::new(made["boundary_mm"][at][0].as_f64().unwrap(), made["boundary_mm"][at][1].as_f64().unwrap());
-        assert!(space.contains(corner("min")) && space.contains(corner("max")), "{made}");
+        assert!(made.get("outside").is_none(), "{made}");
         assert_eq!(saved(&s, id).reference_shown_percent, percent);
     }
+}
+
+/// A 100 mm square view at the A3 sheet's middle would be 2:1 (200 mm across, 277 mm of room).
+/// A block in any corner reaching into that box brings it to 1:1, one whose side only meets it leaves
+/// it, one under the middle fits nothing, whatever preset, and no block is what the border alone says.
+#[test]
+fn a_fitted_view_keeps_off_a_block_in_any_corner() {
+    let model = Aabb2 { min: Vec2::ZERO, max: Vec2::new(100.0, 100.0) };
+    let extents = Extents { model, error_mm: 0.0, bodies: 1 };
+    let space = Aabb2 { min: Vec2::new(20.0, 10.0), max: Vec2::new(410.0, 287.0) };
+    let middle = Vec2::new(210.0, 148.5);
+    let scaled = |block: Option<Aabb2>| fit(&extents, model, middle, Room { space, block }, BASE).map(|scale| scale.to_string());
+    assert_eq!(scaled(None).unwrap(), "2:1");
+    let at = |x0: f64, y0: f64, x1: f64, y1: f64| Some(Aabb2 { min: Vec2::new(x0, y0), max: Vec2::new(x1, y1) });
+    // The box at 2:1 is 110 to 310 across and 48.5 to 248.5 up.
+    let corners = [at(230.0, 10.0, 410.0, 59.0), at(20.0, 10.0, 200.0, 59.0), at(230.0, 238.0, 410.0, 287.0), at(20.0, 238.0, 200.0, 287.0)];
+    for block in corners {
+        assert_eq!(scaled(block).unwrap(), "1:1", "{block:?}");
+    }
+    assert_eq!(scaled(at(230.0, 10.0, 410.0, 48.5)).unwrap(), "2:1", "a side on the box's is clear");
+    assert_eq!(scaled(at(310.0, 10.0, 410.0, 287.0)).unwrap(), "2:1", "a side on the box's is clear");
+    // The drawing space's whole, and past it: nothing is clear of them.
+    for block in [at(20.0, 10.0, 410.0, 287.0), at(0.0, 0.0, 420.0, 297.0), at(200.0, 140.0, 220.0, 150.0)] {
+        let refusal = scaled(block).unwrap_err().to_string();
+        assert!(refusal.contains("off its title block, at no preset scale from 50:1 to 1:10000"), "{refusal}");
+    }
+    // A view of a point has no box to keep off anything clear of the middle.
+    let point = Aabb2 { min: Vec2::ZERO, max: Vec2::ZERO };
+    let dot = Extents { model: point, ..extents };
+    assert_eq!(fit(&dot, point, middle, Room { space, block: corners[0] }, BASE).unwrap().to_string(), "50:1");
+}
+
+/// With no block the fit is what the border alone gives, scale for scale, at every size and place.
+#[test]
+fn a_fit_with_no_block_is_the_borders() {
+    let space = Aabb2 { min: Vec2::new(20.0, 10.0), max: Vec2::new(410.0, 287.0) };
+    for (w, h, x, y) in
+        [(100.0, 20.0, 210.0, 148.5), (1e4, 3.0, 40.0, 20.0), (0.01, 0.01, 409.0, 286.0), (400.0, 300.0, 210.0, 148.5), (10.0, 10.0, 5.0, 148.5)]
+    {
+        let model = Aabb2 { min: Vec2::ZERO, max: Vec2::new(w, h) };
+        let extents = Extents { model, error_mm: 0.0, bodies: 1 };
+        let at = Vec2::new(x, y);
+        let got = fit(&extents, model, at, Room { space, block: None }, BASE).ok();
+        let within = Vec2::new(2.0 * (at.x - space.min.x).min(space.max.x - at.x), 2.0 * (at.y - space.min.y).min(space.max.y - at.y));
+        assert_eq!(got, Scale::fit(model.size(), within), "{w} x {h} at {at:?}");
+    }
+}
+
+/// The base view on a real sheet, its built-in block 180 x 49 mm on the border's lower-right corner
+/// (230 to 410 across, 10 to 59 up): at 2:1 the 100 x 20 view at (210, 70) would reach down to 50, so
+/// it is 1:1, and listed as nothing. Over the block no scale will do, and that says so; with a scale
+/// given it goes there and is listed, as ever. A sheet with no block fits as the border says, however
+/// small, and a block the paper can't hold is refused where it's set.
+#[test]
+fn a_base_view_fits_around_the_sheets_block() {
+    let mut s = block_drawing();
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": "built-in"}));
+    let (off, _) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "position_mm": [210, 70]}));
+    assert_eq!(off["scale"]["text"], "1:1", "{off}");
+    assert_box(&off, [160.0, 60.0], [260.0, 80.0]);
+    assert!(off.get("outside").is_none(), "{off}");
+    let (roomy, _) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "position_mm": [210, 148.5]}));
+    assert_eq!(roomy["scale"]["text"], "2:1", "{roomy}");
+    let refusal = create_refused(&mut s, BASE, json!({"sheet": "Sheet 1", "position_mm": [320, 35]}));
+    assert!(refusal.contains("off its title block, at no preset scale"), "{refusal}");
+    let (given, over) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "position_mm": [320, 35], "scale": "1:1"}));
+    assert_eq!(outside(&given).1, [over]);
+
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let bare = |s: &mut Session, sides: [f64; 2], at: [f64; 2]| {
+        sheet_set(s, sheet, json!({"size": {"custom": {"sides_mm": sides}}, "title_block": null}));
+        s.execute(BASE, &json!({"sheet": "Sheet 1", "position_mm": at}))
+    };
+    let free = bare(&mut s, [420.0, 297.0], [320.0, 35.0]).unwrap();
+    assert_eq!(free["scale"]["text"], "1:1", "the border's room: 180 x 50 mm: {free}");
+    let tiny = bare(&mut s, [45.0, 30.0], [22.5, 15.0]).unwrap();
+    assert_eq!(tiny["scale"]["text"], "1:5", "25 x 10 mm of room: {tiny}");
+    let past = bare(&mut s, [45.0, 30.0], [0.0, 15.0]).unwrap_err().to_string();
+    assert!(past.contains("drawing area at no preset scale"), "{past}");
+    let mut big = solidcraft_geom::title_block::default_block();
+    big.size_mm = Vec2::new(5000.0, 49.0);
+    let refused = s.execute("drawing.sheet.set", &json!({"sheet": "Sheet 1", "title_block": big})).unwrap_err().to_string();
+    assert!(refused.contains("a title block"), "{refused}");
 }
 
 /// What view creation refuses, each with the drawing and the undo steps unchanged: no drawing, a

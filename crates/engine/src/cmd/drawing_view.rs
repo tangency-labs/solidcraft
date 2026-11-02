@@ -46,7 +46,7 @@ use solidcraft_io::paper::MAX_PICTURE_DPI;
 use solidcraft_render::VisualStyle;
 
 use super::CommandSpec;
-use crate::drawing_view::{CHORD_RANGE, Extents, LineRequest, Lines, MAX_PATH_IDS, MAX_PATHS, OnSheet, ShownSet, Styles, Unmeasured};
+use crate::drawing_view::{CHORD_RANGE, Extents, LineRequest, Lines, MAX_PATH_IDS, MAX_PATHS, OnSheet, Room, ShownSet, Styles, Unmeasured};
 use crate::params::bad;
 use crate::schema::drawing_view::{
     AccuracyResult, AlongParam, AngleFromParam, BaseParams, BoxResult, ChoicesResult, CopyParams, CreateResult, DPI_RANGE, EditParams, EditResult,
@@ -117,7 +117,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .doc_only()
         .contract(&BASE_CONTRACT)
         .output(output_schema_for::<CreateResult>)
-        .params("sheet: id or name; view?: as drawing.view.snapshot's (front by default); scale?: \"paper:model\" (default: the largest ISO 5455 preset at which it lies inside the sheet's drawing space, centred where it goes, or 1:1 with nothing to measure; saved either way); position_mm?: [x, y] for its centre (default the sheet's centre); visual_style?, reference_style?, reference_hides_model?, reference_shown_percent?, tangent_edges?: settings it sets itself (each left out follows the default) → {view, sheet, scale: {text, factor, fitted}, boundary_mm, outside?: [it, when its boundary leaves the sheet's drawing space or lies over its title block]}. A view of the drawing's design. One undo step; no model is evaluated."),
+        .params("sheet: id or name; view?: as drawing.view.snapshot's (front by default); scale?: \"paper:model\" (default: the largest ISO 5455 preset at which it lies inside the sheet's drawing space and off its title block, centred where it goes, or 1:1 with nothing to measure; saved either way); position_mm?: [x, y] for its centre (default the sheet's centre); visual_style?, reference_style?, reference_hides_model?, reference_shown_percent?, tangent_edges?: settings it sets itself (each left out follows the default) → {view, sheet, scale: {text, factor, fitted}, boundary_mm, outside?: [it, when its boundary leaves the sheet's drawing space or lies over its title block]}. A view of the drawing's design. One undo step; no model is evaluated."),
     CommandSpec::new(PROJECTED, "Projected View", crate::checked!("drawing.view.projected", projected))
         .icon("new")
         .in_drawing()
@@ -159,7 +159,7 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
     let position = request.position_mm.map_or(paper * 0.5, |p| p.0);
     let (scale, fitted) = match settings.scale {
         Some(scale) => (scale, false),
-        None => (fit(&extents, shown, position, border, CMD)?, true),
+        None => (fit(&extents, shown, position, Room { space: border, block: None }, CMD)?, true),
     };
     let frame = crate::drawing_view::frame(basis, scale, &extents.model, position, CMD)?;
     let boundary = frame.boundary(&shown).map_err(|e| bad(CMD, e.to_string()))?;
@@ -741,7 +741,7 @@ fn base(s: &mut Session, p: &Value) -> Result<Value> {
         let mut staged = Drawing::clone(&record);
         staged.add_views([Arc::new(View { settings: ViewOverrides { scale: Some(one), ..view.settings }, ..view.clone() })]);
         staged.validate().map_err(|e| bad(BASE, e.to_string()))?;
-        let space = crate::drawing_view::sheet(&staged, sheet, BASE)?.drawing_space().map_err(|e| bad(BASE, e.to_string()))?;
+        let room = Room::on(crate::drawing_view::sheet(&staged, sheet, BASE)?, BASE)?;
         let basis = staged.resolve_view(id).map_err(|e| bad(BASE, e.to_string()))?.basis;
         let measured = crate::drawing_view::shown(s).and_then(|set| {
             let extents = crate::drawing_view::measure(&set, &basis)?;
@@ -749,7 +749,7 @@ fn base(s: &mut Session, p: &Value) -> Result<Value> {
         });
         fitted = measured.is_ok();
         view.settings.scale = Some(match measured {
-            Ok((extents, shown)) => fit(&extents, shown, position, space, BASE)?,
+            Ok((extents, shown)) => fit(&extents, shown, position, room, BASE)?,
             Err(_) => one,
         });
     }
@@ -853,17 +853,30 @@ fn direction(basis: &Plane) -> ViewResult {
 }
 
 /// The largest preset scale at which what a view shows (model mm), placed by the middle of its model at
-/// `position`, lies inside the drawing border: the room is twice the distance from the position to
-/// the nearer side, each way, for the box round the model's middle that holds what shows.
-fn fit(extents: &Extents, shown: Aabb2, position: Vec2, border: Aabb2, cmd: &str) -> Result<Scale> {
+/// `position`, lies where `room` says: the room inside the drawing border is twice the distance from
+/// the position to the nearer side, each way, for the box round the model's middle that holds what
+/// shows; that box at a smaller preset, if need be, is off the title block.
+fn fit(extents: &Extents, shown: Aabb2, position: Vec2, room: Room, cmd: &str) -> Result<Scale> {
+    let border = room.space;
     let off = shown.center() - extents.model.center();
     let size = shown.size() + Vec2::new(off.x.abs(), off.y.abs()) * 2.0;
-    let room =
+    let within =
         Vec2::new(2.0 * (position.x - border.min.x).min(border.max.x - position.x), 2.0 * (position.y - border.min.y).min(border.max.y - position.y));
-    Scale::fit(size, room).ok_or_else(|| {
+    let clear = |scale: &Scale| {
+        let half = size * scale.factor() / 2.0;
+        room.clear_of_block(&Aabb2 { min: position - half, max: position + half })
+    };
+    let largest = Scale::fit(size, within);
+    largest.and_then(|largest| PRESETS.iter().copied().filter(|s| s.factor() <= largest.factor()).find(clear)).ok_or_else(|| {
         let name = |s: Option<&Scale>| s.map(|s| s.to_string()).unwrap_or_default();
         let presets = format!("from {} to {}", name(PRESETS.first()), name(PRESETS.last()));
-        bad(cmd, format!("the view fits the sheet's drawing area at no preset scale {presets} here: give a scale, a position or a larger sheet"))
+        let off_block = if room.block.is_some() { ", off its title block," } else { "" };
+        bad(
+            cmd,
+            format!(
+                "the view fits the sheet's drawing area{off_block} at no preset scale {presets} here: give a scale, a position or a larger sheet"
+            ),
+        )
     })
 }
 
