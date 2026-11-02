@@ -102,6 +102,24 @@ fn a_picked_cam_edge_makes_the_cam() {
     assert!((v.first().copied().unwrap_or(f64::NAN) - (800f64.sqrt() - 40.0)).abs() < 1e-3, "{v:?}");
 }
 
+/// A snap point picked as the tip (on no body) is the tip's point, on the follower there; a corner
+/// picked on the follower keeps the corner it was.
+#[test]
+fn a_snap_point_is_the_cam_tip() {
+    let mut app = valve();
+    app.start("joint.cam");
+    let mut d = app.dialog.take().unwrap();
+    assert_ne!(d.inputs[TIP].accept & crate::selection::SNAP_POINTS, 0, "the tip takes snap points");
+    d.inputs[PROFILE].items = vec![edge(&app, Vec3::new(-20.0, 0.0, 5.0))];
+    d.inputs[TIP].items = vec![Sel::Vertex { body: String::new(), point: Vec3::new(40.0, 0.0, 5.0) }];
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert_eq!(p["tip"], json!({"point": [40.0, 0.0, 5.0]}), "{p}");
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.links.len(), 1, "the cam is made with the snapped tip");
+}
+
 /// The dialog's rows pass their English text, which the catalogs translate by its key.
 #[test]
 fn the_cam_dialog_labels_translate() {
