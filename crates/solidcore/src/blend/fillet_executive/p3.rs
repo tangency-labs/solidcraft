@@ -140,6 +140,11 @@ pub enum NoRoomReason {
     /// tangency-labs/smlib#79 862971f, e568e45 and aac4288;
     /// `fixes.fillet_gn_section_generator`, WR-696).
     CutsThePart,
+    /// A convex blend's section would cross a face of the part inside it between its
+    /// rails: the blend would break through the part's boundary (a round on a wall thinner
+    /// than it reaches into the hollow behind; not the fork's,
+    /// `fixes.fillet_refuse_rounds_breaking_through`, WR-707, #2299).
+    BreaksThrough,
     /// A cliff overflow runs past a fillet end whose end face is not planar (WR-631).
     CliffEndFaceNotPlanar,
     /// The end face's plane does not cut a fillet that overflows its end in two, or does
@@ -2043,6 +2048,19 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
         solver: O,
     ) -> Result<Option<SolverCut<O>>>;
 
+    /// Not the fork's (WR-707, #2299): `None` for a concave blend or one whose sections
+    /// stay inside the part; otherwise where its section would cross a face of the part
+    /// inside it, with the largest size that keeps every section clear
+    /// (`session::band_cuts::band_breaks_through_the_part`).
+    ///
+    /// # Errors
+    /// The judging's own errors; the adapter over [`ExecutiveAccess`] has no solvers.
+    fn creation_band_breaks_through(
+        &mut self,
+        k: &mut Kernel,
+        solver: O,
+    ) -> Result<Option<SolverCut<O>>>;
+
     /// `SmFilletSolver::LargestSizeOnItsFaces(pOnly, ...)` (the fork's, 49f393d and
     /// 5e8c9c1) on this solver: the largest size at which its rails stay on its faces
     /// (`only`: that face's boundary only), with what it sizes; `None` where nothing bounds
@@ -2152,6 +2170,16 @@ where
         _solver: O,
     ) -> Result<Option<SolverCut<O>>> {
         Err(invalid("the band's cut needs a live fillet session"))
+    }
+
+    fn creation_band_breaks_through(
+        &mut self,
+        _k: &mut Kernel,
+        _solver: O,
+    ) -> Result<Option<SolverCut<O>>> {
+        Err(invalid(
+            "the band's break-through needs a live fillet session",
+        ))
     }
 
     fn creation_largest_size_on_its_faces(
@@ -3340,6 +3368,51 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         Ok(())
     }
 
+    /// Not the fork's (WR-707, #2299; `fixes.fillet_refuse_rounds_breaking_through`): after
+    /// `BandCutsThePart`, a convex blend whose section between its rails crosses a face of
+    /// the part inside it would break through the part's boundary; the one whose size that
+    /// stays inside is least is refused with [`FilletErrorType::NoRoom`]
+    /// ([`NoRoomReason::BreaksThrough`]), noting that size less the fit margin (the bound
+    /// is open: at it the section touches an edge of the part).
+    fn refuse_blends_breaking_through(
+        &mut self,
+        k: &mut Kernel,
+        access: &mut impl BrepCreationAccess<O>,
+    ) -> Result<()> {
+        let mut worst: Option<(SolverCut<O>, O)> = None;
+        let mut index = 0;
+        while let Some(solver) = self.solvers.get(index).copied() {
+            if let Some(cut) = access.creation_band_breaks_through(k, solver)? {
+                if worst.is_none_or(|(w, _)| cut.radius < w.radius) {
+                    worst = Some((cut, solver));
+                }
+            }
+            index += 1;
+        }
+        let Some((cut, solver)) = worst else {
+            return Ok(());
+        };
+        let g = |x: f64| c_general(x, 0, 7);
+        self.error.code = FilletErrorType::NoRoom as i32;
+        self.error.comment = if cut.chamfer {
+            format!("Fillet Error: the chamfer would break through the part's boundary between its sides along the edge: a chamfer set back less than {} stays inside the part", g(cut.setback))
+        } else {
+            format!("Fillet Error: the round would break through the part's boundary between its rails along the edge: a radius below {} stays inside the part", g(cut.radius))
+        };
+        self.error.no_room = Some(NoRoomReason::BreaksThrough);
+        if cut.edge.is_some() {
+            if let Some(fit) = access.creation_solver_fit(solver)? {
+                let size = if cut.radius > 0.0 {
+                    smos_max(0.0, cut.radius - fit.fit_margin)
+                } else {
+                    0.0
+                };
+                self.note_fit_radius(size, cut.edge, FitKind::Radius);
+            }
+        }
+        Err(failure())
+    }
+
     /// `NoteFitOnFace(pFace)` (the fork's, 49f393d): for a refusal where a rail leaves
     /// `face`, each solver's largest size at which its rails stay on that face
     /// (`LargestSizeOnItsFaces`), noted as the refusal's fit where least
@@ -3568,6 +3641,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             // the fork's 862971f, e568e45 and aac4288: a convex blend that would cut the part
             // into pieces, refused naming the largest size that keeps it whole
             self.refuse_blends_cutting_the_part(k, access)?;
+            // not the fork's (WR-707, #2299): a convex blend whose section would cross a face
+            // of the part inside it, refused naming the largest size that stays inside
+            if k.fixes.fillet_refuse_rounds_breaking_through {
+                self.refuse_blends_breaking_through(k, access)?;
+            }
         }
 
         self.create_corner_vertices(k, access)?;

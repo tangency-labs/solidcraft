@@ -16,6 +16,10 @@
 //! | `keeps_material_behind` (private) | `sm_KeepsMaterialBehind`             |
 //! | `keeps` (private)             | the `Keeps` lambda of `BandCutsThePart`  |
 //!
+//! Not the fork's: [`band_breaks_through_the_part`] (WR-707, #2299), the same sections
+//! judged for crossing a face of the part inside it, with
+//! `fixes.fillet_refuse_rounds_breaking_through`.
+//!
 //! Deviations: the fork's out-params are returned (`None` for no cut). The solutions of
 //! `SmSurface::GlobalCurveIntersect` carry no object handles (the fork reads only their
 //! parameters). Every loop is bounded by fixed counts (32 steps, 40 bisections, halvings
@@ -49,7 +53,8 @@ use crate::surface::surface::Surface;
 use crate::topology::brep_cache::CacheObject;
 use crate::topology::edge;
 use crate::topology::edgeuse::p1 as eu;
-use crate::topology::{face, Brep};
+use crate::topology::{face, vertex, Brep, FaceId};
+use std::collections::BTreeSet;
 
 const OP: &str = "blend::fillet_executive::session::band_cuts";
 
@@ -338,7 +343,7 @@ fn keeps(
     own: f64,
     t: f64,
     trial: f64,
-    crossings: &[Point3],
+    judge: Judge<'_>,
     near: &mut Option<TsectPnt>,
 ) -> Result<Section> {
     let mut out = Section {
@@ -406,8 +411,129 @@ fn keeps(
     out.found = true;
     let p = edge_curve.evaluate_point(k, t)?;
     out.setback = p.distance(rail1);
-    out.keeps = keeps_material_behind(k, target, centre, [rail1, rail2], chord, crossings)?;
+    out.keeps = match judge {
+        Judge::KeepsMaterial(crossings) => {
+            keeps_material_behind(k, target, centre, [rail1, rail2], chord, crossings)?
+        }
+        Judge::StaysInside(skip) => {
+            !section_breaks_through(k, target, centre, [rail1, rail2], chord, skip)?
+        }
+    };
     Ok(out)
+}
+
+/// What `keeps` judges at a section: material kept behind it (`sm_KeepsMaterialBehind`,
+/// with the body's edges crossing the station's plane), or (WR-707, not the fork's) the
+/// section staying inside the part, clear of every face but those skipped.
+#[derive(Clone, Copy)]
+enum Judge<'a> {
+    /// `sm_KeepsMaterialBehind` with these plane crossings.
+    KeepsMaterial(&'a [Point3]),
+    /// `section_breaks_through` false, these faces skipped.
+    StaysInside(&'a BTreeSet<FaceId>),
+}
+
+/// Not the fork's (WR-707, #2299): whether the section of a convex blend at a station,
+/// between its rails (the ball's arc, or the chamfer's chord, as an exact curve), crosses
+/// a face of the body inside that face, other than `skip` (the faces at the blended
+/// edge's ends, which the corners trim): the blend would break through the part's
+/// boundary there (a round on a wall thinner than it reaches into the hollow behind).
+/// Crossings within the body's tolerance of the section's own ends are its rails.
+fn section_breaks_through(
+    k: &Kernel,
+    body: &mut Brep,
+    centre: Point3,
+    rails: [Point3; 2],
+    chord: bool,
+    skip: &BTreeSet<FaceId>,
+) -> Result<bool> {
+    let [rail1, rail2] = rails;
+    let a = rail1 - centre;
+    let b = rail2 - centre;
+    let (aa, ab, bb) = (a.dot(a), a.dot(b), b.dot(b));
+    let det = aa * bb - ab * ab;
+    if !(det > EFF_ZERO * aa * bb) {
+        return Ok(false); // rails opposite or together: no section to judge
+    }
+    let section = if chord {
+        Curve::from(Line::create_line_segment(3, rail1, rail2, None)?)
+    } else {
+        let rho = aa.sqrt();
+        let e1 = a / rho;
+        let e2 = (b - a * (ab / aa)).unitize()?;
+        let phi = b.dot(e2).atan2(b.dot(e1));
+        Curve::from(Ellipse::new_circle(
+            k,
+            centre,
+            e1,
+            e2,
+            Extent1d::from_min_max(0.0, rad_to_deg(phi)),
+            rho,
+            &EllipseOptions {
+                dim: 3,
+                ..EllipseOptions::default()
+            },
+        )?)
+    };
+    let interval = section.natural_interval();
+    let ends = body.tolerance();
+    let zone = brep_zone_tol_3d(k, body, SmallTopoType::default());
+    for f in crate::topology::brep::p1::faces(body, None)? {
+        if skip.contains(&f) {
+            continue;
+        }
+        let mut on_face: Vec<Point2> = Vec::new();
+        {
+            let Some(surface) = face::p2::surface(body, f)? else {
+                continue;
+            };
+            let surface = surface.clone_for_evaluation()?;
+            let domain = surface.natural_uv_domain_with_nurb(k)?;
+            let mut services = BrepFaceServices::new(&mut *body);
+            let solutions = surface.global_curve_intersect_with_context::<CacheObject>(
+                k,
+                [None, Some(CacheObject::Surface(f))],
+                None,
+                &mut services,
+                &domain,
+                &section,
+                &interval,
+                ends,
+            )?;
+            for sol in solutions.as_slice() {
+                let params = &sol.start.parameters;
+                let (Some(&t), Some(&u), Some(&v)) = (params.first(), params.get(1), params.get(2))
+                else {
+                    return Err(SolidError::null_pointer(OP));
+                };
+                let at = section.evaluate_point(k, t)?;
+                if at.distance(rail1) <= ends || at.distance(rail2) <= ends {
+                    continue; // the section's own ends, on the blended faces
+                }
+                on_face.push(Point2::new(u, v));
+            }
+        }
+        for uv in on_face {
+            let mut class = PointClassification::<EntityRef>::new(zone);
+            crate::query::face::p2::point_classify(
+                k,
+                body,
+                f,
+                uv,
+                &mut class,
+                crate::query::face::p2::PointClassifyOptions {
+                    src_zone_tol_3d: zone,
+                    do_boundary_intersections: true,
+                    use_uv_classification: true,
+                    ..crate::query::face::p2::PointClassifyOptions::default()
+                },
+            )?;
+            if class.point_class() == PointClassType::Face {
+                return Ok(true); // the section crosses the part's boundary inside a face
+            }
+        }
+    }
+    Ok(false)
 }
 
 /// `SmFilletSolver::BandCutsThePart`: whether this convex blend (one that removes
@@ -477,7 +603,16 @@ pub fn band_cuts_the_part(
         let normal = tangent.unitize()?;
         let crossings = edges_crossing_plane(k, target, point, normal)?;
         let judged = keeps(
-            k, target, solver, &curve, chord, own, t, 0.0, &crossings, &mut near,
+            k,
+            target,
+            solver,
+            &curve,
+            chord,
+            own,
+            t,
+            0.0,
+            Judge::KeepsMaterial(&crossings),
+            &mut near,
         )?;
         all_crossings.push(crossings);
         nears.push(near.clone());
@@ -523,7 +658,16 @@ pub fn band_cuts_the_part(
             let mut tr = 0.5 * radius;
             while tr > 1.0e-6 * radius {
                 let judged = keeps(
-                    k, target, solver, &curve, chord, own, t, tr, crossings, &mut at,
+                    k,
+                    target,
+                    solver,
+                    &curve,
+                    chord,
+                    own,
+                    t,
+                    tr,
+                    Judge::KeepsMaterial(crossings),
+                    &mut at,
                 )?;
                 if judged.found && judged.keeps {
                     lo = tr;
@@ -537,7 +681,16 @@ pub fn band_cuts_the_part(
             while i < BISECTIONS && lo > 0.0 {
                 let mid = 0.5 * (lo + hi);
                 let judged = keeps(
-                    k, target, solver, &curve, chord, own, t, mid, crossings, &mut at,
+                    k,
+                    target,
+                    solver,
+                    &curve,
+                    chord,
+                    own,
+                    t,
+                    mid,
+                    Judge::KeepsMaterial(crossings),
+                    &mut at,
                 )?;
                 if judged.found && judged.keeps {
                     lo = mid;
@@ -556,4 +709,128 @@ pub fn band_cuts_the_part(
         }
     }
     Ok(cut)
+}
+
+/// Not the fork's (WR-707, #2299; `fixes.fillet_refuse_rounds_breaking_through` with
+/// `fixes.fillet_gn_section_generator`): whether this convex blend's section crosses a
+/// face of the part inside that face somewhere along its edge (it would break through the
+/// part's boundary between its rails), and where it would, the largest size that keeps
+/// every section clear. At the same 32 sections as [`band_cuts_the_part`]; faces at the
+/// blended edge's ends (the corners trim the blend there) are not judged. The limit at
+/// each crossing section is found as the cut's is (halving from the ball's radius, then
+/// 40 bisections), least over the sections. A constant ball only. `None` where no
+/// section breaks through.
+///
+/// # Errors
+///
+/// As [`band_cuts_the_part`].
+pub fn band_breaks_through_the_part(
+    k: &Kernel,
+    target: &mut Brep,
+    solver: &mut SolverObject,
+) -> Result<Option<BandCut>> {
+    let base = solver.base();
+    if base.surface(0)?.is_none() || base.surface(1)?.is_none() {
+        return Ok(None);
+    }
+    let Some(edgeuse) = base.edgeuse(0)? else {
+        return Ok(None);
+    };
+    let edge_id = eu::edge(target, edgeuse)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let curve =
+        edge::evaluation_curve(target, edge_id)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let ivl = edge::interval(target, edge_id)?;
+    let (rolls, on_edge) = rolls_a_ball(solver);
+    if !rolls || on_edge {
+        return Ok(None); // a constant ball only
+    }
+    let probe = TsectPnt::new();
+    let own = ball_law(k, solver, &probe)?.r[0];
+    let chord = solver.base().fsg.as_ref().is_some_and(|fsg| {
+        fsg.fillet_surface_generator_type() == FilletSurfaceGeneratorType::Linear
+    });
+    // the faces at the edge's ends
+    let mut skip = BTreeSet::new();
+    let v0 = edge::vertex(target, edge_id)?;
+    for v in [v0, edge::other_vertex(target, edge_id, v0)?]
+        .into_iter()
+        .flatten()
+    {
+        skip.extend(vertex::faces(target, v)?);
+    }
+    let mut out: Option<BandCut> = None;
+    let mut near: Option<TsectPnt> = None;
+    for j in 0..STEPS {
+        let t = ivl.evaluate((j as f64 + 0.5) / STEPS as f64);
+        let judged = keeps(
+            k,
+            target,
+            solver,
+            &curve,
+            chord,
+            own,
+            t,
+            0.0,
+            Judge::StaysInside(&skip),
+            &mut near,
+        )?;
+        if !judged.found || judged.keeps {
+            continue;
+        }
+        // the largest radius whose section here stays inside the part
+        let mut at = near.clone();
+        let (mut lo, mut hi, mut lo_setback) = (0.0_f64, own, 0.0);
+        let mut tr = 0.5 * own;
+        while tr > 1.0e-6 * own {
+            let s = keeps(
+                k,
+                target,
+                solver,
+                &curve,
+                chord,
+                own,
+                t,
+                tr,
+                Judge::StaysInside(&skip),
+                &mut at,
+            )?;
+            if s.found && s.keeps {
+                lo = tr;
+                lo_setback = s.setback;
+                break;
+            }
+            hi = tr;
+            tr *= 0.5;
+        }
+        let mut i = 0;
+        while i < BISECTIONS && lo > 0.0 {
+            let mid = 0.5 * (lo + hi);
+            let s = keeps(
+                k,
+                target,
+                solver,
+                &curve,
+                chord,
+                own,
+                t,
+                mid,
+                Judge::StaysInside(&skip),
+                &mut at,
+            )?;
+            if s.found && s.keeps {
+                lo = mid;
+                lo_setback = s.setback;
+            } else {
+                hi = mid;
+            }
+            i += 1;
+        }
+        if out.is_none_or(|c| lo < c.radius) {
+            out = Some(BandCut {
+                radius: lo,
+                setback: lo_setback,
+            });
+        }
+    }
+    Ok(out)
 }
