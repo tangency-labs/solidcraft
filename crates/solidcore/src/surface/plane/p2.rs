@@ -20,6 +20,10 @@
 //! | [`Plane::make_new_plane_ellipse`]          | `MakeNewPlaneEllipse`                             |
 //!
 //! Deviations:
+//! - **Plane first with a torus (opt-in, not upstream).** With
+//!   `fixes.plane_first_torus_section_exact` (WR-721, #2405) `GlobalSurfaceIntersect` takes a
+//!   torus's own plane section (`Torus::intersect_with_plane_owned_into`, its orders and UV
+//!   curves swapped as for a surface of revolution); upstream has no torus case and marches it.
 //! - **Arguments.** Out-params become return values; `SmContext` arguments are
 //!   dropped. `GlobalSurfaceIntersect`'s and `IntersectWithPlane`'s optional output
 //!   arrays are always filled ([`SurfaceIntersection`]; a plane/plane intersection has
@@ -1554,7 +1558,21 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
             need_nurb_intersection = x.needs_more_intersections;
             *out = SurfaceIntersection::from(x);
         }
-        // (an SmTorus has no special case: the default branch)
+        // Not upstream (WR-721, #2405, opt-in): the torus's own plane section, as for a
+        // surface of revolution (upstream has no SmTorus case: the default branch)
+        SurfaceKind::Torus(torus) if k.fixes.plane_first_torus_section_exact => {
+            // the plane's boxes take its face's tolerance
+            let need = torus.intersect_with_plane_owned_into(
+                k,
+                plane,
+                PlaneOwner::of(this)?,
+                uv_domain,
+                approx_tol_3d,
+                out,
+            );
+            core::mem::swap(&mut out.surface1_uv_curves, &mut out.surface2_uv_curves);
+            need_nurb_intersection = need?;
+        }
         SurfaceKind::Torus(_)
         | SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)

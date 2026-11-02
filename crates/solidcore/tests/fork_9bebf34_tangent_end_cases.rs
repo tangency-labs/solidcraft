@@ -640,13 +640,15 @@ fn tangent_end_cases_known_failing_at_cd47efd() {
 
 /// The rounds together at r 5: without the blend corner (9bebf34's profile) the pinned corner
 /// patch stands 0.00156 out of the front face; with it (cd47efd's) the Mixed corner builds them
-/// within the box (`issue_2360_mixed_corner.rs`).
+/// within the box (`issue_2360_mixed_corner.rs`). The round on a line spine sits on its exact
+/// spine under `fillet_exact_round_classes` (WR-669 addendum, #2405), which moves the patch's
+/// lowest y from -0.0015609462817799 (the solved stations' spine) to -0.0015609462949179.
 #[test]
 fn rounds_together_r5_needs_the_mixed_corner() {
     let before = rounds_together_r5(&mut kernel());
     assert_eq!(before.failed.len(), 1, "{:?}", before.failed);
     assert!(
-        before.failed[0].contains("y: -0.00156094628"),
+        before.failed[0].contains("y: -0.00156094629"),
         "{:?}",
         before.failed
     );

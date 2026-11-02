@@ -23,6 +23,7 @@
 //! | [`BlendSpine`]                     | `SmBlendSpine`                             |
 //! | [`ExactBlend`]                     | `SmExactBlend`                             |
 //! | [`classify_blend_spine`]           | `sm_ClassifyBlendSpine`                    |
+//! | `line_spine` (private), [`BlendQuadric::foot`] | none (#2405): the line spine's line and the faces' feet of it |
 //! | [`classify_exact_blend`]           | `SmFilletSolver::ClassifyExactBlend`       |
 //! | [`calc_exact_fillet_geom`]         | `SmFilletSolver::CalcExactFilletGeom`      |
 //! | [`ball_zone_open_at_an_end`]       | not the fork's (#2401): a collapsed offset's zone open at an end |
@@ -49,6 +50,13 @@
 //! - **Recognisers' statuses.** `SmSphere::IsNurbSurfaceSphere` returning `TRUE` without a
 //!   sphere (its `SER`s) is "no sphere", as the fork's `&& pNurbSphere != NULL` reads it:
 //!   [`Sphere::is_nurb_surface_sphere`]'s non-`Unported` errors.
+//! - **The line spine's line (not the fork, #2405).** [`classify_blend_spine`] also gives a
+//!   line spine its line, `O1 ∩ O2` in closed form (`line_spine`): two planes meet along
+//!   `n1 x n2`, a plane parallel to a cylinder's axis and two cylinders with parallel axes
+//!   along the axis through their sections' crossing nearest the classified centre. The
+//!   line class's cylinder is built on it, its rails on the faces' feet of it
+//!   ([`BlendQuadric::foot`]), where the fork takes the solved stations' centres and feet
+//!   (2e-12 off the spine on the fork's oblique Ball).
 //! - No recursion: `FromSurface` of an offset surface reads its base once, and a base that
 //!   is itself an offset surface is read once more and no further (the solver's offset
 //!   surfaces are at most two levels deep, as `CalcFilletGeom`'s cast of the base assumes);
@@ -418,6 +426,22 @@ impl BlendQuadric {
         o
     }
 
+    /// Not the fork (#2405): the foot of `m` on a plane or cylinder, the point of it
+    /// nearest `m` (on a cylinder, along `m`'s radial line from the axis); `None` for other
+    /// kinds and for `m` on a cylinder's axis.
+    #[must_use]
+    pub fn foot(&self, m: Point3) -> Option<Point3> {
+        match self.kind {
+            QuadricKind::Plane => Some(m - self.dir * self.dir.dot(m - self.point)),
+            QuadricKind::Cylinder => {
+                let axis = self.point + self.dir * (m - self.point).dot(self.dir);
+                let radial = (m - axis).unitize().ok()?;
+                Some(axis + radial * self.radius)
+            }
+            _ => None,
+        }
+    }
+
     /// Torus, circle (solidcore #2403): the distance of `point` from the circle the tube is
     /// centred on.
     fn circle_distance(&self, point: Point3) -> f64 {
@@ -598,9 +622,11 @@ pub struct ExactBlend {
     /// `m_dRadius`.
     pub radius: f64,
     /// `m_sPoint`: circle, a point of the common axis; point, the ball's centre; conic
-    /// (pair), a point of the conic's plane; nodal quartic, the node.
+    /// (pair), a point of the conic's plane; nodal quartic, the node; line (not the fork,
+    /// #2405), the point of the line nearest the classified centre.
     pub point: Point3,
-    /// `m_sDir`: circle, the axis's unit direction; conic (pair), the plane's unit normal.
+    /// `m_sDir`: circle, the axis's unit direction; conic (pair), the plane's unit normal;
+    /// line (not the fork, #2405), its unit direction.
     pub dir: Vec3,
 }
 
@@ -615,6 +641,68 @@ impl Default for ExactBlend {
             point: Point3::ZERO,
             dir: Vec3::ZERO,
         }
+    }
+}
+
+/// Not the fork (#2405): the line two offsets of a line spine meet in, `O1 ∩ O2`, as its
+/// point nearest `centre` and its unit direction. Two planes meet along `n1 x n2`; a plane
+/// parallel to a cylinder's axis meets the cylinder along the axis, `w = sqrt(R^2 - h^2)`
+/// either side of the axis's foot on the plane (`h` the axis's height over it); two
+/// cylinders with parallel axes along the axes through their sections' crossing,
+/// `x = (d^2 + Ra^2 - Rb^2) / 2d` along their centres' line and `sqrt(Ra^2 - x^2)` across
+/// it. A crossing within rounding of touching is the touching point. `None` for other
+/// kinds or offsets that do not meet in a line (parallel planes, coaxial cylinders).
+fn line_spine(a: &BlendQuadric, b: &BlendQuadric, centre: Point3) -> Option<(Point3, Vec3)> {
+    use QuadricKind as Q;
+    // of two crossings, the one nearer the centre
+    let nearer = |p: Point3, q: Point3| {
+        if centre.distance(p) <= centre.distance(q) {
+            p
+        } else {
+            q
+        }
+    };
+    match (a.kind, b.kind) {
+        (Q::Plane, Q::Plane) => {
+            let c = a.dir.dot(b.dir);
+            let s = 1.0 - c * c;
+            let dir = a.dir.cross(b.dir).unitize().ok()?;
+            if s.is_nan() || s <= 0.0 {
+                return None;
+            }
+            // centre + x n1 + y n2 on both planes
+            let r1 = a.dir.dot(a.point - centre);
+            let r2 = b.dir.dot(b.point - centre);
+            let p = centre + a.dir * ((r1 - c * r2) / s) + b.dir * ((r2 - c * r1) / s);
+            Some((p, dir))
+        }
+        (Q::Plane, Q::Cylinder) | (Q::Cylinder, Q::Plane) => {
+            let (pl, x) = if a.kind == Q::Plane { (a, b) } else { (b, a) };
+            let u = x.dir;
+            let n = across(pl.dir, u).unitize().ok()?;
+            let axis = x.point + u * (centre - x.point).dot(u);
+            let h = n.dot(axis - pl.point);
+            let foot = axis - n * h;
+            let w = (x.radius * x.radius - h * h).max(0.0).sqrt();
+            let t = u.cross(n);
+            Some((nearer(foot + t * w, foot - t * w), u))
+        }
+        (Q::Cylinder, Q::Cylinder) => {
+            let u = a.dir;
+            let ca = a.point + u * (centre - a.point).dot(u);
+            let ab = across(b.point - ca, u);
+            let d = ab.length();
+            if d.is_nan() || d <= 0.0 {
+                return None;
+            }
+            let e = ab / d;
+            let x = (d * d + a.radius * a.radius - b.radius * b.radius) / (2.0 * d);
+            let w = (a.radius * a.radius - x * x).max(0.0).sqrt();
+            let base = ca + e * x;
+            let t = u.cross(e);
+            Some((nearer(base + t * w, base - t * w), u))
+        }
+        _ => None,
     }
 }
 
@@ -876,6 +964,17 @@ fn touching_point(q: &[BlendQuadric; 2], contact: [f64; 2], tol: f64) -> Option<
     None
 }
 
+/// `blend.spine = SM_BS_LINE`, with (not the fork, #2405) the line its offsets meet in
+/// ([`line_spine`]); offsets that meet in no line are no line spine.
+fn set_line_spine(blend: &mut ExactBlend, centre: Point3) {
+    let [a, b] = blend.offsets;
+    if let Some((point, dir)) = line_spine(&a, &b, centre) {
+        blend.spine = BlendSpine::Line;
+        blend.point = point;
+        blend.dir = dir;
+    }
+}
+
 /// `sm_ClassifyBlendSpine`: the one classification of the spine of a constant round of
 /// radius `blend.radius` between faces on `blend.faces`, given their offsets
 /// `blend.offsets` and `centre`, a point of the spine, from the faces' kinds and
@@ -919,7 +1018,7 @@ pub fn classify_blend_spine(centre: Point3, tol: f64, blend: &mut ExactBlend) {
     // two planes: a line
     if ea == Q::Plane && eb == Q::Plane {
         if a.dir.cross(b.dir).length() > ang_tol {
-            blend.spine = BlendSpine::Line;
+            set_line_spine(blend, centre);
         }
         return;
     }
@@ -930,7 +1029,7 @@ pub fn classify_blend_spine(centre: Point3, tol: f64, blend: &mut ExactBlend) {
         let (pl, x) = if ea == Q::Plane { (&a, &b) } else { (&b, &a) };
         if x.kind == Q::Cylinder {
             if pl.dir.dot(x.dir).abs() <= ang_tol {
-                blend.spine = BlendSpine::Line;
+                set_line_spine(blend, centre);
             } else {
                 blend.spine = BlendSpine::Conic;
             }
@@ -961,7 +1060,7 @@ pub fn classify_blend_spine(centre: Point3, tol: f64, blend: &mut ExactBlend) {
 
     // two cylinders with parallel axes: lines
     if ea == Q::Cylinder && eb == Q::Cylinder && a.dir.cross(b.dir).length() <= ang_tol {
-        blend.spine = BlendSpine::Line;
+        set_line_spine(blend, centre);
         return;
     }
 

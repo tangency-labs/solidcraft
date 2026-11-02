@@ -84,7 +84,10 @@
 //!   body without its generator and `IsArc` gates, its frame from the class axis (no `IsArc`
 //!   start angle: the span from the start section) and no blend-curve section; the point
 //!   spine's is [`FilletSolver::calc_sphere_fillet_geom`] as it is (the fork's ignores the
-//!   class). The bodies' own fork-fix flags apply unchanged.
+//!   class). The bodies' own fork-fix flags apply unchanged. Not the fork (#2405): the
+//!   line spine's cylinder is built on the class's exact line (its centres the stations'
+//!   on it, its rails' ends their feet on the faces' quadrics) and stored on the frame it
+//!   was built on (`class_cylinder`), not recognised again from its patch.
 //! - **The ball's triangle (solidcore #2403, not in the fork).** A point spine whose one
 //!   face's offset collapsed onto a line or circle (a round of the ball's radius) and the
 //!   other's not ([`crate::blend::fillet_exact::classify_ball_on_collapsed_offset`], with
@@ -134,6 +137,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::surface::cone::Cone;
 use crate::surface::plane::Plane;
 use crate::surface::surf_of_revolution::SurfOfRevolution;
 use crate::surface::surface::Surface;
@@ -699,6 +703,38 @@ fn line_segment(a: Point3, b: Point3, ivl: &Extent1d) -> Result<Line> {
     Ok(l)
 }
 
+/// The line class's cylinder (not the fork, #2405): the analytic cone `CopyAndAddAnalytics`
+/// recognises (`SmCone::IsNurbSurfaceCone`) in `patch`, the
+/// `CreateConePatch(placement, radius, radius, 0, angle_deg, height)` patch swapped to u
+/// along the axis, on `placement` itself instead of the frame its end circles' `IsArc`
+/// fits give back: the patch's bottom circle's origin and X axis, Z along its linear
+/// direction, the angles `[0, angle_deg]`, not inside out, its NURB reparameterised to the
+/// patch's domain (status ignored, as by `IsNurbSurfaceCone`).
+fn class_cylinder(
+    k: &Kernel,
+    placement: &Axis2Placement,
+    radius: f64,
+    angle_deg: f64,
+    height: f64,
+    patch: &BSplineSurface,
+) -> Result<Cone> {
+    let mut cone = Cone::new_bounded(
+        placement.origin(),
+        placement.x_axis(),
+        placement.y_axis(),
+        radius,
+        radius,
+        0.0,
+        angle_deg,
+        height,
+        true,
+        false,
+        false,
+    );
+    ignore_status(cone.reparameterize(k, &patch.natural_uv_domain()))?;
+    Ok(cone)
+}
+
 impl FilletSolver {
     /// `GetFilletCorner(lIndex)`: the fillet corner at the start (0) or end (1) vertex
     /// of the filleted edge; `None` for another index.
@@ -845,6 +881,20 @@ impl FilletSolver {
         let mut end_pnt1 = eval_offset(k, s, 1, end_uv1)?;
         s.reload_surface_offsets()?;
 
+        // Not the fork (#2405): the class's centres are the stations' on its exact line,
+        // the rails' ends their feet on the faces' quadrics
+        if let Some(class) = class {
+            let on_line = |c: Point3| class.point + class.dir * (c - class.point).dot(class.dir);
+            center0 = on_line(center0);
+            center1 = on_line(center1);
+            let [face0, face1] = &class.faces;
+            let foot = |q: &BlendQuadric, c: Point3| q.foot(c).ok_or_else(sm_err);
+            start_pnt0 = foot(face0, center0)?;
+            start_pnt1 = foot(face1, center0)?;
+            end_pnt0 = foot(face0, center1)?;
+            end_pnt1 = foot(face1, center1)?;
+        }
+
         // get extension vectors along each rail curve and the center curve
         let f = s.surface_extension_factor;
         let ext0 = f * (end_pnt0 - start_pnt0);
@@ -929,8 +979,21 @@ impl FilletSolver {
             k.fixes.fillet_statuses_pass_on,
         )?)?;
 
-        // Copy pConePatch, when possible as an analytic surface
-        let cylinder = cone_patch.copy_and_add_analytics(k)?;
+        // Copy pConePatch, when possible as an analytic surface. Not the fork (#2405): the
+        // class's cylinder is the analytic cone CopyAndAddAnalytics recognises in the patch,
+        // on the frame the patch was built on, not one refitted from its end circles
+        let cylinder = if class.is_some() {
+            Surface::from(class_cylinder(
+                k,
+                &placement,
+                radius0,
+                angle,
+                height,
+                &cone_patch,
+            )?)
+        } else {
+            cone_patch.copy_and_add_analytics(k)?
+        };
 
         // get cylinder u parameter range
         let uv_domain = cylinder.natural_uv_domain_with_nurb(k)?;

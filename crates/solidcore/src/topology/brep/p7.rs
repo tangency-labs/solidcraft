@@ -39,6 +39,10 @@
 //!   pointer). `CopyFaces` copies from one B-rep into another one: upstream also allows
 //!   the destination to be the source B-rep, which a shared and a mutable borrow cannot
 //!   express (copy within one B-rep through a clone).
+//! - **Exact pcurves (WR-722, opt-in `keep_exact_pcurves`).** `MakeFaceWithCurves`'s keep
+//!   step flips the orientations it matches the given UV curves by on a face made with its
+//!   surface's orientation opposite, and `CopyFaces` without the merge passes the face's
+//!   own trims on to its copy (`pbOptCrvOnSurf`).
 //! - **Index checks.** Loop counts that add up to more curves, orientations or edge uses
 //!   than given, and self-intersection UV curve arrays shorter than the 3D curves, are
 //!   [`SolidError::InvalidInput`] (upstream reads past its arrays).
@@ -1711,8 +1715,28 @@ fn make_face_with_curves_transfer_impl(
         // (upstream loops over cpOptUVCurves->GetSize(): a null array is dereferenced)
         let uv: Vec<Curve> = uv_curves
             .ok_or_else(|| null("crv_on_surf without UV curves (upstream dereferences null)"))?;
-        // CreateUVTrimCurves(FALSE, &sNewUVCurves, &crCurveOrientations, ..)
-        let r = face_create_uv_trim_curves(k, b, face, false, uv, &orientations);
+        // CreateUVTrimCurves(FALSE, &sNewUVCurves, &crCurveOrientations, ..). Not upstream
+        // (WR-722, opt-in): on a face made with its surface's orientation opposite, the
+        // upward face use's edge uses run against the loop the orientations are given
+        // along, so they are flipped to match them (upstream's tangent test in
+        // sm_FindBestUVCurve refuses each exact curve there, and it is projected again)
+        let flipped: Vec<OrientType>;
+        let orients = if k.fixes.keep_exact_pcurves && orientation == OrientType::Opposite {
+            flipped = orientations
+                .iter()
+                .map(|&o| {
+                    if o == OrientType::Same {
+                        OrientType::Opposite
+                    } else {
+                        OrientType::Same
+                    }
+                })
+                .collect();
+            &flipped
+        } else {
+            &orientations
+        };
+        let r = face_create_uv_trim_curves(k, b, face, false, uv, orients);
         match r {
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(SolidError::Upstream { code, .. }) if code == crate::error::SM_ERR => {
@@ -2361,6 +2385,9 @@ fn copy_faces_named(
             orientations: curves.curve_orients,
             loop_points: Vec::new(),
         };
+        // Not upstream (WR-722, opt-in): the copy keeps the face's own trims
+        // (`pbOptCrvOnSurf`), not projected again later
+        let keep = (k.fixes.keep_exact_pcurves && input.uv_curves.is_some()).then_some(true);
         match make_face_with_curves(
             k,
             dest,
@@ -2369,7 +2396,7 @@ fn copy_faces_named(
             s2,
             &dom,
             OrientType::Same,
-            None,
+            keep,
             this_face,
             env,
         ) {

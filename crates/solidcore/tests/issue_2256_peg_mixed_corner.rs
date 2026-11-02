@@ -155,12 +155,15 @@ fn front_and_concave_arc_built_without_refusal() {
     r.unwrap();
     let bb = brep_bounding_box(&k, &b, true).unwrap();
     assert!(
-        (bb.min_at(1) + 6.544244339992678e-3).abs() < 1e-9,
+        // 6.544244339992678e-3 with the front round's cylinder on the solved stations; on
+        // its exact spine (#2405) the corner patch moves 8.1e-7
+        (bb.min_at(1) + 6.543433008971893e-3).abs() < 1e-9,
         "min y {}",
         bb.min_at(1)
     );
     let v = volume(&k, &mut b);
-    assert!((v - 9402.870799856591).abs() < 1e-6, "volume {v}");
+    // 9402.870799856591 with the front round on the solved stations (#2405)
+    assert!((v - 9402.870802612037).abs() < 1e-6, "volume {v}");
     assert!(check_brep(&mut k, &mut b, CheckLevel::Level2)
         .unwrap()
         .is_valid());
