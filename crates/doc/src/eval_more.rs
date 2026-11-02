@@ -684,7 +684,7 @@ pub(super) fn sheet_eval(
             tag_flanges(sh, n0, f.id);
             rebuild_sheet(st, i)
         }
-        FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body } => {
+        FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body, sketch, profiles } => {
             // Without a body name the field goes on the newest sheet, as the command's own body lookup does.
             let i = match body {
                 Some(_) => sheet_for(st, body, None)?,
@@ -706,8 +706,18 @@ pub(super) fn sheet_eval(
                     "perforation needs diameter > 0, pitch > diameter and margin >= 0 (diameter {d}, pitch {pitch}, margin {margin})"
                 )));
             }
+            // The outline sketch's profiles, where they lie on the sheet now.
+            let outline = match sketch {
+                Some(sk) => {
+                    let ss = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk}")))?;
+                    let regions = select_profiles(ss, profiles.as_ref().unwrap_or(&ProfileSel::All))?;
+                    let sh = st.sheets.get(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
+                    Some(sh.perforation_outline(&ss.plane, &regions)?)
+                }
+                None => None,
+            };
             let sh = st.sheets.get_mut(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
-            sh.perforations.push(crate::sheet::SheetPerforation { feature: f.id, diameter: d, pitch, margin, square, from_right: false });
+            sh.perforations.push(crate::sheet::SheetPerforation { feature: f.id, diameter: d, pitch, margin, square, from_right: false, outline });
             Ok(())
         }
         FeatureKind::SheetHem { edges, length, gap, flip, body } => {

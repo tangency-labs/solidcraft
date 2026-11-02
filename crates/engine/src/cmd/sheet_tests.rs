@@ -5215,6 +5215,102 @@ fn perforate_supports_a_square_pattern_and_refuses_impossible_values() {
     }
 }
 
+/// The hole centres `staggered_count` counts, over the box (x0, y0)..(x1, y1).
+fn staggered_centres(x0: f64, y0: f64, x1: f64, y1: f64, d: f64, pitch: f64, margin: f64) -> Vec<(f64, f64)> {
+    let (clear, dy) = (d / 2.0 + margin, pitch * 3f64.sqrt() / 2.0);
+    let mut out = Vec::new();
+    let mut row = 0;
+    while y0 + clear + row as f64 * dy <= y1 - clear + 1e-9 {
+        let mut x = x0 + clear + if row % 2 == 1 { pitch / 2.0 } else { 0.0 };
+        while x <= x1 - clear + 1e-9 {
+            out.push((x, y0 + clear + row as f64 * dy));
+            x += pitch;
+        }
+        row += 1;
+    }
+    out
+}
+
+/// A 100 x 60 x 0.8 sheet with a sketch on its face: a 50 x 30 rectangle at (10, 10) with a Ø10 circle at (35, 25).
+fn sheet_with_a_field_outline(s: &mut Session) {
+    outline_blank(s, json!([[0, 0], [100, 0], [100, 60], [0, 60]]));
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Field"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [60, 40]}));
+    run(s, "sketch.circle.center", json!({"center": [35, 25], "radius": 5}));
+    run(s, "sketch.finish", json!({}));
+}
+
+/// #732: a sketch bounds the field. The ring of the rectangle less the circle takes Rv 1.0-1.5 only inside it, margin
+/// clear of both its loops, on the grid from the outline's lower-left corner; an edit without a sketch keeps it.
+#[test]
+fn perforation_outline_bounds_the_field_and_keeps_out_its_inner_loops() {
+    let mut s = Session::default();
+    sheet_with_a_field_outline(&mut s);
+    let made =
+        run(&mut s, "sheet.perforate", json!({"diameter": "1", "pitch": "1.5", "margin": "1", "sketch": "Field", "profiles": [{"point": [15, 15]}]}));
+    let expected: Vec<(f64, f64)> =
+        staggered_centres(10.0, 10.0, 60.0, 40.0, 1.0, 1.5, 1.0).into_iter().filter(|&(x, y)| (x - 35.0).hypot(y - 25.0) >= 6.5).collect();
+    assert_eq!(flat(&mut s)["perforations"][0]["count"].as_u64(), Some(expected.len() as u64));
+    let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
+    let holes = perforation_circles(&dxf);
+    assert_eq!(holes.len(), expected.len());
+    assert!((holes[0].0 - 11.5).abs() < 1e-9 && (holes[0].1 - 11.5).abs() < 1e-9, "first hole at the outline's corner: {:?}", holes[0]);
+    assert!(holes.iter().all(|&(x, y, _)| (11.5 - 1e-9..=58.5 + 1e-9).contains(&x) && (11.5 - 1e-9..=38.5 + 1e-9).contains(&y)));
+    assert!(holes.iter().all(|&(x, y, _)| (x - 35.0).hypot(y - 25.0) >= 6.5 - 1e-9), "no hole in or near the inner loop");
+    let n = holes.len();
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": made["feature"], "command": "sheet.perforate", "params": {"diameter": "1", "pitch": "1.5", "margin": "1"}}),
+    );
+    assert_eq!(flat(&mut s)["perforations"][0]["count"].as_u64(), Some(n as u64), "the edit keeps the outline");
+}
+
+/// #732: on a folded sheet the outline goes through the panel its sketch lies on and stops there: an outline that
+/// reaches past the bend puts no hole in the flange. A sketch on no face of the sheet is refused.
+#[test]
+fn perforation_outline_on_a_folded_sheet_stays_in_its_panel() {
+    let mut s = Session::default();
+    outline_blank(&mut s, json!([[0, 0], [100, 0], [100, 60], [0, 60]]));
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 0.8]], "height": 20}));
+    for (name, z) in [("Top", 0.8), ("Above", 10.0)] {
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, z], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": name}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-50, -50], "p1": [150, 110]}));
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    run(&mut s, "sheet.perforate", json!({"diameter": "1", "pitch": "1.5", "margin": "1", "sketch": "Top"}));
+    let zone = &flat(&mut s)["bend_zones"][0]; // [min x, max x, min y, max y] of the bend zone, flat coordinates
+    let top = zone[3].as_f64().unwrap_or(f64::NAN);
+    let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
+    let holes = perforation_circles(&dxf);
+    assert!(!holes.is_empty());
+    assert!(holes.iter().all(|&(_, y, r)| y - r - 1.0 >= top - 1e-9), "every hole is in the base, beyond the bend zone's y {top}");
+    let refused = s.execute("sheet.perforate", &json!({"diameter": "1", "pitch": "1.5", "sketch": "Above"}));
+    assert!(refused.is_err_and(|e| e.to_string().contains("must lie on a face of the sheet")));
+}
+
+/// #732: a mirrored copy's bounded field is the mirror image of its source's.
+#[test]
+fn a_mirrored_sheet_copy_mirrors_its_perforation_outline() {
+    let mut s = Session::default();
+    sheet_with_a_field_outline(&mut s);
+    run(&mut s, "sheet.perforate", json!({"diameter": "1", "pitch": "1.5", "margin": "1", "sketch": "Field", "profiles": [{"point": [15, 15]}]}));
+    run(&mut s, "solid.mirror", json!({"bodies": ["Body1"], "plane": "YZ"}));
+    let holes = |s: &mut Session, body: &str, sx: f64| -> Vec<(i64, i64)> {
+        let dxf = run(s, "sheet.export_dxf", json!({"body": body}))["dxf"].as_str().unwrap_or_default().to_string();
+        let c = perforation_circles(&dxf);
+        // Relative to the field's own lower-left hole, x scaled by sx, rounded to 1e-6 mm.
+        let x0 = c.iter().map(|h| h.0 * sx).fold(f64::INFINITY, f64::min);
+        let y0 = c.iter().map(|h| h.1).fold(f64::INFINITY, f64::min);
+        let mut v: Vec<(i64, i64)> = c.iter().map(|h| (((h.0 * sx - x0) * 1e6).round() as i64, ((h.1 - y0) * 1e6).round() as i64)).collect();
+        v.sort_unstable();
+        v
+    };
+    let original = holes(&mut s, "Body1", -1.0);
+    assert!(!original.is_empty());
+    assert_eq!(holes(&mut s, "Body1 (2)", 1.0), original);
+}
+
 /// A 100 x 60 tray with one 45° flange 40 high on its y = 0 edge (2.5 mm, R 2.5, K 0.44), and on
 /// it a return 10 high when asked. Returns the far edge of the last panel in the flat pattern:
 /// the base starts at the setback s = (t + R)·tan 22.5°, each bend's zone is (π/4)·(R + K·t) long,
