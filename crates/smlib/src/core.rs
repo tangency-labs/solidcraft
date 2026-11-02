@@ -379,7 +379,8 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_blend_corner = true;
     f.fillet_exact_arc_sections = true;
     f.fillet_exact_arc_spans = true;
-    f.fillet_refuse_rounds_breaking_through = true;
+    // Held back: see `HELD_BACK`.
+    f.fillet_refuse_rounds_breaking_through = false;
     f
 }
 
@@ -388,8 +389,17 @@ pub(crate) fn fixes() -> UpstreamFixes {
 /// without the flag, or a large slowdown. Differing from the C++ kernel is no such evidence: a fix
 /// the fork doesn't have stays on, and where solidcore builds what SMLib refuses, a result right
 /// against its closed form is a win.
+///
+/// `fillet_refuse_rounds_breaking_through` (WR-707, solidcore#2311): sound geometry refused. With it
+/// on, 11 rig cases that pass with it off, each graded against its closed form or invariants, are
+/// refused as breaking through the part (190-fillet-disc-rim-past-its-2mm-wall fails status 1001
+/// instead): every-hole-top-rim-r12-past-plate-bottom, 1080-chamfer-runs-into-openings-cut-by-them
+/// (3350, its closed form), 1080-fillet-notched-block-top-outline-r8,
+/// 324-fillet-over-hole-cut-by-overlong-cylinder, 324-fillet-over-hole-overlap,
+/// 5158-fillet-adjacent-plate-edges-as-thick-as-plate and the sloped and equal-slope basin rims of
+/// #1080 and #5835. A fix under the same flag is in progress on solidcore.
 #[cfg(test)]
-const HELD_BACK: &[&str] = &[];
+const HELD_BACK: &[&str] = &["fillet_refuse_rounds_breaking_through"];
 
 fn fresh() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
