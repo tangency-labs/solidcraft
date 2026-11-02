@@ -128,7 +128,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(concat!("p0, p1: overall ends, width", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.point", "Point", draw_point).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", dimension).at("SKETCH", "CREATE").icon("dimension").key("D").enabled(in_sketch).params(
-        "entities: [refs] (a line midpoint is \"mid:line_id\"; a model edge or vertex, {edge: [x,y,z], body?} or {vertex: [x,y,z], body?}, is projected into the sketch first and measured there: a point against the projected edge measures the distance to it), type?: auto|distance|horizontal|distance_x|vertical|distance_y|length|radius|diameter|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"; also `#name = expression`), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points, two midpoints or a line off the axes: with auto, text_at inside the box they span (as opposite corners) or in its outer corners is the distance between them, above or below the box horizontal, beside it vertical. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A point and a circle or arc: the distance from the point to its edge (or how far within it a point inside lies). Two circles or arcs: the gap between their edges (or how far they overlap when they cross, or the narrowest gap between them when one lies inside the other), or the centre-to-centre distance when they are the two caps of a slot. An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends true): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales about its origin to the value instead of distorting. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
+        "entities: [refs] (3D sketch geometry too, #10608: a drawn 3D line for its length, two 3D points such as \"w1.start\" for their distance, with type distance_x / distance_y / distance_z for the run along an axis, two drawn 3D lines for the angle between them, a drawn 3D arc for its radius; driven and value work as below; a line midpoint is \"mid:line_id\"; a model edge or vertex, {edge: [x,y,z], body?} or {vertex: [x,y,z], body?}, is projected into the sketch first and measured there: a point against the projected edge measures the distance to it), type?: auto|distance|horizontal|distance_x|vertical|distance_y|length|radius|diameter|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"; also `#name = expression`), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points, two midpoints or a line off the axes: with auto, text_at inside the box they span (as opposite corners) or in its outer corners is the distance between them, above or below the box horizontal, beside it vertical. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A point and a circle or arc: the distance from the point to its edge (or how far within it a point inside lies). Two circles or arcs: the gap between their edges (or how far they overlap when they cross, or the narrowest gap between them when one lies inside the other), or the centre-to-centre distance when they are the two caps of a slot. An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends true): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales about its origin to the value instead of distorting. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
     ),
     CommandSpec::new("sketch.constraint.horizontal_vertical", "Horizontal/Vertical", c_horizontal_vertical)
         .at("SKETCH", "CONSTRAINTS")
@@ -290,7 +290,7 @@ pub(super) fn edit_solved<T>(
     let stored = sk.driving_values();
     // The constraints the sketch has before the edit: a conflict message must not name one the
     // edit itself adds (the trial already holds it under the id it would get, #9735).
-    let pre: Vec<String> = sk.constraints.iter().map(|c| c.id.clone()).collect();
+    let pre: Vec<String> = sk.constraints.iter().map(|c| c.id.clone()).chain(sk.wire_constraints.iter().map(|c| c.id.clone())).collect();
     let (out, left) = f(&mut sk, &mut doc)?;
     // A curve that took an offset spline's generated node (drawn from its end) gets its own point there.
     sk.detach_offset_points()?;
@@ -2238,6 +2238,9 @@ fn c_horizontal_vertical(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constraint.coincident";
+    if let Some(reply) = super::sketch_3d::coincident_3d(s, p, cmd)? {
+        return Ok(reply);
+    }
     let p = &super::sketch_project::project_operands(s, p, cmd, &["a", "b"])?;
     // Already tied (e.g. connected when it was drawn there): nothing to add.
     let sk = sketch_store::read(&s.doc, sketch_store::target(s, p, cmd)?)?;
@@ -2724,6 +2727,9 @@ fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
     if refs.is_empty() {
         return Err(bad(cmd, "`entity` or `entities` must name sketch points or curves"));
     }
+    if let Some(reply) = super::sketch_3d::fix_3d(s, p, cmd, &refs, want)? {
+        return Ok(reply);
+    }
     let (n, info) = edit(s, p, cmd, false, |sk, _| {
         // Points and curves; a point is fixed by a Fix constraint, a curve by its flag (which
         // also holds its radius). Projected geometry is always fixed.
@@ -2782,6 +2788,9 @@ pub(super) fn line_pts(sk: &Sketch, l: usize) -> Option<(Vec2, Vec2)> {
 
 fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.dimension";
+    if let Some(reply) = super::sketch_3d::dimension_3d(s, p, cmd)? {
+        return Ok(reply);
+    }
     // A dimension may measure model geometry (#7912): an `{edge: [x,y,z], body?}` or a
     // `{vertex: [x,y,z], body?}` among its entities is projected into the sketch first, as
     // `sketch.project` does, and stands for the projected curve (or point) there.
@@ -3370,6 +3379,8 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
                 points.push(q);
             } else if sk.constraints.iter().any(|c| &c.id == id) {
                 cons.push(id.clone());
+            } else if sk.remove_wire_constraints(std::slice::from_ref(id)) > 0 {
+                // A 3D constraint (#10608): gone, nothing else to do.
             } else if sk.wire_index(id).is_some() {
                 sk.remove_wires(std::slice::from_ref(id));
             } else if sk.link(id).is_some() {
