@@ -874,6 +874,9 @@ thread_local! {
     static APART: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// Set while a union runs with a bore narrowed off a common cylinder (no second round).
     static BORES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The mesh step of the boolean whose tool is being nudged, taken by the boolean of the
+    /// nudged tool (see [`boolean_whole_with`]).
+    static NUDGE_STEP: std::cell::Cell<Option<f64>> = const { std::cell::Cell::new(None) };
     /// The intersections left to the booleans running under [`with_attempt_budget`], if any.
     static ATTEMPTS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
 }
@@ -949,6 +952,51 @@ fn boolean_untimed(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
         crate::tangent_cylinders::boolean(a, b, op, &boolean_whole).unwrap_or_else(|| Err(KernelError::Failed("no split of faces helps".into())))
     };
     boolean_via(a, b, op, &split).or(r)
+}
+
+/// Whether either body has a free-form face (not a plane, cylinder, cone or sphere) and
+/// an edge of one lies in the plane of a planar face of the other (see [`boolean_whole_with`]).
+/// Bounded: past a few thousand edge and face pairs, false.
+fn freeform_edge_on_plane(a: &Body, b: &Body, size: f64) -> bool {
+    guard("edge on plane", || {
+        use truck_meshalgo::prelude::TrySubs;
+        use truck_modeling::BoundedCurve;
+        let tol = (size * 1e-5).max(1e-7);
+        let freeform = |x: &Body| x.solid.face_iter().any(|f| crate::offset::surf_of(f, tol).is_none());
+        if !freeform(a) && !freeform(b) {
+            return Ok(false);
+        }
+        let planes = |x: &Body| -> Vec<(Vec3, f64)> {
+            x.solid
+                .face_iter()
+                .filter_map(|f| {
+                    let mt::Surface::Plane(p) = f.oriented_surface() else { return None };
+                    let n = p.normal();
+                    let n = Vec3::new(n.x, n.y, n.z).normalized()?;
+                    Some((n, n.dot(from_p3(p.origin()))))
+                })
+                .collect()
+        };
+        let on = |planes: &[(Vec3, f64)], x: &Body| {
+            let edges: Vec<_> = x.solid.boundaries().iter().flat_map(|s| s.edge_iter()).collect();
+            if planes.len().saturating_mul(edges.len()) > 4096 {
+                return false;
+            }
+            let near = tol * 1e-2;
+            edges.iter().any(|e| {
+                let c = e.curve();
+                let (t0, t1) = c.range_tuple();
+                let Some(pts) = (0..=8).map(|k| c.try_subs(t0 + (t1 - t0) * f64::from(k) / 8.0).map(from_p3)).collect::<Option<Vec<Vec3>>>() else {
+                    return false;
+                };
+                // An edge of some length, not a point.
+                let long = pts.first().is_some_and(|q| pts.iter().any(|p| (*p - *q).len() > tol));
+                long && planes.iter().any(|(n, d)| pts.iter().all(|p| (n.dot(*p) - d).abs() <= near))
+            })
+        };
+        Ok(on(&planes(a), b) || on(&planes(b), a))
+    })
+    .unwrap_or(false)
 }
 
 /// A conical cutter meeting a body with an earlier conical cut needs finer tracing at
@@ -1320,7 +1368,12 @@ where
     // refined: a round side trimmed to a thin band (a short boss crossing a gently sloping
     // floor) is otherwise spanned by triangles cutting through it, which reads as missing
     // material.
-    let mut tol_m = (size * 5e-4).min(meeting_size(a, b) * 2e-3).max(size * 1e-5);
+    // A nudged tool (the last resort below) meets the target where the tool did, give or take
+    // the hair it was moved by: its booleans mesh at the step measured for the tool. Measured
+    // again, that hair is a meeting box a few millionths of the size thick, and the nudged
+    // boolean meshed both bodies at the finest step (a coil flush with a cylinder's ends, #3088).
+    let nudge_step = NUDGE_STEP.with(|c| c.take());
+    let mut tol_m = nudge_step.unwrap_or_else(|| (size * 5e-4).min(meeting_size(a, b) * 2e-3).max(size * 1e-5));
     // A prism pair (a plate and the tool through it) is decided exactly in 2D, with no mesh of
     // either operand. The sampled shortcuts below need a refined mesh of both, and that mesh is
     // most of what a boolean costs: a pattern or a multi-profile sketch rebuilds the whole
@@ -1353,7 +1406,7 @@ where
     let refined = match &meshes {
         // A meeting box only a few steps thick is the tessellation error of bodies that merely
         // touch or miss each other: a finer mesh there cannot help and only slows the operation.
-        (Some(ma), Some(mb)) => {
+        (Some(ma), Some(mb)) if nudge_step.is_none() => {
             let meet = mesh_meeting_size(ma, mb);
             (meet > tol_m * 8.0).then(|| (size * 5e-4).min(meet * 2e-3).max(size * 1e-5))
         }
@@ -1556,6 +1609,8 @@ where
         }
     }
     let mut empty_votes = 0;
+    // The tries on the operands as they lie that failed outright (no solid at all).
+    let mut failed_at_rest = 0;
     let mut empty_diagnostics = crate::BooleanDiagnostics::default();
     let keep: Vec<Vec<Vec3>> = a.split_keep().iter().chain(b.split_keep()).cloned().collect();
     // The tolerances below follow the larger body. Where the bodies meet in a region much
@@ -1683,6 +1738,13 @@ where
             merge(empty_diagnostics);
             return Ok(None);
         }
+        // Free-form walls with an edge lying in a plane of the other body (a coil whose ends sit
+        // flush on a cylinder's end faces, #3088): both tries as they lie fail on that contact,
+        // and the shifted copies below move both bodies, so they meet it again, at seconds a
+        // try on such walls. The nudge after them moves the tool off it and is asked at once.
+        if attempt == 1 && failed_at_rest == 2 && !APART.with(|c| c.get()) && freeform_edge_on_plane(a, b, size) {
+            break;
+        }
         let shift = mt::Vector3::new(j[0], j[1], j[2]) * (size * 0.01);
         for k in [2e-3, 5e-4] {
             let tol = (size * k).max(1e-5);
@@ -1723,7 +1785,10 @@ where
                     }
                     Err(e) => last = e.to_string(),
                 },
-                Err(e) => last = e.to_string(),
+                Err(e) => {
+                    failed_at_rest += usize::from(attempt == 0);
+                    last = e.to_string();
+                }
             }
         }
         if empty_votes >= 2 && op != BoolOp::Union {
@@ -1775,6 +1840,14 @@ where
         let translation = |screw: usize| SCREWS.get(screw).map_or(Vec3::ZERO, |s| Vec3::new(s.0[0], s.0[1], s.0[2]) * (size * 2e-6));
         let nudge = |screw: usize, sign: f64| {
             let axis = SCREWS.get(screw).map_or(Vec3::Z, |s| Vec3::new(s.1[0], s.1[1], s.1[2]));
+            /// Puts back the step of an enclosing nudge however the boolean ends.
+            struct Step(Option<f64>);
+            impl Drop for Step {
+                fn drop(&mut self) {
+                    NUDGE_STEP.with(|c| c.set(self.0));
+                }
+            }
+            let _step = Step(NUDGE_STEP.with(|c| c.replace(Some(tol_m))));
             capture_boolean_diagnostics(|| {
                 transform(b, translation(screw) * sign, c, axis, 2e-6 * sign).and_then(|nb| Ok(boolean(a, &nb, op)?.map(|r| nudged(r, &nb, &counts))))
             })
