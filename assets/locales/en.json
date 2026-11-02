@@ -2157,6 +2157,8 @@
   "prefs.bottom_centre": "Bottom center",
   "prefs.bottom_right": "Bottom right",
   "prefs.browser": "Browser",
+  "prefs.browser_components_open": "Components start open",
+  "prefs.browser_components_open_note": "Every component in the browser starts open, as before, instead of closed until you open it.",
   "prefs.browser_eye_left": "Eye next to the fold arrow",
   "prefs.browser_eye_left_note": "Browser rows show their show/hide eye next to the fold arrow, as before, instead of in a column at the right end of the rows.",
   "prefs.browser_reveal_on_hover": "Reveal on hover",

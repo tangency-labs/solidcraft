@@ -2157,6 +2157,8 @@
   "prefs.bottom_centre": "Giữa phía dưới",
   "prefs.bottom_right": "Góc dưới bên phải",
   "prefs.browser": "Cây thư mục",
+  "prefs.browser_components_open": "Thành phần mở sẵn",
+  "prefs.browser_components_open_note": "Mọi thành phần trong trình duyệt đều mở sẵn như trước, thay vì đóng cho đến khi bạn mở.",
   "prefs.browser_eye_left": "Biểu tượng mắt cạnh mũi tên thu gọn",
   "prefs.browser_eye_left_note": "Các hàng trong cây thư mục hiển thị biểu tượng mắt bật/tắt cạnh mũi tên thu gọn như trước đây, thay vì trong một cột ở đầu bên phải của các hàng.",
   "prefs.browser_reveal_on_hover": "Hiện khi di chuột",

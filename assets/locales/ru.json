@@ -2100,6 +2100,8 @@
   "prefs.bodies_folders_several": "Только если тел несколько",
   "prefs.bottom": "Снизу",
   "prefs.browser": "Браузер",
+  "prefs.browser_components_open": "Компоненты развёрнуты с начала",
+  "prefs.browser_components_open_note": "Каждый компонент в браузере сразу развёрнут, как раньше, а не свёрнут, пока вы его не развернёте.",
   "prefs.browser_eye_left": "Глаз рядом со стрелкой свёртывания",
   "prefs.browser_eye_left_note": "Строки браузера показывают глаз показа/скрытия рядом со стрелкой свёртывания, как раньше, а не в столбце на правом конце строк.",
   "prefs.browser_reveal_on_hover": "Появляется при наведении",

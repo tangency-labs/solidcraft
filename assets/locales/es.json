@@ -1871,6 +1871,8 @@
   "prefs.bottom_centre": "Centro abajo",
   "prefs.bottom_right": "Derecha abajo",
   "prefs.browser": "Explorador",
+  "prefs.browser_components_open": "Componentes abiertos al inicio",
+  "prefs.browser_components_open_note": "Cada componente del explorador empieza abierto, como antes, en lugar de cerrado hasta que lo abras.",
   "prefs.browser_eye_left": "Ojo junto a la flecha de plegado",
   "prefs.browser_eye_left_note": "Las filas del explorador muestran su ojo de mostrar/ocultar junto a la flecha de plegado, como antes, en lugar de",
   "prefs.browser_reveal_on_hover": "Mostrar al pasar el puntero",

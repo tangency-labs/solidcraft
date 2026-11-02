@@ -2119,6 +2119,8 @@
   "prefs.bottom_centre": "Bas centre",
   "prefs.bottom_right": "Bas droite",
   "prefs.browser": "Navigateur",
+  "prefs.browser_components_open": "Composants dépliés au départ",
+  "prefs.browser_components_open_note": "Chaque composant du navigateur commence déplié, comme avant, au lieu de rester replié jusqu'à ce que vous le dépliiez.",
   "prefs.browser_eye_left": "Œil à côté de la flèche de dépliage",
   "prefs.browser_eye_left_note": "Les lignes du navigateur affichent leur œil d'affichage et de masquage à côté de la flèche de dépliage, comme avant, au lieu d'une colonne à l'extrémité droite des lignes.",
   "prefs.browser_reveal_on_hover": "Révéler au survol",

@@ -1219,6 +1219,8 @@
   "prefs.axis": "Eixo",
   "prefs.bottom": "Embaixo",
   "prefs.browser": "Navegador",
+  "prefs.browser_components_open": "Componentes começam abertos",
+  "prefs.browser_components_open_note": "Cada componente no navegador começa aberto, como antes, em vez de fechado até que você o abra.",
   "prefs.built_in": "Integrado",
   "prefs.button_left": "Arrastar com o esquerdo",
   "prefs.button_middle": "Arrastar com o meio",

@@ -2157,6 +2157,8 @@
   "prefs.bottom_centre": "למטה במרכז",
   "prefs.bottom_right": "למטה מימין",
   "prefs.browser": "עץ התכן",
+  "prefs.browser_components_open": "רכיבים פתוחים מההתחלה",
+  "prefs.browser_components_open_note": "כל רכיב בעץ התכן מתחיל פתוח, כמו קודם, במקום סגור עד שתפתח אותו.",
   "prefs.browser_eye_left": "סמל העין ליד חץ הקיפול",
   "prefs.browser_eye_left_note": "שורות עץ התכן מציגות את סמל העין ליד חץ הקיפול, כמו קודם, במקום בעמודה בקצה הימני של השורות.",
   "prefs.browser_reveal_on_hover": "הצגה בריחוף",

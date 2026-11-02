@@ -1549,6 +1549,8 @@
   "prefs.bottom_centre": "하단 가운데",
   "prefs.bottom_right": "오른쪽 아래",
   "prefs.browser": "브라우저",
+  "prefs.browser_components_open": "구성요소를 펼친 상태로 시작",
+  "prefs.browser_components_open_note": "브라우저의 모든 구성요소가 이전처럼 펼쳐진 상태로 시작합니다. 끄면 직접 펼칠 때까지 접혀 있습니다.",
   "prefs.browser_eye_left": "표시 아이콘을 접기 화살표 옆에 표시",
   "prefs.browser_eye_left_note": "브라우저 행의 표시 아이콘을 행 오른쪽 끝의 열이 아니라 이전처럼 접기 화살표 옆에 표시합니다.",
   "prefs.built_in": "기본 제공",

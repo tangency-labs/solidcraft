@@ -2121,6 +2121,8 @@
   "prefs.bottom_centre": "In basso al centro",
   "prefs.bottom_right": "In basso a destra",
   "prefs.browser": "Struttura",
+  "prefs.browser_components_open": "Componenti aperti all'inizio",
+  "prefs.browser_components_open_note": "Ogni componente nel browser inizia aperto, come prima, invece che chiuso finché non lo apri.",
   "prefs.browser_eye_left": "Occhio accanto alla freccia di espansione",
   "prefs.browser_eye_left_note": "Le righe della Struttura mostrano l'occhio mostra/nascondi accanto alla freccia di espansione, come prima, invece che in una colonna all'estremità destra delle righe.",
   "prefs.browser_reveal_on_hover": "Mostra al passaggio del puntatore",

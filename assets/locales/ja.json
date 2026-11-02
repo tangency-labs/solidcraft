@@ -2157,6 +2157,8 @@
   "prefs.bottom_centre": "下中央",
   "prefs.bottom_right": "右下",
   "prefs.browser": "ブラウザー",
+  "prefs.browser_components_open": "コンポーネントを最初から展開",
+  "prefs.browser_components_open_note": "ブラウザーのすべてのコンポーネントを以前と同じく最初から展開して表示します。オフの場合は展開するまで折りたたまれています。",
   "prefs.browser_eye_left": "表示切り替えを折りたたみ矢印の隣に表示",
   "prefs.browser_eye_left_note": "ブラウザーの各行の表示切り替えを、行の右端の列ではなく、以前のように折りたたみ矢印の隣に表示します。",
   "prefs.browser_reveal_on_hover": "ホバーで表示",

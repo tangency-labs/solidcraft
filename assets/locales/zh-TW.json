@@ -2123,6 +2123,8 @@
   "prefs.bottom_centre": "下方置中",
   "prefs.bottom_right": "右下方",
   "prefs.browser": "瀏覽器",
+  "prefs.browser_components_open": "元件初始展開",
+  "prefs.browser_components_open_note": "瀏覽器中的每個元件都像以前一樣初始展開，而不是在您展開前保持摺疊。",
   "prefs.browser_eye_left": "眼睛圖示置於摺疊箭頭旁",
   "prefs.browser_eye_left_note": "瀏覽器各列會照舊把顯示/隱藏的眼睛圖示放在摺疊箭頭旁，而不是放在各列右端的一欄中。",
   "prefs.browser_reveal_on_hover": "游標移上時顯示",

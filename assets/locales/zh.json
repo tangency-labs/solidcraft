@@ -2157,6 +2157,8 @@
   "prefs.bottom_centre": "底部居中",
   "prefs.bottom_right": "右下角",
   "prefs.browser": "浏览器",
+  "prefs.browser_components_open": "组件初始展开",
+  "prefs.browser_components_open_note": "浏览器中的每个组件都像以前一样初始展开，而不是在您展开前保持折叠。",
   "prefs.browser_eye_left": "显示切换位于折叠箭头旁",
   "prefs.browser_eye_left_note": "浏览器各行的显示切换像以前一样位于折叠箭头旁，而不是在行右端的一列中。",
   "prefs.browser_reveal_on_hover": "悬停时显示",

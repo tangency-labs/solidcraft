@@ -2154,6 +2154,8 @@
   "prefs.bottom_centre": "Unten mittig",
   "prefs.bottom_right": "Unten rechts",
   "prefs.browser": "Browser",
+  "prefs.browser_components_open": "Komponenten zu Beginn aufgeklappt",
+  "prefs.browser_components_open_note": "Jede Komponente im Browser ist wie bisher von Anfang an aufgeklappt, statt zugeklappt zu bleiben, bis du sie aufklappst.",
   "prefs.browser_eye_left": "Auge neben dem Aufklapppfeil",
   "prefs.browser_eye_left_note": "Browserzeilen zeigen ihr Auge zum Ein- und Ausblenden wie bisher neben dem Aufklapppfeil statt in einer Spalte am rechten Zeilenende.",
   "prefs.browser_reveal_on_hover": "Beim Überfahren einblenden",
