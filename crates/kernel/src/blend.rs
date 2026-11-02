@@ -441,6 +441,9 @@ fn blend_geometry(
         concave: bool,
         /// How far along the edge the section reaches from the end vertex.
         reach: f64,
+        /// The side face (`i1` or `i2`) running on past the vertex into a rounded face: it keeps its
+        /// edge there and takes a new one from the vertex to its rail's end, in the end face.
+        run_on: Option<usize>,
     }
     let mut ends: Vec<End> = Vec::new();
     for (v, p) in [(&v0, p0), (&v1, p1)] {
@@ -451,6 +454,35 @@ fn blend_geometry(
             let (f, gf) = (faces.get(fi)?, faces.get(g)?);
             f.edge_iter().find(|e| e.id() != edge.id() && (e.front() == v || e.back() == v) && gf.edge_iter().any(|x| x.id() == e.id()))
         };
+        // A side face running on past the vertex, tangent into a rounded face (a flat top turning
+        // into a bar's rounded end, #3369): the edge between them continues the blended edge, and
+        // the rounded face touches the end only along it. The end face is the other face there,
+        // which the other side meets; the face running on takes a short edge in it, from the
+        // vertex to its rail's end. Only on a convex edge, where the material runs on behind
+        // the end face round the section.
+        let run_on: Option<(usize, usize)> = (side < 0.0 && others.len() == 2)
+            .then(|| {
+                let normal_at = |i: usize| faces.get(i).and_then(|f| crate::curveblend::project(f, p, None)).map(|x| x.1);
+                [(i1, i2), (i2, i1)].into_iter().find_map(|(k, j)| {
+                    others.iter().copied().find_map(|h| {
+                        let g = others.iter().copied().find(|g| *g != h)?;
+                        let e = shared(k, h)?;
+                        let along = (vtx(e.front()) - vtx(e.back())).normalized()?;
+                        let tangent = normal_at(k).zip(normal_at(h)).is_some_and(|(nk, nh)| nk.dot(nh) > 1.0 - 1e-6);
+                        (matches!(e.curve(), mt::Curve::Line(_))
+                            && along.dot(d).abs() > 1.0 - 1e-9
+                            && tangent
+                            && shared(j, h).is_none()
+                            && shared(k, g).is_none()
+                            && shared(j, g).is_some()
+                            && faces.get(g).and_then(|f| plane_normal(f)).is_some())
+                        .then_some((k, h))
+                    })
+                })
+            })
+            .flatten();
+        let others: Vec<usize> = others.into_iter().filter(|g| run_on.is_none_or(|(_, h)| *g != h)).collect();
+        let run_on = run_on.map(|(k, _)| k);
         // One curved surface in several faces round the vertex (a cylinder a boolean left in
         // pieces meeting there): the end face is that surface, its pieces' seams cut back.
         let one_surface = others.len() >= 2 && same_surface(faces, &others, (size * 1e-5).max(1e-6));
@@ -725,6 +757,7 @@ fn blend_geometry(
                 seams: seams.into_iter().map(|(e, q, _)| (e, q)).collect(),
                 concave,
                 reach: far,
+                run_on: None,
             });
             continue;
         }
@@ -739,12 +772,27 @@ fn blend_geometry(
         // Slide a point of the cross-section through `p` along d onto the end plane through p.
         let slide = |x: Vec3, n: Vec3| x - d * (n.dot(x - p) / n.dot(d));
         let (a, b) = (slide(p + t1 * s, na), slide(p + t2 * s, nb));
+        // The side face running on keeps its edge at the vertex; its short edge to the rail's end
+        // must stay inside it.
+        let side_edge = |fi: usize, g: usize| {
+            if run_on == Some(fi) {
+                faces.get(fi)?.edge_iter().find(|e| e.id() != edge.id() && (e.front() == v || e.back() == v))
+            } else {
+                shared(fi, g)
+            }
+        };
         let (e1, e2) = (
-            shared(i1, ga).ok_or_else(|| unsupported("unexpected corner topology"))?,
-            shared(i2, gb).ok_or_else(|| unsupported("unexpected corner topology"))?,
+            side_edge(i1, ga).ok_or_else(|| unsupported("unexpected corner topology"))?,
+            side_edge(i2, gb).ok_or_else(|| unsupported("unexpected corner topology"))?,
         );
         let mut consumed: [Option<mt::Vertex>; 2] = [None, None];
         for (k, (e, q, fi)) in [(&e1, a, i1), (&e2, b, i2)].into_iter().enumerate() {
+            if run_on == Some(fi) {
+                if !faces.get(fi).is_some_and(|f| extension_fits(f, p, q, tol)) {
+                    return Err(too_large("the blend is larger than the neighbouring faces"));
+                }
+                continue;
+            }
             if !matches!(e.curve(), mt::Curve::Line(_)) {
                 return Err(unsupported("the edges at the corners must be straight"));
             }
@@ -812,6 +860,7 @@ fn blend_geometry(
                     seams: Vec::new(),
                     concave: false,
                     reach: 0.0,
+                    run_on: None,
                 });
                 continue;
             }
@@ -849,6 +898,7 @@ fn blend_geometry(
             seams: Vec::new(),
             concave: false,
             reach: 0.0,
+            run_on,
         });
     }
     let [end0, end1] = &ends[..] else { return Err(KernelError::Failed("ends".into())) };
@@ -916,6 +966,7 @@ fn blend_geometry(
     #[allow(clippy::type_complexity)]
     let mut corners: Vec<(mt::Vertex, mt::Vertex, Vec<mt::Edge>, Option<mt::Vertex>, Vec<mt::Vertex>, Vec<mt::Edge>)> = Vec::new();
     let on_tol = (size * 1e-5).max(1e-6);
+    let mut stubs: Vec<(usize, mt::Edge)> = Vec::new();
     for (end, p) in [(end0, p0), (end1, p1)] {
         let (va, vb) = (vertex(&end.ca, end.a), vertex(&end.cb, end.b));
         let (sa, sb) = (p + t1 * s, p + t2 * s);
@@ -955,6 +1006,11 @@ fn blend_geometry(
             let far = if end.e2.absolute_front() == &end.v { end.e2.absolute_back().clone() } else { end.e2.absolute_front().clone() };
             extra.push(retarget(&end.e2, &far, &vb, on_tol)?);
         }
+        // The side face running on: its new edge from the vertex to its rail's end, in the end face.
+        if let Some(fi) = end.run_on {
+            stubs.push((fi, builder::line(&end.v, if fi == i1 { &va } else { &vb })));
+            extra.extend(stubs.last().map(|x| x.1.clone()));
+        }
         corners.push((va, vb, chain, vq, seam_vs, extra));
     }
     let [(a0, b0, c0, q0, s0, x0), (a1, b1, c1, q1, s1, x1)] = &corners[..] else { return Err(KernelError::Failed("ends".into())) };
@@ -973,7 +1029,10 @@ fn blend_geometry(
         for ((e, _), nv) in end.seams.iter().zip(sv) {
             subst.insert(e.id(), shorten(e, &end.v, nv)?);
         }
-        for (e, nv, used) in [(&end.e1, a, &end.ca), (&end.e2, b, &end.cb)] {
+        for (e, nv, used, fi) in [(&end.e1, a, &end.ca, i1), (&end.e2, b, &end.cb, i2)] {
+            if end.run_on == Some(fi) {
+                continue;
+            }
             if used.is_some() {
                 dropped.push(e.id());
                 continue;
@@ -984,6 +1043,7 @@ fn blend_geometry(
             subst.insert(e3.id(), shorten(e3, &end.v, q)?);
         }
     }
+    let stubs_of = |fi: usize| stubs.iter().filter(|x| x.0 == fi).map(|x| x.1.clone()).collect::<Vec<_>>();
     // The side edges at the ends are pieces of themselves; the rails and corner curves are new.
     let mut rec = Rebuild::default();
     rec.pieces(&subst);
@@ -995,11 +1055,11 @@ fn blend_geometry(
         let nf = if i == i1 {
             let mut m = subst.clone();
             m.insert(edge.id(), la.clone());
-            rebuild_face_dropping(f, &m, &dropped, &[])?
+            rebuild_face_dropping(f, &m, &dropped, &stubs_of(i1))?
         } else if i == i2 {
             let mut m = subst.clone();
             m.insert(edge.id(), lb.clone());
-            rebuild_face_dropping(f, &m, &dropped, &[])?
+            rebuild_face_dropping(f, &m, &dropped, &stubs_of(i2))?
         } else if end0.g.contains(&i) {
             rebuild_face_dropping(f, &subst, &dropped, &link0)?
         } else if end1.g.contains(&i) {
@@ -2616,7 +2676,7 @@ fn chamfer_tool_sides(cur: &Body, p: Vec3, s: f64, sides: Option<(ChamferSide, b
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
 
     #[test]
     fn g2_fillet_has_zero_curvature_at_both_planar_rails() {
@@ -3063,6 +3123,43 @@ mod tests {
             let added = vol(&out) - v0;
             assert!((added - area * len).abs() < area * len * 0.01, "{added} vs {}", area * len);
         }
+    }
+
+    #[test]
+    fn a_blend_ends_on_a_slot_wall_where_its_face_runs_on_into_a_round() {
+        // #3369: a slot cut across a stadium bar's rounded end. The edge between the flat top and
+        // the slot floor ends on the slot's walls, where the top also runs on, tangent, into the
+        // rounded end: the blend stops at each wall, the top beside it untouched.
+        use std::f64::consts::PI;
+        let stadium = Loop2 {
+            segs: vec![
+                Seg2::Line { a: Vec2::new(0.0, -9.5), b: Vec2::new(25.0, -9.5) },
+                Seg2::Arc { center: Vec2::new(25.0, 0.0), radius: 9.5, start: -PI / 2.0, sweep: PI },
+                Seg2::Line { a: Vec2::new(25.0, 9.5), b: Vec2::new(0.0, 9.5) },
+                Seg2::Arc { center: Vec2::ZERO, radius: 9.5, start: PI / 2.0, sweep: PI },
+            ],
+        };
+        let bar = crate::build::extrude(&Plane::YZ, &[Region2 { outer: stadium, holes: vec![] }], 0.0, 14.0).unwrap().remove(0);
+        let slot = crate::build::box_solid(Vec3::new(3.5, -12.0, -10.0), Vec3::new(9.5, 0.0, 10.0)).unwrap();
+        let body = crate::ops::boolean(&bar, &slot, crate::BoolOp::Cut).unwrap().unwrap();
+        let vol = |b: &Body| b.tessellate(1e-4).unwrap().measure().volume;
+        let v0 = vol(&body);
+        for (shape, area) in [(Shape::Round, (1.0 - PI / 4.0) * 4.0), (Shape::Flat, 2.0)] {
+            let out = blend(&body, &[Vec3::new(6.5, 0.0, 9.5)], 2.0, shape, "blend").unwrap();
+            assert!(out.validity().is_empty(), "{:?}", out.validity());
+            assert_eq!(out.lumps().unwrap().len(), 1);
+            // Each wall takes the section: the blend is the only new face.
+            assert_eq!(out.face_count(), body.face_count() + 1);
+            assert!(crate::tess::boundaries_on_surfaces(&out.solid, 1e-4));
+            // The section along the 6 mm between the walls, square to both.
+            let removed = v0 - vol(&out);
+            assert!((removed - area * 6.0).abs() < area * 6.0 * 1e-3, "{removed} vs {}", area * 6.0);
+        }
+        // G2: the quintic section's area, 113/756 of the setback squared.
+        let out = fillet_g2(&body, &[Vec3::new(6.5, 0.0, 9.5)], 2.0).unwrap();
+        assert!(out.validity().is_empty(), "{:?}", out.validity());
+        let (removed, want) = (v0 - vol(&out), 113.0 / 756.0 * 4.0 * 6.0);
+        assert!((removed - want).abs() < want * 1e-3, "{removed} vs {want}");
     }
 
     #[test]
