@@ -99,7 +99,9 @@ The first request on a connection must carry the token as a top-level `"token"` 
 (`{"id": 1, "method": "ui.inspect", "params": {}, "token": "…"}`); later requests on the same
 connection may leave it out. A first line without the right token is answered with
 `{"ok": false, "error": "unauthorized: …"}` and the connection is closed, without running
-anything. Tokens are compared in constant time.
+anything. Tokens are compared in constant time. A connection that hasn't sent that first request
+within five seconds is closed without a reply, and blank lines don't extend the time. So connect
+when you have something to send; once authenticated, a connection may stay idle.
 
 `solidcraft-cli mcp --connect 127.0.0.1:PORT` reads the token file for that port by itself
 (`--token T` or `SOLIDCRAFT_CONTROL_TOKEN` give one explicitly). For a test harness, or a
