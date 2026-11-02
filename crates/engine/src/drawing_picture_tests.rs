@@ -106,6 +106,36 @@ fn alpha(grid: &PixelGrid, rows: &[u8], x_mm: f64, y_mm: f64) -> u8 {
     rows[(y * grid.width as usize + x) * 4 + 3]
 }
 
+/// The limit bounds the whole view, not each request: a writer's bands add up, the next one is
+/// refused by name before it paints, and another view's count is its own.
+#[test]
+fn a_views_requests_add_up_to_its_limit() {
+    let (s, sheet, id) = notched("1:1");
+    let d = s.drawing("test").unwrap().clone();
+    let built = crate::drawing_scene::build(&s, &d, sheet).unwrap();
+    let group = built.scene.groups.iter().find(|g| g.object == id).unwrap();
+    let Some(Item::Picture(picture)) = group.items.first() else { panic!("{:?}", group.items) };
+    let grid = picture.grid(300.0).unwrap();
+    let band = |y0: u32, y1: u32| GridWindow { x0: 0, y0, x1: grid.width, y1 };
+    let middle = grid.height / 2;
+    let counted = |window: GridWindow| {
+        let pictures = ViewPictures::new(&s, &d, sheet).unwrap();
+        pictures.rows(id, &grid, window).unwrap();
+        pictures.spent[&id].get()
+    };
+    let (top, bottom) = (counted(band(0, middle)), counted(band(middle, grid.height)));
+    assert!(top > 0 && bottom > 0, "{top} {bottom}");
+
+    let limited = |max_pixel_tests: u64| ViewPictures { max_pixel_tests, ..ViewPictures::new(&s, &d, sheet).unwrap() };
+    let exact = limited(top + bottom);
+    exact.rows(id, &grid, band(0, middle)).unwrap();
+    exact.rows(id, &grid, band(middle, grid.height)).unwrap();
+    let under = limited(top + bottom - 1);
+    under.rows(id, &grid, band(0, middle)).unwrap();
+    let why = under.rows(id, &grid, band(middle, grid.height)).unwrap_err();
+    assert!(why.contains(&format!("exceed {} pixel tests", top + bottom - 1)) && why.contains(&ids::encode(id)), "{why}");
+}
+
 /// The picture lands on the view's lines: its rectangle is the view's boundary at either scale and
 /// on a sheet position that isn't round, to 1e-9 mm, and its pixels show the notch at the top right
 /// and not the top left.

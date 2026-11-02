@@ -12,7 +12,7 @@
 //! their pixels for a writer: placed by the [`solidcraft_geom::drawing_view::ViewFrame`] that placed
 //! the lines. Nothing is kept between exports yet: each renders again.
 
-use std::cell::OnceCell;
+use std::cell::{Cell, OnceCell};
 use std::collections::BTreeMap;
 
 use solidcraft_doc::drawing::Drawing;
@@ -21,7 +21,9 @@ use solidcraft_geom::Aabb2;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::paper::{Item, Picture, Pictures};
 use solidcraft_geom::pixel_grid::{GridWindow, PixelGrid};
-use solidcraft_render::job::{BodyRole, CancelToken, OrthoFrame, PicturePoll, PictureRequest, PictureTask, PixelWindow, Projection, Supersample};
+use solidcraft_render::job::{
+    BodyRole, CancelToken, MAX_PICTURE_PIXEL_TESTS, OrthoFrame, PicturePoll, PictureRequest, PictureTask, PixelWindow, Projection, Supersample,
+};
 use solidcraft_render::{ProductScene, VisualStyle};
 
 use crate::drawing_view::{ShownSet, Styles};
@@ -103,13 +105,17 @@ pub struct ViewPictures<'a> {
     pictures: BTreeMap<u64, ViewPicture>,
     /// Every body the design places, read the first time a writer asks.
     scene: OnceCell<std::result::Result<ProductScene, String>>,
+    /// The pixel tests each view's requests have counted: a writer asks for a picture a band at a
+    /// time, and this is what bounds the whole view.
+    spent: BTreeMap<u64, Cell<u64>>,
+    max_pixel_tests: u64,
 }
 
 impl<'a> ViewPictures<'a> {
     /// The pictures of the views on sheet `sheet` of `d`, each placed as its lines are. With nothing
     /// to show, a view is a placeholder and has none.
     pub fn new(s: &'a Session, d: &Drawing, sheet: u64) -> Result<ViewPictures<'a>> {
-        let mut pictures = BTreeMap::new();
+        let (mut pictures, mut spent) = (BTreeMap::new(), BTreeMap::new());
         if let Ok(set) = crate::drawing_view::shown(s) {
             for (id, view, centre) in crate::drawing_scene::views_on(d, sheet)? {
                 let parts = view_parts(&set, Styles::from(&view));
@@ -117,6 +123,7 @@ impl<'a> ViewPictures<'a> {
                 let frame = ortho(&crate::drawing_view::frame(view.basis, view.scale.value, &extents.model, centre, CMD)?);
                 let count = parts.len();
                 for (i, parts) in parts.into_iter().enumerate() {
+                    spent.entry(id).or_default();
                     let picture = ViewPicture { view: id, frame, parts };
                     if pictures.insert(source(id, i, count), picture).is_some() {
                         return Err(bad(CMD, format!("view {}: its picture's number is another's", ids::encode(id))));
@@ -124,7 +131,7 @@ impl<'a> ViewPictures<'a> {
                 }
             }
         }
-        Ok(ViewPictures { session: s, pictures, scene: OnceCell::new() })
+        Ok(ViewPictures { session: s, pictures, scene: OnceCell::new(), spent, max_pixel_tests: MAX_PICTURE_PIXEL_TESTS })
     }
 
     /// Whether `source` is one of these pictures.
@@ -161,6 +168,11 @@ impl Pictures for ViewPictures<'_> {
         };
         let scene = ProductScene { meshes, bounds: whole.bounds };
         let mut task = PictureTask::new(scene, request, CancelToken::default()).map_err(|e| named(e.to_string()))?;
+        let spent = self.spent.get(&picture.view).ok_or_else(|| named("no count for its view".into()))?;
+        spent.set(spent.get().saturating_add(task.projected_pixel_tests()));
+        if spent.get() > self.max_pixel_tests {
+            return Err(named(format!("its shaded pictures exceed {} pixel tests; reduce its scale or what it shows", self.max_pixel_tests)));
+        }
         let width = (window.x1 - window.x0) as usize;
         let mut pixels = vec![0; width * (window.y1 - window.y0) as usize * 4];
         loop {
