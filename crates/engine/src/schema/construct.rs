@@ -175,6 +175,18 @@ pub struct PlaneTwoEdgesParams {
     pub common: PlaneCommon,
 }
 
+/// Add a construction plane containing an axis and a point off that axis.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PlaneAxisPointParams {
+    /// An origin axis, construction axis, straight edge or sketch line reference.
+    pub axis: GeoRefParam,
+    /// A vertex, sketch point, construction point or fixed point, not on the axis.
+    pub point: GeoRefParam,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: PlaneCommon,
+}
+
 /// Add a construction plane through three points.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]

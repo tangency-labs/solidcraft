@@ -543,6 +543,32 @@ fn configuration_add_column_menu_filters_as_typed_and_resets_on_close() {
 }
 
 #[test]
+fn a_rule_says_why_then_lists_only_the_tables_columns() {
+    // A rule drives or restricts a column of the table only, so Then leaves out a parameter or a
+    // feature without one, where When lists them all: a note says so and how to add one (#10532).
+    let parameters = "Only parameters with a column in the table are listed. Add one with Add Column (+) to use it here.";
+    let features = "Only features with a Suppress column in the table are listed. Add one with Add Column (+) to drive it here.";
+    let mut h = fixture();
+    h.app.run("parameters.add", json!({"name":"depth","expression":"5 mm"})).unwrap();
+    h.app.run("config.configure", json!({"params":["width"]})).unwrap();
+    h.app.start("config.table");
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"dialog:section:Add or edit rule"}})).unwrap();
+    h.frames(3);
+    assert!(h.widget(parameters).is_some(), "depth has no column, so Drive parameter says why it is not listed");
+    h.step(&json!({"click":{"handle":"dialog:Then"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Then:Drive suppression"}})).unwrap();
+    h.frames(3);
+    assert!(h.widget(features).is_some(), "no feature has a Suppress column, so the empty list says why");
+    assert!(h.widget(parameters).is_none(), "the parameter note belongs to the parameter effects");
+    for feature in h.app.session.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>() {
+        h.app.run("config.column", json!({"feature": feature})).unwrap();
+    }
+    h.frames(3);
+    assert!(h.widget(features).is_none(), "with a column for every feature, all are listed and the note goes");
+}
+
+#[test]
 fn draft_bins_do_not_delete_saved_rows_named_new() {
     for command in ["parameters.change", "config.table"] {
         let mut h = fixture();

@@ -282,6 +282,7 @@ pub(crate) struct Panel<'a> {
     cancel: &'a str,
     reset_scroll: bool,
     joined: Option<super::DockEdges>,
+    grow_key: Option<egui::Id>,
 }
 
 pub(crate) struct WorkspaceOptions<'a> {
@@ -600,6 +601,7 @@ impl<'a> Panel<'a> {
             cancel: "Cancel",
             reset_scroll: false,
             joined: None,
+            grow_key: None,
         }
     }
 
@@ -618,6 +620,13 @@ impl<'a> Panel<'a> {
 
     pub(crate) fn width(mut self, width: f32) -> Self {
         self.width = width;
+        self
+    }
+
+    /// The feature card's form measures its labels and publishes the width it needs under
+    /// this key, so the card can widen for the current language (#10620).
+    pub(crate) fn grow_label(mut self, key: egui::Id) -> Self {
+        self.grow_key = Some(key);
         self
     }
 
@@ -670,18 +679,18 @@ impl<'a> Panel<'a> {
         self.joined.map_or(container, |edges| container.joined(edges)).tool_frame(self.frame, right >= self.viewport.right() - 0.5)
     }
 
-    pub(crate) fn window(&self, ctx: &egui::Context) -> egui::Window<'a> {
+    pub(crate) fn window(&self, ctx: &egui::Context) -> super::container::FeatureWindow<'a> {
         self.window_placed(ctx, None)
     }
 
     /// The same window for contents the caller holds to `size` (egui's `fixed_size`); the card
     /// is that plus its frame.
-    pub(crate) fn fixed_window(&self, ctx: &egui::Context, size: egui::Vec2) -> egui::Window<'a> {
+    pub(crate) fn fixed_window(&self, ctx: &egui::Context, size: egui::Vec2) -> super::container::FeatureWindow<'a> {
         let outer = size.x + self.positioned_frame(ctx).total_margin().sum().x;
         self.window_placed(ctx, Some(outer)).fixed_size(size)
     }
 
-    fn window_placed(&self, ctx: &egui::Context, outer_width: Option<f32>) -> egui::Window<'a> {
+    fn window_placed(&self, ctx: &egui::Context, outer_width: Option<f32>) -> super::container::FeatureWindow<'a> {
         let gap = super::Container::new(ctx, super::Surface::Feature).gap();
         let viewport = self.viewport;
         let anchor = self.bounded_anchor(ctx);
@@ -701,7 +710,7 @@ impl<'a> Panel<'a> {
         };
         // Keep drawing safe when even the header/footer cannot fit. egui clips the contents to
         // the remaining viewport; the normal small-height case still keeps both actions visible.
-        super::Container::new(ctx, super::Surface::Feature)
+        let window = super::Container::new(ctx, super::Surface::Feature)
             .window(self.title)
             .id(self.id)
             .title_bar(false)
@@ -720,7 +729,8 @@ impl<'a> Panel<'a> {
             .default_height(0.0)
             .fade_in(false)
             .fade_out(false)
-            .order(egui::Order::Middle)
+            .order(egui::Order::Middle);
+        super::container::FeatureWindow::new(window, self.id, frame)
     }
 
     /// Feature header, scrolling padded body, pinned actions, drag target and compute status.
@@ -758,7 +768,7 @@ impl<'a> Panel<'a> {
         mut collapsed: Option<&mut bool>,
         body: impl FnOnce(&mut Ui) -> ComputeStatus,
     ) -> (bool, super::Action) {
-        super::scope(ui, |ui| {
+        let card = |ui: &mut Ui| {
             let t = Tokens::get();
             let min = ui.cursor().min;
             let band = egui::Rect::from_min_size(min, vec2(ui.available_width(), super::header_height()));
@@ -844,7 +854,11 @@ impl<'a> Panel<'a> {
             );
             super::Container::finish_content(ui, self.positioned_frame(ui.ctx()));
             (close, action)
-        })
+        };
+        match self.grow_key {
+            Some(key) => super::scope_grow(ui, key, card),
+            None => super::scope(ui, card),
+        }
     }
 
     /// Palette composition retains its compact padding and whole-card scrolling on short views.

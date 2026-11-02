@@ -197,6 +197,26 @@ fn chain_with_a_line(on: bool) -> Harness {
     h
 }
 
+/// #10653: Tangent Arc's first click on a line between its ends is refused at once, with the
+/// tool's hint as the error, and picks nothing; a click on the line's end starts the arc.
+#[test]
+fn a_tangent_arc_first_click_off_a_curves_end_is_refused_at_once() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[20,0]],"connect":false,"infer":false})).unwrap();
+    h.app.cam.distance = 120.0;
+    h.settle();
+    h.step(&json!({"start":"sketch.arc.tangent"})).unwrap();
+    click_at(&mut h, [10.0, 0.0]);
+    let refused = h.app.status.as_ref().is_some_and(|s| s.2 && s.0.contains("click the end of a line or arc"));
+    assert!(refused, "{:?}", h.app.status);
+    assert_eq!(h.app.tool.as_ref().map(|t| t.pts.len()), Some(0), "nothing picked");
+    click_at(&mut h, [20.0, 0.0]);
+    click_at(&mut h, [30.0, 10.0]);
+    assert_eq!(curves(&h), 2, "{:?}", h.app.status);
+    assert!(sketch(&h).curves.iter().any(|c| matches!(c.kind, CurveKind::Arc { .. })), "the arc from the line's end");
+}
+
 fn click_at(h: &mut Harness, at: [f64; 2]) {
     h.step(&json!({"move":{"sketch":at}})).unwrap();
     h.frames(2);
@@ -431,9 +451,18 @@ fn undo_takes_back_one_arc_as_it_takes_back_one_segment() {
     h.frames(2);
     assert_eq!(curves(&h), 1, "only the arc goes");
     assert_eq!(sketch(&h).curves.first().map(|c| matches!(c.kind, CurveKind::Line { .. })), Some(true));
-    // As with a line undone mid-chain, the chain's point went with it: the next click is refused
-    // and changes nothing, and Esc ends the chain, leaving the Line tool ready for a new one.
-    click_at(&mut h, [20.0, 20.0]);
+    // The chain goes back to the line's end, still drawing tangent arcs (#10016): the next click
+    // is an arc from there. Esc ends the chain, leaving the Line tool ready for a new one.
+    click_at(&mut h, [10.0, 10.0]);
+    assert_eq!(curves(&h), 2, "{:?}", h.app.status);
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.frames(2);
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.frames(2);
+    assert_eq!(curves(&h), 0);
+    // Past the line too: lines again, from where the chain began.
+    click_at(&mut h, [25.0, 5.0]);
+    assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.line"), "nothing is left to be tangent to");
     assert_eq!(curves(&h), 1, "{:?}", h.app.status);
     h.step(&json!({"key":"Escape"})).unwrap();
     h.frames(2);

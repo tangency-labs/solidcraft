@@ -32,6 +32,17 @@ for the origin plane, the construction feature's numeric ID to select it, or an 
 `{origin: [x,y,z], normal: [x,y,z]}` plane. Existing saved references retain their meaning;
 opening a design does not reinterpret old sketches.
 
+**Plane Through Axis And Point** (Model > Construct) creates a plane containing an
+origin or construction axis, straight model edge or sketch line, and a point off that
+line. Pick the axis first, then a vertex, sketch point or construction point. A point
+on the axis leaves infinitely many possible planes, so choose an off-axis point.
+The plane follows its references when they change and can support a new sketch.
+Scripts use `construct.plane.axis_point`, for example:
+
+```json
+{"axis":{"axis":"Z"},"point":{"point":[10,20,30]},"name":"Fence"}
+```
+
 Curves adapt to the current zoom and display scale. Picking and highlighting use the same
 visible boundary, including small circles at Fit and sketches in rotated components.
 Profile shading follows those curves while preserving holes. Zooming changes the display
@@ -94,7 +105,7 @@ shortcut such as L can start a Midpoint Line; pick the variant you want from the
 change it ([Keyboard shortcuts](shortcuts.md)).
 
 Once a shape's first point is down, value boxes (a line's length and angle, a rectangle's width
-and height, a circle's diameter…) follow the cursor. Typing goes into the first box, Tab moves to
+and height, a circle's diameter, an ellipse's major and minor radius…) follow the cursor. Typing goes into the first box, Tab moves to
 the next and Enter places the shape; each typed value becomes a dimension. A value is an
 expression (`25`, `1 in`, `d1 * 2`), or `width = 20` (also `#width = 20`), which also adds the
 user parameter `width` and dimensions with it, as when [placing a dimension](parameters.md). A
@@ -120,6 +131,20 @@ the direction. Angle expressions can refer to parameters and follow their later 
 Parallel and perpendicular lines ask for a straight sketch line, then a point;
 the reference stays picked so you can place several lines. Right-click clears the current
 points and references; Escape ends the tool.
+
+The horizontal, vertical, parallel and perpendicular tools show a **Length** box beside the
+pointer, which stays empty (infinite) until you type a digit: letters still start other tools.
+With a length, the first click sets the start and a second click the side the segment runs to;
+the angle tool has the Length box beside its Angle box. The segment gets a length dimension
+that follows the typed expression. An empty box keeps the infinite line. The
+**Construction | Normal** switch under the Length box makes such a segment a normal sketch line,
+ready to close a profile; it starts at Construction, is greyed out while the line is infinite
+(an infinite line is always construction), and leaves the Sketch Palette's line type alone.
+
+A command call can cut a horizontal, vertical, angle, parallel or perpendicular construction
+line to a length instead: `length` makes a segment from the point `at`, running towards `near`,
+and adds a length dimension that follows its expression (#10258). With `construction: false` that
+segment is a normal sketch line, ready to close a profile.
 
 Tangents through an external point take a circle or circular arc, the external point, and a
 click choosing the desired preview. A common tangent takes two circles/arcs and a click choosing
@@ -321,6 +346,9 @@ aligned, horizontal, vertical, point-to-line, line-to-circle, point-to-circle, c
 radius, diameter, arc length and angle dimensions. For an arc's length, click the arc and then one of its end points. Each is a parameter
 (`d1`, `d2`, …), so it can hold an expression.
 
+**Concentric** accepts two circles or arcs, or a circle or arc and a sketch point (including the
+origin). Preselect the pair and choose Concentric, or start the tool and pick both, in either order.
+
 Press D, click what you want to measure and type the value: as soon as the click settles the
 dimension (one line, circle or arc, or the second point or line of a distance or angle), its
 value box takes the keyboard with the measured value selected, so typing replaces it. Numbers,
@@ -341,9 +369,9 @@ and the tool stays on for the next dimension. The dimension's text always takes 
 lines take it only away from sketch points and curves, which still start a new dimension.
 
 To have shapes dimensioned as you draw them, turn on **Dimension new shapes** in Preferences ›
-Sketch (it is off by default). Each line, rectangle, circle, arc, slot or polygon you draw then
-gets all its dimensions at the sizes you drew: a line its length and angle, a rectangle its width
-and height, a circle its diameter, and so on. Values you type in the drawing boxes win, and a size
+Sketch (it is off by default). Each line, rectangle, circle, arc, slot, polygon or ellipse you draw
+then gets all its dimensions at the sizes you drew: a line its length and angle, a rectangle its
+width and height, a circle its diameter, an ellipse its major and minor radius, and so on. Values you type in the drawing boxes win, and a size
 the sketch already sets (the angle of a line that snapped horizontal) is left out. The shape and
 its dimensions are one undo step. In scripts, `sketch.draw.dimensioned` takes `"as_drawn": true`.
 

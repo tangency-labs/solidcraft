@@ -624,7 +624,8 @@ fn hole_picks(p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
 /// A point on the cylindrical wall of the hole at `a`, a little in from the picked rim, and the
 /// point on the hole's axis level with it (the same for every pick on one rim).
 fn hole_wall(s: &Session, a: Vec3) -> Option<(Vec3, Vec3)> {
-    let st = s.model.state();
+    // Picks are in world coordinates, including rims on already placed standard parts.
+    let st = s.world_state();
     let dirs = [Vec3::Z * -1.0, Vec3::Z, Vec3::X, Vec3::X * -1.0, Vec3::Y, Vec3::Y * -1.0];
     for step in [0.2, 0.5, 1.0, 2.0] {
         for b in &st.bodies {
@@ -857,6 +858,42 @@ mod tests {
         let (lo, hi) = bbox(&s, "SHCS M8x25");
         assert!((hi.z - 18.0).abs() < 1e-6 && (lo.z + 15.0).abs() < 1e-6, "{lo:?} {hi:?}");
         assert!(s.model.state().threads.iter().any(|t| t.designation == "M8" && (t.pitch - 1.25).abs() < 1e-9));
+    }
+
+    #[test]
+    fn a_screw_seats_on_a_translated_washer() {
+        for z in [11.6, 11.2] {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", json!({"length":60,"width":60,"height":10,"body_name":"Plate"}));
+            run(&mut s, "solid.hole", json!({"position":[19.6,33.948,10],"diameter":8.4}));
+            let washer = run(&mut s, "parts.insert", json!({"family":"washer","size":"M8","at":[23.8,33.948,10]}));
+            let before = s.doc.clone();
+            let undo = s.undo.len();
+            // Both the top bore rim and the wall are world picks on the seated washer (#9648).
+            let screw = run(&mut s, "parts.fastener", json!({"family":"socket_head_cap_screw","size":"M8","length":20,"at":[23.8,33.948,z]}));
+            let joint = s.doc.assembly.joints.iter().find(|j| Some(j.id) == screw["joint"].as_u64()).unwrap();
+            assert_eq!(Some(joint.a.occurrence), washer["occurrence"].as_u64());
+            let (lo, hi) = bbox(&s, "SHCS M8x20");
+            assert!((lo.z + 8.4).abs() < 1e-6 && (hi.z - 19.6).abs() < 1e-6, "{lo:?} {hi:?}");
+            assert!(((lo.x + hi.x) / 2.0 - 19.6).abs() < 1e-6 && ((lo.y + hi.y) / 2.0 - 33.948).abs() < 1e-6, "{lo:?} {hi:?}");
+            assert_eq!(s.undo.len(), undo + 1);
+            run(&mut s, "edit.undo", json!({}));
+            assert_eq!(s.doc, before);
+        }
+    }
+
+    #[test]
+    fn a_screw_seats_on_a_rotated_washer() {
+        let mut s = Session::default();
+        let washer = run(&mut s, "parts.insert", json!({"family":"washer","size":"M8","point":[40,50,60],"direction":[1,0,0]}));
+        run(&mut s, "occurrence.ground", json!({"occurrence":washer["occurrence"],"grounded":true}));
+        let screw = run(&mut s, "parts.insert", json!({"family":"socket_head_cap_screw","size":"M8","length":20,"at":[41.6,54.2,60]}));
+        let joint = s.doc.assembly.joints.iter().find(|j| Some(j.id) == screw["joint"].as_u64()).unwrap();
+        assert_eq!(Some(joint.a.occurrence), washer["occurrence"].as_u64());
+        // The seating face is X = 41.6: the 20 mm shank runs along -X and the 8 mm head along +X.
+        let (lo, hi) = bbox(&s, "SHCS M8x20");
+        assert!(lo.dist(solidcraft_geom::Vec3::new(21.6, 43.5, 53.5)) < 1e-6, "{lo:?}");
+        assert!(hi.dist(solidcraft_geom::Vec3::new(49.6, 56.5, 66.5)) < 1e-6, "{hi:?}");
     }
 
     /// Several holes in one insert: one component placed and seated once per hole, in one undo

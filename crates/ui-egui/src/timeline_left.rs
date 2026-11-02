@@ -268,16 +268,17 @@ pub fn left_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
             return;
         }
         // Held by a dialog, the docked panel stays allocated but empty, so the view keeps its size.
-        let response = Container::new(ui.ctx(), Surface::Panel)
-            .edge("sc_timeline_left", Edge::Left)
-            .exact_size(width)
-            .resizable(false)
-            .frame(Container::new(ui.ctx(), Surface::Panel).edge_frame(t.panel).inner_margin(t.space_4))
-            .show(ui, |ui| {
+        let host = Container::new(ui.ctx(), Surface::Panel);
+        let response = host.show_edge(
+            ui,
+            host.edge("sc_timeline_left", Edge::Left).exact_size(width).resizable(false),
+            host.edge_frame(t.panel).inner_margin(t.space_4),
+            |ui| {
                 if !held {
                     left_timeline(app, ui);
                 }
-            });
+            },
+        );
         app.shell.history = Some(response.response.rect);
         if !held {
             crate::scenario::publish_rect("history:vertical", response.response.rect);

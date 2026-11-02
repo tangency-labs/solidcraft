@@ -9,6 +9,9 @@ mod easyprint;
 #[path = "file_import.rs"]
 pub(crate) mod import;
 
+#[path = "file_open_steps.rs"]
+pub(crate) mod open_steps;
+
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "file_send.rs"]
 mod send;
@@ -58,6 +61,39 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("export")
         .noundo()
         .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10); quality?: standard|fine|finest (STL, OBJ and 3MF: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts)"),
+    // One command per format, so each File › Export item can have a key of its own; started
+    // from a key or command search, the app opens the save picker (the mesh dialog for STL and
+    // 3MF). Each takes `file.export`'s parameters for its format, without `format`.
+    CommandSpec::new("file.export_step", "Export STEP", crate::checked!("file.export_step", export_step))
+        .icon("export")
+        .noundo()
+        .contract(&EXPORT_STEP_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::file::ExportResult>)
+        .params("path; bodies?: [names] (default: every body; a design with components then exports as a STEP assembly) → {path, bytes, format}: STEP, whatever the path's extension"),
+    CommandSpec::new("file.export_stl", "Export STL", crate::checked!("file.export_stl", export_stl))
+        .icon("mesh_export")
+        .noundo()
+        .contract(&EXPORT_STL_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::file::ExportResult>)
+        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard) → {path, bytes, format}: binary STL, whatever the path's extension"),
+    CommandSpec::new("file.export_3mf", "Export 3MF", crate::checked!("file.export_3mf", export_3mf))
+        .icon("mesh_export")
+        .noundo()
+        .contract(&EXPORT_3MF_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::file::ExportResult>)
+        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard); objects?: body|component (as file.export) → {path, bytes, format}: 3MF, whatever the path's extension"),
+    CommandSpec::new("file.export_obj", "Export OBJ", crate::checked!("file.export_obj", export_obj_cmd))
+        .icon("export")
+        .noundo()
+        .contract(&EXPORT_OBJ_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::file::ExportResult>)
+        .params("path; bodies?: [names] (default: every body); quality?: standard|fine|finest (default standard) → {path, bytes, format, files}: OBJ, with the colours of the bodies in a material library (`.mtl`) next to it"),
+    CommandSpec::new("file.export_urdf", "Export URDF", crate::checked!("file.export_urdf", export_urdf_cmd))
+        .icon("export")
+        .noundo()
+        .contract(&EXPORT_URDF_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::file::UrdfExportResult>)
+        .params("path; mesh_prefix?; effort? (default 1000); velocity? (default 10) → {path, format, files, links, joints, warnings}: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md"),
     CommandSpec::new("file.save_mesh", "Save As Mesh", save_mesh)
         .at("INSERT", "FILES")
         .icon("mesh_export")
@@ -85,6 +121,12 @@ fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
     s.user_named = !name.trim().is_empty() && name.trim() != DEFAULT_NAME;
     Ok(json!({"name": name}))
 }
+
+const EXPORT_STEP_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportStepParams> = crate::schema::TypedContract::new();
+const EXPORT_STL_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportMeshParams> = crate::schema::TypedContract::new();
+const EXPORT_3MF_CONTRACT: crate::schema::TypedContract<crate::schema::file::Export3mfParams> = crate::schema::TypedContract::new();
+const EXPORT_OBJ_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportMeshParams> = crate::schema::TypedContract::new();
+const EXPORT_URDF_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportUrdfParams> = crate::schema::TypedContract::new();
 
 fn path_arg<'a>(p: &'a Value, cmd: &str) -> Result<&'a str> {
     str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))
@@ -339,11 +381,29 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let read_only = bool_(p, "read_only").unwrap_or(false);
     // Stamped before it is read: a write while it is being read is a change too.
     let disk = solidcraft_io::design_lock::stamp(path);
+    let (doc, saved) = read_design(s, path)?;
+    opened_design(s, Session::opened_at(doc, saved.as_ref(), Some(path)), path, read_only, disk)
+}
+
+/// Read the design file at `path` for `doc.open`, under its file's name if it has none of its own.
+fn read_design(s: &mut Session, path: &str) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
     let (mut doc, saved) = solidcraft_io::read_design_file(path, s.open_preview.take()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     if let Some(stem) = default_name_for(&doc.name, path) {
         doc.name = stem;
     }
-    s.replace_design(Session::opened_at(doc, saved.as_ref(), Some(path)));
+    Ok((doc, saved))
+}
+
+/// `doc.open` of a design: `opened`, the design read from `path` and evaluated, takes `s`'s
+/// place, and the reply says what it is.
+fn opened_design(
+    s: &mut Session,
+    opened: Session,
+    path: &str,
+    read_only: bool,
+    disk: Option<solidcraft_io::design_lock::FileStamp>,
+) -> Result<Value> {
+    s.replace_design(opened);
     s.disk = disk;
     s.read_only = read_only;
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
@@ -475,7 +535,12 @@ impl Session {
     /// them. Absolute in-memory targets survive Save As, undo, redo and recovery unchanged.
     pub fn opened_at(mut doc: Document, saved: Option<&solidcraft_doc::SavedModel>, path: Option<&str>) -> Self {
         super::component_link::resolve_design_links(&mut doc, path);
-        let mut session = Self::opened(doc, saved);
+        Self::opened(doc, saved).located(path)
+    }
+
+    /// This session, just opened, as the design in the file at `path`.
+    pub(crate) fn located(self, path: Option<&str>) -> Self {
+        let mut session = self;
         session.path = path.map(str::to_owned);
         // A design saved before body names were pinned (#6403) is pinned now, as its first
         // command would pin it: that command pinned them as part of itself, so undoing it went
@@ -674,6 +739,7 @@ fn component_parts(s: &Session) -> Vec<(String, Vec<String>)> {
 
 fn export_to(
     s: &Session,
+    cmd: &str,
     path: &str,
     format: Format,
     bodies: &[String],
@@ -688,7 +754,7 @@ fn export_to(
     // A design with components exports as a STEP assembly; otherwise bodies as placed.
     let bytes = if format == Format::Design {
         if !bodies.is_empty() {
-            return Err(bad("file.export", "design JSON exports the complete document; omit bodies"));
+            return Err(bad(cmd, "design JSON exports the complete document; omit bodies"));
         }
         solidcraft_io::write_design(&s.design())
     } else if format == Format::Step && bodies.is_empty() && !s.doc.occurrences.is_empty() {
@@ -727,11 +793,44 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let path = path_arg(p, cmd)?;
     let format = Format::from_name(str_(p, "format").unwrap_or(path))?;
     if format == Format::Urdf {
-        return export_urdf(s, path, p);
+        if !string_list(cmd, p, "bodies")?.is_empty() {
+            return Err(bad(cmd, "urdf exports the whole assembly; omit bodies"));
+        }
+        return export_urdf(s, cmd, path, p);
     }
     let quality = mesh_quality(p, cmd)?;
     let parts = mesh_parts(s, p, cmd, format)?;
-    export_to(s, path, format, &string_list(cmd, p, "bodies")?, &parts, quality)
+    export_to(s, cmd, path, format, &string_list(cmd, p, "bodies")?, &parts, quality)
+}
+
+fn export_step(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.export_step";
+    let path = path_arg(p, cmd)?;
+    export_to(s, cmd, path, Format::Step, &string_list(cmd, p, "bodies")?, &[], solidcraft_io::MeshQuality::default())
+}
+
+fn export_stl(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.export_stl";
+    let path = path_arg(p, cmd)?;
+    export_to(s, cmd, path, Format::StlBinary, &string_list(cmd, p, "bodies")?, &[], mesh_quality(p, cmd)?)
+}
+
+fn export_3mf(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.export_3mf";
+    let path = path_arg(p, cmd)?;
+    let parts = mesh_parts(s, p, cmd, Format::ThreeMf)?;
+    export_to(s, cmd, path, Format::ThreeMf, &string_list(cmd, p, "bodies")?, &parts, mesh_quality(p, cmd)?)
+}
+
+fn export_obj_cmd(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.export_obj";
+    let path = path_arg(p, cmd)?;
+    export_to(s, cmd, path, Format::Obj, &string_list(cmd, p, "bodies")?, &[], mesh_quality(p, cmd)?)
+}
+
+fn export_urdf_cmd(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.export_urdf";
+    export_urdf(s, cmd, path_arg(p, cmd)?, p)
 }
 
 /// The OBJ export: the mesh file and the material library beside it, with the colours of the
@@ -762,11 +861,7 @@ fn export_obj(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io
 
 /// The assembly as a URDF and its meshes next to it (docs/urdf.md). Every path is checked before
 /// anything is written; the meshes go first and the `.urdf` last.
-fn export_urdf(s: &Session, path: &str, p: &Value) -> Result<Value> {
-    let cmd = "file.export";
-    if !string_list(cmd, p, "bodies")?.is_empty() {
-        return Err(bad(cmd, "urdf exports the whole assembly; omit bodies"));
-    }
+fn export_urdf(s: &Session, cmd: &str, path: &str, p: &Value) -> Result<Value> {
     let positive = |k: &str| match p.get(k) {
         None | Some(Value::Null) => Ok(None),
         Some(_) => num(p, k).filter(|x| *x > 0.0).map(Some).ok_or_else(|| bad(cmd, format!("`{k}` must be a positive number"))),
@@ -861,7 +956,7 @@ fn save_mesh(s: &mut Session, p: &Value) -> Result<Value> {
             },
         );
     }
-    export_to(s, path, format, &string_list(cmd, p, "bodies")?, &parts, quality)
+    export_to(s, cmd, path, format, &string_list(cmd, p, "bodies")?, &parts, quality)
 }
 
 /// The browser build can't start a program.
@@ -1021,6 +1116,43 @@ mod tests {
             assert!(e.contains("`objects` must be body or component"), "{bad}: {e}");
         }
         assert!(!std::path::Path::new(&path("parts.stl")).exists() && !std::path::Path::new(&path("bad.3mf")).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Each format's own export command (one key each in Keyboard Shortcuts) writes that format
+    /// whatever the path's extension, as `file.export` does with `format`, and says so.
+    #[test]
+    fn each_format_has_an_export_command_of_its_own() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-export-per-format-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let at = |n: &str| dir.join(n).to_string_lossy().to_string();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5, "body_name": "Block"})).unwrap();
+        for (cmd, format, signature) in [
+            ("file.export_step", "Step", &b"ISO-10303-21;"[..]),
+            ("file.export_3mf", "ThreeMf", &b"PK"[..]),
+            ("file.export_obj", "Obj", &b""[..]),
+            ("file.export_stl", "StlBinary", &b""[..]),
+        ] {
+            // A name with another format's extension: the command, not the name, picks the format.
+            let path = at(&format!("{format}.txt"));
+            let r = s.execute(cmd, &json!({"path": path})).unwrap();
+            assert_eq!((r["path"].as_str(), r["format"].as_str()), (Some(path.as_str()), Some(format)), "{cmd}: {r}");
+            let bytes = std::fs::read(&path).unwrap();
+            assert_eq!(r["bytes"].as_u64(), Some(bytes.len() as u64), "{cmd}");
+            assert!(bytes.starts_with(signature), "{cmd}");
+        }
+        // The triangles `file.export` writes (the 80-byte header holds the file's name): a box is
+        // 12 triangles, 84 + 50 bytes each.
+        s.execute("file.export", &json!({"path": at("box.stl")})).unwrap();
+        assert_eq!(std::fs::read(at("StlBinary.txt")).unwrap()[80..], std::fs::read(at("box.stl")).unwrap()[80..]);
+        assert_eq!(std::fs::metadata(at("box.stl")).unwrap().len(), 84 + 50 * 12);
+        let obj = std::fs::read_to_string(at("Obj.txt")).unwrap();
+        assert_eq!(obj.lines().filter(|l| l.starts_with("f ")).count(), 12, "{obj}");
+        let r = s.execute("file.export_urdf", &json!({"path": at("robot.urdf")})).unwrap();
+        assert_eq!(r["format"], "Urdf");
+        assert!(std::fs::read_to_string(at("robot.urdf")).unwrap().contains("<robot"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1397,6 +1529,41 @@ mod tests {
         let d = &reopened.model.results[0].boolean_diagnostics;
         assert_eq!(d.events.len(), 1, "{d:?}");
         assert!(d.rejected.is_empty());
+    }
+
+    /// The model a save keeps writes each distinct sheet-metal body once, and every state names
+    /// the records of exactly the sheets it holds (found by the sheet's text, not by building its
+    /// record again for every state, which took most of a large sheet-metal design's save).
+    #[test]
+    fn a_saved_model_writes_each_sheet_once_for_the_states_that_hold_it() {
+        let mut s = Session::new(Document::new("Sheets"));
+        let sheet_rule = json!({"name": "AL2", "thickness": "2 mm", "k_factor": "0.5", "bend_radius": "1 mm", "active": true});
+        s.execute("sheet.manage_rules", &sheet_rule).unwrap();
+        for (i, x) in [0.0, 200.0, 400.0].into_iter().enumerate() {
+            s.execute("sketch.create", &json!({"plane": "XY", "name": format!("Base{i}")})).unwrap();
+            s.execute("sketch.rectangle.two_point", &json!({"p0": [x, 0], "p1": [x + 150.0, 100]})).unwrap();
+            s.execute("sketch.finish", &json!({})).unwrap();
+            s.execute("sheet.flange", &json!({"sketch": format!("Base{i}")})).unwrap();
+            s.execute("sheet.flange", &json!({"edges": [[x + 75.0, 0, 2]], "height": 20})).unwrap();
+        }
+        let saved = saved_geometry(&s, &s.doc).unwrap();
+        let records = &saved.records;
+        let sheets = records["sheets"].as_array().unwrap();
+        let texts: std::collections::HashSet<String> = sheets.iter().map(Value::to_string).collect();
+        assert_eq!(texts.len(), sheets.len(), "each sheet once");
+        let mut held = std::collections::HashSet::new();
+        for (r, feature) in s.model.results.iter().zip(records["features"].as_array().unwrap()) {
+            let state = &records["states"][feature["state"].as_u64().unwrap() as usize];
+            let named = state["sheets"].as_array().unwrap();
+            assert_eq!(named.len(), r.state.sheets.len());
+            for (i, sheet) in named.iter().zip(&r.state.sheets) {
+                let written = &sheets[i.as_u64().unwrap() as usize];
+                assert_eq!(*written, serde_json::to_value(sheet).unwrap(), "{}: the record of its own sheet", r.name);
+                held.insert(written.to_string());
+            }
+        }
+        assert_eq!(held, texts, "every record written is one a state holds");
+        assert!(sheets.len() >= 6, "each part's base, then with its flange: {}", sheets.len());
     }
 
     /// A design whose saved model would give a body back with other topology opens with the
@@ -1852,6 +2019,68 @@ mod tests {
         watch(progress, || stopped.execute("doc.open", &json!({"path":path}))).unwrap();
         assert!(stopped.model.results.iter().all(|r| r.skipped), "no feature was rebuilt after Cancel");
         assert!(stopped.world_state().bodies.is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// #10198: a design opened a feature at a time ([`OpenSteps`]) is the design `doc.open`
+    /// opens: the same features, results, bodies and history marker, with its file and name. Its
+    /// import is offered before the step that evaluates it, and other files are left to `doc.open`.
+    #[test]
+    fn a_design_opened_a_feature_at_a_time_is_the_one_doc_open_opens() {
+        use super::open_steps::OpenSteps;
+        let dir = std::env::temp_dir().join(format!("solidcraft-open-steps-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("steps.sc").to_string_lossy().to_string();
+        let step = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/step-conformance/cylinder_seam.step");
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+        s.execute("file.insert_step", &json!({"path": step})).unwrap();
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        s.execute("solid.box", &json!({"length":5,"width":5,"height":5,"corner":[40,0,0]})).unwrap();
+        s.execute("solid.box", &json!({"length":5,"width":5,"height":5,"corner":[60,0,0]})).unwrap();
+        let features = s.doc.features.len();
+        s.execute("timeline.rollback", &json!({"position": features - 1})).unwrap();
+        s.execute("file.save", &json!({"path": path, "cache": false})).unwrap();
+
+        let mut whole = Session::default();
+        let opened = whole.execute("doc.open", &json!({"path": path, "read_only": true})).unwrap();
+
+        let mut steps = OpenSteps::start(&json!({"path": path, "read_only": true})).unwrap().expect("a design is opened in steps");
+        assert_eq!(steps.path(), path);
+        assert_eq!(steps.progress(), (0, features - 1), "the saved marker is where evaluation stops");
+        let mut imports = 0;
+        let mut n = 0;
+        while !steps.done() {
+            if let Some(text) = steps.next_import() {
+                assert!(text.contains("ISO-10303-21"));
+                imports += 1;
+            }
+            steps.step();
+            n += 1;
+            assert_eq!(steps.progress().0, n);
+        }
+        assert_eq!((imports, n), (1, features - 1));
+        assert!(!steps.step(), "nothing is left to evaluate");
+        let mut stepped = Session::default();
+        let reply = steps.finish(&mut stepped).unwrap();
+
+        assert_eq!(reply, opened);
+        assert_eq!(stepped.doc, whole.doc);
+        assert_eq!(stepped.doc.marker, Some(features - 1));
+        assert_eq!((stepped.path.as_deref(), stepped.read_only), (Some(path.as_str()), true));
+        let summary = |s: &Session| -> Vec<(u64, bool, bool)> { s.model.results.iter().map(|r| (r.id, r.skipped, r.error.is_some())).collect() };
+        assert_eq!(summary(&stepped), summary(&whole));
+        let bodies =
+            |s: &Session| -> Vec<(String, usize)> { s.world_state().bodies.iter().map(|b| (b.name.clone(), b.mesh().triangles.len())).collect() };
+        assert_eq!(bodies(&stepped), bodies(&whole));
+        assert_eq!(stepped.world_state().bodies.len(), 3, "the box, the cylinder and the box before the marker");
+        assert!(stepped.model.is_current(&stepped.doc));
+
+        // Other files, and STEP-only options, are opened by `doc.open`.
+        for p in [json!({"path": step}), json!({"path": "part.stl"}), json!({"path": path, "up": "y"}), json!({})] {
+            assert!(OpenSteps::start(&p).unwrap().is_none(), "{p}");
+        }
+        assert!(OpenSteps::start(&json!({"path": dir.join("missing.sc").to_string_lossy()})).is_err());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

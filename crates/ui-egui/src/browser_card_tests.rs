@@ -43,6 +43,27 @@ fn clicked_browser_folders_toggle_visibility_with_v() {
     }
 }
 
+/// #10526: New Group from the root's context menu in a design with no bodies yet makes a group
+/// the Browser shows, and a body made later can be dropped into it.
+#[test]
+fn a_new_group_in_a_folder_with_nothing_in_it_yet_shows() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.settle();
+    assert!(handle_at("row:Bodies").is_none(), "no bodies, no Bodies folder");
+    // What the root's New Group item runs.
+    group_action(&mut h.app, "ui.newGroup", &json!({"component": 0}));
+    h.settle();
+    let group = h.app.session.doc.browser_groups.first().map(|g| (g.id, g.name.clone())).expect("New Group makes a group");
+    assert!(handle_at(&format!("row:{} (0)", group.1)).is_some(), "the new group shows in the Browser");
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"operation":"new_body","body_name":"One"})).unwrap();
+    h.settle();
+    h.step(&json!({"drag":[{"handle":"row:One"},{"handle":format!("row:{} (0)", group.1)}]})).unwrap();
+    h.settle();
+    let items = h.app.session.doc.browser_group(group.0).map(|g| g.items.len()).unwrap_or(0);
+    assert_eq!(items, 1, "the body went into the group");
+}
+
 /// #10005: F2 on a group picked in the Browser opens its Rename box, as for other rows, and the
 /// typed name renames the group, at the top level and inside a component; a body selected
 /// alongside does not take the rename from the clicked group.
@@ -981,4 +1002,23 @@ fn eye_drag_from_the_origin_is_its_own_undo_step_and_leaves_an_earlier_show_alon
     assert!(origin_hidden(&h), "the Origin's eye is not an undo step: it keeps what the drag set");
     h.app.run("edit.undo", json!({})).unwrap();
     assert!(body_hidden(&h, "One"), "the show is its own undo step: undoing it hides One again");
+}
+
+/// #9953: hiding or showing a sketch or body dynamically dims/undims the row without needing a full row rebuild.
+#[test]
+fn hiding_or_showing_body_or_sketch_updates_row_dimming() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"One"})).unwrap();
+    h.app.run("browser.expand_all", json!({})).unwrap();
+    h.settle();
+
+    // Toggle body hidden via eye click
+    h.step(&json!({"click":{"handle":"eye:One"}})).unwrap();
+    h.settle();
+    assert!(body_hidden(&h, "One"));
+
+    // Toggle body shown again via eye click
+    h.step(&json!({"click":{"handle":"eye:One"}})).unwrap();
+    h.settle();
+    assert!(!body_hidden(&h, "One"));
 }

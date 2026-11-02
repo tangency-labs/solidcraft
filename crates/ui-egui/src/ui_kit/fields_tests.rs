@@ -123,6 +123,363 @@ fn searchable_dropdown_filters_selects_and_accepts_custom_values() {
 }
 
 #[test]
+fn search_picker_filters_focuses_picks_and_takes_custom_values() {
+    let ctx = crate::fonts::test_context();
+    let picked = std::cell::RefCell::new(Vec::new());
+    let custom = std::cell::Cell::new(true);
+    let enabled = std::cell::Cell::new(true);
+    let choices = [
+        SearchChoice { value: "a/one", label: "One", tip: "The first model", group: None },
+        SearchChoice { value: "b/two", label: "Two", tip: "The second model", group: Some("Group") },
+        SearchChoice { value: "b/three", label: "Three", tip: "", group: Some("Group") },
+    ];
+    let draw = |ui: &mut Ui| {
+        row(ui, "Model", |ui| {
+            let shown = search_picker(
+                ui,
+                SearchPicker {
+                    id: "search_picker_test",
+                    handles: "test:model",
+                    current: "One",
+                    current_value: "a/one",
+                    hint: "Search models…",
+                    choices: &choices,
+                    custom: custom.get(),
+                    note: Some("Listing models…"),
+                    open_group: None,
+                    enabled: enabled.get(),
+                },
+            );
+            picked.borrow_mut().extend(shown.inner);
+        });
+    };
+    let open = || {
+        let at = scenario::handle_at("test:model").unwrap();
+        frame(&ctx, pointer(at, true), draw);
+        frame(&ctx, pointer(at, false), draw);
+        frame(&ctx, vec![], draw);
+    };
+    let click = |name: &str| {
+        let at = scenario::handle_at(name).unwrap_or_else(|| panic!("no {name}"));
+        frame(&ctx, pointer(at, true), draw);
+        frame(&ctx, pointer(at, false), draw);
+        frame(&ctx, vec![], draw);
+    };
+    let typing = |text: &str| {
+        frame(&ctx, vec![egui::Event::Text(text.into())], draw);
+        frame(&ctx, vec![], draw);
+    };
+    let is_open = || scenario::handle_at("test:model:search").is_some();
+    frame(&ctx, vec![], draw);
+    assert!(!is_open() && scenario::handle_at("test:model:a/one").is_none(), "closed: only the control");
+
+    // Opening focuses the box: what is typed filters over labels, tips and values.
+    open();
+    assert!(is_open());
+    assert!(ctx.memory(|m| m.has_focus(egui::Id::new("search_picker_test").with("search"))), "the box has the focus");
+    for row in ["a/one", "b/two", "b/three"] {
+        assert!(scenario::handle_at(&format!("test:model:{row}")).is_some(), "{row}");
+    }
+    assert!(scenario::handle_at("test:model:custom").is_none(), "nothing typed, nothing to use");
+    typing("SECOND");
+    assert!(scenario::handle_at("test:model:b/two").is_some(), "a tip is searched, whatever the case");
+    assert!(scenario::handle_at("test:model:a/one").is_none() && scenario::handle_at("test:model:b/three").is_none());
+    assert!(scenario::handle_at("test:model:custom").is_some(), "a substring is no listed value");
+
+    // A click picks the row, closes the popup and forgets the text.
+    click("test:model:b/two");
+    assert_eq!(picked.take(), [Picked::Listed("b/two".into())]);
+    assert!(!is_open());
+    open();
+    assert!(scenario::handle_at("test:model:a/one").is_some(), "the next opening starts unfiltered");
+
+    // A value exactly as listed needs no custom row; a text nothing matches gets one.
+    typing("b/three");
+    assert!(scenario::handle_at("test:model:custom").is_none());
+    assert!(scenario::handle_at("test:model:b/three").is_some());
+    frame(&ctx, key(egui::Key::Escape), draw);
+    frame(&ctx, vec![], draw);
+    assert!(!is_open() && picked.borrow().is_empty(), "Esc closes without a pick");
+    open();
+    typing("  vendor/model:free ");
+    assert!(scenario::handle_at("test:model:a/one").is_none());
+    click("test:model:custom");
+    assert_eq!(picked.take(), [Picked::Custom("vendor/model:free".into())], "trimmed");
+    assert!(!is_open());
+
+    // Enter picks the first row shown; with no match, the typed text.
+    open();
+    typing("t");
+    frame(&ctx, key(egui::Key::Enter), draw);
+    frame(&ctx, vec![], draw);
+    assert_eq!(picked.take(), [Picked::Listed("a/one".into())], "the first row with a t");
+    assert!(!is_open());
+    open();
+    typing("b/");
+    typing("three");
+    frame(&ctx, key(egui::Key::Enter), draw);
+    frame(&ctx, vec![], draw);
+    assert_eq!(picked.take(), [Picked::Listed("b/three".into())]);
+    open();
+    typing("nothing");
+    frame(&ctx, key(egui::Key::Enter), draw);
+    frame(&ctx, vec![], draw);
+    assert_eq!(picked.take(), [Picked::Custom("nothing".into())]);
+
+    // Enter on an empty box leaves the choice as it is.
+    open();
+    frame(&ctx, key(egui::Key::Enter), draw);
+    frame(&ctx, vec![], draw);
+    assert!(picked.borrow().is_empty() && !is_open());
+
+    // Without custom values, a miss offers nothing and Enter keeps the box.
+    custom.set(false);
+    open();
+    typing("nothing");
+    assert!(scenario::handle_at("test:model:custom").is_none());
+    frame(&ctx, key(egui::Key::Enter), draw);
+    frame(&ctx, vec![], draw);
+    assert!(picked.borrow().is_empty() && is_open());
+    typing("!");
+    frame(&ctx, key(egui::Key::Escape), draw);
+    frame(&ctx, vec![], draw);
+    assert!(!is_open());
+
+    // A disabled control does not open.
+    enabled.set(false);
+    open();
+    assert!(!is_open());
+}
+
+/// A long list costs only the rows in view, and a long label neither widens the popup past the
+/// window nor reaches past its edge.
+/// A popup can't grow once it is open, so what appears in it later must fit in the room it opened
+/// with: a custom row above a short list, a list that was empty, a note, and a list again after a
+/// search that matched nothing.
+#[test]
+fn search_picker_keeps_every_row_reachable_as_its_contents_change() {
+    use std::cell::{Cell, RefCell};
+    let ctx = crate::fonts::test_context();
+    let values = RefCell::new(vec!["a/one", "b/two"]);
+    let note: Cell<Option<&str>> = Cell::new(None);
+    let picked = RefCell::new(Vec::new());
+    let frame = |events: Vec<egui::Event>| {
+        scenario::clear_handles();
+        let raw =
+            egui::RawInput { events, screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0))), ..Default::default() };
+        let _ = ctx.run_ui(raw, |ui| {
+            ui.allocate_ui(egui::vec2(160.0, 40.0), |ui| {
+                crate::ui_kit::scope(ui, |ui| {
+                    let values = values.borrow();
+                    let choices: Vec<SearchChoice<'_>> =
+                        values.iter().map(|value| SearchChoice { value, label: value, tip: "", group: None }).collect();
+                    let result = search_picker(
+                        ui,
+                        SearchPicker {
+                            id: "search_picker_room",
+                            handles: "room",
+                            current: "b/two",
+                            current_value: "b/two",
+                            hint: "Search",
+                            choices: &choices,
+                            custom: true,
+                            note: note.get(),
+                            open_group: None,
+                            enabled: true,
+                        },
+                    );
+                    if let Some(pick) = result.inner {
+                        picked.borrow_mut().push(pick);
+                    }
+                });
+            });
+        });
+    };
+    let pointer = |at: egui::Pos2, pressed: bool| {
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
+        ]
+    };
+    let click = |name: &str| {
+        let at = scenario::handle_at(name).unwrap_or_else(|| panic!("no {name}"));
+        frame(pointer(at, true));
+        frame(pointer(at, false));
+        frame(vec![]);
+        frame(vec![]);
+    };
+    let typing = |text: &str| {
+        frame(vec![egui::Event::Text(text.into())]);
+        frame(vec![]);
+        frame(vec![]);
+    };
+    let erase = |times: usize| {
+        for _ in 0..times {
+            frame(vec![egui::Event::Key {
+                key: egui::Key::Backspace,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+            frame(vec![]);
+        }
+        frame(vec![]);
+    };
+    frame(vec![]);
+    frame(vec![]);
+
+    // The custom row appears above the two rows: the row under it can still be clicked.
+    click("room");
+    typing("two");
+    assert!(scenario::handle_at("room:custom").is_some());
+    click("room:b/two");
+    assert_eq!(picked.take(), [Picked::Listed("b/two".into())]);
+
+    // A search that matches nothing leaves no list; taking it back brings the rows, in reach.
+    click("room");
+    typing("zzz");
+    assert!(scenario::handle_at("room:a/one").is_none());
+    frame(vec![]);
+    frame(vec![]);
+    erase(3);
+    click("room:b/two");
+    assert_eq!(picked.take(), [Picked::Listed("b/two".into())]);
+
+    // A list that arrives while it is open, with a long note, stays in reach; the custom row too.
+    values.borrow_mut().clear();
+    note.set(Some("Listing models…"));
+    frame(vec![]);
+    click("room");
+    frame(vec![]);
+    values.borrow_mut().extend(["a/one", "b/two", "c/three", "d/four"]);
+    note.set(Some("A long reason, repeated until it wraps over a few lines of the popup, repeated until it wraps over a few lines of the popup."));
+    frame(vec![]);
+    frame(vec![]);
+    typing("four");
+    click("room:d/four");
+    assert_eq!(picked.take(), [Picked::Listed("d/four".into())]);
+    click("room");
+    typing("nothing");
+    click("room:custom");
+    assert_eq!(picked.take(), [Picked::Custom("nothing".into())]);
+}
+
+#[test]
+fn search_picker_lays_out_the_rows_in_view_inside_a_narrow_window() {
+    let ctx = crate::fonts::test_context();
+    let values: Vec<String> = (0..2000).map(|n| format!("vendor/a-model-with-a-rather-long-name-{n:04}-and-then-some-more-of-it-and-more")).collect();
+    let choices: Vec<SearchChoice<'_>> = values.iter().map(|v| SearchChoice { value: v, label: v, tip: "", group: None }).collect();
+    let draw = |ui: &mut Ui| {
+        ui.allocate_ui(egui::vec2(120.0, 28.0), |ui| {
+            search_picker(
+                ui,
+                SearchPicker {
+                    id: "search_picker_long",
+                    handles: "test:long",
+                    current: "One",
+                    current_value: "",
+                    hint: "",
+                    choices: &choices,
+                    custom: false,
+                    note: None,
+                    open_group: None,
+                    enabled: true,
+                },
+            );
+        });
+    };
+    frame(&ctx, vec![], draw);
+    let at = scenario::handle_at("test:long").unwrap();
+    frame(&ctx, pointer(at, true), draw);
+    frame(&ctx, pointer(at, false), draw);
+    frame(&ctx, vec![], draw);
+    frame(&ctx, vec![], draw);
+    let rows = scenario::handles("test:long:vendor/");
+    assert!(!rows.is_empty() && rows.len() < 30, "{} rows laid out", rows.len());
+    let row = scenario::rect_of("test:long:vendor/a-model-with-a-rather-long-name-0000-and-then-some-more-of-it-and-more").unwrap();
+    assert!(row.left() >= 0.0 && row.right() <= 320.0, "{row:?} reaches past the window");
+    let search = scenario::rect_of("test:long:search").unwrap();
+    assert!(search.left() >= 0.0 && search.right() <= 320.0, "{search:?} reaches past the window");
+}
+
+/// Several groups fold under their headers: at first only the current value's group and the one
+/// asked for are open; a header opens or folds its group; a typed search opens the groups with a
+/// match but one folded by hand; Enter takes the first row shown; a fresh opening forgets the folds.
+#[test]
+fn search_picker_folds_groups_under_their_headers() {
+    let ctx = crate::fonts::test_context();
+    let picked = std::cell::RefCell::new(Vec::new());
+    let open_group = std::cell::Cell::new(None::<&'static str>);
+    let current = std::cell::Cell::new("b1");
+    let choices = [
+        SearchChoice { value: "a1", label: "Alpha one", tip: "", group: Some("A") },
+        SearchChoice { value: "b1", label: "Beta one", tip: "", group: Some("B") },
+        SearchChoice { value: "a2", label: "Alpha two", tip: "", group: Some("A") },
+        SearchChoice { value: "c1", label: "Gamma one", tip: "", group: Some("C") },
+    ];
+    let draw = |ui: &mut Ui| {
+        row(ui, "Model", |ui| {
+            let shown = search_picker(
+                ui,
+                SearchPicker {
+                    id: "search_picker_groups",
+                    handles: "grp",
+                    current: "Beta one",
+                    current_value: current.get(),
+                    hint: "",
+                    choices: &choices,
+                    custom: false,
+                    note: None,
+                    open_group: open_group.get(),
+                    enabled: true,
+                },
+            );
+            picked.borrow_mut().extend(shown.inner);
+        });
+    };
+    let click = |name: &str| {
+        let at = scenario::handle_at(name).unwrap_or_else(|| panic!("no {name}"));
+        frame(&ctx, pointer(at, true), draw);
+        frame(&ctx, pointer(at, false), draw);
+        frame(&ctx, vec![], draw);
+    };
+    let typing = |text: &str| {
+        frame(&ctx, vec![egui::Event::Text(text.into())], draw);
+        frame(&ctx, vec![], draw);
+    };
+    let has = |name: &str| scenario::handle_at(name).is_some();
+    frame(&ctx, vec![], draw);
+    click("grp");
+    assert!(has("grp:group:A") && has("grp:group:B") && has("grp:group:C"), "a header per group");
+    assert!(has("grp:b1") && !has("grp:a1") && !has("grp:c1"), "only the current value's group is open");
+    click("grp:group:A");
+    assert!(has("grp:a1") && has("grp:a2"), "a header opens its group");
+    click("grp:group:A");
+    assert!(!has("grp:a1"), "and folds it again");
+    typing("one");
+    assert!(!has("grp:a1"), "a fold made by hand stays while searching");
+    assert!(has("grp:b1") && has("grp:c1"), "groups with a match open");
+    frame(&ctx, key(egui::Key::Enter), draw);
+    frame(&ctx, vec![], draw);
+    assert_eq!(picked.take(), [Picked::Listed("b1".into())], "Enter takes the first row shown, not one folded away");
+    assert!(!has("grp:search"));
+
+    open_group.set(Some("C"));
+    click("grp");
+    assert!(!has("grp:a1") && has("grp:b1") && has("grp:c1"), "C opens as asked, B as the current value's, A folds");
+    frame(&ctx, key(egui::Key::Escape), draw);
+    frame(&ctx, vec![], draw);
+
+    open_group.set(None);
+    current.set("");
+    click("grp");
+    assert!(has("grp:a1") && has("grp:b1") && has("grp:c1"), "nothing to prefer: every group starts open");
+    frame(&ctx, key(egui::Key::Escape), draw);
+    frame(&ctx, vec![], draw);
+}
+
+#[test]
 fn preference_dropdown_keeps_disabled_choices_inert_and_closes_after_selection() {
     let ctx = crate::fonts::test_context();
     let picked = std::cell::Cell::new(1);
@@ -257,6 +614,30 @@ fn placement_field_keeps_focus_for_owner_validation_on_enter() {
     assert!(value.contains('x'));
 }
 
+/// #10582: an angle typed a key at a time keeps its decimal point when its owner keeps it in
+/// radians, as Edit Canvas does, and so gives back a hair off the value the field set.
+#[test]
+fn an_angle_kept_in_radians_takes_a_typed_decimal_point() {
+    let ctx = crate::fonts::test_context();
+    let mut radians = 0.0_f64;
+    let mut draw = |ui: &mut Ui| {
+        row(ui, "Angle", |ui| {
+            let mut degrees = radians.to_degrees();
+            if angle_field(ui, &mut degrees).changed() {
+                radians = degrees.to_radians();
+            }
+        });
+    };
+    frame(&ctx, vec![], &mut draw);
+    let at = scenario::rect_of("dialog:angle:Angle").expect("the angle field").center();
+    frame(&ctx, pointer(at, true), &mut draw);
+    frame(&ctx, pointer(at, false), &mut draw);
+    for typed in ["-", "3", ".", "7"] {
+        frame(&ctx, vec![egui::Event::Text(typed.into())], &mut draw);
+    }
+    assert!((radians.to_degrees() + 3.7).abs() < 1e-9, "typed -3.7, the angle is {}", radians.to_degrees());
+}
+
 #[test]
 fn bounded_name_editor_keeps_unicode_character_cap() {
     let ctx = crate::fonts::test_context();
@@ -311,6 +692,39 @@ fn count_steps_stay_within_limits_and_keep_expressions() {
     assert_eq!(super::step_count("1e16", 1, &wide), None, "values past what counts can be are refused");
     assert_eq!(super::step_count("5", i64::MAX, &wide).as_deref(), Some("9223372036854775807"), "steps saturate rather than overflow");
     assert_eq!(super::step_count("5", i64::MIN, &wide).as_deref(), Some("-9223372036854775803"));
+}
+
+/// A count's step arrows stand inside the editor, which asks for the text cursor across its
+/// whole rect, so the arrows showed an I-beam and read as part of the text. They are not text:
+/// the pointer over one is the ordinary cursor, whether it can step or not, and the number
+/// beside them is still typed.
+#[test]
+fn count_step_arrows_do_not_take_the_text_cursor() {
+    for value in ["5", "1"] {
+        let ctx = crate::fonts::test_context();
+        let eval = |text: &str| text.trim().parse::<f64>().ok();
+        let mut count = value.to_string();
+        let mut draw = |ui: &mut Ui| {
+            count_row(ui, "Instances", &mut count, &Count { min: 1, max: 10, eval: &eval });
+        };
+        frame(&ctx, vec![], &mut draw);
+        let at = |name: &str| scenario::handle_at(&format!("dialog:Instances {name}")).unwrap_or_else(|| panic!("{name} has a handle"));
+        let (above, below) = (at("up"), at("down"));
+        let field = scenario::rect_of("dialog:widget:Instances").expect("the field has a rect");
+        // The first frame registers the rects; the second reads the cursor they ask for. At 1 the
+        // down arrow is dimmed and the up arrow can still step: neither is text either way.
+        for (pos, which) in [(above, "up"), (below, "down")] {
+            frame_cursor(&ctx, pos, &mut draw);
+            assert_eq!(frame_cursor(&ctx, pos, &mut draw), egui::CursorIcon::Default, "{value}: the {which} arrow");
+        }
+        let text = egui::pos2(field.left() + 2.0, field.center().y);
+        frame_cursor(&ctx, text, &mut draw);
+        assert_eq!(frame_cursor(&ctx, text, &mut draw), egui::CursorIcon::Text, "{value}: the number is still typed");
+        // The enabled arrow still steps when it is clicked.
+        frame(&ctx, pointer(above, true), &mut draw);
+        frame(&ctx, pointer(above, false), &mut draw);
+        assert_eq!(count, if value == "1" { "2" } else { "6" }, "the up arrow steps");
+    }
 }
 
 #[test]

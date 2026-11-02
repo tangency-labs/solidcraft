@@ -1591,8 +1591,8 @@ pub(crate) fn edge_ref_form(e: &Value) -> std::result::Result<EdgeRefForm<'_>, &
     Ok(EdgeRefForm::Index { body, index })
 }
 
-/// Press Pull: a face moves along its normal (an extrude that joins outward or cuts inward); an
-/// edge is rounded (a fillet).
+/// Press Pull: a face moves along its normal (an extrude that joins outward or cuts inward); a
+/// fillet's or chamfer's face changes that feature's size; an edge is rounded (a fillet).
 fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.press_pull";
     let distance = req_expr(cmd, p, "distance")?;
@@ -1604,10 +1604,9 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
     if d.abs() < 1e-9 {
         return Err(bad(cmd, "the distance must not be zero"));
     }
-    // A fillet's or chamfer's face: its size changes by the distance (the feature is edited).
-    if let Some(fp) = vec3(face)
-        && super::face::face_is_planar(s, fp) == Some(false)
-    {
+    // A fillet's or chamfer's face: its size changes by the distance (the feature is edited). A
+    // chamfer's face is flat, so this is asked before whether the face is planar (#4986).
+    if let Some(fp) = vec3(face) {
         let name = solidcraft_doc::naming::face_names_at(&s.model.state(), &[fp]).into_iter().next().unwrap_or_default();
         let fid = solidcraft_doc::persistent_name::made_by(&name);
         if solidcraft_doc::persistent_name::is_blend(&name) {
@@ -1625,8 +1624,10 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
             return Ok(json!({"feature": f.id, "edited": f.name, key: new, "recomputed": out.get("recomputed"), "restored": out.get("restored")}));
         }
         // Another curved face moves along its normal.
-        let r = super::find_command("solid.offset_face").ok_or_else(|| bad(cmd, "solid.offset_face"))?;
-        return (r.run)(s, &json!({"faces": [face], "distance": distance}));
+        if super::face::face_is_planar(s, fp) == Some(false) {
+            let r = super::find_command("solid.offset_face").ok_or_else(|| bad(cmd, "solid.offset_face"))?;
+            return (r.run)(s, &json!({"faces": [face], "distance": distance}));
+        }
     }
     // Pushed in: the extrude cuts the other way by as much (a bare number stays one, so it keeps
     // being read as a bare number typed into the extrude).

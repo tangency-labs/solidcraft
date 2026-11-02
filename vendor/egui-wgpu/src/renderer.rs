@@ -129,6 +129,29 @@ pub struct ScreenDescriptor {
     pub pixels_per_point: f32,
 }
 
+/// SolidCraft: optional ownership of a complete frame, outside the primitive loop.
+/// Returning false keeps the ordinary pass. No effect resources exist by default.
+pub trait FrameCompositor: Send + Sync {
+    /// SolidCraft: select the native viewport before any effect preparation/painting.
+    fn begin_viewport(&self, _viewport: u64) {}
+    /// SolidCraft: actual acquired target geometry, before callback preparation.
+    fn screen(&self, _screen: &ScreenDescriptor, _resources: &mut CallbackResources) {}
+    /// SolidCraft: release target-dependent state on zero size or a lost device.
+    fn suspend(&self) {}
+    fn render(
+        &self,
+        renderer: &Renderer,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        jobs: &[epaint::ClippedPrimitive],
+        screen: &ScreenDescriptor,
+        clear: [f32; 4],
+    ) -> bool;
+
+    /// Called only after the commands producing cached pixels have been submitted.
+    fn submitted(&self) {}
+}
+
 impl ScreenDescriptor {
     /// size in "logical" points
     fn screen_size_in_points(&self) -> [f32; 2] {
@@ -263,6 +286,8 @@ pub struct Renderer {
     ///
     /// See also [`CallbackTrait`].
     pub callback_resources: CallbackResources,
+    /// SolidCraft: installed lazily by an enabled effect; the ordinary loop is unchanged.
+    pub frame_compositor: Option<std::sync::Arc<dyn FrameCompositor>>,
 }
 
 impl Renderer {
@@ -469,6 +494,7 @@ impl Renderer {
             samplers: HashMap::default(),
             options,
             callback_resources: CallbackResources::default(),
+            frame_compositor: None,
         }
     }
 
@@ -933,6 +959,9 @@ impl Renderer {
         profiling::function_scope!();
 
         self.skip_frame = false;
+        if let Some(effect) = &self.frame_compositor {
+            effect.screen(screen_descriptor, &mut self.callback_resources);
+        }
         let screen_size_in_points = screen_descriptor.screen_size_in_points();
 
         let uniform_buffer_content = UniformBuffer {

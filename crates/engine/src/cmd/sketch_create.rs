@@ -16,7 +16,7 @@ use super::sketch::{add_c, circumcircle, edit, ids_of, mark_construction, req_pa
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, num, req_vec2, str_, string_list};
-use crate::schema::sketch_create::{SplineReverseParams, SplineReverseResult};
+use crate::schema::sketch_create::{SplineRemovePointParams, SplineRemovePointResult, SplineReverseParams, SplineReverseResult};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
@@ -29,6 +29,7 @@ mod text_move_tests;
 mod text_expr_tests;
 
 const SPLINE_REVERSE_CONTRACT: TypedContract<SplineReverseParams> = TypedContract::new();
+const SPLINE_REMOVE_POINT_CONTRACT: TypedContract<SplineRemovePointParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.line.midpoint", "Midpoint Line", midpoint_line)
@@ -88,6 +89,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("spline")
         .enabled(in_sketch)
         .params("curve: fit point spline id, at: [x,y]: a fit point is inserted where the curve passes nearest to it, between its neighbours (the curve still runs through it and all its old points; constraints on them stay); end?: start|end: `at` becomes the spline's new first or last point instead, and the curve runs on to it (refused when that end is joined to other geometry). Control point splines take no new points yet. Returns point: the new point's id"),
+    CommandSpec::new("sketch.spline.remove_point", "Remove Spline Point", crate::checked!("sketch.spline.remove_point", spline_remove_point))
+        .icon("spline")
+        .enabled(in_sketch)
+        .contract(&SPLINE_REMOVE_POINT_CONTRACT)
+        .output(output_schema_for::<SplineRemovePointResult>)
+        .params("curve: spline id, point: one of its points (a point id, or the curve's start or end such as s1.end): the spline runs through (or over) its other points only, and the point goes with the constraints on it unless another curve uses it. Fit point, control point and closed splines. Refused for a closed spline's closing point, for an end joined to other geometry or held by a constraint, when fewer than 2 points would be left (3 on a closed spline), and for a projected, offset or patterned spline. Returns curve, point: the point's id, deleted: whether the point went too"),
     CommandSpec::new("sketch.spline.reverse", "Reverse Spline Direction", crate::checked!("sketch.spline.reverse", spline_reverse))
         .icon("spline")
         .enabled(in_sketch)
@@ -711,6 +718,22 @@ fn spline_insert_point(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"point": point, "curve": p.get("curve"), "sketch": info}))
 }
 
+/// One point taken out of a spline (#10783).
+fn spline_remove_point(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.spline.remove_point";
+    let id = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a spline id"))?.to_string();
+    let point = str_(p, "point").ok_or_else(|| bad(cmd, "`point` must be one of the spline's points"))?.to_string();
+    let ((point, deleted), info) = edit(s, p, cmd, false, |sk, _| {
+        let c = sk.curve_index(&id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+        let at = sk.resolve_point(&point).ok_or_else(|| bad(cmd, format!("unknown sketch point `{point}`")))?;
+        let name = sk.points.get(at).map_or(point.clone(), |q| q.id.clone());
+        let deleted = sk.remove_spline_point(c, at).map_err(|e| bad(cmd, e.to_string()))?;
+        Ok((name, deleted))
+    })?;
+    let reply = SplineRemovePointResult { curve: id, point, deleted, sketch: info, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
 fn spline_reverse(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.spline.reverse";
     let id = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a spline id"))?.to_string();
@@ -850,6 +873,27 @@ pub fn tangent_arc_preview(sk: &Sketch, curve: &str, start: &str, end: Vec2) -> 
     Some(out)
 }
 
+/// The picked point, then any other point at the same place: a trimmed arc's end is its own
+/// point, lying on the end of the curve that trimmed it, which is the one a click picks (#1485).
+fn tangent_start_candidates(sk: &Sketch, picked: usize) -> Vec<usize> {
+    let at = sk.point(picked).unwrap_or_default();
+    let tol = 1e-6 * at.len().max(1.0);
+    std::iter::once(picked).chain((0..sk.points.len()).filter(|&q| q != picked && sk.point(q).is_some_and(|x| x.dist(at) <= tol))).collect()
+}
+
+/// The first drawn curve (and which of the candidate points) a tangent arc can leave from.
+fn tangent_start_curve(sk: &Sketch, candidates: &[usize]) -> Option<(usize, usize)> {
+    candidates
+        .iter()
+        .find_map(|&q| sk.curves.iter().enumerate().find(|(i, c)| !c.construction && leaving_dir(sk, *i, q).is_some()).map(|(i, _)| (i, q)))
+}
+
+/// Whether `sketch.arc.tangent` can start at sketch point `start` (an id such as `l1.end`): the
+/// end of a drawn line, arc or spline there. A tool asks before taking the click (#10653).
+pub fn tangent_arc_starts_at(sk: &Sketch, start: &str) -> bool {
+    sk.resolve_point(start).is_some_and(|picked| tangent_start_curve(sk, &tangent_start_candidates(sk, picked)).is_some())
+}
+
 fn arc_tangent(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.arc.tangent";
     // An id ends the arc on that point, so a chain can close; coordinates make a new point.
@@ -864,14 +908,16 @@ fn arc_tangent(s: &mut Session, p: &Value) -> Result<Value> {
             (None, Some(at)) => (at, None),
             (None, None) => return Err(bad(cmd, "missing `end`")),
         };
+        // A snapped place that is no point yet (`on:l3:…` on a line, `mid:l1` at its middle: a
+        // click between a line's ends) is no end to start from: said so, not as an unknown point
+        // (#10653). Point ids (`l1.end`, `p3`, `origin`) have no colon.
+        let not_an_end = || bad(cmd, "`start` must be the end point of a line or arc");
+        if str_(p, "start").is_some_and(|start| start.contains(':')) {
+            return Err(not_an_end());
+        }
         let st = req_parg(sk, doc, p, "start", cmd)?;
-        let picked = st.idx().ok_or_else(|| bad(cmd, "`start` must be the end point of a line or arc"))?;
-        // The picked point, then any other point at the same place: a trimmed arc's end is its own
-        // point, lying on the end of the curve that trimmed it, which is the one a click picks (#1485).
-        let at = st.pos();
-        let tol = 1e-6 * at.len().max(1.0);
-        let candidates: Vec<usize> =
-            std::iter::once(picked).chain((0..sk.points.len()).filter(|&q| q != picked && sk.point(q).is_some_and(|x| x.dist(at) <= tol))).collect();
+        let picked = st.idx().ok_or_else(not_an_end)?;
+        let candidates = tangent_start_candidates(sk, picked);
         let (ci, pi) = match str_(p, "curve") {
             Some(id) => {
                 let ci = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
@@ -882,10 +928,7 @@ fn arc_tangent(s: &mut Session, p: &Value) -> Result<Value> {
                     .ok_or_else(|| bad(cmd, "`start` is not an end of that curve"))?;
                 (ci, pi)
             }
-            None => candidates
-                .iter()
-                .find_map(|&q| sk.curves.iter().enumerate().find(|(i, c)| !c.construction && leaving_dir(sk, *i, q).is_some()).map(|(i, _)| (i, q)))
-                .ok_or_else(|| bad(cmd, "no line or arc ends at `start`"))?,
+            None => tangent_start_curve(sk, &candidates).ok_or_else(|| bad(cmd, "no line or arc ends at `start`"))?,
         };
         let t = leaving_dir(sk, ci, pi).ok_or_else(|| bad(cmd, "`start` is not an end of that curve"))?;
         let s0 = st.pos();

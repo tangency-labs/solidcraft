@@ -620,6 +620,16 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
             };
             Plane::new(o1, d1, n.cross(d1)).ok_or_else(degenerate)
         }
+        PlaneRef::AxisPoint { axis, point: at } => {
+            let (origin, dir) = line(ctx, axis)?;
+            let dir = dir.normalized().ok_or_else(|| bad("the axis has no direction"))?;
+            let delta = point(ctx, at)? - origin;
+            let across = delta - dir * delta.dot(dir);
+            if !across.len().is_finite() || across.len() < 1e-9 {
+                return Err(bad("the point is on the axis: pick a point off the axis to define a unique plane"));
+            }
+            Plane::new(origin, dir, across).ok_or_else(degenerate)
+        }
         PlaneRef::ThreePoints { a, b, c } => {
             let (pa, pb, pc) = (point(ctx, a)?, point(ctx, b)?, point(ctx, c)?);
             if (pb - pa).cross(pc - pa).len() < 1e-9 {
@@ -768,7 +778,7 @@ impl PlaneRef {
     /// The references of a plane built from model geometry.
     pub fn refs_mut(&mut self) -> Vec<&mut GeoRef> {
         match self {
-            PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } => vec![a.as_mut(), b.as_mut()],
+            PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } | PlaneRef::AxisPoint { axis: a, point: b } => vec![a.as_mut(), b.as_mut()],
             PlaneRef::Perpendicular { plane, line } => vec![plane.as_mut(), line.as_mut()],
             PlaneRef::ThreePoints { a, b, c } => vec![a.as_mut(), b.as_mut(), c.as_mut()],
             PlaneRef::Tangent { face, .. } => vec![face.as_mut()],

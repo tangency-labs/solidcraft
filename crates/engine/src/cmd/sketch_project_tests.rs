@@ -1086,6 +1086,106 @@ fn whole_body_project_of_a_filleted_plate_keeps_exact_lines_and_arcs() {
     }
 }
 
+/// A U-slot cut into a plate's edge with its top rim rounded: the round meets the top face on a
+/// circle of radius 6.5 + 1 about the slot's axis, but the kernel makes that edge a spline that
+/// only follows the circle (within 2e-6 mm), and it projected as twenty spline pieces. The
+/// edge is a circle (the selection readout says so): it projects as an arc of that circle.
+#[test]
+fn a_rounded_slot_rim_projects_as_an_arc_of_its_circle() {
+    use solidcraft_sketch::CurveKind;
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 6.5, "height": 20, "base": [20, 2, -5], "operation": "cut", "targets": ["Plate"]}));
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 8.5, 10]], "radius": 1}));
+    let edge = run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 30, "project_edges": false}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs": [{"body": "Plate", "edge": [20, 9.5, 10]}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let face = run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 30, "project_edges": false}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs": [{"body": "Plate", "face": [5, 25, 10]}]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    let state = s.model.state();
+    let center = solidcraft_geom::Vec2::new(20., 2.);
+    for id in [edge, face] {
+        let sk = &state.sketch(id).unwrap().sketch;
+        let pos = |i: usize| sk.points[i].pos;
+        let mut arcs = 0;
+        for curve in &sk.curves {
+            match curve.kind {
+                CurveKind::Line { .. } => {}
+                CurveKind::Arc { c, a, b } => {
+                    arcs += 1;
+                    assert!(pos(c).dist(center) < 1e-5, "arc centre {:?}", pos(c));
+                    for end in [a, b] {
+                        assert!((pos(end).dist(pos(c)) - 7.5).abs() < 1e-5, "arc end {:?} off the circle", pos(end));
+                    }
+                }
+                ref other => panic!("sketch {id}: the rim projects as {other:?}, not as lines and arcs"),
+            }
+        }
+        assert!(arcs >= 1, "sketch {id}: no arc in {:?}", sk.curves);
+    }
+    // The face's outline still closes: the plate's top less the slot's disc of radius 7.5 (its
+    // part above the front face, whose chord lies 2 below the centre).
+    let (r, d) = (7.5f64, 2f64);
+    let below = r * r * (d / r).acos() - d * (r * r - d * d).sqrt();
+    let area = 40. * 30. - (std::f64::consts::PI * r * r - below);
+    let profiles = &state.sketch(face).unwrap().profiles;
+    assert!(profiles.iter().any(|p| (p.area - area).abs() < 1e-3), "{:?} vs {area}", profiles.iter().map(|p| p.area).collect::<Vec<_>>());
+}
+
+/// A hook: a J of lines and two arcs about (-15, 0), of radii 7.5 and 15, extruded 20 with its
+/// top edges chamfered. Seen along the extrusion its outline is the J again. The walls are seen
+/// edge-on, but the triangles of a round wall join its two rims at slightly different angles
+/// and each leans a hair towards the sketch or away: the outline ran zig-zag along the walls
+/// and came in as 74 short lines. Faces that lie edge-on are edge-on in every triangle.
+#[test]
+fn whole_body_project_of_a_chamfered_hook_keeps_its_arcs() {
+    use solidcraft_sketch::CurveKind;
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 60], [0, 0]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [-15, 0], "start": [-30, 0], "end": [0, 0]}));
+    run(&mut s, "sketch.line", json!({"points": [[-30, 0], [-30, 10], [-22.5, 10], [-22.5, 0]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [-15, 0], "start": [-22.5, 0], "end": [-7.5, 0]}));
+    run(&mut s, "sketch.line", json!({"points": [[-7.5, 0], [-7.5, 60], [0, 60]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 20, "body_name": "Hook"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[-15, -15, 20], [-15, -7.5, 20], [0, 30, 20], [-7.5, 30, 20]], "distance": 0.25}));
+    let sketch = run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 40, "project_edges": false}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs": [{"body": "Hook"}]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    let state = s.model.state();
+    let solved = state.sketch(sketch).unwrap();
+    let sk = &solved.sketch;
+    let pos = |i: usize| sk.points[i].pos;
+    let mut radii = Vec::new();
+    for curve in &sk.curves {
+        match curve.kind {
+            CurveKind::Line { .. } => {}
+            CurveKind::Arc { c, a, b } => {
+                assert!(pos(c).dist(solidcraft_geom::Vec2::new(-15., 0.)) < 1e-3, "arc centre {:?}", pos(c));
+                assert!((pos(a).dist(pos(c)) - pos(b).dist(pos(c))).abs() < 1e-6);
+                radii.push(pos(a).dist(pos(c)));
+            }
+            ref other => panic!("the outline projects as {other:?}, not as lines and arcs"),
+        }
+    }
+    radii.sort_by(f64::total_cmp);
+    assert_eq!(radii.len(), 2, "{} curves, arcs of radii {radii:?}", sk.curves.len());
+    assert!((radii[0] - 7.5).abs() < 1e-3 && (radii[1] - 15.).abs() < 1e-3, "{radii:?}");
+    assert_eq!(sk.curves.len(), 8, "{:?}", sk.curves);
+    // One closed profile: the J's area, a rectangle 7.5 x 60 and a half ring 7.5 to 15 with its
+    // 7.5 x 10 tip.
+    let area = 7.5 * 60. + std::f64::consts::PI * (15. * 15. - 7.5 * 7.5) / 2. + 7.5 * 10.;
+    assert!(
+        solved.profiles.iter().any(|p| (p.area - area).abs() < 0.05),
+        "{:?} vs {area}",
+        solved.profiles.iter().map(|p| p.area).collect::<Vec<_>>()
+    );
+}
+
 #[test]
 fn whole_body_intersect_of_a_filleted_plate_keeps_exact_lines_and_arcs() {
     use solidcraft_sketch::CurveKind;
@@ -1197,4 +1297,47 @@ fn a_thicker_angle_moves_the_projected_face_of_the_sketch_on_it() {
     };
     check(&s);
     check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
+}
+
+/// The silhouette of a square with a conic round at each corner (rho 0.19, 0.4, 0.5 and 0.7) is
+/// one closed outline of the square's true area. Fitted arcs along a conic were snapped onto lines
+/// that ended further along the outline, which left gaps of up to 3.6 mm: no profile.
+#[test]
+fn the_silhouette_of_conic_rounds_closes() {
+    let mut s = Session::default();
+    let corners = [
+        ([-75., 65.], [-75., 75.], [-65., 75.], 0.19),
+        ([65., 75.], [75., 75.], [75., 65.], 0.4),
+        ([75., -65.], [75., -75.], [65., -75.], 0.5),
+        ([-65., -75.], [-75., -75.], [-75., -65.], 0.7),
+    ];
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    for (i, (start, apex, end, rho)) in corners.iter().enumerate() {
+        run(&mut s, "sketch.conic", json!({"start": start, "apex": apex, "end": end, "rho": rho}));
+        let next = corners[(i + 1) % 4].0;
+        run(&mut s, "sketch.line", json!({"points": [end, next]}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 55, "body_name": "Part"}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "offset": -10}));
+    run(&mut s, "sketch.project", json!({"refs": [{"body": "Part"}]}));
+    // The true area: the outline through the four rational quadratic Béziers (apex weight
+    // rho / (1 - rho)), finely sampled, and the straight sides between them.
+    let mut outline: Vec<[f64; 2]> = Vec::new();
+    for (start, apex, end, rho) in corners {
+        let w = rho / (1. - rho);
+        for k in 0..=2000 {
+            let t = f64::from(k) / 2000.;
+            let (b0, b1, b2) = ((1. - t) * (1. - t), 2. * t * (1. - t) * w, t * t);
+            let sum = b0 + b1 + b2;
+            outline.push([(b0 * start[0] + b1 * apex[0] + b2 * end[0]) / sum, (b0 * start[1] + b1 * apex[1] + b2 * end[1]) / sum]);
+        }
+    }
+    let n = outline.len();
+    let exact = (0..n).map(|i| outline[i][0] * outline[(i + 1) % n][1] - outline[(i + 1) % n][0] * outline[i][1]).sum::<f64>().abs() / 2.;
+    let si = inspect(&mut s);
+    let profiles = si["profiles"].as_array().unwrap();
+    assert_eq!(profiles.len(), 1, "{}", si["profiles"]);
+    let area = profiles[0]["area_mm2"].as_f64().unwrap();
+    assert!((area - exact).abs() < exact * 2e-4, "area {area}, exact {exact}");
 }

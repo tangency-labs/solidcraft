@@ -58,6 +58,7 @@ pub mod component;
 pub mod construct;
 pub mod edit;
 pub mod features;
+pub mod file;
 pub mod inspect;
 pub mod joints;
 pub mod mass_properties;

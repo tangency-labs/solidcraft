@@ -14,8 +14,34 @@ pub const MIN_WIDTH: f32 = 280.0;
 pub const MAX_WIDTH: f32 = 760.0;
 /// The folded panel's width.
 const STRIP: f32 = 30.0;
-/// The keyboard shortcut that shows and hides the panel (also from its own text field).
-pub const SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT), egui::Key::A);
+/// Consume the configured toggle before CAD shortcuts, including in the chat's own window.
+/// Bare character keys remain text while a field owns the keyboard; chords still hide chat.
+pub fn toggle_shortcut(app: &mut SolveApp, ctx: &egui::Context) {
+    if !shown(app) || crate::keymap::capturing(app) {
+        return;
+    }
+    let keys = crate::keymap::keys(app, "ui.assistant");
+    let typing = ctx.egui_wants_keyboard_input();
+    let pressed = ctx.input_mut(|input| {
+        let mut pressed = false;
+        input.events.retain(|event| {
+            if let egui::Event::Key { key, modifiers, pressed: true, repeat, .. } = event {
+                if typing && !modifiers.command && !modifiers.ctrl && !modifiers.alt {
+                    return true;
+                }
+                if keys.contains(&crate::keymap::key_name(*key, *modifiers)) {
+                    pressed |= !repeat;
+                    return false;
+                }
+            }
+            true
+        });
+        pressed
+    });
+    if pressed {
+        toggle(app);
+    }
+}
 
 fn panel_id(left: bool) -> Id {
     Id::new(if left { "sc_agent_chat_left" } else { "sc_agent_chat_right" })
@@ -50,9 +76,11 @@ pub fn toggle(app: &mut SolveApp) {
 }
 
 /// The tooltip of the chat's buttons: its name and shortcut.
-pub fn tip() -> String {
-    let key = if cfg!(target_os = "macos") { "Cmd+Shift+A" } else { "Ctrl+Shift+A" };
-    format!("{} ({key})", tr("ui.agent_chat"))
+pub fn tip(app: &SolveApp) -> String {
+    match crate::keymap::display_for(app, "ui.assistant") {
+        Some(key) => format!("{} ({key})", tr("ui.agent_chat")),
+        None => tr("ui.agent_chat").to_string(),
+    }
 }
 
 /// The panel, when the chat is turned on and open. Call before the central viewport is laid out.
@@ -68,9 +96,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // With AI features off nothing of the chat is drawn, and the shortcut does nothing.
     if !shown(app) {
         return;
-    }
-    if ctx.input_mut(|i| i.consume_shortcut(&SHORTCUT)) {
-        toggle(app);
     }
     // A window that isn't drawn this frame closes; the next one opens at the saved place.
     if !(app.agent_chat.open && app.preferences.agent_chat_popped) {
@@ -106,24 +131,22 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.agent_chat.dock_space = Some(Rect::from_x_y_ranges(screen.x_range(), available.y_range()));
     let t = Tokens::get();
     let left = app.preferences.agent_chat_side == "left";
-    let side = |id: Id| Container::new(ui.ctx(), Surface::Panel).edge(id, if left { Edge::Left } else { Edge::Right });
+    let host = Container::new(ui.ctx(), Surface::Panel);
+    let side = |id: Id| host.edge(id, if left { Edge::Left } else { Edge::Right });
     if app.preferences.agent_chat_minimized {
-        let r = side(Id::new("sc_agent_chat_strip"))
-            .exact_size(STRIP)
-            .resizable(false)
-            .frame(Container::new(ui.ctx(), Surface::Panel).edge_frame(t.panel))
-            .show(ui, |ui| strip(app, ui));
+        let r = host
+            .show_edge(ui, side(Id::new("sc_agent_chat_strip")).exact_size(STRIP).resizable(false), host.edge_frame(t.panel), |ui| strip(app, ui));
         app.agent_chat.drop_rect = Some(r.response.rect);
         show_drop_hint(app, &ctx);
         return;
     }
     let width = app.preferences.agent_chat_width.clamp(MIN_WIDTH, MAX_WIDTH);
-    let r = side(panel_id(left))
-        .default_size(width)
-        .size_range(MIN_WIDTH..=MAX_WIDTH)
-        .resizable(true)
-        .frame(Container::new(ui.ctx(), Surface::Panel).edge_frame(t.dialog_body))
-        .show(ui, |ui| ui_kit::scope(ui, |ui| body(app, ui, left)));
+    let r = host.show_edge(
+        ui,
+        side(panel_id(left)).default_size(width).size_range(MIN_WIDTH..=MAX_WIDTH).resizable(true),
+        host.edge_frame(t.dialog_body),
+        |ui| ui_kit::scope(ui, |ui| body(app, ui, left)),
+    );
     crate::scenario::publish_rect("agent_chat:panel", r.response.rect);
     app.agent_chat.panel_rect = Some(r.response.rect);
     #[cfg(not(target_arch = "wasm32"))]
@@ -533,6 +556,11 @@ fn window(app: &mut SolveApp, ctx: &egui::Context) {
     // The side panel isn't drawn: its place no longer counts as "in the chat".
     app.agent_chat.panel_rect = None;
     ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("sc_agent_chat_window"), builder, |ui, class| {
+        // Root/embedded inputs are handled by SolveApp::logic. A native chat window owns
+        // its input and must see the toggle before its text editor can consume the chord.
+        if class != egui::ViewportClass::EmbeddedWindow {
+            toggle_shortcut(app, ui.ctx());
+        }
         let t = Tokens::get();
         let frame = Container::new(ui.ctx(), Surface::Panel).edge_frame(t.dialog_body);
         let r = Container::new(ui.ctx(), Surface::Viewport).central().frame(frame).show(ui, |ui| ui_kit::scope(ui, |ui| body(app, ui, false)));
@@ -556,9 +584,6 @@ fn window(app: &mut SolveApp, ctx: &egui::Context) {
         }
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
             drop_hint(&ctx, r.response.rect);
-        }
-        if ctx.input_mut(|i| i.consume_shortcut(&SHORTCUT)) {
-            toggle(app);
         }
         // The whole window is the chat, so New chat works anywhere in it.
         if ctx.input_mut(|i| i.consume_shortcut(&NEW_CHAT_SHORTCUT)) {
@@ -669,7 +694,7 @@ fn strip(app: &mut SolveApp, ui: &mut egui::Ui) {
         if app.preferences.agent_chat_side == "left" { [r.right_top(), r.right_bottom()] } else { [r.left_top(), r.left_bottom()] },
         t.primary_border(t.border),
     );
-    let tip = format!("{} · {}", tip(), state.label());
+    let tip = format!("{} · {}", tip(app), state.label());
     if resp.on_hover_text(tip).clicked() {
         app.preferences.agent_chat_minimized = false;
     }
@@ -1046,11 +1071,8 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
         );
         let models = !modern && models_shown(app);
         let providers = if models { model_providers(app) } else { Vec::new() };
-        let w = (ui.available_width()
-            - if modern || app.agent_chat.modes.is_empty() { 4.0 } else { 116.0 }
-            - if models { 146.0 } else { 0.0 }
-            - if providers.is_empty() { 0.0 } else { 146.0 })
-        .clamp(90.0, 260.0);
+        let w = (ui.available_width() - if modern || app.agent_chat.modes.is_empty() { 4.0 } else { 116.0 } - if models { 146.0 } else { 0.0 })
+            .clamp(90.0, 260.0);
         let mut picked: Option<String> = None;
         let mut add = false;
         let combo = ui
@@ -1111,61 +1133,47 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
                 set_mode(app, &m);
             }
         }
-        // Models from several providers: pick the provider first, then one of its models.
-        if let Some(shown) = shown_provider(app).filter(|_| !providers.is_empty()) {
-            let mut pick: Option<String> = None;
-            let width = picker_width(ui, &shown);
-            let r = ui
-                .allocate_ui(vec2(width, t.control_height), |ui| {
-                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-                    ui_kit::dropdown_menu(ui, "sc_agent_provider", &shown, |ui| {
-                        for (name, count) in &providers {
-                            let row = ui_kit::list_picker(ui, &format!("provider:{name}"), name, *name == shown)
-                                .on_hover_text(trf("ui.agent_chat_provider_models", &[("count", &count.to_string())]));
-                            crate::scenario::publish_handle(&format!("agent_chat:provider:{name}"), row.rect.center());
-                            if row.clicked() {
-                                pick = Some(name.clone());
-                            }
-                        }
-                    })
-                })
-                .inner;
-            crate::scenario::publish_rect("agent_chat:provider", r.rect);
-            crate::scenario::publish_handle("agent_chat:provider", r.rect.center());
-            r.on_hover_text(tr("ui.agent_chat_provider_tip"));
-            if let Some(p) = pick {
-                set_model_provider(app, &p);
-            }
-        }
         // The agent's models (ACP `models`, or an endpoint's list): shown only when it reports some.
         if models {
-            let list = listed_models(app);
-            let cur = list.iter().find(|(m, _)| m.id == app.agent_chat.model).map_or_else(
-                || if providers.is_empty() { app.agent_chat.model.clone() } else { tr("ui.agent_chat_choose_model").to_string() },
-                |(_, name)| name.clone(),
-            );
-            let mut pick: Option<String> = None;
+            // Models from several providers fold under their providers inside the picker, the
+            // current model's provider open.
+            let list = grouped_models(app);
+            let open = shown_provider(app).filter(|_| !providers.is_empty());
+            let cur = list
+                .iter()
+                .find(|(m, _, _, _)| m.id == app.agent_chat.model)
+                .map_or_else(|| app.agent_chat.model.clone(), |(_, name, _, _)| name.clone());
             let width = if providers.is_empty() { t.form_label_width } else { picker_width(ui, &cur) };
-            let r = ui
+            let choices: Vec<ui_kit::SearchChoice<'_>> =
+                list.iter().map(|(m, name, group, tip)| ui_kit::SearchChoice { value: &m.id, label: name, tip, group: group.as_deref() }).collect();
+            let custom = custom_models_accepted(app);
+            let picker = ui
                 .allocate_ui(vec2(width, t.control_height), |ui| {
                     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-                    ui_kit::dropdown_menu(ui, "sc_agent_model", &cur, |ui| {
-                        for (m, name) in &list {
-                            let row = ui_kit::list_picker(ui, &m.id, name, m.id == app.agent_chat.model);
-                            let row = if m.description.is_empty() { row } else { row.on_hover_text(&m.description) };
-                            crate::scenario::publish_handle(&format!("agent_chat:model:{}", m.id), row.rect.center());
-                            if row.clicked() {
-                                pick = Some(m.id.clone());
-                            }
-                        }
-                    })
+                    ui_kit::search_picker(
+                        ui,
+                        ui_kit::SearchPicker {
+                            id: "sc_agent_model",
+                            handles: "agent_chat:model",
+                            current: &cur,
+                            current_value: &app.agent_chat.model,
+                            hint: tr("ui.agent_chat_model_search"),
+                            choices: &choices,
+                            custom,
+                            note: app.agent_chat.models_note.as_deref(),
+                            open_group: open.as_deref(),
+                            enabled: true,
+                        },
+                    )
                 })
                 .inner;
-            crate::scenario::publish_rect("agent_chat:model", r.rect);
-            crate::scenario::publish_handle("agent_chat:model", r.rect.center());
-            r.on_hover_text(tr("ui.agent_chat_model_tip"));
-            if let Some(m) = pick {
-                set_model(app, &m);
+            picker.response.on_hover_text(tr("ui.agent_chat_model_tip"));
+            match picker.inner {
+                Some(ui_kit::Picked::Listed(m)) => set_model(app, &m),
+                Some(ui_kit::Picked::Custom(m)) => {
+                    set_custom_model(app, &m);
+                }
+                None => {}
             }
         }
     });
@@ -1290,52 +1298,95 @@ fn config_select(app: &mut SolveApp, ui: &mut egui::Ui, option: &acp::ConfigOpti
         .collect::<Vec<_>>()
         .join("\n");
     let mut picked = None;
-    let response = ui
-        .add_enabled_ui(!pending && !option.options.is_empty(), |ui| {
-            ui.allocate_ui(vec2(width, t.control_height), |ui| {
-                ui_kit::dropdown_menu(ui, ("sc_agent_config", &option.id), &displayed, |ui| {
-                    let mut previous_group: Option<&str> = None;
-                    for choice in &option.options {
-                        let group = choice.group.as_deref().filter(|g| !g.is_empty());
-                        if let Some(group) = group
-                            && previous_group != Some(group)
-                        {
-                            ui.label(RichText::new(compact_text(group, 32)).color(t.text_dim).size(t.font_small)).on_hover_text(group);
-                        }
-                        previous_group = group;
-                        let row = ui_kit::list_picker(ui, &choice.value, &compact_text(&choice.name, 32), choice.value == option.current_value);
-                        let row = row.on_hover_text(
-                            [choice.name.as_str(), choice.description.as_str()]
-                                .into_iter()
-                                .filter(|part| !part.is_empty())
-                                .collect::<Vec<_>>()
-                                .join("\n"),
-                        );
-                        crate::scenario::publish_handle(&format!("agent_chat:config:{}:{}", option.id, choice.value), row.rect.center());
-                        if option.category == "model" {
-                            crate::scenario::publish_handle(&format!("agent_chat:model:{}", choice.value), row.rect.center());
-                        }
-                        if row.clicked() {
-                            picked = Some(choice.value.clone());
-                        }
-                    }
-                })
+    let enabled = !pending && !option.options.is_empty();
+    let handles = format!("agent_chat:config:{}", option.id);
+    let response = if option.category == "model" {
+        let choices: Vec<ui_kit::SearchChoice<'_>> = option
+            .options
+            .iter()
+            .map(|choice| ui_kit::SearchChoice {
+                value: &choice.value,
+                label: &choice.name,
+                tip: &choice.description,
+                group: choice.group.as_deref(),
             })
-            .inner
-        })
-        .inner;
-    crate::scenario::publish_handle(&format!("agent_chat:config:{}", option.id), response.rect.center());
-    crate::scenario::publish_rect(&format!("agent_chat:config:{}", option.id), response.rect);
-    if option.category == "model" {
-        crate::scenario::publish_handle("agent_chat:model", response.rect.center());
-    } else if option.category == "mode" {
-        crate::scenario::publish_handle("agent_chat:mode", response.rect.center());
-    }
-    response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, !pending && !option.options.is_empty(), format!("{name}: {selected}")));
+            .collect();
+        let id = format!("sc_agent_config:{}", option.id);
+        let picker = ui
+            .allocate_ui(vec2(width, t.control_height), |ui| {
+                ui_kit::search_picker(
+                    ui,
+                    ui_kit::SearchPicker {
+                        id: &id,
+                        handles: &handles,
+                        current: &displayed,
+                        current_value: &option.current_value,
+                        hint: tr("ui.agent_chat_model_search"),
+                        choices: &choices,
+                        custom: true,
+                        note: None,
+                        open_group: None,
+                        enabled,
+                    },
+                )
+            })
+            .inner;
+        picked = picker.inner;
+        // Under the names every kind of agent's model picker goes by.
+        let rows = format!("{handles}:");
+        for (name, at) in crate::scenario::handles(&rows) {
+            if let Some(row) = name.strip_prefix(&rows) {
+                crate::scenario::publish_handle(&format!("agent_chat:model:{row}"), at);
+            }
+        }
+        crate::scenario::publish_target("agent_chat:model", picker.response.rect);
+        picker.response
+    } else {
+        let response = ui
+            .add_enabled_ui(enabled, |ui| {
+                ui.allocate_ui(vec2(width, t.control_height), |ui| {
+                    ui_kit::dropdown_menu(ui, ("sc_agent_config", &option.id), &displayed, |ui| {
+                        let mut previous_group: Option<&str> = None;
+                        for choice in &option.options {
+                            let group = choice.group.as_deref().filter(|g| !g.is_empty());
+                            if let Some(group) = group
+                                && previous_group != Some(group)
+                            {
+                                ui.label(RichText::new(compact_text(group, 32)).color(t.text_dim).size(t.font_small)).on_hover_text(group);
+                            }
+                            previous_group = group;
+                            let row = ui_kit::list_picker(ui, &choice.value, &compact_text(&choice.name, 32), choice.value == option.current_value);
+                            let row = row.on_hover_text(
+                                [choice.name.as_str(), choice.description.as_str()]
+                                    .into_iter()
+                                    .filter(|part| !part.is_empty())
+                                    .collect::<Vec<_>>()
+                                    .join("\n"),
+                            );
+                            crate::scenario::publish_handle(&format!("{handles}:{}", choice.value), row.rect.center());
+                            if row.clicked() {
+                                picked = Some(ui_kit::Picked::Listed(choice.value.clone()));
+                            }
+                        }
+                    })
+                })
+                .inner
+            })
+            .inner;
+        crate::scenario::publish_target(&handles, response.rect);
+        if option.category == "mode" {
+            crate::scenario::publish_handle("agent_chat:mode", response.rect.center());
+        }
+        response
+    };
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, enabled, format!("{name}: {selected}")));
     response.on_hover_text(tip);
-    if let Some(value) = picked {
-        super::set_config_option(app, &option.id, &value);
+    match picked {
+        Some(ui_kit::Picked::Listed(value)) => super::set_config_option(app, &option.id, &value),
+        Some(ui_kit::Picked::Custom(value)) => {
+            super::set_custom_model(app, &value);
+        }
+        None => {}
     }
 }
 
@@ -1562,6 +1613,49 @@ fn auth_box(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
 }
 
+/// The visible **Copy message** button of one transcript message (#10675): copies the whole
+/// message — the prompt as entered, or the assistant's original Markdown — and nothing else.
+/// A streaming reply copies the stable text received so far, which is what `text` holds.
+#[cfg(not(target_arch = "wasm32"))]
+fn copy_message_button(ui: &mut egui::Ui, n: usize, text: &str) {
+    let b = ui_kit::button(ui, tr("ui.agent_chat_copy_message"), ui_kit::Button::Small);
+    crate::scenario::publish_handle(&format!("agent_chat:copy:{n}"), b.rect.center());
+    if b.clicked() {
+        ui.ctx().copy_text(text.to_owned());
+    }
+}
+
+/// The right-click menu of one transcript message (#10675): the same single action as the
+/// visible button, on the whole message area, beside the composer's own text menu.
+/// The area stays hover-only so partial text selection keeps working, so the menu opens on a
+/// right-click released over it rather than on a click the response itself would report.
+#[cfg(not(target_arch = "wasm32"))]
+fn copy_message_menu(ui: &egui::Ui, response: &egui::Response, n: usize, text: &str) {
+    crate::scenario::publish_rect(&format!("agent_chat:msg:{n}"), response.rect);
+    let opened = ui
+        .input(|i| i.pointer.button_released(egui::PointerButton::Secondary) && i.pointer.interact_pos().is_some_and(|p| response.rect.contains(p)));
+    let mut copy = false;
+    Container::new(ui.ctx(), Surface::Popup)
+        .menu(response)
+        .at_pointer_fixed()
+        .frame(ui_kit::Menu::frame())
+        .open_memory(if opened { Some(egui::SetOpenCommand::Bool(true)) } else { None })
+        .show(|ui| {
+            ui_kit::Menu::show(ui, crate::context_menu::LIST_W, |ui| {
+                let item = ui_kit::MenuItem::new("copy_message", tr("ui.agent_chat_copy_message"), "copy");
+                let row = item.show(ui);
+                crate::scenario::publish_handle(&format!("agent_chat:copy_menu:{n}"), row.rect.center());
+                if row.clicked() {
+                    copy = true;
+                    ui.close();
+                }
+            });
+        });
+    if copy {
+        ui.ctx().copy_text(text.to_owned());
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
@@ -1575,6 +1669,9 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
     for (n, item) in app.agent_chat.items.iter().enumerate() {
         match item {
             Item::User { text, image, pictures, context, files } => {
+                // A picture-only prompt has no text to copy: no action rather than an empty copy (#10675).
+                let copyable = !text.is_empty();
+                let before = ui.cursor();
                 ui_kit::assistant_bubble(ui, |ui| {
                     if !text.is_empty() {
                         ui.add(egui::Label::new(RichText::new(text).color(t.text)).selectable(true).wrap());
@@ -1589,13 +1686,28 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                     context_chips(ui, context, false);
                     files_line(ui, files.iter().map(String::as_str));
+                    if copyable {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| copy_message_button(ui, n, text));
+                    }
                 });
+                if copyable {
+                    let drawn = egui::Rect::from_x_y_ranges(before.x_range(), before.min.y..=ui.cursor().min.y);
+                    let resp = ui.interact(drawn, Id::new(("agent_chat_msg", n)), Sense::hover());
+                    copy_message_menu(ui, &resp, n, text);
+                }
             }
             Item::Agent { thought, text } => {
                 if *thought {
                     ui.add(egui::Label::new(RichText::new(text).italics().color(t.text_dim)).selectable(true).wrap());
                 } else {
+                    let before = ui.cursor();
                     ui_kit::assistant_prose(ui, |ui| super::markdown_view::show(ui, n, text));
+                    if !text.is_empty() {
+                        copy_message_button(ui, n, text);
+                        let drawn = egui::Rect::from_x_y_ranges(before.x_range(), before.min.y..=ui.cursor().min.y);
+                        let resp = ui.interact(drawn, Id::new(("agent_chat_msg", n)), Sense::hover());
+                        copy_message_menu(ui, &resp, n, text);
+                    }
                 }
             }
             Item::Tool { .. } => {
@@ -2349,7 +2461,7 @@ mod tests {
             ui_kit::scope(ui, |ui| switcher(&mut app, ui));
         });
         output.textures_delta.clear();
-        let rects: Vec<_> = ["switcher", "mode", "provider", "model"]
+        let rects: Vec<_> = ["switcher", "mode", "model"]
             .into_iter()
             .map(|name| {
                 let rect = crate::scenario::rect_of(&format!("agent_chat:{name}")).expect("picker retained");

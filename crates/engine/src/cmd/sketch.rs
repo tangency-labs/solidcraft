@@ -37,7 +37,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.create", "Create Sketch", create_sketch)
         .at("SOLID", "CREATE")
         .icon("sketch")
-        .params("plane: XY|XZ|YZ | construction plane name or id | {origin?: [x,y,z] numbers in mm, default [0,0,0] (not an expression), x_dir, y_dir} (in world coordinates unless frame says otherwise; a named plane is the active component's own) | {face: [world x,y,z], body?: exact world body, index?: face index, path?: complete occurrence ids, fixed?: bool}; new face attachments require a unique certified source (a flat face of a sheet metal body attaches to its panel instead, in the flat pattern's coordinates), fixed:true explicitly freezes the selected plane; offset?: expr, flip?: bool | \"x\" | \"y\" (not on a face: sketch the plane from its other side, so the normal and the default extrude direction are reversed; a half turn about the plane's own x or y axis, true picks the one keeping the sketch's y axis upward; offset still moves along the unflipped normal), frame?: world (default) | component (which coordinates an explicit plane is in; the reply's `frame` says which, with a `note` when the active component is moved or turned), project_edges?: bool, activate_part?: bool (default false; on a face of a body of another component than the active one: activate that component at the picked placement first, as component.activate would, and make the sketch there; it stays active afterwards and the reply's `activated` names it), name?"),
+        .params("plane: XY|XZ|YZ (sketch x, y along world +X, +Y on XY; +X, -Z on XZ; +Y, +Z on YZ) | construction plane name or id | {origin?: [x,y,z] numbers in mm, default [0,0,0] (not an expression), x_dir, y_dir} (in world coordinates unless frame says otherwise; a named plane is the active component's own) | {face: [world x,y,z], body?: exact world body, index?: face index, path?: complete occurrence ids, fixed?: bool}; new face attachments require a unique certified source (a flat face of a sheet metal body attaches to its panel instead, in the flat pattern's coordinates), fixed:true explicitly freezes the selected plane; offset?: expr, flip?: bool | \"x\" | \"y\" (not on a face: sketch the plane from its other side, so the normal and the default extrude direction are reversed; a half turn about the plane's own x or y axis, true picks the one keeping the sketch's y axis upward; offset still moves along the unflipped normal), frame?: world (default) | component (which coordinates an explicit plane is in; the reply's `frame` says which, with a `note` when the active component is moved or turned), project_edges?: bool, activate_part?: bool (default false; on a face of a body of another component than the active one: activate that component at the picked placement first, as component.activate would, and make the sketch there; it stays active afterwards and the reply's `activated` names it), name?"),
     CommandSpec::new("sketch.edit", "Edit Sketch", edit_sketch).noundo().icon("sketch").params("sketch: id or name"),
     CommandSpec::new("sketch.finish", "Finish Sketch", finish_sketch).at("SKETCH", "FINISH SKETCH").icon("finish").enabled(in_sketch).noundo(),
     CommandSpec::new("sketch.cancel", "Cancel Sketch", cancel_sketch)
@@ -139,7 +139,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_coincident")
         .enabled(in_sketch)
-        .params(concat!("a, b: points, a point and a curve or sketch axis (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or two distinct lines (joins their closest endpoints), or two circles/arcs (the second lies on the first: concentric and equal, `constraints` lists both)", model_operand_doc!())),
+        .params(concat!("a, b: points (or a line's middle as {midpoint: line}, which becomes a point tied there), a point and a curve or sketch axis (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or two distinct lines (joins their closest endpoints), or two circles/arcs (the second lies on the first: concentric and equal, `constraints` lists both)", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.tangent", "Tangent", c_tangent)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_tangent")
@@ -174,7 +174,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_concentric")
         .enabled(in_sketch)
-        .params(concat!("a, b: circles/arcs", model_operand_doc!())),
+        .params(concat!("a, b: two circles/arcs, or a circle/arc and a sketch point (including origin), in either order; the point and the curve's centre become coincident", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.collinear", "Collinear", c_collinear)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_collinear")
@@ -325,7 +325,7 @@ pub(super) fn edit_solved<T>(
     };
     sketch_store::checked(&sk)?;
     sketch_store::write(&mut doc, id, sk)?;
-    *s.doc_mut() = doc;
+    s.set_doc(doc);
     Ok((out, rep))
 }
 
@@ -472,6 +472,9 @@ const CONNECT_TOL: f64 = 1e-6;
 
 /// New points (index `first` on) that land on an existing point, the origin included, get a
 /// coincident constraint to it, as when a click snaps there; `connect: false` leaves them free.
+/// A point placed by parameter expressions is never tied: it follows its expressions, and a
+/// Coincident to where the expressions happened to come to at draw time conflicts with the
+/// next parameter change (#10703).
 fn connect_points(sk: &mut Sketch, first: usize, p: &Value) -> Result<Vec<String>> {
     if !bool_(p, "connect").unwrap_or(true) {
         return Ok(Vec::new());
@@ -481,6 +484,9 @@ fn connect_points(sk: &mut Sketch, first: usize, p: &Value) -> Result<Vec<String
     old.sort_by(|a, b| a.0.x.total_cmp(&b.0.x));
     let mut ties = Vec::new();
     for q in first..sk.points.len() {
+        if sk.points.get(q).is_some_and(|pt| pt.exprs.is_some()) {
+            continue;
+        }
         let Some(at) = sk.point(q) else { continue };
         let from = old.partition_point(|(o, _)| o.x < at.x - CONNECT_TOL);
         let hit =
@@ -2250,17 +2256,38 @@ fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some((a, b)) = line_points {
             return Ok(ConstraintKind::Coincident { p: a, q: b });
         }
+        // A line's middle, `{midpoint: line}` as a selected midpoint is sent (#10311): the point
+        // tied there by a Midpoint constraint stands for it, made as Horizontal/Vertical makes it.
+        let middle = |sk: &mut Sketch, key: &str| -> Result<Option<usize>> {
+            let Some(line) = p.get(key).and_then(|v| v.get("midpoint")) else { return Ok(None) };
+            let l = curve_ref(sk, Some(line), cmd, "midpoint")?;
+            AlignmentTarget::Midpoint(l).materialize(sk, cmd).map(Some)
+        };
+        let (a_mid, b_mid) = (middle(sk, "a")?, middle(sk, "b")?);
         let aref = p.get("a").and_then(Value::as_str).unwrap_or_default();
-        let bref = p.get("b").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`b` must be a point or curve"))?;
+        let bref = p.get("b").and_then(Value::as_str);
+        let b_point = match (b_mid, bref) {
+            (Some(b), _) => Some(b),
+            (None, Some(r)) => sk.resolve_point(r),
+            (None, None) => return Err(bad(cmd, "`b` must be a point or curve")),
+        };
+        let bref = bref.unwrap_or_default();
         // A curve (or sketch axis) picked first and a point second: the point goes onto it.
-        if sk.resolve_point(aref).is_none()
-            && let Some(q) = sk.resolve_point(bref)
+        if a_mid.is_none()
+            && sk.resolve_point(aref).is_none()
+            && let Some(q) = b_point
             && let Some(c) = curve_or_axis(sk, aref)?
         {
             return Ok(ConstraintKind::PointOnCurve { p: q, c });
         }
-        let a = point_ref(sk, p.get("a"), cmd, "a")?;
-        if let Some(b) = sk.resolve_point(bref) {
+        let a = match a_mid {
+            Some(a) => a,
+            None => point_ref(sk, p.get("a"), cmd, "a")?,
+        };
+        if let Some(b) = b_point {
+            if a == b && (a_mid.is_some() || b_mid.is_some()) {
+                return Err(bad(cmd, "that point is already the line's midpoint"));
+            }
             return Ok(ConstraintKind::Coincident { p: a, q: b });
         }
         let c = curve_or_axis(sk, bref)?.ok_or_else(|| bad(cmd, format!("unknown entity `{bref}`")))?;
@@ -2433,11 +2460,21 @@ fn c_perpendicular(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 fn c_concentric(s: &mut Session, p: &Value) -> Result<Value> {
-    let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.concentric", &["a", "b"])?;
-    constrain(s, p, "sketch.constraint.concentric", |sk| {
-        two_curves(sk, p, "sketch.constraint.concentric")
-            .and_then(|ab| two_different("sketch.constraint.concentric", ab))
-            .map(|(a, b)| ConstraintKind::Concentric { a, b })
+    let cmd = "sketch.constraint.concentric";
+    let p = &super::sketch_project::project_operands(s, p, cmd, &["a", "b"])?;
+    constrain(s, p, cmd, |sk| {
+        let centre = |key: &str| {
+            let curve = sk.curves.get(sk.curve_index(p.get(key)?.as_str()?)?)?;
+            match curve.kind {
+                CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } => Some(c),
+                _ => None,
+            }
+        };
+        let point = |key: &str| sk.resolve_point(p.get(key)?.as_str()?);
+        if let Some((p, q)) = centre("a").zip(point("b")).or_else(|| centre("b").zip(point("a"))) {
+            return Ok(ConstraintKind::Coincident { p, q });
+        }
+        two_curves(sk, p, cmd).and_then(|ab| two_different(cmd, ab)).map(|(a, b)| ConstraintKind::Concentric { a, b })
     })
 }
 fn c_collinear(s: &mut Session, p: &Value) -> Result<Value> {
