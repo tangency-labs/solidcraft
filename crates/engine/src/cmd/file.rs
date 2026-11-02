@@ -31,7 +31,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("open")
         .key("Ctrl+O")
         .noundo()
-        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh)"),
+        .params("path: a .zip holding one design (opens unsaved), .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh)"),
     CommandSpec::new("file.insert_step", "Insert STEP", insert_step)
         .at("SOLID", "INSERT")
         .icon("import")
@@ -50,6 +50,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .key("Ctrl+Shift+S")
         .noundo()
         .params("path; format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (as file.save, when `path` is the design's own file)"),
+    CommandSpec::new("file.save_for_sharing", "Save Design to Share (.zip)", save_for_sharing)
+        .icon("save")
+        .noundo()
+        .params("path: the .zip to write (e.g. bracket.solidcraft.zip): the design container, which is a ZIP, under a name issue trackers such as GitHub accept (they take no .solidcraft); doc.open opens it; source?: a design file to save instead of the open design (a crash report's design.solidcraft; a JSON design becomes a container) → path, bytes. A copy: the open design keeps its file and saved state"),
     CommandSpec::new("doc.recovery_list", "Recoverable Designs", recovery_list).icon("restore")
         .noundo()
         .params("dir? (default: the recovery folder) → designs autosaved by apps that crashed or closed with unsaved changes"),
@@ -382,13 +386,18 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     // Stamped before it is read: a write while it is being read is a change too.
     let disk = solidcraft_io::design_lock::stamp(path);
     let (doc, saved) = read_design(s, path)?;
-    opened_design(s, Session::opened_at(doc, saved.as_ref(), Some(path)), path, read_only, disk)
+    let shared = solidcraft_io::is_shared_design_path(path);
+    opened_design(s, Session::opened_at(doc, saved.as_ref(), (!shared).then_some(path)), path, read_only, disk)
 }
 
 /// Read the design file at `path` for `doc.open`, under its file's name if it has none of its own.
 fn read_design(s: &mut Session, path: &str) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
     let (mut doc, saved) = solidcraft_io::read_design_file(path, s.open_preview.take()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    if let Some(stem) = default_name_for(&doc.name, path) {
+    // A design shared as a zip (#4019) takes the name of the design in it, and has no file of its
+    // own yet: saving asks where, rather than replacing the zip.
+    let shared = solidcraft_io::is_shared_design_path(path);
+    let named_after = if shared { solidcraft_io::shared_design_name(path) } else { path.to_string() };
+    if let Some(stem) = default_name_for(&doc.name, &named_after) {
         doc.name = stem;
     }
     Ok((doc, saved))
@@ -404,7 +413,8 @@ fn opened_design(
     disk: Option<solidcraft_io::design_lock::FileStamp>,
 ) -> Result<Value> {
     s.replace_design(opened);
-    s.disk = disk;
+    // A design shared as a zip has no file of its own to watch (#4019).
+    s.disk = if solidcraft_io::is_shared_design_path(path) { None } else { disk };
     s.read_only = read_only;
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
     let mut out = json!({"path": path, "features": s.doc.features.len(), "errors": errors, "name": s.doc.name});
@@ -669,6 +679,33 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
         bool_(p, "cache").unwrap_or(true),
         bool_(p, "overwrite").unwrap_or(false),
     )
+}
+
+/// The open design, or the design file `source`, as a `.zip` for an issue tracker that takes no
+/// `.solidcraft` attachment (#4019). A design container is a ZIP already, so it is written as it
+/// is; a JSON design becomes a container first. A copy: the session keeps its file and saved state.
+fn save_for_sharing(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.save_for_sharing";
+    let path = path_arg(p, cmd)?;
+    if !solidcraft_io::is_shared_design_path(path) {
+        return Err(bad(cmd, "`path` must be a .zip file"));
+    }
+    solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
+    let bytes = match str_(p, "source").filter(|x| !x.trim().is_empty()) {
+        Some(source) => {
+            let bytes =
+                solidcraft_io::vfs::read(source, solidcraft_io::MAX_DESIGN_BYTES).map_err(|e| EngineError::Other(format!("{source}: {e}")))?;
+            // Only a design is shared.
+            let doc = solidcraft_io::read_design(&bytes).map_err(|e| EngineError::Other(format!("{source}: {e}")))?;
+            let container = solidcraft_io::is_design_container(&bytes)
+                && solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(&bytes)).is_ok_and(|r| r.is_container());
+            if container { bytes } else { solidcraft_io::write_design_container_with_compression(&doc, solidcraft_io::DesignCompression::Compact)? }
+        }
+        // Without the evaluated model: the zip is smaller, and the design rebuilds the same.
+        None => s.design_container(solidcraft_io::DesignCompression::Compact, false, false)?,
+    };
+    solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    Ok(json!({"path": path, "bytes": bytes.len()}))
 }
 
 fn default_design_format(path: &str) -> &'static str {
@@ -1851,6 +1888,45 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("solidcraft-name-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn a_design_saved_for_sharing_opens_from_its_zip_unsaved() {
+        let dir = name_dir("share");
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":10,"width":20,"height":30})).unwrap();
+        let file = dir.join("bracket.solidcraft");
+        s.execute("file.save_as", &json!({"path":file})).unwrap();
+        let zip = dir.join("bracket.solidcraft.zip");
+        s.execute("file.save_for_sharing", &json!({"path":zip})).unwrap();
+        assert!(solidcraft_io::is_design_container(&std::fs::read(&zip).unwrap()), "the container itself, not a zip in a zip");
+        assert_eq!(s.path.as_deref(), Some(&*file.to_string_lossy()), "a copy: the design keeps its file");
+        let mut opened = Session::default();
+        let r = opened.execute("doc.open", &json!({"path":zip})).unwrap();
+        assert_eq!((r["name"].as_str(), opened.path.as_deref()), (Some("bracket"), None), "saving the opened design asks where");
+        assert_eq!(opened.doc.features, s.doc.features);
+        assert_eq!(opened.model.state().bodies.len(), 1);
+        // A design file renamed to .zip opens as it is.
+        let renamed = dir.join("renamed.solidcraft.zip");
+        std::fs::copy(&file, &renamed).unwrap();
+        let mut opened = Session::default();
+        opened.execute("doc.open", &json!({"path":renamed})).unwrap();
+        assert_eq!((opened.doc.features.clone(), opened.path.clone()), (s.doc.features.clone(), None));
+        // A crash report's design is saved as it is, a JSON one as a container; anything but a
+        // design or a .zip path is refused.
+        let wrapped = dir.join("crash.zip");
+        s.execute("file.save_for_sharing", &json!({"path":wrapped, "source":file})).unwrap();
+        assert_eq!(std::fs::read(&wrapped).unwrap(), std::fs::read(&file).unwrap());
+        let json_file = dir.join("bracket.json");
+        s.execute("file.export", &json!({"path":json_file})).unwrap();
+        s.execute("file.save_for_sharing", &json!({"path":wrapped, "source":json_file})).unwrap();
+        let shared = std::fs::read(&wrapped).unwrap();
+        assert!(solidcraft_io::is_design_container(&shared));
+        assert_eq!(solidcraft_io::read_design(&shared).unwrap().features, s.doc.features);
+        std::fs::write(dir.join("notes.txt"), "not a design").unwrap();
+        assert!(s.execute("file.save_for_sharing", &json!({"path":wrapped, "source":dir.join("notes.txt")})).is_err());
+        assert!(s.execute("file.save_for_sharing", &json!({"path":dir.join("bracket.solidcraft")})).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

@@ -185,6 +185,15 @@ pub static FORMATS: &[FormatSpec] = &[
         import: Some(ImportSpec { target: ImportTarget::Design, options: &[], native_only: false }),
         export: None,
     },
+    // A design shared as a .zip (`file.save_for_sharing`): opens as the design it holds.
+    FormatSpec {
+        id: "design-zip",
+        label: "SolidCraft design shared as .zip",
+        extensions: &[crate::SHARED_DESIGN_EXT],
+        role: Role::Design,
+        import: Some(ImportSpec { target: ImportTarget::Design, options: &[], native_only: false }),
+        export: None,
+    },
     FormatSpec {
         id: "step",
         label: "STEP",
@@ -396,7 +405,7 @@ pub fn import_filters(native: bool) -> Vec<(&'static str, Vec<&'static str>)> {
     for f in importable(native) {
         let Some(import) = f.import.as_ref() else { continue };
         match import.target {
-            ImportTarget::Design => add("SolidCraft design (container or JSON)", f.extensions),
+            ImportTarget::Design => add("SolidCraft design (container, JSON or shared .zip)", f.extensions),
             ImportTarget::Brep if import.native_only => add("FreeCAD and Rhino", f.extensions),
             ImportTarget::Brep => add(f.label, f.extensions),
             ImportTarget::Mesh => add("Mesh (3MF, STL, OBJ, glTF)", f.extensions),
@@ -457,7 +466,8 @@ mod tests {
             );
         }
         for e in with_target(ImportTarget::Design) {
-            assert!(crate::is_design_path(&format!("part.{e}")), "is_design_path misses .{e}");
+            let path = format!("part.{e}");
+            assert!(crate::is_design_path(&path) || crate::is_shared_design_path(&path), "is_design_path misses .{e}");
         }
         for e in crate::DESIGN_EXTS.iter().chain(["json"].iter()) {
             assert!(with_target(ImportTarget::Design).contains(e), "registry misses design .{e}");
@@ -482,6 +492,7 @@ mod tests {
     fn paths_resolve_to_the_canonical_rows() {
         assert_eq!(for_path("a.SolidCraft").map(|f| f.id), Some("design"));
         assert_eq!(for_path("a.json").map(|f| f.id), Some("design"));
+        assert_eq!(for_path("a.solidcraft.ZIP").map(|f| f.id), Some("design-zip"));
         assert_eq!(for_path("a.STEP").map(|f| f.id), Some("step"));
         assert_eq!(for_path("a.3mf").map(|f| f.id), Some("3mf"));
         assert_eq!(for_path("a.dxf").map(|f| f.id), Some("dxf-sketch"));
@@ -507,7 +518,10 @@ mod tests {
     fn import_filter_groups_hold_the_expected_extensions() {
         let native = import_filters(true);
         let find = |label: &str| native.iter().find(|(l, _)| *l == label).map(|(_, e)| e.clone()).unwrap_or_default();
-        assert_eq!(find("SolidCraft design (container or JSON)"), vec!["sc", "solidcraft", "solvecraft", "json"]);
+        assert_eq!(
+            find("SolidCraft design (container, JSON or shared .zip)"),
+            vec!["sc", "solidcraft", "solvecraft", "json", crate::SHARED_DESIGN_EXT]
+        );
         assert_eq!(find("STEP"), vec!["step", "stp"]);
         assert_eq!(find("IGES"), vec!["igs", "iges"]);
         assert_eq!(find("FreeCAD and Rhino"), vec!["fcstd", "3dm"]);
