@@ -1,9 +1,9 @@
 //! Other CAD formats read through [cadmpeg](https://github.com/cadmpeg/cadmpeg): FreeCAD
-//! `.FCStd` and Rhino `.3dm`. cadmpeg decodes the file into its neutral model and writes that as
+//! `.FCStd`, Rhino `.3dm` and Inventor `.ipt` / `.iam`. cadmpeg decodes the file into its neutral model and writes that as
 //! STEP, which the Import feature then reads and keeps like any STEP file.
 //!
-//! Only codecs for open formats are compiled in (the workspace enables cadmpeg-registry's
-//! `fcstd`, `rhino` and `step` features alone). cadmpeg's codecs for commercial formats, and its
+//! The workspace enables cadmpeg-registry's `fcstd`, `rhino`, `inventor` and `step` features.
+//! cadmpeg's other commercial-format codecs, and its
 //! `sat` codec (a ShapeManager stream decoder that reads ACIS as one dialect), are not built.
 //!
 //! This module is the importer seam: the one place cadmpeg is called, returning STEP text plus
@@ -11,14 +11,14 @@
 //! compare with our own STEP reader, without changing that reader.
 
 /// File extensions read through cadmpeg (lower case).
-pub const NATIVE_CAD_EXTS: [&str; 2] = ["fcstd", "3dm"];
+pub const NATIVE_CAD_EXTS: [&str; 4] = ["fcstd", "3dm", "ipt", "iam"];
 
-/// Is this a FreeCAD or Rhino file name (any case)?
+/// Is this a FreeCAD, Rhino or Inventor file name (any case)?
 pub fn is_native_cad_path(path: &str) -> bool {
     std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| NATIVE_CAD_EXTS.iter().any(|x| e.eq_ignore_ascii_case(x)))
 }
 
-/// Restate a FreeCAD or Rhino file (`file` is its name) as STEP text, with the losses
+/// Restate a FreeCAD, Rhino or Inventor file (`file` is its name) as STEP text, with the losses
 /// and warnings cadmpeg reported. Panics inside cadmpeg become errors.
 pub fn native_cad_to_step(bytes: &[u8], file: &str) -> Result<(String, Vec<String>), String> {
     let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
@@ -30,7 +30,7 @@ pub fn native_cad_to_step(bytes: &[u8], file: &str) -> Result<(String, Vec<Strin
     )
 }
 
-mod convert {
+pub(crate) mod convert {
     use std::io::Cursor;
 
     use cadmpeg_core::decode::{DecodeArena, DecodeContext, DecodeDepth, DecodeMode, DecodePolicy, ResourceLimits, View};
@@ -40,13 +40,13 @@ mod convert {
     use cadmpeg_registry::{DETECTION_PREFIX_LEN, Format, InputCatalog, ResolveSourceError, ResolvedSource, build_encoder, forced_input};
 
     /// The codecs we accept (cadmpeg codec ids), whatever else the registry recognises.
-    const ACCEPTED: [&str; 2] = ["fcstd", "rhino"];
+    const ACCEPTED: [&str; 3] = ["fcstd", "rhino", "inventor"];
 
     /// Caps for hostile input: cadmpeg's tight `service` profile, with our STEP size limit on
     /// the input. The service profile already admits a detailed part's 8 million entities:
     /// cadmpeg 0.6.3 dropped the collection-item budget that refused one at a million (#1783)
     /// and the work-unit budget that went with it.
-    pub(super) fn policy() -> DecodePolicy {
+    pub(crate) fn policy() -> DecodePolicy {
         DecodePolicy {
             mode: DecodeMode::Salvage,
             limits: ResourceLimits { max_input_bytes: crate::limits::Kind::Step.limit(), ..ResourceLimits::service() },
@@ -56,7 +56,7 @@ mod convert {
     /// Decode `bytes` (a file called `name`, extension `ext`) with the codec cadmpeg detects from
     /// the bytes, else the one the extension names, if it is one of `accepted`. Returns the codec id
     /// and the decoded model.
-    pub(super) fn decode(name: &str, ext: &str, bytes: &[u8], accepted: &[&str]) -> Result<(String, DecodeResult), String> {
+    pub(crate) fn decode(name: &str, ext: &str, bytes: &[u8], accepted: &[&str], depth: DecodeDepth) -> Result<(String, DecodeResult), String> {
         let policy = policy();
         let catalog = InputCatalog::with_builtins();
         let codec = {
@@ -81,12 +81,12 @@ mod convert {
         };
         let format = codec.id().as_str().to_string();
         if !accepted.contains(&format.as_str()) {
-            return Err(format!("{name}: {format} files are not supported (FreeCAD .FCStd and Rhino .3dm only)"));
+            return Err(format!("{name}: {format} files are not supported (FreeCAD .FCStd, Rhino .3dm and Inventor .ipt/.iam only)"));
         }
 
         // Decode in memory under the caps, as deep as the STEP writer reads: solids and products,
         // not the design history, which the import does not keep.
-        let options = DecodeOptions { depth: DecodeDepth::Geometry, policy };
+        let options = DecodeOptions { depth, policy };
         let decoded = codec.decode(&mut Cursor::new(bytes), &options).map_err(|e| match e {
             DecodeFailure::Codec(e) => format!("{name}: could not read this {format} file: {e}"),
             other => format!("{name}: {other}"),
@@ -97,9 +97,9 @@ mod convert {
     pub(super) fn to_step(name: &str, bytes: &[u8]) -> Result<(String, Vec<String>), String> {
         let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
         if !super::NATIVE_CAD_EXTS.contains(&ext.as_str()) {
-            return Err(format!("{name}: not supported (FreeCAD .FCStd and Rhino .3dm only)"));
+            return Err(format!("{name}: not supported (FreeCAD .FCStd, Rhino .3dm and Inventor .ipt/.iam only)"));
         }
-        let (format, decoded) = decode(name, &ext, bytes, &ACCEPTED)?;
+        let (format, decoded) = decode(name, &ext, bytes, &ACCEPTED, DecodeDepth::Geometry)?;
         let policy = policy();
         let (ir, report, fidelity) = decoded.into_parts();
         if !report.geometry_transferred() {

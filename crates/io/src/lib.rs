@@ -46,7 +46,9 @@ pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
 pub use svg::{decode_svg, read_svg, svg_nothing_to_import};
 mod gltf_in;
+mod inventor;
 pub use gltf_in::{GltfImport, Loader, MAX_GLTF_BYTES, MeshPlan, PlanPlace, glb_container, is_gltf_path, read_gltf};
+pub use inventor::{import_inventor, is_inventor_path};
 mod obj;
 pub use obj::read_obj;
 pub use threemf::{

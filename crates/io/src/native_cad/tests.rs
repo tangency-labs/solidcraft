@@ -34,6 +34,190 @@ fn extensions() {
         assert!(!is_native_cad_path(other), "{other}");
     }
     assert!(crate::is_step_path("c.FCStd") && crate::is_step_path("c.3dm"), "read as an Import feature like STEP and IGES");
+    assert!(is_native_cad_path("Part.IPT") && is_native_cad_path("Assembly.IAM"));
+}
+
+// Original, in-memory neutral records: no Inventor application, third-party
+// corpus files, or Corliss records are used to generate these tests.
+fn synthetic_inventor_history() -> cadmpeg_ir::CadIr {
+    use serde_json::json;
+    let mut ir = cadmpeg_ir::CadIr::empty();
+    let sketch = "synthetic:test:sketch#rectangle";
+    let ids: Vec<_> = (0..4).map(|i| format!("synthetic:test:entity#line-{i}")).collect();
+    let points = [[0.0, 0.0], [20.0, 0.0], [20.0, 12.0], [0.0, 12.0]];
+    ir.model.sketches.push(
+        serde_json::from_value(json!({
+            "id":sketch, "name":"Rectangle", "placement":{"kind":"resolved","frame":{
+                "origin":{"x":0,"y":0,"z":0}, "normal":{"x":0,"y":0,"z":1}, "u_axis":{"x":1,"y":0,"z":0}}},
+            "profiles":[ids.iter().map(|id| json!({"entity":id,"reversed":false})).collect::<Vec<_>>()]
+        }))
+        .unwrap(),
+    );
+    for i in 0..4 {
+        let start = points[i];
+        let end = points[(i + 1) % 4];
+        ir.model.sketch_entities.push(
+            serde_json::from_value(json!({
+                "id":ids[i], "sketch":sketch, "geometry":{"kind":"line",
+                    "start":{"u":start[0],"v":start[1]}, "end":{"u":end[0],"v":end[1]}}
+            }))
+            .unwrap(),
+        );
+        ir.model.sketch_constraints.push(
+            serde_json::from_value(json!({
+                "id":format!("synthetic:test:constraint#join-{i}"), "sketch":sketch, "active":true,
+                "definition":{"kind":"coincident_loci","loci":[
+                    {"kind":"end","entity":ids[i]}, {"kind":"start","entity":ids[(i + 1) % 4]}]}
+            }))
+            .unwrap(),
+        );
+    }
+    ir.model.features.push(
+        serde_json::from_value(json!({
+            "id":"synthetic:test:feature#sketch", "ordinal":0, "name":"Rectangle", "suppressed":false,
+            "definition":{"definition":"sketch","sketch":{"space":"planar","sketch":sketch}}
+        }))
+        .unwrap(),
+    );
+    ir.model.features.push(
+        serde_json::from_value(json!({
+            "id":"synthetic:test:feature#extrusion", "ordinal":1, "name":"Extrusion", "suppressed":false,
+            "dependencies":["synthetic:test:feature#sketch"],
+            "definition":{"definition":"extrude", "profile":{"kind":"sketch","value":sketch},
+                "direction":{"kind":"profile_normal"}, "start":{"kind":"profile_plane"},
+                "extent":{"kind":"one_sided","side":{"termination":{"kind":"blind","length":8}}},
+                "op":"new_body", "solid":true}
+        }))
+        .unwrap(),
+    );
+    ir
+}
+
+fn imported_history_volume(doc: &solidcraft_doc::Document) -> f64 {
+    let mut model = solidcraft_doc::Model::new();
+    model.evaluate(doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().filter_map(|r| r.error.as_ref()).collect::<Vec<_>>());
+    assert_eq!(model.state().bodies.len(), 1);
+    solidcraft_kernel::measure(&model.state().bodies[0].body).unwrap().volume
+}
+
+#[test]
+fn inventor_neutral_history_rebuilds_owned_editable_features() {
+    let ir = synthetic_inventor_history();
+    let mut doc = crate::inventor::rebuild(&ir, "part.ipt").unwrap();
+    assert_eq!(doc.features.len(), 2);
+    assert_eq!(doc.components.len(), 1);
+    assert!(doc.features.iter().all(|f| f.component == doc.components[0].id));
+    assert!((imported_history_volume(&doc) - 1920.0).abs() < 1e-6);
+    let solidcraft_doc::FeatureKind::Extrude { extent, .. } = &mut doc.features[1].kind else { panic!("not editable extrusion") };
+    extent.distance = "16".into();
+    assert!((imported_history_volume(&doc) - 3840.0).abs() < 1e-6, "editing the imported feature rebuilds the solid");
+    let reopened = solidcraft_doc::Document::from_json(&doc.to_json()).unwrap();
+    assert!((imported_history_volume(&reopened) - 3840.0).abs() < 1e-6);
+}
+
+#[test]
+fn inventor_neutral_symmetric_extent_is_total_distance() {
+    use cadmpeg_ir::features::{ExtrudeExtent, FeatureDefinition, FeatureOperation};
+    let mut ir = synthetic_inventor_history();
+    ir.model.features[1].evaluation.edit(|definition, _| {
+        let FeatureDefinition::Operation(FeatureOperation::Extrude { extent, .. }) = definition else { panic!("extrude") };
+        let ExtrudeExtent::OneSided { side } = extent else { panic!("one sided") };
+        *extent = ExtrudeExtent::Symmetric { side: side.clone() };
+    });
+    let doc = crate::inventor::rebuild(&ir, "symmetric.ipt").unwrap();
+    assert!((imported_history_volume(&doc) - 1920.0).abs() < 1e-6, "8 mm total, not 8 mm on each side");
+}
+
+#[test]
+fn inventor_parameters_preserve_units_and_dependency_expressions() {
+    use serde_json::json;
+    let mut ir = synthetic_inventor_history();
+    ir.model.parameters.push(
+        serde_json::from_value(json!({"id":"synthetic:test:parameter#twice",
+        "name":"twice", "expression":"2 * depth", "value":{"kind":"length","value":16},
+        "dependencies":["synthetic:test:parameter#depth"]}))
+        .unwrap(),
+    );
+    ir.model.parameters.push(
+        serde_json::from_value(json!({"id":"synthetic:test:parameter#depth",
+        "name":"depth", "expression":"0.8 cm", "value":{"kind":"length","value":8}}))
+        .unwrap(),
+    );
+    let mut doc = crate::inventor::rebuild(&ir, "parameters.ipt").unwrap();
+    assert_eq!(doc.params.iter().find(|p| p.name == "twice").unwrap().expr, "2 * depth");
+    assert!((doc.eval("twice", solidcraft_doc::expr::Kind::Length).unwrap() - 16.0).abs() < 1e-9);
+    doc.set_param("depth", "12", Some("mm"), None).unwrap();
+    assert!((doc.eval("twice", solidcraft_doc::expr::Kind::Length).unwrap() - 24.0).abs() < 1e-9);
+}
+
+#[test]
+fn inventor_incomplete_or_unsupported_history_is_refused_as_a_whole() {
+    let mut ir = synthetic_inventor_history();
+    ir.model.features[1].suppressed = None;
+    assert!(crate::inventor::rebuild(&ir, "unknown-state.ipt").unwrap_err().contains("suppression"));
+    ir.model.features[1].suppressed = Some(false);
+    ir.model.features[1].dependencies.clear();
+    ir.model.features[1].ordinal = 0;
+    assert!(crate::inventor::rebuild(&ir, "duplicate-order.ipt").unwrap_err().contains("history position"));
+    ir.model.features[1].ordinal = 1;
+    ir.model.features[1].evaluation.set_definition(
+        serde_json::from_value(serde_json::json!({
+            "definition":"unresolved", "family":"revolve"
+        }))
+        .unwrap(),
+    );
+    assert!(crate::inventor::rebuild(&ir, "unsupported.ipt").unwrap_err().contains("supported editable history subset"));
+    ir.model.features.clear();
+    assert!(crate::inventor::rebuild(&ir, "empty.ipt").is_err());
+}
+
+#[test]
+fn inventor_radius_dimension_remains_bound_to_its_parameter() {
+    use serde_json::json;
+    let mut ir = synthetic_inventor_history();
+    let sketch = ir.model.sketches[0].id.as_str().to_string();
+    let circle = "synthetic:test:entity#circle";
+    let radius = "synthetic:test:parameter#radius";
+    ir.model.sketch_entities.clear();
+    ir.model.sketch_entities.push(
+        serde_json::from_value(json!({"id":circle,"sketch":sketch,
+        "geometry":{"kind":"circle","center":{"u":0,"v":0},"radius":5}}))
+        .unwrap(),
+    );
+    ir.model.sketches[0].profiles = serde_json::from_value(json!([[{"entity":circle,"reversed":false}]])).unwrap();
+    ir.model.parameters.push(
+        serde_json::from_value(json!({"id":radius,"name":"radius","expression":"5 mm",
+        "value":{"kind":"length","value":5}}))
+        .unwrap(),
+    );
+    ir.model.sketch_constraints.clear();
+    ir.model.sketch_constraints.push(
+        serde_json::from_value(json!({"id":"synthetic:test:constraint#radius",
+        "sketch":sketch,"active":true,"driving":true,
+        "definition":{"kind":"radius","entity":circle,"parameter":radius}}))
+        .unwrap(),
+    );
+    let mut doc = crate::inventor::rebuild(&ir, "circle.ipt").unwrap();
+    // Circular mass properties use tessellation; allow 0.1% relative error
+    // against the analytic cylinder, while parameter changes must still rebuild it.
+    let before = imported_history_volume(&doc);
+    let expected = 200.0 * std::f64::consts::PI;
+    assert!((before - expected).abs() < expected * 1e-3, "{before} vs analytic {expected}");
+    doc.set_param("radius", "7 mm", Some("mm"), None).unwrap();
+    let after = imported_history_volume(&doc);
+    let expected = 392.0 * std::f64::consts::PI;
+    assert!((after - expected).abs() < expected * 1e-3, "{after} vs analytic {expected}");
+}
+
+#[test]
+fn inventor_hostile_bytes_fail_cleanly_without_a_corliss_dependency() {
+    for data in [b"".as_slice(), b"not a compound file", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", &[0u8; 512]] {
+        let outcome = std::panic::catch_unwind(|| crate::import_inventor(data, "hostile.ipt"));
+        let error = outcome.expect("no escaping panic").expect_err("no invented history");
+        assert!(error.to_string().contains("hostile.ipt"));
+    }
+    assert!(crate::import_inventor(b"", "assembly.iam").is_err());
 }
 
 #[test]
