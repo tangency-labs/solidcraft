@@ -96,6 +96,11 @@ block2 = "0.6"
 # (already in the tree through many crates).
 libc = "0.2"
 
+[target.'cfg(unix)'.dependencies]
+# A shutdown's SIGTERM closes the app cleanly (src/system_quit.rs), through a safe API (no unsafe);
+# its signal-hook-registry is already in the tree.
+signal-hook = { version = "0.4.5", default-features = false, features = ["iterator"] }
+
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 winit = { version = "0.30", default-features = false, features = ["x11"] }
 # Bringing the window forward on X11 when a close asks about unsaved designs (src/come_forward.rs):

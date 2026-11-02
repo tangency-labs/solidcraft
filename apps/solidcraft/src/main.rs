@@ -39,6 +39,8 @@ mod open_documents;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 mod space_mouse;
 mod startup;
+#[cfg(unix)]
+mod system_quit;
 #[cfg(any(target_os = "windows", test))]
 mod window_fit;
 
@@ -247,6 +249,12 @@ impl eframe::App for App {
         }
         // Every frame, so switching the bridge off reaches the reader while a picker is open too.
         self.nav_bridge.tick(&mut self.solve, ctx);
+        // The system asked the app to stop (shutdown, SIGTERM): close as a forced quit does,
+        // keeping unsaved changes for recovery, since nobody is there to answer "save changes?".
+        #[cfg(unix)]
+        if system_quit::requested() {
+            self.solve.quit_requested = true;
+        }
         if self.solve.quit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
@@ -1217,6 +1225,14 @@ fn main() -> eframe::Result {
             solidcraft_ui_egui::crash_ui::announce(&mut app, &crashed);
             if !notes.is_empty() {
                 app.set_status(notes.join(" "), true);
+            }
+            // A shutdown or restart closes the app cleanly instead of killing it (#7345).
+            #[cfg(unix)]
+            {
+                let ctx = cc.egui_ctx.clone();
+                if let Err(error) = system_quit::install(move || ctx.request_repaint()) {
+                    log::warn!("shutdown signals: {error}");
+                }
             }
             let nav_bridge = nav_bridge::NavBridge::start(&cc.egui_ctx);
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
