@@ -868,6 +868,12 @@ fn void(a: &Body, b: &Body, counts: &[(usize, usize)]) -> Result<Option<Body>> {
     })
 }
 
+/// A closed hollow: `a` with `cavity` as an inverted inner shell. Used when a freefrom shell's
+/// B-rep Cut finds no result even though the cavity lies inside (#6306).
+pub(crate) fn hollow_void(a: &Body, cavity: &Body) -> Result<Body> {
+    void(a, cavity, &record::counts(&[a, cavity]))?.ok_or_else(|| KernelError::Failed("the shell removed everything".into()))
+}
+
 thread_local! {
     /// Set while a boolean runs on bodies whose coincident faces were pushed apart (no
     /// second round of pushing).

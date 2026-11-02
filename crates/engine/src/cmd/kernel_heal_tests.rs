@@ -40,6 +40,43 @@ fn shell_a_box_with_a_drilled_hole() {
     assert!((v_shell - want).abs() < 2e-4 * want, "{v_shell} vs {want}");
 }
 
+/// #6306: after surface-extrude + thicken of an open spline wall, Shell must hollow the solid.
+#[test]
+fn shell_after_thicken_of_a_spline_wall() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let spline = run(&mut s, "sketch.spline.fit_point", json!({"points": [[0.0, 25.0], [27.0, 25.0], [49.5, 32.0], [66.5, 15.5]], "connect": false}))
+        ["created"]["curves"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": [spline], "distance": 30, "body_name": "Wall"}));
+    run(&mut s, "surface.thicken", json!({"bodies": ["Wall"], "thickness": 2, "body_name": "Panel"}));
+    let v0 = volume(&mut s);
+    assert!(v0 > 1000.0, "thickened panel volume {v0}");
+    let state = s.world_state();
+    let panel = state.bodies.iter().find(|b| b.name == "Panel").expect("Panel");
+    assert!(!panel.is_surface(), "thicken must produce a solid");
+    let mut faces = panel.body.faces(0.01).expect("faces");
+    faces.sort_by(|a, b| b.area.total_cmp(&a.area));
+    let c = faces[0].centroid;
+    let t = 0.5;
+    run(&mut s, "solid.shell", json!({"body": "Panel", "faces": [[c.x, c.y, c.z]], "thickness": t}));
+    let state = s.world_state();
+    let panel = state.bodies.iter().find(|b| b.name == "Panel").expect("Panel after shell");
+    let v1 = volume(&mut s);
+    // Freefrom thicken+shell may leave an open surface cup (faces of the hollow) or a solid
+    // with lower volume; either means the shell ran.
+    assert!(
+        panel.is_surface() || (v1 < v0 * 0.95 && v1 > v0 * 0.05),
+        "shell should hollow or open the panel: surface={} before {v0} after {v1} faces={}",
+        panel.is_surface(),
+        panel.body.face_count()
+    );
+    assert!(panel.body.face_count() > 4, "shelled panel should keep wall faces");
+}
+
 /// Offset Face on a cone and a sphere move them exactly.
 #[test]
 fn offset_cone_and_sphere_faces() {

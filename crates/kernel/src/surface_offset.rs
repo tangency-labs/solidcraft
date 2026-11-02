@@ -324,6 +324,157 @@ fn reparameterised(s: mt::BSplineSurface<mt::Point3>, u: (f64, f64), v: (f64, f6
     mt::BSplineSurface::new((ku, kv), s.control_points().clone())
 }
 
+/// How far a fitted solid offset (shell cavity) may stray from the true offset (mm).
+const FITTED_SOLID_TOLERANCE: f64 = 0.01;
+
+/// Test / debug hook: move every face by the same signed distance along its outward normal.
+#[doc(hidden)]
+pub fn offset_solid_fitted_uniform(b: &Body, distance: f64) -> Result<Body> {
+    offset_solid_fitted(b, |_| distance)
+}
+
+/// Offset every face of a closed solid by `shift(face index)` along its outward normal, using
+/// exact moves for planes and circular cylinders and fitted B-splines for the rest (as Thicken
+/// and Offset Surface do). Sharp edges get ruled walls between the parted offset edges; leftover
+/// open corners are patched with planes. Used when the analytic shell offset refuses freeform
+/// faces (#6306).
+pub(crate) fn offset_solid_fitted(b: &Body, shift: impl Fn(usize) -> f64) -> Result<Body> {
+    b.require_brep("offset")?;
+    let faces: Vec<mt::Face> = b.solid.face_iter().cloned().collect();
+    if faces.is_empty() {
+        return Err(KernelError::Invalid("nothing to offset".into()));
+    }
+    let shifts: Vec<f64> = (0..faces.len()).map(shift).collect();
+    if shifts.iter().any(|s| !s.is_finite() || s.abs() > 1e6) {
+        return Err(KernelError::Invalid("offset distance".into()));
+    }
+    let mut distances: Vec<f64> = shifts.iter().copied().filter(|d| d.abs() > 1e-15).collect();
+    distances.sort_by(|a, c| a.total_cmp(c));
+    distances.dedup_by(|a, c| (*a - *c).abs() < 1e-15);
+    if distances.is_empty() {
+        return Ok(b.clone());
+    }
+    let movers: Vec<FaceMover> = faces.iter().map(|f| FaceMover::new(f, &distances, FITTED_SOLID_TOLERANCE)).collect::<Result<_>>()?;
+    let size = b.size().max(1e-6);
+    let tol = FITTED_SOLID_TOLERANCE.max(size * 1e-7);
+    guard("offset solid fitted", || {
+        let near = |a: Vec3, c: Vec3| a.dist(c) <= tol * 4.0;
+        let mut verts: HashMap<mt::VertexID, Vec<mt::Vertex>> = HashMap::new();
+        let mut edges: HashMap<mt::EdgeID, Vec<mt::Edge>> = HashMap::new();
+        // Per-face moved copy of each of its absolute edges.
+        let mut eof: HashMap<(usize, mt::EdgeID), mt::Edge> = HashMap::new();
+        let mut users: HashMap<mt::EdgeID, Vec<usize>> = HashMap::new();
+        let mut abs_edges: HashMap<mt::EdgeID, mt::Edge> = HashMap::new();
+        let mut out: Vec<mt::Face> = Vec::with_capacity(faces.len());
+        let mut history = Vec::with_capacity(faces.len());
+        for (fi, (f, mv)) in faces.iter().zip(&movers).enumerate() {
+            let d = shifts[fi];
+            let map = |p: Vec3| mv.point(p, d);
+            let mut vertex = |v: &mt::Vertex| -> Result<mt::Vertex> {
+                let at = map(from_p3(v.point()))?;
+                let list = verts.entry(v.id()).or_default();
+                if let Some(found) = list.iter().find(|m| near(from_p3(m.point()), at)) {
+                    return Ok(found.clone());
+                }
+                let nv = mt::Vertex::new(p3(at));
+                list.push(nv.clone());
+                Ok(nv)
+            };
+            let mut wires = Vec::new();
+            for w in f.absolute_boundaries() {
+                let mut wire = Vec::new();
+                for e in w.edge_iter() {
+                    let abs = if e.orientation() { e.clone() } else { e.inverse() };
+                    let list = users.entry(abs.id()).or_default();
+                    if !list.contains(&fi) {
+                        list.push(fi);
+                    }
+                    abs_edges.entry(abs.id()).or_insert_with(|| abs.clone());
+                    let (a, c) = (vertex(abs.front())?, vertex(abs.back())?);
+                    let curve = abs.curve();
+                    let (t0, t1) = curve.range_tuple();
+                    let mid = map(from_p3(curve.subs(0.5 * (t0 + t1))))?;
+                    let elist = edges.entry(abs.id()).or_default();
+                    let shared = elist.iter().find(|m| {
+                        m.front().id() == a.id() && m.back().id() == c.id() && {
+                            let mc = m.curve();
+                            let (s0, s1) = mc.range_tuple();
+                            near(from_p3(mc.subs(0.5 * (s0 + s1))), mid)
+                        }
+                    });
+                    let moved = match shared {
+                        Some(m) => m.clone(),
+                        None => {
+                            let curve = mv.curve(&curve, d)?;
+                            let m = mt::Edge::new_unchecked(&a, &c, curve);
+                            elist.push(m.clone());
+                            m
+                        }
+                    };
+                    eof.insert((fi, abs.id()), moved.clone());
+                    wire.push(if e.orientation() { moved } else { moved.inverse() });
+                }
+                wires.push(mt::Wire::from(wire));
+            }
+            let surface = mv.surface(d)?;
+            let mut nf = mt::Face::new_unchecked(wires, surface);
+            if !f.orientation() {
+                nf.invert();
+            }
+            out.push(nf);
+            history.push(crate::record::generated(vec![FaceOrigin::Offset { operand: 0, face: fi }]));
+        }
+        // Sharp edges: ruled walls between the two faces' offset copies of the edge.
+        let mut gaps: Vec<(mt::Edge, mt::Edge)> = Vec::new();
+        for (id, fs) in &users {
+            let [fa, fb] = fs.as_slice() else { continue };
+            let (Some(ea), Some(eb)) = (eof.get(&(*fa, *id)), eof.get(&(*fb, *id))) else { continue };
+            if ea.id() == eb.id() {
+                continue;
+            }
+            gaps.push((ea.clone(), eb.clone()));
+        }
+        let _ = abs_edges;
+        let mut links: HashMap<(mt::VertexID, mt::VertexID), mt::Edge> = HashMap::new();
+        let mut link = |a: &mt::Vertex, c: &mt::Vertex| -> mt::Edge {
+            if let Some(e) = links.get(&(c.id(), a.id())) {
+                return e.inverse();
+            }
+            links.entry((a.id(), c.id())).or_insert_with(|| mt::Edge::new_unchecked(a, c, mt::Curve::Line(mt::Line(a.point(), c.point())))).clone()
+        };
+        let used_forward = |faces: &[mt::Face], e: &mt::Edge| -> Option<bool> {
+            faces
+                .iter()
+                .flat_map(|f| f.boundaries().into_iter().flat_map(|w| w.edge_iter().cloned().collect::<Vec<_>>()))
+                .find(|x| x.id() == e.id())
+                .map(|x| x.front().id() == e.front().id())
+        };
+        for (ea, eb) in gaps {
+            let wire: mt::Wire = vec![ea.clone(), link(ea.back(), eb.back()), eb.inverse(), link(eb.front(), ea.front())].into();
+            let surf = mt::builder::homotopy(&ea, &eb).surface();
+            let wall = mt::Face::new_unchecked(vec![wire], surf);
+            let wall = if used_forward(&out, &ea).unwrap_or(false) { wall.inverse() } else { wall };
+            out.push(wall);
+            history.push(crate::record::generated(vec![FaceOrigin::Offset { operand: 0, face: 0 }]));
+        }
+        // Patch leftover open boundaries with planes (sharp corners).
+        let open = mt::Shell::from(out.clone()).extract_boundaries();
+        for w in open {
+            let patch = mt::builder::try_attach_plane(&[w.inverse()])
+                .map_err(|_| KernelError::Failed("not supported yet: shell offset leaves a corner that does not close flat".into()))?;
+            out.push(patch);
+            history.push(crate::record::generated(vec![FaceOrigin::Offset { operand: 0, face: 0 }]));
+        }
+        let shell = mt::Shell::from(out);
+        if shell.shell_condition() != mt::ShellCondition::Closed {
+            return Err(KernelError::Failed("not supported yet: shell offset of this freeform body does not close".into()));
+        }
+        let solid = crate::body::Solid::try_new(vec![shell]).map_err(|e| KernelError::Failed(format!("shell offset: {e}")))?;
+        let operand = crate::record::Operand::new(b);
+        crate::record::attach(Body::new(solid)?, &[operand], Some(history), HashMap::new())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
