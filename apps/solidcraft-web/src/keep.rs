@@ -160,9 +160,10 @@ pub fn due(now: f64, first_unwritten: f64, last_change: f64) -> bool {
 }
 
 /// Whether leaving the page asks through the browser's "leave site?" box: there is unsaved work,
-/// and it isn't all already kept in the browser (with the preference off it never is).
-pub fn asks_before_unload(persists: bool, keep: bool, any_unsaved: bool, all_kept: bool) -> bool {
-    persists && any_unsaved && !(keep && all_kept)
+/// and either the user still wants to be asked or it isn't all kept in the browser yet (with the
+/// keep preference off it never is, so there the box always stays).
+pub fn asks_before_unload(persists: bool, keep: bool, also_ask: bool, any_unsaved: bool, all_kept: bool) -> bool {
+    persists && any_unsaved && (also_ask || !(keep && all_kept))
 }
 
 /// An answer in the "Restore unsaved design?" window.
@@ -293,18 +294,21 @@ mod tests {
     }
 
     #[test]
-    fn the_browser_asks_before_unload_only_without_a_current_copy() {
-        // The preference off: exactly as before, unsaved work asks.
-        assert!(asks_before_unload(true, false, true, true));
-        assert!(asks_before_unload(true, false, true, false));
-        // On, with every unsaved design kept: no browser box.
-        assert!(!asks_before_unload(true, true, true, true));
-        // On, but a copy still being written (or failed): the browser still asks.
-        assert!(asks_before_unload(true, true, true, false));
+    fn the_browser_asks_before_unload_unless_told_not_to_and_every_copy_is_current() {
+        // Keeping off: exactly as before, unsaved work asks, whatever the second option says.
+        assert!(asks_before_unload(true, false, true, true, true));
+        assert!(asks_before_unload(true, false, true, true, false));
+        assert!(asks_before_unload(true, false, false, true, true));
+        // Keeping on, asking on (the default): both, the box and the copy.
+        assert!(asks_before_unload(true, true, true, true, true));
+        // Keeping on, asking off, every unsaved design kept: no browser box.
+        assert!(!asks_before_unload(true, true, false, true, true));
+        // Keeping on, asking off, a copy still being written (or failed): the browser still asks.
+        assert!(asks_before_unload(true, true, false, true, false));
         // Nothing unsaved, or an embedded page that keeps nothing: never.
-        assert!(!asks_before_unload(true, true, false, false));
-        assert!(!asks_before_unload(true, false, false, false));
-        assert!(!asks_before_unload(false, false, true, false));
+        assert!(!asks_before_unload(true, true, true, false, false));
+        assert!(!asks_before_unload(true, false, true, false, false));
+        assert!(!asks_before_unload(false, false, true, true, false));
     }
 
     #[test]

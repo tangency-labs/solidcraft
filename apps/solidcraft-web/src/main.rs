@@ -231,8 +231,8 @@ mod web {
 
     /// The browser's "leave site? changes you made may not be saved" prompt while a design has
     /// unsaved changes (the page can't show its own dialog when it is being closed). With "keep
-    /// unsaved work in this browser" on, there is nothing to ask once every unsaved design's copy
-    /// is current (`keep::asks_before_unload`, #10220).
+    /// unsaved work in this browser" on and "still ask" off, there is nothing to ask once every
+    /// unsaved design's copy is current (`keep::asks_before_unload`, #10220).
     fn ask_before_unload(window: &web_sys::Window) {
         let on_unload = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::BeforeUnloadEvent)>::new(|e: web_sys::BeforeUnloadEvent| {
             if UNSAVED.with(std::cell::Cell::get) {
@@ -890,7 +890,8 @@ mod web {
         /// Whether leaving the page asks through the browser's own box (`keep::asks_before_unload`).
         fn asks_before_unload(&self) -> bool {
             let any = solidcraft_ui_egui::documents::any_dirty(&self.app);
-            keep::asks_before_unload(self.launch.persists(), self.app.preferences.keep_unsaved_in_browser, any, self.all_kept)
+            let prefs = &self.app.preferences;
+            keep::asks_before_unload(self.launch.persists(), prefs.keep_unsaved_in_browser, prefs.keep_unsaved_also_asks, any, self.all_kept)
         }
 
         /// Whether the shell already has the on-demand face the live language needs.

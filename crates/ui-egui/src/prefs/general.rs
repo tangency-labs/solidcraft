@@ -47,6 +47,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             if app.services.browser_files.is_some() {
                 let tip = app.tr("prefs.keep_unsaved_in_browser_tip").to_string();
                 ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_in_browser"), &mut app.preferences.keep_unsaved_in_browser).on_hover_text(tip);
+                if app.preferences.keep_unsaved_in_browser {
+                    let tip = app.tr("prefs.keep_unsaved_also_asks_tip").to_string();
+                    ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_also_asks"), &mut app.preferences.keep_unsaved_also_asks).on_hover_text(tip);
+                }
             }
             ui_kit::settings_form(ui, labels, |ui| {
                 let shown = ui_kit::settings_row_help(ui, app.tr("ui.autosave_every"), crate::i18n::tr_label("0 turns it off"), |ui| {
