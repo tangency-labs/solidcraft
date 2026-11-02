@@ -241,8 +241,8 @@ impl WireConstraintKind {
         }
     }
 
-    /// Whether its residuals are lengths (mm), not angles: only those say how far a point has
-    /// still to go.
+    /// Whether its residuals say how far a point has still to go: lengths, not angles (an angle's
+    /// residual is weighed into mm too, but turning a line moves its end along an arc, in steps).
     fn in_mm(&self) -> bool {
         !matches!(self, WireConstraintKind::Angle { .. })
     }
@@ -1221,11 +1221,11 @@ fn lm(blocks: &[Block], n: usize, x0: &[f64], hold: Option<usize>, work: &mut f6
     let mut costs = vec![cost(&r)];
     let mut lambda = 1e-3;
     let mut nudges = 0;
-    for it in 0..MAX_ITERS {
+    for _ in 0..MAX_ITERS {
         if r.iter().all(|v| v.abs() < TOL) {
             break;
         }
-        if let Some(was) = it.checked_sub(STALL_ITERS).and_then(|i| costs.get(i)) {
+        if let Some(was) = costs.len().checked_sub(STALL_ITERS + 1).and_then(|i| costs.get(i)) {
             let now = costs.last().copied().unwrap_or(0.0);
             if was - now <= STALL_DECREASE * was && r.iter().any(|v| v.abs() > STALL_RESIDUAL) {
                 break;
@@ -1312,9 +1312,13 @@ fn lm(blocks: &[Block], n: usize, x0: &[f64], hold: Option<usize>, work: &mut f6
             // order where it starts (lines exactly or nearly parallel that must make an angle,
             // the through point of a semicircle whose radius must change) stalls the rest. Its
             // own points are nudged off that start, a few times at most.
-            if nudges < MAX_NUDGES && nudge(blocks, &mut x, nudges) {
+            // Not while a dragged point is pulled: that pass's compromise is thrown away anyway.
+            if hold.is_none() && nudges < MAX_NUDGES && nudge(blocks, &mut x, nudges) {
                 nudges += 1;
                 r = residuals(&x);
+                // The stall window starts again from the nudged start.
+                costs.clear();
+                costs.push(cost(&r));
                 lambda = 1e-3;
                 continue;
             }
@@ -1327,8 +1331,9 @@ fn lm(blocks: &[Block], n: usize, x0: &[f64], hold: Option<usize>, work: &mut f6
 /// Most times one run nudges a stalled start (see [`nudge`]).
 const MAX_NUDGES: usize = 3;
 
-/// Move the free points of the constraints still off by a thousandth of each one's own size,
-/// in directions fixed by `round` (the same every run). Returns whether any moved.
+/// Move the free points of the constraints still off by a thousandth of each one's own size (the
+/// shortest step between its consecutive points: a line's length, not the gap between two
+/// lines), in directions fixed by `round` (the same every run). Returns whether any moved.
 fn nudge(blocks: &[Block], x: &mut [f64], round: usize) -> bool {
     let mut moved = false;
     let stuck: Vec<&Block> = blocks.iter().filter(|b| !b.holds(x)).collect();
@@ -1341,7 +1346,8 @@ fn nudge(blocks: &[Block], x: &mut [f64], round: usize) -> bool {
                 Pt::At(q) => *q,
             })
             .collect();
-        let size = at.iter().flat_map(|p| at.iter().map(move |q| p.dist(*q))).fold(0.0f64, f64::max).max(1e-3);
+        let size = at.windows(2).map(|w| w[0].dist(w[1])).filter(|d| *d > 1e-9).fold(f64::INFINITY, f64::min);
+        let size = if size.is_finite() { size } else { 1.0 };
         for v in &b.vars {
             for axis in 0..3 {
                 let k = (3 * v + axis + 7 * round) as f64 + 1.0;

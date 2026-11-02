@@ -1612,10 +1612,13 @@ impl Session {
         }
         self.refresh();
         for r in &self.model.results {
-            // A value a 3D dimension or point cannot take (#10608), so the sketch no longer
-            // evaluates at all, is refused like one that conflicts.
-            if let (Some(e), true) = (&r.error, solved_before.contains_key(&r.id))
-                && self.doc.sketch(r.id).is_ok_and(|sk| !sk.wire_constraints.is_empty())
+            // A value a 3D dimension or point of this sketch cannot take (#10608) is refused like
+            // one that conflicts; an error from upstream is not the edit's to refuse.
+            if r.error.is_some()
+                && solved_before.contains_key(&r.id)
+                && let Ok(sk) = self.doc.sketch(r.id)
+                && !sk.wire_constraints.is_empty()
+                && let Err(e) = self.doc.apply_wire_values(&self.doc.evaluation_values(), &mut sk.clone())
             {
                 return Err(EngineError::Other(format!("sketch `{}`: {e}; the values were not changed", r.name)));
             }
