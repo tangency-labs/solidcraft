@@ -1896,6 +1896,9 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 crate::scenario::publish_rect(&format!("ribbon:running_section:{tab}:{panel}"), lr);
             } else if panel_open || hot {
                 painter.rect_filled(lr, t.radius_sm, if panel_open { accent.soft } else { t.hover });
+            } else if enabled_panel && !finish {
+                // Faint resting fill so the section header reads as a control (#4118).
+                painter.rect_filled(lr, t.radius_sm, t.field);
             }
             if hidden_reveal.is_some_and(|r| !r.preview) {
                 paint_reveal(&painter, lr, &accent, pulse, true);
@@ -1908,8 +1911,9 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             } else {
                 FontId::proportional(crate::theme::Tokens::get().font_caption)
             };
-            let label_width = painter.layout_no_wrap(label.clone(), font, t.text_dim).size().x;
-            let ink = if panel_open { accent.ink } else { t.text_dim };
+            // Full text ink at rest (not text_dim): section headers must outrank the commands above (#4118).
+            let ink = if panel_open { accent.ink } else { t.text };
+            let label_width = painter.layout_no_wrap(label.clone(), font, ink).size().x;
             ribbon_text(ui, lr.center() - vec2(if finish { 0.0 } else { 6.0 }, 0.0), &label, t.font_caption, ink, panel_open || hot);
             if !finish {
                 dropdown_arrow(&painter, pos2(lr.center().x + label_width / 2.0 + 1.0, lr.center().y + 0.5), ink);
@@ -4457,6 +4461,22 @@ mod dropdown_tests {
         let t = Tokens::get();
         assert!(group_heading_font().size < t.font_caption, "{} vs the header's {}", group_heading_font().size, t.font_caption);
         assert_eq!(group_heading_text("Edges"), "Edges", "written as named, not in capitals");
+    }
+
+    /// Resting section headers use full text ink on a field fill so they outrank the commands
+    /// above and still meet WCAG AA small-text contrast in both themes (#4118).
+    #[test]
+    fn ribbon_section_headers_rest_with_full_text_contrast() {
+        for (dark, t) in [(false, Tokens::light()), (true, Tokens::dark())] {
+            let card = if dark { t.panel } else { Color32::WHITE };
+            let ground = crate::theme::composite(t.field, card);
+            let ratio = crate::theme::contrast_ratio(t.text, ground);
+            assert!(ratio >= 4.5, "dark={dark}: section label {ratio:.2}:1 on resting fill ({:?} on {:?})", t.text, ground);
+            assert!(
+                crate::theme::contrast_ratio(t.text, ground) > crate::theme::contrast_ratio(t.text_dim, ground),
+                "dark={dark}: full text ink outranks text_dim on the resting fill"
+            );
+        }
     }
 
     /// Every panel's drop-down of every tab, and Sketch › Create's families, is at most
