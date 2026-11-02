@@ -10,6 +10,8 @@
 //!   of it first
 //! - `engine.commands`: every command with tab, panel, params and enablement
 //! - `document.inspect {measure?}`: the design (parameters, timeline, bodies, sketches)
+//! - `document.export`, `document.import {text, name?}`, `document.saved {revision}`: the design
+//!   for a host that keeps the files itself (#8517)
 //! - `ui.inspect`: UI state, viewport rect, camera, tool and dialog
 //! - `ui.drag {x0, y0, x1, y1, button?, shift?, ctrl?, steps?, hold?}` (box selection, navigation;
 //!   `hold` keeps the button down that many frames before moving);
@@ -704,6 +706,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "engine.commands" => wrap(execute(app, "engine.commands", json!({}))),
         "document.inspect" => wrap(app.session.execute("document.inspect", p).map_err(|e| e.to_string())),
         "document.revision" => wrap(app.session.execute("document.revision", p).map_err(|e| e.to_string())),
+        // A host that keeps the files itself (an editing embed, #8517).
+        "document.export" => wrap(crate::documents::export(app)),
+        "document.import" => wrap(crate::documents::import(app, p)),
+        "document.saved" => wrap(crate::documents::saved(app, p)),
         // The connection already counts as subscribed (`DesignWatch::join`), and its events start
         // from this answer: published first, so no event repeats it and none older follows.
         "control.subscribe" => {

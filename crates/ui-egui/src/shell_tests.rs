@@ -782,6 +782,51 @@ fn sketched(h: &mut Harness) {
     h.app.run("sketch.finish", json!({})).unwrap();
 }
 
+#[test]
+fn a_host_keeps_the_design_and_gives_it_back_with_its_timeline() {
+    let mut h = Harness::new();
+    h.app.embed_editor = true;
+    sketched(&mut h);
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.settle();
+    let kept = h.call("document.export", json!({}));
+    assert_eq!(kept["ok"], true, "{kept}");
+    let kept = &kept["result"];
+    assert_eq!((kept["format"].as_str(), kept["dirty"].as_bool()), (Some("json"), Some(true)));
+    assert_eq!(kept["revision"], h.call("document.revision", json!({}))["result"]["revision"], "the revision that follows the design");
+    let text = kept["text"].as_str().unwrap().to_string();
+    let timeline = |h: &Harness| h.app.session.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+    let before = timeline(&h);
+    assert!(before.len() >= 2, "{before:?}");
+    // The host says it saved: the design is saved from there, until the next change.
+    let at = kept["revision"].as_u64().unwrap();
+    assert_eq!(h.call("document.saved", json!({"revision": at}))["result"]["dirty"], false);
+    assert!(!h.app.session.is_dirty());
+    assert_eq!(h.call("document.saved", json!({"revision": at + 7}))["ok"], false, "another revision is refused");
+    // Something else is drawn and left open; the kept design comes back in its place, saved,
+    // timeline and all, and what was going on in the other leaves with it.
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    assert_eq!(h.call("document.saved", json!({"revision": at}))["ok"], false, "the design changed since");
+    h.call("ui.start", json!({"command":"sketch.create"}));
+    h.settle();
+    assert!(h.app.dialog.is_some(), "{}", h.call("ui.inspect", json!({})));
+    let (docs, id) = (h.app.docs.count(), h.app.session.document_id.clone());
+    let back = h.call("document.import", json!({"text": text, "name": "Bracket"}));
+    assert_eq!(back["ok"], true, "{back}");
+    assert_eq!(back["result"]["errors"], 0);
+    assert_eq!(back["result"]["revision"], h.call("document.revision", json!({}))["result"]["revision"]);
+    assert_eq!(timeline(&h), before);
+    assert_eq!((h.app.session.doc.name.as_str(), h.app.session.is_dirty(), h.app.docs.count()), ("Bracket", false, docs));
+    assert_ne!(h.app.session.document_id, id, "another design, as one opened is");
+    assert!(h.app.session.undo.is_empty(), "the undo history is the opened design's own");
+    assert!(h.app.dialog.is_none() && h.app.tool.is_none());
+    h.settle();
+    for bad in [json!({}), json!({"text": "{"}), json!({"text": "not a design"})] {
+        assert_eq!(h.call("document.import", bad.clone())["ok"], false, "{bad}");
+        assert_eq!(timeline(&h), before, "a refused import leaves the design as it was");
+    }
+}
+
 /// Dialogs › In the left column (#6707): Extrude takes the place of the browser and the History
 /// at the left, at the column's width and never narrower than its card, in both layouts and
 /// every History dock. The view keeps its size, the dialog is covered, the content area starts

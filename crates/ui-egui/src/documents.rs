@@ -472,6 +472,49 @@ pub fn adopt(app: &mut SolveApp, session: Session) {
     }
 }
 
+/// The active design as its file holds it (`document.export`): what a host that keeps the files
+/// itself writes (#8517). `text` is the design's JSON, the same a `.json` design file holds, and
+/// `revision` is the one `document.revision` names this state by.
+pub fn export(app: &mut SolveApp) -> Result<Value, String> {
+    let revision = app.session.design_revision();
+    let design = app.session.design();
+    let text = String::from_utf8(solidcraft_engine::io::write_design(&design)).map_err(|e| e.to_string())?;
+    Ok(json!({"name": design.name, "revision": revision, "dirty": app.session.is_dirty(), "format": "json", "text": text}))
+}
+
+/// Replace the active design with one a host kept (`document.import {text, name?}`): the text of
+/// a design file (its JSON, as `document.export` gives it). It opens saved, with nothing to undo,
+/// in the active design's place: as a design opened in a tab of its own, with that tab closed
+/// without asking. A text that does not read changes nothing.
+pub fn import(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
+    if app.file_picker_busy() || app.file_load.busy() || app.docs.closing.is_some() || app.docs.quitting.is_some() || app.docs.batch.is_some() {
+        return Err("a file is being opened or saved, or designs are being closed: try again".into());
+    }
+    let text = p.get("text").and_then(Value::as_str).ok_or("missing `text` (the design's JSON)")?;
+    let mut doc = solidcraft_engine::io::read_design(text.as_bytes()).map_err(|e| e.to_string())?;
+    if let Some(name) = p.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()) {
+        doc.name = name.to_string();
+    }
+    let replaced = app.docs.active;
+    open_tab(app, Session::opened(doc, None))?;
+    close(app, replaced, true);
+    let errors = app.session.model.results.iter().filter(|r| r.error.is_some()).count();
+    let revision = app.session.design_revision();
+    Ok(json!({"name": app.session.doc.name, "features": app.session.doc.features.len(), "errors": errors, "revision": revision}))
+}
+
+/// The host saved the design at `revision` (`document.saved`): it counts as saved from there.
+/// Refused when the design has changed since.
+pub fn saved(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
+    let revision = p.get("revision").and_then(Value::as_u64).ok_or("missing `revision`")?;
+    let now = app.session.design_revision();
+    if revision != now {
+        return Err(format!("the design changed since revision {revision} (now {now})"));
+    }
+    app.session.mark_saved();
+    Ok(json!({"revision": revision, "dirty": app.session.is_dirty()}))
+}
+
 /// A new, empty design in its own tab. One that is already empty keeps its tab and still
 /// takes Units of new designs (#1205): a launch starts on that empty design, so returning
 /// here used to leave it in millimetres.

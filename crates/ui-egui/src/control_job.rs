@@ -132,7 +132,7 @@ fn reading(req: &ControlRequest) -> Option<(&'static str, Value)> {
 
 /// Requests that change the design: they wait while one computes.
 pub(crate) fn changes_the_design(method: &str) -> bool {
-    matches!(method, "engine.execute" | "command" | "engine.script" | "engine.batch")
+    matches!(method, "engine.execute" | "command" | "engine.script" | "engine.batch" | "document.import" | "document.saved")
 }
 
 /// What a request computes off the window thread.
