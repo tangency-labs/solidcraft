@@ -664,7 +664,8 @@ completed drawings publish atomically. The browser still exports synchronously.
   helices and curves on the bend, their walls square to the sheet. Free-form bases use bounded
   sampling. A fold crosses the sheet's own outer edges the same way, slanted or on any curve,
   with the outline exact in the flat pattern and its DXF, and flanges and other folds still go
-  on the panels.
+  on the panels. A free-form edge's wall in the solid is one face per curve as drawn, also where
+  a cut-out runs through it; with pockets, which read planes and cylinders, it follows fitted arcs.
   Parallel prismatic partial-depth cuts retain pocket side and depth through transfer and
   unfold/refold, with separate pocket contours in preview and DXF. Planar Intersect preserves
   exact holes and retained islands, including the union of multiple selected profiles, and

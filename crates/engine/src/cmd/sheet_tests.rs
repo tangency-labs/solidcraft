@@ -3587,6 +3587,102 @@ fn flanges_go_on_a_curved_outline_folded_across_its_straight_part() {
     assert!(rel(v, t2_volume_from_flat(&f)) < 3e-4, "volume {v} vs the flat's {}: {f}", t2_volume_from_flat(&f));
 }
 
+/// A free-form rim is one face per curve as drawn, not a face per fitted arc: on the flat blank,
+/// across a fold, and around a cut-out. Pockets, machined by booleans that read planes and
+/// cylinders, bring the fitted arcs back, and a hole drilled in the sheet doesn't.
+#[test]
+fn a_free_form_rim_is_one_face_per_curve() {
+    let ellipse = ("sketch.ellipse", json!({"center": [0, 0], "major": [80, 0], "minor_radius": 40}));
+    let spline = (
+        "sketch.spline.fit_point",
+        json!({"points": [[70, -5], [40, 40], [0, 40], [-50, 35], [-85, 0], [-40, -50], [0, -35], [35, -25]], "periodic": true}),
+    );
+    let fold = json!({"points": [[10, -300, 2], [10, 300, 2]], "fixed": [-60, 0, 2]});
+    // Top, bottom and a wall for each of an ellipse's 4 conics and a closed spline's 8 cubics.
+    for (name, draw, curves) in [("ellipse", ellipse.clone(), 4), ("spline", spline, 8)] {
+        let mut s = Session::default();
+        t2_curved_blank(&mut s, std::slice::from_ref(&draw), "0.4");
+        assert_eq!(faces(&mut s).0, 2 + curves, "{name}, flat");
+        run(&mut s, "sheet.fold", fold.clone());
+        // The fold cuts 2 curves, adding 2 walls on the zone and 2 more pieces beside it. A curve
+        // the fold's lines cross more than once can add a few, never one per fitted arc.
+        let folded = faces(&mut s).0;
+        assert!(folded >= 2 + curves + 6 && folded <= 2 + curves + 12, "{name}, folded: {folded} faces");
+        let (v, f) = (volume(&mut s), flat(&mut s));
+        assert!(rel(v, t2_volume_from_flat(&f)) < 3e-4, "{name}: volume {v} vs the flat's {}", t2_volume_from_flat(&f));
+    }
+    // Around a cut-out: 4 walls more for an ellipse wholly inside the sheet.
+    let mut s = Session::default();
+    t2_curved_blank(&mut s, std::slice::from_ref(&ellipse), "0.4");
+    let before = faces(&mut s).0;
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Hole"}));
+    run(&mut s, "sketch.ellipse", json!({"center": [-30, 0], "major": [-10, 0], "minor_radius": 10}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Hole", "distance": 20, "direction": "symmetric", "operation": "cut", "targets": ["Body1"]}));
+    assert_eq!(faces(&mut s).0, before + 4);
+    // A drilled hole keeps the rim; a pocket doesn't.
+    run(&mut s, "solid.hole", json!({"position": [40, 0, 2], "diameter": 8}));
+    let drilled = faces(&mut s).0;
+    assert!(drilled <= before + 4 + 3, "{drilled} faces after drilling");
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pocket"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [10, 20], "radius": 5}));
+    run(&mut s, "sketch.finish", json!({}));
+    let v = volume(&mut s);
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "Pocket", "distance": 1, "direction": "negative", "operation": "cut", "targets": ["Body1"], "start_offset": 2}),
+    );
+    // The rims go to their fitted arcs with the pocket, which moves the volume too: by at most the
+    // fit tolerance (0.001 mm) over the rims (about 500 mm long) 2 mm high.
+    let pocket = v - volume(&mut s);
+    assert!((pocket - PI * 25.0).abs() < 1.0, "the pocket took {pocket}");
+    assert!(faces(&mut s).0 > before + 40, "with a pocket the rim follows its fitted arcs");
+}
+
+/// A cut through a free-form rim leaves the rest of the rim as drawn: a wall per curve, not a face
+/// per fitted arc, far from the cut as well as beside it, and it folds the same.
+#[test]
+fn a_cut_across_a_free_form_rim_keeps_its_curves() {
+    let spline = (
+        "sketch.spline.fit_point",
+        json!({"points": [[-37.22, 26.29], [-2.29, -8.73], [34, 17], [58.5, -6], [32.19, -37.73], [-2.1, -17.06], [-45.64, -35.44]], "periodic": true}),
+    );
+    let cut = |s: &mut Session, draw: (&str, Value)| {
+        run(s, "sketch.create", json!({"plane": "XY", "name": "Cut"}));
+        run(s, draw.0, draw.1);
+        run(s, "sketch.finish", json!({}));
+        run(s, "solid.extrude", json!({"sketch": "Cut", "distance": 20, "direction": "symmetric", "operation": "cut", "targets": ["Body1"]}));
+    };
+    let rectangle = ("sketch.rectangle.two_point", json!({"p0": [50.18, -45], "p1": [70.68, 27]}));
+    let ellipse = ("sketch.ellipse", json!({"center": [-2, -13], "major": [18, -13], "minor_radius": 8}));
+    // Top, bottom, what's left of 7 cubics and one straight edge of the cut.
+    let mut s = Session::default();
+    t2_curved_blank(&mut s, std::slice::from_ref(&spline), "0.4");
+    cut(&mut s, rectangle);
+    assert!(faces(&mut s).0 <= 2 + 7 + 1, "{} faces", faces(&mut s).0);
+    let (v, f) = (volume(&mut s), flat(&mut s));
+    assert!(rel(v, t2_volume_from_flat(&f)) < 3e-4, "volume {v} vs the flat's {}", t2_volume_from_flat(&f));
+    assert!((bbox(&mut s)["max"][0].as_f64().unwrap_or(f64::NAN) - 50.18).abs() < 1e-6, "the cut's edge");
+    // Folded after, where the fold's lines cut two curves.
+    run(&mut s, "sheet.fold", json!({"points": [[-20, -300, 2], [-20, 300, 2]], "fixed": [40, 0, 2]}));
+    assert!(faces(&mut s).0 <= 2 + 7 + 1 + 12, "folded: {} faces", faces(&mut s).0);
+    let (v, f) = (volume(&mut s), flat(&mut s));
+    assert!(rel(v, t2_volume_from_flat(&f)) < 3e-4, "folded: volume {v} vs the flat's {}", t2_volume_from_flat(&f));
+    // An ellipse through the rim: its 4 conics on the walls too.
+    let mut s = Session::default();
+    t2_curved_blank(&mut s, std::slice::from_ref(&spline), "0.4");
+    cut(&mut s, ellipse);
+    assert!(faces(&mut s).0 <= 2 + 7 + 4 + 2, "{} faces", faces(&mut s).0);
+    // An ellipse across a fold: pieces on the panels and the zone, each as drawn.
+    let mut s = Session::default();
+    t2_curved_blank(&mut s, std::slice::from_ref(&spline), "0.4");
+    cut(&mut s, ("sketch.ellipse", json!({"center": [-20, 0], "major": [-8, 0], "minor_radius": 4})));
+    run(&mut s, "sheet.fold", json!({"points": [[-20, -300, 2], [-20, 300, 2]], "fixed": [40, 0, 2]}));
+    assert!(faces(&mut s).0 <= 40, "{} faces", faces(&mut s).0);
+    assert_eq!(flat(&mut s)["bends"].as_array().map(Vec::len), Some(2));
+}
+
 /// A sharp corner in the zone stays refused, by name: the material beside it wouldn't hang from
 /// anything. A fold clear of it, on the same outline, folds. Where the lines run smoothly into the
 /// arc is no corner.
