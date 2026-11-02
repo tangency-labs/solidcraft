@@ -1285,6 +1285,9 @@ preference_settings! {
     viewport_background: Option<[u8; 3]> = None, PAGE_APPEARANCE;
     /// The application bar's logo in the theme's accent instead of the theme's logo colours.
     logo_accent: bool = false, PAGE_APPEARANCE;
+    /// An accent colour (`#rrggbb`) over the accent of a theme that accepts one (`accepts_accent`);
+    /// empty (the default): the theme's. Kept when the theme does not accept it.
+    accent: String = String::new(), PAGE_APPEARANCE;
     /// Imported theme files (`theme_files`), kept here so they also work in the browser.
     #[serde(deserialize_with = "themes_that_read")]
     custom_themes: Vec<crate::theme_files::ThemeFile> = Vec::new();
@@ -2343,6 +2346,7 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     // followed file (#7573) wins while it is followed and has read completely once.
     follow_theme_file(app, ctx);
     let file = active_theme_file(app);
+    let accepts_accent = file.is_some_and(|f| f.accepts_accent);
     let custom = crate::theme::prepare_tabs(ctx, file, file.and_then(|f| app.preferences.theme_options.get(&f.id)), || {
         file.map(|f| effective_theme_options(&app.preferences, f).0).unwrap_or_default()
     });
@@ -2357,6 +2361,11 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     }
     sync_window_theme(app, ctx, follows_system);
     if crate::theme::set_logo_accent(app.preferences.logo_accent) {
+        app.styled = false;
+    }
+    // Only a theme that accepts one takes the accent; the preference is kept for when one does.
+    let accent = accepts_accent.then(|| crate::theme::parse_accent(&app.preferences.accent)).flatten();
+    if crate::theme::set_accent(accent) {
         app.styled = false;
     }
     // egui's end-of-frame shortcuts only change its context; the saved preference would
@@ -3273,6 +3282,13 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         }
         None => {}
     }
+    // An accent is `#rrggbb` or "" (the theme's): anything else is refused, not saved and ignored.
+    if let Some(a) = rest.get("accent") {
+        let a = a.as_str().unwrap_or("#");
+        if !a.is_empty() && crate::theme::parse_accent(a).is_none() {
+            return Err(format!("`accent` must be a colour as #rrggbb, or \"\" for the theme's own (got `{a}`)"));
+        }
+    }
     let export = rest.remove("theme_export").and_then(|v| v.as_bool()).unwrap_or(false);
     let new = prepare_preferences(app, &staged, followed_theme(&staged, &follow), &serde_json::Value::Object(rest.clone()))?;
     let stopped_following = !app.prefs_window.follow.path(&app.preferences.theme_follow).is_empty() && follow.path(&new.theme_follow).is_empty();
@@ -3636,7 +3652,7 @@ fn followed_theme<'a>(prefs: &Prefs, follow: &'a crate::theme_files::Follow) -> 
 
 /// Preserve authored definitions; themes predating options retain their complete snapshot export.
 fn export_theme_file(file: &crate::theme_files::ThemeFile) -> serde_json::Value {
-    if !file.options.is_empty() || !file.overlays.is_empty() || !file.tabs.is_empty() || file.needs_newer() {
+    if !file.options.is_empty() || !file.overlays.is_empty() || !file.tabs.is_empty() || file.needs_newer() || file.accepts_accent {
         crate::theme_files::export_file(file)
     } else {
         crate::theme_files::export(&file.name, file.base, &crate::theme_files::resolve(file))
@@ -7078,6 +7094,49 @@ mod tests {
         assert!(has(&h, "dropped"));
         assert_eq!(h.app.docs.count(), tabs, "the drop opened no design");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `ui.prefs` `accent`: a theme that accepts one takes it on the next frame and gives its own
+    /// back for ""; a theme that does not is unchanged and has no Accent row, and the saved
+    /// accent is kept for a theme that does; anything but `#rrggbb` is refused.
+    #[test]
+    fn the_accent_preference_applies_only_to_a_theme_that_accepts_it() {
+        use serde_json::json;
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                crate::theme::set_accent(None);
+            }
+        }
+        let _reset = Reset;
+        let pink = egui::Color32::from_rgb(0xec, 0x48, 0x99);
+        let theme = |name: &str, accepts: bool| json!({"format":"solidcraft-theme/1","name":name,"base":"dark","colors":{"accent":"#336699"},"accepts_accent":accepts});
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let out = control(&mut h.app, &json!({"theme_import":theme("Closed",false),"accent":"#ec4899","open":"Interface"}));
+        assert!(out.is_ok(), "{out:?}");
+        h.frames(3);
+        let own = egui::Color32::from_rgb(0x33, 0x66, 0x99);
+        assert_eq!(crate::theme::Tokens::get().accent, own, "a theme that does not accept an accent is unchanged");
+        assert!(crate::scenario::rect_of("prefs:accent:theme").is_none(), "and has no Accent row");
+        assert_eq!(h.app.preferences.accent, "#ec4899", "the saved accent is kept");
+        control(&mut h.app, &json!({"theme_import":theme("Open",true)})).unwrap();
+        h.frames(3);
+        assert_eq!(crate::theme::Tokens::get().accent, pink, "a theme that accepts one takes the saved accent");
+        assert!(crate::scenario::rect_of("prefs:accent:theme").is_some(), "and shows the Accent row");
+        assert!(h.app.prefs().contains("\"accent\""), "kept with the preferences");
+        assert!(control(&mut h.app, &json!({"accent": "pink"})).is_err());
+        assert!(control(&mut h.app, &json!({"accent": "#ec489980"})).is_err(), "an accent is opaque");
+        control(&mut h.app, &json!({"accent": ""})).unwrap();
+        h.frames(2);
+        assert_eq!(crate::theme::Tokens::get().accent, own);
+        control(&mut h.app, &json!({"accent": "#ec4899", "theme": "closed"})).unwrap();
+        h.frames(2);
+        assert_eq!(crate::theme::Tokens::get().accent, own, "switching to a theme that does not accept it drops the override");
+        let exported = control(&mut h.app, &json!({"theme": "open", "theme_export": true})).unwrap();
+        assert_eq!(exported["theme_file"]["accepts_accent"], true, "the field is exported");
+        let bad = json!({"format":"solidcraft-theme/1","name":"Bad","base":"dark","accepts_accent":"yes"});
+        assert!(control(&mut h.app, &json!({"theme_import": bad})).is_err(), "the field is a boolean");
     }
 
     #[test]

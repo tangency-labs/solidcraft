@@ -94,6 +94,9 @@ pub struct ThemeFile {
     /// Conditional value tables, applied in file order with later entries winning by key.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub overlays: Vec<Overlay>,
+    /// Whether the Accent preference applies over this theme's colours (default: no).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub accepts_accent: bool,
     /// Levels newer than [`REQUIREMENTS_LEVEL`] disable options and overlays.
     #[serde(default = "default_requirements_level", skip_serializing_if = "is_default_requirements_level")]
     pub requires: u64,
@@ -126,6 +129,7 @@ impl Default for ThemeFile {
             tabs: BTreeMap::new(),
             options: Vec::new(),
             overlays: Vec::new(),
+            accepts_accent: false,
             requires: default_requirements_level(),
         }
     }
@@ -588,6 +592,10 @@ pub fn from_value(v: &Value) -> Result<ThemeFile, String> {
         None => default_requirements_level(),
         Some(value) => value.as_u64().ok_or("`requires` must be a nonnegative integer")?,
     };
+    let accepts_accent = match v.get("accepts_accent") {
+        None => false,
+        Some(value) => value.as_bool().ok_or("`accepts_accent` must be true or false")?,
+    };
     let layer = parse_layer(v)?;
     let tabs = parse_tabs(v.get("tabs"))?;
     let options = if requires > REQUIREMENTS_LEVEL { Vec::new() } else { parse_options(v.get("options"))? };
@@ -606,6 +614,7 @@ pub fn from_value(v: &Value) -> Result<ThemeFile, String> {
         tabs,
         options,
         overlays,
+        accepts_accent,
         requires,
     })
 }
@@ -1183,7 +1192,7 @@ fn resolve_base(theme: &ThemeFile) -> Tokens {
 /// The File view's colours a theme leaves unset follow the theme's own panel, border, accent and
 /// text, not its base's fixed blue rail and grey cards (#4868). Each ink is whichever candidate
 /// reads best on the fills it sits on.
-fn file_view_from_theme(t: &mut Tokens, dark: bool, set: impl Fn(&str) -> bool) {
+pub(crate) fn file_view_from_theme(t: &mut Tokens, dark: bool, set: impl Fn(&str) -> bool) {
     use crate::theme::contrast_ratio;
     let fallback = t.text;
     let best = |inks: &[Color32], fills: &[Color32]| {
@@ -1308,6 +1317,9 @@ pub fn export_file(theme: &ThemeFile) -> Value {
         }
         if !theme.overlays.is_empty() {
             obj.insert("overlays".into(), json!(theme.overlays));
+        }
+        if theme.accepts_accent {
+            obj.insert("accepts_accent".into(), json!(true));
         }
         if !is_default_requirements_level(&theme.requires) {
             obj.insert("requires".into(), json!(theme.requires));

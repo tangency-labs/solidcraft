@@ -36,6 +36,9 @@ thread_local! {
     /// The application bar's logo in the theme's accent instead of its own logo colours
     /// (Preferences › Interface › Logo), per thread like the rest.
     static LOGO_ACCENT: Cell<bool> = const { Cell::new(false) };
+    /// The accent chosen in Preferences over the theme's own ([`set_accent`]), per thread like
+    /// the rest. `None`: the theme's accent, also whenever the theme does not accept one.
+    static ACCENT: Cell<Option<Color32>> = const { Cell::new(None) };
     /// The 3D view's own dark or light when Preferences give it one ([`ViewportTheme`], #4146),
     /// per thread like the rest. `None`: the view is as dark as the window.
     static VIEWPORT_DARK: Cell<Option<bool>> = const { Cell::new(None) };
@@ -74,6 +77,7 @@ struct Environment {
     vision: ColorVision,
     custom_generation: u64,
     logo: bool,
+    accent: Option<Color32>,
     viewport: Option<bool>,
     background: Option<[u8; 3]>,
 }
@@ -85,12 +89,14 @@ impl Environment {
             vision: vision(),
             custom_generation: CUSTOM_GENERATION.get(),
             logo: LOGO_ACCENT.get(),
+            accent: ACCENT.get(),
             viewport: VIEWPORT_DARK.get(),
             background: viewport_background(),
         }
     }
 
     fn window(self, tokens: Tokens) -> Tokens {
+        let tokens = self.accent.map_or(tokens, |a| tokens.with_accent(a, self.dark));
         let tokens = if self.logo { tokens.with_accent_logo() } else { tokens };
         tokens.with_vision(self.dark, self.vision)
     }
@@ -563,6 +569,18 @@ pub fn set_custom(custom: Option<Custom>) -> bool {
 /// changed anything (the visuals follow on the next [`apply`]).
 pub fn set_logo_accent(on: bool) -> bool {
     LOGO_ACCENT.with(|c| c.replace(on) != on)
+}
+
+/// Use `accent` (opaque) over the active theme's own accent, or the theme's (`None`). Returns whether
+/// that changed anything (the visuals follow on the next [`apply`]).
+pub fn set_accent(accent: Option<Color32>) -> bool {
+    ACCENT.with(|c| c.replace(accent) != accent)
+}
+
+/// `#rrggbb` as an opaque accent; anything else (an empty preference: the theme's) is `None`.
+pub fn parse_accent(s: &str) -> Option<Color32> {
+    let hex = s.trim().strip_prefix('#').filter(|h| h.len() == 6)?;
+    Color32::from_hex(&format!("#{hex}")).ok()
 }
 
 /// Isolated widget tests restore the thread's theme even when an assertion fails.
@@ -1656,6 +1674,7 @@ impl Tokens {
     pub fn themed(dark: bool, mode: ColorVision) -> Tokens {
         let custom = CUSTOM.get().filter(|c| c.dark == dark).map(|c| c.tokens);
         let t = custom.unwrap_or(if dark { Tokens::dark() } else { Tokens::light() });
+        let t = ACCENT.get().map_or(t, |a| t.with_accent(a, dark));
         let t = if LOGO_ACCENT.get() { t.with_accent_logo() } else { t };
         t.with_vision(dark, mode)
     }
@@ -1666,6 +1685,44 @@ impl Tokens {
         let accent = self.accent.to_opaque();
         self.logo = [accent.lerp_to_gamma(Color32::WHITE, 0.22), accent, accent.lerp_to_gamma(Color32::BLACK, 0.2)];
         self
+    }
+
+    /// These tokens with `accent` in place of the theme's: the accent and its soft tint, the
+    /// selected row, ink on the accent, chips, the primary form button, the selection in the view,
+    /// the File view's rail and primary action, and the icons' base colour. The tabs' own accents
+    /// (Sketch, Surface, …) stay the theme's.
+    pub fn with_accent(self, accent: Color32, dark: bool) -> Tokens {
+        let mut t = self;
+        let accent = accent.to_opaque();
+        // The panel behind a translucent theme's tint is the theme's own colour, unmultiplied.
+        let panel = t.panel.to_opaque();
+        t.accent = accent;
+        t.accent_soft = panel.lerp_to_gamma(accent, if dark { 0.3 } else { 0.18 });
+        t.selected_bg = t.accent_soft;
+        // Ink on the soft tint: the accent lifted (dark) or deepened (light) until it reads.
+        let (toward, mut k) = if dark { (Color32::WHITE, 0.35) } else { (Color32::BLACK, 0.35) };
+        t.selected_ink = accent.lerp_to_gamma(toward, k);
+        while contrast_ratio(t.selected_ink, t.accent_soft) < 4.5 && k < 1.0 {
+            k += 0.1;
+            t.selected_ink = accent.lerp_to_gamma(toward, k.min(1.0));
+        }
+        t.on_accent = if contrast_ratio(Color32::BLACK, accent) >= contrast_ratio(Color32::WHITE, accent) { Color32::BLACK } else { Color32::WHITE };
+        t.chip = accent;
+        t.form_primary = accent;
+        t.form_primary_fill = accent;
+        t.sel_face = accent;
+        t.sel_edge = accent;
+        // The icons' own colour (the base ramp, which the Model tab's icons use) in shades of the
+        // accent; the tabs' own ramps (Sketch, Surface, …) stay the theme's.
+        let rgb = |c: Color32| [c.r(), c.g(), c.b()];
+        let mut palette = t.icon_palette.unwrap_or_default();
+        palette.accents[0] = Some([rgb(accent.lerp_to_gamma(Color32::WHITE, 0.15)), rgb(accent), rgb(accent.lerp_to_gamma(Color32::BLACK, 0.25))]);
+        t.icon_palette = Some(palette);
+        // The File view's rail and primary action follow the new accent, as they follow a theme's.
+        crate::theme_files::file_view_from_theme(&mut t, dark, |k| {
+            !matches!(k, "file_rail" | "file_rail_hover" | "file_rail_ink" | "file_primary" | "file_primary_ink" | "file_primary_border")
+        });
+        t
     }
 
     /// These tokens with a colour vision mode's values on top (the tables in `palettes.rs`); Off
@@ -2203,6 +2260,47 @@ mod tests {
                 }
                 let white_ok = super::contrast_ratio(t.on_accent, accent.color) >= 4.5;
                 assert_eq!(accent.on_fill(&t), if white_ok { t.on_accent } else { t.tab_on_fill_dark });
+            }
+        }
+    }
+
+    /// An accent chosen in Preferences, over each built-in theme: the accent family takes it, ink
+    /// on the accent and on its soft tint reads (4.5:1), the File view's primary action follows,
+    /// and the tabs' own accents stay the theme's.
+    #[test]
+    fn a_chosen_accent_replaces_the_accent_family_and_stays_readable() {
+        let mut bases: Vec<(String, super::Tokens, bool)> =
+            vec![("dark".into(), super::Tokens::dark(), true), ("light".into(), super::Tokens::light(), false)];
+        for f in crate::theme_files::builtin() {
+            bases.push((f.id.clone(), crate::theme_files::resolve(f), f.base.is_dark()));
+        }
+        let mut accents: Vec<egui::Color32> = ["#3b82f6", "#44d62c", "#14b8a6", "#8b5cf6", "#ec4899", "#ef4444", "#f97316", "#eab308"]
+            .iter()
+            .filter_map(|h| super::parse_accent(h))
+            .collect();
+        accents.extend([egui::Color32::WHITE, egui::Color32::BLACK, egui::Color32::from_gray(118), egui::Color32::from_rgb(255, 255, 0)]);
+        for (id, base, dark) in &bases {
+            for a in &accents {
+                let t = base.with_accent(*a, *dark);
+                assert_eq!((t.accent, t.form_primary, t.sel_edge, t.file_primary_border), (*a, *a, *a, *a), "{id} {a:?}");
+                assert_eq!(t.selected_bg, t.accent_soft, "{id} {a:?}");
+                for (name, ink, ground) in [("selected_ink", t.selected_ink, t.accent_soft), ("on_accent", t.on_accent, t.accent)] {
+                    let ratio = super::contrast_ratio(ink, ground);
+                    assert!(ratio >= 4.5, "{id} {a:?}: {name} is {ratio:.2}:1");
+                }
+                assert_eq!(t.file_primary, t.accent_soft, "{id} {a:?}: the File view's primary action follows");
+                for tab in ["SKETCH", "SURFACE", "SHEET METAL"] {
+                    assert_eq!(
+                        super::TabAccent::for_tab(&t, tab).color,
+                        super::TabAccent::for_tab(base, tab).color,
+                        "{id}: {tab} keeps its own accent"
+                    );
+                }
+                // The icons' base ramp is the accent's shades; the tabs' ramps and roles stay.
+                let (icons, own) = (t.icon_palette.expect("an accent gives the icons a palette"), base.icon_palette.unwrap_or_default());
+                let ramp = icons.accents[0].expect("base ramp");
+                assert_eq!(ramp[1], [a.r(), a.g(), a.b()], "{id} {a:?}: the icons take the accent");
+                assert_eq!((&icons.accents[1..], icons.roles), (&own.accents[1..], own.roles), "{id} {a:?}");
             }
         }
     }
