@@ -6481,7 +6481,15 @@ mod tests {
         h.app.home.open = false;
         h.call("ui.prefs", json!({"theme": "dark", "open": "Interface"}));
         h.frames(2);
-        super::reveal_preference(&mut h, "dialog:Import…");
+        // The Import card is the last one in the theme carousel: page it into view.
+        for _ in 0..40 {
+            if h.app.prefs_window.import_tile.is_some() {
+                break;
+            }
+            h.step(&json!({"click":{"handle":"prefs:theme_next"}})).unwrap();
+            h.frames(2);
+        }
+        assert!(h.app.prefs_window.import_tile.is_some(), "the Import card is reachable in the theme carousel");
         let (root, out) = (h.dir.join("root"), h.dir.join("out"));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::create_dir_all(&out).unwrap();
