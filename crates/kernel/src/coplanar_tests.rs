@@ -154,3 +154,83 @@ fn trimming_at_a_plane_with_nothing_beyond_it() {
     assert!((measure(&same).unwrap().volume - measured).abs() < measured * 1e-9);
     assert!(crate::coplanar::trim_exact(&dome, -Vec3::Z, 5.0).is_err());
 }
+
+/// A closed cube whose top support is displaced from its boundary, as an imported
+/// approximate face can be. The edges and vertices still describe the original cube.
+fn cube_with_displaced_top(gap: f64) -> Body {
+    use truck_modeling::{Surface, Transformed, Vector3};
+    let solid = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap().deep_copy();
+    let top = solid
+        .face_iter()
+        .find(|face| matches!(face.surface(), Surface::Plane(p) if (p.origin().z - 10.0).abs() < 1e-9 && p.normal().z.abs() > 0.99))
+        .unwrap();
+    let Surface::Plane(mut plane) = top.surface() else { panic!("top plane") };
+    plane.transform_by(truck_modeling::Matrix4::from_translation(Vector3::new(0.0, 0.0, gap)));
+    top.set_surface(Surface::Plane(plane));
+    // Rebuild the body's derived data after changing its support.
+    Body::new(solid).unwrap()
+}
+
+#[test]
+fn a_join_across_a_displaced_planar_boundary_fails_before_numerical_retries() {
+    let target = cube_with_displaced_top(0.02);
+    let tool = box_solid(Vec3::new(5.0, -1.0, 8.0), Vec3::new(15.0, 11.0, 12.0)).unwrap();
+    let before = measure(&target).unwrap().volume;
+    // No numerical attempt is available: the input check must explain the inconsistency
+    // before spending any of the retry budget.
+    let started = std::time::Instant::now();
+    let error = crate::ops::with_attempt_budget(0, || boolean(&target, &tool, BoolOp::Union)).unwrap_err().to_string();
+    assert!(error.contains("boundary") && error.contains("off its plane") && error.contains("repair or reimport"), "{error}");
+    assert!(started.elapsed().as_secs_f64() < 2.0);
+    assert_eq!(target.face_count(), 6);
+    assert_eq!(target.edge_count(), 12);
+    assert!((measure(&target).unwrap().volume - before).abs() < 1e-9);
+}
+
+#[test]
+fn the_same_join_with_matching_planar_boundaries_has_the_analytic_volume() {
+    let target = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let tool = box_solid(Vec3::new(5.0, -1.0, 8.0), Vec3::new(15.0, 11.0, 12.0)).unwrap();
+    let joined = boolean(&target, &tool, BoolOp::Union).unwrap().unwrap();
+    assert!((measure(&joined).unwrap().volume - 1380.0).abs() < 1e-6);
+    assert_eq!(joined.lumps().unwrap().len(), 1);
+    assert!(joined.validity().is_empty(), "{:?}", joined.validity());
+}
+
+#[test]
+fn the_planar_boundary_check_ignores_a_gap_outside_the_meeting_region() {
+    let target = cube_with_displaced_top(0.02);
+    let tool = box_solid(Vec3::new(0.0, 0.0, -2.0), Vec3::new(10.0, 10.0, 1.0)).unwrap();
+    let (ma, mb) = (target.tessellate(0.01).unwrap(), tool.tessellate(0.01).unwrap());
+    crate::boolean_guard::check_planar_boundaries(&target, &tool, &ma, &mb).unwrap();
+    crate::boolean_guard::check_planar_boundaries(&tool, &target, &mb, &ma).unwrap();
+}
+
+#[test]
+fn a_planar_boundary_gap_below_the_operand_mesh_resolution_can_still_be_retried() {
+    let target = cube_with_displaced_top(1e-6);
+    let tool = box_solid(Vec3::new(5.0, -1.0, 8.0), Vec3::new(15.0, 11.0, 12.0)).unwrap();
+    let (ma, mb) = (target.tessellate(0.01).unwrap(), tool.tessellate(0.01).unwrap());
+    crate::boolean_guard::check_planar_boundaries(&target, &tool, &ma, &mb).unwrap();
+}
+
+#[test]
+fn a_support_meeting_the_tool_is_checked_even_when_its_boundary_is_outside() {
+    let target = cube_with_displaced_top(0.02);
+    let tool = box_solid(Vec3::new(5.0, -1.0, 10.01), Vec3::new(15.0, 11.0, 12.0)).unwrap();
+    let (ma, mb) = (target.tessellate(0.01).unwrap(), tool.tessellate(0.01).unwrap());
+    for (a, b, ma, mb, role) in [(&target, &tool, &ma, &mb, "target"), (&tool, &target, &mb, &ma, "tool")] {
+        let error = crate::boolean_guard::check_planar_boundaries(a, b, ma, mb).unwrap_err().to_string();
+        assert!(error.contains(role) && error.contains("off its plane"), "{error}");
+    }
+}
+
+#[test]
+fn an_off_plane_boundary_in_the_tools_hole_is_not_a_meeting_boundary() {
+    let target = cube_with_displaced_top(0.02);
+    let outer = box_solid(Vec3::new(-2.0, -2.0, 8.0), Vec3::new(12.0, 12.0, 12.0)).unwrap();
+    let hole = box_solid(Vec3::new(-1.0, -1.0, 7.0), Vec3::new(11.0, 11.0, 13.0)).unwrap();
+    let tool = boolean(&outer, &hole, BoolOp::Cut).unwrap().unwrap();
+    let (ma, mb) = (target.tessellate(0.01).unwrap(), tool.tessellate(0.01).unwrap());
+    crate::boolean_guard::check_planar_boundaries(&target, &tool, &ma, &mb).unwrap();
+}
