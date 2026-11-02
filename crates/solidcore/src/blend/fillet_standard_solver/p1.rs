@@ -52,6 +52,12 @@
 //! | [`JacobianSurfaces`]                                     | the `rpSurface1`, `rpSurface2` arguments of `LoadJacobian` |
 //!
 //! Deviations:
+//! - **Exact circles of one arc count.** With `fixes.fillet_exact_arc_spans` (WR-711,
+//!   not upstream or in the fork) `CircularCrossSectionFsg::create_surface_from_curves`
+//!   with exact arcs takes a second pass when its circles' arc counts differ, building
+//!   each circle of fewer arcs again with the most (`ArcCounts`), as the approximated
+//!   arcs' second pass does with knots; and each point section takes the nearest
+//!   circle's arcs and weights (`collapse_point_sections`).
 //! - **Knife edges.** With `fixes.fillet_knife_edge_rounds` (WR-570, the fork's
 //!   tangency-labs/smlib `b7ec55b`, not in SMLib at the pin) the edge-use constructors
 //!   orient their offsets by `sector_sides` (`sm_SectorSides`), which also sides a
@@ -2375,6 +2381,90 @@ fn equalise_knots(arc: &mut BSplineCurve, max_unique: usize, op: &'static str) -
     arc.insert_knots(&new_knots)
 }
 
+/// The most and fewest arcs among a round's exact circular sections, with
+/// `fixes.fillet_exact_arc_spans` (WR-711; not upstream): a circle of fewer arcs is
+/// built again as the most.
+struct ArcCounts {
+    on: bool,
+    most: usize,
+    fewest: usize,
+}
+
+impl ArcCounts {
+    const fn new(on: bool) -> Self {
+        Self {
+            on,
+            most: 0,
+            fewest: usize::MAX,
+        }
+    }
+
+    /// The arcs of a section that is a rational quadratic circle (degree 2, one arc
+    /// per span), `None` for another section (a point, an interpolating cubic).
+    fn arcs_of(section: &BSplineCurve) -> Result<Option<usize>> {
+        if section.degree()? != 2 {
+            return Ok(None);
+        }
+        Ok(section.number_of_unique_knots()?.checked_sub(1))
+    }
+
+    fn note(&mut self, section: &BSplineCurve) -> Result<()> {
+        if self.on {
+            if let Some(n) = Self::arcs_of(section)? {
+                self.most = self.most.max(n);
+                self.fewest = self.fewest.min(n);
+            }
+        }
+        Ok(())
+    }
+
+    const fn differ(&self) -> bool {
+        self.on && self.most > self.fewest
+    }
+}
+
+/// With `fixes.fillet_exact_arc_spans` (WR-711; not upstream): each point section of
+/// a round of exact circles (where its rails meet, upstream's degree 1 point curve)
+/// becomes the circle nearest it along the rails collapsed onto its point, the same
+/// arcs and weights. The point is the limit of the circles beside it; as a point curve
+/// its weights were 1 where theirs are `cos(a/4)`, and the skin's weights swung between
+/// them (a variable round that ends in a point was 3.4e-4 off its balls, 8.1e-5 with
+/// the circle's).
+fn collapse_point_sections(sections: &mut [BSplineCurve], params: &[f64]) -> Result<()> {
+    let is_circle = |c: &BSplineCurve| ArcCounts::arcs_of(c).map(|n| n.is_some());
+    for i in 0..sections.len() {
+        let Some(section) = sections.get(i) else {
+            continue;
+        };
+        if section.degree()? != 1 || section.number_control_points()? != 2 {
+            continue;
+        }
+        let (start, _) = section.control_point(ControlPointForm::EuclideanRational, 0)?;
+        let (end, _) = section.control_point(ControlPointForm::EuclideanRational, 1)?;
+        if start != end {
+            continue;
+        }
+        let at = params.get(i).copied().unwrap_or_default();
+        let mut nearest: Option<(f64, usize)> = None;
+        for (j, (c, &t)) in sections.iter().zip(params).enumerate() {
+            if is_circle(c)? && nearest.is_none_or(|(d, _)| (t - at).abs() < d) {
+                nearest = Some(((t - at).abs(), j));
+            }
+        }
+        let Some(mut circle) = nearest.and_then(|(_, j)| sections.get(j).cloned()) else {
+            continue;
+        };
+        for j in 0..circle.number_control_points()? {
+            let (_, w) = circle.control_point(ControlPointForm::EuclideanRational, j)?;
+            circle.set_control_point(ControlPointForm::EuclideanRational, j, start, w)?;
+        }
+        if let Some(slot) = sections.get_mut(i) {
+            *slot = circle;
+        }
+    }
+    Ok(())
+}
+
 /// The cross section at `index` of the array upstream indexes unchecked.
 fn section_mut<'a>(
     sections: &'a mut [Option<BSplineCurve>],
@@ -2735,6 +2825,8 @@ impl CircularCrossSectionFsg {
         // track max/min number of knots in cross-section curves
         let mut max_num_unique_knots: usize = 0;
         let mut min_num_unique_knots: usize = 1_000_000;
+        // the exact circles' most and fewest arcs (WR-711)
+        let mut arcs = ArcCounts::new(!self.approximate_arcs && k.fixes.fillet_exact_arc_spans);
 
         // for two passes - 1st pass allocate curves
         //                  2nd pass make all curve knot vectors compatible
@@ -2760,11 +2852,18 @@ impl CircularCrossSectionFsg {
                     &mut parameters_of_cross_sections,
                     &mut max_num_unique_knots,
                     &mut min_num_unique_knots,
+                    &mut arcs,
                 )?;
                 ii += 1;
             }
 
-            if !self.approximate_arcs || max_num_unique_knots == min_num_unique_knots {
+            // (exact circles of different arc counts take the most, WR-711)
+            let second_pass = if self.approximate_arcs {
+                max_num_unique_knots != min_num_unique_knots
+            } else {
+                arcs.differ()
+            };
+            if !second_pass {
                 // only need 1 pass
                 break;
             }
@@ -2778,6 +2877,11 @@ impl CircularCrossSectionFsg {
                 sections.push(c);
                 params.push(t);
             }
+        }
+
+        // a point section takes the nearest circle's arcs and weights (WR-711)
+        if arcs.on {
+            collapse_point_sections(&mut sections, &params)?;
         }
 
         // when surface can be constructed as a ruled surface (linear center and rail curves)
@@ -2896,6 +3000,7 @@ impl CircularCrossSectionFsg {
         parameters_of_cross_sections: &mut Vec<f64>,
         max_num_unique_knots: &mut usize,
         min_num_unique_knots: &mut usize,
+        arcs: &mut ArcCounts,
     ) -> Result<()> {
         const OP: &str = OP_CIRC;
         // for lNumBetween count locations between knot points
@@ -2974,7 +3079,7 @@ impl CircularCrossSectionFsg {
                     // accumulate cross section curve and parameter value
                     parameters_of_cross_sections.push(t);
                     cross_sections.push(Some(arc));
-                } else {
+                } else if self.approximate_arcs {
                     // Insert knots into degenerate Curve until UniqueKnotCount = MaxNumUniqueKnots
                     let arc = section_mut(cross_sections, knot_index, OP)?
                         .as_mut()
@@ -3102,6 +3207,37 @@ impl CircularCrossSectionFsg {
                     angle * 180.0 / PI,
                     NurbCircleParam::Quadratic,
                 )?);
+            } else {
+                // 2nd pass of exact circles (WR-711): a circle of fewer arcs than the
+                // most is built again as that many equal arcs, tweaked and mirrored as
+                // on the 1st pass
+                let slot = section_mut(cross_sections, knot_index, OP)?;
+                let Some(current) = slot.as_ref() else {
+                    continue;
+                };
+                if ArcCounts::arcs_of(current)?.is_none_or(|n| n >= arcs.most) {
+                    continue;
+                }
+                let mut a = BSplineCurve::create_circle_segment_min_arcs(
+                    3,
+                    &placement,
+                    radius1,
+                    0.0,
+                    angle * 180.0 / PI,
+                    NurbCircleParam::Quadratic,
+                    arcs.most,
+                )?;
+                if (radius1 - radius2).abs() > 1.0e-8 {
+                    a.edit_end_point(p1, true, None)?;
+                    a.edit_end_point(p2, false, None)?;
+                }
+                if self.mirror {
+                    let mut mirror = Axis2Placement::default();
+                    mirror.set_canonical(p1, (p2 - p1).unitize()?, z_vec.unitize()?)?;
+                    a = a.create_mirror_curve(&mirror)?;
+                }
+                *slot = Some(a);
+                continue;
             }
 
             // on 1st pass - See if we have a non-circle case
@@ -3156,6 +3292,9 @@ impl CircularCrossSectionFsg {
 
             // accumulate the cross section curves
             if kkk == 0 {
+                if let Some(a) = &arc {
+                    arcs.note(a)?;
+                }
                 parameters_of_cross_sections.push(t);
                 cross_sections.push(arc);
             }

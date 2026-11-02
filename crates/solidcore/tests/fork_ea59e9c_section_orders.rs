@@ -813,12 +813,15 @@ fn with_solidcraft_s_fixes_the_chords_and_circles_have_the_fork_s_marks() {
     }
 }
 
-/// The mark is the fork's at ea59e9c, the great circles. `fillet_gn_section_generator` brings
-/// the fork's later touch circles, tested with that port, so it stays off here.
+/// The mark is the fork's at ea59e9c, the great circles of approximated arcs.
+/// `fillet_gn_section_generator` brings the fork's later touch circles and
+/// `fillet_exact_arc_sections` its later exact circles (523bc25), tested with those ports
+/// (`wr685_variable_round_touch_circle`, `wr708_exact_arc_sections`), so both stay off here.
 #[test]
 fn with_solidcraft_s_fixes_the_variable_round_has_the_fork_s_mark() {
     let mut k = solidcraft_kernel();
     k.fixes.fillet_gn_section_generator = false;
+    k.fixes.fillet_exact_arc_sections = false;
     assert_variable_mark(&mut k);
 }
 
@@ -1178,19 +1181,112 @@ fn the_linear_variable_round_lies_on_its_cone_and_is_g1() {
     assert_passes(&case, &mut solidcraft_kernel());
 }
 
-/// `cf1c08b` + `0389af2`: the progressive cubic law `[2, 2, 6, 3, 0]` lies on the union of its
-/// balls, passes `Level2`, matches the fork's volume `5957.7178399654949`, and is G1 along both
-/// seams.
+/// The progressive cubic law of `cf1c08b` / `0389af2`.
+const HOLDS_LAW: [f64; 5] = [2.0, 2.0, 6.0, 3.0, 0.0];
+
+/// The volume of the box `10 x 20 x 30` with the progressive cubic round's balls' envelope:
+/// `6000` less the integral along the edge of the area each plane `y = 20 s` cuts between the
+/// rails (`x > 10 - r(s)`, `z > 30 - r(s)`) above the union of the balls' discs, by
+/// [`balls_envelope_volume`] (agrees with 64 times as many points to 2.5e-7). The fork's
+/// `5957.7178399654949` (d01d7b0, approximated arcs) is 6.6e-4 below it, 1.1e-7 relative.
+const HOLDS_VOLUME: f64 = 5_957.718_502;
+
+/// The volume of `box_10_20_30` rounded along its edge `x = 10, z = 30` by the balls of
+/// radius `law(s)` centred at `(10 - r, 20 s, 30 - r)` (Gauss-Legendre, 16 points in each of
+/// 40 panels along the edge and of 8 panels in the angle about each section's corner).
+fn balls_envelope_volume(law: &BSplineCurve) -> f64 {
+    let r_of = |s: f64| law.evaluate_point(s).unwrap().x;
+    let gl: [(f64, f64); 8] = [
+        (0.095_012_509_837_637_4, 0.189_450_610_455_068_5),
+        (0.281_603_550_779_258_9, 0.182_603_415_044_923_6),
+        (0.458_016_777_657_227_4, 0.169_156_519_395_002_5),
+        (0.617_876_244_402_643_8, 0.149_595_988_816_576_7),
+        (0.755_404_408_355_003, 0.124_628_971_255_533_9),
+        (0.865_631_202_387_831_8, 0.095_158_511_682_492_8),
+        (0.944_575_023_073_232_6, 0.062_253_523_938_647_9),
+        (0.989_400_934_991_649_9, 0.027_152_459_411_754_1),
+    ];
+    let nodes = |a: f64, b: f64| -> Vec<(f64, f64)> {
+        let (m, h) = (0.5 * (a + b), 0.5 * (b - a));
+        gl.iter()
+            .flat_map(|&(x, w)| [(m - h * x, h * w), (m + h * x, h * w)])
+            .collect()
+    };
+    let n = 2000;
+    let samples: Vec<(f64, f64)> = (0..=n)
+        .map(|i| {
+            let s = f64::from(i) / f64::from(n);
+            (s, r_of(s))
+        })
+        .collect();
+    // the top of the union of the balls' discs in the plane `y` at `x`
+    let top = |x: f64, y: f64| -> f64 {
+        let disc = |s: f64, r: f64| {
+            let h2 = r * r - (y - 20.0 * s).powi(2) - (x - 10.0 + r).powi(2);
+            if h2 < 0.0 {
+                f64::NEG_INFINITY
+            } else {
+                30.0 - r + h2.sqrt()
+            }
+        };
+        let (mut best, mut most) = (0, f64::NEG_INFINITY);
+        for (i, &(s, r)) in samples.iter().enumerate() {
+            let v = disc(s, r);
+            if v > most {
+                (best, most) = (i, v);
+            }
+        }
+        let mut lo = samples[best.saturating_sub(1)].0;
+        let mut hi = samples[(best + 1).min(samples.len() - 1)].0;
+        let g = (5f64.sqrt() - 1.0) / 2.0;
+        let at = |s: f64| disc(s, r_of(s));
+        for _ in 0..60 {
+            let (s1, s2) = (hi - g * (hi - lo), lo + g * (hi - lo));
+            if at(s1) > at(s2) {
+                hi = s2;
+            } else {
+                lo = s1;
+            }
+        }
+        at(0.5 * (lo + hi)).max(most)
+    };
+    let mut removed = 0.0;
+    for p in 0..40 {
+        for (y, wy) in nodes(0.5 * f64::from(p), 0.5 * f64::from(p + 1)) {
+            let r = r_of(y / 20.0);
+            if r <= 0.0 {
+                continue;
+            }
+            let mut area = 0.0;
+            for q in 0..8 {
+                let a0 = PI / 2.0 * f64::from(q) / 8.0;
+                let a1 = PI / 2.0 * f64::from(q + 1) / 8.0;
+                for (th, wt) in nodes(a0, a1) {
+                    let x = 10.0 - r + r * th.sin();
+                    let z = top(x, y).clamp(30.0 - r, 30.0);
+                    area += (30.0 - z) * r * th.cos() * wt;
+                }
+            }
+            removed += area * wy;
+        }
+    }
+    6000.0 - removed
+}
+
 #[test]
-fn the_progressive_cubic_variable_round_lies_on_its_balls_union_and_is_g1() {
-    let holds_law = [2.0, 2.0, 6.0, 3.0, 0.0];
-    let holds_curve = greville_cubic_curve(holds_law);
-    let case = Case {
+fn the_progressive_cubic_round_s_balls_envelope_has_its_volume() {
+    let v = balls_envelope_volume(&greville_cubic_curve(HOLDS_LAW));
+    near(v, HOLDS_VOLUME, 1e-6, "balls' envelope volume");
+}
+
+fn holds_case() -> Case {
+    let holds_curve = greville_cubic_curve(HOLDS_LAW);
+    Case {
         name: "variable_round_spline_holds",
         build: box_10_20_30,
         pick: [10.0, 10.0, 30.0],
-        blend: Blend::SplineRound(holds_law),
-        volume: 5957.7178399654949,
+        blend: Blend::SplineRound(HOLDS_LAW),
+        volume: HOLDS_VOLUME,
         volume_rel: 1e-7,
         off: Box::new(move |x| distance_to_balls_union(&holds_curve, x)),
         off_tol: None,
@@ -1200,9 +1296,53 @@ fn the_progressive_cubic_variable_round_lies_on_its_balls_union_and_is_g1() {
         order_max: None,
         fitted: true,
         size: 1.0,
-    };
+    }
+}
+
+/// `cf1c08b` + `0389af2`: the progressive cubic law `[2, 2, 6, 3, 0]` lies on the union of its
+/// balls, passes `Level2`, has the volume of its balls' envelope ([`HOLDS_VOLUME`]), and is G1
+/// along both seams; with SolidCraft's fixes its exact circles take one arc count and its end
+/// point their weights (`fillet_exact_arc_spans`, WR-711).
+#[test]
+fn the_progressive_cubic_variable_round_lies_on_its_balls_union_and_is_g1() {
+    let case = holds_case();
     assert_passes(&case, &mut gn_kernel());
     assert_passes(&case, &mut solidcraft_kernel());
+}
+
+/// WR-711: with WR-708's exact circles but without `fillet_exact_arc_spans`, the progressive
+/// cubic round is the fork's (523bc25, 5e8c9c1): 1.966e-3 off its balls' union, its
+/// sections sweeping across 91 degrees one and two arcs; with it, 8.2e-5 off, nearer than
+/// the approximated arcs' 1.0e-4, and within 3e-8 of the envelope's volume.
+#[test]
+fn wr711_exact_circles_of_one_arc_count_keep_the_progressive_round_on_its_balls() {
+    let case = holds_case();
+    let mut off = solidcraft_kernel();
+    off.fixes.fillet_exact_arc_spans = false;
+    let g_off = grade(&case, &mut off);
+    println!("spans off: {g_off:?}");
+    assert!(g_off.failed.is_none(), "{g_off:?}");
+    near(g_off.off, 1.966_136e-3, 1e-8, "the fork's distance off");
+    // the fork's 5957.716621492882 at SmApiBrepComputeVolume's 1e-8; the grade integrates
+    // at 1e-7
+    near(
+        g_off.volume,
+        5_957.716_621_492_882,
+        1e-5,
+        "the fork's volume",
+    );
+
+    let g_on = grade(&case, &mut solidcraft_kernel());
+    println!("spans on: {g_on:?}");
+    assert!(
+        g_on.failed.is_none() && g_on.problems.is_empty(),
+        "{g_on:?}"
+    );
+    assert!(g_on.off < 1e-4, "{g_on:?}");
+    assert!(
+        (g_on.volume - HOLDS_VOLUME).abs() < 3e-8 * HOLDS_VOLUME,
+        "{g_on:?}"
+    );
 }
 
 /// `cf1c08b` + `0389af2`: the folded cubic law `[2, 2, 40, 3, 2]` builds folded (far off the
@@ -1227,8 +1367,11 @@ fn the_folded_cubic_variable_round_leaves_its_balls_union_without_fix_and_is_ref
         fitted: true,
         size: 1.0,
     };
+    // the fork before its G^n section had upstream's approximated arcs, not 523bc25's exact
+    // circle (`fillet_exact_arc_sections`, WR-708), which comes after it
     let mut k_off = solidcraft_kernel();
     k_off.fixes.fillet_gn_section_generator = false;
+    k_off.fixes.fillet_exact_arc_sections = false;
     let g_off = grade(&case, &mut k_off);
     assert!(g_off.failed.is_none(), "{g_off:?}");
     assert!(

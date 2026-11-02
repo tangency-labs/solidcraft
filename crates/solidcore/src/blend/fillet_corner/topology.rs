@@ -37,6 +37,7 @@ mod concave_4x2;
 pub mod concave_nxn;
 pub mod end_corners;
 pub mod mixed_3x2;
+mod swept_turn;
 
 use crate::blend::fillet_corner::p1::{
     check_face_complimentary_corner_concavity, face_by_two_edgeuses, test_g1_continuity,
@@ -137,7 +138,7 @@ fn vertex_of(target: &Brep, eu: EdgeuseId) -> Result<Option<VertexId>> {
     Ok(target.vertexuse(vu)?.vertex)
 }
 
-fn find_side_edgeuse(
+pub(crate) fn find_side_edgeuse(
     target: &Brep,
     filleted: EdgeuseId,
     side: EdgeuseId,
@@ -740,6 +741,21 @@ impl FilletCorner {
         let invalid = |reason: &'static str| SolidError::invalid_input(OP_NX2, reason);
         if self.kind != FilletCornerKind::NByTwo {
             return Err(invalid("requires an NByTwo corner"));
+        }
+        // The fork's (WR-697, e647dac): SmBlendCorner::MakeCornerTopology builds a Swept
+        // turn its own way (MakeSweptTopology); its other events are the two-blend
+        // construction below
+        if self
+            .blend
+            .is_some_and(crate::blend::blend_corner::BlendCorner::is_swept)
+        {
+            return self.make_swept_topology(Nx2TopologyEnv {
+                k,
+                target,
+                pseudo,
+                corner,
+                solvers: [fil_solver1, fil_solver2],
+            });
         }
         let all = self
             .all_eus

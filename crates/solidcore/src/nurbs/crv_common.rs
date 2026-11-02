@@ -9,6 +9,7 @@
 //! | [`Arc`]                            | the `C, X, Y, r, as, ae` arguments |
 //! | [`EllipseArc`]                     | the `C, X, Y, r1, r2, as, ae` arguments |
 //! | [`quadratic_arc_tol`]              | `N_CreateQuadraticArcTol`         |
+//! | [`quadratic_arc_min_arcs`]         | not upstream (WR-711)             |
 //! | [`quartic_arc_tol`]                | `N_CreateQuarticArcTol`           |
 //! | [`quintic_arc_tol`]                | `N_CreateQuinticArcTol`           |
 //! | [`circ_arc`], [`DEFAULT_ANGLE_TOL`] | `N_CreateCircArc` (`at = 0.01`)  |
@@ -18,6 +19,8 @@
 //! | [`elliptical_arc_ang_type_tol`], [`AngleType`] | `N_CreateEllipticalArcAngTypeTol` |
 //!
 //! Deviations:
+//! - [`quadratic_arc_min_arcs`] (not upstream, WR-711) is `N_CreateQuadraticArcTol`
+//!   with a floor on its arc count; at `0` it is that function.
 //! - The output curve is returned as a new [`Curve`] (upstream fills the caller's
 //!   `NL_CURVE`, allocating it when NULL, or checks that a pre-allocated one is large
 //!   enough). The `NL_STACKS` arguments have no counterpart.
@@ -140,6 +143,18 @@ fn circle_pt(c: Vec3, x: Vec3, y: Vec3, r: f64, angle: f64) -> (Vec3, Vec3) {
 /// `InvalidInput` for non-finite or huge angles; `NL_GEO_ERR` for a zero axis;
 /// `NL_INP_ERR` when a segment's tangent lines cannot be intersected.
 pub fn quadratic_arc_tol(arc: &Arc, at: f64) -> Result<Curve> {
+    quadratic_arc_min_arcs(arc, at, 0)
+}
+
+/// [`quadratic_arc_tol`] split into at least `min_arcs` equal arcs (at most four):
+/// the arc count [`quadratic_arc_tol`] picks from the sweep when that is more. Not
+/// upstream: the sections of an exact circular fillet take the same count along the
+/// rails (`fixes.fillet_exact_arc_spans`, WR-711).
+///
+/// # Errors
+///
+/// As [`quadratic_arc_tol`].
+pub fn quadratic_arc_min_arcs(arc: &Arc, at: f64, min_arcs: usize) -> Result<Curve> {
     const OP: &str = "nurbs::crv_common::quadratic_arc_tol";
     let c = arc.center;
     let (r, as_deg) = (arc.r, arc.start);
@@ -147,9 +162,9 @@ pub fn quadratic_arc_tol(arc: &Arc, at: f64) -> Result<Curve> {
 
     // Get number of arcs.
     let cd = conic_data(ConicType::Quadratic, as_deg, arc.end)?;
-    let (ae, n, m) = (cd.ae, cd.n, cd.m);
-
-    let narcs = n / 2;
+    let narcs = (cd.n / 2).max(min_arcs.min(4));
+    let (ae, n) = (cd.ae, 2 * narcs);
+    let m = n + cd.p + 1;
     let theta = ae - as_deg;
     let dtheta = theta / narcs as f64;
 
