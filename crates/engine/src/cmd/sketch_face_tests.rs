@@ -705,6 +705,36 @@ fn a_face_next_to_plane_is_refused_not_ignored() {
     assert_eq!(r["attachment"], "exact_face", "{r}");
 }
 
+/// #3484: a rectangle swept along a path with a right-angle corner has flat side walls; a sketch
+/// can be created on them (they are exact planes, like those of a straight sweep).
+#[test]
+fn sketch_on_a_flat_wall_of_a_cornered_sweep() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Q"}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [30, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "P"}));
+    // The XZ sketch's y runs down world Z: 100 up, then 100 along +X.
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, -100], [100, -100]], "ids": ["up", "across"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.sweep", json!({"sketch": "Q", "path_sketch": "P", "path": ["up", "across"], "operation": "new", "body_name": "Tube"}));
+    // Walls of the first leg (normal -Y, +X) and of the second (underside, -Y), one point each.
+    for point in [[0.0, -15.0, 50.0], [30.0, 0.0, 50.0], [60.0, -15.0, 85.0]] {
+        let r = s.execute("sketch.create", &json!({"plane": {"face": point}})).unwrap_or_else(|e| panic!("{point:?}: {e}"));
+        assert_eq!(r["attachment"], "exact_face", "{point:?}: {r}");
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    // A fixed plane on the same wall is accepted by index as well.
+    let world = s.world_state();
+    let body = world.body("Tube").unwrap();
+    let wall = body.body.faces(0.01).unwrap().into_iter().find(|f| f.plane_normal.is_some_and(|n| n.dot(-Vec3::Y) > 0.999)).unwrap();
+    let pick = json!({"body": "Tube", "index": wall.index, "face": [wall.centroid.x, wall.centroid.y, wall.centroid.z]});
+    drop(world);
+    run(&mut s, "sketch.create", json!({"plane": pick.clone(), "fixed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": pick}));
+}
+
 /// #3248: a custom plane's `origin` that is present but not three numbers (an expression such as
 /// "w/2", a number with a unit, too few values) became [0, 0, 0] without a word. It is refused,
 /// like a bad `x_dir`, and nothing is added. A missing origin is still the world origin.

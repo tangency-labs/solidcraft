@@ -499,6 +499,33 @@ pub(crate) fn p3(v: Vec3) -> mt::Point3 {
 pub(crate) fn v3(v: Vec3) -> mt::Vector3 {
     mt::Vector3::new(v.x, v.y, v.z)
 }
+/// The plane holding every point of a control net, when they all lie in one: a polynomial
+/// surface whose control points are coplanar lies in that plane. Normal follows the surface's
+/// (u, v) orientation. None for a net that is curved, degenerate or too small to tell.
+fn coplanar_net(net: &[Vec<Vec3>]) -> Option<solidcraft_geom::Plane> {
+    let points: Vec<Vec3> = net.iter().flatten().copied().collect();
+    let first = *points.first()?;
+    let extent = points.iter().map(|p| (*p - first).len()).fold(0.0, f64::max);
+    if !(extent.is_finite() && extent > 0.0) {
+        return None;
+    }
+    // Surface directions across the net, from its corners: u runs along rows, v along columns.
+    let last_u = *net.last()?.first()?;
+    let last_v = *net.first()?.last()?;
+    let far = *net.last()?.last()?;
+    let normal = [(last_u - first).cross(last_v - first), (last_u - first).cross(far - first), (far - first).cross(last_v - first)]
+        .into_iter()
+        .max_by(|a, b| a.len().total_cmp(&b.len()))?
+        .normalized()?;
+    let tol = extent * 1e-9 + 1e-9;
+    if points.iter().any(|p| (*p - first).dot(normal).abs() > tol) {
+        return None;
+    }
+    let origin = points.iter().fold(Vec3::ZERO, |sum, p| sum + *p) / points.len() as f64;
+    let along = if (last_u - first).len() > extent * 1e-6 { last_u - first } else { far - first };
+    solidcraft_geom::Plane::new(origin, along - normal * along.dot(normal), normal.cross(along))
+}
+
 pub(crate) fn from_p3(p: mt::Point3) -> Vec3 {
     Vec3::new(p.x, p.y, p.z)
 }
@@ -823,6 +850,19 @@ impl Body {
                     let v = plane.v_axis();
                     solidcraft_geom::Plane::new(from_p3(plane.origin()), Vec3::new(u.x, u.y, u.z), Vec3::new(v.x, v.y, v.z))
                 }
+                // A flat wall built as a spline net (a sweep along a path with corners): flat
+                // when every control point lies in one plane.
+                mt::Surface::BSplineSurface(surface) => {
+                    coplanar_net(&surface.control_points().iter().map(|row| row.iter().map(|p| from_p3(*p)).collect()).collect::<Vec<_>>())
+                }
+                // Likewise a rational one, from its control points with the weights divided out.
+                mt::Surface::NurbsSurface(surface) => surface
+                    .non_rationalized()
+                    .control_points()
+                    .iter()
+                    .map(|row| row.iter().map(|h| (h.w > 0.0 && h.w.is_finite()).then(|| Vec3::new(h.x / h.w, h.y / h.w, h.z / h.w))).collect())
+                    .collect::<Option<Vec<Vec<Vec3>>>>()
+                    .and_then(|net| coplanar_net(&net)),
                 _ => None,
             });
             Ok(plane)
