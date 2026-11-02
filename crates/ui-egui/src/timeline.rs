@@ -630,8 +630,7 @@ pub(crate) fn request_playback(app: &mut SolveApp, action: PlaybackAction) -> Re
         app.run("timeline.roll_to", json!({"position": 0}))?;
         position = 0;
     }
-    app.timeline_playback =
-        Some(Playback { revision: app.session.revision, position, waiting: false, next_at: 0.0, stop_at });
+    app.timeline_playback = Some(Playback { revision: app.session.revision, position, waiting: false, next_at: 0.0, stop_at });
     Ok(())
 }
 
