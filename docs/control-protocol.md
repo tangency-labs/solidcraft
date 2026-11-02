@@ -79,7 +79,10 @@ launch and writes it, as one line of hex, to a file only the user can read:
 | Windows | `%LOCALAPPDATA%\SolidCraft\control\PORT.token` |
 
 On Unix the folder is `0700` and the file `0600`; on Windows the file's inherited permissions are
-replaced by a single entry for the user. `SOLIDCRAFT_CONTROL_DIR` moves the folder. The file is
+replaced by a single entry for the user. `SOLIDCRAFT_CONTROL_DIR` moves the folder. If Windows
+doesn't finish restricting the file within five seconds, the default folder (private to the user)
+keeps it, but a custom folder gets no token file, and clients then need
+`SOLIDCRAFT_CONTROL_TOKEN`. The file is
 removed when the app exits, unless another launch has written its own token there since, and the
 next launch writes a new token. The token file's path is
 printed to stderr at start-up. Beside it, `<port>.pid` holds the app's process id (and, on Linux,
@@ -96,7 +99,9 @@ The first request on a connection must carry the token as a top-level `"token"` 
 (`{"id": 1, "method": "ui.inspect", "params": {}, "token": "…"}`); later requests on the same
 connection may leave it out. A first line without the right token is answered with
 `{"ok": false, "error": "unauthorized: …"}` and the connection is closed, without running
-anything. Tokens are compared in constant time.
+anything. Tokens are compared in constant time. A connection that hasn't sent that first request
+within five seconds is closed without a reply, and blank lines don't extend the time. So connect
+when you have something to send; once authenticated, a connection may stay idle.
 
 `solidcraft-cli mcp --connect 127.0.0.1:PORT` reads the token file for that port by itself
 (`--token T` or `SOLIDCRAFT_CONTROL_TOKEN` give one explicitly). For a test harness, or a

@@ -237,3 +237,40 @@ fn the_mouse_picker_stops_at_a_section_cap() {
         other => panic!("the top face: {other:?}"),
     }
 }
+
+/// With a Section Analysis on, `view.pick` must not answer with edges or vertices in the
+/// half the section removes: the mouse picker has skipped them since #6722, and an agent
+/// must not get an answer the user cannot see (#10704).
+#[test]
+fn a_section_pick_skips_edges_and_vertices_in_the_removed_half() {
+    let mut h = Harness::new();
+    h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}}));
+    h.app.cam = Camera {
+        target: Vec3::new(20.0, 15.0, 10.0),
+        yaw: 0.0,
+        pitch: std::f64::consts::FRAC_PI_2,
+        roll: 0.0,
+        distance: 200.0,
+        fov: 0.0,
+        up: Default::default(),
+    };
+    // Section XZ at 15 mm: keeps y 0..15, removes y 15..30.
+    h.call("engine.execute", json!({"command": "inspect.section", "params": {"plane": {"origin": [0, 15, 0], "normal": [0, 1, 0]}}}));
+    // The same projection the model-frame pick builds, so a world point's pixel can be picked.
+    let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(960.0, 600.0));
+    let cam = h.app.cam;
+    let proj = crate::viewport::Proj { cam, vp: cam.view_proj(960.0 / 600.0, crate::viewport::scene_radius(&h.app)), rect };
+    let px = |p: [f64; 3]| {
+        let sp = proj.to_screen(Vec3::new(p[0], p[1], p[2])).unwrap();
+        json!([sp.x as f64, sp.y as f64])
+    };
+    // Top-view pixels on the removed half's top edge, corner, and mid-edge: nothing is drawn
+    // there, so the pick answers with nothing (it used to return the edge, with `body: null`).
+    for w in [[40.0, 25.0, 20.0], [40.0, 30.0, 20.0], [20.0, 30.0, 20.0]] {
+        let r = pick(&mut h, json!({"pixels": [px(w)]}));
+        assert_eq!(r["hits"][0], serde_json::Value::Null, "the removed half must pick nothing at {w:?}: {}", r["hits"][0]);
+    }
+    // The same pick on the kept half's edge (y < 15) still answers with that edge.
+    let r = pick(&mut h, json!({"pixels": [px([40.0, 5.0, 20.0])]}));
+    assert!(r["hits"][0]["edge"].get("index").is_some(), "the kept half's edge must still pick: {}", r["hits"][0]);
+}

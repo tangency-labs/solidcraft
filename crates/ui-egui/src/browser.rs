@@ -1701,7 +1701,7 @@ fn occurrence_rows_inner(
     if r.double && !takes_components && app.session.doc.parts.contains_key(&placement.component) {
         crate::dialogs_part_size::open(app, placement.component);
     }
-    if r.clicked && takes_components {
+    if r.clicked && (takes_components || crate::dialogs_move::picks_components(app)) {
         if let Some(mut d) = app.dialog.take() {
             d.pick(&app.session, Sel::Occurrence { path: path.to_vec() });
             app.dialog = Some(d);
@@ -2824,7 +2824,9 @@ fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, label_left: f
     if escape {
         // Dropping the state cancels the edit.
     } else if commit {
-        crate::context_menu::commit_rename(app, &rename);
+        if crate::context_menu::commit_rename(app, &rename).is_err() {
+            app.menu.rename = Some(rename);
+        }
     } else {
         app.menu.rename = Some(rename);
     }

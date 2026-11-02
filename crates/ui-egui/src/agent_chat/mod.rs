@@ -49,7 +49,7 @@ use crate::i18n::{format as trf, tr};
 use crate::{ControlRequest, SolveApp};
 use backend::{ChatBackend, Event, PermissionOption, PromptPart, ToolStatus};
 
-pub(crate) use panel::{left_inset, tool_space};
+pub(crate) use panel::{left_inset, owns_keyboard_input, tool_space};
 pub use panel::{show, tip as panel_tip, toggle, toggle_shortcut};
 
 /// Most entries kept in the conversation; older ones are dropped.
@@ -375,6 +375,8 @@ pub struct AgentChat {
     pub confirm_new: bool,
     /// Where the panel was drawn last (for its shortcuts).
     pub panel_rect: Option<egui::Rect>,
+    /// A pointer press in the transcript owns keys just like a focused text editor.
+    keyboard_owned: bool,
     /// Unreserved sheet space, shared by the actual dock and its drag preview.
     pub(crate) dock_space: Option<egui::Rect>,
     /// The last message sent, kept to send again after a sign-in (its files too).
@@ -477,6 +479,7 @@ impl AgentChat {
         }
         // Hit regions must be measured again for the incoming conversation.
         self.panel_rect = None;
+        self.keyboard_owned = false;
         self.dock_space = None;
         self.drop_rect = None;
     }
@@ -729,7 +732,7 @@ impl AgentChat {
                     self.push(Item::Plan(entries));
                 }
             }
-            Event::Permission { key, title, options } => return Some(Outcome::Permission { key, title, options }),
+            Event::Permission { key, title, kind, options } => return Some(Outcome::Permission { key, title, kind, options }),
             Event::Modes { current, available } => {
                 if self.config_options.is_none() && !available.is_empty() {
                     self.modes = available;
@@ -834,6 +837,13 @@ impl AgentChat {
                 self.clear_config();
                 self.state = Some(if matches!(self.state(), State::Starting | State::Failed) { State::Failed } else { State::Exited });
                 self.steering = false;
+                for item in &mut self.items {
+                    if let Item::Tool { status, .. } = item
+                        && !matches!(status, Some(ToolStatus::Completed | ToolStatus::Failed))
+                    {
+                        *status = Some(ToolStatus::Failed);
+                    }
+                }
                 let last: Vec<String> = tail.into_iter().rev().take(6).collect::<Vec<_>>().into_iter().rev().collect();
                 let detail = if last.is_empty() { String::new() } else { format!("\n{}", last.join("\n")) };
                 self.notice(format!("{}{detail}", tr("ui.agent_chat_exited")), true);
@@ -850,7 +860,7 @@ enum Outcome {
     /// A message was answered (or the agent stopped): the turn's bookkeeping ends.
     TurnEnd,
     /// The agent asks before running something of its own: answered by the mode, or asked.
-    Permission { key: u64, title: String, options: Vec<PermissionOption> },
+    Permission { key: u64, title: String, kind: Option<String>, options: Vec<PermissionOption> },
 }
 
 /// The AI features are on (the master switch in Settings → AI) and this is the desktop app.
@@ -921,12 +931,6 @@ pub(crate) fn assistant_tip(app: &SolveApp, mark: AssistantMark) -> String {
         None => tr("ui.assistant").to_string(),
     };
     format!("{name} — {state}")
-}
-
-/// Whether a permission question is about one of SolidCraft's own tools (which SolidCraft's own
-/// gate checks): the agents name MCP tools after their server.
-fn solidcraft_tool(title: &str) -> bool {
-    title.to_ascii_lowercase().contains("solidcraft")
 }
 
 /// `solidcraft-cli` next to this program, else on the search path.
@@ -1658,14 +1662,15 @@ pub fn answer_permission(app: &mut SolveApp, index: usize, option: Option<&str>)
     app.agent_chat.answer(index, option);
 }
 
-/// The agent asks before running something of its own. SolidCraft's own tools are checked by
-/// SolidCraft's gate, so they're allowed here (no double question); otherwise the mode or an
-/// earlier "always allow" may answer, and the chat says so; otherwise the user is asked.
-fn on_permission(app: &mut SolveApp, key: u64, title: String, options: Vec<PermissionOption>) {
+/// The agent asks before running something of its own. The chat's own MCP tools are checked by
+/// SolidCraft's gate, so they're allowed here (no double question, see [`acp::is_bridge_tool`]);
+/// otherwise the mode or an earlier "always allow" may answer, and the chat says so; otherwise the
+/// user is asked.
+fn on_permission(app: &mut SolveApp, key: u64, title: String, kind: Option<&str>, options: Vec<PermissionOption>) {
     let agent = app.agent_chat.running_id.clone();
     let mode = agents::mode_for(&app.preferences, &agent);
     let remembered = agents::always_allowed(&app.preferences, &agent, &title);
-    let why = if solidcraft_tool(&title) {
+    let why = if acp::is_bridge_tool(&title, kind) {
         Some("ui.ai_auto_ours")
     } else if remembered {
         Some("ui.ai_auto_remembered")
@@ -1949,7 +1954,7 @@ pub fn poll(app: &mut SolveApp, ctx: &egui::Context) {
                     b.answer_permission(key, None);
                 }
             }
-            Some(Outcome::Permission { key, title, options }) => on_permission(app, key, title, options),
+            Some(Outcome::Permission { key, title, kind, options }) => on_permission(app, key, title, kind.as_deref(), options),
             None => {}
         }
         if let Some(model) = confirmed_model {

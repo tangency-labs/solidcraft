@@ -67,7 +67,8 @@ fn section_details_live_fields_reconstruct_arbitrary_plane_without_losing_compan
     assert!((original.1 + flipped.1).len() < 1e-9);
     h.app.session.doc_mut().units = "in".into();
     let effect = h.app.session.status_items().remove(0);
-    let params = crate::viewport_details::edit_params(&h.app, &effect, "offset", &V::Length { value: -25.4, units: "in".into() }).unwrap();
+    let params =
+        crate::viewport_details::edit_params(&h.app, &effect, "offset", &V::Length { value: -25.4, units: "in".into(), decimals: 2 }).unwrap();
     assert_eq!(params["offset"], "-25.4 mm");
     assert_eq!(params["hatch"], true);
     assert_eq!(params["flip"], !current_flip);
@@ -121,7 +122,7 @@ fn details_record_scope_preserves_mixed_limits_and_stale_targets_never_move_came
     crate::viewport_details::dispatch(&mut h.app, &h.ctx, &owner, DetailEvent::Target(target));
     assert_eq!(h.app.session.camera, before);
     let effect = h.app.session.status_items().remove(0);
-    assert!(crate::viewport_details::edit_params(&h.app, &effect, "gap", &V::Length { value: 1.0, units: "in".into() }).is_none());
+    assert!(crate::viewport_details::edit_params(&h.app, &effect, "gap", &V::Length { value: 1.0, units: "in".into(), decimals: 2 }).is_none());
     assert!(crate::viewport_details::description(&h.app, &effect).findings.iter().all(|row| !row.target));
 }
 
@@ -2668,5 +2669,31 @@ fn summary_preferences_cancel_restores_layout_independently_of_all_effect_polici
         });
         h.frames(3);
         assert_eq!(crate::scenario::rect_of("viewport_status:summary").is_some(), saved);
+    }
+}
+
+#[test]
+fn a_section_card_shows_every_row_and_reads_like_its_pill() {
+    // #10708: the card was cut off below Hatch (and Flip for a tilted plane), and showed
+    // "15.000000 mm" and a normal with 16 digits.
+    use crate::ui_kit::DetailValue as V;
+    for (plane, rows, normal) in [(json!("XZ"), 3, None), (json!({"origin":[20,15,10],"normal":[1,1,0]}), 3, Some("(0.707, 0.707, 0)"))] {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+        h.app.run("inspect.section", json!({"plane":plane,"offset":15})).unwrap();
+        h.frames(3);
+        let effect = h.app.session.status_items().remove(0);
+        let owner = crate::viewport_status::identity(&effect);
+        h.step(&json!({"click":{"handle":format!("viewport_status:{owner}:setting")}})).unwrap();
+        h.frames(4);
+        let card = crate::scenario::rect_of("viewport_status:card").expect("the card");
+        let fields: Vec<_> = ["offset", "flip", "hatch"].iter().filter_map(|f| crate::scenario::rect_of(&format!("details:field:{f}"))).collect();
+        assert_eq!(fields.len(), rows);
+        assert!(fields.iter().all(|f| card.contains_rect(*f)), "{plane}: card {card:?}, rows {fields:?}");
+        let description = crate::viewport_details::description(&h.app, &effect);
+        assert!(description.settings.iter().any(|s| matches!(&s.value, V::Length { decimals: 2, .. })));
+        if let Some(normal) = normal {
+            assert!(description.settings.iter().any(|s| matches!(&s.value, V::Axis { current, .. } if current == normal)), "{plane}");
+        }
     }
 }

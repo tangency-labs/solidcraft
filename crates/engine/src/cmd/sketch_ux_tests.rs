@@ -1800,6 +1800,55 @@ fn budget_limited_cursor_progress_requests_a_frame_with_the_same_target() {
 // ---------------------------------------------------------------------------------------------
 // Cancel Sketch (#3838)
 
+fn sketch_below_a_solid() -> (Session, u64) {
+    let mut s = Session::default();
+    let id = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5}));
+    (s, id)
+}
+
+#[test]
+fn finishing_a_temporary_sketch_edit_at_the_undo_limit_keeps_the_original_design() {
+    let (mut s, id) = sketch_below_a_solid();
+    for i in 0..crate::MAX_UNDO {
+        run(&mut s, "browser.visibility", json!({"items": ["Body1"], "visible": i % 2 != 0}));
+    }
+    assert_eq!(s.undo.len(), crate::MAX_UNDO);
+    let before = s.doc.to_json();
+    run(&mut s, "sketch.edit", json!({"sketch": id, "restore_marker": null}));
+    for y in [20, 30] {
+        run(&mut s, "sketch.line", json!({"points": [[0, y], [10, y]]}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    assert!(s.undo.len() <= crate::MAX_UNDO);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    assert_eq!(s.active_sketch, None);
+    assert_eq!(s.model.state().bodies.len(), 1);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.marker, None);
+    assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 6);
+}
+
+#[test]
+fn undoing_cancel_then_finishing_restores_the_temporary_sketch_marker() {
+    let (mut s, id) = sketch_below_a_solid();
+    run(&mut s, "sketch.edit", json!({"sketch": id, "restore_marker": null}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 20], [10, 20]]}));
+    run(&mut s, "sketch.cancel", json!({}));
+    assert_eq!(s.doc.marker, None);
+    assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 4);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.active_sketch, Some(id));
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(s.doc.marker, None);
+    assert_eq!(s.active_sketch, None);
+    assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 5);
+    assert_eq!(s.model.state().bodies.len(), 1);
+}
+
 #[test]
 fn cancel_removes_a_new_sketch_with_its_dimensions_and_undo_brings_it_back() {
     let mut s = Session::default();

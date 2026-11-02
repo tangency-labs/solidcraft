@@ -116,6 +116,11 @@ pub struct Construct {
     pub feature: u64,
     pub name: String,
     pub geom: ConstructGeom,
+    /// The bodies it was built from, when every pick it reads lies on a body
+    /// ([`source_bodies`]): a later Move of all of them carries it along (#10127). Empty when
+    /// it also reads something fixed (a point, a plane, a sketch), which keeps it in place.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bodies: Vec<String>,
 }
 
 /// Everything a reference needs to be resolved.
@@ -497,6 +502,48 @@ fn surface_normal(s: FaceSurface, p: Vec3) -> Option<(Vec3, Vec3)> {
     }
 }
 
+/// A point over `s` where the face turns towards `towards` (a reference plane's normal): around
+/// the axis of a cylinder, cone or torus, turned `angle` about it; straight at it on a sphere. Of
+/// the two sides, the one `at` is on (#8822).
+fn facing(s: FaceSurface, at: Vec3, towards: Vec3, angle: f64) -> Result<Vec3> {
+    let side = |d: Vec3, w: Vec3| if d.dot(w) < 0.0 { d * -1.0 } else { d };
+    let around = |axis: Vec3, w: Vec3| -> Result<(Vec3, f64)> {
+        let d = (towards - axis * towards.dot(axis))
+            .normalized()
+            .ok_or_else(|| bad("the reference is square to the face's axis: every plane tangent to the face meets it at a right angle"))?;
+        let d = d * angle.cos() + axis.cross(d) * angle.sin();
+        let r = w - axis * w.dot(axis);
+        Ok((side(d, r), r.len()))
+    };
+    if !angle.is_finite() {
+        return Err(bad("the angle is not a number"));
+    }
+    Ok(match s {
+        FaceSurface::Plane { .. } => at,
+        FaceSurface::Cylinder { origin, axis, radius } => {
+            let w = at - origin;
+            let (d, _) = around(axis.into(), w)?;
+            origin + axis * w.dot(axis) + d * radius
+        }
+        FaceSurface::Cone { apex, axis, .. } => {
+            let w = at - apex;
+            let (d, r) = around(axis.into(), w)?;
+            apex + axis * w.dot(axis) + d * r.max(1e-6)
+        }
+        // On the outer equator, where the tube faces away from the axis.
+        FaceSurface::Torus { center, axis, major, minor } => {
+            let (d, _) = around(axis.into(), at - center)?;
+            center + d * (major + minor)
+        }
+        FaceSurface::Sphere { center, radius } => {
+            if angle.abs() > 1e-12 {
+                return Err(bad("a sphere has no axis to turn the plane about: leave the angle out"));
+            }
+            center + side(towards, at - center) * radius
+        }
+    })
+}
+
 fn face_surface_at(ctx: &Ctx, g: &GeoRef) -> Result<(FaceSurface, Vec3)> {
     match g {
         GeoRef::Face { at, name } => {
@@ -536,6 +583,46 @@ fn line_line(a: (Vec3, Vec3), b: (Vec3, Vec3)) -> Option<Vec3> {
     let s = (uv * vw - vv * uw) / den;
     let t = (uu * vw - uv * uw) / den;
     Some(((p + u * s) + (q + v * t)) * 0.5)
+}
+
+/// The bodies a construction built from `refs` lies on: each face, edge and vertex pick's body,
+/// and the bodies of the constructions it is built from. Empty when any pick is not on a body
+/// (a fixed point, the origin, a plane, a world axis, a sketch) or is not found: such a
+/// construction is held by something a move of the bodies leaves where it is, so it stays.
+pub(crate) fn source_bodies(ctx: &Ctx, refs: &[&GeoRef]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for g in refs {
+        let found: Vec<String> = match g {
+            GeoRef::Face { at, name } => face_of(ctx.st, *at, name).map(|(b, ..)| vec![b.definition_name().to_string()]).unwrap_or_default(),
+            GeoRef::Edge { at, name } => edge_pick(ctx.st, *at, name).map(|(b, ..)| vec![b.definition_name().to_string()]).unwrap_or_default(),
+            GeoRef::Vertex { .. } => {
+                point(ctx, g).ok().and_then(|p| vertex_body(ctx.st, p)).map(|b| vec![b.definition_name().to_string()]).unwrap_or_default()
+            }
+            GeoRef::Axis { name } | GeoRef::ConstructPoint { name } => {
+                ctx.st.construct.iter().find(|c| c.name.as_str() == AsRef::<str>::as_ref(name)).map(|c| c.bodies.clone()).unwrap_or_default()
+            }
+            _ => Vec::new(),
+        };
+        if found.is_empty() {
+            return Vec::new();
+        }
+        for b in found {
+            if !out.contains(&b) {
+                out.push(b);
+            }
+        }
+    }
+    out
+}
+
+/// The body with a vertex (an end of one of its edges) at `p`.
+fn vertex_body(st: &ModelState, p: Vec3) -> Option<&ModelBody> {
+    bodies(st).find(|b| {
+        let tol = (b.body.size() * 1e-3).max(1e-3);
+        b.body
+            .edges(tol)
+            .is_ok_and(|edges| edges.iter().flat_map(|e| [e.points.first(), e.points.last()]).flatten().any(|v| v.dist(p) <= 1e-6 * (1.0 + p.len())))
+    })
 }
 
 pub(crate) fn resolve_axis(ctx: &Ctx, d: &AxisDef) -> Result<(Vec3, Vec3)> {
@@ -637,9 +724,17 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
             }
             Plane::new(pa, pb - pa, pc - pa).ok_or_else(degenerate)
         }
-        PlaneRef::Tangent { face, at } => {
+        PlaneRef::Tangent { face, at, reference, angle } => {
             let (s, _) = face_surface_at(ctx, face)?;
-            let (on, n) = surface_normal(s, *at).ok_or_else(|| bad("the point is on the face's axis"))?;
+            let at = match reference {
+                Some(r) => {
+                    let towards = plane(ctx, r)?.normal().normalized().ok_or_else(degenerate)?;
+                    let angle = angle.as_ref().map(|a| Document::eval_in(ctx.vals, a, Kind::Angle)).transpose()?.unwrap_or(0.0);
+                    facing(s, *at, towards, angle)?
+                }
+                None => *at,
+            };
+            let (on, n) = surface_normal(s, at).ok_or_else(|| bad("the point is on the face's axis"))?;
             Plane::from_normal(on, n).ok_or_else(degenerate)
         }
         PlaneRef::Perpendicular { plane: base, line: l } => {
@@ -781,7 +876,11 @@ impl PlaneRef {
             PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } | PlaneRef::AxisPoint { axis: a, point: b } => vec![a.as_mut(), b.as_mut()],
             PlaneRef::Perpendicular { plane, line } => vec![plane.as_mut(), line.as_mut()],
             PlaneRef::ThreePoints { a, b, c } => vec![a.as_mut(), b.as_mut(), c.as_mut()],
-            PlaneRef::Tangent { face, .. } => vec![face.as_mut()],
+            PlaneRef::Tangent { face, reference, .. } => {
+                let mut v = vec![face.as_mut()];
+                v.extend(reference.as_deref_mut());
+                v
+            }
             PlaneRef::AlongPath { path, .. } => vec![path.as_mut()],
             PlaneRef::ThroughPoint { base, point } => {
                 let mut refs = base.refs_mut();

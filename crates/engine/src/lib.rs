@@ -297,6 +297,10 @@ pub(crate) struct SketchEntry {
     pub(crate) doc: Arc<Document>,
     pub(crate) undo_len: usize,
     pub(crate) undo_top: Option<Arc<Document>>,
+    /// A temporary editor rollback, restored by the engine even without a window.
+    pub(crate) restore_marker: Option<Option<usize>>,
+    pub(crate) pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    pub(crate) visibility: Visibility,
 }
 
 /// A copy of a session that evaluates commands ahead of it ([`Session::ahead`]).
@@ -463,8 +467,9 @@ pub struct Session {
     pub log: Vec<String>,
     /// Increments on every document change (views use it to refresh).
     pub revision: u64,
-    /// Revision increments caused only by visibility. Comparing both counters proves that
-    /// every intervening increment left an editor's document and model untouched.
+    /// Revision increments caused only by what is shown ([`Session::refresh_display`]).
+    /// Comparing both counters proves that every intervening increment left an editor's
+    /// document and model untouched.
     visibility_revision: u64,
     /// [`Document::browser_stamp`] when the browser's groups and order were last checked.
     browser_stamp: [u64; 6],
@@ -930,6 +935,12 @@ impl Session {
         }
     }
 
+    /// The marker an active temporary sketch edit returns to. `Some(None)` means the end of
+    /// the timeline; `None` means this sketch was opened without a temporary rollback.
+    pub fn sketch_restore_marker(&self) -> Option<Option<usize>> {
+        self.sketch_entry.as_ref().filter(|entry| Some(entry.sketch) == self.active_sketch).and_then(|entry| entry.restore_marker)
+    }
+
     /// Mutable document (copy-on-write).
     pub fn doc_mut(&mut self) -> &mut Document {
         self.forget_document_caches();
@@ -1339,8 +1350,9 @@ impl Session {
         }
     }
 
-    /// Only what is hidden or shown changed: the model is untouched, so only the view revision
-    /// moves (the visibility caches are keyed on it) and the viewport redraws.
+    /// Only what is shown changed (hidden or shown items, a section or analysis, the selection):
+    /// the design and model are untouched, so only the view revision moves and the viewport
+    /// redraws. An open feature editor stays valid across it (#10687).
     pub(crate) fn refresh_display(&mut self) {
         self.revision += 1;
         self.visibility_revision += 1;
@@ -1997,6 +2009,7 @@ impl Session {
         let mut copy = self.scratch();
         copy.undo.clone_from(&self.undo);
         copy.redo.clone_from(&self.redo);
+        copy.sketch_entry.clone_from(&self.sketch_entry);
         copy.model.keep(Some(Arc::default()));
         Ahead(copy)
     }
