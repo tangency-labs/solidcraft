@@ -112,6 +112,12 @@ user parameter `width` and dimensions with it, as when [placing a dimension](par
 box that does not become a dimension (a polygon's sides, a rounded rectangle's corner radius)
 takes a value only.
 
+To move or resize [imported SVG or DXF curves](files.md), edit their sketch and box-select
+the curves. Choose **Sketch tab → Modify → Move/Copy Sketch Entities** (`sketch.move`) to
+move or copy them, or **Sketch Scale** (`sketch.scale`) in the same panel to resize them.
+The Model tab's Move/Copy moves bodies. In scripts, `sketch.insert_svg` and
+`sketch.insert_dxf` also accept `at: [x, y]` and `scale` to position and size curves during import.
+
 The Sketch Palette's **Construction Geometries** option hides construction curves while you
 work. A hidden construction curve cannot be picked by a click or by a box. Nothing invisible
 is selectable. The option belongs to one sketch and is saved with the design. Centerlines are

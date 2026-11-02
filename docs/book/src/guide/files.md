@@ -14,6 +14,13 @@
 | DXF, SVG | into a sketch | sketches and flat patterns as DXF |
 | PNG, JPEG | canvases and decals | |
 
+To export a [sketch](sketching.md) with real circles, arcs, and lines, right-click the sketch
+in the **Browser** and choose **Export DXF…** (`sketch.export_dxf`). These become DXF
+`CIRCLE`, `ARC`, and `LINE` entities; a rectangle is four `LINE` entities.
+**File → Export Current View as DXF…** instead writes a projected drawing made of straight
+segments, so circles and arcs become segmented curves. See [view DXF export](../../../view-dxf.md)
+for projection and tolerance settings.
+
 Opening a STEP, IGES, FreeCAD or Rhino file creates a design with the file's bodies as a base feature, and
 inserting one adds them to the current design. Later features build on them. Mesh bodies render,
 measure, move and export, but solid features need B-rep bodies.
