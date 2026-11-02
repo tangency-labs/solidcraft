@@ -4769,6 +4769,7 @@
   "ui.history_sketch_listed_under": "列在 {feature} 下",
   "ui.history_title": "历史",
   "ui.history_toggle_names": "显示或隐藏特征名称",
+  "ui.history_waits_for_editor": "撤销、重做和历史将等待特征编辑器打开",
   "ui.hole": "孔",
   "ui.hole_tap_type": "孔攻丝类型",
   "ui.hole_type": "孔类型",

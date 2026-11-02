@@ -4761,6 +4761,7 @@
   "ui.history_sketch_listed_under": "Aufgeführt unter {feature}",
   "ui.history_title": "Verlauf",
   "ui.history_toggle_names": "Merkmalsnamen ein- oder ausblenden",
+  "ui.history_waits_for_editor": "Rückgängig, Wiederholen und Verlauf warten, bis der Feature-Editor geöffnet ist",
   "ui.hole": "Bohrung",
   "ui.hole_tap_type": "Gewindetyp",
   "ui.hole_type": "Bohrungstyp",

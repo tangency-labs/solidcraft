@@ -4769,6 +4769,7 @@
   "ui.history_sketch_listed_under": "Listed under {feature}",
   "ui.history_title": "History",
   "ui.history_toggle_names": "Show or hide feature names",
+  "ui.history_waits_for_editor": "Undo, Redo and History wait until the feature editor has opened",
   "ui.hole": "Hole",
   "ui.hole_tap_type": "Hole Tap Type",
   "ui.hole_type": "Hole Type",

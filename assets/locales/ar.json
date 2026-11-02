@@ -4769,6 +4769,7 @@
   "ui.history_sketch_listed_under": "مدرج تحت {feature}",
   "ui.history_title": "السجل",
   "ui.history_toggle_names": "إظهار أسماء الميزات أو إخفاؤها",
+  "ui.history_waits_for_editor": "ينتظر التراجع والإعادة والسجل حتى يكتمل فتح محرر الميزة",
   "ui.hole": "ثقب",
   "ui.hole_tap_type": "نوع لولبة الثقب",
   "ui.hole_type": "نوع الثقب",

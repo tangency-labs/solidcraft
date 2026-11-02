@@ -4769,6 +4769,7 @@
   "ui.history_sketch_listed_under": "Được liệt kê dưới {feature}",
   "ui.history_title": "Lịch sử",
   "ui.history_toggle_names": "Hiện hoặc ẩn tên tính năng",
+  "ui.history_waits_for_editor": "Hoàn tác, Làm lại và Lịch sử sẽ chờ cho đến khi trình chỉnh sửa tính năng mở xong",
   "ui.hole": "Tạo lỗ",
   "ui.hole_tap_type": "Kiểu ta-rô ren lỗ",
   "ui.hole_type": "Loại lỗ",

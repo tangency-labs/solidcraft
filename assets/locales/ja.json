@@ -4769,6 +4769,7 @@
   "ui.history_sketch_listed_under": "{feature} の下に表示",
   "ui.history_title": "履歴",
   "ui.history_toggle_names": "フィーチャー名を表示・非表示",
+  "ui.history_waits_for_editor": "元に戻す、やり直す、履歴は、フィーチャーエディターが開くまで待機します",
   "ui.hole": "穴",
   "ui.hole_tap_type": "ねじ穴タイプ",
   "ui.hole_type": "穴タイプ",

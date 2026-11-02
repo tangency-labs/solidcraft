@@ -4769,6 +4769,7 @@
   "ui.history_sketch_listed_under": "מופיעה תחת {feature}",
   "ui.history_title": "ציר הזמן",
   "ui.history_toggle_names": "הצגה או הסתרה של שמות הפיצ'רים",
+  "ui.history_waits_for_editor": "ביטול, ביצוע מחדש וציר הזמן ממתינים עד שעורך הפעולה ייפתח",
   "ui.hole": "חור",
   "ui.hole_tap_type": "סוג הברגת חור",
   "ui.hole_type": "סוג חור",
