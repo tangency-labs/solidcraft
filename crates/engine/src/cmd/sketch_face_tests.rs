@@ -825,9 +825,11 @@ fn a_sketch_on_the_mirrored_half_of_a_combined_body_sits_on_that_half() {
     }
 }
 /// The sensor enclosure's lid rests on the case, and its lip, joined below it, parts its underside
-/// into a ring and a panel. The ring is named after the case's top it rests on, so the lid's cap
-/// certificate finds only the panel: the ring is another piece of the same face and takes a sketch
-/// attached by that certificate, as it did before #8278 (#9465, nightly action matrix).
+/// into a ring and a panel. Where the join names the ring after the case's top it rests on, the
+/// lid's cap certificate finds only the panel: the ring is another piece of the same face and takes
+/// a sketch attached by that certificate, as it did before #8278 (#9465, nightly action matrix).
+/// Where the join's history names it a piece of the lid's own start (SMLib), the certificate finds
+/// it directly. Either way the ring is the underside piece under the pick, whatever its name.
 #[test]
 fn a_sketch_on_the_ring_of_a_lid_underside_parted_by_its_lip_keeps_the_cap() {
     let mut s = Session::default();
@@ -840,8 +842,10 @@ fn a_sketch_on_the_ring_of_a_lid_underside_parted_by_its_lip_keeps_the_cap() {
         .filter(|index| lid.body.planar_face(*index).is_some_and(|plane| plane.normal().dot(-Vec3::Z) > 0.999 && (plane.origin.z - 25.).abs() < 1e-6))
         .collect();
     assert!(down.len() > 1, "the lip parts the lid's underside: {down:?}");
-    let ring = *down.iter().find(|index| names[**index] == "F2:top").unwrap_or_else(|| panic!("the ring, among {names:?}"));
-    let pick = json!({"body":"Lid","index":ring,"face":[12.0, 29.266_666_666_665, 25.0]});
+    let at = Vec3::new(12.0, 29.266_666_666_665, 25.0);
+    let under = solidcraft_doc::naming::face_name_at_body(lid, at);
+    let ring = *down.iter().find(|index| under.as_ref() == Some(&names[**index])).unwrap_or_else(|| panic!("the ring ({under:?}), among {names:?}"));
+    let pick = json!({"body":"Lid","index":ring,"face":[at.x, at.y, at.z]});
     drop(world);
     let id = run(&mut s, "sketch.create", json!({"name":"On ring","plane":pick,"project_edges":false}))["sketch"].as_u64().unwrap();
     run(&mut s, "sketch.finish", json!({}));

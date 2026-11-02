@@ -376,9 +376,45 @@ fn a_curve_id_that_cannot_be_written_into_a_name_is_refused() {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"distance": 10}));
     let edges = run(&mut s, "model.edges", json!({"body": "Body1"}));
-    let names: Vec<String> = edges["edges"].as_array().unwrap().iter().filter_map(|e| e["name"].as_str().map(str::to_string)).collect();
-    assert!(!names.is_empty(), "{edges}");
-    for name in &names {
-        assert_eq!(name.matches('|').count(), 1, "an edge names two faces and separates them once: {name}");
+    let listed: Vec<String> = edges["edges"].as_array().unwrap().iter().filter_map(|e| e["name"].as_str().map(str::to_string)).collect();
+    assert!(!listed.is_empty(), "{edges}");
+    // Every edge names each face it bounds once, whole, separated by one `|` each: two faces
+    // where it separates two (the rims), one where both its sides are the same face (the side's
+    // seam, on a kernel that keeps the side whole). The id is never cut.
+    let world = s.world_state().unwrap();
+    let body = world.body("Body1").unwrap();
+    let faces = solidcraft_doc::naming::face_names(body);
+    let names = solidcraft_doc::naming::edge_names(body);
+    let mesh = body.mesh();
+    assert_eq!(names.len(), mesh.edge_faces.len());
+    let mut sorted = names.clone();
+    sorted.sort();
+    let mut shown = listed.clone();
+    shown.sort();
+    assert_eq!(sorted, shown, "model.edges lists the body's edge names");
+    assert!(faces.iter().any(|f| f == "F2:side:c1" || f.starts_with("F2:side:c1#")), "the side is named with the id whole: {faces:?}");
+    let mut rims = 0;
+    for ((name, between), points) in names.iter().zip(&mesh.edge_faces).zip(&mesh.edges) {
+        let whole = name.rsplit_once('~').filter(|(_, k)| k.parse::<u32>().is_ok()).map_or(name.as_str(), |(n, _)| n);
+        let parts: Vec<&str> = whole.split('|').collect();
+        let own: Vec<&str> = between.iter().map(|f| faces[*f as usize].as_str()).collect();
+        assert_eq!(parts.len(), own.len(), "an edge names each face it bounds, separated once each: {name}");
+        for part in &parts {
+            assert!(own.contains(part), "`{part}` of {name} is a whole face name among {own:?}");
+        }
+        match own.as_slice() {
+            [_, _] => rims += 1,
+            [side] => {
+                // A seam: along the side from the bottom to the top, at one place on the circle.
+                assert!(side.starts_with("F2:side:c1"), "only the side has a seam: {name}");
+                let (Some(a), Some(b)) = (points.first(), points.last()) else { panic!("an empty edge: {name}") };
+                assert!(
+                    (a.z - b.z).abs() > 9.999 && (a.x - b.x).hypot(a.y - b.y) < 1e-6 && (a.x.hypot(a.y) - 5.).abs() < 1e-6,
+                    "{name}: {a:?} {b:?}"
+                );
+            }
+            other => panic!("{name} bounds {other:?}"),
+        }
     }
+    assert!(rims >= 2, "the top and bottom rims: {names:?}");
 }
