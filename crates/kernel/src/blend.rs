@@ -2169,16 +2169,22 @@ fn chamfer_built(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
     }
     // A curved blend follows the whole tangent chain. Give it all picks together so
     // picks on that chain are consumed once, rather than chamfering its new rails again.
+    // Each pick's chain is found on the body as given, before anything is chamfered: one by one,
+    // a straight edge's cutter runs on past its end through the arcs tangent to it, and the
+    // picks on those arcs then name no edge (#2907). Several chains (both ends of a part) go
+    // together the same way.
     if tools.is_err() && edges.len() > 1 {
         let solid = cur.deep_copy();
         let ids = edge_ids(&cur, &solid, edges)?;
         let all = Body::unique_edges(&solid);
-        let same_chain = ids
-            .first()
-            .and_then(|id| all.iter().find(|e| e.id() == *id))
-            .and_then(|e| smooth_chain(&solid, e))
-            .is_some_and(|chain| ids.len() > 1 && ids.iter().all(|id| chain.contains(id)));
-        if same_chain && let Ok(result) = blend(&cur, edges, distance, Shape::Flat, "chamfer") {
+        let shares_chain = |id: &mt::EdgeID| {
+            all.iter()
+                .find(|e| e.id() == *id)
+                .and_then(|e| smooth_chain(&solid, e))
+                .is_some_and(|chain| ids.iter().any(|x| x != id && chain.contains(x)))
+        };
+        let on_chains = ids.len() > 1 && ids.iter().all(shares_chain);
+        if on_chains && let Ok(result) = blend(&cur, edges, distance, Shape::Flat, "chamfer") {
             return Ok(result);
         }
     }
@@ -2616,7 +2622,7 @@ fn chamfer_tool_sides(cur: &Body, p: Vec3, s: f64, sides: Option<(ChamferSide, b
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
 
     #[test]
     fn g2_fillet_has_zero_curvature_at_both_planar_rails() {
@@ -3117,5 +3123,49 @@ mod tests {
         assert!((actual - removed).abs() < 1e-3, "{actual} vs {removed}");
         assert_eq!(out.face_count(), body.face_count() + 4);
         assert!(out.validity().is_empty(), "{:?}", out.validity());
+    }
+
+    #[test]
+    fn a_chamfer_of_two_tangent_chains_resolves_every_pick_on_the_body_as_given() {
+        // A 20 x 20 profile with its top corners rounded (radius 4), extruded 20 along x; both
+        // end outlines chamfered but for their bottom edges (#2907). One by one, the top edge's
+        // cutter ran on through the arcs tangent to it and their picks named no edge.
+        let (w, k, r) = (20.0, 4.0, 2.0);
+        let quarter = std::f64::consts::FRAC_PI_2;
+        let region = Region2 {
+            outer: Loop2 {
+                segs: vec![
+                    Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(w, 0.0) },
+                    Seg2::Line { a: Vec2::new(w, 0.0), b: Vec2::new(w, w - k) },
+                    Seg2::Arc { center: Vec2::new(w - k, w - k), radius: k, start: 0.0, sweep: quarter },
+                    Seg2::Line { a: Vec2::new(w - k, w), b: Vec2::new(k, w) },
+                    Seg2::Arc { center: Vec2::new(k, w - k), radius: k, start: quarter, sweep: quarter },
+                    Seg2::Line { a: Vec2::new(0.0, w - k), b: Vec2::new(0.0, 0.0) },
+                ],
+            },
+            holes: vec![],
+        };
+        let body = crate::extrude(&Plane::YZ, &[region], 0.0, w).unwrap().pop().unwrap();
+        let d = k * (1.0 - std::f64::consts::FRAC_1_SQRT_2);
+        let mut picks = Vec::new();
+        for x in [0.0, w] {
+            for (y, z) in [(w / 2.0, w), (d, w - d), (w - d, w - d), (w, (w - k) / 2.0), (0.0, (w - k) / 2.0)] {
+                picks.push(Vec3::new(x, y, z));
+            }
+        }
+        // Per end: the section along the two sides and the top, and along the two arcs at the
+        // radius of its centroid (Pappus).
+        let straight = 2.0 * (w - k) + (w - 2.0 * k);
+        let along = |inset: f64| 2.0 * (straight + std::f64::consts::PI * (k - inset));
+        let removed = |b: &Body| crate::measure(&body).unwrap().volume - crate::measure(b).unwrap().volume;
+        let chamfered = chamfer(&body, &picks, r).unwrap();
+        let rounded = crate::fillet(&body, &picks, r).unwrap();
+        let c = r * (10.0 - 3.0 * std::f64::consts::PI) / (3.0 * (4.0 - std::f64::consts::PI));
+        for (out, want) in [(&chamfered, 0.5 * r * r * along(r / 3.0)), (&rounded, (1.0 - std::f64::consts::PI / 4.0) * r * r * along(c))] {
+            assert!(out.validity().is_empty(), "{:?}", out.validity());
+            assert_eq!(out.lumps().unwrap().len(), 1);
+            let got = removed(out);
+            assert!((got - want).abs() < 2e-3 * want, "{got} vs {want}");
+        }
     }
 }
