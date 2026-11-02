@@ -48,25 +48,37 @@ pub fn agent_scope_with(recovery: Option<PathBuf>, allowed: impl IntoIterator<It
     PathScope::new(roots)
 }
 
+static SCRATCH_DIR: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+
 /// This server's own folder for screenshots it reads back and deletes (`screenshot` without a
-/// `path`): a new `<temp>/solidcraft-mcp-<pid>-<n>` made on first use (never one that was there
-/// already, which could be someone else's), private to the user on Unix. `<temp>` is spelled with
-/// long names (`vfs::temp_dir`), since the scope refuses short (8.3) ones.
+/// `path`): a new `<temp>/solidcraft-mcp-<pid>-<n>` made when the path scope is built, or on the
+/// first screenshot without a scope. Never reuse an existing folder, which could be someone
+/// else's. It is private to the user on Unix. `<temp>` is spelled with long names (`vfs::temp_dir`),
+/// since the scope refuses short (8.3) ones.
 pub fn scratch_dir() -> Option<PathBuf> {
-    static DIR: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
-    DIR.get_or_init(|| {
-        let b = std::fs::DirBuilder::new();
-        #[cfg(unix)]
-        let mut b = b;
-        #[cfg(unix)]
-        std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
-        let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
-        (0..16u32).find_map(|i| {
-            let d = vfs::temp_dir().join(format!("solidcraft-mcp-{}-{:x}", std::process::id(), seed.wrapping_add(i)));
-            b.create(&d).ok().map(|()| d)
+    SCRATCH_DIR
+        .get_or_init(|| {
+            let b = std::fs::DirBuilder::new();
+            #[cfg(unix)]
+            let mut b = b;
+            #[cfg(unix)]
+            std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
+            let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
+            (0..16u32).find_map(|i| {
+                let d = vfs::temp_dir().join(format!("solidcraft-mcp-{}-{:x}", std::process::id(), seed.wrapping_add(i)));
+                b.create(&d).ok().map(|()| d)
+            })
         })
-    })
-    .clone()
+        .clone()
+}
+
+/// Best-effort cleanup at process shutdown, after all MCP activity has stopped. Only remove
+/// this process's empty scratch folder: saved files, other processes' folders and the recovery
+/// folder must survive. Looking up the cached path never creates a folder just to clean it up.
+pub fn cleanup_scratch_dir() {
+    if let Some(Some(dir)) = SCRATCH_DIR.get() {
+        let _ = std::fs::remove_dir(dir);
+    }
 }
 
 #[cfg(test)]
