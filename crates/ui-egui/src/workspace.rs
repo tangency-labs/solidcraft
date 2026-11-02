@@ -126,7 +126,13 @@ pub const SECTIONS: &[Section] = &[
         ids: &["solid.move", "solid.mirror", "solid.pattern.rectangular", "solid.align", "solid.pattern.circular", "solid.pattern.path"],
     },
     Section { tab: "MODEL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
-    Section { tab: "MODEL", panel: "CONSTRUCT", promoted: 1, ids: &["construct.plane.offset"] },
+    // Plane, Axis and Point work out the method from the picks; the methods follow in the menu.
+    Section {
+        tab: "MODEL",
+        panel: "CONSTRUCT",
+        promoted: 3,
+        ids: &["construct.plane", "construct.axis", "construct.point", "construct.plane.offset"],
+    },
     // Only while a linked design is edited in place, pinned at the right as FINISH SKETCH is.
     Section { tab: "MODEL", panel: "FINISH EDITING", promoted: 1, ids: &["component.finish_edit"] },
     // Sketches drive surfaces too: New Sketch leads the tab, as on MODEL and SHEET METAL.
@@ -904,7 +910,7 @@ mod tests {
             ("CREATE", vec!["solid.extrude", "solid.revolve", "solid.hole"]),
             ("MODIFY", vec!["solid.fillet", "solid.chamfer", "solid.shell", "solid.press_pull"]),
             ("ARRANGE", vec!["solid.move", "solid.mirror", "solid.pattern.rectangular"]),
-            ("CONSTRUCT", vec!["construct.plane.offset"]),
+            ("CONSTRUCT", vec!["construct.plane", "construct.axis", "construct.point"]),
         ] {
             let (cmds, n) = layout("MODEL", panel, &specs).unwrap();
             assert_eq!(cmds.iter().take(n).map(|c| c.id).collect::<Vec<_>>(), expected);

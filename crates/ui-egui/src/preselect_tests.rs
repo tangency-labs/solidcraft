@@ -2904,6 +2904,36 @@ fn plane_at_angle_direction_only_shows_a_pivot_and_applies() {
     assert!(reopened.inputs.iter().any(|i| i.label == "Pivot" && !i.items.is_empty()), "{:?}", reopened.inputs);
 }
 
+/// The ribbon's Plane opens as the method its picks call for: a plane alone opens Offset Plane,
+/// with its Distance, and a second plane turns the window into Midplane. OK adds that method's
+/// own feature.
+#[test]
+fn plane_tool_opens_as_the_method_its_picks_call_for() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.run("construct.plane.offset", json!({"base":"XY","offset":"20 mm","name":"Shelf"})).unwrap();
+    h.app.session.selection = vec![Sel::Plane { name: "XY".into() }];
+    h.app.start("construct.plane");
+    h.frames(2);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(matches!(d.kind, Kind::OffsetPlane { .. }) && d.auto.is_some(), "{d:?}");
+    assert_eq!(d.items(), vec![Sel::Plane { name: "XY".into() }], "the selection is the first pick");
+    assert!(h.app.dialog.as_mut().unwrap().primary().is_some_and(|(label, ..)| label == "Distance"), "Offset Plane's own value and handle");
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, Sel::Plane { name: "Shelf".into() });
+    h.frames(2);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(matches!(d.kind, Kind::Midplane), "a second plane chooses Midplane: {d:?}");
+    assert_eq!(d.items(), vec![Sel::Plane { name: "XY".into() }, Sel::Plane { name: "Shelf".into() }]);
+    let commands = apply_commands(&h.app, d).unwrap();
+    assert_eq!(commands[0].0, "construct.plane.midplane", "OK runs the method's own command");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    h.frames(2);
+    let (_, _, pl) =
+        solidcraft_engine::view::construction_planes(&h.app.session).into_iter().find(|(_, name, _)| name != "Shelf").expect("the midplane");
+    assert!(pl.normal().cross(Vec3::Z).len() < 1e-6 && (pl.origin.z - 10.0).abs() < 1e-6, "{pl:?}");
+}
+
 /// Plane at Angle draws the tilted plane while its dialog is open, when created and when edited,
 /// and redraws it when the angle changes (it used to show only the picked plane and the label).
 #[test]
