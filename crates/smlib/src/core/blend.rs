@@ -24,9 +24,10 @@ use std::sync::PoisonError;
 
 use solidcore::EntityRef;
 use solidcore::SolidError;
+use solidcore::blend::fillet_corner::p3::MIXED_CORNER_RAILS_CROSS;
 use solidcore::blend::fillet_executive::p1::{FilletLaw, FilletLawKind};
-use solidcore::blend::fillet_executive::p3::NoRoomReason;
-use solidcore::blend::fillet_executive::session::FilletSession;
+use solidcore::blend::fillet_executive::p3::{ErrorInfo, FitKind, NoRoomReason};
+use solidcore::blend::fillet_executive::session::{FilletObject, FilletSession};
 use solidcore::blend::fillet_geom::p1::{FilletCornerType, FilletErrorType};
 use solidcore::blend::fillet_section::section::GN_THUMBWEIGHT_EQUAL_AREA;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
@@ -52,6 +53,12 @@ use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, VertexId, 
 
 use super::{Body, answer, run};
 use crate::{Blend, ChamferSecond, Error, Hole, HoleEdge, MAX_POINTS, Result};
+
+/// Why solidcore refuses the 3x2 mixed-convexity corner whose rails cross
+/// (`fixes.fillet_refuse_mixed_corner_crossing_rails`, [`MIXED_CORNER_RAILS_CROSS`]): it builds no
+/// corner for it yet.
+pub(crate) const MIXED_CORNER_UNSUPPORTED: &str = "a fillet corner where a convex and a concave round leave the vertex along one \
+tangent, so that their contact lines cross before the corner (https://github.com/tangency-labs/solidcore/issues/2256)";
 use solidcore::topology::brep::p3::brep_copy;
 
 /// The capi's statuses as SolidCraft errors: an operation's own result.
@@ -66,6 +73,7 @@ pub(super) fn status(e: SolidError) -> Error {
     match e {
         SolidError::Upstream { code, .. } => Error::Status(code),
         SolidError::InvalidInput { .. } => Error::Status(INVALID_INPUT),
+        SolidError::Unsupported { reason, .. } if reason == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
         e if e.is_unported() => Error::Unsupported,
         e => Error::Solidcore(e.to_string()),
     }
@@ -272,8 +280,41 @@ fn face_set(b: &Brep) -> solidcore::Result<HashSet<FaceId>> {
 /// refusing it. Its answer is the fork's only by chance, so it is [`Error::Unsupported`]. With
 /// the cliff overflow on, solidcore makes the fork's choice, and its refusals (each with its own
 /// reason) are [`Error::NoRoom`] like the fork's.
-fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool) -> Error {
+///
+/// A blend too large that solidcore sizes (the session's fit, as the fork's capi reads it with
+/// `smlib_blend_fit_size`, or [`SolidError::FilletRefused`] carrying it; under
+/// `fixes.fillet_gn_section_generator`) is [`Error::TooLarge`] with that size, its edge's point
+/// filled in by the caller from the edge returned with it ([`sized_on`]); a corner solidcore
+/// refuses as not supported (the mixed corner whose rails cross, solidcore#2256) is
+/// [`Error::Unported`] naming it.
+fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool) -> (Error, Option<EdgeId>) {
     let info = s.error_info();
+    let fit = match &e {
+        SolidError::FilletRefused { fit, .. } => Some(*fit),
+        _ if info.code == FilletErrorType::NoRoom as i32 => s.fit_size(),
+        _ => None,
+    };
+    if e.is_unported() || matches!(e, SolidError::Unsupported { reason, .. } if reason == MIXED_CORNER_RAILS_CROSS) {
+        (status(e), None)
+    } else if let Some(fit) = fit
+        && !corner
+        && info.no_room_reason() != Some(NoRoomReason::RailLeavesFace)
+        && fit.size.is_finite()
+        && fit.size > 0.0
+    {
+        let kind = match fit.kind {
+            FitKind::Radius => crate::FitKind::Radius,
+            FitKind::Scale => crate::FitKind::Scale,
+            FitKind::Chord => crate::FitKind::Chord,
+        };
+        (Error::TooLarge { size: fit.size, kind, at: None }, fit.edge)
+    } else {
+        (blend_failure_unsized(info, e, corner), None)
+    }
+}
+
+/// [`blend_failure`] where solidcore gives no size.
+fn blend_failure_unsized(info: &ErrorInfo<FilletObject>, e: SolidError, corner: bool) -> Error {
     if e.is_unported() {
         status(e)
     } else if corner || info.code == FilletErrorType::CornerUnsupported as i32 {
@@ -285,6 +326,32 @@ fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool) -> Error {
     } else {
         Error::NoRoom
     }
+}
+
+/// `e` ([`Error::TooLarge`]) with the point at the middle of `edge` of `b`, the edge its size was
+/// found for; an equal chamfer's size (its ball's radius, [`chamfer_radius`]) as its distance.
+/// Where the edge or its point can't be read the size stays as it is, with no point (a chamfer's
+/// size then is not a distance, so it is left a plain refusal).
+fn sized_on(k: &Kernel, b: &mut Brep, edge: Option<EdgeId>, section: Section<'_>, e: Error) -> solidcore::Result<Error> {
+    let Error::TooLarge { size, kind, .. } = e else { return Ok(e) };
+    let Some(edge) = edge else {
+        return Ok(if matches!(section, Section::Chamfer(_)) && kind == crate::FitKind::Radius { Error::NoRoom } else { e });
+    };
+    let at = match b.edge(edge) {
+        Ok(rec) => match rec.curve.as_ref() {
+            Some(c) => answer(c.evaluate_point(k, rec.interval.evaluate(0.5)))?.map(|p| [p.x, p.y, p.z]),
+            None => None,
+        },
+        Err(_) => None,
+    };
+    if matches!(section, Section::Chamfer(_)) && kind == crate::FitKind::Radius {
+        // The ball's radius is linear in the chamfer's distance along an edge.
+        return Ok(match chamfer_radius(k, b, edge, 1.0)? {
+            Some(per_mm) => Error::TooLarge { size: size / per_mm, kind: crate::FitKind::Distance, at },
+            None => Error::NoRoom,
+        });
+    }
+    Ok(Error::TooLarge { size, kind, at })
 }
 
 /// `round_edges`' `overflow_first` argument: with it the session stops, nothing built, when blends
@@ -337,6 +404,8 @@ fn blend_edges_stopping(
     overflow_first: Option<OverflowFirst<'_>>,
 ) -> solidcore::Result<std::result::Result<(), std::result::Result<usize, Error>>> {
     let before = face_set(b)?;
+    // The edge a sized refusal names ([`blend_failure`]), read after the session lets `b` go.
+    let mut fit_edge = None;
     let done = {
         let mut s = FilletSession::new(k, b)?;
         // `SetFilletParameters(b, es, sections, solvers, values, laws, -1, -1, -1, -1,
@@ -380,11 +449,17 @@ fn blend_edges_stopping(
                             *m = s.mitred_edges();
                         }
                     }
-                    Ok(Err(Err(blend_failure(&s, e, corner))))
+                    let (why, edge) = blend_failure(&s, e, corner);
+                    fit_edge = edge;
+                    Ok(Err(Err(why)))
                 }
             },
             Ok(Err(refusal)) => Ok(Err(refusal)),
-            Err(e) => Ok(Err(Err(blend_failure(&s, e, corner)))),
+            Err(e) => {
+                let (why, edge) = blend_failure(&s, e, corner);
+                fit_edge = edge;
+                Ok(Err(Err(why)))
+            }
         }
     };
     let done: solidcore::Result<std::result::Result<(Vec<usize>, Vec<(usize, FaceId)>), std::result::Result<usize, Error>>> = done;
@@ -392,7 +467,10 @@ fn blend_edges_stopping(
         Ok(d) => d,
         Err(refusal) => {
             b.refresh_cached_topology();
-            return Ok(Err(refusal));
+            return Ok(Err(match refusal {
+                Err(e @ Error::TooLarge { .. }) => Err(sized_on(k, b, fit_edge, section, e)?),
+                r => r,
+            }));
         }
     };
     let stitched = stitch_and_orient(k, b, &StitchAndOrientOptions::default()).map_err(status);

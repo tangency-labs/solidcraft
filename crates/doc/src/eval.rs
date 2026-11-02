@@ -444,8 +444,12 @@ fn with_largest_fit(
     size: &str,
     search: impl FnOnce() -> std::result::Result<Option<(f64, kernel::Body)>, kernel::KernelError>,
 ) -> kernel::KernelError {
+    // The kernel's refusal may name it already, sized exactly where it was found.
+    if kernel::names_largest_fit(&why) {
+        return kernel::KernelError::TooLarge(why);
+    }
     match search() {
-        Ok(Some((largest, _))) => kernel::KernelError::TooLarge(format!("{why}; the largest {size} that fits is {} mm", show_mm(largest))),
+        Ok(Some((largest, _))) => kernel::KernelError::TooLarge(format!("{why}; {}", kernel::largest_fit_note(size, largest))),
         Ok(None) => kernel::KernelError::TooLarge(why),
         Err(e) => {
             log::debug!("the largest {size} that fits: {e}");

@@ -48,6 +48,10 @@ pub enum Error {
     /// crossing, a hole's wall offset just reaching a side's, so the result would pinch to
     /// nothing along a line. A thinner or a thicker wall builds.
     WallsTouch,
+    /// A blend larger than its faces allow, refused with the largest size that builds it
+    /// (solidcore's fit, `SolidError::FilletRefused`): the size, what it sizes, and a point at the
+    /// middle of the edge it was found for, when the refusal names one.
+    TooLarge { size: f64, kind: FitKind, at: Option<[f64; 3]> },
     /// SMLib cannot build this exactly yet (a variable radius whose law has a corner).
     Unsupported,
     /// A blend's edges meet at a vertex of a kind no SMLib blend corner handles yet.
@@ -77,6 +81,31 @@ pub enum Error {
     Unported(&'static str),
 }
 
+/// What the largest size that builds a refused blend ([`Error::TooLarge`]) sizes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FitKind {
+    /// A round's radius.
+    Radius,
+    /// An equal chamfer's distance.
+    Distance,
+    /// A factor on a chamfer's two distances.
+    Scale,
+    /// A chord round's width.
+    Chord,
+}
+
+impl FitKind {
+    /// The size's name, as a fillet's message names it ("the largest radius that fits").
+    pub fn word(self) -> &'static str {
+        match self {
+            FitKind::Radius => "radius",
+            FitKind::Distance => "distance",
+            FitKind::Scale => "scale",
+            FitKind::Chord => "chord width",
+        }
+    }
+}
+
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -89,6 +118,13 @@ impl std::fmt::Display for Error {
             Error::Ambiguous { point } => write!(f, "selection point {} is equally near to two edges or faces", point + 1),
             Error::NoRoom => write!(f, "there is no room for it: an offset leaves none inside the body, or a blend is larger than its faces allow"),
             Error::WallsTouch => write!(f, "the offset's walls would meet along a line, which leaves no solid there"),
+            Error::TooLarge { size, kind, at } => {
+                write!(f, "the blend is larger than its faces allow")?;
+                if let Some([x, y, z]) = at {
+                    write!(f, " at the edge at ({x:.3}, {y:.3}, {z:.3})")?;
+                }
+                write!(f, "; the largest {} that fits is {size}", kind.word())
+            }
             Error::Unsupported => write!(f, "not supported yet: SMLib cannot build this exactly"),
             Error::CornerUnsupported => write!(f, "not supported yet: a corner of this kind is not supported yet by SMLib's blends"),
             Error::CornerRefused { corner } => write!(

@@ -445,6 +445,19 @@ mod imp {
                      run on tangentially into each other, or meet in a way no blend corner builds)"
                 )),
                 SmError::NoRoom => KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow")),
+                SmError::TooLarge { size, kind, at } => {
+                    let beside = match at {
+                        Some([x, y, z]) => format!("the edge at ({x:.3}, {y:.3}, {z:.3})"),
+                        None => "its edges".to_owned(),
+                    };
+                    let fits = match kind {
+                        solidcraft_smlib::FitKind::Scale => {
+                            format!("the largest that fits is {} times the distances given", crate::blend::trimmed_mm(size))
+                        }
+                        kind => crate::blend::largest_fit_note(kind.word(), size),
+                    };
+                    KernelError::TooLarge(format!("the {what} is larger than the faces beside {beside} allow; {fits}"))
+                }
                 SmError::Unported(why) => KernelError::Invalid(format!("not supported yet: {why}")),
                 e => failed(what, "operation", e),
             })?;
