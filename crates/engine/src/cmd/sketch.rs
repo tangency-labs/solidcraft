@@ -259,28 +259,28 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&TANGENT_CONTRACT)
         .output(output_schema_for::<TangentResult>)
-        .params(concat!("a, b: curves or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or the end point of a line or an arc: that end then lies on the other curve (or on the other end point), and its curve is tangent there, in one step (`constraints` lists both)", model_operand_doc!())),
+        .params(concat!("a, b: curves or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or the end point of a line or an arc: that end then lies on the other curve (or on the other end point), and its curve is tangent there, in one step (`constraints` lists both); in a 3D sketch, a drawn 3D line and a drawn 3D arc that meet at an end (the line leaves the arc the way it runs on)", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.equal", "Equal", crate::checked!("sketch.constraint.equal", c_equal))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_equal")
         .enabled(in_sketch)
         .contract(&EQUAL_CONTRACT)
         .output(output_schema_for::<EqualResult>)
-        .params(concat!("a, b: lines or circles/arcs; or curves: [2 to 200 lines or circles/arcs], each made equal to the first, in one step", model_operand_doc!())),
+        .params(concat!("a, b: lines or circles/arcs (in a 3D sketch, two drawn 3D lines or two drawn 3D arcs); or curves: [2 to 200 lines or circles/arcs], each made equal to the first, in one step", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.parallel", "Parallel", crate::checked!("sketch.constraint.parallel", c_parallel))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_parallel")
         .enabled(in_sketch)
         .contract(&PARALLEL_CONTRACT)
         .output(output_schema_for::<ConstraintResult>)
-        .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created)", model_operand_doc!())),
+        .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created); in a 3D sketch, two drawn 3D lines, or a drawn 3D line and an origin plane xy / yz / xz", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.perpendicular", "Perpendicular", crate::checked!("sketch.constraint.perpendicular", c_perpendicular))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_perpendicular")
         .enabled(in_sketch)
         .contract(&PERPENDICULAR_CONTRACT)
         .output(output_schema_for::<ConstraintResult>)
-        .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created)", model_operand_doc!())),
+        .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created); in a 3D sketch, two drawn 3D lines", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.fix", "Fix/Unfix", crate::checked!("sketch.constraint.fix", c_fix))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_fix")
@@ -308,7 +308,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&COLLINEAR_CONTRACT)
         .output(output_schema_for::<ConstraintResult>)
-        .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created)", model_operand_doc!())),
+        .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created); in a 3D sketch, two drawn 3D lines", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.symmetry", "Symmetry", crate::checked!("sketch.constraint.symmetry", c_symmetry))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_symmetry")
@@ -2889,6 +2889,9 @@ fn two_curves_or_axes(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<(usize, u
 
 fn c_tangent(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constraint.tangent";
+    if let Some(made) = super::sketch_3d::relation_3d(s, p, cmd)? {
+        return reply(cmd, TangentResult { made: TangentMade::Curves(made), param_warnings: Vec::new() });
+    }
     let p = &super::sketch_project::project_operands(s, p, cmd, &["a", "b"])?;
     let sk = sketch_store::read(&s.doc, sketch_store::target(s, p, cmd)?)?;
     if tangent_end(sk, p, "a").is_some() || tangent_end(sk, p, "b").is_some() {
@@ -3021,6 +3024,9 @@ fn tangent_at_end(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     reply(cmd, TangentResult { made, param_warnings: Vec::new() })
 }
 fn c_equal(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(made) = super::sketch_3d::relation_3d(s, p, "sketch.constraint.equal")? {
+        return reply("sketch.constraint.equal", EqualResult { made: EqualMade::Pair(made), param_warnings: Vec::new() });
+    }
     if p.get("curves").is_some() {
         return equal_curves(s, p);
     }
@@ -3062,6 +3068,9 @@ fn equal_curves(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, EqualResult { made: EqualMade::Curves { constraints: out, sketch: info }, param_warnings: Vec::new() })
 }
 fn c_parallel(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(made) = super::sketch_3d::relation_3d(s, p, "sketch.constraint.parallel")? {
+        return reply("sketch.constraint.parallel", ConstraintResult { made, param_warnings: Vec::new() });
+    }
     let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.parallel", &["a", "b"])?;
     constrain_reply(s, p, "sketch.constraint.parallel", |sk| {
         two_curves_or_axes(sk, p, "sketch.constraint.parallel")
@@ -3070,6 +3079,9 @@ fn c_parallel(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 fn c_perpendicular(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(made) = super::sketch_3d::relation_3d(s, p, "sketch.constraint.perpendicular")? {
+        return reply("sketch.constraint.perpendicular", ConstraintResult { made, param_warnings: Vec::new() });
+    }
     let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.perpendicular", &["a", "b"])?;
     constrain_reply(s, p, "sketch.constraint.perpendicular", |sk| {
         two_curves_or_axes(sk, p, "sketch.constraint.perpendicular")
@@ -3096,6 +3108,9 @@ fn c_concentric(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 fn c_collinear(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(made) = super::sketch_3d::relation_3d(s, p, "sketch.constraint.collinear")? {
+        return reply("sketch.constraint.collinear", ConstraintResult { made, param_warnings: Vec::new() });
+    }
     let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.collinear", &["a", "b"])?;
     constrain_reply(s, p, "sketch.constraint.collinear", |sk| {
         two_curves_or_axes(sk, p, "sketch.constraint.collinear")
