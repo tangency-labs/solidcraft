@@ -69,7 +69,7 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
         let on = edge_near(b, &m, i, near);
         mid(i).map(|p| EdgeHit { edge: i, point: if on { near } else { p }, verified: verified(i), on_point: on }).ok_or_else(|| "edge".into())
     };
-    if let Some(i) = names.iter().position(|n| n == name) {
+    if let Some(i) = names.iter().position(|n| crate::persistent_name::same_edge(n, name)) {
         return exact(i);
     }
     // By the faces it separates: the best way any edge matches.

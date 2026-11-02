@@ -131,7 +131,7 @@ fn a_later_round_at_a_mitred_corner_is_blended_with_the_rounds_there() {
         faces.iter().find(|f| f["index"].as_u64() == Some(index as u64)).and_then(|f| f["name"].as_str()).unwrap_or_default().to_string()
     };
     let before: Vec<String> = rounds.iter().map(|p| named(&mut s, *p)).collect();
-    assert!(before.iter().all(|n| n.starts_with(&format!("F{first}:blend:"))), "{before:?}");
+    assert!(before.iter().all(|n| n.starts_with(&format!("F{first}:blend("))), "{before:?}");
     let second = run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 10]], "radius": 3}))["feature"].as_u64().unwrap();
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
     let v = volume(&mut s);
@@ -142,7 +142,7 @@ fn a_later_round_at_a_mitred_corner_is_blended_with_the_rounds_there() {
     assert_eq!(after, before);
     // The r3 round (halfway up, at 45°) and the corner's patches: the faces the second fillet made.
     let k3 = 3.0 - 4.5_f64.sqrt();
-    assert!(named(&mut s, solidcore_record::Vec3::new(20.0 - k3, k3, 10.0)).starts_with(&format!("F{second}:blend:")));
+    assert!(named(&mut s, solidcore_record::Vec3::new(20.0 - k3, k3, 10.0)).starts_with(&format!("F{second}:blend(")));
     let made = faces.iter().filter(|f| f["name"].as_str().is_some_and(|n| n.starts_with(&format!("F{second}:")))).count();
     // the r3 round and the corner's patch
     assert_eq!(made, 2, "{faces:?}");
@@ -3001,7 +3001,7 @@ mod naming {
             assert!(names.contains(&want), "{want} in {names:?}");
         }
         assert!(names.iter().any(|n| n.starts_with("F4:side:c1")), "{names:?}");
-        assert!(names.iter().any(|n| n.starts_with("F5:blend:")), "{names:?}");
+        assert!(names.iter().any(|n| n.starts_with("F5:blend(")), "{names:?}");
         let round = s.doc.find_feature("Round").cloned().unwrap();
         assert_eq!(round.edge_names, vec!["F2:side:l2|F2:top".to_string()]);
     }
@@ -3165,7 +3165,7 @@ mod naming {
         run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "B"}));
         run(&mut s, "solid.shell", json!({"faces": [[20, 15, 20]], "thickness": 2}));
         let n = face_names(&mut s, "B");
-        for want in ["F2:inner:F1:-z", "F2:inner:F1:+x", "F2:inner:F1:-x", "F2:inner:F1:+y", "F2:inner:F1:-y"] {
+        for want in ["F2:inner(F1:-z)", "F2:inner(F1:+x)", "F2:inner(F1:-x)", "F2:inner(F1:+y)", "F2:inner(F1:-y)"] {
             assert!(n.contains(&want.to_string()), "{want} in {n:?}");
         }
     }
@@ -3243,7 +3243,7 @@ fn press_pull_on_curved_faces() {
     run(&mut s, "solid.press_pull", json!({"face": [25, 15, 10], "distance": 1}));
     let v1 = volume(&mut s);
     assert!(rel(v1 - v0, PI * (25.0 - 16.0) * 20.0) < 1e-3, "{v0} {v1}");
-    // A shell's inner wall behind a fillet (`F3:inner:F2:blend:…`) only names the fillet: it is
+    // A shell's inner wall behind a fillet (`F3:inner(F2:blend(…))`) only names the fillet: it is
     // offset like any curved face, not taken for the shell's fillet. Pulled 0.5 into the cavity
     // (radius 3 to 2.5), the wall alone moves, stepping in from its tangent neighbours: the
     // quarter ring between the radii, 18 high, is added.

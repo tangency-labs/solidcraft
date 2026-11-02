@@ -2494,7 +2494,7 @@ fn joint_inspect_reports_a_lost_origin() {
 }
 
 /// An edge whose first face is a fillet's: the fillet face's name holds the edge it rounds
-/// (`F2:blend:<face>|<face>`), so the edge's two faces are the whole blend name and the slot's
+/// (`F2:blend(<face>|<face>)`), so the edge's two faces are the whole blend name and the slot's
 /// wall, not the blend name cut at its own `|`.
 #[test]
 fn joint_inspect_splits_an_edge_of_a_blend_face_into_its_two_faces() {
@@ -2518,11 +2518,11 @@ fn joint_inspect_splits_an_edge_of_a_blend_face_into_its_two_faces() {
     let edge = reference(&j, "a", "edge");
     let name = edge["name"].as_str().unwrap_or_default().to_string();
     let faces: Vec<String> = edge["faces"].as_array().into_iter().flatten().filter_map(|f| f["name"].as_str().map(str::to_string)).collect();
-    // `F4:blend:F3:+x|F3:+z#[F3:-y,F5:-y]|F5:-y`: the blend piece beside the slot, and the slot's wall.
-    assert!(name.split_once(':').is_some_and(|(_, r)| r.starts_with("blend:")), "the blend face comes first: {name}");
+    // `F4:blend(F3:+x|F3:+z#[F3:-y,F5:-y])|F5:-y`: the blend piece beside the slot, and the slot's wall.
+    assert!(name.split_once(':').is_some_and(|(_, r)| r.starts_with("blend(")), "the blend face comes first: {name}");
     assert_eq!(faces.len(), 2, "{edge}");
     assert_eq!(format!("{}|{}", faces[0], faces[1]), name, "{edge}");
-    assert!(faces[0].contains(":blend:") && faces[0].contains('|'), "{edge}");
+    assert!(faces[0].contains(":blend(") && faces[0].contains('|'), "{edge}");
     assert!(!faces[1].contains('|'), "{edge}");
 }
 

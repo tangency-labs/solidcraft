@@ -27,7 +27,7 @@ pub(crate) enum Operand {
     /// or mirror: its faces are named after their sources (`<name>@F<feature>.<instance>`).
     Copy { body: String, instance: usize },
     /// The cavity side of a shell grown from a body's faces (by name): each face is the inner
-    /// wall of the face it offsets (`F<feature>:inner:<name>`).
+    /// wall of the face it offsets (`F<feature>:inner(<name>)`).
     Inner(String),
     /// A body the feature built: each face's role (`side:<curve>`, `top`, `+x`, …; the first is
     /// its name, the others aliases), empty where the role is not known exactly.

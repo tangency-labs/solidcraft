@@ -8,7 +8,7 @@
 //! operation with one that made one of its operands.
 //!
 //! This is what persistent names and face attachments stand on. The document composes each
-//! feature's histories into face names (`F5:side:l1`, `F7:blend:…`, `F4:top@F6.2`, see
+//! feature's histories into face names (`F5:side:l1`, `F7:blend(…)`, `F4:top@F6.2`, see
 //! `solidcraft_doc::history_names`); a name is exact only when every operation on the way
 //! reported its history. A flat face with an exact name takes a durable sketch attachment by that
 //! name (`FaceCertificate::Lineage`, docs/face-attachments.md), so an operation that records its

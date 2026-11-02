@@ -413,7 +413,7 @@ fn blend_seams_are_a_rounds_contacts_and_the_blends_beside_it() {
 /// that round's own faces are not its own: where it runs into the cylinder the earlier round
 /// rolls on, its end face, is no seam of it (a block's arc at a cylinder rounded r2, then the
 /// block's top edge with the round's end curve on its side face rounded r1; the earlier round's
-/// name holds a `|` of its own, `F3:blend:F1:+z|F2:side`).
+/// name holds a `|` of its own, `F3:blend(F1:+z|F2:side)`).
 #[test]
 fn a_round_of_a_round_s_end_has_no_seam_with_that_round_s_faces() {
     use solidcraft_doc::naming::{blend_seams, face_names};
@@ -432,7 +432,7 @@ fn a_round_of_a_round_s_end_has_no_seam_with_that_round_s_faces() {
     for seam in &seams {
         let faces = sides(seam.edge);
         if faces.iter().any(|n| n.starts_with("F2:side")) {
-            assert!(faces.iter().any(|n| n.starts_with("F3:blend:")), "a seam of the r2 round only: {faces:?}");
+            assert!(faces.iter().any(|n| n.starts_with("F3:blend(")), "a seam of the r2 round only: {faces:?}");
         }
     }
 }
@@ -533,7 +533,7 @@ fn a_cut_through_one_of_two_bosses_names_only_its_own_walls() {
     assert_eq!(wall(&s), boss);
     run(&mut s, "solid.fillet", json!({"edges": [[6.35, 6.35, 10], [-6.35, 6.35, 10], [-6.35, -6.35, 10], [6.35, -6.35, 10]], "radius": 1.5}));
     let filleted = listed(&mut s, "Arm");
-    let blends = filleted.iter().filter(|(n, _, _)| n.starts_with("F7:blend:")).count();
+    let blends = filleted.iter().filter(|(n, _, _)| n.starts_with("F7:blend(")).count();
     assert_eq!(blends, 4, "{filleted:?}");
     assert_eq!(wall(&s), boss);
 }
@@ -780,8 +780,8 @@ fn a_chamfer_running_past_the_side_edges_it_takes_up_is_named_by_its_edge() {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch": "Bracket", "distance": 23, "body_name": "Bracket"}));
     run(&mut s, "solid.chamfer", json!({"edges": [[0, 0, 0]], "distance": 220, "distance2": 11}));
-    let blends: Vec<String> = names(&s, "Bracket").into_iter().map(|(n, _)| n).filter(|n| n.starts_with("F3:blend:")).collect();
-    assert_eq!(blends, vec!["F3:blend:F2:side:l1|F2:start".to_string()]);
+    let blends: Vec<String> = names(&s, "Bracket").into_iter().map(|(n, _)| n).filter(|n| n.starts_with("F3:blend(")).collect();
+    assert_eq!(blends, vec!["F3:blend(F2:side:l1|F2:start)".to_string()]);
     // On the chamfer's plane, through (x, -11, 0) and (x, 0, 220): below and above z = 85.
     let on = |z: f64| Vec3::new(0.0, -11.0 * (1.0 - z / 220.0), z);
     let at = solidcraft_doc::naming::face_names_at(&s.model.state(), &[on(40.0), on(150.0)]);
