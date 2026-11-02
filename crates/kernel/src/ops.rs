@@ -1652,10 +1652,18 @@ where
                 return Ok(Some(body));
             }
         }
-        // A lens cut from a sphere's projected outline carries a redundant cylinder
-        // tangent to the sphere (#2750). Remove it only after proving that it
-        // encloses the entire target, keeping the other wall and both caps exact.
+        // An inward cut of a widening cone's circular face only needs the tool's
+        // cap (#3303). Widen its walls only after certifying full enclosure.
         if attempt == 1 && op == BoolOp::Cut {
+            let (frustum, diagnostics) = capture_boolean_diagnostics(|| crate::frustum_cut::cut(a, b, &boolean_whole));
+            if let Some(Ok(result)) = frustum
+                && result.as_ref().is_none_or(|body| check(body).0)
+            {
+                merge(diagnostics);
+                return Ok(result);
+            }
+            // A projected lens carries a redundant cylinder tangent to a sphere
+            // (#2750). Keep its cutting cylinder and caps exact as well.
             let (lens, diagnostics) = capture_boolean_diagnostics(|| crate::sphere_lens::cut(a, b, &boolean_whole));
             if let Some(Ok(result)) = lens
                 && result.as_ref().is_none_or(|body| check(body).0)
