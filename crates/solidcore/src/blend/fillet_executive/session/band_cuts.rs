@@ -17,7 +17,7 @@
 //! | `keeps` (private)             | the `Keeps` lambda of `BandCutsThePart`  |
 //!
 //! Not the fork's: [`band_breaks_through_the_part`] (WR-707, #2299), the same sections
-//! judged for crossing a face of the part inside it, with
+//! judged for breaking through the part into a hollow behind a wall, with
 //! `fixes.fillet_refuse_rounds_breaking_through`.
 //!
 //! Deviations: the fork's out-params are returned (`None` for no cut). The solutions of
@@ -415,8 +415,8 @@ fn keeps(
         Judge::KeepsMaterial(crossings) => {
             keeps_material_behind(k, target, centre, [rail1, rail2], chord, crossings)?
         }
-        Judge::StaysInside(skip) => {
-            !section_breaks_through(k, target, centre, [rail1, rail2], chord, skip)?
+        Judge::StaysInside(faces) => {
+            !section_breaks_through(k, target, centre, [rail1, rail2], chord, faces)?
         }
     };
     Ok(out)
@@ -424,28 +424,53 @@ fn keeps(
 
 /// What `keeps` judges at a section: material kept behind it (`sm_KeepsMaterialBehind`,
 /// with the body's edges crossing the station's plane), or (WR-707, not the fork's) the
-/// section staying inside the part, clear of every face but those skipped.
+/// section not breaking through the part (`section_breaks_through`).
 #[derive(Clone, Copy)]
 enum Judge<'a> {
     /// `sm_KeepsMaterialBehind` with these plane crossings.
     KeepsMaterial(&'a [Point3]),
-    /// `section_breaks_through` false, these faces skipped.
-    StaysInside(&'a BTreeSet<FaceId>),
+    /// `section_breaks_through` false, with these faces.
+    StaysInside(&'a ThroughFaces),
+}
+
+/// The faces `section_breaks_through` tells apart (WR-707, not the fork's).
+struct ThroughFaces {
+    /// The faces at the blended edge's ends, which the corners trim: not judged.
+    skip: BTreeSet<FaceId>,
+    /// The blended faces and every face sharing an edge with one: the faces the blend
+    /// reaches over the blended faces' boundaries, which it is trimmed to.
+    reached: BTreeSet<FaceId>,
 }
 
 /// Not the fork's (WR-707, #2299): whether the section of a convex blend at a station,
-/// between its rails (the ball's arc, or the chamfer's chord, as an exact curve), crosses
-/// a face of the body inside that face, other than `skip` (the faces at the blended
-/// edge's ends, which the corners trim): the blend would break through the part's
-/// boundary there (a round on a wall thinner than it reaches into the hollow behind).
-/// Crossings within the body's tolerance of the section's own ends are its rails.
+/// between its rails (the ball's arc, or the chamfer's chord, as an exact curve), breaks
+/// through the part's boundary: it leaves the part through a face and comes back into it
+/// through another (or the same) face, so the part between those crossings is a hollow
+/// behind a wall that the blend opens (a round on a wall thinner than it reaches into the
+/// hollow behind, #2299).
+///
+/// The section is split at every point where it meets the body's boundary (crossings
+/// within the body's tolerance of its own ends are its rails), and each piece between two
+/// such points is classified by its middle. The section breaks through where a piece
+/// lies outside the part's material, one of its ends crosses a face inside the face (not
+/// at an edge), neither end is on a face at the blended edge's ends (which the corners
+/// trim), and one end is on a face that shares no edge with the blended faces: an inner
+/// face of the part, bounding material behind a wall, that the blend does not reach over
+/// the blended faces' boundaries.
+///
+/// So a piece outside the part that reaches a rail is not a break-through: there the
+/// blend runs off its face (over a cliff, into a hole or an opening) and is trimmed to the
+/// faces it runs onto. Nor is a piece through a hole or an opening in a blended face: its
+/// walls bound that face. The construction builds both to their closed-form volumes
+/// (SolidCraft rig cases the fork builds). It builds a blind pocket or a cavity under a
+/// blended face wrong, and those are refused (WR-707 addendum, 2026-11-02).
 fn section_breaks_through(
     k: &Kernel,
     body: &mut Brep,
     centre: Point3,
     rails: [Point3; 2],
     chord: bool,
-    skip: &BTreeSet<FaceId>,
+    faces: &ThroughFaces,
 ) -> Result<bool> {
     let [rail1, rail2] = rails;
     let a = rail1 - centre;
@@ -478,11 +503,12 @@ fn section_breaks_through(
     let interval = section.natural_interval();
     let ends = body.tolerance();
     let zone = brep_zone_tol_3d(k, body, SmallTopoType::default());
+    // where the section meets the boundary of face `f`: its parameter, whether it crosses
+    // `f` inside it (not on its boundary), whether `f` is judged and whether the blend
+    // reaches `f`
+    let mut meets: Vec<Meet> = Vec::new();
     for f in crate::topology::brep::p1::faces(body, None)? {
-        if skip.contains(&f) {
-            continue;
-        }
-        let mut on_face: Vec<Point2> = Vec::new();
+        let mut on_face: Vec<(f64, Point2)> = Vec::new();
         {
             let Some(surface) = face::p2::surface(body, f)? else {
                 continue;
@@ -510,10 +536,10 @@ fn section_breaks_through(
                 if at.distance(rail1) <= ends || at.distance(rail2) <= ends {
                     continue; // the section's own ends, on the blended faces
                 }
-                on_face.push(Point2::new(u, v));
+                on_face.push((t, Point2::new(u, v)));
             }
         }
-        for uv in on_face {
+        for (t, uv) in on_face {
             let mut class = PointClassification::<EntityRef>::new(zone);
             crate::query::face::p2::point_classify(
                 k,
@@ -528,10 +554,66 @@ fn section_breaks_through(
                     ..crate::query::face::p2::PointClassifyOptions::default()
                 },
             )?;
-            if class.point_class() == PointClassType::Face {
-                return Ok(true); // the section crosses the part's boundary inside a face
-            }
+            let inside = match class.point_class() {
+                PointClassType::Unknown => continue, // outside the face
+                PointClassType::Face => true,
+                _ => false, // on the face's boundary
+            };
+            meets.push(Meet {
+                t,
+                inside,
+                judged: !faces.skip.contains(&f),
+                reached: faces.reached.contains(&f),
+            });
         }
+    }
+    meets.sort_by(|x, y| x.t.total_cmp(&y.t));
+    for pair in meets.windows(2) {
+        let [m0, m1] = pair else {
+            continue;
+        };
+        let (t0, t1) = (m0.t, m1.t);
+        if !(m0.judged && m1.judged)
+            || !(m0.inside || m1.inside)
+            || (m0.reached && m1.reached)
+            || !(t1 - t0 > 0.0)
+        // one point, met on two faces
+        {
+            continue;
+        }
+        let middle = section.evaluate_point(k, 0.5 * (t0 + t1))?;
+        if !point_in_material(k, body, middle, zone)? {
+            return Ok(true); // a hollow behind a wall: the section breaks through
+        }
+    }
+    Ok(false)
+}
+
+/// Where a section meets the boundary of a face (`section_breaks_through`).
+#[derive(Clone, Copy)]
+struct Meet {
+    /// The section's parameter there.
+    t: f64,
+    /// Inside the face, not on its boundary.
+    inside: bool,
+    /// The face is judged: not one at the blended edge's ends.
+    judged: bool,
+    /// The face is one the blend reaches ([`ThroughFaces::reached`]).
+    reached: bool,
+}
+
+/// Whether `point` lies in the part's material, inside a region that is not void (the
+/// final classification of `sm_KeepsMaterialBehind`, with a point on the boundary, within
+/// the zone tolerance of a face, edge or vertex, not counted in: a piece of a section
+/// between two crossings of faces that lies within the tolerance of the boundary is too
+/// shallow to keep material).
+fn point_in_material(k: &Kernel, body: &mut Brep, point: Point3, zone: f64) -> Result<bool> {
+    let class = BrepQuery::of_brep(body).point_3d_classify(k, body, point, zone, true)?;
+    if class.point_class() != PointClassType::Region {
+        return Ok(false);
+    }
+    if let Some(EntityRef::Region(region)) = class.object() {
+        return Ok(body.region(region)?.is_void() == 0);
     }
     Ok(false)
 }
@@ -712,11 +794,12 @@ pub fn band_cuts_the_part(
 }
 
 /// Not the fork's (WR-707, #2299; `fixes.fillet_refuse_rounds_breaking_through` with
-/// `fixes.fillet_gn_section_generator`): whether this convex blend's section crosses a
-/// face of the part inside that face somewhere along its edge (it would break through the
-/// part's boundary between its rails), and where it would, the largest size that keeps
-/// every section clear. At the same 32 sections as [`band_cuts_the_part`]; faces at the
-/// blended edge's ends (the corners trim the blend there) are not judged. The limit at
+/// `fixes.fillet_gn_section_generator`): whether this convex blend's section breaks
+/// through the part somewhere along its edge (it leaves the part and comes back into it
+/// through an inner face, one sharing no edge with the blended faces: a hollow behind a
+/// wall, `section_breaks_through`), and where it would, the largest size that keeps every
+/// section from breaking through. At the same 32 sections as [`band_cuts_the_part`]; faces
+/// at the blended edge's ends (the corners trim the blend there) are not judged. The limit at
 /// each crossing section is found as the cut's is (halving from the ball's radius, then
 /// 40 bisections), least over the sections. A constant ball only. `None` where no
 /// section breaks through.
@@ -758,6 +841,15 @@ pub fn band_breaks_through_the_part(
     {
         skip.extend(vertex::faces(target, v)?);
     }
+    // the blended faces and the faces sharing an edge with them
+    let mut reached = BTreeSet::new();
+    for f in edge::faces(target, edge_id, None)? {
+        reached.insert(f);
+        for e in face::p4::edges(target, f, None, false, None)? {
+            reached.extend(edge::faces(target, e, None)?);
+        }
+    }
+    let faces = ThroughFaces { skip, reached };
     let mut out: Option<BandCut> = None;
     let mut near: Option<TsectPnt> = None;
     for j in 0..STEPS {
@@ -771,7 +863,7 @@ pub fn band_breaks_through_the_part(
             own,
             t,
             0.0,
-            Judge::StaysInside(&skip),
+            Judge::StaysInside(&faces),
             &mut near,
         )?;
         if !judged.found || judged.keeps {
@@ -791,7 +883,7 @@ pub fn band_breaks_through_the_part(
                 own,
                 t,
                 tr,
-                Judge::StaysInside(&skip),
+                Judge::StaysInside(&faces),
                 &mut at,
             )?;
             if s.found && s.keeps {
@@ -814,7 +906,7 @@ pub fn band_breaks_through_the_part(
                 own,
                 t,
                 mid,
-                Judge::StaysInside(&skip),
+                Judge::StaysInside(&faces),
                 &mut at,
             )?;
             if s.found && s.keeps {

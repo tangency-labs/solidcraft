@@ -140,9 +140,9 @@ pub enum NoRoomReason {
     /// tangency-labs/smlib#79 862971f, e568e45 and aac4288;
     /// `fixes.fillet_gn_section_generator`, WR-696).
     CutsThePart,
-    /// A convex blend's section would cross a face of the part inside it between its
-    /// rails: the blend would break through the part's boundary (a round on a wall thinner
-    /// than it reaches into the hollow behind; not the fork's,
+    /// A convex blend's section would leave the part between its rails and come back into
+    /// it through an inner face: the blend would break through a wall into the hollow
+    /// behind (a round on a wall thinner than it reaches; not the fork's,
     /// `fixes.fillet_refuse_rounds_breaking_through`, WR-707, #2299).
     BreaksThrough,
     /// A cliff overflow runs past a fillet end whose end face is not planar (WR-631).
@@ -2049,8 +2049,8 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
     ) -> Result<Option<SolverCut<O>>>;
 
     /// Not the fork's (WR-707, #2299): `None` for a concave blend or one whose sections
-    /// stay inside the part; otherwise where its section would cross a face of the part
-    /// inside it, with the largest size that keeps every section clear
+    /// do not break through the part; otherwise where its section would break through
+    /// into a hollow behind a wall, with the largest size at which no section does
     /// (`session::band_cuts::band_breaks_through_the_part`).
     ///
     /// # Errors
@@ -3369,9 +3369,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     }
 
     /// Not the fork's (WR-707, #2299; `fixes.fillet_refuse_rounds_breaking_through`): after
-    /// `BandCutsThePart`, a convex blend whose section between its rails crosses a face of
-    /// the part inside it would break through the part's boundary; the one whose size that
-    /// stays inside is least is refused with [`FilletErrorType::NoRoom`]
+    /// `BandCutsThePart`, a convex blend whose section between its rails leaves the part and
+    /// comes back into it through an inner face would break through a wall into the hollow
+    /// behind; the one whose largest size that does not is least is refused with
+    /// [`FilletErrorType::NoRoom`]
     /// ([`NoRoomReason::BreaksThrough`]), noting that size less the fit margin (the bound
     /// is open: at it the section touches an edge of the part).
     fn refuse_blends_breaking_through(
@@ -3641,8 +3642,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             // the fork's 862971f, e568e45 and aac4288: a convex blend that would cut the part
             // into pieces, refused naming the largest size that keeps it whole
             self.refuse_blends_cutting_the_part(k, access)?;
-            // not the fork's (WR-707, #2299): a convex blend whose section would cross a face
-            // of the part inside it, refused naming the largest size that stays inside
+            // not the fork's (WR-707, #2299): a convex blend whose section would break through
+            // a wall into the hollow behind, refused naming the largest size that does not
             if k.fixes.fillet_refuse_rounds_breaking_through {
                 self.refuse_blends_breaking_through(k, access)?;
             }
