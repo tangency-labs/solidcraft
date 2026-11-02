@@ -195,10 +195,10 @@ impl AcpBackend {
             Incoming::Text { thought, text } => out.push(Event::Text { thought, text }),
             Incoming::Tool { id, title, kind, status, input, output } => out.push(Event::Tool { id, title, kind, status, input, output }),
             Incoming::Plan(p) => out.push(Event::Plan(p)),
-            Incoming::Permission { rpc, title, options } => {
+            Incoming::Permission { rpc, title, kind, options } => {
                 self.next_key += 1;
                 self.permissions.insert(self.next_key, rpc);
-                out.push(Event::Permission { key: self.next_key, title, options });
+                out.push(Event::Permission { key: self.next_key, title, kind, options });
             }
             Incoming::AuthStatus(s) => out.push(Event::AuthStatus(s)),
             Incoming::ModeChanged(m) if !self.modern_config => out.push(Event::Modes { current: m, available: Vec::new() }),
