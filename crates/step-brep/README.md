@@ -52,6 +52,11 @@ is kept with its left-out faces reported. `BuildMode::Strict` returns the stitch
 build's error instead, and `BuildMode::StitchOnly` builds the old way only. The gate is
 `tests/topology_first.rs` (`corpus`, `one_file`, both ignored).
 
+For a `BREP_WITH_VOIDS`, the topology build classifies nested regions with the kernel
+after construction, before healing, seam and trim passes or volume selection. A
+classification error is reported as a topology-build error. Other body kinds are not
+classified by this step; the stitch-only path is unchanged.
+
 ## File pcurves
 
 `step-import` also maps each edge's `PCURVE`s (`Model::file_pcurves`).

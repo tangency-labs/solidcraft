@@ -917,6 +917,13 @@ fn build_topology(
         faces: made,
         mut failures,
     } = constructor::construct(body)?;
+    if body.kind == sm::BodyKind::SolidWithVoids {
+        solidcore::topology::brep::p1::set_region_is_void_flags_for_nested_solids(
+            &mut kernel,
+            &mut brep,
+        )
+        .map_err(|e| format!("classify void regions: {e}"))?;
+    }
     let file_face = |face: FaceId| {
         made.iter()
             .find(|(id, _)| *id == face)

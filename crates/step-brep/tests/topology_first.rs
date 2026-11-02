@@ -23,14 +23,43 @@ use step_import::model::{
     Body, BodyKind, Bound, Curve, Edge, Face, Frame, Loop, OrientedEdge, Shell, Surface, Vertex,
 };
 
-/// Corner `i` of the 10 mm cube: x, y, z from bits 0, 1, 2.
-fn corner(i: usize) -> [f64; 3] {
-    let bit = |b: usize| if i & (1 << b) == 0 { 0.0 } else { 10.0 };
-    [bit(0), bit(1), bit(2)]
+/// Corner `i` of a `size` mm cube whose low corner is `origin`: x, y, z from bits
+/// 0, 1, 2.
+fn cube_corner(origin: [f64; 3], size: f64, i: usize) -> [f64; 3] {
+    let mut point = origin;
+    for (b, coordinate) in point.iter_mut().enumerate() {
+        if i & (1 << b) != 0 {
+            *coordinate += size;
+        }
+    }
+    point
 }
 
-/// A closed 10 mm cube, outward faces, its edges lines from the lower corner index.
-fn cube() -> Body {
+/// A body with no topology yet.
+fn empty_body(name: &str, kind: BodyKind) -> Body {
+    Body {
+        step_id: 1,
+        name: Some(name.into()),
+        kind,
+        unit_mm: 1.0,
+        uncertainty_mm: None,
+        shells: Vec::new(),
+        faces: Vec::new(),
+        edges: Vec::new(),
+        vertices: Vec::new(),
+    }
+}
+
+/// Adds a `size` mm cube at `origin` to `body` at its current indices: outward faces,
+/// its edges lines from the lower corner index, `#id`s from `(edge, face, vertex)`.
+/// Returns the indices of the six faces added.
+fn add_cube(
+    body: &mut Body,
+    origin: [f64; 3],
+    size: f64,
+    (edge_id, face_id, vertex_id): (u64, u64, u64),
+) -> Vec<usize> {
+    let corner = |i: usize| cube_corner(origin, size, i);
     let mut pairs: Vec<(usize, usize)> = Vec::new();
     for a in 0..8usize {
         for b in [1usize, 2, 4] {
@@ -39,37 +68,39 @@ fn cube() -> Body {
             }
         }
     }
+    let (vertex0, edge0) = (body.vertices.len(), body.edges.len());
     let edges: Vec<Edge> = pairs
         .iter()
         .enumerate()
         .map(|(index, &(a, b))| {
             let (p, q) = (corner(a), corner(b));
             Edge {
-                step_id: index as u64 + 1,
-                start: a,
-                end: b,
+                step_id: edge_id + index as u64,
+                start: vertex0 + a,
+                end: vertex0 + b,
                 curve: Curve::Line {
                     origin: p,
                     dir: [
-                        (q[0] - p[0]) / 10.0,
-                        (q[1] - p[1]) / 10.0,
-                        (q[2] - p[2]) / 10.0,
+                        (q[0] - p[0]) / size,
+                        (q[1] - p[1]) / size,
+                        (q[2] - p[2]) / size,
                     ],
                     magnitude: 1.0,
                 },
                 same_sense: true,
                 t_start: 0.0,
-                t_end: 10.0,
+                t_end: size,
             }
         })
         .collect();
     let use_of = |a: usize, b: usize| {
         let (lo, hi) = (a.min(b), a.max(b));
         OrientedEdge {
-            edge: pairs
-                .iter()
-                .position(|&p| p == (lo, hi))
-                .unwrap_or_default(),
+            edge: edge0
+                + pairs
+                    .iter()
+                    .position(|&p| p == (lo, hi))
+                    .unwrap_or_default(),
             forward: a < b,
         }
     };
@@ -82,60 +113,79 @@ fn cube() -> Body {
         ([0, 4, 6, 2], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]),
         ([1, 3, 7, 5], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
     ];
-    let faces = sides
-        .iter()
-        .enumerate()
-        .map(|(index, (c, x, y))| {
-            let z = [
-                x[1] * y[2] - x[2] * y[1],
-                x[2] * y[0] - x[0] * y[2],
-                x[0] * y[1] - x[1] * y[0],
-            ];
-            Face {
-                step_id: 100 + index as u64,
-                surface: Surface::Plane {
-                    frame: Frame {
-                        origin: corner(c[0]),
-                        x: *x,
-                        y: *y,
-                        z,
-                    },
+    let first_face = body.faces.len();
+    for (index, (c, x, y)) in sides.iter().enumerate() {
+        let z = [
+            x[1] * y[2] - x[2] * y[1],
+            x[2] * y[0] - x[0] * y[2],
+            x[0] * y[1] - x[1] * y[0],
+        ];
+        body.faces.push(Face {
+            step_id: face_id + index as u64,
+            surface: Surface::Plane {
+                frame: Frame {
+                    origin: corner(c[0]),
+                    x: *x,
+                    y: *y,
+                    z,
                 },
-                same_sense: true,
-                loops: vec![Loop {
-                    outer: true,
-                    orientation: true,
-                    bound: Bound::Edges(
-                        c.iter()
-                            .zip(c.iter().cycle().skip(1))
-                            .map(|(&a, &b)| use_of(a, b))
-                            .collect(),
-                    ),
-                }],
-            }
-        })
-        .collect();
-    Body {
-        step_id: 1,
-        name: Some("cube".into()),
-        kind: BodyKind::ManifoldSolid,
-        unit_mm: 1.0,
-        uncertainty_mm: None,
-        shells: vec![Shell {
-            step_id: 1,
-            closed: true,
-            orientation: true,
-            faces: (0..6).collect(),
-        }],
-        faces,
-        edges,
-        vertices: (0..8)
-            .map(|i| Vertex {
-                step_id: 1000 + i as u64,
-                point: corner(i),
-            })
-            .collect(),
+            },
+            same_sense: true,
+            loops: vec![Loop {
+                outer: true,
+                orientation: true,
+                bound: Bound::Edges(
+                    c.iter()
+                        .zip(c.iter().cycle().skip(1))
+                        .map(|(&a, &b)| use_of(a, b))
+                        .collect(),
+                ),
+            }],
+        });
     }
+    body.edges.extend(edges);
+    body.vertices.extend((0..8).map(|i| Vertex {
+        step_id: vertex_id + i as u64,
+        point: corner(i),
+    }));
+    (first_face..body.faces.len()).collect()
+}
+
+/// A closed 10 mm cube, outward faces, its edges lines from the lower corner index.
+fn cube() -> Body {
+    let mut body = empty_body("cube", BodyKind::ManifoldSolid);
+    let faces = add_cube(&mut body, [0.0; 3], 10.0, (1, 100, 1000));
+    body.shells.push(Shell {
+        step_id: 1,
+        closed: true,
+        orientation: true,
+        faces,
+    });
+    body
+}
+
+/// A closed 10 mm cube with a centred 5 mm cube as its void (a `BREP_WITH_VOIDS`): its
+/// material is `1000 - 125 = 875` mm³. The void shell is an `ORIENTED_CLOSED_SHELL`
+/// with orientation `.F.` (`step_import::model::Shell::orientation`): its faces are
+/// built outward of the cavity, so the shell reverses them to point into the cavity,
+/// away from the material, as `BREP_WITH_VOIDS` requires.
+fn cube_with_void() -> Body {
+    let mut body = empty_body("cube with void", BodyKind::SolidWithVoids);
+    let outer = add_cube(&mut body, [0.0; 3], 10.0, (1, 100, 1000));
+    let void = add_cube(&mut body, [2.5; 3], 5.0, (13, 200, 2000));
+    body.shells.push(Shell {
+        step_id: 1,
+        closed: true,
+        orientation: true,
+        faces: outer,
+    });
+    body.shells.push(Shell {
+        step_id: 2,
+        closed: true,
+        orientation: false,
+        faces: void,
+    });
+    body
 }
 
 fn options(stitch_only: bool) -> BuildOptions {
@@ -160,6 +210,21 @@ fn volume(brep: &Brep) -> Option<f64> {
     solidcore::mass::integrator::properties::brep_volume(&kernel, &mut copy, 1e-9, &attrs).ok()
 }
 
+fn region_census(brep: &Brep) -> solidcore::Result<(usize, usize, usize)> {
+    let infinite = brep.infinite_region();
+    let mut census = (0, 0, 0);
+    for id in solidcore::topology::brep::p1::regions(brep, None)? {
+        if Some(id) != infinite {
+            match brep.region(id)?.is_void() {
+                0 => census.0 += 1,
+                1 => census.1 += 1,
+                _ => census.2 += 1,
+            }
+        }
+    }
+    Ok(census)
+}
+
 #[test]
 fn a_closed_body_is_built_from_its_topology() {
     let built = build_body(&cube(), options(false)).unwrap();
@@ -174,6 +239,130 @@ fn a_closed_body_is_built_from_its_topology() {
     // The old build stitches.
     let stitched = build_body(&cube(), options(true)).unwrap();
     assert_eq!(stitched.path, BuildPath::Stitch);
+}
+
+/// A solid with a void shell is built from its topology with the cavity removed from
+/// its material: the 10 mm cube less the centred 5 mm cube is 875 mm³, not the 1000 mm³
+/// of its outer shell and not the 1125 mm³ of the two shells added.
+#[test]
+fn a_solid_with_a_void_is_built_from_its_topology_with_the_void_removed() {
+    let body = cube_with_void();
+    assert_eq!(body.shells.len(), 2, "outer shell, then its void");
+    assert!(
+        !body.shells[1].orientation,
+        "the void shell is oriented .F."
+    );
+    let built = step_brep::build_from_topology(&body, options(false)).unwrap();
+    assert_eq!(built.path, BuildPath::Topology);
+    assert!(built.face_failures.is_empty(), "{:?}", built.face_failures);
+    assert!(is_closed_solid(&built.brep));
+    assert_eq!(built.brep.face_list().len(), 12);
+    assert_eq!(built.brep.edge_list().len(), 24);
+    assert_eq!(built.brep.vertex_list().len(), 16);
+    let v = volume(&built.brep).unwrap();
+    assert!((v - 875.0).abs() < 1e-6, "volume {v}");
+    assert_eq!(region_census(&built.brep).unwrap(), (1, 1, 0));
+}
+
+#[test]
+fn default_build_keeps_the_void_and_its_volume() {
+    let built = build_body(&cube_with_void(), options(false)).unwrap();
+    assert_eq!(built.path, BuildPath::Topology);
+    assert!(built.face_failures.is_empty(), "{:?}", built.face_failures);
+    assert!(is_closed_solid(&built.brep));
+    assert_eq!(
+        (
+            built.brep.face_list().len(),
+            built.brep.edge_list().len(),
+            built.brep.vertex_list().len()
+        ),
+        (12, 24, 16)
+    );
+    assert_eq!(region_census(&built.brep).unwrap(), (1, 1, 0));
+    let v = volume(&built.brep).unwrap();
+    assert!((v - 875.0).abs() < 1e-6, "volume {v}");
+}
+
+#[test]
+fn two_disjoint_voids_are_both_removed() {
+    let mut body = empty_body("two voids", BodyKind::SolidWithVoids);
+    for (index, (origin, size)) in [([0.0; 3], 10.0), ([1.0; 3], 2.0), ([6.0; 3], 3.0)]
+        .into_iter()
+        .enumerate()
+    {
+        let faces = add_cube(
+            &mut body,
+            origin,
+            size,
+            (
+                1 + 20 * index as u64,
+                100 + 100 * index as u64,
+                1000 + 1000 * index as u64,
+            ),
+        );
+        body.shells.push(Shell {
+            step_id: index as u64 + 1,
+            closed: true,
+            orientation: index == 0,
+            faces,
+        });
+    }
+    for built in [
+        step_brep::build_from_topology(&body, options(false)).unwrap(),
+        build_body(&body, options(false)).unwrap(),
+    ] {
+        assert_eq!(built.path, BuildPath::Topology);
+        assert!(built.face_failures.is_empty(), "{:?}", built.face_failures);
+        assert!(is_closed_solid(&built.brep));
+        assert_eq!(
+            (
+                built.brep.face_list().len(),
+                built.brep.edge_list().len(),
+                built.brep.vertex_list().len()
+            ),
+            (18, 36, 24)
+        );
+        assert_eq!(region_census(&built.brep).unwrap(), (1, 2, 0));
+        let v = volume(&built.brep).unwrap();
+        assert!((v - 965.0).abs() < 1e-6, "volume {v}");
+    }
+}
+
+#[test]
+fn shell_model_and_single_solid_are_unchanged() {
+    for kind in [BodyKind::ManifoldSolid, BodyKind::ShellModel] {
+        let mut body = cube();
+        body.kind = kind;
+        let built = step_brep::build_from_topology(&body, options(false)).unwrap();
+        assert!(built.face_failures.is_empty(), "{:?}", built.face_failures);
+        assert_eq!(
+            is_closed_solid(&built.brep),
+            kind == BodyKind::ManifoldSolid
+        );
+        assert_eq!(
+            (
+                built.brep.face_list().len(),
+                built.brep.edge_list().len(),
+                built.brep.vertex_list().len()
+            ),
+            (6, 12, 8)
+        );
+        assert_eq!(
+            region_census(&built.brep).unwrap(),
+            if kind == BodyKind::ManifoldSolid {
+                (1, 0, 0)
+            } else {
+                (0, 0, 0)
+            }
+        );
+        let v = volume(&built.brep).unwrap();
+        let expected = if kind == BodyKind::ManifoldSolid {
+            1000.0
+        } else {
+            0.0
+        };
+        assert!((v - expected).abs() < 1e-6, "volume {v}");
+    }
 }
 
 /// One build's outcome as counts and classes (no geometry).
