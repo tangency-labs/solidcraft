@@ -1113,3 +1113,55 @@ fn inch_joint_offsets_limits_and_drive_values_keep_their_units() {
     let Kind::Assembly(Asm::Joint(f)) = edit.kind else { panic!("no edit") };
     assert_eq!((f.limits[0].1.as_str(), f.limits[0].2.as_str()), ("0 in", "0.5 in"));
 }
+
+/// The Assemble ribbon must open a body picker, without executing the JSON command yet.
+#[test]
+fn components_from_bodies_dialog_select_all_cancel_and_ok() {
+    let mut h = crate::scenario::Harness::new();
+    for x in [0, 30] {
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0]})).unwrap();
+    }
+    let before = h.app.session.doc.clone();
+    let names: Vec<_> = h.app.session.model.state().bodies.iter().map(|body| body.name.to_string()).collect();
+    h.step(&json!({"start":"component.from_bodies"})).unwrap();
+    let d = h.app.dialog.as_ref().expect("From Bodies opens a dialog");
+    assert!(matches!(d.kind, Kind::Assembly(Asm::FromBodies)));
+    assert!(apply_commands(&h.app, d).is_err(), "OK requires at least one body");
+    assert_eq!(h.app.session.doc, before);
+    h.step(&json!({"widget":crate::i18n::tr("ui.select_all")})).unwrap();
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands, vec![("component.from_bodies".into(), json!({"bodies":names}))]);
+    if let Ok(path) = std::env::var("SOLIDCRAFT_COMPONENTS_DIALOG_EVIDENCE") {
+        let ctx = crate::fonts::test_context();
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+        let mut textures = Default::default();
+        for frame in 0..6 {
+            let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), ..Default::default() }, |ui| {
+                h.app.logic(ui.ctx());
+                h.app.ui(ui);
+            });
+            crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+            output.textures_delta.clear();
+            if frame == 5 {
+                crate::ui_kit::test_raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures).save(&path).unwrap();
+            }
+        }
+    }
+    h.step(&json!({"widget":"Cancel"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    assert_eq!(h.app.session.doc, before, "Cancel makes no components");
+    // Existing body picks seed the same standard multi-selection input.
+    h.app.session.selection = vec![Sel::Body { name: names[0].clone() }];
+    h.step(&json!({"start":"component.from_bodies"})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.inputs[0].items.body_names(), vec![names[0].clone()]);
+    h.step(&json!({"widget":crate::i18n::tr("ui.select_all")})).unwrap();
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    for name in &names {
+        let component = h.app.session.doc.find_component(name).expect("one component per body");
+        assert_eq!(h.app.session.doc.model_body_component(h.app.session.model.state().body(name).unwrap()), component);
+    }
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.session.doc, before, "the dialog applies one undoable command");
+}
