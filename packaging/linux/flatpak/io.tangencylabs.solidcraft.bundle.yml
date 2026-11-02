@@ -1,0 +1,54 @@
+# Flatpak manifest for the single-file bundle attached to every GitHub release
+# (solidcraft-<version>-linux-<arch>.flatpak). Build it with packaging/linux/flatpak-bundle.sh.
+# Adapted from PhotoCraft's (storytold/photocraft, Apache-2.0; see ATTRIBUTION.md).
+#
+# It repackages the release's own Linux tarball (solidcraft-<version>-linux-<arch>.tar.gz, built
+# on Ubuntu 22.04 by package.sh) instead of compiling Rust inside flatpak-builder: no network
+# during the build, and the same binaries as the AppImage/deb/rpm. The binaries need glibc >= 2.35
+# and load X11, Wayland, xkbcommon and Vulkan at runtime; the freedesktop runtime has all of
+# them, and the GPU driver comes from its org.freedesktop.Platform.GL extension.
+# Earlier releases used the ids ai.storyteller.solidcraft (0.8 until the move to Tangency Labs)
+# and ai.storyteller.solvecraft (before 0.8). The Flatpak repository marks both end-of-life with a
+# rebase to this one, so `flatpak update` moves existing installs over (packaging/flatpak-site.sh,
+# docs/compatibility.md).
+id: io.tangencylabs.solidcraft
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+command: solidcraft
+finish-args:
+  # Display: Wayland first; X11 only when no Wayland compositor is running.
+  - --socket=wayland
+  - --socket=fallback-x11
+  # X11 shared memory (MIT-SHM). Without it the X11 fallback is slow or fails.
+  - --share=ipc
+  # GPU access for the wgpu viewport (Vulkan, or GL as a fallback).
+  - --device=dri
+  # Open/Save dialogs go through the file-chooser portal (rfd's xdg-portal backend), so picked
+  # files work anywhere without broad filesystem access. Documents is granted so files passed by
+  # path (the command line, recent designs) work in the usual place.
+  - --filesystem=xdg-documents
+  # Compatibility shim (docs/compatibility.md): settings and autosaves of earlier releases, kept
+  # under the old app ids, read once on first launch when this app was installed next to the old
+  # one instead of replacing it through `flatpak update`.
+  - --filesystem=~/.var/app/ai.storyteller.solidcraft:ro
+  - --filesystem=~/.var/app/ai.storyteller.solvecraft:ro
+  # Deliberately not granted: network (the optional --control server listens on 127.0.0.1 in
+  # the sandbox; `flatpak override --user --share=network io.tangencylabs.solidcraft` exposes it to
+  # host agents) and home/host filesystem access.
+modules:
+  - name: solidcraft
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 bin/solidcraft /app/bin/solidcraft
+      - install -Dm755 bin/solidcraft-cli /app/bin/solidcraft-cli
+      # The old CLI name, forwarding to solidcraft-cli (compatibility shim, docs/compatibility.md).
+      - install -Dm755 bin/solvecraft-cli /app/bin/solvecraft-cli
+      - install -Dm644 share/applications/io.tangencylabs.solidcraft.desktop /app/share/applications/io.tangencylabs.solidcraft.desktop
+      - install -Dm644 share/mime/packages/io.tangencylabs.solidcraft.xml /app/share/mime/packages/io.tangencylabs.solidcraft.xml
+      # Already has the release's version and date substituted by package.sh.
+      - install -Dm644 share/metainfo/io.tangencylabs.solidcraft.metainfo.xml /app/share/metainfo/io.tangencylabs.solidcraft.metainfo.xml
+      - mkdir -p /app/share/icons /app/share/doc && cp -R share/icons/hicolor /app/share/icons/ && cp -R share/doc/solidcraft /app/share/doc/
+    sources:
+      - type: dir
+        path: stage

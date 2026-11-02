@@ -9,9 +9,10 @@ parameter to watch the timeline rebuild. [Documentation](https://docs.solidcraft
 [ROADMAP](https://github.com/bherbruck/solidcraft/blob/main/ROADMAP.md#known-limitations) lists
 the known limitations. Designs from every earlier version open in this one.
 
-**Upgrading from 0.7 or earlier.** 0.8 changed the Linux app ID to `ai.storyteller.solidcraft`:
-`flatpak update` offers to replace the old app, and the `.deb`, `.rpm` and AppImage remove the old
-menu entry.
+**New app ID.** The app ID is now `io.tangencylabs.solidcraft` (it was `ai.storyteller.solidcraft`,
+and `ai.storyteller.solvecraft` up to 0.7): `flatpak update` offers to replace the old app, the
+`.deb`, `.rpm` and AppImage remove the old menu entry, and settings stay. On macOS the bundle ID
+changed too, so macOS asks once more for the permissions it had granted.
 
 **Upgrading from 0.5 or earlier.** 0.6 renamed SolveCraft to SolidCraft and made the zip
 container the default save format. `.solvecraft` designs, old settings folders and
@@ -42,16 +43,16 @@ installing SolidCraft; keep both remotes in the same user installation:
 ```sh
 flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 flatpak remote-add --user --if-not-exists solidcraft https://docs.solidcraft.io/flatpak/solidcraft.flatpakrepo
-flatpak install --user solidcraft ai.storyteller.solidcraft
-flatpak run ai.storyteller.solidcraft
+flatpak install --user solidcraft io.tangencylabs.solidcraft
+flatpak run io.tangencylabs.solidcraft
 ```
 
 A remote added from the old `bherbruck.github.io` address no longer finds updates: run
 `flatpak remote-modify --user --url=https://docs.solidcraft.io/flatpak/repo/ solidcraft`, then
 `flatpak update --user`.
 
-Flatpak installs from 0.7 or earlier use the old ID `ai.storyteller.solvecraft`: `flatpak update --user`
-offers to replace it with `ai.storyteller.solidcraft`, and settings move along.
+Flatpak installs under an old ID (`ai.storyteller.solidcraft`, or `ai.storyteller.solvecraft` from 0.7 or
+earlier): `flatpak update --user` offers to replace it with `io.tangencylabs.solidcraft`, and settings move along.
 
 Single-file `.flatpak` bundles include the runtime repository address; missing runtimes
 still need an internet connection. [Linux installation details](https://docs.solidcraft.io/guide/getting-started.html#linux-flatpak).

@@ -9,7 +9,7 @@
 use super::{CompletePass, MAX_BYTES, invalid, limit};
 use crate::job::encoding::PngEncoding;
 use crate::job::{CancelToken, CpuHost, ErrorCode, JobError, Phase, Progress, Reservation, Result};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::{Vec3, srgb::encode8};
 
 /// Encoded bytes retain the actual existing host lease. No detached byte getter.
 pub struct CompletedPng {
@@ -154,7 +154,7 @@ impl<'a> FilmPngTask<'a> {
                 let rgb = pass.film.pixel_statistics(self.pixel)?.mean;
                 let mapped = crate::studio::tone_map(Vec3::new(rgb[0], rgb[1], rgb[2]) * self.scale)
                     .map_err(|_| invalid("film exposure exceeds finite radiance range"))?;
-                self.rgba.extend_from_slice(&[encode(mapped.x), encode(mapped.y), encode(mapped.z), 255]);
+                self.rgba.extend_from_slice(&[encode8(mapped.x), encode8(mapped.y), encode8(mapped.z), 255]);
                 self.pixel += 1;
             } else if self.writer.is_none() {
                 charge(1)?;
@@ -202,11 +202,6 @@ impl<'a> FilmPngTask<'a> {
             total: if encoding { u64::from(self.height) } else { count as u64 },
         }))
     }
-}
-
-fn encode(linear: f64) -> u8 {
-    let srgb = if linear <= 0.0031308 { 12.92 * linear } else { 1.055 * linear.powf(1.0 / 2.4) - 0.055 };
-    (srgb.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 #[cfg(test)]

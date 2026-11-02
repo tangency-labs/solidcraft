@@ -251,3 +251,45 @@ fn clipboard_commands_refuse_parameters_that_are_not_an_object() {
     // Nothing was cut or pasted by the refused calls.
     assert!(s.execute("sketch.paste", &json!({})).is_ok(), "the clipboard still holds the copy");
 }
+
+/// Sketch geometry copied in one design pastes into a sketch of another (#9258): at the same
+/// coordinates, with its constraints and dimensions. A dimension that named the first design's
+/// parameter keeps its value as a number in its unit (the other design's `w` is another thing);
+/// one typed as a number keeps it.
+#[test]
+fn sketch_geometry_pastes_into_another_design_with_values_not_foreign_parameters() {
+    let mut a = Session::default();
+    run(&mut a, "parameters.change", json!({"name": "w", "expression": "1 in"}));
+    run(&mut a, "sketch.create", json!({"plane": "XY"}));
+    let rect = strs(&run(&mut a, "sketch.rectangle.two_point", json!({"p0": [5, 5], "p1": [30, 15]}))["curves"]);
+    run(&mut a, "sketch.dimension", json!({"entities": [rect[0]], "value": "w"}));
+    run(&mut a, "sketch.dimension", json!({"entities": [rect[1]], "value": 10}));
+    let sa = a.active_sketch.unwrap();
+    let corner = pos(sketch(&a, sa), &rect[0]);
+    run(&mut a, "sketch.copy", json!({"entities": rect}));
+    let clip = a.sketch_clipboard.clone().unwrap();
+
+    let mut b = Session::default();
+    // Another design with its own `w`, and a sketch with the copied one's id.
+    run(&mut b, "parameters.change", json!({"name": "w", "expression": "3 mm"}));
+    run(&mut b, "sketch.create", json!({"plane": "XZ"}));
+    let sb = b.active_sketch.unwrap();
+    assert_eq!(sb, sa, "same id: the copy must still not be offset as if pasted back into its own sketch");
+    b.sketch_clipboard = Some(clip.for_another_design());
+    let pasted = strs(&run(&mut b, "sketch.paste", json!({}))["curves"]);
+    assert_eq!(pasted.len(), 4);
+    let sk = sketch(&b, sb);
+    let at = pos(sk, &pasted[0]);
+    assert!(at.iter().zip(&corner).all(|(p, q)| p.dist(*q) < 1e-6), "{at:?} vs {corner:?}");
+    let exprs: Vec<String> = sk.constraints.iter().filter_map(|c| c.param.as_ref()).filter_map(|n| b.doc.param(n)).map(|p| p.expr.clone()).collect();
+    assert_eq!(exprs.len(), 2, "{exprs:?}");
+    assert!(exprs.iter().all(|e| solidcraft_doc::expr::references(e).is_empty()), "{exprs:?}");
+    assert!(exprs.iter().any(|e| e == "10"), "{exprs:?}");
+    let width = sk.constraints.iter().filter_map(|c| c.kind.value()).fold(0.0_f64, f64::max);
+    assert!((width - 25.4).abs() < 1e-6, "the width stays 1 in, not the other design's w: {width}");
+    assert!(b.doc.params.iter().filter(|p| p.name == "w").all(|p| p.expr == "3 mm"), "its own w is untouched");
+    // Each paste without a position lands at the copied coordinates.
+    let again = strs(&run(&mut b, "sketch.paste", json!({}))["curves"]);
+    let at = pos(sketch(&b, sb), &again[0]);
+    assert!(at.iter().zip(&corner).all(|(p, q)| p.dist(*q) < 1e-6), "{at:?}");
+}

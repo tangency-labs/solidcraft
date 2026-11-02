@@ -18,48 +18,68 @@ pub(in crate::cmd) fn capture_internal(s: &Session, value: &Value, cmd: &str) ->
     capture_impl(s, value, cmd, true)
 }
 
-fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result<PlaneRef> {
+/// A planar face pick `{face, fixed?, body?, index?, path?}` as [`capture`] reads it before it
+/// looks at the design.
+pub(crate) struct FacePickForm<'a> {
+    /// The picked point, in world coordinates.
+    pub point: solidcraft_geom::Vec3,
+    /// Keep the plane as it is now instead of following the face.
+    pub fixed: bool,
+    /// The exact pick: the world body and the face's index, given together.
+    pub body: Option<&'a str>,
+    pub index: Option<usize>,
+    /// The occurrence path of the body's placement.
+    pub path: Option<Vec<u64>>,
+}
+
+/// What [`capture`] reads `value` as, or its message for the first key it refuses, in the order
+/// `face`, `fixed`, `body`, `index`, the two together, then `path`.
+pub(crate) fn face_pick_form(value: &Value) -> std::result::Result<FacePickForm<'_>, &'static str> {
     let point = value
         .get("face")
         .and_then(vec3)
         .filter(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite())
-        .ok_or_else(|| bad(cmd, "face point must be three finite world coordinates"))?;
+        .ok_or("face point must be three finite world coordinates")?;
     let fixed = match value.get("fixed") {
         None => false,
         Some(Value::Bool(fixed)) => *fixed,
-        _ => return Err(bad(cmd, "fixed must be a boolean")),
+        _ => return Err("fixed must be a boolean"),
     };
-    let state = s.model.state();
-    let doc = s.placed_document();
-    let author_path = s.active_occurrence_path.clone().unwrap_or_else(|| doc.first_path(s.active_component));
-    let author_frame = EmbossFace::component_frame(&doc, s.active_component, &author_path)?;
-    let author_inverse = mat_inverse(&author_frame).ok_or_else(|| bad(cmd, "invalid sketch author frame"))?;
-    let requested_body = match value.get("body") {
+    let body = match value.get("body") {
         None => None,
         Some(Value::String(body)) if !body.is_empty() => Some(body.as_str()),
-        _ => return Err(bad(cmd, "body must be the picked world body name")),
+        _ => return Err("body must be the picked world body name"),
     };
-    let requested_index = match value.get("index") {
+    let index = match value.get("index") {
         None => None,
-        Some(value) => {
-            Some(value.as_u64().and_then(|index| usize::try_from(index).ok()).ok_or_else(|| bad(cmd, "index must be a nonnegative face index"))?)
-        }
+        Some(value) => Some(value.as_u64().and_then(|index| usize::try_from(index).ok()).ok_or("index must be a nonnegative face index")?),
     };
-    if requested_body.is_some() != requested_index.is_some() {
-        return Err(bad(cmd, "an exact face pick requires both body and index"));
+    if body.is_some() != index.is_some() {
+        return Err("an exact face pick requires both body and index");
     }
-    let requested_path = match value.get("path") {
+    let path = match value.get("path") {
         None => None,
         Some(value) => Some(
             value
                 .as_array()
                 .filter(|path| path.len() <= 64)
-                .ok_or_else(|| bad(cmd, "path must contain at most64 occurrence ids"))?
+                .ok_or("path must contain at most64 occurrence ids")?
                 .iter()
-                .map(|id| id.as_u64().filter(|id| *id != 0).ok_or_else(|| bad(cmd, "path ids must be nonzero integers")))
-                .collect::<Result<Vec<_>>>()?,
+                .map(|id| id.as_u64().filter(|id| *id != 0).ok_or("path ids must be nonzero integers"))
+                .collect::<std::result::Result<Vec<_>, _>>()?,
         ),
     };
+    Ok(FacePickForm { point, fixed, body, index, path })
+}
+
+fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result<PlaneRef> {
+    let FacePickForm { point, fixed, body: requested_body, index: requested_index, path: requested_path } =
+        face_pick_form(value).map_err(|why| bad(cmd, why))?;
+    let state = s.model.state();
+    let doc = s.placed_document();
+    let author_path = s.active_occurrence_path.clone().unwrap_or_else(|| doc.first_path(s.active_component));
+    let author_frame = EmbossFace::component_frame(&doc, s.active_component, &author_path)?;
+    let author_inverse = mat_inverse(&author_frame).ok_or_else(|| bad(cmd, "invalid sketch author frame"))?;
     let selected_path = requested_path
         .clone()
         .or_else(|| requested_body.and_then(|name| state.body(name)).map(|body| doc.first_path(doc.model_body_component(body))));
@@ -253,6 +273,27 @@ pub(in crate::cmd) fn capture_positions(s: &mut Session, plane: &PlaneRef) -> Re
         s.pending_moves.remove(&id);
     }
     Ok(())
+}
+
+/// The component and placement (occurrence path, empty for the design) whose body a face pick
+/// `value` lies on: the pick's `path`, else its `body`'s first placement, else the exact
+/// attachment `captured` from it. `None` when none of them names one (a sheet metal panel
+/// face picked by its point alone, or a fixed plane picked by its point alone).
+pub(in crate::cmd) fn pick_owner(s: &Session, value: &Value, captured: &PlaneRef, cmd: &str) -> Result<Option<(u64, Vec<u64>)>> {
+    let form = face_pick_form(value).map_err(|why| bad(cmd, why))?;
+    if let Some(path) = form.path {
+        if path.is_empty() {
+            return Ok(Some((0, path)));
+        }
+        let component = s.occurrence_placement(&path)?.component;
+        return Ok(Some((component, path)));
+    }
+    if let Some(body) = form.body {
+        let state = s.model.state();
+        let doc = s.placed_document();
+        return Ok(state.body(body).map(|body| doc.model_body_component(body)).map(|component| (component, doc.first_path(component))));
+    }
+    Ok(anchor(captured).map(|anchor| (anchor.component, anchor.path.clone())))
 }
 
 #[cfg(test)]

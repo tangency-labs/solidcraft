@@ -87,6 +87,7 @@ fn net(files: Vec<(String, Vec<u8>)>) -> Net {
     let find = move |files: &[(String, Vec<u8>)], url: &str| files.iter().find(|(n, _)| url == format!("{BASE}{n}")).map(|(_, b)| b.clone());
     let find2 = find;
     Net {
+        feed: None,
         get: Arc::new(move |url: &str| find(&files, url).ok_or_else(|| FetchError::Failed(format!("404 {url}")))),
         download: Arc::new(move |url: &str, to: &Path, progress: &dyn Fn(u64, Option<u64>) -> bool| {
             let body = find2(&f2, url).ok_or_else(|| FetchError::Failed(format!("404 {url}")))?;
@@ -128,12 +129,41 @@ fn an_appimage_is_replaced_only_when_it_verifies() {
     let bare = release_with(&[(name, new.len())]);
     assert!(run(&bare, &kind, &m, "x86_64", &n, &dir, &Progress::default()).unwrap_err().contains(SUMS));
 
-    // Cancelled: nothing changes.
+    // Cancelled before any network work: nothing changes.
     let good = format!("{}  {name}\n", hex(&new));
     let n = net(vec![(name.into(), new.clone()), (SUMS.into(), good.clone().into_bytes())]);
     let p = Progress::default();
     p.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-    assert!(run(&r, &kind, &m, "x86_64", &n, &dir, &p).is_err());
+    let err = run(&r, &kind, &m, "x86_64", &n, &dir, &p).unwrap_err();
+    assert!(err.contains("cancelled"), "{err}");
+    assert_eq!(std::fs::read(&target).unwrap(), b"old version");
+
+    // Cancel during the checksum GET: package download never starts (#8908).
+    let progress = Arc::new(Progress::default());
+    let flag = progress.clone();
+    let downloaded = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let hit = downloaded.clone();
+    let files = Arc::new(vec![(name.into(), new.clone()), (SUMS.into(), good.clone().into_bytes())]);
+    let f2 = files.clone();
+    let find = |files: &[(String, Vec<u8>)], url: &str| files.iter().find(|(n, _)| url == format!("{BASE}{n}")).map(|(_, b)| b.clone());
+    let n = Net {
+        feed: None,
+        get: Arc::new(move |url: &str| {
+            let body = find(&files, url).ok_or_else(|| FetchError::Failed(format!("404 {url}")))?;
+            if url.ends_with(SUMS) {
+                flag.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            Ok(body)
+        }),
+        download: Arc::new(move |url: &str, to: &Path, _| {
+            hit.store(true, std::sync::atomic::Ordering::Relaxed);
+            let body = find(&f2, url).ok_or_else(|| FetchError::Failed(format!("404 {url}")))?;
+            std::fs::write(to, body).map_err(|e| FetchError::Failed(e.to_string()))
+        }),
+    };
+    let err = run(&r, &kind, &m, "x86_64", &n, &dir, &progress).unwrap_err();
+    assert!(err.contains("cancelled"), "{err}");
+    assert!(!downloaded.load(std::sync::atomic::Ordering::Relaxed), "package must not start after Cancel");
     assert_eq!(std::fs::read(&target).unwrap(), b"old version");
 
     // Verified: renamed over the old one, executable, restart offered.
@@ -245,4 +275,67 @@ fn an_updated_appimage_takes_the_release_file_name() {
     assert!(!old.exists());
     assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "nothing else is left behind");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn installation_refreshes_the_release_and_verifies_the_final_package() {
+    let dir = scratch("refresh");
+    let target = dir.join("SolidCraft.AppImage");
+    let name = "solidcraft-linux-x86_64.AppImage";
+    let shown = release_with(&[(name, 3), (SUMS, 100)]);
+    let base = "https://github.com/tangency-labs/solidcraft/releases/download/v10.0.0/";
+    let feed = serde_json::json!({
+        "tag_name": "v10.0.0",
+        "assets": [
+            {"name": name, "browser_download_url": format!("{base}{name}"), "size": 3},
+            {"name": SUMS, "browser_download_url": format!("{base}{SUMS}")}
+        ]
+    })
+    .to_string()
+    .into_bytes();
+    for (case, answer, corrupt, expected, fallback) in [
+        ("newest", Ok(feed.clone()), false, "10.0.0", false),
+        ("corrupt newest", Ok(feed), true, "10.0.0", false),
+        ("offline", Err(FetchError::Failed("offline".into())), false, "9.9.9", true),
+        ("rate limited", Err(FetchError::RateLimited { retry_after_s: 60 }), false, "9.9.9", true),
+        ("oversized", Ok(vec![b' '; super::MAX_RELEASE_BYTES + 1]), false, "9.9.9", true),
+        ("older", Ok(br#"{"tag_name":"v9.9.8"}"#.to_vec()), false, "9.9.9", false),
+    ] {
+        std::fs::write(&target, b"old").unwrap();
+        let chosen_base = if expected == "10.0.0" { base } else { BASE };
+        let n = Net {
+            feed: None,
+            get: Arc::new(move |url| {
+                if url == super::LATEST_API {
+                    return answer.clone();
+                }
+                assert_eq!(url, format!("{chosen_base}{SUMS}"), "checksums from the chosen release");
+                Ok(format!("{}  {name}\n", hex(if corrupt { b"bad" } else { b"new" })).into_bytes())
+            }),
+            download: Arc::new(move |url, to, report| {
+                assert_eq!(url, format!("{chosen_base}{name}"), "package from the chosen release");
+                std::fs::write(to, b"new").unwrap();
+                assert!(report(3, Some(3)));
+                Ok(())
+            }),
+        };
+        let p = Progress::default();
+        let result = run(&shown, &InstallKind::AppImage(target.clone()), &Method::AppImage(target.clone()), "x86_64", &n, &dir, &p);
+        let (selected, used_fallback) = p.selection().unwrap();
+        assert_eq!(selected.version(), expected, "{case}");
+        assert_eq!(used_fallback, fallback, "{case}");
+        assert_eq!(
+            p.message(),
+            crate::i18n::format(if fallback { "update.refresh_fallback" } else { "update.refresh_selected" }, &[("version", expected)]),
+            "{case}"
+        );
+        if corrupt {
+            assert!(result.unwrap_err().contains("doesn't match"));
+            assert_eq!(std::fs::read(&target).unwrap(), b"old");
+        } else {
+            assert_eq!(result.unwrap(), Outcome::Restart(target.clone()), "{case}");
+            assert_eq!(std::fs::read(&target).unwrap(), b"new");
+        }
+    }
+    let _ = std::fs::remove_dir_all(dir);
 }

@@ -1,3 +1,6 @@
 # Preserve canonical source receipts and the runtime icon-discovery snapshot.
 .gitattributes text eol=lf
 /assets/icons/ui/design/requested_icons.txt text eol=lf
+# SolidCraft designs (.sc): a JSON document or a ZIP container, never Scala source, so they
+# stay out of GitHub's language statistics. Git's own text/binary detection handles both kinds.
+*.sc -linguist-detectable

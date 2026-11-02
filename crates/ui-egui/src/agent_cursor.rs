@@ -452,7 +452,8 @@ fn finish(app: &mut SolveApp, ctx: &egui::Context) {
     if follow && id == "sketch.create" {
         app.agent.saved_view = Some(app.cam);
     }
-    let (req, _rx) = crate::control::ControlRequest::new(job.method, params);
+    let (mut req, _rx) = crate::control::ControlRequest::new(job.method, params);
+    req.chat_turn = job.chat_turn;
     // What was computed ahead while the pointer glided is found rather than computed again here.
     let out = app.run_with_kept(job.ahead.map(|a| a.kept), |app| match crate::control::handle(app, ctx, &req) {
         crate::control::Outcome::Done(v) => v,

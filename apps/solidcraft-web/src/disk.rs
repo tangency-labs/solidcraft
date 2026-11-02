@@ -147,6 +147,21 @@ pub fn accept_list(extensions: &[&str]) -> String {
     list.join(",")
 }
 
+/// The `accept` of a file input for `extensions` on this device (`apple_touch`: an iPhone or
+/// iPad). The picker there offers only files of a type the system knows from the list and greys
+/// out the rest, `.solidcraft` designs among them, since no system type has that extension
+/// (#6977). So it offers every file there, and the opener checks what it gets.
+pub fn input_accept(extensions: &[&str], apple_touch: bool) -> String {
+    if apple_touch { String::new() } else { accept_list(extensions) }
+}
+
+/// The browser runs on an iPhone or iPad (every browser there is WebKit), from its
+/// `navigator.userAgent` and `navigator.maxTouchPoints`. iPadOS presents itself as a Mac; only its
+/// touch screen tells them apart.
+pub fn apple_touch(user_agent: &str, touch_points: i32) -> bool {
+    ["iPhone", "iPad", "iPod"].iter().any(|d| user_agent.contains(d)) || (user_agent.contains("Macintosh") && touch_points > 1)
+}
+
 /// The largest file an upload for `extensions` reads: images go into a canvas, which has a size
 /// limit, so a bigger one is refused before it is read. `None`: the importer checks the file.
 pub fn upload_limit(extensions: &[&str]) -> Option<usize> {
@@ -154,10 +169,15 @@ pub fn upload_limit(extensions: &[&str]) -> Option<usize> {
     (!extensions.is_empty() && extensions.iter().all(image)).then_some(solidcraft_engine::doc::canvas::MAX_CANVAS_BYTES)
 }
 
-/// The file type a Save As dialog offers for `name`: (description, MIME type, extension).
-pub fn save_type(name: &str) -> (&'static str, &'static str, &'static str) {
-    let json = std::path::Path::new(name).extension().is_some_and(|e| e.eq_ignore_ascii_case("json"));
-    if json { ("Plain JSON design", "application/json", ".json") } else { ("SolidCraft design", "application/octet-stream", ".solidcraft") }
+/// The file type a Save As dialog offers for `name`: (description, MIME type, extension). A
+/// design is `.sc` unless the name already has an older design extension, which it keeps.
+pub fn save_type(name: &str) -> (&'static str, &'static str, String) {
+    let ext = std::path::Path::new(name).extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
+    match ext.as_deref() {
+        Some("json") => ("Plain JSON design", "application/json", ".json".into()),
+        Some(e) if solidcraft_engine::io::is_design_ext(e) => ("SolidCraft design", "application/octet-stream", format!(".{e}")),
+        _ => ("SolidCraft design", "application/octet-stream", format!(".{}", solidcraft_engine::io::DESIGN_EXT)),
+    }
 }
 
 /// Is this a cancelled dialog (the browser's `AbortError`)? Not an error to show.
@@ -249,7 +269,7 @@ mod web {
         let options = Object::new();
         let _ = Reflect::set(&options, &"suggestedName".into(), &name.into());
         let (description, mime, extension) = save_type(name);
-        let _ = Reflect::set(&options, &"types".into(), &types(description, mime, extension));
+        let _ = Reflect::set(&options, &"types".into(), &types(description, mime, &extension));
         options
     }
 
@@ -334,7 +354,9 @@ mod web {
         let options = Object::new();
         let _ = Reflect::set(&options, &"multiple".into(), &JsValue::FALSE);
         let extensions = Array::new();
-        for e in [".solidcraft", ".solvecraft", ".json", ".step", ".stp", ".3mf", ".stl", ".obj", ".glb", ".gltf", ".fcstd", ".3dm", ".dxf", ".svg"] {
+        let designs = solidcraft_engine::io::DESIGN_EXTS.iter().map(|e| format!(".{e}"));
+        let others = [".json", ".step", ".stp", ".3mf", ".stl", ".obj", ".glb", ".gltf", ".fcstd", ".3dm", ".dxf", ".svg"].map(String::from);
+        for e in designs.chain(others) {
             extensions.push(&e.into());
         }
         let accept = Object::new();
@@ -612,6 +634,8 @@ mod tests {
         assert_eq!(route("/disk/18f-2a/Bracket.solidcraft"), WriteTo::Disk);
         assert_eq!(route("/downloads/part.step"), WriteTo::Download);
         assert_eq!(route("/upload/part.step"), WriteTo::Memory);
+        // The temporary folder (a screenshot without a path, #7192) stays in memory.
+        assert_eq!(route(&format!("{}/solidcraft-shot.png", solidcraft_engine::io::vfs::BROWSER_TEMP)), WriteTo::Memory);
     }
 
     #[test]
@@ -650,6 +674,7 @@ mod tests {
     #[test]
     fn only_design_opens_use_the_disk_dialog() {
         assert!(opens_design(&[]));
+        assert!(opens_design(&["sc"]));
         assert!(opens_design(&["solidcraft"]));
         assert!(opens_design(&["solvecraft"]));
         assert!(!opens_design(&["step", "stp"]));
@@ -671,11 +696,33 @@ mod tests {
         assert_eq!(upload_limit(&["dxf"]), None);
     }
 
+    /// An iPhone or iPad greys out a `.solidcraft` design the `accept` list names, as it knows no
+    /// type for that extension, so its inputs offer every file; other devices keep the list (#6977).
+    #[test]
+    fn file_inputs_on_an_iphone_or_ipad_offer_every_file() {
+        let iphone =
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1";
+        let mac = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15";
+        let chrome_ios = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/138.0.7204.156 Mobile/15E148 Safari/604.1";
+        let chrome = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
+        assert!(apple_touch(iphone, 5));
+        assert!(apple_touch(chrome_ios, 5), "every browser on iOS has the same picker");
+        assert!(apple_touch(mac, 5), "an iPad presents itself as a Mac");
+        assert!(!apple_touch(mac, 0), "a Mac has no touch screen");
+        assert!(!apple_touch(chrome, 10), "a touch screen elsewhere filters as before");
+        assert!(!apple_touch("", 0), "hostile input is just not an iPhone");
+        let designs = ["solidcraft", "json", "step"];
+        assert_eq!(input_accept(&designs, true), "");
+        assert_eq!(input_accept(&designs, false), ".solidcraft,.json,.step");
+    }
+
     #[test]
     fn the_save_dialog_offers_the_type_of_the_name() {
-        assert_eq!(save_type("Plate.solidcraft").2, ".solidcraft");
+        assert_eq!(save_type("Plate.sc").2, ".sc");
         assert_eq!(save_type("Plate.JSON").2, ".json");
-        assert_eq!(save_type("Plate").2, ".solidcraft");
+        assert_eq!(save_type("Plate").2, ".sc");
+        // A design opened under an older extension keeps it.
+        assert_eq!(save_type("Plate.solidcraft").2, ".solidcraft");
     }
 
     #[test]

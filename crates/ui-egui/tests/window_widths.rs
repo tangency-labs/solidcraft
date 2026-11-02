@@ -12,7 +12,12 @@ fn window_widths(h: &Harness) -> Vec<(egui::Id, f32)> {
         m.areas()
             .visible_layer_ids()
             .into_iter()
-            .filter(|l| l.order == egui::Order::Middle && l.id != egui::Id::new("sc_browser_card"))
+            // Workspace hosts are not command windows; Shots has wide expanded and small collapsed forms.
+            .filter(|l| {
+                l.order == egui::Order::Middle
+                    && ![egui::Id::new("sc_browser_card"), egui::Id::new("sc_render_shots_strip"), egui::Id::new("sc_render_shots_pill")]
+                        .contains(&l.id)
+            })
             .filter_map(|l| m.area_rect(l.id).map(|r| (l.id, r.width())))
             .collect()
     })
@@ -44,6 +49,32 @@ fn fresh() -> Harness {
 }
 
 #[test]
+fn render_strip_is_excluded_while_real_windows_are_still_measured() {
+    let mut h = fresh();
+    assert_eq!(h.call("ui.workspace", json!({"workspace":"render"}))["ok"], true);
+    h.app.help.about = true;
+    h.frames(6);
+    let strip = egui::Id::new("sc_render_shots_strip");
+    let width = h.ctx.memory(|m| m.area_rect(strip)).expect("visible Shots strip").width();
+    assert!(width > DIALOG_MAX_W, "the workspace strip should span the canvas: {width}");
+    let windows = window_widths(&h);
+    assert!(!windows.iter().any(|(id, _)| *id == strip));
+    assert!(windows.iter().any(|(id, _)| *id == egui::Id::new("sc_about")), "real About window is still measured: {windows:?}");
+    assert_eq!(h.call("engine.execute", json!({"command":"view.shots_strip","params":{"visible":false}}))["ok"], true);
+    h.frames(6);
+    let pill = egui::Id::new("sc_render_shots_pill");
+    let width = h.ctx.memory(|m| m.area_rect(pill)).expect("visible Shots restore control").width();
+    assert!(width < DIALOG_MIN_W, "the restore control is intentionally smaller than a dialog: {width}");
+    let windows = window_widths(&h);
+    assert!(!windows.iter().any(|(id, _)| *id == pill));
+    assert!(windows.iter().any(|(id, _)| *id == egui::Id::new("sc_about")), "real window remains measured with Shots collapsed: {windows:?}");
+    assert_eq!(h.call("ui.start", json!({"command":"file.export_view_dxf"}))["ok"], true);
+    h.frames(6);
+    let dialog = solidcraft_ui_egui::scenario::rect_of("dialog:outer").expect("DXF dialog has an outer rectangle");
+    assert!(dialog.width() >= DIALOG_MIN_W - 4.0, "actual DXF dialog remains at least the dialog minimum: {dialog:?}");
+}
+
+#[test]
 fn command_dialogs_shrink_to_their_content_within_limits() {
     let mut h = fresh();
     let mut bad = Vec::new();
@@ -64,17 +95,19 @@ fn command_dialogs_shrink_to_their_content_within_limits() {
             }
         }
         // The docked dialog shrinks to its content: most dialogs stay well under the maximum.
-        if h.app.dialog.is_some() {
-            for (_, w) in window_widths(&h) {
-                if w < DIALOG_MIN_W - slack {
-                    bad.push(format!("{}: {w} px is narrower than {DIALOG_MIN_W}", spec.id));
-                }
+        if let Some(rect) = solidcraft_ui_egui::scenario::rect_of("dialog:outer").filter(|_| h.app.dialog.is_some()) {
+            let w = rect.width();
+            if w < DIALOG_MIN_W - slack {
+                bad.push(format!("{}: active dialog {w} px is narrower than {DIALOG_MIN_W}", spec.id));
             }
         }
         h.app.dialog = None;
         h.app.params = None;
         h.app.design_properties = None;
+        h.app.sketch_report = None;
         h.app.bom = None;
+        // Properties (Inspect → Measure) opens the Properties card.
+        h.app.menu.props = None;
         if spec.id == "material.properties.validate" {
             h.step(&json!({"click":{"handle":"dialog:close"}})).unwrap();
         }

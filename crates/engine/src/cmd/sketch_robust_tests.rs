@@ -181,3 +181,26 @@ fn offset_cases() {
         sound(&s);
     }
 }
+
+/// #7635: the reporter's design - `l1` with its midpoint pinned at the origin, `l2` perpendicular
+/// to it at the origin, and a construction line `l3` at the origin constrained horizontal with a
+/// 50-degree angle dimension to `l1`. Dragging a free end of `l1` (whose exact target the pinned
+/// inclination makes unreachable) used to leave the failed step placed and break the perpendicular
+/// and angle constraints; the sketch must stay solved instead.
+#[test]
+fn dragging_the_midpoint_line_end_keeps_the_sketch_solved() {
+    let mut s = new_sketch();
+    add(&mut s, "sketch.line", json!({"points": [[-6.616478376301535, -7.876608451910095], [6.616478376301535, 7.876608451910095]]}));
+    add(&mut s, "sketch.constraint.midpoint", json!({"point": "origin", "line": "l1"}));
+    add(&mut s, "sketch.line", json!({"points": [[0.0, 0.0], [-10.656000978748368, 8.951213010548841]]}));
+    add(&mut s, "sketch.constraint.coincident", json!({"a": "l2.start", "b": "origin"}));
+    add(&mut s, "sketch.constraint.perpendicular", json!({"a": "l2", "b": "l1"}));
+    add(&mut s, "sketch.line", json!({"points": [[0.0, 0.0], [10.0, 0.0]], "construction": true}));
+    add(&mut s, "sketch.constraint.coincident", json!({"a": "l3.start", "b": "origin"}));
+    add(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "l3", "mode": "horizontal"}));
+    add(&mut s, "sketch.dimension", json!({"entities": ["l3", "l1"], "type": "angle", "value": "50 deg"}));
+    let r = s.execute("sketch.drag", &json!({"entity": "l1.end", "from": [6.616478376301535, 7.876608451910095], "to": [10.0, 4.0]})).unwrap();
+    assert_eq!(r["sketch"]["solved"], json!(true), "the drag left the sketch unsolved: {r}");
+    s.execute("sketch.drag_end", &json!({})).unwrap();
+    sound(&s);
+}

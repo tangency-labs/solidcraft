@@ -1,4 +1,4 @@
-use std::f64::consts::PI;
+use std::f64::consts::{PI, TAU};
 
 use super::*;
 use crate::{MAX_BEZIER_CTRL, bezier};
@@ -406,4 +406,18 @@ fn connected_bow_tie_and_wrong_winding_are_not_certified_or_silently_repaired() 
     reversed.validate_structure(TOL).unwrap();
     let converted = reversed.to_region(0, TOL).unwrap();
     assert!((converted.outer.signed_area() + 6000.0).abs() < 1e-10);
+}
+
+/// A curve's accuracy scales with it: a bound or a sampled deviation by the factor, and an analytic
+/// curve stays analytic (W17a: paper error = scale × model error).
+#[test]
+fn an_accuracy_scales_with_its_curve() {
+    assert_eq!(CurveAccuracy::Analytic.scaled(0.5), CurveAccuracy::Analytic);
+    assert_eq!(CurveAccuracy::Sampled { max_sample_deviation_mm: 0.01 }.scaled(3.0), CurveAccuracy::Sampled { max_sample_deviation_mm: 0.03 });
+    assert_eq!(CurveAccuracy::Bounded { max_deviation_mm: 0.01 }.scaled(2.0), CurveAccuracy::Bounded { max_deviation_mm: 0.02 });
+    assert_eq!(
+        CurveAccuracy::Sampled { max_sample_deviation_mm: 0.0 }.scaled(5.0),
+        CurveAccuracy::Sampled { max_sample_deviation_mm: 0.0 },
+        "a sampled zero stays sampled"
+    );
 }

@@ -12,7 +12,11 @@ use solidcraft_kernel::Body;
 use super::CommandSpec;
 use super::joints::{cannot_move, effective_values, joint_id, occurrence_id, place_holding, value};
 use crate::params::{bad, bool_, str_, vec3};
+use crate::schema::motion::{FindLimitsParams, FindLimitsResult};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
+
+const FIND_LIMITS_CONTRACT: TypedContract<FindLimitsParams> = TypedContract::new();
 
 #[path = "motion_analysis.rs"]
 mod analysis;
@@ -101,9 +105,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .params(analysis::INTERFERENCE_DOC),
     CommandSpec::new("joint.sweep", "Sweep Joint", sweep::sweep).icon("interference").params(sweep::SWEEP_DOC),
+    CommandSpec::new("joint.find_limits", "Find Joint Limits", crate::checked!("joint.find_limits", sweep::find_limits))
+        .icon("interference")
+        .noundo()
+        .contract(&FIND_LIMITS_CONTRACT)
+        .output(output_schema_for::<FindLimitsResult>)
+        .params(sweep::FIND_LIMITS_DOC),
     CommandSpec::new("motion.list", "List Motion Studies", list_studies).icon("list").noundo(),
     CommandSpec::new("motion.delete", "Delete Motion Study", delete_study).icon("delete").params("study"),
-    CommandSpec::new("explode.create", "Exploded View", explode_create).at("SOLID", "ASSEMBLE").icon("explode").params(
+    CommandSpec::new("explode.create", "Exploded View", explode_create).at("SOLID", "ASSEMBLE").icon("explode").enabled(has_parts_to_explode).params(
         "name?; scale? (automatic: each occurrence pushed away from the assembly's centre by scale × its offset, default 1); \
          moves?: [{occurrence, translate: [x,y,z]}] (instead of automatic)",
     ),
@@ -116,6 +126,14 @@ pub static COMMANDS: &[CommandSpec] = &[
 ];
 
 const MAX_ITEMS: usize = 10_000;
+
+/// `prefix` and the first number from 1 that no name in `taken` has: a default name never repeats
+/// one in use, after a delete either, as joints' and the app's dialogs' default names (#9738).
+fn free_name<'a>(prefix: &str, taken: impl Iterator<Item = &'a str>) -> String {
+    let taken: BTreeSet<&str> = taken.collect();
+    let n = (1..=taken.len() + 1).find(|n| !taken.contains(format!("{prefix}{n}").as_str())).unwrap_or(1);
+    format!("{prefix}{n}")
+}
 
 fn occurrences(s: &Session, p: &Value, cmd: &str) -> Result<Vec<u64>> {
     let list = p.get("occurrences").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`occurrences` must list occurrences"))?;
@@ -500,6 +518,11 @@ pub fn drive_joint(s: &mut Session, id: u64, q: Vec<f64>, given: usize) -> Resul
     Ok(drive_with_contact(s, &[(id, q)], &given)?.0)
 }
 
+/// Drive exactly one coordinate, letting the other values follow loops and preserving expressions.
+pub fn drive_joint_index(s: &mut Session, id: u64, q: Vec<f64>, index: usize) -> Result<Value> {
+    Ok(drive_with_contact(s, &[(id, q)], &[(id, index)].into_iter().collect())?.0)
+}
+
 fn enable_sets(s: &mut Session, p: &Value) -> Result<Value> {
     let on = bool_(p, "enabled").unwrap_or(true);
     s.doc_mut().assembly.contact_enabled = on;
@@ -530,7 +553,8 @@ fn new_set(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "too many contact sets"));
     }
     let id = s.doc_mut().allocate_id()?;
-    let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| format!("Contact Set{}", s.doc.assembly.contact_sets.len() + 1));
+    let name =
+        str_(p, "name").map(str::to_string).unwrap_or_else(|| free_name("Contact Set", s.doc.assembly.contact_sets.iter().map(|c| c.name.as_str())));
     let a = &mut s.doc_mut().assembly;
     a.contact_sets.push(ContactSet { id, name: name.clone(), occurrences: occ, suppressed: false });
     a.contact_enabled = true;
@@ -663,7 +687,7 @@ fn study(s: &mut Session, p: &Value) -> Result<Value> {
             }
             let m = MotionStudy {
                 id,
-                name: str_(p, "name").map(str::to_string).unwrap_or_else(|| format!("Motion Study{}", count + 1)),
+                name: str_(p, "name").map(str::to_string).unwrap_or_else(|| free_name("Motion Study", a.studies.iter().map(|m| m.name.as_str()))),
                 steps: steps.unwrap_or(100),
                 keys,
             };
@@ -1013,7 +1037,30 @@ fn keep_sampled_trace(
 }
 
 fn list_studies(s: &mut Session, _p: &Value) -> Result<Value> {
-    Ok(json!({"studies": s.doc.assembly.studies, "traces": associative::list(s)}))
+    let studies: Vec<Value> = s.doc.assembly.studies.iter().map(|m| study_json(s, m)).collect();
+    Ok(json!({"studies": studies, "traces": associative::list(s)}))
+}
+
+/// A study as `motion.list` gives it: key values in the units `motion.study` takes — degrees
+/// for angles, mm for distances, like `joint.list`'s values — each key with its joint's name,
+/// so a listed study can be fed back to `motion.study` unchanged.
+fn study_json(s: &Session, m: &MotionStudy) -> Value {
+    let keys: Vec<Value> = m
+        .keys
+        .iter()
+        .map(|k| {
+            let joint = s.doc.assembly.joints.iter().find(|j| j.id == k.joint);
+            let angle = joint.is_some_and(|j| j.kind.is_angle(k.index));
+            json!({
+                "joint": k.joint,
+                "joint_name": joint.map(|j| j.name.clone()).unwrap_or_else(|| k.joint.to_string()),
+                "index": k.index,
+                "unit": if angle { "deg" } else { "mm" },
+                "points": k.points.iter().map(|(step, v)| json!([step, if angle { v.to_degrees() } else { *v }])).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    json!({"id": m.id, "name": m.name, "steps": m.steps, "keys": keys})
 }
 
 fn delete_study(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1023,6 +1070,16 @@ fn delete_study(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 // ---- Exploded views ----
+
+/// Why Exploded View is greyed out: it pulls components apart, so a design of plain bodies, or
+/// with a single component, has nothing to separate (#9142).
+const EXPLODE_NEEDS_COMPONENTS: &str =
+    "Exploded View pulls components apart, so the design needs two or more of them (New Component, Insert Design or Create Components from Bodies)";
+
+/// Exploded View is offered once the design has two or more occurrences to move apart (#9142).
+fn has_parts_to_explode(s: &Session) -> std::result::Result<(), String> {
+    if s.doc.occurrences.len() >= 2 { Ok(()) } else { Err(EXPLODE_NEEDS_COMPONENTS.into()) }
+}
 
 fn view_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
     let key = match p.get("view") {
@@ -1088,7 +1145,8 @@ fn explode_create(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "too many exploded views"));
     }
     let id = s.doc_mut().allocate_id()?;
-    let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| format!("Exploded View{}", s.doc.assembly.exploded.len() + 1));
+    let name =
+        str_(p, "name").map(str::to_string).unwrap_or_else(|| free_name("Exploded View", s.doc.assembly.exploded.iter().map(|v| v.name.as_str())));
     s.doc_mut().assembly.exploded.push(ExplodedView { id, name: name.clone(), moves: moves.clone() });
     Ok(json!({"view": id, "name": name, "moves": moves.iter().map(|(o, t)| json!({"occurrence": o, "translate": t})).collect::<Vec<_>>()}))
 }

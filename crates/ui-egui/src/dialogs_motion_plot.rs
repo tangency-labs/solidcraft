@@ -317,7 +317,7 @@ fn collision_rows(
         }
         Some(Err(e)) => {
             ui.vertical(|ui| {
-                ui.add(egui::Label::new(RichText::new(e.as_str()).color(t.error)).wrap());
+                ui.add(egui::Label::new(RichText::new(crate::i18n::tr_label(e)).color(t.error)).wrap());
             });
         }
         None => {}
@@ -385,7 +385,7 @@ fn plot_rows(
                 });
             }
             Some(Err(e)) => {
-                ui.add(egui::Label::new(RichText::new(e.as_str()).color(t.text_dim)).wrap());
+                ui.add(egui::Label::new(RichText::new(crate::i18n::tr_label(e)).color(t.text_dim)).wrap());
             }
             None => {}
         });

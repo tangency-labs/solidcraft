@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::{DesignLink, Document, FeatureKind, ModelBody, ModelState};
 use solidcraft_geom::Vec3;
 
-use super::{absolute, component_key, resolve, session_bodies, stored};
+use super::{absolute, component_key, file_sha256, inherit_properties, resolve, session_bodies, stored};
 use crate::params::{bad, str_};
 use crate::{EngineError, Result, Session};
 
@@ -357,8 +357,6 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
     for g in &mut part.timeline_groups {
         g.features.retain(|f| sc.inside.contains(f));
     }
-    let parents: BTreeSet<u64> = part.timeline_groups.iter().filter_map(|g| g.parent).collect();
-    part.timeline_groups.retain(|g| !g.features.is_empty() || parents.contains(&g.id));
     part.named_views.clear();
     part.configs = Default::default();
     part.assembly = Default::default();
@@ -371,7 +369,14 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
     scope.assembly.origins.retain(|o| mapped(&o.origin.occurrence));
     scope.assembly.contact_sets.retain(|c| c.occurrences.iter().all(mapped));
     scope.assembly.exploded.retain(|v| v.moves.iter().all(|(o, _)| mapped(o)));
-    let mut notices = super::super::component_clone_assembly::clone_assembly(&mut part, &scope, &sc.occurrences, &features, &body_map)?;
+    let (mut notices, joints) =
+        super::super::component_clone_assembly::clone_assembly_with_joint_ids(&mut part, &scope, &sc.occurrences, &features, &body_map)?;
+    // Extracted joints receive new ids. References to joints outside the extracted part go away.
+    for group in &mut part.timeline_groups {
+        group.joints = group.joints.iter().filter_map(|id| joints.get(id).copied()).collect();
+    }
+    let parents: BTreeSet<u64> = part.timeline_groups.iter().filter_map(|g| g.parent).collect();
+    part.timeline_groups.retain(|g| !g.features.is_empty() || !g.joints.is_empty() || parents.contains(&g.id));
     prune_params(&mut part);
     if !source.configs.is_empty() {
         notices.push(format!("the configurations stay in this design; {stem} has none"));
@@ -555,8 +560,8 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
     let sc = scope(s, comp, CMD)?;
     let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(CMD, "`path` is required"))?;
     let file = absolute(Path::new(given));
-    if !file.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("solidcraft")) {
-        return Err(bad(CMD, "the new design must be a .solidcraft file"));
+    if !solidcraft_io::is_design_container_path(&file) {
+        return Err(bad(CMD, "the new design must be a .sc file"));
     }
     if s.path.as_deref().is_some_and(|own| absolute(Path::new(own)) == file) {
         return Err(bad(CMD, "choose another file than this design's own"));
@@ -566,7 +571,7 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
 
     // This design: the component's history becomes an Import feature of the new design's bodies
     let shown = file.display().to_string();
-    let (_, sf, faces, _) = session_bodies(&part, &shown)?;
+    let (_, sf, faces, _, properties) = session_bodies(&part, &shown)?;
     // The link has a body per piece: a body in pieces keeps its name on the first
     let mut solids: Vec<String> = Vec::new();
     for b in part.world_state()?.bodies.iter().filter(|b| !b.body.is_mesh()) {
@@ -592,18 +597,26 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
         f.link_faces = faces;
     }
     let path = stored(s.path.as_deref(), &file);
-    s.doc_mut().links.insert(comp, DesignLink { path: file.to_string_lossy().into_owned(), feature: id });
+    s.doc_mut().links.insert(comp, DesignLink { path: file.to_string_lossy().into_owned(), feature: id, ..Default::default() });
     s.refresh();
     rename_joint_faces(s, &state, id, &sc.own);
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
     }
+    inherit_properties(s, comp, &properties)?;
+    s.refresh();
     let mut warnings = sf.warnings;
     warnings.extend(before.check(s, CMD, &sc.name)?);
     let copies = copies_of(s, comp)?;
 
     part.path = s.path.clone();
     part.execute("file.save", &json!({"path": shown}))?;
+    // The link keeps what the new file holds, as Insert Design's does (#9739).
+    if let Some(read) = file_sha256(&file, s.path.as_deref())
+        && let Some(link) = s.doc_mut().links.get_mut(&comp)
+    {
+        link.file_sha256 = Some(read);
+    }
     Ok(json!({"component": comp, "feature": id, "path": path, "file": shown, "bodies": sc.bodies, "notices": notices, "warnings": warnings,
         "copies": named(s, &copies)}))
 }
@@ -786,6 +799,7 @@ mod tests {
     fn extract_moves_the_history_to_its_own_design_and_links_it() {
         let dir = folder("basic");
         let (mut s, plate, other) = assembly();
+        run(&mut s, "timeline.group", json!({"name":"Internal joints", "joints":["PinHold"]}));
         run(&mut s, "file.save", json!({"path": dir.join("asm.solidcraft")}));
         let (vol, cen) = (volumes(&s), centroids(&s));
         let other_features: Vec<u64> = s.doc.features.iter().filter(|f| f.component == other).map(|f| f.id).collect();
@@ -816,6 +830,7 @@ mod tests {
         assert_eq!(part.doc.components.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Pin"]);
         assert_eq!(part.doc.occurrences.len(), 1);
         assert_eq!(part.doc.assembly.joints.iter().map(|j| j.name.as_str()).collect::<Vec<_>>(), ["PinHold"]);
+        assert_eq!(part.doc.timeline_groups[0].joints, [part.doc.assembly.joints[0].id], "joint folders follow the extracted ids");
         assert!(part.doc.param("plate_h").is_some() && part.doc.param("unused").is_none());
         assert!(part.model.results.iter().all(|r| r.error.is_none()));
         let part_vol = volumes(&part);
@@ -856,7 +871,7 @@ mod tests {
         };
         refuse(&mut s, json!({"component": 0, "path": file}), "not the design");
         refuse(&mut s, json!({"component": "Plate"}), "`path` is required");
-        refuse(&mut s, json!({"component": "Plate", "path": dir.join("plate.step")}), ".solidcraft");
+        refuse(&mut s, json!({"component": "Plate", "path": dir.join("plate.step")}), ".sc file");
 
         // A joint from Plate's subcomponent to the rest of the design
         let pin_occ = s.doc.occurrences.iter().find(|o| o.name.starts_with("Pin")).map(|o| o.id).unwrap();

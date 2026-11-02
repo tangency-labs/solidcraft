@@ -23,6 +23,10 @@ use solidcraft_sketch::linalg;
 
 use crate::{DocError, Document, IDENTITY, Mat, ModelState, Result, apply_point, apply_vector, mat_inverse, mat_mul};
 
+#[path = "joints_handles.rs"]
+mod handles;
+pub use handles::{MotionAxis, motion_axes};
+
 /// Joints the solver (and the URDF export) reads at most.
 pub const MAX_JOINTS: usize = 10_000;
 
@@ -1176,7 +1180,8 @@ impl Placements<'_, '_, '_> {
 }
 
 /// Values the loop solver moves at most in one group of loops, and loop-closing joints it takes
-/// on at most: larger ones are only checked.
+/// on at most: larger ones are only checked (a group with more values moves only those of its
+/// loops that need to move, `moving_loops_values`).
 const MAX_LOOP_VALUES: usize = 64;
 const MAX_LOOPS: usize = 100;
 /// Loop-closing joints one solve takes on at most, over all its groups: a part placed by several
@@ -1320,19 +1325,7 @@ type Group = (Vec<u64>, BTreeSet<u64>, BTreeSet<(u64, usize)>);
 fn loop_groups(tree: &Tree, closing: &[u64], asm: &Assembly, linked: &BTreeSet<(u64, usize)>) -> Vec<Group> {
     let mut groups: Vec<Group> = Vec::new();
     for id in closing {
-        let Some(j) = tree.joints.get(id) else { continue };
-        // A joint between an occurrence and itself (only a hand-edited file has one) is only checked.
-        if j.a.occurrence == j.b.occurrence {
-            continue;
-        }
-        let side = |occ: u64| -> BTreeSet<u64> { tree.path(occ).1.iter().map(|(k, _)| *k).collect() };
-        let mut around: BTreeSet<u64> = side(j.a.occurrence).symmetric_difference(&side(j.b.occurrence)).copied().collect();
-        around.insert(*id);
-        // The values the loop depends on: its joints' and those its links read. Loops tie together
-        // through a shared value only (a rigid joint on both paths has none; two values of one
-        // joint can feed two independent loops).
-        let mut touches = link_chains(asm, tree, &around, linked).0;
-        touches.extend(around.iter().filter_map(|id| tree.joints.get(id)).flat_map(|j| (0..j.kind.dofs().len()).map(|i| (j.id, i))));
+        let Some((mut around, mut touches)) = one_loop(tree, *id, asm, linked) else { continue };
         let mut members = vec![*id];
         groups.retain(|(c, a, t)| {
             if t.is_disjoint(&touches) {
@@ -1346,6 +1339,79 @@ fn loop_groups(tree: &Tree, closing: &[u64], asm: &Assembly, linked: &BTreeSet<(
         groups.push((members, around, touches));
     }
     groups
+}
+
+/// One loop: the closing joint `id` and the joints on the tree paths between its sides, and the
+/// values it depends on (its joints' and those its links read). Loops tie together through a
+/// shared value only (a rigid joint on both paths has none; two values of one joint can feed two
+/// independent loops). None for a joint between an occurrence and itself (only a hand-edited file
+/// has one), which is only checked.
+fn one_loop(tree: &Tree, id: u64, asm: &Assembly, linked: &BTreeSet<(u64, usize)>) -> Option<(BTreeSet<u64>, BTreeSet<(u64, usize)>)> {
+    let j = tree.joints.get(&id)?;
+    if j.a.occurrence == j.b.occurrence {
+        return None;
+    }
+    let side = |occ: u64| -> BTreeSet<u64> { tree.path(occ).1.iter().map(|(k, _)| *k).collect() };
+    let mut around: BTreeSet<u64> = side(j.a.occurrence).symmetric_difference(&side(j.b.occurrence)).copied().collect();
+    around.insert(id);
+    let mut touches = link_chains(asm, tree, &around, linked).0;
+    touches.extend(around.iter().filter_map(|id| tree.joints.get(id)).flat_map(|j| (0..j.kind.dofs().len()).map(|i| (j.id, i))));
+    Some((around, touches))
+}
+
+/// The values to move in a group of loops with more than the solver moves at once (a frame of
+/// profiles held by many planar joints, #9687): those of the loops that need to move, open at the
+/// start (beyond what the conflict check lets pass) or reading a held value that moves, and the
+/// closing joints' of the closed loops those values move, when they are few enough. Every loop of
+/// the group is still kept closed. None when no loop needs to move, or those that do have too
+/// many values themselves. A solve that needs other values of a closed loop (one whose closing
+/// joint is rigid) is not found: that group stays a conflict, as a group this size was before.
+fn moving_loops_values(
+    tree: &Tree,
+    closing: &[u64],
+    moves: &[(u64, usize, f64, f64)],
+    asm: &Assembly,
+    held: &Held,
+    linked: &BTreeSet<(u64, usize)>,
+    vals: &Values,
+    scale: f64,
+) -> Option<Vec<(u64, usize)>> {
+    let moved: BTreeSet<(u64, usize)> = moves.iter().map(|(id, i, ..)| (*id, *i)).collect();
+    let mut gaps = Vec::with_capacity(closing.len() * 9);
+    closure_gaps(&mut PlacementWorkspace::new(tree), closing, vals, scale, &mut gaps)?;
+    let loose = loose_gap(scale);
+    let (mut around, mut others) = (BTreeSet::new(), Vec::new());
+    for (id, gap) in closing.iter().zip(gaps.chunks(9)) {
+        let Some((joints, touches)) = one_loop(tree, *id, asm, linked) else { continue };
+        if largest(gap) > loose || !touches.is_disjoint(&moved) {
+            around.extend(joints);
+        } else {
+            others.push((*id, touches));
+        }
+    }
+    let mut vars = unknowns(tree, &around, asm, linked, held);
+    if vars.is_empty() {
+        return None;
+    }
+    // A closed loop through a value that moves stays closed by its own closing joint's values
+    // (a part slid on one planar joint slides on its second): they are on no tree path, so no other
+    // loop runs through them, but a motion link setting one moves the value its chain starts from,
+    // and the loops through that follow the same way.
+    while vars.len() <= MAX_LOOP_VALUES {
+        let moving: BTreeSet<(u64, usize)> = vars.iter().copied().collect();
+        let follow: BTreeSet<u64> = others.iter().filter(|(_, touches)| !touches.is_disjoint(&moving)).map(|(id, _)| *id).collect();
+        others.retain(|(id, _)| !follow.contains(id));
+        let before = vars.len();
+        for v in unknowns(tree, &follow, asm, linked, held) {
+            if !vars.contains(&v) {
+                vars.push(v);
+            }
+        }
+        if vars.len() == before {
+            break;
+        }
+    }
+    (vars.len() <= MAX_LOOP_VALUES).then_some(vars)
 }
 
 /// The values a solve of the loops `around` moves: every value of their joints but the `held`
@@ -1647,12 +1713,16 @@ fn close_group(
     spent: &std::cell::Cell<usize>,
     vals: &mut Values,
 ) -> Option<BTreeMap<(u64, usize), f64>> {
-    let vars = unknowns(tree, around, asm, linked, held);
+    let scale = loop_scale(tree, around, vals);
+    let mut vars = unknowns(tree, around, asm, linked, held);
     if vars.len() > MAX_LOOP_VALUES {
-        return Some(BTreeMap::new());
+        // Too many to move at once: only the loops that need to move, or none.
+        match moving_loops_values(tree, closing, moves, asm, held, linked, vals, scale) {
+            Some(few) => vars = few,
+            None => return Some(BTreeMap::new()),
+        }
     }
     let bounds = limit_bounds(tree, &vars);
-    let scale = loop_scale(tree, around, vals);
     // Closer than the conflict check needs: 1e-7 mm, and turns of 1e-10 rad across the loop.
     let tol = (1e-10 * scale).min(1e-7);
     // The values with the held ones `t` of the way along (and the unknowns at `x`).

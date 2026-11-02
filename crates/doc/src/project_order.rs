@@ -9,6 +9,13 @@ use crate::{DocError, Result};
 
 type Key = (i64, i64, i64);
 
+/// How far apart two edge ends of `mesh` may be and still meet. A round's fitted edges end a few
+/// 1e-5 mm short of their neighbours, far more than the tolerance that ranks equal areas (#8284).
+pub(super) fn join_tolerance(mesh: &Mesh) -> f64 {
+    let diagonal = mesh.bounds().diagonal();
+    (diagonal * 1e-6).max(1e-9)
+}
+
 /// Boundary of the picked face as drawn: a closed surface cut into pieces (a cylinder or a
 /// round's torus in halves) projects as the whole patch, since its seams are hidden.
 pub(super) fn face_edges(mesh: &Mesh, face: u32, plane: &Plane) -> Result<Vec<usize>> {
@@ -53,12 +60,13 @@ fn boundary_edges(mesh: &Mesh, mut edges: Vec<usize>, faces: &BTreeSet<usize>, p
     let origin = bounds.min;
     let local_origin = plane.to_local(origin);
     let tol = (bounds.diagonal() * 1e-8).max(1e-9);
-    if !tol.is_finite() {
+    let join = join_tolerance(mesh);
+    if !tol.is_finite() || !join.is_finite() {
         return Err(DocError::Invalid("face projection has invalid bounds".into()));
     }
     let key = |p: Vec3| -> Key {
         let p = p - origin;
-        ((p.x / tol).round() as i64, (p.y / tol).round() as i64, (p.z / tol).round() as i64)
+        ((p.x / join).round() as i64, (p.y / join).round() as i64, (p.z / join).round() as i64)
     };
     if edges.iter().any(|e| !mesh.edges.get(*e).is_some_and(|p| p.len() >= 2 && p.iter().all(|p| p.is_finite()))) {
         return Err(DocError::Invalid("face projection has an invalid boundary edge".into()));
@@ -71,6 +79,9 @@ fn boundary_edges(mesh: &Mesh, mut edges: Vec<usize>, faces: &BTreeSet<usize>, p
         let b: Aabb3 = pts.iter().copied().collect();
         (key(b.min), key(b.max))
     };
+    // A round that dies away at a corner leaves an edge from a point to itself: it bounds nothing,
+    // and left in, it reads as a branch where the real edges meet.
+    edges.retain(|e| mesh.edges.get(*e).is_some_and(|p| p.len() > 2 || p.first().zip(p.last()).is_some_and(|(a, b)| a.dist(*b) > join)));
     edges.sort_by_key(|e| geometry_key(*e));
     let mut at: BTreeMap<Key, Vec<usize>> = BTreeMap::new();
     for e in &edges {
@@ -107,7 +118,7 @@ fn boundary_edges(mesh: &Mesh, mut edges: Vec<usize>, faces: &BTreeSet<usize>, p
                 *slot = true;
             }
             boundary.push(edge);
-            if current.dist(start) <= tol {
+            if current.dist(start) <= join {
                 break;
             }
             // Neighbouring quantization cells cover points on either side of a rounding
@@ -121,7 +132,7 @@ fn boundary_edges(mesh: &Mesh, mut edges: Vec<usize>, faces: &BTreeSet<usize>, p
                         if let Some(list) = at.get(&cell) {
                             incident.extend(list.iter().copied().filter(|e| {
                                 mesh.edges.get(*e).is_some_and(|p| {
-                                    p.first().is_some_and(|a| a.dist(current) <= tol) || p.last().is_some_and(|b| b.dist(current) <= tol)
+                                    p.first().is_some_and(|a| a.dist(current) <= join) || p.last().is_some_and(|b| b.dist(current) <= join)
                                 })
                             }));
                         }
@@ -148,7 +159,7 @@ fn boundary_edges(mesh: &Mesh, mut edges: Vec<usize>, faces: &BTreeSet<usize>, p
             edge = *next;
         }
         boundary.sort_by_key(|e| geometry_key(*e));
-        let closed = current.dist(start) <= tol;
+        let closed = current.dist(start) <= join;
         if !closed || !twice_area.is_finite() {
             return Err(DocError::Invalid("face projection has an open or invalid boundary".into()));
         }
@@ -165,6 +176,26 @@ fn boundary_edges(mesh: &Mesh, mut edges: Vec<usize>, faces: &BTreeSet<usize>, p
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A cube's outline from above is its four sides whatever normals its mesh carries: none, too
+    /// few, zero or not numbers fall back to each triangle's own normal, and so do normals
+    /// averaged across its creases, as an imported mesh may have them.
+    #[test]
+    fn a_silhouette_takes_the_triangles_own_normal_where_the_mesh_has_no_surface_normal() {
+        let corner = |i: u32| Vec3::new(f64::from(i & 1), f64::from((i >> 1) & 1), f64::from((i >> 2) & 1)) * 10.0;
+        let positions: Vec<Vec3> = (0..8).map(corner).collect();
+        let quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
+        let triangles: Vec<[u32; 3]> = quads.iter().flat_map(|[a, b, c, d]| [[*a, *b, *c], [*a, *c, *d]]).collect();
+        let averaged: Vec<Vec3> = positions.iter().map(|p| (*p - Vec3::new(5.0, 5.0, 5.0)).normalized().unwrap_or(Vec3::Z)).collect();
+        let nan = Vec3::new(f64::NAN, 0.0, 0.0);
+        for normals in [Vec::new(), vec![Vec3::Z; 3], vec![Vec3::ZERO; 8], vec![nan; 8], vec![Vec3::new(f64::INFINITY, 0.0, 0.0); 8], averaged] {
+            let tri_face = vec![0; triangles.len()];
+            let mesh = Mesh { positions: positions.clone(), normals: normals.clone(), triangles: triangles.clone(), tri_face, ..Mesh::default() };
+            let outline = super::super::silhouette(&Plane::XY, &mesh, None);
+            let sides = outline.iter().filter(|g| matches!(g, solidcraft_sketch::LinkGeom::Line(a, b) if (a.dist(*b) - 10.0).abs() < 1e-9)).count();
+            assert_eq!((outline.len(), sides), (4, 4), "{normals:?}: {outline:?}");
+        }
+    }
 
     #[test]
     fn face_family_omits_only_exact_shared_topological_edges() {
@@ -193,6 +224,146 @@ mod tests {
         assert!(family_edges(&mesh, &selected, &Plane::XY).is_err());
         mesh.edge_faces[2] = vec![0, 0];
         assert!(family_edges(&mesh, &selected, &Plane::XY).is_err());
+    }
+
+    #[test]
+    fn coarsely_tessellated_round_silhouette_fits_an_arc() {
+        use solidcraft_geom::Vec2;
+        use solidcraft_sketch::LinkGeom;
+        let on = |deg: f64| Vec2::new(5. + 5. * deg.to_radians().cos(), 5. + 5. * deg.to_radians().sin());
+        let mut chain = vec![Vec2::new(0., -20.)];
+        chain.extend([180., 169.5, 135., 100.5, 90.].map(on));
+        chain.push(Vec2::new(45., 10.));
+        let mut out = Vec::new();
+        super::super::fit_chain_with_arcs(&chain, Some(0.05), &mut out, true);
+        assert!(out.iter().any(|g| matches!(g, LinkGeom::Arc { .. })), "{out:?}");
+    }
+
+    #[test]
+    fn tangent_snapping_leaves_unrelated_collinear_lines_alone() {
+        use solidcraft_geom::Vec2;
+        use solidcraft_sketch::LinkGeom;
+        let v = Vec2::new;
+        // A rounded corner of radius 2 meeting the top edge, and an unrelated collinear edge.
+        let mut out = vec![
+            LinkGeom::Line(v(21., 8.), v(25., 8.)),
+            LinkGeom::Arc { c: v(2.0008, 5.9992), a: v(2.2808, 8.0), b: v(0., 6.0) },
+            LinkGeom::Line(v(2.0668, 8.), v(48., 8.)),
+        ];
+        super::super::snap_tangent_arcs(&mut out, 0.05);
+        assert_eq!(out.first(), Some(&LinkGeom::Line(v(21., 8.), v(25., 8.))));
+        let (Some(LinkGeom::Arc { a, .. }), Some(LinkGeom::Line(p, _))) = (out.get(1), out.get(2)) else { panic!("{out:?}") };
+        assert!(a.dist(*p) < 1e-9, "{out:?}");
+    }
+
+    #[test]
+    fn tangent_snapping_leaves_a_line_further_along_alone() {
+        use solidcraft_geom::Vec2;
+        use solidcraft_sketch::LinkGeom;
+        let v = Vec2::new;
+        let y = |x: f64| 2.0 - (4.0 - x * x).sqrt();
+        // The arc's end at x = 0.5 already meets the next piece; the line along y = 0 ends at
+        // x = 0.3, further along the outline the other way. Snapping onto it would pull the end
+        // off the piece it meets.
+        let mut out = vec![
+            LinkGeom::Arc { c: v(0., 2.), a: v(0.5, y(0.5)), b: v(-1.5, y(-1.5)) },
+            LinkGeom::Line(v(0.3, 0.), v(10., 0.)),
+            LinkGeom::Line(v(0.5, y(0.5)), v(3., 3.)),
+        ];
+        let before = out.clone();
+        super::super::snap_tangent_arcs(&mut out, 0.05);
+        assert_eq!(out.get(1), before.get(1), "{out:?}");
+        let (Some(LinkGeom::Arc { a, .. }), Some(LinkGeom::Line(p, _))) = (out.first(), out.get(2)) else { panic!("{out:?}") };
+        assert!(a.dist(*p) < 1e-9, "{out:?}");
+    }
+
+    #[test]
+    fn tangent_snapping_gives_one_line_to_one_end_of_an_arc() {
+        use solidcraft_geom::Vec2;
+        use solidcraft_sketch::LinkGeom;
+        let v = Vec2::new;
+        let y = |x: f64| 2.0 - (4.0 - x * x).sqrt();
+        // A short arc whose two ends both lie near the end of one line: both snapping onto it
+        // would shrink the arc to the tangent point.
+        let mut out = vec![LinkGeom::Arc { c: v(0., 2.), a: v(-0.2, y(-0.2)), b: v(0.2, y(0.2)) }, LinkGeom::Line(v(-10., 0.), v(0., 0.))];
+        super::super::snap_tangent_arcs(&mut out, 0.05);
+        let Some(LinkGeom::Arc { a, b, .. }) = out.first() else { panic!("{out:?}") };
+        assert!(a.dist(*b) > 0.1, "{out:?}");
+    }
+
+    #[test]
+    fn tangent_snapping_moves_the_other_end_of_an_arc_to_its_next_line() {
+        use solidcraft_geom::Vec2;
+        use solidcraft_sketch::LinkGeom;
+        let v = Vec2::new;
+        let y = |x: f64| 2.0 - (4.0 - x * x).sqrt();
+        let (a, b) = (v(-0.2, y(-0.2)), v(0.2, y(0.2)));
+        // The line along y = 0 ends nearest both ends of the arc but nearer b, which keeps it; a
+        // takes the next line, tangent to the circle at a and ending a little past it.
+        let back = (v(0., 2.) - a).normalized().map(|n| v(-n.y, n.x)).unwrap_or(Vec2::X);
+        let mut out =
+            vec![LinkGeom::Arc { c: v(0., 2.), a, b }, LinkGeom::Line(v(0.1, 0.), v(10., 0.)), LinkGeom::Line(a + back * 10., a + back * 0.35)];
+        super::super::snap_tangent_arcs(&mut out, 0.05);
+        let (Some(LinkGeom::Arc { a, b, .. }), Some(LinkGeom::Line(p, _)), Some(LinkGeom::Line(_, q))) = (out.first(), out.get(1), out.get(2)) else {
+            panic!("{out:?}")
+        };
+        assert!(b.dist(*p) < 1e-9 && a.dist(*q) < 1e-9 && a.dist(*b) > 0.1, "{out:?}");
+    }
+
+    #[test]
+    fn tangent_snapping_closes_a_conic_corner_in_any_order() {
+        use solidcraft_geom::Vec2;
+        use solidcraft_sketch::LinkGeom;
+        // A square of side 150 with a conic round of 10 mm legs at each corner, fitted with lines
+        // and arcs the way a silhouette is, then snapped with the pieces in each order.
+        for rho in [0.1, 0.15, 0.5, 0.8, 0.9] {
+            let w = rho / (1. - rho);
+            let conic = |s: Vec2, apex: Vec2, e: Vec2, t: f64| {
+                let (b0, b1, b2) = ((1. - t) * (1. - t), 2. * t * (1. - t) * w, t * t);
+                (s * b0 + apex * b1 + e * b2) * (1. / (b0 + b1 + b2))
+            };
+            let v = Vec2::new;
+            let corners = [
+                (v(-75., 65.), v(-75., 75.), v(-65., 75.)),
+                (v(65., 75.), v(75., 75.), v(75., 65.)),
+                (v(75., -65.), v(75., -75.), v(65., -75.)),
+                (v(-65., -75.), v(-75., -75.), v(-75., -65.)),
+            ];
+            let mut chain = Vec::new();
+            for (s, apex, e) in corners {
+                chain.extend((0..=40).map(|k| conic(s, apex, e, f64::from(k) / 40.)));
+            }
+            if let Some(&first) = chain.first() {
+                chain.push(first);
+            }
+            let mut fitted = Vec::new();
+            super::super::fit_chain_with_arcs(&chain, Some(212. * 1e-5), &mut fitted, true);
+            assert!(fitted.iter().any(|g| matches!(g, LinkGeom::Arc { .. })), "{fitted:?}");
+            let ends = |g: &LinkGeom| match *g {
+                LinkGeom::Line(s, t) | LinkGeom::Arc { a: s, b: t, .. } => vec![s, t],
+                _ => Vec::new(),
+            };
+            for k in 0..fitted.len() {
+                let mut out = fitted.clone();
+                out.rotate_left(k);
+                super::super::snap_tangent_arcs(&mut out, 212. * 1e-3);
+                // Every end still meets another piece's end. An end left without a line moves a little
+                // when the arc's radius is set from the lines (well under 0.01 mm here); before, ends
+                // pulled onto lines further along left gaps of 0.25 to 0.55 mm.
+                for (i, g) in out.iter().enumerate() {
+                    for e in ends(g) {
+                        let gap = out
+                            .iter()
+                            .enumerate()
+                            .filter(|(j, _)| *j != i)
+                            .flat_map(|(_, h)| ends(h))
+                            .map(|x| x.dist(e))
+                            .fold(f64::INFINITY, f64::min);
+                        assert!(gap < 212. * 1e-3 * 0.02, "rho {rho}, rotation {k}: gap {gap} at {e:?}: {out:?}");
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -383,6 +554,70 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A 100 mm square whose edges each end `gap` short of the next one's start.
+    fn square_with_gaps(gap: f64) -> Mesh {
+        let corners = [Vec3::new(0., 0., 0.), Vec3::new(100., 0., 0.), Vec3::new(100., 100., 0.), Vec3::new(0., 100., 0.)];
+        let mut mesh = Mesh::default();
+        mesh.positions.extend(corners);
+        for i in 0..4 {
+            let (a, b) = (corners[i], corners[(i + 1) % 4]);
+            let back = (a - b).normalized().unwrap() * gap;
+            mesh.edges.push(vec![a, b + back]);
+            mesh.edge_faces.push(vec![0]);
+        }
+        mesh
+    }
+
+    #[test]
+    fn edges_of_a_round_that_end_a_hair_short_of_their_neighbours_still_close() {
+        // A fitted round's edges end a few 1e-5 mm from the vertex they share (#8284).
+        let mesh = square_with_gaps(3e-5);
+        assert_eq!(face_edges(&mesh, 0, &Plane::XY).unwrap().len(), 4);
+        // A real gap is still an open boundary.
+        let open = square_with_gaps(1e-2);
+        assert!(face_edges(&open, 0, &Plane::XY).unwrap_err().to_string().contains("open"));
+    }
+
+    #[test]
+    fn an_edge_from_a_point_to_itself_is_not_a_branch() {
+        // Where a round dies away at a corner, the mesh keeps a zero-length edge there (#8284).
+        let mut mesh = square_with_gaps(0.);
+        for corner in mesh.positions.clone() {
+            mesh.edges.push(vec![corner, corner]);
+            mesh.edge_faces.push(vec![0, 1]);
+        }
+        assert_eq!(face_edges(&mesh, 0, &Plane::XY).unwrap().len(), 4);
+    }
+
+    #[test]
+    fn curve_ends_a_hair_apart_become_one_point_and_distant_ones_stay() {
+        use solidcraft_geom::Vec2;
+        use solidcraft_sketch::LinkGeom;
+        let mut geom = vec![
+            LinkGeom::Line(Vec2::new(0., 0.), Vec2::new(10., 0.)),
+            LinkGeom::Spline {
+                pts: vec![Vec2::new(10. + 3e-5, 2e-5), Vec2::new(11., 1.), Vec2::new(12., 5.)],
+                control: true,
+                degree: 3,
+                periodic: false,
+                nurbs: None,
+            },
+            LinkGeom::Line(Vec2::new(12., 5. - 1e-5), Vec2::new(0., 0.1)),
+        ];
+        super::super::meet_at_shared_ends(&mut geom, 1e-4);
+        assert_eq!(
+            geom[1],
+            LinkGeom::Spline {
+                pts: vec![Vec2::new(10., 0.), Vec2::new(11., 1.), Vec2::new(12., 5.)],
+                control: true,
+                degree: 3,
+                periodic: false,
+                nurbs: None
+            }
+        );
+        assert_eq!(geom[2], LinkGeom::Line(Vec2::new(12., 5.), Vec2::new(0., 0.1)));
     }
 
     #[test]

@@ -179,7 +179,7 @@ impl NormalizationSource {
                     let linear = match conversion {
                         ColorConversion::RawData => bounded,
                         ColorConversion::PngGammaSrgbPrimaries { encoding_gamma } => bounded.powf(1.0 / encoding_gamma),
-                        _ => srgb_to_linear(bounded),
+                        _ => solidcraft_geom::srgb::decode(bounded),
                     };
                     if !linear.is_finite() || !(0.0..=1.0).contains(&linear) {
                         return Err(invalid("normalization produced invalid linear/data channels"));
@@ -270,9 +270,6 @@ fn digest_bytes(bytes: &[u8], cancelled: &impl Fn() -> bool) -> Result<String> {
         digest.update(chunk);
     }
     Ok(format!("{:x}", digest.finalize()))
-}
-fn srgb_to_linear(value: f64) -> f64 {
-    if value <= 0.04045 { value / 12.92 } else { ((value + 0.055) / 1.055).powf(2.4) }
 }
 fn destination_index(source: [u32; 2], output: [u32; 2], orientation: Orientation, x: u32, y: u32) -> Result<usize> {
     let [width, height] = source;

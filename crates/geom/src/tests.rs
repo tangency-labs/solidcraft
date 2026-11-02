@@ -568,6 +568,99 @@ fn mass_properties_need_consistently_oriented_faces() {
     assert!(m.mass_properties().is_none());
 }
 
+/// `m` with every vertex moved by the linear map `l` (row by row).
+fn mapped(m: &Mesh, l: &inertia::Tensor3) -> Mesh {
+    let apply = |p: Vec3| {
+        let [x, y, z] = l.map(|r| r[0] * p.x + r[1] * p.y + r[2] * p.z);
+        Vec3::new(x, y, z)
+    };
+    Mesh { positions: m.positions.iter().map(|p| apply(*p)).collect(), triangles: m.triangles.clone(), ..Default::default() }
+}
+
+fn tensors_close(a: &inertia::Tensor3, b: &inertia::Tensor3, tol: f64) -> bool {
+    a.iter().flatten().zip(b.iter().flatten()).all(|(x, y)| (x - y).abs() <= tol)
+}
+
+#[test]
+fn gyration_follows_a_rotation_a_scale_and_a_mirror_of_the_body() {
+    let base = offset_box(Vec3::new(5.0, -3.0, 2.0), 20.0, 30.0, 40.0);
+    let props = base.mass_properties().unwrap();
+    let g = props.gyration().unwrap();
+    assert!(tensors_close(&inertia::from_gyration(&g, props.volume), &props.inertia, 1e-6 * props.inertia[0][0]));
+    let (c, s) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+    let (cx, sx) = (20f64.to_radians().cos(), 20f64.to_radians().sin());
+    let turn_z = [[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]];
+    let turn_x = [[1.0, 0.0, 0.0], [0.0, cx, -sx], [0.0, sx, cx]];
+    let turn = [0, 1, 2].map(|i| [0, 1, 2].map(|j| (0..3).map(|k| turn_z[i][k] * turn_x[k][j]).sum::<f64>()));
+    for l in [turn, [[2.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.5]], [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]] {
+        let moved = mapped(&base, &l).mass_properties().expect("a mapped box is still closed");
+        let want = moved.inertia;
+        let got = inertia::from_gyration(&inertia::transformed(&g, &l), moved.volume);
+        assert!(tensors_close(&got, &want, 1e-6 * want[0][0].abs().max(want[2][2].abs())), "{l:?}\n{got:?}\n{want:?}");
+    }
+}
+
+#[test]
+fn principal_axes_of_a_turned_box_are_its_edges() {
+    let (a, b, c) = (20.0, 30.0, 40.0);
+    let v = a * b * c;
+    let (cs, sn) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+    let turn = [[cs, -sn, 0.0], [sn, cs, 0.0], [0.0, 0.0, 1.0]];
+    let m = mapped(&offset_box(Vec3::ZERO, a, b, c), &turn).mass_properties().unwrap();
+    assert!(m.inertia[0][1].abs() > 1.0, "turned about z, the box has a product of inertia: {:?}", m.inertia);
+    let (moments, axes) = inertia::principal(&m.inertia, 0.0).unwrap();
+    // Smallest about the longest edge (z), largest about the shortest (the turned x).
+    let want = [v * (a * a + b * b) / 12.0, v * (a * a + c * c) / 12.0, v * (b * b + c * c) / 12.0];
+    for (got, want) in moments.iter().zip(want) {
+        assert!(close(*got, want, 1e-9), "{moments:?} {want}");
+    }
+    let edges = [Vec3::Z, Vec3::new(-sn, cs, 0.0), Vec3::new(cs, sn, 0.0)];
+    for (axis, edge) in axes.iter().zip(edges) {
+        assert!((axis.dot(edge).abs() - 1.0).abs() < 1e-9, "{axes:?}");
+    }
+    assert!((axes[0].cross(axes[1]) - axes[2]).len() < 1e-12, "right-handed: {axes:?}");
+    // The first two point along the world axis nearest them: +z, then +y.
+    assert!(axes[0].z > 0.0 && axes[1].y > 0.0, "{axes:?}");
+}
+
+#[test]
+fn shifted_inertia_about_a_box_corner_matches_the_closed_form() {
+    let (a, b, c) = (20.0, 30.0, 40.0);
+    let m = offset_box(Vec3::ZERO, a, b, c).mass_properties().unwrap();
+    let mass = 3.0 * m.volume;
+    let at_centre = m.inertia.map(|r| r.map(|x| 3.0 * x));
+    let corner = inertia::shifted(&at_centre, mass, Vec3::ZERO - m.centroid);
+    let want = [
+        [mass * (b * b + c * c) / 3.0, -mass * a * b / 4.0, -mass * a * c / 4.0],
+        [-mass * a * b / 4.0, mass * (a * a + c * c) / 3.0, -mass * b * c / 4.0],
+        [-mass * a * c / 4.0, -mass * b * c / 4.0, mass * (a * a + b * b) / 3.0],
+    ];
+    assert!(tensors_close(&corner, &want, 1e-9 * want[0][0]), "{corner:?}");
+}
+
+#[test]
+fn principal_axes_of_equal_zero_or_broken_tensors() {
+    let sphere = [[5.0, 0.0, 0.0], [0.0, 5.0, 0.0], [0.0, 0.0, 5.0]];
+    assert_eq!(inertia::principal(&sphere, 0.0), Some(([5.0; 3], [Vec3::X, Vec3::Y, Vec3::Z])));
+    assert_eq!(inertia::principal(&[[0.0; 3]; 3], 0.0), Some(([0.0; 3], [Vec3::X, Vec3::Y, Vec3::Z])));
+    assert!(inertia::principal(&[[f64::NAN, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], 0.0).is_none());
+    assert!(inertia::principal(&[[f64::INFINITY, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], 0.0).is_none());
+    // Products of inertia far larger than the moments still settle.
+    let (moments, _) = inertia::principal(&[[1.0, 1e12, 0.0], [1e12, 1.0, 0.0], [0.0, 0.0, 1.0]], 0.0).unwrap();
+    assert!(close(moments[0], -1e12, 1e-9) && close(moments[2], 1e12, 1e-9), "{moments:?}");
+    // A tessellated pin along z: x and y differ in the fifth digit, with a stray product between
+    // them. Exactly, their axes are turned at random; counted as equal, they are X and Y.
+    let pin = [[7.99497, -0.000535, 0.0], [-0.000535, 7.99536, 0.0], [0.0, 0.0, 5.18447]];
+    let (_, exact) = inertia::principal(&pin, 0.0).unwrap();
+    assert!(exact[1].x.abs() < 0.99, "{exact:?}");
+    assert_eq!(inertia::principal(&pin, 1e-3).map(|(_, axes)| axes), Some([Vec3::Z, Vec3::X, Vec3::Y]));
+    // The same with the round pair smallest (a disc), and all three alike (a cube's tessellation).
+    let disc = [[3.00001, 0.0002, 0.0], [0.0002, 3.0, 0.0], [0.0, 0.0, 6.0]];
+    assert_eq!(inertia::principal(&disc, 1e-3).map(|(_, axes)| axes), Some([Vec3::X, Vec3::Y, Vec3::Z]));
+    let cube = [[2.0, 1e-5, 0.0], [1e-5, 2.0001, 0.0], [0.0, 0.0, 1.9999]];
+    assert_eq!(inertia::principal(&cube, 1e-3).map(|(_, axes)| axes), Some([Vec3::X, Vec3::Y, Vec3::Z]));
+}
+
 mod close_pairs {
     use super::*;
 
@@ -884,4 +977,49 @@ fn a_box_from_points_holds_them_and_grows() {
     let both = b.intersection(&b.inflated(1.0).intersection(&Aabb3 { min: Vec3::new(0.0, 1.0, 4.0), max: Vec3::new(9.0, 9.0, 9.0) }));
     assert_eq!((both.min, both.max), (Vec3::new(0.0, 1.0, 4.0), Vec3::new(1.0, 2.0, 5.0)));
     assert!(b.intersection(&far).is_empty());
+}
+
+/// A similarity moves every kind of segment exactly: the moved segment's points are the original's
+/// points moved, its length scales, and an arc stays an arc turning the same way.
+#[test]
+fn a_similarity_moves_each_kind_of_segment_exactly() {
+    let m = Similarity2::new(2.5, 0.7, Vec2::new(-3.0, 11.0)).unwrap();
+    let mut p = [Vec2::ZERO; MAX_BEZIER_CTRL];
+    for (i, q) in p.iter_mut().take(6).enumerate() {
+        *q = Vec2::new(i as f64, (i * i) as f64 * 0.3);
+    }
+    let segments = [
+        Seg2::Line { a: Vec2::new(1.0, 2.0), b: Vec2::new(4.0, -1.0) },
+        Seg2::Arc { center: Vec2::new(2.0, 1.0), radius: 3.0, start: 0.4, sweep: -2.1 },
+        Seg2::Cubic { p0: Vec2::ZERO, p1: Vec2::new(1.0, 2.0), p2: Vec2::new(3.0, 2.0), p3: Vec2::new(4.0, 0.0) },
+        Seg2::Conic { a: Vec2::new(10.0, 0.0), apex: Vec2::new(10.0, 10.0), b: Vec2::new(0.0, 10.0), w: std::f64::consts::FRAC_1_SQRT_2 },
+        Seg2::Bezier { n: 5, p },
+    ];
+    for seg in segments {
+        let moved = seg.similar(&m);
+        for i in 0..=8 {
+            let t = f64::from(i) / 8.0;
+            assert!((moved.point_at(t) - m.apply(seg.point_at(t))).len() < 1e-9, "{seg:?} at {t}");
+        }
+        assert!((moved.length() - seg.length() * m.scale()).abs() < 1e-9 * seg.length().max(1.0), "{seg:?}");
+        assert_eq!(std::mem::discriminant(&moved), std::mem::discriminant(&seg));
+    }
+    // An arc keeps its sweep: the turning direction survives a similarity.
+    let arc = Seg2::Arc { center: Vec2::ZERO, radius: 1.0, start: 0.0, sweep: -1.0 };
+    assert!(matches!(arc.similar(&m), Seg2::Arc { sweep, .. } if sweep == -1.0));
+    // The identity changes nothing.
+    let identity = Similarity2::new(1.0, 0.0, Vec2::ZERO).unwrap();
+    for seg in segments {
+        assert_eq!(seg.similar(&identity), seg);
+    }
+    // A similarity scales by a finite number above 0, and turns and moves by finite ones.
+    for (scale, angle, shift) in [
+        (0.0, 0.0, Vec2::ZERO),
+        (-1.0, 0.0, Vec2::ZERO),
+        (f64::NAN, 0.0, Vec2::ZERO),
+        (1.0, f64::INFINITY, Vec2::ZERO),
+        (1.0, 0.0, Vec2::new(f64::NAN, 0.0)),
+    ] {
+        assert!(Similarity2::new(scale, angle, shift).is_none(), "{scale} {angle} {shift:?}");
+    }
 }

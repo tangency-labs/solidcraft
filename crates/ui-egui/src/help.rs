@@ -28,28 +28,39 @@ pub struct HelpState {
 /// One line per fact, for bug reports.
 pub fn diagnostics(app: &SolveApp) -> String {
     let renderer = if app.viewport.gpu.is_some() { "GPU" } else { "CPU" };
+    let count = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
     format!(
-        "SolidCraft {VERSION} ({COMMIT}, built {BUILD_DATE})\nOS: {} {}\nRenderer: {renderer}{}\nWindow: {}\nDesign: {} ({} features, {} bodies)",
+        "SolidCraft {VERSION} ({COMMIT}, built {BUILD_DATE})\nOS: {} {}\nRenderer: {renderer}{}\nWindow: {}\nDesign: {} ({}, {})",
         std::env::consts::OS,
         std::env::consts::ARCH,
         app.help.gpu.as_ref().map(|g| format!(", {g}")).unwrap_or_default(),
         if app.custom_titlebar { "custom title bar" } else { "system title bar" },
         app.session.doc.name,
-        app.session.doc.features.len(),
-        crate::open_meshing::session_world(&app.session).bodies.len(),
+        count(app.session.doc.features.len(), "feature", "features"),
+        count(crate::open_meshing::session_world(&app.session).bodies.len(), "body", "bodies"),
     )
 }
 
-/// Run a Help menu item: `docs`, `about`, `version` (the release notes), `shortcuts`, `messages`,
-/// `report`, `crashes`, `connect`, `install_cli` (macOS).
+/// Whether a Help menu item can run now: behind an open bug report, the items that open a
+/// window would cover it (#7188). Report an Issue… shows the report.
+pub fn available(app: &SolveApp, item: &str) -> bool {
+    app.issue_report.draft.is_none() || !matches!(item, "about" | "shortcuts" | "messages" | "crashes" | "connect" | "updates")
+}
+
+/// Run a Help menu item: `docs`, `about`, `updates`, `version` (the release notes), `shortcuts`, `messages`, `report`, `crashes`,
+/// `connect`, `install_cli` (macOS).
 pub fn run(app: &mut SolveApp, ctx: &egui::Context, item: &str) {
     app.help.menu = false;
+    if !available(app, item) {
+        return;
+    }
     match item {
         "docs" => ctx.open_url(egui::OpenUrl::new_tab(DOCS_URL)),
         "about" => app.help.about = true,
         "version" => {
             ctx.open_url(egui::OpenUrl::new_tab(crate::update::release_notes_url(crate::update::current_version(), crate::update::release_build())))
         }
+        "updates" => crate::update::check_now(app, ctx),
         "shortcuts" => {
             app.keymap.open = true;
             app.keymap.read_only = true;
@@ -125,6 +136,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
                     for (id, label, icon) in [
                         ("docs", "Documentation", "library"),
                         ("about", "About SolidCraft", "help"),
+                        ("updates", crate::i18n::tr("update.check_for_updates"), "update"),
                         ("shortcuts", "Keyboard Shortcuts", "list"),
                         ("messages", "Messages…", "list"),
                         ("report", "Report an Issue…", "bug_report"),
@@ -135,7 +147,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
                     .into_iter()
                     .filter(|(id, ..)| *id != "install_cli" || cfg!(target_os = "macos"))
                     {
-                        if crate::context_menu::list_row(ui, &crate::context_menu::Item::action(id, label, icon)).is_some() {
+                        let item = crate::context_menu::Item::action(id, label, icon).on_if(available(app, id));
+                        if crate::context_menu::list_row(ui, &item).is_some() {
                             pick = Some(id);
                         }
                         // A layout without the version in the application bar lists it here.
@@ -227,5 +240,16 @@ mod tests {
         let app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         let d = diagnostics(&app);
         assert!(d.contains(VERSION) && d.contains(std::env::consts::OS) && d.contains("Renderer: CPU"), "{d}");
+    }
+
+    /// One feature and one body are counted in the singular (#9085), more in the plural.
+    #[test]
+    fn diagnostics_count_one_feature_and_one_body_in_the_singular() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert!(diagnostics(&app).ends_with("(0 features, 0 bodies)"), "{}", diagnostics(&app));
+        app.session.execute("solid.box", &serde_json::json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        assert!(diagnostics(&app).ends_with("(1 feature, 1 body)"), "{}", diagnostics(&app));
+        app.session.execute("solid.box", &serde_json::json!({"length": 10, "width": 10, "height": 10, "corner": [30, 0, 0]})).unwrap();
+        assert!(diagnostics(&app).ends_with("(2 features, 2 bodies)"), "{}", diagnostics(&app));
     }
 }

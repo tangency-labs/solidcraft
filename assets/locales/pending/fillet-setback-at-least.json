@@ -17,7 +17,13 @@
   "ko": {
     "ui.fillet_error_setback_short": "이 코너의 패치에 비해 셋백이 너무 짧습니다. {least}부터 만들 수 있습니다. 더 긴 셋백을 시도해 보세요."
   },
+  "vi": {
+    "ui.fillet_error_setback_short": "Khoảng Lùi quá ngắn cho mảng của góc này: mảng được tạo từ {least} trở lên. Hãy thử khoảng Lùi dài hơn."
+  },
   "zh": {
     "ui.fillet_error_setback_short": "对于此角点的面片，后退距离太短：从 {least} 起可以构建。请尝试更长的后退距离。"
+  },
+  "vi": {
+    "ui.fillet_error_setback_short": "Khoảng lùi quá ngắn cho mảng ở góc này: góc dựng được từ {least} trở lên. Hãy thử một khoảng Lùi dài hơn."
   }
 }

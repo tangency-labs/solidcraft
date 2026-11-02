@@ -26,18 +26,23 @@ fn failed(what: &str, e: impl std::fmt::Display) -> KernelError {
     KernelError::Failed(format!("SMLib intersection curve: {what}: {e}"))
 }
 
-/// `body` itself, or its face `face` (in its face order) alone as a surface body.
-fn part(body: &Body, face: Option<usize>) -> Result<Body> {
-    match face {
-        None => Ok(body.clone()),
-        Some(f) if f < body.record().faces.len() => crate::surfaces::taken(body, body.record(), &[(f, false)]),
-        Some(f) => Err(KernelError::Invalid(format!("the body has no face {f}"))),
+/// `body` itself, or its faces `faces` (in its face order) alone as a surface body.
+fn part(body: &Body, faces: Option<&[usize]>) -> Result<Body> {
+    let Some(faces) = faces else { return Ok(body.clone()) };
+    let count = body.record().faces.len();
+    if let Some(f) = faces.iter().find(|f| **f >= count) {
+        return Err(KernelError::Invalid(format!("the body has no face {f}")));
     }
+    if faces.is_empty() {
+        return Err(KernelError::Invalid("no face given".into()));
+    }
+    let taken: Vec<(usize, bool)> = faces.iter().map(|f| (*f, false)).collect();
+    crate::surfaces::taken(body, body.record(), &taken)
 }
 
-/// Where `a` (or its face `a_face`) meets `b` (or its face `b_face`): every edge SMLib's imprint
+/// Where `a` (or its faces `a_face`) meets `b` (or its faces `b_face`): every edge SMLib's imprint
 /// of the one by the other makes, its points at `chord` mm. Empty where they do not meet.
-pub fn meeting_edges(a: &Body, a_face: Option<usize>, b: &Body, b_face: Option<usize>, chord: f64) -> Result<Vec<MeetingEdge>> {
+pub fn meeting_edges(a: &Body, a_face: Option<&[usize]>, b: &Body, b_face: Option<&[usize]>, chord: f64) -> Result<Vec<MeetingEdge>> {
     let (a, b) = (part(a, a_face)?, part(b, b_face)?);
     let ta = a.smlib()?.tagged(0).map_err(|e| failed("tag", e))?;
     let tb = b.smlib()?.tagged(1).map_err(|e| failed("tag", e))?;

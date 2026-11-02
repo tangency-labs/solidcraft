@@ -1,4 +1,6 @@
 {
+  "order": 220,
+  "provenance": "Maps the Okibi design system",
   "base": "light",
   "colors": {
     "accent": "#c63a00",
@@ -50,10 +52,13 @@
     "dialog_footer": "#efece8",
     "dialog_label": "#403d38",
     "dialog_rule": "#d9d5d0",
-    "dimension": "#403d38",
-    "dimension_driven": "#6c6863",
+    "dimension": "#006a70",
+    "dimension_driven": "#4d8a8c",
     "error": "#c71529",
     "field": "#fffdfa",
+    "file_rail": "#e1ddd8",
+    "file_rail_hover": "#ebe7e2",
+    "file_rail_ink": "#13110e",
     "form_accent": "#5844bc",
     "form_dim": "#6c6863",
     "form_error": "#c71529",

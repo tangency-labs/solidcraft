@@ -54,6 +54,68 @@ records before writing. V1 imports and v2 looks without PBR explicitly select sc
 shading and clear a prior PBR response. See [local material libraries](book/src/dev/local-libraries.md).
 In-design swatches retain and reuse the response.
 
+## Inspect, replace and inherit a look
+
+`appearance.chain` is a read-only command. Supply exactly one target: a body,
+a face index from `model.faces` with its body, or a component name/ID:
+
+```json
+{"command":"appearance.chain","params":{"target":{"body":"Specimen","face":0}}}
+{"command":"appearance.chain","params":{"target":{"component":"Housing"}}}
+```
+
+The result contains four `steps`, ordered `face`, `body`, `component`, `material`.
+Each step contains `step` and `look`: either null or the full saved look
+(`name`, hex `color`, `opacity`, and optional `pbr`). `active` names the first
+nonempty step, or is null. Body reads have no face step. Component reads have
+no face/body steps. Physical materials belong to bodies; a component's material
+step shows the common material look of its directly owned bodies, or null for
+mixed/empty components. Root is not an assignable component. Imported paint
+remains a display fallback outside these four steps, so an all-null chain does
+not imply a particular viewport color.
+
+`appearance.replace` rewrites every equal body, face and component override in
+one undo step. `from` accepts a library name or a complete look copied from
+`appearance.list`'s `in_design` entries. Equality includes the label, color,
+opacity and all PBR values, so looks with identical names but different responses
+remain distinct. `to` accepts a library name or an object with the same look
+fields as `appearance.assign` (including inert `name` with `color`).
+
+```json
+{"command":"appearance.replace","params":{"from":"ABS - Red","to":"Copper - Clean PBR"}}
+{"command":"appearance.replace","params":{"from":{"name":"Custom","color":"#abcdef","opacity":0.5},"to":{"color":"#123456","opacity":0.4},"scope":{"bodies":["Specimen"]}}}
+```
+
+Omit `scope` to replace all stored overrides, including hidden or suppressed
+ones. Optional `scope.bodies` selects body overrides and face overrides on those
+bodies; `scope.components` selects only those component overrides. These lists
+combine as a union. A component scope does not expand to its bodies or descendants.
+Names and numeric component IDs are accepted; duplicate targets count once.
+Scope targets must exist in the evaluated model/design. An empty target list
+selects nothing. At most 10,000 scope entries and 100,000 stored overrides are
+processed; larger requests/designs refuse. The chain read uses the same override
+budget and at most 100,000 bodies for a component read.
+
+The replacement result is `{"count": N}`, counting stored overrides rewritten.
+Invalid values or targets refuse before mutation. A missing source look, empty
+scope or identical replacement returns count zero without adding undo history or
+clearing redo. Geometry, placements, density, mass, physical material defaults
+and engineering records are unchanged. No command opens a dialog. Existing look
+records support saving/reopening these edits without a format change.
+
+**From Material** uses the existing clear form of `appearance.assign`:
+
+```json
+{"command":"appearance.assign","params":{"bodies":["Specimen"],"color":null}}
+{"command":"appearance.assign","params":{"components":["Housing"]}}
+{"command":"appearance.assign","params":{"body":"Specimen","faces":[[5,10,5]],"color":null}}
+```
+
+Clear removes only the selected override. A face then follows its body, a body
+its component, and finally the physical material's default look. Clear remaining
+higher-priority overrides when the material should be active. This changes the
+look without changing density or mass.
+
 ## Original opaque finish presets
 
 The existing Appearance library includes six additional opaque finishes. Its
@@ -85,8 +147,8 @@ assigns generic physical materials and applies these finishes through the same
 commands used by the editor:
 
 ```sh
-solidcraft-cli run examples/material-finishes.json --save target/material-finishes.solidcraft
-solidcraft-cli render target/material-finishes.solidcraft --out target/material-finishes.png --width 1600 --height 1000
+solidcraft-cli run examples/material-finishes.json --save target/material-finishes.sc
+solidcraft-cli render target/material-finishes.sc --out target/material-finishes.png --width 1600 --height 1000
 ```
 
 ## Actual consumers and color

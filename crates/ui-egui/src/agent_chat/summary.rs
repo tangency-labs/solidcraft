@@ -1,5 +1,5 @@
 //! A tool call in words, for its card (#1457): "Extrude Sketch1 by 10 mm", "Box 40 × 30 × 20 mm,
-//! then Fillet 4 edges (r 4 mm)", "Saved block.solidcraft".
+//! then Fillet 4 edges (r 4 mm)", "Saved block.sc".
 //!
 //! A first pass built from the command's translated label, its main parameters (lengths in the
 //! design's units) and the bodies the result names. Anything it doesn't know (another agent's own

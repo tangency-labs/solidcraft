@@ -228,6 +228,111 @@ fn block_in_component() -> Session {
     s
 }
 
+#[test]
+fn move_expression_distances_follow_world_axes_in_a_turned_component() {
+    for translate in [json!([0, -4, 0]), json!(["0 mm", "-4 mm", "0 mm"]), json!([0, "-4", 0])] {
+        let mut s = block_in_component();
+        run(&mut s, "occurrence.move", json!({"occurrence": "C:1", "axis": [1, 0, 0], "angle": "90 deg", "translate": [50, 10, 20]}));
+        let before = world_bbox(&s, "Body1");
+        run(&mut s, "solid.move", json!({"bodies": ["Body1"], "translate": translate}));
+        let after = world_bbox(&s, "Body1");
+        let shift = Vec3::new(0.0, -4.0, 0.0);
+        assert!(near(after.0, before.0 + shift) && near(after.1, before.1 + shift), "{translate}: {before:?} -> {after:?}");
+        assert!((volume(&mut s) - 24_000.0).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn move_expression_distances_keep_parameters_through_rebuild_and_reopen() {
+    for copy in [false, true] {
+        let mut s = block_in_component();
+        run(&mut s, "parameters.add", json!({"name": "travel", "expression": "4 mm"}));
+        // An oblique turn mixes all three coordinates; the placement's translation must
+        // never contribute to the displacement vector.
+        run(&mut s, "occurrence.move", json!({"occurrence": "C:1", "axis": [1, 2, 3], "angle": "37 deg", "translate": [50, 10, 20]}));
+        run(&mut s, "component.activate", json!({"component": "C"}));
+        let before = world_bbox(&s, "Body1");
+        run(&mut s, "solid.move", json!({"bodies": ["Body1"], "translate": [2, "-travel", "1 cm"], "copy": copy}));
+        let moved = s.model.state().bodies.last().unwrap().name.clone();
+        let assert_shift = |s: &Session, travel: f64| {
+            let after = world_bbox(s, &moved);
+            let shift = Vec3::new(2.0, -travel, 10.0);
+            assert!(near(after.0, before.0 + shift) && near(after.1, before.1 + shift), "copy={copy}, travel={travel}: {before:?} -> {after:?}");
+            if copy {
+                let original = world_bbox(s, "Body1");
+                assert!(near(original.0, before.0) && near(original.1, before.1));
+            }
+        };
+        assert_shift(&s, 4.0);
+        run(&mut s, "parameters.change", json!({"name": "travel", "expression": "8 mm"}));
+        assert_shift(&s, 8.0);
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert_shift(&reopened, 8.0);
+        run(&mut reopened, "parameters.change", json!({"name": "travel", "expression": "12 mm"}));
+        assert_shift(&reopened, 12.0);
+        assert!((volume(&mut reopened) - if copy { 48_000.0 } else { 24_000.0 }).abs() < 1e-6);
+    }
+}
+
+/// One `solid.move` of bodies placed in differently turned frames (a block in the root and a
+/// screw inserted lying down) moves and turns each of them in the world, whichever is listed
+/// first (#9660).
+#[test]
+fn one_move_of_bodies_in_differently_turned_frames_moves_each_in_the_world() {
+    let corners = |(lo, hi): (Vec3, Vec3)| {
+        let mut out = Vec::new();
+        for x in [lo.x, hi.x] {
+            for y in [lo.y, hi.y] {
+                for z in [lo.z, hi.z] {
+                    out.push(Vec3::new(x, y, z));
+                }
+            }
+        }
+        out
+    };
+    let bounds = |points: Vec<Vec3>| {
+        let mut lo = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+        let mut hi = Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for p in points {
+            lo = Vec3::new(lo.x.min(p.x), lo.y.min(p.y), lo.z.min(p.z));
+            hi = Vec3::new(hi.x.max(p.x), hi.y.max(p.y), hi.z.max(p.z));
+        }
+        (lo, hi)
+    };
+    let close = |a: (Vec3, Vec3), b: (Vec3, Vec3)| a.0.dist(b.0) < 1e-4 && a.1.dist(b.1) < 1e-4;
+    // The quarter turn is about the world z axis, which passes through the screw's own origin
+    // (where it was inserted): a Move feature turns about that origin.
+    let moves: [(Value, &dyn Fn(Vec3) -> Vec3); 3] = [
+        (json!({"translate": [0, 0, 3]}), &|p| p + Vec3::new(0.0, 0.0, 3.0)),
+        (json!({"translate": [0, "2 mm", 0]}), &|p| p + Vec3::new(0.0, 2.0, 0.0)),
+        (json!({"axis": [0, 0, 1], "angle": "90 deg"}), &|p| Vec3::new(-p.y, p.x, p.z)),
+    ];
+    for direction in [[1, 0, 0], [0, 0, -1], [0, 1, 0]] {
+        for order in [["Block", "Body1"], ["Body1", "Block"]] {
+            for (params, expected) in &moves {
+                let mut s = Session::default();
+                run(&mut s, "solid.box", json!({"length": 30, "width": 30, "height": 10, "center": [0, 0, 5], "body_name": "Block"}));
+                let screw = json!({"family": "socket_head_cap_screw", "size": "M3", "length": 12, "point": [0, 0, 10], "direction": direction, "name": "screw"});
+                run(&mut s, "parts.insert", screw);
+                let before: Vec<_> = order.iter().map(|b| world_bbox(&s, b)).collect();
+                let mut p = params.clone();
+                p["bodies"] = json!(order);
+                run(&mut s, "solid.move", p.clone());
+                for (body, was) in order.iter().zip(&before) {
+                    let want = bounds(corners(*was).into_iter().map(expected).collect());
+                    let got = world_bbox(&s, body);
+                    assert!(close(got, want), "{body} after {p} (screw along {direction:?}): {got:?}, want {want:?}");
+                }
+                // One step: a single undo puts both back.
+                run(&mut s, "edit.undo", json!({}));
+                for (body, was) in order.iter().zip(&before) {
+                    assert!(close(world_bbox(&s, body), *was), "{body} after undoing {p}");
+                }
+            }
+        }
+    }
+}
+
 /// Edit Feature passes a primitive's placement through as saved, so changing the radius of
 /// Leaf B's rod in the Hinge Assembly leaves the leaf where it was (#2926).
 #[test]

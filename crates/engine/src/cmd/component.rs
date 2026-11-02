@@ -11,21 +11,46 @@ use solidcraft_geom::Vec3;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list, vec3};
+use crate::schema::component::{
+    EditInPlaceParams, EditInPlaceResult, FinishEditParams, FinishEditResult, MoveFeaturesParams, MoveFeaturesResult, MoveSketchesToPartsParams,
+    MoveSketchesToPartsResult, OccurrenceAlignParams, OccurrenceAlignResult, ReparentItemsParams, ReparentItemsResult,
+};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
+const EDIT_IN_PLACE_CONTRACT: TypedContract<EditInPlaceParams> = TypedContract::new();
+const FINISH_EDIT_CONTRACT: TypedContract<FinishEditParams> = TypedContract::new();
+const MOVE_FEATURES_CONTRACT: TypedContract<MoveFeaturesParams> = TypedContract::new();
+const MOVE_SKETCHES_TO_PARTS_CONTRACT: TypedContract<MoveSketchesToPartsParams> = TypedContract::new();
+const REPARENT_ITEMS_CONTRACT: TypedContract<ReparentItemsParams> = TypedContract::new();
+
+#[path = "component_align.rs"]
+mod align;
 #[path = "component_drag.rs"]
 mod drag;
+#[path = "component_foreign.rs"]
+mod foreign;
 #[path = "component_matrix.rs"]
 pub(super) mod matrix;
+#[path = "component_move_features.rs"]
+mod move_features;
 #[path = "component_placing.rs"]
 pub(super) mod placing;
 #[path = "component_properties.rs"]
 pub(super) mod properties;
 #[path = "component_reparent.rs"]
 mod reparent;
+#[path = "component_reparent_items.rs"]
+mod reparent_items;
+#[path = "component_sketches_to_parts.rs"]
+mod sketches_to_parts;
 #[path = "component_transfer.rs"]
 mod transfer;
 
+#[cfg(test)]
+#[path = "component_history_tests.rs"]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod history_tests;
 #[cfg(test)]
 #[path = "occurrence_tests.rs"]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
@@ -35,6 +60,12 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.cycle_color", "Cycle Component Color", cycle_color)
         .icon("colored_components").doc_only()
         .params("component: id or name; saves the next identification colour and enables Component Colors; shared by every instance, separate from appearances"),
+    CommandSpec::new("component.hide_history", "Hide Component History", hide_history)
+        .icon("eye").doc_only()
+        .params("component: id or name; keeps the component's features in the design but leaves them out of the History bar (#10393)"),
+    CommandSpec::new("component.show_history", "Show Component History", show_history)
+        .icon("eye").doc_only()
+        .params("component: id or name; puts a component's features back in the History bar after Hide Component History (#10393)"),
     CommandSpec::new("component.create", "New Component", new_component)
         .at("SOLID", "ASSEMBLE")
         .icon("component")
@@ -43,16 +74,40 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("component")
         .params("bodies: [names] → one new component per body, named after it"),
     CommandSpec::new("component.activate", "Activate Component", activate).icon("activate").noundo().params("component: id or name (0 or \"root\" for the design); occurrence?, path?: exact placement used to author shared geometry"),
+    CommandSpec::new("component.edit_in_place", "Edit in Place", crate::checked!("component.edit_in_place", edit_in_place))
+        .icon("edit")
+        .noundo()
+        .doc_only()
+        .contract(&EDIT_IN_PLACE_CONTRACT)
+        .output(output_schema_for::<EditInPlaceResult>)
+        .params(
+            "component: id or name of a linked component; path?: its placement (occurrence ids, default its first) → in the app \
+             window: open the design it links in a tab of its own with the assembly drawn around it (component.finish_edit goes \
+             back); fails when it is not linked, the assembly has no file yet, something is open or running in it, or the file is \
+             missing, on a network location not allowed yet or open in another SolidCraft; asked during the agent's turn it opens \
+             once the turn ends (queued: true); elsewhere it only checks",
+        ),
+    CommandSpec::new("component.finish_edit", "Finish Edit", crate::checked!("component.finish_edit", finish_edit))
+        .icon("finish_edit")
+        .noundo()
+        .doc_only()
+        .contract(&FINISH_EDIT_CONTRACT)
+        .output(output_schema_for::<FinishEditResult>)
+        .params(
+            "no parameters → in the app window: go back from the linked design edited in place to its assembly, which reads it again; \
+             fails while the design has unsaved changes (run file.save first) or something is open in it; asked during the agent's \
+             turn it finishes once the turn ends (queued: true); elsewhere nothing changes",
+        ),
     CommandSpec::new("component.list", "List Components", list).icon("list").noundo().params(
         "compact?: bool (counts of bodies, features, sketches and construction planes instead of their names; occurrences leave out \
          identity transforms; children as occurrence ids); bodies?: bool (with compact: body names, not their count)",
     ),
     CommandSpec::new("component.properties", "Component Physical Properties", properties::component)
         .icon("measure").noundo()
-        .params("component?: id or name (default active); descendants?: bool (default true). Measures the first placement, or all placements for root, including pending moves; material-aware mass and center of mass in world coordinates; volume, density, mass and center of mass only for closed, consistently oriented bodies; total.open_bodies_skipped counts open bodies excluded from volume/mass totals"),
+        .params("component?: id or name (default active); descendants?: bool (default true); about?: [x, y, z] (mm). Measures the first placement, or all placements for root, including pending moves; material-aware mass and center of mass in world coordinates; volume, density, mass, center of mass and inertia_g_mm2 (the inertia tensor about the body's center of mass, world axes, from its tessellation) only for closed, consistently oriented bodies; total.open_bodies_skipped counts open bodies excluded from volume/mass totals; total.first_moment_g_mm (mass × center of mass), inertia_g_mm2 about the total center of mass, principal_moments_g_mm2 (smallest first) and principal_axes (unit, right-handed); with about, total.inertia_about {point, inertia_g_mm2}"),
     CommandSpec::new("occurrence.properties", "Occurrence Physical Properties", properties::occurrence)
         .icon("measure").noundo()
-        .params("occurrence: id or name; path?: [occurrence ids] (required if nested under multiple instances); descendants?: bool (default true). Physical properties of this placement in world coordinates, including pending moves; volume, density, mass and center of mass only for closed, consistently oriented bodies; total.open_bodies_skipped counts open bodies excluded from volume/mass totals"),
+        .params("occurrence: id or name; path?: [occurrence ids] (required if nested under multiple instances); descendants?: bool (default true); about?: [x, y, z] (mm). Physical properties of this placement in world coordinates, including pending moves; volume, density, mass, center of mass and inertia_g_mm2 only for closed, consistently oriented bodies; total.open_bodies_skipped counts open bodies excluded from volume/mass totals; total inertia as in component.properties"),
     CommandSpec::new("component.rename", "Rename Component", rename).icon("rename").params("component, name"),
     CommandSpec::new("component.delete", "Delete Component", delete).icon("delete").params("component: deletes it, its subcomponents, occurrences and features"),
     CommandSpec::new("component.unlock", "Unlock Contents", unlock).icon("rigid_group").params(
@@ -70,7 +125,51 @@ pub static COMMANDS: &[CommandSpec] = &[
          by (default: its only one, else the active one; a component placed more than once gets them in every instance). Each \
          copy stays where its body is in the world; the copies' names come back as `bodies`",
     ),
-    CommandSpec::new("component.move_sketches", "Move Sketches to Component", move_sketches).icon("move").params("sketches: [ids or names], component"),
+    CommandSpec::new("component.paste_from_design", "Paste from Another Design", foreign::paste_from_design).icon("paste").params(
+        "component?: where it goes (default: the active one); component_path?: its placement (default: the active one, else its \
+         only one). Pastes what was copied in another design, at the same world coordinates: its bodies as imported bodies \
+         (no history) in one Import feature, or its components as independent copies with their history, appearances, \
+         joints and motion (as `component.paste_new`); the user parameters they use come along, renamed `w_2` when taken. \
+         A component that uses what isn't in it (another body, sketch or parameter) is refused, saying what. Returns \
+         `bodies` and `feature`, or the pasted components' `paths`",
+    ),
+    CommandSpec::new("component.move_sketches", "Move Sketches to Component", move_sketches)
+        .icon("move")
+        .params("sketches: [ids or names], component; the sketches keep their own coordinates (component.move_features keeps them where they are in the world), except that a sketch on an exactly attached face stays where it is on the face"),
+    CommandSpec::new(
+        "component.move_sketches.to_parts",
+        "Move Sketches to Their Parts",
+        crate::checked!("component.move_sketches.to_parts", sketches_to_parts::to_parts),
+    )
+    .icon("move")
+    .contract(&MOVE_SKETCHES_TO_PARTS_CONTRACT)
+    .output(output_schema_for::<MoveSketchesToPartsResult>)
+    .params(
+        "sketches?: [ids or names] (default: every sketch in the design) → moved, stayed, sketches [{sketch, name, component, part}], \
+         kept [{sketch, name, code, reason}]. Each sketch whose plane is an exactly attached face of a part's body goes to that part, as \
+         component.move_sketches moves it, and stays where it is on the face; the others (on an origin, construction or fixed \
+         plane, on a body of the design itself, or already in their part) stay where they are. One undo step",
+    ),
+    CommandSpec::new("component.move_features", "Move Features to Component", crate::checked!("component.move_features", move_features::move_features))
+        .icon("move")
+        .contract(&MOVE_FEATURES_CONTRACT)
+        .output(output_schema_for::<MoveFeaturesResult>)
+        .params(
+            "features: [ids or names] (sketches too); component?: where they go (default: the active one) → moved, component, bodies. \
+             Ids, names and timeline order stay; the geometry stays where it is in the world; the bodies the features made move with \
+             them. Refused while the timeline is rolled back, for a component placed more than once, and for a move that would break \
+             a feature (nothing changes)",
+        ),
+    CommandSpec::new("browser.reparent", "Move to Component", crate::checked!("browser.reparent", reparent_items::reparent_items))
+        .icon("move")
+        .contract(&REPARENT_ITEMS_CONTRACT)
+        .output(output_schema_for::<ReparentItemsResult>)
+        .params(
+            "Moves placements, features and bodies into a component. occurrences?: [ids or paths], features?: [ids or names], bodies?: [names], component?: where they go (default: the active \
+             one), component_path?: its placement → component, occurrences, features, bodies (what moved). One undo step, all or \
+             nothing: placements move first (taking what they hold), then features (taking the bodies they made), then the bodies \
+             still elsewhere (a body transfer, which leaves its features behind)",
+        ),
     CommandSpec::new("occurrence.copy", "Paste (Instance)", copy_occurrence).icon("copy")
         .params("component (or occurrence): what to place again; path?: validates selected occurrence; parent?: component (default: the same parent); translate?: [x,y,z]; in_place?: bool (default false: the selected transform within the parent; true: where the selected placement is in the world, translate in world axes; a parent placed more than once is placed by parent_path?, else the active placement, and every instance gets the copy). Copies the selected effective transform, including pending moves"),
     CommandSpec::new("component.paste_new", "Paste New", paste_new).icon("paste").params("component: independently copy its nested definition graph and history, materials and styles; occurrence?, path?: selected source placement; parent?: component the copy goes in (default: the source placement's; not the component or one inside it); in_place?, parent_path?: as occurrence.copy; translate?: [x,y,z]. Reassigned external bodies become base geometry; retained external links and omitted boundary joints are reported"),
@@ -81,6 +180,16 @@ pub static COMMANDS: &[CommandSpec] = &[
          point - at (with any chain of joints it is in that is joined to nothing grounded) and captures its position; other pending \
          moves stay pending. Shared definitions move in all placements. Grounded parts and parts joints hold to something fixed are refused (joint.reach moves those)",
     ),
+    CommandSpec::new("occurrence.align", "Align Occurrence", crate::checked!("occurrence.align", align::align))
+        .icon("align")
+        .contract(&ALIGN_CONTRACT)
+        .output(output_schema_for::<OccurrenceAlignResult>)
+        .params(
+            "occurrence?, occurrences?, path?, paths?: placements to move together; from | from_face | from_plane; to | to_face | to_plane; \
+             flip?: bool; capture?: bool (default true); move_grounded?: bool (default false). Moves only the chosen occurrence placements in \
+             world coordinates without changing shared component geometry; a placement inside a component placed more than once moves in \
+             every placement of it, and the reply's `shared` lists those paths",
+        ),
     CommandSpec::new("occurrence.ground", "Ground", ground).icon("ground").params("occurrence; grounded?: bool (default toggles)"),
     CommandSpec::new("occurrence.reparent", "Move to Component", reparent::reparent).icon("move").params(
         "occurrence; path?: exact placement; parent: component id or name (0 or \"root\" for the design); parent_path?: the parent's \
@@ -90,6 +199,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.capture_position", "Capture Position", capture).at("SOLID", "POSITION").icon("capture").params("keeps pending occurrence moves"),
     CommandSpec::new("component.revert_position", "Revert Position", revert).at("SOLID", "POSITION").icon("revert").noundo().params("occurrences?: [ids] (default all); drops selected pending occurrence moves"),
 ];
+
+const ALIGN_CONTRACT: TypedContract<OccurrenceAlignParams> = TypedContract::new();
 
 fn key(v: Option<&Value>) -> Option<String> {
     match v {
@@ -181,6 +292,30 @@ pub(super) fn new_component(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn from_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     transfer::from_bodies(s, p)
+}
+
+/// The app window opens the edit in place from what this returns; here the component and its
+/// placement are only checked.
+fn edit_in_place(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.edit_in_place";
+    let id = component(s, p, "component", cmd)?;
+    if !s.doc.links.contains_key(&id) {
+        return Err(bad(cmd, "that component is not linked to a design"));
+    }
+    let path = match p.get("path") {
+        Some(_) => serde_json::from_value::<Vec<u64>>(p["path"].clone()).map_err(|_| bad(cmd, "`path` must be occurrence ids"))?,
+        None => s.doc.first_path(id),
+    };
+    if s.occurrence_placement(&path).map_err(|e| bad(cmd, e.to_string()))?.component != id {
+        return Err(bad(cmd, "`path` is a placement of another component"));
+    }
+    serde_json::to_value(EditInPlaceResult { component: id, path, ..Default::default() }).map_err(|e| crate::EngineError::Other(e.to_string()))
+}
+
+/// The app window finishes an edit in place (it knows the part's tab and its assembly); here
+/// there is none, so nothing changes.
+fn finish_edit(_s: &mut Session, _p: &Value) -> Result<Value> {
+    serde_json::to_value(FinishEditResult::default()).map_err(|e| crate::EngineError::Other(e.to_string()))
 }
 
 fn activate(s: &mut Session, p: &Value) -> Result<Value> {
@@ -303,6 +438,9 @@ fn unlock(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let doc = s.doc_mut();
     doc.assembly.joints.retain(|j| !gone.contains(&j.id));
+    for group in &mut doc.timeline_groups {
+        group.joints.retain(|id| !gone.contains(id));
+    }
     doc.assembly.links.retain(|l| !gone.contains(&l.a) && !gone.contains(&l.b));
     s.visibility.hidden_joints.retain(|h| !gone.contains(h));
     Ok(json!({"component": id, "joints": gone}))
@@ -318,7 +456,7 @@ fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {
 fn copy_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.copy_bodies";
     let to = if p.get("component").is_some() { component(s, p, "component", cmd)? } else { s.active_component };
-    let names = string_list(p, "bodies");
+    let names = string_list(cmd, p, "bodies")?;
     if names.is_empty() || names.len() > 1000 {
         return Err(bad(cmd, "`bodies` must list 1…1000 bodies"));
     }
@@ -344,7 +482,7 @@ fn copy_bodies(s: &mut Session, p: &Value) -> Result<Value> {
         // The copy is made where its body is, so it starts out in the same place.
         scratch.active_component = from;
         scratch.active_occurrence_path = None;
-        let mut made = string_list(&scratch.execute("solid.move", &json!({"bodies": bodies, "copy": true}))?, "created_bodies");
+        let mut made = string_list(cmd, &scratch.execute("solid.move", &json!({"bodies": bodies, "copy": true}))?, "created_bodies")?;
         // Each copy is its body's name numbered as all copies are (`Cube (2)`, `Cube (2)(2)`): the
         // move names a copy of `Cube (2)` `Cube (2) (2)`.
         if made.len() == bodies.len() {
@@ -387,7 +525,7 @@ pub(crate) fn transfer_constructor_result(s: &mut Session, p: &Value) -> Result<
 fn move_sketches(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.move_sketches";
     let to = component(s, p, "component", cmd)?;
-    let keys = string_list(p, "sketches");
+    let keys = string_list(cmd, p, "sketches")?;
     let mut ids = Vec::new();
     for k in &keys {
         match s.doc.find_feature(k) {
@@ -399,6 +537,7 @@ fn move_sketches(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`sketches` must list sketches"));
     }
     for id in &ids {
+        sketches_to_parts::reauthor(s, *id, to, cmd)?;
         if let Some(f) = s.doc_mut().feature_mut(*id) {
             f.component = to;
         }
@@ -669,4 +808,22 @@ fn cycle_color(s: &mut Session, p: &Value) -> Result<Value> {
     c.identification_color = Some(next);
     s.colored_components = Some(());
     Ok(json!({"component": id, "color": next}))
+}
+
+/// Mark a component's features out of the History bar, or back in (#10393). The features still
+/// rebuild; only the History bar leaves them out.
+fn set_history_hidden(s: &mut Session, p: &Value, hidden: bool) -> Result<Value> {
+    let cmd = if hidden { "component.hide_history" } else { "component.show_history" };
+    let id = component(s, p, "component", cmd)?;
+    let c = s.doc_mut().components.iter_mut().find(|c| c.id == id).ok_or_else(|| bad(cmd, "choose a component below the design root"))?;
+    c.history_hidden = hidden;
+    Ok(json!({"component": id, "history_hidden": hidden}))
+}
+
+fn hide_history(s: &mut Session, p: &Value) -> Result<Value> {
+    set_history_hidden(s, p, true)
+}
+
+fn show_history(s: &mut Session, p: &Value) -> Result<Value> {
+    set_history_hidden(s, p, false)
 }

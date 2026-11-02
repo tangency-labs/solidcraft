@@ -111,7 +111,7 @@ mod tests {
             {"command": "solid.box", "params": {"length": 4, "width": 4, "height": 30, "operation": "join"}},
         ]});
         let mut s = crate::Session::default();
-        let (results, t) = s.run_script_timed(&script, true).unwrap();
+        let (results, t) = s.run_script_timed(&script, true, &mut |_, _| {}).unwrap();
         assert_eq!(results.len(), 2);
         let rows = t["timings"].as_array().unwrap();
         assert_eq!(rows.len(), 2);
@@ -124,12 +124,12 @@ mod tests {
         let total = t["total_ms"].as_f64().unwrap();
         assert!(total + 0.01 >= rows.iter().map(|r| r["ms"].as_f64().unwrap()).sum::<f64>(), "{t}");
         // Without profile: the same rows, no kernel split; the plain run is unchanged.
-        let (_, t) = crate::Session::default().run_script_timed(&script, false).unwrap();
+        let (_, t) = crate::Session::default().run_script_timed(&script, false, &mut |_, _| {}).unwrap();
         assert!(t["timings"][0].get("profile").is_none());
         assert_eq!(crate::Session::default().run_script(&script).unwrap().len(), 2);
         // A failing step still fails the run, with its step number.
         let bad = json!([{"command": "solid.box", "params": {"length": -1}}]);
-        let e = crate::Session::default().run_script_timed(&bad, true).unwrap_err().to_string();
+        let e = crate::Session::default().run_script_timed(&bad, true, &mut |_, _| {}).unwrap_err().to_string();
         assert!(e.contains("step 1"), "{e}");
     }
 }

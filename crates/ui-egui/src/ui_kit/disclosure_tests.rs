@@ -99,3 +99,39 @@ fn section_card_and_floating_window_folds_render_down_when_open_right_when_close
     }
     crate::theme::set_dark(previous);
 }
+
+#[test]
+fn strip_fold_and_restore_share_the_chevron_texture_with_opposite_orientation() {
+    for expanded in [true, false] {
+        let ctx = crate::fonts::test_context();
+        let mut rect = Rect::NOTHING;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            rect = strip_toggle(ui, expanded, "Shots").rect;
+        });
+        let icon =
+            Rect::from_min_size(rect.min, vec2(Tokens::get().control_height, Tokens::get().control_height)).shrink(Tokens::get().form_icon_inset);
+        let size = icon.width().round() as u32;
+        let expected = icon_svg::render(
+            icon_svg::doc_for(icon_svg::resolve("chevron").master, size).unwrap(),
+            icon_svg::Look { dark: true, accent: None, vision: crate::theme::vision(), palette: None },
+            size,
+        )
+        .unwrap();
+        let mut expected = ColorImage::from_rgba_premultiplied([size as usize, size as usize], expected.data());
+        for pixel in &mut expected.pixels {
+            *pixel = Tokens::get().form_dim.gamma_multiply(f32::from(pixel.a()) / 255.0);
+        }
+        let mut textures = std::collections::HashMap::new();
+        super::super::checks::tests::textures_update(&mut textures, &output.textures_delta);
+        let texture = textures.iter().find_map(|(id, image)| (image == &expected).then_some(*id)).expect("shared chevron artwork");
+        let primitives = ctx.tessellate(output.shapes.clone(), output.pixels_per_point);
+        assert!(
+            primitives.iter().any(|primitive| {
+                let egui::epaint::Primitive::Mesh(mesh) = &primitive.primitive else { return false };
+                mesh.texture_id == texture && mesh.vertices.iter().all(|vertex| ((vertex.pos.y < icon.center().y) == (vertex.uv.y < 0.5)) == expanded)
+            }),
+            "hide points down and restore points up"
+        );
+        output.textures_delta.clear();
+    }
+}

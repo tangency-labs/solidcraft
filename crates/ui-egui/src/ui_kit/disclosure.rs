@@ -1,6 +1,6 @@
 //! One disclosure drawing for sections, trees, cards and window folds.
 use crate::theme::Tokens;
-use egui::{Color32, Painter, Pos2, Rect, Response, Ui, vec2};
+use egui::{Color32, Painter, Pos2, Rect, Response, Ui, pos2, vec2};
 
 /// Content visible: down. Content hidden: right. No animation, matching kit sections.
 /// Tokens: form_section_icon_size; the caller supplies a semantic ink token.
@@ -42,6 +42,29 @@ fn disclosure_button_with_hover(ui: &mut Ui, rect: Rect, open: bool, label: &str
 /// Dropdowns always point down, independently of popup state. Preserve their existing size.
 pub(crate) fn dropdown_indicator(painter: &Painter, rect: Rect, ink: Color32) {
     crate::icons::paint_ink(painter, rect, "chevron", ink);
+}
+
+/// Bottom-strip fold action: down to hide, matching up chevron and title to restore.
+pub(crate) fn strip_toggle(ui: &mut Ui, expanded: bool, label: &str) -> Response {
+    let t = Tokens::get();
+    let title = (!expanded).then(|| ui.painter().layout_no_wrap(label.to_owned(), egui::FontId::proportional(t.font_label), t.form_ink));
+    let width = t.control_height + title.as_ref().map_or(0.0, |title| title.size().x + t.space_6);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, t.control_height), egui::Sense::click());
+    if response.hovered() {
+        ui.painter().rect_filled(rect, t.control_radius, t.hover);
+    }
+    let ink = if response.hovered() || response.has_focus() { t.form_ink } else { t.form_dim };
+    let icon = Rect::from_min_size(rect.min, vec2(t.control_height, t.control_height)).shrink(t.form_icon_inset);
+    if expanded {
+        crate::icons::paint_ink(ui.painter(), icon, "chevron", ink);
+    } else {
+        crate::icons::paint_ink_flipped(ui.painter(), icon, "chevron", ink);
+    }
+    if let Some(title) = title {
+        ui.painter().galley(pos2(rect.left() + t.control_height + t.space_6, rect.center().y - title.size().y / 2.0), title, t.form_ink);
+    }
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+    response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(label)
 }
 
 #[cfg(test)]

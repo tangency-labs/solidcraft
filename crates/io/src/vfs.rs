@@ -46,6 +46,13 @@ mod imp {
         touched();
         std::fs::metadata(path).map(|m| m.len())
     }
+    /// The file's modification time and size (`None`: not there, or the platform keeps no times).
+    pub fn stamp(path: &str) -> Option<(std::time::SystemTime, u64)> {
+        check(path).ok()?;
+        touched();
+        let meta = std::fs::metadata(path).ok()?;
+        Some((meta.modified().ok()?, meta.len()))
+    }
     pub fn exists(path: &str) -> bool {
         check(path).is_ok() && {
             touched();
@@ -108,6 +115,10 @@ mod imp {
     pub fn len(path: &str) -> Result<u64> {
         FILES.with(|f| f.borrow().get(path).map(|b| b.len() as u64)).ok_or_else(|| missing(path))
     }
+    /// Browser storage keeps no modification times.
+    pub fn stamp(_path: &str) -> Option<(std::time::SystemTime, u64)> {
+        None
+    }
     pub fn exists(path: &str) -> bool {
         FILES.with(|f| f.borrow().contains_key(path))
     }
@@ -141,14 +152,17 @@ pub use imp::*;
 /// refuses paths outside it; without one (the user's own file dialogs, the CLI) nothing changes.
 ///
 /// Two kinds of folder: those named on purpose (`--allow-path`, the app's own recovery folder),
-/// where everything is reachable, and the open design's folder, which counts only when
-/// [`design_folder_refusal`] has nothing against it and never reaches hidden files or folders
-/// (`.env`, `.git`) inside it.
+/// where everything is reachable, and design folders (the open design's, and those an agent
+/// opened or saved a design in, #7181), which count only when [`design_folder_refusal`] has
+/// nothing against them and never reach hidden files or folders (`.env`, `.git`) inside them.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PathScope {
     roots: Vec<std::path::PathBuf>,
     design_roots: Vec<std::path::PathBuf>,
 }
+
+/// At most this many design folders in a scope; the oldest gives way.
+pub const MAX_DESIGN_FOLDERS: usize = 16;
 
 thread_local! {
     static SCOPE: std::cell::RefCell<Option<PathScope>> = const { std::cell::RefCell::new(None) };
@@ -177,7 +191,7 @@ fn hidden(name: &std::ffi::OsStr) -> bool {
 /// in a hidden folder. So a design saved in home itself, in `/`, on a drive root or in a system
 /// folder never puts `~/.ssh`, `~/.bashrc` or anything else of the user's in reach.
 pub fn design_folder_refusal(dir: &std::path::Path) -> Option<String> {
-    design_folder_refusal_in(dir, home_dir().as_deref(), Some(&std::env::temp_dir()))
+    design_folder_refusal_in(dir, home_dir().as_deref(), Some(&temp_dir()))
 }
 
 /// [`design_folder_refusal`] with the home and temporary folders given (tests).
@@ -216,15 +230,44 @@ impl PathScope {
     }
 
     /// Also the folder of the design at `path` (the open design), when
-    /// [`design_folder_refusal`] allows it; hidden entries inside it stay out of reach.
-    pub fn with_design(mut self, path: Option<&str>) -> PathScope {
-        let dir = path
-            .map(std::path::Path::new)
-            .and_then(std::path::Path::parent)
-            .map(|d| if d.as_os_str().is_empty() { std::path::Path::new(".") } else { d });
-        if let Some(d) = dir.filter(|d| design_folder_refusal(d).is_none()).and_then(canonical)
+    /// [`design_folder_refusal`] allows it; hidden entries inside it stay out of reach. It is the
+    /// folder of the file as [`PathScope::check`] resolves it: a link to a design elsewhere puts
+    /// the folder it leads to in reach, never the folder the link lies in.
+    pub fn with_design(self, path: Option<&str>) -> PathScope {
+        let file = path.and_then(|p| resolve(std::path::Path::new(p)).ok());
+        match file.as_deref().and_then(std::path::Path::parent) {
+            Some(d) => self.with_design_root(d),
+            None => self,
+        }
+    }
+
+    /// Also the folder of `path`, a design file an agent opened or saved (#7181), on the same
+    /// terms as the open design's. On Windows its text is judged first, as [`PathScope::check`]
+    /// judges a path: resolving a UNC path would already make Windows connect out.
+    pub fn with_design_file(self, path: &str) -> PathScope {
+        if cfg!(windows) && windows_refusal(path).is_some() {
+            return self;
+        }
+        self.with_design(Some(path))
+    }
+
+    /// Also `dir`, a folder an agent opened or saved a design in (a request's `design_folders`),
+    /// on the same terms as the open design's folder, its text judged first on Windows.
+    pub fn with_design_folder(self, dir: &std::path::Path) -> PathScope {
+        if cfg!(windows) && windows_refusal(&dir.to_string_lossy()).is_some() {
+            return self;
+        }
+        self.with_design_root(dir)
+    }
+
+    fn with_design_root(mut self, dir: &std::path::Path) -> PathScope {
+        if design_folder_refusal(dir).is_none()
+            && let Some(d) = canonical(dir)
             && !self.design_roots.contains(&d)
         {
+            if self.design_roots.len() >= MAX_DESIGN_FOLDERS {
+                self.design_roots.remove(0);
+            }
             self.design_roots.push(d);
         }
         self
@@ -235,7 +278,7 @@ impl PathScope {
         &self.roots
     }
 
-    /// The open design's folder, when it counts.
+    /// The design folders that count.
     pub fn design_roots(&self) -> &[std::path::PathBuf] {
         &self.design_roots
     }
@@ -534,6 +577,12 @@ pub fn design_path_is_file(path: &str, design: Option<&str>) -> Option<bool> {
     design_path_refusal(path, design).is_none().then(|| is_file(path))
 }
 
+/// [`stamp`] of a path a design names; `None` when [`check_design_path`] refuses it, which asks
+/// nothing of the disk or the network.
+pub fn design_path_stamp(path: &str, design: Option<&str>) -> Option<(std::time::SystemTime, u64)> {
+    design_path_refusal(path, design).is_none().then(|| stamp(path)).flatten()
+}
+
 /// The checks the layers below ask before reading a file a design names (sketch text's font
 /// files). Done once; every session and agent scope does it.
 pub fn install_checks() {
@@ -585,9 +634,17 @@ pub fn long_names(path: &std::path::Path) -> std::path::PathBuf {
     }
 }
 
+/// The temporary folder in the browser. std has none there (`std::env::temp_dir` panics on
+/// wasm32-unknown-unknown), so it is a folder of the in-memory files: what is written in it stays
+/// in memory, neither stored nor downloaded (#7192).
+pub const BROWSER_TEMP: &str = "/tmp";
+
 /// The temporary folder spelled with long names ([`long_names`]), for the folders SolidCraft
-/// makes in it.
+/// makes in it; [`BROWSER_TEMP`] in the browser.
 pub fn temp_dir() -> std::path::PathBuf {
+    if cfg!(target_arch = "wasm32") {
+        return std::path::PathBuf::from(BROWSER_TEMP);
+    }
     long_names(&std::env::temp_dir())
 }
 
@@ -951,6 +1008,34 @@ mod tests {
         // A design saved at `/` or in a missing folder adds nothing.
         assert!(PathScope::new([]).with_design(Some("/part.solidcraft")).design_roots().is_empty());
         assert!(PathScope::new([]).with_design(Some(&s(base.join("missing/p.solidcraft")))).design_roots().is_empty());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Folders an agent opened or saved a design in (#7181) count as the open design's folder
+    /// does, hidden ones never, and a scope keeps at most `MAX_DESIGN_FOLDERS`: the oldest gives
+    /// way.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_scope_keeps_the_latest_design_folders() {
+        use super::{MAX_DESIGN_FOLDERS, PathScope};
+        let base = super::temp_dir().join(format!("solidcraft-vfs-design-folders-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let dirs: Vec<_> = (0..=MAX_DESIGN_FOLDERS).map(|i| base.join(format!("d{i}"))).collect();
+        for d in dirs.iter().chain([&base.join(".hidden")]) {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let scope = dirs
+            .iter()
+            .fold(PathScope::new([]), |s, d| s.with_design_folder(d))
+            .with_design_folder(&dirs[1])
+            .with_design_folder(&base.join(".hidden"));
+        let canon = |d: &std::path::Path| std::fs::canonicalize(d).unwrap();
+        assert_eq!(scope.design_roots().len(), MAX_DESIGN_FOLDERS, "{scope:?}");
+        assert_eq!(scope.design_roots().last(), Some(&canon(&dirs[MAX_DESIGN_FOLDERS])), "{scope:?}");
+        let file = |d: &std::path::Path| d.join("part.solidcraft").to_string_lossy().to_string();
+        assert!(scope.check(&file(&dirs[1])).is_ok());
+        assert!(scope.check(&file(&dirs[0])).is_err(), "the oldest gave way");
+        assert!(scope.check(&file(&base.join(".hidden"))).is_err(), "a hidden folder never counts");
         let _ = std::fs::remove_dir_all(&base);
     }
 

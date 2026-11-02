@@ -7,6 +7,10 @@ use solidcraft_engine::render::Camera;
 pub(crate) struct Layout {
     pub viewport: Rect,
     pub drawable: Rect,
+    /// The view without the panels (Browser, Assistant, workspace panels), but still counting
+    /// the floating controls as drawn over it: where a fit puts the middle of the model. The
+    /// compass and the navigation bar take room out of `drawable` without moving this.
+    pub middle: Rect,
     pub content: Rect,
     pub axis_view: Rect,
     pub navigation: Rect,
@@ -50,14 +54,9 @@ pub(crate) fn free_rect(view: Rect, obstacles: &[Rect]) -> Rect {
 }
 
 impl Layout {
-    /// The whole viewport as content, without the OK and Cancel pair.
-    #[cfg(test)]
-    pub fn new(viewport: Rect, docks: &[Rect], scale: f32, style: crate::prefs::NavigatorStyle, show_navigation_bar: bool) -> Self {
-        Self::with_content(viewport, viewport, docks, scale, style, egui::Vec2::ZERO, show_navigation_bar)
-    }
-
     /// `corner` is the size of the OK and Cancel pair (#6709; zero while it is not shown): it is
     /// held in the top right corner of the content, and the axis view moves down below it.
+    /// `navigation` is the measured rectangle of the navigation bar (nothing while it is hidden).
     pub fn with_content(
         viewport: Rect,
         content: Rect,
@@ -65,8 +64,49 @@ impl Layout {
         scale: f32,
         style: crate::prefs::NavigatorStyle,
         corner: egui::Vec2,
-        show_navigation_bar: bool,
+        navigation: Rect,
     ) -> Self {
+        Self::build(viewport, content, docks, scale, style, corner, navigation, None)
+    }
+
+    /// Render fits stay between the docked panels, including beneath a short Browser card.
+    pub fn product(
+        viewport: Rect,
+        content: Rect,
+        docks: &[Rect],
+        scale: f32,
+        style: crate::prefs::NavigatorStyle,
+        corner: egui::Vec2,
+        navigation: Rect,
+    ) -> Self {
+        Self::build(viewport, content, docks, scale, style, corner, navigation, Some(crate::frame::Side::Right))
+    }
+
+    /// Render compass at the free canvas edge beside a left-hand Inspector.
+    pub fn product_left(
+        viewport: Rect,
+        content: Rect,
+        docks: &[Rect],
+        scale: f32,
+        style: crate::prefs::NavigatorStyle,
+        corner: egui::Vec2,
+        navigation: Rect,
+    ) -> Self {
+        Self::build(viewport, content, docks, scale, style, corner, navigation, Some(crate::frame::Side::Left))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build(
+        viewport: Rect,
+        content: Rect,
+        docks: &[Rect],
+        scale: f32,
+        style: crate::prefs::NavigatorStyle,
+        corner: egui::Vec2,
+        navigation: Rect,
+        inspector_side: Option<crate::frame::Side>,
+    ) -> Self {
+        let fit_in_content = inspector_side.is_some();
         let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
         let mut obstacles: Vec<_> = docks.iter().take(14).copied().filter(|r| r.is_finite()).map(|r| r.expand(4.0)).collect();
         // Navigation is anchored to the viewport, never to transient dialog space.
@@ -81,43 +121,83 @@ impl Layout {
         } else {
             Rect::NOTHING
         };
+        // A navigation bar on the view's top edge (#8183) keeps the pair and the axis view below it.
+        let bar_on_top = navigation.is_positive() && navigation.center().y < available.center().y;
+        let below_bar = |rect: Rect| {
+            if bar_on_top && rect.intersect(navigation).is_positive() {
+                rect.translate(vec2(0.0, navigation.bottom() + CORNER_GAP - rect.top()))
+            } else {
+                rect
+            }
+        };
+        let confirm = below_bar(confirm);
         // The axis view starts below the pair while it is shown.
         let top = if confirm.is_positive() { confirm.bottom() + CORNER_GAP } else { available.top() };
-        let cube_size = super::viewport::axis_view_size(style);
+        let cube_size = if fit_in_content { 110.0 } else { super::viewport::axis_view_size(style) };
+        let axis_left = |size| {
+            if inspector_side == Some(crate::frame::Side::Left) { available.left() } else { available.right() - size }
+        };
+        let top = below_bar(Rect::from_min_size(pos2(axis_left(cube_size), top), vec2(cube_size, cube_size))).top();
         let mut axis_view = if available.width() >= cube_size && available.bottom() - top >= cube_size {
-            Rect::from_min_size(pos2(available.right() - cube_size, top), vec2(cube_size, cube_size))
+            Rect::from_min_size(pos2(axis_left(cube_size), top), vec2(cube_size, cube_size))
         } else {
             Rect::NOTHING
         };
-        let nav_space = content;
-        let columns = ((nav_space.width() - 10.0) / 30.0).floor().clamp(1.0, 10.0);
-        let nav_height = (10.0 / columns).ceil() * 30.0;
-        let navigation = if show_navigation_bar && nav_space.width() >= columns * 30.0 + 10.0 && nav_space.height() >= nav_height + 7.0 {
-            Rect::from_center_size(pos2(nav_space.center().x, nav_space.bottom() - nav_height * 0.5 - 7.0), vec2(columns * 30.0 + 10.0, nav_height))
-        } else {
-            Rect::NOTHING
-        };
+        if fit_in_content {
+            // A focus-exit or folded-dock chip may occupy the compass's corner.
+            for _ in 0..obstacles.len() {
+                let bottom = obstacles.iter().filter(|dock| axis_view.intersect(**dock).is_positive()).map(Rect::bottom).max_by(f32::total_cmp);
+                let Some(bottom) = bottom else { break };
+                axis_view = if available.bottom() - bottom >= cube_size {
+                    Rect::from_min_size(pos2(axis_view.left(), bottom), vec2(cube_size, cube_size))
+                } else {
+                    Rect::NOTHING
+                };
+            }
+        }
         // On tiny viewports keep the bottom controls usable rather than overlapping them.
         // This decision depends only on viewport size, never on an overlay.
         if axis_view.intersect(navigation).is_positive() {
             let compact = (navigation.top() - top - 4.0).min(cube_size);
             axis_view = if style == crate::prefs::NavigatorStyle::Cube && compact >= 96.0 {
-                Rect::from_min_size(pos2(content.right() - compact, top), vec2(compact, compact))
+                Rect::from_min_size(pos2(axis_left(compact), top), vec2(compact, compact))
             } else {
                 Rect::NOTHING
             };
         }
+        let within = if fit_in_content { content } else { viewport };
+        // Only the panels decide where the middle of the view is; the controls below are drawn
+        // over the view and would otherwise push the model into a corner of it.
+        let middle = free_rect(within, &obstacles);
+        let middle = if middle.is_positive() && middle.is_finite() { middle } else { within };
         for control in [axis_view, navigation, confirm] {
             if control.is_positive() {
                 obstacles.push(control);
             }
         }
-        let drawable = free_rect(viewport, &obstacles).shrink(16.0 / scale);
-        Self { viewport, drawable, content, axis_view, navigation, confirm }
+        let drawable = free_rect(within, &obstacles).shrink(16.0 / scale);
+        Self { viewport, drawable, middle, content, axis_view, navigation, confirm }
     }
 }
 
-pub(crate) fn fit_bounds(mut cam: Camera, bounds: &Aabb3, layout: &Layout, perspective: bool) -> Option<Camera> {
+/// Product cameras keep the authored lens while framing the free canvas.
+pub(crate) fn fit_product_bounds(cam: Camera, bounds: &Aabb3, layout: &Layout) -> Option<Camera> {
+    fit_bounds(cam, bounds, layout, cam.fov)
+}
+
+pub(crate) fn fit_bounds(cam: Camera, bounds: &Aabb3, layout: &Layout, fov: f64) -> Option<Camera> {
+    fit_bounds_sized(cam, bounds, layout, fov, 1.0)
+}
+
+/// [`fit_bounds`] with the model filling `share` (0.1 to 1) of the room between the panels, the
+/// compass and the navigation bar instead of all of it: the Navigation preference "Home and Fit
+/// size" (#10091). The model stays clear of what covers the view at every size.
+pub(crate) fn fit_bounds_sized(mut cam: Camera, bounds: &Aabb3, layout: &Layout, fov: f64, share: f64) -> Option<Camera> {
+    let perspective = fov > 0.0;
+    if !fov.is_finite() || !(0.0..std::f64::consts::PI).contains(&fov) {
+        return None;
+    }
+    let share = if share.is_finite() { share.clamp(0.1, 1.0) } else { 1.0 };
     if bounds.is_empty()
         || !bounds.min.is_finite()
         || !bounds.max.is_finite()
@@ -129,7 +209,7 @@ pub(crate) fn fit_bounds(mut cam: Camera, bounds: &Aabb3, layout: &Layout, persp
         return None;
     }
     let original_fov = cam.fov;
-    cam.fov = if perspective { 0.6 } else { 0.0 };
+    cam.fov = fov;
     let (r, u, b) = cam.basis();
     let centre = bounds.center();
     let mut hx: f64 = 0.0;
@@ -148,9 +228,26 @@ pub(crate) fn fit_bounds(mut cam: Camera, bounds: &Aabb3, layout: &Layout, persp
         depth = depth.max(d.dot(b).abs());
     }
     let h = f64::from(layout.viewport.height());
-    let hh = (hx * h / f64::from(layout.drawable.width())).max(hy * h / f64::from(layout.drawable.height())).max(0.5);
-    let offset = layout.drawable.center() - layout.viewport.center();
-    let tangent = if perspective { (0.3_f64).tan() } else { 0.4 };
+    let drawable = layout.drawable;
+    let hh = (hx * h / f64::from(drawable.width())).max(hy * h / f64::from(drawable.height())).max(0.5);
+    // Home and Fit put the model in the middle of the view. `drawable` decides its size and keeps
+    // it clear of every control; the room it leaves over in either direction moves the model
+    // towards `middle`, the middle of the view, instead of the middle of the gap between the
+    // compass and the navigation bar, which left it low and to one side of an otherwise empty view.
+    let size = vec2((hx * h / hh) as f32, (hy * h / hh) as f32).min(drawable.size());
+    let toward = |want: f32, lo: f32, hi: f32| if lo <= hi { want.clamp(lo, hi) } else { (lo + hi) * 0.5 };
+    let at = pos2(
+        toward(layout.middle.center().x, drawable.left() + size.x * 0.5, drawable.right() - size.x * 0.5),
+        toward(layout.middle.center().y, drawable.top() + size.y * 0.5, drawable.bottom() - size.y * 0.5),
+    );
+    let half = vec2((at.x - drawable.left()).min(drawable.right() - at.x), (at.y - drawable.top()).min(drawable.bottom() - at.y));
+    let room = Rect::from_center_size(at, half * 2.0);
+    if !room.is_positive() || !room.is_finite() {
+        return None;
+    }
+    let hh = (hx * h / f64::from(room.width())).max(hy * h / f64::from(room.height())).max(0.5) / share;
+    let offset = room.center() - layout.viewport.center();
+    let tangent = if perspective { (fov * 0.5).tan() } else { 0.4 };
     cam.distance = hh / tangent + if perspective { depth } else { 0.0 };
     // Offset the target so the model projects into the free rectangle in the original viewport.
     // Perspective needs a bounded correction because corners have different depths.
@@ -163,7 +260,7 @@ pub(crate) fn fit_bounds(mut cam: Camera, bounds: &Aabb3, layout: &Layout, persp
                 x.is_finite()
                     && y.is_finite()
                     && (0.0..=1.0).contains(&z)
-                    && layout.drawable.contains(pos2(layout.viewport.left() + x as f32, layout.viewport.top() + y as f32))
+                    && room.contains(pos2(layout.viewport.left() + x as f32, layout.viewport.top() + y as f32))
             })
         });
         if fits {

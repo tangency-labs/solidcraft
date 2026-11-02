@@ -132,6 +132,44 @@ fn face_join_of_a_step_import_keeps_all_32_neighbours_unchanged() {
     assert_eq!(targets, &["Wall"]);
 }
 
+/// #419: a face pick is resolved against the placed state: a leaf of an assembly that its
+/// joint swung away does not make the pick ambiguous, even though both leaves are built at
+/// the same local place. The pick lands on the leaf that is shown there.
+#[test]
+fn a_face_pick_on_an_assembly_leaf_is_resolved_where_the_leaf_is_shown() {
+    let mut s = Session::default();
+    for leaf in ["Leaf A", "Leaf B"] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": leaf}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 3, "corner": [0, 0, 0]}));
+        run(&mut s, "solid.cylinder", json!({"base": [0, 33, 4], "axis": [1, 0, 0], "radius": 4, "height": 40, "operation": "new"}));
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": "Leaf A:1", "grounded": true}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "revolute",
+            "name": "Hinge",
+            "a": {"occurrence": "Leaf A:1", "circle": [1, 37, 4]},
+            "b": {"occurrence": "Leaf B:1", "circle": [1, 37, 4]},
+            "limits": [["0 deg", "180 deg"]]
+        }),
+    );
+    run(&mut s, "joint.drive", json!({"joint": "Hinge", "value": 60}));
+    // Leaf B is swung 60° away, so the pick is on Leaf A's top face, where it is shown.
+    let result = run(
+        &mut s,
+        "solid.extrude",
+        json!({"face": [13.002403831300967, 9.849781594495369, 3.0], "distance": "10 mm", "direction": "positive", "operation": "join"}),
+    );
+    assert_eq!(result["changed_bodies"], json!(["Body1"]));
+    let state = s.model.state();
+    let volume = solidcraft_kernel::measure(&state.body("Body1").unwrap().body).unwrap().volume;
+    assert!((volume - 15_600.0).abs() < 1e-6, "{volume}");
+}
+
 /// #1349: a profile sketched on a body's face joins that body, and leaves alone a neighbour
 /// whose face it lies on too: a rib on the side of a bracket, drawn down over the motor the
 /// bracket sits on, welded the motor in (a join that ran for minutes on the imported motor and
@@ -197,4 +235,51 @@ fn join_extrude_to_another_body_joins_that_body() {
     assert_eq!(state.bodies.len(), 1, "the tool, the base and the target are one body");
     assert!((volume("Base") - 60_000.0).abs() < 1e-6, "the target took the tool: {}", volume("Base"));
     assert_eq!(state.body("Base").unwrap().body.lumps().map_or(1, |l| l.len()), 1, "one piece");
+}
+
+/// #8151: a design saved before a Join To Object also joined the body it runs to (format 39 and
+/// older) keeps that body apart when it opens, so its later features still find it, and an edit
+/// of the extrude keeps it apart too.
+#[test]
+fn join_extrude_to_another_body_saved_before_it_joined_keeps_that_body() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":40,"height":10,"body_name":"Base"}));
+    run(&mut s, "solid.box", json!({"corner":[0,0,40],"length":40,"width":40,"height":20,"body_name":"Target"}));
+    let sketch = run(&mut s, "sketch.create", json!({"plane":{"face":[20,20,10]}}))["sketch"].as_u64().unwrap();
+    let plane = s.model.state().sketch(sketch).unwrap().plane;
+    let at = |x: f64, y: f64| {
+        let p = plane.to_local(Vec3::new(x, y, 10.0));
+        json!([p.x, p.y])
+    };
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": at(10.0,10.0), "p1": at(30.0,30.0)}));
+    run(&mut s, "sketch.finish", json!({}));
+    // A feature after the extrude names the body it runs to, as the lid's sketch and moves did.
+    // Today's join leaves no such body to name, so the move is made first and put last below.
+    let moved = run(&mut s, "solid.move", json!({"bodies":["Target"],"translate":[0,0,5]}))["feature"].clone();
+    let extrude = run(&mut s, "solid.extrude", json!({"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"]}))["feature"].clone();
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let features = saved["features"].as_array_mut().unwrap();
+    let at_move = features.iter().position(|f| f["id"] == moved).unwrap();
+    let feature = features.remove(at_move);
+    features.push(feature);
+    saved["format"] = json!("solidcraft/39");
+    saved.as_object_mut().unwrap().remove("format_pending");
+    let mut old = Session::new(solidcraft_doc::format::read(&saved.to_string()).unwrap());
+    let check = |s: &Session| {
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+        let state = s.model.state();
+        let volume = |name: &str| solidcraft_kernel::measure(&state.body(name).unwrap().body).unwrap().volume;
+        assert_eq!(state.bodies.len(), 2, "the body the extrude runs to stays its own body");
+        assert!((volume("Base") - 28_000.0).abs() < 1e-6, "the base took the tool: {}", volume("Base"));
+        assert!((volume("Target") - 32_000.0).abs() < 1e-6, "the target is untouched: {}", volume("Target"));
+    };
+    check(&old);
+    run(
+        &mut old,
+        "timeline.redefine",
+        json!({"feature":extrude,"command":"solid.extrude","params":{"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"]}}),
+    );
+    check(&old);
+    // The design saves the choice and opens with it again.
+    check(&Session::new(solidcraft_doc::format::read(&old.doc.to_json()).unwrap()));
 }

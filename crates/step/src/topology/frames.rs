@@ -239,12 +239,27 @@ impl Builder<'_, '_> {
             let starts =
                 |all: bool| members.iter().filter(move |(fi, _, _)| all || spilling(fi)).filter_map(|(_, sign, e)| e.map(|e| sign * e[0][0]));
             let ends = members.iter().filter_map(|(_, sign, e)| e.map(|e| sign * e[0][1]));
-            let Some(phi) = starts(false).chain(starts(true)).chain(ends).find(|phi| fits(*phi)) else {
-                continue;
+            let turns: Vec<(usize, f64)> = match starts(false).chain(starts(true)).chain(ends).find(|phi| fits(*phi)) {
+                Some(phi) => members.iter().map(|(fi, sign, _)| (*fi, sign * phi)).collect(),
+                // No one turn fits them all: two whole turns whose seams are not a whole number
+                // of quarters apart (a ball's two halves, each with its seam from a different
+                // vertex to its pole). Each spilling face is turned on its own to start on a
+                // quarter line; the circles between them are then on one face's grid only, and
+                // their pcurves on the other are made as any other trim's. Left spilling, the
+                // face's form ran past one turn, and a trim across the form's end crossed the
+                // face (a torn ball on screen).
+                None => members
+                    .iter()
+                    .filter(|(fi, _, _)| spilling(fi))
+                    .filter_map(|(fi, _, e)| {
+                        let (f, e) = (self.faces.get(*fi)?, (*e)?);
+                        let fits_alone = |angle: &f64| quarters_turned(&f.surface, e, *angle, self.tol).is_some_and(|q| q <= 4);
+                        [e[0][0], e[0][1]].into_iter().find(fits_alone).map(|angle| (*fi, angle))
+                    })
+                    .collect(),
             };
-            for &(fi, sign, _) in &members {
+            for (fi, angle) in turns {
                 let Some(face) = self.faces.get_mut(fi) else { continue };
-                let angle = sign * phi;
                 let Some(surface) = brep::form::turned(&face.surface, angle) else { continue };
                 face.surface = surface;
                 if let Some(e) = face.extent.as_mut() {

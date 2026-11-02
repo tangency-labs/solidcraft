@@ -304,3 +304,63 @@ fn horizontal_bar_is_painted_only_for_actual_table_overflow() {
         }
     }
 }
+
+/// #8097: a stored file's long name takes the width the size and actions leave (no empty band
+/// on the right), and is only cut, with the full name on hover, when even that is too narrow.
+#[test]
+fn name_list_gives_the_name_the_width_the_other_cells_leave() {
+    let long = "a-rather-long-stored-design-name-for-the-bracket-v12.solidcraft";
+    for (width, cut) in [(900.0, false), (420.0, true)] {
+        let ctx = crate::fonts::test_context();
+        for _ in 0..4 {
+            harness::frame(&ctx, vec![], |ui| {
+                ui.set_width(width);
+                ui_kit::name_list(ui, "files", &["Name", "Size", "Actions"], "Empty", |list| {
+                    for name in [long, "b.step"] {
+                        list.row(name, |row| {
+                            row.name(name);
+                            row.cell(|ui| ui.label("12.3 KB"));
+                            row.cell(|ui| {
+                                ui_kit::button(ui, "Open", ui_kit::Button::Small);
+                                ui_kit::button(ui, "Save to computer…", ui_kit::Button::Small);
+                                ui_kit::button(ui, "Delete", ui_kit::Button::Small);
+                            });
+                        });
+                    }
+                });
+            });
+        }
+        let t = Tokens::get();
+        let row = scenario::rect_of(&format!("dialog:table:files:{long}")).unwrap();
+        let name = scenario::rect_of(&format!("dialog:table:files:{long}:cell:Name")).unwrap();
+        let size = scenario::rect_of(&format!("dialog:table:files:{long}:cell:Size")).unwrap();
+        let actions = scenario::rect_of(&format!("dialog:table:files:{long}:cell:Actions")).unwrap();
+        // The actions end at the row's inset: nothing is left over on the right.
+        assert!((row.right() - actions.right() - t.space_8).abs() <= 1.0, "{width}: row {row:?} actions {actions:?}");
+        // The size and actions are as wide as their content, not wider; the name has the rest.
+        assert!(size.width() < 80.0 && actions.width() < 320.0, "{width}: size {size:?} actions {actions:?}");
+        // ...and never narrower: the size is not cut and every action button keeps its label.
+        let ctx_label = |text: &str| ctx.fonts_mut(|f| f.layout_no_wrap(text.into(), egui::FontId::proportional(t.font_label), t.form_ink).size().x);
+        assert!(size.width() >= ctx_label("12.3 KB") * 0.8, "{width}: size {size:?}");
+        assert!(actions.width() >= ctx_label("OpenSave to computer…Delete"), "{width}: actions {actions:?}");
+        assert!((size.left() - name.right() - t.space_8).abs() <= 1.0);
+        assert_eq!(scenario::count_of(&format!("dialog:name:{long}:cut")), Some(f64::from(u8::from(cut))), "{width}: name {name:?}");
+        assert_eq!(scenario::count_of("dialog:name:b.step:cut"), Some(0.0));
+    }
+}
+
+/// #8563: names sort in natural order: numbers by value, letters without regard to case.
+#[test]
+fn natural_order_compares_numbers_by_value_and_ignores_case() {
+    let mut names = vec!["d10", "width", "d2", "Alpha", "d1", "alpha", "Beta", "d02", "x", "x1", "p99999999999999999999999", "p100"];
+    Sort::Ascending.apply(&mut names, |s| *s);
+    assert_eq!(names, ["Alpha", "alpha", "Beta", "d1", "d2", "d02", "d10", "p100", "p99999999999999999999999", "width", "x", "x1"]);
+    Sort::Descending.apply(&mut names, |s| *s);
+    assert_eq!(names, ["x1", "x", "width", "p99999999999999999999999", "p100", "d10", "d02", "d2", "d1", "Beta", "alpha", "Alpha"]);
+    let mut listed = vec!["d10", "d2", "d1"];
+    Sort::Listed.apply(&mut listed, |s| *s);
+    assert_eq!(listed, ["d10", "d2", "d1"], "the listed order is left alone");
+    assert_eq!(natural_cmp("", ""), std::cmp::Ordering::Equal);
+    assert_eq!(natural_cmp("", "a"), std::cmp::Ordering::Less);
+    assert_eq!([Sort::Listed.next(), Sort::Ascending.next(), Sort::Descending.next()], [Sort::Ascending, Sort::Descending, Sort::Listed]);
+}

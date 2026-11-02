@@ -250,3 +250,37 @@ fn an_explicit_redundant_constraint_keeps_the_dof_and_full_constraint() {
     assert_eq!((g["dof"].clone(), g["fully_constrained"].clone()), (json!(0), json!(true)), "{g}");
     assert!(report(&s).point_determined.iter().all(|d| *d));
 }
+
+/// An arc slot is drawn with nothing redundant, as a straight slot is: its caps are tangent to
+/// both sides, which already makes them equal (#8355). Its six degrees of freedom are the
+/// centre, radius, start, sweep and width, and the two caps stay equal when the width changes.
+#[test]
+fn an_arc_slot_is_drawn_without_a_redundant_constraint() {
+    for (cmd, p) in [
+        ("sketch.slot.arc_center", json!({"center": [30, 30], "start": [50, 30], "end": [30, 50], "width": 6})),
+        ("sketch.slot.arc_three_point", json!({"start": [30, 30], "through": [40, 35], "end": [50, 30], "width": 3})),
+    ] {
+        let mut s = new_sketch();
+        let out = run(&mut s, cmd, p);
+        let rep = report(&s);
+        assert!(rep.ok(), "{cmd}: {rep:?}");
+        assert_eq!((rep.dof, rep.redundant.clone()), (6, Vec::<String>::new()), "{cmd}: {rep:?}");
+        let id = |i: usize| out["curves"][i].as_str().unwrap().to_string();
+        let (end_cap, start_cap) = (id(1), id(3));
+        let r = run(&mut s, "sketch.dimension", json!({"entities": [end_cap], "type": "diameter", "value": 8}));
+        assert_ne!(r["redundant"], true, "{cmd}: {r}");
+        let sk = sketch(&s);
+        let radius = |c: &str| match sk.curves[sk.curve_index(c).unwrap()].kind {
+            solidcraft_sketch::CurveKind::Arc { c, a, .. } => sk.points[c].pos.dist(sk.points[a].pos),
+            _ => panic!("{c} is a cap arc"),
+        };
+        assert!(
+            (radius(&end_cap) - 4.0).abs() < 1e-7 && (radius(&start_cap) - 4.0).abs() < 1e-7,
+            "{cmd}: caps {} and {}",
+            radius(&end_cap),
+            radius(&start_cap)
+        );
+        let rep = report(&s);
+        assert_eq!((rep.dof, rep.redundant), (5, Vec::<String>::new()), "{cmd}");
+    }
+}

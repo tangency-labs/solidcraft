@@ -6,6 +6,17 @@ use egui::{FontId, Rect, Sense, Stroke, Ui, pos2, vec2};
 /// One mouse silhouette beside the actual mapping selector and binding legend.
 /// The figure is descriptive content, not an icon asset or an application viewport.
 pub(crate) fn settings_mouse_mapping(ui: &mut Ui, bindings: &[(Vec<String>, String)], mapping: impl FnOnce(&mut Ui)) {
+    if crate::prefs_search::suppress_chrome(ui) {
+        mapping(ui);
+        for (keys, action) in bindings.iter().take(10) {
+            let chord = keys.join(" ");
+            if crate::prefs_search::texts_hit(ui, &[action, &chord]) {
+                crate::prefs_search::reveal(ui);
+                settings_gesture(ui, keys, action);
+            }
+        }
+        return;
+    }
     let t = Tokens::get();
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = t.space_24 - t.space_2;
@@ -88,6 +99,9 @@ fn axis_columns(rect: Rect) -> [Rect; 5] {
 }
 
 pub(crate) fn settings_axis_header(ui: &mut Ui) {
+    if crate::prefs_search::suppress_chrome(ui) {
+        return;
+    }
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_24), Sense::hover());
     for (column, label) in axis_columns(rect).into_iter().zip(["prefs.axis", "prefs.live_input", "", "prefs.speed", "prefs.source"]) {
@@ -105,6 +119,17 @@ pub(crate) fn settings_axis_row(
     speed: impl FnOnce(&mut Ui),
     source: impl FnOnce(&mut Ui),
 ) {
+    if crate::prefs_search::querying(ui) && crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[name]) {
+        crate::prefs_search::run_hidden(ui, name, |ui| {
+            invert(ui);
+            speed(ui);
+            source(ui);
+        });
+        return;
+    }
+    if crate::prefs_search::querying(ui) {
+        crate::prefs_search::reveal(ui);
+    }
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.control_height + t.space_4), Sense::hover());
     t.secondary_hline(ui.painter(), rect.x_range(), rect.bottom(), t.dialog_rule);
@@ -163,6 +188,9 @@ pub(crate) fn live_axis_bar_in(ui: &Ui, live_rect: Rect, value: f32, dead_zone: 
 
 /// Compact per-axis gain uses a consistent two-decimal specimen and the real accepted range.
 pub(crate) fn settings_axis_gain(ui: &mut Ui, gain: &mut f32) -> egui::Response {
+    if crate::prefs_search::querying(ui) && (!ui.is_visible() || crate::prefs_search::suppress_chrome(ui)) {
+        return crate::prefs_search::hidden_response(ui);
+    }
     let response =
         ui.add(egui::DragValue::new(gain).range(0.0..=3.0).speed(0.05).suffix("×").fixed_decimals(2).custom_parser(crate::prefs::parse_number));
     response.widget_info(|| {

@@ -145,6 +145,8 @@ fn uniform_appearance_requires_acknowledged_projection_and_preserves_physical_da
     assert_eq!(s.doc.to_json(), before);
     let reply = s.execute("render.library.appearance.apply", &json!({"id":"SURF-001","variant":"uniform_opaque","bodies":["Target"]})).unwrap();
     assert_eq!(reply["engineering_properties_unchanged"], true);
+    // The middle of SURF-001's linear range, as sRGB codes.
+    assert_eq!(reply["appearance"]["color"], json!([196, 202, 207]));
     let after: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
     assert_eq!(after["user_materials"], before_value["user_materials"]);
     assert_eq!(s.undo.len(), undo + 1);

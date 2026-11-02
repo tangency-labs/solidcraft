@@ -7,6 +7,59 @@ use solidcraft_render::lighting::{
     environment::{EnvironmentResource, EnvironmentSource, SkyGradient},
 };
 use std::sync::Arc;
+
+pub(super) const CONTRACT: crate::schema::TypedContract<crate::schema::render::EnvironmentParams> = crate::schema::TypedContract::new();
+
+pub(super) fn set(s: &mut crate::Session, params: &serde_json::Value) -> Result<serde_json::Value> {
+    use solidcraft_doc::render_settings::{RenderJob, SkyEnvironment};
+    let command = "render.environment.set";
+    let input: crate::schema::render::EnvironmentParams = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    if input.rotation_deg.is_none() && input.intensity.is_none() {
+        return Err(bad(command, "rotation_deg or intensity is required"));
+    }
+    let rotation = input
+        .rotation_deg
+        .map(|degrees| {
+            if !degrees.is_finite() || degrees.abs() > 1e6 {
+                Err(bad(command, "rotation must be finite degrees within +/-1000000"))
+            } else {
+                Ok(((degrees + 180.0).rem_euclid(360.0) - 180.0).to_radians())
+            }
+        })
+        .transpose()?;
+    let mut setup = super::patched_settings(s, &input.name, &input.set, command)?;
+    let (angle, intensity, maximum) = match &mut setup.job {
+        Some(RenderJob::CpuRaytrace { options }) => {
+            if let Some(hdr) = &mut options.hdr {
+                (Some(&mut hdr.rotation_rad), &mut hdr.intensity, 64.0)
+            } else if let Some(environment) = &mut options.environment {
+                (None, &mut environment.intensity, 64.0)
+            } else {
+                return Err(bad(command, "choose an environment before editing it"));
+            }
+        }
+        Some(RenderJob::GpuPath { options, .. }) => {
+            if let Some(hdr) = &mut options.hdr {
+                (Some(&mut hdr.rotation_rad), &mut hdr.intensity, 100.0)
+            } else if let Some(SkyEnvironment::Sky { rotation_rad, intensity, .. }) = &mut options.environment {
+                (Some(rotation_rad), intensity, 100.0)
+            } else {
+                return Err(bad(command, "choose an environment before editing it"));
+            }
+        }
+        _ => return Err(bad(command, "environment editing requires a typed raytrace setup")),
+    };
+    if let Some(value) = input.intensity {
+        if !value.is_finite() || !(0.0..=maximum).contains(&value) {
+            return Err(bad(command, format!("intensity must be finite and within 0..{maximum}")));
+        }
+        *intensity = value;
+    }
+    if let Some(value) = rotation {
+        *angle.ok_or_else(|| bad(command, "a constant environment has no rotation"))? = value;
+    }
+    super::set_settings(s, &serde_json::json!({"name":input.name,"set":setup}))
+}
 fn unit() -> f64 {
     1.0
 }

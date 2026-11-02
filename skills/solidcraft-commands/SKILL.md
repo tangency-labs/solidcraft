@@ -14,9 +14,10 @@ User-visible behaviour is a command. The toolbar, dialogs, sketch tools, palette
 4. Give it input and output schemas: a contract and a reply type in `crates/engine/src/schema/`, registered with `checked!`, `.contract` and `.output`. A command should have them and a test warns without them; this will become required. `schema/unconverted.txt` only shrinks. How: `docs/book/src/dev/schemas.md`.
 5. Engine tests measure the result: volume, area, face/edge/vertex counts against values you can derive by hand. Where they go: `skills/solidcraft-tests/SKILL.md`.
 6. Add the label as `cmd.<command id>` in a pending locale file (`cargo xtask i18n --add-missing` lists what is missing); a test fails without it. See `skills/solidcraft-ui-text/SKILL.md`.
-7. Run `cargo xtask features` to see the generated `docs/features.md` change, but do not commit it: `main` regenerates it after each merge.
-8. If the command saves something new in a design, add a format file: `skills/solidcraft-file-formats/SKILL.md`.
-9. If it needs a dialog or panel: `skills/solidcraft-ui/SKILL.md`.
+7. A command the ribbon shows also needs help: `help.<command id>` (what it does, then when to use it) in the pending file, and its id in `DOCUMENTED` in `crates/ui-egui/src/command_help.rs`. A test fails without them.
+8. Run `cargo xtask features` to see the generated `docs/features.md` change, but do not commit it: `main` regenerates it after each merge.
+9. If the command saves something new in a design, add a format file: `skills/solidcraft-file-formats/SKILL.md`.
+10. If it needs a dialog or panel: `skills/solidcraft-ui/SKILL.md`.
 
 ## Programmatic calls never open dialogs
 `engine.execute` runs the JSON form. Only toolbar clicks (`ui.start`) start interactive tools and dialogs, which then run commands. A dialog is a front-end form that builds the parameters.

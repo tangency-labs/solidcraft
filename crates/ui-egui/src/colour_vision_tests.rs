@@ -259,6 +259,7 @@ fn groups(t: &Tokens) -> Vec<Group> {
                 ("sketch", t.sketch),
                 ("sketch_fixed", t.sketch_fixed),
                 ("sketch_locked", t.sketch_locked),
+                ("sketch_conflict", t.sketch_conflict),
                 ("sketch_projected", t.sketch_projected),
                 ("sketch_lost", t.sketch_lost),
                 ("sketch_construction", t.sketch_construction),
@@ -269,7 +270,12 @@ fn groups(t: &Tokens) -> Vec<Group> {
         ),
         group(
             "sketch points",
-            &[("sketch_point", t.sketch_point), ("sketch_point_free", t.sketch_point_free), ("sketch_locked", t.sketch_locked)],
+            &[
+                ("sketch_point", t.sketch_point),
+                ("sketch_point_free", t.sketch_point_free),
+                ("sketch_locked", t.sketch_locked),
+                ("sketch_conflict", t.sketch_conflict),
+            ],
             &[("viewport_top", t.viewport_top)],
         ),
         group(
@@ -280,6 +286,44 @@ fn groups(t: &Tokens) -> Vec<Group> {
         group("card text", &[("form_ink", t.form_ink), ("form_error", t.form_error)], &[("dialog_body", t.dialog_body)]),
         group("card hints", &[("form_dim", t.form_dim)], &[("dialog_body", t.dialog_body)]),
         group("card primary", &[("form_primary", t.form_primary)], &[("dialog_body", t.dialog_body)]),
+        group("navigation status", &[("form_primary", t.form_primary), ("warning", t.warning)], &[("dialog_body", t.dialog_body)]),
+        // NAVIGATOR_AXES draws all three axes on the figure ground; its filled tips have letters.
+        group(
+            "Preferences figure axes",
+            &[("figure_axis_x", t.figure_axis_x), ("figure_axis_y", t.figure_axis_y), ("figure_axis_z", t.figure_axis_z)],
+            &[("figure_ground", t.figure_ground)],
+        ),
+        group(
+            "Preferences axis letters",
+            &[("pref_on_accent", t.pref_on_accent)],
+            &[("figure_axis_x", t.figure_axis_x), ("figure_axis_y", t.figure_axis_y), ("figure_axis_z", t.figure_axis_z)],
+        ),
+        // Selection outlines and active geometry are drawn over the model and paper surfaces.
+        group(
+            "Preferences figure actions",
+            &[("figure_accent", t.figure_accent)],
+            &[
+                ("figure_ground", t.figure_ground),
+                ("figure_card", t.figure_card),
+                ("figure_face_top", t.figure_face_top),
+                ("figure_face_left", t.figure_face_left),
+                ("figure_face_right", t.figure_face_right),
+            ],
+        ),
+        // ASSEMBLY_MOVE and the orbit figures distinguish the active ring from the reference dot.
+        group("Preferences figure markers", &[("figure_accent", t.figure_accent), ("figure_reference", t.figure_reference)], &[]),
+        group("Preferences reference dots", &[("figure_reference", t.figure_reference)], &[("figure_ground", t.figure_ground)]),
+        // SKETCH_STATE_ICONS shows these three states together on top-face pads.
+        group(
+            "Preferences sketch states",
+            &[("figure_ok", t.figure_ok), ("figure_warn", t.figure_warn), ("figure_conflict", t.figure_conflict)],
+            &[("figure_ground", t.figure_ground), ("figure_face_top", t.figure_face_top)],
+        ),
+        // Badge text and selected-card marks use these exact pairs; WCAG ratios are also
+        // guarded by theme::tests::preferences_foreground_pairs_hold_small_text_contrast.
+        group("Preferences warning badge", &[("pref_note", t.pref_note)], &[("pref_note_fill", t.pref_note_fill)]),
+        group("Preferences success badge", &[("pref_ok", t.pref_ok)], &[("pref_ok_fill", t.pref_ok_fill)]),
+        group("Preferences selected marks", &[("pref_on_accent", t.pref_on_accent)], &[("figure_accent", t.figure_accent)]),
         // Validation is identified by its words as well as colour. Measure both the
         // ink and badge surfaces against the corresponding failure states.
         group(
@@ -292,9 +336,34 @@ fn groups(t: &Tokens) -> Vec<Group> {
         group("UI text", &[("error", t.error), ("warning", t.warning), ("text", t.text)], &[("panel", t.panel)]),
         // Every axis drawn: origin, view triad, navigation cube, Move gizmo… (one set, #976).
         group("axes", &[("axis_x", t.axis_x), ("axis_y", t.axis_y), ("axis_z", t.axis_z)], &[("viewport_top", t.viewport_top)]),
+        group(
+            "assembly Move",
+            &[("joint_manipulator", t.joint_manipulator), ("joint_axis", t.joint_axis)],
+            &[
+                ("viewport_top", t.viewport_top),
+                ("viewport_bottom", t.viewport_bottom),
+                ("body", t.body),
+                ("sel_face", t.sel_face),
+                ("body_selected", t.body_selected),
+            ],
+        ),
         group("bend lines", &[("bend_up", t.bend_up), ("bend_down", t.bend_down)], &[("viewport_top", t.viewport_top)]),
         group("curvature comb", &[("comb_envelope", t.comb_envelope), ("comb_teeth", t.comb_teeth)], &[("viewport_top", t.viewport_top)]),
         group("box select", &[("box_window", t.box_window), ("box_crossing", t.box_crossing)], &[("viewport_top", t.viewport_top)]),
+        // Sketch dimensions (#7861): their lines and values, driving and driven, apart from the
+        // curves they measure, the construction lines and the conflict red (each its own group:
+        // those three are measured against each other elsewhere).
+        group(
+            "sketch dimensions",
+            &[("dimension", t.dimension), ("dimension_driven", t.dimension_driven), ("sketch", t.sketch), ("sketch_fixed", t.sketch_fixed)],
+            &[("viewport_top", t.viewport_top), ("viewport_bottom", t.viewport_bottom)],
+        ),
+        group(
+            "dimensions and construction",
+            &[("dimension", t.dimension), ("dimension_driven", t.dimension_driven), ("sketch_construction", t.sketch_construction)],
+            &[],
+        ),
+        group("dimensions and conflicts", &[("dimension", t.dimension), ("dimension_driven", t.dimension_driven), ("error", t.error)], &[]),
         group(
             "selection",
             &[
@@ -369,6 +438,35 @@ fn groups(t: &Tokens) -> Vec<Group> {
         out.push(group(name, &[(key, fill)], &[("panel", t.panel)]));
     }
     out.push(group("dark pill text", &[("tab_on_fill_dark", t.tab_on_fill_dark)], &[("mesh_fill", t.mesh_fill)]));
+    // Miniature figures identify axes by labels and direction, reference points by
+    // position. Each ink must remain visible on its surfaces;
+    // the hues are not the only way to distinguish these marks from one another.
+    for (key, ink) in [
+        ("figure_line", t.figure_line),
+        ("figure_accent", t.figure_accent),
+        ("figure_reference", t.figure_reference),
+        ("figure_axis_x", t.figure_axis_x),
+        ("figure_axis_y", t.figure_axis_y),
+        ("figure_axis_z", t.figure_axis_z),
+        ("figure_ok", t.figure_ok),
+        ("figure_warn", t.figure_warn),
+    ] {
+        out.push(group(key, &[(key, ink)], &[("figure_ground", t.figure_ground), ("figure_card", t.figure_card)]));
+    }
+    // The static sketch-state illustration uses success and warm alert inks on
+    // the top face. Keep success apart from each alert; the two warm warning
+    // shades are not a colour-only legend for live solver states.
+    out.push(group(
+        "preferences sketch states",
+        &[("figure_ok", t.figure_ok), ("figure_warn", t.figure_warn)],
+        &[("figure_face_top", t.figure_face_top)],
+    ));
+    out.push(group("preferences sketch note", &[("figure_ok", t.figure_ok), ("pref_note", t.pref_note)], &[("figure_face_top", t.figure_face_top)]));
+    // Badge words identify the status; check the ink against its own fill, as for
+    // tab text above, rather than treating an ink and its tint as competing states.
+    out.push(group("preferences note", &[("pref_note", t.pref_note)], &[("pref_note_fill", t.pref_note_fill)]));
+    out.push(group("preferences success", &[("pref_ok", t.pref_ok)], &[("pref_ok_fill", t.pref_ok_fill)]));
+    out.push(group("preferences accent ink", &[("pref_on_accent", t.pref_on_accent)], &[("form_primary", t.form_primary)]));
     // The removed part of a cut preview is translucent over the body.
     if let Some(sel) = out.iter_mut().find(|g| g.name == "selection") {
         sel.members.push(("preview_cut", over(t.preview_cut, t.body)));
@@ -382,6 +480,20 @@ const SHADED: [&str; 2] = ["analysis.draft", "analysis.access"];
 /// Tokens no colour vision mode needs to keep apart, and why. A new token fails
 /// `every_token_is_measured_or_carries_no_meaning` until it is in a group above or here.
 const NO_MEANING: &[(&str, &str)] = &[
+    ("figure_white", "neutral axis label and highlight ink; letters identify the axes"),
+    ("figure_black", "neutral hatching and shadows; pattern and geometry carry the meaning"),
+    ("pref_well", "neutral well behind a labelled control or illustration"),
+    ("pref_disabled", "dimmed control ink; label and disabled interaction identify availability"),
+    ("figure_highlight", "neutral model lighting; face geometry and outlines identify the model, not the highlight's hue"),
+    ("figure_shadow", "neutral model shading, never an axis, selection or status category"),
+    ("nav_hover", "neutral hover surface; placement and pointer feedback identify the control"),
+    ("nav_press", "neutral pressed/open surface; interaction and menu presence identify the state"),
+    ("nav_dim", "neutral secondary ink; the Later label identifies the unavailable option"),
+    ("nav_field", "neutral control surface, not a semantic category"),
+    ("nav_tip", "neutral tooltip surface, not a semantic category"),
+    ("nav_tip_ink", "neutral tooltip text; words identify the control and value"),
+    ("nav_tip_key_border", "neutral keycap outline; its key label carries the meaning"),
+    ("nav_viewport", "neutral preview-stage background, not model or status colour"),
     ("borders.primary", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
     ("borders.secondary", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
     ("borders.secondary_dotted", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
@@ -392,6 +504,7 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("borders.bevel", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
     ("icon_palette", "optional SVG palette; actual roles and theme contrast are guarded in icon and theme tests"),
     ("file_dim", "File view secondary text, WCAG guarded in theme tests"),
+    ("form_primary_fill", "ground under a filled primary field; form_primary carries the meaning, contrast guarded in theme tests"),
     ("file_recovery_well", "decorative recovery icon ground"),
     ("file_action_height", "layout dimension"),
     ("file_back_height", "layout dimension"),
@@ -447,6 +560,7 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("font_compass", "layout dimension"),
     ("font_subtitle", "layout dimension"),
     ("font_intro", "layout dimension"),
+    ("font_page_heading", "layout dimension"),
     ("font_article_heading", "layout dimension"),
     ("font_title", "layout dimension"),
     ("font_display", "layout dimension"),
@@ -524,8 +638,6 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("grid", "the grid"),
     ("grid_major", "the grid"),
     ("profile_fill", "a closed profile's tint"),
-    ("dimension", "dimension text"),
-    ("dimension_driven", "dimension text, dimmed"),
     ("glyph_bg", "a constraint glyph's ground"),
     ("glyph_edge", "a constraint glyph's edge"),
     // The navigation cube: labelled faces.
@@ -738,6 +850,12 @@ fn each_mode_changes_only_its_table() {
     let red_green_both = [
         "axis_x",
         "axis_y",
+        "figure_axis_x",
+        "figure_axis_y",
+        "figure_axis_z",
+        "figure_ok",
+        "figure_warn",
+        "figure_conflict",
         "analysis.draft",
         "analysis.access",
         "analysis.hatch",
@@ -749,6 +867,7 @@ fn each_mode_changes_only_its_table() {
         "sketch_accent",
         "preview_sketch",
         "form_success_fill",
+        "sketch_conflict",
     ];
     let mut red_green_light =
         red_green_both.into_iter().filter(|name| !["surface_accent", "mesh_accent", "form_accent"].contains(name)).collect::<Vec<_>>();
@@ -762,6 +881,12 @@ fn each_mode_changes_only_its_table() {
             false,
             ColorVision::Tritan,
             set(&[
+                "figure_axis_x",
+                "figure_axis_y",
+                "figure_axis_z",
+                "figure_ok",
+                "figure_warn",
+                "figure_conflict",
                 "surface_accent",
                 "mesh_accent",
                 "form_accent",
@@ -771,6 +896,7 @@ fn each_mode_changes_only_its_table() {
                 "construction_geom",
                 "glyph_text",
                 "preview_sketch",
+                "sketch_conflict",
                 "analysis.hatch",
             ]),
         ),
@@ -778,6 +904,12 @@ fn each_mode_changes_only_its_table() {
             true,
             ColorVision::Tritan,
             set(&[
+                "figure_axis_x",
+                "figure_axis_y",
+                "figure_axis_z",
+                "figure_ok",
+                "figure_warn",
+                "figure_conflict",
                 "surface_accent",
                 "mesh_accent",
                 "form_accent",
@@ -787,6 +919,7 @@ fn each_mode_changes_only_its_table() {
                 "construction_geom",
                 "glyph_text",
                 "preview_sketch",
+                "sketch_conflict",
                 "analysis.hatch",
             ]),
         ),
@@ -854,6 +987,51 @@ fn validation_badges_are_distinct_and_readable_in_every_mode() {
             if contrast < 4.5 {
                 failures.push(format!("{mode:?} dark={dark} success contrast: {contrast:.2}"));
             }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Every shipped theme draws sketch dimensions in a colour of their own (#7861): apart from the
+/// sketch curves, construction lines, the conflict red and the hover and selection accent, and
+/// readable on the viewport — a driving value as text, a driven one as a dimmed line. The
+/// two-colour themes (1-bit) tell them apart by shape alone.
+#[test]
+fn shipped_themes_draw_dimensions_in_their_own_readable_colour() {
+    use crate::theme::contrast_ratio;
+    use crate::theme_files::{builtin, is_two_colour, resolve};
+    let themes = [("light", Tokens::light()), ("dark", Tokens::dark())]
+        .into_iter()
+        .map(|(id, t)| (id.to_string(), t))
+        .chain(builtin().iter().filter(|f| !is_two_colour(&f.id)).map(|f| (f.id.clone(), resolve(f))));
+    let mut failures = Vec::new();
+    for (id, t) in themes {
+        for (name, dim, min_contrast) in [("dimension", t.dimension, 4.5), ("dimension_driven", t.dimension_driven, 3.0)] {
+            for (ground, g) in [("viewport_top", t.viewport_top), ("viewport_bottom", t.viewport_bottom)] {
+                let c = contrast_ratio(dim, g);
+                if c < min_contrast {
+                    failures.push(format!("{id}: {name} on {ground}: contrast {c:.2}"));
+                }
+            }
+            let others = [
+                ("sketch", t.sketch),
+                ("sketch_fixed", t.sketch_fixed),
+                ("sketch_locked", t.sketch_locked),
+                ("sketch_projected", t.sketch_projected),
+                ("sketch_construction", t.sketch_construction),
+                ("error", t.error),
+                ("accent", t.accent),
+            ];
+            for (other, o) in others {
+                let d = normal(rgb(dim), rgb(o));
+                if d < FLOOR {
+                    failures.push(format!("{id}: {name} vs {other}: {d:.1}"));
+                }
+            }
+        }
+        let d = normal(rgb(t.dimension), rgb(t.dimension_driven));
+        if d < FLOOR {
+            failures.push(format!("{id}: dimension vs dimension_driven: {d:.1}"));
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
@@ -970,6 +1148,92 @@ fn ui_prefs_sets_each_mode_and_refuses_anything_else() {
 /// Random values (fixed seed): strings near the four ids and far from them, numbers, nesting.
 /// `ui.prefs` takes exactly the four ids and refuses the rest without a change; saved
 /// preferences load every value, unknown ones as Off. Nothing panics.
+/// The section previews the mode being chosen (#7152): the sample's lines take that mode's
+/// colours. The status chips beside it keep theirs in every mode.
+#[test]
+fn the_sample_previews_the_mode_being_chosen() {
+    for base in ["light", "dark"] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        crate::prefs::control(&mut h.app, &json!({"theme":base,"language":"en","open":"Interface"})).unwrap();
+        h.frames(3);
+        for mode in ColorVision::ALL {
+            let handle = format!("prefs:color_vision:{}", mode.id());
+            crate::prefs::reveal_preference(&mut h, &handle);
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.preferences.color_vision, mode, "the real Appearance segments edit the preference");
+            crate::prefs::reveal_preference(&mut h, "prefs:colour_vision_samples");
+            let (want, off) = (Tokens::get_in(mode), Tokens::get_in(ColorVision::Off));
+            if mode != ColorVision::Off {
+                assert!(
+                    want.axis_x != off.axis_x || want.sketch_locked != off.sketch_locked,
+                    "{base} {mode:?}: axis X or locked sketch geometry must differ from Off"
+                );
+            }
+            // The shared painter clips each figure to its fitted cell. Isolate those actual
+            // page shapes by that clip, preserving their order and geometry. Cropping the whole
+            // page still tessellates unrelated atlas content, which requires its real textures.
+            // Rounded vector shapes also use atlas-backed discs, so retain the rendered page's atlas.
+            let textures = std::collections::HashMap::from([(egui::TextureId::default(), h.ctx.fonts(|fonts| fonts.image()))]);
+            let images: Vec<_> = (0..6)
+                .map(|i| {
+                    let cell = crate::scenario::rect_of(&format!("prefs:colour_vision_sample:{i}")).unwrap();
+                    let artwork: Vec<_> = h
+                        .shapes
+                        .iter()
+                        .filter(|shape| shape.clip_rect.min.distance(cell.min) < 0.01 && shape.clip_rect.max.distance(cell.max) < 0.01)
+                        .cloned()
+                        .collect();
+                    assert!(!artwork.is_empty(), "{base} {mode:?}: sample {i} has actual cell-clipped artwork");
+                    crate::ui_kit::raster_test_shapes(&h.ctx, artwork, 1.0, cell, &textures)
+                })
+                .collect();
+            let near = |actual: [u8; 4], expected: egui::Color32| actual.into_iter().zip(expected.to_array()).all(|(a, b)| a.abs_diff(b) <= 2);
+            let pixel = |i: usize, x, y, colour| {
+                assert!(
+                    near(images[i].get_pixel(x, y).0, colour),
+                    "{base} {mode:?}: sample {i} pixel {x},{y} must be {colour:?}, got {:?}",
+                    images[i].get_pixel(x, y)
+                );
+            };
+            pixel(0, 42, 22, want.sketch_locked);
+            pixel(1, 42, 22, want.sketch_projected);
+            pixel(2, 40, 34, want.axis_x);
+            pixel(2, 14, 20, want.axis_y);
+            // The canonical bends are dashed. Require visible runs in each semantic colour.
+            for (colour, y) in [(want.bend_up, 14), (want.bend_down, 30)] {
+                assert!((12..72).any(|x| near(images[3].get_pixel(x, y).0, colour)), "{base} {mode:?}: bend stroke {colour:?}");
+            }
+            pixel(4, 18, 18, crate::theme::srgb(want.analysis.draft[0]));
+            pixel(4, 40, 18, crate::theme::srgb(want.analysis.draft[1]));
+            pixel(4, 2, 2, want.figure_ground);
+            let negative = crate::theme::srgb(want.analysis.draft[2]);
+            let hatch = crate::theme::srgb(want.analysis.draft[2].map(|c| c * 0.6));
+            let draft = &images[4];
+            let band: Vec<_> = (54..74).flat_map(|x| (24..34).map(move |y| draft.get_pixel(x, y).0)).collect();
+            assert!(band.iter().any(|p| near(*p, negative)), "{base} {mode:?}: Draft retains its negative analysis colour");
+            assert!(band.iter().any(|p| near(*p, hatch)), "{base} {mode:?}: Draft hatching is visible, including Off");
+            // Both diagonals must be visible inside the error box; a blank rounded box fails.
+            for (x, y) in [(38, 19), (46, 18), (38, 25), (46, 25)] {
+                pixel(5, x, y, want.error);
+            }
+            pixel(5, 24, 22, want.timeline_item_error);
+            let area = crate::scenario::rect_of("prefs:colour_vision_samples").unwrap();
+            let page = crate::scenario::rect_of("prefs:page_body").unwrap();
+            assert!(page.expand(1.0).contains_rect(area));
+            for i in 0..6 {
+                let cell = crate::scenario::rect_of(&format!("prefs:colour_vision_sample:{i}")).unwrap();
+                assert!(area.contains_rect(cell));
+                assert_eq!(cell.size(), egui::vec2(84.0, 44.0));
+            }
+            assert_eq!(crate::scenario::rects("prefs:status_sample:").len(), 4);
+        }
+        crate::prefs::control(&mut h.app, &json!({"button":"cancel"})).unwrap();
+        assert_eq!(h.app.preferences.color_vision, ColorVision::Off);
+    }
+}
+
 #[test]
 fn random_values_never_panic_and_only_the_four_ids_are_taken() {
     fn value(next: &mut impl FnMut() -> u64, depth: u32) -> serde_json::Value {

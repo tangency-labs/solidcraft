@@ -34,7 +34,7 @@ fn body_names(s: &Session, p: &Value, cmd: &str, allow_boundary: bool) -> Result
     if p.get("bodies").and_then(Value::as_array).is_none_or(|names| names.iter().any(|name| !name.is_string())) {
         return Err(bad(cmd, "bodies must be an array of body names"));
     }
-    let names = string_list(p, "bodies");
+    let names = string_list(cmd, p, "bodies")?;
     if names.is_empty() || names.len() > 1000 || names.iter().collect::<BTreeSet<_>>().len() != names.len() {
         return Err(bad(cmd, "bodies must list 1..1000 distinct existing definition bodies"));
     }

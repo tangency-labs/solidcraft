@@ -8,11 +8,30 @@ until you review and submit it, and the design is not part of the draft.
 
 To send a report:
 
-1. Review the title, report text and screenshot in SolidCraft, then click **Open GitHub draft**.
-   For long reports, SolidCraft copies the text to your clipboard; paste it into the GitHub draft.
+1. Review the title, report text and screenshot in SolidCraft, then click **Open GitHub issue form**
+   (**Open GitHub** in narrow windows). SolidCraft copies the report text to your clipboard and opens
+   GitHub. Short reports are also filled in through the URL; paste longer reports into the GitHub draft.
 2. Attach the screenshot if you want to share it: use **Copy screenshot** and paste it into
    GitHub, or use **Save screenshot…** and upload the PNG. Screenshots are not attached automatically.
 3. Click **Submit new issue** on GitHub to publish the report. Opening the draft alone does not send it.
+
+### Submission and fallback behavior
+
+The same reviewed report dialog is used by **Report a bug**, command errors and crash reports.
+Desktop and web builds submit through GitHub in the browser; the dialog has no direct submission
+API and needs no GitHub token in SolidCraft. It explains this beside the public-report/account notice.
+Sign in with a GitHub account to publish the report.
+
+**Copy report** and **Open GitHub issue form** remain available without credentials or a connection.
+Copying works even before the required description is filled in; opening GitHub with an empty
+description instead focuses that field and explains what is missing. Neither action closes the draft.
+On narrow windows the footer uses **Open GitHub** and **Copy report**; close the draft with the header's
+close button. The two export actions must remain visible at high UI zoom.
+
+If offline, a browser launch is blocked, or GitHub cannot be reached, the dialog tells the user to
+copy the report and keep the text to submit later. Opening GitHub requests a clipboard copy even for
+short reports. SolidCraft cannot confirm browser launch, clipboard delivery or submission; the draft
+stays editable for retrying. Copying or opening a report does not modify the design or its undo history.
 
 ## Where they are
 
@@ -40,7 +59,7 @@ All of these read the same folder:
 
 **Reproduce:** `solidcraft-cli crashes replay <id>` opens the report's design, runs its
 commands, and reports whether the same internal error happens again (same place and message).
-Without the CLI, run `solidcraft-cli run <report>/replay.json --in <report>/design.solidcraft`.
+Without the CLI, run `solidcraft-cli run <report>/replay.json --in <report>/design.sc`.
 A fixed crash turns into a regression test with the same two files.
 
 **Check that reporting works:** with `SOLIDCRAFT_CRASH_TEST=1` set for the app, the command
@@ -87,7 +106,7 @@ A folder `crashes/<YYYYMMDD-HHMMSS>-<signature>/`:
       The process still ends with the signal, so macOS also writes its own crash report, with every
       thread's stack: `~/Library/Logs/DiagnosticReports/solidcraft-<date>.ips` (Console ▸ Crash
       Reports), whose `pid` is the one in `native`.
-- `design.solidcraft`: the design the replay starts from
+- `design.sc`: the design the replay starts from
 - `replay.json`: `{"commands": [{command, params}, …]}`
 - `minidump.dmp` (Windows, native crashes; on macOS, see the system's own report above): the threads' stacks and the loaded modules at the
   crash, for WinDbg or Visual Studio. It holds stack memory only, not the design, but it stays

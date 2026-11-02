@@ -91,3 +91,43 @@ fn the_viewport_menu_looks_at_a_plane_under_the_cursor() {
     let normal = solidcraft_engine::geom::Plane::named("XZ").unwrap().normal();
     assert!((h.app.cam.back().cross(normal)).len() < 1e-6, "facing the plane along its normal: {:?}", h.app.cam.back());
 }
+
+/// #9029: Look At on a non-horizontal sketch squares its axes to the screen (not only faces it).
+#[test]
+fn look_at_squares_a_vertical_sketch_to_the_screen() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.look_at_anim = false;
+    h.app.run("sketch.create", json!({"plane": "XZ", "name": "Wall"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]})).unwrap();
+    crate::dialogs::look_at_sketch(&mut h.app);
+    let plane = crate::open_meshing::session_world(&h.app.session).sketch(h.app.session.active_sketch.unwrap()).unwrap().plane;
+    let (right, up, back) = h.app.cam.basis();
+    assert!((back.cross(plane.normal())).len() < 1e-6, "facing the sketch: back={back:?} n={:?}", plane.normal());
+    assert!(right.dot(plane.x).abs() > 0.999, "sketch x to the right: right={right:?} x={:?}", plane.x);
+    assert!(up.dot(plane.y) > 0.999, "sketch y upright: up={up:?} y={:?}", plane.y);
+}
+
+/// #9029: editing a sketch after its component is turned faces the world plane and squares axes.
+#[test]
+fn editing_a_sketch_in_a_turned_component_faces_its_world_plane() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.look_at_anim = false;
+    h.app.run("component.create", json!({"name": "Part"})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Face"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let occ = h.app.session.doc.occurrences.iter().find(|o| h.app.session.doc.components.iter().any(|c| c.id == o.component && c.name == "Part"));
+    let Some(occ) = occ.cloned() else { panic!("Part occurrence") };
+    h.app.run("occurrence.ground", json!({"occurrence": occ.id, "grounded": false})).unwrap();
+    // Stand the part up: 90° about X so its XY faces world +Y.
+    h.app.run("occurrence.move", json!({"occurrence": occ.id, "axis": [1, 0, 0], "angle": "90 deg", "capture": true})).unwrap();
+    let id = h.app.session.doc.find_feature("Face").map(|f| f.id).unwrap();
+    h.app.edit_sketch(id);
+    let plane = crate::open_meshing::session_world(&h.app.session).sketch(id).unwrap().plane;
+    let (right, up, back) = h.app.cam.basis();
+    assert!((back.cross(plane.normal())).len() < 1e-5, "facing world plane: back={back:?} n={:?}", plane.normal());
+    assert!(right.dot(plane.x).abs() > 0.99, "x right: {right:?} vs {:?}", plane.x);
+    assert!(up.dot(plane.y) > 0.99, "y up: {up:?} vs {:?}", plane.y);
+}

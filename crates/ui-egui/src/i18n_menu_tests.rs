@@ -33,7 +33,18 @@ fn take(app: &SolveApp, out: &mut BTreeSet<String>) {
     let components: Vec<u64> = app.session.doc.components.iter().map(|c| c.id).collect();
     let groups: Vec<u64> = app.session.doc.browser_groups.iter().map(|g| g.id).collect();
 
-    for target in [Target::Viewport, Target::Origin, Target::Units, Target::Toolbar, Target::Workspace, Target::NamedViews] {
+    for target in [
+        Target::Viewport,
+        Target::Origin,
+        Target::Units,
+        Target::Toolbar,
+        Target::HistoryControls,
+        Target::Workspace,
+        Target::NamedViews,
+        Target::InsertDesign,
+        Target::VisualStyle,
+        Target::ViewTool,
+    ] {
         take_items(out, &context_menu::items(app, &target));
     }
     for name in &bodies {
@@ -95,7 +106,10 @@ fn every_menu_label_is_in_the_english_catalog() {
     // Linked components offer source-file actions absent from the sample design.
     let linked = app.session.execute("component.create", &json!({"name": "Linked part"})).expect("linked component");
     let component = linked["component"].as_u64().expect("component id");
-    app.session.doc_mut().links.insert(component, solidcraft_engine::doc::DesignLink { path: "part.solidcraft".into(), feature: 0 });
+    app.session
+        .doc_mut()
+        .links
+        .insert(component, solidcraft_engine::doc::DesignLink { path: "part.solidcraft".into(), feature: 0, ..Default::default() });
     take(&app, &mut seen);
     assert!(seen.contains("Open Linked Design"));
 

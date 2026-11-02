@@ -28,6 +28,56 @@ fn point(h: &Harness, id: &str) -> Vec2 {
 }
 
 #[test]
+fn concentric_accepts_a_circle_and_point_before_or_after_starting_the_tool() {
+    for preselect in [false, true] {
+        for reverse in [false, true] {
+            for origin in [false, true] {
+                let mut h = Harness::new();
+                h.app.preferences.look_at_anim = false;
+                h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+                h.app.run("sketch.circle.center", json!({"center": [30, 20], "radius": 8, "id": "c1"})).unwrap();
+                let target = if origin {
+                    [0, 0]
+                } else {
+                    h.app.run("sketch.point", json!({"point": [-10, -15], "id": "target"})).unwrap();
+                    h.app.run("sketch.constraint.fix", json!({"entity": "target"})).unwrap();
+                    [-10, -15]
+                };
+                h.app.cam.distance = 200.0;
+                h.settle();
+                let before = h.app.session.doc.to_json();
+                if !preselect {
+                    h.step(&json!({"start": "sketch.constraint.concentric"})).unwrap();
+                }
+                let picks = if reverse { [target, [38, 20]] } else { [[38, 20], target] };
+                for (index, xy) in picks.into_iter().enumerate() {
+                    h.step(&json!({"click": {"sketch": xy}, "shift": preselect && index == 1})).unwrap();
+                }
+                if preselect {
+                    h.step(&json!({"start": "sketch.constraint.concentric"})).unwrap();
+                    assert!(h.app.session.selection.is_empty(), "the preselected pair was consumed");
+                }
+                h.step(&json!({"expect": {"errors": 0}})).unwrap();
+                let expected = Vec2::new(f64::from(target[0]), f64::from(target[1]));
+                assert!(point(&h, "c1.center").dist(expected) < 1e-6, "preselect={preselect}, reverse={reverse}, origin={origin}");
+                h.app.run("edit.undo", json!({})).unwrap();
+                assert_eq!(h.app.session.doc.to_json(), before);
+            }
+        }
+    }
+}
+
+#[test]
+fn the_context_menu_offers_concentric_for_a_circle_and_the_origin() {
+    let mut h = square_with_circle();
+    h.app.session.selection = vec![SketchCurve { id: "c1".into(), sketch: None }, SketchPoint { id: "origin".into() }];
+    let items = context_menu::items(&h.app, &Target::Viewport);
+    let item = items.iter().find(|i| i.id == "sketch.constraint.concentric").expect("the menu offers Concentric");
+    context_menu::run_item(&mut h.app, item, egui::Pos2::ZERO);
+    assert!(point(&h, "c1.center").len() < 1e-6);
+}
+
+#[test]
 fn selecting_the_centre_and_an_edge_preselects_the_alignment() {
     let h = square_with_circle();
     let state = h.app.session.world_state().unwrap();

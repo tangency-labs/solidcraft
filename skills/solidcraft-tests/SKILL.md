@@ -12,7 +12,7 @@ The long form is `docs/book/src/dev/testing.md`.
 - Engine tests sit next to the code or in `*_tests.rs` files, measured against a value you can derive.
 - UI scenarios are JSON in `crates/ui-egui/tests/scenarios/*.json`. Put `{"pending": "why"}` in a scenario that records a bug before it is fixed, and remove it in the fixing PR.
 - Reference tests are `tests/oracle/<case>/recipe.json` with an `expected.json` beside it, run by `cargo xtask oracle`, expected values in closed form (`tools/oracle-analytic/`) or from FreeCAD as a separate program (`tools/freecad-oracle/`). A known failure names its issue (`"known_failure": "#123"`). Never change an expected value to match SolidCraft's output, and never take one from a commercial CAD product.
-- Crash fixes: a regression test from the report's `design.solidcraft` and `replay.json` (`skills/solidcraft-crash-safety/SKILL.md`).
+- Crash fixes: a regression test from the report's `design.sc` and `replay.json` (`skills/solidcraft-crash-safety/SKILL.md`).
 
 ## Unit test or rig case
 - Unit tests assert the code's logic: which edges a chain picks, name resolution, history labels, refusal wording, hostile input, parsing and saving (`a_corner_round_wider_than_its_faces_overflows_and_takes_the_corners_other_edges`: per-edge radii, which no command takes).
