@@ -654,11 +654,17 @@ impl FilletSession<'_> {
             // way, by subtraction
             // WR-695 (the fork's TrimAtCreases, smlib#79 step 6): with
             // `fillet_overflow_trim_at_creases` a cliff overflow is trimmed at its creases in
-            // place instead (a WR-674 section end is still subtracted)
-            if session.executive.cliff_overflow
-                && k.fixes.fillet_overflow_trim_at_creases
-                && !session.executive.open_ends.iter().any(|end| end.section)
-            {
+            // place instead; a WR-674 section end is still subtracted, unless
+            // `fillet_section_end_trim_at_creases` (WR-706) trims it too
+            let sectioned = session.executive.open_ends.iter().any(|end| end.section);
+            let trimmed = if sectioned {
+                k.fixes.fillet_section_end_trim_at_creases
+                    && k.fixes.fillet_overflow_trim_at_creases
+                    && k.fixes.fillet_round_ends_at_tangent_continuation
+            } else {
+                session.executive.cliff_overflow && k.fixes.fillet_overflow_trim_at_creases
+            };
+            if trimmed {
                 let result = session.trim_at_creases(k);
                 session.objects.target.set_editing_enabled(editing);
                 if let Some(output) = error_out {

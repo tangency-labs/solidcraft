@@ -49,6 +49,7 @@
 //! | [`continued_surface`], [`ContinuedSurface`] | `sm_ContinuedSurface` (`db4a655`) |
 //! | [`close_band`]               | `sm_CloseBand` (`db4a655`)             |
 //! | [`close_section_ended_round`] | none (WR-674, not the fork's)         |
+//! | [`section_end`], [`section_end_face`], [`section_edge`] | none (WR-674, WR-706, not the fork's) |
 //!
 //! Deviations:
 //! - **Errors.** `GetFilletErrorInfo()->NoteError(code, comment)` followed by `SM_ERR`
@@ -2003,42 +2004,132 @@ pub fn close_section_ended_round(
 
     // a flat face at each section
     for (end, section) in ends.iter().zip([s0, s1]) {
-        let (a, b) = edge::start_end_vertices(region, section)?;
-        let a = vertex::point(region, a.ok_or_else(|| SolidError::null_pointer(OP))?)?;
-        let b = vertex::point(region, b.ok_or_else(|| SolidError::null_pointer(OP))?)?;
-        let mut lp: Vec<LoopCurve> = Vec::new();
-        add_curve(k, &mut lp, edge_curve(k, region, section)?, a, b)?;
-        for (from, to) in [(b, end.at), (end.at, a)] {
-            if !same(from, to, on_tol) {
-                add_curve(k, &mut lp, line(from, to), from, to)?;
-            }
-        }
-        let [_, x, y] = end.normal.make_unit_ortho_vectors(None)?;
-        let mut bbox: Option<Extent2d> = None;
-        for c in &lp {
-            let mut points = Vec::new();
-            samples(k, &c.curve, 8, &mut points)?;
-            for p in points {
-                let d = p - end.at;
-                let uv = Point2::new(d.dot(x), d.dot(y));
-                match bbox.as_mut() {
-                    None => bbox = Some(Extent2d::from_points(uv, uv)),
-                    Some(bx) => bx.add_point(uv),
-                }
-            }
-        }
-        let Some(bbox) = bbox else {
-            return Err(SolidError::sm_err(OP));
-        };
-        let margin = 0.01 * bbox.size().length() + on_tol;
-        let domain = Extent2d::from_bounds(
-            bbox.min().x - margin,
-            bbox.min().y - margin,
-            bbox.max().x + margin,
-            bbox.max().y + margin,
-        );
-        let plane = Surface::from(Plane::new(end.at, x, y, Vec2::new(1.0, 1.0), &domain));
-        face_of_loop(k, region, plane, lp)?;
+        section_end_face(k, region, end, section, on_tol)?;
     }
     Ok(())
+}
+
+/// The section's flat face of a round cut off at `end` (WR-674, [`close_section_ended_round`];
+/// with `fixes.fillet_section_end_trim_at_creases`, WR-706, the trim's): on the section's
+/// plane, bounded by the lamina edge `section` of `region` (the round's section) and the lines
+/// from its ends to the end's vertex (a line shorter than `on_tol` left out), added to
+/// `region`.
+///
+/// # Errors
+/// Those of the samples and the face construction.
+pub fn section_end_face(
+    k: &mut Kernel,
+    region: &mut Brep,
+    end: &SectionEnd,
+    section: EdgeId,
+    on_tol: f64,
+) -> Result<()> {
+    let line = |from: Point3, to: Point3| Curve::from(Line::from_points(from, to, 3));
+    let (a, b) = edge::start_end_vertices(region, section)?;
+    let a = vertex::point(region, a.ok_or_else(|| SolidError::null_pointer(OP))?)?;
+    let b = vertex::point(region, b.ok_or_else(|| SolidError::null_pointer(OP))?)?;
+    let mut lp: Vec<LoopCurve> = Vec::new();
+    add_curve(k, &mut lp, edge_curve(k, region, section)?, a, b)?;
+    for (from, to) in [(b, end.at), (end.at, a)] {
+        if !same(from, to, on_tol) {
+            add_curve(k, &mut lp, line(from, to), from, to)?;
+        }
+    }
+    let [_, x, y] = end.normal.make_unit_ortho_vectors(None)?;
+    let mut bbox: Option<Extent2d> = None;
+    for c in &lp {
+        let mut points = Vec::new();
+        samples(k, &c.curve, 8, &mut points)?;
+        for p in points {
+            let d = p - end.at;
+            let uv = Point2::new(d.dot(x), d.dot(y));
+            match bbox.as_mut() {
+                None => bbox = Some(Extent2d::from_points(uv, uv)),
+                Some(bx) => bx.add_point(uv),
+            }
+        }
+    }
+    let Some(bbox) = bbox else {
+        return Err(SolidError::sm_err(OP));
+    };
+    let margin = 0.01 * bbox.size().length() + on_tol;
+    let domain = Extent2d::from_bounds(
+        bbox.min().x - margin,
+        bbox.min().y - margin,
+        bbox.max().x + margin,
+        bbox.max().y + margin,
+    );
+    let plane = Surface::from(Plane::new(end.at, x, y, Vec2::new(1.0, 1.0), &domain));
+    face_of_loop(k, region, plane, lp)?;
+    Ok(())
+}
+
+/// The section end of the round on `fil_edge` (of `target`) at its vertex `v` (WR-674): the
+/// plane through the vertex normal to the filleted edge there; `None` where the edge has no
+/// tangent at the vertex.
+///
+/// # Errors
+/// Those of the evaluation.
+pub fn section_end(
+    k: &Kernel,
+    target: &Brep,
+    fil_edge: EdgeId,
+    v: VertexId,
+) -> Result<Option<SectionEnd>> {
+    let vertex_point = vertex::point(target, v)?;
+    let interval = edge::interval(target, fil_edge)?;
+    let t = if edge::start_vertex(target, fil_edge)? == Some(v) {
+        interval.min()
+    } else {
+        interval.max()
+    };
+    let derivs = edge::curve(target, fil_edge)?
+        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .evaluate(k, t, 1, true, true)?;
+    let tangent = derivs
+        .get(1)
+        .copied()
+        .ok_or_else(|| SolidError::null_pointer(OP))?;
+    let length = tangent.length();
+    if length <= EFF_ZERO {
+        return Ok(None);
+    }
+    Ok(Some(SectionEnd {
+        vertex: v,
+        at: vertex_point,
+        normal: tangent * (1.0 / length),
+    }))
+}
+
+/// The lamina edge of `region` that lies on the plane of `end` (four samples within
+/// `on_tol`): the round's section there, once the round is cut by it. `None` when no lamina
+/// edge or more than one does (WR-706).
+///
+/// # Errors
+/// Those of the samples.
+pub fn section_edge(
+    k: &Kernel,
+    region: &Brep,
+    end: &SectionEnd,
+    on_tol: f64,
+) -> Result<Option<EdgeId>> {
+    let mut found = None;
+    for e in crate::topology::brep::p1::edges(region, None)? {
+        if !edge::is_lamina(region, e)? {
+            continue;
+        }
+        let curve = edge_curve(k, region, e)?;
+        let mut points = Vec::new();
+        samples(k, &curve, 4, &mut points)?;
+        if points
+            .iter()
+            .all(|&p| on_section_plane(p, end.at, end.normal, on_tol))
+        {
+            if found.is_some() {
+                return Ok(None);
+            }
+            found = Some(e);
+        }
+    }
+    Ok(found)
 }

@@ -35,8 +35,8 @@ use std::collections::BTreeMap;
 
 use super::{invalid, FilletBody, FilletObject, FilletSession, SolverObject};
 use crate::blend::fillet_cliff_overflow::{
-    close_removal_region, close_section_ended_round, cut_fillet_at_open_end, Blended, Refusal,
-    SectionEnd,
+    close_removal_region, close_section_ended_round, cut_fillet_at_open_end, section_end, Blended,
+    Refusal,
 };
 use crate::blend::fillet_executive::p3::NoRoomReason;
 use crate::blend::fillet_geom::p1::{FilletErrorType, FilletGeomId, FilletSurfaceStorage};
@@ -404,29 +404,10 @@ impl FilletSession<'_> {
             let vertex_point = vertex::point(target, v)?;
             let end_surface = if end.section {
                 // WR-674: the section through the vertex, normal to the filleted edge
-                let interval = edge::interval(target, fil_edge)?;
-                let t = if edge::start_vertex(target, fil_edge)? == Some(v) {
-                    interval.min()
-                } else {
-                    interval.max()
-                };
-                let derivs = edge::curve(target, fil_edge)?
-                    .ok_or_else(|| SolidError::null_pointer(OP))?
-                    .evaluate(k, t, 1, true, true)?;
-                let tangent = derivs
-                    .get(1)
-                    .copied()
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
-                let length = tangent.length();
-                if length <= EFF_ZERO {
-                    return Err(SolidError::sm_err(OP));
-                }
-                let normal = tangent * (1.0 / length);
-                section_ends.push(SectionEnd {
-                    vertex: v,
-                    at: vertex_point,
-                    normal,
-                });
+                let end =
+                    section_end(k, target, fil_edge, v)?.ok_or_else(|| SolidError::sm_err(OP))?;
+                let normal = end.normal;
+                section_ends.push(end);
                 Surface::from(Plane::from_normal(vertex_point, normal))
             } else {
                 face::p2::surface(target, end_face)?
