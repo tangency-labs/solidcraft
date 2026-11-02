@@ -1071,6 +1071,7 @@ pub fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {
         // sharp corner, a triangle), each from the sharp edges meeting there.
         let open = mt::Shell::from(out.clone()).extract_boundaries();
         for w in open {
+            crate::build::refuse_intersection_curves(std::slice::from_ref(&w), "a thickened corner")?;
             let patch = mt::builder::try_attach_plane(&[w.inverse()])
                 .map_err(|_| KernelError::Invalid("not supported yet: thickening a corner where the gap does not close flat".into()))?;
             let mut origins = Vec::new();

@@ -152,6 +152,19 @@ pub(crate) fn face(plane: &Plane, r: &Region2) -> Result<mt::Face> {
     attach_profile(&wires_of(&region_wires(plane, &oriented(r)?)?))
 }
 
+/// Refuses `wires` that a plane cannot be attached to yet: one with an edge where two surfaces
+/// were intersected (a boolean's seam, kept by a later rebuild). truck fits the plane through the
+/// edges' control points, and an intersection curve has none: its `lift_up` is `unimplemented!`
+/// (#1559). `what` says which face, for the error.
+pub(crate) fn refuse_intersection_curves(wires: &[mt::Wire], what: &str) -> Result<()> {
+    if wires.iter().flat_map(|w| w.edge_iter()).any(|e| matches!(e.curve(), mt::Curve::IntersectionCurve(_))) {
+        return Err(KernelError::Failed(format!(
+            "not supported yet: {what} would be bounded by an edge where two surfaces were intersected (a boolean's seam), and such a flat face cannot be rebuilt yet"
+        )));
+    }
+    Ok(())
+}
+
 fn attach_profile(wires: &[mt::Wire]) -> Result<mt::Face> {
     guard("face", || builder::try_attach_plane(wires).map_err(|e| KernelError::Invalid(format!("profile: {e}"))))
 }
@@ -1792,6 +1805,8 @@ fn revolve_touching_axis(plane: &Plane, numbered: &NumberedLoop, axis_origin: Ve
 pub(crate) fn cap_and_close(sides: Vec<Side>, w0: &[mt::Wire], w1: &[mt::Wire], from_end: bool) -> Result<Body> {
     let (mut faces, prov): (Vec<mt::Face>, Vec<Option<FaceProv>>) = sides.into_iter().unzip();
     let history: Option<Vec<FaceProv>> = prov.into_iter().chain([Some(record::cap(from_end)), Some(record::cap(!from_end))]).collect();
+    refuse_intersection_curves(w0, "a cap")?;
+    refuse_intersection_curves(w1, "a cap")?;
     let bottom =
         builder::try_attach_plane(&w0.iter().map(|w| w.inverse()).collect::<Vec<_>>()).map_err(|e| KernelError::Failed(format!("cap: {e}")))?;
     let top = builder::try_attach_plane(w1).map_err(|e| KernelError::Failed(format!("cap: {e}")))?;
