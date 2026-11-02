@@ -1245,4 +1245,30 @@ mod tests {
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
         assert!(!lost.is_lost() && lost.reason().is_none(), "{:?}", lost.reason());
     }
+
+    /// A driver reset that lands after the frame's probe is met by a queue write (or the present),
+    /// which panics inside wgpu (#10240). The painter survives that panic once the device turns
+    /// out lost, and draws nothing more; on a working device a panic is a bug and carries on. A
+    /// driver reset can't be made here: `destroy` loses the device in wgpu itself, so the probe
+    /// after the panic finds it already marked.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_frame_that_meets_a_lost_device_is_survived() {
+        use egui_wgpu::wgpu;
+        let Some((_, device, queue)) = super::offscreen_device() else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let lost = egui_wgpu::DeviceLost::watch(&device);
+        let met = || -> f32 { std::panic::panic_any(String::from("called `Result::unwrap()` on an `Err` value: Lost")) };
+        assert_eq!(lost.survive(&device, &queue, || 0.5), Some(0.5));
+        let bug = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| lost.survive(&device, &queue, met)));
+        assert!(bug.is_err(), "a panic on a working device carries on");
+        assert!(!lost.is_lost());
+
+        device.destroy();
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        assert_eq!(lost.survive(&device, &queue, met), None, "the frame's panic was the loss");
+        assert!(lost.is_lost());
+    }
 }
