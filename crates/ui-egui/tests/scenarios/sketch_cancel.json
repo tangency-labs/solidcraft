@@ -12,5 +12,25 @@
  {"expect": {"sketching": false, "errors": 0}},
  {"expect": {"query": {"command": "document.inspect", "path": ["timeline"], "value": []}}},
  {"call": "engine.execute", "params": {"command": "edit.undo", "params": {}}},
- {"expect": {"sketching": true, "sketch_curves": {"own": 1}}}
+ {"expect": {"sketching": true, "sketch_curves": {"own": 1}}},
+ {"call": "engine.execute", "params": {"command": "edit.redo", "params": {}}},
+ {"expect": {"sketching": false, "features": 0}},
+
+ {"note": "#10839: Finish Sketch on a new sketch that holds nothing removes it, as Cancel does, and Undo brings it back."},
+ {"start": "sketch.create"},
+ {"click": {"plane": "XY"}},
+ {"expect": {"sketching": true, "features": 1}},
+ {"start": "sketch.finish"},
+ {"expect": {"sketching": false, "errors": 0, "features": 0}},
+ {"call": "engine.execute", "params": {"command": "edit.undo", "params": {}}},
+ {"expect": {"sketching": true, "features": 1}},
+ {"call": "engine.execute", "params": {"command": "edit.redo", "params": {}}},
+ {"expect": {"sketching": false, "features": 0}},
+
+ {"note": "Preferences › Sketch can keep an empty sketch, as before."},
+ {"call": "ui.prefs", "params": {"remove_empty_sketches": false}},
+ {"start": "sketch.create"},
+ {"click": {"plane": "XY"}},
+ {"start": "sketch.finish"},
+ {"expect": {"sketching": false, "errors": 0, "features": 1}}
 ]

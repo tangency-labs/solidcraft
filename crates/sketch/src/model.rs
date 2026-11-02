@@ -752,6 +752,21 @@ pub struct Sketch {
     pub view: SketchView,
 }
 
+impl Sketch {
+    /// Nothing drawn, constrained, linked or carried: only the fixed origin (display options aside).
+    pub fn is_empty(&self) -> bool {
+        self.points.len() <= 1
+            && self.curves.is_empty()
+            && self.constraints.is_empty()
+            && self.patterns.is_empty()
+            && self.links.is_empty()
+            && self.offsets.is_empty()
+            && self.freeform_offsets.is_empty()
+            && self.wires.is_empty()
+            && self.equations.is_empty()
+    }
+}
+
 fn is_default_view(v: &SketchView) -> bool {
     *v == SketchView::default()
 }

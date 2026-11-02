@@ -1921,6 +1921,31 @@ fn cancel_refuses_once_undo_has_gone_back_past_where_the_sketch_was_opened() {
     assert_eq!(s.doc.to_json(), before, "nothing changed");
 }
 
+/// Finishing a new sketch that holds nothing can remove it as Cancel does (#10839): only while
+/// it is new and empty, and Cancel would take nothing else with it.
+#[test]
+fn an_open_sketch_is_new_and_empty_only_when_cancel_would_lose_nothing_else() {
+    let mut s = Session::default();
+    assert!(!s.open_sketch_is_new_and_empty(), "no sketch is open");
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    assert!(s.open_sketch_is_new_and_empty());
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "ids": ["l1"]}));
+    assert!(!s.open_sketch_is_new_and_empty(), "it holds a line");
+    run(&mut s, "sketch.delete", json!({"entities": ["l1"]}));
+    assert!(s.open_sketch_is_new_and_empty(), "drawn and deleted again: empty");
+
+    // A parameter added while the sketch is open would go with it.
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "10", "unit": "mm"}));
+    assert!(!s.open_sketch_is_new_and_empty(), "Cancel would also drop the parameter");
+    run(&mut s, "sketch.finish", json!({}));
+
+    // An empty sketch opened again was kept on purpose.
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Kept"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.edit", json!({"sketch": "Kept"}));
+    assert!(!s.open_sketch_is_new_and_empty(), "an existing sketch, not a new one");
+}
+
 /// A line tangent to a free circle, one end dragged off the line: the other end stays where it
 /// is and the circle takes the change (it moved the far end, by 0.4 mm towards the dragged one
 /// for a 5 mm pull, though nothing needed it to).

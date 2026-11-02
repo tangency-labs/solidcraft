@@ -1034,21 +1034,7 @@ fn cancel_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.cancel";
     let restore = restore_on_exit(cmd, p)?;
     let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
-    let entry = s.sketch_entry.clone().filter(|entry| entry.sketch == id);
-    let current = entry.filter(|entry| {
-        let top = entry.undo_len.checked_sub(1).and_then(|i| s.undo.get(i)).map(|snap| &snap.doc);
-        let same_before = s.undo.len() >= entry.undo_len
-            && match (top, &entry.undo_top) {
-                (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
-                (None, None) => true,
-                _ => false,
-            };
-        // The step that created the sketch was taken before it was open: its state is the entry's.
-        let since = s.undo.get(entry.undo_len..).unwrap_or_default();
-        same_before
-            && since.iter().enumerate().all(|(i, snap)| snap.active_sketch == Some(id) || (i == 0 && std::sync::Arc::ptr_eq(&snap.doc, &entry.doc)))
-    });
-    let Some(entry) = current else {
+    let Some(entry) = cancel_entry(s, id).cloned() else {
         return Err(bad(cmd, "the undo history no longer leads back to where this sketch was opened: use Undo to go back"));
     };
     let created = entry.doc.feature(id).is_none();
@@ -1065,6 +1051,39 @@ fn cancel_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     s.selection.clear();
     s.revision += 1;
     Ok(json!({"sketch": id, "removed": created}))
+}
+
+/// Where Cancel Sketch goes back to for the open sketch `id`, while the undo history still runs
+/// through it.
+fn cancel_entry(s: &Session, id: u64) -> Option<&SketchEntry> {
+    s.sketch_entry.as_ref().filter(|entry| entry.sketch == id).filter(|entry| {
+        let top = entry.undo_len.checked_sub(1).and_then(|i| s.undo.get(i)).map(|snap| &snap.doc);
+        let same_before = s.undo.len() >= entry.undo_len
+            && match (top, &entry.undo_top) {
+                (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            };
+        // The step that created the sketch was taken before it was open: its state is the entry's.
+        let since = s.undo.get(entry.undo_len..).unwrap_or_default();
+        same_before
+            && since.iter().enumerate().all(|(i, snap)| snap.active_sketch == Some(id) || (i == 0 && std::sync::Arc::ptr_eq(&snap.doc, &entry.doc)))
+    })
+}
+
+impl Session {
+    /// The open sketch was made when it was entered, still holds nothing, and nothing else in the
+    /// design changed since: Cancel Sketch would take only the empty sketch away (#10839).
+    pub fn open_sketch_is_new_and_empty(&self) -> bool {
+        let Some(id) = sketch_store::active(self) else { return false };
+        let Some(entry) = cancel_entry(self, id) else { return false };
+        if entry.doc.feature(id).is_some() || !sketch_store::read(&self.doc, id).is_ok_and(Sketch::is_empty) {
+            return false;
+        }
+        let mut without = (*self.doc).clone();
+        without.next_id = entry.doc.next_id;
+        without.delete_feature(id).is_ok_and(|gone| gone == [id]) && without == *entry.doc
+    }
 }
 
 fn finish_sketch(s: &mut Session, p: &Value) -> Result<Value> {

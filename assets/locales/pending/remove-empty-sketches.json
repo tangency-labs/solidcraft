@@ -1,0 +1,30 @@
+{
+  "en": {
+    "prefs.remove_empty_sketches": "Finishing an empty new sketch removes it",
+    "prefs.remove_empty_sketches_note": "A sketch you create and finish without drawing anything in it is removed, as Cancel Sketch does; Undo brings it back. Off: the empty sketch stays in the browser and History."
+  },
+  "ar": {
+    "prefs.remove_empty_sketches": "إنهاء رسم جديد فارغ يحذفه",
+    "prefs.remove_empty_sketches_note": "يُحذف الرسم الذي تنشئه وتنهيه دون أن ترسم فيه شيئًا، كما يفعل «إلغاء الرسم»، ويعيده «تراجع». عند الإيقاف: يبقى الرسم الفارغ في المستعرض والسجل."
+  },
+  "de": {
+    "prefs.remove_empty_sketches": "Beenden einer leeren neuen Skizze entfernt sie",
+    "prefs.remove_empty_sketches_note": "Eine Skizze, die Sie erstellen und beenden, ohne etwas darin zu zeichnen, wird wie bei „Skizze abbrechen“ entfernt; Rückgängig holt sie zurück. Aus: Die leere Skizze bleibt im Browser und im Verlauf."
+  },
+  "he": {
+    "prefs.remove_empty_sketches": "סיום סקיצה חדשה ריקה מסיר אותה",
+    "prefs.remove_empty_sketches_note": "סקיצה שנוצרה והסתיימה בלי שצויר בה דבר מוסרת, כמו ב«ביטול סקיצה», וביטול הפעולה מחזיר אותה. כבוי: הסקיצה הריקה נשארת בעץ התכן ובציר הזמן."
+  },
+  "ja": {
+    "prefs.remove_empty_sketches": "空の新しいスケッチを終了すると削除する",
+    "prefs.remove_empty_sketches_note": "何も描かずに作成して終了したスケッチは「スケッチをキャンセル」と同様に削除され、「元に戻す」で復元できます。オフ: 空のスケッチはブラウザーと履歴に残ります。"
+  },
+  "vi": {
+    "prefs.remove_empty_sketches": "Kết thúc phác thảo mới trống sẽ xóa nó",
+    "prefs.remove_empty_sketches_note": "Phác thảo được tạo rồi kết thúc mà không vẽ gì sẽ bị xóa như khi Hủy phác thảo; Hoàn tác sẽ khôi phục nó. Tắt: phác thảo trống vẫn ở lại trong Cây thư mục và Lịch sử."
+  },
+  "zh": {
+    "prefs.remove_empty_sketches": "完成空的新草图时将其删除",
+    "prefs.remove_empty_sketches_note": "创建后未绘制任何内容就完成的草图会像“取消草图”一样被删除，“撤销”可将其恢复。关闭：空草图保留在浏览器和历史中。"
+  }
+}

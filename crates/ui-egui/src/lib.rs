@@ -2268,6 +2268,13 @@ impl SolveApp {
 
     fn leave_sketch(&mut self, command: &str) {
         self.prepare_sketch_exit();
+        // A new sketch finished with nothing in it goes as Cancel takes it, one step Undo brings
+        // back (#10839), unless Preferences › Sketch keeps it.
+        let command = if command == "sketch.finish" && self.preferences.remove_empty_sketches && self.session.open_sketch_is_new_and_empty() {
+            "sketch.cancel"
+        } else {
+            command
+        };
         if self.session.sketch_restore_marker().is_some() {
             // Finishing now restores the marker in the engine: evaluate the complete
             // command ahead so rebuilding later features stays off the window thread.

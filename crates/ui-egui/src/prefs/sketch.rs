@@ -67,6 +67,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         ui_kit::checkbox(ui, app.tr("prefs.sketch_open_look_at"), &mut app.preferences.sketch_open_look_at)
             .on_hover_text(app.tr("prefs.sketch_open_look_at_note"));
+        let remove_empty = setting::remove_empty_sketches(app, ui).on_hover_text(app.tr("prefs.remove_empty_sketches_note"));
+        crate::scenario::publish_target("prefs:remove_empty_sketches", remove_empty.rect);
         ui_kit::settings_block_hint(
             ui,
             app.tr("prefs.sketch_exit_view"),

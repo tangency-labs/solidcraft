@@ -1537,6 +1537,9 @@ preference_settings! {
     sketch_keys_only: bool = false, PAGE_SHORTCUTS;
     /// Where the view goes when a sketch ends (#7038). Keep (the default) leaves it as it is.
     sketch_exit_view: SketchExitView = SketchExitView::default(), PAGE_SKETCH;
+    /// Finishing a new sketch that holds nothing removes it, as Cancel Sketch does (#10839). Off:
+    /// the empty sketch stays in the browser and the timeline, as before.
+    remove_empty_sketches: bool = true, PAGE_SKETCH => check_id("prefs.remove_empty_sketches");
     /// A shape drawn in a sketch gets all its dimensions at once: the typed values, and every
     /// other size the shape has at its size as drawn (`sketch.draw.dimensioned` with `as_drawn`).
     /// Shapes `solidcraft_engine::dimension_roles` doesn't list are drawn as before.
