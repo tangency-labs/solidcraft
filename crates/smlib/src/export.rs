@@ -179,6 +179,7 @@ const I64_IDS: &[i32] = &[
     FACE_NURBS_V_ORDER,
     FACE_NURBS_FORM,
     EDGE_NURBS_FORM,
+    FACE_DEFINITION_REAL_COUNT,
 ];
 
 /// The double arrays this mapping reads.
@@ -232,6 +233,7 @@ const F64_IDS: &[i32] = &[
     FACE_TORUS_MINOR_RADIUS,
     EDGE_TOLERANCE,
     VERTEX_TOLERANCE,
+    FACE_DEFINITION_REALS,
 ];
 
 // The kind values as the arrays hold them (int64); a local item shadows the glob import.
@@ -241,6 +243,7 @@ const SURFACE_CYLINDER: i64 = flat::SURFACE_CYLINDER as i64;
 const SURFACE_CONE: i64 = flat::SURFACE_CONE as i64;
 const SURFACE_SPHERE: i64 = flat::SURFACE_SPHERE as i64;
 const SURFACE_TORUS: i64 = flat::SURFACE_TORUS as i64;
+const SURFACE_BALL_PATCH: i64 = flat::SURFACE_BALL_PATCH as i64;
 const CURVE_NURBS: i64 = flat::CURVE_NURBS as i64;
 const CURVE_LINE: i64 = flat::CURVE_LINE as i64;
 const CURVE_CIRCLE: i64 = flat::CURVE_CIRCLE as i64;
@@ -302,7 +305,8 @@ fn frame(origin: [f64; 3], axis: [f64; 3], x: [f64; 3]) -> b::Frame {
 // ---- Geometry ---------------------------------------------------------------------------
 
 /// The schema record of each face's surface, in face order, and its NURBS form when the arrays give
-/// one (`FACE_NURBS_FORM`: an analytic face with the NURBS SMLib holds it as).
+/// one (`FACE_NURBS_FORM`: an analytic face with the NURBS SMLib holds it as; a ball patch: its
+/// net, the face's own NURBS block, with its sphere from `FACE_DEFINITION_REALS`).
 fn surfaces(flat: View, n_faces: usize) -> Res<Vec<(b::Surface, Option<b::Surface>)>> {
     let kinds = flat.i(FACE_SURFACE_TYPE);
     if kinds.len() != n_faces {
@@ -345,10 +349,13 @@ fn surfaces(flat: View, n_faces: usize) -> Res<Vec<(b::Surface, Option<b::Surfac
     if !forms.is_empty() && forms.len() != n_faces {
         return Err(invalid("face NURBS forms"));
     }
-    let mut k = [0usize; 6];
+    // The definitions, face by face: each defined face's count, then its reals from `defined`.
+    let (counts, reals) = (flat.i(FACE_DEFINITION_REAL_COUNT), flat.f(FACE_DEFINITION_REALS));
+    let mut defined = 0usize;
+    let mut k = [0usize; 7];
     let mut out = Vec::with_capacity(n_faces);
     for (f, &kind) in kinds.iter().enumerate() {
-        let slot = usize::try_from(kind).ok().filter(|s| *s < 6).ok_or_else(|| unsupported(format!("SMLib surface kind {kind}")))?;
+        let slot = usize::try_from(kind).ok().filter(|s| *s < 7).ok_or_else(|| unsupported(format!("SMLib surface kind {kind}")))?;
         let i = at(&k, slot, "kind")?;
         if let Some(c) = k.get_mut(slot) {
             *c += 1;
@@ -404,10 +411,25 @@ fn surfaces(flat: View, n_faces: usize) -> Res<Vec<(b::Surface, Option<b::Surfac
                 tube_start: 0.0,
             },
             SURFACE_NURBS => next_nurbs(&mut nurbs_at)?,
+            SURFACE_BALL_PATCH => {
+                if at(counts, i, "ball patch definition")? != 4 {
+                    return Err(invalid("ball patch definition"));
+                }
+                let d = reals.get(defined..defined + 4).ok_or_else(|| invalid("ball patch definition"))?;
+                defined += 4;
+                b::Surface::BallPatch { center: [d[0], d[1], d[2]], radius: d[3] }
+            }
             other => return Err(unsupported(format!("SMLib surface kind {other}"))),
         };
-        // A NURBS face's own block came first; a form follows the analytic face's canonical entry.
-        let form = if kind != SURFACE_NURBS && forms.get(f) == Some(&1) { Some(next_nurbs(&mut nurbs_at)?) } else { None };
+        // A NURBS face's or a ball patch's own block came first (the patch's is its form); a form
+        // follows the analytic face's canonical entry.
+        let form = match kind {
+            SURFACE_NURBS => None,
+            SURFACE_BALL_PATCH if forms.get(f) == Some(&1) => return Err(invalid("ball patch with a NURBS form")),
+            SURFACE_BALL_PATCH => Some(next_nurbs(&mut nurbs_at)?),
+            _ if forms.get(f) == Some(&1) => Some(next_nurbs(&mut nurbs_at)?),
+            _ => None,
+        };
         // The record's torus is a ring torus. SMLib keeps horn and spindle tori too (a half disc
         // revolved about a line through its rim's end, its tube touching the axis, the major
         // radius a rounding below the minor): such a face is its NURBS form, unlabelled.

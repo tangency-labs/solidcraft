@@ -39,6 +39,9 @@ pub const FACE_NURBS_V_ORDER: i32 = 31;
 pub const SOURCE: i32 = 32;
 pub const FACE_NURBS_FORM: i32 = 33;
 pub const EDGE_NURBS_FORM: i32 = 34;
+/// Per face whose kind carries a definition (a ball patch), in face order: how many reals of
+/// `FACE_DEFINITION_REALS` are its definition (a ball patch: 4).
+pub const FACE_DEFINITION_REAL_COUNT: i32 = 36;
 pub const TOLERANCE: i32 = 101;
 pub const EXTENT: i32 = 102;
 pub const FACE_RANGE: i32 = 103;
@@ -104,6 +107,9 @@ pub const FACE_TORUS_MAJOR_RADIUS: i32 = 162;
 pub const FACE_TORUS_MINOR_RADIUS: i32 = 163;
 pub const EDGE_TOLERANCE: i32 = 164;
 pub const VERTEX_TOLERANCE: i32 = 165;
+/// The definitions counted in `FACE_DEFINITION_REAL_COUNT`, packed in face order: a ball patch's
+/// sphere's centre x, y, z and radius.
+pub const FACE_DEFINITION_REALS: i32 = 166;
 /// The largest EDGE_TOLERANCE or VERTEX_TOLERANCE import takes (smlib.h: "at most 1").
 pub const MAX_TOLERANCE: f64 = 1.0;
 /// `SMLIB_FLAT_MAX_LEN`: no array is longer.
@@ -114,6 +120,9 @@ pub const SURFACE_CYLINDER: u8 = 2;
 pub const SURFACE_CONE: u8 = 3;
 pub const SURFACE_SPHERE: u8 = 4;
 pub const SURFACE_TORUS: u8 = 5;
+/// A rational patch on a sphere (SMLib's `SmBallPatch`): its NURBS block, range and trims as a
+/// NURBS face's, and its sphere in `FACE_DEFINITION_REALS`.
+pub const SURFACE_BALL_PATCH: u8 = 6;
 pub const CURVE_NURBS: u8 = 0;
 pub const CURVE_LINE: u8 = 1;
 pub const CURVE_CIRCLE: u8 = 2;

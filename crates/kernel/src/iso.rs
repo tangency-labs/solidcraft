@@ -344,6 +344,8 @@ fn iso_record(surface: &brep::Surface, along_u: bool, fixed: f64, (a, b): (f64, 
         Surface::PlacedRevolution { .. } => {
             return Err(KernelError::Failed("not supported yet: an iso curve of a revolved surface record".into()));
         }
+        // A label: the face's (u, v) are its NURBS form's, whose rows are its iso curves.
+        Surface::BallPatch { .. } => return Err(KernelError::Invalid("an iso curve of a ball patch's label (take its NURBS form's)".into())),
     })
 }
 
