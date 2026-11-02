@@ -532,15 +532,46 @@ fn the_agents_own_questions_are_answered_by_the_mode_or_asked() {
             PermissionOption { id: "no".into(), name: "Reject".into(), kind: "reject_once".into() },
         ]
     };
-    on_permission(&mut app, 1, "mcp__solidcraft__batch".into(), opts());
-    assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { text, .. }) if text.contains("mcp__solidcraft__batch")));
-    on_permission(&mut app, 2, "Run ls".into(), opts());
+    on_permission(&mut app, 1, "mcp__solidcraft-app__batch".into(), Some("other"), opts());
+    assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { text, .. }) if text.contains("mcp__solidcraft-app__batch")));
+    on_permission(&mut app, 2, "Run ls".into(), None, opts());
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Permission { answer: None, .. })));
     let n = app.agent_chat.items.len() - 1;
     answer_permission(&mut app, n, Some("always"));
     assert!(agents::always_allowed(&app.preferences, "claude", "Run ls"));
-    on_permission(&mut app, 3, "Run ls".into(), opts());
+    on_permission(&mut app, 3, "Run ls".into(), None, opts());
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { .. })), "remembered");
+}
+
+/// A title that only mentions SolidCraft is no tool of SolidCraft's: in every mode but Allow
+/// everything the user is asked, and the mode still answers when it says to.
+#[test]
+fn a_title_that_mentions_solidcraft_goes_through_the_users_mode() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.agent_chat.running_id = "codex".into();
+    let opts = || vec![PermissionOption { id: "allow".into(), name: "Allow".into(), kind: "allow_once".into() }];
+    let titles = [
+        ("run solidcraft-cli; ls", Some("execute")),
+        ("run solidcraft-cli; ls", None),
+        ("Edit ~/.local/share/solidcraft/agent-chat/work/notes.txt", Some("edit")),
+        ("mcp__solidcraft__batch", Some("other")),
+        ("mcp__solidcraft-app__batch", Some("execute")),
+    ];
+    for mode in [agents::Mode::Ask, agents::Mode::Edits] {
+        app.preferences.agent_permissions.insert("codex".into(), mode);
+        for (title, kind) in titles {
+            on_permission(&mut app, 1, title.into(), kind, opts());
+            assert!(matches!(app.agent_chat.items.last(), Some(Item::Permission { answer: None, .. })), "{mode:?}: {title}");
+            app.agent_chat.items.clear();
+        }
+        // The chat's own tool stays a single question, the gate's.
+        on_permission(&mut app, 2, "mcp__solidcraft-app__batch".into(), Some("other"), opts());
+        assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { .. })), "{mode:?}");
+        app.agent_chat.items.clear();
+    }
+    app.preferences.agent_permissions.insert("codex".into(), agents::Mode::All);
+    on_permission(&mut app, 3, titles[0].0.into(), titles[0].1, opts());
+    assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { .. })), "Allow everything answers it");
 }
 
 // ---- Messages typed while the agent works ----
@@ -698,7 +729,8 @@ fn a_late_sign_in_retry_or_permission_cannot_restart_a_departed_turn() {
     crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
     script.report(Event::Permission {
         key: 7,
-        title: "mcp__solidcraft__batch".into(),
+        title: "mcp__solidcraft-app__batch".into(),
+        kind: None,
         options: vec![PermissionOption { id: "allow".into(), name: "Allow".into(), kind: "allow_once".into() }],
     });
     ended(&script, "auth");

@@ -78,6 +78,8 @@ pub enum Event {
     Permission {
         key: u64,
         title: String,
+        /// The tool call's kind, as the agent gives it.
+        kind: Option<String>,
         options: Vec<PermissionOption>,
     },
     /// It needs the user to sign in; `methods` are its own ways to do so.

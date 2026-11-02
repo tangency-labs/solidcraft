@@ -414,9 +414,12 @@ per agent, with **Reset**.
 
 These settings cover SolidCraft's tools. A coding agent's own tools (its shell, its file edits)
 follow the agent's own mode, which you pick in the panel's header. When an agent asks before
-using one of SolidCraft's tools, SolidCraft answers for you, since its own gate checks the call,
-and notes it in the chat as *Auto-allowed*. With **Allow everything**, or after **Always allow**,
-the agent's other questions are answered the same way and noted too.
+using one of the chat's own SolidCraft tools and names it exactly as the Claude adapter does
+(`mcp__solidcraft-app__batch`), SolidCraft answers for you, since its own gate checks the call,
+and notes it in the chat as *Auto-allowed*. Any other question appears in the panel, including
+a SolidCraft tool an agent words differently and a SolidCraft MCP server you added to the agent
+yourself. With **Allow everything**, or after **Always allow**, those questions are answered the
+same way and noted too.
 
 What counts as "a command given a file name": a parameter that holds a file or folder (`file`,
 `dir`, `output`, …), or `path` and `source` when the value reads like a file name (a separator, `~`,
