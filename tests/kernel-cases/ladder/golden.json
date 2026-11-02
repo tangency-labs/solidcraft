@@ -1381,14 +1381,6 @@
       "status": "pass"
     },
     "ladder/07-fillets/018-corner-three-sequential-r5-r3-r2": {
-      "measured": {
-        "area_mm2": 8591.675008996122,
-        "body_count": 1,
-        "edges": 24,
-        "faces": 11,
-        "vertices": 15,
-        "volume_mm3": 47589.770467263734
-      },
       "seconds": 0.06135609,
       "status": "pass"
     },
@@ -1402,6 +1394,22 @@
         "volume_mm3": 44254.34116127434
       },
       "seconds": 2.083591798,
+      "status": "pass"
+    },
+    "ladder/07-fillets/020-corner-three-sequential-r5-r3-r7-partial-chain": {
+      "seconds": 0.053107612,
+      "status": "pass"
+    },
+    "ladder/07-fillets/021-corner-three-sequential-r5-r3-r2-partial-chain": {
+      "measured": {
+        "area_mm2": 8591.674904919324,
+        "body_count": 1,
+        "edges": 24,
+        "faces": 11,
+        "vertices": 15,
+        "volume_mm3": 47589.7705835473
+      },
+      "seconds": 0.06135609,
       "status": "pass"
     },
     "ladder/08-chamfers/001-equal-5": {
@@ -1993,5 +2001,5 @@
       "status": "pass"
     }
   },
-  "reason": "06/023 (1/2-14 NPT) passes: a taper thread's groove follows its crest cone, so no sliver of the flanks is left (volume 8226.4042 against the standard's 8226.4049); the other cases as recorded on SMLib 60b1c6a"
+  "reason": "07-fillets/016 and 018 round the r3 with its tangent chain, which takes the vertical edge their third round was to pick (refused: the pick names no edge); 020 and 021 are the same corners with the r3 alone, as 016 and 018 were recorded (021 measured on SMLib f12a101); 06/023 (1/2-14 NPT) passes: a taper thread's groove follows its crest cone, so no sliver of the flanks is left (volume 8226.4042 against the standard's 8226.4049); the other cases as recorded on SMLib 60b1c6a"
 }
