@@ -2462,3 +2462,39 @@ fn align_axes_are_world_axes_on_a_placed_component() {
     assert!(near(after.min.y, before.min.y + 20.0) && near(after.max.y, before.max.y + 20.0), "y: {after:?}");
     assert!(near(after.min.z, before.min.z) && near(after.max.z, before.max.z), "z: {after:?}");
 }
+
+/// #10940: an Emboss or Deboss whose tool misses the body was recorded as a success that changed
+/// nothing, with no warning. It now says that it changed nothing; one that works says nothing.
+#[test]
+fn an_emboss_that_changes_nothing_says_so() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "T1", "thickness": "0.8 mm", "k_factor": "0.5", "bend_radius": "0.8 mm", "active": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [60, 40]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    let before = volume(&mut s);
+    // A sketch on the XY plane, the sheet's underside: a deboss goes down, away from the sheet.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Logo"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [20, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let reply = run(&mut s, "solid.emboss", json!({"sketch": "Logo", "depth": 0.6, "mode": "deboss"}));
+    let warning = reply["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("deboss changed nothing"), "{reply}");
+    assert!(reply["changed_bodies"].as_array().is_some_and(Vec::is_empty), "{reply}");
+    assert!(rel(volume(&mut s), before) < 1e-9);
+}
+
+#[test]
+fn an_emboss_that_works_has_no_warning() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 10]}, "name": "Logo"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 5], "p1": [15, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    for mode in ["emboss", "deboss"] {
+        let reply = run(&mut s, "solid.emboss", json!({"sketch": "Logo", "depth": 2, "mode": mode}));
+        assert!(reply["warning"].is_null(), "{mode}: {reply}");
+        run(&mut s, "edit.undo", json!({}));
+    }
+}
