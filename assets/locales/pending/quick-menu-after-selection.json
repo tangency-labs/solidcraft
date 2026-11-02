@@ -1,17 +1,26 @@
 {
   "en": {
-    "prefs.quick_menu_after_selection": "Quick menu after a selection (Shift+S opens it any time)"
+    "prefs.quick_menu_after_selection": "Quick menu after a selection"
   },
   "de": {
-    "prefs.quick_menu_after_selection": "Schnellmenü nach einer Auswahl (Umschalt+S öffnet es jederzeit)"
+    "prefs.quick_menu_after_selection": "Schnellmenü nach einer Auswahl"
   },
   "ja": {
-    "prefs.quick_menu_after_selection": "選択後にクイックメニューを表示 (Shift+S でいつでも開く)"
+    "prefs.quick_menu_after_selection": "選択後にクイックメニュー"
   },
   "zh": {
-    "prefs.quick_menu_after_selection": "选择后显示快捷菜单 (随时按 Shift+S 打开)"
+    "prefs.quick_menu_after_selection": "选择后显示快捷菜单"
   },
   "ko": {
-    "prefs.quick_menu_after_selection": "선택 후 빠른 메뉴 표시 (Shift+S로 언제든 열기)"
+    "prefs.quick_menu_after_selection": "선택 후 빠른 메뉴"
+  },
+  "ar": {
+    "prefs.quick_menu_after_selection": "قائمة سريعة بعد التحديد"
+  },
+  "he": {
+    "prefs.quick_menu_after_selection": "תפריט מהיר אחרי בחירה"
+  },
+  "vi": {
+    "prefs.quick_menu_after_selection": "Menu nhanh sau khi chọn"
   }
 }
