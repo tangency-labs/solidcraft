@@ -23,6 +23,7 @@ pub mod compare;
 pub mod drawing_measure;
 pub mod drawing_sheet;
 pub mod drawing_view;
+pub mod enclosure;
 pub mod env;
 pub mod fill;
 pub mod fill_general;

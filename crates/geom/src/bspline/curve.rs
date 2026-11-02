@@ -8,13 +8,14 @@
 //! can be divided by. Arithmetic on a valid curve can still overflow or run out of
 //! precision, so its operations return [`SplineResult`].
 //!
-//! Every piece carries intervals that hold its exact control points ([`super::interval`]): the
+//! Every piece carries intervals that hold its exact control points ([`crate::enclosure::Interval`]): the
 //! curve's own, then every knot insertion done in intervals, each factor from knot differences.
 //! So what the pieces stand for is exactly the curve as given, whatever rounding happened on the
 //! way; their `f64` control points are numbers inside those intervals.
 
-use super::interval::{HInterval, Interval};
+use super::interval::HInterval;
 use super::{Blend, HPoint, MAX_KNOTS, MAX_SPLINE_DEGREE, SplineError, SplineResult, check_knots, clamp_row, invalid};
+use crate::enclosure::Interval;
 
 /// Furthest a control point may be from the origin along any axis (mm).
 const MAX_COORDINATE: f64 = 1e12;
@@ -265,7 +266,7 @@ mod tests {
     /// Whether the exact curve's point at fraction `t` of the piece lies in the piece's enclosure
     /// there, evaluated in intervals.
     fn encloses(def: &Def, piece: &CurvePiece, t: f64) -> bool {
-        let (tt, s) = (Interval::point(t), Interval::point(1.0).sub(Interval::point(t)));
+        let (tt, s) = (Interval::point(t), Interval::ONE - Interval::point(t));
         let mut pts = piece.exact.clone();
         while pts.len() > 1 {
             pts = pts.windows(2).map(|w| w[0].blend(s, w[1], tt)).collect();
@@ -273,7 +274,7 @@ mod tests {
         let h = pts[0];
         let want = truth(def, piece.span(), t);
         [h.x, h.y, h.z].iter().zip(want).all(|(c, v)| {
-            let held = c.div(h.w);
+            let held = *c / h.w;
             held.lo.next_down() <= v.val() && v.val() <= held.hi.next_up()
         })
     }
