@@ -150,9 +150,22 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
             .and_then(|(so, sn)| section_cap(app, &st, &bounds, input, so, sn, kept.first().map(|c| c.t), include_ghosted, replaced, &active_bodies));
         let face_t = kept.first().map(|c| c.t).or(cap.as_ref().map(|(t, _, _)| *t));
         let (edge, vertex) = match (edges_on, input.pixel) {
-            (true, Some(pos)) => {
-                near_edges(app, &st, &bounds, &proj, input, pos, face_t, edge_px, &active_bodies, replaced, include_ghosted, wireframe, slack)
-            }
+            (true, Some(pos)) => near_edges(
+                app,
+                &st,
+                &bounds,
+                &proj,
+                input,
+                pos,
+                face_t,
+                edge_px,
+                &active_bodies,
+                replaced,
+                include_ghosted,
+                wireframe,
+                slack,
+                section,
+            ),
             _ => (None, None),
         };
         hits.push(match (all, cap, kept) {
@@ -382,11 +395,16 @@ fn near_edges(
     include_ghosted: bool,
     wireframe: bool,
     slack: f64,
+    section: Option<(Vec3, Vec3)>,
 ) -> (Option<EdgeHit>, Option<VertexHit>) {
     let reach = crate::pick_index::reach(proj, pos, edge_px.max(6.0));
+    // The section removes a half-space and nothing there is drawn, so the mouse picker skips
+    // edges and vertices in it; a pick must not answer with what the user cannot see (#10704,
+    // the same `kept` test `viewport::pick` applies).
+    let kept = |p: Vec3| section.is_none_or(|(so, sn)| sn.dot(p) <= sn.dot(so) + SECTION_EPS);
     // `slack` is the body's own: what counts as lying on the face in front depends on how
     // coarsely that body is meshed, never on where the camera stands.
-    let visible = |p: Vec3, slack: f64| wireframe || face_t.is_none_or(|t| (p - input.o).dot(input.d) <= t + slack);
+    let visible = |p: Vec3, slack: f64| kept(p) && (wireframe || face_t.is_none_or(|t| (p - input.o).dot(input.d) <= t + slack));
     let mut best_e: Option<EdgeHit> = None;
     let mut best_v: Option<VertexHit> = None;
     for (i, b) in st.bodies.iter().enumerate() {
