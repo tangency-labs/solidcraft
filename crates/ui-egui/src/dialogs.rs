@@ -916,7 +916,7 @@ impl Dialog {
             "solid.align" => {
                 let components = s.selection.iter().any(|x| matches!(x, Sel::Occurrence { .. }));
                 // Bodies also take sketch points and circles: a frame the bodies follow (#6257).
-                let picks = if components { FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN } else { ALIGN_PICKS };
+                let picks = if components { FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN } else { ALIGN_PICKS } | selection::SNAP_POINTS;
                 Dialog::new(
                     Kind::Align { flip: false, components, axes: [true; 3], angle: String::new() },
                     vec![
@@ -979,7 +979,8 @@ impl Dialog {
                         | PLANES
                         | AXES
                         | selection::CONSTRUCTION_POINTS
-                        | selection::ORIGIN,
+                        | selection::ORIGIN
+                        | selection::SNAP_POINTS,
                     true,
                 )],
             ),
@@ -2793,7 +2794,8 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
             let p = s.active_sketch.and_then(|id| state.sketch(id)).map(|sk| sk.plane.to_local(*point)).unwrap_or_default();
             format!("({:.2}, {:.2}) mm", p.x, p.y)
         }
-        Sel::Vertex { body, .. } => format!("{body} · vertex"),
+        // A body vertex, or a snap point (a centre, a middle): where it is.
+        Sel::Vertex { point, .. } => crate::snap_wake::label(*point),
         _ => format!("{item:?}"),
     }
 }
