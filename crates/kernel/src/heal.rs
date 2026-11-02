@@ -368,22 +368,47 @@ fn fit_exact(e: &mt::Edge, tol: f64) -> Option<mt::Edge> {
     None
 }
 
-/// Replace approximate edges that are really lines or arcs with exact ones.
+/// Replace approximate edges that are really lines or arcs with exact ones. Faces with none of
+/// them stay as they are (an imported face around its seam, whose boundary runs through a vertex
+/// twice, cannot be rebuilt, #3085); a face that cannot be rebuilt with its new edges keeps its
+/// old ones, and so do its neighbours along them.
 fn exact_edges(shell: &mt::Shell, tol: f64, trace: &mut Trace) -> Option<mt::Shell> {
     let mut subst: HashMap<mt::EdgeID, mt::Edge> = HashMap::new();
     for e in shell.edge_iter() {
         if !subst.contains_key(&e.id())
             && let Some(x) = exact_curve(&e, tol)
         {
-            trace.made(&x, [e.id()]);
             subst.insert(e.id(), x);
         }
     }
-    if subst.is_empty() {
-        return None;
+    // Each refusal takes edges out, so this ends; the cap only bounds the work.
+    for _ in 0..8 {
+        if subst.is_empty() {
+            return None;
+        }
+        match rebuilt_with(shell, &subst) {
+            Ok(faces) => {
+                for (id, x) in &subst {
+                    trace.made(x, [*id]);
+                }
+                return Some(faces.into());
+            }
+            Err(kept) => subst.retain(|id, _| !kept.contains(id)),
+        }
     }
+    None
+}
+
+/// The faces of `shell` with the edges in `subst` replaced, or the edges of the faces that
+/// cannot be rebuilt with them.
+fn rebuilt_with(shell: &mt::Shell, subst: &HashMap<mt::EdgeID, mt::Edge>) -> Result<Vec<mt::Face>, Vec<mt::EdgeID>> {
     let mut faces = Vec::new();
+    let mut kept = Vec::new();
     for f in shell.face_iter() {
+        if !f.edge_iter().any(|e| subst.contains_key(&e.id())) {
+            faces.push(f.clone());
+            continue;
+        }
         let mut wires = Vec::new();
         for w in f.absolute_boundaries() {
             let es: Vec<mt::Edge> = w
@@ -402,9 +427,12 @@ fn exact_edges(shell: &mt::Shell, tol: f64, trace: &mut Trace) -> Option<mt::She
                 .collect();
             wires.push(mt::Wire::from(es));
         }
-        faces.push(absolute_face(f, wires)?);
+        match absolute_face(f, wires) {
+            Some(nf) => faces.push(nf),
+            None => kept.extend(f.edge_iter().map(|e| e.id()).filter(|id| subst.contains_key(id))),
+        }
     }
-    Some(faces.into())
+    if kept.is_empty() { Ok(faces) } else { Err(kept) }
 }
 
 /// Faces whose surface is flat but not a plane (a revolved line square to the axis, a swept

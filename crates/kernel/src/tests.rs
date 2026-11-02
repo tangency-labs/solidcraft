@@ -1157,6 +1157,53 @@ fn chamfer_sloped_basin_rim() {
     assert!(mesh.contains(Vec3::new(50.0, 3.5, 28.0)));
 }
 
+/// #3085: a pocket cut into a body joined with an imported part goes through the B-rep boolean,
+/// which leaves the pocket's rim as intersection curves of its planes. Healing makes them lines,
+/// but gave up on the whole body when one face could not be rebuilt: the imported round face,
+/// whose boundary runs around its seam through a vertex twice. The chamfer then refused the rim
+/// as not straight, and the ball it rolled instead as larger than the neighbouring faces.
+#[test]
+fn chamfer_a_pocket_rim_beside_an_imported_round_face() {
+    use truck_meshalgo::prelude::PolylineCurve;
+    use truck_modeling as mt;
+    let plate = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 10.0)).unwrap();
+    let boss = cylinder(Vec3::new(8.0, 8.0, 10.0), Vec3::Z, 4.0, 6.0).unwrap();
+    let part = boolean(&plate, &boss, BoolOp::Union).unwrap().unwrap();
+    let pocket = box_solid(Vec3::new(22.0, 12.0, 7.0), Vec3::new(28.0, 18.0, 12.0)).unwrap();
+    let cut = boolean(&part, &pocket, BoolOp::Cut).unwrap().unwrap();
+    // Read back from STEP, the boss's side is one face around its seam.
+    let cut = step_import(&step_export(&[&cut], "t").unwrap()).unwrap().bodies.remove(0).body;
+    assert!(cut.solid.face_iter().any(|f| f.absolute_boundaries().iter().any(|w| !w.is_simple())));
+    // The rim as the boolean leaves it: intersection curves of the top and the pocket's walls.
+    let plane = |o: mt::Point3, u: mt::Vector3, v: mt::Vector3| mt::Surface::Plane(mt::Plane::new(o, o + u, o + v));
+    let top = plane(mt::Point3::new(0.0, 0.0, 10.0), mt::Vector3::unit_x(), mt::Vector3::unit_y());
+    let mut rims = Vec::new();
+    for e in cut.solid.edge_iter() {
+        let (a, b) = (e.front().point(), e.back().point());
+        if (a.z - 10.0).abs() > 1e-9 || (b.z - 10.0).abs() > 1e-9 || rims.contains(&e.id()) {
+            continue;
+        }
+        let wall = if (a.x - b.x).abs() < 1e-9 && [22.0, 28.0].contains(&a.x) {
+            plane(mt::Point3::new(a.x, 0.0, 0.0), mt::Vector3::unit_y(), mt::Vector3::unit_z())
+        } else if (a.y - b.y).abs() < 1e-9 && [12.0, 18.0].contains(&a.y) {
+            plane(mt::Point3::new(0.0, a.y, 0.0), mt::Vector3::unit_x(), mt::Vector3::unit_z())
+        } else {
+            continue;
+        };
+        let ends = if e.orientation() { vec![a, b] } else { vec![b, a] };
+        let seam = mt::IntersectionCurve::new_unchecked(Box::new(top.clone()), Box::new(wall), mt::Leader::Polyline(PolylineCurve(ends)), 1e-6);
+        e.set_curve(mt::Curve::IntersectionCurve(seam));
+        rims.push(e.id());
+    }
+    assert_eq!(rims.len(), 4);
+    let before = measure(&cut).unwrap().volume;
+    let chamfered = chamfer(&cut, &[Vec3::new(25.0, 12.0, 10.0)], 0.5).unwrap();
+    assert!(chamfered.validity().is_empty());
+    // A 0.5 mm chamfer along the 6 mm rim.
+    let removed = before - measure(&chamfered).unwrap().volume;
+    assert!((removed - 0.5 * 0.5 / 2.0 * 6.0).abs() < 0.01, "{removed}");
+}
+
 #[test]
 fn chamfer_wider_than_sloped_basin_rim_is_refused() {
     for (margin, distance) in [(1.0, 2.0), (1.0, 3.0), (0.5, 4.0), (1.0, 1.0)] {
