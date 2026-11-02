@@ -38,6 +38,7 @@ mod drawing_export;
 mod drawing_revision;
 mod drawing_scene;
 mod drawing_sheet;
+mod drawing_ui;
 mod drawing_view;
 mod edit;
 mod face;
@@ -47,6 +48,7 @@ mod join_pieces;
 pub(crate) use bom::{SAME_AS_COMPONENT, occurrence_bom_type, record_item_numbers};
 pub(crate) use component::{path_ids, refuse_filled_virtual};
 pub(crate) use construct::{GeoForm, GeoFormError, REF as GEO_REF_FORMS, SKETCH_PART, geo_form, is_model_axis};
+pub use drawing_ui::pending_icon as drawing_pending_icon;
 pub(crate) use face::{FaceRefForm, face_ref_form};
 pub(crate) use features::profiles as feature_profiles;
 pub(crate) use features::{EdgeRefForm, PLANE_FORMS, axis_dir_form, axis_line_object, edge_ref_form, explicit_plane, plane_name_problem, sketch_key};
@@ -394,6 +396,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(drawing_view::COMMANDS.iter());
     v.extend(settings::COMMANDS.iter());
     v.extend(diagnostics::COMMANDS.iter());
+    v.extend(drawing_ui::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
     v.extend(render_ui::COMMANDS.iter());
     v

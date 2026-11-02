@@ -478,9 +478,16 @@ Other `ui.prefs` parameters:
 - `stand_up: true` stands up a just-opened Y-up file, `stand_up: false` leaves it as it is ("Leave it": the offer, dialog or note, closes and `offer_stand_up` stays on)
 - the dialog's buttons are the handles `stand_up:stand`, `stand_up:leave` and `stand_up:never`
 
-`ui.workspace {workspace?: "design" | "render"}` reads or changes the active workspace.
+`ui.workspace {workspace?: "design" | "render" | "drawing"}` reads or changes the active workspace.
 Entering Render requires finishing the current modelling operation; returning restores
 the Design camera. See [the integrated Render workspace](render-workspace.md).
+Drawing currently exposes the native UI scaffold with a blank canvas. Planned
+operations refuse engine execution; `ui.start` can inspect the agreed Base View,
+Projected View, Dimension and Note option layouts. `ui.prefs` accepts
+`drawing_sheet_dock` (`top`, `bottom`, `under_browser`), `drawing_panel_side`
+(`left`, `right`) and `drawing_panel_width` (240–560). These preferences do not
+edit the source design.
+See [Drawing UI implementation](drawing-workspace-ui.md).
 
 ### Sketch alignment guides
 

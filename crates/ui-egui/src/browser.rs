@@ -908,15 +908,16 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
         finish_browser(app, ui, acts);
         return;
     }
-    let stacked = crate::timeline_left::stacked(app);
+    let stacked = !crate::drawing_workspace::active(app) && crate::timeline_left::stacked(app);
     let container =
         Container::new(ui.ctx(), Surface::Panel).joined(crate::ui_kit::DockEdges { left: true, top: true, bottom: stacked, ..Default::default() });
     let gap = container.gap();
     let width = browser_width(app.preferences.browser_width);
-    let vertical = app.ui.show_timeline && app.preferences.timeline_left;
+    let vertical = app.ui.show_timeline && app.preferences.timeline_left && !crate::drawing_workspace::active(app);
     let mut available = available;
     if !stacked {
         available.min.x += crate::agent_chat::left_inset(app, available);
+        available.min.x += crate::drawing_workspace::left_inset(app).min(available.width().max(0.0));
     }
     if vertical
         && !stacked
@@ -1105,14 +1106,16 @@ fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, c
     if !render {
         browser_header(app, ui, collapsible);
     }
-    let stacked = !render && crate::timeline_left::stacked(app);
+    let stacked = !render && !crate::drawing_workspace::active(app) && crate::timeline_left::stacked(app);
     if !render
         && collapsible
         && (if stacked {
             (app.preferences.timeline_left_browser_collapsed && app.shell.history_folding.is_none_or(|p| p[0] >= 1.0))
                 || ui.available_height() <= t.space_3
         } else {
-            app.preferences.browser_collapsed && !reveals(app) && !(app.ui.show_timeline && app.preferences.timeline_left)
+            app.preferences.browser_collapsed
+                && !reveals(app)
+                && !(app.ui.show_timeline && app.preferences.timeline_left && !crate::drawing_workspace::active(app))
         })
     {
         return;
@@ -1141,8 +1144,8 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), HEADER_H), Sense::hover());
     let response = ui.interact(rect, ui.id().with("browser_header"), if collapsible { Sense::click() } else { Sense::hover() });
     crate::scenario::publish_target("browser:header", rect);
-    let vertical = app.ui.show_timeline && app.preferences.timeline_left;
-    let stacked = crate::timeline_left::stacked(app);
+    let vertical = app.ui.show_timeline && app.preferences.timeline_left && !crate::drawing_workspace::active(app);
+    let stacked = !crate::drawing_workspace::active(app) && crate::timeline_left::stacked(app);
     let collapsed =
         collapsible && if stacked { app.preferences.timeline_left_browser_collapsed } else { !vertical && app.preferences.browser_collapsed };
     if vertical {
@@ -1161,9 +1164,13 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
         crate::ui_kit::disclosure(ui.painter(), pos2(right - t.form_section_icon_size / 2.0, rect.center().y), !collapsed, t.text_dim);
         right -= 18.0;
     }
-    let bodies = app.session.model.state().bodies.len();
-    let key = if bodies == 1 { "ui.browser_bodies_one" } else { "ui.browser_bodies_other" };
-    let count = crate::i18n::format(key, &[("count", &bodies.to_string())]);
+    let count = if crate::drawing_workspace::active(app) {
+        crate::i18n::tr_label("0 objects").to_string()
+    } else {
+        let bodies = app.session.model.state().bodies.len();
+        let key = if bodies == 1 { "ui.browser_bodies_one" } else { "ui.browser_bodies_other" };
+        crate::i18n::format(key, &[("count", &bodies.to_string())])
+    };
     let galley = ui.painter().layout_no_wrap(count, FontId::proportional(t.font_body), t.text_dim);
     ui.painter().galley(pos2(right - galley.size().x, rect.center().y - galley.size().y / 2.0), galley, t.text_dim);
     if collapsible {
@@ -1250,6 +1257,10 @@ fn browser_rows_hugging(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Action
 }
 
 fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shrink_height: bool) {
+    if crate::drawing_workspace::active(app) {
+        crate::drawing_workspace::browser_contents(app, ui);
+        return;
+    }
     prepare_model(app);
     acts.lit = Lit::of(app);
     let mut cache = app.tree.cache.take().unwrap_or_default();

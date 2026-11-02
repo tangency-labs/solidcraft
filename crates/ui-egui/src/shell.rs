@@ -159,6 +159,7 @@ pub(crate) fn fit_rects(app: &SolveApp) -> Vec<Rect> {
 fn occluding_rects(app: &SolveApp, fitting: bool) -> Vec<Rect> {
     let mut rects = Vec::new();
     rects.extend(app.shell.workspace_panels.iter().filter(|(id, _)| !fitting || **id != "render:selection").map(|(_, (rect, _))| *rect));
+    rects.extend(crate::drawing_workspace::covered_rects(app));
     if crate::render_workspace::active(app) || Container::for_layout(app.ui.layout, Surface::Panel).floating() {
         rects.extend(app.shell.cards.iter().copied());
         rects.extend(app.shell.panels.iter().copied());
@@ -250,6 +251,15 @@ pub(crate) fn workspace_content(app: &SolveApp, mut content: Rect) -> Rect {
     }
     if let Some(column) = app.shell.dialog_column {
         content.min.x = within(column.right() + gap, content.left(), content.right());
+    }
+    if Container::for_layout(app.ui.layout, Surface::Panel).floating()
+        && let Some(settings) = crate::drawing_workspace::settings_rect(app)
+    {
+        if app.preferences.drawing_panel_side == "left" {
+            content.min.x = (settings.right() + gap).clamp(content.left(), content.right());
+        } else {
+            content.max.x = (settings.left() - gap).clamp(content.left(), content.right());
+        }
     }
     content
 }

@@ -24,8 +24,32 @@ fn escape(h: &mut Harness) {
     h.app.design_properties = None;
 }
 
+fn planned_drawing_placeholder(id: &str) -> bool {
+    if solidcraft_engine::cmd::drawing_pending_icon(id).is_none() {
+        return false;
+    }
+    solidcraft_engine::find_command(id).is_some_and(|command| command.planned.is_some() && command.icon == icon_svg::PLACEHOLDER)
+}
+
+fn expected_planned_drawing_placeholder(h: &Harness) -> bool {
+    // The renderer records icon names, not command ids. Only these two surfaces may
+    // request the literal provisional glyph; unknown ids remain failures everywhere.
+    if workspace::drawing_tab(&h.app.ui.tab) {
+        return solidcraft_engine::command_specs().iter().any(|command| command.tab == h.app.ui.tab && planned_drawing_placeholder(command.id));
+    }
+    !h.app.sbox.text.is_empty()
+        && solidcraft_ui_egui::shortcut_box::search(&h.app, &h.app.sbox.text).iter().take(56).any(|row| planned_drawing_placeholder(row.0))
+}
+
+fn permitted_request(name: &str, placeholder: bool, planned_drawing: bool) -> bool {
+    !placeholder || (name == icon_svg::PLACEHOLDER && planned_drawing)
+}
+
 fn collect(h: &mut Harness, surface: &str, requested: &mut BTreeMap<String, bool>) {
-    let reply = h.call("ui.icon_audit", json!({}));
+    let planned_drawing = expected_planned_drawing_placeholder(h);
+    // The control wrapper settles after draining. Read the same audit API directly,
+    // so its extra frames cannot leave requests for the next, unrelated surface.
+    let reply = icon_svg::audit::take();
     use std::io::Write as _;
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/icon-audit");
     std::fs::create_dir_all(&dir).unwrap();
@@ -35,15 +59,16 @@ fn collect(h: &mut Harness, surface: &str, requested: &mut BTreeMap<String, bool
         "{surface}\tpanel={:?}\ttool={:?}\t{}",
         h.app.dialog.as_ref().map(|d| &d.kind),
         h.app.tool.as_ref().map(|t| t.cmd),
-        reply["result"]["requested"]
+        serde_json::to_string(&reply).unwrap()
     )
     .unwrap();
-    for item in reply["result"]["requested"].as_array().expect("audit requests") {
-        let name = item["name"].as_str().unwrap();
-        let placeholder = item["placeholder"].as_bool().unwrap();
+    for item in reply {
+        let name = item.name.as_str();
+        let placeholder = item.placeholder;
         if placeholder && !requested.contains_key(name) {
             eprintln!("{surface}: {name} fell back to the placeholder");
         }
+        assert!(permitted_request(name, placeholder, planned_drawing), "{surface}: unexpected placeholder request {name}");
         requested.insert(name.to_owned(), placeholder);
     }
 }
@@ -69,7 +94,7 @@ fn menu(h: &mut Harness, target: Value, surface: &str, requested: &mut BTreeMap<
         // Planned workspace rows deliberately have no artwork until their workspace exists.
         let intentional = id == "-" || id.starts_with('#') || (id == "ui.workspace" && item["shortcut"] == "coming later");
         assert!(!blank || intentional, "{surface}: icon-less menu item {item}");
-        assert_eq!(item["placeholder"], false, "{surface}: {item}");
+        assert!(item["placeholder"] == false || (item["icon"] == icon_svg::PLACEHOLDER && planned_drawing_placeholder(id)), "{surface}: {item}");
         if let Some(children) = item["children"].as_array() {
             for child in children {
                 let id = child["id"].as_str().unwrap();
@@ -79,7 +104,10 @@ fn menu(h: &mut Harness, target: Value, surface: &str, requested: &mut BTreeMap<
                 }
                 let icon = child["icon"].as_str().unwrap();
                 assert!(!icon.is_empty(), "{surface}: submenu row has no icon: {child}");
-                assert!(!solidcraft_ui_egui::icon_svg::resolve(icon).placeholder, "{surface}: submenu placeholder {icon}");
+                assert!(
+                    !icon_svg::resolve(icon).placeholder || (icon == icon_svg::PLACEHOLDER && planned_drawing_placeholder(id)),
+                    "{surface}: submenu placeholder {icon}"
+                );
             }
         }
     }
@@ -241,6 +269,23 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     ribbon(&mut h, &mut requested);
     solidcraft_ui_egui::render_workspace::enter(&mut h.app, false).unwrap();
     h.frames(3);
+    {
+        // Independent egui context keeps closing Drawing popup animations out of the
+        // following Design menu scenes, where the provisional glyph is forbidden.
+        let mut drawing = Harness::new();
+        drawing.app.home.open = false;
+        workspace::enter(&mut drawing.app, "drawing").unwrap();
+        drawing.frames(3);
+        collect(&mut drawing, "Drawing sheet strip and browser", &mut requested);
+        ribbon(&mut drawing, &mut requested);
+        click(&mut drawing, "drawing:sheets:manage");
+        collect(&mut drawing, "Drawing sheet management and docking", &mut requested);
+        escape(&mut drawing);
+        click(&mut drawing, "drawing:sheets:settings");
+        collect(&mut drawing, "Drawing Sheet Settings", &mut requested);
+        click(&mut drawing, "drawing:settings:close");
+        collect(&mut drawing, "Drawing panel closed", &mut requested);
+    }
 
     let body = h.app.session.model.state().bodies.first().unwrap().name.clone();
     let sketch = h.app.session.world_state().sketches.first().unwrap().feature;
@@ -508,8 +553,24 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
             "Runtime icon discovery changed. Regenerate with UPDATE_ICON_MANIFEST=1 cargo test -p solidcraft-ui-egui --test icon_audit"
         );
     }
-    let missing = requested.iter().filter(|(_, placeholder)| **placeholder).map(|(name, _)| name).collect::<Vec<_>>();
+    // Each request was checked in its Drawing/search context by `collect` above.
+    let missing = requested
+        .iter()
+        .filter(|(name, placeholder)| **placeholder && name.as_str() != icon_svg::PLACEHOLDER)
+        .map(|(name, _)| name)
+        .collect::<Vec<_>>();
     assert!(missing.is_empty(), "Runtime placeholder requests (see surface diagnostics above): {missing:?}");
+}
+
+#[test]
+fn intentional_drawing_requests_do_not_allow_unknown_or_unplanned_icons() {
+    assert!(planned_drawing_placeholder("drawing.view.base.planned"));
+    assert!(!planned_drawing_placeholder("drawing.unknown"));
+    assert!(!planned_drawing_placeholder("solid.extrude"));
+    assert!(permitted_request(icon_svg::PLACEHOLDER, true, true));
+    assert!(!permitted_request(icon_svg::PLACEHOLDER, true, false));
+    assert!(!permitted_request("missing_audit_test_icon", true, true));
+    assert!(!permitted_request("drawing_unknown", true, true));
 }
 
 #[test]

@@ -924,12 +924,37 @@ mod tests {
     fn command_artwork_resolves_and_construct_methods_are_distinct() {
         let specs = solidcraft_engine::command_specs();
         for command in &specs {
-            assert!(!resolve(command.icon).placeholder, "{}: {}", command.id, command.icon);
+            if let Some(candidate) = solidcraft_engine::cmd::drawing_pending_icon(command.id) {
+                assert!(command.planned.is_some(), "{} must remain explicitly planned", command.id);
+                assert_eq!(command.icon, PLACEHOLDER, "{} artwork awaits owner approval", command.id);
+                assert!(!resolve(candidate).placeholder, "{}: missing review draft {candidate}", command.id);
+            } else {
+                assert!(!resolve(command.icon).placeholder, "{}: {}", command.id, command.icon);
+            }
         }
         let construction: Vec<_> = specs.iter().filter(|c| c.panel == "CONSTRUCT").collect();
         let distinct: std::collections::HashSet<_> = construction.iter().map(|c| c.icon).collect();
         assert_eq!(construction.len(), 19);
         assert_eq!(distinct.len(), construction.len(), "construction methods need distinct visual identities");
+    }
+
+    #[test]
+    fn pending_drawing_artwork_renders_at_review_sizes_in_both_themes() {
+        let mut candidates = std::collections::HashSet::new();
+        for command in solidcraft_engine::command_specs() {
+            let Some(candidate) = solidcraft_engine::cmd::drawing_pending_icon(command.id) else { continue };
+            assert!(candidates.insert(candidate), "distinct Drawing operations need distinct artwork: {candidate}");
+            let resolved = resolve(candidate);
+            assert_eq!(resolved.master, candidate, "review draft must have an original master");
+            for dark in [false, true] {
+                for size in [16, 24, 64, 128] {
+                    let doc = doc_for(resolved.master, size).unwrap();
+                    let image = render(doc, Look { dark, accent: None, vision: crate::theme::ColorVision::Off, palette: None }, size).unwrap();
+                    assert!(image.pixels().iter().any(|pixel| pixel.alpha() > 0), "{candidate}: {dark} at {size}px");
+                }
+            }
+        }
+        assert_eq!(candidates.len(), 22);
     }
 
     #[test]
