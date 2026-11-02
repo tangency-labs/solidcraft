@@ -968,7 +968,9 @@ fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut
         let lines = crate::quick_measure::item_lines(app, it);
         for (k, line) in lines.into_iter().enumerate() {
             let label = if k == 0 { crate::i18n::format("measure.item", &[("number", &(i + 1).to_string())]) } else { String::new() };
-            value(ui, &label, &line);
+            // Coordinates need all three values; a fixed-height form cell elides the end.
+            let text = if label.is_empty() { line } else { format!("{label}  {line}") };
+            ui_kit::text(ui, &text, ui_kit::Text::Report(&format!("measure_item_{i}_{k}"), false));
         }
     }
     if let Some((now, d, a, b)) = shown_distance(r, *show) {
