@@ -1163,7 +1163,7 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
                 .iter()
                 .find(|(m, _, _, _)| m.id == app.agent_chat.model)
                 .map_or_else(|| app.agent_chat.model.clone(), |(_, name, _, _)| name.clone());
-            let width = if providers.is_empty() { t.form_label_width } else { picker_width(ui, &cur) };
+            let width = picker_width(ui, &cur);
             let choices: Vec<ui_kit::SearchChoice<'_>> =
                 list.iter().map(|(m, name, group, tip)| ui_kit::SearchChoice { value: &m.id, label: name, tip, group: group.as_deref() }).collect();
             let custom = custom_models_accepted(app);
@@ -1187,7 +1187,7 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
                     )
                 })
                 .inner;
-            picker.response.on_hover_text(tr("ui.agent_chat_model_tip"));
+            picker.response.on_hover_text(format!("{cur}\n{}", tr("ui.agent_chat_model_tip")));
             match picker.inner {
                 Some(ui_kit::Picked::Listed(m)) => set_model(app, &m),
                 Some(ui_kit::Picked::Custom(m)) => {
@@ -2447,6 +2447,38 @@ mod tests {
             let always = crate::scenario::handle_at("agent_chat:permission:remember").expect("always");
             assert!(once.x > always.x, "primary once choice remains on the right");
             assert_eq!(app.agent_chat.waiting(), 1, "drawing never answers an approval");
+        }
+    }
+
+    #[test]
+    fn assistant_single_provider_model_names_remain_readable() {
+        for width in [280.0, 420.0, 700.0] {
+            for with_mode in [false, true] {
+                let ctx = crate::fonts::test_context();
+                let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+                app.agent_chat.state = Some(State::Ready);
+                app.agent_chat.detection = Some(discover::Detection::default());
+                let name = "gpt-example-model";
+                app.agent_chat.models = vec![acp::ModelInfo { id: name.into(), name: name.into(), description: String::new() }];
+                app.agent_chat.model = name.into();
+                if with_mode {
+                    app.agent_chat.modes = vec![("edit".into(), "Edit".into())];
+                    app.agent_chat.mode = "edit".into();
+                }
+                for _ in 0..3 {
+                    let input =
+                        egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width + 16.0, 720.0))), ..Default::default() };
+                    crate::scenario::clear_handles();
+                    let output = crate::test_support::frame(&ctx, input, |ui| {
+                        ui.set_width(width);
+                        ui_kit::scope(ui, |ui| switcher(&mut app, ui));
+                    });
+                    let label = crate::test_support::text_shapes(&output).find(|text| text.galley.text() == name).expect("selected model label");
+                    assert!(!label.galley.elided, "selected model is clipped at width {width}, mode {with_mode}");
+                    let picker = crate::scenario::rect_of("agent_chat:model").expect("model picker");
+                    assert!(picker.left() >= 0.0 && picker.right() <= width + 16.0, "model picker escapes the panel: {picker:?}");
+                }
+            }
         }
     }
 
