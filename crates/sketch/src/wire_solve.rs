@@ -1,19 +1,30 @@
 //! 3D sketch constraints (#10608): relations among the fit points of curves drawn in a 3D sketch
 //! ([`crate::Wire::fit`]), solved in a pass of their own after the planar sketch. The planar
-//! solve never sees them, so a sketch without them solves exactly as before, and a 3D constraint
-//! never moves planar geometry.
+//! solve never sees them and a 3D constraint never moves planar geometry; their freedoms and
+//! their failures are reported apart from the planar sketch's ([`WireReport`]).
 //!
 //! A constraint names a drawn curve by its wire id and one of its fit points by index
 //! ([`WirePoint`]). Axes are those of the wires' own coordinate space ([`crate::WireSpace`]): a
 //! sketch in a component is constrained in the component's frame. All wires one constraint
 //! names share a space.
+//!
+//! Points made coincident are one unknown, and a fixed point is a constant. The rest is solved
+//! group by connected group with Levenberg–Marquardt, each constraint's exact Jacobian coming
+//! from the same formula as its residuals ([`dual`]).
+
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::Vec3;
 
 use crate::linalg::{self, Mat};
 use crate::model::{MAX_CONSTRAINTS, Result, Sketch, SketchError, in_range3};
-use crate::wire::{arc_from_3_points, arc_polyline, fit_polyline};
+use crate::union_find::{find, union};
+use crate::wire::{Wire, arc_from_3_points, arc_polyline, fit_polyline};
+
+#[path = "wire_dual.rs"]
+mod dual;
+use dual::{Dual, Num, V};
 
 /// Every residual below this (mm) ends the solve.
 const TOL: f64 = 1e-10;
@@ -23,8 +34,21 @@ pub const ACCEPT: f64 = 1e-6;
 const MAX_ITERS: usize = 200;
 /// Most unknowns (point coordinates) in one connected group: the normal equations are dense.
 pub const MAX_WIRE_VARS: usize = 1_500;
-/// The step for the numerical derivative of a residual (mm).
-const STEP: f64 = 1e-6;
+/// Most residual rows in one connected group: the freedom count reads a dense Jacobian of
+/// rows by unknowns (at most 36 MB).
+pub const MAX_WIRE_ROWS: usize = 2 * MAX_WIRE_VARS;
+/// The work one solve may spend on its linear systems (unknowns cubed, summed over them): about
+/// as many seconds as this is tens of billions. A design that asks for more fails its groups
+/// rather than hold the window.
+const WORK_BUDGET: f64 = 2e10;
+/// A solve gives up on a group once it has stalled far from a solution: over the last
+/// `STALL_ITERS` iterations the sum of squared residuals fell by at most `STALL_DECREASE` of
+/// itself while the largest residual is above `STALL_RESIDUAL` (mm), as the planar solve does.
+const STALL_ITERS: usize = 20;
+const STALL_DECREASE: f64 = 1e-5;
+const STALL_RESIDUAL: f64 = 1e-4;
+/// Two fit points closer than this (mm) meet: drawn end to end, they are joined.
+const MEET: f64 = 1e-9;
 /// Chord-height tolerance (mm) of a re-sampled arc, as when it was drawn.
 const ARC_TOL: f64 = 1e-3;
 
@@ -58,6 +82,11 @@ impl Axis {
             Axis::Y => "y",
             Axis::Z => "z",
         }
+    }
+    /// The axis a direction runs along, either way, when it runs along one.
+    pub fn along(d: Vec3) -> Option<Axis> {
+        let n = d.len();
+        [Axis::X, Axis::Y, Axis::Z].into_iter().find(|a| n > 1e-12 && (d.dot(a.unit()).abs() - n).abs() < 1e-9 * n)
     }
 }
 
@@ -101,34 +130,42 @@ impl WireConstraintKind {
         }
     }
 
-    /// Its residuals, from the positions of [`Self::points`] in that order.
-    fn residuals(&self, at: &[Vec3]) -> Vec<f64> {
-        let p = |i: usize| at.get(i).copied().unwrap_or(Vec3::ZERO);
+    /// Its residuals, from the positions of [`Self::points`] in that order, appended to `out`.
+    fn residuals<T: Num>(&self, at: &[V<T>], out: &mut Vec<T>) {
+        let zero = V { x: T::num(0.0), y: T::num(0.0), z: T::num(0.0) };
+        let p = |i: usize| at.get(i).copied().unwrap_or(zero);
         match self {
-            WireConstraintKind::Coincident { .. } => {
-                let d = p(0) - p(1);
-                vec![d.x, d.y, d.z]
-            }
+            WireConstraintKind::Coincident { .. } => out.extend((p(0) - p(1)).xyz()),
             WireConstraintKind::PointOnLine { .. } => {
                 // The point's offset from the line, square to it: (p − a) × d / |d|.
                 let d = p(2) - p(1);
-                let n = d.len().max(1e-12);
-                let c = (p(0) - p(1)).cross(d) * (1.0 / n);
-                vec![c.x, c.y, c.z]
+                let n = d.len();
+                let n = if n.val() > 1e-12 { n } else { T::num(1e-12) };
+                out.extend((p(0) - p(1)).cross(d).scale(T::num(1.0) / n).xyz());
             }
-            WireConstraintKind::Fix { at, .. } => {
-                let d = p(0) - *at;
-                vec![d.x, d.y, d.z]
-            }
+            WireConstraintKind::Fix { at, .. } => out.extend((p(0) - V::of(*at)).xyz()),
             WireConstraintKind::AlongAxis { axis, .. } => {
                 let d = p(1) - p(0);
-                match axis {
-                    Axis::X => vec![d.y, d.z],
-                    Axis::Y => vec![d.z, d.x],
-                    Axis::Z => vec![d.x, d.y],
-                }
+                out.extend(match axis {
+                    Axis::X => [d.y, d.z],
+                    Axis::Y => [d.z, d.x],
+                    Axis::Z => [d.x, d.y],
+                });
             }
         }
+    }
+
+    /// Its residuals in plain numbers.
+    fn residuals_at(&self, at: &[Vec3]) -> Vec<f64> {
+        let at: Vec<V<f64>> = at.iter().map(|p| V::of(*p)).collect();
+        let mut out = Vec::new();
+        self.residuals(&at, &mut out);
+        out
+    }
+
+    /// How many residuals it has.
+    fn rows(&self) -> usize {
+        self.residuals_at(&vec![Vec3::ZERO; self.points().len()]).len()
     }
 
     /// The same relation, whichever order its operands were given in.
@@ -152,17 +189,19 @@ pub struct WireConstraint {
     pub kind: WireConstraintKind,
 }
 
-/// How a 3D solve went.
+/// How a 3D solve went: apart from the planar sketch's report, whose freedoms and failures it
+/// does not change.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WireReport {
     /// Every 3D constraint holds.
     pub ok: bool,
     /// Remaining degrees of freedom of the drawn 3D points (3 per point, less what the 3D
-    /// constraints determine).
+    /// constraints determine). Zero from a solve that did not count them.
     pub dof: usize,
     /// The constraints left violated by a solve that failed.
     pub failing: Vec<String>,
-    /// The unknowns of a connected group too large to solve at once.
+    /// The unknowns of a connected group too large to solve at once ([`MAX_WIRE_VARS`]
+    /// unknowns, [`MAX_WIRE_ROWS`] residuals).
     pub oversized: Option<usize>,
 }
 
@@ -170,12 +209,99 @@ impl WireReport {
     fn new() -> WireReport {
         WireReport { ok: true, ..WireReport::default() }
     }
+
+    /// Why it failed, in the words a refused edit uses; `conflict` words the list of the
+    /// constraints left violated.
+    pub fn failure(&self, conflict: impl FnOnce(&str) -> String) -> String {
+        match self.oversized {
+            Some(n) => format!(
+                "the 3D sketch joins {n} unknowns (3D point coordinates) or constraints in one connected group, more than the {MAX_WIRE_VARS} unknowns and {MAX_WIRE_ROWS} constraint equations the 3D solver takes at once: split the 3D curves over several sketches"
+            ),
+            None => conflict(&self.failing.join(", ")),
+        }
+    }
+}
+
+/// A point of one group's constraint: an unknown (its index), or a constant.
+#[derive(Clone, Copy)]
+enum Pt {
+    Var(usize),
+    At(Vec3),
+}
+
+/// One constraint of a group, its points as unknowns or constants.
+struct Block<'a> {
+    id: &'a str,
+    kind: &'a WireConstraintKind,
+    pts: Vec<Pt>,
+    /// The distinct unknowns it reads, in the order its derivatives are seeded.
+    vars: Vec<usize>,
+}
+
+impl Block<'_> {
+    fn new<'a>(id: &'a str, kind: &'a WireConstraintKind, pts: Vec<Pt>) -> Block<'a> {
+        let mut vars = Vec::new();
+        for p in &pts {
+            if let Pt::Var(v) = p
+                && !vars.contains(v)
+            {
+                vars.push(*v);
+            }
+        }
+        Block { id, kind, pts, vars }
+    }
+
+    fn at(x: &[f64], v: usize) -> Vec3 {
+        Vec3::new(x.get(3 * v).copied().unwrap_or(0.0), x.get(3 * v + 1).copied().unwrap_or(0.0), x.get(3 * v + 2).copied().unwrap_or(0.0))
+    }
+
+    fn residuals(&self, x: &[f64], out: &mut Vec<f64>) {
+        let at: Vec<V<f64>> = self
+            .pts
+            .iter()
+            .map(|p| match p {
+                Pt::Var(v) => V::of(Self::at(x, *v)),
+                Pt::At(q) => V::of(*q),
+            })
+            .collect();
+        self.kind.residuals(&at, out);
+    }
+
+    /// Its residuals with their derivatives by [`Self::vars`] (three per unknown).
+    fn jacobian(&self, x: &[f64]) -> Vec<Dual> {
+        let at: Vec<V<Dual>> = self
+            .pts
+            .iter()
+            .map(|p| match p {
+                Pt::Var(v) => {
+                    let q = Self::at(x, *v);
+                    let k = 3 * self.vars.iter().position(|u| u == v).unwrap_or(0);
+                    V { x: Dual::var(q.x, k), y: Dual::var(q.y, k + 1), z: Dual::var(q.z, k + 2) }
+                }
+                Pt::At(q) => V::of(*q),
+            })
+            .collect();
+        let mut out = Vec::new();
+        self.kind.residuals(&at, &mut out);
+        out
+    }
+
+    fn holds(&self, x: &[f64]) -> bool {
+        let mut r = Vec::new();
+        self.residuals(x, &mut r);
+        r.iter().all(|v| v.abs() <= ACCEPT)
+    }
 }
 
 impl Sketch {
     /// A drawn (not linked) 3D curve by id.
-    fn drawn_wire(&self, id: &str) -> Option<&crate::Wire> {
+    fn drawn_wire(&self, id: &str) -> Option<&Wire> {
         self.wires.iter().find(|w| w.id == id && w.link.is_none() && !w.fit.is_empty())
+    }
+
+    /// The drawn 3D curves by id, for looking up many.
+    fn drawn_wires(&self) -> HashMap<&str, &Wire> {
+        self.wires.iter().filter(|w| w.link.is_none() && !w.fit.is_empty()).map(|w| (w.id.as_str(), w)).collect()
     }
 
     /// Whether `id` is a drawn straight 3D line (two fit points, not an arc).
@@ -209,39 +335,21 @@ impl Sketch {
     /// Check a 3D constraint against the sketch: its curves exist, are drawn, are lines where a
     /// line is needed, and share one coordinate space.
     pub fn validate_wire_constraint(&self, k: &WireConstraintKind) -> Result<()> {
-        let bad = |m: String| Err(SketchError::Invalid(m));
-        for p in k.points() {
-            if self.wire_point_at(&p).is_none() {
-                return bad(format!("`{}` has no drawn 3D point {}", p.wire, p.index));
-            }
-        }
-        match k {
-            WireConstraintKind::PointOnLine { line, .. } | WireConstraintKind::AlongAxis { line, .. } if !self.is_drawn_line(line) => {
-                return bad(format!("`{line}` is not a drawn 3D line"));
-            }
-            WireConstraintKind::Coincident { a, b } if a == b => return bad("a point cannot be coincident with itself".into()),
-            WireConstraintKind::PointOnLine { p, line } if p.wire == *line => return bad("a line's own end is already on it".into()),
-            WireConstraintKind::Fix { at, .. } if !in_range3(*at) => return bad("3D point out of range".into()),
-            _ => {}
-        }
-        let spaces: Vec<_> = k.wires().iter().filter_map(|id| self.drawn_wire(id).map(|w| w.space)).collect();
-        if spaces.windows(2).any(|w| w[0] != w[1]) {
-            return bad("these 3D curves are in different coordinate spaces (one fixed in the world, one in its component)".into());
-        }
-        Ok(())
+        validate_in(k, &|id| self.drawn_wire(id))
     }
 
-    /// Check every stored 3D constraint (as a design is opened).
+    /// Check every stored 3D constraint.
     pub fn validate_wire_constraints(&self) -> Result<()> {
         if self.wire_constraints.len() > MAX_CONSTRAINTS {
             return Err(SketchError::TooLarge);
         }
+        let drawn = self.drawn_wires();
         let mut ids = std::collections::BTreeSet::new();
         for c in &self.wire_constraints {
             if c.id.is_empty() || c.id.len() > 512 || !ids.insert(c.id.as_str()) {
                 return Err(SketchError::Invalid("3D constraint ids are invalid".into()));
             }
-            self.validate_wire_constraint(&c.kind)?;
+            validate_in(&c.kind, &|id| drawn.get(id).copied())?;
         }
         Ok(())
     }
@@ -260,140 +368,277 @@ impl Sketch {
         Ok(id)
     }
 
-    /// Join drawn 3D curves end to end: each curve's end coincident with the next one's start,
-    /// where they meet. Returns the constraints added.
-    pub fn join_drawn_wires(&mut self, ids: &[String]) -> Result<Vec<String>> {
-        let mut out = Vec::new();
-        for pair in ids.windows(2) {
-            let [a, b] = pair else { continue };
-            let (Some(end), Some(start)) = (self.wire_point(&format!("{a}.end")), self.wire_point(&format!("{b}.start"))) else { continue };
-            let meet = self.wire_point_at(&end).zip(self.wire_point_at(&start)).is_some_and(|(p, q)| p.dist(q) < 1e-9);
-            if meet {
-                out.push(self.add_wire_constraint(WireConstraintKind::Coincident { a: end, b: start })?);
+    /// Join drawn 3D curves that meet: each end of the curves `ids` (a 3D point is its own end)
+    /// that is at the same place as an end of another drawn curve, in the same space, gets a
+    /// Coincident with it, unless the two are joined already. Lines drawn end to end, one call
+    /// or one segment at a time, stay joined when their constraints are solved. Returns the
+    /// constraints added.
+    pub fn join_drawn_ends(&mut self, ids: &[String]) -> Result<Vec<String>> {
+        let ends: Vec<(WirePoint, Vec3, crate::WireSpace)> = self
+            .wires
+            .iter()
+            .filter(|w| w.link.is_none() && !w.fit.is_empty())
+            .flat_map(|w| {
+                let last = w.fit.len() - 1;
+                let idx: Vec<usize> = if last == 0 { vec![0] } else { vec![0, last] };
+                idx.into_iter().filter_map(move |index| w.fit.get(index).map(|at| (WirePoint { wire: w.id.clone(), index }, *at, w.space)))
+            })
+            .collect();
+        // The ends already joined, as sets.
+        let slot: HashMap<&WirePoint, usize> = ends.iter().enumerate().map(|(i, e)| (&e.0, i)).collect();
+        let mut parent: Vec<usize> = (0..ends.len()).collect();
+        for c in &self.wire_constraints {
+            if let WireConstraintKind::Coincident { a, b } = &c.kind
+                && let (Some(i), Some(j)) = (slot.get(a), slot.get(b))
+            {
+                union(&mut parent, *i, *j);
             }
         }
-        Ok(out)
+        // Ends sorted along x, so each looks only at its near neighbours.
+        let mut order: Vec<usize> = (0..ends.len()).collect();
+        order.sort_by(|a, b| {
+            let (pa, pb) = (ends.get(*a).map_or(0.0, |e| e.1.x), ends.get(*b).map_or(0.0, |e| e.1.x));
+            pa.total_cmp(&pb)
+        });
+        let rank: Vec<usize> = {
+            let mut r = vec![0; ends.len()];
+            for (k, i) in order.iter().enumerate() {
+                if let Some(x) = r.get_mut(*i) {
+                    *x = k;
+                }
+            }
+            r
+        };
+        let mut pairs = Vec::new();
+        for (i, (p, at, space)) in ends.iter().enumerate() {
+            if !ids.contains(&p.wire) {
+                continue;
+            }
+            let near = |j: &usize| ends.get(*j).is_some_and(|(q, b, s)| q.wire != p.wire && s == space && at.dist(*b) < MEET);
+            let k = rank.get(i).copied().unwrap_or(0);
+            let below = order.get(..k).unwrap_or(&[]).iter().rev().take_while(|j| ends.get(**j).is_some_and(|e| at.x - e.1.x < MEET));
+            let above = order.get(k + 1..).unwrap_or(&[]).iter().take_while(|j| ends.get(**j).is_some_and(|e| e.1.x - at.x < MEET));
+            let mut found: Vec<usize> = below.chain(above).copied().filter(near).collect();
+            found.sort_unstable();
+            for j in found {
+                if find(&mut parent, i) != find(&mut parent, j) {
+                    union(&mut parent, i, j);
+                    if let (Some(a), Some(b)) = (ends.get(j), ends.get(i)) {
+                        pairs.push((a.0.clone(), b.0.clone()));
+                    }
+                }
+            }
+        }
+        pairs.into_iter().map(|(a, b)| self.add_wire_constraint(WireConstraintKind::Coincident { a, b })).collect()
     }
 
-    /// Drop the 3D constraints that name a curve the sketch no longer has, or a fit point it no
-    /// longer has.
-    pub(crate) fn prune_wire_constraints(&mut self) {
-        let keep: Vec<bool> = self.wire_constraints.iter().map(|c| self.validate_wire_constraint(&c.kind).is_ok()).collect();
+    /// Drop the 3D constraints that no longer check out: they name a curve the sketch no longer
+    /// has, a fit point it no longer has, or are damaged. Returns how many went.
+    pub fn prune_wire_constraints(&mut self) -> usize {
+        let drawn = self.drawn_wires();
+        let keep: Vec<bool> = self.wire_constraints.iter().map(|c| validate_in(&c.kind, &|id| drawn.get(id).copied()).is_ok()).collect();
+        let before = self.wire_constraints.len();
         let mut keep = keep.into_iter();
         self.wire_constraints.retain(|_| keep.next().unwrap_or(false));
+        before - self.wire_constraints.len()
+    }
+
+    /// Drop the 3D constraints that name curve `wire` (its points were rebuilt, a motion trace
+    /// sampled again). Returns how many went.
+    pub fn drop_wire_constraints_on(&mut self, wire: &str) -> usize {
+        let before = self.wire_constraints.len();
+        self.wire_constraints.retain(|c| !c.kind.wires().contains(&wire));
+        before - self.wire_constraints.len()
+    }
+
+    /// Whether every 3D constraint holds as the curves are now (no solve).
+    pub fn wire_constraints_hold(&self) -> bool {
+        let drawn = self.drawn_wires();
+        self.wire_constraints.iter().all(|c| {
+            let at: Option<Vec<Vec3>> =
+                c.kind.points().iter().map(|p| drawn.get(p.wire.as_str()).and_then(|w| w.fit.get(p.index)).copied()).collect();
+            at.is_some_and(|at| c.kind.residuals_at(&at).iter().all(|v| v.abs() <= ACCEPT))
+        })
+    }
+
+    /// [`Sketch::solve_wires_with`], counting the freedoms left.
+    pub fn solve_wires(&mut self, hold: Option<&WirePoint>) -> WireReport {
+        self.solve_wires_with(hold, true)
     }
 
     /// Solve the 3D constraints, moving drawn fit points. With `hold`, that point is kept at
     /// its position when the constraints allow (a drag); otherwise it moves like any other.
+    /// With `count`, the freedoms left are counted (a rank pass the frames of a drag skip).
     /// Planar geometry is never touched. A failed solve leaves every point where it was.
-    pub fn solve_wires(&mut self, hold: Option<&WirePoint>) -> WireReport {
+    pub fn solve_wires_with(&mut self, hold: Option<&WirePoint>, count: bool) -> WireReport {
         let mut rep = WireReport::new();
-        // The unknowns: every fit point of every drawn curve, three coordinates each.
-        let mut slots: Vec<WirePoint> = Vec::new();
-        let mut slot_of = std::collections::HashMap::new();
-        for w in self.wires.iter().filter(|w| w.link.is_none()) {
-            for index in 0..w.fit.len() {
-                let p = WirePoint { wire: w.id.clone(), index };
-                slot_of.insert(p.clone(), slots.len());
-                slots.push(p);
-            }
+        // Every fit point of every drawn curve, by curve.
+        let mut first: HashMap<String, (usize, usize)> = HashMap::new();
+        let mut positions: Vec<Vec3> = Vec::new();
+        for w in self.wires.iter().filter(|w| w.link.is_none() && !w.fit.is_empty()) {
+            first.insert(w.id.clone(), (positions.len(), w.fit.len()));
+            positions.extend(&w.fit);
         }
-        let total = slots.len().saturating_mul(3);
         if self.wire_constraints.is_empty() {
-            rep.dof = total;
+            rep.dof = if count { positions.len().saturating_mul(3) } else { 0 };
             return rep;
         }
-        let cons: Vec<(String, WireConstraintKind, Vec<usize>)> = self
+        let slot = |p: &WirePoint| first.get(&p.wire).filter(|(_, n)| p.index < *n).map(|(s, _)| s + p.index);
+        let cons: Vec<(&str, &WireConstraintKind, Vec<usize>)> = self
             .wire_constraints
             .iter()
-            .filter_map(|c| {
-                let pts: Option<Vec<usize>> = c.kind.points().iter().map(|p| slot_of.get(p).copied()).collect();
-                pts.map(|pts| (c.id.clone(), c.kind.clone(), pts))
-            })
+            .filter_map(|c| c.kind.points().iter().map(slot).collect::<Option<Vec<usize>>>().map(|pts| (c.id.as_str(), &c.kind, pts)))
             .collect();
-        // Connected groups of points.
-        let mut parent: Vec<usize> = (0..slots.len()).collect();
-        for (_, _, pts) in &cons {
-            for w in pts.windows(2) {
-                crate::union_find::union(&mut parent, w[0], w[1]);
+        // Points made coincident are one: classes of points, each one unknown (or constant).
+        let mut parent: Vec<usize> = (0..positions.len()).collect();
+        for (_, k, pts) in &cons {
+            if let (WireConstraintKind::Coincident { .. }, [a, b]) = (k, pts.as_slice()) {
+                union(&mut parent, *a, *b);
             }
         }
-        let held = hold.and_then(|h| slot_of.get(h).copied());
-        let fixed_at: std::collections::HashMap<usize, Vec3> = cons
-            .iter()
-            .filter_map(|(_, k, pts)| match k {
-                WireConstraintKind::Fix { at, .. } => pts.first().map(|p| (*p, *at)),
-                _ => None,
-            })
-            .collect();
-        let mut positions: Vec<Vec3> = slots.iter().map(|p| self.wire_point_at(p).unwrap_or(Vec3::ZERO)).collect();
-        let mut groups: std::collections::BTreeMap<usize, Vec<usize>> = std::collections::BTreeMap::new();
-        for (ci, (_, _, pts)) in cons.iter().enumerate() {
-            if let Some(first) = pts.first() {
-                groups.entry(crate::union_find::find(&mut parent, *first)).or_default().push(ci);
+        let class: Vec<usize> = (0..positions.len()).map(|s| find(&mut parent, s)).collect();
+        let held = hold.and_then(slot);
+        let held_class = held.and_then(|h| class.get(h).copied());
+        // Where each class starts: where it is fixed, else where the held point was put, else
+        // where its first point is.
+        let mut start: HashMap<usize, Vec3> = HashMap::new();
+        for (s, c) in class.iter().enumerate() {
+            if let Some(at) = positions.get(s) {
+                start.entry(*c).or_insert(*at);
             }
         }
-        let mut rank = 0usize;
-        for members in groups.values() {
-            let mut pts: Vec<usize> = members.iter().flat_map(|ci| cons.get(*ci).map(|c| c.2.clone()).unwrap_or_default()).collect();
-            pts.sort_unstable();
-            pts.dedup();
-            let n = pts.len().saturating_mul(3);
-            if n > MAX_WIRE_VARS {
-                rep.ok = false;
-                rep.oversized = Some(n);
-                continue;
-            }
-            let group: Vec<&(String, WireConstraintKind, Vec<usize>)> = members.iter().filter_map(|ci| cons.get(*ci)).collect();
-            // A fixed point starts where it is fixed.
-            let start: Vec<Vec3> =
-                pts.iter().map(|i| fixed_at.get(i).copied().or_else(|| positions.get(*i).copied()).unwrap_or(Vec3::ZERO)).collect();
-            let fixed: Vec<bool> = pts.iter().map(|i| fixed_at.contains_key(i)).collect();
-            let hold_at = held.and_then(|h| pts.iter().position(|p| *p == h));
-            let mut solved = None;
-            if let Some(k) = hold_at {
-                solved = lm(&group, &pts, &start, &fixed, Some(k)).filter(|r| r.1.is_empty());
-            }
-            let (x, failing, r) = match solved {
-                Some(s) => s,
-                None => match lm(&group, &pts, &start, &fixed, None) {
-                    Some(s) => s,
-                    None => (start.clone(), group.iter().map(|c| c.0.clone()).collect(), 0),
-                },
-            };
-            if failing.is_empty() {
-                for (k, i) in pts.iter().enumerate() {
-                    if let (Some(slot), Some(v)) = (positions.get_mut(*i), x.get(k)) {
-                        *slot = *v;
+        if let (Some(h), Some(c)) = (held, held_class)
+            && let Some(at) = positions.get(h)
+        {
+            start.insert(c, *at);
+        }
+        let mut fixed: HashMap<usize, Vec3> = HashMap::new();
+        for (id, k, pts) in &cons {
+            if let (WireConstraintKind::Fix { at, .. }, Some(c)) = (k, pts.first().and_then(|s| class.get(*s))) {
+                match fixed.get(c) {
+                    // Two fixes of one point (joined points) in different places.
+                    Some(was) if was.dist(*at) > ACCEPT => {
+                        rep.ok = false;
+                        rep.failing.push(id.to_string());
+                    }
+                    Some(_) => {}
+                    None => {
+                        fixed.insert(*c, *at);
+                        start.insert(*c, *at);
                     }
                 }
-                rank = rank.saturating_add(r);
-            } else {
-                rep.ok = false;
-                rep.failing.extend(failing);
             }
         }
-        rep.dof = total.saturating_sub(rank);
+        // The other constraints, grouped by the free classes they connect.
+        let rel: Vec<usize> = (0..cons.len())
+            .filter(|i| cons.get(*i).is_some_and(|c| !matches!(c.1, WireConstraintKind::Coincident { .. } | WireConstraintKind::Fix { .. })))
+            .collect();
+        let mut gparent: Vec<usize> = (0..positions.len()).collect();
+        for i in &rel {
+            let Some((_, _, pts)) = cons.get(*i) else { continue };
+            let free: Vec<usize> = pts.iter().filter_map(|s| class.get(*s).copied()).filter(|c| !fixed.contains_key(c)).collect();
+            for w in free.windows(2) {
+                union(&mut gparent, w[0], w[1]);
+            }
+        }
+        let mut groups: std::collections::BTreeMap<usize, Vec<usize>> = std::collections::BTreeMap::new();
+        for i in &rel {
+            let Some((id, k, pts)) = cons.get(*i) else { continue };
+            match pts.iter().filter_map(|s| class.get(*s).copied()).find(|c| !fixed.contains_key(c)) {
+                Some(c) => groups.entry(find(&mut gparent, c)).or_default().push(*i),
+                // Every point fixed: it holds or it doesn't.
+                None => {
+                    let at: Vec<Vec3> = pts.iter().filter_map(|s| class.get(*s).and_then(|c| start.get(c)).copied()).collect();
+                    if k.residuals_at(&at).iter().any(|v| v.abs() > ACCEPT) {
+                        rep.ok = false;
+                        rep.failing.push(id.to_string());
+                    }
+                }
+            }
+        }
+        let mut solved: HashMap<usize, Vec3> = HashMap::new();
+        let mut rank = 0usize;
+        let mut work = 0.0;
+        for members in groups.values() {
+            let mut vars: Vec<usize> = Vec::new();
+            let mut var_of: HashMap<usize, usize> = HashMap::new();
+            let mut blocks = Vec::with_capacity(members.len());
+            for i in members {
+                let Some((id, k, pts)) = cons.get(*i) else { continue };
+                let pts: Vec<Pt> = pts
+                    .iter()
+                    .map(|s| {
+                        let c = class.get(*s).copied().unwrap_or(*s);
+                        match fixed.get(&c) {
+                            Some(at) => Pt::At(*at),
+                            None => Pt::Var(*var_of.entry(c).or_insert_with(|| {
+                                vars.push(c);
+                                vars.len() - 1
+                            })),
+                        }
+                    })
+                    .collect();
+                blocks.push(Block::new(id, k, pts));
+            }
+            let n = vars.len().saturating_mul(3);
+            let rows: usize = blocks.iter().map(|b| b.kind.rows()).sum();
+            if n > MAX_WIRE_VARS || rows > MAX_WIRE_ROWS {
+                rep.ok = false;
+                rep.oversized = Some(rep.oversized.unwrap_or(0).max(n));
+                continue;
+            }
+            let x0: Vec<f64> = vars.iter().flat_map(|c| xyz(start.get(c).copied().unwrap_or(Vec3::ZERO))).collect();
+            let hold_var = held_class.and_then(|c| var_of.get(&c).copied());
+            let mut x = None;
+            if let Some(h) = hold_var {
+                x = lm(&blocks, n, &x0, Some(h), &mut work).filter(|x| blocks.iter().all(|b| b.holds(x)));
+            }
+            let x = x.or_else(|| lm(&blocks, n, &x0, None, &mut work));
+            match x {
+                Some(x) if blocks.iter().all(|b| b.holds(&x)) => {
+                    for (v, c) in vars.iter().enumerate() {
+                        solved.insert(*c, Block::at(&x, v));
+                    }
+                    if count {
+                        rank = rank.saturating_add(group_rank(&blocks, n, rows, &x));
+                    }
+                }
+                Some(x) => {
+                    rep.ok = false;
+                    rep.failing.extend(blocks.iter().filter(|b| !b.holds(&x)).map(|b| b.id.to_string()));
+                }
+                None => {
+                    rep.ok = false;
+                    rep.failing.extend(blocks.iter().map(|b| b.id.to_string()));
+                }
+            }
+        }
+        if count {
+            let mut classes: Vec<usize> = class.clone();
+            classes.sort_unstable();
+            classes.dedup();
+            let free = classes.iter().filter(|c| !fixed.contains_key(c)).count();
+            rep.dof = free.saturating_mul(3).saturating_sub(rank);
+        }
         if !rep.ok {
             return rep;
         }
-        // Write the points back, rebuilding each curve from its fit points; a curve that can no
-        // longer be built (an arc's points now in a line) fails the solve and nothing moves.
-        let mut fits: Vec<(usize, Vec<Vec3>)> = Vec::new();
+        // Each point where its class is, rebuilding each curve from its fit points; a curve that
+        // can no longer be built (an arc's points now in a line) fails the solve and nothing moves.
+        let place = |s: usize| class.get(s).and_then(|c| solved.get(c).or_else(|| start.get(c))).copied();
+        let mut rebuilt = Vec::new();
         for (wi, w) in self.wires.iter().enumerate().filter(|(_, w)| w.link.is_none() && !w.fit.is_empty()) {
-            let fit: Vec<Vec3> = (0..w.fit.len())
-                .map(|index| slot_of.get(&WirePoint { wire: w.id.clone(), index }).and_then(|s| positions.get(*s)).copied().unwrap_or(Vec3::ZERO))
-                .collect();
-            if fit != w.fit {
-                fits.push((wi, fit));
+            let Some((s, n)) = first.get(&w.id) else { continue };
+            let fit: Vec<Vec3> = (0..*n).map(|i| place(s + i).unwrap_or(Vec3::ZERO)).collect();
+            if fit == w.fit {
+                continue;
             }
-        }
-        let mut rebuilt = Vec::with_capacity(fits.len());
-        for (wi, fit) in fits {
-            let Some(w) = self.wires.get(wi) else { continue };
-            if fit.iter().any(|p| !in_range3(*p)) {
+            let failed = |rep: &mut WireReport| {
                 rep.ok = false;
                 rep.failing.extend(self.wire_constraints.iter().filter(|c| c.kind.wires().contains(&w.id.as_str())).map(|c| c.id.clone()));
+            };
+            if fit.iter().any(|p| !in_range3(*p)) {
+                failed(&mut rep);
                 return rep;
             }
             let built = match w.arc {
@@ -401,14 +646,13 @@ impl Sketch {
                     [a, b, c] => arc_from_3_points(*a, *b, *c).map(|arc| (Some(arc), arc_polyline(&arc, ARC_TOL))),
                     _ => None,
                 },
-                None if fit.windows(2).all(|p| p[0].dist(p[1]) >= 1e-9) => Some((None, fit_polyline(&fit))),
+                None if fit.windows(2).all(|p| p[0].dist(p[1]) >= MEET) => Some((None, fit_polyline(&fit))),
                 None => None,
             };
             match built {
                 Some((arc, pts)) => rebuilt.push((wi, fit, arc, pts)),
                 None => {
-                    rep.ok = false;
-                    rep.failing.extend(self.wire_constraints.iter().filter(|c| c.kind.wires().contains(&w.id.as_str())).map(|c| c.id.clone()));
+                    failed(&mut rep);
                     return rep;
                 }
             }
@@ -431,124 +675,105 @@ impl Sketch {
     }
 }
 
-/// Levenberg–Marquardt on one connected group. `pts` are the group's point slots, `start` their
-/// positions; with `hold`, that point (an index into `pts`) is also pulled to where it starts.
-/// Returns the positions, the constraints still violated (empty when solved) and the rank of
-/// the constraints' Jacobian at the result, or `None` when the numbers stop being finite.
-#[allow(clippy::type_complexity)]
-fn lm(
-    group: &[&(String, WireConstraintKind, Vec<usize>)],
-    pts: &[usize],
-    start: &[Vec3],
-    fixed: &[bool],
-    hold: Option<usize>,
-) -> Option<(Vec<Vec3>, Vec<String>, usize)> {
-    // A fixed point is a constant, as in the planar solve: only the others are unknowns.
-    let mut var = Vec::with_capacity(pts.len());
-    let mut count = 0usize;
-    for k in 0..pts.len() {
-        if fixed.get(k).copied().unwrap_or(false) {
-            var.push(None);
-        } else {
-            var.push(Some(count));
-            count += 1;
+/// [`Sketch::validate_wire_constraint`], with the drawn curves looked up by `drawn`.
+fn validate_in<'a>(k: &WireConstraintKind, drawn: &dyn Fn(&str) -> Option<&'a Wire>) -> Result<()> {
+    let bad = |m: String| Err(SketchError::Invalid(m));
+    for p in k.points() {
+        if drawn(&p.wire).and_then(|w| w.fit.get(p.index)).is_none() {
+            return bad(format!("`{}` has no drawn 3D point {}", p.wire, p.index));
         }
     }
-    let hold = hold.filter(|k| var.get(*k).copied().flatten().is_some());
-    let n = count * 3;
-    let local: Vec<Vec<usize>> = group.iter().map(|c| c.2.iter().filter_map(|p| pts.iter().position(|q| q == p)).collect()).collect();
-    let target = hold.and_then(|k| start.get(k).copied());
-    let pos = |x: &[f64], k: usize| match var.get(k).copied().flatten() {
-        Some(v) => {
-            Vec3::new(x.get(3 * v).copied().unwrap_or(0.0), x.get(3 * v + 1).copied().unwrap_or(0.0), x.get(3 * v + 2).copied().unwrap_or(0.0))
+    let line = |id: &str| drawn(id).is_some_and(|w| w.fit.len() == 2 && w.arc.is_none());
+    match k {
+        WireConstraintKind::PointOnLine { line: l, .. } | WireConstraintKind::AlongAxis { line: l, .. } if !line(l) => {
+            return bad(format!("`{l}` is not a drawn 3D line"));
         }
-        None => start.get(k).copied().unwrap_or(Vec3::ZERO),
-    };
+        WireConstraintKind::Coincident { a, b } if a == b => return bad("a point cannot be coincident with itself".into()),
+        // A line's or an arc's own ends together would squeeze it away; a spline may close.
+        WireConstraintKind::Coincident { a, b } if a.wire == b.wire && drawn(&a.wire).is_some_and(|w| w.fit.len() <= 3) => {
+            return bad(format!("`{}` cannot be joined to itself", a.wire));
+        }
+        WireConstraintKind::PointOnLine { p, line } if p.wire == *line => return bad("a line's own end is already on it".into()),
+        WireConstraintKind::Fix { at, .. } if !in_range3(*at) => return bad("3D point out of range".into()),
+        _ => {}
+    }
+    let spaces: Vec<_> = k.wires().iter().filter_map(|id| drawn(id).map(|w| w.space)).collect();
+    if spaces.windows(2).any(|w| w[0] != w[1]) {
+        return bad("these 3D curves are in different coordinate spaces (one fixed in the world, one in its component)".into());
+    }
+    Ok(())
+}
+
+/// Levenberg–Marquardt on one connected group of `n` unknowns from `x0`; with `hold`, that
+/// unknown point is also pulled to where it starts. Returns where it ends, or `None` when the
+/// numbers stop being finite or the solve's `work` runs out ([`WORK_BUDGET`]).
+fn lm(blocks: &[Block], n: usize, x0: &[f64], hold: Option<usize>, work: &mut f64) -> Option<Vec<f64>> {
+    let target = hold.map(|h| Block::at(x0, h));
     let residuals = |x: &[f64]| -> Vec<f64> {
         let mut r = Vec::new();
-        for (c, l) in group.iter().zip(&local) {
-            let at: Vec<Vec3> = l.iter().map(|k| pos(x, *k)).collect();
-            r.extend(c.1.residuals(&at));
+        for b in blocks {
+            b.residuals(x, &mut r);
         }
-        if let (Some(k), Some(t)) = (hold, target) {
-            let d = pos(x, k) - t;
-            r.extend([d.x, d.y, d.z]);
+        if let (Some(h), Some(t)) = (hold, target) {
+            r.extend(xyz(Block::at(x, h) - t));
         }
         r
     };
-    // The Jacobian, each constraint differentiated numerically over its own points only.
-    let jacobian = |x: &[f64], with_hold: bool| -> Mat {
-        let rows: usize =
-            group.iter().zip(&local).map(|(c, l)| c.1.residuals(&vec![Vec3::ZERO; l.len()]).len()).sum::<usize>() + if with_hold { 3 } else { 0 };
-        let mut j = Mat::zeros(rows, n);
-        let mut row = 0;
-        for (c, l) in group.iter().zip(&local) {
-            let at: Vec<Vec3> = l.iter().map(|k| pos(x, *k)).collect();
-            let r0 = c.1.residuals(&at);
-            // Central differences: the derivative's error is of the order STEP², so a solve
-            // with freedom left moves a point (nearly) straight to where it must go.
-            let moved = |slot: usize, axis: usize, by: f64| -> Vec<f64> {
-                let mut m = at.clone();
-                if let Some(p) = m.get_mut(slot) {
-                    match axis {
-                        0 => p.x += by,
-                        1 => p.y += by,
-                        _ => p.z += by,
-                    }
-                }
-                c.1.residuals(&m)
-            };
-            for (slot, k) in l.iter().enumerate() {
-                let Some(v) = var.get(*k).copied().flatten() else { continue };
-                for axis in 0..3 {
-                    let (up, down) = (moved(slot, axis, STEP), moved(slot, axis, -STEP));
-                    for (i, (a, b)) in down.iter().zip(&up).enumerate() {
-                        j.add(row + i, 3 * v + axis, (b - a) / (2.0 * STEP));
-                    }
-                }
-            }
-            row += r0.len();
-        }
-        if let (true, Some(v)) = (with_hold, hold.and_then(|k| var.get(k).copied().flatten())) {
-            for axis in 0..3 {
-                j.set(row + axis, 3 * v + axis, 1.0);
-            }
-        }
-        j
-    };
-    let mut x: Vec<f64> = start.iter().zip(&var).filter(|(_, v)| v.is_some()).flat_map(|(p, _)| [p.x, p.y, p.z]).collect();
     let cost = |r: &[f64]| r.iter().map(|v| v * v).sum::<f64>();
+    let mut x = x0.to_vec();
     let mut r = residuals(&x);
+    let mut costs = vec![cost(&r)];
     let mut lambda = 1e-3;
-    for _ in 0..MAX_ITERS {
+    for it in 0..MAX_ITERS {
         if r.iter().all(|v| v.abs() < TOL) {
             break;
         }
-        let j = jacobian(&x, hold.is_some());
-        // (JᵀJ + λI) dx = −Jᵀr: the damping keeps each step short, so a group with freedom left
-        // moves as little as it can.
+        if let Some(was) = it.checked_sub(STALL_ITERS).and_then(|i| costs.get(i)) {
+            let now = costs.last().copied().unwrap_or(0.0);
+            if was - now <= STALL_DECREASE * was && r.iter().any(|v| v.abs() > STALL_RESIDUAL) {
+                break;
+            }
+        }
+        // (JᵀJ + λI) dx = −Jᵀr, built constraint by constraint over the unknowns each reads.
         let mut a = Mat::zeros(n, n);
         let mut g = vec![0.0; n];
-        for row in 0..j.rows {
-            let rv = r.get(row).copied().unwrap_or(0.0);
-            for c in 0..n {
-                let jc = j.get(row, c);
-                if jc == 0.0 {
-                    continue;
-                }
-                if let Some(gc) = g.get_mut(c) {
-                    *gc -= jc * rv;
-                }
-                for d in 0..n {
-                    let jd = j.get(row, d);
-                    if jd != 0.0 {
-                        a.add(c, d, jc * jd);
+        for b in blocks {
+            let rows = b.jacobian(&x);
+            let cols: Vec<usize> = b.vars.iter().flat_map(|v| [3 * v, 3 * v + 1, 3 * v + 2]).collect();
+            for row in &rows {
+                for (i, ci) in cols.iter().enumerate() {
+                    let ji = row.d.get(i).copied().unwrap_or(0.0);
+                    if ji == 0.0 {
+                        continue;
                     }
+                    if let Some(gi) = g.get_mut(*ci) {
+                        *gi -= ji * row.v;
+                    }
+                    for (j, cj) in cols.iter().enumerate() {
+                        let jj = row.d.get(j).copied().unwrap_or(0.0);
+                        if jj != 0.0 {
+                            a.add(*ci, *cj, ji * jj);
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(h) = hold {
+            let t = target.unwrap_or(Vec3::ZERO);
+            let d = Block::at(&x, h) - t;
+            for (axis, v) in xyz(d).into_iter().enumerate() {
+                a.add(3 * h + axis, 3 * h + axis, 1.0);
+                if let Some(gi) = g.get_mut(3 * h + axis) {
+                    *gi -= v;
                 }
             }
         }
         let mut improved = false;
         for _ in 0..12 {
+            *work += (n as f64).powi(3);
+            if *work > WORK_BUDGET {
+                return None;
+            }
             let mut damped = a.clone();
             for c in 0..n {
                 damped.add(c, c, lambda);
@@ -568,25 +793,34 @@ fn lm(
             }
             lambda *= 4.0;
         }
+        costs.push(cost(&r));
         if !improved {
             break;
         }
     }
-    if !x.iter().all(|v| v.is_finite()) {
-        return None;
-    }
-    // Which constraints are left violated (the hold is not a constraint).
-    let mut failing = Vec::new();
-    for (c, l) in group.iter().zip(&local) {
-        let at: Vec<Vec3> = l.iter().map(|k| pos(&x, *k)).collect();
-        if c.1.residuals(&at).iter().any(|v| v.abs() > ACCEPT) {
-            failing.push(c.0.clone());
+    x.iter().all(|v| v.is_finite()).then_some(x)
+}
+
+/// A point's coordinates.
+fn xyz(p: Vec3) -> [f64; 3] {
+    [p.x, p.y, p.z]
+}
+
+/// The rank of a solved group's constraints: the freedoms they take.
+fn group_rank(blocks: &[Block], n: usize, rows: usize, x: &[f64]) -> usize {
+    let mut j = Mat::zeros(rows, n);
+    let mut row = 0;
+    for b in blocks {
+        for r in b.jacobian(x) {
+            for (i, v) in b.vars.iter().enumerate() {
+                for axis in 0..3 {
+                    j.set(row, 3 * v + axis, r.d.get(3 * i + axis).copied().unwrap_or(0.0));
+                }
+            }
+            row += 1;
         }
     }
-    let j = jacobian(&x, false);
-    let (_, rank) = linalg::determined_vars(&j, 1e-8);
-    let fixed_count = pts.len() - count;
-    Some(((0..pts.len()).map(|k| pos(&x, k)).collect(), failing, rank + 3 * fixed_count))
+    linalg::determined_vars(&j, 1e-8).1
 }
 
 #[cfg(test)]
