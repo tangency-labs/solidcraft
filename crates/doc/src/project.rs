@@ -208,7 +208,7 @@ fn resolve_uncached(
         LinkSource::Intersection { a, b } => {
             let (ma, fa) = crate::project3d::mesh_of(st, a).ok_or_else(|| lost(&a.describe()))?;
             let (mb, fb) = crate::project3d::mesh_of(st, b).ok_or_else(|| lost(&b.describe()))?;
-            wires = crate::project3d::mesh_intersection(&ma, fa, &mb, fb);
+            wires = crate::project3d::mesh_intersection(&ma, fa.as_deref(), &mb, fb.as_deref());
             Vec::new()
         }
         LinkSource::Iso { body, at, dir } => {

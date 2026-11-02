@@ -500,6 +500,77 @@ fn three_d_sketch_curves() {
     assert!((c["start_at"][0].as_f64().unwrap().abs() - 6.0).abs() < 1e-3, "{c}");
 }
 
+/// #9009: picked faces intersect as the viewport picks them, the whole surface patch, not just the
+/// B-rep piece under the pick; a fit-point spline's wall is one face per span joined by hidden seams.
+#[test]
+fn intersection_curve_of_picked_faces_spans_the_whole_surface() {
+    use solidcraft_doc::project::resolve;
+    use solidcraft_geom::Plane;
+    use solidcraft_sketch::{LinkKind, LinkSource};
+    use std::collections::BTreeMap;
+
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "wall_h", "expression": "20 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Wave"}));
+    let wave = ids(&run(&mut s, "sketch.spline.fit_point", json!({"points": [[0, 0], [9.5, 12], [30.5, 7], [52, 15]]}))["curves"])[0].clone();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "Wave", "curves": [wave], "distance": "wall_h", "body_name": "Wall"}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Roof"}));
+    // XZ sketch y is world -Z, so the arc peaks at world z = 15.
+    let arc = run(&mut s, "sketch.arc.three_point", json!({"start": [0, 0], "end": [50, 0], "through": [25, -15]}))["created"]["curves"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "Roof", "curves": [arc], "distance": 30, "body_name": "Roof"}));
+
+    let st = s.model.state();
+    let wall = st.body("Wall").unwrap();
+    let m = wall.mesh();
+    assert!(wall.body.face_count() > 1, "premise of #9009: one face per spline span");
+    assert_eq!(m.surface_patch(m.tri_face[0] as usize).len(), wall.body.face_count(), "premise: the spans are one surface patch (hidden seams)");
+    // A pick on the middle span, away from the joins at x = 9.5 and x = 30.5.
+    let pick =
+        *m.positions.iter().min_by(|a, b| ((a.x - 20.).abs() + (a.z - 10.).abs()).total_cmp(&((b.x - 20.).abs() + (b.z - 10.).abs()))).unwrap();
+
+    let check = |s: &Session, id: u64| {
+        let st = s.model.state();
+        let sk = &st.sketch(id).unwrap().sketch;
+        assert!(sk.links.iter().all(|l| !l.lost), "no link lost");
+        let pts: Vec<_> = sk.wires.iter().flat_map(|w| w.pts.iter().copied()).collect();
+        assert!(!pts.is_empty());
+        let (lo, hi) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), p| (l.min(p.x), h.max(p.x)));
+        assert!(lo < 1.0 && hi > 49.0, "the whole crossing, not one span: x {lo}..{hi}");
+        for p in &pts {
+            assert!((((p.x - 25.).powi(2) + (p.z + 40. / 3.).powi(2)).sqrt() - 85. / 3.).abs() < 0.1, "{p:?}");
+            assert!(p.y > -1e-6 && p.y < 30. + 1e-6, "{p:?}");
+        }
+    };
+
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let id = s.active_sketch.unwrap();
+    let r = run(
+        &mut s,
+        "sketch.intersection_curve",
+        json!({"a": {"face": [pick.x, pick.y, pick.z], "body": "Wall"}, "b": {"face": [25, 15, 15], "body": "Roof"}}),
+    );
+    assert!(!r["wires"].as_array().unwrap().is_empty(), "{r}");
+    check(&s, id);
+
+    // The same as giving the two bodies.
+    let st = s.model.state();
+    let body = |n: &str| Box::new(LinkSource::Body { body: n.to_string() });
+    let whole = resolve(&s.doc, &BTreeMap::new(), &st, &Plane::XY, LinkKind::Include, &LinkSource::Intersection { a: body("Wall"), b: body("Roof") })
+        .unwrap();
+    let sk = &st.sketch(id).unwrap().sketch;
+    assert_eq!(sk.wires.len(), whole.wires.len());
+
+    // Editing the wall re-resolves the stored pick to the same patch.
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "parameters.change", json!({"name": "wall_h", "expression": "25 mm"}));
+    check(&s, id);
+}
+
 #[test]
 fn isoparametric_curves_of_a_cylinder() {
     let mut s = Session::default();
