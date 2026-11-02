@@ -1,0 +1,219 @@
+{
+  "en": {
+    "ui.continuity_position": "Position",
+    "ui.continuity_tangent": "Tangent",
+    "ui.continuity_curvature": "Curvature",
+    "ui.continuity_curvature_change": "Curvature change",
+    "ui.continuity_crease": "Crease",
+    "ui.continuity_curvature_change_tip": "Curvature change (G3): the curvature also changes smoothly across the seam.",
+    "ui.continuity_curvature_tip": "Curvature-continuous (G2): reflections run through without a kink.",
+    "ui.continuity_position_tip": "Position (G0): the surfaces meet, with a crease where they do.",
+    "ui.continuity_tangent_tip": "Tangent (G1): no crease, though the curvature jumps across the seam."
+  },
+  "ar": {
+    "ui.continuity_position": "الموضع",
+    "ui.continuity_tangent": "مماس",
+    "ui.continuity_curvature": "الانحناء",
+    "ui.continuity_curvature_change": "تغيّر الانحناء",
+    "ui.continuity_crease": "تجعّد",
+    "ui.continuity_curvature_change_tip": "تغيّر الانحناء (G3): يتغير الانحناء أيضًا بسلاسة عبر خط الالتقاء.",
+    "ui.continuity_curvature_tip": "متصل الانحناء (G2): تمر الانعكاسات دون انكسار.",
+    "ui.continuity_position_tip": "الموضع (G0): تلتقي الأسطح، مع تجعّد عند التقائها.",
+    "ui.continuity_tangent_tip": "مماس (G1): لا تجعّد، لكن الانحناء يقفز عبر خط الالتقاء."
+  },
+  "cs": {
+    "ui.continuity_position": "Poloha",
+    "ui.continuity_tangent": "Tečnost",
+    "ui.continuity_curvature": "Křivost",
+    "ui.continuity_curvature_change": "Změna křivosti",
+    "ui.continuity_crease": "Hrana"
+  },
+  "da": {
+    "ui.continuity_position": "Positionskontinuitet",
+    "ui.continuity_tangent": "Tangentkontinuitet",
+    "ui.continuity_curvature": "Krumning",
+    "ui.continuity_curvature_change": "Ændring i krumning",
+    "ui.continuity_crease": "Knæk"
+  },
+  "de": {
+    "ui.continuity_position": "Position",
+    "ui.continuity_tangent": "Tangential",
+    "ui.continuity_curvature": "Krümmung",
+    "ui.continuity_curvature_change": "Krümmungsänderung",
+    "ui.continuity_crease": "Knick",
+    "ui.continuity_curvature_change_tip": "Krümmungsänderung (G3): Auch die Krümmung ändert sich an der Naht glatt.",
+    "ui.continuity_curvature_tip": "Krümmungsstetig (G2): Spiegelungen laufen ohne Knick hindurch.",
+    "ui.continuity_position_tip": "Position (G0): Die Flächen treffen sich, mit einem Knick an der Naht.",
+    "ui.continuity_tangent_tip": "Tangential (G1): kein Knick, aber die Krümmung springt an der Naht."
+  },
+  "es": {
+    "ui.continuity_position": "Posición",
+    "ui.continuity_tangent": "Tangente",
+    "ui.continuity_curvature": "Curvatura",
+    "ui.continuity_curvature_change": "Cambio de curvatura",
+    "ui.continuity_crease": "Arista"
+  },
+  "fr": {
+    "ui.continuity_position": "Position",
+    "ui.continuity_tangent": "Tangence",
+    "ui.continuity_curvature": "Courbure",
+    "ui.continuity_curvature_change": "Variation de courbure",
+    "ui.continuity_crease": "Angle vif"
+  },
+  "gl": {
+    "ui.continuity_position": "Posición",
+    "ui.continuity_tangent": "Tanxente",
+    "ui.continuity_curvature": "Curvatura",
+    "ui.continuity_curvature_change": "Cambio de curvatura",
+    "ui.continuity_crease": "Aresta"
+  },
+  "he": {
+    "ui.continuity_position": "מיקום",
+    "ui.continuity_tangent": "משיק",
+    "ui.continuity_curvature": "עקמומיות",
+    "ui.continuity_curvature_change": "שינוי עקמומיות",
+    "ui.continuity_crease": "שבר",
+    "ui.continuity_curvature_change_tip": "שינוי עקמומיות (G3): גם העקמומיות משתנה בצורה חלקה לאורך התפר.",
+    "ui.continuity_curvature_tip": "רציף בעקמומיות (G2): ההשתקפויות עוברות בלי שבר.",
+    "ui.continuity_position_tip": "מיקום (G0): המשטחים נפגשים, עם שבר במקום המפגש.",
+    "ui.continuity_tangent_tip": "משיק (G1): אין שבר, אך העקמומיות קופצת לאורך התפר."
+  },
+  "hu": {
+    "ui.continuity_position": "Pozíció",
+    "ui.continuity_tangent": "Érintő",
+    "ui.continuity_curvature": "Görbület",
+    "ui.continuity_curvature_change": "Görbületváltozás",
+    "ui.continuity_crease": "Törés"
+  },
+  "id": {
+    "ui.continuity_position": "Posisi",
+    "ui.continuity_tangent": "Tangen",
+    "ui.continuity_curvature": "Kelengkungan",
+    "ui.continuity_curvature_change": "Perubahan kelengkungan",
+    "ui.continuity_crease": "Lipatan"
+  },
+  "it": {
+    "ui.continuity_position": "Posizione",
+    "ui.continuity_tangent": "Tangente",
+    "ui.continuity_curvature": "Curvatura",
+    "ui.continuity_curvature_change": "Variazione di curvatura",
+    "ui.continuity_crease": "Spigolo vivo"
+  },
+  "ja": {
+    "ui.continuity_position": "位置",
+    "ui.continuity_tangent": "接線",
+    "ui.continuity_curvature": "曲率",
+    "ui.continuity_curvature_change": "曲率変化",
+    "ui.continuity_crease": "折れ",
+    "ui.continuity_curvature_change_tip": "曲率変化 (G3): 境目で曲率の変化もなめらかです。",
+    "ui.continuity_curvature_tip": "曲率連続 (G2): 映り込みが折れずに通ります。",
+    "ui.continuity_position_tip": "位置 (G0): 面はつながりますが、境目に折れがあります。",
+    "ui.continuity_tangent_tip": "接線 (G1): 折れはありませんが、境目で曲率が飛びます。"
+  },
+  "ko": {
+    "ui.continuity_position": "위치",
+    "ui.continuity_tangent": "접선",
+    "ui.continuity_curvature": "곡률",
+    "ui.continuity_curvature_change": "곡률 변화",
+    "ui.continuity_crease": "꺾임",
+    "ui.continuity_curvature_change_tip": "곡률 변화(G3): 이음매에서 곡률의 변화도 부드럽습니다.",
+    "ui.continuity_curvature_tip": "곡률 연속(G2): 반사가 꺾임 없이 이어집니다.",
+    "ui.continuity_position_tip": "위치(G0): 면이 만나지만, 만나는 곳에 꺾임이 있습니다.",
+    "ui.continuity_tangent_tip": "접선(G1): 꺾임은 없지만, 이음매에서 곡률이 급변합니다."
+  },
+  "ms": {
+    "ui.continuity_position": "Kedudukan",
+    "ui.continuity_tangent": "Tangen",
+    "ui.continuity_curvature": "Kelengkungan",
+    "ui.continuity_curvature_change": "Perubahan kelengkungan",
+    "ui.continuity_crease": "Lipatan"
+  },
+  "nb": {
+    "ui.continuity_position": "Posisjon",
+    "ui.continuity_tangent": "Tangent",
+    "ui.continuity_curvature": "Krumning",
+    "ui.continuity_curvature_change": "Krumningsendring",
+    "ui.continuity_crease": "Knekk"
+  },
+  "nl": {
+    "ui.continuity_position": "Positie",
+    "ui.continuity_tangent": "Tangentieel",
+    "ui.continuity_curvature": "Kromming",
+    "ui.continuity_curvature_change": "Krommingsverandering",
+    "ui.continuity_crease": "Knik"
+  },
+  "pl": {
+    "ui.continuity_position": "Położenie",
+    "ui.continuity_tangent": "Styczność",
+    "ui.continuity_curvature": "Krzywizna",
+    "ui.continuity_curvature_change": "Zmiana krzywizny",
+    "ui.continuity_crease": "Załamanie"
+  },
+  "pt-BR": {
+    "ui.continuity_position": "Posição",
+    "ui.continuity_tangent": "Tangente",
+    "ui.continuity_curvature": "Curvatura",
+    "ui.continuity_curvature_change": "Variação de curvatura",
+    "ui.continuity_crease": "Vinco"
+  },
+  "ro": {
+    "ui.continuity_position": "Poziție",
+    "ui.continuity_tangent": "Tangent",
+    "ui.continuity_curvature": "Curbură",
+    "ui.continuity_curvature_change": "Variația curburii",
+    "ui.continuity_crease": "Muchie"
+  },
+  "ru": {
+    "ui.continuity_position": "Положение",
+    "ui.continuity_tangent": "Касание",
+    "ui.continuity_curvature": "Кривизна",
+    "ui.continuity_curvature_change": "Изменение кривизны",
+    "ui.continuity_crease": "Излом"
+  },
+  "sv": {
+    "ui.continuity_position": "Läge",
+    "ui.continuity_tangent": "Tangent",
+    "ui.continuity_curvature": "Krökning",
+    "ui.continuity_curvature_change": "Krökningsändring",
+    "ui.continuity_crease": "Veck"
+  },
+  "tr": {
+    "ui.continuity_position": "Konum",
+    "ui.continuity_tangent": "Teğet",
+    "ui.continuity_curvature": "Eğrilik",
+    "ui.continuity_curvature_change": "Eğrilik değişimi",
+    "ui.continuity_crease": "Kırık"
+  },
+  "uk": {
+    "ui.continuity_position": "Положення",
+    "ui.continuity_tangent": "Дотична",
+    "ui.continuity_curvature": "Кривизна",
+    "ui.continuity_curvature_change": "Зміна кривини",
+    "ui.continuity_crease": "Злам"
+  },
+  "vi": {
+    "ui.continuity_position": "Vị trí liên tục",
+    "ui.continuity_tangent": "Tiếp tuyến",
+    "ui.continuity_curvature": "Độ cong",
+    "ui.continuity_curvature_change": "Thay đổi độ cong",
+    "ui.continuity_crease": "Nếp gập"
+  },
+  "zh": {
+    "ui.continuity_position": "位置",
+    "ui.continuity_tangent": "相切",
+    "ui.continuity_curvature": "曲率",
+    "ui.continuity_curvature_change": "曲率变化",
+    "ui.continuity_crease": "折痕",
+    "ui.continuity_curvature_change_tip": "曲率变化 (G3)：曲率在接缝处的变化也是平滑的。",
+    "ui.continuity_curvature_tip": "曲率连续 (G2)：反射平滑穿过，没有折痕。",
+    "ui.continuity_position_tip": "位置 (G0)：曲面相接，但接缝处有折痕。",
+    "ui.continuity_tangent_tip": "相切 (G1)：没有折痕，但曲率在接缝处突变。"
+  },
+  "zh-TW": {
+    "ui.continuity_position": "位置",
+    "ui.continuity_tangent": "相切",
+    "ui.continuity_curvature": "曲率",
+    "ui.continuity_curvature_change": "曲率變化",
+    "ui.continuity_crease": "摺痕"
+  }
+}

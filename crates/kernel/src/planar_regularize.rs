@@ -1,168 +1,32 @@
 //! Exact topological removal of construction-induced planar subdivisions.
-//! Shared edge identity and complete construction lineage select the groups.
-use super::{Body, from_p3};
-use crate::history::FaceOrigin;
-use crate::{Result, guard};
-use solidcraft_geom::Plane;
-use std::collections::{BTreeMap, HashMap, HashSet};
+//! Shared edge identity and complete construction lineage select the edges; SMLib joins the
+//! faces either side of them where they are topological (`solidcraft_smlib::Brep::merge_faces`,
+//! every other edge kept by a point at its middle).
+use super::Body;
+use crate::{KernelError, Result, guard};
+use solidcraft_geom::Vec3;
+use solidcraft_geom::brep::{self, eval::CurveEval};
 use std::sync::Arc;
-use truck_modeling as mt;
 
-fn root(parent: &mut [usize], mut i: usize) -> usize {
-    while parent[i] != i {
-        parent[i] = parent[parent[i]];
-        i = parent[i];
-    }
-    i
+/// Points along a record edge (ends and three inside).
+fn edge_points(e: &brep::Edge) -> Vec<Vec3> {
+    let Ok(c) = CurveEval::new(e.parameters()) else { return Vec::new() };
+    let [t0, t1] = e.interval;
+    (0..=4).filter_map(|k| c.point(t0 + (t1 - t0) * k as f64 / 4.0)).collect()
 }
 
-fn merged_face(faces: &[&mt::Face], members: &[usize], plane: Plane, eligible: &HashSet<mt::EdgeID>) -> Option<mt::Face> {
-    let mut counts = HashMap::<mt::EdgeID, (usize, bool)>::new();
-    for i in members {
-        for edge in faces.get(*i)?.boundary_iters().into_iter().flatten() {
-            // Whole linear supports, not a sampled plane fit.
-            let mt::Curve::Line(line) = edge.curve() else { return None };
-            let (a, b) = (from_p3(line.0), from_p3(line.1));
-            if !a.is_finite() || !b.is_finite() || a.len().max(b.len()) > 1e9 {
-                return None;
-            }
-            let front = from_p3(edge.absolute_front().point());
-            let back = from_p3(edge.absolute_back().point());
-            if !front.is_finite() || !back.is_finite() {
-                return None;
-            }
-            let error = 4096. * f64::EPSILON * (1. + a.len() + b.len() + plane.origin.len());
-            if plane.height(a).abs() > error || plane.height(b).abs() > error || a.dist(front) > error || b.dist(back) > error {
-                return None;
-            }
-            let count = counts.entry(edge.id()).or_insert((0, edge.orientation()));
-            if count.0 == 1 && (!eligible.contains(&edge.id()) || count.1 == edge.orientation()) {
-                return None;
-            }
-            count.0 += 1;
-            if count.0 > 2 {
-                return None;
-            }
-        }
-    }
-    let mut boundary = Vec::new();
-    for i in members {
-        for edge in faces.get(*i)?.boundary_iters().into_iter().flatten() {
-            if counts.get(&edge.id()).is_some_and(|(n, _)| *n == 1) {
-                boundary.push(edge);
-            }
-        }
-    }
-    let mut next = HashMap::new();
-    let mut incoming = HashMap::new();
-    for (i, edge) in boundary.iter().enumerate() {
-        if next.insert(edge.front().id(), i).is_some() || incoming.insert(edge.back().id(), i).is_some() {
-            return None;
-        }
-    }
-    if next.len() != incoming.len() || next.keys().any(|id| !incoming.contains_key(id)) {
-        return None;
-    }
-    let mut used = vec![false; boundary.len()];
-    let mut outer = None;
-    let mut holes = Vec::new();
-    for first in 0..boundary.len() {
-        if used[first] {
-            continue;
-        }
-        let start = boundary.get(first)?.front().id();
-        let origin = from_p3(boundary.get(first)?.front().point());
-        let mut index = first;
-        let mut edges = Vec::new();
-        let (mut area, mut magnitude, mut arithmetic_error) = (0., 0., 0.);
-        loop {
-            if *used.get(index)? {
-                return None;
-            }
-            used[index] = true;
-            let edge = boundary.get(index)?.clone();
-            let da = from_p3(edge.front().point()) - origin;
-            let db = from_p3(edge.back().point()) - origin;
-            let a = solidcraft_geom::Vec2::new(da.dot(plane.x), da.dot(plane.y));
-            let b = solidcraft_geom::Vec2::new(db.dot(plane.x), db.dot(plane.y));
-            let term = a.cross(b);
-            area += term;
-            magnitude += term.abs();
-            let coordinate_error =
-                128. * f64::EPSILON * (1. + origin.len() + from_p3(edge.front().point()).len() + from_p3(edge.back().point()).len());
-            arithmetic_error += coordinate_error * (da.len() + db.len() + coordinate_error) * 16.;
-            let back = edge.back().id();
-            edges.push(edge);
-            if back == start {
-                break;
-            }
-            index = *next.get(&back)?;
-        }
-        if edges.len() < 3 || !area.is_finite() || area.abs() <= arithmetic_error + 64. * f64::EPSILON * (edges.len() as f64 + 1.) * magnitude.max(1.)
-        {
-            return None;
-        }
-        let wire = mt::Wire::from(edges);
-        if area > 0. {
-            if outer.replace(wire).is_some() {
-                return None;
-            }
-        } else {
-            holes.push(wire);
-        }
-    }
-    let mut wires = vec![outer?];
-    wires.extend(holes);
-    mt::Face::try_new(wires, faces.get(*members.first()?)?.oriented_surface()).ok()
+/// The point halfway along a record edge's interval.
+fn edge_middle(e: &brep::Edge) -> Option<Vec3> {
+    let [t0, t1] = e.interval;
+    CurveEval::new(e.parameters()).ok()?.point(0.5 * (t0 + t1))
 }
 
-/// `body` with its history: `input`'s faces with each output face made of the input faces
-/// `members` lists for it (every edge of `body` one of `input`'s, by identity), composed with
-/// the history of the operation that made `input`; none where `input` has none.
-fn with_joined_history(body: Body, input: &Body, members: Vec<Vec<usize>>) -> Body {
-    let Some(inner) = input.history() else { return body };
-    let faces = members.into_iter().map(|m| (m.iter().map(|&face| FaceOrigin::Face { operand: 0, face }).collect(), m.len() == 1)).collect();
-    let joined = crate::record::traced(
-        body,
-        &crate::record::counts(&[input]),
-        Some(crate::record::regions(faces)),
-        Some(&crate::record::edge_origins(&input.solid, 0)),
-    );
-    // Both steps are checked (`traced` against `input`, `through` composing over its checked
-    // history); the composed operands' counts are not known here, so it is set in place.
-    let history = crate::boolean_record::through(&joined, 0, Some(inner));
-    Body { history: history.map(Arc::new), ..joined }
+fn failed(e: impl std::fmt::Display) -> KernelError {
+    KernelError::Failed(format!("SMLib planar regularization: {e}"))
 }
 
 impl Body {
     pub(crate) fn regularize_certified_planar_faces(self) -> Result<Self> {
-        self.regularize_planar_faces(false)
-    }
-
-    /// Only newly produced Cut walls call this path. The temporary planes carry
-    /// construction support, never persistent ancestor/source-role authority.
-    pub(crate) fn regularize_generated_planar_faces(self) -> Result<Self> {
-        let body = self.regularize_planar_faces(true)?;
-        let sources = body.face_sources().map(|sources| {
-            sources
-                .iter()
-                .map(|source| {
-                    let mut source = source.clone();
-                    if let Some(super::FaceSource::ExtrudeSide { plane, coalesced, .. }) = &mut source {
-                        if plane.is_some() && !*coalesced {
-                            source = None;
-                        } else {
-                            *plane = None;
-                        }
-                    }
-                    source
-                })
-                .collect()
-        });
-        Ok(body.with_face_sources(sources.map(Arc::new)))
-    }
-
-    fn regularize_planar_faces(self, generated: bool) -> Result<Self> {
         if self.regularization_protected {
             return Ok(self);
         }
@@ -173,63 +37,47 @@ impl Body {
         let split_points = self.split_keep().iter().try_fold(0usize, |sum, line| sum.checked_add(line.len()));
         let Some(split_points) = split_points.filter(|n| *n <= 65_536) else { return Ok(self) };
         let result = guard("certified planar topology regularization", || {
-            let mut faces = Vec::new();
-            let mut shell_owner = Vec::new();
-            let mut use_budget = 65_536usize;
-            for (shell_index, shell) in self.solid.boundaries().iter().enumerate() {
-                for face in shell.face_iter() {
-                    if faces.len() >= sources.len() {
-                        return Ok(None);
-                    }
-                    for _ in face.edge_iter() {
-                        let Some(left) = use_budget.checked_sub(1) else { return Ok(None) };
-                        use_budget = left;
-                    }
-                    faces.push(face);
-                    shell_owner.push(shell_index);
-                }
-            }
-            if faces.len() != sources.len() {
+            if self.face_count() != sources.len() {
                 return Ok(None);
             }
-            let valid: Vec<_> = faces
+            let actual = super::planar_sources::actual_planes(&self)?;
+            let at = super::planar_sources::Resolution::of(&self);
+            let valid: Vec<_> = actual
                 .iter()
                 .zip(sources)
-                .map(|(f, s)| {
+                .map(|(actual, s)| {
                     s.as_ref()
-                        .and_then(|source| {
-                            if generated {
-                                match source {
-                                    super::FaceSource::ExtrudeSide { segment: solidcraft_geom::Seg2::Line { .. }, plane: Some(p), .. } => Some(*p),
-                                    _ => None,
-                                }
-                            } else {
-                                super::planar_sources::certified_plane(source)
-                            }
-                        })
-                        .filter(|p| super::planar_sources::actual_plane(f).is_some_and(|actual| super::planar_sources::same_support(p, &actual)))
+                        .and_then(super::planar_sources::certified_plane)
+                        .filter(|p| actual.is_some_and(|actual| super::planar_sources::same_support(p, &actual, at)))
                 })
                 .collect();
-            let mut adjacency = HashMap::<mt::EdgeID, Vec<(usize, mt::Edge)>>::new();
-            for (i, face) in faces.iter().enumerate() {
-                for edge in face.boundary_iters().into_iter().flatten() {
-                    adjacency.entry(edge.id()).or_default().push((i, edge));
+            let record = self.record();
+            let mut shell_of = vec![usize::MAX; record.faces.len()];
+            for (k, shell) in record.shells.iter().enumerate() {
+                if let brep::Shell::Faces { faces, .. } = shell {
+                    for o in faces {
+                        if let Some(slot) = shell_of.get_mut(o.face as usize) {
+                            *slot = k;
+                        }
+                    }
                 }
             }
-            let mut eligible = HashSet::new();
-            let mut parent: Vec<_> = (0..faces.len()).collect();
+            // The edges between two faces of one shell on one certified plane, from one source,
+            // off every authored split line.
+            let mut eligible = Vec::new();
             let mut identity = 16_000_000usize;
             let mut work = 2_000_000usize;
-            for uses in adjacency.values() {
-                let [(a, ea), (b, eb)] = uses.as_slice() else { continue };
-                if a == b || shell_owner[*a] != shell_owner[*b] || ea.orientation() == eb.orientation() {
+            for (k, e) in record.edges.iter().enumerate() {
+                let [ua, ub] = e.uses.as_slice() else { continue };
+                let (a, b) = (ua.face as usize, ub.face as usize);
+                if a == b || shell_of.get(a) != shell_of.get(b) {
                     continue;
                 }
-                let (Some(pa), Some(pb)) = (valid[*a], valid[*b]) else { continue };
+                let (Some(Some(pa)), Some(Some(pb))) = (valid.get(a), valid.get(b)) else { continue };
                 if pa != pb {
                     continue;
                 }
-                let (Some(sa), Some(sb)) = (sources[*a].as_ref(), sources[*b].as_ref()) else { continue };
+                let (Some(Some(sa)), Some(Some(sb))) = (sources.get(a), sources.get(b)) else { continue };
                 let Some(cost) = super::planar_sources::descriptor_cost(sa)
                     .and_then(|a| super::planar_sources::descriptor_cost(sb).and_then(|b| a.checked_add(b)))
                 else {
@@ -237,118 +85,70 @@ impl Body {
                 };
                 let Some(left) = identity.checked_sub(cost) else { return Ok(None) };
                 identity = left;
-                if !generated && sa != sb {
+                if sa != sb {
                     continue;
                 }
                 let Some(cost) = split_points.checked_mul(6).and_then(|n| n.checked_add(1)) else { return Ok(None) };
                 let Some(left) = work.checked_sub(cost) else { return Ok(None) };
                 work = left;
-                if crate::heal::on_split_line(&crate::heal::edge_points(ea), self.split_keep()) {
+                if crate::heal::on_split_line(&edge_points(e), self.split_keep()) {
                     continue;
                 }
-                eligible.insert(ea.id());
-                let (ra, rb) = (root(&mut parent, *a), root(&mut parent, *b));
-                parent[ra.max(rb)] = ra.min(rb);
+                eligible.push(k);
             }
-            let mut groups = BTreeMap::<usize, Vec<usize>>::new();
-            for i in 0..faces.len() {
-                groups.entry(root(&mut parent, i)).or_default().push(i);
+            if eligible.is_empty() {
+                return Ok(None);
             }
-            let mut replacements = HashMap::new();
-            let mut changed = false;
+            // SMLib removes the topological edges and vertices but those under the points kept:
+            // every edge not chosen (at its middle) stays.
+            let keep: Vec<[f64; 3]> = record
+                .edges
+                .iter()
+                .enumerate()
+                .filter(|(k, _)| eligible.binary_search(k).is_err())
+                .map(|(_, e)| edge_middle(e).map(|p| [p.x, p.y, p.z]))
+                .collect::<Option<_>>()
+                .ok_or_else(|| failed("an edge of the body has no middle point"))?;
+            if keep.len() > solidcraft_smlib::MAX_POINTS {
+                return Ok(None);
+            }
+            let (sb, ob) = crate::native::smlib_body_ordered(&self)?;
+            let ob = ob.ok_or_else(|| failed("SMLib numbers the body's edges unlike its record"))?;
+            let r = sb.tagged(0).map_err(failed)?.merge_faces(&keep, (self.size() * 1e-6).max(1e-9)).map_err(failed)?;
+            if r.counts().map_err(failed)?.first() == Some(&self.face_count()) {
+                return Ok(None);
+            }
+            let check = r.check(solidcraft_smlib::CheckLevel::All).map_err(failed)?;
+            if !check.is_valid() {
+                return Err(failed(format!("SMLib's check refuses the result: {check}")));
+            }
+            let (body, or) = crate::native::body_from_smlib_ordered(&r)?;
+            let or = or.ok_or_else(|| failed("the result's record is numbered unlike SMLib's body"))?;
+            let h = r.history().map_err(failed)?.history(std::slice::from_ref(&ob), &or).map_err(failed)?;
+            // Each face keeps the source of the first face it is made of.
             let mut metadata = 2_000_000usize;
-            for (leader, members) in &groups {
-                if members.len() < 2 {
-                    continue;
+            let mut output = Vec::with_capacity(h.faces.len());
+            for f in &h.faces {
+                let members: Vec<usize> =
+                    f.origins.iter().filter_map(|o| if let crate::history::FaceOrigin::Face { face, .. } = o { Some(*face) } else { None }).collect();
+                let source = members.iter().min().and_then(|m| sources.get(*m)).cloned().flatten();
+                if let Some(s) = &source {
+                    let Some(cost) = super::planar_sources::descriptor_cost(s) else { return Ok(None) };
+                    let Some(left) = metadata.checked_sub(cost) else { return Ok(None) };
+                    metadata = left;
                 }
-                let Some(face) = valid[*leader].and_then(|p| merged_face(&faces, members, p, &eligible)) else { continue };
-                replacements.insert(*leader, face);
-                changed = true;
+                output.push(source);
             }
-            if !changed {
-                return Ok(None);
-            }
-            let mut shells = Vec::new();
-            let mut output_sources = Vec::new();
-            let mut output_ids = Vec::new();
-            // The input faces each output face is made of, for its history.
-            let mut output_members: Vec<Vec<usize>> = Vec::new();
-            let mut offset = 0;
-            for shell in self.solid.boundaries() {
-                let mut output = Vec::new();
-                for face in shell.face_iter() {
-                    let leader = root(&mut parent, offset);
-                    if let Some(merged) = replacements.get(&leader) {
-                        if offset == leader {
-                            output.push(merged.clone());
-                            let Some(members) = groups.remove(&leader) else { return Ok(None) };
-                            output_members.push(members);
-                        } else {
-                            offset += 1;
-                            continue;
-                        }
-                    } else {
-                        output.push(face.clone());
-                        output_members.push(vec![offset]);
-                    }
-                    output_ids.push(output.last().ok_or_else(|| crate::KernelError::Failed("missing regularized face".into()))?.id());
-                    let source = sources[offset].as_ref();
-                    if let Some(source) = source {
-                        let Some(cost) = super::planar_sources::descriptor_cost(source) else { return Ok(None) };
-                        let Some(left) = metadata.checked_sub(cost) else { return Ok(None) };
-                        metadata = left;
-                    }
-                    let mut source = source.cloned();
-                    if generated
-                        && replacements.contains_key(&leader)
-                        && let Some(super::FaceSource::ExtrudeSide { coalesced, .. }) = &mut source
-                    {
-                        *coalesced = true;
-                    }
-                    output_sources.push(source);
-                    offset += 1;
-                }
-                shells.push(mt::Shell::from(output));
-            }
-            let solid = mt::Solid::try_new(shells).map_err(|e| crate::KernelError::Failed(format!("planar regularization does not close: {e}")))?;
-            let body = Body::new(solid)?.with_color(self.color()).with_paint(self.paint().cloned()).with_split_lines(self.split_lines().cloned());
-            if !body.solid.face_iter().map(|f| f.id()).eq(output_ids) {
-                return Ok(None);
-            }
-            Ok(Some(with_joined_history(body.with_face_sources(Some(Arc::new(output_sources))), &self, output_members)))
+            let body = body
+                .with_color(self.color())
+                .with_paint(self.paint().cloned())
+                .with_split_lines(self.split_lines().cloned())
+                .with_face_sources(Some(Arc::new(output)))
+                .with_checked_history(Some(h), &crate::record::counts(&[&self]));
+            // Over the operands of the operation that made `self`, as `self`'s history is.
+            let history = crate::boolean_record::through(&body, 0, self.history());
+            Ok(Some(Body { history: history.map(Arc::new), ..body }))
         })?;
         Ok(result.unwrap_or(self))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn alternate_adjacency_path_cannot_remove_protected_internal_edge() {
-        let vertices: Vec<_> =
-            (0..9).map(|i| mt::builder::vertex(super::super::p3(solidcraft_geom::Vec3::new((i % 3) as f64, (i / 3) as f64, 0.)))).collect();
-        let mut edges = HashMap::<(usize, usize), mt::Edge>::new();
-        let mut faces = Vec::new();
-        for (x, y) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-            let ids = [y * 3 + x, y * 3 + x + 1, (y + 1) * 3 + x + 1, (y + 1) * 3 + x];
-            let wire: mt::Wire = (0..4)
-                .map(|i| {
-                    let (a, b) = (ids[i], ids[(i + 1) % 4]);
-                    let key = (a.min(b), a.max(b));
-                    let edge = edges.entry(key).or_insert_with(|| mt::builder::line(&vertices[key.0], &vertices[key.1]));
-                    if a == key.0 { edge.clone() } else { edge.inverse() }
-                })
-                .collect();
-            faces.push(mt::builder::try_attach_plane(&[wire]).unwrap());
-        }
-        let refs: Vec<_> = faces.iter().collect();
-        let mut eligible: HashSet<_> = edges.values().map(|e| e.id()).collect();
-        assert!(merged_face(&refs, &[0, 1, 2, 3], Plane::XY, &eligible).is_some());
-        eligible.remove(&edges[&(1, 4)].id());
-        assert!(
-            merged_face(&refs, &[0, 1, 2, 3], Plane::XY, &eligible).is_none(),
-            "remaining three internal joins cannot bypass authored split protection"
-        );
     }
 }

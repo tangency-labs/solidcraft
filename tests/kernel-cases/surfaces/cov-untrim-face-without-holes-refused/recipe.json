@@ -1,0 +1,66 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "Sheet sketch"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     10,
+     10
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "surface.patch",
+   "params": {
+    "sketch": "Sheet sketch",
+    "body_name": "Sheet"
+   }
+  },
+  {
+   "command": "surface.untrim",
+   "params": {
+    "face": {
+     "body": "Sheet",
+     "point": [
+      5,
+      5,
+      0
+     ]
+    },
+    "holes": "all",
+    "in_place": true
+   }
+  }
+ ]
+}

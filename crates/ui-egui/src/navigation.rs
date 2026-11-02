@@ -876,7 +876,7 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
     }
     let sketch_turns = app.preferences.space_mouse_sketch_orbit;
     let sketch_view_is_initial = !sketch_turns
-        && solidcraft_engine::view::open_sketch_plane(&app.session).is_some_and(|plane| {
+        && solidcraft_engine::view::open_sketch_plane(&app.session).ok().flatten().is_some_and(|plane| {
             let normal = plane.normal();
             let mut initial = app.cam.looking_from(normal);
             if normal.z.abs() > 0.999 {

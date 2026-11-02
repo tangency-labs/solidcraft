@@ -48,7 +48,7 @@ fn a_line_of_another_sketch_picked_in_the_project_dialog_projects() {
     assert!(h.app.dialog.is_none(), "the dialog closes on a valid pick: {:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
     assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
     let sketch = h.app.session.active_sketch.expect("Project leaves the sketch active");
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(sketch).unwrap().sketch;
     assert!(sk.curves.iter().any(|curve| curve.link.is_some()), "the line is projected into the sketch");
     // The projection names the sketch it came from, so it follows it.
@@ -75,7 +75,7 @@ fn clicked_external_curve_and_point_project_with_source_identity_and_one_undo() 
     assert!(h.app.session.selection.is_empty());
     assert!(h.app.tool.is_none());
     assert_eq!(h.app.session.undo.len(), undo + 1);
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     assert_eq!(sk.curves.len(), 2);
     assert!(sk.curves.iter().any(|curve| curve.link.is_some()));
@@ -127,7 +127,7 @@ fn axis_and_plane_preselection_projects_as_one_command() {
     h.step(&json!({"start":"sketch.project"})).unwrap();
     assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
     assert_eq!(h.app.session.undo.len(), undo + 1);
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     assert_eq!(sk.curves.iter().filter(|c| c.link.is_some()).count(), 2);
     assert!(h.app.session.selection.is_empty());
@@ -147,7 +147,7 @@ fn mixed_local_and_external_selection_keeps_ordinary_project_picking() {
     assert_eq!(h.app.session.undo.len(), undo);
     h.step(&json!({"click":{"world":[20,10,10]}})).unwrap();
     assert_eq!(h.app.session.undo.len(), undo + 1);
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     assert!(state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.iter().any(|curve| curve.link.is_some()));
 }
 
@@ -186,7 +186,7 @@ fn a_rectangle_put_onto_a_projected_edge_is_still_a_profile_to_click() {
     h.call("ui.view", json!({"view":"bottom"}));
     h.step(&json!({"click":{"sketch":[15,12]}})).unwrap();
     assert_eq!(h.app.session.selection, vec![Sel::Profile { sketch, index: 0 }]);
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let ss = state.sketch(sketch).unwrap();
     assert_eq!(ss.profiles.len(), 1);
     let mut bounded_by = ss.profiles[0].outer_curves.clone();

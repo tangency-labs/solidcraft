@@ -5,18 +5,19 @@
 //! one from both sides. The answer itself comes from the exact geometry. Near the nearest mesh
 //! points, each body offers the face there and the edges of that face that pass close by; the
 //! points are moved in turn to the nearest point of one feature from the other (alternating
-//! projection) until they settle, on analytic surfaces in closed form and on other surfaces and
-//! curves through the kernel's point inversion. A point that settles off its face (past the
+//! projection) until they settle, on analytic surfaces in closed form, on other surfaces through
+//! the record's point inversion ([`SurfaceEval::project`]) and on curves by a bracketed search of
+//! the record curve's own points. A point that settles off its face (past the
 //! face's boundary) is dropped: the face's edges, offered too, then carry the minimum.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::mesh_distance::{MeshClosest, TriangleSet};
 use solidcraft_geom::{Aabb3, Mesh, Vec3};
-use truck_modeling as mt;
 
-use crate::body::{Body, from_p3, p3};
+use crate::body::Body;
 use crate::surface_kind::{FaceSurface, surface_of};
 use crate::{Result, guard};
 
@@ -40,8 +41,8 @@ pub struct DistanceShape<'a> {
     mesh: &'a Mesh,
     set: TriangleSet,
     chord: f64,
-    faces: Vec<mt::Face>,
-    edges: Vec<mt::Edge>,
+    faces: Vec<Option<SurfaceEval>>,
+    edges: Vec<Option<(CurveEval, [f64; 2])>>,
     surfaces: Vec<OnceLock<Option<FaceSurface>>>,
     face_tris: OnceLock<HashMap<u32, Vec<u32>>>,
 }
@@ -57,9 +58,9 @@ const ALONG: f64 = 1e-3;
 impl<'a> DistanceShape<'a> {
     /// `mesh` is `body`'s mesh, within `chord` (mm) of its faces.
     pub fn new(body: &'a Body, mesh: &'a Mesh, chord: f64) -> DistanceShape<'a> {
-        let exact = body.mesh.is_none();
-        let faces: Vec<mt::Face> = if exact { body.solid.face_iter().cloned().collect() } else { Vec::new() };
-        let edges = if exact { Body::unique_edges(&body.solid) } else { Vec::new() };
+        let record = body.record();
+        let faces: Vec<Option<SurfaceEval>> = record.faces.iter().map(|f| SurfaceEval::new(f.parameters()).ok()).collect();
+        let edges = record.edges.iter().map(|e| CurveEval::new(e.parameters()).ok().map(|c| (c, e.interval))).collect();
         let surfaces = faces.iter().map(|_| OnceLock::new()).collect();
         let chord = if chord.is_finite() && chord > 0.0 { chord } else { 0.0 };
         DistanceShape { body, mesh, set: TriangleSet::new(mesh), chord, faces, edges, surfaces, face_tris: OnceLock::new() }
@@ -81,7 +82,7 @@ impl<'a> DistanceShape<'a> {
     }
 
     fn surface(&self, face: usize) -> Option<FaceSurface> {
-        *self.surfaces.get(face)?.get_or_init(|| self.faces.get(face).and_then(|f| surface_of(f, self.body.size())))
+        *self.surfaces.get(face)?.get_or_init(|| surface_of(self.body.record(), face))
     }
 
     fn face_triangles(&self, face: u32) -> &[u32] {
@@ -181,48 +182,52 @@ impl<'a> DistanceShape<'a> {
 
     /// The point of `f` nearest `p`, with the parameter hint for the next call.
     fn project(&self, f: Feature, p: Vec3, hint: &mut Hint) -> Option<Vec3> {
-        use mt::{ParametricSurface, SearchNearestParameter};
         match f {
             Feature::Face(i) => {
                 if let Some(q) = self.surface(i).and_then(|s| s.nearest(p)) {
                     return Some(q);
                 }
-                let s = self.faces.get(i)?.oriented_surface();
-                let uv = s.search_nearest_parameter(p3(p), hint.uv, 100).or_else(|| s.search_nearest_parameter(p3(p), None, 100))?;
+                let s = self.faces.get(i)?.as_ref()?;
+                let uv = s.project(p, hint.uv, f64::INFINITY).or_else(|| s.project(p, None, f64::INFINITY))?;
                 hint.uv = Some(uv);
-                Some(from_p3(s.subs(uv.0, uv.1))).filter(|q| q.is_finite())
+                s.point(uv).filter(|q| q.is_finite())
             }
             Feature::Edge(i) => self.edge_nearest(i, p, hint).map(|(q, _)| q),
         }
     }
 
-    /// The point of edge `i` nearest `p`, with the edge's direction there.
+    /// The point of edge `i` nearest `p`, with the edge's direction there: the nearest of evenly
+    /// spaced points along it (or the last call's), narrowed between its neighbours by golden
+    /// section on the record curve's own points.
     fn edge_nearest(&self, i: usize, p: Vec3, hint: &mut Hint) -> Option<(Vec3, Vec3)> {
-        use mt::{BoundedCurve, ParametricCurve, SearchNearestParameter};
-        let c = self.edges.get(i)?.oriented_curve();
-        let (t0, t1) = c.range_tuple();
-        let (lo, hi) = (t0.min(t1), t0.max(t1));
-        let at = |t: f64| from_p3(c.subs(t));
+        let (c, [t0, t1]) = self.edges.get(i)?.as_ref()?;
+        let (t0, t1) = (*t0, *t1);
+        let dist = |t: f64| c.point(t).map_or(f64::INFINITY, |q| q.dist(p));
+        let n = 32;
+        let step = (t1 - t0) / f64::from(n);
         let start = match hint.t {
-            Some(t) => t,
-            None => {
-                // A coarse look along the curve, then the inversion from the best sample.
-                let n = 32;
-                (0..=n).map(|k| t0 + (t1 - t0) * f64::from(k) / f64::from(n)).min_by(|a, b| at(*a).dist(p).total_cmp(&at(*b).dist(p)))?
-            }
+            Some(t) if dist(t).is_finite() => t,
+            _ => (0..=n).map(|k| t0 + step * f64::from(k)).min_by(|a, b| dist(*a).total_cmp(&dist(*b)))?,
         };
-        let mut best = (start.clamp(lo, hi), f64::INFINITY);
-        best.1 = at(best.0).dist(p);
-        for t in [c.search_nearest_parameter(p3(p), Some(start), 64).map(|t| t.clamp(lo, hi)), Some(t0), Some(t1)].into_iter().flatten() {
-            let d = at(t).dist(p);
-            if d < best.1 {
-                best = (t, d);
+        let (mut lo, mut hi) = ((start - step).max(t0), (start + step).min(t1));
+        let golden = 0.5 * (5f64.sqrt() - 1.0);
+        for _ in 0..80 {
+            let (x, y) = (hi - golden * (hi - lo), lo + golden * (hi - lo));
+            if dist(x) <= dist(y) {
+                hi = y;
+            } else {
+                lo = x;
             }
         }
-        hint.t = Some(best.0);
-        let d = c.der(best.0);
-        let q = at(best.0);
-        q.is_finite().then_some((q, Vec3::new(d.x, d.y, d.z)))
+        let t = [0.5 * (lo + hi), t0, t1].into_iter().min_by(|a, b| dist(*a).total_cmp(&dist(*b)))?;
+        hint.t = Some(t);
+        let q = c.point(t)?;
+        let h = (t1 - t0) * 1e-6;
+        let dir = match c.derivs(t) {
+            Some((_, d)) => d,
+            None => c.point((t + h).min(t1))? - c.point((t - h).max(t0))?,
+        };
+        q.is_finite().then_some((q, dir))
     }
 }
 
@@ -234,7 +239,7 @@ enum Feature {
 
 #[derive(Clone, Copy, Default)]
 struct Hint {
-    uv: Option<(f64, f64)>,
+    uv: Option<[f64; 2]>,
     t: Option<f64>,
 }
 
@@ -266,7 +271,7 @@ pub fn body_distance(a: &DistanceShape, b: &DistanceShape, limit: f64) -> Result
     let slack = 2.0 * (a.chord + b.chord);
     let Some(m) = a.mesh_closest(b, if limit.is_finite() { limit + slack } else { f64::INFINITY }) else { return Ok(None) };
     let mesh = BodyDistance { distance: m.distance, from: m.a, to: m.b, exact: false };
-    if a.faces.is_empty() || b.faces.is_empty() {
+    if a.body.is_mesh() || b.body.is_mesh() {
         return Ok(Some(mesh));
     }
     // The face pairs near the nearest mesh points, each with its nearest triangle pair.

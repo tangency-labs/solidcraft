@@ -1,0 +1,109 @@
+# The fillet rig as a regression gate: a pull request that touches fillet code (the paths below)
+# runs every case in tests/kernel-cases/fillets/ on SMLib, through one release build of
+# solidcraft-cli, and fails on a regression (a case that fails and
+# tests/kernel-cases/fillets/KNOWN_FAILING does not list) or on a listed case that now passes
+# (it is fixed: remove its line, so the list only shrinks). See tests/kernel-cases/README.md.
+#
+# GitHub filters a workflow by whole files, so the fillet parts of crates/doc/src/eval*.rs and
+# crates/engine/src/cmd/features.rs select it whenever those files change. Pushes to main and
+# develop that touch the same paths run it too and save the compiler cache (a Blacksmith sticky
+# disk) that pull requests then mount read-only.
+name: Fillet rig
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "crates/kernel/src/blend*.rs"
+      - "crates/kernel/src/fillet*.rs"
+      - "crates/kernel/src/*corner*.rs"
+      - "crates/kernel/src/continuity*.rs"
+      - "crates/smlib/**"
+      - "crates/doc/src/eval*.rs"
+      - "crates/engine/src/cmd/features.rs"
+      - "tests/kernel-cases/fillets/**"
+      # The rig itself: the grading, the runner and this workflow.
+      - "apps/solidcraft-cli/src/kernel_cases.rs"
+      - "xtask/src/kernel_cases.rs"
+      - "scripts/fetch-smlib.sh"
+      - ".github/workflows/fillet-rig.yml"
+  push:
+    branches: [main, develop]
+    # The same paths as pull_request.
+    paths:
+      - "crates/kernel/src/blend*.rs"
+      - "crates/kernel/src/fillet*.rs"
+      - "crates/kernel/src/*corner*.rs"
+      - "crates/kernel/src/continuity*.rs"
+      - "crates/smlib/**"
+      - "crates/doc/src/eval*.rs"
+      - "crates/engine/src/cmd/features.rs"
+      - "tests/kernel-cases/fillets/**"
+      # The rig itself: the grading, the runner and this workflow.
+      - "apps/solidcraft-cli/src/kernel_cases.rs"
+      - "xtask/src/kernel_cases.rs"
+      - "scripts/fetch-smlib.sh"
+      - ".github/workflows/fillet-rig.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fillet-rig-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fillets:
+    name: Fillet rig
+    # Draft pull requests run no CI, as in ci.yml.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 60
+    env:
+      CARGO_INCREMENTAL: "0"
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: /home/runner/.cache/sccache
+      SCCACHE_CACHE_SIZE: 10G
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Size parallel compiles to the job's memory
+        run: scripts/ci/build-jobs.sh
+      - uses: dtolnay/rust-toolchain@stable
+      # Only main and develop commit the cache; pull requests and forks mount a clone and never
+      # write back.
+      - name: Mount the compiler cache
+        uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        continue-on-error: true
+        with:
+          key: ${{ github.repository }}-sccache-fillet-rig
+          path: /home/runner/.cache/sccache
+          commit: ${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && 'on-change' || 'false' }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: fillet-rig
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
+      - name: Set up compiler cache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.16.0
+      - name: Build the CLI (release, SMLib)
+        run: cargo build --release --locked -p solidcraft-cli --features smlib
+      - name: Run the fillet cases against the known-failing list
+        run: >-
+          cargo run -q --locked -p xtask -- kernel-cases --area fillets
+          --cli target/release/solidcraft-cli --out "$RUNNER_TEMP/fillet-rig"
+          --known-failing tests/kernel-cases/fillets/KNOWN_FAILING
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fillet-rig-results
+          path: ${{ runner.temp }}/fillet-rig/results.json
+          if-no-files-found: ignore

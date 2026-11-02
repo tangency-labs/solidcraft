@@ -1,0 +1,35 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 2,
+    "height": 12,
+    "body_name": "A"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 2,
+    "height": 12,
+    "base": [
+     0,
+     0,
+     0.75
+    ],
+    "body_name": "B"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "A",
+    "tools": [
+     "B"
+    ],
+    "operation": "intersect"
+   }
+  }
+ ]
+}

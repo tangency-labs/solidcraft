@@ -20,7 +20,7 @@ fn design(name: &str) -> Session {
 }
 /// `s` copies its placement `path` for another design.
 fn copied(s: &Session, path: Vec<u64>) -> Option<Arc<ForeignCopy>> {
-    Some(Arc::new(ForeignCopy::of(s, Vec::new(), vec![path])))
+    ForeignCopy::of(s, Vec::new(), vec![path]).ok().map(Arc::new)
 }
 
 /// A component copied in another design pastes as an independent copy of it and what it holds:
@@ -37,7 +37,7 @@ fn a_component_from_another_design_pastes_with_its_history() {
     run(&mut source, "component.activate", json!({"component": 0}));
     run(&mut source, "occurrence.ground", json!({"occurrence": at, "grounded": false}));
     run(&mut source, "occurrence.move", json!({"occurrence": at, "translate": [0, 30, 0]}));
-    let was = source.world_state().body("Cube").unwrap().mesh().bounds();
+    let was = source.world_state().unwrap().body("Cube").unwrap().mesh().bounds();
     let box_features = source.doc.features.len();
 
     let mut s = design("Frame");
@@ -55,7 +55,7 @@ fn a_component_from_another_design_pastes_with_its_history() {
     assert_eq!(s.doc.features.len(), box_features, "the box's history came along");
     assert!((volume(&mut s, new) - 16.0).abs() < 1e-6);
     assert_eq!(s.doc.appearances.bodies["Cube"].color, [0xab, 0xcd, 0xef]);
-    let is = s.world_state().body("Cube").unwrap().mesh().bounds();
+    let is = s.world_state().unwrap().body("Cube").unwrap().mesh().bounds();
     assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
     // Its history is its own: changing it here leaves the original as it was.
     let copy = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Box { .. })).unwrap();

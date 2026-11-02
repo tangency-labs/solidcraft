@@ -1,0 +1,32 @@
+# oracle/65-sketch-gear-tooth: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Tooth: 9 faces, 21 edges
+Tooth face F2:side:f1
+Tooth face F2:side:f2
+Tooth face F2:side:r1
+Tooth face F2:side:r2
+Tooth face F2:side:s1
+Tooth face F2:side:s2
+Tooth face F2:side:t1
+Tooth face F2:start
+Tooth face F2:top
+Tooth edge F2:side:f1|F2:side:r1
+Tooth edge F2:side:f1|F2:side:t1
+Tooth edge F2:side:f1|F2:start
+Tooth edge F2:side:f1|F2:top
+Tooth edge F2:side:f2|F2:side:r2
+Tooth edge F2:side:f2|F2:side:t1
+Tooth edge F2:side:f2|F2:start
+Tooth edge F2:side:f2|F2:top
+Tooth edge F2:side:r1|F2:side:s1
+Tooth edge F2:side:r1|F2:start
+Tooth edge F2:side:r1|F2:top
+Tooth edge F2:side:r2|F2:side:s2
+Tooth edge F2:side:r2|F2:start
+Tooth edge F2:side:r2|F2:top
+Tooth edge F2:side:s1|F2:side:s2
+Tooth edge F2:side:s1|F2:start
+Tooth edge F2:side:s1|F2:top
+Tooth edge F2:side:s2|F2:start
+Tooth edge F2:side:s2|F2:top
+Tooth edge F2:side:t1|F2:start
+Tooth edge F2:side:t1|F2:top

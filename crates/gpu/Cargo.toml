@@ -26,8 +26,9 @@ wgpu = { workspace = true, features = ["metal", "vulkan", "dx12", "gles"] }
 [dev-dependencies]
 image = { workspace = true }
 solidcraft-kernel = { workspace = true }
-# Headless pictures of real designs (capture tests).
-solidcraft-engine = { workspace = true, features = ["bundled-render-library"] }
+# Headless pictures of real designs (capture tests), built by the real kernel: SMLib
+# (scripts/fetch-smlib.sh), as in the apps.
+solidcraft-engine = { workspace = true, features = ["bundled-render-library", "smlib"] }
 solidcraft-io = { workspace = true }
 serde_json = { workspace = true }
 # The HLSL the D3D12 backend compiles (tests check it suits FXC).

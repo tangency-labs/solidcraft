@@ -187,7 +187,13 @@ mod tests {
         }
         assert!(std::sync::Arc::ptr_eq(&reference, &mb.mesh()));
         assert_eq!(mb.display_plan_at(DisplayQuality::Normal).unwrap().vertex_count(), {
-            let plan = mb.body.display_plan_angular((mb.body.size() * 1e-3).max(1e-3), solidcraft_kernel::DISPLAY_ANGLE).unwrap();
+            let plan = mb
+                .body
+                .mesh_plan(&solidcraft_kernel::MeshTolerance {
+                    chord: (mb.body.size() * 1e-3).max(1e-3),
+                    angle: Some(solidcraft_kernel::DISPLAY_ANGLE),
+                })
+                .unwrap();
             plan.vertex_count()
         });
     }

@@ -4,15 +4,20 @@
 //! Bézier chains). Vertices and edges at the same places are shared, so the faces close into
 //! one shell without booleans — for solids whose faces are known exactly, such as folded
 //! sheet metal.
+//!
+//! The faces are assembled into a schema 4 record with exactly the topology the descriptions
+//! give ([`assemble`]: shared edges, shells, regions, canonical order), which SMLib builds the
+//! body from. No tolerance stitching is involved: two sheets of material meeting along one
+//! geometric edge keep an edge each.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use mt::builder;
+use solidcraft_geom::brep::eval::{SurfaceEval, face_flux};
+use solidcraft_geom::brep::{self as b, Curve2, pcurve};
 use solidcraft_geom::{Ring, Vec3};
-use truck_modeling as mt;
 
-use crate::body::{Body, Solid, p3, v3};
+use crate::body::Body;
 use crate::{KernelError, Result, guard};
 
 /// Most control points of one Bézier chain edge.
@@ -219,77 +224,526 @@ fn welded(faces: &[FaceSpec]) -> Option<Vec<FaceSpec>> {
     )
 }
 
-#[derive(Default)]
-struct Cache {
-    /// Vertices by point and fan (see [`corner_fans`]).
-    verts: HashMap<(Key, usize), mt::Vertex>,
-    edges: HashMap<(Key, usize, Key, usize, Option<Key>, usize), mt::Edge>,
+fn arr(p: Vec3) -> [f64; 3] {
+    [p.x, p.y, p.z]
 }
 
-impl Cache {
-    fn vertex(&mut self, p: Vec3, fan: usize) -> mt::Vertex {
-        self.verts.entry((key(p), fan)).or_insert_with(|| builder::vertex(p3(p))).clone()
+fn v3(p: [f64; 3]) -> Vec3 {
+    Vec3::new(p[0], p[1], p[2])
+}
+
+/// The vertices and edges of the faces being sewn, shared by key.
+#[derive(Default)]
+struct Builder {
+    vertices: Vec<[f64; 3]>,
+    /// Vertices by point and fan (see [`corner_fans`]).
+    verts: HashMap<(Key, usize), u32>,
+    edges: Vec<PartEdge>,
+    by_key: HashMap<(Key, usize, Key, usize, Option<Key>, usize), u32>,
+}
+
+impl Builder {
+    fn vertex(&mut self, p: Vec3, fan: usize) -> Result<u32> {
+        if let Some(v) = self.verts.get(&(key(p), fan)) {
+            return Ok(*v);
+        }
+        let v = u32::try_from(self.vertices.len()).map_err(|_| KernelError::Invalid("sew: vertex budget exceeded".into()))?;
+        self.vertices.push(arr(p));
+        self.verts.insert((key(p), fan), v);
+        Ok(v)
     }
-    /// The edge `e` on boundary sheet `sheet`, between the vertices of fans `fans` at its ends.
-    fn edge(&mut self, e: &EdgeSpec, sheet: usize, (fa, fb): (usize, usize)) -> Result<mt::Edge> {
+
+    fn point(&self, v: u32) -> Vec3 {
+        self.vertices.get(v as usize).copied().map_or(Vec3::ZERO, v3)
+    }
+
+    /// Where the vertex at `p` is (the first point met in its cell), `p` itself before any.
+    fn at(&self, p: Vec3) -> Vec3 {
+        self.verts.get(&(key(p), 0)).map_or(p, |v| self.point(*v))
+    }
+
+    /// The edge `e` on boundary sheet `sheet`, between the vertices of fans `fans` at its ends,
+    /// and whether `e` runs along it.
+    fn edge(&mut self, e: &EdgeSpec, sheet: usize, (fa, fb): (usize, usize)) -> Result<(u32, bool)> {
         let (a, b) = e.ends();
         let mid = e.mid_key();
         let (ka, kb) = (key(a), key(b));
-        if let Some(found) = self.edges.get(&(ka, fa, kb, fb, mid, sheet)) {
-            return Ok(found.clone());
+        if let Some(found) = self.by_key.get(&(ka, fa, kb, fb, mid, sheet)) {
+            return Ok((*found, true));
         }
-        if let Some(found) = self.edges.get(&(kb, fb, ka, fa, mid, sheet)) {
-            return Ok(found.inverse());
+        if let Some(found) = self.by_key.get(&(kb, fb, ka, fa, mid, sheet)) {
+            return Ok((*found, false));
         }
-        let (va, vb) = (self.vertex(a, fa), self.vertex(b, fb));
-        let made = match e {
-            EdgeSpec::Line { .. } => builder::line(&va, &vb),
-            EdgeSpec::Arc { mid, .. } => arc_edge(&va, &vb, *mid),
+        let (va, vb) = (self.vertex(a, fa)?, self.vertex(b, fb)?);
+        let (pa, pb) = (self.point(va), self.point(vb));
+        let (curve, interval) = match e {
+            EdgeSpec::Line { .. } => (b::Curve::Line { start: arr(pa), end: arr(pb) }, [0.0, 1.0]),
+            EdgeSpec::Arc { mid, .. } => arc_curve(pa, pb, *mid)?,
             EdgeSpec::Chain { .. } => {
-                let curve = self.chain(e)?;
-                mt::Edge::try_new(&va, &vb, mt::Curve::BSplineCurve(curve)).map_err(|e| KernelError::Failed(format!("sew: chain edge: {e}")))?
+                let (knots, points) = chain(e, pa, pb)?;
+                let n = knots.last().copied().unwrap_or(1.0);
+                (b::Curve::Spline { knots, points }, [0.0, n])
             }
         };
-        self.edges.insert((ka, fa, kb, fb, mid, sheet), made.clone());
-        Ok(made)
+        let id = u32::try_from(self.edges.len()).map_err(|_| KernelError::Invalid("sew: edge budget exceeded".into()))?;
+        self.edges.push(PartEdge { nurbs: None, curve, interval, vertices: [va, vb] });
+        self.by_key.insert((ka, fa, kb, fb, mid, sheet), id);
+        Ok((id, true))
     }
 
-    /// A Bézier chain as a B-spline of its degree (inner knots as many times as the degree)
-    /// ending on the shared vertices.
-    fn chain(&mut self, e: &EdgeSpec) -> Result<mt::BSplineCurve<mt::Point3>> {
-        let EdgeSpec::Chain { degree, ctrl } = e else { return Err(KernelError::Invalid("sew: not a Bézier chain".into())) };
-        if !e.valid() {
-            return Err(KernelError::Invalid("sew: a Bézier chain needs degree·n + 1 finite control points".into()));
+    /// The surface of face `fi` and whether its natural normal points outward; on a ruled face,
+    /// each use's exact pcurve is filled in.
+    fn surface(&self, fi: usize, f: &FaceSpec, loops: &mut [Vec<PartUse>], tol: f64) -> Result<(b::Surface, bool)> {
+        let fail = |m: &str| KernelError::Invalid(format!("sew: face {fi}: {m}"));
+        match &f.surface {
+            SurfSpec::Plane => plane_of(f).map(|s| (s, true)).ok_or_else(|| fail("cannot attach a plane to a wire that is not on one plane")),
+            SurfSpec::Revolved { a, b, axis_origin, axis, angle: _ } => {
+                let s = revolved(*a, *b, *axis_origin, *axis).map_err(|m| fail(&m))?;
+                Ok((s.clone(), outward(&s, f.probe)))
+            }
+            SurfSpec::Extruded { a, b, mid, dir } => {
+                let c = circumcentre(*a, *mid, *b).ok_or_else(|| fail("an arc through points in line"))?;
+                let n = (*mid - *a).cross(*b - *mid).normalized().ok_or_else(|| fail("an arc through points in line"))?;
+                let z = dir.normalized().ok_or_else(|| fail("an extrusion of no length"))?;
+                if n.cross(z).len() > 1e-9 {
+                    return Err(fail("not supported yet: an arc wall extruded askew to its arc's axis"));
+                }
+                let x = (*a - c).normalized().ok_or_else(|| fail("an arc of no radius"))?;
+                let y = z.cross(x).normalized().ok_or_else(|| fail("an arc of no radius"))?;
+                let frame = b::Frame { origin: arr(c), x_axis: arr(x), y_axis: arr(y) };
+                let s = b::Surface::Cylinder { frame, radius: a.dist(c) };
+                Ok((s.clone(), outward(&s, f.probe)))
+            }
+            SurfSpec::Ruled { a, b } => {
+                let (ka, pa) = chain(a, self.at(a.ends().0), self.at(a.ends().1))?;
+                let (kb, pb) = chain(b, self.at(b.ends().0), self.at(b.ends().1))?;
+                let (EdgeSpec::Chain { degree: da, .. }, EdgeSpec::Chain { degree: db, .. }) = (a, b) else {
+                    return Err(KernelError::Invalid("sew: not a Bézier chain".into()));
+                };
+                if da != db || pa.len() != pb.len() || ka != kb {
+                    return Err(KernelError::Invalid("sew: ruled chains differ in pieces".into()));
+                }
+                let points = pa.iter().zip(&pb).map(|(p, q)| vec![*p, *q]).collect();
+                let s = b::Surface::Spline { u_knots: ka.clone(), v_knots: vec![0.0, 0.0, 1.0, 1.0], points };
+                for u in loops.iter_mut().flatten() {
+                    let e = self.edges.get(u.edge as usize).ok_or_else(|| fail("edge"))?;
+                    u.given = Some(ruled_pcurve(e, *da, &ka, [&pa, &pb], tol).ok_or_else(|| fail("not supported yet: an edge across a ruled face"))?);
+                }
+                Ok((s.clone(), outward(&s, f.probe)))
+            }
         }
-        let d = *degree;
-        let n = (ctrl.len() - 1) / d;
-        let mut knots = vec![0.0; d + 1];
-        for i in 1..n {
-            knots.extend(std::iter::repeat_n(i as f64, d));
-        }
-        knots.extend(std::iter::repeat_n(n as f64, d + 1));
-        let mut pts: Vec<mt::Point3> = ctrl.iter().map(|p| p3(*p)).collect();
-        let (a, b) = e.ends();
-        if let Some(first) = pts.first_mut() {
-            *first = self.vertex(a, 0).point();
-        }
-        if let Some(last) = pts.last_mut() {
-            *last = self.vertex(b, 0).point();
-        }
-        mt::BSplineCurve::try_new(mt::KnotVec::from(knots), pts).map_err(|e| KernelError::Failed(format!("sew: chain curve: {e}")))
     }
+}
+
+/// A Bézier chain as a B-spline of its degree (inner knots as many times as the degree) ending on
+/// `a` and `b` (its vertices).
+fn chain(e: &EdgeSpec, a: Vec3, b: Vec3) -> Result<(Vec<f64>, Vec<[f64; 3]>)> {
+    let EdgeSpec::Chain { degree, ctrl } = e else { return Err(KernelError::Invalid("sew: not a Bézier chain".into())) };
+    if !e.valid() {
+        return Err(KernelError::Invalid("sew: a Bézier chain needs degree·n + 1 finite control points".into()));
+    }
+    let d = *degree;
+    let n = (ctrl.len() - 1) / d;
+    let mut knots = vec![0.0; d + 1];
+    for i in 1..n {
+        knots.extend(std::iter::repeat_n(i as f64, d));
+    }
+    knots.extend(std::iter::repeat_n(n as f64, d + 1));
+    let mut pts: Vec<[f64; 3]> = ctrl.iter().map(|p| arr(*p)).collect();
+    if let Some(first) = pts.first_mut() {
+        *first = arr(a);
+    }
+    if let Some(last) = pts.last_mut() {
+        *last = arr(b);
+    }
+    Ok((knots, pts))
+}
+
+/// Most Hermite pieces of a folded pcurve.
+const FOLD_PIECES: usize = 1024;
+/// How close, against the edge's size, a folded pcurve lifts onto its edge: as close as the
+/// folded edge's own chain is to the fold (sheet metal's `BEND_CHAIN_TOL`).
+const FOLD_TOL: f64 = 1e-7;
+
+/// The point and first three derivatives at `t` of a B-spline or NURBS curve (homogeneous
+/// `[x·w, y·w, z·w, w]` points; weight 1 for a B-spline): the homogeneous derivatives `A⁽ᵏ⁾`,
+/// `w⁽ᵏ⁾`, then `C⁽ᵏ⁾ = (A⁽ᵏ⁾ − Σⱼ₌₁ᵏ C(k, j) w⁽ʲ⁾ C⁽ᵏ⁻ʲ⁾) / w`.
+fn curve_derivs(knots: &[f64], points: &[[f64; 4]], t: f64) -> Option<[Vec3; 4]> {
+    let degree = knots.len().checked_sub(points.len() + 1)?;
+    let (first, ders) = solidcraft_geom::bspline::basis_derivatives(knots, degree, points.len(), t, 3)?;
+    let (mut a, mut w) = ([Vec3::ZERO; 4], [0.0f64; 4]);
+    for (i, d) in ders.iter().enumerate() {
+        let h = points.get(first + i)?;
+        for k in 0..4 {
+            let n = d.get(k).copied().unwrap_or(0.0);
+            a[k] += Vec3::new(h[0], h[1], h[2]) * n;
+            w[k] += h[3] * n;
+        }
+    }
+    if !(w[0].abs() > 0.0) {
+        return None;
+    }
+    let mut c = [Vec3::ZERO; 4];
+    for k in 0..4 {
+        let mut num = a[k];
+        for j in 1..=k {
+            let binom = [[1.0, 0.0, 0.0, 0.0], [1.0, 1.0, 0.0, 0.0], [1.0, 2.0, 1.0, 0.0], [1.0, 3.0, 3.0, 1.0]][k][j];
+            num -= c[k - j] * (binom * w[j]);
+        }
+        c[k] = num * (1.0 / w[0]);
+    }
+    Some(c)
+}
+
+/// A complex number as `(re, im)`.
+type Cx = (f64, f64);
+
+fn cmul(p: Cx, q: Cx) -> Cx {
+    (p.0 * q.0 - p.1 * q.1, p.0 * q.1 + p.1 * q.0)
+}
+
+fn cdiv(p: Cx, q: Cx) -> Cx {
+    let n = q.0 * q.0 + q.1 * q.1;
+    ((p.0 * q.0 + p.1 * q.1) / n, (p.1 * q.0 - p.0 * q.1) / n)
+}
+
+/// The Bézier control points of the degree-7 Hermite piece on `[s0, s1]` with the values and
+/// first three derivatives `p` at its start and `r` at its end (the k-th derivative of a Bézier of
+/// degree 7 at an end is 7!/(7 − k)! times the k-th difference of the control points there,
+/// scaled by `(s1 − s0)^k`).
+fn hermite7(p: [[f64; 2]; 4], r: [[f64; 2]; 4], h: f64) -> [[f64; 2]; 8] {
+    let (k1, k2, k3) = (h / 7.0, h * h / 42.0, h * h * h / 210.0);
+    let at = |d: [[f64; 2]; 4], m: [f64; 4]| [0, 1].map(|i| d[0][i] * m[0] + d[1][i] * m[1] + d[2][i] * m[2] + d[3][i] * m[3]);
+    [
+        p[0],
+        at(p, [1.0, k1, 0.0, 0.0]),
+        at(p, [1.0, 2.0 * k1, k2, 0.0]),
+        at(p, [1.0, 3.0 * k1, 3.0 * k2, k3]),
+        at(r, [1.0, -3.0 * k1, 3.0 * k2, -k3]),
+        at(r, [1.0, -2.0 * k1, k2, 0.0]),
+        at(r, [1.0, -k1, 0.0, 0.0]),
+        r[0],
+    ]
+}
+
+/// The pcurve on a cylinder or cone face of a B-spline edge with no closed form there: a
+/// flat-pattern edge folded across a bend, a helix, which no NURBS is (its 3D curve is already
+/// degree-7 Hermite pieces of the fold). The same construction in (u, v): degree-7 Hermite pieces
+/// on the edge's own parameter, matching the point and first three derivatives of its angle about
+/// the axis (through the form's quarter parameter when `form` is given) and of its height along
+/// the axis at each piece's ends. The pieces break where the angle crosses a quarter (the form's
+/// parameter is only once differentiable there) and are halved until they lift onto the edge
+/// within [`FOLD_TOL`]. An approximation by construction from exact derivatives, like the edge
+/// itself; nothing is fitted. `None` for another face or curve, or past the piece budget.
+fn folded_pcurve(label: &b::Surface, form: Option<&b::Surface>, curve: &b::Curve, [t0, t1]: [f64; 2]) -> Option<Curve2> {
+    use solidcraft_geom::bspline::{HPoint, bezier_point};
+    use std::f64::consts::{FRAC_PI_2, FRAC_PI_8, TAU};
+    let (b::Surface::Cylinder { frame, .. } | b::Surface::Cone { frame, .. }) = label else { return None };
+    let (knots, points): (&[f64], Vec<[f64; 4]>) = match curve {
+        b::Curve::Spline { knots, points } => (knots, points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()),
+        b::Curve::RationalSpline { knots, homogeneous } => (knots, homogeneous.clone()),
+        _ => return None,
+    };
+    let points = points.as_slice();
+    let (o, x, y) = (v3(frame.origin), v3(frame.x_axis).normalized()?, v3(frame.y_axis).normalized()?);
+    let z = x.cross(y).normalized()?;
+    let on = SurfaceEval::new(form.unwrap_or(label)).ok()?;
+    let edge = solidcraft_geom::brep::eval::CurveEval::new(curve).ok()?;
+    let raw_angle = |t: f64| -> Option<f64> {
+        let d = curve_derivs(knots, points, t)?[0] - o;
+        Some(d.dot(y).atan2(d.dot(x)))
+    };
+    let angle_near = |t: f64, near: f64| raw_angle(t).map(|a| a + ((near - a) / TAU).round() * TAU);
+    // The angle's branch at the start: inside the form's u range when there is one.
+    let mut start = raw_angle(t0)?;
+    if let Some(b::Surface::RationalSpline { u_knots, .. }) = form {
+        let (lo, hi) = (*u_knots.first()?, *u_knots.last()?);
+        let inside = |a: f64| (lo - 1e-9..=hi + 1e-9).contains(&solidcraft_geom::brep::form::param(a));
+        start = (-2..=2).map(|k| start + f64::from(k) * TAU).find(|a| inside(*a))?;
+    }
+    // The angle along the edge, unwrapped from its start, on a grid fine against the edge's spans.
+    let grid = 64 * knots.len().max(1);
+    let ts: Vec<f64> = (0..=grid).map(|i| t0 + (t1 - t0) * i as f64 / grid as f64).collect();
+    let mut angles = Vec::with_capacity(ts.len());
+    let mut prev = start;
+    for &t in &ts {
+        prev = angle_near(t, prev)?;
+        angles.push(prev);
+    }
+    // Breaks: the ends, and on a form each crossing of a quarter, found by bisection.
+    let mut breaks = vec![(t0, *angles.first()?)];
+    if form.is_some() {
+        for i in 1..ts.len() {
+            let (a0, a1) = (*angles.get(i - 1)?, *angles.get(i)?);
+            let (q0, q1) = ((a0 / FRAC_PI_2).floor(), (a1 / FRAC_PI_2).floor());
+            if q0 == q1 {
+                continue;
+            }
+            let target = q0.max(q1) * FRAC_PI_2;
+            let (mut lo, mut hi) = (*ts.get(i - 1)?, *ts.get(i)?);
+            for _ in 0..80 {
+                let mid = 0.5 * (lo + hi);
+                if (angle_near(mid, a0)? - target).signum() == (a0 - target).signum() {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            breaks.push((0.5 * (lo + hi), target));
+        }
+    }
+    breaks.push((t1, *angles.last()?));
+    let size = points.iter().fold(1.0f64, |m, h| [h[0], h[1], h[2]].iter().fold(m, |m, c| m.max((c / h[3]).abs())));
+    // A crossing within rounding of another break (or of an end), or nearer to it on the edge
+    // than the pcurve lifts onto the edge (`FOLD_TOL`), is that break; the end never goes into
+    // the start. An edge starting 3e-12 of its parameter short of a quarter had pieces 1.6e-12
+    // long, whose knots SMLib took as one, past a multiplicity of the degree + 1.
+    let close = 1e-12 * (t1 - t0).abs().max(1.0);
+    let lifts = |a: f64, b: f64| matches!((edge.point(a), edge.point(b)), (Some(p), Some(q)) if p.dist(q) <= FOLD_TOL * size);
+    let mut kept: Vec<(f64, f64)> = Vec::with_capacity(breaks.len());
+    for (i, b) in breaks.iter().enumerate() {
+        let is_end = i + 1 == breaks.len();
+        let both_ends = is_end && kept.len() == 1;
+        match kept.last_mut() {
+            Some(last) if (b.0 - last.0).abs() <= close || (!both_ends && lifts(last.0, b.0)) => {
+                if is_end {
+                    *last = *b;
+                }
+            }
+            _ => kept.push(*b),
+        }
+    }
+    let breaks = kept;
+    // u and v with their first three derivatives at `t`, angle `a`, in quarter `q` of the form.
+    let tq = FRAC_PI_8.tan();
+    let uv = |t: f64, a: f64, q: f64| -> Option<[[f64; 2]; 4]> {
+        let c = curve_derivs(knots, points, t)?;
+        let w = |d: Vec3| (d.dot(x), d.dot(y));
+        let (w0, r1, r2, r3) = (w(c[0] - o), w(c[1]), w(c[2]), w(c[3]));
+        let (r1, r2, r3) = (cdiv(r1, w0), cdiv(r2, w0), cdiv(r3, w0));
+        // θ = Im log w: (log w)' = w'/w, (log w)'' = w''/w − (w'/w)², (log w)''' = w'''/w −
+        // 3 w''w'/w² + 2 (w'/w)³.
+        let a1 = r1.1;
+        let a2 = r2.1 - cmul(r1, r1).1;
+        let a3 = r3.1 - 3.0 * cmul(r2, r1).1 + 2.0 * cmul(cmul(r1, r1), r1).1;
+        let h = [(c[0] - o).dot(z), c[1].dot(z), c[2].dot(z), c[3].dot(z)];
+        let u = if form.is_some() {
+            // The quarter parameter q + ½(1 + g/tan(π/8)), g = tan(ψ/2 − π/8), and its derivatives
+            // in θ, through to t by the chain rule.
+            let g = (0.5 * (a - q * FRAC_PI_2) - FRAC_PI_8).tan();
+            let g1 = 0.5 * (1.0 + g * g);
+            let g2 = g * g1;
+            let g3 = g1 * g1 + g * g2;
+            let (f1, f2, f3) = (g1 / (2.0 * tq), g2 / (2.0 * tq), g3 / (2.0 * tq));
+            [q + 0.5 * (1.0 + g / tq), f1 * a1, f2 * a1 * a1 + f1 * a2, f3 * a1 * a1 * a1 + 3.0 * f2 * a1 * a2 + f1 * a3]
+        } else {
+            [a, a1, a2, a3]
+        };
+        Some([0, 1, 2, 3].map(|k| [u[k], h[k]]))
+    };
+    let mut pieces = 1usize;
+    while pieces * breaks.len() <= FOLD_PIECES {
+        let mut knots2 = vec![t0; 8];
+        let mut ctrl: Vec<[f64; 2]> = Vec::new();
+        let mut worst = 0.0f64;
+        for w in breaks.windows(2) {
+            let (&(a, aa), &(e, ea)) = (w.first()?, w.get(1)?);
+            let q = (0.5 * (aa + ea) / FRAC_PI_2).floor();
+            let mut last = aa;
+            for k in 0..pieces {
+                let (s0, s1) = (a + (e - a) * k as f64 / pieces as f64, a + (e - a) * (k + 1) as f64 / pieces as f64);
+                let (b0, b1) = (last, if k + 1 == pieces { ea } else { angle_near(s1, last)? });
+                last = b1;
+                let piece = hermite7(uv(s0, b0, q)?, uv(s1, b1, q)?, s1 - s0);
+                ctrl.extend_from_slice(if ctrl.is_empty() { &piece[..] } else { &piece[1..] });
+                knots2.extend(std::iter::repeat_n(s1, 7));
+                let h = piece.map(|c| HPoint { x: c[0], y: c[1], z: 0.0, w: 1.0 });
+                for j in 1..8 {
+                    let f = f64::from(j) / 8.0;
+                    let q2 = bezier_point(&h, f).project()?;
+                    worst = worst.max(on.point([q2.x, q2.y])?.dist(edge.point(s0 + (s1 - s0) * f)?));
+                }
+            }
+        }
+        knots2.push(t1);
+        if worst <= FOLD_TOL * size {
+            return Some(Curve2::Spline { knots: knots2, points: ctrl });
+        }
+        pieces *= 2;
+    }
+    None
+}
+
+/// The exact pcurve of an edge of a ruled face `(1 − v)·A(u) + v·B(u)` (`rows` its chains A and
+/// B, of `degree` on `knots`): a chain lying on A or B either way round is `(u(t), 0 or 1)` with
+/// `u` affine in its parameter, and a line from a corner of A to the corner of B at the same `u`
+/// is a ruling, `(u, t)`. `None` for any other edge.
+fn ruled_pcurve(e: &PartEdge, degree: usize, knots: &[f64], rows: [&[[f64; 3]]; 2], tol: f64) -> Option<Curve2> {
+    let near = |p: &[f64; 3], q: &[f64; 3]| v3(*p).dist(v3(*q)) <= tol;
+    let n = *knots.last()?;
+    match &e.curve {
+        b::Curve::Spline { knots: ek, points } if ek.as_slice() == knots => {
+            for (v, row) in [0.0, 1.0].into_iter().zip(rows) {
+                if row.len() != points.len() {
+                    continue;
+                }
+                let forward = points.iter().zip(row).all(|(p, q)| near(p, q));
+                let backward = points.iter().zip(row.iter().rev()).all(|(p, q)| near(p, q));
+                if forward || backward {
+                    // Control points at the Greville abscissae give the affine u(t) exactly.
+                    let points = (0..points.len())
+                        .map(|i| {
+                            let xi = (1..=degree).map(|r| knots.get(i + r).copied().unwrap_or(0.0)).sum::<f64>() / degree as f64;
+                            [if forward { xi } else { n - xi }, v]
+                        })
+                        .collect();
+                    return Some(Curve2::Spline { knots: knots.to_vec(), points });
+                }
+            }
+            None
+        }
+        b::Curve::Line { start, end } => {
+            let corner = |p: &[f64; 3]| -> Option<[f64; 2]> {
+                for (v, row) in [0.0, 1.0].into_iter().zip(rows) {
+                    if row.first().is_some_and(|q| near(p, q)) {
+                        return Some([0.0, v]);
+                    }
+                    if row.last().is_some_and(|q| near(p, q)) {
+                        return Some([n, v]);
+                    }
+                }
+                None
+            };
+            let (s, z) = (corner(start)?, corner(end)?);
+            (s[0] == z[0] && s[1] != z[1]).then(|| Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![s, z] })
+        }
+        _ => None,
+    }
+}
+
+/// The plane of a face's boundary: through the mean of its control points (arcs' midpoints and
+/// chains' control points included), its normal the one the outer loop runs counter-clockwise
+/// about, summed about that mean (about a far origin the rounding of the sum grows with the
+/// square of the distance, and turns a thin face's short normal). None when the boundary has no
+/// area or leaves the plane by more than 10⁻⁶ mm.
+fn plane_of(f: &FaceSpec) -> Option<b::Surface> {
+    let points = |e: &EdgeSpec| -> Vec<Vec3> {
+        match e {
+            EdgeSpec::Line { a, b } => vec![*a, *b],
+            EdgeSpec::Arc { a, b, mid } => vec![*a, *mid, *b],
+            EdgeSpec::Chain { ctrl, .. } => ctrl.to_vec(),
+        }
+    };
+    let all: Vec<Vec3> = f.loops.iter().flatten().flat_map(points).collect();
+    let mean = all.iter().fold(Vec3::ZERO, |s, p| s + *p) * (1.0 / all.len().max(1) as f64);
+    let n = f.loops.first()?.iter().fold(Vec3::ZERO, |n, e| {
+        let p = points(e);
+        p.iter().zip(p.iter().skip(1)).fold(n, |n, (a, b)| n + (*a - mean).cross(*b - mean))
+    });
+    let n = n.normalized()?;
+    if !mean.is_finite() || all.iter().any(|p| ((*p - mean).dot(n)).abs() > 1e-6) {
+        return None;
+    }
+    let t = if n.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
+    let u = (t - n * t.dot(n)).normalized()?;
+    let v = n.cross(u).normalized()?;
+    Some(b::Surface::Plane { origin: arr(mean), u_axis: arr(u), v_axis: arr(v) })
+}
+
+/// The surface the line `a`→`b` sweeps turning about the axis: a cylinder (the line along the
+/// axis), a plane (square to it) or a cone (in a plane through it). A line skew to the axis
+/// sweeps a hyperboloid, which has no exact form here.
+fn revolved(a: Vec3, b: Vec3, origin: Vec3, axis: Vec3) -> std::result::Result<b::Surface, String> {
+    let k = axis.normalized().ok_or("the axis has no direction")?;
+    let foot = |p: Vec3| origin + k * (p - origin).dot(k);
+    let (ra, rb) = (a - foot(a), b - foot(b));
+    let along = (b - a).dot(k);
+    let scale = ra.len().max(rb.len());
+    if !(scale > 1e-12) {
+        return Err("a line along the axis sweeps no surface".into());
+    }
+    if ra.cross(rb).len() > 1e-9 * scale * scale || ra.dot(rb) < 0.0 {
+        return Err("not supported yet: a face revolved from a line skew to its axis or across it".into());
+    }
+    let x = if ra.len() >= rb.len() { ra } else { rb }.normalized().ok_or("a line on the axis")?;
+    let frame = |z: Vec3| -> std::result::Result<b::Frame, String> {
+        let y = z.cross(x).normalized().ok_or("frame")?;
+        Ok(b::Frame { origin: arr(foot(a)), x_axis: arr(x), y_axis: arr(y) })
+    };
+    if along.abs() <= 1e-12 * (b - a).len() {
+        let y = k.cross(x).normalized().ok_or("frame")?;
+        return Ok(b::Surface::Plane { origin: arr(foot(a)), u_axis: arr(x), v_axis: arr(y) });
+    }
+    let slope = (rb.len() - ra.len()) / along;
+    if slope.abs() <= 1e-12 {
+        return Ok(b::Surface::Cylinder { frame: frame(k)?, radius: ra.len() });
+    }
+    // The cone widens along its z.
+    let z = if slope > 0.0 { k } else { k * -1.0 };
+    Ok(b::Surface::Cone { frame: frame(z)?, radius_at_origin: ra.len(), half_angle: slope.abs().atan() })
+}
+
+/// Whether the surface's natural normal at the probe point faces the probe's outward
+/// direction (true without a probe, or where the point cannot be found on the surface).
+fn outward(surface: &b::Surface, probe: Option<(Vec3, Vec3)>) -> bool {
+    let Some((p, out)) = probe else { return true };
+    let Ok(s) = SurfaceEval::new(surface) else { return true };
+    let Some((_, su, sv)) = s.project(p, None, f64::INFINITY).and_then(|uv| s.derivs(uv[0], uv[1])) else { return true };
+    su.cross(sv).dot(out) >= 0.0
+}
+
+/// Below this sagitta-to-half-chord ratio an arc is the exact rational quadratic from its ends
+/// and midpoint, rather than a circle about its circumcentre: the centre of an arc 12 mm long
+/// with a 0.08 µm sagitta (a 225 m radius) is found to about 1e-6 mm, and the circle about it
+/// would miss the arc's own ends by as much.
+const FLAT_ARC: f64 = 1e-2;
+
+/// The arc from `a` to `b` through `mid` and its interval: a circle (angle from `a`), or for a
+/// flat arc one rational quadratic: the middle control point on the line from the chord's
+/// midpoint through `mid`, 2 / (1 − t²) as far, weight (1 − t²) / (1 + t²), where t is the
+/// sagitta over the half chord.
+fn arc_curve(a: Vec3, b: Vec3, mid: Vec3) -> Result<(b::Curve, [f64; 2])> {
+    let fail = || KernelError::Invalid("sew: an arc through points in line".into());
+    let m = (a + b) * 0.5;
+    let half = a.dist(b) / 2.0;
+    let chord = (b - a).normalized().ok_or_else(fail)?;
+    let bow = mid - m;
+    let t = bow.len() / half;
+    if half > 1e-9 && t < FLAT_ARC && bow.dot(chord).abs() <= 1e-9 * half.max(1.0) {
+        let w = (1.0 - t * t) / (1.0 + t * t);
+        let apex = m + bow * (2.0 / (1.0 - t * t));
+        let homogeneous = vec![[a.x, a.y, a.z, 1.0], [apex.x * w, apex.y * w, apex.z * w, w], [b.x, b.y, b.z, 1.0]];
+        return Ok((b::Curve::RationalSpline { knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], homogeneous }, [0.0, 1.0]));
+    }
+    let c = circumcentre(a, mid, b).ok_or_else(fail)?;
+    let n = (mid - a).cross(b - mid).normalized().ok_or_else(fail)?;
+    let x = (a - c).normalized().ok_or_else(fail)?;
+    let y = n.cross(x).normalized().ok_or_else(fail)?;
+    let angle = |p: Vec3| {
+        let r = p - c;
+        r.dot(y).atan2(r.dot(x)).rem_euclid(std::f64::consts::TAU)
+    };
+    let end = angle(b);
+    if !(end > 0.0) {
+        return Err(fail());
+    }
+    Ok((b::Curve::Circle { frame: b::Frame { origin: arr(c), x_axis: arr(x), y_axis: arr(y) }, radius: a.dist(c) }, [0.0, end]))
 }
 
 /// Sew the faces into a closed solid.
 pub fn sew(faces: &[FaceSpec]) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "sew");
     sew_impl(faces, false, None).map(|(body, _)| body)
 }
 
 /// Sew the faces into a closed solid that may touch itself: where four faces meet along a
-/// straight edge (a cut-out's corner on the outline of a plate), each two of them get an edge of
-/// their own (see [`touching_sheets`]), and where faces meet at a point in fans joined by no edge
-/// (a hole's corner on its face's outline), each fan gets a vertex of its own.
+/// straight edge (a cut-out's corner on the outline of a plate), each two of them that bound one
+/// wedge of material get an edge of their own (see [`touching_sheets`]); where faces meet at a
+/// point in fans joined by no edge (two caps touching at a corner), each fan gets a vertex of its
+/// own; and a face whose loops meet at a vertex (a hole's corner on its face's outline) has them
+/// as one loop through it (see [`join_touching_loops`]).
 pub fn sew_touching(faces: &[FaceSpec]) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "sew_touching");
     sew_impl(faces, true, None).map(|(body, _)| body)
 }
 
@@ -316,12 +770,10 @@ const SAME_WAY: f64 = 1e-6;
 /// of extruded arcs and on ruled walls are looked at.
 ///
 /// Each sheet bounds a wedge of material, so that pieces of material meeting along an edge stay
-/// apart, except where that would make a face touch itself: a hole touching the outline from
-/// inside (tangent, or at a corner) leaves its caps an outline and a hole meeting at the edge's
-/// end, which with the material kept apart would share a vertex, and a face can't have that.
-/// The material there goes round the hole, and the edges ending at such points get sheets that
-/// bound the empty wedges instead: the hole's wall on either side is one sheet, the outline's
-/// the other.
+/// apart, as SMLib keeps a solid touching itself along a line: an edge for each wedge of
+/// material, the two edges sharing their end vertices. A hole touching the outline from inside
+/// (tangent, or at a corner) leaves its caps an outline and a hole meeting at the edge's end, at
+/// one vertex: [`join_touching_loops`] makes them one loop through it.
 fn touching_sheets(faces: &[FaceSpec]) -> Result<(HashMap<EdgeUse, usize>, HashMap<Corner, usize>)> {
     let mut uses: HashMap<(Key, Key), Vec<(EdgeUse, Vec3, Vec3)>> = HashMap::new();
     for (fi, face) in faces.iter().enumerate() {
@@ -338,69 +790,27 @@ fn touching_sheets(faces: &[FaceSpec]) -> Result<(HashMap<EdgeUse, usize>, HashM
             }
         }
     }
-    // Each contact edge: its ends, both ways of pairing its faces, and whether the second is used.
-    let mut contacts = Vec::new();
-    for (ends, group) in uses.iter().filter(|(_, g)| g.len() > 2) {
-        let [material, empty] = edge_sheets(faces, group)?;
-        contacts.push((*ends, material, empty, false));
-    }
-    if contacts.is_empty() {
-        return Ok((HashMap::new(), corner_fans(faces, &HashMap::new())));
-    }
-    let sheets_of = |contacts: &[((Key, Key), [[EdgeUse; 2]; 2], [[EdgeUse; 2]; 2], bool)]| -> HashMap<EdgeUse, usize> {
-        let mut sheets = HashMap::new();
-        for (_, material, empty, round) in contacts {
-            for (sheet, pair) in (if *round { empty } else { material }).iter().enumerate() {
-                for u in pair {
-                    sheets.insert(*u, sheet);
-                }
+    // Each contact edge's sheets: its faces in the pairs that bound a wedge of material.
+    let mut sheets = HashMap::new();
+    for group in uses.values().filter(|g| g.len() > 2) {
+        for (sheet, pair) in edge_sheets(faces, group)?.iter().enumerate() {
+            for u in pair {
+                sheets.insert(*u, sheet);
             }
         }
-        sheets
-    };
-    // Each pass turns at least one edge round, and none back.
-    loop {
-        let sheets = sheets_of(&contacts);
-        let fans = corner_fans(faces, &sheets);
-        let touching = self_touching(faces, &fans);
-        let mut turned = false;
-        for (ends, _, _, round) in &mut contacts {
-            if !*round && (touching.contains(&ends.0) || touching.contains(&ends.1)) {
-                *round = true;
-                turned = true;
-            }
-        }
-        if !turned {
-            return Ok((sheets, fans));
-        }
     }
+    let fans = corner_fans(faces, &sheets);
+    Ok((sheets, fans))
 }
 
-/// The points where a face has two corners at one vertex (its loops would touch there).
-fn self_touching(faces: &[FaceSpec], fans: &HashMap<Corner, usize>) -> std::collections::HashSet<Key> {
-    let mut seen = std::collections::HashSet::new();
-    let mut out = std::collections::HashSet::new();
-    for (fi, f) in faces.iter().enumerate() {
-        for (li, l) in f.loops.iter().enumerate() {
-            for (ei, e) in l.iter().enumerate() {
-                let at = key(e.ends().0);
-                if !seen.insert((at, fans.get(&(fi, li, ei)).copied().unwrap_or(0), fi)) {
-                    out.insert(at);
-                }
-            }
-        }
-    }
-    out
-}
-
-/// The two ways of making sheets of an edge four faces meet along, as the pairs of faces
-/// bounding each: around the wedges of material between them, and around the empty ones.
+/// The sheets of an edge four faces meet along, as the pairs of faces bounding each: around the
+/// wedges of material between them.
 ///
 /// Seen along the edge, each face leaves it as a curve; going round the edge, material and empty
 /// wedges between them alternate. Faces are ordered by the way they leave the edge and, where
 /// they leave it the same way (tangent faces), by how fast they turn from it: the order of
 /// points a short way into each face, as in 2D loop chaining (`prism::tightest_left`).
-fn edge_sheets(faces: &[FaceSpec], group: &[(EdgeUse, Vec3, Vec3)]) -> Result<[[[EdgeUse; 2]; 2]; 2]> {
+fn edge_sheets(faces: &[FaceSpec], group: &[(EdgeUse, Vec3, Vec3)]) -> Result<[[EdgeUse; 2]; 2]> {
     let fail = |s: &str| KernelError::Invalid(format!("sew: {s}"));
     let (Some((_, a0, b0)), 4) = (group.first(), group.len()) else { return Err(fail("unsupported edge contact")) };
     let t = (if key(*a0) < key(*b0) { *b0 - *a0 } else { *a0 - *b0 }).normalized().ok_or_else(|| fail("a degenerate contact"))?;
@@ -440,14 +850,11 @@ fn edge_sheets(faces: &[FaceSpec], group: &[(EdgeUse, Vec3, Vec3)]) -> Result<[[
     if wedges.iter().any(|(p, q)| p.3 == q.3 || p.1 == q.1 || (same_way(p.4, q.4) && alike(p.2, q.2))) {
         return Err(fail("ambiguous edge contact"));
     }
-    let pairs = |material: bool| -> Result<[[EdgeUse; 2]; 2]> {
-        let mut it = wedges.iter().filter(|(p, _)| p.3 == material).map(|(p, q)| [p.0, q.0]);
-        match (it.next(), it.next()) {
-            (Some(x), Some(y)) => Ok([x, y]),
-            _ => Err(fail("ambiguous edge contact")),
-        }
-    };
-    Ok([pairs(true)?, pairs(false)?])
+    let mut it = wedges.iter().filter(|(p, _)| p.3).map(|(p, q)| [p.0, q.0]);
+    match (it.next(), it.next()) {
+        (Some(x), Some(y)) => Ok([x, y]),
+        _ => Err(fail("ambiguous edge contact")),
+    }
 }
 
 /// How a face leaves the straight edge `a`→`b` it bounds (its use `u`), seen along the edge's
@@ -523,11 +930,10 @@ fn circumcentre(a: Vec3, b: Vec3, c: Vec3) -> Option<Vec3> {
 /// A loop corner: face, loop, and the edge of the loop that starts there.
 type Corner = (usize, usize, usize);
 
-/// Where the faces meeting at a point form several fans, joined to each other by no edge (a hole
-/// touching its face's outline at one point; two caps touching at a corner), the fan each corner
-/// there is in, from 1 for every fan past the first (corners not listed are in fan 0). Each fan
-/// gets its own vertex, so that a face's loops share no vertex (truck's faces need that) and
-/// every vertex of the solid is a manifold one.
+/// Where the faces meeting at a point form several fans, joined to each other by no edge (two
+/// caps touching at a corner), the fan each corner there is in, from 1 for every fan past the
+/// first (corners not listed are in fan 0). Each fan gets its own vertex, so that pieces of
+/// material touching at a point share no vertex.
 fn corner_fans(faces: &[FaceSpec], sheets: &HashMap<EdgeUse, usize>) -> HashMap<Corner, usize> {
     type EdgeId = (Key, Key, Option<Key>, usize);
     let id = |fi: usize, li: usize, ei: usize, e: &EdgeSpec| -> EdgeId {
@@ -593,181 +999,132 @@ fn corner_fans(faces: &[FaceSpec], sheets: &HashMap<EdgeUse, usize>) -> HashMap<
     out
 }
 
-fn faces_connected(faces: &[mt::Face]) -> bool {
-    let mut by_edge: HashMap<mt::EdgeID, Vec<usize>> = HashMap::new();
-    for (i, f) in faces.iter().enumerate() {
-        for e in f.edge_iter() {
-            by_edge.entry(e.id()).or_default().push(i);
+/// The parent of `i` in a union-find forest, with path halving.
+fn root(parent: &mut [usize], mut i: usize) -> usize {
+    while let Some(&p) = parent.get(i) {
+        if p == i {
+            break;
         }
-    }
-    let mut seen = std::collections::HashSet::new();
-    let mut todo = vec![0];
-    while let Some(i) = todo.pop() {
-        if seen.insert(i)
-            && let Some(f) = faces.get(i)
-        {
-            for e in f.edge_iter() {
-                if let Some(adjacent) = by_edge.get(&e.id()) {
-                    todo.extend(adjacent.iter().copied().filter(|j| !seen.contains(j)));
-                }
-            }
+        let up = parent.get(p).copied().unwrap_or(p);
+        if let Some(slot) = parent.get_mut(i) {
+            *slot = up;
         }
+        i = p;
     }
-    seen.len() == faces.len()
+    i
 }
 
-/// Keep disconnected closed boundaries as distinct shells, preserving orientation.
-fn closed_components(faces: Vec<mt::Face>) -> Result<Vec<mt::Shell>> {
-    const MAX_EDGE_USES: usize = 500_000;
-    const MAX_COMPONENTS: usize = 1024;
-    let fail = |s: &str| KernelError::Invalid(format!("sew: {s}"));
-    let mut by_edge: HashMap<mt::EdgeID, Vec<usize>> = HashMap::new();
-    let mut edge_uses = 0usize;
-    for (i, face) in faces.iter().enumerate() {
-        for edge in face.edge_iter() {
-            edge_uses = edge_uses.saturating_add(1);
-            if edge_uses > MAX_EDGE_USES {
-                return Err(fail("edge budget exceeded"));
-            }
-            let uses = by_edge.entry(edge.id()).or_default();
-            if uses.len() >= 2 {
-                return Err(fail("nonmanifold edge contact"));
-            }
-            uses.push(i);
+fn join(parent: &mut [usize], a: usize, b: usize) {
+    let (a, b) = (root(parent, a), root(parent, b));
+    if let Some(slot) = parent.get_mut(a) {
+        *slot = b;
+    }
+}
+
+/// The faces using each edge, a face once per use.
+fn edge_users(edges: usize, faces: &[PartFace]) -> Result<Vec<Vec<usize>>> {
+    let mut users: Vec<Vec<usize>> = vec![Vec::new(); edges];
+    for (fi, f) in faces.iter().enumerate() {
+        for u in f.loops.iter().flatten() {
+            users.get_mut(u.edge as usize).ok_or_else(|| KernelError::Failed("sew: edge reference".into()))?.push(fi);
         }
     }
-    if by_edge.values().any(|uses| uses.len() != 2) {
-        return Err(fail("the faces do not close"));
+    Ok(users)
+}
+
+/// The connected groups of faces (joined through shared edges), each ascending, and each face's
+/// group.
+fn components(faces: usize, users: &[Vec<usize>]) -> (Vec<Vec<usize>>, Vec<usize>) {
+    let mut parent: Vec<usize> = (0..faces).collect();
+    for u in users {
+        for w in u.windows(2) {
+            if let [a, b] = w {
+                join(&mut parent, *a, *b);
+            }
+        }
     }
-    let mut seen = vec![false; faces.len()];
-    let mut vertices = HashMap::new();
-    let mut components = Vec::new();
-    for first in 0..faces.len() {
-        if seen.get(first).copied().unwrap_or(true) {
-            continue;
+    let mut group_of_root: HashMap<usize, usize> = HashMap::new();
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    let mut of = vec![0; faces];
+    for f in 0..faces {
+        let r = root(&mut parent, f);
+        let next = groups.len();
+        let g = *group_of_root.entry(r).or_insert(next);
+        if g == next {
+            groups.push(Vec::new());
         }
-        if components.len() >= MAX_COMPONENTS {
-            return Err(fail("component budget exceeded"));
+        if let (Some(group), Some(slot)) = (groups.get_mut(g), of.get_mut(f)) {
+            group.push(f);
+            *slot = g;
         }
-        let component = components.len();
-        let mut todo = vec![first];
-        if let Some(slot) = seen.get_mut(first) {
-            *slot = true;
+    }
+    (groups, of)
+}
+
+/// A contact's edge sheets can end in separate vertex fans: each fan gets its own vertex at the
+/// same point, so that every vertex of the boundary is a manifold one. A fan is the faces round
+/// the vertex joined through the edges that end there.
+fn split_vertex_fans(vertices: &mut Vec<[f64; 3]>, edges: &mut [PartEdge], faces: &[PartFace]) -> Result<()> {
+    let users = edge_users(edges.len(), faces)?;
+    let mut at: Vec<Vec<usize>> = vec![Vec::new(); vertices.len()];
+    for (e, edge) in edges.iter().enumerate() {
+        for v in edge.vertices {
+            if let Some(list) = at.get_mut(v as usize)
+                && list.last() != Some(&e)
+            {
+                list.push(e);
+            }
         }
-        let mut indices = Vec::new();
-        while let Some(i) = todo.pop() {
-            let face = faces.get(i).ok_or_else(|| fail("missing component face"))?;
-            indices.push(i);
-            for vertex in face.vertex_iter() {
-                if vertices.insert(vertex.id(), component).is_some_and(|previous| previous != component) {
-                    return Err(fail("bodies touch only at a vertex"));
+    }
+    for (v, incident) in at.iter().enumerate() {
+        // Faces round the vertex, joined by each incident edge.
+        let mut parent: HashMap<usize, usize> = HashMap::new();
+        let mut local: Vec<usize> = Vec::new();
+        let mut index = |f: usize, local: &mut Vec<usize>| -> usize {
+            *parent.entry(f).or_insert_with(|| {
+                local.push(local.len());
+                local.len() - 1
+            })
+        };
+        let mut edge_face = Vec::with_capacity(incident.len());
+        for &e in incident {
+            let fs: Vec<usize> = users.get(e).map(|u| u.iter().map(|f| index(*f, &mut local)).collect()).unwrap_or_default();
+            for w in fs.windows(2) {
+                if let [a, b] = w {
+                    join(&mut local, *a, *b);
                 }
             }
-            for edge in face.edge_iter() {
-                let adjacent = by_edge.get(&edge.id()).ok_or_else(|| fail("missing component edge"))?;
-                for j in adjacent {
-                    let slot = seen.get_mut(*j).ok_or_else(|| fail("missing adjacent face"))?;
-                    if !*slot {
-                        *slot = true;
-                        todo.push(*j);
+            edge_face.push((e, fs.first().copied()));
+        }
+        let mut fan_of_root: HashMap<usize, u32> = HashMap::new();
+        for (e, f) in edge_face {
+            let Some(f) = f else { continue };
+            let r = root(&mut local, f);
+            let fan = match fan_of_root.get(&r) {
+                Some(fan) => *fan,
+                None => {
+                    // The first fan keeps the vertex; each other gets a copy.
+                    let fan = if fan_of_root.is_empty() {
+                        v as u32
+                    } else {
+                        let p = vertices.get(v).copied().ok_or_else(|| KernelError::Failed("sew: vertex".into()))?;
+                        vertices.push(p);
+                        u32::try_from(vertices.len() - 1).map_err(|_| KernelError::Invalid("sew: vertex budget exceeded".into()))?
+                    };
+                    fan_of_root.insert(r, fan);
+                    fan
+                }
+            };
+            if let Some(edge) = edges.get_mut(e) {
+                for end in &mut edge.vertices {
+                    if *end as usize == v {
+                        *end = fan;
                     }
                 }
             }
         }
-        indices.sort_unstable();
-        let component_faces =
-            indices.into_iter().map(|i| faces.get(i).cloned().ok_or_else(|| fail("missing component face"))).collect::<Result<Vec<_>>>()?;
-        components.push(component_faces.into());
     }
-    Ok(components)
-}
-
-/// A contact's edge sheets can terminate in separate vertex fans. Give each fan
-/// its own vertex at the same coordinates so the boundary remains a manifold.
-fn split_vertex_fans(faces: Vec<mt::Face>) -> Result<Vec<mt::Face>> {
-    let mut by_vertex: HashMap<mt::VertexID, Vec<usize>> = HashMap::new();
-    let mut by_edge: HashMap<mt::EdgeID, Vec<usize>> = HashMap::new();
-    let mut vertices = HashMap::new();
-    for (i, f) in faces.iter().enumerate() {
-        for v in f.vertex_iter() {
-            vertices.insert(v.id(), v.clone());
-            by_vertex.entry(v.id()).or_default().push(i);
-        }
-        for e in f.edge_iter() {
-            by_edge.entry(e.id()).or_default().push(i);
-        }
-    }
-    let mut replacements: HashMap<(mt::VertexID, usize), mt::Vertex> = HashMap::new();
-    for (id, members) in &mut by_vertex {
-        members.sort_unstable();
-        members.dedup();
-        let mut seen = std::collections::HashSet::new();
-        let mut fans = Vec::new();
-        for start in members.iter().copied() {
-            if seen.contains(&start) {
-                continue;
-            }
-            let mut todo = vec![start];
-            let mut fan = Vec::new();
-            while let Some(i) = todo.pop() {
-                if !seen.insert(i) {
-                    continue;
-                }
-                fan.push(i);
-                if let Some(f) = faces.get(i) {
-                    for e in f.edge_iter().filter(|e| e.absolute_front().id() == *id || e.absolute_back().id() == *id) {
-                        if let Some(adjacent) = by_edge.get(&e.id()) {
-                            todo.extend(adjacent.iter().copied().filter(|j| !seen.contains(j)));
-                        }
-                    }
-                }
-            }
-            fans.push(fan);
-        }
-        if fans.len() > 1 {
-            let original = vertices.get(id).ok_or_else(|| KernelError::Failed("sew: missing contact vertex".into()))?;
-            for fan in fans {
-                let vertex = builder::vertex(original.point());
-                for i in fan {
-                    replacements.insert((*id, i), vertex.clone());
-                }
-            }
-        }
-    }
-    let mut edges = HashMap::new();
-    for (i, f) in faces.iter().enumerate() {
-        for e in f.edge_iter() {
-            edges.entry(e.id()).or_insert_with(|| {
-                let (a, b) = (e.absolute_front(), e.absolute_back());
-                let a = replacements.get(&(a.id(), i)).unwrap_or(a);
-                let b = replacements.get(&(b.id(), i)).unwrap_or(b);
-                mt::Edge::new(a, b, e.curve())
-            });
-        }
-    }
-    faces
-        .into_iter()
-        .map(|f| {
-            let wires: Vec<mt::Wire> = f
-                .absolute_boundaries()
-                .iter()
-                .map(|w| {
-                    w.edge_iter()
-                        .map(|e| {
-                            let rebuilt = edges.get(&e.id()).ok_or_else(|| KernelError::Failed("sew: missing contact edge".into()))?;
-                            Ok(if e.front() == e.absolute_front() { rebuilt.clone() } else { rebuilt.inverse() })
-                        })
-                        .collect::<Result<Vec<_>>>()
-                        .map(Into::into)
-                })
-                .collect::<Result<_>>()?;
-            let mut rebuilt = mt::Face::try_new(wires, f.surface()).map_err(|e| KernelError::Failed(format!("sew: contact face: {e}")))?;
-            if !f.orientation() {
-                rebuilt.invert();
-            }
-            Ok(rebuilt)
-        })
-        .collect()
+    Ok(())
 }
 
 fn sew_impl(faces: &[FaceSpec], touching: bool, sources: Option<&[Option<crate::FaceSource>]>) -> Result<(Body, Option<Vec<usize>>)> {
@@ -785,173 +1142,517 @@ fn sew_impl(faces: &[FaceSpec], touching: bool, sources: Option<&[Option<crate::
     }
     let welded = welded(faces);
     let faces = welded.as_deref().unwrap_or(faces);
+    let (mut lo, mut hi) =
+        (Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY), Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY));
     for f in faces {
         for l in &f.loops {
+            if l.is_empty() {
+                return Err(KernelError::Invalid("sew: an empty loop".into()));
+            }
             for e in l {
                 let (a, b) = e.ends();
-                // Ends that weld to one vertex would make truck panic on a zero-length edge (#268).
+                // Ends that weld to one vertex make an edge of no length.
                 if !e.valid() || !a.is_finite() || !b.is_finite() || a.dist(b) < 1e-9 || key(a) == key(b) {
                     return Err(KernelError::Invalid("sew: a degenerate edge".into()));
                 }
+                lo = lo.min(a).min(b);
+                hi = hi.max(a).max(b);
             }
         }
     }
+    // The record's working tolerance: 10⁻⁶ of the solid's size, at least 10⁻⁵ mm (the tolerance
+    // of a fitted face, `fill::face_tolerance`).
+    let tol = (lo.dist(hi) * 1e-6).max(1e-5);
     guard("sew", || {
         // Separate fans at a point only where contact is expected (as for edge sheets); a plain
         // sew refuses bodies touching at a vertex.
         let (sheets, fans) = if touching { touching_sheets(faces)? } else { (HashMap::new(), HashMap::new()) };
         let fan = |c: Corner| fans.get(&c).copied().unwrap_or(0);
-        let mut cache = Cache::default();
-        let mut out: Vec<mt::Face> = Vec::with_capacity(faces.len());
+        let mut built = Builder::default();
+        let mut parts: Vec<Vec<Vec<PartUse>>> = Vec::with_capacity(faces.len());
         for (fi, f) in faces.iter().enumerate() {
-            let wires: Vec<mt::Wire> = f
-                .loops
-                .iter()
-                .enumerate()
-                .map(|(li, l)| {
-                    let n = l.len().max(1);
-                    l.iter()
-                        .enumerate()
-                        .map(|(ei, e)| {
-                            cache.edge(e, sheets.get(&(fi, li, ei)).copied().unwrap_or(0), (fan((fi, li, ei)), fan((fi, li, (ei + 1) % n))))
-                        })
-                        .collect::<Result<Vec<_>>>()
-                        .map(Into::into)
-                })
-                .collect::<Result<_>>()?;
-            let face = match &f.surface {
-                SurfSpec::Plane => match builder::try_attach_plane(&wires) {
-                    Ok(face) => face,
-                    // truck's fit loses thin faces away from the origin: see `plane_about_the_mean`.
-                    Err(e) => {
-                        let plane = plane_about_the_mean(&wires).ok_or_else(|| KernelError::Failed(format!("sew: face {fi}: {e}")))?;
-                        mt::Face::try_new(wires, mt::Surface::Plane(plane)).map_err(|e| KernelError::Failed(format!("sew: face {fi}: {e}")))?
-                    }
-                },
-                SurfSpec::Revolved { a, b, axis_origin, axis, angle } => {
-                    let k = axis.normalized().ok_or_else(|| KernelError::Invalid("sew: axis".into()))?;
-                    let (va, vb) = (builder::vertex(p3(*a)), builder::vertex(p3(*b)));
-                    let swept: mt::Shell = builder::rsweep(&builder::line(&va, &vb), p3(*axis_origin), v3(k), mt::Rad(*angle));
-                    let tmp = swept.face_iter().next().cloned().ok_or_else(|| KernelError::Failed("sew: revolved surface".into()))?;
-                    curved(tmp.oriented_surface(), wires, f.probe, fi)?
+            let mut loops = Vec::with_capacity(f.loops.len());
+            for (li, l) in f.loops.iter().enumerate() {
+                let n = l.len().max(1);
+                let mut uses = Vec::with_capacity(l.len());
+                for (ei, e) in l.iter().enumerate() {
+                    let sheet = sheets.get(&(fi, li, ei)).copied().unwrap_or(0);
+                    let (edge, forward) = built.edge(e, sheet, (fan((fi, li, ei)), fan((fi, li, (ei + 1) % n))))?;
+                    uses.push(PartUse { edge, forward, given: None });
                 }
-                SurfSpec::Extruded { a, b, mid, dir } => {
-                    let (va, vb) = (builder::vertex(p3(*a)), builder::vertex(p3(*b)));
-                    let tmp: mt::Face = builder::tsweep(&arc_edge(&va, &vb, *mid), v3(*dir));
-                    curved(tmp.oriented_surface(), wires, f.probe, fi)?
-                }
-                SurfSpec::Ruled { a, b } => {
-                    let (ca, cb) = (cache.chain(a)?, cache.chain(b)?);
-                    if ca.degree() != cb.degree() || ca.control_points().len() != cb.control_points().len() {
-                        return Err(KernelError::Invalid("sew: ruled chains differ in pieces".into()));
-                    }
-                    let surface = mt::Surface::BSplineSurface(mt::BSplineSurface::homotopy(ca, cb));
-                    curved(surface, wires, f.probe, fi)?
-                }
-            };
-            out.push(face);
+                loops.push(uses);
+            }
+            parts.push(loops);
         }
-        let source_ids: HashMap<_, _> = out
-            .iter()
-            .enumerate()
-            .filter_map(|(i, f)| sources.and_then(|s| s.get(i)).and_then(Option::as_ref).map(|s| (f.id(), (f.orientation(), s))))
-            .collect();
-        if !sheets.is_empty() && !faces_connected(&out) {
+        let mut out: Vec<PartFace> = Vec::with_capacity(faces.len());
+        for (fi, (f, mut loops)) in faces.iter().zip(parts).enumerate() {
+            let (surface, forward) = built.surface(fi, f, &mut loops, tol)?;
+            out.push(PartFace { surface, forward, loops });
+        }
+        let Builder { mut vertices, mut edges, .. } = built;
+        let users = edge_users(edges.len(), &out)?;
+        if !sheets.is_empty() && components(out.len(), &users).0.len() > 1 {
             return Err(KernelError::Invalid("sew: bodies touch only along an edge".into()));
         }
         if !sheets.is_empty() {
-            out = split_vertex_fans(out)?;
+            split_vertex_fans(&mut vertices, &mut edges, &out)?;
         }
-        // Faces keep their identity into the solid (grouped into shells) and the body.
-        let built: HashMap<mt::FaceID, usize> = out.iter().enumerate().map(|(i, f)| (f.id(), i)).collect();
-        let shells = closed_components(out)?;
-        let solid = Solid::try_new(shells).map_err(|e| KernelError::Failed(format!("sew: the faces do not close: {e}")))?;
-        let from = solid.face_iter().map(|f| built.get(&f.id()).copied()).collect();
-        let body = Body::new(solid)?;
-        let mapped =
-            body.solid.face_iter().map(|f| source_ids.get(&f.id()).filter(|(o, _)| *o == f.orientation()).map(|(_, s)| (*s).clone())).collect();
-        Ok((body.with_face_sources(sources.map(|_| std::sync::Arc::new(mapped))), from))
+        join_touching_loops(&mut out, &edges)?;
+        // Each edge bounds two faces, and separate bodies share no vertex.
+        if users.iter().any(|u| u.len() > 2) {
+            return Err(KernelError::Invalid("sew: nonmanifold edge contact".into()));
+        }
+        if users.iter().any(|u| u.len() != 2) {
+            return Err(KernelError::Invalid("sew: the faces do not close".into()));
+        }
+        let (groups, group_of) = components(out.len(), &users);
+        if groups.len() > b::MAX_SHELLS {
+            return Err(KernelError::Invalid("sew: component budget exceeded".into()));
+        }
+        let mut vertex_group: Vec<Option<usize>> = vec![None; vertices.len()];
+        for (e, edge) in edges.iter().enumerate() {
+            let Some(&g) = users.get(e).and_then(|u| u.first()).and_then(|f| group_of.get(*f)) else { continue };
+            for v in edge.vertices {
+                let slot = vertex_group.get_mut(v as usize).ok_or_else(|| KernelError::Failed("sew: vertex reference".into()))?;
+                if slot.is_some_and(|other| other != g) {
+                    return Err(KernelError::Invalid("sew: bodies touch only at a vertex".into()));
+                }
+                *slot = Some(g);
+            }
+        }
+        let made = assemble(Parts { vertices, edges, faces: out, tolerance: tol }, true)?;
+        let smlib = solidcraft_smlib::Brep::from_record(&made.brep, true).map_err(|e| KernelError::Failed(format!("sew: SMLib: {e}")))?;
+        let (body, order) = crate::native::body_from_smlib_ordered(&smlib)?;
+        // The face of `faces` each face of the body was built from: record face `c` is SMLib's
+        // face `c`, which the order places in the body.
+        let from = order.and_then(|o| {
+            let mut from = vec![None; body.face_count()];
+            for (spec, &c) in made.faces.iter().enumerate() {
+                let j = if o.faces.is_empty() { c } else { *o.faces.get(c)? };
+                *from.get_mut(j)? = Some(spec);
+            }
+            from.into_iter().collect::<Option<Vec<usize>>>()
+        });
+        let mapped = sources.map(|s| {
+            let mapped: Vec<Option<crate::FaceSource>> = match &from {
+                Some(from) => from.iter().map(|i| s.get(*i).cloned().flatten()).collect(),
+                None => vec![None; body.face_count()],
+            };
+            Arc::new(mapped)
+        });
+        Ok((body.with_face_sources(mapped), from))
     })
 }
 
-/// Below this sagitta-to-half-chord ratio an arc is built as its exact rational quadratic from
-/// its ends and midpoint. truck's three-point arc (circumcentre, then a turn about it) misses
-/// its own ends on very flat arcs: one 12 mm long with a 0.08 µm sagitta (a 225 m radius) ends
-/// about 1e-6 mm off its vertex, and a planar face holding it far from the origin could not be
-/// given a plane (its wire's points no longer closed).
-const FLAT_ARC: f64 = 1e-2;
-
-/// The arc from `a` to `b` through `mid`: the exact rational quadratic for a flat arc, truck's
-/// three-point arc otherwise (and should the curve be refused, which its exact ends make
-/// impossible).
-fn arc_edge(a: &mt::Vertex, b: &mt::Vertex, mid: Vec3) -> mt::Edge {
-    let (pa, pb) = (a.point(), b.point());
-    let (pa, pb) = (Vec3::new(pa.x, pa.y, pa.z), Vec3::new(pb.x, pb.y, pb.z));
-    flat_arc(pa, pb, mid)
-        .and_then(|curve| mt::Edge::try_new(a, b, mt::Curve::NurbsCurve(curve)).ok())
-        .unwrap_or_else(|| builder::circle_arc(a, b, p3(mid)))
-}
-
-/// A flat arc (see [`FLAT_ARC`]) through its midpoint `mid` as one rational quadratic: the middle
-/// control point on the line from the chord's midpoint through `mid`, 2 / (1 − t²) as far, weight
-/// (1 − t²) / (1 + t²), where t is the sagitta over the half chord. None for a deeper arc, or
-/// when `mid` is not halfway along the chord.
-fn flat_arc(a: Vec3, b: Vec3, mid: Vec3) -> Option<mt::NurbsCurve<mt::Vector4>> {
-    let m = (a + b) * 0.5;
-    let half = a.dist(b) / 2.0;
-    let chord = (b - a).normalized()?;
-    let bow = mid - m;
-    let t = bow.len() / half;
-    if !(half > 1e-9) || !(t < FLAT_ARC) || bow.dot(chord).abs() > 1e-9 * half.max(1.0) {
-        return None;
-    }
-    let w = (1.0 - t * t) / (1.0 + t * t);
-    let apex = m + bow * (2.0 / (1.0 - t * t));
-    let h = |p: Vec3, w: f64| mt::Vector4::new(p.x * w, p.y * w, p.z * w, w);
-    Some(mt::NurbsCurve::new(mt::BSplineCurve::new(mt::KnotVec::bezier_knot(2), vec![h(a, 1.0), h(apex, w), h(b, 1.0)])))
-}
-
-/// A curved face on `surf`, turned so its normal at the probe points outward.
-fn curved(mut surf: mt::Surface, wires: Vec<mt::Wire>, probe: Option<(Vec3, Vec3)>, fi: usize) -> Result<mt::Face> {
-    use mt::{ParametricSurface3D, SearchParameter};
-    if let Some((p, outward)) = probe
-        && let Some((u, v)) = surf.search_parameter(p3(p), None, 100)
-    {
-        let n = surf.normal(u, v);
-        if Vec3::new(n.x, n.y, n.z).dot(outward) < 0.0 {
-            surf = mt::Invertible::inverse(&surf);
+/// Each face's loops that meet at a vertex as one loop through it twice: the first loop up to the
+/// vertex, the other from the vertex round to it again, then the rest of the first. That is how
+/// SMLib keeps a face whose hole touches its outline, or whose holes touch each other, at a
+/// corner: a face's loops share no vertex (SMLib's face tests 38 and 39), and two vertices at
+/// one point are one (test 32). Each loop keeps its direction, so the joined loop keeps the face
+/// on its left, and the outer loop stays first.
+fn join_touching_loops(faces: &mut [PartFace], edges: &[PartEdge]) -> Result<()> {
+    let start = |u: &PartUse| -> Result<u32> {
+        let e = edges.get(u.edge as usize).ok_or_else(|| KernelError::Failed("sew: edge reference".into()))?;
+        Ok(if u.forward { e.vertices[0] } else { e.vertices[1] })
+    };
+    for f in faces {
+        // Each join takes one loop away.
+        'join: while f.loops.len() > 1 {
+            for a in 0..f.loops.len() {
+                for b in a + 1..f.loops.len() {
+                    let (Some(la), Some(lb)) = (f.loops.get(a), f.loops.get(b)) else { continue };
+                    let mut at = None;
+                    'find: for (ia, ua) in la.iter().enumerate() {
+                        let v = start(ua)?;
+                        for (ib, ub) in lb.iter().enumerate() {
+                            if start(ub)? == v {
+                                at = Some((ia, ib));
+                                break 'find;
+                            }
+                        }
+                    }
+                    let Some((ia, ib)) = at else { continue };
+                    let mut lb = f.loops.remove(b);
+                    if let Some(la) = f.loops.get_mut(a) {
+                        let rest = la.split_off(ia);
+                        let head: Vec<PartUse> = lb.drain(..ib).collect();
+                        la.extend(lb);
+                        la.extend(head);
+                        la.extend(rest);
+                    }
+                    continue 'join;
+                }
+            }
+            break;
         }
     }
-    mt::Face::try_new(wires, surf).map_err(|e| KernelError::Failed(format!("sew: face {fi}: {e}")))
+    Ok(())
 }
 
-/// The plane of a boundary that truck's fit (`builder::try_attach_plane`) refused: truck's fit
-/// again, on the boundary moved so that the mean of its control points is the origin, and the
-/// plane moved back. None when truck refuses that one too (the boundary is not flat within
-/// truck's 1e-6, or has no area).
-///
-/// truck sums the cross products of consecutive control points about a centre, and takes the
-/// points' sum for that centre (it divides by the number of wires, not of points): eight times as
-/// far from the origin as a rectangle of four lines. The sum is the same about any centre; its
-/// rounding is not. It grows with the square of the centre's distance, and on a thin face, whose
-/// normal is short, turns the normal far enough for truck's own flatness test to fail: truck
-/// finds a 0.00013 x 30 mm face 360 mm from the origin 2e-6 mm out of the plane it fitted. With
-/// the centre at the origin the same face is 1e-14 mm out at most.
-fn plane_about_the_mean(wires: &[mt::Wire]) -> Option<mt::Plane> {
-    let (mut sum, mut count) = (Vec3::ZERO, 0usize);
-    for p in wires.iter().flat_map(|w| w.edge_iter()).flat_map(|e| e.oriented_curve().lift_up().control_points().clone()) {
-        sum += Vec3::new(p.x / p.w, p.y / p.w, p.z / p.w);
-        count += 1;
+/// One face to [`assemble`].
+pub(crate) struct PartFace {
+    pub surface: b::Surface,
+    /// The surface's natural normal points out of the material (on a sheet: to its front).
+    pub forward: bool,
+    /// The loops, counter-clockwise about the face's outward normal, the outer one first.
+    pub loops: Vec<Vec<PartUse>>,
+}
+
+/// One use of an edge in a loop: whether the loop runs along it, and its exact pcurve where the
+/// caller holds one (on the edge's interval, in its direction).
+pub(crate) struct PartUse {
+    pub edge: u32,
+    pub forward: bool,
+    pub given: Option<Curve2>,
+}
+
+pub(crate) struct PartEdge {
+    pub curve: b::Curve,
+    /// The NURBS form the edge is parameterised on, as a record edge keeps it
+    /// ([`b::Edge::nurbs`]): given, `interval` is on it and `curve` only says what the edge is,
+    /// so an edge taken from a record goes back as that same edge.
+    pub nurbs: Option<b::Curve>,
+    pub interval: [f64; 2],
+    pub vertices: [u32; 2],
+}
+
+/// Faces on shared edges and vertices, to be made a record; `tolerance` is every vertex's and
+/// edge's, and the record's.
+pub(crate) struct Parts {
+    pub vertices: Vec<[f64; 3]>,
+    pub edges: Vec<PartEdge>,
+    pub faces: Vec<PartFace>,
+    pub tolerance: f64,
+}
+
+/// An assembled record, with the canonical index of each face of the parts and of each edge
+/// (`None` for an edge no face uses).
+pub(crate) struct Assembled {
+    pub brep: b::Brep,
+    pub faces: Vec<usize>,
+    pub edges: Vec<Option<usize>>,
+}
+
+/// The schema 4 record of `parts`: each face its pcurves (the caller's exact ones where given,
+/// else `pcurve::pcurves`) and parameter box; the faces grouped into shells through shared edges;
+/// closed shells (every edge used twice in them) enclosing material, or a cavity where the
+/// faces' outward normals enclose negative volume, each cavity in the solid around it; open
+/// shells (sheets) in the infinite region; everything in canonical order and validated.
+/// `solid`: every shell must be closed.
+pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
+    let _span = solidcraft_profile::span("kernel", "assemble");
+    let fail = |m: String| KernelError::Invalid(format!("sew: {m}"));
+    let Parts { vertices, edges, faces, tolerance: tol } = parts;
+    let nf = faces.len();
+    if nf == 0 {
+        return Err(fail("no faces".into()));
     }
-    let mean = sum * (1.0 / count.max(1) as f64);
-    if !mean.is_finite() {
-        return None;
+    // The loops as the record keeps them: relative to the surface's natural normal.
+    let loops: Vec<Vec<Vec<(u32, bool, Option<&Curve2>)>>> = faces
+        .iter()
+        .map(|f| {
+            f.loops
+                .iter()
+                .map(|l| {
+                    if f.forward {
+                        l.iter().map(|u| (u.edge, u.forward, u.given.as_ref())).collect()
+                    } else {
+                        l.iter().rev().map(|u| (u.edge, !u.forward, u.given.as_ref())).collect()
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    // Every circle and ellipse edge on its NURBS form (an edge the caller gave a pcurve for keeps
+    // the parameter that pcurve is on).
+    let given_on: Vec<bool> = {
+        let mut g = vec![false; edges.len()];
+        for u in faces.iter().flat_map(|f| f.loops.iter().flatten()).filter(|u| u.given.is_some()) {
+            if let Some(slot) = g.get_mut(u.edge as usize) {
+                *slot = true;
+            }
+        }
+        g
+    };
+    // Each edge's label and NURBS form (`form::edge`): a circle about a revolved face's axis on
+    // that face's frame, so its form lies on the face's quarter grid; an edge given with its form
+    // keeps it, and an edge the caller gave a pcurve for keeps the parameter that pcurve is on.
+    let mut frames_of: Vec<Vec<b::Frame>> = vec![Vec::new(); edges.len()];
+    for f in &faces {
+        let Some(frame) = b::form::frame_of(&f.surface) else { continue };
+        for u in f.loops.iter().flatten() {
+            if let Some(slot) = frames_of.get_mut(u.edge as usize) {
+                slot.push(frame.clone());
+            }
+        }
     }
-    let moved: Vec<mt::Wire> = wires.iter().map(|w| builder::transformed(w, mt::Matrix4::from_translation(v3(-mean)))).collect();
-    match builder::try_attach_plane(&moved).ok()?.surface() {
-        mt::Surface::Plane(plane) => Some(mt::Transformed::transformed(&plane, mt::Matrix4::from_translation(v3(mean)))),
-        _ => None,
+    let mut labels: Vec<(b::Curve, [f64; 2])> = Vec::with_capacity(edges.len());
+    let mut forms: Vec<Option<(b::Curve, [f64; 2])>> = Vec::with_capacity(edges.len());
+    for ((e, frames), given) in edges.iter().zip(&frames_of).zip(&given_on) {
+        if let Some(form) = &e.nurbs {
+            let on_label =
+                b::curve_interval(&e.curve, Some(form), e.interval).ok_or_else(|| fail("an edge's NURBS form does not evaluate".into()))?;
+            labels.push((e.curve.clone(), on_label));
+            forms.push(Some((form.clone(), e.interval)));
+            continue;
+        }
+        if *given {
+            labels.push((e.curve.clone(), e.interval));
+            forms.push(None);
+            continue;
+        }
+        let (label, interval, form) =
+            b::form::edge(&e.curve, e.interval, frames.iter(), tol).ok_or_else(|| fail("an arc of more than one turn".into()))?;
+        labels.push((label, interval));
+        forms.push(form);
     }
+    // Each face on its NURBS form: a cylinder, cone, sphere or torus over the extent its label's
+    // pcurves give, then every pcurve again on the forms, exactly.
+    let mut pcs: Vec<Vec<Vec<Curve2>>> = Vec::with_capacity(nf);
+    let mut domains = Vec::with_capacity(nf);
+    let mut face_forms: Vec<Option<b::Surface>> = Vec::with_capacity(nf);
+    for (fi, (f, ls)) in faces.iter().zip(&loops).enumerate() {
+        let failed = |e: pcurve::Error| KernelError::Failed(format!("sew: face {fi}: {e}"));
+        // Edges folded across a bend: B-spline edges with no given pcurve on a cylinder or cone.
+        let folded_on = |form: Option<&b::Surface>| -> Vec<(u32, Curve2)> {
+            ls.iter()
+                .flatten()
+                .filter(|(_, _, given)| given.is_none())
+                .filter_map(|&(e, _, _)| {
+                    let edge = edges.get(e as usize)?;
+                    Some((e, folded_pcurve(&f.surface, form, &edge.curve, edge.interval)?))
+                })
+                .collect()
+        };
+        // A cylinder, cone, sphere or torus on its NURBS form, over the extent of its boundary on
+        // its label.
+        let form = match f.surface {
+            b::Surface::Cylinder { .. } | b::Surface::Cone { .. } | b::Surface::Sphere { .. } | b::Surface::Torus { .. } => {
+                let boundary: Vec<Vec<(&b::Curve, [f64; 2], bool)>> = ls
+                    .iter()
+                    .map(|l| l.iter().filter_map(|&(e, forward, _)| labels.get(e as usize).map(|(c, i)| (c, *i, forward))).collect())
+                    .collect();
+                let extent = b::form::extent(&f.surface, &boundary).ok_or_else(|| fail(format!("face {fi}: its boundary is not on its surface")))?;
+                Some(b::form::surface(&f.surface, extent).ok_or_else(|| fail(format!("face {fi}: more than one turn")))?)
+            }
+            _ => None,
+        };
+        let (form, form_box) = match form {
+            Some((s, d)) => (Some(s), Some(d)),
+            None => (None, None),
+        };
+        let on = form.as_ref().unwrap_or(&f.surface);
+        let folded_form = if form.is_some() { folded_on(form.as_ref()) } else { Vec::new() };
+        let pc = pcurve::pcurves_within(on, &uses_of(&edges, &forms, ls, &folded_form, tol)?, tol, form_box).map_err(failed)?;
+        domains.push(domain_of(on, &pc).ok_or_else(|| fail(format!("face {fi} has no area in its parameters")))?);
+        pcs.push(pc);
+        face_forms.push(form);
+    }
+    let users = edge_users(edges.len(), &faces)?;
+    let (groups, _) = components(nf, &users);
+    if groups.len() > b::MAX_SHELLS {
+        return Err(fail("component budget exceeded".into()));
+    }
+    let closed: Vec<bool> = groups
+        .iter()
+        .map(|g| {
+            g.iter()
+                .flat_map(|f| faces.get(*f).into_iter().flat_map(|f| f.loops.iter().flatten()))
+                .all(|u| users.get(u.edge as usize).is_some_and(|x| x.len() >= 2))
+        })
+        .collect();
+    if solid && closed.iter().any(|c| !c) {
+        return Err(fail("the faces do not close".into()));
+    }
+    // Closed shells: the volume their outward normals enclose, positive for a solid's outside.
+    let flux_of = |g: &[usize], field: &dyn Fn(Vec3) -> Vec3| -> Result<f64> {
+        let mut sum = 0.0;
+        for &f in g {
+            let (Some(face), Some(pc), Some(ls), Some(dom)) = (faces.get(f), pcs.get(f), loops.get(f), domains.get(f)) else { continue };
+            let on = face_forms.get(f).and_then(Option::as_ref).unwrap_or(&face.surface);
+            let s = SurfaceEval::new(on).map_err(|e| KernelError::Failed(format!("sew: face {f}: {e}")))?;
+            let uses: Vec<Vec<(&Curve2, bool)>> = pc.iter().zip(ls).map(|(c, l)| c.iter().zip(l).map(|(c, u)| (c, u.1)).collect()).collect();
+            let flux = face_flux(&s, dom[1][0], &uses, field).ok_or_else(|| KernelError::Failed(format!("sew: face {f} cannot be evaluated")))?;
+            sum += if face.forward { flux } else { -flux };
+        }
+        Ok(sum)
+    };
+    let mut volume = vec![0.0; groups.len()];
+    for (k, g) in groups.iter().enumerate() {
+        if closed.get(k).copied().unwrap_or(false) {
+            let v = flux_of(g, &|p| p * (1.0 / 3.0))?;
+            if !(v.abs() > 0.0) || !v.is_finite() {
+                return Err(fail("a closed shell encloses no volume".into()));
+            }
+            if let Some(slot) = volume.get_mut(k) {
+                *slot = v;
+            }
+        }
+    }
+    let outers: Vec<usize> = (0..groups.len()).filter(|k| volume.get(*k).is_some_and(|v| *v > 0.0)).collect();
+    // Each cavity in the smallest solid around it (by the winding number of one of its points).
+    let mut cavities: Vec<Vec<usize>> = vec![Vec::new(); groups.len()];
+    for k in (0..groups.len()).filter(|k| volume.get(*k).is_some_and(|v| *v < 0.0)) {
+        let around = if let [only] = outers.as_slice() {
+            Some(*only)
+        } else {
+            let q = groups
+                .get(k)
+                .and_then(|g| g.first())
+                .and_then(|f| faces.get(*f))
+                .and_then(|f| f.loops.first()?.first())
+                .and_then(|u| edges.get(u.edge as usize))
+                .and_then(|e| vertices.get(e.vertices[0] as usize))
+                .map(|p| v3(*p))
+                .ok_or_else(|| fail("cavity".into()))?;
+            let field = move |p: Vec3| {
+                let d = p - q;
+                let r = d.len();
+                d * (1.0 / (4.0 * std::f64::consts::PI * r * r * r))
+            };
+            let mut best: Option<(f64, usize)> = None;
+            for &o in &outers {
+                let w = flux_of(groups.get(o).map_or(&[][..], Vec::as_slice), &field)?;
+                let v = volume.get(o).copied().unwrap_or(0.0);
+                if (w - 1.0).abs() < 0.5 && best.is_none_or(|(b, _)| v < b) {
+                    best = Some((v, o));
+                }
+            }
+            best.map(|(_, o)| o)
+        };
+        let o = around.ok_or_else(|| fail("a cavity lies in no solid".into()))?;
+        cavities.get_mut(o).ok_or_else(|| fail("cavity".into()))?.push(k);
+    }
+    // The record as its parts stand (shell k is group k, face i part face i, edges and vertices
+    // as given), then put in canonical order.
+    let index = |i: usize| u32::try_from(i).map_err(|_| fail("index".into()));
+    let open: Vec<usize> = (0..groups.len()).filter(|k| !closed.get(*k).copied().unwrap_or(false)).collect();
+    let mut regions = vec![b::Region { shells: outers.iter().chain(&open).map(|g| index(*g)).collect::<Result<_>>()?, void: false }];
+    for &o in &outers {
+        let mut shells = vec![index(o)?];
+        for &c in cavities.get(o).into_iter().flatten() {
+            shells.push(index(c)?);
+        }
+        regions.push(b::Region { shells, void: false });
+    }
+    for &o in &outers {
+        for &c in cavities.get(o).into_iter().flatten() {
+            regions.push(b::Region { shells: vec![index(c)?], void: true });
+        }
+    }
+    let shells = groups
+        .iter()
+        .map(|g| {
+            let faces = g
+                .iter()
+                .map(|&f| Ok(b::OrientedFace { face: index(f)?, forward: faces.get(f).is_some_and(|x| x.forward) }))
+                .collect::<Result<_>>()?;
+            Ok(b::Shell::Faces { faces, wires: Vec::new() })
+        })
+        .collect::<Result<_>>()?;
+    let mut record_faces = Vec::with_capacity(nf);
+    for (f, ((face, ls), (pc, domain))) in faces.iter().zip(&loops).zip(pcs.iter().zip(&domains)).enumerate() {
+        let mut record_loops = Vec::with_capacity(ls.len());
+        for (l, c) in ls.iter().zip(pc) {
+            let oriented = l.iter().zip(c).map(|(&(edge, forward, _), pcurve)| b::OrientedEdge { edge, forward, pcurve: pcurve.clone() }).collect();
+            record_loops.push(b::Loop::Edges { edges: oriented });
+        }
+        if record_loops.is_empty() {
+            return Err(fail(format!("face {f} has no loop")));
+        }
+        let nurbs = face_forms.get(f).cloned().flatten();
+        record_faces.push(b::Face { nurbs, surface: face.surface.clone(), domain: *domain, loops: record_loops });
+    }
+    let record_edges = edges
+        .iter()
+        .zip(forms.iter().zip(&labels))
+        .map(|(e, (form, (label, label_interval)))| {
+            let (nurbs, interval) = match form {
+                Some((c, i)) => (Some(c.clone()), *i),
+                None => (None, *label_interval),
+            };
+            b::Edge { nurbs, curve: label.clone(), interval, vertices: e.vertices, tolerance: tol, uses: Vec::new() }
+        })
+        .collect();
+    let record_vertices = vertices.iter().map(|point| b::Vertex { point: *point, tolerance: tol }).collect();
+    let loose = b::Brep { version: b::VERSION, tolerance: tol, regions, shells, faces: record_faces, edges: record_edges, vertices: record_vertices };
+    let part = loose.canonical().map_err(|e| KernelError::Failed(format!("sew: the record is invalid: {e}")))?;
+    let mut face_new = vec![usize::MAX; nf];
+    for (c, &f) in part.faces.iter().enumerate() {
+        if let Some(slot) = face_new.get_mut(f as usize) {
+            *slot = c;
+        }
+    }
+    let mut edge_new = vec![None; edges.len()];
+    for (c, &e) in part.edges.iter().enumerate() {
+        if let Some(slot) = edge_new.get_mut(e as usize) {
+            *slot = Some(c);
+        }
+    }
+    Ok(Assembled { brep: part.brep, faces: face_new, edges: edge_new })
+}
+
+/// A face's parameter box: around its pcurves' control points (a B-spline lies in their hull),
+/// held inside the surface's natural domain (one turn where periodic). None when it has no
+/// width in either direction.
+/// A face's edge uses for `pcurve::pcurves`: on each edge's NURBS form where it has one, else on
+/// its curve as given; `folded` gives the pcurves of edges folded across the face (see
+/// [`folded_pcurve`]).
+fn uses_of<'a>(
+    edges: &'a [PartEdge],
+    forms: &'a [Option<(b::Curve, [f64; 2])>],
+    ls: &[Vec<(u32, bool, Option<&'a Curve2>)>],
+    folded: &'a [(u32, Curve2)],
+    tol: f64,
+) -> Result<Vec<Vec<pcurve::EdgeUse<'a>>>> {
+    ls.iter()
+        .map(|l| {
+            l.iter()
+                .map(|&(e, forward, given)| {
+                    let edge = edges.get(e as usize).ok_or_else(|| KernelError::Invalid("sew: edge reference".into()))?;
+                    let (curve, interval) = match forms.get(e as usize).and_then(Option::as_ref) {
+                        Some((c, i)) => (c, *i),
+                        _ => (&edge.curve, edge.interval),
+                    };
+                    let given = given.or_else(|| folded.iter().find(|(f, _)| *f == e).map(|(_, c)| c));
+                    Ok(pcurve::EdgeUse { edge: e, curve, interval, forward, tolerance: tol, given })
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn domain_of(surface: &b::Surface, pcs: &[Vec<Curve2>]) -> Option<[[f64; 2]; 2]> {
+    let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    for c in pcs.iter().flatten() {
+        let points: Vec<[f64; 2]> = match c {
+            Curve2::Spline { points, .. } => points.clone(),
+            Curve2::RationalSpline { homogeneous, .. } => homogeneous.iter().map(|h| [h[0] / h[2], h[1] / h[2]]).collect(),
+        };
+        for p in points {
+            for d in 0..2 {
+                lo[d] = lo[d].min(p[d]);
+                hi[d] = hi[d].max(p[d]);
+            }
+        }
+    }
+    let natural = surface.natural();
+    let mut out = [[0.0; 2]; 2];
+    for d in 0..2 {
+        let (mut a, mut z) = (lo[d], hi[d]);
+        match natural[d] {
+            b::Natural::Periodic => z = z.min(a + std::f64::consts::TAU),
+            b::Natural::Range(n0, n1) => {
+                a = a.max(n0);
+                z = z.min(n1);
+            }
+        }
+        if !(a < z) {
+            return None;
+        }
+        out[d] = [a, z];
+    }
+    Some(out)
 }
 
 #[cfg(test)]
@@ -1005,7 +1706,7 @@ mod tests {
             let lumps = body.lumps().unwrap();
             assert_eq!(lumps.len(), 2);
             assert!(lumps.iter().all(|b| (crate::measure(b).unwrap().volume - 24.0).abs() < 1e-9));
-            let mesh = body.tessellate(0.01).unwrap();
+            let mesh = body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
             assert!(mesh.contains(Vec3::new(1.0, 1.0, 1.0)));
             assert!(mesh.contains(Vec3::new(11.0, 1.0, 1.0)));
             assert!(!mesh.contains(Vec3::new(5.0, 1.0, 1.0)));
@@ -1034,7 +1735,7 @@ mod tests {
         assert_eq!(cavity.shell_count(), 2);
         assert_eq!(cavity.lumps().unwrap().len(), 1);
         assert!((crate::measure(&cavity).unwrap().volume - 21.0).abs() < 1e-9);
-        assert!(!cavity.tessellate(0.01).unwrap().contains(Vec3::new(1.0, 1.5, 2.0)));
+        assert!(!cavity.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().contains(Vec3::new(1.0, 1.5, 2.0)));
         let touching = box_faces(Vec3::new(2.0, 3.0, 4.0), Vec3::new(2.0, 3.0, 4.0));
         assert!(sew(&outer.iter().chain(&touching).cloned().collect::<Vec<_>>()).unwrap_err().to_string().contains("vertex"));
         let mut hostile = outer.clone();
@@ -1076,6 +1777,45 @@ mod tests {
             let got = crate::measure(&body).unwrap().volume;
             assert!((got - want).abs() < 1e-4 * want, "{o:?} {bow}: {got} vs {want}");
         }
+    }
+
+    /// A 10 x 6 x 2 plate with a triangular cut-out whose corner touches the plate's edge x = 0
+    /// at (0, 3): the plate touches itself along the line of that corner, where four walls meet.
+    /// As SMLib keeps such a solid, each cap is one loop through the corner twice, the line two
+    /// edges (one per wedge of material) between the corner's two vertices: SMLib finds it valid.
+    /// The caps had been an outline and a hole, each with its own vertex at the corner, which
+    /// SMLib refuses (a face with coincident vertices, loops touching).
+    #[test]
+    fn a_cut_out_touching_the_outline_at_a_corner_caps_with_one_loop() {
+        let at = |x: f64, y: f64, z: f64| Vec3::new(x, y, z);
+        let outline = [(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0), (0.0, 3.0)];
+        // Clockwise: a hole.
+        let hole = [(0.0, 3.0), (2.0, 3.5), (2.0, 2.5)];
+        let ring = |pts: &[(f64, f64)], z: f64| -> Vec<EdgeSpec> {
+            (0..pts.len())
+                .map(|i| EdgeSpec::Line { a: at(pts[i].0, pts[i].1, z), b: at(pts[(i + 1) % pts.len()].0, pts[(i + 1) % pts.len()].1, z) })
+                .collect()
+        };
+        let down = |l: Vec<EdgeSpec>| -> Vec<EdgeSpec> { l.into_iter().rev().map(|e| e.reversed()).collect() };
+        let mut faces = vec![
+            FaceSpec { loops: vec![ring(&outline, 2.0), ring(&hole, 2.0)], surface: SurfSpec::Plane, probe: None },
+            FaceSpec { loops: vec![down(ring(&outline, 0.0)), down(ring(&hole, 0.0))], surface: SurfSpec::Plane, probe: None },
+        ];
+        for pts in [&outline[..], &hole[..]] {
+            for i in 0..pts.len() {
+                let ((ax, ay), (bx, by)) = (pts[i], pts[(i + 1) % pts.len()]);
+                faces.push(quad(at(ax, ay, 0.0), at(bx, by, 0.0), at(bx, by, 2.0), at(ax, ay, 2.0)));
+            }
+        }
+        let body = sew_touching(&faces).unwrap();
+        assert!((crate::measure(&body).unwrap().volume - 118.0).abs() < 1e-9);
+        let record = crate::brep_record(&body).unwrap();
+        let caps: Vec<&b::Face> =
+            record.faces.iter().filter(|f| f.loops.len() == 1 && matches!(&f.loops[0], b::Loop::Edges { edges } if edges.len() == 8)).collect();
+        assert_eq!(caps.len(), 2, "each cap one loop of the outline's five edges and the cut-out's three");
+        assert_eq!(record.vertices.len(), 14, "the corner one vertex on each cap");
+        let v = crate::validity(&body);
+        assert!(v.ok(), "{v:?}");
     }
 
     #[test]
@@ -1220,13 +1960,10 @@ mod tests {
     #[test]
     fn thin_faces_away_from_the_origin_get_their_planes() {
         // Slabs 30 x 2 mm and 0.00013 to 0.1 mm thick, away from the origin and turned off the
-        // axes. truck's plane fit sums the cross products of a boundary's points about a centre
-        // and takes the points' sum for it, eight times as far from the origin as a rectangle;
-        // on the thin faces its normal then comes out so far off that truck finds a
-        // 0.00013 x 30 mm face at (-300, -200, 5) 2e-6 mm out of its own plane and refuses it:
-        // `cannot attach a plane to a wire that is not on one plane`. Nine of these 45 slabs
-        // have such a face. (Thinner slabs meet another limit, at the origin too: a face
-        // 0.00003 mm wide and askew to the axes is sewn but gets no triangles.)
+        // axes. A plane fitted by summing the cross products of a boundary's points about a far
+        // centre turns a thin face's short normal so far that a 0.00013 x 30 mm face at
+        // (-300, -200, 5) lies 2e-6 mm out of it; summed about the boundary's mean it lies
+        // within 1e-14 mm.
         let turned = |about_z: f64, about_x: f64| {
             let (sz, cz) = about_z.sin_cos();
             let (sx, cx) = about_x.sin_cos();

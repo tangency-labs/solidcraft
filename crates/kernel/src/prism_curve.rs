@@ -1,8 +1,11 @@
-//! Whole-span certificates for analytic planar prism boundaries.
-//! Samples propose a circle; only positive rational Bernstein bounds accept it.
-use crate::body::from_p3;
-use solidcraft_geom::{Plane, Seg2, Vec2};
-use truck_modeling::{self as mt, BoundedCurve, Invertible, ParametricCurve};
+//! Whole-span certificates for analytic planar prism boundaries, read off the curves of schema 4
+//! record edges. A record's lines and circles are read as they are; a spline is read span by
+//! span (its Bézier pieces): samples propose a circle, and only positive rational Bernstein
+//! bounds accept it.
+use solidcraft_geom::brep::eval::CurveEval;
+use solidcraft_geom::brep::{Brep, Curve};
+use solidcraft_geom::bspline::{self, HPoint};
+use solidcraft_geom::{Plane, Seg2, Vec2, Vec3};
 
 const MAX_DEGREE: usize = 32;
 /// How far an arc read off a curve may end from the curve's end (mm): half the gap a profile
@@ -11,38 +14,126 @@ const ARC_END_TOL: f64 = 5e-7;
 const MAX_CONTROLS: usize = 4096;
 type H = [f64; 3];
 
+/// A curve over `interval` (in its own parameter), run from `ends[0]` to `ends[1]`: from the
+/// interval's min to its max when `forward`, the other way otherwise. The ends are the points
+/// the curve must reach there (a record edge's vertices).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Run<'a> {
+    pub curve: &'a Curve,
+    pub interval: [f64; 2],
+    pub forward: bool,
+    pub ends: [Vec3; 2],
+}
+
+impl<'a> Run<'a> {
+    /// Edge `edge` of `record`, run `forward` (from its start vertex to its end) or back.
+    pub(crate) fn of(record: &'a Brep, edge: usize, forward: bool) -> Option<Run<'a>> {
+        let e = record.edges.get(edge)?;
+        let at = |v: u32| record.vertices.get(v as usize).map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]));
+        let (start, end) = (at(e.vertices[0])?, at(e.vertices[1])?);
+        Some(Run { curve: e.parameters(), interval: e.interval, forward, ends: if forward { [start, end] } else { [end, start] } })
+    }
+
+    /// The parameters it runs from and to.
+    fn ends_along(&self) -> (f64, f64) {
+        let [t0, t1] = self.interval;
+        if self.forward { (t0, t1) } else { (t1, t0) }
+    }
+}
+
 fn charge(work: &mut usize, n: usize) -> Option<()> {
     *work = work.checked_sub(n)?;
     Some(())
 }
 
-fn preflight(c: &mt::Curve, work: &mut usize) -> Option<()> {
-    charge(work, 1)?;
-    let (knots, controls) = match c {
-        mt::Curve::Line(_) => return Some(()),
-        mt::Curve::BSplineCurve(b) => (b.knot_vec(), b.control_points().len()),
-        mt::Curve::NurbsCurve(b) => (b.knot_vec(), b.control_points().len()),
-        _ => return None,
-    };
-    let degree = knots.len().checked_sub(controls + 1)?;
-    if !(1..=MAX_DEGREE).contains(&degree) || controls > MAX_CONTROLS || knots.len() > 8192 {
-        return None;
-    }
-    if knots.iter().any(|t| !t.is_finite()) || knots.windows(2).any(|w| w[1] < w[0]) {
-        return None;
-    }
-    // Charge decomposition before its cloning / knot insertion allocations.
-    charge(work, controls.checked_mul(knots.len())?.checked_mul(degree + 1)?)
+fn v3(p: [f64; 3]) -> Vec3 {
+    Vec3::new(p[0], p[1], p[2])
 }
 
-fn controls(c: &mt::Curve, plane: &Plane, h: f64, tol: f64) -> Option<(Vec<Vec<H>>, f64)> {
-    let spans: Vec<Vec<mt::Vector4>> = match c {
-        mt::Curve::BSplineCurve(b) => {
-            b.bezier_decomposition().into_iter().map(|s| s.control_points().iter().map(|p| mt::Vector4::new(p.x, p.y, p.z, 1.)).collect()).collect()
+/// The Bézier spans of a B-spline (homogeneous control points `ctrl` on `knots`) over `[t0, t1]`,
+/// in parameter order: the piece clamped to the interval (Boehm insertion of its ends), then every
+/// interior knot inserted until it repeats `degree` times; the span between two knots is the
+/// `degree + 1` control points ending at the last of the knots below it. Exact up to rounding.
+fn spline_spans(knots: &[f64], ctrl: &[HPoint], t0: f64, t1: f64, work: &mut usize) -> Option<Vec<Vec<HPoint>>> {
+    let degree = knots.len().checked_sub(ctrl.len() + 1)?;
+    if !(1..=MAX_DEGREE).contains(&degree) || ctrl.len() > MAX_CONTROLS || knots.len() > 8192 {
+        return None;
+    }
+    if knots.iter().any(|t| !t.is_finite()) || knots.windows(2).any(|w| w[1] < w[0]) || ctrl.iter().any(|p| !p.is_finite()) {
+        return None;
+    }
+    // Charge decomposition before its knot insertion allocations.
+    charge(work, ctrl.len().checked_mul(knots.len())?.checked_mul(degree + 1)?)?;
+    let (mut k, mut c) = bspline::segment(degree, knots, ctrl, t0, t1).ok()?;
+    let mut interior: Vec<f64> = k.iter().copied().filter(|t| *t > t0 && *t < t1).collect();
+    interior.dedup();
+    for u in interior {
+        while k.iter().filter(|t| **t == u).count() < degree {
+            (k, c) = bspline::insert_knot(degree, &k, &c, u).ok()?;
         }
-        mt::Curve::NurbsCurve(b) => b.non_rationalized().bezier_decomposition().into_iter().map(|s| s.control_points().clone()).collect(),
+    }
+    let n = c.len();
+    let mut spans = Vec::new();
+    for i in degree..n {
+        let (Some(a), Some(b)) = (k.get(i), k.get(i + 1)) else { return None };
+        if a < b {
+            spans.push(c.get(i - degree..=i)?.to_vec());
+        }
+    }
+    Some(spans)
+}
+
+/// An ellipse (`o + rx cos t x + ry sin t y`) from `t0` to `t1` (either way round) as rational
+/// quadratic Bézier spans of at most a quarter turn each: each the conic through the span's ends
+/// whose tangents meet at the apex, with the middle weight the cosine of half its angle. Exact:
+/// an affine image of the circle's rational quadratic arcs.
+fn ellipse_spans(o: Vec3, x: Vec3, y: Vec3, radii: [f64; 2], t0: f64, t1: f64, work: &mut usize) -> Option<Vec<Vec<HPoint>>> {
+    let span = t1 - t0;
+    if !span.is_finite() || span.abs() > std::f64::consts::TAU * 2.0 {
+        return None;
+    }
+    let n = (span.abs() / std::f64::consts::FRAC_PI_2).ceil().max(1.0) as usize;
+    charge(work, n.checked_mul(3)?)?;
+    let at = |t: f64, scale: f64| o + (x * (radii[0] * t.cos()) + y * (radii[1] * t.sin())) * scale;
+    let h = span / n as f64 / 2.0;
+    let w = h.cos();
+    Some(
+        (0..n)
+            .map(|i| {
+                let a = t0 + span * i as f64 / n as f64;
+                let m = a + h;
+                vec![HPoint::weighted(at(a, 1.0), 1.0), HPoint::weighted(at(m, 1.0 / w), w), HPoint::weighted(at(a + 2.0 * h, 1.0), 1.0)]
+            })
+            .collect(),
+    )
+}
+
+/// `run`'s curve as homogeneous Bézier spans in the direction it runs; `None` for a curve that
+/// isn't a spline or an ellipse.
+fn spans_of(run: &Run, work: &mut usize) -> Option<Vec<Vec<HPoint>>> {
+    let [t0, t1] = run.interval;
+    let spans = match run.curve {
+        Curve::Spline { knots, points } => {
+            let ctrl: Vec<HPoint> = points.iter().map(|p| HPoint::weighted(v3(*p), 1.0)).collect();
+            spline_spans(knots, &ctrl, t0, t1, work)?
+        }
+        Curve::RationalSpline { knots, homogeneous } => {
+            let ctrl: Vec<HPoint> = homogeneous.iter().map(|p| HPoint { x: p[0], y: p[1], z: p[2], w: p[3] }).collect();
+            spline_spans(knots, &ctrl, t0, t1, work)?
+        }
+        Curve::Ellipse { frame, radii } => {
+            let (x, y) = (v3(frame.x_axis), v3(frame.y_axis));
+            let (a, b) = run.ends_along();
+            return ellipse_spans(v3(frame.origin), x, y, *radii, a, b, work);
+        }
         _ => return None,
     };
+    Some(if run.forward { spans } else { spans.into_iter().rev().map(|s| s.into_iter().rev().collect()).collect() })
+}
+
+/// The spans in `plane`: `[x·w, y·w, w]` per control point (weights scaled to at most 1), and the
+/// rounding error of reading them; `None` where a control point lies off the level `h`.
+fn controls(spans: Vec<Vec<HPoint>>, plane: &Plane, h: f64, tol: f64) -> Option<(Vec<Vec<H>>, f64)> {
     if spans.is_empty() || spans.len() > 256 || spans.iter().map(Vec::len).sum::<usize>() > 8192 {
         return None;
     }
@@ -58,10 +149,10 @@ fn controls(c: &mt::Curve, plane: &Plane, h: f64, tol: f64) -> Option<(Vec<Vec<H
         }
         let mut span = Vec::new();
         for p in s {
-            if ![p.x, p.y, p.z, p.w].iter().all(|x| x.is_finite()) || p.w / max_w < 1e-12 {
+            if !p.is_finite() || p.w / max_w < 1e-12 {
                 return None;
             }
-            let v = from_p3(mt::Point3::new(p.x / p.w, p.y / p.w, p.z / p.w));
+            let v = Vec3::new(p.x / p.w, p.y / p.w, p.z / p.w);
             let local = plane.to_local(v);
             let magnitude = v.x.abs() + v.y.abs() + v.z.abs() + plane.origin.len();
             let e = magnitude * f64::EPSILON * 256.;
@@ -201,87 +292,188 @@ fn circle_span(c: &[H], center: Vec2, radius: f64, tol: f64, source_error: f64, 
     (a.signum() == b.signum()).then_some(a + b)
 }
 
-/// [`segment`], except that a spline that is neither a line nor a circular arc comes back as lines
-/// and arcs that stay within `fit` of it (the walls of a body swept along a spline). `None` where
-/// [`segment`] refuses for another reason: not in the plane, not finite, over the work budget,
-/// or a rational spline.
-pub(super) fn segment_fitted(e: &mt::Edge, plane: &Plane, tol: f64, fit: f64, work: &mut usize) -> Option<Vec<Seg2>> {
-    if let Some(exact) = segment(e, plane, tol, work) {
-        return Some(exact);
+/// `run` in `plane` exactly, as lines, circular arcs and free-form segments (each free-form
+/// curve one segment): `None` when it doesn't lie in a plane parallel to `plane`, isn't read
+/// exactly, isn't finite or goes over the work budget.
+pub(crate) fn segment(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> Option<Vec<Seg2>> {
+    read(run, plane, tol, work, false)
+}
+
+/// `run` in `plane` exactly as segments: as [`segment`], and a curve of several Bézier spans
+/// (a chain of a font's curves, a spline through points) as one segment per span, each the
+/// line, conic or Bézier it is, for a planar region's outline. `None` when the edge doesn't lie
+/// in a plane parallel to `plane` or isn't read exactly. Only planar sheets read on SMLib use it.
+#[cfg(feature = "smlib")]
+pub(crate) fn projected(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> Option<Vec<Seg2>> {
+    read(run, plane, tol, work, true)
+}
+
+/// A free-form curve of several Bézier spans in a plane, as the one B-spline it is: its degree,
+/// clamped knots, control points in the plane's coordinates and weights (none: a polynomial
+/// B-spline). Its first and last control points are its ends.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlanarSpline {
+    pub degree: usize,
+    pub knots: Vec<f64>,
+    pub points: Vec<Vec2>,
+    pub weights: Vec<f64>,
+}
+
+/// One piece of an edge read exactly in a plane: a line, arc or single free-form segment, or a
+/// free-form curve of several spans as one [`PlanarSpline`].
+#[derive(Clone, Debug, PartialEq)]
+pub enum PlanarPiece {
+    Seg(Seg2),
+    Spline(PlanarSpline),
+}
+
+/// `run` in `plane` exactly, for a sketch to project it: as [`segment`], and a curve of several
+/// Bézier spans (a spline edge, an elliptical arc past a quarter turn, a chain of a font's
+/// curves) as the one B-spline it is, its knots and weights its own. `None` when the edge
+/// doesn't lie in a plane parallel to `plane` or isn't read exactly.
+pub(crate) fn projected_curves(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> Option<Vec<PlanarPiece>> {
+    if let Some(segs) = read(run, plane, tol, work, false) {
+        return Some(segs.into_iter().map(PlanarPiece::Seg).collect());
     }
-    if !tol.is_finite() || tol <= 0. || !fit.is_finite() || fit <= 0. {
+    one_spline(run, plane, tol, work).map(|s| vec![PlanarPiece::Spline(s)])
+}
+
+/// `run`'s spline (or ellipse) over its interval, in the direction it runs, as one clamped
+/// B-spline in `plane`: the piece of the curve between the interval's ends (Boehm insertion,
+/// exact up to rounding), its control points read in the plane. `None` when a control point lies
+/// off the level of the curve's start (the curve is not in a plane parallel to `plane`), the
+/// ends miss the run's ends, or the work budget runs out.
+fn one_spline(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> Option<PlanarSpline> {
+    if !tol.is_finite() || tol <= 0. || run.interval[1] <= run.interval[0] {
         return None;
     }
-    let mut c = e.curve();
-    preflight(&c, work)?;
-    if !e.orientation() {
-        c.invert();
-    }
-    let (t0, t1) = c.range_tuple();
-    if !(t0.is_finite() && t1.is_finite() && t1 > t0) {
-        return None;
-    }
-    let (a3, b3) = (from_p3(c.subs(t0)), from_p3(c.subs(t1)));
-    if !a3.is_finite() || !b3.is_finite() || a3.dist(from_p3(e.front().point())) > tol || b3.dist(from_p3(e.back().point())) > tol {
-        return None;
-    }
-    let (spans, _) = controls(&c, plane, plane.height(a3), tol)?;
-    let mut out = Vec::new();
-    for span in spans {
-        if span.iter().any(|p| (p[2] - 1.).abs() > 1e-9) {
+    charge(work, 1)?;
+    let [t0, t1] = run.interval;
+    let clamped = |knots: &[f64], ctrl: Vec<HPoint>, work: &mut usize| -> Option<(usize, Vec<f64>, Vec<HPoint>)> {
+        let degree = knots.len().checked_sub(ctrl.len() + 1)?;
+        if !(1..=MAX_DEGREE).contains(&degree) || ctrl.len() > MAX_CONTROLS || knots.len() > 8192 {
             return None;
         }
-        charge(work, 64)?;
-        let points: Vec<Vec2> = span.iter().map(|p| point(*p)).collect();
-        out.extend(solidcraft_geom::bezier(&points)?.fit_arcs(fit)?);
-        if out.len() > MAX_CONTROLS {
+        if knots.iter().any(|t| !t.is_finite()) || knots.windows(2).any(|w| w[1] < w[0]) || ctrl.iter().any(|p| !p.is_finite()) {
             return None;
         }
+        charge(work, ctrl.len().checked_mul(degree + 1)?.checked_mul(2)?)?;
+        let (k, c) = bspline::segment(degree, knots, &ctrl, t0, t1).ok()?;
+        Some((degree, k, c))
+    };
+    // In the curve's own direction, then the way the run goes.
+    let (degree, knots, ctrl) = match run.curve {
+        Curve::Spline { knots, points } => along(run, clamped(knots, points.iter().map(|p| HPoint::weighted(v3(*p), 1.0)).collect(), work)?)?,
+        Curve::RationalSpline { knots, homogeneous } => {
+            along(run, clamped(knots, homogeneous.iter().map(|p| HPoint { x: p[0], y: p[1], z: p[2], w: p[3] }).collect(), work)?)?
+        }
+        // Rational quadratic spans, already the way the run goes, joined: each joint knot twice.
+        Curve::Ellipse { .. } => {
+            let spans = spans_of(run, work)?;
+            let mut knots = vec![0.0; 3];
+            let mut ctrl: Vec<HPoint> = Vec::new();
+            for (i, span) in spans.iter().enumerate() {
+                let [p0, p1, p2] = span.as_slice() else { return None };
+                if let Some(last) = ctrl.last() {
+                    if (last.w - p0.w).abs() > 1e-12 * last.w.abs().max(p0.w.abs()) {
+                        return None;
+                    }
+                } else {
+                    ctrl.push(*p0);
+                }
+                ctrl.extend([*p1, *p2]);
+                knots.extend([(i + 1) as f64; 2]);
+            }
+            knots.push(spans.len() as f64);
+            (2, knots, ctrl)
+        }
+        _ => return None,
+    };
+    let max_w = ctrl.iter().map(|p| p.w).fold(0., f64::max);
+    if !(max_w.is_finite() && max_w > 0.) {
+        return None;
     }
-    Some(out)
+    let (Some(first), Some(last)) = (ctrl.first().and_then(|p| p.project()), ctrl.last().and_then(|p| p.project())) else { return None };
+    let level = plane.height(first);
+    let (a, b) = (plane.to_local(first), plane.to_local(last));
+    if first.dist(run.ends[0]) > tol || last.dist(run.ends[1]) > tol {
+        return None;
+    }
+    let mut points = Vec::with_capacity(ctrl.len());
+    let mut weights = Vec::with_capacity(ctrl.len());
+    for p in &ctrl {
+        if p.w / max_w < 1e-12 {
+            return None;
+        }
+        let v = p.project()?;
+        let error = (v.x.abs() + v.y.abs() + v.z.abs() + plane.origin.len()) * f64::EPSILON * 256.;
+        if (plane.height(v) - level).abs() + error > tol || error > tol * 0.1 {
+            return None;
+        }
+        let local = plane.to_local(v);
+        if !(local.x.is_finite() && local.y.is_finite()) {
+            return None;
+        }
+        points.push(local);
+        weights.push(p.w / max_w);
+    }
+    // The ends exactly where the curve ends.
+    if let Some(p) = points.first_mut() {
+        *p = a;
+    }
+    if let Some(p) = points.last_mut() {
+        *p = b;
+    }
+    if weights.iter().all(|w| (w - 1.).abs() <= 1e-12) {
+        weights.clear();
+    }
+    Some(PlanarSpline { degree, knots, points, weights })
 }
 
-pub(super) fn segment(e: &mt::Edge, plane: &Plane, tol: f64, work: &mut usize) -> Option<Vec<Seg2>> {
-    read(e, plane, tol, work, false)
+/// A clamped B-spline `(degree, knots, control points)` run the way `run` goes: as it is
+/// forward, its knots mirrored and its control points reversed back.
+fn along(run: &Run, (degree, knots, ctrl): (usize, Vec<f64>, Vec<HPoint>)) -> Option<(usize, Vec<f64>, Vec<HPoint>)> {
+    if run.forward {
+        return Some((degree, knots, ctrl));
+    }
+    let sum = knots.first()? + knots.last()?;
+    Some((degree, knots.iter().rev().map(|k| sum - k).collect(), ctrl.into_iter().rev().collect()))
 }
 
-/// Edge `e` in `plane` exactly, for a sketch to project it: as [`segment`], and a curve of
-/// several Bézier spans (a chain of a font's curves, a spline through points) as one segment
-/// per span, each the line, conic or Bézier it is. `None` when the edge doesn't lie in a plane
-/// parallel to `plane` or isn't read exactly.
-pub(crate) fn projected(e: &mt::Edge, plane: &Plane, tol: f64, work: &mut usize) -> Option<Vec<Seg2>> {
-    read(e, plane, tol, work, true)
-}
-
-fn read(e: &mt::Edge, plane: &Plane, tol: f64, work: &mut usize, each_span: bool) -> Option<Vec<Seg2>> {
+fn read(run: &Run, plane: &Plane, tol: f64, work: &mut usize, each_span: bool) -> Option<Vec<Seg2>> {
     if !tol.is_finite() || tol <= 0. {
         return None;
     }
-    let mut c = e.curve();
-    preflight(&c, work)?;
-    if !e.orientation() {
-        c.invert();
-    }
-    let (t0, t1) = c.range_tuple();
-    if !t0.is_finite() || !t1.is_finite() || t1 <= t0 {
+    charge(work, 1)?;
+    if matches!(run.curve, Curve::SurfaceIntersection { .. }) {
         return None;
     }
-    let (a3, b3) = (from_p3(c.subs(t0)), from_p3(c.subs(t1)));
+    let (ts, te) = run.ends_along();
+    if !ts.is_finite() || !te.is_finite() || run.interval[1] <= run.interval[0] {
+        return None;
+    }
+    let eval = CurveEval::new(run.curve).ok()?;
+    let (a3, b3) = (eval.point(ts)?, eval.point(te)?);
     let (a, b) = (plane.to_local(a3), plane.to_local(b3));
     if !a3.is_finite()
         || !b3.is_finite()
         || ![a.x, a.y, b.x, b.y].iter().all(|v| v.is_finite())
-        || a3.dist(from_p3(e.front().point())) > tol
-        || b3.dist(from_p3(e.back().point())) > tol
+        || a3.dist(run.ends[0]) > tol
+        || b3.dist(run.ends[1]) > tol
     {
         return None;
     }
-    if matches!(c, mt::Curve::Line(_)) {
-        let error = (a3.len() + b3.len() + plane.origin.len()) * f64::EPSILON * 256.;
-        return (error < tol * 0.1 && a.dist(b) > tol && (plane.height(a3) - plane.height(b3)).abs() + error <= tol)
-            .then_some(vec![Seg2::Line { a, b }]);
+    let level = plane.height(a3);
+    match run.curve {
+        Curve::Line { .. } => {
+            let error = (a3.len() + b3.len() + plane.origin.len()) * f64::EPSILON * 256.;
+            return (error < tol * 0.1 && a.dist(b) > tol && (level - plane.height(b3)).abs() + error <= tol).then_some(vec![Seg2::Line { a, b }]);
+        }
+        Curve::Polyline { points } => return polyline(points, ts, te, plane, level, tol, work),
+        Curve::Circle { frame, radius } => return circle(v3(frame.origin), v3(frame.x_axis), v3(frame.y_axis), *radius, ts, te, a, b, plane, tol),
+        _ => {}
     }
-    let (spans, error) = controls(&c, plane, plane.height(a3), tol)?;
+    let (spans, error) = controls(spans_of(run, work)?, plane, level, tol)?;
     if spans.windows(2).any(|pair| point(pair[0][pair[0].len() - 1]).dist(point(pair[1][0])) + 2. * error > tol)
         || point(spans.first()?.first().copied()?).dist(a) + error > tol
         || point(spans.last()?.last().copied()?).dist(b) + error > tol
@@ -291,9 +483,71 @@ fn read(e: &mt::Edge, plane: &Plane, tol: f64, work: &mut usize, each_span: bool
     if a.dist(b) > tol && spans.iter().all(|s| line_span(s, a, b, tol, error, work).is_some()) {
         return Some(vec![Seg2::Line { a, b }]);
     }
-    arc(&c, &spans, plane, a, b, tol, error, work)
+    arc(&eval, (ts, te), &spans, plane, a, b, tol, error, work)
         .or_else(|| free_form(&spans, a, b, tol))
         .or_else(|| if each_span { span_by_span(&spans, a, b, tol) } else { None })
+}
+
+/// A polyline from parameter `ts` to `te` (either way round; segment i spans [i, i + 1]) as its
+/// lines, each at level `level` of `plane`.
+fn polyline(points: &[[f64; 3]], ts: f64, te: f64, plane: &Plane, level: f64, tol: f64, work: &mut usize) -> Option<Vec<Seg2>> {
+    charge(work, points.len())?;
+    let (lo, hi) = (ts.min(te), ts.max(te));
+    if !(lo >= 0. && hi <= points.len() as f64) {
+        return None;
+    }
+    let at = |t: f64| -> Option<Vec3> {
+        let last = points.len().checked_sub(2)?;
+        let i = (t.floor().max(0.) as usize).min(last);
+        let (p, q) = (v3(*points.get(i)?), v3(*points.get(i + 1)?));
+        Some(p + (q - p) * (t - i as f64))
+    };
+    let mut stations = vec![lo];
+    stations.extend((lo.floor() as i64 + 1..=hi.ceil() as i64 - 1).map(|k| k as f64).filter(|k| *k > lo && *k < hi));
+    stations.push(hi);
+    if ts > te {
+        stations.reverse();
+    }
+    let mut out = Vec::with_capacity(stations.len());
+    for pair in stations.windows(2) {
+        let (p, q) = (at(pair[0])?, at(pair[1])?);
+        let (u, v) = (plane.to_local(p), plane.to_local(q));
+        if (plane.height(p) - level).abs() > tol || (plane.height(q) - level).abs() > tol || u.dist(v) <= tol {
+            return None;
+        }
+        out.push(Seg2::Line { a: u, b: v });
+    }
+    Some(out)
+}
+
+/// A circle (`o + r (cos t x + sin t y)`) from `ts` to `te`, ending at `a` and `b` in `plane`, as
+/// the arc it is: `None` when it doesn't lie in a plane parallel to `plane`. A whole circle comes
+/// back as its two halves.
+#[allow(clippy::too_many_arguments)]
+fn circle(o: Vec3, x: Vec3, y: Vec3, radius: f64, ts: f64, te: f64, a: Vec2, b: Vec2, plane: &Plane, tol: f64) -> Option<Vec<Seg2>> {
+    let n = plane.normal();
+    let z = x.cross(y);
+    let tilt = radius * z.cross(n).len();
+    let error = (o.len() + radius + plane.origin.len()) * f64::EPSILON * 256.;
+    if !(radius.is_finite() && radius > tol) || tilt + error > tol || error > tol * 0.1 {
+        return None;
+    }
+    let center = plane.to_local(o);
+    let sweep = (te - ts) * z.dot(n).signum();
+    let angular_tol = tol / radius;
+    if sweep.abs() > std::f64::consts::TAU + angular_tol || sweep.abs() < angular_tol {
+        return None;
+    }
+    let start = (a - center).angle();
+    let end = center + Vec2::new((start + sweep).cos(), (start + sweep).sin()) * radius;
+    if end.dist(b) + error > tol.min(ARC_END_TOL) || (a.dist(center) - radius).abs() > tol {
+        return None;
+    }
+    if (sweep.abs() - std::f64::consts::TAU).abs() <= angular_tol {
+        let h = sweep.signum() * std::f64::consts::PI;
+        return Some(vec![Seg2::Arc { center, radius, start, sweep: h }, Seg2::Arc { center, radius, start: start + h, sweep: h }]);
+    }
+    Some(vec![Seg2::Arc { center, radius, start, sweep }])
 }
 
 /// Several `spans` end to end, from `a` to `b`, each as the segment it is: a span whose control
@@ -378,15 +632,24 @@ fn free_form(spans: &[Vec<H>], a: Vec2, b: Vec2, tol: f64) -> Option<Vec<Seg2>> 
     Some(vec![seg])
 }
 
-/// The spline `c` (its Bézier `spans` in the plane, from `a` to `b`) as a circular arc, when
-/// whole-span proofs show it is one.
+/// The spline (`eval` from parameter `ts` to `te`; its Bézier `spans` in the plane, from `a` to
+/// `b`) as a circular arc, when whole-span proofs show it is one.
 #[allow(clippy::too_many_arguments)]
-fn arc(c: &mt::Curve, spans: &[Vec<H>], plane: &Plane, a: Vec2, b: Vec2, tol: f64, error: f64, work: &mut usize) -> Option<Vec<Seg2>> {
-    let (t0, t1) = c.range_tuple();
+fn arc(
+    eval: &CurveEval,
+    (ts, te): (f64, f64),
+    spans: &[Vec<H>],
+    plane: &Plane,
+    a: Vec2,
+    b: Vec2,
+    tol: f64,
+    error: f64,
+    work: &mut usize,
+) -> Option<Vec<Seg2>> {
     // Samples are only a candidate proposal. Whole-span implicit and oriented
     // angular proofs below are required before converting any spline to an arc.
-    let q = plane.to_local(from_p3(c.subs(t0 + (t1 - t0) * 5. / 16.))) - a;
-    let r = plane.to_local(from_p3(c.subs(t0 + (t1 - t0) * 11. / 16.))) - a;
+    let q = plane.to_local(eval.point(ts + (te - ts) * 5. / 16.)?) - a;
+    let r = plane.to_local(eval.point(ts + (te - ts) * 11. / 16.)?) - a;
     let det = 2. * (q.x * r.y - q.y * r.x);
     if !det.is_finite() || det.abs() < 1e-300 {
         return None;
@@ -432,7 +695,6 @@ fn arc(c: &mt::Curve, spans: &[Vec<H>], plane: &Plane, a: Vec2, b: Vec2, tol: f6
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
-    use mt::builder;
 
     fn choose(n: usize, k: usize) -> f64 {
         (0..k).fold(1., |v, i| v * (n - i) as f64 / (i + 1) as f64)
@@ -449,82 +711,117 @@ mod tests {
         }
         out
     }
-    fn trap() -> Vec<f64> {
-        let mut p = vec![1.];
-        for k in 0..=16 {
-            p = multiply(&p, &[-(k as f64) / 16., 1.]);
+    /// The power basis `p` (in t) over the span t = a + h s, in s.
+    fn shifted(p: &[f64], a: f64, h: f64) -> Vec<f64> {
+        let mut out = vec![0.];
+        for c in p.iter().rev() {
+            out = multiply(&out, &[a, h]);
+            out[0] += c;
         }
-        let mid = (0..=16).map(|k| 1. / 32. - k as f64 / 16.).product::<f64>();
-        p.iter_mut().for_each(|v| *v /= mid);
-        p
+        out
     }
-    fn edge(x: &[f64], y: &[f64], w: &[f64], degree: usize) -> mt::Edge {
+    /// A spline of `degree` over spans [k/16, (k+1)/16] (k = 0..16), joined C0 (each interior
+    /// knot `degree` times), whose homogeneous `x`, `y`, `w` are the power bases `f(k)` gives
+    /// in the span's own parameter s ∈ [0, 1]: a curve that bends only between the knots.
+    fn spans(degree: usize, f: impl Fn(usize) -> [Vec<f64>; 3]) -> Curve {
+        let mut knots = vec![0.; degree + 1];
+        let mut homogeneous: Vec<[f64; 4]> = Vec::new();
+        for k in 0..16 {
+            let [x, y, w] = f(k);
+            let (x, y, w) = (bernstein(&x, degree), bernstein(&y, degree), bernstein(&w, degree));
+            let controls = x.iter().zip(y).zip(w).map(|((x, y), w)| [*x, y, 0., w]);
+            homogeneous.extend(controls.skip(usize::from(k > 0)));
+            knots.extend(std::iter::repeat_n((k + 1) as f64 / 16., degree));
+        }
+        knots.push(1.);
+        Curve::RationalSpline { knots, homogeneous }
+    }
+    /// The bump s (1 - s) / (1/4) in the span's own parameter: 0 at both its ends (every old
+    /// sample location k/16 is a knot), 1 half way along the first span (t = 1/32).
+    fn bump(k: usize) -> Vec<f64> {
+        if k == 0 { vec![0., 4., -4.] } else { vec![0.] }
+    }
+    fn bezier_knots(degree: usize) -> Vec<f64> {
+        std::iter::repeat_n(0., degree + 1).chain(std::iter::repeat_n(1., degree + 1)).collect()
+    }
+    /// A NURBS curve of homogeneous control points `(x, y, 0, w)` (power bases in `x`, `y`, `w`).
+    fn curve(x: &[f64], y: &[f64], w: &[f64], degree: usize) -> Curve {
         let (x, y, w) = (bernstein(x, degree), bernstein(y, degree), bernstein(w, degree));
-        let controls = x.iter().zip(y).zip(w).map(|((x, y), w)| mt::Vector4::new(*x, y, 0., w)).collect();
-        let c = mt::Curve::NurbsCurve(mt::NurbsCurve::new(mt::BSplineCurve::new(mt::KnotVec::bezier_knot(degree), controls)));
-        let a = mt::Vertex::new(c.subs(0.));
-        let b = mt::Vertex::new(c.subs(1.));
-        mt::Edge::new(&a, &b, c)
+        let homogeneous = x.iter().zip(y).zip(w).map(|((x, y), w)| [*x, y, 0., w]).collect();
+        Curve::RationalSpline { knots: bezier_knots(degree), homogeneous }
+    }
+    fn at(c: &Curve, t: f64) -> Vec3 {
+        CurveEval::new(c).unwrap().point(t).unwrap()
+    }
+    /// `c` over its whole domain, run forward (or back).
+    fn run(c: &Curve, forward: bool) -> Run<'_> {
+        let interval = match c.natural() {
+            solidcraft_geom::brep::Natural::Range(a, b) => [a, b],
+            solidcraft_geom::brep::Natural::Periodic => [0., std::f64::consts::TAU],
+        };
+        let ends = [at(c, interval[0]), at(c, interval[1])];
+        Run { curve: c, interval, forward, ends: if forward { ends } else { [ends[1], ends[0]] } }
+    }
+    /// The quarter circle of radius 10 about the origin from +x to +y, as a rational quadratic
+    /// spline.
+    fn quarter() -> Curve {
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        Curve::RationalSpline { knots: bezier_knots(2), homogeneous: vec![[10., 0., 0., 1.], [10. * w, 10. * w, 0., w], [0., 10., 0., 1.]] }
     }
 
+    /// Sampling must not certify a spline cap that merely passes through the sample points.
+    /// Once that took a single polynomial of degree 17 with a root at each of the 17 old sample
+    /// locations k/16, more than a B-rep record holds (MAX_SPLINE_DEGREE 16); here the aliasing is
+    /// in the knots instead: a C0 quadratic spline with a knot at every k/16, on the line (or
+    /// the circle) at each of them, and bowing off it between (by 1 mm, 1/32 along).
     #[test]
     fn sample_aliasing_does_not_certify_spline_caps() {
-        let e = edge(&[0., 10.], &trap(), &[1.], 17);
+        let e = spans(2, |k| {
+            let h = 1. / 16.;
+            [shifted(&[0., 10.], k as f64 * h, h), bump(k), vec![1.]]
+        });
         for k in 0..=16 {
-            assert!(e.curve().subs(k as f64 / 16.).y.abs() < 1e-4, "old sample locations must see a line");
+            assert!(at(&e, k as f64 / 16.).y.abs() < 1e-12, "old sample locations must see a line");
         }
-        assert!((e.curve().subs(1. / 32.).y - 1.).abs() < 1e-6);
-        assert!(segment(&e, &Plane::XY, 1e-3, &mut 2_000_000).is_none());
-        let front = e.front();
-        let back = e.back();
-        let low_right = mt::Vertex::new(mt::Point3::new(10., -3., 0.));
-        let low_left = mt::Vertex::new(mt::Point3::new(0., -3., 0.));
-        let wire: mt::Wire =
-            vec![e.clone(), builder::line(back, &low_right), builder::line(&low_right, &low_left), builder::line(&low_left, front)].into();
-        let cap = builder::try_attach_plane(&[wire]).unwrap();
-        let body = crate::body::Body::new(builder::tsweep(&cap, mt::Vector3::new(0., 0., 1.))).unwrap();
-        assert!(body.validity().is_empty());
-        let tool = crate::box_solid(solidcraft_geom::Vec3::new(-1., -4., 0.5), solidcraft_geom::Vec3::new(12., 7., 1.)).unwrap();
-        assert!(
-            crate::prism::prism_boolean(&body, &tool, crate::BoolOp::Cut).is_none(),
-            "an actual extruded aliased spline cap must reach the generic route"
-        );
-        let q = trap();
-        let mut perturb = q.iter().map(|v| v * 0.1).collect::<Vec<_>>();
-        perturb[0] += 1.;
+        assert!((at(&e, 1. / 32.).y - 1.).abs() < 1e-12);
+        assert!(segment(&run(&e, true), &Plane::XY, 1e-3, &mut 2_000_000).is_none());
+        // The quarter circle of radius 10, its homogeneous coordinates scaled by 1 + bump / 10 but
+        // its weight not: radius 10 at every k/16, 11 at 1/32.
         let w = std::f64::consts::FRAC_1_SQRT_2;
-        let x = multiply(&[10., 20. * (w - 1.), 10. * (1. - 2. * w)], &perturb);
-        let y = multiply(&[0., 20. * w, 10. * (1. - 2. * w)], &perturb);
-        let circle = edge(&x, &y, &[1., 2. * (w - 1.), 2. * (1. - w)], 19);
+        let (x, y, wt) = ([10., 20. * (w - 1.), 10. * (1. - 2. * w)], [0., 20. * w, 10. * (1. - 2. * w)], [1., 2. * (w - 1.), 2. * (1. - w)]);
+        let circle = spans(4, |k| {
+            let (a, h) = (k as f64 / 16., 1. / 16.);
+            let scale: Vec<f64> = bump(k).iter().enumerate().map(|(i, v)| v / 10. + if i == 0 { 1. } else { 0. }).collect();
+            [multiply(&shifted(&x, a, h), &scale), multiply(&shifted(&y, a, h), &scale), shifted(&wt, a, h)]
+        });
         for k in 0..=16 {
-            let p = circle.curve().subs(k as f64 / 16.);
-            assert!((p.x.hypot(p.y) - 10.).abs() < 1e-3, "old sample locations must see a circle");
+            let p = at(&circle, k as f64 / 16.);
+            assert!((p.x.hypot(p.y) - 10.).abs() < 1e-9, "old sample locations must see a circle");
         }
-        let p = circle.curve().subs(1. / 32.);
-        assert!((p.x.hypot(p.y) - 11.).abs() < 1e-5);
-        assert!(segment(&circle, &Plane::XY, 1e-3, &mut 2_000_000).is_none());
+        let p = at(&circle, 1. / 32.);
+        assert!((p.x.hypot(p.y) - 11.).abs() < 1e-9);
+        assert!(segment(&run(&circle, true), &Plane::XY, 1e-3, &mut 2_000_000).is_none());
     }
 
     #[test]
     fn genuine_curves_and_oriented_traversal_are_certified() {
-        let a = mt::Vertex::new(mt::Point3::new(10., 0., 0.));
-        let b = mt::Vertex::new(mt::Point3::new(0., 10., 0.));
-        let arc = builder::circle_arc(&a, &b, mt::Point3::new(10. / 2f64.sqrt(), 10. / 2f64.sqrt(), 0.));
-        for e in [&arc, &arc.inverse()] {
-            let result = segment(e, &Plane::XY, 1e-5, &mut 2_000_000).unwrap();
+        let arc = quarter();
+        for forward in [true, false] {
+            let result = segment(&run(&arc, forward), &Plane::XY, 1e-5, &mut 2_000_000).unwrap();
             let Seg2::Arc { center, radius, sweep, .. } = result[0] else { panic!("expected arc") };
             assert!(center.len() < 1e-8 && (radius - 10.).abs() < 1e-8);
             assert!((sweep.abs() - std::f64::consts::FRAC_PI_2).abs() < 1e-8);
-            assert_eq!(sweep > 0., e.orientation());
+            assert_eq!(sweep > 0., forward);
         }
-        let line = edge(&[0., 10.], &[0.], &[1.], 17);
-        assert!(matches!(segment(&line, &Plane::XY, 1e-5, &mut 2_000_000).unwrap()[0], Seg2::Line { .. }));
+        // A line written at the highest degree a B-rep record holds (MAX_SPLINE_DEGREE).
+        let line = curve(&[0., 10.], &[0.], &[1.], solidcraft_geom::bspline::MAX_SPLINE_DEGREE);
+        assert!(matches!(segment(&run(&line, true), &Plane::XY, 1e-5, &mut 2_000_000).unwrap()[0], Seg2::Line { .. }));
         // The longitudinal derivative is negative at t=1/3, independently
         // establishing genuine retracing rather than a stationary tangent.
-        let backtrack = edge(&[0., 10., -35., 35.], &[0.], &[1.], 3);
-        assert!(backtrack.curve().der(1. / 3.).x < -1.);
-        assert!(segment(&backtrack, &Plane::XY, 1e-5, &mut 2_000_000).is_none());
-        assert!(segment(&arc, &Plane::XY, 1e-5, &mut 0).is_none());
+        let backtrack = curve(&[0., 10., -35., 35.], &[0.], &[1.], 3);
+        assert!((at(&backtrack, 1. / 3. + 1e-6).x - at(&backtrack, 1. / 3.).x) / 1e-6 < -1.);
+        assert!(segment(&run(&backtrack, true), &Plane::XY, 1e-5, &mut 2_000_000).is_none());
+        assert!(segment(&run(&arc, true), &Plane::XY, 1e-5, &mut 0).is_none());
     }
 
     /// A curve read as an arc ends where the curve does, however large the tolerance (it grows
@@ -534,38 +831,33 @@ mod tests {
     #[test]
     fn a_curve_near_a_circle_is_not_an_arc_ending_off_it() {
         // A parabola within a micron of the circle through its ends and middle.
-        let e = edge(&[0., 2., 0.], &[0., 0., 0.2], &[1.], 2);
+        let e = curve(&[0., 2., 0.], &[0., 0., 0.2], &[1.], 2);
         let (a, b) = (Vec2::new(0., 0.), Vec2::new(2., 0.2));
-        assert!(from_p3(e.back().point()).dist(solidcraft_geom::Vec3::new(2., 0.2, 0.)) < 1e-12);
+        assert!(at(&e, 1.).dist(Vec3::new(2., 0.2, 0.)) < 1e-12);
         for tol in [1e-5, 2e-3] {
-            let segs = segment(&e, &Plane::XY, tol, &mut 2_000_000).unwrap();
+            let segs = segment(&run(&e, true), &Plane::XY, tol, &mut 2_000_000).unwrap();
             let (first, last) = (segs.first().unwrap(), segs.last().unwrap());
             assert!(first.start().dist(a) < 1e-9 && last.end().dist(b) < 1e-9, "{tol}: {segs:?}");
         }
         // A true arc is still one at either tolerance.
-        let (p, q) = (mt::Vertex::new(mt::Point3::new(10., 0., 0.)), mt::Vertex::new(mt::Point3::new(0., 10., 0.)));
-        let arc = builder::circle_arc(&p, &q, mt::Point3::new(10. / 2f64.sqrt(), 10. / 2f64.sqrt(), 0.));
+        let arc = quarter();
         for tol in [1e-5, 2e-3] {
-            assert!(matches!(segment(&arc, &Plane::XY, tol, &mut 2_000_000).unwrap()[..], [Seg2::Arc { .. }]));
+            assert!(matches!(segment(&run(&arc, true), &Plane::XY, tol, &mut 2_000_000).unwrap()[..], [Seg2::Arc { .. }]));
         }
     }
 
     #[test]
     fn discontinuous_and_multiple_winding_curves_decline() {
-        let edge_from = |knots: Vec<f64>, points: Vec<mt::Vector4>| {
-            let c = mt::Curve::NurbsCurve(mt::NurbsCurve::new(mt::BSplineCurve::new(mt::KnotVec::from(knots), points)));
-            let (lo, hi) = c.range_tuple();
-            mt::Edge::new(&mt::Vertex::new(c.subs(lo)), &mt::Vertex::new(c.subs(hi)), c)
-        };
+        let spline = |knots: Vec<f64>, homogeneous: Vec<[f64; 4]>| Curve::RationalSpline { knots, homogeneous };
         let w = std::f64::consts::FRAC_1_SQRT_2;
-        let p = |x, y, w| mt::Vector4::new(x, y, 0., w);
-        let disconnected = edge_from(
+        let p = |x, y, w| [x, y, 0., w];
+        let disconnected = spline(
             vec![0., 0., 0., 1., 1., 1., 2., 2., 2.],
             vec![p(10., 0., 1.), p(10. * w, 10. * w, w), p(0., 10., 1.), p(-10., 0., 1.), p(-10. * w, -10. * w, w), p(0., -10., 1.)],
         );
-        assert!(segment(&disconnected, &Plane::XY, 1e-5, &mut 2_000_000).is_none());
-        let skipped_line = edge_from(vec![0., 0., 1., 1., 2., 2.], vec![p(0., 0., 1.), p(2., 0., 1.), p(5., 0., 1.), p(10., 0., 1.)]);
-        assert!(segment(&skipped_line, &Plane::XY, 1e-5, &mut 2_000_000).is_none());
+        assert!(segment(&run(&disconnected, true), &Plane::XY, 1e-5, &mut 2_000_000).is_none());
+        let skipped_line = spline(vec![0., 0., 1., 1., 2., 2.], vec![p(0., 0., 1.), p(2., 0., 1.), p(5., 0., 1.), p(10., 0., 1.)]);
+        assert!(segment(&run(&skipped_line, true), &Plane::XY, 1e-5, &mut 2_000_000).is_none());
         let mut points = vec![p(10., 0., 1.)];
         let mut knots = vec![0., 0., 0.];
         for i in 0..8 {
@@ -576,7 +868,7 @@ mod tests {
             knots.extend([i as f64 + 1.; 2]);
         }
         knots.push(8.);
-        let twice = edge_from(knots, points);
-        assert!(segment(&twice, &Plane::XY, 1e-5, &mut 2_000_000).is_none());
+        let twice = spline(knots, points);
+        assert!(segment(&run(&twice, true), &Plane::XY, 1e-5, &mut 2_000_000).is_none());
     }
 }

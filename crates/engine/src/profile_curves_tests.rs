@@ -14,7 +14,7 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
 }
 
 fn volumes(s: &Session) -> Vec<f64> {
-    s.model.state().bodies.iter().map(|b| b.body.tessellate(1e-2).unwrap().measure().volume).collect()
+    s.model.state().bodies.iter().map(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-2)).unwrap().measure().volume).collect()
 }
 
 fn last_error(s: &Session) -> Option<String> {

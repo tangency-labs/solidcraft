@@ -1,0 +1,44 @@
+{
+  "en": {
+    "thread.form_bspp": "Pipe G (ISO 228-1)",
+    "thread.form_bspt": "Pipe taper R, Rc (ISO 7-1)",
+    "thread.form_npt": "Pipe taper NPT (ASME B1.20.1)",
+    "thread.form_rp": "Pipe Rp (ISO 7-1)"
+  },
+  "ar": {
+    "thread.form_bspp": "سن أنابيب G (ISO 228-1)",
+    "thread.form_bspt": "سن أنابيب مخروطي R، Rc (ISO 7-1)",
+    "thread.form_npt": "سن أنابيب مخروطي NPT (ASME B1.20.1)",
+    "thread.form_rp": "سن أنابيب داخلي متوازٍ Rp (ISO 7-1)"
+  },
+  "he": {
+    "thread.form_bspp": "תבריג צנרת G (ISO 228-1)",
+    "thread.form_bspt": "תבריג צנרת קוני R, Rc (ISO 7-1)",
+    "thread.form_npt": "תבריג צנרת קוני NPT (ASME B1.20.1)",
+    "thread.form_rp": "תבריג צנרת פנימי מקביל Rp (ISO 7-1)"
+  },
+  "ja": {
+    "thread.form_bspp": "管用平行ねじ G（ISO 228-1）",
+    "thread.form_bspt": "管用テーパねじ R、Rc（ISO 7-1）",
+    "thread.form_npt": "管用テーパねじ NPT（ASME B1.20.1）",
+    "thread.form_rp": "管用平行めねじ Rp（ISO 7-1）"
+  },
+  "zh": {
+    "thread.form_bspp": "管螺纹 G（ISO 228-1）",
+    "thread.form_bspt": "圆锥管螺纹 R、Rc（ISO 7-1）",
+    "thread.form_npt": "圆锥管螺纹 NPT（ASME B1.20.1）",
+    "thread.form_rp": "圆柱内管螺纹 Rp（ISO 7-1）"
+  },
+  "de": {
+    "thread.form_bspp": "Rohrgewinde G (ISO 228-1)",
+    "thread.form_bspt": "Kegeliges Rohrgewinde R, Rc (ISO 7-1)",
+    "thread.form_npt": "Kegeliges Rohrgewinde NPT (ASME B1.20.1)",
+    "thread.form_rp": "Zylindrisches Innenrohrgewinde Rp (ISO 7-1)"
+  },
+  "ko": {
+    "thread.form_bspp": "관용 평행나사 G (ISO 228-1)",
+    "thread.form_bspt": "관용 테이퍼나사 R, Rc (ISO 7-1)",
+    "thread.form_npt": "관용 테이퍼나사 NPT (ASME B1.20.1)",
+    "thread.form_rp": "관용 평행 암나사 Rp (ISO 7-1)"
+  }
+}

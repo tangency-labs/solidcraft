@@ -1,0 +1,20 @@
+[package]
+name = "solidcraft-profile"
+description = "SolidCraft profiler: nested, per-thread timed spans of SMLib calls, kernel operations, feature evaluation, commands and imports, as a table and a Chrome trace"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Compile the profiler in. Every app turns it on by default (its `profile` feature); off, every
+# call here is an empty inline function and the crate records nothing. On, recording still waits
+# for `set_enabled(true)`, and a span costs one relaxed atomic load until then.
+enabled = []
+
+[dependencies]
+serde_json = { workspace = true }
+# Instant that also works in the browser (std's panics on wasm32-unknown-unknown).
+web-time = { workspace = true }

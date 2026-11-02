@@ -1,0 +1,18 @@
+{
+ "sources": [],
+ "what": "timeline.roll_to a feature in the middle: the part is the one at that step",
+ "method": "marker after Round (2 of 4 features active): 40x30x10 block with its front top edge rounded R2 along 40 mm: V = 12000 - (1-pi/4) 4 40; faces 6 + 1 = 7",
+ "body_count": 1,
+ "volume_mm3": 11965.663706143592,
+ "faces": 7,
+ "results": [
+  {
+   "step": 7,
+   "json": {
+    "marker": 2,
+    "features": 4
+   }
+  }
+ ],
+ "source": "analytic"
+}

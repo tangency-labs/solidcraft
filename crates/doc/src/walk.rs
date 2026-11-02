@@ -50,6 +50,7 @@ impl Walk for solidcraft_sketch::PatternAlignment {}
 impl Walk for solidcraft_kernel::StepNode {}
 impl Walk for crate::document::Operation {}
 impl Walk for solidcraft_kernel::Continuity {}
+impl Walk for solidcraft_kernel::DraftCorner {}
 impl Walk for crate::document::Direction {}
 impl Walk for crate::document::FilletFit {}
 impl Walk for crate::document::FilletCorner {}
@@ -62,6 +63,10 @@ impl Walk for crate::document::ExtendMode {}
 impl Walk for crate::document::RuledMode {}
 impl Walk for crate::document::RuledCorners {}
 impl Walk for crate::document::ExtrudeConvention {}
+impl Walk for crate::thread_forms::ThreadForm {}
+impl Walk for crate::thread_forms::ThreadHand {}
+impl Walk for crate::thread_forms::ThreadTip {}
+impl Walk for crate::thread_forms::SteepFlank {}
 
 /// A reference walks itself: a sketch, a feature or a body.
 macro_rules! reference {

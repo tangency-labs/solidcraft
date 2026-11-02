@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#514"
+ ],
+ "what": "an L bracket unfolded and refolded: the refold must give the folded part back",
+ "source": "analytic",
+ "method": "T = 2, R = 2: base 60 x 36, flange straight 20 - 4 = 16, bend (pi/2)(16 - 4)*60/2 = 565.487; V = 60*2*(36 + 16) + 565.487",
+ "body_count": 1,
+ "volume_mm3": 6805.486677646163
+}

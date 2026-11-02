@@ -1,0 +1,20 @@
+{
+  "ar": {
+    "help.version": "الإصدار {version}"
+  },
+  "en": {
+    "help.version": "Version {version}"
+  },
+  "he": {
+    "help.version": "גרסה {version}"
+  },
+  "ja": {
+    "help.version": "バージョン {version}"
+  },
+  "zh": {
+    "help.version": "版本 {version}"
+  },
+  "zh-TW": {
+    "help.version": "版本 {version}"
+  }
+}

@@ -1,0 +1,46 @@
+# oracle/33-fillet-tangent-chain: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Slot: 14 faces, 28 edges
+Slot face F2:side:a1
+Slot face F2:side:a2
+Slot face F2:side:l1
+Slot face F2:side:l2
+Slot face F2:start
+Slot face F2:top
+Slot face F3:blend:F2:side:a1|F2:top
+Slot face F3:blend:F2:side:a2|F2:top
+Slot face F3:blend:F2:side:l1|F2:top
+Slot face F3:blend:F2:side:l2|F2:top
+Slot face F4:blend:F2:side:a1|F2:start
+Slot face F4:blend:F2:side:a2|F2:start
+Slot face F4:blend:F2:side:l1|F2:start
+Slot face F4:blend:F2:side:l2|F2:start
+Slot edge F2:side:a1|F2:side:l1
+Slot edge F2:side:a1|F2:side:l2
+Slot edge F2:side:a1|F3:blend:F2:side:a1|F2:top
+Slot edge F2:side:a1|F4:blend:F2:side:a1|F2:start
+Slot edge F2:side:a2|F2:side:l1
+Slot edge F2:side:a2|F2:side:l2
+Slot edge F2:side:a2|F3:blend:F2:side:a2|F2:top
+Slot edge F2:side:a2|F4:blend:F2:side:a2|F2:start
+Slot edge F2:side:l1|F3:blend:F2:side:l1|F2:top
+Slot edge F2:side:l1|F4:blend:F2:side:l1|F2:start
+Slot edge F2:side:l2|F3:blend:F2:side:l2|F2:top
+Slot edge F2:side:l2|F4:blend:F2:side:l2|F2:start
+Slot edge F2:start|F4:blend:F2:side:a1|F2:start
+Slot edge F2:start|F4:blend:F2:side:a2|F2:start
+Slot edge F2:start|F4:blend:F2:side:l1|F2:start
+Slot edge F2:start|F4:blend:F2:side:l2|F2:start
+Slot edge F2:top|F3:blend:F2:side:a1|F2:top
+Slot edge F2:top|F3:blend:F2:side:a2|F2:top
+Slot edge F2:top|F3:blend:F2:side:l1|F2:top
+Slot edge F2:top|F3:blend:F2:side:l2|F2:top
+Slot edge F3:blend:F2:side:a1|F2:top|F3:blend:F2:side:l1|F2:top
+Slot edge F3:blend:F2:side:a1|F2:top|F3:blend:F2:side:l2|F2:top
+Slot edge F3:blend:F2:side:a2|F2:top|F3:blend:F2:side:l1|F2:top
+Slot edge F3:blend:F2:side:a2|F2:top|F3:blend:F2:side:l2|F2:top
+Slot edge F4:blend:F2:side:a1|F2:start|F4:blend:F2:side:l1|F2:start
+Slot edge F4:blend:F2:side:a1|F2:start|F4:blend:F2:side:l2|F2:start
+Slot edge F4:blend:F2:side:a2|F2:start|F4:blend:F2:side:l1|F2:start
+Slot edge F4:blend:F2:side:a2|F2:start|F4:blend:F2:side:l2|F2:start
+ref TopFillet (3) edge 0 `F2:side:l1|F2:top` -> Slot edge F2:side:l1|F2:top
+ref BottomChamfer (4) edge 0 `F2:side:l1|F2:start` -> Slot edge F2:side:l1|F2:start

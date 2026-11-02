@@ -1,0 +1,72 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -6,
+     -6,
+     -5
+    ],
+    "length": 12,
+    "width": 12,
+    "height": 5.1,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     0,
+     -4
+    ],
+    "radius": 1.6,
+    "height": 4.1,
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     -3.9
+    ],
+    "length": 1.5,
+    "width": 1.5,
+    "height": 7.1,
+    "operation": "new",
+    "body_name": "Tool"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0.0003,
+     0,
+     -4
+    ],
+    "radius": 1.5,
+    "height": 7.5,
+    "operation": "cut",
+    "targets": [
+     "Tool"
+    ]
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Part",
+    "tools": [
+     "Tool"
+    ],
+    "operation": "cut"
+   }
+  }
+ ]
+}

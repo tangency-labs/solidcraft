@@ -356,7 +356,16 @@ fn edit_joint_shows_components_for_point_and_frame_origins() {
         assert_eq!((&after.a, &after.b), (&before.a, &before.b), "{command}");
 
         // Replacing just B with a face still edits only B, preserving A's point/frame.
-        let body = app.session.world_state().bodies.iter().find(|body| occurrence_of_body(&app.session, &body.name) == Some(b)).unwrap().name.clone();
+        let body = app
+            .session
+            .world_state()
+            .unwrap()
+            .bodies
+            .iter()
+            .find(|body| occurrence_of_body(&app.session, &body.name) == Some(b))
+            .unwrap()
+            .name
+            .clone();
         let picked = Sel::Face { body, index: 0, point: Vec3::new(40.0, 10.0, 10.0) };
         d.active = 1;
         d.pick(&app.session, picked);
@@ -511,7 +520,7 @@ fn straight_edge_snap_follows_a_rotated_occurrence() {
     let transform = app.session.doc.occurrence_of(b).unwrap().transform;
     let mid = solidcraft_engine::doc::apply_point(&transform, Vec3::new(30.0, 10.0, 10.0));
     let axis = solidcraft_engine::doc::apply_vector(&transform, Vec3::Y);
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let mesh = st.body("Body2").unwrap().mesh();
     let index = mesh.edges.iter().position(|e| polyline_mid(e).dist(mid) < 1e-6).unwrap();
     let snap = snap_of(&app.session, &Sel::Edge { body: "Body2".into(), index, point: mid }).unwrap();
@@ -699,7 +708,7 @@ fn face_snaps_mate_face_to_face() {
     for (id, p) in c {
         app.run(&id, p).unwrap();
     }
-    let st = app.session.world_state();
+    let st = app.session.world_state().unwrap();
     let b = st.body("Body2").unwrap().mesh().bounds();
     assert!((b.min.z - 10.0).abs() < 1e-6 && (b.max.z - 20.0).abs() < 1e-6, "{b:?}");
     // Edit Joint shows the mate unflipped; Flip puts B back into A's volume.
@@ -712,7 +721,7 @@ fn face_snaps_mate_face_to_face() {
     for (id, p) in apply_commands(&app, &e).unwrap() {
         app.run(&id, p).unwrap();
     }
-    let b = app.session.world_state().body("Body2").unwrap().mesh().bounds();
+    let b = app.session.world_state().unwrap().body("Body2").unwrap().mesh().bounds();
     assert!((b.max.z - 10.0).abs() < 1e-6, "{b:?}");
 }
 

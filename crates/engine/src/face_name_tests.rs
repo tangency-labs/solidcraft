@@ -43,8 +43,8 @@ fn top_and_hole_names(s: &mut Session) -> (String, Vec<String>) {
 }
 
 /// A 60 x 40 x 10 plate with a hole of radius 5: its top face is a rectangle with a hole in it,
-/// whose centroid (the plate's middle, (30, 20, 10)) is in the hole; the hole's wall is two half
-/// cylinders, whose centroids are inside the cylinder, 2r/π from its axis.
+/// whose centroid (the plate's middle, (30, 20, 10)) is in the hole; the hole's wall is one
+/// whole cylinder (SMLib's, closed on its seam), whose centroid is on its axis, halfway up.
 #[test]
 fn model_faces_gives_a_point_on_each_face_and_the_hole_axis_and_radius() {
     let mut s = Session::default();
@@ -61,10 +61,10 @@ fn model_faces_gives_a_point_on_each_face_and_the_hole_axis_and_radius() {
             Some(c) => {
                 let radial = (at.x - 30.0).hypot(at.y - 20.0);
                 assert!((radial - 5.0).abs() < 1e-9 && at.z > 0.0 && at.z < 10.0, "{at:?}");
-                // The centroid of a half cylinder's wall is 2r/π = 3.18 from the axis, not on the wall.
+                // The centroid of a whole cylinder's wall is on its axis, not on the wall.
                 let centroid = vec(&f["centroid"]);
                 let inside = (centroid.x - 30.0).hypot(centroid.y - 20.0);
-                assert!((2.5..4.0).contains(&inside), "the centroid of a half cylinder is inside it: {inside}");
+                assert!(inside < 1e-9 && (centroid.z - 5.0).abs() < 1e-9, "the centroid of the hole's wall is on its axis: {centroid:?}");
                 // The hole's axis: the line through (30, 20) along z, its radius 5.
                 let (origin, axis) = (vec(&c["origin"]), vec(&c["axis"]));
                 assert!((origin.x - 30.0).abs() < 1e-9 && (origin.y - 20.0).abs() < 1e-9, "{origin:?}");
@@ -122,10 +122,11 @@ fn convert_to_sheet_metal_takes_the_plates_face_by_name() {
         let span = at.iter().cloned().fold(f64::MIN, f64::max) - at.iter().cloned().fold(f64::MAX, f64::min);
         assert!(span > 9.8 && span < 10.0 + 1e-6, "{span}");
     }
-    // The plate is still 100 x 60 x 2.5 less the hole: 15000 - π·5²·2.5 = 14803.65 mm³ for a round hole, a little more
-    // (less than 2% of the hole's 196.35 mm³) for a polygon inside the circle.
+    // The plate is still 100 x 60 x 2.5 less the hole, which is round: 15000 - π·5²·2.5 =
+    // 14803.65 mm³, within the measure's accuracy (SMLib's mass properties come within 2e-7 of
+    // a closed form).
     let (v, round) = (volume(&mut s, "Plate"), 15000.0 - 25.0 * PI * 2.5);
-    assert!(v >= round - 1e-6 && v - round < 0.02 * 25.0 * PI * 2.5, "{v}");
+    assert!((v - round).abs() < 2e-7 * round, "{v} vs {round}");
 }
 
 /// Shell, draft and offset face share the parser of Delete Face.
@@ -207,8 +208,8 @@ fn offset_face_takes_the_face_by_name() {
     assert!((volume(&mut s, "Tray") - 100.0 * 60.0 * 35.0).abs() < 1e-6, "{}", volume(&mut s, "Tray"));
 }
 
-/// A cylinder of radius 10 and height 20 has a side of two half cylinders, each of which
-/// `model.faces` describes (its axis and radius); drafting them 5 degrees from the base plane makes
+/// A cylinder of radius 10 and height 20 has one side face (SMLib's, closed on its seam), which
+/// `model.faces` describes (its axis and radius); drafting it 5 degrees from the base plane makes
 /// a frustum of radius 10 at the base and 10 - 20 tan 5 degrees at the top.
 #[test]
 fn draft_takes_a_cylinders_side_by_name() {
@@ -216,7 +217,7 @@ fn draft_takes_a_cylinders_side_by_name() {
     run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 20, "body_name": "Pin"}));
     let all = faces(&mut s, "Pin");
     let sides: Vec<&Value> = all.iter().filter(|f| f.get("cylinder").is_some()).collect();
-    assert_eq!(sides.len(), 2, "two half cylinders: {all:?}");
+    assert_eq!(sides.len(), 1, "one side: {all:?}");
     for side in &sides {
         assert!((side["cylinder"]["radius"].as_f64().unwrap_or(f64::NAN) - 10.0).abs() < 1e-9, "{side}");
     }

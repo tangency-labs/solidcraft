@@ -1,0 +1,40 @@
+{
+ "sources": [],
+ "what": "occurrence.copy of the arm 20 mm up",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); a second placement of Arm moved by (0,0,20): Arm:2 at (20,0,25); totals 12000, centre (13.333,0,8.333)",
+ "body_count": 3,
+ "volume_mm3": 12000.0,
+ "center_of_mass": [
+  13.333333,
+  0,
+  8.333333
+ ],
+ "results": [
+  {
+   "step": 9,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      20.0,
+      0.0,
+      25.0
+     ],
+     "bbox": {
+      "min": [
+       0.0,
+       -5.0,
+       20.0
+      ],
+      "max": [
+       40.0,
+       5.0,
+       30.0
+      ]
+     },
+     "volume_mm3": 4000.0
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,28 @@
+{
+ "sources": [],
+ "what": "a modelled M10 thread on a d10 shaft running down to a d16 shoulder: it stops clear of it, the collar whole",
+ "source": "analytic",
+ "method": "the shaft's lower end is a shoulder (the d16 collar lies past it, in the groove's way), so the groove stops there with its widest part clear of it: its centre w = (P/4 + 2 (d/2 + 0.05P - r_root) tan30)/2 = 0.699551 mm above the shoulder (its half width at the tool's outer edge, 0.05 P past the crest), and the square stop inside material removes exactly as if the groove ended at its centre (see 003); the top end is free, the groove runs out into the air. V = pi 8^2 10 (the collar) + pi 5^2 w + 2 pi int_{10+w}^35 int r m(r) dr dz (m as in 001); the centre of mass from the three parts' moments (the threaded part's at its middle, the screw averaging every meridian alike; its stop moves it under 0.002 mm). Tolerance 0.05%: the groove is SMLib's exact screw sweep; a groove running a pitch into the collar (the old free-end overrun) removes 0.9% more",
+ "body_count": 1,
+ "volume_mm3": 3648.530350498,
+ "center_of_mass": [
+  0,
+  0,
+  12.824948457564597
+ ],
+ "bbox": {
+  "min": [
+   -8,
+   -8,
+   0
+  ],
+  "max": [
+   8,
+   8,
+   35
+  ]
+ },
+ "tolerance": {
+  "rel": 0.0005
+ }
+}

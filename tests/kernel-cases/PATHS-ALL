@@ -1,0 +1,58 @@
+# The shared core: a change to any of these reruns every area of the kernel rig and the ladder
+# (scripts/ci/kernel_rig_plan.py). One git pathspec glob a line, relative to the repository root:
+# `*` stays within a folder, `**` crosses folders. Each area's own sources are in <area>/PATHS.
+#
+# SMLib: the bindings, the schema 4 record bridge and the pinned revision (SMLIB_REV,
+# SMLIB_PREBUILT), and the script that fetches it.
+crates/smlib/**
+scripts/fetch-smlib.sh
+# The geometry every body is made of: B-rep record, curves, surfaces, meshes.
+crates/geom/**
+# The kernel's core, which every case goes through: bodies, extrude/revolve/primitives, booleans
+# and placements, the planar prisms, the SMLib sweeps and booleans, history and provenance, the
+# native bridge to SMLib, tessellation, and what the grader measures (measure, validity, counts).
+crates/kernel/Cargo.toml
+crates/kernel/src/body.rs
+crates/kernel/src/boolean_record.rs
+crates/kernel/src/build.rs
+crates/kernel/src/freeform.rs
+crates/kernel/src/heal.rs
+crates/kernel/src/history.rs
+crates/kernel/src/lib.rs
+crates/kernel/src/measure.rs
+crates/kernel/src/native.rs
+crates/kernel/src/native/**
+crates/kernel/src/numbered.rs
+crates/kernel/src/ops.rs
+crates/kernel/src/par.rs
+crates/kernel/src/planar_regularize.rs
+crates/kernel/src/planar_sources.rs
+crates/kernel/src/plane_fit.rs
+crates/kernel/src/prism.rs
+crates/kernel/src/prism_curve.rs
+crates/kernel/src/prism_measure.rs
+crates/kernel/src/profile.rs
+crates/kernel/src/provenance.rs
+crates/kernel/src/record.rs
+crates/kernel/src/shell_groups.rs
+crates/kernel/src/smlib_boolean.rs
+crates/kernel/src/smlib_sweeps.rs
+crates/kernel/src/tess/**
+crates/kernel/src/topo.rs
+crates/kernel/src/validity.rs
+crates/kernel/src/watch.rs
+# Timeline evaluation and the model cache, which every feature is evaluated through.
+crates/doc/src/eval.rs
+crates/doc/src/model_cache.rs
+crates/doc/src/walk.rs
+# The command registry and the solid feature commands every case starts with (sketches made
+# into boxes, cylinders, extrusions, revolutions, combines, moves; fillets, holes, shells, sweeps
+# and lofts live there too).
+crates/engine/src/cmd/features.rs
+crates/engine/src/cmd/mod.rs
+# The rig itself: the grader, the runner, the selection and this gate's workflow.
+.github/workflows/kernel-rig.yml
+apps/solidcraft-cli/src/kernel_cases.rs
+scripts/ci/kernel_rig_plan.py
+xtask/src/kernel_cases.rs
+xtask/src/kernel_ladder.rs

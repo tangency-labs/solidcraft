@@ -1,0 +1,23 @@
+{
+  "en": {
+    "ui.patch_continuity_corner_tip": "The patch meets the faces round it at the chosen continuity along each side. At a corner where those faces meet each other with different curvatures, it stays tangent (G1) there."
+  },
+  "ar": {
+    "ui.patch_continuity_corner_tip": "تلتقي الرقعة بالأوجه المحيطة بها بالاستمرارية المختارة على طول كل جانب. وعند زاوية تلتقي فيها تلك الأوجه بعضها ببعض بانحناءات مختلفة، تبقى مماسّة (G1) هناك."
+  },
+  "de": {
+    "ui.patch_continuity_corner_tip": "Der Patch schließt entlang jeder Seite mit der gewählten Stetigkeit an die umgebenden Flächen an. An einer Ecke, an der diese Flächen mit unterschiedlicher Krümmung aufeinandertreffen, bleibt er dort tangential (G1)."
+  },
+  "he": {
+    "ui.patch_continuity_corner_tip": "הטלאי פוגש את הפאות שסביבו ברציפות שנבחרה לאורך כל צלע. בפינה שבה הפאות האלה נפגשות זו עם זו בעקמומיות שונה, הוא נשאר משיק (G1) שם."
+  },
+  "ja": {
+    "ui.patch_continuity_corner_tip": "パッチは各辺に沿って、周囲の面と選んだ連続性でつながります。周囲の面どうしが異なる曲率で接するコーナーでは、そこで接線 (G1) にとどまります。"
+  },
+  "ko": {
+    "ui.patch_continuity_corner_tip": "패치는 각 변을 따라 주변 면과 선택한 연속성으로 이어집니다. 주변 면끼리 서로 다른 곡률로 만나는 모서리에서는 그곳에서 접선(G1)으로 유지됩니다."
+  },
+  "zh": {
+    "ui.patch_continuity_corner_tip": "补面沿每条边以所选的连续性与周围的面相接。在周围的面彼此以不同曲率相接的角上，补面在该处保持相切 (G1)。"
+  }
+}

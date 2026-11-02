@@ -1,0 +1,39 @@
+# corpus/move-bodies: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Block: 6 faces, 12 edges
+Block face F2:side:l1
+Block face F2:side:l2
+Block face F2:side:l3
+Block face F2:side:l4
+Block face F2:start
+Block face F2:top
+Block edge F2:side:l1|F2:side:l2
+Block edge F2:side:l1|F2:side:l4
+Block edge F2:side:l1|F2:start
+Block edge F2:side:l1|F2:top
+Block edge F2:side:l2|F2:side:l3
+Block edge F2:side:l2|F2:start
+Block edge F2:side:l2|F2:top
+Block edge F2:side:l3|F2:side:l4
+Block edge F2:side:l3|F2:start
+Block edge F2:side:l3|F2:top
+Block edge F2:side:l4|F2:start
+Block edge F2:side:l4|F2:top
+body Peg: 6 faces, 12 edges
+Peg face F4:side:l1
+Peg face F4:side:l2
+Peg face F4:side:l3
+Peg face F4:side:l4
+Peg face F4:start
+Peg face F4:top
+Peg edge F4:side:l1|F4:side:l2
+Peg edge F4:side:l1|F4:side:l4
+Peg edge F4:side:l1|F4:start
+Peg edge F4:side:l1|F4:top
+Peg edge F4:side:l2|F4:side:l3
+Peg edge F4:side:l2|F4:start
+Peg edge F4:side:l2|F4:top
+Peg edge F4:side:l3|F4:side:l4
+Peg edge F4:side:l3|F4:start
+Peg edge F4:side:l3|F4:top
+Peg edge F4:side:l4|F4:start
+Peg edge F4:side:l4|F4:top

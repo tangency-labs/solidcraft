@@ -1,0 +1,38 @@
+# oracle/09-shell: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Box: 11 faces, 24 edges
+Box face F2:side:l1
+Box face F2:side:l2
+Box face F2:side:l3
+Box face F2:side:l4
+Box face F2:start
+Box face F2:top
+Box face F3:inner:F2:side:l1
+Box face F3:inner:F2:side:l2
+Box face F3:inner:F2:side:l3
+Box face F3:inner:F2:side:l4
+Box face F3:inner:F2:start
+Box edge F2:side:l1|F2:side:l2
+Box edge F2:side:l1|F2:side:l4
+Box edge F2:side:l1|F2:start
+Box edge F2:side:l1|F2:top
+Box edge F2:side:l2|F2:side:l3
+Box edge F2:side:l2|F2:start
+Box edge F2:side:l2|F2:top
+Box edge F2:side:l3|F2:side:l4
+Box edge F2:side:l3|F2:start
+Box edge F2:side:l3|F2:top
+Box edge F2:side:l4|F2:start
+Box edge F2:side:l4|F2:top
+Box edge F2:top|F3:inner:F2:side:l1
+Box edge F2:top|F3:inner:F2:side:l2
+Box edge F2:top|F3:inner:F2:side:l3
+Box edge F2:top|F3:inner:F2:side:l4
+Box edge F3:inner:F2:side:l1|F3:inner:F2:side:l2
+Box edge F3:inner:F2:side:l1|F3:inner:F2:side:l4
+Box edge F3:inner:F2:side:l1|F3:inner:F2:start
+Box edge F3:inner:F2:side:l2|F3:inner:F2:side:l3
+Box edge F3:inner:F2:side:l2|F3:inner:F2:start
+Box edge F3:inner:F2:side:l3|F3:inner:F2:side:l4
+Box edge F3:inner:F2:side:l3|F3:inner:F2:start
+Box edge F3:inner:F2:side:l4|F3:inner:F2:start
+ref Shell1 (3) face 0 `F2:top` -> Box face F2:top

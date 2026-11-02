@@ -1,0 +1,135 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -27.5,
+     0,
+     0
+    ],
+    "length": 55,
+    "width": 50,
+    "height": 35,
+    "body_name": "Channel"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "body": "Channel",
+    "radius": 2.4,
+    "edges": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      50,
+      0
+     ],
+     [
+      0,
+      0,
+      35
+     ],
+     [
+      0,
+      50,
+      35
+     ],
+     [
+      -27.5,
+      25,
+      0
+     ],
+     [
+      27.5,
+      25,
+      0
+     ],
+     [
+      -27.5,
+      25,
+      35
+     ],
+     [
+      27.5,
+      25,
+      35
+     ],
+     [
+      -27.5,
+      0,
+      17.5
+     ],
+     [
+      27.5,
+      0,
+      17.5
+     ],
+     [
+      -27.5,
+      50,
+      17.5
+     ],
+     [
+      27.5,
+      50,
+      17.5
+     ]
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -22.5,
+     0,
+     5
+    ],
+    "length": 45,
+    "width": 52,
+    "height": 32,
+    "body_name": "Cavity"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Channel",
+    "tools": [
+     "Cavity"
+    ],
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -25,
+     45,
+     5
+    ],
+    "length": 50,
+    "width": 5,
+    "height": 10,
+    "body_name": "Rib"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Channel",
+    "tools": [
+     "Rib"
+    ],
+    "operation": "join"
+   }
+  }
+ ]
+}

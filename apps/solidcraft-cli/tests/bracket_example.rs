@@ -26,8 +26,8 @@ fn assert_two_through_holes(session: &Session, stage: &str) {
     let expected = 2.0 * PI * 4.0_f64.powi(2) * 6.0;
     assert!((removed - expected).abs() < expected * 1e-3, "{stage}: the two holes remove {removed} mm³, expected {expected} mm³");
 
-    let before_mesh = uncut.tessellate(0.01).unwrap();
-    let after_mesh = bracket.tessellate(0.01).unwrap();
+    let before_mesh = uncut.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
+    let after_mesh = bracket.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
     let down = Vec3::new(0.0, 0.0, -1.0);
     for y in [-15.0, -45.0] {
         let center = Vec3::new(25.0, y, 1.0);

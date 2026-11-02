@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#958"
+ ],
+ "what": "a large thin blank folded across its whole width with the fixed point exactly on the sheet's top face",
+ "source": "analytic",
+ "method": "465 x 200 x 0.8 plate: V_flat = 74400 mm3; one fold of width 200 across it: a fold keeps the flat length of the blank, so a fold of angle th, inner radius R, thickness t and K-factor K over a width w takes a flat strip of BA = th(R+Kt) and puts a bend of volume th((R+t)^2-R^2)w/2 in its place: V = V_flat + th w t^2 (1/2 - K) (the bend's mid-surface lies at R+t/2, the neutral axis at R+Kt). V = 74400 + (pi/2)*200*0.64*0.06",
+ "body_count": 1,
+ "volume_mm3": 74412.06371578979
+}

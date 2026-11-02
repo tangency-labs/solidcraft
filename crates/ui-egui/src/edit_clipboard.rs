@@ -324,7 +324,7 @@ pub fn copy(app: &mut SolveApp) -> bool {
         let names: Vec<String> = placements.iter().filter_map(|p| app.session.occurrence_placement(p).ok()).map(|p| p.name).collect();
         app.set_status(format!("Copied {} (Ctrl+V pastes an instance, Ctrl+Shift+V a new copy)", names.join(", ")), false);
         leave_text(app, format!("SolidCraft components: {}", names.join(", ")));
-        app.foreign_copy = Some(std::sync::Arc::new(solidcraft_engine::ForeignCopy::of(&app.session, Vec::new(), placements.clone())));
+        app.foreign_copy = solidcraft_engine::ForeignCopy::of(&app.session, Vec::new(), placements.clone()).ok().map(std::sync::Arc::new);
         app.copied_placements = placements;
         return true;
     }
@@ -334,7 +334,7 @@ pub fn copy(app: &mut SolveApp) -> bool {
         replace_clipboard(app);
         app.set_status(format!("Copied {}", bodies.join(", ")), false);
         leave_text(app, format!("SolidCraft bodies: {}", bodies.join(", ")));
-        app.foreign_copy = Some(std::sync::Arc::new(solidcraft_engine::ForeignCopy::of(&app.session, bodies.clone(), Vec::new())));
+        app.foreign_copy = solidcraft_engine::ForeignCopy::of(&app.session, bodies.clone(), Vec::new()).ok().map(std::sync::Arc::new);
         app.copied_bodies = bodies;
         return true;
     }
@@ -463,7 +463,7 @@ pub fn cut(app: &mut SolveApp) -> bool {
         // design: a cut that holds any feature leaves another design nothing to paste.
         if set.features.is_empty() {
             app.foreign_copy =
-                Some(std::sync::Arc::new(solidcraft_engine::ForeignCopy::of(&app.session, set.bodies.clone(), set.placements.clone())));
+                solidcraft_engine::ForeignCopy::of(&app.session, set.bodies.clone(), set.placements.clone()).ok().map(std::sync::Arc::new);
         }
         app.cut = set;
         // What is cut is the faded set; the selection that chose it would only muddy which that is.

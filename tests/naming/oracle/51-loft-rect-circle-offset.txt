@@ -1,0 +1,20 @@
+# oracle/51-loft-rect-circle-offset: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Loft: 6 faces, 12 edges
+Loft face F4:end
+Loft face F4:side:l1
+Loft face F4:side:l2
+Loft face F4:side:l3
+Loft face F4:side:l4
+Loft face F4:start
+Loft edge F4:end|F4:side:l1
+Loft edge F4:end|F4:side:l2
+Loft edge F4:end|F4:side:l3
+Loft edge F4:end|F4:side:l4
+Loft edge F4:side:l1|F4:side:l2
+Loft edge F4:side:l1|F4:side:l4
+Loft edge F4:side:l1|F4:start
+Loft edge F4:side:l2|F4:side:l3
+Loft edge F4:side:l2|F4:start
+Loft edge F4:side:l3|F4:side:l4
+Loft edge F4:side:l3|F4:start
+Loft edge F4:side:l4|F4:start

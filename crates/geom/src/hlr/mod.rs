@@ -4,8 +4,9 @@
 //! trimmed faces. Every piece is visible, hidden or explicitly uncertain; nothing is guessed.
 //!
 //! Supported: planes, and cylinders, cones, spheres and tori whether stored as analytic records,
-//! revolutions of lines and circles or spline patches (recognised to 1e-9 relative and then
-//! trimmed and intersected in their own chart). Other spline and revolution faces are freeform:
+//! rigidly placed revolutions of lines and circles or spline patches (recognised to 1e-9 relative
+//! and then trimmed and intersected in their own chart). Other spline and rigidly placed revolution
+//! faces are freeform:
 //! unless [`Options::freeform`] is set they are listed in [`Drawing::unsupported`], their
 //! silhouettes are not drawn and anything they could hide is reported uncertain.
 //!
@@ -200,149 +201,147 @@ pub fn prepare_cancellable(b: &Brep, opts: &Options, cancel: &dyn Fn() -> bool) 
     let mut edges = Vec::new();
     let mut faces = Vec::new();
     let mut report = PrepareReport::default();
-    for shell in &b.shells {
-        let base_face = faces.len();
-        let mut curves = Vec::with_capacity(shell.edges.len());
-        for (ei, e) in shell.edges.iter().enumerate() {
-            if ei % 256 == 0 && cancel() {
-                return Err(HlrError::Cancelled);
-            }
-            let (c, acc) = C3::new(&e.curve)?;
-            let record = match &e.curve {
-                crate::brep::Curve::Line { .. } => "line",
-                crate::brep::Curve::CircleArc { .. } => "circle_arc",
-                crate::brep::Curve::EllipseArc { .. } => "ellipse_arc",
-                crate::brep::Curve::Polyline { .. } => "polyline",
-                crate::brep::Curve::Spline { .. } => "spline",
-                crate::brep::Curve::RationalSpline { .. } => "rational_spline",
-                crate::brep::Curve::Intersection { .. } => "intersection",
-                crate::brep::Curve::SurfaceIntersection { .. } => "surface_intersection",
-            };
-            let shape = if matches!(c, C3::Line { .. }) {
-                "line"
-            } else if as_circle(&c, 1e-9).is_some() {
-                "circle"
-            } else {
-                "other"
-            };
-            *report.curves.entry(format!("{record}/{shape}")).or_insert(0) += 1;
-            curves.push((c, acc));
+    let mut curves = Vec::with_capacity(b.edges.len());
+    for (ei, e) in b.edges.iter().enumerate() {
+        if ei % 256 == 0 && cancel() {
+            return Err(HlrError::Cancelled);
         }
-        let local_curves: Vec<C3> = curves.iter().map(|(c, _)| c.clone()).collect();
-        let mut users: Vec<Vec<usize>> = vec![Vec::new(); shell.edges.len()];
-        for (fi, f) in shell.faces.iter().enumerate() {
-            if cancel() {
-                return Err(HlrError::Cancelled);
-            }
-            let mut surface = S3::new(&f.surface)?;
-            // A flat spline patch is a plane: trimmed and intersected as one.
-            if let Some(plane) = surface.flat(1e-9) {
-                surface = plane;
-            }
-            let analytic = surface.analytic(1e-9);
-            // Trim and intersect recognised spline surfaces in their own analytic chart.
-            if matches!(surface, S3::Nurbs(_)) {
-                let axis = match analytic {
-                    Analytic::Cylinder { p, a, .. } => Some((p, a)),
-                    Analytic::Cone { apex, a, .. } => Some((apex, a)),
-                    _ => None,
-                };
-                let mut h = [0., 0.];
-                if let Some((p, a)) = axis {
-                    let along = f.loops.iter().flatten().filter_map(|u| local_curves.get(u.edge as usize)).flat_map(|c| {
-                        let [t0, t1] = c.domain();
-                        (0..=64).map(move |i| c.at(t0 + (t1 - t0) * i as f64 / 64.))
-                    });
-                    let (lo, hi) = along.fold((f64::MAX, f64::MIN), |(lo, hi), q| ((q - p).dot(a).min(lo), (q - p).dot(a).max(hi)));
-                    // Generous: the chart only has to contain the face; the trim bounds it exactly.
-                    let pad = 0.01 * (hi - lo).abs() + 1e-6;
-                    h = [lo - pad, hi + pad];
-                }
-                let toward = match analytic {
-                    Analytic::Sphere { c, .. } => {
-                        let pts: Vec<Vec3> = f
-                            .loops
-                            .iter()
-                            .flatten()
-                            .filter_map(|u| local_curves.get(u.edge as usize))
-                            .map(|c| c.at(0.5 * (c.domain()[0] + c.domain()[1])))
-                            .collect();
-                        let n = pts.len().max(1) as f64;
-                        pts.iter().fold(Vec3::ZERO, |acc, p| acc + *p) / n - c
-                    }
-                    _ => Vec3::ZERO,
-                };
-                if let Some(chart) = S3::from_analytic(&analytic, h, toward) {
-                    surface = chart;
-                }
-            }
-            *report.surfaces.entry(analytic_name(&analytic).to_string()).or_insert(0) += 1;
-            let trim = trim::build(f, &local_curves, &surface, opts.trim_samples);
-            if let Some(why) = trim.unsupported {
-                report.unsupported_trims.push((base_face + fi, why.to_string()));
-            }
-            report.max_trim_chord = report.max_trim_chord.max(trim.chord_error);
-            let (mut lo, mut hi) = (trim.lo, trim.hi);
-            // Curved faces can bulge past their boundary: bound them by the whole surface's
-            // guaranteed box (spline hull, turned profile), clipped to nothing tighter.
-            if !matches!(surface, S3::Plane { .. })
-                && let Some((blo, bhi)) = surface.bound()
-            {
-                lo = lo.min(blo);
-                hi = hi.max(bhi);
-            }
-            // Every face is padded, planes too: a plane record and its edges may disagree by
-            // rounding, and a box flat along the normal would cull the plane's own hit. Rounding
-            // grows with where the body was modelled (its offset), not with the face's size.
-            let pad = (hi - lo).len() * 1e-6 + 1e-12 * offset.x.abs().max(offset.y.abs()).max(offset.z.abs());
-            lo -= Vec3::new(pad, pad, pad);
-            hi += Vec3::new(pad, pad, pad);
-            for u in f.loops.iter().flatten() {
-                if let Some(list) = users.get_mut(u.edge as usize) {
-                    list.push(base_face + fi);
-                }
-            }
-            let freeform = matches!(analytic, Analytic::Other);
-            if freeform {
-                report.freeform_faces.push(base_face + fi);
-            }
-            faces.push(FaceData { surface, analytic, group: Vec::new(), trim, lo, hi, freeform });
+        let (c, acc) = C3::of_edge(e)?;
+        let record = match &e.curve {
+            crate::brep::Curve::Line { .. } => "line",
+            crate::brep::Curve::Circle { .. } => "circle_arc",
+            crate::brep::Curve::Ellipse { .. } => "ellipse_arc",
+            crate::brep::Curve::Polyline { .. } => "polyline",
+            crate::brep::Curve::Spline { .. } => "spline",
+            crate::brep::Curve::RationalSpline { .. } => "rational_spline",
+            // Only one with a spline to follow gets here: what was an `intersection` record.
+            crate::brep::Curve::SurfaceIntersection { .. } => "intersection",
+        };
+        let shape = if matches!(c, C3::Line { .. }) {
+            "line"
+        } else if as_circle(&c, 1e-9).is_some() {
+            "circle"
+        } else {
+            "other"
+        };
+        *report.curves.entry(format!("{record}/{shape}")).or_insert(0) += 1;
+        curves.push((c, acc));
+    }
+    let local_curves: Vec<C3> = curves.iter().map(|(c, _)| c.clone()).collect();
+    let mut users: Vec<Vec<usize>> = vec![Vec::new(); b.edges.len()];
+    // Faces and edges by their numbers in the record. Validation puts every face in a shell; its
+    // loops are stored the same whichever side a shell uses, and hidden lines look at both, so the
+    // shells' orientation does not come into it (a face two shells share is one face). An edge no
+    // face uses (a wire) is drawn like any other.
+    for (fi, f) in b.faces.iter().enumerate() {
+        if cancel() {
+            return Err(HlrError::Cancelled);
         }
-        for (ei, (c, acc)) in curves.into_iter().enumerate() {
-            let list = users.get(ei).cloned().unwrap_or_default();
-            let mut distinct = list.clone();
-            distinct.sort_unstable();
-            distinct.dedup();
-            let kind = if list.len() >= 2 && distinct.len() == 1 {
-                EdgeKind::Seam
-            } else if let [f1, f2] = distinct.as_slice() {
-                let [t0, t1] = c.domain();
-                let normals_parallel = [0.25, 0.5, 0.75].iter().all(|k| {
-                    let m = c.at(t0 + (t1 - t0) * k);
-                    let n = |f: usize| faces.get(f).and_then(|fd: &FaceData| fd.surface.inverse(m, None).and_then(|uv| fd.surface.normal(uv)));
-                    n(*f1).zip(n(*f2)).is_some_and(|(a, b)| a.cross(b).len() < 1e-6)
+        let mut surface = S3::of_face(f)?;
+        // A flat spline patch is a plane: trimmed and intersected as one.
+        if let Some(plane) = surface.flat(1e-9) {
+            surface = plane;
+        }
+        let analytic = surface.analytic(1e-9);
+        // Trim and intersect recognised spline surfaces in their own analytic chart.
+        if matches!(surface, S3::Nurbs(_)) {
+            let axis = match analytic {
+                Analytic::Cylinder { p, a, .. } => Some((p, a)),
+                Analytic::Cone { apex, a, .. } => Some((apex, a)),
+                _ => None,
+            };
+            let mut h = [0., 0.];
+            if let Some((p, a)) = axis {
+                let along = trim::uses(f).filter_map(|u| local_curves.get(u.edge as usize)).flat_map(|c| {
+                    let [t0, t1] = c.domain();
+                    (0..=64).map(move |i| c.at(t0 + (t1 - t0) * i as f64 / 64.))
                 });
-                let same_surface = match (faces.get(*f1).map(|f: &FaceData| f.analytic), faces.get(*f2).map(|f: &FaceData| f.analytic)) {
-                    (Some(a), Some(b)) => same_analytic(&a, &b, 1e-9),
-                    _ => false,
-                };
-                if same_surface {
-                    EdgeKind::Seam
-                } else if normals_parallel {
-                    EdgeKind::Tangent
-                } else {
-                    EdgeKind::Sharp
+                let (lo, hi) = along.fold((f64::MAX, f64::MIN), |(lo, hi), q| ((q - p).dot(a).min(lo), (q - p).dot(a).max(hi)));
+                // Generous: the chart only has to contain the face; the trim bounds it exactly.
+                let pad = 0.01 * (hi - lo).abs() + 1e-6;
+                h = [lo - pad, hi + pad];
+            }
+            let toward = match analytic {
+                Analytic::Sphere { c, .. } => {
+                    let pts: Vec<Vec3> = trim::uses(f)
+                        .filter_map(|u| local_curves.get(u.edge as usize))
+                        .map(|c| c.at(0.5 * (c.domain()[0] + c.domain()[1])))
+                        .collect();
+                    let n = pts.len().max(1) as f64;
+                    pts.iter().fold(Vec3::ZERO, |acc, p| acc + *p) / n - c
                 }
+                _ => Vec3::ZERO,
+            };
+            if let Some(chart) = S3::from_analytic(&analytic, h, toward) {
+                surface = chart;
+            }
+        }
+        *report.surfaces.entry(analytic_name(&analytic).to_string()).or_insert(0) += 1;
+        let trim = trim::build(f, &local_curves, &surface, opts.trim_samples);
+        if let Some(why) = trim.unsupported {
+            report.unsupported_trims.push((fi, why.to_string()));
+        }
+        report.max_trim_chord = report.max_trim_chord.max(trim.chord_error);
+        let (mut lo, mut hi) = (trim.lo, trim.hi);
+        // Curved faces can bulge past their boundary: bound them by the whole surface's
+        // guaranteed box (spline hull, turned profile), clipped to nothing tighter.
+        if !matches!(surface, S3::Plane { .. })
+            && let Some((blo, bhi)) = surface.bound()
+        {
+            lo = lo.min(blo);
+            hi = hi.max(bhi);
+        }
+        // Every face is padded, planes too: a plane record and its edges may disagree by
+        // rounding, and a box flat along the normal would cull the plane's own hit. Rounding
+        // grows with where the body was modelled (its offset), not with the face's size.
+        let pad = (hi - lo).len() * 1e-6 + 1e-12 * offset.x.abs().max(offset.y.abs()).max(offset.z.abs());
+        lo -= Vec3::new(pad, pad, pad);
+        hi += Vec3::new(pad, pad, pad);
+        for u in trim::uses(f) {
+            if let Some(list) = users.get_mut(u.edge as usize) {
+                list.push(fi);
+            }
+        }
+        let freeform = matches!(analytic, Analytic::Other);
+        if freeform {
+            report.freeform_faces.push(fi);
+        }
+        faces.push(FaceData { surface, analytic, group: Vec::new(), trim, lo, hi, freeform });
+    }
+    for (ei, (c, acc)) in curves.into_iter().enumerate() {
+        let list = users.get(ei).cloned().unwrap_or_default();
+        let mut distinct = list.clone();
+        distinct.sort_unstable();
+        distinct.dedup();
+        let kind = if list.len() >= 2 && distinct.len() == 1 {
+            EdgeKind::Seam
+        } else if let [f1, f2] = distinct.as_slice() {
+            let [t0, t1] = c.domain();
+            let normals_parallel = [0.25, 0.5, 0.75].iter().all(|k| {
+                let m = c.at(t0 + (t1 - t0) * k);
+                let n = |f: usize| faces.get(f).and_then(|fd: &FaceData| fd.surface.inverse(m, None).and_then(|uv| fd.surface.normal(uv)));
+                n(*f1).zip(n(*f2)).is_some_and(|(a, b)| a.cross(b).len() < 1e-6)
+            });
+            let same_surface = match (faces.get(*f1).map(|f: &FaceData| f.analytic), faces.get(*f2).map(|f: &FaceData| f.analytic)) {
+                (Some(a), Some(b)) => same_analytic(&a, &b, 1e-9),
+                _ => false,
+            };
+            if same_surface {
+                EdgeKind::Seam
+            } else if normals_parallel {
+                EdgeKind::Tangent
             } else {
                 EdgeKind::Sharp
-            };
-            match kind {
-                EdgeKind::Tangent => report.tangent_edges += 1,
-                EdgeKind::Seam => report.seam_edges += 1,
-                EdgeKind::Sharp => {}
             }
-            edges.push(EdgeData { curve: c, acc, faces: list, kind });
+        } else {
+            EdgeKind::Sharp
+        };
+        match kind {
+            EdgeKind::Tangent => report.tangent_edges += 1,
+            EdgeKind::Seam => report.seam_edges += 1,
+            EdgeKind::Sharp => {}
         }
+        edges.push(EdgeData { curve: c, acc, faces: list, kind });
     }
     // Faces on one quadric or torus. Only surfaces of one kind whose size (radius, half angle,
     // major radius) agrees to the tolerance can match, so each face is compared with the faces
@@ -394,93 +393,20 @@ pub fn prepare_cancellable(b: &Brep, opts: &Options, cancel: &dyn Fn() -> bool) 
     Ok(Prepared { edges, faces, offset, lo, hi, report })
 }
 
-/// The centre of the body's vertices' box (of its faces' reference points when it has no
-/// vertices, a sphere without edges say).
+/// The centre of the body's vertices' box (a validated body has vertices: every face has an edge
+/// loop, every other shell an edge or a vertex).
 fn anchor(b: &Brep) -> Vec3 {
-    use crate::brep::Surface;
-    let v3 = |p: &[f64; 3]| Vec3::new(p[0], p[1], p[2]);
-    let mut pts: Vec<Vec3> = b.shells.iter().flat_map(|s| s.vertices.iter().map(v3)).collect();
-    if pts.is_empty() {
-        pts = b
-            .shells
-            .iter()
-            .flat_map(|s| s.faces.iter())
-            .filter_map(|f| match &f.surface {
-                Surface::Plane { origin, .. } | Surface::PlaneThrough { origin, .. } | Surface::Revolution { origin, .. } => Some(v3(origin)),
-                Surface::PlacedRevolution { origin, matrix: [x, y, z, w], .. } => {
-                    let column = |c: &[f64; 4]| Vec3::new(c[0], c[1], c[2]);
-                    Some(column(x) * origin[0] + column(y) * origin[1] + column(z) * origin[2] + column(w))
-                }
-                Surface::Cylinder { frame, .. } | Surface::Cone { frame, .. } | Surface::Sphere { frame, .. } | Surface::Torus { frame, .. } => {
-                    Some(v3(&frame.origin))
-                }
-                Surface::Spline { points, .. } => points.first().and_then(|r| r.first()).map(v3),
-                Surface::RationalSpline { homogeneous, .. } => {
-                    homogeneous.first().and_then(|r| r.first()).filter(|h| h[3] != 0.).map(|h| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]))
-                }
-            })
-            .collect();
-    }
-    let Some(first) = pts.first().copied() else { return Vec3::ZERO };
-    let (lo, hi) = pts.iter().fold((first, first), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+    let mut pts = b.vertices.iter().map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]));
+    let Some(first) = pts.next() else { return Vec3::ZERO };
+    let (lo, hi) = pts.fold((first, first), |(lo, hi), p| (lo.min(p), hi.max(p)));
     let c = (lo + hi) * 0.5;
     if c.is_finite() { c } else { Vec3::ZERO }
 }
 
-/// The body's records with every position moved by `-d`.
+/// The body's records with every position moved by `-d`: points, control points and NURBS forms,
+/// a placed revolution through its matrix; regions, parameters and pcurves as they are.
 fn shifted(b: &Brep, d: Vec3) -> Brep {
-    use crate::brep::{Curve, Surface};
-    fn point(p: &mut [f64; 3], d: Vec3) {
-        p[0] -= d.x;
-        p[1] -= d.y;
-        p[2] -= d.z;
-    }
-    fn weighted(h: &mut [f64; 4], d: Vec3) {
-        h[0] -= d.x * h[3];
-        h[1] -= d.y * h[3];
-        h[2] -= d.z * h[3];
-    }
-    fn curve(c: &mut Curve, d: Vec3) {
-        match c {
-            Curve::Line { start, end } => {
-                point(start, d);
-                point(end, d);
-            }
-            Curve::CircleArc { frame, .. } | Curve::EllipseArc { frame, .. } => point(&mut frame.origin, d),
-            Curve::Polyline { points } | Curve::Spline { points, .. } | Curve::Intersection { points, .. } => {
-                points.iter_mut().for_each(|p| point(p, d))
-            }
-            Curve::RationalSpline { homogeneous, .. } => homogeneous.iter_mut().for_each(|h| weighted(h, d)),
-            Curve::SurfaceIntersection { surfaces, leader, .. } => {
-                surfaces.iter_mut().for_each(|s| surface(s, d));
-                curve(leader, d);
-            }
-        }
-    }
-    fn surface(s: &mut Surface, d: Vec3) {
-        match s {
-            Surface::Plane { origin, .. } => point(origin, d),
-            Surface::PlaneThrough { origin, u_point, v_point } => [origin, u_point, v_point].into_iter().for_each(|p| point(p, d)),
-            Surface::Cylinder { frame, .. } | Surface::Cone { frame, .. } | Surface::Sphere { frame, .. } | Surface::Torus { frame, .. } => {
-                point(&mut frame.origin, d)
-            }
-            Surface::Spline { points, .. } => points.iter_mut().flatten().for_each(|p| point(p, d)),
-            Surface::RationalSpline { homogeneous, .. } => homogeneous.iter_mut().flatten().for_each(|h| weighted(h, d)),
-            Surface::Revolution { profile, origin, .. } => {
-                curve(profile, d);
-                point(origin, d);
-            }
-            // The placement's last column carries its translation (and the homogeneous weight).
-            Surface::PlacedRevolution { matrix: [.., w], .. } => weighted(w, d),
-        }
-    }
-    let mut out = b.clone();
-    for s in &mut out.shells {
-        s.vertices.iter_mut().for_each(|p| point(p, d));
-        s.edges.iter_mut().for_each(|e| curve(&mut e.curve, d));
-        s.faces.iter_mut().for_each(|f| surface(&mut f.surface, d));
-    }
-    out
+    b.moved(&crate::brep::placement::Rigid { rotation: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], translation: [-d.x, -d.y, -d.z] })
 }
 
 #[derive(Clone, Copy, Debug)]

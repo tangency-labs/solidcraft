@@ -1,0 +1,72 @@
+{
+  "en": {
+    "file_load.step_build": "Building the model",
+    "file_load.step_feature": "Feature {done} of {total}",
+    "file_load.step_part": "Part {done} of {total}",
+    "file_load.step_percent": "{percent}%",
+    "file_load.step_read": "Reading the file",
+    "file_load.step_rebuild": "Rebuilding the features",
+    "file_load.step_repair": "Checking and repairing the parts",
+    "file_load.step_show": "Preparing the view"
+  },
+  "ar": {
+    "file_load.step_build": "جارٍ بناء النموذج",
+    "file_load.step_feature": "الميزة {done} من {total}",
+    "file_load.step_part": "الجزء {done} من {total}",
+    "file_load.step_percent": "{percent}%",
+    "file_load.step_read": "جارٍ قراءة الملف",
+    "file_load.step_rebuild": "جارٍ إعادة بناء الميزات",
+    "file_load.step_repair": "جارٍ فحص الأجزاء وإصلاحها",
+    "file_load.step_show": "جارٍ تجهيز العرض"
+  },
+  "de": {
+    "file_load.step_build": "Modell wird aufgebaut",
+    "file_load.step_feature": "Merkmal {done} von {total}",
+    "file_load.step_part": "Teil {done} von {total}",
+    "file_load.step_percent": "{percent} %",
+    "file_load.step_read": "Datei wird gelesen",
+    "file_load.step_rebuild": "Merkmale werden neu aufgebaut",
+    "file_load.step_repair": "Teile werden geprüft und repariert",
+    "file_load.step_show": "Ansicht wird vorbereitet"
+  },
+  "he": {
+    "file_load.step_build": "בונה את המודל",
+    "file_load.step_feature": "תכונה {done} מתוך {total}",
+    "file_load.step_part": "חלק {done} מתוך {total}",
+    "file_load.step_percent": "{percent}%",
+    "file_load.step_read": "קורא את הקובץ",
+    "file_load.step_rebuild": "בונה מחדש את התכונות",
+    "file_load.step_repair": "בודק ומתקן את החלקים",
+    "file_load.step_show": "מכין את התצוגה"
+  },
+  "ja": {
+    "file_load.step_build": "モデルを構築中",
+    "file_load.step_feature": "フィーチャー {done}/{total}",
+    "file_load.step_part": "パーツ {done}/{total}",
+    "file_load.step_percent": "{percent}%",
+    "file_load.step_read": "ファイルを読み込み中",
+    "file_load.step_rebuild": "フィーチャーを再構築中",
+    "file_load.step_repair": "パーツを確認・修復中",
+    "file_load.step_show": "ビューを準備中"
+  },
+  "ko": {
+    "file_load.step_build": "모델 만드는 중",
+    "file_load.step_feature": "피처 {done}/{total}",
+    "file_load.step_part": "부품 {done}/{total}",
+    "file_load.step_percent": "{percent}%",
+    "file_load.step_read": "파일 읽는 중",
+    "file_load.step_rebuild": "피처 다시 빌드 중",
+    "file_load.step_repair": "부품 확인 및 복구 중",
+    "file_load.step_show": "뷰 준비 중"
+  },
+  "zh": {
+    "file_load.step_build": "正在构建模型",
+    "file_load.step_feature": "特征 {done}/{total}",
+    "file_load.step_part": "零件 {done}/{total}",
+    "file_load.step_percent": "{percent}%",
+    "file_load.step_read": "正在读取文件",
+    "file_load.step_rebuild": "正在重建特征",
+    "file_load.step_repair": "正在检查和修复零件",
+    "file_load.step_show": "正在准备视图"
+  }
+}

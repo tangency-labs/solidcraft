@@ -62,7 +62,7 @@ fn type_into(h: &mut Harness, handle: &str, text: &str) {
 
 /// Whether the model holds material at `p`.
 fn solid_at(h: &Harness, p: Vec3) -> bool {
-    h.app.session.model.state().bodies.iter().any(|b| b.body.contains(p))
+    h.app.session.model.state().bodies.iter().any(|b| b.body.classify_point(p).unwrap() == solidcraft_engine::kernel::PointClass::Inside)
 }
 
 #[test]

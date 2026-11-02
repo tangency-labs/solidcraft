@@ -2243,7 +2243,7 @@ fn native_cpu_controls_check_and_start_the_same_capture_and_keep_it_exportable()
 
     click_render_check(&mut h);
     assert_eq!(h.app.render_workspace.view.cpu.checked.as_ref().unwrap().request, numeric);
-    let reflected = h.app.session.world_state().bodies.first().unwrap().name.clone();
+    let reflected = crate::open_meshing::session_world(&h.app.session).bodies.first().unwrap().name.clone();
     h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Body { name: reflected }]})).unwrap();
     h.frames(3);
     h.step(&json!({"click":{"handle":format!("dialog:section:{}", h.app.tr("render.appearance_editor.reflections"))}})).unwrap();
@@ -5301,7 +5301,7 @@ fn render_workspace_browser_semantic_focus_survives_clearing_object_picks() {
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Object"})).unwrap();
     enter(&mut h.app, true).unwrap();
     let doc = h.app.session.doc.clone();
-    let evaluated = h.app.session.world_state();
+    let evaluated = crate::open_meshing::session_world(&h.app.session);
     let before = (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.is_dirty());
     for (request, expected) in [
         (json!({"kind":"environment"}), RenderSelection::Environment),
@@ -5319,7 +5319,7 @@ fn render_workspace_browser_semantic_focus_survives_clearing_object_picks() {
         assert!(h.app.session.selection.is_empty());
     }
     assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
-    assert!(Arc::ptr_eq(&evaluated, &h.app.session.world_state()));
+    assert!(Arc::ptr_eq(&evaluated, &crate::open_meshing::session_world(&h.app.session)));
     assert_eq!(before, (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.is_dirty()));
 }
 

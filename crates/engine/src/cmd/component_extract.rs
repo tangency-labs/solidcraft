@@ -131,10 +131,10 @@ fn keep_component_looks(doc: &mut Document, owners: &BTreeMap<String, u64>, comp
 /// What the bodies `new` call the face or edge that `old` calls `name`, found where it is.
 fn renamed(old: &ModelState, new: &[&ModelBody], name: &str, near: Vec3) -> Option<String> {
     use solidcraft_doc::{appearance::face_index_at, naming};
-    if let Some((p, _)) = naming::point_on_face(old, name, near) {
+    if let Some(p) = naming::point_on_face(old, name, near) {
         return new.iter().find_map(|b| face_index_at(b, p).and_then(|i| naming::face_names(b).get(i).cloned()));
     }
-    let p = old.bodies.iter().find_map(|b| naming::find_edge(b, name, near).ok())?.0;
+    let p = old.bodies.iter().find_map(|b| naming::find_edge(b, name, near).ok())?;
     new.iter().find(|b| face_index_at(b, p).is_some()).and_then(|b| naming::edge_names_at(b, &[p]).pop())
 }
 
@@ -228,7 +228,7 @@ fn scope(s: &Session, comp: u64, cmd: &str) -> Result<Scope> {
     if source.marker.is_some_and(|m| m < source.features.len()) {
         return Err(bad(cmd, "move the timeline marker to the end first"));
     }
-    if !s.pending_moves.is_empty() {
+    if !s.uncaptured_moves().is_empty() {
         return Err(bad(cmd, "capture or revert the moved components first"));
     }
     let subtree: BTreeSet<u64> = source.components.iter().filter(|c| source.component_within(c.id, comp)).map(|c| c.id).collect();
@@ -381,7 +381,7 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
     if !source.configs.is_empty() {
         notices.push(format!("the configurations stay in this design; {stem} has none"));
     }
-    let part = Session::new(part);
+    let part = Session::opened_validating(part, None, s.validation());
     let failing: Vec<String> = part.model.results.iter().filter_map(|r| r.error.as_ref().map(|e| format!("{} ({e})", r.name))).take(5).collect();
     if !failing.is_empty() {
         return Err(bad(cmd, format!("{name} does not build on its own: {}", failing.join("; "))));
@@ -458,14 +458,14 @@ struct Before {
 }
 
 impl Before {
-    fn take(s: &Session) -> Before {
+    fn take(s: &Session) -> Result<Before> {
         let sol = solidcraft_doc::joints::solve(&s.doc, &s.model.state());
-        Before {
-            world: s.world_state(),
+        Ok(Before {
+            world: s.world_state()?,
             placements: s.doc.occurrences.iter().map(|o| (o.id, o.transform)).collect(),
             errors: s.model.results.iter().map(|r| (r.id, r.error.is_some())).collect(),
             joint_errors: sol.errors.iter().chain(&sol.conflicts).map(|(_, n, _)| n.clone()).collect(),
-        }
+        })
     }
 
     /// Refuse a swap that made a feature fail or changed a body; warn about joints it broke and
@@ -487,7 +487,7 @@ impl Before {
                 o.transform = *t;
             }
         }
-        let world = if moved.is_empty() { s.world_state() } else { std::sync::Arc::new(solidcraft_doc::world_state(&placed, &s.model.state())) };
+        let world = if moved.is_empty() { s.world_state()? } else { std::sync::Arc::new(solidcraft_doc::world_state(&placed, &s.model.state())?) };
         let (was, now): (Vec<&ModelBody>, Vec<&ModelBody>) = (self.world.bodies.iter().collect(), world.bodies.iter().collect());
         if let Some(what) = unmatched(&was, &now)? {
             return Err(bad(cmd, format!("{what} would look different without the history of {name}")));
@@ -534,7 +534,7 @@ fn copies_of(s: &Session, linked: u64) -> Result<Vec<u64>> {
         }
         let Ok(sc) = scope(s, c.id, CMD) else { continue };
         let Ok((part, _)) = part_design(s, &sc, &c.name, CMD) else { continue };
-        let world = part.world_state();
+        let world = part.world_state()?;
         let built: Vec<&ModelBody> = world.bodies.iter().collect();
         if same_solids(&reference, &built)? {
             out.push(c.id);
@@ -574,12 +574,12 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
     let (_, sf, faces, _, properties) = session_bodies(&part, &shown)?;
     // The link has a body per piece: a body in pieces keeps its name on the first
     let mut solids: Vec<String> = Vec::new();
-    for b in part.world_state().bodies.iter().filter(|b| !b.body.is_mesh()) {
+    for b in part.world_state()?.bodies.iter().filter(|b| !b.body.is_mesh()) {
         let pieces = b.body.lumps()?.len().max(1);
         solids.extend((1..=pieces).map(|n| if n == 1 { b.name.clone() } else { format!("{} ({n})", b.name) }));
     }
     let state = s.model.state();
-    let before = Before::take(s);
+    let before = Before::take(s)?;
     let last = s.doc.features.iter().rposition(|f| sc.inside.contains(&f.id)).unwrap_or(s.doc.features.len());
     let at = s.doc.features.iter().take(last).filter(|f| !sc.inside.contains(&f.id)).count();
     clear_history(s, &sc);
@@ -674,12 +674,12 @@ pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
         let (part, _) = part_design(s, &sc, &sc.name, cmd)?;
         let state = s.model.state();
         let reference: Vec<&ModelBody> = state.bodies.iter().filter(|b| b.feature == link.feature).collect();
-        let world = part.world_state();
+        let world = part.world_state()?;
         let built: Vec<&ModelBody> = world.bodies.iter().collect();
         if !same_solids(&reference, &built)? {
             return Err(bad(cmd, format!("{} is not the same as {lname}", sc.name)));
         }
-        let before = Before::take(s);
+        let before = Before::take(s)?;
         clear_history(s, &sc);
         let d = s.doc_mut();
         // Named as the linked component's next placements, as add_occurrence names them
@@ -732,6 +732,7 @@ mod tests {
 
     fn volumes(s: &Session) -> BTreeMap<String, i64> {
         s.world_state()
+            .unwrap()
             .bodies
             .iter()
             .map(|b| (b.name.clone(), (solidcraft_kernel::measure(&b.body).unwrap().volume * 1000.0).round() as i64))
@@ -740,6 +741,7 @@ mod tests {
 
     fn centroids(s: &Session) -> BTreeMap<String, [i64; 3]> {
         s.world_state()
+            .unwrap()
             .bodies
             .iter()
             .map(|b| {
@@ -754,6 +756,7 @@ mod tests {
     fn shapes(s: &Session) -> Vec<[i64; 4]> {
         let mut out: Vec<[i64; 4]> = s
             .world_state()
+            .unwrap()
             .bodies
             .iter()
             .map(|b| {
@@ -900,12 +903,12 @@ mod tests {
         let plate_occ = s.doc.occurrence_of(plate).map(|o| o.id).unwrap();
         let other_occ = s.doc.occurrence_of(other).map(|o| o.id).unwrap();
         let top = {
-            let w = s.world_state();
+            let w = s.world_state().unwrap();
             let m = solidcraft_kernel::measure(&w.body("PlateBody").unwrap().body).unwrap();
             [(m.bbox.min.x + m.bbox.max.x) / 2.0, (m.bbox.min.y + m.bbox.max.y) / 2.0, m.bbox.max.z]
         };
         let bottom = {
-            let w = s.world_state();
+            let w = s.world_state().unwrap();
             let m = solidcraft_kernel::measure(&w.body("OtherBody").unwrap().body).unwrap();
             [(m.bbox.min.x + m.bbox.max.x) / 2.0, (m.bbox.min.y + m.bbox.max.y) / 2.0, m.bbox.min.z]
         };

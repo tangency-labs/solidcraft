@@ -1,0 +1,58 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 60,
+    "width": 40,
+    "height": 10,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 30,
+    "width": 20,
+    "height": 6,
+    "corner": [
+     15,
+     10,
+     5
+    ],
+    "operation": "cut",
+    "targets": [
+     "Plate"
+    ]
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      30,
+      10,
+      10
+     ],
+     [
+      30,
+      30,
+      10
+     ],
+     [
+      15,
+      20,
+      10
+     ],
+     [
+      45,
+      20,
+      10
+     ]
+    ],
+    "distance": 5
+   }
+  }
+ ]
+}
