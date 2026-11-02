@@ -1589,7 +1589,17 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
                 ) {
                     Ok(s) => {
                         o.push(0.0);
-                        put_bss(&mut o, &s);
+                        // (a generator's surface is a B-spline; a procedural blend's net
+                        // is its SmBSplineSurface part, opt-in only)
+                        match s.kind() {
+                            solidcore::surface::surface::SurfaceKind::BSpline(b) => {
+                                put_bss(&mut o, b);
+                            }
+                            solidcore::surface::surface::SurfaceKind::ProceduralBlend(pb) => {
+                                put_bss(&mut o, pb.net());
+                            }
+                            _ => o.push(0.0),
+                        }
                     }
                     Err(e) => {
                         o.push(status(&e));

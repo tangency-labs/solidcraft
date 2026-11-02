@@ -172,6 +172,10 @@ fn box_corner_gn_round(k: &Kernel, a: usize, r: f64, s: f64, len: f64) -> BSplin
             },
         )
         .unwrap();
+    // (a plain B-spline without `fillet_round_as_definition`)
+    let solidcore::surface::surface::SurfaceKind::BSpline(out) = out.into_kind() else {
+        panic!("the G^n round is a B-spline without the definition flag");
+    };
     // its end section against the closed form
     let closed = box_corner_round(a, r, s, len, 2);
     let u0 = out.natural_uv_domain().u_interval().min();

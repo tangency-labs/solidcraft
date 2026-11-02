@@ -559,6 +559,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             | SurfaceKind::Sphere(_)
             | SurfaceKind::Torus(_)
             | SurfaceKind::BSpline(_)
+            | SurfaceKind::ProceduralBlend(_)
             | SurfaceKind::Plane(_)
             | SurfaceKind::SurfOfRevolution(_)
             | SurfaceKind::SurfOfExtrusion(_) => None,
@@ -834,6 +835,8 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     /// Errors from tessellation split selection and the iso curve linearity tests.
     #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn subdivide_by_block(&mut self, k: &Kernel, node: NodeId) -> Result<()> {
+        // the cache is built on blends' nets (the fork's 729f893; `SmBlendNetScope`)
+        let _net = crate::surface::procedural_blend::NetScope::new(k);
         // locals
         let fields = {
             let tree = self
@@ -993,6 +996,10 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 // for the node's bounding box
                 let patch = match surface.kind_with_nurb(k)? {
                     SurfaceKind::BSpline(b) => b.copy_sub_patch(&node_uv),
+                    SurfaceKind::ProceduralBlend(pb) => {
+                        let b = pb.net();
+                        b.copy_sub_patch(&node_uv)
+                    }
                     SurfaceKind::Plane(p) => p.base().copy_sub_patch(&node_uv),
                     SurfaceKind::Cone(s) => s.rev().base().copy_sub_patch(&node_uv),
                     SurfaceKind::Sphere(s) => s.base().base().copy_sub_patch(&node_uv),

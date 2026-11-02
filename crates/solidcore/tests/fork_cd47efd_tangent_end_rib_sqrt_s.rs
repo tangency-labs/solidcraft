@@ -96,7 +96,18 @@ fn front_top(b: &Brep) -> EdgeId {
 
 /// The fork's profile around the change (as `fork_856b54e_tangent_end.rs`), with SMLib's
 /// curve check reading the minimum radius (tests 13/14) and taking a zero-speed tangent
-/// end (WR-668).
+/// end (WR-668), and with the fork's d2757e1 (WR-253): a local solve takes no value from a
+/// failed evaluation.
+///
+/// Without WR-253, the n 3 equal area round fails test 13 (`Bad CurveCusp`, radius 0).
+/// The curve it fails on is the UV trim on the round of the start section at x = 0,
+/// (0, 2, 10) to (0, 0, 8). That trim is an exactly straight iso line (u = 20, v strictly
+/// decreasing, nonzero speed), whose radius of curvature fails to evaluate at every sample
+/// ("no curvature"). `LocalPropertyAnalysis` then still returns a minimum of value
+/// `m_vCurr.m_dFOfT = 0`, as the fork's `SmCurve.cpp` does. Whether that answer turns up
+/// depends on 1-ulp noise: the trim's control points moved by 7e-15 under smlib#79's 7102bc5
+/// (WR-685), and that was enough to turn it up. The fork, with d2757e1 built in, passes
+/// Level 2 at every commit from 7102bc5 to 729f893.
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
     k.fixes.fillet_nx1_tangent_side_edge = true;
@@ -112,6 +123,7 @@ fn kernel() -> Kernel {
     k.fixes.fillet_nx1_tangent_side_edge_same_convexity = true;
     k.fixes.bspline_check_min_radius = true;
     k.fixes.curve_check_zero_speed_tangent_end = true;
+    k.fixes.oscillating_skips_failed_guesses = true;
     k
 }
 

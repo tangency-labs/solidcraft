@@ -2311,6 +2311,10 @@ pub fn is_loop_uv_gap_within_tolerance(
     // is their NER, which certifies nothing)
     let bss: Cow<'_, BSplineSurface> = match surface.kind_with_nurb(k)? {
         SurfaceKind::BSpline(b) => Cow::Borrowed(b),
+        SurfaceKind::ProceduralBlend(pb) => {
+            let b = pb.net();
+            Cow::Borrowed(b)
+        }
         SurfaceKind::Plane(p) => match p.base_with_nurb() {
             Ok(b) => b,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),

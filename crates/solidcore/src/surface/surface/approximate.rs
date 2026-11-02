@@ -655,6 +655,10 @@ impl Surface {
                 SurfaceKind::SrfInVolume(s) => s.surface(),
                 SurfaceKind::Step(_) => return Ok(None),
                 SurfaceKind::BSpline(s) => return Ok(Some(Cow::Borrowed(s))),
+                SurfaceKind::ProceduralBlend(pb) => {
+                    let s = pb.net();
+                    return Ok(Some(Cow::Borrowed(s)));
+                }
                 SurfaceKind::Plane(s) => return Ok(Some(s.base_for_query())),
                 SurfaceKind::SurfOfExtrusion(_) => {
                     // a failed make leaves the surface without NURB (status ignored)

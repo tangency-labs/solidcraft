@@ -18,6 +18,7 @@
 //! | `write_torus` (private)      | `SmTorus::WriteToDB`                             |
 //! | `write_crv_on_surf` (private) | `SmCrvOnSurf::WriteToDB`                        |
 //! | `write_tangent_field` (private) | `SmTangentField::WriteToDB`                   |
+//! | `write_procedural_blend`, `write_definition_curve` (private) | the fork's `SmProceduralBlend::WriteToDB`, `sm_WriteCurve` (014f66f, opt-in) |
 //!
 //! Deviations:
 //! - **Kinds without a writer.** The write side is not in the plan (see
@@ -42,7 +43,9 @@ use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::tangent_field::TangentFieldCurve;
 use crate::error::{ignore_status, Result, SolidError};
+use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::surface::cone::Cone;
+use crate::surface::procedural_blend::ProceduralBlend;
 use crate::surface::sphere::Sphere;
 use crate::surface::surf_of_extrusion::SurfOfExtrusion;
 use crate::surface::surf_of_revolution::SurfOfRevolution;
@@ -122,6 +125,8 @@ pub fn write_surface_at(
     check_depth(depth)?;
     match s.kind() {
         SurfaceKind::BSpline(b) => b.write_to_db(db, version),
+        // the fork writes the definition, then the net (SmProceduralBlend::WriteToDB)
+        SurfaceKind::ProceduralBlend(pb) => write_procedural_blend(pb, db, version, depth),
         SurfaceKind::Plane(p) => p.write_to_db(db, version),
         SurfaceKind::Cone(c) => write_cone(c, db, version, depth),
         SurfaceKind::Sphere(sp) => write_sphere(sp, db, version, depth),
@@ -133,6 +138,88 @@ pub fn write_surface_at(
         SurfaceKind::Step(_) => Err(unported("SmSTEPSurface::WriteToDB")),
         SurfaceKind::SrfInVolume(_) => Err(unported("SmSrfInVolume::WriteToDB")),
     }
+}
+
+/// `SmProceduralBlend::WriteToDB` (the fork's 014f66f): the definition, then the net.
+/// The order, the swap bit and whether there is a law; the sides, offsets, thumbweight,
+/// bound and map; the two supports (each with its type header), the leader, the two
+/// seeds and the law (each with its type header and dimension); then the net's
+/// `SmBSplineSurface` record.
+fn write_procedural_blend(
+    pb: &ProceduralBlend,
+    db: &mut DatabaseWriter,
+    version: u64,
+    depth: usize,
+) -> Result<()> {
+    let def = pb.definition();
+    let ascii = is_ascii(db);
+    let has_law = i32::from(def.law.is_some());
+    let swapped = i32::from(def.swapped);
+    let [side0, side1] = def.sides;
+    let [r0, r1] = def.offsets;
+    let [a0, a1] = def.map_a;
+    let [b0, b1] = def.map_b;
+    let values = [
+        side0,
+        side1,
+        r0,
+        r1,
+        def.thumbweight,
+        def.bound,
+        a0,
+        b0,
+        a1,
+        b1,
+    ];
+    if ascii {
+        db.out_u64(u64::from(def.order));
+        db.out_str(" ");
+        db.out_i64(swapped.into());
+        db.out_str(" ");
+        db.out_i64(has_law.into());
+        db.out_str(" SmProceduralBlend order, swapped, has a law\n");
+        for &v in &values {
+            db.out_f64(v);
+            db.out_str(" ");
+        }
+        db.out_str(" SmProceduralBlend sides, offsets, thumbweight, bound, map\n");
+    } else {
+        db.write_long(i64::from(def.order));
+        db.write_boolean(swapped);
+        db.write_boolean(has_law);
+        db.write_doubles(&values);
+    }
+    for support in &def.supports {
+        if ascii {
+            db.out_str(" SmProceduralBlend->Support\n");
+        }
+        db.write_type(support.type_code(), None);
+        write_surface_at(support, db, version, depth + 1)?;
+    }
+    if ascii {
+        db.out_str(" SmProceduralBlend->Leader\n");
+    }
+    write_definition_curve(&def.leader, db, version)?;
+    for seed in &def.seeds {
+        if ascii {
+            db.out_str(" SmProceduralBlend->Seed\n");
+        }
+        write_definition_curve(seed, db, version)?;
+    }
+    if let Some(law) = &def.law {
+        if ascii {
+            db.out_str(" SmProceduralBlend->Law\n");
+        }
+        write_definition_curve(law, db, version)?;
+    }
+    pb.net().write_to_db(db, version)
+}
+
+/// `sm_WriteCurve`: a curve of a definition, its type header with its dimension, then
+/// its record.
+fn write_definition_curve(c: &BSplineCurve, db: &mut DatabaseWriter, version: u64) -> Result<()> {
+    db.write_type(c.type_code(), Some(c.dim()));
+    c.write_to_db(db, version)
 }
 
 /// `SmCrvOnSurf::WriteToDB`: the domain of interest and the breaks flag, the UV curve

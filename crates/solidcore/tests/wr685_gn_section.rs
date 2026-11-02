@@ -106,6 +106,10 @@ fn corner_surface(
             },
         )
         .unwrap();
+    // (a plain B-spline without `fillet_round_as_definition`)
+    let solidcore::surface::surface::SurfaceKind::BSpline(s) = s.into_kind() else {
+        panic!("the G^n section is a B-spline without the definition flag");
+    };
     (g, s)
 }
 
@@ -279,7 +283,9 @@ fn boss_root_order_2_round_adds_the_section_s_turned_area() {
 /// 60 x 40 x 10 plate, one root line rounded r 2 by the order-2 section at w = 0. Its
 /// faces are a plane and a cylinder, so the jets are not linear in tau and the
 /// certificate encloses curved faces; the fork certifies it on 3 spans. Volume
-/// 40258.5435962825, as #2252 quotes from the fork's commit (the section's area times 60).
+/// 40267.709270590589, fork 3bc54a4's (its jets of order 2 the face curves' normal parts;
+/// before it 40258.5435962825, as #2252 quotes from the fork's commit; the fork's value
+/// integrates the round's definition, within the integrator's 1e-7 of the net's).
 #[test]
 fn pipe_root_order_2_round_takes_the_fork_s_volume() {
     use solidcore::boolean::api_brep::boolean_union;
@@ -298,15 +304,16 @@ fn pipe_root_order_2_round_takes_the_fork_s_volume() {
     let e = pick(&k, &b, [30.0, 28.0, 10.0]);
     fillet_edges(&mut k, &mut b, &[e], 2.0, 2, 2, 0.0).unwrap();
     let v = volume_of(&k, &mut b);
-    let want = 40_258.543_596_282_5;
+    let want = 40_267.709_270_590_589;
     eprintln!("pipe root volume {v:.17e}");
     assert!((v - want).abs() <= 1e-7 * want, "{v} want {want}");
 }
 
 /// The fork's 6148773 (= d01d7b0's 1947a45): at the equal area thumbweight (the default,
-/// -2) the box edge's round takes off what the ball's circle does, 40 times
-/// `(1 - pi/4) r^2` (closed form), at every order. Fork d01d7b0 (built locally) gives
-/// 23922.743344462557, 23922.743341082103 and 23922.743340991368 for n = 2, 3, 4.
+/// 2 since b9d6a72) the box edge's round takes off what the ball's circle does, 40 times
+/// `(1 - pi/4) r^2` (closed form), at every order. Fork 7102bc5 (built locally) gives
+/// 23922.743344461505, 23922.743341081863 and 23922.743340991627 for n = 2, 3, 4
+/// (`wr685_gn_equal_area_per_station.rs` checks those and the nets).
 #[test]
 fn box_edge_equal_area_round_takes_off_the_circle_s_area() {
     use solidcore::blend::fillet_section::section::GN_DEFAULT_THUMBWEIGHT;
@@ -320,24 +327,24 @@ fn box_edge_equal_area_round_takes_off_the_circle_s_area() {
         eprintln!("box edge equal area n {n} volume {v:.17e}");
         assert!((v - want).abs() <= 1e-7 * want, "n {n}: {v} want {want}");
     }
-    // a negative thumbweight past -1 other than the default is refused
+    // a thumbweight of 1 or more other than the default is refused (b9d6a72: any w below
+    // 1 is a thumbweight)
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
     let e = pick(&k, &b, [20.0, 30.0, 20.0]);
-    assert!(fillet_edges(&mut k, &mut b, &[e], 3.0, 2, 2, -1.0).is_err());
+    assert!(fillet_edges(&mut k, &mut b, &[e], 3.0, 2, 2, 1.5).is_err());
 }
 
 /// The box's corner (40, 30, 20) with its three edges rounded r 3 by the order-2 section
-/// in one call: the solvers share one generator, so the first blend's wedge resolves the
-/// equal area thumbweight for all three, and the corner and the ease before its setbacks
-/// (thumbweight 0, the fork's 22d258a = d01d7b0's adb9854) are built from it. Fork
-/// d01d7b0 (built locally): 23829.652499315507 at the equal area default and
-/// 23876.361929859548 at w = 0.
+/// in one call: each station resolves the equal area thumbweight from its own wedge (the
+/// fork's 7102bc5), and the corner and the ease before its setbacks (thumbweight 0, the
+/// fork's 22d258a = d01d7b0's adb9854) are built with the edges'. Fork 7102bc5 (built
+/// locally): 23829.652499294883 at the equal area default and 23876.361929859548 at w = 0.
 #[test]
 fn box_corner_equal_area_rounds_take_the_fork_s_volume() {
     use solidcore::blend::fillet_section::section::GN_DEFAULT_THUMBWEIGHT;
     let mut k = kernel(true);
     for (w, want) in [
-        (GN_DEFAULT_THUMBWEIGHT, 23829.652499315507),
+        (GN_DEFAULT_THUMBWEIGHT, 23829.652499294883),
         (0.0, 23876.361929859548),
     ] {
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
@@ -353,50 +360,20 @@ fn box_corner_equal_area_rounds_take_the_fork_s_volume() {
     }
 }
 
-/// Two edges of different wedges rounded r 2 in one call, after the box's top back edge is
-/// chamfered 5: the chamfer's top edge (135 degrees) and the box's bottom front edge (90).
-/// The fork's solvers share one generator, so the equal area thumbweight is the first
-/// blend's wedge's, for both: the volume depends on the edges' order. Fork d01d7b0 (built
-/// locally): 23468.183912205881 with the chamfer's edge first, 23461.498019658513 with the
-/// box's first, and 23496.557686573007 and 23465.663708708515 for each alone.
-#[test]
-fn equal_area_thumbweight_is_the_first_blend_s_for_every_edge() {
-    use solidcore::blend::fillet_section::section::GN_DEFAULT_THUMBWEIGHT;
-    let mut k = kernel(true);
-    let cases: [(&[usize], f64); 4] = [
-        (&[0, 1], 23468.183912205881),
-        (&[1, 0], 23461.498019658513),
-        (&[0], 23496.557686573007),
-        (&[1], 23465.663708708515),
-    ];
-    for (order, want) in cases {
-        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
-        let c = pick(&k, &b, [20.0, 30.0, 20.0]);
-        fillet_edges(&mut k, &mut b, &[c], 5.0, 0, 2, 0.0).unwrap();
-        let both = [
-            pick(&k, &b, [20.0, 25.0, 20.0]),
-            pick(&k, &b, [20.0, 0.0, 0.0]),
-        ];
-        let es: Vec<EdgeId> = order.iter().map(|&i| both[i]).collect();
-        fillet_edges(&mut k, &mut b, &es, 2.0, 2, 2, GN_DEFAULT_THUMBWEIGHT).unwrap();
-        let v = volume_of(&k, &mut b);
-        eprintln!("edges {order:?} volume {v:.17e}");
-        assert!(
-            (v - want).abs() <= 1e-7 * want,
-            "{order:?}: {v} want {want}"
-        );
-    }
-}
+// The equal area thumbweight of edges of different wedges in one call: each station's
+// own since 7102bc5, in `wr685_gn_equal_area_per_station.rs`.
 
 /// The fork's 22d258a (= d01d7b0's adb9854): the ease of a round before a setback blends it
 /// into the order-2 section at thumbweight 0, not at the equal area default. The 40 mm
 /// box's corner (40, 40, 40), its three edges rounded r 8, set back 12 and eased 4 (as
 /// `issue_1376_setback_ease.rs`). Fork d01d7b0, built locally and driven through
 /// `SmFilletExecutive` the same way, gives 62375.682794873181 (62279.332678480074 without
-/// the ease); with the equal area section as the ease's target the volume differs.
+/// the ease), and fork 7102bc5 the same; with the equal area section as the ease's target
+/// the volume differs. The rounds take the default thumbweight (the equal area one).
 #[test]
 fn eased_setback_takes_the_order_2_section_at_thumbweight_0() {
     use solidcore::blend::fillet_executive::session::FilletSession;
+    use solidcore::blend::fillet_section::section::GN_DEFAULT_THUMBWEIGHT;
     use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
     use solidcore::topology::{edge, vertex};
     let at = |b: &Brep, v| {
@@ -419,7 +396,7 @@ fn eased_setback_takes_the_order_2_section_at_thumbweight_0() {
         {
             let mut s = FilletSession::new(&mut k, &mut b).unwrap();
             s.set_mark_corner_patches(true);
-            s.prepare_constant_radius_edges(&mut k, &edges, 8.0, 1, 2, -2.0)
+            s.prepare_constant_radius_edges(&mut k, &edges, 8.0, 1, 2, GN_DEFAULT_THUMBWEIGHT)
                 .unwrap();
             s.create_corners(&k, None).unwrap();
             let corner = s

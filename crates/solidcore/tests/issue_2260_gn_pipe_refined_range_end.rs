@@ -11,10 +11,24 @@
 //! the answer it is and leaves an end alone only for a range with no fraction; solidcore
 //! now does that under the same flag (#2264).
 //!
-//! Expected volume: the tangency-labs/smlib d01d7b0 build (which has 8ea6a20) run on the
-//! same construction by `SmApiBrepComputeVolume`, 40258.543608517233 at accuracy 1e-7
-//! (40258.543597926051 at 1e-8, as quoted on #2260); checked to the 1e-7 accuracy the
-//! volume is integrated to.
+//! Expected volume: the tangency-labs/smlib 729f893 build run on the same construction by
+//! `SmApiBrepComputeVolume`, 40267.709270590589 at accuracy 1e-7 (3bc54a4 and c596548
+//! give the same), checked to the 1e-7 accuracy the volume is integrated to.
+//!
+//! The round is the plate's and the pipe's section swept along x, so its volume is the
+//! union's, `24000 + 60 (100 pi - (100 acos 0.6 - 48)) = 40165.784613529`, plus 60 times the
+//! section's area. The closed form G^n section (n 2, w 0, ball 2; as `gn_section` in
+//! `fork_ea59e9c_section_orders.rs`), integrated over its plane, gives:
+//! - with the jets since smlib#79's 3bc54a4 (WR-685: the order-n jet is the normal part,
+//!   0 on the plate and `-|c1|^2 / (2 R)` radially on the pipe), area 1.698743952036 and
+//!   volume 40267.7092506513, which the fork's value matches to 5e-10 and solidcore's to
+//!   3e-9;
+//! - with the feet's Taylor jets before it, area 1.545983045903 and volume 40258.5435962833.
+//!   That was the d01d7b0 build's 40258.543608517233, the value this test used to expect.
+//!
+//! Both sections run from the ball's feet (31.3137, 10) to (29.4281, 12.6667) and meet
+//! the plate and the pipe G2 (end curvatures 0 and 1/R); they differ by a tangential
+//! term at order 2.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers
 
 use solidcore::blend::fillet_executive::api::fillet_edges;
@@ -325,8 +339,8 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "volume_representational_end_continuities",
 ];
 
-/// The volume d01d7b0 gives the rounded body at accuracy 1e-7.
-const FORK_VOLUME: f64 = 40_258.543_608_517_233;
+/// The volume 729f893 gives the rounded body at accuracy 1e-7.
+const FORK_VOLUME: f64 = 40_267.709_270_590_589;
 
 fn kernel(names: &[&str]) -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());

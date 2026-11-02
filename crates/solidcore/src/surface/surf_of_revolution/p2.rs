@@ -915,6 +915,7 @@ impl SurfOfRevolution {
             SurfaceKind::Torus(_)
             | SurfaceKind::SurfOfExtrusion(_)
             | SurfaceKind::BSpline(_)
+            | SurfaceKind::ProceduralBlend(_)
             | SurfaceKind::Cone(_)
             | SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
@@ -974,6 +975,9 @@ impl SurfOfRevolution {
         let plane_base;
         let tgt: &BSplineSurface = match test_surface.kind_with_nurb(k)? {
             SurfaceKind::BSpline(s) => s,
+            // (an SmProceduralBlend is an SmBSplineSurface: its net is tested, its corner
+            // points are the definition's, below)
+            SurfaceKind::ProceduralBlend(pb) => pb.net(),
             // (an SmSurfOfExtrusion is an SmBSplineSurface: its NURB is tested)
             SurfaceKind::SurfOfExtrusion(s) => s.base(),
             SurfaceKind::Plane(p) => {
@@ -990,7 +994,10 @@ impl SurfOfRevolution {
             | SurfaceKind::OffsetSurface(_)
             | SurfaceKind::SrfInVolume(_) => return Ok(None),
         };
-        Self::is_nurb_surface_surf_of_revolution_base(k, tgt, tolerance_scale)
+        // the corner points come from the virtual EvaluatePoint: a blend's definition
+        let this =
+            matches!(test_surface.kind(), SurfaceKind::ProceduralBlend(_)).then_some(test_surface);
+        Self::is_nurb_surface_surf_of_revolution_base(k, tgt, tolerance_scale, this)
     }
 
     /// The recogniser of [`Self::is_nurb_surface_surf_of_revolution`] for the
@@ -999,6 +1006,7 @@ impl SurfOfRevolution {
         k: &Kernel,
         tgt: &BSplineSurface,
         tolerance_scale: f64,
+        this: Option<&Surface>,
     ) -> Result<Option<Self>> {
         // no work - not a degree 2 rational surface in at least 1 direction
         let deg_u = tgt.degree(SurfParamType::U);
@@ -1009,8 +1017,16 @@ impl SurfOfRevolution {
 
         // evaluate min/max domain points (statuses ignored upstream; the points are read)
         let uv_domain = tgt.natural_uv_domain();
-        let min_pnt = tgt.evaluate_point(uv_domain.min())?;
-        let max_pnt = tgt.evaluate_point(uv_domain.max())?;
+        let (min_pnt, max_pnt) = match this {
+            Some(s) => (
+                s.evaluate_point(k, uv_domain.min())?,
+                s.evaluate_point(k, uv_domain.max())?,
+            ),
+            None => (
+                tgt.evaluate_point(uv_domain.min())?,
+                tgt.evaluate_point(uv_domain.max())?,
+            ),
+        };
 
         // scaled zero value
         let scaled_zero = tolerance_scale

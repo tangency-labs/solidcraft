@@ -23,6 +23,9 @@
 //! | [`curve_derivs_over`]             | `sm_CurveDerivsOver`                    |
 //! | [`nurbs_partials_over_piece`]     | `sm_NurbsPartialsOverPiece`             |
 //! | [`leader_series_over`]            | `sm_LeaderSeriesOver`                   |
+//! | [`GnLaw`]                         | `sm_GnLaw` (0d43b4c)                    |
+//! | [`law_series`]                    | `sm_LawSeries` (0d43b4c)                |
+//! | [`law_series_over`]               | `sm_LawSeriesOver` (0d43b4c)            |
 //! | [`inverse4`]                      | `sm_Inverse4`                           |
 //! | [`Enclosure`], [`gn_enclose`]     | `sm_GnEnclose` (its `rF`, `pX`, `pDS`)  |
 //! | [`gn_fourth_over`]                | `sm_GnFourthOver`                       |
@@ -44,11 +47,16 @@
 //! - **Indices.** Knots and nets are read by checked indices (a knot or a coordinate
 //!   outside reads NaN, which shows in the result); the fork's indices stay inside.
 
+use super::form::{binom, gn_form_normalized, GnSectionFormT};
 use super::interval::{cmax, cmin, round_down, round_up, Ivl};
-use super::series::{Ser, Trunc, VSer, MAX_E, TAYLOR, V3};
+use super::series::{GnScalar, Ser, Trunc, VSer, MAX_E, MAX_S, TAYLOR, V3};
 use super::station::{
-    ders_basis, gn_evaluate, gn_jacobian, gn_solve_station, knot, smax, solve4, span, GnStation,
-    GnSystem, Nurbs, Partials,
+    ders_basis, gn_evaluate, gn_evaluate_vn, gn_jacobian, gn_solve_station_counted, gn_top_jets,
+    knot, smax, solve4, span, GnStation, GnSystem, Nurbs, Partials,
+};
+use super::tay::{
+    gn_area_sum, gn_half_angle, gn_invert, gn_target, tay_sqrt, GnAreaCells, Ring, Tay, TayScalar,
+    TAY,
 };
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
@@ -438,6 +446,95 @@ pub fn leader_series_over(
     Ok((l, t))
 }
 
+/// `sm_GnLaw` (0d43b4c): a ball whose radius varies, its law r(s) over the leader's
+/// parameter (the x of a B-spline curve), with the curve's NURBS data.
+#[derive(Clone, Debug)]
+pub struct GnLaw<'a> {
+    /// `pCurve`.
+    pub curve: &'a BSplineCurve,
+    /// `sN`.
+    pub n: NurbsCurve,
+}
+
+impl<'a> GnLaw<'a> {
+    /// The law of `curve` (`sLaw.pCurve = pLaw; sm_NurbsCurveOf(*pLaw, sLaw.sN)`).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`NurbsCurve::of`].
+    pub fn of(curve: &'a BSplineCurve) -> Result<Self> {
+        Ok(Self {
+            curve,
+            n: NurbsCurve::of(curve)?,
+        })
+    }
+}
+
+/// `sm_LawSeries` (0d43b4c): r at `s` to order `order` in sigma (its derivatives past a
+/// polynomial law's degree zero), `None` without a law; `before`: the law's piece before
+/// `s` at one of its knots.
+///
+/// # Errors
+///
+/// Those of the law's evaluation; `SM_ERR` where the radius is not positive ("the radius
+/// law is not positive").
+pub fn law_series(
+    law: Option<&GnLaw<'_>>,
+    s: f64,
+    order: usize,
+    before: bool,
+) -> Result<Option<Ser<f64>>> {
+    let Some(law) = law else {
+        return Ok(None);
+    };
+    let mut r = Ser::constant(0.0_f64);
+    let mut derivs = order;
+    if !law.curve.is_rational()? {
+        derivs = derivs.min(law.curve.degree()?);
+    }
+    if derivs > MAX_S {
+        return Err(SolidError::sm_err(OP));
+    }
+    let d = law.curve.evaluate(s, derivs, !before, false)?;
+    let mut fact = 1.0_f64;
+    for i in 0..=derivs {
+        if i > 0 {
+            fact *= i as f64;
+        }
+        let di = d.get(i).ok_or_else(|| SolidError::sm_err(OP))?;
+        r.set(i, 0, di.x / fact);
+    }
+    let positive = r.at(0, 0) > 0.0;
+    if !positive {
+        // "SmGnSectionFSG: the radius law is not positive"
+        return Err(SolidError::sm_err(OP));
+    }
+    Ok(Some(r))
+}
+
+/// `sm_LawSeriesOver` (0d43b4c): r over the span `s` (in one piece of the law: the
+/// stations hold its knots) to order `order`, enclosed.
+///
+/// # Errors
+///
+/// Those of [`curve_derivs_over`]; `SM_ERR` where r is not proved positive.
+pub fn law_series_over(law: &GnLaw<'_>, s: Ivl, order: usize) -> Result<Ser<Ivl>> {
+    let mut r = Ser::constant(IZ);
+    let piece = span(&law.n.u, law.n.p, law.n.n, s.mid());
+    let d = curve_derivs_over(&law.n, s, order, Some(piece))?;
+    let mut fact = 1.0_f64;
+    for i in 0..=order {
+        if i > 0 {
+            fact *= i as f64;
+        }
+        r.set(i, 0, at1(&d, i, VZ).x * Ivl::from(1.0 / fact));
+    }
+    if !r.at(0, 0).is_positive() {
+        return Err(SolidError::sm_err(OP));
+    }
+    Ok(r)
+}
+
 /// `sm_Inverse4`: the inverse of a 4 x 4 matrix (the preconditioner; any approximation
 /// will do), column by column with [`solve4`].
 ///
@@ -473,6 +570,8 @@ pub struct Enclosure {
     pub ds: [f64; 2],
     /// The same, least (`pDSLo`): `|S_u| + |S_v|` no smaller anywhere in the box.
     pub ds_lo: [f64; 2],
+    /// The point V's series over the span (`pV`, 7102bc5).
+    pub v: VSer<Ivl>,
 }
 
 fn ivl_at(x: &[Ivl; 4], i: usize) -> Ivl {
@@ -490,6 +589,7 @@ fn system<'a>(
     tangent: &VSer<Ivl>,
     r: [f64; 2],
     side: [f64; 2],
+    law: Option<&'a Ser<Ivl>>,
 ) -> GnSystem<'a, Ivl> {
     let [p0, p1] = p;
     GnSystem {
@@ -499,6 +599,7 @@ fn system<'a>(
         r,
         side,
         hold: false,
+        law,
     }
 }
 
@@ -519,9 +620,16 @@ pub fn gn_enclose(
     side: [f64; 2],
     n: usize,
     order_s: usize,
+    law: Option<&GnLaw<'_>>,
 ) -> Result<Option<Enclosure>> {
     let s = Ivl::new(a.s, b.s);
     let tr = Trunc::new(order_s, n)?;
+    // a ball whose radius varies: its law over the span (0d43b4c)
+    let law_r = match law {
+        Some(l) => Some(gn_try!(law_series_over(l, s, order_s), None)),
+        None => None,
+    };
+    let law_r = law_r.as_ref();
     let (leader, tangent) = gn_try!(leader_series_over(leader_n, s, tr), None);
     let ax = |c: usize| a.x.get(c).map_or(f64::NAN, |x| x.at(0, 0));
     let bx = |c: usize| b.x.get(c).map_or(f64::NAN, |x| x.at(0, 0));
@@ -578,14 +686,14 @@ pub fn gn_enclose(
         let pc = gn_try!(partials_over(xm, xm, 2), None);
         let sxc = xm.map(|x| Ser::constant(Ivl::from(x)));
         let (sg, _) = gn_try!(
-            gn_evaluate(&system(&pc, &leader, &tangent, r, side), &sxc, point),
+            gn_evaluate(&system(&pc, &leader, &tangent, r, side, law_r), &sxc, point),
             None
         );
         // the Jacobian over the box
         let pb = gn_try!(partials_over(bx_.map(|x| x.lo), bx_.map(|x| x.hi), 2), None);
         let sxb = bx_.map(Ser::constant);
         let jac = gn_try!(
-            gn_jacobian(&system(&pb, &leader, &tangent, r, side), &sxb),
+            gn_jacobian(&system(&pb, &leader, &tangent, r, side, law_r), &sxb),
             None
         );
         let jm = jac.map(|row| row.map(Ivl::mid));
@@ -672,13 +780,14 @@ pub fn gn_enclose(
         partials_over(bx_.map(|x| x.lo), bx_.map(|x| x.hi), lk),
         None
     );
-    let sysk = system(&pk, &leader, &tangent, r, side);
+    let sysk = system(&pk, &leader, &tangent, r, side, law_r);
     let mut sx = bx_.map(Ser::constant);
     for tot in 1..=(tr.s() + tr.e()) {
         let (sg, _) = gn_try!(gn_evaluate(&sysk, &sx, tr), None);
         for i in 0..=cmin_usize(tr.s(), tot) {
             let k = tot - i;
-            if k > tr.e() {
+            // the section's jets of order n are the face curve's (gn_top_jets, 3bc54a4)
+            if k > tr.e() || (n >= 1 && k >= n) {
                 continue;
             }
             let mut yr = [IZ; 4];
@@ -704,7 +813,8 @@ pub fn gn_enclose(
             }
         }
     }
-    let (_, f) = gn_try!(gn_evaluate(&sysk, &sx, tr), None);
+    let (_, mut f, v, nrm) = gn_try!(gn_evaluate_vn(&sysk, &sx, tr), None);
+    gn_top_jets(n, tr, &nrm, &mut f);
     // the faces' first partials over the box: |S_u| + |S_v| bounds |dS| per unit uv step
     // (max norm)
     let mut ds = [0.0_f64; 2];
@@ -732,6 +842,7 @@ pub fn gn_enclose(
         x: sx,
         ds,
         ds_lo,
+        v,
     }))
 }
 
@@ -800,14 +911,63 @@ pub fn gn_fourth_over(
     side: [f64; 2],
     n: usize,
 ) -> Result<Fourth> {
-    let none: Fourth = (
-        [[f64::INFINITY; MAX_E + 1]; 2],
-        [f64::INFINITY; 2],
-        [[0.0; MAX_E + 1]; 2],
-        [0.0; 2],
+    let (fourth, _) = gn_fourth_over_series(
+        k, faces_n, leader_n, faces, center, a, b, r, side, n, None, 0,
+    )?;
+    Ok(fourth)
+}
+
+/// The series `sm_GnFourthOver` hands a varying thumbweight's row terms (its `pF`, `pV`,
+/// `pFm`, `pVm`, `pdMid`, 7102bc5): the feet's and V's over the span to order
+/// `4 + SM_GN_TAYLOR` in s, at its middle to one less, and the middle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PieceSeries {
+    /// `pF`: the feet over the span.
+    pub f: [VSer<Ivl>; 2],
+    /// `pV`: V over the span.
+    pub v: VSer<Ivl>,
+    /// `pFm`: the feet at the middle.
+    pub fm: [VSer<Ivl>; 2],
+    /// `pVm`: V at the middle.
+    pub vm: VSer<Ivl>,
+    /// `pdMid`: the middle.
+    pub mid: f64,
+}
+
+/// [`gn_fourth_over`] with the series of [`PieceSeries`] (`None` where they are not all
+/// proved, as the fork's out-params are then not all set), and the fork's `pLaw` and
+/// `lExtra` (0d43b4c): a ball whose radius varies, and the orders in s the series take
+/// past `4 + SM_GN_TAYLOR` (the touch circle's m').
+///
+/// # Errors
+///
+/// `InvalidInput` when `n` exceeds `SM_GN_MAXE`.
+#[allow(clippy::too_many_arguments)]
+pub fn gn_fourth_over_series(
+    k: &Kernel,
+    faces_n: [&Nurbs; 2],
+    leader_n: &NurbsCurve,
+    faces: [&Surface; 2],
+    center: &BSplineCurve,
+    a: &GnStation,
+    b: &GnStation,
+    r: [f64; 2],
+    side: [f64; 2],
+    n: usize,
+    law: Option<&GnLaw<'_>>,
+    extra: usize,
+) -> Result<(Fourth, Option<PieceSeries>)> {
+    let none: (Fourth, Option<PieceSeries>) = (
+        (
+            [[f64::INFINITY; MAX_E + 1]; 2],
+            [f64::INFINITY; 2],
+            [[0.0; MAX_E + 1]; 2],
+            [0.0; 2],
+        ),
+        None,
     );
     let h = b.s - a.s;
-    let Some(e5) = gn_enclose(faces_n, leader_n, a, b, r, side, n, 4 + TAYLOR)? else {
+    let Some(e5) = gn_enclose(faces_n, leader_n, a, b, r, side, n, 4 + TAYLOR + extra, law)? else {
         return Ok(none);
     };
     // the middle's station, and the series there
@@ -821,24 +981,52 @@ pub fn gn_fourth_over(
     let sm = gn_try!(center.evaluate_point(mid), none);
     let point = Trunc::new(0, 0)?;
     let tol = 1.0e-9 * smax(1.0, sm.length());
+    let mid_r = gn_try!(law_series(law, mid, 0, false), none);
     let smid = gn_try!(
-        gn_solve_station(k, faces, center, mid, seed, r, side, point, tol),
+        gn_solve_station_counted(
+            k,
+            faces,
+            center,
+            mid,
+            seed,
+            r,
+            side,
+            point,
+            tol,
+            mid_r.as_ref()
+        )
+        .0,
         none
     );
-    let Some(e4) = gn_enclose(faces_n, leader_n, &smid, &smid, r, side, n, 4 + TAYLOR - 1)? else {
+    let Some(e4) = gn_enclose(
+        faces_n,
+        leader_n,
+        &smid,
+        &smid,
+        r,
+        side,
+        n,
+        4 + TAYLOR - 1 + extra,
+        law,
+    )?
+    else {
         return Ok(none);
     };
-    let mut m4 = none.0;
-    let mut uv4 = none.1;
-    let mut m4_lo = none.2;
-    let mut uv4_lo = none.3;
+    let series = PieceSeries {
+        f: e5.f,
+        v: e5.v,
+        fm: e4.f,
+        vm: e4.v,
+        mid,
+    };
+    let (mut m4, mut uv4, mut m4_lo, mut uv4_lo) = none.0;
     // the uv curves' fourth derivatives, in the same Taylor form, times the faces'
     // |S_u| + |S_v| over the span's box
     for (f, (uvf, &dsf)) in uv4.iter_mut().zip(&e5.ds).enumerate() {
         let mut dmax = 0.0_f64;
         for c in (2 * f)..(2 * f + 2) {
             let (Some(x4), Some(x5)) = (e4.x.get(c), e5.x.get(c)) else {
-                return Ok(none);
+                return Ok((none.0, Some(series)));
             };
             let m = taylor_bound(|i| x4.at(i, 0).mag(), x5.at(4 + TAYLOR, 0).mag(), h);
             dmax = cmax(dmax, m);
@@ -850,7 +1038,7 @@ pub fn gn_fourth_over(
         let mut dlo = 0.0_f64;
         for c in (2 * f)..(2 * f + 2) {
             let Some(x4) = e4.x.get(c) else {
-                return Ok(none);
+                return Ok((none.0, Some(series)));
             };
             dlo = cmax(dlo, 24.0 * x4.at(4, 0).mig());
         }
@@ -878,7 +1066,363 @@ pub fn gn_fourth_over(
             *m4lfk = crate::geom::vector3d::sqrt(sq);
         }
     }
-    Ok((m4, uv4, m4_lo, uv4_lo))
+    Ok(((m4, uv4, m4_lo, uv4_lo), Some(series)))
+}
+
+/// `sm_GnVarying`: a section whose thumbweight varies along s (the equal area one,
+/// resolved per station): its order, `r1 r2`, and I's enclosures on their grid.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GnVarying {
+    /// `n`.
+    pub n: usize,
+    /// `dRR`: `r1 r2`.
+    pub rr: f64,
+    /// `pCells`: I's enclosures, computed once per cell.
+    pub cells: GnAreaCells,
+}
+
+/// `sm_GnRowTerms`: the largest `|(sum_ik dg_ikj c'_ik)|` (`x`) and `|W_j|` (`y`),
+/// the least `W_j` (`w_lo`) per row, and the largest `|S - O|` (`r`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct GnRowTerms {
+    /// `X`.
+    pub x: Vec<f64>,
+    /// `Y`.
+    pub y: Vec<f64>,
+    /// `Wlo`.
+    pub w_lo: Vec<f64>,
+    /// `R`.
+    pub r: f64,
+}
+
+/// `sm_Centred`: the coefficients `0..=SM_GN_TAY` of a series over a piece in their
+/// Taylor form at its middle m: `c_i(s) = sum_{j < K - i} C(i + j, i) c_(i+j)(m) d^j +
+/// C(K, i) c_K(xi) d^(K-i)`, `d = s - m`, from the middle's coefficients `mid[0..K-1]` and
+/// the piece's `top` at order K.
+#[must_use]
+pub fn centred(mid: &[Ivl], top: Ivl, kk: usize, d: Ivl) -> Tay<Ivl> {
+    let mut r = Tay::<Ivl>::zero();
+    for i in 0..=TAY {
+        let mut sum = Ivl::from(0.0);
+        let mut pow = Ivl::from(1.0);
+        let mut j = 0;
+        while i + j < kk {
+            if j > 0 {
+                pow = pow * d;
+            }
+            let m = mid.get(i + j).copied().unwrap_or(IZ);
+            sum = sum + Ivl::from(binom(i + j, i)) * m * pow;
+            j += 1;
+        }
+        pow = pow * d;
+        r.set(i, sum + Ivl::from(binom(kk, i)) * top * pow);
+    }
+    r
+}
+
+/// A vector series' coordinate q's coefficient `(i, k)`.
+fn vat(v: &VSer<Ivl>, q: usize, i: usize, k: usize) -> Ivl {
+    v.a.get(q).map_or(IZ, |c| c.at(i, k))
+}
+
+/// `sm_GnRowTermsOver`: the row terms over one piece, folded into `rt` (largest X, Y, R;
+/// least W); `false` where w's enclosure or a term is not proved. `f`, `centre`: the
+/// feet's and V's series over the piece (to order `K = 4 + SM_GN_TAYLOR` in s); `fm`,
+/// `cm`: at its middle (to K - 1); `d`: s less the middle over the piece.
+#[allow(clippy::too_many_arguments)]
+pub fn gn_row_terms_over(
+    vary: &mut GnVarying,
+    f: &[VSer<Ivl>; 2],
+    centre: &VSer<Ivl>,
+    fm: &[VSer<Ivl>; 2],
+    cm: &VSer<Ivl>,
+    d: Ivl,
+    guess: f64,
+    bar: &GnSectionFormT<Ivl>,
+    o: [f64; 3],
+    rt: &mut GnRowTerms,
+) -> bool {
+    const K: usize = 4 + TAYLOR;
+    let n = vary.n;
+    let [f0, f1] = f;
+    let [fm0, fm1] = fm;
+    // x = (F1 - V).(F2 - V) / (r1 r2): at the middle to order K - 1, over the piece at
+    // order K
+    let mut x_mid = [IZ; K];
+    let mut x_top = IZ;
+    for q in 0..3 {
+        for i in 0..=K {
+            for l in 0..=i {
+                if i < K {
+                    let t = (vat(fm0, q, l, 0) - vat(cm, q, l, 0))
+                        * (vat(fm1, q, i - l, 0) - vat(cm, q, i - l, 0));
+                    if let Some(xi) = x_mid.get_mut(i) {
+                        *xi = *xi + t;
+                    }
+                } else {
+                    x_top = x_top
+                        + (vat(f0, q, l, 0) - vat(centre, q, l, 0))
+                            * (vat(f1, q, i - l, 0) - vat(centre, q, i - l, 0));
+                }
+            }
+        }
+    }
+    let inv_rr = Ivl::from(1.0) / Ivl::from(vary.rr);
+    for xi in &mut x_mid {
+        *xi = *xi * inv_rr;
+    }
+    x_top = x_top * inv_rr;
+    let u = gn_half_angle(&centred(&x_mid, x_top, K, d));
+    let tg = gn_target(&u);
+    let phi = gn_area_sum::<Ivl>(n, Ivl::from(guess)) - tg.at(0);
+    let mut w0 = IZ;
+    let mut root = false;
+    let mut rho = 1.0e-12 * (1.0 + guess.abs());
+    let mut it = 0;
+    while it < 40 && !root {
+        let w = Ivl::new(guess - rho, guess + rho);
+        let below_one = w.hi < 1.0;
+        if !below_one {
+            break;
+        }
+        let d1 = vary.cells.over(w).at(1);
+        if d1.hi < 0.0 {
+            let nn = Ivl::from(guess) - phi / d1;
+            if nn.lo > w.lo && nn.hi < w.hi {
+                w0 = nn;
+                root = true;
+            }
+        }
+        it += 1;
+        rho *= 4.0;
+    }
+    if !root {
+        return false;
+    }
+    let over_w0 = vary.cells.over(w0);
+    let sw = gn_invert(&tg, &over_w0, w0);
+    let form = gn_form_normalized(n, sw);
+    // the jets c'_ik as series in s over the piece
+    let mut c = [[[Tay::<Ivl>::zero(); 3]; MAX_E + 1]; 2];
+    let mut r_max = 0.0_f64;
+    for (cf, (ff, ffm)) in c.iter_mut().zip(f.iter().zip(fm)) {
+        let mut sum = 0.0_f64;
+        for (kk, ck) in cf.iter_mut().enumerate().take(n + 1) {
+            let mut sq = 0.0_f64;
+            for (q, ckq) in ck.iter_mut().enumerate() {
+                let mut ac_mid = [IZ; K];
+                for (i, a) in ac_mid.iter_mut().enumerate() {
+                    *a = vat(ffm, q, i, kk);
+                }
+                *ckq = centred(&ac_mid, vat(ff, q, K, kk), K, d);
+                if kk == 0 {
+                    let oq = o.get(q).copied().unwrap_or(f64::NAN);
+                    ckq.set(0, ckq.at(0) - Ivl::from(oq));
+                }
+                sq += ckq.at(0).mag() * ckq.at(0).mag();
+            }
+            sum += crate::geom::vector3d::sqrt(sq);
+        }
+        r_max = cmax(r_max, sum);
+    }
+    for (j, wj) in form.w.iter().enumerate() {
+        let mut sq = 0.0_f64;
+        for q in 0..3 {
+            // the coefficient of sigma^4 of sum_ik dg_ikj c'_ik
+            let mut s4 = IZ;
+            for ((gf, bf), cf) in form.g.iter().zip(&bar.g).zip(&c) {
+                for ((gk, bk), ck) in gf.iter().zip(bf).zip(cf).take(n + 1) {
+                    let (Some(&g), Some(&b), Some(ckq)) = (gk.get(j), bk.get(j), ck.get(q)) else {
+                        continue;
+                    };
+                    let mut dg = g;
+                    dg.set(0, dg.at(0) - b);
+                    for i in 0..=TAY {
+                        s4 = s4 + dg.at(i) * ckq.at(TAY - i);
+                    }
+                }
+            }
+            sq += s4.mag() * s4.mag();
+        }
+        let dx = 24.0 * crate::geom::vector3d::sqrt(sq);
+        let dy = 24.0 * wj.at(TAY).mag();
+        let dwlo = wj.at(0).lo;
+        if !(dx.is_finite() && dy.is_finite() && dwlo > 0.0) {
+            return false;
+        }
+        let (Some(xj), Some(yj), Some(lj)) = (rt.x.get_mut(j), rt.y.get_mut(j), rt.w_lo.get_mut(j))
+        else {
+            return false;
+        };
+        *xj = cmax(*xj, dx);
+        *yj = cmax(*yj, dy);
+        *lj = cmin(*lj, dwlo);
+    }
+    if !r_max.is_finite() {
+        return false;
+    }
+    rt.r = cmax(rt.r, r_max);
+    true
+}
+
+/// The arc's homogeneous rows `H[j][q]` and weights `W[j]` ([`arc_rows`]).
+pub type ArcRows<S> = ([[Tay<S>; 3]; 3], [Tay<S>; 3]);
+
+/// `sm_ArcRows` (cc08236): the ball's circle as rows: the rational quadratic arc from the
+/// rail `rho1` to `rho2` about the ball's centre `m`, its control points `rho1, P1, rho2`
+/// and weights `1, w, 1`, `w = cos(theta / 2)` (theta the angle between the radii
+/// `b_i = rho_i - m`), `P1 = m + (mid - m) / w^2` where the rails' tangents meet; as
+/// homogeneous rows `H_j = W_j (P_j - O)` about a fixed point `o`. The series are in s,
+/// over a ring S (`f64`, or intervals). `None` where a radius is not positive or the arc
+/// is a half turn or more (no single arc).
+#[must_use]
+pub fn arc_rows<S: TayScalar + GnScalar>(
+    rho1: &[Tay<S>; 3],
+    rho2: &[Tay<S>; 3],
+    m: &[Tay<S>; 3],
+    o: [f64; 3],
+) -> Option<ArcRows<S>> {
+    let mut b11 = Tay::<S>::zero();
+    let mut b22 = Tay::<S>::zero();
+    let mut b12 = Tay::<S>::zero();
+    for ((&r1, &r2), &mq) in rho1.iter().zip(rho2).zip(m) {
+        let b1 = r1 - mq;
+        let b2 = r2 - mq;
+        b11 = b11 + b1 * b1;
+        b22 = b22 + b2 * b2;
+        b12 = b12 + b1 * b2;
+    }
+    if !b11.at(0).is_positive() || !b22.at(0).is_positive() {
+        return None;
+    }
+    // cos^2(theta / 2) = (1 + cos theta) / 2
+    let half = (Tay::<S>::lift(1.0) + b12 / tay_sqrt(&(b11 * b22))) * Tay::<S>::lift(0.5);
+    if !half.at(0).is_positive() {
+        return None; // a half turn or more: no single arc
+    }
+    let w = tay_sqrt(&half);
+    let inv = Tay::<S>::lift(1.0) / half;
+    let ws = [Tay::<S>::lift(1.0), w, Tay::<S>::lift(1.0)];
+    let mut h = [[Tay::<S>::zero(); 3]; 3];
+    for (q, (((&r1, &r2), &mq), &oq)) in rho1.iter().zip(rho2).zip(m).zip(&o).enumerate() {
+        let so = Tay::<S>::lift(oq);
+        let p1 = mq + ((r1 + r2) * Tay::<S>::lift(0.5) - mq) * inv;
+        let [h0, h1, h2] = &mut h;
+        if let (Some(a), Some(b), Some(c)) = (h0.get_mut(q), h1.get_mut(q), h2.get_mut(q)) {
+            *a = r1 - so;
+            *b = w * (p1 - so);
+            *c = r2 - so;
+        }
+    }
+    Some((h, ws))
+}
+
+/// `sm_ArcRowTermsOver` (cc08236): the arc's row terms over one piece
+/// ([`gn_row_terms_over`]'s, every row varying), folded into `rt`; `false` where they are
+/// not proved. `f`, `centre`: the rails' and the centre's series over the piece (to order
+/// `K = 4 + SM_GN_TAYLOR`); `fm`, `cm`: at its middle (to K - 1); `d`: s less the middle
+/// over the piece. `touch` (0d43b4c): the ball's radius varies, and the circle is the one
+/// it touches the envelope along, about `m + ((rho1 - m) . m' / m' . m') m'` (`centre` and
+/// `cm` one order more, for m').
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub fn arc_row_terms_over(
+    f: &[VSer<Ivl>; 2],
+    centre: &VSer<Ivl>,
+    fm: &[VSer<Ivl>; 2],
+    cm: &VSer<Ivl>,
+    d: Ivl,
+    o: [f64; 3],
+    rt: &mut GnRowTerms,
+    touch: bool,
+) -> bool {
+    const K: usize = 4 + TAYLOR;
+    let mut rho = [[Tay::<Ivl>::zero(); 3]; 2];
+    let mut mc = [Tay::<Ivl>::zero(); 3];
+    for q in 0..3 {
+        let mut ac_mid = [IZ; K];
+        for (rf, (ff, ffm)) in rho.iter_mut().zip(f.iter().zip(fm)) {
+            for (i, a) in ac_mid.iter_mut().enumerate() {
+                *a = vat(ffm, q, i, 0);
+            }
+            if let Some(x) = rf.get_mut(q) {
+                *x = centred(&ac_mid, vat(ff, q, K, 0), K, d);
+            }
+        }
+        for (i, a) in ac_mid.iter_mut().enumerate() {
+            *a = vat(cm, q, i, 0);
+        }
+        if let Some(x) = mc.get_mut(q) {
+            *x = centred(&ac_mid, vat(centre, q, K, 0), K, d);
+        }
+    }
+    if touch {
+        // m' from the centre's coefficients one order up: (i + 1) c_(i+1)
+        let mut dm = [Tay::<Ivl>::zero(); 3];
+        for (q, dq) in dm.iter_mut().enumerate() {
+            let mut ac_mid = [IZ; K];
+            for (i, a) in ac_mid.iter_mut().enumerate() {
+                *a = vat(cm, q, i + 1, 0) * Ivl::from((i + 1) as f64);
+            }
+            *dq = centred(
+                &ac_mid,
+                vat(centre, q, K + 1, 0) * Ivl::from((K + 1) as f64),
+                K,
+                d,
+            );
+        }
+        let mut dd = Tay::<Ivl>::zero();
+        let mut bd = Tay::<Ivl>::zero();
+        for ((&dq, &mq), &r0q) in dm.iter().zip(&mc).zip(&rho[0]) {
+            dd = dd + dq * dq;
+            bd = bd + (r0q - mq) * dq;
+        }
+        if !dd.at(0).is_positive() {
+            return false;
+        }
+        let kk = bd / dd;
+        for (mq, &dq) in mc.iter_mut().zip(&dm) {
+            *mq = *mq + kk * dq;
+        }
+    }
+    let [rho0, rho1] = &rho;
+    let Some((h, w)) = arc_rows(rho0, rho1, &mc, o) else {
+        return false;
+    };
+    // |S - O| <= |m - O| + the ball's radius over the piece
+    let mut d_mo = 0.0_f64;
+    let mut d_rad = 0.0_f64;
+    for ((mq, &oq), r0q) in mc.iter().zip(&o).zip(rho0) {
+        let dd = (mq.at(0) - Ivl::from(oq)).mag();
+        d_mo += dd * dd;
+        let b = (r0q.at(0) - mq.at(0)).mag();
+        d_rad += b * b;
+    }
+    let d_r = crate::geom::vector3d::sqrt(d_mo) + crate::geom::vector3d::sqrt(d_rad);
+    for (j, (hj, wj)) in h.iter().zip(&w).enumerate() {
+        let mut sq = 0.0_f64;
+        for hq in hj {
+            sq += hq.at(TAY).mag() * hq.at(TAY).mag();
+        }
+        let dx = 24.0 * crate::geom::vector3d::sqrt(sq);
+        let dy = 24.0 * wj.at(TAY).mag();
+        let dwlo = wj.at(0).lo;
+        if !(dx.is_finite() && dy.is_finite() && dwlo > 0.0) {
+            return false;
+        }
+        let (Some(xj), Some(yj), Some(lj)) = (rt.x.get_mut(j), rt.y.get_mut(j), rt.w_lo.get_mut(j))
+        else {
+            return false;
+        };
+        *xj = cmax(*xj, dx);
+        *yj = cmax(*yj, dy);
+        *lj = cmin(*lj, dwlo);
+    }
+    if !d_r.is_finite() {
+        return false;
+    }
+    rt.r = cmax(rt.r, d_r);
+    true
 }
 
 /// `sm_GnCertifySpan`: the certified bound on the Hermite span between two stations, or
@@ -912,12 +1456,40 @@ pub fn gn_certify_span(
     side: [f64; 2],
     n: usize,
     target: f64,
+    mut vary: Option<&mut GnVarying>,
+    law: Option<&GnLaw<'_>>,
 ) -> Result<f64> {
     // the series' orders are checked once (the fork leaves them to its callers)
     Trunc::new(4 + TAYLOR, n)?;
     let mut bound_out = f64::INFINITY;
     let h = b.s - a.s;
     let mut last = f64::INFINITY;
+    // the varying thumbweight's fixed one wb and point O: the first station's
+    let mut bar = GnSectionFormT::<Ivl> {
+        w: Vec::new(),
+        g: [Vec::new(), Vec::new()],
+    };
+    let mut o = [0.0_f64; 3];
+    // the ball's circle (n = 1, cc08236): its arc's rows all vary along s, about the first
+    // station's centre
+    let arc = n == 1;
+    let rows_vary = vary.is_some() || arc;
+    let l_jets = if arc { 0 } else { n }; // the jets graded on their own: the arc's rails only
+    if let Some(v) = vary.as_deref() {
+        if !(a.w.is_finite() && b.w.is_finite()) {
+            return Err(SolidError::sm_err(OP));
+        }
+        bar = gn_form_normalized(v.n, Ivl::from(a.w));
+        for (q, oq) in o.iter_mut().enumerate() {
+            *oq = a.f[0].a.get(q).map_or(f64::NAN, |c| c.at(0, 0));
+        }
+    }
+    if arc {
+        bar.w = vec![Ivl::from(0.0); 3];
+        for (q, oq) in o.iter_mut().enumerate() {
+            *oq = a.v.a.get(q).map_or(f64::NAN, |c| c.at(0, 0));
+        }
+    }
     for level in 0..=6_u32 {
         let pieces = 1_usize << level;
         // the pieces' end stations
@@ -937,7 +1509,21 @@ pub fn gn_certify_span(
             let sm = gn_try!(center.evaluate_point(s), bound_out);
             let point = Trunc::new(0, 0)?;
             let tol = 1.0e-9 * smax(1.0, sm.length());
-            match gn_solve_station(k, faces, center, s, seed, r, side, point, tol) {
+            let end_r = gn_try!(law_series(law, s, 0, false), bound_out);
+            match gn_solve_station_counted(
+                k,
+                faces,
+                center,
+                s,
+                seed,
+                r,
+                side,
+                point,
+                tol,
+                end_r.as_ref(),
+            )
+            .0
+            {
                 Ok(st) => ends.push(st),
                 Err(_) => solved = false,
             }
@@ -952,6 +1538,13 @@ pub fn gn_certify_span(
         let mut m4_lo = [[0.0_f64; MAX_E + 1]; 2];
         let mut uv4_lo = [0.0_f64; 2];
         let mut proved = true;
+        let ld = bar.w.len();
+        let mut rows = GnRowTerms {
+            x: vec![0.0; ld],
+            y: vec![0.0; ld],
+            w_lo: vec![f64::INFINITY; ld],
+            r: 0.0,
+        };
         for pair in ends.windows(2) {
             if !proved {
                 break;
@@ -959,12 +1552,27 @@ pub fn gn_certify_span(
             let [ea, eb] = pair else {
                 return Err(SolidError::sm_err(OP));
             };
-            let (pm, puv, pm_lo, puv_lo) = gn_try!(
-                gn_fourth_over(k, faces_n, leader_n, faces, center, ea, eb, r, side, n),
+            let ((pm, puv, pm_lo, puv_lo), series) = gn_try!(
+                gn_fourth_over_series(
+                    k,
+                    faces_n,
+                    leader_n,
+                    faces,
+                    center,
+                    ea,
+                    eb,
+                    r,
+                    side,
+                    l_jets,
+                    law,
+                    // the touch circle of a varying ball takes the centre's
+                    // s-derivative: one order more
+                    usize::from(arc && law.is_some()),
+                ),
                 bound_out
             );
             for (((m4f, pmf), uvf), &puvf) in m4.iter_mut().zip(&pm).zip(uv4.iter_mut()).zip(&puv) {
-                for (m4fk, &pmfk) in m4f.iter_mut().zip(pmf).take(n + 1) {
+                for (m4fk, &pmfk) in m4f.iter_mut().zip(pmf).take(l_jets + 1) {
                     let finite = pmfk < f64::INFINITY;
                     if !finite {
                         proved = false;
@@ -985,17 +1593,86 @@ pub fn gn_certify_span(
             for (l, &pl) in uv4_lo.iter_mut().zip(&puv_lo) {
                 *l = cmax(*l, pl);
             }
+            if proved {
+                if let Some(v) = vary.as_deref_mut() {
+                    // the root's guess at the piece's middle: the stations' thumbweights,
+                    // linearly
+                    proved = match series {
+                        Some(ps) => {
+                            let t = (ps.mid - a.s) / h;
+                            let d = Ivl::new(ea.s, eb.s) - Ivl::from(ps.mid);
+                            let guess = (1.0 - t) * a.w + t * b.w;
+                            gn_row_terms_over(
+                                v, &ps.f, &ps.v, &ps.fm, &ps.vm, d, guess, &bar, o, &mut rows,
+                            )
+                        }
+                        None => false,
+                    };
+                }
+            }
+            if proved && arc {
+                proved = match series {
+                    Some(ps) => {
+                        let d = Ivl::new(ea.s, eb.s) - Ivl::from(ps.mid);
+                        arc_row_terms_over(
+                            &ps.f,
+                            &ps.v,
+                            &ps.fm,
+                            &ps.vm,
+                            d,
+                            o,
+                            &mut rows,
+                            law.is_some(),
+                        )
+                    }
+                    None => false,
+                };
+            }
         }
         if !proved {
             continue;
         }
         let mut bound = 0.0_f64;
+        let mut da = 0.0_f64;
         for (m4f, &uvf) in m4.iter().zip(&uv4) {
             let mut sum = 0.0_f64;
-            for &m4fk in m4f.iter().take(n + 1) {
+            for &m4fk in m4f.iter().take(l_jets + 1) {
                 sum += h * h * h * h / 384.0 * m4fk;
             }
-            bound = cmax(bound, cmax(sum, h * h * h * h / 384.0 * uvf));
+            da = cmax(da, sum);
+            bound = cmax(
+                bound,
+                cmax(
+                    if rows_vary { 0.0 } else { sum },
+                    h * h * h * h / 384.0 * uvf,
+                ),
+            );
+        }
+        // the arc: no fixed section, every row's remainder (the varying rows' bound with
+        // A = 0)
+        if arc {
+            da = 0.0;
+        }
+        if rows_vary {
+            let kh = h * h * h * h / 384.0;
+            for (j, wj) in bar.w.iter().enumerate() {
+                let (Some(&lj), Some(&yj), Some(&xj)) =
+                    (rows.w_lo.get(j), rows.y.get(j), rows.x.get(j))
+                else {
+                    break;
+                };
+                let den = lj - kh * yj;
+                let num = wj.hi * da + kh * xj + kh * yj * rows.r;
+                let positive = den > 0.0;
+                bound = if positive {
+                    cmax(bound, num / den)
+                } else {
+                    f64::INFINITY
+                };
+                if !positive {
+                    break;
+                }
+            }
         }
         if !bound.is_finite() {
             continue;
@@ -1005,14 +1682,16 @@ pub fn gn_certify_span(
             break;
         }
         // the bound no finer level goes under: over the target, no level certifies the span
+        // (the jets' least terms only where the bound takes the jets' sum, not with
+        // varying rows, whose own least terms are not ported: the fork's f916a8d)
         let k4 = h * h * h * h / 384.0;
         let mut lower = 0.0_f64;
         for (m4lf, &uvl) in m4_lo.iter().zip(&uv4_lo) {
             let mut sum = 0.0_f64;
-            for &m in m4lf.iter().take(n + 1) {
+            for &m in m4lf.iter().take(l_jets + 1) {
                 sum += k4 * m;
             }
-            lower = cmax(lower, cmax(sum, k4 * uvl));
+            lower = cmax(lower, cmax(if rows_vary { 0.0 } else { sum }, k4 * uvl));
         }
         if round_down(lower * (1.0 - 1.0e-12)) > target {
             break;
@@ -1062,7 +1741,8 @@ mod tests {
         side: [f64; 2],
     ) -> GnStation {
         let tr = Trunc::new(0, 0).unwrap();
-        gn_solve_station(k, faces, leader, s, seed, r, side, tr, 1e-12).unwrap()
+        super::super::station::gn_solve_station(k, faces, leader, s, seed, r, side, tr, 1e-12)
+            .unwrap()
     }
 
     fn contains(i: Ivl, x: f64) -> bool {
@@ -1094,7 +1774,7 @@ mod tests {
         let a = station(&k, faces, &leader, sa, [r, len * sa, len * sa, r], rr, side);
         let b = station(&k, faces, &leader, sb, [r, len * sb, len * sb, r], rr, side);
         let n = 2;
-        let e = gn_enclose([&n1, &n2], &ln, &a, &b, rr, side, n, 4 + TAYLOR)
+        let e = gn_enclose([&n1, &n2], &ln, &a, &b, rr, side, n, 4 + TAYLOR, None)
             .unwrap()
             .expect("proved");
         assert!(contains(e.x[0].c[0][0], r) && contains(e.x[3].c[0][0], r));
@@ -1126,6 +1806,8 @@ mod tests {
             side,
             n,
             1e-6,
+            None,
+            None,
         )
         .unwrap();
         assert!((0.0..1e-9).contains(&bound), "{bound}");
@@ -1253,7 +1935,7 @@ mod tests {
         // hold the closed form's, `(4! c[4][k])`
         let sm = 0.5 * (sa + sb);
         let ms = st(sm);
-        let em = gn_enclose([&np, &nc], &ln, &ms, &ms, rr, side, n, 4 + TAYLOR - 1)
+        let em = gn_enclose([&np, &nc], &ln, &ms, &ms, rr, side, n, 4 + TAYLOR - 1, None)
             .unwrap()
             .expect("proved at a point");
         let dm = leader.evaluate(sm, 4, true, false).unwrap()[4];
@@ -1301,6 +1983,8 @@ mod tests {
             side,
             n,
             target,
+            None,
+            None,
         )
         .unwrap();
         let jets = h * h * h * h / 384.0 * (want[0][0] + want[0][1]);
@@ -1327,7 +2011,7 @@ mod tests {
                 .unwrap();
             l4l = l4l.max(Vec3::new(d[4].x, d[4].y, 0.0).length());
         }
-        let one = gn_enclose([&np, &nc], &ln, &a, &lb, rr, side, n, 4 + TAYLOR).unwrap();
+        let one = gn_enclose([&np, &nc], &ln, &a, &lb, rr, side, n, 4 + TAYLOR, None).unwrap();
         assert!(one.is_none());
         let long = gn_certify_span(
             &k,
@@ -1341,6 +2025,8 @@ mod tests {
             side,
             n,
             target,
+            None,
+            None,
         )
         .unwrap();
         let jl = hl * hl * hl * hl / 384.0 * (1.0 + r / (big_r + r)) * l4l;

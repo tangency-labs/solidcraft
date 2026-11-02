@@ -1534,6 +1534,9 @@ fn expand_boundary_span(
         SurfaceKind::Sphere(s) => s.base_mut().base_mut(),
         SurfaceKind::Torus(s) => s.base_mut().base_mut(),
         SurfaceKind::SurfOfExtrusion(s) => s.base_mut(),
+        // (the fork's SmProceduralBlend is an SmBSplineSurface: its net's span, the
+        // definition and its map untouched, as ExpandBoundarySpan is not overridden)
+        SurfaceKind::ProceduralBlend(pb) => pb.net_mut(),
         _ => return Err(SolidError::null_pointer(OP)),
     };
     base.expand_boundary_span(param, dir)

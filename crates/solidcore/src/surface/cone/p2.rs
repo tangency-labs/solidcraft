@@ -643,6 +643,27 @@ impl Cone {
         test_surface: &BSplineSurface,
         tolerance_scale: f64,
     ) -> Result<Option<Self>> {
+        Self::is_nurb_surface_cone_on(k, test_surface, tolerance_scale, None)
+    }
+
+    /// [`Self::is_nurb_surface_cone`] of the `SmBSplineSurface` part of `this` (not upstream: the
+    /// fork's `SmProceduralBlend`): the corner points come from its virtual
+    /// `EvaluatePoint`, so a procedural blend's are its definition's. `None` evaluates
+    /// `test_surface` itself.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::is_nurb_surface_cone`].
+    pub(crate) fn is_nurb_surface_cone_on(
+        k: &Kernel,
+        test_surface: &BSplineSurface,
+        tolerance_scale: f64,
+        this: Option<&crate::surface::surface::Surface>,
+    ) -> Result<Option<Self>> {
+        let corner = |uv| match this {
+            Some(s) => s.evaluate_point(k, uv),
+            None => test_surface.evaluate_point(uv),
+        };
         // low work - not rational, not proper degree, not linear in one direction or other
         let deg_u = test_surface.degree(SurfParamType::U);
         let deg_v = test_surface.degree(SurfParamType::V);
@@ -669,8 +690,8 @@ impl Cone {
         }
 
         // evaluate Nurb min/max domain points (statuses ignored)
-        let min_pnt = ignored(test_surface.evaluate_point(uv_domain.min()))?.unwrap_or(Vec3::UNDEF);
-        let max_pnt = ignored(test_surface.evaluate_point(uv_domain.max()))?.unwrap_or(Vec3::UNDEF);
+        let min_pnt = ignored(corner(uv_domain.min()))?.unwrap_or(Vec3::UNDEF);
+        let max_pnt = ignored(corner(uv_domain.max()))?.unwrap_or(Vec3::UNDEF);
 
         // scale zero value and angle tolerance
         let ang_tol = tolerance_scale * EFF_ZERO_SQRT;

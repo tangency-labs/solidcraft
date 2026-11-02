@@ -74,6 +74,10 @@ impl FilletSolverOps for GeometrySolver<'_> {
         &mut self.actual.solver
     }
 
+    fn constant_radii(&self) -> Option<[f64; 2]> {
+        FilletSolverOps::constant_radii(self.actual)
+    }
+
     fn solver_surface(&self, rail: usize) -> Result<Option<&OffsetSurface>> {
         Ok(Some(ConstantRadiusOps::offset_surface(self, rail)?))
     }

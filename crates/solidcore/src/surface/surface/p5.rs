@@ -541,6 +541,21 @@ impl Surface {
                     uv_iso_curve: r.uv_iso_curve,
                 });
             }
+            SurfaceKind::ProceduralBlend(pb) => {
+                let b = pb.net();
+                {
+                    let opts = crate::nurbs::b_spline_surface::p2::IsoCurveOptions {
+                        domain: domain.copied(),
+                        uv_iso_curve: want_uv_iso_curve,
+                    };
+                    let r = b.create_iso_parametric_curve(k, param, iso_parameter, opts)?;
+                    return Ok(IsoParametricCurve {
+                        curve: Curve::from(r.curve),
+                        max_gap_3d: r.max_gap_3d,
+                        uv_iso_curve: r.uv_iso_curve,
+                    });
+                }
+            }
             SurfaceKind::Plane(p) => {
                 let r =
                     p.create_iso_parametric_curve(param, iso_parameter, domain, want_uv_iso_curve)?;

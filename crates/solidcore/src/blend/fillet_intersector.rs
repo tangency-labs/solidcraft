@@ -119,7 +119,6 @@ use crate::intersect::surface_intersector::p4::{
 use crate::kernel::Kernel;
 use crate::math::{max2, max4, min2, EFF_ZERO, EFF_ZERO_SQ};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
-use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::surface::surface::p2::{drop_vectors, TsectCurveType};
 use crate::surface::surface::Surface;
 use crate::topology::edgeuse::p1 as eu1;
@@ -375,7 +374,7 @@ pub trait FilletSolverOps {
         points: &[TsectPnt],
         uv1: &mut BSplineCurve,
         uv2: &mut BSplineCurve,
-    ) -> Result<Option<BSplineSurface>>;
+    ) -> Result<Option<Surface>>;
 
     /// `pFilletGeom->SetFilletSurface(pFilletSurface)` (after deleting the old one); the
     /// geometry is stored in `pseudo`.
@@ -387,7 +386,7 @@ pub trait FilletSolverOps {
         &mut self,
         pseudo: &mut FilletBrep,
         geom: &Self::FilletGeom,
-        surface: Option<BSplineSurface>,
+        surface: Option<Surface>,
     ) -> Result<()>;
 
     /// `pFilletGeom->m_pCenterLineCurve = pCenterLine` (after deleting the old one).
@@ -592,7 +591,7 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
         points: &[TsectPnt],
         uv1: &mut BSplineCurve,
         uv2: &mut BSplineCurve,
-    ) -> Result<Option<BSplineSurface>> {
+    ) -> Result<Option<Surface>> {
         // the virtual m_pFSG->CreateSurface(*this, pCenterLine, pCurve1, pCurve2,
         // sPnts, pSur[0], pUV1, pSur[1], pUV2, ..): the base's generator (SM_ERR for
         // the base class); it reads the solver's tolerance and GetSolverType()
@@ -617,6 +616,7 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
                 points,
                 [&sur0, &sur1],
                 [uv1, uv2],
+                None,
             )
             .map(Some)
     }
@@ -634,11 +634,9 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
         &mut self,
         pseudo: &mut FilletBrep,
         geom: &FilletGeomId,
-        surface: Option<BSplineSurface>,
+        surface: Option<Surface>,
     ) -> Result<()> {
-        pseudo
-            .geom_mut(*geom)?
-            .set_fillet_surface(surface.map(Surface::from));
+        pseudo.geom_mut(*geom)?.set_fillet_surface(surface);
         Ok(())
     }
 
@@ -2535,7 +2533,7 @@ mod tests {
             _points: &[TsectPnt],
             _uv1: &mut BSplineCurve,
             _uv2: &mut BSplineCurve,
-        ) -> Result<Option<BSplineSurface>> {
+        ) -> Result<Option<Surface>> {
             Ok(None)
         }
 
@@ -2543,7 +2541,7 @@ mod tests {
             &mut self,
             _pseudo: &mut FilletBrep,
             _geom: &(),
-            _surface: Option<BSplineSurface>,
+            _surface: Option<Surface>,
         ) -> Result<()> {
             Ok(())
         }

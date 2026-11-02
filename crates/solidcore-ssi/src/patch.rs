@@ -36,6 +36,8 @@ const SAME_EDGE: f64 = 1e-12;
 fn nurb(k: &Kernel, surface: &Surface) -> Result<NurbSurface, Error> {
     let made = match surface.kind() {
         SurfaceKind::BSpline(s) => s.gw_nurb().cloned(),
+        // a blend by its definition: its net, within its certified bound of it
+        SurfaceKind::ProceduralBlend(p) => p.net().gw_nurb().cloned(),
         SurfaceKind::Plane(p) => p.base_with_nurb()?.gw_nurb().cloned(),
         SurfaceKind::Cone(c) => {
             if let Some(n) = c.rev().base().gw_nurb() {

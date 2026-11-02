@@ -3081,6 +3081,11 @@ impl FilletSolverOps for PlainConstantRadiusFs {
         &self.0.solver
     }
 
+    /// `SmConstantRadiusFS::GetFilletRadius(0)`, `(1)`.
+    fn constant_radii(&self) -> Option<[f64; 2]> {
+        <ConstantRadiusFs as FilletSolverOps>::constant_radii(&self.0)
+    }
+
     fn solver_mut(&mut self) -> &mut FilletSolver {
         &mut self.0.solver
     }

@@ -11,7 +11,7 @@
 
 use std::borrow::Cow;
 
-use super::series::{GnScalar, Ser, Trunc, VSer, MAX_K, MAX_S, V3};
+use super::series::{GnScalar, Ser, Trunc, VSer, MAX_E, MAX_K, MAX_S, V3};
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::{Point2, Vec3};
@@ -225,6 +225,30 @@ pub fn span(u: &[f64], p: usize, n: usize, x: f64) -> usize {
     k
 }
 
+/// `sm_SidedSpan` (3bc54a4): [`span`], except at a knot line (within `1e-9 (1 + |x|)` of
+/// it), where `side` -1 takes the piece before it and +1 the piece after it; 0 the span
+/// [`span`] finds.
+#[must_use]
+pub fn sided_span(u: &[f64], p: usize, n: usize, x: f64, side: i32) -> usize {
+    let mut k = span(u, p, n, x);
+    let tol = 1.0e-9 * (1.0 + x.abs());
+    let at = |i: usize| knot(u, i as isize);
+    if side < 0 && (x - at(k)).abs() <= tol {
+        while k > p && at(k - 1).partial_cmp(&at(k)) != Some(core::cmp::Ordering::Less) {
+            k -= 1;
+        }
+        if k > p {
+            k -= 1;
+        }
+    } else if side > 0 && k + 1 < n && (x - at(k + 1)).abs() <= tol {
+        k += 1;
+        while k + 1 < n && at(k).partial_cmp(&at(k + 1)) != Some(core::cmp::Ordering::Less) {
+            k += 1;
+        }
+    }
+    k
+}
+
 /// `sm_DersBasis`: the non-zero basis functions `N_{k-p..k}` and their derivatives up to
 /// `d` at `x` in span `k`, `ders[d][j]` (the NURBS book's A2.3, its knot differences taken
 /// from the knots directly).
@@ -406,6 +430,10 @@ pub fn nurbs_partials<T: GnScalar>(
 pub fn as_b_spline<'a>(k: &Kernel, s: &'a Surface) -> Result<Option<Cow<'a, BSplineSurface>>> {
     Ok(match s.kind_with_nurb(k)? {
         SurfaceKind::BSpline(b) => Some(Cow::Borrowed(b)),
+        SurfaceKind::ProceduralBlend(pb) => {
+            let b = pb.net();
+            Some(Cow::Borrowed(b))
+        }
         SurfaceKind::Plane(p) => Some(p.base_with_nurb()?),
         SurfaceKind::Cone(c) => Some(Cow::Borrowed(c.rev().base())),
         SurfaceKind::SurfOfRevolution(r) => Some(Cow::Borrowed(r.base())),
@@ -421,19 +449,38 @@ pub fn as_b_spline<'a>(k: &Kernel, s: &'a Surface) -> Result<Option<Cow<'a, BSpl
 
 /// `sm_SurfacePartials`: the partials of a face's surface at `uv` up to total order `lk`:
 /// a NURBS (every analytic surface is one, evaluated in its net's parameters) by its net,
-/// continued past its knots; any other surface by its own evaluator.
+/// continued past its knots; any other surface, and a blend by its definition (whose net
+/// is only its approximation, 014f66f), by its own evaluator.
 ///
 /// # Errors
 ///
 /// `SM_ERR` for `lk > MAX_K`; those of [`Nurbs::of`] and the surface's evaluator.
 pub fn surface_partials(k: &Kernel, s: &Surface, uv: Point2, lk: usize) -> Result<Partials<f64>> {
+    surface_partials_sided(k, s, uv, lk, [0, 0])
+}
+
+/// [`surface_partials`] with its `lSideU`, `lSideV` (3bc54a4): at a NURBS face's knot
+/// line, -1 the piece before it, +1 the piece after it ([`sided_span`]).
+///
+/// # Errors
+///
+/// As [`surface_partials`].
+pub fn surface_partials_sided(
+    k: &Kernel,
+    s: &Surface,
+    uv: Point2,
+    lk: usize,
+    sides: [i32; 2],
+) -> Result<Partials<f64>> {
     if lk > MAX_K {
         return Err(SolidError::sm_err(OP));
     }
-    if let Some(bs) = as_b_spline(k, s)? {
+    let definition = matches!(s.kind(), SurfaceKind::ProceduralBlend(_));
+    let bs = if definition { None } else { as_b_spline(k, s)? };
+    if let Some(bs) = bs {
         let n = Nurbs::of(&bs)?;
-        let ku = span(&n.u, n.p, n.nu, uv.x);
-        let kv = span(&n.v, n.q, n.nv, uv.y);
+        let ku = sided_span(&n.u, n.p, n.nu, uv.x, sides[0]);
+        let kv = sided_span(&n.v, n.q, n.nv, uv.y, sides[1]);
         return Ok(nurbs_partials(&n, ku, kv, uv.x, uv.y, lk));
     }
     // Evaluate(crUV, lK, lK, TRUE, TRUE, TRUE, sD, FALSE)
@@ -474,10 +521,16 @@ pub struct GnSystem<'a, T> {
     pub side: [f64; 2],
     /// The offsets held at `tau = 1`.
     pub hold: bool,
+    /// `pR`: a ball whose radius varies, `r(s)` as a series in sigma (`r` unused), or
+    /// none (014f66f).
+    pub law: Option<&'a Ser<T>>,
 }
 
 /// G's four series and the two feet's (`sm_GnEvaluate`'s `rG`, `rF`).
 pub type GnValues<T> = ([Ser<T>; 4], [VSer<T>; 2]);
+
+/// [`GnValues`] and V (`sm_GnEvaluate`'s `pV`).
+pub type GnValuesV<T> = ([Ser<T>; 4], [VSer<T>; 2], VSer<T>);
 
 /// `sm_GnEvaluate`: G and the feet `F_i` as series, given the feet's parameters as series
 /// `x[0..3]` (u1, v1, u2, v2), whose constant terms are the point the partials were taken
@@ -491,6 +544,37 @@ pub fn gn_evaluate<T: GnScalar>(
     x: &[Ser<T>; 4],
     tr: Trunc,
 ) -> Result<GnValues<T>> {
+    let (g, f, _) = gn_evaluate_v(sys, x, tr)?;
+    Ok((g, f))
+}
+
+/// `sm_GnEvaluate` with its `pV`: G, the feet `F_i`, and the point `V(tau)` off face 1
+/// (the ball's centre at `tau = 1`), as series.
+///
+/// # Errors
+///
+/// `SM_ERR` where a face's normal vanishes at a foot.
+pub fn gn_evaluate_v<T: GnScalar>(
+    sys: &GnSystem<'_, T>,
+    x: &[Ser<T>; 4],
+    tr: Trunc,
+) -> Result<GnValuesV<T>> {
+    let (g, f, v, _) = gn_evaluate_vn(sys, x, tr)?;
+    Ok((g, f, v))
+}
+
+/// `sm_GnEvaluate` with its `pV` and `pN` (3bc54a4): also the faces' unit normals at the
+/// feet, as series.
+///
+/// # Errors
+///
+/// `SM_ERR` where a face's normal vanishes at a foot.
+#[allow(clippy::type_complexity)]
+pub fn gn_evaluate_vn<T: GnScalar>(
+    sys: &GnSystem<'_, T>,
+    x: &[Ser<T>; 4],
+    tr: Trunc,
+) -> Result<([Ser<T>; 4], [VSer<T>; 2], VSer<T>, [VSer<T>; 2])> {
     let zero = V3 {
         x: T::of(0.0),
         y: T::of(0.0),
@@ -499,6 +583,7 @@ pub fn gn_evaluate<T: GnScalar>(
     let lm = tr.s() + tr.e();
     let mut v_out = [VSer::constant(zero), VSer::constant(zero)];
     let mut f_out = [VSer::constant(zero), VSer::constant(zero)];
+    let mut n_out = [VSer::constant(zero), VSer::constant(zero)];
     let rows = x.chunks_exact(2).zip(sys.p).zip(sys.r.iter().zip(sys.side));
     for (f, ((xf, pf), (&rf, sidef))) in rows.enumerate() {
         let (Some(xu), Some(xv)) = (xf.first(), xf.get(1)) else {
@@ -544,14 +629,25 @@ pub fn gn_evaluate<T: GnScalar>(
         }
         let nrm = su.cross(&sv, tr);
         let inv_len = nrm.dot(&nrm, tr).inv_sqrt(tr)?;
-        // the offset towards the ball: tau r_i s_i, tau = 1 + eps
+        // the offset towards the ball: tau r_i s_i, tau = 1 + eps (r_i a series in sigma
+        // for a law)
         let mut d = Ser::constant(T::of(rf * sidef));
+        if let Some(law) = sys.law {
+            for i in 0..=tr.s() {
+                d.set(i, 0, law.at(i, 0) * T::of(sidef));
+            }
+        }
         if !sys.hold && tr.e() >= 1 {
-            d.set(0, 1, T::of(rf * sidef));
+            for i in 0..=tr.s() {
+                d.set(i, 1, d.at(i, 0));
+            }
         }
         let vf = s.add(&nrm.times(&inv_len.mul(&d, tr), tr), tr);
-        if let (Some(vo), Some(fo)) = (v_out.get_mut(f), f_out.get_mut(f)) {
+        if let (Some(vo), Some(fo), Some(no)) =
+            (v_out.get_mut(f), f_out.get_mut(f), n_out.get_mut(f))
+        {
             *vo = vf;
+            *no = nrm.times(&inv_len, tr);
             *fo = s;
         }
     }
@@ -559,7 +655,53 @@ pub fn gn_evaluate<T: GnScalar>(
     let diff = v0.sub(v1, tr);
     let [g0, g1, g2] = diff.a;
     let g3 = v0.sub(&sys.leader, tr).dot(&sys.tangent, tr);
-    Ok(([g0, g1, g2, g3], f_out))
+    Ok(([g0, g1, g2, g3], f_out, *v0, n_out))
+}
+
+/// `sm_GnTopJets` (3bc54a4): the section's jets of order `top` (its order n) and up, from
+/// the faces' order-n partials only. The feet's parameters are solved to order n - 1 in
+/// eps, and the face curve `C_i(tau) = S_i(x_i(tau))`, `x_i` so truncated, is a curve on
+/// face i whose jet agrees with the feet's to order n - 1; its eps^n coefficient's part
+/// along the face's normal is the face's own, its tangent part only the
+/// parametrization's. The jet of order k >= n is that normal part, `N (N . C_k)`, so the
+/// section is as continuous as the face's n-th partials. `f` holds C on entry, the jets on
+/// return; `n` the faces' unit normals at the feet.
+pub fn gn_top_jets<T: GnScalar>(top: usize, tr: Trunc, n: &[VSer<T>; 2], f: &mut [VSer<T>; 2]) {
+    if top < 1 {
+        return;
+    }
+    let sigma = Trunc::new(tr.s(), 0).unwrap_or(tr);
+    for (ff, nf) in f.iter_mut().zip(n) {
+        let mut sn = *nf;
+        for comp in &mut sn.a {
+            for i in 0..=MAX_S {
+                for kk in 1..=MAX_E {
+                    comp.set(i, kk, T::of(0.0));
+                }
+            }
+        }
+        for kk in top..=tr.e() {
+            let mut sc = sn;
+            for (cc, fc) in sc.a.iter_mut().zip(&ff.a) {
+                for i in 0..=MAX_S {
+                    for k2 in 0..=MAX_E {
+                        let v = if k2 == 0 && i <= tr.s() {
+                            fc.at(i, kk)
+                        } else {
+                            T::of(0.0)
+                        };
+                        cc.set(i, k2, v);
+                    }
+                }
+            }
+            let sj = sn.times(&sn.dot(&sc, sigma), sigma);
+            for (fc, jc) in ff.a.iter_mut().zip(&sj.a) {
+                for i in 0..=tr.s() {
+                    fc.set(i, kk, jc.at(i, 0));
+                }
+            }
+        }
+    }
 }
 
 /// `sm_GnJacobian`: the Jacobian `dG/dx` at x's constant terms, offsets held: G along
@@ -657,6 +799,89 @@ pub struct GnStation {
     pub x: [Ser<f64>; 4],
     /// The feet on faces 1 and 2.
     pub f: [VSer<f64>; 2],
+    /// `sV`: V, the point at `tau r_i` from the faces (the ball's centre at `tau = 1`).
+    pub v: VSer<f64>,
+    /// `dW`: the equal area thumbweight there (NaN: not resolved).
+    pub w: f64,
+    /// `dWds`: and its s-derivative (NaN: not resolved).
+    pub wds: f64,
+    /// `lSteps`: the Newton steps the feet took (014f66f).
+    pub steps: u32,
+    /// `aiBefore` (3bc54a4): the series above are the station's on the pieces after it
+    /// along s (the leader's, a face's where a foot is on one of its knot lines); a
+    /// face's side for the pieces before it ([`sided_span`]).
+    pub before: [i32; 4],
+    /// `bSided`: the series on the pieces before it are set (`xl`, `fl`, `wdsl`).
+    pub sided: bool,
+    /// `asXL`: x on the pieces before the station, whose s-derivatives the span ending
+    /// here takes (the values agree; the derivatives differ where the leader or a face is
+    /// not smooth at the station).
+    pub xl: [Ser<f64>; 4],
+    /// `asFL`: the feet on the pieces before it.
+    pub fl: [VSer<f64>; 2],
+    /// `sVL` (cc08236): V on the pieces before it.
+    pub vl: VSer<f64>,
+    /// `dWdsL`: the equal area thumbweight's s-derivative on them.
+    pub wdsl: f64,
+}
+
+impl GnStation {
+    /// `sm_InF`: foot `f`'s series as the span ending here takes them.
+    #[must_use]
+    pub fn in_f(&self, f: usize) -> Option<&VSer<f64>> {
+        if self.sided {
+            self.fl.get(f)
+        } else {
+            self.f.get(f)
+        }
+    }
+
+    /// `sm_InX`: parameter `q`'s series as the span ending here takes them.
+    #[must_use]
+    pub fn in_x(&self, q: usize) -> Option<&Ser<f64>> {
+        if self.sided {
+            self.xl.get(q)
+        } else {
+            self.x.get(q)
+        }
+    }
+
+    /// `sm_InWds`: the thumbweight's s-derivative as the span ending here takes it.
+    #[must_use]
+    pub const fn in_wds(&self) -> f64 {
+        if self.sided {
+            self.wdsl
+        } else {
+            self.wds
+        }
+    }
+}
+
+/// The options of `sm_GnSolveStation` past its station (3bc54a4 and 014f66f): `pR`
+/// (a radius law as a series in sigma), `lTop` (the section's order: its jets of that
+/// order and up are the face curve's normal parts, [`gn_top_jets`]; 0 none), `pSides`
+/// (a face's side at a knot line for each parameter, [`sided_span`]) and `bBefore` (the
+/// leader's piece before `s` at one of its knots).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct StationOptions<'a> {
+    /// `pR`.
+    pub law: Option<&'a Ser<f64>>,
+    /// `lTop`.
+    pub top: usize,
+    /// `pSides`.
+    pub sides: Option<[i32; 4]>,
+    /// `bBefore`.
+    pub before: bool,
+}
+
+/// What `sm_GnSolveStation` hands back through `pC` and `pN`: the face curves C (the feet
+/// before [`gn_top_jets`]) and the faces' unit normals at the feet.
+#[derive(Clone, Copy, Debug)]
+pub struct StationCurves {
+    /// `pC`.
+    pub c: [VSer<f64>; 2],
+    /// `pN`.
+    pub n: [VSer<f64>; 2],
 }
 
 /// `sm_LeaderSeries`: the leader (centre line) at `s` as series in sigma up to `tr.s`: its
@@ -666,9 +891,33 @@ pub struct GnStation {
 ///
 /// Those of the curve's evaluation; `SM_ERR` where its tangent vanishes.
 pub fn leader_series(c: &BSplineCurve, s: f64, tr: Trunc) -> Result<(VSer<f64>, VSer<f64>)> {
+    leader_series_sided(c, s, tr, false)
+}
+
+/// [`leader_series`] with its `bBefore` (3bc54a4): at a knot of the leader, its piece
+/// before `s` (lower interval) instead of the one after it.
+///
+/// # Errors
+///
+/// As [`leader_series`].
+pub fn leader_series_sided(
+    c: &BSplineCurve,
+    s: f64,
+    tr: Trunc,
+    before: bool,
+) -> Result<(VSer<f64>, VSer<f64>)> {
     let sigma = Trunc::new(tr.s(), 0)?;
-    // Evaluate(dS, tr.s + 1, TRUE, asD, FALSE)
-    let d = c.evaluate(s, tr.s() + 1, true, false)?;
+    // a polynomial leader's derivatives past its degree are zero; a rational one's are
+    // evaluated (014f66f)
+    let mut derivs = tr.s() + 1;
+    if !c.is_rational()? {
+        derivs = derivs.min(c.degree()?);
+    }
+    // "SmGnSectionFSG: the leader's derivatives of this order are not evaluated"
+    let mut d = c
+        .evaluate(s, derivs, !before, false)
+        .map_err(|_| SolidError::sm_err(OP))?;
+    d.resize(tr.s() + 2, Vec3::ZERO);
     let zero = V3 {
         x: 0.0,
         y: 0.0,
@@ -716,16 +965,81 @@ pub fn gn_solve_station(
     tr: Trunc,
     tol: f64,
 ) -> Result<GnStation> {
+    gn_solve_station_counted(k, faces, leader, s, seed, r, side, tr, tol, None).0
+}
+
+/// [`gn_solve_station`] with the fork's `pR` (a radius law as a series in sigma, 014f66f)
+/// and the Newton steps taken, which are counted even where the solve fails.
+#[allow(clippy::too_many_arguments)]
+pub fn gn_solve_station_counted(
+    k: &Kernel,
+    faces: [&Surface; 2],
+    leader: &BSplineCurve,
+    s: f64,
+    seed: [f64; 4],
+    r: [f64; 2],
+    side: [f64; 2],
+    tr: Trunc,
+    tol: f64,
+    law: Option<&Ser<f64>>,
+) -> (Result<GnStation>, u32) {
+    let opts = StationOptions {
+        law,
+        ..StationOptions::default()
+    };
+    let (st, steps) = gn_solve_station_with(k, faces, leader, s, seed, r, side, tr, tol, opts);
+    (st.map(|(st, _)| st), steps)
+}
+
+/// `sm_GnSolveStation` with all its options ([`StationOptions`]), its `pC` and `pN`
+/// ([`StationCurves`]) and the Newton steps taken (counted even where the solve fails).
+#[allow(clippy::too_many_arguments)]
+pub fn gn_solve_station_with(
+    k: &Kernel,
+    faces: [&Surface; 2],
+    leader: &BSplineCurve,
+    s: f64,
+    seed: [f64; 4],
+    r: [f64; 2],
+    side: [f64; 2],
+    tr: Trunc,
+    tol: f64,
+    opts: StationOptions<'_>,
+) -> (Result<(GnStation, StationCurves)>, u32) {
+    let mut steps = 0_u32;
+    let st = solve_station_body(
+        k, faces, leader, s, seed, r, side, tr, tol, opts, &mut steps,
+    );
+    (st, steps)
+}
+
+/// The body of [`gn_solve_station_counted`].
+#[allow(clippy::too_many_arguments)]
+fn solve_station_body(
+    k: &Kernel,
+    faces: [&Surface; 2],
+    leader: &BSplineCurve,
+    s: f64,
+    seed: [f64; 4],
+    r: [f64; 2],
+    side: [f64; 2],
+    tr: Trunc,
+    tol: f64,
+    opts: StationOptions<'_>,
+    steps: &mut u32,
+) -> Result<(GnStation, StationCurves)> {
+    let law = opts.law;
+    let sides = opts.sides.unwrap_or([0, 0, 0, 0]);
     if tr.s() > MAX_S {
         return Err(SolidError::sm_err(OP));
     }
     let lk = tr.s() + tr.e() + 1;
-    let (l, t) = leader_series(leader, s, tr)?;
+    let (l, t) = leader_series_sided(leader, s, tr, opts.before)?;
     let [f0, f1] = faces;
     let partials_at = |x: &[f64; 4], order: usize| -> Result<[Partials<f64>; 2]> {
         Ok([
-            surface_partials(k, f0, Point2::new(x[0], x[1]), order)?,
-            surface_partials(k, f1, Point2::new(x[2], x[3]), order)?,
+            surface_partials_sided(k, f0, Point2::new(x[0], x[1]), order, [sides[0], sides[1]])?,
+            surface_partials_sided(k, f1, Point2::new(x[2], x[3]), order, [sides[2], sides[3]])?,
         ])
     };
 
@@ -735,6 +1049,7 @@ pub fn gn_solve_station(
     let mut converged = false;
     let mut it = 0;
     while it < 50 && !converged {
+        *steps += 1;
         let pp = partials_at(&x, 2)?;
         let [p0, p1] = &pp;
         let sys = GnSystem {
@@ -744,6 +1059,7 @@ pub fn gn_solve_station(
             r,
             side,
             hold: false,
+            law,
         };
         let sx = x.map(Ser::constant);
         let (g, _) = gn_evaluate(&sys, &sx, point)?;
@@ -780,6 +1096,7 @@ pub fn gn_solve_station(
         r,
         side,
         hold: false,
+        law,
     };
     let mut sx = x.map(Ser::constant);
     let jac = gn_jacobian(&sys, &sx)?;
@@ -789,7 +1106,8 @@ pub fn gn_solve_station(
         let (g, _) = gn_evaluate(&sys, &sx, tr)?;
         for i in 0..=tr.s().min(tot) {
             let kk = tot - i;
-            if kk > tr.e() {
+            // (to order lTop - 1 in eps with lTop: gn_top_jets)
+            if kk > tr.e() || (opts.top >= 1 && kk >= opts.top) {
                 continue;
             }
             let b = [
@@ -805,8 +1123,32 @@ pub fn gn_solve_station(
             }
         }
     }
-    let (_, f) = gn_evaluate(&sys, &sx, tr)?;
-    Ok(GnStation { s, x: sx, f })
+    let (_, mut f, v, n) = gn_evaluate_vn(&sys, &sx, tr)?;
+    let curves = StationCurves { c: f, n };
+    gn_top_jets(opts.top, tr, &n, &mut f);
+    let zero = V3 {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    };
+    Ok((
+        GnStation {
+            s,
+            x: sx,
+            f,
+            v,
+            w: f64::NAN,
+            wds: f64::NAN,
+            steps: *steps,
+            before: [0; 4],
+            sided: false,
+            xl: [Ser::constant(0.0); 4],
+            fl: [VSer::constant(zero); 2],
+            vl: VSer::constant(zero),
+            wdsl: f64::NAN,
+        },
+        curves,
+    ))
 }
 
 /// A unit vector check helper for tests and callers: `Vec3` of a `V3<f64>`.
@@ -958,5 +1300,21 @@ mod tests {
         for (yi, w) in y.iter().zip([1.0, 1.0, 1.0, 1.0]) {
             assert!((yi - w).abs() < 1e-15);
         }
+    }
+
+    /// `sm_SidedSpan` (3bc54a4): on a knot line the piece before it or after it, the
+    /// span `sm_Span` finds elsewhere (a cubic knot vector with a double inner knot at 1).
+    #[test]
+    fn a_sided_span_takes_the_piece_on_its_side() {
+        let u = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0];
+        let (p, n) = (3, 6);
+        assert_eq!(span(&u, p, n, 1.0), 5);
+        assert_eq!(sided_span(&u, p, n, 1.0, 0), 5);
+        assert_eq!(sided_span(&u, p, n, 1.0, 1), 5);
+        assert_eq!(sided_span(&u, p, n, 1.0, -1), 3);
+        assert_eq!(sided_span(&u, p, n, 1.0 + 1e-10, -1), 3);
+        assert_eq!(sided_span(&u, p, n, 1.0 - 1e-10, 1), 5);
+        assert_eq!(sided_span(&u, p, n, 0.5, -1), 3);
+        assert_eq!(sided_span(&u, p, n, 1.5, 1), 5);
     }
 }

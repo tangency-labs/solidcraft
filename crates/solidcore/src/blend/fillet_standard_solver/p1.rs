@@ -1729,6 +1729,24 @@ impl CurveBasedFs {
         self.original.as_ref()
     }
 
+    /// `SM_CAST_PTR(SmBSplineCurve, GetBaseCurve())` (the fork's 0d43b4c): the curve
+    /// `EvaluateBaseCurve` evaluates, the extended one where there is one, as a B-spline
+    /// curve (`None` where it is not one). A line is its B-spline part (its NURB); the
+    /// fork's copy of an `SmLine` keeps the line's own `Evaluate`.
+    ///
+    /// # Errors
+    ///
+    /// Those of a line's NURB.
+    pub fn base_b_spline_curve(&self) -> Result<Option<BSplineCurve>> {
+        if let Some(e) = &self.extended {
+            return Ok(Some(e.clone()));
+        }
+        match &self.original {
+            Some(c) => Ok(bspline_part(c)?.map(std::borrow::Cow::into_owned)),
+            None => Ok(None),
+        }
+    }
+
     /// `SetOriginalCurve`.
     pub fn set_original_curve(&mut self, curve: Option<Curve>) {
         self.original = curve;
@@ -2353,6 +2371,74 @@ fn add_section_knots(
     Ok(knots)
 }
 
+/// The centre line's arc (`IsArc`): its frame, radius, start and end angles.
+pub(crate) type CenterArc = (Axis2Placement, f64, f64, f64);
+
+/// `sm_CircleSweptOrRevolved` (the fork's cc08236, moved out of
+/// `CircleSurfaceFromCurves` unchanged): whether the ball's circles along a centre line
+/// and its rails sweep a cylinder (all three parallel lines; the centre line's own kind
+/// answers `GetDegree` and `IsLine`) or revolve a torus (coaxial arcs of the same sweep):
+/// `(sweep, revolve, the centre line's arc)`.
+pub(crate) fn circle_swept_or_revolved(
+    k: &Kernel,
+    center_line: &Curve,
+    rail1: &BSplineCurve,
+    rail2: &BSplineCurve,
+    approx_tol_3d: f64,
+) -> Result<(bool, bool, Option<CenterArc>)> {
+    let mut sweep = false;
+    let mut revolve = false;
+
+    // see if newSurf == RuledSurface (`GetDegree` and `IsLine` of the centre line's
+    // own kind)
+    let deg1_line = if center_line.degree()? == 1 {
+        center_line.is_line(k, ANALYTIC_SAMPLES, ANALYTIC_TOL)?
+    } else {
+        None
+    };
+    if let Some((_, line_vector)) = deg1_line {
+        sweep = true;
+        if line_is_off(line_vector, rail1)? {
+            sweep = false;
+        }
+        if line_is_off(line_vector, rail2)? {
+            sweep = false;
+        }
+    }
+
+    // see if NewSurf == SurfaceOfRevolution
+    let arc = center_line.is_arc(k, ANALYTIC_SAMPLES, ANALYTIC_TOL)?;
+    if let Some((ref_frame, _, _, end_ang)) = &arc {
+        revolve = true;
+        match bspline_is_arc(k, rail1)? {
+            None => revolve = false,
+            Some((ref_frame2, radius2, _, end_ang2)) => {
+                if (end_ang2 - end_ang).abs() * radius2 > approx_tol_3d
+                    || !ref_frame2.are_coaxial(ref_frame, approx_tol_3d, radius2)
+                {
+                    revolve = false;
+                }
+                if revolve {
+                    match bspline_is_arc(k, rail2)? {
+                        None => revolve = false,
+                        Some((ref_frame3, radius3, _, end_ang3)) => {
+                            // Also check against 1s Rail curve.
+                            if (end_ang3 - end_ang).abs() * radius3 > approx_tol_3d
+                                || !ref_frame3.are_coaxial(ref_frame, approx_tol_3d, radius3)
+                                || (end_ang3 - end_ang2).abs() * radius3 > approx_tol_3d
+                                || !ref_frame3.are_coaxial(&ref_frame2, approx_tol_3d, radius3)
+                            {
+                                revolve = false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok((sweep, revolve, arc))
+}
+
 /// Whether two lines' directions differ by more than `SM_EFF_ZERO_SQRT` (the sweep
 /// test of the generators).
 fn line_is_off(line_vector: Vec3, rail: &BSplineCurve) -> Result<bool> {
@@ -2771,56 +2857,8 @@ impl CircularCrossSectionFsg {
         // when center, rail1, and rail2 curves are parallel lines - NewSurf = RuledSurface
         // when center, rail1, and rail2 curves are arcs           - NewSurf = SurfaceOfRevolution
         // else                                                    - NewSurf = Skinned Surface
-        let mut sweep = false;
-        let mut revolve = false;
-
-        // see if newSurf == RuledSurface (`GetDegree` and `IsLine` of the centre line's
-        // own kind)
-        let deg1_line = if center_line.degree()? == 1 {
-            center_line.is_line(k, ANALYTIC_SAMPLES, ANALYTIC_TOL)?
-        } else {
-            None
-        };
-        if let Some((_, line_vector)) = deg1_line {
-            sweep = true;
-            if line_is_off(line_vector, rail1)? {
-                sweep = false;
-            }
-            if line_is_off(line_vector, rail2)? {
-                sweep = false;
-            }
-        }
-
-        // see if NewSurf == SurfaceOfRevolution
-        let arc = center_line.is_arc(k, ANALYTIC_SAMPLES, ANALYTIC_TOL)?;
-        if let Some((ref_frame, _, _, end_ang)) = &arc {
-            revolve = true;
-            match bspline_is_arc(k, rail1)? {
-                None => revolve = false,
-                Some((ref_frame2, radius2, _, end_ang2)) => {
-                    if (end_ang2 - end_ang).abs() * radius2 > approx_tol_3d
-                        || !ref_frame2.are_coaxial(ref_frame, approx_tol_3d, radius2)
-                    {
-                        revolve = false;
-                    }
-                    if revolve {
-                        match bspline_is_arc(k, rail2)? {
-                            None => revolve = false,
-                            Some((ref_frame3, radius3, _, end_ang3)) => {
-                                // Also check against 1s Rail curve.
-                                if (end_ang3 - end_ang).abs() * radius3 > approx_tol_3d
-                                    || !ref_frame3.are_coaxial(ref_frame, approx_tol_3d, radius3)
-                                    || (end_ang3 - end_ang2).abs() * radius3 > approx_tol_3d
-                                    || !ref_frame3.are_coaxial(&ref_frame2, approx_tol_3d, radius3)
-                                {
-                                    revolve = false;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        let (sweep, revolve, arc) =
+            circle_swept_or_revolved(k, center_line, rail1, rail2, approx_tol_3d)?;
 
         // track max/min number of knots in cross-section curves
         let mut max_num_unique_knots: usize = 0;

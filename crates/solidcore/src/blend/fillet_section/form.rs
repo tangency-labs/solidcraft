@@ -2,41 +2,41 @@
 //! coefficient in each weighted control point) and the piecewise cubic Hermite curves of
 //! the jets along the rails.
 //!
-//! Fork: `sm_Bern`, `sm_BernMul`, `sm_BernPow`, `sm_GnSectionForm`, `sm_GnForm`,
-//! `sm_HermitePoints`, `sm_HermiteKnots` in `source/SMLib/src/SmFilletSection.cpp`
-//! (tangency-labs/smlib@11ea2d9); see [`super`] for the table.
+//! Fork: `sm_Bern`, `sm_Binom`, `sm_BernMul`, `sm_BernPow`, `sm_GnSectionFormT`,
+//! `sm_GnFormT`, `sm_GnForm`, `sm_GnFormNormalized`, `sm_HermitePoints`, `sm_HermiteKnots`
+//! in `source/SMLib/src/SmFilletSection.cpp` (tangency-labs/smlib@11ea2d9; the ring-generic
+//! form, `sm_Binom` and the normalized form 7102bc5); see [`super`] for the table.
 
+use super::tay::Ring;
 use crate::math::Vec3;
 
 /// `sm_Bern`: a polynomial's Bernstein coefficients, of degree `len() - 1`.
 pub type Bern = Vec<f64>;
 
-/// `sm_BernMul`: the product of two Bernstein polynomials (degree `p + q`), each term
-/// `C(p, i) C(q, j) / C(p + q, i + j) a_i b_j` added into `r[i + j]`. An empty factor
-/// gives an empty product.
+/// `sm_Binom`: `C(p, i)`, exact for the degrees here (rounded to the nearest integer).
 #[must_use]
-pub fn bern_mul(a: &[f64], b: &[f64]) -> Bern {
+pub fn binom(p: usize, i: usize) -> f64 {
+    let mut c = 1.0_f64;
+    for m in 1..=i {
+        c = c * (p - i + m) as f64 / m as f64;
+    }
+    (c + 0.5).floor()
+}
+
+/// `sm_BernMul`: the product of two Bernstein polynomials (degree `p + q`) in any ring Z,
+/// each term `C(p, i) C(q, j) / C(p + q, i + j) a_i b_j` added into `r[i + j]`. An empty
+/// factor gives an empty product.
+#[must_use]
+pub fn bern_mul<Z: Ring>(a: &[Z], b: &[Z]) -> Vec<Z> {
     let (Some(p), Some(q)) = (a.len().checked_sub(1), b.len().checked_sub(1)) else {
         return Vec::new();
     };
-    let mut r = vec![0.0; p + q + 1];
+    let mut r = vec![Z::lift(0.0); p + q + 1];
     for (i, &ai) in a.iter().enumerate() {
         for (j, &bj) in b.iter().enumerate() {
-            let mut cp = 1.0;
-            let mut cq = 1.0;
-            let mut cpq = 1.0;
-            for m in 1..=i {
-                cp *= (p - i + m) as f64 / m as f64;
-            }
-            for m in 1..=j {
-                cq *= (q - j + m) as f64 / m as f64;
-            }
-            for m in 1..=(i + j) {
-                cpq *= (p + q - i - j + m) as f64 / m as f64;
-            }
-            let c = cp * cq / cpq;
+            let c = Z::lift(binom(p, i) * binom(q, j)) / Z::lift(binom(p + q, i + j));
             if let Some(x) = r.get_mut(i + j) {
-                *x += c * ai * bj;
+                *x = *x + c * ai * bj;
             }
         }
     }
@@ -45,50 +45,55 @@ pub fn bern_mul(a: &[f64], b: &[f64]) -> Bern {
 
 /// `sm_BernPow`: `a^n` (the constant 1 for `n = 0`), multiplied up from 1.
 #[must_use]
-pub fn bern_pow(a: &[f64], n: usize) -> Bern {
-    let mut r = vec![1.0];
+pub fn bern_pow<Z: Ring>(a: &[Z], n: usize) -> Vec<Z> {
+    let mut r = vec![Z::lift(1.0)];
     for _ in 0..n {
         r = bern_mul(&r, a);
     }
     r
 }
 
-/// `sm_GnSectionForm`: the section of order n and thumbweight w over the common
-/// denominator: its weights `W_j` and, for each jet `c_ik`, the coefficient `g_ik_j` of
-/// `c_ik` in `W_j P_j` (`j = 0..3n+1`).
+/// `sm_GnSectionFormT`: the section of order n and thumbweight w over the common
+/// denominator, in any ring Z: its weights `W_j` and, for each jet `c_ik`, the coefficient
+/// `g_ik_j` of `c_ik` in `W_j P_j` (`j = 0..3n+1`).
 #[derive(Clone, Debug, PartialEq)]
-pub struct GnSectionForm {
+pub struct GnSectionFormT<Z> {
     /// `W`: the weights, of degree `3n + 1`.
-    pub w: Bern,
+    pub w: Vec<Z>,
     /// `aG[i][k]`: jet k of face i's coefficients.
-    pub g: [Vec<Bern>; 2],
+    pub g: [Vec<Vec<Z>>; 2],
 }
 
-/// `sm_GnForm`: the form of the order-n section with thumbweight w,
+/// `sm_GnSectionForm`: the form in doubles.
+pub type GnSectionForm = GnSectionFormT<f64>;
+
+/// `sm_GnFormT`: the form of the order-n section with thumbweight w,
 /// `W = ((1-t)^(n+1) + t^(n+1)) (1 - w + w t)^n (1 - w t)^n`,
 /// `g_0k = (1-t)^(n+1) (1 - w t)^n (-t)^k (1 - w + w t)^(n-k)`,
 /// `g_1k = t^(n+1) (1 - w + w t)^n (t - 1)^k (1 - w t)^(n-k)`.
 #[must_use]
-pub fn gn_form(n: usize, w: f64) -> GnSectionForm {
-    let mut a = vec![0.0; n + 2];
-    let mut b = vec![0.0; n + 2];
+pub fn gn_form_t<Z: Ring>(n: usize, w: Z) -> GnSectionFormT<Z> {
+    let zero = Z::lift(0.0);
+    let one = Z::lift(1.0);
+    let mut a = vec![zero; n + 2];
+    let mut b = vec![zero; n + 2];
     if let Some(a0) = a.first_mut() {
-        *a0 = 1.0; // (1 - t)^(n+1)
+        *a0 = one; // (1 - t)^(n+1)
     }
     if let Some(bn) = b.last_mut() {
-        *bn = 1.0; // t^(n+1)
+        *bn = one; // t^(n+1)
     }
-    let one_minus_wt = [1.0, 1.0 - w]; // 1 - w t
-    let one_minus_w_p_wt = [1.0 - w, 1.0]; // 1 - w + w t
-    let minus_t = [0.0, -1.0]; // -t
-    let t_minus_1 = [-1.0, 0.0]; // t - 1
-    let ab: Bern = a.iter().zip(&b).map(|(x, y)| x + y).collect();
+    let one_minus_wt = [one, one - w]; // 1 - w t
+    let one_minus_w_p_wt = [one - w, one]; // 1 - w + w t
+    let minus_t = [zero, Z::lift(-1.0)]; // -t
+    let t_minus_1 = [Z::lift(-1.0), zero]; // t - 1
+    let ab: Vec<Z> = a.iter().zip(&b).map(|(&x, &y)| x + y).collect();
     let weights = bern_mul(
         &bern_mul(&ab, &bern_pow(&one_minus_w_p_wt, n)),
         &bern_pow(&one_minus_wt, n),
     );
-    let mut g0 = Vec::with_capacity(n + 1);
-    let mut g1 = Vec::with_capacity(n + 1);
+    let mut g0 = Vec::new();
+    let mut g1 = Vec::new();
     for k in 0..=n {
         g0.push(bern_mul(
             &bern_mul(&a, &bern_pow(&one_minus_wt, n)),
@@ -99,10 +104,41 @@ pub fn gn_form(n: usize, w: f64) -> GnSectionForm {
             &bern_mul(&bern_pow(&t_minus_1, k), &bern_pow(&one_minus_wt, n - k)),
         ));
     }
-    GnSectionForm {
+    GnSectionFormT {
         w: weights,
         g: [g0, g1],
     }
+}
+
+/// `sm_GnForm`: [`gn_form_t`] in doubles.
+#[must_use]
+pub fn gn_form(n: usize, w: f64) -> GnSectionForm {
+    gn_form_t(n, w)
+}
+
+/// `sm_GnFormNormalized`: the form over `W_0` (the weight at the first rail, `(1 - w)^n`,
+/// as at the second): the same section, its rows a common factor apart, with the weight 1
+/// at the first rail whatever w is, so that rows interpolated along s keep that rail the
+/// jets' own curve.
+#[must_use]
+pub fn gn_form_normalized<Z: Ring>(n: usize, w: Z) -> GnSectionFormT<Z> {
+    let mut form = gn_form_t(n, w);
+    let Some(&w0) = form.w.first() else {
+        return form;
+    };
+    for j in 0..form.w.len() {
+        if let Some(x) = form.w.get_mut(j) {
+            *x = *x / w0;
+        }
+        for gi in &mut form.g {
+            for gk in gi.iter_mut() {
+                if let Some(x) = gk.get_mut(j) {
+                    *x = *x / w0;
+                }
+            }
+        }
+    }
+    form
 }
 
 /// `sm_HermitePoints`: the control points (`3 (N - 1) + 1`) of the piecewise cubic Hermite
@@ -113,6 +149,31 @@ pub fn hermite_points(s: &[f64], v: &[Vec3], d: &[Vec3]) -> Vec<Vec3> {
     let rows = s.windows(2).zip(v.windows(2)).zip(d.windows(2));
     for (j, ((sw, vw), dw)) in rows.enumerate() {
         let (&[s0, s1], &[v0, v1], &[d0, d1]) = (sw, vw, dw) else {
+            continue;
+        };
+        let h = s1 - s0;
+        if j == 0 {
+            cps.push(v0);
+        }
+        cps.push(v0 + d0 * (h / 3.0));
+        cps.push(v1 - d1 * (h / 3.0));
+        cps.push(v1);
+    }
+    cps
+}
+
+/// `sm_HermitePoints` with each station's derivative as the span ending there takes it
+/// (`d_in`) and as the span starting there does (`d`): a station on a face's knot line has
+/// one of each (3bc54a4).
+#[must_use]
+pub fn hermite_points_sided(s: &[f64], v: &[Vec3], d: &[Vec3], d_in: &[Vec3]) -> Vec<Vec3> {
+    let mut cps = Vec::new();
+    let rows = s
+        .windows(2)
+        .zip(v.windows(2))
+        .zip(d.iter().zip(d_in.iter().skip(1)));
+    for (j, ((sw, vw), (&d0, &d1))) in rows.enumerate() {
+        let (&[s0, s1], &[v0, v1]) = (sw, vw) else {
             continue;
         };
         let h = s1 - s0;
@@ -178,7 +239,7 @@ mod tests {
             for w in [-0.9, -0.5252124, 0.0, 0.0342934, 0.5] {
                 let form = gn_form(n, w);
                 assert_eq!(form.w.len(), 3 * n + 2);
-                // the weights are positive (thumbweights in (-1, 1))
+                // the weights are positive (thumbweights below 1)
                 assert!(form.w.iter().all(|&x| x > 0.0));
                 for t in [0.1_f64, 0.4, 0.5, 0.9] {
                     let a = (1.0 - t).powi(n as i32 + 1);

@@ -57,6 +57,10 @@ const MAX_SPLITS: usize = 1_000_000;
 fn bss<'a>(k: &Kernel, surface: &'a Surface) -> Result<Cow<'a, BSplineSurface>> {
     match surface.kind() {
         SurfaceKind::BSpline(s) => Ok(Cow::Borrowed(s)),
+        SurfaceKind::ProceduralBlend(pb) => {
+            let s = pb.net();
+            Ok(Cow::Borrowed(s))
+        }
         SurfaceKind::Plane(p) => Ok(p.base_for_query()),
         SurfaceKind::Cone(_) | SurfaceKind::Sphere(_) | SurfaceKind::Torus(_) => {
             // (unreachable: iso curves of these kinds dispatch to the kinds' own
@@ -164,6 +168,7 @@ pub(super) fn implicit_iso(
     | SurfaceKind::Cone(_)
     | SurfaceKind::Sphere(_)
     | SurfaceKind::Torus(_)
+    | SurfaceKind::ProceduralBlend(_)
     | SurfaceKind::CurveBounded(_)
     | SurfaceKind::Step(_)
     | SurfaceKind::OffsetSurface(_)

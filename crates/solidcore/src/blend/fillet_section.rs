@@ -37,21 +37,26 @@
 //! | [`station::span`], [`station::ders_basis`], [`station::nurbs_partials`] | `sm_Span`, `sm_DersBasis`, `sm_NurbsPartials` |
 //! | [`station::as_b_spline`], [`station::surface_partials`] | `IsKindOf(SmBSplineSurface_TYPE)` and the cast, `sm_SurfacePartials` |
 //! | [`station::GnSystem`], [`station::gn_evaluate`], [`station::gn_jacobian`], [`station::solve4`] | `sm_GnSystem`, `sm_GnEvaluate`, `sm_GnJacobian`, `sm_Solve4` |
-//! | [`station::GnStation`], [`station::leader_series`], [`station::gn_solve_station`] | `sm_GnStation`, `sm_LeaderSeries`, `sm_GnSolveStation` |
+//! | [`station::GnStation`], [`station::leader_series`], [`station::gn_solve_station`], [`station::gn_solve_station_counted`] | `sm_GnStation`, `sm_LeaderSeries`, `sm_GnSolveStation` (its `pR` and `lSteps`, 014f66f) |
+//! | [`definition::T2`], [`definition::t2_pow`], [`definition::Tv`], [`definition::bern_taylor`], [`definition::StationMemo`], [`definition::evaluate_definition`] | `sm_T2`, `sm_T2Pow`, `sm_TV`, `sm_BernTaylor`, `sm_StationMemo`, `SmProceduralBlend::EvaluateDefinition` (014f66f, c6d9b9a, 0136260) |
 //! | [`section::GN_MAX_ORDER`], [`section::GN_DEFAULT_THUMBWEIGHT`], [`section::GN_THUMBWEIGHT_EQUAL_AREA`] | `SM_GN_MAX_ORDER`, `SM_GN_DEFAULT_THUMBWEIGHT`, `SM_GN_THUMBWEIGHT_EQUAL_AREA` (6148773 = 1947a45) |
-//! | [`section::GnSectionFsg::equal_area_thumbweight`], [`section::GnSectionFsg::resolve_thumbweight`], `gn_section_area_integral` (private) | `EqualAreaThumbweight`, `ResolveThumbweight`, `sm_GnSectionAreaIntegral` (6148773 = 1947a45) |
+//! | [`section::GnSectionFsg::equal_area_thumbweight`], [`section::GnSectionFsg::thumbweight_at`], `gn_equal_area_w`, `gn_station_thumbweight` (private) | `EqualAreaThumbweight` (6148773 = 1947a45; b9d6a72, 7102bc5), `ThumbweightAt`, `sm_GnEqualAreaW`, `sm_GnStationThumbweight` (7102bc5) |
+//! | [`tay::Tay`], [`tay::Ring`], [`tay::TayScalar`], [`tay::tay_sqrt`], [`tay::tay_sin_cos`], [`tay::pow_n`], [`tay::wide`], [`tay::acos_clamped`] | `sm_Tay`, `sm_TayOf`, its operators, the templates' `Z` and `S`, `sm_TaySqrt`, `sm_TaySinCos`, `sm_PowN`, `sm_Wide`, `sm_Acos`, `sm_SinCos` (7102bc5) |
+//! | [`tay::gn_area_integrand`], [`tay::gn_area_sum`], [`tay::gn_wedge_cos`], [`tay::gn_half_angle`], [`tay::gn_target`], [`tay::gn_invert`], [`tay::GnAreaCells`] | `sm_GnAreaIntegrand`, `sm_GnAreaSum` (in place of `sm_GnSectionAreaIntegral`), `sm_GnWedgeCos`, `sm_GnHalfAngle`, `sm_GnTarget`, `sm_GnInvert`, `sm_GnAreaCells` (7102bc5) |
+//! | [`form::binom`], [`form::GnSectionFormT`], [`form::gn_form_t`], [`form::gn_form_normalized`] | `sm_Binom`, `sm_GnSectionFormT`, `sm_GnFormT`, `sm_GnFormNormalized` (7102bc5) |
+//! | [`certificate::GnVarying`], [`certificate::GnRowTerms`], [`certificate::centred`], [`certificate::gn_row_terms_over`], [`certificate::PieceSeries`], [`certificate::gn_fourth_over_series`] | `sm_GnVarying`, `sm_GnRowTerms`, `sm_Centred`, `sm_GnRowTermsOver`, `sm_GnFourthOver`'s `pF`, `pV`, `pFm`, `pVm`, `pdMid` (7102bc5) |
 //! | [`section::GnSectionFsg`], [`section::GnSectionFsg::new`], [`section::GnSectionFsg::is_valid`] | `SmGnSectionFSG`, its constructor, `IsValid` (and `GetOrder`, `GetThumbweight`, `GetCertifiedBound`, `GetCertifiedSpans` as fields) |
 //! | [`section::GnSectionFsg::create_surface`], [`section::GnSectionFsg::create_surface_from_curves`], `build` and `certify` (private) | `CreateSurface`, `CreateSurfaceFromCurves`, `Build` (its certificate block in `certify`) |
 //! | [`section::GnSectionFsg::contact_order_at`] | `ContactOrderAt` |
+//! | [`section::ArcSection`], [`section::GnSectionFsg::circle`], [`section::GnSectionFsg::build_with_radius`] | `SmArcSection`, `SmGnSectionFSG(const SmArcSection &)` (3aae1c4), `Build`'s `dRadius` and its order 1 (cc08236) |
+//! | [`certificate::arc_rows`], [`certificate::arc_row_terms_over`] | `sm_ArcRows`, `sm_ArcRowTermsOver` (cc08236) |
 //!
 //! Deviations:
-//! - **The shared thumbweight.** The fork's solvers share one generator object, whose
-//!   `mutable` thumbweight the first blend built resolves for all of them. The port's
-//!   solvers hold copies: a copy keeps what its own builds resolve, and the session hands
-//!   a resolved thumbweight to the generator it was copied from and to every other copy
-//!   after each solver's `CalcFilletGeom` (its first build). `ContactOrderAt`, through
-//!   the solver's generator borrowed immutably, resolves on a copy it does not keep; its
-//!   generator is resolved by then (the blend is built before its side faces' ribs).
+//! - **The equal area thumbweight.** Resolved at every station (the fork's 7102bc5), so
+//!   a generator's thumbweight is never written: `ContactOrderAt` takes `&self`, and
+//!   the solvers' copies of one generator need nothing shared. The
+//!   station's `dW` and `dWds` start NaN, as the fork's do.
+//! - **The area cells.** `sm_GnAreaCells`' `sHave` and `sI` are one `Option` per cell.
 //! - **Bounds.** `sm_Trunc`'s orders are checked against the series' fixed size
 //!   (`SM_GN_MAXS`, `SM_GN_MAXE`) when a [`series::Trunc`] is made; the fork leaves them
 //!   to its callers. An empty Bernstein polynomial (which the fork never forms) multiplies
@@ -78,8 +83,10 @@
 //!   fork's `SM_ERR_MESSAGE` report of them is not logged.
 
 pub mod certificate;
+pub mod definition;
 pub mod form;
 pub mod interval;
 pub mod section;
 pub mod series;
 pub mod station;
+pub mod tay;

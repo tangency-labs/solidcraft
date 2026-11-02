@@ -87,6 +87,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::sqrt;
+use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, EFF_ZERO, PI};
 use crate::nurbs::b_spline_curve::KnotType;
 use crate::nurbs::b_spline_surface::{
@@ -94,6 +95,7 @@ use crate::nurbs::b_spline_surface::{
 };
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
+use crate::surface::surface::{Surface, SurfaceKind};
 
 const OP: &str = "blend::blend_setback";
 
@@ -281,12 +283,119 @@ pub fn ease_surface(
     } else {
         SurfParamType::U
     };
-    let mut a = from.clone();
-    let mut b = to.clone();
+    let (a, b) = ease_prologue(
+        EaseSide::Net(Box::new(from.clone())),
+        EaseSide::Net(Box::new(to.clone())),
+        along,
+        across,
+    )?;
+    ease_nets(a, b, along, across, ramps)
+}
 
+/// [`ease_surface`] of two fillet surfaces that may be the fork's procedural blends
+/// (`SmProceduralBlend`, opt-in `fillet_round_as_definition`): the fork's `EaseSurface`
+/// takes them as `SmBSplineSurface`s, and its copies' `Reparameterize`, `Reverse` and
+/// `EvaluatePoint` are a blend's own (its map follows, its points are its
+/// definition's); the ease itself is made of the nets. Surfaces that are not blends go
+/// through [`ease_surface`] on their B-spline parts, as before.
+///
+/// # Errors
+///
+/// Those of [`ease_surface`]; `SM_ERR_NULL_POINTER` for a surface with no B-spline part.
+pub fn ease_surface_of(
+    k: &Kernel,
+    from: &Surface,
+    to: &Surface,
+    along: SurfParamType,
+    ramps: &[EaseRamp],
+) -> Result<BSplineSurface> {
+    let part = |s: &Surface| -> Result<BSplineSurface> {
+        Ok(crate::topology::brep::p3::with_nurb(k, s)?
+            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .into_owned())
+    };
+    let blend = |s: &Surface| matches!(s.kind(), SurfaceKind::ProceduralBlend(_));
+    if !blend(from) && !blend(to) {
+        return ease_surface(&part(from)?, &part(to)?, along, ramps);
+    }
+    let across = if along == SurfParamType::U {
+        SurfParamType::V
+    } else {
+        SurfParamType::U
+    };
+    // (crFrom.Copy, crTo.Copy: a blend's copy keeps its definition)
+    let side = |s: &Surface| -> Result<EaseSide<'_>> {
+        Ok(if blend(s) {
+            EaseSide::Blend(k, Box::new(s.copy(k)?))
+        } else {
+            EaseSide::Net(Box::new(part(s)?))
+        })
+    };
+    let (a, b) = ease_prologue(side(from)?, side(to)?, along, across)?;
+    ease_nets(a, b, along, across, ramps)
+}
+
+/// A surface `EaseSurface` orients: a B-spline, or a procedural blend whose
+/// reparametrization, reversal and points are its own.
+enum EaseSide<'k> {
+    /// An `SmBSplineSurface` (or the B-spline part of an analytic one).
+    Net(Box<BSplineSurface>),
+    /// The fork's `SmProceduralBlend`.
+    Blend(&'k Kernel, Box<Surface>),
+}
+
+impl EaseSide<'_> {
+    fn natural_uv_domain(&self) -> Result<Extent2d> {
+        match self {
+            Self::Net(b) => Ok(b.natural_uv_domain()),
+            Self::Blend(k, s) => s.natural_uv_domain_with_nurb(k),
+        }
+    }
+
+    fn reparameterize(&mut self, domain: &Extent2d) -> Result<()> {
+        match self {
+            Self::Net(b) => b.reparameterize(domain),
+            Self::Blend(k, s) => s.reparameterize(k, domain),
+        }
+    }
+
+    fn reverse(&mut self, dir: SurfParamType) -> Result<()> {
+        match self {
+            Self::Net(b) => b.reverse(dir),
+            Self::Blend(k, s) => s.reverse(k, dir),
+        }
+    }
+
+    fn evaluate_point(&self, uv: Point2) -> Result<Point3> {
+        match self {
+            Self::Net(b) => b.evaluate_point(uv),
+            Self::Blend(k, s) => s.evaluate_point(k, uv),
+        }
+    }
+
+    /// The net the ease is made of.
+    fn into_net(self) -> Result<BSplineSurface> {
+        match self {
+            Self::Net(b) => Ok(*b),
+            Self::Blend(_, s) => match s.into_kind() {
+                SurfaceKind::ProceduralBlend(pb) => Ok(pb.net),
+                _ => Err(SolidError::null_pointer(OP)),
+            },
+        }
+    }
+}
+
+/// `EaseSurface`'s first block: `to` on `from`'s domain, turned across when it runs the
+/// other way; returns the two nets.
+fn ease_prologue(
+    a: EaseSide<'_>,
+    mut b: EaseSide<'_>,
+    along: SurfParamType,
+    across: SurfParamType,
+) -> Result<(BSplineSurface, BSplineSurface)> {
     // the same domain: along, the rail parameter in both; across, crFrom's
-    let dom_a = a.natural_uv_domain();
-    let dom_b = b.natural_uv_domain();
+    let dom_a = a.natural_uv_domain()?;
+    let dom_b = b.natural_uv_domain()?;
     let along_a = interval_in(&dom_a, along);
     let along_b = interval_in(&dom_b, along);
     let param_tol = 1.0e-9 * (1.0 + along_a.length());
@@ -319,6 +428,21 @@ pub fn ease_surface(
             }
         }
     }
+
+    Ok((a.into_net()?, b.into_net()?))
+}
+
+/// The rest of `EaseSurface`, on the two nets.
+fn ease_nets(
+    mut a: BSplineSurface,
+    mut b: BSplineSurface,
+    along: SurfParamType,
+    across: SurfParamType,
+    ramps: &[EaseRamp],
+) -> Result<BSplineSurface> {
+    // (the prologue's, from `a`, which it does not change)
+    let along_a = interval_in(&a.natural_uv_domain(), along);
+    let param_tol = 1.0e-9 * (1.0 + along_a.length());
 
     // common degrees, the law's 5 added along
     let along_deg = a.degree(along).max(b.degree(along));

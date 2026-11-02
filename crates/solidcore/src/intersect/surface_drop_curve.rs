@@ -187,6 +187,7 @@ fn is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<(bool, Su
         | SurfaceKind::Sphere(_)
         | SurfaceKind::Torus(_)
         | SurfaceKind::BSpline(_)
+        | SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::SurfOfExtrusion(_)
@@ -268,6 +269,7 @@ fn is_on_seam(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Option<Vec<Po
         | SurfaceKind::Sphere(_)
         | SurfaceKind::Torus(_)
         | SurfaceKind::BSpline(_)
+        | SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::SurfOfExtrusion(_)
@@ -295,6 +297,13 @@ fn create_iso_parametric_curve(
             b.create_iso_parametric_curve(k, param, value, IsoCurveOptions::default())?
                 .curve,
         )),
+        SurfaceKind::ProceduralBlend(pb) => {
+            let b = pb.net();
+            Ok(Curve::from(
+                b.create_iso_parametric_curve(k, param, value, IsoCurveOptions::default())?
+                    .curve,
+            ))
+        }
         // (SmSurfOfExtrusion inherits the B-spline CreateIsoParametricCurve)
         SurfaceKind::SurfOfExtrusion(s) => Ok(Curve::from(
             s.base()

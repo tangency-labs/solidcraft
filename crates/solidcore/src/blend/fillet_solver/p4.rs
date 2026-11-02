@@ -608,6 +608,7 @@ fn is_bspline_surface(surface: &Surface) -> bool {
             | SurfaceKind::Cone(_)
             | SurfaceKind::Sphere(_)
             | SurfaceKind::Torus(_)
+            | SurfaceKind::ProceduralBlend(_)
     )
 }
 
@@ -4835,15 +4836,37 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         points: &[TsectPnt],
         uv1: &mut BSplineCurve,
         uv2: &mut BSplineCurve,
-    ) -> Result<Option<crate::nurbs::b_spline_surface::BSplineSurface>> {
+    ) -> Result<Option<Surface>> {
         // the virtual m_pFSG->CreateSurface(*this, pCenterLine, pCurve1, pCurve2,
         // sPnts, pSur[0], pUV1, pSur[1], pUV2, ..) with pSur[i] = GetSurface(i)
         let solver_type = self.ops.solver_type()?;
         self.pre()?;
         let sur0 = Surface::from(offset_surface(&*self.ops, 0)?.surface.clone());
         let sur1 = Surface::from(offset_surface(&*self.ops, 1)?.surface.clone());
+        let radii = self.ops.constant_radii();
+        // (a variable round between NURBS faces is its definition too, the fork's 0d43b4c;
+        // read only where the circle generator may take it)
+        let law = if k.fixes.fillet_gn_section_generator
+            && k.fixes.fillet_round_as_definition
+            && solver_type == crate::blend::fillet_solver::p1::FilletSolverType::VariableRadius
+        {
+            let has_edgeuse = matches!(self.ops.solver().edgeuse(0), Ok(Some(_)));
+            match self.ops.variable_radius_mut() {
+                Some(v) => Some(crate::blend::fillet_standard_solver::p2::LawBall {
+                    has_edgeuse,
+                    edge: v.curve_based.base_b_spline_curve()?,
+                    law: v.fillet_law().clone(),
+                    interval: v.fillet_law_interval(),
+                    reverse: v.fillet_law_orientation(),
+                }),
+                None => None,
+            }
+        } else {
+            None
+        };
         let solver = self.ops.solver_mut();
         let approx_tol_3d = solver.approx_tol_3d;
+        let this_ang_tol_rad = solver.this_ang_tol_rad();
         let generator = solver
             .fillet_surface_generator_mut()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
@@ -4851,6 +4874,12 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         // WR-685, d01d7b0's 2714d37) is gone since tangency-labs/smlib#79's 410dfe1: with
         // `fixes.fillet_gn_section_generator` a round whose balls fold is refused before the
         // corners by `BallIsRegular` (`blend::fillet_executive::session::ball_regular`).
+        // (a constant round between NURBS faces is its definition, the fork's cc08236)
+        let ball = crate::blend::fillet_standard_solver::p2::CircleBall {
+            radii,
+            ang_tol_rad: this_ang_tol_rad,
+            law,
+        };
         generator
             .create_surface_replacing_uv(
                 k,
@@ -4862,6 +4891,7 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
                 points,
                 [&sur0, &sur1],
                 [uv1, uv2],
+                Some(&ball),
             )
             .map(Some)
     }
@@ -4870,11 +4900,9 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         &mut self,
         pseudo: &mut FilletBrep,
         geom: &FilletGeomId,
-        surface: Option<crate::nurbs::b_spline_surface::BSplineSurface>,
+        surface: Option<Surface>,
     ) -> Result<()> {
-        pseudo
-            .geom_mut(*geom)?
-            .set_fillet_surface(surface.map(Surface::from));
+        pseudo.geom_mut(*geom)?.set_fillet_surface(surface);
         Ok(())
     }
 

@@ -190,7 +190,7 @@ where
 
 /// `SetFilletParameters`' note for a G^n section of another order or thumbweight (WR-685).
 const GN_INVALID: &str =
-    "SetFilletParameters: a G^n section's order must be 2 to 4 and its thumbweight in [0, 1).";
+    "SetFilletParameters: a G^n section's order must be 2 to 4 and its thumbweight below 1.";
 
 const OP: &str = "blend::fillet_executive::p2";
 

@@ -436,6 +436,8 @@ fn b_spline_part(surface: &Surface) -> Option<&BSplineSurface> {
         SurfaceKind::Cone(c) => Some(c.rev().base()),
         SurfaceKind::Sphere(s) => Some(s.base().base()),
         SurfaceKind::Torus(t) => Some(t.base().base()),
+        // (the fork's SmProceduralBlend is an SmBSplineSurface: its net)
+        SurfaceKind::ProceduralBlend(pb) => Some(pb.net()),
         _ => None,
     }
 }

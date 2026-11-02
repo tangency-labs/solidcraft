@@ -688,6 +688,10 @@ pub fn face_vertices(
 fn with_out_of_bounds_enabled(surface: &Surface) -> Result<Option<Surface>> {
     let enabled = match surface.kind() {
         SurfaceKind::BSpline(s) => s.is_out_of_bounds_enabled(),
+        SurfaceKind::ProceduralBlend(pb) => {
+            let s = pb.net();
+            s.is_out_of_bounds_enabled()
+        }
         SurfaceKind::Plane(p) => p.base().is_out_of_bounds_enabled(),
         SurfaceKind::Cone(s) => s.rev().base().is_out_of_bounds_enabled(),
         SurfaceKind::Sphere(s) => s.base().base().is_out_of_bounds_enabled(),
@@ -707,6 +711,10 @@ fn with_out_of_bounds_enabled(surface: &Surface) -> Result<Option<Surface>> {
     let mut copy = surface.clone_for_evaluation()?;
     match copy.kind_mut() {
         SurfaceKind::BSpline(s) => *s.out_of_bounds_enabled_mut() = true,
+        SurfaceKind::ProceduralBlend(pb) => {
+            let s = pb.net_mut();
+            *s.out_of_bounds_enabled_mut() = true;
+        }
         SurfaceKind::Plane(p) => *p.out_of_bounds_enabled_mut() = true,
         SurfaceKind::Cone(s) => *s.rev.base_mut().out_of_bounds_enabled_mut() = true,
         SurfaceKind::Sphere(s) => *s.base.base_mut().out_of_bounds_enabled_mut() = true,

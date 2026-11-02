@@ -384,9 +384,9 @@ impl FilletSurfaceGenerator {
         points: &[TsectPnt],
         side1: crate::blend::fillet_standard_solver::p1::RailSurface<'_>,
         side2: crate::blend::fillet_standard_solver::p1::RailSurface<'_>,
-    ) -> Result<crate::nurbs::b_spline_surface::BSplineSurface> {
+    ) -> Result<Surface> {
         let no_center = || SolidError::invalid_input(OP, "NULL centre line");
-        match self {
+        let surface = match self {
             Self::Base => Err(SolidError::sm_err(OP)),
             Self::EiffelTower => {
                 crate::blend::fillet_custom_solver::EiffelTowerCrossSectionFsg::new()
@@ -422,16 +422,18 @@ impl FilletSurfaceGenerator {
                 let mut uv1 = side1.uv_curve.ok_or_else(none)?.clone();
                 let mut uv2 = side2.uv_curve.ok_or_else(none)?.clone();
                 let mut g = *g;
-                g.create_surface(
+                // (a blend by its definition with `fillet_round_as_definition`, 4a10ed8)
+                return g.create_surface(
                     k,
                     approx_tol_3d,
                     center_line.ok_or_else(no_center)?,
                     [rail1, rail2],
                     [s1, s2],
                     [&mut uv1, &mut uv2],
-                )
+                );
             }
-        }
+        };
+        surface.map(Surface::from)
     }
 
     /// [`FilletSurfaceGenerator::create_surface`] for a caller that owns the rails' uv
@@ -446,6 +448,11 @@ impl FilletSurfaceGenerator {
     ///
     /// The G^n section generator keeps what its build resolves (the equal area
     /// thumbweight, the certificate), as the fork's generator object does.
+    ///
+    /// `ball`: what the circular generator reads off the solver (`None` where the caller
+    /// has no such solver); with it and `fixes.fillet_round_as_definition` a constant
+    /// round between NURBS faces is its definition, the rails and uv curves rebuilt on its
+    /// stations ([`CircularCrossSectionFsg::definition_surface`], the fork's cc08236).
     #[allow(clippy::too_many_arguments)]
     pub fn create_surface_replacing_uv(
         &mut self,
@@ -458,13 +465,34 @@ impl FilletSurfaceGenerator {
         points: &[TsectPnt],
         surfaces: [&Surface; 2],
         uv: [&mut BSplineCurve; 2],
-    ) -> Result<crate::nurbs::b_spline_surface::BSplineSurface> {
+        ball: Option<&crate::blend::fillet_standard_solver::p2::CircleBall>,
+    ) -> Result<Surface> {
         use crate::blend::fillet_standard_solver::p1::RailSurface;
         if let Self::GnSection(g) = self {
             let center =
                 center_line.ok_or_else(|| SolidError::invalid_input(OP, "NULL centre line"))?;
             return g.create_surface(k, approx_tol_3d, center, [rail1, rail2], surfaces, uv);
         }
+        let [uv1, uv2] = uv;
+        let mut center_line = center_line;
+        if let (Self::Circular(g), Some(ball), Some(center)) =
+            (&*self, ball, center_line.as_deref_mut())
+        {
+            if let Some(s) = g.definition_surface(
+                k,
+                approx_tol_3d,
+                solver_type,
+                center,
+                [&mut *rail1, &mut *rail2],
+                points,
+                surfaces,
+                [&mut *uv1, &mut *uv2],
+                ball,
+            )? {
+                return Ok(s);
+            }
+        }
+        let uv = [uv1, uv2];
         let [s1, s2] = surfaces;
         let [uv1, uv2] = uv;
         self.create_surface(
@@ -2120,6 +2148,13 @@ pub trait FilletSolverOps: AsFilletSolverOps {
         Ok(FilletSolverType::Unknown)
     }
 
+    /// `static_cast<SmConstantRadiusFS *>(this)->GetFilletRadius(0)`, `(1)`: the radii of
+    /// a constant-radius solver, which the fork's circle generator reads for a solver whose
+    /// `GetSolverType()` is `SM_FS_CONST_RADIUS` (cc08236); `None` for another class.
+    fn constant_radii(&self) -> Option<[f64; 2]> {
+        None
+    }
+
     /// `SM_CAST_PTR(SmVariableRadiusFS, this)`: mutable borrow when the concrete solver
     /// is a [`VariableRadiusFs`](crate::blend::fillet_standard_solver::p1::VariableRadiusFs).
     fn variable_radius_mut(
@@ -2929,6 +2964,10 @@ fn evaluate_point_out_of_bounds(k: &Kernel, base: &Surface, uv: Point2) -> Resul
     let mut s = base.clone_for_evaluation()?;
     match s.kind_mut() {
         SurfaceKind::BSpline(b) => *b.out_of_bounds_enabled_mut() = true,
+        SurfaceKind::ProceduralBlend(pb) => {
+            let b = pb.net_mut();
+            *b.out_of_bounds_enabled_mut() = true;
+        }
         SurfaceKind::Plane(p) => *p.out_of_bounds_enabled_mut() = true,
         SurfaceKind::SurfOfRevolution(r) => *r.base_mut().out_of_bounds_enabled_mut() = true,
         SurfaceKind::SurfOfExtrusion(r) => *r.base_mut().out_of_bounds_enabled_mut() = true,
@@ -3160,6 +3199,9 @@ pub fn test_analytic_surface(k: &Kernel, surface: AnalyticTestSurface<'_>) -> Re
             SurfaceKind::Cone(c) => c.rev().base(),
             SurfaceKind::Sphere(s) => s.base().base(),
             SurfaceKind::Torus(s) => s.base().base(),
+            // (the fork's SmProceduralBlend is an SmBSplineSurface: its net, its corner
+            // points the definition's, below)
+            SurfaceKind::ProceduralBlend(pb) => pb.net(),
             // not an SmBSplineSurface: upstream's parameter type excludes these
             _ => {
                 return Err(SolidError::InvalidInput {
@@ -3172,7 +3214,13 @@ pub fn test_analytic_surface(k: &Kernel, surface: AnalyticTestSurface<'_>) -> Re
         AnalyticTestSurface::Sphere(s) => s.base().base(),
         AnalyticTestSurface::Torus(t) => t.base().base(),
     };
-    Ok(Cone::is_nurb_surface_cone(k, bss, 1.0)?.is_some())
+    let this = match surface {
+        AnalyticTestSurface::Surface(s) if matches!(s.kind(), SurfaceKind::ProceduralBlend(_)) => {
+            Some(s)
+        }
+        _ => None,
+    };
+    Ok(Cone::is_nurb_surface_cone_on(k, bss, 1.0, this)?.is_some())
 }
 
 /// `SE(pEU->EvaluateBinormal(dParameter, FALSE, rPnt, rBinVec, NULL, &rFaceuseNormal))`

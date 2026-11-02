@@ -1707,6 +1707,7 @@ fn degree_1_directions(k: &Kernel, off: &OffIn) -> Option<[bool; 2]> {
             SurfaceKind::CurveBounded(c) => c.basis(),
             SurfaceKind::Step(st) => st.surface()?,
             SurfaceKind::BSpline(_)
+            | SurfaceKind::ProceduralBlend(_)
             | SurfaceKind::Plane(_)
             | SurfaceKind::Cone(_)
             | SurfaceKind::Sphere(_)

@@ -2012,7 +2012,7 @@ macro_rules! fillet_intersector_ops {
                 points: &[TsectPnt],
                 uv1: &mut BSplineCurve,
                 uv2: &mut BSplineCurve,
-            ) -> Result<Option<BSplineSurface>> {
+            ) -> Result<Option<Surface>> {
                 IntersectorOps::create_fillet_surface(
                     &mut self.base,
                     k,
@@ -2029,7 +2029,7 @@ macro_rules! fillet_intersector_ops {
                 &mut self,
                 pseudo: &mut crate::blend::fillet_geom::p1::FilletBrep,
                 geom: &Self::FilletGeom,
-                surface: Option<BSplineSurface>,
+                surface: Option<Surface>,
             ) -> Result<()> {
                 IntersectorOps::set_fillet_surface(&mut self.base, pseudo, geom, surface)
             }
@@ -2091,6 +2091,11 @@ fn constant_radius_setup_offset_values(
 impl FilletSolverOps for ConstantRadiusAssistedFs {
     fn solver(&self) -> &FilletSolver {
         &self.solver
+    }
+
+    /// `GetFilletRadius(0)`, `(1)`.
+    fn constant_radii(&self) -> Option<[f64; 2]> {
+        Some(self.fillet_radii)
     }
 
     fn solver_mut(&mut self) -> &mut FilletSolver {

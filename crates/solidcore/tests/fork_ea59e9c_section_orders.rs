@@ -1006,7 +1006,14 @@ fn box_g2(name: &'static str, w: f64, cut: f64) -> Case {
 }
 
 fn pipe_g2(name: &'static str, w: f64, volume: f64) -> Case {
-    let (plate, pipe) = pipe_jets(2.0);
+    let (mut plate, mut pipe) = pipe_jets(2.0);
+    // the section's jets of order n are the face curves' normal parts since the fork's
+    // 3bc54a4: the plate's curve of the feet (to order 1) is a line, the pipe's a circle
+    // of radius 10 about (20, 16) whose eps^2 coefficient is -|c1|^2 / (2 R) radially
+    plate[2] = [0.0, 0.0];
+    let radial = [(pipe[0][0] - 20.0) / 10.0, (pipe[0][1] - 16.0) / 10.0];
+    let c1 = pipe[1][0] * pipe[1][0] + pipe[1][1] * pipe[1][1];
+    pipe[2] = [-c1 / 20.0 * radial[0], -c1 / 20.0 * radial[1]];
     Case {
         name,
         build: pipe_on_plate,
@@ -1022,7 +1029,9 @@ fn pipe_g2(name: &'static str, w: f64, volume: f64) -> Case {
         rails: [5, 6],
         order: 2,
         fitted: false,
-        order_max: None,
+        // (since 3bc54a4 one seam meets its face to G3: fork 3bc54a4's surface, whose
+        // nets these agree with to 1e-9)
+        order_max: Some(3),
         size: 2.0,
     }
 }
@@ -1090,7 +1099,7 @@ fn the_box_edge_at_thumbweight_one_half_is_g3_with_its_planes() {
 
 #[test]
 fn the_pipe_root_at_order_2_is_g2_with_its_faces() {
-    assert_order_2(&pipe_g2("pipe_on_plate_g2", 0.0, 40258.5435962825));
+    assert_order_2(&pipe_g2("pipe_on_plate_g2", 0.0, 40267.709270590589));
 }
 
 #[test]
@@ -1098,7 +1107,7 @@ fn the_pipe_root_at_thumbweight_one_half_is_g2_with_its_faces() {
     assert_order_2(&pipe_g2(
         "pipe_on_plate_g2_thumbweight_half",
         0.5,
-        40216.5022652017,
+        40228.830404662585,
     ));
 }
 

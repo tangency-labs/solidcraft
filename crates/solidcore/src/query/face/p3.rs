@@ -815,6 +815,8 @@ fn cell_monotone(k: &Kernel, surface: &Surface, cell: &Extent2d, dir: Vec3) -> R
         SurfaceKind::Cone(c) => c.rev().base(),
         SurfaceKind::Sphere(s) => s.base().base(),
         SurfaceKind::Torus(s) => s.base().base(),
+        // (IsKindOf(SmBSplineSurface_TYPE): the fork's SmProceduralBlend, its net's patch)
+        SurfaceKind::ProceduralBlend(pb) => pb.net(),
         _ => return Ok(false),
     };
     // CopySubPatch snaps to knots: a patch short of the cell says nothing about the rest.

@@ -378,7 +378,7 @@ fn surface_is_closed(
 }
 
 /// Expands `ivl` relatively by 100 (degree 1), 1 (degree 2) or 0.5.
-fn expand_by_degree(ivl: &mut Extent1d, deg: usize) {
+pub(crate) fn expand_by_degree(ivl: &mut Extent1d, deg: usize) {
     if deg == 1 {
         ivl.expand_relative(100.0);
     } else if deg == 2 {

@@ -26,7 +26,7 @@
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-safe tests
 
 use super::{live_solver_ops, SessionObjects};
-use crate::blend::blend_setback::{ease_surface, interval_in, uv_at, EaseRamp};
+use crate::blend::blend_setback::{ease_surface_of, interval_in, uv_at, EaseRamp};
 use crate::blend::fillet_geom::p1::{FilletGeomId, FilletVertexType, SurfaceHandle};
 use crate::blend::fillet_section::section::{GnFaces, GnSectionFsg};
 use crate::blend::fillet_solver::p1::{
@@ -442,25 +442,29 @@ impl SessionObjects<'_> {
                     },
                 )?
             } else {
-                g2_generator.create_surface_from_curves(
-                    k,
-                    &mut c0,
-                    &mut c1,
-                    &mut c2,
-                    tol,
-                    need_g1,
-                    RailSurface {
-                        surface: Some(surf0),
-                        uv_curve: uvs.first(),
-                    },
-                    RailSurface {
-                        surface: Some(surf1),
-                        uv_curve: uvs.get(1),
-                    },
-                )?
+                g2_generator
+                    .create_surface_from_curves(
+                        k,
+                        &mut c0,
+                        &mut c1,
+                        &mut c2,
+                        tol,
+                        need_g1,
+                        RailSurface {
+                            surface: Some(surf0),
+                            uv_curve: uvs.first(),
+                        },
+                        RailSurface {
+                            surface: Some(surf1),
+                            uv_curve: uvs.get(1),
+                        },
+                    )
+                    .map(Surface::from)?
             };
 
-            let eased = ease_surface(&own, &g2, along, geom_ramps)?;
+            // (the fork's EaseSurface takes the G^n target, a blend by its definition with
+            // `fillet_round_as_definition`, and the round's own surface as they are)
+            let eased = ease_surface_of(k, &own_surface, &g2, along, geom_ramps)?;
             self.pseudo
                 .geom_mut(fg)?
                 .set_fillet_surface(Some(Surface::from(eased)));

@@ -136,6 +136,8 @@ fn bspline_part<'a>(k: &Kernel, surface: &'a Surface) -> Result<Option<&'a BSpli
         SurfaceKind::Cone(c) => Some(c.rev().base()),
         SurfaceKind::Sphere(s) => Some(s.base().base()),
         SurfaceKind::Torus(s) => Some(s.base().base()),
+        // (the fork's SmProceduralBlend is an SmBSplineSurface: its net)
+        SurfaceKind::ProceduralBlend(pb) => Some(pb.net()),
         _ => None,
     })
 }
@@ -180,6 +182,9 @@ fn quadric_of_surface(k: &Kernel, surface: &Surface, uv: Point2, tol: f64) -> Re
     let Some(bss) = bspline_part(k, surface)? else {
         return Ok(q);
     };
+    // (the recognisers' corner points come from the virtual EvaluatePoint: a procedural
+    // blend's definition)
+    let this = matches!(surface.kind(), SurfaceKind::ProceduralBlend(_)).then_some(surface);
 
     // the analytic kinds, or a B-spline that is one (a plane, a cone or cylinder, a sphere)
     let mut cone = match surface.kind() {
@@ -194,10 +199,10 @@ fn quadric_of_surface(k: &Kernel, surface: &Surface, uv: Point2, tol: f64) -> Re
     if !plane && cone.is_none() && sphere.is_none() {
         if surface.is_planar(k, tol)?.is_planar {
             plane = true;
-        } else if let Some(c) = Cone::is_nurb_surface_cone(k, bss, 1.0)? {
+        } else if let Some(c) = Cone::is_nurb_surface_cone_on(k, bss, 1.0, this)? {
             cone = Some(ConeData::of(&c));
         } else {
-            match Sphere::is_nurb_surface_sphere(k, bss, 1.0) {
+            match Sphere::is_nurb_surface_sphere_on(k, bss, 1.0, this) {
                 Ok(Some(s)) => sphere = Some((s.base().position().origin(), s.radius())),
                 Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
                     return Err(e)

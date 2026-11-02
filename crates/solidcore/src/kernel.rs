@@ -35,7 +35,7 @@
 //! unlatched and a difftest runner can seed the latch with the value the C++ process
 //! already holds.
 
-use core::cell::Cell;
+use core::cell::{Cell, RefCell};
 use core::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -1456,7 +1456,7 @@ pub struct UpstreamFixes {
     /// carried to it and it is trimmed there in place, instead of the merge dropping the
     /// feature (WR-703, the fork's eb883ad; `blend::fillet_executive::session::keep_features`).
     pub fillet_keep_features: bool,
-    /// A blend-curve fillet (`SM_FSG_BLEND_CURVE`) is built by the G^n section generator ([`crate::blend::fillet_section::section::GnSectionFsg`], the fork's `SmGnSectionFSG`) in place of `SmBlendCurveCrossSectionFSG`: the section of order n = continuity (2 to 4) and thumbweight w (in (-1, 1), or `GN_THUMBWEIGHT_EQUAL_AREA` = -2, the default: the w at which the section takes off the area the ball's circle does, resolved once per generator from the wedge at the first blend's middle station and shared by every solver of that generator; the fork's 6148773 = d01d7b0's 1947a45), `S(t) = f T1(1 - p1) + (1 - f) T2(p2)` over the faces' order-n jets along the rails, a rational Bezier section times the jets' cubic Hermite curves along the rails, certified span by span within a tenth of the fillet's tolerance; its contact with each face is of order n + 1 (n + 2 between planes). `SetFilletParameters` refuses another order or thumbweight (`SM_ERR_INVALID_INPUT`), the corners build theirs with the same order and thumbweight (and refuse to convert two that differ), the tangent end's rib takes the order of contact found at its rail (`ContactOrderAt`), and a round's ease before a setback blends into the order-2 section at thumbweight 0, not the equal area default (the fork's 22d258a = d01d7b0's adb9854). With it the `blend_curve_at_thirds` executive option is not used: the fork removed `SetBlendCurveAtThirds` when this generator replaced the blend curve, the ease's at-thirds G2 target among it; `fillet_blend_curve_revolved_on_arc` does not revolve it (the fork's `AdjustCrossSection` change, which refuses an order above 3, has no port: the function is not ported) (WR-685, #2250; the fork's tangency-labs/smlib@11ea2d9 = d01d7b0's 0bd3f4d, smlib#78).
+    /// A blend-curve fillet (`SM_FSG_BLEND_CURVE`) is built by the G^n section generator ([`crate::blend::fillet_section::section::GnSectionFsg`], the fork's `SmGnSectionFSG`) in place of `SmBlendCurveCrossSectionFSG`: the section of order n = continuity (2 to 4) and thumbweight w (below 1, the fork's b9d6a72, or `GN_THUMBWEIGHT_EQUAL_AREA` = 2, the default: the w at which the section takes off the area the ball's circle does, the fork's 6148773 = d01d7b0's 1947a45, resolved at every station from that station's own wedge, with its s-derivative, so that w varies along the blend: the surface interpolates the section's homogeneous rows, each a cubic Hermite curve of its values and s-derivatives, and the certificate bounds their remainder too, the fork's 7102bc5), `S(t) = f T1(1 - p1) + (1 - f) T2(p2)` over the faces' order-n jets along the rails, a rational Bezier section times the jets' cubic Hermite curves along the rails, certified span by span within a tenth of the fillet's tolerance; its contact with each face is of order n + 1 (n + 2 between planes). `SetFilletParameters` refuses another order or thumbweight (`SM_ERR_INVALID_INPUT`), the corners build theirs with the same order and thumbweight (and refuse to convert two that differ), the tangent end's rib takes the order of contact found at its rail (`ContactOrderAt`), and a round's ease before a setback blends into the order-2 section at thumbweight 0, not the equal area default (the fork's 22d258a = d01d7b0's adb9854). With it the `blend_curve_at_thirds` executive option is not used: the fork removed `SetBlendCurveAtThirds` when this generator replaced the blend curve, the ease's at-thirds G2 target among it; `fillet_blend_curve_revolved_on_arc` does not revolve it (the fork's `AdjustCrossSection` change, which refuses an order above 3, has no port: the function is not ported) (WR-685, #2250; the fork's tangency-labs/smlib@11ea2d9 = d01d7b0's 0bd3f4d, smlib#78).
     ///
     /// With it a variable round is the union of its balls (the fork's d2a6125, f2ec002, e9560e3, 2714d37 and 6007a3d, rebased from 6b346f6, 5db8feb, fb5c060, d622107 and 8bedf89): a variable-radius or constant-distance solver's circle section is the circle along which the balls' envelope touches the ball, square to the centre line and moved along it by `-r r'/|c'|`, not the great circle through the rails; a round whose balls fold over one another is refused (`FilletErrorType::NoRoom`, `NoRoomReason::BallsFold`, naming the radius there); a cliff overflow's law check (`sm_HoldsItsLaw`) tests the touch circle; and `SmApiVariableRadiusFillet` takes the G^n section's default thumbweight (WR-685 addendum 2026-11-01).
     ///
@@ -1464,6 +1464,8 @@ pub struct UpstreamFixes {
     /// Then a convex blend (one that removes material) that would take all of the part between its rails somewhere along its edge, cutting it into pieces, is refused (`NoRoomReason::CutsThePart`) naming the largest size that keeps it whole, the fit noted less the fit margin (`SmFilletSolver::BandCutsThePart` with `sm_EdgesCrossingPlane` and `sm_KeepsMaterialBehind`, the fork's 862971f, e568e45 and aac4288; [`crate::blend::fillet_executive::session::band_cuts`]).
     /// A blend refused as larger than its faces notes its largest size that builds too: where its rails stay on their faces (`LargestSizeOnItsFaces`, `BallThrough`), where a band reaches a circular top's centre, a polygon face's deepest point (`NoteFitOfPolygonsTakenWhole`), or where two bands on a face meet (`BandsMeetAt`; the fork's a3d6d81, 49f393d and 5e8c9c1, [`crate::blend::fillet_executive::session::fit_size`]). A refusal with a size returns [`crate::SolidError::FilletRefused`] (same status) carrying it, from `FilletSession::do_fillet` and the public fillet API.
     pub fillet_gn_section_generator: bool,
+    /// With [`Self::fillet_gn_section_generator`] also on (a no-op otherwise): constant and variable-radius rounds between NURBS faces are built as their definition, a [`crate::surface::procedural_blend::ProceduralBlend`] (the fork's `SmProceduralBlend`): the two faces the ball rolls on, its radius or radius law, the section's order and thumbweight rule and the leader, which evaluate exactly; its net, the certified B-spline approximation within the certificate's bound (the radius law in the certificate), is what the surface cache and tessellation use (`SmBlendNetScope`), the cache's node boxes grown by the net's bound. With it the file reader reads a definition (`SmProceduralBlend_TYPE`, `SURF_BASE_TYPE + 41`); without it that type is refused as the pinned reader refuses it (WR-698, #2273; the fork's tangency-labs/smlib@014f66f to 729f893, smlib#79 step 7, merged at 5e8c9c1).
+    pub fillet_round_as_definition: bool,
     /// The fork's blend corner (`SmBlendCorner`, smlib#79 step 4b; WR-697): two blends of one convexity among three or four edges at a vertex are classified as a Join (their edges continue each other, or meet at 5 degrees or less at a face corner of the other convexity) or a Turn, and built by the two-blend construction pinned SMLib's `SmFilletNx2Corner` has, unchanged (the fork's 74e9beb and 48a8a9f, bit for bit as before). The Mitre turn of two constant circular rounds of one radius on straight spines whose axes meet, between planes, is their exact plane section (`SmBlendCorner::ExactMitreCurve`): a rational quadratic ellipse arc in the plane of symmetry through the axes' crossing, from the rails' crossing on the common face to the side vertex (both placed exactly on the planes), with exact rational cubic UV curves on both rounds; elsewhere the rounds' marched intersection, as upstream. `SmFilletGeom::MakeFaceBrep` keeps each fillet face's own UV trim curves (`MakeFaceWithCurves` with `pbOptCrvOnSurf` TRUE) where upstream drops them and projects the edges' curves again later (the fork's 32fd80a). The boss base of a 40 x 30 x 10 plate with a 10 x 10 x 5 boss, its four base edges rounded r 1, then has its closed-form volume `12500 + 40 (1 - pi/4) + 8 (5/6 - pi/4)` where upstream's mitres are 1.4e-5 off the cylinders. With the session's swept turns (`FilletSession::set_swept_turns`, the fork's `SetSweptTurns`, e647dac and 1fcbdb7) a Turn is Swept: at a sharp straight convex side edge square to both rounded edges on a plane, between constant circular rounds of one radius, the corner's face is the rounds' end section revolved about the side edge, an exact (horn) torus; other Swept turns are refused with their reason (`NoRoom` at a sharp concave side edge, else `CornerUnsupported`). And `SmTorus::RebuildSTEPFromNURBParameters` keeps a horn torus a horn torus after `SwapUV` (the fork's af7a4d9), where upstream turns it into a spindle torus whose edges are up to 1.41 off it. Built in solidcore from smlib#82 (#2360): a convex and a concave blend whose edges continue each other G1 at a vertex of three edges, on a common plane, the third edge a straight tangent seam (the tangent peg's front top edge and the concave arc where its top meets the cylinder its front face runs tangent into), are the blend corner's Mixed corner ([`crate::blend::blend_corner::mixed`]) in place of the 3x2 mixed-convexity corner: the blends are trimmed at their rails' crossing on the plane, and the corner is two Coons patches meeting along the inflection, G1 to both blends and to each other; WR-710's refusal (`fillet_refuse_mixed_corner_crossing_rails`) then does not apply to it.
     pub fillet_blend_corner: bool,
     /// The executive's circular rounds (`SetFilletParameters` with `SM_FSG_CIRCULAR`, and
@@ -1629,6 +1631,24 @@ pub struct Kernel {
     /// to the records of a fresh seeding, so it never carries state between edits.
     #[doc(hidden)]
     pub notify_records: crate::topology::topology::NotifyRecords,
+    /// Not upstream: the fork's `SmBlendNetScope` depth (a `thread_local` there): while it
+    /// is above 0, procedural blends evaluate as their nets
+    /// ([`crate::surface::procedural_blend::NetScope`]). A [`Cell`]: the scope is
+    /// entered and read on paths that hold `&Kernel` (every surface evaluation).
+    pub blend_net_scope: Cell<u32>,
+    /// Not upstream: the fork's process-wide `SmBlendCounts` (diagnostics only, no
+    /// result reads them). A [`Cell`]: the definition's evaluators count through `&Kernel`.
+    pub blend_counts: Cell<crate::surface::procedural_blend::BlendCounts>,
+    /// Not upstream: the fork's `s_lLastSerial`, the last serial a procedural blend's
+    /// definition took (`Renew`), so a station memo entry is never another definition's.
+    /// A [`Cell`]: definitions are made and copied through `&Kernel`.
+    pub blend_last_serial: Cell<u64>,
+    /// Not upstream: the fork's `thread_local` station memo (`t_asMemo`), the stations
+    /// the definitions of procedural blends solved last
+    /// ([`crate::blend::fillet_section::definition::StationMemo`]). A [`RefCell`]: the
+    /// definition is evaluated through `&Kernel`; it is never borrowed across a solve, and
+    /// a hit returns what a fresh solve from the same seeds gives.
+    pub blend_station_memo: RefCell<crate::blend::fillet_section::definition::StationMemo>,
     /// Not upstream: the arena-identity record map of the last stitch glue or split
     /// (`heal::stitch::p1`) and the B-rep value it was kept for (its progress tag, held
     /// weakly), kept only to reuse its allocation. An edit of another B-rep value starts
@@ -1666,6 +1686,12 @@ impl Kernel {
             fixes: UpstreamFixes::default(),
             cancel: None,
             notify_records: crate::topology::topology::NotifyRecords::new(),
+            blend_net_scope: Cell::new(0),
+            blend_counts: Cell::new(crate::surface::procedural_blend::BlendCounts::default()),
+            blend_last_serial: Cell::new(0),
+            blend_station_memo: RefCell::new(
+                crate::blend::fillet_section::definition::StationMemo::default(),
+            ),
             arena_notify_records: (
                 std::sync::Weak::new(),
                 crate::topology::topology::NotifyRecords::new(),

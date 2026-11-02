@@ -606,6 +606,10 @@ impl TessSrfCache {
             // revolution's missing NURB first)
             let bss: Option<BSplineSurface> = match self.base().surface().kind() {
                 SurfaceKind::BSpline(b) => Some(b.clone()),
+                SurfaceKind::ProceduralBlend(pb) => {
+                    let b = pb.net();
+                    Some(b.clone())
+                }
                 SurfaceKind::Plane(p) => Some(match ignore(p.base_with_nurb())? {
                     Some(b) => b.into_owned(),
                     None => p.base().clone(),

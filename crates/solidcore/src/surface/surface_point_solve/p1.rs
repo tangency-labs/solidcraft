@@ -278,6 +278,10 @@ fn b_spline_part(surface: &Surface) -> Option<&BSplineSurface> {
     };
     match base.kind() {
         SurfaceKind::BSpline(b) => Some(b),
+        SurfaceKind::ProceduralBlend(pb) => {
+            let b = pb.net();
+            Some(b)
+        }
         SurfaceKind::Plane(p) => Some(p.base()),
         SurfaceKind::Cone(s) => Some(s.rev().base()),
         SurfaceKind::Sphere(s) => Some(s.base().base()),
@@ -1275,6 +1279,7 @@ fn is_on_seam(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
         | SurfaceKind::Sphere(_)
         | SurfaceKind::Torus(_)
         | SurfaceKind::BSpline(_)
+        | SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::SurfOfExtrusion(_)

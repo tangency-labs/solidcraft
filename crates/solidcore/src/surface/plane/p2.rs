@@ -1557,6 +1557,7 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
         // (an SmTorus has no special case: the default branch)
         SurfaceKind::Torus(_)
         | SurfaceKind::BSpline(_)
+        | SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)

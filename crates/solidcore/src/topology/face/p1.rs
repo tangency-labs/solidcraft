@@ -2278,9 +2278,15 @@ pub fn move_seam_notified<O: LoopObject>(
                     SolidError::sm_err(OP)
                 }
             })?;
-            let (SurfaceKind::BSpline(left), SurfaceKind::BSpline(right)) =
-                (left.into_kind(), right.into_kind())
-            else {
+            // ((SmBSplineSurface*) casts, unchecked in release: the fork's
+            // SmProceduralBlend halves are joined as their nets, and the joined surface
+            // is a plain B-spline)
+            let net = |half: Surface| match half.into_kind() {
+                SurfaceKind::BSpline(b) => Some(b),
+                SurfaceKind::ProceduralBlend(pb) => Some(pb.net),
+                _ => None,
+            };
+            let (Some(left), Some(right)) = (net(left), net(right)) else {
                 return Err(null("MoveSeam: split halves are not SmBSplineSurfaces"));
             };
             let (mut left, mut right) = (left, right);
