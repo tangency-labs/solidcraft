@@ -302,6 +302,24 @@ pub enum SolidError {
         fit: crate::blend::fillet_executive::FitSize<EdgeId>,
     },
 
+    /// A shell, offset or thicken refused by the one construction (opt-in
+    /// `fixes.shell_one_construction`, WR-718, tangency-labs/solidcore#2350), naming the
+    /// largest size that works when there is one. `code` is the status (`SM_ERR`) so
+    /// [`SolidError::sm_status`] reads as an ordinary failure.
+    #[error("{operation}: upstream status {code}: refused ({refusal:?}){}", fmt_size(*.size))]
+    ShellRefused {
+        /// Operation that refused.
+        operation: &'static str,
+        /// Upstream `SmStatus` value (`SM_ERR`).
+        code: i32,
+        /// The entity refused (a face of the input), when known.
+        entity: Option<EntityRef>,
+        /// Why.
+        refusal: crate::offset::construction::ShellRefusal,
+        /// The largest size (a wall thickness) that works, when there is one.
+        size: Option<f64>,
+    },
+
     /// The operation needs an upstream routine whose unit is not ported yet (a
     /// plan back-edge). Returned instead of panicking or faking a result; every
     /// site carries a `// UNPORTED(<unit id>): <C++ symbol>` comment so the
@@ -490,6 +508,12 @@ fn fmt_entity(entity: Option<EntityRef>) -> String {
     entity.map_or_else(String::new, |e| format!(" at {e}"))
 }
 
+fn fmt_size(size: Option<f64>) -> String {
+    size.map_or_else(String::new, |s| {
+        format!("; the largest size that works is {s}")
+    })
+}
+
 impl SolidError {
     /// [`SolidError::Upstream`] with code [`SM_ERR`] and no entity (upstream
     /// `return SE(SM_ERR)`).
@@ -554,7 +578,9 @@ impl SolidError {
     #[must_use]
     pub const fn sm_status(&self) -> Option<i32> {
         match self {
-            Self::Upstream { code, .. } | Self::FilletRefused { code, .. } => Some(*code),
+            Self::Upstream { code, .. }
+            | Self::FilletRefused { code, .. }
+            | Self::ShellRefused { code, .. } => Some(*code),
             Self::Nlib { .. } => Some(SM_ERR),
             Self::InvalidInput { .. }
             | Self::NotFound { .. }
@@ -634,6 +660,7 @@ impl SolidError {
             | Self::PortInvariant { operation, .. }
             | Self::Upstream { operation, .. }
             | Self::FilletRefused { operation, .. }
+            | Self::ShellRefused { operation, .. }
             | Self::Nlib { operation, .. }
             | Self::PreparationRequired { operation }
             | Self::Cancelled { operation } => operation,
@@ -648,7 +675,8 @@ impl SolidError {
             Self::NotFound { entity, .. } => Some(*entity),
             Self::Degenerate { entity, .. }
             | Self::Upstream { entity, .. }
-            | Self::FilletRefused { entity, .. } => *entity,
+            | Self::FilletRefused { entity, .. }
+            | Self::ShellRefused { entity, .. } => *entity,
             Self::InvalidInput { .. }
             | Self::NotConverged { .. }
             | Self::Unsupported { .. }

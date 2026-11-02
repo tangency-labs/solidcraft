@@ -4,6 +4,7 @@
 //! `SmOffsetCurve` in `source/SMLib`, and the offset/shell entry points of
 //! `SM_API/SmApiBrep`.
 
+pub mod construction;
 pub mod offset_executive;
 pub mod offset_faces;
 pub mod offset_geometry_creation;

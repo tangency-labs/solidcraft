@@ -228,6 +228,38 @@ fn make_shell_edges_exact(
     make_edges_on_analytics_exact(kernel, shell, &mut stores)
 }
 
+/// Opt-in (WR-718, #2350 S1): refuses the offset of `face` (whose implicit offset
+/// surface is `offset`) when it folds on the face's parameter box
+/// ([`crate::offset::construction::sheets::certify_regular`]), naming the largest wall
+/// that works.
+fn refuse_folding_offset(
+    kernel: &Kernel,
+    original: &Brep,
+    face: FaceId,
+    offset: &crate::surface::offset_surface::OffsetSurface,
+    operation: &'static str,
+) -> Result<()> {
+    use crate::offset::construction::sheets::{certify_regular, Regularity};
+    let Some(nurb) = crate::topology::brep::p3::with_nurb(kernel, offset.base_surface())? else {
+        return Ok(());
+    };
+    let Some(base) = nurb.gw_nurb() else {
+        return Ok(());
+    };
+    let domain = crate::topology::face::p2::uv_domain(original, face)?;
+    let uv_box = [domain.min.x, domain.max.x, domain.min.y, domain.max.y];
+    match certify_regular(kernel, base, offset.offset_distance(), Some(uv_box))? {
+        Regularity::Regular => Ok(()),
+        Regularity::Folds { largest } => Err(SolidError::ShellRefused {
+            operation,
+            code: crate::error::SM_ERR,
+            entity: Some(EntityRef::Face(face)),
+            refusal: crate::offset::construction::ShellRefusal::Fold,
+            size: Some(largest),
+        }),
+    }
+}
+
 /// Static offset entry point, with a non-null original and an owned result.
 ///
 /// Only ordinary inner failures collapse to native `SM_ERR` (1001).
@@ -1282,6 +1314,18 @@ impl OffsetExecutive {
             // creator object decides upstream (virtual call), not `m_eOffsetOperation`.
             super::face::build_local(original, &self.local_faces, &self.local_surfaces, faceuse)?
         };
+        // Not upstream (WR-718, #2350 S1), opt-in `Kernel::fixes.shell_one_construction`:
+        // a face whose offset folds is refused, naming the largest wall that works
+        if kernel.fixes.shell_one_construction
+            && self.local_faces.is_empty()
+            && self.operation() != OffsetOperation::LocalOperation
+        {
+            if let Some(crate::surface::surface::SurfaceKind::OffsetSurface(offset)) =
+                surface.as_ref().map(crate::surface::surface::Surface::kind)
+            {
+                refuse_folding_offset(kernel, original, id, offset, operation)?;
+            }
+        }
         // Not upstream (WR-346, tangency-labs/solidcore#397), opt-in
         // `Kernel::fixes.offset_collapsed_rounds_mated`: an inset face whose offset collapses (a
         // convex round thinner than the wall) gets no offset face; the faces beside it are
