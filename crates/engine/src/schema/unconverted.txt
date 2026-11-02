@@ -122,9 +122,6 @@ joint.rigid_group
 joint.screw
 joint.solve
 joint.sweep
-library.apply
-library.export
-library.inspect
 material.assign
 material.create
 material.delete
