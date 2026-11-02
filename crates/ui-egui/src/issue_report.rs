@@ -142,6 +142,8 @@ pub struct Draft {
     /// Said with the next screenshot: the technical details were rebuilt for it.
     rebuilt: Option<&'static str>,
     pub note: String,
+    /// What became of saving the design for the report (#6878).
+    design_note: String,
     source_signature: u64,
     /// The description has taken the focus it gets on opening; Continue finding it empty clears
     /// this, so it takes the focus once more (#7190).
@@ -165,6 +167,7 @@ impl Draft {
             built_body: String::new(),
             rebuilt: None,
             note: String::new(),
+            design_note: String::new(),
             source_signature,
             focus_requested: false,
             missing_description: false,
@@ -1482,6 +1485,45 @@ mod tests {
         assert!(h.app.issue_report.draft.as_ref().unwrap().image.is_none());
         assert!(h.widget("Screenshot removed from this draft.").is_some());
         assert!(h.widget("Report text copied. Paste it into GitHub and submit your report there.").is_some());
+    }
+
+    /// #6878: Save design… writes the whole design as one `.json` file for the report, a copy:
+    /// the open design keeps its own file and nothing goes on the undo stack.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn issue_report_save_design_writes_a_copy_to_attach() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":10,"width":20,"height":30,"body_name":"Stock"})).unwrap();
+        h.app.session.doc_mut().name = "Bracket: v2".into();
+        let path = h.dir.join("bracket-report.json");
+        let chosen = path.to_string_lossy().into_owned();
+        h.app.services.pick_save = Some(Box::new(move |name, extensions| {
+            assert_eq!(name, "Bracket_ v2.json", "named after the design, without characters files can't hold");
+            assert_eq!(extensions, &["json"]);
+            Box::pin(std::future::ready(Some(chosen.clone())))
+        }));
+        h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
+        h.frames(16);
+        assert!(h.widget("Design (optional)").is_some());
+        let before = (h.app.session.path.clone(), h.app.session.undo.len());
+        click_commands(&mut h, "Save design…");
+        assert!(h.widget("Design saved. Drag the .json file into the GitHub draft to attach it.").is_some());
+        assert_eq!((h.app.session.path.clone(), h.app.session.undo.len()), before, "a copy: the design keeps its file");
+        let mut reopened = Session::default();
+        reopened.execute("doc.open", &json!({"path": path.to_string_lossy()})).unwrap();
+        assert!(reopened.model.state().body("Stock").is_some(), "the saved design holds the body");
+        let volume = reopened.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+        assert!((volume - 6000.0).abs() < 1e-6, "{volume}");
+    }
+
+    #[test]
+    fn design_file_stems_are_safe_file_names() {
+        assert_eq!(form::design_file_stem("Battery Caddy"), "Battery Caddy");
+        assert_eq!(form::design_file_stem("a/b\\c:d*e?f\"g<h>i|j"), "a_b_c_d_e_f_g_h_i_j");
+        assert_eq!(form::design_file_stem("  ..  "), "solidcraft-design");
+        assert_eq!(form::design_file_stem(""), "solidcraft-design");
+        assert_eq!(form::design_file_stem(&"x".repeat(200)).len(), 80);
     }
 
     #[test]
