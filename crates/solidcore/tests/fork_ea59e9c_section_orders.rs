@@ -30,14 +30,20 @@
 
 use solidcore::blend::fillet_executive::api::{fillet_edges, variable_radius_fillet};
 use solidcore::blend::fillet_executive::session::FilletSession;
+use solidcore::blend::fillet_section::section::{GnSectionFsg, GN_THUMBWEIGHT_EQUAL_AREA};
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
+use solidcore::blend::fillet_standard_solver::p1::FilletLaw;
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::vector2d::Point2;
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, Vec3, PI};
+use solidcore::nurbs::b_spline_curve::p1::{
+    BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
+};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::edge_closest_point;
 use solidcore::surface::surface::Surface;
@@ -221,6 +227,8 @@ enum Blend {
     Round(f64),
     /// The radius from the first figure at x = 0 to the second at x = 20.
     LinearRound(f64, f64),
+    /// The cubic Greville law `r` along y in [0, 20] on `box_10_20_30`.
+    SplineRound([f64; 5]),
     /// The G^n section: order, thumbweight, radius.
     Gn(u32, f64, f64),
 }
@@ -252,6 +260,10 @@ fn box_40_30_20(k: &mut Kernel) -> Result<Brep> {
 
 fn box_20_30_20(k: &mut Kernel) -> Result<Brep> {
     create_box(k, Point3::new(0.0, 0.0, 0.0), 20.0, 30.0, 20.0)
+}
+
+fn box_10_20_30(k: &mut Kernel) -> Result<Brep> {
+    create_box(k, Point3::new(0.0, 0.0, 0.0), 10.0, 20.0, 30.0)
 }
 
 fn boss_on_plate(k: &mut Kernel) -> Result<Brep> {
@@ -530,6 +542,43 @@ fn linear_round(k: &mut Kernel, b: &mut Brep, e: EdgeId, at0: f64, at20: f64) ->
     variable_radius_fillet(k, b, &[e], r0, r1, 1, 1)
 }
 
+/// Cubic Greville B-spline law over [0, 1] (`cf1c08b` / `0389af2`).
+fn greville_cubic_curve(r: [f64; 5]) -> BSplineCurve {
+    let g = [0.0, 1.0 / 6.0, 0.5, 5.0 / 6.0, 1.0];
+    let control: Vec<Vec3> = (0..5).map(|i| Vec3::new(r[i], g[i], 0.0)).collect();
+    BSplineCurve::create_canonical(&CanonicalData {
+        dim: 3,
+        degree: 3,
+        control_points: &control,
+        form: BSplineCurveForm::default(),
+        knot_multiplicities: &[4, 1, 4],
+        knots: &[0.0, 0.5, 1.0],
+        knot_type: KnotType::default(),
+        weights: None,
+        trim: None,
+    })
+    .unwrap()
+}
+
+/// The cubic Greville law `r` along `e` from y = 0 to y = 20.
+fn spline_round(k: &mut Kernel, b: &mut Brep, e: EdgeId, mut r: [f64; 5]) -> Result<()> {
+    let ivl = edge::interval(b, e)?;
+    let c = edge::curve(b, e)?.unwrap();
+    let start = c.evaluate(k, ivl.min(), 0, true, false)?[0];
+    if start.y > 10.0 {
+        r.reverse();
+    }
+    let law = FilletLaw::bspline(greville_cubic_curve(r), &Extent1d::from_min_max(0.0, 1.0));
+    {
+        let mut s = FilletSession::new(k, b)?;
+        s.prepare_variable_radius_edges(k, &[e], r[0], law, 1, 1)?;
+        s.do_fillet(k)?;
+    }
+    stitch_and_orient(k, b, &StitchAndOrientOptions::default())?;
+    b.refresh_cached_topology();
+    Ok(())
+}
+
 fn volume_of(k: &Kernel, b: &mut Brep) -> Result<f64> {
     let store = AttributeStore::default();
     let attrs = PropertyAttributes {
@@ -578,6 +627,7 @@ fn grade(case: &Case, k: &mut Kernel) -> Graded {
         Blend::Chord(d) => chord(k, &mut b, e, d),
         Blend::Round(r) => fillet_edges(k, &mut b, &[e], r, 1, 1, 1.0),
         Blend::LinearRound(a, c) => linear_round(k, &mut b, e, a, c),
+        Blend::SplineRound(r) => spline_round(k, &mut b, e, r),
         Blend::Gn(n, w, r) => fillet_edges(k, &mut b, &[e], r, 2, n, w),
     };
     if let Err(err) = made {
@@ -1053,4 +1103,143 @@ fn the_pipe_root_at_thumbweight_one_half_is_g2_with_its_faces() {
 #[ignore = "slow: 4 min per kernel in the difftest profile, a 227-span certificate"]
 fn the_boss_root_at_order_2_is_at_least_g2_with_its_faces() {
     assert_order_2(&boss_g2());
+}
+
+// ---- equal-area G2 (`b30ad9f`, `e447863`) and variable union-of-balls (`4af4349`, `cf1c08b`, `0389af2`) ----
+
+/// Distance from `x` to the boundary of the union of rolling balls along `(10, 20 s, 30)`
+/// (`s in [0, 1]`) of radius `R(s) = law(s).x`, touching `x = 10` and `z = 30`.
+fn distance_to_balls_union(law: &BSplineCurve, x: Point3) -> f64 {
+    let signed = |s: f64| {
+        let r = law.evaluate_point(s).unwrap().x;
+        let c = Point3::new(10.0 - r, 20.0 * s, 30.0 - r);
+        x.distance(c) - r
+    };
+    let m = 512;
+    let mut best = 0;
+    let mut bd = signed(0.0);
+    for k in 1..=m {
+        let d = signed(f64::from(k) / f64::from(m));
+        if d < bd {
+            bd = d;
+            best = k;
+        }
+    }
+    let mut lo = (f64::from(best) - 1.0).max(0.0) / f64::from(m);
+    let mut hi = (f64::from(best) + 1.0).min(f64::from(m)) / f64::from(m);
+    let g = (5f64.sqrt() - 1.0) / 2.0;
+    for _ in 0..80 {
+        let (s1, s2) = (hi - g * (hi - lo), lo + g * (hi - lo));
+        if signed(s1) < signed(s2) {
+            hi = s2;
+        } else {
+            lo = s1;
+        }
+    }
+    signed(0.5 * (lo + hi)).abs()
+}
+
+/// `b30ad9f` + `e447863`: at `GN_THUMBWEIGHT_EQUAL_AREA` (`w = -0.5252...`), the box edge's
+/// order-2 section removes the circle's area `(1 - pi/4) r^2`, is G2 at `tight` tolerances,
+/// and at most G3 at Continuity Analysis's `loose` tolerances.
+#[test]
+fn the_box_edge_at_gn_equal_area_default_is_g2_and_at_most_g3_with_its_planes() {
+    let w_eq = GnSectionFsg::equal_area_thumbweight(2, PI / 2.0).unwrap();
+    let case = Case {
+        name: "box_edge_g2_equal_area_default",
+        build: box_40_30_20,
+        pick: [20.0, 30.0, 20.0],
+        blend: Blend::Gn(2, GN_THUMBWEIGHT_EQUAL_AREA, 3.0),
+        volume: 24000.0 - 40.0 * 9.0 * (1.0 - PI / 4.0),
+        volume_rel: 1e-7,
+        off: Box::new(move |x| {
+            distance_to_curve(
+                &|t| gn_section(2, w_eq, &BOX_TOP_JETS, &BOX_BACK_JETS, t),
+                [x.y, x.z],
+            )
+        }),
+        off_tol: Some(1e-9),
+        faces: box_planes(40.0, 30.0, 20.0),
+        rails: [5, 3],
+        order: 2,
+        order_max: Some(3),
+        fitted: false,
+        size: 3.0,
+    };
+    assert_order_2(&case);
+}
+
+/// `4af4349`: with `fillet_gn_section_generator` on, `variable_round_on_its_cone` lies on the
+/// exact cone of its balls' envelope, passes `Level2`, and is G1 along both seams.
+#[test]
+fn the_linear_variable_round_lies_on_its_cone_and_is_g1() {
+    let case = named(VARIABLE);
+    assert_passes(&case, &mut gn_kernel());
+    assert_passes(&case, &mut solidcraft_kernel());
+}
+
+/// `cf1c08b` + `0389af2`: the progressive cubic law `[2, 2, 6, 3, 0]` lies on the union of its
+/// balls, passes `Level2`, matches the fork's volume `5957.7178399654949`, and is G1 along both
+/// seams.
+#[test]
+fn the_progressive_cubic_variable_round_lies_on_its_balls_union_and_is_g1() {
+    let holds_law = [2.0, 2.0, 6.0, 3.0, 0.0];
+    let holds_curve = greville_cubic_curve(holds_law);
+    let case = Case {
+        name: "variable_round_spline_holds",
+        build: box_10_20_30,
+        pick: [10.0, 10.0, 30.0],
+        blend: Blend::SplineRound(holds_law),
+        volume: 5957.7178399654949,
+        volume_rel: 1e-7,
+        off: Box::new(move |x| distance_to_balls_union(&holds_curve, x)),
+        off_tol: None,
+        faces: box_planes(10.0, 20.0, 30.0),
+        rails: [1, 5],
+        order: 1,
+        order_max: None,
+        fitted: true,
+        size: 1.0,
+    };
+    assert_passes(&case, &mut gn_kernel());
+    assert_passes(&case, &mut solidcraft_kernel());
+}
+
+/// `cf1c08b` + `0389af2`: the folded cubic law `[2, 2, 40, 3, 2]` builds folded (far off the
+/// union of its balls) when `fillet_gn_section_generator` is off, and is refused when on.
+#[test]
+fn the_folded_cubic_variable_round_leaves_its_balls_union_without_fix_and_is_refused_with_fix() {
+    let folds_law = [2.0, 2.0, 40.0, 3.0, 2.0];
+    let folds_curve = greville_cubic_curve(folds_law);
+    let case = Case {
+        name: "variable_round_spline_folds",
+        build: box_10_20_30,
+        pick: [10.0, 10.0, 30.0],
+        blend: Blend::SplineRound(folds_law),
+        volume: 6000.0 - 332.2,
+        volume_rel: 1e-3,
+        off: Box::new(move |x| distance_to_balls_union(&folds_curve, x)),
+        off_tol: None,
+        faces: box_planes(10.0, 20.0, 30.0),
+        rails: [1, 5],
+        order: 1,
+        order_max: None,
+        fitted: true,
+        size: 1.0,
+    };
+    let mut k_off = solidcraft_kernel();
+    k_off.fixes.fillet_gn_section_generator = false;
+    let g_off = grade(&case, &mut k_off);
+    assert!(g_off.failed.is_none(), "{g_off:?}");
+    assert!(
+        g_off.off > 1.0,
+        "expected folded surface far off balls union: {g_off:?}"
+    );
+    assert!(!g_off.problems.is_empty(), "{g_off:?}");
+
+    let g_on = grade(&case, &mut solidcraft_kernel());
+    assert!(
+        g_on.failed.is_some(),
+        "expected folded law to be refused: {g_on:?}"
+    );
 }
