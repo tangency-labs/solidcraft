@@ -331,3 +331,35 @@ fn a_line_cannot_be_joined_to_itself() {
     let (a, b) = (sk.wire_point(&format!("{l}.start")).unwrap(), sk.wire_point(&format!("{l}.end")).unwrap());
     assert!(sk.add_wire_constraint(WireConstraintKind::Coincident { a, b }).is_err());
 }
+
+#[test]
+fn a_failing_group_leaves_the_others_to_solve() {
+    let mut sk = Sketch::new();
+    // A conflict: a line fixed at both ends held along X off the axis.
+    let bad = line(&mut sk, v(0.0, 0.0, 0.0), v(0.0, 10.0, 0.0));
+    for end in ["start", "end"] {
+        let p = sk.wire_point(&format!("{bad}.{end}")).unwrap();
+        let at = sk.wire_point_at(&p).unwrap();
+        sk.add_wire_constraint(WireConstraintKind::Fix { p, at }).unwrap();
+    }
+    sk.add_wire_constraint(WireConstraintKind::AlongAxis { line: bad.clone(), axis: Axis::X }).unwrap();
+    // An unrelated line that can go along Z.
+    let good = line(&mut sk, v(20.0, 0.0, 0.0), v(21.0, 1.0, 30.0));
+    sk.add_wire_constraint(WireConstraintKind::AlongAxis { line: good.clone(), axis: Axis::Z }).unwrap();
+    let rep = sk.solve_wires(None);
+    assert!(!rep.ok);
+    let d = at(&sk, &format!("{good}.end")) - at(&sk, &format!("{good}.start"));
+    assert!(d.x.abs() < 1e-9 && d.y.abs() < 1e-9, "the other line solved: {d:?}");
+    assert!(close(at(&sk, &format!("{bad}.end")), v(0.0, 10.0, 0.0)), "the failing one stays");
+}
+
+#[test]
+fn a_saved_constraint_cannot_take_another_entity_s_id() {
+    let mut sk = Sketch::new();
+    let l = line(&mut sk, v(0.0, 0.0, 0.0), v(10.0, 0.0, 0.0));
+    sk.wire_constraints.push(WireConstraint { id: l.clone(), kind: WireConstraintKind::AlongAxis { line: l.clone(), axis: Axis::X } });
+    assert!(sk.validate_wire_constraints().is_err());
+    // A direction a hair off an axis is not along it.
+    assert_eq!(Axis::along(v(1.0, 1e-5, 0.0)), None);
+    assert_eq!(Axis::along(v(0.0, 0.0, -3.0)), Some(Axis::Z));
+}
