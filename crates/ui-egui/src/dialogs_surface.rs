@@ -494,6 +494,11 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             let mut p = sheet_picks(app, items(inputs, 0))?;
             p["axis"] = match items(inputs, 1).first() {
                 Some(Sel::Axis { name }) => json!(name),
+                // A line of the profile sketch itself keeps the bare id: that is how designs
+                // saved before #6548 store it, and an unchanged edit must not rewrite it.
+                Some(Sel::SketchCurve { id, sketch: Some(named) }) if p.get("sketch") != Some(&json!(*named)) => {
+                    json!({"sketch": named, "curve": id})
+                }
                 Some(Sel::SketchCurve { id, .. }) => json!(id),
                 Some(x) => crate::dialogs::axis_param(app, x)?,
                 None => axis.clone().ok_or("select an axis")?,
@@ -819,7 +824,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             let (pick, stored) = match axis {
                 AxisRef::World { axis } => (Some(Sel::Axis { name: axis.to_ascii_uppercase() }), None),
                 AxisRef::SketchAxis { axis } => (Some(Sel::Axis { name: axis.to_ascii_lowercase() }), None),
-                AxisRef::SketchLine { curve } => (Some(crate::selection::curve_pick(curve, sketch.0, s.active_sketch)), None),
+                AxisRef::SketchLine { curve, sketch: Some(owner) } => (Some(crate::selection::curve_pick(curve, *owner, s.active_sketch)), None),
+                AxisRef::SketchLine { curve, sketch: None } => (Some(crate::selection::curve_pick(curve, sketch.0, s.active_sketch)), None),
                 AxisRef::Construction { name } => (Some(Sel::Axis { name: name.to_string() }), None),
                 AxisRef::Line { origin, dir } => (
                     None,

@@ -283,3 +283,46 @@ fn only_the_active_selection_field_looks_active() {
     assert_eq!(border(&h, "Profile"), filled, "filled inactive");
     assert_ne!(filled, t.control_border, "filled inactive differs from empty inactive");
 }
+
+/// #6548: the axis line lives in another sketch and shares its id with a line of the profile
+/// sketch. The dialog must send the owning sketch with the id, and the solid must turn about
+/// the picked line, not the profile sketch's colliding one.
+#[test]
+fn dialog_axis_from_another_sketch_keeps_its_sketch() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"AxisSketch"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0.0,-20.0],[0.0,20.0]],"construction":true})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"ProfileSketch"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[15.0,-10.0],[15.0,10.0]],"construction":true})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[10.0,-5.0],"p1":[20.0,5.0]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let profile = h.app.session.doc.find_feature("ProfileSketch").unwrap().id;
+    let axis_sketch = h.app.session.doc.find_feature("AxisSketch").unwrap().id;
+    let mut dialog = crate::dialogs::Dialog::for_command(&h.app, "solid.revolve").unwrap();
+    dialog.active = 0;
+    // The field arrives prefilled with this very profile (#684), so a blind pick would toggle it
+    // off: start from empty so the pick lands.
+    dialog.inputs[0].items.clear();
+    dialog.pick(&h.app.session, solidcraft_engine::Sel::Profile { sketch: profile, index: 0 });
+    dialog.active = 1;
+    dialog.inputs[1].items.clear();
+    dialog.pick(&h.app.session, solidcraft_engine::Sel::SketchCurve { id: "l1".into(), sketch: Some(axis_sketch) });
+    h.app.dialog = Some(dialog);
+    h.frames(4);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(
+        h.app.dialog.is_none(),
+        "error={:?} preview={:?} log={:?}",
+        h.app.dialog.as_ref().and_then(|d| d.error.clone()),
+        h.app.preview.error,
+        h.app.session.log
+    );
+    let FeatureKind::Revolve { axis, .. } = &h.app.session.doc.features.last().unwrap().kind else { panic!("revolve") };
+    assert!(matches!(axis, AxisRef::SketchLine { curve, sketch: Some(owner) } if curve == "l1" && *owner == axis_sketch), "kept qualified: {axis:?}");
+    // π · (20² − 10²) · 10 about x = 0, not the crossing error the colliding id used to give.
+    let state = h.app.session.world_state();
+    let volume: f64 = state.bodies.iter().map(|b| solidcraft_engine::doc::kernel::measure(&b.body).unwrap().volume).sum();
+    let expected = std::f64::consts::PI * 300.0 * 10.0;
+    assert!((volume - expected).abs() / expected < 1e-4, "{volume} != {expected}");
+}
