@@ -313,15 +313,23 @@ fn bodies_out_of_the_view_are_not_drawn() {
     let scene = build_scene(&app);
     let spans: usize = scene.blocks.iter().map(|b| b.bytes.bodies.len()).sum();
     assert_eq!(spans, 2, "each body's box is kept with its block");
+    // Each box's triangles as the mesher made them (12 or more, by kernel), told apart by where
+    // they lie: the near box at the origin, the far one 1000 mm along x.
+    let triangles = |near: bool| -> u64 {
+        let spans = scene.blocks.iter().flat_map(|b| b.bytes.bodies.iter());
+        spans.filter(|s| (s.bounds[0][0] < 500.0) == near).map(|s| u64::from(s.vertices.end.saturating_sub(s.vertices.start)) / 3).sum()
+    };
+    let (near, far) = (triangles(true), triangles(false));
+    assert!(near >= 12 && far >= 12, "a box is at least two triangles a side: {near} and {far}");
     let slot: crate::gpu::SceneSlot = std::sync::Arc::new(std::sync::Mutex::new(Some(scene)));
     let none: crate::gpu::SceneSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
     frames.frame(crate::scale_tests::view_frame(&app, SIZE, (1, &slot), (0, &none)));
     let both = frames.stats().triangles;
-    assert_eq!(both, 24, "both boxes in view");
+    assert_eq!(both, near + far, "both boxes in view");
     app.cam.target = solidcraft_engine::geom::Vec3::new(5.0, 5.0, 5.0);
     app.cam.distance = 40.0;
     frames.frame(crate::scale_tests::view_frame(&app, SIZE, (1, &slot), (0, &none)));
-    assert_eq!(frames.stats().triangles, 12, "the far box is not drawn");
+    assert_eq!(frames.stats().triangles, near, "the far box is not drawn");
     app.fit_view();
     frames.frame(crate::scale_tests::view_frame(&app, SIZE, (1, &slot), (0, &none)));
     assert_eq!(frames.stats().triangles, both, "and drawn again once in view");

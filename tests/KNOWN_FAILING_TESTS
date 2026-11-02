@@ -22,4 +22,3 @@ solidcraft-kernel::corner_g2::tests::the_box_corner_g2_patch_is_a_closed_solid_c
 solidcraft-kernel::tests::fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole the arc and tab rounds together remove 9.20067 against 9.20420 (3.8e-4 off, 1e-5 allowed)
 solidcraft-smlib::ops::tests::a_variable_round_with_a_corner_in_its_law_is_its_balls_union the two halves' rounds end on their own touch circles at the law's corner, not where they cross: 39.6456 removed against 39.5421
 solidcraft-ui-egui::timeline::tests::each_chip_finds_its_own_result main's test: its radius 20 fillet with fit reduce on a 10 mm box builds on SMLib without a reduced-radius warning, so the fixture has no warned feature (same reply on develop's kernel)
-solidcraft-ui-egui::viewport::appearance_tests::bodies_out_of_the_view_are_not_drawn main's test counts 12 triangles a box; SMLib's mesher gives a 10 mm box 108, so it stops at 216 against 24 before it reaches the culling
