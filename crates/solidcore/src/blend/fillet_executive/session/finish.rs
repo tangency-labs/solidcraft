@@ -665,6 +665,21 @@ impl FilletSession<'_> {
             session.mark_corner_patches()?;
             let editing = session.objects.target.editing_enabled();
             session.objects.target.set_editing_enabled(true);
+            // The fork's (WR-703, `eb883ad`): a feature standing inside a round's band is kept:
+            // the round is trimmed round it in place and sewn in instead of merged.
+            if k.fixes.fillet_keep_features
+                && !session.executive.cliff_overflow
+                && !session.executive.open_ends.iter().any(|end| end.section)
+            {
+                let kept = session.keep_features_in_bands(k);
+                if !matches!(kept, Ok(false)) {
+                    session.objects.target.set_editing_enabled(editing);
+                    if let Some(output) = error_out {
+                        output.assign(&session.executive.error);
+                    }
+                    return kept.map(drop);
+                }
+            }
             // The fork's (WR-631, WR-638): a cliff overflow closes the fillet faces into the
             // region the blends remove and subtracts it from the target, instead of merging
             // the fillet faces in; the error a failed subtraction noted stands.

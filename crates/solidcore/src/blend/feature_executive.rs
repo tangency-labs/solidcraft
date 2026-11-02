@@ -1996,7 +1996,7 @@ fn copy_faces(
 /// `CopyFaces` from one B-rep into another with both B-reps' own attributes
 /// ([`crate::topology::brep::p2::CopyNotifyState`]): each attribute goes to the new
 /// objects as its behaviour says (`SM_NO_COPY`), as upstream's live on the objects.
-fn copy_faces_carrying(
+pub(crate) fn copy_faces_carrying(
     k: &mut Kernel,
     src: &mut Brep,
     faces: &[FaceId],

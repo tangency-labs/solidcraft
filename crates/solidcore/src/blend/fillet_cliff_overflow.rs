@@ -194,7 +194,7 @@ fn add_curve(
 }
 
 /// `sm_EdgeCurve`: a copy of the edge's curve over the edge's interval.
-fn edge_curve(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Curve> {
+pub(crate) fn edge_curve(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Curve> {
     let curve = edge::curve(b, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
     let mut copy = curve.copy(k)?;
     let mut ivl = edge::interval(b, e)?;
