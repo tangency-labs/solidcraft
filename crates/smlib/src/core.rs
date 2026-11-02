@@ -366,6 +366,14 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_surface_plane_curve_on_plane_equation = true;
     f.fillet_extended_rail_end_at_side_edge_crossing = true;
     f.fillet_gn_section_generator = true;
+    f.face_trim_curves_kept_where_exact = true;
+    f.swap_uv_keeps_analytic_definition = true;
+    f.face_shrink_bound_on_knot = true;
+    f.offset_updates_result_tolerances = true;
+    f.cone_iso_circle_at_axial_height = true;
+    f.boolean_coincident_strip_drops_crossing = true;
+    f.fillet_overflow_trim_at_creases = true;
+    f.fillet_section_end_trim_at_creases = true;
     f
 }
 
