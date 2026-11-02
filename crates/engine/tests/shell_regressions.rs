@@ -86,3 +86,14 @@ fn sound(s: &Session) {
         assert!(b.body.validity().is_empty(), "{:?}", b.body.validity());
     }
 }
+
+/// Seed 6 (minimised, #1494): a cylinder joined on a box's side leaves a saddle on the
+/// cylinder seam. The shell used to refuse that corner.
+#[test]
+fn shell_box_with_side_cylinder_seam_saddle() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"height": 30.0, "length": 47.5, "width": 45.0}));
+    run(&mut s, "solid.cylinder", json!({"axis": [1.0, 0.0, 0.0], "base": [47.5, 0.0, 10.0], "height": 30.0, "operation": "join", "radius": 7.5}));
+    run(&mut s, "solid.shell", json!({"faces": [[23.75, 22.5, 0.0]], "thickness": 1.0}));
+    sound(&s);
+}

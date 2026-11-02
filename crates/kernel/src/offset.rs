@@ -429,12 +429,64 @@ fn span_step(ns: &[Vec3], s: &[f64]) -> Option<Vec3> {
 /// Most faces round one corner that [`split_corner`] takes on.
 const MAX_SPLIT_FACES: usize = 48;
 
-/// The corners in place of a corner where more than three planar faces meet and whose moved
-/// planes miss a common point (a hip floor's corner, a pyramid's apex): each new corner with
-/// the faces through it. Corners sharing two faces are joined by a new edge on those faces.
-/// Only corners whose edges are all convex or all concave: the faces there bound a convex
-/// region (the body's side or the outside's), and after the move its corners are the points on
-/// three moved planes inside all the others.
+/// Whether two offset surfaces are the same sheet (a cylinder split into halves, or a plane).
+fn same_surf(a: &Surf, b: &Surf, tol: f64) -> bool {
+    match (*a, *b) {
+        (Surf::Plane { n, d }, Surf::Plane { n: n2, d: d2 }) => n.dot(n2) > 1.0 - 1e-9 && (d - d2).abs() < tol,
+        (Surf::Cylinder { o, a, r, convex }, Surf::Cylinder { o: o2, a: a2, r: r2, convex: c2 }) => {
+            convex == c2 && (r - r2).abs() < tol && a.dot(a2).abs() > 1.0 - 1e-6 && {
+                let off = o2 - o;
+                (off - a * off.dot(a)).len() < tol
+            }
+        }
+        _ => false,
+    }
+}
+
+/// A point near `near` on all three moved surfaces, or `None` when they miss (parallel planes,
+/// two halves of one cylinder with one other face, …).
+fn meet3(near: Vec3, a: &Surf, b: &Surf, c: &Surf, size: f64) -> Option<Vec3> {
+    let tol = size * 1e-9;
+    let mut uniq: Vec<Surf> = Vec::new();
+    for s in [*a, *b, *c] {
+        if !uniq.iter().any(|u| same_surf(u, &s, tol)) {
+            uniq.push(s);
+        }
+    }
+    if uniq.len() != 3 {
+        return None;
+    }
+    // Three planes: closed form.
+    if let (Surf::Plane { n: n0, d: d0 }, Surf::Plane { n: n1, d: d1 }, Surf::Plane { n: n2, d: d2 }) = (uniq[0], uniq[1], uniq[2]) {
+        let den = n0.dot(n1.cross(n2));
+        if den.abs() < 1e-9 {
+            return None;
+        }
+        let x = (n1.cross(n2) * d0 + n2.cross(n0) * d1 + n0.cross(n1) * d2) * (1.0 / den);
+        return (x.is_finite() && x.dist(near) <= size).then_some(x);
+    }
+    // Newton onto the three surfaces (plane + plane + cylinder, and similar).
+    let mut q = near;
+    for _ in 0..30 {
+        let d: Vec<f64> = uniq.iter().map(|sf| sf.dist(q)).collect();
+        if d.iter().all(|x| x.abs() < tol) {
+            return Some(q);
+        }
+        let gs: Vec<Vec3> = uniq.iter().map(|sf| sf.grad(q)).collect::<Option<_>>()?;
+        let rhs: Vec<f64> = d.iter().map(|x| -x).collect();
+        q += span_step(&gs, &rhs)?;
+    }
+    uniq.iter().all(|sf| sf.dist(q).abs() < size * 1e-6).then_some(q).filter(|x| x.dist(near) <= size)
+}
+
+/// The corners in place of a corner where more than three faces meet and whose moved surfaces
+/// miss a common point (a hip floor's corner, a pyramid's apex, a saddle on a cylinder seam
+/// after its halves were merged): each new corner with the faces through it. Corners sharing
+/// two faces are joined by a new edge on those faces. Planes and cylinders only. Only corners
+/// whose edges are all convex or all concave, or a mixed saddle whose faces form one ring: the
+/// faces there bound a convex region (the body's side or the outside's), and after the move its
+/// corners are the points on three moved surfaces inside all the others (convex/concave) or on
+/// each run of three faces in a row (saddle).
 fn split_corner(
     v: &mt::Vertex,
     at: &[usize],
@@ -448,28 +500,29 @@ fn split_corner(
         return None;
     }
     let p = from_p3(v.point());
-    // (face, outward normal, old offset, moved offset).
-    let planes: Vec<(usize, Vec3, f64, f64)> = at
-        .iter()
-        .map(|i| match (old.get(*i)?, new.get(*i)?) {
-            (Surf::Plane { n, d }, Surf::Plane { d: d2, .. }) => Some((*i, *n, *d, *d2)),
-            _ => None,
-        })
-        .collect::<Option<_>>()?;
-    let normal = |fi: usize| planes.iter().find(|x| x.0 == fi).map(|x| x.1);
+    let tol = size * 1e-9;
+    // Only planes and cylinders: a free-form or sphere corner is refused.
+    if at.iter().any(|i| !matches!(old.get(*i), Some(Surf::Plane { .. } | Surf::Cylinder { .. }))) {
+        return None;
+    }
+    let normal = |fi: usize| old.get(fi).and_then(|sf| sf.normal(p));
     // Edge kinds round the corner: a face's loop runs counter-clockwise about its outward
     // normal, so its inside is to the left; the edge is convex when the face beyond it falls
     // away from there.
     let mut sign = 0.0f64;
     let mut mixed = false;
     let mut pairs: Vec<(usize, usize)> = Vec::new();
-    for &(fi, na, ..) in &planes {
+    for &fi in at {
+        let na = normal(fi)?;
         for w in faces.get(fi)?.boundaries() {
             for e in w.edge_iter() {
                 if e.front().id() != v.id() && e.back().id() != v.id() {
                     continue;
                 }
                 let fb = efaces.get(&e.id())?.iter().copied().find(|j| *j != fi)?;
+                if !at.contains(&fb) {
+                    continue;
+                }
                 pairs.push((fi, fb));
                 let dir = (from_p3(e.back().point()) - from_p3(e.front().point())).normalized()?;
                 let s = normal(fb)?.dot(na.cross(dir));
@@ -488,42 +541,50 @@ fn split_corner(
     }
     // Which triples of faces may meet at a new corner. All convex or all concave: any triple
     // whose point is inside all the other moved planes. Mixed (a saddle, such as a box on a
-    // box that overhangs its side): the faces round the corner in order, and each new corner
-    // on three faces in a row (the two new edges on the middle face meet there). A saddle's
-    // faces bound no convex region, so a right corner can be outside another face's moved
-    // plane, and the inside-all-the-others test does not apply. What keeps a corner in place
-    // is that it is where its middle face's two new edges meet; a corner past the far end of
-    // one of the corner's edges turns that edge round, and a face whose loops cross after the
-    // move is refused (both checked in `offset_body`).
+    // box that overhangs its side, or a cylinder joined on a box's side): the faces round the
+    // corner in order, and each new corner on three faces in a row (the two new edges on the
+    // middle face meet there). A saddle's faces bound no convex region, so a right corner can
+    // be outside another face's moved plane, and the inside-all-the-others test does not apply.
+    // What keeps a corner in place is that it is where its middle face's two new edges meet; a
+    // corner past the far end of one of the corner's edges turns that edge round, and a face
+    // whose loops cross after the move is refused (both checked in `offset_body`).
     let triples: Vec<[usize; 3]> = if mixed {
-        let ring = face_ring(&pairs, planes.len())?;
+        let ring = face_ring(&pairs, at.len())?;
         let n = ring.len();
         (0..n).map(|i| [ring[(i + n - 1) % n], ring[i], ring[(i + 1) % n]]).collect()
     } else {
+        // The all-convex / all-concave path still needs planar faces only (its inside test is
+        // plane offsets).
+        if at.iter().any(|i| !matches!(old.get(*i), Some(Surf::Plane { .. }))) {
+            return None;
+        }
         let mut t = Vec::new();
-        for ia in 0..planes.len() {
-            for ib in ia + 1..planes.len() {
-                for ic in ib + 1..planes.len() {
-                    t.push([planes[ia].0, planes[ib].0, planes[ic].0]);
+        for ia in 0..at.len() {
+            for ib in ia + 1..at.len() {
+                for ic in ib + 1..at.len() {
+                    t.push([at[ia], at[ib], at[ic]]);
                 }
             }
         }
         t
     };
-    let plane_of = |fi: usize| planes.iter().find(|x| x.0 == fi);
-    // Convex: the body's side, n·x ≤ d; concave: the outside's, n·x ≥ d.
+    // Convex: the body's side, n·x ≤ d; concave: the outside's, n·x ≥ d. Planes only.
+    let plane_off = |fi: usize| match (old.get(fi)?, new.get(fi)?) {
+        (Surf::Plane { n, d }, Surf::Plane { d: d2, .. }) => Some((*n, *d, *d2)),
+        _ => None,
+    };
     let side = -sign;
     let merge = size * 1e-6;
     let mut nodes: Vec<(Vec3, Vec<usize>)> = Vec::new();
     for [fa, fb, fc] in triples {
-        let (a, b, c) = (plane_of(fa)?, plane_of(fb)?, plane_of(fc)?);
-        let den = a.1.dot(b.1.cross(c.1));
-        if den.abs() < 1e-9 {
-            continue;
-        }
-        let x = (b.1.cross(c.1) * a.3 + c.1.cross(a.1) * b.3 + a.1.cross(b.1) * c.3) * (1.0 / den);
-        if !x.is_finite() || x.dist(p) > size || (!mixed && planes.iter().any(|q| side * (q.1.dot(x) - q.3) > merge)) {
-            continue;
+        // A triple that misses (parallel opposite planes, two halves of one cylinder, …) is
+        // skipped; the other runs of three faces still make the saddle's corners.
+        let Some(x) = meet3(p, new.get(fa)?, new.get(fb)?, new.get(fc)?, size) else { continue };
+        if !mixed {
+            let planes: Vec<(Vec3, f64, f64)> = at.iter().filter_map(|i| plane_off(*i)).collect();
+            if planes.len() != at.len() || planes.iter().any(|(n, _, d2)| side * (n.dot(x) - d2) > merge) {
+                continue;
+            }
         }
         let fs = [fa, fb, fc];
         match nodes.iter_mut().find(|(q, _)| q.dist(x) < merge) {
@@ -538,16 +599,32 @@ fn split_corner(
         }
     }
     // Every face keeps a corner here, and every edge an end.
-    if planes.iter().any(|q| !nodes.iter().any(|(_, nf)| nf.contains(&q.0)))
+    if at.iter().any(|q| !nodes.iter().any(|(_, nf)| nf.contains(q)))
         || pairs.iter().any(|(x, y)| !nodes.iter().any(|(_, nf)| nf.contains(x) && nf.contains(y)))
     {
         return None;
     }
-    // Each corner where its planes meet best (least squares, for planes meeting at one point
-    // to within the merge distance).
+    // Each corner where its surfaces meet best (Newton, for sheets that meet at one point to
+    // within the merge distance).
     for (q, nf) in nodes.iter_mut() {
-        let (ns, ss): (Vec<Vec3>, Vec<f64>) = nf.iter().filter_map(|f| planes.iter().find(|x| x.0 == *f)).map(|x| (x.1, x.3 - x.2)).unzip();
-        *q = p + span_step(&ns, &ss)?;
+        let sheets: Vec<Surf> = nf.iter().filter_map(|f| new.get(*f).copied()).collect();
+        let mut uniq: Vec<Surf> = Vec::new();
+        for s in &sheets {
+            if !uniq.iter().any(|u| same_surf(u, s, tol)) {
+                uniq.push(*s);
+            }
+        }
+        let mut x = *q;
+        for _ in 0..8 {
+            let d: Vec<f64> = uniq.iter().map(|sf| sf.dist(x)).collect();
+            if d.iter().all(|e| e.abs() < merge) {
+                break;
+            }
+            let gs: Vec<Vec3> = uniq.iter().map(|sf| sf.grad(x)).collect::<Option<_>>()?;
+            let rhs: Vec<f64> = d.iter().map(|e| -e).collect();
+            x += span_step(&gs, &rhs)?;
+        }
+        *q = x;
     }
     Some(nodes)
 }
@@ -706,11 +783,139 @@ pub(crate) fn arc_mid(e: &mt::Edge, tol: f64) -> Option<Option<Vec3>> {
     pts.iter().all(|p| (p.dist(centre) - r).abs() < tol && (*p - centre).dot(w.normalized().unwrap_or(Vec3::Z)).abs() < tol).then_some(Some(m))
 }
 
+/// Merge each group of edge-connected faces that lie on the same cylinder into one face. A
+/// shell's saddle on a cylinder seam (#1494) cannot be split into corners joined by straight
+/// edges while the seam is still there; with the halves joined, that corner is four faces and
+/// the new edge on the front and the wall is a generator (a line). `None` when nothing merges.
+fn merge_adjacent_cylinders(b: &Body) -> Option<(Body, Vec<Vec<usize>>)> {
+    merge_adjacent_cylinders_result(b).ok()
+}
+
+fn merge_adjacent_cylinders_result(b: &Body) -> std::result::Result<(Body, Vec<Vec<usize>>), String> {
+    let faces: Vec<mt::Face> = b.solid.face_iter().cloned().collect();
+    let size = b.size();
+    let tol = (size * 1e-7).max(1e-9);
+    let surfs: Vec<Option<Surf>> = faces.iter().map(|f| surf_of(f, tol * 100.0)).collect();
+    let mut parent: Vec<usize> = (0..faces.len()).collect();
+    let find = |parent: &mut [usize], mut x: usize| {
+        while parent.get(x).copied().unwrap_or(x) != x {
+            let p = parent[x];
+            let g = parent.get(p).copied().unwrap_or(p);
+            parent[x] = g;
+            x = p;
+        }
+        x
+    };
+    let mut by_edge: HashMap<mt::EdgeID, Vec<usize>> = HashMap::new();
+    for (i, f) in faces.iter().enumerate() {
+        for e in f.edge_iter() {
+            by_edge.entry(e.id()).or_default().push(i);
+        }
+    }
+    let mut merged_any = false;
+    let mut cand = 0usize;
+    for fs in by_edge.values() {
+        if let [a, b] = fs[..]
+            && a != b
+            && let (Some(Some(sa)), Some(Some(sb))) = (surfs.get(a), surfs.get(b))
+            && matches!(sa, Surf::Cylinder { .. })
+        {
+            cand += 1;
+            if !same_surf(sa, sb, tol * 100.0) {
+                continue;
+            }
+            let (ra, rb) = (find(&mut parent, a), find(&mut parent, b));
+            if ra != rb {
+                if let Some(x) = parent.get_mut(ra.max(rb)) {
+                    *x = ra.min(rb);
+                }
+                merged_any = true;
+            }
+        }
+    }
+    if !merged_any {
+        return Err(format!("no merge cand={cand} faces={}", faces.len()));
+    }
+    let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
+    for i in 0..faces.len() {
+        groups.entry(find(&mut parent, i)).or_default().push(i);
+    }
+    let mut out: Vec<mt::Face> = Vec::new();
+    let mut from: Vec<Vec<usize>> = Vec::new();
+    let mut order: Vec<usize> = groups.keys().copied().collect();
+    order.sort_unstable();
+    for g in order {
+        let members = groups.get(&g).ok_or_else(|| "group".to_string())?;
+        if members.len() == 1 {
+            let i = *members.first().ok_or_else(|| "empty group".to_string())?;
+            out.push(faces.get(i).ok_or_else(|| "face".to_string())?.clone());
+            from.push(members.clone());
+            continue;
+        }
+        let mut count: HashMap<mt::EdgeID, usize> = HashMap::new();
+        for m in members {
+            for e in faces.get(*m).ok_or_else(|| "face".to_string())?.boundary_iters().into_iter().flatten() {
+                *count.entry(e.id()).or_insert(0) += 1;
+            }
+        }
+        let mut rest: Vec<mt::Edge> = Vec::new();
+        for m in members {
+            for e in faces.get(*m).ok_or_else(|| "face".to_string())?.boundary_iters().into_iter().flatten() {
+                if count.get(&e.id()).copied().unwrap_or(0) == 1 {
+                    rest.push(e);
+                }
+            }
+        }
+        let mut loops: Vec<Vec<mt::Edge>> = Vec::new();
+        while let Some(first) = rest.pop() {
+            let start = first.front().clone();
+            let mut cur = first.back().clone();
+            let mut lp = vec![first];
+            let mut guard = 0;
+            while cur != start && guard < 100_000 {
+                guard += 1;
+                let k = rest.iter().position(|e| e.front() == &cur).ok_or_else(|| format!("chain break members={members:?} rest={}", rest.len()))?;
+                let e = rest.remove(k);
+                cur = e.back().clone();
+                lp.push(e);
+            }
+            loops.push(lp);
+        }
+        let surface = faces.get(*members.first().ok_or_else(|| "empty".to_string())?).ok_or_else(|| "face".to_string())?.oriented_surface();
+        // One outer wire, the rest holes (a full cylinder wall has two end loops).
+        let (outer, holes) = loops.split_first().ok_or_else(|| "no loops".to_string())?;
+        let mut wires: Vec<mt::Wire> = vec![outer.clone().into()];
+        for h in holes {
+            wires.push(h.clone().into());
+        }
+        out.push(mt::Face::try_new(wires, surface).map_err(|e| format!("face try_new: {e}"))?);
+        from.push(members.clone());
+    }
+    let shell: mt::Shell = out.into();
+    // Keep every shell the body had: only the faces were merged.
+    let solid = mt::Solid::try_new(vec![shell]).map_err(|e| format!("solid: {e}"))?;
+    let body = Body::new(solid).map_err(|e| format!("body: {e}"))?.without_history();
+    Ok((body, from))
+}
+
 /// The body with each face moved along its outward normal by `shift(face index, normal at a
 /// face point)`, keeping the topology. Faces must be planes or cylinders. The result's history
 /// is over `[b]`: each face is the face it was moved from, each edge the edge it was moved from;
 /// faces moved to nothing are gone, and their neighbours meet along new edges.
 pub(crate) fn offset_body(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Result<Body> {
+    // A cylinder wall built as two halves puts its seam on a plane that also meets a saddle
+    // (#1494). Joining those halves first lets [`split_corner`] express the saddle with a
+    // straight generator; without that, the seam would need a curved new edge.
+    if let Some((merged, map)) = merge_adjacent_cylinders(b) {
+        return offset_body_inner(&merged, |fi, n| {
+            let old = map.get(fi).and_then(|g| g.first()).copied().unwrap_or(fi);
+            shift(old, n)
+        });
+    }
+    offset_body_inner(b, shift)
+}
+
+fn offset_body_inner(b: &Body, shift: impl Fn(usize, Vec3) -> f64) -> Result<Body> {
     let faces: Vec<mt::Face> = b.solid.face_iter().cloned().collect();
     let size = b.size();
     let tol = (size * 1e-7).max(1e-9);
