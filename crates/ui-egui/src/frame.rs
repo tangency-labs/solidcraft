@@ -36,6 +36,11 @@ pub fn dock_offset(ctx: &egui::Context, key: &str) -> egui::Vec2 {
     ctx.data(|d| d.get_temp::<egui::Vec2>(egui::Id::new(("sc_dock_offset", key)))).unwrap_or(egui::Vec2::ZERO)
 }
 
+/// Put a docked panel with this key back `offset` from its place (zero: in its place).
+pub fn set_dock_offset(ctx: &egui::Context, key: &str, offset: egui::Vec2) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(("sc_dock_offset", key)), offset));
+}
+
 /// A title drag owns the pointer even when it outruns the dialog's previous position.
 pub(crate) fn dock_dragging(ctx: &egui::Context) -> bool {
     let frame = ctx.cumulative_frame_nr();

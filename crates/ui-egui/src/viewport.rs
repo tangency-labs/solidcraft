@@ -4369,6 +4369,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let navigating_from_press = mode.is_some() || app.viewport.primary_nav.is_some() || joint_handle_pointer;
     let held = crate::select_other::track_hold(app, ui.ctx(), &proj, inside, primary_pressed, primary_down, hover, navigating_from_press);
     crate::select_other::hover_override(app);
+    // A part dragged in from the parts library: where it lands, and the insert on release.
+    crate::library::view_drop(app, ui, rect, &proj);
     let painter = ui.painter_at(rect);
     crate::gpu::paint_background(&painter, rect, &t);
 
