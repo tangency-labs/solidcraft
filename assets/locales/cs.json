@@ -5157,7 +5157,7 @@
   "update.check_unavailable": "Pro tuto instalaci není kontrola aktualizací dostupná.",
   "update.checking": "Kontrola…",
   "update.copy": "Kopírovat",
-  "update.dmg_opened": "Obraz disku je otevřený a ověřený: přetáhněte SolidCraft do Aplikací místo staré kopie a poté SolidCraft restartujte.",
+  "update.dmg_opened": "Obraz disku je otevřený a ověřený: ukončete SolidCraft, přetáhněte nový SolidCraft do Aplikací místo staré kopie a poté SolidCraft znovu otevřete.",
   "update.download": "Stáhnout",
   "update.download_open": "Stáhnout a otevřít",
   "update.downloading": "Stahování a ověřování… {done} z {total} MB",

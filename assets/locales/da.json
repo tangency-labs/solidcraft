@@ -5157,7 +5157,7 @@
   "update.check_unavailable": "Søgning efter opdateringer er ikke tilgængelig for denne installation.",
   "update.checking": "Søger…",
   "update.copy": "Kopiér",
-  "update.dmg_opened": "Diskbilledet er åbnet og verificeret: Træk SolidCraft til Programmer, erstat den gamle kopi, og genstart SolidCraft.",
+  "update.dmg_opened": "Diskbilledet er åbnet og verificeret: Afslut SolidCraft, træk det nye SolidCraft til Programmer, erstat den gamle kopi, og åbn derefter SolidCraft igen.",
   "update.download": "Download",
   "update.download_open": "Download og åbn",
   "update.downloading": "Downloader og verificerer… {done} af {total} MB",
