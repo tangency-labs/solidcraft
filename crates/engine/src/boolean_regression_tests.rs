@@ -225,6 +225,32 @@ fn shallow_cuts_rebuild_after_inserting_an_earlier_pocket() {
     }
 }
 
+/// #3303: a cylindrical face-extrusion tool encloses a widening cone and only
+/// touches its top rim. It must trim the height without a displaced tool or lid.
+#[test]
+fn inward_face_cut_of_a_frustum_keeps_its_depth_after_reopening() {
+    let s = replay(include_str!("../../../examples/regressions/inward_face_cut_of_frustum.json"));
+    let check = |s: &Session| {
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+        assert!(s.model.results.iter().all(|r| r.boolean_diagnostics.events.iter().all(|e| !e.strategy.alters_result())));
+        assert_eq!(s.model.state().bodies.len(), 1);
+        let state = s.model.state();
+        let body = &state.body("Body3").unwrap().body;
+        assert!(body.validity().is_empty(), "{:?}", body.validity());
+        assert_eq!(body.shell_count(), 1);
+        let mesh = body.tessellate(1e-5).unwrap();
+        // Frustum pi*h/3*(r0² + r0*r1 + r1²), with r1 = 1 + 0.4*5.6.
+        let want = std::f64::consts::PI * 5.6 / 3. * (1. + 3.24 + 3.24 * 3.24);
+        let got = mesh.measure().volume;
+        assert!((got - want).abs() < 0.01, "{got} vs {want}");
+        assert!((mesh.bounds().max.z - 5.6).abs() < 1e-8);
+        println!("#3303: volume {got:.6} / {want:.6} mm³; height 5.6 mm, one valid shell");
+    };
+    check(&s);
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    check(&reopened);
+}
+
 /// #2059: tabs exactly as wide as their supporting ribs share the ribs' side
 /// planes. The base's remote conical chamfer must not prevent their join.
 #[test]
