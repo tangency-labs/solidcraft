@@ -7680,23 +7680,38 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 // Picks on bodies of other (moved) components are where those bodies are shown.
                 None => doc.resolve_plane_in(vals, plane, 0, Some(&construction_state(doc, st, f.component)))?,
             };
-            st.construct.push(crate::construct::Construct { feature: f.id, name: f.name.clone(), geom: crate::construct::ConstructGeom::Plane(pl) });
+            st.construct.push(crate::construct::Construct {
+                feature: f.id,
+                name: f.name.clone(),
+                geom: crate::construct::ConstructGeom::Plane(pl),
+                bodies: Vec::new(),
+            });
             Ok(())
         }
         FeatureKind::ConstructionAxis { def } => {
-            let (origin, dir) =
-                crate::construct::resolve_axis(&crate::construct::Ctx { doc, vals, st: &construction_state(doc, st, f.component), depth: 0 }, def)?;
+            let cst = construction_state(doc, st, f.component);
+            let ctx = crate::construct::Ctx { doc, vals, st: &cst, depth: 0 };
+            let (origin, dir) = crate::construct::resolve_axis(&ctx, def)?;
+            let bodies = crate::construct::source_bodies(&ctx, &def.refs());
             st.construct.push(crate::construct::Construct {
                 feature: f.id,
                 name: f.name.clone(),
                 geom: crate::construct::ConstructGeom::Axis { origin, dir },
+                bodies,
             });
             Ok(())
         }
         FeatureKind::ConstructionPoint { def } => {
-            let p =
-                crate::construct::resolve_point(&crate::construct::Ctx { doc, vals, st: &construction_state(doc, st, f.component), depth: 0 }, def)?;
-            st.construct.push(crate::construct::Construct { feature: f.id, name: f.name.clone(), geom: crate::construct::ConstructGeom::Point(p) });
+            let cst = construction_state(doc, st, f.component);
+            let ctx = crate::construct::Ctx { doc, vals, st: &cst, depth: 0 };
+            let p = crate::construct::resolve_point(&ctx, def)?;
+            let bodies = crate::construct::source_bodies(&ctx, &def.refs());
+            st.construct.push(crate::construct::Construct {
+                feature: f.id,
+                name: f.name.clone(),
+                geom: crate::construct::ConstructGeom::Point(p),
+                bodies,
+            });
             Ok(())
         }
         FeatureKind::BoundaryFill { tools, cells, operation, remove_tools } => {
@@ -8176,6 +8191,9 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                     *slot = ModelBody::traced_new(mb.name.clone(), Traced::step(nb, &[&mb.traced()]), mb.feature);
                 }
             }
+            if !*copy {
+                move_constructions_with(doc, st, bodies, &crate::rigid(t, Vec3::ZERO, axis, ang));
+            }
             Ok(())
         }
         FeatureKind::MeshConvert { body, tolerance } => {
@@ -8309,6 +8327,36 @@ fn construction_state<'a>(doc: &Document, st: &'a ModelState, comp: u64) -> std:
         return std::borrow::Cow::Owned(world_state(doc, st));
     }
     state_in_frame(doc, st, comp)
+}
+
+/// Construction axes and points built on bodies a Move moves go with them (#10127): an axis
+/// through a cylinder turns with the cylinder, as its faces do. Only those built from the moved
+/// bodies alone (`Construct::bodies`) follow; one also held by a fixed point, a plane or another
+/// body stays. `m` is the move in the bodies' own frame; each construction is kept in its
+/// component's frame (`construction_state`), so the move is carried over into that frame.
+fn move_constructions_with(doc: &Document, st: &mut ModelState, moved: &[crate::BodyName], m: &Mat) {
+    let frame_of = |feature: u64| {
+        let comp = doc.feature(feature).map(|f| f.component).unwrap_or(0);
+        if comp == 0 && !doc.occurrences.is_empty() { crate::IDENTITY } else { doc.component_transform(comp) }
+    };
+    let world: BTreeMap<&str, Mat> =
+        st.bodies.iter().filter(|b| moved.iter().any(|n| *n == b.name)).map(|b| (b.name.as_str(), body_world(doc, b))).collect();
+    let mut placed = Vec::new();
+    for (k, c) in st.construct.iter().enumerate() {
+        let Some(body) = c.bodies.first().and_then(|b| world.get(b.as_str())) else { continue };
+        if !c.bodies.iter().all(|b| world.contains_key(b.as_str())) {
+            continue;
+        }
+        let frame = frame_of(c.feature);
+        let (Some(body_inv), Some(frame_inv)) = (crate::mat_inverse(body), crate::mat_inverse(&frame)) else { continue };
+        let in_frame = crate::mat_mul(&crate::mat_mul(&frame_inv, body), &crate::mat_mul(m, &crate::mat_mul(&body_inv, &frame)));
+        placed.push((k, c.geom.placed(&in_frame)));
+    }
+    for (k, geom) in placed {
+        if let Some(c) = st.construct.get_mut(k) {
+            c.geom = geom;
+        }
+    }
 }
 
 /// Whether `plane` is given by the origin planes and numbers alone.
