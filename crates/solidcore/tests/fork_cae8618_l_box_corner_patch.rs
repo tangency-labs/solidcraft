@@ -9,6 +9,10 @@
 //!
 //! The fork's test measures the angle between the binormals of the two faces at 31
 //! stations inside each of the patch's edges; this one compares the faces' normals there.
+//! Both take the angle from the cross product, `atan2(|a x b|, a . b)` (the fork's since
+//! tangency-labs/smlib#119), not `acos(a . b)`, which cannot resolve an angle below
+//! 2.1e-8 rad (1.21e-6 degrees). The fork negates the dot product, as tangent faces'
+//! binormals are opposed; this one takes it unsigned, as a face's normal may point either way.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -85,8 +89,11 @@ fn corner_patch_seams(k: &Kernel, b: &Brep, corner: Point3, reach: f64) -> (usiz
                 let p = c
                     .evaluate_point(k, iv.evaluate(f64::from(i) / 32.0))
                     .unwrap();
-                let cos = normal(s, p).dot(normal(s2, p)).abs().min(1.0);
-                worst = worst.max(cos.acos().to_degrees());
+                // the normals' angle either way round, from the cross product, which
+                // resolves it below acos's 2.1e-8 rad floor
+                let (n, n2) = (normal(s, p), normal(s2, p));
+                let angle = n.cross(n2).length().atan2(n.dot(n2).abs());
+                worst = worst.max(angle.to_degrees());
             }
         }
     }

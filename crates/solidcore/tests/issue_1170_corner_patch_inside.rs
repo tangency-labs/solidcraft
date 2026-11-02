@@ -103,12 +103,10 @@ fn max_patch_normal_angle(setback: f64, stay_inside: bool) -> solidcore::Result<
                     .ok_or(solidcore::SolidError::sm_err("issue_1170"))?;
                 s.evaluate_normal(&k, uv, Side::Left, Side::Left)
             };
-            let ang = normal(s1)?
-                .dot(normal(s2)?)
-                .abs()
-                .min(1.0)
-                .acos()
-                .to_degrees();
+            // the normals' angle either way round, from the cross product, which resolves
+            // it below acos's 2.1e-8 rad floor (tangency-labs/smlib#119)
+            let (n1, n2) = (normal(s1)?, normal(s2)?);
+            let ang = n1.cross(n2).length().atan2(n1.dot(n2).abs()).to_degrees();
             worst = worst.max(ang);
         }
     }
