@@ -289,7 +289,8 @@ impl NameCache {
 /// away or deleted). Items that cannot tell, and ones with no names, count as there.
 pub fn is_gone(session: &Session, entry: &Entry, names: &mut NameCache) -> bool {
     let Some(sel) = entry.sels.first() else { return false };
-    let state = session.world_state();
+    // A model that cannot be placed right now cannot tell either: the item counts as there.
+    let Ok(state) = session.world_state() else { return false };
     match sel {
         Sel::Body { name } => state.body(name).is_none(),
         Sel::Feature { id } => session.doc.feature(*id).is_none(),
@@ -328,7 +329,7 @@ pub fn current_sels(session: &Session, entry: &Entry, names: &mut NameCache) -> 
     if entry.names.is_empty() {
         return entry.sels.clone();
     }
-    let state = session.world_state();
+    let Ok(state) = session.world_state() else { return entry.sels.clone() };
     let Some(model_body) = state.body(body) else { return Vec::new() };
     let current = names.names(body, !is_face, || {
         if is_face { solidcraft_engine::doc::naming::face_names(model_body).to_vec() } else { solidcraft_engine::doc::naming::edge_names(model_body) }
