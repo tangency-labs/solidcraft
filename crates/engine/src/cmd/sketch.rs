@@ -596,7 +596,7 @@ pub(super) fn line_or_axis_ref(sk: &mut Sketch, v: Option<&Value>, cmd: &str, wh
 }
 
 /// Curve `id`, or the line of sketch axis `id` (see [`line_or_axis_ref`]); `None` when neither.
-fn curve_or_axis(sk: &mut Sketch, id: &str) -> Result<Option<usize>> {
+pub(super) fn curve_or_axis(sk: &mut Sketch, id: &str) -> Result<Option<usize>> {
     match sk.curve_index(id) {
         Some(c) => Ok(Some(c)),
         None => Ok(sk.sketch_axis_line(id)?),

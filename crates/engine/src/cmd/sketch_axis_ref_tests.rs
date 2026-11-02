@@ -237,3 +237,33 @@ fn bad_line_references_are_errors_and_change_nothing() {
     assert_eq!(s.doc.to_json(), before_redundant);
     assert!(axis_lines(&sketch(&s)).is_empty());
 }
+
+/// A point placed on a sketch axis while drawing (`on:x:…`, `on:y:…`, and the crossing of
+/// both, `x:x+y:…`) is held on that axis's line: it stays there when the line it starts is
+/// pulled about, as on any curve (#9330).
+#[test]
+fn a_point_drawn_on_a_sketch_axis_is_held_on_it() {
+    use solidcraft_sketch::ConstraintKind;
+    let mut s = on(json!("XY"));
+    let r = run(&mut s, "sketch.line", json!({"points": ["on:x:5,0.3", [20, 10]], "ids": ["a"]}));
+    assert!(r["sketch"]["solved"].as_bool().unwrap(), "{r}");
+    run(&mut s, "sketch.line", json!({"points": ["on:y:-0.2,7", [-15, 12]], "ids": ["b"]}));
+    run(&mut s, "sketch.line", json!({"points": ["x:x+y:0.1,-0.1", [6, -9]], "ids": ["c"]}));
+    let sk = sketch(&s);
+    let axes = axis_lines(&sk);
+    assert_eq!(axes.len(), 2, "one line per axis, shared: {axes:?}");
+    let line = |name: &str| axes.iter().find(|(n, _)| n == name).map(|(_, id)| sk.curve_index(id).unwrap()).unwrap();
+    let held = |p: &str, c: usize| {
+        let p = sk.resolve_point(p).unwrap();
+        sk.constraints.iter().any(|k| k.kind == ConstraintKind::PointOnCurve { p, c })
+    };
+    assert!(held("a.start", line("x")) && held("b.start", line("y")), "{:?}", sk.constraints);
+    assert!(held("c.start", line("x")) && held("c.start", line("y")));
+    assert!(pt(&sk, "a.start").y.abs() < 1e-9 && pt(&sk, "b.start").x.abs() < 1e-9, "on the axes");
+    assert!(pt(&sk, "c.start").len() < 1e-9, "at the origin");
+    // Dragged along, the points stay on their axes.
+    run(&mut s, "sketch.drag", json!({"entity": "a.start", "to": [9, 4]}));
+    run(&mut s, "sketch.drag", json!({"entity": "b.start", "to": [3, -6]}));
+    let sk = sketch(&s);
+    assert!(pt(&sk, "a.start").y.abs() < 1e-7 && pt(&sk, "b.start").x.abs() < 1e-7, "{:?} {:?}", pt(&sk, "a.start"), pt(&sk, "b.start"));
+}

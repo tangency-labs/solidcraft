@@ -32,9 +32,9 @@
  {"click": {"sketch": [0, 10]}},
  {"click": {"handle": "dialog:OK"}},
  {"expect": {"dialog": null, "errors": 0, "sketch_curves": {"own": 3}}},
- {"expect": {"query": {"command": "sketch.inspect", "path": ["curves", 2, "radius"], "value": 3}}},
- {"expect": {"query": {"command": "sketch.inspect", "path": ["curves", 2, "center_at", 0], "value": -10}}},
- {"expect": {"query": {"command": "sketch.inspect", "path": ["curves", 2, "center_at", 1], "value": 0}}},
+ {"expect": {"query": {"command": "sketch.inspect", "path": ["curves", 4, "radius"], "value": 3}}},
+ {"expect": {"query": {"command": "sketch.inspect", "path": ["curves", 4, "center_at", 0], "value": -10}}},
+ {"expect": {"query": {"command": "sketch.inspect", "path": ["curves", 4, "center_at", 1], "value": 0}}},
  {"shot": "sketch_mirror_window"},
 
  {"note": "Starting the command again and pressing Escape leaves the document and the undo history untouched."},

@@ -569,3 +569,66 @@ fn a_horizontal_line_ends_plumb_with_a_point_above_and_keeps_both() {
         "the line stays horizontal"
     );
 }
+
+/// The sketch's own X and Y axes, held on (point id, axis name): the points with a
+/// point-on-curve constraint to a sketch axis's line.
+fn held_on_axes(h: &Harness) -> Vec<(String, String)> {
+    use solidcraft_engine::sketch::{ConstraintKind::PointOnCurve, LinkSource};
+    let st = h.app.session.world_state();
+    let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let axis_of = |c: usize| {
+        let link = sk.curves.get(c)?.link.as_deref()?;
+        match &sk.link(link)?.source {
+            LinkSource::SketchAxis { name } => Some(name.clone()),
+            _ => None,
+        }
+    };
+    sk.constraints
+        .iter()
+        .filter_map(|k| match k.kind {
+            PointOnCurve { p, c } => Some((sk.points.get(p)?.id.clone(), axis_of(c)?)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// #9330: with the Point tool, a click two pixels off the sketch's X axis puts the point on it
+/// and holds it there; so does a line's first point two pixels off the Y axis. Nothing else is
+/// near, so before, the point took the grid and nothing held it. With the Origin hidden (its
+/// axes not drawn), nothing snaps to them.
+#[test]
+fn a_point_drawn_near_a_sketch_axis_lands_on_it_and_stays_there() {
+    for shown in [true, false] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.set_origin_shown(shown);
+        h.frames(3);
+        let [x, y] = h.at(&json!({"sketch":[12.3, 0]})).unwrap();
+        step(&mut h, json!({"start":"sketch.point"}));
+        step(&mut h, json!({"click":[x, y - 2.0]}));
+        step(&mut h, json!({"key":"Escape"}));
+        let [x, y] = h.at(&json!({"sketch":[0, 9.7]})).unwrap();
+        let [x1, y1] = h.at(&json!({"sketch":[15, 20]})).unwrap();
+        step(&mut h, json!({"start":"sketch.line"}));
+        step(&mut h, json!({"click":[x + 2.0, y]}));
+        step(&mut h, json!({"click":[x1, y1]}));
+        step(&mut h, json!({"key":"Escape"}));
+        step(&mut h, json!({"key":"Escape"}));
+        let held = held_on_axes(&h);
+        if !shown {
+            assert!(held.is_empty(), "Origin hidden: {held:?}");
+            continue;
+        }
+        let st = h.app.session.world_state();
+        let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let at = |id: &str| sk.point(sk.resolve_point(id).unwrap()).unwrap();
+        let on_x: Vec<&String> = held.iter().filter(|(_, a)| a == "x").map(|(p, _)| p).collect();
+        let on_y: Vec<&String> = held.iter().filter(|(_, a)| a == "y").map(|(p, _)| p).collect();
+        assert_eq!((on_x.len(), on_y.len()), (1, 1), "{held:?}");
+        let (px, py) = (at(on_x[0]), at(on_y[0]));
+        assert!(px.y.abs() < 1e-9 && (px.x - 12.3).abs() < 0.5, "on the X axis: {px:?}");
+        assert!(py.x.abs() < 1e-9 && (py.y - 9.7).abs() < 0.5, "on the Y axis: {py:?}");
+    }
+}

@@ -32,7 +32,7 @@
   {"click": {"sketch": [30, 30]}},
   {"key": "Escape"},
   {"key": "Escape"},
-  {"expect": {"query": {"command": "sketch.inspect", "path": ["curves", 6, "construction"], "value": true}}},
+  {"expect": {"query": {"command": "sketch.inspect", "path": ["curves", 7, "construction"], "value": true}}},
   {"key": "X"},
   {"click": {"sketch": [40, 15]}},
   {"key": "X"},
@@ -43,5 +43,5 @@
   {"click": {"sketch": [30, 40]}},
   {"key": "Escape"},
   {"key": "Escape"},
-  {"expect": {"query": {"command": "sketch.inspect", "path": ["curves", 7, "construction"], "value": false}}}
+  {"expect": {"query": {"command": "sketch.inspect", "path": ["curves", 8, "construction"], "value": false}}}
 ]
