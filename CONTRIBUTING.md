@@ -347,6 +347,13 @@ without pushes. These automatic cleanup deadlines are separate from the daily pr
 `/unclaim` releases the bot claim early (only you or a maintainer can). Issues a maintainer has
 taken are never freed automatically.
 
+**A PR has to explain itself.** Start the description with what it is, in plain words someone new
+to the project would understand: what it does and who it's for. Don't assume anyone knows the name
+of your tool, project or feature. If there's anything to look at, show it in the description: a
+picture or video has to be visible there without opening the changed files. "The GIF is the change"
+doesn't count. A PR that doesn't do this waits until it does. For a PR that adds to
+`docs/showcase.md` or `docs/screenshots/`, the Picture check fails until the description shows one.
+
 Help reviewers see what the words mean. For observable CAD, UI or model behavior, please
 include actual descriptive screenshots or a short recording in the issue or PR. This evidence
 is required for changes or bugs that can be demonstrated in the app, including kernel,
