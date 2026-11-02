@@ -635,6 +635,105 @@ fn plane_perpendicular_to_a_plane_through_a_line() {
     assert!(s.execute("construct.plane.perpendicular", &json!({"plane": "XY", "line": {"axis": "Z"}})).is_err());
 }
 
+/// The signed distance of `p` from `pl`, along its normal.
+fn above(pl: &Plane, p: Vec3) -> f64 {
+    (p - pl.origin).dot(pl.normal().normalized().unwrap_or(Vec3::Z))
+}
+
+#[test]
+fn plane_normal_to_axis_is_square_to_the_axis_through_the_point() {
+    let mut s = part();
+    // The box's front bottom edge runs along X; the top back right corner is (40, 30, 20).
+    run(&mut s, "construct.plane.normal_to_axis", json!({"axis": {"edge": [20, 0, 0]}, "point": {"vertex": [40, 30, 20]}, "name": "End"}));
+    let end = plane(&s, "End");
+    assert!(near(end.origin, Vec3::new(40.0, 30.0, 20.0)) && parallel(end.normal(), Vec3::X), "{end:?}");
+    // The box's right face lies in it, and the left face 40 mm behind it.
+    assert!(on_plane(&end, Vec3::new(40.0, 7.0, 3.0)), "{end:?}");
+    assert!((above(&end, Vec3::new(0.0, 7.0, 3.0)).abs() - 40.0).abs() < 1e-6, "{end:?}");
+    // World Z through a fixed point: the horizontal plane at that height.
+    run(&mut s, "construct.plane.normal_to_axis", json!({"axis": {"axis": "Z"}, "point": {"point": [10, 20, 30]}, "name": "Shelf"}));
+    let shelf = plane(&s, "Shelf");
+    assert!(near(shelf.origin, Vec3::new(10.0, 20.0, 30.0)) && parallel(shelf.normal(), Vec3::Z), "{shelf:?}");
+    // A point on the axis is fine: unlike Plane Through Axis And Point, the plane is still unique.
+    run(&mut s, "construct.plane.normal_to_axis", json!({"axis": {"axis": "Z"}, "point": {"point": [0, 0, 5]}, "name": "Low"}));
+    assert!(near(plane(&s, "Low").origin, Vec3::new(0.0, 0.0, 5.0)) && parallel(plane(&s, "Low").normal(), Vec3::Z));
+    // A sloped axis in space, (0,0,0) to (1,2,2) (3 long), through (3,0,0): the normal is
+    // (1,2,2)/3 and the origin of the axis is 3 · 1/3 = 1 mm behind the plane.
+    run(&mut s, "construct.axis.two_points", json!({"a": {"point": [0, 0, 0]}, "b": {"point": [1, 2, 2]}, "name": "Slant"}));
+    run(&mut s, "construct.plane.normal_to_axis", json!({"axis": {"axis": "Slant"}, "point": {"point": [3, 0, 0]}, "name": "Cross"}));
+    let cross = plane(&s, "Cross");
+    let n = Vec3::new(1.0, 2.0, 2.0) / 3.0;
+    assert!(near(cross.origin, Vec3::new(3.0, 0.0, 0.0)) && near(cross.normal().normalized().unwrap(), n), "{cross:?}");
+    assert!((above(&cross, Vec3::ZERO) + 1.0).abs() < 1e-9, "{cross:?}");
+    // Something that is not a line, or not a point, is refused and changes nothing.
+    let before = s.doc.to_json();
+    assert!(s.execute("construct.plane.normal_to_axis", &json!({"axis": "XY", "point": {"point": [0, 0, 0]}})).is_err());
+    assert!(s.execute("construct.plane.normal_to_axis", &json!({"axis": {"axis": "Z"}, "point": {"plane": "XY"}})).is_err());
+    assert!(s.execute("construct.plane.normal_to_axis", &json!({"axis": {"axis": "Z"}})).is_err());
+    assert_eq!(s.doc.to_json(), before, "a refused plane leaves the design unchanged");
+}
+
+#[test]
+fn plane_normal_to_axis_on_a_sloped_edge_follows_the_model() {
+    // A wedge: the right triangle (0,0), (30,0), (0,40) on XY, 10 mm tall. Its sloped edge runs
+    // from (30,0) to (0,40): 50 mm long, along (-3,4)/5.
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "tall", "expression": "10 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0], [0, 40], [0, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "tall", "name": "Wedge"}));
+    run(&mut s, "construct.plane.normal_to_axis", json!({"axis": {"edge": [15, 20, 0]}, "point": {"vertex": [30, 0, 10]}, "name": "Cut"}));
+    let check = |s: &Session, height: f64| {
+        let pl = plane(s, "Cut");
+        assert!(near(pl.origin, Vec3::new(30.0, 0.0, height)), "{pl:?}");
+        assert!(parallel(pl.normal(), Vec3::new(-3.0, 4.0, 0.0)), "{pl:?}");
+        // The edge's other end, (0,40), is the edge's length from the plane; the vertical edge
+        // at (30,0) lies in it.
+        assert!((above(&pl, Vec3::new(0.0, 40.0, 0.0)).abs() - 50.0).abs() < 1e-6, "{pl:?}");
+        assert!(on_plane(&pl, Vec3::new(30.0, 0.0, height / 2.0)), "{pl:?}");
+    };
+    check(&s, 10.0);
+    // An upstream edit (the wedge grows taller) moves the vertex, and the plane goes with it.
+    run(&mut s, "parameters.change", json!({"name": "tall", "expression": "25 mm"}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    check(&s, 25.0);
+    run(&mut s, "edit.undo", json!({}));
+    check(&s, 10.0);
+}
+
+#[test]
+fn plane_normal_to_axis_follows_edits_renames_undo_and_reopen() {
+    let mut s = Session::default();
+    run(&mut s, "construct.axis.two_points", json!({"a": {"point": [5, 6, 7]}, "b": {"point": [5, 6, 17]}, "name": "Spine"}));
+    run(&mut s, "construct.point.vertex", json!({"point": {"point": [15, 6, 9]}, "name": "Pin"}));
+    run(&mut s, "construct.plane.normal_to_axis", json!({"axis": {"axis": "Spine"}, "point": {"construct_point": "Pin"}, "name": "Disc"}));
+    let disc = plane(&s, "Disc");
+    assert!(near(disc.origin, Vec3::new(15.0, 6.0, 9.0)) && parallel(disc.normal(), Vec3::Z), "{disc:?}");
+    run(&mut s, "timeline.rename", json!({"feature": "Spine", "name": "Mast"}));
+    run(&mut s, "timeline.rename", json!({"feature": "Pin", "name": "Peg"}));
+    let definition = run(&mut s, "timeline.inspect", json!({"feature": "Disc"}));
+    assert_eq!(definition["definition"]["plane"]["type"], "normal_to_axis");
+    assert_eq!(definition["definition"]["plane"]["axis"]["name"], "Mast");
+    assert_eq!(definition["definition"]["plane"]["point"]["name"], "Peg");
+    // Turning the axis to run along Y turns the plane; moving the point moves it.
+    run(&mut s, "timeline.edit", json!({"feature": "Mast", "set": {"def.b": {"type": "point", "p": [5, 16, 7]}}}));
+    assert!(parallel(plane(&s, "Disc").normal(), Vec3::Y), "{:?}", plane(&s, "Disc"));
+    run(&mut s, "timeline.edit", json!({"feature": "Peg", "set": {"def.point": {"type": "point", "p": [1, 2, 3]}}}));
+    let disc = plane(&s, "Disc");
+    assert!(near(disc.origin, Vec3::new(1.0, 2.0, 3.0)) && parallel(disc.normal(), Vec3::Y), "{disc:?}");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(near(plane(&s, "Disc").origin, Vec3::new(15.0, 6.0, 9.0)));
+    run(&mut s, "edit.redo", json!({}));
+    let reopened = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
+    let mut cold = Session::new(reopened);
+    cold.refresh();
+    assert!(cold.model.results.iter().all(|r| r.error.is_none()), "{:?}", cold.model.results);
+    let pl = plane(&cold, "Disc");
+    assert!(near(pl.origin, Vec3::new(1.0, 2.0, 3.0)) && parallel(pl.normal(), Vec3::Y), "{pl:?}");
+    run(&mut cold, "sketch.create", json!({"plane": "Disc"}));
+}
+
 #[test]
 fn ambiguous_plane_aliases_refuse_without_document_or_history_changes() {
     for alias in ["Top", "Front", "Right", "XY", "XZ", "YZ"] {

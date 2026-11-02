@@ -1,0 +1,30 @@
+{
+  "en": {
+    "cmd.construct.plane.normal_to_axis": "Plane Normal To Axis",
+    "help.construct.plane.normal_to_axis": "Creates a construction plane square to an axis or straight edge, through a point you pick. Use it to sketch a cross-section at a vertex, such as the end of a rail or shaft."
+  },
+  "ar": {
+    "cmd.construct.plane.normal_to_axis": "مستوى عمودي على محور",
+    "help.construct.plane.normal_to_axis": "ينشئ مستوى إنشائيًا عموديًا على محور أو حافة مستقيمة ويمر بنقطة تختارها. استخدمه لرسم مقطع عرضي عند رأس، مثل طرف سكة أو عمود."
+  },
+  "de": {
+    "cmd.construct.plane.normal_to_axis": "Ebene senkrecht zur Achse",
+    "help.construct.plane.normal_to_axis": "Erzeugt eine Konstruktionsebene senkrecht zu einer Achse oder geraden Kante, durch einen gewählten Punkt. Damit skizzieren Sie einen Querschnitt an einem Eckpunkt, etwa am Ende einer Schiene oder Welle."
+  },
+  "he": {
+    "cmd.construct.plane.normal_to_axis": "מישור ניצב לציר",
+    "help.construct.plane.normal_to_axis": "יצירת מישור עזר ניצב לציר או למקצוע ישר, דרך נקודה שנבחרה. מתאים לשרטוט חתך בקודקוד, למשל בקצה של מסילה או פיר."
+  },
+  "ja": {
+    "cmd.construct.plane.normal_to_axis": "軸に垂直な平面",
+    "help.construct.plane.normal_to_axis": "軸または直線エッジに垂直で、選択した点を通る構築平面を作ります。レールやシャフトの端など、頂点の位置で断面をスケッチするときに使います。"
+  },
+  "vi": {
+    "cmd.construct.plane.normal_to_axis": "Mặt phẳng vuông góc với trục",
+    "help.construct.plane.normal_to_axis": "Tạo mặt phẳng dựng hình vuông góc với một trục hoặc cạnh thẳng, đi qua một điểm bạn chọn. Dùng để phác thảo mặt cắt tại một đỉnh, chẳng hạn ở đầu một thanh ray hoặc trục."
+  },
+  "zh": {
+    "cmd.construct.plane.normal_to_axis": "垂直于轴的平面",
+    "help.construct.plane.normal_to_axis": "创建垂直于轴或直边、并通过所选点的构造平面。用于在顶点处绘制截面草图，例如在导轨或轴的端部。"
+  }
+}

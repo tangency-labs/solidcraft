@@ -207,6 +207,7 @@ fn construction_names_follow_renames_in_every_definition() {
         json!({"type": "tangent", "face": plane, "at": [0, 0, 0]}),
         json!({"type": "along_path", "path": axis, "t": "0.5"}),
         json!({"type": "perpendicular", "plane": plane, "line": axis}),
+        json!({"type": "normal_to_axis", "axis": axis, "point": point}),
     ];
     let wrapped = planes.into_iter().map(|plane| {
         json!({"type": "construction_plane", "plane": {"type": "flipped", "base": {

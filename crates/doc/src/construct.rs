@@ -783,6 +783,17 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
             let (p, tan) = along(ctx, path, t)?;
             Plane::from_normal(p, tan).ok_or_else(degenerate)
         }
+        PlaneRef::NormalToAxis { axis, point: at } => {
+            // A model edge or round face faces one way however an edit rebuilds it, so a sketch
+            // on the plane keeps its side; a sketch line or axis faces the way it was drawn.
+            let (_, dir) = if matches!(**axis, GeoRef::Edge { .. } | GeoRef::Face { .. }) { model_axis(ctx.st, axis)? } else { line(ctx, axis)? };
+            let n = dir.normalized().ok_or_else(|| bad("the axis has no direction"))?;
+            let p = point(ctx, at)?;
+            if !p.is_finite() {
+                return Err(bad("the point is not finite"));
+            }
+            Plane::from_normal(p, n).ok_or_else(degenerate)
+        }
         PlaneRef::ThroughPoint { base, point: at } => {
             let b = ctx.doc.resolve_plane_in(ctx.vals, base, ctx.depth + 1, Some(ctx.st))?;
             let n = b.normal().normalized().ok_or_else(degenerate)?;
@@ -908,7 +919,10 @@ impl PlaneRef {
     /// The references of a plane built from model geometry.
     pub fn refs_mut(&mut self) -> Vec<&mut GeoRef> {
         match self {
-            PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } | PlaneRef::AxisPoint { axis: a, point: b } => vec![a.as_mut(), b.as_mut()],
+            PlaneRef::Midplane { a, b }
+            | PlaneRef::TwoEdges { a, b }
+            | PlaneRef::AxisPoint { axis: a, point: b }
+            | PlaneRef::NormalToAxis { axis: a, point: b } => vec![a.as_mut(), b.as_mut()],
             PlaneRef::Perpendicular { plane, line } => vec![plane.as_mut(), line.as_mut()],
             PlaneRef::ThreePoints { a, b, c } => vec![a.as_mut(), b.as_mut(), c.as_mut()],
             PlaneRef::Tangent { face, reference, .. } => {

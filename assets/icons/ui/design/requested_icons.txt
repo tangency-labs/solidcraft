@@ -183,6 +183,7 @@ plane_along_path	false
 plane_angle	false
 plane_axis_point	false
 plane_midplane	false
+plane_normal_to_axis	false
 plane_perpendicular	false
 plane_tangent	false
 plane_three_points	false

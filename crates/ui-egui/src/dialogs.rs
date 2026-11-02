@@ -5916,6 +5916,9 @@ fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&
         "construct.plane.perpendicular" => {
             ("construct.plane.perpendicular", "PERPENDICULAR PLANE", &[("Plane", PLANE, "plane"), ("Line", LINE, "line")])
         }
+        "construct.plane.normal_to_axis" => {
+            ("construct.plane.normal_to_axis", "cmd.construct.plane.normal_to_axis", &[("Axis", LINE | CURVES, "axis"), ("Point", POINT, "point")])
+        }
         _ => return None,
     })
 }
@@ -7658,6 +7661,7 @@ mod construct_ask_tests {
         "construct.plane.three_points",
         "construct.plane.tangent",
         "construct.plane.perpendicular",
+        "construct.plane.normal_to_axis",
     ];
 
     /// A 20 mm cylinder, 20 mm tall, at the origin: the #204 repro design.

@@ -231,7 +231,8 @@ fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
         | PlaneRef::AxisPoint { .. }
         | PlaneRef::ThreePoints { .. }
         | PlaneRef::AlongPath { .. }
-        | PlaneRef::Perpendicular { .. } => {
+        | PlaneRef::Perpendicular { .. }
+        | PlaneRef::NormalToAxis { .. } => {
             for r in p.refs_mut() {
                 map_geo_ref(m, r);
             }
