@@ -459,6 +459,19 @@ pub struct Session {
     /// design's name. A borrowed name follows Save As to the new file's name (#4907); a name
     /// the user chose is kept.
     pub user_named: bool,
+    /// Set when an earlier revision is open read-only (`doc.restore` with `mode: "readonly"`).
+    /// Edits and Save are refused until that revision is restored as the working model, saved
+    /// as a new file, or another design is opened.
+    pub revision_view: Option<u64>,
+    /// The design's save history (`document_history` in its file): the save count and the
+    /// revisions with their snapshots. The session keeps it, as it keeps `visibility`: opening
+    /// takes it out of the document and a save writes it into the file's copy only, so saving
+    /// never changes the live document or its undo history. The live document's own field stays
+    /// fresh.
+    pub document_history: Arc<solidcraft_doc::document_history::DocumentHistory>,
+    /// Whether saves keep model snapshots, and the size and revision caps. Off by default.
+    /// A preference, like `auto_project`: it belongs to the user, not the design.
+    pub revision_limits: solidcraft_doc::document_history::RevisionHistoryOptions,
     /// One-shot display-only notification during doc.open, before authoritative evaluation.
     /// Interactive loaders may show it provisionally; it never becomes model state.
     pub open_preview: Option<Box<dyn Fn(solidcraft_io::DesignPreview) + Send + Sync>>,
@@ -680,13 +693,17 @@ impl Session {
         solidcraft_io::vfs::install_checks();
         // The session keeps what is hidden (an undo step of its own); the design file carries it.
         let visibility = std::mem::take(&mut doc.visibility);
+        // The session keeps the save history too; the design file carries it.
+        let history = std::mem::take(&mut doc.document_history);
         let doc = Arc::new(doc);
         let model = Self::saved_model(&doc, saved).unwrap_or_else(|| {
             let mut model = Model::new();
             model.evaluate_shared(&doc);
             model
         });
-        Self::with_model(doc, visibility, model)
+        let mut session = Self::with_model(doc, visibility, model);
+        session.document_history = Arc::new(history);
+        session
     }
 
     /// The model `doc`'s file kept, when it is `doc`'s evaluation and the cache is not turned off.
@@ -713,6 +730,9 @@ impl Session {
             disk: None,
             read_only: false,
             user_named: false,
+            revision_view: None,
+            document_history: Default::default(),
+            revision_limits: Default::default(),
             open_preview: None,
             log: Vec::new(),
             revision: 1,
@@ -777,6 +797,7 @@ impl Session {
     pub fn replace_design(&mut self, fresh: Session) {
         let auto_project = self.auto_project;
         let single_surface_analysis = self.single_surface_analysis;
+        let revision_limits = self.revision_limits;
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
         let render_viewport = self.render_viewport.clone();
@@ -791,6 +812,7 @@ impl Session {
         self.crash_journal = crash_journal;
         self.auto_project = auto_project;
         self.set_single_surface_analysis(single_surface_analysis);
+        self.revision_limits = revision_limits;
         self.param_check = param_check;
         self.easyprint_upload = easyprint_upload;
         self.render_viewport = render_viewport;
@@ -1459,6 +1481,13 @@ impl Session {
     /// the model up to date before anything reads it.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        if let Some(rev) = self.revision_view
+            && (spec.undoable || spec.id == "file.save")
+        {
+            return Err(EngineError::Other(format!(
+                "revision {rev} is open read-only; restore it as the working model (`doc.restore` mode \"working\") or use Save As"
+            )));
+        }
         let host_viewport = self.render_viewport.clone();
         let host_jobs = self.render_jobs.host.clone();
         let additional_jobs = self.render_jobs.additional.clone();
@@ -1715,6 +1744,9 @@ impl Session {
             disk: self.disk,
             read_only: self.read_only,
             user_named: self.user_named,
+            revision_view: self.revision_view,
+            document_history: self.document_history.clone(),
+            revision_limits: self.revision_limits,
             open_preview: None,
             saved: self.saved.clone(),
             log: Vec::new(),
@@ -2234,6 +2266,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         named_views,
         visibility,
         next_component_color_index,
+        document_history,
     } = a;
     *render == b.render
         && *format == b.format
@@ -2270,4 +2303,5 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *named_views == b.named_views
         && *visibility == b.visibility
         && *next_component_color_index == b.next_component_color_index
+        && *document_history == b.document_history
 }

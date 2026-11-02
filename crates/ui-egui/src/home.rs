@@ -609,6 +609,7 @@ enum FileAction {
     Import,
     Save,
     SaveAs,
+    Revisions,
     Export(&'static str),
     Mesh,
     ViewDxf,
@@ -741,13 +742,15 @@ fn navigation(app: &SolveApp, ui: &mut egui::Ui, action: &mut Option<FileAction>
     } else {
         format!("{} ({})", app.tr_label("Recover"), app.recoverable.len())
     };
+    let save = design && app.session.revision_view.is_none();
     let nav = [
         ("home:start", app.tr_label("Start"), String::new(), Some(Section::Start), true, FileAction::Section(Section::Start)),
         ("home:new", app.tr_label("New"), format!("{primary}N"), None, true, FileAction::New("preferred")),
         ("home:open", app.tr("ui.open"), format!("{primary}O"), None, true, FileAction::Open),
         ("home:recover", recover.as_str(), String::new(), Some(Section::Recovery), true, FileAction::Section(Section::Recovery)),
-        ("home:save", app.tr("ui.save"), format!("{primary}S"), None, design, FileAction::Save),
+        ("home:save", app.tr("ui.save"), format!("{primary}S"), None, save, FileAction::Save),
         ("home:save_as", app.tr("ui.save_as"), format!("{primary}{shift}S"), None, design, FileAction::SaveAs),
+        ("home:revisions", app.tr("home.revisions"), String::new(), None, design, FileAction::Revisions),
         ("home:export", app.tr("home.export"), String::new(), Some(Section::Export), design, FileAction::Section(Section::Export)),
         ("home:properties", app.tr("home.properties"), String::new(), None, design, FileAction::Properties),
         ("home:settings", app.tr("home.settings"), format!("{primary},"), None, true, FileAction::Settings),
@@ -756,7 +759,7 @@ fn navigation(app: &SolveApp, ui: &mut egui::Ui, action: &mut Option<FileAction>
         ("home:about", app.tr_label("About SolidCraft"), String::new(), None, true, FileAction::About),
     ];
     for (index, (id, label, key, section, enabled, picked)) in nav.into_iter().enumerate() {
-        if index == 4 || index == 8 {
+        if index == 4 || index == 9 {
             FileView::separator(ui);
         }
         let response = FileView::nav_row(ui, id, label, &key, section == Some(app.home.section), enabled && !busy);
@@ -1097,6 +1100,9 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
         FileAction::SaveAs => {
             app.home.open = false;
             crate::toolbar::save_as(app);
+        }
+        FileAction::Revisions => {
+            app.start("doc.revisions");
         }
         FileAction::Export(ext) => {
             app.home.open = false;

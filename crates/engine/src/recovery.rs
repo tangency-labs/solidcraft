@@ -220,6 +220,8 @@ struct Snapshot {
     id: String,
     doc: Arc<Document>,
     visibility: crate::Visibility,
+    /// The session's save history, so a recovered design saved over its file keeps its revisions.
+    history: Arc<solidcraft_doc::document_history::DocumentHistory>,
     path: Option<String>,
 }
 
@@ -227,11 +229,12 @@ impl Snapshot {
     /// Write the design and its entry (the slow part: serialising and compressing the design).
     fn write(&self) -> Result<()> {
         let io = |e: std::io::Error| EngineError::Other(format!("autosave: {e}"));
-        let bytes = if self.visibility.is_empty() {
+        let bytes = if self.visibility.is_empty() && self.doc.document_history == *self.history {
             solidcraft_io::write_design_container(&self.doc)?
         } else {
             let mut doc = (*self.doc).clone();
             doc.visibility = self.visibility.clone();
+            doc.document_history = (*self.history).clone();
             solidcraft_io::write_design_container(&doc)?
         };
         solidcraft_io::write_atomic(&file(&self.dir, &self.id, solidcraft_io::DESIGN_EXT), &bytes, false).map_err(io)?;
@@ -316,7 +319,14 @@ impl Autosaver {
                 }
                 // No thread to write on: write here, as before.
                 Err(_) => {
-                    let snapshot = Snapshot { dir: self.dir.clone(), id: self.id.clone(), doc, visibility, path: s.path.clone() };
+                    let snapshot = Snapshot {
+                        dir: self.dir.clone(),
+                        id: self.id.clone(),
+                        doc,
+                        visibility,
+                        history: s.document_history.clone(),
+                        path: s.path.clone(),
+                    };
                     let written = snapshot.write();
                     self.written(s, snapshot.doc, snapshot.visibility, written)?;
                     Ok(true)
@@ -350,7 +360,14 @@ impl Autosaver {
         if self.last.as_ref().is_some_and(|(l, v)| (Arc::ptr_eq(l, &s.doc) || **l == *s.doc) && *v == s.visibility) {
             return None;
         }
-        Some(Snapshot { dir: self.dir.clone(), id: self.id.clone(), doc: s.doc.clone(), visibility: s.visibility.clone(), path: s.path.clone() })
+        Some(Snapshot {
+            dir: self.dir.clone(),
+            id: self.id.clone(),
+            doc: s.doc.clone(),
+            visibility: s.visibility.clone(),
+            history: s.document_history.clone(),
+            path: s.path.clone(),
+        })
     }
 
     /// The running write's outcome, once it has one (`wait`: wait for it). True when no write
