@@ -44,6 +44,13 @@ pub const CONSTRAINT_GALLERY: &[&str] = &[
     "sketch.constraint.perpendicular",
 ];
 
+/// Whether a Constrain-panel command is drawn as a small grid cell: the default gallery and any
+/// other constraint the user pins, since every constraint has a small `c_` icon in the same style.
+pub fn constraint_cell(id: &str) -> bool {
+    CONSTRAINT_GALLERY.contains(&id)
+        || (id.starts_with("sketch.constraint.") && solidcraft_engine::find_command(id).is_some_and(|c| c.icon.starts_with("c_")))
+}
+
 pub struct CommandGroup {
     pub label: &'static str,
     pub ids: &'static [&'static str],

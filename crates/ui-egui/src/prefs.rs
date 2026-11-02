@@ -1223,6 +1223,9 @@ preference_settings! {
     /// blinks there, and a running command that sits in a drop-down marks its section label. Off
     /// by default: the ribbon stays as it was.
     ribbon_reveal: bool = false, PAGE_LAYOUT => check_id("prefs.ribbon_reveal");
+    /// Constraints pinned to the sketch ribbon's Constrain panel are drawn as small cells in its
+    /// constraint grid, like the default six. Off: they are full-size buttons, as before.
+    pinned_constraints_in_grid: bool = true, PAGE_LAYOUT => check_id("prefs.pinned_constraints_in_grid");
     /// Where a dialog's OK and Cancel sit: under its inputs (the default) or in its title row (#6708).
     dialog_buttons: crate::ui_kit::DialogButtons = Default::default(), PAGE_LAYOUT;
     /// Where notices and offers stack: the view's bottom-right corner (the default) or the bottom
@@ -5748,6 +5751,7 @@ mod tests {
             ("sketch_tab_always", json!(true), PAGE_LAYOUT),
             ("keep_work_on_tab_switch", json!(true), PAGE_LAYOUT),
             ("ribbon_reveal", json!(true), PAGE_LAYOUT),
+            ("pinned_constraints_in_grid", json!(false), PAGE_LAYOUT),
             ("dialog_buttons", json!("top"), PAGE_LAYOUT),
             ("toast_place", json!("centre"), PAGE_LAYOUT),
             ("ribbon_icon_grid", json!(true), PAGE_LAYOUT),
