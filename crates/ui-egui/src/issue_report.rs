@@ -18,6 +18,11 @@ const MAX_BODY: usize = 24_000;
 const MAX_REPORT: usize = 32_000;
 const MAX_IMAGE_PIXELS: usize = 16_000_000;
 const ISSUE_URL: &str = "https://github.com/tangency-labs/solidcraft/issues/new";
+/// GitHub answers a longer link with `414 URI Too Long` (from about 8,200 characters).
+const MAX_URL: usize = 6000;
+/// Someone who isn't signed in is sent to sign in with the link to return to, encoded once more;
+/// past about 7,600 characters GitHub drops it and the form comes back empty after signing in.
+const MAX_SIGN_IN_URL: usize = 7000;
 
 thread_local! {
     static CAD_INPUT_BLOCKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -587,10 +592,15 @@ pub fn begin_crash(app: &mut SolveApp, ctx: &egui::Context, report: &serde_json:
     app.issue_report.draft = Some(draft);
 }
 
+/// A query value as GitHub reads it: a space is `+`, so a `+` is encoded, as are `&`, `#`, `%`,
+/// `=`, quotes, line breaks and every byte outside ASCII. The rest of what RFC 3986 allows in a
+/// query stays as it is: a report's link is about a fifth longer than its text, not two-thirds.
 fn encode(value: &str) -> String {
-    let mut out = String::new();
+    let mut out = String::with_capacity(value.len());
     for b in value.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+        if b == b' ' {
+            out.push('+');
+        } else if b.is_ascii_alphanumeric() || b"-_.~!$()*,;:@/?".contains(&b) {
             out.push(char::from(b));
         } else {
             let _ = write!(&mut out, "%{b:02X}");
@@ -599,13 +609,22 @@ fn encode(value: &str) -> String {
     out
 }
 
-/// Long drafts stay local and can be copied into the browser editor; never discard them.
+/// The length of `url` as GitHub's sign-in page carries it back: encoded once more.
+fn sign_in_length(url: &str) -> usize {
+    url.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.*~".contains(&b) { 1 } else { 3 }).sum()
+}
+
+/// The link to a new issue with `title` and `body` filled in, and whether `body` was too long
+/// for it (the link then carries the title alone): a report went in it whole only up to 2,000
+/// characters, with every space and line break taking three, so most went through the
+/// clipboard and a quarter of them arrived empty (#7103). Long drafts stay local and can be
+/// copied into the browser editor; never discard them.
 pub fn draft_url(title: &str, body: &str) -> (String, bool) {
     let title = limited(title, 160);
     let base = format!("{ISSUE_URL}?title={}", encode(&title));
-    if body.len() <= MAX_BODY {
+    if body.len() <= MAX_URL {
         let url = format!("{base}&body={}", encode(body));
-        if url.len() <= 2000 {
+        if url.len() <= MAX_URL && sign_in_length(&url) <= MAX_SIGN_IN_URL {
             return (url, false);
         }
     }
@@ -1377,6 +1396,63 @@ mod tests {
         assert!(section.contains("0 s ago error: \"錯誤"), "a broken time still reads: {section}");
     }
 
+    /// The query of `url` as GitHub reads it: names and values, `+` a space.
+    fn query(url: &str) -> Vec<(String, String)> {
+        let decode = |v: &str| {
+            let (mut bytes, mut it) = (Vec::new(), v.bytes());
+            while let Some(b) = it.next() {
+                bytes.push(match b {
+                    b'+' => b' ',
+                    b'%' => u8::from_str_radix(&String::from_utf8(vec![it.next().unwrap(), it.next().unwrap()]).unwrap(), 16).unwrap(),
+                    b => b,
+                });
+            }
+            String::from_utf8(bytes).unwrap()
+        };
+        let (_, query) = url.split_once('?').unwrap();
+        query.split('&').map(|pair| pair.split_once('=').map(|(k, v)| (decode(k), decode(v))).unwrap()).collect()
+    }
+
+    /// A typical report goes in the link whole (#7103, #10556). The link took at most 2,000
+    /// characters, with every space and line break taking three: most reports didn't fit, and
+    /// GitHub opened with the title alone.
+    #[test]
+    fn issue_report_link_carries_a_typical_report_whole_and_exactly() {
+        let mut app = app();
+        app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+        let mut draft = draft_for(&app, None, None);
+        draft.description = "The fillet fails: \"radius 6 > 5\" & the preview shows #3 + 50% of the edge 🚀\n".repeat(8);
+        draft.steps = "1. Sketch a circle on XY\n2. Extrude it 10 mm\n3. Fillet the top edge with 6 mm".into();
+        let body = draft.report_body();
+        assert!(body.len() >= 1600, "as long as a typical report: {}", body.len());
+        let (url, too_long) = draft_url(&draft.report_title(), &body);
+        assert!(!too_long, "the report fits the link: {}", url.len());
+        assert_eq!(query(&url), [("title".to_string(), draft.report_title()), ("body".to_string(), body)]);
+    }
+
+    /// GitHub refuses a link longer than about 8,200 characters, and drops one its sign-in page
+    /// encodes to more than about 7,600 (the form then comes back empty after signing in). A
+    /// report too long for that goes through the clipboard, never cut.
+    #[test]
+    fn issue_report_link_stays_within_what_github_keeps() {
+        for chunk in ["word ", "x", "ünïcødé ", "a&b=c#d+e%f\"g'\n"] {
+            let (mut fitted, mut refused) = (false, false);
+            for n in (0..8000).step_by(97) {
+                let body = chunk.repeat(n / chunk.len() + 1);
+                let (url, too_long) = draft_url("Fillet fails", &body);
+                if too_long {
+                    assert!(!url.contains("&body="), "{chunk:?}");
+                    refused = true;
+                } else {
+                    assert!(url.len() <= MAX_URL && sign_in_length(&url) <= MAX_SIGN_IN_URL, "{chunk:?} × {n}");
+                    assert_eq!(query(&url), [("title".to_string(), "Fillet fails".to_string()), ("body".to_string(), body)]);
+                    fitted = true;
+                }
+            }
+            assert!(fitted && refused, "{chunk:?}");
+        }
+    }
+
     #[test]
     fn issue_report_hostile_context_and_url_are_bounded_without_new_query_parameters() {
         let mut app = app();
@@ -1391,7 +1467,7 @@ mod tests {
         assert_eq!(url.matches('&').count(), 1);
         assert!(url.contains("%26labels%3Dsecret") && url.contains("%F0%9F%9A%80"));
         let (short, copy) = draft_url(&hostile, &draft.body);
-        assert!(copy && short.len() <= 2000 && !short.contains("&body="));
+        assert!(copy && short.len() <= MAX_URL && !short.contains("&body="));
         assert!(draft.body.contains("Stock"), "fallback must retain the editable full report");
     }
 
@@ -1491,7 +1567,13 @@ mod tests {
         let mut draft = draft_for(&h.app, None, None);
         draft.title.clear();
         draft.description = "d".repeat(160);
-        draft.body = "x".repeat(1500);
+        // Just long enough that the title drawn from the description takes the link over.
+        for n in (0..MAX_URL).step_by(16) {
+            draft.body = "x".repeat(n);
+            if draft_url(&draft.report_title(), &draft.report_body()).1 {
+                break;
+            }
+        }
         let reviewed = draft.report_body();
         assert!(!draft_url("", &reviewed).1, "the fallback title must be what crosses the URL limit");
         assert!(draft_url(&draft.report_title(), &reviewed).1);
