@@ -233,8 +233,8 @@ fn pin(sk: &mut Sketch, p: usize, cutter: usize) -> Result<()> {
 /// Split curve `ci` at interior parameters `ts` (sorted). Returns the pieces in parameter
 /// order (the first keeps the original index) and the new points.
 fn split_at(sk: &mut Sketch, ci: usize, ts: &[f64]) -> Result<(Vec<usize>, Vec<usize>)> {
-    let sh = sk.shape(ci).ok_or_else(|| bad("split", "curve"))?;
-    let kind = sk.curves.get(ci).map(|c| c.kind.clone()).ok_or_else(|| bad("split", "curve"))?;
+    let sh = sk.shape(ci).ok_or_else(|| bad("sketch.modify", "curve"))?;
+    let kind = sk.curves.get(ci).map(|c| c.kind.clone()).ok_or_else(|| bad("sketch.modify", "curve"))?;
     let construction = sk.curves.get(ci).is_some_and(|c| c.construction);
     let mut pts = Vec::new();
     for t in ts {
@@ -272,7 +272,7 @@ fn split_at(sk: &mut Sketch, ci: usize, ts: &[f64]) -> Result<(Vec<usize>, Vec<u
         }
         CurveKind::Circle { c, .. } => {
             if pts.len() < 2 {
-                return Err(bad("split", "a circle needs two points to split at"));
+                return Err(bad("sketch.modify", "a circle needs two points to split at"));
             }
             let mut chain = pts.clone();
             if let Some(f) = pts.first() {
@@ -286,7 +286,7 @@ fn split_at(sk: &mut Sketch, ci: usize, ts: &[f64]) -> Result<(Vec<usize>, Vec<u
                 push(sk, CurveKind::Arc { c, a: w[0], b: w[1] }, "a")?;
             }
         }
-        _ => return Err(bad("split", "not supported yet for ellipses, splines and conics")),
+        _ => return Err(bad("sketch.modify", "not supported yet for ellipses, splines and conics")),
     }
     Ok((pieces, pts))
 }

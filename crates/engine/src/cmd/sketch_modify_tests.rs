@@ -4774,3 +4774,21 @@ fn breaking_again_where_a_curve_was_broken_adds_nothing() {
     }
     assert!(k.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Distance { value, .. } if close(value, 20.0))), "{:?}", k.constraints);
 }
+
+/// #4712: the split inside the sketch modify tools refuses in the name of the public
+/// command, not the internal `split` step: an error must never name a command the caller
+/// cannot write.
+#[test]
+fn split_failures_name_the_public_command() {
+    let mut s = new_sketch();
+    // A circle, split at one point: the circle needs two points to split at.
+    let circle = ids(&run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}))["curves"])[0].clone();
+    let error = s.execute("sketch.break", &json!({"curve": circle, "points": [[10, 0]]})).expect_err("a circle needs two points to split at");
+    let crate::EngineError::BadParams { cmd, msg } = &error else { panic!("a parameter error: {error}") };
+    assert_eq!(cmd, "sketch.modify", "{error}");
+    assert_eq!(msg, "a circle needs two points to split at");
+    // The message the caller reads names the public command, never the internal `split`.
+    let text = error.to_string();
+    assert!(text.contains("invalid parameters for `sketch.modify`"), "{text}");
+    assert!(!text.contains("invalid parameters for `split`"), "{text}");
+}
