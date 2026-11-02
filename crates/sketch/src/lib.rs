@@ -72,8 +72,8 @@ pub use shape::{Shape, intersections, intersections_within, nearest_crossing, ne
 pub use solver::solve_after_edit_with_analysis;
 pub use solver::{
     Analysis, CONSISTENT, DrivingValues, Hold, MAX_COMPONENT_VARS, SolveReport, SolveStatus, constraint_residual, determined_by, fillets_kept,
-    flips_from_stored, measure_dimension, move_line_towards, move_point_towards, solve, solve_after_edit, solve_after_link_move,
-    solve_after_value_edit, solve_holding, solve_with,
+    flips_from_stored, measure_dimension, move_line_towards, move_point_towards, side_flips_from_stored, solve, solve_after_edit,
+    solve_after_link_move, solve_after_value_edit, solve_holding, solve_with,
 };
 pub use text::{MAX_TEXT_CHARS, TextAlign, TextMetrics, TextStyle, text_geometry, text_geometry_in, text_geometry_styled};
 pub use thin::{MAX_THIN_SEGMENTS, thin_wall_regions};
