@@ -305,30 +305,6 @@ mod tests {
         8000.0 - full + (sum - union) * hh * hh
     }
 
-    /// What the strips leave of the corner block where a patch over the corner of rounds `ra`,
-    /// `rb`, `rc` on a, b, c lies: beyond a's end section (y < rc), b's (x > 20 − rc) and c's end
-    /// (z > 20 − max(ra, rb), where c's rails meet a's and b's), the box's material that no
-    /// strip removes, by columns along z. Outside that block such a body is the strips' (its
-    /// rounds are the strips' cylinders up to those ends), so its patch takes at most this
-    /// beyond them.
-    fn corner_block(ra: f64, rb: f64, rc: f64) -> f64 {
-        let len = |d: f64, r: f64| if d < r { r - (r * r - (r - d) * (r - d)).max(0.0).sqrt() } else { 0.0 };
-        let (n, depth) = (2000, ra.max(rb));
-        let h = rc / n as f64;
-        let mut kept = 0.0;
-        for i in 0..n {
-            let dx = (i as f64 + 0.5) * h;
-            for j in 0..n {
-                let dy = (j as f64 + 0.5) * h;
-                if (rc - dx).powi(2) + (rc - dy).powi(2) > rc * rc && dx < rc && dy < rc {
-                    continue;
-                }
-                kept += depth - len(dx, ra).max(len(dy, rb)).min(depth);
-            }
-        }
-        kept * h * h
-    }
-
     /// Largest angle (degrees) between the two faces' normals along edges between curved faces.
     fn kink(b: &Body) -> f64 {
         let rec = Faces::of(b).unwrap();
@@ -515,29 +491,41 @@ mod tests {
         assert!(r.validity().is_empty(), "{:?}", r.validity());
         assert!((vol(&r) - sphere).abs() < 1e-11 * sphere, "{} vs {sphere}", vol(&r));
         assert!(kink(&r) < 0.01);
-        // Different radii: a smooth patch over the corner, more than the strips take, and no more
-        // than they leave in the block it lies in: its rounds end at a's section y = rc, b's
-        // x = 20 − rc, and c's rails where they meet a's and b's (z = 20 − ra, z = 20 − rb), the
-        // patch's four corners. (2, 2, 3): 1.168 beyond the strips, of the 11.86 the block keeps;
-        // (2, 3, 4): 3.099 of 32.69.
+        // Different radii: SMLib's setback corner (SmBlendSetback.h). Each round runs whole up to
+        // its section square to its edge at its setback, the owner's rule's (at least 1.5 r, more
+        // where the rails beside it cross later, scaled to the least at which the corner's G1 fill
+        // is certified convex), and the hole between the three sections is filled by the setback
+        // split: one setback patch per round and the triangle between them in three
+        // quadrilaterals, so 6 planes, 3 rounds and 6 patches (15 faces), G1 across every seam.
+        // Outside the box the sections span ([20 - d_b, 20] x [0, d_a] x [20 - d_c, 20], d each
+        // edge's setback) the body is the three strips', so its volume is theirs within that box's.
+        // The rounds a and b of one radius lie mirrored about the plane x + y = 20 with c: one
+        // setback. (2, 2, 3): 3.6155, 3.6155, 4.6485; (2, 3, 4): 4.7745, 5.03975, 6.366 (a, b, c).
         for (rs, sel) in [((2.0, 2.0, 3.0), fillet(&ab, &[c], 3.0)), ((2.0, 3.0, 4.0), fillet_radii(&bx, &[(a, 2.0), (b, 3.0), (c, 4.0)]))] {
             let r = sel.unwrap();
-            assert_eq!(r.face_count(), 10);
+            assert_eq!(r.face_count(), 15);
             assert_eq!(r.unmeshed_faces(), 0);
+            assert!(r.validity().is_empty(), "{:?}", r.validity());
             let k = kink(&r);
-            assert!(k < 0.05, "kink {k}°");
+            assert!(k < 0.01, "kink {k}°");
             let (ra, rb, rc) = rs;
-            let ends = [
-                Vec3::new(20.0 - ra, rc, 20.0),
-                Vec3::new(20.0, rc, 20.0 - ra),
-                Vec3::new(20.0 - rc, rb, 20.0),
-                Vec3::new(20.0 - rc, 0.0, 20.0 - rb),
-            ];
-            for p in ends {
-                assert!(vertices(&r).iter().any(|q| q.dist(p) < 1e-9), "{rs:?}: no patch corner at {p:?}");
+            let vs = vertices(&r);
+            // An edge's setback: where its round's section meets both faces, at two vertices.
+            let setback = |at: &dyn Fn(f64) -> [Vec3; 2], r: f64| -> Option<f64> {
+                vs.iter()
+                    .flat_map(|p| [p.y, 20.0 - p.x, 20.0 - p.z])
+                    .find(|d| *d >= 1.5 * r - 1e-9 && *d < 20.0 && at(*d).iter().all(|q| vs.iter().any(|p| p.dist(*q) < 1e-9)))
+            };
+            let da = setback(&|d| [Vec3::new(20.0 - ra, d, 20.0), Vec3::new(20.0, d, 20.0 - ra)], ra);
+            let db = setback(&|d| [Vec3::new(20.0 - d, 0.0, 20.0 - rb), Vec3::new(20.0 - d, rb, 20.0)], rb);
+            let dc = setback(&|d| [Vec3::new(20.0 - rc, 0.0, 20.0 - d), Vec3::new(20.0, rc, 20.0 - d)], rc);
+            eprintln!("{rs:?}: setbacks {da:?} {db:?} {dc:?}");
+            let (Some(da), Some(db), Some(dc)) = (da, db, dc) else { panic!("{rs:?}: a round's setback section is missing: {da:?} {db:?} {dc:?}") };
+            if ra == rb {
+                assert!((da - db).abs() < 1e-9, "{da} vs {db}");
             }
             let (v, s) = (vol(&r), strips(ra, rb, rc));
-            assert!(v < s + 0.05 && v > s - corner_block(ra, rb, rc), "{v} vs {s}");
+            assert!((v - s).abs() < db * da * dc, "{v} vs {s}");
         }
     }
 
