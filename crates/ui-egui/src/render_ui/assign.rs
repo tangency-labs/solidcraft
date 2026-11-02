@@ -563,61 +563,6 @@ pub(crate) fn selection_bar(app: &mut SolveApp, ui: &mut egui::Ui, free: egui::R
 }
 
 /// Existing appearance commands exposed alongside the shared inheritance widget.
-pub(crate) fn selection_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let Some(sel) = app.session.selection.last().cloned() else { return };
-    let Ok(target) = chain_target(app, &sel) else { return };
-    if let Ok(chain) = app.session.execute("appearance.chain", &json!({"target":target})) {
-        let steps = chain["steps"].as_array().map(Vec::as_slice).unwrap_or_default();
-        let looks =
-            std::array::from_fn(|index| steps.get(index).and_then(|s| s.get("look")).filter(|l| !l.is_null()).map(super::library::tile_sphere));
-        let active = match chain["active"].as_str() {
-            Some("face") => ui_kit::LookStep::Face,
-            Some("body") => ui_kit::LookStep::Body,
-            Some("component") => ui_kit::LookStep::Component,
-            _ => ui_kit::LookStep::Material,
-        };
-        if ui_kit::look_chain(
-            ui,
-            "render:look_chain",
-            [app.tr("render.pick_face"), app.tr("render.pick_body"), app.tr("render.pick_component"), app.tr("render.look_material")],
-            looks,
-            active,
-        )
-        .is_some()
-        {
-            app.start("appearance.assign");
-        }
-    }
-    ui_kit::dropdown_menu(ui, "render_selection_actions", app.tr("cmd.appearance_assign"), |ui| {
-        for (id, label) in
-            [("appearance.assign", "cmd.appearance_assign"), ("appearance.replace", "render.replace_all"), ("appearance.copy", "cmd.appearance_copy")]
-        {
-            if let Some(command) = solidcraft_engine::find_command(id) {
-                let info = command.info(&app.session);
-                if ui_kit::command_menu_button(
-                    ui,
-                    id,
-                    app.tr(label),
-                    command.icon,
-                    &crate::keymap::display_for(app, id).unwrap_or_default(),
-                    info.enabled,
-                )
-                .clicked()
-                {
-                    app.start(id);
-                    ui.close();
-                }
-            }
-        }
-        if ui_kit::command_menu_button(ui, "render_remove_override", app.tr("render.remove_override"), "delete", "", true).clicked() {
-            if let Ok(targets) = targets(app, &app.session.selection) {
-                let _ = app.run("appearance.assign", targets);
-            }
-            ui.close();
-        }
-    });
-}
-
 pub(crate) fn replacement_dialog(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(pending) = app.render_workspace.view.assign.replacement.clone() else { return };
     if pending.revision != app.session.revision || !pending.document.ptr_eq(&std::sync::Arc::downgrade(&app.session.doc)) {

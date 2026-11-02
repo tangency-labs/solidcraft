@@ -1196,14 +1196,12 @@ impl SolveApp {
         // Render focus already applies its semantic selection after clearing object picks.
         // A tab switch brings in the other design's own Render selection.
         if done.is_ok() && !matches!(id, "view.render_select" | "view.next_tab" | "view.previous_tab") && selection_changed {
-            if self.session.selection.is_empty() && render_workspace::active(self) {
-                render_workspace::selection_editor(self, &render_workspace::RenderSelection::Nothing);
-            }
-            self.render_workspace.view.selection = if self.session.selection.is_empty() {
-                render_workspace::RenderSelection::Nothing
+            let selection = render_workspace::object_selection(self);
+            if render_workspace::active(self) {
+                render_workspace::selection_editor(self, &selection);
             } else {
-                render_workspace::RenderSelection::Object(self.session.selection.clone())
-            };
+                self.render_workspace.view.selection = selection;
+            }
         }
         if let Ok(v) = &done {
             if matches!(id, "render.lights.solo" | "render.lights.mute") {
@@ -1277,23 +1275,16 @@ impl SolveApp {
                 let selected = match v.get("kind").and_then(Value::as_str) {
                     Some("environment") => RenderSelection::Environment,
                     Some("wear") => RenderSelection::Wear,
-                    Some("lighting") => {
-                        render_workspace::select_lighting(self);
-                        RenderSelection::Lighting
-                    }
+                    Some("lighting") => RenderSelection::Lighting,
                     Some("output") => RenderSelection::Output,
                     Some("sampling") => RenderSelection::Sampling,
                     Some("effects") => RenderSelection::Effects,
                     Some("check") => RenderSelection::Check,
-                    Some("light") => {
-                        render_workspace::select_lighting(self);
-                        RenderSelection::Light(v.get("id").and_then(Value::as_str).unwrap_or_default().into())
-                    }
+                    Some("light") => RenderSelection::Light(v.get("id").and_then(Value::as_str).unwrap_or_default().into()),
                     Some("shot") => RenderSelection::Shot(v.get("id").and_then(Value::as_str).unwrap_or_default().into()),
                     _ => RenderSelection::Nothing,
                 };
                 render_workspace::selection_editor(self, &selected);
-                self.render_workspace.view.selection = selected;
             }
             if id == "view.layout" {
                 let layout =
