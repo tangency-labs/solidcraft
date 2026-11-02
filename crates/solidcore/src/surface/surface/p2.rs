@@ -8584,6 +8584,83 @@ mod issue_892_tests {
         let volume = brep_volume(&k, &mut plate, 1e-6, &attributes).unwrap();
         assert!((volume - 118.0).abs() < 1e-6, "volume {volume}");
     }
+
+    /// The same 10 x 6 plate with the triangular hole whose corner touches the outline
+    /// at (0, 3), built through the public capped sweep with only
+    /// `Kernel::fixes.join_touching_loops` toggled (WR-405). With the flag off (the
+    /// default, upstream's separate loops) the hole is a second outer loop, so the sweep
+    /// builds 12 faces with volume 122: both loops are taken as material, the plate plus
+    /// the hole's prism (area 1, 2 long) instead of the plate less it. With the flag on it
+    /// is 10 faces and volume 118 (the plate less the hole). `check_brep` at `Level2`
+    /// passes both bodies: validity does not see the difference, only the loops, the face
+    /// count and the volume do.
+    #[test]
+    fn issue_892_only_join_touching_loops_changes_the_sweep() {
+        // the plane's loop structure, the sweep's face count and volume, and the
+        // whole-body check's failure lines, for one setting of the flag
+        fn measure(join: bool) -> (Vec<usize>, Vec<usize>, usize, f64, Vec<String>) {
+            let points = |p: &[(f64, f64)]| -> Vec<Curve> {
+                p.iter()
+                    .zip(p.iter().cycle().skip(1))
+                    .map(|(&(ax, ay), &(bx, by))| {
+                        Curve::from(
+                            create_line_segment(Point3::new(ax, ay, 0.0), Point3::new(bx, by, 0.0))
+                                .unwrap(),
+                        )
+                    })
+                    .collect()
+            };
+            let mut curves =
+                points(&[(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0), (0.0, 3.0)]);
+            curves.extend(points(&[(0.0, 3.0), (2.0, 2.5), (2.0, 3.5)]));
+            let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+
+            let mut k = Kernel::default();
+            k.fixes.join_touching_loops = join;
+            let plane =
+                crate::surface::surface::Surface::create_plane_with_3d_curves(&k, &curves, 1e-6)
+                    .unwrap();
+            let mut plate =
+                create_linear_sweep(&mut k, &refs, Vec3::new(0.0, 0.0, 1.0), 2.0, true).unwrap();
+            let faces = crate::topology::brep::p1::faces(&plate, None)
+                .unwrap()
+                .len();
+            let store = AttributeStore::default();
+            let key_of = |_| ObjectKey(0);
+            let attributes = PropertyAttributes {
+                store: &store,
+                key_of: &key_of,
+            };
+            let volume = brep_volume(&k, &mut plate, 1e-6, &attributes).unwrap();
+            let check = crate::topology::brep::validation::check_brep(
+                &mut k,
+                &mut plate,
+                crate::topology::brep::validation::CheckLevel::Level2,
+            )
+            .unwrap();
+            (
+                plane.outer_loop_counts,
+                plane.loop_counts,
+                faces,
+                volume,
+                check.lines(),
+            )
+        }
+
+        // the flag is not part of the default kernel: pin it before either run
+        assert!(!Kernel::default().fixes.join_touching_loops);
+        let (outer, loops, faces, volume, lines) = measure(false);
+        assert_eq!((outer, loops), (vec![2], vec![5, 3]));
+        assert_eq!(faces, 12);
+        assert!((volume - 122.0).abs() < 1e-6, "volume {volume}");
+        assert!(lines.is_empty(), "{lines:?}");
+
+        let (outer, loops, faces, volume, lines) = measure(true);
+        assert_eq!((outer, loops), (vec![1], vec![8]));
+        assert_eq!(faces, 10);
+        assert!((volume - 118.0).abs() < 1e-6, "volume {volume}");
+        assert!(lines.is_empty(), "{lines:?}");
+    }
 }
 
 #[cfg(test)]
