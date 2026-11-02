@@ -109,8 +109,9 @@ pub(crate) fn railed_wires(planes: &[Plane], wires: &[mt::Wire], closed: bool, r
     }
     let size = bounds.diagonal();
     let tol = (size * 1e-4).max(1e-6);
+    let planes = section_planes(planes, &ctrl, tol);
     let start = centroid(ctrl.first().ok_or_else(|| fail("sections"))?);
-    let rails: Vec<Rail> = rails.iter().map(|r| rail(r, start, planes, &curves, tol)).collect::<Result<_>>()?;
+    let rails: Vec<Rail> = rails.iter().map(|r| rail(r, start, &planes, &curves, tol)).collect::<Result<_>>()?;
     if let [a, b] = &rails[..]
         && a.anchors.iter().zip(&b.anchors).any(|(p, q)| p.on.dist(q.on) <= tol)
     {
@@ -157,7 +158,7 @@ pub(crate) fn railed_wires(planes: &[Plane], wires: &[mt::Wire], closed: bool, r
     };
     // The sections' normals, turned to agree with the first's.
     let mut normals: Vec<Vec3> = Vec::with_capacity(count);
-    for p in planes {
+    for p in &planes {
         let n = p.normal();
         let prev = normals.last().copied().unwrap_or(n);
         normals.push(if n.dot(prev) < 0.0 { n * -1.0 } else { n });
@@ -285,6 +286,47 @@ fn wire_point(ctrl: &[Vec<Vec3>], knots: &[mt::KnotVec], g: f64) -> Result<Vec3>
 }
 
 /// The middle of a wire's control points.
+/// The sections' planes as the rails meet them. A section whose curves run along one line lies in
+/// every plane through that line, so the plane of the sketch it was drawn in says nothing about the
+/// loft: it takes the plane through the line that faces most nearly as the nearest curved section
+/// does, or along the loft when every section is straight. A curved section's curves fix its plane (#4056).
+fn section_planes(planes: &[Plane], ctrl: &[Vec<Vec<Vec3>>], tol: f64) -> Vec<Plane> {
+    let lines: Vec<Option<Vec3>> = ctrl.iter().map(|s| line_of(&s.iter().flatten().copied().collect::<Vec<_>>(), tol)).collect();
+    let middles: Vec<Vec3> = ctrl.iter().map(|s| centroid(s)).collect();
+    let curved = |j: usize| lines.get(j).is_some_and(Option::is_none);
+    planes
+        .iter()
+        .enumerate()
+        .map(|(i, plane)| {
+            let (Some(Some(d)), Some(&mid)) = (lines.get(i), middles.get(i)) else { return *plane };
+            let nearest = (1..planes.len()).flat_map(|k| [i.checked_sub(k), Some(i + k)]).flatten().find(|j| curved(*j));
+            let facing = nearest.and_then(|j| planes.get(j)).map(Plane::normal);
+            let along = match (middles.get(i + 1), i.checked_sub(1).and_then(|j| middles.get(j))) {
+                (Some(next), _) => Some(*next - mid),
+                (None, Some(prev)) => Some(mid - *prev),
+                (None, None) => None,
+            };
+            // The first way to face that is not along the line itself, turned square to it.
+            [facing, along]
+                .into_iter()
+                .flatten()
+                .filter_map(|r| r.normalized())
+                .map(|r| r - *d * r.dot(*d))
+                .find(|n| n.len() > 1e-6)
+                .and_then(|n| Plane::new(mid, *d, n.cross(*d)))
+                .unwrap_or(*plane)
+        })
+        .collect()
+}
+
+/// The direction of the line every point of `pts` lies on (within `tol`), if there is one.
+fn line_of(pts: &[Vec3], tol: f64) -> Option<Vec3> {
+    let a = *pts.first()?;
+    let far = pts.iter().copied().max_by(|p, q| p.dist(a).total_cmp(&q.dist(a)))?;
+    let d = (far - a).normalized()?;
+    pts.iter().all(|p| (*p - a - d * (*p - a).dot(d)).len() <= tol).then_some(d)
+}
+
 fn centroid(ctrl: &[Vec<Vec3>]) -> Vec3 {
     let (sum, n) = ctrl.iter().flatten().fold((Vec3::ZERO, 0usize), |(s, n), p| (s + *p, n + 1));
     sum * (1.0 / n.max(1) as f64)
