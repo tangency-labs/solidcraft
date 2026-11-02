@@ -4461,6 +4461,134 @@ fn a_split_wall_clicked_once_is_one_item() {
     assert!(prompt.contains("1 item(s)") && prompt.contains("Round face r10"), "{prompt}");
 }
 
+/// The chat open over `boxes` boxes, and the picker open with Elements active: the harness and the
+/// boxes' feature ids and names, in order.
+fn picker_over_boxes(boxes: usize, timeline_left: bool) -> (crate::scenario::Harness, Vec<(u64, String)>) {
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.timeline_left = timeline_left;
+    h.call("ui.agent_chat", json!({"open": true}));
+    for i in 0..boxes {
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": format!("Body{}", i + 1)})).expect("a box");
+    }
+    let features = h.app.session.doc.features.iter().map(|f| (f.id, f.name.clone())).collect();
+    start_pick(&mut h.app, None);
+    h.frames(3);
+    assert_eq!(h.app.dialog.as_ref().map(|d| d.active), Some(0), "the picker opens with Elements active");
+    (h, features)
+}
+
+fn click_handle(h: &mut crate::scenario::Harness, handle: &str) {
+    h.step(&json!({"click": {"handle": handle}})).unwrap_or_else(|e| panic!("{handle}: {e}"));
+    h.frames(3);
+}
+
+/// What the picker's inputs hold: Elements, Features, Bodies.
+fn picked(h: &crate::scenario::Harness) -> Vec<Vec<solidcraft_engine::Sel>> {
+    h.app.dialog.as_ref().map(|d| d.inputs.iter().map(|i| i.items.clone()).collect()).unwrap_or_default()
+}
+
+/// OK makes one pill that holds what is named here, and nothing else.
+fn ok_makes_one_pill_of(h: &mut crate::scenario::Harness, kind: context::Kind, label: &str) {
+    click_handle(h, "dialog:ok");
+    assert!(h.app.dialog.is_none(), "OK closed the picker");
+    assert_eq!(h.app.agent_chat.pills.len(), 1);
+    let items: Vec<_> = h.app.agent_chat.pills[0].context.items.iter().map(|e| (e.kind, e.label.clone())).collect();
+    assert_eq!(items, [(kind, label.to_string())]);
+}
+
+/// A step clicked in either History bar goes into Features while Elements is active, and the edit
+/// selection is left alone (#11318).
+#[test]
+fn a_history_step_clicked_while_picking_lands_in_features_and_leaves_the_selection_alone() {
+    use solidcraft_engine::Sel;
+    for left in [false, true] {
+        let (mut h, features) = picker_over_boxes(1, left);
+        let (id, name) = features[0].clone();
+        let selection = h.app.session.selection.clone();
+        click_handle(&mut h, &format!("timeline:{name}"));
+        assert_eq!(picked(&h), [vec![], vec![Sel::Feature { id }], vec![]], "left={left}");
+        assert_eq!(h.app.dialog.as_ref().map(|d| d.active), Some(1), "Features is the active list now; left={left}");
+        assert_eq!(h.app.session.selection, selection, "the edit selection is unchanged; left={left}");
+        // A second click takes the step out again (after the double-click time: a double click edits).
+        h.frames(30);
+        click_handle(&mut h, &format!("timeline:{name}"));
+        assert_eq!(picked(&h), [vec![], vec![], vec![]], "a second click takes it out; left={left}");
+        assert_eq!(h.app.session.selection, selection, "the edit selection is unchanged; left={left}");
+        h.frames(30);
+        click_handle(&mut h, &format!("timeline:{name}"));
+        ok_makes_one_pill_of(&mut h, context::Kind::Feature, &name);
+    }
+}
+
+/// The same for a step in the Browser's Features folder, and a body in its Bodies folder goes into
+/// Bodies (#11318).
+#[test]
+fn a_browser_row_clicked_while_picking_lands_in_the_list_that_takes_it() {
+    use solidcraft_engine::Sel;
+    let (mut h, features) = picker_over_boxes(1, false);
+    let (id, name) = features[0].clone();
+    h.app.tree.expanded.insert("c0/features".into());
+    h.frames(3);
+    let selection = h.app.session.selection.clone();
+    let row = format!("row:browser-feature:c0:{id}");
+    click_handle(&mut h, &row);
+    assert_eq!(picked(&h), [vec![], vec![Sel::Feature { id }], vec![]]);
+    assert_eq!(h.app.session.selection, selection, "the edit selection is unchanged");
+    h.frames(30);
+    click_handle(&mut h, &row);
+    assert_eq!(picked(&h), [vec![], vec![], vec![]], "a second click takes it out");
+    assert_eq!(h.app.session.selection, selection, "the edit selection is unchanged");
+    h.frames(30);
+    click_handle(&mut h, &row);
+    ok_makes_one_pill_of(&mut h, context::Kind::Feature, &name);
+
+    h.app.agent_chat.pills.clear();
+    start_pick(&mut h.app, None);
+    h.frames(3);
+    click_handle(&mut h, "row:Body1");
+    assert_eq!(picked(&h), [vec![], vec![], vec![Sel::Body { name: "Body1".into() }]]);
+    assert_eq!(h.app.session.selection, selection, "the edit selection is unchanged");
+    ok_makes_one_pill_of(&mut h, context::Kind::Body, "Body1");
+}
+
+/// The Features field says to click steps, not faces (#11318).
+#[test]
+fn the_features_field_says_what_to_click() {
+    let d = crate::dialogs::Dialog::chat_context();
+    let hints: Vec<_> = d.inputs.iter().map(|i| (i.label, crate::dialogs::hint(i))).collect();
+    let features = hints.iter().find(|(label, _)| *label == "Features").map(|(_, hint)| *hint).unwrap_or_default();
+    assert!(!features.contains("click faces") && features.contains("History"), "{hints:?}");
+}
+
+/// The picker lists each picked step under its field, and the × on one takes it out (#11318).
+#[test]
+fn the_picker_lists_what_was_picked_and_takes_one_out() {
+    use solidcraft_engine::Sel;
+    let (mut h, features) = picker_over_boxes(2, false);
+    click_handle(&mut h, "dialog:Features");
+    assert_eq!(h.app.dialog.as_ref().map(|d| d.active), Some(1), "a click on the field makes it active");
+    for (_, name) in &features {
+        click_handle(&mut h, &format!("timeline:{name}"));
+    }
+    let ids: Vec<Sel> = features.iter().map(|(id, _)| Sel::Feature { id: *id }).collect();
+    assert_eq!(picked(&h).get(1), Some(&ids));
+    // Each listed item is a row with a × of its own (`ui_kit::list_row`). The list starts folded,
+    // as in every dialog (#3683); the arrow beside the field opens it.
+    let rows = || {
+        let mut rows: Vec<_> = crate::scenario::handles("dialog:list:Features:").into_iter().map(|(name, _)| name).collect();
+        rows.sort();
+        rows.dedup();
+        rows
+    };
+    assert!(rows().is_empty(), "the list starts folded");
+    click_handle(&mut h, "dialog:list_toggle:Features");
+    assert_eq!(rows(), ["dialog:list:Features:0:remove", "dialog:list:Features:1:remove"], "one row per picked step");
+    assert!(crate::scenario::rect_of("dialog:list:Features:1").is_some());
+    click_handle(&mut h, "dialog:list:Features:0:remove");
+    assert_eq!(picked(&h).get(1).map(Vec::as_slice), ids.get(1..), "the first step was taken out");
+    assert_eq!(rows(), ["dialog:list:Features:0:remove"], "one row is left");
+}
+
 // ---- Chips: hover and things that are gone (#2286) ----
 
 /// The chip under the pointer lights its target in the model for as long as the pointer is on it.

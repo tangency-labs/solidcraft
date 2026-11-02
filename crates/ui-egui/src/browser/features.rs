@@ -343,7 +343,9 @@ fn feature_row(
             let _ = app.run("component.activate", json!({"component":component,"occurrence":path.last(),"path":path}));
         }
         app.edit_feature(id);
-    } else if r.clicked {
+    } else if r.clicked && !crate::timeline::pick_feature_into_dialog(app, id, ui.input(|i| i.modifiers)) {
+        // A dialog that takes features (the chat's picker, a pattern) took the click as the
+        // History does (#11318); otherwise the row is selected.
         click_select(app, ui, format!("f:{id}"), Some(Sel::Feature { id }));
     }
     if let Some(at) = r.secondary {
@@ -1261,5 +1263,26 @@ mod tests {
         settle_heavy(&mut h);
         assert_eq!(h.app.session.doc.marker, Some(2), "the marker drag still rolls back");
         assert_eq!(order(&h), [ids[2], ids[0], ids[1]], "rolling back moves no feature");
+    }
+
+    /// #11318: a feature row's click goes into a dialog whose active input takes features (a
+    /// pattern's Objects list), as a History row's click already did; the ordinary selection is
+    /// left alone.
+    #[test]
+    fn a_feature_row_clicked_while_a_pattern_takes_features_goes_into_the_dialog() {
+        let mut h = Harness::new();
+        let r = h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":"Block","body_name":"Block"})).unwrap();
+        let id = r["feature"].as_u64().unwrap();
+        h.app.tree.expanded.insert("c0/features".into());
+        h.app.run("select.clear", json!({})).unwrap();
+        h.settle();
+        h.app.start("solid.pattern.rectangular");
+        h.frames(4);
+        h.step(&json!({"click": {"handle": "dialog:Object Type"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Object Type:Features"}})).unwrap();
+        h.step(&json!({"click": {"handle": format!("row:browser-feature:c0:{id}")}})).unwrap();
+        let picked = h.app.dialog.as_ref().map(|dialog| dialog.inputs[0].items.clone());
+        assert_eq!(picked, Some(vec![Sel::Feature { id }]), "the row's click goes to the dialog");
+        assert!(h.app.session.selection.is_empty(), "dialog picks leave the ordinary selection alone");
     }
 }

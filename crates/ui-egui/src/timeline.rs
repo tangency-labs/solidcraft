@@ -674,18 +674,24 @@ fn select_range(app: &mut SolveApp, order: &[u64], id: u64, add: bool) {
     let _ = app.run("select.set", json!({ "items": items, "add": add }));
 }
 
-/// Give a History feature click to a compatible active dialog input in any layout.
+/// Give a History or Browser feature click to a compatible active dialog input in any layout.
 /// Plain clicks keep an existing pick; Ctrl/Command clicks toggle it off.
 pub(crate) fn pick_feature_into_dialog(app: &mut SolveApp, id: u64, modifiers: egui::Modifiers) -> bool {
     // A pattern or Mirror says why it does not take a sketch (#10057).
     if app.dialog.as_mut().is_some_and(|d| d.refuse_sketch(&app.session, id)) {
         return true;
     }
+    // The chat's picker takes the step into Features whichever list is active (#11318).
+    if let Some(d) = app.dialog.as_mut() {
+        d.activate_input_taking(crate::selection::FEATURES);
+    }
     let Some(d) = app.dialog.as_mut().filter(|d| d.active_input().is_some_and(|i| i.accept & crate::selection::FEATURES != 0)) else {
         return false;
     };
     let feature = solidcraft_engine::Sel::Feature { id };
-    if modifiers.command || modifiers.ctrl || !d.active_input().is_some_and(|i| i.items.contains(&feature)) {
+    // The chat's picker takes a picked step out on a plain click too, as the model view does.
+    let toggle = modifiers.command || modifiers.ctrl || matches!(d.kind, crate::dialogs::Kind::ChatContext);
+    if toggle || !d.active_input().is_some_and(|i| i.items.contains(&feature)) {
         d.pick(&app.session, feature);
     }
     true

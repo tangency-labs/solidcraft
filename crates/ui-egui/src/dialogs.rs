@@ -1480,6 +1480,18 @@ impl Dialog {
         self.inputs.get(self.active)
     }
 
+    /// The chat's picker takes a step or a body clicked in the History or the Browser into the
+    /// list that takes it, whichever list is active (#11318): make that list the active one.
+    /// Other dialogs keep their active input.
+    pub(crate) fn activate_input_taking(&mut self, accept: Accept) {
+        if !matches!(self.kind, Kind::ChatContext) || self.active_input().is_some_and(|i| i.accept & accept != 0) {
+            return;
+        }
+        if let Some(i) = self.inputs.iter().position(|i| i.accept & accept != 0) {
+            self.active = i;
+        }
+    }
+
     /// Whether a round edge kept in `inp` stands for its centre: a construction point's input,
     /// or Move's pivot and points (`dialogs_move::sel_point`). Other point inputs take the
     /// centre as a vertex (`circle_centre_pick`).
@@ -2624,7 +2636,7 @@ fn title(k: &Kind) -> &'static str {
     }
 }
 
-fn hint(inp: &SelInput) -> &'static str {
+pub(crate) fn hint(inp: &SelInput) -> &'static str {
     let a = inp.accept;
     if a & PROFILES != 0 {
         "click profiles in the view"
@@ -2647,6 +2659,8 @@ fn hint(inp: &SelInput) -> &'static str {
     } else if inp.label == "Faces/Body" {
         // Shell (#794): faces open the hollow; a body alone seals a closed void inside.
         "click faces to remove, or a body in the Browser for a closed hollow"
+    } else if a & selection::FEATURES != 0 {
+        "click steps in the History or the Browser"
     } else if a & BODIES != 0 {
         "click bodies"
     } else {

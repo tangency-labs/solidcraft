@@ -436,8 +436,11 @@ The agent reaches the open design only through SolidCraft's own tools (the
   a message that waits in the queue.
 - **Pick context:** press it to choose what the message is about on purpose. A picker opens with
   three lists, **Elements** (faces, edges, vertices), **Features** (steps of the timeline) and
-  **Bodies**; click things in the model, the timeline or the browser to put them in the list that
-  is active (click a list to make it active; click a picked thing again to take it out). **OK**
+  **Bodies**. A click in the model goes into the list that is active (click a list to make it
+  active). A step clicked in the History or the Browser goes into Features, and a body clicked in
+  the Browser into Bodies, whichever list is active. Click a picked thing again to take it out.
+  The arrow beside a list shows what it holds by name, as in every dialog; the × on a name takes
+  it out. **OK**
   puts the pick into the message as a **pill**, `«1: Plate · 3 faces»`, at the text cursor (at the
   end when the box was never used). Typing `@` where a word starts does the same: the `@` is
   taken out and the picker opens, and the pill goes where it was. Pick as often as you like; each

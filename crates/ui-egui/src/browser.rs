@@ -439,13 +439,17 @@ enum Take {
 /// ([`pick_from_browser`]). Returns false when that input does not take bodies, so the click
 /// keeps its ordinary meaning. A Shift range only adds; a group or component toggles.
 fn offer_bodies(app: &mut SolveApp, names: &[String], take: Take) -> bool {
-    if !dialog_takes_body(app) || app.dialog.as_ref().is_some_and(|d| d.takes_components()) {
-        return false;
-    }
     let world = crate::open_meshing::session_world(&app.session);
     let picked: Vec<Sel> =
         names.iter().filter(|n| world.body(n).is_some() && !app.session.body_removed_later(n)).map(|n| Sel::Body { name: n.clone() }).collect();
     if picked.is_empty() {
+        return false;
+    }
+    // The chat's picker takes them into Bodies whichever list is active (#11318).
+    if let Some(d) = app.dialog.as_mut() {
+        d.activate_input_taking(crate::selection::BODIES);
+    }
+    if !dialog_takes_body(app) || app.dialog.as_ref().is_some_and(|d| d.takes_components()) {
         return false;
     }
     let Some(mut d) = app.dialog.take() else { return false };
@@ -2511,6 +2515,10 @@ pub(crate) fn pick_sketch_into_dialog(app: &mut SolveApp, id: u64) -> bool {
 /// Browser picks go only into compatible active dialog inputs. Outside a dialog, planes and
 /// axes become the selection; body rows use the ordinary Ctrl/Shift-aware selection path.
 fn pick_from_browser(app: &mut SolveApp, x: Sel) {
+    // The chat's picker takes a body into Bodies whichever list is active (#11318).
+    if let (Sel::Body { .. }, Some(d)) = (&x, app.dialog.as_mut()) {
+        d.activate_input_taking(crate::selection::BODIES);
+    }
     if let Sel::Body { name } = &x
         && dialog_takes_body(app)
         && let Some(mut d) = app.dialog.take()
