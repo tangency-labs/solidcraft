@@ -164,7 +164,7 @@ same triangles, colour and paint; the picture shown while opening draws its tria
 `cache/model.json` records `solidcraft-model-cache/8`, the producer revision
 `solidcraft-truck-adapter/4`, the application version, the build (source commit,
 CPU architecture and OS), the evaluation source (below, with the CPU architecture
-and OS), the geometry kernel that computed it (`solidcore` or `smlib`), the SHA-256 of the exact `document.json` (whose blob references pin every
+and OS), the geometry kernel that computed it (`solidcore`; earlier builds could write `smlib`, a cache this build evaluates again), the SHA-256 of the exact `document.json` (whose blob references pin every
 STEP, mesh and image payload) and of `cache/bodies.bin`, the slices, each kernel
 body's slice and display share, and the model's records. A cache is read back only
 when the format, the producer, the evaluation source, the platform, the kernel and both
