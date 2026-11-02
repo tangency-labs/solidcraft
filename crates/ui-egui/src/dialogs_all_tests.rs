@@ -978,6 +978,93 @@ fn solid_pattern_quantity_arrows_step_the_count_the_command_receives() {
     }
 }
 
+/// Each direction of a rectangular pattern has its own Distance Type (#8523): Spacing by default,
+/// Extent, or To Object, which adds a pick input for that direction and sends its point.
+#[test]
+fn rectangular_pattern_distance_type_per_direction() {
+    let mut h = fixture();
+    let mut d = representative(&h, "solid.pattern.rectangular");
+    d.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+    d.inputs[2].items = vec![Sel::Axis { name: "Y".into() }];
+    h.app.dialog = Some(d);
+    h.settle();
+    let sent = |h: &Harness| {
+        let cmds = crate::dialogs::preview_commands(&h.app, h.app.dialog.as_ref().unwrap());
+        cmds.map(|cmds| cmds.into_iter().find(|(id, _)| id == "solid.pattern.rectangular").map(|(_, p)| p).unwrap_or_default())
+    };
+    let p = sent(&h).unwrap();
+    assert!(p.get("type1").is_none() && p.get("type2").is_none() && p.get("to1").is_none(), "Spacing is the default: {p}");
+    let set = |h: &mut Harness, key: &str, value: &str| {
+        h.app.dialog.as_mut().unwrap().extra.insert(key.into(), json!(value));
+        h.frames(2);
+    };
+    set(&mut h, "type1", "extent");
+    let p = sent(&h).unwrap();
+    assert_eq!((&p["type1"], p.get("type2")), (&json!("extent"), None), "{p}");
+    assert_eq!(h.app.dialog.as_mut().unwrap().primary().map(|(label, ..)| label), Some("Extent"));
+    // To Object on the second direction: its own input, active, and a pick is needed.
+    set(&mut h, "type2", "to_object");
+    let d = h.app.dialog.as_ref().unwrap();
+    let labels: Vec<&str> = d.inputs.iter().map(|i| i.label).collect();
+    assert_eq!(labels.last(), Some(&"To Object 2"), "{labels:?}");
+    assert!(!labels.contains(&"To Object"), "{labels:?}");
+    assert_eq!(d.active, d.inputs.len() - 1);
+    assert_eq!(d.inputs.last().map(|i| i.accept), Some(OBJECT_PICKS), "what an extrude's To Object takes (#8527)");
+    assert_eq!(sent(&h).unwrap_err(), "select the face or point Direction 2 runs to");
+    // A plane is sent as the reference, so the copies follow it.
+    let last = h.app.dialog.as_ref().unwrap().inputs.len() - 1;
+    h.app.dialog.as_mut().unwrap().inputs[last].items = vec![Sel::Plane { name: "XZ".into() }];
+    let p = sent(&h).unwrap();
+    assert!(p["to2"].is_object(), "{p}");
+    let last = h.app.dialog.as_ref().unwrap().inputs.len() - 1;
+    h.app.dialog.as_mut().unwrap().inputs[last].items = vec![Sel::Vertex { body: String::new(), point: Vec3::new(0.0, 40.0, 0.0) }];
+    let p = sent(&h).unwrap();
+    assert_eq!((&p["type2"], &p["to2"], &p["type1"]), (&json!("to_object"), &json!([0.0, 40.0, 0.0]), &json!("extent")), "{p}");
+    // Back to Spacing: the input goes, and with it the point.
+    set(&mut h, "type2", "spacing");
+    assert!(h.app.dialog.as_ref().unwrap().inputs.iter().all(|i| i.label != "To Object 2"));
+    assert!(sent(&h).unwrap().get("to2").is_none());
+}
+
+/// Reopened, a pattern's To Objects show their faces, not stored points, each pick row under its
+/// own direction's Distance Type and above its To Offset, as an extrude's does (#7780, #8523).
+#[test]
+fn reopened_rectangular_pattern_shows_each_to_object_under_its_distance_type() {
+    let mut h = Harness::new();
+    for (id, p) in [
+        ("solid.box", json!({"length":120,"width":120,"height":5,"name":"Plate","body_name":"Plate"})),
+        ("solid.hole", json!({"position":[60,60,5],"diameter":2,"name":"Hole"})),
+        ("solid.box", json!({"length":10,"width":10,"height":5,"corner":[100,130,0],"name":"Stop","body_name":"Stop"})),
+        (
+            "solid.pattern.rectangular",
+            json!({"features":["Hole"],"dir1":[1,0,0],"count1":3,"type1":"to_object","to1":[100,135,2.5],"to_offset1":"-2 mm",
+                   "dir2":[0,1,0],"count2":2,"type2":"extent","spacing2":30,"name":"Pattern"}),
+        ),
+    ] {
+        h.app.run(id, p).unwrap();
+    }
+    h.frames(4);
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Pattern"}})).unwrap();
+    h.frames(8);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.extra.get("type1"), Some(&json!("to_object")));
+    assert_eq!(d.extra.get("type2"), Some(&json!("extent")));
+    let to = d.inputs.iter().find(|i| i.label == "To Object").and_then(|i| i.items.first()).cloned();
+    assert!(matches!(&to, Some(Sel::Face { body, .. }) if body == "Stop"), "{to:?}");
+    assert!(matches!(&d.kind, Kind::PatternRect { to_offset, spacing2, .. } if to_offset == "-2 mm" && spacing2 == "30"), "{:?}", d.kind);
+    let y = |name: &str| h.widget(name).unwrap_or_else(|| panic!("{name}"))[1];
+    let to_row = crate::scenario::handle_at("dialog:clear:To Object").unwrap().y as f64;
+    assert!(
+        y("Distance Type") < to_row && to_row < y("To Offset") && y("To Offset") < y("Quantity 2"),
+        "To Object's row is under Direction 1's Distance Type"
+    );
+    assert!(y("Distance Type 2") < y("Extent 2"));
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    let saved = h.app.session.doc.to_json().replace([' ', '\n'], "");
+    assert!(saved.contains("\"extent2\":true") && saved.contains("\"to_offset1\""), "{saved}");
+}
+
 #[test]
 fn coil_from_a_profile_hides_the_primitive_section() {
     let h = fixture();
