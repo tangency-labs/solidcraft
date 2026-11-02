@@ -1088,7 +1088,7 @@ fn relations_3d_square_up_a_frame_corner_and_hold_it_to_the_origin_planes() {
     assert!((fit(&s, &z, 1).z - 50.0).abs() < 1e-6);
     assert!(s.execute("sketch.dimension", &json!({"entities": [format!("{far}.end"), "xy"], "value": 25})).is_err());
     let e = s.execute("sketch.constraint.perpendicular", &json!({"a": x, "b": "xy"})).unwrap_err().to_string();
-    assert!(e.contains("only Parallel takes a plane"), "{e}");
+    assert!(e.contains("only Parallel takes an origin plane") && e.contains("along_axis"), "{e}");
 }
 
 #[test]

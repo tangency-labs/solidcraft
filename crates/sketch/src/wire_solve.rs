@@ -336,7 +336,14 @@ impl WireConstraintKind {
     /// Whether its residuals say how far a point has still to go: lengths, not angles (an angle's
     /// residual is weighed into mm too, but turning a line moves its end along an arc, in steps).
     fn in_mm(&self) -> bool {
-        !matches!(self, WireConstraintKind::Angle { .. })
+        !matches!(
+            self,
+            WireConstraintKind::Angle { .. }
+                | WireConstraintKind::PlaneAngle { .. }
+                | WireConstraintKind::Parallel { .. }
+                | WireConstraintKind::Perpendicular { .. }
+                | WireConstraintKind::ParallelToPlane { .. }
+        )
     }
 
     /// Whether its value is an angle.
@@ -426,15 +433,23 @@ impl WireConstraintKind {
                 // The circle through the arc's three points: |ab| |bc| |ca| / (2 |ab × ac|).
                 out.push(circumradius(p(0), p(1), p(2)) - T::num(*value));
             }
+            // Directions are compared as units, then weighed by the lines' size (a constant of the
+            // step, so shrinking a line gains nothing): residuals in mm, so a direction weighs as
+            // much as a length at any size.
             WireConstraintKind::Parallel { .. } => {
                 // The sine of the angle between them, as a vector: zero either way round.
-                out.extend(unit(p(1) - p(0)).cross(unit(p(3) - p(2))).xyz());
+                let (u, v) = (p(1) - p(0), p(3) - p(2));
+                out.extend(unit(u).cross(unit(v)).scale(size(u, v)).xyz());
             }
             // Zero gradient where they start parallel: such a start is nudged off.
-            WireConstraintKind::Perpendicular { .. } => out.push(unit(p(1) - p(0)).dot(unit(p(3) - p(2)))),
+            WireConstraintKind::Perpendicular { .. } => {
+                let (u, v) = (p(1) - p(0), p(3) - p(2));
+                out.push(unit(u).dot(unit(v)) * size(u, v));
+            }
             WireConstraintKind::Collinear { .. } => {
-                let d = unit(p(1) - p(0));
-                out.extend(d.cross(unit(p(3) - p(2))).xyz());
+                let (u, v) = (p(1) - p(0), p(3) - p(2));
+                let d = unit(u);
+                out.extend(d.cross(unit(v)).scale(size(u, v)).xyz());
                 // b's start on a's line too.
                 out.extend((p(2) - p(0)).cross(d).xyz());
             }
@@ -450,26 +465,30 @@ impl WireConstraintKind {
                 let (at, out_of) = if *arc_end == 0 { (s, -T::num(1.0)) } else { (e, T::num(1.0)) };
                 let along = unit(n.cross(at - center)).scale(out_of);
                 let (near, far) = if *line_end == 0 { (p(0), p(1)) } else { (p(1), p(0)) };
-                out.extend((unit(far - near) - along).xyz());
+                out.extend((unit(far - near) - along).scale(weight((far - near).len())).xyz());
                 // And the line's end held on the arc's end.
                 out.extend((near - at).xyz());
             }
-            WireConstraintKind::ParallelToPlane { plane, .. } => out.push(unit(p(1) - p(0)).dot(V::of(plane.normal()))),
+            WireConstraintKind::ParallelToPlane { plane, .. } => {
+                let u = p(1) - p(0);
+                out.push(unit(u).dot(V::of(plane.normal())) * weight(u.len()));
+            }
             WireConstraintKind::OnPlane { plane, .. } => out.push(p(0).dot(V::of(plane.normal()))),
             WireConstraintKind::PlaneDistance { plane, reversed, value, .. } => {
                 let d = p(0).dot(V::of(plane.normal()));
                 out.push(if *reversed { -d } else { d } - T::num(*value));
             }
             WireConstraintKind::PlaneAngle { plane, reversed, value, .. } => {
-                let (u, normal) = (unit(p(1) - p(0)), V::<T>::of(plane.normal()));
+                let (run, normal) = (p(1) - p(0), V::<T>::of(plane.normal()));
+                let (u, length) = (unit(run), weight(run.len()));
                 let normal = if *reversed { V { x: -normal.x, y: -normal.y, z: -normal.z } } else { normal };
                 if *value >= std::f64::consts::FRAC_PI_2 - PARALLEL_ANGLE {
                     // Square to the plane: along its normal, smooth there unlike the angle.
-                    out.extend((u - normal).xyz());
+                    out.extend((u - normal).scale(length).xyz());
                 } else {
                     // The signed angle, rising towards the normal: smooth at 0 (in the plane) and
-                    // short of 90°.
-                    out.push(u.dot(normal).atan2(u.cross(normal).len()) - T::num(*value));
+                    // short of 90°, as an arc length at the line's end.
+                    out.push((u.dot(normal).atan2(u.cross(normal).len()) - T::num(*value)) * length);
                 }
             }
         }
@@ -826,7 +845,7 @@ impl Sketch {
         };
         for line_end in [0usize, 1] {
             for arc_end in [0usize, 2] {
-                let meet = matches!((l.fit.get(line_end), a.fit.get(arc_end)), (Some(p), Some(q)) if p.dist(*q) < 1e-6)
+                let meet = matches!((l.fit.get(line_end), a.fit.get(arc_end)), (Some(p), Some(q)) if p.dist(*q) < MEET)
                     || joined(WirePoint { wire: line.to_string(), index: line_end }, WirePoint { wire: arc.to_string(), index: arc_end });
                 if meet {
                     return Some(WireConstraintKind::Tangent { line: line.to_string(), arc: arc.to_string(), line_end, arc_end });

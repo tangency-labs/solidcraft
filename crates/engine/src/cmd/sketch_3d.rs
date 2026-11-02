@@ -496,10 +496,18 @@ pub(super) fn relation_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Optio
     }
     let kind = match (cmd, plane) {
         ("sketch.constraint.parallel", Some(plane)) if sk.is_drawn_line(&line_of) => WireConstraintKind::ParallelToPlane { line: line_of, plane },
+        ("sketch.constraint.parallel", Some(_)) => {
+            return Err(bad(
+                cmd,
+                format!("parallel to the origin plane `{other}` takes a drawn 3D line (sketch.constraint.on_plane holds a point on it)"),
+            ));
+        }
         (_, Some(_)) => {
             return Err(bad(
                 cmd,
-                format!("`{other}`: of the origin planes, only Parallel takes a plane (use sketch.constraint.on_plane for a point)"),
+                format!(
+                    "`{other}`: of the relations, only Parallel takes an origin plane (a line square to it is sketch.constraint.along_axis; a point on it, sketch.constraint.on_plane)"
+                ),
             ));
         }
         ("sketch.constraint.parallel", None) if sk.is_drawn_line(&a) && sk.is_drawn_line(&b) => WireConstraintKind::Parallel { a, b },
@@ -745,6 +753,14 @@ pub(super) fn toggle_driven_3d(s: &mut Session, p: &Value, cmd: &str, cid: &str,
     let Some(c) = sk.wire_constraints.iter().find(|c| c.id == cid).cloned() else { return Ok(None) };
     let v = c.kind.value().ok_or_else(|| bad(cmd, format!("`{cid}` is not a dimension")))?;
     let driven = want.unwrap_or(!c.driven);
+    // Where an angle to a plane's line runs now, from its start.
+    let rise = match &c.kind {
+        WireConstraintKind::PlaneAngle { line, .. } => {
+            let at = |role: &str| sk.wire_point(&format!("{line}.{role}")).and_then(|q| sk.wire_point_at(&q));
+            at("end").zip(at("start")).map(|(e, s)| e - s)
+        }
+        _ => None,
+    };
     let freed = {
         let mut without = sk.clone();
         if let Some(slot) = without.wire_constraints.iter_mut().find(|c| c.id == cid) {
@@ -755,6 +771,10 @@ pub(super) fn toggle_driven_3d(s: &mut Session, p: &Value, cmd: &str, cid: &str,
     let start = s.doc.clone();
     let (_, info) = edit(s, p, cmd, true, |sk, doc| {
         let slot = sk.wire_constraints.iter_mut().find(|c| c.id == cid).ok_or_else(|| bad(cmd, format!("no constraint `{cid}`")))?;
+        if let (false, WireConstraintKind::PlaneAngle { plane, reversed, .. }) = (driven, &mut slot.kind) {
+            // It measured the angle whichever side the line rose to: it drives it on that side.
+            *reversed = rise.is_some_and(|d| d.dot(plane.normal()) < -SIDE * d.len().max(1.0));
+        }
         if driven != slot.driven {
             slot.driven = driven;
             slot.param = if driven {

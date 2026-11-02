@@ -775,3 +775,75 @@ fn equal_arcs_hold_one_radius_survive_a_save_and_go_with_an_arc() {
     sk.remove_wires(std::slice::from_ref(&b));
     assert!(sk.wire_constraints.iter().all(|c| c.id != id));
 }
+
+#[test]
+fn no_constraint_reads_more_points_than_its_jacobian_holds() {
+    let p = |w: &str| WirePoint { wire: w.into(), index: 0 };
+    let kinds = [
+        WireConstraintKind::Equal { a: "a".into(), b: "b".into(), arcs: true },
+        WireConstraintKind::Tangent { line: "l".into(), arc: "a".into(), line_end: 0, arc_end: 0 },
+        WireConstraintKind::Collinear { a: "a".into(), b: "b".into() },
+        WireConstraintKind::Angle { a: "a".into(), b: "b".into(), a_reversed: false, b_reversed: false, value: 1.0 },
+        WireConstraintKind::PointOnLine { p: p("q"), line: "l".into() },
+        WireConstraintKind::PlaneDistance { p: p("q"), plane: OriginPlane::Xy, reversed: false, value: 1.0 },
+    ];
+    for k in kinds {
+        assert!(3 * k.points().len() <= dual::N, "{k:?}");
+    }
+}
+
+#[test]
+fn perpendicular_turns_lines_a_hair_off_parallel_beside_a_length() {
+    // 1e-10 rad off parallel: too little for a step to register, too much for a zero gradient.
+    let mut sk = Sketch::new();
+    let a = line(&mut sk, v(0.0, 0.0, 0.0), v(5000.0, 0.0, 0.0));
+    let b = line(&mut sk, v(0.0, 2500.0, 0.0), v(5000.0, 2500.0, 5e-7));
+    fix_all(&mut sk, &format!("{a}.start"));
+    fix_all(&mut sk, &format!("{a}.end"));
+    fix_all(&mut sk, &format!("{b}.start"));
+    let (s, e) = (sk.wire_point(&format!("{b}.start")).unwrap(), sk.wire_point(&format!("{b}.end")).unwrap());
+    sk.add_wire_dimension(WireConstraintKind::Distance { a: s, b: e, value: 5000.0 }, None, false).unwrap();
+    sk.add_wire_constraint(WireConstraintKind::Perpendicular { a: a.clone(), b: b.clone() }).unwrap();
+    let rep = sk.solve_wires(None);
+    assert!(rep.ok, "{rep:?}");
+    let d = at(&sk, &format!("{b}.end")) - at(&sk, &format!("{b}.start"));
+    assert!(d.x.abs() < 1e-6 && (d.len() - 5000.0).abs() < 1e-6, "{d:?}");
+}
+
+#[test]
+fn equal_arcs_from_a_semicircle_follow_a_radius() {
+    // b starts as a semicircle (its least radius for that chord): its through point must move.
+    let mut sk = Sketch::new();
+    let a = sk.add_drawn_arc_in(&[v(0.0, 0.0, 0.0), v(3.0, 3.0, 0.0), v(6.0, 0.0, 0.0)], WireSpace::Component).unwrap();
+    let b = sk.add_drawn_arc_in(&[v(0.0, 20.0, 0.0), v(3.0, 23.0, 0.0), v(6.0, 20.0, 0.0)], WireSpace::Component).unwrap();
+    for arc in [&a, &b] {
+        fix_all(&mut sk, &format!("{arc}.start"));
+        fix_all(&mut sk, &format!("{arc}.end"));
+    }
+    sk.add_wire_dimension(WireConstraintKind::Radius { arc: a.clone(), value: 5.0 }, None, false).unwrap();
+    sk.add_wire_constraint(sk.equal_kind(&a, &b).unwrap()).unwrap();
+    let rep = sk.solve_wires(None);
+    assert!(rep.ok, "{rep:?}");
+    let radius = |arc: &str| sk.measure_wire_dimension(&WireConstraintKind::Radius { arc: arc.to_string(), value: 0.0 }).unwrap();
+    assert!((radius(&a) - 5.0).abs() < 1e-7 && (radius(&b) - 5.0).abs() < 1e-7, "{} {}", radius(&a), radius(&b));
+}
+
+#[test]
+fn a_tangent_at_the_arc_s_start_from_the_line_s_end_runs_back_before_it() {
+    // The quarter arc from (10, 0) runs on past its start in −Y; a line ending there leaves it so.
+    let mut sk = Sketch::new();
+    let h = std::f64::consts::FRAC_1_SQRT_2 * 10.0;
+    let arc = sk.add_drawn_arc_in(&[v(10.0, 0.0, 0.0), v(h, h, 0.0), v(0.0, 10.0, 0.0)], WireSpace::Component).unwrap();
+    let l = line(&mut sk, v(11.0, -8.0, 0.5), v(10.0, 0.0, 0.0));
+    sk.join_drawn_ends(std::slice::from_ref(&l)).unwrap();
+    for i in 0..3 {
+        fix_all(&mut sk, &format!("{arc}.{i}"));
+    }
+    let k = sk.tangent_kind(&l, &arc).unwrap();
+    assert!(matches!(k, WireConstraintKind::Tangent { line_end: 1, arc_end: 0, .. }), "{k:?}");
+    sk.add_wire_constraint(k).unwrap();
+    let rep = sk.solve_wires(None);
+    assert!(rep.ok, "{rep:?}");
+    let d = at(&sk, &format!("{l}.start")) - at(&sk, &format!("{l}.end"));
+    assert!(d.y < 0.0 && d.x.abs() < 1e-9 && d.z.abs() < 1e-9, "{d:?}");
+}

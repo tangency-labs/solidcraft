@@ -318,6 +318,49 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
                         None => false,
                     }
                 }
+                // To an origin plane: the plane the paste turns it onto, the side it was on, and
+                // the paste's shift along it (a point on the plane is then that far from it).
+                // One the paste turns onto no origin plane goes.
+                solidcraft_sketch::WireConstraintKind::ParallelToPlane { line, plane } => match onto_plane(matrix(line), *plane) {
+                    Some((to, _, _)) => {
+                        *plane = to;
+                        true
+                    }
+                    None => false,
+                },
+                solidcraft_sketch::WireConstraintKind::PlaneAngle { line, plane, reversed, .. } => match onto_plane(matrix(line), *plane) {
+                    Some((to, flip, _)) => {
+                        *plane = to;
+                        *reversed ^= flip;
+                        true
+                    }
+                    None => false,
+                },
+                solidcraft_sketch::WireConstraintKind::PlaneDistance { p, plane, reversed, value } => match onto_plane(matrix(&p.wire), *plane) {
+                    Some((to, flip, shift)) => {
+                        let side = if *reversed != flip { -1.0 } else { 1.0 };
+                        let w = shift + side * *value;
+                        (*plane, *reversed, *value) = (to, w < 0.0, w.abs());
+                        true
+                    }
+                    None => false,
+                },
+                solidcraft_sketch::WireConstraintKind::OnPlane { p, plane } => match onto_plane(matrix(&p.wire), *plane) {
+                    Some((to, _, shift)) if shift.abs() <= 1e-9 => {
+                        *plane = to;
+                        true
+                    }
+                    Some((to, _, shift)) => {
+                        c.kind = solidcraft_sketch::WireConstraintKind::PlaneDistance {
+                            p: p.clone(),
+                            plane: to,
+                            reversed: shift < 0.0,
+                            value: shift.abs(),
+                        };
+                        true
+                    }
+                    None => false,
+                },
                 _ => true,
             });
             // Patterns and text words have expressions outside FeatureKind's numeric inputs.
@@ -349,4 +392,20 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     scratch.selection = ids.values().map(|id| Sel::Feature { id: *id }).collect();
     s.accept_computed(scratch);
     Ok(json!({"pasted": made, "errors": [], "notices": []}))
+}
+
+/// The origin plane `matrix` turns `plane` onto, whether it turns the normal round (the plane's
+/// back side to its front), and how far the matrix shifts points along the new normal; `None`
+/// when it turns it onto no origin plane.
+fn onto_plane(matrix: &solidcraft_doc::Mat, plane: solidcraft_sketch::OriginPlane) -> Option<(solidcraft_sketch::OriginPlane, bool, f64)> {
+    use solidcraft_sketch::{Axis, OriginPlane};
+    let n = solidcraft_doc::apply_vector(matrix, plane.normal());
+    let axis = Axis::along(n)?;
+    let to = match axis {
+        Axis::X => OriginPlane::Yz,
+        Axis::Y => OriginPlane::Xz,
+        Axis::Z => OriginPlane::Xy,
+    };
+    let shift = solidcraft_doc::apply_point(matrix, solidcraft_geom::Vec3::ZERO).dot(to.normal());
+    Some((to, n.dot(to.normal()) < 0.0, shift))
 }
