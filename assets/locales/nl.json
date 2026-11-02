@@ -5157,7 +5157,7 @@
   "update.check_unavailable": "Controleren op updates is niet beschikbaar voor deze installatie.",
   "update.checking": "Controleren…",
   "update.copy": "Kopiëren",
-  "update.dmg_opened": "Het schijfkopie is geopend en geverifieerd: sleep SolidCraft naar Programma's, vervang de oude kopie en start SolidCraft daarna opnieuw.",
+  "update.dmg_opened": "Het schijfkopie is geopend en geverifieerd: stop SolidCraft, sleep de nieuwe SolidCraft naar Programma's, vervang de oude kopie en open SolidCraft daarna opnieuw.",
   "update.download": "Downloaden",
   "update.download_open": "Downloaden en openen",
   "update.downloading": "Downloaden en verifiëren… {done} van {total} MB",

@@ -5156,7 +5156,7 @@
   "update.check_unavailable": "Pemeriksaan pembaruan tidak tersedia untuk instalasi ini.",
   "update.checking": "Memeriksa…",
   "update.copy": "Salin",
-  "update.dmg_opened": "Disk image terbuka dan terverifikasi: seret SolidCraft ke Applications, ganti salinan lama, lalu mulai ulang SolidCraft.",
+  "update.dmg_opened": "Disk image terbuka dan terverifikasi: keluar dari SolidCraft, seret SolidCraft yang baru ke Applications, ganti salinan lama, lalu buka SolidCraft lagi.",
   "update.download": "Unduh",
   "update.download_open": "Unduh dan buka",
   "update.downloading": "Mengunduh dan memverifikasi… {done} dari {total} MB",

@@ -5156,7 +5156,7 @@
   "update.check_unavailable": "Căutarea actualizărilor nu este disponibilă pentru această instalare.",
   "update.checking": "Se verifică…",
   "update.copy": "Copiază",
-  "update.dmg_opened": "Imaginea de disc este deschisă și verificată: trageți SolidCraft în Applications, înlocuind copia veche, apoi reporniți SolidCraft.",
+  "update.dmg_opened": "Imaginea de disc este deschisă și verificată: ieșiți din SolidCraft, trageți noul SolidCraft în Applications, înlocuind copia veche, apoi deschideți din nou SolidCraft.",
   "update.download": "Descarcă",
   "update.download_open": "Descarcă și deschide",
   "update.downloading": "Se descarcă și se verifică… {done} din {total} MB",

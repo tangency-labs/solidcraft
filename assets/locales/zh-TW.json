@@ -5159,7 +5159,7 @@
   "update.check_unavailable": "此安裝版本無法檢查更新。",
   "update.checking": "正在檢查…",
   "update.copy": "複製",
-  "update.dmg_opened": "磁碟映像已驗證並開啟：將 SolidCraft 拖到「應用程式」取代舊版本，然後重新啟動 SolidCraft。",
+  "update.dmg_opened": "磁碟映像已驗證並開啟：結束 SolidCraft，將新的 SolidCraft 拖到「應用程式」取代舊版本，然後再次開啟 SolidCraft。",
   "update.download": "下載",
   "update.download_open": "下載並開啟",
   "update.downloading": "正在下載並驗證… {done} / {total} MB",

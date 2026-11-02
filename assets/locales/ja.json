@@ -5222,7 +5222,7 @@
   "update.check_unavailable": "このインストールではアップデートを確認できません。",
   "update.checking": "確認中…",
   "update.copy": "コピー",
-  "update.dmg_opened": "ディスクイメージを検証して開きました: SolidCraft をアプリケーションフォルダにドラッグして古いものを置き換え、SolidCraft を再起動してください。",
+  "update.dmg_opened": "ディスクイメージを検証して開きました: SolidCraft を終了し、新しい SolidCraft をアプリケーションフォルダにドラッグして古いものを置き換えてから、SolidCraft をもう一度開いてください。",
   "update.download": "ダウンロード",
   "update.download_open": "ダウンロードして開く",
   "update.downloading": "ダウンロードと検証中… {done} / {total} MB",

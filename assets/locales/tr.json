@@ -5156,7 +5156,7 @@
   "update.check_unavailable": "Bu kurulum için güncelleme denetimi kullanılamıyor.",
   "update.checking": "Denetleniyor…",
   "update.copy": "Kopyala",
-  "update.dmg_opened": "Disk görüntüsü açıldı ve doğrulandı: SolidCraft'ı “Uygulamalar” klasörüne sürükleyin, eski sürümü değiştirin ve SolidCraft'ı yeniden başlatın.",
+  "update.dmg_opened": "Disk görüntüsü açıldı ve doğrulandı: SolidCraft'tan çıkın, yeni SolidCraft'ı “Uygulamalar” klasörüne sürükleyin, eski sürümü değiştirin ve SolidCraft'ı yeniden açın.",
   "update.download": "İndir",
   "update.download_open": "İndir ve aç",
   "update.downloading": "İndiriliyor ve doğrulanıyor… {done} / {total} MB",

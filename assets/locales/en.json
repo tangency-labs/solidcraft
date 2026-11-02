@@ -5222,7 +5222,7 @@
   "update.check_unavailable": "Update checks are not available for this installation.",
   "update.checking": "Checking…",
   "update.copy": "Copy",
-  "update.dmg_opened": "The disk image is open and verified: drag SolidCraft to Applications, replacing the old copy, then restart SolidCraft.",
+  "update.dmg_opened": "The disk image is open and verified: quit SolidCraft, drag the new SolidCraft to Applications, replacing the old copy, then open SolidCraft again.",
   "update.download": "Download",
   "update.download_open": "Download and open",
   "update.downloading": "Downloading and verifying… {done} of {total} MB",
