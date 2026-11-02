@@ -331,6 +331,31 @@ fn starting_a_profile_command_opens_preferences_instead_of_failing() {
 }
 
 #[test]
+fn typing_a_profile_name_keeps_focus_out_of_preferences_search() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.prefs", json!({"open": "General"}));
+    h.frames(3);
+    h.step(&json!({"text": "profiles"})).expect("find Settings profiles");
+    h.frames(3);
+    h.step(&json!({"click": {"handle": "dialog:Name"}})).expect("focus the profile name");
+    h.frames(2);
+    let name_focus = h.ctx.memory(|memory| memory.focused()).expect("the name field has focus");
+    for text in ["Lap", "top"] {
+        h.step(&json!({"text": text})).expect("type a profile name");
+        h.frames(2);
+        assert_eq!(h.app.prefs_window.filter, "profiles", "profile-name text went to Preferences search");
+        assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(name_focus), "the name field keeps focus");
+    }
+    assert!(h.widget("Laptop").is_some(), "the name field contains the typed name");
+    h.step(&json!({"widget": "Save"})).expect("save the profile");
+    h.frames(2);
+    assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Laptop"));
+    assert_eq!(h.app.settings_profiles.names(), ["Laptop"]);
+    assert_eq!(h.app.prefs_window.filter, "profiles");
+}
+
+#[test]
 fn choosing_a_profile_in_preferences_applies_it() {
     let mut h = Harness::new();
     run(&mut h, "settings.profile.save", json!({"name": "Laptop"}));

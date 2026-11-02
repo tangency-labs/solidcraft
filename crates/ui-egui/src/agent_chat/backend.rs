@@ -78,6 +78,8 @@ pub enum Event {
     Permission {
         key: u64,
         title: String,
+        /// The tool call's kind, as the agent gives it.
+        kind: Option<String>,
         options: Vec<PermissionOption>,
     },
     /// It needs the user to sign in; `methods` are its own ways to do so.
@@ -96,6 +98,11 @@ pub enum Event {
         current: String,
         available: Vec<super::acp::ModelInfo>,
     },
+    /// Why an endpoint's models could not be listed (`None`: they could). It comes before the
+    /// [`Event::Models`] of that listing, which then holds only the configured model.
+    ModelsNote(Option<String>),
+    /// The agent refused the model it was just sent, and says why.
+    ModelRejected(String),
     ConfigOptions(Vec<ConfigOption>),
     ConfigOptionFinished {
         id: String,

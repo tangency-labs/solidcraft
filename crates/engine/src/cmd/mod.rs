@@ -26,6 +26,9 @@ pub(crate) mod clearance;
 mod clipboard;
 mod clipboard_foreign;
 mod compare;
+mod compare_picture;
+#[cfg(test)]
+mod compare_picture_tests;
 mod component;
 mod component_clone;
 mod component_clone_assembly;
@@ -37,16 +40,21 @@ mod face;
 mod features;
 mod features_more;
 mod join_pieces;
-pub(crate) use construct::{GeoForm, GeoFormError, REF as GEO_REF_FORMS, SKETCH_PART, geo_form, is_model_axis};
+pub(crate) use construct::{GeoForm, GeoFormError, REF as GEO_REF_FORMS, SKETCH_PART, geo_form, is_model_axis, plane_axis_point_kind};
 pub(crate) use face::{FaceRefForm, face_ref_form};
 pub(crate) use features::profiles as feature_profiles;
 pub(crate) use features::{EdgeRefForm, PLANE_FORMS, axis_dir_form, axis_line_object, edge_ref_form, explicit_plane, plane_name_problem, sketch_key};
 pub use features::{auto_operation, extrude_reach, shown_scope};
+pub use file::open_steps::OpenSteps;
 pub use join_pieces::{Addition, addition};
+pub use parts::part_length_label;
 pub use sketch::dimension_roles;
 pub(crate) use sketch::face::face_pick_form;
-pub use sketch_construction::{ConstructionLine, construction_line_choice, construction_line_mode, construction_line_solutions};
-pub use sketch_create::tangent_arc_preview;
+pub use sketch_construction::{
+    ConstructionLine, construction_line_choice, construction_line_mode, construction_line_solutions, construction_line_takes_length,
+    construction_segment,
+};
+pub use sketch_create::{tangent_arc_preview, tangent_arc_starts_at};
 pub use sketch_import::drawing_import_command;
 pub use sketch_modify::{extend_arc_preview, extend_preview, trim_piece};
 pub use view_dxf::sketch::exportable as view_dxf_exportable;
@@ -242,6 +250,12 @@ impl CommandSpec {
             other => other,
         }
     }
+    /// The refusal this command gives when it is not available in this session: none when it
+    /// is. It is the engine's own wording (`EngineError::Disabled`), so a caller that only has
+    /// the message can tell it from a failure of the command itself.
+    pub fn disabled_refusal(&self, s: &Session) -> Option<String> {
+        (self.enabled)(s).err().map(|why| crate::EngineError::Disabled(self.id.to_string(), why).to_string())
+    }
     pub fn info(&self, s: &Session) -> CommandInfo {
         let e = (self.enabled)(s);
         let (label, icon) = match self.id {
@@ -342,6 +356,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
     v.extend(compare::COMMANDS.iter());
+    v.extend(compare_picture::COMMANDS.iter());
     v.extend(silhouette::COMMANDS.iter());
     v.extend(materials::COMMANDS.iter());
     v.extend(material_properties::COMMANDS.iter());

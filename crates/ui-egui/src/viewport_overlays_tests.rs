@@ -67,7 +67,8 @@ fn section_details_live_fields_reconstruct_arbitrary_plane_without_losing_compan
     assert!((original.1 + flipped.1).len() < 1e-9);
     h.app.session.doc_mut().units = "in".into();
     let effect = h.app.session.status_items().remove(0);
-    let params = crate::viewport_details::edit_params(&h.app, &effect, "offset", &V::Length { value: -25.4, units: "in".into() }).unwrap();
+    let params =
+        crate::viewport_details::edit_params(&h.app, &effect, "offset", &V::Length { value: -25.4, units: "in".into(), decimals: 2 }).unwrap();
     assert_eq!(params["offset"], "-25.4 mm");
     assert_eq!(params["hatch"], true);
     assert_eq!(params["flip"], !current_flip);
@@ -121,7 +122,7 @@ fn details_record_scope_preserves_mixed_limits_and_stale_targets_never_move_came
     crate::viewport_details::dispatch(&mut h.app, &h.ctx, &owner, DetailEvent::Target(target));
     assert_eq!(h.app.session.camera, before);
     let effect = h.app.session.status_items().remove(0);
-    assert!(crate::viewport_details::edit_params(&h.app, &effect, "gap", &V::Length { value: 1.0, units: "in".into() }).is_none());
+    assert!(crate::viewport_details::edit_params(&h.app, &effect, "gap", &V::Length { value: 1.0, units: "in".into(), decimals: 2 }).is_none());
     assert!(crate::viewport_details::description(&h.app, &effect).findings.iter().all(|row| !row.target));
 }
 
@@ -1304,6 +1305,63 @@ fn view_angles_readout_shows_only_when_on_and_applies_typed_angles() {
     }
 }
 
+/// The card's zero buttons and per-axis locks (#4581): zero turns one angle to 0° at once, and a
+/// locked angle stays put through orbit turns and Apply, so a symmetrical view can hold its yaw
+/// while only the pitch is adjusted.
+#[test]
+fn view_angles_card_zero_buttons_and_axis_locks() {
+    use solidcraft_engine::render::ViewAngles;
+    let mut h = Harness::new();
+    h.app.preferences.look_at_anim = false;
+    h.call("engine.execute", json!({"command": "view.angle_readout", "params": {"enabled": true}}));
+    h.call("ui.view", json!({"view": "iso"}));
+    h.settle();
+    let readout = crate::scenario::rect_of("view_angles:readout").expect("the readout shows once it is on");
+    h.call("ui.click", json!({"x": readout.center().x, "y": readout.center().y}));
+    assert!(crate::scenario::rect_of("view_angles:card").is_some());
+    // The iso view has a non-zero yaw; its zero button turns it to the front view at once.
+    let before = h.app.cam.view_angles();
+    assert!(before.yaw.abs() > 1.0, "{before:?}");
+    let zero = crate::scenario::handle_at("view_angles:zero:yaw").expect("a zero button per axis");
+    h.call("ui.click", json!({"x": zero.x, "y": zero.y}));
+    h.settle();
+    let after = h.app.cam.view_angles();
+    assert!(after.yaw.abs() < 1e-6, "{after:?}");
+    assert!((after.pitch - before.pitch).abs() < 1e-6, "only yaw zeroed: {after:?}");
+    // Lock yaw: an orbit turn moves the pitch but never the locked yaw, and the locked axis's
+    // zero button goes inert.
+    let lock = crate::scenario::handle_at("view_angles:lock:yaw").expect("a lock per axis");
+    h.call("ui.click", json!({"x": lock.x, "y": lock.y}));
+    assert!(h.app.ui.view_angles_lock_yaw);
+    let yaw = h.app.cam.view_angles().yaw;
+    h.app.run("view.navigate", json!({"camera": h.app.cam, "action": "up", "degrees": 20.0})).unwrap();
+    let turned = h.app.cam.view_angles();
+    assert!((turned.yaw - yaw).abs() < 1e-6, "a locked yaw survives an orbit turn: {turned:?}");
+    assert!(turned.pitch > before.pitch + 10.0, "the turn moved the pitch: {turned:?}");
+    let zero = crate::scenario::handle_at("view_angles:zero:yaw").unwrap();
+    h.call("ui.click", json!({"x": zero.x, "y": zero.y}));
+    h.settle();
+    assert!((h.app.cam.view_angles().yaw - yaw).abs() < 1e-6, "the locked axis's zero button is inert");
+    // Apply keeps the locked angle whatever the card holds for it.
+    h.ctx.data_mut(|d| d.insert_temp(crate::view_angles::draft_id(), ViewAngles { yaw: 40.0, pitch: 20.0, roll: 0.0 }));
+    h.frame();
+    let apply = crate::scenario::handle_at("dialog:button:Apply").unwrap();
+    h.call("ui.click", json!({"x": apply.x, "y": apply.y}));
+    h.settle();
+    let applied = h.app.cam.view_angles();
+    assert!((applied.yaw - yaw).abs() < 1e-6, "Apply keeps the locked yaw: {applied:?}");
+    assert!((applied.pitch - 20.0).abs() < 1e-6, "{applied:?}");
+    // Unlocking lets the zero button work again.
+    let lock = crate::scenario::handle_at("view_angles:lock:yaw").unwrap();
+    h.call("ui.click", json!({"x": lock.x, "y": lock.y}));
+    assert!(!h.app.ui.view_angles_lock_yaw);
+    let zero = crate::scenario::handle_at("view_angles:zero:yaw").unwrap();
+    h.call("ui.click", json!({"x": zero.x, "y": zero.y}));
+    h.settle();
+    assert!(h.app.cam.view_angles().yaw.abs() < 1e-6);
+    assert!(h.app.session.undo.is_empty(), "view angles never touch the design");
+}
+
 /// In the corner (#7893) the buttons sit as in the dialogs: right-aligned, dismissals first and the
 /// main action right-most; when they wrap, the row with the main action is the bottom one.
 #[test]
@@ -1484,6 +1542,37 @@ fn a_huge_extrude_distance_draws_its_handles_at_once() {
     h.frames(4);
     assert!(crate::scenario::handle_at("taper").is_some(), "the taper handle is drawn");
     assert!(started.elapsed().as_secs_f64() < 10.0, "{:?}", started.elapsed());
+}
+
+/// The taper handle's limits come from the profiles' inradii, a grid search over every side:
+/// an open extrude works them out once for its profiles, not every frame, and again when the
+/// profiles change.
+#[test]
+fn an_open_extrude_keeps_its_taper_limits_while_the_profiles_stay() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[-20,-20],"p1":[20,20]})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":6})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("select.clear", json!({})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"home"}})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"solid.extrude"})).unwrap();
+    h.step(&json!({"click":{"world":[15,15,0]}})).unwrap();
+    h.frames(2);
+    assert!(crate::scenario::handle_at("taper").is_some(), "the taper handle is drawn");
+    let once = crate::canvas::taper_radii_worked_out();
+    h.frames(20);
+    assert_eq!(crate::canvas::taper_radii_worked_out(), once, "the same profile: not worked out again");
+    h.step(&json!({"text":"25"})).unwrap();
+    h.frames(4);
+    assert_eq!(crate::canvas::taper_radii_worked_out(), once, "only the height changed");
+    // The disc in the hole joins the extrude: other profiles, other limits.
+    h.step(&json!({"click":{"world":[-3,-3,0]}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().map(|d| d.inputs[0].items.len()), Some(2), "{:?}", h.app.dialog.as_ref().map(|d| &d.inputs[0].items));
+    assert!(crate::canvas::taper_radii_worked_out() > once, "new profiles are worked out");
 }
 
 fn point_overlays(app: &SolveApp) -> Vec<Shape> {
@@ -2580,5 +2669,31 @@ fn summary_preferences_cancel_restores_layout_independently_of_all_effect_polici
         });
         h.frames(3);
         assert_eq!(crate::scenario::rect_of("viewport_status:summary").is_some(), saved);
+    }
+}
+
+#[test]
+fn a_section_card_shows_every_row_and_reads_like_its_pill() {
+    // #10708: the card was cut off below Hatch (and Flip for a tilted plane), and showed
+    // "15.000000 mm" and a normal with 16 digits.
+    use crate::ui_kit::DetailValue as V;
+    for (plane, rows, normal) in [(json!("XZ"), 3, None), (json!({"origin":[20,15,10],"normal":[1,1,0]}), 3, Some("(0.707, 0.707, 0)"))] {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+        h.app.run("inspect.section", json!({"plane":plane,"offset":15})).unwrap();
+        h.frames(3);
+        let effect = h.app.session.status_items().remove(0);
+        let owner = crate::viewport_status::identity(&effect);
+        h.step(&json!({"click":{"handle":format!("viewport_status:{owner}:setting")}})).unwrap();
+        h.frames(4);
+        let card = crate::scenario::rect_of("viewport_status:card").expect("the card");
+        let fields: Vec<_> = ["offset", "flip", "hatch"].iter().filter_map(|f| crate::scenario::rect_of(&format!("details:field:{f}"))).collect();
+        assert_eq!(fields.len(), rows);
+        assert!(fields.iter().all(|f| card.contains_rect(*f)), "{plane}: card {card:?}, rows {fields:?}");
+        let description = crate::viewport_details::description(&h.app, &effect);
+        assert!(description.settings.iter().any(|s| matches!(&s.value, V::Length { decimals: 2, .. })));
+        if let Some(normal) = normal {
+            assert!(description.settings.iter().any(|s| matches!(&s.value, V::Axis { current, .. } if current == normal)), "{plane}");
+        }
     }
 }

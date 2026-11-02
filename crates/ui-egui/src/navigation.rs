@@ -503,7 +503,7 @@ pub(crate) fn step_key_hold(app: &mut SolveApp, ctx: &egui::Context) {
     {
         app.cancel_view_animation();
         app.viewport.orbit_free = None;
-        app.cam = cam;
+        app.cam = crate::view_angles::keep_locked(app, app.cam, cam);
     }
 }
 
@@ -815,7 +815,8 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
                 Some(NavMode::Zoom) => {
                     let press = ui.input(|i| i.pointer.press_origin());
                     let anchor = model_zoom_anchor(app, rect, press.or(hover), caps.orbit);
-                    app.cam.zoom_at((f64::from(delta.y) * 0.01).exp(), anchor);
+                    let sign = if crate::prefs::nav_preset(&app.preferences.nav).reverse_drag_zoom { -1.0 } else { 1.0 };
+                    app.cam.zoom_at((f64::from(delta.y) * 0.01 * sign).exp(), anchor);
                 }
                 _ => {}
             }
@@ -909,11 +910,15 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
         }
     });
     if let Some(queued) = app.viewport.device_motion.take() {
+        let before = app.cam;
         device_camera(&mut app.cam, queued.motion, queued.seconds, height, turn, app.preferences.free_orbit, anchor, pivot);
+        app.cam = crate::view_angles::keep_locked(app, before, app.cam);
     }
     // A device app's motion (the navigation bridge), on the same terms.
     if let Some(queued) = app.viewport.bridge_motion.take() {
+        let before = app.cam;
         bridge_camera(&mut app.cam, queued, height, turn, app.preferences.zoom_reverse, app.preferences.free_orbit, anchor, pivot);
+        app.cam = crate::view_angles::keep_locked(app, before, app.cam);
     }
 }
 

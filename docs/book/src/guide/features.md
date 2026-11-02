@@ -282,7 +282,7 @@ edited with the sketch commands. Expressions are text (`"30"`, `"30 mm"`, `"widt
 
 ```json
 {"command": "timeline.inspect", "params": {"feature": "Slab"}}
-→ {"type": "ExtrudeFeature",
+→ {"type": "extrude", "type_name": "ExtrudeFeature",
    "definition": {"sketch": 1, "profiles": {"type": "all"}, "operation": "new_body",
                   "extent": {"distance": "10", "direction": "positive"}},
    "inputs": [{"label": "Distance", "param": "d1", "expression": "10", "unit": "mm"}], …}

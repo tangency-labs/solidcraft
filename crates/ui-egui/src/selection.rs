@@ -29,6 +29,19 @@ pub(crate) fn alignment_points(selection: &[Sel]) -> Option<[serde_json::Value; 
     (a != b).then_some([a, b])
 }
 
+/// Coincident's two operands for a two-item selection: points and curves by id, a line's
+/// midpoint as `{midpoint: line}`, which the command ties a point to (#10311).
+pub(crate) fn coincident_operands(selection: &[Sel]) -> Option<serde_json::Value> {
+    let [a, b] = selection else { return None };
+    let operand = |s: &Sel| match s {
+        Sel::SketchPoint { id } | Sel::SketchCurve { id, .. } => Some(serde_json::json!(id)),
+        Sel::SketchMidpoint { id } => Some(serde_json::json!({"midpoint": id})),
+        _ => None,
+    };
+    let (a, b) = (operand(a)?, operand(b)?);
+    (a != b).then(|| serde_json::json!({"a": a, "b": b}))
+}
+
 /// The current middle of a finite straight sketch edge.
 pub(crate) fn line_midpoint(sk: &solidcraft_engine::sketch::Sketch, line: usize) -> Option<solidcraft_engine::geom::Vec2> {
     let curve = sk.curves.get(line)?;
@@ -113,7 +126,9 @@ impl SelInput {
             Hit::Plane { name, .. } if a & PLANES != 0 => Some(Sel::Plane { name: name.clone() }),
             Hit::Axis { name } if a & AXES != 0 => Some(Sel::Axis { name: name.clone() }),
             Hit::ConstructionPoint { name } if a & CONSTRUCTION_POINTS != 0 => Some(Sel::ConstructionPoint { name: name.clone() }),
-            Hit::SketchCurve { sketch, id, straight: true, .. } if a & AXES != 0 => Some(curve_pick(id, *sketch, active)),
+            // A straight sketch line stands for an axis only in an input that takes axes for
+            // what they are: an input that takes curves too (Measure) takes the line as its curve.
+            Hit::SketchCurve { sketch, id, straight: true, .. } if a & AXES != 0 && a & CURVES == 0 => Some(curve_pick(id, *sketch, active)),
             Hit::SketchCurve { sketch, id, .. } if a & SKETCH_LINES != 0 => Some(Sel::ExternalSketchCurve { sketch: *sketch, id: id.clone() }),
             Hit::SketchCurve { sketch, id, .. } if a & CURVES != 0 => Some(curve_pick(id, *sketch, active)),
             Hit::SketchPoint { sketch, id, .. } if a & EXTERNAL_POINTS != 0 => Some(Sel::ExternalSketchPoint { sketch: *sketch, id: id.clone() }),

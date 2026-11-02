@@ -167,6 +167,8 @@ fn joint_and_drive_preview_on_the_placed_model() {
         removed: [3, 3, 3, 100],
         edge: [0, 0, 0, 255],
         ghost: true,
+        tint_new: true,
+        cut_tint: true,
     };
     let cmds = preview_commands(&app, &d).unwrap();
     let b = world_preview(&app.session, &cmds, colors).unwrap().unwrap();
@@ -321,6 +323,72 @@ fn edit_joint_shows_both_sides_and_a_repick_sends_only_that_side() {
     assert_eq!(after.a, before.a);
     assert_eq!(after.b.occurrence, b);
     assert_ne!(after.b, before.b);
+}
+
+/// Point and frame origins have no face pick, but Edit Joint must still identify their
+/// components (#7749). Showing those components must not replace either stored origin.
+#[test]
+fn edit_joint_shows_components_for_point_and_frame_origins() {
+    for command in ["joint.create", "joint.as_built", "joint.rigid_group"] {
+        let mut app = two_boxes();
+        let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+        let params = match command {
+            "joint.create" => json!({"type": "rigid", "flip": true,
+                "a": {"occurrence": a, "point": [10, 10, 10], "z": [0, 0, 1]},
+                "b": {"occurrence": b, "point": [40, 10, 10], "z": [0, 0, 1]}}),
+            "joint.as_built" => json!({"type": "rigid", "a": a, "b": b}),
+            _ => json!({"occurrences": [a, b]}),
+        };
+        app.run(command, params).unwrap();
+        let before = app.session.doc.assembly.joints[0].clone();
+        let mut d = edit_joint(&app, before.id).unwrap();
+        for (input, (id, name)) in d.inputs.iter().zip([(a, "A:1"), (b, "B:1")]) {
+            let item = input.items.first().expect("the stored component is shown");
+            assert_eq!(item, &Sel::Occurrence { path: vec![id] }, "{command}");
+            assert_eq!(crate::dialogs::selection_label(&app.session, app.preferences.origin_plane_names, &d, input, item), name);
+        }
+        let commands = apply_commands(&app, &d).unwrap();
+        assert!(commands[0].1.get("a").is_none() && commands[0].1.get("b").is_none(), "{commands:?}");
+        for (id, params) in commands {
+            app.run(&id, params).unwrap();
+        }
+        let after = &app.session.doc.assembly.joints[0];
+        assert_eq!((&after.a, &after.b), (&before.a, &before.b), "{command}");
+
+        // Replacing just B with a face still edits only B, preserving A's point/frame.
+        let body = app.session.world_state().bodies.iter().find(|body| occurrence_of_body(&app.session, &body.name) == Some(b)).unwrap().name.clone();
+        let picked = Sel::Face { body, index: 0, point: Vec3::new(40.0, 10.0, 10.0) };
+        d.active = 1;
+        d.pick(&app.session, picked);
+        let commands = apply_commands(&app, &d).unwrap();
+        assert!(commands[0].1.get("a").is_none(), "{commands:?}");
+        assert_eq!(commands[0].1["b"]["occurrence"], b);
+    }
+}
+
+#[test]
+fn edit_joint_component_labels_keep_the_nested_instance_and_root() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    let parent = app.run("component.create", json!({"name": "Assembly", "activate": false})).unwrap()["occurrence"].as_u64().unwrap();
+    let first =
+        app.run("component.create", json!({"name": "Part", "parent": "Assembly", "activate": false})).unwrap()["occurrence"].as_u64().unwrap();
+    let second = app.run("occurrence.copy", json!({"occurrence": first})).unwrap()["occurrence"].as_u64().unwrap();
+    let origin = |id| json!({"occurrence": id, "frame": {"origin": [0, 0, 0], "z": [0, 0, 1], "x": [1, 0, 0]}});
+    app.run("joint.create", json!({"type": "rigid", "flip": true, "a": origin(0), "b": origin(second)})).unwrap();
+    let before = app.session.doc.assembly.joints[0].clone();
+    let mut d = edit_joint(&app, before.id).unwrap();
+    for (input, (path, label)) in d.inputs.iter().zip([(vec![], app.session.doc.name.as_str()), (vec![parent, second], "Part:2")]) {
+        let item = input.items.first().expect("the stored component is shown");
+        assert_eq!(item, &Sel::Occurrence { path });
+        assert_eq!(crate::dialogs::selection_label(&app.session, app.preferences.origin_plane_names, &d, input, item), label);
+    }
+    for (id, params) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, params).unwrap();
+    }
+    let after = &app.session.doc.assembly.joints[0];
+    assert_eq!((&after.a, &after.b), (&before.a, &before.b));
+    d.inputs[1].items.clear();
+    assert!(apply_commands(&app, &d).is_err(), "clearing a side still requires a replacement origin");
 }
 
 /// A side on a hole's wall shows the wall, a cylinder, not the plate's face beside the hole: the
@@ -871,6 +939,8 @@ fn drive_says_where_a_loop_stopped_it() {
         removed: [3, 3, 3, 100],
         edge: [0, 0, 0, 255],
         ghost: true,
+        tint_new: true,
+        cut_tint: true,
     };
     let rocker = app.session.doc.assembly.joints.iter().position(|j| j.name == "Rocker").unwrap();
     let mut d = drive_joint(&app, app.session.doc.assembly.joints[rocker].id).unwrap();
@@ -931,6 +1001,8 @@ fn drive_says_when_its_joint_is_joined_to_nothing_grounded() {
         removed: [3, 3, 3, 100],
         edge: [0, 0, 0, 255],
         ghost: true,
+        tint_new: true,
+        cut_tint: true,
     };
     let b = world_preview(&app.session, &apply_commands(&app, &d).unwrap(), colors).unwrap().unwrap();
     let why = b.stopped.as_ref().and_then(drive_stop).unwrap();
@@ -1106,4 +1178,56 @@ fn inch_joint_offsets_limits_and_drive_values_keep_their_units() {
     let edit = edit_joint(&app, joint).unwrap();
     let Kind::Assembly(Asm::Joint(f)) = edit.kind else { panic!("no edit") };
     assert_eq!((f.limits[0].1.as_str(), f.limits[0].2.as_str()), ("0 in", "0.5 in"));
+}
+
+/// The Assemble ribbon must open a body picker, without executing the JSON command yet.
+#[test]
+fn components_from_bodies_dialog_select_all_cancel_and_ok() {
+    let mut h = crate::scenario::Harness::new();
+    for x in [0, 30] {
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0]})).unwrap();
+    }
+    let before = h.app.session.doc.clone();
+    let names: Vec<_> = h.app.session.model.state().bodies.iter().map(|body| body.name.to_string()).collect();
+    h.step(&json!({"start":"component.from_bodies"})).unwrap();
+    let d = h.app.dialog.as_ref().expect("From Bodies opens a dialog");
+    assert!(matches!(d.kind, Kind::Assembly(Asm::FromBodies)));
+    assert!(apply_commands(&h.app, d).is_err(), "OK requires at least one body");
+    assert_eq!(h.app.session.doc, before);
+    h.step(&json!({"widget":crate::i18n::tr("ui.select_all")})).unwrap();
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands, vec![("component.from_bodies".into(), json!({"bodies":names}))]);
+    if let Ok(path) = std::env::var("SOLIDCRAFT_COMPONENTS_DIALOG_EVIDENCE") {
+        let ctx = crate::fonts::test_context();
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+        let mut textures = Default::default();
+        for frame in 0..6 {
+            let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), ..Default::default() }, |ui| {
+                h.app.logic(ui.ctx());
+                h.app.ui(ui);
+            });
+            crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+            output.textures_delta.clear();
+            if frame == 5 {
+                crate::ui_kit::test_raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures).save(&path).unwrap();
+            }
+        }
+    }
+    h.step(&json!({"widget":"Cancel"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    assert_eq!(h.app.session.doc, before, "Cancel makes no components");
+    // Existing body picks seed the same standard multi-selection input.
+    h.app.session.selection = vec![Sel::Body { name: names[0].clone() }];
+    h.step(&json!({"start":"component.from_bodies"})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.inputs[0].items.body_names(), vec![names[0].clone()]);
+    h.step(&json!({"widget":crate::i18n::tr("ui.select_all")})).unwrap();
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    for name in &names {
+        let component = h.app.session.doc.find_component(name).expect("one component per body");
+        assert_eq!(h.app.session.doc.model_body_component(h.app.session.model.state().body(name).unwrap()), component);
+    }
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.session.doc, before, "the dialog applies one undoable command");
 }

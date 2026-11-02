@@ -777,6 +777,7 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         arc_turn: 0.0,
         lined: Vec::new(),
         chain: Default::default(),
+        normal: false,
     })
 }
 
@@ -792,7 +793,7 @@ pub fn hint(id: &str) -> Option<String> {
     Some(
         match id {
             "sketch.project" => "Project: click edges, faces, vertices, other sketches' curves, axes or planes",
-            "sketch.intersect" => "Intersect: click faces or edges to cut with the sketch plane",
+            "sketch.intersect" => "Intersect: click faces, edges or other sketches' curves to cut with the sketch plane",
             "sketch.include_3d" => "Include 3D Geometry: click edges or vertices",
             "sketch.fit_curves_to_section" => "Fit Curves to Mesh Section: click a body",
             "sketch.isoparametric_curve" => "Isoparametric Curve: click a point on a face (Shift: along)",
@@ -1257,6 +1258,13 @@ pub(crate) fn place_point(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<
         return;
     }
     let p = crate::sketch_dims::placed(app, tool, &p);
+    // Tangent Arc starts at the end of a line, arc or spline. A first click anywhere else (on a
+    // line between its ends, in empty space) is refused now, saying where to click, instead of
+    // failing at the second click on a point the command can't take (#10653).
+    if tool.cmd == "sketch.arc.tangent" && tool.pts.is_empty() && !tangent_start(app, &p) {
+        app.set_status(hint(tool.cmd).unwrap_or_default(), true);
+        return;
+    }
     tool.pts.push(p);
     if n > 0 && tool.pts.len() >= n {
         if run_points(app, tool) {
@@ -1266,6 +1274,13 @@ pub(crate) fn place_point(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<
             tool.pts.pop();
         }
     }
+}
+
+/// Whether a click picked a sketch point a tangent arc can start at.
+fn tangent_start(app: &SolveApp, p: &(Vec2, Option<String>)) -> bool {
+    let Some(id) = &p.1 else { return false };
+    let state = app.session.world_state();
+    app.session.active_sketch.and_then(|sid| state.sketch(sid)).is_some_and(|ss| solidcraft_engine::cmd::tangent_arc_starts_at(&ss.sketch, id))
 }
 
 fn run_points(app: &mut SolveApp, t: &Tool) -> bool {

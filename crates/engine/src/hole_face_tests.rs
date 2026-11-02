@@ -450,3 +450,47 @@ fn a_hole_may_start_over_the_mouth_of_an_existing_bore() {
     let e = s.execute("solid.hole", &json!({"position": [-1, 15, 20], "diameter": 8})).unwrap_err().to_string();
     assert!(e.contains("is not on a face of a body"), "{e}");
 }
+
+/// A hole moved off the part cuts nothing and says so (#10701), as a pattern's copies do: by a
+/// parameter of its position or a sketch point moved away. Back on the part it is silent.
+#[test]
+fn a_hole_moved_off_the_part_says_it_removes_no_material() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "hx", "expression": "10 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "name": "Plate"}));
+    run(&mut s, "solid.hole", json!({"position": ["hx", "10 mm", "10 mm"], "diameter": 5, "name": "H1"}));
+    assert_eq!(said(&s, "H1"), "");
+    change(&mut s, "hx", "100 mm");
+    assert!((volume(&mut s) - 12_000.0).abs() < 1e-6, "nothing is cut");
+    assert!(said(&s, "H1").contains("the hole removes no material"), "{}", said(&s, "H1"));
+    change(&mut s, "hx", "30 mm");
+    assert_eq!(said(&s, "H1"), "");
+    // Holes at two sketch points, one of them moved off the plate.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10, "name": "HP"}));
+    run(&mut s, "sketch.point", json!({"point": [10, 20], "id": "a"}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "b"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "HP", "points": ["a", "b"], "diameter": 4, "name": "H2"}));
+    assert_eq!(said(&s, "H2"), "");
+    run(&mut s, "sketch.edit", json!({"sketch": "HP"}));
+    run(&mut s, "sketch.move_point", json!({"point": "a", "to": [100, 100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert!(said(&s, "H2").contains("1 of 2 holes remove no material"), "{}", said(&s, "H2"));
+}
+
+/// A hole wider than the part takes all of it away and says so (#10702): at creation, and when
+/// a parameter widens it later. A hole across the part's width keeps the rest, silently.
+#[test]
+fn a_hole_wider_than_the_part_says_it_removes_all_of_it() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "hd", "expression": "40 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "name": "Plate"}));
+    run(&mut s, "solid.hole", json!({"position": [10, 10, 10], "diameter": "hd", "name": "H1"}));
+    assert_eq!(said(&s, "H1"), "");
+    assert_eq!(s.model.state().bodies.len(), 1);
+    change(&mut s, "hd", "100 mm");
+    assert!(s.model.state().bodies.is_empty());
+    assert!(said(&s, "H1").contains("the hole removes all of Body1"), "{}", said(&s, "H1"));
+    change(&mut s, "hd", "5 mm");
+    assert_eq!(said(&s, "H1"), "");
+}

@@ -570,3 +570,25 @@ fn vertex_markers_follow_the_edges_display_mode() {
         assert!(front.iter().all(|(_, c)| Some(*c) == edge), "style {style}: markers in the edge colour");
     }
 }
+
+/// The radius is 4% of what the frame draws (#9327): in an empty design a preview's box, not the
+/// floor that left the depth map's precision to show as specks; nothing drawn, or AO off, is off.
+#[test]
+fn the_ambient_occlusion_radius_follows_what_is_drawn() {
+    use solidcraft_engine::geom::Aabb3;
+
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.preferences.ambient_occlusion = true;
+    app.ui.visual_style = 0;
+    assert_eq!(super::ao_radius(&app), 0.0, "nothing to occlude");
+    app.preview.bounds = Aabb3 { min: Vec3::ZERO, max: Vec3::new(30.0, 40.0, 0.0) };
+    assert_eq!(super::ao_radius(&app), 2.0, "the preview's box, its diagonal 50");
+    app.preview.bounds = Aabb3::EMPTY;
+    app.run("solid.box", json!({"length": 300, "width": 400, "height": 0.001})).unwrap();
+    assert!((super::ao_radius(&app) - 20.0).abs() < 1e-3, "the body's box");
+    app.ui.visual_style = 2;
+    assert_eq!(super::ao_radius(&app), 0.0, "wireframe");
+    app.ui.visual_style = 0;
+    app.preferences.ambient_occlusion = false;
+    assert_eq!(super::ao_radius(&app), 0.0, "off");
+}

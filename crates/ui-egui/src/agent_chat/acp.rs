@@ -160,6 +160,19 @@ pub fn initialize_params(version: &str) -> Value {
 /// keeps its own entry on a clash) can't shadow the bridge with a headless session.
 pub const BRIDGE_NAME: &str = "solidcraft-app";
 
+/// Whether a permission question is about a tool of the chat's own MCP server, whose calls
+/// SolidCraft's gate checks. The agent writes both values and ACP has nothing better to go on, so
+/// the test is strict: the whole title is the tool's name as the Claude adapter forms it
+/// (`mcp__solidcraft-app__batch`), one word with no room for a command line, a path or other free
+/// text, and the kind is `other` (the kind an MCP tool has) or not given. Any other title goes
+/// through the user's mode and remembered answers: agents that word their MCP tools differently,
+/// and a user's own MCP server, which the gate doesn't see.
+pub fn is_bridge_tool(title: &str, kind: Option<&str>) -> bool {
+    let tool = title.strip_prefix("mcp__").and_then(|t| t.strip_prefix(BRIDGE_NAME)).and_then(|t| t.strip_prefix("__"));
+    let named = tool.is_some_and(|t| !t.is_empty() && t.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'));
+    named && matches!(kind, None | Some("other"))
+}
+
 /// The MCP server the agent starts to reach the design: `solidcraft-cli mcp --connect` bridged to
 /// this app's control port. The server finds the port's token in the token file the app wrote
 /// (docs/control-protocol.md), so the token never travels through the agent, and it keeps its
@@ -473,6 +486,8 @@ pub enum Incoming {
     Permission {
         rpc: Value,
         title: String,
+        /// The tool call's kind (`execute`, `edit`, `other`, …), as the agent gives it.
+        kind: Option<String>,
         options: Vec<PermissionOption>,
     },
     /// The agent says whether it is logged in (an extension both adapters send).
@@ -546,6 +561,7 @@ pub fn parse(line: &str) -> Option<Incoming> {
         (Some("session/request_permission"), Some(id)) => {
             let call = params.get("toolCall");
             let title = call.and_then(|c| c.get("title")).and_then(Value::as_str).unwrap_or("").to_string();
+            let kind = call.and_then(|c| c.get("kind")).and_then(Value::as_str).map(str::to_string);
             let options = params
                 .get("options")
                 .and_then(Value::as_array)
@@ -562,7 +578,7 @@ pub fn parse(line: &str) -> Option<Incoming> {
                         .collect()
                 })
                 .unwrap_or_default();
-            Some(Incoming::Permission { rpc: id.clone(), title, options })
+            Some(Incoming::Permission { rpc: id.clone(), title, kind, options })
         }
         (Some(m), Some(id)) => Some(Incoming::Unsupported { rpc: id.clone(), method: m.to_string() }),
         (Some("session/update"), None) => Some(update(params.get("update")?, params.get("sessionId").and_then(Value::as_str).unwrap_or(""))),
@@ -700,6 +716,48 @@ mod tests {
         // The panel still recognises the bridge's tools as SolidCraft's (agents name them after
         // their server, e.g. `mcp__solidcraft-app__batch`).
         assert!(BRIDGE_NAME.contains("solidcraft"));
+        assert!(is_bridge_tool(&format!("mcp__{BRIDGE_NAME}__batch"), Some("other")));
+    }
+
+    /// Only the whole name of a tool of the chat's own server counts, whatever else a title holds.
+    #[test]
+    fn only_the_bridges_exact_tool_names_are_its_tools() {
+        for tool in ["batch", "inspect_design", "set_parameter"] {
+            assert!(is_bridge_tool(&format!("mcp__solidcraft-app__{tool}"), None), "{tool}");
+            assert!(is_bridge_tool(&format!("mcp__solidcraft-app__{tool}"), Some("other")), "{tool}");
+        }
+        for title in [
+            "",
+            "solidcraft",
+            "SolidCraft",
+            "run solidcraft-cli; ls",
+            "solidcraft-cli --version",
+            "Edit ~/.local/share/solidcraft/agent-chat/work/notes.txt",
+            // A user's own MCP server (docs/mcp.md), which SolidCraft's gate doesn't see.
+            "mcp__solidcraft__batch",
+            "mcp__solidcraft-live__batch",
+            "mcp__other__solidcraft-app",
+            "mcp__solidcraft-app__",
+            "mcp__solidcraft-app",
+            "solidcraft-app__batch",
+            "solidcraft-app: batch",
+            "Tool: solidcraft-app/batch",
+            "mcp.solidcraft-app.batch",
+            " mcp__solidcraft-app__batch",
+            "mcp__solidcraft-app__batch ",
+            "mcp__solidcraft-app__batch; ls",
+            "mcp__solidcraft-app__batch && ls",
+            "mcp__solidcraft-app__batch\nls",
+            "mcp__solidcraft-app__../../tool",
+            "mcp__SOLIDCRAFT-APP__batch",
+            "MCP__solidcraft-app__batch",
+            "mcp__solidcraft-app__Batch",
+        ] {
+            assert!(!is_bridge_tool(title, None), "{title:?}");
+        }
+        for kind in ["execute", "edit", "delete", "move", "read", "search", "fetch", "think", ""] {
+            assert!(!is_bridge_tool("mcp__solidcraft-app__batch", Some(kind)), "{kind:?}");
+        }
     }
 
     #[test]
@@ -813,8 +871,9 @@ mod tests {
             })
         );
         let perm = r#"{"jsonrpc":"2.0","id":7,"method":"session/request_permission","params":{"sessionId":"s","toolCall":{"toolCallId":"t1","title":"batch"},"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"},{"optionId":"reject","name":"Reject","kind":"reject_once"}]}}"#;
-        let Some(Incoming::Permission { rpc, title, options }) = parse(perm) else { panic!() };
+        let Some(Incoming::Permission { rpc, title, kind, options }) = parse(perm) else { panic!() };
         assert_eq!((title.as_str(), options.len(), options[1].kind.as_str()), ("batch", 2, "reject_once"));
+        assert_eq!(kind, None);
         assert_eq!(permission_reply(rpc.clone(), Some("allow"))["result"]["outcome"], json!({"outcome": "selected", "optionId": "allow"}));
         assert_eq!(permission_reply(rpc, None)["result"]["outcome"]["outcome"], "cancelled");
         let fs = r#"{"jsonrpc":"2.0","id":8,"method":"fs/read_text_file","params":{}}"#;

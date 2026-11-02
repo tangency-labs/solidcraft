@@ -143,6 +143,9 @@ pub struct TreeState {
     /// Find in Timeline: the feature the history scrolls to the next time it draws its items, in
     /// the bottom strip or in the history on the left (#5850).
     pub timeline_reveal: Option<u64>,
+    /// Show components marked out of the History bar anyway (#10393). Held by the session, like
+    /// the bar's Show All toggle; the History controls' menu carries the switch.
+    pub history_show_hidden: bool,
     /// The feature of the face or edge last picked in the view, so a new pick scrolls the
     /// history to it once.
     pub view_pick: Option<u64>,
@@ -364,7 +367,7 @@ pub fn group_items(app: &SolveApp, id: u64, scope: &str) -> Vec<Item> {
         v.push(Item::action("ui.newGroup", "New Group", "folder").with(json!({ "component": g.component, "folder": g.folder, "parent": id })));
     }
     v.extend([
-        Item::action("ui.rename", "Rename", "rename").with(json!({ "group": id })),
+        Item::action("ui.rename", "Rename", "rename").key("F2").with(json!({ "group": id })),
         Item::action("ui.ungroup", "Ungroup", "folder").with(json!({ "group": id })),
         Item::sep(),
         // The group itself: its items keep their own state.
@@ -374,6 +377,11 @@ pub fn group_items(app: &SolveApp, id: u64, scope: &str) -> Vec<Item> {
         v.push(Item::action("ui.isolate", "Isolate", "body").with(json!({ "bodies": group_bodies(app, id) })));
     }
     v
+}
+
+/// Move Sketches to Their Parts (`component.move_sketches.to_parts`) for `sketches` (ids).
+pub(crate) fn sketches_to_parts_item(sketches: Vec<String>) -> Item {
+    Item::action("component.move_sketches.to_parts", "Move Sketches to Their Parts", "move").with(json!({ "sketches": sketches }))
 }
 
 /// The menu of a folder row (Bodies, Sketches, Construction).
@@ -388,6 +396,11 @@ pub fn folder_items(app: &SolveApp, component: u64, folder: &str, scope: &str) -
     }
     if folder == "sketches" {
         v.push(paste_item(app, component, scope, folder, None));
+        // The folder's selected sketches, or all of them, go to the part whose face they are on (#10218).
+        if !app.session.doc.components.is_empty() && !all.is_empty() {
+            let sketches = if sel.is_empty() { all.iter().map(|e| e.key.clone()).collect() } else { sel.clone() };
+            v.push(sketches_to_parts_item(sketches));
+        }
     }
     v.push(Item::action("ui.newGroup", "New Group", "folder").with(json!({ "component": component, "folder": folder })));
     if sel.len() > 1 {
@@ -1688,7 +1701,7 @@ fn occurrence_rows_inner(
     if r.double && !takes_components && app.session.doc.parts.contains_key(&placement.component) {
         crate::dialogs_part_size::open(app, placement.component);
     }
-    if r.clicked && takes_components {
+    if r.clicked && (takes_components || crate::dialogs_move::picks_components(app)) {
         if let Some(mut d) = app.dialog.take() {
             d.pick(&app.session, Sel::Occurrence { path: path.to_vec() });
             app.dialog = Some(d);
@@ -2171,7 +2184,7 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
         Item::action("canvas.to_sketch", "Canvas to Sketch", "canvas").with(json!({ "canvas": id })),
         Item::sep(),
         Item::action("ui.delete", "Delete", "delete").with(json!({ "canvases": [id] })),
-        Item::action("ui.rename", "Rename", "rename").with(json!({ "canvas": id })),
+        Item::action("ui.rename", "Rename", "rename").key("F2").with(json!({ "canvas": id })),
         Item::sep(),
         Item::action("ui.canvasVisible", "Show/Hide", "eye").key("V").with(json!({ "canvas": id, "visible": !visible })),
     ]
@@ -2872,7 +2885,7 @@ fn entry_row(
             label: &e.label,
             name: true,
             selected,
-            dim: !e.visible || parent_hidden,
+            dim: !visible || parent_hidden,
             cut,
             color: e.color,
             swatch: appearance.swatch,

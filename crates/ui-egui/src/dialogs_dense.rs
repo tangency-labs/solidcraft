@@ -86,6 +86,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             _ => k.simple_metadata().map(|(command, _)| command),
         },
         Kind::Assembly(k) => match k {
+            crate::dialogs_assembly::Asm::FromBodies => Some("component.from_bodies"),
             crate::dialogs_assembly::Asm::NewComponent { .. } => Some("component.create"),
             crate::dialogs_assembly::Asm::Joint(f) => Some(if f.as_built { "joint.as_built" } else { "joint.create" }),
             crate::dialogs_assembly::Asm::JointOrigin { .. } => Some("joint.origin"),
@@ -115,8 +116,18 @@ const MAX_PATTERN_INSTANCES: i64 = 1000;
 /// A solid pattern's quantity row, with step arrows from 1 to `MAX_PATTERN_INSTANCES`. The
 /// count goes to the command as typed, so it is evaluated as the document evaluates it.
 fn quantity_row(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label: &str, value: &mut String) -> bool {
+    count_row_to(ui, doc, label, value, MAX_PATTERN_INSTANCES)
+}
+
+/// The most revolutions a coil makes (the helix's own limit).
+const MAX_COIL_REVOLUTIONS: i64 = 200;
+
+/// A count row with step arrows by whole numbers from 1 to `max`, evaluated as the document
+/// evaluates it. A fraction still types in (a coil's revolutions); an arrow steps it to the next
+/// whole number.
+fn count_row_to(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label: &str, value: &mut String, max: i64) -> bool {
     let eval = |text: &str| doc.eval(text.trim(), solidcraft_engine::doc::expr::Kind::Unitless).ok();
-    ui_kit::count_row(ui, label, value, &ui_kit::Count { min: 1, max: MAX_PATTERN_INSTANCES, eval: &eval })
+    ui_kit::count_row(ui, label, value, &ui_kit::Count { min: 1, max, eval: &eval })
 }
 
 fn fillet_type(extra: &serde_json::Map<String, Value>) -> usize {
@@ -188,7 +199,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     placement_row(d, ui, app);
     if crate::hole_refs::takes(d) {
         // Each reference edge with its distance (#37, #6380).
-        enter |= crate::hole_refs::input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
+        enter |= crate::hole_refs::input_rows(d, ui, &app.session, app.preferences.origin_plane_names, app.preferences.length_decimals);
     } else {
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
     }
@@ -219,11 +230,11 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::SketchIntersect { bodies, projection_link } => {
             let mut selected = if *bodies { 1 } else { 0 };
             let changed = ui_kit::row(ui, tr("ui.sketch_intersect_selection_filter"), |ui| {
-                ui_kit::segmented(ui, &mut selected, &[tr("Faces"), tr("Bodies")], Default::default())
+                ui_kit::segmented(ui, &mut selected, &[tr("Geometry"), tr("Bodies")], Default::default())
             });
             if changed && let Some(input) = d.inputs.first_mut() {
                 *bodies = selected == 1;
-                input.accept = if *bodies { BODIES } else { FACES };
+                input.accept = if *bodies { BODIES } else { super::INTERSECT_GEOMETRY };
                 input.items.clear();
             }
             ui_kit::row(ui, tr("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
@@ -740,6 +751,12 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::AnglePlane { angle } => {
             enter |= expr_row(ui, "Angle", angle);
         }
+        // The angle turns the plane from its reference, so it shows once one is picked.
+        Kind::TangentPlane { angle } => {
+            if d.inputs.get(1).is_some_and(|inp| !inp.items.is_empty()) {
+                enter |= expr_row(ui, "Angle", angle);
+            }
+        }
         Kind::PathPlane { t, .. } => {
             enter |= expr_row(ui, "Position (0 to 1)", t);
         }
@@ -860,7 +877,12 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 if from_sketch && (*k == "diameter" || *k == "section_size") {
                     continue;
                 }
-                enter |= expr_row(ui, primitive_label(k), v);
+                // Revolutions steps by whole turns like the other counts (#7481).
+                enter |= if *k == "revolutions" {
+                    count_row_to(ui, &app.session.doc, primitive_label(k), v, MAX_COIL_REVOLUTIONS)
+                } else {
+                    expr_row(ui, primitive_label(k), v)
+                };
             }
             if *cmd == "solid.coil" {
                 enter |= coil_rows(ui, &mut d.extra);

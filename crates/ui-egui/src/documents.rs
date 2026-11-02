@@ -15,6 +15,23 @@ use crate::SolveApp;
 use crate::theme::Tokens;
 use crate::ui_kit;
 
+/// Continue transient shot queues without adopting their document or view into the active tab.
+pub(crate) fn advance_render_batches(app: &mut SolveApp, ctx: &egui::Context) {
+    let mut error = None;
+    for slot in app.docs.slots.iter_mut().flatten() {
+        if let Err(failure) = slot.session.advance_render_batch() {
+            error = Some(failure.to_string());
+        }
+        let queue = slot.session.render_queue_state();
+        if queue.running != 0 || queue.waiting != 0 {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
+    }
+    if let Some(error) = error {
+        app.set_status(error, true);
+    }
+}
+
 /// Most designs open at once.
 pub const MAX_OPEN: usize = 32;
 
@@ -217,6 +234,8 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     crate::agent_chat::leave_document(app);
     app.agent_chat.swap_document(&mut slot.agent_chat);
     let out_rev = app.session.revision;
+    // A click's point means nothing in the other design.
+    app.edit_anchor_hint = None;
     let mut out = DocSlot {
         session: std::mem::replace(&mut app.session, slot.session),
         autosave: app.autosave.as_mut().and_then(|a| std::mem::replace(&mut a.active, slot.autosave)),

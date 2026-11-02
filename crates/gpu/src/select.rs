@@ -139,7 +139,7 @@ pub fn native_backends() -> wgpu::Backends {
     }
 }
 
-pub(crate) fn tier_of(t: wgpu::DeviceType) -> Tier {
+pub fn tier_of(t: wgpu::DeviceType) -> Tier {
     match t {
         wgpu::DeviceType::Cpu => Tier::Software,
         wgpu::DeviceType::DiscreteGpu | wgpu::DeviceType::IntegratedGpu | wgpu::DeviceType::VirtualGpu | wgpu::DeviceType::Other => Tier::Hardware,

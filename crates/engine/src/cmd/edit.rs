@@ -10,6 +10,14 @@ use crate::params::{bad, bool_, name_or_id_values, num, str_};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("ui.assistant", "Toggle Assistant", crate::checked!("ui.assistant", assistant))
+        .icon("assistant")
+        .key("Ctrl+Shift+A")
+        .noundo()
+        .doc_only()
+        .contract(&ASSISTANT_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::AssistantResult>)
+        .params("Show or hide Assistant in the app. Headless calls are refused without changing the design"),
     CommandSpec::new("edit.undo", "Undo", undo).icon("undo").key("Ctrl+Z").noundo().doc_only(),
     CommandSpec::new("edit.redo", "Redo", redo).icon("redo").key("Ctrl+Y").noundo().doc_only(),
     CommandSpec::new("edit.repeat", "Repeat Last Command", crate::checked!("edit.repeat", repeat))
@@ -117,6 +125,12 @@ fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
     let label = now.label.clone();
     s.undo.push(now);
     Ok(json!({"redone": label}))
+}
+
+const ASSISTANT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::AssistantParams> = crate::schema::TypedContract::new();
+
+fn assistant(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(EngineError::Other("ui.assistant shows or hides Assistant in the app; no assistant panel exists in a headless session".into()))
 }
 
 const REPEAT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::RepeatParams> = crate::schema::TypedContract::new();
@@ -1123,7 +1137,7 @@ fn inspect_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let rolled_back = s.doc.features.iter().position(|x| x.id == id).is_some_and(|i| i >= marker);
     let r = s.model.result(id);
     Ok(json!({
-        "id": f.id, "name": f.name, "type": f.kind.type_name(), "suppressed": f.suppressed, "rolled_back": rolled_back,
+        "id": f.id, "name": f.name, "type": f.kind.kind_key(), "type_name": f.kind.type_name(), "suppressed": f.suppressed, "rolled_back": rolled_back,
         "definition": def, "omitted": omitted, "inputs": inputs,
         "error": r.and_then(|r| r.error.clone()), "warning": r.and_then(|r| r.warning.clone()),
         "boolean_diagnostics": r.map(|r| &r.boolean_diagnostics),
@@ -1316,7 +1330,7 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
             s.selection.push(x);
         }
     }
-    s.revision += 1;
+    s.refresh_display();
     Ok(json!({"selected": s.selection.len()}))
 }
 
@@ -1373,7 +1387,7 @@ fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
     s.selection.clear();
-    s.revision += 1;
+    s.refresh_display();
     Ok(json!({"selected": 0}))
 }
 
@@ -1737,6 +1751,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     }
     trial.doc_mut().marker = Some(idx + 1);
     trial.refresh();
+    // The edited feature keeps its name. Its temporary replacement needs a fresh one while
+    // the original remains in the trial as a placeholder (including construction planes).
+    if let Some(parameters) = params.as_object_mut() {
+        parameters.remove("name");
+    }
     let r = spec.run_nested(&mut trial, &params)?;
     let made = r.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
     let mut new = trial.doc.feature(made).cloned().ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
@@ -1747,6 +1766,15 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && before.at.dist(after.at.0) < 1e-8
     {
         *after = before.clone();
+    }
+    // A perforation keeps its outline through an edit that names no sketch (the Perforate dialog has no outline).
+    if let (FeatureKind::SheetPerforate { sketch: Some(before), profiles: picked, .. }, FeatureKind::SheetPerforate { sketch, profiles, .. }) =
+        (&old.kind, &mut new.kind)
+        && sketch.is_none()
+        && params.get("sketch").is_none()
+    {
+        *sketch = Some(*before);
+        *profiles = picked.clone();
     }
     // A boundary surface's loop of sketch curves and its curve network are one command's two
     // forms: an edit may turn one into the other.
@@ -1775,6 +1803,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         })
         .collect();
     trial.doc_mut().features.retain(|f| f.id != made);
+    // Made right after the edited feature, the trial joined the timeline folder holding both:
+    // it leaves it too, or its id stays there, and is given out again below (#9373).
+    for group in &mut trial.doc_mut().timeline_groups {
+        group.features.retain(|f| *f != made);
+    }
     let added = trial.doc.features.len().saturating_sub(s.doc.features.len());
     trial.doc_mut().marker = s.doc.marker.map(|marker| if marker > idx { marker.saturating_add(added) } else { marker });
     if made == s.doc.next_id && trial.doc.next_id == made.saturating_add(1) {

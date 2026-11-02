@@ -6,6 +6,16 @@ component has its own origin, bodies, sketches and timeline entries. The **activ
 (the radio button in the browser) receives new sketches and features; the others are drawn
 faded.
 
+Sketches drawn on a part's face while the design was active belong to the design, so they
+collect in its Sketches folder. **Move Sketches to Their Parts**
+(`component.move_sketches.to_parts`), on a Sketches folder's menu and on a sketch's menu, moves
+the folder's sketches (or the selected ones) to the part whose face each is drawn on, as dragging
+it onto the part would. Each stays where it is on its face, and the whole move is one undo step.
+A sketch with no single part to go to stays where it is: one on an origin, construction or fixed
+plane, on a body of the design itself, on a face without an exact attachment, or already in its
+part. The status bar says how many moved and why the others stayed; the command's reply lists
+each sketch. With no `sketches` it looks at every sketch in the design.
+
 A component is placed by its **occurrences**. Paste creates another instance of the same
 component, and **Paste New** creates an independent copy. Move an occurrence with the move
 triad, then **Capture Position** to keep it or **Revert** to put it back. SolidCraft asks before
@@ -384,6 +394,11 @@ off. A STEP or mesh file picked there is inserted as **Insert STEP** or **Insert
 Mesh** would. The part's solid bodies come
 in as they sit in that design, and they are kept in the assembly, so it opens even without the
 part file. The link is stored relative to the assembly's folder once the assembly is saved.
+For scripts, `translate: [x,y,z]` places the design's origin in millimetres from the destination
+parent's origin (the active component unless `parent` is supplied). It defaults to `[0,0,0]`.
+With `reuse: true`, insertion reuses the existing linked component but uses the same coordinates;
+it does not inherit another occurrence's position or rotation. For example, inserts at
+`[20,0,0]` and `[40,0,0]` place the two origins at 20 and 40 mm, even when the second reuses the link.
 After the part file changes, **Update Links** (`component.update_links`) reads it again.
 An assembly that opens, or whose tab comes back to the front, does that by itself for the parts whose files
 changed since it last read them, whether the part was saved in another tab, another window or by
