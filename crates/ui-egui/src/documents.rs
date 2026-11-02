@@ -193,6 +193,15 @@ impl Documents {
     }
 }
 
+/// The host renamed a design file: every open tab of that path follows it, including the
+/// borrowed design name the tab title shows (#11375).
+pub fn follow_file_rename(app: &mut SolveApp, old_path: &str, new_path: &str) {
+    app.session.follow_file_rename(old_path, new_path);
+    for slot in app.docs.background_mut() {
+        slot.session.follow_file_rename(old_path, new_path);
+    }
+}
+
 fn take_view(app: &mut SolveApp) -> DocView {
     DocView {
         render: std::mem::take(&mut app.render_workspace.view),
@@ -1368,6 +1377,26 @@ mod tests {
         a.open_path(&path);
         assert_eq!(a.docs.count(), 2);
         assert!(std::sync::Arc::ptr_eq(&doc, &a.session.doc));
+    }
+
+    #[test]
+    fn follow_file_rename_updates_every_open_tab_title() {
+        let mut a = app();
+        a.session.doc_mut().name = "Plate".into();
+        a.session.path = Some("opfs://Plate.solidcraft".into());
+        a.session.user_named = false;
+        new_tab(&mut a);
+        a.session.doc_mut().name = "Other".into();
+        a.session.path = Some("opfs://Other.solidcraft".into());
+        // Background tab is Plate; active is Other.
+        follow_file_rename(&mut a, "opfs://Plate.solidcraft", "opfs://Bracket.solidcraft");
+        assert_eq!(a.session.doc.name, "Other");
+        assert_eq!(a.session.path.as_deref(), Some("opfs://Other.solidcraft"));
+        let bg = a.docs.background().next().expect("background Plate");
+        assert_eq!(bg.doc.name, "Bracket");
+        assert_eq!(bg.path.as_deref(), Some("opfs://Bracket.solidcraft"));
+        switch(&mut a, 0);
+        assert_eq!(a.session.doc.name, "Bracket");
     }
 
     #[test]
