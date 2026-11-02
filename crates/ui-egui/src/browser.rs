@@ -1524,7 +1524,11 @@ fn component_rows_inner(
     }
     if r.double {
         if app.session.doc.parts.contains_key(&id) {
-            crate::dialogs_part_size::open(app, id);
+            if app.session.doc.parts.get(&id).is_some_and(|part| part.family == "spur_gear") {
+                crate::dialogs_gears::open(app, id);
+            } else {
+                crate::dialogs_part_size::open(app, id);
+            }
         } else {
             crate::edit_in_place::double_click_component(app, json!({ "component": id }));
         }
@@ -1699,7 +1703,11 @@ fn occurrence_rows_inner(
         crate::edit_in_place::double_click_component(app, params);
     }
     if r.double && !takes_components && app.session.doc.parts.contains_key(&placement.component) {
-        crate::dialogs_part_size::open(app, placement.component);
+        if app.session.doc.parts.get(&placement.component).is_some_and(|part| part.family == "spur_gear") {
+            crate::dialogs_gears::open(app, placement.component);
+        } else {
+            crate::dialogs_part_size::open(app, placement.component);
+        }
     }
     if r.clicked && takes_components {
         if let Some(mut d) = app.dialog.take() {

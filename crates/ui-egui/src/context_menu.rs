@@ -375,7 +375,6 @@ pub fn radial_items(app: &SolveApp) -> Vec<Item> {
         cmd(app, "solid.move", "Move/Copy"),
     ]
 }
-
 /// The list of a menu (under the ring for the viewport).
 pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
     let mut v = match target {
@@ -753,10 +752,12 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         return v;
     }
     if !sel.is_empty() {
-        if !v.iter().any(|item| item.id == "parts.resize")
+        if !v.iter().any(|item| matches!(item.id.as_str(), "parts.resize" | "gears.resize"))
             && let Some(component) = crate::dialogs_part_size::selected_component(app)
+            && let Some(command) = crate::dialogs_gears::edit_command(app, component)
         {
-            v.push(cmd(app, "parts.resize", "Change Part Size").with(json!({"component":component})));
+            let label = if command == "gears.resize" { "Edit Gear Parameters" } else { "Change Part Size" };
+            v.push(cmd(app, command, label).with(json!({"component":component})));
         }
         v.push(Item::sep());
         v.push(act("ui.clear", "Clear Selection", "close").key("Esc"));
@@ -796,8 +797,11 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
     ];
     if one {
         let b = bodies.first().cloned().unwrap_or_default();
-        if let Some(component) = crate::dialogs_part_size::component_for_bodies(app, bodies) {
-            v.push(cmd(app, "parts.resize", "Change Part Size").with(json!({"component":component})));
+        if let Some(component) = crate::dialogs_part_size::component_for_bodies(app, bodies)
+            && let Some(command) = crate::dialogs_gears::edit_command(app, component)
+        {
+            let label = if command == "gears.resize" { "Edit Gear Parameters" } else { "Change Part Size" };
+            v.push(cmd(app, command, label).with(json!({"component":component})));
         }
         v.push(Item::sep());
         if !browser {
@@ -1003,8 +1007,9 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let into = json!({ "component": id, "path": app.session.doc.first_path(id) });
     let pastes_here = crate::edit_clipboard::can_paste_into(app, id);
     let mut v = Vec::new();
-    if doc.parts.contains_key(&id) {
-        v.push(cmd(app, "parts.resize", "Edit").with(json!({"component":id})));
+    if let Some(command) = crate::dialogs_gears::edit_command(app, id) {
+        let label = if command == "gears.resize" { "Edit Gear Parameters" } else { "Edit" };
+        v.push(cmd(app, command, label).with(json!({"component":id})));
     }
     if id != 0 {
         let grounded = occ.is_some_and(|o| o.grounded);
@@ -1403,6 +1408,13 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
     let p = item.params.clone().unwrap_or(Value::Null);
     let bodies = strs(&p, "bodies");
     match item.id.as_str() {
+        "gears.resize" => {
+            if let Some(component) = id_of(&p, "component") {
+                crate::dialogs_gears::open(app, component);
+            } else {
+                app.start("gears.resize");
+            }
+        }
         "appearance.library" if crate::render_workspace::active(app) => {
             app.start("appearance.library");
         }
