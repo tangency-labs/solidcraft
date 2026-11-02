@@ -3438,7 +3438,7 @@ fn hovered_feature_faces<'a>(
     app: &SolveApp,
     st: &'a solidcraft_engine::doc::ModelState,
     hover: Option<&Hit>,
-) -> Option<(&'a solidcraft_engine::doc::ModelBody, Vec<usize>)> {
+) -> Option<(&'a solidcraft_engine::doc::ModelBody, std::collections::HashSet<usize>)> {
     if !app.preferences.hover_feature_outline
         || app.dialog.is_some()
         || app.tool.is_some()
@@ -4143,7 +4143,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 && m.edge_pickable(e)
                 && let Some(p) = m.edges.get(e)
             {
-                edge_lines(&mut feedback, p, outline, 1.5, &edge_normals(&m, p));
+                edge_lines(&mut feedback, p, outline, 1.5, &[]);
             }
         }
     }
