@@ -7,8 +7,9 @@
 //!
 //! The initial bridge writes one `MANIFOLD_SOLID_BREP` per B-rep, with all live faces
 //! in one closed shell. Curves and surfaces are written as their exact analytic or
-//! NURBS entities. Curved faces carry pcurves; periodic seams carry both sides of
-//! the seam so the writer can emit a single `SEAM_CURVE`.
+//! NURBS entities. Curved faces carry one pcurve per actual edge use, so a seam edge
+//! used twice carries the two pcurves the writer joins into one `SEAM_CURVE`; a closed
+//! edge used once (a cap circle) is no seam.
 
 use std::collections::BTreeMap;
 
@@ -242,27 +243,6 @@ fn bspline_surface(
     }))
 }
 
-fn edge_start_is_end(brep: &Brep, edge: solidcore::topology::EdgeId) -> bool {
-    use solidcore::topology::edge;
-    let Ok((start, end)) = edge::start_end_vertices(brep, edge) else {
-        return false;
-    };
-    match (start, end) {
-        (Some(start), Some(end)) if start == end => true,
-        (Some(start), Some(end)) => {
-            let Ok(a) = brep.vertex(start) else {
-                return false;
-            };
-            let Ok(b) = brep.vertex(end) else {
-                return false;
-            };
-            let (a, b) = (a.point, b.point);
-            (a.x - b.x).abs() < 1.0e-7 && (a.y - b.y).abs() < 1.0e-7 && (a.z - b.z).abs() < 1.0e-7
-        }
-        _ => false,
-    }
-}
-
 /// Which of `surface`'s STEP parameters (u, v) are angles (ISO 10303-42): a cylinder's
 /// or cone's u (its v is a length), a sphere's or torus's u and v, a surface of
 /// revolution's u and, for a conic generator, its v (the generator's parameter), and an
@@ -425,33 +405,7 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
                             if opposite {
                                 uv.reverse();
                             }
-                            let mut curves = vec![uv.clone()];
-                            let periodic = matches!(
-                                face.surface
-                                    .as_ref()
-                                    .map(solidcore::surface::surface::Surface::kind),
-                                Some(
-                                    solidcore::surface::surface::p2::SurfaceKind::Cone(_)
-                                        | solidcore::surface::surface::p2::SurfaceKind::Sphere(_)
-                                        | solidcore::surface::surface::p2::SurfaceKind::Torus(_)
-                                        | solidcore::surface::surface::p2::SurfaceKind::SurfOfRevolution(_)
-                                        | solidcore::surface::surface::p2::SurfaceKind::BSpline(_)
-                                        | solidcore::surface::surface::p2::SurfaceKind::BallPatch(_)
-                                )
-                            );
-                            if periodic {
-                                let closed_edge = edge_start_is_end(brep, edge);
-                                if closed_edge {
-                                    let mean_u =
-                                        uv.iter().map(|p| p[0]).sum::<f64>() / uv.len() as f64;
-                                    let shift = if mean_u > 180.0 { -360.0 } else { 360.0 };
-                                    let mut other = uv.clone();
-                                    for point in &mut other {
-                                        point[0] += shift;
-                                    }
-                                    curves.push(other);
-                                }
-                            }
+                            let mut curves = vec![uv];
                             // SolidCore's STEP parameters give angles in degrees; the file's
                             // plane angle unit is the radian ([`step_angles`]).
                             let (angular_u, angular_v) = step_angles(surf);
@@ -589,6 +543,31 @@ mod tests {
     use solidcore::math::Point3;
     use solidcore::primitive::api_primitives as api;
 
+    /// How many times each face's boundary uses each edge, and how many sampled pcurve
+    /// curves the model gives that (face, `BRep` edge): `(uses, curves)`.
+    fn pcurves_by_face_edge(model: &Model) -> BTreeMap<(u64, usize), (usize, usize)> {
+        let body = &model.bodies[0];
+        let mut counts = BTreeMap::new();
+        for face in &body.faces {
+            for (loop_index, loop_) in face.loops.iter().enumerate() {
+                let Bound::Edges(edges) = &loop_.bound else {
+                    continue;
+                };
+                for (use_index, oriented) in edges.iter().enumerate() {
+                    let entry = counts
+                        .entry((face.step_id, oriented.edge))
+                        .or_insert((0, 0));
+                    entry.0 += 1;
+                    if let Some(curves) = model.pcurves.get(&(face.step_id, loop_index, use_index))
+                    {
+                        entry.1 += curves.len();
+                    }
+                }
+            }
+        }
+        counts
+    }
+
     #[test]
     fn maps_a_box_and_a_sphere_to_the_neutral_model() {
         let mut kernel = Kernel::default();
@@ -610,11 +589,44 @@ mod tests {
         let cylinder =
             api::create_cylinder(&mut kernel, Point3::new(0.0, 0.0, -2.0), 2.0, 4.0).unwrap();
         let model = brep_to_model(&cylinder).expect("cylinder to model");
-        assert!(
-            model.pcurves.values().any(|curves| curves.len() >= 2),
-            "cylinder seam edge should carry two pcurves: {:?}",
-            model.pcurves
+        // One curve per actual edge use: the wall's seam edge is used twice, each cap
+        // circle once. A closed cap circle is not a seam.
+        let grouped = pcurves_by_face_edge(&model);
+        for (&(face, edge), &(uses, curves)) in &grouped {
+            assert!(
+                curves == uses || curves == 0,
+                "face {face} edge {edge}: {uses} uses carry {curves} curves: {:?}",
+                model.pcurves
+            );
+        }
+        let seams: Vec<_> = grouped.iter().filter(|(_, &(uses, _))| uses == 2).collect();
+        assert_eq!(
+            seams.len(),
+            1,
+            "the cylinder has one seam edge (its wall's): {grouped:?}"
         );
+        let (seam, &(seam_uses, seam_curves)) = seams[0];
+        assert_eq!(
+            (seam_uses, seam_curves),
+            (2, 2),
+            "seam {seam:?} must carry one curve per use: {grouped:?}"
+        );
+        let cap_trims: Vec<_> = grouped
+            .iter()
+            .filter(|(_, &(uses, curves))| uses == 1 && curves > 0)
+            .collect();
+        assert_eq!(
+            cap_trims.len(),
+            2,
+            "the wall trims two cap circles, one use each: {grouped:?}"
+        );
+        for (key, &(uses, curves)) in cap_trims {
+            assert_eq!(
+                (uses, curves),
+                (1, 1),
+                "cap trim {key:?} must carry one curve: {grouped:?}"
+            );
+        }
         for curves in model.pcurves.values() {
             for curve in curves {
                 assert!(
