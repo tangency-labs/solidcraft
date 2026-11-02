@@ -463,6 +463,12 @@ pub struct Session {
     /// Edits and Save are refused until that revision is restored as the working model, saved
     /// as a new file, or another design is opened.
     pub revision_view: Option<u64>,
+    /// The design's save history (`document_history` in its file): the save count and the
+    /// revisions with their snapshots. The session keeps it, as it keeps `visibility`: opening
+    /// takes it out of the document and a save writes it into the file's copy only, so saving
+    /// never changes the live document or its undo history. The live document's own field stays
+    /// fresh.
+    pub document_history: Arc<solidcraft_doc::document_history::DocumentHistory>,
     /// Whether saves keep model snapshots, and the size and revision caps. Off by default.
     /// A preference, like `auto_project`: it belongs to the user, not the design.
     pub revision_limits: solidcraft_doc::document_history::RevisionHistoryOptions,
@@ -687,13 +693,17 @@ impl Session {
         solidcraft_io::vfs::install_checks();
         // The session keeps what is hidden (an undo step of its own); the design file carries it.
         let visibility = std::mem::take(&mut doc.visibility);
+        // The session keeps the save history too; the design file carries it.
+        let history = std::mem::take(&mut doc.document_history);
         let doc = Arc::new(doc);
         let model = Self::saved_model(&doc, saved).unwrap_or_else(|| {
             let mut model = Model::new();
             model.evaluate_shared(&doc);
             model
         });
-        Self::with_model(doc, visibility, model)
+        let mut session = Self::with_model(doc, visibility, model);
+        session.document_history = Arc::new(history);
+        session
     }
 
     /// The model `doc`'s file kept, when it is `doc`'s evaluation and the cache is not turned off.
@@ -721,6 +731,7 @@ impl Session {
             read_only: false,
             user_named: false,
             revision_view: None,
+            document_history: Default::default(),
             revision_limits: Default::default(),
             open_preview: None,
             log: Vec::new(),
@@ -1734,6 +1745,7 @@ impl Session {
             read_only: self.read_only,
             user_named: self.user_named,
             revision_view: self.revision_view,
+            document_history: self.document_history.clone(),
             revision_limits: self.revision_limits,
             open_preview: None,
             saved: self.saved.clone(),
@@ -2215,8 +2227,7 @@ fn image_host_availability(host: Option<&render::job::ImageHost>, expected: &ren
 }
 
 /// Whether two designs differ at most in their features. Every field is named, so a new one has
-/// to be decided on here. The saved revisions (`document_history`) are left out: the joints
-/// never read them.
+/// to be decided on here.
 fn same_but_features(a: &Document, b: &Document) -> bool {
     let Document {
         render,
@@ -2255,7 +2266,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         named_views,
         visibility,
         next_component_color_index,
-        document_history: _,
+        document_history,
     } = a;
     *render == b.render
         && *format == b.format
@@ -2292,4 +2303,5 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *named_views == b.named_views
         && *visibility == b.visibility
         && *next_component_color_index == b.next_component_color_index
+        && *document_history == b.document_history
 }

@@ -19,7 +19,8 @@ pub struct RevisionsPanel {
     error: Option<String>,
 }
 
-/// One revision row. Snapshots stay in the document; this only keeps what the row draws.
+/// One revision row. Snapshots stay in the session's save history; this only keeps what the row
+/// draws.
 struct Row {
     revision: u64,
     format_version: u32,
@@ -54,7 +55,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let selected = app.revisions.as_ref().and_then(|panel| panel.selected);
-    let history = &app.session.doc.document_history;
+    let history = &app.session.document_history;
     let rows = rows_of(history, selected);
     let save_count = history.revision;
     let format_version = history.format_version;
@@ -214,7 +215,7 @@ fn restore_revision(app: &mut SolveApp, revision: u64, mode: &str) -> Result<(),
     app.params = None;
     app.menu.props = None;
     crate::dim_view::cancel();
-    let save_count = app.session.doc.document_history.revision;
+    let save_count = app.session.document_history.revision;
     let revision = revision.to_string();
     let count = save_count.to_string();
     let message = if mode == "readonly" {
@@ -319,7 +320,7 @@ mod tests {
     fn save_snapshot(app: &mut crate::SolveApp) {
         let limits = SnapshotLimits { max_versions: app.session.revision_limits.max_versions, max_bytes: app.session.revision_limits.max_bytes };
         let snapshot = DocumentHistory::model_snapshot(&app.session.design(), limits.max_bytes);
-        app.session.doc_mut().document_history.record_save_with(snapshot, limits);
+        std::sync::Arc::make_mut(&mut app.session.document_history).record_save_with(snapshot, limits);
     }
 
     #[test]
@@ -354,7 +355,7 @@ mod tests {
         h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0], "name": "Second"})).unwrap();
         save_snapshot(&mut h.app);
         assert_eq!(h.app.session.doc.features.len(), 2);
-        assert_eq!(h.app.session.doc.document_history.revision, 2);
+        assert_eq!(h.app.session.document_history.revision, 2);
 
         open(&mut h.app);
         h.frames(2);
@@ -370,7 +371,7 @@ mod tests {
         h.frames(1);
         assert_eq!(h.app.session.doc.features.len(), 1);
         assert_eq!(h.app.session.doc.features.first().map(|feature| feature.id), first);
-        assert_eq!(h.app.session.doc.document_history.revision, 2, "restore keeps the save count");
+        assert_eq!(h.app.session.document_history.revision, 2, "restore keeps the save count");
         assert!(h.app.session.revision_view.is_none());
         assert!(h.app.revisions.is_some());
         let volume = h.app.run("inspect.measure", json!({})).unwrap();
@@ -396,23 +397,23 @@ mod tests {
         for _ in 0..MAX_SNAPSHOTS + 1 {
             save_snapshot(&mut h.app);
         }
-        assert!(h.app.session.doc.document_history.entries.first().is_some_and(|entry| entry.snapshot.is_none()));
-        assert_eq!(h.app.session.doc.document_history.entries.iter().filter(|entry| entry.snapshot.is_some()).count(), MAX_SNAPSHOTS);
+        assert!(h.app.session.document_history.entries.first().is_some_and(|entry| entry.snapshot.is_none()));
+        assert_eq!(h.app.session.document_history.entries.iter().filter(|entry| entry.snapshot.is_some()).count(), MAX_SNAPSHOTS);
         open(&mut h.app);
         h.frames(2);
         let dropped = format!("Snapshot dropped. This revision is older than the newest {MAX_SNAPSHOTS} that can keep one.");
         assert!(h.widget(&dropped).is_some(), "a pruned revision says the snapshot was dropped");
         assert!(h.widget(&format!("Restorable snapshots: {MAX_SNAPSHOTS} of the newest {MAX_SNAPSHOTS}.")).is_some());
         let features = h.app.session.doc.features.len();
-        let revision = h.app.session.doc.document_history.revision;
+        let revision = h.app.session.document_history.revision;
         h.step(&json!({"widget": "Revision 1"})).unwrap();
         h.frames(1);
         h.step(&json!({"widget": "Restore"})).unwrap();
         assert_eq!(h.app.session.doc.features.len(), features, "a dropped snapshot cannot be restored");
-        assert_eq!(h.app.session.doc.document_history.revision, revision);
+        assert_eq!(h.app.session.document_history.revision, revision);
 
         let mut older = Harness::new();
-        older.app.session.doc_mut().document_history = DocumentHistory::migrated(1);
+        older.app.session.document_history = std::sync::Arc::new(DocumentHistory::migrated(1));
         open(&mut older.app);
         older.frames(2);
         assert!(older.widget("No snapshot. This revision records an older file that did not store one.").is_some());
@@ -422,7 +423,7 @@ mod tests {
         older.frames(1);
         older.step(&json!({"widget": "Restore"})).unwrap();
         assert!(older.app.session.doc.features.is_empty());
-        assert_eq!(older.app.session.doc.document_history.revision, 0);
+        assert_eq!(older.app.session.document_history.revision, 0);
     }
 
     #[test]
@@ -436,8 +437,8 @@ mod tests {
         h.frame();
         h.settle();
         assert!(h.app.saving.is_none());
-        assert_eq!(h.app.session.doc.document_history.revision, 1);
-        assert!(h.app.session.doc.document_history.entries.first().is_some_and(|entry| entry.snapshot.is_some()));
+        assert_eq!(h.app.session.document_history.revision, 1);
+        assert!(h.app.session.document_history.entries.first().is_some_and(|entry| entry.snapshot.is_some()));
         assert!(!h.app.session.is_dirty());
     }
 }

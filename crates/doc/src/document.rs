@@ -2899,7 +2899,9 @@ pub struct Document {
     #[serde(default = "crate::format::pending_names", skip_serializing_if = "Vec::is_empty")]
     pub format_pending: Vec<String>,
     /// In-file save history: format number, save count, and optional parametric snapshots.
-    /// An older design opens at save count 0 (`document_history`).
+    /// An older design opens at save count 0 (`document_history`). Only a file's copy fills it:
+    /// an open design's session keeps the history and writes it into the file's copy on save,
+    /// so the live document's stays fresh.
     #[serde(default)]
     pub document_history: crate::document_history::DocumentHistory,
     pub name: String,
