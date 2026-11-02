@@ -4251,6 +4251,7 @@
   "ui.agent_chat_no_images": "هذا الوكيل لا يقبل الصور",
   "ui.agent_chat_no_picture": "لا توجد صورة في الحافظة",
   "ui.agent_chat_no_tool_call": "لم يستخدم النموذج أدوات SolidCraft، لذا لم يتغيّر التصميم. اختر نموذجًا يدعم استدعاء الأدوات؛ راجع «النماذج المحلية» في دليل محادثة الوكيل.",
+  "ui.agent_chat_node_too_old": "إصدار Node.js ‏{version} قديم جدًا لهذا الوكيل. ثبّت Node.js 20.10 أو أحدث، ثم اضغط على تحديث.",
   "ui.agent_chat_none_found": "لم يُعثر على وكيل برمجي. ثبّت أحد هذه ثم اضغط تحديث:",
   "ui.agent_chat_none_found_short": "لم يُعثر على وكيل",
   "ui.agent_chat_not_installed": "غير مثبت",

@@ -4251,6 +4251,7 @@
   "ui.agent_chat_no_images": "该智能体不接收图片",
   "ui.agent_chat_no_picture": "剪贴板上没有图片",
   "ui.agent_chat_no_tool_call": "模型没有使用 SolidCraft 的工具，因此设计没有更改。请选择支持工具调用的模型；参见智能体聊天指南中的“本地模型”。",
+  "ui.agent_chat_node_too_old": "Node.js {version} 版本过旧，无法运行此代理。请安装 Node.js 20.10 或更新版本，然后点击刷新。",
   "ui.agent_chat_none_found": "未找到编程智能体。请安装以下之一，然后点击刷新：",
   "ui.agent_chat_none_found_short": "未找到智能体",
   "ui.agent_chat_not_installed": "未安装",

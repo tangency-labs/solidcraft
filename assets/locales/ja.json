@@ -4251,6 +4251,7 @@
   "ui.agent_chat_no_images": "このエージェントは画像を受け付けません",
   "ui.agent_chat_no_picture": "クリップボードに画像がありません",
   "ui.agent_chat_no_tool_call": "モデルが SolidCraft のツールを使わなかったため、デザインは変更されませんでした。ツール呼び出しに対応したモデルを選んでください。エージェントチャットのガイドの「ローカルモデル」を参照してください。",
+  "ui.agent_chat_node_too_old": "Node.js {version} はこのエージェントには古すぎます。Node.js 20.10 以降をインストールしてから、更新を押してください。",
   "ui.agent_chat_none_found": "コーディングエージェントが見つかりません。次のいずれかをインストールしてから「再検索」を押してください:",
   "ui.agent_chat_none_found_short": "エージェントが見つかりません",
   "ui.agent_chat_not_installed": "未インストール",

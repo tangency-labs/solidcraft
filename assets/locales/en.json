@@ -4251,6 +4251,7 @@
   "ui.agent_chat_no_images": "This agent doesn't take pictures",
   "ui.agent_chat_no_picture": "There is no picture on the clipboard",
   "ui.agent_chat_no_tool_call": "The model didn't use SolidCraft's tools, so the design wasn't changed. Choose a model that supports tool calling; see Local models in the agent chat guide.",
+  "ui.agent_chat_node_too_old": "Node.js {version} is too old for this agent. Install Node.js 20.10 or newer, then press Refresh.",
   "ui.agent_chat_none_found": "No coding agent found. Install one of these, then press Refresh:",
   "ui.agent_chat_none_found_short": "No agent found",
   "ui.agent_chat_not_installed": "Not installed",
