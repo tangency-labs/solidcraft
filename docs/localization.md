@@ -43,7 +43,7 @@ meaning (Construction, Flat, Round, Normal, Gap, Clearance).
 
 Command labels (`cmd.*`: what menus, the toolbar, the command palette and the shortcut list show)
 are in title case: "Home View", "Center of Mass". All other English text is in sentence case:
-buttons, links, settings, rows, headings and tooltips, as in "Restore defaults" or the "Center of
+buttons, links, settings, rows, headings and tooltips, as in "Restore page defaults" or the "Center of
 mass" row in Design properties. So the same words can appear in both cases, as a command and as a
 link or row beside it (New Design in the File menu, New design on the home screen). Two buttons
 on one page never differ only by case; give them different words.
