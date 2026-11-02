@@ -1,33 +1,51 @@
 //! Inspection: curvature combs and minimum radius on sketch curves, model edges and faces;
 //! centre of mass of bodies.
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcraft_geom::{Aabb3, Seg2, Vec2, Vec3};
 
 use super::CommandSpec;
 use crate::params::{bad, num, string_list, vec3};
+use crate::schema::sketch_inspect::{
+    BodyCenter, CenterOfMassParams, CentersOfMass, Comb, CurvatureCombParams, CurvatureCombs, IsocurveParams, Isocurves, MinimumRadii,
+    MinimumRadiusParams, RadiusItem,
+};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const COMB_CONTRACT: TypedContract<CurvatureCombParams> = TypedContract::new();
+const RADIUS_CONTRACT: TypedContract<MinimumRadiusParams> = TypedContract::new();
+const ISOCURVE_CONTRACT: TypedContract<IsocurveParams> = TypedContract::new();
+const CENTER_CONTRACT: TypedContract<CenterOfMassParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("inspect.curvature_comb", "Curvature Comb Analysis", curvature_comb)
+    CommandSpec::new("inspect.curvature_comb", "Curvature Comb Analysis", crate::checked!("inspect.curvature_comb", curvature_comb))
         .at("SKETCH", "INSPECT")
         .icon("curvature_comb")
         .noundo()
+        .contract(&COMB_CONTRACT)
+        .output(output_schema_for::<CurvatureCombs>)
         .params("curves?: [sketch curve ids] (sketch?: id|name, default active) | edges?: [[x,y,z] points on body edges] | faces?: [[x,y,z] points on faces] with count?: isoparametric curves each way (default 4; combs along the face's iso grid); density?: teeth per curve (default 40), scale?: comb length per unit curvature (default auto)"),
-    CommandSpec::new("inspect.minimum_radius", "Minimum Radius Analysis", minimum_radius)
+    CommandSpec::new("inspect.minimum_radius", "Minimum Radius Analysis", crate::checked!("inspect.minimum_radius", minimum_radius))
         .at("SKETCH", "INSPECT")
         .icon("min_radius")
         .noundo()
+        .contract(&RADIUS_CONTRACT)
+        .output(output_schema_for::<MinimumRadii>)
         .params("curves?: [sketch curve ids] (sketch?) | edges?: [[x,y,z]…] | faces?: [[x,y,z]…] (default: every face of every body); the smallest radius of curvature of each and where it is"),
-    CommandSpec::new("inspect.isocurve", "Isocurve Analysis", isocurves)
+    CommandSpec::new("inspect.isocurve", "Isocurve Analysis", crate::checked!("inspect.isocurve", isocurves))
         .at("SKETCH", "INSPECT")
         .icon("iso_analysis")
         .noundo()
+        .contract(&ISOCURVE_CONTRACT)
+        .output(output_schema_for::<Isocurves>)
         .params("faces: [[x,y,z]…] points on faces; count?: curves each way (default 8): the faces' isoparametric curves"),
-    CommandSpec::new("inspect.center_of_mass", "Center of Mass", center_of_mass)
+    CommandSpec::new("inspect.center_of_mass", "Center of Mass", crate::checked!("inspect.center_of_mass", center_of_mass))
         .at("SKETCH", "INSPECT")
         .icon("center_of_mass")
         .noundo()
+        .contract(&CENTER_CONTRACT)
+        .output(output_schema_for::<CentersOfMass>)
         .params("bodies?: [names] (default all): the centre of mass (uniform density) of each and of all together"),
 ];
 
@@ -134,21 +152,25 @@ fn curvature_comb(s: &mut Session, p: &Value) -> Result<Value> {
     let diag = bounds.diagonal();
     let scale =
         num(p, "scale").filter(|x| *x > 0.0).unwrap_or(if kmax > 1e-12 && !bounds.is_empty() && diag.is_finite() { 0.2 * diag / kmax } else { 1.0 });
-    let out: Vec<Value> = combs
-        .iter()
-        .map(|(id, teeth)| {
+    let out = combs
+        .into_iter()
+        .map(|(curve, teeth)| {
             let lines: Vec<[[f64; 3]; 2]> = teeth.iter().map(|(q, k, n)| [(*q).into(), (*q - *n * (k * scale)).into()]).collect();
             let kmax_c = teeth.iter().map(|t| t.1.abs()).fold(0.0_f64, f64::max);
-            json!({
-                "curve": id,
-                "teeth": lines,
-                "envelope": lines.iter().map(|l| l[1]).collect::<Vec<_>>(),
-                "max_curvature": kmax_c,
-                "min_radius": if kmax_c > 1e-12 { Value::from(1.0 / kmax_c) } else { Value::Null },
-            })
+            Comb {
+                curve,
+                envelope: lines.iter().map(|l| l[1]).collect(),
+                teeth: lines,
+                max_curvature: kmax_c,
+                min_radius: (kmax_c > 1e-12).then(|| 1.0 / kmax_c),
+            }
         })
         .collect();
-    Ok(json!({"combs": out, "scale": scale}))
+    reply(cmd, CurvatureCombs { combs: out, scale, param_warnings: Vec::new() })
+}
+
+fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 /// Smallest radius along teeth: (radius, where), or None when straight.
@@ -275,15 +297,8 @@ fn minimum_radius(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     let overall = items.iter().filter_map(|i| i.1).min_by(|a, b| a.0.total_cmp(&b.0));
-    let fmt = |x: Option<(f64, Vec3)>| match x {
-        Some((r, at)) => json!({"min_radius": r, "at": [at.x, at.y, at.z]}),
-        None => json!({"min_radius": null}),
-    };
-    Ok(json!({
-        "items": items.iter().map(|(id, x)| { let mut v = fmt(*x); v["item"] = json!(id); v }).collect::<Vec<_>>(),
-        "min_radius": overall.map(|o| o.0),
-        "at": overall.map(|o| [o.1.x, o.1.y, o.1.z]),
-    }))
+    let items = items.into_iter().map(|(item, x)| RadiusItem { item, min_radius: x.map(|x| x.0), at: x.map(|x| x.1.into()) }).collect();
+    reply(cmd, MinimumRadii { items, min_radius: overall.map(|o| o.0), at: overall.map(|o| o.1.into()), param_warnings: Vec::new() })
 }
 
 fn isocurves(s: &mut Session, p: &Value) -> Result<Value> {
@@ -300,10 +315,10 @@ fn isocurves(s: &mut Session, p: &Value) -> Result<Value> {
         let (bi, f) = face_at(&st, at).ok_or_else(|| bad(cmd, "no face there"))?;
         let m = st.bodies.get(bi).map(|b| b.mesh()).ok_or_else(|| bad(cmd, "body"))?;
         for w in solidcraft_doc::iso_grid(&m, f, at, count) {
-            out.push(w.iter().map(|q| [q.x, q.y, q.z]).collect::<Vec<_>>());
+            out.push(w.iter().map(|&q| q.into()).collect());
         }
     }
-    Ok(json!({"curves": out}))
+    reply(cmd, Isocurves { curves: out, param_warnings: Vec::new() })
 }
 
 fn center_of_mass(s: &mut Session, p: &Value) -> Result<Value> {
@@ -320,13 +335,13 @@ fn center_of_mass(s: &mut Session, p: &Value) -> Result<Value> {
         }
         vol += m.volume;
         moment += m.centroid * m.volume;
-        out.push(json!({"body": b.name, "center": [m.centroid.x, m.centroid.y, m.centroid.z], "volume": m.volume}));
+        out.push(BodyCenter { body: b.name.clone(), center: m.centroid.into(), volume: m.volume });
     }
     if out.is_empty() {
         return Err(bad(cmd, if names.is_empty() { "there are no bodies" } else { "no such bodies" }));
     }
     let c = if vol.abs() > 1e-300 { moment / vol } else { Vec3::ZERO };
-    Ok(json!({"center": [c.x, c.y, c.z], "volume": vol, "bodies": out}))
+    reply(cmd, CentersOfMass { center: c.into(), volume: vol, bodies: out, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]

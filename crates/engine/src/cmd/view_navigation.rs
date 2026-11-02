@@ -4,13 +4,17 @@ use solidcraft_render::{Camera, StandardView};
 
 use super::CommandSpec;
 use crate::params::{bad, num, req_vec2, req_vec3, vec3};
-use crate::schema::view_navigation::{RenderBrowser, RenderFocus, RenderSelect, TabStep, TabStepParams};
+use crate::schema::view_navigation::{
+    CameraReply, NormalToParams, RenderBrowser, RenderFocus, RenderSelect, StandardViewParams, TabStep, TabStepParams,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
 
 const FOCUS_CONTRACT: TypedContract<RenderFocus> = TypedContract::new();
 const BROWSER_CONTRACT: TypedContract<RenderBrowserRequest> = TypedContract::new();
 const TAB_STEP_CONTRACT: TypedContract<TabStepParams> = TypedContract::new();
+const STANDARD_VIEW_CONTRACT: TypedContract<StandardViewParams> = TypedContract::new();
+const NORMAL_TO_CONTRACT: TypedContract<NormalToParams> = TypedContract::new();
 
 // Both existing request forms share the Browser command and its published schema.
 #[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
@@ -107,18 +111,20 @@ CommandSpec::new("view.navigate", "Navigate View", navigate)
     .noundo()
     .doc_only()
     .params("camera: Camera; direction?: [x,y,z] in the camera's up-axis frame; or action: left|right|up|down|clockwise|counterclockwise|home|fit, degrees?: 0..180 (how far left|right|up|down turn; default 90), fit?: bool (frame the whole model from the new direction as well, as home does; default false); or motion: pan|orbit|zoom, delta?: [dx,dy] (pixels, each ±10000), free_orbit?: bool (orbit through poles, default false), viewport?: [width,height] (1..1000000, required for pan or pivot), pivot?: [x,y,z], factor?: 0.05..20 (required for zoom), anchor?: [x,y,z] → camera, fit, continuous?"),
-CommandSpec::new("view.normal_to", "Normal to Selection", normal_to)
+CommandSpec::new("view.normal_to", "Normal to Selection", crate::checked!("view.normal_to", normal_to))
         .icon("camera")
         .noundo()
         .enabled(|s| normal_target(s).map(|_| ()).ok_or_else(|| "select a planar face or plane".into()))
+        .contract(&NORMAL_TO_CONTRACT)
+        .output(output_schema_for::<CameraReply>)
         .params("camera?: Camera (default: current session camera or home view) → camera; Look At the first selected planar face or plane, centered on the picked point; repeat while aligned to flip the side; preserves scale and projection"),
-CommandSpec::new("view.front", "Front View", front).icon("camera").noundo().key("Ctrl+1").params(STANDARD_PARAMS),
-CommandSpec::new("view.back", "Back View", back).icon("camera").noundo().key("Ctrl+2").params(STANDARD_PARAMS),
-CommandSpec::new("view.left", "Left View", left).icon("camera").noundo().key("Ctrl+3").params(STANDARD_PARAMS),
-CommandSpec::new("view.right", "Right View", right).icon("camera").noundo().key("Ctrl+4").params(STANDARD_PARAMS),
-CommandSpec::new("view.top", "Top View", top).icon("camera").noundo().key("Ctrl+5").params(STANDARD_PARAMS),
-CommandSpec::new("view.bottom", "Bottom View", bottom).icon("camera").noundo().key("Ctrl+6").params(STANDARD_PARAMS),
-CommandSpec::new("view.isometric", "Isometric View", isometric).icon("camera").noundo().key("Ctrl+7").params(STANDARD_PARAMS),
+CommandSpec::new("view.front", "Front View", crate::checked!("view.front", front)).icon("camera").noundo().key("Ctrl+1").contract(&STANDARD_VIEW_CONTRACT).output(output_schema_for::<CameraReply>).params(STANDARD_PARAMS),
+CommandSpec::new("view.back", "Back View", crate::checked!("view.back", back)).icon("camera").noundo().key("Ctrl+2").contract(&STANDARD_VIEW_CONTRACT).output(output_schema_for::<CameraReply>).params(STANDARD_PARAMS),
+CommandSpec::new("view.left", "Left View", crate::checked!("view.left", left)).icon("camera").noundo().key("Ctrl+3").contract(&STANDARD_VIEW_CONTRACT).output(output_schema_for::<CameraReply>).params(STANDARD_PARAMS),
+CommandSpec::new("view.right", "Right View", crate::checked!("view.right", right)).icon("camera").noundo().key("Ctrl+4").contract(&STANDARD_VIEW_CONTRACT).output(output_schema_for::<CameraReply>).params(STANDARD_PARAMS),
+CommandSpec::new("view.top", "Top View", crate::checked!("view.top", top)).icon("camera").noundo().key("Ctrl+5").contract(&STANDARD_VIEW_CONTRACT).output(output_schema_for::<CameraReply>).params(STANDARD_PARAMS),
+CommandSpec::new("view.bottom", "Bottom View", crate::checked!("view.bottom", bottom)).icon("camera").noundo().key("Ctrl+6").contract(&STANDARD_VIEW_CONTRACT).output(output_schema_for::<CameraReply>).params(STANDARD_PARAMS),
+CommandSpec::new("view.isometric", "Isometric View", crate::checked!("view.isometric", isometric)).icon("camera").noundo().key("Ctrl+7").contract(&STANDARD_VIEW_CONTRACT).output(output_schema_for::<CameraReply>).params(STANDARD_PARAMS),
 CommandSpec::new("view.next_tab", "Next Tab", crate::checked!("view.next_tab", next_tab))
     .icon("chevron_right").noundo().doc_only().key("Ctrl+Tab").contract(&TAB_STEP_CONTRACT).output(output_schema_for::<TabStep>)
     .params("no parameters → step: 1; the window shows the design tab to the right of the shown one (after the last, the first); never edits the design or opens a dialog"),
@@ -164,18 +170,36 @@ fn isometric(s: &mut Session, p: &Value) -> Result<Value> {
     turn_to(s, p, "view.isometric")
 }
 
+/// A view command's `camera` as its handler reads it: a [`Camera`] with finite fields, a positive
+/// distance and a field of view in [0, π). None for anything else, which the handlers refuse as
+/// "invalid camera" (and `CameraParam`, its contract type, too).
+pub(crate) fn camera_form(v: &Value) -> Option<Camera> {
+    serde_json::from_value::<Camera>(v.clone()).ok().filter(usable_camera)
+}
+
+fn usable_camera(cam: &Camera) -> bool {
+    cam.is_valid() && cam.fov.is_finite() && (0.0..std::f64::consts::PI).contains(&cam.fov)
+}
+
+/// The camera a view command turns: the one given, else the session's, else the home view.
+fn given_camera(s: &Session, p: &Value) -> Option<Camera> {
+    match p.get("camera") {
+        Some(value) => camera_form(value),
+        None => Some(s.camera.unwrap_or_else(|| crate::view::home_camera(s))).filter(usable_camera),
+    }
+}
+
+/// The reply of a view command that turned the camera to `camera`.
+fn camera_reply(cmd: &str, camera: Camera) -> Result<Value> {
+    serde_json::to_value(CameraReply { camera, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
+}
+
 fn turn_to(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     let view = standard_view(cmd).ok_or_else(|| bad(cmd, "not a standard view"))?;
-    let mut cam: Camera = match p.get("camera") {
-        Some(value) => serde_json::from_value(value.clone()).map_err(|_| bad(cmd, "invalid camera"))?,
-        None => s.camera.unwrap_or_else(|| crate::view::home_camera(s)),
-    };
-    if !cam.is_valid() || !cam.fov.is_finite() || !(0.0..std::f64::consts::PI).contains(&cam.fov) {
-        return Err(bad(cmd, "invalid camera"));
-    }
+    let mut cam = given_camera(s, p).ok_or_else(|| bad(cmd, "invalid camera"))?;
     cam.set_view(view);
     s.camera = Some(cam);
-    Ok(json!({"camera": cam}))
+    camera_reply(cmd, cam)
 }
 
 fn normal_target(s: &Session) -> Option<(solidcraft_geom::Vec3, solidcraft_geom::Vec3)> {
@@ -210,25 +234,15 @@ fn status_details(s: &mut Session, p: &Value) -> Result<Value> {
 fn normal_to(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.normal_to";
     let (point, normal) = normal_target(s).ok_or_else(|| bad(cmd, "select a planar face or plane"))?;
-    let cam: Camera = match p.get("camera") {
-        Some(value) => serde_json::from_value(value.clone()).map_err(|_| bad(cmd, "invalid camera"))?,
-        None => s.camera.unwrap_or_else(|| crate::view::home_camera(s)),
-    };
-    if !cam.is_valid()
-        || !cam.fov.is_finite()
-        || !(0.0..std::f64::consts::PI).contains(&cam.fov)
-        || cam.yaw.abs() > 1e6
-        || cam.roll.abs() > 1e6
-        || cam.pitch.abs() > std::f64::consts::FRAC_PI_2
-    {
-        return Err(bad(cmd, "invalid camera"));
-    }
+    let cam = given_camera(s, p)
+        .filter(|cam| cam.yaw.abs() <= 1e6 && cam.roll.abs() <= 1e6 && cam.pitch.abs() <= std::f64::consts::FRAC_PI_2)
+        .ok_or_else(|| bad(cmd, "invalid camera"))?;
     // Promoted from viewport::look_at_selection: asking again from the normal side flips it.
     let direction = if cam.back().dot(normal) > 0.999 { -normal } else { normal };
     let mut to = cam.looking_from(direction);
     to.target = point;
     s.camera = Some(to);
-    Ok(json!({"camera": to}))
+    camera_reply(cmd, to)
 }
 
 // UI-owned settings follow the layout command: validate here, apply in the UI adapter.

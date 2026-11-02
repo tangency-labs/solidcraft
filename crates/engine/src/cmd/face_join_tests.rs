@@ -230,3 +230,50 @@ fn join_extrude_to_another_body_joins_that_body() {
     assert!((volume("Base") - 60_000.0).abs() < 1e-6, "the target took the tool: {}", volume("Base"));
     assert_eq!(state.body("Base").unwrap().body.lumps().map_or(1, |l| l.len()), 1, "one piece");
 }
+
+/// #8151: a design saved before a Join To Object also joined the body it runs to (format 39 and
+/// older) keeps that body apart when it opens, so its later features still find it, and an edit
+/// of the extrude keeps it apart too.
+#[test]
+fn join_extrude_to_another_body_saved_before_it_joined_keeps_that_body() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":40,"height":10,"body_name":"Base"}));
+    run(&mut s, "solid.box", json!({"corner":[0,0,40],"length":40,"width":40,"height":20,"body_name":"Target"}));
+    let sketch = run(&mut s, "sketch.create", json!({"plane":{"face":[20,20,10]}}))["sketch"].as_u64().unwrap();
+    let plane = s.model.state().sketch(sketch).unwrap().plane;
+    let at = |x: f64, y: f64| {
+        let p = plane.to_local(Vec3::new(x, y, 10.0));
+        json!([p.x, p.y])
+    };
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": at(10.0,10.0), "p1": at(30.0,30.0)}));
+    run(&mut s, "sketch.finish", json!({}));
+    // A feature after the extrude names the body it runs to, as the lid's sketch and moves did.
+    // Today's join leaves no such body to name, so the move is made first and put last below.
+    let moved = run(&mut s, "solid.move", json!({"bodies":["Target"],"translate":[0,0,5]}))["feature"].clone();
+    let extrude = run(&mut s, "solid.extrude", json!({"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"]}))["feature"].clone();
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let features = saved["features"].as_array_mut().unwrap();
+    let at_move = features.iter().position(|f| f["id"] == moved).unwrap();
+    let feature = features.remove(at_move);
+    features.push(feature);
+    saved["format"] = json!("solidcraft/39");
+    saved.as_object_mut().unwrap().remove("format_pending");
+    let mut old = Session::new(solidcraft_doc::format::read(&saved.to_string()).unwrap());
+    let check = |s: &Session| {
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+        let state = s.model.state();
+        let volume = |name: &str| solidcraft_kernel::measure(&state.body(name).unwrap().body).unwrap().volume;
+        assert_eq!(state.bodies.len(), 2, "the body the extrude runs to stays its own body");
+        assert!((volume("Base") - 28_000.0).abs() < 1e-6, "the base took the tool: {}", volume("Base"));
+        assert!((volume("Target") - 32_000.0).abs() < 1e-6, "the target is untouched: {}", volume("Target"));
+    };
+    check(&old);
+    run(
+        &mut old,
+        "timeline.redefine",
+        json!({"feature":extrude,"command":"solid.extrude","params":{"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"]}}),
+    );
+    check(&old);
+    // The design saves the choice and opens with it again.
+    check(&Session::new(solidcraft_doc::format::read(&old.doc.to_json()).unwrap()));
+}

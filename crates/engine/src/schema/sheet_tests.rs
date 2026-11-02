@@ -355,3 +355,139 @@ fn replies_match_the_output_schema() {
     assert!(r.get("param_warnings").is_some(), "{r}");
     check(r);
 }
+
+#[test]
+fn rule_commands_publish_contracts_and_refuse_unknown_keys() {
+    for id in ["sheet.rules", "sheet.manage_rules"] {
+        let spec = crate::command_specs().into_iter().find(|c| c.id == id).unwrap();
+        assert!(spec.contract.is_some() && spec.output.is_some(), "{id}: input schema missing");
+        let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+        let p = if id == "sheet.rules" { json!({"unknown_key": true}) } else { json!({"name": "Test", "thikness": 1}) };
+        assert!(s.execute(id, &p).is_err(), "{id}: unknown key accepted");
+        assert!(s.doc.sheet.rules.is_empty());
+    }
+}
+
+#[test]
+fn rule_contract_keys_and_readers_match() {
+    use super::{AngleDisplayParam, ManageRulesParams, RuleName, RulesParams};
+    assert_keys(input_schema_for::<RulesParams>(), &[]);
+    assert_keys(
+        input_schema_for::<ManageRulesParams>(),
+        &[
+            "active",
+            "angle_display",
+            "bend_radius",
+            "corner_relief",
+            "corner_relief_shape",
+            "delete",
+            "gap",
+            "hem_gap",
+            "k_factor",
+            "name",
+            "relief_depth",
+            "relief_width",
+            "thickness",
+        ],
+    );
+    for (text, valid) in [("bend", true), (" INCLUDED ", true), ("\u{2003}BeNd\u{2003}", true), ("outside", false)] {
+        assert_eq!(parse::<AngleDisplayParam>(json!(text)).is_some(), valid);
+    }
+    assert!(parse::<AngleDisplayParam>(json!(false)).is_none());
+    for v in [json!(null), json!(false), json!(1), json!(""), json!(" \n "), json!("a".repeat(129)), json!("é".repeat(65))] {
+        assert!(parse::<RuleName>(v).is_none());
+    }
+    assert_eq!(parse::<RuleName>(json!("  My rule  ")).unwrap().0, "My rule");
+    assert!(parse::<RuleName>(json!("é".repeat(64))).is_some());
+    let pattern = input_schema_for::<AngleDisplayParam>();
+    assert!(pattern.as_value()["pattern"].as_str().unwrap().contains(&super::blanks()));
+    assert_strict_keeps_todays_errors(&[
+        ("sheet.manage_rules", json!({"name": null})),
+        ("sheet.manage_rules", json!({"name": true})),
+        ("sheet.manage_rules", json!({"name": "  "})),
+        ("sheet.manage_rules", json!({"name": "a".repeat(129)})),
+        ("sheet.manage_rules", json!({"name": "R", "angle_display": "outer"})),
+        ("sheet.manage_rules", json!({"name": "R", "angle_display": 5})),
+        ("sheet.manage_rules", json!({"name": "R", "corner_relief_shape": "oval"})),
+        ("sheet.manage_rules", json!({"name": "R", "thickness": -1})),
+        ("sheet.manage_rules", json!({"name": "R", "k_factor": 2})),
+        ("sheet.manage_rules", json!({"name": "Missing", "delete": true})),
+    ]);
+}
+
+/// Run all rule forms in Warn, compare with Off, and pin the successful reply shapes.
+#[test]
+fn rule_replies_match_the_output_schemas_without_warnings() {
+    use super::{ManageRulesResult, RulesResult};
+    let mut off = Session::default();
+    let mut warn = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let calls = [
+        ("sheet.rules", json!({})),
+        (
+            "sheet.manage_rules",
+            json!({"name": "  Metric  ", "thickness": 2, "k_factor": "0.4", "bend_radius": "Thickness / 2",
+            "relief_width": 1, "relief_depth": "Thickness", "corner_relief": 3, "corner_relief_shape": " Round ",
+            "hem_gap": 0.1, "gap": "Thickness / 2", "angle_display": " INCLUDED ", "active": true}),
+        ),
+        (
+            "sheet.manage_rules",
+            json!({"name": "Metric", "thickness": "3 mm", "k_factor": 0.5, "bend_radius": 1,
+            "relief_width": "1 mm", "relief_depth": 2, "corner_relief": "3 mm", "corner_relief_shape": "tear",
+            "hem_gap": "0.2 mm", "gap": 2, "angle_display": "BeNd", "active": false, "delete": false}),
+        ),
+        ("sheet.manage_rules", json!({"name": "Other"})),
+        (
+            "sheet.manage_rules",
+            json!({"name": "Other", "thickness": null, "k_factor": null, "bend_radius": null,
+            "relief_width": null, "relief_depth": null, "corner_relief": null, "corner_relief_shape": null,
+            "hem_gap": null, "gap": null, "angle_display": null, "active": null, "delete": null}),
+        ),
+        ("sheet.rules", json!({})),
+        ("sheet.manage_rules", json!({"name": "Other", "active": true})),
+        ("sheet.manage_rules", json!({"name": "Metric", "delete": true})),
+        ("sheet.manage_rules", json!({"name": "Other", "delete": true})),
+        ("sheet.rules", json!({})),
+    ];
+    for (id, p) in calls {
+        let a = off.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+        let b = warn.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+        assert_eq!(a, b, "{id} {p}");
+        assert!(b.get("param_warnings").is_none(), "{id} {p}: {b}");
+        let schema = if id == "sheet.rules" { output_schema_for::<RulesResult>() } else { output_schema_for::<ManageRulesResult>() };
+        assert!(conforms(schema.as_value(), schema.as_value(), &b), "{id}: {b}");
+        if let Some(rule) = b.get("rule") {
+            let saved = off.doc.sheet.rules.iter().find(|r| json!(r.name) == rule["name"]).unwrap();
+            let mut old = json!(saved);
+            old["angle_display"] = json!(saved.angle_display);
+            assert_eq!(*rule, old);
+            let (vals, _) = off.doc.param_values();
+            assert_eq!(b["values"], json!(off.doc.rule_values(&vals, saved).unwrap()));
+            assert_eq!(b["errors"], json!([]));
+        }
+    }
+    // Saved rules whose expressions no longer evaluate are still listed, with null values.
+    warn.doc_mut().sheet.rules.push(solidcraft_doc::sheet::SheetRule {
+        name: "Invalid".into(),
+        thickness: "Missing".into(),
+        ..solidcraft_doc::sheet::SheetRule::steel()
+    });
+    let reply = warn.execute("sheet.rules", &json!({})).unwrap();
+    assert_eq!(reply["rules"][0]["values"], Value::Null);
+    let schema = output_schema_for::<RulesResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply));
+}
+
+#[test]
+fn rule_warnings_match_the_output_schema_and_strict_does_not_mutate() {
+    use super::{ManageRulesResult, RulesResult};
+    for (id, p) in [("sheet.rules", json!({"naem": "R"})), ("sheet.manage_rules", json!({"name": "R", "thikness": 1}))] {
+        let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+        assert!(s.execute(id, &p).is_err());
+        assert!(s.doc.sheet.rules.is_empty());
+        s.param_check = ParamCheck::Warn;
+        let reply = s.execute(id, &p).unwrap();
+        assert!(!reply["param_warnings"].as_array().unwrap().is_empty());
+        let schema = if id == "sheet.rules" { output_schema_for::<RulesResult>() } else { output_schema_for::<ManageRulesResult>() };
+        assert!(conforms(schema.as_value(), schema.as_value(), &reply));
+    }
+}

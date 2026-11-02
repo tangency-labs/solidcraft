@@ -71,20 +71,23 @@ pub struct Build {
     pub built: &'static str,
 }
 
-/// One report, as listed.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+/// One report, as listed (and as `diagnostics.crash_reports` describes it, #10909).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, schemars::JsonSchema)]
 pub struct Summary {
+    /// The report's id, which `diagnostics.crash_report` reads.
     pub id: String,
     /// `command_panic`, `panic`, `kernel_panic_recovered` or `unclean_exit`.
     pub kind: String,
     /// When the report was first recorded (UTC). Unclean exits are recorded at a later launch,
     /// which may be days after the session ended, rather than at the exact exit time.
     pub time: String,
+    /// The internal error's message.
     pub message: String,
     /// The command running when it happened, if one was.
     pub command: Option<String>,
     /// Times it happened.
     pub count: u64,
+    /// The version of SolidCraft it happened in.
     pub version: String,
     /// The report's folder.
     pub path: String,

@@ -1,5 +1,5 @@
 use super::*;
-use solidcraft_io::catalog::{Definition, Entry, FORMAT, LibraryLook, LibraryMaterial};
+use solidcraft_io::catalog::{Definition, Entry, FORMAT, LibraryLook, LibraryMaterial, Provenance};
 use std::sync::{
     Arc,
     atomic::{AtomicU64, Ordering},
