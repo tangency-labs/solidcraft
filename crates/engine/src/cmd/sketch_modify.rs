@@ -60,7 +60,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("trim")
         .key("T")
         .enabled(in_sketch)
-        .params(concat!("curve: id, at: [x,y] (the piece to remove: between the nearest intersections around it)", created_doc!())),
+        .params(concat!("curve: id, at: [x,y] (the piece to remove: between the nearest intersections around it). Trimming a line source releases its dependent straight offsets' linked extents (offset_released: curve ids), retaining their driving normal-distance dimensions and parallel relations", created_doc!())),
     CommandSpec::new("sketch.trim.path", "Trim Along Path", trim_path)
         .icon("trim")
         .enabled(in_sketch)
@@ -409,11 +409,101 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
     let at = req_vec2(cmd, p, "at")?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let ci = curve_arg(sk, p, cmd)?;
-        let (out, _) = remove_piece(sk, ci, at, cmd)?;
+        let released = release_source_line_offsets(sk, doc, ci, cmd)?;
+        let (mut out, _) = remove_piece(sk, ci, at, cmd)?;
+        if !released.is_empty() {
+            out["offset_released"] = json!(released);
+        }
         doc.prune_model_params();
         Ok(out)
     })?;
     Ok(json!({"result": out, "sketch": info}))
+}
+
+/// A source line's endpoints may change independently of its parallel offsets. Materialize
+/// the affected line chains before Trim, retaining their original driving distance parameters
+/// as point-line dimensions. Directly trimming an associated output remains a separate command policy.
+fn release_source_line_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, ci: usize, cmd: &str) -> Result<Vec<String>> {
+    let Some(curve) = sk.curves.get(ci) else { return Ok(Vec::new()) };
+    if curve.infinite || sk.is_linked_curve(ci) || !matches!(curve.kind, CurveKind::Line { .. }) {
+        return Ok(Vec::new());
+    }
+    let id = curve.id.clone();
+    let affected: Vec<usize> = sk
+        .offsets
+        .iter()
+        .enumerate()
+        .filter_map(|(i, offset)| {
+            (offset.topology.is_none()
+                && offset.sources.iter().any(|(source, _)| source == &id)
+                && offset.sources.len() == offset.outputs.len()
+                && offset.sources.iter().zip(&offset.outputs).all(|((source, _), output)| {
+                    [source, output]
+                        .iter()
+                        .all(|id| sk.curve_index(id).and_then(|ci| sk.curves.get(ci)).is_some_and(|c| matches!(c.kind, CurveKind::Line { .. })))
+                }))
+            .then_some(i)
+        })
+        .collect();
+    if affected.is_empty() {
+        return Ok(Vec::new());
+    }
+    let report = solve_current(sk, doc)?;
+    if !report.keeps_orientation() {
+        return Err(bad(cmd, report.failure(|_| "cannot trim a source with conflicting offset dimensions".into())));
+    }
+    let mut released = Vec::new();
+    for index in affected.into_iter().rev() {
+        let record = sk.offsets.remove(index);
+        let dimension = sk
+            .constraints
+            .iter()
+            .find(|c| {
+                matches!(&c.kind,
+            ConstraintKind::OffsetDistance { output, .. } if record.outputs.contains(output))
+            })
+            .cloned()
+            .ok_or_else(|| bad(cmd, "missing offset distance dimension"))?;
+        let value = match dimension.kind {
+            ConstraintKind::OffsetDistance { value, .. } => value,
+            _ => record.distance.abs(),
+        };
+        sk.constraints.retain(|c| !matches!(&c.kind, ConstraintKind::OffsetDistance { output, .. } if record.outputs.contains(output)));
+        for output in &record.outputs {
+            let target = sk.curve_index(output).ok_or_else(|| bad(cmd, "missing offset line"))?;
+            let points = sk.curves.get(target).map(|c| c.kind.point_ids()).unwrap_or_default();
+            for i in points {
+                if i != 0
+                    && sk.curves.iter().all(|c| !c.kind.uses(i) || record.outputs.contains(&c.id))
+                    && let Some(point) = sk.points.get_mut(i)
+                {
+                    point.fixed = false;
+                }
+            }
+        }
+        for (index, ((source, _), output)) in record.sources.iter().zip(&record.outputs).enumerate() {
+            let source = sk.curve_index(source).ok_or_else(|| bad(cmd, "missing offset source"))?;
+            let target = sk.curve_index(output).ok_or_else(|| bad(cmd, "missing offset line"))?;
+            if !sk.constraints.iter().any(|c| {
+                matches!(c.kind,
+                ConstraintKind::Parallel { a, b } if (a == source && b == target) || (a == target && b == source))
+            }) {
+                add_c(sk, ConstraintKind::Parallel { a: source, b: target })?;
+            }
+            let p = sk.curves.get(target).and_then(|c| c.kind.ends()).map(|ends| ends.0).ok_or_else(|| bad(cmd, "missing offset line endpoint"))?;
+            let kind = ConstraintKind::PointLineDistance { p, l: source, value };
+            let id = sk.add_constraint(kind.clone(), dimension.param.clone())?;
+            if let Some(added) = sk.constraints.iter_mut().find(|c| c.id == id) {
+                let mut kept = dimension.clone();
+                kept.id = if index == 0 { dimension.id.clone() } else { id };
+                kept.kind = kind;
+                *added = kept;
+            }
+        }
+        released.extend(record.outputs);
+    }
+    released.sort();
+    Ok(released)
 }
 
 /// Remove the piece of curve `ci` around `at`: between the nearest intersections on either
@@ -443,6 +533,21 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
         return Ok((json!({"deleted": id}), removed));
     }
     refuse_offset_ends(sk, ci, "trim", cmd)?;
+    // For parallel lines, any point on the output measures the same normal distance.
+    // Move an endpoint witness to the surviving piece before removing its old endpoint.
+    let witnesses: Vec<String> = sk
+        .constraints
+        .iter()
+        .filter_map(|dimension| {
+            let ConstraintKind::PointLineDistance { p, l, .. } = dimension.kind else { return None };
+            let ends = sk.curves.get(ci).and_then(|c| c.kind.ends())?;
+            let line = matches!(sk.curves.get(ci)?.kind, CurveKind::Line { .. });
+            (line
+                && (p == ends.0 || p == ends.1)
+                && sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Parallel { a, b } if (a == ci && b == l) || (a == l && b == ci))))
+            .then(|| dimension.id.clone())
+        })
+        .collect();
     release_extent(sk, ci);
     let ts: Vec<f64> = cuts.iter().map(|c| c.0).collect();
     let (pieces, pts) = split_at(sk, ci, &ts)?;
@@ -477,6 +582,15 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
     };
     let keep: Vec<usize> = pieces.iter().copied().filter(|x| *x != gone).collect();
     tie(sk, &keep)?;
+    if let Some((a, _)) = sk.curves.get(ci).and_then(|c| c.kind.ends()) {
+        for dimension in &mut sk.constraints {
+            if witnesses.contains(&dimension.id)
+                && let ConstraintKind::PointLineDistance { p, .. } = &mut dimension.kind
+            {
+                *p = a;
+            }
+        }
+    }
     let removed = sk.polyline(gone);
     sk.remove_curves(&[gone]);
     Ok((json!({"trimmed": id}), removed))
@@ -575,7 +689,14 @@ fn trim_path(s: &mut Session, p: &Value) -> Result<Value> {
             after = (si, t);
             // A piece trim refuses (a closed spline crossed once) stays as it was.
             let before = sk.clone();
-            match remove_piece(sk, ci, q, cmd) {
+            let cut = release_source_line_offsets(sk, doc, ci, cmd).and_then(|released| {
+                let (mut out, gone) = remove_piece(sk, ci, q, cmd)?;
+                if !released.is_empty() {
+                    out["offset_released"] = json!(released);
+                }
+                Ok((out, gone))
+            });
+            match cut {
                 Ok((out, gone)) => {
                     trimmed.push(out);
                     removed.push(json!(gone.iter().map(|v| [v.x, v.y]).collect::<Vec<_>>()));
