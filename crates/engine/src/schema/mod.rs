@@ -73,6 +73,7 @@ pub mod sketch_constraints;
 pub mod sketch_create;
 pub mod sketch_equation;
 pub mod surface_analysis;
+pub mod surface_boundary;
 pub mod ui_prefs;
 pub mod view_navigation;
 

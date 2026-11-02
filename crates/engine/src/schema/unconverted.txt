@@ -360,7 +360,6 @@ solid.sweep
 solid.thread
 solid.web
 surface.blend
-surface.boundary
 surface.extend
 surface.extrude
 surface.fair
