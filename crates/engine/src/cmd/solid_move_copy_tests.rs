@@ -181,3 +181,100 @@ fn an_older_design_with_no_copy_key_at_all_still_loads_and_moves_in_place() {
     let moved = state.body("Cube").unwrap();
     assert!(moved.mesh().bounds().min.dist(Vec3::new(5.0, 0.0, 0.0)) < 1e-6);
 }
+
+fn assert_bounds(s: &Session, body: &str, min: Vec3, max: Vec3) {
+    let bounds = s.world_state().body(body).unwrap().mesh().bounds();
+    assert!(bounds.min.dist(min) < 1e-6 && bounds.max.dist(max) < 1e-6, "{body}: {bounds:?}, expected {min:?}..{max:?}");
+}
+
+#[test]
+fn explicit_origin_rotates_in_place_and_survives_reopen() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0], "body_name": "B"}));
+    run(&mut s, "solid.move", json!({"bodies": ["B"], "origin": ["105 mm", "5 mm", 0], "angle": "90 deg"}));
+    for session in [&s, &Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap())] {
+        assert_bounds(session, "B", Vec3::new(100.0, 0.0, 0.0), Vec3::new(110.0, 10.0, 10.0));
+    }
+}
+
+#[test]
+fn matrix_moves_a_copy_and_survives_reopen() {
+    for matrix in [json!([0, -1, 0, 30, 1, 0, 0, 0, 0, 0, 1, 0]), json!([[0, -1, 0, 30], [1, 0, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])] {
+        let mut s = Session::default();
+        cube20(&mut s, "Cube");
+        run(&mut s, "solid.move", json!({"bodies": ["Cube"], "matrix": matrix, "copy": true, "body_name": "Copy"}));
+        for session in [&s, &Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap())] {
+            assert_bounds(session, "Cube", Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0));
+            assert_bounds(session, "Copy", Vec3::new(10.0, 0.0, 0.0), Vec3::new(30.0, 20.0, 20.0));
+        }
+    }
+}
+
+#[test]
+fn invalid_move_transforms_are_refused_without_changing_the_design() {
+    let mut s = Session::default();
+    cube20(&mut s, "Cube");
+    let saved = s.doc.to_json();
+    let rigid = json!([1, 0, 0, 30, 0, 1, 0, 0, 0, 0, 1, 0]);
+    let mut cases = vec![
+        json!({"origin": [1, 2]}),
+        json!({"origin": [0, true, 0]}),
+        json!({"origin": ["1e12 mm", 0, 0]}),
+        json!({"axis": [0, 0, 0], "angle": 90}),
+        json!({"axis": "no"}),
+        json!({"angle": false}),
+        json!({"copy": "true"}),
+        json!({"matrix": [1, 2, 3]}),
+        json!({"matrix": [2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]}),
+        json!({"matrix": [-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]}),
+        json!({"matrix": [1, 0.1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]}),
+        json!({"matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0.1, 1]}),
+        json!({"matrix": rigid, "tolerance": 0.1}),
+        json!({"tolerance": 0.001}),
+    ];
+    for key in ["translate", "origin", "axis", "angle"] {
+        cases.push(json!({"matrix": rigid, key: null}));
+    }
+    for mut p in cases {
+        p["bodies"] = json!(["Cube"]);
+        assert!(s.execute("solid.move", &p).is_err(), "accepted {p}");
+        assert_eq!(s.doc.to_json(), saved, "changed design after rejecting {p}");
+    }
+}
+
+#[test]
+fn matrix_axis_angle_preserves_small_and_half_turns() {
+    use solidcraft_doc::{apply_point, rigid};
+    for axis in [Vec3::X, Vec3::Y, Vec3::Z, Vec3::new(0.0, 1.0, -1.0), Vec3::new(-1.0, 2.0, -3.0)] {
+        for angle in [0.0, 1e-12, 0.2, std::f64::consts::PI - 1e-8, std::f64::consts::PI, std::f64::consts::PI + 1e-8] {
+            let matrix = rigid(Vec3::ZERO, Vec3::ZERO, axis, angle);
+            let (a, theta) = super::super::component::matrix::axis_angle(&matrix);
+            let restored = rigid(Vec3::ZERO, Vec3::ZERO, a, theta);
+            for point in [Vec3::X, Vec3::Y, Vec3::Z] {
+                assert!(apply_point(&matrix, point).dist(apply_point(&restored, point)) < 1e-10, "{axis:?}, {angle}");
+            }
+        }
+    }
+}
+
+#[test]
+fn origin_remains_parametric_and_undoable() {
+    let mut s = Session::default();
+    cube20(&mut s, "Cube");
+    run(&mut s, "parameters.change", json!({"name": "pivot", "expression": "10 mm"}));
+    run(&mut s, "solid.move", json!({"bodies": ["Cube"], "origin": ["pivot", 10, 0], "angle": "180 deg", "name": "Turn"}));
+    assert_bounds(&s, "Cube", Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0));
+    run(&mut s, "parameters.change", json!({"name": "pivot", "expression": "20 mm"}));
+    assert_bounds(&s, "Cube", Vec3::new(20.0, 0.0, 0.0), Vec3::new(40.0, 20.0, 20.0));
+    run(&mut s, "edit.undo", json!({}));
+    assert_bounds(&s, "Cube", Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0));
+}
+
+#[test]
+fn matrix_translation_is_in_mm_even_in_an_inch_design() {
+    let mut s = Session::default();
+    cube20(&mut s, "Cube");
+    run(&mut s, "document.units", json!({"units": "in"}));
+    run(&mut s, "solid.move", json!({"bodies": ["Cube"], "matrix": [1,0,0,30, 0,1,0,0, 0,0,1,0]}));
+    assert_bounds(&s, "Cube", Vec3::new(30.0, 0.0, 0.0), Vec3::new(50.0, 20.0, 20.0));
+}

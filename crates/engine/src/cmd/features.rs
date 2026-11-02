@@ -12,8 +12,8 @@ use solidcraft_geom::Vec3;
 use super::{CommandSpec, not_in_sketch};
 use crate::params::{UNKNOWN_COMMAND, bad, bool_, expr, expr_problem, req_expr, str_, string_list, string_list_or_default, vec2, vec3};
 use crate::schema::features::{
-    BoundingSolidParams, BoxParams, ConeParams, CylinderParams, ExtrudeParams, FeatureResult, OffsetPlaneParams, PipeParams, PlaneAtAngleParams,
-    ScaleParams, SphereParams, TorusParams,
+    BoundingSolidParams, BoxParams, ConeParams, CylinderParams, ExtrudeParams, FeatureResult, MoveParams, MoveResult, OffsetPlaneParams, PipeParams,
+    PlaneAtAngleParams, ScaleParams, SphereParams, TorusParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -29,6 +29,7 @@ const BOUNDING_SOLID_CONTRACT: TypedContract<BoundingSolidParams> = TypedContrac
 const SCALE_CONTRACT: TypedContract<ScaleParams> = TypedContract::new();
 const OFFSET_PLANE_CONTRACT: TypedContract<OffsetPlaneParams> = TypedContract::new();
 const PLANE_AT_ANGLE_CONTRACT: TypedContract<PlaneAtAngleParams> = TypedContract::new();
+const MOVE_CONTRACT: TypedContract<MoveParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.extrude", "Extrude", crate::checked!("solid.extrude", extrude))
@@ -167,7 +168,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("presspull")
         .key("Q")
         .params("face: [x,y,z] and distance: expr (positive adds material, negative cuts), or edges: [[x,y,z]…] and distance (a fillet)"),
-    CommandSpec::new("solid.move", "Move/Copy", move_bodies).at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch).params("bodies: [names]; translate?: [x,y,z] (exprs or numbers); axis?: [x,y,z]; angle?: expr; copy?: bool (default false: keeps the original bodies and transforms a new copy instead of moving them in place)"),
+    CommandSpec::new("solid.move", "Move/Copy", crate::checked!("solid.move", move_bodies))
+        .at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch)
+        .contract(&MOVE_CONTRACT).output(output_schema_for::<MoveResult>)
+        .params("bodies: [names]; translate?: [x,y,z] (length exprs or numbers, applied after rotation); axis?: [x,y,z] (default Z); angle?: angle expr; origin?: [x,y,z] (length exprs or numbers, default world origin); matrix?: rigid row-major 3x4 or 4x4, flat or rows (instead of translate/axis/angle/origin); tolerance?: matrix rotation tolerance (default 1e-9, at most 1e-3); copy?: bool (default false; true keeps originals and transforms copies); name?, body_name?, body_names?"),
 ];
 
 /// Where an extrude starts and which way is positive: a point inside the (first) profile or
@@ -1803,45 +1807,80 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(out)
 }
 
+/// Convert a rigid matrix to the Move feature's existing translation/axis/angle form before
+/// frame mapping. The original matrix is validated before any information is discarded.
+pub(crate) fn move_matrix_params(p: &Value) -> Result<Option<Value>> {
+    let Some(matrix) = p.get("matrix") else { return Ok(None) };
+    let cmd = "solid.move";
+    if ["translate", "axis", "angle", "origin"].iter().any(|k| p.get(k).is_some()) {
+        return Err(bad(cmd, "matrix cannot be combined with translate, axis, angle or origin"));
+    }
+    let m = super::component::matrix::rigid(matrix, super::component::matrix::tolerance(p, cmd)?, cmd)?;
+    let (axis, angle) = super::component::matrix::axis_angle(&m);
+    let mut out = p.clone();
+    if let Some(obj) = out.as_object_mut() {
+        obj.remove("matrix");
+        obj.remove("tolerance");
+        obj.insert("translate".into(), json!([format!("{} mm", m[3][0]), format!("{} mm", m[3][1]), format!("{} mm", m[3][2])]));
+        obj.insert("axis".into(), json!([axis.x, axis.y, axis.z]));
+        obj.insert("angle".into(), json!(format!("{angle} rad")));
+    }
+    Ok(Some(out))
+}
+
 fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {
+    let normalized = move_matrix_params(p)?;
+    let p = normalized.as_ref().unwrap_or(p);
+    let cmd = "solid.move";
+    if p.get("tolerance").is_some() {
+        return Err(bad(cmd, "tolerance requires matrix"));
+    }
+    // Validate before choosing the body-feature or multi-placement route.
+    point_param(s, p, "translate", cmd)?;
+    point_param(s, p, "origin", cmd)?;
+    if let Some(v) = p.get("axis") {
+        let a = vec3(v).ok_or_else(|| bad(cmd, "axis must be a finite non-zero [x, y, z]"))?;
+        if a.normalized().is_none() {
+            return Err(bad(cmd, "axis must be non-zero"));
+        }
+    }
+    if p.get("angle").is_some() {
+        let a = req_expr(cmd, p, "angle")?;
+        check_expr(s, &a, Kind::Angle, cmd, "angle")?;
+    }
+    if p.get("copy").is_some_and(|v| !v.is_boolean()) {
+        return Err(bad(cmd, "copy must be a boolean"));
+    }
     if let Some(plan) = crate::frames::placements_moved(s, p) {
         return move_placements(s, p, plan);
     }
     move_body_feature(s, p)
 }
 
-/// A move of several placements of one part (`frames::placements_moved`, #4768): each placement
-/// moved in the world by the move's translation and turn (about the world origin, as the Move
-/// feature turns bodies), and the root component's bodies listed moved as bodies, in one step.
+/// Move repeated placements in world coordinates, and any root bodies in the same step.
 fn move_placements(s: &mut Session, p: &Value, plan: crate::frames::PlacementMove) -> Result<Value> {
     let cmd = "solid.move";
-    let length = |v: &Value| -> Result<f64> {
-        match v {
-            Value::Number(n) => n.as_f64().ok_or_else(|| bad(cmd, "translate entries must be numbers or expressions")),
-            Value::String(e) => s.doc.eval(e, Kind::Length).map_err(|e| bad(cmd, format!("translate: {e}"))),
-            _ => Err(bad(cmd, "translate entries must be numbers or expressions")),
+    let mut transform = json!({});
+    for key in ["translate", "origin"] {
+        if let Some(coords) = point_param(s, p, key, cmd)? {
+            let values = coords.iter().map(|e| s.doc.eval(e, Kind::Length).map_err(|e| bad(cmd, e.to_string()))).collect::<Result<Vec<_>>>()?;
+            transform[key] = json!(values);
         }
-    };
-    let translate = match p.get("translate") {
-        Some(Value::Array(a)) if a.len() == 3 => a.iter().map(length).collect::<Result<Vec<f64>>>()?,
-        None => vec![0.0; 3],
-        _ => return Err(bad(cmd, "`translate` must be [x, y, z]")),
-    };
-    let angle = match expr(p, "angle") {
-        Some(a) => Some(s.doc.eval(&a, Kind::Angle).map_err(|e| bad(cmd, format!("angle: {e}")))?),
-        None => None,
-    };
+    }
+    if let Some(axis) = p.get("axis") {
+        transform["axis"] = axis.clone();
+    }
+    if let Some(angle) = expr(p, "angle") {
+        transform["angle"] = json!(s.doc.eval(&angle, Kind::Angle).map_err(|e| bad(cmd, e.to_string()))?);
+    }
     let spec = super::find_command("occurrence.move").ok_or_else(|| EngineError::UnknownCommand("occurrence.move".into()))?;
     let mut moved = Vec::new();
     for path in &plan.paths {
         let Some(&occurrence) = path.last() else { continue };
-        let mut q = json!({"occurrence": occurrence, "path": path, "space": "world", "translate": translate});
-        if let Some(axis) = p.get("axis") {
-            q["axis"] = axis.clone();
-        }
-        if let Some(angle) = angle {
-            q["angle"] = json!(angle);
-        }
+        let mut q = transform.clone();
+        q["occurrence"] = json!(occurrence);
+        q["path"] = json!(path);
+        q["space"] = json!("world");
         spec.run_nested(s, &q)?;
         moved.push(occurrence);
     }
@@ -1860,34 +1899,18 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if bodies.is_empty() {
         return Err(bad(cmd, "`bodies` must list bodies"));
     }
-    let t = match p.get("translate") {
-        Some(Value::Array(a)) if a.len() == 3 => {
-            let mut out: [Expr; 3] = Default::default();
-            for (i, v) in a.iter().enumerate() {
-                let e = expr(&json!({"v": v}), "v").ok_or_else(|| bad(cmd, "translate entries must be numbers or expressions"))?;
-                check_expr(s, &e, Kind::Length, cmd, "translate")?;
-                if let Some(slot) = out.get_mut(i) {
-                    *slot = e;
-                }
-            }
-            out
-        }
-        None => ["0".into(), "0".into(), "0".into()],
-        _ => return Err(bad(cmd, "`translate` must be [x, y, z]")),
-    };
-    let angle = expr(p, "angle");
-    if let Some(a) = &angle {
-        check_expr(s, a, Kind::Angle, cmd, "angle")?;
-    }
+    let translate = point_param(s, p, "translate", cmd)?.unwrap_or_else(|| point_expr(Vec3::ZERO));
+    let origin = point_param(s, p, "origin", cmd)?;
     let copy = bool_(p, "copy").unwrap_or(false);
     let reply = add_feature(
         s,
         p,
         FeatureKind::Move {
             bodies: bodies.iter().cloned().map(BodyName).collect(),
-            translate: t,
+            translate,
+            origin,
             rotate_axis: p.get("axis").and_then(vec3).map(Dir),
-            angle,
+            angle: expr(p, "angle"),
             copy,
         },
     )?;
