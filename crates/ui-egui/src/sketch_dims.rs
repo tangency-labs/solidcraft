@@ -64,6 +64,8 @@ pub fn boxes_for(cmd: &str, n: usize) -> Vec<DimBox> {
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 1) => vec![b("Radius", Length)],
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 2) => vec![b("Sweep", Angle)],
         ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed", 1) => vec![b("Radius", Length), b("Sides", Unitless)],
+        // By side: the side from the first click to the second (#11271).
+        ("sketch.polygon.edge", 1) => vec![b("Length", Length), b("Sides", Unitless)],
         ("sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point", 1) => vec![b("Length", Length)],
         ("sketch.conic", 2) => vec![b("Rho", Unitless)],
         ("sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point", 2)
@@ -148,6 +150,7 @@ pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
             c + Vec2::from_angle(a0 + sweep) * r
         }
         ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed", 1) => a + dir_or_x(h - a) * lk("Radius").unwrap_or((h - a).len()),
+        ("sketch.polygon.edge", 1) => a + dir_or_x(h - a) * lk("Length").unwrap_or((h - a).len()),
         ("sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point", 2) => match lk("Width") {
             Some(w) => {
                 let c0 = t.pts.first().map(|p| p.0).unwrap_or(a);
@@ -338,7 +341,8 @@ fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
         ("sketch.circle.two_tangent", 2) => {
             vec![(crate::sketch_tools::two_tangent_default_radius(app, t), (first + a) * 0.5 + dir_or_x(a - first).perp() * off)]
         }
-        ("sketch.arc.center_point" | "sketch.slot.arc_center", 1) | ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed", 1) => {
+        ("sketch.arc.center_point" | "sketch.slot.arc_center", 1)
+        | ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed" | "sketch.polygon.edge", 1) => {
             vec![((e - a).len(), (a + e) * 0.5), (6.0, a + (e - a) * 0.5 + (e - a).perp() * 0.3)]
         }
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 2) => {
@@ -614,7 +618,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     // Polygon values used to sit inside the radius, so both boxes covered a small polygon
     // and each other. Place them together outside its projected outline, in screen space:
     // their separation must not shrink with the shape or a tilted sketch plane.
-    let polygon_positions = if matches!(t.cmd, "sketch.polygon.inscribed" | "sketch.polygon.circumscribed") {
+    let polygon_positions = if matches!(t.cmd, "sketch.polygon.inscribed" | "sketch.polygon.circumscribed" | "sketch.polygon.edge") {
         let corners = crate::tools::polygon_outline(t, e, locked(app, t, "Sides").unwrap_or(6.0))
             .unwrap_or_else(|| t.pts.iter().map(|p| p.0).chain(std::iter::once(e)).collect());
         let points: Vec<_> = corners.iter().filter_map(|p| proj.to_screen(plane.to_world(*p))).collect();
