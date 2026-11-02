@@ -16,6 +16,7 @@ mod known_failing;
 mod layers;
 mod licences;
 mod lists;
+mod mesh_decisions;
 mod pending;
 mod render_assets;
 mod skills;
@@ -103,6 +104,10 @@ commands:
   skills          check that AGENTS.md and skills/*/SKILL.md cite files, `cargo xtask` commands and skills
                   that exist, that the router table lists exactly the skills there are, and that
                   AGENTS.md and new skills stay short
+  mesh-decisions  check that model decisions in crates/doc, crates/engine and crates/kernel use exact
+                  geometry: fails on a function outside display, export, previews and mesh bodies
+                  that uses a mesh and xtask/mesh-decisions.txt does not list, and on a listed one
+                  that no longer does (the list only shrinks)
   test [CARGO ARGS] [-- TEST ARGS]
                   build the tests with the ci profile, then run every test binary at once
                   (and the doc tests alongside); SOLIDCRAFT_TEST_JOBS=N bounds concurrent test
@@ -117,7 +122,8 @@ commands:
   web-offline-test [--site DIR]
                   check in headless Chrome that the web app works offline and updates to a new
                   build (a stand-in app, or the web build in DIR such as dist/web)
-  ci              fmt --check, assets, icons, licences --check, lists, skills, layers, ui-containers, clippy -D warnings, then the tests
+  ci              fmt --check, assets, icons, licences --check, lists, skills, layers, ui-containers,
+                  mesh-decisions, clippy -D warnings, then the tests
                   with the wasm check alongside, then web-offline-test when Chrome is installed
                   (stops at the first failing step)
 ";
@@ -145,6 +151,7 @@ fn main() -> ExitCode {
         Some("licences") => licences::run(&root(), rest.contains(&"--check")),
         Some("fold-pending") => pending::run(&root()),
         Some("skills") => skills::run(&root()),
+        Some("mesh-decisions") => mesh_decisions::run(&root()),
         Some("lists") => lists::run(&root(), rest.contains(&"--fix")),
         Some("test") => {
             let (cargo_args, test_args) = rest.iter().position(|a| *a == "--").map_or((&rest[..], &[][..]), |i| (&rest[..i], &rest[i + 1..]));
@@ -435,6 +442,7 @@ fn cmd_ci() -> Result<(), String> {
     skills::run(&root())?;
     cmd_layers()?;
     ui_containers::run(&root())?;
+    mesh_decisions::run(&root())?;
     let mut c = cargo();
     c.args(["clippy", "--workspace", "--all-targets", "--profile", "ci", "--", "-D", "warnings"]);
     run(c, "cargo clippy -D warnings")?;
