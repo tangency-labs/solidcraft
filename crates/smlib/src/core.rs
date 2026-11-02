@@ -375,7 +375,8 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_overflow_trim_at_creases = true;
     f.fillet_section_end_trim_at_creases = true;
     f.fillet_refuse_mixed_corner_crossing_rails = true;
-    f.fillet_keep_features = true;
+    // Held back: see `HELD_BACK`.
+    f.fillet_keep_features = false;
     f.fillet_blend_corner = true;
     f.fillet_exact_arc_sections = true;
     f.fillet_exact_arc_spans = true;
@@ -398,8 +399,13 @@ pub(crate) fn fixes() -> UpstreamFixes {
 /// 324-fillet-over-hole-cut-by-overlong-cylinder, 324-fillet-over-hole-overlap,
 /// 5158-fillet-adjacent-plate-edges-as-thick-as-plate and the sloped and equal-slope basin rims of
 /// #1080 and #5835. A fix under the same flag is in progress on solidcore.
+///
+/// `fillet_keep_features` (WR-703, solidcore#2287): sound geometry refused. A 30 x 20 x 8 block
+/// with an r 6 boss joined on its top, its front top edge rounded r 3 (a band clear of the boss),
+/// is refused with SM_ERR_INVALID_INPUT; off it builds 6099.225530 mm³, its closed form, as the
+/// C++ fork does (solidcore#2370; ui-egui's `opening_a_large_design_never_stalls_the_window`).
 #[cfg(test)]
-const HELD_BACK: &[&str] = &["fillet_refuse_rounds_breaking_through"];
+const HELD_BACK: &[&str] = &["fillet_keep_features", "fillet_refuse_rounds_breaking_through"];
 
 fn fresh() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
