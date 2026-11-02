@@ -4159,3 +4159,52 @@ fn tool_room_beside_the_docked_assistant_survives_an_inside_out_view() {
         assert!(free.min.x.is_finite() && free.max.x.is_finite(), "{side}: {free:?}");
     }
 }
+
+/// #10882: right-clicking selected text in an assistant reply keeps the selection and offers
+/// Copy. egui would otherwise start a new, empty selection on the secondary press.
+#[test]
+fn right_click_in_a_reply_keeps_the_selection_and_offers_copy() {
+    use crate::scenario::{clear_handles, rect_of};
+    use egui::{Event, Modifiers, PointerButton, pos2};
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "The quick brown fox jumps over the lazy dog.".into() });
+    h.frames(3);
+    let [x, y] = h.widget("The quick brown fox jumps over the lazy dog.").expect("the reply is drawn");
+    let reply = pos2(x as f32, y as f32);
+    let alive =
+        |h: &crate::scenario::Harness| h.ctx.plugin_opt::<egui::text_selection::LabelSelectionState>().is_some_and(|p| p.lock().has_selection());
+    // Drag-select across the sentence, as a hand does.
+    h.call("ui.drag", json!({"x0": x - 60.0, "y0": y, "x1": x + 60.0, "y1": y, "steps": 6}));
+    assert!(alive(&h), "the drag selected text");
+    // Right-click on it: egui must not see the press, so the selection lives and a menu opens.
+    h.frame_with(vec![Event::PointerMoved(reply)]);
+    h.frame_with(vec![
+        Event::PointerButton { pos: reply, button: PointerButton::Secondary, pressed: true, modifiers: Modifiers::NONE },
+        Event::PointerButton { pos: reply, button: PointerButton::Secondary, pressed: false, modifiers: Modifiers::NONE },
+    ]);
+    h.frames(2);
+    assert!(alive(&h), "the right-click kept the selection");
+    let menu = rect_of("agent_chat:copy_menu").expect("the menu offers Copy");
+    // Clicking Copy copies the selection, and the menu closes.
+    clear_handles();
+    let c = menu.center();
+    h.frame_with(vec![Event::PointerMoved(c)]);
+    h.frame_with(vec![
+        Event::PointerButton { pos: c, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE },
+        Event::PointerButton { pos: c, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE },
+    ]);
+    let copied: Vec<String> = h
+        .output
+        .commands
+        .iter()
+        .filter_map(|c| match c {
+            egui::OutputCommand::CopyText(t) => Some(t.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(copied.len(), 1, "one Copy: {copied:?}");
+    assert!(!copied[0].is_empty() && "The quick brown fox jumps over the lazy dog.".contains(&copied[0]), "copied a piece of the reply: {copied:?}");
+    h.frames(2);
+    assert!(rect_of("agent_chat:copy_menu").is_none(), "the menu closed");
+}
