@@ -1754,6 +1754,39 @@ fn a_bridged_request_carries_the_agents_folders() {
     echo.join().unwrap();
 }
 
+/// A server started before its first tool call keeps no connection waiting (the app closes one
+/// that shows no token in time), and a call on a connection the app has closed meanwhile goes out
+/// on a new one without an error.
+#[test]
+fn a_bridge_holds_no_idle_connection_and_survives_one_closed_before_its_first_call() {
+    use std::io::{BufRead, Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let app = std::thread::spawn(move || {
+        let (mut probe, _) = listener.accept().unwrap();
+        probe.set_read_timeout(Some(std::time::Duration::from_secs(10))).unwrap();
+        assert_eq!(probe.read(&mut [0u8; 1]).unwrap(), 0, "the probe closes at once and sends nothing");
+        // The connection the second bridge makes first: closed unanswered, as a timed-out one is.
+        drop(listener.accept().unwrap());
+        for _ in 0..2 {
+            let (stream, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            std::io::BufReader::new(stream.try_clone().unwrap()).read_line(&mut line).unwrap();
+            let req: Value = serde_json::from_str(&line).unwrap();
+            writeln!(&stream, "{}", json!({"id": req["id"], "ok": true, "result": {"method": req["method"]}})).unwrap();
+        }
+    });
+    let token = "0123456789abcdef0123456789abcdef";
+    let mut early = crate::Remote::new(&addr, Some(token));
+    early.try_connect().unwrap();
+    let mut idle = crate::Remote::connect_with_token(&addr, Some(token)).unwrap();
+    let got = crate::Backend::call(&mut early, "ui.view", json!({})).unwrap();
+    assert_eq!(got["method"], "ui.view", "{got}");
+    let got = crate::Backend::call(&mut idle, "ui.view", json!({})).unwrap();
+    assert_eq!(got["method"], "ui.view", "{got}");
+    app.join().unwrap();
+}
+
 /// #7181, bridged: once the agent has saved a design through the app, that file's folder goes
 /// with every later request as `design_folders`, so the app counts it after the design moves on.
 /// Not before the save succeeded, not for one the app refused, not for a relative path (the app
