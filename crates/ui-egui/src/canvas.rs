@@ -2346,7 +2346,7 @@ mod tests {
         assert!(order(&h) < Some(egui::Order::Middle), "Preferences draws over the value box");
         if window.intersects(box_rect) {
             assert!(
-                h.ctx.memory(|m| m.layer_id_at(box_rect.center())).is_some_and(|l| l.id == egui::Id::new("sc_prefs")),
+                h.ctx.memory(|m| m.layer_id_at(window.intersect(box_rect).center())).is_some_and(|l| l.id == egui::Id::new("sc_prefs")),
                 "Preferences covers the Distance box where they overlap"
             );
         }
