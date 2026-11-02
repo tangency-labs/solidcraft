@@ -389,8 +389,6 @@ fn rounds_together_r5(k: &mut Kernel) -> Outcome {
 enum Here {
     /// The fork marks it failing; it passes here.
     Passes(&'static str),
-    /// Both fail, for a different reason or by a different amount here.
-    FailsOtherwise(&'static str),
 }
 
 /// The fork's mark of a case at one revision: its reason the case fails there (`None`: it
@@ -405,7 +403,6 @@ impl Mark {
     fn fails_here(&self) -> bool {
         match self.here {
             Some(Here::Passes(_)) => false,
-            Some(Here::FailsOtherwise(_)) => true,
             None => self.fails_today.is_some(),
         }
     }
@@ -665,7 +662,7 @@ fn tangent_end_marks_are_the_fork_s() {
             let differs = m.fails_here() != m.fails_today.is_some();
             match &m.here {
                 None => assert!(!differs, "{revision:?} {}", c.name),
-                Some(Here::Passes(why) | Here::FailsOtherwise(why)) => {
+                Some(Here::Passes(why)) => {
                     assert!(
                         m.fails_today.is_some() && !why.is_empty(),
                         "{revision:?} {}",
