@@ -1,0 +1,26 @@
+{
+  "en": {
+    "prefs.accent": "Accent",
+    "prefs.accent_theme": "Theme's own"
+  },
+  "ar": {
+    "prefs.accent": "لون التمييز",
+    "prefs.accent_theme": "لون السمة"
+  },
+  "he": {
+    "prefs.accent": "צבע הדגשה",
+    "prefs.accent_theme": "של ערכת הנושא"
+  },
+  "ja": {
+    "prefs.accent": "アクセント",
+    "prefs.accent_theme": "テーマの色"
+  },
+  "vi": {
+    "prefs.accent": "Màu nhấn",
+    "prefs.accent_theme": "Của chủ đề"
+  },
+  "zh": {
+    "prefs.accent": "强调色",
+    "prefs.accent_theme": "主题自带"
+  }
+}
