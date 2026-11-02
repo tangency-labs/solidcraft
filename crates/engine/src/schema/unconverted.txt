@@ -71,10 +71,6 @@ document.metadata
 document.metadata.remove
 document.metadata.set
 document.units
-edit.checkpoint
-edit.redo
-edit.restore_checkpoint
-edit.undo
 engine.commands
 explode.create
 explode.delete
