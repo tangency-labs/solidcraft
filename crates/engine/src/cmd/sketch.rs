@@ -141,7 +141,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(concat!("p0, p1: overall ends, width", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.point", "Point", draw_point).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", dimension).at("SKETCH", "CREATE").icon("dimension").key("D").enabled(in_sketch).params(
-        "entities: [refs] (a line midpoint is \"mid:line_id\"; a model edge or vertex, {edge: [x,y,z], body?} or {vertex: [x,y,z], body?}, is projected into the sketch first and measured there: a point against the projected edge measures the distance to it), type?: auto|distance|horizontal|distance_x|vertical|distance_y|length|radius|diameter|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"; also `#name = expression`), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points, two midpoints or a line off the axes: with auto, text_at inside the box they span (as opposite corners) or in its outer corners is the distance between them, above or below the box horizontal, beside it vertical. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A point and a circle or arc: the distance from the point to its edge (or how far within it a point inside lies). Two circles or arcs: the gap between their edges (or how far they overlap when they cross, or the narrowest gap between them when one lies inside the other), or the centre-to-centre distance when they are the two caps of a slot. An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends true): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales about its origin to the value instead of distorting. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
+        "entities: [refs] (3D sketch geometry too, #10608: a drawn 3D line for its length, two 3D points such as \"w1.start\" for their distance, with type distance_x / distance_y / distance_z for the run along an axis, two drawn 3D lines for the angle between them, a drawn 3D arc for its radius; driven and value work as below; a line midpoint is \"mid:line_id\"; a model edge or vertex, {edge: [x,y,z], body?} or {vertex: [x,y,z], body?}, is projected into the sketch first and measured there: a point against the projected edge measures the distance to it), type?: auto|distance|horizontal|distance_x|vertical|distance_y|length|radius|diameter|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"; also `#name = expression`), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points, two midpoints or a line off the axes: with auto, text_at inside the box they span (as opposite corners) or in its outer corners is the distance between them, above or below the box horizontal, beside it vertical. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A point and a circle or arc: the distance from the point to its edge (or how far within it a point inside lies). Two circles or arcs: the gap between their edges (or how far they overlap when they cross, or the narrowest gap between them when one lies inside the other), or the centre-to-centre distance when they are the two caps of a slot. An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends true): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales about its origin to the value instead of distorting. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
     ),
     CommandSpec::new("sketch.constraint.horizontal_vertical", "Horizontal/Vertical", c_horizontal_vertical)
         .at("SKETCH", "CONSTRAINTS")
@@ -498,7 +498,10 @@ pub(super) fn wire_collapse(before: &Sketch, after: &Sketch) -> Option<String> {
         |(lo, hi), p| (lo.min(p), hi.max(p)),
     );
     let span = if lo.x <= hi.x { lo.dist(hi) } else { 0.0 };
-    let reach = FLUNG * span.max(1.0);
+    // A 3D dimension may ask for more than the curves span now (its largest driving value).
+    let longest =
+        after.wire_constraints.iter().filter(|c| !c.driven && !c.kind.is_angle()).filter_map(|c| c.kind.value()).map(f64::abs).fold(0.0, f64::max);
+    let reach = FLUNG * (span + longest).max(1.0);
     let thrown = new.iter().any(|(id, w)| old.get(id).is_some_and(|o| o.fit.iter().zip(&w.fit).any(|(p, q)| !(p.dist(*q) <= reach))));
     thrown.then(|| "that would throw 3D points of the sketch far away: its 3D constraints have no solution near the sketch as it is".to_string())
 }
@@ -790,8 +793,11 @@ pub(crate) fn created(before: Option<&Sketch>, after: &Sketch) -> Value {
     let ids = |v: Vec<&solidcraft_sketch::Constraint>| v.into_iter().map(|c| c.id.clone()).collect::<Vec<_>>();
     // 3D constraints (#10608) are constraints too.
     let mut cons = ids(cons);
-    cons.extend(after.wire_constraints.iter().map(|c| c.id.clone()).filter(|id| new(&id.as_str())));
-    let mut out = json!({"points": points, "curves": curves, "constraints": cons, "dimensions": ids(dims)});
+    let mut dims = ids(dims);
+    for c in after.wire_constraints.iter().filter(|c| new(&c.id.as_str())) {
+        if c.kind.is_dimension() { &mut dims } else { &mut cons }.push(c.id.clone());
+    }
+    let mut out = json!({"points": points, "curves": curves, "constraints": cons, "dimensions": dims});
     let wires: Vec<&str> = after.wires.iter().map(|x| x.id.as_str()).filter(new).collect();
     if !wires.is_empty()
         && let Some(o) = out.as_object_mut()
@@ -3026,6 +3032,9 @@ pub(super) fn line_pts(sk: &Sketch, l: usize) -> Option<(Vec2, Vec2)> {
 
 fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.dimension";
+    if let Some(reply) = super::sketch_3d::dimension_3d(s, p, cmd)? {
+        return Ok(reply);
+    }
     // A dimension may measure model geometry (#7912): an `{edge: [x,y,z], body?}` or a
     // `{vertex: [x,y,z], body?}` among its entities is projected into the sketch first, as
     // `sketch.project` does, and stands for the projected curve (or point) there.
@@ -3412,6 +3421,9 @@ fn dimension_text(s: &mut Session, p: &Value) -> Result<Value> {
     let key = str_(p, "dimension").ok_or_else(|| bad(cmd, "`dimension` must be a dimension id or parameter name"))?.to_string();
     let at = if bool_(p, "reset").unwrap_or(false) { None } else { Some(req_vec2(cmd, p, "at")?) };
     let (id, info) = edit(s, p, cmd, false, |sk, _| {
+        if sk.wire_constraints.iter().any(|c| c.kind.is_dimension() && (c.id == key || c.param.as_deref() == Some(key.as_str()))) {
+            return Err(bad(cmd, format!("`{key}` is a 3D dimension: 3D dimensions have no text to move yet (#10617)")));
+        }
         let c = sk
             .constraints
             .iter()

@@ -618,8 +618,8 @@ fn a_3d_conflict_does_not_block_planar_edits_and_shows() {
     let sk = doc.sketch_mut(sketch).unwrap();
     let end = sk.wire_point(&format!("{l3}.end")).unwrap();
     let start = sk.wire_point(&format!("{l3}.start")).unwrap();
-    sk.add_wire_constraint(solidcraft_sketch::WireConstraintKind::Fix { p: start, at: Vec3::ZERO }).unwrap();
-    sk.add_wire_constraint(solidcraft_sketch::WireConstraintKind::Fix { p: end, at: Vec3::new(10.0, 5.0, 5.0) }).unwrap();
+    sk.add_wire_constraint(solidcraft_sketch::WireConstraintKind::Fix { p: start, at: Vec3::ZERO, exprs: None }).unwrap();
+    sk.add_wire_constraint(solidcraft_sketch::WireConstraintKind::Fix { p: end, at: Vec3::new(10.0, 5.0, 5.0), exprs: None }).unwrap();
     sk.add_wire_constraint(solidcraft_sketch::WireConstraintKind::AlongAxis { line: l3.clone(), axis: solidcraft_sketch::Axis::X }).unwrap();
     s.set_doc(doc);
     let l = run(&mut s, "sketch.line", json!({"points":[[0,0],[10,1]]}))["curves"][0].as_str().unwrap().to_string();
@@ -783,4 +783,213 @@ fn a_motion_trace_curve_takes_no_constraints_and_counts_no_freedoms() {
     // Its fit points are no freedoms to take away: a line drawn beside it adds its own 6 only.
     let r = run(&mut s, "sketch.line3d", json!({"points":[[0,20,0],[10,20,5]]}));
     assert_eq!(r["sketch"]["dof"], 6, "{r}");
+}
+
+/// Where a fit point of 3D curve `wire` lands once the model is evaluated (parameters applied).
+fn solved_fit(s: &Session, sketch: u64, wire: &str, index: usize) -> Vec3 {
+    let world = s.world_state();
+    let sk = &world.sketch(sketch).unwrap().sketch;
+    sk.wires[sk.wire_index(wire).unwrap()].fit[index]
+}
+
+#[test]
+fn a_3d_line_placed_by_expressions_follows_the_parameters() {
+    // The runner of #10608: a line on the tube top, from mid-length to 370 short of the end.
+    let mut s = Session::default();
+    run(&mut s, "parameters.change", json!({"name": "len", "expression": "3500 mm"}));
+    run(&mut s, "parameters.change", json!({"name": "shs", "expression": "150 mm"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    let r = run(&mut s, "sketch.line3d", json!({"points": [["len / 2", 0, "shs"], ["len - 370 mm", 0, "shs"]]}));
+    let l = r["curves"][0].as_str().unwrap().to_string();
+    assert_eq!(r["constraints"].as_array().map(Vec::len), Some(2), "a placed Fix per point: {r}");
+    run(&mut s, "sketch.finish", json!({}));
+    near(solved_fit(&s, sketch, &l, 0), Vec3::new(1750.0, 0.0, 150.0));
+    near(solved_fit(&s, sketch, &l, 1), Vec3::new(3130.0, 0.0, 150.0));
+    run(&mut s, "parameters.change", json!({"name": "shs", "expression": "120 mm"}));
+    run(&mut s, "parameters.change", json!({"name": "len", "expression": "3000 mm"}));
+    near(solved_fit(&s, sketch, &l, 0), Vec3::new(1500.0, 0.0, 120.0));
+    near(solved_fit(&s, sketch, &l, 1), Vec3::new(2630.0, 0.0, 120.0));
+    // Renaming a parameter renames it in the point's expressions, and they still evaluate.
+    run(&mut s, "parameters.rename", json!({"name": "shs", "new_name": "tube"}));
+    run(&mut s, "parameters.change", json!({"name": "tube", "expression": "100 mm"}));
+    near(solved_fit(&s, sketch, &l, 0), Vec3::new(1500.0, 0.0, 100.0));
+    // An unknown parameter is refused, the design unchanged.
+    let before = s.doc.to_json();
+    run(&mut s, "sketch.edit", json!({"sketch": sketch}));
+    assert!(s.execute("sketch.point3d", &json!({"point": [0, "nope", 0]})).is_err());
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn dimensions_3d_drive_measure_and_follow_their_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[100,0,0],[100,0,60]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{a}.start")}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": a, "axis": "x"}));
+    // The run's length, as a new user parameter.
+    let d = run(&mut s, "sketch.dimension", json!({"entities": [a], "value": "run = 120"}));
+    assert_eq!((d["type"].as_str(), d["defined"].as_str()), (Some("length"), Some("run")), "{d}");
+    assert!((d["measured"].as_f64().unwrap() - 120.0).abs() < 1e-6, "{d}");
+    near(fit(&s, &a, 1), Vec3::new(120.0, 0.0, 0.0));
+    // The rise: 60 along Z from the corner, and the angle between run and rise.
+    let z = run(&mut s, "sketch.dimension", json!({"entities": [format!("{a}.end"), format!("{b}.end")], "type": "distance_z", "value": 80}));
+    assert_eq!(z["type"], "distance_z", "{z}");
+    let angle = run(&mut s, "sketch.dimension", json!({"entities": [a, b], "value": "90 deg"}));
+    assert_eq!(angle["unit"], "deg", "{angle}");
+    let top = fit(&s, &b, 1);
+    assert!((top.x - 120.0).abs() < 1e-6 && top.y.abs() < 1e-6 && (top.z - 80.0).abs() < 1e-6, "{top:?}");
+    // The parameter drives it after the sketch is closed.
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "parameters.change", json!({"name": "run", "expression": "150 mm"}));
+    near(solved_fit(&s, sketch, &a, 1), Vec3::new(150.0, 0.0, 0.0));
+    near(solved_fit(&s, sketch, &b, 1), Vec3::new(150.0, 0.0, 80.0));
+    // A dimension the other constraints already settle is refused; driven, it measures.
+    run(&mut s, "sketch.edit", json!({"sketch": sketch}));
+    let before = s.doc.to_json();
+    let e = s
+        .execute("sketch.dimension", &json!({"entities": [format!("{a}.start"), format!("{a}.end")], "type": "distance_x"}))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("already determined"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+    let driven = run(&mut s, "sketch.dimension", json!({"entities": [format!("{a}.start"), format!("{b}.end")], "driven": true}));
+    let diagonal = (150.0f64 * 150.0 + 80.0 * 80.0).sqrt();
+    assert!((driven["measured"].as_f64().unwrap() - diagonal).abs() < 1e-6, "{driven}");
+    // The dimensions' parameters are in use: not pruned, and they survive a save.
+    let restored = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
+    let params = restored.sketch(sketch).unwrap().dimension_params().into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!(params.len(), 3, "{params:?}");
+    for p in &params {
+        assert!(restored.param(p).is_some(), "{p}");
+    }
+}
+
+/// A run along X from a fixed start, dimensioned by parameter `run`, then a rise from its end.
+fn run_and_rise(s: &mut Session) -> (u64, String, String) {
+    run(s, "sketch.create", json!({"plane":"XY"}));
+    run(s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    let r = run(s, "sketch.line3d", json!({"points":[[0,0,0],[100,0,0],[100,0,60]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    run(s, "sketch.constraint.fix", json!({"entity": format!("{a}.start")}));
+    run(s, "sketch.constraint.along_axis", json!({"line": a, "axis": "x"}));
+    run(s, "sketch.dimension", json!({"entities": [a], "value": "run = 100"}));
+    (sketch, a, b)
+}
+
+#[test]
+fn a_parameter_change_stores_the_3d_curves_where_it_puts_them() {
+    let mut s = Session::default();
+    let (sketch, a, b) = run_and_rise(&mut s);
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "parameters.change", json!({"name": "run", "expression": "150 mm"}));
+    // The stored sketch, not only the evaluated one: later edits start from it.
+    let stored = |s: &Session, w: &str, i: usize| {
+        let sk = s.doc.sketch(sketch).unwrap();
+        sk.wires[sk.wire_index(w).unwrap()].fit[i]
+    };
+    near(stored(&s, &a, 1), Vec3::new(150.0, 0.0, 0.0));
+    near(stored(&s, &b, 0), Vec3::new(150.0, 0.0, 0.0));
+    // The rise's top, held by nothing, stayed put. Moving the corner works from where the
+    // change put it, and fixing it holds it there.
+    near(stored(&s, &b, 1), Vec3::new(100.0, 0.0, 60.0));
+    run(&mut s, "sketch.edit", json!({"sketch": sketch}));
+    run(&mut s, "sketch.move3d", json!({"wire": b, "index": 0, "by": [0, 0, 0]}));
+    near(stored(&s, &b, 0), Vec3::new(150.0, 0.0, 0.0));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{b}.start")}));
+    near(stored(&s, &b, 0), Vec3::new(150.0, 0.0, 0.0));
+}
+
+#[test]
+fn a_parameter_change_that_breaks_the_3d_constraints_is_refused() {
+    let mut s = Session::default();
+    let (sketch, a, _) = run_and_rise(&mut s);
+    // The run's end also fixed: changing its length can only conflict.
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{a}.end")}));
+    run(&mut s, "sketch.finish", json!({}));
+    let before = s.doc.to_json();
+    let e = s.execute("parameters.change", &json!({"name": "run", "expression": "150 mm"})).unwrap_err().to_string();
+    assert!(e.contains("3D constraints would conflict"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+    let _ = sketch;
+}
+
+#[test]
+fn a_redundant_3d_dimension_can_be_placed_driven_and_toggled() {
+    let mut s = Session::default();
+    let (sketch, a, _) = run_and_rise(&mut s);
+    // The run along X is its length already.
+    let ends = json!([format!("{a}.start"), format!("{a}.end")]);
+    let r = run(&mut s, "sketch.dimension", json!({"entities": ends, "type": "distance_x", "if_redundant": "driven"}));
+    assert_eq!((r["driven"].as_bool(), r["redundant"].as_bool()), (Some(true), Some(true)), "{r}");
+    let k = r["constraint"].as_str().unwrap().to_string();
+    // Making it driving would over-constrain: it stays driven.
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.toggle_driven", &json!({"constraint": k})).unwrap_err().to_string();
+    assert!(e.contains("stays driven"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+    // The length dimension made driven frees the run; the X distance can then drive it.
+    let length = s.doc.sketch(sketch).unwrap().wire_constraints.iter().find(|c| c.param.is_some()).unwrap().id.clone();
+    run(&mut s, "sketch.toggle_driven", json!({"constraint": length, "driven": true}));
+    let r = run(&mut s, "sketch.toggle_driven", json!({"constraint": k, "driven": false}));
+    assert_eq!(r["driven"], false, "{r}");
+    let e = s.execute("sketch.dimension_text", &json!({"dimension": k, "at": [1, 2]})).unwrap_err().to_string();
+    assert!(e.contains("#10617"), "{e}");
+}
+
+#[test]
+fn an_angle_at_a_corner_is_the_corner_s_angle() {
+    // A bracket drawn as a run out and a return leg back over it (180° apart at the corner).
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[100,0,0],[50,0,40]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    run(&mut s, "sketch.constraint.fix", json!({"entity": a}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": [a, b], "value": "60 deg"}));
+    assert!((d["measured"].as_f64().unwrap() - 60.0).abs() < 1e-6, "{d}");
+    // The leg leans back over the run at 60° from the corner, as on a drawing.
+    let (corner, tip) = (fit(&s, &b, 0), fit(&s, &b, 1));
+    let leg = tip - corner;
+    assert!(leg.x < 0.0 && (leg.x / leg.len() + 0.5).abs() < 1e-9, "{leg:?}");
+}
+
+#[test]
+fn a_driven_3d_dimension_takes_any_value_it_measures_through_edits() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    // A reference distance between two points that are then joined: it measures 0.
+    let p = run(&mut s, "sketch.point3d", json!({"point":[0,0,0]}))["point"].as_str().unwrap().to_string();
+    let q = run(&mut s, "sketch.point3d", json!({"point":[5,0,0]}))["point"].as_str().unwrap().to_string();
+    let d = run(&mut s, "sketch.dimension", json!({"entities": [p, q], "driven": true}));
+    assert!(d["created"]["dimensions"].as_array().is_some_and(|a| a.len() == 1), "listed as a dimension: {d}");
+    run(&mut s, "sketch.constraint.coincident", json!({"a": p, "b": q}));
+    // The sketch still evaluates and takes edits, planar ones too.
+    run(&mut s, "sketch.point3d", json!({"point":[1,2,3]}));
+    run(&mut s, "sketch.line", json!({"points":[[2,3],[10,4]]}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()));
+    // A reference length of 1.5 km.
+    let l = run(&mut s, "sketch.line3d", json!({"points":[[0,10,0],[1500000,10,0]]}))["curves"][0].as_str().unwrap().to_string();
+    let r = run(&mut s, "sketch.dimension", json!({"entities": [l], "driven": true}));
+    assert!((r["measured"].as_f64().unwrap() - 1.5e6).abs() < 1e-3, "{r}");
+}
+
+#[test]
+fn a_parameter_value_a_3d_dimension_cannot_take_is_refused() {
+    let mut s = Session::default();
+    let (_, _, _) = run_and_rise(&mut s);
+    run(&mut s, "sketch.finish", json!({}));
+    for bad in ["0 mm", "-5 mm", "2000000 mm"] {
+        let before = s.doc.to_json();
+        let e = s.execute("parameters.change", &json!({"name": "run", "expression": bad})).unwrap_err().to_string();
+        assert!(e.contains("not changed"), "{bad}: {e}");
+        assert_eq!(s.doc.to_json(), before, "{bad}");
+    }
 }
