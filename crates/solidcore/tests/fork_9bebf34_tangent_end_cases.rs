@@ -47,6 +47,7 @@
     clippy::indexing_slicing,
     clippy::cast_precision_loss
 )] // test helpers
+use solidcore::blend::fillet_corner::p3::MIXED_CORNER_RAILS_CROSS;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use solidcore::boolean::api_brep::boolean_union;
@@ -78,12 +79,17 @@ fn kernel(crossing: bool) -> Kernel {
 
 /// Every fix SolidCraft turns on: all but `geometric_g2_continuity`, and but WR-685's
 /// `fillet_gn_section_generator`, the fork's later 11ea2d9 (= 0bd3f4d), which a87c502 does
-/// not have (its section refuses the curvature round's thumbweight 1).
+/// not have (its section refuses the curvature round's thumbweight 1), and but WR-710's
+/// `fillet_refuse_mixed_corner_crossing_rails`, not the fork's (it refuses the rounds
+/// together: [`rounds_together_refused_by_wr710`]).
 fn solidcraft_kernel() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" && name != "fillet_gn_section_generator" {
+        if name != "geometric_g2_continuity"
+            && name != "fillet_gn_section_generator"
+            && name != "fillet_refuse_mixed_corner_crossing_rails"
+        {
             *f.flag_mut(name).unwrap() = true;
         }
     }
@@ -513,6 +519,27 @@ fn tangent_end_cases_known_failing() {
         wrong.is_empty(),
         "passes, though listed as failing: {wrong:#?}"
     );
+}
+
+/// WR-710 (`fillet_refuse_mixed_corner_crossing_rails`, #2256): the front top edge and the
+/// concave arc leave V along one tangent, so the bar's top closes to a cusp there and the
+/// rails on it cross before the corner. With the refusal on, the rounds together are refused
+/// at r 2 and r 5 instead of built with the corner patch the fork marks out of the front face
+/// (here r 2 builds within the box, its seam at (32, 2, 10) G0 by SolidCraft's continuity
+/// check, and r 5 stands 0.00156 out).
+#[test]
+fn rounds_together_refused_by_wr710() {
+    for run in [rounds_together_r2, rounds_together_r5] {
+        let mut k = kernel(true);
+        k.fixes.fillet_refuse_mixed_corner_crossing_rails = true;
+        let out = run(&mut k);
+        assert_eq!(out.failed.len(), 1, "{:?}", out.failed);
+        assert!(
+            out.failed[0].contains(MIXED_CORNER_RAILS_CROSS),
+            "{:?}",
+            out.failed
+        );
+    }
 }
 
 /// The fork's marks are kept as they are: solidcore's outcome is the fork's except where a

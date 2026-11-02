@@ -14,7 +14,7 @@
 //! | [`FilletCorner::new`] with [`FilletCornerKind::Open`] | `SmFilletOpenCorner::SmFilletOpenCorner`           |
 //! | [`FilletCorner::new`] with [`FilletCornerKind::Degenerate`] | `SmFilletDegenerateCorner::SmFilletDegenerateCorner` |
 //! | [`FilletCorner::corner_type`], [`FilletCornerKind::name`] | `GetCornerType`, `GetName` (per derived class)   |
-//! | [`FilletCorner::create`] | `SmFilletCorner::Create` (with `fixes.fillet_corner_per_vertex_fan`, the fork's knife-edge refusal of a two-edge corner, `e418750`, WR-665) |
+//! | [`FilletCorner::create`] | `SmFilletCorner::Create` (with `fixes.fillet_corner_per_vertex_fan`, the fork's knife-edge refusal of a two-edge corner, `e418750`, WR-665; with `fixes.fillet_refuse_mixed_corner_crossing_rails`, not upstream, the refusal of a 3x2 mixed-convexity corner whose rails cross, WR-710) |
 //! | [`FilletCorner::is_mitre`], [`FilletCorner::filleted_edgeuses`] | the fork's `SmFilletNx2Corner::IsMitre`, `GetFilletedEdgeuses` (`9ba2b12`, WR-634) |
 //! | [`FilletCorner::create_with_solver_lookup`] | `Create` with borrowed executive solvers |
 //! | [`FilletCorner::calc_corner_geom`]                 | `SmFilletCorner::CalcCornerGeom`                      |
@@ -1067,7 +1067,11 @@ impl FilletCorner {
     /// clockwise neighbour, radial partner or edge, a filleted edge use without a
     /// solver (or a solver id past `solvers`) or a solver without surface generator
     /// (upstream dereferences them), and a walk that does not close; those of the
-    /// sector convexity test; [`SolidError::Unported`] (module docs).
+    /// sector convexity test; [`SolidError::Unported`] (module docs). With
+    /// `fixes.fillet_refuse_mixed_corner_crossing_rails` (WR-710, not upstream),
+    /// [`SolidError::Unsupported`] with the reason [`MIXED_CORNER_RAILS_CROSS`] for a 3x2
+    /// mixed-convexity corner whose two filleted edges leave the vertex along one
+    /// tangent, so their rails cross before the corner.
     pub fn create(
         k: &Kernel,
         b: &mut Brep,
@@ -1302,6 +1306,27 @@ impl FilletCorner {
                                 && eu2::is_convex_radial_sector(k, b, eu0, 4, false, 0.0)?
                                     != eu2::is_convex_radial_sector(k, b, eu1_, 4, false, 0.0)?
                             {
+                                // Not upstream (WR-710, opt-in
+                                // `fillet_refuse_mixed_corner_crossing_rails`, #2256):
+                                // where the two edges leave the vertex along one tangent,
+                                // their common face closes to a cusp there and the rails
+                                // cross before the corner; the corner patch built across
+                                // them leaves the faces, so the corner is refused.
+                                if k.fixes.fillet_refuse_mixed_corner_crossing_rails
+                                    && mixed_corner_rails_cross(
+                                        k,
+                                        b,
+                                        vertex,
+                                        edge_of(b, eu0)?,
+                                        edge_of(b, eu1_)?,
+                                        tan_tol_deg,
+                                    )?
+                                {
+                                    return Err(SolidError::Unsupported {
+                                        operation: OP_CREATE,
+                                        reason: MIXED_CORNER_RAILS_CROSS,
+                                    });
+                                }
                                 Some(make(FilletCornerKind::ThreeByTwoMixed))
                             } else {
                                 // else continue with case 4
@@ -3288,6 +3313,69 @@ fn bspline_part_mut(kind: &mut CurveKind) -> Option<&mut BSplineCurve> {
         CurveKind::Parabola(c) => Some(c.base_mut()),
         _ => None,
     }
+}
+
+/// The reason of the [`SolidError::Unsupported`] that [`FilletCorner::create`] returns,
+/// with `Kernel::fixes.fillet_refuse_mixed_corner_crossing_rails` (WR-710, #2256), for a
+/// corner of two filleted edges of differing convexity whose rails cross before the
+/// corner (see [`FilletCorner::create`]).
+pub const MIXED_CORNER_RAILS_CROSS: &str =
+    "a corner whose edges differ in convexity, where the rails cross, is not supported (#2256)";
+
+/// Not upstream (WR-710): whether the filleted edges `edge1` and `edge2` of a 3x2
+/// mixed-convexity corner leave `vertex` along one tangent, within `ang_tol_deg`
+/// degrees and in the same sense. Their common face then closes to a cusp at the
+/// vertex (its corner angle between them is zero), so the two rails, each set the
+/// blend's size into that face, cross each other before they reach the corner: the
+/// convex blend's rail runs past the concave edge and the concave blend's rail past the
+/// convex edge. (Two edges of one tangent leaving the vertex in opposite senses, an
+/// edge running on smoothly into the other, are not this case.) `false` for one edge
+/// given twice (two filleted uses of the same edge), a closed edge, a tangent that
+/// cannot be evaluated or one shorter than `SM_EFF_ZERO`.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an edge without a curve.
+fn mixed_corner_rails_cross(
+    k: &Kernel,
+    b: &Brep,
+    vertex: VertexId,
+    edge1: EdgeId,
+    edge2: EdgeId,
+    ang_tol_deg: f64,
+) -> Result<bool> {
+    if edge1 == edge2 {
+        return Ok(false); // two uses of one edge, not two edges
+    }
+    // the tangent of `e` at `vertex`, pointing away from it
+    let leaving = |e: EdgeId| -> Result<Option<Vec3>> {
+        let start = edge::start_vertex(b, e)? == Some(vertex);
+        let end = edge::end_vertex(b, e)? == Some(vertex);
+        if start == end {
+            return Ok(None); // closed at the vertex, or not on it
+        }
+        let curve =
+            edge::curve(b, e)?.ok_or_else(|| invalid(OP_CREATE, "filleted edge without curve"))?;
+        let interval = edge::interval(b, e)?;
+        let t = if start {
+            interval.min()
+        } else {
+            interval.max()
+        };
+        let pv = ignored(curve.evaluate(k, t, 1, true, true))?;
+        let Some(&[_, d, ..]) = pv.as_deref() else {
+            return Ok(None);
+        };
+        if d.length_squared() <= crate::math::EFF_ZERO * crate::math::EFF_ZERO {
+            return Ok(None);
+        }
+        Ok(Some(if start { d } else { -d }))
+    };
+    let (Some(d1), Some(d2)) = (leaving(edge1)?, leaving(edge2)?) else {
+        return Ok(false);
+    };
+    let ang = ignored(d1.angle_between(d2))?;
+    Ok(ang.is_some_and(|a| rad_to_deg(a) < ang_tol_deg))
 }
 
 /// `sm_TestG1Continuity` (unit `blend.fillet_corner_p1`).
