@@ -3066,7 +3066,7 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
 #[derive(Debug, PartialEq)]
 pub(crate) enum FilletRefusal {
     /// In these plain words.
-    Plain(&'static str),
+    Plain(String),
     /// Not again: the Setback field already flags the value and names the least it takes.
     InField,
 }
@@ -3081,6 +3081,12 @@ pub(crate) fn fillet_plain_error(error: &str, setback_in_field: bool) -> Option<
     if setback_in_field && error.contains("the setback must be more than") {
         return Some(FilletRefusal::InField);
     }
+    // A setback too short for its corner's patch: the least that builds, as the kernel names it
+    if let Some((_, rest)) = error.split_once(solidcraft_engine::kernel::SETBACK_AT_LEAST)
+        && let Some(least) = rest.split_once(" mm").map(|(n, _)| n.trim()).filter(|n| n.parse::<f64>().is_ok())
+    {
+        return Some(FilletRefusal::Plain(crate::i18n::format("ui.fillet_error_setback_short", &[("least", &format!("{least} mm"))])));
+    }
     let too_large = error.contains("larger than the faces beside its edges allow");
     let corner = error.contains("setback") || error.contains("G2 corner") || error.contains("corner patch");
     let kernel = error.contains("SMLib")
@@ -3089,11 +3095,11 @@ pub(crate) fn fillet_plain_error(error: &str, setback_in_field: bool) -> Option<
         || error.contains("kernel internal error")
         || error.contains("the rounds would leave openings");
     if too_large {
-        Some(FilletRefusal::Plain(tr("ui.fillet_error_too_large")))
+        Some(FilletRefusal::Plain(tr("ui.fillet_error_too_large").to_string()))
     } else if corner && kernel {
-        Some(FilletRefusal::Plain(tr("ui.fillet_error_corner")))
+        Some(FilletRefusal::Plain(tr("ui.fillet_error_corner").to_string()))
     } else if kernel {
-        Some(FilletRefusal::Plain(tr("ui.fillet_error_failed")))
+        Some(FilletRefusal::Plain(tr("ui.fillet_error_failed").to_string()))
     } else {
         None
     }

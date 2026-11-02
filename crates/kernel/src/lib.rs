@@ -156,8 +156,8 @@ mod validity;
 pub mod watch;
 
 pub use blend::{
-    ChamferSide, blend_edges, chamfer, chamfer_max, chamfer_sides, fillet, fillet_each, fillet_g2, fillet_g2_corners, fillet_g2_with_g2_corners,
-    fillet_least_setback, fillet_max, fillet_max_each, fillet_removing, fillet_setback, tangent_chain,
+    ChamferSide, SETBACK_AT_LEAST, blend_edges, chamfer, chamfer_max, chamfer_sides, fillet, fillet_each, fillet_g2, fillet_g2_corners,
+    fillet_g2_with_g2_corners, fillet_least_setback, fillet_max, fillet_max_each, fillet_removing, fillet_setback, tangent_chain,
 };
 pub use blend_corner::fillet_radii;
 pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fillet_variable, fillet_variable_points, fillet_variable_spline, taper};
@@ -202,7 +202,7 @@ pub use meshbody::{MAX_TRIANGLES, mesh_body};
 pub use native::{body_from_smlib, smlib_body};
 pub use native::{brep_record, decode_native_body, encode_native_body, native_preview_mesh};
 pub use offset::with_same_surface;
-pub use ops::{BoolOp, boolean, half_space, join_apart, place_matrix, split_by_plane, transform, transform_matrix, union_all, union_apart};
+pub use ops::{BoolOp, apart, boolean, half_space, join_apart, place_matrix, split_by_plane, transform, transform_matrix, union_all, union_apart};
 pub use point_path::{
     PathPiece, PointPath, SpaceBezier, along_path, curve_path, edge_path, face_section_along, project_onto_face, sketch_record_curve,
     sweep_point_path_with,

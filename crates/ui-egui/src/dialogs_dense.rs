@@ -1470,6 +1470,26 @@ mod tests {
 
     /// A smooth-patch fillet reopens with its corner and setback, and OK writes them as saved; a
     /// setback list the dialog cannot show as one distance is kept as it is.
+    /// A setback too short for SMLib's corner fill (past the least the field flags) is refused by
+    /// the kernel naming the smallest that builds; the dialog says it in plain words, that length
+    /// in them.
+    #[test]
+    fn a_setback_too_short_for_the_corner_says_the_least_that_builds() {
+        let refused = format!(
+            "invalid parameters for `solid.fillet`: the setback is too short for its corner: {}5.9620 mm (the corner's patch is convex only from there)",
+            solidcraft_engine::kernel::SETBACK_AT_LEAST
+        );
+        match crate::dialogs::fillet_plain_error(&refused, true) {
+            Some(crate::dialogs::FilletRefusal::Plain(plain)) => assert!(plain.contains("5.9620 mm"), "{plain}"),
+            other => panic!("{other:?}"),
+        }
+        // A blend too large for its faces keeps its own words.
+        assert_eq!(
+            crate::dialogs::fillet_plain_error("the fillet is larger than the faces beside its edges allow", true),
+            Some(crate::dialogs::FilletRefusal::Plain(crate::i18n::tr("ui.fillet_error_too_large").to_string()))
+        );
+    }
+
     #[test]
     fn a_saved_smooth_patch_reopens_with_its_setback() {
         for (setbacks, field) in [
