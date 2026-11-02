@@ -30,6 +30,67 @@ pub(crate) fn paint_background(painter: &egui::Painter, rect: egui::Rect, tokens
     painter.add(egui::Shape::mesh(mesh));
 }
 
+/// The part of a picture (as texture coordinates) that `rect` shows in a window `window`: the
+/// picture covers the window from its centre, so a narrower window keeps the middle of it, and
+/// panels and the view's own size don't move it.
+fn background_uv(image: egui::Vec2, rect: egui::Rect, window: egui::Rect) -> egui::Rect {
+    let scale = (window.width() / image.x).max(window.height() / image.y).max(f32::EPSILON);
+    let uv = |p: egui::Pos2| ((p - window.center()) / scale + image / 2.0) / image;
+    egui::Rect::from_min_max(uv(rect.min).to_pos2(), uv(rect.max).to_pos2())
+}
+
+/// A picture's pixels, at most `limit` on a side (what the GPU takes).
+fn decode_background(bytes: &[u8], limit: u32) -> Result<egui::ColorImage, String> {
+    let mut image = image::load_from_memory(bytes).map_err(|e| e.to_string())?;
+    if image.width().max(image.height()) > limit {
+        image = image.resize(limit, limit, image::imageops::FilterType::Triangle);
+    }
+    let rgba = image.into_rgba8();
+    Ok(egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], rgba.as_raw()))
+}
+
+#[derive(Clone)]
+struct BackgroundPicture {
+    path: String,
+    decoded: std::sync::Arc<std::sync::Mutex<Option<Result<egui::ColorImage, String>>>>,
+    texture: Option<egui::TextureHandle>,
+}
+
+/// The background picture over the view's background (the Background picture preference), read
+/// off the window thread. Until it is ready, and if it can't be read, the view's background stays.
+pub(crate) fn paint_background_picture(app: &mut crate::SolveApp, painter: &egui::Painter, rect: egui::Rect) {
+    let path = &app.preferences.background_image;
+    if path.is_empty() {
+        return;
+    }
+    let ctx = painter.ctx().clone();
+    let id = egui::Id::new("sc_background_picture");
+    let mut picture = ctx.data(|d| d.get_temp::<BackgroundPicture>(id)).filter(|p| p.path == *path).unwrap_or_else(|| {
+        let picture = BackgroundPicture { path: path.clone(), decoded: Default::default(), texture: None };
+        let (path, slot, repaint) = (path.clone(), picture.decoded.clone(), ctx.clone());
+        let limit = ctx.input(|i| i.max_texture_side) as u32;
+        std::thread::spawn(move || {
+            let result = std::fs::read(&path).map_err(|e| e.to_string()).and_then(|bytes| decode_background(&bytes, limit));
+            *slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(result);
+            repaint.request_repaint();
+        });
+        picture
+    });
+    let done = picture.decoded.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+    match done {
+        Some(Ok(image)) => {
+            let options = egui::TextureOptions { mipmap_mode: Some(egui::TextureFilter::Linear), ..egui::TextureOptions::LINEAR };
+            picture.texture = Some(ctx.load_texture("background-picture", image, options));
+        }
+        Some(Err(error)) => app.set_status(format!("{}: {error}", crate::i18n::tr("prefs.background_unreadable")), true),
+        None => {}
+    }
+    if let Some(texture) = &picture.texture {
+        painter.image(texture.id(), rect, background_uv(texture.size_vec2(), rect, ctx.content_rect()), egui::Color32::WHITE);
+    }
+    ctx.data_mut(|d| d.insert_temp(id, picture));
+}
+
 /// The GPU plan evaluation compiling beside the window: there once it is ready ([`tick_tessellation`]).
 pub type TessReady = std::sync::Arc<std::sync::OnceLock<solidcraft_gpu::TessGpu>>;
 
@@ -1244,5 +1305,38 @@ mod tests {
         }
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
         assert!(!lost.is_lost() && lost.reason().is_none(), "{:?}", lost.reason());
+    }
+}
+
+#[cfg(test)]
+mod background_picture_tests {
+    use egui::{Rect, pos2, vec2};
+
+    /// A window as wide as the picture shows all of it; a narrower one keeps its middle, at scale.
+    #[test]
+    fn a_picture_covers_the_window_from_its_centre() {
+        let image = vec2(5120.0, 1440.0);
+        let wide = Rect::from_min_size(pos2(0.0, 0.0), image);
+        let all = super::background_uv(image, wide, wide);
+        assert!(all.min.distance(pos2(0.0, 0.0)) < 1e-4 && all.max.distance(pos2(1.0, 1.0)) < 1e-4, "{all:?}");
+        let small = Rect::from_min_size(pos2(0.0, 0.0), vec2(2560.0, 1440.0));
+        let middle = super::background_uv(image, small, small);
+        assert!(middle.min.distance(pos2(0.25, 0.0)) < 1e-4 && middle.max.distance(pos2(0.75, 1.0)) < 1e-4, "{middle:?}");
+        // The view inside the window shows its own part, so the panels don't move the picture.
+        let view = Rect::from_min_size(pos2(1280.0, 0.0), vec2(1280.0, 720.0));
+        let part = super::background_uv(image, view, small);
+        assert!(part.min.distance(pos2(0.5, 0.0)) < 1e-4 && part.max.distance(pos2(0.75, 0.5)) < 1e-4, "{part:?}");
+        // A tall window keeps the picture's middle the other way.
+        let tall = Rect::from_min_size(pos2(0.0, 0.0), vec2(500.0, 1000.0));
+        let side = super::background_uv(vec2(100.0, 100.0), tall, tall);
+        assert!(side.min.distance(pos2(0.25, 0.0)) < 1e-4 && side.max.distance(pos2(0.75, 1.0)) < 1e-4, "{side:?}");
+    }
+
+    #[test]
+    fn a_big_picture_is_scaled_to_the_limit_and_junk_says_so() {
+        assert!(super::decode_background(b"not a picture", 8192).is_err());
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::new(40, 20).write_to(&mut png, image::ImageFormat::Png).unwrap();
+        assert_eq!(super::decode_background(png.get_ref(), 10).unwrap().size, [10, 5]);
     }
 }

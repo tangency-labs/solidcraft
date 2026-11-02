@@ -143,6 +143,7 @@ fn analysis_colours_reach_the_shader_in_its_order() {
 /// raise the file's count here and give the reason. Fewer is always fine. The icon sources may
 /// hold none at all.
 const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
+    ("gpu.rs", 1, "the white tint that shows the background picture as it is"),
     ("navigation.rs", 1, "the navigation cube's face shading, made from a token"),
     ("canvas.rs", 3, "white rings around manipulator handles"),
     ("context_menu.rs", 1, "the radial menu's shadow"),

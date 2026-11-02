@@ -1177,6 +1177,8 @@ preference_settings! {
     /// `dark`, `light` or `system` (follow the operating system), or a theme file's id: a
     /// built-in one (`gruvbox-dark`, …) or one of `custom_themes` (#2255).
     theme: String = "dark".into(), PAGE_APPEARANCE;
+    /// A picture behind the model in place of the view's background; empty for none.
+    background_image: String = String::new(), PAGE_APPEARANCE;
     /// The 3D view's colours: the theme's own, or the Light or Dark theme's whatever the window
     /// uses (#4146).
     viewport_theme: crate::theme::ViewportTheme = crate::theme::ViewportTheme::Theme, PAGE_APPEARANCE;
