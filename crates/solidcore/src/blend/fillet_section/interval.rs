@@ -109,6 +109,18 @@ impl Ivl {
         cmax(self.lo.abs(), self.hi.abs())
     }
 
+    /// `sm_Mig`: the least magnitude in it, 0 where it holds 0.
+    #[must_use]
+    pub fn mig(self) -> f64 {
+        if self.lo > 0.0 {
+            self.lo
+        } else if self.hi < 0.0 {
+            -self.hi
+        } else {
+            0.0
+        }
+    }
+
     /// `sm_Mid`: its middle.
     #[must_use]
     pub fn mid(self) -> f64 {
