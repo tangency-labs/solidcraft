@@ -596,8 +596,8 @@ fn admission_ignores_the_cpu_raster_projected_pixel_limit() {
     let mesh = Mesh {
         positions: vec![Vec3::new(-10.0, -10.0, 0.0), Vec3::new(10.0, -10.0, 0.0), Vec3::new(10.0, 10.0, 0.0)],
         normals: vec![Vec3::Z; 3],
-        triangles: vec![[0, 1, 2]; 3201],
-        tri_face: vec![0; 3201],
+        triangles: vec![[0, 1, 2]; 6500],
+        tri_face: vec![0; 6500],
         ..Default::default()
     };
     let scene = ProductScene {

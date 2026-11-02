@@ -261,19 +261,25 @@ fn admission_rejects_projected_pixel_work_before_starting_a_job() {
 fn pixel_work_admission_includes_the_limit_and_uses_clipped_sample_bounds() {
     let mut body = square("Full viewport", [100; 3], 1.0, Vec3::ZERO);
     let mesh = Arc::make_mut(&mut body.mesh);
-    // Each triangle's bounds cover all 200 * 200 supersampled pixels.
-    mesh.triangles = vec![[0, 1, 2]; 3200];
-    mesh.tri_face = vec![0; 3200];
+    // Each triangle's bounds cover all 200 * 200 supersampled pixels, its spans about half.
+    mesh.triangles = vec![[0, 1, 2]];
+    mesh.tri_face = vec![0];
     let mut request = ImageRequest { width: 100, height: 100, ..request() };
     request.camera.distance = 1.0;
     request.camera.fov = 0.0;
+    let one = admit(&scene(vec![body.clone()]), &request).unwrap().projected_pixel_tests.unwrap();
+    assert!((20_000..=20_600).contains(&one), "{one}");
+    let times = MAX_PIXEL_TESTS / one;
+    let mesh = Arc::make_mut(&mut body.mesh);
+    mesh.triangles = vec![[0, 1, 2]; times as usize];
+    mesh.tri_face = vec![0; times as usize];
     let mut scene = scene(vec![body]);
-    assert_eq!(admit(&scene, &request).unwrap().projected_pixel_tests, Some(128_000_000));
+    assert_eq!(admit(&scene, &request).unwrap().projected_pixel_tests, Some(times * one));
     let mut task = ImageTask::new(scene.clone(), request.clone(), CancelToken::default()).unwrap();
     while task.stage() != Stage::Clear {
         task.step(1).unwrap();
     }
-    assert_eq!(task.raster.pixel_tests, 128_000_000);
+    assert_eq!(task.raster.pixel_tests, times * one);
     Arc::make_mut(&mut scene.meshes[0].mesh).triangles.push([0, 1, 2]);
     assert_eq!(admit(&scene, &request).unwrap_err().code, ErrorCode::LimitExceeded);
     // Registered executors budget their own work, independently of the raster projection.
@@ -615,9 +621,9 @@ fn a_picture_is_admitted_under_its_own_pixel_work_cap() {
         roles: Vec::new(),
         background: None,
     };
-    assert!(admit_picture(&big(8000), &small).unwrap().projected_pixel_tests.unwrap() > MAX_PIXEL_TESTS, "over a product image's cap");
+    assert!(admit_picture(&big(20_000), &small).unwrap().projected_pixel_tests.unwrap() > MAX_PIXEL_TESTS, "over a product image's cap");
     // The raster holds it to the same figure: it prepares all of that and starts to paint.
-    let mut task = PictureTask::new(big(8000), small.clone(), CancelToken::default()).unwrap();
+    let mut task = PictureTask::new(big(20_000), small.clone(), CancelToken::default()).unwrap();
     while !matches!(task.step(16_384).unwrap(), PicturePoll::Pending(p) if matches!(p.phase, Phase::Running)) {}
 
     let sheet = OrthoFrame { shift: Vec2::new(594.0, 420.0), ..frame };
@@ -630,7 +636,7 @@ fn a_picture_is_admitted_under_its_own_pixel_work_cap() {
     // A larger picture gets no more: the figure bounds the time, whatever the sheet.
     let error = admit_picture(&big(100), &a0).unwrap_err();
     assert_eq!(error.code, ErrorCode::LimitExceeded);
-    assert!(error.message.contains("400000000 pixel tests"), "{}", error.message);
+    assert!(error.message.contains("250000000 pixel tests"), "{}", error.message);
     // A small part of that picture counts only what it draws.
     let part = PictureRequest { tiles: vec![PixelWindow { x0: 28_000, y0: 19_000, x1: 28_064, y1: 19_064 }], ..a0.clone() };
     assert!(admit_picture(&big(100), &part).unwrap().projected_pixel_tests.unwrap() <= 100 * 12 * 64 * 64);
@@ -649,28 +655,29 @@ fn one_triangle(corners: [[f64; 2]; 3]) -> ProductScene {
     scene(vec![ProductMesh { mesh: Arc::new(mesh), ..block("One", [100; 3], Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)) }])
 }
 
-/// A triangle counts only where it meets the tiles asked for, on the raster's own bounds, and the
-/// count is the work: a thin one across a tile's edge, one outside, a tile inside a huge one, and a
-/// long sliver. The numbers are bounds' columns times rows, worked by hand on the 100 x 50 canvas.
+/// A triangle counts only the row spans it can touch, in the tiles asked for, and the count is the
+/// work: a thin one across a tile's edge, one outside, a tile inside a huge one, and a long sliver.
+/// On the 100 x 50 canvas a box would count 96, 32, 64, 0, 5000, 100, 5000 and 200.
 #[test]
-fn a_triangle_counts_only_where_it_meets_the_tiles() {
+fn a_triangle_counts_only_the_row_spans_it_can_touch() {
     let (frame, grid) = front_view();
     let window = |x0: u32, x1: u32, y0: u32, y1: u32| PixelWindow { x0, y0, x1, y1 };
     let whole = window(0, 100, 0, 50);
     let thin = [[29.5, 10.5], [30.5, 10.5], [30.5, 40.5]];
     let huge = [[-1000.0, -1000.0], [3000.0, -1000.0], [-1000.0, 3000.0]];
     let sliver = [[0.5, 0.5], [99.5, 49.5], [99.5, 49.6]];
+    // Each row of `thin` has at most 3 samples, of `sliver` at most 5, and a row a tile's part of it
+    // misses costs one.
     let cases = [
-        // Columns 29 to 31, rows 9 to 40: 3 x 32; each side of the edge at 30 has its own part.
-        (thin, vec![whole], 96),
-        (thin, vec![window(0, 30, 0, 50)], 32),
-        (thin, vec![window(30, 100, 0, 50)], 64),
-        (thin, vec![window(0, 30, 0, 50), window(30, 100, 0, 50)], 96),
-        (thin, vec![window(60, 70, 0, 50)], 0),
-        (huge, vec![whole], 5000),
-        (huge, vec![window(10, 20, 10, 20)], 100),
-        (sliver, vec![whole], 5000),
-        (sliver, vec![window(40, 60, 20, 30)], 200),
+        (thin, vec![whole], 32..=96),
+        (thin, vec![window(0, 30, 0, 50)], 32..=32),
+        (thin, vec![window(30, 100, 0, 50)], 32..=64),
+        (thin, vec![window(0, 30, 0, 50), window(30, 100, 0, 50)], 64..=96),
+        (thin, vec![window(60, 70, 0, 50)], 0..=0),
+        (huge, vec![whole], 5000..=5000),
+        (huge, vec![window(10, 20, 10, 20)], 100..=100),
+        (sliver, vec![whole], 50..=250),
+        (sliver, vec![window(40, 60, 20, 30)], 10..=100),
     ];
     for (corners, windows, count) in cases {
         let request = PictureRequest {
@@ -681,21 +688,22 @@ fn a_triangle_counts_only_where_it_meets_the_tiles() {
             background: None,
         };
         let drawn = one_triangle(corners);
-        assert_eq!(admit_picture(&drawn, &request).unwrap().projected_pixel_tests, Some(count), "{corners:?}: {:?}", request.tiles);
+        let admitted = admit_picture(&drawn, &request).unwrap().projected_pixel_tests.unwrap();
+        assert!(count.contains(&admitted), "{corners:?}: {:?}: {admitted}", request.tiles);
         let mut task = PictureTask::new(drawn, request.clone(), CancelToken::default()).unwrap();
         // Each tile's samples are cleared and put down, a unit each, and the rest are its tests.
         let held: u64 = request.tiles.iter().map(|t| 2 * (t.width() * t.height()) as u64).sum();
         loop {
             match task.step(1).unwrap() {
                 PicturePoll::Complete => break,
-                PicturePoll::Pending(p) if matches!(p.phase, Phase::Running) => assert_eq!(p.total, count + held, "progress is of the tiles"),
+                PicturePoll::Pending(p) if matches!(p.phase, Phase::Running) => assert_eq!(p.total, admitted + held, "progress is of the tiles"),
                 _ => {}
             }
         }
-        assert_eq!(task.raster.pixel_tests, count, "the raster counts what admission did");
-        assert_eq!(task.raster.pixel_done, count + held, "{corners:?}: the count is the work: {:?}", request.tiles);
+        assert_eq!(task.raster.pixel_tests, admitted, "the raster counts what admission did");
+        assert_eq!(task.raster.pixel_done, admitted + held, "{corners:?}: the count is the work: {:?}", request.tiles);
     }
-    // At two samples a pixel, a tile holds four times the samples, from its own first one.
+    // A tile holds four times the samples at two a pixel, from its own first one.
     let two = PictureRequest {
         projection: Projection::Ortho { frame, grid },
         tiles: vec![window(10, 20, 10, 20)],
@@ -704,14 +712,95 @@ fn a_triangle_counts_only_where_it_meets_the_tiles() {
         background: None,
     };
     assert_eq!(admit_picture(&one_triangle(huge), &two).unwrap().projected_pixel_tests, Some(400));
+    let mut task = PictureTask::new(one_triangle(huge), two.clone(), CancelToken::default()).unwrap();
+    // 400 tests, 400 samples cleared and 100 pixels put down.
+    loop {
+        match task.step(1).unwrap() {
+            PicturePoll::Complete => break,
+            PicturePoll::Pending(p) if matches!(p.phase, Phase::Running) => assert_eq!(p.total, 900, "progress counts every sample"),
+            _ => {}
+        }
+    }
+    assert_eq!(task.raster.pixel_done, 900);
+    // A long triangle whose box crosses the canvas but which misses it costs its rows, so a file of
+    // them can't take time the limit doesn't see, and it draws nothing.
+    let past = [[-50.0, 10.0], [10.0, -50.0], [-50.0, -50.0]];
+    let off = PictureRequest { tiles: vec![whole], supersample: Supersample::One, ..two.clone() };
+    let [_, _, y0, y1] = placed_bounds(past, &off);
+    assert!(y1 > y0, "the box crosses the canvas");
+    assert_eq!(admit_picture(&one_triangle(past), &off).unwrap().projected_pixel_tests, Some((y1 - y0 + 1) as u64));
     // A sum at its end is refused by name, not wrapped; no one triangle's count can overflow, its
     // sides being two samples a pixel of at most 65536 pixels.
     let drawn = one_triangle(thin);
     let view = Projection::Ortho { frame, grid }.view(&drawn, 1).unwrap();
     let placed = view.place(corners(&drawn.meshes[0], 0).unwrap().0).unwrap().unwrap();
     let mut sum = u64::MAX;
-    let e = add_pixel_tests(&mut sum, placed.bounds, [0, 99, 0, 49], u64::MAX).unwrap_err();
+    let e = add_pixel_tests(&mut sum, &placed, &[whole], 1, u64::MAX).unwrap_err();
     assert_eq!(e.message, "pixel work overflow");
+    let exact = {
+        let mut sum = 0;
+        add_pixel_tests(&mut sum, &placed, &[whole], 1, u64::MAX).unwrap();
+        sum
+    };
+    let mut sum = 0;
+    add_pixel_tests(&mut sum, &placed, &[whole], 1, exact).unwrap();
+    let mut sum = 0;
+    assert!(add_pixel_tests(&mut sum, &placed, &[whole], 1, exact - 1).unwrap_err().message.contains("pixel tests"));
+}
+
+/// The bounds a triangle at paper `corners` has on `request`'s canvas.
+fn placed_bounds(corners_mm: [[f64; 2]; 3], request: &PictureRequest) -> [usize; 4] {
+    let drawn = one_triangle(corners_mm);
+    let view = request.projection.view(&drawn, request.supersample.factor()).unwrap();
+    view.place(corners(&drawn.meshes[0], 0).unwrap().0).unwrap().unwrap().bounds
+}
+
+/// Never short: every sample the raster's test takes lies in its row's span, for random triangles
+/// and the shapes that strain the arithmetic: slivers, edges a hair off level or plumb, tiny areas,
+/// corners far off the canvas, both windings, and corners exactly on sample centres.
+#[test]
+fn a_row_span_holds_every_sample_the_test_takes() {
+    let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state >> 11) as f64 / (1u64 << 53) as f64
+    };
+    const SIDE: usize = 48;
+    let (mut triangles, mut taken, mut asked) = (0u64, 0u64, 0u64);
+    for shape in 0..12_000 {
+        let mut point = |scale: f64| [(next() * 2.0 - 0.5) * scale, (next() * 2.0 - 0.5) * scale];
+        let [mut a, mut b, mut c] = [point(SIDE as f64), point(SIDE as f64), point(SIDE as f64)];
+        match shape % 8 {
+            1 => [b, c] = [[a[0] + 40.0, a[1] + 1e-11], [a[0] + 20.0, a[1] + 30.0]],
+            2 => [b, c] = [[a[0] + 1e-11, a[1] + 40.0], [a[0] + 30.0, a[1] + 20.0]],
+            3 => c = [(a[0] + b[0]) / 2.0 + 1e-6, (a[1] + b[1]) / 2.0],
+            4 => [a, b, c] = [[a[0] * 3e4, a[1] * 3e4], [b[0] * 3e4, b[1] * 3e4], c],
+            5 => [a, b, c] = [a.map(|v| v.round() + 0.5), b.map(|v| v.round() + 0.5), c.map(|v| v.round() + 0.5)],
+            6 => [b, c] = [[a[0] + 1e-5, a[1]], [a[0], a[1] + 1e-5]],
+            7 => c = b,
+            _ => {}
+        }
+        let points = [[a[0], a[1], 0.0], [b[0], b[1], 0.0], [c[0], c[1], 0.0]];
+        let area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+        if area.abs() < 1e-12 {
+            continue;
+        }
+        triangles += 1;
+        for y in 0..SIDE {
+            let span = row_span(&points, area, [0, SIDE - 1], y);
+            asked += span.map_or(0, |[from, to]| (to - from + 1) as u64);
+            for x in 0..SIDE {
+                if sample_weights(&points, area, x, y).is_some() {
+                    taken += 1;
+                    assert!(span.is_some_and(|[from, to]| from <= x && x <= to), "{points:?}: sample {x}, {y} outside {span:?}");
+                }
+            }
+        }
+    }
+    assert!(triangles > 10_000 && taken > 100_000, "{triangles} {taken}");
+    assert!(asked < taken * 2, "the spans are tight enough to matter: {asked} asked, {taken} taken");
 }
 
 /// A picture outside its bounds is refused before anything is allocated.

@@ -23,8 +23,9 @@ pub const MAX_TRIANGLES: u64 = 262_144;
 pub const MAX_GEOMETRY_BYTES: u64 = 128 * 1024 * 1024;
 pub const MAX_JOB_BYTES: u64 = 384 * 1024 * 1024;
 pub const MAX_PIXEL_TESTS: u64 = 128_000_000;
-/// A picture's, however large: a fixed bound on its time, about a minute at worst on one thread.
-pub const MAX_PICTURE_PIXEL_TESTS: u64 = 400_000_000;
+/// A picture's, however large: a fixed bound on its time, about a minute at worst on one thread, when
+/// every test paints a surface.
+pub const MAX_PICTURE_PIXEL_TESTS: u64 = 250_000_000;
 const MAX_STEP: usize = 16_384;
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -93,8 +94,8 @@ pub(crate) fn admit_base(scene: &ProductScene, request: &ImageRequest) -> Result
     let mut admission = admit_raster(admit_source(scene, request, MAX_TRIANGLES)?)?;
     let projection = Projection::Camera { camera: request.camera, width: request.width, height: request.height };
     let view = projection.view(scene, Supersample::Two.factor())?;
-    let whole = tile_samples(&[PixelWindow { x0: 0, y0: 0, x1: request.width, y1: request.height }], Supersample::Two.factor());
-    admission.projected_pixel_tests = Some(projected_pixel_tests(scene, &view, &[], whole, MAX_PIXEL_TESTS)?);
+    let whole = [PixelWindow { x0: 0, y0: 0, x1: request.width, y1: request.height }];
+    admission.projected_pixel_tests = Some(projected_pixel_tests(scene, &view, &[], &whole, Supersample::Two.factor(), MAX_PIXEL_TESTS)?);
     Ok(admission)
 }
 
@@ -298,14 +299,19 @@ fn admit_raster(source: Source) -> Result<Admission> {
     Ok(a)
 }
 
-/// Adds the samples a triangle's whole-canvas bounds test inside `within` to `sum`, refused over
-/// `max`.
-fn add_pixel_tests(sum: &mut u64, bounds: [usize; 4], within: [usize; 4], max: u64) -> Result<()> {
-    let Some([x0, x1, y0, y1]) = narrowed(bounds, within) else {
-        return Ok(());
-    };
-    let tests = ((x1 - x0 + 1) as u64).checked_mul((y1 - y0 + 1) as u64).ok_or_else(|| limit("pixel work overflow"))?;
-    *sum = sum.checked_add(tests).ok_or_else(|| limit("pixel work overflow"))?;
+/// Adds a triangle's work on `tiles` at `ss` samples a pixel each way to `sum`, refused over `max`:
+/// each row of its bounds in each tile costs its span's samples, or one unit for an empty span, as
+/// the raster's own walk does ([`Triangle::start_row`]).
+fn add_pixel_tests(sum: &mut u64, placed: &Placed, tiles: &[PixelWindow], ss: usize, max: u64) -> Result<()> {
+    for tile in tiles {
+        let Some([x0, x1, y0, y1]) = narrowed(placed.bounds, tile_samples(tile, ss)) else {
+            continue;
+        };
+        for y in y0..=y1 {
+            let tests = row_span(&placed.points, placed.area, [x0, x1], y).map_or(1, |[from, to]| (to - from + 1) as u64);
+            *sum = sum.checked_add(tests).ok_or_else(|| limit("pixel work overflow"))?;
+        }
+    }
     if *sum > max {
         return Err(limit(&format!("projected product exceeds {max} pixel tests; reduce image dimensions or visible geometry")));
     }
@@ -325,16 +331,68 @@ fn narrowed([x0, x1, y0, y1]: [usize; 4], [from_x, to_x, from_y, to_y]: [usize; 
     (bounds[0] <= bounds[1] && bounds[2] <= bounds[3]).then_some(bounds)
 }
 
-/// The sample bounds round `tiles`, each non-empty, at `ss` samples a pixel each way: only these are
-/// drawn, so only these are counted, however large the canvas is.
-fn tile_samples(tiles: &[PixelWindow], ss: usize) -> [usize; 4] {
-    let (x0, x1) = (tiles.iter().map(|t| t.x0).min().unwrap_or(0), tiles.iter().map(|t| t.x1).max().unwrap_or(1));
-    let (y0, y1) = (tiles.iter().map(|t| t.y0).min().unwrap_or(0), tiles.iter().map(|t| t.y1).max().unwrap_or(1));
-    [x0 as usize * ss, x1 as usize * ss - 1, y0 as usize * ss, y1 as usize * ss - 1]
+/// A non-empty tile's sample bounds, at `ss` samples a pixel each way.
+fn tile_samples(tile: &PixelWindow, ss: usize) -> [usize; 4] {
+    [tile.x0 as usize * ss, tile.x1 as usize * ss - 1, tile.y0 as usize * ss, tile.y1 as usize * ss - 1]
+}
+
+/// The weights of whole-canvas sample `(x, y)` in a triangle, if the sample is the triangle's. Its
+/// position comes from its whole-canvas index, so it is the same number in every tile and tiles side
+/// by side give the whole picture exactly.
+fn sample_weights([a, b, c]: &[[f64; 3]; 3], area: f64, x: usize, y: usize) -> Option<[f64; 3]> {
+    let (x, y) = (x as f64 + 0.5, y as f64 + 0.5);
+    let w0 = ((b[0] - x) * (c[1] - y) - (b[1] - y) * (c[0] - x)) / area;
+    let w1 = ((c[0] - x) * (a[1] - y) - (c[1] - y) * (a[0] - x)) / area;
+    let w2 = 1.0 - w0 - w1;
+    // A shared triangle edge belongs to exactly one raster triangle, including glass.
+    for (w, mut p, mut q) in [(w0, b, c), (w1, c, a), (w2, a, b)] {
+        if w < -1e-9 {
+            return None;
+        }
+        if w.abs() <= 1e-9 {
+            if area < 0.0 {
+                std::mem::swap(&mut p, &mut q);
+            }
+            let (dx, dy) = (q[0] - p[0], q[1] - p[1]);
+            if !(dy < 0.0 || (dy == 0.0 && dx > 0.0)) {
+                return None;
+            }
+        }
+    }
+    Some([w0, w1, w2])
+}
+
+/// The samples of row `y` within `[x0, x1]` that [`sample_weights`] can take, inclusive; `None` when
+/// it can take none. Never short: along a row each edge's weight is `(constant + slope x) / area`, and
+/// its bound on `x` allows for the test's tolerance and the rounding of that arithmetic. A sample it
+/// lets through wrongly is refused by the test, so pixels don't depend on it.
+fn row_span([a, b, c]: &[[f64; 3]; 3], area: f64, [x0, x1]: [usize; 2], y: usize) -> Option<[usize; 2]> {
+    let row = y as f64 + 0.5;
+    let (mut from, mut to) = (x0 as f64, x1 as f64);
+    for (p, q) in [(b, c), (c, a), (a, b)] {
+        let slope = (p[1] - q[1]) * area.signum();
+        let constant = (p[0] * (q[1] - row) - q[0] * (p[1] - row)) * area.signum();
+        let size = (p[0].abs() + q[0].abs() + to.abs() + 1.0) * (p[1].abs() + q[1].abs() + row);
+        let margin = 1e-9 * area.abs() + 64.0 * f64::EPSILON * size;
+        if slope == 0.0 {
+            if constant < -margin {
+                return None;
+            }
+            continue;
+        }
+        // Where the weight reaches the margin, as a sample index (its centre is at index + 0.5).
+        let at = (-margin - constant) / slope - 0.5;
+        if slope > 0.0 {
+            from = from.max(at.ceil());
+        } else {
+            to = to.min(at.floor());
+        }
+    }
+    (from <= to).then_some([from as usize, to as usize])
 }
 
 /// A request's pixel tests, counted before a job starts as its raster will count them.
-fn projected_pixel_tests(scene: &ProductScene, view: &View, roles: &[BodyRole], within: [usize; 4], max: u64) -> Result<u64> {
+fn projected_pixel_tests(scene: &ProductScene, view: &View, roles: &[BodyRole], tiles: &[PixelWindow], ss: usize, max: u64) -> Result<u64> {
     let mut tests = 0;
     for (role, body) in scene.meshes.iter().enumerate() {
         let mut looks = BTreeMap::new();
@@ -349,7 +407,7 @@ fn projected_pixel_tests(scene: &ProductScene, view: &View, roles: &[BodyRole], 
             if look(body, face, paints(roles, role), normals)?.is_some()
                 && let Some(placed) = view.place(world)?
             {
-                add_pixel_tests(&mut tests, placed.bounds, within, max)?;
+                add_pixel_tests(&mut tests, &placed, tiles, ss, max)?;
             }
         }
     }
@@ -555,8 +613,8 @@ pub fn admit_picture(scene: &ProductScene, request: &PictureRequest) -> Result<A
         budget.image_limits(false),
     )?)?;
     let view = request.projection.view(scene, request.supersample.factor())?;
-    let within = tile_samples(&request.tiles, request.supersample.factor());
-    admission.projected_pixel_tests = Some(projected_pixel_tests(scene, &view, &request.roles, within, MAX_PICTURE_PIXEL_TESTS)?);
+    let ss = request.supersample.factor();
+    admission.projected_pixel_tests = Some(projected_pixel_tests(scene, &view, &request.roles, &request.tiles, ss, MAX_PICTURE_PIXEL_TESTS)?);
     Ok(admission)
 }
 
@@ -685,14 +743,25 @@ struct Triangle {
     bounds: [usize; 4],
     x: usize,
     y: usize,
+    /// The last sample of the current row's span.
+    end: usize,
 }
 
 impl Triangle {
-    /// Its cursor at the first sample of its bounds.
+    /// Its cursor at the first row of its bounds.
     fn new(world: [Vec3; 3], look: Look, placed: Placed) -> Self {
         let Look { colour, opacity, surface, paint, normals } = look;
         let Placed { points, inv_w, area, bounds } = placed;
-        Self { points, world, normals, inv_w, colour: colour.map(decode), opacity, surface, paint, area, bounds, x: bounds[0], y: bounds[2] }
+        let mut triangle =
+            Self { points, world, normals, inv_w, colour: colour.map(decode), opacity, surface, paint, area, bounds, x: 0, y: 0, end: 0 };
+        triangle.start_row(bounds[2]);
+        triangle
+    }
+
+    /// Its cursor at the start of row `y`'s span. A row with an empty span is one pass with no sample.
+    fn start_row(&mut self, y: usize) {
+        [self.x, self.end] = row_span(&self.points, self.area, [self.bounds[0], self.bounds[1]], y).unwrap_or([1, 0]);
+        self.y = y;
     }
 }
 
@@ -774,8 +843,6 @@ struct Raster {
     sort_dst: usize,
     pixels: Vec<[u8; 4]>,
     depth: Vec<f32>,
-    /// The sample bounds round the tiles ([`tile_samples`]).
-    within: [usize; 4],
     pixel_tests: u64,
     max_pixel_tests: u64,
     pixel_done: u64,
@@ -801,7 +868,6 @@ impl Raster {
         let PictureRequest { projection, tiles, supersample, roles, background } = request;
         let ss = supersample.factor();
         let view = projection.view(&scene, ss)?;
-        let within = tile_samples(&tiles, ss);
         let samples = tiles.iter().map(|t| t.width() * t.height()).max().unwrap_or(0) * ss * ss;
         let pixels = tiles.iter().map(|t| t.width() * t.height()).max().unwrap_or(0);
         let looks = reserve(scene.meshes.len())?;
@@ -836,7 +902,6 @@ impl Raster {
             sort_mid: 0,
             sort_end: 0,
             sort_dst: 0,
-            within,
             pixel_tests: 0,
             max_pixel_tests,
             pixel_done: 0,
@@ -863,10 +928,8 @@ impl Raster {
             },
             Stage::Clear | Stage::Opaque | Stage::Glass | Stage::Downsample | Stage::Encode => {
                 // In u64: a large picture's canvas outgrows a 32-bit usize.
-                let [x0, x1, y0, y1] = self.within;
-                let samples = (x1 - x0 + 1) as u64 * (y1 - y0 + 1) as u64;
+                let samples: u64 = self.tiles.iter().map(|t| (t.width() * t.height() * self.ss * self.ss) as u64).sum();
                 let total = self.pixel_tests + samples + samples / (self.ss * self.ss) as u64;
-                // Overlapping tiles can draw more than the picture once.
                 Progress { phase: Phase::Running, done: self.pixel_done.min(total), total }
             }
             Stage::Done => Progress { phase: Phase::Completed, done: 1, total: 1 },
@@ -954,7 +1017,7 @@ impl Raster {
         if let Some(look) = self.look(draw, normals)?
             && let Some(placed) = self.view.place(world)?
         {
-            add_pixel_tests(&mut self.pixel_tests, placed.bounds, self.within, self.max_pixel_tests)?;
+            add_pixel_tests(&mut self.pixel_tests, &placed, &self.tiles, self.ss, self.max_pixel_tests)?;
             draw.depth = (world[0] / 3.0 + world[1] / 3.0 + world[2] / 3.0 - self.view.reference).dot(self.view.back);
             if !draw.depth.is_finite() {
                 return Err(invalid("invalid triangle depth"));
@@ -1065,15 +1128,18 @@ impl Raster {
                 }
                 continue;
             };
-            raster_pixel(triangle, tile, &self.view, self.studio_weights, clear, &mut self.pixels, &mut self.depth)?;
-            triangle.x += 1;
-            if triangle.x > triangle.bounds[1] {
-                triangle.x = triangle.bounds[0];
-                triangle.y += 1;
+            if triangle.x <= triangle.end {
+                raster_pixel(triangle, tile, &self.view, self.studio_weights, clear, &mut self.pixels, &mut self.depth)?;
             }
-            if triangle.y > triangle.bounds[3] {
-                self.triangle = None;
-                self.draw += 1;
+            triangle.x += 1;
+            if triangle.x > triangle.end {
+                if triangle.y < triangle.bounds[3] {
+                    let next = triangle.y + 1;
+                    triangle.start_row(next);
+                } else {
+                    self.triangle = None;
+                    self.draw += 1;
+                }
             }
             self.pixel_done += 1;
         }
@@ -1251,27 +1317,9 @@ fn raster_pixel(
     depth: &mut [f32],
 ) -> Result<()> {
     let [a, b, c] = t.points;
-    // The sample's position from its whole-canvas integer index, so it is the same number in
-    // every tile and tiles side by side give the whole picture exactly.
-    let (x, y) = (t.x as f64 + 0.5, t.y as f64 + 0.5);
-    let w0 = ((b[0] - x) * (c[1] - y) - (b[1] - y) * (c[0] - x)) / t.area;
-    let w1 = ((c[0] - x) * (a[1] - y) - (c[1] - y) * (a[0] - x)) / t.area;
-    let w2 = 1.0 - w0 - w1;
-    // A shared triangle edge belongs to exactly one raster triangle, including glass.
-    for (w, mut p, mut q) in [(w0, b, c), (w1, c, a), (w2, a, b)] {
-        if w < -1e-9 {
-            return Ok(());
-        }
-        if w.abs() <= 1e-9 {
-            if t.area < 0.0 {
-                std::mem::swap(&mut p, &mut q);
-            }
-            let (dx, dy) = (q[0] - p[0], q[1] - p[1]);
-            if !(dy < 0.0 || (dy == 0.0 && dx > 0.0)) {
-                return Ok(());
-            }
-        }
-    }
+    let Some([w0, w1, w2]) = sample_weights(&t.points, t.area, t.x, t.y) else {
+        return Ok(());
+    };
     let z = (w0 * a[2] + w1 * b[2] + w2 * c[2]) as f32;
     let index = (t.y - y0) * width + (t.x - x0);
     let old_depth = depth.get_mut(index).ok_or_else(|| invalid("missing pixel depth"))?;
