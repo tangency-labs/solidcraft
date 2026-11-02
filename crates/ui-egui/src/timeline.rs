@@ -557,6 +557,9 @@ pub(crate) struct Playback {
     position: usize,
     waiting: bool,
     next_at: f64,
+    /// Stop once the marker reaches this index: the end of History, or the mid-timeline review
+    /// point that was set when Play was pressed (#10798).
+    stop_at: usize,
 }
 
 const PLAYBACK_STEP_SECONDS: f64 = 0.5;
@@ -618,14 +621,17 @@ pub(crate) fn request_playback(app: &mut SolveApp, action: PlaybackAction) -> Re
     }
     playback_ready(app)?;
     let n = app.session.doc.features.len();
-    let mut position = app.session.doc.marker.unwrap_or(n);
-    if position >= n {
-        // Marker at the end (the usual place after modelling): go to the start, then play
-        // through like a Play that began there (#10798).
+    let marker = app.session.doc.marker.unwrap_or(n);
+    // From the start, play through to the end. From a mid-timeline marker or the end, rewind
+    // first and play up to that marker (the end when the marker was already there) (#10798).
+    let stop_at = if marker == 0 { n } else { marker.min(n) };
+    let mut position = marker;
+    if position != 0 {
         app.run("timeline.roll_to", json!({"position": 0}))?;
         position = 0;
     }
-    app.timeline_playback = Some(Playback { revision: app.session.revision, position, waiting: false, next_at: 0.0 });
+    app.timeline_playback =
+        Some(Playback { revision: app.session.revision, position, waiting: false, next_at: 0.0, stop_at });
     Ok(())
 }
 
@@ -660,11 +666,11 @@ pub(crate) fn tick_playback(app: &mut SolveApp, ctx: &egui::Context) {
     } else if app.session.revision != playback.revision || position != playback.position || app.deferred.is_some() {
         return;
     }
-    if position >= n {
+    if position >= playback.stop_at.min(n) {
         return;
     }
     if now >= playback.next_at {
-        playback.position = position.saturating_add(1).min(n);
+        playback.position = position.saturating_add(1).min(playback.stop_at.min(n));
         if app.run_heavy("timeline.roll_to", json!({"position": playback.position})).is_err() {
             return;
         }
@@ -1654,6 +1660,25 @@ mod tests {
         h.frames(60);
         assert_eq!(h.app.session.doc.marker, None);
         assert_eq!(h.app.session.model.state().bodies.len(), 2);
+        assert!(h.app.timeline_playback.is_none());
+    }
+
+    #[test]
+    fn playback_from_mid_timeline_rewinds_then_stops_at_the_marker() {
+        let mut h = two_boxes(false);
+        h.app.run("timeline.roll_to", json!({"position": 1})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.doc.marker, Some(1));
+        assert_eq!(h.app.session.model.state().bodies.len(), 1);
+        h.app.start("timeline.play");
+        assert_eq!(h.app.session.doc.marker, Some(0), "Play from mid rewinds before stepping");
+        assert!(h.app.timeline_playback.is_some());
+        h.frames(2);
+        assert_eq!(h.app.session.doc.marker, Some(1));
+        assert_eq!(h.app.session.model.state().bodies.len(), 1);
+        h.frames(60);
+        assert_eq!(h.app.session.doc.marker, Some(1), "stops at the review marker, not the end");
+        assert_eq!(h.app.session.model.state().bodies.len(), 1);
         assert!(h.app.timeline_playback.is_none());
     }
 
