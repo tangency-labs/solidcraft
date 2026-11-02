@@ -16,18 +16,134 @@ root=$(git rev-parse --show-toplevel)
 dest=${1:-$root/reports/difftest}
 repo=${GITHUB_REPOSITORY:-tangency-labs/solidcore}
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+keep_tmp=0
+
+cleanup() {
+  if [ "$keep_tmp" -eq 1 ]; then
+    return 0
+  fi
+  rm -rf -- "$tmp"
+}
+trap cleanup EXIT
+
+warn() {
+  echo "fetch-reports: $*" >&2
+}
+
+# restore_backup BACKUP REPLACED_TIMES: put the complete pre-publish set back.
+restore_backup() {
+  local backup=$1 replaced_times=$2 f
+  # The complete old set is in BACKUP, so anything in DEST can be replaced.
+  # Move links as links and leave unrelated subdirectories.
+  for f in "$dest"/*.json; do
+    if [ ! -e "$f" ] && [ ! -L "$f" ]; then continue; fi
+    if [ -d "$f" ] && [ ! -L "$f" ]; then continue; fi
+    if ! rm -f -- "$f"; then return 1; fi
+  done
+  if [ "$replaced_times" -eq 1 ] && { [ -e "$dest/times.tsv" ] || [ -L "$dest/times.tsv" ]; }; then
+    if ! rm -f -- "$dest/times.tsv"; then return 1; fi
+  fi
+  for f in "$backup"/*.json; do
+    if [ ! -e "$f" ] && [ ! -L "$f" ]; then continue; fi
+    if ! mv -- "$f" "$dest/"; then return 1; fi
+  done
+  if [ "$replaced_times" -eq 1 ] && { [ -e "$backup/times.tsv" ] || [ -L "$backup/times.tsv" ]; }; then
+    if ! mv -- "$backup/times.tsv" "$dest/"; then return 1; fi
+  fi
+  return 0
+}
 
 install() {
-  local src=$1 n
-  n=$(find "$src" -maxdepth 1 -name '*.json' | wc -l)
-  [ "$n" -gt 0 ] || return 1
-  mkdir -p "$dest"
-  find "$dest" -maxdepth 1 -name '*.json' -delete
-  find "$src" -maxdepth 1 -name '*.json' -exec mv -t "$dest" {} +
-  # Per-unit wall times of that run (difftest --jobs queue order only).
-  if [ -f "$src/times.tsv" ]; then mv "$src/times.tsv" "$dest/"; fi
-  echo "fetch-reports: $n reports -> ${dest#"$root"/} ($2)"
+  local src=$1 why=$2 f n=0 replaced_times=0 backup= ok=1
+
+  # Check the whole staged set before DEST is touched: at least one report and
+  # no directory named *.json. Symlinks are links, never their targets.
+  for f in "$src"/*.json; do
+    if [ ! -e "$f" ] && [ ! -L "$f" ]; then continue; fi
+    if [ -d "$f" ] && [ ! -L "$f" ]; then
+      warn "refusing directory named ${f##*/} in $src"
+      return 1
+    fi
+    n=$((n + 1))
+  done
+  if [ "$n" -eq 0 ]; then
+    warn "no reports in $src"
+    return 1
+  fi
+  if [ -e "$src/times.tsv" ] || [ -L "$src/times.tsv" ]; then
+    if [ -d "$src/times.tsv" ] && [ ! -L "$src/times.tsv" ]; then
+      warn "refusing directory named times.tsv in $src"
+      return 1
+    fi
+    replaced_times=1
+  fi
+
+  if ! mkdir -p -- "$dest"; then
+    warn "cannot create $dest"
+    return 1
+  fi
+  # A staged report never replaces an unrelated destination subdirectory.
+  for f in "$src"/*.json; do
+    if [ ! -e "$f" ] && [ ! -L "$f" ]; then continue; fi
+    if [ -d "$dest/${f##*/}" ] && [ ! -L "$dest/${f##*/}" ]; then
+      warn "refusing to replace directory $dest/${f##*/}"
+      return 1
+    fi
+  done
+  if ! backup=$(mktemp -d "$tmp/backup.XXXXXX"); then
+    warn "cannot create a backup directory"
+    return 1
+  fi
+
+  # Back up the reports this publish replaces. cp -P copies symlinks as links.
+  for f in "$dest"/*.json; do
+    if [ ! -e "$f" ] && [ ! -L "$f" ]; then continue; fi
+    if [ -d "$f" ] && [ ! -L "$f" ]; then continue; fi
+    if ! cp -P -- "$f" "$backup/"; then
+      warn "cannot back up $f"
+      return 1
+    fi
+  done
+  if [ "$replaced_times" -eq 1 ] && { [ -e "$dest/times.tsv" ] || [ -L "$dest/times.tsv" ]; }; then
+    if ! cp -P -- "$dest/times.tsv" "$backup/"; then
+      warn "cannot back up $dest/times.tsv"
+      return 1
+    fi
+  fi
+
+  # Publish. From here on every failure restores the backup.
+  for f in "$dest"/*.json; do
+    if [ ! -e "$f" ] && [ ! -L "$f" ]; then continue; fi
+    if [ -d "$f" ] && [ ! -L "$f" ]; then continue; fi
+    if ! rm -f -- "$f"; then ok=0; break; fi
+  done
+  if [ "$ok" -eq 1 ] && [ "$replaced_times" -eq 1 ] \
+      && { [ -e "$dest/times.tsv" ] || [ -L "$dest/times.tsv" ]; }; then
+    if ! rm -f -- "$dest/times.tsv"; then ok=0; fi
+  fi
+  if [ "$ok" -eq 1 ]; then
+    for f in "$src"/*.json; do
+      if [ ! -e "$f" ] && [ ! -L "$f" ]; then continue; fi
+      if ! mv -- "$f" "$dest/"; then ok=0; break; fi
+    done
+  fi
+  if [ "$ok" -eq 1 ] && [ "$replaced_times" -eq 1 ]; then
+    if ! mv -- "$src/times.tsv" "$dest/"; then ok=0; fi
+  fi
+
+  if [ "$ok" -eq 0 ]; then
+    if restore_backup "$backup" "$replaced_times"; then
+      warn "publish failed; previous reports restored"
+      return 1
+    fi
+    # Keep the recovery copy and its work directory for a person to inspect.
+    keep_tmp=1
+    warn "publish failed and rollback failed; previous reports are kept in $backup"
+    return 1
+  fi
+
+  echo "fetch-reports: $n reports -> ${dest#"$root"/} ($why)"
+  return 0
 }
 
 if command -v gh >/dev/null; then
