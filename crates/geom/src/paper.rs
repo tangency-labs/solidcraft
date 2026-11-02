@@ -50,6 +50,7 @@ use crate::pixel_grid::{GridWindow, PixelGrid, PixelGridError};
 use crate::{Aabb2, EPS, Region2, Seg2, Vec2};
 
 pub mod annotate;
+pub mod cubic_pieces;
 pub mod flatten;
 pub mod grid;
 pub mod text;

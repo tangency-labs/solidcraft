@@ -9,15 +9,21 @@
 //!   counted. A path's last piece has no next, so it is kept unless it has no length.
 //! - A width under half a step is one step, and is counted.
 //! - Circular arcs come in pieces of at most a quarter turn ([`arc_pieces`]). Ellipses, hyperbolas
-//!   and Béziers above degree 3 aren't walked yet (A3b): a scene with one is refused.
+//!   and Béziers above degree 3 come as cubics within [`CURVE_ERROR_MM`] ([`cubic_pieces`]), at most
+//!   [`MAX_CURVE_CUBICS`] in a scene, and are counted.
 
-use super::{Invalid, Item, ObjectKind, Picture, Prepared, Result, arc_pieces};
+use super::cubic_pieces::cubic_pieces;
+use super::{Invalid, Item, ObjectKind, Picture, Prepared, Result, arc_pieces, require};
 use crate::{Seg2, Vec2};
 
 /// The largest number put on a grid, in millimetres either way: far past any scene's 2e5.
 const MAX_NUMBER_MM: f64 = 9e9;
 /// Pieces ending this many steps or fewer from where the path is are merged into the next.
 pub const SLIVER_STEPS: i64 = 10;
+/// How far a conic's or a higher Bézier's cubics may be from it before rounding, in millimetres.
+pub const CURVE_ERROR_MM: f64 = 1e-4;
+/// The most cubics a scene's conics and higher Béziers may become.
+pub const MAX_CURVE_CUBICS: usize = 1_000_000;
 
 /// A writer's number grid: `per_mm` steps a millimetre.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -125,6 +131,8 @@ pub struct GridReport {
     pub widths_snapped: usize,
     /// Pieces too short for the grid, merged into the next.
     pub pieces_merged: usize,
+    /// Cubics made from ellipses, hyperbolas and Béziers above degree 3.
+    pub curve_cubics: usize,
 }
 
 /// A scene on a grid: the sheet's size, its groups in paint order, and the report.
@@ -246,7 +254,15 @@ impl Walk<'_> {
                 self.push(Piece::Quadratic { c, to: end });
             }
             Seg2::Conic { .. } | Seg2::Bezier { .. } => {
-                return Err(Invalid("not supported yet: ellipses, hyperbolas and Béziers above degree 3 on paper (#4890, A3b)"));
+                let (cubics, _) = cubic_pieces(seg, CURVE_ERROR_MM)?;
+                self.report.curve_cubics = self.report.curve_cubics.saturating_add(cubics.len());
+                require(self.report.curve_cubics <= MAX_CURVE_CUBICS, "a scene's curves need more than 1,000,000 cubics on paper")?;
+                let last = cubics.len().saturating_sub(1);
+                for (i, cubic) in cubics.iter().enumerate() {
+                    let Seg2::Cubic { p1, p2, p3, .. } = *cubic else { continue };
+                    let to = if i == last { end } else { self.grid.point(p3)? };
+                    self.push(Piece::Cubic { c1: self.grid.point(p1)?, c2: self.grid.point(p2)?, to });
+                }
             }
         }
         Ok(())
