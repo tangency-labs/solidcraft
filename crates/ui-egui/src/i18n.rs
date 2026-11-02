@@ -136,10 +136,14 @@ pub const SYSTEM: &str = "system";
 
 /// Match the system's preferred locale tags against the catalogs: the exact tag first
 /// (`zh-TW`, `pt-BR`, `en-GB`), then the tag's base language (`zh-CN` → `zh`, `de-AT` → `de`),
-/// then English. Tags come in the system's order of preference; the first one that matches wins.
+/// then English. A Chinese tag goes by its script or region instead ([`chinese_catalog`]).
+/// Tags come in the system's order of preference; the first one that matches wins.
 pub fn match_system_tags(tags: &[String]) -> &'static str {
     for tag in tags {
         let tag = tag.replace('_', "-");
+        if let Some(catalog) = chinese_catalog(&tag) {
+            return catalog;
+        }
         if let Some(catalog) = LOCALES.iter().find(|catalog| catalog.id.eq_ignore_ascii_case(&tag)) {
             return catalog.id;
         }
@@ -151,11 +155,39 @@ pub fn match_system_tags(tags: &[String]) -> &'static str {
     ENGLISH.id
 }
 
+/// The catalog for a Chinese tag (#10306): by its script when it has one (`Hant` → `zh-TW`,
+/// `Hans` → `zh`), else by its region (`TW`, `HK` and `MO` use Traditional characters, so
+/// `zh-TW`; any other region, or none, `zh`). macOS lists its languages with a script
+/// (`zh-Hant-TW`), which no catalog matches exactly, and the base `zh` is Simplified.
+fn chinese_catalog(tag: &str) -> Option<&'static str> {
+    let mut parts = tag.split('-');
+    if !parts.next().is_some_and(|base| base.eq_ignore_ascii_case("zh")) {
+        return None;
+    }
+    let rest: Vec<&str> = parts.collect();
+    let traditional = match rest.iter().find(|part| part.len() == 4) {
+        Some(script) => script.eq_ignore_ascii_case("Hant"),
+        None => rest.iter().any(|part| ["TW", "HK", "MO"].iter().any(|region| part.eq_ignore_ascii_case(region))),
+    };
+    let id = if traditional { "zh-TW" } else { "zh" };
+    LOCALES.iter().find(|catalog| catalog.id == id).map(|catalog| catalog.id)
+}
+
 /// The catalog id the system asks for, read once per process: the OS locale on desktop
 /// (Windows, macOS, Linux/BSD) and `navigator.languages` in the browser.
 pub fn system_language() -> &'static str {
-    static CACHED: OnceLock<&'static str> = OnceLock::new();
-    CACHED.get_or_init(|| match_system_tags(&sys_locale::get_locales().collect::<Vec<_>>()))
+    SYSTEM_LANGUAGE.get_or_init(|| {
+        // Tests read the same words on every PC, whatever its language.
+        if cfg!(test) { ENGLISH.id } else { match_system_tags(&sys_locale::get_locales().collect::<Vec<_>>()) }
+    })
+}
+
+static SYSTEM_LANGUAGE: OnceLock<&'static str> = OnceLock::new();
+
+/// `cfg!(test)` for the tests outside this crate, which link it without that: they all start from
+/// the test harness, which calls this first.
+pub(crate) fn pin_system_language() {
+    let _ = SYSTEM_LANGUAGE.set(ENGLISH.id);
 }
 
 /// The catalog id a `language` preference resolves to: the saved choice, or the system's for
@@ -411,6 +443,33 @@ mod tests {
         assert_eq!(super::match_system_tags(&tags(&["xx-YY"])), "en", "unknown: English");
         assert_eq!(super::match_system_tags(&tags(&[])), "en", "nothing: English");
         assert_eq!(super::match_system_tags(&tags(&["xx-YY", "de-DE"])), "de", "the first tag that matches wins");
+        // #10306: a Chinese tag goes by its script, else by its region.
+        for (tag, want) in [
+            ("zh-Hant-TW", "zh-TW"),
+            ("zh-Hant-HK", "zh-TW"),
+            ("zh-Hant", "zh-TW"),
+            ("zh_Hant_MO", "zh-TW"),
+            ("ZH-HANT-tw", "zh-TW"),
+            ("zh-Hant-CN", "zh-TW"),
+            ("zh-HK", "zh-TW"),
+            ("zh-MO", "zh-TW"),
+            ("zh-Hans-CN", "zh"),
+            ("zh-Hans", "zh"),
+            ("zh-Hans-TW", "zh"),
+            ("zh-SG", "zh"),
+            ("zh", "zh"),
+        ] {
+            assert_eq!(super::match_system_tags(&tags(&[tag])), want, "{tag}");
+        }
+        // Other languages keep the exact tag, then the base language.
+        assert_eq!(super::match_system_tags(&tags(&["sr-Latn-RS"])), "sr");
+        assert_eq!(super::match_system_tags(&tags(&["zhx-TW", "de"])), "de", "only zh itself is Chinese");
+    }
+
+    /// Tests name English words, so the PC's own language never reaches them (#10297).
+    #[test]
+    fn tests_take_english_as_the_system_language() {
+        assert_eq!(super::system_language(), "en");
     }
 
     /// A saved language is never overridden: only `system` resolves through the OS (#10138).

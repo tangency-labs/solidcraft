@@ -123,6 +123,11 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { angle, .. } }) {
             angle: String = "45 deg".into() => shown_expr(angle, ValueKind::Angle),
         } => json!({"angle": angle});
+        // With a reference plane, the plane touches where the face turns towards it (#8822).
+        TangentPlane("construct.plane.tangent", "TANGENT PLANE", [("Face", FACES, false), ("Reference plane", PLANES | PLANAR_FACES, false)],
+            FeatureKind::ConstructionPlane { plane: PlaneRef::Tangent { angle, .. } }) {
+            angle: String = "0 deg".into() => angle.as_ref().map_or_else(|| "0 deg".to_string(), ToString::to_string),
+        } => json!({"angle": angle});
         Scale("solid.scale", "SCALE", [("Bodies", BODIES, true)],
             FeatureKind::Scale { factor, .. }) {
             factor: String = "2".into() => factor.to_string(),
@@ -1127,6 +1132,19 @@ impl Dialog {
                     continue;
                 }
             }
+            // Move/Copy keeps a selected component as the component, so Create Copy can still be
+            // ticked after it (the bodies are what a move without a copy moves).
+            if matches!(d.kind, Kind::Move { .. })
+                && let Sel::Occurrence { path } = sel
+                && !path.is_empty()
+                && let Some(inp) = d.inputs.first_mut()
+                && inp.accept == BODIES
+            {
+                if !inp.items.contains(sel) {
+                    inp.items.push(sel.clone());
+                }
+                continue;
+            }
             let as_body = match sel {
                 Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => Some(Sel::Body { name: body.to_string() }),
                 _ => None,
@@ -1318,6 +1336,7 @@ impl Dialog {
                 | Kind::Loft { .. }
                 | Kind::Sweep { .. }
                 | Kind::AnglePlane { .. }
+                | Kind::TangentPlane { .. }
                 | Kind::PathPlane { .. }
                 | Kind::Midplane
                 | Kind::Construct { .. }
@@ -2960,6 +2979,16 @@ fn missing_pick(error: &str) -> bool {
     awaiting_selection(error) || error.get(..5).is_some_and(|start| start.eq_ignore_ascii_case("pick "))
 }
 
+/// A refusal that says the command is not available in this context ("`sketch.project` is not
+/// available right now: no sketch is being edited"): the engine's own `Disabled` refusal for the
+/// command this dialog runs, so the sketch ended or the mode changed under it. Guidance, not a
+/// failure of the design: there is nothing to report (#10181).
+fn context_refusal(app: &SolveApp, d: &Dialog, error: &str) -> bool {
+    let Some(id) = d.command() else { return false };
+    let Some(spec) = solidcraft_engine::find_command(id) else { return false };
+    spec.disabled_refusal(&app.session).is_some_and(|refusal| refusal == error)
+}
+
 fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut egui::Ui) {
     if matches!(d.kind, Kind::SketchModify(_))
         && d.previews()
@@ -3010,8 +3039,13 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
             });
             return;
         }
+        // A command that is not available in this context ("`sketch.project` is not available
+        // right now: no sketch is being edited") is guidance too: the context went away, not the
+        // design, so there is nothing to report (#10181).
         let rect = if missing_pick(&error) {
             crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Hint("missing_pick")).rect
+        } else if context_refusal(app, d, &error) {
+            crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Hint("context")).rect
         } else {
             // A fillet's refusal reads in plain words, or not at all where its Setback field already
             // says what is wrong; the kernel's own text stays in the hover text, Copy Details and the
@@ -4990,6 +5024,15 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             };
             ("construct.plane.along_path", json!({"path": path, "t": t}))
         }
+        Kind::TangentPlane { .. } => {
+            need(0, "a curved face")?;
+            let face = construct_ref(app, sels(d, 0).first().ok_or("pick a curved face")?)?;
+            match sels(d, 1).first() {
+                Some(reference) => ("construct.plane.tangent", json!({"face": face, "reference": plane_arg(app, Some(reference))?})),
+                // A null `angle` keeps the descriptor's angle out: it turns the plane from a reference.
+                None => ("construct.plane.tangent", json!({"face": face, "angle": null})),
+            }
+        }
         Kind::AnglePlane { .. } => {
             need(0, "a plane")?;
             let base = plane_arg(app, sels(d, 0).first())?;
@@ -5863,7 +5906,6 @@ fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&
             "PLANE THROUGH THREE POINTS",
             &[("First point", POINT, "a"), ("Second point", POINT, "b"), ("Third point", POINT, "c")],
         ),
-        "construct.plane.tangent" => ("construct.plane.tangent", "TANGENT PLANE", &[("Face", FACES, "face")]),
         "construct.plane.perpendicular" => {
             ("construct.plane.perpendicular", "PERPENDICULAR PLANE", &[("Plane", PLANE, "plane"), ("Line", LINE, "line")])
         }
@@ -6330,14 +6372,19 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     }
                 }
                 None => {
+                    // Evaluation projects the stored point onto the face along the drill
+                    // direction when the body moves; seed the Face pick there too (#10689).
+                    // Keep `position_exprs.point` as the stored value so expressions stay only
+                    // when the pick is still that point (a moved face drops them for numbers).
+                    let on_face = solidcraft_engine::doc::hole_on_surface(&crate::open_meshing::session_world(s), position.0, direction.0, &[]);
                     if let Some(inp) = d.inputs.first_mut() {
-                        inp.items = vec![face_sel(s, position.0).unwrap_or(Sel::Face { body: String::new(), index: 0, point: position.0 })];
+                        inp.items = vec![face_sel(s, on_face).unwrap_or(Sel::Face { body: String::new(), index: 0, point: on_face })];
                     }
                     d.extra.insert("direction".into(), pt3(direction.0));
                     // A position given as expressions (#1678) is sent again while the pick
                     // stays where the hole is; a new pick places it by the point picked.
-                    if let Some(at) = at {
-                        let exprs: Vec<&str> = at.iter().map(|e| e.as_str()).collect();
+                    if let Some(exprs) = at {
+                        let exprs: Vec<&str> = exprs.iter().map(|e| e.as_str()).collect();
                         d.extra.insert("position_exprs".into(), json!({"at": exprs, "point": pt3(position.0)}));
                     }
                     crate::hole_refs::restore(s, &mut d, references, &f.edge_names, app.preferences.length_decimals);
@@ -6604,11 +6651,15 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     d.extra.insert("reversed".into(), json!(reversed));
                     d.kind = Kind::PatternCirc { count: count.to_string(), angle: angle.to_string() };
                     // The edge or face it turns about, else its construction axis, else an origin
-                    // axis or its line.
+                    // axis or its line. The line's origin goes back as stored: numbers, or the
+                    // length expressions it follows (#10852).
+                    let at_zero = origin.iter().all(|e| e.trim().parse::<f64>().is_ok_and(|v| v.abs() < 1e-9));
+                    let origin: Vec<Value> =
+                        origin.iter().map(|e| e.trim().parse::<f64>().map_or_else(|_| json!(e.to_string()), |v| json!(v))).collect();
                     let pick = match (axis_ref, axis_feature) {
                         (Some(g), _) => model_axis_sel(s, g),
                         (None, Some(name)) => Some(Sel::Axis { name: name.to_string() }),
-                        (None, None) => world_axis(axis.0).filter(|_| origin.len() < 1e-9).map(|name| Sel::Axis { name }),
+                        (None, None) => world_axis(axis.0).filter(|_| at_zero).map(|name| Sel::Axis { name }),
                     };
                     match (pick, axis_ref) {
                         (Some(pick), _) => {
@@ -6621,7 +6672,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                             d.extra.insert("axis".into(), serde_json::to_value(g).unwrap_or(Value::Null));
                         }
                         (None, None) => {
-                            d.extra.insert("axis".into(), json!({"origin": pt3(origin.0), "dir": pt3(axis.0)}));
+                            d.extra.insert("axis".into(), json!({"origin": origin, "dir": pt3(axis.0)}));
                         }
                     }
                     d
@@ -6759,6 +6810,17 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d.extra.insert("axis".into(), serde_json::to_value(axis).ok()?);
             d.extra.insert("point".into(), serde_json::to_value(point).ok()?);
+            d
+        }
+        FeatureKind::ConstructionPlane { plane: PlaneRef::Tangent { face, reference, .. } } => {
+            let mut d = start("construct.plane.tangent")?;
+            d.kind = Kind::simple_restore(&f.kind)?;
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = geo_sel(s, face).into_iter().collect();
+            }
+            if let Some(inp) = d.inputs.get_mut(1) {
+                inp.items = reference.as_deref().and_then(|r| geo_sel(s, r)).into_iter().collect();
+            }
             d
         }
         FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a, b } } => {
@@ -7325,6 +7387,42 @@ mod refused_ok_tests {
         let bore = h.app.session.execute("timeline.inspect", &json!({"feature": "Bore"})).unwrap();
         assert!(bore.to_string().contains("\"depth\":\"5\""), "{bore}");
     }
+
+    /// After a parameter moves the drilled face, Edit Hole seeds the face where the hole is
+    /// now — not the stored raw position above or inside the body (#10689).
+    #[test]
+    fn editing_a_hole_after_its_face_moves_seeds_the_face() {
+        let mut h = Harness::new();
+        steps(
+            &mut h,
+            &[
+                json!({"call": "engine.execute", "params": {"command": "parameters.add", "params": {"name": "t", "expression": "10 mm"}}}),
+                json!({"call": "engine.execute", "params": {"command": "solid.box", "params": {"name": "Base", "body_name": "Base", "length": 40, "width": 30, "height": "t"}}}),
+                json!({"call": "engine.execute", "params": {"command": "solid.hole", "params": {"name": "Hole1", "position": [30, 15, 10], "diameter": 5, "depth": 4}}}),
+                json!({"call": "engine.execute", "params": {"command": "parameters.change", "params": {"name": "t", "expression": "8 mm"}}}),
+                json!({"call": "ui.editFeature", "params": {"feature": "Hole1"}}),
+            ],
+        );
+        assert!(h.app.dialog.as_ref().is_some_and(|d| d.editing.is_some()));
+        let face = h.app.dialog.as_ref().and_then(|d| d.inputs.first()).and_then(|i| i.items.first());
+        let Some(Sel::Face { point, body, .. }) = face else {
+            panic!("Edit Hole seeds a face pick, got {face:?}");
+        };
+        assert!(!body.is_empty(), "the face has a body name");
+        assert!((point.z - 8.0).abs() < 1e-3, "seeded on the face at z=8, got {point:?}");
+        h.frames(2);
+        assert_eq!(shown(&mut h), None, "no off-face refusal");
+        if let Some(Kind::Hole { diameter, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *diameter = "6 mm".into();
+        }
+        h.frames(2);
+        assert_eq!(shown(&mut h), None);
+        steps(&mut h, &[json!({"key": "Enter"})]);
+        assert!(h.app.dialog.is_none());
+        let vol = h.app.session.execute("inspect.measure", &json!({})).unwrap();
+        let volume = vol["total"]["volume_mm3"].as_f64().expect("volume");
+        assert!((volume - 9486.90).abs() < 0.1, "Ø6 hole on the moved face: {volume}");
+    }
 }
 
 /// Whether two picks are the same face of the same body (wherever on it they were made).
@@ -7604,6 +7702,34 @@ mod construct_ask_tests {
         assert!(h.app.dialog.is_none(), "Create closes the dialog: {:?}", status_error(&h.app));
         assert!(status_error(&h.app).is_none(), "{:?}", status_error(&h.app));
         assert!(!solidcraft_engine::view::construction_planes(&h.app.session).is_empty(), "the tangent plane is created");
+    }
+
+    /// #8822: a reference plane and an angle place the tangent plane, and editing it brings both back.
+    #[test]
+    fn tangent_plane_lines_up_with_a_reference_plane() {
+        let mut h = Harness::new();
+        cylinder(&mut h);
+        h.step(&json!({"click": {"world": [10, 0, 10]}})).unwrap(); // the outer cylindrical face
+        h.step(&json!({"start": "construct.plane.tangent"})).unwrap();
+        h.frames(2);
+        let d = h.app.dialog.as_mut().expect("the dialog opens");
+        assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), ["Face", "Reference plane"]);
+        d.inputs[1].items = vec![Sel::Plane { name: "XZ".into() }];
+        if let Kind::TangentPlane { angle } = &mut d.kind {
+            *angle = "30 deg".into();
+        }
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert!(h.app.dialog.is_none(), "Create closes the dialog: {:?}", status_error(&h.app));
+        let planes = solidcraft_engine::view::construction_planes(&h.app.session);
+        let (id, _, pl) = planes.last().expect("the tangent plane is created");
+        // XZ faces ±Y; turned 30° about the axis (Z), on the side of the pick (+X).
+        let n = Vec3::new(0.5, -(3f64.sqrt()) / 2.0, 0.0);
+        assert!(pl.normal().cross(n).len() < 1e-6 && (pl.origin - n * 10.0).dot(n).abs() < 1e-6, "{pl:?}");
+        let reopened = for_feature(&h.app, *id, None).expect("the plane opens for editing");
+        assert!(matches!(&reopened.kind, Kind::TangentPlane { angle } if angle == "30 deg"), "{:?}", reopened.kind);
+        assert_eq!(reopened.inputs[1].items, vec![Sel::Plane { name: "XZ".into() }]);
+        assert_eq!(reopened.inputs[0].items.len(), 1, "the face is picked again");
     }
 }
 

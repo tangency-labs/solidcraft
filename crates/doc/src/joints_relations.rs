@@ -16,14 +16,11 @@ const TURNS: [f64; 4] = [0.0, std::f64::consts::FRAC_PI_2, std::f64::consts::PI,
 /// Starts tried at most (angle values beyond the first three start at 0).
 const MAX_STARTS: usize = 64;
 
-/// The values of relation `j` that move B least from where it is now: B's joint frame as it sits
-/// in A's, met as nearly as the relation allows (its origin as near as it can be to where it is,
-/// and its axes, each weighed as a point a part's size along it). `None` for a joint that is not a relation, or whose
-/// origins can't be found.
+/// The values of joint `j` that move B least from where it is now: B's joint frame as it sits
+/// in A's, met as nearly as the joint allows (its origin as near as it can be to where it is,
+/// and its axes, each weighed as a point a part's size along it). Used for relations and for
+/// typed joints that close a loop. `None` when the origins or finite values can't be found.
 pub fn relation_values(doc: &Document, st: &ModelState, j: &Joint) -> Option<Vec<f64>> {
-    if !j.kind.is_relation() {
-        return None;
-    }
     let world = |occ: u64| if occ == 0 { IDENTITY } else { occurrence_world(doc, occ) };
     let fa = mat_mul(&world(j.a.occurrence), &resolve_origin(doc, st, &j.a).ok()?);
     let fb = mat_mul(&world(j.b.occurrence), &resolve_origin(doc, st, &j.b).ok()?);

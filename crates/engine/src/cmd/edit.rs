@@ -1334,7 +1334,7 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
             s.selection.push(x);
         }
     }
-    s.revision += 1;
+    s.refresh_display();
     Ok(json!({"selected": s.selection.len()}))
 }
 
@@ -1391,7 +1391,7 @@ fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
     s.selection.clear();
-    s.revision += 1;
+    s.refresh_display();
     Ok(json!({"selected": 0}))
 }
 
@@ -1771,6 +1771,15 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         *after = before.clone();
     }
+    // A perforation keeps its outline through an edit that names no sketch (the Perforate dialog has no outline).
+    if let (FeatureKind::SheetPerforate { sketch: Some(before), profiles: picked, .. }, FeatureKind::SheetPerforate { sketch, profiles, .. }) =
+        (&old.kind, &mut new.kind)
+        && sketch.is_none()
+        && params.get("sketch").is_none()
+    {
+        *sketch = Some(*before);
+        *profiles = picked.clone();
+    }
     // A boundary surface's loop of sketch curves and its curve network are one command's two
     // forms: an edit may turn one into the other.
     let boundary = |k: &FeatureKind| matches!(k, FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. });
@@ -1798,6 +1807,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         })
         .collect();
     trial.doc_mut().features.retain(|f| f.id != made);
+    // Made right after the edited feature, the trial joined the timeline folder holding both:
+    // it leaves it too, or its id stays there, and is given out again below (#9373).
+    for group in &mut trial.doc_mut().timeline_groups {
+        group.features.retain(|f| *f != made);
+    }
     let added = trial.doc.features.len().saturating_sub(s.doc.features.len());
     trial.doc_mut().marker = s.doc.marker.map(|marker| if marker > idx { marker.saturating_add(added) } else { marker });
     if made == s.doc.next_id && trial.doc.next_id == made.saturating_add(1) {

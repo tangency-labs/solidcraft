@@ -1203,6 +1203,7 @@
   "cmd.sketch_spline_control_point_5": "Сплайн за контрольними точками (5-й степінь)",
   "cmd.sketch_spline_fit_point": "Сплайн за точками проходження",
   "cmd.sketch_spline_insert_point": "Додати точку сплайна",
+  "cmd.sketch_spline_remove_point": "Видалити точку сплайна",
   "cmd.sketch_spline_reverse": "Обернути напрямок сплайна",
   "cmd.sketch_spun_profile": "Профіль обертання",
   "cmd.sketch_toggle_diameter": "Перемкнути радіус / діаметр",

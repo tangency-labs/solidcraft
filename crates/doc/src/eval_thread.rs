@@ -162,7 +162,12 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
         .bodies
         .iter()
         .enumerate()
-        .filter_map(|(i, b)| kernel::cylinder_face_at(&b.body, p).map(|c| (i, c)))
+        .filter(|(_, b)| !more::beyond_cylinder_reach(b, p))
+        .filter_map(|(i, b)| {
+            #[cfg(test)]
+            cost_tests::count(|c| c.cylinder_search += 1);
+            kernel::cylinder_face_at(&b.body, p).map(|c| (i, c))
+        })
         .min_by(|a, b| {
             let dist = |c: &kernel::CylinderFace| ((p - c.axis_point - c.axis * (p - c.axis_point).dot(c.axis)).len() - c.radius).abs();
             dist(&a.1).total_cmp(&dist(&b.1))

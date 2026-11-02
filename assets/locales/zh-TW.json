@@ -1203,6 +1203,7 @@
   "cmd.sketch_spline_control_point_5": "控制點雲形線（5 次）",
   "cmd.sketch_spline_fit_point": "擬合點雲形線",
   "cmd.sketch_spline_insert_point": "新增雲形線點",
+  "cmd.sketch_spline_remove_point": "刪除雲形線點",
   "cmd.sketch_spline_reverse": "反向雲形線方向",
   "cmd.sketch_spun_profile": "旋轉輪廓",
   "cmd.sketch_toggle_diameter": "切換半徑 / 直徑",

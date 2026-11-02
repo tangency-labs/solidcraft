@@ -347,6 +347,9 @@ thread_local! {
     static DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     /// The outermost command's coordinates were mapped here (its table lists them).
     static MAPPED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The outermost command is `solid.move`, whose parameters stay in the world when its bodies
+    /// lie in differently turned frames (`split_move`).
+    static OUTER_MOVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// The picks of the running command: the point it sees and the bodies whose faces meet
     /// there (the first is the body under it; more than one means the pick is ambiguous).
     static PICKS: std::cell::RefCell<Vec<(Vec3, Vec<String>)>> = const { std::cell::RefCell::new(Vec::new()) };
@@ -413,6 +416,7 @@ impl Nested {
         if outer {
             let inner = if id == "timeline.redefine" { None } else { Some(id) };
             MAPPED.with(|m| m.set(inner.is_none_or(|i| !table(i).is_empty() || i == "construct.plane.axis_point")));
+            OUTER_MOVE.with(|m| m.set(id == "solid.move"));
         }
         (Nested, outer)
     }
@@ -427,6 +431,11 @@ impl Drop for Nested {
 /// `params` with world picks mapped into component frames (`None`: nothing to change). A model
 /// that cannot be placed is the error.
 pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<Value>> {
+    // A move of bodies in differently turned frames keeps its world vectors: `solid.move` splits
+    // it by frame and maps each part itself (`split_move`).
+    if id == "solid.move" && split_move(s, params).is_some() {
+        return Ok(None);
+    }
     // A command with no world picks has nothing to map, and may not need the bodies placed.
     let picks = !table(id).is_empty() || matches!(id, "library.apply" | "timeline.redefine" | "sketch.redefine");
     if !picks || !placed(s) {
@@ -434,6 +443,59 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<V
     }
     let world = s.world_state()?;
     Ok(map_local(s, &world, id, params))
+}
+
+/// A `solid.move` of bodies placed in different frames, as one move per frame (#9660). A Move
+/// feature moves each of its bodies in the body's own frame, by one vector and one turn: given
+/// in the world, they can be mapped into one frame only, so bodies in a frame turned otherwise
+/// (a screw inserted lying down, moved with a block of the root) moved along their own axes.
+/// Bodies whose frames turn alike share a move (and for a turn, frames that are also in the
+/// same place, as its pivot is a point). `None`: the bodies share one frame, or are moved as
+/// placements (`placements_moved`), or the move is not the outermost command (run by another,
+/// such as Edit Feature, its parameters are already in component frames). `to_local` leaves the
+/// parameters of a split move in the world, and `solid.move` asks for the parts.
+pub(crate) fn split_move(s: &Session, params: &Value) -> Option<Vec<Value>> {
+    let outermost_move = DEPTH.with(std::cell::Cell::get) == 1 && OUTER_MOVE.with(std::cell::Cell::get);
+    if !outermost_move || !placed(s) || placements_moved(s, params).is_some() {
+        return None;
+    }
+    let names = params.get("bodies")?.as_array()?;
+    let turns = params.get("axis").is_some() || params.get("angle").is_some();
+    let alike = |a: &Mat, b: &Mat| {
+        let columns = if turns { 4 } else { 3 };
+        a.iter().zip(b).take(columns).all(|(x, y)| x.iter().zip(y).take(3).all(|(u, v)| (u - v).abs() <= 1e-9 * (1.0 + u.abs().max(v.abs()))))
+    };
+    let frames = s.body_frames();
+    let mut groups: Vec<(Mat, Vec<Value>)> = Vec::new();
+    for name in names {
+        // An unknown body is the command's to refuse.
+        let b = name.as_str()?;
+        let m = frames.iter().find(|(world, own, _)| world == b || own == b).map(|(.., m)| *m)?;
+        match groups.iter_mut().find(|(g, _)| alike(g, &m)) {
+            Some((_, bodies)) => bodies.push(name.clone()),
+            None => groups.push((m, vec![name.clone()])),
+        }
+    }
+    if groups.len() < 2 {
+        return None;
+    }
+    // An unplaceable model is `to_local`'s error to report.
+    let world = s.world_state().ok()?;
+    let given = params.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty());
+    let moves = groups
+        .into_iter()
+        .enumerate()
+        .map(|(k, (_, bodies))| {
+            let mut p = params.clone();
+            p["bodies"] = Value::Array(bodies);
+            // Each move is its own feature: a name given is numbered after the first.
+            if let Some(name) = given.filter(|_| k > 0) {
+                p["name"] = Value::String(format!("{name} ({})", k + 1));
+            }
+            map_local(s, &world, "solid.move", &p).unwrap_or(p)
+        })
+        .collect();
+    Some(moves)
 }
 
 /// [`to_local`] on the placed model `world`.
@@ -448,8 +510,9 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
         return Some(out);
     }
     // Several placements of one part moved together are moved as placements, in the world
-    // (`placements_moved`): their names and vectors stay as given.
-    if id == "solid.move" && placements_moved(s, params).is_some() {
+    // (`placements_moved`), and components copied (`occurrences`) likewise: their names and vectors
+    // stay as given. Bodies listed with them are mapped by `copy_components`.
+    if id == "solid.move" && (params.get("occurrences").is_some() || placements_moved(s, params).is_some()) {
         return None;
     }
     if id == "timeline.redefine" {

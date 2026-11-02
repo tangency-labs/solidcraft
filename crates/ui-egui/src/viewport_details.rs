@@ -16,7 +16,7 @@ fn field(id: &str, label: &str, value: DetailValue) -> DetailSetting {
     DetailSetting { id: id.into(), label: tr(label), value, enabled: true }
 }
 fn length(app: &SolveApp, value: f64) -> DetailValue {
-    DetailValue::Length { value, units: app.session.doc.units.clone() }
+    DetailValue::Length { value, units: app.session.doc.units.clone(), decimals: app.preferences.length_decimals }
 }
 fn number(value: f64, min: f64, max: f64, suffix: &str) -> DetailValue {
     DetailValue::Number { value, min, max, suffix: suffix.into() }
@@ -26,7 +26,13 @@ fn axis(value: [f64; 3]) -> DetailValue {
     let current = if axes.iter().any(|axis| *axis == value || axis.map(|v| -v) == value) {
         crate::viewport_status::direction(value)
     } else {
-        let [x, y, z] = value;
+        // Rounded as the card's other numbers are: a tilted normal reads (0.707, 0.707, 0).
+        let short = |v: f64| {
+            let s = format!("{v:.3}");
+            let s = s.trim_end_matches('0').trim_end_matches('.');
+            if s == "-0" { "0".to_string() } else { s.to_string() }
+        };
+        let [x, y, z] = value.map(short);
         format!("({x}, {y}, {z})")
     };
     DetailValue::Axis { value, current }

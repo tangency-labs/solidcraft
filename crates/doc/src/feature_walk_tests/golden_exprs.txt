@@ -107,7 +107,7 @@ pattern_circular
   inputs:
     Quantity = circ.count (Unitless)
     Total angle = circ.angle (Angle)
-  expressions: circ.count, circ.angle
+  expressions: circ.count, circ.angle, 0, 0, 0
 pattern_path
   inputs:
     Quantity = path.count (Unitless)

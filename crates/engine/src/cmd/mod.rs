@@ -47,13 +47,14 @@ pub(crate) use features::{EdgeRefForm, PLANE_FORMS, axis_dir_form, axis_line_obj
 pub use features::{auto_operation, extrude_reach, shown_scope};
 pub use file::open_steps::OpenSteps;
 pub use join_pieces::{Addition, addition};
+pub use parts::part_length_label;
 pub use sketch::dimension_roles;
 pub(crate) use sketch::face::face_pick_form;
 pub use sketch_construction::{
     ConstructionLine, construction_line_choice, construction_line_mode, construction_line_solutions, construction_line_takes_length,
     construction_segment,
 };
-pub use sketch_create::tangent_arc_preview;
+pub use sketch_create::{tangent_arc_preview, tangent_arc_starts_at};
 pub use sketch_import::drawing_import_command;
 pub use sketch_modify::{extend_arc_preview, extend_preview, trim_piece};
 pub use view_dxf::sketch::exportable as view_dxf_exportable;
@@ -248,6 +249,12 @@ impl CommandSpec {
             Err(crate::EngineError::BadParams { cmd, msg }) if cmd.is_empty() => Err(crate::EngineError::BadParams { cmd: self.id.to_string(), msg }),
             other => other,
         }
+    }
+    /// The refusal this command gives when it is not available in this session: none when it
+    /// is. It is the engine's own wording (`EngineError::Disabled`), so a caller that only has
+    /// the message can tell it from a failure of the command itself.
+    pub fn disabled_refusal(&self, s: &Session) -> Option<String> {
+        (self.enabled)(s).err().map(|why| crate::EngineError::Disabled(self.id.to_string(), why).to_string())
     }
     pub fn info(&self, s: &Session) -> CommandInfo {
         let e = (self.enabled)(s);

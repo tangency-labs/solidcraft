@@ -1203,6 +1203,7 @@
   "cmd.sketch_spline_control_point_5": "Vezérlőpontos spline (5. fokú)",
   "cmd.sketch_spline_fit_point": "Illesztőpontos spline",
   "cmd.sketch_spline_insert_point": "Splinepont hozzáadása",
+  "cmd.sketch_spline_remove_point": "Splinepont eltávolítása",
   "cmd.sketch_spline_reverse": "Spline irányának megfordítása",
   "cmd.sketch_spun_profile": "Forgatott profil",
   "cmd.sketch_toggle_diameter": "Sugár / átmérő váltása",
