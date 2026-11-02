@@ -82,6 +82,15 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
     if let ([i], true) = (cands.as_slice(), level >= Match::Piece) {
         return exact(*i);
     }
+    // Only the root of the name fits, on faces named from geometry, and the reference's point lies
+    // on another edge: geometry once named that edge differently (a design saved when a round wall
+    // took the name of a join's new face), so the point says which edge this is.
+    if level == Match::Stem
+        && cands.iter().all(|i| !verified(*i) && !edge_near(b, &m, *i, near))
+        && let Some(i) = (0..m.edges.len()).find(|i| edge_near(b, &m, *i, near))
+    {
+        return Ok(EdgeHit { edge: i, point: near, split: false, verified: false, on_point: true, legacy: false });
+    }
     cands
         .iter()
         .filter_map(|i| mid(*i).map(|p| (p, *i)))
