@@ -1,16 +1,21 @@
 //! The blend corner's Ball: three constant rounds of one radius `r` and one convexity at
-//! a vertex of three planes end on great circles of the one ball touching the three
-//! planes, and the corner's face is that ball's spherical triangle between the contacts,
-//! one rational patch exactly on the sphere, G1 to every round.
+//! a vertex of three faces, each a plane or a natural quadric (a sphere, a cylinder or a
+//! cone), end on great circles of the one ball touching the three faces, and the corner's
+//! face is that ball's spherical triangle between the contacts, one rational patch exactly
+//! on the sphere, G1 to every round.
 //!
 //! Upstream: none (pinned SMLib builds such a vertex as a 3x3 corner's Coons patch). The
 //! fork's `source/SMLib/src/SmBlendCornerBall.cpp`, `source/SMLib/inc/SmBlendCorner.h`
-//! (tangency-labs/smlib 79d4763, a6243fa, f8e6709, 4241a1b, unchanged to 5e8c9c1; smlib#79
-//! step 4c). From the fork's file head: the ball of radius `r` touching the three planes
-//! `F_i` (unit normals `n_i`) is centred at `C`, `n_i . C = n_i . p_i + s_i r` on the side
-//! the rounds' balls roll; it touches `F_i` at `P_i = C - s_i r n_i`. The round between
-//! `F_i` and `F_j` ends on its section through `C`, from `P_i` to `P_j`: all three end
-//! sections are great circles of the sphere about `C`.
+//! (tangency-labs/smlib 79d4763, a6243fa, f8e6709, 4241a1b; smlib#79 step 4c; the curved
+//! faces 7048946, smlib#110; unchanged to dda881f). From the fork's file head: the ball of
+//! radius `r` touching the three faces `F_i` is centred at `C`, where the faces' offsets by
+//! `r` meet on the side the rounds' balls roll (the triple offset point); it touches `F_i`
+//! at `P_i = C - s_i r n_i`, `n_i` the offset's normal at `C`. The round between `F_i` and
+//! `F_j` ends on its section through `C`, from `P_i` to `P_j`, in the plane of `n_i` and
+//! `n_j` whatever the faces: all three end sections are great circles of the sphere about
+//! `C`. Where two faces or more are planes, `C` is in closed form (the offset planes' line
+//! meets the third offset); otherwise Newton's method, the root taken only where a
+//! Krawczyk test proves it the one root within rounding of the part's size.
 //!
 //! | Rust                         | Fork                                                  |
 //! |------------------------------|-------------------------------------------------------|
@@ -21,6 +26,8 @@
 //! | [`ball_corner_edge_geom`]    | `SmBlendCorner::BuildBallSurface` (`CalcCornerEdgeGeom`'s Ball part) |
 //! | [`create_ball_patch`]        | `SmBlendCorner::CreateBallPatch`                      |
 //! | `ball_centre` (private)      | `SmBlendCorner::BallCentre`                           |
+//! | `ball_face_quadric` (private) | `sm_BallFaceQuadric`                                 |
+//! | `BallImplicit`, `ball_inverse`, `ball_certified_root` (private) | `SmBallImplicit`, `sm_BallInverse`, `sm_BallCertifiedRoot` |
 //! | `ball_triangle_patch` (private) | `sm_BallTrianglePatch`                             |
 //! | `ring_faces` (private)       | `sm_BallRingFaces`                                    |
 //! | `BallPoly`, `choose`, `times`, `sum` (private) | `SmBallPoly`, `sm_Choose`, `sm_BallTimes`, `sm_BallSum` |
@@ -33,12 +40,14 @@
 //! refusals are checked before the face takes the net. The patch and its loop are kept in
 //! [`BallCorner`] from the edge geometry until the patch takes them. The fork's
 //! `SmFilletExecutive::IsSetBackVertex` is the caller's `set_back` argument. Opt-in:
-//! `Kernel::fixes.fillet_blend_corner` (WR-697). No recursion.
+//! `Kernel::fixes.fillet_blend_corner` (WR-697). No recursion; the certified root's Newton
+//! loop is bounded at 50 steps, as the fork's.
 
 use crate::blend::blend_corner::BlendCornerEvent;
 use crate::blend::fillet_corner::p1::face_by_two_edgeuses;
 use crate::blend::fillet_corner::p3::{CornerPatchEnv, FilletCorner};
 use crate::blend::fillet_custom_solver::{offset_local_point_solve, offset_natural_uv_domain};
+use crate::blend::fillet_exact::{BlendQuadric, QuadricKind};
 use crate::blend::fillet_geom::p1::{FilletBrep, FilletEdgeType, FilletSolverId};
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverType, FilletSurfaceGeneratorType};
 use crate::blend::fillet_solver::p5::is_concave_edge;
@@ -56,9 +65,10 @@ use crate::surface::surface::Surface;
 use crate::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as face2;
-use crate::topology::{vertex, Brep, EdgeuseId, FaceId};
+use crate::topology::{vertex, Brep, EdgeuseId, FaceId, VertexId};
 
 const OP_CLASSIFY: &str = "blend::blend_corner::ball::classify_ball";
+const OP_QUADRIC: &str = "blend::blend_corner::ball::ball_face_quadric";
 const OP_CENTRE: &str = "blend::blend_corner::ball::ball_centre";
 const OP_PLACE: &str = "blend::blend_corner::ball::place_ball_contacts";
 const OP_BUILD: &str = "blend::blend_corner::ball::ball_corner_edge_geom";
@@ -155,6 +165,197 @@ fn ring_faces(b: &Brep, all_eus: &[EdgeuseId]) -> Result<[Option<FaceId>; 3]> {
     Ok(faces)
 }
 
+fn max(a: f64, b: f64) -> f64 {
+    // smos_Max
+    if a > b {
+        a
+    } else {
+        b
+    }
+}
+
+/// `sm_BallFaceQuadric` (the fork's 7048946): the quadric (a plane or a natural quadric) a
+/// ring face lies on, [`QuadricKind::None`] where it lies on none.
+fn ball_face_quadric(k: &Kernel, b: &Brep, face: FaceId, tol: f64) -> Result<BlendQuadric> {
+    let surface = face2::surface(b, face)?.ok_or_else(|| SolidError::null_pointer(OP_QUADRIC))?;
+    let q = BlendQuadric::from_surface(k, surface, face2::uv_domain(b, face)?.mid(), tol)?;
+    if !matches!(
+        q.kind,
+        QuadricKind::Plane | QuadricKind::Sphere | QuadricKind::Cylinder | QuadricKind::Cone
+    ) {
+        return Ok(BlendQuadric::default());
+    }
+    Ok(q)
+}
+
+/// A 3x3 matrix entry, `0` out of range (never: the indices are below 3).
+fn at3(m: &[[f64; 3]; 3], i: usize, j: usize) -> f64 {
+    m.get(i).and_then(|r| r.get(j)).copied().unwrap_or(0.0)
+}
+
+/// `SmBallImplicit` (the fork's 7048946): a quadric's implicit form
+/// `f(x) = x.A.x + 2 b.x + c` about an origin (`x = point - origin`).
+#[derive(Debug, Clone, Copy, Default)]
+struct BallImplicit {
+    a: [[f64; 3]; 3],
+    b: [f64; 3],
+    c: f64,
+}
+
+impl BallImplicit {
+    /// `Set`: the quadric's form about `at`.
+    fn new(quadric: &BlendQuadric, at: Point3) -> Self {
+        let mut local = *quadric;
+        local.point = Point3::new(
+            quadric.point.x - at.x,
+            quadric.point.y - at.y,
+            quadric.point.z - at.z,
+        );
+        let (a, b, c) = local.implicit();
+        Self { a, b, c }
+    }
+
+    /// `Value`: `f(x)`, and the sum of its terms' magnitudes (`pdBound`).
+    fn value(&self, x: &[f64; 3]) -> (f64, f64) {
+        let mut d = self.c;
+        let mut abs = self.c.abs();
+        for ((bi, row), xi) in self.b.iter().zip(self.a.iter()).zip(x.iter()) {
+            let t = 2.0 * bi * xi;
+            d += t;
+            abs += t.abs();
+            for (aij, xj) in row.iter().zip(x.iter()) {
+                let u = xi * aij * xj;
+                d += u;
+                abs += u.abs();
+            }
+        }
+        (d, abs)
+    }
+
+    /// `Gradient`: `2 (A x + b)`.
+    fn gradient(&self, x: &[f64; 3]) -> [f64; 3] {
+        let [x0, x1, x2] = *x;
+        let mut g = [0.0; 3];
+        for ((gi, row), bi) in g.iter_mut().zip(self.a.iter()).zip(self.b.iter()) {
+            let [r0, r1, r2] = *row;
+            *gi = 2.0 * (r0 * x0 + r1 * x1 + r2 * x2 + bi);
+        }
+        g
+    }
+}
+
+/// `sm_BallInverse` (the fork's 7048946): the inverse of `m` by its adjugate, `None` where
+/// its determinant is below `SM_EFF_ZERO_SQRT` of its largest entry cubed.
+fn ball_inverse(m: &[[f64; 3]; 3]) -> Option<[[f64; 3]; 3]> {
+    let e = |i, j| at3(m, i, j);
+    let det = e(0, 0) * (e(1, 1) * e(2, 2) - e(1, 2) * e(2, 1))
+        - e(0, 1) * (e(1, 0) * e(2, 2) - e(1, 2) * e(2, 0))
+        + e(0, 2) * (e(1, 0) * e(2, 1) - e(1, 1) * e(2, 0));
+    let mut scale = 0.0;
+    for row in m {
+        for v in row {
+            scale = max(scale, v.abs());
+        }
+    }
+    // !(|det| > ...), NaN included
+    if det
+        .abs()
+        .partial_cmp(&(EFF_ZERO_SQRT * scale * scale * scale))
+        != Some(std::cmp::Ordering::Greater)
+    {
+        return None;
+    }
+    let mut inv = [[0.0; 3]; 3];
+    for (i, row) in inv.iter_mut().enumerate() {
+        for (j, v) in row.iter_mut().enumerate() {
+            let (i1, i2, j1, j2) = ((j + 1) % 3, (j + 2) % 3, (i + 1) % 3, (i + 2) % 3);
+            *v = (e(i1, j1) * e(i2, j2) - e(i1, j2) * e(i2, j1)) / det;
+        }
+    }
+    Some(inv)
+}
+
+/// `sm_BallCertifiedRoot` (the fork's 7048946): the one point near the origin where three
+/// quadrics' implicit equations vanish: Newton's method from the origin, then Krawczyk's
+/// test on the box of half-width `half` about the iterate, which proves it holds exactly
+/// one root (the gradients are affine, so the Jacobian over the box is the iterate's plus
+/// `2 A` times the box, exactly). Rounding is bounded by the sum of the terms' magnitudes.
+/// The iterate, and whether it is proved (`false` where Newton fails or the test does not
+/// prove the box). Bounded: at most 50 Newton steps.
+fn ball_certified_root(f: &[BallImplicit; 3], half: f64) -> ([f64; 3], bool) {
+    let mut x = [0.0; 3];
+    let mut fx = [0.0; 3];
+    let mut jac = [[0.0; 3]; 3];
+    for it in 0..50 {
+        for ((fi, ji), fq) in fx.iter_mut().zip(jac.iter_mut()).zip(f.iter()) {
+            *fi = fq.value(&x).0;
+            *ji = fq.gradient(&x);
+        }
+        let Some(y) = ball_inverse(&jac) else {
+            return (x, false);
+        };
+        let mut step = 0.0;
+        for (xi, yi) in x.iter_mut().zip(y.iter()) {
+            let [y0, y1, y2] = *yi;
+            let [f0, f1, f2] = fx;
+            let d = y0 * f0 + y1 * f1 + y2 * f2;
+            *xi -= d;
+            step = max(step, d.abs());
+        }
+        if step <= 0.01 * half && it > 0 {
+            break;
+        }
+    }
+    // Krawczyk: K = x - Y f(x) + (I - Y J(X)) (X - x) inside X proves exactly one root in X.
+    // With J(X) = J(x) + dJ, |dJ_mk| <= 2 half sum_l |A_m,kl|, component i of K - x is within
+    // |(Y f)_i| + half sum_k ( |(I - Y J(x))_ik| + sum_m |Y_im| |dJ_mk| ), each term padded for
+    // rounding (f by its terms' magnitudes).
+    let mut bound = [0.0; 3];
+    for (((fi, bi), ji), fq) in fx
+        .iter_mut()
+        .zip(bound.iter_mut())
+        .zip(jac.iter_mut())
+        .zip(f.iter())
+    {
+        (*fi, *bi) = fq.value(&x);
+        *ji = fq.gradient(&x);
+    }
+    let Some(y) = ball_inverse(&jac) else {
+        return (x, false);
+    };
+    let eps = 16.0 * f64::EPSILON;
+    let mut spread = [[0.0; 3]; 3];
+    for (sm, fq) in spread.iter_mut().zip(f.iter()) {
+        for (smk, ak) in sm.iter_mut().zip(fq.a.iter()) {
+            let [a0, a1, a2] = *ak;
+            *smk = 2.0 * half * (a0.abs() + a1.abs() + a2.abs());
+        }
+    }
+    for i in 0..3 {
+        let mut rad = 0.0;
+        for k in 0..3 {
+            let (fk, bk) = (
+                fx.get(k).copied().unwrap_or(0.0),
+                bound.get(k).copied().unwrap_or(0.0),
+            );
+            rad += at3(&y, i, k).abs() * (fk.abs() + eps * bk);
+            let mut iyj = if i == k { 1.0 } else { 0.0 };
+            let mut scale = 1.0;
+            for m in 0..3 {
+                iyj -= at3(&y, i, m) * at3(&jac, m, k);
+                scale += (at3(&y, i, m) * at3(&jac, m, k)).abs();
+                rad += at3(&y, i, m).abs() * at3(&spread, m, k) * half;
+            }
+            rad += (iyj.abs() + eps * scale) * half;
+        }
+        // !(rad < half), NaN included
+        if rad.partial_cmp(&half) != Some(std::cmp::Ordering::Less) {
+            return (x, false);
+        }
+    }
+    (x, true)
+}
+
 /// `GetSurface(rail)->GetOffsetDistance()` of a solver, absolute (`NER` on none).
 fn offset_radius(solver: &FilletSolver, rail: usize, op: &'static str) -> Result<f64> {
     let slot = solver
@@ -163,22 +364,24 @@ fn offset_radius(solver: &FilletSolver, rail: usize, op: &'static str) -> Result
     Ok(slot.surface.offset_distance().abs())
 }
 
-/// `SmBlendCorner::ClassifyBall` (the fork's 79d4763, a6243fa): whether a filleted
-/// vertex is a Ball. Every edge there is blended (three solver edge uses, `all_eus` the
-/// corner's ring of three), each a constant circular round of the same radius (within
-/// the rounds' least tolerance), all convex or all concave, the three faces distinct
-/// planes meeting at a point, and the vertex not set back (`set_back`, the fork's
-/// `IsSetBackVertex`). [`BlendCornerEvent::Ball`] where it is, else
+/// `SmBlendCorner::ClassifyBall` (the fork's 79d4763, a6243fa, 7048946): whether the
+/// filleted `vertex` is a Ball. Every edge there is blended (three solver edge uses,
+/// `all_eus` the corner's ring of three), each a constant circular round of the same
+/// radius (within the rounds' least tolerance), all convex or all concave, the three faces
+/// distinct, each a plane or a natural quadric (a cylinder or sphere wider than the ball),
+/// their normals at the vertex independent, and the vertex not set back (`set_back`, the
+/// fork's `IsSetBackVertex`). [`BlendCornerEvent::Ball`] where it is, else
 /// [`BlendCornerEvent::None`] (the corner hierarchy builds it).
 ///
 /// # Errors
 ///
 /// [`SolidError::null_pointer`] for a missing edge or face surface the fork
 /// dereferences (`NER`); those of the solver lookups, the convexity test and the
-/// planarity test.
+/// quadric recognition.
 pub fn classify_ball(
     k: &Kernel,
     b: &mut Brep,
+    vertex: VertexId,
     solver_eus: &[EdgeuseId],
     all_eus: &[EdgeuseId],
     set_back: bool,
@@ -229,21 +432,28 @@ pub fn classify_ball(
         return none;
     }
 
-    // three planes
+    // three faces, each a plane or a natural quadric (a cylinder or sphere wider than the ball),
+    // their normals at the vertex independent
     let faces = ring_faces(b, all_eus)?;
+    let at = vertex::point(b, vertex)?;
     let mut normals = [Vec3::default(); 3];
     for (face, normal) in faces.iter().zip(normals.iter_mut()) {
         let Some(face) = *face else {
             return none;
         };
-        let Some(surface) = face2::surface(b, face)? else {
-            return none;
-        };
-        let planar = surface.is_planar(k, tol)?;
-        if !planar.is_planar {
+        let quadric = ball_face_quadric(k, b, face, tol)?;
+        if quadric.kind == QuadricKind::None {
             return none;
         }
-        *normal = planar.normal;
+        let Ok(n) = quadric.normal(at).unitize() else {
+            return none; // a cone's apex
+        };
+        *normal = n;
+        if matches!(quadric.kind, QuadricKind::Sphere | QuadricKind::Cylinder)
+            && quadric.radius.partial_cmp(&(radius + tol)) != Some(std::cmp::Ordering::Greater)
+        {
+            return none; // a ball as wide as the cylinder or sphere: its offset is its axis or centre
+        }
     }
     let [n0, n1, n2] = normals;
     if faces[0] == faces[1]
@@ -256,9 +466,9 @@ pub fn classify_ball(
     Ok(BlendCornerEvent::Ball)
 }
 
-/// `SmBlendCorner::BallCentre` (the fork's 4241a1b): the ball's centre, the planes'
-/// triple offset point solved from them (Cramer's rule), its radius and the contacts
-/// `P_i` with the three faces; checked to be the ball of round 0's section at vertex 0
+/// `SmBlendCorner::BallCentre` (the fork's 4241a1b, 7048946): the ball's centre, where the
+/// faces' offsets by the radius meet (in closed form where two or three are planes, else
+/// the certified root), its radius and the contacts `P_i` with the three faces; checked to be the ball of round 0's section at vertex 0
 /// and the contacts to be the corner's vertices.
 fn ball_centre(
     k: &Kernel,
@@ -312,50 +522,164 @@ fn ball_centre(
         .offset_distance()
         .abs();
 
-    // the planes, and the centre r from each on the ball's side: n_i . C = n_i . p_i + s_i r
+    // each face's quadric offset by r on the ball's side (the side of it the rounds' ball is
+    // on, seen from vertex i, the contact on it)
     let faces = ring_faces(target, all_eus)?;
-    let mut normals = [Vec3::default(); 3];
-    let mut rhs = [0.0; 3];
+    let vertices = [v0, v1, v2];
+    let mut offsets = [BlendQuadric::default(); 3];
     let mut side = [0.0; 3];
-    for (ii, face) in faces.iter().enumerate() {
+    let mut planes = 0usize;
+    for ((face, &v), (offset, sd)) in faces
+        .iter()
+        .zip(vertices.iter())
+        .zip(offsets.iter_mut().zip(side.iter_mut()))
+    {
         let face = face.ok_or_else(nul)?;
-        let surface = face2::surface(target, face)?.ok_or_else(nul)?;
-        let planar = surface.is_planar(k, tol)?;
-        if !planar.is_planar {
-            return Err(err()); // ClassifyBall took the faces to be planes
+        let quadric = ball_face_quadric(k, target, face, tol)?;
+        if quadric.kind == QuadricKind::None {
+            return Err(err()); // ClassifyBall took the faces to be planes or quadrics
         }
-        let n = planar.normal.unitize()?;
-        let on_plane = planar.point;
-        let s = if n.dot(ball - on_plane) >= 0.0 {
+        let on = pseudo.vertex_point(v)?;
+        *sd = if quadric.normal(on).dot(ball - on) >= 0.0 {
             1.0
         } else {
             -1.0
         };
-        if let (Some(normal), Some(r), Some(sd)) =
-            (normals.get_mut(ii), rhs.get_mut(ii), side.get_mut(ii))
-        {
-            *normal = n;
-            *sd = s;
-            *r = n.x * on_plane.x + n.y * on_plane.y + n.z * on_plane.z + s * radius;
+        *offset = quadric.offset(*sd * radius, tol);
+        if offset.kind != quadric.kind || offset.side != quadric.side {
+            return Err(err()); // ClassifyBall took the quadrics wider than the ball
+        }
+        if offset.kind == QuadricKind::Plane {
+            planes += 1;
         }
     }
-    let [n0, n1, n2] = normals;
-    // Cramer's rule: C = (rhs_0 n_1 x n_2 + rhs_1 n_2 x n_0 + rhs_2 n_0 x n_1) / (n_0 . n_1 x n_2)
-    let det = n0.dot(n1.cross(n2));
-    if det.abs() <= EFF_ZERO {
-        return Err(err());
+
+    // C: where the offsets meet, about the rounds' ball (each quadric's implicit form there)
+    let mut order = [0usize, 1, 2]; // the planes first
+    let mut at = 0usize;
+    for (ii, o) in offsets.iter().enumerate() {
+        if o.kind == QuadricKind::Plane {
+            if let Some(slot) = order.get_mut(at) {
+                *slot = ii;
+            }
+            at += 1;
+        }
     }
-    let centre: Point3 = n1.cross(n2) * (rhs[0] / det)
-        + n2.cross(n0) * (rhs[1] / det)
-        + n0.cross(n1) * (rhs[2] / det);
-    if centre.distance(ball) > tol {
-        return Err(err()); // the rounds' ball is the planes' triple offset point
+    let mut at = planes;
+    for (ii, o) in offsets.iter().enumerate() {
+        if o.kind != QuadricKind::Plane {
+            if let Some(slot) = order.get_mut(at) {
+                *slot = ii;
+            }
+            at += 1;
+        }
     }
-    let mut contacts = [Point3::default(); 3];
-    for (ii, (&v, contact)) in [v0, v1, v2].iter().zip(contacts.iter_mut()).enumerate() {
-        let (Some(&n), Some(&s)) = (normals.get(ii), side.get(ii)) else {
+    let mut f = [BallImplicit::default(); 3];
+    for (fi, &oi) in f.iter_mut().zip(order.iter()) {
+        let o = offsets.get(oi).ok_or_else(err)?;
+        *fi = BallImplicit::new(o, ball);
+    }
+    let [f0, f1, f2] = f;
+    let mut x = [0.0; 3];
+    if planes >= 2 {
+        // the two offset planes' line, n_0 . x = -c_0 / 2 and n_1 . x = -c_1 / 2 (2 b = n)
+        let n0 = Vec3::new(2.0 * f0.b[0], 2.0 * f0.b[1], 2.0 * f0.b[2]);
+        let n1 = Vec3::new(2.0 * f1.b[0], 2.0 * f1.b[1], 2.0 * f1.b[2]);
+        let dv = n0.cross(n1);
+        let dd = dv.dot(dv);
+        if dd <= EFF_ZERO {
             return Err(err());
-        };
+        }
+        // its point nearest the origin: (h_0 (n_1 x d) + h_1 (d x n_0)) / |d|^2, h_i = -c_i
+        let p0v = (n1.cross(dv) * (-f0.c) + dv.cross(n0) * (-f1.c)) * (1.0 / dd);
+        let p0 = [p0v.x, p0v.y, p0v.z];
+        let d = [dv.x, dv.y, dv.z];
+        if planes == 3 {
+            // the third plane: n_2 . (p0 + t d) = -c_2
+            let den = 2.0 * (f2.b[0] * d[0] + f2.b[1] * d[1] + f2.b[2] * d[2]);
+            if den.abs() <= EFF_ZERO {
+                return Err(err());
+            }
+            let t = -f2.value(&p0).0 / den;
+            for ((xk, pk), dk) in x.iter_mut().zip(p0.iter()).zip(d.iter()) {
+                *xk = pk + t * dk;
+            }
+        } else {
+            // the quadric along the line: q2 t^2 + 2 q1 t + q0 = 0, the root nearest the
+            // rounds' ball
+            let mut qa = 0.0;
+            let mut qb = 0.0;
+            for ((row, dk), bk) in f2.a.iter().zip(d.iter()).zip(f2.b.iter()) {
+                let mut ad = 0.0;
+                let mut ap = 0.0;
+                for ((akm, dm), pm) in row.iter().zip(d.iter()).zip(p0.iter()) {
+                    ad += akm * dm;
+                    ap += akm * pm;
+                }
+                qa += dk * ad;
+                qb += dk * (ap + bk);
+            }
+            let qc = f2.value(&p0).0;
+            let disc = qb * qb - qa * qc;
+            if disc < 0.0 || (qa.abs() <= EFF_ZERO * dd && qb.abs() <= EFF_ZERO * dd) {
+                return Err(err()); // the line misses the offset quadric
+            }
+            let mut roots = [0.0; 2];
+            let count;
+            if qa.abs() <= EFF_ZERO * dd {
+                roots[0] = -qc / (2.0 * qb);
+                count = 1;
+            } else {
+                // without cancellation: q = -(b + sign(b) sqrt(disc)), t = q / a and c / q
+                let sign = if qb >= 0.0 { 1.0 } else { -1.0 };
+                let q = -(qb + sign * disc.sqrt());
+                roots[0] = q / qa;
+                if q == 0.0 {
+                    count = 1;
+                } else {
+                    roots[1] = qc / q;
+                    count = 2;
+                }
+            }
+            // the root nearest the origin (the rounds' ball): |p0 + t d|, p0 square to d
+            let mut best = roots[0];
+            for &t in roots.iter().take(count).skip(1) {
+                if t.abs() < best.abs() {
+                    best = t;
+                }
+            }
+            for ((xk, pk), dk) in x.iter_mut().zip(p0.iter()).zip(d.iter()) {
+                *xk = pk + best * dk;
+            }
+        }
+    } else {
+        // no closed form: the root certified within rounding of the part's size
+        let mut size = 0.0;
+        for face in &faces {
+            let face = face.ok_or_else(nul)?;
+            let bx = crate::query::face::p1::calculate_bounding_box(k, target, face, false)?;
+            size = max(size, (bx.max - bx.min).length());
+        }
+        let (root, proved) = ball_certified_root(&f, 1e-12 * max(size, 1.0));
+        if !proved {
+            return Err(err());
+        }
+        x = root;
+    }
+    let centre = Point3::new(ball.x + x[0], ball.y + x[1], ball.z + x[2]);
+    if centre.distance(ball) > tol {
+        return Err(err()); // the rounds' ball is the offsets' meeting point
+    }
+    // the contacts: the centre moved back along the offset's normal there (the face's at the
+    // contact)
+    let mut contacts = [Point3::default(); 3];
+    for (((&v, contact), o), &s) in vertices
+        .iter()
+        .zip(contacts.iter_mut())
+        .zip(offsets.iter())
+        .zip(side.iter())
+    {
+        let n = o.normal(centre).unitize()?;
         *contact = centre - n * (s * radius);
         if contact.distance(pseudo.vertex_point(v)?) > tol {
             return Err(err()); // vertex i is the ball's contact with face i

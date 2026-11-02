@@ -17,6 +17,7 @@
 //! | `foot_on_surface` (private)  | `sm_FootOnSurface`                          |
 //! | `bernstein_product_21` (private) | `sm_BernsteinProduct21`                 |
 //! | [`ball`]                     | the Ball (`ClassifyBall`, `BuildBallSurface`, `CreateBallPatch`; 79d4763, a6243fa, f8e6709, 4241a1b) |
+//! | [`setback`]                  | the Setback (`ClassifySetBack`, `MakeSetBackTopology`, `BuildSetBackFill`, `CreateSetBackPatches`; 61547af, 1506e2f, f1d81f4) |
 //! | [`swept`]                    | the Swept turn (`Classify`'s Swept part, `BuildSweptSurface`, `CreateSweptPatch`) |
 //!
 //! Deviations: the blend corner is not its own corner kind here. The fork's `SmBlendCorner`
@@ -53,6 +54,7 @@ use crate::topology::face::p2 as face2;
 use crate::topology::{edge, Brep, EdgeId, EdgeuseId, VertexId};
 
 pub mod ball;
+pub mod setback;
 pub mod swept;
 
 const OP_CLASSIFY: &str = "blend::blend_corner::classify";
@@ -71,6 +73,9 @@ pub enum BlendCornerEvent {
     /// `SM_BCE_BALL` (the fork's 79d4763): three rounds of one radius and convexity, the
     /// common ball's sphere between them ([`ball`]).
     Ball,
+    /// `SM_BCE_SETBACK` (the fork's 61547af): three or more blends, every edge there
+    /// blended, each set back and the hole filled by the setback split ([`setback`]).
+    Setback,
 }
 
 /// `SmBlendTurn`: a Turn's two modes.
@@ -97,6 +102,12 @@ impl BlendCorner {
     #[must_use]
     pub fn is_ball(self) -> bool {
         self.event == BlendCornerEvent::Ball
+    }
+
+    /// `IsSetBack`: the Setback (the fork's 61547af).
+    #[must_use]
+    pub fn is_setback(self) -> bool {
+        self.event == BlendCornerEvent::Setback
     }
 
     /// `IsSwept`: a Turn, Swept.

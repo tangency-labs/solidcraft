@@ -451,6 +451,10 @@ pub enum FilletVertexType {
     /// `SM_FV_UNKNOWN`.
     #[default]
     Unknown = 13,
+    /// The fork's `SM_FV_PRECOMPUTED` (61547af; smlib#104): placed by its corner's own
+    /// build (a setback fill's base point). Not in the pinned enum, so it has no upstream
+    /// code ([`Self::from_code`]); its discriminant follows the pinned ones.
+    Precomputed = 14,
 }
 
 impl FilletVertexType {
