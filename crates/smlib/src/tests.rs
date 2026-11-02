@@ -79,7 +79,7 @@ fn calls_from_many_threads_are_serialised() {
 static DUMP_DIR_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Entry points that ask no kernel, so have nothing to say here.
-const NO_KERNEL: [&str; 10] = [
+const NO_KERNEL: [&str; 11] = [
     "inertia_tensor",
     "is_valid",
     "failed_tests",
@@ -90,6 +90,7 @@ const NO_KERNEL: [&str; 10] = [
     "to_native_report",
     "to_native_ordered",
     "blends",
+    "word",
 ];
 
 const ANSWERING: [&str; 62] = [
