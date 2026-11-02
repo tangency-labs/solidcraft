@@ -7,8 +7,13 @@
 //! curved walls follow the intersections of the exact offsets, fitted within tolerance.
 //! A chamfer may also set back by different distances on the face and up the walls (two
 //! distances, or a distance and an angle: [`loop_chamfer_sides`]).
+//! Free-form edges in the face plane (the outline of an extruded spline) take part too when
+//! their walls stand square to the face: their blend surface is fitted within tolerance through
+//! the edge's offset on the face and its copy on the wall, and sharp corners between them
+//! follow the crossing of the offsets, found numerically.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use solidcraft_geom::Vec3;
 use truck_modeling::{self as mt, builder};
@@ -22,7 +27,7 @@ fn unsupported(msg: &str) -> KernelError {
     KernelError::Failed(format!("not supported yet: {msg}"))
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 enum Seg {
     Line {
         a: Vec3,
@@ -36,31 +41,106 @@ enum Seg {
         angle: f64,
         mid: Vec3,
     },
+    /// A free-form curve in the face plane from `a` to `b`.
+    Curve {
+        a: Vec3,
+        b: Vec3,
+        mid: Vec3,
+        span: Rc<Span>,
+    },
+}
+
+/// A loop edge's oriented curve by a parameter from 0 to 1, running on beyond its ends as the
+/// parabola of its end point, tangent and curvature (where an offset reaches past a sharp corner;
+/// smooth enough there to fit through).
+#[derive(Debug)]
+struct Span {
+    curve: mt::Curve,
+    t0: f64,
+    t1: f64,
+}
+
+impl Span {
+    /// The point at `u` and the derivative there.
+    fn at(&self, u: f64) -> (Vec3, Vec3) {
+        use mt::ParametricCurve;
+        let inside = u.clamp(0.0, 1.0);
+        let t = self.t0 + (self.t1 - self.t0) * inside;
+        let scale = self.t1 - self.t0;
+        let (d, d2) = (self.curve.der(t), self.curve.der2(t));
+        let (d, d2) = (Vec3::new(d.x, d.y, d.z) * scale, Vec3::new(d2.x, d2.y, d2.z) * (scale * scale));
+        let past = u - inside;
+        (from_p3(self.curve.subs(t)) + d * past + d2 * (past * past / 2.0), d + d2 * past)
+    }
+    /// The parameter of the curve's point nearest `p`.
+    fn param_of(&self, p: Vec3) -> f64 {
+        use mt::SearchNearestParameter;
+        let (a, b) = (self.at(0.0).0, self.at(1.0).0);
+        let near = (a.dist(b) * 1e-9).max(1e-12);
+        if p.dist(a) <= near {
+            return 0.0;
+        }
+        if p.dist(b) <= near {
+            return 1.0;
+        }
+        let mid = (self.t0 + self.t1) / 2.0;
+        let t = self.curve.search_nearest_parameter(p3(p), Some(mid), 100).unwrap_or(mid);
+        ((t - self.t0) / (self.t1 - self.t0)).clamp(0.0, 1.0)
+    }
 }
 
 impl Seg {
     fn start(&self) -> Vec3 {
         match *self {
-            Seg::Line { a, .. } | Seg::Arc { a, .. } => a,
+            Seg::Line { a, .. } | Seg::Arc { a, .. } | Seg::Curve { a, .. } => a,
         }
     }
     fn end(&self) -> Vec3 {
         match *self {
-            Seg::Line { b, .. } => b,
+            Seg::Line { b, .. } | Seg::Curve { b, .. } => b,
             Seg::Arc { a, c, axis, angle, .. } => turn(a, c, axis, angle),
         }
     }
     /// Unit tangent (direction of travel) at a point of the segment.
     fn tangent(&self, p: Vec3) -> Option<Vec3> {
-        match *self {
-            Seg::Line { a, b } => (b - a).normalized(),
-            Seg::Arc { c, axis, .. } => axis.cross(p - c).normalized(),
+        match self {
+            Seg::Line { a, b } => (*b - *a).normalized(),
+            Seg::Arc { c, axis, .. } => axis.cross(p - *c).normalized(),
+            Seg::Curve { span, .. } => span.at(span.param_of(p)).1.normalized(),
         }
+    }
+    /// The point at parameter `u` (0 at the start, 1 at the end, beyond them along the line, the
+    /// circle or the end tangents).
+    fn point(&self, u: f64) -> Vec3 {
+        match self {
+            Seg::Line { a, b } => *a + (*b - *a) * u,
+            Seg::Arc { a, c, axis, angle, .. } => turn(*a, *c, *axis, angle * u),
+            Seg::Curve { span, .. } => span.at(u).0,
+        }
+    }
+    /// Unit tangent at parameter `u`.
+    fn tangent_at(&self, u: f64) -> Option<Vec3> {
+        match self {
+            Seg::Curve { span, .. } => span.at(u).1.normalized(),
+            _ => self.tangent(self.point(u)),
+        }
+    }
+    fn mid(&self) -> Vec3 {
+        match *self {
+            Seg::Line { a, b } => (a + b) * 0.5,
+            Seg::Arc { mid, .. } | Seg::Curve { mid, .. } => mid,
+        }
+    }
+    fn free(&self) -> bool {
+        matches!(self, Seg::Curve { .. })
     }
 }
 
 /// Intersection of two inward offsets nearest their shared corner, in the face plane.
 fn offset_joint(prev: &Seg, cur: &Seg, n: Vec3, d: f64) -> Option<Vec3> {
+    if prev.free() || cur.free() {
+        return offset_joint_free(prev, cur, n, d).map(|x| x.0);
+    }
     let p = cur.start();
     let line_circle = |line: &Seg, arc: &Seg| {
         let Seg::Arc { a, c, .. } = *arc else { return None };
@@ -98,6 +178,147 @@ fn offset_joint(prev: &Seg, cur: &Seg, n: Vec3, d: f64) -> Option<Vec3> {
     }
 }
 
+/// [`offset_joint`] by Newton's method, for any two segments (a free-form one among them), with
+/// the parameters of the crossing along `prev` and along `cur` (beyond 1 and below 0 past their
+/// ends).
+fn offset_joint_free(prev: &Seg, cur: &Seg, n: Vec3, d: f64) -> Option<(Vec3, f64, f64)> {
+    let off = |s: &Seg, u: f64| Some(s.point(u) + n.cross(s.tangent_at(u)?) * d);
+    let scale = prev.start().dist(prev.end()).max(cur.start().dist(cur.end())).max(d.abs()).max(1e-9);
+    let (mut u0, mut u1) = (1.0f64, 0.0f64);
+    let h = 1e-6;
+    for _ in 0..60 {
+        let (p0, p1) = (off(prev, u0)?, off(cur, u1)?);
+        let f = p0 - p1;
+        if f.len() <= scale * 1e-13 {
+            break;
+        }
+        let j0 = (off(prev, u0 + h)? - off(prev, u0 - h)?) * (0.5 / h);
+        let j1 = (off(cur, u1 + h)? - off(cur, u1 - h)?) * (-0.5 / h);
+        let (a11, a12, a22) = (j0.dot(j0), j0.dot(j1), j1.dot(j1));
+        let (b1, b2) = (-f.dot(j0), -f.dot(j1));
+        let det = a11 * a22 - a12 * a12;
+        // Parallel offsets never cross.
+        if !(det.abs() > 1e-20 * a11 * a22) {
+            return None;
+        }
+        u0 += ((b1 * a22 - b2 * a12) / det).clamp(-0.25, 0.25);
+        u1 += ((a11 * b2 - a12 * b1) / det).clamp(-0.25, 0.25);
+        if !(u0.is_finite() && u1.is_finite()) || !(-1.0..=3.0).contains(&u0) || !(-2.0..=2.0).contains(&u1) {
+            return None;
+        }
+    }
+    let (p0, p1) = (off(prev, u0)?, off(cur, u1)?);
+    (p0.dist(p1) <= scale * 1e-9).then_some(((p0 + p1) * 0.5, u0, u1))
+}
+
+/// A free-form piece's blend: one surface through its offset on the face, its copy on the wall
+/// and (for a round) the edge itself between them, and its two rails, the sides of the surface.
+struct CurveFit {
+    surface: mt::Surface,
+    face: mt::Curve,
+    wall: mt::Curve,
+}
+
+/// Whether `q` is on the surface of `g` within `tol`.
+fn on_surface(g: &mt::Face, q: Vec3, tol: f64) -> bool {
+    use mt::{ParametricSurface, SearchNearestParameter, SearchParameter};
+    let s = g.oriented_surface();
+    s.search_parameter(p3(q), None, 100)
+        .or_else(|| s.search_nearest_parameter(p3(q), None, 100))
+        .is_some_and(|(u, v)| from_p3(s.subs(u, v)).dist(q) <= tol)
+}
+
+/// [`CurveFit`] of a free-form piece set back by `sf` on the face and `sw` along its `wall`
+/// (square to the face); `face_u`: where the face rail starts and ends (past the piece's ends,
+/// or short of them, at a sharp corner). `up`: along the wall away from the edge.
+#[allow(clippy::too_many_arguments)]
+fn fit_free(s: &Seg, wall: &mt::Face, n: Vec3, up: Vec3, (sf, sw): (f64, f64), round: bool, face_u: (f64, f64), tol: f64) -> Result<CurveFit> {
+    use mt::{Cut, ParametricCurve};
+    let face_pt = |u: f64| s.tangent_at(u).map(|t| s.point(u) + n.cross(t) * sf);
+    let wall_pt = |u: f64| s.point(u) + up * sw;
+    // The wall stands square to the face all along, the edge's straight extrusion.
+    for j in 0..=8 {
+        let u = f64::from(j) / 8.0;
+        let square = face_normal(wall, s.point(u)).is_some_and(|gn| gn.dot(n).abs() < 1e-6);
+        if !square || !on_surface(wall, wall_pt(u), tol * 10.0) {
+            return Err(unsupported("a free-form loop edge whose wall is not square to the face"));
+        }
+    }
+    let snap = |u: f64, to: f64| if (u - to).abs() < 1e-6 { to } else { u };
+    let (us, ue) = (snap(face_u.0, 0.0), snap(face_u.1, 1.0));
+    if !(us < ue) {
+        return Err(too_large("the blend is longer than a free-form edge"));
+    }
+    let (lo, hi) = (us.min(0.0) - 0.05, ue.max(1.0) + 0.05);
+    let mut breaks = vec![lo, us, 0.0, 1.0, ue, hi];
+    breaks.sort_by(f64::total_cmp);
+    breaks.dedup();
+    let span = hi - lo;
+    let w_of = |u: f64| (u - lo) / span;
+    for count in [8u32, 16, 32, 64, 128, 256] {
+        let h = span / f64::from(count);
+        let mut nodes = vec![lo];
+        for win in breaks.windows(2) {
+            let (&[a, b], true) = (win, true) else { continue };
+            let parts = ((b - a) / h).ceil().clamp(1.0, 4096.0) as u32;
+            nodes.extend((1..=parts).map(|j| if j == parts { b } else { a + (b - a) * f64::from(j) / f64::from(parts) }));
+        }
+        let w: Vec<f64> = nodes.iter().map(|u| w_of(*u)).collect();
+        let fp: Vec<Vec3> = nodes.iter().map(|u| face_pt(*u)).collect::<Option<_>>().ok_or_else(|| unsupported("degenerate free-form edge"))?;
+        // The offset on the face must run forward: past a bend tighter than the setback it folds.
+        for (win, u) in fp.windows(2).zip(&nodes) {
+            let (&[p, q], Some(t)) = (win, s.tangent_at(*u)) else { continue };
+            if (q - p).dot(t) <= 0.0 {
+                return Err(too_large("the blend is larger than a free-form edge's bend"));
+            }
+        }
+        let wp: Vec<Vec3> = nodes.iter().map(|u| wall_pt(*u)).collect();
+        let ep: Vec<Vec3> = nodes.iter().map(|u| s.point(*u)).collect();
+        let fit = |pts: &[Vec3]| crate::build::interpolate_cubic_at(pts, &w);
+        let (Some(fc), Some(wc)) = (fit(&fp), fit(&wp)) else { continue };
+        let ec = if round {
+            let Some(c) = fit(&ep) else { continue };
+            Some(c)
+        } else {
+            None
+        };
+        let good = nodes.windows(2).all(|win| {
+            let &[a, b] = win else { return false };
+            let um = (a + b) / 2.0;
+            let wm = w_of(um);
+            let near = |c: &mt::BSplineCurve<mt::Point3>, want: Option<Vec3>| want.is_some_and(|x| from_p3(c.subs(wm)).dist(x) <= tol);
+            near(&fc, face_pt(um)) && near(&wc, Some(wall_pt(um))) && ec.as_ref().is_none_or(|c| near(c, Some(s.point(um))))
+        });
+        if !good {
+            continue;
+        }
+        let fail = |e: &dyn std::fmt::Display| KernelError::Failed(format!("free-form blend surface: {e}"));
+        let row = |c: &mt::BSplineCurve<mt::Point3>, wt: f64| -> Vec<mt::Vector4> {
+            c.control_points().iter().map(|p| mt::Vector4::new(p.x * wt, p.y * wt, p.z * wt, wt)).collect()
+        };
+        let vk = fc.knot_vec().clone();
+        // A round's section is a quarter circle (the wall is square to the face): its control
+        // polygon's corner is on the edge.
+        let rows = match &ec {
+            Some(ec) => vec![row(&fc, 1.0), row(ec, std::f64::consts::FRAC_1_SQRT_2), row(&wc, 1.0)],
+            None => vec![row(&fc, 1.0), row(&wc, 1.0)],
+        };
+        let side_curve = |points: Option<&Vec<mt::Vector4>>, from: f64, to: f64| -> Result<mt::Curve> {
+            let points = points.cloned().ok_or_else(|| fail(&"row"))?;
+            let mut c = mt::NurbsCurve::new(mt::BSplineCurve::try_new(vk.clone(), points).map_err(|e| fail(&e))?);
+            c = c.cut(from);
+            let _ = c.cut(to);
+            Ok(mt::Curve::NurbsCurve(c))
+        };
+        let face = side_curve(rows.first(), w_of(us), w_of(ue))?;
+        let wall = side_curve(rows.last(), w_of(0.0), w_of(1.0))?;
+        let across = mt::KnotVec::bezier_knot(rows.len() - 1);
+        let bs = mt::BSplineSurface::try_new((across, vk), rows).map_err(|e| fail(&e))?;
+        return Ok(CurveFit { surface: mt::Surface::NurbsSurface(mt::NurbsSurface::new(bs)), face, wall });
+    }
+    Err(unsupported("could not fit the blend along a free-form edge within tolerance"))
+}
+
 /// A curved-wall joint is generally not planar. Fit its exact offset slices rather than
 /// projecting a circular section onto a tangent mitre and revolving that distorted section.
 /// `(r, rw)`: the round's radius (`rw` unused), or a chamfer's setbacks on the face and up the wall.
@@ -128,8 +349,9 @@ fn offset_profile(prev: &Seg, cur: &Seg, n: Vec3, side: f64, (r, rw): (f64, f64)
     Err(unsupported("could not fit the curved corner within tolerance"))
 }
 
-/// The exact shape of an oriented loop edge (a line, or an arc found from samples).
-fn seg_of(e: &mt::Edge, tol: f64) -> Option<Seg> {
+/// The exact shape of an oriented loop edge of the face with normal `n` (a line, or an arc found
+/// from samples, else a free-form curve in the face plane).
+fn seg_of(e: &mt::Edge, n: Vec3, tol: f64) -> Option<Seg> {
     use mt::{BoundedCurve, ParametricCurve};
     let (a, b) = (from_p3(e.front().point()), from_p3(e.back().point()));
     let c = e.oriented_curve();
@@ -140,6 +362,17 @@ fn seg_of(e: &mt::Edge, tol: f64) -> Option<Seg> {
         return Some(Seg::Line { a, b });
     }
     let m = *pts.get(8)?;
+    if let Some(arc) = arc_of(a, b, m, &pts, closed, tol) {
+        return Some(arc);
+    }
+    if closed || !pts.iter().all(|p| (*p - a).dot(n).abs() < tol) || matches!(c, mt::Curve::Line(_)) {
+        return None;
+    }
+    Some(Seg::Curve { a, b, mid: m, span: Rc::new(Span { curve: c, t0, t1 }) })
+}
+
+/// The arc through an edge's samples `pts` (from `a` to `b`, `m` halfway), if it is one.
+fn arc_of(a: Vec3, b: Vec3, m: Vec3, pts: &[Vec3], closed: bool, tol: f64) -> Option<Seg> {
     // A closed edge (a full circle): fit through points a third of the way round.
     let (b_fit, m_fit) = if closed { (*pts.get(5)?, *pts.get(11)?) } else { (b, m) };
     let (u, v) = (b_fit - a, m_fit - a);
@@ -205,7 +438,7 @@ fn pieces(segs: &[Seg]) -> Vec<(usize, Seg)> {
                 out.push((i, Seg::Arc { a, c, axis, angle: h, mid: turn(a, c, axis, h / 2.0) }));
                 out.push((i, Seg::Arc { a: a2, c, axis, angle: h, mid: turn(a, c, axis, 1.5 * h) }));
             }
-            _ => out.push((i, *s)),
+            _ => out.push((i, s.clone())),
         }
     }
     out
@@ -330,13 +563,13 @@ fn build(
     };
     let edge_segs: Vec<Seg> = edges
         .iter()
-        .map(|e| seg_of(e, (size * 1e-5).max(1e-6)))
+        .map(|e| seg_of(e, n, (size * 1e-5).max(1e-6)))
         .collect::<Option<_>>()
         .ok_or_else(|| unsupported("loop edges must be lines or arcs"))?;
     // Pieces: the loop's edges, full circles in halves; each knows its edge.
     let split = pieces(&edge_segs);
     let owner: Vec<usize> = split.iter().map(|x| x.0).collect();
-    let segs: Vec<Seg> = split.iter().map(|x| x.1).collect();
+    let segs: Vec<Seg> = split.iter().map(|x| x.1.clone()).collect();
     let k = segs.len();
     // Joints: k round a whole loop; k + 1 along a run (its two ends included).
     let nj = if open { k + 1 } else { k };
@@ -369,10 +602,7 @@ fn build(
             .iter()
             .position(|g| !std::ptr::eq(*g, *f) && g.edge_iter().any(|x| x.id() == e.id()))
             .ok_or_else(|| unsupported("an edge with one face"))?;
-        let mid = match *s {
-            Seg::Line { a, b } => (a + b) * 0.5,
-            Seg::Arc { mid, .. } => mid,
-        };
+        let mid = s.mid();
         let g = faces.get(wf).ok_or_else(|| KernelError::Failed("wall".into()))?;
         let gn = face_normal(g, mid).ok_or_else(|| unsupported("wall normal"))?;
         if gn.dot(n).abs() > 1.0 - 1e-6 {
@@ -392,8 +622,8 @@ fn build(
     // places, which the rolling-ball blend handles.
     if open {
         let ends = [
-            (edges.first().map(|e| e.front().clone()), segs.first().map(|s| (s.start(), *s))),
-            (edges.last().map(|e| e.back().clone()), segs.last().map(|s| (s.end(), *s))),
+            (edges.first().map(|e| e.front().clone()), segs.first().map(|s| (s.start(), s.clone()))),
+            (edges.last().map(|e| e.back().clone()), segs.last().map(|s| (s.end(), s.clone()))),
         ];
         for (v, seg) in ends {
             let (Some(v), Some((p, s))) = (v, seg) else { return Err(KernelError::Failed("run end".into())) };
@@ -524,6 +754,8 @@ fn build(
     let mut pb = Vec::with_capacity(nj);
     let mut centres = Vec::with_capacity(nj);
     let mut curved_joint = vec![false; nj];
+    // Where each free-form piece's face rail starts and ends along it (off its ends at a sharp corner).
+    let mut face_u = vec![(0.0, 1.0); k];
     // Joint i: the start of piece i (the end of the last piece for a run's far end).
     let joint_point = |i: usize| if i < k { segs.get(i).map(|s| s.start()) } else { segs.last().map(|s| s.end()) };
     for i in 0..nj {
@@ -544,17 +776,29 @@ fn build(
         };
         let x = d0.cross(d1);
         let lam = ((m * sb - m0 * sb0).cross(d1)).dot(x) / x.len2();
-        let exact = (matches!(segs.get(ip), Some(Seg::Arc { .. })) || matches!(segs.get(i), Some(Seg::Arc { .. })))
-            && t.dot(n * side) > 1.0 - 1e-9
-            && t0.dot(n * side) > 1.0 - 1e-9;
+        let curved = |x: Option<&Seg>| matches!(x, Some(Seg::Arc { .. } | Seg::Curve { .. }));
+        let free = segs.get(ip).is_some_and(Seg::free) || segs.get(i).is_some_and(Seg::free);
+        let exact = (curved(segs.get(ip)) || curved(segs.get(i))) && t.dot(n * side) > 1.0 - 1e-9 && t0.dot(n * side) > 1.0 - 1e-9;
         if exact {
             let (Some(prev), Some(cur)) = (segs.get(ip), segs.get(i)) else { return Err(unsupported("corner segments")) };
-            pa.push(
-                offset_joint(prev, cur, n, if sides.is_some() { sb } else { r }).ok_or_else(|| too_large("the blend's offset walls do not meet"))?,
-            );
+            let d = if sides.is_some() { sb } else { r };
+            if free {
+                let (q, u0, u1) = offset_joint_free(prev, cur, n, d).ok_or_else(|| too_large("the blend's offset walls do not meet"))?;
+                if let Some(x) = face_u.get_mut(ip) {
+                    x.1 = u0;
+                }
+                if let Some(x) = face_u.get_mut(i) {
+                    x.0 = u1;
+                }
+                pa.push(q);
+            } else {
+                pa.push(offset_joint(prev, cur, n, d).ok_or_else(|| too_large("the blend's offset walls do not meet"))?);
+            }
             if let Some(slot) = curved_joint.get_mut(i) {
                 *slot = true;
             }
+        } else if free {
+            return Err(unsupported("a sharp corner between a free-form edge and a sloping wall"));
         } else {
             pa.push(p + m0 * sb0 + d0 * lam);
         }
@@ -575,7 +819,11 @@ fn build(
         }
         let p = joint_point(i).ok_or_else(|| unsupported("degenerate loop joint"))?;
         if !crate::blend::extension_fits(f, p, *q, size * 1e-7) {
-            return Err(too_large("the blend is larger than the neighbouring faces"));
+            // A narrow corner sends the mitre far into the face: say which corner.
+            return Err(too_large(&format!(
+                "the blend is larger than the neighbouring faces at the sharp corner near ({:.2}, {:.2}, {:.2})",
+                p.x, p.y, p.z
+            )));
         }
     }
     // The offset arcs must not turn inside out; an arc of exactly the blend's radius shrinks
@@ -604,6 +852,21 @@ fn build(
     }
     if collapsed.iter().all(|x| *x) {
         return Err(too_large("the blend is larger than a corner radius"));
+    }
+    // Free-form pieces: their blend surfaces and rails.
+    let mut curve_fits: Vec<Option<CurveFit>> = Vec::with_capacity(k);
+    for (i, s) in segs.iter().enumerate() {
+        if !s.free() {
+            curve_fits.push(None);
+            continue;
+        }
+        let (_, t, sf, sw, _) = frame(i, s.start()).ok_or_else(|| unsupported("the face and wall meet at an angle the blend can't take"))?;
+        if t.dot(n * side) < 1.0 - 1e-9 {
+            return Err(unsupported("a free-form loop edge whose wall is not square to the face"));
+        }
+        let wall = walls.get(i).and_then(|w| faces.get(*w)).ok_or_else(|| KernelError::Failed("wall".into()))?;
+        let fit = fit_free(s, wall, n, t, (sf, sw), round, face_u.get(i).copied().unwrap_or((0.0, 1.0)), tol)?;
+        curve_fits.push(Some(fit));
     }
     let mut va: Vec<mt::Vertex> = pa.iter().map(|p| builder::vertex(p3(*p))).collect();
     // A collapsed piece starts and ends at one vertex.
@@ -712,9 +975,14 @@ fn build(
             return None;
         }
         let (a, b) = (vs.get(i)?, vs.get(nxt(i))?);
-        Some(match *s {
+        Some(match s {
             Seg::Line { .. } => builder::line(a, b),
-            Seg::Arc { mid, .. } => builder::circle_arc(a, b, p3(offset(mid, s))),
+            Seg::Arc { mid, .. } => builder::circle_arc(a, b, p3(offset(*mid, s))),
+            Seg::Curve { .. } => {
+                let fit = curve_fits.get(i)?.as_ref()?;
+                let c = if std::ptr::eq(vs, va.as_slice()) { &fit.face } else { &fit.wall };
+                mt::Edge::try_new(a, b, c.clone()).ok()?
+            }
         })
     };
     let piece_of = |s: &Seg| segs.iter().position(|x| std::ptr::eq(x, s)).unwrap_or(0);
@@ -738,10 +1006,7 @@ fn build(
                 let (Some(a), Some(b), Some(s), Some(wf)) = (vb.get(i), vb.get(nxt(i)), segs.get(i), walls.get(i)) else {
                     return Err(KernelError::Failed("rail".into()));
                 };
-                let mid = match *s {
-                    Seg::Line { a, b } => (a + b) * 0.5,
-                    Seg::Arc { mid, .. } => mid,
-                };
+                let mid = s.mid();
                 let want = wall_off(mid, s);
                 let g = faces.get(*wf).ok_or_else(|| KernelError::Failed("wall".into()))?;
                 g.edge_iter()
@@ -885,6 +1150,7 @@ fn build(
             continue;
         };
         let swept: mt::Shell = match *s {
+            Seg::Curve { .. } => Default::default(),
             Seg::Line { a, b } => {
                 // The cross-section at the start, swept along the whole edge and beyond (the
                 // face may reach past the edge's ends at a mitre).
@@ -923,7 +1189,9 @@ fn build(
                 builder::rsweep(&base, p3(c), v3(axis), mt::Rad(angle))
             }
         };
-        let mut surf = swept.face_iter().next().map(|x| x.oriented_surface()).ok_or_else(|| KernelError::Failed("blend surface".into()))?;
+        let fitted = curve_fits.get(i).and_then(|x| x.as_ref()).map(|x| x.surface.clone());
+        let mut surf =
+            fitted.or_else(|| swept.face_iter().next().map(|x| x.oriented_surface())).ok_or_else(|| KernelError::Failed("blend surface".into()))?;
         // Outward: toward the profile centre on a concave loop, away from it on a convex one.
         // An unequal chamfer's profile has no centre: its middle, away from the edge on a concave
         // loop (where the chamfer fills) and toward it on a convex one.
