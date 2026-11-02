@@ -112,3 +112,23 @@ fn a_flanges_sheet_names_hold_when_another_flange_goes() {
     assert!(solidcraft_doc::naming::named_face_point(&s.model.state(), None, &gone).is_err());
     assert!(solidcraft_doc::naming::named_face_point(&s.model.state(), Some("Body2"), &right).is_err());
 }
+
+/// A fold at 45° across a strip, with a bend zone wide for the strip: about a third of the bend's
+/// faces lies beyond the ends of its start line, along the bend, and they still take its names.
+#[test]
+fn a_bend_askew_across_a_sheet_keeps_its_names() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "R10", "thickness": "1 mm", "bend_radius": "10 mm", "active": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Strip"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [200, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Strip"}));
+    run(&mut s, "sheet.fold", json!({"points": [[90, -5, 1], [115, 20, 1]], "fixed": [10, 10, 1]}));
+    let fold = s.doc.features.last().map_or(0, |f| f.id);
+    let all = faces(&mut s);
+    for (side, radius) in [("inner", 10.0), ("outer", 11.0)] {
+        let name = format!("sheet:Body1:F{fold}.0:bend.{side}");
+        let f = named(&all, &name);
+        assert!(f.len() == 1 && f[0].2.is_some_and(|r| (r - radius).abs() < 1e-6), "{name}: {all:?}");
+    }
+}
