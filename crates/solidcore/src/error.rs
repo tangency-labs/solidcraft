@@ -281,6 +281,27 @@ pub enum SolidError {
         operation: &'static str,
     },
 
+    /// A fillet refused as too large, with the largest size that builds it (opt-in
+    /// `fixes.fillet_gn_section_generator`; the fork's `GetFitRadius`, `GetFitEdge` and
+    /// `GetFitKind`, which its capi's `smlib_blend_fit_size` reads, tangency-labs/smlib#79,
+    /// WR-696). Returned in place of [`SolidError::Upstream`] with the same `code` (so
+    /// [`SolidError::sm_status`] is unchanged) only when the refusal's cause has a size; a
+    /// radius law has none. The fillet session's error info holds the reason and comment.
+    #[error("{operation}: upstream status {code}: refused; the largest size that builds is {}", .fit.size)]
+    FilletRefused {
+        /// Operation that failed.
+        operation: &'static str,
+        /// Upstream `SmStatus` value (`SM_ERR`).
+        code: i32,
+        /// Entity involved, when known (the [`SolidError::Upstream`]'s).
+        entity: Option<EntityRef>,
+        /// Why there is no room, when the refusal names it.
+        reason: Option<crate::blend::fillet_executive::NoRoomReason>,
+        /// The largest size that builds: a radius, a factor on two offsets, or a chord
+        /// width ([`crate::blend::fillet_executive::FitKind`]), for the blend of `fit.edge`.
+        fit: crate::blend::fillet_executive::FitSize<EdgeId>,
+    },
+
     /// The operation needs an upstream routine whose unit is not ported yet (a
     /// plan back-edge). Returned instead of panicking or faking a result; every
     /// site carries a `// UNPORTED(<unit id>): <C++ symbol>` comment so the
@@ -533,7 +554,7 @@ impl SolidError {
     #[must_use]
     pub const fn sm_status(&self) -> Option<i32> {
         match self {
-            Self::Upstream { code, .. } => Some(*code),
+            Self::Upstream { code, .. } | Self::FilletRefused { code, .. } => Some(*code),
             Self::Nlib { .. } => Some(SM_ERR),
             Self::InvalidInput { .. }
             | Self::NotFound { .. }
@@ -612,6 +633,7 @@ impl SolidError {
             | Self::Unsupported { operation, .. }
             | Self::PortInvariant { operation, .. }
             | Self::Upstream { operation, .. }
+            | Self::FilletRefused { operation, .. }
             | Self::Nlib { operation, .. }
             | Self::PreparationRequired { operation }
             | Self::Cancelled { operation } => operation,
@@ -624,7 +646,9 @@ impl SolidError {
     pub fn entity(&self) -> Option<EntityRef> {
         match self {
             Self::NotFound { entity, .. } => Some(*entity),
-            Self::Degenerate { entity, .. } | Self::Upstream { entity, .. } => *entity,
+            Self::Degenerate { entity, .. }
+            | Self::Upstream { entity, .. }
+            | Self::FilletRefused { entity, .. } => *entity,
             Self::InvalidInput { .. }
             | Self::NotConverged { .. }
             | Self::Unsupported { .. }

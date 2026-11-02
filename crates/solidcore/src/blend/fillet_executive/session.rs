@@ -94,6 +94,8 @@ use crate::kernel::Kernel;
 use crate::surface::surface::Surface;
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
+pub mod ball_regular;
+pub mod band_cuts;
 mod big_radius;
 mod classification;
 mod cliff_overflow;
@@ -102,6 +104,7 @@ mod corner_marks;
 mod crossing_rails;
 mod ease;
 pub(crate) mod finish;
+pub mod fit_size;
 mod original_merge;
 mod original_trim;
 mod overflow_first;
@@ -2206,6 +2209,25 @@ impl<'target> FilletSession<'target> {
         &self.executive.error
     }
 
+    /// `GetFitRadius`, `GetFitEdge`, `GetFitKind` (the fork's, tangency-labs/smlib#79
+    /// a3d6d81): with a refusal as too large ([`ErrorInfo::no_room_reason`]), the largest
+    /// size that builds the refused blend and its edge, computed from the refusal's cause;
+    /// `None` when its cause has no size (a radius law) or no refusal noted one. Only with
+    /// `fixes.fillet_gn_section_generator`.
+    #[must_use]
+    pub fn fit_size(&self) -> Option<crate::blend::fillet_executive::FitSize<EdgeId>> {
+        let fit = self.executive.fit_size()?;
+        let edge = match fit.edge {
+            Some(FilletObject::Topology(FilletBody::Target, EntityRef::Edge(e))) => Some(e),
+            _ => None,
+        };
+        Some(crate::blend::fillet_executive::FitSize {
+            size: fit.size,
+            edge,
+            kind: fit.kind,
+        })
+    }
+
     /// `SetDoGlobalMerge`.
     pub fn set_do_global_merge(&mut self, do_global_merge: bool) {
         self.executive.set_do_global_merge(do_global_merge);
@@ -2844,6 +2866,265 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
             .and_then(Option::as_mut)
             .ok_or_else(|| invalid("solver is not live in this session"))?;
         trace_reach::extend_trace_to_its_rails(k, self.target, current)
+    }
+
+    fn creation_ball_is_regular(
+        &mut self,
+        k: &mut Kernel,
+        solver: FilletObject,
+    ) -> Result<(ball_regular::BallStation, bool)> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        let current = self
+            .solvers
+            .get_mut(id.0 as usize)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("solver is not live in this session"))?;
+        let const_radius = current.solver_type()? == FilletSolverType::ConstRadius;
+        let station = ball_regular::ball_is_regular(k, self.target, current)?;
+        Ok((station, const_radius))
+    }
+
+    fn creation_solver_fit(
+        &self,
+        solver: FilletObject,
+    ) -> Result<Option<crate::blend::fillet_executive::p3::SolverFit<FilletObject>>> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        let current = self
+            .solvers
+            .get(id.0 as usize)
+            .and_then(Option::as_ref)
+            .ok_or_else(|| invalid("solver is not live in this session"))?;
+        let base = current.base();
+        let Some(edgeuse) = base.edgeuse(0)? else {
+            return Ok(None);
+        };
+        let Some(edge) = crate::topology::edgeuse::p1::edge(self.target, edgeuse)? else {
+            return Ok(None);
+        };
+        // FitMargin: a thousand of the blended edge's tolerances
+        let fit_margin = 1000.0 * crate::topology::edge::tolerance(self.target, edge)?;
+        let offsets = match (base.surface(0)?, base.surface(1)?) {
+            (Some(a), Some(b)) => Some([a.surface.offset_distance(), b.surface.offset_distance()]),
+            _ => None,
+        };
+        Ok(Some(crate::blend::fillet_executive::p3::SolverFit {
+            edge: FilletObject::Topology(FilletBody::Target, EntityRef::Edge(edge)),
+            fit_margin,
+            offsets,
+        }))
+    }
+
+    fn creation_band_cuts_the_part(
+        &mut self,
+        k: &mut Kernel,
+        solver: FilletObject,
+    ) -> Result<Option<crate::blend::fillet_executive::p3::SolverCut<FilletObject>>> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        let current = self
+            .solvers
+            .get_mut(id.0 as usize)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("solver is not live in this session"))?;
+        // sm_BlendAddsMaterial: IsConcaveEdge of the solver's edge
+        let edge = match current.base().edgeuse(0)? {
+            Some(edgeuse) => crate::topology::edgeuse::p1::edge(self.target, edgeuse)?,
+            None => None,
+        };
+        let edge = edge.ok_or_else(|| SolidError::null_pointer(OP))?;
+        if crate::blend::fillet_solver::p5::is_concave_edge(k, self.target, edge)? {
+            return Ok(None);
+        }
+        let Some(cut) = band_cuts::band_cuts_the_part(k, self.target, current)? else {
+            return Ok(None);
+        };
+        let chamfer = current.base().fsg.as_ref().is_some_and(|fsg| {
+            fsg.fillet_surface_generator_type() == FilletSurfaceGeneratorType::Linear
+        });
+        Ok(Some(crate::blend::fillet_executive::p3::SolverCut {
+            radius: cut.radius,
+            setback: cut.setback,
+            edge: Some(FilletObject::Topology(
+                FilletBody::Target,
+                EntityRef::Edge(edge),
+            )),
+            chamfer,
+        }))
+    }
+
+    fn creation_largest_size_on_its_faces(
+        &mut self,
+        k: &mut Kernel,
+        solver: FilletObject,
+        only: Option<FilletObject>,
+    ) -> Result<Option<(f64, crate::blend::fillet_executive::FitKind)>> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        let only = match only {
+            None => None,
+            Some(FilletObject::Topology(FilletBody::Target, EntityRef::Face(face))) => Some(face),
+            Some(_) => return Err(invalid("the fit's face is not a target face")),
+        };
+        let current = self
+            .solvers
+            .get_mut(id.0 as usize)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("solver is not live in this session"))?;
+        fit_size::largest_size_on_its_faces(k, self.target, current, only)
+    }
+
+    fn creation_polygons_taken_whole(
+        &mut self,
+        k: &mut Kernel,
+        solvers: &[FilletObject],
+    ) -> Result<Vec<(f64, FilletObject)>> {
+        // the faces the blends roll on (the fork's map of face pointers, here in face order),
+        // each with its blends in the executive's order
+        let mut on: BTreeMap<FaceId, Vec<(usize, usize)>> = BTreeMap::new();
+        for &solver in solvers {
+            let FilletObject::Solver(id) = solver else {
+                return Err(invalid("object is not a solver"));
+            };
+            let index = id.0 as usize;
+            let current = self.solver(id)?;
+            let (rolls, law) = ball_regular::rolls_a_ball(current);
+            if !rolls || law {
+                continue;
+            }
+            for rail in 0..2 {
+                if let Some(edgeuse) = current.base().edgeuse(rail)? {
+                    if let Some(face) = crate::topology::edgeuse::p1::face(self.target, edgeuse)? {
+                        on.entry(face).or_default().push((index, rail));
+                    }
+                }
+            }
+        }
+        let mut out = Vec::new();
+        for (face, blends) in on {
+            // each blend's solver taken out for the sizing, put back after
+            let mut taken: Vec<(usize, usize, SolverObject)> = Vec::new();
+            for &(index, rail) in &blends {
+                if let Some(object) = self.solvers.get_mut(index).and_then(Option::take) {
+                    taken.push((index, rail, object));
+                }
+            }
+            // a solver on the face twice (both its faces) cannot be held twice: not sized
+            let result = if taken.len() == blends.len() {
+                let mut views: Vec<fit_size::OnFace<'_>> = taken
+                    .iter_mut()
+                    .map(|(_, rail, object)| fit_size::OnFace {
+                        solver: object,
+                        rail: *rail,
+                    })
+                    .collect();
+                fit_size::polygon_fit(k, self.target, face, &mut views)
+            } else {
+                Ok(None)
+            };
+            for (index, _, object) in taken {
+                if let Some(slot) = self.solvers.get_mut(index) {
+                    *slot = Some(object);
+                }
+            }
+            if let (Some(best), Some(&(first, _))) = (result?, blends.first()) {
+                let id = u32::try_from(first).map_err(|_| invalid("solver index out of range"))?;
+                out.push((best, FilletObject::Solver(FilletSolverId(id))));
+            }
+        }
+        Ok(out)
+    }
+
+    fn creation_circle_tops(
+        &mut self,
+        k: &mut Kernel,
+        solver: FilletObject,
+    ) -> Result<Vec<(f64, FilletObject)>> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        let current = self
+            .solvers
+            .get_mut(id.0 as usize)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("solver is not live in this session"))?;
+        let mut out = Vec::new();
+        for (rho, edge) in fit_size::circle_top_fit(k, self.target, current)? {
+            // FitMargin: a thousand of the edge's tolerances
+            let margin = 1000.0 * crate::topology::edge::tolerance(self.target, edge)?;
+            out.push((
+                (rho - margin).max(0.0),
+                FilletObject::Topology(FilletBody::Target, EntityRef::Edge(edge)),
+            ));
+        }
+        Ok(out)
+    }
+
+    fn creation_bands_meet(
+        &mut self,
+        k: &mut Kernel,
+        solvers: &[FilletObject],
+    ) -> Result<Vec<(f64, FilletObject)>> {
+        let mut out = Vec::new();
+        for &a in solvers {
+            for &b in solvers {
+                let (FilletObject::Solver(ia), FilletObject::Solver(ib)) = (a, b) else {
+                    return Err(invalid("object is not a solver"));
+                };
+                if ia == ib {
+                    continue;
+                }
+                let (Some(ea0), Some(_)) = (
+                    self.solver(ia)?.base().edgeuse(0)?,
+                    self.solver(ib)?.base().edgeuse(0)?,
+                ) else {
+                    continue;
+                };
+                let edge = crate::topology::edgeuse::p1::edge(self.target, ea0)?
+                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                for ka in 0..2 {
+                    for kb in 0..2 {
+                        let fa = match self.solver(ia)?.base().edgeuse(ka)? {
+                            Some(e) => crate::topology::edgeuse::p1::face(self.target, e)?,
+                            None => continue,
+                        };
+                        let fb = match self.solver(ib)?.base().edgeuse(kb)? {
+                            Some(e) => crate::topology::edgeuse::p1::face(self.target, e)?,
+                            None => continue,
+                        };
+                        if fa != fb {
+                            continue;
+                        }
+                        let (Some(mut this), Some(mut other)) = (
+                            self.solvers.get_mut(ia.0 as usize).and_then(Option::take),
+                            self.solvers.get_mut(ib.0 as usize).and_then(Option::take),
+                        ) else {
+                            return Err(invalid("solver is not live in this session"));
+                        };
+                        let meet =
+                            fit_size::bands_meet_at(k, self.target, &mut this, &mut other, ka, kb);
+                        if let Some(slot) = self.solvers.get_mut(ia.0 as usize) {
+                            *slot = Some(this);
+                        }
+                        if let Some(slot) = self.solvers.get_mut(ib.0 as usize) {
+                            *slot = Some(other);
+                        }
+                        if let Some(meet) = meet? {
+                            out.push((
+                                meet,
+                                FilletObject::Topology(FilletBody::Target, EntityRef::Edge(edge)),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(out)
     }
 }
 

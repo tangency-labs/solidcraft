@@ -564,8 +564,9 @@ fn filter_solution<O: SolutionObject>(
 }
 /// The tolerance of the edge owning `curve` (`pCurveOwner->GetTolerance()` in
 /// `sm_ClassifyCurveSurfaceXSectPoint`), through a face-aware caller's `queries` and
-/// the curve's `handle`; `None` for a curve no edge owns, or when the caller cannot
-/// resolve it.
+/// the curve's `handle`, or else the edge's tolerance recorded on the curve
+/// (`topology::edge::evaluation_curve`'s copy carries it); `None` for a curve no edge
+/// owns, or when neither resolves it.
 ///
 /// # Errors
 ///
@@ -583,7 +584,7 @@ pub(super) fn curve_edge_tolerance<O>(
     }
     match (queries, handle) {
         (Some(queries), Some(handle)) => queries.curve_edge_tolerance(handle).transpose(),
-        _ => Ok(None),
+        _ => Ok(curve.owner_zone_tol_3d()),
     }
 }
 

@@ -1557,6 +1557,10 @@ fn executive(target: Option<Handle>) -> FilletExecutive<Handle> {
         overflow_edges: Vec::new(),
         mitred_edges: Vec::new(),
         fan_split_points: Vec::new(),
+        // the fork's refusal fit (WR-696): none noted, as `FilletExecutive::new` leaves it
+        fit_radius: -1.0,
+        fit_edge: None,
+        fit_kind: solidcore::blend::fillet_executive::FitKind::Radius,
     };
     executive.intersector.ignore_tangency = true;
     executive

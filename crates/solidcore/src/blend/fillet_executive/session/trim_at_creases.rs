@@ -20,8 +20,8 @@
 //!   fork's in address order).
 //! - **Fit sizes.** The three refusals step 5 sizes (`NoteFitOnFace` after the tangent
 //!   edge and the extension, `NoteFitRadius` from `sm_CornerTakesPerRadius` after the
-//!   whole edge; tangency-labs/smlib a3d6d81, 49f393d) are ported as refusals; their fit
-//!   sizes are not (`FIT(#2278)` at each).
+//!   whole edge; tangency-labs/smlib a3d6d81, 49f393d) note them with
+//!   `fixes.fillet_gn_section_generator` (WR-696, #2278).
 //! - **Section ends (not the fork's).** A round with WR-674's section ends is trimmed here
 //!   only with `fixes.fillet_section_end_trim_at_creases` (WR-706, #2223): each such end is
 //!   cut by its section's plane and closed by the section's flat face, and a side of that
@@ -173,6 +173,80 @@ const fn refusal(
 }
 
 impl FilletSession<'_> {
+    /// The fork's fit for a blend whose corners take the whole of its edge (a3d6d81): for a
+    /// constant ball, the edge's length over what its corners take per unit radius at both
+    /// ends (`sm_CornerTakesPerRadius`, over the solvers of the same radius), less the fit
+    /// margin, noted where some corner takes any.
+    fn note_fit_of_corners_taking_the_edge(
+        &mut self,
+        k: &mut Kernel,
+        solver: FilletObject,
+        solvers: &[FilletObject],
+    ) -> Result<()> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        let current = self.objects.solver(id)?;
+        let Some(eu) = current.base().edgeuse(0)? else {
+            return Ok(());
+        };
+        let Some(e) = eu1::edge(self.objects.target, eu)? else {
+            return Ok(());
+        };
+        let (rolls, on_edge) = super::ball_regular::rolls_a_ball(current);
+        if !rolls || on_edge {
+            return Ok(());
+        }
+        let offset = |o: &super::SolverObject| -> Result<f64> {
+            Ok(o.base()
+                .surface(0)?
+                .ok_or_else(|| SolidError::null_pointer(OP))?
+                .surface
+                .offset_distance())
+        };
+        let own = offset(current)?;
+        let mut blended = BTreeSet::new();
+        for &other in solvers {
+            let FilletObject::Solver(oid) = other else {
+                return Err(invalid("object is not a solver"));
+            };
+            let o = self.objects.solver(oid)?;
+            let (r, law) = super::ball_regular::rolls_a_ball(o);
+            if r && !law && (offset(o)? - own).abs() <= crate::math::EFF_ZERO * (1.0 + own.abs()) {
+                if let Some(oeu) = o.base().edgeuse(0)? {
+                    if let Some(oe) = eu1::edge(self.objects.target, oeu)? {
+                        blended.insert(oe);
+                    }
+                }
+            }
+        }
+        let target: &Brep = self.objects.target;
+        let v0 = edge::vertex(target, e)?;
+        let v1 = edge::other_vertex(target, e, v0)?;
+        let mut per = [0.0_f64; 2];
+        for (slot, v) in per.iter_mut().zip([v0, v1]) {
+            if let Some(v) = v {
+                *slot = super::fit_size::corner_takes_per_radius(k, target, v, e, &blended)?;
+            }
+        }
+        let curve =
+            edge::evaluation_curve(target, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let length = curve.length(k, &edge::interval(target, e)?, crate::math::EFF_ZERO)?;
+        if per[0] + per[1] > 0.0 {
+            let margin = 1000.0 * edge::tolerance(target, e)?;
+            let fit = smos_max(0.0, length / (per[0] + per[1]) - margin);
+            self.executive.note_fit_radius(
+                fit,
+                Some(FilletObject::Topology(
+                    FilletBody::Target,
+                    EntityRef::Edge(e),
+                )),
+                crate::blend::fillet_executive::FitKind::Radius,
+            );
+        }
+        Ok(())
+    }
+
     /// Runs `edit` on the target through the session's notifications (its records and
     /// attribute store, under the target's identities), with the identity its queries
     /// resolve the target's records by, as the session's own stitch of the target does.
@@ -570,7 +644,16 @@ impl FilletSession<'_> {
                                 && rolled_on.contains(&g)
                                 && is_tangent_edge(k, self.objects.target, e, tangency)?
                             {
-                                // FIT(#2278): NoteFitOnFace(g)
+                                // the fork's NoteFitOnFace(g) (49f393d; with
+                                // `fixes.fillet_gn_section_generator`, WR-696)
+                                if k.fixes.fillet_gn_section_generator {
+                                    let face = FilletObject::Topology(
+                                        FilletBody::Target,
+                                        EntityRef::Face(g),
+                                    );
+                                    self.executive
+                                        .note_fit_on_face(k, &mut self.objects, face)?;
+                                }
                                 return refuse(
                                     note,
                                     refusal(
@@ -636,7 +719,15 @@ impl FilletSession<'_> {
         for i in 0..solvers.len() {
             let has = round_of.values().any(|&r| r == i);
             if has && !kept_rounds.contains(&i) {
-                // FIT(#2278): NoteFitRadius from sm_CornerTakesPerRadius at each end
+                // the largest radius that keeps a length of the edge: its corners take
+                // r <u, e> at each end (sm_CornerTakesPerRadius), the edge's length L in all
+                // at r = L / (s0 + s1); open, so less the fit margin (the fork's a3d6d81;
+                // with `fixes.fillet_gn_section_generator`, WR-696)
+                if k.fixes.fillet_gn_section_generator {
+                    if let Some(&solver) = solvers.get(i) {
+                        self.note_fit_of_corners_taking_the_edge(k, solver, solvers)?;
+                    }
+                }
                 return refuse(
                     note,
                     refusal(
@@ -697,7 +788,13 @@ impl FilletSession<'_> {
             let outcome = extend(k, self.objects.target, f, &rails, blended_edges, tol)?;
             match outcome {
                 ExtendOutcome::Refused(why) => {
-                    // FIT(#2278): NoteFitOnFace(f)
+                    // the fork's NoteFitOnFace(f) (49f393d; with
+                    // `fixes.fillet_gn_section_generator`, WR-696)
+                    if k.fixes.fillet_gn_section_generator {
+                        let face = FilletObject::Topology(FilletBody::Target, EntityRef::Face(f));
+                        self.executive
+                            .note_fit_on_face(k, &mut self.objects, face)?;
+                    }
                     return refuse(
                         note,
                         refusal(

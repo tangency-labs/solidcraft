@@ -199,9 +199,19 @@ fn folding_balls_are_refused_naming_the_radius() {
     let (err, reason) = spline_round(true, FOLDS).expect_err("a folded round is refused");
     eprintln!("{err}");
     assert_eq!(reason, Some(NoRoomReason::BallsFold));
-    // the fork's d01d7b0 build finds the fold at the same radius (19.6284)
+    // since the fork's tangency-labs/smlib#79 (410dfe1, WR-696) the fold is found by
+    // `BallIsRegular` before the corners, where the law first stops being progressive:
+    // the fork's 5e8c9c1 build names 19.63563 (its capi test: 19.6356317), and 7.838673
+    // for the law peaking at 13.2 (capi: 7.8386732); d01d7b0's `sm_BallsFold` named 19.6284
     assert!(
-        err.contains("fold over one another where its radius is 19.6284:"),
+        err.contains("fold over one another where its radius is 19.63563:"),
+        "{err}"
+    );
+    let (err, reason) =
+        spline_round(true, [2.0, 2.0, 13.2, 3.0, 2.0]).expect_err("a folded round is refused");
+    assert_eq!(reason, Some(NoRoomReason::BallsFold));
+    assert!(
+        err.contains("fold over one another where its radius is 7.838673:"),
         "{err}"
     );
 }

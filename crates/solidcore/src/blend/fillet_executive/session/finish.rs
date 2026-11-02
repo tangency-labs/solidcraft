@@ -514,6 +514,24 @@ impl FilletSession<'_> {
                 self.executive.error = note;
             }
         }
+        // Opt-in (`fixes.fillet_gn_section_generator`, WR-696): a refusal with a size that
+        // builds carries it on the error, its status unchanged.
+        if let Err(SolidError::Upstream {
+            operation,
+            code,
+            entity,
+        }) = result
+        {
+            if let Some(fit) = self.fit_size() {
+                return Err(SolidError::FilletRefused {
+                    operation,
+                    code,
+                    entity,
+                    reason: self.executive.error.no_room,
+                    fit,
+                });
+            }
+        }
         result?;
         if !k.fixes.fillet_refuse_non_manifold_result {
             return Ok(());

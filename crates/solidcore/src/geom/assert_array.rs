@@ -365,7 +365,7 @@ impl AssertReport {
 /// notation for `precision` significant digits (exponent form when the decimal
 /// exponent is below -4 or at least `precision`), trailing zeros removed, right-aligned
 /// in `width`.
-fn c_general(x: f64, width: usize, precision: usize) -> String {
+pub(crate) fn c_general(x: f64, width: usize, precision: usize) -> String {
     let p = precision.max(1);
     let body = if x.is_nan() {
         if x.is_sign_negative() { "-nan" } else { "nan" }.to_string()

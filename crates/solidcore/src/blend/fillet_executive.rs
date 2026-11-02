@@ -13,4 +13,4 @@ pub mod topology_changes;
 
 // Supported public paths; numbered modules are implementation partitions.
 pub use p1::{FilletLaw, FilletLawKind};
-pub use p3::NoRoomReason;
+pub use p3::{FitKind, FitSize, NoRoomReason};

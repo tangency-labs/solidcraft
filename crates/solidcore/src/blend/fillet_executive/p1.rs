@@ -706,6 +706,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             overflow_edges: Vec::new(),
             mitred_edges: Vec::new(),
             fan_split_points: Vec::new(),
+            fit_radius: -1.0,
+            fit_edge: None,
+            fit_kind: super::p3::FitKind::Radius,
         }
     }
 
