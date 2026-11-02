@@ -13,13 +13,22 @@
 //! - Compact layout with the History at the left: the History's edge panel stays allocated
 //!   (empty) under the dialog, so the view keeps its size and the model doesn't move.
 //! - The Sketch Palette keeps the right edge; Delete confirmations stay where they are.
+//!
+//! With Dialogs › At the view's edge, a dialog dragged onto the browser or left History locks
+//! there (`dialog_snap_browser`, #8168): changing that column's width moves it too. Dragging
+//! clear of the edge unlocks, so a free place on the left still works.
 
-use egui::{Rect, pos2};
+use egui::{Rect, pos2, vec2};
 use serde::{Deserialize, Serialize};
 
 use crate::SolveApp;
 use crate::theme::Tokens;
 use crate::ui_kit::{Container, Surface};
+
+/// How close a dragged Edge dialog's left side must be to the browser/History edge to lock (#8168).
+const SNAP_PX: f32 = 14.0;
+/// How far past that edge a snapped dialog must be dragged before it unlocks.
+const UNSNAP_PX: f32 = 24.0;
 
 /// Where command dialogs open (Preferences › Interface › Dialogs).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,4 +110,65 @@ pub(crate) fn layout(app: &mut SolveApp, available: Rect) {
 pub(crate) fn bounds(app: &SolveApp, column: Rect, viewport: Rect) -> Rect {
     let gap = Container::for_layout(app.ui.layout, Surface::Feature).gap();
     Rect::from_min_max(column.min, pos2(viewport.right().max(column.right()), column.bottom() + gap))
+}
+
+/// The x a dialog at the view's edge snaps to: the content area's left, which already clears the
+/// browser and a left History. `None` when Dialogs is In the left column, or when nothing is at
+/// the left to snap to.
+pub(crate) fn snap_x(app: &SolveApp, content: Rect) -> Option<f32> {
+    if app.preferences.dialog_place != DialogPlace::Edge || !content.is_finite() {
+        return None;
+    }
+    let browser = app.ui.show_browser && app.shell.browser.is_some_and(|r| r.is_positive());
+    let history = left_history(app) && app.shell.history.is_some_and(|r| r.is_positive());
+    (browser || history).then_some(content.left())
+}
+
+/// Horizontal offset that parks a docked dialog of `width` so its left edge sits at `snap_x`.
+pub(crate) fn snap_offset_x(side: crate::frame::Side, docked_x: f32, width: f32, snap_x: f32) -> f32 {
+    match side {
+        // Right-docked cards place by their right edge.
+        crate::frame::Side::Right => snap_x + width - docked_x,
+        crate::frame::Side::Left => snap_x - docked_x,
+    }
+}
+
+/// Engage or clear the remembered browser snap from a title-band drag, and rewrite the stored
+/// horizontal offset so a snapped dialog follows the browser or left History (#8168).
+pub(crate) fn follow_browser_snap(
+    app: &mut SolveApp,
+    ctx: &egui::Context,
+    side: crate::frame::Side,
+    drag_key: &str,
+    content: Rect,
+    dialog: Rect,
+    width: f32,
+) {
+    let Some(edge) = snap_x(app, content) else {
+        return;
+    };
+    if !dialog.is_finite() || !width.is_finite() || width < crate::frame::DIALOG_MIN_W * 0.5 {
+        return;
+    }
+    let dist = dialog.left() - edge;
+    let dragging = crate::frame::dock_dragging(ctx);
+    if dragging {
+        if app.preferences.dialog_snap_browser && dist.abs() >= UNSNAP_PX {
+            app.preferences.dialog_snap_browser = false;
+        }
+    } else if dist.abs() <= SNAP_PX {
+        app.preferences.dialog_snap_browser = true;
+    }
+    if !app.preferences.dialog_snap_browser || dragging {
+        return;
+    }
+    let moved = crate::frame::dock_offset(ctx, drag_key);
+    let want_x = snap_offset_x(side, side.anchor_x(content), width, edge);
+    if (moved.x - want_x).abs() <= 0.5 && (dialog.left() - edge).abs() <= 1.0 {
+        return;
+    }
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(("sc_dock_offset", drag_key)), vec2(want_x, moved.y)));
+    if (dialog.left() - edge).abs() > 1.0 {
+        ctx.request_repaint();
+    }
 }

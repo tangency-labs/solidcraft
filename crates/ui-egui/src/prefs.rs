@@ -1374,6 +1374,10 @@ preference_settings! {
     /// Where command dialogs open: at the view's edge, or in the left column in place of the
     /// browser and the History there (#6707).
     dialog_place: crate::dialog_column::DialogPlace = Default::default(), PAGE_LAYOUT;
+    /// When a command dialog at the view's edge last locked to the browser or left History
+    /// (#8168). Set by dragging onto that edge; cleared by dragging clear of it. Not a Preferences
+    /// control — stored in the background so a resized browser moves the dialog with it.
+    dialog_snap_browser: bool = false;
     /// The names the browser, dialogs and lists show for the origin planes (#6491).
     origin_plane_names: OriginPlaneNames = OriginPlaneNames::default(), PAGE_DESIGN;
     /// When components' bodies sit in a Bodies folder in the browser (#4217).
