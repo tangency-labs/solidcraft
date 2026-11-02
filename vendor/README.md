@@ -341,9 +341,10 @@ SolidCraft changes:
   compositor wasn't showing stalled the main window behind its present.
 - `src/lib.rs`, `src/winit.rs`: the device's lost callback marks `RenderState::device_lost`
   (`DeviceLost`), and the painter draws nothing on a lost device. Before a frame's uploads it
-  submits nothing (`DeviceLost::probe`), so a device the driver lost is found by that
-  submission rather than by the first queue write, which panicked inside wgpu-core
-  (`PendingWrites::activate`, #4172).
+  submits a command buffer holding a debug marker (`DeviceLost::probe`), so a device the
+  driver lost is found by opening that command list rather than by the first queue write,
+  which panicked inside wgpu-core (`PendingWrites::activate`, #4172). An empty submission
+  only signalled a fence, which a reset D3D12 device let through (#6528).
 - `src/lib.rs`, `src/winit.rs`: a surface configure that meets a lost device is not taken as
   configured (`configure_captured`): wgpu reports device-loss errors to no error scope, and on
   D3D12 a driver reset found by the configure has already dropped the surface's configuration.

@@ -101,8 +101,17 @@ pub enum PlaneRef {
     AxisPoint { axis: Box<GeoRef>, point: Box<GeoRef> },
     /// Through three points.
     ThreePoints { a: Box<GeoRef>, b: Box<GeoRef>, c: Box<GeoRef> },
-    /// Tangent to a face (cylinder, cone, sphere, torus) where the point `at` lies over it.
-    Tangent { face: Box<GeoRef>, at: Vec3 },
+    /// Tangent to a face (cylinder, cone, sphere, torus) where the point `at` lies over it. With
+    /// a `reference` (a plane or planar face), it touches where the face turns towards the
+    /// reference instead, turned by `angle` about the face's axis, on the side of `at` (#8822).
+    Tangent {
+        face: Box<GeoRef>,
+        at: Vec3,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reference: Option<Box<GeoRef>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        angle: Option<Expr>,
+    },
     /// Square to an edge or sketch curve, a fraction `t` (expression, 0…1) of the way along it.
     AlongPath { path: Box<GeoRef>, t: Expr },
     /// Through a straight edge (or line, axis) and square to a plane (or planar face).
@@ -1208,9 +1217,10 @@ pub enum FeatureKind {
         body: Option<BodyName>,
     },
     /// A perforation field (#732): round holes of `diameter` on a staggered (60°) or square grid of `pitch` over the
-    /// whole flat sheet, kept `margin` (default: the diameter) clear of its edges, cut-outs and bend zones. Stored like
-    /// a cosmetic thread: the holes go to the flat pattern, the DXF and the measured volume, not into the B-rep, so a
-    /// panel can carry tens of thousands of them.
+    /// whole flat sheet, or inside the closed profiles of `sketch` when it is given, kept `margin` (default: the
+    /// diameter) clear of its edges, cut-outs, bend zones and the outline. Stored like a cosmetic thread: the holes go
+    /// to the flat pattern, the DXF and the measured volume, not into the B-rep, so a panel can carry tens of thousands
+    /// of them.
     SheetPerforate {
         #[walk(length = "Diameter")]
         diameter: Expr,
@@ -1223,6 +1233,13 @@ pub enum FeatureKind {
         pattern: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
+        /// The field's outline: a sketch on a face of the sheet. None: the whole sheet.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sketch: Option<SketchId>,
+        /// Which of the outline sketch's profiles bound the field. None: all of them.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(profiles_of = sketch)]
+        profiles: Option<ProfileSel>,
     },
     /// Fold a sheet along a line on its base face: a sketch line (followed when the sketch
     /// changes), else the points `a`, `b`.
@@ -2223,7 +2240,11 @@ pub enum PatternKind {
         reversed2: bool,
     },
     Circular {
-        origin: Position,
+        /// A point on the axis the copies turn about: numbers, or length expressions it follows
+        /// as the parameters change (#10852).
+        #[serde(with = "point_expr")]
+        #[walk(placement)]
+        origin: PointExpr,
         axis: Dir,
         #[walk(unitless = "Quantity")]
         count: Expr,
@@ -2432,6 +2453,167 @@ impl FeatureKind {
             FeatureKind::MeshImport { .. } => "MeshFeature",
             FeatureKind::MeshConvert { .. } => "MeshConvertFeature",
         }
+    }
+
+    /// Design-file variant key (e.g. `"extrude"`, `"box"`, `"sheet_flange"`).
+    pub fn kind_key(&self) -> &'static str {
+        match self {
+            FeatureKind::BodyTransfer { .. } => "body_transfer",
+            FeatureKind::Sketch { .. } => "sketch",
+            FeatureKind::Extrude { .. } => "extrude",
+            FeatureKind::Revolve { .. } => "revolve",
+            FeatureKind::Fillet { .. } => "fillet",
+            FeatureKind::Chamfer { .. } => "chamfer",
+            FeatureKind::Box { .. } => "box",
+            FeatureKind::Cylinder { .. } => "cylinder",
+            FeatureKind::Sphere { .. } => "sphere",
+            FeatureKind::Torus { .. } => "torus",
+            FeatureKind::Cone { .. } => "cone",
+            FeatureKind::Combine { .. } => "combine",
+            FeatureKind::Pattern { .. } => "pattern",
+            FeatureKind::Mirror { .. } => "mirror",
+            FeatureKind::Hole { .. } => "hole",
+            FeatureKind::Thread { .. } => "thread",
+            FeatureKind::Loft { .. } => "loft",
+            FeatureKind::Sweep { .. } => "sweep",
+            FeatureKind::Shell { .. } => "shell",
+            FeatureKind::Draft { .. } => "draft",
+            FeatureKind::ConstructionPlane { .. } => "construction_plane",
+            FeatureKind::Split { .. } => "split",
+            FeatureKind::ConstructionAxis { .. } => "construction_axis",
+            FeatureKind::ConstructionPoint { .. } => "construction_point",
+            FeatureKind::SplitFace { .. } => "split_face",
+            FeatureKind::Scale { .. } => "scale",
+            FeatureKind::OffsetFace { .. } => "offset_face",
+            FeatureKind::DeleteFace { .. } => "delete_face",
+            FeatureKind::BoundingSolid { .. } => "bounding_solid",
+            FeatureKind::Pipe { .. } => "pipe",
+            FeatureKind::FrameMember { .. } => "frame_member",
+            FeatureKind::Emboss { .. } => "emboss",
+            FeatureKind::Rib { .. } => "rib",
+            FeatureKind::ReplaceFace { .. } => "replace_face",
+            FeatureKind::Align { .. } => "align",
+            FeatureKind::Coil { .. } => "coil",
+            FeatureKind::SheetBase { .. } => "sheet_base",
+            FeatureKind::SheetContour { .. } => "sheet_contour",
+            FeatureKind::SheetFlange { .. } => "sheet_flange",
+            FeatureKind::SheetHem { .. } => "sheet_hem",
+            FeatureKind::SheetPerforate { .. } => "sheet_perforate",
+            FeatureKind::SheetFold { .. } => "sheet_fold",
+            FeatureKind::SheetPath { .. } => "sheet_path",
+            FeatureKind::SheetUnfold { .. } => "sheet_unfold",
+            FeatureKind::SheetConvert { .. } => "sheet_convert",
+            FeatureKind::Boss { .. } => "boss",
+            FeatureKind::Lip { .. } => "lip",
+            FeatureKind::SnapFit { .. } => "snap_fit",
+            FeatureKind::Rest { .. } => "rest",
+            FeatureKind::BoundaryFill { .. } => "boundary_fill",
+            FeatureKind::Remove { .. } => "remove",
+            FeatureKind::Patch { .. } => "patch",
+            FeatureKind::Stitch { .. } => "stitch",
+            FeatureKind::Thicken { .. } => "thicken",
+            FeatureKind::SurfaceExtrude { .. } => "surface_extrude",
+            FeatureKind::Unstitch { .. } => "unstitch",
+            FeatureKind::ReverseNormal { .. } => "reverse_normal",
+            FeatureKind::SurfaceUntrim { .. } => "surface_untrim",
+            FeatureKind::SurfaceRevolve { .. } => "surface_revolve",
+            FeatureKind::SurfaceSweep { .. } => "surface_sweep",
+            FeatureKind::SurfaceLoft { .. } => "surface_loft",
+            FeatureKind::SurfaceOffset { .. } => "surface_offset",
+            FeatureKind::SurfaceRuled { .. } => "surface_ruled",
+            FeatureKind::SurfaceExtend { .. } => "surface_extend",
+            FeatureKind::SurfaceBlend { .. } => "surface_blend",
+            FeatureKind::SurfaceBoundary { .. } => "surface_boundary",
+            FeatureKind::SurfaceNetwork { .. } => "surface_network",
+            FeatureKind::SurfaceMatch { .. } => "surface_match",
+            FeatureKind::SurfaceFair { .. } => "surface_fair",
+            FeatureKind::SurfaceTrim { .. } => "surface_trim",
+            FeatureKind::Move { .. } => "move",
+            FeatureKind::Import { .. } => "import",
+            FeatureKind::MeshConvert { .. } => "mesh_convert",
+            FeatureKind::MeshImport { .. } => "mesh_import",
+        }
+    }
+
+    /// Map a display or Rust type name (e.g. `"HoleFeature"`, `"EdgeFlangeFeature"`)
+    /// to the canonical design-file variant key (`"hole"`, `"sheet_flange"`).
+    pub fn type_name_to_kind_key(name: &str) -> Option<&'static str> {
+        Some(match name {
+            "BodyTransferFeature" => "body_transfer",
+            "Sketch" => "sketch",
+            "ExtrudeFeature" => "extrude",
+            "RevolveFeature" => "revolve",
+            "FilletFeature" => "fillet",
+            "ChamferFeature" => "chamfer",
+            "BoxFeature" => "box",
+            "CylinderFeature" => "cylinder",
+            "SphereFeature" => "sphere",
+            "TorusFeature" => "torus",
+            "ConeFeature" => "cone",
+            "CombineFeature" => "combine",
+            "RectangularPatternFeature" | "PathPatternFeature" | "CircularPatternFeature" => "pattern",
+            "MirrorFeature" => "mirror",
+            "ConstructionPlane" => "construction_plane",
+            "HoleFeature" => "hole",
+            "ThreadFeature" => "thread",
+            "LoftFeature" => "loft",
+            "SweepFeature" => "sweep",
+            "ShellFeature" => "shell",
+            "DraftFeature" => "draft",
+            "SplitBodyFeature" => "split",
+            "SplitFaceFeature" => "split_face",
+            "ConstructionAxis" => "construction_axis",
+            "ConstructionPoint" => "construction_point",
+            "MoveFeature" => "move",
+            "ScaleFeature" => "scale",
+            "OffsetFacesFeature" => "offset_face",
+            "DeleteFaceFeature" => "delete_face",
+            "OffsetSurfaceFeature" => "surface_offset",
+            "BoundingSolidFeature" => "bounding_solid",
+            "PipeFeature" => "pipe",
+            "FrameMemberFeature" => "frame_member",
+            "EmbossFeature" => "emboss",
+            "BossFeature" => "boss",
+            "LipFeature" | "GrooveFeature" => "lip",
+            "SnapFitFeature" => "snap_fit",
+            "RestFeature" => "rest",
+            "BoundaryFillFeature" => "boundary_fill",
+            "BaseFlangeFeature" => "sheet_base",
+            "ContourFlangeFeature" => "sheet_contour",
+            "EdgeFlangeFeature" => "sheet_flange",
+            "HemFeature" => "sheet_hem",
+            "PerforateFeature" => "sheet_perforate",
+            "FoldFeature" => "sheet_fold",
+            "PathFlangeFeature" => "sheet_path",
+            "UnfoldFeature" | "RefoldFeature" => "sheet_unfold",
+            "ConvertToSheetMetalFeature" => "sheet_convert",
+            "CoilFeature" => "coil",
+            "RibFeature" | "WebFeature" => "rib",
+            "ReplaceFaceFeature" => "replace_face",
+            "AlignFeature" => "align",
+            "RemoveFeature" => "remove",
+            "PatchFeature" => "patch",
+            "SurfaceExtrudeFeature" => "surface_extrude",
+            "SurfaceRevolveFeature" => "surface_revolve",
+            "SurfaceSweepFeature" => "surface_sweep",
+            "SurfaceLoftFeature" => "surface_loft",
+            "BlendFeature" => "surface_blend",
+            "BoundaryFeature" => "surface_boundary",
+            "MatchFeature" => "surface_match",
+            "FairFeature" => "surface_fair",
+            "StitchFeature" => "stitch",
+            "ThickenFeature" => "thicken",
+            "TrimFeature" => "surface_trim",
+            "ExtendFeature" => "surface_extend",
+            "RuledSurfaceFeature" => "surface_ruled",
+            "UnstitchFeature" => "unstitch",
+            "ReverseNormalFeature" => "reverse_normal",
+            "UntrimFeature" => "surface_untrim",
+            "BaseFeature" => "import",
+            "MeshFeature" => "mesh_import",
+            "MeshConvertFeature" => "mesh_convert",
+            _ => return None,
+        })
     }
     /// Default name prefix (`Extrude` → `Extrude1`).
     pub fn base_name(&self) -> &'static str {
@@ -3604,12 +3786,18 @@ impl Document {
         } else {
             0
         };
-        let id = self.next_id.max(1);
-        self.next_id = id.checked_add(1).ok_or_else(|| DocError::Invalid("too many items in the design".into()))?;
         let name = match name {
             Some(n) if !n.trim().is_empty() => n.trim().to_string(),
             _ => self.unique_name(kind.base_name()),
         };
+        // Plane references share the feature namespace. A duplicate would silently select
+        // the first feature. Other shared names (a sketch and its extrude) remain supported.
+        let is_plane = matches!(kind, FeatureKind::ConstructionPlane { .. });
+        if self.features.iter().any(|f| f.name == name && (is_plane || matches!(f.kind, FeatureKind::ConstructionPlane { .. }))) {
+            return Err(DocError::Invalid(format!("another feature is called `{name}`")));
+        }
+        let id = self.next_id.max(1);
+        self.next_id = id.checked_add(1).ok_or_else(|| DocError::Invalid("too many items in the design".into()))?;
         let f = Feature {
             id,
             name,

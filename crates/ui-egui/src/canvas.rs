@@ -20,7 +20,7 @@ use crate::viewport::{Proj, projected_polygon};
 /// direction a growing value points.
 pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
     let st = app.session.world_state();
-    let first = d.inputs.first()?.items.first()?;
+    let first = &anchor_item(app, d)?;
     let (at, normal) = match first {
         Sel::Profile { sketch, index } => {
             let ss = st.sketch(*sketch)?;
@@ -250,12 +250,44 @@ pub(crate) fn blend_grow_dir(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
     Some(if edge_concave(m, index, p).unwrap_or(false) { n } else { -n })
 }
 
+/// The pick the dialog's arrow sits on: the first, or for a fillet or chamfer reopened from a
+/// click on one of its faces (Press Pull), its edge nearest the click, at the point on it nearest
+/// the click (#4986).
+fn anchor_item(app: &SolveApp, d: &Dialog) -> Option<Sel> {
+    let items = &d.inputs.first()?.items;
+    let first = items.first()?.clone();
+    let (Some(hint), Kind::Fillet { .. }) = (d.anchor_hint, &d.kind) else { return Some(first) };
+    let st = app.session.world_state();
+    let nearest = items
+        .iter()
+        .filter_map(|s| {
+            let Sel::Edge { body, index, .. } = s else { return None };
+            let at = nearest_on_polyline(st.body(body)?.mesh().edges.get(*index)?, hint)?;
+            Some((at.dist(hint), Sel::Edge { body: body.clone(), index: *index, point: at }))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0));
+    Some(nearest.map_or(first, |(_, s)| s))
+}
+
+/// The point of the polyline `pts` nearest `p`.
+fn nearest_on_polyline(pts: &[Vec3], p: Vec3) -> Option<Vec3> {
+    let on = |a: Vec3, b: Vec3| {
+        let ab = b - a;
+        let len2 = ab.dot(ab);
+        a + ab * if len2 > 0.0 { ((p - a).dot(ab) / len2).clamp(0.0, 1.0) } else { 0.0 }
+    };
+    pts.windows(2)
+        .filter_map(|w| if let [a, b] = w { Some(on(*a, *b)) } else { None })
+        .min_by(|x, y| x.dist(p).total_cmp(&y.dist(p)))
+        .or_else(|| pts.first().copied())
+}
+
 /// The directions Distance 1 and Distance 2 of a chamfer of two distances run from its edge at
 /// `at`: along the face that faces up most, or the other one with Flip, and along the remaining
 /// face (the kernel's `chamfer_tool_sides` picks them the same way). None for any other dialog.
 pub(crate) fn chamfer_face_dirs(app: &SolveApp, d: &Dialog, at: Vec3) -> Option<(Vec3, Vec3)> {
     let Kind::Fillet { chamfer: true, ctype: 1, flip, .. } = &d.kind else { return None };
-    let Some(Sel::Edge { body, index, .. }) = d.inputs.first()?.items.first() else { return None };
+    let Some(Sel::Edge { body, index, .. }) = &anchor_item(app, d) else { return None };
     let st = app.session.world_state();
     let mesh = st.body(body)?.mesh();
     let sides = edge_sides(&mesh, *index, at)?;
@@ -1830,7 +1862,9 @@ fn revolve_display_extent(app: &SolveApp, d: &Dialog, axis: (Vec3, Vec3)) -> Opt
             .ok()?;
         (angle, other)
     };
-    solidcraft_engine::doc::revolve_extent_with_convention(
+    // The solid refuses 0° and a sweep past a full turn, and the dialog says so. The handle
+    // still uses that boundary, so the grab point stays and the angle can be dragged back.
+    solidcraft_engine::doc::revolve_extent_for_handle(
         &state,
         &plane,
         &regions,
@@ -1962,6 +1996,19 @@ fn arrow(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The arrow's point on a picked edge: one point, a zero-length piece, a click past the end.
+    #[test]
+    fn nearest_on_polyline_handles_short_edges_and_clicks_past_the_end() {
+        let p = |x: f64, y: f64| Vec3::new(x, y, 0.0);
+        assert_eq!(nearest_on_polyline(&[], p(1.0, 1.0)), None);
+        assert_eq!(nearest_on_polyline(&[p(2.0, 3.0)], p(9.0, 9.0)), Some(p(2.0, 3.0)));
+        assert_eq!(nearest_on_polyline(&[p(2.0, 3.0), p(2.0, 3.0)], p(9.0, 9.0)), Some(p(2.0, 3.0)));
+        let edge = [p(0.0, 0.0), p(0.0, 0.0), p(10.0, 0.0)];
+        assert_eq!(nearest_on_polyline(&edge, p(4.0, 2.0)), Some(p(4.0, 0.0)));
+        assert_eq!(nearest_on_polyline(&edge, p(15.0, 1.0)), Some(p(10.0, 0.0)));
+        assert_eq!(nearest_on_polyline(&edge, p(-3.0, -1.0)), Some(p(0.0, 0.0)));
+    }
 
     #[test]
     fn offset_plane_preview_stays_within_its_square() {

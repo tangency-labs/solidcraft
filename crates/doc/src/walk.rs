@@ -335,6 +335,7 @@ impl Walk for PlaneRef {
                     p = base;
                 }
                 PlaneRef::AlongPath { t, .. } => return f(("Distance (0 to 1)", t, Kind::Unitless, ExprRole::Input)),
+                PlaneRef::Tangent { angle: Some(angle), .. } => return f(("Angle", angle, Kind::Angle, ExprRole::Input)),
                 // A plane seen from behind keeps its base's expressions (a sketch made with
                 // `flip` on an offset plane did not follow the offset's parameter).
                 PlaneRef::Flipped { base, .. } | PlaneRef::ThroughPoint { base, .. } => p = base,
@@ -361,6 +362,7 @@ impl Walk for PlaneRef {
                     p = base;
                 }
                 PlaneRef::AlongPath { t, .. } => return f(("Distance (0 to 1)", t, Kind::Unitless, ExprRole::Input)),
+                PlaneRef::Tangent { angle: Some(angle), .. } => return f(("Angle", angle, Kind::Angle, ExprRole::Input)),
                 // A plane seen from behind keeps its base's expressions (a sketch made with
                 // `flip` on an offset plane did not follow the offset's parameter).
                 PlaneRef::Flipped { base, .. } | PlaneRef::ThroughPoint { base, .. } => p = base,
@@ -415,7 +417,13 @@ impl PlaneRef {
                 b.walk_feature_refs(f, depth + 1);
                 c.walk_feature_refs(f, depth + 1);
             }
-            Self::Tangent { face, .. } | Self::AlongPath { path: face, .. } => face.walk_feature_refs(f, depth + 1),
+            Self::Tangent { face, reference, .. } => {
+                face.walk_feature_refs(f, depth + 1);
+                if let Some(r) = reference {
+                    r.walk_feature_refs(f, depth + 1);
+                }
+            }
+            Self::AlongPath { path, .. } => path.walk_feature_refs(f, depth + 1),
             Self::Origin { .. } | Self::Custom { .. } | Self::Placed { .. } | Self::Face { .. } => {}
         }
     }
@@ -446,7 +454,13 @@ impl PlaneRef {
                 b.walk_feature_refs_mut(f, depth + 1);
                 c.walk_feature_refs_mut(f, depth + 1);
             }
-            Self::Tangent { face, .. } | Self::AlongPath { path: face, .. } => face.walk_feature_refs_mut(f, depth + 1),
+            Self::Tangent { face, reference, .. } => {
+                face.walk_feature_refs_mut(f, depth + 1);
+                if let Some(r) = reference {
+                    r.walk_feature_refs_mut(f, depth + 1);
+                }
+            }
+            Self::AlongPath { path, .. } => path.walk_feature_refs_mut(f, depth + 1),
             Self::Origin { .. } | Self::Custom { .. } | Self::Placed { .. } | Self::Face { .. } => {}
         }
     }

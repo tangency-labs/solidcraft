@@ -11,10 +11,39 @@ const HALF: f64 = 40.0;
 // The remaining regions belong to the face, including the middle of each edge.
 const INSET: f64 = 0.68;
 
+fn camera(app: &SolveApp) -> Camera {
+    let mut cam = app.cam;
+    if !crate::render_workspace::active(app) {
+        cam.fov = app.view_fov();
+    }
+    cam
+}
+
+fn inverse_focal_length(cam: &Camera) -> f64 {
+    // The field of view spans the whole navigator, including the margin around its cube.
+    let half_height = f64::from(DESIGN_SIZE) / (2.0 * HALF);
+    if cam.fov.is_finite() { (cam.fov.clamp(0.0, std::f64::consts::FRAC_PI_2) * 0.5).tan() / half_height } else { 0.0 }
+}
+
 fn project(cam: &Camera, v: Vec3, scale: f64) -> egui::Vec2 {
-    let (r, u, _) = cam.basis();
+    let (r, u, b) = cam.basis();
     let v = cam.from_frame(v);
-    vec2((v.dot(r) * scale) as f32, -(v.dot(u) * scale) as f32)
+    // A unit cube has its own camera, independent of model size and zoom. Place its eye
+    // one unit beyond the focal distance: the front face keeps its size beside the arrows.
+    // At the maximum 90-degree field of view the eye is still outside the cube's sphere,
+    // so every vertex stays in front of it. Zero fov gives the original parallel projection.
+    let denominator = 1.0 + inverse_focal_length(cam) * (1.0 - v.dot(b));
+    vec2((v.dot(r) * scale / denominator) as f32, -(v.dot(u) * scale / denominator) as f32)
+}
+
+/// Local projected axes at a label's centre; a direction alone has no perspective position.
+fn project_direction(cam: &Camera, at: Vec3, direction: Vec3) -> egui::Vec2 {
+    let (r, u, b) = cam.basis();
+    let inverse_focal = inverse_focal_length(cam);
+    let direction = cam.from_frame(direction);
+    let denominator = 1.0 + inverse_focal * (1.0 - cam.from_frame(at).dot(b));
+    let parallel = vec2(direction.dot(r) as f32, -direction.dot(u) as f32);
+    (parallel + project(cam, at, 1.0) * (inverse_focal * direction.dot(b)) as f32) / denominator as f32
 }
 
 fn direction_label(d: Vec3) -> String {
@@ -38,16 +67,21 @@ fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
         return Vec::new();
     }
     let mut out = Vec::new();
+    let inverse_focal = inverse_focal_length(cam);
+    let inverse_eye_distance = inverse_focal / (1.0 + inverse_focal);
     let mut add = |d: Vec3, normal: Vec3, mut vertices: Vec<Vec3>, axes: Option<(Vec3, Vec3)>| {
         let depth = cam.from_frame(normal).dot(cam.back());
-        if depth <= 1e-5 {
+        // All face planes are one unit from the origin. In perspective a face must look
+        // toward the finite eye, not merely toward the parallel view direction.
+        if depth <= inverse_eye_distance + 1e-5 {
             return;
         }
         let centre = vertices.iter().copied().fold(Vec3::ZERO, |sum, p| sum + p) / vertices.len() as f64;
-        let at = c + project(cam, centre, half);
+        let projected_centre = project(cam, centre, half);
+        let at = c + projected_centre;
         vertices.sort_by(|a, b| {
-            let a = project(cam, *a - centre, half);
-            let b = project(cam, *b - centre, half);
+            let a = project(cam, *a, half) - projected_centre;
+            let b = project(cam, *b, half) - projected_centre;
             a.y.atan2(a.x).total_cmp(&b.y.atan2(b.x))
         });
         let vertices = Ring::new(vertices);
@@ -62,7 +96,7 @@ fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
             outer_edges,
             centre: at,
             label: direction_label(d),
-            text_axes: axes.map(|(r, u)| (project(cam, r, 1.0), -project(cam, u, 1.0))),
+            text_axes: axes.map(|(r, u)| (project_direction(cam, centre, r), -project_direction(cam, centre, u))),
             depth,
         });
     };
@@ -115,8 +149,8 @@ fn hit(faces: &[Facet], p: Pos2) -> Option<usize> {
     faces.iter().enumerate().rev().find(|(_, f)| contains(&f.points, p)).map(|(i, _)| i)
 }
 
-pub(super) fn drag_origin(cam: &Camera, centre: Pos2, pointer: Pos2, scale: f32) -> bool {
-    hit(&facets(cam, centre, HALF * f64::from(scale)), pointer).is_some()
+pub(super) fn drag_origin(app: &SolveApp, centre: Pos2, pointer: Pos2, scale: f32) -> bool {
+    hit(&facets(&camera(app), centre, HALF * f64::from(scale)), pointer).is_some()
 }
 
 fn navigate(app: &mut SolveApp, action: Option<&str>, dir: Option<Vec3>) {
@@ -188,7 +222,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let active = orbiting || ui.rect_contains_pointer(outer);
     let t = Tokens::get().navigation_cube(active);
     crate::scenario::publish_count("navigation_cube:active", f64::from(u8::from(active)));
-    let faces = facets(&app.cam, c, HALF * f64::from(scale));
+    let faces = facets(&camera(app), c, HALF * f64::from(scale));
     let hover = ui.input(|i| i.pointer.hover_pos()).filter(|p| ui.is_enabled() && ui.rect_contains_pointer(rect) && !crate::shell::covered(app, *p));
     let hovered = if orbiting { None } else { hover.and_then(|p| hit(&faces, p)) };
     let painter = ui.painter_at(outer);
@@ -296,6 +330,64 @@ mod tests {
         // These tests inspect shapes without uploading textures to a renderer.
         output.textures_delta.clear();
         output
+    }
+
+    #[test]
+    fn cube_projection_foreshortens_depth_only_in_perspective() {
+        for up in [UpAxis::Z, UpAxis::Y] {
+            let mut cam = Camera { up, ..Default::default() };
+            cam.set_view(StandardView::Front);
+            let near = Vec3::new(0.5, -1.0, 0.0);
+            let far = Vec3::new(0.5, 1.0, 0.0);
+            assert_eq!(project(&cam, near, HALF), project(&cam, far, HALF));
+            for fov in [0.2618, 0.6, std::f64::consts::FRAC_PI_2] {
+                cam.fov = fov;
+                let front = project(&cam, near, HALF);
+                let back = project(&cam, far, HALF);
+                assert!(back.x < front.x, "perspective must make the far edge smaller: {up:?}, {fov}");
+                assert!((front.x - HALF as f32 * 0.5).abs() < 1e-4, "the front face must retain its size beside the orbit arrows");
+                let focal_distance = f64::from(DESIGN_SIZE) / (2.0 * HALF * (fov * 0.5).tan());
+                let ratio = focal_distance / (focal_distance + 2.0);
+                assert!((f64::from(back.x / front.x) - ratio).abs() < 1e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn perspective_toggle_changes_the_cube_and_its_faces_still_navigate() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube", "look_at_anim":false}));
+        h.call("ui.view", json!({"view":"iso"}));
+        let orthographic = crate::scenario::handle_at("navigation_cube:front").unwrap();
+        h.call("ui.set", json!({"perspective":true}));
+        let fov = camera(&h.app).fov;
+        assert!(fov > 0.0);
+        let p = crate::scenario::handle_at("navigation_cube:front").unwrap();
+        assert_ne!(p, orthographic, "the drawn cube must follow the viewport's projection selection");
+        h.call("ui.click", json!({"x":p.x,"y":p.y}));
+        assert_eq!(h.app.cam.aligned_standard_view(1e-5), Some(StandardView::Front));
+        assert_eq!(camera(&h.app).fov, fov);
+        h.call("ui.set", json!({"autoOrthoFaces":true}));
+        assert_eq!(camera(&h.app).fov, 0.0, "automatic orthographic axis views also apply to the cube");
+        h.call("ui.view", json!({"view":"iso"}));
+        assert_eq!(camera(&h.app).fov, fov);
+    }
+
+    #[test]
+    fn perspective_cube_culls_sides_facing_away_and_ignores_model_framing() {
+        let cam = Camera { yaw: -0.1, pitch: 0.1, fov: 0.6, ..Default::default() };
+        let faces = facets(&cam, Pos2::ZERO, HALF);
+        assert_eq!(faces.len(), 9, "only the front face is visible from this finite eye");
+        assert!(faces.iter().all(|face| face.direction.y == -1.0));
+        let points = |cam: &Camera| facets(cam, Pos2::ZERO, HALF).into_iter().flat_map(|face| face.points).collect::<Vec<_>>();
+        let expected = points(&cam);
+        for distance in [1e-3, 100.0, 1e12] {
+            assert_eq!(points(&Camera { distance, target: Vec3::new(123.0, -456.0, 789.0), ..cam }), expected);
+        }
+        let parallel = Camera { fov: 0.0, ..cam };
+        for fov in [f64::NAN, f64::INFINITY, -1.0] {
+            assert_eq!(points(&Camera { fov, ..cam }), points(&parallel));
+        }
     }
 
     #[test]
@@ -463,12 +555,16 @@ mod tests {
                 cam.set_view(view);
                 for roll in [0.0, 0.7, std::f64::consts::FRAC_PI_2] {
                     cam.roll = roll;
-                    let faces = facets(&cam, Pos2::ZERO, HALF);
-                    assert!(!faces.is_empty());
-                    for (i, face) in faces.iter().enumerate() {
-                        assert_eq!(hit(&faces, face.centre), Some(i), "{up:?} {view:?} {roll} {}", face.label);
+                    for fov in [0.0, 0.2618, 0.6, std::f64::consts::FRAC_PI_2] {
+                        cam.fov = fov;
+                        let faces = facets(&cam, Pos2::ZERO, HALF);
+                        assert!(!faces.is_empty());
+                        for (i, face) in faces.iter().enumerate() {
+                            assert_eq!(hit(&faces, face.centre), Some(i), "{up:?} {view:?} {roll} {fov} {}", face.label);
+                            assert!(face.points.iter().all(|p| p.is_finite() && p.to_vec2().length() <= (HALF * 3.0_f64.sqrt()) as f32 + 1e-4));
+                        }
+                        assert!(hit(&faces, pos2(80.0, 80.0)).is_none());
                     }
-                    assert!(hit(&faces, pos2(80.0, 80.0)).is_none());
                 }
             }
         }

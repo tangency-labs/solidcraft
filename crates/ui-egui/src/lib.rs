@@ -594,6 +594,8 @@ pub struct SolveApp {
     /// A linked component's design edited in place, with its assembly around it.
     pub edit_in_place: edit_in_place::EditInPlace,
     pub(crate) pending_feature_edit: Option<feature_edit::PendingFeatureEdit>,
+    /// The feature being reopened from a click and where, until its dialog opens (UI state only).
+    edit_anchor_hint: Option<(u64, solidcraft_engine::geom::Vec3)>,
     /// The open feature window's check of what its material does (#6901).
     pub op_check: op_auto::OpCheck,
     /// A command recomputing the history (the marker moved, undo) computing off the window
@@ -828,6 +830,7 @@ impl SolveApp {
             editing_state: None,
             edit_in_place: Default::default(),
             pending_feature_edit: None,
+            edit_anchor_hint: None,
             op_check: op_auto::OpCheck::default(),
             deferred: None,
             deferred_queue: Vec::new(),
@@ -1154,6 +1157,10 @@ impl SolveApp {
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
         if self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() {
             return Err("a file operation is in progress".into());
+        }
+        // The editor's own marker moves come through here, so only Undo, Redo and Play close it.
+        if matches!(id, "edit.undo" | "edit.redo" | "timeline.play") {
+            self.close_editor_for_history()?;
         }
         // Commands may start only detected slicers and the programs the user added under Custom….
         if matches!(id, "file.save_mesh" | "file.send_to_slicer") {
@@ -1551,6 +1558,12 @@ impl SolveApp {
             }
             return;
         }
+        if id == "ui.assistant" {
+            if agent_chat::shown(self) {
+                agent_chat::toggle(self);
+            }
+            return;
+        }
         if id == "ui.palette" {
             shortcut_box::open(self, None);
             return;
@@ -1746,7 +1759,7 @@ impl SolveApp {
         dim_view::cancel();
         self.tool = None;
         self.home.open = false;
-        if dialogs_sheet::start_export(self, id) {
+        if dialogs_sheet::start_export(self, id) || toolbar::start_export(self, id) {
             return;
         }
         if id == "component.finish_edit" {
@@ -1851,9 +1864,9 @@ impl SolveApp {
             self.cancel_sketch();
             return;
         }
-        // Press Pull: edges get a fillet, a fillet's round face reopens its fillet (its size
-        // changes, as `solid.press_pull` does: #1932), other curved faces an offset, planar faces
-        // and profiles an extrude.
+        // Press Pull: edges get a fillet, a fillet's round face or a chamfer's flat one reopens
+        // its feature (its size changes, as `solid.press_pull` does: #1932, #4986), other curved
+        // faces an offset, planar faces and profiles an extrude.
         if id == "solid.press_pull" {
             if let Some(pending) = &mut self.pending_feature_edit {
                 pending.then_start(id);
@@ -1863,16 +1876,18 @@ impl SolveApp {
                 return self.start("solid.fillet");
             }
             let sel = &self.session.selection;
-            let curved = sel.iter().find_map(|s| match s {
-                solidcraft_engine::Sel::Face { body, index, .. } if dialogs::planar_face(&self.session, body, *index).is_none() => {
-                    Some((body, *index))
-                }
+            let blend = sel.iter().find_map(|s| match s {
+                solidcraft_engine::Sel::Face { body, index, point } => dialogs::blend_feature(&self.session, body, *index).map(|id| (id, *point)),
                 _ => None,
             });
-            if let Some((body, index)) = curved {
-                if let Some(blend) = dialogs::blend_feature(&self.session, body, index) {
-                    return self.edit_feature(blend);
-                }
+            // Its arrow sits on the edge of the face clicked.
+            if let Some((blend, point)) = blend {
+                return self.edit_feature_at(blend, Some(point));
+            }
+            let curved = sel.iter().any(
+                |s| matches!(s, solidcraft_engine::Sel::Face { body, index, .. } if dialogs::planar_face(&self.session, body, *index).is_none()),
+            );
+            if curved {
                 return self.start("solid.offset_face");
             }
             let empty = sel.is_empty();
@@ -2052,7 +2067,15 @@ impl SolveApp {
     /// Edit a feature: sketches open in sketch mode; other features roll the
     /// timeline back to just before themselves and reopen their dialog, filled in.
     pub fn edit_feature(&mut self, id: u64) {
+        self.edit_feature_at(id, None);
+    }
+
+    /// [`Self::edit_feature`] opened from a click at `at` on what the feature made: the dialog's
+    /// arrow sits by that point (a fillet's or chamfer's edge nearest it).
+    pub(crate) fn edit_feature_at(&mut self, id: u64, at: Option<solidcraft_engine::geom::Vec3>) {
         use solidcraft_engine::doc::FeatureKind;
+        // A non-finite point (over the control channel) keeps the first edge.
+        self.edit_anchor_hint = at.filter(|p| p.is_finite()).map(|p| (id, p));
         dialogs::cancel(self);
         let Some(f) = self.session.doc.feature(id) else { return };
         if matches!(f.kind, FeatureKind::Sketch { .. }) {
@@ -2073,10 +2096,30 @@ impl SolveApp {
         self.open_feature_edit(id, marker, original);
     }
 
+    /// Undo, Redo and the History bar would change the design under an open feature editor (Edit
+    /// Hole, Edit Box, …), whose OK and Cancel then refuse it (#10688). They cancel the editor
+    /// first, putting its marker back, as starting another tool does; while it is still opening
+    /// they wait for it.
+    pub(crate) fn close_editor_for_history(&mut self) -> Result<(), String> {
+        if self.pending_feature_edit.is_some() {
+            let why = i18n::tr("ui.history_waits_for_editor").to_string();
+            self.set_status(why.clone(), true);
+            return Err(why);
+        }
+        if self.editing_state.is_some() || self.dialog.as_ref().is_some_and(|d| d.editing.is_some()) {
+            dialogs::cancel(self);
+        }
+        Ok(())
+    }
+
     fn open_feature_edit(&mut self, id: u64, marker: Option<usize>, original: Session) {
         self.editing_state = Some(dialogs::EditingState { source: self.session.scratch(), original });
+        // The id check matters while another feature's reopening is still pending: a later call
+        // for a feature id that is gone returns before it drops that pending edit.
+        let hint = self.edit_anchor_hint.take().filter(|(f, _)| *f == id).map(|(_, p)| p);
         match dialogs::for_feature(self, id, marker) {
-            Some(d) => {
+            Some(mut d) => {
+                d.anchor_hint = hint;
                 if !d.previews() {
                     self.editing_state = None;
                 }
@@ -2284,7 +2327,9 @@ impl SolveApp {
 
     /// Is the origin widget shown? Origin planes and axes are drawn and pickable. While a dialog
     /// picks a plane ([`SolveApp::picking_plane`]) the Origin is always shown, drawn through the
-    /// model (a plane inside a body stays visible), even when the browser hides it.
+    /// model (a plane inside a body stays visible), even when the browser hides it — except the
+    /// origin planes for Project ([`SolveApp::picking_project_geometry`], #10778), which keep a
+    /// hidden Origin hidden.
     pub fn origin_visible(&self) -> bool {
         self.origin_shown() || self.picking_plane()
     }
@@ -2299,6 +2344,15 @@ impl SolveApp {
     /// shown for it, so they can be picked in the view rather than only in the browser (#2581).
     pub fn picking_plane(&self) -> bool {
         self.picking_sketch_plane() || self.dialog.as_ref().is_some_and(|d| d.inputs.get(d.active).is_some_and(|i| i.accept & selection::PLANES != 0))
+    }
+
+    /// Is the Sketch Project dialog open, picking its geometry? Its pick takes origin planes,
+    /// but Project must not bring hidden origin planes back (#10778): every line a plane
+    /// projects, an origin axis already gives, so the planes only add noise over the geometry
+    /// being picked. Other dialogs that pick a plane keep the reveal ([`Self::picking_plane`],
+    /// #2581).
+    pub fn picking_project_geometry(&self) -> bool {
+        self.dialog.as_ref().is_some_and(|d| matches!(d.kind, dialogs::Kind::SketchProject { .. }))
     }
 
     /// The field of view the view is drawn with: the `perspective_fov` preference while the view is
@@ -2794,6 +2848,7 @@ impl SolveApp {
             if !keymap::capturing(self) {
                 expression_complete::begin_frame(ctx);
             }
+            agent_chat::toggle_shortcut(self, ctx);
             // A digit for a construction line's Length box is not a shortcut (#10258).
             sketch_construction::claim_typed_length(self, ctx);
             if !self.embedded {
@@ -3009,7 +3064,10 @@ impl SolveApp {
                 (i.pointer.middle_down() || i.pointer.secondary_down())
                     && i.pointer.press_origin().is_some_and(|p| full.contains(p) && !shell::covered(self, p))
             });
-            let blocked = !continuing_navigation && ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| shell::covered(self, p));
+            // A captured comparison divider also keeps its primary drag across floating cards.
+            let continuing_comparison = render_workspace::comparison_drag_captured(self) && ui.input(|i| i.pointer.primary_down());
+            let blocked =
+                !continuing_navigation && !continuing_comparison && ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| shell::covered(self, p));
             let mut viewport_ui = ui.new_child(egui::UiBuilder::new().max_rect(full).id_salt("floating_viewport"));
             if blocked {
                 // Disabled only to shield the scene from input under a card or menu; it must

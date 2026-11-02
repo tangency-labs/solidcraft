@@ -1186,9 +1186,29 @@ impl Sketch {
         let keep = self.links.clone();
         self.remove_curves(&curves);
         let pts = self.link_points(id);
+        self.free_own_curves(&pts);
         self.remove_points(&pts);
         // Removal prunes empty links; this one stays.
         self.links = keep;
+    }
+
+    /// The sketch's own curves that use one of `pts` (a circle drawn on a projected hole's
+    /// centre) move onto a free point of their own at the same place, so removing `pts` doesn't
+    /// delete them with the link (#5388). Constraints on `pts` still go with them.
+    fn free_own_curves(&mut self, pts: &[usize]) {
+        for &p in pts {
+            let own: Vec<usize> = self.curves.iter().enumerate().filter(|(_, c)| c.link.is_none() && c.kind.uses(p)).map(|(i, _)| i).collect();
+            if own.is_empty() {
+                continue;
+            }
+            let Some(pos) = self.points.get(p).map(|q| q.pos) else { continue };
+            let Ok(free) = self.add_point(pos, None) else { continue };
+            for ci in own {
+                if let Some(c) = self.curves.get_mut(ci) {
+                    c.kind.map_points(&|q| if q == p { free } else { q });
+                }
+            }
+        }
     }
 
     /// Mark a link as lost (its reference was not found); its geometry stays as it was.

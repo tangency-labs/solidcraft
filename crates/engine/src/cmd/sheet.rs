@@ -56,7 +56,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&PERFORATE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-        "diameter, pitch: expr; margin?: expr (clear of edges, cut-outs and bends; default: the diameter); pattern?: staggered (60°, default) | square; body? - a perforation field over the whole flat sheet: holes in the flat pattern (perforations), the DXF (layer PERFORATION) and the measured volume, not cut into the B-rep (#732)",
+        "diameter, pitch: expr; margin?: expr (clear of edges, cut-outs, bends and the outline; default: the diameter); pattern?: staggered (60°, default) | square; body?; sketch? + profiles? (the outline: closed profiles of a sketch on a face of the sheet; holes only inside them, out of their inner loops) - a perforation field over the whole flat sheet or inside the outline: holes in the flat pattern (perforations), the DXF (layer PERFORATION) and the measured volume, not cut into the B-rep (#732)",
     ),
     CommandSpec::new("sheet.hem", "Hem", crate::checked!("sheet.hem", hem))
         .at("SHEET METAL", "CREATE")
@@ -472,7 +472,14 @@ fn perforate(s: &mut Session, p: &Value) -> Result<Value> {
         check_expr(s, m, Kind::Length, cmd, "margin")?;
     }
     let pattern = str_(p, "pattern").map(|t| perforation_pattern(t).map(str::to_string).map_err(|why| bad(cmd, why))).transpose()?;
-    add_feature(s, p, FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body: str_(p, "body").map(BodyName::from) })
+    // The outline: only a sketch named here, never the active one.
+    let sketch = match p.get("sketch") {
+        Some(_) => Some(SketchId(feature_sketch(s, p, cmd)?)),
+        None if p.get("profiles").is_some() => return Err(bad(cmd, "`profiles` picks the outline's profiles: it needs `sketch`")),
+        None => None,
+    };
+    let profiles = p.get("profiles").map(|_| profiles(p, cmd)).transpose()?;
+    add_feature(s, p, FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body: str_(p, "body").map(BodyName::from), sketch, profiles })
 }
 
 fn hem(s: &mut Session, p: &Value) -> Result<Value> {

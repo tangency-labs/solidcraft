@@ -202,9 +202,12 @@ fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
         }
         // Named origin planes and construction planes are the component's own.
         PlaneRef::Origin { .. } | PlaneRef::Construction { .. } => {}
-        PlaneRef::Tangent { face, at } => {
+        PlaneRef::Tangent { face, at, reference, .. } => {
             *at = apply_point(m, *at);
             map_geo_ref(m, face);
+            if let Some(r) = reference {
+                map_geo_ref(m, r);
+            }
         }
         PlaneRef::Midplane { .. }
         | PlaneRef::TwoEdges { .. }

@@ -942,6 +942,105 @@ fn fillet_face_then_press_pull_edits_its_fillet() {
     assert_eq!(d.editing.map(|e| e.0), Some(fillet));
 }
 
+/// Press Pull on a chamfer's flat face reopens the chamfer to change its distance, as on a
+/// fillet's face, rather than extruding it (#4986): picked first, or picked with Press Pull
+/// already open.
+#[test]
+fn chamfer_face_then_press_pull_edits_its_chamfer() {
+    let script = json!([
+        {"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}},
+        {"command": "solid.chamfer", "params": {"edges": [[40, 0, 10]], "distance": 3}}
+    ]);
+    // The middle of the chamfer's face, from (37, 0) to (40, 3).
+    let p = Vec3::new(38.5, 1.5, 10.0);
+    let bevel = |app: &SolveApp| {
+        let names = solidcraft_engine::doc::naming::face_names_at(&app.session.model.state(), &[p]);
+        assert!(names[0].contains("blend"), "{names:?}");
+        let st = app.session.model.state();
+        let b = st.body("Body1").unwrap();
+        let index = solidcraft_engine::doc::naming::face_names(b).iter().position(|n| *n == names[0]).unwrap();
+        Sel::Face { body: "Body1".into(), index, point: p }
+    };
+    let mut app = app_with(script.clone());
+    let chamfer = app.session.doc.features.last().unwrap().id;
+    let sel = bevel(&app);
+    let d = start(&mut app, vec![sel], "solid.press_pull");
+    assert!(matches!(&d.kind, Kind::Fillet { radius, chamfer: true, .. } if radius.starts_with('3')), "{:?}", d.kind);
+    assert_eq!(d.editing.map(|e| e.0), Some(chamfer));
+
+    let mut app = app_with(script);
+    app.start("solid.press_pull");
+    let sel = bevel(&app);
+    let index = if let Sel::Face { index, .. } = &sel { *index } else { 0 };
+    crate::viewport::dialog_pick(&mut app, &crate::viewport::Hit::Face { body: "Body1".into(), index, point: p }, sel);
+    let d = app.dialog.clone().unwrap();
+    assert!(matches!(d.kind, Kind::Fillet { chamfer: true, .. }), "{:?}", d.kind);
+    assert_eq!(d.editing.map(|e| e.0), Some(chamfer));
+}
+
+/// Press Pull reopens a fillet or chamfer of several edges with its arrow on the edge of the face
+/// clicked, not on the feature's first edge (the Sample Plate's far corner): picked first, or
+/// picked with Press Pull open. Opened from the history, the arrow stays on the first edge.
+#[test]
+fn press_pull_on_a_blend_face_puts_the_arrow_on_the_clicked_edge() {
+    let r = 6.0 * std::f64::consts::FRAC_1_SQRT_2;
+    let chamfered = json!([
+        {"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}},
+        {"command": "solid.chamfer", "params": {"edges": [[20, 0, 20], [40, 15, 20], [20, 30, 20], [0, 15, 20]], "distance": 2}}
+    ]);
+    // The script, the body, a point on the clicked blend face, its edge, the feature's first edge.
+    let cases = [
+        (solidcraft_engine::sample::script(), "Plate", Vec3::new(74.0 + r, 44.0 + r, 4.0), Vec3::new(80.0, 50.0, 4.0), Vec3::new(0.0, 0.0, 4.0)),
+        (chamfered, "Body1", Vec3::new(20.0, 29.0, 19.0), Vec3::new(20.0, 30.0, 20.0), Vec3::new(20.0, 0.0, 20.0)),
+    ];
+    for (script, body, p, clicked, first) in cases {
+        let setup = |h: &mut crate::scenario::Harness| -> Sel {
+            h.app.session.run_script(&script).unwrap();
+            h.frames(2);
+            h.step(&json!({"call": "ui.view", "params": {"view": "fit"}})).unwrap();
+            let names = solidcraft_engine::doc::naming::face_names_at(&h.app.session.model.state(), &[p]);
+            assert!(names[0].contains("blend"), "{names:?}");
+            let st = h.app.session.model.state();
+            let index = solidcraft_engine::doc::naming::face_names(st.body(body).unwrap()).iter().position(|n| *n == names[0]).unwrap();
+            Sel::Face { body: body.into(), index, point: p }
+        };
+        // The arrow is nearer `want` than `other` on screen.
+        let arrow_near = |h: &mut crate::scenario::Harness, want: Vec3, other: Vec3, how: &str| {
+            h.frames(5);
+            assert!(
+                matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Fillet { .. })),
+                "{body} {how}: {:?}",
+                h.app.dialog.as_ref().map(|d| &d.kind)
+            );
+            let tip = crate::scenario::handle_at("arrow").unwrap_or_else(|| panic!("{body} {how}: no arrow"));
+            let mut dist = |w: Vec3| {
+                let [x, y] = h.at(&json!({"world": [w.x, w.y, w.z]})).unwrap();
+                tip.distance(egui::pos2(x as f32, y as f32))
+            };
+            let (a, b) = (dist(want), dist(other));
+            assert!(a < b, "{body} {how}: the arrow is {a} px from the edge it should be on, {b} px from the other");
+        };
+        let mut h = crate::scenario::Harness::new();
+        let face = setup(&mut h);
+        h.app.session.selection = vec![face];
+        h.step(&json!({"start": "solid.press_pull"})).unwrap();
+        arrow_near(&mut h, clicked, first, "picked first");
+        // No click to go by: the feature's first edge, as before.
+        let id = h.app.dialog.as_ref().and_then(|d| d.editing).map(|e| e.0).unwrap();
+        crate::dialogs::cancel(&mut h.app);
+        h.step(&json!({"call": "ui.editFeature", "params": {"feature": id}})).unwrap();
+        arrow_near(&mut h, first, clicked, "from the history");
+
+        let mut h = crate::scenario::Harness::new();
+        let face = setup(&mut h);
+        h.step(&json!({"start": "solid.press_pull"})).unwrap();
+        let index = if let Sel::Face { index, .. } = &face { *index } else { 0 };
+        let hit = crate::viewport::Hit::Face { body: body.into(), index, point: p };
+        crate::viewport::dialog_pick(&mut h.app, &hit, face);
+        arrow_near(&mut h, clicked, first, "picked with Press Pull open");
+    }
+}
+
 #[test]
 fn faces_then_shell_and_face_then_hole() {
     let mut app = boxed();
@@ -1598,6 +1697,39 @@ fn modeled_thread_survives_timeline_double_click_and_ok() {
         let restored = h.app.session.world_state().body("Body1").unwrap().mesh().measure().volume;
         assert!((restored - threaded_volume).abs() < 1e-6, "one undo restores the original modeled thread");
     }
+}
+
+/// A modeled thread's editor previews; unticking Modeled makes it a plain edit, so its OK
+/// computes off the window thread from the design as it is: a body hidden meanwhile doesn't
+/// refuse it as a changed design.
+#[test]
+fn a_thread_edit_switched_to_cosmetic_applies_after_a_body_is_hidden() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.apply_off_thread = Some(std::time::Duration::ZERO);
+    h.app.run("solid.cylinder", json!({"radius":4,"height":4})).unwrap();
+    h.app.run("solid.box", json!({"corner":[20,0,0],"length":4,"width":4,"height":4})).unwrap();
+    let Sel::Face { point, .. } = thread_face(&h.app, "Body1") else { panic!("face") };
+    let id = h.app.run("solid.thread", json!({"face":point,"designation":"M8x1","modeled":true})).unwrap()["feature"].as_u64().unwrap();
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"timeline:Thread1"},"double":true})).unwrap();
+    h.frames(4);
+    assert!(h.app.dialog.as_ref().unwrap().previews(), "a modeled thread previews");
+    h.app.dialog.as_mut().unwrap().extra["modeled"] = json!(false);
+    assert!(!h.app.dialog.as_ref().unwrap().previews());
+    h.app.run("browser.visibility", json!({"items":["Body2"],"visible":false})).unwrap();
+    h.step(&json!({"widget":"OK"})).unwrap();
+    for _ in 0..500 {
+        if h.app.applying.is_none() {
+            break;
+        }
+        h.frames(1);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    h.frames(4);
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    assert_eq!(h.app.session.doc.marker, None);
+    assert!(matches!(h.app.session.doc.feature(id).unwrap().kind, solidcraft_engine::doc::FeatureKind::Thread { modeled: false, .. }));
 }
 
 #[test]

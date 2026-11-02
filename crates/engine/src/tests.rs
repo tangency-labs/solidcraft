@@ -889,8 +889,15 @@ fn hostile_params_never_panic() {
                     while let Some(&id) = ids.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
                         for v in hostile_values() {
                             for k in keys {
-                                if k == "path" && (id.starts_with("parameters.") || id == "timeline.export_script") {
-                                    continue; // parameter and script files: covered by their own tests (no stray files)
+                                if k == "path"
+                                    && (id.starts_with("parameters.")
+                                        || id == "timeline.export_script"
+                                        || matches!(
+                                            id,
+                                            "file.export_3mf" | "file.export_obj" | "file.export_step" | "file.export_stl" | "file.export_urdf"
+                                        ))
+                                {
+                                    continue; // parameter, script and export files: covered by their own tests (no stray files)
                                 }
                                 let mut s = Session::default();
                                 // A model with a sketch, a body and an active sketch, so most commands get far.
@@ -1124,7 +1131,8 @@ fn timeline_inspect_shows_what_timeline_edit_changes() {
     run(&mut s, "solid.extrude", json!({"distance": 10, "name": "Slab"}));
     run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 10]], "radius": 2, "name": "Round"}));
     let i = run(&mut s, "timeline.inspect", json!({"feature": "Slab"}));
-    assert_eq!(i["type"], "ExtrudeFeature", "{i}");
+    assert_eq!(i["type"], "extrude", "{i}");
+    assert_eq!(i["type_name"], "ExtrudeFeature", "{i}");
     assert_eq!(i["definition"]["extent"]["distance"], "10", "{i}");
     assert_eq!(i["definition"]["operation"], "new_body", "{i}");
     assert!(i["definition"].get("type").is_none() && i["definition"].get("param_names").is_none(), "{i}");
@@ -1723,8 +1731,10 @@ fn section_analysis() {
     assert_eq!(s.undo.len(), undo);
 }
 
-/// A section index finds the same cut segments, in the same order, as cutting every triangle:
-/// tilted and axis normals, cuts through vertices, at the ends and beyond the part.
+/// A section index finds the same cut segments, in the same order and to the bit, as cutting
+/// every triangle: one index for every normal (tilting a Section Analysis turns it every frame,
+/// #10373), axis and tilted, cuts through vertices, at the ends and beyond the part, and a
+/// triangle with a corner that is not a number.
 #[test]
 fn section_index_cuts_like_every_triangle() {
     let mut s = Session::default();
@@ -1732,18 +1742,30 @@ fn section_index_cuts_like_every_triangle() {
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 8, "operation": "join"}));
     let st = s.model.state();
     let m = st.bodies.first().unwrap().mesh();
-    assert!(m.triangles.len() > 64, "enough triangles for several slabs: {}", m.triangles.len());
-    for n in [Vec3::Z, -Vec3::Y, Vec3::new(1.0, 2.0, 3.0).normalized().unwrap(), Vec3::new(-0.3, 0.1, 0.9).normalized().unwrap()] {
-        let index = view::SectionIndex::new(&m, n);
-        let heights: Vec<f64> = m.positions.iter().map(|p| n.dot(*p)).collect();
-        let (lo, hi) = heights.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), h| (a.min(*h), b.max(*h)));
-        let mut cuts: Vec<f64> = (0..=40).map(|k| lo - 1.0 + (hi - lo + 2.0) * k as f64 / 40.0).collect();
-        cuts.extend(heights.iter().step_by(7).copied());
-        cuts.extend([lo, hi]);
-        for at in cuts {
-            let o = n * at;
-            let segments = view::section_segments(&m, o, n);
-            assert_eq!(index.segments(&m, o), segments, "{n:?} at {at}");
+    assert!(m.triangles.len() > 64, "enough triangles for several cells: {}", m.triangles.len());
+    let bits = |v: Vec<(Vec3, Vec3)>| v.iter().flat_map(|(a, b)| [a.x, a.y, a.z, b.x, b.y, b.z].map(f64::to_bits)).collect::<Vec<_>>();
+    let mut hostile = (*m).clone();
+    hostile.positions.push(Vec3::new(f64::NAN, 0.0, 0.0));
+    let nan = u32::try_from(hostile.positions.len() - 1).unwrap();
+    hostile.triangles.extend([[0, 1, nan], [0, 1, u32::MAX]]);
+    for m in [&*m, &hostile] {
+        let index = view::SectionIndex::new(m);
+        let mut normals = vec![Vec3::Z, -Vec3::Y, Vec3::new(1.0, 2.0, 3.0).normalized().unwrap(), Vec3::new(-0.3, 0.1, 0.9).normalized().unwrap()];
+        // A tilt drag: the normal turns a little every frame.
+        normals.extend((0..30).map(|k| {
+            let a = (5.0 + 3.0 * k as f64).to_radians();
+            Vec3::new(0.1, a.sin(), a.cos()).normalized().unwrap()
+        }));
+        for n in normals {
+            let heights: Vec<f64> = m.positions.iter().map(|p| n.dot(*p)).filter(|h| h.is_finite()).collect();
+            let (lo, hi) = heights.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), h| (a.min(*h), b.max(*h)));
+            let mut cuts: Vec<f64> = (0..=40).map(|k| lo - 1.0 + (hi - lo + 2.0) * k as f64 / 40.0).collect();
+            cuts.extend(heights.iter().step_by(7).copied());
+            cuts.extend([lo, hi]);
+            for at in cuts {
+                let o = n * at;
+                assert_eq!(bits(index.segments(m, o, n)), bits(view::section_segments(m, o, n)), "{n:?} at {at}");
+            }
         }
     }
 }
@@ -2869,6 +2891,60 @@ fn press_pull_on_curved_faces() {
         s.execute("solid.press_pull", &json!({"face": [on.x, on.y, on.z], "distance": 0.5})).map(|v| v.to_string()).unwrap_or_else(|e| e.to_string());
     assert!(!err.contains("not a fillet's or a chamfer's"), "{err}");
     assert!(err.contains("offset"), "{err}");
+}
+
+/// #4986: Press Pull on a chamfer's flat face changes the chamfer's distance, as on a fillet's
+/// face it changes the radius, rather than extruding the face.
+#[test]
+fn press_pull_on_a_chamfer_face_edits_the_chamfer() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[40, 0, 10]], "distance": 3, "name": "Bevel"}));
+    let cut = |d: f64| d * d / 2.0 * 20.0;
+    assert!(rel(volume(&mut s), 24000.0 - cut(3.0)) < 1e-6);
+    // The chamfer's face runs from (37, 0) to (40, 3); its middle.
+    let out = run(&mut s, "solid.press_pull", json!({"face": [38.5, 1.5, 10], "distance": 2}));
+    assert_eq!(out["edited"], "Bevel", "{out}");
+    assert_eq!(s.doc.features.len(), 2, "no extrude added");
+    assert!(rel(volume(&mut s), 24000.0 - cut(5.0)) < 1e-6, "{}", volume(&mut s));
+    // A point on the flat front face 0.02 mm from its edge with the chamfer (which now runs from
+    // (35, 0) to (40, 5)) is the front face's: it is extruded, the chamfer is left alone.
+    let mut t = Session::default();
+    run(&mut t, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut t, "solid.chamfer", json!({"edges": [[40, 0, 10]], "distance": 3, "name": "Bevel"}));
+    let out = run(&mut t, "solid.press_pull", json!({"face": [36.98, 0, 10], "distance": 1}));
+    assert!(out.get("edited").is_none(), "{out}");
+    assert!(matches!(t.doc.features.last().map(|f| &f.kind), Some(solidcraft_doc::FeatureKind::Extrude { .. })), "an extrude added: {out}");
+    assert!(
+        matches!(&t.doc.features[1].kind, solidcraft_doc::FeatureKind::Chamfer { distance, .. } if distance == "3"),
+        "{:?}",
+        t.doc.features[1].kind
+    );
+    // Too far in (past zero) or too far out: an error, the chamfer as it was.
+    let on = [39.0, 1.0, 10.0];
+    for d in [-10.0, 1e9] {
+        assert!(s.execute("solid.press_pull", &json!({"face": on, "distance": d})).is_err(), "{d}");
+        assert!(rel(volume(&mut s), 24000.0 - cut(5.0)) < 1e-6, "{d}: {}", volume(&mut s));
+    }
+    // An unequal chamfer's first distance changes and its second stays; an angle chamfer keeps
+    // its angle.
+    // Each chamfer's face crosses the corner's bisector at legs a, b: (40 - u, u), u = ab / (a + b).
+    let tan30 = (PI / 6.0).tan();
+    for (extra, u) in [(json!({"distance2": 4}), 8.0 / 6.0), (json!({"angle": "30 deg"}), 2.0 * tan30 / (1.0 + tan30))] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+        let mut p = json!({"edges": [[40, 0, 10]], "distance": 2, "name": "Bevel"});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        run(&mut s, "solid.chamfer", p);
+        let v0 = volume(&mut s);
+        let out = run(&mut s, "solid.press_pull", json!({"face": [40.0 - u, u, 10.0], "distance": 1}));
+        assert_eq!(out["edited"], "Bevel", "{extra}: {out}");
+        assert_eq!(s.doc.features.len(), 2, "{extra}");
+        let Some(solidcraft_doc::FeatureKind::Chamfer { distance2, angle, .. }) = s.doc.features.last().map(|f| &f.kind) else { panic!("{extra}") };
+        assert_eq!(distance2.as_ref().map(|e| e.to_string()), extra.get("distance2").map(|v| v.to_string()), "{extra}");
+        assert_eq!(angle.as_ref().map(|e| e.to_string()), extra.get("angle").and_then(|v| v.as_str()).map(str::to_string), "{extra}");
+        assert!(volume(&mut s) < v0 - 1.0, "{extra}: a bigger chamfer cuts more");
+    }
 }
 
 /// A cut in one component leaves other components' bodies alone unless they are named as

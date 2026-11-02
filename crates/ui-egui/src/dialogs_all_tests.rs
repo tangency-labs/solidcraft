@@ -579,6 +579,38 @@ fn new_cards_settle_before_the_first_click_in_both_layouts() {
 }
 
 #[test]
+fn the_loft_dialog_widens_its_label_column_for_the_current_language() {
+    // #10620: German "Anpassung an Leitkurve" (Rail Fit) clipped to "Anpassung an Leit…" in
+    // the fixed-width Loft card. The label column now measures the dialog's labels in the
+    // active language and the card widens by the same amount, so the label fits and the
+    // control column keeps its design width. English, whose labels fit the design, is unchanged.
+    let t = Tokens::get();
+    let shoot = |language: &str| {
+        let mut h = fixture();
+        h.call("ui.resize", json!({"width": 1400, "height": 950}));
+        h.app.preferences.language = language.into();
+        h.app.dialog = Some(representative(&h, "solid.loft"));
+        h.frames(4);
+        (h, scenario::rect_of("dialog:card").unwrap(), scenario::rect_of("dialog:label:Rail Fit").unwrap())
+    };
+    let (h, card, label) = shoot("de");
+    let (_, english_card, english_label) = shoot("en");
+    assert!(card.width() > english_card.width(), "the German card widened: {card:?} vs {english_card:?}");
+    assert!(label.width() > t.form_label_width * 1.6, "past the ordinary cap: {label:?}");
+    assert!(english_label.width() <= t.form_label_width * 1.6, "English keeps the design's label column: {english_label:?}");
+    // The drawn galley holds the whole translation: no ellipsis.
+    let drawn = h
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.job.text.contains("Anpassung") => Some(text.galley.job.text.to_string()),
+            _ => None,
+        })
+        .expect("the Rail Fit row drew its German label");
+    assert!(drawn.contains("Leitkurve") && !drawn.contains('…'), "the label is not ellipsized: {drawn:?}");
+}
+
+#[test]
 fn remaining_dialogs_keep_kit_chrome_and_cancel_restores_preview() {
     for command in [
         "contact.create",
@@ -963,6 +995,51 @@ fn coil_from_a_profile_hides_the_primitive_section() {
     assert!(p.get("operation").is_some(), "{p}");
 }
 
+/// The Revolutions field steps by whole turns like the other counts (#7481).
+#[test]
+fn coil_revolutions_arrows_step_whole_turns() {
+    let mut h = fixture();
+    h.app.run("parameters.add", json!({"name":"turns","expression":"3","unit":""})).unwrap();
+    h.app.dialog = Some(Dialog::for_command(&h.app, "solid.coil").unwrap());
+    h.settle();
+    let sent = |h: &Harness| {
+        let cmds = crate::dialogs::preview_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        cmds.iter().find(|(id, _)| id == "solid.coil").map(|(_, p)| p["revolutions"].clone()).unwrap_or_else(|| panic!("{cmds:?}"))
+    };
+    let set = |h: &mut Harness, text: &str| {
+        if let Some(Kind::Primitive { fields, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind)
+            && let Some((_, value)) = fields.iter_mut().find(|(k, _)| *k == "revolutions")
+        {
+            *value = text.into();
+        }
+        h.frames(2);
+    };
+    let click = |h: &mut Harness, arrow: &str| h.step(&json!({"click":{"handle":format!("dialog:ui.revolutions {arrow}")}})).unwrap();
+    assert_eq!(sent(&h), json!("4"));
+    click(&mut h, "up");
+    assert_eq!(sent(&h), json!("5"));
+    click(&mut h, "down");
+    click(&mut h, "down");
+    assert_eq!(sent(&h), json!("3"));
+    // A fraction steps to the next whole turn either way.
+    set(&mut h, "2.5");
+    click(&mut h, "up");
+    assert_eq!(sent(&h), json!("3"));
+    set(&mut h, "2.5");
+    click(&mut h, "down");
+    assert_eq!(sent(&h), json!("2"));
+    // From 1 to the helix's 200 turns.
+    set(&mut h, "1");
+    click(&mut h, "down");
+    assert_eq!(sent(&h), json!("1"));
+    set(&mut h, "200");
+    click(&mut h, "up");
+    assert_eq!(sent(&h), json!("200"));
+    set(&mut h, "turns");
+    click(&mut h, "up");
+    assert_eq!(sent(&h), json!("turns + 1"));
+}
+
 fn extrude_focus_fixture() -> Harness {
     let mut h = Harness::new();
     h.app.home.open = false;
@@ -1174,6 +1251,30 @@ fn ok_on_a_rolled_back_pattern_editor_says_it_is_not_built() {
     assert!(text.starts_with("Pattern changed, but it is after the history marker"), "{text}");
 }
 
+/// #10852: the editor of a circular pattern whose axis origin is length expressions sends them
+/// back as they are, so applying it unchanged keeps the pattern following its parameters.
+#[test]
+fn editing_a_circular_pattern_keeps_its_origin_expressions() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    for (id, params) in [
+        ("parameters.add", json!({"name":"cx","expression":"20 mm"})),
+        ("solid.box", json!({"length":40,"width":30,"height":10,"corner":[0,0,0],"body_name":"Plate"})),
+        ("solid.cylinder", json!({"radius":2,"height":20,"base":["cx - 10 mm",15,-5],"operation":"cut","targets":["Plate"],"name":"Cut"})),
+        ("solid.pattern.circular", json!({"features":["Cut"],"axis":{"origin":["cx",15,0],"dir":[0,0,1]},"count":2,"name":"Pattern"})),
+    ] {
+        h.app.run(id, params).unwrap();
+    }
+    let pattern = h.app.session.doc.features.last().unwrap().id;
+    let origin = |h: &Harness| serde_json::to_value(&h.app.session.doc.feature(pattern).unwrap().kind).unwrap()["pattern"]["origin"].clone();
+    assert_eq!(origin(&h), json!(["cx", 15.0, 0.0]));
+    let d = crate::dialogs::for_feature(&h.app, pattern, None).unwrap();
+    for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    assert_eq!(origin(&h), json!(["cx", 15.0, 0.0]), "the expression is kept, not its value now");
+}
+
 /// The Circular Pattern dialog must show only one field active at a time (#10066): the pick
 /// field's accent ring yields while a text field holds the keyboard, and clicking a pick field
 /// takes the keyboard back.
@@ -1298,4 +1399,57 @@ fn stored_bare_numbers_edit_with_their_units() {
         assert!(h.app.dialog.is_none(), "{command}: OK applies the unchanged editor");
         assert_eq!(h.app.session.doc.features.len(), count, "{command}: the feature is redefined in place");
     }
+}
+
+#[test]
+fn dialog_profile_labels_name_the_sketch_in_coil_and_mirror() {
+    for command in ["solid.coil", "sketch.mirror"] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Panel"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
+        let sketch = h.app.session.active_sketch.unwrap();
+        if command == "solid.coil" {
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        h.call("ui.view", json!({"view": "top"}));
+        h.call("ui.camera", json!({"target": [20, 15, 0], "distance": 100}));
+        h.step(&json!({"click": {"world": [20, 15, 0]}})).unwrap();
+        assert_eq!(h.app.session.selection, vec![Sel::Profile { sketch, index: 0 }]);
+        h.app.start(command);
+        h.app.dialog.as_mut().unwrap().preview_enabled = false;
+        h.frames(3);
+        let d = h.app.dialog.as_ref().unwrap();
+        let input = &d.inputs[0];
+        assert_eq!(input.items, vec![Sel::Profile { sketch, index: 0 }]);
+        assert_eq!(selection_label(&h.app.session, h.app.preferences.origin_plane_names, d, input, &input.items[0]), "Panel · profile 1");
+        let mut painted = false;
+        for clipped in &h.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                if let egui::Shape::Text(text) = shape {
+                    painted |= text.galley.text() == "Panel · profile 1";
+                }
+            });
+        }
+        assert!(painted, "{command}: the painted selection label");
+    }
+}
+
+#[test]
+fn dialog_sketch_selection_labels_translate_and_keep_identifiers() {
+    let mut h = Harness::new();
+    let sketch = h.app.run("sketch.create", json!({"plane": "XY", "name": "Panel"})).unwrap()["sketch"].as_u64().unwrap();
+    let d = Dialog::for_command(&h.app, "sketch.mirror").unwrap();
+    for (sel, english, german) in [
+        (Sel::Profile { sketch, index: 1 }, "Panel · profile 2", "Panel · Profil 2"),
+        (Sel::SketchMidpoint { id: "l7".into() }, "Midpoint · l7", "Mittelpunkt · l7"),
+        (Sel::ExternalSketchCurve { sketch, id: "l7".into() }, "Panel · curve l7", "Panel · Kurve l7"),
+        (Sel::SketchConstraint { id: "k3".into() }, "Constraint k3", "Bedingung k3"),
+    ] {
+        for (language, expected) in [("en", english), ("de", german)] {
+            let _language = crate::i18n::scope(language);
+            assert_eq!(selection_label(&h.app.session, h.app.preferences.origin_plane_names, &d, &d.inputs[0], &sel), expected);
+        }
+    }
+    let missing = Sel::Profile { sketch: 999, index: 0 };
+    assert_eq!(selection_label(&h.app.session, h.app.preferences.origin_plane_names, &d, &d.inputs[0], &missing), "Sketch999 · profile 1");
 }
