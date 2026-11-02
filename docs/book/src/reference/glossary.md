@@ -46,6 +46,35 @@ An appearance sets colour and surface finish only. It has no effect on mass or s
 - **Elsewhere:** appearance, visual material, colour.
 - **For translators:** not the physical material.
 
+### bend allowance
+
+The length of a bend along its neutral axis: what the bend adds to a flat pattern between its two
+straight legs.
+
+SolidCraft works it out for every bend as the bend angle in radians times the bend radius plus the
+K-factor times the thickness. A rule's unfold method can set that K-factor from a press brake
+chart's value for a 90° bend.
+
+- **In SolidCraft:** the `allowance` of each bend in `sheet.flat_pattern` and `allowance_mm` in
+  the bend table; `unfold_method: allowance` with `unfold_value` in `sheet.manage_rules`.
+- **Don't use:** bend length (also the length of a bend line), stretch.
+- **Elsewhere:** BA.
+- **For translators:** a length a bend adds, not a tolerance or a permitted amount.
+
+### bend deduction
+
+The length to take off the sum of a part's outside lengths, measured to the virtual sharps, for
+each bend, to get its flat length.
+
+It is the bend's two outside setbacks less its bend allowance; for a 90° bend each setback is the
+bend radius plus the thickness. A rule's unfold method can set the K-factor from a press brake
+chart's value for a 90° bend.
+
+- **In SolidCraft:** `unfold_method: deduction` with `unfold_value` in `sheet.manage_rules`.
+- **Don't use:** bend compensation (also used for other corrections), shrinkage.
+- **Elsewhere:** BD.
+- **For translators:** a length taken off for a bend, not a discount or a tax.
+
 ### bill of materials
 
 The list of the components placed in a design or in one component, with the quantity of each.
@@ -439,6 +468,21 @@ The ordered list of a design's features, which SolidCraft computes from first to
 - **Don't use:** feature history, history (for the timeline).
 - **Elsewhere:** timeline, history, feature tree.
 - **For translators:** not the undo history.
+
+### unfold method
+
+What sets the K-factor that a sheet metal rule's bends unfold by: the K-factor itself, or a press
+brake chart's bend deduction or bend allowance for a 90° bend.
+
+With a 90° value, every bend uses the K-factor that makes a 90° bend at the rule's bend radius come
+out at exactly that value, so other angles and radii follow from the same neutral axis.
+
+- **In SolidCraft:** Sheet Metal Rules › Unfold Method; the `unfold_method` (`k_factor`,
+  `deduction` or `allowance`) and `unfold_value` keys of a rule.
+- **Don't use:** unfold rule (a rule is the whole set of values).
+- **Elsewhere:** bend allowance type, bend calculation.
+- **For translators:** how a flat length is worked out, not the Unfold command, which flattens a
+  part in the model.
 
 ### view angles
 
