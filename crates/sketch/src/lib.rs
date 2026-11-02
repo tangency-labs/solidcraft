@@ -81,6 +81,7 @@ pub use wire::{MAX_FIT_POINTS, MAX_WIRE_POINTS, Wire, WireArc, WireSpace, arc_fr
 
 #[cfg(test)]
 mod circle_edge_tests;
+mod concentric_distance_tests;
 #[cfg(test)]
 mod coincident_tangent_tests;
 #[cfg(test)]

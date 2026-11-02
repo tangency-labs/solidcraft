@@ -607,6 +607,7 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
             out.push(if value.abs() <= TOL { d } else { d.abs() - value });
         }
         LineCircleDistance { l, c, value, inside } => out.push(s.line_circle_gap(l, c, inside) - value),
+        ConcentricDistance { a, b, value } => out.push(s.round(b).1 - s.round(a).1 - value),
         PointCircleDistance { p, c, value, inside } => out.push(s.point_circle_gap(p, c, inside) - value),
         CircleCircleDistance { a, b, value, circles } => out.push(s.circle_circle_gap(a, b, circles) - value),
         // A length within convergence tolerance of zero means the line's two ends meet:
@@ -679,6 +680,7 @@ fn measure(s: &State, k: &ConstraintKind) -> Option<f64> {
             line_dist(s.p(p), a, b).abs()
         }
         LineCircleDistance { l, c, inside, .. } => s.line_circle_gap(l, c, inside),
+        ConcentricDistance { a, b, .. } => s.round(b).1 - s.round(a).1,
         PointCircleDistance { p, c, inside, .. } => s.point_circle_gap(p, c, inside),
         CircleCircleDistance { a, b, circles, .. } => s.circle_circle_gap(a, b, circles),
         Length { l, .. } => {
@@ -961,7 +963,7 @@ fn block_refs(sk: &Sketch, b: &Block) -> Vec<Ref> {
             ArcSweep { c, .. } | Radius { c, .. } | Diameter { c, .. } | ArcLength { c, .. } => vec![C(c)],
             Parallel { a, b } | Perpendicular { a, b } | Collinear { a, b } | Angle { a, b, .. } => vec![L(a), L(b)],
             Equal { a, b } if line(a) => vec![L(a), L(b)],
-            Equal { a, b } | Concentric { a, b } | SlotOverallLength { a, b, .. } => vec![R(a), R(b)],
+            Equal { a, b } | Concentric { a, b } | ConcentricDistance { a, b, .. } | SlotOverallLength { a, b, .. } => vec![R(a), R(b)],
             Tangent { a, b } => tangent(a, b).to_vec(),
             Smooth { a, b } => vec![C(a), C(b)],
             Symmetric { p, q, l } => vec![P(p), P(q), L(l)],
@@ -1880,7 +1882,7 @@ fn build_blocks<'a>(sk: &'a Sketch, lay: &Layout, on_curve: &[(usize, usize)]) -
         }
     }
     for (i, c) in sk.constraints.iter().enumerate() {
-        if c.driven || matches!(c.kind, ConstraintKind::OffsetDistance { .. }) || sk.follows_its_source(&c.kind) {
+        if c.driven || matches!(c.kind, ConstraintKind::OffsetDistance { .. }) {
             continue;
         }
         raw.push(match touch_point(sk, &c.kind, on_curve) {

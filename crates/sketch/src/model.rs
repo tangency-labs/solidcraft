@@ -370,6 +370,12 @@ pub enum ConstraintKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         inside: bool,
     },
+    /// Radial distance between two concentric circles or arcs: outer radius − inner radius.
+    ConcentricDistance {
+        a: usize,
+        b: usize,
+        value: f64,
+    },
     /// Distance from point `p` to the edge of circle or arc `c`, along the radius through the
     /// point: `|p − centre| − radius` while the point is outside the circle or, `inside`, how
     /// far within the edge it lies, `radius − |p − centre|`. Zero puts the point on the circle.
@@ -470,6 +476,7 @@ impl ConstraintKind {
             | DistanceY { value, .. }
             | PointLineDistance { value, .. }
             | LineCircleDistance { value, .. }
+            | ConcentricDistance { value, .. }
             | PointCircleDistance { value, .. }
             | CircleCircleDistance { value, .. }
             | Length { value, .. }
@@ -493,6 +500,7 @@ impl ConstraintKind {
             | DistanceY { value, .. }
             | PointLineDistance { value, .. }
             | LineCircleDistance { value, .. }
+            | ConcentricDistance { value, .. }
             | PointCircleDistance { value, .. }
             | CircleCircleDistance { value, .. }
             | Length { value, .. }
@@ -533,6 +541,7 @@ impl ConstraintKind {
             | DistanceY { .. }
             | PointLineDistance { .. }
             | LineCircleDistance { .. }
+            | ConcentricDistance { .. }
             | PointCircleDistance { .. }
             | CircleCircleDistance { .. }
             | Length { .. } => "LinearDimension",
@@ -569,6 +578,7 @@ impl ConstraintKind {
             Angle { a, b, .. } | SlotOverallLength { a, b, .. } => (vec![], vec![a, b]),
             Midpoint { p, l } | PointLineDistance { p, l, .. } => (vec![p], vec![l]),
             LineCircleDistance { l, c, .. } => (vec![], vec![l, c]),
+            ConcentricDistance { a, b, .. } => (vec![], vec![a, b]),
             PointCircleDistance { p, c, .. } => (vec![p], vec![c]),
             CircleCircleDistance { a, b, .. } => (vec![], vec![a, b]),
             Symmetric { p, q, l } => (vec![p, q], vec![l]),
@@ -637,6 +647,10 @@ impl ConstraintKind {
             LineCircleDistance { l, c, .. } => {
                 fc(l);
                 fc(c);
+            }
+            ConcentricDistance { a, b, .. } => {
+                fc(a);
+                fc(b);
             }
             PointCircleDistance { p, c, .. } => {
                 fp(p);
@@ -1131,6 +1145,13 @@ impl Sketch {
                 need_line(l)?;
                 need_round(c)?;
             }
+            ConcentricDistance { a, b, .. } => {
+                need_round(a)?;
+                need_round(b)?;
+                if a == b {
+                    return Err(SketchError::Invalid("two distinct curves are needed".into()));
+                }
+            }
             PointCircleDistance { c, .. } => need_round(c)?,
             CircleCircleDistance { a, b, .. } => {
                 if a == b {
@@ -1475,6 +1496,12 @@ impl Sketch {
     pub fn center(&self, ci: usize) -> Option<Vec2> {
         match self.curves.get(ci)?.kind {
             CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } | CurveKind::Ellipse { c, .. } => self.point(c),
+            _ => None,
+        }
+    }
+    pub fn center_point(&self, ci: usize) -> Option<usize> {
+        match self.curves.get(ci)?.kind {
+            CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } | CurveKind::Ellipse { c, .. } => Some(c),
             _ => None,
         }
     }
