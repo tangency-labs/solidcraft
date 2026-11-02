@@ -27,7 +27,18 @@
 //!   every return (an early return leaves the caller's values).
 //! - **`SmTArray::SetSize`** fills new records with zero bytes (`smos_Calloc` / `memset`,
 //!   no constructor): `rClassifyLoopIOs` grows with [`ZEROED_CLASSIFY_LOOP_IO`] (type 0,
-//!   `m_bDegen_Loop` and `m_bArea_Loop` `FALSE`), not with `SmClassifyLoopIO()`.
+//!   `m_bDegen_Loop` and `m_bArea_Loop` `FALSE`), not with `SmClassifyLoopIO()`. Its
+//!   allocation outlives the size (`SmTArray.h` 480-596: `MIN_ARRAY_SIZE` 16, doubled
+//!   until it holds the size, `smos_Calloc`ed, i.e. zeroed, `SmMemory.cpp` 120; growth
+//!   within it zeroes the added records, growth past it copies `m_lSize` records into a
+//!   new zeroed block). `rClassifyLoopIOs[lLoopIndx]` is unchecked (`SmTArray.h`
+//!   454-464 checks only under `SM_DEBUG_CODE`), and a touch's loop index counts the
+//!   face's loops, not the target loops: on a face whose target loops are fewer
+//!   (`SetProps_Stage3` passes the closed loops only, into a fresh array) the walk reads
+//!   and writes the zeroed records past the size (WR-715). The one `SetSize` of the call
+//!   (`SmFace.cpp` 4267) is the only resize. The port keeps those records as
+//!   `out.classify_loop_io_slack` ([`ClassifyLoopsOut::classify_loop_io_slack`],
+//!   `set_classify_loop_ios_size`); past the allocation the read stays an error.
 //! - **Marks.** `SmNewMarkAndLock` on the face context marks classified loops; a fresh
 //!   locked mark leaves every loop unmarked, so the port keeps the marked loops in a
 //!   local set. Upstream leaves the mark on the loops (not observable here).
@@ -54,7 +65,8 @@
 //!   props' seam lists (borrowed) or the lists computed for a bisector or for UV
 //!   containment (owned for the pass).
 //! - **Undefined behaviour upstream** is [`SolidError::InvalidInput`]: an index read
-//!   outside `rClassifyLoopIOs`, the face props' loop props or a touch list (odd length),
+//!   past the allocation of `rClassifyLoopIOs`, outside the face props' loop props or a
+//!   touch list (odd length),
 //!   an empty seam classification read at its first or last interval, a loop without
 //!   loop use.
 //! - No recursion ([`Looptree::find_item`] bounds its own).
@@ -145,14 +157,85 @@ fn index(i: u64) -> Result<usize> {
     usize::try_from(i).map_err(|_| invalid("index out of range"))
 }
 
-fn io_at(ios: &[ClassifyLoopIo], i: u64) -> Result<&ClassifyLoopIo> {
-    ios.get(index(i)?)
-        .ok_or_else(|| invalid("classify loop record index out of range"))
+/// `SmTArray::SetSize`'s smallest allocation (`MIN_ARRAY_SIZE`).
+const MIN_ARRAY_SIZE: usize = 16;
+
+/// `rClassifyLoopIOs.SetSize(size)` on the records `ios` and the zero-filled slots
+/// `slack` that `SmTArray` holds past them (`m_lMaxSize - m_lSize`): growing from
+/// nothing allocates `max(16, next power of two)` zeroed records, growing within the
+/// allocation zeroes the records it adds, growing past it allocates anew (zeroed, the
+/// old records copied, the old slack gone), shrinking keeps the records past the new
+/// size as slack and size 0 frees everything.
+pub(crate) fn set_classify_loop_ios_size(
+    ios: &mut Vec<ClassifyLoopIo>,
+    slack: &mut Vec<ClassifyLoopIo>,
+    size: usize,
+) {
+    let old = ios.len();
+    let capacity = old + slack.len();
+    if size == 0 {
+        ios.clear();
+        slack.clear();
+    } else if capacity == 0 || size > capacity {
+        let allocated = size
+            .checked_next_power_of_two()
+            .unwrap_or(size)
+            .max(MIN_ARRAY_SIZE);
+        ios.resize(size, ZEROED_CLASSIFY_LOOP_IO);
+        *slack = vec![ZEROED_CLASSIFY_LOOP_IO; allocated.saturating_sub(size)];
+    } else {
+        let mut all = core::mem::take(ios);
+        all.append(slack);
+        for io in all.iter_mut().skip(old).take(size.saturating_sub(old)) {
+            *io = ZEROED_CLASSIFY_LOOP_IO;
+        }
+        *slack = all.split_off(size);
+        *ios = all;
+    }
 }
 
-fn io_at_mut(ios: &mut [ClassifyLoopIo], i: u64) -> Result<&mut ClassifyLoopIo> {
-    ios.get_mut(index(i)?)
-        .ok_or_else(|| invalid("classify loop record index out of range"))
+/// `rClassifyLoopIOs[i]`, unchecked upstream: a record of `ios`, or past them one of
+/// the zeroed slots of the same allocation (`slack`, see
+/// [`set_classify_loop_ios_size`]); `None` past the allocation.
+pub(crate) fn classify_loop_io<'a>(
+    ios: &'a [ClassifyLoopIo],
+    slack: &'a [ClassifyLoopIo],
+    i: usize,
+) -> Option<&'a ClassifyLoopIo> {
+    match i.checked_sub(ios.len()) {
+        None => ios.get(i),
+        Some(j) => slack.get(j),
+    }
+}
+
+/// [`classify_loop_io`] for writing.
+fn classify_loop_io_mut<'a>(
+    ios: &'a mut [ClassifyLoopIo],
+    slack: &'a mut [ClassifyLoopIo],
+    i: usize,
+) -> Option<&'a mut ClassifyLoopIo> {
+    match i.checked_sub(ios.len()) {
+        None => ios.get_mut(i),
+        Some(j) => slack.get_mut(j),
+    }
+}
+
+fn io_at(out: &ClassifyLoopsOut, i: u64) -> Result<&ClassifyLoopIo> {
+    classify_loop_io(
+        &out.classify_loop_ios,
+        &out.classify_loop_io_slack,
+        index(i)?,
+    )
+    .ok_or_else(|| invalid("classify loop record index out of range"))
+}
+
+fn io_at_mut(out: &mut ClassifyLoopsOut, i: u64) -> Result<&mut ClassifyLoopIo> {
+    classify_loop_io_mut(
+        &mut out.classify_loop_ios,
+        &mut out.classify_loop_io_slack,
+        index(i)?,
+    )
+    .ok_or_else(|| invalid("classify loop record index out of range"))
 }
 
 fn touch_at<O: Copy>(list: &[TouchData<O>], i: usize) -> Result<TouchData<O>> {
@@ -413,8 +496,11 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
     // init output
     out.classifiable = HealNotYetFaceType::NoProbs;
     out.looptree = None;
-    out.classify_loop_ios
-        .resize(loops.len(), ZEROED_CLASSIFY_LOOP_IO);
+    set_classify_loop_ios_size(
+        &mut out.classify_loop_ios,
+        &mut out.classify_loop_io_slack,
+        loops.len(),
+    );
     out.start_type = CrvDirOnFaceType::Uninit;
     out.stop_type = CrvDirOnFaceType::Uninit;
     out.ordered_no_area_indices.clear();
@@ -742,8 +828,7 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
                     && touch_at(done, jj + 1)?.loop_dir == CrvDirOnFaceType::In
                 {
                     let loop_indx = touch_at(done, jj)?.loop_index;
-                    if (no_area_loop_cnt > 0
-                        && io_at(&out.classify_loop_ios, loop_indx)?.area_loop == Tri::False)
+                    if (no_area_loop_cnt > 0 && io_at(out, loop_indx)?.area_loop == Tri::False)
                         || no_area_loop_cnt == 0
                     {
                         inc_indx = Some(jj);
@@ -794,7 +879,7 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
                 if cyclic_walk
                     && !(touch_at(done, j1)?.loop_dir == CrvDirOnFaceType::Out
                         && touch_at(done, j1 + 1)?.loop_dir == CrvDirOnFaceType::In)
-                    && !(io_at(&out.classify_loop_ios, loop_indx)?.area_loop == Tri::False
+                    && !(io_at(out, loop_indx)?.area_loop == Tri::False
                         && start_with_no_vertex_pole)
                 {
                     // Without an outside starting state, depth zero cannot establish
@@ -805,9 +890,9 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
                 }
                 (true, false, false)
             } else {
-                let no_area = |i: u64| -> Result<bool> {
-                    Ok(io_at(&out.classify_loop_ios, i)?.area_loop == Tri::False)
-                };
+                let records: &ClassifyLoopsOut = out;
+                let no_area =
+                    |i: u64| -> Result<bool> { Ok(io_at(records, i)?.area_loop == Tri::False) };
                 // paired a loop to itself
                 let exiting_same_loop = last_indx == loop_indx && last_indx != NO_VERTEX_POLE;
                 // paired an entering NoArea_Loop with an exiting NoArea_Loop
@@ -844,7 +929,7 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
                     // EnterEvent: Orient block (a subsequent entry is only asserted
                     // upstream)
                     let orient = touch_orient(done, j1)?;
-                    let io = io_at_mut(&mut out.classify_loop_ios, io_i as u64)?;
+                    let io = io_at_mut(out, io_i as u64)?;
                     if io.orient == OrientType::Unknown {
                         io.orient = orient;
                     }
@@ -902,7 +987,7 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
             } else if pairing {
                 if let Some(io_i) = io_indx {
                     let orient = touch_orient(done, j1)?;
-                    let io = io_at_mut(&mut out.classify_loop_ios, io_i as u64)?;
+                    let io = io_at_mut(out, io_i as u64)?;
                     if io.orient == OrientType::Unknown {
                         io.orient = orient;
                     }
@@ -1102,6 +1187,86 @@ mod tests {
         assert_eq!(root.classify_loop_io, Some(0));
         assert_eq!(root.partner_classify_loop_io, Some(1));
         assert_eq!(tree.len(), 1);
+    }
+
+    #[test]
+    fn missing_seam_touch_past_the_target_loops_reads_the_zeroed_slack() {
+        // Stage 3 classifies only the closed loops, while the seam touch list counts all
+        // of the face's loops: the second loop's touches index past `rClassifyLoopIOs`.
+        // Upstream reads and writes the zeroed record of the allocation there and pairs
+        // the loops (chair.stp body 21 face 2: Bot/Top, NO_PROBS in the C++).
+        let k = Kernel::default();
+        let mut b = Brep::new();
+        let f = face_with_loops(&mut b, &[false, false], true);
+        let done = vec![
+            touch(0, CrvDirOnFaceType::Out),
+            touch(0, CrvDirOnFaceType::In),
+            touch(1, CrvDirOnFaceType::In),
+            touch(1, CrvDirOnFaceType::Out),
+        ];
+        let mut props = seam_props(&k, 2, done);
+        let mut loops = vec![LoopId::from_index(0)];
+        let (r, out) = run(&b, f, &mut props, &mut loops);
+        r.unwrap();
+        assert_eq!(out.classifiable, HealNotYetFaceType::NoProbs);
+        assert_eq!(out.ordered_no_area_indices, vec![0]);
+        assert_eq!(out.classify_loop_ios.len(), 1);
+        let io0 = out.classify_loop_ios[0];
+        assert_eq!(
+            (io0.orient, io0.area_loop, io0.containment),
+            (OrientType::Same, Tri::False, ContainmentType::BotLoop)
+        );
+        // record 1 is the first slot past the size, of the 16 SetSize allocates
+        assert_eq!(out.classify_loop_io_slack.len(), 15);
+        let io1 = out.classify_loop_io_slack[0];
+        assert_eq!(
+            (io1.loop_, io1.orient, io1.area_loop, io1.containment),
+            (
+                None,
+                OrientType::Opposite,
+                Tri::False,
+                ContainmentType::TopLoop
+            )
+        );
+        let tree = out.looptree.unwrap();
+        let root = tree.item(tree.root().unwrap()).unwrap();
+        assert_eq!(root.loop_, Some(LoopId::from_index(0)));
+        assert_eq!(root.partner_loop, Some(LoopId::from_index(1)));
+        assert_eq!(root.partner_classify_loop_io, Some(1));
+        assert_eq!(tree.len(), 1);
+    }
+
+    #[test]
+    fn classify_loop_io_records_keep_smtarray_allocation() {
+        let z = ZEROED_CLASSIFY_LOOP_IO;
+        let mut marked = z;
+        marked.containment = ContainmentType::TopLoop;
+        let (mut ios, mut slack) = (Vec::new(), Vec::new());
+        // from nothing: 16 records, zeroed
+        set_classify_loop_ios_size(&mut ios, &mut slack, 2);
+        assert_eq!((ios.len(), slack.len()), (2, 14));
+        assert_eq!(classify_loop_io(&ios, &slack, 15), Some(&z));
+        assert_eq!(classify_loop_io(&ios, &slack, 16), None);
+        // shrinking keeps the records past the new size in the allocation
+        ios[1] = marked;
+        set_classify_loop_ios_size(&mut ios, &mut slack, 1);
+        assert_eq!((ios.len(), slack.len()), (1, 15));
+        assert_eq!(classify_loop_io(&ios, &slack, 1), Some(&marked));
+        // growing within the allocation zeroes the records it adds, not those past it
+        slack[3] = marked;
+        set_classify_loop_ios_size(&mut ios, &mut slack, 3);
+        assert_eq!(ios, vec![z; 3]);
+        assert_eq!(classify_loop_io(&ios, &slack, 4), Some(&marked));
+        // growing past it allocates anew: the records copied, the rest zeroed
+        ios[0] = marked;
+        set_classify_loop_ios_size(&mut ios, &mut slack, 17);
+        assert_eq!((ios.len(), slack.len()), (17, 15));
+        assert_eq!(ios[0], marked);
+        assert!(ios[1..].iter().chain(&slack).all(|io| *io == z));
+        // size 0 frees it
+        set_classify_loop_ios_size(&mut ios, &mut slack, 0);
+        assert!(ios.is_empty() && slack.is_empty());
+        assert_eq!(classify_loop_io(&ios, &slack, 0), None);
     }
 
     #[test]

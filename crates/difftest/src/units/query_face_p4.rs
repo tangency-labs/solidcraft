@@ -390,6 +390,7 @@ fn initial_out() -> ClassifyLoopsOut {
     ClassifyLoopsOut {
         classifiable: HealNotYetFaceType::NoLoopTreeRoot,
         classify_loop_ios: Vec::new(),
+        classify_loop_io_slack: Vec::new(),
         start_type: CrvDirOnFaceType::Lamina,
         stop_type: CrvDirOnFaceType::Lamina,
         ordered_no_area_indices: vec![77],

@@ -147,6 +147,19 @@ fn at<T: Copy>(v: &[T], i: usize, operation: &'static str) -> Result<T> {
         .ok_or_else(|| null(operation, "index out of range"))
 }
 
+/// `sClassifyLoopIOs[i]` of `SetProps_Stage3`, unchecked upstream: past the records it
+/// reads the zeroed slots of their allocation
+/// ([`crate::query::face::p4::classify_loop_io`]).
+fn classify_io_at(
+    ios: &[ClassifyLoopIo],
+    slack: &[ClassifyLoopIo],
+    i: usize,
+) -> Result<ClassifyLoopIo> {
+    crate::query::face::p4::classify_loop_io(ios, slack, i)
+        .copied()
+        .ok_or_else(|| null(OP_STAGE3, "index out of range"))
+}
+
 // ---- enumerations ---------------------------------------------------------------------
 
 /// An `SmBoolean` that can also be `UNSURE` (`TRUE` 1, `FALSE` 0, `UNSURE` 2).
@@ -1276,6 +1289,10 @@ pub struct ClassifyLoopsOut {
     pub classifiable: HealNotYetFaceType,
     /// `rClassifyLoopIOs`: one record per target loop.
     pub classify_loop_ios: Vec<ClassifyLoopIo>,
+    /// The zero-filled records `SmTArray` allocates past `rClassifyLoopIOs`' size (at
+    /// least 16, in powers of two), which upstream's unchecked `rClassifyLoopIOs[i]`
+    /// reads and writes for a touch's loop index past the target loops.
+    pub classify_loop_io_slack: Vec<ClassifyLoopIo>,
     /// `reClassifyCrv_StartType`.
     pub start_type: CrvDirOnFaceType,
     /// `reClassifyCrv_StopType`.
@@ -1293,6 +1310,7 @@ impl Default for ClassifyLoopsOut {
         Self {
             classifiable: HealNotYetFaceType::NoProbs,
             classify_loop_ios: Vec::new(),
+            classify_loop_io_slack: Vec::new(),
             start_type: CrvDirOnFaceType::Uninit,
             stop_type: CrvDirOnFaceType::Uninit,
             ordered_no_area_indices: Vec::new(),
@@ -2368,6 +2386,7 @@ impl<O: LoopObject> FaceProps<O> {
         let ClassifyLoopsOut {
             classifiable,
             classify_loop_ios,
+            classify_loop_io_slack,
             start_type: classify_crv_start_type,
             stop_type: classify_crv_stop_type,
             ordered_no_area_indices,
@@ -2404,7 +2423,7 @@ impl<O: LoopObject> FaceProps<O> {
 
             // match SmClassifyLoopIO and m_sLoopProps indices
             let p_loop = at(&loops, ii, OP_STAGE3)?;
-            let io = at(&classify_loop_ios, jj, OP_STAGE3)?;
+            let io = classify_io_at(&classify_loop_ios, &classify_loop_io_slack, jj)?;
 
             // guard against NULL m_pLooptreeRoot - can happen when ClassifyLoops cannot
             // process loops (a failed status is checked upstream by SE_MSG only)
@@ -2579,7 +2598,9 @@ impl<O: LoopObject> FaceProps<O> {
                 && closed.is_true()
             {
                 let lowest = match ordered_no_area_indices.first() {
-                    Some(&i) => Some(at(&classify_loop_ios, i, OP_STAGE3)?.containment),
+                    Some(&i) => Some(
+                        classify_io_at(&classify_loop_ios, &classify_loop_io_slack, i)?.containment,
+                    ),
                     None => None,
                 };
                 if lowest == Some(want) {
