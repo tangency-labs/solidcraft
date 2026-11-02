@@ -85,7 +85,8 @@ points down at Z = 0, with its centre of mass over the origin; the design itself
 While the window is open, the print faces of the bodies being sent are tinted and outlined in the
 viewport; closing it hides them again. A copy made with Move/Copy or Mirror keeps its print face.
 To mark print faces with Ctrl+B and the face menu and see them at all times, as earlier versions
-did, turn on **Print faces outside Send to Slicer** in Preferences › General › Slicer. A print face that is gone or no longer flat is
+did, turn on **Mark print faces from the face menu and Ctrl+B, and always show them** in
+Preferences › General › Files. A print face that is gone or no longer flat is
 reported, and the body is sent as it lies. Curved faces and mesh bodies can't be print faces.
 Known limitation: after a shell of a body that is already shelled, no face of that body can be
 marked, as no sketch can be attached to one either; this needs kernel work, which is paused.
