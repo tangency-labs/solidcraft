@@ -1394,12 +1394,20 @@ fn moving_loops_values(
     }
     // A closed loop through a value that moves stays closed by its own closing joint's values
     // (a part slid on one planar joint slides on its second): they are on no tree path, so no other
-    // loop runs through them.
-    let moving: BTreeSet<(u64, usize)> = vars.iter().copied().collect();
-    let follow: BTreeSet<u64> = others.into_iter().filter(|(_, touches)| !touches.is_disjoint(&moving)).map(|(id, _)| id).collect();
-    for v in unknowns(tree, &follow, asm, linked, held) {
-        if !vars.contains(&v) {
-            vars.push(v);
+    // loop runs through them, but a motion link setting one moves the value its chain starts from,
+    // and the loops through that follow the same way.
+    while vars.len() <= MAX_LOOP_VALUES {
+        let moving: BTreeSet<(u64, usize)> = vars.iter().copied().collect();
+        let follow: BTreeSet<u64> = others.iter().filter(|(_, touches)| !touches.is_disjoint(&moving)).map(|(id, _)| *id).collect();
+        others.retain(|(id, _)| !follow.contains(id));
+        let before = vars.len();
+        for v in unknowns(tree, &follow, asm, linked, held) {
+            if !vars.contains(&v) {
+                vars.push(v);
+            }
+        }
+        if vars.len() == before {
+            break;
         }
     }
     (vars.len() <= MAX_LOOP_VALUES).then_some(vars)
