@@ -17,7 +17,6 @@
 use solidcraft_geom::Mesh;
 use solidcraft_geom::Vec3;
 use solidcraft_geom::tess::{EvalCurve, EvalSurface, TessPlan};
-use wgpu::util::DeviceExt;
 
 pub mod capture;
 pub mod concurrent;
@@ -66,15 +65,55 @@ fn error_scopes(device: &wgpu::Device) -> [wgpu::ErrorScopeGuard; 3] {
     [wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal, wgpu::ErrorFilter::Validation].map(|f| device.push_error_scope(f))
 }
 
-/// The first error the scopes caught.
-fn caught(scopes: [wgpu::ErrorScopeGuard; 3]) -> Option<String> {
-    let mut failed = None;
-    for scope in scopes.into_iter().rev() {
-        if let Some(e) = popped(scope.pop()) {
-            failed.get_or_insert(e.to_string());
+/// The error to report from several that scopes caught: running out of memory when any scope
+/// caught it (the validation errors that follow from a buffer or texture the device refused are
+/// secondary), else the first.
+fn preferred_error(errors: impl IntoIterator<Item = wgpu::Error>) -> Option<wgpu::Error> {
+    let mut first = None;
+    for error in errors {
+        if matches!(error, wgpu::Error::OutOfMemory { .. }) {
+            return Some(error);
         }
+        first.get_or_insert(error);
     }
-    failed
+    first
+}
+
+/// What an error says to the user: "GPU out of memory" for an allocation the device refused,
+/// else wgpu's own message.
+fn describe(error: &wgpu::Error) -> String {
+    match error {
+        wgpu::Error::OutOfMemory { .. } => "GPU out of memory".into(),
+        other => other.to_string(),
+    }
+}
+
+/// The error the scopes caught ([`preferred_error`]), described.
+fn caught(scopes: [wgpu::ErrorScopeGuard; 3]) -> Option<String> {
+    preferred_error(scopes.into_iter().rev().filter_map(|scope| popped(scope.pop()))).as_ref().map(describe)
+}
+
+/// As `create_buffer_init`, without its panic when the device refuses the buffer (out of memory,
+/// or a lost device): the buffer is created under error scopes, and a refusal is an error before
+/// anything is written to it. The size is padded to [`wgpu::COPY_BUFFER_ALIGNMENT`] (at least
+/// one word), as `create_buffer_init` pads it.
+fn buffer_init(device: &wgpu::Device, label: &str, contents: &[u8], usage: wgpu::BufferUsages) -> Result<wgpu::Buffer> {
+    let len = contents.len() as u64;
+    let size = (len.div_ceil(wgpu::COPY_BUFFER_ALIGNMENT) * wgpu::COPY_BUFFER_ALIGNMENT).max(wgpu::COPY_BUFFER_ALIGNMENT);
+    let scopes = error_scopes(device);
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: true });
+    if let Some(error) = caught(scopes) {
+        return Err(GpuError::Render(error));
+    }
+    // The whole padded size: a mapped range must be a multiple of the alignment too.
+    let mut padded = contents.to_vec();
+    padded.resize(size as usize, 0);
+    match buffer.get_mapped_range_mut(..size) {
+        Ok(mut mapped) => mapped.copy_from_slice(&padded),
+        Err(error) => return Err(GpuError::Render(error.to_string())),
+    }
+    buffer.unmap();
+    Ok(buffer)
 }
 
 /// The D3D12 shader compiler every wgpu instance starts with (#6756). `WGPU_DX12_COMPILER` names
@@ -361,10 +400,10 @@ impl TessGpu {
         let count = word(packed.count)?;
         let words = |v: &[u32]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
         let floats = |v: &[f32]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
-        let params = tess_buffer::<[u32; 4]>(d, "tess params", words(&[count, 0, 0, 0]), wgpu::BufferUsages::UNIFORM);
-        let surfaces = tess_buffer::<[u32; SURFACE_WORDS]>(d, "tess surfaces", words(&packed.surfaces), wgpu::BufferUsages::STORAGE);
-        let data = tess_buffer::<f32>(d, "tess data", floats(&packed.data), wgpu::BufferUsages::STORAGE);
-        let verts = tess_buffer::<[u32; VERTEX_WORDS]>(d, "tess vertices", words(&packed.vertices), wgpu::BufferUsages::STORAGE);
+        let params = tess_buffer::<[u32; 4]>(d, "tess params", words(&[count, 0, 0, 0]), wgpu::BufferUsages::UNIFORM)?;
+        let surfaces = tess_buffer::<[u32; SURFACE_WORDS]>(d, "tess surfaces", words(&packed.surfaces), wgpu::BufferUsages::STORAGE)?;
+        let data = tess_buffer::<f32>(d, "tess data", floats(&packed.data), wgpu::BufferUsages::STORAGE)?;
+        let verts = tess_buffer::<[u32; VERTEX_WORDS]>(d, "tess vertices", words(&packed.vertices), wgpu::BufferUsages::STORAGE)?;
         let vertices = d.create_buffer(&wgpu::BufferDescriptor {
             label: Some("tess mesh vertices"),
             size: (packed.count.max(1) as u64) * VERTEX_STRIDE,
@@ -387,7 +426,7 @@ impl TessGpu {
             }
             parts.push(Part { vertices: v0..offset, indices: i0..word(tri.len())? });
         }
-        let indices = tess_buffer::<u32>(d, "tess mesh indices", words(&tri), wgpu::BufferUsages::INDEX);
+        let indices = tess_buffer::<u32>(d, "tess mesh indices", words(&tri), wgpu::BufferUsages::INDEX)?;
         let bind = d.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("tess mesh"),
             layout: &self.layout,
@@ -433,10 +472,10 @@ impl TessGpu {
         let bytes_u32 = |v: &[u32]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
         let bytes_f32 = |v: &[f32]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
         let count = u32::try_from(n).map_err(|_| GpuError::Failed("batch too large".into()))?;
-        let params = tess_buffer::<[u32; 4]>(d, "tess params", bytes_u32(&[count, 0, 0, 0]), wgpu::BufferUsages::UNIFORM);
-        let surfaces = tess_buffer::<[u32; SURFACE_WORDS]>(d, "tess surfaces", bytes_u32(&packed.surfaces), wgpu::BufferUsages::STORAGE);
-        let data = tess_buffer::<f32>(d, "tess data", bytes_f32(&packed.data), wgpu::BufferUsages::STORAGE);
-        let verts = tess_buffer::<[u32; VERTEX_WORDS]>(d, "tess vertices", bytes_u32(vertices), wgpu::BufferUsages::STORAGE);
+        let params = tess_buffer::<[u32; 4]>(d, "tess params", bytes_u32(&[count, 0, 0, 0]), wgpu::BufferUsages::UNIFORM)?;
+        let surfaces = tess_buffer::<[u32; SURFACE_WORDS]>(d, "tess surfaces", bytes_u32(&packed.surfaces), wgpu::BufferUsages::STORAGE)?;
+        let data = tess_buffer::<f32>(d, "tess data", bytes_f32(&packed.data), wgpu::BufferUsages::STORAGE)?;
+        let verts = tess_buffer::<[u32; VERTEX_WORDS]>(d, "tess vertices", bytes_u32(vertices), wgpu::BufferUsages::STORAGE)?;
         let size = (n as u64) * VERTEX_STRIDE;
         let out = d.create_buffer(&wgpu::BufferDescriptor {
             label: Some("tess out"),
@@ -491,9 +530,9 @@ const VERTEX_WORDS: usize = 8;
 const SURFACE_WORDS: usize = 12;
 
 // Each empty binding still needs a whole element of its packed shader representation.
-fn tess_buffer<T>(device: &wgpu::Device, label: &str, mut contents: Vec<u8>, usage: wgpu::BufferUsages) -> wgpu::Buffer {
+fn tess_buffer<T>(device: &wgpu::Device, label: &str, mut contents: Vec<u8>, usage: wgpu::BufferUsages) -> Result<wgpu::Buffer> {
     contents.resize(contents.len().max(std::mem::size_of::<T>()), 0);
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(label), contents: &contents, usage })
+    buffer_init(device, label, &contents, usage)
 }
 
 /// A plan as the shader reads it.

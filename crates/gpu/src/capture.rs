@@ -13,7 +13,6 @@ use std::sync::{Arc, Mutex};
 
 use solidcraft_geom::Vec3;
 use solidcraft_render::{AnalysisMode, Camera, Rgb, SECTION_CAP, Scene};
-use wgpu::util::DeviceExt;
 
 use crate::view::{AccessMap, DrawStats, Frame, GpuScene, GpuTarget, Renderer, analysis_colors, analysis_uniform};
 use crate::{GpuError, Result, caught, error_scopes};
@@ -235,9 +234,19 @@ impl Capturer {
         let (resolved_view, depth_view) = (resolved.create_view(&Default::default()), depth.create_view(&Default::default()));
         let multisampled_view = multisampled.as_ref().map(|t| t.create_view(&Default::default()));
         let (top, bottom) = scene.background.unwrap_or(BACKGROUND);
-        let background = background_vertices(device, top, bottom);
+        let background = match background_vertices(device, top, bottom) {
+            Ok(b) => b,
+            Err(e) => {
+                let _ = caught(scopes);
+                return Err(e);
+            }
+        };
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sc_capture") });
         state.renderer.prepare(device, queue, &mut encoder, &frame);
+        if let Some(reason) = state.renderer.take_refused_upload() {
+            let _ = caught(scopes);
+            return Err(GpuError::Render(reason));
+        }
         {
             let (view, resolve_target, store) = match &multisampled_view {
                 Some(ms) => (ms, Some(&resolved_view), wgpu::StoreOp::Discard),
@@ -504,7 +513,7 @@ fn fs(i: O) -> @location(0) vec4<f32> {
 /// Background vertex: NDC position (2 × f32) and sRGB colour (4 × u8).
 const BACKGROUND_VERTEX: u64 = 12;
 
-fn background_vertices(device: &wgpu::Device, top: Rgb, bottom: Rgb) -> wgpu::Buffer {
+fn background_vertices(device: &wgpu::Device, top: Rgb, bottom: Rgb) -> Result<wgpu::Buffer> {
     let mut bytes = Vec::with_capacity(6 * BACKGROUND_VERTEX as usize);
     let corner = |x: f32, y: f32| (x, y, if y > 0.0 { top } else { bottom });
     for (x, y, c) in [corner(-1.0, 1.0), corner(1.0, 1.0), corner(1.0, -1.0), corner(-1.0, 1.0), corner(1.0, -1.0), corner(-1.0, -1.0)] {
@@ -512,11 +521,7 @@ fn background_vertices(device: &wgpu::Device, top: Rgb, bottom: Rgb) -> wgpu::Bu
         bytes.extend_from_slice(&y.to_le_bytes());
         bytes.extend_from_slice(&[c.0, c.1, c.2, 255]);
     }
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("sc_capture_background"),
-        contents: &bytes,
-        usage: wgpu::BufferUsages::VERTEX,
-    })
+    crate::buffer_init(device, "sc_capture_background", &bytes, wgpu::BufferUsages::VERTEX)
 }
 
 fn background_pipeline(device: &wgpu::Device, samples: u32, depth: wgpu::TextureFormat) -> wgpu::RenderPipeline {

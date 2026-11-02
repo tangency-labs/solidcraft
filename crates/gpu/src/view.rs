@@ -14,7 +14,6 @@ use std::sync::{Arc, Mutex};
 use solidcraft_geom::Vec3;
 
 use crate::pbr;
-use wgpu::util::DeviceExt;
 
 mod ao;
 mod clouds;
@@ -1113,6 +1112,7 @@ struct Batch {
 }
 
 /// A chunk of planned bodies on the GPU: their evaluated mesh and a colour per vertex.
+#[derive(Clone)]
 struct PlannedDraw {
     mesh: Arc<crate::GpuMesh>,
     colors: wgpu::Buffer,
@@ -1131,6 +1131,7 @@ impl PlannedDraw {
 }
 
 /// An [`InstancedMesh`]'s triangles on the GPU (kept while its key comes back).
+#[derive(Clone)]
 enum SharedGpu {
     /// Shared vertices and their indices.
     Indexed { vertices: wgpu::Buffer, indices: wgpu::Buffer, count: u32 },
@@ -1238,6 +1239,7 @@ pub fn placed_box_in_view(rows: &[[f32; 4]; 3], bounds: &[[f32; 3]; 2], vp: &[[f
 }
 
 /// One level of an [`InstancedDraw`]: its triangles and the placements drawn from it.
+#[derive(Clone)]
 struct LevelDraw {
     tris: Arc<SharedGpu>,
     flat: bool,
@@ -1250,6 +1252,7 @@ struct LevelDraw {
 
 /// An [`InstancedMesh`] on the GPU: its triangles and coarser levels (shared with the next scene
 /// while they come back), and the placements in view, each drawn from its level.
+#[derive(Clone)]
 struct InstancedDraw {
     look: InstanceLook,
     /// The full triangles first, then coarser ones.
@@ -1313,6 +1316,7 @@ enum ClassGpu {
 
 /// A scene block on the GPU, with the bytes it was uploaded from. Each artifact is kept while
 /// its `Arc` comes back, so an opacity class change uploads nothing for a class drawn by runs.
+#[derive(Clone)]
 struct BlockGpu {
     bytes: Arc<BlockBytes>,
     vertices: Option<wgpu::Buffer>,
@@ -1357,11 +1361,7 @@ fn class_gpu(
     let bytes: Vec<u8> = runs.iter().flat_map(|r| r.clone()).flat_map(|i| i.to_le_bytes()).collect();
     *uploaded += bytes.len() as u64;
     let count = u32::try_from(bytes.len() / 4).unwrap_or(u32::MAX);
-    let indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("sc_block_indices"),
-        contents: &bytes,
-        usage: wgpu::BufferUsages::INDEX,
-    });
+    let indices = buffer_init(device, "sc_block_indices", &bytes, wgpu::BufferUsages::INDEX)?;
     Some(ClassGpu::Indexed { indices, count })
 }
 
@@ -1375,11 +1375,7 @@ impl BlockGpu {
             old.as_ref().and_then(|o| o.vertices.clone())
         } else {
             *uploaded += bytes.vertices.len() as u64;
-            Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("sc_block_vertices"),
-                contents: &bytes.vertices,
-                usage: wgpu::BufferUsages::VERTEX,
-            }))
+            buffer_init(device, "sc_block_vertices", &bytes.vertices, wgpu::BufferUsages::VERTEX)
         };
         let mut class = |class: TriClass| {
             let old_pair = old.as_ref().and_then(|o| o.class(class).map(|c| (c, o.bytes.runs(class))));
@@ -1453,6 +1449,7 @@ fn joined<'a>(blocks: impl Iterator<Item = &'a Option<Batch>>, own: Option<Batch
 }
 
 /// A scene's palette on the GPU: an `R32Uint` texture, [`PALETTE_WIDTH`] entries to a row.
+#[derive(Clone)]
 struct PaletteGpu {
     palette: Arc<Palette>,
     /// Held for the bind group, which views it.
@@ -1586,14 +1583,17 @@ const CHUNK_SPLIT: u64 = 32;
 const MAX_CHUNK_BODIES: usize = 128;
 
 /// A block's see-through triangles as the global glass stream took them ([`Batches::glass_from`]).
+#[derive(Clone)]
 struct GlassSource {
     key: u64,
     vertices: Arc<Vec<u8>>,
     glass: Arc<Vec<std::ops::Range<u32>>>,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Batches {
+    /// The last scene upload failed (and was logged): a retry that fails again is not.
+    upload_failed: bool,
     /// What the last scene taken uploaded.
     uploads: UploadStats,
     /// The blocks' see-through triangles the global glass stream was assembled from (block key,
@@ -1647,7 +1647,10 @@ struct Batches {
 
 impl Batches {
     /// Upload a new scene. Planned bodies not yet on the GPU are evaluated there: their
-    /// dispatches go into `encoder`, ahead of this frame's render pass.
+    /// dispatches go into `encoder`, ahead of this frame's render pass. The new scene is built
+    /// into a copy and swapped in only when every buffer uploaded: when the device refuses one
+    /// (out of memory), the previous picture stays, the scene is put back to be retried (unless
+    /// a newer one was published meanwhile), the failure is logged once, and the reason returned.
     fn take(
         &mut self,
         device: &wgpu::Device,
@@ -1658,32 +1661,58 @@ impl Batches {
         slot: &SceneSlot,
         tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>,
         oit_available: bool,
-    ) {
+    ) -> Result<(), String> {
         if self.key == Some(key) {
-            return;
+            return Ok(());
         }
-        if let Some(sc) = slot.lock().ok().and_then(|mut s| s.take()) {
-            self.uploads = UploadStats::default();
-            let palette = sc.palette.clone();
-            let mut written = 0;
-            match self.palette.take() {
-                Some(mut p) => {
-                    p.update(device, queue, uniform, bgl, palette, &mut written);
-                    self.palette = Some(p);
-                }
-                None => self.palette = Some(PaletteGpu::new(device, queue, uniform, bgl, palette, &mut written)),
+        let Some(sc) = slot.lock().ok().and_then(|mut s| s.take()) else { return Ok(()) };
+        let _ = take_upload_failure();
+        let mut next = self.clone();
+        next.upload_scene(device, queue, uniform, bgl, key, &sc, tess, oit_available);
+        match take_upload_failure() {
+            None => {
+                next.upload_failed = false;
+                *self = next;
+                Ok(())
             }
-            self.uploads.palette = written;
+            Some(reason) => {
+                if !self.upload_failed {
+                    log::error!("scene upload failed, keeping the previous picture: {reason}");
+                }
+                self.upload_failed = true;
+                if let Ok(mut pending) = slot.lock()
+                    && pending.is_none()
+                {
+                    *pending = Some(sc);
+                }
+                Err(reason)
+            }
+        }
+    }
+
+    fn upload_scene(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        uniform: &wgpu::Buffer,
+        bgl: &wgpu::BindGroupLayout,
+        key: u64,
+        sc: &GpuScene,
+        tess: Option<(&crate::TessGpu, &mut wgpu::CommandEncoder)>,
+        oit_available: bool,
+    ) {
+        {
+            self.uploads = UploadStats::default();
             self.planned = match tess {
                 Some((tess, encoder)) => self.planned(device, tess, encoder, &sc.planned),
                 None => Vec::new(),
             };
             self.instanced = self.instanced(device, &sc.instanced);
-            self.hover_planned = sc.hover_planned;
-            self.selected_planned = sc.selected_planned;
-            self.hover_blocks = sc.hover_blocks;
-            self.selected_blocks = sc.selected_blocks;
-            self.recoloured = sc.recoloured;
+            self.hover_planned = sc.hover_planned.clone();
+            self.selected_planned = sc.selected_planned.clone();
+            self.hover_blocks = sc.hover_blocks.clone();
+            self.selected_blocks = sc.selected_blocks.clone();
+            self.recoloured = sc.recoloured.clone();
             self.hover_instanced = self.instanced(device, &sc.hover_instanced);
             self.selected_instanced = self.instanced(device, &sc.selected_instanced);
             let mut kept = std::mem::take(&mut self.blocks);
@@ -1750,6 +1779,17 @@ impl Batches {
             }
             self.uploads.geometry += geometry;
             self.blocks_culled_for = None;
+            // Last: the palette texture is shared with the picture on screen, which a refused
+            // upload above must leave as it was.
+            let mut written = 0;
+            match self.palette.take() {
+                Some(mut p) => {
+                    p.update(device, queue, uniform, bgl, sc.palette.clone(), &mut written);
+                    self.palette = Some(p);
+                }
+                None => self.palette = Some(PaletteGpu::new(device, queue, uniform, bgl, sc.palette.clone(), &mut written)),
+            }
+            self.uploads.palette = written;
             self.key = Some(key);
         }
     }
@@ -1972,6 +2012,8 @@ const NOT_CAP: u32 = 0x80;
 
 /// The viewport's pipelines and the scenes uploaded to one device, for one kind of target.
 pub struct Renderer {
+    /// Why the last `prepare` could not upload a scene (the device refused a buffer), if so.
+    refused_upload: Option<String>,
     /// What the last frame drew ([`Renderer::stats`]).
     stats: DrawStatsHandle,
     /// What the frame `prepare` drew offscreen (supersampled, or for see-through surfaces),
@@ -2934,6 +2976,7 @@ impl Renderer {
             let (depth_reset, section_reset, section_clear) = resets.join();
             let oit = oit.join();
             Renderer {
+                refused_upload: None,
                 ao: ao.join(),
                 depth_reset,
                 section_reset,
@@ -3131,21 +3174,30 @@ fn upload_with(device: &wgpu::Device, label: &str, bytes: &[u8], stride: usize, 
     Some(Batch { parts, chunk })
 }
 
-/// As `create_buffer_init`, without its panic when the device refused the buffer (an allocation
-/// error caught by an error scope): `None` instead, so the upload fails.
+thread_local! {
+    /// The first buffer the device refused during the scene upload under way on this thread.
+    static UPLOAD_FAILURE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The uploads' failure since the last call, if the device refused a buffer.
+fn take_upload_failure() -> Option<String> {
+    UPLOAD_FAILURE.with(|f| f.borrow_mut().take())
+}
+
+/// [`crate::buffer_init`] for the scene uploads: `None` (as an empty upload) when the device
+/// refused the buffer, with the reason kept for [`take_upload_failure`] so the whole scene's
+/// upload can fail and leave the previous picture in place.
 fn buffer_init(device: &wgpu::Device, label: &str, contents: &[u8], usage: wgpu::BufferUsages) -> Option<wgpu::Buffer> {
-    let len = contents.len() as u64;
-    let size = len.div_ceil(wgpu::COPY_BUFFER_ALIGNMENT) * wgpu::COPY_BUFFER_ALIGNMENT;
-    let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: true });
-    match buffer.get_mapped_range_mut(..len) {
-        Ok(mut mapped) => mapped.copy_from_slice(contents),
+    match crate::buffer_init(device, label, contents, usage) {
+        Ok(buffer) => Some(buffer),
         Err(error) => {
-            log::error!("geometry upload failed: {error}");
-            return None;
+            let reason = error.to_string();
+            UPLOAD_FAILURE.with(|f| {
+                f.borrow_mut().get_or_insert(reason);
+            });
+            None
         }
     }
-    buffer.unmap();
-    Some(buffer)
 }
 
 /// Bytes per GPU buffer for vertices of `stride` bytes: within the device's limit and a
@@ -3346,6 +3398,12 @@ impl Renderer {
         self.target.samples != self.window.samples || self.target.depth != self.window.depth || self.target.format != self.window.format
     }
 
+    /// Why the last [`Renderer::prepare`] left a scene out (the device refused a buffer for it),
+    /// taken: the picture it prepared shows the previous scene.
+    pub(crate) fn take_refused_upload(&mut self) -> Option<String> {
+        self.refused_upload.take()
+    }
+
     /// Before the frame's render pass: upload the scenes that changed (planned bodies not yet on
     /// the GPU are evaluated by dispatches recorded into `encoder`), the uniform, the images and
     /// the accessibility map, and draw the frame supersampled when it asks for that. A frame whose
@@ -3354,6 +3412,7 @@ impl Renderer {
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame) {
         let res = self;
         let cb = frame;
+        res.refused_upload = None;
         let key = frame_key(cb);
         if can_reuse(res.ss_ready && res.ss.is_some(), res.ss_key, key) {
             // A still frame shows the picture as it is; the first one filters it down once.
@@ -3370,15 +3429,10 @@ impl Renderer {
             // A large product scene can exceed what the device will allocate. Its upload runs under
             // its own error scopes, so the failure reaches the preview instead of the device's
             // uncaptured-error handler, and nothing half-uploaded is drawn.
-            let scopes =
-                [wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal, wgpu::ErrorFilter::Validation].map(|f| device.push_error_scope(f));
-            res.product.take(device, queue, &res.uniform, &res.uniform_bgl, cb.key, &cb.slot, None, false);
-            let mut failed = None;
-            for scope in scopes.into_iter().rev() {
-                if let Some(e) = crate::popped(scope.pop()) {
-                    failed.get_or_insert(e.to_string());
-                }
-            }
+            let scopes = crate::error_scopes(device);
+            let refused = res.product.take(device, queue, &res.uniform, &res.uniform_bgl, cb.key, &cb.slot, None, false).err();
+            let caught = crate::caught(scopes);
+            let failed = caught.or(refused);
             if let Some(error) = failed {
                 log::error!("product preview upload failed: {error}");
                 res.product = Batches { key: Some(cb.key), ..Batches::default() };
@@ -3387,7 +3441,7 @@ impl Renderer {
                 }
             }
             res.product.sort_glass(queue, cb.back);
-            res.highlight.take(device, queue, &res.uniform, &res.uniform_bgl, cb.hl_key, &cb.hl_slot, None, false);
+            let _ = res.highlight.take(device, queue, &res.uniform, &res.uniform_bgl, cb.hl_key, &cb.hl_slot, None, false);
             queue.write_buffer(&res.uniform, 0, &uniform_bytes(cb, cb.size_px[0], cb.size_px[1], res.linear_out, res.target.reversed_depth()));
             // The product picture goes through the window's pass too: offscreen when the targets
             // differ or it is drawn smaller, else straight into the window's pass.
@@ -3396,19 +3450,15 @@ impl Renderer {
             return;
         }
         res.take_ready_tessellation();
-        res.model.take(
-            device,
-            queue,
-            &res.uniform,
-            &res.uniform_bgl,
-            cb.key,
-            &cb.slot,
-            res.tess.as_ref().map(|t| (t, &mut *encoder)),
-            res.oit.is_some(),
-        );
-        res.sketch.take(device, queue, &res.uniform, &res.uniform_bgl, cb.sketch_key, &cb.sketch_slot, None, res.oit.is_some());
-        res.highlight.take(device, queue, &res.uniform, &res.uniform_bgl, cb.hl_key, &cb.hl_slot, None, res.oit.is_some());
-        res.preview.take(device, queue, &res.uniform, &res.uniform_bgl, cb.pv_key, &cb.pv_slot, None, res.oit.is_some());
+        let oit = res.oit.is_some();
+        let uploads = [
+            res.model.take(device, queue, &res.uniform, &res.uniform_bgl, cb.key, &cb.slot, res.tess.as_ref().map(|t| (t, &mut *encoder)), oit),
+            res.sketch.take(device, queue, &res.uniform, &res.uniform_bgl, cb.sketch_key, &cb.sketch_slot, None, oit),
+            res.highlight.take(device, queue, &res.uniform, &res.uniform_bgl, cb.hl_key, &cb.hl_slot, None, oit),
+            res.preview.take(device, queue, &res.uniform, &res.uniform_bgl, cb.pv_key, &cb.pv_slot, None, oit),
+        ];
+        // A refused scene leaves the previous picture; a capture must not pass it off as the new one.
+        res.refused_upload = uploads.into_iter().find_map(Result::err);
         // See-through surfaces are drawn without sorting where the device can (order-independent
         // transparency, in an offscreen frame); else their triangles are sorted for the view.
         let see_through = res.oit.is_some() && res.model.see_through();
@@ -4192,6 +4242,50 @@ pub fn analysis_colors(c: &solidcraft_render::AnalysisColors) -> [f32; 36] {
 
 #[cfg(test)]
 mod tests {
+    /// The device refuses a block's index buffer (past its buffer size limit, standing in for a
+    /// GPU out of memory): the scene is not swapped in, the previous picture stays, and the scene
+    /// is kept for a retry (#4791).
+    #[test]
+    fn refused_scene_upload_keeps_the_previous_picture_and_retries() {
+        use super::*;
+        let Ok((adapter, _, _)) = crate::open_headless() else { return };
+        let limits = wgpu::Limits { max_buffer_size: 2048, ..wgpu::Limits::downlevel_defaults() };
+        let Ok((device, queue)) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { required_limits: limits, ..Default::default() }))
+        else {
+            return;
+        };
+        let block = |runs: usize| SceneBlock {
+            key: 7,
+            bytes: Arc::new(BlockBytes { vertices: Arc::new(vec![0; 3 * TRI_SIZE]), opaque: Arc::new(vec![0..1; runs]), ..BlockBytes::default() }),
+        };
+        let scene = |block: &SceneBlock| GpuScene { blocks: vec![block.clone()], ..GpuScene::default() };
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let r = Renderer::new(&device, GpuTarget { format, depth: None, samples: 1, tess: false, oit: false }, None);
+        let mut batches = Batches::default();
+        let previous = block(1);
+        let slot: SceneSlot = Arc::new(Mutex::new(Some(scene(&previous))));
+        batches.take(&device, &queue, &r.uniform, &r.uniform_bgl, 1, &slot, None, false).unwrap();
+        assert_eq!(batches.key, Some(1));
+        // So many runs need an index buffer, and its 4 KiB is over the 2 KiB limit.
+        let refused = block(1024);
+        *slot.lock().unwrap() = Some(scene(&refused));
+        for _ in 0..2 {
+            assert!(batches.take(&device, &queue, &r.uniform, &r.uniform_bgl, 2, &slot, None, false).is_err());
+            assert_eq!(batches.key, Some(1), "the previous picture stays");
+            assert!(Arc::ptr_eq(&batches.blocks[&7].bytes, &previous.bytes));
+            let pending = slot.lock().unwrap();
+            assert!(Arc::ptr_eq(&pending.as_ref().unwrap().blocks[0].bytes, &refused.bytes), "kept for a retry");
+        }
+        // A newer scene published meanwhile is not overwritten by the one put back.
+        let newer = block(2);
+        *slot.lock().unwrap() = Some(scene(&newer));
+        batches.take(&device, &queue, &r.uniform, &r.uniform_bgl, 3, &slot, None, false).unwrap();
+        assert_eq!(batches.key, Some(3));
+        assert!(Arc::ptr_eq(&batches.blocks[&7].bytes, &newer.bytes));
+        assert!(slot.lock().unwrap().is_none());
+    }
+
     /// A placed box is kept while any of it may be in view, and left out only when it lies
     /// wholly past one side of the view: in an orthographic view and a perspective one, behind
     /// the eye too.
@@ -4301,12 +4395,12 @@ mod tests {
             eprintln!("skipping: no GPU adapter");
             return;
         };
-        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
         // Invalid mapping usage provides a deterministic failed allocation without exhausting memory.
         let result =
             super::upload_with(&device, "rejected geometry", &[0; 288], super::PBR_SIZE, wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::VERTEX);
         assert!(result.is_none());
-        assert!(pollster::block_on(scope.pop()).is_some());
+        // The refusal is caught by the upload's own scopes and kept for the scene upload to fail on.
+        assert!(super::take_upload_failure().is_some());
     }
 
     /// Only the FirePro under Metal skips GPU evaluation; the same card under another backend
@@ -4766,7 +4860,7 @@ mod glass_tests {
         };
         let take = |r: &mut Renderer, key: u64, sc: GpuScene| {
             let slot: SceneSlot = Arc::new(Mutex::new(Some(sc)));
-            r.model.take(&device, &queue, &r.uniform, &r.uniform_bgl, key, &slot, None, false);
+            r.model.take(&device, &queue, &r.uniform, &r.uniform_bgl, key, &slot, None, false).unwrap();
             r.model.uploads
         };
         let first = take(&mut r, 1, scene(&palette, &bytes));

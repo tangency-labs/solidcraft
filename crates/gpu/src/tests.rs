@@ -22,6 +22,22 @@ fn gpu() -> Option<TessGpu> {
     }
 }
 
+/// Several scopes catch errors: running out of memory is reported in preference to the validation
+/// errors a refused buffer causes (#4791), and `buffer_init` pads like `create_buffer_init`.
+#[test]
+fn out_of_memory_is_reported_before_secondary_validation_errors() {
+    let validation = || wgpu::Error::Validation { source: "invalid buffer".into(), description: "invalid buffer".into() };
+    let oom = || wgpu::Error::OutOfMemory { source: "refused".into() };
+    let picked = preferred_error([validation(), oom()]).map(|e| describe(&e));
+    assert_eq!(picked.as_deref(), Some("GPU out of memory"));
+    let picked = preferred_error([validation()]).map(|e| describe(&e));
+    assert!(picked.is_some_and(|m| m.contains("invalid buffer")));
+    assert!(preferred_error([]).is_none());
+    let Ok((_, device, _)) = open_headless() else { return };
+    let buffer = buffer_init(&device, "test", &[1, 2, 3], wgpu::BufferUsages::VERTEX);
+    assert_eq!(buffer.map(|b| b.size()).map_err(|e| e.to_string()), Ok(wgpu::COPY_BUFFER_ALIGNMENT));
+}
+
 /// A shader the device rejects when the pipeline is created (its binding 1 is writable, the
 /// layout's read-only), standing in for one a device's compiler cannot build.
 const REJECTED: &str = "
