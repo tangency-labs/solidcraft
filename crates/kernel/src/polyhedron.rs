@@ -463,6 +463,10 @@ fn shell_planar(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
     let healed = healed.with_paint(b.paint().cloned()).with_split_lines(b.split_lines().cloned()).inherit_regularization_protection(b);
     let size = healed.size();
     let mesh = healed.tessellate((size * 1e-3).max(1e-3))?;
+    // How far a pick may lie from a face and still open it: match the UI / face_index_at
+    // reach (5% of size). The old size·1e−3 band rejected near-miss clicks on a split's cut
+    // (#6382: half-sphere shell → "select at least one face to remove").
+    let reach = size * 0.05 + 1e-6;
     // Faces to open: the face of the triangle nearest each point.
     let mut opened: Vec<usize> = Vec::new();
     for p in open {
@@ -473,7 +477,7 @@ fn shell_planar(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
             .filter_map(|(t, f)| mesh.tri(t).map(|[x, y, z]| (point_tri(*p, x, y, z), *f as usize)))
             .min_by(|a, c| a.0.total_cmp(&c.0));
         if let Some((d, f)) = near
-            && d < size * 1e-3 + 1e-6
+            && d <= reach
             && !opened.contains(&f)
         {
             opened.push(f);
