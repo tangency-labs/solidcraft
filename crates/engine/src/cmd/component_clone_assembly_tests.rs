@@ -145,7 +145,7 @@ fn copied_gears_take_their_picked_faces_along() {
 fn naming_remaps_exact_tokens_unicode_and_legacy_body_identity() {
     let features = BTreeMap::from([(1, 21), (10, 30)]);
     let bodies = BTreeMap::from([("Wheel: inner".into(), "Wheel copy: inner".into())]);
-    assert_eq!(face_name("F1:blend:F10:start@F1.3", &features, &bodies).as_deref(), Some("F21:blend:F30:start@F21.3"));
+    assert_eq!(face_name("F1:blend:F10:start@F1.3", &features, &bodies).as_deref(), Some("F21:blend(F30:start@F21.3)"));
     assert_eq!(face_name("F1:side:曲線F10", &features, &bodies).as_deref(), Some("F21:side:曲線F10"));
     assert_eq!(face_name("F1:side:F100.7", &features, &bodies).as_deref(), Some("F21:side:F100.7"));
     assert_eq!(face_name("Wheel: inner:face:7", &features, &bodies).as_deref(), Some("Wheel copy: inner:face:7"));
