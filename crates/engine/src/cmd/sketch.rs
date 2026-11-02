@@ -290,7 +290,7 @@ pub(super) fn edit_solved<T>(
     let stored = sk.driving_values();
     // The constraints the sketch has before the edit: a conflict message must not name one the
     // edit itself adds (the trial already holds it under the id it would get, #9735).
-    let pre: Vec<String> = sk.constraints.iter().map(|c| c.id.clone()).collect();
+    let pre: Vec<String> = sk.constraints.iter().map(|c| c.id.clone()).chain(sk.wire_constraints.iter().map(|c| c.id.clone())).collect();
     let (out, left) = f(&mut sk, &mut doc)?;
     // A curve that took an offset spline's generated node (drawn from its end) gets its own point there.
     sk.detach_offset_points()?;
@@ -2238,6 +2238,9 @@ fn c_horizontal_vertical(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constraint.coincident";
+    if let Some(reply) = super::sketch_3d::coincident_3d(s, p, cmd)? {
+        return Ok(reply);
+    }
     let p = &super::sketch_project::project_operands(s, p, cmd, &["a", "b"])?;
     // Already tied (e.g. connected when it was drawn there): nothing to add.
     let sk = sketch_store::read(&s.doc, sketch_store::target(s, p, cmd)?)?;
@@ -2723,6 +2726,9 @@ fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if refs.is_empty() {
         return Err(bad(cmd, "`entity` or `entities` must name sketch points or curves"));
+    }
+    if let Some(reply) = super::sketch_3d::fix_3d(s, p, cmd, &refs, want)? {
+        return Ok(reply);
     }
     let (n, info) = edit(s, p, cmd, false, |sk, _| {
         // Points and curves; a point is fixed by a Fix constraint, a curve by its flag (which
@@ -3370,6 +3376,8 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
                 points.push(q);
             } else if sk.constraints.iter().any(|c| &c.id == id) {
                 cons.push(id.clone());
+            } else if sk.remove_wire_constraints(std::slice::from_ref(id)) > 0 {
+                // A 3D constraint (#10608): gone, nothing else to do.
             } else if sk.wire_index(id).is_some() {
                 sk.remove_wires(std::slice::from_ref(id));
             } else if sk.link(id).is_some() {
