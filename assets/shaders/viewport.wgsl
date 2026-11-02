@@ -2,7 +2,7 @@
 struct U {
     vp: mat4x4<f32>,
     back: vec4<f32>,   // xyz = toward the eye, w = 1 for linear output
-    screen: vec4<f32>, // viewport width, height (px), unused, silhouettes on (1)
+    screen: vec4<f32>, // viewport width, height (px), product preview (1: shade in linear light), silhouettes on (1)
     clip: vec4<f32>,   // section plane: normal, d (zero normal: no section)
     cap: vec4<f32>,    // colour of the inside of cut bodies
     ana: vec4<f32>,    // surface analysis: mode (1 zebra, 2 draft, 3 curvature), parameter
@@ -50,8 +50,20 @@ fn palette(i: u32) -> vec4<f32> {
     return vec4<f32>(f32(v & 255u), f32((v >> 8u) & 255u), f32((v >> 16u) & 255u), f32((v >> 24u) & 255u)) / 255.0;
 }
 
+// Design's transfer to a linear attachment, as it has always been: the dark branch is flat
+// (c, not c / 12.92). Product frames decode with `srgb_to_linear` instead.
 fn to_linear(c: vec3<f32>) -> vec3<f32> {
     return select(c, pow((c + vec3<f32>(0.055)) / vec3<f32>(1.055), vec3<f32>(2.4)), c > vec3<f32>(0.04045));
+}
+
+// The sRGB transfer both ways, piecewise, as the CPU product image decodes and encodes
+// (`solidcraft_render::job`).
+fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
+    return select(c / 12.92, pow((c + vec3<f32>(0.055)) / vec3<f32>(1.055), vec3<f32>(2.4)), c > vec3<f32>(0.04045));
+}
+
+fn to_srgb(c: vec3<f32>) -> vec3<f32> {
+    return select(c * 12.92, 1.055 * pow(c, vec3<f32>(1.0 / 2.4)) - vec3<f32>(0.055), c > vec3<f32>(0.0031308));
 }
 
 fn out_color(c: vec4<f32>) -> vec4<f32> {
@@ -606,6 +618,15 @@ fn lit_color(i: TOut, visibility: f32, base: vec4<f32>) -> vec4<f32> {
         return out_color(vec4<f32>(min(sky_lit(base.rgb, n, diff, fill, visibility) + vec3<f32>(spec), vec3<f32>(1.0)), base.a));
     }
     let k = 0.42 + 0.38 * diff + 0.25 * fill - (0.42 + 0.25 * fill) * (1.0 - visibility);
+    // The product preview shades in linear light and encodes once, as the exported image does
+    // (`solidcraft_render::job`), so the two agree; Design shades the encoded colour as it
+    // always has.
+    if (u.screen.z > 0.5) {
+        let lit = min(srgb_to_linear(base.rgb) * k + vec3<f32>(spec), vec3<f32>(1.0));
+        // A linear attachment takes the linear result as it is; any other is encoded once.
+        if (u.back.w > 0.5) { return vec4<f32>(lit, base.a); }
+        return vec4<f32>(to_srgb(lit), base.a);
+    }
     return out_color(vec4<f32>(min(base.rgb * k + vec3<f32>(spec), vec3<f32>(1.0)), base.a));
 }
 
