@@ -666,3 +666,81 @@ fn failed_face_extrusion_edit_keeps_context_until_escape_and_preserves_visibilit
     assert!(!h.app.body_visible("Source"));
     assert_eq!(h.app.session.visibility, visibility);
 }
+
+/// The extrude "Depth" (a 10 x 10 x 10 block) and a later box "Pad" beside it, both in view.
+fn two_features() -> Harness {
+    let mut h = make(json!({}));
+    h.app.run("solid.box", json!({"corner":[30,0,0],"length":8,"width":8,"height":4,"name":"Pad"})).unwrap();
+    h.app.animate_fit_all();
+    h.frames(30);
+    h
+}
+
+fn editing_feature(h: &Harness) -> Option<u64> {
+    h.app.dialog.as_ref().and_then(|d| d.editing).map(|(id, _)| id)
+}
+
+fn feature_id(h: &Harness, name: &str) -> u64 {
+    h.app.session.doc.find_feature(name).unwrap().id
+}
+
+// Double-clicking a body's face in the view opens the editor of the feature that made the face,
+// as a double-click on that feature's row does (#10989).
+#[test]
+fn double_clicking_a_face_edits_the_feature_that_made_it() {
+    let mut h = two_features();
+    h.step(&json!({"click":{"world":[5,5,10]},"double":true})).unwrap();
+    h.frames(8);
+    assert!(h.app.dialog.is_some(), "the extrude's editor opens");
+    assert_eq!(editing_feature(&h), Some(feature_id(&h, "Depth")));
+    h.step(&json!({"widget":"Cancel"})).unwrap();
+    h.settle();
+    h.frames(30);
+    assert!(h.app.dialog.is_none());
+    // A face of the later feature opens that feature, not the extrude.
+    h.step(&json!({"click":{"world":[34,4,4]},"double":true})).unwrap();
+    h.frames(8);
+    assert_eq!(editing_feature(&h), Some(feature_id(&h, "Pad")));
+}
+
+// It is the same editor the timeline row opens.
+#[test]
+fn double_clicking_a_face_opens_what_the_timeline_row_opens() {
+    let mut h = two_features();
+    open(&mut h);
+    let from_row = h.app.dialog.as_ref().map(|d| (format!("{:?}", d.kind), d.editing.map(|e| e.0)));
+    h.step(&json!({"widget":"Cancel"})).unwrap();
+    h.settle();
+    h.frames(30);
+    h.step(&json!({"click":{"world":[5,5,10]},"double":true})).unwrap();
+    h.frames(8);
+    assert_eq!(h.app.dialog.as_ref().map(|d| (format!("{:?}", d.kind), d.editing.map(|e| e.0))), from_row);
+}
+
+// A single click only selects the face, and a double-click with Shift held is left to the selection.
+#[test]
+fn a_single_click_on_a_face_only_selects_it() {
+    let mut h = two_features();
+    h.step(&json!({"click":{"world":[5,5,10]}})).unwrap();
+    h.frames(30);
+    assert!(h.app.dialog.is_none() && h.app.pending_feature_edit.is_none());
+    assert!(h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::Face { .. })), "{:?}", h.app.session.selection);
+    h.step(&json!({"click":{"world":[5,5,10]},"double":true,"shift":true})).unwrap();
+    h.frames(8);
+    assert!(h.app.dialog.is_none(), "a double-click with a modifier is left to the selection");
+}
+
+// Inside a dialog or tool the double-click does what it did: it does not swap the dialog.
+#[test]
+fn double_clicking_a_face_inside_an_open_dialog_leaves_it() {
+    let mut h = two_features();
+    h.app.start("solid.box");
+    h.frames(4);
+    let primitive = |h: &Harness| h.app.dialog.as_ref().is_some_and(|d| format!("{:?}", d.kind).starts_with("Primitive { cmd: \"solid.box\""));
+    assert!(primitive(&h));
+    h.step(&json!({"click":{"world":[5,5,10]},"double":true})).unwrap();
+    h.frames(8);
+    assert!(primitive(&h), "the Box dialog stays open");
+    assert_eq!(editing_feature(&h), None);
+    assert!(h.app.pending_feature_edit.is_none());
+}

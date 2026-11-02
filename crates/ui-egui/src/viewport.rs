@@ -4881,7 +4881,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 .collect();
             let _ = app.run("select.set", json!({ "items": items, "add": add }));
         }
-        // Double-click a component's face: edit a linked one in place, activate any other.
+        // Double-click a face: edit a linked component in place, activate another component, or
+        // else open the editor of the feature that made the face (as the Browser's row does).
         if resp.double_clicked()
             && !held
             && !dim_edit
@@ -4889,9 +4890,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && app.tool.is_none()
             && app.dialog.is_none()
             && app.session.active_sketch.is_none()
-            && let Some(Hit::Face { body, .. }) = app.viewport.hover.clone()
+            && let Some(Hit::Face { body, index, point }) = app.viewport.hover.clone()
+            && !crate::edit_in_place::double_click_face(app, &body)
         {
-            crate::edit_in_place::double_click_face(app, &body);
+            app.edit_feature_of_face(&body, index, point);
         }
         // A right-click, unless the same press opened the mouse gestures' ring. egui's click
         // already allows the pointer a few points of travel, as a mouse moves while it is clicked.
