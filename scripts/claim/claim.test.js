@@ -1,6 +1,8 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readFileSync } = require('node:fs');
+const { join } = require('node:path');
 const claim = require('./claim.js');
 
 const NOW = Date.parse('2026-10-16T12:00:00Z');
@@ -44,7 +46,7 @@ function fake(world = {}) {
           if (!found) throw Object.assign(new Error('nf'), { status: 404 });
           return { data: found };
         },
-        listEventsForTimeline: async () => ({ data: world.timeline || [] }),
+        listEventsForTimeline: async ({ issue_number }) => ({ data: world.timelines?.[issue_number] || world.timeline || [] }),
       },
     },
   };
@@ -371,6 +373,36 @@ test('a PR in another repository cannot reserve a local issue with the same numb
   });
   assert.deepEqual(await claim.handlePull({ github, context: pullCtx(50, 'Thing (#7)') }), [7]);
   assert.deepEqual(find(calls, 'addAssignees')[1].assignees, ['alice']);
+});
+
+test('workflow permissions allow duplicate PR replies and subsequent issue claims', async (t) => {
+  const workflow = readFileSync(join(__dirname, '../../.github/workflows/claim.yml'), 'utf8');
+  const permissions = workflow.match(/^permissions:\n((?:[ \t]+[^\n]*\n)+)/m)?.[1] || '';
+  for (const [reason, world, warning] of [
+    ['existing claimant', { byNumber: { 7: openIssue(7, ['bob'], ['in progress']) } }, /@bob/],
+    ['older PR', { byNumber: { 7: openIssue(7) }, timelines: { 7: [pr(42, 'bob')] } }, /#42 claimed #7 first/],
+  ]) {
+    await t.test(reason, async () => {
+      const { github, calls } = fake({ ...world, byNumber: { ...world.byNumber, 8: openIssue(8) } });
+      // Both destinations use issues.createComment, but a PR comment needs PR write access.
+      // Enforce the real workflow's token permissions instead of letting every fake write pass.
+      const createComment = github.rest.issues.createComment;
+      github.rest.issues.createComment = async (args) => {
+        const scope = args.issue_number === 50 ? 'pull-requests' : 'issues';
+        assert.match(permissions, new RegExp(`^  ${scope}: write(?:[ \\t]*(?:#.*)?)?$`, 'm'),
+          `workflow token cannot comment on #${args.issue_number}: ${scope}: write is required`);
+        return createComment(args);
+      };
+      assert.deepEqual(await claim.handlePull({ github, context: pullCtx(50, 'Thing (#7) (#8)') }), [8]);
+      const comments = calls.filter(([name]) => name === 'comment').map(([, args]) => args);
+      assert.deepEqual(comments.map((c) => c.issue_number), [50, 8]);
+      assert.match(comments[0].body, warning);
+      assert.match(comments[1].body, /Claimed by @alice through #50/);
+      for (const name of ['addAssignees', 'addLabels']) {
+        assert.deepEqual(calls.filter(([n]) => n === name).map(([, args]) => args.issue_number), [8]);
+      }
+    });
+  }
 });
 
 test('the claimant\'s own PR just makes sure the label is there', async () => {
