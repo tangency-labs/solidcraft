@@ -985,14 +985,139 @@ mod imp {
     /// the path by [`crate::sweep_path`]'s laws (the same the polyline sweep uses), each section
     /// exactly the profile's image, and SMLib skins the walls through them. Round a closed path the
     /// last section has to land on the first, and the ends are joined.
+    ///
+    /// Along a straight path square to the profile, with no end scale or rails, a loop that is a
+    /// circle centred on the path's line maps onto itself at every station, and its wall is built
+    /// as the exact cylinder: a profile of such circles alone is swept untwisted, and such holes
+    /// in another outer loop are cut from the sweep of the rest. Other loops are skinned, and an
+    /// arc centred on the line within a loop of other curves still is.
     pub(crate) fn sweep_controlled(plane: &Plane, region: &NumberedRegion, path: &[crate::PathSeg], ctl: &crate::SweepControl) -> Result<Body> {
         let runs = smooth_runs(path)?;
         if runs.len() > 1 {
             return cornered_controlled(plane, region, path, &runs, ctl);
         }
         let pieces = pieces(region.loops());
-        let c = curves(plane, &pieces)?;
         let start = path.first().map(crate::PathSeg::start).ok_or_else(|| KernelError::Invalid("the path needs 1…1000 segments".into()))?;
+        // A circle centred on the twist axis, swept straight along that axis, turns onto itself:
+        // its wall is exactly the cylinder, built as one rather than skinned (solidcore#2184: a
+        // skin lying within 4e-9 of a cylinder another body shares fails the boolean).
+        let axial = straight_axis(plane, path, ctl, start).map(|(k, length)| {
+            let round: Vec<Option<(Vec3, f64)>> = region.loops().map(|l| circle_on_axis(plane, &l.lp, start, k)).collect();
+            (k, length, round)
+        });
+        let mut bores: Vec<(Vec3, f64)> = Vec::new();
+        let mut kept = region.clone();
+        if let Some((_, _, round)) = &axial {
+            if round.iter().all(Option::is_some) {
+                // Every loop a circle about the axis: the twist changes nothing.
+                match sweep(plane, &pieces, path, false) {
+                    Ok(body) => return Ok(body),
+                    Err(e) => log::debug!(target: "smlib", "twisted sweep of circles about its path, swept untwisted: {e}; skinned instead"),
+                }
+            } else if round.first().is_some_and(Option::is_none) {
+                // The holes that are circles about the axis are cut as exact cylinders from the
+                // sweep of the rest, through and a little past both ends.
+                let (mut holes, mut cut) = (Vec::new(), Vec::new());
+                for (h, r) in region.holes.iter().zip(round.iter().skip(1)) {
+                    match r {
+                        Some(circle) => cut.push(*circle),
+                        None => holes.push(h.clone()),
+                    }
+                }
+                if !cut.is_empty() {
+                    bores = cut;
+                    kept = NumberedRegion { outer: region.outer.clone(), holes };
+                }
+            }
+        }
+        let skinned = skinned_controlled(plane, &kept, path, ctl, start, &bores, axial.as_ref().map(|(k, l, _)| (*k, *l)));
+        let (body, st, size, closed) = match skinned {
+            Ok(r) => r,
+            Err(e) if !bores.is_empty() => {
+                log::debug!(target: "smlib", "twisted sweep with its bores cut as cylinders: {e}; all skinned instead");
+                skinned_controlled(plane, region, path, ctl, start, &[], None)?
+            }
+            Err(e) => return Err(e),
+        };
+        let (Some(first), Some(last)) = (st.first(), st.last()) else { return Err(KernelError::Invalid("sweep path".into())) };
+        let s0 = first.at;
+        let mid = st.get(st.len() / 2).copied().unwrap_or(*last);
+        let inside = seeds(plane, &pieces, |q| mid.at + mid.apply(q - s0));
+        let roles = if closed {
+            // Round a closed path there are no caps, and the start holds seams only.
+            roles(&body, &plane.offset(size * 10.0), None, &[], &inside, false)?
+        } else {
+            let end = Plane::new(last.at + last.apply(plane.origin - s0), last.apply(plane.x), last.apply(plane.y))
+                .ok_or_else(|| KernelError::Invalid("the sweep's end section is degenerate".into()))?;
+            roles(&body, plane, Some(&end), &seeds(plane, &pieces, |q| q), &inside, false)?
+        };
+        with_history(body, &roles, &pieces)
+    }
+
+    /// The unit direction of a path of lines running straight along the profile plane's normal,
+    /// and its length, when the sweep's laws only turn the profile about that line through the
+    /// path's start (no end scale, no rails): each station is then the profile turned about the
+    /// axis and moved along it.
+    fn straight_axis(plane: &Plane, path: &[crate::PathSeg], ctl: &crate::SweepControl, start: Vec3) -> Option<(Vec3, f64)> {
+        if ctl.scale != 1.0 || !ctl.rails.is_empty() {
+            return None;
+        }
+        let n = plane.normal().normalized()?;
+        let mut at = start;
+        let mut length = 0.0;
+        let mut k: Option<Vec3> = None;
+        for s in path {
+            let crate::PathSeg::Line { a, b } = *s else { return None };
+            let d = b - a;
+            let t = d.normalized()?;
+            let scale = 1.0 + a.dist(start) + b.dist(start);
+            if a.dist(at) > 1e-9 * scale || t.dot(n).abs() < 1.0 - 1e-12 || k.is_some_and(|k| t.dot(k) < 1.0 - 1e-12) {
+                return None;
+            }
+            k.get_or_insert(t);
+            length += d.len();
+            at = b;
+        }
+        k.filter(|_| length.is_finite() && length > 0.0).map(|k| (k, length))
+    }
+
+    /// The centre and radius of `lp` when it is one circle (in one or several arcs) centred on the
+    /// line through `start` along the unit `k`.
+    fn circle_on_axis(plane: &Plane, lp: &solidcraft_geom::Loop2, start: Vec3, k: Vec3) -> Option<(Vec3, f64)> {
+        let mut circle: Option<(Vec3, f64)> = None;
+        let mut turn = 0.0;
+        for s in &lp.segs {
+            let Seg2::Arc { center, radius, sweep, .. } = *s else { return None };
+            let c = plane.to_world(center);
+            let tol = 1e-9 * (1.0 + radius.abs());
+            let w = c - start;
+            if !(radius.is_finite() && radius > 0.0) || (w - k * w.dot(k)).len() > tol {
+                return None;
+            }
+            if let Some((c0, r0)) = circle
+                && (c0.dist(c) > tol || (r0 - radius).abs() > tol)
+            {
+                return None;
+            }
+            circle.get_or_insert((c, radius));
+            turn += sweep.abs();
+        }
+        circle.filter(|_| (turn - std::f64::consts::TAU).abs() <= 1e-9 * std::f64::consts::TAU)
+    }
+
+    /// The controlled sweep of `region` skinned through its stations, with each of `bores` (a
+    /// centre and radius on the straight path's axis `straight`: its direction and length) cut
+    /// from it as an exact cylinder; the stations, the sweep's size and whether the path closes.
+    fn skinned_controlled(
+        plane: &Plane,
+        region: &NumberedRegion,
+        path: &[crate::PathSeg],
+        ctl: &crate::SweepControl,
+        start: Vec3,
+        bores: &[(Vec3, f64)],
+        straight: Option<(Vec3, f64)>,
+    ) -> Result<(Body, Vec<crate::sweep_path::Station>, f64, bool)> {
+        let c = curves(plane, &pieces(region.loops()))?;
         // Each point of the profile turns with the path and the twist, and SMLib's skin is a cubic
         // interpolation through the stations with free ends, whose error near the ends falls only
         // as the square of the step: a square of reach 7.1 twisted a quarter turn over 40 mm is
@@ -1004,8 +1129,7 @@ mod imp {
         let n = ((turn / step).ceil() as usize).max(rail_points.saturating_sub(1)).clamp(MIN_STATIONS, MAX_STATIONS);
         let (pts, tangents) = path_samples(path, n)?;
         let st = crate::sweep_path::controlled_stations(plane, &pts, &tangents, &[], ctl)?;
-        let (Some(first), Some(last)) = (st.first(), st.last()) else { return Err(KernelError::Invalid("sweep path".into())) };
-        let s0 = first.at;
+        let s0 = st.first().ok_or_else(|| KernelError::Invalid("sweep path".into()))?.at;
         let size = pts.windows(2).map(|w| w[0].dist(w[1])).sum::<f64>() + region.outer.lp.signed_area().abs().sqrt();
         let closed = pts.last().is_some_and(|e| e.dist(start) <= 1e-7 * (1.0 + size));
         if closed {
@@ -1020,19 +1144,20 @@ mod imp {
                 Affine { m: [p(a), p(b), p(c)], t: p(s.at - s.apply(s0)) }
             })
             .collect();
-        let brep = Brep::sweep_stations(&c, &maps, if closed { Ends::Joined } else { Ends::Capped }).map_err(|e| failed("sweep", e))?;
-        let body = body_of(brep, "sweep")?;
-        let mid = st.get(st.len() / 2).copied().unwrap_or(*last);
-        let inside = seeds(plane, &pieces, |q| mid.at + mid.apply(q - s0));
-        let roles = if closed {
-            // Round a closed path there are no caps, and the start holds seams only.
-            roles(&body, &plane.offset(size * 10.0), None, &[], &inside, false)?
-        } else {
-            let end = Plane::new(last.at + last.apply(plane.origin - s0), last.apply(plane.x), last.apply(plane.y))
-                .ok_or_else(|| KernelError::Invalid("the sweep's end section is degenerate".into()))?;
-            roles(&body, plane, Some(&end), &seeds(plane, &pieces, |q| q), &inside, false)?
-        };
-        with_history(body, &roles, &pieces)
+        let mut brep = Brep::sweep_stations(&c, &maps, if closed { Ends::Joined } else { Ends::Capped }).map_err(|e| failed("sweep", e))?;
+        if let (false, Some((k, length))) = (bores.is_empty(), straight) {
+            // Past each end by a share of the sweep's size, so no face of the cut lies on a cap.
+            let past = 0.25 * size + 1e-3;
+            for (center, radius) in bores {
+                let from = *center - k * past;
+                let circle =
+                    Curve::Arc { center: p(from), axis: p(k), reference: p(plane.x), radius: *radius, start: 0.0, end: std::f64::consts::TAU };
+                let bore =
+                    Brep::extrude(&[circle], p(k), length + 2.0 * past, 0.0, DraftCorner::default(), true).map_err(|e| failed("sweep bore", e))?;
+                brep = combined(&brep, &bore, solidcraft_smlib::BooleanOp::Subtract, "sweep bore")?;
+            }
+        }
+        Ok((body_of(brep, "sweep")?, st, size, closed))
     }
 
     /// `x` moved by `a`.
