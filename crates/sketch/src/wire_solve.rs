@@ -20,7 +20,7 @@ use solidcraft_geom::Vec3;
 use crate::linalg::{self, Mat};
 use crate::model::{MAX_CONSTRAINTS, Result, Sketch, SketchError, in_range3};
 use crate::union_find::{find, union};
-use crate::wire::{Wire, arc_from_3_points, arc_polyline, fit_polyline};
+use crate::wire::{Wire, arc_from_3_points, arc_polyline, drawn_polyline};
 
 #[path = "wire_dual.rs"]
 mod dual;
@@ -37,10 +37,14 @@ pub const MAX_WIRE_VARS: usize = 1_500;
 /// Most residual rows in one connected group: the freedom count reads a dense Jacobian of
 /// rows by unknowns (at most 36 MB).
 pub const MAX_WIRE_ROWS: usize = 2 * MAX_WIRE_VARS;
-/// The work one solve may spend on its linear systems (unknowns cubed, summed over them): about
-/// as many seconds as this is tens of billions. A design that asks for more fails its groups
-/// rather than hold the window.
-const WORK_BUDGET: f64 = 2e10;
+/// The multiply-adds one solve may spend on its linear systems and its freedom count, about a
+/// second's work. A design that asks for more is left where it is and reported as too large to
+/// solve in time, rather than hold the window.
+const WORK_BUDGET: f64 = 4e9;
+/// The most a point moves in one solver step, as a share of its group's size: a step that turns
+/// a line moves its end along an arc in small steps, rather than straight off to where the
+/// linear model says, which stretches it.
+const MAX_STEP: f64 = 0.25;
 /// A solve gives up on a group once it has stalled far from a solution: over the last
 /// `STALL_ITERS` iterations the sum of squared residuals fell by at most `STALL_DECREASE` of
 /// itself while the largest residual is above `STALL_RESIDUAL` (mm), as the planar solve does.
@@ -86,7 +90,7 @@ impl Axis {
     /// The axis a direction runs along, either way, when it runs along one.
     pub fn along(d: Vec3) -> Option<Axis> {
         let n = d.len();
-        [Axis::X, Axis::Y, Axis::Z].into_iter().find(|a| n > 1e-12 && (d.dot(a.unit()).abs() - n).abs() < 1e-9 * n)
+        [Axis::X, Axis::Y, Axis::Z].into_iter().find(|a| n > 1e-12 && d.cross(a.unit()).len() <= 1e-9 * n)
     }
 }
 
@@ -201,8 +205,17 @@ pub struct WireReport {
     /// The constraints left violated by a solve that failed.
     pub failing: Vec<String>,
     /// The unknowns of a connected group too large to solve at once ([`MAX_WIRE_VARS`]
-    /// unknowns, [`MAX_WIRE_ROWS`] residuals).
+    /// unknowns, [`MAX_WIRE_ROWS`] residuals), with its residuals in `oversized_rows`.
     pub oversized: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oversized_rows: Option<usize>,
+    /// The solve ran out of work ([`WORK_BUDGET`]) before every group was solved: those left
+    /// are where they were, and none of their constraints is said to conflict.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub out_of_time: bool,
+    /// The freedom count ran out of work: `dof` counts some groups as if unconstrained.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub uncounted: bool,
 }
 
 impl WireReport {
@@ -213,12 +226,16 @@ impl WireReport {
     /// Why it failed, in the words a refused edit uses; `conflict` words the list of the
     /// constraints left violated.
     pub fn failure(&self, conflict: impl FnOnce(&str) -> String) -> String {
-        match self.oversized {
-            Some(n) => format!(
-                "the 3D sketch joins {n} unknowns (3D point coordinates) or constraints in one connected group, more than the {MAX_WIRE_VARS} unknowns and {MAX_WIRE_ROWS} constraint equations the 3D solver takes at once: split the 3D curves over several sketches"
-            ),
-            None => conflict(&self.failing.join(", ")),
+        if let Some(n) = self.oversized {
+            let rows = self.oversized_rows.unwrap_or(0);
+            return format!(
+                "the 3D sketch joins {n} unknowns (3D point coordinates) and {rows} constraint equations in one connected group, more than the {MAX_WIRE_VARS} unknowns or {MAX_WIRE_ROWS} equations the 3D solver takes at once: split the 3D curves over several sketches"
+            );
         }
+        if self.failing.is_empty() && self.out_of_time {
+            return "the 3D sketch is too large to solve in time: split its 3D curves over several sketches".into();
+        }
+        conflict(&self.failing.join(", "))
     }
 }
 
@@ -344,9 +361,20 @@ impl Sketch {
             return Err(SketchError::TooLarge);
         }
         let drawn = self.drawn_wires();
+        // Not another entity's id either: a delete by id would take the wrong one.
+        let others: std::collections::HashSet<&str> = self
+            .points
+            .iter()
+            .map(|p| p.id.as_str())
+            .chain(self.curves.iter().map(|c| c.id.as_str()))
+            .chain(self.constraints.iter().map(|c| c.id.as_str()))
+            .chain(self.wires.iter().map(|w| w.id.as_str()))
+            .chain(self.links.iter().map(|l| l.id.as_str()))
+            .chain(self.patterns.iter().map(|p| p.id.as_str()))
+            .collect();
         let mut ids = std::collections::BTreeSet::new();
         for c in &self.wire_constraints {
-            if c.id.is_empty() || c.id.len() > 512 || !ids.insert(c.id.as_str()) {
+            if c.id.is_empty() || c.id.len() > 512 || others.contains(c.id.as_str()) || !ids.insert(c.id.as_str()) {
                 return Err(SketchError::Invalid("3D constraint ids are invalid".into()));
             }
             validate_in(&c.kind, &|id| drawn.get(id).copied())?;
@@ -409,9 +437,10 @@ impl Sketch {
             }
             r
         };
+        let wanted: std::collections::HashSet<&str> = ids.iter().map(String::as_str).collect();
         let mut pairs = Vec::new();
         for (i, (p, at, space)) in ends.iter().enumerate() {
-            if !ids.contains(&p.wire) {
+            if !wanted.contains(p.wire.as_str()) {
                 continue;
             }
             let near = |j: &usize| ends.get(*j).is_some_and(|(q, b, s)| q.wire != p.wire && s == space && at.dist(*b) < MEET);
@@ -449,6 +478,27 @@ impl Sketch {
         let before = self.wire_constraints.len();
         self.wire_constraints.retain(|c| !c.kind.wires().contains(&wire));
         before - self.wire_constraints.len()
+    }
+
+    /// Whether a fit point is fixed, itself or through the points joined to it.
+    pub fn wire_point_fixed(&self, p: &WirePoint) -> bool {
+        let mut joined = vec![p.clone()];
+        let mut k = 0;
+        while let Some(q) = joined.get(k).cloned() {
+            k += 1;
+            if k > 4096 {
+                break;
+            }
+            for c in &self.wire_constraints {
+                match &c.kind {
+                    WireConstraintKind::Fix { p, .. } if *p == q => return true,
+                    WireConstraintKind::Coincident { a, b } if *a == q && !joined.contains(b) => joined.push(b.clone()),
+                    WireConstraintKind::Coincident { a, b } if *b == q && !joined.contains(a) => joined.push(a.clone()),
+                    _ => {}
+                }
+            }
+        }
+        false
     }
 
     /// Whether every 3D constraint holds as the curves are now (no solve).
@@ -512,6 +562,8 @@ impl Sketch {
         {
             start.insert(c, *at);
         }
+        // Classes a failure leaves where their points are: the rest still move.
+        let mut failed: std::collections::HashSet<usize> = std::collections::HashSet::new();
         let mut fixed: HashMap<usize, Vec3> = HashMap::new();
         for (id, k, pts) in &cons {
             if let (WireConstraintKind::Fix { at, .. }, Some(c)) = (k, pts.first().and_then(|s| class.get(*s))) {
@@ -520,6 +572,7 @@ impl Sketch {
                     Some(was) if was.dist(*at) > ACCEPT => {
                         rep.ok = false;
                         rep.failing.push(id.to_string());
+                        failed.insert(*c);
                     }
                     Some(_) => {}
                     None => {
@@ -552,6 +605,7 @@ impl Sketch {
                     if k.residuals_at(&at).iter().any(|v| v.abs() > ACCEPT) {
                         rep.ok = false;
                         rep.failing.push(id.to_string());
+                        failed.extend(pts.iter().filter_map(|s| class.get(*s).copied()));
                     }
                 }
             }
@@ -584,32 +638,54 @@ impl Sketch {
             let rows: usize = blocks.iter().map(|b| b.kind.rows()).sum();
             if n > MAX_WIRE_VARS || rows > MAX_WIRE_ROWS {
                 rep.ok = false;
-                rep.oversized = Some(rep.oversized.unwrap_or(0).max(n));
+                if rep.oversized.unwrap_or(0) <= n {
+                    rep.oversized = Some(n);
+                    rep.oversized_rows = Some(rows);
+                }
+                failed.extend(vars.iter().copied());
                 continue;
             }
             let x0: Vec<f64> = vars.iter().flat_map(|c| xyz(start.get(c).copied().unwrap_or(Vec3::ZERO))).collect();
             let hold_var = held_class.and_then(|c| var_of.get(&c).copied());
-            let mut x = None;
+            let mut x = Lm::Diverged;
             if let Some(h) = hold_var {
-                x = lm(&blocks, n, &x0, Some(h), &mut work).filter(|x| blocks.iter().all(|b| b.holds(x)));
+                x = lm(&blocks, n, &x0, Some(h), &mut work);
+                if matches!(&x, Lm::Done(x) if !blocks.iter().all(|b| b.holds(x))) {
+                    x = Lm::Diverged;
+                }
             }
-            let x = x.or_else(|| lm(&blocks, n, &x0, None, &mut work));
+            if matches!(x, Lm::Diverged) {
+                x = lm(&blocks, n, &x0, None, &mut work);
+            }
             match x {
-                Some(x) if blocks.iter().all(|b| b.holds(&x)) => {
+                Lm::Done(x) if blocks.iter().all(|b| b.holds(&x)) => {
                     for (v, c) in vars.iter().enumerate() {
                         solved.insert(*c, Block::at(&x, v));
                     }
                     if count {
-                        rank = rank.saturating_add(group_rank(&blocks, n, rows, &x));
+                        match group_rank(&blocks, n, rows, &x, &mut work) {
+                            Some(r) => rank = rank.saturating_add(r),
+                            None => rep.uncounted = true,
+                        }
                     }
                 }
-                Some(x) => {
+                Lm::Done(x) => {
                     rep.ok = false;
                     rep.failing.extend(blocks.iter().filter(|b| !b.holds(&x)).map(|b| b.id.to_string()));
+                    failed.extend(vars.iter().copied());
                 }
-                None => {
+                Lm::Diverged => {
                     rep.ok = false;
                     rep.failing.extend(blocks.iter().map(|b| b.id.to_string()));
+                    failed.extend(vars.iter().copied());
+                }
+                // Out of work: this group and the ones after it stay where they are, and their
+                // constraints are not said to conflict.
+                Lm::OutOfTime => {
+                    rep.ok = false;
+                    rep.out_of_time = true;
+                    failed.extend(vars.iter().copied());
+                    work = f64::INFINITY;
                 }
             }
         }
@@ -620,12 +696,14 @@ impl Sketch {
             let free = classes.iter().filter(|c| !fixed.contains_key(c)).count();
             rep.dof = free.saturating_mul(3).saturating_sub(rank);
         }
-        if !rep.ok {
-            return rep;
-        }
-        // Each point where its class is, rebuilding each curve from its fit points; a curve that
-        // can no longer be built (an arc's points now in a line) fails the solve and nothing moves.
-        let place = |s: usize| class.get(s).and_then(|c| solved.get(c).or_else(|| start.get(c))).copied();
+        // Each point where its class is, but for the classes a failure leaves where they were,
+        // rebuilding each curve from its fit points; a curve that can no longer be built (an
+        // arc's points now in a line) fails the solve and nothing moves.
+        let place = |s: usize| match class.get(s) {
+            Some(c) if failed.contains(c) => positions.get(s).copied(),
+            Some(c) => solved.get(c).or_else(|| start.get(c)).copied(),
+            None => positions.get(s).copied(),
+        };
         let mut rebuilt = Vec::new();
         for (wi, w) in self.wires.iter().enumerate().filter(|(_, w)| w.link.is_none() && !w.fit.is_empty()) {
             let Some((s, n)) = first.get(&w.id) else { continue };
@@ -646,8 +724,7 @@ impl Sketch {
                     [a, b, c] => arc_from_3_points(*a, *b, *c).map(|arc| (Some(arc), arc_polyline(&arc, ARC_TOL))),
                     _ => None,
                 },
-                None if fit.windows(2).all(|p| p[0].dist(p[1]) >= MEET) => Some((None, fit_polyline(&fit))),
-                None => None,
+                None => drawn_polyline(&fit).ok().map(|pts| (None, pts)),
             };
             match built {
                 Some((arc, pts)) => rebuilt.push((wi, fit, arc, pts)),
@@ -704,10 +781,21 @@ fn validate_in<'a>(k: &WireConstraintKind, drawn: &dyn Fn(&str) -> Option<&'a Wi
     Ok(())
 }
 
+/// How a Levenberg–Marquardt run ended.
+enum Lm {
+    /// Where it ended (solved or not).
+    Done(Vec<f64>),
+    /// The numbers stopped being finite.
+    Diverged,
+    /// The solve's work ran out ([`WORK_BUDGET`]).
+    OutOfTime,
+}
+
 /// Levenberg–Marquardt on one connected group of `n` unknowns from `x0`; with `hold`, that
-/// unknown point is also pulled to where it starts. Returns where it ends, or `None` when the
-/// numbers stop being finite or the solve's `work` runs out ([`WORK_BUDGET`]).
-fn lm(blocks: &[Block], n: usize, x0: &[f64], hold: Option<usize>, work: &mut f64) -> Option<Vec<f64>> {
+/// unknown point is also pulled to where it starts. Each step is damped by the curvature of each
+/// unknown (Marquardt's scaling), so a group solves alike at any size, and no point moves more
+/// than [`MAX_STEP`] of the group's size in one step.
+fn lm(blocks: &[Block], n: usize, x0: &[f64], hold: Option<usize>, work: &mut f64) -> Lm {
     let target = hold.map(|h| Block::at(x0, h));
     let residuals = |x: &[f64]| -> Vec<f64> {
         let mut r = Vec::new();
@@ -720,6 +808,16 @@ fn lm(blocks: &[Block], n: usize, x0: &[f64], hold: Option<usize>, work: &mut f6
         r
     };
     let cost = |r: &[f64]| r.iter().map(|v| v * v).sum::<f64>();
+    // The group's size: every point its constraints read, fixed ones too.
+    let size = {
+        let all = blocks.iter().flat_map(|b| b.pts.iter()).map(|p| match p {
+            Pt::Var(v) => Block::at(x0, *v),
+            Pt::At(q) => *q,
+        });
+        let far = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+        let (lo, hi) = all.fold((far, far * -1.0), |(lo, hi), p| (lo.min(p), hi.max(p)));
+        if lo.x <= hi.x { lo.dist(hi).max(1.0) } else { 1.0 }
+    };
     let mut x = x0.to_vec();
     let mut r = residuals(&x);
     let mut costs = vec![cost(&r)];
@@ -768,20 +866,27 @@ fn lm(blocks: &[Block], n: usize, x0: &[f64], hold: Option<usize>, work: &mut f6
                 }
             }
         }
+        let top = (0..n).map(|c| a.get(c, c)).fold(0.0f64, f64::max);
         let mut improved = false;
         for _ in 0..12 {
-            *work += (n as f64).powi(3);
             if *work > WORK_BUDGET {
-                return None;
+                return Lm::OutOfTime;
             }
             let mut damped = a.clone();
             for c in 0..n {
-                damped.add(c, c, lambda);
+                damped.add(c, c, lambda * (a.get(c, c) + 1e-9 * top + 1e-12));
             }
-            let Some(dx) = linalg::solve(damped, g.clone()) else {
+            let Some(mut dx) = linalg::solve_counted(damped, g.clone(), work) else {
                 lambda *= 10.0;
                 continue;
             };
+            // At least twice what is still off, so a length asked to grow far gets there.
+            let reach = (MAX_STEP * size).max(2.0 * r.iter().fold(0.0f64, |m, v| m.max(v.abs())));
+            let longest = (0..n / 3).map(|v| Block::at(&dx, v).len()).fold(0.0f64, f64::max);
+            if longest > reach {
+                let s = reach / longest;
+                dx.iter_mut().for_each(|v| *v *= s);
+            }
             let trial: Vec<f64> = x.iter().zip(&dx).map(|(a, b)| a + b).collect();
             let rt = residuals(&trial);
             if rt.iter().all(|v| v.is_finite()) && cost(&rt) < cost(&r) {
@@ -798,7 +903,7 @@ fn lm(blocks: &[Block], n: usize, x0: &[f64], hold: Option<usize>, work: &mut f6
             break;
         }
     }
-    x.iter().all(|v| v.is_finite()).then_some(x)
+    if x.iter().all(|v| v.is_finite()) { Lm::Done(x) } else { Lm::Diverged }
 }
 
 /// A point's coordinates.
@@ -806,8 +911,9 @@ fn xyz(p: Vec3) -> [f64; 3] {
     [p.x, p.y, p.z]
 }
 
-/// The rank of a solved group's constraints: the freedoms they take.
-fn group_rank(blocks: &[Block], n: usize, rows: usize, x: &[f64]) -> usize {
+/// The rank of a solved group's constraints, the freedoms they take, its work added to `work`;
+/// `None` when the solve's work runs out.
+fn group_rank(blocks: &[Block], n: usize, rows: usize, x: &[f64], work: &mut f64) -> Option<usize> {
     let mut j = Mat::zeros(rows, n);
     let mut row = 0;
     for b in blocks {
@@ -820,7 +926,7 @@ fn group_rank(blocks: &[Block], n: usize, rows: usize, x: &[f64]) -> usize {
             row += 1;
         }
     }
-    linalg::determined_vars(&j, 1e-8).1
+    linalg::rank_counted(&j, 1e-8, work, WORK_BUDGET)
 }
 
 #[cfg(test)]

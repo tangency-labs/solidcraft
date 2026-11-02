@@ -608,7 +608,7 @@ fn lines_drawn_one_segment_at_a_time_stay_joined_through_their_constraints() {
     run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{a}.start")}));
     run(&mut s, "sketch.constraint.along_axis", json!({"line": a, "axis": "x"}));
     let r = run(&mut s, "sketch.constraint.along_axis", json!({"line": b, "axis": "z"}));
-    assert_eq!(r["sketch"]["created"]["constraints"].as_array().map(Vec::len).unwrap_or(1), 1);
+    assert_eq!(r["created"]["constraints"].as_array().map(Vec::len), Some(1), "{r}");
     near(fit(&s, &b, 0), fit(&s, &a, 1));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.pipe", json!({"path_sketch":sketch,"path":[a, b],"diameter":4}));
@@ -632,7 +632,9 @@ fn a_3d_conflict_does_not_block_planar_edits_and_shows() {
     sk.add_wire_constraint(solidcraft_sketch::WireConstraintKind::AlongAxis { line: l3.clone(), axis: solidcraft_sketch::Axis::X }).unwrap();
     s.set_doc(doc);
     let l = run(&mut s, "sketch.line", json!({"points":[[0,0],[10,1]]}))["curves"][0].as_str().unwrap().to_string();
-    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": l, "mode": "horizontal"}));
+    let r = run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": l, "mode": "horizontal"}));
+    // `solved` is the planar sketch's; the 3D conflict is its own.
+    assert_eq!((r["sketch"]["solved"].as_bool(), r["sketch"]["wires_solved"].as_bool()), (Some(true), Some(false)), "{r}");
     let info = run(&mut s, "sketch.inspect", json!({}));
     assert_eq!(info["status"], "solved", "{info}");
     assert_eq!(info["wires_solve"]["ok"], false, "{info}");
@@ -652,4 +654,64 @@ fn a_3d_curve_and_its_own_constraint_delete_together() {
     run(&mut s, "sketch.delete", json!({"entities": [l, k]}));
     let sk = s.doc.sketch(s.active_sketch.unwrap()).unwrap();
     assert!(sk.wires.is_empty() && sk.wire_constraints.is_empty());
+}
+
+#[test]
+fn a_planar_conflict_does_not_block_3d_edits_and_solved_groups_still_move() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    let l = run(&mut s, "sketch.line", json!({"points":[[2,3],[10,4]]}))["curves"][0].as_str().unwrap().to_string();
+    // A planar line held both horizontal and vertical: the planar sketch conflicts.
+    let mut doc = (*s.doc).clone();
+    let sk = doc.sketch_mut(sketch).unwrap();
+    let c = sk.curve_index(&l).unwrap();
+    sk.add_constraint(solidcraft_sketch::ConstraintKind::Horizontal { l: c }, None).unwrap();
+    sk.add_constraint(solidcraft_sketch::ConstraintKind::Vertical { l: c }, None).unwrap();
+    s.set_doc(doc);
+    // 3D edits go ahead.
+    let a = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,1,1]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{a}.start")}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": a, "axis": "x"}));
+    let end = fit(&s, &a, 1);
+    assert!(end.y.abs() < 1e-9 && end.z.abs() < 1e-9, "{end:?}");
+}
+
+#[test]
+fn a_3d_line_is_not_squeezed_to_a_point() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let l = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,0.000001,0]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{l}.start")}));
+    let before = s.doc.to_json();
+    // Along Y would leave a millionth of a 10 mm line (the limits planar lines have).
+    let e = s.execute("sketch.constraint.along_axis", &json!({"line": l, "axis": "y"})).unwrap_err().to_string();
+    assert!(e.contains("shrink"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn a_deleted_joint_stays_deleted() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,1,1],[10,1,20]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    let joint = r["constraints"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": a, "axis": "x"}));
+    run(&mut s, "sketch.delete", json!({"entities": [joint]}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": b, "axis": "z"}));
+    let sketch = s.active_sketch.unwrap();
+    let joins = |s: &Session| {
+        s.doc
+            .sketch(sketch)
+            .unwrap()
+            .wire_constraints
+            .iter()
+            .filter(|c| matches!(c.kind, solidcraft_sketch::WireConstraintKind::Coincident { .. }))
+            .count()
+    };
+    assert_eq!(joins(&s), 0, "the deleted joint is not put back");
 }

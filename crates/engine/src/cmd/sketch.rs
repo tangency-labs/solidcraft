@@ -254,10 +254,12 @@ pub(super) fn edit<T>(
 
 /// A solve's outcome as commands return it: `dof` counts the 3D curves' freedoms too, and a
 /// sketch with drawn 3D curves also gives the planar sketch's alone (`planar_dof`, #10608).
+/// `solved` is the planar sketch's; a sketch with drawn 3D curves also gives `wires_solved`.
 pub(super) fn report_json(rep: &SolveReport) -> Value {
-    let mut out = json!({"solved": rep.keeps_orientation() && rep.wires_ok(), "dof": rep.shown_dof()});
+    let mut out = json!({"solved": rep.keeps_orientation(), "dof": rep.shown_dof()});
     if rep.wires.is_some() {
         out["planar_dof"] = json!(rep.dof);
+        out["wires_solved"] = json!(rep.wires_ok());
     }
     out
 }
@@ -317,7 +319,17 @@ pub(super) fn edit_solved<T>(
     // Whether the 3D constraints held before the edit: only then does one that leaves them
     // failing count as over-constraining (#10608).
     let wires_held = sk.wire_constraints_hold();
+    // What the edit changes: a strict edit is refused for breaking the planar sketch only when
+    // it changed the planar sketch, and for breaking the 3D constraints only when it changed
+    // the 3D curves or their constraints (#10608).
+    let planar_before = (sk.points.clone(), sk.curves.clone(), sk.constraints.clone());
+    let wires_before = (sk.wires.clone(), sk.wire_constraints.clone());
     let (out, left) = f(&mut sk, &mut doc)?;
+    let strictness = Strict {
+        planar: strict && (sk.points != planar_before.0 || sk.curves != planar_before.1 || sk.constraints != planar_before.2),
+        wires: strict && (sk.wires != wires_before.0 || sk.wire_constraints != wires_before.1),
+        wires_held,
+    };
     // A curve that took an offset spline's generated node (drawn from its end) gets its own point there.
     sk.detach_offset_points()?;
     let offsets = !sk.offsets.is_empty() || !sk.freeform_offsets.is_empty();
@@ -336,7 +348,11 @@ pub(super) fn edit_solved<T>(
                 sk.refresh_offsets()?;
                 rep = counted_solve(&mut sk, &Hold::default(), Some(&reference), analysis, None);
             }
-            Some(settle(strict, rep, &mut sk, unsolved, &pre, wires_held)?)
+            // The 3D curves' report too, so every reply counts their freedoms alike.
+            if sk.wires.iter().any(|w| w.link.is_none() && !w.fit.is_empty()) {
+                rep.wires = Some(sk.solve_wires_with(None, analysis != Analysis::StatusOnly));
+            }
+            Some(settle(strictness, rep, &mut sk, unsolved, &pre)?)
         }
         // Solved for the document's values, continuing from the stored solved state.
         Left::Solved | Left::Unsolved => {
@@ -346,7 +362,7 @@ pub(super) fn edit_solved<T>(
             #[cfg(test)]
             solve_counts::record(analysis);
             let rep = doc.solve_sketch_with_analysis(&vals, &mut sk, &stored, None, analysis)?;
-            Some(settle(strict, rep, &mut sk, unsolved, &pre, wires_held)?)
+            Some(settle(strictness, rep, &mut sk, unsolved, &pre)?)
         }
     };
     sketch_store::checked(&sk)?;
@@ -361,11 +377,14 @@ pub(super) fn edit_solved<T>(
 /// `pre` are the constraint ids the sketch had before the edit: the trial already holds any
 /// constraint the edit adds, under the id it would get, so a conflict list that named it would
 /// name an id the sketch does not have yet (#9735).
-/// The 3D constraints (#10608) are settled apart: with `strict`, an edit that leaves them
-/// failing is refused when they held before it (`wires_held`); a planar edit of a sketch whose
-/// 3D constraints already fail goes ahead. A 3D solve that fails moves no 3D curve.
-fn settle(strict: bool, mut rep: SolveReport, sk: &mut Sketch, unsolved: Sketch, pre: &[String], wires_held: bool) -> Result<SolveReport> {
-    if let Some(w) = rep.wires.as_ref().filter(|w| strict && wires_held && !w.ok) {
+/// The 3D constraints (#10608) are settled apart, see [`Strict`]. A 3D group that fails moves
+/// none of its curves; a planar solve that fails keeps the 3D curves as the 3D solve left them.
+fn settle(strict: Strict, mut rep: SolveReport, sk: &mut Sketch, unsolved: Sketch, pre: &[String]) -> Result<SolveReport> {
+    let Strict { planar: strict, wires: strict_wires, wires_held } = strict;
+    if strict_wires && let Some(why) = wire_collapse(&unsolved, sk) {
+        return Err(EngineError::Other(why));
+    }
+    if let Some(w) = rep.wires.as_ref().filter(|w| strict_wires && wires_held && !w.ok) {
         let had: Vec<String> = w.failing.iter().filter(|id| pre.iter().any(|p| p == *id)).cloned().collect();
         if w.oversized.is_none() && had.is_empty() {
             return Err(EngineError::Other(
@@ -403,9 +422,58 @@ fn settle(strict: bool, mut rep: SolveReport, sk: &mut Sketch, unsolved: Sketch,
         return Err(EngineError::Other(format!("that would shrink {curve} to a point: its constraints can only be met without it")));
     }
     if !rep.keeps_orientation() || far || gone.is_some() {
+        let (wires, wire_constraints) = (std::mem::take(&mut sk.wires), std::mem::take(&mut sk.wire_constraints));
         *sk = unsolved;
+        (sk.wires, sk.wire_constraints) = (wires, wire_constraints);
     }
     Ok(rep)
+}
+
+/// Which failures refuse an edit's solve: the planar sketch's when the edit changed it
+/// (`planar`), the 3D constraints' when it changed the 3D curves or their constraints (`wires`)
+/// and they held before it (`wires_held`). An edit is not refused for a failure it did not touch.
+#[derive(Clone, Copy)]
+pub(super) struct Strict {
+    planar: bool,
+    wires: bool,
+    wires_held: bool,
+}
+
+/// Why solving `before` into `after` collapsed a drawn 3D curve (#10608), as `shrunk` and
+/// `flung` judge planar geometry: a line or arc from longer (or wider) than 1e-3 to shorter
+/// than 1e-5, or a point thrown further than [`FLUNG`] times the 3D curves' size.
+fn wire_collapse(before: &Sketch, after: &Sketch) -> Option<String> {
+    let size = |w: &solidcraft_sketch::Wire| match (w.arc, w.fit.as_slice()) {
+        (Some(a), _) => Some(a.radius),
+        (None, [p, q]) => Some(p.dist(*q)),
+        _ => None,
+    };
+    let drawn = |sk: &Sketch| {
+        sk.wires
+            .iter()
+            .filter(|w| w.link.is_none() && !w.fit.is_empty())
+            .map(|w| (w.id.clone(), w.clone()))
+            .collect::<std::collections::HashMap<_, _>>()
+    };
+    let (old, new) = (drawn(before), drawn(after));
+    for (id, w) in &new {
+        if let Some(o) = old.get(id)
+            && matches!((size(o), size(w)), (Some(b), Some(a)) if b > 1e-3 && a < 1e-5)
+        {
+            return Some(format!("that would shrink {id} to a point: its 3D constraints can only be met without it"));
+        }
+    }
+    let (lo, hi) = old.values().flat_map(|w| w.fit.iter().copied()).fold(
+        (
+            solidcraft_geom::Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY),
+            solidcraft_geom::Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY),
+        ),
+        |(lo, hi), p| (lo.min(p), hi.max(p)),
+    );
+    let span = if lo.x <= hi.x { lo.dist(hi) } else { 0.0 };
+    let reach = FLUNG * span.max(1.0);
+    let thrown = new.iter().any(|(id, w)| old.get(id).is_some_and(|o| o.fit.iter().zip(&w.fit).any(|(p, q)| !(p.dist(*q) <= reach))));
+    thrown.then(|| "that would throw 3D points of the sketch far away: its 3D constraints have no solution near the sketch as it is".to_string())
 }
 
 /// The first line or circle that solving `before` into `after` shrank to a point: longer (or
