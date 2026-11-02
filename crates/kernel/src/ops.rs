@@ -1501,14 +1501,21 @@ where
         match r {
             Some(Ok(Some(body))) => {
                 let (ok, v) = check(&body);
-                if ok {
+                // An intersection is held to the retry guard here, so that one it refuses (material
+                // kept beyond a body, #423) leaves the strategies below to answer.
+                let guarded = || op != BoolOp::Intersect || crate::boolean_guard::check_retry(a, b, op, Some(&body)).is_ok();
+                if ok && guarded() {
                     merge(diagnostics);
                     let mut event = BooleanFallback::new(BooleanStrategy::CoplanarSeparation);
                     event.face_shift_mm = size * 0.0229;
                     record(event);
                     return Ok(Some(body));
                 }
-                apart_failed = format!("; faces pushed apart gave an implausible volume {v:.4}");
+                apart_failed = if ok {
+                    "; faces pushed apart gave an intersection reaching outside the bodies".to_string()
+                } else {
+                    format!("; faces pushed apart gave an implausible volume {v:.4}")
+                };
             }
             Some(Err(e)) => apart_failed = format!("; {e}"),
             Some(Ok(None)) | None => {}
