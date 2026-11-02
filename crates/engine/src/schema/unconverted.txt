@@ -290,8 +290,6 @@ sketch.isoparametric_curve
 sketch.line
 sketch.line.midpoint
 sketch.line3d
-sketch.loose_ends
-sketch.loose_ends.tie
 sketch.mirror
 sketch.move
 sketch.move3d
