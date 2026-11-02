@@ -454,6 +454,13 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
             Some("ui.manipulator_free_alt_tip"),
             &mut app.preferences.manipulator_free_alt,
         );
+        check(
+            ui,
+            "sketch_edge_drag_moves",
+            "prefs.sketch_edge_drag_moves",
+            Some("prefs.sketch_edge_drag_moves_note"),
+            &mut app.preferences.sketch_edge_drag_moves,
+        );
     });
 }
 

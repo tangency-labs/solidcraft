@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.sketch_edge_drag_moves": "Dragging an edge moves the curve",
+    "prefs.sketch_edge_drag_moves_note": "Dragging a circle, arc, ellipse or conic by its edge moves it whole, and a horizontal or vertical side of a shape moves only across itself, so the rest of the shape stays. Hold Ctrl/Cmd as you press to change the radius or a conic's fullness, or to slide a side freely. Off: an edge changes the radius and a side slides with the pointer, as before."
+  },
+  "ar": {
+    "prefs.sketch_edge_drag_moves": "سحب الحافة يحرّك المنحنى",
+    "prefs.sketch_edge_drag_moves_note": "سحب دائرة أو قوس أو قطع ناقص أو منحنى مخروطي من حافته يحرّكه كاملًا، والضلع الأفقي أو الرأسي لشكل يتحرك عموديًا على نفسه فقط، فيبقى باقي الشكل مكانه. اضغط مع الاستمرار على Ctrl/Cmd عند الضغط لتغيير نصف القطر أو امتلاء المنحنى المخروطي، أو لتحريك الضلع بحرية. عند الإيقاف: تغيّر الحافة نصف القطر ويتبع الضلع المؤشر، كما كان من قبل."
+  },
+  "de": {
+    "prefs.sketch_edge_drag_moves": "Ziehen an einer Kante verschiebt die Kurve",
+    "prefs.sketch_edge_drag_moves_note": "Ziehen an der Kante eines Kreises, Bogens, einer Ellipse oder eines Kegelschnitts verschiebt ihn als Ganzes, und eine waagerechte oder senkrechte Seite einer Form bewegt sich nur quer zu sich selbst, sodass der Rest der Form bleibt. Halten Sie beim Drücken Strg/Cmd, um den Radius oder die Völle eines Kegelschnitts zu ändern oder eine Seite frei zu schieben. Aus: Eine Kante ändert den Radius, und eine Seite folgt dem Zeiger, wie bisher."
+  },
+  "he": {
+    "prefs.sketch_edge_drag_moves": "גרירת קצה מזיזה את העקומה",
+    "prefs.sketch_edge_drag_moves_note": "גרירת עיגול, קשת, אליפסה או עקומת חתך חרוט בקצה שלהם מזיזה אותם בשלמותם, וצלע אופקית או אנכית של צורה זזה רק בניצב לעצמה, כך ששאר הצורה נשארת במקומה. החזיקו Ctrl/Cmd בזמן הלחיצה כדי לשנות את הרדיוס או את מלאות עקומת החתך החרוט, או כדי להחליק צלע בחופשיות. כבוי: הקצה משנה את הרדיוס והצלע עוקבת אחרי הסמן, כמו קודם."
+  },
+  "ja": {
+    "prefs.sketch_edge_drag_moves": "エッジのドラッグで曲線を移動",
+    "prefs.sketch_edge_drag_moves_note": "円、円弧、楕円、円錐曲線をエッジでドラッグすると全体が移動し、形状の水平または垂直な辺はその辺に垂直な方向にだけ動くので、形状の残りはそのままです。押すときに Ctrl/Cmd を押していると、半径や円錐曲線のふくらみを変更するか、辺を自由にスライドします。オフ: 従来どおり、エッジは半径を変更し、辺はポインターに追従します。"
+  },
+  "ko": {
+    "prefs.sketch_edge_drag_moves": "가장자리를 드래그하면 곡선 이동",
+    "prefs.sketch_edge_drag_moves_note": "원, 원호, 타원 또는 원뿔 곡선을 가장자리로 드래그하면 전체가 이동하고, 도형의 수평 또는 수직 변은 자신과 수직인 방향으로만 움직이므로 도형의 나머지는 그대로 있습니다. 누를 때 Ctrl/Cmd를 누르고 있으면 반지름이나 원뿔 곡선의 볼록한 정도를 바꾸거나 변을 자유롭게 밉니다. 끄기: 이전처럼 가장자리는 반지름을 바꾸고 변은 포인터를 따라갑니다."
+  },
+  "vi": {
+    "prefs.sketch_edge_drag_moves": "Kéo cạnh sẽ di chuyển đường cong",
+    "prefs.sketch_edge_drag_moves_note": "Kéo đường tròn, cung, elip hoặc đường conic theo cạnh của nó sẽ di chuyển toàn bộ, còn cạnh ngang hoặc dọc của một hình chỉ di chuyển vuông góc với chính nó, nên phần còn lại của hình giữ nguyên. Giữ Ctrl/Cmd khi nhấn để thay đổi bán kính hoặc độ phồng của đường conic, hoặc để trượt cạnh tự do. Tắt: cạnh thay đổi bán kính và cạnh thẳng đi theo con trỏ, như trước đây."
+  },
+  "zh": {
+    "prefs.sketch_edge_drag_moves": "拖动边缘移动曲线",
+    "prefs.sketch_edge_drag_moves_note": "按边缘拖动圆、圆弧、椭圆或圆锥曲线会整体移动它；形状的水平或竖直边只沿垂直于自身的方向移动，形状的其余部分保持不动。按下时按住 Ctrl/Cmd 可改为更改半径或圆锥曲线的饱满度，或自由滑动边。关闭：与以前一样，边缘更改半径，边跟随指针滑动。"
+  }
+}

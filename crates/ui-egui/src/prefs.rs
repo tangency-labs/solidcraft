@@ -1605,6 +1605,11 @@ preference_settings! {
     /// its half-axes and axes can be dimensioned. Off: the ellipse alone, and D on it gives its
     /// minor radius, labelled R, as before.
     ellipse_axes: bool = true, PAGE_SKETCH;
+    /// A curve dragged by its edge keeps its shape: a circle, arc, ellipse or conic moves whole,
+    /// and a horizontal or vertical side of a shape moves only across itself; Ctrl/Cmd at the
+    /// press changes the shape instead (`viewport::EdgeDrag`). Off: the edge changes a circle's
+    /// radius and a side slides with the pointer, as before.
+    sketch_edge_drag_moves: bool = true, PAGE_SKETCH;
     /// Drive Joints shows the moved parts' old place as a ghost (its Show ghost box, #5905).
     drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
     /// While Move's triad drags a component drawn as a layer of its own, what is under the pointer
