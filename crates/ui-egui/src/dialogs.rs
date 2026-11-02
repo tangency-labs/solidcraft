@@ -130,10 +130,14 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::ConstructionPlane { plane: PlaneRef::Tangent { angle, .. } }) {
             angle: String = "0 deg".into() => angle.as_ref().map_or_else(|| "0 deg".to_string(), ToString::to_string),
         } => json!({"angle": angle});
+        // Uniform, or per axis (#10782): then `factor` is X's, beside Y's and Z's.
         Scale("solid.scale", "SCALE", [("Bodies", BODIES, true)],
-            FeatureKind::Scale { factor, .. }) {
-            factor: String = "2".into() => factor.to_string(),
-        } => json!({"factor": factor});
+            FeatureKind::Scale { factor, factors, .. }) {
+            factor: String = "2".into() => factors.as_ref().map_or_else(|| factor.to_string(), |f| f[0].to_string()),
+            per_axis: bool = false => factors.is_some(),
+            factor_y: String = "2".into() => factors.as_ref().map_or_else(|| factor.to_string(), |f| f[1].to_string()),
+            factor_z: String = "2".into() => factors.as_ref().map_or_else(|| factor.to_string(), |f| f[2].to_string()),
+        } => if *per_axis { json!({"factors": [factor, factor_y, factor_z]}) } else { json!({"factor": factor}) };
         OffsetFaces("solid.offset_face", "OFFSET FACE", [("Faces", FACES, true)],
             FeatureKind::OffsetFace { distance, .. }) {
             distance: String = "2 mm".into() => shown_expr(distance, ValueKind::Length),
@@ -1388,7 +1392,8 @@ impl Dialog {
             Kind::Pipe { diameter, .. } => ("Diameter", ValueKind::Length, diameter),
             Kind::Stock { margin } => ("Margin", ValueKind::Length, margin),
             Kind::AnglePlane { angle } => ("Angle", ValueKind::Angle, angle),
-            Kind::Scale { factor } => ("Scale", ValueKind::Unitless, factor),
+            Kind::Scale { per_axis: true, .. } => return None,
+            Kind::Scale { factor, .. } => ("Scale", ValueKind::Unitless, factor),
             Kind::OffsetFaces { distance } => ("Distance", ValueKind::Length, distance),
             Kind::Sheet(k) => return k.primary(&self.inputs),
             Kind::Surface(k) => return k.primary(),
@@ -6586,16 +6591,13 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Scale { bodies, origin, factors, .. } => {
+        FeatureKind::Scale { bodies, origin, .. } => {
             let mut d = start("solid.scale")?;
             d.kind = Kind::simple_restore(&f.kind)?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = bodies.iter().map(|n| Sel::Body { name: n.to_string() }).collect();
             }
             d.extra.insert("origin".into(), pt3(origin.0));
-            if let Some(f) = factors {
-                d.extra.insert("factors".into(), json!(f));
-            }
             d
         }
         FeatureKind::OffsetFace { faces, body, .. } => {
