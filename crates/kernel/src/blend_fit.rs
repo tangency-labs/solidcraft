@@ -559,19 +559,19 @@ fn convex_at(body: &Body, p: Vec3) -> Option<bool> {
 
 /// A chamfer of convex edges takes material away and one of concave edges fills it: a result
 /// that went the other way (a chamfer on a curved edge running off a face it skims, which the
-/// wedges can't bound) is refused rather than kept. Rounds are left to the wedges: a round
-/// rolled along a smooth chain may run on round convex and concave stretches alike.
+/// wedges can't bound) is refused rather than kept. A round of convex edges only takes material
+/// away too, so one that grew the part ran past a face beside its edge (a ring narrower than
+/// the radius, #3435) and is refused the same way. Rounds of concave edges are left to the
+/// wedges: a round rolled along a smooth chain may run on round convex and concave stretches.
 fn right_way(input: &Body, out: Body, edges: &[Vec3], size: Size) -> Result<Body> {
-    if matches!(size, Size::Round(_)) {
-        return Ok(out);
-    }
     let ways: Option<Vec<bool>> = edges.iter().map(|p| convex_at(input, *p)).collect();
     let Some(ways) = ways else { return Ok(out) };
     let (convex, concave) = (ways.iter().all(|w| *w), ways.iter().all(|w| !*w));
+    let concave = concave && !matches!(size, Size::Round(_));
     if !(convex || concave) {
         return Ok(out);
     }
-    let (Ok(a), Ok(b)) = (crate::measure(input), crate::measure(&out)) else { return Ok(out) };
+    let (Ok(a), Ok(b)) = (crate::measure_mass(input), crate::measure_mass(&out)) else { return Ok(out) };
     let slack = a.volume.abs() * 1e-5 + 1e-6;
     let grew = b.volume - a.volume;
     if (convex && grew > slack) || (concave && grew < -slack) {
