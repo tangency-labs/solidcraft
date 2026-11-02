@@ -290,11 +290,25 @@ fn retype(h: &mut crate::scenario::Harness, handle: &str, text: &str) {
     h.frames(2);
 }
 
+/// Run frames until the preview of the typed size is in. It computes on its own thread, and
+/// its result (a failure shows its reason in the window, which moves the buttons) arrives on
+/// whichever frame the thread finishes. A test that reads the window or clicks a handle
+/// before then races that frame, and on a loaded machine loses.
+fn preview_in(h: &mut crate::scenario::Harness) {
+    let began = std::time::Instant::now();
+    while h.app.preview.busy && began.elapsed() < std::time::Duration::from_secs(60) {
+        h.frame();
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    h.frames(2);
+}
+
 fn apply(h: &mut crate::scenario::Harness) {
     // Lay the window out once before reading its OK handle. An error line that wraps onto a
     // second row moves the button, and a click on the handle from the frame before then
     // lands above it and commits nothing.
     h.frames(2);
+    preview_in(h);
     h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
     h.frames(2);
 }
@@ -559,7 +573,7 @@ fn a_refused_size_gives_way_to_one_that_fits() {
     let shown = |h: &mut crate::scenario::Harness, size: &str| {
         set_size(&mut h.app, size);
         h.settle();
-        h.frames(2);
+        preview_in(h);
         h.app.dialog.as_ref().and_then(|d| d.error.clone()).or_else(|| h.app.preview.error.clone())
     };
     assert!(shown(&mut h, "4 m").is_some_and(|e| e.contains("too large")));
