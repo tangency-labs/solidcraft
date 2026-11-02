@@ -1598,6 +1598,8 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
 
 #[cfg(not(target_arch = "wasm32"))]
 fn transcript_body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) -> f32 {
+    // Select All and Copy of the whole conversation, read before its labels see the keys.
+    super::select_all::handle(chat, ui.ctx());
     let conversation = egui::ScrollArea::vertical()
         .id_salt("sc_agent_chat_scroll")
         .min_scrolled_height(0.0)
@@ -2295,6 +2297,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
     let mut hovered: Option<Hovered> = None;
     let current = &view.revision;
     let units = summary::Units { units: &view.units, decimals: view.decimals };
+    let all_selected = chat.all_selected;
     for (n, item) in chat.items.iter().enumerate() {
         match item {
             Item::User { text, image, pictures, context, files } => {
@@ -2304,7 +2307,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                 ui_kit::assistant_bubble(ui, |ui| {
                     let gone = chat.gone.sent.get(&n).map_or(&[][..], Vec::as_slice);
                     if !text.is_empty()
-                        && let Some(group) = user_text(ui, text, context, gone, &format!("agent_chat:sent:{n}"))
+                        && let Some(group) = user_text(ui, text, context, gone, &format!("agent_chat:sent:{n}"), all_selected)
                     {
                         hovered = Some(Hovered::Group { sent: true, at: n, group });
                     }
@@ -2338,10 +2341,10 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
             }
             Item::Agent { thought, text } => {
                 if *thought {
-                    super::markdown_view::selectable(ui, egui::Label::new(RichText::new(text).italics().color(t.text_dim)).wrap());
+                    super::markdown_view::selectable(ui, egui::Label::new(RichText::new(text).italics().color(t.text_dim)).wrap(), false);
                 } else {
                     let before = ui.cursor();
-                    ui_kit::assistant_prose(ui, |ui| super::markdown_view::show(ui, n, text));
+                    ui_kit::assistant_prose(ui, |ui| super::markdown_view::show(ui, n, text, all_selected));
                     if !text.is_empty() {
                         copy_message_button(ui, n, text);
                         let drawn = egui::Rect::from_x_y_ranges(before.x_range(), before.min.y..=ui.cursor().min.y);
@@ -2419,7 +2422,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
             Item::Approval { id, title, tool, answer: given } => {
                 ui_kit::assistant_approval(ui, tr("ui.agent_chat_approval"), |ui| {
                     ui_kit::assistant_tool_detail(ui, |ui| {
-                        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(title).monospace().size(t.font_caption)).wrap());
+                        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(title).monospace().size(t.font_caption)).wrap(), false);
                     });
                     match given {
                         Some(true) => {
@@ -2529,7 +2532,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                 }
                 _ => {
                     if !p.text.is_empty()
-                        && let Some(group) = user_text(ui, &p.text, &p.context, &[], &format!("agent_chat:queued:{n}"))
+                        && let Some(group) = user_text(ui, &p.text, &p.context, &[], &format!("agent_chat:queued:{n}"), false)
                     {
                         hovered = Some(Hovered::Group { sent: false, at: n, group });
                     }
@@ -2649,13 +2652,14 @@ fn unplaced<'a>(context: &'a Context, gone: &'a [bool]) -> (std::borrow::Cow<'a,
 }
 
 /// A sent message's text, its pills drawn as pills: `gone` flags the context's items that have left
-/// the design, which strikes through the pills they are in. Returns the number of the pill under the
-/// pointer (its group), for the host to light what it stands for.
+/// the design, which strikes through the pills they are in; `selected`: the whole transcript is
+/// selected (#10676). Returns the number of the pill under the pointer (its group), for the host to
+/// light what it stands for.
 #[cfg(not(target_arch = "wasm32"))]
-fn user_text(ui: &mut egui::Ui, text: &str, context: &Context, gone: &[bool], handle: &str) -> Option<u32> {
+fn user_text(ui: &mut egui::Ui, text: &str, context: &Context, gone: &[bool], handle: &str, selected: bool) -> Option<u32> {
     let t = Tokens::get();
     if context.groups.is_empty() {
-        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(text).color(t.text)).wrap());
+        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(text).color(t.text)).wrap(), selected);
         return None;
     }
     let look = |id: u32| {
@@ -2669,7 +2673,7 @@ fn user_text(ui: &mut egui::Ui, text: &str, context: &Context, gone: &[bool], ha
     let font = egui::FontId::proportional(ui.style().text_styles.get(&egui::TextStyle::Body).map_or(t.font_label, |f| f.size));
     let galley = ui.fonts_mut(|f| f.layout_job(pills::job(text, &font, t.text, ui.available_width(), &look)));
     // Through the conversation's selectable label, so it stays in a selection scrolled out of view.
-    let response = super::markdown_view::selectable(ui, egui::Label::new(egui::WidgetText::Galley(Arc::clone(&galley))));
+    let response = super::markdown_view::selectable(ui, egui::Label::new(egui::WidgetText::Galley(Arc::clone(&galley))), selected);
     // Where each pill is, for tests and scripts.
     for span in pills::spans(text) {
         let row = galley.pos_from_cursor(egui::text::CCursor::new(span.start + 2));

@@ -36,6 +36,7 @@ pub mod paste;
 mod pills;
 #[cfg(not(target_arch = "wasm32"))]
 mod process;
+mod select_all;
 pub mod settings;
 pub mod summary;
 
@@ -467,6 +468,8 @@ pub struct AgentChat {
     keyboard_owned: bool,
     /// The panel forgets its own width the next time it is drawn, so the preference applies.
     pub(crate) forget_width: bool,
+    /// Select All (Ctrl+A) in the transcript took the whole conversation (#10676).
+    all_selected: bool,
     /// Unreserved sheet space, shared by the actual dock and its drag preview.
     pub(crate) dock_space: Option<egui::Rect>,
     /// The last message sent, kept to send again after a sign-in (its files too).
@@ -624,6 +627,7 @@ impl AgentChat {
         // Hit regions must be measured again for the incoming conversation.
         self.panel_rect = None;
         self.keyboard_owned = false;
+        self.all_selected = false;
         self.dock_space = None;
         self.drop_rect = None;
     }
@@ -1783,6 +1787,7 @@ pub fn new_chat(app: &mut SolveApp) {
     let chat = &mut app.agent_chat;
     chat.confirm_new = false;
     chat.items.clear();
+    chat.all_selected = false;
     chat.turn_warning = None;
     chat.gallery = None;
     chat.chips_version += 1;
