@@ -40,6 +40,42 @@ fn shell_a_box_with_a_drilled_hole() {
     assert!((v_shell - want).abs() < 2e-4 * want, "{v_shell} vs {want}");
 }
 
+/// #4009: shell with no open face leaves a closed hollow (analytic box volume).
+#[test]
+fn shell_closed_hollow_with_no_open_face() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 12.5}));
+    run(&mut s, "solid.shell", json!({"faces": [], "thickness": 2.5}));
+    let vol = volume(&mut s);
+    let want = 40.0 * 30.0 * 12.5 - 35.0 * 25.0 * 7.5;
+    assert!((vol - want).abs() < 1e-6 * want, "{vol} vs {want}");
+    let m = run(&mut s, "inspect.measure", json!({}));
+    let faces = m["bodies"].as_array().unwrap()[0]["faces"].as_u64().unwrap();
+    assert_eq!(faces, 12, "outer and inner shells: {m}");
+}
+
+/// #4009: with several bodies, a closed hollow needs an explicit body name.
+#[test]
+fn shell_closed_hollow_needs_a_body_when_several_exist() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 12.5, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"corner": [50, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "B"}));
+    match s.execute("solid.shell", &json!({"faces": [], "thickness": 2.5})) {
+        Ok(_) => panic!("expected a body name when two bodies exist"),
+        Err(e) => assert!(e.to_string().contains("body") || e.to_string().contains("select"), "{e}"),
+    }
+    run(&mut s, "solid.shell", json!({"body": "A", "faces": [], "thickness": 2.5}));
+    let a = run(&mut s, "inspect.measure", json!({}))["bodies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["name"] == "A")
+        .and_then(|b| b["volume_mm3"].as_f64())
+        .unwrap();
+    let want = 40.0 * 30.0 * 12.5 - 35.0 * 25.0 * 7.5;
+    assert!((a - want).abs() < 1e-6 * want, "{a} vs {want}");
+}
+
 /// Offset Face on a cone and a sphere move them exactly.
 #[test]
 fn offset_cone_and_sphere_faces() {
