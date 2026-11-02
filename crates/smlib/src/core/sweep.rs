@@ -1594,12 +1594,7 @@ fn put_curve(c: &Curve) -> solidcore::Result<Out<(Profile, [f64; 2])>> {
         knots.extend(std::iter::repeat_n(u, m));
     }
     let clamped = can.knot_multiplicities.first().is_some_and(|&m| m > degree) && can.knot_multiplicities.last().is_some_and(|&m| m > degree);
-    if !(1..=CURVE_MAX_DEGREE).contains(&degree)
-        || count < degree + 1
-        || count > CURVE_MAX_POINTS
-        || knots.len() != count + degree + 1
-        || !clamped
-    {
+    if !(1..=CURVE_MAX_DEGREE).contains(&degree) || count < degree + 1 || count > CURVE_MAX_POINTS || knots.len() != count + degree + 1 || !clamped {
         return Ok(Err(Error::Unsupported));
     }
     let points = can.control_points.iter().enumerate().map(|(i, p)| [p.x, p.y, p.z, can.weights.get(i).copied().unwrap_or(1.0)]).collect();

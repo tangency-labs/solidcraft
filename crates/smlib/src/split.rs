@@ -33,7 +33,6 @@ impl Brep {
     /// normal and the part in front. A `sheet` that is no sheet, or a `face` it does not have, is
     /// [`Error::Argument`].
     pub fn split_body_by_sheet(&self, sheet: &Brep, face: usize) -> Result<Option<(Brep, Brep)>> {
-        core::split::split_body_by_sheet(self.core(), sheet.core(), face)
-            .map(|r| r.map(|(b, f)| (Brep::made_core(b), Brep::made_core(f))))
+        core::split::split_body_by_sheet(self.core(), sheet.core(), face).map(|r| r.map(|(b, f)| (Brep::made_core(b), Brep::made_core(f))))
     }
 }

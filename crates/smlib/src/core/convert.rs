@@ -2492,7 +2492,6 @@ fn extent2d(u0: f64, v0: f64, u1: f64, v1: f64) -> Result<Extent2d> {
     Ok(Extent2d::from_bounds(u0, v0, u1, v1))
 }
 
-
 /// A body from the flat arrays the C API imports (`BrepFromFlat`): `Validate`,
 /// `FlatToBrepData`, then `MakeTopologyFromData` with the B-rep's tolerance as it is ([`own_tolerances`]) and no UV
 /// trims or analytic conversion made; it heals unless `SOURCE` says SMLib wrote the arrays.

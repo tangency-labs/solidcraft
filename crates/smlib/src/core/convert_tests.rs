@@ -90,8 +90,6 @@ fn round_trips(name: &str) {
     assert!(rel(v, c.volume) < 1e-9, "{name}: {v} vs {}", c.volume);
 }
 
-
-
 macro_rules! primitive {
     ($m:ident, $name:literal $(, volume: $vol:meta)? $(, round_trip: $rt:meta)?) => {
         mod $m {
@@ -165,8 +163,6 @@ fn a_parabola_gives_its_nurb_or_says_it_cannot() {
     let none = part(0.5, 0.5);
     assert!(matches!(&none, Err(e) if e.to_string().contains("MakeNurb")), "{none:?}");
 }
-
-
 
 /// Each edge's and vertex's tolerance crosses the kernels as it is. One box edge given eight times
 /// the box's tolerance, in arrays whose TOLERANCE is the largest (as SMLib's export wrote them),
@@ -286,5 +282,3 @@ fn shells_listed_inner_first_import_outer_first() {
     let v = volume(&back, 1e-9).unwrap();
     assert!(rel(v, SEALED_VOID_VOLUME) < 1e-9, "inner first: {v}");
 }
-
-

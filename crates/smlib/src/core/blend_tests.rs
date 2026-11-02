@@ -281,8 +281,6 @@ fn solidcore_case(name: &'static str) -> Got {
     })
 }
 
-
-
 macro_rules! cases {
     ($($m:ident $(: $ign:meta)?),* $(,)?) => {$(
         mod $m {
@@ -668,7 +666,6 @@ fn the_first_distance_goes_on_the_face_along_first() {
     }
 }
 
-
 /// The capi's `knife_edge_chamfers` (fork e96898d): a 10 high extrusion of the profile whose arc
 /// of radius R = 21 runs out tangent into its top line at the tip x = 62 1/6 (a knife edge, a
 /// cusp), chamfered d at the tip. No ball lies d back along both faces there; the chamfer is the
@@ -746,7 +743,6 @@ fn edges_871() -> Vec<[f64; 3]> {
     ];
     [23.5, 9.5].iter().flat_map(|x| yz.iter().map(move |(y, z)| [*x, *y, *z])).collect()
 }
-
 
 /// #871's rounds at r 0.5 fit (the wall between the window and the block's side is 1.26 thick):
 /// 38 faces, and the closed form `issue_871_tests::rounds_that_fit_are_closed` derives. At r 1 they

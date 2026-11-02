@@ -355,8 +355,6 @@ fn solidcore_case(name: &'static str) -> Got {
     })
 }
 
-
-
 macro_rules! cases {
     ($($m:ident $([$pign:meta])? $(: $ign:meta)?),* $(,)?) => {$(
         mod $m {
@@ -471,7 +469,6 @@ fn sweep_placed_reports_the_motions() {
     check_motions(&turned, &quarter_turn());
 }
 
-
 /// A diagonal 10 above a 10 x 10 x 10 box's top, projected down onto the top: the same diagonal
 /// at z = 10.
 #[test]
@@ -572,7 +569,6 @@ fn a_box_top_section_is_the_line_across_it() {
     let len = length(&p);
     assert!((len - 10.0).abs() < 1e-6, "{len} against 10");
 }
-
 
 /// The capi's argument checks, before any kernel call.
 #[test]

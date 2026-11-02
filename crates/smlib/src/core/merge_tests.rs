@@ -199,8 +199,6 @@ fn solidcore_case(name: &str) -> Got {
     judge(name, "solidcore", got)
 }
 
-
-
 macro_rules! cases {
     ($($m:ident $(: $ign:meta)?),* $(,)?) => {$(
         mod $m {
@@ -345,7 +343,6 @@ fn a_flap_on_a_cube_edge_stays_beside_it() {
     assert!((v - 1000.0).abs() < 1e-6 && (a - 700.0).abs() < 1e-6, "volume {v}, area {a}");
 }
 
-
 /// The inputs are never changed.
 #[test]
 fn the_body_stays_as_it_was() {
@@ -357,4 +354,3 @@ fn the_body_stays_as_it_was() {
     let _ = merge_faces(&block, &[], TOL).unwrap();
     assert_eq!(counts(&block).unwrap(), was);
 }
-

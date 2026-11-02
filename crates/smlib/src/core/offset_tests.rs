@@ -335,8 +335,6 @@ fn solidcore_case(name: &'static str) -> Got {
     })
 }
 
-
-
 macro_rules! cases {
     ($($m:ident $(: $ign:meta)?),* $(,)?) => {$(
         mod $m {
@@ -526,10 +524,6 @@ fn a_draft_leaves_no_mark() {
     }
 }
 
-
-
-
-
 /// A stepped block, 40 x 30 x 10 with its half x < 20 raised to 20 (rig case
 /// shell/cov-replace-face-step-onto-the-higher-face, the fork's `offset_faces_close_a_step_wall`):
 /// a top moved onto the other's plane closes the step wall between them to nothing, and the tops
@@ -548,7 +542,6 @@ fn offset_faces_close_a_step_wall() {
         assert!(rel(got, v) < 1e-9 && rel(area, a) < 1e-9, "d {d}: V {got} A {area}");
     }
 }
-
 
 /// Rig case shell/4492's rounded box: four mitred rounds, r 3, come off a 40 x 30 x 10 box's top
 /// together and follow it. From height 0 the outline is the 34 x 24 top moved out by the round's

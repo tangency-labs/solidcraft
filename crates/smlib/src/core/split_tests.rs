@@ -127,9 +127,6 @@ fn solidcore_case(name: &str) -> Got {
     judge(name, "solidcore", got)
 }
 
-
-
-
 macro_rules! cases {
     ($($m:ident $(: $ign:meta)?),* $(,)?) => {$(
         mod $m {
@@ -257,7 +254,6 @@ fn the_body_stays_as_it_was() {
     assert_eq!(counts(&b).unwrap(), [6, 12, 8]);
     assert!(rel(volume(&b, 1e-8).unwrap(), 1000.0) < 1e-12);
 }
-
 
 /// A one-face sheet on a B-spline surface (as SolidCraft's extrude of a sketch spline makes it:
 /// the cubic through (0, 0), (13, -8), (27, 8), (40, 0) in x and z, straight along y over

@@ -616,7 +616,6 @@ fn global_intersect_scores() -> Vec<Score> {
     scores
 }
 
-
 /// solidcore passes every case SMLib passed ([`GSI_1E6_PASS`]). The self-crossing
 /// curves it missed (Viviani's figure eight, the crossing loops) are split at their crossings
 /// since solidcore's `ssi_split_curves_at_singular_points` (tangency-labs/solidcore#2110).

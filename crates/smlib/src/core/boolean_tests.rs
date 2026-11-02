@@ -186,8 +186,6 @@ fn solidcore_case(name: &'static str) -> Option<Measured> {
     })
 }
 
-
-
 macro_rules! cases {
     ($($m:ident $(: $ign:meta)?),* $(,)?) => {$(
         mod $m {
@@ -322,7 +320,6 @@ fn a_failed_closest_point_counts_as_off_the_piece() {
     })
     .unwrap();
 }
-
 
 /// Rig case booleans/2928, reduced (fork c2e3d9d): a ring, r 3..5 about (0, 10), z 0..2, unioned
 /// with a half annulus prism, r 4..5 about (e, 10), z 2..20, whose cap sits on the ring's top. Two

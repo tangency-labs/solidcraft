@@ -132,8 +132,6 @@ fn solidcore_case(name: &str) -> Got {
     judge(name, "solidcore", got)
 }
 
-
-
 macro_rules! cases {
     ($($m:ident $(: $ign:meta)?),* $(,)?) => {$(
         mod $m {
@@ -184,7 +182,6 @@ fn the_body_stays_as_it_was() {
     let _ = untrim_face(&b, TOP, TOL, None, false, true);
     assert_eq!(counts(&b).unwrap(), was);
 }
-
 
 /// A one-face sheet on `surface` over `domain`, the face its whole box.
 fn whole_face(surface: solidcore::surface::surface::Surface) -> Body {
@@ -274,8 +271,6 @@ fn extend_solidcore(name: &str) -> Got {
     });
     extend_judge(name, "solidcore", got)
 }
-
-
 
 macro_rules! extend_cases {
     ($($m:ident $(: $ign:meta)?),* $(,)?) => {$(

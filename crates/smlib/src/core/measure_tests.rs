@@ -108,15 +108,6 @@ fn check_refuses_only_an_unknown_naming() {
     name(NamingScheme::Caller).unwrap();
 }
 
-
-
-
-
-
-
-
-
-
 macro_rules! primitive {
     ($m:ident, $name:literal $(, mass: $mass:meta)? $(, area: $area:meta)?) => {
         mod $m {
@@ -161,7 +152,6 @@ primitive!(sphere, "sphere");
 primitive!(cone, "cone");
 primitive!(frustum, "frustum");
 primitive!(torus, "torus");
-
 
 /// A valid box passes every test at level 2 (SolidCraft's level), with an empty report.
 #[test]

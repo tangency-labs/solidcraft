@@ -280,7 +280,6 @@ impl Brep {
         }
         core::blend::blend(self.core(), kind, edges, sizes, tolerance, corners, setbacks, open).map(Brep::made_core)
     }
-
 }
 
 #[cfg(test)]

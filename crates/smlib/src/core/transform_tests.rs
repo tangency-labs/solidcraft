@@ -174,8 +174,6 @@ fn solidcore_case(name: &str) -> Got {
     judge(name, "solidcore", got)
 }
 
-
-
 macro_rules! cases {
     ($($m:ident $(: $ign:meta)?),* $(,)?) => {$(
         mod $m {
@@ -240,4 +238,3 @@ fn the_body_stays_as_it_was() {
         assert_eq!(bounds(x).unwrap(), ([1.0, 2.0, 3.0], [11.0, 22.0, 33.0]));
     }
 }
-
