@@ -24,6 +24,7 @@
 //! | `seam_pcurve` (private)       | `sm_DraftSeamPcurve`                  |
 //! | `iso_pcurve` (private)        | `sm_DraftIsoPcurve`                   |
 //! | `seam_curve` (private)        | `sm_DraftSeamCurve`                   |
+//! | `draft_cone` (private)        | `sm_DraftCone`                        |
 //! | `has_corner`                  | `sm_DraftHasCorner`                   |
 //! | `draft_input` (private)       | `sm_DraftInput`                       |
 //! | `lines_and_arcs`              | `sm_DraftLinesAndArcs`                |
@@ -35,7 +36,9 @@
 //! and the seam is their intersection, a conic: the rational quadratic through the
 //! corner and the far crossing with the walls' common tangents there, through the
 //! crossing at half height. On a plane wall its pcurve is its affine image; on a cone
-//! wall a rational quartic. Every seam and pcurve is checked. With the tangent rule a
+//! wall a rational quartic in each of the cone's spans it crosses. An arc's wall whose
+//! height runs along its axis is its exact cone (tangency-labs/smlib 3ae7bfa), any other
+//! wall the surface ruled between its ends. Every seam and pcurve is checked. With the tangent rule a
 //! corner that opens a gap continues an arc's end along its tangent line (a flat
 //! piece with no edge on the profile); a line's wall continues as itself.
 //!
@@ -52,14 +55,17 @@ use crate::curve::composite_curve::{CompositeCurve, OffsetDirection};
 use crate::curve::curve::p2::{CIRCLE_TYPE, LINE_TYPE};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{Result, SolidError};
+use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
+use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::line_line_closest_point;
 use crate::kernel::Kernel;
-use crate::math::{max2, min2, Point2, Point3, Vec3, EFF_ZERO, EFF_ZERO_SQRT, PI};
+use crate::math::{max2, min2, rad_to_deg, Point2, Point3, Vec3, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::p1::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p1::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::surface::cone::Cone;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p7::FaceCurvesInput;
 use crate::topology::BrepId;
@@ -397,8 +403,9 @@ fn quartic(a: [f64; 3], b: [f64; 3]) -> [f64; 5] {
 
 /// The seam's pcurve on wall `w`, whose surface parameters are
 /// `(u0 + f (u1 - u0), v0 + (t - t0) * v_scale)` for the wall's fraction `f` and curve
-/// parameter `t` (`sm_DraftSeamPcurve`). `SM_ERR` when the seam leaves one span of an
-/// arc wall or a weight is not positive.
+/// parameter `t` (`sm_DraftSeamPcurve`). On an arc's wall the seam is cut where it
+/// crosses from one span to the next, each piece the rational quartic of its span.
+/// `SM_ERR` when a piece leaves its span or a weight is not positive.
 #[allow(clippy::too_many_arguments)] // the fork's arguments, and the WR-571 mode
 fn seam_pcurve(
     w: &Wall,
@@ -443,78 +450,177 @@ fn seam_pcurve(
             Some(&weights),
         );
     }
-    // a cone: the span holding the seam (its angles at both ends and halfway lie in it)
-    let (a0, am, a1) = if apex {
-        // WR-571: each point at its own height
-        let half = seam_point(seam, 0.5);
-        let a0 = angle(w, seam.p - seam.f0 * h, 0.5 * (w.lo + w.hi));
-        let am = angle(
-            w,
-            half - (seam.f0 + (half - seam.p).dot(n) / height) * h,
-            a0,
-        );
-        let a1 = angle(w, seam.x - seam.f1 * h, a0);
-        (a0, am, a1)
-    } else {
-        let a0 = angle(w, seam.p, 0.5 * (w.lo + w.hi));
-        let am = angle(w, seam_point(seam, 0.5) - 0.5 * h, a0);
-        let a1 = angle(w, seam.x - h, a0);
-        (a0, am, a1)
-    };
+    // a cone: in each span of the wall's surface the seam crosses, its piece's pcurve is a
+    // rational quartic (the span's parameter is a Moebius map of tan of the half angle, a
+    // ratio of quadratics along the conic); the seam is cut where its angle crosses a
+    // span's end (a quadratic's root) (the fork's tangency-labs/smlib@3ae7bfa)
     let nb = w.breaks.len();
-    let mut j = 0;
-    let lo = min2(a0, min2(am, a1));
-    let hi = max2(a0, max2(am, a1));
-    while j + 2 < nb && lo >= at(&w.breaks, j + 1)? {
-        j += 1;
-    }
-    let s0 = at(&w.breaks, j)?;
-    let s1 = at(&w.breaks, j + 1)?;
-    if lo < s0 - EFF_ZERO_SQRT || hi > s1 + EFF_ZERO_SQRT {
+    if nb < 2 {
         return Err(SolidError::sm_err(OP));
     }
-    let mid = 0.5 * (s0 + s1);
-    let tan_q = (0.25 * (s1 - s0)).tan();
-    let xm = mid.cos() * w.x + mid.sin() * w.y;
-    let ym = w.axis.cross(xm);
-    // tau = (dy + tanq (rho + dx)) / (2 tanq (rho + dx)), each term affine in space
-    let mut num = [0.0; 3];
-    let mut den = [0.0; 3];
-    let mut su = [0.0; 3];
-    let mut wt = [0.0; 3];
-    for (k, ((c, f), wk)) in cp.iter().zip(sf).zip(sw).enumerate() {
-        let r = *c - f * h - w.center;
-        let rho = w.radius - f * w.shrink;
-        let dx = r.dot(xm);
-        let dy = r.dot(ym);
-        if let (Some(nk), Some(dk), Some(uk), Some(tk)) =
-            (num.get_mut(k), den.get_mut(k), su.get_mut(k), wt.get_mut(k))
-        {
-            *nk = wk * (dy + tan_q * (rho + dx));
-            *dk = wk * 2.0 * tan_q * (rho + dx);
-            *uk = wk * (u0 + f * (u1 - u0));
-            *tk = wk;
+    // the seam's homogeneous control points and their height fractions
+    let swh = sw;
+    let sfh = sf;
+    let sph = [cp[0] * sw[0], cp[1] * sw[1], cp[2] * sw[2]];
+    // the seam's parameters where it crosses a span's end: c(s) . n_b = 0 for the end's
+    // half-plane normal n_b, c(s) the seam's homogeneous point less its height, less the
+    // centre
+    let mut cuts = vec![0.0];
+    {
+        let mut roots = Vec::new();
+        for b in 1..nb.saturating_sub(1) {
+            let db_ang = at(&w.breaks, b)?;
+            let nrm = -db_ang.sin() * w.x + db_ang.cos() * w.y;
+            let dir = db_ang.cos() * w.x + db_ang.sin() * w.y;
+            let mut c = [0.0; 3];
+            let mut d = [0.0; 3];
+            for ((ck, dk), ((p, f), wk)) in c
+                .iter_mut()
+                .zip(d.iter_mut())
+                .zip(cp.iter().zip(sf).zip(sw))
+            {
+                let r = *p - f * h - w.center;
+                *ck = wk * r.dot(nrm);
+                *dk = wk * r.dot(dir);
+            }
+            // c0 (1-s)^2 + 2 c1 s (1-s) + c2 s^2 = a s^2 + 2 b s + c0
+            let qa = c[0] - 2.0 * c[1] + c[2];
+            let qb = c[1] - c[0];
+            let qc = c[0];
+            let mut r = Vec::with_capacity(2);
+            if qa.abs() <= EFF_ZERO * (c[0].abs() + c[1].abs() + c[2].abs()) {
+                if qb != 0.0 {
+                    r.push(-qc / (2.0 * qb));
+                }
+            } else {
+                let disc = qb * qb - qa * qc;
+                if disc >= 0.0 {
+                    let q = -(qb + if qb >= 0.0 { disc.sqrt() } else { -disc.sqrt() });
+                    if q != 0.0 {
+                        r.push(qc / q);
+                    }
+                    r.push(q / qa);
+                }
+            }
+            for t in r {
+                if !(t > EFF_ZERO && t < 1.0 - EFF_ZERO) {
+                    continue;
+                }
+                // on the end's own half-plane, not its opposite
+                let dd = (1.0 - t) * (1.0 - t) * d[0] + 2.0 * t * (1.0 - t) * d[1] + t * t * d[2];
+                if dd > 0.0 {
+                    roots.push(t);
+                }
+            }
         }
+        roots.sort_by(f64::total_cmp);
+        cuts.extend(roots);
     }
-    let d4 = quartic(wt, den);
-    let u4 = quartic(su, den);
-    let t4 = quartic(num, wt);
-    for ((dk, uk), tk) in d4.iter().zip(u4).zip(t4) {
-        if !(*dk > 0.0) {
+    cuts.push(1.0);
+    // the homogeneous seam point at blossom (x, y): B(x, x) is the point at x
+    let blossom = |x: f64, y: f64| -> (Vec3, f64, f64) {
+        let c0 = (1.0 - x) * (1.0 - y);
+        let c1 = (1.0 - x) * y + x * (1.0 - y);
+        let c2 = x * y;
+        (
+            c0 * sph[0] + c1 * sph[1] + c2 * sph[2],
+            c0 * swh[0] + c1 * swh[1] + c2 * swh[2],
+            c0 * swh[0] * sfh[0] + c1 * swh[1] * sfh[1] + c2 * swh[2] * sfh[2],
+        )
+    };
+    // the homogeneous seam point at s (`fnAt`)
+    let point_at = |t: f64| -> (Vec3, f64, f64) {
+        let b0 = (1.0 - t) * (1.0 - t);
+        let b1 = 2.0 * t * (1.0 - t);
+        let b2 = t * t;
+        (
+            b0 * sph[0] + b1 * sph[1] + b2 * sph[2],
+            b0 * swh[0] + b1 * swh[1] + b2 * swh[2],
+            b0 * swh[0] * sfh[0] + b1 * swh[1] * sfh[1] + b2 * swh[2] * sfh[2],
+        )
+    };
+    let mut prev_w = 0.0;
+    for (piece, pair) in cuts.windows(2).enumerate() {
+        let (Some(&c0), Some(&c1)) = (pair.first(), pair.get(1)) else {
             return Err(SolidError::sm_err(OP));
+        };
+        // the piece as a rational quadratic: its ends and the crossing of their tangents,
+        // by blossoming the homogeneous curve: B(t0, t0), B(t0, t1), B(t1, t1)
+        let q = [blossom(c0, c0), blossom(c0, c1), blossom(c1, c1)];
+        // the span holding the piece: its middle's angle
+        let (mid_p, mid_w, mid_f) = point_at(0.5 * (c0 + c1));
+        let mid_q = mid_p / mid_w - (mid_f / mid_w) * h;
+        let am = angle(w, mid_q, 0.5 * (w.lo + w.hi));
+        let mut j = 0;
+        while j + 2 < nb && am > at(&w.breaks, j + 1)? {
+            j += 1;
         }
-        let tau = tk / dk;
-        let t = s0 + (s1 - s0) * tau;
-        points.push(Point3::new(uk / dk, v0 + (t - t0) * v_scale, 0.0));
-        weights.push(*dk);
+        let s0 = at(&w.breaks, j)?;
+        let s1 = at(&w.breaks, j + 1)?;
+        let mid = 0.5 * (s0 + s1);
+        let tan_q = (0.25 * (s1 - s0)).tan();
+        let xm = mid.cos() * w.x + mid.sin() * w.y;
+        let ym = w.axis.cross(xm);
+        // tau = (dy + tanq (rho + dx)) / (2 tanq (rho + dx)), each term affine in space
+        let mut num = [0.0; 3];
+        let mut den = [0.0; 3];
+        let mut su = [0.0; 3];
+        let mut wt = [0.0; 3];
+        for (k, (qp, qw, qf)) in q.iter().copied().enumerate() {
+            let f = qf / qw;
+            let c = qp / qw;
+            let r = c - f * h - w.center;
+            let rho = w.radius - f * w.shrink;
+            let dx = r.dot(xm);
+            let dy = r.dot(ym);
+            if let (Some(nk), Some(dk), Some(uk), Some(tk)) =
+                (num.get_mut(k), den.get_mut(k), su.get_mut(k), wt.get_mut(k))
+            {
+                *nk = qw * (dy + tan_q * (rho + dx));
+                *dk = qw * 2.0 * tan_q * (rho + dx);
+                *uk = qw * (u0 + f * (u1 - u0));
+                *tk = qw;
+            }
+        }
+        let d4 = quartic(wt, den);
+        let u4 = quartic(su, den);
+        let t4 = quartic(num, wt);
+        // the pieces join with one weight: scale this piece's to the last one's end
+        let scale = if piece == 0 || !(d4[0] > 0.0) {
+            1.0
+        } else {
+            prev_w / d4[0]
+        };
+        for (k, ((dk, uk), tk)) in d4.iter().zip(u4).zip(t4).enumerate() {
+            if !(*dk > 0.0) {
+                return Err(SolidError::sm_err(OP));
+            }
+            let tau = tk / dk;
+            if tau < -EFF_ZERO_SQRT || tau > 1.0 + EFF_ZERO_SQRT {
+                // the piece leaves its span
+                return Err(SolidError::sm_err(OP));
+            }
+            let t = s0 + (s1 - s0) * tau;
+            if piece > 0 && k == 0 {
+                // shared with the last piece's end
+                continue;
+            }
+            points.push(Point3::new(uk / dk, v0 + (t - t0) * v_scale, 0.0));
+            weights.push(*dk * scale);
+        }
+        prev_w = d4[4] * scale;
     }
+    let last = cuts.len().saturating_sub(1);
+    let mults: Vec<usize> = (0..cuts.len())
+        .map(|k| if k == 0 || k == last { 5 } else { 4 })
+        .collect();
     canonical(
         2,
         4,
         &points,
         BSplineCurveForm::Unspecified,
-        &[5, 5],
-        &knots,
+        &mults,
+        &cuts,
         Some(&weights),
     )
 }
@@ -543,6 +649,40 @@ fn seam_curve(seam: &Seam) -> Result<BSplineCurve> {
         &[0.0, 1.0],
         Some(&[1.0, seam.weight, 1.0]),
     )
+}
+
+/// An arc's wall as its exact cone, in the cone's own parametrization (`sm_DraftCone`,
+/// the fork's tangency-labs/smlib@3ae7bfa): about the arc's axis (its angles the
+/// wall's, from `x`), NURBS `u` along the height from the profile's curve (`f = 0`) to
+/// the far end's (`f = 1`), NURBS `v` round the angles `lo..hi` in the cone's equal
+/// spans of at most a quarter turn. Its normal is the ruled wall's. `None` for a line's
+/// wall, or when the height is not along the axis (an oblique wall is no cone of
+/// revolution about it).
+fn draft_cone(k: &Kernel, w: &Wall, h: Vec3) -> Result<Option<Cone>> {
+    let along = h.dot(w.axis);
+    if !w.arc || (h - along * w.axis).length() > EFF_ZERO * (1.0 + along.abs()) {
+        return Ok(None);
+    }
+    let r0 = w.radius;
+    let r1 = w.radius - w.shrink;
+    // the profile's end (f = 0) at the base when the height runs along the axis, else at
+    // the top with the linear direction run top to bottom (the cone's `inside_out`)
+    let down = along < 0.0;
+    let origin = Axis2Placement::new(if down { w.center + h } else { w.center }, w.x, w.y);
+    let mut cone = Cone::create_canonical(
+        k,
+        &origin,
+        if down { r1 } else { r0 },
+        if down { r0 } else { r1 },
+        along.abs(),
+        true,
+        down,
+    )?;
+    cone.adjust_step_uv_domain(
+        k,
+        &Extent2d::from_bounds(rad_to_deg(w.lo), 0.0, rad_to_deg(w.hi), along.abs()),
+    )?;
+    Ok(Some(cone))
 }
 
 /// The tangent at `t` (`Evaluate(t, 1, TRUE, v)`), `None` when it fails.
@@ -1415,7 +1555,28 @@ fn walls_closing_at_apexes(
         w.lo = lo0;
         w.hi = hi1;
         w.breaks.clear();
-        if w.arc {
+        // an arc's wall on its cone: the cone's own equal spans (its seams' pcurves are cut
+        // where they cross from one to the next) (the fork's tangency-labs/smlib@3ae7bfa)
+        let wall_cone = if w.arc {
+            draft_cone(a.kernel(kernel_brep)?, w, h)?
+        } else {
+            None
+        };
+        if let Some(cone) = wall_cone {
+            let (v_knots, _) = Surface::from(cone).knots_with_nurb(
+                a.kernel(kernel_brep)?,
+                SurfParamType::V,
+                None,
+            )?;
+            if v_knots.len() < 2 {
+                return Err(SolidError::sm_err(OP));
+            }
+            let spans = v_knots.len() - 1;
+            for k in 0..=spans {
+                w.breaks
+                    .push(w.lo + (w.hi - w.lo) * k as f64 / spans as f64);
+            }
+        } else if w.arc {
             let quarter = 0.5 * PI;
             w.breaks.push(lo0);
             if hi0 >= lo1 {
@@ -1455,8 +1616,18 @@ fn walls_closing_at_apexes(
             let k = a.kernel(kernel_brep)?;
             let low = wall_curve(w, 0.0, h)?;
             let high = wall_curve(w, 1.0, h)?;
-            let surface = BSplineSurface::create_ruled_surface(&low, &high, SurfParamType::U)?;
-            let domain = surface.natural_uv_domain();
+            // an arc's wall is its cone (as an undrafted arc's is its cylinder), any other
+            // the surface ruled between its ends (the fork's tangency-labs/smlib@3ae7bfa)
+            let cone = if w.arc { draft_cone(k, w, h)? } else { None };
+            let (surface, domain) = if let Some(cone) = cone {
+                let surface = Surface::from(cone);
+                let domain = surface.natural_uv_domain_with_nurb(k)?;
+                (surface, domain)
+            } else {
+                let surface = BSplineSurface::create_ruled_surface(&low, &high, SurfParamType::U)?;
+                let domain = surface.natural_uv_domain();
+                (Surface::from(surface), domain)
+            };
             let u0 = domain.u_min();
             let u1 = domain.u_max();
             let v_scale = (domain.v_max() - domain.v_min()) / (w.hi - w.lo);
@@ -1539,7 +1710,7 @@ fn walls_closing_at_apexes(
                 for step in 0..=8 {
                     let t = ivl.evaluate(f64::from(step) / 8.0);
                     let uv = pc.evaluate_point(t)?;
-                    let on = surface.evaluate_point(Point2::new(uv.x, uv.y))?;
+                    let on = surface.evaluate_point(k, Point2::new(uv.x, uv.y))?;
                     let at_t = c.evaluate_point(t)?;
                     if on.distance(at_t) > tol {
                         return Ok(refuse(TaperCornerRefusal::NotExact, seam.p - seam.f0 * h));
@@ -1557,7 +1728,7 @@ fn walls_closing_at_apexes(
                 orientations,
                 loop_points: Vec::new(),
             };
-            (face_curves, Surface::from(surface), domain)
+            (face_curves, surface, domain)
         };
         // the loop runs clockwise in (u, v): opposite to the surface's normal
         let (curves, surface, domain) = face;
@@ -1758,7 +1929,28 @@ pub(super) fn curvature_keeping_walls(
         w.lo = lo0;
         w.hi = hi1;
         w.breaks.clear();
-        if w.arc {
+        // an arc's wall on its cone: the cone's own equal spans (its seams' pcurves are cut
+        // where they cross from one to the next) (the fork's tangency-labs/smlib@3ae7bfa)
+        let wall_cone = if w.arc {
+            draft_cone(a.kernel(kernel_brep)?, w, h)?
+        } else {
+            None
+        };
+        if let Some(cone) = wall_cone {
+            let (v_knots, _) = Surface::from(cone).knots_with_nurb(
+                a.kernel(kernel_brep)?,
+                SurfParamType::V,
+                None,
+            )?;
+            if v_knots.len() < 2 {
+                return Err(SolidError::sm_err(OP));
+            }
+            let spans = v_knots.len() - 1;
+            for k in 0..=spans {
+                w.breaks
+                    .push(w.lo + (w.hi - w.lo) * k as f64 / spans as f64);
+            }
+        } else if w.arc {
             let quarter = 0.5 * PI;
             w.breaks.push(lo0);
             if hi0 >= lo1 {
@@ -1794,8 +1986,18 @@ pub(super) fn curvature_keeping_walls(
             let k = a.kernel(kernel_brep)?;
             let low = wall_curve(w, 0.0, h)?;
             let high = wall_curve(w, 1.0, h)?;
-            let surface = BSplineSurface::create_ruled_surface(&low, &high, SurfParamType::U)?;
-            let domain = surface.natural_uv_domain();
+            // an arc's wall is its cone (as an undrafted arc's is its cylinder), any other
+            // the surface ruled between its ends (the fork's tangency-labs/smlib@3ae7bfa)
+            let cone = if w.arc { draft_cone(k, w, h)? } else { None };
+            let (surface, domain) = if let Some(cone) = cone {
+                let surface = Surface::from(cone);
+                let domain = surface.natural_uv_domain_with_nurb(k)?;
+                (surface, domain)
+            } else {
+                let surface = BSplineSurface::create_ruled_surface(&low, &high, SurfParamType::U)?;
+                let domain = surface.natural_uv_domain();
+                (Surface::from(surface), domain)
+            };
             let u0 = domain.u_min();
             let u1 = domain.u_max();
             let v_scale = (domain.v_max() - domain.v_min()) / (w.hi - w.lo);
@@ -1872,7 +2074,7 @@ pub(super) fn curvature_keeping_walls(
                 for step in 0..=8 {
                     let t = ivl.evaluate(f64::from(step) / 8.0);
                     let uv = pc.evaluate_point(t)?;
-                    let on = surface.evaluate_point(Point2::new(uv.x, uv.y))?;
+                    let on = surface.evaluate_point(k, Point2::new(uv.x, uv.y))?;
                     let at_t = c.evaluate_point(t)?;
                     if on.distance(at_t) > tol {
                         let corner = if e == seam0_index { s0.p } else { s1.p };
@@ -1889,7 +2091,7 @@ pub(super) fn curvature_keeping_walls(
                 orientations,
                 loop_points: Vec::new(),
             };
-            (face_curves, Surface::from(surface), domain)
+            (face_curves, surface, domain)
         };
         // the loop runs clockwise in (u, v): opposite to the surface's normal
         let (curves, surface, domain) = face;

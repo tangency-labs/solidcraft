@@ -453,6 +453,14 @@ const PASSES: Mark = Mark {
 const CHAMFERS_AT_9BEBF34: &str = "status 1001: SmFilletNx1Corner, Corner Edge Computation Failure (the chamfers' tangent ends, as front_chamfer_d2 and concave_chamfer_d2)";
 const CHAMFERS_AT_CD47EFD: &str = "status 1001: SmFillet3x2MixedConvexityCorner, Vertex Computation Failure, where the two chamfers meet at the tangent seam (the corner, not the tangent ends: each chamfer alone passes)";
 const DRAFTED_ROUNDS: &str = "status 1001 before any geometry: the corner where the front top edge runs tangent into the concave arc, on the cone, is of no kind SMLib's blend corners take";
+/// The drafted peg here is the tangent rule's (`taper_tangent_corner_planes`, WR-521), whose
+/// arc walls are their exact cones since the fork's 3ae7bfa (WR-521's addendum of
+/// 2026-11-02), so the bar's and the disc's cone walls are one face. Before, the bar's arc
+/// wall was a ruled B-spline taken for a cone over its own domain, and SMLib's check refused
+/// the front round (Tests #8, #5, #11, #13: a kink, a zero and a slow speed at interior
+/// knots, and a 2D curve with a radius of curvature of 5.5e-5); the rounds together failed as
+/// the fork's.
+const DRAFTED_HERE: &str = "on the tangent rule's cone walls the round builds within the box and checks clean (front round r2 removes 25.861, the rounds together 12.05 at 9bebf34's profile and 11.97 at cd47efd's)";
 const ROUNDS_R2: &str = "the corner patch where the rounds meet stands 0.0374 out of the front face (box y min -0.0374099)";
 const ROUNDS_R5: &str = "the corner patch where the rounds meet stands 0.128 out of the front face (box y min -0.1278205)";
 const ROUNDS_R2_HERE: &str = "the rounds together build within the box and check clean (with fillet_blend_corner, as the blend corner's Mixed corner, built in solidcore from smlib#82)";
@@ -498,7 +506,7 @@ const TANGENT_END_CASES: [TangentEndCase; 13] = [
         run: drafted_front_round_r2,
         at_9bebf34: Mark {
             fails_today: Some("SMLib's check refuses the round: Test #13 (a 2D curve with a radius of curvature of 8.6e-6) and Tests #7 and #8 (kinks at interior knots) on its end on the cone"),
-            here: Some(Here::FailsOtherwise("on the LinearExtension draft, SMLib's check refuses the round with Tests #8, #5, #11 and #13 (a kink, a zero and a slow speed at interior knots, and a 2D curve with a radius of curvature of 5.5e-5)")),
+            here: Some(Here::Passes(DRAFTED_HERE)),
         },
         at_cd47efd: PASSES,
     },
@@ -507,11 +515,11 @@ const TANGENT_END_CASES: [TangentEndCase; 13] = [
         run: drafted_rounds_together_r2,
         at_9bebf34: Mark {
             fails_today: Some(DRAFTED_ROUNDS),
-            here: None,
+            here: Some(Here::Passes(DRAFTED_HERE)),
         },
         at_cd47efd: Mark {
             fails_today: Some(DRAFTED_ROUNDS),
-            here: None,
+            here: Some(Here::Passes(DRAFTED_HERE)),
         },
     },
     TangentEndCase {
