@@ -72,8 +72,12 @@
 //! Deviations: out-params are return values; a refusal's status and reason are one
 //! [`Refusal`] (the fork's `Fill` is cleared on refusal, so no fill is returned then);
 //! `SER`/`NER` of a call is that call's error, with no reason. The context argument of
-//! `EaseSurface` and `FillHole` is dropped (they use it only to copy and build surfaces). A
-//! round's surface is a [`BSplineSurface`] (the fork takes one and casts its copy back). The
+//! `EaseSurface` is dropped (it uses it only to copy and build surfaces); `FillHole`,
+//! `FillHoleProbe` and `CertifiedScale` take the kernel (smlib#104 evaluates the rounds
+//! through it). A round's surface is a [`Surface`] that has a B-spline part (the fork's
+//! `const SmBSplineSurface *`, of which an exact round's cylinder, cone or torus and a
+//! procedural blend are kinds): its evaluations are its own kind's, as the fork's virtual
+//! calls are, and its jets come from a copy of its B-spline part. The
 //! orientation test of `sm_EaseSurface` evaluates the B-spline (#1376). Where the fork's
 //! unsigned arithmetic would wrap into an out-of-bounds read (an index or row below what it
 //! subtracts) the port returns `SM_ERR`, and a least-squares system with fewer rows than
@@ -96,6 +100,13 @@ use crate::nurbs::b_spline_surface::{
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::{Surface, SurfaceKind};
+
+mod certify;
+mod graph;
+mod qp;
+mod scale;
+
+pub use scale::{certified_scale, CertifiedScale};
 
 const OP: &str = "blend::blend_setback";
 
@@ -1090,11 +1101,17 @@ struct RoundJets {
     h: Vec<Vec<Hom>>,
     /// Its across degree.
     q: usize,
+    /// `rdDtDs` (the fork's d1de555): `dt/ds` there, s the mean arc length of its rails.
+    dt_ds: f64,
 }
 
 /// `sm_SbRoundJets`: a round's homogeneous derivatives along its rails at its end section,
 /// to order `k`, and its across degree.
-fn round_jets(round: &Round<'_>, k: usize) -> core::result::Result<RoundJets, Refusal> {
+fn round_jets(
+    kernel: &Kernel,
+    round: &Round<'_>,
+    k: usize,
+) -> core::result::Result<RoundJets, Refusal> {
     let along = round.along;
     if along != SurfParamType::U && along != SurfParamType::V {
         return Err(Refusal::invalid(
@@ -1106,7 +1123,11 @@ fn round_jets(round: &Round<'_>, k: usize) -> core::result::Result<RoundJets, Re
     } else {
         SurfParamType::U
     };
-    let mut s = round.surface.clone();
+    // Copy, then SM_CAST_PTR(SmBSplineSurface, pCopy) (NER): an analytic round's NURB, a
+    // procedural blend's net
+    let mut s = crate::topology::brep::p3::with_nurb(kernel, round.surface)?
+        .ok_or_else(|| Refusal::from(SolidError::null_pointer(OP)))?
+        .into_owned();
     let p = s.degree(along);
     let dom = s.natural_uv_domain();
     let along_ivl = interval_in(&dom, along);
@@ -1237,7 +1258,106 @@ fn round_jets(round: &Round<'_>, k: usize) -> core::result::Result<RoundJets, Re
             *el_mut(el_mut(&mut h, d)?, j)? = hd;
         }
     }
-    Ok(RoundJets { h, q: lq })
+
+    // the weights' share: G = H / W, W the rails' mean weight (the fork's d1de555)
+    if k > 2 {
+        return Err(sm_err().into()); // the jets are taken to second order
+    }
+    let mut sw = [0.0; 3];
+    for (d, swd) in sw.iter_mut().enumerate().take(k + 1) {
+        let hd = el_ref(&h, d)?;
+        *swd = 0.5 * (el_ref(hd, 0)?[3] + el_ref(hd, lq)?[3]);
+    }
+    if !(sw[0] > 0.0) {
+        return Err(Refusal::invalid(
+            "SmBlendSetback: a round's weights must be positive",
+        ));
+    }
+    let rho0 = 1.0 / sw[0];
+    let rho1 = -sw[1] / (sw[0] * sw[0]);
+    let rho2 = (2.0 * sw[1] * sw[1] - sw[0] * sw[2]) / (sw[0] * sw[0] * sw[0]);
+    let mut g = h.clone();
+    for j in 0..=lq {
+        let h0j = el(el_ref(&h, 0)?, j)?;
+        let mut g0 = HOM_ZERO;
+        let mut g1 = HOM_ZERO;
+        let mut g2 = HOM_ZERO;
+        g0 = axpy(&g0, rho0, &h0j);
+        if k >= 1 {
+            g1 = axpy(&g1, rho1, &h0j);
+            g1 = axpy(&g1, rho0, el_ref(el_ref(&h, 1)?, j)?);
+        }
+        if k >= 2 {
+            g2 = axpy(&g2, rho2, &h0j);
+            g2 = axpy(&g2, 2.0 * rho1, el_ref(el_ref(&h, 1)?, j)?);
+            g2 = axpy(&g2, rho0, el_ref(el_ref(&h, 2)?, j)?);
+        }
+        *el_mut(el_mut(&mut g, 0)?, j)? = g0;
+        if k >= 1 {
+            *el_mut(el_mut(&mut g, 1)?, j)? = g1;
+        }
+        if k >= 2 {
+            *el_mut(el_mut(&mut g, 2)?, j)? = g2;
+        }
+    }
+    // the rails' points and their first two derivatives by t, from the homogeneous ones
+    let mut speed = 0.0;
+    let mut accel = 0.0;
+    for e in 0..2 {
+        let c = if e == 0 { 0 } else { lq };
+        let a0 = el(el_ref(&g, 0)?, c)?;
+        let w0 = a0[3];
+        let w1 = if k >= 1 {
+            el(el_ref(&g, 1)?, c)?[3]
+        } else {
+            0.0
+        };
+        let w2 = if k >= 2 {
+            el(el_ref(&g, 2)?, c)?[3]
+        } else {
+            0.0
+        };
+        let p0 = Vec3::new(a0[0] / w0, a0[1] / w0, a0[2] / w0);
+        let mut p1 = Vec3::ZERO;
+        let mut p2 = Vec3::ZERO;
+        if k >= 1 {
+            let a1 = el(el_ref(&g, 1)?, c)?;
+            p1 = (Vec3::new(a1[0], a1[1], a1[2]) - p0 * w1) / w0;
+        }
+        if k >= 2 {
+            let a2 = el(el_ref(&g, 2)?, c)?;
+            p2 = (Vec3::new(a2[0], a2[1], a2[2]) - p1 * (2.0 * w1) - p0 * w2) / w0;
+        }
+        let len = p1.length();
+        if !(len > 0.0) {
+            return Err(Refusal::invalid(
+                "SmBlendSetback: a round's rails do not move along it at its end",
+            ));
+        }
+        speed += 0.5 * len;
+        accel += 0.5 * p1.dot(p2) / len;
+    }
+    // the parameter along: s, ds/dt = speed; dt/ds = 1 / speed, d2t/ds2 = -accel / speed^3
+    let ts = 1.0 / speed;
+    let tss = -accel / (speed * speed * speed);
+    for j in 0..=lq {
+        let g0 = el(el_ref(&g, 0)?, j)?;
+        *el_mut(el_mut(&mut h, 0)?, j)? = g0;
+        if k >= 1 {
+            let g1 = el(el_ref(&g, 1)?, j)?;
+            *el_mut(el_mut(&mut h, 1)?, j)? = axpy(&HOM_ZERO, ts, &g1);
+        }
+        if k >= 2 {
+            let g1 = el(el_ref(&g, 1)?, j)?;
+            let g2 = el(el_ref(&g, 2)?, j)?;
+            *el_mut(el_mut(&mut h, 2)?, j)? = axpy(&axpy(&HOM_ZERO, ts * ts, &g2), tss, &g1);
+        }
+    }
+    Ok(RoundJets {
+        h,
+        q: lq,
+        dt_ds: ts,
+    })
 }
 
 /// `sm_SbMonomials`: the monomials `x^a y^b`, `a + b <= d`, in a fixed order.
@@ -1502,8 +1622,10 @@ fn least_squares(
 /// fill).
 #[derive(Debug, Clone, Copy)]
 pub struct Round<'a> {
-    /// Its surface, one Bezier span across its rails, any along them (`m_pSurface`).
-    pub surface: &'a BSplineSurface,
+    /// Its surface, one Bezier span across its rails, any along them (`m_pSurface`, a
+    /// `const SmBSplineSurface *`): a B-spline, or an analytic surface or procedural blend
+    /// upstream derives from it, which evaluates as its own kind.
+    pub surface: &'a Surface,
     /// Its rails' direction (`m_eAlong`).
     pub along: SurfParamType,
     /// The rail parameter of its end section (`m_dEnd`).
@@ -1561,11 +1683,77 @@ pub struct Fill {
 /// conditions on the interior map no degree up to 9 can meet, or a fill that folds. A failing
 /// call's error, without a reason.
 pub fn fill_hole(
+    kernel: &Kernel,
     faces: &[Face],
     rounds: &[Round<'_>],
     order: usize,
     tol: f64,
 ) -> core::result::Result<Fill, Refusal> {
+    fill_hole_with(
+        kernel,
+        faces,
+        rounds,
+        order,
+        tol,
+        None,
+        &mut FillStats::default(),
+    )
+}
+
+/// `SmBlendSetback::Probe` (the fork's 250cb3f, f1d81f4): [`certified_scale`]'s probe of a
+/// G1 fill at degree 9: whether its conditions can be met (`feasible`), and the least
+/// uniform violation of its normalized sector conditions over the heights (`margin_value`:
+/// `<= 0` where met; `margin` asks it), one quadratic programme each; or (`fill`) the fill as
+/// [`fill_hole`]'s, its degrees tried from the least up only.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Probe {
+    /// `m_bFill`: the fill itself, from the least degree up (no degree-9 proof first).
+    pub fill: bool,
+    /// `m_bMargin`.
+    pub margin: bool,
+    /// `m_bFeasible`.
+    pub feasible: bool,
+    /// `m_dMargin`.
+    pub margin_value: f64,
+}
+
+/// The fork's `Fill::m_lSolves` and `m_bUncertified` (f1d81f4), kept on refusal too.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FillStats {
+    /// `m_lSolves`: the quadratic programmes a G1 fill solved (its count, not its time).
+    pub solves: usize,
+    /// `m_bUncertified`: the G1 fill was refused as no fill up to degree 9 is certified
+    /// convex.
+    pub uncertified: bool,
+}
+
+/// `SmBlendSetback::FillHoleProbe`: the G1 fill (order 1) probed as `probe` asks, or built
+/// (`probe.fill`). A probe that asks no fill returns an empty one.
+///
+/// # Errors
+/// As [`fill_hole`]'s.
+pub fn fill_hole_probe(
+    kernel: &Kernel,
+    faces: &[Face],
+    rounds: &[Round<'_>],
+    tol: f64,
+    probe: &mut Probe,
+    stats: &mut FillStats,
+) -> core::result::Result<Fill, Refusal> {
+    fill_hole_with(kernel, faces, rounds, 1, tol, Some(probe), stats)
+}
+
+/// `sm_SbFillHole`: [`fill_hole`] with the probe and the statistics.
+fn fill_hole_with(
+    kernel: &Kernel,
+    faces: &[Face],
+    rounds: &[Round<'_>],
+    order: usize,
+    tol: f64,
+    probe: Option<&mut Probe>,
+    stats: &mut FillStats,
+) -> core::result::Result<Fill, Refusal> {
+    *stats = FillStats::default();
     if order != 1 && order != 2 {
         return Err(Refusal::invalid(
             "SmBlendSetback: a setback fill is of order 1 (G1) or 2 (G2)",
@@ -1583,9 +1771,15 @@ pub fn fill_hole(
     // each round's jets at its end, and the faces its across ends lie on
     let mut jets: Vec<Vec<Vec<Hom>>> = Vec::with_capacity(n);
     let mut qs: Vec<usize> = Vec::with_capacity(n);
+    let mut dt_ds: Vec<f64> = Vec::with_capacity(n);
     let mut face_at = [vec![n; n], vec![n; n]];
     for (r, round) in rounds.iter().enumerate() {
-        let RoundJets { h, q } = round_jets(round, k)?;
+        let RoundJets {
+            h,
+            q,
+            dt_ds: r_dt_ds,
+        } = round_jets(kernel, round, k)?;
+        dt_ds.push(r_dt_ds);
         for (e, at_e) in face_at.iter_mut().enumerate() {
             let hp = el_ref(el_ref(&h, 0)?, if e == 0 { 0 } else { q })?;
             let p = euclid(hp);
@@ -1662,6 +1856,22 @@ pub fn fill_hole(
             *slot = true;
         }
     }
+    if k == 1 {
+        return graph::graph_g1(
+            &graph::GraphInput {
+                faces,
+                rounds,
+                jets: &jets,
+                qs: &qs,
+                round: &cycle_round,
+                face: &cycle_face,
+                rev: &cycle_rev,
+                tol,
+            },
+            stats,
+            probe,
+        );
+    }
     let face_of = |m: usize| -> Result<&Face> { el_ref(faces, el(&cycle_face, m % n)?) };
 
     // the domain
@@ -1702,7 +1912,7 @@ pub fn fill_hole(
         };
         for &r in &cycle_round {
             let round = el_ref(rounds, r)?;
-            let dom = round.surface.natural_uv_domain();
+            let dom = round.surface.natural_uv_domain_with_nurb(kernel)?;
             let across = if round.along == SurfParamType::U {
                 dom.v_interval()
             } else {
@@ -1713,7 +1923,7 @@ pub fn fill_hole(
             } else {
                 Point2::new(across.evaluate(0.5), round.end)
             };
-            let d = round.surface.evaluate(uv, 1, 1, flags)?;
+            let d = round.surface.evaluate(kernel, uv, 1, 1, flags)?;
             let row0 = el_ref(&d, 0)?;
             let point = el(row0, 0)?;
             let speed = if round.along == SurfParamType::U {
@@ -1722,7 +1932,8 @@ pub fn fill_hole(
                 el(row0, 1)?
             };
             mids.push(point);
-            speeds.push(speed.length());
+            // by s (sm_SbRoundJets; the fork's d1de555)
+            speeds.push(speed.length() * el(&dt_ds, r)?);
             centre += point * (1.0 / nf);
         }
         for m in 0..n {

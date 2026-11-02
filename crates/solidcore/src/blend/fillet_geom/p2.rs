@@ -2623,7 +2623,6 @@ impl FilletBrep {
             .fillet_corner()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
         let cp_vertex = corners.corner(corner)?.filleted_vertex();
-        let set_back_dist = corners.corner(corner)?.set_back_dist();
 
         let geoms = self.vertex_fillet_geoms(v)?;
         if geoms.len() != 1 {
@@ -2634,6 +2633,9 @@ impl FilletBrep {
         let fs = solvers.solver(si)?;
         let eu = solver_edgeuse(fs, 0, OP)?;
         let e = eu1::edge(target, eu)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        // each edge's own (the fork's 61547af, GetSetBackDistAlong; the corner's one setback
+        // elsewhere)
+        let set_back_dist = corners.corner(corner)?.set_back_dist_along(target, e)?;
         let (plane_orig, plane_normal) =
             set_back_frame(k, target, e, cp_vertex, set_back_dist, OP)?;
 

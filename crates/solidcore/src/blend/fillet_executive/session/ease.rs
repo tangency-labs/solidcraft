@@ -48,7 +48,7 @@ use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::Surface;
 use crate::topology::edgeuse::p1 as eu;
 use crate::topology::face::p2 as face2;
-use crate::topology::{edge, VertexId};
+use crate::topology::{edge, EdgeId, VertexId};
 
 use super::FilletObject;
 
@@ -133,8 +133,17 @@ impl SessionObjects<'_> {
             if !(corner.set_back_dist() > 0.0) || !(corner.ease_dist() > 0.0) {
                 continue;
             }
-            let dist_at = corner.set_back_dist() + corner.ease_dist();
             let cp_vertex: VertexId = corner.filleted_vertex().ok_or_else(null)?;
+            // the corner's setback along each of its edges (GetSetBackDistAlong), read while
+            // the surfaces change
+            let ease_dist = corner.ease_dist();
+            let mut along_edge: Vec<(EdgeId, f64)> = Vec::new();
+            for &eu in corner.all_eus.as_deref().unwrap_or_default() {
+                if let Some(e) = eu::edge(self.target, eu)? {
+                    along_edge.push((e, corner.set_back_dist_along(self.target, e)?));
+                }
+            }
+            let set_back_dist = corner.set_back_dist();
             let mut fvs = Vec::new();
             corner.fillet_vertices(&mut fvs);
             for fv in fvs {
@@ -198,6 +207,12 @@ impl SessionObjects<'_> {
                 // setback's)
                 let edgeuse = base.edgeuse(0)?.ok_or_else(null)?;
                 let e = eu::edge(self.target, edgeuse)?.ok_or_else(null)?;
+                // each edge's own setback (the fork's 61547af, GetSetBackDistAlong)
+                let dist_at = along_edge
+                    .iter()
+                    .find(|(edge, _)| *edge == e)
+                    .map_or(set_back_dist, |&(_, d)| d)
+                    + ease_dist;
                 let edge_curve = edge::curve(self.target, e)?.ok_or_else(null)?;
                 let edge_ivl = edge::interval(self.target, e)?;
                 let from_start = edge::start_vertex(self.target, e)? == Some(cp_vertex);

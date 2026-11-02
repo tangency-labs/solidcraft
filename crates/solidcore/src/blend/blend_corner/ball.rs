@@ -138,7 +138,7 @@ fn min(a: f64, b: f64) -> f64 {
 }
 
 /// `GetFilletSolverOfEdgeuse(pEU)`, else of its mate.
-fn solver_of_edgeuse_or_mate(
+pub(crate) fn solver_of_edgeuse_or_mate(
     b: &Brep,
     eu: EdgeuseId,
     solvers: &dyn BallSolvers,

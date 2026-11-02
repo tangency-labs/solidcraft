@@ -684,6 +684,11 @@ pub struct FilletExecutive<O> {
     pub fit_edge: Option<O>,
     /// `m_lFitKind`: what [`Self::fit_radius`] sizes.
     pub fit_kind: FitKind,
+    /// `m_dFitSetBack` (the fork's, smlib#104 f1d81f4; `-1` from the constructor): with a
+    /// setback corner refused as too short for a convex fill ([`FilletErrorType::NoRoom`]),
+    /// the least setback that builds one: `> 0`, `0` when none does, `< 0` when not that
+    /// cause. Set only with `fixes.fillet_blend_corner` (`NoteFitSetBack`).
+    pub fit_setback: f64,
 }
 
 /// What a refusal's fit sizes (the fork's `SM_FIT_RADIUS`, `SM_FIT_SCALE`, `SM_FIT_CHORD`).
@@ -2720,7 +2725,18 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut index = 0;
         while let Some(corner) = self.corners.get(index).copied() {
             k.check_cancelled(OP)?;
+            let noted_before = self.error.code;
             if ignore(access.vertices_make_topology(k, corner, self))?.is_none() {
+                // The fork's (fdff996, 61547af; WR-697): a corner refused as one the blends
+                // cannot pass (SM_FILERR_NO_ROOM, noted by the corner), or one it does not
+                // build with its reason, keeps that reason
+                if k.fixes.fillet_blend_corner
+                    && (self.error.code == FilletErrorType::NoRoom as i32
+                        || (self.error.code == FilletErrorType::CornerUnsupported as i32
+                            && noted_before != FilletErrorType::CornerUnsupported as i32))
+                {
+                    return Err(failure());
+                }
                 return self.corner_vertex_failure(
                     access,
                     corner,
@@ -3180,7 +3196,13 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     "Fillet Corner Error: Vertex Computation Failure",
                 );
             }
+            let noted_before = self.error.code;
             if ignore(access.edges_calculate(k, corner, self))?.is_none() {
+                // The fork's (61547af; WR-697): a corner that noted why it refused (a
+                // setback corner's fill, SmBlendCorner) keeps that reason
+                if k.fixes.fillet_blend_corner && self.error.code != noted_before {
+                    return Err(failure());
+                }
                 return self.corner_vertex_failure(
                     access,
                     corner,

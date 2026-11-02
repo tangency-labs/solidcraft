@@ -429,7 +429,7 @@ fn is_fillet_side_face(target: &Brep, filleted: EdgeuseId, face: Option<FaceId>)
     Ok(face == eu1::face(target, radial(target, filleted)?)?)
 }
 
-fn new_corner_vertex(
+pub(crate) fn new_corner_vertex(
     k: &Kernel,
     pseudo: &mut FilletBrep,
     corner: FilletCornerId,

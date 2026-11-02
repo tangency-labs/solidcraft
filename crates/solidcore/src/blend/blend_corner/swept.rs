@@ -159,7 +159,7 @@ fn max(a: f64, b: f64) -> f64 {
 
 /// `%g` of a finite `v`: six significant digits, trailing zeros dropped, exponent form
 /// below `1e-4` and from `1e6`.
-fn fmt_g(v: f64) -> String {
+pub(crate) fn fmt_g(v: f64) -> String {
     if v == 0.0 || !v.is_finite() {
         return format!("{v}");
     }

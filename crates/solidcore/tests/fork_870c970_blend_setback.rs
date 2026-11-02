@@ -32,7 +32,7 @@
 )] // test helpers
 
 use solidcore::blend::blend_setback::{
-    containment, distances, ease_surface, fill_hole, EaseRamp, Edge, Face, Round,
+    certified_scale, containment, distances, ease_surface, fill_hole, EaseRamp, Edge, Face, Round,
 };
 use solidcore::blend::fillet_section::section::{GnFaces, GnSectionFsg};
 use solidcore::error::SolidError;
@@ -382,10 +382,21 @@ fn grade_seam(k: &Kernel, name: &str, a: &SeamSide<'_>, b: &SeamSide<'_>, size: 
 fn setback_box_corner(radii: [f64; 3], round_order: usize, ease: f64, order: usize) {
     let k = Kernel::default();
     let faces = box_corner_faces();
-    let setbacks = distances(&faces, &box_corner_edges(radii))
+    let mut setbacks = distances(&faces, &box_corner_edges(radii))
         .unwrap()
         .setbacks;
     assert_eq!(setbacks.len(), 3);
+    if order == 1 {
+        // a G1 fill is the graph fill (smlib#104), certified convex only past the least
+        // scale of the setbacks that certifies it (the fork's capi `box_corner_g1_setbacks`)
+        let scale = certified_scale(&k, &faces, &box_corner_edges(radii), &setbacks, None)
+            .unwrap()
+            .scale;
+        assert!(scale >= 1.0);
+        for x in &mut setbacks {
+            *x *= scale;
+        }
+    }
     let len = 10.0;
     let mut rounds = Vec::new();
     for a in 0..3 {
@@ -403,18 +414,22 @@ fn setback_box_corner(radii: [f64; 3], round_order: usize, ease: f64, order: usi
             }];
             own = ease_surface(&own, &g2, SurfParamType::U, &ramp).unwrap();
         }
-        rounds.push(own);
+        rounds.push(Surface::from(own));
     }
     let input: Vec<Round<'_>> = rounds
         .iter()
         .map(|own| Round {
             surface: own,
             along: SurfParamType::U,
-            end: own.natural_uv_domain().u_interval().min(),
+            end: own
+                .natural_uv_domain_with_nurb(&k)
+                .unwrap()
+                .u_interval()
+                .min(),
             corner_above: false,
         })
         .collect();
-    let fill = fill_hole(&faces, &input, order, 1e-9);
+    let fill = fill_hole(&k, &faces, &input, order, 1e-9);
     match &fill {
         Ok(f) => println!(
             "  setbacks {:.9}, {:.9}, {:.9}; fill status 0 (no refusal), interior degree {}",
@@ -445,7 +460,7 @@ fn setback_box_corner(radii: [f64; 3], round_order: usize, ease: f64, order: usi
         })
         .collect();
     let patches: Vec<Surface> = fill.patches.iter().cloned().map(Surface::from).collect();
-    let round_surfaces: Vec<Surface> = rounds.iter().cloned().map(Surface::from).collect();
+    let round_surfaces: Vec<Surface> = rounds.clone();
     let at = |x: f64, y: f64| Point2::new(x, y);
     let origin = |_: f64| Point2::new(0.0, 0.0);
     for m in 0..3 {
@@ -461,7 +476,7 @@ fn setback_box_corner(radii: [f64; 3], round_order: usize, ease: f64, order: usi
             let t = f64::from(j) / 8.0;
             let p = sp.evaluate_point(at(0.0, t)).unwrap();
             let q = round
-                .evaluate_point(at(end, if rev { 1.0 - t } else { t }))
+                .evaluate_point(&k, at(end, if rev { 1.0 - t } else { t }))
                 .unwrap();
             let pa = sp.evaluate_point(at(t, 0.0)).unwrap();
             let pb = sp.evaluate_point(at(t, 1.0)).unwrap();
@@ -621,8 +636,8 @@ fn box_corner_unequal_g1() {
 #[test]
 fn g2_fill_of_uneased_rounds_refused() {
     let faces = box_corner_faces();
-    let rounds: Vec<BSplineSurface> = (0..3)
-        .map(|a| box_corner_round(a, 2.0, 3.0, 10.0, 1))
+    let rounds: Vec<Surface> = (0..3)
+        .map(|a| Surface::from(box_corner_round(a, 2.0, 3.0, 10.0, 1)))
         .collect();
     let input: Vec<Round<'_>> = rounds
         .iter()
@@ -633,7 +648,7 @@ fn g2_fill_of_uneased_rounds_refused() {
             corner_above: false,
         })
         .collect();
-    let refusal = fill_hole(&faces, &input, 2, 1e-9).unwrap_err();
+    let refusal = fill_hole(&Kernel::default(), &faces, &input, 2, 1e-9).unwrap_err();
     assert!(matches!(refusal.error, SolidError::InvalidInput { .. }));
     let why = refusal.reason.expect("a reason");
     println!("  refused: {why}");

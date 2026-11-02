@@ -760,6 +760,7 @@ fn state() -> FilletExecutive<Handle> {
         fit_radius: -1.0,
         fit_edge: None,
         fit_kind: FitKind::Radius,
+        fit_setback: -1.0,
     }
 }
 

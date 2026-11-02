@@ -1561,6 +1561,7 @@ fn executive(target: Option<Handle>) -> FilletExecutive<Handle> {
         fit_radius: -1.0,
         fit_edge: None,
         fit_kind: solidcore::blend::fillet_executive::FitKind::Radius,
+        fit_setback: -1.0,
     };
     executive.intersector.ignore_tangency = true;
     executive
