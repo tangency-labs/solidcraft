@@ -2203,7 +2203,15 @@ fn chamfer_built(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
             // Where that blend cannot build the edge, the cutter is what used to succeed (#814).
             let inside = tool.as_ref().ok().is_some_and(|t| t.extension_inside);
             let step = if inside {
-                match blend(&cur, std::slice::from_ref(p), distance, Shape::Flat, "chamfer") {
+                let blended = blend(&cur, std::slice::from_ref(p), distance, Shape::Flat, "chamfer");
+                // Material past the faces (a pin joined under a bar): the local blend cannot trim
+                // against it, so it can leave the part open or refuse. Then the cutter, less
+                // that material.
+                let clipped = match &blended {
+                    Ok(b) if !is_open_or_pinched(b) => None,
+                    _ => clipped_cut(&cur, *p, distance).ok().flatten(),
+                };
+                match clipped.map(Ok).unwrap_or(blended) {
                     Ok(b) => b,
                     Err(miss) => match tool.and_then(|t| cut_one(&cur, &t)) {
                         Ok(Some(b)) => b,
@@ -2235,6 +2243,96 @@ fn chamfer_built(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
     };
     // Chamfers meeting at corners on curved faces: all at once.
     one_by_one().or_else(|e| corners(body, edges, distance, Shape::Flat, "chamfer", false).map_err(|e2| keep_size(e, e2)))
+}
+
+/// A chamfer whose cutter also reaches material past the edge's two faces, as under a bar with a
+/// pin joined below it: the cutter less that material, so only the corner between the two faces
+/// goes and what lies beyond keeps its shape (the pin's top, bared by the chamfer, becomes a face).
+/// `None` where a step finds nothing to keep or a boolean declines; the caller then blends.
+fn clipped_cut(cur: &Body, p: Vec3, distance: f64) -> Result<Option<Body>> {
+    // The cutter's size varies a little with k, so a coincidence that defeats one try may miss the next.
+    // A try whose faces only touch along a line (a pinched edge) is kept only if none does better.
+    let mut pinched = None;
+    let mut last = Ok(None);
+    for k in 0..5 {
+        last = clipped_cut_with(cur, p, distance, k);
+        match last {
+            Ok(Some(b)) if is_pinched(&b) => {
+                pinched.get_or_insert(b);
+                last = Ok(None);
+            }
+            Ok(Some(b)) => return Ok(Some(b)),
+            _ => {}
+        }
+    }
+    if pinched.is_some() { Ok(pinched) } else { last }
+}
+
+/// Whether some edge of the body's mesh is used by more than two triangles: two faces that meet
+/// only along a line, where the part is pinched though each shell is closed.
+fn is_pinched(b: &Body) -> bool {
+    mesh_edge_uses(b).is_some_and(|uses| uses.iter().any(|n| *n > 2))
+}
+
+/// Whether the body's mesh is open (an edge with one triangle) or pinched.
+fn is_open_or_pinched(b: &Body) -> bool {
+    mesh_edge_uses(b).is_some_and(|uses| uses.iter().any(|n| *n != 2))
+}
+
+/// How many triangles use each edge of the body's mesh, with coincident ends joined.
+fn mesh_edge_uses(b: &Body) -> Option<Vec<u32>> {
+    let m = b.tessellate(0.05).ok()?;
+    let key = |i: u32| {
+        let p = m.positions[i as usize];
+        [p.x, p.y, p.z].map(|c| (c * 1e5).round() as i64)
+    };
+    let mut uses: std::collections::HashMap<_, u32> = std::collections::HashMap::new();
+    for t in &m.triangles {
+        for (a, c) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+            let (a, c) = (key(a), key(c));
+            *uses.entry(if a < c { (a, c) } else { (c, a) }).or_default() += 1;
+        }
+    }
+    Some(uses.into_values().collect())
+}
+
+fn clipped_cut_with(cur: &Body, p: Vec3, distance: f64, k: usize) -> Result<Option<Body>> {
+    let (_, f) = edge_frame(cur, p)?;
+    // Only an outside edge: a hole corner's cutter runs into the wall it bevels, and its own bevel builds.
+    // The frame is built as if convex, so look: beside a convex edge, out past one face and in
+    // behind the other, is air; a concave edge has material there.
+    let (mid, e) = ((f.p0 + f.p1) * 0.5, (distance * 0.05).min(0.05));
+    if cur.contains(mid + (f.n1 - f.n2) * e) || cur.contains(mid + (f.n2 - f.n1) * e) {
+        return Ok(None);
+    }
+    let tool = chamfer_tool(cur, p, distance, k)?;
+    let big = cur.size().max(1.0) * 8.0;
+    let Some(inside) = crate::ops::boolean(cur, &tool.body, crate::BoolOp::Intersect)? else { return Ok(None) };
+    // What lies past each face inside the cutter: the cut takes it, and it is put back after.
+    let mut pieces = Vec::new();
+    for n in [f.n1, f.n2] {
+        // Everything past this face's plane.
+        let plane = solidcraft_geom::Plane::from_normal(f.p0, n).ok_or_else(|| KernelError::Failed("chamfer plane".into()))?;
+        let square = solidcraft_geom::Loop2::polygon(&[
+            solidcraft_geom::Vec2::new(-big, -big),
+            solidcraft_geom::Vec2::new(big, -big),
+            solidcraft_geom::Vec2::new(big, big),
+            solidcraft_geom::Vec2::new(-big, big),
+        ]);
+        let region = solidcraft_geom::Region2 { outer: square, holes: vec![] };
+        let past = crate::build::extrude(&plane, &[region], 0.0, big)?.pop().ok_or_else(|| KernelError::Failed("chamfer half-space".into()))?;
+        if let Some(beyond) = crate::ops::boolean(&inside, &past, crate::BoolOp::Intersect)? {
+            pieces.push(beyond);
+        }
+    }
+    let Some(mut r) = cut_one(cur, &tool)? else { return Ok(None) };
+    for piece in &pieces {
+        match crate::ops::boolean(&r, piece, crate::BoolOp::Union)? {
+            Some(joined) => r = joined,
+            None => return Ok(None),
+        }
+    }
+    Ok(Some(r).filter(|b| !b.is_surface()))
 }
 
 /// `cur` cut by one cutter, with its history over `[cur]` (`None`: nothing left).
