@@ -1334,8 +1334,9 @@ preference_settings! {
     /// over the view (the default), the dialog, or nothing (#7717).
     stand_up_unknown: StandUpUnknown = StandUpUnknown::default(), PAGE_DESIGN;
     /// Extrude: with a profile picked, a face, vertex or parallel plane picked off its plane
-    /// switches the extent to To Object (off: picks only add profiles, as before).
-    extrude_auto_to_object: bool = false, PAGE_TOOLS => check("Extrude to a picked target", "In Extrude, with a profile picked, picking a face, vertex or parallel plane off its plane switches the extent to To Object");
+    /// switches the extent to To Object (off: picks only add profiles, as before). A click into the
+    /// Profiles box makes the next picks profiles again.
+    extrude_auto_to_object: bool = true, PAGE_TOOLS => check("Extrude to a picked target", "In Extrude, with a profile picked, picking a face, vertex or parallel plane off its plane switches the extent to To Object");
     /// Extrude turns the view to isometric each time it opens, so the depth can be seen (#9176).
     /// Off (the default): the view stays as it is.
     extrude_view_isometric: bool = false, PAGE_TOOLS => check_id("prefs.extrude_view_isometric");
@@ -5787,7 +5788,7 @@ mod tests {
             ("direct_interaction", json!(true), PAGE_TOOLS),
             ("hole_snaps", json!(true), PAGE_TOOLS),
             ("hole_moves", json!(true), PAGE_TOOLS),
-            ("extrude_auto_to_object", json!(true), PAGE_TOOLS),
+            ("extrude_auto_to_object", json!(false), PAGE_TOOLS),
             ("extrude_view_isometric", json!(true), PAGE_TOOLS),
             ("extrude_view_return", json!(true), PAGE_TOOLS),
             ("auto_operation", json!(false), PAGE_TOOLS),
