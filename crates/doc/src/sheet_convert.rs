@@ -417,6 +417,21 @@ fn bend_cylinder(b: &Body, mesh: &Mesh, f: usize, tol: f64) -> Option<Chamfer> {
     na.cross(nb).normalized().map(|_| Chamfer { strip: f, a, b: bb })
 }
 
+/// Every piece of bend cylinder `c`'s cylinder (the same axis line and radius) that is a bend
+/// cylinder between the same two faces: the pieces cut-outs across a bend leave of it. `c` too.
+fn bend_pieces(b: &Body, mesh: &Mesh, c: Chamfer, tol: f64) -> Vec<Chamfer> {
+    let Some(FaceSurface::Cylinder { origin, axis, radius }) = face_surface(b, c.strip) else { return vec![c] };
+    let coaxial = |g: usize| match face_surface(b, g) {
+        Some(FaceSurface::Cylinder { origin: o, axis: a, radius: r }) => {
+            (r - radius).abs() <= tol && a.cross(axis).len() <= 1e-6 && ((o - origin) - axis * (o - origin).dot(axis)).len() <= tol
+        }
+        _ => false,
+    };
+    let same = |o: &Chamfer| (o.a, o.b) == (c.a, c.b) || (o.a, o.b) == (c.b, c.a);
+    let pieces = (0..b.face_count()).filter(|g| *g != c.strip && coaxial(*g)).filter_map(|g| bend_cylinder(b, mesh, g, tol)).filter(same);
+    std::iter::once(c).chain(pieces).collect()
+}
+
 /// The cylinder of bend `c` on a shell's other skin: the bend cylinder between the faces
 /// straight behind `c`'s two sides, so that a bend picked on either skin is that bend on both.
 fn other_skin(b: &Body, mesh: &Mesh, c: &Chamfer, tol: f64) -> Option<Chamfer> {
@@ -429,7 +444,8 @@ fn other_skin(b: &Body, mesh: &Mesh, c: &Chamfer, tol: f64) -> Option<Chamfer> {
 
 /// Face `g`'s outline with each picked chamfer along it taken out: the edge along the chamfer
 /// moves to where `g`'s plane meets the plane of the face across the chamfer (its corners
-/// sliding along the edges before and after it), and runs along that face.
+/// sliding along the edges before and after it, or stepping down to it where the face goes on
+/// past the chamfer's end), and runs along that face.
 fn without_chamfers(b: &Body, mut face: Face, g: usize, chamfers: &[Chamfer], tol: f64) -> Result<Face> {
     for c in chamfers {
         let other = if c.a == g {
@@ -447,29 +463,57 @@ fn without_chamfers(b: &Body, mut face: Face, g: usize, chamfers: &[Chamfer], to
         let &[k] = along.as_slice() else {
             return err("not supported yet: a chamfer picked as a bend that runs along a face more than once");
         };
-        // Its corners slide along the edges before and after it: those must be straight.
-        if [k + m - 1, k + 1].iter().any(|i| face.round.get(i % m).is_some_and(Option::is_some)) {
-            return err("not supported yet: a round edge of a face that ends at a chamfer picked as a bend");
-        }
-        // Each end of the edge slides along the edge on its other side, out to the other plane.
-        let slide = |corner: usize, before: usize| -> Option<Vec3> {
+        let (Some(&p0), Some(&q0)) = (face.pts.get(k), face.pts.get((k + 1) % m)) else { return err("a face of the sheet has no outline") };
+        let Some(e) = (q0 - p0).normalized() else { return err("a face of the sheet has an edge without length") };
+        // Each end of the edge slides along the straight edge on its other side, out to the
+        // other plane.
+        let slide = |corner: usize, before: usize, edge: usize| -> Option<Vec3> {
+            if face.round.get(edge % m).is_some_and(Option::is_some) {
+                return None;
+            }
             let (p, q) = (*face.pts.get(corner % m)?, *face.pts.get(before % m)?);
             let d = (p - q).normalized()?;
             let s = (o - p).dot(n) / d.dot(n);
-            (s.is_finite() && s >= -tol).then_some(p + d * s)
+            (d.cross(e).len() > 1e-6 && s.is_finite() && s >= -tol).then_some(p + d * s)
         };
-        let (Some(p), Some(q)) = (slide(k, k + m - 1), slide(k + 1, k + 2)) else {
-            return err("a face beside a chamfer picked as a bend does not reach the face across it");
+        // Where that edge is round or runs on along the chamfer's line (the face goes on past
+        // the chamfer's end), the end keeps its corner and steps down square to the edge onto
+        // the other plane: a step the bend's setback takes up again.
+        let w = face.n.cross(e);
+        let drop = |p: Vec3| -> Result<Vec3> {
+            let s = (o - p).dot(n) / w.dot(n);
+            if s.is_finite() { Ok(p + w * s) } else { err("a face beside a chamfer picked as a bend does not reach the face across it") }
         };
-        if let Some(x) = face.pts.get_mut(k) {
-            *x = p;
+        let (next_across, next_round) = (face.across.get((k + 1) % m).copied().flatten(), face.round.get((k + 1) % m).copied().flatten());
+        let start: Vec<(Vec3, Option<usize>)> = match slide(k, k + m - 1, k + m - 1) {
+            Some(p) => vec![(p, Some(other))],
+            None => vec![(p0, None), (drop(p0)?, Some(other))],
+        };
+        let end: Vec<(Vec3, Option<usize>, Option<(Vec3, Vec3)>)> = match slide(k + 1, k + 2, k + 1) {
+            Some(q) => vec![(q, next_across, next_round)],
+            None => vec![(drop(q0)?, None, None), (q0, next_across, next_round)],
+        };
+        let (mut pts, mut across, mut round) = (Vec::with_capacity(m + 2), Vec::with_capacity(m + 2), Vec::with_capacity(m + 2));
+        for i in 0..m {
+            if i == k {
+                for (p, a) in &start {
+                    pts.push(*p);
+                    across.push(*a);
+                    round.push(None);
+                }
+            } else if i == (k + 1) % m {
+                for (p, a, r) in &end {
+                    pts.push(*p);
+                    across.push(*a);
+                    round.push(*r);
+                }
+            } else {
+                pts.push(face.pts.get(i).copied().unwrap_or_default());
+                across.push(face.across.get(i).copied().flatten());
+                round.push(face.round.get(i).copied().flatten());
+            }
         }
-        if let Some(x) = face.pts.get_mut((k + 1) % m) {
-            *x = q;
-        }
-        if let Some(x) = face.across.get_mut(k) {
-            *x = Some(other);
-        }
+        (face.pts, face.across, face.round) = (pts, across, round);
     }
     Ok(face)
 }
@@ -489,8 +533,10 @@ fn rip_cut(x: &Face, y: &Face, e: Vec3, t: f64, gap: f64) -> Result<f64> {
 
 /// A counter-clockwise outline with each edge moved in by its own amount. Moved edges meet
 /// where their lines cross; two edges in one line that move by different amounts are joined by
-/// a square step. Returns the corners and, per edge, the edge it was (none for a step).
-fn inset(pts: &[Vec2], by: &[f64]) -> Result<(Vec<Vec2>, Vec<Option<usize>>)> {
+/// a square step. An edge left shorter than `tol` (a step down to a bend's line that the bend's
+/// setback takes up) is dropped, with the corner it shares with the edge that moved further.
+/// Returns the corners and, per edge, the edge it was (none for a step).
+fn inset(pts: &[Vec2], by: &[f64], tol: f64) -> Result<(Vec<Vec2>, Vec<Option<usize>>)> {
     let n = pts.len();
     if n < 3 {
         return err("a face of the sheet has no outline");
@@ -517,6 +563,15 @@ fn inset(pts: &[Vec2], by: &[f64]) -> Result<(Vec<Vec2>, Vec<Option<usize>>)> {
             return err("the outline of a face of the sheet doubles back on itself");
         }
         from.push(Some(i));
+    }
+    let moved_by = |from: &[Option<usize>], j: usize| from.get(j).copied().flatten().and_then(|i| by.get(i)).map_or(0.0, |b| b.abs());
+    while out.len() > 3 {
+        let m = out.len();
+        let short = (0..m).find(|j| matches!((out.get(*j), out.get((j + 1) % m)), (Some(a), Some(b)) if a.dist(*b) <= tol));
+        let Some(j) = short else { break };
+        let corner = if moved_by(&from, (j + m - 1) % m) > moved_by(&from, (j + 1) % m) { j } else { (j + 1) % m };
+        out.remove(corner);
+        from.remove(j);
     }
     // Every edge still runs the way it did, and the outline is still one simple loop.
     let m = out.len();
@@ -651,31 +706,89 @@ fn drawn(trimmed: &[Vec2], from: &[Option<usize>], pts: &[Vec2], round: &[Option
     if round.iter().all(Option::is_none) {
         return Ok(None);
     }
-    let (m, n) = (trimmed.len(), pts.len());
-    let mut segs: Vec<Seg2> = Vec::with_capacity(m);
-    for j in 0..m {
-        let (Some(&a), Some(&b)) = (trimmed.get(j), trimmed.get((j + 1) % m)) else { continue };
-        let arc = from.get(j).copied().flatten().and_then(|i| Some((i, round.get(i).copied().flatten()?)));
-        let Some((i, (c, mid))) = arc else {
-            segs.push(Seg2::Line { a: snap(a), b: snap(b) });
-            continue;
-        };
-        let (Some(&p), Some(&q)) = (pts.get(i), pts.get((i + 1) % n)) else { continue };
-        if a.dist(p) > 1e-6 || b.dist(q) > 1e-6 {
-            return err("not supported yet: a round edge of a face that ends at a bend or a cut edge of the sheet");
-        }
-        let (start, r) = ((p - c).angle(), c.dist(p));
-        let half = ((mid - c).angle() - start + PI).rem_euclid(TAU) - PI;
-        match segs.last_mut() {
-            Some(Seg2::Arc { center, radius, sweep, .. })
-                if center.dist(c) <= 1e-9 && (*radius - r).abs() <= 1e-9 && *sweep * half > 0.0 && (*sweep + 2.0 * half).abs() <= PI + 1e-9 =>
+    let mut segs: Vec<Seg2> = Vec::with_capacity(trimmed.len());
+    for j in 0..trimmed.len() {
+        let Some(seg) = drawn_edge(trimmed, from, pts, round, j)? else { continue };
+        match (segs.last_mut(), seg) {
+            (Some(Seg2::Arc { center, radius, sweep, .. }), Seg2::Arc { center: c, radius: r, sweep: s, .. })
+                if center.dist(c) <= 1e-9 && (*radius - r).abs() <= 1e-9 && *sweep * s > 0.0 && (*sweep + s).abs() <= PI + 1e-9 =>
             {
-                *sweep += 2.0 * half;
+                *sweep += s;
             }
-            _ => segs.push(Seg2::Arc { center: c, radius: r, start, sweep: 2.0 * half }),
+            _ => segs.push(seg),
         }
     }
     Ok(Some(Loop2 { segs }))
+}
+
+/// A panel's trimmed outline where it meets the panel across bend `g` along more than one edge
+/// (cut-outs across the bend notch it): the edges must lie in one line, running the same way;
+/// they become one edge, from the first one's start to the last one's end, and each notch
+/// between two of them a hole of the sheet (the notch's edges, closed along the line). Returns
+/// the holes, each with the corners where it leaves the line and comes back to it. Nothing
+/// changes where the panel meets `g` along one edge or none.
+fn join_runs(
+    trimmed: &mut Vec<Vec2>,
+    from: &mut Vec<Option<usize>>,
+    across: &[Option<usize>],
+    pts: &[Vec2],
+    round: &[Option<(Vec2, Vec2)>],
+    g: usize,
+    tol: f64,
+) -> Result<Vec<(Region2, Vec2, Vec2)>> {
+    let m = trimmed.len();
+    let along = |j: usize| from.get(j).copied().flatten().and_then(|i| across.get(i).copied().flatten()) == Some(g);
+    let runs: Vec<usize> = (0..m).filter(|j| along(*j)).collect();
+    let (Some(&first), true) = (runs.first(), runs.len() > 1) else { return Ok(Vec::new()) };
+    let corner = |j: usize| trimmed.get(j % m).copied().unwrap_or_default();
+    let (o, Some(d)) = (corner(first), (corner(first + 1) - corner(first)).normalized()) else { return err("a bend edge has no length") };
+    let off = |p: Vec2| (p - o).cross(d).abs();
+    if runs.iter().any(|j| off(corner(*j)) > tol || off(corner(j + 1)) > tol || (corner(j + 1) - corner(*j)).dot(d) <= 0.0) {
+        return err("not supported yet: a face of the sheet that meets a bend along edges not in one line");
+    }
+    let mut order = runs.clone();
+    order.sort_by(|x, y| (corner(*x) - o).dot(d).total_cmp(&(corner(*y) - o).dot(d)));
+    let mut gone = vec![false; m];
+    let mut holes = Vec::new();
+    for pair in order.windows(2) {
+        let &[ja, jb] = pair else { continue };
+        // The notch: forward round the outline from the end of one edge to the start of the next.
+        let mut segs = Vec::new();
+        let mut j = (ja + 1) % m;
+        while j != jb {
+            if along(j) || segs.len() > m {
+                return err("not supported yet: a face of the sheet that meets a bend along edges out of order");
+            }
+            segs.extend(drawn_edge(trimmed, from, pts, round, j)?);
+            gone[j] = true;
+            j = (j + 1) % m;
+        }
+        gone[jb] = true;
+        let (e, s) = (corner(ja + 1), corner(jb));
+        segs.push(Seg2::Line { a: snap(s), b: snap(e) });
+        let lp = Loop2 { segs };
+        holes.push((Region2 { outer: if lp.signed_area() < 0.0 { lp.reversed() } else { lp }, holes: Vec::new() }, e, s));
+    }
+    let keep: Vec<usize> = (0..m).filter(|j| !gone.get(*j).copied().unwrap_or(false)).collect();
+    let (kept, kept_from): (Vec<Vec2>, Vec<Option<usize>>) = keep.iter().map(|j| (corner(*j), from.get(*j).copied().flatten())).unzip();
+    (*trimmed, *from) = (kept, kept_from);
+    Ok(holes)
+}
+
+/// Edge `j` of a panel's trimmed outline as [`drawn`] draws it: a line, or an arc where it was a
+/// round edge of the face.
+fn drawn_edge(trimmed: &[Vec2], from: &[Option<usize>], pts: &[Vec2], round: &[Option<(Vec2, Vec2)>], j: usize) -> Result<Option<Seg2>> {
+    let (m, n) = (trimmed.len(), pts.len());
+    let (Some(&a), Some(&b)) = (trimmed.get(j % m), trimmed.get((j + 1) % m)) else { return Ok(None) };
+    let arc = from.get(j % m).copied().flatten().and_then(|i| Some((i, round.get(i).copied().flatten()?)));
+    let Some((i, (c, mid))) = arc else { return Ok(Some(Seg2::Line { a: snap(a), b: snap(b) })) };
+    let (Some(&p), Some(&q)) = (pts.get(i), pts.get((i + 1) % n)) else { return Ok(None) };
+    if a.dist(p) > 1e-6 || b.dist(q) > 1e-6 {
+        return err("not supported yet: a round edge of a face that ends at a bend or a cut edge of the sheet");
+    }
+    let (start, r) = ((p - c).angle(), c.dist(p));
+    let half = ((mid - c).angle() - start + PI).rem_euclid(TAU) - PI;
+    Ok(Some(Seg2::Arc { center: c, radius: r, start, sweep: 2.0 * half }))
 }
 
 /// Names of the edges of `body` at the bend points, to find them again after the body changes.
@@ -728,7 +841,8 @@ pub fn convert_body(
     for p in bends {
         if let Some(c) = chamfer_at(mb, &mesh, *p, tol, near) {
             picks.push((*p, (c.a, c.b)));
-            for c in std::iter::once(c).chain(other_skin(b, &mesh, &c, tol)) {
+            // Every piece of the bend, on either skin: cut-outs across it split its cylinder.
+            for c in std::iter::once(c).chain(other_skin(b, &mesh, &c, tol)).flat_map(|c| bend_pieces(b, &mesh, c, tol)) {
                 if !chamfers.iter().any(|x| x.strip == c.strip) {
                     chamfers.push(c);
                 }
@@ -899,7 +1013,20 @@ pub fn convert_body(
         }
         let first = panel.face.pts.first().copied().unwrap_or_default();
         let face_at = |e: DocError| DocError::Invalid(format!("{e} (the face at {})", at(first)));
-        let (trimmed, from) = inset(&pts, &by).map_err(face_at)?;
+        let (mut trimmed, mut from) = inset(&pts, &by, tol).map_err(face_at)?;
+        // Where cut-outs across a bend notch the panel, its edges along the bend are one bend
+        // edge and the notches holes of the sheet, as is the bend zone between them (below).
+        let mut gaps: BTreeMap<usize, Vec<(Vec2, Vec2)>> = BTreeMap::new();
+        let mut bent: Vec<usize> =
+            across.iter().flatten().copied().filter(|g| panel.parent == Some(*g) || panels.get(g).is_some_and(|c| c.parent == Some(pf))).collect();
+        bent.sort_unstable();
+        bent.dedup();
+        for g in bent {
+            for (hole, e, s) in join_runs(&mut trimmed, &mut from, &across, &pts, &round, g, tol).map_err(face_at)? {
+                sh.holes.push(hole);
+                gaps.entry(g).or_default().push((e, s));
+            }
+        }
         let exact = drawn(&trimmed, &from, &pts, &round).map_err(face_at)?;
         match fl {
             None => sh.base.outer = exact.unwrap_or_else(|| Loop2::polygon(&trimmed.iter().map(|q| snap(*q)).collect::<Vec<_>>())),
@@ -1014,7 +1141,13 @@ pub fn convert_body(
                 tag: String::new(),
                 tear: (false, false),
             });
-            queue.push((g, Some(sh.flanges.len() - 1)));
+            let i = sh.flanges.len() - 1;
+            let (ba, n) = sh.flanges.get(i).map_or((0.0, Vec2::new(d.y, -d.x)), |f| (sh.allowance(f), f.n));
+            for (e, s) in gaps.get(&g).into_iter().flatten() {
+                let zone = Loop2::polygon(&[snap(*e), snap(*s), snap(*s + n * ba), snap(*e + n * ba)]);
+                sh.holes.push(Region2 { outer: zone.ccw(), holes: Vec::new() });
+            }
+            queue.push((g, Some(i)));
         }
     }
     // The bends on the fixed face finished as an edge flange feature finishes its own
@@ -1046,21 +1179,21 @@ mod tests {
     fn edges_move_in_by_their_own_amounts_and_step_along_one_line() {
         let v = Vec2::new;
         let square = [v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)];
-        let (p, from) = inset(&square, &[1.0, 0.0, 2.0, 0.0]).unwrap();
+        let (p, from) = inset(&square, &[1.0, 0.0, 2.0, 0.0], 1e-6).unwrap();
         assert_eq!(p, vec![v(0.0, 1.0), v(10.0, 1.0), v(10.0, 8.0), v(0.0, 8.0)]);
         assert_eq!(from, vec![Some(0), Some(1), Some(2), Some(3)]);
         // Two edges in one line that move by different amounts: a square step between them,
         // so 5 x 2 goes from the 10 x 10.
         let split = [v(0.0, 0.0), v(5.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)];
-        let (p, from) = inset(&split, &[0.0, 2.0, 0.0, 0.0, 0.0]).unwrap();
+        let (p, from) = inset(&split, &[0.0, 2.0, 0.0, 0.0, 0.0], 1e-6).unwrap();
         assert_eq!(p, vec![v(0.0, 0.0), v(5.0, 0.0), v(5.0, 2.0), v(10.0, 2.0), v(10.0, 10.0), v(0.0, 10.0)]);
         assert_eq!(from, vec![Some(0), None, Some(1), Some(2), Some(3), Some(4)]);
         // A slanted end keeps its line: the corner slides along it (2 up a 45° edge is 2 along).
         let slanted = [v(0.0, 0.0), v(10.0, 0.0), v(15.0, 5.0), v(0.0, 5.0)];
-        let (p, _) = inset(&slanted, &[2.0, 0.0, 0.0, 0.0]).unwrap();
+        let (p, _) = inset(&slanted, &[2.0, 0.0, 0.0, 0.0], 1e-6).unwrap();
         assert!(p[1].dist(v(12.0, 2.0)) < 1e-12 && p[0].dist(v(0.0, 2.0)) < 1e-12, "{p:?}");
         // Setbacks longer than the face leave nothing of it.
-        assert!(inset(&square, &[6.0, 0.0, 6.0, 0.0]).is_err());
-        assert!(inset(&square, &[f64::NAN, 0.0, 0.0, 0.0]).is_err());
+        assert!(inset(&square, &[6.0, 0.0, 6.0, 0.0], 1e-6).is_err());
+        assert!(inset(&square, &[f64::NAN, 0.0, 0.0, 0.0], 1e-6).is_err());
     }
 }
