@@ -158,6 +158,9 @@ pub struct Harness {
     queue: Option<std::sync::mpsc::Sender<ControlRequest>>,
     time: f64,
     size: egui::Vec2,
+    /// The pixels per point of the screen the window is on, as the platform reports it for each
+    /// screen (none: not reported, and egui takes 1).
+    pub screen_scale: Option<f32>,
     /// The camera as the last `camera` step left it.
     cam_mark: Option<solidcraft_engine::render::Camera>,
 }
@@ -194,6 +197,7 @@ impl Harness {
             queue: None,
             time: 0.0,
             size: egui::vec2(1600.0, 1000.0),
+            screen_scale: None,
             cam_mark: None,
         };
         WIDTHS.with(|m| m.borrow_mut().clear());
@@ -226,14 +230,7 @@ impl Harness {
     /// One frame that receives all these events at once (a quick tap, or input queued during a
     /// slow frame), before any queued ones.
     pub fn frame_with(&mut self, events: Vec<egui::Event>) {
-        self.time += 1.0 / 60.0;
-        let mut raw = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.size)),
-            time: Some(self.time),
-            focused: true,
-            events,
-            ..Default::default()
-        };
+        let mut raw = self.input(events);
         self.app.raw_input_hook(&mut raw);
         let app = &mut self.app;
         let mut out = self.ctx.run_ui(raw, |ui| {
@@ -244,6 +241,22 @@ impl Harness {
         out.textures_delta.clear();
         self.output = out.platform_output;
         self.shapes = out.shapes;
+    }
+
+    /// The next frame's input: the window's size on its screen, `events`, and the time a frame on.
+    fn input(&mut self, events: Vec<egui::Event>) -> egui::RawInput {
+        self.time += 1.0 / 60.0;
+        let mut raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.size)),
+            time: Some(self.time),
+            focused: true,
+            events,
+            ..Default::default()
+        };
+        if let Some(scale) = self.screen_scale {
+            raw.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(scale);
+        }
+        raw
     }
 
     pub fn frames(&mut self, n: usize) {
@@ -261,16 +274,7 @@ impl Harness {
     /// One frame in which files are dragged over the window (`hovered`) or dropped, the pointer
     /// last seen at `at`.
     pub fn drag_files(&mut self, at: egui::Pos2, hovered: Vec<egui::HoveredFile>, dropped: Vec<egui::DroppedFileHandle>) {
-        self.time += 1.0 / 60.0;
-        let raw = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.size)),
-            time: Some(self.time),
-            focused: true,
-            events: vec![egui::Event::PointerMoved(at)],
-            hovered_files: hovered,
-            dropped_files: dropped,
-            ..Default::default()
-        };
+        let raw = egui::RawInput { hovered_files: hovered, dropped_files: dropped, ..self.input(vec![egui::Event::PointerMoved(at)]) };
         let app = &mut self.app;
         let mut out = self.ctx.run_ui(raw, |ui| {
             app.logic(ui.ctx());
