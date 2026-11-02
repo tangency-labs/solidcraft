@@ -579,6 +579,12 @@ impl Stations {
         }
     }
 
+    /// The levels strictly between `lo` and `hi` where a wall meets another across it along a
+    /// curve at one level.
+    fn seams(&self, lo: f64, hi: f64, tol: f64) -> Vec<f64> {
+        self.cross.values().flatten().filter(|(_, l, h)| h - l < tol && *l > lo + tol && *h < hi - tol).map(|(_, l, h)| (l + h) / 2.0).collect()
+    }
+
     /// Does wall `w` meet another wall across it between levels `lo` and `hi` (not at them)?
     fn across(&self, w: usize, lo: f64, hi: f64, tol: f64) -> bool {
         self.of(w).iter().any(|(_, l, h)| *l < hi - tol && *h > lo + tol)
@@ -2420,10 +2426,21 @@ fn stack_tagged(b: &Body, d: Vec3, plane: &Plane, tol: f64, index: &LazyIndex) -
     let mut levels: Vec<f64> = events.iter().map(|(z, _, _, _)| *z).collect();
     levels.sort_by(f64::total_cmp);
     levels.dedup_by(|x, y| (*x - *y).abs() < tol);
-    if levels.len() < 2 || levels.len() > 64 || levels.iter().any(|z| !z.is_finite()) {
+    if levels.len() < 2 || levels.iter().any(|z| !z.is_finite()) {
         return None;
     }
     let stations = Stations::new(index.get(), walls, d, plane, tol);
+    // Where a wall goes on in another face between caps (two pieces of one plane meeting along a
+    // seam: a mirrored copy against its source), the slab is divided too, so the segments beside
+    // it are known on both sides ([`Stations::past`]) rather than dropped as crossed.
+    if let (Some(&lo), Some(&hi)) = (levels.first(), levels.last()) {
+        levels.extend(stations.seams(lo, hi, tol));
+        levels.sort_by(f64::total_cmp);
+        levels.dedup_by(|x, y| (*x - *y).abs() < tol);
+    }
+    if levels.len() > 64 {
+        return None;
+    }
     let mut current = Section::default();
     let mut stack: Vec<Prism> = Vec::new();
     let mut budget = MAX_PLANAR_PAIRS;

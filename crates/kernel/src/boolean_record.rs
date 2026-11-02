@@ -37,6 +37,14 @@ pub(crate) fn through(result: &Body, k: usize, inner: Option<&History>) -> Optio
     composed(result.history()?.clone().substituted(k, inner?))
 }
 
+/// `h`, the history over the operation's operands of `before`, carried on to `after`, which a
+/// step whose history is over `[before]` made from it. A step that leaves the body as it was
+/// returns `before` itself (the same solid, with the history it came with, over whatever made
+/// it), and `h` then stays as it is.
+pub(crate) fn stepped(before: &Body, after: &Body, h: Option<History>) -> Option<History> {
+    if std::sync::Arc::ptr_eq(&before.solid, &after.solid) { h } else { through(after, 0, h.as_ref()) }
+}
+
 /// Operand `operand` (with `counts` giving every operand's faces and edges) as the result, with
 /// the history that says so.
 pub(crate) fn operand(body: &Body, operand: usize, counts: &[(usize, usize)]) -> Body {

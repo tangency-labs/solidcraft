@@ -524,3 +524,59 @@ fn stacked_pieces_of_one_cylinder_keep_their_walls() {
         }
     }
 }
+
+/// A block with a bore standing on a plate, flush with the plate's side, back to back over part
+/// of the plate's top: imprinted along the contact's outline and glued (`outline_union`). The
+/// plate's edge is cut where the block's corners meet it; the block has no edge to cut, so it
+/// comes back as it was, with the history of the cut that bored it (over two operands), which
+/// is not a step of the join's: the result keeps the history all the same, every face of both
+/// but the block's foot, which is glued away.
+#[test]
+fn a_side_imprinting_leaves_as_it_was_keeps_the_history() {
+    let plate = boxed(0.0, 0.0, 0.0, 20.0, 20.0, 10.0);
+    let bore = crate::cylinder(Vec3::new(5.0, 15.0, 12.5), Vec3::X, 1.0, 10.0).unwrap();
+    let block = boolean(&boxed(5.0, 10.0, 10.0, 15.0, 20.0, 15.0), &bore, BoolOp::Cut).unwrap().unwrap();
+    assert_eq!(block.history().unwrap().operands, 2);
+    let foot = crate::coplanar::faces_in(&block, -Vec3::Z, -10.0, 1e-6);
+    assert_eq!(foot.len(), 1);
+    for (a, b, block_at) in [(&plate, &block, 1), (&block, &plate, 0)] {
+        let r = crate::outline::outline_union(a, b, &|_| true).expect("glued along the outline");
+        let h = verified(&r, &[a, b], 0.01);
+        for (k, operand) in [a, b].into_iter().enumerate() {
+            for f in (0..operand.face_count()).filter(|f| k != block_at || !foot.contains(f)) {
+                assert!(!from(h, face(k, f)).is_empty(), "face {f} of operand {k} is lost\n{}", show(h));
+            }
+        }
+    }
+}
+
+/// A stepped bar of trapezoid sections along X (a prism along X only, its end taller) whose
+/// floor is two faces of one plane, meeting along a seam at x = 20 where no cap is (what a
+/// split, or a mirrored copy against its source, leaves), with a groove cut into its top:
+/// decided in 2D slab by slab (the prism route), the slab divided at the seam, so the result's
+/// history holds, and both pieces of the floor are in it.
+#[test]
+fn a_prism_cut_across_a_seam_between_caps_keeps_the_history() {
+    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    let yz = Plane::new(Vec3::ZERO, Vec3::Y, Vec3::Z).unwrap();
+    let trapezoid = |top: f64| Region2 {
+        outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(8.0, top), Vec2::new(2.0, top)]),
+        holes: vec![],
+    };
+    let low = crate::extrude(&yz, &[trapezoid(10.0)], 0.0, 30.0).unwrap().pop().unwrap();
+    let end = crate::extrude(&yz, &[trapezoid(16.0)], 0.0, 10.0).unwrap().pop().unwrap();
+    let bar = boolean(&low, &end, BoolOp::Union).unwrap().unwrap();
+    let floor = crate::coplanar::faces_in(&bar, -Vec3::Z, 0.0, 1e-6);
+    assert_eq!(floor.len(), 1);
+    let seam = Plane::from_normal(Vec3::new(20.0, 0.0, 0.0), Vec3::X).unwrap();
+    let a = crate::splitface::split_faces(&bar, &floor, &crate::SplitTool::Plane(seam)).unwrap();
+    let pieces = crate::coplanar::faces_in(&a, -Vec3::Z, 0.0, 1e-6);
+    assert_eq!(pieces.len(), 2);
+    let groove = boxed(15.0, 4.0, 8.0, 25.0, 6.0, 11.0);
+    assert!(matches!(crate::prism::prism_boolean(&a, &groove, BoolOp::Cut), Some(Ok(Some(_)))), "a pair of prisms");
+    let r = boolean(&a, &groove, BoolOp::Cut).unwrap().unwrap();
+    let h = verified(&r, &[&a, &groove], 0.01);
+    for f in pieces {
+        assert!(!from(h, face(0, f)).is_empty(), "floor piece {f}\n{}", show(h));
+    }
+}
