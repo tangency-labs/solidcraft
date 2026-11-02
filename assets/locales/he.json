@@ -4465,6 +4465,8 @@
   "ui.coming_later": "בקרוב",
   "ui.command_done": "{command} הושלם",
   "ui.command_palette_hint": "יש להקליד פקודה, למשל {example}  — או ללחוץ S לחיפוש",
+  "ui.components_from_bodies_hint": "יצירת רכיב לכל גוף שנבחר, בשם הגוף, תחת הרכיב הפעיל.",
+  "ui.components_from_bodies_required": "יש לבחור גוף אחד לפחות.",
   "ui.concentric": "משותף מרכז",
   "ui.cone": "חרוט",
   "ui.conic_curve": "עקום חרוטי",

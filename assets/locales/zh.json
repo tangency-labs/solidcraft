@@ -4465,6 +4465,8 @@
   "ui.coming_later": "即将推出",
   "ui.command_done": "{command} 完成",
   "ui.command_palette_hint": "输入命令，例如 {example}  — 或按 S 搜索",
+  "ui.components_from_bodies_hint": "在活动组件下，为每个选定实体创建一个以该实体命名的组件。",
+  "ui.components_from_bodies_required": "请至少选择一个实体。",
   "ui.concentric": "同心",
   "ui.cone": "圆锥体",
   "ui.conic_curve": "圆锥曲线",
