@@ -7430,6 +7430,10 @@ fn eval_feature(
                 // The solve may have moved the curve a text runs along.
                 warns.extend(crate::project::relay_path_texts(&mut sk));
             }
+            // 3D constraints that fail leave the 3D curves where they were (#10608).
+            if let Some(w) = report.wires.as_ref().filter(|w| !w.ok) {
+                warns.push(w.failure(|f| format!("the 3D sketch constraints conflict ({f})")));
+            }
             if !warns.is_empty() {
                 *warning = Some(warns.join("; "));
             }

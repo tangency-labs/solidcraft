@@ -303,9 +303,12 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
         "name": ss.name,
         "plane": ss.plane,
         "status": ss.report.status,
-        "dof": ss.report.dof,
-        "fully_constrained": ss.report.fully_constrained(),
+        "dof": ss.report.shown_dof(),
+        "fully_constrained": ss.report.shown_dof() == 0,
         "failing": ss.report.failing,
+        // The 3D constraints' solve (#10608): its freedoms are in `dof`, its failures here.
+        "wires_solve": ss.report.wires,
+        "wire_constraints": sk.wire_constraints,
         "curves": curves,
         "points": points,
         "constraints": constraints,
@@ -426,7 +429,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         .sketches
         .iter()
         .map(|ss| {
-            let mut v = json!({"id": ss.feature, "name": ss.name, "dof": ss.report.dof, "status": ss.report.status, "curves": ss.sketch.curves.len(), "profiles": ss.profiles.len(), "visible": crate::view::sketch_shown(s, ss.feature)});
+            let mut v = json!({"id": ss.feature, "name": ss.name, "dof": ss.report.shown_dof(), "status": ss.report.status, "wires_ok": ss.report.wires_ok(), "curves": ss.sketch.curves.len(), "profiles": ss.profiles.len(), "visible": crate::view::sketch_shown(s, ss.feature)});
             // A summary that stands in for the sketch's contents (the compact MCP inspect_design).
             if with_counts && let Some(o) = v.as_object_mut() {
                 o.insert("plane".into(), json!(ss.plane));

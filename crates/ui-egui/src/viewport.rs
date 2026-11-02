@@ -7069,19 +7069,19 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     loose_end_markers(sk, &ss.ends, &ss.plane, painter, proj, &v);
     // Sketch status, unless the status bar shows it (#7243).
     if let Some(r) = app.viewport.layout.as_ref().map(|l| l.content).filter(|_| !crate::status_bar::shown(app)) {
-        let status = if !ss.report.ok() {
+        let status = if !ss.report.shown_ok() {
             crate::i18n::tr("sketch.status_conflict").to_string()
         } else if !crate::sketch_palette::has_geometry(sk) {
             crate::i18n::tr("ui.no_geometry_yet").to_string()
-        } else if ss.report.dof == 0 {
+        } else if ss.report.shown_dof() == 0 {
             crate::i18n::tr("sketch.status_fully_constrained").to_string()
-        } else if ss.report.dof == 1 {
+        } else if ss.report.shown_dof() == 1 {
             crate::i18n::tr("ui.1_degree_of_freedom").to_string()
         } else {
-            crate::i18n::format("sketch.degrees_of_freedom", &[("count", &ss.report.dof.to_string())])
+            crate::i18n::format("sketch.degrees_of_freedom", &[("count", &ss.report.shown_dof().to_string())])
         };
         let msg = format!("{} — {status}", crate::i18n::tr_name(&ss.name));
-        let c = if ss.report.ok() { v.sketch_accent } else { v.error };
+        let c = if ss.report.shown_ok() { v.sketch_accent } else { v.error };
         painter.text(pos2(r.left() + 12.0, r.top() + 12.0), Align2::LEFT_TOP, msg, FontId::proportional(t.font_button), c);
     }
 }

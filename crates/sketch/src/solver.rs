@@ -102,6 +102,11 @@ pub struct SolveReport {
     /// the solve fails without a conflicting constraint to name (#5280).
     #[serde(default)]
     pub oversized: Option<usize>,
+    /// The solve of the 3D constraints among drawn 3D curves (#10608), for a sketch that has
+    /// drawn 3D curves. Its freedoms are not in `dof` nor its failures in `status`: those are
+    /// the planar sketch's, which planar edits measure themselves by.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wires: Option<crate::WireReport>,
 }
 
 impl SolveReport {
@@ -110,6 +115,18 @@ impl SolveReport {
     }
     pub fn fully_constrained(&self) -> bool {
         self.dof == 0
+    }
+    /// The freedoms left to show: the planar sketch's and its 3D curves'.
+    pub fn shown_dof(&self) -> usize {
+        self.dof.saturating_add(self.wires.as_ref().map_or(0, |w| w.dof))
+    }
+    /// The 3D constraints hold (or there are none).
+    pub fn wires_ok(&self) -> bool {
+        self.wires.as_ref().is_none_or(|w| w.ok)
+    }
+    /// What to show: solved, planar and 3D, and no freedom left in either.
+    pub fn shown_ok(&self) -> bool {
+        self.ok() && self.wires_ok()
     }
     /// Solved, and no orientation of the stored state flipped: what a value edit accepts.
     pub fn keeps_orientation(&self) -> bool {
@@ -3348,6 +3365,7 @@ fn solve_inner(
         curve_determined,
         redundant,
         oversized: too_large,
+        wires: None,
     }
 }
 
