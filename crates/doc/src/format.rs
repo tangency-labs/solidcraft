@@ -2502,7 +2502,7 @@ mod tests {
         let v = solidcore_record::Vec3::new;
         let w = sketch.add_drawn_wire_in(&[v(0.0, 0.0, 0.0), v(10.0, 0.0, 0.0)], solidcraft_sketch::WireSpace::Component).unwrap();
         let p = solidcraft_sketch::WirePoint { wire: w, index: 0 };
-        sketch.add_wire_constraint(solidcraft_sketch::WireConstraintKind::Fix { p, at: v(0.0, 0.0, 0.0) }).unwrap();
+        sketch.add_wire_constraint(solidcraft_sketch::WireConstraintKind::Fix { p, at: v(0.0, 0.0, 0.0), exprs: None }).unwrap();
         let mut doc = Document::new("3D constraints");
         doc.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
         let mut stale: Value = serde_json::from_str(&doc.to_json()).unwrap();

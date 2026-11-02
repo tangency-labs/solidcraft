@@ -41,6 +41,9 @@ fn strict_keeps_todays_errors() {
         ("sketch.point3d", json!({"point": [1, 2]})),
         ("sketch.point3d", json!({"point": "1,2,3"})),
         ("sketch.point3d", json!({"point": [1, 2, 3], "sketch": {}})),
+        // A coordinate may be an expression (#10608), but neither a flag nor blank text.
+        ("sketch.line3d", json!({"points": [[0, 0, 0], [true, 0, 1]]})),
+        ("sketch.point3d", json!({"point": [1, " ", 3]})),
         ("sketch.move3d", json!({})),
         ("sketch.move3d", json!({"wire": 3, "to": [0, 0, 0]})),
         ("sketch.move3d", json!({"wire": null, "to": [0, 0, 0]})),
@@ -144,6 +147,9 @@ fn the_schemas_take_what_the_handlers_read() {
                 (json!({"points": [[0, 0, 0]]}), false),
                 (json!({"points": [[0, 0, 0], [1, 1]]}), false),
                 (json!({"points": two, "sketch": true}), false),
+                // Coordinates may be expressions over the design's parameters (#10608).
+                (json!({"points": [["len / 2", 0, "shs"], {"x": 1, "y": "w", "z": 1}]}), true),
+                (json!({"points": [[true, 0, 0], [1, 1, 1]]}), false),
             ],
         );
     }
@@ -154,6 +160,8 @@ fn the_schemas_take_what_the_handlers_read() {
             (json!({"point": {"x": 1, "y": 2, "z": 3}}), true),
             (json!({}), false),
             (json!({"point": [1, 2]}), false),
+            (json!({"point": ["h", 2, 3]}), true),
+            (json!({"point": [1, null, 3]}), false),
         ],
     );
     takes(

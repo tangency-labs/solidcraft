@@ -8,13 +8,15 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 use solidcore_record::Vec3;
 
 /// Most unknowns one constraint reads: three coordinates of each of its points.
-pub const N: usize = 9;
+pub const N: usize = 12;
 
 /// What a residual is computed in: plain numbers, or numbers with their derivatives.
 pub trait Num: Copy + Add<Output = Self> + Sub<Output = Self> + Mul<Output = Self> + Div<Output = Self> + Neg<Output = Self> {
     fn num(v: f64) -> Self;
     fn val(self) -> f64;
     fn sqrt(self) -> Self;
+    /// The angle of the point (x, self) from the x axis, as `f64::atan2`.
+    fn atan2(self, x: Self) -> Self;
 }
 
 impl Num for f64 {
@@ -26,6 +28,9 @@ impl Num for f64 {
     }
     fn sqrt(self) -> f64 {
         f64::sqrt(self)
+    }
+    fn atan2(self, x: f64) -> f64 {
+        f64::atan2(self, x)
     }
 }
 
@@ -110,6 +115,15 @@ impl Num for Dual {
         // The root of zero has no derivative; it is taken as zero there (a length of nothing).
         let s = self.v.sqrt();
         self.map(s, if s > 1e-150 { 0.5 / s } else { 0.0 })
+    }
+    fn atan2(self, x: Dual) -> Dual {
+        // d atan2(y, x) = (x dy − y dx) / (x² + y²); none at the origin.
+        let r2 = self.v * self.v + x.v * x.v;
+        let mut d = [0.0; N];
+        if r2 > 1e-300 {
+            d.iter_mut().zip(self.d.iter().zip(x.d)).for_each(|(o, (dy, dx))| *o = (x.v * dy - self.v * dx) / r2);
+        }
+        Dual { v: self.v.atan2(x.v), d }
     }
 }
 

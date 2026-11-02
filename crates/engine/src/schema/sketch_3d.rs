@@ -18,7 +18,7 @@ use solidcore_record::Vec3;
 use super::check::whole;
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
-use super::types::{Point3, SketchRef, present};
+use super::types::{Point3, PointExpr3, SketchRef, present};
 use crate::params;
 
 /// Draw 3D lines through world points, one line per segment, joined end to end. Needs 3D Sketch
@@ -114,10 +114,45 @@ fn move_required(schema: &mut Schema) {
     schema.insert("anyOf".into(), json!([{"required": ["to"]}, {"required": ["by"]}]));
 }
 
-/// The `points` of `sketch.line3d` and `sketch.spline3d`: a list of 2 to 500 points, as their
+/// What the 3D drawing commands say of a coordinate that is neither a number nor an expression.
+pub const POINT3_MUST: &str = "a 3D point's coordinates must be numbers or expressions over the design's parameters";
+
+/// A 3D point's three coordinates, from `[x, y, z]` or `{x, y, z}` (as `params::vec3` reads a
+/// point), each still as given: a number or an expression (#10608).
+pub fn point3_coordinates(v: &Value) -> Option<[&Value; 3]> {
+    match v {
+        Value::Array(a) if a.len() == 3 => Some([&a[0], &a[1], &a[2]]),
+        Value::Object(o) => Some([o.get("x")?, o.get("y")?, o.get("z")?]),
+        _ => None,
+    }
+}
+
+/// Whether a coordinate is one the 3D drawing commands take: a number in range (as
+/// `params::finite` takes it), or an expression (text of at most 4096 bytes, not blank). Whether
+/// the expression evaluates is the handler's to check: it has the design.
+fn coordinate(v: &Value) -> bool {
+    match v {
+        Value::Number(n) => n.as_f64().and_then(params::finite).is_some(),
+        Value::String(e) => !e.trim().is_empty() && e.len() <= 4096,
+        _ => false,
+    }
+}
+
+/// A 3D point whose coordinates are numbers or expressions, with the handler's messages: `shape`
+/// for something that is no point.
+fn expr_point(v: &Value, shape: &str) -> Result<[Value; 3], String> {
+    let c = point3_coordinates(v).ok_or_else(|| shape.to_string())?;
+    if !c.iter().all(|c| coordinate(c)) {
+        return Err(whole(POINT3_MUST));
+    }
+    Ok(c.map(Clone::clone))
+}
+
+/// The `points` of `sketch.line3d` and `sketch.spline3d`: a list of 2 to 500 points, each
+/// `[x, y, z]` or `{x, y, z}` with numbers or expressions over the design's parameters, as their
 /// `points` reader takes it, with its messages.
 #[derive(Clone, Debug, PartialEq)]
-pub struct DrawnPoints(pub Vec<Vec3>);
+pub struct DrawnPoints(pub Vec<[Value; 3]>);
 
 impl<'de> Deserialize<'de> for DrawnPoints {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -128,10 +163,7 @@ impl<'de> Deserialize<'de> for DrawnPoints {
         if a.len() < 2 || a.len() > max {
             return Err(D::Error::custom(whole(format!("`points` needs 2 to {max} points"))));
         }
-        a.iter()
-            .map(|v| params::vec3(v).ok_or_else(|| D::Error::custom(whole("a point must be [x, y, z]"))))
-            .collect::<Result<_, _>>()
-            .map(DrawnPoints)
+        a.iter().map(|v| expr_point(v, &whole("a point must be [x, y, z]")).map_err(D::Error::custom)).collect::<Result<_, _>>().map(DrawnPoints)
     }
 }
 
@@ -140,9 +172,9 @@ impl JsonSchema for DrawnPoints {
         "DrawnPoints".into()
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        let point = generator.subschema_for::<Point3>();
+        let point = generator.subschema_for::<PointExpr3>();
         json_schema!({
-            "description": "World points [x, y, z] in mm, 2 to 500.",
+            "description": "World points [x, y, z] in mm, 2 to 500, each coordinate a number or an expression over the design's parameters.",
             "type": "array",
             "items": point,
             "minItems": 2,
@@ -151,13 +183,14 @@ impl JsonSchema for DrawnPoints {
     }
 }
 
-/// The `point` of `sketch.point3d`: a [`Point3`], with the handler's message.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct WorldPoint(pub Vec3);
+/// The `point` of `sketch.point3d`: `[x, y, z]` or `{x, y, z}`, each coordinate a number or an
+/// expression over the design's parameters, with the handler's messages.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WorldPoint(pub [Value; 3]);
 
 impl<'de> Deserialize<'de> for WorldPoint {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        params::vec3(&Value::deserialize(d)?).map(WorldPoint).ok_or_else(|| D::Error::custom("must be a point [x, y, z]"))
+        expr_point(&Value::deserialize(d)?, "must be a point [x, y, z]").map(WorldPoint).map_err(D::Error::custom)
     }
 }
 
@@ -169,7 +202,7 @@ impl JsonSchema for WorldPoint {
         true
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        generator.subschema_for::<Point3>()
+        generator.subschema_for::<PointExpr3>()
     }
 }
 
@@ -253,7 +286,8 @@ impl JsonSchema for FitIndex {
 pub struct Curves3dResult {
     /// The ids of the curves drawn: one per segment for a line, one for a spline.
     pub curves: Vec<String>,
-    /// The Coincident constraints that join what was drawn to the drawn 3D ends it meets (#10608).
+    /// The constraints made (#10608): the Coincident joints to the drawn 3D ends it meets, and a Fix
+    /// that holds each point placed by expressions where they put it.
     pub constraints: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
@@ -267,7 +301,8 @@ pub struct Curves3dResult {
 pub struct Point3dResult {
     /// The id of the point drawn.
     pub point: String,
-    /// The Coincident constraints that join what was drawn to the drawn 3D ends it meets (#10608).
+    /// The constraints made (#10608): the Coincident joints to the drawn 3D ends it meets, and a Fix
+    /// that holds each point placed by expressions where they put it.
     pub constraints: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,

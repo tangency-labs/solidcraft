@@ -457,7 +457,25 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
         failing: ss.report.failing.clone(),
         // The 3D constraints' solve (#10608): its freedoms are in `dof`, its failures here.
         wires_solve: serde_json::to_value(&ss.report.wires).unwrap_or_default(),
-        wire_constraints: serde_json::to_value(&sk.wire_constraints).unwrap_or_default(),
+        // As the planar constraints are listed: a dimension's parameter expression, and an angle in
+        // degrees beside the stored radians.
+        wire_constraints: Value::Array(
+            sk.wire_constraints
+                .iter()
+                .map(|c| {
+                    let mut v = serde_json::to_value(c).unwrap_or_default();
+                    if let Some(o) = v.as_object_mut() {
+                        if let Some(p) = &c.param {
+                            o.insert("expression".into(), json!(s.doc.param(p).map(|x| x.expr.clone())));
+                        }
+                        if let (true, Some(value)) = (c.kind.is_angle(), c.kind.value()) {
+                            o.insert("degrees".into(), json!(value.to_degrees()));
+                        }
+                    }
+                    v
+                })
+                .collect(),
+        ),
         curves,
         points,
         constraints,
