@@ -973,7 +973,10 @@ fn main() -> eframe::Result {
         notes.push(device_lost::note(cpu_renderer, reason.as_deref()));
     }
     if safe_mode {
-        notes.push("Safe mode: default settings (yours are kept for the next normal start), no recovery offer, software rendering.".into());
+        notes.push(
+            "Safe mode: default settings (yours are kept for the next normal start), no recovery offer, software rendering, no AI agent connections."
+                .into(),
+        );
     }
     let fallback_note = std::env::var(startup::FALLBACK_NOTE_ENV).ok().map(|s| s.chars().take(4096).collect::<String>());
     if let Some(note) = &fallback_note {
@@ -1100,6 +1103,11 @@ fn main() -> eframe::Result {
             if let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(k))).filter(|_| !safe_mode) {
                 app.load_prefs(&p);
             }
+            // Safe mode opens no control channel (`startup::control_plan`, #10217); Preferences ›
+            // Assistant shows the switch off there rather than its default.
+            if safe_mode {
+                app.preferences.agent_control = false;
+            }
             if let Some(path) = &theme_file
                 && let Err(e) = solidcraft_ui_egui::prefs::follow_theme_file_for_run(&mut app, path)
             {
@@ -1156,8 +1164,8 @@ fn main() -> eframe::Result {
             }
             mark("viewport pipelines");
             // `--control`/the environment name a port; otherwise the preference (on by default)
-            // opens the default one (docs/control-protocol.md).
-            if let Some(listen_on) = solidcraft_engine::control_auth::plan(control_port, app.preferences.agent_control) {
+            // opens the default one (docs/control-protocol.md). Safe mode opens none.
+            if let Some(listen_on) = startup::control_plan(safe_mode, control_port, app.preferences.agent_control) {
                 let rx = control_server::start(listen_on, cc.egui_ctx.clone());
                 app = app.with_control(rx);
             }

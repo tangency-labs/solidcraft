@@ -7,7 +7,8 @@
 //! - **Launches that die before the window is up**: a marker file counts them; after two in a
 //!   row the next launch starts in safe mode by itself.
 //! - **Safe mode** (`--safe-mode` or `SOLIDCRAFT_SAFE_MODE=1`): default settings (the saved ones
-//!   are left untouched), no recovery offer, the software renderer and CPU meshing.
+//!   are left untouched), no recovery offer, the software renderer and CPU meshing, and no
+//!   control channel for AI agents.
 //! - **A renderer that cannot start**: on Windows, try the remaining graphics APIs in order,
 //!   then the software renderer (`SOLIDCRAFT_RENDERER=cpu`). An explicit `WGPU_BACKEND` fails
 //!   cleanly without switching. Exhausted retries show a message box with the error.
@@ -72,6 +73,15 @@ pub fn back_up(path: &Path) -> std::io::Result<PathBuf> {
 fn app_ron_reads(text: &str, prefs_keys: &[&str]) -> bool {
     let Ok(kv) = ron::from_str::<std::collections::HashMap<String, String>>(text) else { return false };
     prefs_keys.iter().filter_map(|k| kv.get(*k)).all(|p| serde_json::from_str::<serde_json::Value>(p).is_ok_and(|v| v.is_object()))
+}
+
+/// What the control channel listens on. Safe mode opens none, whatever the saved "Let AI agents
+/// connect" or an explicit port says: it is for troubleshooting, so agents don't connect then
+/// (#10217). Otherwise an explicit port wins over the preference ([`control_auth::plan`]).
+///
+/// [`control_auth::plan`]: solidcraft_engine::control_auth::plan
+pub fn control_plan(safe_mode: bool, explicit: Option<u16>, enabled: bool) -> Option<solidcraft_engine::control_auth::Listen> {
+    if safe_mode { None } else { solidcraft_engine::control_auth::plan(explicit, enabled) }
 }
 
 /// Check the settings files in `dir` before anything reads them: one that doesn't read is moved
@@ -546,6 +556,20 @@ mod tests {
             assert!(kept.iter().any(|e| std::fs::read(e.path()).unwrap() == text), "{name}: the bad file is kept");
         }
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// #10217: safe mode opens no control channel, not with the preference on (its default, since
+    /// safe mode reads no settings) and not with an explicit port; a normal launch is unchanged.
+    #[test]
+    fn safe_mode_opens_no_control_channel() {
+        use solidcraft_engine::control_auth::{Listen, plan};
+        for explicit in [None, Some(7777)] {
+            for enabled in [false, true] {
+                assert_eq!(control_plan(true, explicit, enabled), None, "safe mode, port {explicit:?}, preference {enabled}");
+                assert_eq!(control_plan(false, explicit, enabled), plan(explicit, enabled), "port {explicit:?}, preference {enabled}");
+            }
+        }
+        assert_eq!(control_plan(false, None, true), Some(Listen::Default));
     }
 
     #[test]

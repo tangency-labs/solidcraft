@@ -42,6 +42,7 @@ fixture and manager-run evidence commands are in [blur-behind.md](blur-behind.md
 | `solidcraft --control PORT`, or `SOLIDCRAFT_CONTROL_PORT=PORT` | exactly `127.0.0.1:PORT` (the flag wins over the variable), whatever the setting |
 | neither, and Preferences > Assistant > "Let AI agents connect (control channel / MCP)" on (the default) | the default port **27878**, or the next free one up to 27893 when it is taken (a second window, another program) |
 | neither, and the setting off | nothing |
+| safe mode (`--safe-mode`, `SOLIDCRAFT_SAFE_MODE=1`, or by itself after two failed launches) | nothing, whatever the flag, the variable or the setting say |
 
 The setting is read at start-up. Old preference files, which don't have it, load with it on. A
 launch with `--control` or the variable behaves as it always did (the start page stays hidden,
