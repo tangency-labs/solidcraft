@@ -660,14 +660,6 @@ fn untagged(mut b: Brep) -> Out<Brep> {
 pub(crate) const CURVATURE_SECTION: &str = "a curvature-continuous fillet on solidcore: the curvature section's equal-area Gⁿ \
 generator is not in solidcore yet (solidcore#2250, port in progress as #2260)";
 
-/// Why a variable round whose radius changes is refused ([`fillet_variable`]). The capi builds it
-/// as the union of its balls (fork 6b346f6, 5db8feb, fb5c060); solidcore's variable round takes
-/// the balls' great circles, a body every check passes but not that round, so it is not built in
-/// its place. The refusal comes off when the solidcore pin carries #2262 (on #2260) and its
-/// `fillet_gn_section_generator` flag is on.
-pub(crate) const VARIABLE_ROUND: &str = "a variable-radius fillet on solidcore: a round whose radius changes is the union of its \
-balls, which solidcore does not build yet (solidcore#2250, port in progress as #2262)";
-
 /// [`blend_holes`] without its holes.
 #[allow(clippy::too_many_arguments)] // the capi's blend_call
 pub(crate) fn blend(
@@ -1216,24 +1208,31 @@ pub(crate) fn fillet_variable(
     if law_pinches(degree, knots, radii) {
         return Err(Error::Unsupported);
     }
-    on_copy("smlib_fillet_variable", body, |k, w| {
+    on_copy("smlib_fillet_variable", body, |k, mut w| {
         let picked = match pick_edges(k, &w, &[point], tolerance)? {
             Ok((p, _)) => p,
             Err(m) => return Ok(Err(edge_miss(m))),
         };
         let [e] = picked[..] else { return Ok(Err(Error::NoMatch { point: 0 })) };
-        if law_along(k, &w, e, start, degree, knots, radii)?.is_none() {
+        let Some(law) = law_along(k, &w, e, start, degree, knots, radii)? else {
             return Ok(Err(Error::Status(INVALID_INPUT)));
-        }
+        };
         // A law with a corner splits the round's face there (`SplitFilletFacesAtRadiusCorners`,
         // fork 6eecf04), which solidcore does not have.
         if law_has_corner(degree, knots, radii) {
             return Ok(Err(Error::Unsupported));
         }
-        // The round is the union of its balls (smlib#78): each ball touches it along the circle
-        // shifted -r r'/|c'| from its great circle, which solidcore's variable round does not
-        // take yet: the great-circle round is not built in its place.
-        Ok(Err(Error::Unported(VARIABLE_ROUND)))
+        // The round is the union of its balls (smlib#78, solidcore#2262 with
+        // `fillet_gn_section_generator`): each ball touches it along the circle shifted
+        // -r r'/|c'| from its great circle. A law whose balls fold over one another is refused
+        // (`NoRoomReason::BallsFold`), [`Error::NoRoom`].
+        let solid_in = brep_p2::is_manifold_solid(&w)?;
+        let (r0, r1) = (radii.first().copied().unwrap_or(0.0), radii.last().copied().unwrap_or(0.0));
+        Ok(match blend_edges(k, &mut w, &[e], &[r0.max(r1)], Section::Round, Some(law), &[], None)? {
+            Ok(()) => finish(w, solid_in)?,
+            Err(Ok(_)) => Err(Error::Unsupported),
+            Err(Err(e)) => Err(e),
+        })
     })
 }
 

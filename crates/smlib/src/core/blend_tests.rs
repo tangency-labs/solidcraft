@@ -678,26 +678,31 @@ fn a_curvature_round_is_refused_until_solidcore_has_the_equal_area_section() {
     assert_eq!(blend(&b, Blend::Curvature, &[[90.0; 3]], &[2.0], TOL, &[], &[], Corners::Filled).err(), Some(Error::NoMatch { point: 0 }));
 }
 
-/// A variable round whose radius changes is refused on solidcore: the round is the union of its
-/// balls, and solidcore's takes their great circles (1 to 3 along 30 mm: 27.8982 off, not
-/// 27.8574), until its pin has that round (solidcore#2250). A constant round is untouched.
+/// A variable round is the union of its balls (solidcore#2262, `fillet_gn_section_generator`).
+/// Along the 30 mm top front edge: a law of one radius 2 takes the constant round's
+/// (1 - π/4) 4 · 30 = 25.752220; 1 to 3, the balls' union's 27.857434 (the great circles would take
+/// 27.898239), either way along the edge. Both come out 5.3e-5 of that over, as on the C++
+/// kernel: the solver's surface fit. A law whose radius climbs faster than a rolling ball can
+/// follow (1 to 4 within a mm) folds its balls over one another: refused, not built.
 #[test]
-fn a_variable_round_is_refused_until_solidcore_has_the_balls_union() {
+fn a_variable_round_is_the_union_of_its_balls() {
     let b = BLOCK.core();
-    let linear = fillet_variable(&b, TOP_FRONT, TOL, [0.0, 0.0, 10.0], 1, &[0.0, 0.0, 1.0, 1.0], &[1.0, 3.0]).err();
-    assert_eq!(linear, Some(Error::Unported(super::blend::VARIABLE_ROUND)));
-    assert!(linear.is_some_and(|e| e.to_string().contains("solidcore#2250")));
-    let cubic = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
-    let bulge = fillet_variable(&b, TOP_FRONT, TOL, [0.0, 0.0, 10.0], 3, &cubic, &[1.0, 2.0, 2.0, 1.0]).err();
-    assert_eq!(bulge, Some(Error::Unported(super::blend::VARIABLE_ROUND)));
-    // A law of one radius too: the variable round's own surface, not the constant round's.
-    let constant = fillet_variable(&b, TOP_FRONT, TOL, [0.0, 0.0, 10.0], 1, &[0.0, 0.0, 1.0, 1.0], &[2.0, 2.0]).err();
-    assert_eq!(constant, Some(Error::Unported(super::blend::VARIABLE_ROUND)));
+    let removed = |radii: &[f64], start: [f64; 3]| {
+        let r = fillet_variable(&b, TOP_FRONT, TOL, start, 1, &[0.0, 0.0, 1.0, 1.0], radii).unwrap();
+        let (rec, _) = native(&to_arrays(&r).unwrap()).unwrap();
+        rec.validate().unwrap();
+        ABC - volume(&r, 1e-8).unwrap()
+    };
+    let constant = removed(&[2.0, 2.0], [0.0, 0.0, 10.0]);
+    assert!(rel(constant, (1.0 - PI / 4.0) * 4.0 * 30.0) < 1e-4, "{constant}");
+    let linear = removed(&[1.0, 3.0], [0.0, 0.0, 10.0]);
+    assert!(rel(linear, 27.857434) < 1e-4, "{linear}");
+    assert!(rel(removed(&[1.0, 3.0], [30.0, 0.0, 10.0]), linear) < 1e-8);
+    let steep = [0.0, 0.0, 0.0, 0.0, 0.02, 0.04, 1.0, 1.0, 1.0, 1.0];
+    let folds = fillet_variable(&b, TOP_FRONT, TOL, [0.0, 0.0, 10.0], 3, &steep, &[1.0, 1.0, 4.0, 4.0, 4.0, 4.0]).err();
+    assert_eq!(folds, Some(Error::NoRoom));
     // A pick that misses is still named first.
     assert_eq!(fillet_variable(&b, [90.0; 3], TOL, [0.0; 3], 1, &[0.0, 0.0, 1.0, 1.0], &[1.0, 3.0]).err(), Some(Error::NoMatch { point: 0 }));
-    // A plain round is untouched.
-    let round = blend(&b, Blend::Round, &[TOP_FRONT], &[2.0], TOL, &[], &[], Corners::Filled).unwrap();
-    assert!((ABC - volume(&round, 1e-8).unwrap() - (1.0 - PI / 4.0) * 4.0 * 30.0).abs() < 1e-6);
 }
 
 /// The capi's argument checks, before any kernel call.

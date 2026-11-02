@@ -1,9 +1,14 @@
 use super::*;
 
-fn wedge() -> Body {
+/// A wedge 40 x 20, 15 high, its top front edge along x from 0 to 40.
+fn wedge_body() -> Body {
     use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
     let outer = Loop2::polygon(&[Vec2::new(0., 0.), Vec2::new(40., 0.), Vec2::new(0., 20.)]);
-    let body = crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 0., 15.).unwrap().pop().unwrap();
+    crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 0., 15.).unwrap().pop().unwrap()
+}
+
+fn wedge() -> Body {
+    let body = wedge_body();
     let at = Vec3::new(20., 0., 15.);
     // The room's taper, closing to zero at the wedge's tip, given as a spline fillet: R16 itself
     // is built over the wedge's cliffs (the blend-overflow decision), so a tapered fillet no
@@ -12,12 +17,14 @@ fn wedge() -> Body {
     fillet_variable_spline(&body, at, t.start, &t.spline).unwrap()
 }
 
-/// The wedge's variable round: V 5223.0386, on whichever kernel the test runs (the fork's variable
-/// round follows the fillet between its traced points, 4438859, and solidcore's with it).
+/// The wedge's variable round takes off the union of its balls (smlib#78, solidcore#2262):
+/// `removed_by_balls` along the 40 mm edge, about 754.28, on whichever kernel the test runs.
 #[test]
 fn the_wedge_round_keeps_its_volume() {
     let v = crate::measure(&wedge()).unwrap().volume;
-    assert!((v - 5223.0386).abs() < 1e-3, "{v}");
+    let law = taper(&wedge_body(), Vec3::new(20., 0., 15.), 16.).unwrap().spline;
+    let want = 6000.0 - super::tests::removed_by_balls(40.0, &|u| law.eval(u), &|_, _| f64::INFINITY, &[]);
+    assert!(((v - want) / want).abs() < 1e-4, "{v} vs {want}");
 }
 
 /// The display mesh of a fillet tapering to zero at a wedge's tip converges to the B-rep: each
