@@ -44,12 +44,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("save")
         .key("Ctrl+S")
         .noundo()
-        .params("path? (default: current file); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused)"),
+        .params("path? (default: current file; a name that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused)"),
     CommandSpec::new("file.save_as", "Save As", save_as)
         .icon("save")
         .key("Ctrl+Shift+S")
         .noundo()
-        .params("path; format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (as file.save, when `path` is the design's own file)"),
+        .params("path (a design file name, .sc as a rule; one that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (as file.save, when `path` is the design's own file)"),
     CommandSpec::new("doc.recovery_list", "Recoverable Designs", recovery_list).icon("restore")
         .noundo()
         .params("dir? (default: the recovery folder) → designs autosaved by apps that crashed or closed with unsaved changes"),
@@ -472,8 +472,38 @@ fn rename_design(s: &mut Session, from: &str, to: &str) {
     }
 }
 
-fn write(s: &mut Session, path: &str, format: &str, compression: &str, preview: bool, cache: bool, overwrite: bool) -> Result<Value> {
+/// The kind of file `doc.open` reads `path` as when that is not a design, by its extension. A
+/// design saved under such a name would not open again as the design (#9745).
+fn other_file_kind(path: &str) -> Option<&'static str> {
+    if solidcraft_io::is_step_path(path) {
+        Some("a STEP or other CAD exchange file")
+    } else if solidcraft_io::is_mesh_path(path) {
+        Some("a mesh")
+    } else if super::drawing_import_command(path).is_some() {
+        Some("a 2D drawing")
+    } else if solidcraft_io::is_point_cloud_path(path) {
+        Some("a point cloud")
+    } else if solidcraft_io::is_drawing_path(path) {
+        Some("a SolidCraft drawing")
+    } else {
+        None
+    }
+}
+
+/// Refuse to save a design under a name [`other_file_kind`] opens as another kind of file,
+/// pointing to `file.export` when that writes the format.
+fn check_design_name(cmd: &str, path: &str) -> Result<()> {
+    let Some(kind) = other_file_kind(path) else { return Ok(()) };
+    let ext = std::path::Path::new(path).extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_default();
+    let export = if solidcraft_io::Format::from_name(&ext).is_ok() { format!(", or write a .{ext} file with file.export") } else { String::new() };
+    Err(bad(cmd, format!("{path}: a .{ext} file opens as {kind}, not as a design; save the design as .{}{export}", solidcraft_io::DESIGN_EXT)))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write(s: &mut Session, cmd: &str, path: &str, format: &str, compression: &str, preview: bool, cache: bool, overwrite: bool) -> Result<Value> {
+    // A path outside the agent's folders says so first, whatever its name.
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
+    check_design_name(cmd, path)?;
     if s.path.as_deref() == Some(path) {
         if s.read_only {
             return Err(EngineError::Other(format!("{path}: the design was opened read-only; save it to another file with file.save_as")));
@@ -662,6 +692,7 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
     };
     write(
         s,
+        "file.save",
         &path,
         str_(p, "format").unwrap_or(default_design_format(&path)),
         str_(p, "compression").unwrap_or("fast"),
@@ -679,6 +710,7 @@ fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
     let path = path_arg(p, "file.save_as")?.to_string();
     write(
         s,
+        "file.save_as",
         &path,
         str_(p, "format").unwrap_or(default_design_format(&path)),
         str_(p, "compression").unwrap_or("fast"),
@@ -1886,6 +1918,36 @@ mod tests {
         let mut failed = Session::default();
         assert!(failed.execute("file.save_as", &json!({"path":dir.join("missing-dir").join("plate.solidcraft")})).is_err());
         assert_eq!(failed.doc.name, "Untitled");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_design_is_not_saved_under_a_name_that_opens_as_another_file() {
+        // #9745: a design saved as `part.step` or `part.stl` was refused or opened as a broken mesh.
+        let dir = name_dir("other-kind");
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+        for name in
+            ["part.step", "part.STP", "part.igs", "part.stl", "part.obj", "part.3mf", "part.glb", "part.dxf", "part.svg", "part.ply", "part.scdwg"]
+        {
+            let path = dir.join(name);
+            for command in ["file.save_as", "file.save"] {
+                let e = s.execute(command, &json!({"path":path})).unwrap_err().to_string();
+                assert!(e.contains("not as a design") && e.contains(".sc"), "{command} {name}: {e}");
+                assert!(!path.exists(), "{command} {name} wrote the file");
+            }
+        }
+        let e = s.execute("file.save_as", &json!({"path":dir.join("part.stl")})).unwrap_err().to_string();
+        assert!(e.contains("file.export"), "STL is an export format: {e}");
+        assert!(s.path.is_none() && s.is_dirty(), "a refused save changes nothing");
+        // Names that open again as the design still save, and what they write opens as it.
+        for name in ["part.sc", "part.json", "part.txt", "part"] {
+            let path = dir.join(name);
+            s.execute("file.save_as", &json!({"path":path})).unwrap();
+            let mut reopened = Session::default();
+            reopened.execute("doc.open", &json!({"path":path})).unwrap();
+            assert_eq!(reopened.doc.features.len(), 1, "{name} reopens as the design");
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
 
