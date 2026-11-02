@@ -1303,6 +1303,33 @@ fn reparent_keeps_the_world_position_and_follows_paths() {
 
 /// A component can't go inside itself or what it holds. Out of a parent placed more than once it
 /// moves from the placement named, keeping that one's place in the world.
+/// #11063: a part with a hole cut from a sketch on its disc's top face moves into another
+/// component. The sketch's face attachment was found through the part's old placement path,
+/// which no longer starts at the design once the part is inside the other component, and the
+/// move was refused ("would break Sketch2"). The attachment follows the move, and the hole stays.
+#[test]
+fn reparent_carries_a_sketch_on_a_face_inside_the_moved_part() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Component1", "activate": false}));
+    run(&mut s, "component.create", json!({"name": "Component2"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Sketch1"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Sketch1", "distance": 3, "operation": "new"}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [0, 5, 3]}, "name": "Sketch2"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Sketch2", "distance": -3, "operation": "cut"}));
+    let volume = |s: &Session| s.world_state().bodies.iter().map(|b| b.mesh().measure().volume.abs()).sum::<f64>();
+    let before = volume(&s);
+    let r = run(&mut s, "occurrence.reparent", json!({"occurrence": "Component2:1", "parent": "Component1"}));
+    assert_eq!(r["path"].as_array().map(Vec::len), Some(2), "{r}");
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "every feature still builds");
+    assert!((volume(&s) - before).abs() < 1e-6, "the disc keeps its hole: {} vs {before}", volume(&s));
+    let reopened = Session::new(crate::doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(reopened.model.results.iter().all(|r| r.error.is_none()), "and after reopening");
+}
+
 #[test]
 fn reparent_refuses_cycles_and_moves_out_of_a_named_instance() {
     let mut s = Session::default();
