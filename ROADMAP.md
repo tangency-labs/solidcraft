@@ -489,6 +489,22 @@ completed drawings publish atomically. The browser still exports synchronously.
   connected equal-distance chamfers also trim each other across unequal sloped rim walls;
   curved chamfer chains with straight planar ends can terminate across two existing planar
   bevel faces, splitting their shared seam; picks on the same tangent chain are applied once (#1303);
+  curved fillet chains with straight planar ends likewise end across two planar end faces: across
+  the seam between two end bevels, or meeting the seam's line past the vertex where it lies in a
+  side's plane (the foot of a wall whose end is flush with the plate's slanted side, concave; a
+  plate's top edge running into a wall standing on it, convex); where both meet at the wall's end
+  (the foot's cove and the plate edge's round, in either order, in one fillet or with a radius
+  per edge), they merge in a ruled S-shaped band between the two rounds, exact rational, G1 to
+  both, that keeps the wall's end and the plate's side beneath it; it needs a short straight run
+  before the end (refused with the length it needs), the wall's end and the plate's side as two
+  faces, and a plate corner away from 81-99 degrees for the edge round first;
+  the wall's upright corner at such an end (one line with the plate's corner beneath, the two
+  edges' chains stopping where they meet) ends in the plate's top, which takes its end and keeps
+  the wall's end down to the plate; the plate's corner follows with it or after it, leaving a ledge
+  of the top between them (alone it is refused: the wall's corner would overhang it); at its top
+  it ends in earlier rounds of its radius, fitted ones too, along their crease where one top edge
+  is round and in a piece of the ball in place of their mitre where both are; with the foot's
+  cove or the plate edge's round at that end it is not supported yet;
   whole smooth loops of a planar face, picked whole or by one edge (tangent
   chain), including circles and walls at any angle (boss bases and tops, bores, pocket floors,
   plate outlines), loops with sharp corners between straight or mixed arc/line edges (straight

@@ -246,83 +246,273 @@ fn section_fits(fit: &Fit, section: &Section, along: f64, round: bool, sigma: f6
 /// there and the end curve from contact 1 to contact 2 (fitted through points where the
 /// strip's cross-section curves meet the face's surface, and checked against both).
 fn end_cap(fit: &Fit, g: &mt::Face, at: &Section, seams: [Option<&mt::Edge>; 2], round: bool, tolerance: f64) -> Result<(f64, f64, mt::Curve)> {
-    use mt::{ParametricCurve, ParametricSurface, SearchNearestParameter};
+    use mt::{ParametricSurface, SearchNearestParameter};
     let fail = || unsupported("the blend's end on its end face");
     let (surf, gs) = (&fit.surface, g.surface());
     let mid = if round { at.c + ((at.q1 - at.c) + (at.q2 - at.c)).normalized().ok_or_else(fail)? * at.c.dist(at.q1) } else { (at.q1 + at.q2) * 0.5 };
     let (_, v_start) = surf.search_nearest_parameter(p3(mid), None, 100).ok_or_else(fail)?;
-    // S(u, v) = G(a, b) for v, a, b by Newton from v.
-    let meet = |u: f64, v: f64| -> Option<f64> {
-        let mut v = v;
-        let (mut a, mut b) = gs.search_nearest_parameter(surf.subs(u, v), None, 100)?;
-        for _ in 0..60 {
-            let f = from_p3(surf.subs(u, v)) - from_p3(gs.subs(a, b));
-            if !f.is_finite() {
-                return None;
-            }
-            if f.len() <= tolerance * 1e-3 {
-                return (-1e-9..=1.0 + 1e-9).contains(&v).then_some(v.clamp(0.0, 1.0));
-            }
-            let (sv, ga, gb) = (surf.vder(u, v), gs.uder(a, b), gs.vder(a, b));
-            let m = [[sv.x, -ga.x, -gb.x], [sv.y, -ga.y, -gb.y], [sv.z, -ga.z, -gb.z]];
-            let [dv, da, db] = crate::polyhedron::solve3_pub(m, [-f.x, -f.y, -f.z])?;
-            // Keep each step within the strip's parameters.
-            let k = if dv.abs() > 0.1 { 0.1 / dv.abs() } else { 1.0 };
-            v += dv * k;
-            a += da * k;
-            b += db * k;
-        }
-        None
-    };
     for m in [16usize, 32, 64] {
-        let mut pts = Vec::with_capacity(m + 1);
-        let mut vs = Vec::with_capacity(m + 1);
-        // From the middle out to both contacts, each search starting where the last ended.
+        // From the middle out to both contacts.
         let half = m / 2;
-        let mid_v = meet(0.5_f64.min(half as f64 / m as f64), v_start).ok_or_else(fail)?;
-        let mut found = vec![None; m + 1];
-        if let Some(slot) = found.get_mut(half) {
-            *slot = Some(mid_v);
-        }
-        let mut last = mid_v;
-        for i in (0..half).rev() {
-            last = meet(i as f64 / m as f64, last).ok_or_else(fail)?;
-            if let Some(slot) = found.get_mut(i) {
-                *slot = Some(last);
-            }
-        }
-        last = mid_v;
-        for i in half + 1..=m {
-            last = meet(i as f64 / m as f64, last).ok_or_else(fail)?;
-            if let Some(slot) = found.get_mut(i) {
-                *slot = Some(last);
-            }
-        }
-        for (i, v) in found.iter().enumerate() {
-            let v = v.ok_or_else(fail)?;
-            vs.push(v);
-            pts.push(from_p3(surf.subs(i as f64 / m as f64, v)));
-        }
+        let u_mid = half as f64 / m as f64;
+        let v_mid = meet_surface(surf, &gs, u_mid, v_start, tolerance).ok_or_else(fail)?;
+        let to_1 = march(surf, &gs, (u_mid, v_mid), 0.0, half, tolerance).ok_or_else(fail)?;
+        let to_2 = march(surf, &gs, (u_mid, v_mid), 1.0, m - half, tolerance).ok_or_else(fail)?;
+        let uv: Vec<(f64, f64)> = to_1.iter().rev().chain(to_2.iter().skip(1)).copied().collect();
+        let mut pts: Vec<Vec3> = uv.iter().map(|(u, v)| from_p3(surf.subs(*u, *v))).collect();
         snap_to_seams(&mut pts, seams, tolerance);
-        let bs = crate::build::interpolate_cubic(&pts).ok_or_else(fail)?;
-        let fits = (0..m).all(|i| {
-            let q = p3(from_p3(bs.subs((i as f64 + 0.5) / m as f64)));
-            let hint = vs.get(i).map(|v| ((i as f64 + 0.5) / m as f64, *v));
-            let on_g = gs.search_nearest_parameter(q, None, 100).is_some_and(|(a, b)| from_p3(gs.subs(a, b)).dist(from_p3(q)) <= tolerance);
-            let on_s = surf.search_nearest_parameter(q, hint, 100).is_some_and(|(u, v)| from_p3(surf.subs(u, v)).dist(from_p3(q)) <= tolerance);
-            on_g && on_s
-        });
-        if fits {
-            let (Some(t1), Some(t2)) = (vs.first(), vs.last()) else { return Err(fail()) };
+        if let Some(bs) = fit_on_both(surf, &gs, &pts, &uv, tolerance) {
+            let (Some(t1), Some(t2)) = (uv.first().map(|x| x.1), uv.last().map(|x| x.1)) else { return Err(fail()) };
             // Both contacts are cut there: strictly inside the strip's own part.
             let inside = |t: f64| t > fit.range.0 + 1e-6 && t < fit.range.1 - 1e-6;
-            if !(inside(*t1) && inside(*t2)) {
+            if !(inside(t1) && inside(t2)) {
                 return Err(too_large("the blend is larger than the neighbouring faces (site 309)"));
             }
-            return Ok((*t1, *t2, mt::Curve::BSplineCurve(bs)));
+            return Ok((t1, t2, mt::Curve::BSplineCurve(bs)));
         }
     }
     Err(fail())
+}
+
+/// Where the strip's curve along it at `u` meets the surface `gs`: its `v` there, by Newton from
+/// `v` (S(u, v) = G(a, b) for v, a, b).
+fn meet_surface(surf: &mt::Surface, gs: &mt::Surface, u: f64, v: f64, tolerance: f64) -> Option<f64> {
+    use mt::{ParametricSurface, SearchNearestParameter};
+    let mut v = v;
+    let (mut a, mut b) = gs.search_nearest_parameter(surf.subs(u, v), None, 100)?;
+    for _ in 0..60 {
+        let f = from_p3(surf.subs(u, v)) - from_p3(gs.subs(a, b));
+        if !f.is_finite() {
+            return None;
+        }
+        if f.len() <= tolerance * 1e-3 {
+            return (-1e-9..=1.0 + 1e-9).contains(&v).then_some(v.clamp(0.0, 1.0));
+        }
+        let (sv, ga, gb) = (surf.vder(u, v), gs.uder(a, b), gs.vder(a, b));
+        let m = [[sv.x, -ga.x, -gb.x], [sv.y, -ga.y, -gb.y], [sv.z, -ga.z, -gb.z]];
+        let [dv, da, db] = crate::polyhedron::solve3_pub(m, [-f.x, -f.y, -f.z])?;
+        // Keep each step within the strip's parameters.
+        let k = if dv.abs() > 0.1 { 0.1 / dv.abs() } else { 1.0 };
+        v += dv * k;
+        a += da * k;
+        b += db * k;
+    }
+    None
+}
+
+/// The strip's curves along it from `u0` (whose `v0` already meets the surface `gs`) to `u1`, in
+/// `steps` steps, each where it meets `gs`: `(u, v)` at each, every search starting where the
+/// last ended.
+fn march(surf: &mt::Surface, gs: &mt::Surface, (u0, v0): (f64, f64), u1: f64, steps: usize, tolerance: f64) -> Option<Vec<(f64, f64)>> {
+    let mut out = Vec::with_capacity(steps + 1);
+    out.push((u0, v0));
+    let mut last = v0;
+    for i in 1..=steps {
+        let u = u0 + (u1 - u0) * i as f64 / steps as f64;
+        last = meet_surface(surf, gs, u, last, tolerance)?;
+        out.push((u, last));
+    }
+    Some(out)
+}
+
+/// The cubic through `pts` (the strip's points at `uv`, where they meet the surface `gs`), if it
+/// keeps within `tolerance` of both the strip and `gs` halfway between them.
+fn fit_on_both(surf: &mt::Surface, gs: &mt::Surface, pts: &[Vec3], uv: &[(f64, f64)], tolerance: f64) -> Option<mt::BSplineCurve<mt::Point3>> {
+    use mt::{ParametricCurve, ParametricSurface, SearchNearestParameter};
+    let bs = crate::build::interpolate_cubic(pts)?;
+    let m = pts.len().checked_sub(1)?;
+    let fits = (0..m).all(|i| {
+        let q = bs.subs((i as f64 + 0.5) / m as f64);
+        let hint = uv.get(i).zip(uv.get(i + 1)).map(|(a, b)| ((a.0 + b.0) * 0.5, (a.1 + b.1) * 0.5));
+        let on_g = gs.search_nearest_parameter(q, None, 100).is_some_and(|(a, b)| from_p3(gs.subs(a, b)).dist(from_p3(q)) <= tolerance);
+        let on_s = surf.search_nearest_parameter(q, hint, 100).is_some_and(|(a, b)| from_p3(surf.subs(a, b)).dist(from_p3(q)) <= tolerance);
+        on_g && on_s
+    });
+    fits.then_some(bs)
+}
+
+/// A round's end across two end faces: on the first from contact 1 to the crossing, on the second
+/// from the crossing to contact 2 (none where the crossing is that contact).
+type RoundEnds = (Option<mt::Curve>, Option<mt::Curve>);
+
+/// A round run on past a chain end that two planar end faces close (`ga` reached by contact 1,
+/// `gb` by contact 2, meeting in a straight seam through the end vertex `p` along `w`): where the
+/// round crosses the seam's line, and its end on each face.
+struct SplitRound {
+    /// The contacts' parameters where they are cut.
+    t1: f64,
+    t2: f64,
+    /// Where the round crosses the seam's line, as a fraction of `w` from `p` (in (0, 1) where
+    /// the seam is shortened, below 0 where it runs on past the vertex).
+    fraction: f64,
+    /// The crossing, on the round.
+    crossing: Vec3,
+    /// The end on `ga` from contact 1 to the crossing, and on `gb` from the crossing to contact
+    /// 2. None where the crossing is that contact itself (the seam's line runs on along that
+    /// side's own edge with the end face: a wall's end flush with the face beneath it).
+    on_a: Option<mt::Curve>,
+    on_b: Option<mt::Curve>,
+}
+
+/// Where the line through `p` along `w` crosses the round `surf` within its own part: `(u, v, λ)`
+/// with S(u, v) = p + w λ. First on the circle of the section `at` (exact for a straight edge
+/// between planes), then on the fitted surface by Newton. A crossing within a hair of a contact
+/// is that contact, where the line passes it within `tolerance`.
+fn crossing_on_round(surf: &mt::Surface, at: &Section, (p, t, w): (Vec3, Vec3, Vec3), tolerance: f64) -> Option<(f64, f64, f64)> {
+    use mt::{ParametricSurface, SearchNearestParameter};
+    // |perp(p + w λ - c)| = r, a point of the arc from q1 to q2.
+    let perp = |x: Vec3| x - t * x.dot(t);
+    let r = at.c.dist(at.q1);
+    let (d0, dw) = (perp(p - at.c), perp(w));
+    let (qa, qb, qc) = (dw.dot(dw), 2.0 * d0.dot(dw), d0.dot(d0) - r * r);
+    let disc = qb * qb - 4.0 * qa * qc;
+    if !(qa > 1e-300 && disc >= 0.0 && r > 0.0) {
+        return None;
+    }
+    let (a1, a2) = (perp(at.q1 - at.c), perp(at.q2 - at.c));
+    let angle = |x: Vec3, y: Vec3| (x.dot(y) / (x.len() * y.len()).max(1e-300)).clamp(-1.0, 1.0).acos();
+    let span = angle(a1, a2);
+    let guess = [(-qb - disc.sqrt()) / (2.0 * qa), (-qb + disc.sqrt()) / (2.0 * qa)]
+        .into_iter()
+        .map(|l| (l, perp(p + w * l - at.c)))
+        .map(|(l, y)| (l, angle(a1, y) + angle(y, a2) - span))
+        .filter(|(_, off)| *off <= 1e-6)
+        .min_by(|x, y| x.1.total_cmp(&y.1))
+        .map(|(l, _)| l)?;
+    let (mut u, mut v) = surf.search_nearest_parameter(p3(p + w * guess), None, 100)?;
+    let mut lambda = guess;
+    let mut found = false;
+    for _ in 0..60 {
+        let f = from_p3(surf.subs(u, v)) - (p + w * lambda);
+        if !f.is_finite() {
+            return None;
+        }
+        if f.len() <= tolerance * 1e-3 {
+            found = true;
+            break;
+        }
+        let (su, sv) = (surf.uder(u, v), surf.vder(u, v));
+        let m = [[su.x, sv.x, -w.x], [su.y, sv.y, -w.y], [su.z, sv.z, -w.z]];
+        let [du, dv, dl] = crate::polyhedron::solve3_pub(m, [-f.x, -f.y, -f.z])?;
+        let k = if du.abs().max(dv.abs()) > 0.1 { 0.1 / du.abs().max(dv.abs()) } else { 1.0 };
+        u += du * k;
+        v += dv * k;
+        lambda += dl * k;
+    }
+    let edge = (tolerance * 10.0 / (r * span).max(1e-300)).min(1e-3);
+    if !found || !(-edge..=1.0 + edge).contains(&u) || !(-1e-9..=1.0 + 1e-9).contains(&v) {
+        return None;
+    }
+    // Near a contact: on it, if the line passes it closely enough; else where it crossed.
+    let snapped = [(0.0, u < edge), (1.0, u > 1.0 - edge)].into_iter().find(|x| x.1).map(|x| x.0);
+    Some(snapped.and_then(|at_u| crossing_on_contact(surf, at_u, v, (p, w), tolerance)).unwrap_or((u.clamp(0.0, 1.0), v.clamp(0.0, 1.0), lambda)))
+}
+
+/// Where the line through `p` along `w`, lying in (or within `tolerance` of) the plane of the side
+/// whose contact runs at `u` (0 or 1), meets that contact: `(u, v, λ)` with S(u, v) nearest
+/// p + w λ, by Gauss-Newton on `v` and `λ` from `v0`, if they come within `tolerance`.
+fn crossing_on_contact(surf: &mt::Surface, u: f64, v0: f64, (p, w): (Vec3, Vec3), tolerance: f64) -> Option<(f64, f64, f64)> {
+    use mt::ParametricSurface;
+    let w2 = w.len2();
+    if !(w2 > 1e-300) {
+        return None;
+    }
+    let mut v = v0;
+    let mut lambda = (from_p3(surf.subs(u, v)) - p).dot(w) / w2;
+    for _ in 0..60 {
+        let f = from_p3(surf.subs(u, v)) - (p + w * lambda);
+        if !f.is_finite() {
+            return None;
+        }
+        if f.len() <= tolerance * 1e-3 {
+            break;
+        }
+        let sv = surf.vder(u, v);
+        let a = Vec3::new(sv.x, sv.y, sv.z);
+        let (aa, ab, bb) = (a.dot(a), -a.dot(w), w2);
+        let det = aa * bb - ab * ab;
+        if !(det.abs() > 1e-300) {
+            return None;
+        }
+        let (ra, rb) = (-a.dot(f), w.dot(f));
+        let dv = (ra * bb - rb * ab) / det;
+        let dl = (aa * rb - ab * ra) / det;
+        let k = if dv.abs() > 0.1 { 0.1 / dv.abs() } else { 1.0 };
+        v += dv * k;
+        lambda += dl * k;
+        // Settled: the line misses the contact by what is left.
+        if (dv * k).abs() <= 1e-14 && (dl * k).abs() * w2.sqrt() <= tolerance * 1e-6 {
+            break;
+        }
+    }
+    let miss = (from_p3(surf.subs(u, v)) - (p + w * lambda)).len();
+    (miss <= tolerance && (-1e-9..=1.0 + 1e-9).contains(&v)).then_some((u, v.clamp(0.0, 1.0), lambda))
+}
+
+/// [`SplitRound`] for the round `fit`, whose section at the end vertex is `at` (centre on the
+/// strip's axis along `t` there). The crossing is found on the section's circle and then on the
+/// fitted surface itself; each end is fitted through points where the strip's curves along it
+/// meet that face, and checked against both.
+fn split_round_cap(
+    fit: &Fit,
+    (ga, gb): (&mt::Face, &mt::Face),
+    at: &Section,
+    (p, t, w): (Vec3, Vec3, Vec3),
+    seams: [Option<&mt::Edge>; 2],
+    tolerance: f64,
+) -> Result<SplitRound> {
+    use mt::{ParametricSurface, SearchNearestParameter};
+    let fail = || unsupported("the round does not cross the edge between the end faces");
+    let surf = &fit.surface;
+    let along = w.normalized().ok_or_else(fail)?;
+    // A seam whose line lies in a side's plane (that side runs on into the end face along it: a
+    // plate's slanted side under a wall's end flush with it) touches the round at that side's
+    // contact instead of crossing it there: within `tolerance` of the plane as far as the round
+    // reaches from the vertex.
+    let reach = at.c.dist(p) + at.c.dist(at.q1);
+    let in_side = [(0.0, at.q1), (1.0, at.q2)]
+        .into_iter()
+        .find(|(_, q)| (*q - at.c).normalized().is_some_and(|n| n.dot(along).abs() * reach <= tolerance))
+        .and_then(|(u, q)| surf.search_nearest_parameter(p3(q), None, 100).and_then(|(_, v)| crossing_on_contact(surf, u, v, (p, w), tolerance)));
+    let (u, v, lambda) = match in_side {
+        Some(found) => found,
+        None => crossing_on_round(surf, at, (p, t, w), tolerance).ok_or_else(fail)?,
+    };
+    let crossing = from_p3(surf.subs(u, v));
+    // One end, between the crossing at `u` and the contact at `to` (0 or 1) on face `g`, from
+    // contact 1's side to contact 2's: the curve and its `v` at the contact.
+    let piece = |g: &mt::Face, to: f64, seam: Option<&mt::Edge>| -> Result<Option<(mt::Curve, f64)>> {
+        if (u - to).abs() < 1e-12 {
+            return Ok(None);
+        }
+        let gs = g.surface();
+        for m in [16usize, 32, 64] {
+            // From the crossing out to the contact.
+            let mut uv = march(surf, &gs, (u, v), to, m, tolerance).ok_or_else(fail)?;
+            let mut pts: Vec<Vec3> = uv.iter().map(|(a, b)| from_p3(surf.subs(*a, *b))).collect();
+            let at_contact = uv.last().map(|x| x.1).ok_or_else(fail)?;
+            if to == 0.0 {
+                pts.reverse();
+                uv.reverse();
+                snap_to_seams(&mut pts, [seam, None], tolerance);
+            } else {
+                snap_to_seams(&mut pts, [None, seam], tolerance);
+            }
+            if let Some(bs) = fit_on_both(surf, &gs, &pts, &uv, tolerance) {
+                return Ok(Some((mt::Curve::BSplineCurve(bs), at_contact)));
+            }
+        }
+        Err(fail())
+    };
+    let a = piece(ga, 0.0, seams[0])?;
+    let b = piece(gb, 1.0, seams[1])?;
+    let (t1, t2) = (a.as_ref().map_or(v, |x| x.1), b.as_ref().map_or(v, |x| x.1));
+    // Both contacts are cut there: strictly inside the strip's own part.
+    let inside = |t: f64| t > fit.range.0 + 1e-6 && t < fit.range.1 - 1e-6;
+    if !(inside(t1) && inside(t2)) {
+        return Err(too_large("the blend is larger than the neighbouring faces (split round end)"));
+    }
+    Ok(SplitRound { t1, t2, fraction: lambda, crossing, on_a: a.map(|x| x.0), on_b: b.map(|x| x.0) })
 }
 
 /// The ends of an end curve (contact 1 to contact 2) that land within `tolerance` of an end of
@@ -1058,6 +1248,133 @@ fn law_beyond(law: &RadiusSpline, s: f64) -> Option<f64> {
     (r.is_finite() && r > 0.0).then_some(r)
 }
 
+/// A chain end where the round merges with an earlier round of the other kind
+/// ([`crate::merge_corner`]): the strip runs on to the section through `L` and ends on `Γ_X`, the
+/// earlier round `g` ends on `Γ_g`, and the band `R` between them closes the corner.
+struct MergeEnd {
+    /// The chain's vertex, its edge there and the earlier round's face.
+    k: usize,
+    ke: usize,
+    g: usize,
+    /// The side (1 or 2) that is `T`.
+    top: u8,
+    zone: crate::merge_corner::Zone,
+    end: crate::merge_corner::MixedEnd,
+}
+
+impl MergeEnd {
+    /// Whether the later round (this chain's) adds material: it is `A`, the earlier `B`.
+    fn later_adds(&self) -> bool {
+        !self.end.earlier_adds
+    }
+
+    /// Where the later round's contact with the face beside the chain meets `L`.
+    fn q_x(&self) -> Vec3 {
+        if self.later_adds() { self.zone.q_w } else { self.zone.q_s }
+    }
+
+    /// The later round's edge with the band at `t` (`P*` at 0, `q_X` at 1).
+    fn gamma_x(&self, t: f64) -> Vec3 {
+        if self.later_adds() { self.zone.gamma_a(t) } else { self.zone.gamma_b(t) }
+    }
+}
+
+/// The merge at the end `k` of the chain (end face `fi`, tangent to the chain's side `side`), if
+/// the end face is an earlier round of the other kind ending flush with a wall's end, planned or
+/// refused where the corner does not fit. `end_faces`: the faces the chain ends on, by vertex
+/// (the first reached by side 1's contact); `tols`: the chain's tolerance and the fit's.
+#[allow(clippy::too_many_arguments)]
+fn merge_end(
+    faces: &[mt::Face],
+    (side1, side2): (&[usize], &[usize]),
+    chain: &[mt::Edge],
+    verts: &[mt::Vertex],
+    end_faces: &[(usize, usize)],
+    (k, fi, side): (usize, usize, u8),
+    convex: bool,
+    fixed: Option<f64>,
+    (tol, fit_tolerance): (f64, f64),
+) -> Result<Option<MergeEnd>> {
+    let ke = if k == 0 { 0 } else { chain.len().saturating_sub(1) };
+    let (top, other) = if side == 1 { (side1.get(ke), side2.get(ke)) } else { (side2.get(ke), side1.get(ke)) };
+    let (Some(t), Some(x), Some(v), Some(g), Some(terminal)) =
+        (top.and_then(|i| faces.get(*i)), other.and_then(|i| faces.get(*i)), verts.get(k), faces.get(fi), chain.get(ke))
+    else {
+        return Ok(None);
+    };
+    let found = crate::guard("curve blend end", || Ok(crate::merge_corner::mixed_end(faces, v, t, x, g, fit_tolerance))).ok().flatten();
+    let Some(end) = found.filter(|m| m.earlier_adds == convex) else { return Ok(None) };
+    let refuse = |why: &str| KernelError::TooLarge(format!("{}: {why}", crate::blend::MIXED_END));
+    let r = fixed.ok_or_else(|| refuse("not with a chord width or a radius law"))?;
+    let p = from_p3(v.point());
+    // The chain runs straight back from its end as far as its last edge is straight; its contact
+    // with `T` as far as the plane the chain ends on there, if it ends there on a plane (on into
+    // the next edge, the contact's straight run ends square to the edge, as the edge's does).
+    let far = if terminal.front() == v { terminal.back() } else { terminal.front() };
+    let is_straight = straight(terminal, tol * 10.0);
+    let reach = if is_straight { from_p3(far.point()) } else { p };
+    let kf = if k == 0 { 1 } else { k.saturating_sub(1) };
+    let ends: Vec<usize> = end_faces.iter().filter(|(kk, _)| *kk == kf).map(|(_, f)| *f).collect();
+    let on = match ends[..] {
+        [one] => Some(one),
+        [first, second] => Some(if side == 1 { first } else { second }),
+        _ => None,
+    };
+    let end_plane = on.filter(|_| is_straight).and_then(|i| faces.get(i)).and_then(crate::blend::plane_normal).map(|n| (from_p3(far.point()), n));
+    let zone = end.plan(p, r, crate::merge_corner::Run { reach, end: end_plane })?;
+    Ok(Some(MergeEnd { k, ke, g: fi, top: side, zone, end }))
+}
+
+/// Where the strip `fit`, run on to the section through `L`, ends at the merge `m`: its contacts'
+/// parameters at `P*` (on `T`) and at `q_X` (where its other contact meets `L`), and `Γ_X` from
+/// contact 1 to contact 2. `Γ_X` is the exact curve: the strip is checked to hold it within
+/// `tolerance` along its length, between its own contacts and within its own part.
+fn merge_cap(fit: &Fit, m: &MergeEnd, tolerance: f64) -> Result<(f64, f64, mt::Curve)> {
+    use mt::{BoundedCurve, ParametricCurve, ParametricSurface, SearchNearestParameter};
+    let refuse = |why: &str| KernelError::TooLarge(format!("{}: {why}", crate::blend::MIXED_END_SIZE));
+    let off = || refuse("the merged corner does not lie on the round");
+    let (lo, hi) = (fit.range.0.min(fit.range.1), fit.range.0.max(fit.range.1));
+    let inside = |t: f64| t > lo + 1e-6 && t < hi - 1e-6;
+    // The contacts' parameters where `P*` and `q_X` lie on them.
+    let on_contact = |row: usize, q: Vec3| -> Option<f64> {
+        let curve = fit.contacts.get(row)?;
+        let (a, b) = curve.range_tuple();
+        let hint = (0..=64)
+            .map(|i| a + (b - a) * f64::from(i) / 64.0)
+            .min_by(|x, y| from_p3(curve.subs(*x)).dist(q).total_cmp(&from_p3(curve.subs(*y)).dist(q)))?;
+        let t = curve.search_nearest_parameter(p3(q), hint, 100)?;
+        (inside(t) && from_p3(curve.subs(t)).dist(q) <= tolerance).then_some(t)
+    };
+    let (row_t, row_x) = if m.top == 1 { (0, 1) } else { (1, 0) };
+    let t_top = on_contact(row_t, m.zone.p_star).ok_or_else(off)?;
+    let t_x = on_contact(row_x, m.q_x()).ok_or_else(off)?;
+    // `Γ_X` on the strip: its points, and halfway between them, near the strip within its part.
+    let surf = &fit.surface;
+    let mut hint: Option<(f64, f64)> = None;
+    for i in 0..=64 {
+        let x = m.gamma_x(f64::from(i) / 64.0);
+        let (u, v) = surf.search_nearest_parameter(p3(x), hint, 100).or_else(|| surf.search_nearest_parameter(p3(x), None, 100)).ok_or_else(off)?;
+        let near = from_p3(surf.subs(u, v)).dist(x) <= tolerance;
+        if !(near && (-1e-6..=1.0 + 1e-6).contains(&u) && v > lo - 1e-9 && v < hi + 1e-9) {
+            return Err(off());
+        }
+        hint = Some((u, v));
+    }
+    let curve = if m.later_adds() { m.zone.curve_a()? } else { m.zone.curve_b()? };
+    // From contact 1 to contact 2: from `P*` where `T` is side 1.
+    let curve = if m.top == 1 {
+        curve
+    } else {
+        crate::guard("merge corner end", || {
+            let mut c = curve.clone();
+            c.invert();
+            Ok(c)
+        })?
+    };
+    let (t1, t2) = if m.top == 1 { (t_top, t_x) } else { (t_x, t_top) };
+    Ok((t1, t2, mt::Curve::NurbsCurve(curve)))
+}
+
 /// Blend the closed chain of edges (ids in any order) with radius `r`; with what it built from
 /// `solid` (each blend face in place of its chain edge).
 pub(crate) fn curve_blend(solid: &Solid, ids: &[mt::EdgeID], size: f64, r: f64, round: bool) -> Result<(Solid, Rebuild)> {
@@ -1344,8 +1661,9 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
     let mut seams: Vec<Vec<(usize, mt::Edge)>> = Vec::with_capacity(nv);
     // At an open chain's ends: the end face (planar, square to the edge there).
     let mut end_faces: Vec<(usize, usize)> = Vec::new(); // (vertex index, face index)
-    // A flat strip on planar sides can end across two planar faces (an earlier chamfer).
-    // Their shared seam is shortened to the crossing of the new chamfer plane.
+    // A strip on planar sides can end across two planar faces (an earlier chamfer, or a wall's
+    // end flush with the face beneath it). Their shared seam ends where the strip crosses it:
+    // shortened to it, or (a round) run on to it past the vertex.
     let mut split_ends: Vec<(usize, usize, usize, mt::Edge)> = Vec::new();
     // Chain ends whose end face is not a plane square to the edge: (vertex, face, point, tangent,
     // the side (1 or 2) the end face is tangent to when it lies along the edge there).
@@ -1384,7 +1702,7 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
         if let [ga, gb] = ends[..] {
             let terminal = chain.get(if k == 0 { 0 } else { n - 1 }).ok_or_else(|| unsupported("chain end"))?;
             let planar = [ga, gb, k1, k2].iter().all(|i| faces.get(*i).and_then(crate::blend::plane_normal).is_some());
-            if round || !planar || !straight(terminal, tol * 10.0) {
+            if !planar || !straight(terminal, tol * 10.0) {
                 return Err(unsupported("a vertex of the edge chain where other faces meet"));
             }
             let shares = |g: usize, side: usize| {
@@ -1518,9 +1836,14 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
         vsec.push(s);
         vradius.push(r);
     }
+    // Uniform refinement preserves a common spacing across neighbouring patches. Work is
+    // capped: a difficult strip returns an error instead of accepting an inaccurate fit.
+    let fit_tolerance = (size * 1e-5).clamp(1e-5, 0.001);
     // Past a slanted end: sections of the same rolling ball beyond the end vertex (far to near
     // at the chain's start, near to far at its end), far enough to cross the end face.
     let mut beyond: Vec<(usize, Vec<Section>, Vec<f64>)> = Vec::new();
+    // Ends where the round merges with an earlier round of the other kind.
+    let mut merges: Vec<MergeEnd> = Vec::new();
     for (k, fi, p, t, tangent) in slanted.iter_mut() {
         let g = faces.get(*fi).ok_or_else(|| KernelError::Failed("end face".into()))?;
         let at = vsec.get(*k).copied().ok_or_else(|| KernelError::Failed("section".into()))?;
@@ -1545,9 +1868,23 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
         if cos < 0.15 && tangent.is_none() {
             return Err(unsupported("an end face almost along the edge"));
         }
-        let width = at.q1.dist(*p).max(at.q2.dist(*p)).max(at.c.dist(*p)) + vradius.get(*k).copied().unwrap_or(scale);
-        let reach = 1.5 * width / if tangent.is_some() { 1.0 } else { cos };
         let out = if *k == 0 { -*t } else { *t };
+        // An earlier round of the other kind ending flush with a wall's end, tangent to the side
+        // the chain shares with it ([`crate::merge_corner`]): the two rounds merge there.
+        let merge = match *tangent {
+            Some(side) if round => {
+                merge_end(&faces, (&side1, &side2), &chain, &verts, &end_faces, (*k, *fi, side), convex, fixed, (tol, fit_tolerance))?
+            }
+            _ => None,
+        };
+        let width = at.q1.dist(*p).max(at.q2.dist(*p)).max(at.c.dist(*p)) + vradius.get(*k).copied().unwrap_or(scale);
+        // At a merge the strip runs on past the end to the section through `L`, and as far again
+        // as past any other end.
+        let reach = match &merge {
+            Some(m) => (m.zone.v - *p).dot(out).max(0.0) + 1.5 * width,
+            None => 1.5 * width / if tangent.is_some() { 1.0 } else { cos },
+        };
+        merges.extend(merge);
         // The run on past the end only gives the fit its context (the end face cuts it back), but
         // it keeps the law's end slope: the radius is read at the distance past the end.
         let law_s = |d: f64| if *k == 0 { -d / total } else { 1.0 + d / total };
@@ -1622,9 +1959,6 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
         }
         beyond.push((*k, list, laws));
     }
-    // Uniform refinement preserves a common spacing across neighbouring patches. Work is
-    // capped: a difficult strip returns an error instead of accepting an inaccurate fit.
-    let fit_tolerance = (size * 1e-5).clamp(1e-5, 0.001);
     // At a seam the contact lies on the seam plane, which need not be square to the
     // original edge. Its ball centre therefore need not lie in the edge's normal plane.
     // Interpolate that plane's displacement so the interior sections tend to the exact
@@ -1811,7 +2145,10 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
     // Where each extended blend meets its slanted end face: (vertex, edge, cut parameters of
     // the two contacts, the end curve from contact 1 to contact 2).
     let mut caps: Vec<(usize, usize, f64, f64, mt::Curve)> = Vec::new();
-    let mut split_caps: Vec<(usize, mt::Edge, Vec3)> = Vec::new();
+    // Ends across two end faces: (vertex, the seam between them, where the blend crosses it, and
+    // a round's end on each face, contact 1 to the crossing and on to contact 2; a chamfer's
+    // ends are lines).
+    let mut split_caps: Vec<(usize, mt::Edge, Vec3, Option<RoundEnds>)> = Vec::new();
     for (k, fi, _, _, tangent) in &slanted {
         let ke = if *k == 0 { 0 } else { n - 1 };
         let fit = fits.get(ke).and_then(Option::as_ref).ok_or_else(|| KernelError::Failed("curve blend fit".into()))?;
@@ -1821,9 +2158,68 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
         let both = [seam(1), seam(2)];
         if let Some((_, ga, gb, middle)) = split_ends.iter().find(|e| e.0 == *k) {
             use mt::{BSplineCurve, KnotVec, ParametricCurve, SearchNearestParameter};
-            let fail = || unsupported("the chamfer does not cross both end faces");
-            let p = from_p3(verts.get(*k).ok_or_else(fail)?.point());
+            let fail = || {
+                unsupported(if round {
+                    "the round does not cross the edge between the end faces"
+                } else {
+                    "the chamfer does not cross both end faces"
+                })
+            };
+            let old = verts.get(*k).ok_or_else(fail)?;
+            let p = from_p3(old.point());
             let (_, t) = tangent_at(chain.get(ke).ok_or_else(fail)?, if *k == 0 { 0.0 } else { 1.0 }).ok_or_else(fail)?;
+            let far = if middle.front() == old { middle.back() } else { middle.front() };
+            if round {
+                use mt::BoundedCurve;
+                let w = from_p3(far.point()) - p;
+                let (fa, fb) = (faces.get(*ga).ok_or_else(fail)?, faces.get(*gb).ok_or_else(fail)?);
+                let end = crate::guard("curve blend split end", || split_round_cap(fit, (fa, fb), &at, (p, t, w), both, fit_tolerance))?;
+                // The round crosses the seam short of its far end (two bevels at the end of a rim),
+                // or its line past the vertex, which the seam then runs on to: a round adding
+                // material at a wall's foot, or one taking it away along a plate's top edge that
+                // runs into a wall standing on the plate (the wall's face runs on down to it).
+                let crosses = end.fraction < 1.0 - 1e-6 && end.fraction.abs() > 1e-6;
+                // The round's end, and the seam run on past the vertex, are new edges of the end
+                // faces: they keep clear of the faces' other edges (a hole beside the end, the
+                // face's far side), sampled finely between their own ends.
+                let mut runs: Vec<Vec<Vec3>> = [&end.on_a, &end.on_b]
+                    .into_iter()
+                    .flatten()
+                    .map(|c| {
+                        let (lo, hi) = c.range_tuple();
+                        (0..=128).map(|i| from_p3(c.subs(lo + (hi - lo) * i as f64 / 128.0))).collect()
+                    })
+                    .collect();
+                if end.fraction < 0.0 {
+                    runs.push((0..=128).map(|i| p + (end.crossing - p) * (i as f64 / 128.0)).collect());
+                }
+                let clear = runs.iter().all(|run| {
+                    let gap = run.windows(2).map(|x| x.first().zip(x.get(1)).map_or(0.0, |(a, b)| a.dist(*b))).fold(fit_tolerance * 10.0, f64::max);
+                    let inner = run.get(2..run.len().saturating_sub(2)).unwrap_or(&[]);
+                    [fa, fb].iter().all(|g| {
+                        g.edge_iter()
+                            .filter(|e| e.front() != old && e.back() != old)
+                            .all(|e| inner.iter().all(|q| crate::blend::on_edge(&e, *q, gap).is_none()))
+                    })
+                });
+                if !crosses || !clear {
+                    return Err(too_large("the blend is larger than the neighbouring faces (split round end)"));
+                }
+                let first = end.on_a.as_ref().map_or(end.crossing, |c| from_p3(c.front()));
+                let last = end.on_b.as_ref().map_or(end.crossing, |c| from_p3(c.back()));
+                // The end's own curve where it lies on one face; across both only its ends are
+                // used (the blend and the end faces take the two curves, `split_arcs`).
+                let curve = match (&end.on_a, &end.on_b) {
+                    (Some(c), None) | (None, Some(c)) => c.clone(),
+                    _ => mt::Curve::BSplineCurve(
+                        BSplineCurve::try_new(KnotVec::from(vec![0.0, 0.0, 0.5, 1.0, 1.0]), vec![p3(first), p3(end.crossing), p3(last)])
+                            .map_err(|e| KernelError::Failed(format!("round end: {e}")))?,
+                    ),
+                };
+                caps.push((*k, ke, end.t1, end.t2, curve));
+                split_caps.push((*k, middle.clone(), end.crossing, Some((end.on_a, end.on_b))));
+                continue;
+            }
             let hit = |q: Vec3, fi: usize| -> Option<Vec3> {
                 let normal = faces.get(fi).and_then(crate::blend::plane_normal)?;
                 let den = normal.dot(t);
@@ -1832,7 +2228,6 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
             let a = hit(at.q1, *ga).ok_or_else(fail)?;
             let b = hit(at.q2, *gb).ok_or_else(fail)?;
             let m = (at.q2 - at.q1).cross(t).normalized().ok_or_else(fail)?;
-            let far = if middle.front() == verts.get(*k).ok_or_else(fail)? { middle.back() } else { middle.front() };
             let u = from_p3(far.point()) - p;
             let den = m.dot(u);
             if den.abs() < tol {
@@ -1853,7 +2248,13 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
             let curve = BSplineCurve::try_new(KnotVec::from(vec![0.0, 0.0, 0.5, 1.0, 1.0]), vec![p3(a), p3(c), p3(b)])
                 .map_err(|e| KernelError::Failed(format!("chamfer end: {e}")))?;
             caps.push((*k, ke, ta, tb, mt::Curve::BSplineCurve(curve)));
-            split_caps.push((*k, middle.clone(), c));
+            split_caps.push((*k, middle.clone(), c, None));
+            continue;
+        }
+        // A merge with an earlier round of the other kind ends on the band's edge `Γ_X`.
+        if let Some(m) = merges.iter().find(|m| m.k == *k) {
+            let cap = crate::guard("curve blend merge end", || merge_cap(fit, m, fit_tolerance))?;
+            caps.push((*k, ke, cap.0, cap.1, cap.2));
             continue;
         }
         let cap = crate::guard("curve blend end", || match tangent {
@@ -1904,10 +2305,30 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
                 *slot = v;
             }
         }
+        // A merge's band, on `P*`, the later round's `q_X` (both new) and the earlier round's `u`:
+        // the strip's contacts end at `P*` and `q_X`, and its end is the band's edge `Γ_X`.
+        let mut bands: HashMap<usize, crate::merge_corner::Band> = HashMap::new();
+        for m in &merges {
+            let p_star = builder::vertex(p3(m.zone.p_star));
+            let q_x = builder::vertex(p3(m.q_x()));
+            let (q_w, q_s) = if m.later_adds() { (&q_x, &m.end.u) } else { (&m.end.u, &q_x) };
+            let band = m.zone.band(&p_star, q_w, q_s, fit_tolerance)?;
+            let (on_top, on_other) = if m.top == 1 { (&mut v1, &mut v2) } else { (&mut v2, &mut v1) };
+            if let (Some(a), Some(b)) = (on_top.get_mut(m.k), on_other.get_mut(m.k)) {
+                *a = p_star;
+                *b = q_x;
+            }
+            bands.insert(m.k, band);
+        }
+        // The earlier rounds' ends at merges are left out (the band's edges `Γ_g` take their place).
+        let merged: Vec<mt::EdgeID> = merges.iter().map(|m| m.end.cap.id()).collect();
         // A chain end (a cap, or the section at a square end) on the far end of its seam uses that
         // seam up: that vertex is the end.
         let mut consumed: HashMap<mt::EdgeID, mt::Vertex> = HashMap::new();
         for (k, _) in &end_faces {
+            if bands.contains_key(k) {
+                continue;
+            }
             for (side, seam) in seams.get(*k).into_iter().flatten() {
                 let Some(old) = verts.get(*k) else { continue };
                 let far = if seam.front() == old { seam.back() } else { seam.front() };
@@ -1928,7 +2349,8 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
             Size::Chord(_) | Size::Law(_) => s.c.dist(s.q1),
         };
         let mut arcs: Vec<Option<mt::Edge>> = Vec::with_capacity(nv);
-        let mut split_arcs: HashMap<usize, Vec<mt::Edge>> = HashMap::new();
+        // The pieces of an end across two end faces, and the vertex where they meet the seam.
+        let mut split_arcs: HashMap<usize, (Vec<mt::Edge>, mt::Vertex)> = HashMap::new();
         for (k, s) in vsec.iter().enumerate() {
             let (a, b) = (v1.get(k).ok_or_else(|| fail("vertex"))?, v2.get(k).ok_or_else(|| fail("vertex"))?);
             // A closed section has no arc to run between the contacts: the blend meets itself
@@ -1941,13 +2363,38 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
             } else {
                 Some(builder::line(a, b))
             };
-            let e = match caps.iter().find(|c| c.0 == k) {
-                Some((_, _, _, _, curve)) => Some(mt::Edge::try_new(a, b, curve.clone()).map_err(|e| fail(&e.to_string()))?),
-                None => e,
+            let merge = merges.iter().find(|m| m.k == k).zip(bands.get(&k));
+            let e = match (merge, caps.iter().find(|c| c.0 == k)) {
+                // The band's edge with the later round, from `P*` to `q_X`: from contact 1 to 2.
+                (Some((m, band)), _) => {
+                    let gamma = if m.later_adds() { &band.gamma_a } else { &band.gamma_b };
+                    Some(if m.top == 1 { gamma.clone() } else { gamma.inverse() })
+                }
+                (None, Some((_, _, _, _, curve))) => Some(mt::Edge::try_new(a, b, curve.clone()).map_err(|e| fail(&e.to_string()))?),
+                (None, None) => e,
             };
-            if let Some((_, _, c)) = split_caps.iter().find(|cap| cap.0 == k) {
-                let v = builder::vertex(p3(*c));
-                split_arcs.insert(k, vec![builder::line(a, &v), builder::line(&v, b)]);
+            match split_caps.iter().find(|cap| cap.0 == k) {
+                Some((_, _, c, None)) => {
+                    let v = builder::vertex(p3(*c));
+                    split_arcs.insert(k, (vec![builder::line(a, &v), builder::line(&v, b)], v));
+                }
+                // A round's end crossing the seam at a contact meets it at that contact's vertex.
+                Some((_, _, c, Some((on_a, on_b)))) => {
+                    let v = match (on_a, on_b) {
+                        (None, _) => a.clone(),
+                        (_, None) => b.clone(),
+                        _ => builder::vertex(p3(*c)),
+                    };
+                    let mut parts = Vec::with_capacity(2);
+                    if let Some(curve) = on_a {
+                        parts.push(mt::Edge::try_new(a, &v, curve.clone()).map_err(|e| fail(&e.to_string()))?);
+                    }
+                    if let Some(curve) = on_b {
+                        parts.push(mt::Edge::try_new(&v, b, curve.clone()).map_err(|e| fail(&e.to_string()))?);
+                    }
+                    split_arcs.insert(k, (parts, v));
+                }
+                None => {}
             }
             arcs.push(e);
         }
@@ -2034,13 +2481,26 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
             }
         }
         let mut seam_subst: HashMap<mt::EdgeID, mt::Edge> = HashMap::new();
-        for (k, seam, _) in &split_caps {
+        for (k, seam, _, _) in &split_caps {
             let old = verts.get(*k).ok_or_else(|| fail("end vertex"))?;
-            let v = split_arcs.get(k).and_then(|es| es.first()).map(|e| e.back()).ok_or_else(|| fail("end seam"))?;
+            let v = split_arcs.get(k).map(|(_, v)| v).ok_or_else(|| fail("end seam"))?;
             seam_subst.insert(seam.id(), crate::blend::retarget(seam, old, v, fit_tolerance)?);
         }
+        // At a merge: the earlier round's contact with `T` shortened to `P*`, and `E`'s edge with the
+        // face beside the chain to `q_X` (the band's edge on `L` takes the rest). An earlier round
+        // the chain merges with at both its ends has its contact shortened at both.
+        for m in &merges {
+            let v = verts.get(m.k).ok_or_else(|| fail("vertex"))?;
+            let top = if m.top == 1 { v1.get(m.k) } else { v2.get(m.k) }.ok_or_else(|| fail("vertex"))?;
+            let other = if m.top == 1 { v2.get(m.k) } else { v1.get(m.k) }.ok_or_else(|| fail("vertex"))?;
+            let contact = seam_subst.get(&m.end.contact.id()).cloned().unwrap_or_else(|| m.end.contact.clone());
+            seam_subst.insert(m.end.contact.id(), crate::blend::retarget(&contact, v, top, fit_tolerance)?);
+            let id = m.end.end_side.id();
+            let end_side = seam_subst.get(&id).cloned().unwrap_or_else(|| m.end.end_side.clone());
+            seam_subst.insert(id, crate::blend::retarget(&end_side, &m.end.u, other, fit_tolerance)?);
+        }
         for (id, (seam, a, b)) in ends {
-            if consumed.contains_key(&id) {
+            if consumed.contains_key(&id) || merges.iter().any(|m| m.end.contact.id() == id || m.end.cap.id() == id) {
                 continue;
             }
             // At an end of an open chain the blend may stop past the seam's old end (a slanted end
@@ -2093,13 +2553,34 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
         rec.pieces(&seam_subst);
         for (fi, f) in faces.iter().enumerate() {
             let corners: Vec<usize> = end_faces.iter().filter(|(_, g)| *g == fi).map(|(k, _)| *k).collect();
+            // An earlier round at a merge: its contact with `T` runs to `P*`, its end on the face
+            // beside the chain gives way to `Γ_g` from `P*` to `u`. The end face `E`: its edge on
+            // `L` with that face stops at `q_X`, the band's edge on `L` running on to `u`.
+            let earlier: Vec<&MergeEnd> = merges.iter().filter(|m| m.g == fi).collect();
+            let ended: Vec<&MergeEnd> = merges.iter().filter(|m| m.end.end == f.id()).collect();
+            if !earlier.is_empty() || !ended.is_empty() {
+                if corners.iter().any(|k| !bands.contains_key(k)) || (!earlier.is_empty() && !ended.is_empty()) {
+                    return Err(unsupported("an earlier round that ends at a merged corner and elsewhere on the edge"));
+                }
+                let connectors: Vec<mt::Edge> = earlier
+                    .iter()
+                    .filter_map(|m| bands.get(&m.k).map(|b| if m.later_adds() { b.gamma_b.clone() } else { b.gamma_a.clone() }))
+                    .chain(ended.iter().filter_map(|m| bands.get(&m.k).map(|b| b.on_l.clone())))
+                    .collect();
+                let rebuilt = crate::blend::rebuild_face_dropping(f, &seam_subst, &merged, &connectors)?;
+                rec.face(&rebuilt, f);
+                out.push(rebuilt);
+                continue;
+            }
             if !corners.is_empty() {
                 if corners.iter().any(|k| split_arcs.contains_key(k)) {
                     let connectors: Vec<mt::Edge> = corners
                         .iter()
-                        .flat_map(|k| split_arcs.get(k).cloned().unwrap_or_else(|| arcs.get(*k).cloned().flatten().into_iter().collect()))
+                        .flat_map(|k| split_arcs.get(k).map(|x| x.0.clone()).unwrap_or_else(|| arcs.get(*k).cloned().flatten().into_iter().collect()))
                         .collect();
-                    let rebuilt = crate::blend::rebuild_face(f, &seam_subst, &connectors)?;
+                    // A seam the round used up (its contact at the seam's far end) is left out.
+                    let used_up: Vec<mt::EdgeID> = consumed.keys().copied().collect();
+                    let rebuilt = crate::blend::rebuild_face_dropping(f, &seam_subst, &used_up, &connectors)?;
                     rec.face(&rebuilt, f);
                     out.push(rebuilt);
                     continue;
@@ -2169,7 +2650,7 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
                         if e.front() == chain_e.front() { base.clone() } else { base.inverse() }
                     } else if let Some(s) = seam_subst.get(&e.id()) {
                         if e.front() == e.absolute_front() { s.clone() } else { s.inverse() }
-                    } else if consumed.contains_key(&e.id()) {
+                    } else if consumed.contains_key(&e.id()) || merged.contains(&e.id()) {
                         continue;
                     } else {
                         e.clone()
@@ -2221,7 +2702,7 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
                         .into_iter()
                         .filter_map(|(i, arc)| arc.map(|arc| (i, arc.clone())))
                         .find(|(_, arc)| arc.id() == e.id())
-                        .and_then(|(i, arc)| split_arcs.get(&i).map(|parts| (arc, parts)));
+                        .and_then(|(i, arc)| split_arcs.get(&i).map(|parts| (arc, &parts.0)));
                     match split {
                         Some((arc, parts)) if e.orientation() == arc.orientation() => parts.clone(),
                         Some((_, parts)) => parts.iter().rev().map(|p| p.inverse()).collect(),
@@ -2232,6 +2713,13 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
             let face = mt::Face::try_new(vec![wire], bf.clone()).map_err(|e| fail(&e.to_string()))?;
             rec.blend(&face, [chain_e.id()]);
             out.push(face);
+        }
+        // The bands at merges, made by this blend in place of its chain's end edge and the
+        // earlier round's end, the edges meeting at the corner.
+        for m in &merges {
+            let (Some(band), Some(chain_e)) = (bands.get(&m.k), chain.get(m.ke)) else { return Err(fail("merge band")) };
+            rec.blend(&band.face, [chain_e.id(), m.end.cap.id()]);
+            out.push(band.face.clone());
         }
         let mut shells = solid.boundaries().clone();
         if let Some(sh) = shells.get_mut(si) {

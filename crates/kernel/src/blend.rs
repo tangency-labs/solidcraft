@@ -33,6 +33,61 @@ pub(crate) fn too_large(msg: &str) -> KernelError {
     KernelError::TooLarge(msg.into())
 }
 
+/// A round running into the end of an earlier round of the other kind where it ends flush with a
+/// wall's end ([`crate::merge_corner::mixed_end`]), where the two cannot merge whatever their size
+/// (the round has no one radius, the faces there are not square to the top): no other route builds
+/// it, so this refusal, followed by why, is reported over any other ([`decisive`]). Shown as not
+/// supported yet, as every size refusal is.
+pub(crate) const MIXED_END: &str = "a round meeting the end of an earlier round of the other kind";
+
+/// [`MIXED_END`] where the rounds are too large to merge there (the band between them needs more
+/// straight edge than there is, or reaches past a face's end): smaller rounds may merge, so it is
+/// no [`decisive`] refusal, but it says more than any other refusal but one ([`rank`]).
+pub(crate) const MIXED_END_SIZE: &str = "rounds too large to merge at the end of an earlier round of the other kind";
+
+/// The edge beneath a flush vertex ([`flush_vertex`]) blended while the one standing on it is
+/// sharp: its blend would leave that corner overhanging it.
+const FLUSH_BENEATH: &str = "a blend leaving the corner standing flush on it overhanging: blend that corner first, or with it";
+
+/// A blend ending at a flush vertex ([`flush_vertex`]) whose fourth face is curved (an earlier
+/// round of the face the corner stands on, or of the corner's foot): no plane takes its end.
+const FLUSH_CURVED: &str = "a blend ending where its corner stands flush on an earlier round";
+
+/// Whether a refusal is one of a flush end's ([`FLUSH_BENEATH`], [`FLUSH_CURVED`]): it says more
+/// than the rolling ball's refusal of the chain past that vertex.
+fn flush_refusal(e: &KernelError) -> bool {
+    matches!(e, KernelError::Failed(m) if m.ends_with(FLUSH_BENEATH) || m.ends_with(FLUSH_CURVED))
+}
+
+/// Whether refusal `e` says more than `f` ([`rank`]; at one rank, a flush end's).
+fn says_more(e: &KernelError, f: &KernelError) -> bool {
+    rank(e) > rank(f) || (rank(e) == rank(f) && flush_refusal(e) && !flush_refusal(f))
+}
+
+/// Whether a refusal says what no other route and no other size gets round: it outranks every
+/// other refusal, and a search for the size that fits stops at it.
+pub(crate) fn decisive(e: &KernelError) -> bool {
+    matches!(e, KernelError::TooLarge(m) if m.starts_with(MIXED_END))
+}
+
+/// How much a refusal says: a decisive one, then rounds too large to merge at an end (a smaller
+/// pair may), then a size (a smaller blend may fit), then any other.
+fn rank(e: &KernelError) -> u8 {
+    match e {
+        _ if decisive(e) => 3,
+        KernelError::TooLarge(m) if m.starts_with(MIXED_END_SIZE) => 2,
+        KernelError::TooLarge(_) => 1,
+        _ => 0,
+    }
+}
+
+/// Whether a refusal is about a round meeting the end of an earlier round of the other kind,
+/// decisive or a size ([`MIXED_END`], [`MIXED_END_SIZE`]): what no other route builds, so it is
+/// reported over the other routes' refusals.
+fn at_mixed_end(e: &KernelError) -> bool {
+    rank(e) >= 2
+}
+
 pub(crate) fn vtx(v: &mt::Vertex) -> Vec3 {
     from_p3(v.point())
 }
@@ -55,7 +110,12 @@ pub(crate) fn rebuild_face(f: &mt::Face, subst: &HashMap<mt::EdgeID, mt::Edge>, 
 }
 
 /// [`rebuild_face`], also leaving out the `dropped` edges (consumed by a blend).
-fn rebuild_face_dropping(f: &mt::Face, subst: &HashMap<mt::EdgeID, mt::Edge>, dropped: &[mt::EdgeID], connectors: &[mt::Edge]) -> Result<mt::Face> {
+pub(crate) fn rebuild_face_dropping(
+    f: &mt::Face,
+    subst: &HashMap<mt::EdgeID, mt::Edge>,
+    dropped: &[mt::EdgeID],
+    connectors: &[mt::Edge],
+) -> Result<mt::Face> {
     let mut wires = Vec::new();
     for w in f.absolute_boundaries() {
         let mut edges: Vec<mt::Edge> = Vec::new();
@@ -391,6 +451,240 @@ pub(crate) fn retarget(e: &mt::Edge, v: &mt::Vertex, nv: &mt::Vertex, tol: f64) 
     Err(too_large("the blend is larger than the neighbouring faces"))
 }
 
+/// Where a round ends in the mitre of two earlier rounds of its radius, each running on smoothly
+/// from one of its sides (a wall's top edges, rounded before its corner): the ball touching both
+/// sides and the face the earlier rounds share ends all three. The round ends at its section
+/// through the ball's centre `c` (square to the edge at `at` on its line), each earlier round at
+/// its own, from the round's contact to `t` (the mitre's far end, where the ball touches the face
+/// they share), and a piece of the ball's sphere takes the corner in place of the mitre.
+struct BallEnd {
+    c: Vec3,
+    at: Vec3,
+    t: mt::Vertex,
+    mitre: mt::Edge,
+}
+
+/// The circle arc from `a` to `b` about `c` (both `r` from it, less than half a turn apart) at
+/// fraction `f`.
+fn arc_at(c: Vec3, a: Vec3, b: Vec3, f: f64) -> Vec3 {
+    let (u, w) = (a - c, b - c);
+    let theta = (u.dot(w) / (u.len() * w.len()).max(1e-300)).clamp(-1.0, 1.0).acos();
+    if theta < 1e-12 {
+        return a;
+    }
+    c + (u * ((1.0 - f) * theta).sin() + w * (f * theta).sin()) / theta.sin()
+}
+
+/// [`BallEnd`] at the end `v` (at `p`) of a convex round of radius `r` (setback `s`, in-face
+/// directions `t1`, `t2`, face 1's outward normal `n1`, along `d`) between faces `i1` and `i2`,
+/// whose other faces there are `ga` (sharing `e1` with `i1`) and `gb` (`e2` with `i2`). None
+/// where the faces there are not such earlier rounds of this radius.
+#[allow(clippy::too_many_arguments)]
+fn ball_end(
+    faces: &[&mt::Face],
+    (i1, i2): (usize, usize),
+    (ga, gb): (usize, usize),
+    v: &mt::Vertex,
+    p: Vec3,
+    (t1, t2, n1, d): (Vec3, Vec3, Vec3, Vec3),
+    (s, r): (f64, f64),
+    (e1, e2): (Option<mt::Edge>, Option<mt::Edge>),
+    size: f64,
+) -> Option<BallEnd> {
+    use mt::{BoundedCurve, ParametricCurve};
+    let (Some(e1), Some(e2)) = (e1, e2) else { return None };
+    let face = |i: usize| faces.get(i).copied();
+    let (fa, fb, f1, f2) = (face(ga)?, face(gb)?, face(i1)?, face(i2)?);
+    if ga == gb || plane_normal(fa).is_some() || plane_normal(fb).is_some() {
+        return None;
+    }
+    // Each runs on smoothly from its side.
+    let normal = |f: &mt::Face| crate::curveblend::project(f, p, None).map(|x| x.1);
+    if !(normal(fa)?.dot(normal(f1)?) > 1.0 - 1e-6 && normal(fb)?.dot(normal(f2)?) > 1.0 - 1e-6) {
+        return None;
+    }
+    // The mitre from `v`, and its far end.
+    let at_v = |e: &mt::Edge| e.front() == v || e.back() == v;
+    let mitre = fa.edge_iter().find(|e| at_v(e) && fb.edge_iter().any(|x| x.id() == e.id()))?;
+    let t = if mitre.front() == v { mitre.back() } else { mitre.front() };
+    // Fitted rounds hold their surface to the fit's tolerance.
+    let tol = (size * 1e-5).clamp(1e-5, 1e-3) * 4.0;
+    // Where the round's contact on side 1 crosses the earlier round's contact there.
+    let c1 = e1.curve();
+    let (lo, hi) = c1.range_tuple();
+    // The curve runs from the stored front.
+    let from_front = e1.absolute_front() == v;
+    let at = |k: f64| from_p3(c1.subs(if from_front { lo + (hi - lo) * k } else { hi - (hi - lo) * k }));
+    let off = |k: f64| (at(k) - p).dot(t1) - s;
+    let steps = 256;
+    let k = (1..=steps).map(|i| f64::from(i) / f64::from(steps)).find(|k| off(*k) >= 0.0)?;
+    let (mut x, mut y) = (k - 1.0 / f64::from(steps), k);
+    for _ in 0..60 {
+        let m = 0.5 * (x + y);
+        if off(m) >= 0.0 {
+            y = m;
+        } else {
+            x = m;
+        }
+    }
+    let a = at(0.5 * (x + y));
+    // The ball: `r` in from side 1 at that contact, on the round's axis; it touches side 2 on the
+    // earlier round's contact there and the shared face at `t`.
+    let c = a - n1 * r;
+    let along = p + d * (c - p).dot(d);
+    let b = along + t2 * s;
+    let tv = vtx(t);
+    if ((c - along) - (t1 * s - n1 * r)).len() > tol || on_edge(&e2, b, tol).is_none() || (c.dist(tv) - r).abs() > tol {
+        return None;
+    }
+    // Each earlier round holds the circle from the round's contact to `t`.
+    let holds = |f: &mt::Face, from: Vec3| {
+        (1..8).all(|i| {
+            let q = arc_at(c, from, tv, f64::from(i) / 8.0);
+            crate::curveblend::project(f, q, None).is_some_and(|(x, _, _)| x.dist(q) <= tol)
+        })
+    };
+    (holds(fa, a) && holds(fb, b)).then(|| BallEnd { c, at: along, t: t.clone(), mitre: mitre.clone() })
+}
+
+/// Where a convex round of radius `r` ends in one earlier round `g` of its radius that runs on
+/// smoothly from one side and ends in the other side's face (a wall's top edge rounded before its
+/// corner, its end flush with the wall's end): the two cylinders cut each other along a crease, as
+/// rounding both together makes it. The crease runs from where their contacts on the side they
+/// share cross to where the round's contact on the other side meets the earlier round's end. The
+/// crease's points from contact 1 to contact 2, the vertex the round's contact uses up on each
+/// side (the earlier round's end, when the crease ends at its far end), and how far along the edge
+/// the crease reaches from `p`. None where `g` is no such round.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn crease_end(
+    g: &mt::Face,
+    (e1, e2): (&mt::Edge, &mt::Edge),
+    v: &mt::Vertex,
+    p: Vec3,
+    (t1, n1, n2, d): (Vec3, Vec3, Vec3, Vec3),
+    (s, r): (f64, f64),
+    size: f64,
+) -> Option<(Vec<Vec3>, [Option<mt::Vertex>; 2], f64)> {
+    let tol = (size * 1e-5).clamp(1e-5, 1e-3) * 4.0;
+    let ng = crate::curveblend::project(g, p, None)?.1;
+    // The side `g` runs on from (its contact there straight), and its end on the other side, an
+    // arc of this radius.
+    let tangent = if ng.dot(n1) > 1.0 - 1e-6 {
+        1
+    } else if ng.dot(n2) > 1.0 - 1e-6 {
+        2
+    } else {
+        return None;
+    };
+    let (contact, end) = if tangent == 1 { (e1, e2) } else { (e2, e1) };
+    if !matches!(contact.curve(), mt::Curve::Line(_)) && !crate::curveblend::straight(contact, tol * 1e-3) {
+        return None;
+    }
+    let (o, rho, _) = crate::curveblend::circle_of(end, tol)?;
+    if (rho - r).abs() > tol {
+        return None;
+    }
+    let far = |e: &mt::Edge| if e.front() == v { e.back().clone() } else { e.front().clone() };
+    let u = (vtx(&far(contact)) - p).normalized()?;
+    // The round's axis and the earlier round's meet at `c0`.
+    let axis = p + t1 * s - n1 * r;
+    let w = d.cross(u);
+    let w2 = w.len2();
+    if w2 < 1e-12 {
+        return None;
+    }
+    let lambda = (o - axis).cross(u).dot(w) / w2;
+    let c0 = axis + d * lambda;
+    let perp = |x: Vec3| x - u * x.dot(u);
+    if perp(c0 - o).len() > tol {
+        return None;
+    }
+    // Round the section from contact 1 to contact 2: on each direction the point of the round's
+    // cylinder at the earlier round's radius from its axis, followed from the side they share.
+    let theta = n1.dot(n2).clamp(-1.0, 1.0).acos();
+    if !(theta > 1e-6 && theta < std::f64::consts::PI - 1e-6) {
+        return None;
+    }
+    let dir = |f: f64| (n1 * ((1.0 - f) * theta).sin() + n2 * (f * theta).sin()) / theta.sin();
+    let b = perp(d);
+    let bb = b.len2();
+    if bb < 1e-12 {
+        return None;
+    }
+    let n = 48usize;
+    // The two roots part at the shared side's contact: one way the crease runs over the earlier
+    // round, the other over the rest of its cylinder (`way`, the first step's sign).
+    let track = |way: f64| -> Option<Vec<Vec3>> {
+        let order: Vec<usize> = if tangent == 1 { (0..=n).collect() } else { (0..=n).rev().collect() };
+        let mut mu = 0.0;
+        let mut pts: Vec<(usize, Vec3)> = Vec::with_capacity(n + 1);
+        for (k, i) in order.into_iter().enumerate() {
+            let f = i as f64 / n as f64;
+            let a = perp(dir(f)) * r;
+            let (qb, qc) = (2.0 * a.dot(b), a.len2() - r * r);
+            let disc = qb * qb - 4.0 * bb * qc;
+            if disc < -tol * tol {
+                return None;
+            }
+            let root = disc.max(0.0).sqrt();
+            let roots = [(-qb - root) / (2.0 * bb), (-qb + root) / (2.0 * bb)];
+            mu = match k {
+                // At the contact both roots are nought.
+                0 => 0.0,
+                1 => roots.into_iter().max_by(|x, y| (x * way).total_cmp(&(y * way)))?,
+                _ => roots.into_iter().min_by(|x, y| (x - mu).abs().total_cmp(&(y - mu).abs()))?,
+            };
+            pts.push((i, c0 + d * mu + dir(f) * r));
+        }
+        pts.sort_by_key(|x| x.0);
+        Some(pts.into_iter().map(|x| x.1).collect())
+    };
+    // The contact on the shared side meets the earlier round's there; on the other side the
+    // crease ends on the earlier round's end, using it up when it ends at its far end.
+    let ends_of = |pts: &[Vec3]| -> Option<(Vec3, Vec3)> {
+        let (first, last) = (*pts.first()?, *pts.last()?);
+        Some(if tangent == 1 { (first, last) } else { (last, first) })
+    };
+    let pts = [1.0, -1.0].into_iter().filter_map(track).find(|pts| {
+        ends_of(pts).is_some_and(|(at_contact, at_end)| on_edge(contact, at_contact, tol).is_some() && on_edge(end, at_end, tol).is_some())
+    })?;
+    let (_, at_end) = ends_of(&pts)?;
+    let mut used: [Option<mt::Vertex>; 2] = [None, None];
+    let end_far = far(end);
+    if vtx(&end_far).dist(at_end) <= tol
+        && let Some(slot) = used.get_mut(if tangent == 1 { 1 } else { 0 })
+    {
+        *slot = Some(end_far);
+    }
+    // On the earlier round all along, the fitted curve too.
+    let on_g = |q: Vec3| crate::curveblend::project(g, q, None).is_some_and(|(x, _, _)| x.dist(q) <= tol);
+    let bs = crate::build::interpolate_cubic(&pts)?;
+    let fits = (0..n).all(|i| {
+        use mt::ParametricCurve;
+        let q = from_p3(bs.subs((i as f64 + 0.5) / n as f64));
+        let rad = perp(q - o).len();
+        let on_axis = (q - axis) - d * (q - axis).dot(d);
+        on_g(q) && (rad - r).abs() <= tol && (on_axis.len() - r).abs() <= tol
+    });
+    if !(fits && pts.iter().all(|q| on_g(*q))) {
+        return None;
+    }
+    // Ending at the vertex it uses up, exactly.
+    let mut pts = pts;
+    if let Some(x) = &used[0]
+        && let Some(q) = pts.first_mut()
+    {
+        *q = vtx(x);
+    }
+    if let Some(x) = &used[1]
+        && let Some(q) = pts.last_mut()
+    {
+        *q = vtx(x);
+    }
+    let reach = pts.iter().map(|q| (*q - p).dot(d).abs()).fold(0.0, f64::max);
+    Some((pts, used, reach))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn blend_geometry(
     solid: &Solid,
@@ -441,6 +735,13 @@ fn blend_geometry(
         concave: bool,
         /// How far along the edge the section reaches from the end vertex.
         reach: f64,
+        /// At a flush end ([`flush_vertex`]), the side (1 or 2) whose face runs on past the vertex
+        /// along the edge's line: its rail ends at a new edge across that face from the vertex,
+        /// `e1` or `e2` being the edge it runs on along, which stays as it is.
+        flush: Option<u8>,
+        /// A ball end: the blend ends where two earlier rounds of its radius meet in a mitre
+        /// running on from the vertex ([`BallEnd`]).
+        ball: Option<BallEnd>,
     }
     let mut ends: Vec<End> = Vec::new();
     for (v, p) in [(&v0, p0), (&v1, p1)] {
@@ -475,6 +776,95 @@ fn blend_geometry(
         // they reach its surface, and the blend's end is where its surface meets the end face
         // (the cross-section through `p` slid along d onto it, point by point).
         let is_line = |e: &mt::Edge| matches!(e.curve(), mt::Curve::Line(_));
+        // A flush end ([`flush_vertex`]): one side face runs on past `v` along the edge's line (a
+        // wall's end flush with the face beneath it) beside `base`, and the end face `g` meets the
+        // other side and `base` but not that face. Where the edge stands on `g` (g faces along it,
+        // the faces beneath running on wider than its corner), the blend ends in g's plane: g takes
+        // the end section, over the material beneath, and the rail on the running side ends at a
+        // new edge across that face from `v`. The edge beneath (`g` facing away from it) is refused:
+        // its blend would leave the corner standing on it overhanging.
+        let into = if v == &v0 { d } else { -d };
+        let run_on = |fi: usize| -> Option<(usize, mt::Edge)> {
+            let e = faces.get(fi)?.edge_iter().find(|e| e.id() != edge.id() && (e.front() == v || e.back() == v))?;
+            let far = if e.front() == v { e.back() } else { e.front() };
+            let along = matches!(e.curve(), mt::Curve::Line(_)) && (vtx(far) - p).normalized().is_some_and(|u| u.dot(into) < -1.0 + 1e-9);
+            let base = others.iter().copied().find(|g| faces.get(*g).is_some_and(|f| f.edge_iter().any(|x| x.id() == e.id())))?;
+            along.then_some((base, e))
+        };
+        let flush = match others[..] {
+            [x, y] => [(i1, i2, 1u8), (i2, i1, 2u8)].into_iter().find_map(|(fi, other, k)| {
+                let (base, run) = run_on(fi)?;
+                let g = if base == x { y } else { x };
+                (shared(other, g).is_some() && shared(base, g).is_some() && shared(fi, g).is_none()).then_some((k, base, g, run))
+            }),
+            _ => None,
+        };
+        if let Some((k, base, g, run)) = flush {
+            if shape == Shape::Curvature {
+                return Err(unsupported("G2 fillets require one planar end face at each end"));
+            }
+            if side > 0.0 {
+                return Err(unsupported("a concave blend ending where its face runs on past the end"));
+            }
+            let ng = faces.get(g).and_then(|f| plane_normal(f)).ok_or_else(|| unsupported(FLUSH_CURVED))?;
+            if ng.dot(into).abs() < 1e-9 {
+                return Err(unsupported("an end face parallel to the edge"));
+            }
+            if ng.dot(into) < 0.0 {
+                return Err(unsupported(FLUSH_BENEATH));
+            }
+            let slide = |x: Vec3| x - d * (ng.dot(x - p) / ng.dot(d));
+            let (a, b) = (slide(p + t1 * s), slide(p + t2 * s));
+            let (fi, other, q_run, q_other) = if k == 1 { (i1, i2, a, b) } else { (i2, i1, b, a) };
+            // The new edge across the running face stays inside it.
+            if !faces.get(fi).is_some_and(|f| extension_fits(f, p, q_run, tol)) {
+                return Err(too_large("the blend is larger than the neighbouring faces"));
+            }
+            let e_other = shared(other, g).ok_or_else(|| unsupported("unexpected corner topology"))?;
+            let seam = shared(base, g).ok_or_else(|| unsupported("unexpected corner topology"))?;
+            if !is_line(&e_other) || !is_line(&seam) {
+                return Err(unsupported("the edges at the corners must be straight"));
+            }
+            let from_v = |e: &mt::Edge| {
+                let far = if e.front() == v { e.back() } else { e.front() };
+                (vtx(far) - p, vtx(far).dist(p))
+            };
+            let (w_other, len) = from_v(&e_other);
+            let along = (q_other - p).dot(w_other) / len.max(1e-300);
+            if (q_other - p - w_other * (along / len.max(1e-300))).len() > tol * 100.0 + 1e-7 || along <= tol || along >= len - tol {
+                return Err(too_large("the blend is larger than the neighbouring faces"));
+            }
+            // The section lies over the material beneath: turning about g's normal from the new
+            // edge across the running face, the other side's edge with g comes before the seam of
+            // g with the face beneath.
+            let w_run = q_run - p;
+            let turn = |w: Vec3| w_run.cross(w).dot(ng).atan2(w_run.dot(w));
+            let (to_other, to_seam) = (turn(w_other), turn(from_v(&seam).0));
+            let to_seam = if to_other < 0.0 { -to_seam } else { to_seam };
+            let to_seam = if to_seam < 0.0 { to_seam + std::f64::consts::TAU } else { to_seam };
+            if !(to_seam > to_other.abs() + 1e-9) {
+                return Err(unsupported(FLUSH_BENEATH));
+            }
+            ends.push(End {
+                v: v.clone(),
+                g: vec![g],
+                e1: if k == 1 { run.clone() } else { e_other.clone() },
+                e2: if k == 1 { e_other } else { run },
+                e3: None,
+                a,
+                b,
+                planes: vec![(p, ng)],
+                ca: None,
+                cb: None,
+                cap: None,
+                seams: Vec::new(),
+                concave: false,
+                reach: 0.0,
+                flush: Some(k),
+                ball: None,
+            });
+            continue;
+        }
         // Two end faces, not both planes meeting the sides and each other in lines (a sheet metal
         // rim edge ending where a bend meets the next panel): the same, each face taking the
         // section's points on it, cut where it crosses the edge between them.
@@ -508,7 +898,31 @@ fn blend_geometry(
                 && shape == Shape::Round
                 && (of_radius(&e1) || of_radius(&e2))
             {
-                return Err(unsupported("a blend ending in an earlier round"));
+                // One earlier round, its end in the other side's face: the crease, where the
+                // corner build refuses it (a round the rolling ball fitted).
+                let n2 = faces.get(i2).and_then(|f| plane_normal(f)).ok_or_else(|| unsupported("a blend ending in an earlier round"))?;
+                let crease = if ga == gb && side < 0.0 { crease_end(g, (&e1, &e2), v, p, (t1, n1, n2, d), (s, r), size) } else { None };
+                let Some((pts, [ca, cb], reach)) = crease else { return Err(unsupported("a blend ending in an earlier round")) };
+                let (Some(a), Some(b)) = (pts.first().copied(), pts.last().copied()) else { return Err(KernelError::Failed("blend end".into())) };
+                ends.push(End {
+                    v: v.clone(),
+                    g: vec![ga],
+                    e1,
+                    e2,
+                    e3: None,
+                    a,
+                    b,
+                    planes: Vec::new(),
+                    ca,
+                    cb,
+                    cap: Some(vec![pts]),
+                    seams: Vec::new(),
+                    concave: false,
+                    reach,
+                    flush: None,
+                    ball: None,
+                });
+                continue;
             }
             let surf = g.surface();
             let surf_b = faces.get(gb).ok_or_else(|| KernelError::Failed("face".into()))?.surface();
@@ -725,6 +1139,37 @@ fn blend_geometry(
                 seams: seams.into_iter().map(|(e, q, _)| (e, q)).collect(),
                 concave,
                 reach: far,
+                flush: None,
+                ball: None,
+            });
+            continue;
+        }
+        // A ball end ([`BallEnd`]): the end faces are earlier rounds running on smoothly from the
+        // sides, meeting each other in a mitre from `v`, and the ball of this radius touching both
+        // sides and both rounds touches them along circles through the mitre's far end.
+        if shape == Shape::Round
+            && side < 0.0
+            && let Some(ball) = ball_end(faces, (i1, i2), (ga, gb), v, p, (t1, t2, n1, d), (s, r), (shared(i1, ga), shared(i2, gb)), size)
+        {
+            let (Some(e1), Some(e2)) = (shared(i1, ga), shared(i2, gb)) else { return Err(unsupported("unexpected corner topology")) };
+            let (a, b) = (ball.at + t1 * s, ball.at + t2 * s);
+            ends.push(End {
+                v: v.clone(),
+                g: vec![ga, gb],
+                e1,
+                e2,
+                e3: None,
+                a,
+                b,
+                planes: vec![(ball.at, d)],
+                ca: None,
+                cb: None,
+                cap: None,
+                seams: Vec::new(),
+                concave: false,
+                reach: 0.0,
+                flush: None,
+                ball: Some(ball),
             });
             continue;
         }
@@ -812,6 +1257,8 @@ fn blend_geometry(
                     seams: Vec::new(),
                     concave: false,
                     reach: 0.0,
+                    flush: None,
+                    ball: None,
                 });
                 continue;
             }
@@ -849,6 +1296,8 @@ fn blend_geometry(
             seams: Vec::new(),
             concave: false,
             reach: 0.0,
+            flush: None,
+            ball: None,
         });
     }
     let [end0, end1] = &ends[..] else { return Err(KernelError::Failed("ends".into())) };
@@ -917,6 +1366,8 @@ fn blend_geometry(
     let mut corners: Vec<(mt::Vertex, mt::Vertex, Vec<mt::Edge>, Option<mt::Vertex>, Vec<mt::Vertex>, Vec<mt::Edge>)> = Vec::new();
     let on_tol = (size * 1e-5).max(1e-6);
     for (end, p) in [(end0, p0), (end1, p1)] {
+        // A ball end's section is through the ball's centre.
+        let p = end.ball.as_ref().map_or(p, |x| x.at);
         let (va, vb) = (vertex(&end.ca, end.a), vertex(&end.cb, end.b));
         let (sa, sb) = (p + t1 * s, p + t2 * s);
         let mut seam_vs: Vec<mt::Vertex> = Vec::new();
@@ -955,11 +1406,30 @@ fn blend_geometry(
             let far = if end.e2.absolute_front() == &end.v { end.e2.absolute_back().clone() } else { end.e2.absolute_front().clone() };
             extra.push(retarget(&end.e2, &far, &vb, on_tol)?);
         }
+        // At a flush end, the new edge from the vertex across the running face to its rail's end.
+        match end.flush {
+            Some(1) => extra.push(builder::line(&end.v, &va)),
+            Some(_) => extra.push(builder::line(&end.v, &vb)),
+            None => {}
+        }
+        // At a ball end, each earlier round's section from the blend's contact to the far end of
+        // the mitre.
+        if let Some(ball) = &end.ball {
+            let tv = vtx(&ball.t);
+            for (x, q) in [(&va, end.a), (&vb, end.b)] {
+                extra.push(builder::circle_arc(x, &ball.t, p3(arc_at(ball.c, q, tv, 0.5))));
+            }
+        }
         corners.push((va, vb, chain, vq, seam_vs, extra));
     }
     let [(a0, b0, c0, q0, s0, x0), (a1, b1, c1, q1, s1, x1)] = &corners[..] else { return Err(KernelError::Failed("ends".into())) };
     let link0: Vec<mt::Edge> = c0.iter().chain(x0).cloned().collect();
     let link1: Vec<mt::Edge> = c1.iter().chain(x1).cloned().collect();
+    // The running face of a flush end takes its new edge.
+    let across = |k: u8| -> Vec<mt::Edge> {
+        [(end0, x0), (end1, x1)].iter().filter(|(end, _)| end.flush == Some(k)).flat_map(|(_, x)| x.iter().cloned()).collect()
+    };
+    let (across1, across2) = (across(1), across(2));
     let la = rail_a.clone().unwrap_or_else(|| builder::line(a0, a1));
     let lb = rail_b.clone().unwrap_or_else(|| builder::line(b0, b1));
 
@@ -973,7 +1443,11 @@ fn blend_geometry(
         for ((e, _), nv) in end.seams.iter().zip(sv) {
             subst.insert(e.id(), shorten(e, &end.v, nv)?);
         }
-        for (e, nv, used) in [(&end.e1, a, &end.ca), (&end.e2, b, &end.cb)] {
+        for (k, (e, nv, used)) in [(&end.e1, a, &end.ca), (&end.e2, b, &end.cb)].into_iter().enumerate() {
+            // The edge a flush end's face runs on along stays as it is.
+            if end.flush == Some(k as u8 + 1) {
+                continue;
+            }
             if used.is_some() {
                 dropped.push(e.id());
                 continue;
@@ -982,6 +1456,10 @@ fn blend_geometry(
         }
         if let (Some((e3, _)), Some(q)) = (&end.e3, q) {
             subst.insert(e3.id(), shorten(e3, &end.v, q)?);
+        }
+        // A ball end's mitre goes: the sphere takes its place.
+        if let Some(ball) = &end.ball {
+            dropped.push(ball.mitre.id());
         }
     }
     // The side edges at the ends are pieces of themselves; the rails and corner curves are new.
@@ -995,11 +1473,11 @@ fn blend_geometry(
         let nf = if i == i1 {
             let mut m = subst.clone();
             m.insert(edge.id(), la.clone());
-            rebuild_face_dropping(f, &m, &dropped, &[])?
+            rebuild_face_dropping(f, &m, &dropped, &across1)?
         } else if i == i2 {
             let mut m = subst.clone();
             m.insert(edge.id(), lb.clone());
-            rebuild_face_dropping(f, &m, &dropped, &[])?
+            rebuild_face_dropping(f, &m, &dropped, &across2)?
         } else if end0.g.contains(&i) {
             rebuild_face_dropping(f, &subst, &dropped, &link0)?
         } else if end1.g.contains(&i) {
@@ -1083,6 +1561,40 @@ fn blend_geometry(
     };
     rec.blend(&blend_face, [edge.id()]);
     new_faces.push(blend_face);
+    // At a ball end, the ball's sphere within the three sections: the blend's (run against the
+    // blend face's use of it) and the earlier rounds' two.
+    for (k, (end, chain, extra)) in [(end0, c0, x0), (end1, c1, x1)].into_iter().enumerate() {
+        let Some(ball) = &end.ball else { continue };
+        let ([section], [to_a, to_b]) = (&chain[..], &extra[..]) else { return Err(KernelError::Failed("ball end".into())) };
+        // The blend face runs end 0's section forward when face 1 runs the edge from v0.
+        let blend_forward = (k == 0) == f1_forward;
+        let wire: mt::Wire = if blend_forward {
+            vec![section.inverse(), to_a.clone(), to_b.inverse()].into()
+        } else {
+            vec![section.clone(), to_b.clone(), to_a.inverse()].into()
+        };
+        // A sphere about the centre, its poles and seam away from the corner (the ball's contacts
+        // with the three faces lie round it).
+        let out =
+            ((end.a - ball.c) + (end.b - ball.c) + (vtx(&ball.t) - ball.c)).normalized().ok_or_else(|| KernelError::Failed("ball end".into()))?;
+        let pole = out.any_perp();
+        let (north, south, back) = (ball.c + pole * r, ball.c - pole * r, ball.c - out * r);
+        let meridian = builder::circle_arc(&builder::vertex(p3(north)), &builder::vertex(p3(south)), p3(back));
+        let mut surf =
+            mt::Surface::RevolutedCurve(mt::Processor::new(mt::RevolutedCurve::by_revolution(meridian.oriented_curve(), p3(ball.c), v3(pole))));
+        {
+            use mt::{ParametricSurface3D, SearchNearestParameter};
+            if let Some((u, w)) = surf.search_nearest_parameter(p3(ball.c + out * r), None, 100) {
+                let n = surf.normal(u, w);
+                if Vec3::new(n.x, n.y, n.z).dot(out) < 0.0 {
+                    surf = mt::Invertible::inverse(&surf);
+                }
+            }
+        }
+        let sphere = mt::Face::try_new(vec![wire], surf).map_err(|e| KernelError::Failed(format!("ball end: {e}")))?;
+        rec.blend(&sphere, [edge.id(), ball.mitre.id()]);
+        new_faces.push(sphere);
+    }
     let mut shells = solid.boundaries().clone();
     let new_shell: mt::Shell = new_faces.into();
     if let Some(sh) = shells.get_mut(si) {
@@ -1181,12 +1693,22 @@ fn blend_with(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str, cur
         return first;
     }
     let mut fallback: Option<Body> = None;
+    // Refused in every order: the first order's refusal, unless another order's says more about a
+    // round meeting the end of an earlier round of the other kind.
+    let mut other: Option<KernelError> = None;
     for order in orders(edges).into_iter().skip(1) {
-        if let Ok(done) = blend_in_order(body, &order, r, shape, what, curved_ends) {
-            if sound(&done) {
-                return Ok(done);
+        match blend_in_order(body, &order, r, shape, what, curved_ends) {
+            Ok(done) => {
+                if sound(&done) {
+                    return Ok(done);
+                }
+                fallback.get_or_insert(done);
             }
-            fallback.get_or_insert(done);
+            Err(e) => {
+                if other.as_ref().is_none_or(|o| rank(&e) > rank(o)) && at_mixed_end(&e) {
+                    other = Some(e);
+                }
+            }
         }
     }
     match (first, fallback) {
@@ -1195,7 +1717,10 @@ fn blend_with(body: &Body, edges: &[Vec3], r: f64, shape: Shape, what: &str, cur
             let _ = e;
             Ok(done)
         }
-        (Err(e), None) => Err(e),
+        (Err(e), None) => Err(match other {
+            Some(e2) => keep_decisive(e, e2),
+            None => e,
+        }),
     }
 }
 
@@ -1342,7 +1867,7 @@ fn blend_each(mut cur: Body, edges: &[Vec3], r: f64, shape: Shape, what: &str, c
         let mut done: Option<(Body, Vec<usize>, Aabb3)> = None;
         for (j, p) in todo.iter().enumerate() {
             if let Some((_, _, e)) = refused.iter().find(|(q, _, _)| q.dist(*p) < 1e-12) {
-                if first_err.is_none() || (matches!(e, KernelError::TooLarge(_)) && !matches!(first_err, Some(KernelError::TooLarge(_)))) {
+                if first_err.as_ref().is_none_or(|f| says_more(e, f)) {
                     first_err = Some(e.clone());
                 }
                 continue;
@@ -1407,14 +1932,17 @@ fn blend_each(mut cur: Body, edges: &[Vec3], r: f64, shape: Shape, what: &str, c
                 Some(Ok(o)) => Ok(o),
                 // The chain cannot be rolled: the edge alone, locally or as a ball rolled along it
                 // (ending in the round the chain ran into).
-                Some(Err(e2)) => local()
-                    .map(|o| (o, vec![j]))
-                    .or_else(|_| if chain.as_ref().is_some_and(|c| c.len() > 1) { roll(&[edge.id()]) } else { Err(e2.clone()) })
-                    .map_err(|_| e2),
+                // A flush end's refusal says more than the chain's.
+                Some(Err(e2)) => match local() {
+                    Ok(o) => Ok((o, vec![j])),
+                    Err(le) => if chain.as_ref().is_some_and(|c| c.len() > 1) { roll(&[edge.id()]) } else { Err(e2.clone()) }
+                        .map_err(|_| if flush_refusal(&le) { le } else { e2 }),
+                },
                 None => match local() {
                     Ok(o) => Ok((o, vec![j])),
-                    // A curved edge, or one between curved faces: roll a ball along its smooth chain.
-                    Err(e) if !curved_case(&solid, &edge, curved_ends) => Err(e),
+                    // A curved edge, or one between curved faces, or a straight one whose end only
+                    // the rolling ball builds: roll a ball along its smooth chain.
+                    Err(e) if !curved_case(&solid, &edge, curved_ends) && !rolled_end(&solid, &edge, size) => Err(e),
                     Err(e) => match chain.as_deref() {
                         // The chain that cannot be rolled (it runs on into the edge an earlier round
                         // left where it met another face): the edge alone, ending on that round. A
@@ -1427,6 +1955,7 @@ fn blend_each(mut cur: Body, edges: &[Vec3], r: f64, shape: Shape, what: &str, c
                             };
                             roll(ids).or_else(|first| if ids.len() > 1 { roll(&[edge.id()]).map_err(|_| first) } else { Err(first) }).map_err(|e2| {
                                 match e2 {
+                                    e2 if at_mixed_end(&e2) => e2,
                                     KernelError::TooLarge(m) => KernelError::TooLarge(format!("{m} ({e})")),
                                     e2 => KernelError::Failed(format!("{e2} ({e})")),
                                 }
@@ -1438,15 +1967,36 @@ fn blend_each(mut cur: Body, edges: &[Vec3], r: f64, shape: Shape, what: &str, c
             };
             // What this attempt could change: the edge and its smooth chain, with room for the blend.
             let reach = edges_box(&solid, chain.as_deref().unwrap_or(&[edge.id()]), r + tol);
-            match attempt.and_then(|((o, rec), js)| record::rebuilt(o, &[&solid], &rec).map(|b| (b, js))) {
+            // Picks of edges the blend took up and left no trace of (an earlier round's end where
+            // the chain merged with it) are done with it: picked or not, the result is the same.
+            let absorbed = |o: &Solid, rec: &Rebuild, mut js: Vec<usize>| {
+                let kept = Body::unique_edges(o);
+                let gone: Vec<mt::EdgeID> = rec.blended().filter(|id| !kept.iter().any(|e| e.id() == *id)).collect();
+                if gone.is_empty() {
+                    return js;
+                }
+                let all = Body::unique_edges(&solid);
+                for (k, q) in todo.iter().enumerate() {
+                    let on = cur.nearest_edge(*q, tol).ok().flatten().and_then(|(i, _)| all.get(i)).is_some_and(|x| gone.contains(&x.id()));
+                    if on && !js.contains(&k) {
+                        js.push(k);
+                    }
+                }
+                js
+            };
+            match attempt.and_then(|((o, rec), js)| {
+                let js = absorbed(&o, &rec, js);
+                record::rebuilt(o, &[&solid], &rec).map(|b| (b, js))
+            }) {
                 Ok((b, js)) => {
                     done = Some((b, js, reach));
                     break;
                 }
-                // Reported: the first refusal, unless a later one is a size a smaller radius may
-                // fit (the others may be refused only until that edge is blended).
+                // Reported: the first refusal, unless a later one says more ([`rank`]): decisive,
+                // or a size a smaller radius may fit (the others may be refused only until that
+                // edge is blended).
                 Err(e) => {
-                    if first_err.is_none() || (matches!(e, KernelError::TooLarge(_)) && !matches!(first_err, Some(KernelError::TooLarge(_)))) {
+                    if first_err.as_ref().is_none_or(|f| says_more(&e, f)) {
                         first_err = Some(e.clone());
                     }
                     refused.push((*p, reach, e));
@@ -1535,7 +2085,12 @@ fn run_on_loop(cur: &Body, solid: &Solid, pts: &[Vec3]) -> Result<Option<(Vec<mt
                 !matches!(e.curve(), mt::Curve::Line(_)) && smooth(prev, e) && smooth(e, next)
             };
             let usable = |i: usize| sel(i) || filler(i);
-            if (0..m).all(usable) {
+            // Not over a flush vertex: the blends end there, each on its own ([`flush_vertex`]).
+            let flush_after = |i: usize| match (es.get(i % m), es.get((i + 1) % m)) {
+                (Some(a), Some(b)) => flush_vertex(solid, a, b, a.back()),
+                _ => false,
+            };
+            if (0..m).all(usable) && !(0..m).any(flush_after) {
                 // The whole loop.
                 if (0..m).filter(|i| sel(*i)).count() >= 2 {
                     let ids: Vec<mt::EdgeID> = es.iter().map(|e| e.id()).collect();
@@ -1556,7 +2111,7 @@ fn run_on_loop(cur: &Body, solid: &Solid, pts: &[Vec3]) -> Result<Option<(Vec<mt
                     while idx.last().is_some_and(|i| !sel(*i)) {
                         idx.pop();
                     }
-                    if idx.iter().filter(|i| sel(**i)).count() < 2 {
+                    if idx.iter().filter(|i| sel(**i)).count() < 2 || idx.iter().rev().skip(1).any(|i| flush_after(*i)) {
                         continue;
                     }
                     let ids: Vec<mt::EdgeID> = idx.iter().filter_map(|i| es.get(i % m).map(|e| e.id())).collect();
@@ -1593,6 +2148,51 @@ fn curved_case(solid: &Solid, edge: &mt::Edge, curved_ends: bool) -> bool {
         || (curved_ends && solid.face_iter().filter(|f| f.vertex_iter().any(|v| v == *edge.front() || v == *edge.back())).any(curved))
 }
 
+/// Whether a straight edge between planes ends where the rolling ball builds the end and the
+/// local blend does not: at a vertex of four faces whose two end faces are planes meeting along a
+/// straight seam, each beside one of the edge's faces (a wall's end flush with the face beneath
+/// it, the blend crossing the seam's line past the vertex), or where an earlier round of the
+/// other kind ends flush with a wall's end ([`crate::merge_corner::mixed_end`]). `size`: the
+/// body's.
+fn rolled_end(solid: &Solid, edge: &mt::Edge, size: f64) -> bool {
+    if !matches!(edge.curve(), mt::Curve::Line(_)) {
+        return false;
+    }
+    let sides: Vec<&mt::Face> = solid.face_iter().filter(|f| f.edge_iter().any(|e| e.id() == edge.id())).take(3).collect();
+    let [a, b] = sides[..] else { return false };
+    if plane_normal(a).is_none() || plane_normal(b).is_none() {
+        return false;
+    }
+    let tol = (size * 1e-7).max(1e-9);
+    let fit = (size * 1e-5).clamp(1e-5, 1e-3);
+    let faces: Vec<mt::Face> = solid.face_iter().cloned().collect();
+    let at = |e: &mt::Edge, v: &mt::Vertex| e.front() == v || e.back() == v;
+    let seam = |f: &mt::Face, g: &mt::Face, v: &mt::Vertex| f.edge_iter().find(|e| at(e, v) && g.edge_iter().any(|x| x.id() == e.id()));
+    [edge.front(), edge.back()].into_iter().any(|v| {
+        let ends: Vec<&mt::Face> =
+            faces.iter().filter(|f| f.id() != a.id() && f.id() != b.id() && f.vertex_iter().any(|x| x == *v)).take(3).collect();
+        // A flush vertex is the local blend's ([`flush_vertex`]).
+        let flush = || [a, b].iter().any(|f| f.edge_iter().any(|x| x.id() != edge.id() && at(&x, v) && flush_vertex(solid, edge, &x, v)));
+        match ends[..] {
+            [_, _] if flush() => false,
+            [g, h] => {
+                let beside = |s: &mt::Face, t: &mt::Face| seam(g, s, v).is_some() && seam(h, t, v).is_some();
+                plane_normal(g).is_some()
+                    && plane_normal(h).is_some()
+                    && (beside(a, b) || beside(b, a))
+                    && seam(g, h, v).is_some_and(|e| crate::curveblend::straight(&e, tol * 10.0))
+            }
+            [g] => {
+                plane_normal(g).is_none()
+                    && [(a, b), (b, a)].into_iter().any(|(t, x)| {
+                        crate::guard("blend end", || Ok(crate::merge_corner::mixed_end(&faces, v, t, x, g, fit))).ok().flatten().is_some()
+                    })
+            }
+            _ => false,
+        }
+    })
+}
+
 /// Whether the two faces of `edge` meet tangentially along it (sampled at a quarter, the
 /// middle and three quarters of the edge): a seam, not a corner.
 fn tangent_faces(solid: &Solid, edge: &mt::Edge) -> bool {
@@ -1615,6 +2215,24 @@ fn tangent_faces(solid: &Solid, edge: &mt::Edge) -> bool {
 
 /// The chain of edges continuing `edge` smoothly at its ends (its ids): closed, or open where
 /// the next edge turns sharply.
+/// The edges a fillet of edge `index` (as in [`Body::tessellate`]'s `edges`) takes with it: its
+/// smooth chain, ending where the fillet's does (at the end of an earlier round of the other kind
+/// it meets, not over that round's end and on up the wall). For the dialog's tangent chain, so
+/// what it shows picked is what the fillet rounds. `None` for a mesh body or no such edge.
+pub fn fillet_chain(body: &Body, index: usize) -> Option<Vec<usize>> {
+    if body.is_mesh() {
+        return None;
+    }
+    guard("fillet chain", || {
+        let all = Body::unique_edges(&body.solid);
+        let Some(edge) = all.get(index) else { return Ok(None) };
+        let Some(ids) = smooth_chain(&body.solid, edge) else { return Ok(None) };
+        Ok(Some(ids.iter().filter_map(|id| all.iter().position(|e| e.id() == *id)).collect()))
+    })
+    .ok()
+    .flatten()
+}
+
 pub(crate) fn smooth_chain(solid: &Solid, edge: &mt::Edge) -> Option<Vec<mt::EdgeID>> {
     smooth_chain_within(solid, edge, &|_| true)
 }
@@ -1654,6 +2272,7 @@ pub(crate) fn smooth_chain_within(solid: &Solid, edge: &mt::Edge, keep: &dyn Fn(
     let mut ids = vec![edge.id()];
     // Walk on from one end of the edge (leaving vertex `v` in direction `d`).
     let walk = |mut v: mt::Vertex, mut d: Vec3, ids: &mut Vec<mt::EdgeID>, stop: &mt::Vertex| -> Option<bool> {
+        let mut cur = edge.clone();
         for _ in 0..200 {
             if v == *stop {
                 return Some(true);
@@ -1661,10 +2280,17 @@ pub(crate) fn smooth_chain_within(solid: &Solid, edge: &mt::Edge, keep: &dyn Fn(
             let next = all.iter().filter(|e| !ids.contains(&e.id()) && (*e.front() == v || *e.back() == v)).find_map(|e| {
                 let fwd = *e.front() == v;
                 let t = if fwd { dir(e, false)? } else { -dir(e, true)? };
-                (t.dot(d) > 1.0 - 1e-4 && !smooth_seam(solid, e) && keep(e)).then(|| (e.clone(), fwd))
+                (t.dot(d) > 1.0 - 1e-4
+                    && !smooth_seam(solid, e)
+                    && keep(e)
+                    && faces_carry_on(solid, &cur, e, &v)
+                    && !onto_round_cap(solid, &cur, e, &v)
+                    && !flush_vertex(solid, &cur, e, &v))
+                .then(|| (e.clone(), fwd))
             });
             let Some((e, fwd)) = next else { return Some(false) };
             ids.push(e.id());
+            cur = e.clone();
             if fwd {
                 v = e.back().clone();
                 d = dir(&e, true)?;
@@ -1680,6 +2306,136 @@ pub(crate) fn smooth_chain_within(solid: &Solid, edge: &mt::Edge, keep: &dyn Fn(
         walk(edge.front().clone(), -dir(edge, false)?, &mut ids, edge.back())?;
     }
     Some(ids)
+}
+
+/// Whether the faces of `next` carry on those of `cur` at their common vertex `v`: each is one of
+/// them or meets one tangentially there (an earlier round running on from a side). A ball rolling
+/// along `cur` rolls on along `next` only then, not onto the end of an earlier round of a face
+/// beside its own (a wall foot's round ending flush in the plate's side under the wall's end).
+fn faces_carry_on(solid: &Solid, cur: &mt::Edge, next: &mt::Edge, v: &mt::Vertex) -> bool {
+    let p = vtx(v);
+    let faces_of = |e: &mt::Edge| solid.face_iter().filter(|f| f.edge_iter().any(|x| x.id() == e.id())).take(3).collect::<Vec<_>>();
+    let (fc, fx) = (faces_of(cur), faces_of(next));
+    let normal = |f: &mt::Face| crate::curveblend::project(f, p, None).map(|x| x.1);
+    let cur_normals: Vec<Vec3> = fc.iter().filter_map(|f| normal(f)).collect();
+    fx.iter().all(|f| fc.iter().any(|g| g.id() == f.id()) || normal(f).is_some_and(|n| cur_normals.iter().any(|m| m.dot(n) > 1.0 - 1e-6)))
+}
+
+/// Whether `v` is a flush vertex between the straight edge `cur` and the straight `next` running on
+/// along its line: the two share one face (a wall's end flush with the side of the plate beneath
+/// it), each has a face of its own (the wall's face, the plate's side) and those two meet only
+/// through one more face at `v` (the plate's top, which the wall stands on). The faces of their own
+/// cross there at an angle, so a round of one does not run on into the other: each ends in that
+/// fourth face's plane ([`blend_geometry`]).
+fn flush_vertex(solid: &Solid, cur: &mt::Edge, next: &mt::Edge, v: &mt::Vertex) -> bool {
+    if !matches!(cur.curve(), mt::Curve::Line(_)) || !matches!(next.curve(), mt::Curve::Line(_)) {
+        return false;
+    }
+    // On along one line, past `v`.
+    let away = |e: &mt::Edge| {
+        let far = if e.front() == v { e.back() } else { e.front() };
+        (vtx(far) - vtx(v)).normalized()
+    };
+    if !matches!((away(cur), away(next)), (Some(a), Some(b)) if a.dot(b) < -1.0 + 1e-9) {
+        return false;
+    }
+    let faces_of = |e: &mt::Edge| solid.face_iter().filter(|f| f.edge_iter().any(|x| x.id() == e.id())).take(3).collect::<Vec<_>>();
+    let (fc, fx) = (faces_of(cur), faces_of(next));
+    let ([a, b], [c, e]) = (&fc[..], &fx[..]) else { return false };
+    let (own_cur, own_next) = if a.id() == c.id() {
+        (b, e)
+    } else if a.id() == e.id() {
+        (b, c)
+    } else if b.id() == c.id() {
+        (a, e)
+    } else if b.id() == e.id() {
+        (a, c)
+    } else {
+        return false;
+    };
+    let shared = if own_cur.id() == a.id() { b } else { a };
+    if own_cur.id() == own_next.id() {
+        return false;
+    }
+    // A crease between the faces of their own (not one running on smoothly into the other).
+    let normal = |f: &mt::Face| crate::curveblend::project(f, vtx(v), None).map(|x| x.1);
+    if normal(own_cur).zip(normal(own_next)).is_none_or(|(x, y)| x.dot(y) > 1.0 - 1e-6) {
+        return false;
+    }
+    let at: Vec<&mt::Face> = solid.face_iter().filter(|f| f.vertex_iter().any(|x| x == *v)).take(5).collect();
+    let rest: Vec<&&mt::Face> = at.iter().filter(|f| ![shared.id(), own_cur.id(), own_next.id()].contains(&f.id())).collect();
+    let ([g], 4) = (&rest[..], at.len()) else { return false };
+    let meets = |f: &mt::Face| g.edge_iter().any(|x| (x.front() == v || x.back() == v) && f.edge_iter().any(|y| y.id() == x.id()));
+    meets(own_cur) && meets(own_next) && !meets(shared)
+}
+
+/// Whether a chain at vertex `v`, leaving edge `cur`, would run on into `next` only over the end
+/// of an earlier round of the other kind: one face of `cur` (`old`, a plane) gives way at `v` to a
+/// round (`new`) tangent to it along a seam, and the round bends to the far side of `old` from the
+/// ball rolling along `cur` (a round taking material away where an earlier one added it, or the
+/// other way round). The ball's contact with `old` does not run on along that seam, so the chain
+/// ends at `v`, but only where the round ends flush with a wall's end as an earlier round does
+/// there ([`crate::merge_corner::mixed_end`]), at whatever angle its seam crosses the chain (square
+/// to it where the plate's side is square to the wall). A round of the same kind (an earlier round
+/// of the edge the chain runs into), a corner rounded square to the chain's faces (its seam with
+/// `old` is no round's contact with a plane under the chain) and a curved face of the design (a
+/// cove, a slot's rounded corner) leave the chain as it was.
+fn onto_round_cap(solid: &Solid, cur: &mt::Edge, next: &mt::Edge, v: &mt::Vertex) -> bool {
+    use mt::{BoundedCurve, ParametricCurve};
+    let faces_of = |e: &mt::Edge| solid.face_iter().filter(|f| f.edge_iter().any(|x| x.id() == e.id())).take(3).collect::<Vec<_>>();
+    let (fc, fx) = (faces_of(cur), faces_of(next));
+    let ([a, b], [c, e]) = (&fc[..], &fx[..]) else { return false };
+    let (shared, old, new) = if a.id() == c.id() {
+        (a, b, e)
+    } else if a.id() == e.id() {
+        (a, b, c)
+    } else if b.id() == c.id() {
+        (b, a, e)
+    } else if b.id() == e.id() {
+        (b, a, c)
+    } else {
+        return false;
+    };
+    if plane_normal(old).is_none() || plane_normal(new).is_some() {
+        return false;
+    }
+    let Some(seam) = old.edge_iter().find(|x| (x.front() == v || x.back() == v) && new.edge_iter().any(|y| y.id() == x.id())) else { return false };
+    if !smooth_seam(solid, &seam) {
+        return false;
+    }
+    let p = from_p3(v.point());
+    // A face's outward normal at `v` and the direction into it across `cur` (a boundary runs
+    // counter-clockwise about the outward normal: the face lies to its left).
+    let side = |f: &mt::Face| -> Option<(Vec3, Vec3)> {
+        let used = f.boundary_iters().into_iter().flatten().find(|x| x.id() == cur.id())?;
+        let c = used.oriented_curve();
+        let (t0, t1) = c.range_tuple();
+        let dd = c.der(if used.front() == v { t0 } else { t1 });
+        let along = Vec3::new(dd.x, dd.y, dd.z).normalized()?;
+        let (_, n, _) = crate::curveblend::project(f, p, None)?;
+        Some((n, n.cross(along).normalized()?))
+    };
+    let (Some((n1, t1)), Some((n2, t2))) = (side(old), side(shared)) else { return false };
+    // A convex `cur` rolls the ball inside the body (behind `old`), a concave one outside.
+    let convex = n1.dot(t2) < 0.0 && n2.dot(t1) < 0.0;
+    let concave = n1.dot(t2) > 0.0 && n2.dot(t1) > 0.0;
+    let Some(m) = edge_mid(next) else { return false };
+    // Which side of `old` the round's end runs to; level with it (pieces of one surface, a
+    // cylinder's two halves) is no round's end.
+    let bend = (m - p).dot(n1);
+    let tol = p.dist(m) * 1e-3;
+    if !((convex && bend > tol) || (concave && bend < -tol)) {
+        return false;
+    }
+    // And it is such a round's end: a cylinder ending flush with a wall's end
+    // ([`crate::merge_corner::mixed_end`]), adding material where `cur` takes it away or the other
+    // way round. A designed cove or a slot's rounded corner the chain runs on over is none.
+    let faces: Vec<mt::Face> = solid.face_iter().cloned().collect();
+    let fit = (p.dist(m) * 1e-4).clamp(1e-5, 1e-3);
+    crate::guard("chain end", || Ok(crate::merge_corner::mixed_end(&faces, v, old, shared, new, fit)))
+        .ok()
+        .flatten()
+        .is_some_and(|end| end.earlier_adds == convex)
 }
 
 /// Whether the faces on either side of `e` meet smoothly there (a seam between pieces of one
@@ -1869,26 +2625,31 @@ fn fillet_built(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
                 // Three edges at a vertex of any faces end in a sphere.
                 .or_else(|e| {
                     if edges.len() >= 3 {
-                        crate::blend_vertex::fillet_ball_vertices(body, edges, radius).and_then(|b| closed(body, b)).map_err(|_| e)
+                        crate::blend_vertex::fillet_ball_vertices(body, edges, radius)
+                            .and_then(|b| closed(body, b))
+                            .map_err(|e2| keep_decisive(e, e2))
                     } else {
                         Err(e)
                     }
                 })
         })
         // Straight edges ending at a curved face that isn't an earlier round's: a rolling ball
-        // trimmed by the face. Refused, the refusal above stands.
-        .or_else(|e| blend_with(body, edges, radius, Shape::Round, "fillet", true).and_then(|b| closed(body, b)).map_err(|_| e))
+        // trimmed by the face. Refused, the refusal above stands unless this one is decisive.
+        .or_else(|e| blend_with(body, edges, radius, Shape::Round, "fillet", true).and_then(|b| closed(body, b)).map_err(|e2| keep_decisive(e, e2)))
         // Blends meeting at corners on curved faces: all at once.
         .or_else(|e| corners(body, edges, radius, Shape::Round, "fillet", false).and_then(|b| closed(body, b)).map_err(|e2| keep_size(e, e2)))
 }
 
-/// The first refusal, unless only the second found the blend too large (a smaller one may fit).
+/// The first refusal, unless the second says more ([`rank`]): a decisive one, or the blend too
+/// large where the first did not (a smaller one may fit).
 fn keep_size(e: KernelError, e2: KernelError) -> KernelError {
-    match (&e, e2) {
-        (KernelError::TooLarge(_), _) => e,
-        (_, e2 @ KernelError::TooLarge(_)) => e2,
-        _ => e,
-    }
+    if rank(&e2) > rank(&e) { e2 } else { e }
+}
+
+/// The first refusal, unless the second is about a round meeting the end of an earlier round of
+/// the other kind and says more ([`at_mixed_end`], [`rank`]).
+fn keep_decisive(e: KernelError, e2: KernelError) -> KernelError {
+    if at_mixed_end(&e2) && rank(&e2) > rank(&e) { e2 } else { e }
 }
 
 /// Blend the edges together, rebuilding the corners where they meet on faces of any surface
@@ -1932,7 +2693,8 @@ fn radius_step(radius: f64) -> f64 {
 /// The largest radius below `radius` (to three significant digits) at which the fillet of
 /// these edges works, with its result; `None` when none does. Each candidate is a real fillet
 /// of the edges, so the radius returned is one that was built; the search runs up to 16 of
-/// them, so it is for an explicit request, not every refusal.
+/// them, so it is for an explicit request, not every refusal. A decisive refusal ends the
+/// search, with the largest radius built before it, if any.
 pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64) -> Option<(f64, Body)> {
     if !(radius.is_finite() && radius > 1e-6) {
         return None;
@@ -1953,6 +2715,9 @@ pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64) -> Option<(f64, Body
                 lo = mid;
                 best = Some(b);
             }
+            // Refused for what the radius doesn't change: no point searching on. A smaller
+            // radius already built (the end may have fitted the earlier round there) stands.
+            Err(e) if decisive(&e) => break,
             Err(_) => hi = mid,
         }
     }
@@ -1964,7 +2729,7 @@ pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64) -> Option<(f64, Body
 /// reduced for a tight edge elsewhere. The radius per edge (in `edges`' order) and the result;
 /// one radius for all (as [`fillet_max`]) when a group is refused for another reason than its
 /// size, the groups don't build together, or there are too many to search (each search is up
-/// to 16 fillets, and this runs in the live preview).
+/// to 16 fillets, and this runs in the live preview). `None` when a group's refusal is decisive.
 pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64) -> Option<(Vec<f64>, Body)> {
     const MAX_GROUPS: usize = 8;
     const MAX_SEARCHES: usize = 2;
@@ -1976,6 +2741,7 @@ pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64) -> Option<(Vec<
         let pts: Vec<Vec3> = g.iter().filter_map(|i| edges.get(*i).copied()).collect();
         let r = match fillet(body, &pts, radius) {
             Ok(_) => continue,
+            Err(e) if decisive(&e) => return None,
             Err(KernelError::TooLarge(_)) if searches < MAX_SEARCHES => {
                 searches += 1;
                 match fillet_max(body, &pts, radius) {
@@ -2026,11 +2792,21 @@ pub fn fillet_each(body: &Body, edges: &[Vec3], radii: &[f64]) -> Result<Body> {
         }
     }
     by_radius.sort_by(|a, b| b.0.total_cmp(&a.0));
-    let mut cur = body.clone();
-    for (r, pts) in &by_radius {
-        cur = fillet(&cur, pts, *r)?;
-    }
-    Ok(cur)
+    let in_turn = |groups: &mut dyn Iterator<Item = &(f64, Vec<Vec3>)>| -> Result<Body> {
+        let mut cur = body.clone();
+        for (r, pts) in groups {
+            cur = fillet(&cur, pts, *r)?;
+        }
+        Ok(cur)
+    };
+    // The smallest first where the largest first is refused: a round alone may be refused where
+    // it ends on a face almost along its edge, yet build where it meets the end of an earlier
+    // round of the other kind there (a plate edge's round square to a wall's end, the foot's round
+    // first). The first refusal stands unless the second says more.
+    in_turn(&mut by_radius.iter()).or_else(|e| match by_radius.len() {
+        0 | 1 => Err(e),
+        _ => in_turn(&mut by_radius.iter().rev()).map_err(|e2| keep_size(e, e2)),
+    })
 }
 
 /// The points' edges (found as [`edge_ids`] finds them, on the body as the blends see it) grouped
@@ -3117,5 +3893,45 @@ mod tests {
         assert!((actual - removed).abs() < 1e-3, "{actual} vs {removed}");
         assert_eq!(out.face_count(), body.face_count() + 4);
         assert!(out.validity().is_empty(), "{:?}", out.validity());
+    }
+
+    #[test]
+    fn a_round_ends_in_earlier_rounds_of_its_radius_as_if_rounded_with_them() {
+        // A box's upright edge rounded after the top edges at its end: in a piece of the ball
+        // touching the three faces where both are round (their mitre goes), along a crease where
+        // one is. The same body as rounding them all together, and the volume the rounds take.
+        let b = crate::build::box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0)).unwrap();
+        let (a, c, up) = (Vec3::new(20.0, 10.0, 20.0), Vec3::new(10.0, 0.0, 20.0), Vec3::new(20.0, 0.0, 10.0));
+        let vol = |x: &Body| crate::measure(x).unwrap().volume;
+        let quarter = 1.0 - std::f64::consts::FRAC_PI_4;
+        for r in [1.0, 2.0] {
+            for earlier in [vec![a, c], vec![a], vec![c]] {
+                let how = format!("r {r}, {} earlier", earlier.len());
+                let first = fillet(&b, &earlier, r).unwrap();
+                let after = fillet(&first, &[up], r).unwrap();
+                assert!(after.validity().is_empty(), "{how}: {:?}", after.validity());
+                assert_eq!(after.crossed_face_loops().unwrap(), 0, "{how}");
+                let all: Vec<Vec3> = earlier.iter().copied().chain([up]).collect();
+                let together = fillet(&b, &all, r).unwrap();
+                assert_eq!(after.face_count(), together.face_count(), "{how}");
+                assert!((vol(&after) - vol(&together)).abs() < 1e-3, "{how}: {} vs {}", vol(&after), vol(&together));
+                // Each round's section along it; the corner: the ball's eighth of its cube where
+                // all three are round, less the two cylinders' common corner where two are.
+                let removed = if earlier.len() == 2 {
+                    3.0 * quarter * r * r * (20.0 - r) + (1.0 - std::f64::consts::FRAC_PI_6) * r.powi(3)
+                } else {
+                    2.0 * quarter * r * r * 20.0 - (5.0 / 3.0 - std::f64::consts::FRAC_PI_2) * r.powi(3)
+                };
+                let actual = vol(&b) - vol(&after);
+                assert!((actual - removed).abs() < 2e-3 * removed, "{how}: {actual} vs {removed}");
+                // The upright edge's top corner is gone.
+                assert!(!after.solid.vertex_iter().any(|v| vtx(&v).dist(Vec3::new(20.0, 0.0, 20.0 - r)) < 1e-8), "{how}");
+            }
+        }
+        // Earlier rounds of another radius: not this end.
+        let first = fillet(&b, &[a, c], 2.0).unwrap();
+        if let Ok(after) = fillet(&first, &[up], 1.0) {
+            assert!(after.validity().is_empty(), "{:?}", after.validity());
+        }
     }
 }
