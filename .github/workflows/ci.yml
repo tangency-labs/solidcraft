@@ -442,9 +442,6 @@ jobs:
         with:
           key: quick-compile
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Cargo check
         run: cargo check --workspace --all-targets --locked
 
@@ -464,9 +461,6 @@ jobs:
         with:
           key: native-clippy
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Clippy
         env:
           FULL: ${{ needs.changes.outputs.full }}
@@ -476,6 +470,13 @@ jobs:
           scope=(--workspace)
           if [ "$FULL" != true ]; then scope=(); for p in $PACKAGES; do scope+=(-p "$p"); done; fi
           cargo clippy "${scope[@]}" --all-targets --profile ci --locked -- -D warnings
+      # The C++ SMLib kernel is opt-in (`--features smlib`, off by default): lint the code and tests
+      # behind it too, on the crates that have any. Needs the prebuilt library.
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
+      - name: Clippy with the C++ SMLib kernel
+        run: cargo clippy -p solidcraft-smlib -p solidcraft-kernel -p solidcraft-cli --features solidcraft-cli/smlib --all-targets --profile ci --locked -- -D warnings
 
   build-tests:
     name: Build tests
@@ -510,9 +511,6 @@ jobs:
         with:
           key: native-tests
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -584,9 +582,6 @@ jobs:
         with:
           key: native-tests
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -639,6 +634,69 @@ jobs:
           name: junit
           path: ${{ env.CARGO_TARGET_DIR || 'target' }}/nextest/ci/junit.xml
           retention-days: 7
+
+  cpp-tests:
+    name: Native Linux tests (C++ SMLib)
+    # The tests that compare solidcore with the C++ SMLib kernel (parity tests, the C++ round trips,
+    # the C++ SSI corpus score, the model cache across kernels) are built only with the opt-in
+    # `smlib` feature, which every other job leaves off. They live in solidcraft-smlib,
+    # solidcraft-kernel and the CLI's model_cache; the other tests there run again here on
+    # solidcore, the default kernel either way, graded against the same list.
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.native == 'true' }}
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 60
+    env:
+      CARGO_INCREMENTAL: "0"
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: /home/runner/.cache/sccache
+      SCCACHE_CACHE_SIZE: 20G
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Size parallel compiles to the job's memory
+        run: scripts/ci/build-jobs.sh
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Mount the compiler cache
+        uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        continue-on-error: true
+        with:
+          key: ${{ github.repository }}-sccache-cpp-tests
+          path: /home/runner/.cache/sccache
+          commit: ${{ github.ref == 'refs/heads/main' && 'on-change' || 'false' }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: native-cpp-tests
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
+      - name: Set up compiler cache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.16.0
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-nextest
+      - name: Run the tests with the C++ kernel built
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          # The pull request filter of Native Linux tests (default() in .config/nextest.toml);
+          # elsewhere everything but the random boolean property tests, as there.
+          base='default()'
+          if [ "$EVENT_NAME" != pull_request ]; then
+            base='not (package(solidcraft-kernel) & binary(boolean_props))'
+          fi
+          junit=${CARGO_TARGET_DIR:-target}/nextest/ci/junit.xml
+          rm -f "$junit"
+          status=0
+          cargo nextest run -p solidcraft-smlib -p solidcraft-kernel -p solidcraft-cli --features solidcraft-cli/smlib \
+            --cargo-profile ci --locked --profile ci --no-tests=pass --ignore-default-filter -E "($base) & (not package(=solidcraft-cli) | binary(=model_cache))" || status=$?
+          if [ "$status" -ne 0 ] && [ "$status" -ne 100 ]; then exit "$status"; fi
+          cargo xtask known-failing --junit "$junit"
+      - name: Compiler cache statistics
+        if: always()
+        run: sccache --show-stats
 
   gpu-path-tests:
     name: GPU path tests (${{ matrix.shard }}/4)
@@ -703,9 +761,6 @@ jobs:
         with:
           key: native-gpu
           save-if: ${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && matrix.shard == 1 }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -862,9 +917,6 @@ jobs:
         with:
           key: doc-tests
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -923,9 +975,6 @@ jobs:
         with:
           key: oracle
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -965,9 +1014,6 @@ jobs:
         with:
           key: windows-fxc
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       # One test at a time: WARP's shader JIT crashes now and then (a null read in
       # d3d10warp.dll's JIT optimizer, about 1 run in 60) when several devices compile compute
       # pipelines at once, which the parallel tests do. Minidumps showed it in WARP itself, not
@@ -992,9 +1038,6 @@ jobs:
         with:
           key: windows-startup
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Backend order and probing on Windows
         run: cargo test -p solidcraft --profile ci --locked -- startup::tests native_crash::tests native_frame::tests
       - name: Build the app
@@ -1012,7 +1055,7 @@ jobs:
     # commit's real run instead: the merge queue reads `ci` from the newest run of a commit, so a
     # run without a passing `ci` would block a pull request that passed (#1850, #3182, #3252).
     name: ci
-    needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-startup, dependency-advisories, wasm]
+    needs: [changes, checks, quick-compile, clippy, build-tests, tests, cpp-tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-startup, dependency-advisories, wasm]
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
@@ -1060,6 +1103,7 @@ jobs:
           BUILD: ${{ needs.build-tests.result }}
           EVENT_NAME: ${{ github.event_name }}
           TESTS: ${{ needs.tests.result }}
+          CPP_TESTS: ${{ needs.cpp-tests.result }}
           GPU_RUN: ${{ needs.changes.outputs.gpu }}
           GPU: ${{ needs.gpu-path-tests.result }}
           DOCS: ${{ needs.doc-tests.result }}
@@ -1084,6 +1128,7 @@ jobs:
               test "$BUILD" = success
             fi
             test "$TESTS" = success
+            test "$CPP_TESTS" = success
           fi
           # The same output decides whether the GPU path tests run (their job's `if`).
           if [ "$GPU_RUN" = true ]; then
@@ -1132,9 +1177,6 @@ jobs:
         with:
           key: wasm
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh wasm32-unknown-unknown
       - run: cargo xtask wasm
 
   riscv64-gates:
@@ -1157,9 +1199,6 @@ jobs:
         with:
           key: riscv64
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh riscv64gc-unknown-linux-gnu
       - name: Install cross-compilation dependencies
         run: |
           # Ubuntu's regular archive serves amd64; RISC-V packages live in ports.
@@ -1180,8 +1219,6 @@ jobs:
       - name: Cargo check on RISC-V
         env:
           CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
-          # SMLib has no prebuilt library for RISC-V: its sources are compiled with this.
-          CXX_riscv64gc_unknown_linux_gnu: riscv64-linux-gnu-g++
           PKG_CONFIG_SYSROOT_DIR: /
           PKG_CONFIG_PATH: /usr/lib/riscv64-linux-gnu/pkgconfig:/usr/share/pkgconfig
           PKG_CONFIG_ALLOW_CROSS: 1

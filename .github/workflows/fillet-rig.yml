@@ -86,15 +86,12 @@ jobs:
         with:
           key: fillet-rig
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.16.0
-      - name: Build the CLI (release, SMLib)
-        run: cargo build --release --locked -p solidcraft-cli --features smlib
+      - name: Build the CLI (release, solidcore alone)
+        run: cargo build --release --locked -p solidcraft-cli
       - name: Run the fillet cases against the known-failing list
         run: >-
           cargo run -q --locked -p xtask -- kernel-cases --area fillets
