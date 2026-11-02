@@ -3020,6 +3020,21 @@ fn offset_refuses_an_outline_that_would_loop_over_itself() {
     run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 20], [20, 0], [0, 20]], "closed": true}));
     let o = run(&mut s, "sketch.offset", json!({"curves": ["l1"], "distance": 1, "side": [10, -5]}));
     assert_eq!(ids(&o["curves"]).len(), 4, "{o}");
+    // The same bow tie split where it crosses itself only touches itself there: it too keeps
+    // its offset.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 10], [20, 20], [20, 0], [0, 20]], "closed": true}));
+    let o = run(&mut s, "sketch.offset", json!({"curves": ["l1"], "distance": 1, "side": [10, -5]}));
+    assert_eq!(ids(&o["curves"]).len(), 5, "{o}");
+    // A dumbbell whose neck is 2 high: inward by exactly 1 the neck's two sides land on one
+    // another, which is no outline either; a little less is made.
+    let dumbbell = [[0, 0], [4, 0], [4, 1], [8, 1], [8, 0], [12, 0], [12, 4], [8, 4], [8, 3], [4, 3], [4, 4], [0, 4]];
+    for (distance, made) in [(1.0, false), (0.9, true)] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points": dumbbell, "closed": true}));
+        let r = s.execute("sketch.offset", &json!({"curves": ["l1"], "distance": distance, "side": [2, 2]}));
+        assert_eq!(r.is_ok(), made, "{distance}: {r:?}");
+    }
 }
 
 #[test]

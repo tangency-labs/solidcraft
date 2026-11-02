@@ -323,7 +323,7 @@ impl Sketch {
             if !offset.closed {
                 joints.push(pieces.last().ok_or_else(bad)?.2);
             }
-            if offset.closed && !crosses_itself(&outline) && crosses_itself(&cut_to_joints(&pieces, &outline, &joints)) {
+            if offset.closed && !crosses_itself(&outline, true) && crosses_itself(&cut_to_joints(&pieces, &outline, &joints), false) {
                 return Err(SketchError::Invalid("the offset curves would cross".into()));
             }
             for (i, id) in offset.outputs.iter().enumerate() {
@@ -385,17 +385,26 @@ fn cut_to_joints(pieces: &[(Shape, Vec2, Vec2)], outline: &[Outline], joints: &[
 }
 
 /// Whether a closed outline of lines and arcs crosses itself away from the ends its pieces
-/// share. A simple outline whose offset does is refused, not drawn as a loop: an inward offset
-/// wider than a neck of the shape pinches it into two, which one outline can't be (an outline
-/// that already crosses itself, a figure eight, keeps its crossing offset). Outlines of more
-/// than 1000 pieces aren't checked.
-fn crosses_itself(outline: &[Outline]) -> bool {
+/// share: two of its pieces cross, or two lines lie along each other. With `touching`, pieces
+/// that aren't neighbours meeting at all count too (an outline split where it crosses itself
+/// only touches itself there). A simple outline whose offset crosses itself is refused, not drawn
+/// as a loop: an inward offset wider than a neck of the shape pinches it into two, which one
+/// outline can't be (an outline that already crosses or touches itself, a figure eight, keeps
+/// its crossing offset). Outlines of more than 1000 pieces aren't checked.
+fn crosses_itself(outline: &[Outline], touching: bool) -> bool {
     let n = outline.len();
     if !(2..=1000).contains(&n) {
         return false;
     }
-    let size = outline.iter().fold(1.0f64, |m, (_, a, b, _)| m.max(a.x.abs()).max(a.y.abs()).max(b.x.abs()).max(b.y.abs()));
-    let tol = 1e-9 * size;
+    // Tolerances from the outline's own size, plus the coordinates' rounding.
+    let ends = || outline.iter().flat_map(|(_, a, b, _)| [*a, *b]);
+    let (lo, hi) = ends().fold((Vec2::new(f64::MAX, f64::MAX), Vec2::new(f64::MIN, f64::MIN)), |(lo, hi), p| {
+        (Vec2::new(lo.x.min(p.x), lo.y.min(p.y)), Vec2::new(hi.x.max(p.x), hi.y.max(p.y)))
+    });
+    let reach = ends().fold(0.0f64, |m, p| m.max(p.x.abs()).max(p.y.abs()));
+    let extent = (hi.x - lo.x).max(hi.y - lo.y).max(1e-9);
+    let tol = 1e-9 * extent + 1e-12 * reach;
+    let near = 1e-6 * extent + 1e-12 * reach;
     let bounds = |s: &Shape| match *s {
         Shape::Line { a, b } => (a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y)),
         Shape::Round { c, r, .. } => (c.x - r, c.y - r, c.x + r, c.y + r),
@@ -407,15 +416,33 @@ fn crosses_itself(outline: &[Outline]) -> bool {
             if bx.2 < by.0 - tol || by.2 < bx.0 - tol || bx.3 < by.1 - tol || by.3 < bx.1 - tol {
                 continue;
             }
+            let neighbours = j == i + 1 || (i == 0 && j == n - 1);
             // Neighbours meet at their shared end, where a tangent pair's crossings are rounding
             // noise.
             let shared: Vec<Vec2> = [x.1, x.2].into_iter().filter(|p| p.dist(y.1).min(p.dist(y.2)) <= tol).collect();
-            let near = 1e-6 * size;
+            let on = |piece: &Outline, p: Vec2, with_ends: bool| {
+                piece.0.param_on(p, tol).is_some() || (with_ends && (piece.1.dist(p) <= tol || piece.2.dist(p) <= tol))
+            };
+            let with_ends = touching && !neighbours;
+            if with_ends && !shared.is_empty() {
+                return true;
+            }
             if intersections(&x.0, &y.0)
                 .into_iter()
-                .any(|p| x.0.param_on(p, tol).is_some() && y.0.param_on(p, tol).is_some() && shared.iter().all(|s| s.dist(p) > near))
+                .any(|p| on(x, p, with_ends) && on(y, p, with_ends) && (with_ends || shared.iter().all(|s| s.dist(p) > near)))
             {
                 return true;
+            }
+            // Two lines along one another: no crossing point, but they overlap.
+            if let (Shape::Line { a, b }, Shape::Line { a: c, b: d }) = (x.0, y.0)
+                && let Some(u) = (b - a).normalized()
+            {
+                let off = |p: Vec2| ((p - a).x * u.y - (p - a).y * u.x).abs();
+                let along = |p: Vec2| (p - a).dot(u);
+                let (s0, s1) = (along(c).min(along(d)), along(c).max(along(d)));
+                if off(c) <= tol && off(d) <= tol && s1.min(a.dist(b)) - s0.max(0.0) > near {
+                    return true;
+                }
             }
         }
     }
