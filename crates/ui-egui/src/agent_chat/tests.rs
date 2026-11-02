@@ -121,24 +121,50 @@ fn transcript_shortcut_ownership_ends_when_the_panel_is_hidden() {
     }
 }
 
-/// The transcript's selection highlights (#10676), and whether one covers `text`'s first line.
-fn transcript_highlights(h: &crate::scenario::Harness, text: &str) -> (usize, bool) {
-    let fill = h.ctx.style_of(h.ctx.theme()).visuals.selection.bg_fill;
-    let faded = |c: egui::Color32| {
-        let k = f32::from(c.a()) / f32::from(fill.a().max(1));
-        c.a() > 0 && [(c.r(), fill.r()), (c.g(), fill.g()), (c.b(), fill.b())].iter().all(|&(x, y)| (f32::from(x) - f32::from(y) * k).abs() <= 2.0)
-    };
-    let (mut rects, mut at) = (Vec::new(), None);
+/// `c` is `reference`, or `reference` faded: a window floating inside the app fades its shapes.
+fn same_colour(c: egui::Color32, reference: egui::Color32) -> bool {
+    let k = f32::from(c.a()) / f32::from(reference.a().max(1));
+    c.a() > 0
+        && [(c.r(), reference.r()), (c.g(), reference.g()), (c.b(), reference.b())]
+            .iter()
+            .all(|&(x, y)| (f32::from(x) - f32::from(y) * k).abs() <= 2.0)
+}
+
+/// The filled rectangles outlined outside, as text selection marks are, drawn this frame, with
+/// their outline colour.
+fn outlined_rects(h: &crate::scenario::Harness) -> Vec<(egui::Rect, egui::Color32)> {
+    let mut rects = Vec::new();
     for clipped in &h.shapes {
-        crate::test_support::each_shape(&clipped.shape, &mut |shape| match shape {
-            // A window floating inside the app fades its shapes: the same colour at less opacity.
-            egui::Shape::Rect(r) if faded(r.fill) => rects.push(r.rect),
-            egui::Shape::Text(t) if t.galley.text() == text => at = Some(t.pos + egui::vec2(4.0, 4.0)),
-            _ => {}
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+            if let egui::Shape::Rect(r) = shape
+                && r.stroke.width > 0.0
+                && r.stroke.color.a() > 0
+                && r.fill.a() > 0
+                && r.stroke_kind == egui::StrokeKind::Outside
+            {
+                rects.push((r.rect, r.stroke.color));
+            }
         });
     }
-    let at = at.expect("the text is drawn");
-    (rects.len(), rects.iter().any(|r| r.contains(at)))
+    rects
+}
+
+/// The transcript's selection highlights (#10676), the outlined rectangles not drawn in `base`:
+/// how many, and the outline colour of the one that covers `text`'s first line.
+fn transcript_highlights(h: &crate::scenario::Harness, base: &[(egui::Rect, egui::Color32)], text: &str) -> (usize, Option<egui::Color32>) {
+    let rects: Vec<_> = outlined_rects(h).into_iter().filter(|r| !base.contains(r)).collect();
+    let mut at = None;
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+            if let egui::Shape::Text(t) = shape
+                && t.galley.text() == text
+            {
+                at = Some(t.pos + egui::vec2(4.0, 4.0));
+            }
+        });
+    }
+    let at = at.unwrap_or_else(|| panic!("{text:?} is drawn"));
+    (rects.len(), rects.iter().find(|(r, _)| r.contains(at)).map(|(_, c)| *c))
 }
 
 /// #10676: Ctrl+A in the transcript selects every prompt and answer of the conversation, not
@@ -147,16 +173,18 @@ fn transcript_highlights(h: &crate::scenario::Harness, text: &str) -> (usize, bo
 #[test]
 fn select_all_in_the_transcript_takes_the_whole_conversation() {
     let reply = "# Clipboard test heading\n\nFIRST PARAGRAPH ALPHA. This text belongs to the assistant.\n\nSECOND PARAGRAPH BETA.\n\n- List item one\n- List item two\n\n```text\nCODE BLOCK GAMMA\nsecond code line\n```\n\nFINAL PARAGRAPH OMEGA.";
-    let expected = "User:\nMake a plate\n\nAssistant:\nClipboard test heading\n\nFIRST PARAGRAPH ALPHA. This text belongs to the assistant.\n\nSECOND PARAGRAPH BETA.\n\n• List item one\n• List item two\n\nCODE BLOCK GAMMA\nsecond code line\n\nFINAL PARAGRAPH OMEGA.\n\nAssistant:\nTranscript clipboard sentinel";
+    let expected = "User:\nMake a plate\n\nAssistant:\nClipboard test heading\n\nFIRST PARAGRAPH ALPHA. This text belongs to the assistant.\n\nSECOND PARAGRAPH BETA.\n\n• List item one\n• List item two\n\nCODE BLOCK GAMMA\nsecond code line\n\nFINAL PARAGRAPH OMEGA.\n\nUser:\nThanks\n\nAssistant:\nTranscript clipboard sentinel";
     let ctrl =
         |key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::CTRL | egui::Modifiers::COMMAND };
     let copied = |h: &crate::scenario::Harness| {
         h.output.commands.iter().find_map(|c| if let egui::OutputCommand::CopyText(t) = c { Some(t.clone()) } else { None })
     };
-    for (layout, popped) in
-        [(crate::shell::LayoutMode::Docked, false), (crate::shell::LayoutMode::Floating, false), (crate::shell::LayoutMode::Floating, true)]
-    {
+    let layouts =
+        [(crate::shell::LayoutMode::Docked, false), (crate::shell::LayoutMode::Floating, false), (crate::shell::LayoutMode::Floating, true)];
+    for (dark, (layout, popped)) in [true, false].into_iter().flat_map(|dark| layouts.map(|l| (dark, l))) {
         let mut h = transcript_clipboard_harness(layout);
+        h.app.preferences.theme = if dark { "dark" } else { "light" }.into();
+        h.app.ui.dark = dark;
         if popped {
             h.call("ui.resize", json!({"width": 1600, "height": 1000}));
             h.app.preferences.agent_chat_popped = true;
@@ -169,22 +197,36 @@ fn select_all_in_the_transcript_takes_the_whole_conversation() {
                 Item::Agent { thought: false, text: reply.into() },
                 Item::Agent { thought: true, text: "THOUGHT DELTA".into() },
                 Item::Notice { text: "NOTICE EPSILON".into(), error: false },
+                Item::User { text: "Thanks".into(), image: false, pictures: Vec::new(), context: Context::default(), files: Vec::new() },
             ],
         );
         h.frames(4);
-        let (before, _) = transcript_highlights(&h, "THOUGHT DELTA");
         // A double-click selects a word of one block, as in the report.
         let at = transcript_text_position(&h);
         transcript_click(&mut h, at);
         transcript_click(&mut h, at);
         let undo = h.app.session.undo.len();
+        let base = outlined_rects(&h);
         h.frame_with(vec![ctrl(egui::Key::A)]);
         assert!(h.app.agent_chat.all_selected, "{layout:?} popped {popped}: Ctrl+A selects the conversation");
         assert!(!h.ctx.plugin::<egui::text_selection::LabelSelectionState>().lock().has_selection(), "the block selection gives way");
-        let (after, thought) = transcript_highlights(&h, "THOUGHT DELTA");
-        // Two prompts and answers of one block each, and the reply's seven blocks.
-        assert!(after >= before + 9, "{layout:?} popped {popped}: every message block is highlighted ({before} -> {after})");
-        assert!(!thought, "a thought is not highlighted");
+        let (after, thought) = transcript_highlights(&h, &base, "THOUGHT DELTA");
+        // The prompts and one-block answers in view, and the reply's seven blocks.
+        assert!(after >= 9, "{layout:?} popped {popped}: every message block is highlighted ({after})");
+        assert!(thought.is_none(), "a thought is not highlighted");
+        // The prompt's bubble is filled with the selection colour itself: the outline must show
+        // on it, as on the reply's text and code backgrounds, in either theme.
+        let t = crate::theme::Tokens::get();
+        assert_eq!(h.ctx.style_of(h.ctx.theme()).visuals.dark_mode, dark, "the theme took effect");
+        for text in ["Thanks", "Transcript clipboard sentinel", "FINAL PARAGRAPH OMEGA.", "CODE BLOCK GAMMA\nsecond code line"] {
+            let outline = transcript_highlights(&h, &base, text).1.unwrap_or_else(|| panic!("{text:?} is highlighted"));
+            for (name, under) in [("bubble", t.accent_soft), ("panel", t.panel), ("dialog body", t.dialog_body), ("code", t.field)] {
+                assert!(
+                    !same_colour(outline, under),
+                    "dark {dark} {layout:?} popped {popped}: {text:?} outline {outline:?} vanishes on the {name} {under:?}"
+                );
+            }
+        }
         h.frame_with(vec![egui::Event::Copy]);
         assert_eq!(copied(&h).as_deref(), Some(expected), "{layout:?} popped {popped}: Copy takes the whole conversation");
         assert!(h.app.copied_bodies.is_empty(), "the CAD body is not copied");
@@ -200,7 +242,7 @@ fn select_all_in_the_transcript_takes_the_whole_conversation() {
             modifiers: egui::Modifiers::NONE,
         }]);
         assert!(!h.app.agent_chat.all_selected, "Esc ends it");
-        assert_eq!(transcript_highlights(&h, "THOUGHT DELTA").0, before, "and its highlight");
+        assert_eq!(transcript_highlights(&h, &base, "THOUGHT DELTA").0, 0, "and its highlight");
         // An ordinary selection works again afterwards.
         h.frame_with(vec![ctrl(egui::Key::A)]);
         assert!(h.app.agent_chat.all_selected);

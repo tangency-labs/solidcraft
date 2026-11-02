@@ -65,7 +65,8 @@ fn host(url: &str) -> &str {
 /// hidden text (#11527). Out of view this one still takes part: it keeps its end of the selection
 /// and gives its text to Copy, clipped to nothing so it is not drawn and never moves the selection.
 /// `selected`: the whole transcript is selected (#10676), so its text is drawn over the selection
-/// colour, as egui draws a label's own selection.
+/// colour, as egui draws a label's own selection, and outlined with the selection stroke: a
+/// prompt's bubble is filled with that same colour, so the fill alone would not show there.
 pub(super) fn selectable(ui: &mut egui::Ui, label: egui::Label, selected: bool) -> egui::Response {
     use egui::text_selection::LabelSelectionState;
     let behind = ui.painter().add(egui::Shape::Noop);
@@ -83,7 +84,10 @@ pub(super) fn selectable(ui: &mut egui::Ui, label: egui::Label, selected: bool) 
         ui.set_clip_rect(clip);
     }
     if selected {
-        ui.painter().set(behind, egui::Shape::rect_filled(response.rect, 0.0, ui.visuals().selection.bg_fill));
+        let selection = ui.visuals().selection;
+        let corner = egui::CornerRadius::same(Tokens::get().radius_sm / 2);
+        let mark = egui::epaint::RectShape::new(response.rect, corner, selection.bg_fill, selection.stroke, egui::StrokeKind::Outside);
+        ui.painter().set(behind, mark);
     }
     response
 }
