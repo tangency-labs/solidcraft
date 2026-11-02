@@ -129,7 +129,7 @@ impl Session {
             self.continuity.clear();
         }
         self.status_analysis_changed(None);
-        self.revision += 1;
+        self.refresh_display();
     }
 }
 

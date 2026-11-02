@@ -6552,8 +6552,8 @@ fn trim_to_body(tools: Vec<Traced>, target: &ModelBody, dist_to_start: impl Fn(V
 
 /// For a Cut To the curved face `fi` of `target`: the height above `plane` (along its normal) at
 /// which a flat-ended tool over `regions`, travelling along `travel` × the normal (±1), stops in
-/// the gap beyond that face. Rays over the profiles must each cross the face once, with material
-/// just before it and none just after; the end is halfway across the narrowest gap to the next
+/// the gap beyond that face. Rays over the profiles must each cross the face ahead of the profile,
+/// with material just before the first such crossing and none just after; the end is halfway across the narrowest gap to the next
 /// material (at most the usual run past a curved target). `None` when that does not hold.
 fn cut_end_past_face(target: &ModelBody, fi: usize, plane: &Plane, regions: &[Region2], travel: f64) -> Option<f64> {
     let m = target.mesh();
@@ -6599,8 +6599,9 @@ fn cut_end_past_face(target: &ModelBody, fi: usize, plane: &Plane, regions: &[Re
                 return None;
             }
         }
-        let on_face: Vec<usize> = (0..hits.len()).filter(|&k| hits[k].1 == fi).collect();
-        let [k] = on_face[..] else { return None };
+        // The first crossing of the face ahead of the profile: an exact kernel's whole cylinder is
+        // one face, which a line through it crosses twice.
+        let k = (0..hits.len()).filter(|&k| hits[k].1 == fi && hits[k].0 > -eps).min_by(|a, b| hits[*a].0.total_cmp(&hits[*b].0))?;
         let e = hits[k].0;
         let at = |t: f64| plane.origin + n * (travel * t) + (q - plane.origin - n * height(q));
         if !m.contains(at(e - eps * 10.0)) || m.contains(at(e + eps * 10.0)) {
