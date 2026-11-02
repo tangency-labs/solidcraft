@@ -172,7 +172,11 @@ fn main() -> ExitCode {
         Some("oracle") => oracle::run(&args[1..]),
         Some("fuzz") => fuzz::run(&args[1..]),
         Some("fuzz-one") => fuzz::one(&args[1..]),
-        Some("mcp") => cmd_mcp(&args[1..]),
+        Some("mcp") => {
+            let result = cmd_mcp(&args[1..]);
+            solidcraft_mcp::cleanup_scratch_dir();
+            result
+        }
         Some("crashes") => crashes::run(&args[1..]),
         Some("icon") => cmd_icon(&args[1..]),
         Some("licences" | "licenses") => {

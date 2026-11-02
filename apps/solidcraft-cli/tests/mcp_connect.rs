@@ -263,3 +263,110 @@ mod setup {
         assert!(json_of(&pkg.join("claude_desktop_config.json"))["mcpServers"]["solidcraft"].is_object());
     }
 }
+
+/// Scratch files belong to the CLI process; exercise real startup, requests and shutdown.
+mod scratch_cleanup {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    fn command(case: &str) -> (PathBuf, Command) {
+        let dir = std::env::temp_dir().join(format!("solidcraft-mcp-lifecycle-{case}-{}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"));
+        command
+            .args(["mcp", "--headless"])
+            .env("TMPDIR", &dir)
+            .env("TMP", &dir)
+            .env("TEMP", &dir)
+            .env("SOLIDCRAFT_RECOVERY_DIR", dir.join("recovery"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        (dir, command)
+    }
+
+    fn scratch_folders(dir: &Path) -> Vec<PathBuf> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.file_name().unwrap().to_string_lossy().starts_with("solidcraft-mcp-"))
+            .collect()
+    }
+
+    fn initialize() -> Value {
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}})
+    }
+
+    fn run(mut command: Command, request: Value) -> std::process::Output {
+        let mut child = command.spawn().unwrap();
+        writeln!(child.stdin.take().unwrap(), "{request}").unwrap();
+        child.wait_with_output().unwrap()
+    }
+
+    #[test]
+    fn eof_removes_only_the_process_scratch_folder() {
+        let (dir, command) = command("eof");
+        let unrelated = dir.join("solidcraft-mcp-unrelated");
+        std::fs::create_dir(&unrelated).unwrap();
+        let out = run(command, initialize());
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let reply: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert!(reply.get("result").is_some(), "{reply}");
+        assert_eq!(scratch_folders(&dir), vec![unrelated]);
+        assert!(dir.join("recovery").is_dir(), "cleanup must leave the recovery folder alone");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn startup_error_removes_the_process_scratch_folder() {
+        let (dir, mut command) = command("startup-error");
+        let out = command.args(["--param-check", "invalid"]).stdin(Stdio::null()).output().unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success());
+        assert!(stderr.contains("--param-check wants off, warn or strict"), "{stderr}");
+        assert!(scratch_folders(&dir).is_empty(), "startup error left a scratch folder in {dir:?}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn shutdown_preserves_nonempty_scratch_folder() {
+        let (dir, mut command) = command("nonempty");
+        let mut child = command.spawn().unwrap();
+        let mut input = child.stdin.take().unwrap();
+        writeln!(input, "{}", initialize()).unwrap();
+        let mut reply = String::new();
+        BufReader::new(child.stdout.take().unwrap()).read_line(&mut reply).unwrap();
+        let reply: Value = serde_json::from_str(&reply).unwrap();
+        assert!(reply.get("result").is_some(), "{reply}");
+        let scratch = scratch_folders(&dir);
+        assert_eq!(scratch.len(), 1);
+        let saved = scratch[0].join("keep.txt");
+        std::fs::write(&saved, "saved output").unwrap();
+        drop(input);
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(std::fs::read_to_string(saved).unwrap(), "saved output");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn failed_screenshot_scratch_folder_is_removed_without_a_path_scope() {
+        let (dir, mut command) = command("screenshot");
+        command.arg("--allow-any-path");
+        // A headless server cannot capture a window. The request still allocates a scratch
+        // path before the backend refuses it, without relying on a GPU or installed renderer.
+        let out = run(
+            command,
+            json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": {"name": "screenshot", "arguments": {"source": "window"}},
+            }),
+        );
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let reply: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(reply["result"]["isError"], true, "{reply}");
+        assert!(reply["result"]["content"][0]["text"].as_str().unwrap().contains("the window gave no picture"), "{reply}");
+        assert!(scratch_folders(&dir).is_empty(), "failed screenshot left a scratch folder in {dir:?}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
