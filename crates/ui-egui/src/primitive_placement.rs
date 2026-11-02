@@ -17,7 +17,7 @@ use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::geom::PlaneGeom as _;
 
 use crate::i18n::tr;
-use crate::selection::{EDGES, EXTERNAL_POINTS, FACES, ORIGIN, POINTS, SelInput, VERTICES};
+use crate::selection::{EDGES, EXTERNAL_POINTS, FACES, ORIGIN, POINTS, SNAP_POINTS, SelInput, VERTICES};
 use crate::ui_kit::{self, choice_row, expr_row};
 use solidcraft_engine::Sel;
 
@@ -36,11 +36,12 @@ const BOX_PLACEMENTS: [&str; 2] = ["Corner", "Center"];
 
 /// The selection inputs of a primitive's dialog: the Box takes a point for its corner or centre,
 /// the Sphere and Torus for their centre. It takes the points of every shown sketch, each with
-/// its sketch (#9403).
+/// its sketch (#9403), and hovering an edge or face wakes its snap points (a hole's centre, an
+/// edge's middle, a face's centre) to pick (#11230).
 pub(crate) fn inputs(cmd: &str) -> Vec<SelInput> {
     match cmd {
         "solid.box" | "solid.sphere" | "solid.torus" => {
-            vec![SelInput::new("Point", VERTICES | EDGES | FACES | ORIGIN | POINTS | EXTERNAL_POINTS, false).tip("dialog.primitive_point_tip")]
+            vec![SelInput::new("Point", VERTICES | EDGES | FACES | ORIGIN | POINTS | EXTERNAL_POINTS | SNAP_POINTS, false).tip("dialog.primitive_point_tip")]
         }
         _ => Vec::new(),
     }
