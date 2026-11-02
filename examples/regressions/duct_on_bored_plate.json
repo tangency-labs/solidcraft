@@ -1,0 +1,338 @@
+{
+ "description": "A duct lofted between two periodic spline sections stands flush on an 80 x 80 x 20 plate beside its 38 mm bore, its foot following the bore's rim 0.2 mm away, and is joined to the plate (case posted on PR #4611 for #4542). Splitting the plate's top along the loft's wall searched the wall for thousands of sides where the field only jumps sign past the wall's edge, 48 times each; the join took 96 s in a release build.",
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -40,
+     -40,
+     0
+    ],
+    "length": 80,
+    "width": 80,
+    "height": 20,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     0,
+     -1
+    ],
+    "axis": [
+     0,
+     0,
+     1
+    ],
+    "radius": 19,
+    "height": 22,
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      20
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.spline.fit_point",
+   "params": {
+    "points": [
+     [
+      14.7081,
+      -12.3415
+     ],
+     [
+      15.7277,
+      -11.0127
+     ],
+     [
+      16.6277,
+      -9.6
+     ],
+     [
+      17.4011,
+      -8.1143
+     ],
+     [
+      18.0421,
+      -6.5668
+     ],
+     [
+      18.5458,
+      -4.9693
+     ],
+     [
+      18.9083,
+      -3.334
+     ],
+     [
+      19.1269,
+      -1.6734
+     ],
+     [
+      19.2,
+      0.0
+     ],
+     [
+      19.1269,
+      1.6734
+     ],
+     [
+      18.9083,
+      3.334
+     ],
+     [
+      18.5458,
+      4.9693
+     ],
+     [
+      18.0421,
+      6.5668
+     ],
+     [
+      17.4011,
+      8.1143
+     ],
+     [
+      16.6277,
+      9.6
+     ],
+     [
+      15.7277,
+      11.0127
+     ],
+     [
+      14.7081,
+      12.3415
+     ],
+     [
+      22.9813,
+      19.2836
+     ],
+     [
+      25.9808,
+      15.0
+     ],
+     [
+      28.1908,
+      10.2606
+     ],
+     [
+      29.5442,
+      5.2094
+     ],
+     [
+      30.0,
+      0.0
+     ],
+     [
+      29.5442,
+      -5.2094
+     ],
+     [
+      28.1908,
+      -10.2606
+     ],
+     [
+      25.9808,
+      -15.0
+     ],
+     [
+      22.9813,
+      -19.2836
+     ]
+    ],
+    "periodic": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      40
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.spline.fit_point",
+   "params": {
+    "points": [
+     [
+      18.4337,
+      -3.2534
+     ],
+     [
+      18.8366,
+      -1.9755
+     ],
+     [
+      19.1266,
+      -0.6672
+     ],
+     [
+      19.3016,
+      0.6613
+     ],
+     [
+      19.36,
+      2.0
+     ],
+     [
+      19.3016,
+      3.3387
+     ],
+     [
+      19.1266,
+      4.6672
+     ],
+     [
+      18.8366,
+      5.9755
+     ],
+     [
+      18.4337,
+      7.2534
+     ],
+     [
+      17.9209,
+      8.4914
+     ],
+     [
+      17.3022,
+      9.68
+     ],
+     [
+      16.5822,
+      10.8101
+     ],
+     [
+      15.7664,
+      11.8732
+     ],
+     [
+      14.8612,
+      12.8612
+     ],
+     [
+      13.8732,
+      13.7664
+     ],
+     [
+      12.8101,
+      14.5822
+     ],
+     [
+      11.68,
+      15.3022
+     ],
+     [
+      17.0,
+      24.5167
+     ],
+     [
+      20.7125,
+      21.9172
+     ],
+     [
+      23.9172,
+      18.7125
+     ],
+     [
+      26.5167,
+      15.0
+     ],
+     [
+      28.432,
+      10.8925
+     ],
+     [
+      29.605,
+      6.5149
+     ],
+     [
+      30.0,
+      2.0
+     ],
+     [
+      29.605,
+      -2.5149
+     ],
+     [
+      28.432,
+      -6.8925
+     ]
+    ],
+    "periodic": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "Sketch1"
+     },
+     {
+      "sketch": "Sketch2"
+     }
+    ],
+    "operation": "new",
+    "body_name": "Duct"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Plate",
+    "tools": [
+     "Duct"
+    ],
+    "operation": "join"
+   }
+  }
+ ]
+}

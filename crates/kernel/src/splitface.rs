@@ -29,6 +29,10 @@ pub enum SplitTool<'a> {
     /// splits exactly (a plane), and so does a single arc swept along the normal (a cylinder);
     /// longer chains, splines and arcs swept aslant follow the curve.
     Curves { plane: Plane, curves: Vec<Vec<Seg2>>, along: Option<Vec3> },
+    /// Several faces of another body as one tool: each point is on the side of the nearest of
+    /// them. Faces with a plane, cylinder or other surface of their own split one by one; the
+    /// rest (spans of a swept spline) together, so the face is traced once for all of them.
+    Faces { body: &'a Body, faces: Vec<usize> },
 }
 
 /// Which side of the tool a point is on (zero on the tool).
@@ -37,7 +41,10 @@ enum Field {
         o: Vec3,
         n: Vec3,
     },
-    Surface(mt::Surface),
+    /// Any other surface, with the points of [`seeds`] when it is a B-spline or NURBS surface.
+    Surface(mt::Surface, Option<Vec<((f64, f64), mt::Point3)>>),
+    /// Free-form surfaces taken together (see [`SplitTool::Faces`]).
+    Pieces(Vec<Piece>),
     /// A circular cylinder (radius `r` about the line through `o` along unit `axis`); `out` is
     /// +1 when the tool's normal points away from the axis.
     Cylinder {
@@ -56,18 +63,100 @@ enum Field {
     },
 }
 
+/// One surface of [`Field::Pieces`]: the surface, its seeds and a box it lies in (none when its
+/// control points give none).
+struct Piece {
+    s: mt::Surface,
+    seeds: Option<Vec<((f64, f64), mt::Point3)>>,
+    hull: Option<(Vec3, Vec3)>,
+}
+
+impl Piece {
+    fn new(s: mt::Surface) -> Piece {
+        let seeds = match s.try_range_tuple() {
+            (Some(u), Some(v)) => seeds(&s, u, v),
+            _ => None,
+        };
+        let pts: Vec<Vec3> = match &s {
+            mt::Surface::BSplineSurface(b) => b.control_points().iter().flatten().map(|p| from_p3(*p)).collect(),
+            mt::Surface::NurbsSurface(b) => {
+                let w: Vec<_> = b.control_points().iter().flatten().collect();
+                if !w.iter().all(|p| p.w > 0.0 && p.w.is_finite()) {
+                    Vec::new()
+                } else {
+                    w.iter().map(|p| Vec3::new(p.x / p.w, p.y / p.w, p.z / p.w)).collect()
+                }
+            }
+            _ => Vec::new(),
+        };
+        let hull = pts.split_first().map(|(f, rest)| rest.iter().fold((*f, *f), |(lo, hi), p| (lo.min(*p), hi.max(*p))));
+        let hull = hull.filter(|(lo, hi)| lo.is_finite() && hi.is_finite());
+        Piece { s, seeds, hull }
+    }
+
+    /// No point of the surface is nearer `p` than this.
+    fn reach(&self, p: Vec3) -> f64 {
+        self.hull.map_or(0.0, |(lo, hi)| (p - p.max(lo).min(hi)).len())
+    }
+}
+
 impl Field {
     fn eval(&self, p: Vec3) -> f64 {
+        self.eval_from(p, None).0
+    }
+
+    /// [`Field::eval`], a surface searched from `hint` (the parameters of a point close by) when
+    /// given, with the parameters of the surface point found (none for other fields).
+    fn eval_from(&self, p: Vec3, hint: Option<(f64, f64)>) -> (f64, Option<(f64, f64)>) {
+        match self {
+            Field::Surface(s, seeds) => {
+                let start = hint.map_or_else(|| nearest_seed(seeds.as_deref(), p3(p)), |(u, v)| mt::SPHint2D::Parameter(u, v));
+                let found = s.search_nearest_parameter(p3(p), start, 50);
+                // A hint that leads nowhere: searched afresh.
+                let found = if found.is_none() && hint.is_some() {
+                    s.search_nearest_parameter(p3(p), nearest_seed(seeds.as_deref(), p3(p)), 50)
+                } else {
+                    found
+                };
+                match found {
+                    Some((u, v)) => {
+                        let q = from_p3(s.subs(u, v));
+                        let n = s.normal(u, v);
+                        ((p - q).dot(Vec3::new(n.x, n.y, n.z)), Some((u, v)))
+                    }
+                    None => (f64::NAN, None),
+                }
+            }
+            Field::Pieces(pieces) => {
+                // The nearest piece, the nearest boxes first: one whose box is farther than the
+                // nearest point so far can't be nearer.
+                let mut order: Vec<(f64, &Piece)> = pieces.iter().map(|x| (x.reach(p), x)).collect();
+                order.sort_by(|a, b| a.0.total_cmp(&b.0));
+                let mut best: Option<(f64, f64)> = None;
+                for (reach, x) in order {
+                    if best.is_some_and(|b| reach > b.0) {
+                        break;
+                    }
+                    let Some((u, v)) = x.s.search_nearest_parameter(p3(p), nearest_seed(x.seeds.as_deref(), p3(p)), 50) else { continue };
+                    let q = from_p3(x.s.subs(u, v));
+                    let n = x.s.normal(u, v);
+                    let dist = (p - q).len();
+                    if dist.is_finite() && best.is_none_or(|b| dist < b.0) {
+                        best = Some((dist, (p - q).dot(Vec3::new(n.x, n.y, n.z))));
+                    }
+                }
+                (best.map_or(f64::NAN, |b| b.1), None)
+            }
+            _ => (self.eval_other(p), None),
+        }
+    }
+
+    /// The fields other than a surface.
+    fn eval_other(&self, p: Vec3) -> f64 {
         match self {
             Field::Plane { o, n } => (p - *o).dot(*n),
-            Field::Surface(s) => match s.search_nearest_parameter(p3(p), None, 50) {
-                Some((u, v)) => {
-                    let q = from_p3(s.subs(u, v));
-                    let n = s.normal(u, v);
-                    (p - q).dot(Vec3::new(n.x, n.y, n.z))
-                }
-                None => f64::NAN,
-            },
+            // Searched in eval_from.
+            Field::Surface(..) | Field::Pieces(_) => f64::NAN,
             Field::Cylinder { o, axis, r, out } => {
                 let v = p - *o;
                 let radial = v - *axis * v.dot(*axis);
@@ -198,8 +287,33 @@ fn trace(face: &mt::Face, g: &Field, size: f64) -> Result<Vec<Chain>> {
     // One division for every triangle, so shared sides divide alike.
     let longest = base.iter().flat_map(|c| (0..3).map(move |k| c[k].1.distance(c[(k + 1) % 3].1))).fold(0.0, f64::max);
     let n = ((longest / step).ceil() as usize).clamp(1, 48);
+    // The side of a triangle the zero set cannot reach: its corners all on that side, farther
+    // from the tool than twice its longest side (the field grows like the distance to the tool).
+    // The corners inside such a triangle take its side unevaluated. Only for a surface tool: each
+    // of its values is a search of the surface, and every corner of a finely divided face took
+    // minutes for a spline tool (#4542, #4547).
+    let mut at_vertex: HashMap<(u64, u64), f64> = HashMap::new();
+    let mut clear = |c: &[((f64, f64), mt::Point3); 3]| -> Option<bool> {
+        if !matches!(g, Field::Surface(..) | Field::Pieces(_)) {
+            return None;
+        }
+        let reach = 2.0 * (0..3).map(|k| c[k].1.distance(c[(k + 1) % 3].1)).fold(0.0, f64::max) + step;
+        let vals: Vec<f64> = c.iter().map(|x| *at_vertex.entry((x.0.0.to_bits(), x.0.1.to_bits())).or_insert_with(|| g.eval(from_p3(x.1)))).collect();
+        if vals.iter().all(|v| *v > reach) {
+            Some(true)
+        } else if vals.iter().all(|v| *v < -reach) {
+            Some(false)
+        } else {
+            None
+        }
+    };
     let mut tris: Vec<[(usize, (f64, f64)); 3]> = Vec::new();
+    // Per corner: whether a triangle that needs its value holds it, and the side a clear one gave.
+    let mut needed: Vec<bool> = Vec::new();
+    let mut given: Vec<Option<bool>> = Vec::new();
     for c in base {
+        let side = clear(&c);
+        let first = tris.len();
         let at = |i: usize, j: usize| {
             let (a, b, cc) = (c[0].0, c[1].0, c[2].0);
             let (s, t) = (i as f64 / n as f64, j as f64 / n as f64);
@@ -218,8 +332,39 @@ fn trace(face: &mt::Face, g: &Field, size: f64) -> Result<Vec<Chain>> {
         if tris.len() > 4_000_000 {
             return Err(KernelError::Failed("the face is too finely divided to trace".into()));
         }
+        for (i, _) in tris.iter().skip(first).flatten() {
+            if needed.len() <= *i {
+                needed.resize(*i + 1, false);
+                given.resize(*i + 1, None);
+            }
+            match side {
+                None => {
+                    if let Some(x) = needed.get_mut(*i) {
+                        *x = true;
+                    }
+                }
+                Some(sd) => {
+                    if let Some(x) = given.get_mut(*i) {
+                        *x = Some(sd);
+                    }
+                }
+            }
+        }
     }
-    let gv: Vec<f64> = corner_uv.iter().map(|uv| g.eval(from_p3(surface.subs(uv.0, uv.1)))).collect();
+    let gv: Vec<f64> = corner_uv
+        .iter()
+        .enumerate()
+        .map(|(i, uv)| match (needed.get(i).copied().unwrap_or(true), given.get(i).copied().flatten()) {
+            (false, Some(sd)) => {
+                if sd {
+                    1.0
+                } else {
+                    -1.0
+                }
+            }
+            _ => g.eval(from_p3(surface.subs(uv.0, uv.1))),
+        })
+        .collect();
     if gv.iter().any(|x| !x.is_finite()) {
         return Err(KernelError::Failed("the splitting tool cannot be evaluated on the face".into()));
     }
@@ -250,24 +395,63 @@ fn trace(face: &mt::Face, g: &Field, size: f64) -> Result<Vec<Chain>> {
             links.entry(y).or_default().push(x);
         }
     }
-    // Exact point on a crossed mesh edge: bisection along its parameter segment.
+    // Exact point on a crossed mesh edge: a root of the field along its parameter segment,
+    // bracketed (regula falsi with the Illinois step, bisecting when the bracket stops halving).
+    // Each value is a search of the tool; 48 bisection steps per crossed edge were nearly all of
+    // a join's time where a lofted wall runs close beside a bore (#4542).
     let exact = |k: (usize, usize)| -> Option<(mt::Point3, (f64, f64))> {
         let (ua, ub) = *node_uv.get(&k)?;
+        // Each step searches the tool from where the last one found it: the points are close.
+        let near = std::cell::Cell::new(None);
         let f = |s: f64| {
             let uv = (ua.0 + (ub.0 - ua.0) * s, ua.1 + (ub.1 - ua.1) * s);
-            (g.eval(from_p3(surface.subs(uv.0, uv.1))), uv)
+            let (val, at) = g.eval_from(from_p3(surface.subs(uv.0, uv.1)), near.get());
+            near.set(at);
+            (val, uv)
         };
-        let (mut lo, mut hi) = (0.0, 1.0);
-        let s0 = f(0.0).0 >= 0.0;
-        for _ in 0..48 {
-            let mid = 0.5 * (lo + hi);
-            if (f(mid).0 >= 0.0) == s0 {
-                lo = mid;
-            } else {
-                hi = mid;
+        let (f0, f1) = (f(0.0).0, f(1.0).0);
+        // No value is farther from zero than its point is from the tool, so where the field
+        // crosses zero on this side its ends are no farther from zero, together, than the side
+        // is long. Ends farther than that change sign by a jump (past the edge of a bounded
+        // tool face the nearest point turns round it): no crossing to search for. Such sides
+        // were thousands of searches in a join beside a bore (#4542).
+        let (pa, pb) = (from_p3(surface.subs(ua.0, ua.1)), from_p3(surface.subs(ub.0, ub.1)));
+        if f0.abs() + f1.abs() > 4.0 * (pb - pa).len() + size * 1e-7 {
+            return None;
+        }
+        let s0 = f0 >= 0.0;
+        // Ends on one side (a corner exactly on the tool) or not found: the middle, which the
+        // check below turns away unless it is on the tool.
+        let mut at = 0.5;
+        if f0.is_finite() && f1.is_finite() && (f1 >= 0.0) != s0 {
+            let (mut lo, mut flo, mut hi, mut fhi) = (0.0, f0, 1.0, f1);
+            // Which end the last step moved (-1 low, 1 high), and steps that didn't halve it.
+            let (mut moved, mut slow) = (0i8, 0u8);
+            for _ in 0..64 {
+                let width = hi - lo;
+                let secant = (lo * fhi - hi * flo) / (fhi - flo);
+                at = if slow < 2 && secant.is_finite() && secant > lo && secant < hi { secant } else { 0.5 * (lo + hi) };
+                let v = f(at).0;
+                if !v.is_finite() || v.abs() <= size * 1e-10 || width <= 1e-12 {
+                    break;
+                }
+                if (v >= 0.0) == s0 {
+                    (lo, flo) = (at, v);
+                    if moved == -1 {
+                        fhi *= 0.5;
+                    }
+                    moved = -1;
+                } else {
+                    (hi, fhi) = (at, v);
+                    if moved == 1 {
+                        flo *= 0.5;
+                    }
+                    moved = 1;
+                }
+                slow = if hi - lo > 0.5 * width { slow + 1 } else { 0 };
             }
         }
-        let (val, uv) = f(0.5 * (lo + hi));
+        let (val, uv) = f(at);
         // A side whose ends were on the same side after all (a corner exactly on the tool).
         if !(val.abs() <= size * 1e-7) {
             return None;
@@ -918,9 +1102,9 @@ fn split_one(faces: &mut Vec<mt::Face>, fi: usize, g: &Field, size: f64, new_edg
 /// The plane or circular cylinder a (B-spline) surface is, as a field with the surface's
 /// normal; other surfaces as they are.
 fn surface_field(s: &mt::Surface) -> Field {
-    let (Some((u0, u1)), Some((v0, v1))) = s.try_range_tuple() else { return Field::Surface(s.clone()) };
+    let (Some((u0, u1)), Some((v0, v1))) = s.try_range_tuple() else { return Field::Surface(s.clone(), None) };
     if !matches!(s, mt::Surface::Plane(_) | mt::Surface::BSplineSurface(_) | mt::Surface::NurbsSurface(_)) {
-        return Field::Surface(s.clone());
+        return Field::Surface(s.clone(), seeds(s, (u0, u1), (v0, v1)));
     }
     let at = |a: f64, b: f64| from_p3(s.subs(u0 + (u1 - u0) * a, v0 + (v1 - v0) * b));
     let nrm = |a: f64, b: f64| {
@@ -966,7 +1150,54 @@ fn surface_field(s: &mt::Surface) -> Field {
             return Field::Cylinder { o: centre, axis, r, out };
         }
     }
-    Field::Surface(s.clone())
+    Field::Surface(s.clone(), seeds(s, (u0, u1), (v0, v1)))
+}
+
+/// Divisions of the grid a surface is first searched on when truck is given no hint: its own
+/// (50 for a B-spline or NURBS surface, 100 for a revolved curve).
+fn seed_division(s: &mt::Surface) -> Option<usize> {
+    match s {
+        mt::Surface::BSplineSurface(_) | mt::Surface::NurbsSurface(_) => Some(50),
+        mt::Surface::RevolutedCurve(_) => Some(100),
+        mt::Surface::Plane(_) => None,
+    }
+}
+
+/// The points of a surface on the grid the nearest-point search starts from (the grid truck
+/// walks when it is given no hint, same order), sampled once for the whole trace: truck
+/// re-evaluates all of them for every point, and a face split by a spline sweep or a revolved
+/// rim is traced at thousands of points (#4542, #4547). `None` for a plane.
+fn seeds(s: &mt::Surface, (u0, u1): (f64, f64), (v0, v1): (f64, f64)) -> Option<Vec<((f64, f64), mt::Point3)>> {
+    let division = seed_division(s)?;
+    if ![u0, u1, v0, v1].iter().all(|x| x.is_finite()) {
+        return None;
+    }
+    let d = division as f64;
+    let mut out = Vec::with_capacity((division + 1) * (division + 1));
+    for i in 0..=division {
+        for j in 0..=division {
+            let (p, q) = (i as f64 / d, j as f64 / d);
+            let (u, v) = (u0 * (1.0 - p) + u1 * p, v0 * (1.0 - q) + v1 * q);
+            out.push(((u, v), s.subs(u, v)));
+        }
+    }
+    Some(out)
+}
+
+/// The search hint for `p`: the parameters of the nearest seed (the first of equals, as truck
+/// picks), or none without seeds.
+fn nearest_seed(seeds: Option<&[((f64, f64), mt::Point3)]>, p: mt::Point3) -> mt::SPHint2D {
+    let Some(seeds) = seeds else { return mt::SPHint2D::None };
+    let mut best = None;
+    let mut min = f64::INFINITY;
+    for (uv, q) in seeds {
+        let dist = q.distance2(p);
+        if dist < min {
+            min = dist;
+            best = Some(*uv);
+        }
+    }
+    best.map_or(mt::SPHint2D::None, |(u, v)| mt::SPHint2D::Parameter(u, v))
 }
 
 /// A plane or circular cylinder behind a surface (for offsetting).
@@ -1020,6 +1251,25 @@ fn fields(tool: &SplitTool) -> Result<Vec<Field>> {
             other.require_brep("a split tool")?;
             let f = other.solid.face_iter().nth(*face).ok_or_else(|| KernelError::Invalid(format!("the tool body has no face {face}")))?;
             vec![surface_field(&f.oriented_surface())]
+        }
+        SplitTool::Faces { body: other, faces } => {
+            other.require_brep("a split tool")?;
+            let all: Vec<&mt::Face> = other.solid.face_iter().collect();
+            let mut out = Vec::new();
+            let mut pieces = Vec::new();
+            for face in faces {
+                let f = all.get(*face).ok_or_else(|| KernelError::Invalid(format!("the tool body has no face {face}")))?;
+                match surface_field(&f.oriented_surface()) {
+                    Field::Surface(s, _) => pieces.push(Piece::new(s)),
+                    other => out.push(other),
+                }
+            }
+            match pieces.len() {
+                0 => {}
+                1 => out.extend(pieces.into_iter().map(|x| Field::Surface(x.s, x.seeds))),
+                _ => out.push(Field::Pieces(pieces)),
+            }
+            out
         }
         SplitTool::Curves { plane, curves, along } => {
             let n = plane.normal();
@@ -1381,8 +1631,8 @@ pub fn split_body(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
             let line = mt::Curve::Line(mt::Line(p3(a), p3(b)));
             crate::step_in::geom::revolved_oriented(line, p3(*o), crate::body::v3(axis.vec()), 0.5, crate::body::v3(x * *out))
         }
-        Field::Surface(s) => s.clone(),
-        Field::Curve { .. } => return Err(KernelError::Invalid("a body is split by a plane or a face".into())),
+        Field::Surface(s, _) => s.clone(),
+        Field::Curve { .. } | Field::Pieces(_) => return Err(KernelError::Invalid("a body is split by a plane or a face".into())),
     };
     let total = body.solid.face_iter().count();
     let all: Vec<usize> = (0..total).collect();

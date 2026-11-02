@@ -199,6 +199,11 @@ Changes:
   `analyzers::collision_test_hooks`, behind a `test-hooks` feature that only
   `solidcraft-kernel`'s tests turn on, and `crates/kernel/tests/mesh_collision_equivalence.rs`
   compares the two.
+- `analyzers/collision.rs`: no sweep when no triangle of one mesh meets the other mesh's box (no
+  two triangles' boxes can overlap, so the sweep would find no pairs). A boolean meets every face
+  of one solid with every face of the other, and sweeping the 136 000 triangles of a finely
+  divided face against faces it lies apart from took over a minute of a join (#4542).
+  `apart_meshes_have_no_pairs` in the test hooks checks the exit on random meshes.
 - `tessellation/triangulation.rs`: the inside test of a face's boundary also skips runs of 32
   segments whose box, grown by the tolerance, the test's ray cannot meet. Same answers. The
   old test is kept as `tessellation::include_test_hooks`, behind a `test-hooks` feature that
