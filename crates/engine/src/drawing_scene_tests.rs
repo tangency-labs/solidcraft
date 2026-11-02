@@ -602,6 +602,29 @@ fn a_view_with_no_lines_is_an_object_at_its_boundary() {
     assert!(near(&held.bounds_mm, [140.0, 140.0], [160.0, 160.0]) && held.boundary_mm == Some(held.bounds_mm), "{held:?}");
 }
 
+/// A view's box holds what it draws, whatever that is, and one that drew nothing stands at its
+/// boundary rather than at an empty box.
+#[test]
+fn a_views_box_is_what_it_draws() {
+    let (s, ..) = front_and_top();
+    let record = s.drawing("test").unwrap().sheets[0].clone();
+    let (centre, boundary) = (Vec2::new(100.0, 100.0), Aabb2 { min: Vec2::new(-30.0, -20.0), max: Vec2::new(30.0, 20.0) });
+    let rect = Aabb2 { min: Vec2::new(1.0, 2.0), max: Vec2::new(5.0, 7.0) };
+    let corners = [rect.min, Vec2::new(rect.max.x, rect.min.y), rect.max, Vec2::new(rect.min.x, rect.max.y)];
+    let segs = (0..4).map(|i| Seg2::Line { a: corners[i], b: corners[(i + 1) % 4] }).collect();
+    let fill = Item::Fill { region: Region2 { outer: Loop2 { segs }, holes: Vec::new() } };
+    let picture = Item::Picture(Picture { source: 1, rect, opacity: 1.0 });
+    let moved = [101.0, 102.0];
+    let moved_to = [105.0, 107.0];
+    for (items, min, max) in [(vec![], [70.0, 80.0], [130.0, 120.0]), (vec![fill], moved, moved_to), (vec![picture], moved, moved_to)] {
+        let drawn =
+            Drawn { group: Some(Group { object: 7, kind: ObjectKind::View, items }), status: Status::Drawn, stats: None, boundary: Some(boundary) };
+        let (_, _, objects) = assemble(&record, [(7, centre, &drawn)].into_iter()).unwrap();
+        let object = objects.iter().find(|o| o.object == 7).unwrap();
+        assert!(near(&object.bounds_mm, min, max), "{object:?}");
+    }
+}
+
 /// The provider lists a view once it is drawn, moves its bounds with it and projects nothing for
 /// that, and a view gone from the drawing is gone from the list.
 #[test]

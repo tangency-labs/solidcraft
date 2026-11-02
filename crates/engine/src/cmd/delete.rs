@@ -520,7 +520,9 @@ mod tests {
         let (mut s, [front, ..], _, _, drawing) = sheet_objects();
         let sheet = s.drawing("test").unwrap().sheets[0].id;
         run(&mut s, "select.set", json!({"items": [item(drawing, front)]}));
-        let other = run(&mut s, "drawing.create", json!({}))["drawing"].as_str().and_then(ids::decode);
+        let other = ids::decode(run(&mut s, "drawing.create", json!({}))["id"].as_str().unwrap()).unwrap();
+        let others = run(&mut s, "drawing.view.base", json!({"sheet": "Sheet 1", "scale": "1:2"}));
+        let others = ids::decode(others["view"].as_str().unwrap()).unwrap();
         run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
         run(&mut s, "select.set", json!({"items": [item(drawing, front)]}));
         let refused = |s: &mut Session, items: Value| {
@@ -532,9 +534,8 @@ mod tests {
         refused(&mut s, json!([item(drawing, 0)]));
         refused(&mut s, json!([item(drawing, sheet)]));
         refused(&mut s, json!([item(99, front)]));
-        if let Some(other) = other {
-            refused(&mut s, json!([item(other, front)]));
-        }
+        refused(&mut s, json!([item(other, front)]));
+        refused(&mut s, json!([item(other, others)]));
         refused(&mut s, json!([{"type": "drawing", "drawing": ids::encode(drawing), "object": front}]));
         refused(&mut s, json!([{"type": "drawing", "drawing": ids::encode(drawing), "object": "x"}]));
         refused(&mut s, json!([{"type": "drawing", "drawing": ids::encode(drawing)}]));
@@ -657,6 +658,27 @@ mod tests {
         assert_ne!(read["status"], json!("ok"), "{read}");
         run(&mut s, "selection.delete", json!({"items": [item(drawing, dimension)]}));
         assert!(s.drawing("test").unwrap().dimension(dimension).is_none());
+    }
+
+    /// Chosen in any order, dimensions and balloons all go and are listed by id.
+    #[test]
+    fn what_is_chosen_goes_in_any_order() {
+        let (mut s, [front, ..], dimension, balloon, drawing) = sheet_objects();
+        let front = ids::encode(front);
+        let id = |reply: Value| ids::decode(reply["record"]["id"].as_str().unwrap()).unwrap();
+        let occurrence = s.doc.occurrences[0].id;
+        let next_dimension = id(run(&mut s, "drawing.dimension.add", json!({"view": front, "kind": {"length": {"edge": [50, 0, 0]}}})));
+        let next_balloon =
+            id(run(&mut s, "drawing.balloon.add", json!({"view": front, "edge": {"point": [205, 0, 10], "path": [occurrence]}, "at": [80, 40]})));
+        let mut dimensions = [dimension, next_dimension];
+        let mut balloons = [balloon, next_balloon];
+        dimensions.sort_unstable();
+        balloons.sort_unstable();
+        let items: Vec<Value> = dimensions.iter().chain(&balloons).rev().map(|object| item(drawing, *object)).collect();
+        let reply = run(&mut s, "selection.delete", json!({"items": items}));
+        assert_eq!((&reply["dimensions"], &reply["balloons"]), (&listed(&dimensions), &listed(&balloons)), "{reply}");
+        let d = s.drawing("test").unwrap();
+        assert!(d.dimensions.is_empty() && d.balloons.is_empty());
     }
 
     /// What isn't there, or isn't the drawing's, is refused whole with the drawing as it was: unknown
