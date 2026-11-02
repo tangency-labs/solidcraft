@@ -2120,12 +2120,17 @@ mod tests {
     #[test]
     fn each_chip_finds_its_own_result() {
         let mut h = two_boxes(false);
-        h.app.run("solid.fillet", json!({"edges": [[5, 0, 10]], "radius": 20, "fit": "reduce", "body": "One"})).unwrap();
+        // Too large for the box: R6 on its four vertical edges is reduced to the full round (5),
+        // and the feature warns that it was.
+        let edges = json!([[0, 0, 5], [10, 0, 5], [10, 10, 5], [0, 10, 5]]);
+        h.app.run("solid.fillet", json!({"edges": edges, "radius": 6, "fit": "reduce", "body": "One"})).unwrap();
         h.frames(2);
         let model = &h.app.session.model;
         let index = super::result_index(&model.results);
         let ids: Vec<u64> = h.app.session.doc.features.iter().map(|f| f.id).collect();
         assert!(ids.len() >= 3 && model.results.iter().any(|r| r.warning.is_some()), "a warned feature among others");
+        let warning = ids.last().and_then(|id| model.result(*id)).and_then(|r| r.warning.clone()).unwrap_or_default();
+        assert!(warning.contains("reduced"), "the fillet is the warned feature: {warning}");
         for id in &ids {
             let found = index.get(id).and_then(|k| model.results.get(*k));
             assert!(found.is_some_and(|r| std::ptr::eq(r, model.result(*id).unwrap())), "feature {id}");
