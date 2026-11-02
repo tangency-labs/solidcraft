@@ -252,11 +252,29 @@ pub(crate) struct LaidLine {
     pub(crate) width: f64,
 }
 
-/// A stretch of a line in one direction: its glyphs, and the bytes of the line they set.
+/// A stretch of a line in one direction and one font: its glyphs, the bytes of the line they set,
+/// and which font sets them (0 is the text's own; paper text numbers the ones it falls back to).
 pub(crate) struct Run {
     pub(crate) glyphs: Range<usize>,
     pub(crate) text: Range<usize>,
     pub(crate) rtl: bool,
+    pub(crate) face: usize,
+}
+
+/// A line being laid out, run by run, left to right.
+#[derive(Default)]
+pub(crate) struct Laying {
+    glyphs: Vec<Glyph>,
+    runs: Vec<Run>,
+    pen: f64,
+    /// The letter spacing the pen has moved past the last glyph.
+    gap: f64,
+}
+
+impl Laying {
+    pub(crate) fn line(self) -> LaidLine {
+        LaidLine { width: self.pen - self.gap, glyphs: self.glyphs, runs: self.runs }
+    }
 }
 
 impl<'a> TextMetrics<'a> {
@@ -278,6 +296,11 @@ impl<'a> TextMetrics<'a> {
             shaper: std::cell::OnceCell::new(),
             face,
         })
+    }
+
+    /// The capital height text is scaled by, in font units ([`cap_height`]).
+    pub(crate) fn cap(&self) -> f64 {
+        self.cap
     }
 
     /// Millimetres per font unit at a capital height of `height` mm.
@@ -330,7 +353,7 @@ impl<'a> TextMetrics<'a> {
         }
         let glyphs: Vec<Glyph> = self.glyphs(line, k).collect();
         let width = glyphs.last().map(|g| g.x + g.advance).unwrap_or(0.0);
-        let runs = vec![Run { glyphs: 0..glyphs.len(), text: 0..line.len(), rtl: false }];
+        let runs = vec![Run { glyphs: 0..glyphs.len(), text: 0..line.len(), rtl: false, face: 0 }];
         LaidLine { glyphs, runs, width }
     }
 
@@ -355,7 +378,6 @@ impl<'a> TextMetrics<'a> {
     /// letter spacing goes after each glyph that has an advance, not after a mark. A character the font lacks is its
     /// missing-glyph box here. Brackets are not mirrored.
     fn shaped(&self, line: &str, k: f64) -> Option<LaidLine> {
-        use harfrust::{Direction, Feature, ShapeOptions, Tag, UnicodeBuffer};
         // Nothing below U+0590 is written right to left.
         if line.chars().all(|c| u32::from(c) < 0x0590) {
             return None;
@@ -364,43 +386,77 @@ impl<'a> TextMetrics<'a> {
         if !info.has_rtl() {
             return None;
         }
-        let font = harfrust::FontRef::from_index(self.bytes, self.index).ok()?;
-        let data = self.shaper.get_or_init(|| Some(harfrust::ShaperData::new(&font))).as_ref()?;
-        let shaper = data.shaper(&font).build();
-        let kerning_off = [Feature::new(Tag::new(b"kern"), 0, ..)];
-        let (mut out, mut laid, mut pen, mut gap) = (Vec::new(), Vec::new(), 0.0f64, 0.0f64);
+        let mut laying = Laying::default();
         // A line break in the line ends a paragraph of the algorithm; the paragraphs follow one another.
         let runs = info.paragraphs.iter().flat_map(|paragraph| {
             let (levels, runs) = info.visual_runs(paragraph, paragraph.range.clone());
             runs.into_iter().map(move |run| (levels.get(run.start).is_some_and(|l| l.is_rtl()), run))
         });
         for (rtl, run) in runs {
-            let first = out.len();
-            let mut buffer = UnicodeBuffer::new();
-            buffer.push_str(line.get(run.clone())?);
-            buffer.set_direction(if rtl { Direction::RightToLeft } else { Direction::LeftToRight });
-            buffer.guess_segment_properties();
-            let shaped = shaper.shape(buffer, ShapeOptions::new().features(&kerning_off));
-            for (glyph, place) in shaped.glyph_infos().iter().zip(shaped.glyph_positions()) {
-                let advance = f64::from(place.x_advance) * k;
-                out.push(Glyph {
-                    id: ttf_parser::GlyphId(u16::try_from(glyph.glyph_id).ok()?),
-                    x: pen + f64::from(place.x_offset) * k,
-                    advance,
-                    rise: f64::from(place.y_offset) * k,
-                    // The buffer numbers its clusters by their bytes in the run.
-                    cluster: run.start + usize::try_from(glyph.cluster).ok()?,
-                });
-                pen += advance;
-                gap = 0.0;
-                if advance != 0.0 {
-                    pen += self.letter_spacing;
-                    gap = self.letter_spacing;
-                }
-            }
-            laid.push(Run { glyphs: first..out.len(), text: run, rtl });
+            self.shape_run(line, run, rtl, None, k, 0, &mut laying)?;
         }
-        Some(LaidLine { glyphs: out, runs: laid, width: pen - gap })
+        Some(laying.line())
+    }
+
+    /// The bytes `run` of `line`, all in one direction, shaped by the font's own rules for `language` (when given), as
+    /// run `face` of `laying`. None when the font cannot be shaped.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn shape_run(
+        &self,
+        line: &str,
+        run: Range<usize>,
+        rtl: bool,
+        language: Option<&str>,
+        k: f64,
+        face: usize,
+        laying: &mut Laying,
+    ) -> Option<()> {
+        use harfrust::{Direction, Feature, ShapeOptions, Tag, UnicodeBuffer};
+        let font = harfrust::FontRef::from_index(self.bytes, self.index).ok()?;
+        let data = self.shaper.get_or_init(|| Some(harfrust::ShaperData::new(&font))).as_ref()?;
+        let shaper = data.shaper(&font).build();
+        let kerning_off = [Feature::new(Tag::new(b"kern"), 0, ..)];
+        let first = laying.glyphs.len();
+        let mut buffer = UnicodeBuffer::new();
+        buffer.push_str(line.get(run.clone())?);
+        buffer.set_direction(if rtl { Direction::RightToLeft } else { Direction::LeftToRight });
+        if let Some(language) = language.and_then(|tag| tag.parse().ok()) {
+            buffer.set_language(language);
+        }
+        buffer.guess_segment_properties();
+        let shaped = shaper.shape(buffer, ShapeOptions::new().features(&kerning_off));
+        for (glyph, place) in shaped.glyph_infos().iter().zip(shaped.glyph_positions()) {
+            let advance = f64::from(place.x_advance) * k;
+            laying.glyphs.push(Glyph {
+                id: ttf_parser::GlyphId(u16::try_from(glyph.glyph_id).ok()?),
+                x: laying.pen + f64::from(place.x_offset) * k,
+                advance,
+                rise: f64::from(place.y_offset) * k,
+                // The buffer numbers its clusters by their bytes in the run.
+                cluster: run.start + usize::try_from(glyph.cluster).ok()?,
+            });
+            laying.pen += advance;
+            laying.gap = 0.0;
+            if advance != 0.0 {
+                laying.pen += self.letter_spacing;
+                laying.gap = self.letter_spacing;
+            }
+        }
+        laying.runs.push(Run { glyphs: first..laying.glyphs.len(), text: run, rtl, face });
+        Some(())
+    }
+
+    /// The bytes `run` of `line` by the rule of a line that isn't shaped ([`Self::glyphs`]), as run `face` of `laying`.
+    pub(crate) fn plain_run(&self, line: &str, run: Range<usize>, k: f64, face: usize, laying: &mut Laying) -> Option<()> {
+        let first = laying.glyphs.len();
+        let start = laying.pen;
+        for glyph in self.glyphs(line.get(run.clone())?, k) {
+            laying.pen = start + glyph.x + glyph.advance + self.letter_spacing;
+            laying.gap = self.letter_spacing;
+            laying.glyphs.push(Glyph { x: start + glyph.x, cluster: run.start + glyph.cluster, ..glyph });
+        }
+        laying.runs.push(Run { glyphs: first..laying.glyphs.len(), text: run, rtl: false, face });
+        Some(())
     }
 }
 
