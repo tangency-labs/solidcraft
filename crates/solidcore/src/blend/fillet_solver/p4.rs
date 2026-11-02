@@ -2019,14 +2019,14 @@ fn c3_try_analytic(
     // succeeds (a failure falls through, an unported callee does not)
     match calc_cylinder_fillet_geom(ops, cx, &mut st.store, &st.tsect_pnts) {
         Ok(()) => return Ok(true),
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => {}
     }
 
     // try making a torus fillet to store in m_vFilletGeoms[0]; quit when this succeeds
     match calc_torus_fillet_geom(ops, cx, &mut st.store, &st.tsect_pnts) {
         Ok(()) => return Ok(true),
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => {}
     }
 
@@ -2038,7 +2038,7 @@ fn c3_try_analytic(
     let tsects = st.store.snapshot(cx.fillets, &st.tsect_pnts)?;
     match FilletSolver::calc_sphere_fillet_geom(ops, cx.k, cx.target, cx.fillets, &tsects, None) {
         Ok(()) => Ok(true),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(false),
     }
 }
@@ -2632,7 +2632,7 @@ fn c4_trace(
         let mut points = st.store.snapshot(cx.fillets, &st.tsect_pnts)?;
         let stat = do_point_intersection(fi, ops, cx, &mut points, args);
         if let Err(e) = stat.as_ref() {
-            if e.is_unported() {
+            if e.is_unported_or_cancelled() {
                 return stat;
             }
         }
@@ -2806,7 +2806,7 @@ fn c4_cusp_recovery(
         );
         match found {
             Ok(()) => {}
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => continue,
         }
 

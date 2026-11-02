@@ -84,6 +84,9 @@ const OP: &str = "blend::fillet_executive::api";
 /// a result the check keeps is the flag-off result: the copy shares nothing with
 /// `brep`, so `fillet` edits the caller's own objects (curve owners included). The
 /// copy fails only on geometry nested deeper than `MAX_GEOMETRY_NESTING`.
+///
+/// A kernel whose cancel token fired returns `Cancelled` in place of `Ok` (#2136), with
+/// the body as the operation left it, as on any other failure.
 fn refusing_non_manifold_result(
     k: &mut Kernel,
     brep: &mut Brep,
@@ -105,7 +108,9 @@ fn refusing_non_manifold_result(
             // caller; the body keeps the edits the executive made before a failure,
             // as upstream)
             brep.refresh_cached_topology();
-            result
+            // (not upstream, #2136 / #2371: a cancel that a status-ignoring helper
+            // inside the operation absorbed still ends it as `Cancelled`, never `Ok`)
+            result.and_then(|()| k.check_cancelled(OP))
         }
     }
 }

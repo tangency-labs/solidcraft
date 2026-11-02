@@ -85,6 +85,12 @@
 //! - **Generator state.** `CreateSurface`'s solver argument is replaced by its tolerance;
 //!   `Build` stores the certified bound and span count as the fork does (`&mut self`). The
 //!   fork's `SM_ERR_MESSAGE` report of them is not logged.
+//! - **Cancellation (#2136, #2371).** `Build` polls the kernel's cancel token
+//!   ([`crate::kernel::Kernel::check_cancelled`]) once per station (before the
+//!   certificate, and again where each station is solved for the span ending there),
+//!   once per row or station of the skin's net, and its certificate block once per span, per knot-line secant step and per
+//!   halved span; `sm_GnCertifySpan` once per level, piece's end station and piece's bound.
+//!   A fired token returns `Cancelled`; one that never fires changes nothing.
 
 pub mod certificate;
 pub mod definition;
