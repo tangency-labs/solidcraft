@@ -1,0 +1,112 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/4007",
+ "pr": "none: closed on SolidCraft without a linked PR",
+ "test": "none: geometry is the issue's",
+ "summary": "A half disc whose circle touches the axis (a horn torus) revolved 270 degrees, plus a ring-torus control 1 mm further out.",
+ "cases": [
+  {
+   "name": "revolve_half_disc_horn_torus_270",
+   "note": "A half disc of radius 14 whose centre is 14 mm from the axis (its circle touches the axis: a horn torus) revolved 270 degrees. The profile is the half of the disc away from the axis (x from 14 to 28); the circle's other half, not in the profile, touches the axis at the origin. Area: torus face (arc length pi r at centroid distance 14 + 2r/pi) plus cylinder face (length 28 at 14 mm), each x 3 pi/2, plus two half-disc caps: 7211.92881465. Faces: 4 geometric faces (torus with major radius = minor radius, cylinder, 2 caps); a kernel may split at a seam. SolidCraft's STEP writer emitted a B-spline with a collapsed pole row and a non-deterministic file; the kernel-side check is volume, area and determinism of the revolve.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "result",
+     "profile": [
+      {
+       "kind": "arc",
+       "center": [
+        14.0,
+        0.0
+       ],
+       "radius": 14.0,
+       "start_deg": -90.0,
+       "end_deg": 90.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        14.0,
+        14.0
+       ],
+       "to": [
+        14.0,
+        -14.0
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 270.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 28932.17609889229,
+     "tol": 0.289,
+     "formula": "Pappus: area pi r^2 / 2 = 307.876080052, centroid 14 + 4r/(3 pi) = 19.941784542 from the axis, volume = area x distance x 3 pi/2 = 28932.1760989."
+    }
+   }
+  },
+  {
+   "name": "revolve_half_disc_ring_torus_270",
+   "note": "Control for revolve_half_disc_horn_torus_270: the same half disc with its centre 15 mm from the axis (a ring torus). Area: torus face pi r (15 + 2r/pi) 3 pi/2, cylinder face 28 x 15 x 3 pi/2, two caps: 7551.13739852.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "result",
+     "profile": [
+      {
+       "kind": "arc",
+       "center": [
+        15.0,
+        0.0
+       ],
+       "radius": 14.0,
+       "start_deg": -90.0,
+       "end_deg": 90.0
+      },
+      {
+       "kind": "line",
+       "from": [
+        15.0,
+        14.0
+       ],
+       "to": [
+        15.0,
+        -14.0
+       ]
+      }
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "angle_deg": 270.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 30383.007945852423,
+     "tol": 0.304,
+     "formula": "Pappus: area 307.876080052, centroid 15 + 4r/(3 pi) = 20.941784542, volume x 3 pi/2 = 30383.0079459."
+    }
+   }
+  }
+ ]
+}
