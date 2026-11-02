@@ -38,6 +38,15 @@ entry has a note for translators: what the term must not be confused with. Its "
 than one meaning" table lists the English words that need a separate catalogue entry for each
 meaning (Construction, Flat, Round, Normal, Gap, Clearance).
 
+## Case
+
+Command labels (`cmd.*`: what menus, the toolbar, the command palette and the shortcut list show)
+are in title case: "Home View", "Center of Mass". All other English text is in sentence case:
+buttons, links, settings, rows, headings and tooltips, as in "Restore defaults" or the "Center of
+mass" row in Design properties. So the same words can appear in both cases, as a command and as a
+link or row beside it (New Design in the File menu, New design on the home screen). Two buttons
+on one page never differ only by case; give them different words.
+
 ## English (UK)
 
 `en-GB.json` holds only the English messages whose spelling differs in UK English (Centre,

@@ -160,7 +160,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("c_perpendicular")
         .enabled(in_sketch)
         .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created)", model_operand_doc!())),
-    CommandSpec::new("sketch.constraint.fix", "Fix/UnFix", c_fix)
+    CommandSpec::new("sketch.constraint.fix", "Fix/Unfix", c_fix)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_fix")
         .enabled(in_sketch)

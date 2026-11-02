@@ -182,7 +182,7 @@ up to **256 MB**. A larger file is refused before it is read, and the message sa
 the limit. In the desktop app you can raise both:
 
 - **Preferences › General › Largest file to open** sets each limit in MB, from its default up to
-  16 GB (16384 MB). It is kept between runs; Restore Defaults on the General page puts back 512 MB
+  16 GB (16384 MB). It is kept between runs; Restore defaults on the General page puts back 512 MB
   and 256 MB.
 - **`--max-file-size SIZE`** at launch (`solidcraft --max-file-size 2GB big-assembly.step`) raises
   both limits for that run only, over the preference, without saving anything. SIZE is a number

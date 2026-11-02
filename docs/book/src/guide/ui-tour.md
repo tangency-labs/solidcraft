@@ -188,7 +188,7 @@ compass. Tool sheets remain draggable: their four corners round away from the ri
 edge, and their two right corners square when docked there. Browser keeps only the height its contents need. Assistant remains on the
 outside edge, and History keeps its chosen bottom, left or shared Browser column.
 The choice is saved between launches. Switching preserves the current tool,
-camera, selection and design; Cancel and Restore Defaults work like other preferences.
+camera, selection and design; Cancel and Restore defaults work like other preferences.
 
 General › **Show text under ribbon icons** is a separate, saved option for either
 layout. Turn it off for shorter icon-only command buttons; tooltips, section names

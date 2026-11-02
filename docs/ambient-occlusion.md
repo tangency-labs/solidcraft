@@ -15,7 +15,7 @@ combines AO with the display-quality and supersampling controls from #1319 and #
 Custom is derived from the current settings, not a third preset that overwrites them.
 Individual controls remain editable. Selecting a preset applies all three settings
 immediately; MSAA, ground shadow, projection and visual style stay unchanged.
-Graphics preferences support Cancel, Apply and Restore Defaults. Adaptive supersampling
+Graphics preferences support Cancel, Apply and Restore defaults. Adaptive supersampling
 keeps #1321's 0.25-second settling delay, texture limit and 384 MiB memory cap;
 the requested 2× may be reduced or skipped when the device cannot accommodate it.
 

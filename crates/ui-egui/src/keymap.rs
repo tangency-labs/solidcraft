@@ -1206,7 +1206,7 @@ mod tests {
         h.frames(3);
         h.step(&json!({"click": {"handle": "prefs:search:shortcuts"}})).expect("unfold the shortcut matches");
         h.frames(2);
-        h.step(&json!({"click": {"handle": "shortcut:sketch.constraint.fix"}})).expect("record Fix/UnFix's key");
+        h.step(&json!({"click": {"handle": "shortcut:sketch.constraint.fix"}})).expect("record Fix/Unfix's key");
         assert!(capturing(&h.app), "recording from a search result");
         h.step(&json!({"key": "P", "pressed": true})).unwrap();
         h.step(&json!({"text": "p"})).unwrap();
