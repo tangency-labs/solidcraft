@@ -1388,6 +1388,9 @@ preference_settings! {
     color_vision: crate::theme::ColorVision = crate::theme::ColorVision::Off, PAGE_APPEARANCE;
     /// Check for updates at start and once a day (docs/updates.md).
     check_updates: bool = true, 0;
+    webdav_enabled: bool = false, PAGE_GENERAL;
+    webdav_url: String = String::new(), PAGE_GENERAL;
+    webdav_user: String = String::new(), PAGE_GENERAL;
     /// When the last update check ran, and the versions skipped or put off (`update::Memo`).
     update: crate::update::Memo = crate::update::Memo::default();
     /// The variant last started in each split tool family (Rectangle, Circle, Arc, Slot, Polygon, Line,
@@ -1706,6 +1709,7 @@ pub(crate) fn open_profiles(app: &mut SolveApp) {
 #[derive(Clone)]
 struct Snapshot {
     prefs: Prefs,
+    webdav_password: String,
     dark: bool,
     layout: crate::shell::LayoutMode,
     grid: bool,
@@ -1729,6 +1733,7 @@ impl Snapshot {
     fn take(app: &SolveApp) -> Snapshot {
         Snapshot {
             prefs: app.preferences.clone(),
+            webdav_password: app.webdav.password.clone(),
             dark: app.ui.dark,
             layout: app.ui.layout,
             grid: app.ui.show_grid,
@@ -1754,6 +1759,7 @@ impl Snapshot {
         let update = std::mem::take(&mut app.preferences.update);
         app.preferences = self.prefs;
         sync_surface_analysis(app);
+        app.webdav.password = self.webdav_password;
         app.preferences.update = update;
         if units_changed {
             default_units_changed(app);
@@ -1801,6 +1807,7 @@ impl Snapshot {
             toolbar,
             favourites,
             profile,
+            webdav_password,
         } = self;
         *prefs == app.preferences
             && *dark == app.ui.dark
@@ -1819,6 +1826,7 @@ impl Snapshot {
             && *toolbar == app.toolbar_custom.prefs()
             && *favourites == app.sbox.pinned
             && *profile == app.settings_profiles.active
+            && *webdav_password == app.webdav.password
     }
 }
 

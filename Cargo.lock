@@ -4440,8 +4440,10 @@ dependencies = [
  "log",
  "minisign-verify",
  "nix 0.31.3",
+ "percent-encoding",
  "pollster 0.4.0",
  "proc-macro2",
+ "quick-xml",
  "semver",
  "serde",
  "serde_json",
@@ -4455,6 +4457,7 @@ dependencies = [
  "toml",
  "ttf-parser",
  "unicode-bidi",
+ "url",
  "web-time",
  "winreg",
  "zip",
@@ -4476,6 +4479,14 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "solidcraft-web-folder"
+version = "0.29.0"
+dependencies = [
+ "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]

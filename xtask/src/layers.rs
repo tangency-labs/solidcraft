@@ -56,6 +56,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("solidcraft", Class::Exempt),
     ("cli", Class::Exempt),
     ("web", Class::Exempt),
+    // the self-hosted web image's server-folder file service (no workspace dependencies)
+    ("web-folder", Class::Exempt),
     ("xtask", Class::Exempt),
 ];
 

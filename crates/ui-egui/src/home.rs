@@ -561,13 +561,13 @@ pub fn open_recent(app: &mut SolveApp, path: &str) {
 }
 
 /// Find out whether the recent files are there: on a thread, so the page never waits on a drive.
-fn ask_present(h: &mut HomeState, ctx: &egui::Context, recent: &[String]) {
+fn ask_present(h: &mut HomeState, _ctx: &egui::Context, recent: &[String]) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let new: Vec<String> = recent.iter().filter(|p| h.present_asked.insert((*p).clone())).cloned().collect();
         if !new.is_empty() {
             let (tx, rx) = std::sync::mpsc::channel();
-            let ctx = ctx.clone();
+            let ctx = _ctx.clone();
             let spawned = std::thread::Builder::new().name("recent-files".into()).spawn(move || {
                 for p in new {
                     let there = solidcraft_engine::io::vfs::exists(&p);

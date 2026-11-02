@@ -315,6 +315,7 @@ mod viewport_details;
 mod viewport_layout;
 mod viewport_status;
 mod viewport_status_fixture;
+pub mod webdav;
 pub mod workspace;
 
 use std::sync::mpsc::Receiver;
@@ -433,6 +434,11 @@ impl Default for UiState {
 /// Host services injected by the app so this crate stays portable.
 #[derive(Default)]
 pub struct Services {
+    pub webdav_http: Option<webdav::Http>,
+    /// Wait for a host-backed save before allowing the design to close.
+    pub persist_save: Option<Box<dyn Fn(&str) -> Option<save_job::PersistFuture>>>,
+    /// Notify the host of the existing changed-elsewhere question’s answer.
+    pub save_conflict_answer: Option<Box<dyn Fn(open_elsewhere::DiskAnswer)>>,
     /// Ask for a file to open. The extensions are the file type the command reads, offered as
     /// the picker's first filter (`&[]`: designs, CAD files and meshes, #1801).
     pub pick_open: Option<Box<dyn Fn(&[&str]) -> FilePickerFuture>>,
@@ -511,6 +517,7 @@ pub struct SolveApp {
     pub blur: blur::State,
     pub(crate) viewport_status: ui_kit::StatusPresentation,
     pub(crate) viewport_status_fixture: viewport_status_fixture::Fixture,
+    pub webdav: webdav::State,
     /// Compact browser embed: retain model panels and joint controls without application chrome.
     pub embedded: bool,
     pub session: Session,
@@ -658,6 +665,7 @@ pub struct SolveApp {
     pub disk_prompt: bool,
     /// Update Links or Open Linked Design waiting for a network server to be allowed.
     pub network_prompt: Option<network_prompt::NetworkPrompt>,
+    pub(crate) host_save: Option<save_job::HostSave>,
     /// Designs left by crashed apps, offered for recovery.
     pub recoverable: Vec<solidcraft_engine::recovery::Entry>,
     /// Discard all was clicked in the recovery window: its confirmation is showing (#9299).
@@ -795,6 +803,7 @@ impl SolveApp {
             pre_extrude_cam: None,
             pre_sketch_component: None,
             services,
+            webdav: Default::default(),
             file_picker: None,
             slicer_wait: None,
             easyprint: Default::default(),
@@ -860,6 +869,7 @@ impl SolveApp {
             lock_prompts: Vec::new(),
             disk_prompt: false,
             network_prompt: None,
+            host_save: None,
             recoverable: Vec::new(),
             recovery_discard_all: false,
             quick_measure: Default::default(),
@@ -1155,7 +1165,7 @@ impl SolveApp {
 
     /// Run a command programmatically (JSON parameters, no dialogs).
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
-        if self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() {
+        if self.file_load.busy() || self.file_picker.is_some() || webdav::busy(self) || self.saving.is_some() || self.host_save.is_some() {
             return Err("a file operation is in progress".into());
         }
         // Commands may start only detected slicers and the programs the user added under Custom….
@@ -1167,6 +1177,9 @@ impl SolveApp {
             let action = serde_json::from_value(reply["action"].clone()).map_err(|e| e.to_string())?;
             timeline::request_playback(self, action)?;
             return Ok(reply);
+        }
+        if matches!(id, "file.save" | "file.save_as") && webdav::managed(self) {
+            self.webdav.overwrite = params.get("overwrite").and_then(Value::as_bool).unwrap_or(false);
         }
         let t0 = now_ms();
         let revision = self.session.revision;
@@ -1211,6 +1224,13 @@ impl SolveApp {
             }
             if matches!(id, "render.lights.set" | "render.lights.add" | "render.lights.duplicate" | "render.lights.remove") {
                 render_workspace::light::edited(self, &params, v);
+            }
+        }
+        if done.is_ok() {
+            match id {
+                "file.save" => save_job::begin_programmatic(self, "file.save"),
+                "file.save_as" => save_job::begin_programmatic(self, "file.save_as"),
+                _ => {}
             }
         }
         done
@@ -2771,7 +2791,7 @@ impl SolveApp {
         if ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1) || (i.key_pressed(egui::Key::BrowserBack) && !typing)) {
             edit_in_place::back(self);
         }
-        if self.saving.is_some() || self.edit_in_place.refreshing() {
+        if self.saving.is_some() || self.host_save.is_some() || self.edit_in_place.refreshing() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
         open_meshing::tick(self, ctx);
@@ -2968,6 +2988,7 @@ impl SolveApp {
         file_load::show(self, ui.ctx());
         open_meshing::show(self, ui.ctx());
         documents::prompt(self, ui.ctx());
+        webdav::show(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());
         network_prompt::show(self, ui.ctx());
         update::show(self, ui.ctx());
@@ -3202,9 +3223,17 @@ impl SolveApp {
             return;
         }
         let reply = req.reply.clone();
+        let host_was_pending = self.host_save.is_some();
         match control::handle(self, ctx, &req) {
             control::Outcome::Done(v) => {
-                let _ = reply.send(v);
+                if !host_was_pending
+                    && webdav::managed(self)
+                    && let Some(save) = self.host_save.as_mut()
+                {
+                    save.reply = Some((reply, v));
+                } else {
+                    let _ = reply.send(v);
+                }
             }
             // A window that is minimised or covered (another macOS Space) presents no frame:
             // say so at once rather than after the deadline (#1677).
