@@ -56,8 +56,9 @@ pub fn union_all(bodies: &[&Body]) -> Result<Body> {
 }
 
 /// Whether B-rep bodies `a` and `b` are apart: their exact boxes, each grown by twice its
-/// record's tolerance (as [`union_apart`] takes them), do not meet.
-fn apart(a: &Body, b: &Body) -> Result<bool> {
+/// record's tolerance (as [`union_apart`] takes them), do not meet. Never for a mesh body. The
+/// way to skip work on bodies that cannot meet: a mesh's box is not the body's.
+pub fn apart(a: &Body, b: &Body) -> Result<bool> {
     if a.is_mesh() || b.is_mesh() {
         return Ok(false);
     }
