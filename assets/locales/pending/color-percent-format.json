@@ -1,0 +1,20 @@
+{
+  "ar": {
+    "color.percent_help": "عرض قيم اللون كنسبة مئوية"
+  },
+  "en": {
+    "color.percent_help": "Showing color values as percentage"
+  },
+  "he": {
+    "color.percent_help": "הצגת ערכי הצבע כאחוזים"
+  },
+  "ja": {
+    "color.percent_help": "色の値をパーセントで表示"
+  },
+  "vi": {
+    "color.percent_help": "Hiển thị giá trị màu dạng phần trăm"
+  },
+  "zh": {
+    "color.percent_help": "以百分比显示颜色值"
+  }
+}
