@@ -482,8 +482,9 @@ impl Seg2 {
             }
         }
     }
-    /// Parameter of the closest point: exact projection for lines,
-    /// sampling followed by Newton for the remaining curves.
+    /// Parameter of the closest point: exact for lines and arcs. The remaining curves are sampled and
+    /// refined from every dip in the sampled distance, since the lowest sample can sit on the wrong
+    /// part of the curve; the ends count, so a closed segment is searched from both.
     pub fn closest_param(&self, p: Vec2) -> f64 {
         let finite = |p: Vec2| p.x.is_finite() && p.y.is_finite();
         match *self {
@@ -498,25 +499,57 @@ impl Seg2 {
                     return t.clamp(0.0, 1.0);
                 }
             }
+            Seg2::Arc { center, radius, start, sweep } if radius > 0.0 && sweep != 0.0 => {
+                let angle = (p - center).angle();
+                let along = if sweep > 0.0 { (angle - start).rem_euclid(TAU) } else { (start - angle).rem_euclid(TAU) };
+                if along <= sweep.abs() {
+                    return along / sweep.abs();
+                }
+                return if self.start().dist(p) <= self.end().dist(p) { 0.0 } else { 1.0 };
+            }
             _ => {}
         }
-        let n = 64;
-        let mut t =
-            (0..=n).map(|i| i as f64 / n as f64).min_by(|x, y| self.point_at(*x).dist(p).total_cmp(&self.point_at(*y).dist(p))).unwrap_or(0.0);
+        const N: usize = 64;
+        let at = |i: usize| i as f64 / N as f64;
+        let dist: [f64; N + 1] = std::array::from_fn(|i| self.point_at(at(i)).dist(p));
+        // Refined from sample `i`, within its neighbours.
+        let refine = |i: usize| {
+            let t = self.newton_closest(p, at(i), at(i.saturating_sub(1)), at((i + 1).min(N)));
+            (t, self.point_at(t).dist(p))
+        };
+        let lowest = dist.iter().enumerate().min_by(|a, b| a.1.total_cmp(b.1)).map_or(0, |(i, _)| i);
+        let (mut t, mut near) = refine(lowest);
+        for i in (0..=N).filter(|&i| i != lowest && (i == 0 || dist[i] < dist[i - 1]) && (i == N || dist[i] <= dist[i + 1])) {
+            let (other, d) = refine(i);
+            // Clearly nearer only: two parts of a curve the same distance away keep the first answer.
+            if d + 1e-12 * (1.0 + d) < near {
+                (t, near) = (other, d);
+            }
+        }
+        t
+    }
+
+    /// Newton's method for the parameter of the point nearest `p`, from `t`, within `[lo, hi]`: the
+    /// range closes in on the minimum, and a step that leaves it bisects.
+    fn newton_closest(&self, p: Vec2, mut t: f64, mut lo: f64, mut hi: f64) -> f64 {
         for _ in 0..30 {
             let (q, d) = (self.point_at(t), self.derivative(t));
             let (d2, h) = ((self.derivative((t + 1e-6).min(1.0)) - self.derivative((t - 1e-6).max(0.0))) / 2e-6, q - p);
             let f = h.dot(d);
             let df = d.dot(d) + h.dot(d2);
-            if df.abs() < 1e-300 {
+            if f < 0.0 {
+                lo = t;
+            } else if f > 0.0 {
+                hi = t;
+            } else {
                 break;
             }
-            let nt = (t - f / df).clamp(0.0, 1.0);
-            if (nt - t).abs() < 1e-14 {
-                t = nt;
+            let step = t - f / df;
+            // Arrived, even where the step rounds to the end of the range it has just closed.
+            if (step - t).abs() < 1e-14 {
                 break;
             }
-            t = nt;
+            t = if step > lo && step < hi { step } else { 0.5 * (lo + hi) };
         }
         t
     }
@@ -1083,14 +1116,146 @@ mod tests {
                 let p = Vec2::new((k * 17 % 37) as f64 - 18.0, (k * 31 % 29) as f64 - 14.0);
                 let old = sampled_closest(s, p);
                 let new = s.closest_param(p);
-                if i > 0 {
-                    assert_eq!(new.to_bits(), old.to_bits());
+                // Curves other than lines and arcs keep today's answer wherever it was the nearest.
+                if i >= curves.len() - 1 && s.point_at(old).dist(p) <= s.point_at(new).dist(p) + 1e-10 {
+                    assert!((new - old).abs() < 1e-9, "{s:?} {p:?}");
                 }
                 assert!(s.point_at(new).dist(p) <= s.point_at(old).dist(p) + 1e-10);
                 let on_curve = s.point_at(k as f64 / 100.0);
                 assert!(s.point_at(s.closest_param(on_curve)).dist(on_curve) < 1e-9);
             }
         }
+    }
+
+    #[test]
+    fn closest_param_finds_the_nearest_part_of_the_curve() {
+        use std::f64::consts::{FRAC_1_SQRT_2, TAU};
+        let v = Vec2::new;
+        // The lowest sample is on the wrong part of the curve (#10007).
+        let doubled = Seg2::Cubic { p0: v(0.0, 0.0), p1: v(100.0, 10.0), p2: v(-90.0, 10.0), p3: v(10.0, 0.0) };
+        let p = v(10.0, 1.0);
+        assert!((doubled.closest_param(p) - 0.0372).abs() < 1e-3 && doubled.point_at(doubled.closest_param(p)).dist(p) < 0.08);
+        // The lowest sample is the answer, its end, and Newton must not walk away from it.
+        let s = Seg2::Cubic { p0: v(0.0, 0.0), p1: v(2.0, 7.0), p2: v(6.0, -3.0), p3: v(8.0, 4.0) };
+        assert_eq!(s.closest_param(v(4.75, 13.0)), 1.0);
+        // A full circle's points just before its start, either way round: nearest just before its
+        // end, not at its start. The same from a closed curve, which has no exact answer to use.
+        for sweep in [TAU, -TAU] {
+            let circle = Seg2::Arc { center: v(1.0, 2.0), radius: 5.0, start: 0.6131, sweep };
+            for delta in [1e-4, 0.01, 0.04] {
+                let p = v(1.0, 2.0) + Vec2::from_angle(0.6131 - delta * sweep.signum()) * 4.99;
+                assert!((circle.point_at(circle.closest_param(p)).dist(p) - 0.01).abs() < 1e-9, "sweep {sweep}, {delta}");
+            }
+        }
+        let closed = Seg2::Cubic { p0: v(0.0, 0.0), p1: v(30.0, 20.0), p2: v(-30.0, 20.0), p3: v(0.0, 0.0) };
+        let (start, end) = (closed.point_at(1e-3), closed.point_at(1.0 - 1e-3));
+        assert!((closed.closest_param(start) - 1e-3).abs() < 1e-9 && (closed.closest_param(end) - (1.0 - 1e-3)).abs() < 1e-9);
+        // A loop tighter than a sample: Newton must stay beside its sample, or it lands far from it.
+        let looped = Seg2::Cubic {
+            p0: v(0.0, 0.0),
+            p1: v(440.96668404407825, 8.394467272561808),
+            p2: v(-444.93401227675724, 8.394467272561808),
+            p3: v(1.5292259603454506, 0.0),
+        };
+        let p = v(126.39305028911927, 4.398065468717801);
+        assert!(looped.point_at(looped.closest_param(p)).dist(p) < 1e-5);
+        // A heavy weight rushes the parameter, but refining still ends at the nearest point.
+        let a = v(0.9110380263611129, -9.82486500633782);
+        let (apex, b) = (v(-78.51917171728384, -76.49370802914093), v(6.049669594010543, 8.821535281358884));
+        let heavy = Seg2::Conic { a, apex, b, w: 7243.232077589842 };
+        let p = v(6.049585703470391, 8.821579216771788);
+        assert!(heavy.point_at(heavy.closest_param(p)).dist(p) < 1e-4);
+        // A point on the curve is found exactly, also when the last step rounds to no step at all.
+        let (a, apex) = (v(19.33004733688409, 2.4328030999200934), v(16.965885683593374, 10.075495012924941));
+        let oval = Seg2::Conic { a, apex, b: v(2.6358383467092836, 5.642691913004848), w: FRAC_1_SQRT_2 };
+        let p = v(4.9066583889092845, 6.2420408748003124);
+        assert!(oval.point_at(oval.closest_param(p)).dist(p) < 1e-12);
+        // An arc outside its sweep answers with its nearer end.
+        let quarter = Seg2::Arc { center: Vec2::ZERO, radius: 2.0, start: 0.0, sweep: TAU / 4.0 };
+        assert_eq!((quarter.closest_param(v(3.0, -0.1)), quarter.closest_param(v(-0.1, 3.0))), (0.0, 1.0));
+        assert_eq!(quarter.reversed().closest_param(v(3.0, -0.1)), 1.0);
+    }
+
+    /// Two parts of a curve the same distance away: the answer stays the one found first, whatever
+    /// the last bit of the two distances says.
+    #[test]
+    fn closest_param_keeps_the_first_of_two_equally_near_parts() {
+        let v = Vec2::new;
+        let arch = Seg2::Cubic { p0: v(0.0, 0.0), p1: v(0.3, 10.0), p2: v(9.7, 10.0), p3: v(10.0, 0.0) };
+        for k in 0..400 {
+            let p = v(5.0, k as f64 * 0.0173 - 3.0);
+            assert!((arch.closest_param(p) - sampled_closest(&arch, p)).abs() < 1e-9, "{p:?}");
+        }
+    }
+
+    /// Random curves, sharp bends and closed ones among them, and points anywhere, near them and
+    /// beside their ends, against a dense search.
+    #[test]
+    fn closest_param_is_never_further_than_a_dense_search() {
+        use std::f64::consts::TAU;
+        let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+        let mut unit = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for _ in 0..60 {
+            let mut at = |r: f64| Vec2::new((unit() * 2.0 - 1.0) * r, (unit() * 2.0 - 1.0) * r);
+            let (p0, p3) = (at(10.0), at(10.0));
+            let mut control = [Vec2::ZERO; MAX_BEZIER_CTRL];
+            control.iter_mut().for_each(|q| *q = at(30.0));
+            let (center, radius) = (at(5.0), 0.5 + at(10.0).x.abs());
+            let curves = [
+                Seg2::Cubic { p0, p1: at(10.0), p2: at(10.0), p3 },
+                Seg2::Cubic { p0, p1: at(200.0), p2: at(200.0), p3 },
+                Seg2::Cubic { p0, p1: at(30.0), p2: at(30.0), p3: p0 },
+                Seg2::Conic { a: p0, apex: at(50.0), b: p3, w: 10f64.powf(at(2.0).x) },
+                Seg2::Bezier { n: 9, p: control },
+                Seg2::Arc { center, radius, start: at(20.0).x, sweep: at(TAU).x },
+                Seg2::Arc { center, radius, start: at(20.0).x, sweep: TAU.copysign(at(1.0).x) },
+            ];
+            for s in curves {
+                for p in [at(60.0), s.point_at(at(0.5).x + 0.5) + at(2.0), s.start() + at(0.5), s.end() + at(0.5)] {
+                    let closest = s.point_at(s.closest_param(p)).dist(p);
+                    let dense = (0..=2048).map(|i| s.point_at(i as f64 / 2048.0).dist(p)).fold(f64::INFINITY, f64::min);
+                    assert!(closest <= dense + 1e-9 * (1.0 + dense), "{s:?} {p:?}: {closest} against {dense}");
+                }
+            }
+        }
+    }
+
+    /// Nonsense in, a parameter on the curve out: a caller feeds the answer straight to `point_at`.
+    #[test]
+    fn closest_param_of_hostile_input_stays_in_range() {
+        use std::f64::consts::TAU;
+        let v = Vec2::new;
+        let big = f64::MAX / 4.0;
+        let nan = v(f64::NAN, 1.0);
+        let curves = [
+            Seg2::Arc { center: Vec2::ZERO, radius: 2.0, start: 0.0, sweep: 0.0 },
+            Seg2::Arc { center: Vec2::ZERO, radius: 0.0, start: 0.0, sweep: 1.0 },
+            Seg2::Arc { center: Vec2::ZERO, radius: -2.0, start: 0.0, sweep: 1.0 },
+            Seg2::Arc { center: Vec2::ZERO, radius: 2.0, start: 0.0, sweep: 2.0 * TAU },
+            Seg2::Arc { center: Vec2::ZERO, radius: 2.0, start: big, sweep: 1.0 },
+            Seg2::Arc { center: Vec2::ZERO, radius: f64::INFINITY, start: 0.0, sweep: 1.0 },
+            Seg2::Arc { center: nan, radius: 2.0, start: 0.0, sweep: 1.0 },
+            Seg2::Arc { center: Vec2::ZERO, radius: 2.0, start: f64::NAN, sweep: f64::NAN },
+            Seg2::Cubic { p0: Vec2::ZERO, p1: Vec2::ZERO, p2: Vec2::ZERO, p3: Vec2::ZERO },
+            Seg2::Cubic { p0: nan, p1: Vec2::ZERO, p2: v(1.0, 1.0), p3: v(2.0, 0.0) },
+            Seg2::Cubic { p0: v(big, big), p1: v(-big, big), p2: v(big, -big), p3: v(-big, -big) },
+            Seg2::Conic { a: Vec2::ZERO, apex: v(1.0, 1.0), b: v(2.0, 0.0), w: f64::NAN },
+            Seg2::Conic { a: Vec2::ZERO, apex: v(1.0, 1.0), b: v(2.0, 0.0), w: -1.0 },
+        ];
+        for s in curves {
+            for p in [Vec2::ZERO, v(3.0, -1.0), nan, v(f64::INFINITY, 0.0), v(big, -big)] {
+                let t = s.closest_param(p);
+                assert!((0.0..=1.0).contains(&t), "{s:?} {p:?}: {t}");
+            }
+        }
+        // A negative radius is a point on the far side of the centre, and still gets the nearest.
+        let flipped = Seg2::Arc { center: Vec2::ZERO, radius: -2.0, start: 0.0, sweep: 1.0 };
+        assert!((flipped.closest_param(Vec2::from_angle(0.5) * -3.0) - 0.5).abs() < 1e-6);
     }
 
     /// The sweep visits only the edges crossing each slab; it must give the triangles that
