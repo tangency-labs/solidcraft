@@ -558,6 +558,52 @@ impl<V: Homogeneous<f64>> BSplineSurface<V> {
     }
 }
 
+/// SolidCraft: the grid pre-search of nearest-point searches without a hint, its basis
+/// functions made once per grid line.
+impl<P: ControlPoint<f64>> BSplineSurface<P> {
+    /// Same answer as `algo::surface::presearch` with `dist(subs(u, v))` as the distance, bit
+    /// for bit: the same grid, each point summed exactly as `subs` sums it, the same first
+    /// minimum. `subs` makes both parameters' basis functions at every grid point; here each
+    /// grid line's are made once. Every point of an intersection curve on a B-spline or NURBS
+    /// face is projected without a hint, so this grid was searched for each one: tapered text
+    /// cut into a block took 40 s (#4431).
+    #[doc(hidden)]
+    pub fn grid_presearch(
+        &self,
+        (urange, vrange): ((f64, f64), (f64, f64)),
+        division: usize,
+        mut dist: impl FnMut(P) -> f64,
+    ) -> (f64, f64) {
+        let ((u0, u1), (v0, v1)) = (urange, vrange);
+        let (degree0, degree1) = self.degrees();
+        let (uknot_vec, vknot_vec) = &self.knot_vecs;
+        let at = |k: usize, (x0, x1): (f64, f64)| {
+            let p = k as f64 / division as f64;
+            x0 * (1.0 - p) + x1 * p
+        };
+        let us: Vec<f64> = (0..=division).map(|i| at(i, (u0, u1))).collect();
+        let vs: Vec<f64> = (0..=division).map(|j| at(j, (v0, v1))).collect();
+        let basis0: Vec<Vec<f64>> = us.iter().map(|u| uknot_vec.bspline_basis_functions(degree0, *u)).collect();
+        let basis1: Vec<Vec<f64>> = vs.iter().map(|v| vknot_vec.bspline_basis_functions(degree1, *v)).collect();
+        let mut res = (0.0, 0.0);
+        let mut min = f64::INFINITY;
+        for (u, b0s) in us.iter().zip(&basis0) {
+            for (v, b1s) in vs.iter().zip(&basis1) {
+                let closure = |sum: P, (vec, b0): (&Vec<P>, &f64)| {
+                    let closure = |sum: P, (pt, b1): (&P, &f64)| sum + pt.to_vec() * (*b0 * b1);
+                    vec.iter().zip(b1s).fold(sum, closure)
+                };
+                let d = dist(self.control_points.iter().zip(b0s).fold(P::origin(), closure));
+                if d < min {
+                    min = d;
+                    res = (*u, *v);
+                }
+            }
+        }
+        res
+    }
+}
+
 impl<P: ControlPoint<f64>> ParametricSurface for BSplineSurface<P> {
     type Point = P;
     type Vector = P::Diff;
@@ -1937,14 +1983,14 @@ where
         hint: H,
         trials: usize,
     ) -> Option<(f64, f64)> {
+        // SolidCraft: `grid_presearch`, the same grid search as `algo::surface::presearch`.
+        let dist = |p: P| p.distance2(point);
         let hint = match hint.into() {
             SPHint2D::Parameter(x, y) => (x, y),
             SPHint2D::Range(range0, range1) => {
-                algo::surface::presearch(self, point, (range0, range1), PRESEARCH_DIVISION)
+                self.grid_presearch((range0, range1), PRESEARCH_DIVISION, dist)
             }
-            SPHint2D::None => {
-                algo::surface::presearch(self, point, self.range_tuple(), PRESEARCH_DIVISION)
-            }
+            SPHint2D::None => self.grid_presearch(self.range_tuple(), PRESEARCH_DIVISION, dist),
         };
         algo::surface::search_nearest_parameter(self, point, hint, trials)
     }

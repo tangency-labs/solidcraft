@@ -522,7 +522,8 @@ impl<V: Homogeneous<f64> + ControlPoint<f64, Diff = V> + Tolerance> NurbsSurface
     pub fn boundary(&self) -> NurbsCurve<V> { NurbsCurve::new(self.0.boundary()) }
 }
 
-impl<V: Homogeneous<f64>> SearchNearestParameter<D2> for NurbsSurface<V>
+// SolidCraft: `V: ControlPoint` (as `ParametricSurface` asks) for `grid_presearch`.
+impl<V: Homogeneous<f64> + ControlPoint<f64, Diff = V>> SearchNearestParameter<D2> for NurbsSurface<V>
 where
     Self: ParametricSurface<Point = V::Point, Vector = <V::Point as EuclideanSpace>::Diff>,
     V::Point: EuclideanSpace<Scalar = f64> + MetricSpace<Metric = f64>,
@@ -556,14 +557,15 @@ where
         hint: H,
         trials: usize,
     ) -> Option<(f64, f64)> {
+        // SolidCraft: `BSplineSurface::grid_presearch` of the homogeneous surface, each point
+        // made as `subs` makes it, the same grid search as `algo::surface::presearch`.
+        let dist = |p: V| p.to_point().distance2(point);
         let hint = match hint.into() {
             SPHint2D::Parameter(x, y) => (x, y),
             SPHint2D::Range(range0, range1) => {
-                algo::surface::presearch(self, point, (range0, range1), PRESEARCH_DIVISION)
+                self.0.grid_presearch((range0, range1), PRESEARCH_DIVISION, dist)
             }
-            SPHint2D::None => {
-                algo::surface::presearch(self, point, self.range_tuple(), PRESEARCH_DIVISION)
-            }
+            SPHint2D::None => self.0.grid_presearch(self.range_tuple(), PRESEARCH_DIVISION, dist),
         };
         algo::surface::search_nearest_parameter(self, point, hint, trials)
     }

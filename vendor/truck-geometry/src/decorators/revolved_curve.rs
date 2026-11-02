@@ -365,6 +365,52 @@ impl<C: ParametricCurve3D + BoundedCurve> SearchParameter<D2> for RevolutedCurve
     }
 }
 
+/// SolidCraft: the presearch of a transformed revolved surface (the surface `truck-modeling`
+/// keeps for a revolution), for the nearest-point search it runs without a hint.
+impl<C: ParametricCurve3D> Processor<RevolutedCurve<C>, Matrix4> {
+    /// Same answer as `algo::surface::presearch(self, point, range, division)`, bit for bit:
+    /// the same grid, the same points (each found with the same operations as `subs`), the same
+    /// first minimum. `subs` evaluates the profile curve and builds the rotation for every grid
+    /// point; here each is made once per grid line (the profile curve depends on one parameter,
+    /// the rotation on the other), so the grid costs two matrix products a point. The searches
+    /// of intersection curves on a revolved face ran this grid for every point they projected
+    /// (#4542).
+    #[doc(hidden)]
+    pub fn presearch(&self, point: Point3, (urange, vrange): ((f64, f64), (f64, f64)), division: usize) -> (f64, f64) {
+        let ((u0, u1), (v0, v1)) = (urange, vrange);
+        let at = |k: usize, (x0, x1): (f64, f64)| {
+            let p = k as f64 / division as f64;
+            x0 * (1.0 - p) + x1 * p
+        };
+        let us: Vec<f64> = (0..=division).map(|i| at(i, (u0, u1))).collect();
+        let vs: Vec<f64> = (0..=division).map(|j| at(j, (v0, v1))).collect();
+        // The entity's own parameters: (u, v), or (v, u) when the processor swaps them.
+        let (curve_params, angle_params) = match self.orientation {
+            true => (&us, &vs),
+            false => (&vs, &us),
+        };
+        let curve_points: Vec<Point3> = curve_params.iter().map(|t| self.entity.curve.subs(*t)).collect();
+        let rotations: Vec<Matrix4> = angle_params.iter().map(|a| self.entity.revolution.point_rotation_matrix(*a)).collect();
+        let mut res = (0.0, 0.0);
+        let mut min = f64::INFINITY;
+        for (i, u) in us.iter().enumerate() {
+            for (j, v) in vs.iter().enumerate() {
+                let (c, r) = match self.orientation {
+                    true => (curve_points.get(i), rotations.get(j)),
+                    false => (curve_points.get(j), rotations.get(i)),
+                };
+                let (Some(c), Some(r)) = (c, r) else { continue };
+                let dist = self.transform.transform_point(r.transform_point(*c)).distance2(point);
+                if dist < min {
+                    min = dist;
+                    res = (*u, *v);
+                }
+            }
+        }
+        res
+    }
+}
+
 impl<C: ParametricCurve3D + BoundedCurve> SearchNearestParameter<D2> for RevolutedCurve<C> {
     type Point = Point3;
     fn search_nearest_parameter<H: Into<SPHint2D>>(
