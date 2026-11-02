@@ -77,6 +77,7 @@ engine.describe                   the command registry itself
 explode.delete                    exploded views: display offsets
 explode.list                      exploded views: display offsets
 expr.evaluate                     expression evaluation
+file.import_cache_clear           clears a cache of imported files
 file.open_in_easyprint            hands the file to another program
 file.save                         saving the design
 file.save_as                      saving the design

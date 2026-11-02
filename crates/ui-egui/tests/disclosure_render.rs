@@ -221,9 +221,9 @@ fn stand_up_memory_controls_apply_and_forget_with_visible_evidence() {
     assert!(h.app.stand_up.is_some());
     capture(&mut h, "first-offer.png");
     h.step(&json!({"click":{"handle":"stand_up:stand"}})).unwrap();
-    let stood = solidcraft_engine::view::bounds(&h.app.session);
+    let stood = solidcraft_engine::view::bounds(&h.app.session).unwrap();
     h.app.open_path(&path);
     assert!(h.app.stand_up.is_none());
-    assert_eq!(solidcraft_engine::view::bounds(&h.app.session), stood);
+    assert_eq!(solidcraft_engine::view::bounds(&h.app.session).unwrap(), stood);
     capture(&mut h, "reopened.png");
 }

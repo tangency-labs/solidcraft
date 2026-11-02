@@ -10376,7 +10376,7 @@ mod tests {
         let digest = app.stand_up_digest.clone().unwrap();
         control(&mut app, &json!({"stand_up": true})).unwrap();
         assert_eq!(app.preferences.stand_up_answers.get(&digest), Some(Answer::YToZ));
-        let stood = solidcraft_engine::view::bounds(&app.session);
+        let stood = solidcraft_engine::view::bounds(&app.session).unwrap();
         // Across app restarts, too: the user history round-trips through the real settings API.
         let mut reopened = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         reopened.load_prefs(&app.prefs());
@@ -10385,9 +10385,9 @@ mod tests {
         assert_eq!(hit["import_reused"], true, "remembered stand-up applies on a cache hit");
         crate::stand_up::offer(&mut reopened, &path, &[], Some(&hit));
         assert!(reopened.stand_up.is_none());
-        assert_eq!(solidcraft_engine::view::bounds(&reopened.session), stood);
+        assert_eq!(solidcraft_engine::view::bounds(&reopened.session).unwrap(), stood);
         reopened.run("edit.undo", json!({})).unwrap();
-        let b = solidcraft_engine::view::bounds(&reopened.session);
+        let b = solidcraft_engine::view::bounds(&reopened.session).unwrap();
         assert!((b.max.y - b.min.y - 40.0).abs() < 1e-6, "remembered rotation is undoable");
 
         control(&mut reopened, &json!({"reuse_imports": false})).unwrap();
@@ -10408,10 +10408,10 @@ mod tests {
         assert!(reopened.stand_up.is_some());
         assert_ne!(reopened.stand_up_digest.as_ref(), Some(&digest));
         control(&mut reopened, &json!({"stand_up": false})).unwrap();
-        let left = solidcraft_engine::view::bounds(&reopened.session);
+        let left = solidcraft_engine::view::bounds(&reopened.session).unwrap();
         reopened.open_path(&path);
         assert!(reopened.stand_up.is_none());
-        assert_eq!(solidcraft_engine::view::bounds(&reopened.session), left);
+        assert_eq!(solidcraft_engine::view::bounds(&reopened.session).unwrap(), left);
 
         let remembered = reopened.preferences.stand_up_answers.clone();
         control(&mut reopened, &json!({"remember_stand_up": false})).unwrap();

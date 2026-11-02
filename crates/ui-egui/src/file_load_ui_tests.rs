@@ -459,10 +459,10 @@ fn stand_up_memory_applies_after_an_off_thread_open() {
     open(&mut w);
     assert!(w.app.stand_up.is_some());
     crate::prefs::control(&mut w.app, &json!({"stand_up":true})).unwrap();
-    let stood = solidcraft_engine::view::bounds(&w.app.session);
+    let stood = solidcraft_engine::view::bounds(&w.app.session).unwrap();
     open(&mut w);
     assert!(w.app.stand_up.is_none());
-    assert_eq!(solidcraft_engine::view::bounds(&w.app.session), stood);
+    assert_eq!(solidcraft_engine::view::bounds(&w.app.session).unwrap(), stood);
     std::fs::remove_dir_all(dir).unwrap();
 }
 
