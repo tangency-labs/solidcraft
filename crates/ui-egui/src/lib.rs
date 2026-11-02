@@ -35,6 +35,7 @@ pub mod delete;
 pub mod design_properties;
 pub mod dialog_column;
 mod dialog_descriptor;
+pub(crate) mod dialog_tree;
 pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
@@ -3095,6 +3096,7 @@ impl SolveApp {
         }
         // Before the dialog: a click on the view's OK or Cancel is for this frame's dialog.
         view_confirm::show(self, ui.ctx());
+        dialog_tree::show(self, ui.ctx());
         dialogs::show(self, ui.ctx());
         issue_report::CadInput::block(self, ui, report_input);
         sketch_palette::show(self, ui.ctx());

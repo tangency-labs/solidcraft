@@ -1318,6 +1318,33 @@ fn model_feature_indices(app: &SolveApp, component: u64, sketches: bool) -> Vec<
     }
 }
 
+/// The design's Origin, Bodies and Construction rows as the browser draws them (a click picks
+/// for an open dialog as there), for the design tree over the view while a dialog holds the left
+/// column (`dialog_tree`).
+pub(crate) fn tree_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
+    prepare_model(app);
+    let mut acts = Actions { lit: Lit::of(app), ..Default::default() };
+    origin_rows(app, ui, depth, &mut acts);
+    // The root's folders as the browser draws them (`browser_cache`).
+    let mut cache = app.tree.cache.take().unwrap_or_default();
+    cache.prepare(app);
+    let folders = ["bodies", "construction"].map(|folder| cache.folder(app, 0, None, folder));
+    app.tree.cache = Some(cache);
+    for (folder, data) in ["bodies", "construction"].into_iter().zip(&folders) {
+        folder_rows_at(app, ui, 0, None, folder, depth, &mut acts, data);
+    }
+    if !acts.hovered {
+        acts.hover_bodies.clear();
+    }
+    app.viewport.hover_bodies = acts.hover_bodies;
+    if let Some(d) = acts.drop {
+        apply_drop(app, d);
+    }
+    if let Some((at, target)) = acts.menu {
+        crate::context_menu::open_for(app, at, target);
+    }
+}
+
 fn browser_rows(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions) {
     rows_scrolling(app, ui, acts, false);
 }

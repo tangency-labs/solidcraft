@@ -122,6 +122,10 @@
   value box in the viewport. Preferences › Interface › **Dialogs** › *In the left column* opens
   them in the browser's place instead (and the History's, when it is at the left), at least as
   wide as that column; the column comes back as it was when the dialog closes.
+  While a dialog
+  holds the column, the view's top-left corner shows the design's name: click it to open the
+  Origin, Bodies and (with the History at the left) the features over the view, and click a row
+  to pick it for the dialog's active box.
   Interface › **Dialog buttons** › **Top** puts OK, Cancel and Apply in
   the dialog's title row, right of the title, where they stay while sections open and close;
   Cancel then also takes the place of the close button. Enter and Esc work as before. The Sketch
