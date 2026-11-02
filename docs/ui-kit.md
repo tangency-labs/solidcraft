@@ -208,11 +208,13 @@ rules. Its compass is 110 pt; the 48 pt Shots strip clears the docks by 8 pt.
 - `expr_row`, `hint_row`, `text_row` and `choice_row` compose `row` with the existing
   expression, hinted expression, plain text and dropdown controls. They preserve row order,
   labels, focus IDs and completion; callers keep Enter/change ownership and explicit dropdown IDs.
-  `count_row` composes `row` with `count_field` for pattern quantities. `checked_row` is
+  `count_row` composes `row` with `count_field` for pattern quantities. `angle_step_row`
+  composes `row` with `angle_step_field` for an angle (Extrude taper, Revolve angle, Coil start
+  angle): arrows step by a caller-chosen number of degrees. `checked_row` is
   `hint_row` for a value the form checks before it runs: with a warning, the field is outlined in
   the warning colour and the message sits under it (`warning_caption`), so colour is never the
   only cue.
-  The label of an `expr_row` or `hint_row` scrubs: dragging it sideways changes a
+  The label of an `expr_row`, `hint_row` or `angle_step_row` scrubs: dragging it sideways changes a
   literal value (`20 mm`, `45°`) by about a hundredth of its size per point, on that step's
   grid, Shift ten times finer and Ctrl/Cmd ten times coarser. It keeps the unit and decimal
   mark as typed, never makes a size negative, and leaves expressions and parameters alone.
@@ -352,6 +354,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `text_lines` | Virtualized read-only licence/report lines, horizontal overflow | `font_small`, `text`, `control_height` |
 | fields: `field`, `hint_field`, `focused_field`, `checked_field` | Expression editors, optional empty hint or retained focus, or outlined in the warning colour when flagged; returns accepted Enter | `control_height/fill`, `form_inset`, `font_label`, `warning` |
 | `count_field`, `Count` | Expression editor for a whole-number count (a pattern's quantity) with up/down step arrows at its right edge. `Count` gives the limits and the evaluator (the design's parameters); an arrow steps the evaluated count by one within them, replacing a plain number or adjusting an expression's trailing `+ n`, and is dimmed when it can't step. Handles `dialog:<row> up` / `down`; returns accepted Enter | field tokens, `control_border`, `control_radius`, `selected_bg`, `form_ink/dim`, `space_4` |
+| `angle_step_field`, `AngleStep` | Expression editor for an angle with the same up/down arrows. `AngleStep` gives the step in degrees and an evaluator that returns degrees; an arrow steps a plain number or `N deg`, or adjusts an expression's trailing `± n deg`, and is dimmed when it can't step. Handles `dialog:<row> up` / `down`; returns accepted Enter | same as `count_field` |
 | `text_field`, `focused_text_field` | Plain name editor, optionally retaining focus | field tokens |
 | `multiline_text_field` | Three-line plain-text row with stable focus ID | field/row tokens |
 | `password_field` | Stable secret editor; excludes the secret from scenario/accessibility metadata | field tokens |

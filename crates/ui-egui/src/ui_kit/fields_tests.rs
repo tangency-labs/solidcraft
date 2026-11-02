@@ -824,10 +824,52 @@ fn count_steps_stay_within_limits_and_keep_expressions() {
     assert_eq!(super::step_count("5", i64::MIN, &wide).as_deref(), Some("-9223372036854775803"));
 }
 
+#[test]
+fn angle_steps_by_degrees_and_keep_expressions() {
+    let eval = |text: &str| -> Option<f64> {
+        let text = text.trim();
+        match text {
+            "alpha" => Some(20.0),
+            "alpha + 10 deg" => Some(30.0),
+            "alpha + 20 deg" => Some(40.0),
+            "alpha - 10 deg" => Some(10.0),
+            _ => super::plain_angle_degrees(text),
+        }
+    };
+    let step = |text: &str, delta, step_deg| super::step_angle(text, delta, &AngleStep { step_deg, eval: &eval });
+    assert_eq!(step("5 deg", 1, 1.0).as_deref(), Some("6 deg"));
+    assert_eq!(step("5", -1, 1.0).as_deref(), Some("4 deg"));
+    assert_eq!(step("355 deg", 1, 10.0).as_deref(), Some("360 deg"));
+    assert_eq!(step("360 deg", -1, 10.0).as_deref(), Some("350 deg"));
+    assert_eq!(step("", 1, 10.0).as_deref(), Some("10 deg"), "empty means 0 deg");
+    assert_eq!(step("5.5 deg", 1, 1.0).as_deref(), Some("6 deg"));
+    assert_eq!(step("alpha", 1, 10.0).as_deref(), Some("alpha + 10 deg"));
+    assert_eq!(step("alpha + 10 deg", 1, 10.0).as_deref(), Some("alpha + 20 deg"));
+    assert_eq!(step("alpha + 10 deg", -1, 10.0).as_deref(), Some("alpha"));
+    for junk in ["abc", "1e400", "NaN"] {
+        assert_eq!(step(junk, 1, 1.0), None, "{junk}");
+    }
+}
+
 /// A count's step arrows stand inside the editor, which asks for the text cursor across its
 /// whole rect, so the arrows showed an I-beam and read as part of the text. They are not text:
 /// the pointer over one is the ordinary cursor, whether it can step or not, and the number
 /// beside them is still typed.
+#[test]
+fn angle_step_arrows_nudge_a_field() {
+    let ctx = crate::fonts::test_context();
+    let eval = |text: &str| super::plain_angle_degrees(text.trim());
+    let mut angle = "5 deg".to_string();
+    let mut draw = |ui: &mut Ui| {
+        angle_step_row(ui, "Taper Angle", &mut angle, &AngleStep { step_deg: 1.0, eval: &eval });
+    };
+    frame(&ctx, vec![], &mut draw);
+    let up = scenario::handle_at("dialog:Taper Angle up").expect("up handle");
+    frame(&ctx, pointer(up, true), &mut draw);
+    frame(&ctx, pointer(up, false), &mut draw);
+    assert_eq!(angle, "6 deg");
+}
+
 #[test]
 fn count_step_arrows_do_not_take_the_text_cursor() {
     for value in ["5", "1"] {

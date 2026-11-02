@@ -308,6 +308,17 @@ fn count_row_to(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label
     ui_kit::count_row(ui, label, value, &ui_kit::Count { min: 1, max, eval: &eval })
 }
 
+/// Extrude taper: 1° steps (#7480).
+const TAPER_ANGLE_STEP_DEG: f64 = 1.0;
+/// Revolve angle and Coil start angle: 10° steps (#7480).
+const FEATURE_ANGLE_STEP_DEG: f64 = 10.0;
+
+/// An angle expression row with step arrows, evaluated as the document evaluates angles.
+fn angle_step_row_to(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label: &str, value: &mut String, step_deg: f64) -> bool {
+    let eval = |text: &str| doc.eval(text.trim(), solidcraft_engine::doc::expr::Kind::Angle).ok().map(|rad| rad.to_degrees());
+    ui_kit::angle_step_row(ui, label, value, &ui_kit::AngleStep { step_deg, eval: &eval })
+}
+
 fn fillet_type(extra: &serde_json::Map<String, Value>) -> usize {
     let value = extra.get("type").and_then(Value::as_str).unwrap_or("constant");
     if value == "g2" { 3 } else { FILLET_TYPES.iter().position(|(_, key)| *key == value).unwrap_or(0) }
@@ -549,13 +560,11 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     enter |= expr_row(ui, "Offset", start);
                 }
                 if *direction < 2 {
-                    form_row(ui, "Taper Angle", |ui| {
-                        let before = taper.clone();
-                        enter |= field(ui, taper);
-                        if *taper != before {
-                            *taper_present = !taper.trim().is_empty();
-                        }
-                    });
+                    let before = taper.clone();
+                    enter |= angle_step_row_to(ui, &app.session.doc, "Taper Angle", taper, TAPER_ANGLE_STEP_DEG);
+                    if *taper != before {
+                        *taper_present = !taper.trim().is_empty();
+                    }
                 }
             });
         }
@@ -793,7 +802,7 @@ pub(crate) fn primitive_label(key: &str) -> &str {
 
 /// The coil's section, where the section sits on the diameter, the way it turns and where it
 /// starts (#3862). A default stays out of the parameters, so OK on an unchanged edit keeps the coil.
-fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> bool {
+fn coil_rows(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, extra: &mut serde_json::Map<String, Value>) -> bool {
     const POSITIONS: [(&str, &str); 3] = [("Inside", "inside"), ("Center", "center"), ("Outside", "outside")];
     form_row(ui, "Section", |ui| extra_segments(ui, extra, "section", &[("Circular", "circular"), ("Square", "square")]));
     form_row(ui, "Section position", |ui| {
@@ -813,7 +822,8 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> b
     });
     let mut angle = extra.get("start_angle").and_then(Value::as_str).unwrap_or_default().to_string();
     let before = angle.clone();
-    let enter = hint_row(ui, "Start angle", &mut angle, "0 deg");
+    // Empty still means 0 deg; an arrow writes an explicit value (#7480).
+    let enter = angle_step_row_to(ui, doc, "Start angle", &mut angle, FEATURE_ANGLE_STEP_DEG);
     if angle != before {
         if angle.trim().is_empty() {
             extra.remove("start_angle");
@@ -862,7 +872,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                         }
                     }
                 });
-                enter |= expr_row(ui, "Angle", angle);
+                enter |= angle_step_row_to(ui, &app.session.doc, "Angle", angle, FEATURE_ANGLE_STEP_DEG);
                 if dir == 1 {
                     form_row(ui, "Angle 2", |ui| {
                         enter |= extra_field(ui, &mut d.extra, "angle2", "90 deg");
@@ -1056,7 +1066,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 };
             }
             if *cmd == "solid.coil" {
-                enter |= coil_rows(ui, &mut d.extra);
+                enter |= coil_rows(ui, &app.session.doc, &mut d.extra);
             }
             if at.is_none() {
                 enter |= crate::primitive_placement::rows(ui, &app.session, cmd, &mut d.extra);

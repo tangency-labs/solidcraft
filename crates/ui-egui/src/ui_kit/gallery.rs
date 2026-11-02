@@ -1676,6 +1676,18 @@ const ELEMENTS: &[Element] = &[
             count_field(ui, &mut count, &Count { min: 1, max: 10, eval: &|text: &str| text.trim().parse().ok() });
         });
     }),
+    element!("angle_step_row", "dialog:row:Gallery", Some("dialog:Gallery angle up"), |ui, _| {
+        let mut angle = "10 deg".to_owned();
+        let eval = |text: &str| text.trim().strip_suffix("deg").map(str::trim).unwrap_or(text).parse().ok();
+        angle_step_row(ui, "Gallery", &mut angle, &AngleStep { step_deg: 10.0, eval: &eval });
+    }),
+    element!("angle_step_field", "dialog:row:Gallery", Some("dialog:Gallery angle down"), |ui, _| {
+        row(ui, "Gallery", |ui| {
+            let mut angle = "5 deg".to_owned();
+            let eval = |text: &str| text.trim().strip_suffix("deg").map(str::trim).unwrap_or(text).parse().ok();
+            angle_step_field(ui, &mut angle, &AngleStep { step_deg: 1.0, eval: &eval });
+        });
+    }),
     element!("hint_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         hint_row(ui, "Gallery", &mut s.value, "Value");
     }),
