@@ -2044,9 +2044,8 @@ pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) -> Result<(), String
         RenameWhat::View(v) => app.run("view.rename", json!({ "view": v, "name": name })).map(|_| ()),
         RenameWhat::Joint(j) => app.run("joint.edit", json!({ "joint": j, "name": name })).map(|_| ()),
     };
-    if let Err(error) = &result {
-        app.set_status(error.clone(), true);
-    }
+    // The command's own status line explains a refusal; the caller decides whether to keep the
+    // editor open on it.
     result
 }
 
