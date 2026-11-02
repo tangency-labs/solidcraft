@@ -7135,7 +7135,7 @@ fn eval_feature(
         }
         FeatureKind::ConstructionAxis { def } => {
             let cst = construction_state(doc, st, f.component)?;
-            let ctx = crate::construct::Ctx { doc, vals, st: &*cst, depth: 0 };
+            let ctx = crate::construct::Ctx { doc, vals, st: &cst, depth: 0 };
             let (origin, dir) = crate::construct::resolve_axis(&ctx, def)?;
             let bodies = crate::construct::source_bodies(&ctx, &def.refs());
             st.construct.push(crate::construct::Construct {
@@ -7148,7 +7148,7 @@ fn eval_feature(
         }
         FeatureKind::ConstructionPoint { def } => {
             let cst = construction_state(doc, st, f.component)?;
-            let ctx = crate::construct::Ctx { doc, vals, st: &*cst, depth: 0 };
+            let ctx = crate::construct::Ctx { doc, vals, st: &cst, depth: 0 };
             let p = crate::construct::resolve_point(&ctx, def)?;
             let bodies = crate::construct::source_bodies(&ctx, &def.refs());
             st.construct.push(crate::construct::Construct {
