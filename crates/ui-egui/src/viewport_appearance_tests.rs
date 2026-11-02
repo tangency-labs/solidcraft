@@ -404,6 +404,7 @@ fn cancelling_theme_preview_restores_viewport_palette_keys() {
 #[test]
 fn inspect_menu_toggles_component_colors_without_a_dialog_and_refreshes_scene() {
     let mut h = crate::scenario::Harness::new();
+    h.app.preferences.language = "en".into();
     h.frames(3);
     let command = solidcraft_engine::find_command("inspect.colored_components").unwrap();
     let info = command.info(&h.app.session);

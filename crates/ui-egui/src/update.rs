@@ -1162,30 +1162,6 @@ enum State {
 pub fn prefs_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     let can = available(app);
     let kind = app.updater.kind().clone();
-    // Where nothing can check (the browser app, development builds, the Flatpak), the box and
-    // Check now would do nothing: the note below says how this copy updates instead.
-    if can {
-        ui_kit::checkbox(ui, crate::i18n::tr("update.check_automatically"), &mut app.preferences.check_updates);
-        ui.horizontal_wrapped(|ui| {
-            let busy = app.updater.status == Status::Checking;
-            let (status, warning) = match (&app.updater.status, offered_or_newer(app)) {
-                (Status::Checking, _) => (crate::i18n::tr("update.checking").to_string(), false),
-                (Status::Failed(e), _) => (crate::i18n::format("update.failed", &[("error", e)]), true),
-                (_, Some(v)) => (crate::i18n::format("update.available", &[("version", &v)]), false),
-                (Status::UpToDate, None) => (crate::i18n::tr("update.up_to_date").to_string(), false),
-                (Status::Idle, None) => (String::new(), false),
-            };
-            if !status.is_empty() {
-                ui_kit::settings_badge(ui, &status, warning);
-            }
-            let r = ui_kit::button(ui, crate::i18n::tr("update.check_now"), ui_kit::Button::Enabled(!busy));
-            crate::scenario::publish_rect("prefs:check_now", r.rect);
-            if r.clicked() {
-                let ctx = ui.ctx().clone();
-                check_now(app, &ctx);
-            }
-        });
-    }
     let note = if kind == InstallKind::Web {
         crate::i18n::tr("update.prefs_web").to_string()
     } else if can && let Some(manager) = app.updater.managed_by().map(str::to_string) {
@@ -1197,7 +1173,41 @@ pub fn prefs_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else {
         crate::i18n::format("update.prefs_dev", &[("version", current_version())])
     };
-    ui_kit::text(ui, &note, ui_kit::Text::Hint("updates"));
+    ui.horizontal_wrapped(|ui| {
+        if can {
+            let (status, warning) = match (&app.updater.status, offered_or_newer(app)) {
+                (Status::Checking, _) => (crate::i18n::tr("update.checking").to_string(), false),
+                (Status::Failed(e), _) => (crate::i18n::format("update.failed", &[("error", e)]), true),
+                (_, Some(v)) => (crate::i18n::format("update.available", &[("version", &v)]), false),
+                (Status::UpToDate, None) => (crate::i18n::tr("update.up_to_date").to_string(), false),
+                (Status::Idle, None) => (String::new(), false),
+            };
+            if !status.is_empty() {
+                ui_kit::settings_badge(ui, &status, warning);
+            }
+            let last = app.preferences.update.last_check;
+            if last.is_finite() && last > 0.0 {
+                let time = solidcraft_engine::crash::utc(last as u64);
+                let checked = crate::i18n::format("prefs.general.last_check", &[("time", &time)]);
+                ui_kit::settings_inline_note(ui, &checked);
+            }
+        } else {
+            ui_kit::settings_inline_note(ui, crate::i18n::tr("update.check_unavailable"));
+        }
+        let busy = app.updater.status == Status::Checking;
+        let r = ui_kit::button(ui, crate::i18n::tr("update.check_now"), ui_kit::Button::Enabled(can && !busy));
+        crate::scenario::publish_target("prefs:check_now", r.rect);
+        if can && r.clicked() {
+            let ctx = ui.ctx().clone();
+            check_now(app, &ctx);
+        }
+        let help = ui_kit::help_icon(ui, &note);
+        crate::scenario::publish_target("prefs:updates_help", help.rect);
+    });
+    ui.add_enabled_ui(can, |ui| {
+        let check = ui_kit::checkbox(ui, crate::i18n::tr("update.check_automatically"), &mut app.preferences.check_updates);
+        crate::scenario::publish_target("prefs:check_updates", check.rect);
+    });
     if let Some(v) = offered_or_newer(app)
         && offered(app).is_none()
         && ui_kit::button(ui, crate::i18n::format("update.show", &[("version", &v)]), ui_kit::Button::Normal).clicked()

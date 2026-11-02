@@ -75,6 +75,7 @@ impl Tokens {
             font_compass: 13.5,
             font_subtitle: 15.0,
             font_intro: 16.0,
+            font_page_heading: 20.0,
             font_article_heading: 17.0,
             font_title: 22.0,
             font_display: 26.0,
@@ -228,6 +229,8 @@ impl Tokens {
             selected_bg: Color32::from_rgb(232, 241, 250),
             figure_ground: Color32::from_rgb(247, 248, 250),
             figure_line: Color32::from_rgb(111, 124, 143),
+            figure_highlight: Color32::WHITE,
+            figure_shadow: Color32::BLACK,
             figure_face_top: Color32::from_rgb(255, 255, 255),
             figure_face_left: Color32::from_rgb(228, 233, 240),
             figure_face_right: Color32::from_rgb(201, 210, 222),
@@ -241,8 +244,9 @@ impl Tokens {
             figure_axis_z: Color32::from_rgb(47, 111, 208),
             figure_ok: Color32::from_rgb(47, 125, 91),
             figure_warn: Color32::from_rgb(201, 138, 0),
+            figure_conflict: Color32::from_rgb(184, 74, 0),
             pref_well: Color32::from_rgb(238, 241, 245),
-            pref_note: Color32::from_rgb(184, 74, 0),
+            pref_note: Color32::from_rgb(183, 74, 0),
             pref_note_fill: Color32::from_rgb(251, 235, 221),
             pref_on_accent: Color32::from_rgb(255, 255, 255),
             pref_ok: Color32::from_rgb(39, 107, 44),
@@ -380,6 +384,7 @@ impl Tokens {
         t.figure_axis_z = Color32::from_rgb(108, 168, 247);
         t.figure_ok = Color32::from_rgb(127, 209, 174);
         t.figure_warn = Color32::from_rgb(232, 194, 74);
+        t.figure_conflict = Color32::from_rgb(240, 162, 122);
         t.pref_well = Color32::from_rgb(47, 52, 62);
         t.pref_note = Color32::from_rgb(240, 162, 122);
         t.pref_note_fill = Color32::from_rgb(74, 51, 38);
