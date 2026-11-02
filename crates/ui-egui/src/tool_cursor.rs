@@ -6,8 +6,13 @@
 //! Off by default; View settings ("Show tool at cursor") or `ui.set {"toolCursor": true}` turn
 //! it on.
 //! It is UI only: drawing it runs no command and changes nothing in the design.
+//! Cursor coordinates also show while idle on an explicit reference plane (#11070), unless
+//! Preferences > Graphics > Show cursor coordinates is off.
 
 use egui::{Pos2, Rect, Stroke, Vec2, pos2, vec2};
+use solidcore_record::Plane;
+use solidcraft_engine::Sel;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::theme::Tokens;
@@ -31,6 +36,75 @@ const FLIPPED_GAP: f32 = 6.0;
 /// pointer, so a readout placed from it could still slide under the arrow.
 pub(crate) fn readout_at(painter: &egui::Painter, view: Rect, point: Pos2) -> Pos2 {
     painter.ctx().pointer_hover_pos().filter(|p| view.contains(*p)).unwrap_or(point) + READOUT
+}
+
+/// The pointer's position on an explicit reference, never an arbitrary depth in the view.
+/// Point-placing tools keep their own snapped readout instead of getting a second one.
+fn coordinate_text(app: &SolveApp, proj: &crate::viewport::Proj, at: Pos2) -> Option<String> {
+    if !app.preferences.cursor_coordinates || !at.is_finite() {
+        return None;
+    }
+    let state = app.session.world_state().ok()?;
+    let sketch = app.session.active_sketch.and_then(|id| state.sketch(id));
+    if sketch.is_some()
+        && (crate::sketch3d::drawing(app) || app.tool.as_ref().is_some_and(|t| t.kind != crate::tools::Kind::Ext && t.hover.is_some()))
+    {
+        return None;
+    }
+    let plane = if let Some(sketch) = sketch {
+        sketch.plane
+    } else {
+        app.session.selection.iter().find_map(|sel| match sel {
+            Sel::Plane { name } => crate::dialogs::plane_by_name(&app.session, name),
+            Sel::Face { body, index, .. } => {
+                let (origin, normal) = crate::dialogs::planar_face(&app.session, body, *index)?;
+                Plane::from_normal(origin, normal)
+            }
+            _ => None,
+        })?
+    };
+    let (origin, direction) = proj.ray(at);
+    let point = plane.intersect_ray(origin, direction)?;
+    if !point.is_finite() || (proj.cam.fov > 0.0 && (point - origin).dot(direction) < 0.0) {
+        return None;
+    }
+    if sketch.is_some_and(|sketch| !sketch.sketch.view.three_d) {
+        let local = plane.to_local(point);
+        Some(crate::i18n::format(
+            "cursor.sketch_coordinates",
+            &[("x", &crate::prefs::show_mm(app, local.x, 1)), ("y", &crate::prefs::show_mm(app, local.y, 1))],
+        ))
+    } else {
+        Some(crate::i18n::format(
+            "cursor.world_coordinates",
+            &[
+                ("x", &crate::prefs::show_mm(app, point.x, 1)),
+                ("y", &crate::prefs::show_mm(app, point.y, 1)),
+                ("z", &crate::prefs::show_mm(app, point.z, 1)),
+            ],
+        ))
+    }
+}
+
+/// Idle coordinates follow the pointer only where it reaches the model, clear of UI controls.
+pub(crate) fn show_coordinates(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewport::Proj, at: Option<Pos2>) {
+    let Some(at) = at else { return };
+    let Some(text) = coordinate_text(app, proj, at) else { return };
+    let colour = Tokens::view().text_dim;
+    let bounds = painter.clip_rect().intersect(proj.rect).shrink(FLIPPED_GAP);
+    let galley = painter.layout(text, egui::FontId::proportional(Tokens::get().font_small), colour, bounds.width().max(1.0));
+    let mut position = at + READOUT;
+    if position.x + galley.size().x > bounds.right() {
+        position.x = at.x - FLIPPED_GAP - galley.size().x;
+    }
+    if position.y + galley.size().y > bounds.bottom() {
+        position.y = at.y - FLIPPED_GAP - galley.size().y;
+    }
+    position.x = position.x.max(bounds.left());
+    position.y = position.y.max(bounds.top());
+    let rect = Rect::from_min_size(position, galley.size());
+    painter.galley(position, galley, colour);
+    crate::scenario::publish_rect("viewport:readout", rect);
 }
 
 /// The command whose tool or dialog is running: the one a click in the viewport goes to.
@@ -271,6 +345,109 @@ mod tests {
             assert!(readout.top() > at.y, "at {at:?}: the readout {readout:?} is not below the hot spot");
         }
         h.step(&json!({"key": "Escape"})).unwrap();
+    }
+
+    /// #11070: an open sketch reports the pointer position without starting a drawing tool.
+    #[test]
+    fn idle_sketch_has_a_cursor_coordinate_readout() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.settle();
+        assert!(h.app.tool.is_none());
+        let c = h.app.viewport.rect.unwrap().center() + vec2(70.0, 30.0);
+        h.step(&json!({"move": [c.x, c.y]})).unwrap();
+        h.frames(2);
+        assert!(rect_of("viewport:readout").is_some(), "an idle sketch should show cursor coordinates");
+
+        h.call("ui.prefs", json!({"cursor_coordinates": false}));
+        h.frames(2);
+        assert!(rect_of("viewport:readout").is_none(), "the preference restores the old idle display");
+        h.step(&json!({"start": "sketch.line"})).unwrap();
+        h.step(&json!({"move": [c.x + 5.0, c.y]})).unwrap();
+        h.frames(2);
+        assert!(rect_of("viewport:readout").is_some(), "the existing drawing-tool readout remains available");
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.call("ui.prefs", json!({"cursor_coordinates": true}));
+        h.step(&json!({"move": [4.0, 4.0]})).unwrap();
+        h.frames(2);
+        assert!(rect_of("viewport:readout").is_none(), "coordinates hide outside the model viewport");
+    }
+
+    #[test]
+    fn cursor_coordinates_use_the_sketch_frame_and_design_units() {
+        use solidcore_record::Vec3;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": {"origin": [100, 200, 30], "x_dir": [0, 1, 0], "y_dir": [-1, 0, 0]}})).unwrap();
+        h.app.run("document.units", json!({"units": "in"})).unwrap();
+        h.call("ui.camera", json!({"target": [100, 200, 30]}));
+        h.call("ui.view", json!({"view": "top"}));
+        h.settle();
+        let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        // Local (25.4, -50.8) mm is world (150.8, 225.4, 30), regardless of the view.
+        let at = proj.to_screen(Vec3::new(150.8, 225.4, 30.0)).unwrap();
+        assert_eq!(coordinate_text(&h.app, &proj, at).as_deref(), Some("Sketch · X 1.000 in  Y -2.000 in"));
+        h.step(&json!({"move": [at.x, at.y]})).unwrap();
+        h.frames(2);
+        assert!(
+            h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text)
+                if text.galley.text() == "Sketch · X 1.000 in  Y -2.000 in")),
+            "the view paints the measured coordinates"
+        );
+    }
+
+    #[test]
+    fn model_cursor_coordinates_require_a_plane_and_keep_world_axes() {
+        use solidcore_record::Vec3;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 17, "name": "Datum"})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.settle();
+        let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        let point = Vec3::new(12.0, 6.0, 17.0);
+        let at = proj.to_screen(point).unwrap();
+        h.app.session.selection.clear();
+        assert!(coordinate_text(&h.app, &proj, at).is_none(), "an unreferenced 3D pointer has no depth");
+        h.app.session.selection = vec![Sel::Plane { name: "Datum".into() }];
+        assert_eq!(coordinate_text(&h.app, &proj, at).as_deref(), Some("World · X 12.00 mm  Y 6.00 mm  Z 17.00 mm"));
+
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 17})).unwrap();
+        let state = h.app.session.world_state().unwrap();
+        let body = state.bodies.first().unwrap();
+        let face = body.body.faces(0.1).unwrap().into_iter().find(|face| face.plane_normal.is_some_and(|normal| normal.z > 0.99)).unwrap();
+        h.app.session.selection = vec![Sel::Face { body: body.name.clone(), index: face.index, point: face.centroid }];
+        assert_eq!(coordinate_text(&h.app, &proj, at).as_deref(), Some("World · X 12.00 mm  Y 6.00 mm  Z 17.00 mm"));
+
+        h.app.session.selection = vec![Sel::Plane { name: "missing".into() }];
+        assert!(coordinate_text(&h.app, &proj, at).is_none());
+        h.app.session.selection = vec![Sel::Plane { name: "YZ".into() }];
+        let mut edge_on = proj;
+        edge_on.cam.yaw = 0.0;
+        edge_on.cam.pitch = 0.0;
+        assert!(coordinate_text(&h.app, &edge_on, at).is_none(), "an edge-on plane has no finite readout");
+    }
+
+    #[test]
+    fn cursor_coordinates_preference_can_be_changed_in_graphics_and_saved() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"open": "Graphics"}));
+        h.frames(4);
+        crate::prefs::reveal_preference(&mut h, "prefs:cursor_coordinates");
+        h.step(&json!({"click": {"handle": "prefs:cursor_coordinates"}})).unwrap();
+        assert!(!h.app.preferences.cursor_coordinates);
+        h.call("ui.prefs", json!({"button": "ok"}));
+        let mut reopened = SolveApp::new(Default::default(), Default::default());
+        reopened.load_prefs(&h.app.prefs());
+        assert!(!reopened.preferences.cursor_coordinates);
+        h.call("ui.prefs", json!({"open": "Graphics"}));
+        h.call("ui.prefs", json!({"button": "defaults"}));
+        assert!(h.app.preferences.cursor_coordinates);
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        assert!(!h.app.preferences.cursor_coordinates, "Cancel restores the value before Defaults");
     }
 
     /// Every interactive tool's command has an icon to show.

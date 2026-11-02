@@ -288,6 +288,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .on_hover_text(app.tr("settings.frame_rate_details_note"));
                 crate::scenario::publish_target("prefs:frame_rate_details", response.rect);
             });
+            let coordinates = setting::cursor_coordinates(app, ui).on_hover_text(app.tr("prefs.cursor_coordinates.tip"));
+            crate::scenario::publish_target("prefs:cursor_coordinates", coordinates.rect);
             let profile = setting::profile_operations(app, ui).on_hover_text(app.tr("prefs.profile_operations_note"));
             crate::scenario::publish_target("prefs:profile_operations", profile.rect);
             ui.horizontal_wrapped(|ui| {

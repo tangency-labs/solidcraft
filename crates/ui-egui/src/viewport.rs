@@ -5238,14 +5238,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::space_mouse_model::corner(ui, picture, calibration, app.space_mouse.raw.into());
     }
     // Last, so it sits over the overlays; only where a click would reach the model.
-    let badge_at = hover.filter(|p| {
-        inside
-            && !navigating
-            && resp.hovered()
-            && ui.ctx().layer_id_at(*p).is_none_or(|layer| layer == ui.layer_id())
-            && !crate::shell::covered(app, *p)
+    let model_pointer = hover.filter(|p| {
+        inside && resp.hovered() && ui.ctx().layer_id_at(*p).is_none_or(|layer| layer == ui.layer_id()) && !crate::shell::covered(app, *p)
     });
-    crate::tool_cursor::show(app, &painter, badge_at);
+    crate::tool_cursor::show_coordinates(app, &painter, &proj, model_pointer);
+    crate::tool_cursor::show(app, &painter, model_pointer.filter(|_| !navigating));
 }
 
 fn paint_box_selection(painter: &egui::Painter, bx: &BoxSel, sketch: bool) {

@@ -1276,6 +1276,9 @@ preference_settings! {
     /// A thin bar along the window's bottom edge: what is being edited, the open sketch's state
     /// and the design's units (#7243). Off by default.
     status_bar: bool = false, PAGE_LAYOUT;
+    /// Show pointer coordinates in an idle sketch or on a selected model plane (#11070).
+    /// Off keeps only the existing drawing-tool coordinates.
+    cursor_coordinates: bool = true, PAGE_GRAPHICS => check_id("prefs.cursor_coordinates");
     /// The selection's length, area or distance in the view's bottom right corner (#7000). Off by
     /// default.
     quick_measure: bool = false, PAGE_GRAPHICS;
@@ -5912,6 +5915,7 @@ mod tests {
             ("browser_eye_left", json!(true), PAGE_LAYOUT),
             ("browser_components_open", json!(true), PAGE_LAYOUT),
             ("quick_measure", json!(true), PAGE_GRAPHICS),
+            ("cursor_coordinates", json!(false), PAGE_GRAPHICS),
             ("origin_plane_names", json!("top_front_right"), PAGE_DESIGN),
             ("direct_interaction", json!(true), PAGE_TOOLS),
             ("hole_snaps", json!(true), PAGE_TOOLS),

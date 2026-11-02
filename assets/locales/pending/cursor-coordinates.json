@@ -1,0 +1,50 @@
+{
+  "ar": {
+    "cursor.sketch_coordinates": "رسم · X {x}  Y {y}",
+    "cursor.world_coordinates": "العالم · X {x}  Y {y}  Z {z}",
+    "prefs.cursor_coordinates": "إظهار إحداثيات المؤشر",
+    "prefs.cursor_coordinates.tip": "إظهار الإحداثيات في مستوى الرسم، أو إحداثيات العالم على مستوى أو وجه مستوٍ محدد. أوقف هذا الخيار لإظهار الإحداثيات أثناء الرسم فقط."
+  },
+  "de": {
+    "cursor.sketch_coordinates": "Skizze · X {x}  Y {y}",
+    "cursor.world_coordinates": "Welt · X {x}  Y {y}  Z {z}",
+    "prefs.cursor_coordinates": "Cursor-Koordinaten anzeigen",
+    "prefs.cursor_coordinates.tip": "Koordinaten in der Skizzenebene oder Weltkoordinaten auf einer ausgewählten Ebene oder ebenen Fläche anzeigen. Ausschalten, um Koordinaten nur beim Zeichnen anzuzeigen."
+  },
+  "en": {
+    "cursor.sketch_coordinates": "Sketch · X {x}  Y {y}",
+    "cursor.world_coordinates": "World · X {x}  Y {y}  Z {z}",
+    "prefs.cursor_coordinates": "Show cursor coordinates",
+    "prefs.cursor_coordinates.tip": "Show coordinates in the sketch plane, or world coordinates on a selected plane or planar face. Turn off to show coordinates only while drawing."
+  },
+  "he": {
+    "cursor.sketch_coordinates": "סקיצה · X {x}  Y {y}",
+    "cursor.world_coordinates": "עולם · X {x}  Y {y}  Z {z}",
+    "prefs.cursor_coordinates": "הצגת קואורדינטות הסמן",
+    "prefs.cursor_coordinates.tip": "הצגת קואורדינטות במישור הסקיצה, או קואורדינטות עולם על מישור או פאה מישורית שנבחרו. כיבוי האפשרות יציג קואורדינטות רק בזמן ציור."
+  },
+  "ja": {
+    "cursor.sketch_coordinates": "スケッチ · X {x}  Y {y}",
+    "cursor.world_coordinates": "ワールド · X {x}  Y {y}  Z {z}",
+    "prefs.cursor_coordinates": "カーソル座標を表示",
+    "prefs.cursor_coordinates.tip": "スケッチ平面の座標、または選択した平面や平らな面上のワールド座標を表示します。オフにすると、描画中のみ座標を表示します。"
+  },
+  "ko": {
+    "cursor.sketch_coordinates": "스케치 · X {x}  Y {y}",
+    "cursor.world_coordinates": "월드 · X {x}  Y {y}  Z {z}",
+    "prefs.cursor_coordinates": "커서 좌표 표시",
+    "prefs.cursor_coordinates.tip": "스케치 평면의 좌표 또는 선택한 평면이나 평평한 면의 월드 좌표를 표시합니다. 끄면 그리는 동안에만 좌표를 표시합니다."
+  },
+  "vi": {
+    "cursor.sketch_coordinates": "Phác thảo · X {x}  Y {y}",
+    "cursor.world_coordinates": "Toàn cục · X {x}  Y {y}  Z {z}",
+    "prefs.cursor_coordinates": "Hiển thị tọa độ con trỏ",
+    "prefs.cursor_coordinates.tip": "Hiển thị tọa độ trên mặt phẳng phác thảo, hoặc tọa độ toàn cục trên mặt phẳng hay mặt phẳng của vật thể đã chọn. Tắt để chỉ hiển thị tọa độ khi vẽ."
+  },
+  "zh": {
+    "cursor.sketch_coordinates": "草图 · X {x}  Y {y}",
+    "cursor.world_coordinates": "世界 · X {x}  Y {y}  Z {z}",
+    "prefs.cursor_coordinates": "显示光标坐标",
+    "prefs.cursor_coordinates.tip": "显示草图平面中的坐标，或所选平面或平坦面上的世界坐标。关闭后仅在绘制时显示坐标。"
+  }
+}
