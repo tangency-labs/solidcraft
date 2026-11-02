@@ -463,8 +463,9 @@ pub struct Session {
     pub log: Vec<String>,
     /// Increments on every document change (views use it to refresh).
     pub revision: u64,
-    /// Revision increments caused only by visibility. Comparing both counters proves that
-    /// every intervening increment left an editor's document and model untouched.
+    /// Revision increments caused only by what is shown ([`Session::refresh_display`]).
+    /// Comparing both counters proves that every intervening increment left an editor's
+    /// document and model untouched.
     visibility_revision: u64,
     /// [`Document::browser_stamp`] when the browser's groups and order were last checked.
     browser_stamp: [u64; 6],
@@ -1339,8 +1340,9 @@ impl Session {
         }
     }
 
-    /// Only what is hidden or shown changed: the model is untouched, so only the view revision
-    /// moves (the visibility caches are keyed on it) and the viewport redraws.
+    /// Only what is shown changed (hidden or shown items, a section or analysis, the selection):
+    /// the design and model are untouched, so only the view revision moves and the viewport
+    /// redraws. An open feature editor stays valid across it (#10687).
     pub(crate) fn refresh_display(&mut self) {
         self.revision += 1;
         self.visibility_revision += 1;
