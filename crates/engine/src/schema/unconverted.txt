@@ -78,7 +78,6 @@ frame.member
 frame.profile.insert
 frame.profile.list
 frame.profile.properties
-inspect.clearance
 inspect.compare
 inspect.interference
 inspect.measure
