@@ -1,5 +1,5 @@
-# Quick static checks for the release pipeline (seconds, no Rust build): workflow syntax, the
-# packaging shell and PowerShell scripts, and the Linux desktop/AppStream/Flatpak metadata.
+# Release pipeline checks: workflow syntax, packaging shell and PowerShell scripts,
+# desktop metadata, and tiny native builds that exercise embedded dependency metadata.
 # Adapted from PhotoCraft's (storytold/photocraft, Apache-2.0; see ATTRIBUTION.md).
 name: Packaging lint
 
@@ -19,6 +19,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  audit-metadata:
+    name: Dependency metadata (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: macOS universal test targets
+        if: runner.os == 'macOS'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Install metadata tools
+        shell: bash
+        run: |
+          cargo install cargo-auditable --version 0.7.7 --locked
+          cargo install rust-audit-info --version 0.5.4 --locked
+      - name: Build, strip and package tiny audit fixtures
+        run: python packaging/tests/audit_test.py
+
   lint:
     runs-on: ubuntu-latest
     env:

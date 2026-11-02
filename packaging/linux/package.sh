@@ -45,10 +45,10 @@ echo "==> SolidCraft $VERSION for Linux $ARCH ($FORMATS)"
 
 if [ "$SKIP_BUILD" = 0 ]; then
   if [ -n "${CROSS_TARGET:-}" ]; then
-    (cd "$ROOT" && cargo build --release --locked -p solidcraft -p solidcraft-cli --target "$CROSS_TARGET")
+    (cd "$ROOT" && build_release --release --locked -p solidcraft -p solidcraft-cli --target "$CROSS_TARGET")
     BIN="$CARGO_TARGET_DIR/$CROSS_TARGET/release"
   else
-    (cd "$ROOT" && cargo build --release --locked -p solidcraft -p solidcraft-cli)
+    (cd "$ROOT" && build_release --release --locked -p solidcraft -p solidcraft-cli)
     BIN="$CARGO_TARGET_DIR/release"
   fi
 else
@@ -68,6 +68,8 @@ install -Dm755 "$BIN/solidcraft-cli" "$STAGE/usr/bin/solidcraft-cli"
 # Compatibility shim (docs/compatibility.md): the old CLI name forwards to solidcraft-cli.
 install -Dm755 "$BIN/solvecraft-cli" "$STAGE/usr/bin/solvecraft-cli"
 strip "$STAGE/usr/bin/solidcraft" "$STAGE/usr/bin/solidcraft-cli" "$STAGE/usr/bin/solvecraft-cli" 2>/dev/null || true
+check_audit solidcraft "$STAGE/usr/bin/solidcraft"
+check_audit solidcraft-cli "$STAGE/usr/bin/solidcraft-cli"
 install -Dm644 "$ROOT/assets/platforms/linux/$APP_ID.desktop" "$STAGE/usr/share/applications/$APP_ID.desktop"
 install -Dm644 "$ROOT/assets/platforms/linux/$APP_ID.mime.xml" "$STAGE/usr/share/mime/packages/$APP_ID.xml"
 mkdir -p "$STAGE/usr/share/metainfo"
@@ -93,6 +95,12 @@ if has tar; then
   mkdir -p "$WORK/tar"
   cp -R "$STAGE/usr" "$WORK/tar/$BASENAME"
   tar -C "$WORK/tar" -czf "$DIST/$BASENAME.tar.gz" "$BASENAME"
+  if [ "${SOLIDCRAFT_AUDITABLE:-0}" = 1 ]; then
+    mkdir -p "$WORK/audit-tar"
+    tar -C "$WORK/audit-tar" -xzf "$DIST/$BASENAME.tar.gz"
+    check_audit solidcraft "$WORK/audit-tar/$BASENAME/bin/solidcraft"
+    check_audit solidcraft-cli "$WORK/audit-tar/$BASENAME/bin/solidcraft-cli"
+  fi
   echo "wrote $DIST/$BASENAME.tar.gz"
 fi
 

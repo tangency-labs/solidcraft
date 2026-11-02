@@ -44,6 +44,28 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 APP_ID=io.tangencylabs.solidcraft
 export APP_ID
 
+# Release jobs opt in; a local package build needs no extra Cargo tools.
+case "${SOLIDCRAFT_AUDITABLE:-0}" in
+  0 | 1) ;;
+  *) echo "SOLIDCRAFT_AUDITABLE must be 0 or 1" >&2; exit 2 ;;
+esac
+build_release() {
+  if [ "${SOLIDCRAFT_AUDITABLE:-0}" = 1 ]; then
+    cargo auditable build "$@"
+  else
+    cargo build "$@"
+  fi
+}
+
+# $1 is the Cargo package; the remaining arguments are final executable paths.
+check_audit() {
+  local package="$1"
+  shift
+  if [ "${SOLIDCRAFT_AUDITABLE:-0}" = 1 ]; then
+    "${SOLIDCRAFT_PACKAGING_PYTHON:-python3}" "$ROOT/packaging/check-audit.py" --package "$package" "$@"
+  fi
+}
+
 # Emit a GitHub Actions warning (plain stderr outside Actions).
 warn() {
   if [ -n "${GITHUB_ACTIONS:-}" ]; then echo "::warning::$*"; else echo "warning: $*" >&2; fi

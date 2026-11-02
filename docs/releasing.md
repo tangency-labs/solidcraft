@@ -170,6 +170,44 @@ change release infrastructure does not itself request publication of the applica
 5. Confirm that the release is public and its tag resolves to the recorded SHA. Report the
    release URL, version, checks performed, and any remaining limitations.
 
+## Dependency metadata in native binaries
+
+The native release jobs use `cargo-auditable` 0.7.7 to embed Rust package names,
+versions and dependency relationships into `solidcraft` and `solidcraft-cli`.
+Users can inspect an installed executable without a source checkout:
+
+```sh
+cargo install cargo-audit --locked
+cargo audit bin /path/to/solidcraft
+cargo audit bin /path/to/solidcraft-cli
+```
+
+This complements the repository's cargo-deny checks: the embedded record stays
+with the installed binary when new advisories are published. It does not certify
+the binary as vulnerability-free, and local path patches still need comparison
+with their upstream sources (see [dependency advisory coverage](book/src/dev/testing.md#dependency-advisories)).
+
+`SOLIDCRAFT_AUDITABLE=1` selects auditable builds in the native packaging scripts.
+The release workflow installs the pinned builder and `rust-audit-info` 0.5.4;
+local packaging keeps ordinary `cargo build` unless opted in. Opted-in packaging,
+including `--skip-build` and Windows `-Phase package`, requires those binaries to
+carry decodable metadata. Python 3.11 or newer runs `packaging/check-audit.py`,
+which checks the root package against the workspace's Cargo version (not the
+nightly filename version).
+
+The checks inspect the stripped Linux/FreeBSD staging trees, unpacked tarballs,
+the mounted macOS DMG and unpacked CLI zip, and the Windows build/signed staging
+files and unpacked portable zip. Linux's other formats use the same checked
+staging tree. Each architecture in a macOS universal binary is checked separately;
+to scan one with tools that only read thin Mach-O, first use `lipo -thin arm64`
+or `lipo -thin x86_64` to write that slice to a temporary file.
+
+Packaging CI builds small real binaries on Linux, macOS and Windows. It checks
+the auditable and ordinary build paths, missing/corrupt metadata, root/version
+mismatches, separate roots in a multi-package build, stripping and zip round trips;
+macOS also checks ad-hoc signing and rejects a universal binary with metadata
+missing from one architecture.
+
 ## Dry runs and retries
 
 `gh workflow run release.yml --ref <branch> -f draft=false` builds packages and uploads the

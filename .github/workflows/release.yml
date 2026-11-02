@@ -52,6 +52,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
+  SOLIDCRAFT_AUDITABLE: "1"
+  CARGO_AUDITABLE_VERSION: "0.7.7"
+  RUST_AUDIT_INFO_VERSION: "0.5.4"
 
 jobs:
   version:
@@ -133,6 +136,9 @@ jobs:
       NFPM_VERSION: 2.47.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
       - name: Install packaging tools
         run: |
           sudo apt-get update
@@ -144,6 +150,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-linux-${{ matrix.arch }}
+      - name: Install dependency metadata tools
+        run: |
+          cargo install cargo-auditable --version "$CARGO_AUDITABLE_VERSION" --locked
+          cargo install rust-audit-info --version "$RUST_AUDIT_INFO_VERSION" --locked
       - name: Build and package (AppImage, deb, rpm, tar.gz)
         run: packaging/linux/package.sh
       - name: Check the packages
@@ -324,9 +334,9 @@ jobs:
           cpu: 4
           mem: 12288
           # Passed into the VM by name; never templated into the script below.
-          envs: "SOLIDCRAFT_VERSION SOLIDCRAFT_BUILD_DATE"
+          envs: "SOLIDCRAFT_VERSION SOLIDCRAFT_BUILD_DATE SOLIDCRAFT_AUDITABLE CARGO_AUDITABLE_VERSION RUST_AUDIT_INFO_VERSION"
           prepare: |
-            pkg install -y bash git curl pkgconf libxkbcommon wayland libX11 libXcursor libXrandr libXi libxcb mesa-libs vulkan-loader
+            pkg install -y bash git curl python311 pkgconf libxkbcommon wayland libX11 libXcursor libXrandr libXi libxcb mesa-libs vulkan-loader
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
           run: |
             set -e
@@ -335,6 +345,9 @@ jobs:
             # Build outside the checkout so only dist/ is copied back out of the VM. 4 jobs: more
             # runs the VM out of memory.
             export CARGO_TARGET_DIR=/var/tmp/solidcraft-target CARGO_BUILD_JOBS=4
+            cargo install cargo-auditable --version "$CARGO_AUDITABLE_VERSION" --locked
+            cargo install rust-audit-info --version "$RUST_AUDIT_INFO_VERSION" --locked
+            export SOLIDCRAFT_PACKAGING_PYTHON=python3.11
             bash packaging/freebsd/package.sh
             tar -tzf dist/release/solidcraft-*-freebsd-x86_64.tar.gz \
               | grep -E '/bin/solidcraft$|/bin/solidcraft-cli$|/share/applications/io\.tangencylabs\.solidcraft\.desktop$|/share/doc/solidcraft/THIRD-PARTY-LICENSES\.txt$'
@@ -368,6 +381,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-macos-${{ matrix.arch }}
+      - name: Install dependency metadata tools
+        run: |
+          cargo install cargo-auditable --version "$CARGO_AUDITABLE_VERSION" --locked
+          cargo install rust-audit-info --version "$RUST_AUDIT_INFO_VERSION" --locked
       - name: Build
         run: packaging/macos/package.sh --build-only ${{ matrix.target }}
       # Not named release-*: the release job collects every release-* artifact as an asset.
@@ -390,6 +407,12 @@ jobs:
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install dependency metadata reader
+        run: cargo install rust-audit-info --version "$RUST_AUDIT_INFO_VERSION" --locked
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: macos-bin-aarch64
@@ -456,6 +479,9 @@ jobs:
       SIGNPATH_PROJECT_SLUG: solidcraft
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: icons
@@ -466,6 +492,13 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-windows-${{ matrix.arch }}
+      - name: Install dependency metadata tools
+        shell: pwsh
+        run: |
+          cargo install cargo-auditable --version $env:CARGO_AUDITABLE_VERSION --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo install rust-audit-info --version $env:RUST_AUDIT_INFO_VERSION --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install WiX
         shell: pwsh
         run: |

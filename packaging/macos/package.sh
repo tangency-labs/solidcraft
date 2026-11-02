@@ -132,7 +132,7 @@ if [ -n "$BUILD_ONLY" ]; then
     *) echo "unknown --build-only target $BUILD_ONLY" >&2; exit 2 ;;
   esac
   echo "==> SolidCraft $VERSION for macOS ($BUILD_ONLY, build only)"
-  (cd "$ROOT" && cargo build --release --locked -p solidcraft -p solidcraft-cli --target "$BUILD_ONLY")
+  (cd "$ROOT" && build_release --release --locked -p solidcraft -p solidcraft-cli --target "$BUILD_ONLY")
   exit 0
 fi
 
@@ -140,7 +140,7 @@ echo "==> SolidCraft $VERSION for macOS ($ARCH)"
 if [ "$SKIP_BUILD" = 0 ]; then
   args=()
   for t in "${TARGETS[@]}"; do args+=(--target "$t"); done
-  (cd "$ROOT" && cargo build --release --locked -p solidcraft -p solidcraft-cli "${args[@]}")
+  (cd "$ROOT" && build_release --release --locked -p solidcraft -p solidcraft-cli "${args[@]}")
 fi
 
 rm -rf "$WORK"
@@ -231,6 +231,8 @@ done
 test -s "$MNT/SolidCraft.app/Contents/Resources/Licenses/THIRD-PARTY-LICENSES.txt"
 # Not --strict: the mounted HFS volume adds Finder info, which strict verification rejects.
 codesign --verify --deep --verbose=2 "$MNT/SolidCraft.app"
+check_audit solidcraft "$MNT/SolidCraft.app/Contents/MacOS/SolidCraft"
+check_audit solidcraft-cli "$MNT/SolidCraft.app/Contents/MacOS/solidcraft-cli"
 "$MNT/SolidCraft.app/Contents/MacOS/SolidCraft" --version
 hdiutil detach "$MNT"
 
@@ -263,6 +265,10 @@ sign_code "$CLI_DIR/solvecraft-cli" "$MACOS_BUNDLE_ID.cli-alias"
 copy_docs "$CLI_DIR"
 rm -f "$CLI_ZIP"
 ditto -c -k --keepParent "$CLI_DIR" "$CLI_ZIP"
+if [ "${SOLIDCRAFT_AUDITABLE:-0}" = 1 ]; then
+  ditto -x -k "$CLI_ZIP" "$WORK/audit-cli"
+  check_audit solidcraft-cli "$WORK/audit-cli/$(basename "$CLI_DIR")/solidcraft-cli"
+fi
 if [ "$NOTARIZE" = 1 ]; then
   # A zip of bare executables can't be stapled; Gatekeeper finds the ticket online.
   echo "==> notarizing $CLI_ZIP"

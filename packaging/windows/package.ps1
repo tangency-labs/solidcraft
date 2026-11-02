@@ -66,12 +66,27 @@ New-Item -ItemType Directory -Force -Path $Dist | Out-Null
 
 Write-Output "SolidCraft $Version for Windows $Arch ($Target)"
 
+if ($env:SOLIDCRAFT_AUDITABLE -and $env:SOLIDCRAFT_AUDITABLE -notin @('0', '1')) {
+  throw 'SOLIDCRAFT_AUDITABLE must be 0 or 1'
+}
+function Test-AuditMetadata([string] $Directory) {
+  if ($env:SOLIDCRAFT_AUDITABLE -eq '1') {
+    foreach ($package in 'solidcraft', 'solidcraft-cli') {
+      Invoke-Native "audit metadata ($package)" {
+        python (Join-Path $Root 'packaging/check-audit.py') --package $package (Join-Path $Directory "$package.exe")
+      }
+    }
+  }
+}
+
 if (-not $SkipBuild -and $Phase -ne 'package') {
   # Static CRT: no VC++ redistributable needed. Scoped to the target so host build scripts and
   # proc-macros are unaffected.
   $flagVar = 'CARGO_TARGET_' + ($Target.ToUpper() -replace '-', '_') + '_RUSTFLAGS'
   [Environment]::SetEnvironmentVariable($flagVar, '-C target-feature=+crt-static')
-  Invoke-Native "cargo build ($Target)" { cargo build --release --locked -p solidcraft -p solidcraft-cli --target $Target }
+  $cargoArgs = @('build', '--release', '--locked', '-p', 'solidcraft', '-p', 'solidcraft-cli', '--target', $Target)
+  if ($env:SOLIDCRAFT_AUDITABLE -eq '1') { $cargoArgs = @('auditable') + $cargoArgs }
+  Invoke-Native "cargo build ($Target)" { cargo @cargoArgs }
 }
 $Bin = Join-Path $TargetDir "$Target\release"
 $Stage = Join-Path $TargetDir "windows-package\$Arch"
@@ -95,6 +110,7 @@ foreach ($check in @(@('solidcraft.exe', 2), @('solidcraft-cli.exe', 3), @('solv
   Write-Output "ok $($check[0]): $Arch, PE subsystem $($h.Subsystem)"
 }
 & (Join-Path $PSScriptRoot 'check-icon.ps1') -Path (Join-Path $CheckDir 'solidcraft.exe')
+Test-AuditMetadata $CheckDir
 if ($Phase -ne 'package') {
   Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
   New-Item -ItemType Directory -Force -Path $Stage | Out-Null
@@ -133,6 +149,12 @@ foreach ($f in 'README.md', 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE', 'THIRD-PA
 $Zip = Join-Path $Dist "solidcraft-$Version-windows-$Arch-portable.zip"
 Remove-Item -Force $Zip -ErrorAction SilentlyContinue
 Compress-Archive -Path $Portable -DestinationPath $Zip
+if ($env:SOLIDCRAFT_AUDITABLE -eq '1') {
+  $Unpacked = Join-Path $Stage 'audit-zip'
+  Remove-Item -Recurse -Force $Unpacked -ErrorAction SilentlyContinue
+  Expand-Archive -Path $Zip -DestinationPath $Unpacked
+  Test-AuditMetadata (Join-Path $Unpacked (Split-Path $Portable -Leaf))
+}
 
 # ---- the app as a plain download (x64) ---------------------------------------------------------
 $Outputs = @($Msi, $Zip)

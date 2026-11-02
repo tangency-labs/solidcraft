@@ -37,7 +37,7 @@ echo "==> SolidCraft $VERSION for FreeBSD $ARCH"
 # The release VM has 12 GB; full parallelism on the biggest crates runs it out of memory.
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 if [ "$SKIP_BUILD" = 0 ]; then
-  (cd "$ROOT" && cargo build --release --locked -p solidcraft -p solidcraft-cli)
+  (cd "$ROOT" && build_release --release --locked -p solidcraft -p solidcraft-cli)
 fi
 WORK="$CARGO_TARGET_DIR/freebsd-package"
 STAGE="$WORK/$BASENAME"
@@ -51,6 +51,8 @@ mkdir -p "$STAGE/bin" "$STAGE/share/applications" "$STAGE/share/mime/packages" \
 # docs/compatibility.md).
 install -m 755 "$BIN/solidcraft" "$BIN/solidcraft-cli" "$BIN/solvecraft-cli" "$STAGE/bin/"
 strip "$STAGE/bin/solidcraft" "$STAGE/bin/solidcraft-cli" "$STAGE/bin/solvecraft-cli" 2>/dev/null || true
+check_audit solidcraft "$STAGE/bin/solidcraft"
+check_audit solidcraft-cli "$STAGE/bin/solidcraft-cli"
 # The desktop entry, MIME type, metainfo and icons are the freedesktop files Linux ships.
 install -m 644 "$LINUX/$APP_ID.desktop" "$STAGE/share/applications/$APP_ID.desktop"
 install -m 644 "$LINUX/$APP_ID.mime.xml" "$STAGE/share/mime/packages/$APP_ID.xml"
@@ -67,6 +69,12 @@ for f in bin/solidcraft bin/solidcraft-cli bin/solvecraft-cli "share/application
 done
 
 tar -C "$WORK" -czf "$DIST/$BASENAME.tar.gz" "$BASENAME"
+if [ "${SOLIDCRAFT_AUDITABLE:-0}" = 1 ]; then
+  mkdir -p "$WORK/audit-tar"
+  tar -C "$WORK/audit-tar" -xzf "$DIST/$BASENAME.tar.gz"
+  check_audit solidcraft "$WORK/audit-tar/$BASENAME/bin/solidcraft"
+  check_audit solidcraft-cli "$WORK/audit-tar/$BASENAME/bin/solidcraft-cli"
+fi
 echo "wrote $DIST/$BASENAME.tar.gz"
 "$STAGE/bin/solidcraft-cli" --version
 echo "==> done"
