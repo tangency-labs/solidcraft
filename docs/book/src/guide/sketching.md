@@ -429,6 +429,14 @@ shows the remaining degrees of freedom. A constraint or dimension that would ove
 sketch is refused rather than applied. Drag a point to move it; the solver keeps every
 constraint while you drag.
 
+Drag a circle, arc, ellipse or conic by its edge to move it whole. A horizontal or vertical side
+of a shape, such as a rectangle's, moves only across itself, so the rest of the shape stays where
+it is. Hold **Ctrl/Cmd** as you press to change the shape instead: the edge then sets the radius
+(a conic's fullness), and a side slides with the pointer. An arc or conic joined at both ends,
+such as a slot's round end, always changes its radius, and any other line slides with the
+pointer. Preferences › Sketch › **Dragging an edge moves the curve** (on by default) turns this
+off: then an edge sets the radius and a side slides with the pointer, as in earlier versions.
+
 A sketch's constraints can still come to conflict through a change elsewhere: a parameter, or an
 earlier sketch that projected geometry follows. While they do, the curves and points a failing
 constraint holds, and that constraint's glyph or dimension, are drawn in the conflict colour (red;

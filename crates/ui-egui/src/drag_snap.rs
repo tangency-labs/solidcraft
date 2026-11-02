@@ -176,8 +176,9 @@ pub fn find(sk: &Sketch, moving: &[(usize, Vec2)], exclude: &[usize], mm_px: f64
 }
 
 /// Points the drag of `entities` (point or curve ids: the one grabbed and those dragged with it)
-/// moves, and the points that move with them.
-pub fn moving_points<'a>(sk: &Sketch, entities: impl IntoIterator<Item = &'a str>) -> (Vec<usize>, Vec<usize>) {
+/// moves, and the points that move with them. `group`: the entities slide as one (a selection,
+/// or a circle or arc moved whole), so every curve takes its points along.
+pub fn moving_points<'a>(sk: &Sketch, entities: impl IntoIterator<Item = &'a str>, group: bool) -> (Vec<usize>, Vec<usize>) {
     let mut own: Vec<usize> = entities
         .into_iter()
         .flat_map(|entity| {
@@ -185,8 +186,9 @@ pub fn moving_points<'a>(sk: &Sketch, entities: impl IntoIterator<Item = &'a str
                 vec![p]
             } else {
                 match sk.curve_index(entity).and_then(|c| sk.curves.get(c)) {
-                    // Only lines slide whole; a circle or arc grabbed on its edge changes its radius.
-                    Some(c) if matches!(c.kind, CurveKind::Line { .. }) => c.kind.point_ids(),
+                    // Alone, only a line slides whole; a circle or arc grabbed on its edge changes
+                    // its radius.
+                    Some(c) if group || matches!(c.kind, CurveKind::Line { .. }) => c.kind.point_ids(),
                     _ => Vec::new(),
                 }
             }
@@ -280,7 +282,7 @@ mod tests {
     }
 
     fn drag(s: &Sketch, entity: &str, p: Vec2) -> Option<Snap> {
-        let (own, ex) = moving_points(s, [entity]);
+        let (own, ex) = moving_points(s, [entity], false);
         find(s, &[(own[0], p)], &ex, 0.1)
     }
 
@@ -312,7 +314,7 @@ mod tests {
     fn a_dragged_centre_rectangle_moves_and_lines_up_its_centre() {
         let s = centre_rectangle([30.0, 5.0]);
         let centre = s.resolve_point("p5").unwrap_or(0);
-        let (own, ex) = moving_points(&s, ["l1", "l2", "l3", "l4"]);
+        let (own, ex) = moving_points(&s, ["l1", "l2", "l3", "l4"], true);
         assert!(own.contains(&centre) && ex.contains(&centre), "{own:?} {ex:?}");
         let d = Vec2::new(0.0, -4.7);
         let moving: Vec<(usize, Vec2)> = own.iter().filter_map(|&p| s.point(p).map(|x| (p, x + d))).collect();

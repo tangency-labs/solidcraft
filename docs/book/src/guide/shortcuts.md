@@ -95,11 +95,12 @@ and editing keep their existing modifiers.
 
 ### Sketch modifiers
 
-While drawing or dragging a sketch point:
+While drawing or dragging sketch geometry:
 
 | Keys | Action |
 |---|---|
 | Ctrl/Cmd or Alt/Option (default) | suppress auto-snap for that gesture |
+| Ctrl/Cmd when pressing on a curve's edge | change its shape: a circle's or arc's radius, a conic's fullness; a rectangle's side slides with the pointer |
 | Shift | prefer a line midpoint when targeting (skips a curve-curve crossing) |
 
 Change the snap-suppress chord in Preferences › Sketch. Selection still uses Shift and

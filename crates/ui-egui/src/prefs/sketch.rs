@@ -94,6 +94,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         // Constraint glyphs hide when zoomed out (#8980).
         let check = setting::hide_constraint_glyphs_zoomed_out(app, ui).on_hover_text(app.tr("prefs.hide_constraint_glyphs_zoomed_out_note"));
         crate::scenario::publish_target("prefs:hide_constraint_glyphs_zoomed_out", check.rect);
+        let check = setting::sketch_edge_drag_moves(app, ui).on_hover_text(app.tr("prefs.sketch_edge_drag_moves_note"));
+        crate::scenario::publish_target("prefs:sketch_edge_drag_moves", check.rect);
     });
     ui_kit::settings_section(ui, "selection", app.tr("prefs.selecting"), |ui| {
         ui_kit::checkbox(ui, crate::i18n::tr_label("Click selects whole bodies"), &mut app.ui.pick_bodies);

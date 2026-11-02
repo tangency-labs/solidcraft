@@ -1278,13 +1278,7 @@ impl Sketch {
         if ci >= self.curves.len() {
             return Vec::new();
         }
-        // Points made one by coincident constraints.
-        let mut root: Vec<usize> = (0..self.points.len()).collect();
-        for c in &self.constraints {
-            if let ConstraintKind::Coincident { p, q } = c.kind {
-                union(&mut root, p, q);
-            }
-        }
+        let mut root = self.coincident_roots();
         let ends: Vec<Vec<usize>> =
             self.curves.iter().map(|c| c.kind.ends().map(|(a, b)| vec![find(&mut root, a), find(&mut root, b)]).unwrap_or_default()).collect();
         let mut seen = vec![false; self.curves.len()];
@@ -1312,6 +1306,35 @@ impl Sketch {
             out.insert(0, f);
         }
         out
+    }
+
+    /// Whether both ends of curve `ci` meet an end of another curve (shared or coincident end
+    /// points): a side of a closed shape, or a curve in the middle of a chain.
+    pub fn ends_joined(&self, ci: usize) -> bool {
+        let Some((a, b)) = self.curves.get(ci).and_then(|c| c.kind.ends()) else { return false };
+        let mut root = self.coincident_roots();
+        let others: Vec<usize> = self
+            .curves
+            .iter()
+            .enumerate()
+            .filter(|(j, _)| *j != ci)
+            .filter_map(|(_, c)| c.kind.ends())
+            .flat_map(|(p, q)| [p, q])
+            .map(|p| find(&mut root, p))
+            .collect();
+        let (a, b) = (find(&mut root, a), find(&mut root, b));
+        others.contains(&a) && others.contains(&b)
+    }
+
+    /// Each point's set of points made one by coincident constraints, for [`find`].
+    fn coincident_roots(&self) -> Vec<usize> {
+        let mut root: Vec<usize> = (0..self.points.len()).collect();
+        for c in &self.constraints {
+            if let ConstraintKind::Coincident { p, q } = c.kind {
+                union(&mut root, p, q);
+            }
+        }
+        root
     }
 
     /// Virtual sharp corners (what a fillet or chamfer leaves where dimensions measured to the
