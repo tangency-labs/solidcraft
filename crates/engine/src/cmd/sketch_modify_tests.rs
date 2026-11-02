@@ -2996,6 +2996,32 @@ fn offset_refuses_the_combinations_that_would_be_guesswork() {
     assert_eq!(o["sides"].as_array().map(Vec::len), Some(2), "{o}");
 }
 
+/// An outline with a neck: an inward offset wider than half the neck would pinch it into two,
+/// which one outline can't be. The offset is refused, and the sketch keeps what it had, where
+/// it used to be drawn as a loop back over itself (found by fuzzing). Narrower, it is made; an
+/// outline that already crosses itself (a bow tie) still gets its crossing offset.
+#[test]
+fn offset_refuses_an_outline_that_would_loop_over_itself() {
+    let necked = |s: &mut Session| {
+        run(s, "sketch.arc.three_point", json!({"start": [-18.297, -25.082], "end": [16.306, -24.151], "through": [-1.25, -15.158]}));
+        run(s, "sketch.arc.three_point", json!({"start": [16.306, -24.151], "end": [12.319, -5.785], "through": [21.544, -13.398]}));
+        run(s, "sketch.line", json!({"points": [[12.319, -5.785], [19.695, 22.256], [-2.01, 25.074], [-12.378, 20.824], [-24.959, -8.303]]}));
+        run(s, "sketch.arc.three_point", json!({"start": [-24.959, -8.303], "end": [-18.297, -25.082], "through": [-19.508, -15.851]}));
+    };
+    let mut s = new_sketch();
+    necked(&mut s);
+    let curves = sketch(&s).curves.len();
+    let e = s.execute("sketch.offset", &json!({"curves": ["a1"], "distance": 3.71, "side": [0, 0]})).unwrap_err().to_string();
+    assert!(e.contains("would cross"), "{e}");
+    assert_eq!(sketch(&s).curves.len(), curves, "a refused offset leaves the sketch alone");
+    let o = run(&mut s, "sketch.offset", json!({"curves": ["a1"], "distance": 1, "side": [0, 0]}));
+    assert_eq!(ids(&o["curves"]).len(), 7, "{o}");
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 20], [20, 0], [0, 20]], "closed": true}));
+    let o = run(&mut s, "sketch.offset", json!({"curves": ["l1"], "distance": 1, "side": [10, -5]}));
+    assert_eq!(ids(&o["curves"]).len(), 4, "{o}");
+}
+
 #[test]
 fn offset_one_side_still_reports_one_set_of_curves_and_its_association() {
     let mut s = new_sketch();

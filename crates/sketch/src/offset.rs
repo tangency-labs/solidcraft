@@ -240,6 +240,7 @@ impl Sketch {
             }
             let bad = || SketchError::Invalid("an offset source vanished or changed shape".into());
             let mut pieces = Vec::new();
+            let mut outline = Vec::new();
             for (id, forward) in &offset.sources {
                 let i = self.curve_index(id).ok_or_else(bad)?;
                 let kind = &self.curves.get(i).ok_or_else(bad)?.kind;
@@ -247,11 +248,15 @@ impl Sketch {
                     CurveKind::Line { a, b } => {
                         let (a, b) = (self.point(a).ok_or_else(bad)?, self.point(b).ok_or_else(bad)?);
                         let (a, b) = if *forward { (a, b) } else { (b, a) };
+                        outline.push((Shape::Line { a, b }, a, b));
                         let n = (b - a).normalized().ok_or_else(bad)?.perp() * offset.distance;
                         (Shape::Line { a: a + n, b: b + n }, a + n, b + n, None)
                     }
                     CurveKind::Arc { c, a, b } => {
                         let (c, a, b) = (self.point(c).ok_or_else(bad)?, self.point(a).ok_or_else(bad)?, self.point(b).ok_or_else(bad)?);
+                        let start = (a - c).angle();
+                        let sweep = ((b - c).angle() - start).rem_euclid(std::f64::consts::TAU);
+                        outline.push((Shape::Round { c, r: c.dist(a), start, sweep }, a, b));
                         let r = c.dist(a) - if *forward { offset.distance } else { -offset.distance };
                         if r <= 1e-9 {
                             return Err(SketchError::Invalid("the offset collapses an arc".into()));
@@ -318,6 +323,9 @@ impl Sketch {
             if !offset.closed {
                 joints.push(pieces.last().ok_or_else(bad)?.2);
             }
+            if offset.closed && !crosses_itself(&outline) && crosses_itself(&cut_to_joints(&pieces, &joints)) {
+                return Err(SketchError::Invalid("the offset curves would cross".into()));
+            }
             for (i, id) in offset.outputs.iter().enumerate() {
                 let a = *joints.get(i).ok_or_else(bad)?;
                 let b = *joints.get(if offset.closed { (i + 1) % n } else { i + 1 }).ok_or_else(bad)?;
@@ -350,4 +358,61 @@ impl Sketch {
         }
         Ok(())
     }
+}
+
+/// The closed offset outline's pieces, each cut to its joints: a line between them, an arc
+/// anticlockwise from one to the other the way the piece runs.
+fn cut_to_joints(pieces: &[(Shape, Vec2, Vec2, Option<bool>)], joints: &[Vec2]) -> Vec<(Shape, Vec2, Vec2)> {
+    let n = pieces.len();
+    (0..n)
+        .filter_map(|i| {
+            let (a, b) = (*joints.get(i)?, *joints.get((i + 1) % n)?);
+            Some(match pieces.get(i)? {
+                (Shape::Round { c, r, .. }, _, _, Some(ccw)) => {
+                    let (from, to) = if *ccw { (a, b) } else { (b, a) };
+                    let start = (from - *c).angle();
+                    (Shape::Round { c: *c, r: *r, start, sweep: ((to - *c).angle() - start).rem_euclid(std::f64::consts::TAU) }, a, b)
+                }
+                _ => (Shape::Line { a, b }, a, b),
+            })
+        })
+        .collect()
+}
+
+/// Whether a closed outline of lines and arcs crosses itself away from the ends its pieces
+/// share. A simple outline whose offset does is refused, not drawn as a loop: an inward offset
+/// wider than a neck of the shape pinches it into two, which one outline can't be (an outline
+/// that already crosses itself, a figure eight, keeps its crossing offset). Outlines of more
+/// than 1000 pieces aren't checked.
+fn crosses_itself(outline: &[(Shape, Vec2, Vec2)]) -> bool {
+    let n = outline.len();
+    if !(2..=1000).contains(&n) {
+        return false;
+    }
+    let size = outline.iter().fold(1.0f64, |m, (_, a, b)| m.max(a.x.abs()).max(a.y.abs()).max(b.x.abs()).max(b.y.abs()));
+    let tol = 1e-9 * size;
+    let bounds = |s: &Shape| match *s {
+        Shape::Line { a, b } => (a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y)),
+        Shape::Round { c, r, .. } => (c.x - r, c.y - r, c.x + r, c.y + r),
+    };
+    for i in 0..n {
+        for j in i + 1..n {
+            let (Some(x), Some(y)) = (outline.get(i), outline.get(j)) else { continue };
+            let (bx, by) = (bounds(&x.0), bounds(&y.0));
+            if bx.2 < by.0 - tol || by.2 < bx.0 - tol || bx.3 < by.1 - tol || by.3 < bx.1 - tol {
+                continue;
+            }
+            // Neighbours meet at their shared end, where a tangent pair's crossings are rounding
+            // noise.
+            let shared: Vec<Vec2> = [x.1, x.2].into_iter().filter(|p| p.dist(y.1).min(p.dist(y.2)) <= tol).collect();
+            let near = 1e-6 * size;
+            if intersections(&x.0, &y.0)
+                .into_iter()
+                .any(|p| x.0.param_on(p, tol).is_some() && y.0.param_on(p, tol).is_some() && shared.iter().all(|s| s.dist(p) > near))
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
