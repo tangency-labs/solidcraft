@@ -339,6 +339,12 @@ and a fresh CI run:
    PRs in groups by area, so PRs that touch the same code meet a conflict at most once.
 4. Reference the issue (`Fixes #12`). In the PR, say what you tested and how. For geometry work, include the measured numbers (and
    the expected ones).
+5. Write the PR title and first sentence for someone who hasn't seen your chat, the issue or the
+   code. Maintainers pick what to review from the title, and it becomes the commit on `main`. Say
+   which part of the app changes and what a user now sees or can do, and name things rather than
+   leaning on "there", "it" or "this".
+   - Unclear: `Send to Slicer: pick one print face per body there, and show print faces only while it is open`
+   - Clear: `Send to Slicer: choose the face each body sits on in that window, not from the face menu`
 
 Commenting `/claim` assigns you, adds the `in progress` label, and replies with its automatic cleanup
 deadline. It frees a claim with no linked PR after 72 hours, or a claim with a PR after 14 days
