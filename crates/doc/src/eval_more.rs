@@ -1559,13 +1559,13 @@ fn sheet_prism_cut(
 
 /// A box around `body`, grown past its mesh's deflection from the exact faces (and a hair
 /// more): bodies whose boxes are apart do not meet. None when it can't be worked out.
-fn body_box(body: &Body) -> Option<Aabb3> {
+pub(super) fn body_box(body: &Body) -> Option<Aabb3> {
     let tol = (body.size() * 1e-3).max(1e-4);
     padded_box(&body.tessellate(tol).ok()?, tol)
 }
 
 /// [`body_box`] of a model body, from the mesh it keeps.
-fn mesh_box(mb: &ModelBody) -> Option<Aabb3> {
+pub(super) fn mesh_box(mb: &ModelBody) -> Option<Aabb3> {
     padded_box(&mb.mesh(), mb.display_tol())
 }
 
@@ -1574,8 +1574,46 @@ fn padded_box(mesh: &solidcraft_geom::Mesh, tol: f64) -> Option<Aabb3> {
     (!b.is_empty() && b.min.is_finite() && b.max.is_finite()).then(|| b.inflated(2.0 * tol + 1e-6))
 }
 
+/// Whether [`kernel::cylinder_face_at`] is known to find no face of `mb` at `p`. It takes a
+/// face only when its own mesh of the body comes within a twentieth of the body's size of the
+/// point. That mesh lies in the body's box ([`mesh_box`]) give or take its own deflection, which
+/// the reach allows for, so a box farther away than that holds no face for it. Working that out from the mesh the body keeps
+/// spares a tessellation of every body in the design for each tap marking (#10227). A mesh
+/// body, and a body whose box is unknown, are searched as before.
+pub(super) fn beyond_cylinder_reach(mb: &ModelBody, p: Vec3) -> bool {
+    if mb.body.is_mesh() {
+        return false;
+    }
+    let Some(b) = mesh_box(mb) else { return false };
+    let size = mb.body.size();
+    let reach = size * 0.05 + 2.0 * (size * 1e-3).max(1e-3);
+    let off = (b.min - p).max(p - b.max).max(Vec3::ZERO);
+    off.len() > reach
+}
+
+/// Whether the line through `at` along `dir` is known to pass farther than `reach` from the box
+/// of `mb` ([`mesh_box`]) everywhere, and so from every point of the mesh the body keeps. Unknown
+/// is never.
+pub(super) fn line_beyond_reach(mb: &ModelBody, at: Vec3, dir: Vec3, reach: f64) -> bool {
+    let Some(b) = mesh_box(mb) else { return false };
+    let b = b.inflated(reach);
+    let (mut lo, mut hi) = (f64::NEG_INFINITY, f64::INFINITY);
+    for (a, d, min, max) in [(at.x, dir.x, b.min.x, b.max.x), (at.y, dir.y, b.min.y, b.max.y), (at.z, dir.z, b.min.z, b.max.z)] {
+        if d == 0.0 {
+            if a < min || a > max {
+                return true;
+            }
+            continue;
+        }
+        let (t0, t1) = ((min - a) / d, (max - a) / d);
+        lo = lo.max(t0.min(t1));
+        hi = hi.min(t0.max(t1));
+    }
+    lo > hi
+}
+
 /// Whether two boxes are known to be apart (an unknown box is never apart).
-fn boxes_apart(a: &Option<Aabb3>, b: &Option<Aabb3>) -> bool {
+pub(super) fn boxes_apart(a: &Option<Aabb3>, b: &Option<Aabb3>) -> bool {
     let (Some(a), Some(b)) = (a, b) else { return false };
     a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y || a.max.z < b.min.z || b.max.z < a.min.z
 }
