@@ -731,6 +731,8 @@ mod tests {
     #[test]
     fn only_folded_features_folders_on_screen_work_out_their_mark() {
         let mut h = Harness::new();
+        // The folders sit inside placements, which start closed (#9274).
+        h.app.preferences.browser_components_open = true;
         let component = h.app.run("component.create", json!({"name":"Part"})).unwrap();
         let feature = h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Plate"})).unwrap()["feature"].as_u64().unwrap();
         h.app.run("component.activate", json!({"component":0})).unwrap();
