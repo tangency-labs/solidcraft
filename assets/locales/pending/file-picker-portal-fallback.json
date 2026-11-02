@@ -1,42 +1,42 @@
 {
   "en": {
-    "file.open.portal_fallback.no_session_bus": "without a D-Bus session bus the file chooser is not the desktop's own: the user has to be told",
-    "file.open.portal_fallback.no_portal_service": "without the desktop portal service the file chooser is not the desktop's own: the user has to be told",
-    "file.open.portal_fallback.xwayland": "under XWayland the portal rejects the parent window: the user has to be told"
+    "file.open.portal_fallback.no_session_bus": "The file chooser that opened is not the desktop's own: there is no D-Bus session bus.",
+    "file.open.portal_fallback.no_portal_service": "The file chooser that opened is not the desktop's own: the desktop portal service is not available.",
+    "file.open.portal_fallback.xwayland": "The file chooser that opened is not the desktop's own: under XWayland the portal refuses the parent window."
   },
   "ar": {
-    "file.open.portal_fallback.no_session_bus": "بدون ناقل جلسات D-Bus لا يكون منتقي الملفات تابعًا لسطح المكتب: يجب إبلاغ المستخدم",
-    "file.open.portal_fallback.no_portal_service": "بدون خدمة منتقي الملفات في سطح المكتب لا يكون المنتقي تابعًا لسطح المكتب: يجب إبلاغ المستخدم",
-    "file.open.portal_fallback.xwayland": "في XWayland ترفض البوابة النافذة الأصلية: يجب إبلاغ المستخدم"
+    "file.open.portal_fallback.no_session_bus": "منتقي الملفات الذي فُتح ليس تابعًا لسطح المكتب: لا يوجد ناقل جلسات D-Bus.",
+    "file.open.portal_fallback.no_portal_service": "منتقي الملفات الذي فُتح ليس تابعًا لسطح المكتب: خدمة منتقي الملفات في سطح المكتب غير متاحة.",
+    "file.open.portal_fallback.xwayland": "منتقي الملفات الذي فُتح ليس تابعًا لسطح المكتب: في XWayland ترفض البوابة النافذة الأصلية."
   },
   "de": {
-    "file.open.portal_fallback.no_session_bus": "Ohne D-Bus-Sitzungsbus ist die Dateiauswahl nicht die des Desktops: Der Benutzer muss darauf hingewiesen werden",
-    "file.open.portal_fallback.no_portal_service": "Ohne den Dateiauswahl-Dienst des Desktops ist die Dateiauswahl nicht die des Desktops: Der Benutzer muss darauf hingewiesen werden",
-    "file.open.portal_fallback.xwayland": "Unter XWayland lehnt das Portal das Elternfenster ab: Der Benutzer muss darauf hingewiesen werden"
+    "file.open.portal_fallback.no_session_bus": "Die geöffnete Dateiauswahl ist nicht die des Desktops: Es gibt keinen D-Bus-Sitzungsbus.",
+    "file.open.portal_fallback.no_portal_service": "Die geöffnete Dateiauswahl ist nicht die des Desktops: Der Dateiauswahl-Dienst des Desktops ist nicht verfügbar.",
+    "file.open.portal_fallback.xwayland": "Die geöffnete Dateiauswahl ist nicht die des Desktops: Unter XWayland lehnt das Portal das Elternfenster ab."
   },
   "he": {
-    "file.open.portal_fallback.no_session_bus": "בלי אוטובוס הפעלה של D-Bus בורר הקבצים אינו של שולחן העבודה: המשתמש צריך להיות מודע",
-    "file.open.portal_fallback.no_portal_service": "בלי שירות בחירת הקבצים של שולחן העבודה בורר הקבצים אינו של שולחן העבודה: המשתמש צריך להיות מודע",
-    "file.open.portal_fallback.xwayland": "תחת XWayland הפורטל דוחה את חלון האב: המשתמש צריך להיות מודע"
+    "file.open.portal_fallback.no_session_bus": "בורר הקבצים שנפתח אינו של שולחן העבודה: אין אוטובוס הפעלה של D-Bus.",
+    "file.open.portal_fallback.no_portal_service": "בורר הקבצים שנפתח אינו של שולחן העבודה: שירות בחירת הקבצים של שולחן העבודה אינו זמין.",
+    "file.open.portal_fallback.xwayland": "בורר הקבצים שנפתח אינו של שולחן העבודה: תחת XWayland הפורטל דוחה את חלון האב."
   },
   "ja": {
-    "file.open.portal_fallback.no_session_bus": "D-Bus セッションがないため、ファイル選択はデスクトップのものではありません: ユーザーへの通知が必要です",
-    "file.open.portal_fallback.no_portal_service": "デスクトップのファイル選択サービスがないため、ファイル選択はデスクトップのものではありません: ユーザーへの通知が必要です",
-    "file.open.portal_fallback.xwayland": "XWayland ではポータルが元のウィンドウを拒否します: ユーザーへの通知が必要です"
+    "file.open.portal_fallback.no_session_bus": "開いたファイル選択はデスクトップのものではありません。D-Bus セッションがありません。",
+    "file.open.portal_fallback.no_portal_service": "開いたファイル選択はデスクトップのものではありません。デスクトップのファイル選択サービスが利用できません。",
+    "file.open.portal_fallback.xwayland": "開いたファイル選択はデスクトップのものではありません。XWayland ではポータルが親ウィンドウを拒否します。"
   },
   "ko": {
-    "file.open.portal_fallback.no_session_bus": "D-Bus 세션 버스가 없어 파일 선택이 데스크톱의 것이 아닙니다: 사용자에게 알려야 합니다",
-    "file.open.portal_fallback.no_portal_service": "데스크톱의 파일 선택 서비스가 없어 파일 선택이 데스크톱의 것이 아닙니다: 사용자에게 알려야 합니다",
-    "file.open.portal_fallback.xwayland": "XWayland에서는 포털이 부모 창을 거부합니다: 사용자에게 알려야 합니다"
+    "file.open.portal_fallback.no_session_bus": "열린 파일 선택은 데스크톱의 것이 아닙니다: D-Bus 세션 버스가 없습니다.",
+    "file.open.portal_fallback.no_portal_service": "열린 파일 선택은 데스크톱의 것이 아닙니다: 데스크톱의 파일 선택 서비스를 사용할 수 없습니다.",
+    "file.open.portal_fallback.xwayland": "열린 파일 선택은 데스크톱의 것이 아닙니다: XWayland에서는 포털이 부모 창을 거부합니다."
   },
   "vi": {
-    "file.open.portal_fallback.no_session_bus": "Không có bus phiên D-Bus nên bộ chọn tệp không phải của riêng desktop: người dùng cần được thông báo",
-    "file.open.portal_fallback.no_portal_service": "Không có dịch vụ chọn tệp của desktop nên bộ chọn tệp không phải của riêng desktop: người dùng cần được thông báo",
-    "file.open.portal_fallback.xwayland": "Dưới XWayland, portal từ chối cửa sổ cha: người dùng cần được thông báo"
+    "file.open.portal_fallback.no_session_bus": "Bộ chọn tệp đã mở không phải của riêng desktop: không có bus phiên D-Bus.",
+    "file.open.portal_fallback.no_portal_service": "Bộ chọn tệp đã mở không phải của riêng desktop: dịch vụ chọn tệp của desktop không khả dụng.",
+    "file.open.portal_fallback.xwayland": "Bộ chọn tệp đã mở không phải của riêng desktop: dưới XWayland, portal từ chối cửa sổ cha."
   },
   "zh": {
-    "file.open.portal_fallback.no_session_bus": "没有 D-Bus 会话总线，文件选择器并非桌面自带：需要告知用户",
-    "file.open.portal_fallback.no_portal_service": "没有桌面的文件选择服务，文件选择器并非桌面自带：需要告知用户",
-    "file.open.portal_fallback.xwayland": "在 XWayland 下，门户会拒绝父窗口：需要告知用户"
+    "file.open.portal_fallback.no_session_bus": "打开的文件选择器并非桌面自带：没有 D-Bus 会话总线。",
+    "file.open.portal_fallback.no_portal_service": "打开的文件选择器并非桌面自带：桌面的文件选择服务不可用。",
+    "file.open.portal_fallback.xwayland": "打开的文件选择器并非桌面自带：在 XWayland 下，门户会拒绝父窗口。"
   }
 }

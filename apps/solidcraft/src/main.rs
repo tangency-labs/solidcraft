@@ -1414,6 +1414,13 @@ fn prefer_x11(display: bool, wayland_display: bool, desktop: Option<&str>, wayla
     display && !(niri && wayland_display)
 }
 
+#[cfg(all(unix, not(target_os = "macos")))]
+const CHOOSER_NO_SESSION_BUS: &str = "file.open.portal_fallback.no_session_bus";
+#[cfg(all(unix, not(target_os = "macos")))]
+const CHOOSER_NO_PORTAL_SERVICE: &str = "file.open.portal_fallback.no_portal_service";
+#[cfg(all(unix, not(target_os = "macos")))]
+const CHOOSER_XWAYLAND: &str = "file.open.portal_fallback.xwayland";
+
 /// Whether the chooser that opens is NOT the desktop's own, and why.
 ///
 /// `rfd` opens the file chooser through the XDG desktop portal; when the portal is not there it
@@ -1428,16 +1435,6 @@ fn prefer_x11(display: bool, wayland_display: bool, desktop: Option<&str>, wayla
 ///
 /// `None` means the desktop's own chooser is the one that opens and there is nothing to say;
 /// `Some` carries the reason to report.
-/// Why the file chooser that opens is not the desktop's own: the desktop's own chooser is the
-/// portal one, and `rfd` falls back to zenity without it (#10159). Each reason is the message
-/// that says so.
-#[cfg(all(unix, not(target_os = "macos")))]
-const CHOOSER_NO_SESSION_BUS: &str = "file.open.portal_fallback.no_session_bus";
-#[cfg(all(unix, not(target_os = "macos")))]
-const CHOOSER_NO_PORTAL_SERVICE: &str = "file.open.portal_fallback.no_portal_service";
-#[cfg(all(unix, not(target_os = "macos")))]
-const CHOOSER_XWAYLAND: &str = "file.open.portal_fallback.xwayland";
-
 #[cfg(all(unix, not(target_os = "macos")))]
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn desktop_chooser_fallback(dbus_session: bool, portal_service: bool, wayland_display: bool, x11_display: bool) -> Option<&'static str> {
