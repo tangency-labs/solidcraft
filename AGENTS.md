@@ -433,6 +433,7 @@ own constructions. The policy (owner, 2026-11-02; supersedes the interim rule of
 
 ## 5. Where things go
 
+- **Which layer a job belongs to:** [docs/layers.md](docs/layers.md). Each job lives in one layer: kernel, record, ops, tess, or the applications. The kernel computes; ops decides and sequences, and never computes a geometric quantity itself. Two implementations of one job are a bug.
 - `plan/units/<id>.toml`: one unit's plan entry (status, claims, notes). Edit only
   your unit's file. Every tool reads them through `harness/plan/units.py` (Rust:
   `crates/difftest/src/plan.rs`).

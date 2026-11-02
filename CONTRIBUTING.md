@@ -9,6 +9,7 @@ case, replacing the code they supersede. This page is the short version;
 
 ## Before you start
 
+- **Put the work in its layer.** [docs/layers.md](docs/layers.md) says where each job lives. Geometry is computed only in the kernel (`solidcore`). The modelling API (`solidcore-ops`) only chooses and sequences kernel calls. Applications compute no geometry. If a workflow needs maths the kernel lacks, add it to the kernel with tests.
 - **Read the docs for the area.**
   - For fillets and chamfers, read [docs/generic-blend.md](docs/generic-blend.md): what the blend
     builds, its events, its exact classes, its open work, and how each step is ported (§9).
