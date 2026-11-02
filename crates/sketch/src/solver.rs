@@ -609,6 +609,13 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
         LineCircleDistance { l, c, value, inside } => out.push(s.line_circle_gap(l, c, inside) - value),
         PointCircleDistance { p, c, value, inside } => out.push(s.point_circle_gap(p, c, inside) - value),
         CircleCircleDistance { a, b, value, circles } => out.push(s.circle_circle_gap(a, b, circles) - value),
+        // A length within convergence tolerance of zero means the line's two ends meet:
+        // the component rows keep both directions constrained even when they do, the way a
+        // coincidence does (the same treatment a distance of zero gets above).
+        Length { l, value } if value.abs() <= TOL => {
+            let (a, b) = s.line(l);
+            out.extend([b.x - a.x, b.y - a.y]);
+        }
         Length { l, value } => {
             let (a, b) = s.line(l);
             out.push(a.dist(b) - value);

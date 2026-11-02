@@ -243,6 +243,34 @@ fn a_recorded_feature_that_does_not_fit_is_refused_and_changes_nothing() {
     assert!(s.doc.feature(r["feature"].as_u64().unwrap()).is_some_and(|f| !f.param_names.is_empty()), "its inputs get parameter names");
 }
 
+/// #10748: `timeline.inspect` reports a feature's design variant name in `type` and display name
+/// in `type_name`; `timeline.add` accepts `timeline.inspect` results and inspect type names.
+#[test]
+fn timeline_add_accepts_inspect_result_and_type_names() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 5, "name": "Block"}));
+    let mut inspected = run(&mut s, "timeline.inspect", json!({"feature": "Block"}));
+    assert_eq!(inspected["type"], "box", "inspect type is the design file variant name");
+    assert_eq!(inspected["type_name"], "BoxFeature", "inspect type_name is the display type");
+
+    // 1. timeline.add accepts the full inspected object directly in a new session
+    let mut s2 = Session::default();
+    let added = run(&mut s2, "timeline.add", json!({"feature": inspected.clone()}));
+    assert!(added["error"].is_null(), "{added}");
+    assert_eq!(s2.doc.features.len(), 1);
+
+    // 2. timeline.add with id 0 allocates a new id in the current session
+    inspected["id"] = json!(0);
+    let added2 = run(&mut s, "timeline.add", json!({"feature": inspected}));
+    assert!(added2["error"].is_null(), "{added2}");
+    assert_eq!(s.doc.features.len(), 2);
+
+    // 3. timeline.add accepts the inspect type name (e.g. BoxFeature, HoleFeature)
+    let added_by_type_name =
+        run(&mut s, "timeline.add", json!({"feature": {"type": "BoxFeature", "length": "5", "width": "5", "height": "5", "corner": [50, 0, 0]}}));
+    assert!(added_by_type_name["error"].is_null(), "{added_by_type_name}");
+}
+
 #[test]
 fn the_script_is_written_to_a_file_that_replays() {
     let mut s = Session::default();

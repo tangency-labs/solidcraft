@@ -599,11 +599,21 @@ impl OffscreenFrames {
 
     /// Draw one frame and wait for the GPU: milliseconds from `prepare` to the work finishing.
     pub(crate) fn frame(&mut self, frame: Frame) -> f64 {
+        let [prepare, paint, wait] = self.frame_parts(frame);
+        prepare + paint + wait
+    }
+
+    /// [`Self::frame`] in its parts, in milliseconds: the renderer's `prepare` (uploads, culling),
+    /// recording the draws (`paint`), and the GPU's work until it has finished.
+    pub(crate) fn frame_parts(&mut self, frame: Frame) -> [f64; 3] {
+        let ms = |t: std::time::Instant| t.elapsed().as_secs_f64() * 1000.0;
         let started = std::time::Instant::now();
         let cb = ViewportCallback(frame);
         let mut encoder = self.device.create_command_encoder(&Default::default());
         let screen = egui_wgpu::ScreenDescriptor { size_in_pixels: [self.size, self.size], pixels_per_point: 1.0 };
         let extra = egui_wgpu::CallbackTrait::prepare(&cb, &self.device, &self.queue, &screen, &mut encoder, &mut self.resources);
+        let prepare = ms(started);
+        let painted = std::time::Instant::now();
         {
             let mut pass = encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -628,9 +638,11 @@ impl OffscreenFrames {
             let info = egui::PaintCallbackInfo { viewport: rect, clip_rect: rect, pixels_per_point: 1.0, screen_size_px: [self.size, self.size] };
             egui_wgpu::CallbackTrait::paint(&cb, info, &mut pass, &self.resources);
         }
+        let paint = ms(painted);
+        let waited = std::time::Instant::now();
         self.queue.submit(extra.into_iter().chain([encoder.finish()]));
         let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
-        started.elapsed().as_secs_f64() * 1000.0
+        [prepare, paint, ms(waited)]
     }
 
     /// What the model scene's last change uploaded.
@@ -1177,7 +1189,7 @@ mod tests {
         let capturer = solidcraft_gpu::capture::Capturer::new(&adapter, device.clone(), queue.clone()).unwrap().watching(lost.flag());
         let (scene, cam) = (solidcraft_engine::render::Scene::default(), solidcraft_engine::render::Camera::default());
         assert_ne!(super::picture(&capturer, &scene, &cam, 16, 16).unwrap().renderer, "cpu");
-        assert!(!lost.probe(&queue), "a working device isn't lost");
+        assert!(!lost.probe(&device, &queue), "a working device isn't lost");
 
         // egui's renderer is made with the window, before any loss (made on a lost device, its
         // uniform buffer's `create_buffer_init` panics).
@@ -1185,7 +1197,7 @@ mod tests {
 
         device.destroy();
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
-        assert!(lost.is_lost() && lost.probe(&queue), "the lost callback marked the device");
+        assert!(lost.is_lost() && lost.probe(&device, &queue), "the lost callback marked the device");
         assert!(lost.reason().is_some_and(|r| r.starts_with("Destroyed")), "{:?}", lost.reason());
 
         // The next frame's uploads, as the painter would make them were it not skipping: wgpu
@@ -1197,5 +1209,40 @@ mod tests {
         // A save's thumbnail still comes: from the CPU rasterizer.
         let picture = super::picture(&capturer, &scene, &cam, 16, 16).unwrap();
         assert_eq!((picture.renderer, picture.rgba.len()), ("cpu", 16 * 16 * 4));
+    }
+
+    /// The probe runs before every frame's uploads, so on a working device it must cost nothing
+    /// visible: no error for any scope or handler, and the uploads after it go through. On a
+    /// reset D3D12 device an empty submission went through and the upload after it panicked
+    /// inside wgpu (#6528); the probe now opens a command list, the driver call that upload's
+    /// queue write would make first. A driver reset can't be made here: `destroy` loses the
+    /// device in wgpu itself, before any driver call.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_lost_device_probe_is_clean_on_a_working_device() {
+        use egui_wgpu::wgpu;
+        let Some((adapter, device, queue)) = super::offscreen_device() else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let lost = egui_wgpu::DeviceLost::watch(&device);
+        let capturer = solidcraft_gpu::capture::Capturer::new(&adapter, device.clone(), queue.clone()).unwrap().watching(lost.flag());
+        let mut renderer = egui_wgpu::Renderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, Default::default());
+        let image = egui::ImageData::Color(std::sync::Arc::new(egui::ColorImage::filled([4, 4], egui::Color32::WHITE)));
+        let delta = egui::epaint::ImageDelta::full(image, egui::TextureOptions::LINEAR);
+        let (scene, cam) = (solidcraft_engine::render::Scene::default(), solidcraft_engine::render::Camera::default());
+        for frame in 0..3 {
+            // As the painter: the probe, then the frame's first queue write.
+            let (was_lost, error) = egui_wgpu::capture_errors(&device, || {
+                let was_lost = lost.probe(&device, &queue);
+                renderer.update_texture(&device, &queue, egui::TextureId::Managed(0), &delta);
+                was_lost
+            });
+            assert!(!was_lost && error.is_none(), "frame {frame}: lost {was_lost}, {error:?}");
+            // A save's thumbnail, which probes too, still comes from the GPU.
+            assert_ne!(super::picture(&capturer, &scene, &cam, 16, 16).unwrap().renderer, "cpu");
+        }
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        assert!(!lost.is_lost() && lost.reason().is_none(), "{:?}", lost.reason());
     }
 }

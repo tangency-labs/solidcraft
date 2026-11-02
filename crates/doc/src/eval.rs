@@ -40,6 +40,11 @@ pub struct ModelBody {
     joint_faces: Arc<OnceLock<JointFaces>>,
     /// Lazy canonical reference triangles for a proper rigid occurrence placement.
     mesh_placement: Option<Arc<placed_mesh::PlacedMesh>>,
+    /// For a mirrored copy: its faces as a world state shows them, a rigid move of the source's
+    /// [`placed_mesh::OppositeHand`]. Display only: the model reads the copy's own triangles.
+    mirrored_mesh: Option<Arc<placed_mesh::PlacedMesh>>,
+    /// The first mirrored copy made of this body, shared by its clones.
+    opposite_hand: Arc<OnceLock<placed_mesh::OppositeHand>>,
     /// The display plan (none when the body has no plan: a mesh body, or one the planner
     /// refuses), shared like the mesh. A GPU viewport draws it.
     plan: Arc<[OnceLock<Option<Arc<TessPlan>>>; 4]>,
@@ -86,6 +91,8 @@ impl ModelBody {
             mesh: Arc::new(OnceLock::new()),
             joint_faces: Arc::new(OnceLock::new()),
             mesh_placement: None,
+            mirrored_mesh: None,
+            opposite_hand: Arc::new(OnceLock::new()),
             plan: Arc::new(Default::default()),
             plan_mesh: Arc::new(Default::default()),
             key: 0,
@@ -993,6 +1000,7 @@ impl ModelState {
                         && let Some(lines) = olds.first().and_then(|x| x.body.split_lines())
                     {
                         b.body = b.body.clone().with_split_lines(Some(lines.clone()));
+                        b.mirrored_mesh = None;
                     }
                     // An imported look outlives the operations on the body.
                     if b.body.paint().is_none()
@@ -1213,6 +1221,8 @@ impl ModelState {
     }
 
     pub fn body(&self, name: &str) -> Option<&ModelBody> {
+        #[cfg(test)]
+        cost_tests::count(|c| c.body_searches += 1);
         self.bodies.iter().find(|b| b.name == name)
     }
 
@@ -1808,6 +1818,8 @@ fn hash_placement(m: &Mat, h: &mut impl Hasher) {
 fn mirror_placements_digest(doc: &Document, f: &Feature, placements: &[Vec<u64>], bodies: &[crate::BodyName]) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     doc.component_transform(f.component).iter().flatten().for_each(|x| x.to_bits().hash(&mut h));
+    // A feature added after the mirror that builds on its copies needs them made for that.
+    placement_reuse::copies_only_shown(doc, f).hash(&mut h);
     for placed in placements.iter().map(|path| mirror_copy_frame(doc, path)) {
         placed.is_some().hash(&mut h);
         if let Some((component, frame, picked)) = placed {
@@ -1958,13 +1970,7 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             None => u8::MAX.hash(&mut h),
         }
     }
-    for name in &reads.bodies {
-        name.hash(&mut h);
-        match st.and_then(|st| st.body(name)) {
-            Some(b) => hash_placement(&crate::mat_mul(&inverse, &body_world(doc, b)), &mut h),
-            None => u8::MAX.hash(&mut h),
-        }
-    }
+    hash_placed_bodies(doc, st, &reads.bodies, &inverse, &mut h);
     // Legacy and component-wide reads still need the conservative offset dependency. Body
     // reads above already include just their own offsets, in the frame that evaluates them.
     if reads.all || !reads.components.is_empty() || !reads.paths.is_empty() {
@@ -1972,6 +1978,38 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
     }
     // Never 0: the feature reads placements.
     h.finish() | 1
+}
+
+/// The bodies part of [`placement_digest`]: each body read, in name order, and where it is placed
+/// relative to the reading frame `inverse` (`u8::MAX` for one not in `st`), as [`body_world`]
+/// places it. The bodies, their components and the components' frames are looked up once: a
+/// join or cut without targets reads every body of its component, and searching the model, the
+/// timeline and the placements again for each of them made every evaluation, even one served
+/// from the cache, quadratic in the bodies.
+fn hash_placed_bodies(doc: &Document, st: Option<&ModelState>, names: &std::collections::BTreeSet<String>, inverse: &Mat, h: &mut impl Hasher) {
+    let (Some(st), false) = (st, names.is_empty()) else {
+        names.iter().for_each(|name| (name, u8::MAX).hash(h));
+        return;
+    };
+    // The first body of a name, as `ModelState::body` finds it.
+    let mut index: std::collections::HashMap<&str, usize> = std::collections::HashMap::with_capacity(st.bodies.len());
+    for (i, b) in st.bodies.iter().enumerate() {
+        index.entry(b.name.as_str()).or_insert(i);
+    }
+    let components = doc.model_body_components(st);
+    let mut frames: std::collections::HashMap<u64, Mat> = std::collections::HashMap::new();
+    for name in names {
+        name.hash(h);
+        let found = index.get(name.as_str()).and_then(|&i| Some((st.bodies.get(i)?, *components.get(i)?)));
+        match found {
+            Some((b, component)) => {
+                let m = *frames.entry(component).or_insert_with(|| doc.component_transform(component));
+                let world = doc.model_body_offset(b).map(|offset| crate::mat_mul(&m, offset)).unwrap_or(m);
+                hash_placement(&crate::mat_mul(inverse, &world), h);
+            }
+            None => u8::MAX.hash(h),
+        }
+    }
 }
 
 /// Every occurrence's placement and every body offset (a feature read from a frame that cannot
@@ -2385,6 +2423,16 @@ impl Model {
                         _ => mats,
                     };
                     next.stamp(&state, f, key, mats);
+                    // Evaluated again only for what came before it (a mirror moved by a drag).
+                    if let Some(old) = self.results.get(i).filter(|old| old.id == f.id) {
+                        let made = old.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| (b.name.as_str(), b));
+                        let made: std::collections::HashMap<&str, &ModelBody> = made.collect();
+                        for b in next.bodies.iter_mut().filter(|b| b.feature == f.id) {
+                            if let Some(old) = made.get(b.name.as_str()) {
+                                b.keep_meshes_of(old);
+                            }
+                        }
+                    }
                     for b in &mut next.bodies {
                         if !b.transferred {
                             b.component = match doc.body_components.get(&b.name) {
@@ -4282,7 +4330,8 @@ fn blend_edges_on(mb: &ModelBody, f: &Feature, edges: &[crate::Position], idx: &
             Some((_, Err(_))) | None => {
                 let mut w = None;
                 let refs: Vec<EdgeRef> = f.edge_refs.get(i).cloned().into_iter().collect();
-                let skipped = format!("edge `{}` no longer exists and was skipped", stored.map(String::as_str).unwrap_or("?"));
+                let skipped =
+                    format!("edge `{}` no longer exists and was skipped", stored.map_or_else(|| "?".into(), |n| crate::name_lookup::quoted(n)));
                 // The name is gone. A pick on the axis of a round must not fall through to the
                 // tangency seam (#775). A sharp edge that moved still resolves from the point,
                 // which an edit relies on.
@@ -4291,7 +4340,7 @@ fn blend_edges_on(mb: &ModelBody, f: &Feature, edges: &[crate::Position], idx: &
                 } else if let Ok(q) = resolve_edges(&mb.body, &[p], &refs, &mut w) {
                     out.extend(q);
                     notes.push(match stored {
-                        Some(n) => format!("edge `{n}` no longer exists; using the edge at the picked point"),
+                        Some(n) => format!("edge `{}` no longer exists; using the edge at the picked point", crate::name_lookup::quoted(n)),
                         None => "an edge reference without a name was found by its point".into(),
                     });
                 } else {
@@ -4986,6 +5035,29 @@ pub fn revolve_extent_with_convention(
     to: Option<Vec3>,
     convention: crate::RevolveConvention,
 ) -> Result<RevolveExtent> {
+    let extent = revolve_extent_for_handle(st, plane, regions, (origin, axis), (angle, angle2), symmetric, to, convention)?;
+    // A solid needs an open sweep inside one full turn. Zero and a turn past 360° keep a
+    // handle frame (`revolve_extent_for_handle`) and still fail here, with the same message.
+    if !(extent.sweep.abs() > 1e-9 && extent.sweep.abs() <= std::f64::consts::TAU + 1e-9) {
+        return Err(DocError::Invalid("the revolve angle must be more than 0 and at most 360°".into()));
+    }
+    Ok(extent)
+}
+
+/// Where the angle handle sits. A sweep of zero, or past a full turn, builds no solid and
+/// [`revolve_extent_with_convention`] refuses it. The boundary is still a point on the circle,
+/// and the grab point stays there so the angle can be dragged back into range.
+#[allow(clippy::too_many_arguments)]
+pub fn revolve_extent_for_handle(
+    st: &ModelState,
+    plane: &Plane,
+    regions: &[Region2],
+    (origin, axis): (Vec3, Vec3),
+    (angle, angle2): (f64, Option<f64>),
+    symmetric: bool,
+    to: Option<Vec3>,
+    convention: crate::RevolveConvention,
+) -> Result<RevolveExtent> {
     let (start, sweep) = match (to, angle2, symmetric) {
         (Some(point), _, _) => {
             let points: Vec<Vec2> = regions.iter().flat_map(|r| r.outer.polyline(1e-2)).collect();
@@ -5024,7 +5096,7 @@ pub fn revolve_extent_with_convention(
         (None, None, true) => (-angle / 2.0, angle),
         (None, None, false) => (0.0, angle),
     };
-    if !(sweep.is_finite() && start.is_finite() && sweep.abs() > 1e-9 && sweep.abs() <= std::f64::consts::TAU + 1e-9) {
+    if !(sweep.is_finite() && start.is_finite()) {
         return Err(DocError::Invalid("the revolve angle must be more than 0 and at most 360°".into()));
     }
     let points: Vec<Vec2> = regions.iter().flat_map(|r| r.outer.polyline(1e-2)).collect();
@@ -6469,11 +6541,19 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
             }
         }
         crate::PatternKind::Circular { origin, axis, count: c, angle, alignment, reversed, axis_ref, axis_feature } => {
-            // On an edge or round face: about it as it is now; on a construction axis: where it is.
+            // On an edge or round face: about it as it is now; on a construction axis: where it is;
+            // else through its origin, whose expressions follow the parameters (#10852).
             let (origin, axis) = match (axis_ref, axis_feature) {
                 (Some(g), _) => crate::construct::model_axis(&construction_state(doc, st, component), g)?,
                 (None, Some(name)) => construction_axis_in(Some(doc), st, name, component)?,
-                (None, None) => (origin.0, axis.0),
+                (None, None) => {
+                    let [x, y, z] = origin;
+                    let o = Vec3::new(val(vals, x, Kind::Length)?, val(vals, y, Kind::Length)?, val(vals, z, Kind::Length)?);
+                    if ![o.x, o.y, o.z].iter().all(|c| c.is_finite() && c.abs() < 1e9) {
+                        return Err(DocError::Invalid("the pattern's axis origin is out of range".into()));
+                    }
+                    (o, axis.0)
+                }
             };
             let n = count(c)?;
             let total = val(vals, angle, Kind::Angle)?;
@@ -6624,7 +6704,17 @@ fn with_named_face_points(doc: &Document, state: &ModelState, f: &Feature) -> Op
         if n.is_empty() {
             continue;
         }
-        match crate::name_lookup::locate_face_on_body(&fst, f.kind.face_body(), n, *p) {
+        let hit = crate::name_lookup::locate_face_on_body(&fst, f.kind.face_body(), n, *p);
+        // A hole on one of two bodies with the same face name (two bodies of one extrude, the
+        // pieces of a split body) is on that body's face, whole: the name is not split there
+        // unless that body has pieces of it too (#10699).
+        let hit = match hit {
+            Some(h) if hole_axis.is_some() && h.split && h.on_point => {
+                fst.bodies.get(h.body).and_then(|b| crate::name_lookup::locate_face_on_body(&fst, Some(&b.name), n, *p)).or(Some(h))
+            }
+            other => other,
+        };
+        match hit {
             Some(hit) => {
                 if let Some(note) = hit.note(n) {
                     notes.push(note);
@@ -7187,10 +7277,10 @@ fn face_plane(st: &ModelState, picked: &Plane, at: Vec3, name: Option<&str>) -> 
                         let note = if crate::naming::legacy_name(name).is_some() {
                             None
                         } else if !crate::naming::face_has_name(b, f.index, name) {
-                            Some(format!("face `{name}` was split; using the piece nearest the picked point"))
+                            Some(format!("face `{}` was split; using the piece nearest the picked point", crate::name_lookup::quoted(name)))
                         } else if !crate::naming::face_name_exact(b, f.index) && (f.centroid - at).dot(n).abs() > tol {
                             // Named from geometry and moved off the picked plane: geometry alone decided.
-                            Some(format!("face `{name}` was found by geometry, not exact history; check it"))
+                            Some(format!("face `{}` was found by geometry, not exact history; check it", crate::name_lookup::quoted(name)))
                         } else {
                             None
                         };
@@ -7747,6 +7837,9 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             let m = mirror_matrix(&pl);
             let mut output = 0;
+            // Copies evaluated on each frame a placement is dragged, which nothing cuts or joins:
+            // searching their revolved faces again was nearly all that took.
+            let shown_only = !*combine && !placements.is_empty() && placement_reuse::copies_only_shown(doc, f);
             for (k, n) in bodies.iter().enumerate() {
                 let i = st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
                 let Some(mb) = st.bodies.get(i).cloned() else { continue };
@@ -7763,7 +7856,12 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                     }
                     None => (None, m, m),
                 };
-                let mirrored = moved_copy(&mb, kernel::transform_matrix(&mb.body, if *combine { own } else { copy })?, 1);
+                let copied = if shown_only {
+                    kernel::place_matrix(&mb.body, copy)
+                } else {
+                    kernel::transform_matrix(&mb.body, if *combine { own } else { copy })
+                };
+                let mirrored = moved_copy(&mb, copied?, 1);
                 if *combine {
                     let joined = kernel::boolean(&mb.body, &mirrored.body, BoolOp::Union)?
                         .ok_or_else(|| DocError::Invalid("the mirror join produced nothing".into()))?;
@@ -7785,6 +7883,9 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                     let name = copy_body_name(st, f, output, &mb.name);
                     copy_sheet(st, &mb.name, &name, &copy);
                     let mut body = ModelBody::traced_new(name, mirrored, f.id);
+                    if !placements.is_empty() {
+                        body.mirrored_mesh = placed_mesh::PlacedMesh::mirrored(&mb, &body.body, &copy).map(Arc::new);
+                    }
                     if let Some(c) = component.filter(|c| *c != f.component) {
                         // Kept in that component as a moved body is (and through later features).
                         body.component = c;
@@ -8198,6 +8299,7 @@ fn plane_reads_geometry(plane: &PlaneRef) -> bool {
         PlaneRef::ThroughPoint { .. }
         | PlaneRef::Midplane { .. }
         | PlaneRef::TwoEdges { .. }
+        | PlaneRef::AxisPoint { .. }
         | PlaneRef::ThreePoints { .. }
         | PlaneRef::Tangent { .. }
         | PlaneRef::AlongPath { .. }
@@ -8462,7 +8564,8 @@ impl PlacedBodies {
         if let Some(placed) = self.taken(b, m, &name) {
             return placed;
         }
-        match kernel::place_matrix(&b.body, *m) {
+        let body = if crate::is_identity(m) { Ok(b.body.clone()) } else { kernel::place_matrix(&b.body, *m) };
+        match body {
             Ok(body) => {
                 let mut fresh = ModelBody::new(name, body, b.feature);
                 fresh.mesh_placement = placed_mesh::PlacedMesh::new(b, m).map(Arc::new);
@@ -8568,6 +8671,12 @@ fn placed_key(b: &ModelBody, m: &crate::Mat) -> (usize, [u64; 16]) {
     (Arc::as_ptr(&b.mesh) as usize, bits)
 }
 
+/// Whether a world state shows `b`, placed by `m`, apart from the model's body. A mirrored copy
+/// always is: it is drawn from its source's opposite hand, and the model keeps its own triangles.
+fn placed_apart(b: &ModelBody, m: &crate::Mat) -> bool {
+    !crate::is_identity(m) || b.mirrored_mesh.is_some()
+}
+
 /// [`world_state`], reusing the bodies `placed` holds from an earlier call and leaving it holding
 /// this call's.
 pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut PlacedBodies) -> ModelState {
@@ -8575,7 +8684,10 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
         return st.clone();
     }
     let mut placed_now = PlacedBodies::default();
-    let comp_of_feature = |id: u64| doc.feature(id).map(|f| f.component).unwrap_or(0);
+    // Looked up once: every sketch, construction and tap asked the timeline, and every placement
+    // went through all bodies, each time searching (a large assembly paid this every command).
+    let feature_components: std::collections::HashMap<u64, u64> = doc.features.iter().rev().map(|f| (f.id, f.component)).collect();
+    let comp_of_feature = |id: u64| feature_components.get(&id).copied().unwrap_or(0);
     let first_path = |comp: u64| -> Vec<u64> {
         let mut path = Vec::new();
         let mut c = comp;
@@ -8598,11 +8710,28 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
     let mut jobs = Vec::new();
     let owners = doc.model_body_components(st);
     let names = crate::WorldNames::new(doc, st);
-    let bodies_of = |comp: u64| st.bodies.iter().zip(&owners).filter(move |(_, owner)| **owner == comp).map(|(b, _)| b);
+    let mut by_component: std::collections::HashMap<u64, Vec<&ModelBody>> = std::collections::HashMap::new();
+    for (b, owner) in st.bodies.iter().zip(&owners) {
+        by_component.entry(*owner).or_default().push(b);
+    }
+    let bodies_of = |comp: u64| by_component.get(&comp).into_iter().flatten().copied();
+    // Each tap's component and the offset of the body it is on (the first body of that name).
+    let mut first_body: std::collections::HashMap<&str, (&ModelBody, u64)> = std::collections::HashMap::new();
+    for (b, owner) in st.bodies.iter().zip(&owners).rev() {
+        first_body.insert(b.name.as_str(), (b, *owner));
+    }
+    let tap_frames: Vec<(u64, Option<&crate::Mat>)> = st
+        .threads
+        .iter()
+        .map(|t| match first_body.get(t.body.as_str()) {
+            Some((body, owner)) => (*owner, doc.model_body_offset(body)),
+            None => (comp_of_feature(t.feature), None),
+        })
+        .collect();
     for (comp, path, m) in &placements {
         for b in bodies_of(*comp) {
             let bm = body_matrix(b, m);
-            if !crate::is_identity(&bm) {
+            if placed_apart(b, &bm) {
                 jobs.push((b, bm, names.name(&b.name, *comp, path)));
             }
         }
@@ -8620,7 +8749,7 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
             let bm = body_matrix(b, &m);
             // Identical geometry also shares its display mesh cell with the definition.
             // A changed placement keeps a distinct mesh, at that placement's coordinates.
-            let mut placed = if crate::is_identity(&bm) {
+            let mut placed = if !placed_apart(b, &bm) {
                 let mut placed = b.clone();
                 placed.name = names.name(&b.name, comp, &path);
                 placed
@@ -8678,14 +8807,10 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
             }
         }
         // Unlike editable sketch guides, cosmetic surfaces belong to every occurrence.
-        for t in st
-            .threads
-            .iter()
-            .filter(|t| st.body(&t.body).map(|body| doc.model_body_component(body)).unwrap_or_else(|| comp_of_feature(t.feature)) == comp)
-        {
+        for (t, (_, offset)) in st.threads.iter().zip(&tap_frames).filter(|(_, (owner, _))| *owner == comp) {
             let mut t2 = t.clone();
             t2.body = names.name(&t.body, comp, &path);
-            let frame = st.body(&t.body).and_then(|body| doc.model_body_offset(body)).map(|offset| crate::mat_mul(&m, offset)).unwrap_or(m);
+            let frame = offset.map(|offset| crate::mat_mul(&m, offset)).unwrap_or(m);
             t2.axis_point = crate::apply_point(&frame, t.axis_point);
             t2.axis = crate::apply_vector(&frame, *t.axis).unit().unwrap_or(t.axis);
             out.threads.push(t2);
@@ -8870,7 +8995,7 @@ mod chain_tests {
 
 #[cfg(test)]
 #[path = "eval_cost_tests.rs"]
-mod cost_tests;
+pub(crate) mod cost_tests;
 
 #[cfg(test)]
 #[path = "eval_whole_face_tests.rs"]

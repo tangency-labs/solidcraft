@@ -643,6 +643,29 @@ fn timeline_folders_are_command_backed_saved_undoable_and_follow_feature_ids() {
     assert!(s.doc.timeline_groups.is_empty());
 }
 
+/// #9373: editing a feature inside a timeline folder left the id of the edit's trial feature in
+/// the folder and gave that id out again, so every edit there added it once more, and a feature
+/// made later took it and was listed twice: the saved design then would not open. Edited, the
+/// folder keeps its own features, once each, and the design opens again.
+#[test]
+fn editing_a_feature_inside_a_folder_leaves_the_folder_as_it_was() {
+    let mut s = Session::default();
+    for (name, height) in [("Base", 10), ("Post", 20), ("Pin", 30)] {
+        run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": height, "operation": "new", "name": name}));
+    }
+    let ids: Vec<u64> = s.doc.features.iter().map(|f| f.id).collect();
+    run(&mut s, "timeline.group", json!({"name": "Parts", "features": ids}));
+    for width in [5, 6, 7] {
+        run(&mut s, "timeline.redefine", json!({"feature": "Post", "command": "solid.box", "params": {"length": 4, "width": width, "height": 20}}));
+    }
+    assert_eq!(s.doc.timeline_groups[0].features, ids, "no trial feature is left in the folder");
+    let made =
+        run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "operation": "new", "name": "Later"}))["feature"].as_u64().unwrap();
+    assert!(!s.doc.timeline_groups[0].features.contains(&made), "a feature made after the folder is not in it");
+    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(reopened.timeline_groups, s.doc.timeline_groups);
+}
+
 #[test]
 fn timeline_reorders_selected_features_as_one_block_and_removes_folders_in_one_step() {
     let mut s = Session::default();
@@ -1559,11 +1582,13 @@ fn timeline_joint_folders_are_mixed_saved_and_undoable() {
     let saved = s.doc.to_json();
     let reopened = solidcraft_doc::Document::from_json(&saved).unwrap();
     assert_eq!(reopened.to_json(), saved);
+    // A folder naming a joint the design doesn't have, or one twice, opens without that entry
+    // (#9373).
     let mut damaged: Value = serde_json::from_str(&saved).unwrap();
     damaged["timeline_groups"][0]["joints"] = json!([u64::MAX]);
-    assert!(solidcraft_doc::Document::from_json(&damaged.to_string()).is_err());
+    assert!(solidcraft_doc::Document::from_json(&damaged.to_string()).unwrap().timeline_groups[0].joints.is_empty());
     damaged["timeline_groups"][0]["joints"] = json!([joint, joint]);
-    assert!(solidcraft_doc::Document::from_json(&damaged.to_string()).is_err());
+    assert_eq!(solidcraft_doc::Document::from_json(&damaged.to_string()).unwrap().timeline_groups[0].joints, [joint]);
     let destination = run(&mut s, "timeline.group", json!({"name":"Destination"}))["group"].as_u64().unwrap();
     run(&mut s, "timeline.move_to_group", json!({"joints":[joint], "group":destination}));
     assert!(s.doc.timeline_groups[0].joints.is_empty());
@@ -1627,4 +1652,37 @@ fn timeline_joint_folders_reject_hostile_joint_references_atomically() {
             assert_eq!(s.doc.to_json(), before);
         }
     }
+}
+
+/// A reference image is shared, not copied, by every edit after it: each undo state holds the
+/// design as it was, and a copied image of up to 16 MiB per state would hold gigabytes.
+#[test]
+fn edits_after_a_canvas_share_its_image_with_every_undo_state() {
+    let mut s = Session::default();
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend([0, 0, 0, 4, 0, 0, 0, 2, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    png.resize(64 << 10, 0);
+    run(&mut s, "canvas.insert", json!({"data": solidcraft_doc::canvas::base64_encode(&png), "plane": "XY", "width": 40}));
+    for i in 0..20 {
+        run(&mut s, "parameters.add", json!({"name": format!("p{i}"), "expression": "10 mm"}));
+    }
+    let image = s.doc.canvases[0].data.as_ptr();
+    let copies = s.undo.iter().filter_map(|u| u.doc.canvases.first()).filter(|c| c.data.as_ptr() != image).count();
+    assert_eq!(copies, 0, "undo states holding their own copy of the image");
+    for _ in 0..20 {
+        run(&mut s, "edit.undo", json!({}));
+    }
+    assert_eq!(s.doc.canvases[0].data.as_ptr(), image, "undo brings back the same image");
+    assert_eq!(s.doc.canvases[0].bytes().as_deref(), Some(png.as_slice()));
+}
+
+#[test]
+fn assistant_toggle_is_refused_headlessly_without_changing_the_document() {
+    let mut s = Session::default();
+    let before = (s.doc.to_json(), s.undo.len());
+    let error = s.execute("ui.assistant", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("headless session"), "{error}");
+    assert_eq!((s.doc.to_json(), s.undo.len()), before);
+    let spec = crate::find_command("ui.assistant").unwrap();
+    assert_eq!((spec.shortcut, spec.tab, spec.undoable), (Some("Ctrl+Shift+A"), "", false));
 }

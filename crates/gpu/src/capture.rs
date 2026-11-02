@@ -106,13 +106,17 @@ impl Capturer {
         self.lost.load(Ordering::Acquire)
     }
 
-    /// [`Capturer::is_lost`], asking the driver first: an empty submission meets a loss the
-    /// driver reports and marks it, where the picture's first upload would panic inside wgpu.
+    /// [`Capturer::is_lost`], asking the driver first: a submission that opens a command list
+    /// meets a loss the driver reports and marks it, where the picture's first upload would
+    /// panic inside wgpu. As `egui_wgpu::DeviceLost::probe`: an empty submission only signals a
+    /// fence, which a reset D3D12 device let through (#6528).
     fn probe_lost(&self) -> bool {
         if self.is_lost() {
             return true;
         }
-        self.queue.submit([]);
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("device lost probe") });
+        encoder.insert_debug_marker("device lost probe");
+        self.queue.submit([encoder.finish()]);
         self.is_lost()
     }
 

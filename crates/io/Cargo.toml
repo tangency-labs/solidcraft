@@ -47,3 +47,6 @@ tempfile = "3.27"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 trash = "5.2.9"
+
+[dev-dependencies]
+solidcraft-testkit = { workspace = true }

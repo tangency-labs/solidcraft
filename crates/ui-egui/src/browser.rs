@@ -143,6 +143,9 @@ pub struct TreeState {
     /// Find in Timeline: the feature the history scrolls to the next time it draws its items, in
     /// the bottom strip or in the history on the left (#5850).
     pub timeline_reveal: Option<u64>,
+    /// Show components marked out of the History bar anyway (#10393). Held by the session, like
+    /// the bar's Show All toggle; the History controls' menu carries the switch.
+    pub history_show_hidden: bool,
     /// The feature of the face or edge last picked in the view, so a new pick scrolls the
     /// history to it once.
     pub view_pick: Option<u64>,

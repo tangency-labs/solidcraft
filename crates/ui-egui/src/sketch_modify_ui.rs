@@ -72,6 +72,9 @@ const CHAMFER_TYPE_ICONS: [&str; 3] = ["sketch_chamfer_equal", "sketch_chamfer_t
 /// The engine's own cap on the copies one sketch pattern may make.
 const MAX_COPIES: f64 = 500.0;
 
+/// The engine's own cap on the offsets `sketch.offset` stacks one behind the other.
+const MAX_OFFSET_INSTANCES: i64 = 100;
+
 /// The offset directions, in the words and the order `solid.extrude` already uses for them.
 /// One Side offsets the way the distance points. Two Sides adds an independent distance the
 /// other way. Symmetric applies the one distance each way.
@@ -102,8 +105,10 @@ pub enum Mod {
     /// `sketch.offset`: the curves to offset, the distance typed and whether the connected
     /// chain follows. A positive distance is left of the chain, as the command defines it;
     /// `flip` reverses whatever sign the field holds. `mode` indexes [`OFFSET_MODES`], and
-    /// `distance2` is the other side's distance that Two Sides asks for.
-    Offset { distance: String, distance2: String, mode: usize, chain: bool, flip: bool },
+    /// `distance2` is the other side's distance that Two Sides asks for. `instances` is how many
+    /// offsets stand one behind the other, each the same distance again from the one before it:
+    /// one, the offset by itself, by default.
+    Offset { distance: String, distance2: String, instances: String, mode: usize, chain: bool, flip: bool },
     /// `sketch.mirror`: the entities and the line they reflect in. The command has no number of
     /// its own, so the window's whole job is to show what is picked and let a pick be changed
     /// before anything is committed.
@@ -227,6 +232,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "sketch.offset" => Mod::Offset {
             distance: crate::dialogs::length_default(&app.session, "2"),
             distance2: crate::dialogs::length_default(&app.session, "2"),
+            instances: "1".into(),
             mode: 0,
             chain: true,
             flip: false,
@@ -526,12 +532,15 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
     let mut enter = false;
     match k {
         Mod::Scale { factor } => enter |= number(ui, "Factor", factor),
-        Mod::Offset { distance, distance2, mode, chain, flip } => {
+        Mod::Offset { distance, distance2, instances, mode, chain, flip } => {
             icons(ui, "Direction", &OFFSET_MODES, &OFFSET_MODE_ICONS, mode);
             enter |= number(ui, "Distance", distance);
             if *mode == TWO_SIDES {
                 enter |= number(ui, "Distance 2", distance2);
             }
+            // Every instance after the first offsets the one before it by Distance again, so the
+            // arrows walk the offset outwards one ring at a time.
+            enter |= quantity(ui, doc, "Instances", instances, 1, MAX_OFFSET_INSTANCES);
             ui_kit::section(ui, "offset_options", "Options", true, |ui| {
                 if *mode != SYMMETRIC {
                     ui_kit::checkbox_grid(ui, &mut [("Flip", flip), ("Chain", chain)], 2);
@@ -796,6 +805,15 @@ fn whole(app: &SolveApp, label: &str, text: &str) -> Result<u64, String> {
     Ok(v.round() as u64)
 }
 
+/// Validate a typed offset instance count before sending it to the command.
+fn offset_instances(app: &SolveApp, text: &str) -> Result<u64, String> {
+    let v = app.session.doc.eval(text.trim(), ValueKind::Unitless).map_err(|e| format!("Instances: {e}"))?;
+    if !v.is_finite() || !(1.0..=MAX_OFFSET_INSTANCES as f64).contains(&v) || (v - v.round()).abs() > 1e-9 {
+        return Err(format!("Instances must be a whole number from 1 to {MAX_OFFSET_INSTANCES}"));
+    }
+    Ok(v.round() as u64)
+}
+
 /// A typed length as the command wants it, in millimetres. A bare number means the design's
 /// units, as a typed sketch value does everywhere else. `value` above reads an empty row as
 /// zero, which a Move window wants and a pattern spacing does not.
@@ -903,14 +921,18 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             let (dx, dy) = (value(app, x, ValueKind::Length, "X")?, value(app, y, ValueKind::Length, "Y")?);
             ("sketch.transform", json!({"entities": entities, "factor": f, "angle": turn, "center": middle, "translate": [dx, dy]}))
         }
-        Mod::Offset { distance, distance2, mode, chain, flip } => {
+        Mod::Offset { distance, distance2, instances, mode, chain, flip } => {
             let curves = curve_ids(inputs, 0);
             if curves.is_empty() {
                 return Err("Select the curves to offset first".into());
             }
             // Symmetric hides Flip, so a flip left over from another mode does not travel with it.
             signed_length(app, "Distance", distance, *flip && *mode != SYMMETRIC)?;
-            let mut params = json!({"curves": curves, "distance": distance.trim(), "flip": *flip && *mode != SYMMETRIC, "chain": chain});
+            // The count is not kept in the design, so the command gets the number it evaluates to
+            // rather than the text, the way Scale and the pattern spacings send theirs.
+            let count = offset_instances(app, instances)?;
+            let mut params =
+                json!({"curves": curves, "distance": distance.trim(), "flip": *flip && *mode != SYMMETRIC, "chain": chain, "instances": count});
             if let Value::Object(m) = &mut params {
                 if *mode == SYMMETRIC {
                     m.insert("symmetric".into(), json!(true));

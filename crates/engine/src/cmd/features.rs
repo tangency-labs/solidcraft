@@ -91,7 +91,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.pattern.circular", "Circular Pattern", pattern_circ)
         .at("SOLID", "CREATE")
         .icon("pattern_circ")
-        .params("features: [names] | bodies: [names] | components: [names]; axis: X|Y|Z | construction axis name (followed when edited) | {origin, dir} | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); count; angle? (default 360 deg; partial arcs include both ends); alignment?: left|center|right (default right; original stays fixed); reversed?: bool (Flip; selects the extra side for even centered counts)"),
+        .params("features: [names] | bodies: [names] | components: [names]; axis: X|Y|Z | construction axis name (followed when edited) | {origin, dir} (origin coordinates may be length expressions; the pattern follows them) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); count; angle? (default 360 deg; partial arcs include both ends); alignment?: left|center|right (default right; original stays fixed); reversed?: bool (Flip; selects the extra side for even centered counts)"),
     CommandSpec::new("solid.pattern.path", "Pattern on Path", pattern_path)
         .at("SOLID", "CREATE")
         .icon("pattern_path")
@@ -1591,8 +1591,8 @@ pub(crate) fn edge_ref_form(e: &Value) -> std::result::Result<EdgeRefForm<'_>, &
     Ok(EdgeRefForm::Index { body, index })
 }
 
-/// Press Pull: a face moves along its normal (an extrude that joins outward or cuts inward); an
-/// edge is rounded (a fillet).
+/// Press Pull: a face moves along its normal (an extrude that joins outward or cuts inward); a
+/// fillet's or chamfer's face changes that feature's size; an edge is rounded (a fillet).
 fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.press_pull";
     let distance = req_expr(cmd, p, "distance")?;
@@ -1604,10 +1604,9 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
     if d.abs() < 1e-9 {
         return Err(bad(cmd, "the distance must not be zero"));
     }
-    // A fillet's or chamfer's face: its size changes by the distance (the feature is edited).
-    if let Some(fp) = vec3(face)
-        && super::face::face_is_planar(s, fp) == Some(false)
-    {
+    // A fillet's or chamfer's face: its size changes by the distance (the feature is edited). A
+    // chamfer's face is flat, so this is asked before whether the face is planar (#4986).
+    if let Some(fp) = vec3(face) {
         let name = solidcraft_doc::naming::face_names_at(&s.model.state(), &[fp]).into_iter().next().unwrap_or_default();
         let fid = solidcraft_doc::persistent_name::made_by(&name);
         if solidcraft_doc::persistent_name::is_blend(&name) {
@@ -1625,8 +1624,10 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
             return Ok(json!({"feature": f.id, "edited": f.name, key: new, "recomputed": out.get("recomputed"), "restored": out.get("restored")}));
         }
         // Another curved face moves along its normal.
-        let r = super::find_command("solid.offset_face").ok_or_else(|| bad(cmd, "solid.offset_face"))?;
-        return (r.run)(s, &json!({"faces": [face], "distance": distance}));
+        if super::face::face_is_planar(s, fp) == Some(false) {
+            let r = super::find_command("solid.offset_face").ok_or_else(|| bad(cmd, "solid.offset_face"))?;
+            return (r.run)(s, &json!({"faces": [face], "distance": distance}));
+        }
     }
     // Pushed in: the extrude cuts the other way by as much (a bare number stays one, so it keeps
     // being read as a bare number typed into the extrude).
@@ -1806,7 +1807,42 @@ fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(plan) = crate::frames::placements_moved(s, p) {
         return move_placements(s, p, plan);
     }
+    // Bodies in differently placed frames: one Move feature per frame, each moving its bodies
+    // by the world vector and turn mapped into that frame (#9660).
+    if let Some(moves) = crate::frames::split_move(s, p) {
+        return move_split(s, &moves);
+    }
     move_body_feature(s, p)
+}
+
+/// The moves of `frames::split_move`, in one step, with one reply: the features made, and the
+/// bodies made, changed and removed by any of them.
+fn move_split(s: &mut Session, moves: &[Value]) -> Result<Value> {
+    let mut features = Vec::new();
+    let mut lists: [(&str, Vec<Value>); 3] = [("created_bodies", Vec::new()), ("changed_bodies", Vec::new()), ("removed_bodies", Vec::new())];
+    let mut last = Value::Null;
+    for p in moves {
+        let reply = move_body_feature(s, p)?;
+        features.push(reply.get("feature").cloned().unwrap_or(Value::Null));
+        for (key, list) in &mut lists {
+            for name in reply.get(*key).and_then(Value::as_array).into_iter().flatten() {
+                if !list.contains(name) {
+                    list.push(name.clone());
+                }
+            }
+        }
+        last = reply;
+    }
+    if let Some(out) = last.as_object_mut() {
+        if let Some(first) = features.first() {
+            out.insert("feature".into(), first.clone());
+        }
+        out.insert("features".into(), Value::Array(features));
+        for (key, list) in lists {
+            out.insert(key.into(), Value::Array(list));
+        }
+    }
+    Ok(last)
 }
 
 /// A move of several placements of one part (`frames::placements_moved`, #4768): each placement
@@ -2045,16 +2081,32 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
     finish_pattern(s, p, features, pattern, bodies)
 }
 
+/// The line a circular pattern turns about, as [`axis_line`] reads it, except that the origin of
+/// `{origin, dir}` may be length expressions, kept so the pattern follows them (#10852).
+fn pattern_axis(s: &Session, p: &Value, cmd: &str) -> Result<(PointExpr, Vec3, Option<solidcraft_doc::construct::GeoRef>, Option<FeatureName>)> {
+    if let Some(a @ Value::Object(o)) = p.get("axis")
+        && o.contains_key("origin")
+        && !super::is_model_axis(a)
+    {
+        // Read under its full name, so a refusal says which origin it means.
+        let origin = point_param(s, &json!({ "axis.origin": o.get("origin") }), "axis.origin", cmd)?;
+        let dir = a.get("dir").and_then(vec3).and_then(|d| d.normalized()).ok_or_else(|| bad(cmd, "axis needs a non-zero `dir`"))?;
+        return Ok((origin.unwrap_or_else(|| solidcraft_doc::point_expr(Vec3::ZERO)), dir, None, None));
+    }
+    let (origin, dir, axis_ref, axis_feature) = axis_line(s, p, cmd)?;
+    Ok((solidcraft_doc::point_expr(origin), dir, axis_ref, axis_feature))
+}
+
 fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.pattern.circular";
     let (features, bodies) = pattern_sources(s, p, cmd)?;
-    let (origin, axis, axis_ref, axis_feature) = axis_line(s, p, cmd)?;
+    let (origin, axis, axis_ref, axis_feature) = pattern_axis(s, p, cmd)?;
     let count = req_expr(cmd, p, "count")?;
     check_count(s, &count, cmd, "count")?;
     let angle = expr(p, "angle").unwrap_or_else(|| "360 deg".into());
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let pattern = solidcraft_doc::PatternKind::Circular {
-        origin: Position(origin),
+        origin,
         axis: Dir(axis),
         count,
         angle,

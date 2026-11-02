@@ -178,6 +178,7 @@ impl Drop for Harness {
 
 impl Harness {
     pub fn new() -> Harness {
+        crate::i18n::pin_system_language();
         let mut h = Harness {
             app: SolveApp::new(Session::default(), Services::default()),
             ctx: {
@@ -595,12 +596,19 @@ impl Harness {
             } else if let Some(how) = s.get("restart").and_then(Value::as_str) {
                 // "crash": the app dies (its autosave lock goes with it, the entry stays);
                 // "close": it closes normally. Then a new app starts on the same folders.
-                // Scenarios use a zero autosave interval: finish the latest checkpoint before
-                // the simulated crash, even if an older snapshot was still being written.
-                if how == "crash"
-                    && let Some(autosave) = self.app.autosave.as_mut()
-                {
-                    autosave.save(&self.app.session).map_err(|e| format!("autosave before simulated crash: {e}"))?;
+                if how == "crash" {
+                    // The work so far is autosaved before the crash: the write runs on a worker
+                    // thread, which a loaded machine had not finished (#10690). The autosave's
+                    // own ticks write it; a bounded wait, so an autosave that stopped writing
+                    // still fails the recovery that follows.
+                    for _ in 0..600 {
+                        let caught_up = self.app.autosave.as_ref().and_then(|a| a.active.as_ref()).is_none_or(|a| a.caught_up(&self.app.session));
+                        if caught_up {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                        self.frames(1);
+                    }
                 }
                 let mut old = std::mem::replace(&mut self.app, SolveApp::new(Session::default(), Services::default()));
                 if how == "close" {
@@ -904,14 +912,16 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                 }
             }
             "dialog" => {
-                let d = &ui["dialog"];
+                // A word of the dialog's state as the code holds it: scenarios check fields that
+                // `ui.inspect` reports only as the command OK runs.
+                let d = h.app.dialog.as_ref().map(|d| format!("{d:?}"));
                 let ok = match v {
-                    Value::Null => d.is_null(),
-                    Value::String(w) => d.as_str().is_some_and(|d| d.contains(w.as_str())),
+                    Value::Null => d.is_none() && ui["dialog"].is_null(),
+                    Value::String(w) => d.as_deref().is_some_and(|d| d.contains(w.as_str())),
                     _ => false,
                 };
                 if !ok {
-                    return Err(format!("dialog: got {d}, want {v}"));
+                    return Err(format!("dialog: got {d:?}, want {v}"));
                 }
             }
             "tool" => {
