@@ -1,7 +1,7 @@
 //! The model cache: a design's evaluated timeline (every feature's result and the state after
 //! it, [`SavedModel`]), saved with it so opening need not evaluate it again. Bodies use
 //! SolidCraft's exact native B-rep encoding (a mesh body, its own triangles); the key ties the
-//! cache to the exact document, and to the source and platform that computed it
+//! cache to the exact document, and to the source, platform and geometry kernel that computed it
 //! (docs/design-container.md).
 use super::*;
 use solidcraft_doc::{ModelState, SavedModel};
@@ -27,6 +27,12 @@ fn build() -> String {
 /// build before it; one that changed it (a kernel fix, the codec) evaluates the design again.
 fn evaluation() -> String {
     format!("{}/{}-{}", env!("SOLIDCRAFT_EVALUATION_SOURCE"), std::env::consts::ARCH, std::env::consts::OS)
+}
+
+/// The geometry kernel that answers in this process: another kernel's cache is not its result (the
+/// two differ in tolerances and in what they refuse), so a design opened under it evaluates again.
+fn kernel() -> &'static str {
+    solidcraft_kernel::kernel_route::choice().id()
 }
 
 /// A 4 x 4 matrix as its 16 numbers, in storage order.
@@ -296,6 +302,7 @@ impl Encoded {
             document: digest(document),
             evaluation: evaluation(),
             format: FORMAT,
+            kernel: kernel(),
             model: records,
             payload: digest(&data),
             producer: PRODUCER,
@@ -320,6 +327,7 @@ struct Manifest<'a> {
     document: String,
     evaluation: String,
     format: &'a str,
+    kernel: &'a str,
     model: &'a Value,
     payload: String,
     producer: &'a str,
@@ -336,14 +344,15 @@ pub fn read_design_geometry(bytes: &[u8]) -> Option<std::sync::Arc<ModelState>> 
     DesignContainerReader::new(Cursor::new(bytes)).ok()?.geometry()?.final_state().ok()
 }
 
-/// Whether `manifest` is a model cache of this build's evaluation source for `document`. The
-/// application version and commit that wrote it are not asked: another version of the same
+/// Whether `manifest` is a model cache of this build's evaluation source and kernel for `document`.
+/// The application version and commit that wrote it are not asked: another version of the same
 /// evaluation source computed the same model.
 fn current(manifest: &Value, document: &[u8]) -> bool {
     let is = |key: &str, value: &str| manifest.get(key).and_then(Value::as_str) == Some(value);
     is("format", FORMAT)
         && is("producer", PRODUCER)
         && is("evaluation", &evaluation())
+        && is("kernel", kernel())
         && is("document", &digest(document))
         && source_trusted(env!("SOLIDCRAFT_EVALUATION_SOURCE"), cfg!(any(test, feature = "trust-unknown-source")))
 }

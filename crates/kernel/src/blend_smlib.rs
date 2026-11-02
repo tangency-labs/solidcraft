@@ -453,6 +453,7 @@ mod imp {
                     )),
                     _ => KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow")),
                 },
+                SmError::Unported(why) => KernelError::Invalid(format!("not supported yet: {why}")),
                 e => failed(what, "operation", e),
             })?;
             // Checked here unless the evaluation's validation mode leaves it to the feature's end

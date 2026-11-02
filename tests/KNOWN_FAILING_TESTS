@@ -1,42 +1,54 @@
-# The cargo tests that fail today, one a line: `<test> <why it fails today>`, with the issue that
-# tracks it when there is one. Sorted. `<test>` is nextest's `<binary id>::<test name>`, as the
-# junit report names it. CI's test jobs (`cargo xtask known-failing`) fail on a test that fails
-# and is not listed here, and on a listed test that passes: a fix removes its line in the same
-# pull request. The tests stay un-ignored, so every run shows whether they still fail.
-# Refresh (after an SMLib pin bump): download the junit artifacts of develop's latest CI run, one
-# directory each (`gh run download <run> -R tangency-labs/solidcraft -n <artifact> -D <dir>/<artifact>`
-# for junit and junit-gpu-1..4), run `cargo xtask known-failing --junit <dir>`, then drop each
-# FIXED line and add each REGRESSION line with its cause, from the test's failure message.
-# Baseline: develop 2bf58241f (CI run 41522001173, x86_64 Linux), after the SMLib a18bbe5 pin (v1.1.0-alpha).
-solidcraft-cli::action_matrix::action_matrix_sample 2 baseline actions fail on SMLib: 2 shells (Bad Loop Orient on issue-616-lid-ribs; status 1001 on filleted-shelled-box, shelled again open at an inner wall)
-solidcraft-cli::naming_corpus::corpus_designs_name_alike_every_build_and_fail_where_a_reference_is_gone oracle/83-boundary-loop-thicken does not load: step 8, SMLib thicken status 1001
+# The cargo tests that fail today on the default kernel, solidcore, one a line: `<test> <why it fails
+# today>`, with the issue that tracks it when there is one. Sorted. `<test>` is nextest's
+# `<binary id>::<test name>`, as the junit report names it. CI's test jobs (`cargo xtask known-failing`)
+# fail on a test that fails and is not listed here, and on a listed test that passes: a fix removes its
+# line in the same pull request. The tests stay un-ignored, so every run shows whether they still fail.
+# `KNOWN_FAILING_TESTS.smlib` is the same list for the C++ kernel (SOLIDCRAFT_KERNEL=smlib, graded with
+# --list). Refresh as that list's header says.
+solidcraft-cli::action_matrix::action_matrix_sample 3 baseline actions fail, the same 3 as on C++: 2 shells (Bad Loop Orient on issue-616-lid-ribs; status 1001 on filleted-shelled-box), 1 fillet (SmSurfOfRevolution Test #7 on oblique_cut_of_cylinder)
+solidcraft-cli::model_cache::a_later_round_after_opening_blends_the_saved_rounds_again the later r3 round at the r2 mitre builds solidcore's 10-face corner (7928.743041), the test wants SMLib f916a8d's setback corner (smlib#104), which solidcore ports in solidcore#2310: 15 faces, 7928.142563938
+solidcraft-cli::naming_corpus::corpus_designs_name_alike_every_build_and_fail_where_a_reference_is_gone oracle/83-boundary-loop-thicken does not load: step 8, thicken status 1001, as on C++
 solidcraft-doc::eval::chain_tests::a_propagated_chain_that_cannot_build_says_how_to_blend_the_edge_alone the propagated chain now builds a round (9 faces), so there is no refusal to read, on SMLib v1.1.0-alpha (a18bbe5), passed on f916a8d; cause being established
 solidcraft-doc::eval::cost_tests::a_cut_leaves_bodies_it_cannot_reach_as_they_were main's mesh-based version (#10303) not taken; the exact replacement is to come
 solidcraft-doc::eval::cost_tests::a_tap_marking_searches_only_the_bodies_near_it main's mesh-based version (#10303) not taken; the exact replacement is to come
 solidcraft-doc::eval::cost_tests::a_tap_marking_still_searches_the_bodies_within_its_reach main's mesh-based version (#10303) not taken; the exact replacement is to come
-solidcraft-engine::cmd::file::tests::each_format_has_an_export_command_of_its_own SMLib meshes a box's planar faces into 124 triangles, not 12 (the STL is 6284 bytes, the test counts 84 + 50 x 12)
-solidcraft-engine::cmd::sketch_project::tests::intersection_curve_of_picked_faces_spans_the_whole_surface main's mesh-based version (#9107) not taken; the exact replacement is to come
+solidcraft-engine::cmd::edit::tests::inserting_variable_fillet_control_preserves_parameters_at_existing_positions solidcore refuses a variable fillet whose law has a corner (solidcore#430)
+solidcraft-engine::cmd::file::tests::each_format_has_an_export_command_of_its_own the box's planar faces are meshed into 124 triangles, not 12 (the STL is 6284 bytes, the test counts 84 + 50 x 12), as on SMLib
+solidcraft-engine::cmd::sketch_project::tests::intersection_curve_of_picked_faces_spans_the_whole_surface its premise fails off truck: the fit-point spline wall's 3 span faces are not one surface patch in the kernel's mesh (surface_patch gives 1 face, the test wants 3), as on SMLib
 solidcraft-engine::extent_tests::cut_to_the_far_side_of_a_curved_wall main's mesh-based version (#8634) not taken; the exact replacement is to come
-solidcraft-engine::hole_face_tests::a_hole_wider_than_the_part_says_it_removes_all_of_it a 40 mm hole at (10, 10) touches the plate's edge y = 30 at one point; SMLib parts the plate there into 2 bodies, the test wants truck's 1
-solidcraft-engine::measure_centre_tests::a_fillet_round_a_boss_reports_its_radius SMLib's round at the foot of a boss is not an analytic torus of minor radius 3, so no face of the body is (the test finds none to measure)
-solidcraft-engine::tests::fillet_fit_taper_closes_to_a_point SMLib fillet status 1001 on the taper fit (radius 16 closing to 0)
-solidcraft-engine::tests::mirror_placed::dragging_a_mirrored_part_meshes_its_copies_once on SMLib a copy of a copy drawn from its first copy's triangles (#10101) is triangulated differently from a fresh evaluation; the surface is the same. Dealt with in solidcore, where the mesher moves (docs/layers.md)
+solidcraft-engine::hole_face_tests::a_hole_wider_than_the_part_says_it_removes_all_of_it a 40 mm hole at (10, 10) touches the plate's edge y = 30 at one point; the kernel parts the plate there into 2 bodies, the test wants truck's 1, as on SMLib
+solidcraft-engine::measure_centre_tests::a_fillet_round_a_boss_reports_its_radius the round at the foot of a boss is not an analytic torus of minor radius 3, so no face of the body is (the test finds none to measure), as on SMLib
+solidcraft-engine::tests::a_later_round_at_a_mitred_corner_is_blended_with_the_rounds_there solidcore's corner of three rounds of different radii is 7928.74304145614 with 10 faces; the test wants SMLib f916a8d's setback corner (smlib#104), which solidcore ports in solidcore#2310: 15 faces, 7928.142563938
+solidcraft-engine::tests::chord_and_variable_fillets its 2 → 4 → 2 waist: solidcore refuses a variable fillet whose law has a corner (solidcore#430)
+solidcraft-engine::tests::fillet_fit_taper_closes_to_a_point fillet status 1001 on the taper fit (radius 16 closing to 0), as on C++
+solidcraft-engine::tests::mirror_placed::dragging_a_mirrored_part_meshes_its_copies_once a copy of a copy drawn from its first copy's triangles (#10101) is triangulated differently from a fresh mesh of it, where truck's meshes are the same under a rigid move, as on SMLib
 solidcraft-engine::tests::robustness::fillet_into_an_earlier_round R2 into the earlier round: volume 35923.387 against 35919.524, on SMLib v1.1.0-alpha (a18bbe5), passed on f916a8d; cause being established
-solidcraft-kernel::blend::corner_tests::a_round_ending_in_an_earlier_round_matches_both_together SMLib fillet status 1001 on the round that ends in the earlier one
-solidcraft-kernel::blend::corner_tests::corner_blends_hold_at_any_scale at 0.01x a picked edge runs on tangentially into an unblended edge and SMLib's result is not a closed solid (the smooth-vertex End, tangency-labs/smlib#81)
+solidcraft-kernel::blend::corner_tests::a_round_ending_in_an_earlier_round_matches_both_together fillet status 1001 on the round that ends in the earlier one, as on C++
+solidcraft-kernel::blend::corner_tests::corner_blends_hold_at_any_scale at 0.01x the arc case's rounds remove 72.783 (scaled back) against 72.713 at 1x, as on C++
 solidcraft-kernel::blend_corner::tests::a_round_next_to_a_round_of_another_radius the face count is 9, not the expected count, on SMLib v1.1.0-alpha (a18bbe5), passed on f916a8d; cause being established
-solidcraft-kernel::blend_corner::tests::issue2422_vertical_after_separate_bottom_rounds SMLib's check refuses the fillet: edge and vertex tolerance 0.97 against the body's 0.01 (#2422)
+solidcraft-kernel::blend_corner::tests::issue2422_vertical_after_separate_bottom_rounds the check refuses the fillet: edge and vertex tolerance 0.97 against the body's 0.01, as on C++ (#2422)
+solidcraft-kernel::blend_corner::tests::three_rounds_at_a_corner the corner's variable-radius transition between rounds of different radii meets its neighbours at 0.144 degrees once its sections are the balls' touch circles (fillet_gn_section_generator, solidcore#2262; 0 with the great circles), as on SMLib d01d7b0; the corner step replaces that transition
 solidcraft-kernel::blend_smlib::tests::smooth_edges_and_unfinished_tangent_chains_are_refused_saying_why the smooth edge builds (volume 7957.723) where a refusal is expected, on SMLib v1.1.0-alpha (a18bbe5), passed on f916a8d; cause being established
+solidcraft-kernel::blend_variable::tests::variable_radius_with_a_corner_through_a_middle_point solidcore refuses a variable fillet whose law has a corner (solidcore#430)
 solidcraft-kernel::corner_g2::tests::a_concave_corner_takes_the_g2_patch_too the concave G2 corner's curvature jump clear of the corners is 5.5e-2, above the bound, on SMLib v1.1.0-alpha (a18bbe5), passed on f916a8d; cause being established
-solidcraft-kernel::corner_g2::tests::a_long_setback_keeps_the_g2_patch_inside_the_box at set backs 11 to 15 the G2 corner patch bulges 2.6e-6 to 1.33e-3 past the box (the explicit corner is in progress)
-solidcraft-kernel::corner_g2::tests::curvature_rounds_meet_at_a_g2_corner the corner loop's fill misses its neighbours' curvature by 1.6e-3 (tolerance 1e-3), on SMLib v1.1.0-alpha (a18bbe5), passed on f916a8d; cause being established
+solidcraft-kernel::corner_g2::tests::a_long_setback_keeps_the_g2_patch_inside_the_box at set backs 11 to 15 the G2 corner patch bulges past the box, as on C++
+solidcraft-kernel::corner_g2::tests::curvature_rounds_meet_at_a_g2_corner the corner between curvature rounds jumps 2.07 in curvature over 538 stations on solidcore; the test wants it curvature continuous, as SMLib f916a8d's setback corner (smlib#104), which solidcore ports in solidcore#2310 builds it
 solidcraft-kernel::corner_g2::tests::set_back_8_the_g2_corner_lies_between_the_hull_and_the_prisms set back 8: the G2 corner's distance check reads 0.0611, past its bound (volume 47370.642, in range), on SMLib v1.1.0-alpha (a18bbe5), passed on f916a8d; cause being established
-solidcraft-kernel::corner_g2::tests::the_box_corner_g2_patch_is_a_closed_solid_curvature_continuous_to_its_neighbours the fitted G2 corner patch bulges 1.7e-5 past the box, which SMLib's exact tight box now sees (the explicit G2 corner builds it inside)
+solidcraft-kernel::corner_g2::tests::the_box_corner_g2_patch_is_a_closed_solid_curvature_continuous_to_its_neighbours the fitted G2 corner patch bulges 1.7e-5 past the box, as on C++
+solidcraft-kernel::fillet_setback_tests::a_setback_not_past_the_radius_is_refused_naming_the_least solidcore builds setback 5.5 (15 faces) where SMLib f916a8d's setback corner (smlib#104), which solidcore ports in solidcore#2310 refuses it naming the least that builds; solidcraft_smlib::blend_fit names no size on solidcore until then
 solidcraft-kernel::issue_851_tests::blend_the_arc_top_edge_and_the_top_front_edge removes 59.148 against 60.122, on SMLib v1.1.0-alpha (a18bbe5), passed on f916a8d; cause being established
 solidcraft-kernel::issue_851_tests::fillet_the_arc_top_edge_and_the_front_upright_at_the_arc removes 31.497 against 32.310, on SMLib v1.1.0-alpha (a18bbe5), passed on f916a8d; cause being established
 solidcraft-kernel::issue_851_tests::fillet_the_top_front_edge_and_the_front_left_upright removes 42.236 against 43.187, on SMLib v1.1.0-alpha (a18bbe5), passed on f916a8d; cause being established
 solidcraft-kernel::issue_851_tests::fillet_the_top_front_edge_and_the_front_upright_at_the_arc removes 41.341 against 42.146, on SMLib v1.1.0-alpha (a18bbe5), passed on f916a8d; cause being established
 solidcraft-kernel::smooth_edges::tests::a_seam_split_in_two_edges_is_drawn_whole the side seam is one edge ([24]), not split in two, on SMLib v1.1.0-alpha (a18bbe5), passed on f916a8d; cause being established
-solidcraft-kernel::tests::fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole the partial selection runs on tangentially into an unblended edge and SMLib's result is not a closed solid (the smooth-vertex End, tangency-labs/smlib#81)
+solidcraft-kernel::tests::fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole the R25 rim and a corner arc round together since solidcore#2223, but the two R2 corner arcs picked together fail 1001 in trim_at_creases (cliff_overflow with the crease trims off), though each builds alone (solidcore#2314)
+solidcraft-kernel::tests::fillet_three_edges_at_a_corner solidcore builds the corner as an analytic sphere octant (sphere: 1); since 38385ab5d the test wants SMLib 5e8c9c1's blend (Ball corners as rational patches, the round as its definition, smlib#79), which solidcore ports in solidcore#2273: one rational patch on the ball's sphere
+solidcraft-smlib::core::blend_tests::fillet_all_edges::solidcore_matches_the_cpp_kernel the C++ comparison: solidcore's 8 box corners are analytic spheres, C++ 5e8c9c1's rational splines (SMLib 5e8c9c1's blend (Ball corners as rational patches, the round as its definition, smlib#79), which solidcore ports in solidcore#2273)
+solidcraft-smlib::core::blend_tests::fillet_variable_linear::solidcore_matches_the_cpp_kernel the C++ comparison: solidcore 5972.141093 against C++ 5e8c9c1's 5972.142573 (SMLib 5e8c9c1's blend (Ball corners as rational patches, the round as its definition, smlib#79), which solidcore ports in solidcore#2273)
+solidcraft-smlib::core::blend_tests::rounds_on_the_871_part the C++ comparison: solidcore 3874.348250 against C++ 5e8c9c1's 3874.348458 (SMLib 5e8c9c1's blend (Ball corners as rational patches, the round as its definition, smlib#79), which solidcore ports in solidcore#2273)
+solidcraft-smlib::core::blend_tests::setback_corner::solidcore_matches_the_cpp_kernel the C++ comparison: solidcore 5943.191647 against C++ f916a8d's 5948.231174 (SMLib f916a8d's setback corner (smlib#104), which solidcore ports in solidcore#2310)
+solidcraft-smlib::core::convert_tests::cpp_round_trip::a_shelled_rounded_box the C++ round trip: the shelled rounded box C++ 5e8c9c1 builds differs from solidcore's in its arrays (real array 154[0]: -10 against 0), its corners built by SMLib 5e8c9c1's blend (Ball corners as rational patches, the round as its definition, smlib#79), which solidcore ports in solidcore#2273
+solidcraft-smlib::core::offset_tests::mitred_rounds_follow_a_moved_top the C++ comparison: solidcore's offset edges keep their tolerances (offset_edges_keep_source_tolerance, solidcore#2111), C++ at 7ac037e's do not, so the moved tops' volumes are 2e-9 to 2.3e-7 apart; both are 1.2e-8 to 3.1e-7 off the closed form at accuracy 1e-8, solidcore with the fix 2.1e-7 at most
 solidcraft-smlib::ops::tests::a_setback_corner_left_open_returns_its_hole the open corner returns holes of 9, 27 and 19 edges, not its one hole; SMLib's open_holes counts a seam edge its own face uses twice as free (fixed for v1.1.0-alpha.1)
+solidcraft-smlib::ops::tests::a_variable_round_with_a_corner_in_its_law_is_its_balls_union solidcore refuses a variable fillet whose law has a corner (solidcore#430)
 solidcraft-smlib::ops::tests::fillet_takes_exactly_the_picked_edges one round on the picked edge gives 9 faces, not the expected count, on SMLib v1.1.0-alpha (a18bbe5), passed on f916a8d; cause being established

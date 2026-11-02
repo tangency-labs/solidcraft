@@ -540,12 +540,18 @@ fn offset_surface_cube_import_is_closed_and_editable() {
     assert!(rel(measure(&result).unwrap().volume, 1000.0 - 40.0 * std::f64::consts::PI) < 1e-3);
 }
 
-/// A solid whose B-rep SMLib refuses, its faces too (here every SMLib call: the build has no
-/// SMLib), is refused with the kernel's reason, naming the solid. It once came in as a mesh of
-/// its faces, which the planner could still triangulate.
+/// A solid whose B-rep SMLib refuses, its faces too (here every SMLib call: the C++ kernel is asked
+/// for, SOLIDCRAFT_KERNEL=smlib, on a build without it), is refused with the kernel's reason, naming
+/// the solid. It once came in as a mesh of its faces, which the planner could still triangulate.
+/// On solidcore, the default, the cube imports, so there is nothing to refuse.
 #[cfg(not(feature = "smlib"))]
 #[test]
 fn a_solid_smlib_refuses_with_its_faces_is_refused_not_meshed() {
+    use crate::kernel_route::{Backend, choice};
+    if choice() != Backend::Smlib {
+        eprintln!("skipped: needs SOLIDCRAFT_KERNEL=smlib on a build without the C++ kernel");
+        return;
+    }
     let text = format!("{HEAD}{}#60=SHAPE_REPRESENTATION('',(#101),$);\n{TAIL}", cube_entities());
     let why = step_import(&text).map(|imp| imp.warnings).unwrap_err().to_string();
     assert!(why.contains("solid 'Cube': not imported: ") && why.contains("SMLib"), "{why}");
