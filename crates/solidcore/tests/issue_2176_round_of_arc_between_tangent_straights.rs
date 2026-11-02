@@ -224,18 +224,35 @@ fn pinned_default_fails_the_corner() {
 /// figure is with WR-682's `fillet_surface_plane_curve_on_plane_equation`, which is in this
 /// test's set of fixes and takes 8.8e-9 off what that round removes (0.375911985298899
 /// without it): its end's curve is traced on the plane. The body is sound either way.
+///
+/// The tab side's edge and the rim each end at a mixed-convexity End (WR-697's
+/// `fillet_blend_corner`, the fork's 3e26f76, in this test's set of fixes): the end rib is the
+/// intersection between the rails' ends on the end face's surface, which are exact here to
+/// 1e-13. Without it the rib is marched from one rail's end, and the rounds remove
+/// 0.375911976512270 and 7.958674274526857. The rim's closed form, its spandrel
+/// (1 - pi/4) r^2 revolved about the disc's axis outside |x| < 4, is 7.958672911836132:
+/// the End's figure is 5.3e-8 off it, the marched rib's 1.4e-6.
+///
+/// The tab side's End rib is traced from the top rail's end. Until `FlushCurve` kept a
+/// short last span whose merge fails the trace's span test (WR-697 addendum, end-rib flush
+/// merge), the merged span left the rib's UV curve on the round 4.1077e-5 off its 3D curve
+/// (`check_brep` `Bad Gap`, edge tolerance 4e-5), and the round removed 0.375912317213533.
+/// Each body is now checked sound.
 #[test]
 fn the_neighbours_keep_their_rounds() {
     for (at, removed_before) in [
-        ([4.0, 28.0, 2.0], 0.375_911_976_512_270_5),
+        ([4.0, 28.0, 2.0], 0.375_912_307_117_687),
         ([0.0, 33.111_111_1, 2.0], 0.278_032_181_169_237_45),
-        ([0.0, -25.0, 2.0], 7.958_674_274_526_857),
+        ([0.0, -25.0, 2.0], 7.958_672_964_786_274),
     ] {
         let mut k = kernel(true);
         let mut b = plate(&mut k);
         let before = volume(&k, &mut b);
         let e = pick(&k, &b, at);
         fillet_edges(&mut k, &mut b, &[e], RADIUS, 1, 1, 1.0).unwrap();
+        b.refresh_cached_topology();
+        let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        assert!(check.is_valid(), "{at:?}: {:?}", check.lines());
         let removed = before - volume(&k, &mut b);
         assert!(
             (removed - removed_before).abs() <= 1e-9,

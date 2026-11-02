@@ -13,7 +13,7 @@
 //! Expected values are closed form (#2223's file header): each arc's round removes the
 //! Pappus wedge (1 - pi/4) r^2 (pi/2) (2 - c), c = r (10 - 3 pi) / (3 (4 - pi)); the two
 //! wedges lie at opposite corners of the tab and are disjoint, so the pair removes twice it.
-//! With the R25 rim as well, the rim's 7.958674274526857 (#2176) is added: its round ends on
+//! With the R25 rim as well, the rim's 7.958672964786274 (#2176) is added: its round ends on
 //! the tab's sides at y = sqrt(609) < 280/9, clear of both wedges.
 
 #![allow(
@@ -46,7 +46,7 @@ const CORNER_L: [f64; 3] = [-3.414_213_56, 32.525_324_7, 2.0];
 /// A point on the R2 corner arc at x > 0 (#2314's `CORNER`).
 const CORNER: [f64; 3] = [3.414_213_56, 32.525_324_7, 2.0];
 /// What the rim's round removes alone (#2176's `the_neighbours_keep_their_rounds`).
-const RIM_REMOVED: f64 = 7.958_674_274_526_857;
+const RIM_REMOVED: f64 = 7.958_672_964_786_274;
 
 /// Every opt-in fix on (as in the issue), with WR-706 as given.
 fn kernel(wr706: bool) -> Kernel {

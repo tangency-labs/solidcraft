@@ -938,6 +938,19 @@ impl FilletCorner {
             FilletCornerKind::NByOneClosed => {
                 self.tangent_fillet_solver_nx1_closed_with_lookup(k, b, fs, solver_of)
             }
+            // the fork's SmBlendCorner::GetTangentFilletSolver: a closed Join's one blend
+            // continues itself (543d25a; WR-697)
+            FilletCornerKind::NByTwo if self.is_closed_join() => {
+                let eus = self
+                    .solver_eus
+                    .as_deref()
+                    .ok_or_else(|| SolidError::invalid_input(OP, NULL_DEREF))?;
+                let eu = eus
+                    .first()
+                    .copied()
+                    .ok_or_else(|| SolidError::invalid_input(OP, NULL_DEREF))?;
+                Ok((solver_of(eu) == Some(fs)).then_some(fs))
+            }
             FilletCornerKind::NByTwo => {
                 self.tangent_fillet_solver_nx2_with_lookup(k, b, fs, solver_of)
             }

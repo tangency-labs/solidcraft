@@ -30,7 +30,12 @@
 //! 9bebf34 it is [`kernel`]: the same without WR-600's
 //! `fillet_nx1_tangent_side_edge_same_convexity`, whose tangent end of the trace is the fork's
 //! later 6d73e4f/0cc48bd/b34d61b (under it a tangent end is a rail/edge crossing of the trace
-//! and never reaches `CalcRailIntExtendedEdgeuse`).
+//! and never reaches `CalcRailIntExtendedEdgeuse`), and without WR-697's `fillet_blend_corner`,
+//! the fork's later smlib#79 step 4. In the fork that step always comes with the tangent
+//! end of the trace: its End (3e26f76) takes a rail's end on the end face's surface, which a
+//! tangent end reaching `CalcRailIntExtendedEdgeuse` without WR-600 does not meet (the
+//! curvature round fails with 1005 there). At 5e8c9c1, with both, the fork's marks of the
+//! thirteen cases are cd47efd's, and solidcore's under [`solidcraft_kernel`] are too.
 //!
 //! Four of the cases have tests already, under WR-600 on (cd47efd's profile):
 //! `fork_856b54e_tangent_end.rs` (front chamfer, concave chamfer, front round, against closed
@@ -76,10 +81,11 @@ use solidcore::{Brep, Kernel};
 const PI: f64 = core::f64::consts::PI;
 
 /// The fork's profile at 9bebf34, before its tangent end of the trace (module doc):
-/// [`solidcraft_kernel`] without WR-600's fix.
+/// [`solidcraft_kernel`] without WR-600's fix and without WR-697's blend corner.
 fn kernel() -> Kernel {
     let mut k = solidcraft_kernel();
     k.fixes.fillet_nx1_tangent_side_edge_same_convexity = false;
+    k.fixes.fillet_blend_corner = false;
     k
 }
 
@@ -389,6 +395,8 @@ fn rounds_together_r5(k: &mut Kernel) -> Outcome {
 enum Here {
     /// The fork marks it failing; it passes here.
     Passes(&'static str),
+    /// Both fail, for a different reason or by a different amount here.
+    FailsOtherwise(&'static str),
 }
 
 /// The fork's mark of a case at one revision: its reason the case fails there (`None`: it
@@ -403,6 +411,7 @@ impl Mark {
     fn fails_here(&self) -> bool {
         match self.here {
             Some(Here::Passes(_)) => false,
+            Some(Here::FailsOtherwise(_)) => true,
             None => self.fails_today.is_some(),
         }
     }
@@ -462,6 +471,8 @@ const ROUNDS_R2: &str = "the corner patch where the rounds meet stands 0.0374 ou
 const ROUNDS_R5: &str = "the corner patch where the rounds meet stands 0.128 out of the front face (box y min -0.1278205)";
 const ROUNDS_R2_HERE: &str = "the rounds together build within the box and check clean (with fillet_blend_corner, as the blend corner's Mixed corner, built in solidcore from smlib#82)";
 const ROUNDS_R5_HERE: &str = "the blend corner's Mixed corner (fillet_blend_corner, built in solidcore from smlib#82) builds the rounds together within the box; without it the pinned corner patch stands 0.00156 out of the front face (box y min -0.0015609)";
+const ROUNDS_R2_HERE_AT_9BEBF34: &str = "the rounds together build within the box and check clean (the pinned corner patch: this profile has no fillet_blend_corner, whose Mixed corner builds them at cd47efd)";
+const ROUNDS_R5_HERE_AT_9BEBF34: &str = "the pinned corner patch stands 0.00156 out of the front face (box y min -0.0015609): this profile has no fillet_blend_corner, whose Mixed corner builds the rounds together within the box at cd47efd";
 const CHAMFERS_HERE: &str = "the blend corner's Mixed corner (fillet_blend_corner, built in solidcore from smlib#82) builds the chamfers together at the tangent seam";
 
 const TANGENT_END_CASES: [TangentEndCase; 13] = [
@@ -557,7 +568,7 @@ const TANGENT_END_CASES: [TangentEndCase; 13] = [
         run: rounds_together_r2,
         at_9bebf34: Mark {
             fails_today: Some(ROUNDS_R2),
-            here: Some(Here::Passes(ROUNDS_R2_HERE)),
+            here: Some(Here::Passes(ROUNDS_R2_HERE_AT_9BEBF34)),
         },
         at_cd47efd: Mark {
             fails_today: Some(ROUNDS_R2),
@@ -569,7 +580,7 @@ const TANGENT_END_CASES: [TangentEndCase; 13] = [
         run: rounds_together_r5,
         at_9bebf34: Mark {
             fails_today: Some(ROUNDS_R5),
-            here: Some(Here::Passes(ROUNDS_R5_HERE)),
+            here: Some(Here::FailsOtherwise(ROUNDS_R5_HERE_AT_9BEBF34)),
         },
         at_cd47efd: Mark {
             fails_today: Some(ROUNDS_R5),
@@ -627,6 +638,23 @@ fn tangent_end_cases_known_failing_at_cd47efd() {
     );
 }
 
+/// The rounds together at r 5: without the blend corner (9bebf34's profile) the pinned corner
+/// patch stands 0.00156 out of the front face; with it (cd47efd's) the Mixed corner builds them
+/// within the box (`issue_2360_mixed_corner.rs`).
+#[test]
+fn rounds_together_r5_needs_the_mixed_corner() {
+    let before = rounds_together_r5(&mut kernel());
+    assert_eq!(before.failed.len(), 1, "{:?}", before.failed);
+    assert!(
+        before.failed[0].contains("y: -0.00156094628"),
+        "{:?}",
+        before.failed
+    );
+
+    let after = rounds_together_r5(&mut solidcraft_kernel());
+    assert!(after.failed.is_empty(), "{:?}", after.failed);
+}
+
 /// WR-710 (`fillet_refuse_mixed_corner_crossing_rails`, #2256): the front top edge and the
 /// concave arc leave V along one tangent, so the bar's top closes to a cusp there and the
 /// rails on it cross before the corner. With the refusal on, the rounds together are refused
@@ -662,7 +690,7 @@ fn tangent_end_marks_are_the_fork_s() {
             let differs = m.fails_here() != m.fails_today.is_some();
             match &m.here {
                 None => assert!(!differs, "{revision:?} {}", c.name),
-                Some(Here::Passes(why)) => {
+                Some(Here::Passes(why) | Here::FailsOtherwise(why)) => {
                     assert!(
                         m.fails_today.is_some() && !why.is_empty(),
                         "{revision:?} {}",

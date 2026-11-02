@@ -86,6 +86,15 @@ pub trait RailClassificationContext {
     /// # Errors
     /// An unresolved corner.
     fn corner_type(&self, corner: FilletCornerId) -> Result<FilletCornerType>;
+    /// `(IsClosedJoin(), IsEndOnEndFace())` of the corner (the fork's 543d25a, 53c47b8;
+    /// WR-697). The default, for a context without blend corners: no closed Join, and an
+    /// end on its end face exactly at an Nx1 corner.
+    ///
+    /// # Errors
+    /// An unresolved corner.
+    fn corner_blend_tests(&self, corner: FilletCornerId) -> Result<(bool, bool)> {
+        Ok((false, self.corner_type(corner)? == FilletCornerType::NByOne))
+    }
     /// `GetFilletExecutive()->GetFilletCornerOfVertex(vertex)` of the fork's
     /// `EndSectionsFitTheirFaces` (tangency-labs/smlib `a307480`): the corner of a
     /// target vertex.
@@ -176,6 +185,9 @@ impl<C: RailClassificationContext> SplitCorners for ContextCorners<'_, C> {
     }
     fn corner_type(&self, id: FilletCornerId) -> Result<FilletCornerType> {
         self.0.corner_type(id)
+    }
+    fn is_closed_join(&self, id: FilletCornerId) -> Result<bool> {
+        Ok(self.0.corner_blend_tests(id)?.0)
     }
 }
 
@@ -580,6 +592,9 @@ mod tests {
         }
         fn corner_type(&self, id: FilletCornerId) -> Result<FilletCornerType> {
             (self.0)(id)
+        }
+        fn is_closed_join(&self, _: FilletCornerId) -> Result<bool> {
+            Ok(false)
         }
     }
 

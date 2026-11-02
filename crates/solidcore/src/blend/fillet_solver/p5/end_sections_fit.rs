@@ -12,7 +12,7 @@
 //! (`SmFace::CurveOnClassify`). There is no recursion.
 
 use super::{RailClassificationContext, OP};
-use crate::blend::fillet_geom::p1::{FilletBrep, FilletCornerType, FilletGeomType};
+use crate::blend::fillet_geom::p1::{FilletBrep, FilletGeomType};
 use crate::blend::fillet_geom::p2::{srf_srf_intersection, SrfSrfOptions};
 use crate::blend::fillet_solver::p1::{
     test_manifold_tangent_rollover, FilletSolver, FilletSolverOps,
@@ -104,8 +104,9 @@ impl FilletSolver {
                 let v = v.ok_or_else(|| SolidError::null_pointer(OP))?;
                 let corner = context.corner_of_vertex(v)?;
                 let vertex_edges = vertex::edges(target, v, None)?;
+                // the fork's IsEndOnEndFace() (53c47b8; WR-697): the Nx1 corner pinned
                 let is_nx1 = match corner {
-                    Some(c) => context.corner_type(c)? == FilletCornerType::NByOne,
+                    Some(c) => context.corner_blend_tests(c)?.1,
                     None => false,
                 };
                 if !is_nx1 || vertex_edges.len() != 3 {

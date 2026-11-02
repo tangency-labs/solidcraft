@@ -2257,8 +2257,35 @@ impl FilletBrep {
                     continue;
                 };
 
-                let prim_eu = primary_edgeuse(fillet_brep, fb_edge)?
+                let mut prim_eu = primary_edgeuse(fillet_brep, fb_edge)?
                     .ok_or_else(|| invalid(OP_TRIM, "fillet B-rep edge without edge use"))?;
+                // The fork's (WR-697, 794946e): the edge use on this fillet's own face
+                // (its surface). Where two blends' contact lines meet, their rails are
+                // one edge of the fillet B-rep between both fillets' faces, and its primary
+                // edge use can be the other's: this fillet's face was then never collected
+                // to be kept. A rail edge on one face only has the one.
+                if k.fixes.fillet_blend_corner {
+                    let prim_face = eu1::face(fillet_brep, prim_eu)?;
+                    let own = own_fillet_face(geom, fillet_brep);
+                    let mut own_eu = None;
+                    let mut two_faces = false;
+                    for eu in edge::edgeuses(fillet_brep, fb_edge, None, None)? {
+                        let face = eu1::face(fillet_brep, eu)?;
+                        if face != prim_face {
+                            two_faces = true;
+                        }
+                        if own_eu.is_none() && same_surface(fillet_brep, face, own)? {
+                            own_eu = Some(eu);
+                        }
+                    }
+                    if let Some(eu) = own_eu {
+                        prim_eu = eu;
+                    } else if two_faces {
+                        // SER_MSG: a rail's edge lies between two faces, neither the
+                        // fillet's own
+                        return Err(SolidError::sm_err(OP_TRIM));
+                    }
+                }
                 let fb_face = eu1::face(fillet_brep, prim_eu)?;
 
                 // Collect all faces reachable from pFBFace in m_pFilletBrep -- all new
@@ -2547,6 +2574,41 @@ impl FilletBrep {
         }
         Ok(())
     }
+}
+
+/// The fillet B-rep face that holds geometry `geom`'s fillet surface (`GetFilletSurface()`
+/// once `MakeFaceBrep` transferred it to `fillet_brep`), if any.
+fn own_fillet_face(geom: &super::p1::FilletGeom, fillet_brep: &Brep) -> Option<FaceId> {
+    let Some(super::p1::FilletSurfaceStorage::ManagedFace { body, face }) = geom.fillet_surface
+    else {
+        return None;
+    };
+    let serial = fillet_brep.notify_serial()?;
+    let identity = crate::topology::brep::p3::topology_ref(
+        serial,
+        EntityRef::Brep(crate::topology::BrepId::from_index(0)),
+    );
+    (identity == body).then_some(face)
+}
+
+/// `pFace->GetSurface() == GetFilletSurface()`: pointer identity of `face`'s surface and
+/// the fillet surface on face `own` (the same face's, or one carrying the same owner, as
+/// every record standing for one upstream surface object does). No fillet face: `false`.
+fn same_surface(brep: &Brep, face: Option<FaceId>, own: Option<FaceId>) -> Result<bool> {
+    let (Some(face), Some(own)) = (face, own) else {
+        return Ok(false);
+    };
+    if face == own {
+        return Ok(true);
+    }
+    let (a, b) = (
+        brep.face(face)?.surface.as_ref(),
+        brep.face(own)?.surface.as_ref(),
+    );
+    Ok(match (a, b) {
+        (Some(x), Some(y)) => x.owner().is_some_and(|o| Some(o) == y.owner()),
+        _ => false,
+    })
 }
 
 #[cfg(test)]

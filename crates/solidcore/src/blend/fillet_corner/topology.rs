@@ -39,6 +39,7 @@ pub mod closed_nx1;
 mod concave_4x2;
 pub mod concave_nxn;
 pub mod end_corners;
+pub mod join;
 mod mixed;
 pub mod mixed_3x2;
 mod swept_turn;

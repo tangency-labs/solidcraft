@@ -1190,6 +1190,72 @@ impl<'s> SurfaceIntersector<'s> {
         })
     }
 
+    /// Not upstream (WR-697 addendum, with `fixes.fillet_blend_corner`): whether the span
+    /// from `a` to `b` passes the tests [`Self::test_span_accuracy`] makes of a traced
+    /// span, without touching either point: the tangent turn within `this_ang_tol_rad`,
+    /// and at the same five interior parameters the 3D Hermite span and the two UV
+    /// Hermite spans mapped onto their surfaces within `this_approx_tol_3d` of each other.
+    /// A span no longer than `100 * SM_EFF_ZERO` passes, as there.
+    ///
+    /// # Errors
+    ///
+    /// Those of the angle and the surface evaluations.
+    pub(super) fn span_keeps_accuracy(
+        &self,
+        k: &Kernel,
+        a: &TsectPnt,
+        b: &TsectPnt,
+    ) -> Result<bool> {
+        let step_size = b.curve_parameter - a.curve_parameter;
+        if step_size <= EFF_ZERO * 100.0 {
+            return Ok(true);
+        }
+        if a.crv_deriv().angle_between(b.crv_deriv())? > self.this_ang_tol_rad {
+            return Ok(false);
+        }
+        let uv_crv0 = HermiteCurve::from_2d(
+            a.uv_pos(SrfIndex::First),
+            a.uv_deriv(SrfIndex::First) * step_size,
+            b.uv_pos(SrfIndex::First),
+            b.uv_deriv(SrfIndex::First) * step_size,
+            2,
+        );
+        let uv_crv1 = HermiteCurve::from_2d(
+            a.uv_pos(SrfIndex::Second),
+            a.uv_deriv(SrfIndex::Second) * step_size,
+            b.uv_pos(SrfIndex::Second),
+            b.uv_deriv(SrfIndex::Second) * step_size,
+            2,
+        );
+        let crv_3d = HermiteCurve::new(
+            a.crv_pos(),
+            a.crv_deriv() * step_size,
+            b.crv_pos(),
+            b.crv_deriv() * step_size,
+            3,
+        );
+        let tol_sq = self.this_approx_tol_3d * self.this_approx_tol_3d;
+        for i in 0..NUM_SPAN_TEST_POINTS {
+            let param = (i as f64 + 1.0) / (NUM_SPAN_TEST_POINTS as f64 + 1.0);
+            let uv3d0 = uv_crv0.evaluate_point(param);
+            let uv3d1 = uv_crv1.evaluate_point(param);
+            let uv0 = self.uv_domains[0].clamp_point(Point2::new(uv3d0.x, uv3d0.y));
+            let uv1 = self.uv_domains[1].clamp_point(Point2::new(uv3d1.x, uv3d1.y));
+            let pnt0 = self.surfaces[0].evaluate_point(k, uv0)?;
+            let pnt1 = self.surfaces[1].evaluate_point(k, uv1)?;
+            let crv_pnt = crv_3d.evaluate_point(param);
+            let dist_sq = max3(
+                pnt0.distance_squared(pnt1),
+                pnt0.distance_squared(crv_pnt),
+                pnt1.distance_squared(crv_pnt),
+            );
+            if dist_sq > tol_sq {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     /// A rejected span: a singular point becomes a crossing point.
     fn demote_singularity(&mut self, id: TsectId) -> Result<()> {
         let p = self.point_mut(id)?;

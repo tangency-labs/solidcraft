@@ -15,6 +15,7 @@
 //! | [`FilletBrep::calc_rail_int_edgeuse`], [`FilletBrep::calc_rail_int_edgeuse_with_solver`] | `SmFilletVertex::CalcRailIntEdgeuse`         |
 //! | [`FilletBrep::calc_vert_on_cross_section`]        | `SmFilletVertex::CalcVertOnCrossSection`     |
 //! | [`FilletBrep::calc_set_back_vert`]                | `SmFilletVertex::CalcSetBackVert`            |
+//! | [`FilletBrep::calc_join_section`]                 | the fork's `SmFilletVertex::CalcJoinSection` (`SmBlendCornerJoin.cpp`, 543d25a; WR-697) |
 //! | [`FilletBrep::new_fillet_edge`](super::p1::FilletBrep::new_fillet_edge) (in `p1`) | `SmFilletEdge::SmFilletEdge` |
 //! | [`FilletBrep::calc_rail_rail_interpolation`]      | `SmFilletEdge::CalcRailRailInterpolation`    |
 //! | [`FilletBrep::update_edge_split_face`]            | `SmFilletEdge::UpdateSplitFace`              |
@@ -173,6 +174,7 @@ const OP_RAIL_RAIL: &str = "blend::fillet_geom::p2::FilletBrep::calc_rail_int_ra
 const OP_RAIL_EU: &str = "blend::fillet_geom::p2::FilletBrep::calc_rail_int_edgeuse";
 const OP_CROSS: &str = "blend::fillet_geom::p2::FilletBrep::calc_vert_on_cross_section";
 const OP_SETBACK: &str = "blend::fillet_geom::p2::FilletBrep::calc_set_back_vert";
+const OP_JOIN: &str = "blend::fillet_geom::p2::FilletBrep::calc_join_section";
 const OP_INTERP: &str = "blend::fillet_geom::p2::FilletBrep::calc_rail_rail_interpolation";
 const OP_SPLIT: &str = "blend::fillet_geom::p2::FilletBrep::update_edge_split_face";
 const OP_DESTROY: &str = "blend::fillet_geom::p2::FilletBrep::destroy_geom";
@@ -2378,6 +2380,180 @@ impl FilletBrep {
         let uv2 = tsect.uv_pos(other_srf(rail_index, OP)?);
         let pnt2 = face_surface(target, face2, OP)?.evaluate_point(k, uv2)?;
         self.set_processed(mate, uv2, pnt2)?;
+        Ok(())
+    }
+
+    /// The fork's `SmFilletVertex::CalcJoinSection` (`SmBlendCornerJoin.cpp`, 543d25a;
+    /// WR-697): a Join's shared section (`SM_FV_JOIN_SECTION` `v` and its mate), each
+    /// blend's section in the plane through the corner's vertex square to the first
+    /// blend's edge there. Each blend's section is its ball's: `PointOnPlaneSolve` on the
+    /// blend's own faces, started from the ball's feet at the vertex (the vertex stepped
+    /// the ball's radius along each face's binormal of the edge). It sets the blend's rail
+    /// end here (and a closed blend's other one). The section's ends are the first
+    /// blend's feet, on `v`'s face and on its mate's.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_NULL_POINTER` without corner, mate, faces, filleted vertex, solver, edge
+    /// use, edge, curve, offset or base surface or rail-end vertex use; `SM_ERR` without a
+    /// fillet geometry and, after setting `SM_FV_SOLVER_NOT_CONVERGE`, when a blend has
+    /// no ball in the plane; those of the evaluations and solves.
+    pub fn calc_join_section(
+        &mut self,
+        k: &Kernel,
+        v: VertexId,
+        corners: CornerLookup<'_>,
+        solvers: &mut [FilletSolver],
+        target: &mut Brep,
+    ) -> Result<()> {
+        self.calc_join_section_with_solvers(
+            k,
+            v,
+            corners,
+            &mut RailSolvers::Indexed(solvers),
+            target,
+        )
+    }
+
+    /// [`Self::calc_join_section`] with the live session's concrete solvers of the
+    /// vertex's geometries (`PointOnPlaneSolve` is the concrete solver's virtual).
+    ///
+    /// # Errors
+    /// As [`Self::calc_join_section`]; an unresolved geometry solver.
+    pub fn calc_join_section_with_live_solvers(
+        &mut self,
+        k: &Kernel,
+        v: VertexId,
+        corners: CornerLookup<'_>,
+        solvers: Vec<(FilletSolverId, &mut dyn FilletSolverOps)>,
+        target: &mut Brep,
+    ) -> Result<()> {
+        self.calc_join_section_with_solvers(
+            k,
+            v,
+            corners,
+            &mut RailSolvers::LiveSet(solvers),
+            target,
+        )
+    }
+
+    #[allow(clippy::too_many_lines)] // one fork routine
+    fn calc_join_section_with_solvers(
+        &mut self,
+        k: &Kernel,
+        v: VertexId,
+        corners: CornerLookup<'_>,
+        solvers: &mut RailSolvers<'_>,
+        target: &mut Brep,
+    ) -> Result<()> {
+        const OP: &str = OP_JOIN;
+        let nul = || SolidError::null_pointer(OP);
+        let corner = self.fillet_vertex(v)?.fillet_corner().ok_or_else(nul)?;
+        let mate = self.fillet_vertex(v)?.mate(0).ok_or_else(nul)?;
+        let first_face =
+            as_face(self.fillet_vertex(v)?.point_class_object(), OP)?.ok_or_else(nul)?;
+        let other_face =
+            as_face(self.fillet_vertex(mate)?.point_class_object(), OP)?.ok_or_else(nul)?;
+        let cp_vertex = corners.corner(corner)?.filleted_vertex().ok_or_else(nul)?;
+
+        let geoms = self.vertex_fillet_geoms(v)?;
+        if geoms.is_empty() {
+            return Err(SolidError::sm_err(OP));
+        }
+
+        // the plane: through the vertex, square to the first blend's edge
+        let mut plane_orig = Point3::default();
+        let mut plane_normal = Vec3::default();
+        for (gg, &g) in geoms.iter().enumerate() {
+            let sid = self.geom_solver_id(g, OP)?;
+            let fs = solvers.solver(sid)?;
+            let eu = solver_edgeuse(fs, 0, OP)?;
+            let e = eu1::edge(target, eu)?.ok_or_else(nul)?;
+            let curve = edge::curve(target, e)?.ok_or_else(nul)?.clone();
+            let ivl = edge::interval(target, e)?;
+            let param = if edge::start_vertex(target, e)? == Some(cp_vertex) {
+                ivl.min()
+            } else {
+                ivl.max()
+            };
+            if gg == 0 {
+                let pv = curve.evaluate(k, param, 1, true, true)?;
+                plane_orig = pv.first().copied().ok_or_else(|| SolidError::sm_err(OP))?;
+                plane_normal = pv.get(1).copied().ok_or_else(|| SolidError::sm_err(OP))?;
+            }
+
+            // the ball's feet at the vertex, on each of the blend's faces
+            let mut uvs = [Point2::new(0.0, 0.0); 2];
+            for (ii, slot) in uvs.iter_mut().enumerate() {
+                let fs = solvers.solver(sid)?;
+                let side_eu = solver_edgeuse(fs, ii, OP)?;
+                let offset = solver_surface(fs, ii, OP)?;
+                let distance = offset.offset_distance().abs();
+                let base = offset.base_surface().clone();
+                let b = evaluate_binormal(
+                    k,
+                    target,
+                    side_eu,
+                    param,
+                    false,
+                    &BinormalOptions::default(),
+                )?;
+                let bin = b.binormal * distance;
+                let uv_dir = crate::surface::surface::p7::drop_vectors_at(
+                    k,
+                    &base,
+                    b.uv,
+                    Side::Left,
+                    Side::Left,
+                    &[bin],
+                )?
+                .first()
+                .copied()
+                .ok_or_else(|| SolidError::sm_err(OP))?;
+                *slot = Point2::new(b.uv.x + uv_dir.x, b.uv.y + uv_dir.y);
+            }
+
+            let (vu, tsect) = self.rail_end_tsect(v, Some(g), None, OP)?;
+            let fs = solvers.solver(sid)?;
+            let domain1 = solver_surface(fs, 0, OP)?.natural_uv_domain_with_nurb(k)?;
+            let domain2 = solver_surface(fs, 1, OP)?.natural_uv_domain_with_nurb(k)?;
+            let [uv0, uv1] = uvs;
+            let (found, tsect) = point_on_plane_solve(
+                k,
+                solvers.solver_ops_mut(sid)?,
+                plane_orig,
+                plane_normal,
+                &domain1,
+                &domain2,
+                uv0,
+                uv1,
+                &tsect,
+            )?;
+            self.fillet_vertexuse_mut(vu)?.set_tsect_pnt(&tsect);
+            if !found {
+                self.fillet_vertex_mut(v)?
+                    .set_status(FilStatus::SolverNotConverge);
+                // SER_MSG: no ball of the blend lies in the shared section's plane
+                return Err(SolidError::sm_err(OP));
+            }
+            // a closed blend's other rail end here
+            if let Some(other_vu) = self.vu_at_rail_end(v, Some(g), Some(vu), None)? {
+                self.fillet_vertexuse_mut(other_vu)?.set_tsect_pnt(&tsect);
+            }
+
+            if gg == 0 {
+                // the section's ends: the first blend's feet
+                let first = usize::from(eu1::face(target, eu)? != Some(first_face));
+                let uv_first = tsect.uv_pos(srf(first, OP)?);
+                let uv_other = tsect.uv_pos(other_srf(first, OP)?);
+                let p_first =
+                    face_surface(target, Some(first_face), OP)?.evaluate_point(k, uv_first)?;
+                let p_other =
+                    face_surface(target, Some(other_face), OP)?.evaluate_point(k, uv_other)?;
+                self.set_processed(v, uv_first, p_first)?;
+                self.set_processed(mate, uv_other, p_other)?;
+            }
+        }
         Ok(())
     }
 

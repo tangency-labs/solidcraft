@@ -1482,6 +1482,12 @@ impl FilletBrep {
             Some(c) => corners.corner(c)?.corner_type() == FilletCornerType::ThreeByTwoMixed,
             None => false,
         };
+        // The fork's (WR-697, 3e26f76): at an End's end rib the rail's end is its crossing
+        // with the end face's surface (CalcRailIntEndSurface); the end rib is then the
+        // intersection between the two rail ends (CalcFilletIntSideFace)
+        if k.fixes.fillet_blend_corner && !b3x2_mixed_corner_case {
+            return self.calc_rail_int_end_surface(k, v, corners, context, target);
+        }
 
         // Find adjacent fillet edge which was classified
         let fe_type = if b3x2_mixed_corner_case {
@@ -1694,6 +1700,103 @@ impl FilletBrep {
 
         // Set vertex geometry
         set_vertex_point(self.brep_mut(), v, vert_geom)?;
+        self.fillet_vertex_mut(v)?.set_status(FilStatus::Processed);
+        Ok(())
+    }
+
+    /// The fork's `SmFilletVertex::CalcRailIntEndSurface` (`SmBlendCornerEnd.cpp`,
+    /// 3e26f76; WR-697): the rail's end at a mixed-convexity End
+    /// (`SM_FV_RAIL_X_EXTENDED_EDGEUSE` of an end rib, `SM_FE_FILLET_X_SIDE_FACE`), the rail
+    /// curve's crossing with the end face's surface continued (the corner's extended
+    /// surface of the end face, else the face's own), the crossing nearest the corner's
+    /// vertex. Before the blend is traced (no fillet surface or rail curve yet) the vertex
+    /// is left unprocessed.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_NULL_POINTER` without corner, end rib, rail, primary edge use, fillet
+    /// geometry, end face, its surface, solver or filleted vertex; `SM_ERR` after setting
+    /// `SM_FIL_SURF_INT_FAILURE` when the rail does not meet the surface; those of the
+    /// intersection and evaluations.
+    pub fn calc_rail_int_end_surface(
+        &mut self,
+        k: &Kernel,
+        v: VertexId,
+        corners: CornerLookup<'_>,
+        context: &(impl super::p5::FilletEdgeContext + ?Sized),
+        target: &Brep,
+    ) -> Result<()> {
+        const OP: &str = "blend::fillet_geom::p4::FilletBrep::calc_rail_int_end_surface";
+        let nul = || SolidError::null_pointer(OP);
+        let corner = corners.corner(self.fillet_vertex(v)?.fillet_corner().ok_or_else(nul)?)?;
+
+        // the end rib and this vertex's rail
+        let mut rib = None;
+        let mut rail = None;
+        for e in vertex::edges(self.brep(), v, None)? {
+            let edge_type = self.fillet_edge(e)?.fillet_edge_type();
+            if edge_type == FilletEdgeType::FilletXSideFace && rib.is_none() {
+                rib = Some(e);
+            } else if edge_type == FilletEdgeType::Rail && rail.is_none() {
+                rail = Some(e);
+            }
+        }
+        let rib = rib.ok_or_else(nul)?;
+        let rail = rail.ok_or_else(nul)?;
+        let rib_eu = primary_edgeuse(self.brep(), rib)?.ok_or_else(nul)?;
+        let fillet_geom = self.fillet_edgeuse(rib_eu)?.fillet_geom().ok_or_else(nul)?;
+        let rail_curve = edge::curve(self.brep(), rail)?.cloned();
+        let (true, Some(rail_curve)) = (self.geom(fillet_geom)?.has_fillet_surface(), rail_curve)
+        else {
+            // not traced yet: the corner's second pass finds it
+            return Ok(());
+        };
+
+        let end_face = self.fillet_edge(rib)?.original_face().ok_or_else(nul)?;
+        let end_surface = match context.extended_surface(corner, end_face)? {
+            Some(s) => s.clone(),
+            None => target
+                .face(end_face)?
+                .surface
+                .as_ref()
+                .ok_or_else(nul)?
+                .clone_for_evaluation()?,
+        };
+
+        let sid = self.geom(fillet_geom)?.fillet_solver().ok_or_else(nul)?;
+        let tol = context.solver(sid)?.this_approx_tol_3d();
+
+        let interval = rail_curve.natural_interval();
+        let solutions = end_surface.global_curve_intersect(
+            k,
+            [
+                super::p1::CliffHandle::Curve(&rail_curve),
+                super::p1::CliffHandle::Surface(&end_surface),
+            ],
+            &end_surface.natural_uv_domain_with_nurb(k)?,
+            &rail_curve,
+            &interval,
+            tol,
+        )?;
+        let vert_pnt = vertex::point(target, corner.filleted_vertex().ok_or_else(nul)?)?;
+        let mut best: Option<Point3> = None;
+        let mut best_dist = BIG_DOUBLE;
+        for sol in solutions.as_slice() {
+            let pnt = rail_curve.evaluate_point(k, sol.start.param(0)?)?;
+            let dist = pnt.distance(vert_pnt);
+            if dist < best_dist {
+                best_dist = dist;
+                best = Some(pnt);
+            }
+        }
+        let Some(best) = best else {
+            self.fillet_vertex_mut(v)?
+                .set_status(FilStatus::SurfIntFailure);
+            // SER_MSG: the rail does not meet the end face's surface
+            return Err(SolidError::sm_err(OP));
+        };
+
+        set_vertex_point(self.brep_mut(), v, best)?;
         self.fillet_vertex_mut(v)?.set_status(FilStatus::Processed);
         Ok(())
     }

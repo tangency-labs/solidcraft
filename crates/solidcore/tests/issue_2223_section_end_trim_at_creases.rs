@@ -26,8 +26,8 @@
 //!
 //! **Both.** The rim's round ends on the tab's flat sides at y = sqrt(609) = 24.68, the corner
 //! arc's round starts at y = 280/9 = 31.11, so the two removed regions are disjoint and the
-//! fillet removes the rim's 7.958674274526857 (the rim alone, as #2176's test pins it) plus
-//! the wedge: 8.117810114248773.
+//! fillet removes the rim's 7.958672964786274 (the rim alone, as #2176's test pins it, its end rib WR-697's End's) plus
+//! the wedge: 8.11780880450819.
 
 #![allow(
     clippy::unwrap_used,
@@ -57,7 +57,7 @@ const RIM: [f64; 3] = [0.0, -25.0, 2.0];
 /// A point on the R2 corner arc at x > 0.
 const CORNER: [f64; 3] = [3.414_213_56, 32.525_324_7, 2.0];
 /// What the rim's round removes alone (#2176's `the_neighbours_keep_their_rounds`).
-const RIM_REMOVED: f64 = 7.958_674_274_526_857;
+const RIM_REMOVED: f64 = 7.958_672_964_786_274;
 
 /// Every opt-in fix on (as in the issue), with WR-706 as given.
 fn kernel(wr706: bool) -> Kernel {

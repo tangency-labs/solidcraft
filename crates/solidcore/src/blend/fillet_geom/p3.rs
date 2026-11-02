@@ -308,6 +308,8 @@ impl FilletBrep {
                 self.calc_vert_on_cross_section(k, v, None, corners, solvers, target)
             }
             FilletVertexType::Setback => self.calc_set_back_vert(k, v, corners, solvers, target),
+            // the fork's SM_FV_JOIN_SECTION (543d25a; WR-697)
+            FilletVertexType::JoinSection => self.calc_join_section(k, v, corners, solvers, target),
             FilletVertexType::Mate => self.mate_geom(k, v, corners, target, solvers, depth),
             // SM_FV_FILLET_X_EDGEUSE and default
             _ => Ok(()),
@@ -1611,6 +1613,9 @@ impl FilletBrep {
         // pFilletCorner->GetCornerType() (upstream dereferences a NULL corner)
         let corner_type = corners
             .corner_type(fillet_corner.ok_or_else(|| SolidError::null_pointer(OP_SPLIT))?)?;
+        let closed_join = corner_type == FilletCornerType::NByTwo
+            && corners
+                .is_closed_join(fillet_corner.ok_or_else(|| SolidError::null_pointer(OP_SPLIT))?)?;
 
         // move the side edgeuses associated to the original geom to the new geom
         let ref_eus = self.geom(g)?.ref_eus.clone();
@@ -1625,8 +1630,10 @@ impl FilletBrep {
             if self.fillet_edge(e)?.fillet_corner() != fillet_corner {
                 continue;
             }
+            // the fork's `|| IsClosedJoin()` in place of the 1x1 corner (543d25a; WR-697)
             if (corner_type == FilletCornerType::NByOneClosed
-                || corner_type == FilletCornerType::OneByOne)
+                || corner_type == FilletCornerType::OneByOne
+                || closed_join)
                 && Some(eu) == primary_edgeuse(self.brep(), e)?
             {
                 continue;
@@ -1673,6 +1680,13 @@ pub trait SplitCorners {
     /// [`CornerLookup::corner`]'s for an id not in the table.
     fn corner_type(&self, id: FilletCornerId) -> Result<FilletCornerType> {
         Ok(self.lookup().corner(id)?.corner_type())
+    }
+    /// `pCorner->IsClosedJoin()` (the fork's 543d25a; WR-697).
+    ///
+    /// # Errors
+    /// [`CornerLookup::corner`]'s for an id not in the table.
+    fn is_closed_join(&self, id: FilletCornerId) -> Result<bool> {
+        Ok(self.lookup().corner(id)?.is_closed_join())
     }
 }
 

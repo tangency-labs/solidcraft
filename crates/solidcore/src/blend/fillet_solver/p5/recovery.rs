@@ -419,10 +419,15 @@ impl Recovery<'_> {
                 return Ok(());
             }
             let corner = required(self.fillets.fillet_vertex(self.start(r0)?)?.fillet_corner())?;
+            // the fork's `|| IsClosedJoin()` in place of the 1x1 corner (543d25a; WR-697)
+            let corner_type = self.corners.corner_type(corner)?;
+            let closed_join =
+                corner_type == FilletCornerType::NByTwo && self.corners.is_closed_join(corner)?;
             if !matches!(
-                self.corners.corner_type(corner)?,
+                corner_type,
                 FilletCornerType::NByOneClosed | FilletCornerType::OneByOne
-            ) {
+            ) && !closed_join
+            {
                 return Err(SolidError::sm_err(OP));
             }
             if unknown0 {
