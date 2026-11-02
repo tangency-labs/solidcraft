@@ -3226,7 +3226,8 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
             return Ok(None);
         };
         // FitMargin: a thousand of the blended edge's tolerances
-        let fit_margin = 1000.0 * crate::topology::edge::tolerance(self.target, edge)?;
+        let tolerance = crate::topology::edge::tolerance(self.target, edge)?;
+        let fit_margin = 1000.0 * tolerance;
         let offsets = match (base.surface(0)?, base.surface(1)?) {
             (Some(a), Some(b)) => Some([a.surface.offset_distance(), b.surface.offset_distance()]),
             _ => None,
@@ -3234,6 +3235,7 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
         Ok(Some(crate::blend::fillet_executive::p3::SolverFit {
             edge: FilletObject::Topology(FilletBody::Target, EntityRef::Edge(edge)),
             fit_margin,
+            tolerance,
             offsets,
         }))
     }
@@ -3342,7 +3344,7 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
         &mut self,
         k: &mut Kernel,
         solvers: &[FilletObject],
-    ) -> Result<Vec<(f64, FilletObject)>> {
+    ) -> Result<Vec<(f64, FilletObject, f64)>> {
         // the faces the blends roll on (the fork's map of face pointers, here in face order),
         // each with its blends in the executive's order
         let mut on: BTreeMap<FaceId, Vec<(usize, usize)>> = BTreeMap::new();
@@ -3392,11 +3394,66 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
                 }
             }
             if let (Some(best), Some(&(first, _))) = (result?, blends.first()) {
+                // the least of the face's balls (#2401): the face is taken whole once it
+                // reaches the face's bound
+                let mut least = crate::math::BIG_DOUBLE;
+                for &(index, _) in &blends {
+                    let id =
+                        u32::try_from(index).map_err(|_| invalid("solver index out of range"))?;
+                    if let Some(offset) = self.solver(FilletSolverId(id))?.base().surface(0)? {
+                        least = least.min(offset.surface.offset_distance().abs());
+                    }
+                }
                 let id = u32::try_from(first).map_err(|_| invalid("solver index out of range"))?;
-                out.push((best, FilletObject::Solver(FilletSolverId(id))));
+                out.push((best, FilletObject::Solver(FilletSolverId(id)), least));
             }
         }
         Ok(out)
+    }
+
+    fn creation_ball_zone_open(
+        &mut self,
+        k: &mut Kernel,
+        solver: FilletObject,
+        radius: Option<f64>,
+    ) -> Result<Option<f64>> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        // the other blends' edges, where a chain runs on into the next round (#2403's ball
+        // triangle, built only under `fillet_blend_corner`)
+        let mut joined = Vec::new();
+        if k.fixes.fillet_blend_corner {
+            for (index, other) in self.solvers.iter_mut().enumerate() {
+                let Some(other) = other.as_mut() else {
+                    continue;
+                };
+                if index == id.0 as usize {
+                    continue;
+                }
+                if let Some(use0) = ball_regular::ops_of(other).solver().edgeuse(0)? {
+                    if let Some(e) = crate::topology::edgeuse::p1::edge(self.target, use0)? {
+                        joined.push(e);
+                    }
+                }
+            }
+        }
+        let current = self
+            .solvers
+            .get_mut(id.0 as usize)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("solver is not live in this session"))?;
+        let (rolls, law) = ball_regular::rolls_a_ball(current);
+        if !rolls || law {
+            return Ok(None);
+        }
+        crate::blend::fillet_exact::ball_zone_open_at_an_end(
+            ball_regular::ops_of(current),
+            k,
+            self.target,
+            radius,
+            &joined,
+        )
     }
 
     fn creation_circle_tops(

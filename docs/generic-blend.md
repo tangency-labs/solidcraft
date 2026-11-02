@@ -314,6 +314,26 @@ open (a size at it would leave a face or an edge of no extent), it is the bound 
 edge's tolerances. The fillet session returns it next to the reason: `fit_size()` gives a `FitSize`, the size and
 its `FitKind` (a radius, a setback or a setback scale; `blend::fillet_executive`).
 
+Each cause is decided from its own geometry, before the construction that it would make fail
+(#2401):
+- **A polygon face taken whole.** A plane face bounded by straight edges, every one blended, is taken
+  whole once the balls reach its deepest point (`NoteFitOfPolygonsTakenWhole`'s bound). This is
+  judged before the corners and the trace, whose rails would have no length. The refusal names
+  that depth, open.
+- **A collapsed offset.** A ball as wide as a face it rolls on (a cylinder or sphere of its radius,
+  with the ball inside) has its offset of that face collapsed onto the axis or centre, so its centre
+  is fixed. The zone it sweeps ends in a section of the ball only where the plane through an end of
+  the edge, square to it, holds that centre. A tray's seam and a cornered block's rim hold it at
+  both ends and build. The middle edge of an arc's tangent chain, rounded at its round's radius,
+  does not: refused, naming that radius, open. A larger ball that does not fit that face names it
+  open the same way. An end where the chain runs on into another blended edge closes the zone
+  with `fillet_blend_corner`: the Join there places the next round's section through the centre,
+  and the piece is the ball's triangle (#2403). So the same middle edge in a chain with the
+  upright and the arc's top edge builds at that radius.
+- **An open end of an overflow.** An overflow's open end whose end face does not cut the blend,
+  and a trimmed blend that keeps no length where no corner takes any, names where the blend stays
+  on its faces (`LargestSizeOnItsFaces`, open).
+
 The application shows the refusal and offers that size; it does not search by retrying builds.
 
 ## 4. The exact classes

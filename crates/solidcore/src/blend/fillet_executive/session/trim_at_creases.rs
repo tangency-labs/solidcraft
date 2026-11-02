@@ -259,6 +259,12 @@ impl FilletSession<'_> {
                 )),
                 crate::blend::fillet_executive::FitKind::Radius,
             );
+        } else {
+            // not the fork's (#2401): no corner takes any of the edge (its ends are open ends
+            // the round runs out to), so the trim took it all: the overflow's own bound,
+            // where its rails stay on their faces
+            self.executive
+                .note_fit_on_its_faces(k, &mut self.objects, solver)?;
         }
         Ok(())
     }
@@ -496,6 +502,13 @@ impl FilletSession<'_> {
             );
             for (slot, f) in entry.iter_mut().zip(faces) {
                 slot.1 = f;
+            }
+            // not the fork's (#2401; with `fixes.fillet_gn_section_generator`, WR-696): an
+            // open end the end face does not cut is an overflow's, absent below the size at
+            // which the end's blend stays on its faces: that size (open)
+            if note.is_some() && cut.is_err() && k.fixes.fillet_gn_section_generator {
+                self.executive
+                    .note_fit_on_its_faces(k, &mut self.objects, end.solver)?;
             }
             self.noted(note.take(), cut)?;
         }

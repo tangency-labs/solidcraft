@@ -25,6 +25,7 @@
 //! | [`classify_blend_spine`]           | `sm_ClassifyBlendSpine`                    |
 //! | [`classify_exact_blend`]           | `SmFilletSolver::ClassifyExactBlend`       |
 //! | [`calc_exact_fillet_geom`]         | `SmFilletSolver::CalcExactFilletGeom`      |
+//! | [`ball_zone_open_at_an_end`]       | not the fork's (#2401): a collapsed offset's zone open at an end |
 //! | `across`, `lines_meet`, `coaxial`, `inscribed_radius`, `pair_plane`, `points_with_contact`, `directions_with_dots`, `touching_point` (private) | `sm_Across`, `sm_LinesMeet`, `sm_Coaxial`, `sm_InscribedRadius`, `sm_PairPlane`, `sm_PointsWithContact`, `sm_DirectionsWithDots`, `sm_TouchingPoint` |
 //! | [`classify_ball_on_collapsed_offset`], `curve_crosses_quadric` (private) | none (solidcore #2403) |
 //!
@@ -68,7 +69,7 @@ use crate::surface::surface::p2::PLANE_TYPE;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::torus::Torus;
 use crate::topology::edgeuse::p1 as eu;
-use crate::topology::Brep;
+use crate::topology::{Brep, EdgeId};
 
 pub mod rational;
 
@@ -1214,6 +1215,156 @@ pub fn classify_exact_blend(
         blend.spine = BlendSpine::Traced;
     }
     Ok(blend)
+}
+
+/// Not the fork's (#2401; with `fixes.fillet_gn_section_generator`): for a constant ball of
+/// `radius` (`None`: the solver's own) whose offset of one of its faces collapses (the face
+/// a cylinder or sphere as wide as the ball, the ball inside it: its offset is the axis or
+/// the centre, [`QuadricKind::Line`] or [`QuadricKind::Point`]), the radius of that face
+/// where the zone the ball sweeps is open at an end of the edge; `None` where no offset
+/// collapses, the edge is closed, or each end closes it.
+///
+/// The ball's centre then lies on the collapsed offset and the other face's offset at once:
+/// it does not move along the edge, and every section of the round is a section of that one
+/// ball. The zone it sweeps ends at an end of the edge only where the plane through that end
+/// square to the edge holds the centre: the next round's section there (the tray's seam, a
+/// cornered block's rim) or its End's plane. Otherwise the zone has no section at that end
+/// (the ball touches the other face at one point off it, as at the tangent ends of the
+/// middle edge of an arc's tangent chain) and no round ends there. Judged where the
+/// collapsed axis crosses that plane (or lies in it): the centre is there if that point lies
+/// on the other face's offset, within the solver's tolerance.
+///
+/// An end at a vertex of one of `joined` (the session's other blended edges) is where the
+/// chain runs on into the next round: with `fixes.fillet_blend_corner` the Join places that
+/// round's section through the fixed centre and the piece is built as the ball's triangle
+/// between the two sections (`classify_ball_on_collapsed_offset`, #2403), so that end
+/// closes the zone whatever the plane square to the edge. The caller passes `joined` only
+/// under that flag; without it such a piece is traced and is judged by the plane alone.
+///
+/// # Errors
+///
+/// Those of the drops, the evaluations and the topology lookups; `SM_ERR_NULL_POINTER` for
+/// a solver without its edge use, offset surfaces or edge curve.
+pub fn ball_zone_open_at_an_end(
+    ops: &mut dyn FilletSolverOps,
+    k: &Kernel,
+    b: &Brep,
+    radius: Option<f64>,
+    joined: &[EdgeId],
+) -> Result<Option<f64>> {
+    use crate::surface::surface::p4::NoObject;
+    use crate::surface::surface::p5::DropPointOptions;
+    use crate::topology::edge;
+    let eu0 = ops
+        .solver()
+        .edgeuse(0)?
+        .ok_or_else(|| SolidError::null_pointer(OP))?;
+    let e = eu::edge(b, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    if edge::is_closed(b, e)? {
+        return Ok(None);
+    }
+    let curve = edge::evaluation_curve(b, e)?
+        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .clone();
+    let ivl = edge::interval(b, e)?;
+    let tol = b.tolerance();
+    let approx = ops.solver().approx_tol_3d;
+    let mid = curve.evaluate_point(k, ivl.evaluate(0.5))?;
+
+    // each face's quadric there and its offset by the ball
+    let mut faces = [BlendQuadric::default(); 2];
+    let mut offsets = [BlendQuadric::default(); 2];
+    for i in 0..2 {
+        let (face, p, n, uv) = {
+            let off = ops
+                .solver()
+                .surface(i)?
+                .ok_or_else(|| SolidError::null_pointer(OP))?;
+            let base = off.surface.base_surface();
+            let domain = base.natural_uv_domain_with_nurb(k)?;
+            let dropped =
+                base.drop_point::<NoObject>(k, mid, &domain, &DropPointOptions::default())?;
+            if !dropped.success {
+                return Ok(None);
+            }
+            let uv = dropped.result_uv;
+            let face = BlendQuadric::from_surface(k, base, uv, tol)?;
+            if face.kind == QuadricKind::None {
+                return Ok(None);
+            }
+            let (p, n) = point_and_normal(k, base, uv)?;
+            (face, p, n, uv)
+        };
+        let q = crate::blend::fillet_solver::p2::eval_offset(k, ops.solver_mut(), i, uv)?;
+        let mut off = (q - p).dot(n);
+        if let Some(r) = radius {
+            off = if off < 0.0 { -r } else { r };
+        }
+        if let (Some(f), Some(o)) = (faces.get_mut(i), offsets.get_mut(i)) {
+            *f = face;
+            *o = face.offset(off, tol);
+        }
+    }
+    let collapsed = |q: &BlendQuadric| matches!(q.kind, QuadricKind::Line | QuadricKind::Point);
+    let Some(c) = offsets.iter().position(collapsed) else {
+        return Ok(None);
+    };
+    let (Some(&axis), Some(&other), Some(face)) =
+        (offsets.get(c), offsets.get(1 - c), faces.get(c))
+    else {
+        return Ok(None);
+    };
+
+    // each end of the edge: does the plane through it square to the edge hold the centre?
+    for t in [ivl.min(), ivl.max()] {
+        let pv = curve.evaluate(k, t, 1, true, false)?;
+        let (Some(&v), Some(&d)) = (pv.first(), pv.get(1)) else {
+            return Ok(None);
+        };
+        let Ok(along) = d.unitize() else {
+            return Ok(None);
+        };
+        if end_runs_on(b, e, v, tol, joined)? {
+            continue;
+        }
+        let closes = if axis.kind == QuadricKind::Point {
+            (axis.point - v).dot(along).abs() <= approx
+        } else {
+            let across_plane = axis.dir.dot(along);
+            if across_plane.abs() <= EFF_ZERO_SQRT {
+                // the axis lies in the plane (or misses it)
+                (axis.point - v).dot(along).abs() <= approx
+            } else {
+                let x = axis.point + axis.dir * ((v - axis.point).dot(along) / across_plane);
+                other.distance(x) <= approx
+            }
+        };
+        if !closes {
+            return Ok(Some(face.radius));
+        }
+    }
+    Ok(None)
+}
+
+/// Whether the end of `e` at `at` (within `tol`) is a vertex one of `joined` also ends at:
+/// the chain runs on there into another blended edge's round.
+fn end_runs_on(b: &Brep, e: EdgeId, at: Point3, tol: f64, joined: &[EdgeId]) -> Result<bool> {
+    use crate::topology::{edge, vertex};
+    if joined.is_empty() {
+        return Ok(false);
+    }
+    let (start, end) = edge::start_end_vertices(b, e)?;
+    for v in [start, end].into_iter().flatten() {
+        if vertex::point(b, v)?.distance(at) > tol {
+            continue;
+        }
+        for other in vertex::edges(b, v, None)? {
+            if other != e && joined.contains(&other) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 /// `SmFilletSolver::CalcExactFilletGeom(crBlend, rTsectPnts, pFG, bRecalc, rbBuilt)`: the

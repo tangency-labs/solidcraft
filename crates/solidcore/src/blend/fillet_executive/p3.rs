@@ -180,6 +180,12 @@ pub enum NoRoomReason {
     /// face cannot be carried on to it (the fork's `sm_Extend`, tangency-labs/smlib@99e57b8,
     /// 2d4b154 and bc8c44d; WR-695); the error's comment names which case.
     RailRunsPastFaceIntoMaterial,
+    /// A constant ball as wide as a face it rolls on (a cylinder or sphere of its radius,
+    /// the ball inside): its offset of that face collapses onto the axis or the centre, so
+    /// its centre does not move along the edge, and the zone it sweeps has no section of the
+    /// ball at an end of the edge, so no round ends there (not the fork's, #2401;
+    /// `fixes.fillet_gn_section_generator`).
+    OffsetCollapses,
 }
 
 /// The initialized error-info members p3 reads or writes. Corner kinds use the
@@ -2077,8 +2083,9 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
 
     /// `NoteFitOfPolygonsTakenWhole`'s per-face sizes (the fork's, 49f393d): for each face
     /// the blends of `solvers` (constant balls) roll on, in face order, where it is a
-    /// polygon with every edge blended, the radius that leaves some of it and the first
-    /// solver on it.
+    /// polygon with every edge blended, the radius that leaves some of it, the first
+    /// solver on it and the least radius of the blends on it (not the fork's: what the
+    /// face's taken-whole event compares, #2401).
     ///
     /// # Errors
     /// The sizing's own errors; the adapter over [`ExecutiveAccess`] has no solvers.
@@ -2086,7 +2093,7 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
         &mut self,
         k: &mut Kernel,
         solvers: &[O],
-    ) -> Result<Vec<(f64, O)>>;
+    ) -> Result<Vec<(f64, O, f64)>>;
 
     /// The circle-top fit of `CreateFilletBrep` (the fork's, a3d6d81 and 5e8c9c1) for
     /// `solver`: for each planar face its closed edge bounds alone, the radius of the ball
@@ -2095,6 +2102,20 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
     /// # Errors
     /// The sizing's own errors; the adapter over [`ExecutiveAccess`] has no solvers.
     fn creation_circle_tops(&mut self, k: &mut Kernel, solver: O) -> Result<Vec<(f64, O)>>;
+
+    /// Not the fork's (#2401): for a constant ball of `radius` (`None`: its own) whose
+    /// offset of a face collapses, the radius of that face where the zone the ball sweeps is
+    /// open at an end of the edge (`blend::fillet_exact::ball_zone_open_at_an_end`); `None`
+    /// otherwise, and for a solver that rolls no constant ball.
+    ///
+    /// # Errors
+    /// The judging's own errors; the adapter over [`ExecutiveAccess`] has no solvers.
+    fn creation_ball_zone_open(
+        &mut self,
+        k: &mut Kernel,
+        solver: O,
+        radius: Option<f64>,
+    ) -> Result<Option<f64>>;
 
     /// `SmFilletSolver::BandsMeetAt` (the fork's, a3d6d81) over the executive's pairs of
     /// `solvers` sharing a face, in its loop order (`a`, `b`, then each's face index): the
@@ -2127,6 +2148,8 @@ pub struct SolverFit<O> {
     pub edge: O,
     /// `FitMargin(*pEdge)`: a thousand of the edge's tolerances.
     pub fit_margin: f64,
+    /// The edge's tolerance: within it of a bound, a blend is at the bound (#2401).
+    pub tolerance: f64,
     /// `GetSurface(i)->GetOffsetDistance()`, `None` without both offset surfaces.
     pub offsets: Option<[f64; 2]>,
 }
@@ -2195,8 +2218,17 @@ where
         &mut self,
         _k: &mut Kernel,
         _solvers: &[O],
-    ) -> Result<Vec<(f64, O)>> {
+    ) -> Result<Vec<(f64, O, f64)>> {
         Err(invalid("a refusal's fit needs a live fillet session"))
+    }
+
+    fn creation_ball_zone_open(
+        &mut self,
+        _k: &mut Kernel,
+        _solver: O,
+        _radius: Option<f64>,
+    ) -> Result<Option<f64>> {
+        Err(invalid("the ball's zone needs a live fillet session"))
     }
 
     fn creation_circle_tops(&mut self, _k: &mut Kernel, _solver: O) -> Result<Vec<(f64, O)>> {
@@ -2940,10 +2972,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                             if access.geometry_overflow_edge(solver)? != Some(edge) {
                                 continue;
                             }
-                            let size =
-                                access.creation_largest_size_on_its_faces(k, solver, None)?;
-                            let (limit, kind) = size.unwrap_or((0.0, FitKind::Radius));
-                            self.note_open_fit(access, size.is_some(), limit, kind, solver)?;
+                            self.note_fit_on_its_faces(k, access, solver)?;
                         }
                     }
                 }
@@ -2980,7 +3009,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             // touching it at the centre); open, so less the fit margin
             if k.fixes.fillet_gn_section_generator {
                 let solvers = self.solvers.clone();
-                for (best, solver) in access.creation_polygons_taken_whole(k, &solvers)? {
+                for (best, solver, _) in access.creation_polygons_taken_whole(k, &solvers)? {
                     self.note_open_fit(access, true, best, FitKind::Radius, solver)?;
                 }
                 for solver in solvers {
@@ -2997,6 +3026,63 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             );
         }
         Ok(())
+    }
+
+    /// Not the fork's (#2401, `fixes.fillet_gn_section_generator` with
+    /// `fixes.fillet_refuse_face_consuming_blends`): a plane face bounded by straight edges,
+    /// each blended with a constant ball, is taken whole once the least of its balls reaches
+    /// the radius that leaves some of it (`NoteFitOfPolygonsTakenWhole`'s bound, the deepest
+    /// point of the face in the balls' terms), to within the blended edge's tolerance (a face
+    /// of no extent). That is the face's own event, judged from its geometry before the
+    /// corners and the trace, whose rails would have no length there; the refusal is
+    /// `FacesOutlastTheirBlends`' ([`NoRoomReason::FaceConsumed`]), noting the bound less
+    /// the fit margin (open: at it the face is a point or a segment).
+    ///
+    /// # Errors
+    /// The refusal as `SM_ERR`, noted in the error info; those of the sizing.
+    fn refuse_polygons_taken_whole(
+        &mut self,
+        k: &mut Kernel,
+        access: &mut impl BrepCreationAccess<O>,
+    ) -> Result<()> {
+        let solvers = self.solvers.clone();
+        let sized = access.creation_polygons_taken_whole(k, &solvers)?;
+        let mut taken = false;
+        for &(best, solver, least) in &sized {
+            if let Some(fit) = access.creation_solver_fit(solver)? {
+                taken = taken || best - least <= fit.tolerance;
+            }
+        }
+        if !taken {
+            return Ok(());
+        }
+        for (best, solver, _) in sized {
+            self.note_open_fit(access, true, best, FitKind::Radius, solver)?;
+        }
+        self.record_no_room(
+            NoRoomReason::FaceConsumed,
+            "Fillet Error: the blends take the whole of a face they roll on, some at an angle to it (the blend is larger than the faces allow)",
+        )
+    }
+
+    /// The fork's per-solver fit of an overflow's refusal (49f393d): the largest size at
+    /// which `solver`'s rails stay on its faces (`LargestSizeOnItsFaces`, where a boundary
+    /// of a face first meets a rail), open, so less the fit margin (`NoteOpenFit`), noted
+    /// where least. Used by the refusals of the overflow in `CreateFilletBrep` and (not the
+    /// fork's, #2401) by those of its trim at an open end, whose cause, the overflow, is
+    /// absent below that size.
+    ///
+    /// # Errors
+    /// Those of the sizing.
+    pub fn note_fit_on_its_faces(
+        &mut self,
+        k: &mut Kernel,
+        access: &mut impl BrepCreationAccess<O>,
+        solver: O,
+    ) -> Result<()> {
+        let size = access.creation_largest_size_on_its_faces(k, solver, None)?;
+        let (limit, kind) = size.unwrap_or((0.0, FitKind::Radius));
+        self.note_open_fit(access, size.is_some(), limit, kind, solver)
     }
 
     /// Refuse blends whose bands on a face they share overlap, away from any corner that
@@ -3506,7 +3592,15 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         if let Some((solver, const_radius)) = worst_solver {
             if worst.ball && !worst.law {
                 if let Some(fit) = access.creation_solver_fit(solver)? {
-                    let open = if worst.check == BallCheck::NotEnclosed {
+                    // where h(r) reaches 0 the face's offset collapses: closed, unless the
+                    // ball's zone at that radius is open at an end of the edge (#2401), which
+                    // refuses that radius too
+                    let open = if worst.check == BallCheck::NotEnclosed
+                        && (worst.works <= 0.0
+                            || access
+                                .creation_ball_zone_open(k, solver, Some(worst.works))?
+                                .is_none())
+                    {
                         0.0
                     } else {
                         fit.fit_margin
@@ -3536,6 +3630,35 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             }
         }
         Err(failure())
+    }
+
+    /// Not the fork's (#2401): after the ball's regularity, a constant ball whose offset of
+    /// a face collapses (the face as wide as the ball) has its centre fixed, and builds only
+    /// as the zone it sweeps, which must end in a section of the ball at each end of the
+    /// edge. Where it does not (the middle edge of an arc's tangent chain rounded at its
+    /// round's radius), the blend is refused with [`FilletErrorType::NoRoom`]
+    /// ([`NoRoomReason::OffsetCollapses`]), naming that face's radius less the fit margin:
+    /// open, as below it the offset is a surface again and the ball rolls. Where it does (a
+    /// tray's seam, a cornered block's rim) it is built as before.
+    fn refuse_collapsed_offsets(
+        &mut self,
+        k: &mut Kernel,
+        access: &mut impl BrepCreationAccess<O>,
+    ) -> Result<()> {
+        let mut index = 0;
+        while let Some(solver) = self.solvers.get(index).copied() {
+            index += 1;
+            let Some(radius) = access.creation_ball_zone_open(k, solver, None)? else {
+                continue;
+            };
+            let g = |x: f64| c_general(x, 0, 7);
+            self.error.code = FilletErrorType::NoRoom as i32;
+            self.error.comment = format!("Fillet Error: the rolling ball is as wide as a face it rolls on (radius {}): its centre does not move along the edge, and at an end of the edge it has no section, so no round ends there: a radius below {} rolls", g(radius), g(radius));
+            self.error.no_room = Some(NoRoomReason::OffsetCollapses);
+            self.note_open_fit(access, true, radius, FitKind::Radius, solver)?;
+            return Err(failure());
+        }
+        Ok(())
     }
 
     /// The fork's `CreateFilletBrep` block after the ball's regularity (862971f, e568e45,
@@ -3639,6 +3762,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // regularity along each blend's edge, refused naming the radius that works.
         if k.fixes.fillet_gn_section_generator {
             self.refuse_irregular_balls(k, access)?;
+            // not the fork's (#2401): a ball as wide as a face, whose zone has no section at
+            // an end of its edge
+            self.refuse_collapsed_offsets(k, access)?;
             // the fork's 862971f, e568e45 and aac4288: a convex blend that would cut the part
             // into pieces, refused naming the largest size that keeps it whole
             self.refuse_blends_cutting_the_part(k, access)?;
@@ -3646,6 +3772,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             // a wall into the hollow behind, refused naming the largest size that does not
             if k.fixes.fillet_refuse_rounds_breaking_through {
                 self.refuse_blends_breaking_through(k, access)?;
+            }
+            // not the fork's (#2401): a polygon face its blends take whole, refused before
+            // the trace that its rails of no length would fail
+            if k.fixes.fillet_refuse_face_consuming_blends {
+                self.refuse_polygons_taken_whole(k, access)?;
             }
         }
 
