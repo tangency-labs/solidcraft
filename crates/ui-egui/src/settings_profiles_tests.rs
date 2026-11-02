@@ -88,6 +88,30 @@ fn switching_profiles_applies_every_setting_at_once() {
     assert!(error(&mut h, "settings.profile.apply", json!({"name": "Desk"})).contains("no settings profile"));
 }
 
+/// The quick-access bar (#10223) travels with the toolbar: a profile captures it, survives its
+/// checks, and switching profiles brings each one's bar back.
+#[test]
+fn a_profile_carries_the_quick_access_bar() {
+    let mut h = Harness::new();
+    run(&mut h, "settings.profile.save", json!({"name": "Plain"}));
+    crate::toolbar_custom::quick_add(&mut h.app, "solid.fillet").unwrap();
+    crate::toolbar_custom::quick_add(&mut h.app, "solid.extrude").unwrap();
+    let doc = capture(&h.app, "Quick");
+    assert_eq!(doc["toolbar"]["quick_access"], json!(["solid.fillet", "solid.extrude"]));
+    assert_eq!(sanitize(&doc).unwrap(), doc);
+    run(&mut h, "settings.profile.save", json!({"name": "Quick"}));
+
+    run(&mut h, "settings.profile.apply", json!({"name": "Plain"}));
+    assert!(h.app.toolbar_custom.quick_access.is_empty());
+    run(&mut h, "settings.profile.apply", json!({"name": "Quick"}));
+    assert_eq!(h.app.toolbar_custom.quick_access, ["solid.fillet", "solid.extrude"]);
+
+    // A hostile list is cut down to what the bar holds.
+    let hostile = json!({"format": FORMAT, "name": "Odd", "toolbar": {"version": 3, "quick_access": (0..500).map(|i| json!(format!("c{i}"))).chain([json!(3)]).collect::<Vec<_>>()}});
+    let doc = sanitize(&hostile).unwrap();
+    assert_eq!(doc["toolbar"]["quick_access"].as_array().map(Vec::len), Some(crate::toolbar_custom::MAX_QUICK_ACCESS));
+}
+
 #[test]
 fn rename_and_delete_follow_the_active_profile() {
     let mut h = Harness::new();

@@ -194,6 +194,14 @@ General › **Show text under ribbon icons** is a separate, saved option for eit
 layout. Turn it off for shorter icon-only command buttons; tooltips, section names
 and command menus remain available.
 
+**Quick-access bar.** Right-click any ribbon button, a row of a section's drop-down or a command
+search result and choose **Add to Quick Access**: the command's icon joins the application bar,
+after Save, Undo and Redo. A click starts the command as its ribbon button does; drag a button
+along the bar to reorder it; right-click it and choose **Remove from Quick Access** to take it off.
+The bar is empty, and so not shown, until a command is added, and holds up to 24 commands. Narrow
+windows hide it with Undo and Redo. It is saved with the toolbar's customisations, so it is
+exported with the keyboard shortcuts and carried by settings profiles.
+
 Interface › Layout › **Show origin and bodies at the top** (off by default) puts the active
 component's Bodies folder and the Origin (planes, axes and point) at the top of the History when
 it sits on the left or under the browser and is wide enough for names. They are the browser's own
