@@ -12,8 +12,8 @@ use crate::cargo;
 /// Select the full-CI runner without changing `xtask test`'s argument forwarding.
 pub fn run_selected(side: Vec<(String, Command)>) -> Result<(), String> {
     match std::env::var("SOLIDCRAFT_TEST_RUNNER") {
-        Err(std::env::VarError::NotPresent) => crate::test::run(&[], &[], side),
-        Ok(value) if value == "libtest" => crate::test::run(&[], &[], side),
+        Err(std::env::VarError::NotPresent) => crate::test::run(&[], &[], false, side),
+        Ok(value) if value == "libtest" => crate::test::run(&[], &[], false, side),
         Ok(value) if value == "nextest" => run(side),
         _ => Err("SOLIDCRAFT_TEST_RUNNER must be libtest or nextest".into()),
     }
@@ -34,11 +34,15 @@ impl Prepared {
     }
 
     fn command_with_options(&self, threads: Option<OsString>, matrix_jobs: Option<OsString>, cpus: usize) -> Command {
+        // Every heavy test, but not the nightly-only property tests: like a push to `main`.
+        let filter = crate::test::without_nightly_only();
         let mut c = cargo();
         c.args(["nextest", "run", "--cargo-metadata"]).arg(&self.cargo_metadata).arg("--binaries-metadata").arg(&self.binaries_metadata).args([
             "--profile",
             "local-ci",
             "--ignore-default-filter",
+            "-E",
+            filter.as_str(),
             "--no-fail-fast",
             "--retries",
             "0",
@@ -142,6 +146,7 @@ mod tests {
         let args: Vec<_> = c.get_args().map(|s| s.to_string_lossy().into_owned()).collect();
         assert!(args.windows(2).any(|s| s == ["--profile", "local-ci"]));
         assert!(args.iter().any(|s| s == "--ignore-default-filter"));
+        assert!(args.windows(2).any(|s| s == ["-E", "not (package(solidcraft-kernel) & binary(boolean_props))"]));
         assert!(args.iter().any(|s| s == "--no-fail-fast"));
         assert!(args.windows(2).any(|s| s == ["--retries", "0"]));
         assert!(args.windows(2).any(|s| s == ["--no-tests", "fail"]));

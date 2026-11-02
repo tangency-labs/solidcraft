@@ -27,4 +27,5 @@ A failing test without its fix cannot merge: it turns `main` red for everyone. I
 - A geometry change that moves the robustness goldens re-records them in the same PR (`ROBUSTNESS_GOLDENS_BLESS="why it changed"`, `docs/robustness.md`).
 - The action matrix is a ratchet: record a newly passing action with `cargo xtask action-matrix --bless` (`docs/action-matrix.md`).
 - Pull requests skip a few heavy tests, which run in the merge queue, nightly and on `main`. Check that validation after merging. The list is in `.config/nextest.toml` and the testing page.
+- The kernel's `boolean_props` property tests draw random inputs and run only nightly; `cargo xtask test` and `cargo xtask ci` skip them like CI does, and `cargo xtask test --property-tests` runs them.
 - Mutation testing finds behaviour the suites miss: `docs/mutation-testing.md`.
