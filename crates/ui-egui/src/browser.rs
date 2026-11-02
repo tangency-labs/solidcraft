@@ -2824,7 +2824,9 @@ fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, label_left: f
     if escape {
         // Dropping the state cancels the edit.
     } else if commit {
-        crate::context_menu::commit_rename(app, &rename);
+        if crate::context_menu::commit_rename(app, &rename).is_err() {
+            app.menu.rename = Some(rename);
+        }
     } else {
         app.menu.rename = Some(rename);
     }

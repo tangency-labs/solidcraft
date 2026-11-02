@@ -1091,7 +1091,7 @@ fn a_body_renamed_in_the_browser_keeps_the_pattern_after_it() {
     let before = mesh(&h);
     // What Enter does, without the frames after it that would see the rename in.
     let rename = h.app.menu.rename.take().unwrap();
-    crate::context_menu::commit_rename(&mut h.app, &rename);
+    let _ = crate::context_menu::commit_rename(&mut h.app, &rename);
     assert!(h.app.computing_since().is_some(), "computing");
     assert_eq!(names(&h), ["Body1"], "the design is as it was while it computes");
     until_settled(&mut h);
