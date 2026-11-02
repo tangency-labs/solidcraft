@@ -3,6 +3,7 @@
 //! sign-in). The panel sees only [`Event`]s.
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -20,6 +21,9 @@ enum Pending {
     SetModel,
     SetConfig,
 }
+
+/// Give a cancelled prompt time to finish before disconnecting an unresponsive agent.
+const CANCEL_GRACE: Duration = Duration::from_secs(5);
 
 /// Variables the agent doesn't inherit: a control token set for the app's own `--control` port
 /// would otherwise reach the agent and outrank the chat endpoint's own token file.
@@ -41,6 +45,7 @@ pub struct AcpBackend {
     /// Open permission questions: our key → the agent's request id.
     permissions: HashMap<u64, Value>,
     next_key: u64,
+    cancelling: Option<(u64, Instant)>,
     exited: bool,
     config_pending: Option<(u64, String)>,
     modern_config: bool,
@@ -68,6 +73,7 @@ impl AcpBackend {
             auth: Vec::new(),
             permissions: HashMap::new(),
             next_key: 0,
+            cancelling: None,
             exited: false,
             config_pending: None,
             modern_config: false,
@@ -93,6 +99,9 @@ impl AcpBackend {
         match msg {
             Incoming::Reply { id, result } => {
                 let Some(what) = self.pending.remove(&id) else { return };
+                if self.cancelling.is_some_and(|(request, _)| request == id) {
+                    self.cancelling = None;
+                }
                 match (what, result) {
                     (Pending::Initialize, Ok(v)) => {
                         self.agent = acp::agent_info(&v);
@@ -104,6 +113,12 @@ impl AcpBackend {
                     }
                     (Pending::SessionNew, Ok(v)) => match v.get("sessionId").and_then(Value::as_str) {
                         Some(s) => {
+                            // New chat has opened successfully: retire the old turn before Ready.
+                            // Its late reply and cancellation deadline must not end the new turn.
+                            if let Some((request, _)) = self.cancelling.take() {
+                                self.pending.remove(&request);
+                                out.push(Event::TurnEnded { reason: "cancelled".into() });
+                            }
                             self.session = Some(s.to_string());
                             match acp::config_options(&v) {
                                 acp::ConfigParse::Snapshot(options) => {
@@ -198,10 +213,17 @@ impl AcpBackend {
             Incoming::Ignored => {}
         }
     }
-}
 
-impl ChatBackend for AcpBackend {
-    fn poll(&mut self) -> Vec<Event> {
+    fn finish_exit(&mut self, tail: Vec<String>) -> Event {
+        self.exited = true;
+        self.session = None;
+        self.pending.clear();
+        self.cancelling = None;
+        self.config_pending = None;
+        Event::Exited { tail }
+    }
+
+    fn poll_at(&mut self, now: Instant) -> Vec<Event> {
         let mut out = Vec::new();
         if self.exited {
             return out;
@@ -214,17 +236,24 @@ impl ChatBackend for AcpBackend {
                     }
                 }
                 Ok(FromAgent::Exited(tail)) => {
-                    self.exited = true;
-                    self.session = None;
-                    self.pending.clear();
-                    self.config_pending = None;
-                    out.push(Event::Exited { tail });
+                    out.push(self.finish_exit(tail));
                     break;
                 }
                 Err(_) => break,
             }
         }
+        // Drain replies first: an acknowledgement already waiting must keep the connection.
+        if self.cancelling.is_some_and(|(_, started)| now.saturating_duration_since(started) >= CANCEL_GRACE) {
+            self.proc.shutdown(false);
+            out.push(self.finish_exit(vec![crate::i18n::tr("ui.agent_chat_cancel_timeout").to_string()]));
+        }
         out
+    }
+}
+
+impl ChatBackend for AcpBackend {
+    fn poll(&mut self) -> Vec<Event> {
+        self.poll_at(Instant::now())
     }
 
     fn prompt(&mut self, parts: &[PromptPart]) {
@@ -240,6 +269,11 @@ impl ChatBackend for AcpBackend {
         }
         if let Some(s) = &self.session {
             self.proc.send(&acp::notification("session/cancel", json!({"sessionId": s})));
+            // Repeated Stop presses must not postpone the fallback. An idle session needs none.
+            if self.cancelling.is_none() {
+                self.cancelling =
+                    self.pending.iter().find_map(|(&id, request)| (*request == Pending::Prompt).then_some(id)).map(|id| (id, Instant::now()));
+            }
         }
     }
 
@@ -342,6 +376,75 @@ pub fn test_agent(argv: &[String], cwd: &std::path::Path) -> Result<String, Test
 mod tests {
     use super::*;
     use crate::agent_chat::backend::StartContext;
+
+    fn ready_backend() -> Result<AcpBackend, String> {
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let mut backend = AcpBackend::start(&["sh".into(), "-c".into(), "cat >/dev/null".into()], ctx)?;
+        let mut events = Vec::new();
+        backend.handle(Incoming::Reply { id: 1, result: Ok(json!({"agentInfo":{"name":"fake"}})) }, &mut events);
+        backend.handle(Incoming::Reply { id: 2, result: Ok(json!({"sessionId":"s1"})) }, &mut events);
+        Ok(backend)
+    }
+
+    #[test]
+    fn an_unresponsive_cancel_disconnects_the_agent() {
+        let mut backend = ready_backend().unwrap();
+        backend.prompt(&[PromptPart::Text("stalled search".into())]);
+        backend.cancel();
+        let started = backend.cancelling.unwrap().1;
+        assert!(backend.poll_at(started + CANCEL_GRACE - Duration::from_millis(1)).is_empty());
+        backend.cancel();
+        let events = backend.poll_at(started + CANCEL_GRACE);
+        assert!(matches!(events.as_slice(), [Event::Exited { .. }]), "Stop must not wait indefinitely: {events:?}");
+        assert!(backend.pid().is_none());
+        assert!(backend.session.is_none() && backend.pending.is_empty());
+        assert!(backend.poll().is_empty(), "the exit is reported only once");
+    }
+
+    #[test]
+    fn a_cancelled_prompt_reply_keeps_the_connection() {
+        for reply in [Ok(json!({"stopReason":"cancelled"})), Err((-32603, "operation aborted".into()))] {
+            let mut backend = ready_backend().unwrap();
+            backend.prompt(&[PromptPart::Text("search".into())]);
+            let request = backend.next_id;
+            backend.cancel();
+            let mut events = Vec::new();
+            backend.handle(Incoming::Reply { id: request, result: reply }, &mut events);
+            assert!(events.iter().any(|e| matches!(e, Event::TurnEnded { .. })));
+            assert!(backend.poll_at(Instant::now() + CANCEL_GRACE).is_empty());
+            assert!(backend.pid().is_some() && !backend.exited);
+            backend.shutdown(true);
+        }
+    }
+
+    #[test]
+    fn cancelling_an_idle_session_does_not_disconnect_it() {
+        let mut backend = ready_backend().unwrap();
+        backend.cancel();
+        assert!(backend.poll_at(Instant::now() + CANCEL_GRACE).is_empty());
+        assert!(backend.pid().is_some() && !backend.exited);
+        backend.shutdown(true);
+    }
+
+    #[test]
+    fn a_new_session_retires_the_old_cancelled_prompt() {
+        let mut backend = ready_backend().unwrap();
+        backend.prompt(&[PromptPart::Text("old search".into())]);
+        let old_prompt = backend.next_id;
+        backend.cancel();
+        ChatBackend::new_session(&mut backend);
+        let mut events = Vec::new();
+        backend.handle(Incoming::Reply { id: backend.next_id, result: Ok(json!({"sessionId":"s2"})) }, &mut events);
+        assert!(matches!(events.first(), Some(Event::TurnEnded { reason }) if reason == "cancelled"));
+        assert!(matches!(events.last(), Some(Event::Ready { .. })));
+        backend.prompt(&[PromptPart::Text("new search".into())]);
+        assert!(backend.poll_at(Instant::now() + CANCEL_GRACE).is_empty(), "a new session has no stale cancellation deadline");
+        backend.cancel();
+        events.clear();
+        backend.handle(Incoming::Reply { id: old_prompt, result: Ok(json!({"stopReason":"cancelled"})) }, &mut events);
+        assert!(events.is_empty(), "an old reply must not end the new turn or clear its cancellation deadline");
+        assert!(matches!(backend.poll_at(Instant::now() + CANCEL_GRACE).as_slice(), [Event::Exited { .. }]));
+    }
 
     fn snapshot(session: &str, value: &str) -> Value {
         json!({"sessionId":session,"configOptions":[{"id":"provider.model","category":"model","name":"Model","type":"select","currentValue":value,"options":[{"value":"fast","name":"Fast"},{"value":"smart","name":"Smart"}]}]})

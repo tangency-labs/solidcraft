@@ -1203,6 +1203,7 @@
   "cmd.sketch_spline_control_point_5": "Splajn řídicími body (stupeň 5)",
   "cmd.sketch_spline_fit_point": "Splajn procházející body",
   "cmd.sketch_spline_insert_point": "Přidat bod splajnu",
+  "cmd.sketch_spline_remove_point": "Odebrat bod splajnu",
   "cmd.sketch_spline_reverse": "Obrátit směr splajnu",
   "cmd.sketch_spun_profile": "Rotační obrys",
   "cmd.sketch_toggle_diameter": "Přepnout poloměr / průměr",

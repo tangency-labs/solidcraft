@@ -1203,6 +1203,7 @@
   "cmd.sketch_spline_control_point_5": "Spline kontrolnih točaka (stupanj 5)",
   "cmd.sketch_spline_fit_point": "Spline kroz točke",
   "cmd.sketch_spline_insert_point": "Dodaj točku splinea",
+  "cmd.sketch_spline_remove_point": "Ukloni točku splinea",
   "cmd.sketch_spline_reverse": "Obrni smjer splinea",
   "cmd.sketch_spun_profile": "Rotirani profil",
   "cmd.sketch_toggle_diameter": "Prebaci polumjer / promjer",

@@ -1203,6 +1203,7 @@
   "cmd.sketch_spline_control_point_5": "Splin Titik Kawalan (Darjah 5)",
   "cmd.sketch_spline_fit_point": "Splin Titik Padanan",
   "cmd.sketch_spline_insert_point": "Tambah Titik Splin",
+  "cmd.sketch_spline_remove_point": "Buang Titik Splin",
   "cmd.sketch_spline_reverse": "Songsangkan Arah Splin",
   "cmd.sketch_spun_profile": "Profil Putaran",
   "cmd.sketch_toggle_diameter": "Togol Jejari / Diameter",

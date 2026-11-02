@@ -3666,7 +3666,7 @@ impl Renderer {
         };
         if phase == Phase::AfterSeeThrough {
             pass.set_bind_group(1, &res.access_bind, &[]);
-            pass.set_bind_group(2, &res.ao.bind, &[]);
+            pass.set_bind_group(2, &res.ao.maps.bind, &[]);
             Self::draw_over(res, pass, sk, h, pv, m, &tris, &lines);
             return;
         }
@@ -3675,7 +3675,7 @@ impl Renderer {
         pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
         lines(pass, &res.overlay, &sk.under);
         pass.set_bind_group(1, &res.access_bind, &[]);
-        pass.set_bind_group(2, &res.ao.bind, &[]);
+        pass.set_bind_group(2, &res.ao.maps.bind, &[]);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         // `counting`: only closed bodies, for a section's crossing count ([`Cut::count`]).
         let planned = |pass: &mut wgpu::RenderPass<'static>, p: &wgpu::RenderPipeline, counting: bool| {

@@ -1,6 +1,126 @@
 use super::*;
 use std::sync::mpsc::channel;
 
+fn transcript_clipboard_harness(layout: crate::shell::LayoutMode) -> crate::scenario::Harness {
+    let mut h = narrow_chat();
+    h.app.ui.layout = layout;
+    h.app.preferences.agent_chat_width = 500.0;
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "Transcript clipboard sentinel".into() });
+    h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"})).unwrap();
+    h.app.run("select.set", json!({"items": [{"type": "body", "name": "Cube"}]})).unwrap();
+    h.frames(4);
+    h
+}
+
+fn transcript_text_position(h: &crate::scenario::Harness) -> egui::Pos2 {
+    let mut at = None;
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+            if let egui::Shape::Text(text) = shape
+                && text.galley.text() == "Transcript clipboard sentinel"
+            {
+                at = Some(text.pos + egui::vec2(15.0, 7.0));
+            }
+        });
+    }
+    at.expect("the assistant message is visible")
+}
+
+fn transcript_click(h: &mut crate::scenario::Harness, pos: egui::Pos2) {
+    h.frame_with(vec![
+        egui::Event::PointerMoved(pos),
+        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE },
+    ]);
+    h.frame_with(vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }]);
+}
+
+#[test]
+fn transcript_copy_and_cut_do_not_touch_the_cad_clipboard() {
+    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+        let mut h = transcript_clipboard_harness(layout);
+        let at = transcript_text_position(&h);
+        transcript_click(&mut h, at);
+        transcript_click(&mut h, at);
+        assert!(h.ctx.plugin::<egui::text_selection::LabelSelectionState>().lock().has_selection(), "select real label text");
+        assert!(!h.ctx.egui_wants_keyboard_input(), "a selectable label is not a text editor");
+        // Moving the mouse away does not transfer the keyboard back to the model.
+        h.frame_with(vec![egui::Event::PointerMoved(egui::pos2(500.0, 500.0))]);
+        let undo = h.app.session.undo.len();
+        h.frame_with(vec![egui::Event::Copy]);
+        assert!(h.output.commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == "Transcript")), "copy selected text");
+        assert!(h.app.copied_bodies.is_empty(), "{layout:?}: copying text must not copy a CAD body");
+        h.frame_with(vec![egui::Event::Cut]);
+        assert!(h.app.cut.is_empty(), "{layout:?}: cutting read-only text must not cut a CAD body");
+        assert_eq!(h.app.session.undo.len(), undo);
+    }
+}
+
+#[test]
+fn transcript_paste_does_not_insert_a_previously_copied_body() {
+    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+        let mut h = transcript_clipboard_harness(layout);
+        h.frame_with(vec![egui::Event::Copy]);
+        assert!(!h.app.copied_bodies.is_empty(), "prime the real CAD clipboard");
+        let at = transcript_text_position(&h);
+        transcript_click(&mut h, at);
+        transcript_click(&mut h, at);
+        let undo = h.app.session.undo.len();
+        h.frame_with(vec![egui::Event::Paste("text from another app".into())]);
+        assert_eq!(h.app.session.model.state().bodies.len(), 1, "{layout:?}: text paste must not paste CAD geometry");
+        assert_eq!(h.app.session.undo.len(), undo);
+        // A deliberate click outside the panel returns ownership to CAD.
+        transcript_click(&mut h, egui::pos2(700.0, 500.0));
+        h.frame_with(vec![egui::Event::Paste("SolidCraft bodies".into())]);
+        assert_eq!(h.app.session.model.state().bodies.len(), 2, "{layout:?}: CAD paste still works after returning to the model");
+    }
+}
+
+#[test]
+fn transcript_key_events_do_not_run_cad_shortcuts() {
+    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+        let mut h = transcript_clipboard_harness(layout);
+        let at = transcript_text_position(&h);
+        transcript_click(&mut h, at);
+        transcript_click(&mut h, at);
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+        };
+        h.frame_with(vec![key(egui::Key::C)]);
+        assert!(h.app.copied_bodies.is_empty(), "{layout:?}: key-event copy also belongs to the chat");
+        h.frame_with(vec![key(egui::Key::X)]);
+        assert!(h.app.cut.is_empty(), "{layout:?}: key-event cut also belongs to the chat");
+        assert!(crate::edit_clipboard::copy(&mut h.app));
+        h.frame_with(vec![key(egui::Key::V)]);
+        assert_eq!(h.app.session.model.state().bodies.len(), 1, "{layout:?}: key-event paste stays out of CAD");
+        // A quick tap can have no modifiers held by the end of the frame. It must not
+        // fall through to the plain A (Appearance) shortcut while selecting chat text.
+        h.frame_with(vec![key(egui::Key::A)]);
+        assert!(h.app.dialog.is_none(), "{layout:?}: selecting text must not open Appearance");
+    }
+}
+
+#[test]
+fn transcript_shortcut_ownership_ends_when_the_panel_is_hidden() {
+    for hidden in ["closed", "minimized", "disabled"] {
+        let mut h = transcript_clipboard_harness(crate::shell::LayoutMode::Floating);
+        h.frame_with(vec![egui::Event::Copy]);
+        let at = transcript_text_position(&h);
+        transcript_click(&mut h, at);
+        transcript_click(&mut h, at);
+        match hidden {
+            "closed" => h.app.agent_chat.open = false,
+            "minimized" => h.app.preferences.agent_chat_minimized = true,
+            _ => h.app.preferences.ai_features = false,
+        }
+        h.frame_with(vec![egui::Event::Paste("SolidCraft bodies".into())]);
+        assert_eq!(h.app.session.model.state().bodies.len(), 2, "{hidden}: the invisible panel must not retain CAD keys");
+    }
+}
+
 fn chat() -> AgentChat {
     let mut c = AgentChat::default();
     c.state = Some(State::Ready);
@@ -1125,6 +1245,51 @@ fn stop_keeps_the_queue() {
     send_now(&mut app, &ctx);
     assert_eq!(script.calls(), ["prompt: first", "cancel", "prompt: later"]);
     assert!(app.agent_chat.pending.is_empty());
+}
+
+#[test]
+fn an_unresponsive_cancel_exit_keeps_the_queue_and_completed_changes() {
+    let (mut app, script, ctx) = app_with_script();
+    let (tx, rx) = channel();
+    app.agent_chat.tools_rx = Some(rx);
+    let before = app.session.doc.clone();
+    send(&mut app, &ctx, "two boxes".into());
+    let replies: Vec<_> = [0.0, 20.0].into_iter().map(|x| ask(&tx, "engine.execute", boxed(x))).collect();
+    frame(&mut app);
+    for reply in replies {
+        assert_eq!(reply.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    }
+    let completed = app.session.doc.clone();
+    let statuses = [Some(ToolStatus::Completed), Some(ToolStatus::Failed), Some(ToolStatus::Pending), Some(ToolStatus::InProgress), None];
+    for (id, status) in statuses.into_iter().enumerate() {
+        script.report(Event::Tool { id: id.to_string(), title: Some("search".into()), kind: None, status, input: None, output: None });
+    }
+    poll(&mut app, &ctx);
+    send(&mut app, &ctx, "later".into());
+    cancel(&mut app);
+    script.report(Event::Exited { tail: vec![tr("ui.agent_chat_cancel_timeout").to_string()] });
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.state(), State::Exited);
+    assert!(app.agent_chat.backend.is_none() && app.agent_chat.turn.is_none());
+    assert_eq!(texts(&app), ["later"]);
+    assert_eq!(script.prompts().len(), 1, "disconnect must not send the queue");
+    assert!(Arc::ptr_eq(&app.session.doc, &completed), "completed changes stay in the design");
+    let statuses: Vec<_> = app
+        .agent_chat
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Tool { status, .. } => Some(*status),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        statuses,
+        [Some(ToolStatus::Completed), Some(ToolStatus::Failed), Some(ToolStatus::Failed), Some(ToolStatus::Failed), Some(ToolStatus::Failed)]
+    );
+    let changes = app.agent_chat.items.iter().rposition(|i| matches!(i, Item::Changes { steps: 2, .. })).expect("the completed changes are grouped");
+    undo_changes(&mut app, changes);
+    assert!(Arc::ptr_eq(&app.session.doc, &before), "the completed changes still undo together");
 }
 
 /// Send now: cancel first, the prompt only after the agent has ended the cancelled turn, with a

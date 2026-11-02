@@ -1203,6 +1203,7 @@
   "cmd.sketch_spline_control_point_5": "Spline per punti di controllo (grado 5)",
   "cmd.sketch_spline_fit_point": "Spline interpolante",
   "cmd.sketch_spline_insert_point": "Aggiungi punto alla spline",
+  "cmd.sketch_spline_remove_point": "Rimuovi punto dalla spline",
   "cmd.sketch_spline_reverse": "Inverti direzione della spline",
   "cmd.sketch_spun_profile": "Profilo di tornitura",
   "cmd.sketch_toggle_diameter": "Alterna raggio / diametro",

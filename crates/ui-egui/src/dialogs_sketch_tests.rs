@@ -11,6 +11,35 @@ fn fixture() -> Harness {
     h
 }
 
+// ---------------------------------------------------------------------------
+// #10181
+// ---------------------------------------------------------------------------
+
+/// #10181: the Project panel left open by a sketch that ends offers its context error
+/// ("`sketch.project` is not available right now: no sketch is being edited") as something to
+/// report: the dialog draws a "Create Issue…" button for a refusal that only says the sketch
+/// is gone, which is guidance, not a failure.
+#[test]
+fn a_context_error_offers_no_create_issue_button_10181() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Body1"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.settle();
+    h.app.session.selection = vec![Sel::Face { body: "Body1".into(), index: 5, point: solidcraft_engine::geom::Vec3::new(20.0, 15.0, 20.0) }];
+    h.app.start("sketch.project");
+    h.frames(4);
+    assert!(h.app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::SketchProject { .. })), "the Project panel opens for the live sketch");
+    // The sketch ends while the Project panel is still open.
+    h.app.finish_sketch();
+    h.frames(4);
+    if h.app.dialog.is_some() {
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.settle();
+    }
+    let error = h.app.dialog.as_ref().and_then(|d| d.error.clone());
+    assert!(scenario::handle_at("dialog:create_issue").is_none(), "the Project panel offers its context error as something to report: {error:?}");
+}
+
 fn picked(h: &Harness, command: &str) -> Dialog {
     let mut d = Dialog::for_command(&h.app, command).unwrap();
     let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();

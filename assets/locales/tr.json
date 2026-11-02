@@ -1203,6 +1203,7 @@
   "cmd.sketch_spline_control_point_5": "Kontrol noktalı spline (derece 5)",
   "cmd.sketch_spline_fit_point": "Uydurma noktalı spline",
   "cmd.sketch_spline_insert_point": "Spline Noktası Ekle",
+  "cmd.sketch_spline_remove_point": "Spline Noktasını Kaldır",
   "cmd.sketch_spline_reverse": "Spline yönünü ters çevir",
   "cmd.sketch_spun_profile": "Döndürülmüş profil",
   "cmd.sketch_toggle_diameter": "Yarıçap / Çap Arasında Geçiş Yap",

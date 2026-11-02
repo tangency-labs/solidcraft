@@ -35,6 +35,38 @@ fn fixture() -> (Harness, u64, u64, u64) {
 }
 
 #[test]
+fn viewport_restores_isolated_occurrences_and_undo_restores_isolation() {
+    for label in ["Show All", "Unisolate"] {
+        let (mut h, _, first, second) = fixture();
+        h.app.session.selection.clear();
+        let menu_item =
+            |h: &Harness, label: &str| context_menu::items(&h.app, &Target::Viewport).into_iter().find(|item| item.label == label).unwrap();
+        assert!(!menu_item(&h, label).enabled, "nothing is hidden yet");
+        let isolate =
+            context_menu::items(&h.app, &Target::Occurrence { path: vec![first] }).into_iter().find(|item| item.label == "Isolate").unwrap();
+        context_menu::run_item(&mut h.app, &isolate, egui::Pos2::ZERO);
+        assert!(h.app.session.visibility.hidden_bodies.is_empty());
+        assert_eq!(h.app.session.visibility.hidden_occurrences, vec![vec![second]]);
+        let other_body = h.app.session.occurrence_bodies(&[second], false).unwrap()[0].clone();
+        assert!(!h.app.session.body_visible(&other_body));
+
+        let restore = menu_item(&h, label);
+        assert!(restore.enabled, "{label} must restore a hidden component instance");
+        let undo = h.app.session.undo.len();
+        context_menu::run_item(&mut h.app, &restore, egui::Pos2::ZERO);
+        assert!(h.app.session.visibility.hidden_occurrences.is_empty());
+        assert!(h.app.session.body_visible(&other_body));
+        assert_eq!(h.app.session.undo.len(), undo + 1, "restoring visibility is one undo step");
+        assert!(!menu_item(&h, label).enabled, "all component instances are visible again");
+
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.visibility.hidden_occurrences, vec![vec![second]]);
+        assert!(!h.app.session.body_visible(&other_body));
+        assert!(menu_item(&h, label).enabled);
+    }
+}
+
+#[test]
 fn folder_visibility_shortcut_targets_only_the_clicked_placement() {
     let (mut h, component, first, second) = fixture();
     let group = h.app.run("browser.group", json!({"component":component,"folder":"bodies","items":["Body1"],"name":"Group"})).unwrap()["group"]

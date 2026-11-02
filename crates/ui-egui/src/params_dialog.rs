@@ -109,6 +109,19 @@ struct Row {
     text: Option<String>,
 }
 
+impl Row {
+    /// Whether the Filter box's text (lower case) is in the row's name, expression, text,
+    /// comment or group. The expression lets a parameter's name find every one that uses it
+    /// (#9706).
+    fn matches(&self, filter: &str) -> bool {
+        filter.is_empty()
+            || [&self.name, &self.expression, &self.comment, &self.group]
+                .into_iter()
+                .chain(self.text.as_ref())
+                .any(|field| field.to_ascii_lowercase().contains(filter))
+    }
+}
+
 fn rows(app: &mut SolveApp) -> Vec<Row> {
     let list = app.session.execute("parameters.list", &json!({})).unwrap_or_default();
     // Sketch dimension parameters: the sketch that owns each.
@@ -273,15 +286,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::text(ui, error, ui_kit::Text::Error("parameters_error"));
                 }
                 let filter = d.filter.to_ascii_lowercase();
-                let visible: Vec<_> = all
-                    .iter()
-                    .filter(|r| {
-                        filter.is_empty()
-                            || r.name.to_ascii_lowercase().contains(&filter)
-                            || r.comment.to_ascii_lowercase().contains(&filter)
-                            || r.group.to_ascii_lowercase().contains(&filter)
-                    })
-                    .collect();
+                let visible: Vec<_> = all.iter().filter(|r| r.matches(&filter)).collect();
                 // One Name-column floor for every table in this dialog so Favorites, User and
                 // Model sections stay lined up when only some lists hold a long name (#8551 review).
                 let name_floor = visible
@@ -1470,6 +1475,27 @@ mod tests {
         assert_eq!(fav, ["s_d1", "d10", "Alpha"]);
         assert_eq!(users, ["width", "d10", "d2", "d1", "Alpha"]);
         assert_eq!(groups, [("Sketch1".into(), vec!["s_d3", "s_d2", "s_d1"]), ("Box1".into(), vec!["b_len", "b_h"])]);
+    }
+
+    /// #9706: the Filter box reads expressions too, so a parameter's name lists every parameter
+    /// that uses it, and a value finds the parameter that holds it.
+    #[test]
+    fn the_filter_lists_the_parameters_that_use_a_name() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width": 1600, "height": 1400}));
+        for (name, expression) in [("width", "40 mm"), ("height", "width * 2"), ("depth", "5 mm")] {
+            h.app.run("parameters.add", json!({"name": name, "expression": expression})).unwrap();
+        }
+        h.app.start("parameters.change");
+        h.frames(6);
+        let all = ["width", "height", "depth"];
+        for (filter, expected) in [("width", vec!["width", "height"]), ("WIDTH *", vec!["height"]), ("5 mm", vec!["depth"]), ("", all.to_vec())] {
+            h.app.params.as_mut().unwrap().filter = filter.into();
+            h.frames(4);
+            let shown: Vec<&str> = all.into_iter().filter(|n| crate::scenario::rect_of(&format!("dialog:table:user:{n}")).is_some()).collect();
+            assert_eq!(shown, expected, "filter {filter:?}");
+        }
     }
 
     /// #8563: clicking a Name heading sorts every table in the window, the choice outlives the

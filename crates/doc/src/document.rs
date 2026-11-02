@@ -86,8 +86,17 @@ pub enum PlaneRef {
     AxisPoint { axis: Box<GeoRef>, point: Box<GeoRef> },
     /// Through three points.
     ThreePoints { a: Box<GeoRef>, b: Box<GeoRef>, c: Box<GeoRef> },
-    /// Tangent to a face (cylinder, cone, sphere, torus) where the point `at` lies over it.
-    Tangent { face: Box<GeoRef>, at: Vec3 },
+    /// Tangent to a face (cylinder, cone, sphere, torus) where the point `at` lies over it. With
+    /// a `reference` (a plane or planar face), it touches where the face turns towards the
+    /// reference instead, turned by `angle` about the face's axis, on the side of `at` (#8822).
+    Tangent {
+        face: Box<GeoRef>,
+        at: Vec3,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reference: Option<Box<GeoRef>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        angle: Option<Expr>,
+    },
     /// Square to an edge or sketch curve, a fraction `t` (expression, 0…1) of the way along it.
     AlongPath { path: Box<GeoRef>, t: Expr },
     /// Through a straight edge (or line, axis) and square to a plane (or planar face).
@@ -1275,9 +1284,10 @@ pub enum FeatureKind {
         body: Option<BodyName>,
     },
     /// A perforation field (#732): round holes of `diameter` on a staggered (60°) or square grid of `pitch` over the
-    /// whole flat sheet, kept `margin` (default: the diameter) clear of its edges, cut-outs and bend zones. Stored like
-    /// a cosmetic thread: the holes go to the flat pattern, the DXF and the measured volume, not into the B-rep, so a
-    /// panel can carry tens of thousands of them.
+    /// whole flat sheet, or inside the closed profiles of `sketch` when it is given, kept `margin` (default: the
+    /// diameter) clear of its edges, cut-outs, bend zones and the outline. Stored like a cosmetic thread: the holes go
+    /// to the flat pattern, the DXF and the measured volume, not into the B-rep, so a panel can carry tens of thousands
+    /// of them.
     SheetPerforate {
         #[walk(length = "Diameter")]
         diameter: Expr,
@@ -1290,6 +1300,13 @@ pub enum FeatureKind {
         pattern: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
+        /// The field's outline: a sketch on a face of the sheet. None: the whole sheet.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sketch: Option<SketchId>,
+        /// Which of the outline sketch's profiles bound the field. None: all of them.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(profiles_of = sketch)]
+        profiles: Option<ProfileSel>,
     },
     /// Fold a sheet along a line on its base face: a sketch line (followed when the sketch
     /// changes), else the points `a`, `b`.
@@ -2339,7 +2356,11 @@ pub enum PatternKind {
         reversed2: bool,
     },
     Circular {
-        origin: Position,
+        /// A point on the axis the copies turn about: numbers, or length expressions it follows
+        /// as the parameters change (#10852).
+        #[serde(with = "point_expr")]
+        #[walk(placement)]
+        origin: PointExpr,
         axis: Dir,
         #[walk(unitless = "Quantity")]
         count: Expr,
