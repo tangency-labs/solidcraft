@@ -190,6 +190,7 @@ pub(crate) mod navigation;
 pub mod navigation_bar;
 mod navigation_bar_view;
 pub use navigation::WebWheelGestures;
+mod network_folder_ui;
 pub mod network_prompt;
 pub mod op_auto;
 pub mod open_elsewhere;
@@ -443,6 +444,9 @@ pub struct Services {
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
     /// Open a dialog asking for a program (a slicer); `None` when the host has no such dialog.
     pub pick_program: Option<Box<dyn Fn() -> FilePickerFuture>>,
+    /// Open a dialog asking for a folder (a network folder for Send to Slicer); `None` when the
+    /// host has no such dialog (the browser), and then no network folder is offered.
+    pub pick_folder: Option<Box<dyn Fn() -> FilePickerFuture>>,
     pub show_in_folder: Option<Box<dyn Fn(&str)>>,
     /// Where the host reads the anti-aliasing preference at start (a small JSON file).
     pub graphics_path: Option<String>,
@@ -537,6 +541,8 @@ pub struct SolveApp {
     file_picker: Option<file_picker::Pending>,
     /// A slicer started alone and waited for before the file is sent (Send to Slicer).
     pub(crate) slicer_wait: Option<dialogs_save_mesh::SlicerWait>,
+    /// Send to Slicer's network folders: the window that adds one and a copy going on (#2304).
+    pub(crate) network_folder: network_folder_ui::State,
     /// Open with EasyPrint: the upload in flight and the question before the first one.
     pub(crate) easyprint: easyprint_ui::State,
     /// A Save or Save As being written on a worker (see [`save_job`]).
@@ -797,6 +803,7 @@ impl SolveApp {
             services,
             file_picker: None,
             slicer_wait: None,
+            network_folder: Default::default(),
             easyprint: Default::default(),
             saving: None,
             viewport: viewport::ViewportState::default(),
@@ -1125,6 +1132,8 @@ impl SolveApp {
             self.ui.layout = p.layout;
             self.preferences = p;
         }
+        // Send to Slicer's network folders live in the preferences; the session's commands use them.
+        self.session.network_folders = solidcraft_engine::remote_slicers::sanitized(&self.preferences.network_folders);
         // Before a design given at start opens: its paths follow the network preferences.
         prefs::sync_surface_analysis(self);
         prefs::apply_network(&self.preferences);
@@ -1161,6 +1170,10 @@ impl SolveApp {
         // Commands may start only detected slicers and the programs the user added under Custom….
         if matches!(id, "file.save_mesh" | "file.send_to_slicer") {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);
+        }
+        // The network folders are the preferences' (Cancel in Preferences may have put back others).
+        if matches!(id, "file.save_mesh" | "file.send_to_slicer") || id.starts_with("file.slicers") {
+            self.session.network_folders = solidcraft_engine::remote_slicers::sanitized(&self.preferences.network_folders);
         }
         if id == "timeline.play" {
             let reply = self.session.execute(id, &params).map_err(|e| e.to_string())?;
@@ -1401,6 +1414,10 @@ impl SolveApp {
             }
             // Curves drawn in construction (or centerline) mode take that line type.
             sketch_palette::apply_mode(self, id, v);
+        }
+        // A network folder added or removed by a command is kept in the preferences.
+        if r.is_ok() && matches!(id, "file.slicers.add_remote" | "file.slicers.remove_remote") {
+            self.preferences.network_folders = self.session.network_folders.clone();
         }
         // Settings profiles live in the app: the engine only checked the parameters.
         let r = match r {
@@ -2984,6 +3001,7 @@ impl SolveApp {
                 agent_chat::poll(self, ui.ctx());
                 // Preferences and Keyboard Shortcuts open from Home too (its links, the gear, Ctrl+,).
                 prefs::show(self, ui.ctx());
+                network_folder_ui::show(self, ui.ctx());
                 return;
             }
         }
@@ -3115,6 +3133,8 @@ impl SolveApp {
         joint_handles::show_warning(self, ui.ctx());
         shortcut_box::show(self, ui.ctx());
         prefs::show(self, ui.ctx());
+        // Over Send to Slicer and Preferences, which both open it.
+        network_folder_ui::show(self, ui.ctx());
         toolbar_custom::window(self, ui.ctx());
     }
 

@@ -63,6 +63,7 @@ pub use component_link::resolve_design_links;
 mod config;
 mod design_link;
 mod file;
+mod file_remote;
 mod frame;
 pub(crate) mod inspect;
 mod interference;
@@ -345,6 +346,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(parameters::COMMANDS.iter());
     v.extend(parameter_sweep::COMMANDS.iter());
     v.extend(file::COMMANDS.iter());
+    v.extend(file_remote::COMMANDS.iter());
     v.extend(print_face::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());

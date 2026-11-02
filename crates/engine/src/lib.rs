@@ -24,6 +24,9 @@ pub mod occurrences;
 pub mod params;
 pub mod product_scene;
 pub mod recovery;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod remote_sftp;
+pub mod remote_slicers;
 pub mod render_jobs;
 pub mod render_lights;
 pub mod sample;
@@ -481,6 +484,9 @@ pub struct Session {
     /// How the host uploads a model to EasyPrint (`file.open_in_easyprint`); `None`: it can't. It
     /// belongs to the session like `param_check`, so it survives opening and starting designs.
     pub easyprint_upload: Option<EasyPrintUpload>,
+    /// Send to Slicer's network folders (#2304): the user's, which the app keeps in its preferences.
+    /// They belong to the session like `param_check`, so they survive opening and starting designs.
+    pub network_folders: Vec<remote_slicers::RemoteTarget>,
     /// After a live frame: its sketch, the document it left and the revision. Its links were
     /// brought up to date by that frame, so the gesture's next frame needn't project them again
     /// while nothing else has run (#3222).
@@ -718,6 +724,7 @@ impl Session {
             auto_project: true,
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
+            network_folders: Vec::new(),
             live_links: None,
             active_component: 0,
             active_occurrence_path: None,
@@ -774,6 +781,7 @@ impl Session {
         let single_surface_analysis = self.single_surface_analysis;
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
+        let network_folders = std::mem::take(&mut self.network_folders);
         let render_viewport = self.render_viewport.clone();
         let render_jobs = self.render_jobs.scratch();
         let checkpoints = std::mem::take(&mut self.checkpoints);
@@ -788,6 +796,7 @@ impl Session {
         self.set_single_surface_analysis(single_surface_analysis);
         self.param_check = param_check;
         self.easyprint_upload = easyprint_upload;
+        self.network_folders = network_folders;
         self.render_viewport = render_viewport;
         self.render_jobs = render_jobs;
         self.checkpoints = checkpoints;
@@ -1714,6 +1723,7 @@ impl Session {
             auto_project: self.auto_project,
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
+            network_folders: self.network_folders.clone(),
             live_links: None,
             active_component: self.active_component,
             active_occurrence_path: self.active_occurrence_path.clone(),

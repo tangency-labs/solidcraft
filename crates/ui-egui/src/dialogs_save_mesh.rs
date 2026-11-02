@@ -9,10 +9,14 @@
 //! once, so it undoes like any other.
 //!
 //! Every place that saves a mesh opens this dialog: File › Export STL / Export 3MF, the Mesh tab, and the
-//! Save As Mesh item of the body menus. The slicer list (Send to Slicer only) holds the programs the user added (kept
-//! between runs, newest first), then the slicers found on this machine, then "Custom…", which asks
-//! for a program and adds it at the top; "Custom…" itself is never the selection. Pressing Delete
-//! over a program the user added removes it.
+//! Save As Mesh item of the body menus. The slicer list (Send to Slicer only) holds the network
+//! folders the user added (#2304), the programs the user added (kept between runs, newest first),
+//! then the slicers found on this machine, then "Custom…", which asks for a program and adds it at
+//! the top, and "Network folder…", which asks for a folder and a name; neither is ever the
+//! selection. Pressing Delete over a network folder or a program the user added removes it.
+//!
+//! Send to Slicer has Format and Quality rows of its own (3MF, binary or ASCII STL; standard, fine
+//! or finest), remembered apart from Save as Mesh's. Their first choices are what it always sent.
 
 use crate::selection::SelectionExt as _;
 use crate::ui_kit::choice_row;
@@ -33,6 +37,10 @@ use solidcraft_engine::Sel;
 const FORMATS: [(&str, &str, &str); 3] = [("STL", "stl", "stl"), ("3MF", "3mf", "3mf"), ("3MF with face tags", "3mf-tagged", "3mf")];
 /// The list key of the EasyPrint row (no slicer has it: ids are words, programs are paths).
 const EASYPRINT: &str = "easyprint";
+/// Send to Slicer's formats: the label, `file.send_to_slicer`'s `format` and `ascii`, and the name
+/// the preference keeps. 3MF first: what Send to Slicer always sent.
+const SEND_FORMATS: [(&str, &str, bool, &str); 3] =
+    [("3MF", "3mf", false, "3mf"), ("ui.mesh_format_stl_binary", "stl", false, "stl"), ("ui.mesh_format_stl_ascii", "stl", true, "stl-ascii")];
 /// How closely the mesh follows curved faces (#4747): the label and `file.save_mesh`'s `quality`.
 const QUALITIES: [(&str, &str); 3] = [("Standard", "standard"), ("Fine", "fine"), ("Finest", "finest")];
 /// Edge of a slicer's icon in the list.
@@ -44,9 +52,11 @@ const MAX_CUSTOM: usize = 24;
 #[derive(Clone, Debug, PartialEq)]
 pub struct SaveMesh {
     format: usize,
+    /// Send to Slicer's format: an index into [`SEND_FORMATS`].
+    send_format: usize,
     /// Send to Slicer: only the bodies and the slicer are asked.
     open: bool,
-    /// Index into [`QUALITIES`] (Save As Mesh; Send to Slicer has no quality row).
+    /// Index into [`QUALITIES`]; each of the two dialogs remembers its own.
     quality: usize,
     /// The chosen slicer: an installed one's id, or the path of one the user added.
     slicer: String,
@@ -135,8 +145,10 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         _ if open => p.send_slicer.clone(),
         _ => String::new(),
     };
-    let quality = QUALITIES.iter().position(|q| q.1 == p.save_mesh_quality).unwrap_or(0);
-    let kind = Kind::SaveMesh(SaveMesh { format, quality, open, slicer, stale: true, shown: None });
+    let remembered = if open { &p.send_quality } else { &p.save_mesh_quality };
+    let quality = QUALITIES.iter().position(|q| q.1 == *remembered).unwrap_or(0);
+    let send_format = SEND_FORMATS.iter().position(|f| f.3 == p.send_format).unwrap_or(0);
+    let kind = Kind::SaveMesh(SaveMesh { format, send_format, quality, open, slicer, stale: true, shown: None });
     let mut inputs = vec![SelInput::new("Bodies", BODIES, true)];
     if open {
         inputs.push(SelInput::new("Print face", PLANAR_FACES, true));
@@ -184,10 +196,19 @@ fn send_to_slicer(app: &mut SolveApp, params: Value) {
         app.set_status(line, false);
         return;
     }
+    if let Some(target) = crate::network_folder_ui::sending(app) {
+        let line = crate::i18n::format("ui.network_folder_still_sending", &[("target", target)]);
+        app.set_status(line, false);
+        return;
+    }
     let mut params = params;
     params["single_instance"] = json!(app.preferences.slicer_single_instance);
     params["wait"] = json!("return");
     let Ok(result) = app.run("file.send_to_slicer", params.clone()) else { return };
+    // A network folder: the copy goes on in the background, and the status line follows it.
+    if crate::network_folder_ui::follow(app, &result) {
+        return;
+    }
     if result.get("starting").is_none() {
         return report(app, &result);
     }
@@ -216,6 +237,7 @@ fn begin_wait(app: &mut SolveApp, params: Value, result: &Value) {
 /// Per frame: when the slicer being waited for is ready, send the file; when the wait ran out, say so.
 pub fn tick_wait(app: &mut SolveApp, ctx: &egui::Context) {
     use std::sync::mpsc::TryRecvError;
+    crate::network_folder_ui::tick(app, ctx);
     let Some(wait) = app.slicer_wait.as_ref() else { return };
     let ready = match wait.done.try_recv() {
         Err(TryRecvError::Empty) => return ctx.request_repaint_after(std::time::Duration::from_millis(200)),
@@ -389,11 +411,15 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mu
         app.slicer_menu.refresh(&app.preferences.custom_slicers);
         let entries = app.slicer_menu.entries();
         let easyprint = crate::easyprint_ui::available(app);
+        let remotes = network_folders(app);
         k.slicer = if easyprint && k.slicer == EASYPRINT {
             EASYPRINT.into()
+        } else if remotes.iter().any(|t| t.id() == k.slicer) {
+            k.slicer.clone()
         } else {
             app.slicer_menu
                 .key_for(&k.slicer)
+                .or_else(|| remotes.first().map(|t| t.id()))
                 .or_else(|| entries.first().map(|e| e.key.clone()))
                 .or_else(|| easyprint.then(|| EASYPRINT.to_string()))
                 .unwrap_or_default()
@@ -410,31 +436,81 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mu
         let choosing = app.file_picker_busy();
         ui.add_enabled_ui(!choosing, |ui| slicer_combo(app, ui, k));
     });
+    // EasyPrint takes its own file; the slicers and network folders take these.
+    if k.slicer != EASYPRINT {
+        choice_row(ui, "Format", "sm_send_format", &mut k.send_format, &SEND_FORMATS.map(|f| f.0));
+        choice_row(ui, "Quality", "sm_send_quality", &mut k.quality, &QUALITIES.map(|q| q.0));
+    }
     false
+}
+
+/// The network folders the list offers: the user's, where the host can reach folders.
+fn network_folders(app: &SolveApp) -> Vec<solidcraft_engine::remote_slicers::RemoteTarget> {
+    if crate::network_folder_ui::available(app) { app.preferences.network_folders.clone() } else { Vec::new() }
+}
+
+/// Make `key` the dialog's slicer; with `instead`, only when that one is chosen now.
+pub(crate) fn choose(k: &mut SaveMesh, key: &str, instead: Option<&str>) {
+    if instead.is_none_or(|old| k.slicer == old) {
+        k.slicer = key.to_string();
+    }
+}
+
+/// A network folder row, or the selected one's icon in the closed list.
+fn paint_network_icon(ui: &egui::Ui, rect: egui::Rect) {
+    crate::icons::paint_icon(ui.painter(), rect, "network_folder", 1.0);
 }
 
 fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
     let entries = app.slicer_menu.entries();
     let ctx = ui.ctx().clone();
     let current = entries.iter().find(|e| e.key == k.slicer);
+    let remotes = network_folders(app);
+    let current_remote = remotes.iter().find(|t| t.id() == k.slicer);
     let pad = "\u{2003}\u{2003}";
     let easyprint = crate::easyprint_ui::available(app);
     let easyprint_label = crate::i18n::tr("ui.easyprint_row");
-    let text = match current {
-        Some(e) => format!("{pad}{}", e.slicer.name),
-        None if easyprint && k.slicer == EASYPRINT => format!("{pad}{easyprint_label}"),
-        None => crate::i18n::tr_label("No slicer found").to_string(),
+    let text = match (current_remote, current) {
+        (Some(t), _) => format!("{pad}{}", t.name),
+        (None, Some(e)) => format!("{pad}{}", e.slicer.name),
+        (None, None) if easyprint && k.slicer == EASYPRINT => format!("{pad}{easyprint_label}"),
+        (None, None) => crate::i18n::tr_label("No slicer found").to_string(),
     };
+    let (programs, network) = (app.services.pick_program.is_some(), crate::network_folder_ui::available(app));
     let mut pick_custom = false;
+    let mut pick_network = false;
     let mut delete: Option<String> = None;
+    let mut delete_remote: Option<String> = None;
     let mut chosen: Option<String> = None;
-    let name = current.map(|e| e.slicer.name.clone());
+    let name = current_remote.map(|t| t.name.clone()).or_else(|| current.map(|e| e.slicer.name.clone()));
     // A long name ends in … instead of wrapping onto a second line; the full one is in the tooltip.
     let wrap = ui.style().wrap_mode;
     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
     let r = crate::ui_kit::dropdown_menu(ui, "sm_slicer", &text, |ui| {
         let frame = ctx.cumulative_frame_nr();
         ctx.data_mut(|d| d.insert_temp(egui::Id::new("sc_slicer_popup"), frame));
+        // The network folders first, as the programs the user added come before the ones found.
+        for t in &remotes {
+            let key = t.id();
+            let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
+            if resp.hovered() || key == k.slicer {
+                let fill = if resp.hovered() { Tokens::get().hover } else { Tokens::get().selected_bg };
+                ui.painter().rect_filled(rect, Tokens::get().radius_sm / 2, fill);
+            }
+            paint_network_icon(ui, egui::Rect::from_min_size(rect.left_center() + vec2(3.0, -ICON / 2.0), vec2(ICON, ICON)));
+            let text = fitted(ui, &t.name, rect.width() - (ICON + 9.0) - 6.0, Tokens::get().text);
+            ui.painter().galley(rect.left_center() + vec2(ICON + 9.0, -text.size().y / 2.0), text, Tokens::get().text);
+            crate::scenario::publish_handle(&format!("dialog:Slicer:{}", t.name), rect.center());
+            let hint = crate::i18n::format("ui.network_folder_delete_tip", &[("folder", &t.shown())]);
+            resp.clone().on_hover_text(format!("{}\n{hint}", t.name));
+            if resp.hovered() && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete)) {
+                delete_remote = Some(t.name.clone());
+            }
+            if resp.clicked() {
+                chosen = Some(key);
+                ui.close();
+            }
+        }
         for e in &entries {
             let tex = icon(&mut app.slicer_menu, &ctx, e);
             let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
@@ -476,42 +552,61 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
                 ui.close();
             }
         }
-        if !entries.is_empty() || easyprint {
+        if !entries.is_empty() || !remotes.is_empty() || easyprint {
             ui.separator();
         }
-        // A browser has no program to add.
-        if app.services.pick_program.is_none() {
-            return;
+        // A browser has no program to add, nor a folder.
+        let add_row = |ui: &mut egui::Ui, label: &str, tip: &str, handle: &str| {
+            let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
+            if resp.hovered() {
+                ui.painter().rect_filled(rect, Tokens::get().radius_sm / 2, Tokens::get().hover);
+            }
+            ui.painter().text(
+                rect.left_center() + vec2(ICON + 9.0, 0.0),
+                egui::Align2::LEFT_CENTER,
+                label,
+                egui::FontId::proportional(crate::theme::Tokens::get().font_button),
+                Tokens::get().text,
+            );
+            crate::scenario::publish_handle(handle, rect.center());
+            let clicked = resp.on_hover_text(tip).clicked();
+            if clicked {
+                ui.close();
+            }
+            clicked
+        };
+        if programs {
+            pick_custom = add_row(ui, crate::i18n::tr_label("Custom…"), crate::i18n::tr("ui.custom_program_tip"), "dialog:Slicer:Custom");
         }
-        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
-        if resp.hovered() {
-            ui.painter().rect_filled(rect, Tokens::get().radius_sm / 2, Tokens::get().hover);
-        }
-        ui.painter().text(
-            rect.left_center() + vec2(ICON + 9.0, 0.0),
-            egui::Align2::LEFT_CENTER,
-            crate::i18n::tr_label("Custom…"),
-            egui::FontId::proportional(crate::theme::Tokens::get().font_button),
-            Tokens::get().text,
-        );
-        crate::scenario::publish_handle("dialog:Slicer:Custom", rect.center());
-        if resp.on_hover_text(crate::i18n::tr("ui.custom_program_tip")).clicked() {
-            pick_custom = true;
-            ui.close();
+        if network {
+            pick_network =
+                add_row(ui, crate::i18n::tr("ui.network_folder_row"), crate::i18n::tr("ui.network_folder_tip"), "dialog:Slicer:NetworkFolder");
         }
     });
     ui.style_mut().wrap_mode = wrap;
     if let Some(name) = name {
         r.clone().on_hover_text(name);
     }
-    if let Some(e) = current {
+    let at = egui::Rect::from_min_size(r.rect.left_center() + vec2(ui.spacing().button_padding.x + 1.0, -ICON / 2.0), vec2(ICON, ICON));
+    if current_remote.is_some() {
+        paint_network_icon(ui, at);
+    } else if let Some(e) = current {
         let tex = icon(&mut app.slicer_menu, &ctx, e);
-        let rect = r.rect;
-        let at = egui::Rect::from_min_size(rect.left_center() + vec2(ui.spacing().button_padding.x + 1.0, -ICON / 2.0), vec2(ICON, ICON));
         paint_icon(ui, at, tex, &e.slicer.name);
     }
     if let Some(key) = chosen {
         k.slicer = key;
+    }
+    if let Some(name) = delete_remote {
+        let key = format!("{}{name}", solidcraft_engine::remote_slicers::ID_PREFIX);
+        crate::network_folder_ui::remove(app, &name);
+        if k.slicer == key {
+            let first = network_folders(app).first().map(|t| t.id());
+            k.slicer = first.or_else(|| app.slicer_menu.entries().first().map(|e| e.key.clone())).unwrap_or_default();
+        }
+    }
+    if pick_network {
+        crate::network_folder_ui::open_new(app, true);
     }
     if let Some(key) = delete {
         app.preferences.custom_slicers.retain(|p| *p != key);
@@ -544,7 +639,7 @@ fn add_custom(app: &mut SolveApp, path: &str) -> Result<(), String> {
 pub fn commands(k: &SaveMesh, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, String> {
     let format = FORMATS.get(k.format).map_or("stl", |f| f.1);
     let mut p = json!({ "format": format });
-    // Standard is the command's own default, so it is left out. Sending has no quality row.
+    // Standard is the command's own default, so it is left out. Sending sets its own below.
     if let Some((_, quality)) = QUALITIES.get(k.quality).filter(|_| k.quality > 0 && !k.open) {
         p["quality"] = json!(quality);
     }
@@ -560,6 +655,15 @@ pub fn commands(k: &SaveMesh, inputs: &[SelInput]) -> Result<Vec<(String, Value)
         p["format"] = json!("3mf");
         if k.slicer == EASYPRINT {
             return Ok(vec![("file.open_in_easyprint".into(), p)]);
+        }
+        // Standard and binary are the command's defaults, so they are left out.
+        let (_, format, ascii, _) = SEND_FORMATS.get(k.send_format).copied().unwrap_or(SEND_FORMATS[0]);
+        p["format"] = json!(format);
+        if ascii {
+            p["ascii"] = json!(true);
+        }
+        if let Some((_, quality)) = QUALITIES.get(k.quality).filter(|_| k.quality > 0) {
+            p["quality"] = json!(quality);
         }
         p["slicer"] = json!(k.slicer);
         return Ok(vec![("file.send_to_slicer".into(), p)]);
@@ -591,6 +695,8 @@ pub fn run(app: &mut SolveApp, k: &SaveMesh, inputs: &[SelInput]) -> Result<(), 
         if k.slicer == EASYPRINT {
             crate::easyprint_ui::request(app, params);
         } else {
+            app.preferences.send_format = SEND_FORMATS.get(k.send_format).map_or("3mf", |f| f.3).into();
+            app.preferences.send_quality = QUALITIES.get(k.quality).map_or("standard", |q| q.1).into();
             send_to_slicer(app, params);
         }
         return Ok(());
@@ -620,6 +726,16 @@ fn save(app: &mut SolveApp, mut params: Value, path: &str) {
 /// The status line after a save or a send.
 fn report(app: &mut SolveApp, result: &Value) {
     let path = result.get("path").and_then(Value::as_str).unwrap_or_default();
+    // A network folder: where the copy went (no program was started, nothing is replaced).
+    if result.get("remote").and_then(Value::as_bool) == Some(true) {
+        let target = result.get("target").and_then(Value::as_str).unwrap_or_default();
+        match (result.get("slicer_error").and_then(Value::as_str), result.get("sent_to").and_then(Value::as_str)) {
+            (Some(e), _) => app.set_status(e.to_string(), true),
+            (None, Some(to)) => app.set_status(crate::i18n::format("ui.sent_to_network_folder", &[("target", target), ("path", to)]), false),
+            (None, None) => app.set_status(crate::i18n::format("ui.saved_to", &[("path", path)]), false),
+        }
+        return;
+    }
     match result.get("slicer_error").and_then(Value::as_str) {
         Some(e) => app.set_status(e.to_string(), true),
         None => match result.get("slicer").and_then(Value::as_str) {
@@ -933,8 +1049,8 @@ mod tests {
     }
 
     #[test]
-    fn send_to_slicer_asks_for_bodies_and_a_slicer_but_not_a_format() {
-        let k = SaveMesh { format: 0, quality: 0, open: true, slicer: "prusa".into(), stale: false, shown: None };
+    fn send_to_slicer_asks_for_bodies_a_slicer_a_format_and_a_quality() {
+        let k = SaveMesh { format: 0, send_format: 0, quality: 0, open: true, slicer: "prusa".into(), stale: false, shown: None };
         let mut input = SelInput::new("Bodies", BODIES, true);
         assert!(commands(&k, std::slice::from_ref(&input)).is_err());
         input.items = vec![Sel::Body { name: "Part".into() }];
@@ -946,18 +1062,286 @@ mod tests {
         assert_eq!((id.as_str(), p["format"].as_str(), p.get("slicer")), ("file.save_mesh", Some("3mf-tagged"), None));
         assert_eq!(button(&save), "Save");
         assert_eq!(button(&k), "Send");
+        // The Format and Quality rows (#2304): ASCII STL at Fine is said; 3MF and Standard are the defaults.
+        let ascii_fine = SaveMesh { send_format: 2, quality: 1, ..k.clone() };
+        let (_, p) = commands(&ascii_fine, std::slice::from_ref(&input)).unwrap().remove(0);
+        assert_eq!(p, json!({"slicer": "prusa", "bodies": ["Part"], "format": "stl", "ascii": true, "quality": "fine"}));
+        let (_, p) = commands(&SaveMesh { send_format: 1, ..k.clone() }, std::slice::from_ref(&input)).unwrap().remove(0);
+        assert_eq!((p["format"].as_str(), p.get("ascii")), (Some("stl"), None), "binary STL");
+        // EasyPrint takes its own 3MF whatever the rows say.
+        let (id, p) = commands(&SaveMesh { slicer: EASYPRINT.into(), ..ascii_fine }, std::slice::from_ref(&input)).unwrap().remove(0);
+        assert_eq!((id.as_str(), p["format"].as_str(), p.get("quality"), p.get("ascii")), ("file.open_in_easyprint", Some("3mf"), None, None));
         assert!(commands(&SaveMesh { slicer: String::new(), ..k }, &[input]).is_err());
     }
 
     #[test]
-    fn a_remembered_quality_goes_to_save_but_not_to_send() {
+    fn send_to_slicer_starts_as_it_always_sent_and_each_dialog_remembers_its_own_choices() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let opened = |app: &SolveApp| match app.dialog.as_ref().map(|d| &d.kind) {
+            Some(Kind::SaveMesh(k)) => k.clone(),
+            _ => panic!("no dialog"),
+        };
+        app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        app.start("file.send_to_slicer");
+        let k = opened(&app);
+        // Changes a default: no. A new user sends a Standard 3MF, as before the rows existed.
+        assert_eq!((SEND_FORMATS[k.send_format].3, QUALITIES[k.quality].1), ("3mf", "standard"));
+        app.dialog = None;
+        app.preferences.send_format = "stl-ascii".into();
+        app.preferences.send_quality = "fine".into();
+        app.preferences.save_mesh_quality = "finest".into();
+        app.start("file.send_to_slicer");
+        let k = opened(&app);
+        assert_eq!((SEND_FORMATS[k.send_format].3, QUALITIES[k.quality].1), ("stl-ascii", "fine"));
+        app.dialog = None;
+        app.start("file.save_mesh");
+        assert_eq!(QUALITIES[opened(&app).quality].1, "finest", "Save as Mesh keeps its own quality");
+        // Something unreadable in the settings file starts from the defaults.
+        app.dialog = None;
+        app.preferences.send_format = "obj".into();
+        app.preferences.send_quality = "ultra".into();
+        app.start("file.send_to_slicer");
+        let k = opened(&app);
+        assert_eq!((k.send_format, k.quality), (0, 0));
+    }
+
+    /// A share folder for a test, removed when it ends.
+    struct Share(std::path::PathBuf);
+
+    impl Share {
+        fn new(tag: &str) -> Share {
+            let dir = std::env::temp_dir().join(format!("solidcraft-ui-network-folder-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            Share(dir)
+        }
+        fn path(&self) -> String {
+            self.0.to_string_lossy().into_owned()
+        }
+    }
+
+    impl Drop for Share {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Frames until the status line holds `text`.
+    fn until_status(h: &mut crate::scenario::Harness, text: &str) -> String {
+        for _ in 0..300 {
+            if let Some((line, _, _)) = &h.app.status
+                && line.contains(text)
+            {
+                return line.clone();
+            }
+            h.frame();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("the status line never said {text:?}: {:?}", h.app.status);
+    }
+
+    #[test]
+    fn a_network_folder_is_added_in_its_window_listed_first_and_sent_to_without_a_program() {
+        let share = Share::new("window");
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Part"})).unwrap();
+        h.app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        let folder = share.path();
+        h.app.services.pick_folder = Some(Box::new(move || {
+            let folder = folder.clone();
+            Box::pin(async move { Some(folder) })
+        }));
+        h.app.preferences.send_format = "stl".into();
+        h.app.start("file.send_to_slicer");
+        h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Body { name: "Part".into() }];
+        h.settle();
+        // "Network folder…" in the list opens the window; Browse fills the folder, Test writes there.
+        h.step(&json!({"widget": "Slicer", "near": "Slicer"})).unwrap();
+        h.settle();
+        h.step(&json!({"click": {"handle": "dialog:Slicer:NetworkFolder"}})).unwrap();
+        h.settle();
+        assert!(h.widget("Add Network Folder").is_some(), "the window opened from the list");
+        h.step(&json!({"click": {"handle": "dialog:NetworkFolder:Browse"}})).unwrap();
+        h.settle();
+        h.step(&json!({"widget": "Name", "near": "Name"})).unwrap();
+        h.step(&json!({"text": "Orca on homelab"})).unwrap();
+        h.settle();
+        h.step(&json!({"widget": "Test"})).unwrap();
+        for _ in 0..100 {
+            h.frame();
+            if h.widget("A file can be written there.").is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(h.widget("A file can be written there.").is_some(), "the test result is shown");
+        assert_eq!(std::fs::read_dir(&share.0).unwrap().count(), 0, "the test file is deleted");
+        h.step(&json!({"widget": "Add"})).unwrap();
+        h.settle();
+        assert_eq!(h.app.preferences.network_folders.len(), 1, "kept in the preferences");
+        assert_eq!(
+            (h.app.preferences.network_folders[0].name.as_str(), h.app.preferences.network_folders[0].folder()),
+            ("Orca on homelab", share.path().as_str())
+        );
+        let Some(Kind::SaveMesh(k)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("Send to Slicer closed") };
+        assert_eq!(k.slicer, "remote:Orca on homelab", "the folder just added is the choice");
+        assert_eq!(network_folders(&h.app).first().map(|t| t.id()), Some(k.slicer.clone()), "listed first");
+        // Send: a binary STL under the design and body's name; no program, the path in the status line.
+        let inputs = h.app.dialog.as_ref().unwrap().inputs.clone();
+        run(&mut h.app, &k, &inputs).unwrap();
+        let line = until_status(&mut h, "Sent to Orca on homelab");
+        let sent = share.0.join("Untitled - Part.stl");
+        assert!(line.contains(&sent.to_string_lossy().into_owned()), "{line}");
+        assert!(!std::fs::read(&sent).unwrap().starts_with(b"PK"));
+        assert_eq!(h.app.preferences.send_slicer, "remote:Orca on homelab", "remembered");
+        // Again: a number is added rather than replacing the file.
+        run(&mut h.app, &k, &inputs).unwrap();
+        until_status(&mut h, "Untitled - Part (2).stl");
+        // Delete over its row takes it out (the files sent there stay).
+        crate::network_folder_ui::remove(&mut h.app, "Orca on homelab");
+        assert!(h.app.preferences.network_folders.is_empty() && sent.exists());
+    }
+
+    /// Frames, up to about 20 s, until `done` holds.
+    fn until(h: &mut crate::scenario::Harness, what: &str, done: impl Fn(&crate::scenario::Harness) -> bool) {
+        for _ in 0..2000 {
+            h.frame();
+            if done(h) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("never: {what}; status {:?}", h.app.status);
+    }
+
+    #[test]
+    fn an_sftp_server_is_added_in_its_window_once_its_key_is_shown_and_trusted() {
+        use solidcraft_engine::remote_sftp::{self, test_server};
+        let share = Share::new("sftp");
+        let prints = share.0.join("prints");
+        std::fs::create_dir_all(&prints).unwrap();
+        let key = share.0.join("id_ed25519");
+        std::fs::write(&key, test_server::key(7).to_openssh(Default::default()).unwrap().as_bytes()).unwrap();
+        let authorized = vec![test_server::key(7).public_key().clone()];
+        let running = test_server::start(1, test_server::Options { authorized, ..Default::default() }, &share.0).unwrap();
+        let fingerprint = running.host_key.public_key().fingerprint(Default::default()).to_string();
+        // Not the user's own ~/.ssh: a server only this test knows.
+        *remote_sftp::TEST_SETUP.lock().unwrap() =
+            Some(remote_sftp::Setup { known_hosts: None, agent: None, confirmed: None, limit: std::time::Duration::from_secs(10) });
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Part"})).unwrap();
+        h.app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        h.app.services.pick_folder = Some(Box::new(|| Box::pin(async { None })));
+        h.app.start("file.send_to_slicer");
+        h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Body { name: "Part".into() }];
+        h.settle();
+        h.step(&json!({"widget": "Slicer", "near": "Slicer"})).unwrap();
+        h.settle();
+        h.step(&json!({"click": {"handle": "dialog:Slicer:NetworkFolder"}})).unwrap();
+        h.settle();
+        h.step(&json!({"click": {"handle": "dialog:NetworkFolder:SFTP"}})).unwrap();
+        h.settle();
+        assert!(h.widget("Key file").is_some() && h.widget("Browse…").is_none(), "the SFTP rows replace the folder's");
+        let server = format!("maker@127.0.0.1:{}", running.port);
+        // Name, then Tab from field to field, as a person fills it in.
+        h.step(&json!({"widget": "Name", "near": "Name"})).unwrap();
+        for (i, text) in ["Orca box".to_string(), server.clone(), prints.to_string_lossy().into_owned(), key.to_string_lossy().into_owned()]
+            .into_iter()
+            .enumerate()
+        {
+            if i > 0 {
+                h.step(&json!({"key": "Tab"})).unwrap();
+            }
+            h.step(&json!({"text": text})).unwrap();
+            h.settle();
+        }
+        // Test: the server is new, so nothing is written; its key is shown to check, with Trust.
+        h.step(&json!({"widget": "Test"})).unwrap();
+        until(&mut h, "the key is shown", |h| h.widget("Trust this key").is_some());
+        let words = [("fingerprint", fingerprint.as_str()), ("algorithm", "ssh-ed25519")];
+        let shown = crate::i18n::format("ui.network_folder_host_unknown", &words);
+        assert!(shown.contains(&fingerprint) && h.widget(&shown).is_some(), "the fingerprint is shown: {shown}");
+        assert_eq!(std::fs::read_dir(&prints).unwrap().count(), 0);
+        // The window grows to the answer first; the button is clicked where it then is.
+        h.settle();
+        h.step(&json!({"click": {"handle": "dialog:NetworkFolder:Trust"}})).unwrap();
+        until(&mut h, "the test passes", |h| h.widget("A file can be written there.").is_some());
+        assert!(h.widget(&crate::i18n::format("ui.network_folder_host_trusted", &words)).is_some(), "the key trusted is shown");
+        assert_eq!(std::fs::read_dir(&prints).unwrap().count(), 0, "the test file is deleted");
+        h.step(&json!({"widget": "Add"})).unwrap();
+        h.settle();
+
+        let saved = h.app.preferences.network_folders.first().cloned().unwrap();
+        let address = saved.address().unwrap();
+        assert_eq!((saved.name.as_str(), address.to_string(), saved.folder()), ("Orca box", server.clone(), prints.to_string_lossy().as_ref()));
+        let stored = serde_json::to_string(&h.app.preferences.network_folders).unwrap();
+        assert!(stored.contains(&fingerprint) && !stored.to_lowercase().contains("password"), "{stored}");
+        let Some(Kind::SaveMesh(k)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("Send to Slicer closed") };
+        assert_eq!(k.slicer, "remote:Orca box");
+        let inputs = h.app.dialog.as_ref().unwrap().inputs.clone();
+        run(&mut h.app, &k, &inputs).unwrap();
+        until(&mut h, "sent", |h| h.app.status.as_ref().is_some_and(|(line, _, _)| line.starts_with("Sent to Orca box")));
+        let line = h.app.status.clone().unwrap().0;
+        assert!(line.contains(&format!("sftp://{server}")), "{line}");
+        assert_eq!(std::fs::read_dir(&prints).unwrap().count(), 1);
+        // Its row in the preferences shows where the files go.
+        assert!(saved.shown().starts_with(&format!("sftp://{server}/")));
+        *remote_sftp::TEST_SETUP.lock().unwrap() = None;
+    }
+
+    #[test]
+    fn a_network_folder_that_is_not_mounted_is_reported_and_nothing_is_made() {
+        let share = Share::new("gone");
+        let gone = share.0.join("not-mounted");
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Part"})).unwrap();
+        h.app.services.pick_folder = Some(Box::new(|| Box::pin(async { None })));
+        h.app.preferences.network_folders = vec![solidcraft_engine::remote_slicers::RemoteTarget::folder_target("NAS", &gone.to_string_lossy())];
+        let k = SaveMesh { format: 0, send_format: 0, quality: 0, open: true, slicer: "remote:NAS".into(), stale: false, shown: None };
         let mut input = SelInput::new("Bodies", BODIES, true);
         input.items = vec![Sel::Body { name: "Part".into() }];
-        let k = SaveMesh { format: 0, quality: 2, open: true, slicer: "prusa".into(), stale: false, shown: None };
-        let (_, sent) = commands(&k, std::slice::from_ref(&input)).unwrap().remove(0);
-        assert_eq!(sent.get("quality"), None, "sending has no quality row: the default applies");
-        let (_, saved) = commands(&SaveMesh { open: false, ..k }, &[input]).unwrap().remove(0);
-        assert_eq!(saved["quality"], "finest");
+        run(&mut h.app, &k, &[input]).unwrap();
+        let line = until_status(&mut h, "mounted");
+        assert!(matches!(&h.app.status, Some((_, _, true))), "an error: {line}");
+        assert!(line.contains("NAS"), "{line}");
+        assert!(!gone.exists(), "a missing folder is never made");
+    }
+
+    #[test]
+    fn network_folders_added_by_a_script_are_kept_in_the_preferences_and_across_restarts() {
+        let share = Share::new("script");
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.services.pick_folder = Some(Box::new(|| Box::pin(async { None })));
+        app.run("file.slicers.add_remote", json!({"name": "Printer share", "folder": share.path()})).unwrap();
+        assert!(app.dialog.is_none(), "no window for a script");
+        assert_eq!(app.preferences.network_folders.len(), 1);
+        let listed = app.run("file.slicers", json!({})).unwrap();
+        assert_eq!((listed["slicers"][0]["id"].as_str(), listed["slicers"][0]["remote"].as_bool()), (Some("remote:Printer share"), Some(true)));
+        let tested = app.run("file.slicers.test", json!({"name": "Printer share"})).unwrap();
+        assert_eq!(tested["ok"], true);
+        // The next start reads them back from the settings file; the design never holds them.
+        let saved = app.prefs();
+        assert!(!app.session.doc.to_json().contains(&share.path()));
+        let mut next = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        next.load_prefs(&saved);
+        assert_eq!(next.preferences.network_folders, app.preferences.network_folders);
+        assert_eq!(next.session.network_folders, app.preferences.network_folders);
+        next.run("file.slicers.remove_remote", json!({"name": "remote:printer share"})).unwrap();
+        assert!(next.preferences.network_folders.is_empty());
+        // A hand-edited settings file with a bad entry: it is left out, not a crash.
+        next.preferences.network_folders = vec![solidcraft_engine::remote_slicers::RemoteTarget::folder_target("", "relative")];
+        let listed = next.run("file.slicers", json!({})).unwrap();
+        assert!(listed["slicers"].as_array().unwrap().iter().all(|t| t["remote"].is_null()));
+    }
+
+    #[test]
+    fn the_browser_offers_no_network_folder() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.preferences.network_folders = vec![solidcraft_engine::remote_slicers::RemoteTarget::folder_target("NAS", "/mnt/nas")];
+        assert!(app.services.pick_folder.is_none());
+        assert!(!crate::network_folder_ui::available(&app));
+        assert!(network_folders(&app).is_empty(), "no folders where none can be written");
     }
 
     #[test]
