@@ -390,82 +390,84 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
                     .map_err(|e| err(e.to_string()))?
                     .ok_or_else(|| err("edgeuse has no edge"))?;
                 if !planar_face {
-                    let Ok((Some(uv_curve), _)) = eu::uv_trim_curve(brep, edgeuse) else {
-                        continue;
-                    };
-                    let interval = uv_curve.natural_interval();
-                    let (low, high) = (interval.min(), interval.max());
-                    // The UV trim curve is in the surface's NURB parameters; a STEP pcurve
-                    // is in its STEP ones (ISO 10303-42), which SolidCore converts to and
-                    // from (the angles not linearly). A pcurve with a sample that does not
-                    // convert is left out.
-                    let mut uv = Vec::with_capacity(65);
-                    let mut converted = true;
-                    for step in 0..=64 {
-                        let t = low + (high - low) * f64::from(step) / 64.0;
-                        if let Ok(p) = uv_curve.evaluate_point(pcurve_kernel, t) {
-                            match surf.convert_uv_from_nurbs_to_step(
-                                pcurve_kernel,
-                                solidcore::geom::vector2d::Point2::new(p.x, p.y),
-                            ) {
-                                Ok(step_uv) => uv.push([step_uv.x, step_uv.y]),
-                                Err(_) => converted = false,
+                    // The UV trim only enriches this face's boundary: without one the
+                    // edge use still contributes its oriented edge below.
+                    if let Ok((Some(uv_curve), _)) = eu::uv_trim_curve(brep, edgeuse) {
+                        let interval = uv_curve.natural_interval();
+                        let (low, high) = (interval.min(), interval.max());
+                        // The UV trim curve is in the surface's NURB parameters; a STEP pcurve
+                        // is in its STEP ones (ISO 10303-42), which SolidCore converts to and
+                        // from (the angles not linearly). A pcurve with a sample that does not
+                        // convert is left out.
+                        let mut uv = Vec::with_capacity(65);
+                        let mut converted = true;
+                        for step in 0..=64 {
+                            let t = low + (high - low) * f64::from(step) / 64.0;
+                            if let Ok(p) = uv_curve.evaluate_point(pcurve_kernel, t) {
+                                match surf.convert_uv_from_nurbs_to_step(
+                                    pcurve_kernel,
+                                    solidcore::geom::vector2d::Point2::new(p.x, p.y),
+                                ) {
+                                    Ok(step_uv) => uv.push([step_uv.x, step_uv.y]),
+                                    Err(_) => converted = false,
+                                }
                             }
                         }
-                    }
-                    if !converted {
-                        uv.clear();
-                    }
-                    if uv.len() >= 2 {
-                        let opposite = eu::orientation(brep, edgeuse).is_ok_and(|orientation| {
-                            orientation
+                        if !converted {
+                            uv.clear();
+                        }
+                        if uv.len() >= 2 {
+                            let opposite =
+                                eu::orientation(brep, edgeuse).is_ok_and(|orientation| {
+                                    orientation
                                 != solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType::Same
-                        });
-                        if opposite {
-                            uv.reverse();
-                        }
-                        let mut curves = vec![uv.clone()];
-                        let periodic = matches!(
-                            face.surface
-                                .as_ref()
-                                .map(solidcore::surface::surface::Surface::kind),
-                            Some(
-                                solidcore::surface::surface::p2::SurfaceKind::Cone(_)
-                                    | solidcore::surface::surface::p2::SurfaceKind::Sphere(_)
-                                    | solidcore::surface::surface::p2::SurfaceKind::Torus(_)
-                                    | solidcore::surface::surface::p2::SurfaceKind::SurfOfRevolution(
-                                        _
-                                    )
-                                    | solidcore::surface::surface::p2::SurfaceKind::BSpline(_)
-                                    | solidcore::surface::surface::p2::SurfaceKind::BallPatch(_)
-                            )
-                        );
-                        if periodic {
-                            let closed_edge = edge_start_is_end(brep, edge);
-                            if closed_edge {
-                                let mean_u = uv.iter().map(|p| p[0]).sum::<f64>() / uv.len() as f64;
-                                let shift = if mean_u > 180.0 { -360.0 } else { 360.0 };
-                                let mut other = uv.clone();
-                                for point in &mut other {
-                                    point[0] += shift;
-                                }
-                                curves.push(other);
+                                });
+                            if opposite {
+                                uv.reverse();
                             }
-                        }
-                        // SolidCore's STEP parameters give angles in degrees; the file's
-                        // plane angle unit is the radian ([`step_angles`]).
-                        let (angular_u, angular_v) = step_angles(surf);
-                        for curve in &mut curves {
-                            for point in curve {
-                                if angular_u {
-                                    point[0] = point[0].to_radians();
-                                }
-                                if angular_v {
-                                    point[1] = point[1].to_radians();
+                            let mut curves = vec![uv.clone()];
+                            let periodic = matches!(
+                                face.surface
+                                    .as_ref()
+                                    .map(solidcore::surface::surface::Surface::kind),
+                                Some(
+                                    solidcore::surface::surface::p2::SurfaceKind::Cone(_)
+                                        | solidcore::surface::surface::p2::SurfaceKind::Sphere(_)
+                                        | solidcore::surface::surface::p2::SurfaceKind::Torus(_)
+                                        | solidcore::surface::surface::p2::SurfaceKind::SurfOfRevolution(_)
+                                        | solidcore::surface::surface::p2::SurfaceKind::BSpline(_)
+                                        | solidcore::surface::surface::p2::SurfaceKind::BallPatch(_)
+                                )
+                            );
+                            if periodic {
+                                let closed_edge = edge_start_is_end(brep, edge);
+                                if closed_edge {
+                                    let mean_u =
+                                        uv.iter().map(|p| p[0]).sum::<f64>() / uv.len() as f64;
+                                    let shift = if mean_u > 180.0 { -360.0 } else { 360.0 };
+                                    let mut other = uv.clone();
+                                    for point in &mut other {
+                                        point[0] += shift;
+                                    }
+                                    curves.push(other);
                                 }
                             }
+                            // SolidCore's STEP parameters give angles in degrees; the file's
+                            // plane angle unit is the radian ([`step_angles`]).
+                            let (angular_u, angular_v) = step_angles(surf);
+                            for curve in &mut curves {
+                                for point in curve {
+                                    if angular_u {
+                                        point[0] = point[0].to_radians();
+                                    }
+                                    if angular_v {
+                                        point[1] = point[1].to_radians();
+                                    }
+                                }
+                            }
+                            pcurves
+                                .insert((u64::from(id.index()) + 1, loop_index, use_index), curves);
                         }
-                        pcurves.insert((u64::from(id.index()) + 1, loop_index, use_index), curves);
                     }
                 }
                 let forward = eu::orientation(brep, edgeuse).map_err(|e| err(e.to_string()))?
