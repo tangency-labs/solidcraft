@@ -602,3 +602,176 @@ fn an_angle_beside_a_length_solves_at_building_scale() {
         assert!((sk.measure_wire_dimension(&kind).unwrap() - 50f64.to_radians()).abs() < 1e-9, "{l}");
     }
 }
+
+#[test]
+fn parallel_perpendicular_and_equal_hold_between_free_lines() {
+    let mut sk = Sketch::new();
+    let a = line(&mut sk, v(0.0, 0.0, 0.0), v(10.0, 0.0, 0.0));
+    let b = line(&mut sk, v(0.0, 5.0, 0.0), v(8.0, 6.0, 2.0));
+    let c = line(&mut sk, v(0.0, 0.0, 0.0), v(1.0, 9.0, 3.0));
+    for end in ["start", "end"] {
+        fix_all(&mut sk, &format!("{a}.{end}"));
+    }
+    fix_all(&mut sk, &format!("{b}.start"));
+    fix_all(&mut sk, &format!("{c}.start"));
+    sk.add_wire_constraint(WireConstraintKind::Parallel { a: a.clone(), b: b.clone() }).unwrap();
+    sk.add_wire_constraint(sk.equal_kind(&a, &b).unwrap()).unwrap();
+    sk.add_wire_constraint(WireConstraintKind::Perpendicular { a: a.clone(), b: c.clone() }).unwrap();
+    let rep = sk.solve_wires(None);
+    assert!(rep.ok, "{rep:?}");
+    // b runs along X from its fixed start, as long as a: it ends at (10, 5, 0).
+    assert!(close(at(&sk, &format!("{b}.end")), v(10.0, 5.0, 0.0)), "{:?}", at(&sk, &format!("{b}.end")));
+    assert!(at(&sk, &format!("{c}.end")).x.abs() < 1e-7, "c stands square to a");
+}
+
+#[test]
+fn collinear_puts_the_second_line_on_the_first() {
+    let mut sk = Sketch::new();
+    let a = line(&mut sk, v(0.0, 0.0, 0.0), v(10.0, 0.0, 0.0));
+    let b = line(&mut sk, v(20.0, 3.0, 4.0), v(30.0, 3.0, 4.0));
+    for end in ["start", "end"] {
+        fix_all(&mut sk, &format!("{a}.{end}"));
+    }
+    sk.add_wire_constraint(WireConstraintKind::Collinear { a: a.clone(), b: b.clone() }).unwrap();
+    let rep = sk.solve_wires(None);
+    assert!(rep.ok, "{rep:?}");
+    for end in ["start", "end"] {
+        let q = at(&sk, &format!("{b}.{end}"));
+        assert!(q.y.abs() < 1e-7 && q.z.abs() < 1e-7, "{q:?}");
+    }
+}
+
+#[test]
+fn a_line_turns_tangent_to_the_arc_it_leaves() {
+    // A quarter arc from (10,0,0) round to (0,10,0) about the origin, fixed; a line leaving its
+    // end. Tangent there means running along -X, square to the radius (0,10,0).
+    let mut sk = Sketch::new();
+    let d = 10.0 * std::f64::consts::FRAC_1_SQRT_2;
+    let arc = sk.add_drawn_arc_in(&[v(10.0, 0.0, 0.0), v(d, d, 0.0), v(0.0, 10.0, 0.0)], WireSpace::Component).unwrap();
+    for k in 0..3 {
+        fix_all(&mut sk, &format!("{arc}.{k}"));
+    }
+    let l = line(&mut sk, v(0.0, 10.0, 0.0), v(-8.0, 13.0, 1.0));
+    let k = sk.tangent_kind(&l, &arc).expect("they meet");
+    sk.add_wire_constraint(k).unwrap();
+    let rep = sk.solve_wires(None);
+    assert!(rep.ok, "{rep:?}");
+    let end = at(&sk, &format!("{l}.end"));
+    assert!((end.y - 10.0).abs() < 1e-7 && end.z.abs() < 1e-7 && end.x < 0.0, "{end:?}");
+    assert!(close(at(&sk, &format!("{l}.start")), v(0.0, 10.0, 0.0)));
+    // A line that does not touch the arc has no tangent to take.
+    let far = line(&mut sk, v(50.0, 50.0, 0.0), v(60.0, 50.0, 0.0));
+    assert!(sk.tangent_kind(&far, &arc).is_none());
+}
+
+#[test]
+fn plane_relations_and_dimensions_use_the_origin_planes() {
+    let mut sk = Sketch::new();
+    let l = line(&mut sk, v(0.0, 0.0, 0.0), v(10.0, 1.0, 7.0));
+    fix_all(&mut sk, &format!("{l}.start"));
+    // Parallel to XY: the end comes down to z = 0.
+    sk.add_wire_constraint(WireConstraintKind::ParallelToPlane { line: l.clone(), plane: OriginPlane::Xy }).unwrap();
+    let q = sk.add_drawn_wire_in(&[v(3.0, 4.0, 5.0)], WireSpace::Component).unwrap();
+    sk.add_wire_constraint(WireConstraintKind::OnPlane { p: sk.wire_point(&q).unwrap(), plane: OriginPlane::Yz }).unwrap();
+    let r = sk.add_drawn_wire_in(&[v(1.0, -2.0, 3.0)], WireSpace::Component).unwrap();
+    let dist = WireConstraintKind::PlaneDistance { p: sk.wire_point(&r).unwrap(), plane: OriginPlane::Xz, reversed: true, value: 6.0 };
+    sk.add_wire_dimension(dist, None, false).unwrap();
+    let rep = sk.solve_wires(None);
+    assert!(rep.ok, "{rep:?}");
+    assert!(at(&sk, &format!("{l}.end")).z.abs() < 1e-7);
+    assert!(close(at(&sk, &q), v(0.0, 4.0, 5.0)), "onto YZ: {:?}", at(&sk, &q));
+    assert!(close(at(&sk, &r), v(1.0, -6.0, 3.0)), "6 behind XZ: {:?}", at(&sk, &r));
+    // A line at 30° to XY, measured.
+    let m = line(&mut sk, v(0.0, 0.0, 0.0), v(3.0f64.sqrt(), 0.0, 1.0));
+    let k = WireConstraintKind::PlaneAngle { line: m, plane: OriginPlane::Xy, reversed: false, value: 0.0 };
+    assert!((sk.measure_wire_dimension(&k).unwrap() - std::f64::consts::FRAC_PI_6).abs() < 1e-12);
+    assert_eq!(OriginPlane::from_name("ZX"), Some(OriginPlane::Xz));
+}
+
+#[test]
+fn angles_to_a_plane_drive_from_lying_in_it_to_standing_square() {
+    // Three lines from fixed starts: one lying in XY driven to 80°, one at 30° driven to 0°, one
+    // upright held at 90°.
+    let mut sk = Sketch::new();
+    let flat = line(&mut sk, v(0.0, 0.0, 0.0), v(10.0, 0.0, 0.0));
+    let slope = line(&mut sk, v(0.0, 5.0, 0.0), v(3.0f64.sqrt() * 5.0, 5.0, 5.0));
+    let up = line(&mut sk, v(0.0, 9.0, 0.0), v(0.1, 9.0, 10.0));
+    for l in [&flat, &slope, &up] {
+        fix_all(&mut sk, &format!("{l}.start"));
+    }
+    for (l, deg) in [(&flat, 80.0), (&slope, 0.0), (&up, 90.0)] {
+        let k = WireConstraintKind::PlaneAngle { line: l.clone(), plane: OriginPlane::Xy, reversed: false, value: f64::to_radians(deg) };
+        sk.add_wire_dimension(k, None, false).unwrap();
+    }
+    let rep = sk.solve_wires(None);
+    assert!(rep.ok, "the flat start is nudged off the plane: {rep:?}");
+    let dir = |l: &str| {
+        let d = at(&sk, &format!("{l}.end")) - at(&sk, &format!("{l}.start"));
+        d * (1.0 / d.len())
+    };
+    assert!((dir(&flat).z - 80f64.to_radians().sin()).abs() < 1e-9, "{:?}", dir(&flat));
+    assert!(dir(&slope).z.abs() < 1e-9, "{:?}", dir(&slope));
+    assert!((dir(&up).z - 1.0).abs() < 1e-9, "{:?}", dir(&up));
+}
+
+#[test]
+fn perpendicular_turns_lines_that_start_parallel() {
+    let mut sk = Sketch::new();
+    let a = line(&mut sk, v(0.0, 0.0, 0.0), v(10.0, 0.0, 0.0));
+    let b = line(&mut sk, v(0.0, 5.0, 0.0), v(10.0, 5.0, 0.0));
+    fix_all(&mut sk, &format!("{a}.start"));
+    fix_all(&mut sk, &format!("{a}.end"));
+    fix_all(&mut sk, &format!("{b}.start"));
+    sk.add_wire_constraint(WireConstraintKind::Perpendicular { a: a.clone(), b: b.clone() }).unwrap();
+    let rep = sk.solve_wires(None);
+    assert!(rep.ok, "{rep:?}");
+    let d = at(&sk, &format!("{b}.end")) - at(&sk, &format!("{b}.start"));
+    assert!(d.x.abs() < 1e-9 && d.len() > 1.0, "{d:?}");
+}
+
+#[test]
+fn a_tangent_line_leaves_the_arc_the_way_it_runs_and_never_folds_back() {
+    // A quarter arc from (10, 0) to (0, 10) about the origin, in XY. At its end it runs on in −X.
+    let mut sk = Sketch::new();
+    let h = std::f64::consts::FRAC_1_SQRT_2 * 10.0;
+    let arc = sk.add_drawn_arc_in(&[v(10.0, 0.0, 0.0), v(h, h, 0.0), v(0.0, 10.0, 0.0)], WireSpace::Component).unwrap();
+    // A line from the arc's end drawn back over the arc (a cusp if it were only parallel).
+    let l = line(&mut sk, v(0.0, 10.0, 0.0), v(8.0, 10.5, 0.0));
+    sk.join_drawn_ends(std::slice::from_ref(&l)).unwrap();
+    for i in 0..3 {
+        fix_all(&mut sk, &format!("{arc}.{i}"));
+    }
+    let k = sk.tangent_kind(&l, &arc).unwrap();
+    sk.add_wire_constraint(k).unwrap();
+    let rep = sk.solve_wires(None);
+    assert!(rep.ok, "{rep:?}");
+    let d = at(&sk, &format!("{l}.end")) - at(&sk, &format!("{l}.start"));
+    assert!(d.x < 0.0 && d.y.abs() < 1e-9 && d.z.abs() < 1e-9, "runs on in −X: {d:?}");
+}
+
+#[test]
+fn equal_arcs_hold_one_radius_survive_a_save_and_go_with_an_arc() {
+    let mut sk = Sketch::new();
+    let a = sk.add_drawn_arc_in(&[v(0.0, 0.0, 0.0), v(5.0, 5.0, 0.0), v(10.0, 0.0, 0.0)], WireSpace::Component).unwrap();
+    let b = sk.add_drawn_arc_in(&[v(0.0, 20.0, 0.0), v(3.0, 23.0, 0.0), v(6.0, 20.0, 0.0)], WireSpace::Component).unwrap();
+    for i in 0..3 {
+        fix_all(&mut sk, &format!("{a}.{i}"));
+    }
+    fix_all(&mut sk, &format!("{b}.start"));
+    fix_all(&mut sk, &format!("{b}.end"));
+    let k = sk.equal_kind(&a, &b).unwrap();
+    assert!(matches!(k, WireConstraintKind::Equal { arcs: true, .. }));
+    let id = sk.add_wire_constraint(k).unwrap();
+    let rep = sk.solve_wires(None);
+    assert!(rep.ok, "{rep:?}");
+    let radius = |sk: &Sketch, arc: &str| sk.measure_wire_dimension(&WireConstraintKind::Radius { arc: arc.to_string(), value: 0.0 }).unwrap();
+    assert!((radius(&sk, &a) - radius(&sk, &b)).abs() < 1e-7 && (radius(&sk, &a) - 5.0).abs() < 1e-9);
+    // Saved, the ids stay plain wire ids.
+    let text = serde_json::to_string(&sk.wire_constraints).unwrap();
+    assert!(text.contains("\"arcs\":true") && !text.contains("arc:"), "{text}");
+    let back: Sketch = serde_json::from_str(&serde_json::to_string(&sk).unwrap()).unwrap();
+    assert_eq!(back.wire_constraints, sk.wire_constraints);
+    back.validate_wire_constraints().unwrap();
+    sk.remove_wires(std::slice::from_ref(&b));
+    assert!(sk.wire_constraints.iter().all(|c| c.id != id));
+}
