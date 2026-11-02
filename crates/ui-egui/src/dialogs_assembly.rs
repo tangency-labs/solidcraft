@@ -74,9 +74,10 @@ pub(crate) fn joint_choice(name: &str, kind: JointKind) -> String {
     format!("{name} ({})", crate::i18n::tr_label(kind_label(kind)))
 }
 
-/// What a joint origin input accepts: snaps on faces, edges and vertices, the world origin, and
-/// a sketch point (so a joint can be placed on the design origin or a hole centre).
-pub const SNAPS: crate::selection::Accept = FACES | EDGES | VERTICES | ORIGIN | POINTS;
+/// What a joint origin input accepts: snaps on faces, edges and vertices, the world origin, a
+/// sketch point (so a joint can be placed on the design origin or a hole centre), and the snap
+/// points a hovered edge or face wakes (its centres, middles and ends, #11227).
+pub const SNAPS: crate::selection::Accept = FACES | EDGES | VERTICES | ORIGIN | POINTS | crate::selection::SNAP_POINTS;
 /// Commands whose effect is where occurrences sit (previewed on the placed model).
 const MOVES: &[&str] = &[
     "joint.create",
@@ -723,6 +724,22 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
         m.insert("occurrence".into(), json!(occ));
     }
     Some(snap)
+}
+
+/// A woken snap point picked in a joint origin input (#11227) stands for the edge or face that
+/// woke it when that item's own snap is there (a hole's centre, an edge's middle, a face's
+/// centre): the joint keeps it by name, as a pick of the item itself would. Any other woken point
+/// (an arc's end, a cylinder's far end) stays a point.
+pub(crate) fn woken_pick(app: &SolveApp, sel: Sel) -> Sel {
+    let Sel::Vertex { point, .. } = &sel else { return sel };
+    let snaps = app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept == SNAPS);
+    let tol = 1e-4 * (1.0 + point.len());
+    let woken = &app.viewport.woken;
+    let Some(item) = woken.item.as_ref().filter(|_| snaps && woken.points.iter().any(|p| p.at.dist(*point) <= tol)) else { return sel };
+    match snap_of(&app.session, item) {
+        Some(s) if s.at.dist(*point) <= tol => item.clone(),
+        _ => sel,
+    }
 }
 
 /// A snap moved across its own plane by (x, y) (the joint's offset), as an explicit frame.
@@ -1726,7 +1743,7 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
     }
     // The snap under the cursor (found again only when the hovered item changes).
     let accepting = d.inputs.get(d.active).is_some_and(|i| i.accept == SNAPS);
-    let under = app.viewport.hover.as_ref().and_then(crate::viewport::hit_sel).filter(|_| accepting);
+    let under = app.viewport.hover.as_ref().and_then(crate::viewport::hit_sel).filter(|_| accepting).map(|s| woken_pick(app, s));
     match under {
         Some(sel) => {
             let fresh = !matches!(hover, Some((s, _)) if *s == sel);
