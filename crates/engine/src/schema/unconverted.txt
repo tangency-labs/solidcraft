@@ -58,10 +58,6 @@ contact.edit
 contact.enable_all
 contact.enable_sets
 contact.list
-diagnostics.crash_report
-diagnostics.crash_reports
-diagnostics.crash_reports.clear
-diagnostics.crash_test
 doc.open
 doc.recover
 doc.recovery_discard
