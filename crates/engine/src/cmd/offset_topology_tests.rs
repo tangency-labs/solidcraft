@@ -123,7 +123,7 @@ fn an_outline_outside_a_dog_bone_meets_outside_both_notches() {
     run(&mut session, "sketch.line", json!({"points":[[10,10],[-10,10]]}));
     run(&mut session, "sketch.arc.center_point", json!({"center":[-20,10],"start":[-10,10],"end":[-20,0]}));
     run(&mut session, "sketch.arc.center_point", json!({"center":[-20,-10],"start":[-20,0],"end":[-10,-10]}));
-    run(&mut session, "sketch.offset", json!({"curves":["l1"],"distance":2,"side":[0,40]}));
+    run(&mut session, "sketch.offset", json!({"curves":["l1"],"distance":2,"side":[0,-40]}));
     let state = session.model.state();
     let sk = &state.sketch(sketch).unwrap().sketch;
     let record = sk.offsets.last().unwrap();
