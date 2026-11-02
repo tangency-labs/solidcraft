@@ -729,3 +729,73 @@ fn round_along_long_lines_and_small_turns_measures_its_volume() {
     // Centred across the bar, as the part is.
     assert!(m.centroid.x.abs() < 1e-3, "centre of mass x {}", m.centroid.x);
 }
+
+/// The closed profile of four natural fit splines, each through three points (its ends and a
+/// bowed middle), as the sketch's fit-point spline makes them: two cubic spans a side, joined
+/// smoothly within a side and at an angle at the four corners. Rotated a quarter turn about
+/// (10, 10) side to side.
+fn spline_sided_profile() -> solidcraft_geom::Region2 {
+    use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
+    let side = [Vec2::new(0.0, 0.0), Vec2::new(10.0, -3.0), Vec2::new(20.0, 0.0)];
+    let turn = |p: Vec2, q: usize| (0..q).fold(p - Vec2::new(10.0, 10.0), |v, _| Vec2::new(-v.y, v.x)) + Vec2::new(10.0, 10.0);
+    let mut segs = Vec::new();
+    for q in 0..4 {
+        let [p0, p1, p2] = side.map(|p| turn(p, q));
+        // Natural ends: the middle point's second derivative, chord-length parameters.
+        let (h0, h1) = (p0.dist(p1), p1.dist(p2));
+        let m = ((p2 - p1) / h1 - (p1 - p0) / h0) * (6.0 / (2.0 * (h0 + h1)));
+        let spans = [(p0, p1, h0, Vec2::ZERO, m), (p1, p2, h1, m, Vec2::ZERO)];
+        for (a, b, h, ma, mb) in spans {
+            let slope = (b - a) / h;
+            let d0 = (slope - (ma * 2.0 + mb) * (h / 6.0)) * h;
+            let d1 = (slope + (ma + mb * 2.0) * (h / 6.0)) * h;
+            segs.push(Seg2::Cubic { p0: a, p1: a + d0 / 3.0, p2: b - d1 / 3.0, p3: b });
+        }
+    }
+    Region2 { outer: Loop2 { segs }, holes: vec![] }
+}
+
+/// #3779: small equal chamfers and rounds round the top rim of an extruded profile of spline
+/// sides. Each side's two spans roll as one chain; its sections resampled by distance along the
+/// centres are solved at the spline's own point and tangent there (the chord between centres
+/// tilted the section plane off the spline and the ball did not fit), and each chain ends in the
+/// next side's wall at the corner. The rim is 4 × 20.9 mm long; the removed volume is the
+/// section's area times the rim's length, within the corners' share.
+#[test]
+fn small_blends_round_a_spline_sided_rim() {
+    use solidcraft_geom::Plane;
+    let body = crate::extrude(&Plane::XY, &[spline_sided_profile()], 0.0, 2.0).unwrap().pop().unwrap();
+    // A point in the middle of each span of the top rim.
+    let picks: Vec<Vec3> = crate::body::Body::unique_edges(&body.solid)
+        .into_iter()
+        .filter(|e| [e.front(), e.back()].iter().all(|v| (crate::blend::vtx(v).z - 2.0).abs() < 1e-9))
+        .map(|e| {
+            let c = e.curve();
+            let (a, b) = c.range_tuple();
+            from_p3(c.subs((a + b) * 0.5))
+        })
+        .collect();
+    assert_eq!(picks.len(), 8);
+    let rim: f64 = crate::body::Body::unique_edges(&body.solid)
+        .into_iter()
+        .filter(|e| [e.front(), e.back()].iter().all(|v| (crate::blend::vtx(v).z - 2.0).abs() < 1e-9))
+        .map(|e| {
+            let c = e.curve();
+            let (a, b) = c.range_tuple();
+            (0..200).map(|i| from_p3(c.subs(a + (b - a) * i as f64 / 200.0)).dist(from_p3(c.subs(a + (b - a) * (i + 1) as f64 / 200.0)))).sum::<f64>()
+        })
+        .sum();
+    let volume = |b: &Body| crate::measure(b).unwrap().volume;
+    let v0 = volume(&body);
+    let d: f64 = 0.1;
+    for round in [false, true] {
+        let what = if round { "fillet" } else { "chamfer" };
+        let made = if round { fillet(&body, &picks, d) } else { crate::chamfer(&body, &picks, d) }.unwrap_or_else(|e| panic!("{what} {d}: {e}"));
+        assert!(made.validity().is_empty(), "{what}: {:?}", made.validity());
+        assert_eq!(made.crossed_face_loops().unwrap(), 0, "{what}");
+        let area = if round { d * d * (1.0 - std::f64::consts::FRAC_PI_4) } else { d * d / 2.0 };
+        let removed = v0 - volume(&made);
+        let want = area * rim;
+        assert!((removed - want).abs() < want * 0.05, "{what}: removed {removed} vs {want}");
+    }
+}

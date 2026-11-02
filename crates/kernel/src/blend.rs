@@ -2182,9 +2182,36 @@ fn chamfer_built(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
             return Ok(result);
         }
     }
+    // Picks on one smooth chain of curved edges (by the body as given), when other picks are
+    // elsewhere: a curved blend rolls the whole chain from any one of them, and the others then
+    // lie beside its new rails, which one at a time they would chamfer again (#3779: each
+    // spline side of a rim is two spans, and the other sides are selected too). Each such
+    // group is blended together.
+    let chain_groups: Vec<Vec<Vec3>> = {
+        let solid = cur.deep_copy();
+        let all = Body::unique_edges(&solid);
+        let mut groups: Vec<(Vec<mt::EdgeID>, Vec<Vec3>)> = Vec::new();
+        for p in edges {
+            let Some(id) = nearest_edge_id(&cur, &all, *p)? else { continue };
+            if let Some(group) = groups.iter_mut().find(|(chain, _)| chain.contains(&id)) {
+                group.1.push(*p);
+                continue;
+            }
+            let Some(edge) = all.iter().find(|e| e.id() == id) else { continue };
+            if let Some(chain) = smooth_chain(&solid, edge)
+                && chain.len() > 1
+                && all.iter().any(|e| chain.contains(&e.id()) && !matches!(e.curve(), mt::Curve::Line(_)))
+            {
+                groups.push((chain, vec![*p]));
+            }
+        }
+        groups.into_iter().map(|(_, picks)| picks).filter(|picks| picks.len() > 1).collect()
+    };
     let start = cur.clone();
     let one_by_one = || -> Result<Body> {
         let mut cur = start.clone();
+        // Picks already blended with the rest of their chain.
+        let mut consumed: Vec<Vec3> = Vec::new();
         // Set once a step has changed the body, so a later miss cannot restart from the cutters.
         let mut progressed = false;
         // A chain running on into curved faces, or an edge ending at one: as for fillets.
@@ -2198,6 +2225,17 @@ fn chamfer_built(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
                 })
         };
         for p in edges {
+            if consumed.iter().any(|q| q.dist(*p) < 1e-12) {
+                continue;
+            }
+            if let Some(group) = chain_groups.iter().find(|g| g.iter().any(|q| q.dist(*p) < 1e-12))
+                && let Ok(b) = blend(&cur, group, distance, Shape::Flat, "chamfer")
+            {
+                progressed = true;
+                cur = record::after(b, &cur, &counts);
+                consumed.extend(group.iter().copied());
+                continue;
+            }
             let tool = chamfer_tool(&cur, *p, distance, 0);
             // The extension is inside the wall. The local blend is one bevel on a hole corner.
             // Where that blend cannot build the edge, the cutter is what used to succeed (#814).
