@@ -318,6 +318,10 @@ jobs:
           cargo test -p xtask ui_containers --locked
       - name: Sorted lists
         run: cargo xtask lists
+      - name: Model decisions use exact geometry, not meshes
+        run: |
+          cargo xtask mesh-decisions
+          cargo test -p xtask mesh_decisions --locked
       - name: Agent router and skills cite real files
         run: |
           cargo xtask skills
