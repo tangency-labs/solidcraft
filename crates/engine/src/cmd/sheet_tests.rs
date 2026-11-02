@@ -3940,7 +3940,9 @@ fn a_corner_relief_of_an_edge_flange_is_saved_with_it_and_designs_without_one_sa
     // timeline.edit changes the relief of a saved feature, and null takes it back to the rule's.
     let id = s.doc.features.iter().rev().nth(1).map_or(0, |f| f.id);
     run(&mut s, "timeline.edit", json!({"feature": id, "set": {"corner_relief_shape": "rectangular"}}));
-    assert!(relief_drawing(&mut s).0.is_empty());
+    // No arc of the 6 mm round relief is left (the torn ends where the two features' flanges meet
+    // are drawn as arcs too).
+    assert!(relief_drawing(&mut s).0.iter().all(|(_, r)| (r - 3.0).abs() > 1e-6));
     run(&mut s, "timeline.edit", json!({"feature": id, "set": {"corner_relief_shape": null, "corner_relief": null}}));
     assert!(flange_features(&s)[0].get("corner_relief_shape").is_none());
     assert!(flange_features(&s)[0].get("corner_relief").is_none());
