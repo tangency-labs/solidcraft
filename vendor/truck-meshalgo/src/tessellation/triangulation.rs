@@ -440,7 +440,7 @@ where
         };
         let preboundary: Option<Vec<_>> = boundaries.iter().map(create_boundary).collect();
         let polygon: Option<PolygonMesh> = (|| {
-            let boundary = PolyBoundary::new(preboundary?, &surface, tol);
+            let boundary = PolyBoundary::new(preboundary?, &surface, tol)?;
             Some(trimming_tessellation(&surface, &boundary, tol, cap))
         })();
         CompressedFace {
@@ -481,7 +481,7 @@ fn shell_create_polygon<S: PreMeshableSurface>(
         })
         .collect::<Option<Vec<_>>>();
     let polygon: Option<PolygonMesh> = (|| {
-        let boundary = PolyBoundary::new(preboundary?, &surface, tol);
+        let boundary = PolyBoundary::new(preboundary?, &surface, tol)?;
         let mut mesh = trimming_tessellation(surface, &boundary, tol, cap);
         // Display and export meshes only, as the ruling grid lines: the meshes Boolean
         // operations intersect keep truck's points.
@@ -713,16 +713,31 @@ fn loop_orientation(curve: &[Point2]) -> bool {
 }
 
 impl PolyBoundary {
-    fn new(pieces: Vec<PolyBoundaryPiece>, surface: &impl PreMeshableSurface, tol: Deflection) -> Self {
+    fn new(pieces: Vec<PolyBoundaryPiece>, surface: &impl PreMeshableSurface, tol: Deflection) -> Option<Self> {
         Self::with_steps(pieces, surface, tol, None)
     }
     // SolidCraft: only the disposable preview supplies fixed seam subdivisions.
-    fn with_steps<S: PreMeshableSurface>(pieces: Vec<PolyBoundaryPiece>, surface: &S, tol: Deflection, steps: Option<usize>) -> Self {
+    // SolidCraft, bounded work: a polyline closing an open loop along the surface's domain has
+    // a few points where the loop is sound; one with more than `MAX_EDGE_POINTS` (a loop laid
+    // out across millions of periods gave 4.3 million, and meshing them never finished, #1985)
+    // leaves the face unmeshed (`None`), which `Body::validity` reports, instead of hanging.
+    // A sound face stays far below it: a full turn needs 20,000 points only past a radius of ~2e7 chord tolerances (measured); export uses 2e-4 of the body size.
+    fn with_steps<S: PreMeshableSurface>(pieces: Vec<PolyBoundaryPiece>, surface: &S, tol: Deflection, steps: Option<usize>) -> Option<Self> {
+        let overflow = std::cell::Cell::new(false);
         let polyline_on_surface = |surface: &S, p: Point2, q: Point2, tol| {
             if let Some(n) = steps {
                 (0..=n).map(|i| p + (q - p) * (i as f64 / n as f64)).collect()
+            } else if overflow.get() {
+                // The face is left unmeshed: the other closing polylines are not computed.
+                vec![p, q]
             } else {
-                polyline_on_surface(surface, p, q, tol)
+                match polyline_on_surface(surface, p, q, tol) {
+                    Some(line) if line.len() <= MAX_EDGE_POINTS => line,
+                    _ => {
+                        overflow.set(true);
+                        vec![p, q]
+                    }
+                }
             }
         };
         let (mut closed, mut open) = (Vec::new(), Vec::new());
@@ -829,9 +844,12 @@ impl PolyBoundary {
                 closed.push(connect_edges([vec0, vec1, vec2, vec3]));
             }
         }
+        if overflow.get() {
+            return None;
+        }
         let boxes = closed.iter().map(|curve| curve.iter().collect()).collect();
         let runs = closed.iter().map(|curve| run_boxes(curve)).collect();
-        Self(closed, boxes, runs)
+        Some(Self(closed, boxes, runs))
     }
 
     /// whether `c` is included in the domain with boundary = `self`.
@@ -1057,7 +1075,7 @@ pub(super) fn preview_face<S: RobustMeshableSurface>(surface: &S, loops: &[Vec<P
     let pieces = loops.iter().map(|w| {
         PolyBoundaryPiece::try_new(surface, std::iter::once(PolylineCurve(w.clone())), search, 1e-3)
     }).collect::<Option<Vec<_>>>()?;
-    let boundary = PolyBoundary::with_steps(pieces, surface, Deflection::chord(1e-3), Some(steps));
+    let boundary = PolyBoundary::with_steps(pieces, surface, Deflection::chord(1e-3), Some(steps))?;
     // Projection can duplicate points at singularities; periodic seams add at most
     // eight fixed polylines. Reject non-finite parameters before spade sees them.
     if boundary.0.iter().map(Vec::len).sum::<usize>() > 8192 + 8 * (steps + 1)
@@ -1611,18 +1629,45 @@ fn triangulation_into_polymesh<'a>(
     )
 }
 
+/// SolidCraft, bounded work: `None` where the line would need more than `MAX_EDGE_POINTS`
+/// points, however far apart its ends are (truck's `parameter_division` copied vectors at
+/// each of 100 levels first: 23 s and 1.3 GB for 200,000 turns, and an out-of-memory abort for
+/// millions, #1374).
 fn polyline_on_surface(
     surface: impl PreMeshableSurface,
     p: Point2,
     q: Point2,
     tol: Deflection,
-) -> Vec<Point2> {
+) -> Option<Vec<Point2>> {
     use truck_geometry::prelude::*;
     let line = Line(p, q);
     let pcurve = PCurve::new(line, surface);
-    let (vec, _) = pcurve.parameter_division(pcurve.range_tuple(), tol.chord);
+    let (t0, t1) = pcurve.range_tuple();
+    let vec = bounded_parameter_division(|t| pcurve.subs(t), (t0, t1), tol.chord)?;
     let vec = halved_while_turning(|t| pcurve.subs(t), vec, tol);
-    vec.into_iter().map(|t| line.subs(t)).collect()
+    Some(vec.into_iter().map(|t| line.subs(t)).collect())
+}
+
+/// SolidCraft: truck's `parameter_division` (the same probe, bisection and 100 levels), iterative,
+/// returning `None` once the division has more than `MAX_EDGE_POINTS` pieces.
+fn bounded_parameter_division(curve: impl Fn(f64) -> Point3, range: (f64, f64), tol: f64) -> Option<Vec<f64>> {
+    let mut out = vec![range.0];
+    let mut stack = vec![(range.0, range.1, curve(range.0), curve(range.1), 100usize)];
+    while let Some((a, b, pa, pb, trials)) = stack.pop() {
+        let p = 0.5 + (0.2 * HashGen::hash1(pa.midpoint(pb)) - 0.1);
+        let probe = curve(a * (1.0 - p) + b * p);
+        if probe.distance2(pa + (pb - pa) * p) < tol * tol || trials == 0 {
+            out.push(b);
+        } else if out.len() + stack.len() >= MAX_EDGE_POINTS {
+            return None;
+        } else {
+            let tm = (a + b) / 2.0;
+            let pm = curve(tm);
+            stack.push((tm, b, pm, pb, trials - 1));
+            stack.push((a, tm, pa, pm, trials - 1));
+        }
+    }
+    Some(out)
 }
 
 /// SolidCraft: `params` with every interval halved while the curve turns more over it than the
@@ -1675,6 +1720,23 @@ fn par_bench() {
         let _shell = shell_tessellation_single_thread(&shell, Deflection::chord(0.01), by_search_parameter);
     });
     println!("{}ms", instant.elapsed().as_millis());
+}
+
+/// The bound on the polylines that close an open boundary loop, for the SolidCraft kernel tests
+/// (this crate's own tests do not run in CI).
+///
+/// Not part of the API. Built only for tests, or with the `test-hooks` feature.
+#[cfg(any(test, feature = "test-hooks"))]
+#[doc(hidden)]
+pub mod boundary_test_hooks {
+    use super::*;
+
+    /// The number of points of the boundary made from one loop of parameter points `piece` on
+    /// `surface`, closed along its domain where it is open; `None` where a closing polyline
+    /// would have more than `MAX_EDGE_POINTS` points (the face is then left unmeshed).
+    pub fn boundary_points<S: PreMeshableSurface>(surface: &S, piece: Vec<Point2>, chord: f64) -> Option<usize> {
+        PolyBoundary::new(vec![PolyBoundaryPiece(piece)], surface, Deflection::chord(chord)).map(|b| b.0.iter().map(Vec::len).sum())
+    }
 }
 
 /// `include` before the runs: kept to check the new one answers the same everywhere.

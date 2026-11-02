@@ -527,4 +527,4 @@ mod closed;
 mod triangulation;
 #[cfg(feature = "test-hooks")]
 #[doc(hidden)]
-pub use triangulation::{include_test_hooks, loop_fill_test_hooks};
+pub use triangulation::{boundary_test_hooks, include_test_hooks, loop_fill_test_hooks};
