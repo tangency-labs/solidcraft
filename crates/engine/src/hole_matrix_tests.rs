@@ -179,6 +179,15 @@ fn radial(rr: f64, r: f64, depth: f64) -> f64 {
     sum
 }
 
+/// The bridge layers of a counterbore of radius `rc` over a hole of radius r: one 0.2 mm layer of
+/// the slot (out to the counterbore wall) and one of the square, both 0.02 mm wider than the
+/// hole, each less the bore's disc.
+fn bridges(rc: f64, r: f64) -> f64 {
+    let q = r + 0.01;
+    let slot = 2.0 * (q * (rc * rc - q * q).sqrt() + rc * rc * (q / rc).asin());
+    0.2 * (slot - PI * r * r) + 0.2 * (4.0 * q * q - PI * r * r)
+}
+
 // ---- the cases -------------------------------------------------------------------------------
 
 const DOWN: [f64; 3] = [0.0, 0.0, -1.0];
@@ -411,6 +420,33 @@ fn cases() -> Vec<Case> {
             vec![spot([20.0, 15.0, 20.0], DOWN, 20.0, None)],
         )
         .faces(3),
+        Case::new(
+            "type/counterbore-bridged/blind",
+            block(),
+            hole(json!({"position": [20, 15, 20], "depth": 10, "type": "counterbore", "cb_diameter": 12, "cb_depth": 3, "bridge": "0.2 mm"})),
+            cyl(6.0, 3.0) + cyl(r, 7.0) + bridges(6.0, r),
+            r,
+            vec![spot([20.0, 15.0, 20.0], DOWN, 10.0, Some(10.0))],
+        )
+        .faces(12),
+        Case::new(
+            "type/counterbore-bridged/blind-drill-point",
+            block(),
+            hole(json!({"position": [20, 15, 20], "depth": 10, "type": "counterbore", "cb_diameter": 12, "cb_depth": 3, "tip_angle": "118 deg", "bridge": "0.2 mm"})),
+            cyl(6.0, 3.0) + cyl(r, 7.0) + tip(r) + bridges(6.0, r),
+            r,
+            vec![spot([20.0, 15.0, 20.0], DOWN, 10.0, Some(10.0 + r / 59f64.to_radians().tan()))],
+        )
+        .faces(12),
+        Case::new(
+            "type/counterbore-bridged/through",
+            block(),
+            hole(json!({"position": [20, 15, 20], "type": "counterbore", "cb_diameter": 12, "cb_depth": 3, "bridge": "0.2 mm"})),
+            cyl(6.0, 3.0) + cyl(r, 17.0) + bridges(6.0, r),
+            r,
+            vec![spot([20.0, 15.0, 20.0], DOWN, 20.0, None)],
+        )
+        .faces(11),
         Case::new(
             "type/countersink/blind",
             block(),
@@ -892,4 +928,59 @@ fn a_hole_on_a_cones_side_drills_along_its_normal() {
     let solidcraft_doc::FeatureKind::Hole { direction, .. } = &f.kind else { panic!("not a hole") };
     let d = direction.0;
     assert!((d.x + 0.8).abs() < 1e-6 && d.y.abs() < 1e-6 && (d.z + 0.6).abs() < 1e-6, "{d:?}");
+}
+
+#[test]
+fn bridged_counterbore_layers_along_x_save_and_refuse_bad_values() {
+    let block = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+        s
+    };
+    let mut s = block();
+    let mut p = json!({"position":[20,15,20],"diameter":6,"type":"counterbore","cb_diameter":12,"cb_depth":3,"bridge":"0.2 mm"});
+    run(&mut s, "solid.hole", p.clone()).unwrap();
+    // Layer 1 (z 16.8 to 17): the slot runs along X out to the counterbore wall, beside it is solid.
+    assert!(!solid_at(&s, Vec3::new(25.5, 15.0, 16.9)), "the slot reaches the counterbore wall along X");
+    assert!(solid_at(&s, Vec3::new(20.0, 19.5, 16.9)), "beside the slot the layer bridges the counterbore");
+    // Layer 2 (z 16.6 to 16.8): the square's corners are open, the slot's ends are bridged.
+    assert!(!solid_at(&s, Vec3::new(22.9, 17.9, 16.7)), "the square's corner is open");
+    assert!(solid_at(&s, Vec3::new(25.5, 15.0, 16.7)), "past the square the second layer is solid");
+    // Below both layers the bore is round again.
+    assert!(solid_at(&s, Vec3::new(22.9, 17.9, 16.5)), "the bore is round below the layers");
+    let saved = s.doc.to_json();
+    assert!(saved.contains("\"bridge\""), "the design saves the layer");
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    assert!(!solid_at(&reopened, Vec3::new(22.9, 17.9, 16.7)), "the layers survive reopening");
+    // A thicker layer moves the square down with it.
+    let mut thick = block();
+    p["bridge"] = json!("0.5 mm");
+    run(&mut thick, "solid.hole", p.clone()).unwrap();
+    assert!(!solid_at(&thick, Vec3::new(22.9, 17.9, 16.2)), "a 0.5 mm square spans z 16 to 16.5");
+    assert!(solid_at(&thick, Vec3::new(22.9, 17.9, 15.9)));
+    // Left out, nothing is saved and the counterbore is plain.
+    let mut plain = block();
+    p.as_object_mut().unwrap().remove("bridge");
+    run(&mut plain, "solid.hole", p.clone()).unwrap();
+    assert!(!plain.doc.to_json().contains("bridge"));
+    assert!(solid_at(&plain, Vec3::new(22.9, 17.9, 16.7)));
+    // Refused: a layer that is not a positive length, layers that don't fit in the hole, and a
+    // bridge on a hole that has no counterbore.
+    let refusal = |p: &Value| {
+        let mut s = block();
+        let refused = s.execute("solid.hole", p).err().map(|e| e.to_string()).unwrap_or_default();
+        let failed = s.doc.features.last().and_then(|f| s.model.result(f.id)).and_then(|r| r.error.clone()).unwrap_or_default();
+        format!("{refused}{failed}")
+    };
+    for bad in [json!("0 mm"), json!("-0.2 mm"), json!("30 deg")] {
+        p["bridge"] = bad.clone();
+        assert!(!refusal(&p).is_empty(), "bridge {bad} is refused");
+    }
+    p["bridge"] = json!("0.2 mm");
+    p["depth"] = json!(3.3);
+    assert!(refusal(&p).contains("must fit in the hole"), "too shallow: {}", refusal(&p));
+    p.as_object_mut().unwrap().remove("depth");
+    p["type"] = json!("countersink");
+    p["cs_diameter"] = json!(12);
+    assert!(refusal(&p).contains("counterbore"), "countersink: {}", refusal(&p));
 }

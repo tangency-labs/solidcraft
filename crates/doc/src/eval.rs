@@ -4635,13 +4635,16 @@ fn hole_tools_and_prisms(
     match hole {
         HoleKind::Simple => tools.extend(bore(None)?),
         HoleKind::Drilled { tip_angle } => tools.extend(bore(Some(tip_angle))?),
-        HoleKind::Counterbore { cb_diameter, cb_depth, tip_angle } => {
+        HoleKind::Counterbore { cb_diameter, cb_depth, tip_angle, bridge } => {
             let (rc, dc) = (val(vals, cb_diameter, Kind::Length)? / 2.0, val(vals, cb_depth, Kind::Length)?);
             if !(rc > r && dc > 0.0 && -dc > bottom) {
                 return Err(DocError::Invalid("the counterbore must be wider than the hole and shallower than it".into()));
             }
             // Wide and shallow first: the narrow hole then crosses the pocket floor.
             tools.push(cyl(rc, -dc, top, "cbore")?);
+            if let Some(layer) = bridge {
+                tools.extend(bridge_tools(&plane, r, rc, dc, bottom, val(vals, layer, Kind::Length)?)?);
+            }
             tools.extend(bore(tip_angle.as_ref())?);
         }
         HoleKind::Countersink { cs_diameter, cs_angle, tip_angle } => {
@@ -4666,6 +4669,52 @@ fn hole_tools_and_prisms(
             );
             tools.extend(bore(tip_angle.as_ref())?);
         }
+    }
+    Ok(tools)
+}
+
+/// How much wider than the hole a bridged counterbore's slot and square are, in mm.
+const BRIDGE_CLEARANCE: f64 = 0.02;
+
+/// The bridge layers of a counterbore printed opening down: below its floor, a slot across the
+/// whole counterbore, along X (one `layer` thick), then a square (one more), both
+/// [`BRIDGE_CLEARANCE`] wider than the hole, so each layer spans between supported edges.
+/// `plane` is the hole's, its normal out of the material; the bore crosses both layers, clear of
+/// their sides.
+fn bridge_tools(plane: &Plane, r: f64, rc: f64, dc: f64, bottom: f64, layer: f64) -> Result<Vec<(Traced, Option<more::PrimitivePrism>)>> {
+    if !(layer > 0.0 && layer.is_finite()) {
+        return Err(DocError::Invalid("the bridge layer must be a positive length, such as 0.2 mm".into()));
+    }
+    let (t1, t2) = (-dc - layer, -dc - 2.0 * layer);
+    if t2 <= bottom {
+        return Err(DocError::Invalid(format!(
+            "the two bridge layers ({:.3} mm) must fit in the hole below the counterbore: make the hole deeper or the bridge thinner",
+            2.0 * layer
+        )));
+    }
+    // The slot along world X where the axis allows it, else along the hole plane's own x.
+    let n = plane.normal();
+    let x = (Vec3::X - n * Vec3::X.dot(n)).normalized().filter(|_| Vec3::X.dot(n).abs() < 0.99).unwrap_or(plane.x);
+    let bp = Plane::new(plane.origin, x, n.cross(x)).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
+    // Both a hair wider than the hole, so the bore's rim doesn't touch their sides.
+    let q = r + BRIDGE_CLEARANCE / 2.0;
+    // The slot ends on the counterbore's wall: two lines and two arcs of its circle.
+    let a = (rc * rc - q * q).sqrt();
+    let phi = q.atan2(a);
+    let slot = solidcraft_geom::Loop2 {
+        segs: vec![
+            solidcraft_geom::Seg2::Line { a: Vec2::new(-a, -q), b: Vec2::new(a, -q) },
+            solidcraft_geom::Seg2::Arc { center: Vec2::ZERO, radius: rc, start: -phi, sweep: 2.0 * phi },
+            solidcraft_geom::Seg2::Line { a: Vec2::new(a, q), b: Vec2::new(-a, q) },
+            solidcraft_geom::Seg2::Arc { center: Vec2::ZERO, radius: rc, start: std::f64::consts::PI - phi, sweep: 2.0 * phi },
+        ],
+    };
+    let square = solidcraft_geom::Loop2::polygon(&[Vec2::new(-q, -q), Vec2::new(q, -q), Vec2::new(q, q), Vec2::new(-q, q)]);
+    let mut tools = Vec::new();
+    for (outline, lo, hi) in [(slot, t1, -dc), (square, t2, t1)] {
+        let region = Region2 { outer: outline, holes: vec![] };
+        let tool = kernel::extrude(&bp, &[region], lo, hi)?.pop().ok_or_else(|| DocError::Invalid("hole tool".into()))?;
+        tools.push((crate::lineage::part_tool(tool, "bridge"), None));
     }
     Ok(tools)
 }
