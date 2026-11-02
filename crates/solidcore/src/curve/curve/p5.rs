@@ -2939,6 +2939,31 @@ mod tests {
     }
 
     #[test]
+    fn memo_hit_shares_completed_curve_tree_data() {
+        let k = Kernel {
+            memoize_curve_caches: true,
+            ..Kernel::default()
+        };
+        let curve = ellipse_spline();
+        let first = make_curve_cache(&k, &curve, Some(7u32)).unwrap();
+        let hit = make_curve_cache(&k, &curve, Some(-1i64)).unwrap();
+        assert!(!first.spans().is_empty());
+        assert!(!first.parents().is_empty());
+        assert_eq!(first.spans(), hit.spans());
+        assert_eq!(first.parents(), hit.parents());
+        assert!(
+            std::ptr::eq(first.spans().as_ptr(), hit.spans().as_ptr()),
+            "memo hit copied completed curve spans"
+        );
+        assert!(
+            std::ptr::eq(first.parents().as_ptr(), hit.parents().as_ptr()),
+            "memo hit copied completed curve parents"
+        );
+        assert_eq!(first.tree().unwrap().owner_object().unwrap(), Some(7));
+        assert_eq!(hit.tree().unwrap().owner_object().unwrap(), Some(-1));
+    }
+
+    #[test]
     fn memo_follows_edits_and_kernel_state() {
         let k = Kernel {
             memoize_curve_caches: true,
