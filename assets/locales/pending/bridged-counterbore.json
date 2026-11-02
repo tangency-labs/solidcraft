@@ -1,3 +1,8 @@
 {
-  "en": { "Bridge": "Bridge" }
+  "ar": { "Bridge": "جسر" },
+  "en": { "Bridge": "Bridge" },
+  "he": { "Bridge": "גשר" },
+  "ja": { "Bridge": "ブリッジ" },
+  "vi": { "Bridge": "Cầu nối" },
+  "zh": { "Bridge": "桥接" }
 }
