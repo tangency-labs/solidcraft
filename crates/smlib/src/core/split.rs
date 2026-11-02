@@ -59,8 +59,8 @@ use crate::{Error, Result};
 use solidcore::topology::brep::p3::brep_copy;
 
 /// `SMLIB_SPLIT_MAX_FACES`, `SMLIB_SPLIT_MAX_TOOLS`.
-pub(crate) const MAX_FACES: usize = crate::ffi::split::MAX_FACES;
-pub(crate) const MAX_TOOLS: usize = crate::ffi::split::MAX_TOOLS;
+pub(crate) const MAX_FACES: usize = 100_000;
+pub(crate) const MAX_TOOLS: usize = 4096;
 
 /// `SM_ERR`.
 const SM_ERR: i32 = 1001;

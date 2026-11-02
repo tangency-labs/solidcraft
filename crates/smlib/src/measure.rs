@@ -2,12 +2,7 @@
 //! surfaces rather than a tessellation; the exact box; how far an edge lies from a face's surface;
 //! where a point lies against a body.
 
-use crate::{Brep, Result, core, error, ffi, route};
-
-/// Whether the Measure family runs on solidcore ([`route`]).
-fn on_core() -> bool {
-    route::backend() == route::Backend::Solidcore
-}
+use crate::{Brep, Result, core};
 
 /// The accuracy [`Brep::mass_properties`] and [`Brep::area`] use unless told otherwise: the
 /// finest SMLib allows. Analytic primitives then come out within 2e-7 of their closed forms.
@@ -55,16 +50,7 @@ impl Brep {
     /// else inside a material region or outside. A body with no material (a sheet, an open shell)
     /// has no inside. A non-finite coordinate is [`Error::Argument`](crate::Error::Argument).
     pub fn classify_point(&self, p: [f64; 3]) -> Result<PointClass> {
-        if on_core() {
-            return core::classify_point(self.core()?, p);
-        }
-        match ffi::measure::classify_point(self.cpp()?, p).map_err(error)? {
-            ffi::measure::POINT_OUTSIDE => Ok(PointClass::Outside),
-            ffi::measure::POINT_INSIDE => Ok(PointClass::Inside),
-            ffi::measure::POINT_ON_BOUNDARY => Ok(PointClass::OnBoundary),
-            // The C API writes only the three above; any other value is passed on as it came.
-            other => Err(crate::Error::Status(other)),
-        }
+        core::classify_point(self.core(), p)
     }
 
     /// Mass properties at `relative_accuracy` (clamped to [1e-8, 1e-1]; [`MEASURE_ACCURACY`] is
@@ -72,21 +58,13 @@ impl Brep {
     /// touching along edges or at points, measure too. A body with no material (a sheet, an open
     /// shell) has volume 0 and no inertia, its faces' area and the centroid of that area.
     pub fn mass_properties(&self, relative_accuracy: f64) -> Result<MassProperties> {
-        if on_core() {
-            return core::mass_properties(self.core()?, relative_accuracy);
-        }
-        let m = ffi::measure::mass_properties(self.cpp()?, relative_accuracy).map_err(error)?;
-        let [area, volume, cx, cy, cz, ixx, iyy, izz, iyz, izx, ixy] = m;
-        Ok(MassProperties { area, volume, centroid: [cx, cy, cz], moments: [ixx, iyy, izz], products: [iyz, izx, ixy] })
+        core::mass_properties(self.core(), relative_accuracy)
     }
 
     /// The exact axis-aligned box, least corner then greatest: the extrema of every vertex, edge
     /// and face on its exact curve or surface, not grown by tolerances or control hulls.
     pub fn bounds(&self) -> Result<([f64; 3], [f64; 3])> {
-        if on_core() {
-            return core::bounds(self.core()?);
-        }
-        ffi::measure::bounds(self.cpp()?).map_err(error)
+        core::bounds(self.core())
     }
 
     /// How far edge `edge` (its curve over its interval) lies from the surface of face `face`,
@@ -96,23 +74,16 @@ impl Brep {
     /// goes; SMLib keeps such an edge whole when making its UV trim only when its zone tolerance
     /// (half the flat arrays' `EDGE_TOLERANCE`) covers this.
     pub fn edge_face_distance(&self, edge: usize, face: usize) -> Result<f64> {
-        if on_core() {
-            return core::edge_face_distance(self.core()?, edge, face);
-        }
-        let (Ok(e), Ok(f)) = (i64::try_from(edge), i64::try_from(face)) else { return Err(error(ffi::ERR_ARG)) };
-        ffi::measure::edge_face_distance(self.cpp()?, e, f).map_err(error)
+        core::edge_face_distance(self.core(), edge, face)
     }
 
     /// Total area of every face, each counted once, so sheets and open shells too.
     pub fn area(&self, relative_accuracy: f64) -> Result<f64> {
-        if on_core() {
-            return core::area(self.core()?, relative_accuracy);
-        }
-        ffi::measure::area(self.cpp()?, relative_accuracy).map_err(error)
+        core::area(self.core(), relative_accuracy)
     }
 }
 
-/// The closed forms of the primitives' measures, for the tests of both kernels.
+/// The closed forms of the primitives' measures, for the tests.
 #[cfg(test)]
 pub(crate) mod closed {
     use std::f64::consts::PI;
@@ -206,7 +177,7 @@ pub(crate) mod closed {
     }
 }
 
-#[cfg(all(test, feature = "native"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::Error;
@@ -266,7 +237,7 @@ mod tests {
 
     use closed::Closed;
 
-    /// A primitive the C++ kernel made, with its closed forms.
+    /// A primitive with its closed forms.
     struct Expected {
         name: &'static str,
         body: Brep,

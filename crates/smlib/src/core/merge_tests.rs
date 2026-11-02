@@ -1,7 +1,5 @@
 //! Stitch and merge faces on solidcore, against closed forms: counts, volumes (or areas) and
-//! whether the result closes, and every result exports to a record that validates. With SMLib
-//! built, the same input converted to the C++ kernel gives the same result or the same error
-//! (parity only: the expected values are the analytic ones).
+//! whether the result closes, and every result exports to a record that validates.
 //!
 //! A stitch's input is six (or five) separate planar faces of a 10 mm cube, each its own face of
 //! one body with its own edges, none shared; a merge's is a cube with four faces cut across, or
@@ -201,46 +199,6 @@ fn solidcore_case(name: &str) -> Got {
     judge(name, "solidcore", got)
 }
 
-/// The case on the C++ kernel, called directly (whatever the choice), on the input converted
-/// from solidcore's.
-#[cfg(feature = "native")]
-fn cpp_case(name: &str) -> Got {
-    use crate::ops::pick_error;
-    use crate::{Brep, error, ffi};
-    crate::init().unwrap();
-    let (op, _) = case(name);
-    let r = match op {
-        Op::Stitch(input, tol) => ffi::sheets::stitch(Brep::made_core(input.core()).cpp().unwrap(), tol).map_err(error),
-        Op::Merge(input, keep, tol) => {
-            ffi::ops::merge_faces(Brep::made_core(input.core()).cpp().unwrap(), keep, tol).map(|h| (h, false)).map_err(pick_error)
-        }
-    };
-    let got = r.map(|(h, closed)| {
-        let size = if is_sheet(name) { ffi::measure::area(&h, 1e-8) } else { ffi::volume(&h, 1e-8) }.unwrap();
-        let n = ffi::counts(&h).unwrap().map(|x| usize::try_from(x).unwrap());
-        let bx = ffi::measure::bounds(&h).unwrap();
-        let (rec, _) = native(&Brep::made(h).cpp_arrays().unwrap()).unwrap();
-        rec.validate().unwrap();
-        Measured { size, counts: n, closed, bounds: bx, kinds: kinds(&rec) }
-    });
-    judge(name, "C++", got)
-}
-
-#[cfg(feature = "native")]
-fn parity(name: &str) {
-    match (solidcore_case(name), cpp_case(name)) {
-        (Ok(a), Ok(b)) => {
-            assert!(rel(a.size, b.size) < 1e-9, "{name}: solidcore {} vs C++ {}", a.size, b.size);
-            assert_eq!(a.counts, b.counts, "{name}: counts (solidcore vs C++)");
-            assert_eq!(a.closed, b.closed, "{name}: closed (solidcore vs C++)");
-            assert_eq!(a.kinds, b.kinds, "{name}: faces by surface kind (solidcore vs C++)");
-            let near = |x: [f64; 3], y: [f64; 3]| x.iter().zip(&y).all(|(p, q)| (p - q).abs() < 1e-6);
-            assert!(near(a.bounds.0, b.bounds.0) && near(a.bounds.1, b.bounds.1), "{name}: bounds {:?} vs C++ {:?}", a.bounds, b.bounds);
-        }
-        (a, b) => assert_eq!(a.err(), b.err(), "{name}: errors (solidcore vs C++)"),
-    }
-}
-
 macro_rules! cases {
     ($($m:ident $(: $ign:meta)?),* $(,)?) => {$(
         mod $m {
@@ -248,19 +206,6 @@ macro_rules! cases {
             $(#[$ign])?
             fn solidcore_matches_the_closed_form() {
                 let _ = super::solidcore_case(stringify!($m));
-            }
-            #[cfg(feature = "native")]
-            #[test]
-            $(#[$ign])?
-            fn solidcore_matches_the_cpp_kernel() {
-                let _cpp = crate::route::on_cpp();
-                super::parity(stringify!($m));
-            }
-            #[cfg(feature = "native")]
-            #[test]
-            fn the_cpp_kernel_matches_the_closed_form() {
-                let _cpp = crate::route::on_cpp();
-                let _ = super::cpp_case(stringify!($m));
             }
         }
     )*};
@@ -398,25 +343,6 @@ fn a_flap_on_a_cube_edge_stays_beside_it() {
     assert!((v - 1000.0).abs() < 1e-6 && (a - 700.0).abs() < 1e-6, "volume {v}, area {a}");
 }
 
-/// The same three on C++, the same input converted: the fork's e5d9bba, as its capi tests say.
-#[cfg(feature = "native")]
-#[test]
-fn sheets_on_a_cube_stitch_the_same_on_cpp() {
-    let _cpp = crate::route::on_cpp();
-    use crate::{Brep, error, ffi};
-    crate::init().unwrap();
-    let sew = |b: Body| ffi::sheets::stitch(Brep::made_core(b).cpp().unwrap(), 1e-6).map_err(error);
-    let (cover, closed) = sew(cube_and_biquadratic_cover()).unwrap();
-    assert!(closed);
-    assert_eq!(ffi::counts(&cover).unwrap()[0], 6);
-    assert!((ffi::volume(&cover, 1e-8).unwrap() - 1100.0).abs() < 1e-6);
-    assert_eq!(sew(cube_and_bicubic_cover()).err(), Some(Error::Unsupported));
-    let (flap, closed) = sew(cube_and_flap()).unwrap();
-    assert!(!closed);
-    assert_eq!(ffi::counts(&flap).unwrap()[0], 7);
-    assert!((ffi::volume(&flap, 1e-8).unwrap() - 1000.0).abs() < 1e-6);
-}
-
 /// The inputs are never changed.
 #[test]
 fn the_body_stays_as_it_was() {
@@ -427,31 +353,4 @@ fn the_body_stays_as_it_was() {
     let was = counts(&block).unwrap();
     let _ = merge_faces(&block, &[], TOL).unwrap();
     assert_eq!(counts(&block).unwrap(), was);
-}
-
-/// Face and edge tags (`Brep::tagged`) through a stitch and a merge on solidcore, as on
-/// C++: the input is tagged on solidcore, converted to C++ and tagged the same way there.
-#[cfg(feature = "native")]
-mod history {
-    use crate::{Brep, ffi};
-
-    #[test]
-    fn tags_cross_a_stitch() {
-        let _cpp = crate::route::on_cpp();
-        crate::init().unwrap();
-        let a = Brep::made_core(super::loose_faces(super::ALL, 0.0)).tagged(0).unwrap();
-        let cpp = Brep::made(ffi::sheets::stitch(a.cpp().unwrap(), super::TOL).unwrap().0).history().unwrap();
-        let core = Brep::made_core(super::stitch(a.core().unwrap(), super::TOL).unwrap().0).history().unwrap();
-        assert_eq!(core.canonical(), cpp.canonical());
-    }
-
-    #[test]
-    fn tags_cross_a_merge() {
-        let _cpp = crate::route::on_cpp();
-        crate::init().unwrap();
-        let a = Brep::made_core(super::split_cube()).tagged(0).unwrap();
-        let cpp = Brep::made(ffi::ops::merge_faces(a.cpp().unwrap(), &[], super::TOL).unwrap()).history().unwrap();
-        let core = Brep::made_core(super::merge_faces(a.core().unwrap(), &[], super::TOL).unwrap()).history().unwrap();
-        assert_eq!(core.canonical(), cpp.canonical());
-    }
 }

@@ -1548,13 +1548,11 @@ mod tests {
         manifest.as_object_mut().unwrap().remove("evaluation");
         entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
         assert!(read_design_geometry(&package(&entries)).is_none());
-        // The kernel that computed it is recorded, and another kernel's model is evaluated again:
-        // the same source gives different bodies on the two (a cache without one is a miss too).
-        use solidcraft_kernel::kernel_route::{Backend, choice};
-        assert_eq!(written(&original)["kernel"], json!(choice().id()));
-        let other = if choice() == Backend::Solidcore { Backend::Smlib } else { Backend::Solidcore };
-        let bytes = with(&[("kernel", other.id())]);
-        assert!(read_design_geometry(&bytes).is_none(), "{}'s cache", other.id());
+        // The kernel that computed it is recorded, and a model the C++ kernel computed (an earlier
+        // build's) is evaluated again (a cache without one is a miss too).
+        assert_eq!(written(&original)["kernel"], json!(native_cache::KERNEL));
+        let bytes = with(&[("kernel", "smlib")]);
+        assert!(read_design_geometry(&bytes).is_none(), "the C++ kernel's cache");
         assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
         let mut entries = original.clone();
         let mut manifest = written(&entries);

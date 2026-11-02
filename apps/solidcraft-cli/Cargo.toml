@@ -23,10 +23,6 @@ path = "src/alias.rs"
 default = ["raytrace-cpu", "profile"]
 bundled-render-library = ["solidcraft-engine/bundled-render-library"]
 raytrace-cpu = ["solidcraft-engine/raytrace-cpu"]
-# Also link the C++ SMLib kernel (solidcraft-engine/smlib), off by default: needs a C++ toolchain
-# and scripts/fetch-smlib.sh. solidcore, the Rust kernel, is always built and is the default either
-# way; with this on, SOLIDCRAFT_KERNEL=smlib or the Geometry kernel preference can choose C++.
-smlib = ["solidcraft-engine/smlib"]
 # The profiler, compiled in so any build can say where its time goes (`--profile`,
 # SOLIDCRAFT_PROFILE=1); it records nothing until asked.
 profile = ["solidcraft-engine/profile"]

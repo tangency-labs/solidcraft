@@ -1,10 +1,12 @@
-# The cargo tests that fail today on the default kernel, solidcore, one a line: `<test> <why it fails
+# The cargo tests that fail today on the kernel, solidcore, one a line: `<test> <why it fails
 # today>`, with the issue that tracks it when there is one. Sorted. `<test>` is nextest's
 # `<binary id>::<test name>`, as the junit report names it. CI's test jobs (`cargo xtask known-failing`)
 # fail on a test that fails and is not listed here, and on a listed test that passes: a fix removes its
 # line in the same pull request. The tests stay un-ignored, so every run shows whether they still fail.
-# `KNOWN_FAILING_TESTS.smlib` is the same list for the C++ kernel (SOLIDCRAFT_KERNEL=smlib, graded with
-# --list). Refresh as that list's header says.
+# Refresh: download the junit artifacts of develop's latest CI run, one directory each
+# (`gh run download <run> -R tangency-labs/solidcraft -n <artifact> -D <dir>/<artifact>` for junit
+# and junit-gpu-1..4), run `cargo xtask known-failing --junit <dir>`, then drop each FIXED line and
+# add each REGRESSION line with its cause, from the test's failure message.
 solidcraft-cli::action_matrix::action_matrix_sample 3 baseline actions fail, the same 3 as on C++: 2 shells (Bad Loop Orient on issue-616-lid-ribs; status 1001 on filleted-shelled-box), 1 fillet (SmSurfOfRevolution Test #7 on oblique_cut_of_cylinder)
 solidcraft-cli::model_cache::a_later_round_after_opening_blends_the_saved_rounds_again the later r3 round at the r2 mitre builds solidcore's 10-face corner (7928.743041), the test wants SMLib f916a8d's setback corner (smlib#104), which solidcore ports in solidcore#2310: 15 faces, 7928.142563938
 solidcraft-cli::naming_corpus::corpus_designs_name_alike_every_build_and_fail_where_a_reference_is_gone oracle/83-boundary-loop-thicken does not load: step 8, thicken status 1001, as on C++
@@ -31,12 +33,6 @@ solidcraft-kernel::blend_wrong_way_tests::a_chamfer_that_would_grow_the_part_on_
 solidcraft-kernel::corner_g2::tests::a_long_setback_keeps_the_g2_patch_inside_the_box at set backs 11 to 15 the G2 corner patch bulges past the box, as on C++
 solidcraft-kernel::corner_g2::tests::curvature_rounds_meet_at_a_g2_corner the corner between curvature rounds jumps 2.07 in curvature over 538 stations on solidcore; the test wants it curvature continuous, as SMLib f916a8d's setback corner (smlib#104), which solidcore ports in solidcore#2310 builds it
 solidcraft-kernel::corner_g2::tests::the_box_corner_g2_patch_is_a_closed_solid_curvature_continuous_to_its_neighbours the fitted G2 corner patch bulges 1.7e-5 past the box, as on C++
-solidcraft-kernel::fillet_setback_tests::a_setback_not_past_the_radius_is_refused_naming_the_least solidcore builds setback 5.5 (15 faces) where SMLib f916a8d's setback corner (smlib#104), which solidcore ports in solidcore#2310 refuses it naming the least that builds; solidcraft_smlib::blend_fit names no size on solidcore until then
+solidcraft-kernel::fillet_setback_tests::a_setback_not_past_the_radius_is_refused_naming_the_least solidcore builds setback 5.5 (15 faces) where SMLib f916a8d's setback corner (smlib#104), which solidcore ports in solidcore#2310 refuses it naming the least that builds; nothing names the least setback on solidcore until then
 solidcraft-kernel::tests::fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole the R25 rim and a corner arc round together since solidcore#2223, but the two R2 corner arcs picked together fail 1001 in trim_at_creases (cliff_overflow with the crease trims off), though each builds alone (solidcore#2314)
-solidcraft-smlib::core::blend_tests::fillet_all_edges::solidcore_matches_the_cpp_kernel the C++ comparison: solidcore's 8 box corners are analytic spheres, C++ 5e8c9c1's rational splines (SMLib 5e8c9c1's blend (Ball corners as rational patches, the round as its definition, smlib#79), which solidcore ports in solidcore#2273)
-solidcraft-smlib::core::blend_tests::fillet_variable_linear::solidcore_matches_the_cpp_kernel the C++ comparison: solidcore 5972.141093 against C++ 5e8c9c1's 5972.142573 (SMLib 5e8c9c1's blend (Ball corners as rational patches, the round as its definition, smlib#79), which solidcore ports in solidcore#2273)
-solidcraft-smlib::core::blend_tests::rounds_on_the_871_part the C++ comparison: solidcore 3874.348250 against C++ 5e8c9c1's 3874.348458 (SMLib 5e8c9c1's blend (Ball corners as rational patches, the round as its definition, smlib#79), which solidcore ports in solidcore#2273)
-solidcraft-smlib::core::blend_tests::setback_corner::solidcore_matches_the_cpp_kernel the C++ comparison: solidcore 5943.191647 against C++ f916a8d's 5948.231174 (SMLib f916a8d's setback corner (smlib#104), which solidcore ports in solidcore#2310)
-solidcraft-smlib::core::convert_tests::cpp_round_trip::a_shelled_rounded_box the C++ round trip: the shelled rounded box C++ 5e8c9c1 builds differs from solidcore's in its arrays (real array 154[0]: -10 against 0), its corners built by SMLib 5e8c9c1's blend (Ball corners as rational patches, the round as its definition, smlib#79), which solidcore ports in solidcore#2273
-solidcraft-smlib::core::offset_tests::mitred_rounds_follow_a_moved_top the C++ comparison: solidcore's offset edges keep their tolerances (offset_edges_keep_source_tolerance, solidcore#2111), C++ at 7ac037e's do not, so the moved tops' volumes are 2e-9 to 2.3e-7 apart; both are 1.2e-8 to 3.1e-7 off the closed form at accuracy 1e-8, solidcore with the fix 2.1e-7 at most
 solidcraft-smlib::ops::tests::a_variable_round_with_a_corner_in_its_law_is_its_balls_union solidcore refuses a variable fillet whose law has a corner (solidcore#430)

@@ -41,8 +41,8 @@ fn nested_spans_have_self_and_total_time() {
             let _inner = span("test", "inner");
             spin(4);
         }
-        // Timed by someone else (SMLib's C API): a child of `outer`.
-        record("smlib", "call", Duration::from_millis(2));
+        // Timed by someone else: a child of `outer`.
+        record("external", "call", Duration::from_millis(2));
     }
     set_enabled(false);
     let r = report();

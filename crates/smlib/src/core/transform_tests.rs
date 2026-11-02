@@ -1,8 +1,6 @@
 //! Copies and affine transforms on solidcore, against closed forms: every result keeps its counts,
 //! its volume scales by the matrix's |det|, its bounds are the moved box's, and it exports to a
-//! record that validates. With SMLib built, the same case on the C++ kernel gives the same
-//! volume, counts, bounds and faces by surface kind, or the same error (parity only: the
-//! expected values are the analytic ones).
+//! record that validates.
 
 use std::collections::BTreeMap;
 use std::f64::consts::PI;
@@ -176,44 +174,6 @@ fn solidcore_case(name: &str) -> Got {
     judge(name, "solidcore", got)
 }
 
-/// The case on the C++ kernel, called directly (whatever the choice).
-#[cfg(feature = "native")]
-fn cpp_case(name: &str) -> Got {
-    use crate::{Brep, error, ffi};
-    crate::init().unwrap();
-    let c = case(name);
-    let body = match c.shape {
-        Shape::Box(o, s) => ffi::make_box(&o, &s).unwrap(),
-        Shape::Cylinder(o, r, h) => ffi::make_cylinder(&o, r, h).unwrap(),
-    };
-    let got = ffi::transform(&body, &c.matrix).map_err(error).map(|h| {
-        let volume = ffi::volume(&h, 1e-8).unwrap();
-        let n = ffi::counts(&h).unwrap().map(|x| usize::try_from(x).unwrap());
-        let bx = ffi::measure::bounds(&h).unwrap();
-        let (rec, _) = native(&Brep::made(h).cpp_arrays().unwrap()).unwrap();
-        rec.validate().unwrap();
-        Measured { volume, bounds: bx, counts: n, kinds: kinds(&rec) }
-    });
-    judge(name, "C++", got)
-}
-
-/// solidcore and C++ agree: volume within 1e-9, the same counts, bounds and faces by kind, or the
-/// same error.
-#[cfg(feature = "native")]
-fn parity(name: &str) {
-    let (ours, cpp) = (solidcore_case(name), cpp_case(name));
-    match (ours, cpp) {
-        (Ok(a), Ok(b)) => {
-            assert!(rel(a.volume, b.volume) < 1e-9, "{name}: solidcore {} vs C++ {}", a.volume, b.volume);
-            assert_eq!(a.counts, b.counts, "{name}: counts (solidcore vs C++)");
-            assert_eq!(a.kinds, b.kinds, "{name}: faces by surface kind (solidcore vs C++)");
-            let near = |x: [f64; 3], y: [f64; 3]| x.iter().zip(&y).all(|(p, q)| (p - q).abs() < 1e-6);
-            assert!(near(a.bounds.0, b.bounds.0) && near(a.bounds.1, b.bounds.1), "{name}: bounds {:?} vs C++ {:?}", a.bounds, b.bounds);
-        }
-        (a, b) => assert_eq!(a.err(), b.err(), "{name}: errors (solidcore vs C++)"),
-    }
-}
-
 macro_rules! cases {
     ($($m:ident $(: $ign:meta)?),* $(,)?) => {$(
         mod $m {
@@ -221,19 +181,6 @@ macro_rules! cases {
             $(#[$ign])?
             fn solidcore_matches_the_closed_form() {
                 let _ = super::solidcore_case(stringify!($m));
-            }
-            #[cfg(feature = "native")]
-            #[test]
-            $(#[$ign])?
-            fn solidcore_matches_the_cpp_kernel() {
-                let _cpp = crate::route::on_cpp();
-                super::parity(stringify!($m));
-            }
-            #[cfg(feature = "native")]
-            #[test]
-            fn the_cpp_kernel_matches_the_closed_form() {
-                let _cpp = crate::route::on_cpp();
-                let _ = super::cpp_case(stringify!($m));
             }
         }
     )*};
@@ -289,40 +236,5 @@ fn the_body_stays_as_it_was() {
         assert_eq!(counts(x).unwrap(), [6, 12, 8]);
         assert!(rel(volume(x, 1e-8).unwrap(), 6000.0) < 1e-12);
         assert_eq!(bounds(x).unwrap(), ([1.0, 2.0, 3.0], [11.0, 22.0, 33.0]));
-    }
-}
-
-/// Face and edge tags (`Brep::tagged`) through a copy and a transform on solidcore, as on
-/// C++: the box is tagged on the C++ kernel, its solidcore body converted from that and tagged the
-/// same way, and the two results' histories must be the same.
-#[cfg(feature = "native")]
-mod history {
-    use crate::{Brep, ffi};
-
-    fn tagged_box() -> Brep {
-        crate::init().unwrap();
-        Brep::made(ffi::make_box(&[0.0; 3], &[20.0, 30.0, 10.0]).unwrap()).tagged(0).unwrap()
-    }
-
-    #[test]
-    fn tags_cross_a_copy() {
-        let _cpp = crate::route::on_cpp();
-        let a = tagged_box();
-        let cpp = Brep::made(ffi::copy(a.cpp().unwrap()).unwrap()).history().unwrap();
-        let core = Brep::made_core(super::copy(a.core().unwrap()).unwrap()).history().unwrap();
-        assert_eq!(core.canonical(), cpp.canonical());
-    }
-
-    #[test]
-    fn tags_cross_a_mirror_and_a_shear() {
-        let _cpp = crate::route::on_cpp();
-        let a = tagged_box();
-        let mirror = [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0; 4]];
-        let shear = [[1.0, 0.5, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [2.0, 3.0, 4.0, 1.0]];
-        for m in [mirror, shear] {
-            let cpp = Brep::made(ffi::transform(a.cpp().unwrap(), &m).unwrap()).history().unwrap();
-            let core = Brep::made_core(super::transform(a.core().unwrap(), &m).unwrap()).history().unwrap();
-            assert_eq!(core.canonical(), cpp.canonical(), "{m:?}");
-        }
     }
 }

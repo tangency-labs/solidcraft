@@ -1,18 +1,12 @@
 [package]
 name = "solidcraft-kernel"
-description = "SolidCraft B-rep kernel boundary: solids, extrude/revolve/booleans/fillets, meshes, measures and STEP, behind our own API (implemented with SMLib)"
+description = "SolidCraft B-rep kernel boundary: solids, extrude/revolve/booleans/fillets, meshes, measures and STEP, behind our own API (implemented with solidcore)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [lints]
 workspace = true
-
-[features]
-# Also link NVIDIA's C++ SMLib (tangency-labs/smlib), off by default; needs a C++ toolchain and
-# scripts/fetch-smlib.sh (ADR 0002). solidcore, the Rust port, answers every operation either way;
-# without this, asking for the C++ kernel (SOLIDCRAFT_KERNEL=smlib) is refused as not built.
-smlib = ["solidcraft-smlib/native"]
 
 [dependencies]
 solidcraft-geom = { workspace = true }

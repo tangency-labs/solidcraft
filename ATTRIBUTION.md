@@ -815,7 +815,7 @@ crates/engine/src/tests/gltf_import.rs); no third-party models are committed.
 
 | Crate | Used for | Licence |
 |---|---|---|
-| solidcore (https://github.com/tangency-labs/solidcore, pinned by rev in Cargo.toml) | the Rust port of NVIDIA's SMLib: the second backend behind crates/smlib, which routes an operation to it once it matches the C++ kernel on the kernel-case rig (crates/smlib/src/route.rs) | Apache-2.0 (its NOTICE credits NVIDIA's USD BRep) |
+| solidcore (https://github.com/tangency-labs/solidcore, pinned by rev in Cargo.toml) | the Rust port of NVIDIA's SMLib: the B-rep kernel behind crates/smlib | Apache-2.0 (its NOTICE credits NVIDIA's USD BRep) |
 
 Linked as a crate; no code from it is copied into SolidCraft. Its licence text and NOTICE go
 into THIRD-PARTY-LICENSES.txt when `main` regenerates it.

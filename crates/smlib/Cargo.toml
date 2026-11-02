@@ -1,43 +1,19 @@
 [package]
 name = "solidcraft-smlib"
-description = "SolidCraft: NVIDIA's SMLib B-rep kernel (tangency-labs/smlib, Apache-2.0), statically linked behind its C API, with a safe Rust wrapper"
+description = "SolidCraft: the B-rep kernel, solidcore (tangency-labs/solidcore, the Rust port of NVIDIA's SMLib, Apache-2.0), behind a safe wrapper"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-links = "smlib"
 
-# The workspace lints, except unsafe_code: denied, not forbidden, so that src/ffi.rs can allow it.
-# Calling a C library has no safe API. Keep the rest in sync with [workspace.lints].
-[lints.rust]
-unsafe_code = "deny"
-
-[lints.clippy]
-dbg_macro = "warn"
-todo = "warn"
-too_many_arguments = "allow"
-type_complexity = "allow"
-neg_cmp_op_on_partial_ord = "allow"
-
-[features]
-# Compile and link the C++ SMLib (the apps' and the kernel's `smlib` feature turns it on; off by
-# default). Off, the crate builds without a C++ toolchain, the SMLib sources or a prebuilt library,
-# build.rs does nothing, solidcore answers every operation, and a call asked of the C++ kernel
-# returns `Error::NotBuilt`.
-native = []
+[lints]
+workspace = true
 
 [dependencies]
 log = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-profile = { workspace = true }
 solidcore = { workspace = true }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-# The clocks SMLib's C library asks for in a browser build (src/ffi.rs).
-web-time = { workspace = true }
-
-[build-dependencies]
-cc = { version = "1.2", features = ["parallel"] }
 
 [dev-dependencies]
 solidcraft-profile = { workspace = true, features = ["enabled"] }

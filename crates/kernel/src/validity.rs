@@ -54,14 +54,9 @@ fn smlib_validity(body: &Body) -> Option<SmlibCheck> {
     })
 }
 
-/// Whether this build links SMLib (the `smlib` feature).
-pub fn smlib_built() -> bool {
-    solidcraft_smlib::built()
-}
-
 /// Where every kernel call that fails from now on leaves its inputs for replay
-/// (`solidcraft_smlib::set_dump_dir`, on either kernel: the call and its B-reps, which `Brep::read`
-/// reads back); `None` stops it.
-pub fn smlib_dump_dir(dir: Option<&std::path::Path>) -> crate::Result<()> {
-    solidcraft_smlib::set_dump_dir(dir).map_err(|e| crate::KernelError::Failed(format!("kernel dump folder: {e}")))
+/// (`solidcraft_smlib::set_dump_dir`: the call and its B-reps, which `Brep::read` reads back);
+/// `None` stops it.
+pub fn smlib_dump_dir(dir: Option<&std::path::Path>) {
+    solidcraft_smlib::set_dump_dir(dir);
 }

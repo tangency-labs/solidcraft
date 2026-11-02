@@ -2,21 +2,13 @@
 //! component is its own product with a package body and its own pins (nothing shared).
 //!
 //! ```sh
-//! scripts/fetch-smlib.sh
 //! SOLIDCRAFT_STEP_PCB_COMPONENTS=600 SOLIDCRAFT_STEP_PCB_PINS=15 \
-//!     cargo run --release -p solidcraft-kernel --features smlib --example step_board_fixture -- board.step
+//!     cargo run --release -p solidcraft-kernel --example step_board_fixture -- board.step
 //! ```
 //!
 //! 600 components of 15 pins give 52 MB. The defaults are 500 and 16; the path defaults to
 //! `board.step`.
 
-#[cfg(not(feature = "smlib"))]
-fn main() {
-    eprintln!("step_board_fixture needs SMLib: run scripts/fetch-smlib.sh, then add --features smlib");
-    std::process::exit(2);
-}
-
-#[cfg(feature = "smlib")]
 fn main() {
     if let Err(e) = run::main() {
         eprintln!("step_board_fixture: {e}");
@@ -24,7 +16,6 @@ fn main() {
     }
 }
 
-#[cfg(feature = "smlib")]
 mod run {
     use solidcraft_geom::Vec3;
     use solidcraft_kernel::{Body, ExportBody, ExportProduct, StepHeader, box_solid, cylinder, fillet, step_export_products};

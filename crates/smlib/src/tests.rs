@@ -1,6 +1,5 @@
 use super::*;
 
-#[cfg(feature = "native")]
 #[test]
 fn box_end_to_end() {
     let b = Brep::make_box([1.0, 2.0, 3.0], [10.0, 20.0, 30.0]).unwrap();
@@ -9,20 +8,15 @@ fn box_end_to_end() {
     let c = b.try_clone().unwrap();
     drop(b);
     assert!((c.volume(1e-7).unwrap() - 6000.0).abs() < 1e-6);
-    let mut buf = [0u8; 512];
-    assert_eq!(ffi::current_call(&mut buf), 0, "no C call in flight between calls");
+    assert_eq!(current_call(), None, "no call in flight between calls");
 }
 
-#[cfg(feature = "native")]
 #[test]
 fn bad_arguments_are_errors() {
     assert_eq!(Brep::make_box([0.0; 3], [1.0, -1.0, 1.0]).unwrap_err(), Error::Argument);
     assert_eq!(Brep::make_box([f64::NAN, 0.0, 0.0], [1.0; 3]).unwrap_err(), Error::Argument);
-    // each kernel refuses a bad box the same way, whichever one is in force
-    init().unwrap();
     for size in [[1.0, -1.0, 1.0], [1.0, 0.0, 1.0], [1.0, 1.0, f64::NAN]] {
-        assert_eq!(core::make_box([0.0; 3], size).err(), Some(Error::Argument), "solidcore: {size:?}");
-        assert_eq!(ffi::make_box(&[0.0; 3], &size).map_err(error).err(), Some(Error::Argument), "C++: {size:?}");
+        assert_eq!(core::make_box([0.0; 3], size).err(), Some(Error::Argument), "{size:?}");
     }
     let b = Brep::make_box([0.0; 3], [1.0; 3]).unwrap();
     assert_eq!(b.volume(f64::INFINITY).unwrap_err(), Error::Argument);
@@ -38,13 +32,13 @@ fn solidcore_reads_back_the_files_it_writes() {
     let cylinder = core::make_cylinder([1.0, 2.0, 3.0], 2.0, 5.0).map(Brep::made_core).unwrap();
     for ascii in [false, true] {
         let path = dir.join(format!("cylinder-{ascii}.smb"));
-        core::file::write(cylinder.core().unwrap(), &path, ascii).unwrap();
+        core::file::write(cylinder.core(), &path, ascii).unwrap();
         let back = core::file::read(&path, ascii).map(Brep::made_core).unwrap();
-        let v = core::volume(back.core().unwrap(), 1e-7).unwrap();
+        let v = core::volume(back.core(), 1e-7).unwrap();
         assert!((v - PI * 4.0 * 5.0).abs() < 1e-5, "ascii {ascii}: {v}");
-        assert_eq!(core::counts(back.core().unwrap()).unwrap(), core::counts(cylinder.core().unwrap()).unwrap(), "ascii {ascii}");
+        assert_eq!(core::counts(back.core()).unwrap(), core::counts(cylinder.core()).unwrap(), "ascii {ascii}");
     }
-    let body = cylinder.core().unwrap();
+    let body = cylinder.core();
     assert!(core::file::write(body, &dir.join("missing/x.smb"), false).is_err());
     assert!(core::file::read(&dir.join("missing.smb"), false).is_err());
     let junk = dir.join("junk.smb");
@@ -67,60 +61,6 @@ fn solidcore_refuses_an_ascii_file_of_junk() {
     assert!(r.is_err());
 }
 
-/// A file either kernel wrote reads on the other, with the same measure.
-#[cfg(feature = "native")]
-#[test]
-fn each_kernel_reads_the_files_of_the_other() {
-    use std::f64::consts::PI;
-    let dir = std::env::temp_dir().join(format!("solidcraft-smlib-cross-file-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let want = PI * 4.0 * 5.0;
-    for ascii in [false, true] {
-        let from_core = dir.join(format!("core-{ascii}.smb"));
-        let body = core::make_cylinder([0.0; 3], 2.0, 5.0).unwrap();
-        core::file::write(&body, &from_core, ascii).unwrap();
-        crate::init().unwrap();
-        let on_cpp = ffi::read(&c_path(&from_core).unwrap(), ascii).map(Brep::made).unwrap();
-        let v = ffi::volume(on_cpp.cpp().unwrap(), 1e-7).unwrap();
-        assert!((v - want).abs() < 1e-5, "C++ on solidcore's file, ascii {ascii}: {v}");
-        let from_cpp = dir.join(format!("cpp-{ascii}.smb"));
-        let cpp = ffi::make_cylinder(&[0.0; 3], 2.0, 5.0).map(Brep::made).unwrap();
-        crate::check(ffi::write(cpp.cpp().unwrap(), &c_path(&from_cpp).unwrap(), ascii)).unwrap();
-        let on_core = core::file::read(&from_cpp, ascii).unwrap();
-        let v = core::volume(&on_core, 1e-7).unwrap();
-        assert!((v - want).abs() < 1e-5, "solidcore on C++'s file, ascii {ascii}: {v}");
-    }
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[cfg(feature = "native")]
-#[test]
-fn native_files_round_trip_and_failures_dump_their_inputs() {
-    let _dumps = DUMP_DIR_TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let _cpp = route::on_cpp();
-    let dir = std::env::temp_dir().join(format!("solidcraft-smlib-test-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let b = Brep::make_box([0.0; 3], [2.0, 3.0, 4.0]).unwrap();
-    let path = dir.join("box.smb");
-    b.write(&path, false).unwrap();
-    let back = Brep::read(&path, false).unwrap();
-    assert!((back.volume(1e-7).unwrap() - 24.0).abs() < 1e-9);
-
-    let dumps = dir.join("dumps");
-    std::fs::create_dir_all(&dumps).unwrap();
-    set_dump_dir(Some(&dumps)).unwrap();
-    assert!(b.write(&dir.join("missing/x.smb"), false).is_err());
-    set_dump_dir(None).unwrap();
-    let names: Vec<String> =
-        std::fs::read_dir(&dumps).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
-    assert!(names.iter().any(|n| n.ends_with("-smlib_brep_write.txt")), "{names:?}");
-    let smb = names.iter().find(|n| n.ends_with("-smlib_brep_write-brep.smb")).unwrap();
-    let replayed = Brep::read(&dumps.join(smb), false).unwrap();
-    assert!((replayed.volume(1e-7).unwrap() - 24.0).abs() < 1e-9);
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[cfg(feature = "native")]
 #[test]
 fn calls_from_many_threads_are_serialised() {
     let handles: Vec<_> = (0..8)
@@ -135,30 +75,11 @@ fn calls_from_many_threads_are_serialised() {
     assert!(handles.into_iter().all(|h| h.join().unwrap()));
 }
 
-#[cfg(not(feature = "native"))]
-#[test]
-fn without_native_every_call_says_so() {
-    assert_eq!(init(), Err(Error::NotBuilt));
-    // the C API's own box, whichever kernel is in force
-    assert_eq!(ffi::make_box(&[0.0; 3], &[1.0; 3]).map_err(error).err(), Some(Error::NotBuilt));
-    // solidcore builds a box without SMLib; asking the C++ kernel about it says there is none
-    let b = core::make_box([0.0; 3], [1.0; 3]).map(Brep::made_core).unwrap();
-    assert_eq!(b.cpp().err(), Some(Error::NotBuilt));
-    // and says how to get it
-    assert!(!built());
-    assert!(Error::NotBuilt.to_string().contains("--features smlib"), "{}", Error::NotBuilt);
-}
-
 /// The dump folder is process-wide: the tests that set it take turns.
 static DUMP_DIR_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// Which public entry points work with no C++ kernel: all of them but [`CPP_ONLY`], which are the
-/// C++ kernel's own arrays and start-up, reached only across kernels and by tests. A new entry point
-/// fails [`every_entry_point_is_in_the_guard`] until it is called in the test below or listed.
-const CPP_ONLY: [&str; 8] = ["init", "new", "get_i64", "get_f64", "set_i64", "set_f64", "import", "export"];
-
 /// Entry points that ask no kernel, so have nothing to say here.
-const NO_KERNEL: [&str; 11] = [
+const NO_KERNEL: [&str; 10] = [
     "inertia_tensor",
     "is_valid",
     "failed_tests",
@@ -169,8 +90,6 @@ const NO_KERNEL: [&str; 11] = [
     "to_native_report",
     "to_native_ordered",
     "blends",
-    // The last refusal's fit, read after it: on solidcore, none yet.
-    "blend_fit",
 ];
 
 const ANSWERING: [&str; 62] = [
@@ -258,36 +177,28 @@ fn every_entry_point_is_in_the_guard() {
         for line in file.lines() {
             let Some(rest) = line.trim_start().strip_prefix("pub fn ") else { continue };
             let name = rest.split(['(', '<']).next().unwrap_or(rest);
-            assert!(ANSWERING.contains(&name) || CPP_ONLY.contains(&name) || NO_KERNEL.contains(&name), "`{name}` is in neither list");
+            assert!(ANSWERING.contains(&name) || NO_KERNEL.contains(&name), "`{name}` is in neither list");
         }
     }
 }
 
-/// With no C++ kernel, each entry point answers with something other than "not built": its result
-/// or its own refusal, on a body of the right kind or the wrong one. Built with the C++ kernel, the
-/// same calls with nothing chosen never touch a C++ body: nothing on the default path reaches it.
+/// Each entry point answers, with its result or its own refusal, on a body of the right kind or the
+/// wrong one: none panics.
 #[test]
-fn without_the_cpp_kernel_every_entry_point_answers() {
+fn every_entry_point_answers() {
     use crate::sweeps::{Affine, Curve, DraftCorner, Ends, SweepFrame};
     use crate::trim::{Continuation, Holes};
     use crate::{Blend, BooleanOp, ChamferSecond, CheckLevel};
-    if route::backend() != route::Backend::Solidcore {
-        return;
-    }
-    fn says<T>(name: &str, r: Result<T>) -> Option<T> {
-        match r {
-            Err(Error::NotBuilt) => panic!("{name} needs the C++ kernel"),
-            r => r.ok(),
-        }
+    fn says<T>(_name: &str, r: Result<T>) -> Option<T> {
+        r.ok()
     }
     let dir = std::env::temp_dir().join(format!("solidcraft-smlib-guard-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     {
         let _dumps = DUMP_DIR_TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        says("set_dump_dir", set_dump_dir(None));
+        set_dump_dir(None);
     }
     let _ = current_call();
-    route::take_reached();
     let a = says("make_box", Brep::make_box([0.0; 3], [10.0; 3])).unwrap();
     let t = says("make_box", Brep::make_box([5.0; 3], [10.0; 3])).unwrap();
     let p = |x: f64, y: f64, z: f64| [x, y, z];
@@ -363,8 +274,6 @@ fn without_the_cpp_kernel_every_entry_point_answers() {
     says("loft_to_point", Brep::loft_to_point(&lines, p(5.0, 5.0, 12.0)));
     says("screw_sweep", Brep::screw_sweep(&lines, p(30.0, 0.0, 0.0), p(0.0, 0.0, 1.0), 12.0, 1.0, 0.01));
     says("screw_sweep_radial", Brep::screw_sweep_radial(&lines, p(30.0, 0.0, 0.0), p(0.0, 0.0, 1.0), 12.0, 1.0, &[(0.0, 0.0), (1.0, 0.0)], 0.01));
-    let (cpp, core) = route::take_reached();
-    assert!(cpp == 0 && core > 0, "the default path touched a C++ body {cpp} times ({core} solidcore calls)");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -400,31 +309,6 @@ fn a_failing_solidcore_call_leaves_a_dump_and_names_itself() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-#[test]
-fn call_lines_give_the_function_and_the_c_api_time() {
-    let (name, took) = call_time("smlib_boolean(op=1, a=#3 (12 faces), b=#4) -> 0 (12.345 ms)").unwrap();
-    assert_eq!((name, took), ("smlib_boolean", std::time::Duration::from_micros(12_345)));
-    assert_eq!(call_time("smlib_make_box(origin=(0,0,0)) -> -1002 (0.001 ms)").map(|c| c.0), Some("smlib_make_box"));
-    for bad in ["SMLib warning at x.cpp:12: tolerance (in smlib_boolean(...))", "smlib_x() -> 0 (nan ms)", "smlib_x() -> 0 (-1 ms)", "", "smlib_x"] {
-        assert_eq!(call_time(bad), None, "{bad}");
-    }
-}
-
-#[cfg(feature = "native")]
-#[test]
-fn every_call_is_a_profiler_span_timed_by_the_c_api() {
-    let _cpp = route::on_cpp();
-    solidcraft_profile::set_enabled(true);
-    let mark = solidcraft_profile::mark();
-    // the C API's own box, whichever kernel is in force
-    crate::init().unwrap();
-    let b = ffi::make_box(&[0.0; 3], &[1.0; 3]).map(Brep::made).unwrap();
-    let _ = b.volume(1e-7).unwrap();
-    let r = mark.report();
-    let names: Vec<&str> = r.rows.iter().filter(|r| r.category == "smlib").map(|r| r.name).collect();
-    assert!(names.contains(&"smlib_make_box") && names.contains(&"smlib_brep_volume"), "{r:?}");
-}
-
 /// SMLib may end an edge at a parameter of its own (a knot its vertex lies at, where its drop onto
 /// the patch ends): within the edge's tolerance as SMLib held it, on its curve, the pcurve is
 /// mapped onto our interval exactly; farther is SMLib trimming the edge, refused with how far. An
@@ -456,7 +340,6 @@ fn a_pcurve_smlib_ends_within_the_edges_tolerance_is_mapped_onto_our_interval() 
 /// when it makes its trim, unless the edge's tolerance covers its gap. The gap is measured
 /// (SMLib's own, over the patch) and covered, so the face's pcurves come back on the edge's
 /// own interval, ending at the patch's corner.
-#[cfg(feature = "native")]
 #[test]
 fn an_edge_a_few_um_past_its_patch_keeps_its_interval() {
     use solidcraft_geom::brep::pcurve::{TrimEdge, TrimFace, TrimUse, Trims};

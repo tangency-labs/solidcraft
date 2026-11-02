@@ -1,7 +1,5 @@
-#[cfg(feature = "native")]
 use super::*;
 
-#[cfg(feature = "native")]
 mod native_tests {
     use super::*;
     use crate::{CheckLevel, MEASURE_ACCURACY};

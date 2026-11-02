@@ -1,7 +1,5 @@
 //! Fillets and chamfers on solidcore, against closed forms: every result exports to a record that
-//! validates. With SMLib built, the same case on the C++ kernel gives the same volume, counts and
-//! faces by surface kind, or the same error (parity only: the expected values are the analytic
-//! ones).
+//! validates.
 //!
 //! The bodies are solidcore's own boxes and cylinders.
 
@@ -283,83 +281,6 @@ fn solidcore_case(name: &'static str) -> Got {
     })
 }
 
-/// The case on the C++ kernel, called directly (whatever the choice).
-#[cfg(feature = "native")]
-fn cpp_case(name: &str) -> Got {
-    use crate::ops::{pick_error, setback_error};
-    use crate::{Brep, ffi};
-    crate::init().unwrap();
-    let make = |s: Shape| -> Brep {
-        match s {
-            Shape::Box(o, z) => ffi::make_box(&o, &z),
-            Shape::Cylinder(o, r, h) => ffi::make_cylinder(&o, r, h),
-            Shape::Holed(o, z, c, r, h) => {
-                ffi::ops::boolean(&ffi::make_box(&o, &z).unwrap(), &ffi::make_cylinder(&c, r, h).unwrap(), ffi::ops::BOOLEAN_SUBTRACT)
-            }
-        }
-        .map(Brep::made)
-        .unwrap()
-    };
-    let kind = |k| match k {
-        Blend::Round => ffi::ops::BLEND_ROUND,
-        Blend::Curvature => ffi::ops::BLEND_CURVATURE,
-        Blend::Chord => ffi::ops::BLEND_CHORD,
-        Blend::Chamfer => ffi::ops::BLEND_CHAMFER,
-    };
-    let c = case(name);
-    let tol = tolerance(name);
-    let r = match &c.op {
-        Op::Blend(s, k, points, size) => {
-            ffi::ops::blend(kind(*k), make(*s).cpp().unwrap(), points, &vec![*size; points.len()], tol).map_err(pick_error)
-        }
-        Op::Sides(s, points, d, second, first) => {
-            let (value, angle) = match second {
-                ChamferSecond::Distance(d) => (*d, false),
-                ChamferSecond::Angle(a) => (*a, true),
-            };
-            ffi::ops::chamfer_sides(make(*s).cpp().unwrap(), points, tol, *d, value, angle, first).map_err(pick_error)
-        }
-        Op::Setback(s, points, size, corners, setbacks) => {
-            ffi::ops::blend_setback(ffi::ops::BLEND_ROUND, make(*s).cpp().unwrap(), points, &vec![*size; points.len()], corners, setbacks, tol)
-                .map_err(setback_error)
-        }
-        Op::Variable(s, point, start, degree, knots, radii) => {
-            ffi::ops::fillet_variable(make(*s).cpp().unwrap(), point, tol, start, i32::try_from(*degree).unwrap(), knots, radii).map_err(
-                |s| match s {
-                    ffi::ops::ERR_PICK_NONE => Error::NoMatch { point: 0 },
-                    ffi::ops::ERR_PICK_AMBIGUOUS => Error::Ambiguous { point: 0 },
-                    s => crate::error(s),
-                },
-            )
-        }
-    };
-    let got = r.map(|h| {
-        let v = ffi::volume(&h, 1e-8).unwrap();
-        let n = ffi::counts(&h).unwrap().map(|x| usize::try_from(x).unwrap());
-        let b = Brep::made(h);
-        let (rec, _) = native(&b.cpp_arrays().unwrap()).unwrap();
-        rec.validate().unwrap();
-        Measured { volume: v, counts: n, kinds: kinds(&rec) }
-    });
-    judge(name, "C++", &c.expect, got)
-}
-
-/// solidcore and C++ agree: volume within 1e-9, the same counts and faces by kind, or the same
-/// error.
-#[cfg(feature = "native")]
-fn parity(name: &'static str) {
-    let cpp = cpp_case(name);
-    let ours = solidcore_case(name);
-    match (ours, cpp) {
-        (Ok(a), Ok(b)) => {
-            assert!(rel(a.volume, b.volume) < 1e-9, "{name}: solidcore {} vs C++ {}", a.volume, b.volume);
-            assert_eq!(a.counts, b.counts, "{name}: face, edge, vertex counts (solidcore vs C++)");
-            assert_eq!(a.kinds, b.kinds, "{name}: faces by surface kind (solidcore vs C++)");
-        }
-        (a, b) => assert_eq!(a.err(), b.err(), "{name}: errors (solidcore vs C++)"),
-    }
-}
-
 macro_rules! cases {
     ($($m:ident $(: $ign:meta)?),* $(,)?) => {$(
         mod $m {
@@ -367,19 +288,6 @@ macro_rules! cases {
             $(#[$ign])?
             fn solidcore_matches_the_closed_form() {
                 let _ = super::solidcore_case(stringify!($m));
-            }
-            #[cfg(feature = "native")]
-            #[test]
-            $(#[$ign])?
-            fn solidcore_matches_the_cpp_kernel() {
-                let _cpp = crate::route::on_cpp();
-                super::parity(stringify!($m));
-            }
-            #[cfg(feature = "native")]
-            #[test]
-            fn the_cpp_kernel_matches_the_closed_form() {
-                let _cpp = crate::route::on_cpp();
-                let _ = super::cpp_case(stringify!($m));
             }
         }
     )*};
@@ -437,8 +345,6 @@ fn a_cliff_overflow_the_fork_refuses_has_no_room() {
 /// over it too (Simpson on 4000 spans, against a bound of its quartic end edge's tolerance).
 #[test]
 fn overflow_goes_first() {
-    #[cfg(feature = "native")]
-    let _cpp = crate::route::on_cpp();
     let f = |u: f64| 0.5 * (u * (441.0 - u * u).sqrt() + 441.0 * (u / 21.0).asin());
     let w = 440f64.sqrt();
     let alone = 20.0 * (f(w) - f(1.0) - (w - 1.0));
@@ -467,14 +373,6 @@ fn overflow_goes_first() {
         println!("overflow first {sizes:?}: {:.9}, expected {want:.9}", got.0);
         assert_eq!(got.1, dropped, "{sizes:?}");
         assert!((got.0 - want).abs() <= bound, "{sizes:?}: {} vs {want}", got.0);
-        #[cfg(feature = "native")]
-        {
-            let body = crate::Brep::made_core(Shape::Box([0.0; 3], [20.0; 3]).core());
-            let (cpp, d) = crate::ffi::ops::blend_dropping(crate::ffi::ops::BLEND_ROUND, body.cpp().unwrap(), points, sizes, 1.0).unwrap();
-            assert_eq!(d, dropped, "C++ {sizes:?}");
-            let v = crate::ffi::volume(&cpp, 1e-8).unwrap();
-            assert!((got.0 - v).abs() <= bound, "{sizes:?}: solidcore {} vs C++ {v}", got.0);
-        }
     }
 }
 
@@ -612,11 +510,9 @@ fn pocket_chamfer_on_a_boolean_body() {
 /// The corner of r5 rounds at (60, 40, 20) on a 60 x 40 x 20 box, set back 8 and left open: the
 /// box's six faces and the three rounds (9 faces, 30 edges, 22 vertices), a sheet, and one hole
 /// of twelve edges (each section and face curve in two), chained end to start, each beside a face
-/// of the sheet. With SMLib built, the C++ kernel gives the same counts and the same hole.
+/// of the sheet.
 #[test]
 fn a_setback_corner_left_open_returns_its_hole() {
-    #[cfg(feature = "native")]
-    let _cpp = crate::route::on_cpp();
     let edges = [[30.0, 40.0, 20.0], [60.0, 20.0, 20.0], [60.0, 40.0, 10.0]];
     let (open, holes) = timed("setback_open", move || {
         let b = Shape::Box([0.0; 3], [60.0, 40.0, 20.0]).core();
@@ -635,25 +531,6 @@ fn a_setback_corner_left_open_returns_its_hole() {
         let next = &hole.edges[(k + 1) % 12];
         assert_eq!(end(h, true), end(next, false), "edge {k} ends where the next starts");
         assert!(h.face < 9);
-    }
-    #[cfg(feature = "native")]
-    {
-        crate::init().unwrap();
-        let b = crate::ffi::make_box(&[0.0; 3], &[60.0, 40.0, 20.0]).map(crate::Brep::made).unwrap();
-        let (h, values) = crate::ffi::ops::blend_setback_open(
-            crate::ffi::ops::BLEND_ROUND,
-            b.cpp().unwrap(),
-            &edges,
-            &[5.0; 3],
-            &[[60.0, 40.0, 20.0]],
-            &[8.0],
-            0.1,
-        )
-        .unwrap();
-        assert_eq!(crate::ffi::counts(&h).unwrap(), [9, 30, 22], "C++ counts");
-        let ours: Vec<i64> =
-            std::iter::once(12).chain(hole.edges.iter().flat_map(|h| [h.edge as i64, h.face as i64, i64::from(h.forward)])).collect();
-        assert_eq!(values, ours, "the hole (C++ vs solidcore)");
     }
     // A corner where an edge is not rounded builds no setback, and the refusal names it.
     let refused = timed("setback_open_refused", move || {
@@ -789,65 +666,6 @@ fn the_first_distance_goes_on_the_face_along_first() {
     }
 }
 
-/// Face and edge tags (`Brep::tagged`) through blends on solidcore, as on C++: the box is
-/// tagged on the C++ kernel, its solidcore body converted from that and tagged the same way, and
-/// the two results' histories must be the same.
-#[cfg(feature = "native")]
-mod history {
-    use solidcraft_geom::brep::history::Change;
-
-    use crate::history::Raw;
-    use crate::{Blend, Brep, ffi};
-
-    /// A 20 x 30 x 10 box, tagged as operand 0, with `kind` of `size` on its top front edge
-    /// (y = 0, z = 10), on both kernels: solidcore's history, then the C++ kernel's.
-    fn one_edge(kind: Blend, size: f64) -> (Raw, Raw) {
-        crate::init().unwrap();
-        let a = Brep::made(ffi::make_box(&[0.0; 3], &[20.0, 30.0, 10.0]).unwrap()).tagged(0).unwrap();
-        let edge = [[10.0, 0.0, 10.0]];
-        let code = match kind {
-            Blend::Round => ffi::ops::BLEND_ROUND,
-            Blend::Curvature => ffi::ops::BLEND_CURVATURE,
-            Blend::Chord => ffi::ops::BLEND_CHORD,
-            Blend::Chamfer => ffi::ops::BLEND_CHAMFER,
-        };
-        let cpp = ffi::ops::blend(code, a.cpp().unwrap(), &edge, &[size], super::TOL).unwrap();
-        let cpp = Brep::made(cpp).history().unwrap();
-        let core = super::blend(a.core().unwrap(), kind, &edge, &[size], super::TOL, &[], &[], super::Corners::Filled).unwrap();
-        (Brep::made_core(core).history().unwrap(), cpp)
-    }
-
-    /// The changes of `h`'s faces, sorted: one blend of one box edge leaves the bottom and back
-    /// as they were, trims the top, front and both sides, and makes the blend face.
-    fn changes(h: &Raw) -> Vec<Change> {
-        let mut c: Vec<Change> = h.faces.iter().map(|f| f.change).collect();
-        c.sort_by_key(|c| *c as u8);
-        c
-    }
-
-    fn check(kind: Blend, size: f64) {
-        let (core, cpp) = one_edge(kind, size);
-        let want = [Change::Kept, Change::Kept, Change::Modified, Change::Modified, Change::Modified, Change::Modified, Change::Generated];
-        assert_eq!(changes(&cpp), want, "C++ {kind:?}: {cpp:?}");
-        assert_eq!(core.canonical(), cpp.canonical(), "{kind:?}");
-    }
-
-    /// A 2 mm round on the top front edge of a box: the top and front are trimmed, the round is
-    /// new.
-    #[test]
-    fn tags_cross_a_fillet() {
-        let _cpp = crate::route::on_cpp();
-        check(Blend::Round, 2.0);
-    }
-
-    /// A 2 mm chamfer on the same edge: the same faces kept, trimmed and made as the round.
-    #[test]
-    fn tags_cross_a_chamfer() {
-        let _cpp = crate::route::on_cpp();
-        check(Blend::Chamfer, 2.0);
-    }
-}
-
 /// The capi's `knife_edge_chamfers` (fork e96898d): a 10 high extrusion of the profile whose arc
 /// of radius R = 21 runs out tangent into its top line at the tip x = 62 1/6 (a knife edge, a
 /// cusp), chamfered d at the tip. No ball lies d back along both faces there; the chamfer is the
@@ -928,23 +746,9 @@ fn edges_871() -> Vec<[f64; 3]> {
 
 /// #871's rounds at r 0.5 fit (the wall between the window and the block's side is 1.26 thick):
 /// 38 faces, and the closed form `issue_871_tests::rounds_that_fit_are_closed` derives. At r 1 they
-/// overlap, which is refused. With SMLib built, the C++ kernel gives the same.
-#[cfg(feature = "native")]
+/// overlap, which is refused.
 #[test]
 fn rounds_on_the_871_part() {
-    let _cpp = crate::route::on_cpp();
-    rounds_on_the_871_part_check();
-}
-
-/// The same on a build without the C++ kernel: solidcore's half alone. A test of its own, so that
-/// tests/KNOWN_FAILING_TESTS's entry for the C++ comparison (rounds_on_the_871_part) is graded only where it runs.
-#[cfg(not(feature = "native"))]
-#[test]
-fn rounds_on_the_871_part_on_solidcore() {
-    rounds_on_the_871_part_check();
-}
-
-fn rounds_on_the_871_part_check() {
     let p = part_871();
     let e = edges_871();
     let sizes = |r: f64| vec![r; e.len()];
@@ -956,27 +760,6 @@ fn rounds_on_the_871_part_check() {
     assert_eq!(refused, Error::NoRoom);
     assert_eq!(n[0], 38);
     assert!((v - exact).abs() < 1e-3, "{v} vs {exact}");
-    #[cfg(feature = "native")]
-    {
-        use crate::{Brep, ffi};
-        crate::init().unwrap();
-        let bx = |lo: [f64; 3], hi: [f64; 3]| ffi::make_box(&lo, &[hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]).unwrap();
-        let top = ffi::ops::boolean(
-            &bx([9.5, 8.0, 0.0], [23.5, 29.5, 10.0]),
-            &bx([9.5, 12.74437365538526, 10.0], [23.5, 22.69275963366936, 20.0]),
-            ffi::ops::BOOLEAN_UNION,
-        )
-        .unwrap();
-        let cut = ffi::ops::boolean(&top, &bx([9.5, 14.0, 7.0], [23.5, 19.2, 14.1]), ffi::ops::BOOLEAN_SUBTRACT).unwrap();
-        let cpp = Brep::made(cut);
-        let h = cpp.cpp().unwrap();
-        let fit = ffi::ops::blend(ffi::ops::BLEND_ROUND, h, &e, &sizes(0.5), TOL).unwrap();
-        let (cv, cn) = (ffi::volume(&fit, 1e-8).unwrap(), ffi::counts(&fit).unwrap().map(|x| usize::try_from(x).unwrap()));
-        let crefused = ffi::ops::blend(ffi::ops::BLEND_ROUND, h, &e, &sizes(1.0), TOL).map(|_| ());
-        assert!(rel(v, cv) < 1e-9, "solidcore {v} vs C++ {cv}");
-        assert_eq!(n, cn);
-        assert!(crefused.is_err());
-    }
 }
 
 /// The fork's `tabbed_plate_rounds_mitred_on_the_arcs_continuation`: a plate 2 thick, its outline an
@@ -984,11 +767,9 @@ fn rounds_on_the_871_part_check() {
 /// outline rounded r 0.5. The arc's round and the tab side's are mitred on the arc wall's
 /// continuation. Removed: the outline's area less the area of the outline moved in by
 /// d = r (1 - cos phi), at the height r sin phi into the round (midpoint rule, 8192 steps; the area
-/// by Green's theorem). With SMLib built, the C++ kernel gives the same.
+/// by Green's theorem).
 #[test]
 fn tabbed_plate_rounds_mitred_on_the_arcs_continuation() {
-    #[cfg(feature = "native")]
-    let _cpp = crate::route::on_cpp();
     use super::sweep::extrude;
     use crate::sweeps::{Curve, DraftCorner};
     const Z: [f64; 3] = [0.0, 0.0, 1.0];
@@ -1037,15 +818,42 @@ fn tabbed_plate_rounds_mitred_on_the_arcs_continuation() {
     rec.validate().unwrap();
     assert!(super::is_manifold_solid(&round).unwrap());
     assert!(super::check(&round, crate::check::CheckLevel::All).unwrap().is_valid());
-    #[cfg(feature = "native")]
-    {
-        use crate::{Brep, ffi};
-        crate::init().unwrap();
-        let list = crate::sweeps::List::of(&outline).unwrap();
-        let cpp = ffi::sweeps::extrude(&list.raw(), &Z, 2.0, 0.0, ffi::sweeps::DRAFT_CORNER_CURVATURE, true, &mut [f64::NAN; 3]).unwrap();
-        let cround = ffi::ops::blend(ffi::ops::BLEND_ROUND, Brep::made(cpp).cpp().unwrap(), &top, &[r; 6], TOL).unwrap();
-        let cv = ffi::volume(&cround, 1e-8).unwrap();
-        assert!(rel(volume(&round, 1e-8).unwrap(), cv) < 1e-9);
-        assert_eq!(counts(&round).unwrap(), ffi::counts(&cround).unwrap().map(|x| usize::try_from(x).unwrap()));
+}
+
+/// Face and edge tags (`Brep::tagged`) through blends: a 20 x 30 x 10 box tagged as operand 0,
+/// with one blend on its top front edge (y = 0, z = 10), leaves the bottom and back as they were,
+/// trims the top, front and both sides, and makes the blend face.
+mod history {
+    use solidcraft_geom::brep::history::Change;
+
+    use crate::history::Raw;
+    use crate::{Blend, Brep};
+
+    fn one_edge(kind: Blend, size: f64) -> Raw {
+        let a = Brep::make_box([0.0; 3], [20.0, 30.0, 10.0]).unwrap().tagged(0).unwrap();
+        let edge = [[10.0, 0.0, 10.0]];
+        let core = super::blend(a.core(), kind, &edge, &[size], super::TOL, &[], &[], super::Corners::Filled).unwrap();
+        Brep::made_core(core).history().unwrap()
+    }
+
+    fn check(kind: Blend, size: f64) {
+        let h = one_edge(kind, size);
+        let mut changes: Vec<Change> = h.faces.iter().map(|f| f.change).collect();
+        changes.sort_by_key(|c| *c as u8);
+        let want = [Change::Kept, Change::Kept, Change::Modified, Change::Modified, Change::Modified, Change::Modified, Change::Generated];
+        assert_eq!(changes, want, "{kind:?}: {h:?}");
+    }
+
+    /// A 2 mm round on the top front edge of a box: the top and front are trimmed, the round is
+    /// new.
+    #[test]
+    fn tags_cross_a_fillet() {
+        check(Blend::Round, 2.0);
+    }
+
+    /// A 2 mm chamfer on the same edge: the same faces kept, trimmed and made as the round.
+    #[test]
+    fn tags_cross_a_chamfer() {
+        check(Blend::Chamfer, 2.0);
     }
 }

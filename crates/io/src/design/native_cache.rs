@@ -29,11 +29,10 @@ fn evaluation() -> String {
     format!("{}/{}-{}", env!("SOLIDCRAFT_EVALUATION_SOURCE"), std::env::consts::ARCH, std::env::consts::OS)
 }
 
-/// The geometry kernel that answers in this process: another kernel's cache is not its result (the
-/// two differ in tolerances and in what they refuse), so a design opened under it evaluates again.
-fn kernel() -> &'static str {
-    solidcraft_kernel::kernel_route::choice().id()
-}
+/// The geometry kernel that computed a cache. A cache another kernel wrote (the C++ SMLib, which
+/// earlier builds could run on) is not this build's result: the kernels differ in tolerances and in
+/// what they refuse, so a design opened from it evaluates again.
+pub(super) const KERNEL: &str = "solidcore";
 
 /// A 4 x 4 matrix as its 16 numbers, in storage order.
 fn matrix(t: &[[f64; 4]; 4]) -> Vec<f64> {
@@ -302,7 +301,7 @@ impl Encoded {
             document: digest(document),
             evaluation: evaluation(),
             format: FORMAT,
-            kernel: kernel(),
+            kernel: KERNEL,
             model: records,
             payload: digest(&data),
             producer: PRODUCER,
@@ -352,7 +351,7 @@ fn current(manifest: &Value, document: &[u8]) -> bool {
     is("format", FORMAT)
         && is("producer", PRODUCER)
         && is("evaluation", &evaluation())
-        && is("kernel", kernel())
+        && is("kernel", KERNEL)
         && is("document", &digest(document))
         && source_trusted(env!("SOLIDCRAFT_EVALUATION_SOURCE"), cfg!(any(test, feature = "trust-unknown-source")))
 }
