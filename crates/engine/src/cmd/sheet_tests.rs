@@ -6105,3 +6105,50 @@ fn an_unfolded_sheets_flat_face_is_named_after_its_base_at_every_size() {
         }
     }
 }
+
+/// A base flange 1 thick (R 1, K 0.44) from the closed outline `pts` on XY.
+fn sheet_from_outline(s: &mut Session, pts: Value) {
+    run(s, "sheet.manage_rules", json!({"name": "S1", "thickness": "1", "bend_radius": "1", "k_factor": 0.44, "active": true}));
+    run(s, "sketch.create", json!({"plane": "XY", "name": "B"}));
+    run(s, "sketch.line", json!({"points": pts, "closed": true}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "sheet.flange", json!({"sketch": "B"}));
+}
+
+/// The bends of the flat pattern as (length, lower y, upper y), sorted by the lower y.
+fn bend_spans(s: &mut Session) -> Vec<(f64, f64, f64)> {
+    let f = flat(s);
+    let mut v: Vec<(f64, f64, f64)> = f["bends"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| {
+            let (y0, y1) = (b["start"][1].as_f64().unwrap(), b["end"][1].as_f64().unwrap());
+            (b["length"].as_f64().unwrap(), y0.min(y1), y0.max(y1))
+        })
+        .collect();
+    v.sort_by(|a, b| a.1.total_cmp(&b.1));
+    v
+}
+
+const STEPPED: [[f64; 2]; 8] =
+    [[-106.9, 5.4], [108.9, 5.4], [108.9, 408.9], [-106.9, 408.9], [-106.9, 388.3], [-108.9, 388.3], [-108.9, 10.5], [-106.9, 10.5]];
+
+/// A flange on part of a stepped outline spans that part: on the X −108.9 segment (Y 10.5…388.3)
+/// of a base whose edge beyond it is already at the bend line (X −106.9), the bend is 377.8 long
+/// and no relief is cut. Before, it ran the face's whole length (403.5).
+#[test]
+fn a_flange_on_part_of_a_stepped_outline_spans_that_part() {
+    let mut s = Session::default();
+    sheet_from_outline(&mut s, json!(STEPPED));
+    run(&mut s, "sheet.flange", json!({"edges": [[-108.9, 200, 1]], "height": 20}));
+    let spans = bend_spans(&mut s);
+    assert_eq!(spans.len(), 1);
+    let (len, y0, y1) = spans[0];
+    assert!((len - 377.8).abs() < 1e-9 && (y0 - 10.5).abs() < 1e-9 && (y1 - 388.3).abs() < 1e-9, "{spans:?}");
+    // The base trimmed back to X −106.9 (215.8 × 403.5), and the bend (allowance (π/2)(R + K·t)) and
+    // the 18 leg along the 377.8: no relief.
+    let allowance = PI / 2.0 * (1.0 + 0.44 * 1.0);
+    let expected = 215.8 * 403.5 + 377.8 * (allowance + 18.0);
+    assert!(rel(flat_area(&flat(&mut s)), expected) < 1e-9, "{} vs {expected}", flat_area(&flat(&mut s)));
+}
