@@ -1,10 +1,13 @@
-//! Text on paper (#4890 B1b): laid out by the rule sketch text measures with, in the bundled
-//! drawing font, as runs the paper scene takes. Expected numbers come from the font's own tables
-//! (Liberation Sans: 2048 units per em, a cap height of 1409) or from `TextMetrics`.
+//! Text on paper (#4890 B1b): laid out by the rule sketch text measures with, in the drawing's
+//! font, as runs the paper scene takes. Expected numbers come from the font's own tables
+//! (Liberation Sans: 2048 units per em, a cap height of 1409) or from `TextMetrics`. Named families
+//! are looked up in the repository's own fonts, never the computer's.
+
+use std::path::PathBuf;
 
 use sha2::{Digest, Sha256};
 use solidcraft_geom::Vec2;
-use solidcraft_geom::paper::text::{Font, TextRun};
+use solidcraft_geom::paper::text::{Embed, Font, TextRun};
 use solidcraft_geom::paper::{Group, Item, ObjectKind, Scene};
 
 use crate::fonts::font_data;
@@ -26,7 +29,7 @@ fn one((runs, mut fonts): (Vec<TextRun>, Vec<Font>)) -> (Vec<TextRun>, Font) {
         assert!(font.glyphs.keys().copied().eq(placed), "{} holds exactly its runs' glyphs", font.postscript_name);
     }
     assert!(runs.iter().all(|r| fonts.iter().any(|f| f.id == r.font)), "each run's font is listed");
-    assert_eq!(fonts.len(), 1, "one drawing font so far");
+    assert_eq!(fonts.len(), 1, "one font a text so far");
     (runs, fonts.remove(0))
 }
 
@@ -43,7 +46,17 @@ fn width(line: &str) -> f64 {
 }
 
 fn err(text: &str, family: Option<&str>, style: &TextStyle) -> String {
-    paper_text(text, family, AT, 5.0, 0.0, style).unwrap_err().to_string()
+    paper_text_in(&repo_fonts(), text, family, AT, 5.0, 0.0, style).unwrap_err().to_string()
+}
+
+/// The repository's fonts as the only installed ones: Liberation Sans, IBM Plex Mono, BIZ
+/// UDPGothic and IBM Plex Sans (a variable face).
+fn repo_fonts() -> Vec<PathBuf> {
+    vec![PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts")]
+}
+
+fn set_in(text: &str, family: &str) -> (Vec<TextRun>, Font) {
+    one(paper_text_in(&repo_fonts(), text, Some(family), AT, 5.0, 0.0, &TextStyle::default()).unwrap().unwrap())
 }
 
 #[test]
@@ -72,7 +85,7 @@ fn the_drawing_font_is_admitted_with_what_a_pdf_needs() {
     assert_eq!((font.units_per_em, font.num_glyphs, font.metrics.cap_height), (2048, 2620, 1409));
     assert_eq!(font.metrics.bbox, [-1114, -621, 2666, 2007]);
     assert!(font.metrics.ascent > 1409 && font.metrics.descent < 0);
-    assert_eq!((font.metrics.italic_angle, font.metrics.flags), (0.0, Default::default()));
+    assert_eq!((font.metrics.italic_angle, font.metrics.flags, font.embed), (0.0, Default::default(), Embed::Subset));
     assert_eq!(&*font.bytes, data.bytes());
     let id: [u8; 32] = Sha256::new().chain_update(data.bytes()).chain_update(0u32.to_le_bytes()).finalize().into();
     assert_eq!(font.id, id);
@@ -135,12 +148,249 @@ fn a_character_the_font_lacks_is_refused_by_name() {
 }
 
 #[test]
-fn only_the_drawing_fonts_faces_are_set() {
-    let plain = TextStyle::default();
-    let e = err("A", Some("Arial"), &plain);
-    assert!(e.contains("`Arial` is not a drawing font: drawings are set in Liberation Sans"), "{e}");
-    let e = err("A", None, &TextStyle { bold: true, ..TextStyle::default() });
-    assert!(e.contains("has no bold face"), "{e}");
+fn a_family_is_found_by_name_among_the_installed_fonts() {
+    let (runs, font) = set_in("Title 12", "ibm plex mono");
+    let file = std::fs::read(repo_fonts()[0].join("ibm-plex-mono/IBMPlexMono-Regular.ttf")).unwrap();
+    let id: [u8; 32] = Sha256::new().chain_update(&file).chain_update(0u32.to_le_bytes()).finalize().into();
+    assert_eq!((font.postscript_name.as_str(), font.id), ("IBMPlexMono-Regular", id));
+    assert!(*font.bytes == *file, "the file's own bytes");
+    assert!(font.metrics.flags.fixed_pitch && !font.metrics.flags.serif);
+    scene(&runs, &font).validate().unwrap();
+    assert_eq!(paper_font_note(&repo_fonts(), "IBM Plex Mono"), None);
+    // Japanese in a Japanese family; the built-in font has no glyph for it.
+    let (runs, font) = set_in("図面 A3", "BIZ UDPGothic");
+    assert_eq!(font.postscript_name, "BIZUDPGothic-Regular");
+    scene(&runs, &font).validate().unwrap();
+    // The same text in the same font is the same runs and font, every time.
+    assert_eq!(set_in("図面 A3", "BIZ UDPGothic"), (runs, font));
+}
+
+#[test]
+fn a_family_paper_cant_use_is_set_in_the_built_in_font_and_named() {
+    let builtin = set("Title", &TextStyle::default());
+    for (family, note) in [
+        ("Futura", "Futura isn't on this computer: set in Liberation Sans"),
+        ("Liberation Serif", "Liberation Serif isn't on this computer: set in Liberation Sans"),
+    ] {
+        assert_eq!(set_in("Title", family), builtin, "{family}");
+        assert_eq!(paper_font_note(&repo_fonts(), family).as_deref(), Some(note));
+    }
+    for family in ["", " ", "Liberation Sans", "liberation-sans"] {
+        assert_eq!(paper_font_note(&repo_fonts(), family), None, "{family:?}");
+    }
+}
+
+/// IBM Plex Mono's file with `patch` applied, alone in a folder of its own, removed at the end of
+/// the test.
+struct Patched(PathBuf);
+
+impl Patched {
+    fn new(name: &str, patch: impl FnOnce(&mut Vec<u8>)) -> Patched {
+        let mut bytes = std::fs::read(repo_fonts()[0].join("ibm-plex-mono/IBMPlexMono-Regular.ttf")).unwrap();
+        patch(&mut bytes);
+        let dir = std::env::temp_dir().join(format!("solidcraft-paper-fonts-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("patched.ttf"), bytes).unwrap();
+        Patched(dir)
+    }
+
+    /// The face admitted for paper, or why it isn't.
+    fn admitted(&self) -> std::result::Result<Font, String> {
+        super::admit(&font_data(Some(&self.0.join("patched.ttf").to_string_lossy())).unwrap())
+    }
+}
+
+impl Drop for Patched {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Where table `tag`'s record is in a font file's table directory.
+fn record(bytes: &[u8], tag: &[u8; 4]) -> usize {
+    let tables = usize::from(u16::from_be_bytes([bytes[4], bytes[5]]));
+    (0..tables).map(|i| 12 + 16 * i).find(|&r| &bytes[r..r + 4] == tag).unwrap()
+}
+
+/// Where table `tag` starts in a font file.
+fn table(bytes: &[u8], tag: &[u8; 4]) -> usize {
+    let r = record(bytes, tag);
+    u32::from_be_bytes(bytes[r + 8..r + 12].try_into().unwrap()) as usize
+}
+
+/// The font file without table `tag`: its record renamed, so no reader finds it.
+fn without(bytes: &mut [u8], tag: &[u8; 4]) {
+    let r = record(bytes, tag);
+    bytes[r..r + 4].copy_from_slice(b"zzzz");
+}
+
+/// The font file with its OS/2 `field` (a 16-bit field at that byte) set to `value`.
+fn os2(bytes: &mut [u8], field: usize, value: u16) {
+    let at = table(bytes, b"OS/2") + field;
+    bytes[at..at + 2].copy_from_slice(&value.to_be_bytes());
+}
+
+/// The font file with table `tag` in the place of its `post` table, which is long enough.
+fn with_table(bytes: &mut [u8], tag: &[u8; 4], data: &[u8]) {
+    let (r, at) = (record(bytes, b"post"), table(bytes, b"post"));
+    bytes[at..at + data.len()].copy_from_slice(data);
+    bytes[r + 12..r + 16].copy_from_slice(&(data.len() as u32).to_be_bytes());
+    bytes[r..r + 4].copy_from_slice(tag);
+}
+
+/// The font file with its first `count` glyphs advancing `width`.
+fn advances(bytes: &mut [u8], count: usize, width: u16) {
+    let at = table(bytes, b"hmtx");
+    (0..count).for_each(|g| bytes[at + 4 * g..at + 4 * g + 2].copy_from_slice(&width.to_be_bytes()));
+}
+
+/// A variable face is set at its default instance, which is what a PDF draws.
+#[test]
+fn a_variable_face_is_set_at_its_default_instance() {
+    let (runs, font) = set_in("Title 12", "IBM Plex Sans");
+    let face = ttf_parser::Face::parse(&font.bytes, 0).unwrap();
+    assert!(face.is_variable() && font.postscript_name.starts_with("IBMPlexSans"), "{}", font.postscript_name);
+    let t = face.glyph_index('T').unwrap();
+    assert_eq!(font.glyphs[&t.0].advance, face.glyph_hor_advance(t).unwrap(), "the default instance's advance");
+    scene(&runs, &font).validate().unwrap();
+    assert_eq!(paper_font_note(&repo_fonts(), "IBM Plex Sans"), None);
+}
+
+/// A face whose tables lack what a PDF's font descriptor asks for is admitted with it made up for:
+/// a cap height as sketch text scales by, no italic angle and a fixed pitch from the advances, and a
+/// PostScript name from its family and style or its id.
+#[test]
+fn what_a_face_lacks_is_made_up_for() {
+    let plain = Patched::new("plain", |_| {}).admitted().unwrap();
+    assert_eq!((plain.postscript_name.as_str(), plain.embed, plain.metrics.flags.fixed_pitch), ("IBMPlexMono-Regular", Embed::Subset, true));
+    // The cap height in OS/2 (`sCapHeight`, at byte 88) when it has one; version 1 has none: the
+    // top of `H`.
+    let face = ttf_parser::Face::parse(&plain.bytes, 0).unwrap();
+    let h = face.glyph_bounding_box(face.glyph_index('H').unwrap()).unwrap().y_max;
+    assert_ne!(h, 600);
+    assert_eq!(Patched::new("cap-600", |b| os2(b, 88, 600)).admitted().unwrap().metrics.cap_height, 600);
+    let v1 = Patched::new("os2-v1", |b| {
+        os2(b, 88, 600);
+        os2(b, 0, 1);
+    });
+    assert_eq!(v1.admitted().unwrap().metrics.cap_height, h);
+    let no_post = Patched::new("no-post", |b| without(b, b"post"));
+    let font = no_post.admitted().unwrap();
+    assert_eq!((font.metrics.italic_angle, font.metrics.flags.fixed_pitch), (0.0, true));
+    // Without `post`, a glyph of another width means no fixed pitch, and so does nothing advancing.
+    let glyphs = usize::from(font.num_glyphs);
+    let pitch = |name: &str, count, width| {
+        let patched = Patched::new(name, |b| {
+            without(b, b"post");
+            advances(b, count, width);
+        });
+        patched.admitted().unwrap().metrics.flags.fixed_pitch
+    };
+    assert!(!pitch("one-wider", 1, 900));
+    assert!(!pitch("no-advances", glyphs, 0));
+    // Text set in either is text the scene takes.
+    for patched in [&v1, &no_post] {
+        let set = paper_text_in(std::slice::from_ref(&patched.0), "Title 12", Some("IBM Plex Mono"), AT, 5.0, 0.0, &TextStyle::default());
+        let (runs, font) = one(set.unwrap().unwrap());
+        scene(&runs, &font).validate().unwrap();
+    }
+    // No PostScript name or style: the family's name; no names at all: the id.
+    let unnamed = Patched::new("no-postscript-name", |b| {
+        let at = table(b, b"name");
+        for i in 0..usize::from(u16::from_be_bytes([b[at + 2], b[at + 3]])) {
+            let id = at + 6 + 12 * i + 6;
+            if [2, 6, 17].contains(&u16::from_be_bytes([b[id], b[id + 1]])) {
+                b[id..id + 2].copy_from_slice(&255u16.to_be_bytes());
+            }
+        }
+    });
+    assert_eq!(unnamed.admitted().unwrap().postscript_name, "IBMPlexMono");
+    let nameless = Patched::new("no-names", |b| without(b, b"name")).admitted().unwrap();
+    let hex: String = nameless.id[..4].iter().map(|b| format!("{b:02X}")).collect();
+    assert_eq!(nameless.postscript_name, format!("Font-{hex}"));
+    // A name longer than a PDF's: the whole of the name table's text, read as the PostScript name.
+    let long = Patched::new("long-name", |b| {
+        let at = table(b, b"name");
+        let postscript = (0..usize::from(u16::from_be_bytes([b[at + 2], b[at + 3]])))
+            .map(|i| at + 6 + 12 * i + 6)
+            .find(|&id| u16::from_be_bytes([b[id], b[id + 1]]) == 6)
+            .unwrap();
+        b[postscript + 2..postscript + 4].copy_from_slice(&1000u16.to_be_bytes());
+        b[postscript + 4..postscript + 6].copy_from_slice(&0u16.to_be_bytes());
+    });
+    assert_eq!(long.admitted().unwrap().postscript_name.len(), 127);
+    // No `l` or `I` to measure: a fifth of the weight class per thousand units of em.
+    let no_stem = Patched::new("no-stem", |b| {
+        without(b, b"cmap");
+        os2(b, 4, 700);
+        let head = table(b, b"head");
+        b[head + 18..head + 20].copy_from_slice(&2000u16.to_be_bytes());
+    });
+    assert_eq!(no_stem.admitted().unwrap().metrics.stem_v, 280);
+}
+
+/// Outlines needn't be TrueType ones, and a PDF can't hold CFF2's. No font in the repository has
+/// either, so these are the smallest tables a reader takes: one glyph, empty.
+#[test]
+fn cff_outlines_are_outlines_and_a_pdf_cant_hold_cff2() {
+    // Header; name, top dictionary (its charstrings at byte 23), string and subroutine indexes;
+    // the charstrings.
+    let cff = [1, 0, 4, 1, 0, 1, 1, 1, 2, b'A', 0, 1, 1, 1, 5, 28, 0, 23, 17, 0, 0, 0, 0, 0, 1, 1, 1, 2, 14];
+    // Header; top dictionary (its charstrings at byte 13); subroutine index; the charstrings.
+    let cff2 = [2, 0, 5, 0, 4, 28, 0, 13, 17, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 2, 14];
+    for (name, tag, data, embed) in [("cff", b"CFF ", &cff[..], Embed::Subset), ("cff2", b"CFF2", &cff2[..], Embed::Outlines)] {
+        let patched = Patched::new(name, |b| {
+            without(b, b"glyf");
+            with_table(b, tag, data);
+        });
+        assert_eq!(patched.admitted().unwrap().embed, embed, "{name}");
+    }
+}
+
+/// How a PDF may carry a face comes from its embedding permissions (OS/2 `fsType`, at byte 8).
+#[test]
+fn a_faces_licence_says_how_a_pdf_carries_it() {
+    for (fs_type, embed) in [
+        (0x0000, Embed::Subset),
+        (0x0008, Embed::Subset),
+        (0x0002, Embed::Outlines),
+        (0x0200, Embed::Outlines),
+        (0x0100, Embed::Whole),
+        (0x0102, Embed::Outlines),
+    ] {
+        let font = Patched::new(&format!("fs-type-{fs_type:x}"), |b| os2(b, 8, fs_type)).admitted().unwrap();
+        assert_eq!(font.embed, embed, "{fs_type:#06x}");
+    }
+}
+
+/// A face with no outlines to fill (a bitmap or colour-only font) is refused, and its family is
+/// set in the built-in font, named.
+#[test]
+fn a_face_with_no_outlines_is_refused() {
+    let bitmap = Patched::new("no-outlines", |b| without(b, b"glyf"));
+    assert_eq!(bitmap.admitted().unwrap_err(), "it has no outlines: a bitmap or colour font");
+    let note = paper_font_note(std::slice::from_ref(&bitmap.0), "IBM Plex Mono");
+    assert_eq!(note.as_deref(), Some("IBM Plex Mono can't be set on paper (it has no outlines: a bitmap or colour font): set in Liberation Sans"));
+}
+
+#[test]
+fn a_font_file_or_a_name_on_several_lines_is_refused() {
+    for family in ["C:/Fonts/arial.ttf", "fonts\\a", "Futura.otf", "~/f.ttc"] {
+        let e = err("A", Some(family), &TextStyle::default());
+        assert!(e.contains("drawings name fonts by family, so they travel"), "{family}: {e}");
+    }
+    assert!(check_family("Futura\nBold").is_err() && check_family(&"F".repeat(1025)).is_err());
+    assert!(check_family("").is_ok() && check_family("Noto Sans CJK JP").is_ok());
+}
+
+#[test]
+fn bold_takes_a_bold_face_and_italic_leans_without_one() {
+    let bold = TextStyle { bold: true, ..TextStyle::default() };
+    let e = err("A", None, &bold);
+    assert!(e.contains("the font Liberation Sans has no bold face"), "{e}");
+    let e = err("A", Some("IBM Plex Mono"), &bold);
+    assert!(e.contains("the font IBM Plex Mono has no bold face"), "{e}");
     let (runs, _) = paper_text("A", Some(" liberation sans "), AT, 5.0, 0.0, &TextStyle { italic: true, ..TextStyle::default() }).unwrap().unwrap();
     assert_eq!(runs[0].slant, 12f64.to_radians().tan(), "a made-up italic leans as sketch text's");
     let e = err("A", None, &TextStyle { path: Some("c1".into()), ..TextStyle::default() });
