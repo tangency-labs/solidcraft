@@ -7,27 +7,48 @@ use solidcraft_doc::config::{Column, ConfigRow, MAX_COLUMNS, MAX_ROWS};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list};
+use crate::schema::config::{ConfigActivation, ConfigRowParams, ConfigTable, ConfigTableParams, ConfigTableReply, ConfigTableRow, ConfigTarget};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
+
+const TABLE_CONTRACT: TypedContract<ConfigTableParams> = TypedContract::new();
+const ROW_CONTRACT: TypedContract<ConfigRowParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("config.configure", "Configure", configure).at("SOLID", "CONFIGURE").icon("params").params(
         "params?: [parameter names]; features?: [feature names]; materials?: [body names]; appearances?: [body names] (columns to add; with no rows yet, a \"Default\" row takes the current values)",
     ),
-    CommandSpec::new("config.table", "Display Configuration Table", show)
+    CommandSpec::new("config.table", "Display Configuration Table", crate::checked!("config.table", show))
         .at("SOLID", "CONFIGURE")
         .icon("configuration_table")
         .noundo()
+        .contract(&TABLE_CONTRACT)
+        .output(output_schema_for::<ConfigTableReply>)
         .params("→ columns (param:<name> or suppress:<feature>), rows, the active row and whether the design still matches it"),
     CommandSpec::new("config.column", "Configuration Column", column).icon("configuration_table").params("param? | feature? | material? | appearance? (target name); delete?: bool"),
     CommandSpec::new("config.row", "Configuration Row", row).icon("configuration_table").params(
         "name; from? (row to copy; default current values); values?: {column key: expression, suppression, material name, appearance name or Look object}; rename?; delete?: bool",
     ),
-    CommandSpec::new("config.activate", "Activate Configuration", activate).icon("activate").params("row: name — sets its parameter values and suppressions"),
-    CommandSpec::new("config.preview", "Preview Configuration", preview).icon("eye").noundo().params("row: name — validates a rebuild without changing the design or history"),
+    CommandSpec::new("config.activate", "Activate Configuration", crate::checked!("config.activate", activate))
+        .icon("activate")
+        .contract(&ROW_CONTRACT)
+        .output(output_schema_for::<ConfigActivation>)
+        .params("row: name — sets its parameter values and suppressions"),
+    CommandSpec::new("config.preview", "Preview Configuration", crate::checked!("config.preview", preview))
+        .icon("eye")
+        .noundo()
+        .contract(&ROW_CONTRACT)
+        .output(output_schema_for::<ConfigActivation>)
+        .params("row: name — validates a rebuild without changing the design or history"),
     CommandSpec::new("config.rule", "Configuration Rule", rule).icon("configuration_table").params(
         "rule?: {id,name,enabled,condition,effect}; rules?: [rule…] (added or replaced together, then the rows checked once); id? + delete?; id? + index? (ordered move)",
     ),
-    CommandSpec::new("config.rules", "Configuration Rules", show).icon("list").noundo().params("ordered typed rules, rows and active state"),
+    CommandSpec::new("config.rules", "Configuration Rules", crate::checked!("config.rules", show))
+        .icon("list")
+        .noundo()
+        .contract(&TABLE_CONTRACT)
+        .output(output_schema_for::<ConfigTableReply>)
+        .params("ordered typed rules, rows and active state"),
 ];
 
 fn column_of(s: &Session, p: &Value, cmd: &str) -> Result<Column> {
@@ -166,14 +187,21 @@ fn configure(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn show(s: &mut Session, _p: &Value) -> Result<Value> {
+    let table = table(s, "config.table")?;
+    to_reply("config.table", ConfigTableReply { table, param_warnings: Vec::new() })
+}
+
+fn to_reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// The table as the read-only commands, and an activation after its switch, return it.
+fn table(s: &Session, cmd: &str) -> Result<ConfigTable> {
     let t = &s.doc.configs;
     let keys: Vec<String> = t.columns.iter().map(|c| s.doc.config_key(c)).collect();
-    let rows: Vec<Value> = t
-        .rows
-        .iter()
-        .map(|r| json!({"name": r.name, "values": keys.iter().zip(&r.cells).map(|(k, v)| (k.clone(), json!(v))).collect::<serde_json::Map<_, _>>()}))
-        .collect();
-    let targets: Vec<Value> = t
+    let rows =
+        t.rows.iter().map(|r| ConfigTableRow { name: r.name.clone(), values: keys.iter().cloned().zip(r.cells.iter().cloned()).collect() }).collect();
+    let targets = t
         .columns
         .iter()
         .map(|column| {
@@ -190,13 +218,22 @@ fn show(s: &mut Session, _p: &Value) -> Result<Value> {
                 }
                 _ => s.doc.config_key(column),
             };
-            json!({"key":s.doc.config_key(column),"label":label,"target":column})
+            let target = serde_json::to_value(column).map_err(|e| bad(cmd, e.to_string()))?;
+            Ok(ConfigTarget { key: s.doc.config_key(column), label, target })
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
+    let rules = t.rules.iter().map(|r| serde_json::to_value(r).map_err(|e| bad(cmd, e.to_string()))).collect::<Result<Vec<_>>>()?;
     let styles = s.doc.configuration_style_status(&s.model.state());
-    Ok(
-        json!({"columns": keys, "targets":targets, "rows": rows, "rules": t.rules, "active": t.active, "matches": s.doc.configuration_matches() && styles.is_ok(), "style_status":styles.as_ref().ok(),"style_error":styles.err().map(|error|error.to_string())}),
-    )
+    Ok(ConfigTable {
+        columns: keys,
+        targets,
+        rows,
+        rules,
+        active: t.active.clone(),
+        matches: s.doc.configuration_matches() && styles.is_ok(),
+        style_error: styles.as_ref().err().map(|error| error.to_string()),
+        style_status: styles.ok(),
+    })
 }
 
 fn column(s: &mut Session, p: &Value) -> Result<Value> {
@@ -412,6 +449,12 @@ fn rule(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn activate(s: &mut Session, p: &Value) -> Result<Value> {
+    to_reply("config.activate", activation(s, p)?)
+}
+
+/// Switch to the row `p` names and say what that did, as `config.activate` and
+/// `config.preview` return it.
+fn activation(s: &mut Session, p: &Value) -> Result<ConfigActivation> {
     let cmd = "config.activate";
     let r = str_(p, "row").ok_or_else(|| bad(cmd, "`row` is required"))?.to_string();
     let mut trial = s.scratch();
@@ -437,19 +480,18 @@ fn activate(s: &mut Session, p: &Value) -> Result<Value> {
     s.doc = trial.doc;
     s.settle_value_edit(&solved)?;
     let errors: Vec<String> = s.model.results.iter().filter_map(|x| x.error.clone()).collect();
-    let mut out = show(s, p)?;
-    out["errors"] = json!(errors);
-    out["trace"] = json!(trace);
-    out["styles"] = json!(styles);
-    Ok(out)
+    let trace = trace.iter().map(|t| serde_json::to_value(t).map_err(|e| bad(cmd, e.to_string()))).collect::<Result<Vec<_>>>()?;
+    Ok(ConfigActivation { table: table(s, cmd)?, errors, trace, styles, preview: None, parameters: None, param_warnings: Vec::new() })
 }
 
 fn preview(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "config.preview";
     let mut trial = s.scratch();
-    let mut out = activate(&mut trial, p)?;
-    out["preview"] = json!(true);
-    out["parameters"] = json!(trial.doc.param_rows());
-    Ok(out)
+    let mut out = activation(&mut trial, p)?;
+    out.preview = Some(true);
+    out.parameters =
+        Some(trial.doc.param_rows().iter().map(|r| serde_json::to_value(r).map_err(|e| bad(cmd, e.to_string()))).collect::<Result<Vec<_>>>()?);
+    to_reply(cmd, out)
 }
 
 #[cfg(test)]

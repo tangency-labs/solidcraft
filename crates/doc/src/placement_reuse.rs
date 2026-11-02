@@ -111,6 +111,7 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
                 to_offset: _,
                 from,
                 corner: _,
+                to_body_apart: _,
             } = extent;
             to.is_none() && from.is_none() && !through_all && components.get(&sketch.0) == Some(&f.component)
         }

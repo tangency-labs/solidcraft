@@ -57,11 +57,11 @@ pub fn rejoin(app: &SolveApp, t: &mut Tool) {
     if t.cmd != LINE && !in_arc_mode(t) {
         return;
     }
-    let Some(Some(current)) = t.pts.last().map(|p| p.1.clone()) else { return };
+    let Some((point, Some(current))) = t.pts.last().cloned() else { return };
     let Ok(state) = app.session.world_state() else { return };
     let Some(ss) = app.session.active_sketch.and_then(|id| state.sketch(id)) else { return };
-    let at = |id: &str| ss.sketch.resolve_point(id).and_then(|p| ss.sketch.point(p));
-    if at(&current).is_some() {
+    let at = |id: &str, point| chain_point(&ss.sketch, id, point);
+    if at(&current, point).is_some() {
         return;
     }
     let mut back = std::mem::take(&mut t.chain.back);
@@ -69,7 +69,7 @@ pub fn rejoin(app: &SolveApp, t: &mut Tool) {
     while let Some(((point, id), curve)) = back.pop() {
         match id {
             None => to = Some(((point, None), curve)),
-            Some(id) => match at(&id) {
+            Some(id) => match at(&id, point) {
                 Some(point) => to = Some(((point, Some(id)), curve)),
                 None => continue,
             },
@@ -87,6 +87,28 @@ pub fn rejoin(app: &SolveApp, t: &mut Tool) {
     t.lined.clear();
     crate::sketch_dims::reset(t);
     t.chain = LineChain { curve, back, ..LineChain::default() };
+}
+
+/// A drawing snap has no point id until the command materializes it. Keep its picked position
+/// while its source curves remain, including when Undo returns to the start of the chain.
+/// Model-vertex snaps are resolved by the drawing command, not by the sketch's point lookup.
+fn chain_point(sketch: &Sketch, id: &str, picked: Vec2) -> Option<Vec2> {
+    if let Some(point) = sketch.resolve_point(id).and_then(|p| sketch.point(p)) {
+        return Some(point);
+    }
+    let exists = if let Some(curve) = id.strip_prefix("mid:") {
+        sketch.curve_index(curve).is_some()
+    } else if let Some(snap) = id.strip_prefix("on:") {
+        let (curve, _) = snap.rsplit_once(':')?;
+        sketch.curve_index(curve).is_some()
+    } else if let Some(snap) = id.strip_prefix("x:") {
+        let (curves, _) = snap.rsplit_once(':')?;
+        let (a, b) = curves.split_once('+')?;
+        sketch.curve_index(a).is_some() && sketch.curve_index(b).is_some()
+    } else {
+        id.starts_with("vertex:")
+    };
+    exists.then_some(picked)
 }
 
 /// Whether the tool is a Line tool's chain drawing tangent arcs, not the Tangent Arc tool itself.

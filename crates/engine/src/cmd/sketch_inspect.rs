@@ -1,18 +1,30 @@
 //! Inspection: curvature combs and minimum radius on sketch curves, model edges and faces;
 //! centre of mass of bodies.
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcraft_geom::{Aabb3, Seg2, Vec2, Vec3};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, string_list, vec3};
+use crate::schema::sketch_inspect::{
+    AnalysisCleared, BodyCenter, CenterOfMassParams, CentersOfMass, Comb, CurvatureCombParams, CurvatureCombReply, CurvatureCombs, IsoFace,
+    IsocurveParams, IsocurveReply, Isocurves, MAX_ISO_FACES, MinimumRadii, MinimumRadiusParams, RadiusItem, SkippedBody,
+};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{CombPick, CombView, EngineError, Result, Session};
 
+const COMB_CONTRACT: TypedContract<CurvatureCombParams> = TypedContract::new();
+const RADIUS_CONTRACT: TypedContract<MinimumRadiusParams> = TypedContract::new();
+const ISOCURVE_CONTRACT: TypedContract<IsocurveParams> = TypedContract::new();
+const CENTER_CONTRACT: TypedContract<CenterOfMassParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("inspect.curvature_comb", "Curvature Comb Analysis", curvature_comb)
+    CommandSpec::new("inspect.curvature_comb", "Curvature Comb Analysis", crate::checked!("inspect.curvature_comb", curvature_comb))
         .at("SKETCH", "INSPECT")
         .icon("curvature_comb")
         .noundo()
+        .contract(&COMB_CONTRACT)
+        .output(output_schema_for::<CurvatureCombReply>)
         .params(
             "curves?: [sketch curve ids] (sketch?: id|name, default active) | edges?: [[x,y,z] points on body edges: the edge whose \
              exact curve passes nearest] | faces?: [[x,y,z] points on faces] with count?: isoparametric curves each way (default 4; \
@@ -27,25 +39,31 @@ pub static COMMANDS: &[CommandSpec] = &[
              surface's normal curvature along each iso curve, along the surface normal. → combs: [{curve, teeth: [[foot, tip]], \
              envelope: [tip], max_curvature, min_radius}] (those shown, with `add`), scale",
         ),
-    CommandSpec::new("inspect.minimum_radius", "Minimum Radius Analysis", minimum_radius)
+    CommandSpec::new("inspect.minimum_radius", "Minimum Radius Analysis", crate::checked!("inspect.minimum_radius", minimum_radius))
         .at("SKETCH", "INSPECT")
         .icon("min_radius")
         .noundo()
+        .contract(&RADIUS_CONTRACT)
+        .output(output_schema_for::<MinimumRadii>)
         .params("curves?: [sketch curve ids] (sketch?) | edges?: [[x,y,z]…] | faces?: [[x,y,z]…] (default: every face of every body); the smallest radius of curvature of each and where it is"),
-    CommandSpec::new("inspect.isocurve", "Isocurve Analysis", isocurves)
+    CommandSpec::new("inspect.isocurve", "Isocurve Analysis", crate::checked!("inspect.isocurve", isocurves))
         .at("SKETCH", "INSPECT")
         .icon("iso_analysis")
         .noundo()
+        .contract(&ISOCURVE_CONTRACT)
+        .output(output_schema_for::<IsocurveReply>)
         .params(
             "faces: [[x,y,z]…] points on faces (1…100); count?: whole number of curves each way, 1…100 (default 8); \
              add?: true keeps the faces already shown; clear?: true turns the analysis off. → each face's isoparametric \
              curves, u = const and v = const of its surface, evenly spaced across it and cut to its trims, as points \
              (`curves`) and per face (`faces`); the viewport draws them",
         ),
-    CommandSpec::new("inspect.center_of_mass", "Center of Mass", center_of_mass)
+    CommandSpec::new("inspect.center_of_mass", "Center of Mass", crate::checked!("inspect.center_of_mass", center_of_mass))
         .at("SKETCH", "INSPECT")
         .icon("center_of_mass")
         .noundo()
+        .contract(&CENTER_CONTRACT)
+        .output(output_schema_for::<CentersOfMass>)
         .params("bodies?: [names] (default all): the centre of mass (uniform density) of each and of all together, from the exact mass properties `inspect.measure` takes → center, volume, bodies: [{body, center, volume}], skipped: [{body, reason}] (bodies that enclose no volume or could not be measured)"),
 ];
 
@@ -142,7 +160,7 @@ fn curvature_comb(s: &mut Session, p: &Value) -> Result<Value> {
     if bool_(p, "clear").unwrap_or(false) {
         s.comb = None;
         s.revision += 1;
-        return Ok(json!({"analysis": "curvature_comb", "cleared": true}));
+        return reply(cmd, CurvatureCombReply::Cleared(AnalysisCleared { analysis: "curvature_comb".into(), cleared: true, param_warnings: Vec::new() }));
     }
     let add = bool_(p, "add").unwrap_or(false);
     let shown = if add { s.comb.clone() } else { None };
@@ -209,26 +227,30 @@ fn curvature_comb(s: &mut Session, p: &Value) -> Result<Value> {
     let auto = if kmax > 1e-12 && !bounds.is_empty() && diag.is_finite() { 0.2 * diag / kmax } else { 1.0 };
     let scale = fixed_scale.unwrap_or(auto * length);
     let mut drawn = Vec::with_capacity(combs.len());
-    let out: Vec<Value> = combs
+    let out: Vec<Comb> = combs
         .iter()
         .map(|(id, teeth)| {
             let lines: Vec<[Vec3; 2]> = teeth.iter().map(|(q, k, n)| [*q, *q - *n * (k * scale)]).collect();
             let kmax_c = teeth.iter().map(|t| t.1.abs()).fold(0.0_f64, f64::max);
             let reply: Vec<[[f64; 3]; 2]> = lines.iter().map(|[a, b]| [(*a).into(), (*b).into()]).collect();
-            let value = json!({
-                "curve": id,
-                "envelope": reply.iter().map(|l| l[1]).collect::<Vec<_>>(),
-                "teeth": reply,
-                "max_curvature": kmax_c,
-                "min_radius": if kmax_c > 1e-12 { Value::from(1.0 / kmax_c) } else { Value::Null },
-            });
+            let comb = Comb {
+                curve: id.clone(),
+                envelope: reply.iter().map(|l| l[1]).collect(),
+                teeth: reply,
+                max_curvature: kmax_c,
+                min_radius: (kmax_c > 1e-12).then(|| 1.0 / kmax_c),
+            };
             drawn.push(lines);
-            value
+            comb
         })
         .collect();
     s.analyses_off(Some("inspect.curvature_comb"));
     s.comb = Some(CombView { picks: kept, density, length, fixed_scale, scale, teeth: drawn });
-    Ok(json!({"combs": out, "scale": scale}))
+    reply(cmd, CurvatureCombReply::Combs(CurvatureCombs { combs: out, scale, param_warnings: Vec::new() }))
+}
+
+fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 /// Smallest radius along teeth: (radius, where), or None when straight.
@@ -342,20 +364,12 @@ fn minimum_radius(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     let overall = items.iter().filter_map(|i| i.1).min_by(|a, b| a.0.total_cmp(&b.0));
-    let fmt = |x: Option<(f64, Vec3)>| match x {
-        Some((r, at)) => json!({"min_radius": r, "at": [at.x, at.y, at.z]}),
-        None => json!({"min_radius": null}),
-    };
-    Ok(json!({
-        "items": items.iter().map(|(id, x)| { let mut v = fmt(*x); v["item"] = json!(id); v }).collect::<Vec<_>>(),
-        "min_radius": overall.map(|o| o.0),
-        "at": overall.map(|o| [o.1.x, o.1.y, o.1.z]),
-    }))
+    let items = items.into_iter().map(|(item, x)| RadiusItem { item, min_radius: x.map(|x| x.0), at: x.map(|x| x.1.into()) }).collect();
+    reply(cmd, MinimumRadii { items, min_radius: overall.map(|o| o.0), at: overall.map(|o| o.1.into()), param_warnings: Vec::new() })
 }
 
 /// Isocurves each way when the call does not say (`count`), and most faces one call may pick.
 const DEFAULT_ISO_COUNT: usize = 8;
-const MAX_ISO_FACES: usize = 100;
 
 /// The visible model body whose face is nearest `at` (within its pick tolerance), and that face.
 fn iso_face_at<'a>(s: &Session, st: &'a solidcraft_doc::ModelState, at: Vec3) -> Option<(&'a solidcraft_doc::ModelBody, usize)> {
@@ -378,7 +392,7 @@ fn isocurves(s: &mut Session, p: &Value) -> Result<Value> {
     if bool_(p, "clear").unwrap_or(false) {
         s.isocurves.clear();
         s.revision += 1;
-        return Ok(json!({"analysis": "isocurve", "cleared": true}));
+        return reply(cmd, IsocurveReply::Cleared(AnalysisCleared { analysis: "isocurve".into(), cleared: true, param_warnings: Vec::new() }));
     }
     let max = crate::kernel::MAX_ISO_COUNT;
     let count = match p.get("count") {
@@ -400,7 +414,7 @@ fn isocurves(s: &mut Session, p: &Value) -> Result<Value> {
         let (body, face) = iso_face_at(s, &st, at).ok_or_else(|| bad(cmd, "no face there"))?;
         let lines = body.iso_lines(face, count)?;
         let along_u = lines.iter().filter(|l| l.along_u).count();
-        shown.push(json!({"body": body.name, "face": face, "count": count, "u_curves": along_u, "v_curves": lines.len() - along_u}));
+        shown.push(IsoFace { body: body.name.clone(), face, count, u_curves: along_u, v_curves: lines.len() - along_u });
         curves.extend(lines.iter().map(|l| l.points.iter().map(|q| [q.x, q.y, q.z]).collect::<Vec<_>>()));
         picks.push((face, crate::IsoPick { body: body.name.clone(), at, count }));
     }
@@ -417,7 +431,7 @@ fn isocurves(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.isocurves.extend(picks.into_iter().map(|(_, k)| k));
     s.analyses_off(Some("inspect.isocurve"));
-    Ok(json!({"curves": curves, "faces": shown}))
+    reply(cmd, IsocurveReply::Curves(Isocurves { curves, faces: shown, param_warnings: Vec::new() }))
 }
 
 impl Session {
@@ -453,38 +467,36 @@ fn center_of_mass(s: &mut Session, p: &Value) -> Result<Value> {
     // volume (a surface body, an open mesh) or that cannot be measured has no centre of mass.
     for b in st.bodies.iter().filter(|b| names.is_empty() || names.contains(&b.name)) {
         if !super::inspect::encloses_volume(&b.body) {
-            skipped.push(json!({"body": b.name, "reason": "it encloses no volume"}));
+            skipped.push(SkippedBody { body: b.name.clone(), reason: "it encloses no volume".into() });
             continue;
         }
         let m = match b.measure() {
             Ok(m) if m.volume.is_finite() && m.centroid.is_finite() => m,
             Ok(_) => {
-                skipped.push(json!({"body": b.name, "reason": "its measure is not finite"}));
+                skipped.push(SkippedBody { body: b.name.clone(), reason: "its measure is not finite".into() });
                 continue;
             }
             Err(e) => {
-                skipped.push(json!({"body": b.name, "reason": e.to_string()}));
+                skipped.push(SkippedBody { body: b.name.clone(), reason: e.to_string() });
                 continue;
             }
         };
         vol += m.volume;
         moment += m.centroid * m.volume;
-        out.push(json!({"body": b.name, "center": [m.centroid.x, m.centroid.y, m.centroid.z], "volume": m.volume}));
+        out.push(BodyCenter { body: b.name.clone(), center: m.centroid.into(), volume: m.volume });
     }
     if out.is_empty() {
         return Err(bad(
             cmd,
             match skipped.first() {
-                Some(why) => {
-                    format!("no body to measure: `{}`: {}", why["body"].as_str().unwrap_or_default(), why["reason"].as_str().unwrap_or_default())
-                }
+                Some(why) => format!("no body to measure: `{}`: {}", why.body, why.reason),
                 None if names.is_empty() => "there are no bodies".to_string(),
                 None => "no such bodies".to_string(),
             },
         ));
     }
     let c = if vol.abs() > 1e-300 { moment / vol } else { Vec3::ZERO };
-    Ok(json!({"center": [c.x, c.y, c.z], "volume": vol, "bodies": out, "skipped": skipped}))
+    reply(cmd, CentersOfMass { center: c.into(), volume: vol, bodies: out, skipped, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]

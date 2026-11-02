@@ -341,6 +341,15 @@ and a fresh CI run:
    PRs in groups by area, so PRs that touch the same code meet a conflict at most once.
 4. Reference the issue (`Fixes #12`). In the PR, say what you tested and how. For geometry work, include the measured numbers (and
    the expected ones).
+5. Write the PR title and first sentence for someone who hasn't seen your chat, the issue or the
+   code. Maintainers pick what to review from the title, and it becomes the commit on `main`. Say
+   which part of the app changes and what a user now sees or can do, and name things rather than
+   leaning on "there", "it" or "this".
+   - Unclear: `Send to Slicer: pick one print face per body there, and show print faces only while it is open`
+   - Clear: `3D printing: choose the face each body rests on in the Send to Slicer window, not the face menu`
+
+   Use plain, literal English in PR text: one idea per sentence, active voice, and one word for one
+   thing. This helps everyone, including readers whose first language isn't English.
 
 Commenting `/claim` assigns you, adds the `in progress` label, and replies with its automatic cleanup
 deadline. It frees a claim with no linked PR after 72 hours, or a claim with a PR after 14 days
@@ -348,6 +357,13 @@ without pushes. These automatic cleanup deadlines are separate from the daily pr
 72-hour takeover policy above. A draft PR that references the issue claims it the same way.
 `/unclaim` releases the bot claim early (only you or a maintainer can). Issues a maintainer has
 taken are never freed automatically.
+
+**A PR has to explain itself.** Start the description with what it is, in plain words someone new
+to the project would understand: what it does and who it's for. Don't assume anyone knows the name
+of your tool, project or feature. If there's anything to look at, show it in the description: a
+picture or video has to be visible there without opening the changed files. "The GIF is the change"
+doesn't count. A PR that doesn't do this waits until it does. For a PR that adds to
+`docs/showcase.md` or `docs/screenshots/`, the Picture check fails until the description shows one.
 
 Help reviewers see what the words mean. For observable CAD, UI or model behavior, please
 include actual descriptive screenshots or a short recording in the issue or PR. This evidence

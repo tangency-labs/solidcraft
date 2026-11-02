@@ -15,6 +15,8 @@ fn harness() -> Harness {
     let mut h = Harness::new();
     h.app.home.open = false;
     h.app.ui.show_browser = true;
+    // The tests read the Joints folders inside placements, which start closed (#9274).
+    h.app.preferences.browser_components_open = true;
     crate::test_support::grounded_boxes(&[("A", 0), ("B", 30), ("C", 60)], |id, p| h.app.run(id, p).unwrap());
     h.app
         .run("joint.create", json!({"type": "revolute", "name": "Hinge", "a": {"occurrence": "A:1", "face": [10, 10, 10]}, "b": {"occurrence": "B:1", "face": [40, 10, 0]}}))

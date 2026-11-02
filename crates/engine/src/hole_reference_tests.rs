@@ -106,6 +106,32 @@ fn a_hole_follows_its_edges_when_the_box_grows() {
 }
 
 #[test]
+fn a_referenced_hole_can_be_patterned_and_mirrored() {
+    // #8055, #6754: a pattern or mirror places its copies from the hole's own spot, found again
+    // after the hole has been drilled. Through the plate, its centre is then in the opening, with
+    // no face under it.
+    let mut s = plate();
+    let mut through = referenced(json!([{"edge": [0, 20, 10], "distance": 10}, {"edge": [25, 0, 10], "distance": 12}]));
+    through.as_object_mut().unwrap().remove("depth");
+    run(&mut s, "solid.hole", through);
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"features": ["H"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 12, "dir2": [0, 1, 0], "count2": 2, "spacing2": 12, "name": "P"}),
+    );
+    for (x, y) in [(10.0, 12.0), (22.0, 12.0), (10.0, 24.0), (22.0, 24.0)] {
+        bore_at(&s, x, y, 10.0);
+    }
+    run(&mut s, "solid.mirror", json!({"features": ["H"], "plane": {"origin": [25, 0, 0], "normal": [1, 0, 0]}, "name": "M"}));
+    bore_at(&s, 40.0, 12.0, 10.0);
+    // The copies still follow the hole's edges.
+    run(&mut s, "parameters.change", json!({"name": "len", "expression": "60 mm"}));
+    let p = s.doc.find_feature("P").unwrap().id;
+    assert!(s.model.result(p).is_some_and(|r| r.error.is_none()), "{:?}", s.model.result(p).map(|r| &r.error));
+    bore_at(&s, 22.0, 24.0, 10.0);
+}
+
+#[test]
 fn a_bad_reference_is_refused() {
     let mut s = plate();
     run(&mut s, "solid.hole", json!({"position": [25, 20, 10], "diameter": 10, "name": "Bore"}));

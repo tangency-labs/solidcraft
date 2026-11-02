@@ -1326,6 +1326,9 @@ preference_settings! {
     /// Each tree row's eye between its fold arrow and its radio, as before #8718, instead of in a
     /// column at the rows' right end. Off by default.
     browser_eye_left: bool = false, PAGE_LAYOUT => check_id("prefs.browser_eye_left");
+    /// Every component placement in the browser starts open, as before #9274, instead of closed
+    /// until the user opens it. Off by default.
+    browser_components_open: bool = false, PAGE_LAYOUT => check_id("prefs.browser_components_open");
     /// The wheel zooms toward the point under the cursor (else toward the view's centre).
     zoom_to_cursor: bool = true, PAGE_NAVIGATION => check("Zoom to the cursor", "The wheel zooms toward the point under the cursor (off: toward the view's center)");
     /// Speed multiplier for wheel zoom, independent of the 3D mouse.
@@ -1357,8 +1360,9 @@ preference_settings! {
     /// over the view (the default), the dialog, or nothing (#7717).
     stand_up_unknown: StandUpUnknown = StandUpUnknown::default(), PAGE_DESIGN;
     /// Extrude: with a profile picked, a face, vertex or parallel plane picked off its plane
-    /// switches the extent to To Object (off: picks only add profiles, as before).
-    extrude_auto_to_object: bool = false, PAGE_TOOLS => check("Extrude to a picked target", "In Extrude, with a profile picked, picking a face, vertex or parallel plane off its plane switches the extent to To Object");
+    /// switches the extent to To Object (off: picks only add profiles, as before). A click into the
+    /// Profiles box makes the next picks profiles again.
+    extrude_auto_to_object: bool = true, PAGE_TOOLS => check("Extrude to a picked target", "In Extrude, with a profile picked, picking a face, vertex or parallel plane off its plane switches the extent to To Object");
     /// Extrude turns the view to isometric each time it opens, so the depth can be seen (#9176).
     /// Off (the default): the view stays as it is.
     extrude_view_isometric: bool = false, PAGE_TOOLS => check_id("prefs.extrude_view_isometric");
@@ -5856,12 +5860,13 @@ mod tests {
             ("view_confirm_corner", json!(true), PAGE_LAYOUT),
             ("status_bar", json!(true), PAGE_LAYOUT),
             ("browser_eye_left", json!(true), PAGE_LAYOUT),
+            ("browser_components_open", json!(true), PAGE_LAYOUT),
             ("quick_measure", json!(true), PAGE_GRAPHICS),
             ("origin_plane_names", json!("top_front_right"), PAGE_DESIGN),
             ("direct_interaction", json!(true), PAGE_TOOLS),
             ("hole_snaps", json!(true), PAGE_TOOLS),
             ("hole_moves", json!(true), PAGE_TOOLS),
-            ("extrude_auto_to_object", json!(true), PAGE_TOOLS),
+            ("extrude_auto_to_object", json!(false), PAGE_TOOLS),
             ("extrude_view_isometric", json!(true), PAGE_TOOLS),
             ("extrude_view_return", json!(true), PAGE_TOOLS),
             ("auto_operation", json!(false), PAGE_TOOLS),

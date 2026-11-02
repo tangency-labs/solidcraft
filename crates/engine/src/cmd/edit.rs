@@ -18,8 +18,20 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ASSISTANT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::AssistantResult>)
         .params("Show or hide Assistant in the app. Headless calls are refused without changing the design"),
-    CommandSpec::new("edit.undo", "Undo", undo).icon("undo").key("Ctrl+Z").noundo().doc_only(),
-    CommandSpec::new("edit.redo", "Redo", redo).icon("redo").key("Ctrl+Y").noundo().doc_only(),
+    CommandSpec::new("edit.undo", "Undo", crate::checked!("edit.undo", undo))
+        .icon("undo")
+        .key("Ctrl+Z")
+        .noundo()
+        .doc_only()
+        .contract(&UNDO_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::UndoResult>),
+    CommandSpec::new("edit.redo", "Redo", crate::checked!("edit.redo", redo))
+        .icon("redo")
+        .key("Ctrl+Y")
+        .noundo()
+        .doc_only()
+        .contract(&REDO_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::RedoResult>),
     CommandSpec::new("edit.repeat", "Repeat Last Command", crate::checked!("edit.repeat", repeat))
         .icon("redo")
         .key("Shift+R")
@@ -28,13 +40,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&REPEAT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::RepeatResult>)
         .params("Starts the last tool or dialog started in the app again, with its defaults (a toolbar click, not a replay of its values). Only the app has a tool to start: called here it is refused, and changes nothing"),
-    CommandSpec::new("edit.checkpoint", "Checkpoint", checkpoint).icon("checkpoint")
+    CommandSpec::new("edit.checkpoint", "Checkpoint", crate::checked!("edit.checkpoint", checkpoint)).icon("checkpoint")
         .noundo()
         .doc_only()
+        .contract(&CHECKPOINT_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::CheckpointResult>)
         .params("→ {checkpoint: id}: remember the design, active sketch and undo history (restore with edit.restore_checkpoint; the last 16 are kept, the oldest dropped first)"),
-    CommandSpec::new("edit.restore_checkpoint", "Restore Checkpoint", restore_checkpoint).icon("restore")
+    CommandSpec::new("edit.restore_checkpoint", "Restore Checkpoint", crate::checked!("edit.restore_checkpoint", restore_checkpoint)).icon("restore")
         .noundo()
         .doc_only()
+        .contract(&RESTORE_CHECKPOINT_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::CheckpointResult>)
         .params("checkpoint: id; forget?: bool (true = drop it without going back). Goes back to it, undo history included. Restoring or forgetting uses it and every later checkpoint up: take a new one to go back again"),
     CommandSpec::new("timeline.compute_all", "Compute All", compute_all).at("SOLID", "MODIFY").icon("compute").noundo(),
     CommandSpec::new("timeline.play", "Play History", crate::checked!("timeline.play", play))
@@ -111,12 +127,22 @@ fn play(_s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(crate::schema::edit::TimelinePlayResult { action: request.action }).map_err(|e| EngineError::Other(e.to_string()))
 }
 
+const UNDO_CONTRACT: crate::schema::TypedContract<crate::schema::edit::UndoParams> = crate::schema::TypedContract::new();
+const REDO_CONTRACT: crate::schema::TypedContract<crate::schema::edit::RedoParams> = crate::schema::TypedContract::new();
+const CHECKPOINT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::CheckpointParams> = crate::schema::TypedContract::new();
+const RESTORE_CHECKPOINT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::RestoreCheckpointParams> = crate::schema::TypedContract::new();
+
+/// A reply built from its schema's type, so the two can't drift apart.
+fn reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(r).map_err(|e| bad(cmd, e.to_string()))
+}
+
 fn undo(s: &mut Session, _p: &Value) -> Result<Value> {
     let Some(prev) = s.undo.pop() else { return Err(EngineError::Other("nothing to undo".into())) };
     let now = go_to(s, prev);
     let label = now.label.clone();
     s.redo.push(now);
-    Ok(json!({"undone": label}))
+    reply("edit.undo", crate::schema::edit::UndoResult { undone: label, param_warnings: Vec::new() })
 }
 
 fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -124,7 +150,7 @@ fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
     let now = go_to(s, next);
     let label = now.label.clone();
     s.undo.push(now);
-    Ok(json!({"redone": label}))
+    reply("edit.redo", crate::schema::edit::RedoResult { redone: label, param_warnings: Vec::new() })
 }
 
 const ASSISTANT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::AssistantParams> = crate::schema::TypedContract::new();
@@ -172,18 +198,21 @@ fn go_to(s: &mut Session, snap: Snapshot) -> Snapshot {
 }
 
 fn checkpoint(s: &mut Session, _p: &Value) -> Result<Value> {
-    Ok(json!({"checkpoint": s.checkpoint()}))
+    let checkpoint = s.checkpoint();
+    reply("edit.checkpoint", crate::schema::edit::CheckpointResult { checkpoint, restored: None, param_warnings: Vec::new() })
 }
 
 fn restore_checkpoint(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "edit.restore_checkpoint";
     let id = p.get("checkpoint").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "`checkpoint` must be an id from edit.checkpoint"))?;
+    let done =
+        |restored: bool| reply(cmd, crate::schema::edit::CheckpointResult { checkpoint: id, restored: Some(restored), param_warnings: Vec::new() });
     if bool_(p, "forget") == Some(true) {
         s.drop_checkpoint(id);
-        return Ok(json!({"checkpoint": id, "restored": false}));
+        return done(false);
     }
     s.restore_checkpoint(id)?;
-    Ok(json!({"checkpoint": id, "restored": true}))
+    done(true)
 }
 
 fn compute_all(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -1779,6 +1808,12 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         *sketch = Some(*before);
         *profiles = picked.clone();
+    }
+    // An old design's Join To Object keeps the body it runs to apart through an edit (#8151).
+    if let (FeatureKind::Extrude { extent: before, .. }, FeatureKind::Extrude { extent: after, .. }) = (&old.kind, &mut new.kind)
+        && after.to.is_some()
+    {
+        after.to_body_apart = before.to_body_apart;
     }
     // A boundary surface's loop of sketch curves and its curve network are one command's two
     // forms: an edit may turn one into the other.
