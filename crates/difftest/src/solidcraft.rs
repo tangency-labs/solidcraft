@@ -1640,6 +1640,7 @@ fn make_missing_nurbs(k: &Kernel, b: &mut Brep) -> Result<(), SolidError> {
             SurfaceKind::SurfOfExtrusion(s) => s.base().gw_nurb().is_none(),
             SurfaceKind::BSpline(_)
             | SurfaceKind::ProceduralBlend(_)
+            | SurfaceKind::BallPatch(_)
             | SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
             | SurfaceKind::OffsetSurface(_)

@@ -368,6 +368,7 @@ fn is_b_spline_kind(surface: &Surface) -> bool {
             | SurfaceKind::Sphere(_)
             | SurfaceKind::Torus(_)
             | SurfaceKind::ProceduralBlend(_)
+            | SurfaceKind::BallPatch(_)
     )
 }
 
@@ -2241,6 +2242,8 @@ fn nurb_of(k: &Kernel, surface: &Surface) -> Result<crate::nurbs::srf_basic::Sur
         SurfaceKind::Torus(s) => s.base().base().gw_nurb().cloned().ok_or_else(missing),
         // (the fork's SmProceduralBlend: its net's NURB)
         SurfaceKind::ProceduralBlend(pb) => pb.net().gw_nurb().cloned().ok_or_else(missing),
+        // (the fork's SmBallPatch is an SmBSplineSurface too: its net)
+        SurfaceKind::BallPatch(pb) => pb.net().gw_nurb().cloned().ok_or_else(missing),
         _ => Err(missing()),
     }
 }

@@ -1040,6 +1040,7 @@ fn is_singularity(
         | SurfaceKind::Torus(_)
         | SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
+        | SurfaceKind::BallPatch(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::SurfOfExtrusion(_)

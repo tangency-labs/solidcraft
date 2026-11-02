@@ -2284,6 +2284,7 @@ pub fn move_seam_notified<O: LoopObject>(
             let net = |half: Surface| match half.into_kind() {
                 SurfaceKind::BSpline(b) => Some(b),
                 SurfaceKind::ProceduralBlend(pb) => Some(pb.net),
+                SurfaceKind::BallPatch(bp) => Some(bp.net),
                 _ => None,
             };
             let (Some(left), Some(right)) = (net(left), net(right)) else {

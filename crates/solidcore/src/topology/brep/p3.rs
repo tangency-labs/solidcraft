@@ -4073,6 +4073,8 @@ pub(crate) fn with_nurb<'a>(k: &Kernel, s: &'a Surface) -> Result<Option<Cow<'a,
         SurfaceKind::BSpline(x) => Some(Cow::Borrowed(x)),
         // (the fork's SmProceduralBlend: `new SmBSplineSurface(*pBSS)` slices it to its net)
         SurfaceKind::ProceduralBlend(x) => Some(Cow::Borrowed(x.net())),
+        // (the fork's SmBallPatch is an SmBSplineSurface too: its net)
+        SurfaceKind::BallPatch(x) => Some(Cow::Borrowed(x.net())),
         SurfaceKind::Plane(x) => Some(x.base_for_query()),
         SurfaceKind::SurfOfExtrusion(x) => {
             if x.base().gw_nurb().is_some() {
@@ -4100,6 +4102,8 @@ fn as_bspline_surface(s: &Surface) -> Option<&BSplineSurface> {
         SurfaceKind::Torus(x) => Some(x.base().base()),
         SurfaceKind::Sphere(x) => Some(x.base().base()),
         SurfaceKind::ProceduralBlend(x) => Some(x.net()),
+        // (the fork's SmBallPatch is an SmBSplineSurface too: its net)
+        SurfaceKind::BallPatch(x) => Some(x.net()),
         _ => None,
     }
 }

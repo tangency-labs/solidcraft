@@ -1558,6 +1558,7 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
         SurfaceKind::Torus(_)
         | SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
+        | SurfaceKind::BallPatch(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)

@@ -9,6 +9,7 @@
 
 pub mod b_spline_volume;
 pub mod b_spline_volume_n_lib;
+pub mod ball_patch;
 pub mod bend_volume;
 pub mod cone;
 pub mod curve_bounded_surface;

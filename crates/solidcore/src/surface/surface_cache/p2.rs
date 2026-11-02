@@ -560,6 +560,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             | SurfaceKind::Torus(_)
             | SurfaceKind::BSpline(_)
             | SurfaceKind::ProceduralBlend(_)
+            | SurfaceKind::BallPatch(_)
             | SurfaceKind::Plane(_)
             | SurfaceKind::SurfOfRevolution(_)
             | SurfaceKind::SurfOfExtrusion(_) => None,
@@ -998,6 +999,10 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                     SurfaceKind::BSpline(b) => b.copy_sub_patch(&node_uv),
                     SurfaceKind::ProceduralBlend(pb) => {
                         let b = pb.net();
+                        b.copy_sub_patch(&node_uv)
+                    }
+                    SurfaceKind::BallPatch(bp) => {
+                        let b = bp.net();
                         b.copy_sub_patch(&node_uv)
                     }
                     SurfaceKind::Plane(p) => p.base().copy_sub_patch(&node_uv),

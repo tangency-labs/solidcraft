@@ -148,8 +148,9 @@ fn corner_faces(b: &Brep, v: &[Point3; 3]) -> Vec<FaceId> {
     out
 }
 
-/// The corner's face of `b`: one face with the three vertices `v`, a rational B-spline
-/// (never the analytic sphere) on the sphere about `c` of radius `rad`, its normal out
+/// The corner's face of `b`: one face with the three vertices `v`, a ball patch (a
+/// rational B-spline carrying its sphere, never the analytic sphere) on the sphere about
+/// `c` of radius `rad`, its normal out
 /// of the body (away from `c` convex, towards it concave), its edges on the sphere
 /// within `edge_tol`. Returns the worst surface, edge and normal deviations.
 fn ball_face(
@@ -164,10 +165,13 @@ fn ball_face(
     assert_eq!(faces.len(), 1, "one corner face");
     let f = faces[0];
     let s = face2::surface(b, f).unwrap().unwrap();
-    let SurfaceKind::BSpline(net) = s.kind() else {
-        panic!("the Ball's face is a B-spline patch, got {:?}", s.kind());
+    // the fork's f8e6709: an SmBallPatch carrying the corner ball's sphere
+    let SurfaceKind::BallPatch(patch) = s.kind() else {
+        panic!("the Ball's face is a ball patch, got {:?}", s.kind());
     };
-    assert!(net.is_rational());
+    assert!(patch.net().is_rational());
+    assert!(patch.centre().distance(c) <= 1e-12, "{:?}", patch.centre());
+    assert!((patch.radius() - rad).abs() <= 1e-12, "{}", patch.radius());
     let dom = s.natural_uv_domain_with_nurb(k).unwrap();
     let (mut surf_off, mut normal_off, mut edge_off) = (0.0f64, 0.0f64, 0.0f64);
     for i in 0..=16 {

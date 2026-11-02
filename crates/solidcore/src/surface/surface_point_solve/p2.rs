@@ -1225,6 +1225,10 @@ pub(crate) fn with_out_of_bounds_enabled(surface: &Surface) -> Result<Option<Sur
             let b = pb.net();
             b.is_out_of_bounds_enabled()
         }
+        SurfaceKind::BallPatch(bp) => {
+            let b = bp.net();
+            b.is_out_of_bounds_enabled()
+        }
         SurfaceKind::Plane(p) => p.base().is_out_of_bounds_enabled(),
         SurfaceKind::Cone(s) => s.rev().base().is_out_of_bounds_enabled(),
         SurfaceKind::Sphere(s) => s.base().base().is_out_of_bounds_enabled(),
@@ -1246,6 +1250,10 @@ pub(crate) fn with_out_of_bounds_enabled(surface: &Surface) -> Result<Option<Sur
         SurfaceKind::BSpline(b) => *b.out_of_bounds_enabled_mut() = true,
         SurfaceKind::ProceduralBlend(pb) => {
             let b = pb.net_mut();
+            *b.out_of_bounds_enabled_mut() = true;
+        }
+        SurfaceKind::BallPatch(bp) => {
+            let b = bp.net_mut();
             *b.out_of_bounds_enabled_mut() = true;
         }
         SurfaceKind::Plane(p) => *p.out_of_bounds_enabled_mut() = true,
@@ -1301,6 +1309,10 @@ fn out_of_bounds_base(surface: &Surface) -> Option<&BSplineSurface> {
         SurfaceKind::BSpline(b) => Some(b),
         SurfaceKind::ProceduralBlend(pb) => {
             let b = pb.net();
+            Some(b)
+        }
+        SurfaceKind::BallPatch(bp) => {
+            let b = bp.net();
             Some(b)
         }
         SurfaceKind::Plane(p) => Some(p.base()),

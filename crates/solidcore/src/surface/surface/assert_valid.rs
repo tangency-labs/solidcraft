@@ -418,9 +418,9 @@ impl Surface {
             face,
         };
         match self.kind() {
-            SurfaceKind::BSpline(_) | SurfaceKind::ProceduralBlend(_) => {
-                b_spline_surface_assert_valid(k, self, &mut r)
-            }
+            SurfaceKind::BSpline(_)
+            | SurfaceKind::ProceduralBlend(_)
+            | SurfaceKind::BallPatch(_) => b_spline_surface_assert_valid(k, self, &mut r),
             SurfaceKind::Plane(_) => plane_assert_valid(k, self, &mut r),
             SurfaceKind::Cone(c) if c.is_cylinder_class() => cylinder_assert_valid(k, self, &mut r),
             SurfaceKind::Cone(_) => cone_assert_valid(k, self, &mut r),
@@ -718,6 +718,8 @@ fn b_spline_part(s: &Surface) -> Option<&BSplineSurface> {
         SurfaceKind::SurfOfExtrusion(e) => Some(e.base()),
         // (the fork's SmProceduralBlend inherits SmBSplineSurface::AssertValid: its net)
         SurfaceKind::ProceduralBlend(pb) => Some(pb.net()),
+        // (the fork's SmBallPatch inherits SmBSplineSurface::AssertValid: its net)
+        SurfaceKind::BallPatch(bp) => Some(bp.net()),
         _ => None,
     }
 }

@@ -61,6 +61,10 @@ fn bss<'a>(k: &Kernel, surface: &'a Surface) -> Result<Cow<'a, BSplineSurface>> 
             let s = pb.net();
             Ok(Cow::Borrowed(s))
         }
+        SurfaceKind::BallPatch(bp) => {
+            let s = bp.net();
+            Ok(Cow::Borrowed(s))
+        }
         SurfaceKind::Plane(p) => Ok(p.base_for_query()),
         SurfaceKind::Cone(_) | SurfaceKind::Sphere(_) | SurfaceKind::Torus(_) => {
             // (unreachable: iso curves of these kinds dispatch to the kinds' own

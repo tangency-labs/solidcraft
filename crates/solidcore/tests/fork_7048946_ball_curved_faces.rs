@@ -130,8 +130,10 @@ fn sphere_offs(k: &Kernel, b: &Brep, centres: &[Point3], rad: f64) -> Vec<f64> {
     let mut best = vec![f64::INFINITY; centres.len()];
     for f in get_faces(b).unwrap() {
         let s = face2::surface(b, f).unwrap().unwrap();
-        let SurfaceKind::BSpline(net) = s.kind() else {
-            continue;
+        let net = match s.kind() {
+            SurfaceKind::BSpline(net) => net,
+            SurfaceKind::BallPatch(patch) => patch.net(),
+            _ => continue,
         };
         if !net.is_rational() {
             continue;

@@ -1537,6 +1537,8 @@ fn expand_boundary_span(
         // (the fork's SmProceduralBlend is an SmBSplineSurface: its net's span, the
         // definition and its map untouched, as ExpandBoundarySpan is not overridden)
         SurfaceKind::ProceduralBlend(pb) => pb.net_mut(),
+        // (the fork's SmBallPatch is an SmBSplineSurface too: its net)
+        SurfaceKind::BallPatch(pb) => pb.net_mut(),
         _ => return Err(SolidError::null_pointer(OP)),
     };
     base.expand_boundary_span(param, dir)

@@ -33,12 +33,10 @@
 //! | `BallPoly`, `choose`, `times`, `sum` (private) | `SmBallPoly`, `sm_Choose`, `sm_BallTimes`, `sm_BallSum` |
 //! | `MakeBallTopology`           | `FilletCorner::make_ball_topology` (`fillet_corner::topology`) |
 //!
-//! Deviations: the corner's face is the fork's rational patch as a plain
-//! `SurfaceKind::BSpline` (the same net, so the same points). The fork's f8e6709 wraps it
-//! in `SmBallPatch`, which carries the sphere as its definition (its own type, exact
-//! offset and database IO); that class is not ported here, but `SmBallPatch::Create`'s
-//! refusals are checked before the face takes the net. The patch and its loop are kept in
-//! [`BallCorner`] from the edge geometry until the patch takes them. The fork's
+//! Deviations: the face is, as the fork's f8e6709 makes it, an
+//! [`crate::surface::ball_patch::BallPatch`] (`SmBallPatch`): the rational patch carrying
+//! its sphere as its definition (its own type, exact offset and database IO). The patch
+//! and its loop are kept in [`BallCorner`] from the edge geometry until the patch takes them. The fork's
 //! `SmFilletExecutive::IsSetBackVertex` is the caller's `set_back` argument. Opt-in:
 //! `Kernel::fixes.fillet_blend_corner` (WR-697). No recursion; the certified root's Newton
 //! loop is bounded at 50 steps, as the fork's.
@@ -61,6 +59,7 @@ use crate::nurbs::b_spline_surface::p1::{BSplineSurfaceForm, CanonicalSurfaceDat
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
+use crate::surface::ball_patch::BallPatch;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
 use crate::topology::edgeuse::p1 as eu1;
@@ -957,37 +956,6 @@ fn ball_triangle_patch(
     Ok((patch, from, to))
 }
 
-/// `SmBallPatch::Create`'s refusals (the fork's f8e6709): a sphere's centre is finite and
-/// its radius finite and positive, and a patch on it is rational with positive weights.
-/// The face takes the net as it is (module docs).
-fn check_ball_patch(net: &BSplineSurface, centre: Point3, radius: f64) -> Result<()> {
-    let invalid = |reason| SolidError::invalid_input(OP_BUILD, reason);
-    if !radius.is_finite()
-        || radius.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater)
-        || !centre.x.is_finite()
-        || !centre.y.is_finite()
-        || !centre.z.is_finite()
-    {
-        return Err(invalid(
-            "SmBallPatch: a sphere's centre is finite and its radius finite and positive",
-        ));
-    }
-    let cpn = net.control_point_net()?;
-    if !net.is_rational() || cpn.weights.len() != cpn.points.len() {
-        return Err(invalid("SmBallPatch: a patch on a sphere is rational"));
-    }
-    if cpn
-        .weights
-        .iter()
-        .any(|w| w.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater))
-    {
-        return Err(invalid(
-            "SmBallPatch: a patch on a sphere has positive weights",
-        ));
-    }
-    Ok(())
-}
-
 /// `SmBlendCorner::BuildBallSurface` (the fork's 79d4763, a6243fa, f8e6709; run by
 /// `CalcCornerEdgeGeom` on a Ball before the edges' own kinds compute their curves): the
 /// corner's face, one rational patch on the ball's sphere with the pole at contact 0 and
@@ -1049,9 +1017,8 @@ pub fn ball_corner_edge_geom(
         let at = patch.evaluate_point(k, mid)?;
         let normal = patch.evaluate_normal(k, mid, Side::Left, Side::Left)?;
         if (normal.dot(at - centre) < 0.0) == adds_material {
-            // the fork's SmBallPatch::Create (its refusals; the definition is not kept)
-            check_ball_patch(&net, centre, radius)?;
-            chosen = Some(patch);
+            // the face's surface carries its sphere as its definition (its offset is exact)
+            chosen = Some(Surface::from(BallPatch::create(&net, centre, radius)?));
         }
     }
     let surface = chosen.ok_or_else(nul)?;

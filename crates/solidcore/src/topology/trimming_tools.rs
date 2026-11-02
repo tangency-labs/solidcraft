@@ -2315,6 +2315,10 @@ pub fn is_loop_uv_gap_within_tolerance(
             let b = pb.net();
             Cow::Borrowed(b)
         }
+        SurfaceKind::BallPatch(bp) => {
+            let b = bp.net();
+            Cow::Borrowed(b)
+        }
         SurfaceKind::Plane(p) => match p.base_with_nurb() {
             Ok(b) => b,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),

@@ -692,6 +692,10 @@ fn with_out_of_bounds_enabled(surface: &Surface) -> Result<Option<Surface>> {
             let s = pb.net();
             s.is_out_of_bounds_enabled()
         }
+        SurfaceKind::BallPatch(bp) => {
+            let s = bp.net();
+            s.is_out_of_bounds_enabled()
+        }
         SurfaceKind::Plane(p) => p.base().is_out_of_bounds_enabled(),
         SurfaceKind::Cone(s) => s.rev().base().is_out_of_bounds_enabled(),
         SurfaceKind::Sphere(s) => s.base().base().is_out_of_bounds_enabled(),
@@ -713,6 +717,10 @@ fn with_out_of_bounds_enabled(surface: &Surface) -> Result<Option<Surface>> {
         SurfaceKind::BSpline(s) => *s.out_of_bounds_enabled_mut() = true,
         SurfaceKind::ProceduralBlend(pb) => {
             let s = pb.net_mut();
+            *s.out_of_bounds_enabled_mut() = true;
+        }
+        SurfaceKind::BallPatch(bp) => {
+            let s = bp.net_mut();
             *s.out_of_bounds_enabled_mut() = true;
         }
         SurfaceKind::Plane(p) => *p.out_of_bounds_enabled_mut() = true,

@@ -227,6 +227,10 @@ fn bspline_of_kind(kind: &SurfaceKind) -> Option<&BSplineSurface> {
             let b = pb.net();
             Some(b)
         }
+        SurfaceKind::BallPatch(bp) => {
+            let b = bp.net();
+            Some(b)
+        }
         SurfaceKind::Plane(p) => Some(p.base()),
         SurfaceKind::Cone(s) => Some(s.rev().base()),
         SurfaceKind::Sphere(s) => Some(s.base().base()),
@@ -328,6 +332,11 @@ pub(super) fn calculate_bounding_box(
         // SmProceduralBlend::CalculateBoundingBox (the virtual one the cache calls on its
         // surface): the net's boxes grown by the bound
         SurfaceKind::ProceduralBlend(pb) => pb.calculate_bounding_box(k, domain, req, surface),
+        // (the fork's SmBallPatch inherits SmBSplineSurface's, run for the patch)
+        SurfaceKind::BallPatch(bp) => {
+            bp.net()
+                .calculate_bounding_box_of(k, domain, req, Some(surface))
+        }
         // inherited from SmBSplineSurface, run for the derived surface (its IsKindOf
         // and virtual EvaluateNormal)
         SurfaceKind::Cone(s) => {
@@ -465,6 +474,7 @@ fn is_singularity(
         | SurfaceKind::Torus(_)
         | SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
+        | SurfaceKind::BallPatch(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::SurfOfExtrusion(_)

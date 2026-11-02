@@ -2690,6 +2690,10 @@ impl FilletCorner {
                         let b = pb.net_mut();
                         *b.out_of_bounds_enabled_mut() = true;
                     }
+                    SurfaceKind::BallPatch(bp) => {
+                        let b = bp.net_mut();
+                        *b.out_of_bounds_enabled_mut() = true;
+                    }
                     SurfaceKind::Plane(p) => *p.out_of_bounds_enabled_mut() = true,
                     SurfaceKind::SurfOfRevolution(r) => {
                         *r.base_mut().out_of_bounds_enabled_mut() = true;

@@ -1252,6 +1252,7 @@ fn dump_state(o: &mut Vec<f64>, s: Option<&Surface>) {
         Some(sp2::SurfaceKind::BSpline(b)) => dump_bss(o, b),
         // an SmProceduralBlend is an SmBSplineSurface: its net
         Some(sp2::SurfaceKind::ProceduralBlend(pb)) => dump_bss(o, pb.net()),
+        Some(sp2::SurfaceKind::BallPatch(bp)) => dump_bss(o, bp.net()),
         // an SmPlane is an SmBSplineSurface: its B-spline part
         Some(sp2::SurfaceKind::Plane(p)) => dump_bss(o, p.base()),
         // an SmSurfOfRevolution is an SmBSplineSurface: its NURB

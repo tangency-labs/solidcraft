@@ -434,6 +434,10 @@ pub fn as_b_spline<'a>(k: &Kernel, s: &'a Surface) -> Result<Option<Cow<'a, BSpl
             let b = pb.net();
             Some(Cow::Borrowed(b))
         }
+        SurfaceKind::BallPatch(bp) => {
+            let b = bp.net();
+            Some(Cow::Borrowed(b))
+        }
         SurfaceKind::Plane(p) => Some(p.base_with_nurb()?),
         SurfaceKind::Cone(c) => Some(Cow::Borrowed(c.rev().base())),
         SurfaceKind::SurfOfRevolution(r) => Some(Cow::Borrowed(r.base())),

@@ -248,6 +248,7 @@ fn is_b_spline_surface(s: &Surface) -> bool {
             | SurfaceKind::Sphere(_)
             | SurfaceKind::Torus(_)
             | SurfaceKind::ProceduralBlend(_)
+            | SurfaceKind::BallPatch(_)
     )
 }
 

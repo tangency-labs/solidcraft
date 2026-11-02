@@ -659,6 +659,10 @@ impl Surface {
                     let s = pb.net();
                     return Ok(Some(Cow::Borrowed(s)));
                 }
+                SurfaceKind::BallPatch(bp) => {
+                    let s = bp.net();
+                    return Ok(Some(Cow::Borrowed(s)));
+                }
                 SurfaceKind::Plane(s) => return Ok(Some(s.base_for_query())),
                 SurfaceKind::SurfOfExtrusion(_) => {
                     // a failed make leaves the surface without NURB (status ignored)

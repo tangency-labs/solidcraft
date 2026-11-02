@@ -1167,6 +1167,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                         let own = match cache.surface().kind() {
                             SurfaceKind::BSpline(b) => b.gw_nurb(),
                             SurfaceKind::ProceduralBlend(pb) => pb.net().gw_nurb(),
+                            SurfaceKind::BallPatch(bp) => bp.net().gw_nurb(),
                             SurfaceKind::CurveBounded(_)
                             | SurfaceKind::Plane(_)
                             | SurfaceKind::Cone(_)

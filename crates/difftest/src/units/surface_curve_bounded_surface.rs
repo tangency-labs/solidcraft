@@ -738,6 +738,7 @@ fn the_cbs(s: &Surface) -> solidcore::Result<&CurveBoundedSurface> {
         SurfaceKind::CurveBounded(c) => Ok(c),
         SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
+        | SurfaceKind::BallPatch(_)
         | SurfaceKind::Plane(_)
         | SurfaceKind::Cone(_)
         | SurfaceKind::Sphere(_)

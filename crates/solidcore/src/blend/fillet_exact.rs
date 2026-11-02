@@ -138,6 +138,8 @@ fn bspline_part<'a>(k: &Kernel, surface: &'a Surface) -> Result<Option<&'a BSpli
         SurfaceKind::Torus(s) => Some(s.base().base()),
         // (the fork's SmProceduralBlend is an SmBSplineSurface: its net)
         SurfaceKind::ProceduralBlend(pb) => Some(pb.net()),
+        // (the fork's SmBallPatch is an SmBSplineSurface too: its net)
+        SurfaceKind::BallPatch(pb) => Some(pb.net()),
         _ => None,
     })
 }

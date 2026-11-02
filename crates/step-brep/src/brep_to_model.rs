@@ -196,43 +196,50 @@ fn surface(
                 magnitude,
             })
         }
-        SurfaceKind::BSpline(bspline) => {
-            let net = bspline
-                .control_point_net()
-                .map_err(|e| err(e.to_string()))?;
-            let v_count = net.v_count.max(1);
-            let points: Vec<Vec<[f64; 3]>> = net
-                .points
-                .chunks(v_count)
-                .map(|row| row.iter().map(|p| point(*p)).collect())
-                .collect();
-            let weights = if net.weights.is_empty() {
-                None
-            } else {
-                Some(net.weights.chunks(v_count).map(<[f64]>::to_vec).collect())
-            };
-            let canonical = bspline.canonical().map_err(|e| err(e.to_string()))?;
-            Ok(ModelSurface::BSpline(step_import::model::BSplineSurface {
-                u_degree: canonical.u_degree as u32,
-                v_degree: canonical.v_degree as u32,
-                points,
-                weights,
-                u_knots: canonical.u_knots,
-                u_mults: canonical
-                    .u_multiplicities
-                    .into_iter()
-                    .map(|m| m as u32)
-                    .collect(),
-                v_knots: canonical.v_knots,
-                v_mults: canonical
-                    .v_multiplicities
-                    .into_iter()
-                    .map(|m| m as u32)
-                    .collect(),
-            }))
-        }
+        SurfaceKind::BSpline(bspline) => bspline_surface(bspline),
+        // the blend corner's ball patch (opt-in): its net, exactly on its sphere
+        SurfaceKind::BallPatch(patch) => bspline_surface(patch.net()),
         other => Err(err(format!("unsupported surface kind {other:?}"))),
     }
+}
+
+/// A B-spline surface's STEP model: its control net, weights and knots.
+fn bspline_surface(
+    bspline: &solidcore::nurbs::b_spline_surface::BSplineSurface,
+) -> Result<ModelSurface, ExportModelError> {
+    let net = bspline
+        .control_point_net()
+        .map_err(|e| err(e.to_string()))?;
+    let v_count = net.v_count.max(1);
+    let points: Vec<Vec<[f64; 3]>> = net
+        .points
+        .chunks(v_count)
+        .map(|row| row.iter().map(|p| point(*p)).collect())
+        .collect();
+    let weights = if net.weights.is_empty() {
+        None
+    } else {
+        Some(net.weights.chunks(v_count).map(<[f64]>::to_vec).collect())
+    };
+    let canonical = bspline.canonical().map_err(|e| err(e.to_string()))?;
+    Ok(ModelSurface::BSpline(step_import::model::BSplineSurface {
+        u_degree: canonical.u_degree as u32,
+        v_degree: canonical.v_degree as u32,
+        points,
+        weights,
+        u_knots: canonical.u_knots,
+        u_mults: canonical
+            .u_multiplicities
+            .into_iter()
+            .map(|m| m as u32)
+            .collect(),
+        v_knots: canonical.v_knots,
+        v_mults: canonical
+            .v_multiplicities
+            .into_iter()
+            .map(|m| m as u32)
+            .collect(),
+    }))
 }
 
 fn edge_start_is_end(brep: &Brep, edge: solidcore::topology::EdgeId) -> bool {
@@ -430,6 +437,7 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
                                         _
                                     )
                                     | solidcore::surface::surface::p2::SurfaceKind::BSpline(_)
+                                    | solidcore::surface::surface::p2::SurfaceKind::BallPatch(_)
                             )
                         );
                         if periodic {

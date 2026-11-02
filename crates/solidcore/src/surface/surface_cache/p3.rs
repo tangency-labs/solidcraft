@@ -716,7 +716,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             // (SM_CAST_PTR(SmBSplineSurface, ..): the fork's SmProceduralBlend halves too)
             let is_bspline = matches!(
                 half.kind(),
-                SurfaceKind::BSpline(_) | SurfaceKind::ProceduralBlend(_)
+                SurfaceKind::BSpline(_)
+                    | SurfaceKind::ProceduralBlend(_)
+                    | SurfaceKind::BallPatch(_)
             );
             self.subdivision_surfaces_mut().push((h, half));
             *slot = is_bspline.then_some(h);
@@ -998,6 +1000,10 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             SurfaceKind::BSpline(b) => Some(std::borrow::Cow::Borrowed(b)),
             SurfaceKind::ProceduralBlend(pb) => {
                 let b = pb.net();
+                Some(std::borrow::Cow::Borrowed(b))
+            }
+            SurfaceKind::BallPatch(bp) => {
+                let b = bp.net();
                 Some(std::borrow::Cow::Borrowed(b))
             }
             SurfaceKind::Plane(p) => Some(p.base_with_nurb()?),

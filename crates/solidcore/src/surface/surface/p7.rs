@@ -841,6 +841,7 @@ impl Surface {
             | SurfaceKind::Torus(_)
             | SurfaceKind::BSpline(_)
             | SurfaceKind::ProceduralBlend(_)
+            | SurfaceKind::BallPatch(_)
             | SurfaceKind::SurfOfRevolution(_)
             | SurfaceKind::SurfOfExtrusion(_)
             | SurfaceKind::Step(_) => base_evaluate_normal(k, self, uv, u_side, v_side),
@@ -881,6 +882,7 @@ impl Surface {
             | SurfaceKind::Torus(_)
             | SurfaceKind::BSpline(_)
             | SurfaceKind::ProceduralBlend(_)
+            | SurfaceKind::BallPatch(_)
             | SurfaceKind::CurveBounded(_)
             | SurfaceKind::SurfOfRevolution(_)
             | SurfaceKind::SurfOfExtrusion(_)
@@ -918,6 +920,9 @@ impl Surface {
             }
             SurfaceKind::BSpline(s) => {
                 Ok(planar_of(k, s, &self.natural_uv_domain_with_nurb(k)?)?.is_planar(tol_3d))
+            }
+            SurfaceKind::BallPatch(s) => {
+                Ok(planar_of(k, s.net(), &self.natural_uv_domain_with_nurb(k)?)?.is_planar(tol_3d))
             }
             // SmSurface::IsPlanar on the blend's own (virtual) CalculateBoundingBox: the
             // net's pseudo box grown by the bound; a box that fails is not planar (the

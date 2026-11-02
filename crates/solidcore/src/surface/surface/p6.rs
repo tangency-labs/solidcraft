@@ -2118,6 +2118,21 @@ pub(super) fn create_iso_parametric_curve(
                 Ok((Curve::from(iso.curve), iso.max_gap_3d))
             }
         }
+        SurfaceKind::BallPatch(bp) => {
+            let b = bp.net();
+            {
+                let iso = b.create_iso_parametric_curve(
+                    k,
+                    dir,
+                    value,
+                    IsoCurveOptions {
+                        domain: domain.copied(),
+                        uv_iso_curve: false,
+                    },
+                )?;
+                Ok((Curve::from(iso.curve), iso.max_gap_3d))
+            }
+        }
         // (SmSurfOfExtrusion inherits the B-spline override, whose
         // `GetOrCreateGwNurbPointer` makes a missing NURB: a recognised extrusion has
         // none until then)
@@ -2180,6 +2195,7 @@ fn is_singularity(
         | SurfaceKind::Torus(_)
         | SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
+        | SurfaceKind::BallPatch(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SrfInVolume(_)
         | SurfaceKind::SurfOfRevolution(_)
@@ -2203,6 +2219,7 @@ fn is_on_seam(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
         | SurfaceKind::Torus(_)
         | SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
+        | SurfaceKind::BallPatch(_)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SrfInVolume(_)
         | SurfaceKind::SurfOfRevolution(_)

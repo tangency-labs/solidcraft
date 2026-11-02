@@ -19,6 +19,7 @@
 //! | `write_crv_on_surf` (private) | `SmCrvOnSurf::WriteToDB`                        |
 //! | `write_tangent_field` (private) | `SmTangentField::WriteToDB`                   |
 //! | `write_procedural_blend`, `write_definition_curve` (private) | the fork's `SmProceduralBlend::WriteToDB`, `sm_WriteCurve` (014f66f, opt-in) |
+//! | `write_ball_patch` (private) | the fork's `SmBallPatch::WriteToDB` (f8e6709, opt-in) |
 //!
 //! Deviations:
 //! - **Kinds without a writer.** The write side is not in the plan (see
@@ -44,6 +45,7 @@ use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::tangent_field::TangentFieldCurve;
 use crate::error::{ignore_status, Result, SolidError};
 use crate::nurbs::b_spline_curve::BSplineCurve;
+use crate::surface::ball_patch::BallPatch;
 use crate::surface::cone::Cone;
 use crate::surface::procedural_blend::ProceduralBlend;
 use crate::surface::sphere::Sphere;
@@ -127,6 +129,8 @@ pub fn write_surface_at(
         SurfaceKind::BSpline(b) => b.write_to_db(db, version),
         // the fork writes the definition, then the net (SmProceduralBlend::WriteToDB)
         SurfaceKind::ProceduralBlend(pb) => write_procedural_blend(pb, db, version, depth),
+        // the fork writes the definition, then the net (SmBallPatch::WriteToDB)
+        SurfaceKind::BallPatch(bp) => write_ball_patch(bp, db, version),
         SurfaceKind::Plane(p) => p.write_to_db(db, version),
         SurfaceKind::Cone(c) => write_cone(c, db, version, depth),
         SurfaceKind::Sphere(sp) => write_sphere(sp, db, version, depth),
@@ -138,6 +142,23 @@ pub fn write_surface_at(
         SurfaceKind::Step(_) => Err(unported("SmSTEPSurface::WriteToDB")),
         SurfaceKind::SrfInVolume(_) => Err(unported("SmSrfInVolume::WriteToDB")),
     }
+}
+
+/// `SmBallPatch::WriteToDB` (the fork's f8e6709): the centre and the radius, then the
+/// net's `SmBSplineSurface` record.
+fn write_ball_patch(bp: &BallPatch, db: &mut DatabaseWriter, version: u64) -> Result<()> {
+    let c = bp.centre();
+    let values = [c.x, c.y, c.z, bp.radius()];
+    if is_ascii(db) {
+        for &v in &values {
+            db.out_f64(v);
+            db.out_str(" ");
+        }
+        db.out_str(" SmBallPatch centre, radius\n");
+    } else {
+        db.write_doubles(&values);
+    }
+    bp.net().write_to_db(db, version)
 }
 
 /// `SmProceduralBlend::WriteToDB` (the fork's 014f66f): the definition, then the net.

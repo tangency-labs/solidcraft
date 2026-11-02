@@ -1047,6 +1047,7 @@ impl Sphere {
             }
             SurfaceKind::BSpline(_)
             | SurfaceKind::ProceduralBlend(_)
+            | SurfaceKind::BallPatch(_)
             | SurfaceKind::Cone(_)
             | SurfaceKind::Torus(_)
             | SurfaceKind::SurfOfExtrusion(_)

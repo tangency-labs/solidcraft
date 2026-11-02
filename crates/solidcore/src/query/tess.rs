@@ -610,6 +610,10 @@ impl TessSrfCache {
                     let b = pb.net();
                     Some(b.clone())
                 }
+                SurfaceKind::BallPatch(bp) => {
+                    let b = bp.net();
+                    Some(b.clone())
+                }
                 SurfaceKind::Plane(p) => Some(match ignore(p.base_with_nurb())? {
                     Some(b) => b.into_owned(),
                     None => p.base().clone(),

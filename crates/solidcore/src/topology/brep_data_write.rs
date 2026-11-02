@@ -531,6 +531,10 @@ pub fn bspline_surface_part(s: &Surface) -> Result<Option<Cow<'_, BSplineSurface
             let b = pb.net();
             Some(Cow::Borrowed(b))
         }
+        SurfaceKind::BallPatch(bp) => {
+            let b = bp.net();
+            Some(Cow::Borrowed(b))
+        }
         SurfaceKind::Plane(p) => Some(p.base_with_nurb()?),
         SurfaceKind::Cone(c) => Some(Cow::Borrowed(c.rev().base())),
         SurfaceKind::Sphere(sp) => Some(Cow::Borrowed(sp.base().base())),

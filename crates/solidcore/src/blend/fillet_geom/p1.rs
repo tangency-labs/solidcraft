@@ -2743,6 +2743,7 @@ pub fn evaluate_mate(k: &Kernel, brep: &Brep, face: FaceId, uv: Point2) -> Resul
             | SurfaceKind::Sphere(_)
             | SurfaceKind::Torus(_)
             | SurfaceKind::ProceduralBlend(_)
+            | SurfaceKind::BallPatch(_)
     ) {
         return Err(SolidError::null_pointer(OP_EVALUATE_MATE));
     }
@@ -2760,6 +2761,8 @@ pub fn evaluate_mate(k: &Kernel, brep: &Brep, face: FaceId, uv: Point2) -> Resul
             SurfaceKind::Torus(s) => s.base().base().evaluate_point_on_extended_surface(uv),
             // (the fork's SmProceduralBlend: the net's extension, NLib on its NURB)
             SurfaceKind::ProceduralBlend(pb) => pb.net().evaluate_point_on_extended_surface(uv),
+            // (the fork's SmBallPatch is an SmBSplineSurface too: its net)
+            SurfaceKind::BallPatch(pb) => pb.net().evaluate_point_on_extended_surface(uv),
             _ => Err(SolidError::null_pointer(OP_EVALUATE_MATE)),
         }
     }
@@ -3837,6 +3840,8 @@ fn b_spline_net_mut(surface: &mut Surface) -> Option<&mut BSplineSurface> {
         SurfaceKind::SurfOfExtrusion(s) => Some(s.base_mut()),
         // (the fork's SmProceduralBlend: its net's control points)
         SurfaceKind::ProceduralBlend(pb) => Some(pb.net_mut()),
+        // (the fork's SmBallPatch is an SmBSplineSurface too: its net)
+        SurfaceKind::BallPatch(pb) => Some(pb.net_mut()),
         _ => None,
     }
 }

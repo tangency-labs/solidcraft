@@ -916,6 +916,7 @@ impl SurfOfRevolution {
             | SurfaceKind::SurfOfExtrusion(_)
             | SurfaceKind::BSpline(_)
             | SurfaceKind::ProceduralBlend(_)
+            | SurfaceKind::BallPatch(_)
             | SurfaceKind::Cone(_)
             | SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
@@ -978,6 +979,8 @@ impl SurfOfRevolution {
             // (an SmProceduralBlend is an SmBSplineSurface: its net is tested, its corner
             // points are the definition's, below)
             SurfaceKind::ProceduralBlend(pb) => pb.net(),
+            // (the fork's SmBallPatch is an SmBSplineSurface: its net)
+            SurfaceKind::BallPatch(bp) => bp.net(),
             // (an SmSurfOfExtrusion is an SmBSplineSurface: its NURB is tested)
             SurfaceKind::SurfOfExtrusion(s) => s.base(),
             SurfaceKind::Plane(p) => {
