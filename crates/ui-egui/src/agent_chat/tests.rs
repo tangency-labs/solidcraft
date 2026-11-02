@@ -1127,6 +1127,51 @@ fn stop_keeps_the_queue() {
     assert!(app.agent_chat.pending.is_empty());
 }
 
+#[test]
+fn an_unresponsive_cancel_exit_keeps_the_queue_and_completed_changes() {
+    let (mut app, script, ctx) = app_with_script();
+    let (tx, rx) = channel();
+    app.agent_chat.tools_rx = Some(rx);
+    let before = app.session.doc.clone();
+    send(&mut app, &ctx, "two boxes".into());
+    let replies: Vec<_> = [0.0, 20.0].into_iter().map(|x| ask(&tx, "engine.execute", boxed(x))).collect();
+    frame(&mut app);
+    for reply in replies {
+        assert_eq!(reply.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    }
+    let completed = app.session.doc.clone();
+    let statuses = [Some(ToolStatus::Completed), Some(ToolStatus::Failed), Some(ToolStatus::Pending), Some(ToolStatus::InProgress), None];
+    for (id, status) in statuses.into_iter().enumerate() {
+        script.report(Event::Tool { id: id.to_string(), title: Some("search".into()), kind: None, status, input: None, output: None });
+    }
+    poll(&mut app, &ctx);
+    send(&mut app, &ctx, "later".into());
+    cancel(&mut app);
+    script.report(Event::Exited { tail: vec![tr("ui.agent_chat_cancel_timeout").to_string()] });
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.state(), State::Exited);
+    assert!(app.agent_chat.backend.is_none() && app.agent_chat.turn.is_none());
+    assert_eq!(texts(&app), ["later"]);
+    assert_eq!(script.prompts().len(), 1, "disconnect must not send the queue");
+    assert!(Arc::ptr_eq(&app.session.doc, &completed), "completed changes stay in the design");
+    let statuses: Vec<_> = app
+        .agent_chat
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Tool { status, .. } => Some(*status),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        statuses,
+        [Some(ToolStatus::Completed), Some(ToolStatus::Failed), Some(ToolStatus::Failed), Some(ToolStatus::Failed), Some(ToolStatus::Failed)]
+    );
+    let changes = app.agent_chat.items.iter().rposition(|i| matches!(i, Item::Changes { steps: 2, .. })).expect("the completed changes are grouped");
+    undo_changes(&mut app, changes);
+    assert!(Arc::ptr_eq(&app.session.doc, &before), "the completed changes still undo together");
+}
+
 /// Send now: cancel first, the prompt only after the agent has ended the cancelled turn, with a
 /// note that the previous step was interrupted (shown without it in the conversation).
 #[test]

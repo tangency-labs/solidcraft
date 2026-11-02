@@ -1,0 +1,10 @@
+{
+  "ar": { "ui.agent_chat_cancel_timeout": "لم يستجب الوكيل لطلب الإيقاف، فتم قطع الاتصال به. أعد الاتصال للمتابعة." },
+  "de": { "ui.agent_chat_cancel_timeout": "Der Agent hat nicht auf Stopp reagiert und wurde getrennt. Zum Fortfahren erneut verbinden." },
+  "en": { "ui.agent_chat_cancel_timeout": "The agent did not respond to Stop and was disconnected. Reconnect to continue." },
+  "he": { "ui.agent_chat_cancel_timeout": "הסוכן לא הגיב לבקשת העצירה ונותק. יש להתחבר מחדש כדי להמשיך." },
+  "ja": { "ui.agent_chat_cancel_timeout": "エージェントが停止要求に応答しなかったため、接続を切断しました。続行するには再接続してください。" },
+  "ko": { "ui.agent_chat_cancel_timeout": "에이전트가 중지 요청에 응답하지 않아 연결이 끊어졌습니다. 계속하려면 다시 연결하세요." },
+  "vi": { "ui.agent_chat_cancel_timeout": "Tác nhân không phản hồi yêu cầu Dừng nên đã bị ngắt kết nối. Hãy kết nối lại để tiếp tục." },
+  "zh": { "ui.agent_chat_cancel_timeout": "代理未响应停止请求，已断开连接。请重新连接以继续。" }
+}

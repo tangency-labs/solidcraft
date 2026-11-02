@@ -834,6 +834,13 @@ impl AgentChat {
                 self.clear_config();
                 self.state = Some(if matches!(self.state(), State::Starting | State::Failed) { State::Failed } else { State::Exited });
                 self.steering = false;
+                for item in &mut self.items {
+                    if let Item::Tool { status, .. } = item
+                        && !matches!(status, Some(ToolStatus::Completed | ToolStatus::Failed))
+                    {
+                        *status = Some(ToolStatus::Failed);
+                    }
+                }
                 let last: Vec<String> = tail.into_iter().rev().take(6).collect::<Vec<_>>().into_iter().rev().collect();
                 let detail = if last.is_empty() { String::new() } else { format!("\n{}", last.join("\n")) };
                 self.notice(format!("{}{detail}", tr("ui.agent_chat_exited")), true);
