@@ -640,6 +640,29 @@ mod extrude_view_preference {
             assert_eq!(h.app.cam, iso_of(top), "{close}: isometric again");
         }
     }
+
+    /// #10571: Extrude clicked with the sketch still open ends the sketch on its way, and that
+    /// end turns the view back where it opened (Preferences › Sketch). The turn must not become
+    /// the view Extrude goes back to: it is the view the command was clicked in.
+    #[test]
+    fn extrude_from_an_open_sketch_goes_back_to_the_view_it_was_clicked_in() {
+        let mut h = Harness::new();
+        h.app.preferences.extrude_view_isometric = true;
+        h.app.preferences.extrude_view_return = true;
+        h.app.preferences.sketch_exit_view = crate::prefs::SketchExitView::Previous;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.settle();
+        let top = h.app.cam;
+        open_extrude(&mut h);
+        assert_eq!(h.app.cam, iso_of(top), "isometric while Extrude is open");
+        h.step(&json!({"widget": "Cancel"})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none());
+        assert_eq!(h.app.session.active_sketch, None, "Extrude ended the sketch");
+        assert_eq!(h.app.cam, top, "back to the sketch view it was clicked in");
+    }
 }
 
 /// #8127: a sketch inside an inserted fastener, opened from its row in the browser, activates the

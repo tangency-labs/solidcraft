@@ -1068,7 +1068,7 @@ fn timeline_group_name(
     if escape {
         // Dropping the shared state cancels the edit and leaves the old name intact.
     } else if commit {
-        crate::context_menu::commit_rename(app, &rename);
+        let _ = crate::context_menu::commit_rename(app, &rename);
     } else {
         app.menu.rename = Some(rename);
     }
