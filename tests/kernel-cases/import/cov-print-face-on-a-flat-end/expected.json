@@ -1,0 +1,17 @@
+{
+ "sources": [],
+ "what": "a cylinder's flat end marked as the face a slicer export lays it on",
+ "source": "analytic",
+ "method": "(3,4,20) is on the top end of the cylinder r 10, h 20 about z: a flat face, so it is marked, and the body is unchanged: V = pi*100*20 = 6283.1853, 3 faces",
+ "body_count": 1,
+ "faces": 3,
+ "volume_mm3": 6283.185307,
+ "results": [
+  {
+   "step": 2,
+   "json": {
+    "body": "Peg"
+   }
+  }
+ ]
+}
