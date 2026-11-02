@@ -120,12 +120,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CREATE")
         .icon("slot")
         .enabled(in_sketch)
-        .params(concat!("p0, p1: arc centres, width", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: arc centres, width; returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.slot.overall", "Overall Slot", slot_overall)
         .at("SKETCH", "CREATE")
         .icon("slot_overall")
         .enabled(in_sketch)
-        .params(concat!("p0, p1: overall ends, width", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: overall ends, width; returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.point", "Point", draw_point).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", dimension).at("SKETCH", "CREATE").icon("dimension").key("D").enabled(in_sketch).params(
         "entities: [refs] (a line midpoint is \"mid:line_id\"; a model edge or vertex, {edge: [x,y,z], body?} or {vertex: [x,y,z], body?}, is projected into the sketch first and measured there: a point against the projected edge measures the distance to it), type?: auto|distance|horizontal|distance_x|vertical|distance_y|length|radius|diameter|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"; also `#name = expression`), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points, two midpoints or a line off the axes: with auto, text_at inside the box they span (as opposite corners) or in its outer corners is the distance between them, above or below the box horizontal, beside it vertical. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A point and a circle or arc: the distance from the point to its edge (or how far within it a point inside lies). Two circles or arcs: the gap between their edges (or how far they overlap when they cross, or the narrowest gap between them when one lies inside the other), or the centre-to-centre distance when they are the two caps of a slot. An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends true): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales about its origin to the value instead of distorting. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
@@ -1725,10 +1725,22 @@ fn polygon_edge(s: &mut Session, p: &Value) -> Result<Value> {
     polygon(s, p, cmd, center, rv, start, n, true)
 }
 
+/// The centre point of arc `a` (`None`: not an arc).
+fn arc_centre(sk: &Sketch, a: usize) -> Option<usize> {
+    match sk.curves.get(a).map(|c| &c.kind) {
+        Some(CurveKind::Arc { c, .. }) => Some(*c),
+        _ => None,
+    }
+}
+
+/// A straight slot: two lines and two equal arc caps, tangent where they meet, plus its middle
+/// (#7908): a point held at the midpoint of a construction line between the arc centres, so it
+/// stays in the middle however the slot is edited or dragged. The middle adds no freedom.
 pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<Value> {
     let h = w / 2.0;
     let d = (c1 - c0).normalized().ok_or_else(|| bad(cmd, "the slot ends must differ"))?;
     let n = d.perp();
+    let mut extra = (None, None);
     let (out, info) = draw(s, p, cmd, |sk, _| {
         let pts: Vec<usize> =
             [c0 - n * h, c1 - n * h, c1 + n * h, c0 + n * h].iter().map(|q| sk.add_point(*q, None)).collect::<std::result::Result<_, _>>()?;
@@ -1742,9 +1754,20 @@ pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w:
             cons.push(add_c(sk, ConstraintKind::Tangent { a: l, b: a })?);
         }
         cons.push(add_c(sk, ConstraintKind::Equal { a: a0, b: a1 })?);
+        let (k0, k1) = arc_centre(sk, a0).zip(arc_centre(sk, a1)).ok_or_else(|| bad(cmd, "the slot caps lost their centres"))?;
+        let axis = sk.add_line_pts(k0, k1, None)?;
+        if let Some(c) = sk.curves.get_mut(axis) {
+            c.construction = true;
+        }
+        let mid = sk.add_point((c0 + c1) * 0.5, None)?;
+        cons.push(add_c(sk, ConstraintKind::Midpoint { p: mid, l: axis })?);
+        extra = (sk.curves.get(axis).map(|c| c.id.clone()), sk.points.get(mid).map(|q| q.id.clone()));
         Ok((ids_of(sk, &[l1, a1, l2, a0]), cons))
     })?;
-    Ok(result(out, info))
+    let mut out = result(out, info);
+    out["centre_line"] = json!(extra.0);
+    out["middle"] = json!(extra.1);
+    Ok(out)
 }
 
 fn slot_c2c(s: &mut Session, p: &Value) -> Result<Value> {

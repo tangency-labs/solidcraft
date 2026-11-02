@@ -269,7 +269,7 @@ fn typed_small_slot_width_preview_matches_the_final_click() {
         super::place(&mut h.app, click);
         let state = h.app.session.world_state();
         let committed = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
-        assert_eq!(committed.curves.len(), 4, "{command}: final click commits the typed width");
+        assert_eq!(committed.curves.len(), 5, "{command}: final click commits the typed width (and the middle's centre line)");
         let solidcraft_engine::geom::Seg2::Arc { radius, .. } = committed.segs(1)[0] else { panic!("missing slot cap") };
         assert!((radius - 0.00005).abs() < 1e-10, "{command}: the typed width determines the cap radius");
         let mut output = ctx.run_ui(input(), |ui| {
