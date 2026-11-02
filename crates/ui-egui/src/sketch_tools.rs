@@ -1344,14 +1344,29 @@ fn run_entities(app: &mut SolveApp, t: &Tool) -> bool {
     app.run(t.cmd, params).is_ok()
 }
 
+/// Commit a fully placed spline before Finish Sketch drops its drawing tool. A failed
+/// command keeps both the sketch and its pending points open so the error can be corrected.
+/// Incomplete splines need no command; Cancel Sketch never calls this.
+pub(crate) fn commit_pending_spline(app: &mut SolveApp) -> bool {
+    let Some(tool) =
+        app.tool.take_if(|tool| matches!(tool.cmd, "sketch.spline.fit_point" | "sketch.spline.control_point" | "sketch.spline.control_point_5"))
+    else {
+        return true;
+    };
+    let committed = tool.pts.len() < 2 || run_points(app, &tool);
+    app.tool = Some(tool);
+    committed
+}
+
 /// Right-click with an extra tool: finish a chain or move to the next stage. Returns false
 /// when the tool should be dropped.
 pub fn finish(app: &mut SolveApp, tool: &mut Tool) -> bool {
     let Some(m) = mode(tool.cmd) else { return false };
     match m {
         Mode::Points(0) if tool.pts.len() >= 2 => {
-            run_points(app, tool);
-            tool.pts.clear();
+            if run_points(app, tool) {
+                tool.pts.clear();
+            }
             true
         }
         Mode::Entities(0) if !tool.picks.is_empty() => {

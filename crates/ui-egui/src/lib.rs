@@ -1744,6 +1744,12 @@ impl SolveApp {
             sketch_palette::toggle_construction(self);
             return;
         }
+        // Finish must see the pending spline before another command clears its tool.
+        if id == "sketch.finish" {
+            self.home.open = false;
+            self.finish_sketch();
+            return;
+        }
         dim_view::cancel();
         self.tool = None;
         self.home.open = false;
@@ -1842,10 +1848,6 @@ impl SolveApp {
         }
         if id == "sketch.edit" {
             self.start_sketch_edit(opener);
-            return;
-        }
-        if id == "sketch.finish" {
-            self.finish_sketch();
             return;
         }
         if id == "sketch.cancel" {
@@ -2253,6 +2255,9 @@ impl SolveApp {
     }
 
     fn leave_sketch(&mut self, command: &str) {
+        if command == "sketch.finish" && !sketch_tools::commit_pending_spline(self) {
+            return;
+        }
         self.prepare_sketch_exit();
         if self.session.sketch_restore_marker().is_some() {
             // Finishing now restores the marker in the engine: evaluate the complete
