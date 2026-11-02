@@ -50,7 +50,7 @@ pub(super) fn snapshot(app: &SolveApp) -> Result<RenderSetup, String> {
 
 // Compare editable numerical intent before validation, so an incompatible legacy value
 // or a lens temporarily paired with an orthographic camera cannot disable dirty tracking.
-fn draft(app: &SolveApp) -> Result<RenderSetup, String> {
+pub(super) fn draft(app: &SolveApp) -> Result<RenderSetup, String> {
     let view = &app.render_workspace.view;
     let mut setup = RenderSetup { camera: app.cam, ..view.draft.clone() };
     setup.job = Some(match view.method {
@@ -140,10 +140,66 @@ fn draft(app: &SolveApp) -> Result<RenderSetup, String> {
     Ok(setup)
 }
 
+/// Save only fields a numerical editor changed. Navigation keeps its explicit
+/// Update shot/Revert flow, and temporary optical bindings remain local.
+pub(super) fn persist_editor(app: &mut SolveApp, before: &RenderSetup) -> Result<(), String> {
+    let after = draft(app)?;
+    // A corrective edit (for example removing an invalid wear layer) must not
+    // require the hostile previous draft to be serialisable. The new value and
+    // the saved command are still validated normally.
+    let old = serde_json::to_value(before).ok();
+    let new = serde_json::to_value(&after).map_err(|error| error.to_string())?;
+    let saved = app.session.doc.render.setups.get(&app.render_workspace.view.name);
+    let saved = saved.and_then(|setup| serde_json::to_value(setup).ok());
+    let mut patch = serde_json::Map::new();
+    if let Some(fields) = new.as_object() {
+        for (key, value) in fields {
+            if key != "camera"
+                && old.as_ref().and_then(|old| old.get(key)) != Some(value)
+                && saved.as_ref().and_then(|saved| saved.get(key)) != Some(value)
+            {
+                patch.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    if !patch.is_empty() {
+        after.validate().map_err(|error| error.to_string())?;
+        let name = app.render_workspace.view.name.clone();
+        app.run("render.settings.set", serde_json::json!({"name":name,"set":patch}))?;
+        app.render_workspace.revision = app.session.revision;
+        let camera = app.render_workspace.view.clean_setup.as_ref().map_or(after.camera, |clean| clean.camera);
+        app.render_workspace.view.clean_setup = Some(RenderSetup { camera, ..after.clone() });
+        app.render_workspace.view.clean_name = app.render_workspace.view.name.clone();
+        materials::refresh_render_revision(app);
+        cpu::refresh_render_revision(app);
+    }
+    if let Some(saved) = app.session.doc.render.setups.get(&app.render_workspace.view.name) {
+        let mut saved = saved.clone();
+        saved.camera = after.camera;
+        if saved == after {
+            let camera = app.render_workspace.view.clean_setup.as_ref().map_or(after.camera, |clean| clean.camera);
+            app.render_workspace.view.clean_setup = Some(RenderSetup { camera, ..after });
+            app.render_workspace.view.clean_name = app.render_workspace.view.name.clone();
+            app.render_workspace.revision = app.session.revision;
+        }
+    }
+    refresh_dirty(app);
+    Ok(())
+}
+
 /// A setup switch/reload replaces its numeric editor draft, never a completed image or camera.
 pub(super) fn load(app: &mut SolveApp) {
     let setup = app.session.doc.render.setups.get(&app.render_workspace.view.name).cloned().unwrap_or_default();
-    let view = &mut app.render_workspace.view;
+    load_values(&mut app.render_workspace.view, setup);
+    app.render_workspace.view.dirty = false;
+    app.render_workspace.revision = app.session.revision;
+    // Keep the explicit Restore Saved Camera action: loading options does not navigate.
+    app.render_workspace.view.clean_setup = draft(app).ok();
+    app.render_workspace.view.clean_name = app.render_workspace.view.name.clone();
+    super::light::loaded(app);
+}
+
+fn load_values(view: &mut super::ViewState, setup: RenderSetup) {
     view.method = ImageMethod::Raster;
     view.transparent = false;
     view.raytrace = RaytraceOptions::default();
@@ -230,18 +286,193 @@ pub(super) fn load(app: &mut SolveApp) {
         None => {}
     }
     view.draft = setup;
-    view.dirty = false;
+}
+
+/// Compare the complete authoring source, excluding only saved Render settings.
+/// Stable body labels alone do not prove that geometry or its material is unchanged.
+pub(super) fn same_model_source(app: &SolveApp, document: &std::sync::Weak<solidcraft_engine::doc::Document>) -> bool {
+    if app.session.model.is_stale() {
+        return false;
+    }
+    let Some(source) = document.upgrade() else { return false };
+    // Exhaustive by design: adding a Document field must update this comparison.
+    // Match ergonomics bind references, including vectors and point-cloud data.
+    macro_rules! compare_authoring_fields {
+        ($($field:ident),* $(,)?) => {{
+            let solidcraft_engine::doc::Document { render: _, $($field),* } = source.as_ref();
+            true $(&& $field == &app.session.doc.$field)*
+        }};
+    }
+    compare_authoring_fields!(
+        format,
+        format_pending,
+        name,
+        units,
+        metadata,
+        params,
+        text_params,
+        features,
+        marker,
+        next_id,
+        reserved_body_names,
+        components,
+        next_component_color_index,
+        occurrences,
+        assembly,
+        sheet,
+        plastic,
+        parts,
+        links,
+        configs,
+        favorites,
+        canvases,
+        point_clouds,
+        param_comments,
+        materials,
+        print_faces,
+        user_materials,
+        appearances,
+        body_components,
+        body_offsets,
+        browser_groups,
+        timeline_groups,
+        browser_order,
+        named_views,
+        visibility,
+    )
+}
+
+/// A single refresh's source comparisons. Targets are still checked per binding.
+#[derive(Default)]
+pub(super) struct SourceCache(Vec<(std::sync::Weak<solidcraft_engine::doc::Document>, bool)>);
+
+impl SourceCache {
+    pub(super) fn same_model_source(&mut self, app: &SolveApp, document: &std::sync::Weak<solidcraft_engine::doc::Document>) -> bool {
+        if let Some((_, same)) = self.0.iter().find(|(source, _)| std::sync::Weak::ptr_eq(source, document)) {
+            return *same && !app.session.model.is_stale() && document.upgrade().is_some();
+        }
+        let same = same_model_source(app, document);
+        self.0.push((document.clone(), same));
+        same
+    }
+}
+
+/// Synchronize saved edits/Undo without replacing local camera or runtime inputs.
+pub(super) fn sync_revision(app: &mut SolveApp) {
+    if app.render_workspace.revision == app.session.revision {
+        return;
+    }
+    // A new shot name can intentionally carry the unsaved draft of its source.
+    // Its missing saved entry is not an Undo of that source's numerical fields.
+    if app.render_workspace.view.clean_name != app.render_workspace.view.name {
+        if !app.render_workspace.view.dirty {
+            load(app);
+        }
+        return;
+    }
+    let Some(clean) = app.render_workspace.view.clean_setup.clone() else {
+        if !app.render_workspace.view.dirty {
+            load(app);
+        }
+        return;
+    };
+    let saved = app.session.doc.render.setups.get(&app.render_workspace.view.name).cloned().unwrap_or_default();
+    let mut previous = super::ViewState::default();
+    load_values(&mut previous, clean.clone());
+    let mut updated = super::ViewState::default();
+    load_values(&mut updated, saved);
+    // Construct the new clean numerical baseline independently of local drafts.
+    let current = std::mem::replace(&mut app.render_workspace.view, updated);
+    let mut next_clean = draft(app).ok();
+    if let Some(next) = &mut next_clean {
+        next.camera = clean.camera;
+    }
+    let updated = std::mem::replace(&mut app.render_workspace.view, current);
+    let view = &mut app.render_workspace.view;
+    macro_rules! sync {
+        ($($head:ident $(.$tail:ident)*),* $(,)?) => {$(
+            if previous.$head$(.$tail)* != updated.$head$(.$tail)* && view.$head$(.$tail)* == previous.$head$(.$tail)* {
+                view.$head$(.$tail)* = updated.$head$(.$tail)*;
+            }
+        )*};
+    }
+    // Only persisted fields participate. Reflections, optical bindings, file selectors,
+    // editor selection, results and host/job state stay in their existing owners.
+    sync!(
+        method,
+        transparent,
+        samples,
+        max_depth,
+        seed,
+        draft.backend,
+        draft.mode,
+        draft.width,
+        draft.height,
+        draft.format,
+        draft.exposure_ev,
+        draft.environment_rotation,
+        draft.environment_intensity,
+        draft.background,
+        draft.job,
+        draft.surfaces,
+        draft.optics,
+        draft.stage,
+        raytrace.budget,
+        raytrace.primary_samples,
+        raytrace.progressive,
+        raytrace.preset,
+        raytrace.lights,
+        raytrace.punctual_lights,
+        raytrace.area_lights,
+        raytrace.area_samples,
+        raytrace.seed,
+        raytrace.shadows,
+        cpu.environment,
+        cpu.color,
+        cpu.intensity,
+        cpu.rotation_rad,
+        cpu.samples,
+        studio.aging,
+        studio.nested_media,
+        studio.volume,
+        studio.adaptive,
+        studio.transmission_samples,
+        studio.finishing,
+        studio.backdrop_enabled,
+        studio.backdrop,
+        studio.linear_exr,
+        studio.tone_map,
+        studio.denoise,
+        studio.lens_enabled,
+        studio.lens,
+        studio.lighting_enabled,
+        studio.ambient,
+        studio.sun_enabled,
+        studio.sun,
+        studio.area_lights,
+        studio.environment,
+        studio.gradient,
+        studio.rotation_rad,
+        studio.intensity,
+        studio.assume_linear_srgb
+    );
+    // File HDR selectors are runtime inputs; embedded selectors follow saved Undo.
+    if view.cpu.hdr == previous.cpu.hdr {
+        view.cpu.hdr = updated.cpu.hdr;
+    }
+    if view.studio.hdr == previous.studio.hdr {
+        view.studio.hdr = updated.studio.hdr;
+    }
+    view.clean_setup = next_clean;
     app.render_workspace.revision = app.session.revision;
-    // Keep the existing explicit Restore Saved Camera action: loading options does not navigate.
-    app.render_workspace.view.clean_setup = draft(app).ok();
-    super::light::loaded(app);
+    materials::refresh_render_revision(app);
+    cpu::refresh_render_revision(app);
+    refresh_dirty(app);
 }
 
 pub(super) fn refresh_dirty(app: &mut SolveApp) {
-    if let Some(clean) = &app.render_workspace.view.clean_setup
-        && (has_runtime_inputs(app) || draft(app).as_ref() != Ok(clean))
-    {
-        app.render_workspace.view.dirty = true;
+    if let Some(clean) = &app.render_workspace.view.clean_setup {
+        app.render_workspace.view.dirty = has_runtime_inputs(app) || draft(app).as_ref() != Ok(clean);
     }
 }
 
@@ -284,6 +515,7 @@ pub(super) fn save(app: &mut SolveApp) -> Result<(), String> {
     }
     app.render_workspace.view.draft = setup.clone();
     app.render_workspace.view.clean_setup = Some(setup);
+    app.render_workspace.view.clean_name = app.render_workspace.view.name.clone();
     app.render_workspace.view.dirty = false;
     app.render_workspace.revision = app.session.revision;
     Ok(())

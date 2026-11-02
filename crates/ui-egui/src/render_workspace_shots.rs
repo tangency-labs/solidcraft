@@ -9,13 +9,6 @@ pub(super) fn camera_modified(app: &SolveApp, name: &str) -> bool {
     app.session.doc.render.setups.get(name).is_some_and(|setup| setup.camera != app.cam)
 }
 
-/// Update just the saved camera, preserving all the shot's other saved intent.
-pub(super) fn update_camera(app: &mut SolveApp) -> Result<(), String> {
-    let name = app.render_workspace.view.name.clone();
-    app.run("render.settings.set", json!({"name":name,"set":{"camera":app.cam}}))?;
-    Ok(())
-}
-
 pub(crate) fn contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     super::thumbnails::refresh(app, ui.ctx());
     let status = app.render_workspace.view.job.and_then(|job| app.session.render_job_handle(job).ok()).and_then(|handle| handle.status().ok());

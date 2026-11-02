@@ -105,13 +105,13 @@ fn section(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) -> bool {
         crate::scenario::publish_target(&id, rect);
     }
     if row.actions.iter().any(|r| r.clicked()) {
-        // The existing Shots manager owns naming and saving. This navigation never saves.
+        // Shot naming and saving use the existing Save shot prompt.
         if key == "lights" {
             if let Err(error) = super::light::edit(app, "render.lights.add", None, Some(json!({"kind":"area"}))) {
                 app.set_status(error, true);
             }
         } else {
-            app.start("render.settings.get");
+            app.start("render.settings.set");
         }
     }
     if row.clicked && key == "lights" {
@@ -200,7 +200,6 @@ pub(crate) fn sections(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if row.clicked {
         select(app, "environment", None);
-        app.render_workspace.view.inspector.page = inspector::Page::Environment;
     }
     if section(app, ui, "lights") {
         for (index, light) in super::light::rows(app).unwrap_or_default().iter().enumerate() {
@@ -243,7 +242,6 @@ pub(crate) fn sections(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             if row.clicked {
                 select(app, "light", Some(id));
-                app.render_workspace.view.inspector.page = inspector::Page::Lighting;
             }
         }
     }

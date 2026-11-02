@@ -266,7 +266,6 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
             crate::scenario::publish_target("render:shot:output", response.rect);
             if response.clicked() {
                 let _ = app.run("view.render_select", json!({"kind":"output"}));
-                app.render_workspace.view.inspector.page = inspector::Page::Output;
             }
         });
     });
@@ -451,9 +450,7 @@ pub(super) fn frame_rect(aspect: f64, viewport: Rect) -> Option<Rect> {
 }
 
 pub(crate) fn overlay_visible(app: &SolveApp) -> bool {
-    !app.render_workspace.view.result
-        && (app.render_workspace.view.stage == Stage::Frame
-            || (app.render_workspace.view.inspector.page == inspector::Page::Camera && selected(app).is_some()))
+    !app.render_workspace.view.result && (app.render_workspace.view.stage == Stage::Frame || selected(app).is_some())
 }
 
 pub(crate) fn preview_rect(app: &SolveApp, viewport: Rect) -> Option<Rect> {

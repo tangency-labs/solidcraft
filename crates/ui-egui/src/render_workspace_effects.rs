@@ -74,18 +74,6 @@ pub(super) fn layer_actions(app: &SolveApp, ui: &mut egui::Ui, prefix: &str, sel
     (movement, remove)
 }
 
-pub(super) fn aging_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
-    super::wear::controls(app, ui);
-    if app.render_workspace.view.method != ImageMethod::GpuRaytrace {
-        return;
-    }
-    let title = app.tr("render.aging_airborne").to_string();
-    ui_kit::section(ui, "render_aging_atmosphere", &title, false, |ui| {
-        note(app, ui, "render.aging_airborne_help");
-        super::environment::atmosphere(app, ui);
-    });
-}
-
 pub(super) fn presentation_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::banner(ui, ui_kit::AssistantTone::Neutral, |ui| note(app, ui, "render.children.effects_banner"));
     let enabled = app.render_workspace.view.method == ImageMethod::GpuRaytrace;
