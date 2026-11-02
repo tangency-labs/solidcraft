@@ -74,6 +74,7 @@ pub mod material_properties;
 pub mod metadata;
 pub mod motion;
 pub mod panels;
+pub mod parameter_sweep;
 pub mod parts;
 pub mod print_face;
 pub mod render;
