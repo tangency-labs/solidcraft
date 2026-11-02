@@ -658,6 +658,7 @@ enum Cmd {
     SetModel(String),
     SetRequestTimeout(u64),
     SetReasoningEffort(String),
+    SetInstructions(String),
 }
 
 pub struct ApiBackend {
@@ -696,6 +697,7 @@ impl ApiBackend {
                 tools: Vec::new(),
                 tool_names: Vec::new(),
                 history: Vec::new(),
+                note: super::acp::SYSTEM_NOTE.to_string(),
                 session_id,
                 gemini_sigs: Default::default(),
                 events: ev_tx,
@@ -737,6 +739,11 @@ impl ChatBackend for ApiBackend {
             let _ = c.send(Cmd::SetReasoningEffort(effort.to_string()));
         }
     }
+    fn set_instructions(&mut self, text: &str) {
+        if let Some(c) = &self.cmds {
+            let _ = c.send(Cmd::SetInstructions(text.to_string()));
+        }
+    }
     fn new_session(&mut self) {
         // A running turn is cancelled; the worker resets the history once it has ended.
         self.cancel.store(true, Ordering::Relaxed);
@@ -774,6 +781,8 @@ struct Worker {
     tool_names: Vec<String>,
     /// The conversation in the endpoint's shape, without the system note (sent separately).
     history: Vec<Value>,
+    /// The system note every request carries ([`super::acp::system_note`]).
+    note: String,
     /// OpenCode Go's stable session ID for this chat (one per chat, not per request).
     session_id: String,
     /// Thought signatures of Gemini function-call parts, by kept call id, for the
@@ -828,6 +837,7 @@ impl Worker {
                     // the endpoint's, not the user's, and must not silently override the choice.
                     self.no_reasoning.set(false);
                 }
+                Cmd::SetInstructions(text) => self.note = super::acp::system_note(&text),
                 Cmd::NewChat => {
                     self.history.clear();
                     // A new conversation gets a fresh Go session ID for routing and caching.
@@ -1135,7 +1145,7 @@ impl Worker {
         match protocol {
             GoProtocol::Chat => self.body(),
             GoProtocol::Responses => {
-                let mut body = json!({"model": self.cfg.model, "input": go_responses_input(super::acp::SYSTEM_NOTE, &self.history)});
+                let mut body = json!({"model": self.cfg.model, "input": go_responses_input(&self.note, &self.history)});
                 if let Some(tools) = self.go_tools(protocol) {
                     body["tools"] = tools;
                 }
@@ -1145,7 +1155,7 @@ impl Worker {
                 let mut body = json!({
                     "model": self.cfg.model,
                     "max_tokens": ANTHROPIC_MAX_TOKENS,
-                    "system": super::acp::SYSTEM_NOTE,
+                    "system": self.note,
                     "messages": go_anthropic_messages(&self.history),
                 });
                 if let Some(tools) = self.go_tools(protocol) {
@@ -1155,7 +1165,7 @@ impl Worker {
             }
             GoProtocol::Gemini => {
                 let mut body = json!({"contents": go_gemini_contents(&self.history, &self.gemini_sigs.borrow())});
-                body["systemInstruction"] = json!({"parts": [{"text": super::acp::SYSTEM_NOTE}]});
+                body["systemInstruction"] = json!({"parts": [{"text": self.note}]});
                 if let Some(tools) = self.go_tools(protocol) {
                     body["tools"] = tools;
                 }
@@ -1180,7 +1190,7 @@ impl Worker {
         match self.cfg.protocol {
             Protocol::OpenAi => {
                 let mut messages = Vec::with_capacity(self.history.len() + 1);
-                messages.push(json!({"role": "system", "content": super::acp::SYSTEM_NOTE}));
+                messages.push(json!({"role": "system", "content": self.note}));
                 messages.extend(self.history.iter().cloned());
                 let mut body = json!({"model": self.cfg.model, "messages": messages});
                 if let Some(effort) = self.reasoning_effort() {
@@ -1200,7 +1210,7 @@ impl Worker {
                 let mut body = json!({
                     "model": self.cfg.model,
                     "max_tokens": ANTHROPIC_MAX_TOKENS,
-                    "system": super::acp::SYSTEM_NOTE,
+                    "system": self.note,
                     "messages": &self.history,
                 });
                 if !self.tools.is_empty() {
@@ -1998,7 +2008,8 @@ mod tests {
     }
 
     /// New chat resets the model's history to the system note: the next request carries nothing
-    /// of the conversation before it.
+    /// of the conversation before it. The note carries the custom instructions set for each
+    /// conversation (#8220): the first one's, then none after they were cleared.
     #[test]
     fn a_new_chat_resets_the_history_to_the_system_note() {
         let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
@@ -2033,12 +2044,16 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(10));
             }
         };
+        b.set_instructions("Use M3 screws.");
         run(&mut b, &|b| b.prompt(&[PromptPart::Text("one".into())]), 2);
+        b.set_instructions("");
         run(&mut b, &|b| b.new_session(), 1);
         run(&mut b, &|b| b.prompt(&[PromptPart::Text("two".into())]), 1);
         let sent = seen.lock().unwrap();
+        assert_eq!(sent[0]["messages"][0]["content"], super::super::acp::system_note("Use M3 screws."));
         let roles: Vec<&str> = sent[1]["messages"].as_array().unwrap().iter().map(|m| m["role"].as_str().unwrap_or("")).collect();
         assert_eq!(roles, ["system", "user"]);
+        assert_eq!(sent[1]["messages"][0]["content"], super::super::acp::SYSTEM_NOTE);
         assert_eq!(sent[1]["messages"][1]["content"], "two");
         b.shutdown(true);
     }
@@ -2767,6 +2782,7 @@ mod tests {
             tools: vec![json!({"type": "function", "function": {"name": "measure"}})],
             tool_names: vec!["measure".into()],
             history: vec![json!({"role": "user", "content": "hi"})],
+            note: super::super::acp::SYSTEM_NOTE.to_string(),
             session_id: "test-session".to_string(),
             gemini_sigs: Default::default(),
             events,
