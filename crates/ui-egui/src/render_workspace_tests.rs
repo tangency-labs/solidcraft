@@ -2216,9 +2216,9 @@ fn native_cpu_controls_check_and_start_the_same_capture_and_keep_it_exportable()
     h.call("ui.resize", json!({"width":1600,"height":1800}));
     enter(&mut h.app, true).unwrap();
     inspector::select_editor(&mut h.app, inspector::Editor::Output);
-    h.app.render_workspace.view.draft.width = 16;
-    h.app.render_workspace.view.draft.height = 16;
-    h.app.render_workspace.view.dirty = true;
+    // Keep the small capture size in the saved setup across editor autosaves.
+    let name = h.app.render_workspace.view.name.clone();
+    h.app.run("render.settings.set", json!({"name":name,"set":{"width":16,"height":16}})).unwrap();
     h.frames(3);
     let available = image_host(&h.app, ImageMethod::CpuRaytrace).is_ok();
     h.step(&json!({"click":{"handle":"render:method"}})).unwrap();
@@ -2231,6 +2231,7 @@ fn native_cpu_controls_check_and_start_the_same_capture_and_keep_it_exportable()
     assert_eq!(h.app.render_workspace.view.method, ImageMethod::CpuRaytrace);
     h.app.run("view.render_select", json!({"kind":"sampling"})).unwrap();
     h.frames(3);
+    h.step(&json!({"click":{"handle":format!("dialog:section:{}", h.app.tr("render.children.cpu"))}})).unwrap();
     h.step(&json!({"click":{"handle":"render:aa"}})).unwrap();
     h.step(&json!({"click":{"handle":"render:aa-4"}})).unwrap();
     assert_eq!(h.app.render_workspace.view.raytrace.primary_samples, 4);
