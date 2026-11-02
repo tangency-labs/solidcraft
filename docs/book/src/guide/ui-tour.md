@@ -5,8 +5,11 @@
 - **Title bar.** On Windows and Linux the application bar is the window's title bar. On the left:
   the File menu (New, Open, Save, Save As, Export…), undo and redo, the Home tab (the start page)
   and one tab per open design (each with its own undo history, selection and camera; a dot marks
-  unsaved changes). On the right: Report a bug, Help (?), Preferences (which hold the theme) and the
-  window's buttons. On Linux, to have your desktop's own title bar and window buttons instead, set
+  unsaved changes). Double-click a design's tab to rename the design: type the name, then press
+  Enter or click elsewhere to keep it, or Esc to leave the old one (Preferences › Interface turns
+  this off, for a double-click that maximizes the window instead). On the right: Report a bug,
+  Help (?), Preferences (which hold the theme) and the window's buttons. On Linux, to have your
+  desktop's own title bar and window buttons instead, set
   `SOLIDCRAFT_TITLEBAR=system` or put `"titlebar": "system"` in `graphics.json` in the settings
   folder (see [Troubleshooting](troubleshooting.md#reset-the-settings)) and restart; `app` (the
   default) puts the application bar back.
