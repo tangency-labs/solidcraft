@@ -172,11 +172,12 @@ pub struct McpBridge {
 
 impl McpBridge {
     pub fn to_json(&self) -> Value {
+        let control_dir = solidcraft_engine::control_auth::token_path(self.port).and_then(|path| path.parent().map(std::path::Path::to_path_buf));
         json!({
             "name": BRIDGE_NAME,
             "command": self.cli.to_string_lossy(),
             "args": ["mcp", "--connect", format!("127.0.0.1:{}", self.port)],
-            "env": [],
+            "env": bridge_env(std::env::var_os("XDG_DATA_HOME"), control_dir),
         })
     }
 
@@ -211,8 +212,23 @@ pub fn wsl_path(path: &std::path::Path) -> std::path::PathBuf {
     }
 }
 
+/// Pass the app's effective token folder directly to its MCP child. XDG_DATA_HOME is also
+/// forwarded for other SolidCraft data lookups, but SOLIDCRAFT_CONTROL_DIR takes precedence in
+/// control_auth and therefore keeps authentication aligned with the exact token_path for this port.
+fn bridge_env(xdg_data_home: Option<std::ffi::OsString>, control_dir: Option<std::path::PathBuf>) -> Value {
+    let mut env = Vec::with_capacity(2);
+    if let Some(value) = xdg_data_home {
+        env.push(json!({"name": "XDG_DATA_HOME", "value": value.to_string_lossy()}));
+    }
+    if let Some(value) = control_dir {
+        env.push(json!({"name": "SOLIDCRAFT_CONTROL_DIR", "value": value.to_string_lossy()}));
+    }
+    Value::Array(env)
+}
+
 /// What every session is told about where it is. An agent with no route for it in
 /// [`session_new_params`] doesn't get it.
+
 pub const SYSTEM_NOTE: &str = "You are running inside SolidCraft, a parametric 3D CAD application, as the user's assistant. \
 The open design is reachable through the `solidcraft-app` MCP server: use its tools (list_commands, batch, execute, inspect_design, \
 measure, screenshot, set_parameter, undo, skill_reference) to read and change the design the user is looking at, and verify with \
@@ -772,6 +788,20 @@ mod tests {
         assert_eq!(p["cwd"], "/mnt/c/Users/u/work");
         assert_eq!(p["mcpServers"][0]["command"], "/mnt/c/Program Files/SolidCraft/solidcraft-cli.exe");
         assert_eq!(p["mcpServers"][0]["args"], json!(["mcp", "--connect", "127.0.0.1:41234"]));
+    }
+
+    #[test]
+    fn bridge_environment_passes_data_root_and_effective_control_folder_without_secrets() {
+        let env = bridge_env(Some(std::ffi::OsString::from("/flatpak/data")), Some(std::path::PathBuf::from("/flatpak/data/solidcraft/control")));
+        assert_eq!(
+            env,
+            json!([
+                {"name": "XDG_DATA_HOME", "value": "/flatpak/data"},
+                {"name": "SOLIDCRAFT_CONTROL_DIR", "value": "/flatpak/data/solidcraft/control"},
+            ])
+        );
+        assert_eq!(bridge_env(None, None), json!([]));
+        assert!(env.to_string().find("token").is_none());
     }
 
     #[test]
