@@ -147,6 +147,10 @@ fn handshake_and_tools_list() {
         "new_design",
         "open",
         "save",
+        "documents",
+        "quit_app",
+        "preferences",
+        "agent_cursor",
     ] {
         assert!(names.contains(&want), "{want} missing from {names:?}");
     }
@@ -3280,4 +3284,146 @@ fn plain_headless_adds_no_notice() {
     let mut s = server();
     let r = raw_tool(&mut s, "list_commands", json!({}));
     assert_eq!(r["result"]["content"].as_array().unwrap().len(), 1);
+}
+
+/// #3704: a fake desktop app that records the app-management methods it is asked.
+struct AppTools {
+    calls: Vec<(String, Value)>,
+}
+
+impl crate::backend::Backend for AppTools {
+    fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        self.calls.push((method.to_string(), params.clone()));
+        match method {
+            "ui.documents" => Ok(json!({"documents": [{"name": "A", "active": true, "unsaved": false}], "active_index": 0})),
+            "app.quit" => Ok(json!({"quitting": true})),
+            "ui.prefs" => Ok(json!({"default_units": "mm", "theme": "dark"})),
+            "ui.agent_cursor" => Ok(json!({"show": true, "speed": 2.0, "follow_camera": false})),
+            other => Err(format!("unknown method `{other}`")),
+        }
+    }
+    fn has_ui(&self) -> bool {
+        true
+    }
+    fn describe(&self) -> String {
+        "app-tools".into()
+    }
+}
+
+fn app_tool(name: &str, args: Value) -> (AppTools, Value, bool) {
+    let mut b = AppTools { calls: Vec::new() };
+    let r = crate::tools::call_tool(&mut b, name, &args);
+    let is_error = r["isError"] == json!(true);
+    (b, r, is_error)
+}
+
+fn app_methods(b: &AppTools) -> Vec<&str> {
+    b.calls.iter().map(|(m, _)| m.as_str()).collect()
+}
+
+/// #3704: headless has no window, so the four app-management tools say so at once, naming the tool.
+#[test]
+fn app_tools_need_the_desktop_app() {
+    let mut s = server();
+    for name in ["documents", "quit_app", "preferences", "agent_cursor"] {
+        let r = raw_tool(&mut s, name, json!({}));
+        assert_eq!(r["result"]["isError"], json!(true), "{name}: {r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with(name), "{name}: {text}");
+        assert!(text.contains("needs the desktop app"), "{name}: {text}");
+    }
+}
+
+/// #3704: `documents` lists the tabs with no action, and passes action/index/force to ui.documents.
+#[test]
+fn documents_bridges_to_ui_documents() {
+    let (b, r, is_err) = app_tool("documents", json!({}));
+    assert!(!is_err, "{r}");
+    assert_eq!(app_methods(&b), ["ui.documents"]);
+    assert_eq!(b.calls[0].1, json!({}));
+
+    let (b, r, is_err) = app_tool("documents", json!({"action": "switch", "index": 2}));
+    assert!(!is_err, "{r}");
+    assert_eq!(b.calls[0].1, json!({"action": "switch", "index": 2}));
+
+    let (b, r, is_err) = app_tool("documents", json!({"action": "close", "force": true}));
+    assert!(!is_err, "{r}");
+    assert_eq!(b.calls[0].1, json!({"action": "close", "force": true}));
+
+    let (b, _r, is_err) = app_tool("documents", json!({"action": "new"}));
+    assert!(!is_err);
+    assert_eq!(b.calls[0].1, json!({"action": "new"}));
+}
+
+/// #3704: `quit_app` asks app.quit, with force only when given.
+#[test]
+fn quit_app_bridges_to_app_quit() {
+    let (b, r, is_err) = app_tool("quit_app", json!({}));
+    assert!(!is_err, "{r}");
+    assert_eq!(app_methods(&b), ["app.quit"]);
+    assert_eq!(b.calls[0].1, json!({}));
+
+    let (b, _r, is_err) = app_tool("quit_app", json!({"force": true}));
+    assert!(!is_err);
+    assert_eq!(b.calls[0].1, json!({"force": true}));
+}
+
+/// #3704: `preferences` reads with no arguments and passes the named ones straight to ui.prefs;
+/// a preference the app does not know is the app's refusal, not a schema error.
+#[test]
+fn preferences_reads_and_sets() {
+    let (b, r, is_err) = app_tool("preferences", json!({}));
+    assert!(!is_err, "{r}");
+    assert_eq!(app_methods(&b), ["ui.prefs"]);
+    assert_eq!(b.calls[0].1, json!({}));
+
+    let (b, r, is_err) = app_tool("preferences", json!({"theme": "dark", "default_units": "cm"}));
+    assert!(!is_err, "{r}");
+    assert_eq!(b.calls[0].1, json!({"theme": "dark", "default_units": "cm"}));
+    assert!(r["content"][0]["text"].as_str().unwrap().contains("dark"));
+
+    // A made-up key passes the schema (additionalProperties) and is refused by the app.
+    let mut s = server();
+    let r = raw_tool(&mut s, "preferences", json!({"no_such_preference": 1}));
+    assert_eq!(r["result"]["isError"], json!(true), "{r}");
+}
+
+/// #3704: `agent_cursor` passes show/speed/follow_camera to ui.agent_cursor, and speed may be "instant".
+#[test]
+fn agent_cursor_bridges_to_ui_agent_cursor() {
+    let (b, r, is_err) = app_tool("agent_cursor", json!({}));
+    assert!(!is_err, "{r}");
+    assert_eq!(app_methods(&b), ["ui.agent_cursor"]);
+    assert_eq!(b.calls[0].1, json!({}));
+
+    let (b, _r, is_err) = app_tool("agent_cursor", json!({"show": true, "speed": "instant", "follow_camera": true}));
+    assert!(!is_err);
+    assert_eq!(b.calls[0].1, json!({"show": true, "speed": "instant", "follow_camera": true}));
+}
+
+/// #3704: the app-management tools are not engine commands, so a batch step names the tool, not
+/// a confusing "unknown command"; and their schemas still refuse unknown arguments.
+#[test]
+fn app_tools_are_not_batch_steps_and_check_arguments() {
+    for name in ["documents", "quit_app", "preferences", "agent_cursor"] {
+        let mut s = server();
+        let r = raw_tool(&mut s, "batch", json!({"commands": [{"command": name}]}));
+        assert_eq!(r["result"]["isError"], json!(true), "{name}: {r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains(&format!("`{name}` is a tool")), "{name}: {text}");
+        // `execute` wrapping them is refused too, with the same direction.
+        let r = raw_tool(&mut s, "execute", json!({"command": name}));
+        assert_eq!(r["result"]["isError"], json!(true), "execute {name}: {r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains(&format!("`{name}` is a tool, not an engine command")), "execute {name}: {text}");
+    }
+    let mut s = server();
+    // Unknown arguments are schema errors…
+    assert_eq!(raw_tool(&mut s, "documents", json!({"bogus": 1}))["error"]["code"], -32602);
+    assert_eq!(raw_tool(&mut s, "agent_cursor", json!({"bogus": 1}))["error"]["code"], -32602);
+    assert_eq!(raw_tool(&mut s, "quit_app", json!({"bogus": 1}))["error"]["code"], -32602);
+    // …while `preferences` takes any key (the app decides which it knows).
+    let r = raw_tool(&mut s, "preferences", json!({"any_preference": 1}));
+    assert_eq!(r["result"]["isError"], json!(true), "{r}");
+    assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("needs the desktop app"), "{r}");
 }
