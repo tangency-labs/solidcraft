@@ -180,6 +180,9 @@ sketch.constraint.perpendicular   2D sketch only (the sketch solver and engine t
 sketch.constraint.polygon         2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.symmetry        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.construction               2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.construction_line          2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.construction_line.horizontal  2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.construction_line.vertical 2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.copy                       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.cut                        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.delete                     2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -218,6 +221,9 @@ sketch.slot.arc_three_point       2D sketch only (the sketch solver and engine t
 sketch.slot.center_point          2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.snap                       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.solve                      2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.spline.insert_point        2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.spline.remove_point        2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.spline.reverse             2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.toggle_driven              2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.transform                  2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.trim                       2D sketch only (the sketch solver and engine tests); no kernel operation
