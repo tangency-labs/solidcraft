@@ -911,13 +911,15 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
     });
     if let Some(queued) = app.viewport.device_motion.take() {
         let before = app.cam;
-        device_camera(&mut app.cam, queued.motion, queued.seconds, height, turn, app.preferences.free_orbit, anchor, pivot);
+        let lock = app.preferences.space_mouse_horizon_lock;
+        device_camera(&mut app.cam, queued.motion, queued.seconds, height, turn, app.preferences.free_orbit, lock, anchor, pivot);
         app.cam = crate::view_angles::keep_locked(app, before, app.cam);
     }
     // A device app's motion (the navigation bridge), on the same terms.
     if let Some(queued) = app.viewport.bridge_motion.take() {
         let before = app.cam;
-        bridge_camera(&mut app.cam, queued, height, turn, app.preferences.zoom_reverse, app.preferences.free_orbit, anchor, pivot);
+        let lock = app.preferences.space_mouse_horizon_lock;
+        bridge_camera(&mut app.cam, queued, height, turn, app.preferences.zoom_reverse, app.preferences.free_orbit, lock, anchor, pivot);
         app.cam = crate::view_angles::keep_locked(app, before, app.cam);
     }
 }
@@ -939,6 +941,7 @@ pub(crate) fn bridge_camera(
     turn: bool,
     reverse_zoom: bool,
     free_orbit: bool,
+    horizon_lock: bool,
     anchor: Option<Vec3>,
     pivot: Option<Vec3>,
 ) {
@@ -947,7 +950,14 @@ pub(crate) fn bridge_camera(
     let [ox, oy] = motion.orbit;
     if turn {
         let keep = pivot.map(|p| (p, cam.frame_coords(p)));
-        if free_orbit {
+        if horizon_lock {
+            if free_orbit {
+                cam.orbit_unlimited(ox, oy);
+            } else {
+                cam.orbit(ox, oy);
+            }
+            level_horizon(cam, BRIDGE_FRAME_SECONDS, free_orbit);
+        } else if free_orbit {
             cam.rotate_in_view(Vec3::new(-oy * 0.008, -ox * 0.008, 0.0));
         } else {
             orbit_on_screen(cam, ox, oy);
@@ -968,13 +978,37 @@ pub(crate) fn bridge_camera(
     }
 }
 
+/// With the horizon lock, the share of a roll left after a second is `e^-HORIZON_LEVEL_RATE`.
+const HORIZON_LEVEL_RATE: f64 = 8.0;
+
+/// A device app's motion carries no time: its horizon lock eases the roll as one frame does.
+const BRIDGE_FRAME_SECONDS: f64 = 1.0 / 60.0;
+
+/// Ease `cam`'s roll toward level over `seconds` (the 3D mouse horizon lock): the short way
+/// round, never past level, and exactly level once within a hair, so a view that is level stays
+/// exactly level. Level is no roll, or, with `over_poles` (free orbit tilts on over the top, so
+/// the view may be upside down), the nearest half turn.
+fn level_horizon(cam: &mut Camera, seconds: f64, over_poles: bool) {
+    use std::f64::consts::{PI, TAU};
+    if !cam.roll.is_finite() {
+        cam.roll = 0.0;
+        return;
+    }
+    let level = if over_poles { (cam.roll / PI).round() * PI } else { 0.0 };
+    let off = (cam.roll - level + PI).rem_euclid(TAU) - PI;
+    let eased = off * (-HORIZON_LEVEL_RATE * seconds).exp();
+    cam.roll = level + if eased.abs() < 1e-4 { 0.0 } else { eased };
+}
+
 /// `seconds` of 3D mouse `motion` on `cam`, in a view `height` points tall. A full deflection
 /// pans about 0.6 of the view's height a second and turns about two radians a second, whatever
 /// the frame rate. With `turn` off the view keeps its orientation. `anchor` is the model point the
 /// view holds while it zooms, as the wheel's cursor point (none zooms through the model, #7435).
 /// `pivot` is the point the view turns around and keeps still on screen (none: the view's centre).
 /// Reverse zoom direction is a wheel setting and leaves the cap alone: the cap's own direction is
-/// its per-axis invert, already in `motion` (#8993).
+/// its per-axis invert, already in `motion` (#8993). With `horizon_lock` the view never rolls:
+/// `free_orbit` then only lets the tilt go on over the poles, as the mouse's upright free orbit
+/// does (see [`level_horizon`]).
 pub(crate) fn device_camera(
     cam: &mut Camera,
     motion: Motion,
@@ -982,6 +1016,7 @@ pub(crate) fn device_camera(
     height: f64,
     turn: bool,
     free_orbit: bool,
+    horizon_lock: bool,
     anchor: Option<Vec3>,
     pivot: Option<Vec3>,
 ) {
@@ -999,7 +1034,18 @@ pub(crate) fn device_camera(
         // Roll and Rz is Spin. The KMJ profile swaps physical Ry/Rz for the selected navigation
         // mode, so swapping them again here would make Roll behave like Spin.
         let keep = pivot.map(|p| (p, cam.frame_coords(p)));
-        if free_orbit {
+        if horizon_lock {
+            // The horizon stays level: Tilt tilts, Roll and Spin both turn about the world's up
+            // axis, and a roll the view already has is eased out. With free orbit the tilt goes
+            // on over the poles (the mouse's upright free orbit); without it, it stops at them.
+            let (turn, tilt) = ((ry + rz) * 250.0 * seconds, rx * 250.0 * seconds);
+            if free_orbit {
+                cam.orbit_unlimited(turn, tilt);
+            } else {
+                cam.orbit(turn, tilt);
+            }
+            level_horizon(cam, seconds, free_orbit);
+        } else if free_orbit {
             cam.rotate_in_view(Vec3::new(-rx, -ry, rz) * (2.0 * seconds));
         } else {
             orbit_on_screen(cam, ry * 250.0 * seconds, rx * 250.0 * seconds);
@@ -1721,6 +1767,135 @@ mod tests {
         assert!((h.app.cam.back().z - 0.6_f64.sin()).abs() > 1e-3);
     }
 
+    /// The 3D mouse horizon lock: whatever the six axes do, the view never rolls and the world's
+    /// up axis stays vertical on screen, with or without free orbit.
+    #[test]
+    fn horizon_lock_keeps_the_horizon_level_whatever_the_six_axes_do() {
+        use super::*;
+        use crate::space_mouse::Motion;
+        for up in [solidcraft_engine::render::UpAxis::Z, solidcraft_engine::render::UpAxis::Y] {
+            for free_orbit in [false, true] {
+                let mut cam = Camera { yaw: 0.3, pitch: 0.4, up, ..Default::default() };
+                for i in 0..600 {
+                    let t = f64::from(i) * 0.37;
+                    let motion = Motion {
+                        translation: [t.sin(), (t * 1.3).cos(), (t * 0.7).sin()],
+                        rotation: [(t * 0.9).sin(), (t * 1.7).cos(), (t * 0.5).sin()],
+                    };
+                    device_camera(&mut cam, motion, 0.016, 600.0, true, free_orbit, true, None, None);
+                    assert!(cam.basis().0.dot(cam.up_dir()).abs() < 1e-9, "{up:?} free_orbit {free_orbit}: frame {i}: the horizon stays level");
+                    if !free_orbit {
+                        assert_eq!(cam.roll, 0.0, "{up:?}: frame {i}");
+                        assert!(cam.basis().1.dot(cam.up_dir()) >= 0.0, "{up:?}: never upside down");
+                    }
+                }
+            }
+        }
+    }
+
+    /// With free orbit too, the tilt goes on over the poles (the view ends up upside down) while the
+    /// horizon stays level, with no jump of the heading; a roll the view had is eased out.
+    #[test]
+    fn horizon_lock_with_free_orbit_tilts_over_the_pole_and_keeps_the_horizon_level() {
+        use super::*;
+        use crate::space_mouse::Motion;
+        for up in [solidcraft_engine::render::UpAxis::Z, solidcraft_engine::render::UpAxis::Y] {
+            for start_roll in [0.0, 0.7] {
+                let mut cam = Camera { yaw: 0.5, pitch: 0.3, roll: start_roll, up, ..Default::default() };
+                let seconds = 0.016;
+                let step = 2.0 * seconds;
+                let mut upside_down = false;
+                for i in 0..400 {
+                    let before = cam;
+                    let rotation = [1.0, if i % 2 == 0 { 0.4 } else { -0.4 }, 0.0];
+                    device_camera(&mut cam, Motion { translation: [0.0; 3], rotation }, seconds, 600.0, true, true, true, None, None);
+                    let moved = before.back().dot(cam.back()).clamp(-1.0, 1.0).acos();
+                    assert!(moved <= 2.0 * step + 1e-6, "{up:?} frame {i}: the view jumped by {moved}");
+                    if i > 200 {
+                        assert!(cam.basis().0.dot(cam.up_dir()).abs() < 1e-6, "{up:?} frame {i}: the horizon stays level: {cam:?}");
+                    }
+                    upside_down |= cam.basis().1.dot(cam.up_dir()) < 0.0;
+                }
+                assert!(upside_down, "{up:?} start roll {start_roll}: the tilt went on over the pole");
+            }
+        }
+    }
+
+    /// Off (the default), the cap turns the view as it did before: Tilt and Roll orbit, Spin rolls.
+    #[test]
+    fn without_the_horizon_lock_the_cap_still_rolls_the_view() {
+        use super::*;
+        use crate::space_mouse::Motion;
+        let motion = Motion { translation: [0.0; 3], rotation: [0.2, 0.3, 0.5] };
+        let start = Camera { yaw: 0.3, pitch: 0.4, ..Default::default() };
+        let mut cam = start;
+        device_camera(&mut cam, motion, 0.1, 600.0, true, false, false, None, None);
+        let mut by_hand = start;
+        by_hand.orbit(0.3 * 250.0 * 0.1, 0.2 * 250.0 * 0.1);
+        by_hand.roll_by(0.5 * 2.0 * 0.1);
+        assert_eq!(cam, by_hand);
+        assert!(cam.roll != 0.0, "Spin rolls the view");
+    }
+
+    /// Switching the lock on in a rolled view eases the roll out: it falls steadily to level, with
+    /// no jump (bar the last hair, 1e-4 rad, that snaps to level), either way round.
+    #[test]
+    fn horizon_lock_eases_an_existing_roll_out_without_a_jump() {
+        use super::*;
+        use crate::space_mouse::Motion;
+        for start_roll in [0.7, -0.7, 3.0, -3.0, 7.0] {
+            let mut cam = Camera { yaw: 0.3, pitch: 0.2, roll: start_roll, ..Default::default() };
+            let mut last = (cam.roll + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+            let mut frames = 0;
+            while cam.roll != 0.0 {
+                device_camera(&mut cam, Motion { translation: [0.0; 3], rotation: [0.0; 3] }, 0.016, 600.0, true, false, true, None, None);
+                let now = cam.roll;
+                assert!(now.abs() < last.abs(), "start {start_roll}: roll {now} after {last}");
+                assert!(last.abs() - now.abs() <= last.abs() * (1.0 - (-8.0_f64 * 0.016).exp()) + 1e-4, "start {start_roll}: no jump");
+                last = now;
+                frames += 1;
+                assert!(frames < 600, "start {start_roll}: levelled within ten seconds");
+            }
+        }
+    }
+
+    /// Tilting on into a pole stops at the pole, with the view's direction moving smoothly: no
+    /// flip and no jump of the heading.
+    #[test]
+    fn horizon_lock_tilts_into_the_pole_without_flipping() {
+        use super::*;
+        use crate::space_mouse::Motion;
+        for tilt in [1.0, -1.0] {
+            let mut cam = Camera { yaw: 0.5, pitch: 0.0, ..Default::default() };
+            let seconds = 0.016;
+            let step = 2.0 * seconds;
+            for i in 0..400 {
+                let before = cam;
+                let rotation = [tilt, if i % 2 == 0 { 0.5 } else { -0.5 }, 0.0];
+                device_camera(&mut cam, Motion { translation: [0.0; 3], rotation }, seconds, 600.0, true, false, true, None, None);
+                assert!(cam.pitch.abs() < std::f64::consts::FRAC_PI_2, "frame {i}: {cam:?}");
+                assert!(cam.basis().1.dot(cam.up_dir()) >= 0.0, "frame {i}: never upside down");
+                let moved = before.back().dot(cam.back()).clamp(-1.0, 1.0).acos();
+                assert!(moved <= 2.0 * step + 1e-9, "frame {i}: the view jumped by {moved}");
+            }
+            assert!(cam.pitch.abs() > std::f64::consts::FRAC_PI_2 - 1e-3, "tilt {tilt}: it reached the pole");
+        }
+    }
+
+    /// A device app's orbit keeps the horizon on the same terms.
+    #[test]
+    fn horizon_lock_applies_to_a_device_apps_orbit_too() {
+        use super::*;
+        let mut cam = Camera { yaw: 0.3, pitch: 0.2, roll: 0.7, ..Default::default() };
+        for _ in 0..600 {
+            let motion = BridgeMotion { orbit: [9.0, 4.0], ..Default::default() };
+            bridge_camera(&mut cam, motion, 600.0, true, false, false, true, None, None);
+            assert!(cam.basis().1.dot(cam.up_dir()) >= 0.0);
+        }
+        assert_eq!(cam.roll, 0.0);
+        assert!(cam.basis().0.dot(cam.up_dir()).abs() < 1e-9);
+    }
+
     #[test]
     fn solidworks_mouse_orbit_passes_the_pole_and_shift_snaps() {
         use serde_json::json;
@@ -1792,7 +1967,7 @@ mod tests {
         }
         // Other presets keep the existing upright camera behavior.
         let mut cam = Camera { yaw: 0.0, pitch: 1.5, ..Default::default() };
-        device_camera(&mut cam, Motion { translation: [0.0; 3], rotation: [1.0, 0.0, 0.0] }, 0.1, 600.0, true, false, None, None);
+        device_camera(&mut cam, Motion { translation: [0.0; 3], rotation: [1.0, 0.0, 0.0] }, 0.1, 600.0, true, false, false, None, None);
         assert!(cam.pitch < std::f64::consts::FRAC_PI_2 && cam.pitch > 1.5);
     }
 
@@ -1819,11 +1994,11 @@ mod tests {
             let rolled = Camera { roll, ..upright };
             for rotation in [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.6, -0.8, 0.0]] {
                 let cap = |cam: &mut Camera| {
-                    device_camera(cam, Motion { translation: [0.0; 3], rotation }, 1e-4, 600.0, true, false, None, None);
+                    device_camera(cam, Motion { translation: [0.0; 3], rotation }, 1e-4, 600.0, true, false, false, None, None);
                 };
                 let bridge = |cam: &mut Camera| {
                     let orbit = [rotation[1] * 0.03, rotation[0] * 0.03];
-                    bridge_camera(cam, BridgeMotion { orbit, ..Default::default() }, 600.0, true, false, false, None, None);
+                    bridge_camera(cam, BridgeMotion { orbit, ..Default::default() }, 600.0, true, false, false, false, None, None);
                 };
                 for turn in [&cap as &dyn Fn(&mut Camera), &bridge] {
                     let (want, got) = (on_screen(upright, turn), on_screen(rolled, turn));

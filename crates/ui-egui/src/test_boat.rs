@@ -110,7 +110,7 @@ impl Boat {
 /// `motion` for `seconds` on the boat's camera in a box `aspect` wide for its height of `height`
 /// points, with pan and zoom held so a sphere of `radius` stays inside it.
 pub(crate) fn step(cam: &mut Camera, motion: crate::space_mouse::Motion, seconds: f64, height: f64, radius: f64, aspect: f64, free_orbit: bool) {
-    crate::navigation::device_camera(cam, motion, seconds, height, true, free_orbit, None, None);
+    crate::navigation::device_camera(cam, motion, seconds, height, true, free_orbit, false, None, None);
     cam.fov = FOV;
     // Zoom within limits: the nearest still shows the whole boat in the shorter side of the box.
     let shorter = aspect.min(1.0);
