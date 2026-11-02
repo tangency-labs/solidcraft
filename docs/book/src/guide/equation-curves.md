@@ -137,12 +137,20 @@ in it; change them and click **OK**.
   `2 * pi` (6.28) along x, not every 360.
 - **The circle has a gap.** End must be a whole turn: `2 * pi`, or `360 deg`.
 - **A rule is rejected.** Use `*` for multiply (`2 * t`, not `2t`), and close every bracket.
+- **"Can't be shown to stay within the tolerance near …".** The rule jumps there (`floor`,
+  `round`, `sign`, `mod`, or `tan` at a quarter turn), and a smooth curve can't follow a jump.
+  Narrow the range to one side of it, or use a rule without the jump.
+- **"Even 500 points don't keep the spline within the tolerance".** The rule bends faster than 500
+  points can follow, such as a very fine wave. Raise the tolerance or narrow the range.
 
 ## For scripts and agents
 
 The commands are `sketch.equation_curve` and `sketch.equation_curve.edit` (see the
 [command reference](../reference/commands.md)). The curve is a fit point spline through points
 worked out from the rules, as many as keep it within the **Tolerance** (0.01 mm unless you set
-another), up to 500. Its points are fixed, so other curves can start at its ends. When a parameter
-a rule uses changes, the points follow. The pictures on this page come from the scripts in
+another), up to 500. That is proven all along the curve, not checked at a few places between the
+points, and the reply's `deviation` is the bound. Its points are fixed, so other curves can start
+at its ends. When a parameter a rule uses changes, the points follow; if the new values make the
+curve bend more than its points can follow within the Tolerance, the sketch says so, and editing
+the curve fits it again. The pictures on this page come from the scripts in
 `docs/book/scripts/equation-*.json`.

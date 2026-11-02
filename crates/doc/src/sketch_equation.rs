@@ -1,14 +1,23 @@
 //! Equation curves (#8352): the points of a sketch curve worked out from its formulas over the
 //! design's parameters. The formulas are evaluated at evenly spaced values of the curve's
 //! variable; the sketch draws a cubic fit spline through those points. How many points: as many
-//! as it takes for the spline to stay within the curve's tolerance of the formulas, checked
-//! between the points, up to the most a spline takes. When the parameters change, the same
-//! number of points is placed again (`Document::apply_equation_values`), before every solve.
+//! as it takes for the spline to stay within the curve's tolerance of the formulas, proven
+//! between the points (#10414), up to the most a spline takes. When the parameters change, the
+//! same number of points is placed again (`Document::apply_equation_values`), before every solve.
+//!
+//! The proof: on each span of the spline, the formula's variable `t` is mapped linearly onto the
+//! span's Bézier parameter `s`, and `|F(t) − B(s(t))|` is bounded over the span in intervals
+//! ([`solidcraft_geom::enclosure`]), with the derivative's mean-value form to keep the bound
+//! close, splitting the span where the bound is too wide. Every point of the formulas is then
+//! within the bound of a point of the spline, and every point of the spline within it of a point
+//! of the formulas. A formula that jumps (`floor`, `sign`, `mod`, `tan` at a pole) or leaves a
+//! function's domain inside a span can't be proven there, and the curve is refused with where.
 
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use solidcore_record::Vec2;
+use solidcraft_geom::enclosure::{Interval, Jet, Real};
 use solidcraft_sketch::{EquationCurve, MAX_COORD, MAX_EQUATION_TEXT, MAX_SPLINE_POINTS, Sketch, VariableUnit, fit_beziers_mode};
 
 use crate::expr::{self, Defaults, Kind, Value};
@@ -25,6 +34,11 @@ const FIRST_COUNT: usize = 9;
 const MAX_RANGE: f64 = 1e6;
 /// How many times the point count is raised before the fit gives up.
 const MAX_ROUNDS: usize = 12;
+/// Most parts of spans the proof bounds for one point count: it bounds each span once and splits
+/// only where the bound is too wide, so this is reached only by a formula far from its spline.
+const MAX_CHECKS: usize = 20_000;
+/// The narrowest part of a span the proof splits, as a fraction of the span.
+const MIN_PART: f64 = 1e-9;
 
 /// An equation curve's points and how well the spline through them follows the formulas.
 #[derive(Clone, Debug, PartialEq)]
@@ -33,7 +47,8 @@ pub struct EquationFit {
     pub points: Vec<Vec2>,
     /// The curve ends where it starts: the spline closes smoothly there.
     pub closed: bool,
-    /// The largest distance (mm) found between the spline and the formulas.
+    /// How far the spline may stray from the formulas (mm): a proven bound, within the tolerance
+    /// for a fit that is accepted.
     pub deviation: f64,
 }
 
@@ -179,40 +194,335 @@ fn check_samples(points: &[Vec2], closed: bool) -> Result<()> {
     Ok(())
 }
 
-/// Distance from `q` to the cubic Bézier `b`, sampled finely.
-fn bezier_distance(b: &[Vec2; 4], q: Vec2) -> f64 {
-    const STEPS: usize = 32;
-    let at = |t: f64| {
-        let s = 1.0 - t;
-        b[0] * (s * s * s) + b[1] * (3.0 * t * s * s) + b[2] * (3.0 * t * t * s) + b[3] * (t * t * t)
-    };
-    let mut best = f64::INFINITY;
-    let mut prev = at(0.0);
-    for i in 1..=STEPS {
-        let next = at(i as f64 / STEPS as f64);
-        let d = next - prev;
-        let l2 = d.len2();
-        let t = if l2 > 0.0 { ((q - prev).dot(d) / l2).clamp(0.0, 1.0) } else { 0.0 };
-        best = best.min(q.dist(prev + d * t));
-        prev = next;
-    }
-    best
+/// The formulas, read once, for evaluating in intervals many times.
+struct Formulas<'a> {
+    vals: &'a BTreeMap<String, Value>,
+    eq: &'a EquationCurve,
+    x: Option<expr::Compiled>,
+    y: expr::Compiled,
+    d: Defaults,
 }
 
-/// How far the spline through `points` strays from the formulas: the largest distance from the
-/// formulas' points a quarter, a half and three quarters of the way between two samples to the
-/// spline's piece between them.
-fn deviation(vals: &BTreeMap<String, Value>, eq: &EquationCurve, (a, b): (f64, f64), points: &[Vec2], closed: bool, d: Defaults) -> Result<f64> {
-    let pieces = fit_beziers_mode(points, closed).map_err(|e| DocError::Invalid(e.to_string()))?;
-    let step = (b - a) / points.len().saturating_sub(1).max(1) as f64;
-    let mut worst: f64 = 0.0;
-    for (i, piece) in pieces.iter().enumerate() {
-        for k in [0.25, 0.5, 0.75] {
-            let q = point_at(vals, eq, a + step * (i as f64 + k), d)?;
-            worst = worst.max(bezier_distance(piece, q));
+impl<'a> Formulas<'a> {
+    fn new(vals: &'a BTreeMap<String, Value>, eq: &'a EquationCurve, d: Defaults) -> Result<Formulas<'a>> {
+        let x = eq.x.as_deref().map(expr::Compiled::new).transpose()?;
+        Ok(Formulas { vals, eq, x, y: expr::Compiled::new(&eq.y)?, d })
+    }
+
+    /// The formulas' point where the variable is `at`, in `N`, in mm.
+    fn at<N: Real>(&self, at: N) -> Result<[N; 2]> {
+        let d = self.d;
+        let in_len = |x: N| expr::proven(N::exact(d.len).and_then(|l| x.mul(l)));
+        let variable = match self.eq.variable_unit {
+            VariableUnit::Number => Value { v: at, len: 0, ang: 0 },
+            VariableUnit::Range => Value { v: in_len(at)?, len: 1, ang: 0 },
+        };
+        let name = self.eq.variable();
+        let lookup = |n: &str| {
+            if n == name {
+                Ok(variable)
+            } else {
+                self.vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`")))?.exact::<N>()
+            }
+        };
+        let x = match &self.x {
+            Some(c) => c.eval(&lookup, d)?.to_kind_in(Kind::Length, d)?,
+            None => in_len(at)?,
+        };
+        Ok([x, self.y.eval(&lookup, d)?.to_kind_in(Kind::Length, d)?])
+    }
+
+    /// `F(t) − B(s(t))` for the cubic Bézier `b`, over a part of its span where `s` runs linearly
+    /// from `s0` at `t0` to `s1` at `t1`.
+    fn gap<N: Real>(&self, b: &[Vec2; 4], part: Part, t: N) -> Result<[N; 2]> {
+        let p = expr::proven;
+        let [t0, t1, s0, s1] = [part.t0, part.t1, part.s0, part.s1].map(N::exact);
+        let (t0, t1, s0, s1) = (p(t0)?, p(t1)?, p(s0)?, p(s1)?);
+        let s = p(t.sub(t0).and_then(|u| t1.sub(t0).and_then(|h| u.div(h))).and_then(|f| s1.sub(s0).and_then(|w| f.mul(w))).and_then(|v| s0.add(v)))?;
+        // The piece about the middle of the part's run of `s`, so its bound grows only with the
+        // square of how far `s` runs, not with the size of its control points.
+        let sc = f64::midpoint(part.s0, part.s1);
+        let delta = p(s.sub(p(N::exact(sc))?))?;
+        let f = self.at(t)?;
+        let mut out = f;
+        for (k, o) in out.iter_mut().enumerate() {
+            let [c0, c1, c2, c3] = taylor(b, sc, k).map(N::within);
+            let horner = c3.and_then(|c3| c3.mul(delta)).and_then(|v| c2.and_then(|c2| v.add(c2))).and_then(|v| v.mul(delta));
+            let horner = horner.and_then(|v| c1.and_then(|c1| v.add(c1))).and_then(|v| v.mul(delta)).and_then(|v| c0.and_then(|c0| v.add(c0)));
+            *o = p(horner.and_then(|bk| o.sub(bk)))?;
+        }
+        Ok(out)
+    }
+
+    /// The parameter of the piece's point nearest the formulas' point at `t`, from Newton's
+    /// method started at `guess`, and the distance to it. The proof maps `t` to that parameter:
+    /// any mapping that runs from 0 at the span's start to 1 at its end gives a sound bound, as
+    /// the parts' runs of `s` chain from 0 to 1 and so cover the piece, and the nearest point
+    /// keeps the bound tight where the spline's chord-length parameter runs unevenly against `t`.
+    fn nearest(&self, b: &[Vec2; 4], t: f64, guess: f64) -> Option<(f64, f64)> {
+        let [x, y] = self.at::<f64>(t).ok()?;
+        Some(nearest_on(b, Vec2::new(x, y), guess))
+    }
+
+    /// A proven bound of `|F − B|` over a part of a span.
+    fn bound(&self, b: &[Vec2; 4], part: Part) -> Result<f64> {
+        let whole = Interval::new(part.t0, part.t1);
+        let c = whole.mid();
+        let at_mid = self.gap(b, part, Interval::point(c))?;
+        let ranges = match Jet::variable(whole).ok().map(|t| self.gap(b, part, t)) {
+            Some(Ok(g)) => {
+                let mut out = [whole; 2];
+                for (k, (g, m)) in g.iter().zip(at_mid).enumerate() {
+                    let range = if g.d.lo() > 0.0 || g.d.hi() < 0.0 {
+                        // Monotone: its extremes are at the ends.
+                        let (lo, hi) = (self.gap(b, part, Interval::point(part.t0))?, self.gap(b, part, Interval::point(part.t1))?);
+                        lo[k].hull(hi[k])
+                    } else {
+                        m + g.d * (whole - Interval::point(c))
+                    };
+                    out[k] = range.meet(g.v).unwrap_or(g.v);
+                }
+                out
+            }
+            // A derivative without a bound (`√` at 0): the values alone.
+            _ => self.gap(b, part, whole)?,
+        };
+        Ok((ranges[0].abs().sqr() + ranges[1].abs().sqr()).sqrt_nonneg().hi())
+    }
+
+    /// What the check finds on a span, and an error where the formulas can't be bounded however
+    /// narrow the part (a jump, a domain's edge).
+    fn span(&self, b: &[Vec2; 4], span: (f64, f64), tol: f64, budget: &mut usize) -> Result<Found> {
+        let narrowest = (span.1 - span.0).abs() * MIN_PART;
+        let mut parts = vec![Part { t0: span.0, t1: span.1, s0: 0.0, s1: 1.0 }];
+        let mut worst: f64 = 0.0;
+        while let Some(part) = parts.pop() {
+            if *budget == 0 {
+                return Ok(Found::Unproven(worst.max(tol) * 2.0));
+            }
+            *budget -= 1;
+            let narrow = (part.t1 - part.t0).abs() <= narrowest;
+            let m = f64::midpoint(part.t0, part.t1);
+            let (sm, off) = self.nearest(b, m, f64::midpoint(part.s0, part.s1)).unwrap_or((f64::midpoint(part.s0, part.s1), 0.0));
+            match self.bound(b, part) {
+                Ok(above) if above <= tol => {
+                    worst = worst.max(above);
+                    continue;
+                }
+                Ok(above) if narrow => return Ok(Found::Unproven(above)),
+                Err(e) if narrow => {
+                    return Err(DocError::Invalid(format!(
+                        "the formulas can't be shown to stay within the tolerance near {} = {}: {e}",
+                        self.eq.variable(),
+                        short(m)
+                    )));
+                }
+                _ => {}
+            }
+            // A point of the formulas already further than the tolerance from the piece: this
+            // count falls short (an estimate that only steers the count; it proves nothing).
+            if off > tol {
+                return Ok(Found::Off { by: off, at: m });
+            }
+            let sm = sm.clamp(part.s0.min(part.s1), part.s0.max(part.s1));
+            parts.push(Part { t1: m, s1: sm, ..part });
+            parts.push(Part { t0: m, s0: sm, ..part });
+        }
+        Ok(Found::Within(worst))
+    }
+}
+
+/// The parameter of the cubic Bézier `b`'s point nearest `target`, by Newton's method from
+/// `guess`, and the distance to it.
+fn nearest_on(b: &[Vec2; 4], target: Vec2, guess: f64) -> (f64, f64) {
+    let point = |s: f64| {
+        let r = 1.0 - s;
+        b[0] * (r * r * r) + b[1] * (3.0 * s * r * r) + b[2] * (3.0 * s * s * r) + b[3] * (s * s * s)
+    };
+    let mut s = guess.clamp(0.0, 1.0);
+    for _ in 0..8 {
+        let r = 1.0 - s;
+        let d1 = (b[1] - b[0]) * (3.0 * r * r) + (b[2] - b[1]) * (6.0 * s * r) + (b[3] - b[2]) * (3.0 * s * s);
+        let d2 = (b[2] - b[1] * 2.0 + b[0]) * (6.0 * r) + (b[3] - b[2] * 2.0 + b[1]) * (6.0 * s);
+        let off = point(s) - target;
+        let (g, h) = (off.dot(d1), d1.dot(d1) + off.dot(d2));
+        let next = s - g / h;
+        if !(h > 0.0 && next.is_finite()) {
+            break;
+        }
+        s = next.clamp(0.0, 1.0);
+    }
+    (s, point(s).dist(target))
+}
+
+/// Most boxes [`surely_far`] looks at before giving up.
+const MAX_BOXES: usize = 4096;
+
+/// Whether every point of the spline is proven further than `tol` from every point of `target`.
+/// A cubic piece lies inside the box of its control points, and halving a piece in intervals
+/// gives control points that enclose each half's exact ones; so a box further than `tol` away
+/// rules its part out, and the rest is halved until ruled out. `false` when a part stays close or
+/// the work runs out: not proven far.
+fn surely_far(pieces: &[[Vec2; 4]], target: [Interval; 2], tol: f64) -> bool {
+    let mut stack: Vec<[[Interval; 2]; 4]> = pieces.iter().map(|b| b.map(|q| [Interval::point(q.x), Interval::point(q.y)])).collect();
+    let half = Interval::point(0.5);
+    let mut boxes = 0;
+    while let Some(c) = stack.pop() {
+        boxes += 1;
+        if boxes > MAX_BOXES {
+            return false;
+        }
+        // The squared gap between the box and the target in each direction, rounded down.
+        let mut gap2 = Interval::ZERO;
+        for k in 0..2 {
+            let lo = c.iter().map(|p| p[k].lo()).fold(f64::INFINITY, f64::min);
+            let hi = c.iter().map(|p| p[k].hi()).fold(f64::NEG_INFINITY, f64::max);
+            let g = if lo > target[k].hi() {
+                Interval::point(lo) - Interval::point(target[k].hi())
+            } else if target[k].lo() > hi {
+                Interval::point(target[k].lo()) - Interval::point(hi)
+            } else {
+                Interval::ZERO
+            };
+            gap2 = gap2 + Interval::point(g.lo().max(0.0)).sqr();
+        }
+        // Ruled out only when surely further than `tol`: the gap's lower bound against the
+        // upper bound of `tol²`.
+        if gap2.lo() > Interval::point(tol).sqr().hi() {
+            continue;
+        }
+        // Close, and already small: the curve may come within `tol` here.
+        let size = c.iter().flat_map(|p| p.iter()).map(|i| i.width()).fold(0.0, f64::max);
+        let spread = (0..2)
+            .map(|k| c.iter().map(|p| p[k].hi()).fold(f64::NEG_INFINITY, f64::max) - c.iter().map(|p| p[k].lo()).fold(f64::INFINITY, f64::min))
+            .fold(0.0, f64::max);
+        if spread.max(size) <= tol {
+            return false;
+        }
+        // de Casteljau at ½ in intervals.
+        let mid = |a: [Interval; 2], b: [Interval; 2]| [(a[0] + b[0]) * half, (a[1] + b[1]) * half];
+        let (p01, p12, p23) = (mid(c[0], c[1]), mid(c[1], c[2]), mid(c[2], c[3]));
+        let (p012, p123) = (mid(p01, p12), mid(p12, p23));
+        let m = mid(p012, p123);
+        stack.push([c[0], p01, p012, m]);
+        stack.push([m, p123, p23, c[3]]);
+    }
+    true
+}
+
+/// What the check found, on a span or the whole curve.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Found {
+    /// Proven within the tolerance: the bound.
+    Within(f64),
+    /// A point of the formulas found about `by` mm from its span's piece, where the variable is
+    /// `at`, by Newton's method: the count falls short. A heuristic, which proves nothing.
+    Off { by: f64, at: f64 },
+    /// Neither, within the work allowed: an estimate above the tolerance.
+    Unproven(f64),
+}
+
+impl Found {
+    /// The deviation a fit reports.
+    fn deviation(self) -> f64 {
+        match self {
+            Found::Within(d) | Found::Off { by: d, .. } | Found::Unproven(d) => d,
         }
     }
-    Ok(worst)
+}
+
+/// Coordinate `k` of the cubic Bézier `b` as a polynomial in `s − sc`: its four coefficients,
+/// each enclosed.
+fn taylor(b: &[Vec2; 4], sc: f64, k: usize) -> [Interval; 4] {
+    let c = |q: Vec2| Interval::point(if k == 0 { q.x } else { q.y });
+    let (p0, p1, p2, p3) = (c(b[0]), c(b[1]), c(b[2]), c(b[3]));
+    let (two, three) = (Interval::point(2.0), Interval::point(3.0));
+    // The power basis: a0 + a1 s + a2 s² + a3 s³.
+    let a1 = three * (p1 - p0);
+    let a2 = three * (p2 - two * p1 + p0);
+    let a3 = p3 - three * p2 + three * p1 - p0;
+    let s = Interval::point(sc);
+    [p0 + s * (a1 + s * (a2 + s * a3)), a1 + s * (two * a2 + three * s * a3), a2 + three * s * a3, a3]
+}
+
+/// A part of a span: `t` from `t0` to `t1`, mapped linearly onto the piece's `s0` to `s1`.
+#[derive(Clone, Copy, Debug)]
+struct Part {
+    t0: f64,
+    t1: f64,
+    s0: f64,
+    s1: f64,
+}
+
+/// What the check finds for the spline through `points`: a bound proven within the tolerance, a
+/// point of the formulas found off, or neither within the work allowed.
+fn deviation(vals: &BTreeMap<String, Value>, eq: &EquationCurve, (a, b): (f64, f64), points: &[Vec2], closed: bool, d: Defaults) -> Result<Found> {
+    let pieces = fit_beziers_mode(points, closed).map_err(|e| DocError::Invalid(e.to_string()))?;
+    let f = Formulas::new(vals, eq, d)?;
+    let last = points.len().saturating_sub(1).max(1);
+    // The spans meet where the samples were taken, and the last one ends at the range's end.
+    let t = |i: usize| if i >= last { b } else { a + (b - a) * (i as f64 / last as f64) };
+    let mut budget = MAX_CHECKS;
+    let (mut worst, mut unproven): (f64, Option<f64>) = (0.0, None);
+    for (i, piece) in pieces.iter().enumerate() {
+        match f.span(piece, (t(i), t(i + 1)), eq.tolerance, &mut budget)? {
+            Found::Within(bound) => worst = worst.max(bound),
+            off @ Found::Off { .. } => return Ok(off),
+            // Keep looking: a later span may be found off.
+            Found::Unproven(e) => unproven = Some(unproven.map_or(e, |u: f64| u.max(e))),
+        }
+    }
+    Ok(unproven.map_or(Found::Within(worst), Found::Unproven))
+}
+
+/// A refusal when, with these values, a point of the formulas is further from the whole spline
+/// than the tolerance (#10414): the saved count can't follow them, as a wave made finer by a
+/// parameter. A curve proven within, or one that merely can't be proven at its count (saved
+/// before the proof, or needing more points to prove than to be within), keeps rebuilding. The
+/// last few curves found fine are remembered (per thread), so an unchanged rebuild doesn't check
+/// them again.
+fn shown_off(vals: &BTreeMap<String, Value>, eq: &EquationCurve, span: (f64, f64), points: &[Vec2], closed: bool, d: Defaults) -> Option<String> {
+    type Key = (EquationCurve, Vec<(String, u64, i8, i8)>, u64, usize, bool);
+    thread_local! {
+        static FINE: std::cell::RefCell<Vec<Key>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+    let texts = [eq.x.as_deref(), Some(eq.y.as_str()), Some(eq.start.as_str()), Some(eq.end.as_str())];
+    let mut used: Vec<(String, u64, i8, i8)> =
+        texts.into_iter().flatten().flat_map(expr::references).filter_map(|n| vals.get(&n).map(|v| (n, v.v.to_bits(), v.len, v.ang))).collect();
+    used.sort();
+    used.dedup();
+    let key: Key = (eq.clone(), used, d.len.to_bits(), points.len(), closed);
+    if FINE.with(|fine| fine.borrow().contains(&key)) {
+        return None;
+    }
+    let refusal = match deviation(vals, eq, span, points, closed, d) {
+        // Found off by a heuristic: refused only once proven further than the tolerance from
+        // every point of the spline, the formulas' point enclosed in intervals.
+        Ok(Found::Off { at, .. }) => {
+            let pieces = fit_beziers_mode(points, closed).ok()?;
+            let target = Formulas::new(vals, eq, d).ok()?.at::<Interval>(Interval::point(at)).ok()?;
+            surely_far(&pieces, target, eq.tolerance).then(|| {
+                format!(
+                    "with these values its {} points leave the formulas' point at {} = {} further than the tolerance of {} mm from the spline: edit the curve to fit it again",
+                    points.len(),
+                    eq.variable(),
+                    short(at),
+                    short(eq.tolerance)
+                )
+            })
+        }
+        _ => None,
+    };
+    if refusal.is_none() {
+        FINE.with(|fine| {
+            let mut fine = fine.borrow_mut();
+            if fine.len() >= 64 {
+                fine.remove(0);
+            }
+            fine.push(key);
+        });
+    }
+    refusal
 }
 
 /// Check an equation's text and tolerance before any evaluation.
@@ -230,8 +540,16 @@ pub fn check(eq: &EquationCurve) -> Result<()> {
 }
 
 /// The points of `count` samples (a closed curve's last one is its first), whether it closes,
-/// and how far the spline through them strays.
+/// and how far the spline through them may stray.
 pub fn sample(vals: &BTreeMap<String, Value>, eq: &EquationCurve, count: usize, closed: Option<bool>) -> Result<EquationFit> {
+    let (points, closed, span, d) = place(vals, eq, count, closed)?;
+    let deviation = deviation(vals, eq, span, &points, closed, d)?.deviation();
+    Ok(EquationFit { points, closed, deviation })
+}
+
+/// The points of `count` samples and whether they close, with the range and how bare numbers
+/// read: what placing the points needs, without the proof.
+fn place(vals: &BTreeMap<String, Value>, eq: &EquationCurve, count: usize, closed: Option<bool>) -> Result<(Vec<Vec2>, bool, (f64, f64), Defaults)> {
     check(eq)?;
     if !(2..=MAX_SPLINE_POINTS).contains(&count) {
         return Err(DocError::Invalid(format!("an equation curve takes 2 to {MAX_SPLINE_POINTS} points")));
@@ -247,8 +565,7 @@ pub fn sample(vals: &BTreeMap<String, Value>, eq: &EquationCurve, count: usize, 
         *last = first;
     }
     check_samples(&points, closed)?;
-    let deviation = deviation(vals, eq, span, &points, closed, d)?;
-    Ok(EquationFit { points, closed, deviation })
+    Ok((points, closed, span, d))
 }
 
 /// The points of an equation curve, as few as keep the spline within its tolerance of the
@@ -262,9 +579,9 @@ pub fn fit(vals: &BTreeMap<String, Value>, eq: &EquationCurve) -> Result<Equatio
         }
         if count >= MAX_SPLINE_POINTS {
             return Err(DocError::Invalid(format!(
-                "even {MAX_SPLINE_POINTS} points stray {} mm from the formulas, more than the tolerance of {} mm: raise the tolerance or narrow the range",
-                short(fit.deviation),
-                short(eq.tolerance)
+                "even {MAX_SPLINE_POINTS} points don't keep the spline within the tolerance of {} mm of the formulas (it was found about {} mm off): raise the tolerance or narrow the range",
+                short(eq.tolerance),
+                short(fit.deviation)
             )));
         }
         // A cubic fit's error falls with the fourth power of the spacing: aim a little past
@@ -279,7 +596,9 @@ pub fn fit(vals: &BTreeMap<String, Value>, eq: &EquationCurve) -> Result<Equatio
 impl crate::Document {
     /// Place the points of the sketch's equation curves where their formulas put them now (in
     /// place), with the number of points each has. Their points are fixed, so the solve keeps
-    /// them there. A curve that is gone or is no longer a fit point spline is left as it is.
+    /// them there. A curve that is gone or is no longer a fit point spline is left as it is. A
+    /// curve whose formulas are now found further from its spline than its tolerance is an error
+    /// ([`shown_off`]).
     pub fn apply_equation_values(&self, vals: &BTreeMap<String, Value>, sk: &mut Sketch) -> Result<()> {
         for k in 0..sk.equations.len() {
             let Some(eq) = sk.equations.get(k).cloned() else { continue };
@@ -288,8 +607,12 @@ impl crate::Document {
                 continue;
             };
             let (count, closed) = (pts.len(), *periodic);
-            let fit = sample(vals, &eq, count, Some(closed)).map_err(|e| DocError::Expr(format!("equation curve {}: {e}", eq.curve)))?;
-            sk.place_equation_points(ci, &fit.points)?;
+            let (points, closed, span, d) =
+                place(vals, &eq, count, Some(closed)).map_err(|e| DocError::Expr(format!("equation curve {}: {e}", eq.curve)))?;
+            if let Some(why) = shown_off(vals, &eq, span, &points, closed, d) {
+                return Err(DocError::Expr(format!("equation curve {}: {why}", eq.curve)));
+            }
+            sk.place_equation_points(ci, &points)?;
         }
         Ok(())
     }
@@ -369,6 +692,118 @@ mod tests {
         let tight = fit(&vals, &e).unwrap();
         assert!(tight.points.len() > loose.points.len(), "{} vs {}", tight.points.len(), loose.points.len());
         assert!(tight.deviation <= 0.005 && loose.deviation <= 0.1);
+    }
+
+    /// The formulas' point at `t`, worked out apart from the check (plain `f64`).
+    fn formula_point(e: &EquationCurve, t: f64) -> Vec2 {
+        let name = e.variable();
+        let d = Defaults { len: 1.0, ang: 1.0 };
+        let lookup = |n: &str| if n == name { Ok(Value::num(t)) } else { Err(DocError::Expr(n.into())) };
+        let value = |f: &str| expr::eval_with_defaults(f, &lookup, d).and_then(|v| v.to_kind_in(Kind::Length, d)).unwrap();
+        Vec2::new(e.x.as_deref().map_or(t, value), value(&e.y))
+    }
+
+    /// An accepted curve is within its reported deviation, and so its tolerance, everywhere: the
+    /// formulas measured densely, each point's distance to the spline's polyline at 400 steps a
+    /// piece. The sampled check this replaced reported less than this measures on every curve
+    /// here (#10414).
+    #[test]
+    fn an_accepted_curve_is_within_its_deviation_everywhere() {
+        let vals = BTreeMap::new();
+        for (x, y, a, b, tol) in [
+            (None, "10 * (cosh(x / 40) + 0.6 * sinh(x / 40))", 0.0, 120.0, 0.01),
+            (Some("20 * cos(t)"), "20 * sin(t)", 0.0, 1.5 * std::f64::consts::PI, 0.01),
+            (None, "x * x / 20", -30.0, 30.0, 0.01),
+            (Some("t * cos(t)"), "t * sin(t)", 0.0, 6.0 * std::f64::consts::PI, 0.1),
+            (None, "5 + 2 * sin(x / 5)", 0.0, 30.0, 0.01),
+            (None, "abs(x)", -1.0, 1.0, 0.01),
+        ] {
+            let mut e = eq(x, y, &a.to_string(), &b.to_string());
+            e.tolerance = tol;
+            let f = fit(&vals, &e).unwrap();
+            assert!(f.deviation <= tol, "{y}: {}", f.deviation);
+            let pieces = fit_beziers_mode(&f.points, f.closed).unwrap();
+            let line: Vec<Vec2> = pieces
+                .iter()
+                .flat_map(|p| {
+                    (0..=400).map(move |k| {
+                        let (s, r) = (k as f64 / 400.0, 1.0 - k as f64 / 400.0);
+                        p[0] * (r * r * r) + p[1] * (3.0 * s * r * r) + p[2] * (3.0 * s * s * r) + p[3] * (s * s * s)
+                    })
+                })
+                .collect();
+            for k in 0..=3000 {
+                let q = formula_point(&e, a + (b - a) * k as f64 / 3000.0);
+                let near = line
+                    .windows(2)
+                    .map(|w| {
+                        let d = w[1] - w[0];
+                        let u = if d.len2() > 0.0 { ((q - w[0]).dot(d) / d.len2()).clamp(0.0, 1.0) } else { 0.0 };
+                        q.dist(w[0] + d * u)
+                    })
+                    .fold(f64::INFINITY, f64::min);
+                assert!(near <= f.deviation, "{y} at step {k}: {near} mm from the spline, more than {}", f.deviation);
+            }
+        }
+    }
+
+    /// A formula that is zero at every place a sampled check would look (#10404) is not drawn as a
+    /// flat line 1 mm off: these waves are too fine for 500 points and are refused. The sampled
+    /// check accepted each with 9 points.
+    #[test]
+    fn a_wave_zero_at_every_check_point_is_refused_not_drawn_flat() {
+        let vals = BTreeMap::new();
+        for (y, tol) in [("sin(64 * pi * x)", 1e-4), ("sin(800 * pi * x)", 0.01), ("sin(2048 * pi * x)", 1e-4)] {
+            let mut e = eq(None, y, "0", "1");
+            e.tolerance = tol;
+            let err = fit(&vals, &e).map(|f| f.points.len()).unwrap_err().to_string();
+            assert!(err.contains("even 500 points don't keep the spline within the tolerance"), "{y}: {err}");
+        }
+    }
+
+    /// A formula that jumps can't be followed by a smooth curve: it is refused, saying where.
+    #[test]
+    fn a_formula_that_jumps_is_refused_where_it_jumps() {
+        let vals = BTreeMap::new();
+        for (y, at) in [("floor(x)", "x = 1:"), ("sign(x - 0.5)", "x = 0.5:"), ("mod(x, 2)", "x = 2:")] {
+            let err = fit(&vals, &eq(None, y, "0", "3")).map(|f| f.points.len()).unwrap_err().to_string();
+            assert!(err.contains("can't be shown to stay within the tolerance near") && err.contains(at), "{y}: {err}");
+        }
+    }
+
+    /// On a rebuild, a curve is refused only when its formulas are proven further than the
+    /// tolerance from its spline. The semicircle at 348 points is within the tolerance (measured
+    /// densely, from 346 points) though not provable below 352, and keeps rebuilding; a sine the
+    /// samples all miss is refused (#10414).
+    #[test]
+    fn a_rebuild_is_refused_only_when_the_formulas_are_shown_off_the_spline() {
+        let vals = BTreeMap::new();
+        let shown_off_at = |x: Option<&str>, y: &str, (a, b): (f64, f64), tol: f64, count: usize| {
+            let mut e = eq(x, y, &a.to_string(), &b.to_string());
+            e.tolerance = tol;
+            let (points, closed, span, d) = place(&vals, &e, count, None).unwrap();
+            (deviation(&vals, &e, span, &points, closed, d).unwrap(), shown_off(&vals, &e, span, &points, closed, d))
+        };
+        let (found, refused) = shown_off_at(None, "sqrt(400 - x^2)", (-20.0, 20.0), 0.01, 348);
+        assert!(!matches!(found, Found::Within(_)), "proven at 348 points now: pick a count it isn't");
+        assert_eq!(refused, None);
+        let (_, refused) = shown_off_at(None, "sin(800 * pi * x)", (0.0, 1.0), 0.01, 9);
+        assert!(refused.is_some_and(|why| why.contains("further than the tolerance of 0.01 mm from the spline")));
+    }
+
+    /// A piece exactly the tolerance away is not ruled out, along an axis or across one, nor one
+    /// a step closer; one a step further is.
+    #[test]
+    fn a_piece_at_the_tolerance_is_not_proven_far() {
+        let tol = 0.01;
+        let at = |x: f64, y: f64| [Vec2::new(x, y); 4];
+        let target = [Interval::ZERO, Interval::ZERO];
+        // 0.006² + 0.008² = 0.01² in reals; the doubles are close, so only the exact axis cases
+        // can be told apart by a step.
+        for piece in [at(tol, 0.0), at(0.0, -tol), at(0.006, 0.008), at(tol.next_down(), 0.0)] {
+            assert!(!surely_far(&[piece], target, tol), "{piece:?}");
+        }
+        assert!(surely_far(&[at(tol.next_up().next_up(), 0.0)], target, tol));
     }
 
     #[test]

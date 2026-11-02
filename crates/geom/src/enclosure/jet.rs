@@ -7,7 +7,7 @@
 
 use std::cmp::Ordering;
 
-use super::{Proven, Real};
+use super::{Interval, Proven, Real};
 
 /// `v` and its derivative `d` with respect to one variable.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -55,11 +55,17 @@ impl<N: Real> Real for Jet<N> {
     fn exact(x: f64) -> Proven<Jet<N>> {
         Jet::constant(N::exact(x)?)
     }
+    fn within(i: Interval) -> Proven<Jet<N>> {
+        Jet::constant(N::within(i)?)
+    }
     fn cmp_f64(self, c: f64) -> Option<Ordering> {
         self.v.cmp_f64(c)
     }
     fn as_point(self) -> Option<f64> {
         self.v.as_point()
+    }
+    fn is_finite(self) -> bool {
+        self.v.is_finite() && self.d.is_finite()
     }
     fn hull(self, o: Jet<N>) -> Proven<Jet<N>> {
         Ok(Jet { v: self.v.hull(o.v)?, d: self.d.hull(o.d)? })
@@ -82,7 +88,10 @@ impl<N: Real> Real for Jet<N> {
     }
     fn pow(self, e: Jet<N>) -> Proven<Jet<N>> {
         let v = self.v.pow(e.v)?;
-        match e.v.as_point() {
+        // The fixed-power rules hold only for an exponent that doesn't vary: one whose derivative
+        // is exactly zero, not merely one whose value is a single number (`2^x` at x = 0).
+        let fixed = if e.d.as_point() == Some(0.0) { e.v.as_point() } else { None };
+        match fixed {
             Some(0.0) => Jet::constant(v),
             // A whole power: n·xⁿ⁻¹, with n − 1 exact.
             Some(n) if n == n.trunc() && n.abs() < 4.5e15 => self.chain(v, N::exact(n)?.mul(self.v.pow(N::exact(n - 1.0)?)?)?),
@@ -173,8 +182,8 @@ impl<N: Real> Real for Jet<N> {
             _ => Ok(Jet { v, d: self.d.neg().hull(self.d)? }),
         }
     }
-    fn signum(self) -> Proven<Jet<N>> {
-        Jet::constant(self.v.signum()?)
+    fn sign(self) -> Proven<Jet<N>> {
+        Jet::constant(self.v.sign()?)
     }
     fn floor(self) -> Proven<Jet<N>> {
         Jet::constant(self.v.floor()?)
@@ -192,7 +201,7 @@ impl<N: Real> Real for Jet<N> {
     fn rem_euclid(self, o: Jet<N>) -> Proven<Jet<N>> {
         let v = self.v.rem_euclid(o.v)?;
         let q = self.v.div(o.v.abs()?)?.floor()?;
-        let d = self.d.sub(q.mul(o.v.signum()?)?.mul(o.d)?)?;
+        let d = self.d.sub(q.mul(o.v.sign()?)?.mul(o.d)?)?;
         Ok(Jet { v, d })
     }
     fn min(self, o: Jet<N>) -> Proven<Jet<N>> {

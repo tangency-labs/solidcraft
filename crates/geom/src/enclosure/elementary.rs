@@ -516,12 +516,14 @@ pub(super) fn trunc(x: Interval) -> Proven<Interval> {
     step(x, f64::trunc)
 }
 
-/// `signum`: 1 or −1; refused where `x` may be zero, as `signum(±0) = ±1`.
-pub(super) fn signum(x: Interval) -> Proven<Interval> {
+/// `sign`: 1, 0 or −1; refused where `x` may be zero without being only zero.
+pub(super) fn sign(x: Interval) -> Proven<Interval> {
     if x.lo > 0.0 {
         Ok(Interval::ONE)
     } else if x.hi < 0.0 {
         Ok(-Interval::ONE)
+    } else if x == Interval::ZERO {
+        Ok(Interval::ZERO)
     } else {
         Err(Unproven::Jump)
     }
