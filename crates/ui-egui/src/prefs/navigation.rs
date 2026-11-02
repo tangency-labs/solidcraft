@@ -106,6 +106,10 @@ fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 });
             });
         });
+        if app.preferences.nav == "maya" {
+            let axis = setting::maya_horizontal_zoom(app, ui).backing_on_hover_text(app.tr("nav.maya_horizontal_zoom.help"));
+            crate::scenario::publish_target("prefs:maya_horizontal_zoom", axis.rect);
+        }
         if nav_preset(&app.preferences.nav).bindings.iter().any(|b| b.button == NavButton::Right && b.mode == NavMode::Orbit) {
             let response = setting::right_drag_orbits(app, ui).backing_on_hover_text(crate::i18n::tr("nav.right_drag_orbits.help"));
             crate::scenario::publish_target("prefs:right_drag_orbits", response.rect);
