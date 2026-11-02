@@ -741,6 +741,40 @@ fn embed_keeps_model_panels_without_application_chrome() {
     assert!(h.app.viewport.rect.is_some());
 }
 
+#[test]
+fn embed_editor_keeps_the_ribbon_and_leaves_files_to_the_host() {
+    let mut h = Harness::new();
+    h.settle();
+    assert!(rect_of("appbar:home").is_some(), "the full app has its application bar");
+    h.app.embed_editor = true;
+    h.app.home.show(h.app.session.revision);
+    h.settle();
+    assert!(!h.app.home.open, "the host shows the design, never the start page");
+    assert_eq!(h.app.ui.layout, LayoutMode::Docked);
+    assert!(rect_of("appbar:home").is_none() && rect_of("titlebar:report").is_none(), "no application bar");
+    assert!(rect_of("button:sketch.create").is_some() && rect_of("browser:card").is_some(), "the modelling surface stays");
+    // With no bar to hold it, command search stays in the ribbon whatever the host's header layout.
+    h.app.header = crate::toolbar::HeaderLayout::COMPACT;
+    h.settle();
+    assert!(rect_of("ribbon:search").is_some() && rect_of("titlebar:search").is_none());
+    h.step(&json!({"click":{"handle":"button:sketch.create"}})).unwrap();
+    assert!(h.app.dialog.is_some(), "and its commands work");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    // New, Open, Save, Close and Preferences belong to the host page.
+    let (docs, revision) = (h.app.docs.count(), h.app.session.revision);
+    for key in ["N", "O", "S", "W", "Comma"] {
+        h.step(&json!({"key":key,"cmd":true})).unwrap();
+    }
+    h.settle();
+    assert_eq!((h.app.docs.count(), h.app.session.revision), (docs, revision));
+    assert!(!h.app.file_picker_busy() && !h.app.prefs_window.open, "{}", h.call("ui.inspect", json!({})));
+    // Undo stays the design's own.
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.settle();
+    h.step(&json!({"key":"Z","cmd":true})).unwrap();
+    assert!(h.app.session.doc.features.is_empty(), "Ctrl+Z undoes in the embed too");
+}
+
 /// A design with a finished sketch nothing uses yet, so Extrude opens ready for OK.
 fn sketched(h: &mut Harness) {
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();

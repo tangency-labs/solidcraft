@@ -392,7 +392,7 @@ pub enum VersionPlace {
 
 /// The closed search field goes in the application bar rather than the ribbon.
 pub(crate) fn search_in_header(app: &SolveApp) -> bool {
-    app.header.search == SearchPlace::Header && !app.embedded
+    app.header.search == SearchPlace::Header && !app.embedded && !app.embed_editor
 }
 
 /// Space between the header search field and Settings.
@@ -3373,6 +3373,8 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         }
         if mods.command {
             match k {
+                // An editing embed's host has its own New, Open, Save, Close and settings.
+                Key::N | Key::O | Key::S | Key::W | Key::Comma if app.embed_editor => {}
                 Key::N => crate::documents::new_design(app),
                 Key::Comma => crate::prefs::open_at(app, 0),
                 Key::O => {
