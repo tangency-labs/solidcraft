@@ -1,7 +1,7 @@
 //! 3D sketch curves from the model: curves projected onto faces (on their display meshes), the
-//! bodies and faces an intersection curve is taken on, and spun profiles.
+//! sides an intersection curve is taken on (bodies, faces and other sketches' curves), and spun profiles.
 
-use solidcore_record::{Plane, Vec2, Vec3};
+use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::Mesh;
 use solidcraft_geom::prelude::*;
 use solidcraft_sketch::LinkSource;
@@ -10,7 +10,7 @@ use crate::eval::ModelState;
 
 /// The body of a body or face reference, and the face (its index in the body's face order) for a
 /// face reference: the face nearest its point, on the named body or else the nearest body.
-pub(crate) fn part_of<'a>(st: &'a ModelState, src: &LinkSource) -> Option<(&'a crate::ModelBody, Option<usize>)> {
+fn part_of<'a>(st: &'a ModelState, src: &LinkSource) -> Option<(&'a crate::ModelBody, Option<usize>)> {
     match src {
         LinkSource::Body { body } => Some((st.body(body)?, None)),
         LinkSource::Face { body, at } => {
@@ -19,6 +19,91 @@ pub(crate) fn part_of<'a>(st: &'a ModelState, src: &LinkSource) -> Option<(&'a c
             Some((b, usize::try_from(f).ok()))
         }
         _ => None,
+    }
+}
+
+/// One side of an intersection curve: a body (or one face of it), or a curve of another sketch.
+enum Side<'a> {
+    Part(&'a crate::ModelBody, Option<usize>),
+    Curve { plane: Plane, segs: Vec<Seg2>, pts: Vec<Vec3> },
+}
+
+fn side_of<'a>(st: &'a ModelState, src: &LinkSource) -> Option<Side<'a>> {
+    if let Some((b, f)) = part_of(st, src) {
+        return Some(Side::Part(b, f));
+    }
+    let LinkSource::SketchCurve { sketch, curve } = src else { return None };
+    let ss = st.sketch(*sketch)?;
+    let ci = ss.sketch.curve_index(curve)?;
+    let segs = ss.sketch.exact_segs(ci).unwrap_or_else(|| ss.sketch.segs(ci));
+    let pts: Vec<Vec3> = ss.sketch.segs(ci).iter().flat_map(|s| s.polyline(1e-3)).map(|p| ss.plane.to_world(p)).collect();
+    (!segs.is_empty() && pts.len() >= 2).then(|| Side::Curve { plane: ss.plane.clone(), segs, pts })
+}
+
+/// Bounds of a point set; `None` when empty or not finite.
+fn bounds_of<'a>(pts: impl IntoIterator<Item = &'a Vec3>) -> Option<(Vec3, Vec3)> {
+    let mut it = pts.into_iter();
+    let first = *it.next()?;
+    let (lo, hi) = it.fold((first, first), |(l, h), p| (l.min(*p), h.max(*p)));
+    (lo.is_finite() && hi.is_finite()).then_some((lo, hi))
+}
+
+/// The offsets along `plane`'s unit normal `n` that cover the box `lo`..`hi`, padded.
+fn span_over(plane: &Plane, n: Vec3, lo: Vec3, hi: Vec3) -> (f64, f64) {
+    let corners =
+        (0..8).map(|i| Vec3::new(if i & 1 == 0 { lo.x } else { hi.x }, if i & 2 == 0 { lo.y } else { hi.y }, if i & 4 == 0 { lo.z } else { hi.z }));
+    let (s0, s1) = corners.map(|c| (c - plane.origin).dot(n)).fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), s| (l.min(s), h.max(s)));
+    let pad = (hi - lo).len() * 0.02 + 1e-3;
+    (s0 - pad, s1 + pad)
+}
+
+/// Where intersection sides `a` and `b` meet: the edges SMLib's imprint of one by the other makes,
+/// each its exact record curve, its points at the display tolerance. A sketch curve stands in for
+/// its extrusion along its sketch's normal, both ways and as far as the other side reaches: a sheet
+/// made here for this alone and never added to the model (#11048).
+pub(crate) fn meeting(st: &ModelState, a: &LinkSource, b: &LinkSource) -> crate::Result<Vec<crate::kernel::MeetingEdge>> {
+    let lost = |s: &LinkSource| crate::DocError::Unknown(format!("{} no longer exists", s.describe()));
+    let (sa, sb) = (side_of(st, a).ok_or_else(|| lost(a))?, side_of(st, b).ok_or_else(|| lost(b))?);
+    let unit = |p: &Plane, s: &LinkSource| p.normal().normalized().ok_or_else(|| lost(s));
+    // How far each curve is swept: across the other side's bounds, or for two curves as far as a
+    // crossing can lie (a + s·na = b + t·nb with a, b within the curves' bounds, so |s|·sin ≤ |a − b|).
+    let (ra, rb) = match (&sa, &sb) {
+        (Side::Curve { plane: pa, pts: qa, .. }, Side::Curve { plane: pb, pts: qb, .. }) => {
+            let sin = unit(pa, a)?.cross(unit(pb, b)?).len();
+            if sin < 1e-6 {
+                return Err(crate::DocError::Invalid("the two curves' sketches are parallel, so their extrusions never cross in a curve".into()));
+            }
+            let (lo, hi) = bounds_of(qa.iter().chain(qb)).ok_or_else(|| lost(a))?;
+            let reach = (hi - lo).len() / sin * 1.05 + 1e-3;
+            ((-reach, reach), (-reach, reach))
+        }
+        (Side::Curve { plane, .. }, Side::Part(mb, _)) => {
+            let m = mb.mesh().bounds();
+            (span_over(plane, unit(plane, a)?, m.min, m.max), (0.0, 0.0))
+        }
+        (Side::Part(mb, _), Side::Curve { plane, .. }) => {
+            let m = mb.mesh().bounds();
+            ((0.0, 0.0), span_over(plane, unit(plane, b)?, m.min, m.max))
+        }
+        (Side::Part(..), Side::Part(..)) => ((0.0, 0.0), (0.0, 0.0)),
+    };
+    let sheet = |s: &Side, (s0, s1): (f64, f64)| -> crate::Result<Option<crate::kernel::Body>> {
+        match s {
+            Side::Curve { plane, segs, .. } => Ok(Some(crate::kernel::extrude_sheet(plane, std::slice::from_ref(segs), s0, s1)?)),
+            Side::Part(..) => Ok(None),
+        }
+    };
+    let (ka, kb) = (sheet(&sa, ra)?, sheet(&sb, rb)?);
+    let (Some((ba, fa)), Some((bb, fb))) = (body_of(&sa, ka.as_ref()), body_of(&sb, kb.as_ref())) else { return Err(lost(a)) };
+    let chord = (ba.size().max(bb.size()) * 1e-3).max(1e-3);
+    Ok(crate::kernel::meeting_edges(ba, fa.as_ref().map(std::slice::from_ref), bb, fb.as_ref().map(std::slice::from_ref), chord)?)
+}
+
+/// The kernel body a side is intersected as: its model body (and face), or the curve's `sheet`.
+fn body_of<'b>(side: &'b Side<'b>, sheet: Option<&'b crate::kernel::Body>) -> Option<(&'b crate::kernel::Body, Option<usize>)> {
+    match side {
+        Side::Part(mb, f) => Some((&mb.body, *f)),
+        Side::Curve { .. } => sheet.map(|k| (k, None)),
     }
 }
 

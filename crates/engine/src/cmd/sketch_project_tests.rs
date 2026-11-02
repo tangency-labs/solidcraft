@@ -585,6 +585,80 @@ fn intersection_curve_of_picked_faces_spans_the_whole_surface() {
     check(&s, id);
 }
 
+/// #11048: two sketch curves meet as their extrusions along their sketches' normals would, with no
+/// helper surfaces; a curve also meets a face, and parallel sketches are refused.
+#[test]
+fn intersection_curve_of_two_sketch_curves() {
+    use solidcraft_geom::{Vec2, Vec3};
+
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Top"}));
+    let top = ids(&run(&mut s, "sketch.spline.fit_point", json!({"points": [[0, 0], [9.5, 12], [30.5, 7], [52, 15]]}))["curves"])[0].clone();
+    run(&mut s, "sketch.finish", json!({}));
+    // XZ sketch y is world -Z: this spline runs between z = 3 and 17.
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Side"}));
+    let side = ids(&run(&mut s, "sketch.spline.fit_point", json!({"points": [[-2, -15], [15, -3], [35, -17], [55, -5]]}))["curves"])[0].clone();
+    run(&mut s, "sketch.finish", json!({}));
+
+    // Every point lies over both curves: on the top one seen from above, on the side one from the side.
+    let off = |poly: &[Vec2], q: Vec2| {
+        poly.windows(2)
+            .map(|w| Vec3::new(q.x, q.y, 0.).dist_to_segment(Vec3::new(w[0].x, w[0].y, 0.), Vec3::new(w[1].x, w[1].y, 0.)))
+            .fold(f64::INFINITY, f64::min)
+    };
+    let check = |s: &Session, id: u64, x_to: f64| {
+        let st = s.model.state();
+        let sk = &st.sketch(id).unwrap().sketch;
+        assert!(sk.links.iter().all(|l| !l.lost), "no link lost");
+        let pts: Vec<_> = sk.wires.iter().flat_map(|w| w.pts.iter().copied()).collect();
+        assert!(pts.len() > 10, "{} points", pts.len());
+        let curve = |name: &str, c: &str| {
+            let ss = st.sketch(s.doc.find_feature(name).unwrap().id).unwrap();
+            (ss.plane, ss.sketch.polyline(ss.sketch.curve_index(c).unwrap()))
+        };
+        let ((tp, tpoly), (sp, spoly)) = (curve("Top", &top), curve("Side", &side));
+        for p in &pts {
+            assert!(off(&tpoly, tp.to_local(*p)) < 0.05, "off the top curve: {p:?}");
+            assert!(off(&spoly, sp.to_local(*p)) < 0.05, "off the side curve: {p:?}");
+        }
+        let (lo, hi) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), p| (l.min(p.x), h.max(p.x)));
+        assert!(lo < 0.5 && hi > x_to - 0.5, "the whole crossing: x {lo}..{hi}");
+    };
+
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let id = s.active_sketch.unwrap();
+    let r = run(&mut s, "sketch.intersection_curve", json!({"a": {"sketch": "Top", "curve": top}, "b": {"sketch": "Side", "curve": side}}));
+    assert_eq!(r["wires"].as_array().unwrap().len(), 1, "{r}");
+    run(&mut s, "sketch.finish", json!({}));
+    check(&s, id, 52.0);
+
+    // Editing a source curve moves the result with it.
+    run(&mut s, "sketch.edit", json!({"sketch": "Top"}));
+    run(&mut s, "sketch.move_point", json!({"point": "p4", "to": [45, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    check(&s, id, 45.0);
+
+    // A curve against a face: the side curve's surface, extruded for real, gives the same crossing.
+    run(&mut s, "surface.extrude", json!({"sketch": "Side", "curves": [side], "distance": 30, "body_name": "Roof"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let on_face = s.active_sketch.unwrap();
+    run(&mut s, "sketch.intersection_curve", json!({"a": {"face": [10, 15, 6], "body": "Roof"}, "b": {"sketch": "Top", "curve": top}}));
+    run(&mut s, "sketch.finish", json!({}));
+    let st = s.model.state();
+    let pts: Vec<_> = st.sketch(on_face).unwrap().sketch.wires.iter().flat_map(|w| w.pts.iter().copied()).collect();
+    let (lo, hi) = pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), p| (l.min(p.x), h.max(p.x)));
+    assert!(lo < 0.5 && hi > 44.5, "curve against face: x {lo}..{hi}");
+
+    // Curves on parallel sketches have no crossing curve: refused, saying why.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10, "name": "Above"}));
+    let above = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 10]]}))["curves"])[0].clone();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let e =
+        s.execute("sketch.intersection_curve", &json!({"a": {"sketch": "Top", "curve": top}, "b": {"sketch": "Above", "curve": above}})).unwrap_err();
+    assert!(e.to_string().contains("parallel"), "{e}");
+}
+
 #[test]
 fn isoparametric_curves_of_a_cylinder() {
     let mut s = Session::default();
