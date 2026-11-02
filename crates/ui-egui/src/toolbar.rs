@@ -386,28 +386,32 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let clicked = resp.on_hover_text(tip).clicked();
             enabled && clicked
         };
-        let step = if compact_actions { 22.0 } else { 34.0 };
-        // Save, Undo and Redo use the same actions as the File menu and shortcuts.
+        // Save / Undo / Redo: the icon runs the usual action; the group arrow opens a menu (#9928).
         let shown = design_shown(app) && idle;
         let tip = |id: &str, key: &str| {
             let label = app.tr(id);
             if shown { format!("{label} ({key})") } else { crate::i18n::format("ui.needs_design", &[("command", label)]) }
         };
         let (save_tip, undo_tip, redo_tip) = (tip("ui.save", "Ctrl+S"), tip("ui.undo", "Ctrl+Z"), tip("ui.redo", "Ctrl+Y"));
-        if click(ui, x, "save", &save_tip, shown) {
+        let undo_on = shown && FileAction::Undo.enabled(app);
+        let redo_on = shown && FileAction::Redo.enabled(app);
+        x = app_bar_group(ui, x, compact_actions, "save", &save_tip, shown, "sc_save_menu", r, &t);
+        if ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new(("sc_save_menu", "run"))).unwrap_or(false)) {
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("sc_save_menu", "run")), false));
             save(app);
         }
-        x += step;
         // Narrow windows retain Save; Undo and Redo remain available from their shortcuts and menus.
         if !compact_actions {
-            if click(ui, x, "undo", &undo_tip, shown) {
+            x = app_bar_group(ui, x, false, "undo", &undo_tip, undo_on, "sc_undo_menu", r, &t);
+            if ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new(("sc_undo_menu", "run"))).unwrap_or(false)) {
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("sc_undo_menu", "run")), false));
                 FileAction::Undo.run(app);
             }
-            x += step;
-            if click(ui, x, "redo", &redo_tip, shown) {
+            x = app_bar_group(ui, x, false, "redo", &redo_tip, redo_on, "sc_redo_menu", r, &t);
+            if ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new(("sc_redo_menu", "run"))).unwrap_or(false)) {
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("sc_redo_menu", "run")), false));
                 FileAction::Redo.run(app);
             }
-            x += step;
         }
         if file {
             app.ui.palette_open = false;
@@ -423,7 +427,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         // Document tabs follow the file actions; the house opens the start page.
         let captions = if app.custom_titlebar { crate::titlebar::WIDTH } else { 0.0 };
-        let separator_x = x - step + if compact_actions { 19.0 } else { 24.0 };
+        let separator_x = x + if compact_actions { 5.0 } else { 10.0 };
         app_bar_separator(ui, r, separator_x, "documents");
         let tabs_start = separator_x + 10.0;
         let report_text = crate::i18n::tr("ui.report_a_bug");
@@ -512,8 +516,65 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     });
     file_menu(app, ui.ctx());
+    save_group_menu(app, ui.ctx());
+    undo_group_menu(app, ui.ctx());
+    redo_group_menu(app, ui.ctx());
     let help_x = ui.ctx().data(|d| d.get_temp::<f32>(egui::Id::new("sc_help_anchor")).unwrap_or(300.0));
     crate::help::show(app, &ui.ctx().clone(), pos2(help_x - 14.0, APP_BAR_HEIGHT));
+}
+
+/// Icon plus group arrow for Save / Undo / Redo (#9928). Returns the x past the control.
+/// Clicking the icon queues the primary action (`{menu}_run`); the arrow toggles `{menu}`.
+fn app_bar_group(ui: &mut egui::Ui, at: f32, compact: bool, icon: &str, tip: &str, enabled: bool, menu: &str, bar: Rect, t: &Tokens) -> f32 {
+    let icon_w = if compact { 22.0 } else { 28.0 };
+    let arrow_w = 14.0;
+    let left = at - if compact { 11.0 } else { 16.0 };
+    let icon_r = Rect::from_min_size(pos2(left, bar.center().y - 16.0), vec2(icon_w, 32.0));
+    let arrow_r = Rect::from_min_size(pos2(icon_r.right(), icon_r.top()), vec2(arrow_w, 32.0));
+    let group = icon_r.union(arrow_r);
+    let open = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new(menu)).unwrap_or(false));
+    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let icon_resp = ui.interact(icon_r, ui.id().with(("ab", icon)), sense);
+    let arrow_resp = ui.interact(arrow_r, ui.id().with(("ab", icon, "menu")), sense);
+    icon_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, tip));
+    arrow_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, tip));
+    crate::scenario::publish_target(&format!("appbar:{icon}"), icon_r);
+    crate::scenario::publish_target(&format!("titlebar:{icon}"), icon_r);
+    crate::scenario::publish_target(&format!("appbar:{icon}:menu"), arrow_r);
+    let hot = enabled && (icon_resp.hovered() || arrow_resp.hovered() || icon_resp.has_focus() || open);
+    if hot {
+        ui.painter().rect_filled(group.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
+    }
+    let alpha = if enabled { 1.0 } else { 0.35 };
+    icons::paint_app_bar(ui.painter(), Rect::from_center_size(icon_r.center(), vec2(18.0, 18.0)), icon, alpha);
+    let ink = if enabled { t.app_bar_text } else { t.app_bar_text.gamma_multiply(0.35) };
+    dropdown_arrow(ui.painter(), arrow_r.center(), ink.gamma_multiply(alpha));
+    let icon_clicked = enabled && icon_resp.clicked();
+    let arrow_clicked = enabled && arrow_resp.clicked();
+    let _ = icon_resp.on_hover_text(tip);
+    let _ = arrow_resp.on_hover_text(tip);
+    if icon_clicked {
+        ui.ctx().data_mut(|d| {
+            d.insert_temp(egui::Id::new((menu, "run")), true);
+            d.insert_temp(egui::Id::new(menu), false);
+        });
+    }
+    if arrow_clicked {
+        let pass = ui.ctx().cumulative_pass_nr();
+        ui.ctx().data_mut(|d| {
+            let was = d.get_temp::<bool>(egui::Id::new(menu)).unwrap_or(false);
+            d.insert_temp(egui::Id::new(menu), !was);
+            d.insert_temp(egui::Id::new((menu, "opened")), pass);
+            d.insert_temp(egui::Id::new((menu, "x")), group.left());
+            // One group menu at a time; leave the File menu alone.
+            for other in ["sc_save_menu", "sc_undo_menu", "sc_redo_menu"] {
+                if other != menu {
+                    d.insert_temp(egui::Id::new(other), false);
+                }
+            }
+        });
+    }
+    group.right() + if compact { 4.0 } else { 6.0 }
 }
 
 /// File, edit and application actions shared by the in-window and native menus.
@@ -527,6 +588,10 @@ pub enum FileAction {
     Save,
     /// Save the active design under another name.
     SaveAs,
+    /// Save a copy beside the open file, keeping that file (#9928).
+    SaveCopy,
+    /// Save every dirty open design that already has a path (#9928).
+    SaveAll,
     /// Undo the active design's last command.
     Undo,
     /// Redo the active design's last undone command.
@@ -556,8 +621,10 @@ pub enum FileAction {
 impl FileAction {
     /// Whether this action is available in the current document, picker and report state.
     pub fn enabled(&self, app: &SolveApp) -> bool {
-        let needs_design = matches!(self, Self::Save | Self::SaveAs | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_))
-            || matches!(self, Self::Export(extension) if *extension != "json");
+        let needs_design = matches!(
+            self,
+            Self::Save | Self::SaveAs | Self::SaveCopy | Self::SaveAll | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_)
+        ) || matches!(self, Self::Export(extension) if *extension != "json");
         // An open bug report describes the designs as they are, and a window opened behind it
         // covers it (#7188). Quit too, as behind any modal window: it would switch to a design
         // with unsaved changes under the report, and ask about it where it can't be answered.
@@ -565,6 +632,7 @@ impl FileAction {
         let available = match self {
             Self::Undo => !app.session.undo.is_empty(),
             Self::Redo => !app.session.redo.is_empty(),
+            Self::SaveAll => crate::documents::any_dirty(app),
             Self::ClearRecent => !app.home.recent.is_empty(),
             Self::AgentChat => crate::agent_chat::app_bar_button_shown(app),
             _ => true,
@@ -592,6 +660,8 @@ impl FileAction {
             }),
             Self::Save => save(app),
             Self::SaveAs => save_as(app),
+            Self::SaveCopy => save_copy(app),
+            Self::SaveAll => save_all(app),
             Self::Undo => drop(app.run("edit.undo", json!({}))),
             Self::Redo => drop(app.run("edit.redo", json!({}))),
             Self::SaveJson => save_as_with_extension(app, "json"),
@@ -774,6 +844,129 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+/// Save group menu from the app-bar Save arrow (#9928).
+fn save_group_menu(app: &mut SolveApp, ctx: &egui::Context) {
+    let id = egui::Id::new("sc_save_menu");
+    if !ctx.data(|d| d.get_temp::<bool>(id).unwrap_or(false)) {
+        return;
+    }
+    let mut close = false;
+    let x = ctx.data(|d| d.get_temp::<f32>(egui::Id::new(("sc_save_menu", "x")))).unwrap_or(100.0);
+    let resp = Container::new(ctx, Surface::Popup)
+        .area(egui::Id::new("sc_save_group_area"))
+        .fixed_pos(pos2(x, APP_BAR_HEIGHT))
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            crate::ui_kit::Menu::show_frame(ui, crate::ui_kit::Menu::frame(), |ui| {
+                ui.set_min_width(180.0);
+                ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+                ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::NONE;
+                ui.visuals_mut().widgets.hovered.weak_bg_fill = Tokens::get().hover;
+                let item_if = |ui: &mut egui::Ui, label: &str, key: &str, icon: &str, enabled: bool| {
+                    crate::context_menu::list_row(ui, &crate::context_menu::Item::action(label, label, icon).key(key).on_if(enabled)).is_some()
+                };
+                let shown = design_shown(app);
+                if item_if(ui, app.tr("ui.save"), "Ctrl+S", "save", FileAction::Save.enabled(app)) {
+                    FileAction::Save.run(app);
+                    close = true;
+                }
+                let save_as_key = crate::keymap::effective(app, "file.save_as").unwrap_or_default();
+                if item_if(ui, &format!("{}…", app.tr("ui.save_as")), &save_as_key, "save", FileAction::SaveAs.enabled(app)) {
+                    FileAction::SaveAs.run(app);
+                    close = true;
+                }
+                if item_if(ui, app.tr("document.save_copy"), "", "save", FileAction::SaveCopy.enabled(app)) {
+                    FileAction::SaveCopy.run(app);
+                    close = true;
+                }
+                if item_if(ui, app.tr("ui.save_all"), "", "save", FileAction::SaveAll.enabled(app)) {
+                    FileAction::SaveAll.run(app);
+                    close = true;
+                }
+                ui.separator();
+                let (stl_key, mf_key, step_key) = (
+                    crate::keymap::effective(app, "file.export_stl").unwrap_or_default(),
+                    crate::keymap::effective(app, "file.export_3mf").unwrap_or_default(),
+                    crate::keymap::effective(app, "file.export_step").unwrap_or_default(),
+                );
+                if item_if(ui, "Export STL…", &stl_key, "mesh_export", shown) {
+                    FileAction::Command("file.export_stl").run(app);
+                    close = true;
+                }
+                if item_if(ui, "Export 3MF…", &mf_key, "mesh_export", shown) {
+                    FileAction::Command("file.export_3mf").run(app);
+                    close = true;
+                }
+                if item_if(ui, "Export STEP…", &step_key, "export", shown) {
+                    FileAction::Command("file.export_step").run(app);
+                    close = true;
+                }
+            });
+        });
+    let just_opened = ctx.data(|d| d.get_temp::<u64>(egui::Id::new(("sc_save_menu", "opened")))) == Some(ctx.cumulative_pass_nr());
+    if close || (!just_opened && resp.response.clicked_elsewhere()) {
+        ctx.data_mut(|d| d.insert_temp(id, false));
+    }
+}
+
+/// Undo history from the app-bar Undo arrow: each row undoes through that step (#9928).
+fn undo_group_menu(app: &mut SolveApp, ctx: &egui::Context) {
+    history_group_menu(app, ctx, "sc_undo_menu", true);
+}
+
+/// Redo history from the app-bar Redo arrow (#9928).
+fn redo_group_menu(app: &mut SolveApp, ctx: &egui::Context) {
+    history_group_menu(app, ctx, "sc_redo_menu", false);
+}
+
+fn history_group_menu(app: &mut SolveApp, ctx: &egui::Context, menu: &str, undo: bool) {
+    let id = egui::Id::new(menu);
+    if !ctx.data(|d| d.get_temp::<bool>(id).unwrap_or(false)) {
+        return;
+    }
+    let mut close = false;
+    let x = ctx.data(|d| d.get_temp::<f32>(egui::Id::new((menu, "x")))).unwrap_or(100.0);
+    let labels: Vec<String> = if undo {
+        app.session.undo.iter().rev().map(|s| s.label.clone()).take(24).collect()
+    } else {
+        app.session.redo.iter().rev().map(|s| s.label.clone()).take(24).collect()
+    };
+    let icon = if undo { "undo" } else { "redo" };
+    let empty = if undo { app.tr("ui.nothing_to_undo").to_string() } else { app.tr("ui.nothing_to_redo").to_string() };
+    let fallback = if undo { app.tr("ui.undo").to_string() } else { app.tr("ui.redo").to_string() };
+    let resp = Container::new(ctx, Surface::Popup)
+        .area(egui::Id::new((menu, "area")))
+        .fixed_pos(pos2(x, APP_BAR_HEIGHT))
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            crate::ui_kit::Menu::show_frame(ui, crate::ui_kit::Menu::frame(), |ui| {
+                ui.set_min_width(180.0);
+                ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+                ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::NONE;
+                ui.visuals_mut().widgets.hovered.weak_bg_fill = Tokens::get().hover;
+                if labels.is_empty() {
+                    ui.label(egui::RichText::new(empty).weak());
+                }
+                for (i, label) in labels.iter().enumerate() {
+                    let text = if label.trim().is_empty() { fallback.clone() } else { label.clone() };
+                    let row = crate::context_menu::Item::action(&text, &text, icon);
+                    if crate::context_menu::list_row(ui, &row).is_some() {
+                        let cmd = if undo { "edit.undo" } else { "edit.redo" };
+                        for _ in 0..=i {
+                            let _ = app.run(cmd, json!({}));
+                        }
+                        close = true;
+                        break;
+                    }
+                }
+            });
+        });
+    let just_opened = ctx.data(|d| d.get_temp::<u64>(egui::Id::new((menu, "opened")))) == Some(ctx.cumulative_pass_nr());
+    if close || (!just_opened && resp.response.clicked_elsewhere()) {
+        ctx.data_mut(|d| d.insert_temp(id, false));
+    }
+}
+
 /// Whether the design is on screen: viewport/menu editing stays disabled behind File.
 /// File owns its explicit Save/Save As/export actions and returns to the design before dispatch.
 pub fn design_shown(app: &SolveApp) -> bool {
@@ -803,6 +996,27 @@ pub(crate) fn save_as(app: &mut SolveApp) {
 pub(crate) fn save_copy(app: &mut SolveApp) {
     let name = crate::i18n::format("document.copy_name", &[("name", &app.session.save_as_name())]);
     save_as_named(app, &name, solidcraft_engine::io::DESIGN_EXT);
+}
+
+/// Save every dirty open design that already has a path; the first untitled dirty one opens Save As (#9928).
+fn save_all(app: &mut SolveApp) {
+    let active = app.docs.active;
+    let dirty: Vec<usize> = crate::documents::tabs_info(app).into_iter().enumerate().filter_map(|(i, (_, dirty))| dirty.then_some(i)).collect();
+    let mut untitled: Option<usize> = None;
+    for i in dirty {
+        crate::documents::switch(app, i);
+        if app.session.path.is_some() {
+            // Sync save so every tab finishes before the next switch (Save All is not a worker batch).
+            let _ = app.run("file.save", json!({}));
+        } else {
+            untitled = untitled.or(Some(i));
+        }
+    }
+    crate::documents::switch(app, active);
+    if let Some(i) = untitled {
+        crate::documents::switch(app, i);
+        save_as(app);
+    }
 }
 
 /// Save As offers the open file's own name, not the name stored in the design (#8329).
@@ -3155,6 +3369,21 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         app.last_escape = None;
         return;
     }
+    // Save / Undo / Redo group menus use the same Area pattern (#9928).
+    let group_open =
+        ["sc_save_menu", "sc_undo_menu", "sc_redo_menu"].into_iter().find(|m| ctx.data(|d| d.get_temp::<bool>(egui::Id::new(*m)).unwrap_or(false)));
+    if let Some(menu) = group_open
+        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new(menu), false));
+        egui::Popup::close_all(ctx);
+        ctx.input_mut(|i| {
+            i.raw.events.retain(|event| !matches!(event, egui::Event::Key { key: egui::Key::Escape, modifiers, .. } if modifiers.matches_logically(egui::Modifiers::NONE)));
+        });
+        app.esc_handled = true;
+        app.last_escape = None;
+        return;
+    }
     // The Keyboard Shortcuts window is waiting for a key: it is not a shortcut.
     if crate::keymap::capturing(app) {
         // Parameters is drawn before Preferences; do not let its footer see this Escape.
@@ -3466,6 +3695,45 @@ mod header_report_tests {
         FileAction::Redo.run(&mut h.app);
         assert_eq!(h.app.session.undo.len(), depth);
         assert!(!FileAction::Redo.enabled(&h.app));
+    }
+
+    #[test]
+    fn app_bar_group_arrows_open_save_and_undo_menus() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.custom_titlebar = true;
+        h.call("ui.resize", json!({"width":1400,"height":720}));
+        h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
+        h.app.run("solid.cylinder", json!({"radius":5,"height":10})).unwrap();
+        h.frames(3);
+        assert!(crate::scenario::handle_at("appbar:save:menu").is_some(), "Save has a group arrow");
+        assert!(crate::scenario::handle_at("appbar:undo:menu").is_some(), "Undo has a group arrow");
+        assert!(crate::scenario::handle_at("appbar:redo:menu").is_some(), "Redo has a group arrow");
+        // Open the Save menu the same way the arrow click does (Area close logic needs the opened pass).
+        let pass = h.ctx.cumulative_pass_nr();
+        h.ctx.data_mut(|d| {
+            d.insert_temp(egui::Id::new("sc_save_menu"), true);
+            d.insert_temp(egui::Id::new(("sc_save_menu", "opened")), pass);
+            d.insert_temp(egui::Id::new(("sc_save_menu", "x")), 120.0_f32);
+        });
+        h.frames(1);
+        assert!(h.widget(h.app.tr("ui.save_all")).is_some(), "Save menu lists Save All");
+        assert!(h.widget(h.app.tr("document.save_copy")).is_some(), "Save menu lists Save a Copy");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        assert!(!h.ctx.data(|d| d.get_temp::<bool>(egui::Id::new("sc_save_menu")).unwrap_or(false)));
+        let depth = h.app.session.undo.len();
+        let labels: Vec<_> = h.app.session.undo.iter().rev().map(|s| s.label.clone()).collect();
+        assert!(labels.len() >= 2, "{labels:?}");
+        let pass = h.ctx.cumulative_pass_nr();
+        h.ctx.data_mut(|d| {
+            d.insert_temp(egui::Id::new("sc_undo_menu"), true);
+            d.insert_temp(egui::Id::new(("sc_undo_menu", "opened")), pass);
+            d.insert_temp(egui::Id::new(("sc_undo_menu", "x")), 160.0_f32);
+        });
+        h.frames(1);
+        // Picking an older row undoes through that step (cylinder, then box).
+        h.step(&json!({"widget": labels[1].as_str()})).unwrap();
+        assert_eq!(h.app.session.undo.len(), depth.saturating_sub(2));
     }
 
     #[test]
