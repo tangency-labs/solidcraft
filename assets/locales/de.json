@@ -4129,6 +4129,7 @@
   "ui.agent_chat_auth_terminal": "Führen Sie dies in einem Terminal aus und klicken Sie dann erneut auf Verbinden:",
   "ui.agent_chat_auth_title": "Beim Agenten anmelden",
   "ui.agent_chat_cancel": "Abbrechen",
+  "ui.agent_chat_cancel_timeout": "Der Agent hat nicht auf Stopp reagiert und wurde getrennt. Zum Fortfahren erneut verbinden.",
   "ui.agent_chat_cannot_start": "Installiert, startet aber nicht: {error}",
   "ui.agent_chat_changes": "Änderungen: {n}, ein Rückgängig-Schritt",
   "ui.agent_chat_changes_n": "{n} Änderungen",

@@ -4134,6 +4134,7 @@
   "ui.agent_chat_auth_terminal": "在终端中运行以下命令，然后再次点击连接：",
   "ui.agent_chat_auth_title": "登录智能体",
   "ui.agent_chat_cancel": "取消",
+  "ui.agent_chat_cancel_timeout": "代理未响应停止请求，已断开连接。请重新连接以继续。",
   "ui.agent_chat_cannot_start": "已安装，但无法启动：{error}",
   "ui.agent_chat_changes": "{n} 项更改，一步撤销",
   "ui.agent_chat_changes_n": "{n} 项更改",

@@ -4134,6 +4134,7 @@
   "ui.agent_chat_auth_terminal": "ターミナルでこれを実行してから、もう一度「接続」を押してください:",
   "ui.agent_chat_auth_title": "エージェントにサインイン",
   "ui.agent_chat_cancel": "キャンセル",
+  "ui.agent_chat_cancel_timeout": "エージェントが停止要求に応答しなかったため、接続を切断しました。続行するには再接続してください。",
   "ui.agent_chat_cannot_start": "インストールされていますが、起動しません: {error}",
   "ui.agent_chat_changes": "{n} 件の変更（元に戻すは1回）",
   "ui.agent_chat_changes_n": "{n} 件の変更",

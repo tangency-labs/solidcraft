@@ -4134,6 +4134,7 @@
   "ui.agent_chat_auth_terminal": "יש להריץ את זה במסוף ואז ללחוץ שוב על התחברות:",
   "ui.agent_chat_auth_title": "התחברות לסוכן",
   "ui.agent_chat_cancel": "ביטול",
+  "ui.agent_chat_cancel_timeout": "הסוכן לא הגיב לבקשת העצירה ונותק. יש להתחבר מחדש כדי להמשיך.",
   "ui.agent_chat_cannot_start": "מותקן, אך אינו מופעל: {error}",
   "ui.agent_chat_changes": "שינויים: {n}, צעד ביטול אחד",
   "ui.agent_chat_changes_n": "{n} שינויים",

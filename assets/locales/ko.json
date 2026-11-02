@@ -2962,6 +2962,7 @@
   "ui.agent_chat_auth_terminal": "터미널에서 이것을 실행한 뒤 다시 연결을 누르세요:",
   "ui.agent_chat_auth_title": "에이전트에 로그인",
   "ui.agent_chat_cancel": "취소",
+  "ui.agent_chat_cancel_timeout": "에이전트가 중지 요청에 응답하지 않아 연결이 끊어졌습니다. 계속하려면 다시 연결하세요.",
   "ui.agent_chat_cannot_start": "설치되어 있지만 시작되지 않습니다: {error}",
   "ui.agent_chat_changes": "변경 {n}개, 실행 취소 한 번",
   "ui.agent_chat_changes_of": "변경 {n}/{limit}",

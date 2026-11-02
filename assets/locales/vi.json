@@ -4134,6 +4134,7 @@
   "ui.agent_chat_auth_terminal": "Chạy lệnh này trong cửa sổ dòng lệnh, sau đó nhấp Kết nối lại:",
   "ui.agent_chat_auth_title": "Đăng nhập vào AI Agent",
   "ui.agent_chat_cancel": "Hủy bỏ",
+  "ui.agent_chat_cancel_timeout": "Tác nhân không phản hồi yêu cầu Dừng nên đã bị ngắt kết nối. Hãy kết nối lại để tiếp tục.",
   "ui.agent_chat_cannot_start": "Đã cài đặt nhưng không khởi động được: {error}",
   "ui.agent_chat_changes": "Thay đổi: {n}, trong 1 bước hoàn tác",
   "ui.agent_chat_changes_n": "{n} thay đổi",

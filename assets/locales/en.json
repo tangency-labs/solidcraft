@@ -4134,6 +4134,7 @@
   "ui.agent_chat_auth_terminal": "Run this in a terminal, then press Connect again:",
   "ui.agent_chat_auth_title": "Sign in to the agent",
   "ui.agent_chat_cancel": "Cancel",
+  "ui.agent_chat_cancel_timeout": "The agent did not respond to Stop and was disconnected. Reconnect to continue.",
   "ui.agent_chat_cannot_start": "Installed, but it does not start: {error}",
   "ui.agent_chat_changes": "Changes: {n}, one undo step",
   "ui.agent_chat_changes_n": "{n} changes",

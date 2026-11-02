@@ -4134,6 +4134,7 @@
   "ui.agent_chat_auth_terminal": "شغّل هذا في الطرفية، ثم اضغط «اتصال» مرة أخرى:",
   "ui.agent_chat_auth_title": "تسجيل الدخول إلى الوكيل",
   "ui.agent_chat_cancel": "إلغاء",
+  "ui.agent_chat_cancel_timeout": "لم يستجب الوكيل لطلب الإيقاف، فتم قطع الاتصال به. أعد الاتصال للمتابعة.",
   "ui.agent_chat_cannot_start": "مثبّت، لكنه لا يبدأ: {error}",
   "ui.agent_chat_changes": "التغييرات: {n}، خطوة تراجع واحدة",
   "ui.agent_chat_changes_n": "{n} تغييرات",
