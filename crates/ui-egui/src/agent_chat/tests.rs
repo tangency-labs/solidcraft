@@ -3534,13 +3534,14 @@ fn pick_into_dialog(app: &mut SolveApp, sels: &[solidcraft_engine::Sel]) {
     app.dialog = Some(d);
 }
 
-/// Pick context opens the picker with Elements, Features and Bodies; OK puts what was picked in the
-/// tray above the message box, as chips with an ×; × takes one out; Cancel keeps what was there.
+/// Pick context opens the picker with Elements, Features and Bodies; OK puts a pill into the message
+/// box, at the caret; Cancel, and OK with nothing picked, add nothing.
 #[test]
-fn the_picker_fills_a_tray_of_chips_that_can_be_trimmed() {
+fn the_picker_puts_a_pill_into_the_text_where_the_caret_is() {
     let mut h = crate::scenario::Harness::new();
     h.call("ui.agent_chat", json!({"open": true}));
     let sels = box_selection(&mut h.app);
+    h.app.agent_chat.input = "make to match".into();
     h.frames(3);
     let [x, y] = h.widget("Pick context").expect("the button is there");
     h.call("ui.click", json!({"x": x, "y": y}));
@@ -3553,65 +3554,317 @@ fn the_picker_fills_a_tray_of_chips_that_can_be_trimmed() {
     h.call("ui.click", json!({"x": x, "y": y}));
     h.frames(4);
     assert!(h.app.dialog.is_none(), "OK closed the picker");
-    assert_eq!(h.app.agent_chat.picked.len(), 4);
-    assert_eq!(h.app.agent_chat.picked_context.items.len(), 4);
-    for heading in ["Elements 2", "Features 1", "Bodies 1"] {
-        assert!(h.widget(heading).is_some(), "{heading} is drawn in the tray");
-    }
-    // × takes the body out: the tray and the picks stay in step.
-    let cross = crate::scenario::handle_at("agent_chat:picked_remove:3").expect("every chip has an ×");
-    h.call("ui.click", json!({"x": cross.x, "y": cross.y}));
-    h.frames(4);
-    assert_eq!(h.app.agent_chat.picked.len(), 3);
-    assert!(h.app.agent_chat.picked_context.items.iter().all(|i| i.kind != context::Kind::Body));
-    // Reopened, the picker holds what is in the tray; Cancel leaves it alone.
-    start_pick(&mut h.app);
-    assert_eq!(h.app.dialog.as_ref().map(|d| d.inputs.iter().map(|i| i.items.len()).collect::<Vec<_>>()), Some(vec![2, 1, 0]));
-    pick_into_dialog(&mut h.app, &[solidcraft_engine::Sel::Body { name: "Body1".into() }]);
+    assert_eq!(h.app.agent_chat.pills.len(), 1);
+    let pill = &h.app.agent_chat.pills[0];
+    assert_eq!(pill.context.items.len(), 4);
+    assert_eq!(pill.label, "1 face + 1 edge + 1 feature + 1 body");
+    let text = h.app.agent_chat.input.clone();
+    assert_eq!(text, format!("make to match {} ", pills::marker(pill.id, &pill.label)), "at the end: nothing was typed after it");
+    // Cancel adds nothing, and nor does OK with nothing picked.
+    start_pick(&mut h.app, Some(0));
+    pick_into_dialog(&mut h.app, &sels[3..]);
     crate::dialogs::cancel(&mut h.app);
-    assert!(h.app.dialog.is_none());
-    assert_eq!(h.app.agent_chat.picked.len(), 3, "Cancel keeps what was picked before");
-    // The control channel opens it too and reports what is picked.
-    let reply = h.call("ui.agent_chat", json!({"pick": true}));
+    assert!(h.app.dialog.is_none() && h.app.agent_chat.pills.len() == 1);
+    start_pick(&mut h.app, Some(0));
+    let d = h.app.dialog.take().expect("the picker");
+    pick_done(&mut h.app, &d).expect("OK");
+    assert_eq!(h.app.agent_chat.pills.len(), 1);
+    assert_eq!(h.app.agent_chat.input, text);
+    // The control channel opens it too, with a place in the box, and reports the pills.
+    let reply = h.call("ui.agent_chat", json!({"pick": true, "pick_at": 4}));
     assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::ChatContext)));
-    assert_eq!(reply["result"]["picked"].as_array().map(Vec::len), Some(3));
+    assert_eq!(reply["result"]["pills"].as_array().map(Vec::len), Some(1));
+    assert_eq!(h.app.agent_chat.pick_at, Some(4));
     crate::dialogs::cancel(&mut h.app);
     // While another dialog is open, the button does nothing.
     h.app.start("solid.box");
     let before = h.app.dialog.is_some();
-    start_pick(&mut h.app);
+    start_pick(&mut h.app, None);
     assert!(before && !matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::ChatContext)));
 }
 
-/// What was picked goes with the next message, once, together with an attached selection that does
-/// not repeat it.
+/// Make a pick of `sels` and put its pill at character `at` of the box.
+fn pick_pill(app: &mut SolveApp, at: usize, sels: &[solidcraft_engine::Sel]) {
+    start_pick(app, Some(at));
+    pick_into_dialog(app, sels);
+    let d = app.dialog.take().expect("the picker");
+    pick_done(app, &d).expect("OK");
+}
+
+/// A pick goes to the agent where it was made: the marks in the text are numbered in reading order
+/// whichever was picked first, and the groups follow the message under the same numbers, with what
+/// an attached selection adds listed apart.
 #[test]
-fn the_picks_go_with_the_next_message_once() {
+fn picks_reach_the_agent_at_the_place_they_were_made() {
     let (mut app, script, ctx) = app_with_script();
     let sels = box_selection(&mut app);
-    start_pick(&mut app);
-    pick_into_dialog(&mut app, &sels[2..]); // the feature and the body
-    let d = app.dialog.take().expect("the picker");
-    pick_done(&mut app, &d).expect("OK");
-    assert_eq!(app.agent_chat.picked_context.items.len(), 2);
-
-    // The same body is also selected and Attach selection is on: it is listed once.
-    app.session.selection = vec![sels[3].clone(), sels[0].clone()];
+    app.agent_chat.input = "make  match ".into();
+    // The body is picked first and goes at the end; the face picked second goes in front of it.
+    pick_pill(&mut app, 12, &sels[3..]);
+    pick_pill(&mut app, 5, &sels[..1]);
+    assert_eq!(app.agent_chat.pills.len(), 2);
+    app.session.selection = vec![sels[1].clone()];
     app.agent_chat.attach_selection = true;
-    send(&mut app, &ctx, "look at these".into());
+    let text = std::mem::take(&mut app.agent_chat.input);
+    send(&mut app, &ctx, text);
     let prompt = script.calls().pop().expect("a prompt");
-    assert!(prompt.starts_with("prompt: look at these\n\n[Selected in SolidCraft"), "{prompt}");
-    assert!(prompt.contains("3 item(s)"), "two picked and one more selected: {prompt}");
-    assert_eq!(prompt.matches("- Body1").count(), 1, "{prompt}");
-    let Some(Item::User { context, .. }) = app.agent_chat.items.last() else { panic!("a sent message") };
-    assert_eq!(context.items.len(), 3);
-    assert!(app.agent_chat.picked.is_empty() && app.agent_chat.picked_context.is_empty(), "the tray is empty again");
+    assert!(prompt.starts_with("prompt: make «1: Flat face"), "the face picked second stands first and is 1: {prompt}");
+    assert!(prompt.contains(" match «2: Body1» \n\n[Selected"), "the body's mark follows 'match': {prompt}");
+    let block = &prompt[prompt.find("[Selected in SolidCraft").expect("the block")..];
+    assert!(block.contains("stands for the numbered group below"), "{block}");
+    let g1 = block.find("\n«1: ").expect("group 1");
+    let g2 = block.find("\n«2: Body1»\nBodies:\n- Body1").expect("group 2");
+    let rest = block.find("Selected as well, not placed in the message:").expect("the selection that is not placed");
+    assert!(g1 < g2 && g2 < rest, "{block}");
+    assert!(block.contains("Elements:") && block[rest..].contains("Elements:"), "{block}");
+    let Some(Item::User { text, context, .. }) = app.agent_chat.items.last() else { panic!("a sent message") };
+    assert!(text.contains("«1: ") && text.contains("«2: Body1»"), "{text}");
+    assert_eq!(context.groups.iter().map(|(n, _)| *n).collect::<Vec<_>>(), vec![1, 2]);
+    assert!(app.agent_chat.pills.is_empty(), "nothing is left to carry");
     // The next message carries nothing of it.
     ended(&script, "");
     poll(&mut app, &ctx);
     app.agent_chat.attach_selection = false;
     send(&mut app, &ctx, "and now?".into());
     assert_eq!(script.calls().pop().as_deref(), Some("prompt: and now?"));
+}
+
+/// A pill whose mark was taken out of the text is not sent; a mark nobody picked is plain text.
+#[test]
+fn a_deleted_mark_drops_its_pick() {
+    let (mut app, script, ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    pick_pill(&mut app, 0, &sels[3..]);
+    pick_pill(&mut app, 0, &sels[2..3]);
+    // Take the first pick's mark out and type one that stands for nothing.
+    let first = pills::spans(&app.agent_chat.input)
+        .into_iter()
+        .find(|s| app.agent_chat.pills.iter().any(|p| p.id == s.id && p.context.items.iter().any(|i| i.kind == context::Kind::Body)))
+        .expect("the body's mark");
+    let text = pills::remove(&app.agent_chat.input, first.start, first.end) + " «9: nothing»";
+    send(&mut app, &ctx, text);
+    let prompt = script.calls().pop().expect("a prompt");
+    assert!(prompt.contains("1 item(s)") && !prompt.contains("- Body1") && prompt.contains("‹9: nothing›") && !prompt.contains("«9:"), "{prompt}");
+    let Some(Item::User { context, .. }) = app.agent_chat.items.last() else { panic!("a sent message") };
+    assert_eq!(context.items.len(), 1);
+}
+
+/// The agent replaced the design: the pills stood for the old one's geometry, so they and their
+/// marks leave the box, and the words around them stay.
+#[test]
+fn replacing_the_design_takes_the_pills_out_of_the_box() {
+    let (mut app, _script, _ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    app.agent_chat.input = "make  round".into();
+    pick_pill(&mut app, 5, &sels[3..]);
+    assert_eq!(app.agent_chat.pills.len(), 1);
+    continue_in_document(&mut app);
+    assert!(app.agent_chat.pills.is_empty());
+    assert_eq!(app.agent_chat.input, "make  round");
+}
+
+/// Queued messages that go as one prompt keep their picks apart: the second message's marks follow
+/// the first one's numbers.
+#[test]
+fn queued_messages_number_their_picks_on() {
+    let (mut app, script, ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    app.agent_chat.state = Some(State::Busy);
+    for pick in [&sels[3..], &sels[2..3]] {
+        app.agent_chat.input = "see ".into();
+        pick_pill(&mut app, 4, pick);
+        let text = std::mem::take(&mut app.agent_chat.input);
+        send(&mut app, &ctx, text);
+    }
+    assert_eq!(app.agent_chat.pending.len(), 2);
+    app.agent_chat.state = Some(State::Ready);
+    send_queue(&mut app, &ctx, false);
+    let prompt = script.calls().pop().expect("a prompt");
+    assert!(prompt.starts_with("prompt: see «1: Body1» \n\nsee «2: "), "the second message's mark follows the first one's number: {prompt}");
+    assert!(prompt.contains("\n«1: Body1»\nBodies:\n- Body1") && prompt.contains("\n«2: "), "{prompt}");
+}
+
+/// Backspace right after a pill takes it whole; Delete right before one does too.
+#[test]
+fn backspace_and_delete_take_a_pill_whole() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    let sels = box_selection(&mut h.app);
+    h.app.agent_chat.input = "a b".into();
+    pick_pill(&mut h.app, 2, &sels[3..]);
+    h.frames(3);
+    let marker_end = pills::spans(&h.app.agent_chat.input)[0].end;
+    place_caret_for_test(&mut h, marker_end);
+    h.step(&json!({"key": "Backspace"})).expect("key");
+    h.frames(2);
+    assert!(pills::spans(&h.app.agent_chat.input).is_empty(), "the whole mark went: {:?}", h.app.agent_chat.input);
+    assert_eq!(h.app.agent_chat.input, "a  b", "only the mark went: {:?}", h.app.agent_chat.input);
+    // Delete from in front of a fresh one.
+    h.app.agent_chat.input = "a b".into();
+    h.app.agent_chat.pills.clear();
+    pick_pill(&mut h.app, 2, &sels[3..]);
+    h.frames(3);
+    let start = pills::spans(&h.app.agent_chat.input)[0].start;
+    place_caret_for_test(&mut h, start);
+    h.step(&json!({"key": "Delete"})).expect("key");
+    h.frames(2);
+    assert!(pills::spans(&h.app.agent_chat.input).is_empty(), "{:?}", h.app.agent_chat.input);
+}
+
+/// The word-delete key (Alt+Backspace) next to a pill takes it whole too, not a part of its mark.
+#[test]
+fn a_word_delete_next_to_a_pill_takes_it_whole() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    let sels = box_selection(&mut h.app);
+    h.app.agent_chat.input = "a ".into();
+    pick_pill(&mut h.app, 2, &sels[3..]);
+    h.frames(3);
+    let end = pills::spans(&h.app.agent_chat.input)[0].end;
+    place_caret_for_test(&mut h, end);
+    h.step(&json!({"key": "Backspace", "alt": true})).expect("key");
+    h.frames(2);
+    assert!(!h.app.agent_chat.input.contains(pills::OPEN) && !h.app.agent_chat.input.contains(pills::CLOSE), "{:?}", h.app.agent_chat.input);
+}
+
+/// A pick made with the caret inside an earlier pill goes after it and leaves it whole.
+#[test]
+fn a_pick_made_inside_a_pill_does_not_break_it() {
+    let (mut app, script, ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    app.agent_chat.input = "see ".into();
+    pick_pill(&mut app, 4, &sels[3..]);
+    let first = pills::spans(&app.agent_chat.input)[0].clone();
+    pick_pill(&mut app, first.start + 3, &sels[2..3]);
+    let spans = pills::spans(&app.agent_chat.input);
+    assert_eq!(spans.len(), 2, "both marks are whole: {:?}", app.agent_chat.input);
+    assert!(spans[0].end <= spans[1].start);
+    let text = std::mem::take(&mut app.agent_chat.input);
+    send(&mut app, &ctx, text);
+    let prompt = script.calls().pop().expect("a prompt");
+    assert!(prompt.contains("«1: Body1»\nBodies:") && prompt.contains("«2: "), "both picks arrive: {prompt}");
+}
+
+/// What is picked and also selected is listed once, under the pick.
+#[test]
+fn a_picked_thing_that_is_also_selected_is_listed_once() {
+    let (mut app, script, ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    pick_pill(&mut app, 0, &sels[3..]);
+    app.session.selection = vec![sels[3].clone(), sels[1].clone()];
+    app.agent_chat.attach_selection = true;
+    let text = std::mem::take(&mut app.agent_chat.input);
+    send(&mut app, &ctx, text);
+    let prompt = script.calls().pop().expect("a prompt");
+    assert_eq!(prompt.matches("- Body1").count(), 1, "{prompt}");
+    assert!(prompt.contains("2 item(s)") && prompt.contains("not placed in the message"), "the edge is the only one not placed: {prompt}");
+}
+
+/// A mark pasted from an earlier message stands for nothing: it is sent as plain brackets, so it is
+/// not read as one of the numbered groups.
+#[test]
+fn a_pasted_mark_is_not_read_as_a_group() {
+    let (mut app, script, ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    // Numbers keep counting up across a session, so a mark from an earlier message (they are
+    // numbered from 1 when sent) is never the number of a pick being made.
+    app.agent_chat.next_pill = 4;
+    app.agent_chat.input = "old «1: Plate · 3 faces» new ".into();
+    pick_pill(&mut app, 29, &sels[3..]);
+    let text = std::mem::take(&mut app.agent_chat.input);
+    send(&mut app, &ctx, text);
+    let prompt = script.calls().pop().expect("a prompt");
+    assert!(prompt.starts_with("prompt: old ‹1: Plate · 3 faces› new «1: Body1»"), "{prompt}");
+    assert_eq!(prompt.matches("«1: Body1»").count(), 2, "the mark in the text and its group, and no other: {prompt}");
+    assert!(!prompt.contains("«1: Plate"), "{prompt}");
+}
+
+/// With no room in the queue the words and their picks stay in the box; nothing is lost.
+#[test]
+fn a_full_queue_keeps_the_words_and_their_picks() {
+    let (mut app, _script, ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    app.agent_chat.state = Some(State::Busy);
+    app.agent_chat.pending =
+        (0..MAX_PENDING).map(|_| Pending { text: "x".into(), image: false, context: Context::default(), files: Vec::new() }).collect();
+    app.agent_chat.input = "see ".into();
+    pick_pill(&mut app, 4, &sels[3..]);
+    let text = std::mem::take(&mut app.agent_chat.input);
+    send(&mut app, &ctx, text.clone());
+    assert_eq!(app.agent_chat.pending.len(), MAX_PENDING, "nothing was added");
+    assert_eq!(app.agent_chat.input, text, "the words are back in the box");
+    assert_eq!(app.agent_chat.pills.len(), 1, "and so is the pick");
+}
+
+/// Sending text through the control channel does not take the picks of what is in the box.
+#[test]
+fn a_message_sent_from_elsewhere_leaves_the_boxs_picks() {
+    let (mut app, _script, ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    app.agent_chat.input = "draft ".into();
+    pick_pill(&mut app, 6, &sels[3..]);
+    send(&mut app, &ctx, "something else".into());
+    assert_eq!(app.agent_chat.pills.len(), 1, "the box still has its mark and its pick");
+    assert!(pills::spans(&app.agent_chat.input).len() == 1);
+}
+
+/// `@` while another tool's dialog is open is only a character: the picker cannot open.
+#[test]
+fn an_at_sign_stays_while_another_dialog_is_open() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.app.start("solid.box");
+    assert!(h.app.dialog.is_some());
+    h.app.agent_chat.input = "5 ".into();
+    h.app.agent_chat.caret_to = Some(2);
+    h.frames(3);
+    h.step(&json!({"text": "@"})).expect("typed");
+    h.frames(3);
+    assert_eq!(h.app.agent_chat.input, "5 @", "the @ is kept");
+}
+
+/// The group headers use the same safe mark as the text, and a group whose items were all past the
+/// limit says so instead of standing empty.
+#[test]
+fn the_group_headers_are_safe_and_never_empty() {
+    let (mut app, _script, _ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    let mut context = context::describe(&mut app.session, &sels[3..]).in_group(1, "bad » name\nnext");
+    context.groups.push((2, "Gone".into()));
+    let block = context.prompt_block();
+    assert!(block.contains("\n«1: bad name next»\nBodies:"), "{block}");
+    assert!(block.contains("\n«2: Gone»\n(none listed: past the limit)"), "{block}");
+    assert!(!block.contains("bad »"), "{block}");
+}
+
+/// Put the caret of the message box at a character in a test harness and give the box the focus.
+fn place_caret_for_test(h: &mut crate::scenario::Harness, at: usize) {
+    h.app.agent_chat.caret_to = Some(at);
+    h.frames(3);
+}
+
+/// Typing `@` where a word starts opens the picker and leaves no `@` in the text; inside a word
+/// (an address) it is just a character.
+#[test]
+fn typing_an_at_sign_opens_the_picker_where_it_was_typed() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.app.agent_chat.input = "match ".into();
+    h.app.agent_chat.caret_to = Some(6);
+    h.frames(3);
+    h.step(&json!({"text": "@"})).expect("typed");
+    h.frames(3);
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::ChatContext)), "the picker opened");
+    assert_eq!(h.app.agent_chat.input, "match ", "the @ is not left in the text");
+    assert_eq!(h.app.agent_chat.pick_at, Some(6));
+    crate::dialogs::cancel(&mut h.app);
+    h.app.agent_chat.input = "mail me".into();
+    h.app.agent_chat.caret_to = Some(4);
+    h.frames(3);
+    h.step(&json!({"text": "@"})).expect("typed");
+    h.frames(3);
+    assert!(h.app.dialog.is_none(), "inside a word it is just a character");
+    assert_eq!(h.app.agent_chat.input, "mail@ me");
 }
 
 /// Two clicks on two rims are two things, not four edges (a click on a rim selects both halves for
@@ -3672,6 +3925,82 @@ fn a_split_wall_clicked_once_is_one_item() {
     send(&mut app, &ctx, "this wall".into());
     let prompt = script.calls().pop().expect("a prompt");
     assert!(prompt.contains("1 item(s)") && prompt.contains("Round face r10"), "{prompt}");
+}
+
+// ---- Chips: hover and things that are gone (#2286) ----
+
+/// The chip under the pointer lights its target in the model for as long as the pointer is on it.
+#[test]
+fn hovering_a_chip_lights_what_it_stands_for() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    let sels = box_selection(&mut h.app);
+    let context = context::describe(&mut h.app.session, &sels);
+    h.app.agent_chat.items.push(Item::User { text: "look".into(), image: false, pictures: Vec::new(), context: context.clone(), files: Vec::new() });
+    h.frames(4);
+    assert!(h.app.highlighted().iter().all(|s| !sels.contains(s)), "nothing is lit without the pointer");
+    // The feature's chip is the third item.
+    let at = crate::scenario::handle_at("agent_chat:sent:0:chip:2").expect("the chip is drawn");
+    h.call("ui.move", json!({"x": at.x, "y": at.y}));
+    h.call("ui.move", json!({"x": at.x + 1.0, "y": at.y}));
+    h.frames(3);
+    assert!(h.app.highlighted().contains(&sels[2]), "the feature is lit: {:?}", h.app.highlighted());
+    assert!(!h.app.highlighted().contains(&sels[3]), "only the chip's own item");
+    h.call("ui.move", json!({"x": 5.0, "y": 5.0}));
+    h.frames(3);
+    assert!(h.app.highlighted().iter().all(|s| !sels.contains(s)), "lit no longer once the pointer is away");
+}
+
+/// The pill in a sent message lights what it stands for while the pointer is on it, and the chips
+/// below the message are only for what is not in a pill.
+#[test]
+fn hovering_a_pill_in_a_sent_message_lights_its_group() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    let sels = box_selection(&mut h.app);
+    let in_pill = context::describe(&mut h.app.session, &sels[2..3]).in_group(1, "the feature");
+    let mut context = in_pill;
+    context.merge(context::describe(&mut h.app.session, &sels[3..]));
+    let text = format!("check {} against the body", pills::marker(1, "the feature"));
+    h.app.agent_chat.items.push(Item::User { text, image: false, pictures: Vec::new(), context, files: Vec::new() });
+    h.frames(4);
+    let at = crate::scenario::handle_at("agent_chat:sent:0:pill:1").expect("the pill is drawn in the message");
+    h.call("ui.move", json!({"x": at.x, "y": at.y}));
+    h.call("ui.move", json!({"x": at.x + 1.0, "y": at.y}));
+    h.frames(3);
+    assert!(h.app.highlighted().contains(&sels[2]), "the pill's feature is lit: {:?}", h.app.highlighted());
+    assert!(!h.app.highlighted().contains(&sels[3]), "only the pill's own group");
+    h.call("ui.move", json!({"x": 5.0, "y": 5.0}));
+    h.frames(3);
+    assert!(h.app.highlighted().iter().all(|s| !sels.contains(s)), "lit no longer once the pointer is away");
+    // The feature is in the pill, so it has no chip; the body (from Attach selection) has one.
+    assert!(crate::scenario::handle_at("agent_chat:sent:0:chip:0").is_some(), "the unplaced body has a chip");
+    assert!(crate::scenario::handle_at("agent_chat:sent:0:chip:1").is_none(), "the feature has none: it is a pill");
+}
+
+/// A chip or pill whose body, feature, face or edge has left the design is struck through (flagged), in the
+/// pill and on a sent message; undoing that leaves them as they were.
+#[test]
+fn chips_of_things_that_are_gone_are_flagged() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    let sels = box_selection(&mut h.app);
+    let context = context::describe(&mut h.app.session, &sels);
+    h.app.agent_chat.items.push(Item::User { text: "look".into(), image: false, pictures: Vec::new(), context: context.clone(), files: Vec::new() });
+    h.app.agent_chat.pills = vec![Pill { id: 1, label: "all".into(), context: context.clone().in_group(1, "all") }];
+    h.app.agent_chat.input = pills::marker(1, "all");
+    h.app.agent_chat.chips_version += 1;
+    h.frames(4);
+    assert_eq!(h.app.agent_chat.gone.sent.get(&0), Some(&vec![false; 4]), "everything is still there");
+    assert_eq!(h.app.agent_chat.gone.pills, vec![false], "the pill is as it was");
+    // The box is undone: its body, feature, face and edge are gone.
+    h.app.run("edit.undo", json!({})).expect("undo");
+    h.frames(4);
+    assert_eq!(h.app.agent_chat.gone.sent.get(&0), Some(&vec![true; 4]), "all four are gone");
+    assert_eq!(h.app.agent_chat.gone.pills, vec![true], "and flagged once something in it has gone");
+    h.app.run("edit.redo", json!({})).expect("redo");
+    h.frames(4);
+    assert_eq!(h.app.agent_chat.gone.sent.get(&0), Some(&vec![false; 4]), "back after a redo");
 }
 
 // ---- Attached pictures in the shared viewer ----
@@ -4256,4 +4585,98 @@ fn a_picture_only_prompt_and_a_thought_have_no_copy_message_action() {
     assert!(crate::scenario::handle_at("agent_chat:copy:0").is_none(), "a picture-only prompt hides the text-copy action");
     assert!(crate::scenario::handle_at("agent_chat:copy:1").is_none(), "a thought has no copy action");
     assert!(h.widget("Copy message").is_none(), "nothing to click");
+}
+
+/// Enter sends the box's text with its picks, wherever the caret is; so does `send_input` on the
+/// control channel (the box is emptied, the picks go with the message).
+#[test]
+fn enter_and_the_control_channel_send_the_box_with_its_pills() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    let sels = box_selection(&mut h.app);
+    h.app.agent_chat.input = "put it ".into();
+    pick_pill(&mut h.app, 7, &sels[3..]);
+    h.app.agent_chat.input.push_str("here");
+    h.app.agent_chat.caret_to = Some(3);
+    h.frames(4);
+    h.step(&json!({"key": "Enter"})).expect("key");
+    h.frames(4);
+    let last_user = |h: &crate::scenario::Harness| h.app.agent_chat.items.iter().rev().find(|i| matches!(i, Item::User { .. })).cloned();
+    let Some(Item::User { text, context, .. }) = last_user(&h) else { panic!("Enter sent it: {:?}", h.app.agent_chat.input) };
+    assert!(text.contains("«1: Body1»") && context.groups.len() == 1, "{text}");
+    assert!(h.app.agent_chat.input.is_empty() && h.app.agent_chat.pills.is_empty());
+    // The same through the control channel.
+    h.app.agent_chat.items.clear();
+    h.app.agent_chat.input = "again ".into();
+    pick_pill(&mut h.app, 6, &sels[3..]);
+    let reply = h.call("ui.agent_chat", json!({}));
+    assert!(reply["result"]["input"].as_str().is_some_and(|t| t.contains("«")), "the status shows the box");
+    h.call("ui.agent_chat", json!({"send_input": true}));
+    assert!(matches!(last_user(&h), Some(Item::User { context, .. }) if context.groups.len() == 1), "the control channel sent it");
+    assert!(h.app.agent_chat.input.is_empty());
+    assert!(h.app.agent_chat.pills.is_empty(), "the picks went with the message");
+}
+
+/// A pill (or chip) lights the face it was made for even after an edit has renumbered the faces:
+/// the face is found by its persistent name, not by the number it had; one that has gone lights
+/// nothing.
+#[test]
+fn a_chip_lights_its_face_by_name_after_the_faces_are_renumbered() {
+    use solidcraft_engine::Sel;
+    let (mut app, _script, _ctx) = app_with_script();
+    app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).expect("a box");
+    let faces = app.session.execute("model.faces", &json!({"body": "Body1"})).expect("faces")["faces"].as_array().cloned().unwrap_or_default();
+    let at = |v: &Value| solidcraft_engine::geom::Vec3::new(v[0].as_f64().unwrap_or(0.0), v[1].as_f64().unwrap_or(0.0), v[2].as_f64().unwrap_or(0.0));
+    let pick = |f: &Value| Sel::Face { body: "Body1".into(), index: f["index"].as_u64().unwrap_or(0) as usize, point: at(&f["point"]) };
+    let (first, last) = (faces.first().expect("faces").clone(), faces.last().expect("faces").clone());
+    assert_ne!(first["index"], last["index"]);
+    let sel = pick(&last);
+    let mut entry = context::describe(&mut app.session, std::slice::from_ref(&sel)).items[0].clone();
+    let mut names = context::NameCache::new();
+    assert_eq!(context::current_sels(&app.session, &entry, &mut names), vec![sel.clone()], "untouched: as picked");
+    // An edit has renumbered the faces: the chip still holds the number it was made with (here the
+    // number of another face), and the name of the face it stands for.
+    let was = entry.sels.clone();
+    entry.sels = vec![pick(&first)];
+    entry.names = context::describe(&mut app.session, &was).items[0].names.clone();
+    let lit = context::current_sels(&app.session, &entry, &mut names);
+    assert!(
+        matches!(lit.as_slice(), [Sel::Face { index, .. }] if Some(*index as u64) == last["index"].as_u64()),
+        "the face of the name is lit, not the one of the stale number: {lit:?}"
+    );
+    // A name no face has any more: gone, lights nothing.
+    entry.names = vec!["F99:nowhere".into()];
+    assert!(context::current_sels(&app.session, &entry, &mut names).is_empty());
+}
+
+/// Editing a queued message: the marks that are left keep their groups (numbered 1, 2, ... again), a
+/// group whose mark was taken out is not placed any more (its items show as chips), and a mark typed
+/// by hand stands for nothing.
+#[test]
+fn editing_a_queued_message_keeps_its_marks_and_groups_together() {
+    let (mut app, _script, _ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    let mut context = context::describe(&mut app.session, &sels[3..]).in_group(1, "Body1");
+    context.merge(context::describe(&mut app.session, &sels[2..3]).in_group(2, "the feature"));
+    let mut queued = Pending { text: "fit «1: Body1» to «2: the feature» now".into(), image: false, context, files: Vec::new() };
+    queued.text = "fit «2: the feature» to «9: typed» now".into();
+    queued.regroup();
+    assert_eq!(queued.text, "fit «1: the feature» to ‹9: typed› now");
+    assert_eq!(queued.context.groups, vec![(1, "the feature".to_string())]);
+    let group_of = |kind: context::Kind| queued.context.items.iter().find(|i| i.kind == kind).map(|i| i.group);
+    assert_eq!(group_of(context::Kind::Feature), Some(1), "the feature is the first mark now");
+    assert_eq!(group_of(context::Kind::Body), Some(0), "the body's mark was taken out: it is not placed");
+    assert_eq!(queued.context.items.iter().filter(|i| i.group == 0).count(), 1, "one chip is left for the body");
+}
+
+/// New chat keeps the box as it is, with the picks its marks stand for.
+#[test]
+fn new_chat_keeps_the_draft_and_its_picks() {
+    let (mut app, _script, _ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    app.agent_chat.input = "see ".into();
+    pick_pill(&mut app, 4, &sels[3..]);
+    new_chat(&mut app);
+    assert_eq!(app.agent_chat.pills.len(), 1, "the mark is still in the box, and so is what it stands for");
+    assert_eq!(pills::spans(&app.agent_chat.input).len(), 1);
 }

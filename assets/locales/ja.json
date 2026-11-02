@@ -4213,7 +4213,7 @@
   "ui.agent_chat_permission": "エージェントが実行の許可を求めています: {title}",
   "ui.agent_chat_pick": "エージェント",
   "ui.agent_chat_pick_context": "コンテキストを選ぶ",
-  "ui.agent_chat_pick_context_tip": "エージェントに見てほしい面、エッジ、フィーチャ、ボディをモデルから選び、OK を押します",
+  "ui.agent_chat_pick_context_tip": "モデルの面、エッジ、フィーチャ、ボディを選んで OK を押すと、カーソルの位置にピルとしてメッセージに入ります(@ を入力しても同じです)",
   "ui.agent_chat_placeholder": "デザインの変更をエージェントに依頼…",
   "ui.agent_chat_placeholder_busy": "エージェントの作業が終わったら送るメッセージを入力（Ctrl+Enter: 今すぐ送信）",
   "ui.agent_chat_pop_out": "独立したウィンドウで開く（別の画面に移動できます）",
