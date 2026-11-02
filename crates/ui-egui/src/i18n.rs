@@ -389,6 +389,31 @@ pub fn tr_diagnostic(text: &str) -> String {
     CURRENT.with(|current| current.get().diagnostic(text))
 }
 
+/// Translate known engine error messages using i18n keys.
+/// If the error message is not recognized, returns it unchanged.
+pub fn tr_engine_error(error: &str) -> String {
+    // Match known engine error messages and translate them
+    if error == "nothing to break at there" {
+        return tr("sketch.error.nothing_to_break").to_string();
+    }
+    if error.starts_with("`")
+        && error.contains(" is an offset, and its ends follow its source curves: ")
+        && error.ends_with(" the source curves instead, or break the offset association first")
+    {
+        return tr("sketch.error.offset_trim").to_string();
+    }
+    if error.starts_with("`")
+        && error.contains(" is an offset, and its corners follow its source curves: ")
+        && error.ends_with(" the source corners before offsetting, or break the offset association first")
+    {
+        return tr("sketch.error.offset_fillet_chamfer").to_string();
+    }
+    if error == "a closed curve needs two crossings to trim" {
+        return tr("sketch.error.closed_curve_two_crossings").to_string();
+    }
+    error.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     /// The system's locale tags pick a catalog: exact tag, then base language, then English (#10138).
