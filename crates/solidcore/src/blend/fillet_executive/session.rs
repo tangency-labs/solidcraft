@@ -775,6 +775,20 @@ fn live_corner_vertices_geom(
         };
         crate::blend::blend_corner::ball::place_ball_contacts(k, target, pseudo, corner, &lookup)?;
     }
+    // The fork's (WR-697, 6fd0411): a Mixed corner places its vertices A, P, Q and B once
+    // both blends are traced (CalcMixedVertGeom), after the base's vertex geometry
+    if corner
+        .blend
+        .is_some_and(crate::blend::blend_corner::BlendCorner::is_mixed)
+    {
+        let lookup = SweptSessionSolvers {
+            solvers: &*solvers,
+            executive: None,
+        };
+        crate::blend::blend_corner::mixed::calc_mixed_vert_geom(
+            k, target, pseudo, corner, &lookup,
+        )?;
+    }
     Ok(())
 }
 
@@ -2692,6 +2706,21 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
         {
             return Err(SolidError::sm_err("SmBlendCorner::BuildSetBackFill"));
         }
+        // The fork's (WR-697, 6fd0411, 6e79de5): a Mixed corner's edges and its two faces'
+        // surfaces (SmBlendCorner::CalcMixedEdgeGeom), before the base's
+        // CalcCornerEdgeGeom; its edges are all precomputed
+        if corner
+            .blend
+            .is_some_and(crate::blend::blend_corner::BlendCorner::is_mixed)
+        {
+            let lookup = SweptSessionSolvers {
+                solvers: solvers.as_slice(),
+                executive: None,
+            };
+            crate::blend::blend_corner::mixed::calc_mixed_edge_geom(
+                k, target, pseudo, corner, &lookup,
+            )?;
+        }
         // The fork's (WR-697, e647dac): a Swept turn's torus and its arc A-B
         // (SmBlendCorner::BuildSweptSurface, CalcCornerEdgeGeom), before the edges' own
         // kinds compute the rest
@@ -3893,6 +3922,25 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
                     .is_some_and(crate::blend::blend_corner::BlendCorner::is_setback)
                 {
                     return Err(SolidError::sm_err("SmBlendCorner::CreateSetBackPatches"));
+                }
+                // The fork's (WR-697, 6fd0411): a Mixed corner's two faces are its patches
+                // (SmBlendCorner::CreateMixedPatches)
+                if corner
+                    .blend
+                    .is_some_and(crate::blend::blend_corner::BlendCorner::is_mixed)
+                {
+                    let mut no_note = |_: &FilletCorner| {};
+                    let mut env = CornerPatchEnv {
+                        k,
+                        target,
+                        pseudo,
+                        solvers: &store,
+                        fillet: Some(&mut fillet),
+                        note_face_error: &mut no_note,
+                    };
+                    return crate::blend::blend_corner::mixed::create_mixed_patches(
+                        corner, &mut env,
+                    );
                 }
                 // The fork's (WR-697, e647dac): a Swept turn's patch is its torus
                 // (SmBlendCorner::CreateSweptPatch)

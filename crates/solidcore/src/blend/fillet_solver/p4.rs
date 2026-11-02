@@ -458,6 +458,12 @@ impl FilletSolver {
             }
         }
 
+        // From smlib#82 (WR-697, `fillet_blend_corner`): at an end its corner does not
+        // blend, a trace that stops short of the edge's end runs on to it first
+        if cx.k.fixes.fillet_blend_corner {
+            c2_trace_to_edge_ends(ops, &mut cx, &mut st)?;
+        }
+
         // :1872-1920 no points; drop near-duplicate end points
         c2_clean_ends(ops, &mut cx, &mut st)?;
 
@@ -1635,6 +1641,106 @@ fn c2_offset_point_ignored(
         k.fixes.fillet_statuses_pass_on,
     )?)?
     .unwrap_or(Vec3::UNDEF))
+}
+
+/// From smlib#82 (the fork's cc0e23f, 47b5471; WR-697, `fillet_blend_corner`): a rail
+/// ends where its corner's event needs it, so at an end whose corner does not blend (the
+/// trace is extended there: `m_bExtendBefore` at the edge's start, `m_bExtendAfter` at
+/// its end, set from the corners by `SetExtensionFlags`) the trace runs to the edge's own
+/// end first: where the ball's centre of its first or last point drops onto the edge
+/// short of that end (a corner whose rails cross before the edge's vertex, the Mixed
+/// one), the edge's section there is a through point (made as the G1 knots' are, solved
+/// over the trace's extended domains), and the extension runs on past it.
+fn c2_trace_to_edge_ends(
+    ops: &mut dyn FilletSolverOps,
+    cx: &mut Cx<'_>,
+    st: &mut CalcState,
+) -> Result<()> {
+    use crate::geom::global_solver::{SolutionRequested, SolverOperation};
+    use crate::intersect::surface_intersector::p1::SrfIndex;
+    use crate::math::BIG_DOUBLE;
+    use crate::topology::edge as topo_edge;
+
+    let eu0 = ops
+        .solver()
+        .edgeuse(0)?
+        .ok_or_else(|| invalid("no edge use 0"))?;
+    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    if !st.do_sorting
+        || st.tsect_pnts.is_empty()
+        || topo_edge::start_vertex(cx.target, edge)? == topo_edge::end_vertex(cx.target, edge)?
+    {
+        return Ok(());
+    }
+    let tol = ops.solver().this_approx_tol_3d();
+    for end in 0..2 {
+        let extended = if end == 0 {
+            ops.solver().extend_before
+        } else {
+            ops.solver().extend_after
+        };
+        if !extended {
+            continue;
+        }
+        // the trace's point nearest that end: its ball's centre dropped to the edge
+        let near = if end == 0 {
+            st.tsect_pnts.first()
+        } else {
+            st.tsect_pnts.last()
+        }
+        .copied()
+        .ok_or_else(|| invalid("no trace point"))?;
+        let near_pnt = st.store.get(cx.fillets, near)?.clone();
+        ops.setup_offset_values(&near_pnt, None)?;
+        let centre = offset_evaluate_point(cx.k, ops, 0, near_pnt.uv_pos(SrfIndex::First))?;
+        let sols = st.edge_curve.global_point_solve::<NoObject>(
+            cx.k,
+            &st.ivl,
+            SolverOperation::Minimize,
+            centre,
+            tol,
+            SolutionRequested::Single,
+            &crate::curve::curve::p1::GlobalPointSolveOptions::default(),
+        )?;
+        let sol = sols.get(0).ok_or_else(|| SolidError::sm_err(OP))?;
+        let end_param = if end == 0 { st.ivl.min() } else { st.ivl.max() };
+        let at = st.edge_curve.evaluate_point(cx.k, sol.start.param(0)?)?;
+        let end_pnt = st.edge_curve.evaluate_point(cx.k, end_param)?;
+        if at.distance(end_pnt) <= tol {
+            continue;
+        }
+        // the edge's section at its end, as the G1 knots' through points are made
+        let base0 = st.base_surfaces[0].clone();
+        let (pnt, tangent) = binormal_guess_point(ops, cx, &base0, end_param, true)?;
+        // solved where the trace itself runs: its base surfaces' extended domains
+        let mut domain1 = st.base_surfaces[0].natural_uv_domain_if_built();
+        let mut domain2 = st.base_surfaces[1].natural_uv_domain_if_built();
+        ops.solver()
+            .setup_offset_extension(cx.k, &st.base_surfaces[0], &mut domain1)?;
+        ops.solver()
+            .setup_offset_extension(cx.k, &st.base_surfaces[1], &mut domain2)?;
+        let mut end_tsect = TsectPnt::new();
+        super::p3::find_fillet_tsect_pnt_in(
+            ops,
+            cx.k,
+            Some(&mut *cx.target),
+            &st.base_surfaces[0],
+            &st.base_surfaces[1],
+            pnt,
+            tangent,
+            &mut end_tsect,
+            Some(&domain1),
+            Some(&domain2),
+        )?;
+        end_tsect.curve_parameter = -BIG_DOUBLE;
+        let r = st.store.alloc(end_tsect);
+        if end == 0 {
+            st.tsect_pnts.insert(0, r);
+        } else {
+            st.tsect_pnts.push(r);
+        }
+    }
+    Ok(())
 }
 
 /// :1872-1920: `SM_ERR` without points; with more than two, drop the penultimate

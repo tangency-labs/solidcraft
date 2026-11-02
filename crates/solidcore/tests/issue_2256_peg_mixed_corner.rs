@@ -54,10 +54,13 @@ fn key_of(e: EntityRef) -> ObjectRef {
     }
 }
 
-/// Every opt-in fix on (SolidCraft's set), with WR-710's refusal on or off.
+/// Every opt-in fix on (SolidCraft's set) but the blend corner (`fillet_blend_corner`,
+/// whose Mixed corner builds this corner: `issue_2360_mixed_corner.rs`), with WR-710's
+/// refusal on or off.
 fn kernel(refuse: bool) -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = UpstreamFixes::all();
+    k.fixes.fillet_blend_corner = false;
     k.fixes.fillet_refuse_mixed_corner_crossing_rails = refuse;
     k
 }

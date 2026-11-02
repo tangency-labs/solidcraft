@@ -37,6 +37,7 @@ pub mod closed_nx1;
 mod concave_4x2;
 pub mod concave_nxn;
 pub mod end_corners;
+mod mixed;
 pub mod mixed_3x2;
 mod swept_turn;
 
@@ -753,6 +754,20 @@ impl FilletCorner {
             .is_some_and(crate::blend::blend_corner::BlendCorner::is_swept)
         {
             return self.make_swept_topology(Nx2TopologyEnv {
+                k,
+                target,
+                pseudo,
+                corner,
+                solvers: [fil_solver1, fil_solver2],
+            });
+        }
+        // The fork's (WR-697, 6fd0411): SmBlendCorner::MakeCornerTopology builds a Mixed
+        // corner its own way (MakeMixedTopology)
+        if self
+            .blend
+            .is_some_and(crate::blend::blend_corner::BlendCorner::is_mixed)
+        {
+            return self.make_mixed_topology(Nx2TopologyEnv {
                 k,
                 target,
                 pseudo,

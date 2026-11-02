@@ -455,9 +455,9 @@ const CHAMFERS_AT_CD47EFD: &str = "status 1001: SmFillet3x2MixedConvexityCorner,
 const DRAFTED_ROUNDS: &str = "status 1001 before any geometry: the corner where the front top edge runs tangent into the concave arc, on the cone, is of no kind SMLib's blend corners take";
 const ROUNDS_R2: &str = "the corner patch where the rounds meet stands 0.0374 out of the front face (box y min -0.0374099)";
 const ROUNDS_R5: &str = "the corner patch where the rounds meet stands 0.128 out of the front face (box y min -0.1278205)";
-const ROUNDS_R2_HERE: &str = "the rounds together build within the box and check clean";
-const ROUNDS_R5_HERE: &str =
-    "the corner patch stands 0.00156 out of the front face (box y min -0.0015609)";
+const ROUNDS_R2_HERE: &str = "the rounds together build within the box and check clean (with fillet_blend_corner, as the blend corner's Mixed corner, built in solidcore from smlib#82)";
+const ROUNDS_R5_HERE: &str = "the blend corner's Mixed corner (fillet_blend_corner, built in solidcore from smlib#82) builds the rounds together within the box; without it the pinned corner patch stands 0.00156 out of the front face (box y min -0.0015609)";
+const CHAMFERS_HERE: &str = "the blend corner's Mixed corner (fillet_blend_corner, built in solidcore from smlib#82) builds the chamfers together at the tangent seam";
 
 const TANGENT_END_CASES: [TangentEndCase; 13] = [
     TangentEndCase {
@@ -469,7 +469,7 @@ const TANGENT_END_CASES: [TangentEndCase; 13] = [
         },
         at_cd47efd: Mark {
             fails_today: Some(CHAMFERS_AT_CD47EFD),
-            here: None,
+            here: Some(Here::Passes(CHAMFERS_HERE)),
         },
     },
     TangentEndCase {
@@ -564,11 +564,11 @@ const TANGENT_END_CASES: [TangentEndCase; 13] = [
         run: rounds_together_r5,
         at_9bebf34: Mark {
             fails_today: Some(ROUNDS_R5),
-            here: Some(Here::FailsOtherwise(ROUNDS_R5_HERE)),
+            here: Some(Here::Passes(ROUNDS_R5_HERE)),
         },
         at_cd47efd: Mark {
             fails_today: Some(ROUNDS_R5),
-            here: Some(Here::FailsOtherwise(ROUNDS_R5_HERE)),
+            here: Some(Here::Passes(ROUNDS_R5_HERE)),
         },
     },
 ];
@@ -633,6 +633,8 @@ fn rounds_together_refused_by_wr710() {
     for revision in [Revision::At9bebf34, Revision::AtCd47efd] {
         for run in [rounds_together_r2, rounds_together_r5] {
             let mut k = revision.kernel();
+            // the blend corner's Mixed corner builds this corner (`issue_2360_mixed_corner.rs`)
+            k.fixes.fillet_blend_corner = false;
             k.fixes.fillet_refuse_mixed_corner_crossing_rails = true;
             let out = run(&mut k);
             assert_eq!(out.failed.len(), 1, "{revision:?} {:?}", out.failed);

@@ -156,10 +156,24 @@ fn solidcraft_kernel() -> Kernel {
     k
 }
 
+/// SolidCraft's fixes but the blend corner (`fillet_blend_corner`, whose trace rule, from
+/// smlib#82, runs the trace on to the edge's ends: see below).
 #[test]
 fn chamfer_past_the_bottom_is_no_room_with_solidcraft_fixes() {
     let mut k = solidcraft_kernel();
+    k.fixes.fillet_blend_corner = false;
     assert_eq!(chamfer(&mut k), Err(FilletErrorType::NoRoom as i32));
+}
+
+/// With the blend corner too (every fix but `geometric_g2_continuity`), the trace runs on to
+/// the edge's ends before it is extended (from smlib#82, `c2_trace_to_edge_ends`), the rails
+/// no longer leave their faces, and the chamfer builds a manifold solid of 12 faces. The
+/// fork at d443f10 (smlib#82's branch), the same chamfer through `SmFilletExecutive` with
+/// both corners bevelled, gives the same: success, 12 faces, `IsManifoldSolid`.
+#[test]
+fn chamfer_past_the_bottom_builds_with_the_blend_corner() {
+    let mut k = solidcraft_kernel();
+    assert_eq!(chamfer(&mut k), Ok((12, true)));
 }
 
 #[test]
