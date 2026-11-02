@@ -4355,6 +4355,7 @@ dependencies = [
  "solidcraft-doc",
  "solidcraft-geom",
  "solidcraft-kernel",
+ "solidcraft-sketch",
  "solidcraft-testkit",
  "thiserror 2.0.21",
  "zip",
