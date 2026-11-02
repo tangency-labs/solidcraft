@@ -16,6 +16,8 @@ use crate::{BoolOp, KernelError, Result, guard, record};
 
 const MAX_DEPTH: usize = 4000;
 const MAX_POLYS: usize = 200_000;
+/// Most pieces the splits of one boolean may add to its polygons (see [`Pieces`]).
+const MAX_PIECES: usize = 2_000_000;
 
 #[derive(Clone, Copy, Debug)]
 struct PlaneEq {
@@ -49,8 +51,8 @@ const FRONT: u8 = 1;
 const BACK: u8 = 2;
 const SPANNING: u8 = 3;
 
-/// Split `p` by `pl` into the four buckets.
-fn split(pl: PlaneEq, p: &Poly, eps: f64, cf: &mut Vec<Poly>, cb: &mut Vec<Poly>, f: &mut Vec<Poly>, b: &mut Vec<Poly>) {
+/// Split `p` by `pl` into the four buckets. True when it was cut into two pieces.
+fn split(pl: PlaneEq, p: &Poly, eps: f64, cf: &mut Vec<Poly>, cb: &mut Vec<Poly>, f: &mut Vec<Poly>, b: &mut Vec<Poly>) -> bool {
     let mut ptype = 0u8;
     let types: Vec<u8> =
         p.v.iter()
@@ -99,107 +101,177 @@ fn split(pl: PlaneEq, p: &Poly, eps: f64, cf: &mut Vec<Poly>, cb: &mut Vec<Poly>
                     }
                 }
             }
+            let two = fv.len() >= 3 && bv.len() >= 3;
             if fv.len() >= 3 {
                 f.push(Poly { v: fv, plane: p.plane, src: p.src });
             }
             if bv.len() >= 3 {
                 b.push(Poly { v: bv, plane: p.plane, src: p.src });
             }
+            return two;
         }
     }
+    false
 }
 
+/// One node of a [`Tree`]: its splitting plane, the polygons on it, and its children as
+/// indices into the tree's nodes.
 #[derive(Default)]
 struct Node {
     plane: Option<PlaneEq>,
-    front: Option<Box<Node>>,
-    back: Option<Box<Node>>,
+    front: Option<usize>,
+    back: Option<usize>,
     polys: Vec<Poly>,
 }
 
-impl Node {
-    fn build(&mut self, polys: Vec<Poly>, eps: f64, depth: usize) -> Result<()> {
-        if polys.is_empty() {
-            return Ok(());
-        }
-        if depth > MAX_DEPTH {
-            return Err(KernelError::Failed("planar boolean: tree too deep".into()));
-        }
-        let pl = match self.plane {
-            Some(p) => p,
-            None => {
-                let p = polys.first().map(|p| p.plane).ok_or_else(|| KernelError::Failed("bsp".into()))?;
-                self.plane = Some(p);
-                p
+/// The pieces a spanning split may still make in one [`csg`]: each split of a polygon in two
+/// takes one. Polygons pushed down a deep tree can be split at every level (a thread's groove
+/// against a finely faceted sphere took 6 GB, #2470), so past this the boolean fails at once.
+struct Pieces(usize);
+
+impl Pieces {
+    fn take(&mut self) -> Result<()> {
+        self.0 = self.0.checked_sub(1).ok_or_else(|| KernelError::Failed("the bodies are too detailed to facet".into()))?;
+        Ok(())
+    }
+}
+
+/// A BSP tree, its nodes in one list (the root first). Every walk keeps its own work list
+/// instead of recursing: a convex faceted face makes a chain one node per facet, deeper than a
+/// thread's stack can hold (#2470), and a boxed tree would also recurse when dropped.
+struct Tree {
+    nodes: Vec<Node>,
+}
+
+impl Default for Tree {
+    fn default() -> Self {
+        Tree { nodes: vec![Node::default()] }
+    }
+}
+
+impl Tree {
+    /// Add `polys` to the tree.
+    fn build(&mut self, polys: Vec<Poly>, eps: f64, pieces: &mut Pieces) -> Result<()> {
+        let mut work = vec![(0usize, polys, 0usize)];
+        while let Some((at, polys, depth)) = work.pop() {
+            if polys.is_empty() {
+                continue;
             }
-        };
-        let (mut f, mut b) = (Vec::new(), Vec::new());
-        let mut cf = Vec::new();
-        let mut cb = Vec::new();
-        for p in &polys {
-            split(pl, p, eps, &mut cf, &mut cb, &mut f, &mut b);
-        }
-        self.polys.extend(cf);
-        self.polys.extend(cb);
-        if !f.is_empty() {
-            self.front.get_or_insert_with(Default::default).build(f, eps, depth + 1)?;
-        }
-        if !b.is_empty() {
-            self.back.get_or_insert_with(Default::default).build(b, eps, depth + 1)?;
+            if depth > MAX_DEPTH {
+                return Err(KernelError::Failed("planar boolean: tree too deep".into()));
+            }
+            let node = self.nodes.get_mut(at).ok_or_else(|| KernelError::Failed("bsp".into()))?;
+            let pl = match node.plane {
+                Some(p) => p,
+                None => {
+                    let p = polys.first().map(|p| p.plane).ok_or_else(|| KernelError::Failed("bsp".into()))?;
+                    node.plane = Some(p);
+                    p
+                }
+            };
+            let (mut f, mut b) = (Vec::new(), Vec::new());
+            let mut cf = Vec::new();
+            let mut cb = Vec::new();
+            for p in &polys {
+                if split(pl, p, eps, &mut cf, &mut cb, &mut f, &mut b) {
+                    pieces.take()?;
+                }
+            }
+            node.polys.extend(cf);
+            node.polys.extend(cb);
+            let (front, back) = (node.front, node.back);
+            if !f.is_empty() {
+                work.push((self.child(at, front, true)?, f, depth + 1));
+            }
+            if !b.is_empty() {
+                work.push((self.child(at, back, false)?, b, depth + 1));
+            }
         }
         Ok(())
     }
+    /// The front or back child of `at` (`existing`), made when it has none.
+    fn child(&mut self, at: usize, existing: Option<usize>, front: bool) -> Result<usize> {
+        if let Some(c) = existing {
+            return Ok(c);
+        }
+        let c = self.nodes.len();
+        self.nodes.push(Node::default());
+        let node = self.nodes.get_mut(at).ok_or_else(|| KernelError::Failed("bsp".into()))?;
+        if front {
+            node.front = Some(c);
+        } else {
+            node.back = Some(c);
+        }
+        Ok(c)
+    }
     fn invert(&mut self) {
-        for p in &mut self.polys {
-            p.flip();
-        }
-        self.plane = self.plane.map(PlaneEq::flipped);
-        if let Some(f) = &mut self.front {
-            f.invert();
-        }
-        if let Some(b) = &mut self.back {
-            b.invert();
-        }
-        std::mem::swap(&mut self.front, &mut self.back);
-    }
-    fn clip_polys(&self, polys: Vec<Poly>, eps: f64) -> Vec<Poly> {
-        let Some(pl) = self.plane else { return polys };
-        let (mut f, mut b) = (Vec::new(), Vec::new());
-        let (mut cf, mut cb) = (Vec::new(), Vec::new());
-        for p in &polys {
-            split(pl, p, eps, &mut cf, &mut cb, &mut f, &mut b);
-        }
-        f.extend(cf);
-        b.extend(cb);
-        let f = match &self.front {
-            Some(n) => n.clip_polys(f, eps),
-            None => f,
-        };
-        let b = match &self.back {
-            Some(n) => n.clip_polys(b, eps),
-            None => Vec::new(),
-        };
-        let mut out = f;
-        out.extend(b);
-        out
-    }
-    fn clip_to(&mut self, other: &Node, eps: f64) {
-        let polys = std::mem::take(&mut self.polys);
-        self.polys = other.clip_polys(polys, eps);
-        if let Some(f) = &mut self.front {
-            f.clip_to(other, eps);
-        }
-        if let Some(b) = &mut self.back {
-            b.clip_to(other, eps);
+        for node in &mut self.nodes {
+            for p in &mut node.polys {
+                p.flip();
+            }
+            node.plane = node.plane.map(PlaneEq::flipped);
+            std::mem::swap(&mut node.front, &mut node.back);
         }
     }
+    /// The parts of `polys` outside the tree's solid, in the order a front-first walk of the
+    /// tree meets them.
+    fn clip_polys(&self, polys: Vec<Poly>, eps: f64, pieces: &mut Pieces) -> Result<Vec<Poly>> {
+        enum Job {
+            Clip(usize, Vec<Poly>),
+            Keep(Vec<Poly>),
+        }
+        let mut out = Vec::new();
+        let mut work = vec![Job::Clip(0, polys)];
+        while let Some(job) = work.pop() {
+            let (at, polys) = match job {
+                Job::Keep(polys) => {
+                    out.extend(polys);
+                    continue;
+                }
+                Job::Clip(at, polys) => (at, polys),
+            };
+            let Some(node) = self.nodes.get(at) else { continue };
+            let Some(pl) = node.plane else {
+                out.extend(polys);
+                continue;
+            };
+            let (mut f, mut b) = (Vec::new(), Vec::new());
+            let (mut cf, mut cb) = (Vec::new(), Vec::new());
+            for p in &polys {
+                if split(pl, p, eps, &mut cf, &mut cb, &mut f, &mut b) {
+                    pieces.take()?;
+                }
+            }
+            f.extend(cf);
+            b.extend(cb);
+            // The back's pieces come after the front's: pushed first, taken last. With no back
+            // child they are inside the solid and dropped.
+            if let Some(back) = node.back {
+                work.push(Job::Clip(back, b));
+            }
+            work.push(match node.front {
+                Some(front) => Job::Clip(front, f),
+                None => Job::Keep(f),
+            });
+        }
+        Ok(out)
+    }
+    fn clip_to(&mut self, other: &Tree, eps: f64, pieces: &mut Pieces) -> Result<()> {
+        for node in &mut self.nodes {
+            let polys = std::mem::take(&mut node.polys);
+            node.polys = other.clip_polys(polys, eps, pieces)?;
+        }
+        Ok(())
+    }
+    /// Every polygon in the tree, each node's before its front's and its front's before its
+    /// back's.
     fn all(&self, out: &mut Vec<Poly>) {
-        out.extend(self.polys.iter().cloned());
-        if let Some(f) = &self.front {
-            f.all(out);
-        }
-        if let Some(b) = &self.back {
-            b.all(out);
+        let mut work = vec![0usize];
+        while let Some(at) = work.pop() {
+            let Some(node) = self.nodes.get(at) else { continue };
+            out.extend(node.polys.iter().cloned());
+            work.extend(node.back);
+            work.extend(node.front);
         }
     }
 }
@@ -777,41 +849,47 @@ fn polys_volume(ps: &[Poly]) -> f64 {
 
 /// The polygons of a BSP boolean (csg.js style).
 fn csg(pa: Vec<Poly>, pb: Vec<Poly>, op: BoolOp, eps: f64) -> Result<Vec<Poly>> {
-    let (mut na, mut nb) = (Node::default(), Node::default());
-    na.build(pa, eps, 0)?;
-    nb.build(pb, eps, 0)?;
+    csg_within(pa, pb, op, eps, MAX_PIECES)
+}
+
+/// [`csg`], its splits allowed to add at most `max_pieces` pieces.
+fn csg_within(pa: Vec<Poly>, pb: Vec<Poly>, op: BoolOp, eps: f64, max_pieces: usize) -> Result<Vec<Poly>> {
+    let (mut na, mut nb) = (Tree::default(), Tree::default());
+    let pieces = &mut Pieces(max_pieces);
+    na.build(pa, eps, pieces)?;
+    nb.build(pb, eps, pieces)?;
     match op {
         BoolOp::Union => {
-            na.clip_to(&nb, eps);
-            nb.clip_to(&na, eps);
+            na.clip_to(&nb, eps, pieces)?;
+            nb.clip_to(&na, eps, pieces)?;
             nb.invert();
-            nb.clip_to(&na, eps);
+            nb.clip_to(&na, eps, pieces)?;
             nb.invert();
             let mut extra = Vec::new();
             nb.all(&mut extra);
-            na.build(extra, eps, 0)?;
+            na.build(extra, eps, pieces)?;
         }
         BoolOp::Cut => {
             na.invert();
-            na.clip_to(&nb, eps);
-            nb.clip_to(&na, eps);
+            na.clip_to(&nb, eps, pieces)?;
+            nb.clip_to(&na, eps, pieces)?;
             nb.invert();
-            nb.clip_to(&na, eps);
+            nb.clip_to(&na, eps, pieces)?;
             nb.invert();
             let mut extra = Vec::new();
             nb.all(&mut extra);
-            na.build(extra, eps, 0)?;
+            na.build(extra, eps, pieces)?;
             na.invert();
         }
         BoolOp::Intersect => {
             na.invert();
-            nb.clip_to(&na, eps);
+            nb.clip_to(&na, eps, pieces)?;
             nb.invert();
-            na.clip_to(&nb, eps);
-            nb.clip_to(&na, eps);
+            na.clip_to(&nb, eps, pieces)?;
+            nb.clip_to(&na, eps, pieces)?;
             let mut extra = Vec::new();
             nb.all(&mut extra);
-            na.build(extra, eps, 0)?;
+            na.build(extra, eps, pieces)?;
             na.invert();
         }
     }
@@ -1217,6 +1295,11 @@ fn split_pinched_vertices(loops: &mut [Vec<Vec<usize>>], verts: &mut Vec<Vec3>, 
         }
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[path = "polybool_deep_tests.rs"]
+mod deep_tests;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
