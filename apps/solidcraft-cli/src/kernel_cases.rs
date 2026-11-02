@@ -198,6 +198,28 @@ fn continuity_seams(b: &solidcraft_engine::doc::ModelBody, edges: &Value) -> Res
     }
 }
 
+/// The orders a case's `continuity` asks for: `{order, edges, exact}` for its `edges` seams, or
+/// `seams: [{order, edges, exact}, ...]`, each read the same way, for seams that reach different
+/// orders (`edges` points picking each). Nothing where it asks for no order (the curvature-jump
+/// form, or none); an `order` that is not g0…g4 is an error.
+fn continuity_wants(cont: &Value) -> Vec<Result<(&Value, solidcraft_engine::kernel::Continuity, bool), String>> {
+    fn one(w: &Value) -> Option<Result<(&Value, solidcraft_engine::kernel::Continuity, bool), String>> {
+        let order = w.get("order").filter(|o| !o.is_null())?;
+        let exact = w["exact"].as_bool().unwrap_or(false);
+        Some(
+            order
+                .as_str()
+                .and_then(solidcraft_engine::kernel::Continuity::parse)
+                .map(|o| (&w["edges"], o, exact))
+                .ok_or_else(|| format!("continuity `order` {order} is not g0…g4")),
+        )
+    }
+    match cont.get("seams").and_then(Value::as_array) {
+        Some(seams) => seams.iter().map(|w| one(w).unwrap_or_else(|| Err("a continuity seam with no `order`".to_owned()))).collect(),
+        None => one(cont).into_iter().collect(),
+    }
+}
+
 /// The `continuity: {order, edges}` check of `b`: its `edges` seams measured as Continuity
 /// Analysis (`inspect.continuity`) measures them, at its default stations and tolerances, and the
 /// lowest order among them with the seam that has it (the worst: of those, the one whose first
@@ -794,22 +816,22 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>, validation: solidcraft
             );
         }
         // The order every blend seam reaches, as Continuity Analysis measures it.
-        if let Some(order) = want["continuity"].get("order").filter(|o| !o.is_null()) {
-            let edges = &want["continuity"]["edges"];
-            let exact = want["continuity"]["exact"].as_bool().unwrap_or(false);
-            let which = if edges.is_array() { "picked" } else { edges.as_str().unwrap_or("blend") };
-            let need = format!("{} {} at every {which} seam", if exact { "exactly" } else { ">=" }, order.as_str().unwrap_or("?"));
-            match order.as_str().and_then(solidcraft_engine::kernel::Continuity::parse) {
-                Some(o) => match continuity_order(b, o, edges, exact) {
-                    Ok((got, ok)) => c.push("continuity_order", got, json!(need), ok),
-                    Err(e) => c.push("continuity_order", json!(format!("{}: {e}", b.name)), json!(need), false),
-                },
-                None => c.push("continuity_order", json!(format!("continuity `order` {order} is not g0…g4")), json!("an order"), false),
+        for wanted in continuity_wants(&want["continuity"]) {
+            match wanted {
+                Ok((edges, o, exact)) => {
+                    let which = if edges.is_array() { "picked" } else { edges.as_str().unwrap_or("blend") };
+                    let need = format!("{} {} at every {which} seam", if exact { "exactly" } else { ">=" }, o.as_str());
+                    match continuity_order(b, o, edges, exact) {
+                        Ok((got, ok)) => c.push("continuity_order", got, json!(need), ok),
+                        Err(e) => c.push("continuity_order", json!(format!("{}: {e}", b.name)), json!(need), false),
+                    }
+                }
+                Err(e) => c.push("continuity_order", json!(e), json!("an order"), false),
             }
         }
         // Curvature continuity across the seams round a point: the worst jump clear of the
         // seams' turns must be within the case's bound.
-        if let Some(cont) = want.get("continuity").filter(|c| !c.is_null() && c.get("order").is_none()) {
+        if let Some(cont) = want.get("continuity").filter(|c| !c.is_null() && c.get("order").is_none() && c.get("seams").is_none()) {
             let (near, within, clear, bound) =
                 (v3(&cont["near"]), cont["within_mm"].as_f64(), cont["clear_mm"].as_f64(), cont["curvature_jump_per_mm"].as_f64());
             match (near, within, clear, bound) {
@@ -1194,6 +1216,28 @@ mod tests {
         let r = read_json(&format!("{a}/recipe.json")).unwrap();
         assert!(script(&a, "/scratch", &r).unwrap_err().contains("deeper than"));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `continuity` asks for one order at every seam it picks, or per seam (`seams`), each entry
+    /// read as the one-order form; the curvature-jump form asks for none.
+    #[test]
+    fn continuity_asks_for_one_order_or_one_per_seam() {
+        use solidcraft_engine::kernel::Continuity;
+        let read = |c: Value| {
+            continuity_wants(&c).into_iter().map(|w| w.map(|(e, o, x)| (e.clone(), o, x))).collect::<Vec<Result<(Value, Continuity, bool), String>>>()
+        };
+        let g2 = Continuity::parse("g2").unwrap();
+        let g3 = Continuity::parse("g3").unwrap();
+        assert_eq!(read(json!({"order": "g2", "exact": true})), vec![Ok((Value::Null, g2, true))]);
+        let (p, q) = (json!([[30.0, 31.3, 10.0]]), json!([[30.0, 29.4, 12.7]]));
+        assert_eq!(
+            read(json!({"seams": [{"order": "g2", "exact": true, "edges": p}, {"order": "g3", "edges": q}]})),
+            vec![Ok((p.clone(), g2, true)), Ok((q, g3, false))]
+        );
+        assert!(read(json!({"near": [0.0, 0.0, 0.0], "within_mm": 1.0})).is_empty());
+        assert!(read(Value::Null).is_empty());
+        assert!(read(json!({"order": "g9"}))[0].is_err());
+        assert!(read(json!({"seams": [{"edges": p}]}))[0].is_err(), "a seam must say its order");
     }
 
     /// The flat pattern is graded on the last `sheet.flat_pattern` result: its size, its outline's
