@@ -70,6 +70,7 @@ pub mod joints;
 pub mod libraries;
 pub mod mass_properties;
 pub mod material_properties;
+pub mod metadata;
 pub mod motion;
 pub mod panels;
 pub mod print_face;

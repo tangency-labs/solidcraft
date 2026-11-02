@@ -55,9 +55,6 @@ doc.recover
 doc.recovery_discard
 doc.recovery_list
 document.inspect
-document.metadata
-document.metadata.remove
-document.metadata.set
 engine.commands
 explode.create
 explode.delete
