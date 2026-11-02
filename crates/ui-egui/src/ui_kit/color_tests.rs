@@ -445,6 +445,35 @@ fn hsv_saturation_and_value_follow_the_u8_and_f_number_formats() {
 }
 
 #[test]
+fn percent_format_scales_rgb_and_hsv_zero_to_one_hundred() {
+    let ctx = crate::fonts::test_context();
+    let mut rgb = [255, 0, 0];
+    tall(&ctx, vec![], &mut rgb);
+    tall_click(&ctx, "color:format:Percent", &mut rgb);
+    assert!(scenario::handle_at("color:channel:R").is_some());
+    assert!(scenario::handle_at("color:hex").is_none());
+    // %: RGB and S/V are 0–100; hue stays in degrees (#10201).
+    tall_type(&ctx, "R", "50", &mut rgb);
+    assert_eq!(rgb[0], 128);
+    tall_type(&ctx, "S", "100", &mut rgb);
+    tall_type(&ctx, "V", "50", &mut rgb);
+    assert_eq!(rgb, hsv_bytes(0.0, 1.0, 0.5));
+    // Copy uses the standard (non-tall) popover layout's published handle.
+    frame(&ctx, vec![], |ui| color_popover(ui, &mut rgb));
+    let want = {
+        let pct = |c: u8| (f64::from(c) / 255.0 * 100.0).round();
+        let [r, g, b] = rgb;
+        format!("{:.0}%, {:.0}%, {:.0}%", pct(r), pct(g), pct(b))
+    };
+    assert_eq!(copy(&ctx, &mut rgb).as_deref(), Some(want.as_str()));
+    // Shared with other pickers, like Hex.
+    let mut other = [1, 2, 3];
+    frame(&ctx, vec![], |ui| ui.push_id("another_picker", |ui| color_popover(ui, &mut other)));
+    assert!(scenario::handle_at("color:channel:R").is_some(), "% selection is shared");
+    assert_eq!(other, [1, 2, 3]);
+}
+
+#[test]
 fn finished_edits_join_one_recent_list_that_every_picker_offers() {
     let ctx = crate::fonts::test_context();
     let mut rgb = [10, 20, 30];
