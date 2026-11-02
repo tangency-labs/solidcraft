@@ -50,6 +50,7 @@ Three toggle tiles (208.8 x 140).
 | State icons | Toggle tile | `Prefs.sketch_state_icons` | `true` | none | `sketch-state-icons` | |
 | Conflict colour | Toggle tile | `Prefs.sketch_conflict_colour` | `true` | none | `sketch-conflict` | |
 | Hide glyphs zoomed out | Toggle tile | `Prefs.hide_constraint_glyphs_zoomed_out` | `true` | none | `sketch-hide-glyphs` | |
+| Constraint glyph size | Slider, 100% to 300% in 25% steps | `Prefs.constraint_glyph_scale` | `1.0` | "How large constraint glyphs and their letters or icons are drawn in a sketch." | none | Not on the board yet (#10794); today a slider row under the toggles. |
 
 ## Selecting
 
