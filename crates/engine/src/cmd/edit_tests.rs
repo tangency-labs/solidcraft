@@ -643,6 +643,29 @@ fn timeline_folders_are_command_backed_saved_undoable_and_follow_feature_ids() {
     assert!(s.doc.timeline_groups.is_empty());
 }
 
+/// #9373: editing a feature inside a timeline folder left the id of the edit's trial feature in
+/// the folder and gave that id out again, so every edit there added it once more, and a feature
+/// made later took it and was listed twice: the saved design then would not open. Edited, the
+/// folder keeps its own features, once each, and the design opens again.
+#[test]
+fn editing_a_feature_inside_a_folder_leaves_the_folder_as_it_was() {
+    let mut s = Session::default();
+    for (name, height) in [("Base", 10), ("Post", 20), ("Pin", 30)] {
+        run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": height, "operation": "new", "name": name}));
+    }
+    let ids: Vec<u64> = s.doc.features.iter().map(|f| f.id).collect();
+    run(&mut s, "timeline.group", json!({"name": "Parts", "features": ids}));
+    for width in [5, 6, 7] {
+        run(&mut s, "timeline.redefine", json!({"feature": "Post", "command": "solid.box", "params": {"length": 4, "width": width, "height": 20}}));
+    }
+    assert_eq!(s.doc.timeline_groups[0].features, ids, "no trial feature is left in the folder");
+    let made =
+        run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "operation": "new", "name": "Later"}))["feature"].as_u64().unwrap();
+    assert!(!s.doc.timeline_groups[0].features.contains(&made), "a feature made after the folder is not in it");
+    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(reopened.timeline_groups, s.doc.timeline_groups);
+}
+
 #[test]
 fn timeline_reorders_selected_features_as_one_block_and_removes_folders_in_one_step() {
     let mut s = Session::default();
@@ -1559,11 +1582,13 @@ fn timeline_joint_folders_are_mixed_saved_and_undoable() {
     let saved = s.doc.to_json();
     let reopened = solidcraft_doc::Document::from_json(&saved).unwrap();
     assert_eq!(reopened.to_json(), saved);
+    // A folder naming a joint the design doesn't have, or one twice, opens without that entry
+    // (#9373).
     let mut damaged: Value = serde_json::from_str(&saved).unwrap();
     damaged["timeline_groups"][0]["joints"] = json!([u64::MAX]);
-    assert!(solidcraft_doc::Document::from_json(&damaged.to_string()).is_err());
+    assert!(solidcraft_doc::Document::from_json(&damaged.to_string()).unwrap().timeline_groups[0].joints.is_empty());
     damaged["timeline_groups"][0]["joints"] = json!([joint, joint]);
-    assert!(solidcraft_doc::Document::from_json(&damaged.to_string()).is_err());
+    assert_eq!(solidcraft_doc::Document::from_json(&damaged.to_string()).unwrap().timeline_groups[0].joints, [joint]);
     let destination = run(&mut s, "timeline.group", json!({"name":"Destination"}))["group"].as_u64().unwrap();
     run(&mut s, "timeline.move_to_group", json!({"joints":[joint], "group":destination}));
     assert!(s.doc.timeline_groups[0].joints.is_empty());

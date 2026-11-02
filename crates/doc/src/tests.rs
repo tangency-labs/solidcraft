@@ -596,6 +596,33 @@ fn feature_inserted_at_a_marker_inside_a_timeline_folder_joins_it() {
     assert!(Document::from_json(&doc.to_json()).is_ok(), "the inserted feature must leave a reopenable design");
 }
 
+/// #9373: a timeline folder that names a feature or joint the design doesn't have, or a feature
+/// a folder already lists, no longer stops the design opening. Those entries are dropped and
+/// everything else is kept. Editing a feature inside a folder used to save such entries.
+#[test]
+fn a_folder_naming_missing_or_repeated_features_still_opens() {
+    let mut doc = Document::new("stale folder entries");
+    let sketch = || FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() };
+    let a = doc.add_feature(sketch(), Some("A")).unwrap();
+    let b = doc.add_feature(sketch(), Some("B")).unwrap();
+    let c = doc.add_feature(sketch(), Some("C")).unwrap();
+    let missing = doc.next_id + 10;
+    doc.timeline_groups.push(TimelineGroup { id: 100, name: "Repeats".into(), parent: None, features: vec![a, b, b], joints: vec![] });
+    doc.timeline_groups.push(TimelineGroup {
+        id: 101,
+        name: "Stale".into(),
+        parent: None,
+        features: vec![b, c, missing, missing, missing],
+        joints: vec![missing, missing],
+    });
+    let opened = Document::from_json(&doc.to_json()).expect("the design opens");
+    assert_eq!(opened.features.iter().map(|f| f.id).collect::<Vec<_>>(), vec![a, b, c]);
+    assert_eq!(opened.timeline_groups[0].features, vec![a, b], "listed once");
+    assert_eq!(opened.timeline_groups[1].features, vec![c], "no missing feature, nor one the first folder holds");
+    assert!(opened.timeline_groups[1].joints.is_empty());
+    assert_eq!(opened.timeline_groups.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(), ["Repeats", "Stale"], "both folders are kept");
+}
+
 /// A marker after the last feature leaves every feature active, as no marker does, so a feature
 /// added then is active too, not added rolled back (#7741: editing the last feature from the
 /// History runs its command with the marker there).
