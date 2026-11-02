@@ -681,11 +681,13 @@ mod web {
             if let Some(res) = done {
                 let installed = match res {
                     Ok(bytes) => {
+                        solidcraft_engine::sketch::fallback::provide_web_font(bytes.clone());
                         self.cjk_bytes = Some(bytes);
                         true
                     }
                     Err(err) => {
                         log::warn!("failed to fetch CJK font from {JAPANESE_FONT_PATH}: {err}");
+                        solidcraft_engine::sketch::fallback::web_font_failed();
                         false
                     }
                 };
@@ -720,10 +722,11 @@ mod web {
             self.font_language.clone_from(&self.app.preferences.language);
         }
 
-        /// CJK text on screen with no CJK font yet (an English UI showing a Japanese name):
-        /// fetch the font, so the text does not stay tofu (#720).
+        /// CJK text on screen with no CJK font yet (an English UI showing a Japanese name), or a
+        /// drawing's text waiting for one: fetch the font, so the text does not stay tofu (#720).
         fn watch_text_for_font(&mut self, ctx: &egui::Context) {
-            if self.font.watching_text() && solidcraft_ui_egui::fonts::painted_cjk(ctx) && self.font.text_needs_font() {
+            let wanted = solidcraft_ui_egui::fonts::painted_cjk(ctx) || solidcraft_engine::sketch::fallback::web_font_wanted();
+            if self.font.watching_text() && wanted && self.font.text_needs_font() {
                 self.fetch_font(ctx);
             }
         }

@@ -29,6 +29,7 @@ fn font() -> Font {
         bytes: Arc::from(vec![1u8, 2, 3]),
         face: 0,
         postscript_name: "MadeUp-Regular".into(),
+        embed: Embed::Subset,
         num_glyphs: 3,
         units_per_em: 1000,
         metrics,
@@ -87,7 +88,8 @@ fn a_run_and_its_font_pass_and_count_toward_the_records() {
 }
 
 /// A scene without text writes no `fonts`, so every scene today keeps its bytes. A font's bytes are
-/// never written, so a scene read back is refused until they come from the drawing font.
+/// never written, so a scene read back is refused until they come from the font of its id. How a PDF
+/// may carry it is written by name.
 #[test]
 fn font_bytes_never_go_through_json() {
     let plain = Scene::new(p(420.0, 297.0), vec![]);
@@ -96,6 +98,10 @@ fn font_bytes_never_go_through_json() {
     let value = serde_json::to_value(&scene).unwrap();
     assert!(value["fonts"][0].get("bytes").is_none() && value["fonts"][0]["id"] == json!(vec![7; 32]), "{value}");
     assert_eq!(value["groups"][0]["items"][0]["kind"], json!("text"));
+    assert_eq!(value["fonts"][0]["embed"], json!("subset"));
+    for (embed, name) in [(Embed::Whole, "whole"), (Embed::Outlines, "outlines")] {
+        assert_eq!((serde_json::to_value(embed).unwrap(), serde_json::from_value::<Embed>(json!(name)).unwrap()), (json!(name), embed));
+    }
     let mut read: Scene = serde_json::from_value(value.clone()).unwrap();
     assert!(read.fonts[0].bytes.is_empty());
     let refusal = read.validate().unwrap_err().0;
@@ -117,6 +123,7 @@ fn each_rule_is_refused() {
         ("a font's table holds exactly the glyphs its runs place", e(|_, f| drop(f.glyphs.insert(0, f.glyphs[&1].clone())))),
         ("a font has its bytes", e(|_, f| f.bytes = Arc::from(vec![]))),
         ("a font's PostScript name", e(|_, f| f.postscript_name = "Made Up".into())),
+        ("a font's PostScript name", e(|_, f| f.postscript_name = "Made%Up".into())),
         ("a font's PostScript name", e(|_, f| f.postscript_name = "M".repeat(128))),
         ("a font's PostScript name", e(|_, f| f.postscript_name = String::new())),
         ("a font has glyphs, and 16 to 16384 units per em", e(|_, f| f.units_per_em = 15)),

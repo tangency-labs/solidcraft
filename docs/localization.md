@@ -110,7 +110,8 @@ widgets; UTF-8 byte lengths do not describe their displayed width.
 
 The desktop host tries system CJK fonts across Windows, macOS and Linux, the Flatpak host font
 folders (`/run/host/fonts`, `/run/host/user-fonts`), the folders listed in `SOLIDCRAFT_FONT_DIRS`
-and an optional `CRAFT_FONTS_DIR` font pack, and skips files that cannot be parsed. Chinese uses its own fallback
+and an optional `CRAFT_FONTS_DIR` font pack, and skips files that cannot be parsed. The lists of known fonts per script are in
+`sketch::fonts::fallback`. Chinese uses its own fallback
 chain after the general CJK font: many Japanese CJK fonts (Hiragino Gothic, Meiryo, Yu Gothic)
 match the CJK font search but lack simplified characters, so a second fallback found by the
 Chinese font-name list (`PingFang`, `Microsoft YaHei`, `Noto Sans CJK SC`, …) covers them per
@@ -122,6 +123,7 @@ under SIL OFL 1.1) within the web distribution artifacts only. The font is loade
 origin (`./fonts/BIZUDPGothic-Regular.ttf`) on-demand when the interface language is a CJK one, or, with
 any other interface language, the first time Japanese text (kana, kanji or full-width forms in a design name,
 file name, body name or typed text) is drawn, without contacting any external CDNs or third-party servers.
+A drawing's text asks for the same font: the web covers Japanese for now, and refuses other scripts its fonts lack by name.
 A session that never shows such text downloads no font. If font loading fails with a CJK interface, the web
 interface shows English for that session only to prevent missing glyphs (tofu); the saved language
 preference is kept, so the next visit tries again. The bundled font specifically targets Japanese; it also
