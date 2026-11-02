@@ -1623,7 +1623,7 @@
   "help.sketch.insert_svg": "Citește traseele unui desen SVG într-o schiță, scalate, rotite și plasate așa cum stabiliți. Folosiți-o pentru a transforma un logo sau un contur vectorial în curbe pe care le puteți extruda.",
   "help.sketch.inspect": "Deschide un raport despre schița deschisă: câte grade de libertate au rămas și dacă este complet constrânsă. Folosiți-l pentru a afla ce se mai mișcă înainte de a finaliza schița.",
   "help.sketch.intersect": "Adaugă curbele sau punctele în care corpuri, fețe, muchii sau alte schițe taie planul schiței. Rămân legate și urmează modelul când acesta se schimbă.",
-  "help.sketch.intersection_curve": "Creează curbe 3D acolo unde se întâlnesc două corpuri sau fețe, legate de ele. Folosiți-le ca trasee sau ghidaje care urmează modelul.",
+  "help.sketch.intersection_curve": "Creează curbe 3D acolo unde se întâlnesc două corpuri, fețe sau curbe ale altor schițe, legate de ele. Folosiți-le ca trasee sau ghidaje care urmează modelul.",
   "help.sketch.isoparametric_curve": "Creează o curbă 3D pe direcția U sau V a unei fețe, printr-un punct ales de dumneavoastră, legată de față. Folosiți-o ca traseu sau linie de separare care urmează suprafața.",
   "help.sketch.line": "Desenează linii conectate punct cu punct, ca lanț deschis sau contur închis. Este instrumentul de bază pentru majoritatea profilurilor.",
   "help.sketch.line.midpoint": "Desenează o linie de la mijlocul ei spre un capăt, celălalt capăt fiind în oglindă. Folosiți-o pentru linii centrate pe un punct, de exemplu o muchie simetrică.",

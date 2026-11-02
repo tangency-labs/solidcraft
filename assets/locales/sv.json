@@ -1624,7 +1624,7 @@
   "help.sketch.insert_svg": "Läser in banorna från en SVG-ritning i en skiss, skalade, vridna och placerade där du anger. Använd det för att göra en logotyp eller en vektorkontur till kurvor som du kan extrudera.",
   "help.sketch.inspect": "Öppnar en rapport om den öppna skissen: hur många frihetsgrader som återstår och om den är fullt definierad. Använd det för att ta reda på vad som fortfarande rör sig innan du avslutar skissen.",
   "help.sketch.intersect": "Lägger till de kurvor eller punkter där kroppar, ytor, kanter eller andra skisser korsar skissplanet. De förblir länkade och följer modellen när den ändras.",
-  "help.sketch.intersection_curve": "Skapar 3D-kurvor där två kroppar eller ytor möts, länkade till dem. Använd dem som banor eller styrkurvor som följer modellen.",
+  "help.sketch.intersection_curve": "Skapar 3D-kurvor där två kroppar, ytor eller kurvor från andra skisser möts, länkade till dem. Använd dem som banor eller styrkurvor som följer modellen.",
   "help.sketch.isoparametric_curve": "Skapar en 3D-kurva längs en ytas U- eller V-riktning genom en punkt som du väljer, länkad till ytan. Använd den som en bana eller delningslinje som följer ytan.",
   "help.sketch.line": "Ritar sammanhängande linjer punkt för punkt, som en öppen kedja eller en sluten kontur. Det är det grundläggande verktyget för de flesta profiler.",
   "help.sketch.line.midpoint": "Ritar en linje från dess mittpunkt ut till ena änden, med den andra änden speglad. Använd det för linjer centrerade på en punkt, till exempel en symmetrisk kant.",

@@ -1678,7 +1678,7 @@
   "help.sketch.insert_svg": "Liest die Pfade einer SVG-Zeichnung in eine Skizze ein, skaliert, gedreht und an der gewünschten Stelle. Damit machen Sie aus einem Logo oder einer Vektorkontur Kurven, die sich extrudieren lassen.",
   "help.sketch.inspect": "Öffnet einen Bericht zur offenen Skizze: wie viele Freiheitsgrade übrig sind und ob sie vollständig bestimmt ist. Damit sehen Sie, was sich noch bewegt, bevor Sie die Skizze abschließen.",
   "help.sketch.intersect": "Fügt die Kurven oder Punkte hinzu, an denen Körper, Flächen, Kanten oder andere Skizzen die Skizzenebene schneiden. Sie bleiben verknüpft und folgen Änderungen am Modell.",
-  "help.sketch.intersection_curve": "Erzeugt 3D-Kurven, wo sich zwei Körper oder Flächen treffen, mit diesen verknüpft. Als Pfade oder Leitkurven, die dem Modell folgen.",
+  "help.sketch.intersection_curve": "Erzeugt 3D-Kurven, wo sich zwei Körper, Flächen oder Kurven anderer Skizzen treffen, mit diesen verknüpft. Als Pfade oder Leitkurven, die dem Modell folgen.",
   "help.sketch.isoparametric_curve": "Erzeugt eine 3D-Kurve in U- oder V-Richtung einer Fläche durch einen gewählten Punkt, mit der Fläche verknüpft. Als Pfad oder Trennlinie, die der Fläche folgt.",
   "help.sketch.line": "Zeichnet verbundene Linien Punkt für Punkt, als offene Kette oder geschlossene Kontur. Das Grundwerkzeug für die meisten Profile.",
   "help.sketch.line.midpoint": "Zeichnet eine Linie von ihrem Mittelpunkt zu einem Ende, das andere Ende gespiegelt. Für Linien, die auf einem Punkt mittig liegen, etwa eine symmetrische Kante.",

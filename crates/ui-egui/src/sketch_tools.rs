@@ -1478,14 +1478,14 @@ pub fn finish(app: &mut SolveApp, tool: &mut Tool) -> bool {
             tool.pts.clear();
             true
         }
-        // Project to Surface: the right-click ends the curves; elsewhere it starts the picks over.
-        Mode::Steps if tool.cmd == "sketch.project_to_surface" && !tool.picks.is_empty() && tool.picks.last().is_some_and(|x| x != "|") => {
-            tool.picks.push("|".into());
-            true
-        }
+        // Intersection Curve: the right-click starts the picks over (#11048).
         Mode::Steps if tool.cmd == "sketch.intersection_curve" && !tool.picks.is_empty() => {
             tool.picks.clear();
             app.set_status(crate::tools::hint(tool.cmd), false);
+            true
+        }
+        Mode::Steps if !tool.picks.is_empty() && tool.picks.last().is_some_and(|x| x != "|") => {
+            tool.picks.push("|".into());
             true
         }
         _ if !tool.pts.is_empty() || !tool.picks.is_empty() => {

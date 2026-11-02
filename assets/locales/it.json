@@ -1624,7 +1624,7 @@
   "help.sketch.insert_svg": "Legge i tracciati di un disegno SVG in uno schizzo, scalati, ruotati e posizionati come imposti. Usalo per trasformare un logo o un contorno vettoriale in curve che puoi estrudere.",
   "help.sketch.inspect": "Apre un rapporto sullo schizzo aperto: quanti gradi di libertà restano e se è completamente vincolato. Usalo per scoprire cosa si muove ancora prima di terminare lo schizzo.",
   "help.sketch.intersect": "Aggiunge le curve o i punti in cui corpi, facce, spigoli o altri schizzi attraversano il piano dello schizzo. Restano collegati e seguono il modello quando cambia.",
-  "help.sketch.intersection_curve": "Crea curve 3D dove si incontrano due corpi o facce, collegate a essi. Usale come percorsi o guide che seguono il modello.",
+  "help.sketch.intersection_curve": "Crea curve 3D dove si incontrano due corpi, facce o curve di altri schizzi, collegate a essi. Usale come percorsi o guide che seguono il modello.",
   "help.sketch.isoparametric_curve": "Crea una curva 3D lungo la direzione U o V di una faccia passante per un punto che scegli, collegata alla faccia. Usala come percorso o linea di divisione che segue la superficie.",
   "help.sketch.line": "Disegna linee collegate punto per punto, come catena aperta o contorno chiuso. È lo strumento di base per la maggior parte dei profili.",
   "help.sketch.line.midpoint": "Disegna una linea dal suo punto medio fino a un'estremità, con l'altra estremità speculare. Usalo per linee centrate su un punto, come un bordo simmetrico.",

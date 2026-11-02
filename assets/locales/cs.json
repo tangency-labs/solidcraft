@@ -1623,7 +1623,7 @@
   "help.sketch.insert_svg": "Načte cesty výkresu SVG do náčrtu, ve zvoleném měřítku, natočení a poloze. Použijte to k přeměně loga nebo vektorového obrysu na křivky, které lze vysunout.",
   "help.sketch.inspect": "Otevře zprávu o otevřeném náčrtu: kolik stupňů volnosti zbývá a zda je plně zavazbený. Použijte to ke zjištění, co se ještě hýbe, než náčrt dokončíte.",
   "help.sketch.intersect": "Přidá křivky nebo body, kde tělesa, plochy, hrany nebo jiné náčrty protínají rovinu náčrtu. Zůstanou propojené a sledují model, když se změní.",
-  "help.sketch.intersection_curve": "Vytvoří 3D křivky tam, kde se setkávají dvě tělesa nebo plochy, propojené s nimi. Použijte je jako cesty nebo vodicí dráhy, které sledují model.",
+  "help.sketch.intersection_curve": "Vytvoří 3D křivky tam, kde se setkávají dvě tělesa, plochy nebo křivky jiných náčrtů, propojené s nimi. Použijte je jako cesty nebo vodicí dráhy, které sledují model.",
   "help.sketch.isoparametric_curve": "Vytvoří 3D křivku ve směru U nebo V plochy bodem, který vyberete, propojenou s plochou. Použijte ji jako cestu nebo dělicí čáru, která sleduje povrch.",
   "help.sketch.line": "Kreslí spojené úsečky bod po bodu, jako otevřený řetězec nebo uzavřený obrys. Je to základní nástroj pro většinu profilů.",
   "help.sketch.line.midpoint": "Nakreslí úsečku od jejího středu k jednomu konci, přičemž druhý konec se zrcadlí. Použijte to pro úsečky vystředěné na bod, například souměrnou hranu.",

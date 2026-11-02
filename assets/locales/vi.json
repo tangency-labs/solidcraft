@@ -1684,7 +1684,7 @@
   "help.sketch.insert_svg": "Đọc các đường dẫn của bản vẽ SVG vào phác thảo, theo tỉ lệ, góc xoay và vị trí bạn đặt. Dùng để biến logo hoặc đường bao véc tơ thành đường cong có thể đùn.",
   "help.sketch.inspect": "Mở báo cáo về bản phác thảo đang mở: còn bao nhiêu bậc tự do và đã ràng buộc hoàn toàn chưa. Dùng nó để biết phần nào vẫn còn di chuyển được trước khi hoàn tất bản phác thảo.",
   "help.sketch.intersect": "Thêm các đường cong hoặc điểm nơi khối, mặt, cạnh hoặc phác thảo khác cắt qua mặt phẳng phác thảo. Chúng vẫn được liên kết và thay đổi theo mô hình.",
-  "help.sketch.intersection_curve": "Tạo đường cong 3D tại nơi hai khối hoặc hai mặt gặp nhau, liên kết với chúng. Dùng làm đường dẫn hoặc ray dẫn hướng thay đổi theo mô hình.",
+  "help.sketch.intersection_curve": "Tạo đường cong 3D tại nơi hai khối, hai mặt hoặc đường cong của các phác thảo khác gặp nhau, liên kết với chúng. Dùng làm đường dẫn hoặc ray dẫn hướng thay đổi theo mô hình.",
   "help.sketch.isoparametric_curve": "Tạo đường cong 3D theo hướng U hoặc V của một mặt qua điểm bạn chọn, liên kết với mặt đó. Dùng làm đường dẫn hoặc đường tách thay đổi theo bề mặt.",
   "help.sketch.line": "Vẽ các đường thẳng nối liền từng điểm một, thành chuỗi hở hoặc đường bao khép kín. Đây là công cụ cơ bản cho hầu hết biên dạng.",
   "help.sketch.line.midpoint": "Vẽ đường thẳng từ trung điểm ra một đầu, đầu kia đối xứng qua trung điểm. Dùng cho đường thẳng có tâm tại một điểm, như cạnh đối xứng.",
