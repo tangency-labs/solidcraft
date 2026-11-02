@@ -42,14 +42,10 @@ component.replace_with_link
 component.revert_position
 component.unlock
 component.update_links
-config.activate
 config.column
 config.configure
-config.preview
 config.row
 config.rule
-config.rules
-config.table
 contact.check
 contact.create
 contact.disable_all
