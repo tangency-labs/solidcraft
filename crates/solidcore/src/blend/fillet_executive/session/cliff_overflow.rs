@@ -89,14 +89,14 @@ fn status_of(e: &SolidError) -> i32 {
 
 impl FilletSession<'_> {
     /// `GetFilletErrorInfo()->NoteError(code, comment)` of a [`Refusal`].
-    fn note_refusal(&mut self, refusal: Refusal) {
+    pub(super) fn note_refusal(&mut self, refusal: Refusal) {
         self.executive.error.code = refusal.code as i32;
         self.executive.error.comment = refusal.comment.into();
         self.executive.error.no_room = refusal.reason;
     }
 
     /// Note `note`'s refusal, if any, and pass `result` on.
-    fn noted<T>(&mut self, note: Option<Refusal>, result: Result<T>) -> Result<T> {
+    pub(super) fn noted<T>(&mut self, note: Option<Refusal>, result: Result<T>) -> Result<T> {
         if let Some(refusal) = note {
             self.note_refusal(refusal);
         }
@@ -121,7 +121,7 @@ impl FilletSession<'_> {
     /// square to the centres' line, its centre moved along that line by `-r dr/ds` (`s` the
     /// centres' arc length) and its radius `r sqrt(1 - (dr/ds)^2)`, its point in the
     /// bisector plane on the edge's side; the law's value and slope are read with `SER`.
-    fn holds_its_law(&self, k: &Kernel, solver: FilletObject) -> Result<bool> {
+    pub(super) fn holds_its_law(&self, k: &Kernel, solver: FilletObject) -> Result<bool> {
         let FilletObject::Solver(id) = solver else {
             return Err(invalid("object is not a solver"));
         };
@@ -275,7 +275,10 @@ impl FilletSession<'_> {
 
     /// The face of the intermediate body each of `solver`'s fillet geometries' surfaces is
     /// on (`pFG->GetFilletSurface()->GetOwner()` in `m_pFilletBrep`), `None` for none.
-    fn fillet_faces(&self, solver: FilletObject) -> Result<Vec<(FilletGeomId, Option<FaceId>)>> {
+    pub(super) fn fillet_faces(
+        &self,
+        solver: FilletObject,
+    ) -> Result<Vec<(FilletGeomId, Option<FaceId>)>> {
         let FilletObject::Solver(id) = solver else {
             return Err(invalid("object is not a solver"));
         };

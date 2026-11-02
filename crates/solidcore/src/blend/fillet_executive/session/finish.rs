@@ -652,6 +652,20 @@ impl FilletSession<'_> {
             // the fillet faces in; the error a failed subtraction noted stands.
             // WR-674: a round left open at its tangent-continuation ends is built the same
             // way, by subtraction
+            // WR-695 (the fork's TrimAtCreases, smlib#79 step 6): with
+            // `fillet_overflow_trim_at_creases` a cliff overflow is trimmed at its creases in
+            // place instead (a WR-674 section end is still subtracted)
+            if session.executive.cliff_overflow
+                && k.fixes.fillet_overflow_trim_at_creases
+                && !session.executive.open_ends.iter().any(|end| end.section)
+            {
+                let result = session.trim_at_creases(k);
+                session.objects.target.set_editing_enabled(editing);
+                if let Some(output) = error_out {
+                    output.assign(&session.executive.error);
+                }
+                return result;
+            }
             if session.executive.cliff_overflow
                 || session.executive.open_ends.iter().any(|end| end.section)
             {

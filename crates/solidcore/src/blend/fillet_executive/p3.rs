@@ -140,6 +140,17 @@ pub enum NoRoomReason {
     /// its ends such ends, and with its faces' sections at the ends straight (not the fork's,
     /// WR-674, `fixes.fillet_round_ends_at_tangent_continuation`).
     TangentContinuationEndUnsupported,
+    /// A blend past its faces creases a face that runs on tangentially from a face it rolls
+    /// on: the rail would roll over onto it, no cliff (the fork's `TrimAtCreases`,
+    /// tangency-labs/smlib@bacd0bb; `fixes.fillet_overflow_trim_at_creases`, WR-695).
+    CreaseAcrossTangentEdge,
+    /// A blend past its faces keeps no length of its edge: its corners take the whole of it
+    /// (the fork's `TrimAtCreases`, tangency-labs/smlib@8832ead; WR-695).
+    CornersTakeWholeEdge,
+    /// A kept rail of a blend past its faces runs off a face into the material where the
+    /// face cannot be carried on to it (the fork's `sm_Extend`, tangency-labs/smlib@99e57b8,
+    /// 2d4b154 and bc8c44d; WR-695); the error's comment names which case.
+    RailRunsPastFaceIntoMaterial,
 }
 
 /// The initialized error-info members p3 reads or writes. Corner kinds use the

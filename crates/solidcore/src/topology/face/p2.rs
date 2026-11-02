@@ -923,6 +923,79 @@ pub(crate) fn classify_interval_on_face(
         .collect())
 }
 
+/// One interval of [`classify_free_curve_on_face`]: its parameter interval, the class of
+/// its interior, and the class of each end with the edge it lies on (`None` off an edge).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FaceCurveRun {
+    /// `m_vInterval`.
+    pub interval: Extent1d,
+    /// `m_vStart`'s class and edge.
+    pub start: (PointClassType, Option<EdgeId>),
+    /// `m_vMid`'s class.
+    pub mid: PointClassType,
+    /// `m_vEnd`'s class and edge.
+    pub end: (PointClassType, Option<EdgeId>),
+}
+
+/// `SmCurveClassification sClass(&crCurve, interval, NULL, dTol)` followed by
+/// `SER(face.CurveOnClassify(TRUE, sClass, bHasBigGaps))`, on the caller's B-rep in place
+/// ([`curve_on_classify_mut`]: the UV trim curves, gap caches and trimmed surface cache the
+/// classification makes stay on `b`, as upstream's `const` call leaves them): the
+/// intervals, each end with the edge it lies on.
+///
+/// # Errors
+///
+/// Those of [`curve_on_classify_mut`].
+pub(crate) fn classify_free_curve_on_face(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    curve: &Curve,
+    interval: Extent1d,
+    tol: f64,
+    has_big_gaps: bool,
+) -> Result<Vec<FaceCurveRun>> {
+    let mut objects = FaceClassify { brep: b, curve };
+    let init = ClassificationInit {
+        curve: Some(ClassHandle::Curve),
+        interval,
+        uv_curve: None,
+        src_zone_tol_3d: zone_tol3d(k, tol),
+        opt_data_size: 0,
+        is_curve_owned: false,
+        is_curve_current: true,
+        surface1: None,
+        surface2: None,
+        uv_curve2: None,
+        ti: None,
+    };
+    let mut classification = CurveClassification::with_curve(k, &init)?;
+    curve_on_classify_mut(
+        k,
+        f,
+        &mut objects,
+        true,
+        &mut classification,
+        has_big_gaps,
+        false,
+        true,
+    )?;
+    let edge_of = |o: Option<ClassHandle>| match o {
+        Some(ClassHandle::Edge(e)) => Some(e),
+        _ => None,
+    };
+    Ok(classification
+        .intervals()
+        .iter()
+        .map(|i| FaceCurveRun {
+            interval: i.interval,
+            start: (i.start.point_class(), edge_of(i.start.object())),
+            mid: i.mid.point_class(),
+            end: (i.end.point_class(), edge_of(i.end.object())),
+        })
+        .collect())
+}
+
 /// `SmFace::CalculateUVDomainFromUVTrimCurves(rTrimUVDomain)` (unit `topology.face_p1`),
 /// on the caller's B-rep: the UV trim curves the call makes (a cache upstream fills
 /// through a `const` method) stay on it.
