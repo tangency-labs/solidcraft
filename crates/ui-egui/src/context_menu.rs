@@ -109,6 +109,8 @@ pub enum Target {
         folder: String,
         scope: String,
     },
+    /// The quick menu at the cursor: the commands that take the selection (#5501).
+    Quick,
 }
 
 /// One menu entry: a command id (run with `params` when given, else started like a toolbar
@@ -260,6 +262,8 @@ pub struct MenuState {
     opener: Option<Rect>,
     /// The menu was on screen in an earlier frame. Until then a press is the opening click's own.
     shown: bool,
+    /// Clicks and selections the quick menu follows.
+    pub(crate) quick: crate::quick_menu::Watch,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -406,6 +410,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Joint { id } => joint_items(app, *id),
         Target::ToolbarCommand { id } => crate::toolbar_custom::command_items(app, id),
         Target::Toolbar => crate::toolbar_custom::toolbar_items(app),
+        Target::Quick => crate::quick_menu::items(app),
         Target::HistoryControls => crate::timeline::transport_items(app),
         Target::Workspace => {
             let rendering = crate::render_workspace::active(app);
@@ -1307,56 +1312,36 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     {
         v.push(cmd(app, "sketch.dimension", "Arc Length Dimension").with(json!({ "entities": [arc], "type": "arc_length" })));
     }
-    let mut c = Vec::new();
+    // The constraints whose commands take this selection (`CommandSpec::for_selection`, #5501),
+    // in toolbar order. Fix/Unfix has its own row above.
     let n = ents.len();
-    let (l, r, p) = (lines.len(), rounds.len(), points.len());
-    if l == 1 && n == 1 {
-        c.push(cmd(app, "sketch.constraint.horizontal_vertical", "Horizontal/Vertical").with(json!({ "line": lines[0] })));
-    }
+    let (l, p) = (lines.len(), points.len());
+    // Two points, or a point and a line, align horizontally or vertically: one row for each.
+    let mut align = Vec::new();
     if p == 2 && n == 2 {
-        c.push(cmd(app, "sketch.constraint.coincident", "Coincident").with(json!({ "a": points[0], "b": points[1] })));
-        c.extend(alignment_items(&app.session.selection));
+        align.extend(alignment_items(&app.session.selection));
     }
-    if p == 1 && curves.len() == 1 && n == 2 {
-        c.push(cmd(app, "sketch.constraint.coincident", "Coincident").with(json!({ "a": picked[0], "b": picked[1] })));
-        if l == 1 {
-            c.push(cmd(app, "sketch.constraint.midpoint", "MidPoint").with(json!({ "point": points[0], "line": lines[0] })));
-            // #617: the point can also be aligned with the line (a circle's centre with a square's edge).
-            if let Some(align) = crate::tools::point_line_points(&ss.sketch, &json!(points[0]), &lines[0]) {
-                c.push(
-                    act("ui.horizontalConstraint", "Horizontal Constraint", "c_hv")
-                        .with(json!({"points": align, "mode": "horizontal", "if_redundant": "refuse"})),
-                );
-                c.push(
-                    act("ui.verticalConstraint", "Vertical Constraint", "c_hv")
-                        .with(json!({"points": align, "mode": "vertical", "if_redundant": "refuse"})),
-                );
-            }
-        }
+    if p == 1
+        && l == 1
+        && n == 2
+        && let Some(points) = crate::tools::point_line_points(&ss.sketch, &json!(points[0]), &lines[0])
+    {
+        // #617: the point can also be aligned with the line (a circle's centre with a square's edge).
+        align.push(
+            act("ui.horizontalConstraint", "Horizontal Constraint", "c_hv")
+                .with(json!({"points": points, "mode": "horizontal", "if_redundant": "refuse"})),
+        );
+        align.push(
+            act("ui.verticalConstraint", "Vertical Constraint", "c_hv").with(json!({"points": points, "mode": "vertical", "if_redundant": "refuse"})),
+        );
     }
-    if l == 2 && n == 2 {
-        let ab = json!({ "a": lines[0], "b": lines[1] });
-        c.push(cmd(app, "sketch.constraint.parallel", "Parallel").with(ab.clone()));
-        c.push(cmd(app, "sketch.constraint.perpendicular", "Perpendicular").with(ab.clone()));
-        c.push(cmd(app, "sketch.constraint.collinear", "Collinear").with(ab.clone()));
-        c.push(cmd(app, "sketch.constraint.equal", "Equal").with(ab.clone()));
-        c.push(cmd(app, "sketch.constraint.midpoint", "MidPoint").with(ab));
-    }
-    if r == 2 && n == 2 {
-        let ab = json!({ "a": rounds[0], "b": rounds[1] });
-        c.push(cmd(app, "sketch.constraint.concentric", "Concentric").with(ab.clone()));
-        c.push(cmd(app, "sketch.constraint.equal", "Equal").with(ab.clone()));
-        c.push(cmd(app, "sketch.constraint.tangent", "Tangent").with(ab));
-    }
-    if r == 1 && p == 1 && n == 2 {
-        c.push(cmd(app, "sketch.constraint.concentric", "Concentric").with(json!({ "a": picked[0], "b": picked[1] })));
-    }
-    if l == 1 && r == 1 && n == 2 {
-        c.push(cmd(app, "sketch.constraint.tangent", "Tangent").with(json!({ "a": picked[0], "b": picked[1] })));
-    }
-    if p == 2 && l == 1 && n == 3 {
-        c.push(cmd(app, "sketch.constraint.symmetry", "Symmetry").with(json!({ "a": points[0], "b": points[1], "line": lines[0] })));
-    }
+    let mut c: Vec<Item> = solidcraft_engine::command_specs()
+        .into_iter()
+        .filter(|spec| spec.tab == "SKETCH" && spec.panel == "CONSTRAINTS" && spec.id != "sketch.constraint.fix")
+        .filter(|spec| align.is_empty() || spec.id != "sketch.constraint.horizontal_vertical")
+        .filter_map(|spec| spec.for_selection(&app.session).map(|params| cmd(app, spec.id, spec.label).with(params)))
+        .collect();
+    c.extend(align);
     if !c.is_empty() {
         v.push(Item::heading("Constraints"));
         v.extend(c);
@@ -2353,6 +2338,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     track_hold(app, ctx);
     show_rename(app, ctx);
     crate::design_properties::show_object(app, ctx);
+    crate::quick_menu::watch(app, ctx);
     let Some(at) = app.viewport.context_menu else { return };
     let screen = ctx.content_rect();
     let target = app.menu.target.clone();
@@ -2445,6 +2431,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
         });
     inside |= resp.response.contains_pointer() || resp.response.rect.contains(pointer.unwrap_or(Pos2::ZERO));
+    // The quick menu closes when the pointer moves well away from it without picking.
+    if target == Target::Quick && app.menu.submenu.is_none() && crate::quick_menu::left(resp.response.rect, pointer) {
+        close(app);
+        return;
+    }
 
     // A flyout closes once the pointer moves on to another row of its menu and rests there
     // (#6657). A pointer that is still (the flyout opened with the keys) leaves it open.

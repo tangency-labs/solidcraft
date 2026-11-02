@@ -137,6 +137,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         .on_hover_text(if touchpad { crate::i18n::tr("nav.touchpad.scroll") } else { crate::i18n::tr("ui.trackpad_pan_tip") });
                 });
                 setting::radial_context_menu(app, ui);
+                setting::quick_menu_after_selection(app, ui);
             });
         });
         ui_kit::row(ui, app.tr("prefs.trackpad_zoom_modifier"), |ui| {

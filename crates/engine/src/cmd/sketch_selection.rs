@@ -1,8 +1,10 @@
 //! How sketch constraint commands take the current selection (#5501): the parameters a
 //! complete, unambiguous selection of the sketch being edited gives each of them. A toolbar start
 //! runs the constraint at once with them, and menus offer the constraints a selection fits from
-//! the same rules ([`super::CommandSpec::for_selection`]). The commands still validate the
-//! geometry; these rules only read which ids were picked, in pick order.
+//! the same rules ([`super::CommandSpec::for_selection`]). [`constraint_params`] reads which ids
+//! were picked, in pick order; the commands' hooks also check what kind of entity each is
+//! ([`kinds_fit`]: two lines for Parallel, a circle or arc for Concentric…), so a menu offers only
+//! constraints that apply. The commands still validate the geometry.
 
 use serde_json::{Value, json};
 
@@ -89,11 +91,61 @@ fn curve_pair(command: &str, selection: &[Sel]) -> Option<Value> {
     (a != b).then(|| json!({"a": a, "b": b}))
 }
 
-/// [`constraint_params`] for the session's selection in the sketch being edited.
+/// What a selected sketch entity is, for [`kinds_fit`].
+#[derive(Clone, Copy, PartialEq)]
+enum Kind {
+    Point,
+    Line,
+    /// A circle or an arc.
+    Round,
+    /// Any other curve (spline, ellipse, conic).
+    Curve,
+}
+
+fn kind(sketch: &Sketch, sel: &Sel) -> Option<Kind> {
+    use crate::sketch::CurveKind;
+    match sel {
+        Sel::SketchPoint { .. } | Sel::SketchMidpoint { .. } => Some(Kind::Point),
+        Sel::SketchCurve { id, .. } => Some(match sketch.curves.get(sketch.curve_index(id)?)?.kind {
+            CurveKind::Line { .. } => Kind::Line,
+            CurveKind::Circle { .. } | CurveKind::Arc { .. } => Kind::Round,
+            _ => Kind::Curve,
+        }),
+        _ => None,
+    }
+}
+
+/// Whether the kinds of the selected entities suit `command`: Parallel, Perpendicular and
+/// Collinear take two lines; Equal lines or circles and arcs; Tangent two curves that are not
+/// both lines; Concentric circles or arcs (or one and a point); Curvature a pair with a free-form
+/// curve; MidPoint, Coincident and Polygon lines where they take curves; Horizontal/Vertical a
+/// single line. Entities of no sketch never fit.
+pub fn kinds_fit(command: &str, selection: &[Sel], sketch: &Sketch) -> bool {
+    let Some(kinds) = selection.iter().map(|s| kind(sketch, s)).collect::<Option<Vec<Kind>>>() else { return false };
+    let count = |k: Kind| kinds.iter().filter(|x| **x == k).count();
+    let (n, p, l, r, c) = (kinds.len(), count(Kind::Point), count(Kind::Line), count(Kind::Round), count(Kind::Curve));
+    match command.strip_prefix("sketch.constraint.").unwrap_or_default() {
+        "parallel" | "perpendicular" | "collinear" => n == 2 && l == 2,
+        "equal" => n >= 2 && (l == n || r == n),
+        "tangent" => n == 2 && p == 0 && l < 2,
+        "concentric" => n == 2 && (r == 2 || (r == 1 && p == 1)),
+        "curvature" => n == 2 && p == 0 && c >= 1,
+        "horizontal_vertical" => n != 1 || l == 1,
+        "midpoint" | "coincident" => p == n || l == n - p,
+        "polygon" => l == n,
+        _ => true,
+    }
+}
+
+/// [`constraint_params`] for the session's selection in the sketch being edited, when the
+/// kinds of the selected entities suit the command ([`kinds_fit`]).
 fn from_session(command: &str, s: &Session) -> Option<Value> {
     let state = s.world_state();
-    let sketch = super::sketch_store::active(s).and_then(|id| state.sketch(id)).map(|ss| &ss.sketch);
-    constraint_params(command, &s.selection, sketch)
+    let sketch = super::sketch_store::active(s).and_then(|id| state.sketch(id)).map(|ss| &ss.sketch)?;
+    if !kinds_fit(command, &s.selection, sketch) {
+        return None;
+    }
+    constraint_params(command, &s.selection, Some(sketch))
 }
 
 macro_rules! takes {

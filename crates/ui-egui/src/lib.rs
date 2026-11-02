@@ -215,6 +215,7 @@ mod print_face_ui;
 pub(crate) mod quick_measure;
 #[cfg(test)]
 mod quick_measure_tests;
+pub(crate) mod quick_menu;
 pub(crate) mod recent_colors;
 pub mod recovery_ui;
 pub mod ref_images;

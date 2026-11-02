@@ -37,10 +37,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .key("E")
         .contract(&EXTRUDE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
+        .from_selection(super::model_selection::profiles)
         .params("distance: expr (or through_all: true); taper?: angle expr (positive: outward, so the far end is larger along the extrusion direction; negative: inward, so the far end is smaller); sketch?: id|name (default: active or last sketch); profiles?: all | [index] | [{curves: [ids]}] (the profile whose outer loop is made of exactly these curves, or pieces of them; found again on every recompute, so it follows parameter changes; islands inside are its holes; an error when no profile or several match) | [{point:[x,y]}] (index and point picks are stored by their curves when that finds the same profile; a pick on a drawn profile that reference geometry, such as the projected outline of the face the sketch is on, cuts into regions takes the whole drawn profile); exact_regions?: bool (each index or point pick is exactly the region it names, as the dialogs send); default: every drawn profile, except that a loop inside another is its hole and a loop inside that hole is material again; face?: [x,y,z] (extrude a planar body face instead of a sketch profile); faces?: [[x,y,z],…] (coplanar faces of one body); face_body?: name (whose face, where faces of several bodies meet at the point); direction?: positive|negative|symmetric (distance is total thickness, split evenly around the start plane); convention?: total_distance|legacy_per_side (default total_distance; legacy preserves older symmetric extents); distance2?: expr (Two Sides: a second distance the other way from the first side, which may be through_all or to; with direction: negative the first side goes against the normal and distance2 along it); start_offset?: expr (along the sketch normal, also with direction: negative); to?: [x,y,z] (To Object: a face, vertex or point; to_offset?: expr past it); from?: [x,y,z] (From Object: start at that face or point); operation?: new|join|cut|intersect|auto (cut into a body, otherwise join existing solids; new in an empty component); targets?: [body] (Join from a face, or from a sketch on a body's face, defaults to that face's body; explicit targets or participants override); name?; body_name?; thin?: true (Thin: a wall along sketch curves instead of the profiles) with curves?: [curve ids] (open chains and closed loops, joined where they meet end to end; default: every drawn curve of the sketch), thickness: expr, side?: center|inside|outside|two_sides (a closed loop's inside is the area it encloses, an open chain's the side it bends toward, a straight line's the left of its first curve as drawn; default center), thickness2?: expr (two_sides: the thickness outside); corners are mitred, crossing walls are one"),
     CommandSpec::new("solid.revolve", "Revolve", revolve)
         .at("SOLID", "CREATE")
         .icon("revolve")
+        .from_selection(super::model_selection::profiles)
         .params("axis: sketch line id | x | y (sketch axes) | X|Y|Z (world) | {type: world, axis: X|Y|Z} (as returned by timeline.inspect) | construction axis name (followed when edited) | {origin, dir} | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (Two Sides: the other side's angle); direction?: symmetric (angle split either side, independent of axis direction); convention?: sketch_normal|legacy_axis_start (default sketch_normal; legacy retains older angular starts); to?: [x,y,z] (To Object: turn until that face, vertex or point); sketch?, profiles? | face: [x,y,z] (a planar body face as the profile) and face_body?: name (whose face, where faces of several bodies meet), operation?, targets?, name?, body_name?"),
     CommandSpec::new("solid.sweep", "Sweep", sweep)
         .at("SOLID", "CREATE")
@@ -81,8 +83,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("fillet")
         .key("F")
+        .from_selection(super::model_selection::blend_edges)
         .params("edges: [[x,y,z] point on edge | {body, index}]; radius: expr; body?; type?: constant|curvature (alias g2: curvature-continuous quintic between planar faces along straight edges, one planar end face at each end (including sloped ends); radius sets the equivalent circular setback, not constant curvature; exact fit only)|chord (radius is the width across)|variable (radius at the end nearest start, radius2 at the other; one end may be 0, where the round closes to the corner)|spline (the radius along the edge is a clamped B-spline from the end nearest start: radius is its first control radius, radii the rest, knots its knot vector from 0 to 1; one end may be 0); radius2?; start?: [x,y,z]; radii?: [expr, …]; knots?: [number, …]; mid?: [[position 0…1 from start, radius expr], …] (variable radii between the ends); smooth?: bool (smooth instead of straight between the radii); corner?: rolling|g2 (rolling, the default: the corners where three blended edges meet are pieces of the rolling ball's sphere, tangent to each blend; g2: a patch repeating each blend's surface up to the second order, constant-radius exact fillets only, refused where it cannot be built); fit?: exact|reduce|taper (exact, the default: a radius too large for the geometry around the edges is refused; reduce: where it doesn't fit it is reduced to the largest that does, one radius for edges sharing a face; the smallest used is returned as `radius_applied`, each edge's as `radii_applied: [{edge: [x,y,z], radius}]`, and noted in the feature's warning; taper: along each straight edge between planar faces where it doesn't fit, the radius follows the room there as a smooth spline, down to 0 where a face closes to a point, noted in the feature's warning)"),
-    CommandSpec::new("solid.chamfer", "Chamfer", chamfer).at("SOLID", "MODIFY").icon("chamfer").params("edges: [[x,y,z] | {body, index}]; distance: expr; distance2?: expr (along the second face) | angle?: expr (from the first face); flip?: bool (which face is first: by default the one facing up most); body?"),
+    CommandSpec::new("solid.chamfer", "Chamfer", chamfer).at("SOLID", "MODIFY").icon("chamfer").from_selection(super::model_selection::blend_edges)
+        .params("edges: [[x,y,z] | {body, index}]; distance: expr; distance2?: expr (along the second face) | angle?: expr (from the first face); flip?: bool (which face is first: by default the one facing up most); body?"),
     CommandSpec::new("solid.combine", "Combine", combine).at("SOLID", "MODIFY").icon("combine").params("target: body; tools: [body]; operation?: join|cut|intersect; keep_tools?: bool; new_component?: bool (the result goes into a new component; component_name?)"),
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", pattern_rect)
         .at("SOLID", "CREATE")
@@ -135,10 +139,12 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.shell", "Shell", shell)
         .at("SOLID", "MODIFY")
         .icon("shell")
+        .from_selection(super::model_selection::body_faces)
         .params("faces: [[x,y,z] points on the faces to remove, or face names from model.faces]; thickness: expr; direction?: inside|outside|both; tangent_chain?: bool (also open faces joined smoothly to the picked ones); body?"),
     CommandSpec::new("solid.draft", "Draft", draft)
         .at("SOLID", "MODIFY")
         .icon("draft")
+        .from_selection(super::model_selection::body_faces)
         .params("faces: [[x,y,z] points, or face names from model.faces]; angle: expr; neutral: XY|XZ|YZ|plane name|{origin, normal}; pull?: [x,y,z] (default: neutral plane normal); body?"),
     CommandSpec::new("construct.plane.offset", "Offset Plane", crate::checked!("construct.plane.offset", plane_offset))
         .at("SOLID", "CONSTRUCT")
@@ -166,6 +172,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("presspull")
         .key("Q")
+        .from_selection(super::model_selection::one_face)
         .params("face: [x,y,z] and distance: expr (positive adds material, negative cuts), or edges: [[x,y,z]…] and distance (a fillet)"),
     CommandSpec::new("solid.move", "Move/Copy", move_bodies).at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch).params("bodies: [names]; translate?: [x,y,z] (exprs or numbers); axis?: [x,y,z]; angle?: expr; copy?: bool (default false: keeps the original bodies and transforms a new copy instead of moving them in place)"),
 ];

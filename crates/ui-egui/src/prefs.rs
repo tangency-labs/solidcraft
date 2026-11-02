@@ -1012,6 +1012,9 @@ preference_settings! {
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.
     radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
+    /// The quick menu (`quick_menu`) also opens by itself shortly after a click in the viewport
+    /// selects something a command takes (#5501). Off by default: a click only selects.
+    quick_menu_after_selection: bool = false, PAGE_NAVIGATION => check_tr("prefs.quick_menu_after_selection");
     /// Work on the model directly in the viewport (pull a face to extrude or cut); off by default.
     direct_interaction: bool = false, PAGE_TOOLS => check("Direct interaction", "Work on the model directly in the viewport. Press a flat face or a profile and pull: up extrudes, down into a body cuts, and sideways movement sets the step size");
     /// Mouse gestures: a ring of tools on the right button.
