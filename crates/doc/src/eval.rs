@@ -5633,7 +5633,9 @@ fn feature_tools_with_constructor(
                 let start = if hi > 0.0 { lo + off } else { hi + off };
                 tools = trim_to_body(tools, tb, |q: Vec3| ((q - ss.plane.origin).dot(n) - start).abs())?;
             }
-            if untrimmed {
+            // A join's profile grows into the material it joins; its sketch plane and depth as drawn
+            // still serve a join into sheet metal (`sheet_join`), which takes the sketch's regions.
+            if untrimmed || (*operation == Operation::Join && curved.is_none()) {
                 *constructor = Some(ExtrudeConstructor { plane: ss.plane, interval: (lo + off, hi + off) });
             }
             // A Join tool's faces outlive the boolean where they stay on the result, so they are
@@ -7439,6 +7441,14 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 let handled = more::sheet_cut(f, st, &bodies, &crate::plain(targets), constructor.as_ref(), warning)?;
                 if !handled.is_empty() {
                     return apply_beside_sheet_cut(doc, st, f, tools, *operation, &crate::plain(targets), &handled);
+                }
+            }
+            // A join one sheet thick in the plane of a panel becomes part of that panel. A Join to an
+            // object (#6424) is left to the generic path below, which joins the object as well.
+            if *operation == Operation::Join && to_body.is_none() && matches!(f.kind, FeatureKind::Extrude { .. }) && !st.sheets.is_empty() {
+                let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
+                if !more::sheet_join(f, st, &bodies, &crate::plain(targets), constructor.as_ref())?.is_empty() {
+                    return Ok(());
                 }
             }
             // A Join extrude to an object joins that object too (#6424): the tool and the body

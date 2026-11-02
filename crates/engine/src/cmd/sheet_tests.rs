@@ -839,6 +839,99 @@ fn a_pattern_of_a_cut_in_the_flat_is_kept_like_the_cut() {
     assert!(rel(volume(&mut s), folded - 4.0 * each) < 1e-9, "{} vs {}", volume(&mut s), folded - 4.0 * each);
 }
 
+/// Material joined in the flat, one sheet thick in the plane of a panel, becomes part of that
+/// panel as a cut made there does: kept in the flat pattern and refolded, its size following a
+/// parameter. A tab on the base's free edge and one beside the flange's panel. A join that
+/// reaches into the bend zone keeps the warning that the flat pattern can't include it.
+#[test]
+fn a_join_in_the_flat_is_kept_like_a_cut() {
+    // The rule's 2.5 mm sheet, R 2.5, K 0.44: the flange on y = 50 sets the base back to y = 45 and
+    // bends across BA = π/2·(2.5 + 0.44·2.5); its panel runs on from y = 45 + BA, x 0 to 80.
+    let (t, ba) = (2.5, FRAC_PI_2 * (2.5 + 0.44 * 2.5));
+    let tab = |s: &mut Session, name: &str, points: Value| {
+        run(s, "sketch.create", json!({"plane": "XY", "name": name}));
+        run(s, "sketch.line", json!({"points": points, "closed": true}));
+        run(s, "sketch.finish", json!({}));
+        run(s, "solid.extrude", json!({"sketch": name, "distance": t, "operation": "join", "name": format!("{name}_Join")}))
+    };
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "TabW", "expression": "10 mm"}));
+    base(&mut s, 80.0, 50.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[40, 50, 2.5]], "height": 20}));
+    let folded = volume(&mut s);
+    run(&mut s, "sheet.unfold", json!({}));
+    let unfolded = volume(&mut s);
+    // 15 x TabW on the base's free edge at x = 80.
+    let out = tab(&mut s, "Base_Tab", json!([["80 mm", "10 mm"], ["95 mm", "10 mm"], ["95 mm", "10 mm + TabW"], ["80 mm", "10 mm + TabW"]]));
+    assert!(out["warning"].is_null(), "{out}");
+    assert!(rel(volume(&mut s), unfolded + 15.0 * 10.0 * t) < 1e-9, "{}", volume(&mut s));
+    // 10 x 5 beside the flange's panel, 3 mm past its bend.
+    let y = 45.0 + ba + 3.0;
+    let out = tab(&mut s, "Panel_Tab", json!([[80, y], [90, y], [90, y + 5.0], [80, y + 5.0]]));
+    assert!(out["warning"].is_null(), "{out}");
+    let added = |w: f64| 15.0 * w * t + 10.0 * 5.0 * t;
+    assert!(rel(volume(&mut s), unfolded + added(10.0)) < 1e-9, "{}", volume(&mut s));
+    assert!((flat(&mut s)["flat_size_mm"][0].as_f64().unwrap_or(0.0) - 95.0).abs() < 1e-9);
+    run(&mut s, "sheet.refold", json!({}));
+    assert!(rel(volume(&mut s), folded + added(10.0)) < 1e-9, "{} vs {}", volume(&mut s), folded + added(10.0));
+    run(&mut s, "parameters.change", json!({"name": "TabW", "expression": "20 mm"}));
+    assert!(rel(volume(&mut s), folded + added(20.0)) < 1e-9, "{} vs {}", volume(&mut s), folded + added(20.0));
+    // One join with a tab on each: each joins the panel it is beside.
+    let mut s = Session::default();
+    base(&mut s, 80.0, 50.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[40, 50, 2.5]], "height": 20}));
+    let folded = volume(&mut s);
+    run(&mut s, "sheet.unfold", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Tabs"}));
+    run(&mut s, "sketch.line", json!({"points": [[80, 10], [95, 10], [95, 20], [80, 20]], "closed": true}));
+    run(&mut s, "sketch.line", json!({"points": [[80, y], [90, y], [90, y + 5.0], [80, y + 5.0]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    let out = run(&mut s, "solid.extrude", json!({"sketch": "Tabs", "distance": t, "operation": "join"}));
+    assert!(out["warning"].is_null(), "{out}");
+    run(&mut s, "sheet.refold", json!({}));
+    assert!(rel(volume(&mut s), folded + added(10.0)) < 1e-9, "{} vs {}", volume(&mut s), folded + added(10.0));
+    // Into the bend zone (it starts at y = 45): the generic path, with its warning.
+    let mut s = Session::default();
+    base(&mut s, 80.0, 50.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[40, 50, 2.5]], "height": 20}));
+    run(&mut s, "sheet.unfold", json!({}));
+    let out = tab(&mut s, "Zone_Tab", json!([[80, 40], [90, 40], [90, 48], [80, 48]]));
+    assert!(out["warning"].as_str().is_some_and(|w| w.contains("can't include this change")), "{out}");
+    // The same two tabs in a 1 mm sheet (R 1.18) and a 3 mm one (R 3), each joined one sheet
+    // thick: kept, refolded and following the parameter alike.
+    for (t, r) in [(1.0, 1.18), (3.0, 3.0)] {
+        let what = format!("T {t} R {r}");
+        let ba = FRAC_PI_2 * (r + 0.44 * t);
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "TabW", "expression": "10 mm"}));
+        let rule = json!({"name": "Rule", "active": true, "thickness": format!("{t} mm"), "k_factor": "0.44", "bend_radius": format!("{r} mm")});
+        run(&mut s, "sheet.manage_rules", rule);
+        base(&mut s, 80.0, 50.0);
+        run(&mut s, "sheet.flange", json!({"edges": [[40, 50, t]], "height": 20}));
+        let folded = volume(&mut s);
+        run(&mut s, "sheet.unfold", json!({}));
+        let unfolded = volume(&mut s);
+        let join = |s: &mut Session, name: &str, points: Value| {
+            run(s, "sketch.create", json!({"plane": "XY", "name": name}));
+            run(s, "sketch.line", json!({"points": points, "closed": true}));
+            run(s, "sketch.finish", json!({}));
+            run(s, "solid.extrude", json!({"sketch": name, "distance": t, "operation": "join"}))
+        };
+        let out = join(&mut s, "Base_Tab", json!([["80 mm", "10 mm"], ["95 mm", "10 mm"], ["95 mm", "10 mm + TabW"], ["80 mm", "10 mm + TabW"]]));
+        assert!(out["warning"].is_null(), "{what}: {out}");
+        // The panel starts BA past the base, set back R + T from y = 50.
+        let y = 50.0 - (r + t) + ba + 3.0;
+        let out = join(&mut s, "Panel_Tab", json!([[80, y], [90, y], [90, y + 5.0], [80, y + 5.0]]));
+        assert!(out["warning"].is_null(), "{what}: {out}");
+        let added = |w: f64| 15.0 * w * t + 10.0 * 5.0 * t;
+        assert!(rel(volume(&mut s), unfolded + added(10.0)) < 1e-9, "{what}: {}", volume(&mut s));
+        run(&mut s, "sheet.refold", json!({}));
+        assert!(rel(volume(&mut s), folded + added(10.0)) < 1e-9, "{what}: {} vs {}", volume(&mut s), folded + added(10.0));
+        run(&mut s, "parameters.change", json!({"name": "TabW", "expression": "20 mm"}));
+        assert!(rel(volume(&mut s), folded + added(20.0)) < 1e-9, "{what}: {} vs {}", volume(&mut s), folded + added(20.0));
+    }
+}
+
 /// A plate (15, -20) (0, 0) (-100, 0) (-100, -20) with a 20 mm inside flange on its slanted edge
 /// (2 mm sheet, R 2, K 0.5: the folded sheet holds its flat area times the thickness), unfolded,
 /// and a triangle cut out with a corner on the bend line: where the line ends on the plate's
@@ -5373,9 +5466,10 @@ fn flat_exports(s: &mut Session) -> Vec<std::result::Result<Value, String>> {
     calls.iter().map(|(id, p)| s.execute(id, p).map_err(|e| e.to_string())).collect()
 }
 
-/// A mirror combined into a sheet, or a tab extruded onto it and joined, makes a part its
-/// flat pattern does not have (the mirrored half, the tab): the flat pattern, the DXF and the
-/// bend table are refused with the feature's name instead of writing the sheet without it.
+/// A mirror combined into a sheet, or a block extruded onto it and joined, makes a part its
+/// flat pattern does not have (the mirrored half, the block): the flat pattern, the DXF and the
+/// bend table are refused with the feature's name instead of writing the sheet without it. (A
+/// tab joined in the sheet's own plane becomes part of it: `a_join_in_the_flat_is_kept_like_a_cut`.)
 #[test]
 fn a_mirror_or_a_join_into_a_sheet_refuses_its_flat_pattern_naming_the_feature() {
     let mut s = Session::default();
@@ -5391,12 +5485,21 @@ fn a_mirror_or_a_join_into_a_sheet_refuses_its_flat_pattern_naming_the_feature()
 
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
-    rectangle_tool(&mut s, "Tab", [40.0, 60.0], [60.0, 75.0]);
-    run(&mut s, "solid.extrude", json!({"sketch": "Tab", "distance": 2.5, "operation": "join"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 2.5, "name": "Block"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [40, 20], "p1": [60, 35]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Block", "distance": 10, "operation": "join"}));
     for result in flat_exports(&mut s) {
-        let error = result.expect_err("a joined tab the flat pattern lacks");
+        let error = result.expect_err("a joined block the flat pattern lacks");
         assert!(error.contains("can't include Extrude1"), "{error}");
     }
+    // The tab beside the base's edge, joined in its plane, is in the flat pattern.
+    let mut s = Session::default();
+    base(&mut s, 100.0, 60.0);
+    rectangle_tool(&mut s, "Tab", [40.0, 60.0], [60.0, 75.0]);
+    run(&mut s, "solid.extrude", json!({"sketch": "Tab", "distance": 2.5, "operation": "join"}));
+    assert!(flat_exports(&mut s).into_iter().all(|r| r.is_ok()));
+    assert!((flat(&mut s)["flat_size_mm"][1].as_f64().unwrap_or(0.0) - 75.0).abs() < 1e-9);
 }
 
 /// A fillet on a sheet's corner is refused in the flat pattern until a sheet metal feature
