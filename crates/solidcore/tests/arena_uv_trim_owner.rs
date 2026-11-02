@@ -8,8 +8,9 @@
 //! notification identity
 //! (`plan/findings/topology.edgeuse_p1--arena-uv-trim-owner-identity.md`).
 //!
-//! The solid is the upstream test file, read by the Rust reader when the pinned upstream
-//! checkout is present (as the difftest SMS tests do).
+//! The solid is the pinned `Solids/box.smb`, vendored byte-for-byte at
+//! `tests/data/reader-regressions/box.smb` (provenance in that directory's `README.md`) and
+//! read by the Rust reader, so the test does not need an upstream checkout.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -29,15 +30,15 @@ use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::NamingScheme;
 use solidcore::{Brep, EntityRef, Kernel};
 
+/// `Solids/box.smb` at the pinned upstream commit, vendored verbatim
+/// (`data/reader-regressions/README.md`).
+const BOX: &[u8] = include_bytes!("data/reader-regressions/box.smb");
+
 /// `Solids/box.smb` read by the Rust reader and arena-named, as the difftest reader
 /// (`own_reader::read_file`) makes it.
-fn arena_box(k: &mut Kernel) -> Option<Brep> {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../upstream/TestFiles/pt_TestFiles/Solids/box.smb");
-    let Ok(bytes) = std::fs::read(&path) else {
-        eprintln!("unavailable upstream test file: {}", path.display());
-        return None;
-    };
+fn arena_box(k: &mut Kernel) -> Brep {
+    // `read_from_file` takes the bytes by value, as the reader consumes them.
+    let bytes = BOX.to_vec();
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
@@ -54,7 +55,7 @@ fn arena_box(k: &mut Kernel) -> Option<Brep> {
     };
     read_from_file(k, &mut b, bytes, FileType::Ascii, false, &mut env).unwrap();
     b.use_arena_naming().unwrap();
-    Some(b)
+    b
 }
 
 /// The `SmEdgeuse` test #6 lines of a level-2 check.
@@ -70,9 +71,7 @@ fn test6_lines(k: &mut Kernel, b: &mut Brep) -> Vec<String> {
 #[test]
 fn arena_set_uv_trim_curve_owns_the_curve_by_its_holder() {
     let mut k = Kernel::default();
-    let Some(mut b) = arena_box(&mut k) else {
-        return;
-    };
+    let mut b = arena_box(&mut k);
     assert_eq!(b.naming(), NamingScheme::Arena);
     assert!(test6_lines(&mut k, &mut b).is_empty());
 

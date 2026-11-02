@@ -10,8 +10,10 @@
 //!
 //! The steps are those `SmBrep::Transform(const double[4][4])` takes for the `mat0076`
 //! matrix (its `V` and `Uᵀ` transforms and mirrors), through the placement transform
-//! and the mirror alone. The solid is the upstream test file, read when the pinned
-//! upstream checkout is present (as the difftest SMS tests do).
+//! and the mirror alone. The solid is the pinned `Solids/revolution.smb`, vendored
+//! byte-for-byte at `tests/data/reader-regressions/revolution.smb` (provenance in that
+//! directory's `README.md`) and read by the Rust reader, so the test does not need an
+//! upstream checkout.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -31,13 +33,13 @@ use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::{Brep, EntityRef, Kernel};
 
-fn revolution(k: &mut Kernel) -> Option<Brep> {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../upstream/TestFiles/pt_TestFiles/Solids/revolution.smb");
-    let Ok(bytes) = std::fs::read(&path) else {
-        eprintln!("unavailable upstream test file: {}", path.display());
-        return None;
-    };
+/// `Solids/revolution.smb` at the pinned upstream commit, vendored verbatim
+/// (`data/reader-regressions/README.md`).
+const REVOLUTION: &[u8] = include_bytes!("data/reader-regressions/revolution.smb");
+
+fn revolution(k: &mut Kernel) -> Brep {
+    // `read_from_file` takes the bytes by value, as the reader consumes them.
+    let bytes = REVOLUTION.to_vec();
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
@@ -54,15 +56,13 @@ fn revolution(k: &mut Kernel) -> Option<Brep> {
     };
     read_from_file(k, &mut b, bytes, FileType::Ascii, false, &mut env).unwrap();
     b.refresh_cached_topology();
-    Some(b)
+    b
 }
 
 #[test]
 fn issue_1570_mirror_of_a_flattened_revolution_finds_its_infinite_region() {
     let mut k = Kernel::default();
-    let Some(mut b) = revolution(&mut k) else {
-        return;
-    };
+    let mut b = revolution(&mut k);
     let origin = Vec3::new(0.0, 0.0, 0.0);
     let v = Axis2Placement::new(
         origin,
