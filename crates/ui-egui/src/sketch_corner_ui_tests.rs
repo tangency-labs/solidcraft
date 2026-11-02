@@ -593,7 +593,15 @@ fn an_impossible_size_keeps_the_window_open_with_its_reason() {
     h.step(&json!({"start":"sketch.chamfer.equal_distance"})).unwrap();
     h.frames(2);
     h.step(&json!({"click":{"world":[0,0,0]}})).unwrap();
-    h.frames(2);
+    // The pick comes back through the input queue: let it land before typing, so the window is
+    // not left with nothing picked (OK is then refused as "select the corner to cut first").
+    h.settle();
+    assert_eq!(
+        h.app.dialog.as_ref().map(|d| crate::sketch_modify_ui::dialog_rows(&h.app.session, d).len()),
+        Some(1),
+        "the corner shows as one row: {:?}",
+        h.app.status
+    );
     for size in ["500", "0", "-3", "not a number"] {
         set_size(&mut h.app, size);
         apply(&mut h);
