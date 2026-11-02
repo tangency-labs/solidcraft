@@ -2912,6 +2912,9 @@ pub struct Document {
     /// Plastic rules.
     #[serde(default, skip_serializing_if = "crate::plastic::PlasticSettings::is_empty")]
     pub plastic: crate::plastic::PlasticSettings,
+    /// CNC manufacture setups, machine and post profiles.
+    #[serde(default, skip_serializing_if = "solidcraft_manufacture::ManufactureSettings::is_empty")]
+    pub manufacture: solidcraft_manufacture::ManufactureSettings,
     /// Components that are standard parts (by component id): what to rebuild them from.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub parts: std::collections::BTreeMap<u64, StandardPart>,
@@ -3242,6 +3245,7 @@ impl Document {
             assembly: Default::default(),
             sheet: Default::default(),
             plastic: Default::default(),
+            manufacture: Default::default(),
             configs: Default::default(),
             parts: Default::default(),
             links: Default::default(),
