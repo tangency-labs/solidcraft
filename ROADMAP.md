@@ -662,7 +662,9 @@ completed drawings publish atomically. The browser still exports synchronously.
   pieces survive unfold/refold as one logical sheet group, including split flanged sheets.
   Cut-outs made in the flat pattern cross bends at any angle or curved: their edges fold to
   helices and curves on the bend, their walls square to the sheet. Free-form bases use bounded
-  sampling.
+  sampling. A fold crosses the sheet's own outer edges the same way, slanted or on any curve,
+  with the outline exact in the flat pattern and its DXF, and flanges and other folds still go
+  on the panels.
   Parallel prismatic partial-depth cuts retain pocket side and depth through transfer and
   unfold/refold, with separate pocket contours in preview and DXF. Planar Intersect preserves
   exact holes and retained islands, including the union of multiple selected profiles, and

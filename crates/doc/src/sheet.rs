@@ -529,6 +529,10 @@ pub struct SheetFlange {
     /// (flat coordinates, counter-clockwise).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exact: Option<Loop2>,
+    /// A fold's bend zone as drawn, when a curved edge of the sheet crosses it (flat coordinates,
+    /// counter-clockwise): `zone` is this instead of straight ends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zone_shape: Option<Loop2>,
     /// Which feature made it: `F<feature>.<k>` (persistent edge names).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub tag: String,
@@ -830,6 +834,205 @@ fn rect(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> Region2 {
     Region2 { outer: lp, holes: Vec::new() }
 }
 
+/// How a fold's bend runs along its line `d`: where its start line starts and ends, how far its far
+/// edge runs on past those ends, and which ends are cut askew (`SheetFlange::ext`, `tear`).
+type FoldEnds = (f64, f64, (f64, f64), (bool, bool));
+
+/// The ends of a fold's zone (`strip`, between the lines at `s0` and `s0 + ba` along `n`) when
+/// straight edges of the sheet slant across it, so that it folds as a bend with torn ends. Every
+/// corner must lie on one of the two lines: a curved edge has corners in between, and an S of the
+/// same area as a straight end would pass on area alone.
+fn slanted_zone(strip: &[Vec2], n: Vec2, d: Vec2, s0: f64, ba: f64) -> Option<FoldEnds> {
+    let on_line = |q: &Vec2, s: f64| (q.dot(n) - s).abs() <= ZONE_SQUARE_TOL;
+    if !strip.iter().all(|q| on_line(q, s0) || on_line(q, s0 + ba)) {
+        return None;
+    }
+    let span = |s: f64| {
+        let mut along = strip.iter().filter(|q| on_line(q, s)).map(|q| q.dot(d));
+        let first = along.next()?;
+        Some(along.fold((first, first), |(lo, hi), u| (lo.min(u), hi.max(u))))
+    };
+    let ((a0, a1), (e0, e1)) = (span(s0)?, span(s0 + ba)?);
+    let (start, far) = (a1 - a0, e1 - e0);
+    let trapezoid = (start + far) / 2.0 * ba;
+    if start <= ZONE_SQUARE_TOL
+        || far <= ZONE_SQUARE_TOL
+        || (trapezoid - signed_area(strip).abs()).abs() > 1e-6 * start.max(far).max(1.0) * ba.max(1.0)
+    {
+        return None;
+    }
+    let end = |on: f64| if on.abs() > ZONE_SQUARE_TOL { (on, true) } else { (0.0, false) };
+    let ((on0, torn0), (on1, torn1)) = (end(a0 - e0), end(e1 - a1));
+    Some((a0, a1, (on0, on1), (torn0, torn1)))
+}
+
+/// A turn sharper than this (its sine) between two edges of an outline is a corner. Smooth curves
+/// and their chords turn less: a chord at the sheet's 0.001 mm tolerance turns about 5° on a 1 mm
+/// radius.
+const CORNER_TURN: f64 = 0.17;
+
+/// Where two edges of an outline meet at a corner.
+fn outline_corners(outline: &Loop2) -> Vec<Vec2> {
+    let segs = &outline.segs;
+    let mut corners = Vec::new();
+    for (i, next) in segs.iter().enumerate() {
+        let Some(prev) = segs.get((i + segs.len() - 1) % segs.len()) else { continue };
+        let (t0, t1) = (prev.end_tangent(), next.start_tangent());
+        if t0.cross(t1).abs() > CORNER_TURN || t0.dot(t1) < 0.0 {
+            corners.push(next.start());
+        }
+    }
+    corners
+}
+
+/// `seg` in pieces, cut where it crosses the line `level` along `n`, into `out`. A curve that only
+/// touches the line stays whole.
+fn cut_at_level(seg: &Seg2, n: Vec2, level: f64, out: &mut Vec<Seg2>) {
+    const SAMPLES: usize = 64;
+    const MAX_CROSSINGS: usize = 16;
+    const ON_LINE: f64 = 1e-9;
+    let off = |s: &Seg2, t: f64| s.point_at(t).dot(n) - level;
+    let mut rest = *seg;
+    for _ in 0..MAX_CROSSINGS {
+        // The first change of side, skipping samples on the line itself.
+        let (mut last, mut crossing) = (None::<(f64, f64)>, None);
+        for k in 0..=SAMPLES {
+            let t = k as f64 / SAMPLES as f64;
+            let v = off(&rest, t);
+            if v.abs() <= ON_LINE {
+                continue;
+            }
+            match last {
+                Some((was, before)) if before * v < 0.0 => {
+                    crossing = Some((was, t, before));
+                    break;
+                }
+                _ => last = Some((t, v)),
+            }
+        }
+        let Some((mut lo, mut hi, before)) = crossing else { break };
+        // On the distance itself: the cut lands on the line, and what's left starts on it.
+        for _ in 0..60 {
+            let mid = (lo + hi) / 2.0;
+            if off(&rest, mid) * before > 0.0 {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let (first, second) = rest.split_at((lo + hi) / 2.0);
+        out.push(first);
+        rest = second;
+    }
+    out.push(rest);
+}
+
+/// A panel's outline cut exactly across a fold whose zone a curved edge crosses, each piece
+/// keeping its exact curves.
+#[derive(Clone, Debug, PartialEq)]
+struct CurvedFold {
+    fixed: Loop2,
+    zone: Loop2,
+    moving: Loop2,
+    ends: FoldEnds,
+}
+
+/// `outline` cut into the side short of the zone between the lines at `s0` and `s0 + ba` along `n`,
+/// the zone, and the side past it. It must run from one side through the zone to the other and
+/// back through the zone, once: a notch, several tabs on the line or a zone that reaches the
+/// outline's tip is `None`. Both of the zone's ends count as torn: their edges aren't square across.
+fn curved_fold(outline: &Loop2, n: Vec2, d: Vec2, s0: f64, ba: f64) -> Option<CurvedFold> {
+    const ON_LINE: f64 = 1e-6;
+    if outline.segs.len() > MAX_FLAT_POINTS {
+        return None;
+    }
+    let outline = outline.ccw();
+    let mut pieces = Vec::new();
+    for seg in &outline.segs {
+        let mut near = Vec::new();
+        cut_at_level(seg, n, s0, &mut near);
+        for piece in &near {
+            cut_at_level(piece, n, s0 + ba, &mut pieces);
+        }
+    }
+    // The band each piece lies in: 0 short of the zone, 1 in it, 2 past it. A piece along either
+    // line is an edge square across the bend, not one crossing it.
+    let mut bands = Vec::with_capacity(pieces.len());
+    for piece in &pieces {
+        let v = piece.mid().dot(n);
+        if !v.is_finite() || (v - s0).abs() <= ON_LINE || (v - s0 - ba).abs() <= ON_LINE {
+            return None;
+        }
+        bands.push(if v < s0 {
+            0
+        } else if v > s0 + ba {
+            2
+        } else {
+            1
+        });
+    }
+    // Round the outline from where it enters the side short of the zone.
+    let count = pieces.len();
+    let first = (0..count).find(|&i| bands.get(i) == Some(&0) && bands.get((i + count - 1) % count) != Some(&0))?;
+    let mut runs: Vec<(i32, Vec<Seg2>)> = Vec::new();
+    for k in 0..count {
+        let i = (first + k) % count;
+        let (band, piece) = (*bands.get(i)?, *pieces.get(i)?);
+        match runs.last_mut() {
+            Some((b, run)) if *b == band => run.push(piece),
+            _ => runs.push((band, vec![piece])),
+        }
+    }
+    let [(0, near), (1, there), (2, far), (1, back)] = runs.as_slice() else { return None };
+    let ends_of = |run: &[Seg2]| Some((run.first()?.start(), run.last()?.end()));
+    let ((near0, near1), (there0, there1), (far0, far1), (back0, back1)) = (ends_of(near)?, ends_of(there)?, ends_of(far)?, ends_of(back)?);
+    let on = |q: Vec2, s: f64| (q.dot(n) - s).abs() <= ON_LINE;
+    if !(on(near0, s0) && on(near1, s0) && on(far0, s0 + ba) && on(far1, s0 + ba)) {
+        return None;
+    }
+    let closed = |run: &[Seg2], to: Vec2, from: Vec2| {
+        let mut segs = run.to_vec();
+        segs.push(Seg2::Line { a: to, b: from });
+        segs
+    };
+    let mut zone = closed(there, there1, back0);
+    zone.extend_from_slice(back);
+    zone.push(Seg2::Line { a: back1, b: there0 });
+    let span = |p: Vec2, q: Vec2| (p.dot(d).min(q.dot(d)), p.dot(d).max(q.dot(d)));
+    let ((a0, a1), (e0, e1)) = (span(near0, near1), span(far0, far1));
+    if a1 - a0 <= ON_LINE || e1 - e0 <= ON_LINE {
+        return None;
+    }
+    Some(CurvedFold {
+        fixed: Loop2 { segs: closed(near, near1, near0) },
+        zone: Loop2 { segs: zone },
+        moving: Loop2 { segs: closed(far, far1, far0) },
+        ends: (a0, a1, (a0 - e0, e1 - a1), (true, true)),
+    })
+}
+
+/// Two counter-clockwise loops joined along a straight edge they share, running opposite ways:
+/// every curve of both exactly as it was, which the planar booleans wouldn't hand back.
+fn join_along_seam(a: &Loop2, b: &Loop2) -> Option<Loop2> {
+    const SAME: f64 = 1e-6;
+    if a.segs.len().saturating_mul(b.segs.len()) > MAX_FLAT_POINTS {
+        return None;
+    }
+    for (i, ea) in a.segs.iter().enumerate() {
+        let Seg2::Line { a: p, b: q } = *ea else { continue };
+        for (j, eb) in b.segs.iter().enumerate() {
+            let Seg2::Line { a: r, b: s } = *eb else { continue };
+            if p.dist(s) <= SAME && q.dist(r) <= SAME {
+                let mut segs = Vec::with_capacity(a.segs.len() + b.segs.len());
+                segs.extend(a.segs.iter().skip(i + 1).chain(a.segs.iter().take(i)).cloned());
+                segs.extend(b.segs.iter().skip(j + 1).chain(b.segs.iter().take(j)).cloned());
+                return Some(Loop2 { segs });
+            }
+        }
+    }
+    None
+}
+
 /// Round to a 1e-9 mm grid (keeps trimmed edges exactly where the kernel expects them).
 fn snap(v: Vec2) -> Vec2 {
     let r = |x: f64| (x * 1e9).round() / 1e9;
@@ -1087,6 +1290,9 @@ impl SheetBody {
     /// Flat region of a flange's bend zone: square across the bend at both ends, but at a torn
     /// end its far edge ends where the panel's does.
     pub fn zone(&self, f: &SheetFlange) -> Region2 {
+        if let Some(lp) = &f.zone_shape {
+            return Region2 { outer: lp.ccw(), holes: Vec::new() };
+        }
         let ba = self.allowance(f);
         let (u0, u1) = self.zone_span(f);
         let (a, b) = (f.p + f.d * u0, f.p + f.d * u1);
@@ -1101,6 +1307,32 @@ impl SheetBody {
     fn zone_ends(&self, f: &SheetFlange) -> (f64, f64) {
         let (u0, u1) = self.zone_span(f);
         (if f.tear.0 { -f.ext.0 } else { u0 }, if f.tear.1 { f.len + f.ext.1 } else { u1 })
+    }
+
+    /// How far a bend's zone reaches along the bend from `p`: a torn end runs askew, and a curved
+    /// edge may bulge past both of its ends.
+    pub(crate) fn zone_reach(&self, f: &SheetFlange) -> (f64, f64) {
+        if let Some(lp) = &f.zone_shape {
+            return lp.polyline(1e-3).iter().map(|q| (*q - f.p).dot(f.d)).fold((f64::MAX, f64::MIN), |(lo, hi), u| (lo.min(u), hi.max(u)));
+        }
+        let ((u0, u1), (e0, e1)) = (self.zone_span(f), self.zone_ends(f));
+        (u0.min(e0), u1.max(e1))
+    }
+
+    /// Where a bend's centre line starts and ends, along the bend from `p`: between the middles
+    /// of the bend's two ends (a torn end is askew), or where a curved edge crosses it.
+    fn centre_line(&self, f: &SheetFlange) -> (f64, f64) {
+        if let Some(lp) = &f.zone_shape {
+            let mut at = Vec::new();
+            for e in &lp.segs {
+                line_hits(f.p + f.n * (self.allowance(f) / 2.0), f.d, e, &mut at);
+            }
+            if let (Some(lo), Some(hi)) = (at.iter().copied().reduce(f64::min), at.iter().copied().reduce(f64::max)) {
+                return (lo, hi);
+            }
+        }
+        let ((u0, u1), (e0, e1)) = (self.zone_span(f), self.zone_ends(f));
+        ((u0 + e0) / 2.0, (u1 + e1) / 2.0)
     }
 
     /// Folded (in the flat frame, as `fold`), the point of a bend's end (the one at `p`, or the
@@ -1141,7 +1373,9 @@ impl SheetBody {
         if let Some(shape) = &f.shape
             && let Some((lo, hi)) = edge_span(shape, f.p + f.n * self.allowance(f))
         {
-            return (span.0.max(lo), span.1.min(hi));
+            // A torn end runs askew to where the panel's end starts, so the panel's root doesn't
+            // limit the bend there.
+            return (if f.tear.0 { span.0 } else { span.0.max(lo) }, if f.tear.1 { span.1 } else { span.1.min(hi) });
         }
         span
     }
@@ -1925,6 +2159,60 @@ impl SheetBody {
         Ok(regions)
     }
 
+    /// The sheet's panels and bend zones. Where a free-form edge crosses a fold, the zone and the
+    /// panels either side are already joined along their seams, so the edge stays the curve it
+    /// was drawn as: merged by the planar booleans it would come back as fitted arcs. A seam
+    /// another feature changed is left to them.
+    fn flat_pieces(&self) -> Result<Vec<Region2>> {
+        let mut owners: Vec<Option<usize>> = Vec::new();
+        let mut slots: Vec<Option<Region2>> = Vec::new();
+        for (pi, r) in self.panels() {
+            owners.push(pi);
+            slots.push(Some(planar_region(&r)?));
+        }
+        let panel_slot = |pi: Option<usize>| owners.iter().position(|o| *o == pi);
+        let panels = slots.len();
+        for f in &self.flanges {
+            slots.push(Some(planar_region(&self.zone(f))?));
+        }
+        // Which slot now holds each: joined pieces live in the one they joined.
+        let mut held_by: Vec<usize> = (0..slots.len()).collect();
+        let free_form = |slots: &[Option<Region2>], at: usize| slots.get(at).and_then(Option::as_ref).is_some_and(|r| !r.outer.is_line_arc());
+        for (i, f) in self.flanges.iter().enumerate() {
+            // A fold's pieces share whole seams; an edge flange's bend needn't span its edge.
+            if f.shape.is_none() {
+                continue;
+            }
+            let zone = panels + i;
+            let sides = [panel_slot(f.parent), panel_slot(Some(i))];
+            if !free_form(&slots, zone) && !sides.iter().flatten().any(|&p| free_form(&slots, held_by.get(p).copied().unwrap_or(p))) {
+                continue;
+            }
+            for side in sides.into_iter().flatten() {
+                let at = |held_by: &[usize], k: usize| held_by.get(k).copied().unwrap_or(k);
+                let (a, b) = (at(&held_by, zone), at(&held_by, side));
+                if a == b {
+                    continue;
+                }
+                let (Some(Some(ra)), Some(Some(rb))) = (slots.get(a), slots.get(b)) else { continue };
+                let Some(joined) = join_along_seam(&ra.outer, &rb.outer) else { continue };
+                let holes = ra.holes.iter().chain(&rb.holes).cloned().collect();
+                if let Some(slot) = slots.get_mut(a) {
+                    *slot = Some(Region2 { outer: joined, holes });
+                }
+                if let Some(slot) = slots.get_mut(b) {
+                    *slot = None;
+                }
+                for k in &mut held_by {
+                    if *k == b {
+                        *k = a;
+                    }
+                }
+            }
+        }
+        Ok(slots.into_iter().flatten().collect())
+    }
+
     pub(crate) fn flat_material(&self) -> Result<Vec<Region2>> {
         let mut work = FlatWork::new();
         // Merge structural pieces before cutting: clipping each panel first introduces
@@ -1938,16 +2226,12 @@ impl SheetBody {
         }
         let mut regions = Vec::new();
         let mut panel_points = 0usize;
-        for (_, r) in self.panels() {
-            let r = planar_region(&r)?;
+        for r in self.flat_pieces()? {
             panel_points = panel_points.saturating_add(region_complexity(std::slice::from_ref(&r))?.1);
             if panel_points > MAX_FLAT_POINTS {
                 return Err(flat_budget_error());
             }
             regions.push(r);
-        }
-        for f in &self.flanges {
-            regions.push(planar_region(&self.zone(f))?);
             region_complexity(&regions)?;
         }
         let regions = material_union(regions, &mut work)?;
@@ -2079,9 +2363,7 @@ impl SheetBody {
         let mut out = Vec::new();
         for (i, f) in self.flanges.iter().enumerate() {
             let ba = self.allowance(f);
-            // The centre line runs between the middles of the bend's two ends (a torn end is askew).
-            let ((u0, u1), (e0, e1)) = (self.zone_span(f), self.zone_ends(f));
-            let (u0, u1) = ((u0 + e0) / 2.0, (u1 + e1) / 2.0);
+            let (u0, u1) = self.centre_line(f);
             let a = f.p + f.n * (ba / 2.0) + f.d * u0;
             for (s0, s1) in clear_of(a, f.d, u1 - u0, &cuts) {
                 out.push(BendInfo {
@@ -2379,10 +2661,8 @@ impl SheetBody {
                     return Err(DocError::Invalid("not supported yet: a partial side-edge flange beside a cut-out".into()));
                 }
                 let clipped = if side || original.shape.is_some() || original.exact.is_some() {
+                    // A panel with curves gives way to its 0.001 mm chords here.
                     let region = self.panel(original);
-                    if !region.outer.segs.iter().all(|s| matches!(s, Seg2::Line { .. })) {
-                        return Err(DocError::Invalid("not supported yet: a flange setback on a curved flange panel".into()));
-                    }
                     let points = clip(&region.outer.ccw().polyline(1e-3), a + inward * by, inward);
                     if points.len() < 3 {
                         return Err(DocError::Invalid("the flange's setback removes the whole panel".into()));
@@ -2718,6 +2998,7 @@ impl SheetBody {
                 leg: leg.max(0.0),
                 shape: None,
                 exact: None,
+                zone_shape: None,
                 tag: String::new(),
                 ext: (0.0, 0.0),
                 slope: (0.0, 0.0),
@@ -3616,6 +3897,7 @@ impl SheetBody {
             tear: (false, false),
             shape: None,
             exact: None,
+            zone_shape: None,
             tag: String::new(),
         });
         Ok(self.flanges.len() - 1)
@@ -3629,7 +3911,8 @@ impl SheetBody {
     /// flat). On the base the side holding `fixed` (default: the larger side) stays put; on a
     /// flange the side toward its own bend does. `flip` folds the other way. A `fixed` point that
     /// touches no material still picks the side it lies on, and sets `warning` (see
-    /// [`FOLD_FIXED_OFF_SHEET`]).
+    /// [`FOLD_FIXED_OFF_SHEET`]). The outline may cross the zone on straight slanted edges or on
+    /// any curve; a sharp corner in the zone is refused, by name.
     #[allow(clippy::too_many_arguments)]
     pub fn add_fold(
         &mut self,
@@ -3684,11 +3967,12 @@ impl SheetBody {
             let pts = dedup(&r.outer.ccw().polyline(1e-3));
             let (a2, b2) = (Vec2::new(fa.x, fa.y), Vec2::new(fb.x, fb.y));
             if pts.contains((a2 + b2) * 0.5) || polys_cross(&pts, &[a2, b2, (a2 + b2) * 0.5]) {
-                found = Some((pi, inv, a2, b2, pts));
+                found = Some((pi, inv, a2, b2, pts, r.outer));
                 break;
             }
         }
-        let (panel, inv, a2, b2, pts) = found.ok_or_else(|| DocError::Invalid("the fold line must lie on a flat face of the sheet".into()))?;
+        let (panel, inv, a2, b2, pts, outline) =
+            found.ok_or_else(|| DocError::Invalid("the fold line must lie on a flat face of the sheet".into()))?;
         let d = (b2 - a2).normalized().ok_or_else(|| DocError::Invalid("the fold line has no length".into()))?;
         let mut n = Vec2::new(-d.y, d.x);
         let l0 = a2.dot(n);
@@ -3741,6 +4025,7 @@ impl SheetBody {
             tear: (false, false),
             shape: None,
             exact: None,
+            zone_shape: None,
             tag: String::new(),
         };
         let ba = self.allowance(&probe);
@@ -3771,26 +4056,46 @@ impl SheetBody {
             let angle = if flip { -angle } else { angle };
             return self.fold_tabs(panel, &pts, (n, d), (s0, ba), span, (angle, radius), &strips);
         }
-        // The bend zone must be a rectangle across the panel (a slanted or curved edge would
-        // run across the bend as a helix, which the sheet's faces can't carry yet).
+        // The bend zone is a rectangle across the panel, or straight edges of the sheet slant
+        // across it, or curved ones do. Those ends fold to helices and curves, as torn ends and
+        // cut-outs across a bend do.
         let us: Vec<f64> = strip.iter().map(|q| q.dot(d)).collect();
         let (u0, u1) = (us.iter().cloned().fold(f64::MAX, f64::min), us.iter().cloned().fold(f64::MIN, f64::max));
+        let mut ends: FoldEnds = (u0, u1, (0.0, 0.0), (false, false));
+        let mut zone_shape = None;
+        // An outline with curves is cut exactly, wherever the curves are, so they stay as drawn in
+        // the flat pattern; a cut that doesn't come out whole falls back on the chords.
+        let cut = if outline.segs.iter().all(|e| matches!(e, Seg2::Line { .. })) { None } else { curved_fold(&outline, n, d, s0, ba) };
         if ((u1 - u0) * ba - signed_area(&strip).abs()).abs() > 1e-6 * (u1 - u0).max(1.0) * ba.max(1.0) {
-            // A corner of the outline inside the zone (e.g. a fold right at a tab's root): name
-            // it and how far the line has to move to clear it.
-            let corners: Vec<(Vec2, f64)> = pts.iter().map(|q| (*q, q.dot(n) - s0)).filter(|(_, s)| *s > 1e-6 && *s < ba - 1e-6).collect();
-            if let Some(&(c, _)) = corners.first() {
-                let on = corners.iter().fold(0.0_f64, |m, (_, s)| m.max(*s));
-                let back = corners.iter().fold(0.0_f64, |m, (_, s)| m.max(ba - *s));
-                let w = apply_point(&self.world(panel), Vec3::new(c.x, c.y, self.t));
-                return Err(DocError::Invalid(format!(
-                    "the bend zone ({ba:.3} mm wide) reaches a corner of the sheet's outline at ({:.3}, {:.3}, {:.3}): \
-                     move the fold line at least {on:.3} mm toward the side that folds or {back:.3} mm toward the side that stays",
-                    w.x, w.y, w.z
-                )));
+            if let Some(slanted) = slanted_zone(&strip, n, d, s0, ba) {
+                ends = slanted;
+            } else {
+                // A corner of the outline inside the zone (e.g. a fold right at a tab's root): name
+                // it and how far the line has to move to clear it.
+                let corners: Vec<(Vec2, f64)> =
+                    outline_corners(&outline).into_iter().map(|q| (q, q.dot(n) - s0)).filter(|(_, s)| *s > 1e-6 && *s < ba - 1e-6).collect();
+                if let Some(&(c, _)) = corners.first() {
+                    let on = corners.iter().fold(0.0_f64, |m, (_, s)| m.max(*s));
+                    let back = corners.iter().fold(0.0_f64, |m, (_, s)| m.max(ba - *s));
+                    let w = apply_point(&self.world(panel), Vec3::new(c.x, c.y, self.t));
+                    return Err(DocError::Invalid(format!(
+                        "the bend zone ({ba:.3} mm wide) reaches a corner of the sheet's outline at ({:.3}, {:.3}, {:.3}): \
+                         move the fold line at least {on:.3} mm toward the side that folds or {back:.3} mm toward the side that stays",
+                        w.x, w.y, w.z
+                    )));
+                }
+                let Some(curved) = &cut else {
+                    return Err(DocError::Invalid("not supported yet: folds whose bend zone crosses a slanted or curved edge of the sheet".into()));
+                };
+                ends = curved.ends;
+                zone_shape = Some(curved.zone.clone());
             }
-            return Err(DocError::Invalid("not supported yet: folds whose bend zone crosses a slanted or curved edge of the sheet".into()));
         }
+        let (u0, u1, ext, tear) = ends;
+        let (fixed_exact, moving_exact) = match cut {
+            Some(cut) => (Some(cut.fixed), Some(cut.moving)),
+            None => (None, None),
+        };
         let up = !flip;
         let leg = moving.iter().map(|q| q.dot(n) - s0 - ba).fold(0.0, f64::max);
         let p0 = n * s0 + d * u0;
@@ -3801,11 +4106,14 @@ impl SheetBody {
             v.into_iter().map(snap).collect::<Vec<_>>()
         };
         match panel {
-            None => self.base = Region2 { outer: Loop2::polygon(&fixed_part).ccw(), holes: self.base.holes.clone() },
+            None => {
+                self.base =
+                    Region2 { outer: fixed_exact.clone().unwrap_or_else(|| Loop2::polygon(&fixed_part)).ccw(), holes: self.base.holes.clone() }
+            }
             Some(j) => {
                 if let Some(f) = self.flanges.get_mut(j) {
                     f.shape = Some(ccw(fixed_part.clone()));
-                    f.exact = None;
+                    f.exact = fixed_exact;
                 }
             }
         }
@@ -3818,11 +4126,12 @@ impl SheetBody {
             angle: if up { angle } else { -angle },
             radius,
             leg,
-            ext: (0.0, 0.0),
+            ext,
             slope: (0.0, 0.0),
-            tear: (false, false),
+            tear,
             shape: Some(ccw(moving)),
-            exact: None,
+            exact: moving_exact,
+            zone_shape,
             tag: String::new(),
         });
         let i = self.flanges.len() - 1;
@@ -3967,6 +4276,7 @@ impl SheetBody {
                 tear: (false, false),
                 shape: Some(ccw(moving)),
                 exact: None,
+                zone_shape: None,
                 tag: String::new(),
             });
         }
@@ -4723,6 +5033,9 @@ impl SheetBody {
             if let Some(exact) = &mut f.exact {
                 *exact = flip_x_loop(exact);
             }
+            if let Some(zone) = &mut f.zone_shape {
+                *zone = flip_x_loop(zone);
+            }
         }
         for r in self.holes.iter_mut().chain(self.labels.iter_mut()).chain(self.pockets.iter_mut().map(|p| &mut p.region)) {
             *r = flip_x_region(r);
@@ -4864,6 +5177,7 @@ pub fn contour_flange(body: &str, rule: &str, rv: &RuleValues, plane: &Plane, pt
             tear: (false, false),
             shape: None,
             exact: None,
+            zone_shape: None,
             tag: String::new(),
         };
         let ba = sheet.allowance(&f);
@@ -5538,6 +5852,145 @@ mod tests {
                 assert!((v0 - vol(&body) - removed * 2.0).abs() < 0.05, "{angle}°: {} vs {}", v0 - vol(&body), removed * 2.0);
             }
         }
+    }
+
+    /// Any closed curve the sheet's outlines can hold: a circle, conics, cubics, and a mix.
+    fn curved_outlines() -> Vec<(&'static str, Loop2)> {
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let v = |x: f64, y: f64| Vec2::new(x, y);
+        let conic = |a: Vec2, apex: Vec2, b: Vec2| Seg2::Conic { a, apex, b, w };
+        let ellipse = vec![
+            conic(v(80.0, 0.0), v(80.0, 40.0), v(0.0, 40.0)),
+            conic(v(0.0, 40.0), v(-80.0, 40.0), v(-80.0, 0.0)),
+            conic(v(-80.0, 0.0), v(-80.0, -40.0), v(0.0, -40.0)),
+            conic(v(0.0, -40.0), v(80.0, -40.0), v(80.0, 0.0)),
+        ];
+        let cubic = |p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2| Seg2::Cubic { p0, p1, p2, p3 };
+        // An uneven blob: its sides aren't symmetric about the fold or each other.
+        let spline = vec![
+            cubic(v(70.0, -5.0), v(75.0, 30.0), v(30.0, 55.0), v(0.0, 40.0)),
+            cubic(v(0.0, 40.0), v(-30.0, 25.0), v(-90.0, 45.0), v(-85.0, 0.0)),
+            cubic(v(-85.0, 0.0), v(-80.0, -45.0), v(-20.0, -60.0), v(0.0, -35.0)),
+            cubic(v(0.0, -35.0), v(20.0, -10.0), v(65.0, -40.0), v(70.0, -5.0)),
+        ];
+        // A D: a straight side the fold runs across, and an arc it also crosses.
+        let d_shape = vec![
+            Seg2::Line { a: v(-50.0, -50.0), b: v(0.0, -50.0) },
+            Seg2::Arc { center: v(0.0, 0.0), radius: 50.0, start: -std::f64::consts::FRAC_PI_2, sweep: std::f64::consts::PI },
+            Seg2::Line { a: v(0.0, 50.0), b: v(-50.0, 50.0) },
+            Seg2::Line { a: v(-50.0, 50.0), b: v(-50.0, -50.0) },
+        ];
+        vec![
+            ("circle", Loop2::circle(v(0.0, 0.0), 50.0)),
+            ("ellipse", Loop2 { segs: ellipse }),
+            ("spline", Loop2 { segs: spline }),
+            ("D", Loop2 { segs: d_shape }),
+        ]
+    }
+
+    #[test]
+    fn a_curved_outline_is_cut_exactly_across_a_fold_whatever_the_curve() {
+        let (n, d) = (Vec2::new(1.0, 0.0), Vec2::new(0.0, -1.0));
+        for (name, lp) in curved_outlines() {
+            for (s0, ba) in [(-2.8, 5.6), (-30.0, 12.0), (10.0, 1.5)] {
+                let cut = curved_fold(&lp, n, d, s0, ba).unwrap_or_else(|| panic!("{name} at {s0}"));
+                // The pieces are the outline: nothing lost, nothing doubled, and all closed.
+                let area = |l: &Loop2| l.signed_area();
+                let sum = area(&cut.fixed) + area(&cut.zone) + area(&cut.moving);
+                assert!((sum - lp.signed_area().abs()).abs() < 1e-6, "{name} at {s0}: {sum} vs {}", lp.signed_area());
+                for piece in [&cut.fixed, &cut.zone, &cut.moving] {
+                    assert!(piece.is_closed(1e-9) && piece.is_ccw(), "{name} at {s0}: {piece:?}");
+                }
+                // Each lies wholly in its band, on the outline's own curves: sampled densely.
+                let band = |l: &Loop2, lo: f64, hi: f64| l.polyline(1e-3).iter().all(|q| q.dot(n) >= lo - 1e-6 && q.dot(n) <= hi + 1e-6);
+                assert!(band(&cut.fixed, f64::MIN, s0) && band(&cut.zone, s0, s0 + ba) && band(&cut.moving, s0 + ba, f64::MAX), "{name} at {s0}");
+                // A curve is cut, not replaced by chords: the same kind of segment comes back.
+                let curves = |l: &Loop2| l.segs.iter().filter(|e| !matches!(e, Seg2::Line { .. })).count();
+                assert!(curves(&cut.fixed) + curves(&cut.zone) + curves(&cut.moving) >= curves(&lp), "{name} at {s0}");
+                assert!(cut.ends.3 == (true, true), "{name}: both ends are torn");
+            }
+        }
+    }
+
+    /// What keeps a flat pattern true: unrolling a bend keeps lengths on its neutral surface, so
+    /// a curved edge is as long folded as in the flat there, and only there.
+    #[test]
+    fn a_curved_edge_keeps_its_length_on_the_neutral_surface() {
+        for (name, lp) in curved_outlines() {
+            let mut s = plate(10.0, 10.0);
+            s.base = Region2 { outer: lp, holes: Vec::new() };
+            let t = s.t;
+            let mut warning = None;
+            let (a, b) = (Vec3::new(5.0, -200.0, t), Vec3::new(5.0, 200.0, t));
+            let i =
+                s.add_fold(a, b, std::f64::consts::FRAC_PI_2, 3.0, "centerline", false, None, &mut warning).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let zone = s.flanges[i].zone_shape.clone().unwrap_or_else(|| panic!("{name}: no exact zone"));
+            let neutral = t - s.k * t;
+            let mut edges = 0;
+            for e in zone.segs.iter().filter(|e| !matches!(zone_edge_kind(&s.flanges[i], e), ZoneEdge::Along)) {
+                edges += 1;
+                const N: usize = 400;
+                let at = |k: usize| e.point_at(k as f64 / N as f64);
+                let flat: f64 = (0..N).map(|k| at(k).dist(at(k + 1))).sum();
+                let folded = |z: f64| -> f64 { (0..N).map(|k| s.map3(Piece::Zone(i), at(k), z).dist(s.map3(Piece::Zone(i), at(k + 1), z))).sum() };
+                assert!((folded(neutral) - flat).abs() < 1e-3, "{name}: {} folded vs {flat} flat", folded(neutral));
+                // The test can tell: on the inside of the bend the edge is shorter.
+                assert!(flat - folded(t) > 0.05, "{name}: {} on the inside vs {flat} flat", folded(t));
+            }
+            assert!(edges >= 2, "{name}: {zone:?}");
+        }
+    }
+
+    #[test]
+    fn a_fold_across_an_outline_that_doesnt_pass_through_once_is_refused() {
+        let (n, d) = (Vec2::new(1.0, 0.0), Vec2::new(0.0, -1.0));
+        let v = |x: f64, y: f64| Vec2::new(x, y);
+        let circle = Loop2::circle(v(0.0, 0.0), 50.0);
+        // The zone reaches the tip: nothing lies past it, or short of it.
+        assert!(curved_fold(&circle, n, d, 49.0, 5.0).is_none());
+        assert!(curved_fold(&circle, n, d, -54.0, 5.0).is_none());
+        // Wholly off the sheet.
+        assert!(curved_fold(&circle, n, d, 60.0, 5.0).is_none());
+        // Two tabs on the line: the outline crosses the zone four times.
+        let tabs = Loop2::polygon(&[
+            v(-10.0, -30.0),
+            v(10.0, -30.0),
+            v(10.0, -5.0),
+            v(-10.0, -5.0),
+            v(-10.0, 5.0),
+            v(10.0, 5.0),
+            v(10.0, 30.0),
+            v(-10.0, 30.0),
+            v(-20.0, 30.0),
+            v(-20.0, -30.0),
+        ]);
+        assert!(curved_fold(&tabs, n, d, -2.0, 4.0).is_none());
+        // An edge square across the bend, along the zone's line.
+        let along = Loop2::polygon(&[v(-10.0, -10.0), v(2.0, -10.0), v(2.0, 10.0), v(-10.0, 10.0)]);
+        assert!(curved_fold(&along, n, d, -2.0, 4.0).is_none());
+        // Numbers that aren't.
+        assert!(curved_fold(&circle, n, d, f64::NAN, 5.0).is_none());
+        assert!(curved_fold(&Loop2 { segs: Vec::new() }, n, d, 0.0, 5.0).is_none());
+    }
+
+    #[test]
+    fn a_fold_zone_with_straight_ends_is_told_from_a_curved_or_cornered_one() {
+        let (n, d) = (Vec2::new(1.0, 0.0), Vec2::new(0.0, 1.0));
+        let zone = |pts: &[(f64, f64)]| slanted_zone(&pts.iter().map(|&(x, y)| Vec2::new(x, y)).collect::<Vec<_>>(), n, d, 0.0, 4.0);
+        // Narrowing, widening, leaning one way, and square at one end.
+        assert_eq!(zone(&[(0.0, 0.0), (4.0, 1.0), (4.0, 9.0), (0.0, 10.0)]), Some((0.0, 10.0, (-1.0, -1.0), (true, true))));
+        assert_eq!(zone(&[(0.0, 1.0), (4.0, 0.0), (4.0, 10.0), (0.0, 9.0)]), Some((1.0, 9.0, (1.0, 1.0), (true, true))));
+        assert_eq!(zone(&[(0.0, 0.0), (4.0, 2.0), (4.0, 12.0), (0.0, 10.0)]), Some((0.0, 10.0, (-2.0, 2.0), (true, true))));
+        assert_eq!(zone(&[(0.0, 0.0), (4.0, 0.0), (4.0, 9.0), (0.0, 10.0)]), Some((0.0, 10.0, (0.0, -1.0), (false, true))));
+        // An S across the zone encloses what the straight end would: its corners give it away.
+        assert_eq!(zone(&[(0.0, 0.0), (4.0, 1.0), (4.0, 9.0), (2.0, 10.0), (2.0, 9.0), (0.0, 10.0)]), None);
+        // A curved end, as a polyline.
+        assert_eq!(zone(&[(0.0, 0.0), (4.0, 0.0), (4.0, 9.0), (3.0, 9.8), (1.0, 9.8), (0.0, 9.0)]), None);
+        // Nothing to bend across: the zone comes to a point on either line, or isn't there.
+        assert_eq!(zone(&[(0.0, 0.0), (4.0, 5.0), (0.0, 10.0)]), None);
+        assert_eq!(zone(&[(0.0, 5.0), (4.0, 0.0), (4.0, 10.0)]), None);
+        assert_eq!(zone(&[]), None);
+        assert_eq!(zone(&[(f64::NAN, 0.0), (4.0, 0.0), (4.0, 10.0), (0.0, 10.0)]), None);
     }
 
     #[test]
