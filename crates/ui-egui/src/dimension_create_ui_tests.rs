@@ -864,6 +864,101 @@ fn type_first_keeps_the_place_first_flow() {
     crate::dim_view::cancel();
 }
 
+/// Put the value field's caret at `at` with nothing selected, as the field itself does when it
+/// misses the keyboard for a frame (a WebView2 showed the caret before the value, #11204).
+fn caret_without_the_person(h: &Harness, at: usize) {
+    let id = egui::Id::new("sc_dim_edit");
+    let mut state = egui::TextEdit::load_state(&h.ctx, id).unwrap_or_default();
+    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(at))));
+    state.store(&h.ctx, id);
+}
+
+/// A primary click at sketch point `at`, the button held down for `frames` frames.
+fn held_click(h: &mut Harness, at: [f64; 2], frames: usize) {
+    h.step(&json!({"move":{"world":[at[0],at[1],0]}})).unwrap();
+    let [x, y] = h.at(&json!({"world":[at[0],at[1],0]})).unwrap();
+    let pos = egui::pos2(x as f32, y as f32);
+    let (button, modifiers) = (egui::PointerButton::Primary, egui::Modifiers::NONE);
+    h.app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: true, modifiers });
+    h.frames(frames);
+    h.app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: false, modifiers });
+    h.settle();
+}
+
+/// The value field's caret and selection end (characters).
+fn caret(h: &Harness) -> Option<(usize, usize)> {
+    egui::TextEdit::load_state(&h.ctx, egui::Id::new("sc_dim_edit"))
+        .and_then(|s| s.cursor.char_range())
+        .map(|r| (r.primary.index.0, r.secondary.index.0))
+}
+
+/// Until the person takes the proposed value over, the first digit they type replaces all of
+/// it (#11204): however long the click that placed it was held, frames later, and whatever moved
+/// the caret without them. Typed without Ctrl+A, as a person does.
+#[test]
+fn typed_digits_replace_the_proposed_value_whatever_moved_the_caret() {
+    for held in [1usize, 4, 12] {
+        let mut h = sketch_with(&[("sketch.line", json!({"points":[[0,0],[20,0]],"infer":false}))], [10., 0.]);
+        let dims = dimension_count(&h);
+        h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+        assert_live(&h);
+        // A click held `held` frames: what a person's 60 to 150 ms click is at 60 Hz and beyond.
+        held_click(&mut h, [10., -7.], held);
+        assert_eq!(crate::dim_view::live(), None, "held {held}: the text is pinned");
+        h.frames(12);
+        caret_without_the_person(&h, 0);
+        h.frames(2);
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")), "held {held}");
+        keys(&mut h, "400");
+        assert_eq!(crate::dim_view::draft_preview().map(|d| d.0).as_deref(), Some("400"), "held {held}");
+        h.step(&json!({"key":"Enter"})).unwrap();
+        let new = added(&h, dims);
+        assert_eq!(new.len(), 1, "held {held}");
+        assert!((new[0].kind.value().unwrap() - 400.).abs() < 1e-6, "held {held}: {:?}", new[0].kind);
+        crate::dim_view::cancel();
+    }
+}
+
+/// A caret the person put somewhere stays there: Home then 1 writes in front of the value, and a
+/// click into the field types where it landed (#11204).
+#[test]
+fn a_caret_the_person_moved_stays_where_they_put_it() {
+    let mut h = sketch_with(&[("sketch.line", json!({"points":[[0,0],[20,0]],"infer":false}))], [10., 0.]);
+    let dims = dimension_count(&h);
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    assert_live(&h);
+    h.step(&json!({"click":{"world":[10,-7,0]}})).unwrap();
+    h.frames(4);
+    h.step(&json!({"key":"Home"})).unwrap();
+    h.frames(4);
+    assert_eq!(caret(&h), Some((0, 0)), "Home put the caret before the value");
+    keys(&mut h, "1");
+    h.frames(4);
+    assert_eq!(caret(&h), Some((1, 1)), "the caret stays after what was typed");
+    assert_eq!(crate::dim_view::draft_preview().map(|d| d.0).as_deref(), Some("120 mm"));
+    h.step(&json!({"key":"Enter"})).unwrap();
+    let new = added(&h, dims);
+    assert_eq!(new.len(), 1);
+    assert!((new[0].kind.value().unwrap() - 120.).abs() < 1e-6, "{:?}", new[0].kind);
+    crate::dim_view::cancel();
+
+    // A click into the field puts the caret where it landed: typing goes there.
+    let mut h = sketch_with(&[("sketch.line", json!({"points":[[0,0],[20,0]],"infer":false}))], [10., 0.]);
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    h.step(&json!({"click":{"world":[10,-7,0]}})).unwrap();
+    h.frames(4);
+    let [x, y] = h.widget("20 mm").expect("the value field");
+    h.step(&json!({"click":[x, y]})).unwrap();
+    h.frames(4);
+    assert!(crate::dim_view::editing(), "a click into the field keeps the value open");
+    let placed = caret(&h);
+    assert!(placed.is_some_and(|(a, b)| a == b), "the click placed a caret: {placed:?}");
+    keys(&mut h, "4");
+    let expr = crate::dim_view::draft_preview().map(|d| d.0).unwrap_or_default();
+    assert!(expr.len() == "20 mm4".len() && expr.contains('4') && expr != "4", "typing went in at the click, not over the value: {expr:?}");
+    crate::dim_view::cancel();
+}
+
 /// Type-first, the text follows the pointer: moving it from inside the box the picks span (the
 /// distance between them) to above or beside it switches to the horizontal or vertical distance and
 /// back. Until something is typed the value follows the dimension, so the preview measures the

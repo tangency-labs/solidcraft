@@ -57,6 +57,13 @@ struct Edit {
     /// dimension, and its text follows the pointer until a click pins it or Enter places it.
     live: Option<Live>,
     selection: Option<egui::text::CCursorRange>,
+    /// The person took the value over: typed into it, pressed a key in it, inserted a completion
+    /// or a reference, or pressed into the field. Until then every frame starts with the whole
+    /// value selected, so the first key replaces it whatever else moved the caret (#11204).
+    owned: bool,
+    /// Where the box sat last frame: a press only takes the value over once the box stayed put
+    /// under it, so the click that placed or pinned the value does not.
+    shown: Option<Pos2>,
     /// The last dimension a click referenced, and when: the second click of a double-click on
     /// it must not insert its name again.
     picked: Option<(String, f64)>,
@@ -167,6 +174,8 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
             draft: Some(draft),
             live: None,
             selection: None,
+            owned: false,
+            shown: None,
             picked: None,
             sketch: None,
             driven: None,
@@ -199,6 +208,8 @@ pub fn begin_live(app: &mut SolveApp, entities: Vec<String>, pointer: Option<Pos
             draft: Some(draft),
             live,
             selection: None,
+            owned: false,
+            shown: None,
             picked: None,
             sketch: None,
             driven: None,
@@ -242,6 +253,7 @@ fn move_text(app: &SolveApp, e: &mut Edit, at: Vec2) {
         if expr != e.expr {
             // Keep the new value selected, so typing still replaces it.
             e.fresh = FRESH;
+            e.owned = false;
         }
         (e.param, e.expr, *draft) = (param, expr, redone);
         return;
@@ -428,6 +440,8 @@ pub fn model_double_click(app: &mut SolveApp, pos: Pos2) -> bool {
             draft: None,
             live: None,
             selection: None,
+            owned: false,
+            shown: None,
             picked: None,
             sketch: Some(d.sketch),
             driven: None,
@@ -527,6 +541,8 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
             draft: None,
             live: None,
             selection: None,
+            owned: false,
+            shown: None,
             picked: None,
             sketch: None,
             driven,
@@ -863,6 +879,8 @@ pub fn edit_param(app: &SolveApp, param: &str) {
             draft: None,
             live: None,
             selection: None,
+            owned: false,
+            shown: None,
             picked: None,
             sketch: None,
             driven: None,
@@ -912,6 +930,7 @@ fn insert_reference(ctx: &egui::Context, edit: &mut Edit, name: &str) {
     state.store(ctx, id);
     ctx.memory_mut(|m| m.request_focus(id));
     edit.fresh = FRESH - 1;
+    edit.owned = true;
     if let Some(live) = edit.live.as_mut() {
         live.typed = true;
     }
@@ -999,7 +1018,26 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                 ui.set_max_width(popup_width);
                 crate::ui_kit::text(ui, &crate::i18n::format("dialog.dimension_name", &[("name", &e.param)]), crate::ui_kit::Text::Inline)
                     .on_hover_text(crate::i18n::tr("dialog.dimension_insert_hint"));
+                if !e.owned {
+                    // The whole value is selected before the field reads its state, every frame
+                    // until the person takes it over, so typing replaces it (#11204). Only on the
+                    // first frame was not enough: a frame without the keyboard collapses the
+                    // field's selection to its caret, and the first digit went in beside the value.
+                    let n = e.expr.chars().count();
+                    let mut s = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
+                    s.cursor.set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
+                    e.selection = s.cursor.char_range();
+                    s.store(ui.ctx(), id);
+                    // A key this frame acts on the whole value (a digit replaces it, Home puts the
+                    // caret before it); from then on the caret is the person's.
+                    let focused = ui.memory(|m| m.has_focus(id));
+                    e.owned = focused && ui.input(|i| i.events.iter().any(|ev| matches!(ev, egui::Event::Key { pressed: true, .. })));
+                }
                 let r = crate::ui_kit::cell_editor(ui, id, &mut e.expr, "", false);
+                // A press into the field puts the caret where it landed; not the press that placed
+                // or pinned the value, which began before the box sat there.
+                let settled = e.shown == Some(anchor);
+                e.owned |= settled && r.hovered() && ui.input(|i| i.pointer.any_pressed());
                 crate::theme::TabAccent::number_focus(ui, &r);
                 if r.has_focus() {
                     e.selection = egui::TextEdit::load_state(ctx, id).and_then(|s| s.cursor.char_range());
@@ -1011,16 +1049,9 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                 if let Some(live) = e.live.as_mut() {
                     live.typed |= r.changed() || completed;
                 }
+                e.owned |= r.changed() || completed;
                 if let Some(error) = e.draft.as_ref().and_then(|d| d.error.as_ref()) {
                     crate::ui_kit::text(ui, error, crate::ui_kit::Text::Report("dimension_error", true));
-                }
-                if e.fresh == FRESH {
-                    // The whole value is selected, so typing replaces it.
-                    let n = e.expr.chars().count();
-                    let mut s = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
-                    s.cursor.set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
-                    e.selection = s.cursor.char_range();
-                    s.store(ui.ctx(), id);
                 }
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                 if r.lost_focus() && enter {
@@ -1041,6 +1072,7 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
         });
     });
     e.fresh = e.fresh.saturating_sub(1);
+    e.shown = Some(anchor);
     match done {
         Some(true) => {
             let result = if let Some(draft) = &e.draft {
@@ -1059,7 +1091,8 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
             match result {
                 Err(err) => {
                     app.set_status(err, true);
-                    EDIT.with(|x| *x.borrow_mut() = Some(Edit { fresh: FRESH, ..e }));
+                    // The value is selected again, so typing replaces it.
+                    EDIT.with(|x| *x.borrow_mut() = Some(Edit { fresh: FRESH, owned: false, ..e }));
                 }
                 Ok(reply) => {
                     clear_picks(app);
