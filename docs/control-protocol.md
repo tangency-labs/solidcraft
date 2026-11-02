@@ -505,6 +505,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `placement_handles` (default false: handles on the preview of a Rest, Boss or Snap Fit that move it across the model and turn it)
 - `print_face_highlight` (0…1, default 0.2: how strongly a print face is tinted and outlined in the view, #8429; 0 draws no highlight)
 - `quick_measure` (default false: the selection's length, area or distance in the view's bottom right corner, the rect `measure:quick`; #7000)
+- `ribbon_motion` (default true: changing ribbon tabs slides the tab highlight to the new tab over 0.25 s, dimmed on the way, and cross-fades the panels over 0.2 s, the new tab's drifting in from its side as the old tab's fade out; false: both swap at once, as before; the handle `ribbon:highlight` is the highlight's rect)
 - `ribbon_reveal` (default false: hovering a result in Search commands switches the ribbon to the command's tab and marks its button, or opens the panel drop-down that holds it on its row, handle `ribbon:reveal`; leaving the results goes back to the tab before; a command started from the search blinks there, and a running command from a drop-down marks its panel label, `ribbon:running_section:<TAB>:<SECTION>`, #7287)
 - `right_drag_orbits` (default true; false: a right drag the mouse preset would orbit leaves the camera alone, #6492)
 - `select_other_hidden` (default true: Select Other includes hidden geometry near the pointer; false restores the original visible-only list under the pointer)

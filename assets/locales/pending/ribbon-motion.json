@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.ribbon_motion": "Animate ribbon tab changes",
+    "prefs.ribbon_motion_note": "Changing tabs slides the highlight to the new tab and fades its tools in from that side as the old ones fade out. Turn off to switch at once."
+  },
+  "ar": {
+    "prefs.ribbon_motion": "تحريك التبديل بين تبويبات الشريط",
+    "prefs.ribbon_motion_note": "عند تغيير التبويب ينزلق التمييز إلى التبويب الجديد وتظهر أدواته تدريجيًا من جهته بينما تتلاشى الأدوات السابقة. أوقفه للتبديل فورًا."
+  },
+  "de": {
+    "prefs.ribbon_motion": "Registerkartenwechsel im Menüband animieren",
+    "prefs.ribbon_motion_note": "Beim Wechsel der Registerkarte gleitet die Markierung zur neuen Registerkarte, und ihre Werkzeuge werden von dieser Seite eingeblendet, während die alten ausgeblendet werden. Ausschalten, um sofort zu wechseln."
+  },
+  "he": {
+    "prefs.ribbon_motion": "הנפשת מעבר בין לשוניות ברצועה",
+    "prefs.ribbon_motion_note": "במעבר בין לשוניות, ההדגשה מחליקה אל הלשונית החדשה והכלים שלה מופיעים בהדרגה מאותו צד בזמן שהכלים הקודמים נמוגים. כבו כדי לעבור מיד."
+  },
+  "ja": {
+    "prefs.ribbon_motion": "リボンのタブ切り替えをアニメーション表示",
+    "prefs.ribbon_motion_note": "タブを切り替えると、強調表示が新しいタブへ滑るように移り、そのツールがその方向からフェードインし、前のツールはフェードアウトします。オフにするとすぐに切り替わります。"
+  },
+  "ko": {
+    "prefs.ribbon_motion": "리본 탭 전환 애니메이션",
+    "prefs.ribbon_motion_note": "탭을 바꾸면 강조 표시가 새 탭으로 미끄러지듯 옮겨지고, 새 탭의 도구가 그쪽에서 서서히 나타나며 이전 도구는 서서히 사라집니다. 끄면 바로 전환됩니다."
+  },
+  "vi": {
+    "prefs.ribbon_motion": "Hiệu ứng khi đổi thẻ trên thanh công cụ",
+    "prefs.ribbon_motion_note": "Khi đổi thẻ, phần tô sáng trượt sang thẻ mới và các công cụ của thẻ đó hiện dần từ phía ấy trong khi công cụ cũ mờ đi. Tắt để chuyển ngay lập tức."
+  },
+  "zh": {
+    "prefs.ribbon_motion": "功能区选项卡切换动画",
+    "prefs.ribbon_motion_note": "切换选项卡时，高亮滑向新选项卡，新选项卡的工具从该侧淡入，旧工具同时淡出。关闭后立即切换。"
+  }
+}
