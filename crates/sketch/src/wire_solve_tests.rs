@@ -582,3 +582,23 @@ fn an_angle_stalled_beside_a_solved_distance_is_still_turned() {
     let w = at(&sk, &format!("{b}.end"));
     assert!((w.len() - 700.0).abs() < 1e-6 && (w.dot(dir) / w.len() - 40f64.to_radians().cos()).abs() < 1e-9, "{w:?}");
 }
+
+#[test]
+fn an_angle_beside_a_length_solves_at_building_scale() {
+    // Lines 1 to 20 m long, a hair off parallel, the free one also holding its length.
+    for l in [1000.0f64, 5000.0, 20000.0] {
+        let mut sk = Sketch::new();
+        let a = line(&mut sk, v(0.0, 0.0, 0.0), v(l, 0.0, 0.0));
+        let b = line(&mut sk, v(0.0, l / 2.0, 0.0), v(l, l / 2.0, 1e-10 * l));
+        fix_all(&mut sk, &format!("{a}.start"));
+        fix_all(&mut sk, &format!("{a}.end"));
+        fix_all(&mut sk, &format!("{b}.start"));
+        let (s, e) = (sk.wire_point(&format!("{b}.start")).unwrap(), sk.wire_point(&format!("{b}.end")).unwrap());
+        sk.add_wire_dimension(WireConstraintKind::Distance { a: s, b: e, value: l }, None, false).unwrap();
+        let k = angle(&mut sk, &a, &b, 50.0);
+        let rep = sk.solve_wires(None);
+        assert!(rep.ok, "{l}: {rep:?}");
+        let kind = sk.wire_constraints.iter().find(|c| c.id == k).unwrap().kind.clone();
+        assert!((sk.measure_wire_dimension(&kind).unwrap() - 50f64.to_radians()).abs() < 1e-9, "{l}");
+    }
+}
