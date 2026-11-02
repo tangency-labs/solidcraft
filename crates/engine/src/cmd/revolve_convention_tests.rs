@@ -342,6 +342,45 @@ fn construction_axis_revolve_follows_the_axis() {
     assert!((volume(&s) - 80.0 * PI).abs() < 0.05, "{}", volume(&s));
 }
 
+/// The two vertical sides of one rectangle are different axes. A two-point rectangle numbers
+/// the max-x side and the min-x side separately; a 120° revolve about each must contain a point
+/// swept about that side and not the point swept about the other (#7452).
+#[test]
+fn rectangle_revolve_about_its_right_edge_differs_from_its_left() {
+    for (axis_x, sample_x) in [(30.0, 10.5), (10.0, 29.5)] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"name": "Profile", "plane": "XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 0], "p1": [30, 10]}));
+        let id = vertical_line(&s, axis_x);
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.revolve", json!({"sketch": "Profile", "axis": id, "angle": "120 deg", "operation": "new"}));
+        let body = &s.model.state().bodies[0].body;
+        let on_edge = lift_xy(axis_x, sample_x);
+        let on_other = lift_xy(if axis_x > 20.0 { 10.0 } else { 30.0 }, if sample_x < 20.0 { 29.5 } else { 10.5 });
+        assert!(body.contains(on_edge), "axis x={axis_x} ({id}) should contain {on_edge:?}");
+        assert!(!body.contains(on_other), "axis x={axis_x} ({id}) should not contain the other edge's probe {on_other:?}");
+    }
+}
+
+fn vertical_line(s: &Session, x: f64) -> String {
+    let sk = s.doc.sketch(s.active_sketch.expect("sketch")).expect("sketch");
+    sk.curves
+        .iter()
+        .find_map(|c| {
+            let solidcraft_sketch::CurveKind::Line { a, b } = c.kind else { return None };
+            let (pa, pb) = (sk.point(a)?, sk.point(b)?);
+            ((pa.x - x).abs() < 1e-9 && (pb.x - x).abs() < 1e-9).then(|| c.id.clone())
+        })
+        .unwrap_or_else(|| panic!("no vertical line at x={x}"))
+}
+
+/// `(point_x, 5, 0)` rotated 80° about `x = axis_x` toward +Z, the sketch-normal sense on XY.
+fn lift_xy(axis_x: f64, point_x: f64) -> Vec3 {
+    let dx = point_x - axis_x;
+    let t = 80.0_f64.to_radians();
+    Vec3::new(axis_x + dx * t.cos(), 5.0, dx.abs() * t.sin())
+}
+
 #[test]
 fn construction_axis_revolve_rejects_invalid_axes_atomically() {
     for (a, b, message) in [

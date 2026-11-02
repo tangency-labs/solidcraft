@@ -4503,13 +4503,17 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::Revolve { angle, operation, axis: stored_axis } => {
             need(0, "profiles")?;
+            let (sketch, idx) = profiles();
+            // A sketch line is kept by id only when that id on the profile sketch is the
+            // highlighted line. Ids repeat across sketches (#3726); the highlight and the angle
+            // handle follow the pick's sketch, and a bare id would revolve about whatever line
+            // the profile sketch happens to number the same.
             let axis = match sels(d, 1).first() {
                 Some(Sel::Axis { name }) => json!(name),
-                Some(Sel::SketchCurve { id, .. }) => json!(id),
+                Some(curve @ Sel::SketchCurve { .. }) => sketch_curve_axis(app, curve, sketch.as_u64())?,
                 Some(x) => axis_param(app, x)?,
                 None => stored_axis.clone().ok_or("select an axis")?,
             };
-            let (sketch, idx) = profiles();
             let mut p = json!({"axis": axis, "angle": angle, "operation": OPS.get(*operation).copied().unwrap_or("new")});
             // A planar body face revolves like a profile (#2747); profiles win when both are picked.
             let face = sels(d, 0).iter().find_map(|x| match x {
@@ -5414,6 +5418,48 @@ pub(crate) fn takes_as_axis(s: &Session, sel: &Sel) -> bool {
         Sel::Face { .. } => round_axis(s, sel).is_some(),
         _ => true,
     }
+}
+
+/// A sketch curve picked as a revolve axis.
+///
+/// The highlight and the angle handle follow [`axis_of`] (the sketch the pick names, or the
+/// active sketch when it does not). Eval resolves a bare curve id on the profile sketch, and
+/// curve ids repeat from sketch to sketch (#3726), so that line can be a different edge — often
+/// the opposite side of a rectangle. Keep the id when the profile sketch's line is the
+/// highlighted one, so a same-sketch axis stays a sketch line. Otherwise pass the highlighted
+/// line as `{origin, dir}` in world coordinates (the command stores it in the component frame).
+/// A face profile has no sketch yet — its generated sketch numbers edges from `l1` again — so
+/// that pick is always the geometric line.
+pub(crate) fn sketch_curve_axis(app: &SolveApp, sel: &Sel, profile_sketch: Option<u64>) -> Result<Value, String> {
+    let Sel::SketchCurve { id, .. } = sel else { return axis_param(app, sel) };
+    let (origin, dir) = axis_of(app, sel).ok_or(AXIS_PICK)?;
+    if !origin.is_finite() || !dir.is_finite() {
+        return Err(AXIS_PICK.into());
+    }
+    let same = profile_sketch.and_then(|sketch| profile_axis_line(app, sketch, id)).is_some_and(|line| same_axis(line, (origin, dir)));
+    if same { Ok(json!(id)) } else { Ok(json!({"origin": pt(origin), "dir": pt(dir)})) }
+}
+
+/// The world line of curve `id` on `sketch`, when that curve is a line.
+fn profile_axis_line(app: &SolveApp, sketch: u64, id: &str) -> Option<(Vec3, Vec3)> {
+    let st = app.session.world_state();
+    let ss = st.sketch(sketch)?;
+    let c = ss.sketch.curves.get(ss.sketch.curve_index(id)?)?;
+    let solidcraft_engine::sketch::CurveKind::Line { a, b } = c.kind else { return None };
+    let pa = ss.plane.to_world(ss.sketch.point(a)?);
+    let pb = ss.plane.to_world(ss.sketch.point(b)?);
+    let dir = (pb - pa).normalized()?;
+    (pa.is_finite() && dir.is_finite()).then_some((pa, dir))
+}
+
+/// Whether two world lines are the same axis: parallel, and no gap between them.
+fn same_axis((o1, d1): (Vec3, Vec3), (o2, d2): (Vec3, Vec3)) -> bool {
+    let (Some(d1), Some(d2)) = (d1.normalized(), d2.normalized()) else { return false };
+    if d1.dot(d2).abs() <= 1.0 - 1e-9 {
+        return false;
+    }
+    let sep = (o2 - o1).cross(d1).len();
+    sep <= 1e-6 * (1.0 + o1.len() + o2.len())
 }
 
 /// An axis input's pick as a command's `axis`: a world axis or construction axis by name, a
