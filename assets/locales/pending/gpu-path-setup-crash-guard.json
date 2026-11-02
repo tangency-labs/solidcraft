@@ -1,0 +1,34 @@
+{
+  "en": {
+    "render.gpu_path_crashed": "SolidCraft closed while setting it up on this graphics adapter last time, most likely inside the graphics driver, so it is not set up again by itself. Choose CPU ray tracing instead, or try again (a driver update also tries again).",
+    "render.gpu_path_retry": "Try again"
+  },
+  "ar": {
+    "render.gpu_path_crashed": "أُغلق SolidCraft أثناء إعداده على محوّل الرسوميات هذا في المرة السابقة، على الأرجح داخل برنامج تشغيل الرسوميات، لذا لن يُعاد إعداده تلقائيًا. استخدم تتبع الأشعة على المعالج المركزي بدلًا منه، أو حاول مرة أخرى (يعيد تحديث برنامج التشغيل المحاولة أيضًا).",
+    "render.gpu_path_retry": "حاول مرة أخرى"
+  },
+  "de": {
+    "render.gpu_path_crashed": "SolidCraft wurde beim letzten Einrichten auf diesem Grafikadapter beendet, wahrscheinlich im Grafiktreiber, und richtet ihn deshalb nicht von selbst erneut ein. Verwenden Sie stattdessen Raytracing auf der CPU oder versuchen Sie es erneut (nach einem Treiberupdate wird es ebenfalls erneut versucht).",
+    "render.gpu_path_retry": "Erneut versuchen"
+  },
+  "fr": {
+    "render.gpu_path_crashed": "SolidCraft s’est fermé pendant sa dernière préparation sur cet adaptateur graphique, très probablement dans le pilote graphique ; il n’est donc plus préparé de lui-même. Utilisez le lancer de rayons sur le CPU, ou réessayez (une mise à jour du pilote réessaie aussi).",
+    "render.gpu_path_retry": "Réessayer"
+  },
+  "he": {
+    "render.gpu_path_crashed": "SolidCraft נסגר בזמן ההכנה על מתאם גרפי זה בפעם הקודמת, ככל הנראה בתוך מנהל ההתקן הגרפי, ולכן ההכנה לא תתבצע שוב מעצמה. יש להשתמש במעקב קרניים על המעבד במקום זאת, או לנסות שוב (עדכון מנהל ההתקן גם מנסה שוב).",
+    "render.gpu_path_retry": "לנסות שוב"
+  },
+  "ja": {
+    "render.gpu_path_crashed": "前回このグラフィックアダプターでの準備中に SolidCraft が終了しました。グラフィックドライバー内で終了した可能性が高いため、自動では再度準備しません。代わりに CPU レイトレーシングを使うか、もう一度試してください（ドライバーを更新した場合も再試行されます）。",
+    "render.gpu_path_retry": "もう一度試す"
+  },
+  "vi": {
+    "render.gpu_path_crashed": "Lần trước SolidCraft đã đóng khi đang thiết lập nó trên bộ điều hợp đồ họa này, nhiều khả năng là trong trình điều khiển đồ họa, nên nó sẽ không tự thiết lập lại. Hãy dùng dò tia trên CPU, hoặc thử lại (cập nhật trình điều khiển cũng sẽ thử lại).",
+    "render.gpu_path_retry": "Thử lại"
+  },
+  "zh": {
+    "render.gpu_path_crashed": "上次在此图形适配器上设置时 SolidCraft 关闭了，很可能是在图形驱动程序内部，因此不会再自动设置。请改用 CPU 光线追踪，或重试（更新驱动程序后也会重试）。",
+    "render.gpu_path_retry": "重试"
+  }
+}

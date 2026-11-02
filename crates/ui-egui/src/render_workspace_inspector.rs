@@ -1726,7 +1726,7 @@ fn reveal_section(app: &mut SolveApp, ui: &mut egui::Ui, section: &'static str) 
     }
 }
 
-fn gpu_status(app: &SolveApp, ui: &mut egui::Ui) {
+fn gpu_status(app: &mut SolveApp, ui: &mut egui::Ui) {
     if app.render_workspace.view.method != ImageMethod::GpuRaytrace {
         return;
     }
@@ -1734,6 +1734,7 @@ fn gpu_status(app: &SolveApp, ui: &mut egui::Ui) {
         super::PathHost::Preparing(_, started) => super::setup_progress(ui, app, *started),
         super::PathHost::Failed(error) => {
             ui_kit::text(ui, &format!("{}: {error}", app.tr("render.gpu_path_failed")), ui_kit::Text::Error("render.gpu_path_failed"));
+            super::retry_crashed_setup(app, ui);
         }
         super::PathHost::NotStarted => {
             ui_kit::text(ui, app.tr("render.gpu_unavailable"), ui_kit::Text::Note("render.gpu_unavailable"));
