@@ -6085,6 +6085,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                         .and_then(|ss| ss.sketch.points.iter().find(|p| p.id == id).map(|p| ss.plane.to_world(p.pos)))
                         .unwrap_or(position.0);
                     if let Some(inp) = d.inputs.first_mut() {
+                        // Editing a Single hole places it at exactly one point: a pick replaces.
+                        inp.multi = false;
                         inp.items = vec![face_sel(s, at).unwrap_or(Sel::Face { body: String::new(), index: 0, point: at })];
                     }
                     d.extra.insert("direction".into(), pt3(direction.0));
@@ -6106,6 +6108,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     // when the pick is still that point (a moved face drops them for numbers).
                     let on_face = solidcraft_engine::doc::hole_on_surface(&s.world_state(), position.0, direction.0, &[]);
                     if let Some(inp) = d.inputs.first_mut() {
+                        // Editing a Single hole places it at exactly one point: a pick replaces.
+                        inp.multi = false;
                         inp.items = vec![face_sel(s, on_face).unwrap_or(Sel::Face { body: String::new(), index: 0, point: on_face })];
                     }
                     d.extra.insert("direction".into(), pt3(direction.0));
