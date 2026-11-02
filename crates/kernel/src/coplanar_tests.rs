@@ -154,3 +154,31 @@ fn trimming_at_a_plane_with_nothing_beyond_it() {
     assert!((measure(&same).unwrap().volume - measured).abs() < measured * 1e-9);
     assert!(crate::coplanar::trim_exact(&dome, -Vec3::Z, 5.0).is_err());
 }
+
+/// A tapered pocket-shaped tool (49.5 x 40 at its top, its sides leaning in by 30 degrees down to
+/// 15 below) whose top lies in the face the rib stands on, 0.5 short of the rib. Pushed up out of
+/// that plane, its leaning sides stay on their planes and carry it past its top's outline, into
+/// the rib: the intersection used to keep a wedge of the rib above the tool (#423). It is the
+/// tool, all of it below the plane, and the guard refuses the wedge.
+#[test]
+fn an_intersection_keeps_nothing_beyond_the_face_its_tool_was_pushed_out_of() {
+    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    let target = ribbed();
+    let plane = Plane::new(Vec3::new(0.0, 0.0, 20.0), Vec3::X, Vec3::Y).unwrap();
+    let outline = Loop2::polygon(&[Vec2::new(40.0, 30.0), Vec2::new(89.5, 30.0), Vec2::new(89.5, 70.0), Vec2::new(40.0, 70.0)]);
+    let (h, t) = (15.0, 30f64.to_radians().tan());
+    let tool = extrude_tapered(&plane, &Region2 { outer: outline, holes: vec![] }, h, -1.0, -30f64.to_radians()).unwrap();
+    let expected = 49.5 * 40.0 * h - (49.5 + 40.0) * t * h * h + 4.0 * t * t * h.powi(3) / 3.0;
+    let r = crate::coplanar::boolean_apart(&target, &tool, BoolOp::Intersect).expect("the faces are pushed").unwrap().unwrap();
+    let v = measure(&r).unwrap().volume;
+    assert!((v - expected).abs() < 1e-2, "{v} against {expected}");
+    assert_eq!(r.lumps().unwrap().len(), 1);
+    assert!(r.validity().is_empty(), "{:?}", r.validity());
+    let top = r.tessellate(0.05).unwrap().positions.iter().map(|p| p.z).fold(f64::MIN, f64::max);
+    assert!(top < 20.0 + 1e-6, "the intersection reaches up to z = {top}");
+    // What the pushed tool alone takes: the wedge of the rib too, which the guard refuses.
+    let pushed = crate::coplanar::push_faces(&tool, Vec3::Z, 20.0, target.size().max(tool.size()) * 0.0229).unwrap();
+    let wedged = boolean(&target, &pushed, BoolOp::Intersect).unwrap().unwrap();
+    assert!(crate::boolean_guard::check_retry(&target, &tool, BoolOp::Intersect, Some(&wedged)).is_err());
+    assert!(crate::boolean_guard::check_retry(&target, &tool, BoolOp::Intersect, Some(&r)).is_ok());
+}

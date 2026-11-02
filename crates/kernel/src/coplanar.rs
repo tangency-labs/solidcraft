@@ -21,6 +21,12 @@
 //! (`backed`), the others on the other body's faces (see [`crate::clearance`]). A face with
 //! no room stays where it is and the boolean fails with [`NO_ROOM`], for the strategies that
 //! take the bodies as they lie.
+//!
+//! The space a face is asked about is the prism over the face. A face whose neighbours lean is
+//! moved without stretching them (they keep their planes), so the tool also grows past the
+//! prism, beside the face: an intersection there would take the target's material beyond the
+//! tool's face. An intersection is therefore cut back to every plane its tool's faces were
+//! pushed out of, and refused when its tool reaches past one of those planes elsewhere (#423).
 
 use std::collections::HashMap;
 
@@ -717,6 +723,12 @@ fn move_out(x: &Body, n: Vec3, d: f64, delta: f64, grow: bool) -> Result<(Body, 
     }
 }
 
+/// Does `body` reach past the plane (n, d) by more than `skin` (measured on a mesh of `chord`)?
+fn reaches_past(body: &Body, n: Vec3, d: f64, chord: f64, skin: f64) -> Result<bool> {
+    let mesh = body.tessellate_with(chord, true)?;
+    Ok(mesh.positions.iter().any(|p| n.dot(*p) - d > skin))
+}
+
 /// A box covering everything beyond the plane (n, d) by up to `depth`.
 fn slab_beyond(n: Vec3, d: f64, depth: f64, extent: f64) -> Result<Body> {
     let u = n.any_perp();
@@ -841,6 +853,11 @@ fn apart_with(a: &Body, b: &Body, op: BoolOp, grow: bool) -> Option<Result<Optio
         let (mut ha, mut hb) = (crate::boolean_record::kept(a, 0, 1), crate::boolean_record::kept(b, 0, 1));
         for (n, d) in &same {
             // b's face points along n too.
+            // An intersection is cut back to the plane afterwards, which holds only for a tool that
+            // lies wholly on its own side of it.
+            if op == BoolOp::Intersect && reaches_past(b, *n, *d, chord, skin)? {
+                return Err(KernelError::Failed("an intersection's tool reaches past the plane of a face that would be pushed".into()));
+            }
             let free = if op == BoolOp::Union {
                 // Both faces move out and the slab beyond the plane is cut off the joined body
                 // again, everywhere: neither body may have anything in it.
@@ -895,7 +912,18 @@ fn apart_with(a: &Body, b: &Body, op: BoolOp, grow: bool) -> Option<Result<Optio
         // The pushed bodies' histories as over [a, b], a's and b's in their places.
         let (ha, hb) = (crate::boolean_record::placed(ha, 0, 2), crate::boolean_record::placed(hb, 1, 2));
         let mut h = crate::boolean_record::of_pair(&r, &ha, &hb);
-        if op == BoolOp::Union && grow {
+        if op == BoolOp::Intersect {
+            // The tool lies on its side of each plane its faces were pushed out of, so whatever
+            // the intersection has beyond one came with the push: it is cut off by editing faces
+            // (a cut along the plane would run along the face the intersection has in it). A
+            // trim that can't be made refuses the result rather than keep it (#423).
+            for (n, d) in &same {
+                if reaches_past(&r, *n, *d, chord, skin)? {
+                    r = trim_exact(&r, *n, *d)?;
+                    h = None;
+                }
+            }
+        } else if op == BoolOp::Union && grow {
             // What grown faces left beyond each plane is cut off by editing the faces: a cut along the plane would run along the
             // edges where the grown faces meet their neighbours, which the mesh intersection cannot take.
             for (n, d) in &same {
