@@ -323,12 +323,15 @@ pub struct Move3dResult {
     pub param_warnings: Vec<String>,
 }
 
-/// An axis of the sketch's 3D space.
+/// An axis of the sketch's 3D space: `x`, `y` or `z` (either case).
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AxisName {
+    #[serde(alias = "X")]
     X,
+    #[serde(alias = "Y")]
     Y,
+    #[serde(alias = "Z")]
     Z,
 }
 
@@ -362,17 +365,26 @@ pub struct AlongAxisResult {
     pub param_warnings: Vec<String>,
 }
 
-/// An origin plane of the sketch's 3D space: `xy`, `yz` or `xz` (either case, either order, as
+/// An origin plane of the sketch's 3D space: `xy`, `yz` or `xz` (any case, either order, as
 /// Parallel takes them).
-#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PlaneName {
-    #[serde(alias = "XY", alias = "yx", alias = "YX")]
     Xy,
-    #[serde(alias = "YZ", alias = "zy", alias = "ZY")]
     Yz,
-    #[serde(alias = "XZ", alias = "zx", alias = "ZX")]
     Xz,
+}
+
+impl<'de> Deserialize<'de> for PlaneName {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let name = String::deserialize(d)?;
+        match solidcraft_sketch::OriginPlane::from_name(&name) {
+            Some(solidcraft_sketch::OriginPlane::Xy) => Ok(PlaneName::Xy),
+            Some(solidcraft_sketch::OriginPlane::Yz) => Ok(PlaneName::Yz),
+            Some(solidcraft_sketch::OriginPlane::Xz) => Ok(PlaneName::Xz),
+            None => Err(serde::de::Error::custom("`plane` must be xy, yz or xz")),
+        }
+    }
 }
 
 /// Hold 3D points on an origin plane.
