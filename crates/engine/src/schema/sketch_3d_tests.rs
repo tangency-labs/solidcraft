@@ -1,8 +1,8 @@
 use serde_json::{Value, json};
 
 use super::{
-    AlongAxisParams, AlongAxisResult, Arc3dParams, Curves3dResult, Line3dParams, Move3dParams, Move3dResult, Point3dParams, Point3dResult,
-    Spline3dParams,
+    AlongAxisParams, AlongAxisResult, Arc3dParams, Curves3dResult, Line3dParams, Move3dParams, Move3dResult, OnPlaneParams, OnPlaneResult,
+    Point3dParams, Point3dResult, Spline3dParams,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -291,6 +291,7 @@ fn the_check_names_what_is_wrong_with_a_key() {
 #[test]
 fn along_axis_schema_and_the_key_check_agree() {
     assert_keys(input_schema_for::<AlongAxisParams>(), &["axis", "line", "lines", "sketch"]);
+    assert_keys(input_schema_for::<OnPlaneParams>(), &["plane", "point", "points", "sketch"]);
 }
 
 #[test]
@@ -300,6 +301,9 @@ fn along_axis_strict_keeps_todays_errors() {
         ("sketch.constraint.along_axis", json!({"line": "w1", "axis": "w"})),
         ("sketch.constraint.along_axis", json!({"line": 5, "axis": "x"})),
         ("sketch.constraint.along_axis", json!({"axis": "x"})),
+        ("sketch.constraint.on_plane", json!({"point": "q1"})),
+        ("sketch.constraint.on_plane", json!({"point": "q1", "plane": "xw"})),
+        ("sketch.constraint.on_plane", json!({"plane": "xy"})),
     ]);
 }
 
@@ -313,5 +317,18 @@ fn along_axis_reply_matches_its_schema() {
     let line = l["curves"][0].as_str().unwrap_or_else(|| panic!("{l}")).to_string();
     let r = run(&mut s, "sketch.constraint.along_axis", json!({"line": line, "axis": "x"}));
     let schema = output_schema_for::<AlongAxisResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &r), "{r}");
+}
+
+#[test]
+fn on_plane_reply_matches_its_schema() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let run = |s: &mut Session, id: &str, p: serde_json::Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let q = run(&mut s, "sketch.point3d", json!({"point": [1, 2, 3]}));
+    let point = q["point"].as_str().unwrap_or_else(|| panic!("{q}")).to_string();
+    let r = run(&mut s, "sketch.constraint.on_plane", json!({"point": point, "plane": "xy"}));
+    let schema = output_schema_for::<OnPlaneResult>();
     assert!(conforms(schema.as_value(), schema.as_value(), &r), "{r}");
 }
