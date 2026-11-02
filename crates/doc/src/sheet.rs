@@ -3078,7 +3078,11 @@ impl SheetBody {
                 return Err("the gap would cut a panel away".into());
             }
         }
-        // The flat pattern must stay one sheet without overlaps.
+        // The flat pattern must stay one sheet without overlaps: closing must not make the two
+        // overlap, nor add to what either already overlaps of another flange. A flange can lie
+        // over another one in the flat away from this corner (the walls on either side of a
+        // notch's inner corner both unfold into the notch, and a return on one of them lies over
+        // the other), and the corner is still closed then (#8823).
         let [new_a, new_b] = new;
         let pieces = |s: &SheetBody, f: &SheetFlange| {
             let mut v = vec![corners_of(&s.zone(f))];
@@ -3088,13 +3092,19 @@ impl SheetBody {
             v
         };
         let mine = [pieces(self, &new_a), pieces(self, &new_b)];
+        let was = [pieces(self, &fa), pieces(self, &fb)];
         let overlap = |p: &[Vec<Vec2>], q: &[Vec<Vec2>]| p.iter().any(|a| q.iter().any(|b| pieces_overlap(a, b)));
+        let shared = |p: &[Vec<Vec2>], q: &[Vec<Vec2>]| p.iter().map(|a| q.iter().map(|b| convex_overlap(a, b)).sum::<f64>()).sum::<f64>();
+        let perimeter =
+            |p: &[Vec<Vec2>]| p.iter().flat_map(|c| (0..c.len()).filter_map(move |i| Some(c.get(i)?.dist(*c.get((i + 1) % c.len())?)))).sum::<f64>();
         let [mine_a, mine_b] = &mine;
         let clash = overlap(mine_a, mine_b)
             || self.flanges.iter().enumerate().any(|(j, g)| {
                 j != k.a && j != k.b && g.shape.is_none() && {
                     let other = pieces(self, g);
-                    mine.iter().any(|p| overlap(p, &other))
+                    mine.iter().zip(&was).any(|(p, q)| {
+                        overlap(p, &other) && shared(p, &other) > shared(q, &other) + FLAT_SLIVER * perimeter(p).max(perimeter(&other)).max(1.0)
+                    })
                 }
             });
         if clash {
