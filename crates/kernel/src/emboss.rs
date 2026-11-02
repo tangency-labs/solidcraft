@@ -246,10 +246,13 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
             return Err(fail("depth reaches the axis or inner wall"));
         }
         if let Some(at) = anchor {
+            // A full cylinder is several half-faces of one surface, and the checks above leave a
+            // single exterior wall radius between the two endcaps, so any point on that surface
+            // and between the caps names the same logical wall. The pick may be on the half the
+            // sketch is not tangent to (#3425); an endcap or inner-wall point still fails.
             let h = (at - o).dot(axis);
             let v = at - o - axis * h;
-            let theta = angle(at, o, axis, radial, tangent);
-            if (v.len() - r).abs() > tol * 10.0 || theta <= alo + tol / r || theta >= ahi - tol / r || h <= lo + tol || h >= hi - tol {
+            if (v.len() - r).abs() > tol * 10.0 || h <= lo + tol || h >= hi - tol {
                 return Err(fail("saved selection no longer identifies the sketch's cylindrical face"));
             }
         }
@@ -744,7 +747,8 @@ mod tests {
         ] {
             assert!(emboss_cylinder(&sleeve, &plane(), &profiles, d).is_err());
         }
-        assert!(emboss_cylinder_at(&sleeve, -Vec3::Y * 10. + Vec3::Z * 7.5, &plane(), &[profile()], 1.).is_err());
+        assert!(emboss_cylinder_at(&sleeve, -Vec3::Y * 8. + Vec3::Z * 7.5, &plane(), &[profile()], 1.).is_err());
+        assert!(emboss_cylinder_at(&sleeve, -Vec3::Y * 10. + Vec3::Z * 20., &plane(), &[profile()], 1.).is_err());
         assert_eq!(crate::step_export(&[&sleeve], "unchanged").unwrap(), before);
     }
 }
