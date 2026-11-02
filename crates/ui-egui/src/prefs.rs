@@ -1574,8 +1574,9 @@ preference_settings! {
     /// glyphs and dimensions are red, in `error`, as before.
     sketch_conflict_colour: bool = true, PAGE_SKETCH => check_id("prefs.sketch_conflict_colour");
     /// Hide constraint glyphs when the sketch is zoomed out so far that a millimetre of the plane
-    /// is smaller than `sketch_tools::MIN_GLYPH_PX_PER_MM` on screen (#8980). Off: glyphs stay at a
-    /// fixed screen size at every zoom, as before.
+    /// is smaller than `sketch_tools::MIN_GLYPH_PX_PER_MM` on screen (#8980) and the glyphs span
+    /// less than `sketch_tools::MIN_GLYPH_SPAN_PX` (#10518). Off: glyphs stay at a fixed screen
+    /// size at every zoom, as before.
     hide_constraint_glyphs_zoomed_out: bool = true, PAGE_SKETCH => check_id("prefs.hide_constraint_glyphs_zoomed_out");
     /// Drive Joints shows the moved parts' old place as a ghost (its Show ghost box, #5905).
     drive_joints_ghost: bool = true, PAGE_TOOLS;

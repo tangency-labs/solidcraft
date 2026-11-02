@@ -1642,9 +1642,28 @@ const GLYPH: f32 = 15.0;
 /// a 10 mm feature is then smaller than a glyph.
 pub const MIN_GLYPH_PX_PER_MM: f32 = 2.0;
 
-/// Whether constraint glyphs should draw at this sketch-plane scale (#8980).
-pub fn constraint_glyphs_visible_at_scale(px_per_mm: f32, hide_when_zoomed_out: bool) -> bool {
-    !hide_when_zoomed_out || px_per_mm >= MIN_GLYPH_PX_PER_MM
+/// Below `MIN_GLYPH_PX_PER_MM`, glyphs still draw while their anchors span at least this many
+/// screen pixels (the larger side of their bounds), twenty glyphs across (#10518): a large sketch
+/// that still fills the view keeps its glyphs; a small one far away loses them, as before.
+pub const MIN_GLYPH_SPAN_PX: f32 = 20.0 * GLYPH;
+
+/// Whether constraint glyphs should draw at this sketch-plane scale (#8980), given how far apart
+/// their anchors are on screen (`span_px`, only measured when zoomed out, #10518).
+pub fn constraint_glyphs_visible_at_scale(px_per_mm: f32, hide_when_zoomed_out: bool, span_px: impl FnOnce() -> f32) -> bool {
+    !hide_when_zoomed_out || px_per_mm >= MIN_GLYPH_PX_PER_MM || span_px() >= MIN_GLYPH_SPAN_PX
+}
+
+/// The larger side, in screen pixels, of the bounds of the active sketch's glyph anchors.
+fn glyph_span_px(ss: &solidcraft_engine::doc::SolvedSketch, proj: &Proj) -> f32 {
+    let mut r = egui::Rect::NOTHING;
+    for c in ss.sketch.constraints.iter().filter(|c| !c.kind.is_dimension()) {
+        for (at, _) in glyph_anchors(&ss.sketch, &c.kind) {
+            if let Some(p) = proj.to_screen(ss.plane.to_world(at)) {
+                r.extend_with(p);
+            }
+        }
+    }
+    if r.min.x <= r.max.x { r.width().max(r.height()) } else { 0.0 }
 }
 
 /// Pixels on screen for one millimetre along the sketch plane's U axis, near the plane origin.
@@ -1662,9 +1681,10 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
         GLYPHS.with(|g| g.borrow_mut().clear());
         return;
     }
-    // Zoomed out far enough: fixed-size glyphs would dominate the sketch (#8980).
+    // Zoomed out far enough: fixed-size glyphs would dominate the sketch (#8980), unless the
+    // sketch still spreads them across the view (#10518).
     if let Some(scale) = sketch_px_per_mm(&ss.plane, proj)
-        && !constraint_glyphs_visible_at_scale(scale, app.preferences.hide_constraint_glyphs_zoomed_out)
+        && !constraint_glyphs_visible_at_scale(scale, app.preferences.hide_constraint_glyphs_zoomed_out, || glyph_span_px(ss, proj))
     {
         GLYPHS.with(|g| g.borrow_mut().clear());
         return;
@@ -1926,24 +1946,38 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
 
 #[cfg(test)]
 mod glyph_zoom_tests {
-    use super::{MIN_GLYPH_PX_PER_MM, constraint_glyphs_visible_at_scale};
+    use super::{MIN_GLYPH_PX_PER_MM, MIN_GLYPH_SPAN_PX, constraint_glyphs_visible_at_scale};
+
+    /// A sketch whose glyph anchors sit close together on screen.
+    fn small() -> f32 {
+        40.0
+    }
 
     #[test]
     fn glyphs_stay_visible_when_zoomed_in() {
-        assert!(constraint_glyphs_visible_at_scale(MIN_GLYPH_PX_PER_MM, true));
-        assert!(constraint_glyphs_visible_at_scale(10.0, true));
+        assert!(constraint_glyphs_visible_at_scale(MIN_GLYPH_PX_PER_MM, true, small));
+        assert!(constraint_glyphs_visible_at_scale(10.0, true, small));
     }
 
     #[test]
     fn glyphs_hide_below_the_zoom_threshold() {
-        assert!(!constraint_glyphs_visible_at_scale(MIN_GLYPH_PX_PER_MM - f32::EPSILON, true));
-        assert!(!constraint_glyphs_visible_at_scale(0.5, true));
+        assert!(!constraint_glyphs_visible_at_scale(MIN_GLYPH_PX_PER_MM - f32::EPSILON, true, small));
+        assert!(!constraint_glyphs_visible_at_scale(0.5, true, small));
+        assert!(!constraint_glyphs_visible_at_scale(0.5, true, || MIN_GLYPH_SPAN_PX - 1.0));
     }
 
     #[test]
     fn preference_off_keeps_glyphs_at_every_zoom() {
-        assert!(constraint_glyphs_visible_at_scale(0.1, false));
-        assert!(constraint_glyphs_visible_at_scale(MIN_GLYPH_PX_PER_MM - 1.0, false));
+        assert!(constraint_glyphs_visible_at_scale(0.1, false, small));
+        assert!(constraint_glyphs_visible_at_scale(MIN_GLYPH_PX_PER_MM - 1.0, false, small));
+    }
+
+    /// A 500 mm sketch zoomed to fit is below two pixels a millimetre yet fills the view: its
+    /// glyphs stay (#10518).
+    #[test]
+    fn glyphs_stay_while_a_large_sketch_fills_the_view() {
+        assert!(constraint_glyphs_visible_at_scale(1.5, true, || 500.0 * 1.5));
+        assert!(constraint_glyphs_visible_at_scale(0.05, true, || MIN_GLYPH_SPAN_PX));
     }
 }
 
