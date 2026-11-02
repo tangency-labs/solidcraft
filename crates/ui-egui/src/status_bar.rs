@@ -41,14 +41,14 @@ pub(crate) enum SketchState {
 
 impl SketchState {
     pub(crate) fn of(ss: &solidcraft_engine::doc::SolvedSketch) -> SketchState {
-        if !ss.report.ok() {
+        if !ss.report.shown_ok() {
             SketchState::Conflict
         } else if !crate::sketch_palette::has_geometry(&ss.sketch) {
             SketchState::Empty
-        } else if ss.report.dof == 0 {
+        } else if ss.report.shown_dof() == 0 {
             SketchState::Full
         } else {
-            SketchState::Under(ss.report.dof)
+            SketchState::Under(ss.report.shown_dof())
         }
     }
 
