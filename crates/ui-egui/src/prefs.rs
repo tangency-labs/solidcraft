@@ -338,7 +338,7 @@ pub const PAGE_PLUGINS: usize = 11;
 pub const PARAMETER_LIST_ROWS: std::ops::RangeInclusive<u16> = 5..=200;
 const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
     ui_kit::WindowPage {
-        icon: "settings",
+        icon: "prefs_general",
         label: "ui.general",
         group: None,
         handle: "prefs:page:General",
@@ -346,7 +346,7 @@ const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
         draw: window_page::<PAGE_GENERAL>,
     },
     ui_kit::WindowPage {
-        icon: "settings_palette",
+        icon: "prefs_appearance",
         label: "prefs.structure.appearance",
         group: Some("prefs.structure.look"),
         handle: "prefs:page:Appearance",
@@ -354,7 +354,7 @@ const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
         draw: window_page::<PAGE_APPEARANCE>,
     },
     ui_kit::WindowPage {
-        icon: "settings_monitor",
+        icon: "prefs_layout",
         label: "prefs.structure.layout",
         group: None,
         handle: "prefs:page:Layout",
@@ -362,7 +362,7 @@ const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
         draw: window_page::<PAGE_LAYOUT>,
     },
     ui_kit::WindowPage {
-        icon: "settings_monitor",
+        icon: "prefs_graphics",
         label: "ui.graphics",
         group: None,
         handle: "prefs:page:Graphics",
@@ -370,7 +370,7 @@ const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
         draw: window_page::<PAGE_GRAPHICS>,
     },
     ui_kit::WindowPage {
-        icon: "ws_design",
+        icon: "prefs_design",
         label: "ui.design",
         group: Some("prefs.structure.work"),
         handle: "prefs:page:Design",
@@ -378,7 +378,7 @@ const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
         draw: window_page::<PAGE_DESIGN>,
     },
     ui_kit::WindowPage {
-        icon: "sketch",
+        icon: "prefs_sketch",
         label: "prefs.structure.sketch",
         group: None,
         handle: "prefs:page:Sketch",
@@ -386,7 +386,7 @@ const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
         draw: window_page::<PAGE_SKETCH>,
     },
     ui_kit::WindowPage {
-        icon: "settings",
+        icon: "prefs_tools",
         label: "prefs.structure.tools",
         group: None,
         handle: "prefs:page:Tools",
@@ -394,7 +394,7 @@ const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
         draw: window_page::<PAGE_TOOLS>,
     },
     ui_kit::WindowPage {
-        icon: "settings_mouse",
+        icon: "prefs_navigation",
         label: "ui.navigation",
         group: Some("prefs.input"),
         handle: "prefs:page:Navigation",
@@ -402,7 +402,7 @@ const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
         draw: window_page::<PAGE_NAVIGATION>,
     },
     ui_kit::WindowPage {
-        icon: "settings_mouse",
+        icon: "prefs_mouse3d",
         label: "prefs.structure.mouse3d",
         group: None,
         handle: "prefs:page:3D mouse",
@@ -410,7 +410,7 @@ const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
         draw: window_page::<PAGE_MOUSE3D>,
     },
     ui_kit::WindowPage {
-        icon: "settings_keyboard",
+        icon: "prefs_shortcuts",
         label: "prefs.shortcuts",
         group: None,
         handle: "prefs:page:Shortcuts",
@@ -418,7 +418,7 @@ const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
         draw: window_page::<PAGE_SHORTCUTS>,
     },
     ui_kit::WindowPage {
-        icon: "assistant",
+        icon: "prefs_assistant",
         label: "prefs.assistant",
         group: Some("prefs.extend"),
         handle: "prefs:page:Assistant",
@@ -426,7 +426,7 @@ const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
         draw: window_page::<PAGE_ASSISTANT>,
     },
     ui_kit::WindowPage {
-        icon: "settings_plug",
+        icon: "prefs_plugins",
         label: "ui.plugins",
         group: None,
         handle: "prefs:page:Plugins",
