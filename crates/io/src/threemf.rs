@@ -365,22 +365,37 @@ pub fn write_3mf(objects: &[MeshObject]) -> Result<Vec<u8>> {
 
 /// A 3MF package of meshes with model metadata (see [`model_xml_with`]).
 pub fn write_3mf_with(objects: &[MeshObject], metadata: &[(&str, &str)]) -> Result<Vec<u8>> {
-    write_3mf_parts(objects, &[], metadata)
+    write_3mf_parts(objects, &[], metadata, None)
 }
 
-/// A 3MF package of meshes, some of them written as objects with parts (see [`model_xml_parts`]).
-pub fn write_3mf_parts(objects: &[MeshObject], parts: &[(String, Vec<usize>)], metadata: &[(&str, &str)]) -> Result<Vec<u8>> {
+/// A 3MF package of meshes, some of them written as objects with parts (see [`model_xml_parts`]),
+/// with `thumbnail` (a PNG) as the package thumbnail that file managers and slicers show.
+pub fn write_3mf_parts(
+    objects: &[MeshObject],
+    parts: &[(String, Vec<usize>)],
+    metadata: &[(&str, &str)],
+    thumbnail: Option<&[u8]>,
+) -> Result<Vec<u8>> {
     if objects.is_empty() {
         return Err(IoError::Empty);
     }
-    let content_types = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">\n <Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>\n <Default Extension=\"model\" ContentType=\"application/vnd.ms-package.3dmanufacturing-3dmodel+xml\"/>\n</Types>\n";
+    let (png_type, thumbnail_rel) = match thumbnail {
+        Some(_) => (
+            " <Default Extension=\"png\" ContentType=\"image/png\"/>\n",
+            " <Relationship Target=\"/Metadata/thumbnail.png\" Id=\"rel1\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail\"/>\n",
+        ),
+        None => ("", ""),
+    };
+    let content_types = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">\n <Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>\n <Default Extension=\"model\" ContentType=\"application/vnd.ms-package.3dmanufacturing-3dmodel+xml\"/>\n{png_type}</Types>\n"
+    );
     let rels = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n <Relationship Target=\"/3D/3dmodel.model\" Id=\"rel0\" Type=\"{MODEL_REL}\"/>\n</Relationships>\n"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n <Relationship Target=\"/3D/3dmodel.model\" Id=\"rel0\" Type=\"{MODEL_REL}\"/>\n{thumbnail_rel}</Relationships>\n"
     );
     let model = model_xml_parts(objects, parts, metadata);
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
-    for (name, data) in [("[Content_Types].xml", content_types.as_bytes()), ("_rels/.rels", rels.as_bytes()), ("3D/3dmodel.model", model.as_bytes())]
-    {
+    let package = [("[Content_Types].xml", content_types.as_bytes()), ("_rels/.rels", rels.as_bytes()), ("3D/3dmodel.model", model.as_bytes())];
+    for (name, data) in package.into_iter().chain(thumbnail.map(|png| ("Metadata/thumbnail.png", png))) {
         let opts = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated)
             .last_modified_time(zip::DateTime::default())
@@ -1006,6 +1021,30 @@ pub(crate) mod tests {
         }
     }
 
+    /// #9449: a thumbnail is the package's standard thumbnail part, so file managers show it;
+    /// without one the package has only the model.
+    #[test]
+    fn a_thumbnail_is_the_package_thumbnail() {
+        let png: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+        let bytes = write_3mf_parts(&[tetra("Cube")], &[], &[], Some(png)).unwrap();
+        let mut zip = zip::ZipArchive::new(Cursor::new(bytes.as_slice())).unwrap();
+        assert_eq!(read_part(&mut zip, "Metadata/thumbnail.png").unwrap().as_deref(), Some(png));
+        let rels = String::from_utf8(read_part(&mut zip, "_rels/.rels").unwrap().unwrap()).unwrap();
+        assert!(
+            rels.contains(
+                r#"Target="/Metadata/thumbnail.png" Id="rel1" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail""#
+            ),
+            "{rels}"
+        );
+        let types = String::from_utf8(read_part(&mut zip, "[Content_Types].xml").unwrap().unwrap()).unwrap();
+        assert!(types.contains(r#"<Default Extension="png" ContentType="image/png"/>"#), "{types}");
+        let (read, warnings) = read_3mf(&bytes).unwrap();
+        assert!(warnings.is_empty() && read.len() == 1, "{warnings:?}");
+
+        let plain = write_3mf_parts(&[tetra("Cube")], &[], &[], None).unwrap();
+        assert_eq!(zip::ZipArchive::new(Cursor::new(plain.as_slice())).unwrap().len(), 3);
+    }
+
     /// #8139: objects in a part are written once as meshes and built once, as one object whose
     /// components are those meshes; the others are built on their own, as before. Read back, the
     /// part is one object named after it, with every triangle of its meshes.
@@ -1019,7 +1058,7 @@ pub(crate) mod tests {
         let build = x.split("<build>").nth(1).unwrap_or_default();
         assert_eq!(build.matches("<item ").count(), 2, "{x}");
         assert!(build.contains("objectid=\"4\"") && build.contains("objectid=\"5\""), "{x}");
-        let (read, warnings) = read_3mf(&write_3mf_parts(&objects, &[("Bracket:1".into(), vec![0, 1])], &[]).unwrap()).unwrap();
+        let (read, warnings) = read_3mf(&write_3mf_parts(&objects, &[("Bracket:1".into(), vec![0, 1])], &[], None).unwrap()).unwrap();
         assert!(warnings.is_empty(), "{warnings:?}");
         let names: Vec<&str> = read.iter().map(|o| o.name.as_str()).collect();
         assert_eq!(names, ["Loose", "Bracket:1"]);

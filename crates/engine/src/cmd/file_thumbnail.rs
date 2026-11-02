@@ -4,15 +4,42 @@ use solidcraft_geom::Aabb3;
 use solidcraft_render::{Camera, Rgb, Scene, SceneMesh, StandardView};
 
 pub(super) fn saved(s: &Session) -> Option<Vec<u8>> {
-    let (scene, camera) = scene(s)?;
+    let (scene, camera) = scene(s, HOME_ZOOM)?;
     let [width, height] = solidcraft_io::THUMBNAIL_SIZE;
     // Drawn by the renderer the host installed (the GPU); none installed, no thumbnail.
     let renderer = crate::capture::installed()?;
     crate::capture::png_with(Some(&*renderer), &scene, &camera, u32::try_from(width).ok()?, u32::try_from(height).ok()?).ok().map(|p| p.bytes)
 }
 
-/// What the thumbnail shows: the shown bodies' warm display meshes in their colours, iso, fitted.
-fn scene(s: &Session) -> Option<(Scene, Camera)> {
+/// How close the Home picture comes: its frame is wider than tall, so the fit leaves room at the sides.
+const HOME_ZOOM: f64 = 0.7;
+
+/// The side of a mesh export's square thumbnail, as slicers write theirs.
+const EXPORT_SIZE: u32 = 512;
+
+/// A mesh export's thumbnail: the same scene, fitted whole into a square, on a transparent background.
+pub(super) fn exported(s: &Session) -> Option<Vec<u8>> {
+    let (mut scene, camera) = scene(s, 1.0)?;
+    let renderer = crate::capture::installed()?;
+    let rgba = transparent(&*renderer, &mut scene, &camera, EXPORT_SIZE)?;
+    solidcraft_render::png(EXPORT_SIZE as usize, EXPORT_SIZE as usize, rgba)
+}
+
+/// `scene` drawn over black and over white, unblended to straight RGBA.
+fn transparent(renderer: &crate::capture::Renderer, scene: &mut Scene, camera: &Camera, size: u32) -> Option<Vec<u8>> {
+    let mut draw = |backdrop: Rgb| {
+        scene.background = Some((backdrop, backdrop));
+        crate::capture::rgba_with(Some(renderer), scene, camera, size, size).ok().map(|p| p.rgba)
+    };
+    let over_black = draw(Rgb(0, 0, 0))?;
+    let mut over_white = draw(Rgb(255, 255, 255))?;
+    solidcraft_render::unblend(&mut over_white, &over_black);
+    Some(over_white)
+}
+
+/// What the thumbnail shows: the shown bodies' warm display meshes in their colours, iso, fitted
+/// with the distance scaled by `zoom`.
+fn scene(s: &Session, zoom: f64) -> Option<(Scene, Camera)> {
     if s.active_sketch.is_some() || !s.pending_moves.is_empty() || s.model.results.iter().any(|r| r.error.is_some()) {
         return None;
     }
@@ -45,7 +72,7 @@ fn scene(s: &Session) -> Option<(Scene, Camera)> {
     let mut camera = Camera::default();
     camera.set_view(StandardView::Iso);
     camera.fit(&bounds);
-    camera.distance *= 0.7;
+    camera.distance *= zoom;
     scene.radius = (bounds.diagonal() * 0.5).max(camera.half_height()).max(10.);
     scene.background = Some((crate::view::colors::BG_TOP, crate::view::colors::BG_BOTTOM));
     Some((scene, camera))
@@ -66,7 +93,7 @@ mod tests {
         for body in &world.bodies {
             body.mesh();
         }
-        assert_eq!(scene(&session).unwrap().0.meshes.len(), 1, "the hidden body is not in the picture");
+        assert_eq!(scene(&session, HOME_ZOOM).unwrap().0.meshes.len(), 1, "the hidden body is not in the picture");
         let expected = saved(&session).unwrap();
         let bytes = session.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
         let doc = solidcraft_io::read_design(&bytes).unwrap();
@@ -109,7 +136,29 @@ mod tests {
         for body in &session.world_state().bodies {
             body.mesh();
         }
-        let (scene, camera) = scene(&session).unwrap();
+        let (scene, camera) = scene(&session, HOME_ZOOM).unwrap();
         assert!(crate::capture::png_with(None, &scene, &camera, 240, 150).is_err());
+    }
+
+    /// #9449: a mesh export's thumbnail keeps the part and drops the background, as a slicer's does.
+    #[test]
+    fn an_export_thumbnail_has_a_transparent_background() {
+        let mut session = Session::default();
+        session.execute("solid.box", &serde_json::json!({"length":10,"width":20,"height":30})).unwrap();
+        for body in &session.world_state().bodies {
+            body.mesh();
+        }
+        let (mut scene, camera) = scene(&session, 1.0).unwrap();
+        // The backdrop everywhere but the first pixel, which is the part in mid grey.
+        let renderer = |scene: &Scene, _: &Camera, w: u32, h: u32| {
+            let (Rgb(r, g, b), _) = scene.background.unwrap();
+            let mut rgba: Vec<u8> = [r, g, b, 255].repeat((w * h) as usize);
+            rgba[..4].copy_from_slice(&[128, 128, 128, 255]);
+            Ok(crate::capture::Picture { rgba, renderer: "gpu" })
+        };
+        let rgba = transparent(&renderer, &mut scene, &camera, 4).unwrap();
+        assert_eq!(rgba.len(), 4 * 4 * 4);
+        assert_eq!(rgba[..4], [128, 128, 128, 255], "the part stays opaque");
+        assert!(rgba[4..].chunks(4).all(|pixel| pixel[3] == 0), "the background is transparent");
     }
 }
