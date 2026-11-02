@@ -67,6 +67,13 @@ fn ring(n: usize) -> Loop2 {
     Loop2 { segs: (0..n).map(|i| Seg2::Line { a: at(i), b: at(i + 1) }).collect() }
 }
 
+/// Text isn't cut by a clip yet.
+#[test]
+fn text_in_a_clipped_object_is_refused() {
+    let clipped = Scene { clips: vec![(1, crate::paper::Clip::Circle { center: p(20.0, 30.0), radius: 2.0 })], ..scene(vec![run()], vec![font()]) };
+    assert_eq!(clipped.prepare().unwrap_err().0, "not supported yet: text in a clipped object (#4890 A8)");
+}
+
 /// An edit of the run and its font, for a list of them.
 fn e(edit: impl FnOnce(&mut TextRun, &mut Font) + 'static) -> Box<dyn FnOnce(&mut TextRun, &mut Font)> {
     Box::new(edit)

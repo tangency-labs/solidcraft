@@ -1,6 +1,6 @@
 //! Clips (#4890 A8): an object's items cut to its [`Clip`], a rectangle or a circle, keeping what
 //! lies inside. [`Scene::prepare`](super::Scene::prepare) does it once, before any
-//! writer, so every writer draws the same clip-free groups.
+//! writer, so every writer draws the same cut lines and fills.
 //!
 //! - Each piece of a stroke is cut where it crosses the clip's edge, and a part is kept when its
 //!   middle is inside; on the edge, within [`EPS`], counts as inside. A line or an arc is cut where
@@ -19,11 +19,14 @@
 //! - A fill wholly inside is kept and one wholly outside is dropped, an edge along the clip's (within
 //!   [`EPS`]) being on either side; one that crosses the edge, or lies round the whole clip, isn't
 //!   supported yet.
+//! - A picture wholly outside is dropped. Pixels aren't geometry, so one crossing the edge stays
+//!   whole here, and [`GridItem::Picture`](super::grid::GridItem::Picture) gives its writer the clip
+//!   to cut it at. Text isn't supported yet.
 
 use std::f64::consts::TAU;
 
 use super::{Clip, Dashes, Group, Invalid, Item, Result, meet};
-use crate::{EPS, Region2, Seg2, Vec2};
+use crate::{Aabb2, EPS, Region2, Seg2, Vec2};
 
 /// How closely a curve's crossing of a clip's edge is found: the span of its last part's control
 /// points, in millimetres.
@@ -34,7 +37,7 @@ pub const MAX_HALVINGS: usize = 1 << 12;
 
 impl Clip {
     /// Whether `p` is inside, or on the edge within [`EPS`].
-    fn holds(&self, p: Vec2) -> bool {
+    pub fn holds(&self, p: Vec2) -> bool {
         self.depth(p) >= -EPS
     }
 
@@ -44,6 +47,27 @@ impl Clip {
             Clip::Rect { min, max } => (p.x - min.x).min(max.x - p.x).min(p.y - min.y).min(max.y - p.y),
             Clip::Circle { center, radius } => radius - p.dist(center),
         }
+    }
+
+    /// The box round it.
+    pub fn bounds(&self) -> Aabb2 {
+        match *self {
+            Clip::Rect { min, max } => Aabb2 { min, max },
+            Clip::Circle { center, radius } => Aabb2 { min: center - Vec2::new(radius, radius), max: center + Vec2::new(radius, radius) },
+        }
+    }
+
+    /// Whether any of `rect` is inside: its point nearest a circle's centre is.
+    fn meets(&self, rect: &Aabb2) -> bool {
+        match *self {
+            Clip::Rect { .. } => self.bounds().meets(rect),
+            Clip::Circle { center, .. } => self.holds(Vec2::new(center.x.clamp(rect.min.x, rect.max.x), center.y.clamp(rect.min.y, rect.max.y))),
+        }
+    }
+
+    /// Whether all of `rect` is inside: both shapes are convex, so its corners say.
+    pub(super) fn holds_all(&self, rect: &Aabb2) -> bool {
+        [rect.min, Vec2::new(rect.max.x, rect.min.y), rect.max, Vec2::new(rect.min.x, rect.max.y)].into_iter().all(|corner| self.holds(corner))
     }
 
     /// A point inside.
@@ -214,7 +238,12 @@ pub(super) fn clipped(group: &Group, clip: &Clip) -> Result<Group> {
                     items.push(item.clone());
                 }
             }
-            Item::Text(_) | Item::Picture(_) => return Err(Invalid("not supported yet: text or a picture in a clipped object (#4890 A8)")),
+            Item::Text(_) => return Err(Invalid("not supported yet: text in a clipped object (#4890 A8)")),
+            Item::Picture(picture) => {
+                if clip.meets(&picture.rect) {
+                    items.push(item.clone());
+                }
+            }
         }
     }
     Ok(Group { object: group.object, kind: group.kind, items })

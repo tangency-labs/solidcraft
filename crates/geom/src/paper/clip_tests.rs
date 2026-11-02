@@ -526,12 +526,56 @@ fn clips_are_part_of_the_scene() {
     assert!(scene.validate().is_err(), "validate checks them too");
 }
 
-/// Pictures aren't cut: a clipped object with one is refused, never drawn past its clip.
+/// Pictures aren't cut here: one wholly outside its object's clip is dropped, and one meeting it is
+/// kept whole, with the clip handed on to its writer.
 #[test]
-fn a_picture_in_a_clipped_object_is_refused() {
-    let rect = crate::Aabb2 { min: p(0.0, 0.0), max: p(10.0, 10.0) };
-    let items = vec![Item::Picture(crate::paper::Picture { source: 1, rect, opacity: 1.0 })];
-    let scene = Scene::new(p(420.0, 297.0), vec![Group { object: 1, kind: ObjectKind::View, items }]);
-    let e = groups_cut(&scene, &[(1, Clip::Circle { center: p(5.0, 5.0), radius: 2.0 })]).unwrap_err();
-    assert!(e.0.contains("not supported yet"), "{}", e.0);
+fn a_picture_is_dropped_or_handed_on_with_the_clip_it_crosses() {
+    let picture = crate::paper::Picture { source: 1, rect: crate::Aabb2 { min: p(0.0, 0.0), max: p(10.0, 10.0) }, opacity: 1.0 };
+    let scene = Scene::new(p(420.0, 297.0), vec![Group { object: 1, kind: ObjectKind::View, items: vec![Item::Picture(picture)] }]);
+    let circle = |x: f64, y: f64, radius: f64| Clip::Circle { center: p(x, y), radius };
+    // The corners of the 10 mm square are 7.0711 mm from its middle; (13, 13) is 4.2426 mm from its
+    // corner, whose box the 4 mm circle's box overlaps though the disc doesn't reach it.
+    let cases = [
+        (rect(2.0, 2.0, 8.0, 8.0), Some(true)),
+        (rect(5.0, -5.0, 15.0, 5.0), Some(true)),
+        (rect(0.0, 0.0, 10.0, 10.0), Some(false)),
+        (rect(-1.0, -1.0, 11.0, 11.0), Some(false)),
+        (rect(20.0, 0.0, 30.0, 10.0), None),
+        (circle(5.0, 5.0, 2.0), Some(true)),
+        (circle(5.0, 5.0, 7.0), Some(true)),
+        (circle(5.0, 5.0, 7.1), Some(false)),
+        // Holding two opposite corners and a third, but not (10, 0), 11.3 mm away.
+        (circle(2.0, 8.0, 9.0), Some(true)),
+        (circle(13.0, 13.0, 4.0), None),
+        (circle(13.0, 13.0, 4.3), Some(true)),
+    ];
+    for (clip, expected) in cases {
+        let clipped = Scene { clips: vec![(1, clip)], ..scene.clone() };
+        let on = clipped.prepare().unwrap().on_grid(crate::paper::grid::Grid::NANOMETRE).unwrap();
+        let got = on.groups[0].items.first().map(|item| match item {
+            crate::paper::grid::GridItem::Picture { picture: drawn, clip: handed, .. } => {
+                assert_eq!(*drawn, picture, "the picture stays whole: {clip:?}");
+                assert!(handed.is_none_or(|handed| handed == clip), "{clip:?}");
+                handed.is_some()
+            }
+            other => panic!("{other:?}"),
+        });
+        assert_eq!(got, expected, "{clip:?}");
+    }
+    // Another object's clip leaves a picture alone.
+    assert_eq!(groups_cut(&scene, &[(2, circle(50.0, 50.0, 2.0))]).unwrap()[0].items, [Item::Picture(picture)]);
+
+    // What of it can show is one box for every writer: all of a picture on the sheet, the part
+    // inside its clip's box, and only the sheet's part of one past the sheet's edge.
+    let visible = |scene: &Scene| match &scene.prepare().unwrap().on_grid(crate::paper::grid::Grid::NANOMETRE).unwrap().groups[0].items[0] {
+        crate::paper::grid::GridItem::Picture { visible, .. } => *visible,
+        other => panic!("{other:?}"),
+    };
+    let area = |(x0, y0): (f64, f64), (x1, y1): (f64, f64)| crate::Aabb2 { min: p(x0, y0), max: p(x1, y1) };
+    assert_eq!(visible(&scene), picture.rect);
+    assert_eq!(visible(&Scene { clips: vec![(1, rect(5.0, -5.0, 15.0, 5.0))], ..scene.clone() }), area((5.0, 0.0), (10.0, 5.0)));
+    assert_eq!(visible(&Scene { clips: vec![(1, circle(5.0, 5.0, 2.0))], ..scene.clone() }), area((3.0, 3.0), (7.0, 7.0)));
+    let past = crate::paper::Picture { rect: area((415.0, 290.0), (425.0, 300.0)), ..picture };
+    let edge = Scene::new(p(420.0, 297.0), vec![Group { object: 1, kind: ObjectKind::View, items: vec![Item::Picture(past)] }]);
+    assert_eq!(visible(&edge), area((415.0, 290.0), (420.0, 297.0)));
 }

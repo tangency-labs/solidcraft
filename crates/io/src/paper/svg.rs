@@ -20,10 +20,12 @@
 //! - **Pictures** (#5624 S5) are `<image>`s holding a PNG as a data URI, on their own pixel grid
 //!   ([`Picture::grid`]) at the picture resolution the caller gives, cropped to the pixels on the
 //!   sheet. Their edges are the grid's, on the same nanometre grid as the lines, so they register.
+//!   One crossing its object's clip holds only the pixels that meet the clip's box, and is cut by a
+//!   `<clipPath>` on that grid too.
 
 use std::fmt::Write;
 
-use solidcraft_geom::paper::{FillRule, Grid, GridDashes, GridItem, GridPath, GridPoint, GridReport, Picture, Pictures, Piece, Prepared};
+use solidcraft_geom::paper::{Clip, FillRule, Grid, GridDashes, GridItem, GridPath, GridPoint, GridReport, Picture, Pictures, Piece, Prepared};
 use solidcraft_geom::{Aabb2, Vec2};
 
 use super::png::{PICTURE_DPI, picture_png};
@@ -39,7 +41,7 @@ pub fn paper_svg(scene: &Prepared, pictures: &dyn Pictures, picture_dpi: f64) ->
         return Err(IoError::Invalid(format!("an SVG's pictures are 25 to 1200 dpi, not {picture_dpi}")));
     }
     let on = scene.on_grid(Grid::NANOMETRE).map_err(|e| IoError::Invalid(e.to_string()))?;
-    let mut w = Writer { out: String::new(), height: on.size.y };
+    let mut w = Writer { out: String::new(), height: on.size.y, clips: 0 };
     let (width, height) = (number(on.size.x), number(on.size.y));
     w.out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     let _ = writeln!(
@@ -63,9 +65,8 @@ pub fn paper_svg(scene: &Prepared, pictures: &dyn Pictures, picture_dpi: f64) ->
                 }
                 GridItem::Fill { loops } => w.fill(loops, FillRule::EvenOdd),
                 GridItem::Text { loops, .. } => w.fill(loops, FillRule::NonZero),
-                GridItem::Picture(picture) => {
-                    let sheet = Aabb2 { min: Vec2::new(0.0, 0.0), max: scene.size_mm() };
-                    if !w.picture(picture, sheet, picture_dpi, pictures)? {
+                GridItem::Picture { picture, clip, visible } => {
+                    if !w.picture(picture, clip.as_ref(), *visible, picture_dpi, pictures)? {
                         continue;
                     }
                 }
@@ -106,6 +107,13 @@ struct Writer {
     out: String,
     /// The page height, in nanometres: y is written as this less y.
     height: i64,
+    /// How many `<clipPath>`s so far: the next one's id is `clip` and one more.
+    clips: usize,
+}
+
+/// A point on the lines' grid.
+fn on_lines(p: Vec2) -> Result<GridPoint> {
+    Grid::NANOMETRE.point(p).map_err(|e| IoError::Invalid(e.to_string()))
 }
 
 impl Writer {
@@ -116,21 +124,42 @@ impl Writer {
         loops.iter().for_each(|l| self.path(l));
     }
 
-    /// Picture `picture`'s `<image>` up to its `href`'s closing quote: the pixels of its grid at
-    /// `dpi` that meet `sheet`. False, with nothing written, when none do.
-    fn picture(&mut self, picture: &Picture, sheet: Aabb2, dpi: f64, pictures: &dyn Pictures) -> Result<bool> {
+    /// `clip`'s `<clipPath>`, and its id.
+    fn clip_path(&mut self, clip: &Clip) -> Result<usize> {
+        self.clips += 1;
+        let _ = write!(self.out, "<clipPath id=\"clip{}\">", self.clips);
+        match *clip {
+            Clip::Rect { min, max } => {
+                let (low, high) = (on_lines(min)?, on_lines(max)?);
+                let (x, y) = (number(low.x), number(self.height - high.y));
+                let _ = write!(self.out, "<rect x=\"{x}\" y=\"{y}\" width=\"{}\" height=\"{}\"/>", number(high.x - low.x), number(high.y - low.y));
+            }
+            Clip::Circle { center, radius } => {
+                let at = on_lines(center)?;
+                let r = Grid::NANOMETRE.steps(radius).map_err(|e| IoError::Invalid(e.to_string()))?;
+                let _ = write!(self.out, "<circle cx=\"{}\" cy=\"{}\" r=\"{}\"/>", number(at.x), number(self.height - at.y), number(r));
+            }
+        }
+        self.out.push_str("</clipPath>\n");
+        Ok(self.clips)
+    }
+
+    /// Picture `picture`'s `<image>` up to its `href`'s closing quote, after its `clip`'s
+    /// `<clipPath>`: the pixels of its grid at `dpi` that meet `area`. False, with nothing written,
+    /// when none do.
+    fn picture(&mut self, picture: &Picture, clip: Option<&Clip>, area: Aabb2, dpi: f64, pictures: &dyn Pictures) -> Result<bool> {
         let source = picture.source;
         let grid = picture.grid(dpi).map_err(|e| IoError::Invalid(format!("picture {source}: {e}")))?;
-        let Some(window) = grid.window(sheet) else {
+        let Some(window) = grid.window(area) else {
             return Ok(false);
         };
         // The window's outer pixel edges, on the lines' grid: x0 + i·p across, y0 + j·p up.
-        let corner = |x: f64, y: f64| Grid::NANOMETRE.point(Vec2::new(x, y)).map_err(|e| IoError::Invalid(e.to_string()));
-        let low = corner(grid.column(window.x0).0, grid.row(window.y1 - 1).0)?;
-        let high = corner(grid.column(window.x1 - 1).1, grid.row(window.y0).1)?;
+        let low = on_lines(Vec2::new(grid.column(window.x0).0, grid.row(window.y1 - 1).0))?;
+        let high = on_lines(Vec2::new(grid.column(window.x1 - 1).1, grid.row(window.y0).1))?;
         // Base64 is 4 bytes for every 3.
         let room = MAX_DRAWING_BYTES.saturating_sub(self.out.len()) / 4 * 3;
         let png = picture_png(source, &grid, window, pictures, room)?;
+        let clip = clip.map(|clip| self.clip_path(clip)).transpose()?;
         self.out.push_str("<image x=\"");
         push_number(&mut self.out, low.x);
         self.out.push_str("\" y=\"");
@@ -140,6 +169,9 @@ impl Writer {
         self.out.push_str("\" height=\"");
         push_number(&mut self.out, high.y - low.y);
         self.out.push_str("\" preserveAspectRatio=\"none\"");
+        if let Some(id) = clip {
+            let _ = write!(self.out, " clip-path=\"url(#clip{id})\"");
+        }
         if picture.opacity < 1.0 {
             // Written as millionths, as lengths are.
             self.out.push_str(" opacity=\"");

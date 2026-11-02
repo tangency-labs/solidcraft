@@ -294,11 +294,13 @@ fn meet(a: &Seg2, b: &Seg2) -> bool {
     a.end().dist(b.start()) <= EPS
 }
 
-/// A scene that passed [`Scene::validate`], with no clips left: what every writer reads. Without
-/// clips the scene is borrowed as it is; with them it is the scene cut to them.
+/// A scene that passed [`Scene::validate`], its strokes and fills cut to its clips: what every
+/// writer reads. Without clips the scene is borrowed as it is; with them it is the scene cut to them.
 #[derive(Clone, Debug)]
 pub struct Prepared<'a> {
     scene: Cow<'a, Scene>,
+    /// Each clipped object's clip: pixels aren't cut until a writer draws them.
+    clips: BTreeMap<u64, Clip>,
 }
 
 impl Prepared<'_> {
@@ -344,9 +346,9 @@ impl Scene {
     pub fn prepare(&self) -> Result<Prepared<'_>> {
         self.validate()?;
         if self.clips.is_empty() {
-            return Ok(Prepared { scene: Cow::Borrowed(self) });
+            return Ok(Prepared { scene: Cow::Borrowed(self), clips: BTreeMap::new() });
         }
-        let clips: BTreeMap<u64, &Clip> = self.clips.iter().map(|(object, clip)| (*object, clip)).collect();
+        let clips: BTreeMap<u64, Clip> = self.clips.iter().copied().collect();
         let mut groups = Vec::with_capacity(self.groups.len());
         for group in &self.groups {
             match clips.get(&group.object) {
@@ -356,7 +358,7 @@ impl Scene {
         }
         let cut = Scene { size_mm: self.size_mm, groups, fonts: self.fonts.clone(), clips: Vec::new() };
         cut.validate()?;
-        Ok(Prepared { scene: Cow::Owned(cut) })
+        Ok(Prepared { scene: Cow::Owned(cut), clips })
     }
 
     /// Checks the clips against the module's notes: few enough, one for each object, each well made.
