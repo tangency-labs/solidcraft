@@ -686,17 +686,29 @@ fn dirty(app: &SolveApp, i: usize) -> bool {
     app.docs.slots.get(i).and_then(Option::as_ref).is_some_and(|s| s.session.is_dirty())
 }
 
+/// A tab's name: the file a saved design was opened or saved as (without its extension), so a
+/// Save As shows the new name; an unsaved design keeps its design name (#7267).
+fn tab_name(session: &Session) -> String {
+    session
+        .path
+        .as_deref()
+        .and_then(|p| std::path::Path::new(p).file_stem())
+        .map(|n| n.to_string_lossy().into_owned())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| session.doc.name.clone())
+}
+
 /// Tab names (with an unsaved-changes flag), in order.
 pub fn tabs_info(app: &SolveApp) -> Vec<(String, bool)> {
     if app.docs.slots.is_empty() {
-        return vec![(app.session.doc.name.clone(), app.session.is_dirty())];
+        return vec![(tab_name(&app.session), app.session.is_dirty())];
     }
     app.docs
         .slots
         .iter()
         .map(|s| match s {
-            Some(d) => (d.session.doc.name.clone(), d.session.is_dirty()),
-            None => (app.session.doc.name.clone(), app.session.is_dirty()),
+            Some(d) => (tab_name(&d.session), d.session.is_dirty()),
+            None => (tab_name(&app.session), app.session.is_dirty()),
         })
         .collect()
 }
@@ -1294,6 +1306,22 @@ mod tests {
         a.home.open = true;
         assert!(reuse_path(&mut a, "renamed.solidcraft").unwrap());
         assert!(!a.home.open);
+    }
+
+    #[test]
+    fn saved_tabs_show_file_names_and_unsaved_tabs_keep_design_names() {
+        let mut a = app();
+        let design = a.session.doc.name.clone();
+        assert_eq!(tabs_info(&a)[0].0, design);
+        a.session.path = Some("parts/bracket.solidcraft".into());
+        assert_eq!(tabs_info(&a)[0].0, "bracket");
+        // Save As under a new revision name: the tab follows the file, not the design's first name.
+        a.session.path = Some("parts/bracket rev B.solidcraft".into());
+        assert_eq!(tabs_info(&a)[0].0, "bracket rev B");
+        new_tab(&mut a);
+        let names: Vec<String> = tabs_info(&a).into_iter().map(|(n, _)| n).collect();
+        assert_eq!(names.first().map(String::as_str), Some("bracket rev B"));
+        assert_eq!(names.len(), 2);
     }
 
     #[test]
