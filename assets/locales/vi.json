@@ -4248,6 +4248,7 @@
   "ui.agent_chat_no_images": "AI Agent này không hỗ trợ tiếp nhận hình ảnh",
   "ui.agent_chat_no_picture": "Không có hình ảnh trong bộ nhớ tạm",
   "ui.agent_chat_no_tool_call": "Mô hình không sử dụng các công cụ của SolidCraft nên thiết kế không thay đổi. Hãy chọn mô hình hỗ trợ gọi công cụ; xem mục Mô hình cục bộ trong hướng dẫn trò chuyện AI.",
+  "ui.agent_chat_node_too_old": "Node.js {version} quá cũ đối với tác nhân này. Hãy cài đặt Node.js 20.10 trở lên, rồi nhấn Làm mới.",
   "ui.agent_chat_none_found": "Không tìm thấy tác tử lập trình nào. Hãy cài đặt một trong các tác tử sau, rồi nhấn Làm mới:",
   "ui.agent_chat_none_found_short": "Không tìm thấy tác tử nào",
   "ui.agent_chat_not_installed": "Chưa cài đặt",

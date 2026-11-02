@@ -4231,6 +4231,7 @@
   "ui.agent_chat_no_images": "Dieser Agent nimmt keine Bilder an",
   "ui.agent_chat_no_picture": "In der Zwischenablage befindet sich kein Bild",
   "ui.agent_chat_no_tool_call": "Das Modell hat die Werkzeuge von SolidCraft nicht verwendet, daher wurde das Design nicht geändert. Wählen Sie ein Modell, das Werkzeugaufrufe unterstützt; siehe „Lokale Modelle“ im Leitfaden zum Agenten-Chat.",
+  "ui.agent_chat_node_too_old": "Node.js {version} ist für diesen Agenten zu alt. Installieren Sie Node.js 20.10 oder neuer und klicken Sie dann auf Aktualisieren.",
   "ui.agent_chat_none_found": "Kein Coding-Agent gefunden. Installieren Sie einen davon und klicken Sie dann auf Aktualisieren:",
   "ui.agent_chat_none_found_short": "Kein Agent gefunden",
   "ui.agent_chat_not_installed": "Nicht installiert",

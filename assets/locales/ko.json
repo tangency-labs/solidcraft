@@ -3059,6 +3059,7 @@
   "ui.agent_chat_no_control": "에이전트 채팅 엔드포인트가 시작되지 않아 에이전트가 디자인에 접근할 수 없습니다.",
   "ui.agent_chat_no_images": "이 에이전트는 이미지를 받지 않습니다",
   "ui.agent_chat_no_picture": "클립보드에 이미지가 없습니다",
+  "ui.agent_chat_node_too_old": "Node.js {version}은 이 에이전트에 사용하기에는 너무 오래된 버전입니다. Node.js 20.10 이상을 설치한 후 새로 고침을 누르세요.",
   "ui.agent_chat_none_found": "코딩 에이전트를 찾지 못했습니다. 다음 중 하나를 설치한 뒤 새로 고침을 누르세요:",
   "ui.agent_chat_none_found_short": "에이전트를 찾지 못함",
   "ui.agent_chat_not_installed": "설치되지 않음",

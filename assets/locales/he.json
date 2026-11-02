@@ -4248,6 +4248,7 @@
   "ui.agent_chat_no_images": "הסוכן הזה לא מקבל תמונות",
   "ui.agent_chat_no_picture": "אין תמונה בלוח",
   "ui.agent_chat_no_tool_call": "המודל לא השתמש בכלים של SolidCraft, ולכן התכן לא השתנה. יש לבחור מודל שתומך בקריאה לכלים; ראו „מודלים מקומיים” במדריך צ'אט הסוכן.",
+  "ui.agent_chat_node_too_old": "גרסת Node.js ‏{version} ישנה מדי עבור סוכן זה. יש להתקין Node.js 20.10 ומעלה, ואז ללחוץ על רענון.",
   "ui.agent_chat_none_found": "לא נמצא סוכן קוד. יש להתקין אחד מאלה ואז ללחוץ על רענון:",
   "ui.agent_chat_none_found_short": "לא נמצא סוכן",
   "ui.agent_chat_not_installed": "לא מותקן",
