@@ -165,9 +165,9 @@ fn the_svg_reader_reads_it_back() {
     assert!(c.dist(p(50.0, 50.0)) < 3e-6 && a.dist(p(60.0, 50.0)) < 3e-6 && b.dist(p(50.0, 60.0)) < 3e-6, "{:?}", arcs[0]);
 }
 
-/// Text isn't written yet (B2): a scene with a run is refused by name, never written without it.
+/// Text is its glyph outlines, one path a run, filled black with SVG's default nonzero rule.
 #[test]
-fn text_is_refused_by_name_until_the_writer_learns_it() {
+fn text_is_its_outlines_filled_black_nonzero() {
     use solidcraft_geom::paper::text::{Cluster, Font, FontFlags, FontGlyph, FontMetrics, PlacedGlyph, TextRun};
     let metrics = FontMetrics {
         ascent: 900,
@@ -200,9 +200,30 @@ fn text_is_refused_by_name_until_the_writer_learns_it() {
         clusters: vec![Cluster { glyphs: 0..1, text: 0..1 }],
         rtl: false,
     };
+    let outlines: Vec<Loop2> = run.outlines(&font).collect();
     let scene = Scene { fonts: vec![font], ..sheet(vec![Item::Text(run)]) };
-    let refusal = paper_svg(&scene.prepare().unwrap(), &NoPictures, 300.0).unwrap_err().to_string();
-    assert!(refusal.contains("not supported yet: text in an SVG"), "{refusal}");
+    let (text, _) = svg(&scene);
+    assert_eq!(text.matches("<path fill=\"#000\" stroke=\"none\" d=\"").count(), 1, "{text}");
+    // The same path a fill of the placed outlines gets, without its even-odd rule.
+    let (outer, holes) = outlines.split_first().unwrap();
+    let filled = sheet(vec![Item::Fill { region: Region2 { outer: outer.clone(), holes: holes.to_vec() } }]);
+    assert_eq!(first_d(&scene), first_d(&filled));
+}
+
+/// Real text in the drawing font: a dimension's symbols, and a line read right to left, each run one
+/// path holding a closed loop for each of its glyph loops.
+#[test]
+fn symbols_and_a_right_to_left_line_are_written() {
+    use solidcraft_sketch::{TextStyle, paper_text};
+    for line in ["Ø12 ±0.1 30°", "קו 12"] {
+        let (runs, fonts) = paper_text(line, None, p(20.0, 30.0), 3.5, 0.0, &TextStyle::default()).unwrap().unwrap();
+        let loops: usize = runs.iter().map(|r| r.outlines(&fonts[0]).count()).sum();
+        let count = runs.len();
+        let scene = Scene { fonts, ..sheet(runs.into_iter().map(Item::Text).collect()) };
+        let (text, _) = svg(&scene);
+        assert_eq!(text.matches("<path fill=\"#000\" stroke=\"none\" d=\"").count(), count, "{line}");
+        assert!(loops > 0 && text.matches('M').count() == loops && text.matches('Z').count() == loops, "{line}: {text}");
+    }
 }
 
 fn picture(source: u64, min: Vec2, max: Vec2, opacity: f64) -> Item {
