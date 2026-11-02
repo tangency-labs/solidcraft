@@ -789,3 +789,27 @@ fn hiding_an_occurrence_hides_its_construction_geometry() {
         assert!(!s.construction_visible(name), "{name} shows in a hidden placement");
     }
 }
+
+/// #10127: an axis and a point built on a component's cylinder turn with it when Move/Copy
+/// turns the cylinder, as its faces do. One also pinned to a fixed point stays where it is.
+#[test]
+fn construction_on_a_moved_body_moves_with_it() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "body_name": "Pin"}));
+    run(&mut s, "component.create", json!({"name": "Part", "parent": "root", "activate": false}));
+    run(&mut s, "component.move_bodies", json!({"bodies": ["Pin"], "component": "Part"}));
+    run(&mut s, "construct.axis.through_cylinder", json!({"face": {"face": [5, 0, 10]}, "name": "PinAxis"}));
+    run(&mut s, "construct.point.center", json!({"of": {"edge": [5, 0, 20]}, "name": "PinTop"}));
+    run(&mut s, "construct.axis.two_points", json!({"a": {"construct_point": "PinTop"}, "b": {"point": [0, 50, 20]}, "name": "Tether"}));
+    let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap();
+    // A quarter turn about Y through the origin, then 10 mm along X: the top centre (0, 0, 20)
+    // goes to (30, 0, 0), and the cylinder's axis lies along X.
+    run(&mut s, "solid.move", json!({"bodies": [body], "translate": [10, 0, 0], "axis": [0, 1, 0], "angle": "90 deg"}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let (o, d) = axis(&s, "PinAxis");
+    assert!(parallel(d, Vec3::X) && on_line(o, d, Vec3::new(30.0, 0.0, 0.0)), "{o:?} {d:?}");
+    assert!(near(point(&s, "PinTop"), Vec3::new(30.0, 0.0, 0.0)), "{:?}", point(&s, "PinTop"));
+    let (o, d) = axis(&s, "Tether");
+    assert!(on_line(o, d, Vec3::new(0.0, 0.0, 20.0)) && on_line(o, d, Vec3::new(0.0, 50.0, 20.0)), "{o:?} {d:?}");
+}

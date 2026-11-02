@@ -116,6 +116,11 @@ pub struct Construct {
     pub feature: u64,
     pub name: String,
     pub geom: ConstructGeom,
+    /// The bodies it was built from, when every pick it reads lies on a body
+    /// ([`source_bodies`]): a later Move of all of them carries it along (#10127). Empty when
+    /// it also reads something fixed (a point, a plane, a sketch), which keeps it in place.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bodies: Vec<String>,
 }
 
 /// Everything a reference needs to be resolved.
@@ -578,6 +583,46 @@ fn line_line(a: (Vec3, Vec3), b: (Vec3, Vec3)) -> Option<Vec3> {
     let s = (uv * vw - vv * uw) / den;
     let t = (uu * vw - uv * uw) / den;
     Some(((p + u * s) + (q + v * t)) * 0.5)
+}
+
+/// The bodies a construction built from `refs` lies on: each face, edge and vertex pick's body,
+/// and the bodies of the constructions it is built from. Empty when any pick is not on a body
+/// (a fixed point, the origin, a plane, a world axis, a sketch) or is not found: such a
+/// construction is held by something a move of the bodies leaves where it is, so it stays.
+pub(crate) fn source_bodies(ctx: &Ctx, refs: &[&GeoRef]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for g in refs {
+        let found: Vec<String> = match g {
+            GeoRef::Face { at, name } => face_of(ctx.st, *at, name).map(|(b, ..)| vec![b.definition_name().to_string()]).unwrap_or_default(),
+            GeoRef::Edge { at, name } => edge_pick(ctx.st, *at, name).map(|(b, ..)| vec![b.definition_name().to_string()]).unwrap_or_default(),
+            GeoRef::Vertex { .. } => {
+                point(ctx, g).ok().and_then(|p| vertex_body(ctx.st, p)).map(|b| vec![b.definition_name().to_string()]).unwrap_or_default()
+            }
+            GeoRef::Axis { name } | GeoRef::ConstructPoint { name } => {
+                ctx.st.construct.iter().find(|c| c.name.as_str() == AsRef::<str>::as_ref(name)).map(|c| c.bodies.clone()).unwrap_or_default()
+            }
+            _ => Vec::new(),
+        };
+        if found.is_empty() {
+            return Vec::new();
+        }
+        for b in found {
+            if !out.contains(&b) {
+                out.push(b);
+            }
+        }
+    }
+    out
+}
+
+/// The body with a vertex (an end of one of its edges) at `p`.
+fn vertex_body(st: &ModelState, p: Vec3) -> Option<&ModelBody> {
+    bodies(st).find(|b| {
+        let tol = (b.body.size() * 1e-3).max(1e-3);
+        b.body
+            .edges(tol)
+            .is_ok_and(|edges| edges.iter().flat_map(|e| [e.points.first(), e.points.last()]).flatten().any(|v| v.dist(p) <= 1e-6 * (1.0 + p.len())))
+    })
 }
 
 pub(crate) fn resolve_axis(ctx: &Ctx, d: &AxisDef) -> Result<(Vec3, Vec3)> {
