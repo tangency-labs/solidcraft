@@ -2922,7 +2922,10 @@ fn apply_op(doc: &Document, state: &mut ModelState, f: &Feature, tools: Vec<Body
 /// Many cut tools clear of each other (a pattern's copies, the circles of a vent field in one
 /// sketch) as one tool of many pieces, so the target is cut once instead of rebuilding an ever
 /// more complex body for every tool (#261, #368). Tools that may meet are left as they are.
-fn clear_tools_as_one(tools: Vec<Traced>) -> Result<Vec<Traced>> {
+/// `targets` are the bodies the tools cut, where they are (`None` when one is shown in another
+/// frame): tools whose boxes only finer meshes show apart are joined only when no two of them
+/// cut into the same curved face of a target.
+fn clear_tools_as_one(tools: Vec<Traced>, targets: Option<&[&ModelBody]>) -> Result<Vec<Traced>> {
     if tools.len() < 8 {
         return Ok(tools);
     }
@@ -2931,8 +2934,12 @@ fn clear_tools_as_one(tools: Vec<Traced>) -> Result<Vec<Traced>> {
         Some(one) => Some(one),
         // The kernel only compares the tools' boxes, so copies of a through hole close together
         // on a circle (their boxes overlap) seem to meet (#9007). Measured on finer meshes they
-        // may still be clearly apart.
-        None if tools_clearly_apart(&bodies) => kernel::join_apart(&bodies).ok().flatten(),
+        // may still be clearly apart. A curved face that several of them notch at once keeps
+        // lines a one-by-one cut leaves out (a revolved bore with 37 grooves came out in 184
+        // faces instead of 151, of the same volume), so those are cut in turn.
+        None if targets.is_some_and(|t| !tools_share_a_curved_face(&bodies, t)) && tools_clearly_apart(&bodies) => {
+            kernel::join_apart(&bodies).ok().flatten()
+        }
         None => None,
     };
     #[cfg(test)]
@@ -2941,6 +2948,51 @@ fn clear_tools_as_one(tools: Vec<Traced>) -> Result<Vec<Traced>> {
         // Each piece's faces keep the names of the tool it is.
         Some(one) => vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())],
         None => tools,
+    })
+}
+
+/// Whether two of `tools` may cut into the same face of one of `targets` that is not flat: some
+/// triangle of that face's mesh comes within both tools' boxes. Coplanar pieces of a flat face
+/// are merged again after any cut, a curved face's are not. `true` when that cannot be told (a
+/// mesh body, a tool without a box), so the tools are cut in turn as before.
+fn tools_share_a_curved_face(tools: &[Body], targets: &[&ModelBody]) -> bool {
+    let Some(boxes) = tools.iter().map(more::exact_box).collect::<Option<Vec<_>>>() else { return true };
+    targets.iter().any(|mb| {
+        if mb.body.is_mesh() {
+            return true;
+        }
+        let mesh = mb.mesh();
+        let pad = 2.0 * mb.display_tol() + APART_GAP;
+        // The first tool met on each face, and the faces two tools meet.
+        let mut first: BTreeMap<u32, usize> = BTreeMap::new();
+        let mut shared = std::collections::BTreeSet::new();
+        for (t, face) in mesh.triangles.iter().zip(&mesh.tri_face) {
+            if shared.contains(face) {
+                continue;
+            }
+            let Some(corners) = mesh.tri(t) else { continue };
+            let mut tri = solidcraft_geom::Aabb3::EMPTY;
+            for p in corners {
+                tri.add(p);
+            }
+            let tri = Some(tri.inflated(pad));
+            for (k, b) in boxes.iter().enumerate() {
+                if more::boxes_apart(&tri, &Some(*b)) {
+                    continue;
+                }
+                match first.get(face) {
+                    None => {
+                        first.insert(*face, k);
+                    }
+                    Some(&j) if j != k => {
+                        shared.insert(*face);
+                        break;
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+        shared.iter().any(|&face| !matches!(kernel::face_surface(&mb.body, face as usize), Some(kernel::FaceSurface::Plane { .. })))
     })
 }
 
@@ -3191,7 +3243,13 @@ fn apply_traced_with(
         }
         Operation::Cut | Operation::Intersect => {
             let bop = if op == Operation::Cut { BoolOp::Cut } else { BoolOp::Intersect };
-            let tools = if op == Operation::Cut { clear_tools_as_one(tools)? } else { tools };
+            let tools = if op == Operation::Cut {
+                let in_place: Option<Vec<&ModelBody>> =
+                    target_idx.iter().map(|&i| state.bodies.get(i).filter(|b| tool_frame(&b.name).is_none())).collect();
+                clear_tools_as_one(tools, in_place.as_deref())?
+            } else {
+                tools
+            };
             // Each target's pieces before the cut: a body joined from separate pieces stays one.
             let affected: std::collections::BTreeMap<String, usize> =
                 target_idx.iter().filter_map(|i| state.bodies.get(*i)).map(|b| (b.name.clone(), b.body.lumps().map_or(1, |l| l.len()))).collect();

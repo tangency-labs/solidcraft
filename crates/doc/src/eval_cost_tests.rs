@@ -1566,6 +1566,49 @@ fn copies_of_a_hole_that_come_close_are_cut_one_by_one() {
     assert_eq!((work.cut_tools, work.miss_intersects), (15, 0), "{work:?}");
 }
 
+/// A ring (25 mm outside, 16 mm bore, 55 mm high) with a blind groove, 8 mm wide and 30 mm deep,
+/// cut into its bore from below, in a circular pattern of ten about Z: their boxes, grown as the
+/// kernel grows them, meet, finer meshes show them 1.9 mm apart. The ring's faces counted as its
+/// surfaces are, and the work.
+fn grooved_ring_faces() -> (usize, Counts) {
+    let mut doc = Document::new("grooves");
+    let cylinder = |base: Vec3, radius: &str, height: &str, operation: Operation| FeatureKind::Cylinder {
+        base: point_expr(base),
+        axis: Dir(Vec3::Z),
+        radius: radius.into(),
+        height: height.into(),
+        operation,
+        references: Vec::new(),
+    };
+    doc.add_feature(cylinder(Vec3::ZERO, "25", "55", Operation::NewBody), Some("Ring")).unwrap();
+    doc.add_feature(cylinder(Vec3::new(0.0, 0.0, -1.0), "16", "57", Operation::Cut), Some("Bore")).unwrap();
+    let groove = doc.add_feature(cylinder(Vec3::new(16.0, 0.0, -1.0), "4", "31", Operation::Cut), Some("Groove")).unwrap();
+    hole_pattern(&mut doc, groove, 10);
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    (kernel::measure(&st.bodies[0].body).unwrap().merged.faces, work)
+}
+
+#[test]
+fn copies_that_notch_the_same_round_face_are_cut_one_by_one() {
+    // Cut all in one go, the ten grooves left the bore in more faces than cutting them one after
+    // another does (48 against 38, #9007): copies that notch the same round face are cut in turn.
+    let (patterned, work) = grooved_ring_faces();
+    let cut = |a: kernel::Body, b: &kernel::Body| kernel::boolean(&a, b, kernel::BoolOp::Cut).unwrap().unwrap();
+    let ring =
+        cut(kernel::cylinder(Vec3::ZERO, Vec3::Z, 25.0, 55.0).unwrap(), &kernel::cylinder(Vec3::new(0.0, 0.0, -1.0), Vec3::Z, 16.0, 57.0).unwrap());
+    let groove = kernel::cylinder(Vec3::new(16.0, 0.0, -1.0), Vec3::Z, 4.0, 31.0).unwrap();
+    let one_by_one = (0..10).fold(ring, |ring, k| {
+        let copy = kernel::transform(&groove, Vec3::ZERO, Vec3::ZERO, Vec3::Z, (36.0 * k as f64).to_radians()).unwrap();
+        cut(ring, &copy)
+    });
+    assert_eq!(patterned, kernel::measure(&one_by_one).unwrap().merged.faces);
+    assert_eq!(work.cut_tools, 9, "{work:?}");
+}
+
 #[test]
 fn tools_are_apart_only_when_they_neither_meet_nor_nest() {
     let rod = |x: f64, y: f64, r: f64| kernel::cylinder(Vec3::new(x, y, -100.0), Vec3::Z, r, 200.0).unwrap();
