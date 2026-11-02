@@ -500,7 +500,7 @@ fn measure_takes_a_sketch_lines_woken_middle() {
     h.settle();
     h.app.start("inspect.measure");
     h.step(&json!({ "move": { "sketch": [10, 2.5] } })).unwrap();
-    let middle = solidcraft_engine::geom::Vec3::new(20.0, 5.0, 0.0);
+    let middle = solidcore_record::Vec3::new(20.0, 5.0, 0.0);
     assert!(h.app.viewport.woken.points.iter().any(|p| p.at.dist(middle) < 1e-9), "{:?}", h.app.viewport.woken);
     h.step(&json!({ "click": { "sketch": [20, 5] } })).unwrap();
     let picked = &h.app.dialog.as_ref().unwrap().inputs[0].items;
