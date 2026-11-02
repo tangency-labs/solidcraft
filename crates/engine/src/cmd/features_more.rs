@@ -39,7 +39,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.replace_face", "Replace Face", replace_face)
         .at("SOLID", "MODIFY")
         .icon("replace_face")
-        .params("faces: [[x,y,z] points on planar faces, or face names from model.faces]; target: plane (XY|XZ|YZ|construction plane|{origin, normal}) | target_face: [x,y,z] on a parallel planar face; body?"),
+        .params("faces: [[x,y,z] points or face names]; target: plane (XY|XZ|YZ|construction plane|{origin, normal}) | target_face: [x,y,z] on a plane or curved surface; target_body?, body?; extends/trims neighbours; refuses targets that remove unselected faces"),
     CommandSpec::new("solid.align", "Align", align)
         .at("SOLID", "MODIFY")
         .icon("align")
@@ -381,21 +381,28 @@ fn face_points(s: &Session, p: &Value, k: &str, cmd: &str) -> Result<Vec<Vec3>> 
 fn replace_face(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.replace_face";
     let faces = face_points(s, p, "faces", cmd)?;
-    for f in &faces {
-        if super::face::face_normal(s, *f).is_none() {
-            return Err(bad(cmd, "not supported yet: replacing a face that is not planar"));
-        }
-    }
-    let target = match p.get("target_face").and_then(vec3) {
-        Some(tp) => {
-            let n = super::face::face_normal(s, tp).ok_or_else(|| bad(cmd, "the target face must be planar"))?;
-            let plane = solidcraft_geom::Plane::from_normal(tp, n).ok_or_else(|| bad(cmd, "the target face's plane"))?;
-            solidcraft_doc::PlaneRef::Custom { plane }
-        }
-        None => plane_param(s, p.get("target"), cmd)?,
+    let (target, tool) = if let Some(v) = p.get("target_face") {
+        let tp = vec3(v).ok_or_else(|| bad(cmd, "`target_face` must be [x,y,z]"))?;
+        let named = str_(p, "target_body");
+        let state = s.model.state();
+        let candidates: Vec<_> = state
+            .bodies
+            .iter()
+            .filter(|b| named.is_none_or(|name| b.name == name))
+            .filter(|b| solidcraft_doc::appearance::face_index_at(b, tp).is_some())
+            .collect();
+        let [tb] = candidates.as_slice() else {
+            return Err(bad(cmd, "target face is missing or ambiguous; supply target_body"));
+        };
+        (
+            solidcraft_doc::PlaneRef::Origin { name: "XY".into() },
+            Some(solidcraft_doc::FaceAt { body: BodyName(tb.name.clone()), point: Position(tp) }),
+        )
+    } else {
+        (plane_param(s, p.get("target"), cmd)?, None)
     };
     let body = str_(p, "body").map(str::to_string);
-    add_feature(s, p, FeatureKind::ReplaceFace { faces: faces.into_iter().map(FacePick).collect(), target, body: body.map(BodyName) })
+    add_feature(s, p, FeatureKind::ReplaceFace { faces: faces.into_iter().map(FacePick).collect(), target, tool, body: body.map(BodyName) })
 }
 
 /// `axes`: three booleans, one per world axis, for a point-to-point Align.

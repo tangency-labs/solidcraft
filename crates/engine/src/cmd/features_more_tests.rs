@@ -811,8 +811,8 @@ fn replace_face_align_remove() {
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "A"}));
     run(&mut s, "solid.replace_face", json!({"faces": [[5, 5, 10]], "target": {"origin": [0, 0, 15], "normal": [0, 0, 1]}}));
     assert!(rel(volume(&mut s), 1500.0) < 1e-6);
-    let e = s.execute("solid.replace_face", &json!({"faces": [[5, 5, 15]], "target": {"origin": [0, 0, 15], "normal": [1, 0, 1]}}));
-    assert!(e.is_err() || s.model.results.last().is_some_and(|r| r.error.as_deref().unwrap_or("").contains("parallel")));
+    run(&mut s, "solid.replace_face", json!({"faces": [[5,5,15]], "target": {"origin": [0,0,15], "normal": [1,0,1]}}));
+    assert!(rel(volume(&mut s), 1000.0) < 1e-6);
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "A"}));
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [50, 0, 0], "body_name": "B"}));
@@ -2461,4 +2461,57 @@ fn align_axes_are_world_axes_on_a_placed_component() {
     assert!(near(after.min.x, before.min.x) && near(after.max.x, before.max.x), "x: {after:?}");
     assert!(near(after.min.y, before.min.y + 20.0) && near(after.max.y, before.max.y + 20.0), "y: {after:?}");
     assert!(near(after.min.z, before.min.z) && near(after.max.z, before.max.z), "z: {after:?}");
+}
+
+#[test]
+fn replace_round_into_its_neighbour_survives_rebuild_and_undo() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20,"body_name":"A"}));
+    run(&mut s, "solid.fillet", json!({"edges":[[20,0,20]],"radius":3}));
+    let before = measure(&mut s)["bodies"][0]["volume_mm3"].as_f64().unwrap();
+    let inset = 3.0 * (1.0 - 0.5_f64.sqrt());
+    run(&mut s, "solid.replace_face", json!({"body":"A","faces":[[20,inset,20.0-inset]],"target_body":"A","target_face":[20,0,10]}));
+    let m = measure(&mut s);
+    assert!((m["bodies"][0]["volume_mm3"].as_f64().unwrap() - 24000.0).abs() < 1e-6);
+    assert_eq!(m["bodies"][0]["faces"], 6);
+    assert_eq!(m["bodies"][0]["closed"], true);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(reopened.model.results.iter().all(|r| r.error.is_none()), "{:?}", reopened.model.results.last());
+    assert!((measure(&mut reopened)["bodies"][0]["volume_mm3"].as_f64().unwrap() - 24000.0).abs() < 1e-6);
+    run(&mut s, "edit.undo", json!({}));
+    assert!((measure(&mut s)["bodies"][0]["volume_mm3"].as_f64().unwrap() - before).abs() < 1e-6);
+}
+
+#[test]
+fn replace_face_curved_target_survives_save_and_undo() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":8,"body_name":"A"}));
+    run(&mut s, "solid.cylinder", json!({"base":[5,-5,30],"axis":[0,1,0],"radius":20,"height":20,"body_name":"Target"}));
+    run(&mut s, "solid.replace_face", json!({"body":"A","faces":[[5,5,8]],"target_body":"Target","target_face":[5,5,10]}));
+    assert!(s.model.results.last().is_some_and(|r| r.error.is_none()));
+    let encoded = serde_json::to_value(&s.doc).unwrap();
+    let feature = encoded["features"].as_array().unwrap().last().unwrap();
+    assert_eq!(feature["tool"]["body"], "Target");
+    let expected = 3000.0 - 10.0 * (5.0 * 375.0_f64.sqrt() + 400.0 * 0.25_f64.asin());
+    let measured = run(&mut s, "inspect.measure", json!({"bodies":["A"]}));
+    assert!((measured["bodies"][0]["volume_mm3"].as_f64().unwrap() - expected).abs() < 0.1);
+    run(&mut s, "edit.undo", json!({}));
+    let measured = run(&mut s, "inspect.measure", json!({"bodies":["A"]}));
+    assert!((measured["bodies"][0]["volume_mm3"].as_f64().unwrap() - 800.0).abs() < 1e-6);
+}
+
+#[test]
+fn replace_round_onto_a_plane_ignores_the_plane_face_beside_it() {
+    // The round lies within reach of the side face's plane; the pick must stay the round,
+    // or Replace Face would try to offset that side face by a fraction of a millimetre.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20,"body_name":"A"}));
+    run(&mut s, "solid.fillet", json!({"edges":[[40,15,20]],"radius":3}));
+    let pick = [40.0 - 3.0 + 3.0 * 0.5_f64.sqrt(), 15.0, 20.0 - 3.0 + 3.0 * 0.5_f64.sqrt()];
+    run(&mut s, "solid.replace_face", json!({"body":"A","faces":[pick],"target":{"origin":[40.0,0.0,0.0],"normal":[1.0,0.0,0.0]}}));
+    let m = measure(&mut s);
+    assert!((m["bodies"][0]["volume_mm3"].as_f64().unwrap() - 24000.0).abs() < 1e-6);
+    assert_eq!(m["bodies"][0]["faces"], 6);
+    assert_eq!(m["bodies"][0]["closed"], true);
+    assert!(s.model.results.last().is_some_and(|r| r.error.is_none()), "{:?}", s.model.results.last());
 }

@@ -1532,6 +1532,207 @@ mod tests {
     }
 
     #[test]
+    fn replace_round_with_adjacent_plane_merges_the_target() {
+        for (origin, l, w, h, r) in [(Vec3::ZERO, 40.0, 30.0, 20.0, 3.0), (Vec3::new(-120.0, 70.0, 15.0), 21.0, 17.0, 9.0, 1.2)] {
+            let block = box_solid(origin, origin + Vec3::new(l, w, h)).unwrap();
+            let edges =
+                [Vec3::new(l / 2.0, 0.0, h), Vec3::new(l, w / 2.0, h), Vec3::new(l / 2.0, w, h), Vec3::new(0.0, w / 2.0, h)].map(|p| p + origin);
+            let rounded = crate::fillet(&block, &edges, r).unwrap();
+            let normals = [-Vec3::Y, Vec3::X, Vec3::Y, -Vec3::X];
+            let inset = r * (1.0 - 0.5_f64.sqrt());
+            let picks: Vec<_> = edges.iter().zip(normals).map(|(p, n)| *p - n * inset - Vec3::Z * inset).collect();
+            for side in 0..4 {
+                let target = rounded.faces(0.01).unwrap().iter().position(|f| f.plane_normal.is_some_and(|n| n.dot(normals[side]) > 0.999)).unwrap();
+                let keep: Vec<_> = edges.iter().enumerate().filter(|(i, _)| *i != side).map(|(_, p)| *p).collect();
+                let reference = crate::fillet(&block, &keep, r).unwrap();
+                for tool in
+                    [SplitTool::Face { body: &rounded, face: target }, SplitTool::Plane(Plane::from_normal(edges[side], normals[side]).unwrap())]
+                {
+                    let result = crate::replace_faces(&rounded, &[picks[side]], &tool).unwrap();
+                    assert_eq!(result.face_count(), reference.face_count());
+                    assert_eq!(result.unmeshed_faces(), 0);
+                    assert_eq!(result.crossed_face_loops().unwrap(), 0);
+                    let volume = |b: &Body| b.tessellate(1e-5).unwrap().measure().volume;
+                    assert!((volume(&result) - volume(&reference)).abs() < l * w * h * 2e-5);
+                }
+            }
+            // Several rounds may merge into one existing top face in one command.
+            let result =
+                crate::replace_faces(&rounded, &picks, &SplitTool::Plane(Plane::from_normal(origin + Vec3::Z * h, Vec3::Z).unwrap())).unwrap();
+            assert_eq!(result.face_count(), 6);
+            assert!((measure(&result).unwrap().volume - l * w * h).abs() < 1e-6);
+            // A plane on the opposite side must not cause the selected round to be healed.
+            assert!(
+                crate::replace_faces(&rounded, &[picks[0]], &SplitTool::Plane(Plane::from_normal(origin + Vec3::Y * w, Vec3::Y).unwrap())).is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn replace_top_round_between_mitred_rounds_onto_its_side_plane() {
+        // The topology of a plate whose vertical corner rounds on one side were removed
+        // first: the top round there ends at the two other top rounds in mitres, so its
+        // neighbours are curved at both ends. Replacing it with the side plane must trim
+        // those ends back to that plane, not fail on the round neighbours.
+        let block = box_solid(Vec3::ZERO, Vec3::new(80.0, 50.0, 8.0)).unwrap();
+        let vertical = [Vec3::new(0.0, 0.0, 4.0), Vec3::new(0.0, 50.0, 4.0)];
+        let base = crate::fillet(&block, &vertical, 6.0).unwrap();
+        let top = [Vec3::new(40.0, 0.0, 8.0), Vec3::new(40.0, 50.0, 8.0), Vec3::new(80.0, 25.0, 8.0)];
+        let rounded = crate::fillet(&base, &top, 2.0).unwrap();
+        let reference = crate::fillet(&base, &[top[0], top[1]], 2.0).unwrap();
+        let inset = 2.0 * (1.0 - 0.5_f64.sqrt());
+        let pick = Vec3::new(80.0 - inset, 25.0, 8.0 - inset);
+        let side = rounded
+            .faces(0.01)
+            .unwrap()
+            .iter()
+            .position(|f| f.plane_normal.is_some_and(|n| n.dot(Vec3::X) > 0.999) && (f.centroid.x - 80.0).abs() < 1e-6)
+            .unwrap();
+        for tool in
+            [SplitTool::Face { body: &rounded, face: side }, SplitTool::Plane(Plane::from_normal(Vec3::new(80.0, 0.0, 0.0), Vec3::X).unwrap())]
+        {
+            let result = crate::replace_faces(&rounded, &[pick], &tool).unwrap();
+            assert_eq!(result.face_count(), reference.face_count());
+            assert_eq!(result.unmeshed_faces(), 0);
+            assert_eq!(result.crossed_face_loops().unwrap(), 0);
+            let volume = |b: &Body| b.tessellate(1e-5).unwrap().measure().volume;
+            assert!((volume(&result) - volume(&reference)).abs() < 80.0 * 50.0 * 8.0 * 2e-5, "{} vs {}", volume(&result), volume(&reference));
+            for p in [Vec3::new(79.9, 0.1, 7.9), Vec3::new(79.9, 0.1, 3.0), Vec3::new(79.0, 1.0, 7.0), Vec3::new(79.0, 48.0, 7.0)] {
+                assert_eq!(result.contains(p), reference.contains(p), "{p:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn replace_face_sweeps_a_move_past_the_rim_of_its_neighbour() {
+        // A boss on a plate: moving the boss's side to the plate's end plane is farther than the
+        // boss is wide. The offset path refuses that (a loop in the plate's top would cross its
+        // edge); sweeping the face there and joining lets that loop open into a notch.
+        let plate = box_solid(Vec3::ZERO, Vec3::new(80.0, 50.0, 8.0)).unwrap();
+        let boss = box_solid(Vec3::new(15.0, 4.0, 8.0), Vec3::new(24.5, 12.5, 48.0)).unwrap();
+        let body = crate::boolean(&plate, &boss, crate::BoolOp::Union).unwrap().unwrap();
+        let plane = Plane::from_normal(Vec3::new(80.0, 0.0, 0.0), Vec3::X).unwrap();
+        let result = crate::replace_faces(&body, &[Vec3::new(24.5, 8.25, 30.0)], &SplitTool::Plane(plane)).unwrap();
+        assert_eq!(result.unmeshed_faces(), 0);
+        assert_eq!(result.crossed_face_loops().unwrap(), 0);
+        let volume = result.tessellate(1e-5).unwrap().measure().volume;
+        assert!((volume - 54_100.0).abs() < 1.0, "{volume}");
+        assert!(result.contains(Vec3::new(60.0, 8.25, 30.0)));
+        assert!(!result.contains(Vec3::new(60.0, 8.25, 50.0)));
+    }
+
+    /// Replacing a face with one on a part of the body standing higher: the grown cap reaches
+    /// that face, the split cannot run, and the sweep must still take over (a fix here once
+    /// aborted the whole operation with the split's error).
+    #[test]
+    fn replace_a_face_onto_a_higher_part_s_face() {
+        let plate = box_solid(Vec3::new(-30.0, -15.0, 0.0), Vec3::new(30.0, 15.0, 8.0)).unwrap();
+        let boss = cylinder(Vec3::new(0.0, 0.0, 8.0), Vec3::Z, 8.0, 10.0).unwrap();
+        let bar = box_solid(Vec3::new(16.0, -5.0, 0.0), Vec3::new(26.0, 5.0, 40.0)).unwrap();
+        let both = crate::boolean(&plate, &boss, crate::BoolOp::Union).unwrap().unwrap();
+        let body = crate::boolean(&both, &bar, crate::BoolOp::Union).unwrap().unwrap();
+        let faces = body.faces(1e-3).unwrap();
+        let top_bar = faces.iter().find(|f| (f.centroid.z - 40.0).abs() < 1e-6 && f.centroid.x > 15.0).expect("bar top");
+        let top_boss = faces.iter().find(|f| (f.centroid.z - 18.0).abs() < 1e-6 && f.centroid.x.abs() < 8.0).expect("boss top");
+        let before = body.tessellate(1e-4).unwrap().measure().volume;
+        let result = crate::replace_faces(&body, &[top_boss.centroid], &SplitTool::Face { body: &body, face: top_bar.index })
+            .expect("the boss top reaches the bar's top");
+        assert_eq!(result.unmeshed_faces(), 0);
+        let after = result.tessellate(1e-4).unwrap().measure().volume;
+        let grown = std::f64::consts::PI * 64.0 * (40.0 - 18.0);
+        assert!((after - before - grown).abs() < 1.0, "{before} -> {after}, wanted +{grown}");
+    }
+
+    #[test]
+    fn replace_a_keyway_floor_onto_the_boss_wall() {
+        // A keyway cut into a boss: replacing its floor with the boss's outer wall fills it
+        // back, the wall's neighbours extending to the cylinder as NX does.
+        let boss = cylinder(Vec3::new(0.0, 0.0, 8.0), Vec3::Z, 12.0, 14.0).unwrap();
+        let cutter = box_solid(Vec3::new(-1.75, -20.0, 12.0), Vec3::new(1.75, -5.0, 22.0)).unwrap();
+        let body = crate::boolean(&boss, &cutter, crate::BoolOp::Cut).unwrap().unwrap();
+        let faces = body.faces(1e-3).unwrap();
+        let floor = faces
+            .iter()
+            .find(|f| f.plane_normal.is_some_and(|n| n.dot(-Vec3::Y) > 0.999) && (f.centroid.y + 5.0).abs() < 1e-6)
+            .expect("keyway floor");
+        let wall = (0..body.face_count())
+            .find(|i| matches!(crate::face_surface(&body, *i), Some(crate::FaceSurface::Cylinder { radius, .. }) if (radius - 12.0).abs() < 1e-6))
+            .expect("boss wall");
+        let result = crate::replace_faces(&body, &[floor.centroid], &SplitTool::Face { body: &body, face: wall }).unwrap();
+        assert_eq!(result.unmeshed_faces(), 0);
+        let volume = result.tessellate(1e-4).unwrap().measure().volume;
+        let want = std::f64::consts::PI * 144.0 * 14.0;
+        assert!((volume - want).abs() < 1.0, "{volume} vs {want}");
+        assert!(result.contains(Vec3::new(0.0, -11.0, 17.0)));
+        assert!(!result.contains(Vec3::new(0.0, -14.0, 17.0)));
+    }
+
+    #[test]
+    fn replace_face_with_bspline_target() {
+        // A parabolic cylinder z=9+x²/20, represented as a B-spline surface,
+        // wider than the source cap so its trim does not supply the new boundary.
+        let a = mt::builder::vertex(p3(Vec3::new(-5.0, -5.0, 10.25)));
+        let b = mt::builder::vertex(p3(Vec3::new(15.0, -5.0, 20.25)));
+        let curve =
+            mt::Curve::BSplineCurve(mt::BSplineCurve::new(mt::KnotVec::bezier_knot(2), vec![a.point(), p3(Vec3::new(5.0, -5.0, 5.25)), b.point()]));
+        let edge = mt::Edge::new(&a, &b, curve);
+        let face: mt::Face = mt::builder::tsweep(&edge, mt::Vector3::new(0.0, 20.0, 0.0));
+        let target = crate::surfaces::surface_body(vec![face]);
+        let block = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 8.0)).unwrap();
+        let result = crate::replace_faces(&block, &[Vec3::new(5.0, 5.0, 8.0)], &SplitTool::Face { body: &target, face: 0 }).unwrap();
+        // Integral (9+x²/20) dx dy over the 10 by 10 cap.
+        let expected = 900.0 + 500.0 / 3.0;
+        assert!((measure(&result).unwrap().volume - expected).abs() < 0.2, "{}", measure(&result).unwrap().volume);
+        assert_eq!(result.unmeshed_faces(), 0);
+        assert_eq!(result.face_count(), 6);
+    }
+
+    #[test]
+    fn replace_face_with_tilted_plane_and_cylinder() {
+        let plane = Plane::from_normal(Vec3::new(0.0, 0.0, 15.0), Vec3::new(1.0, 0.0, 1.0)).unwrap();
+        let block = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let tilted = crate::replace_faces(&block, &[Vec3::new(5.0, 5.0, 10.0)], &SplitTool::Plane(plane)).unwrap();
+        assert_eq!(tilted.face_count(), 6);
+        assert!((measure(&tilted).unwrap().volume - 1000.0).abs() < 1e-6);
+        assert!(tilted.contains(Vec3::new(1.0, 5.0, 12.0)));
+        assert!(!tilted.contains(Vec3::new(9.0, 5.0, 8.0)));
+        let raised = crate::offset_faces(&block, &[Vec3::new(5.0, 5.0, 10.0)], 5.0).unwrap();
+        let coincident = crate::replace_faces(&raised, &[Vec3::new(5.0, 5.0, 15.0)], &SplitTool::Plane(plane)).unwrap();
+        assert!((measure(&coincident).unwrap().volume - 1000.0).abs() < 1e-6);
+        let target = cylinder(Vec3::new(5.0, -5.0, 30.0), Vec3::Y, 20.0, 20.0).unwrap();
+        let face = target.faces(0.01).unwrap().iter().position(|f| f.plane_normal.is_none()).unwrap();
+        let tool = SplitTool::Face { body: &target, face };
+        // Integral of 30-sqrt(400-(x-5)^2), for 0<x<10 and 0<y<10.
+        let expected = 3000.0 - 10.0 * (5.0 * 375.0_f64.sqrt() + 400.0 * 0.25_f64.asin());
+        for height in [8.0, 15.0] {
+            let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, height)).unwrap();
+            let curved = crate::replace_faces(&b, &[Vec3::new(5.0, 5.0, height)], &tool).unwrap();
+            assert_eq!(curved.face_count(), 6);
+            assert_eq!(curved.unmeshed_faces(), 0);
+            assert!((measure(&curved).unwrap().volume - expected).abs() < 0.1, "{} vs {expected}", measure(&curved).unwrap().volume);
+            assert!(curved.contains(Vec3::new(0.1, 5.0, 10.3)));
+            assert!(!curved.contains(Vec3::new(5.0, 5.0, 10.3)));
+            // A curved source cap can be replaced by a plane as well.
+            let flat = crate::replace_faces(
+                &curved,
+                &[Vec3::new(5.0, 5.0, 10.0)],
+                &SplitTool::Plane(Plane::from_normal(Vec3::new(0.0, 0.0, 7.0), Vec3::Z).unwrap()),
+            )
+            .unwrap();
+            assert!((measure(&flat).unwrap().volume - 700.0).abs() < 0.1);
+        }
+        // A target that removes a side is not a face replacement.
+        assert!(
+            crate::replace_faces(
+                &block,
+                &[Vec3::new(5.0, 5.0, 10.0)],
+                &SplitTool::Plane(Plane::from_normal(Vec3::new(5.0, 0.0, 0.0), Vec3::X).unwrap())
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn plane_splits_a_box_top() {
         let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
         let m0 = measure(&b).unwrap();
