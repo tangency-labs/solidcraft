@@ -68,6 +68,10 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
         fixes: k.fixes,
         cancel: k.cancel.clone(),
         notify_records: crate::topology::topology::NotifyRecords::new(),
+        arena_notify_records: (
+            std::sync::Weak::new(),
+            crate::topology::topology::NotifyRecords::new(),
+        ),
     }
 }
 

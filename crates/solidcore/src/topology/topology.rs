@@ -325,6 +325,12 @@ pub trait TopologyRecords {
 pub struct NotifyRecords {
     map: BTreeMap<ObjectKey, Topology>,
     progress: Vec<SeedProgress>,
+    /// The keys of the records handed out mutably since [`Self::reset_changed`] last ran,
+    /// in hand-out order, with repeats (not upstream: so a reset visits only those).
+    changed: Vec<ObjectKey>,
+    /// Whether any record may have changed without its key in `changed` (a bulk
+    /// mutable access, or records given at construction).
+    all_changed: bool,
 }
 
 /// How far a [`NotifyRecords`] has checked and seeded the objects of one B-rep value,
@@ -380,9 +386,12 @@ impl PartialEq for NotifyRecords {
 
 impl From<BTreeMap<ObjectKey, Topology>> for NotifyRecords {
     fn from(map: BTreeMap<ObjectKey, Topology>) -> Self {
+        let all_changed = !map.is_empty();
         Self {
             map,
             progress: Vec::new(),
+            changed: Vec::new(),
+            all_changed,
         }
     }
 }
@@ -400,18 +409,35 @@ impl NotifyRecords {
         Self::default()
     }
 
+    /// Remembers that the record of `key` may change. Past one entry per record the list
+    /// is dropped for a full reset, so a store that is never reset stays bounded.
+    fn note_changed(&mut self, key: ObjectKey) {
+        if self.all_changed {
+            return;
+        }
+        if self.changed.len() > self.map.len() {
+            self.changed.clear();
+            self.all_changed = true;
+        } else {
+            self.changed.push(key);
+        }
+    }
+
     /// The record of `key`, made default first if it has none.
     pub fn or_default(&mut self, key: ObjectKey) -> &mut Topology {
+        self.note_changed(key);
         self.map.entry(key).or_default()
     }
 
     /// Sets the record of `key`, returning the previous one.
     pub fn insert(&mut self, key: ObjectKey, record: Topology) -> Option<Topology> {
+        self.note_changed(key);
         self.map.insert(key, record)
     }
 
     /// Mutable access to the record of `key`.
     pub fn get_mut(&mut self, key: &ObjectKey) -> Option<&mut Topology> {
+        self.note_changed(*key);
         self.map.get_mut(key)
     }
 
@@ -419,6 +445,7 @@ impl NotifyRecords {
     pub fn values_mut(
         &mut self,
     ) -> std::collections::btree_map::ValuesMut<'_, ObjectKey, Topology> {
+        self.all_changed = true;
         self.map.values_mut()
     }
 
@@ -431,13 +458,56 @@ impl NotifyRecords {
     /// Keeps the records `keep` accepts (it may also change them).
     pub fn retain(&mut self, keep: impl FnMut(&ObjectKey, &mut Topology) -> bool) {
         self.progress.clear();
+        self.all_changed = true;
         self.map.retain(keep);
     }
 
     /// Removes every record.
     pub fn clear(&mut self) {
         self.progress.clear();
+        self.changed.clear();
+        self.all_changed = false;
         self.map.clear();
+    }
+
+    /// Makes the store hold a default record for exactly the keys `keys` (ascending,
+    /// without repeats) and no other, as clearing it and adding a default record for
+    /// each key would, and forgets the seeding progress, as [`Self::retain`] does. Only
+    /// the records handed out mutably since the last reset (or all, after a bulk
+    /// access) are reset; the others are default already. The key sets are matched in
+    /// one ascending walk of both.
+    pub(crate) fn reset_to_keys(&mut self, keys: &[ObjectKey]) {
+        self.progress.clear();
+        if self.all_changed {
+            for record in self.map.values_mut() {
+                *record = Topology::default();
+            }
+        } else {
+            for key in &self.changed {
+                if let Some(record) = self.map.get_mut(key) {
+                    *record = Topology::default();
+                }
+            }
+        }
+        self.changed.clear();
+        self.all_changed = false;
+        let (mut gone, mut new) = (Vec::new(), Vec::new());
+        let mut wanted = keys.iter().peekable();
+        for key in self.map.keys() {
+            while let Some(&w) = wanted.next_if(|w| *w < key) {
+                new.push(w);
+            }
+            if wanted.next_if(|w| *w == key).is_none() {
+                gone.push(*key);
+            }
+        }
+        new.extend(wanted.copied());
+        for key in gone {
+            self.map.remove(&key);
+        }
+        for key in new {
+            self.map.insert(key, Topology::default());
+        }
     }
 
     /// The records and the progress kept for `id` on the B-rep value `instance` (made
@@ -454,7 +524,7 @@ impl NotifyRecords {
             .progress
             .iter()
             .position(|p| p.id == id && Arc::ptr_eq(&p.instance, &instance));
-        let Self { map, progress } = self;
+        let Self { map, progress, .. } = self;
         let p = if let Some(at) = at {
             progress.get_mut(at)
         } else {
@@ -475,6 +545,7 @@ impl TopologyRecords for NotifyRecords {
     }
 
     fn topology_mut(&mut self, key: ObjectKey) -> Option<&mut Topology> {
+        self.note_changed(key);
         self.map.get_mut(&key)
     }
 }
@@ -1280,6 +1351,48 @@ impl TrackTopologyChanges {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `reset_to_keys` leaves exactly the map a fresh store seeded with the keys has,
+    /// whatever was changed (one key, through each mutable access, or in bulk), added or
+    /// removed before it.
+    #[test]
+    fn reset_to_keys_matches_a_fresh_seeding() {
+        let fresh = |keys: &[u64]| -> BTreeMap<ObjectKey, Topology> {
+            keys.iter()
+                .map(|&k| (ObjectKey(k), Topology::default()))
+                .collect()
+        };
+        let keys = |ks: &[u64]| -> Vec<ObjectKey> { ks.iter().map(|&k| ObjectKey(k)).collect() };
+        let mut r = NotifyRecords::from(fresh(&[1, 2, 3, 5]));
+        r.reset_to_keys(&keys(&[1, 2, 3, 5]));
+        assert_eq!(*r, fresh(&[1, 2, 3, 5]));
+        // single changes through each access, a new key, then a smaller and larger set
+        r.get_mut(&ObjectKey(2)).unwrap().set_user_index1(7);
+        r.or_default(ObjectKey(9)).set_user_index1(8);
+        r.insert(ObjectKey(3), {
+            let mut t = Topology::default();
+            t.set_user_index1(9);
+            t
+        });
+        r.topology_mut(ObjectKey(5)).unwrap().set_user_index1(10);
+        r.reset_to_keys(&keys(&[0, 2, 3, 4, 5, 11]));
+        assert_eq!(*r, fresh(&[0, 2, 3, 4, 5, 11]));
+        // a bulk change
+        for t in r.values_mut() {
+            t.set_user_index1(1);
+        }
+        r.reset_to_keys(&keys(&[2, 4]));
+        assert_eq!(*r, fresh(&[2, 4]));
+        // past the change list's bound
+        for _ in 0..10 {
+            r.get_mut(&ObjectKey(4)).unwrap().set_user_index1(3);
+        }
+        r.get_mut(&ObjectKey(2)).unwrap().set_user_index1(4);
+        r.reset_to_keys(&keys(&[2, 4]));
+        assert_eq!(*r, fresh(&[2, 4]));
+        r.reset_to_keys(&[]);
+        assert!(r.is_empty());
+    }
 
     /// A test key per entity: `kind * 1_000_000 + index` (vertex 1, edge 2, face 3).
     fn dep_key(e: EntityRef) -> ObjectKey {

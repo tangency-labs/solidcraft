@@ -780,21 +780,10 @@ fn reseed_records(
         keys.sort_unstable();
     }
     keys.dedup();
-    // (both ascending: `retain` visits the records in key order)
-    let mut next = 0;
-    records.retain(|key, record| {
-        while keys.get(next).is_some_and(|k| k < key) {
-            next += 1;
-        }
-        let keep = keys.get(next) == Some(key);
-        *record = topo::Topology::default();
-        keep
-    });
-    if records.len() != keys.len() {
-        for key in keys {
-            records.or_default(key);
-        }
-    }
+    // (not upstream) only the records the last edits changed are reset and only the
+    // difference in keys is removed or added, so a stitch's many edits do not each
+    // rebuild the whole map
+    records.reset_to_keys(&keys);
 }
 
 /// The kinds of topology keys with their class type codes (`GetType`), by kind number:

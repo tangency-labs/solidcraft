@@ -817,6 +817,35 @@ impl ArenaNotifyState {
         }
     }
 
+    /// [`Self::with_attributes_of`] reusing the records of an earlier state
+    /// ([`Self::into_records`]): they end exactly as [`Self::new`] makes them, a default
+    /// record for every object of `b` and the B-rep and no other, but only the records
+    /// the earlier edit changed are reset and only the difference in keys is removed or
+    /// added. For a caller that makes many edits of a large B-rep in a row (the stitch's
+    /// glues), where a fresh map per edit is quadratic.
+    pub(crate) fn with_attributes_of_reusing(
+        mut records: crate::topology::topology::NotifyRecords,
+        b: &mut Brep,
+    ) -> Self {
+        use crate::topology::loopuse::notify_ref;
+        let mut keys: Vec<_> = brep_entities(b)
+            .into_iter()
+            .map(|e| notify_ref(e).key)
+            .collect();
+        keys.sort_unstable();
+        keys.dedup();
+        records.reset_to_keys(&keys);
+        Self {
+            records,
+            attributes: b.take_attributes(),
+        }
+    }
+
+    /// The records, for [`Self::with_attributes_of_reusing`].
+    pub(crate) fn into_records(self) -> crate::topology::topology::NotifyRecords {
+        self.records
+    }
+
     /// [`Self::new`] holding `b`'s own attributes ([`Brep::add_attribute`], keyed by the
     /// same arena identities), so the edit's notifications propagate them with SMLib's
     /// handlers, as upstream's live on the objects the edit changes. `b` holds none

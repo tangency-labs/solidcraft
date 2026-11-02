@@ -2473,8 +2473,11 @@ pub(crate) fn glue_edges_general(
     delete: EdgeId,
     inside_faceuses: Option<&[FaceuseId]>,
 ) -> Result<()> {
-    // (not upstream) with `b`'s own attributes, given back afterwards
-    let mut state = crate::topology::brep::p2::ArenaNotifyState::with_attributes_of(b);
+    // (not upstream) with `b`'s own attributes, given back afterwards, and the kernel's
+    // reused record map (the same records a fresh state has)
+    let (tag, records) = take_arena_records(k, b);
+    let mut state =
+        crate::topology::brep::p2::ArenaNotifyState::with_attributes_of_reusing(records, b);
     let r = Context::with_notification_context(k, |k, context| {
         let mut env = state.env(Some(context));
         crate::topology::brep::p7::glue_edges_general(
@@ -2490,8 +2493,29 @@ pub(crate) fn glue_edges_general(
         )
     });
     let restored = state.restore_attributes(b);
+    k.arena_notify_records = (tag, state.into_records());
     r??;
     restored
+}
+
+/// The kernel's reused arena record map for `b` ([`Kernel::arena_notify_records`]) and
+/// `b`'s progress tag to keep it under: the map kept for this B-rep value, or an empty
+/// one when it was kept for another value (record keys are arena identities, which
+/// repeat across B-reps).
+fn take_arena_records(
+    k: &mut Kernel,
+    b: &mut Brep,
+) -> (
+    std::sync::Weak<()>,
+    crate::topology::topology::NotifyRecords,
+) {
+    let tag = std::sync::Arc::downgrade(&b.progress_tag());
+    let (bound, records) = std::mem::take(&mut k.arena_notify_records);
+    if bound.ptr_eq(&tag) {
+        (tag, records)
+    } else {
+        (tag, crate::topology::topology::NotifyRecords::new())
+    }
 }
 
 /// `SmBrep::SqueezeEdge(edge, keep)` (unit `topology.brep_p3`,
@@ -2529,8 +2553,11 @@ pub(crate) fn make_vertex_split_edge(
     e: EdgeId,
     t: f64,
 ) -> Result<(Option<EdgeId>, Option<EdgeId>, Option<VertexId>)> {
-    // a default record per object (upstream every object has its `SmTopology` part)
-    let mut state = crate::topology::brep::p2::ArenaNotifyState::with_attributes_of(b);
+    // a default record per object (upstream every object has its `SmTopology` part), in
+    // the kernel's reused record map
+    let (tag, records) = take_arena_records(k, b);
+    let mut state =
+        crate::topology::brep::p2::ArenaNotifyState::with_attributes_of_reusing(records, b);
     // The kernel's context is the split's own `k`; no separate object context.
     let out = crate::topology::brep::p9::make_vertex_split_edge(
         k,
@@ -2541,6 +2568,7 @@ pub(crate) fn make_vertex_split_edge(
         &|edge, kind| local_identity(kind, edge.index()),
     );
     let restored = state.restore_attributes(b);
+    k.arena_notify_records = (tag, state.into_records());
     let out = out?;
     restored?;
     if !out.split {
@@ -2828,6 +2856,38 @@ mod tests {
     use super::*;
     use crate::geom::object::NotifyOperation;
     use crate::topology::EdgeuseOwner;
+
+    /// The kernel's reused arena record map is bound to one B-rep value: a later edit of
+    /// the same value starts on a fresh seeding of it whatever the edit before changed,
+    /// and an edit of another value (here a box with the same arena layout, so the same
+    /// keys) starts on an empty map, never on the other's records.
+    #[test]
+    fn arena_records_are_bound_to_one_brep() {
+        use crate::primitive::api_primitives::create_box;
+        use crate::topology::brep::p2::ArenaNotifyState;
+        let mut k = Kernel::default();
+        let mut b1 = create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0).unwrap();
+        let mut b2 = create_box(&mut k, Point3::ZERO, 4.0, 5.0, 6.0).unwrap();
+        let fresh = |b: &Brep| (*ArenaNotifyState::new(b).records).clone();
+        // an edit of b1 that changes a record
+        let edit = |k: &mut Kernel, b: &mut Brep, reused: bool| {
+            let (tag, records) = take_arena_records(k, b);
+            assert_eq!(records.is_empty(), !reused);
+            let mut state = ArenaNotifyState::with_attributes_of_reusing(records, b);
+            assert_eq!(*state.records, fresh(b));
+            let key = *state.records.keys().next().unwrap();
+            state.records.get_mut(&key).unwrap().set_user_index1(5);
+            state.restore_attributes(b).unwrap();
+            k.arena_notify_records = (tag, state.into_records());
+        };
+        edit(&mut k, &mut b1, false);
+        edit(&mut k, &mut b1, true);
+        edit(&mut k, &mut b2, false);
+        edit(&mut k, &mut b1, false);
+        // a copy is another value
+        let mut copy = b1.clone();
+        edit(&mut k, &mut copy, false);
+    }
 
     #[test]
     fn actual_stitch_split_keeps_curve_identity_and_refusal_prefix() {

@@ -1577,6 +1577,16 @@ pub struct Kernel {
     /// to the records of a fresh seeding, so it never carries state between edits.
     #[doc(hidden)]
     pub notify_records: crate::topology::topology::NotifyRecords,
+    /// Not upstream: the arena-identity record map of the last stitch glue or split
+    /// (`heal::stitch::p1`) and the B-rep value it was kept for (its progress tag, held
+    /// weakly), kept only to reuse its allocation. An edit of another B-rep value starts
+    /// on an empty map instead, and every edit resets it to a default record for every
+    /// object of its B-rep, so it never carries state between edits.
+    #[doc(hidden)]
+    pub arena_notify_records: (
+        std::sync::Weak<()>,
+        crate::topology::topology::NotifyRecords,
+    ),
 }
 
 impl Default for Kernel {
@@ -1600,6 +1610,10 @@ impl Kernel {
             fixes: UpstreamFixes::default(),
             cancel: None,
             notify_records: crate::topology::topology::NotifyRecords::new(),
+            arena_notify_records: (
+                std::sync::Weak::new(),
+                crate::topology::topology::NotifyRecords::new(),
+            ),
         }
     }
 
