@@ -18,6 +18,12 @@ use solidcraft_geom::{Loop2, MAX_BEZIER_DEGREE, Seg2, Vec2};
 
 use crate::{IoError, Result};
 
+mod file_model;
+pub use file_model::{
+    DxfFile, DxfGeometryBounds, Entity as DxfFileEntity, EntityWeight as DxfEntityWeight, Layer as DxfFileLayer, LayerId as DxfLayerId,
+    StandardWeight as DxfStandardWeight,
+};
+
 /// A layer's linetype, defined in the file's LTYPE table so a viewer needs nothing else.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DxfLinetype {
@@ -245,22 +251,96 @@ impl DxfShape {
     }
 }
 
+/// A fallible bounded sink for the owned-file path. Formatting remains exactly that of Out.
+struct BoundedDxfString<'a> {
+    text: &'a mut String,
+    limit: usize,
+    failure: Option<&'static str>,
+}
+
+impl std::fmt::Write for BoundedDxfString<'_> {
+    fn write_str(&mut self, value: &str) -> std::fmt::Result {
+        if self.failure.is_some() {
+            return Err(std::fmt::Error);
+        }
+        if self.text.len().checked_add(value.len()).is_none_or(|n| n > self.limit) {
+            self.failure = Some("DXF file output exceeds the drawing-byte limit");
+            return Err(std::fmt::Error);
+        }
+        if self.text.try_reserve(value.len()).is_err() {
+            self.failure = Some("DXF file output allocation failed");
+            return Err(std::fmt::Error);
+        }
+        self.text.push_str(value);
+        Ok(())
+    }
+}
+
+/// The existing twelve-decimal DXF spelling, shared by output and owned admission.
+fn number_value(value: f64) -> std::result::Result<String, &'static str> {
+    let mut text = String::new();
+    // A finite f64 in fixed notation needs at most 323 bytes, including sign.
+    let mut sink = BoundedDxfString { text: &mut text, limit: 384, failure: None };
+    if write!(sink, "{value:.12}").is_err() {
+        return Err(sink.failure.unwrap_or("DXF number formatting failed"));
+    }
+    let end = text.trim_end_matches('0').len();
+    text.truncate(end);
+    if text.ends_with('.') {
+        text.try_reserve(1).map_err(|_| "DXF number allocation failed")?;
+        text.push('0');
+    }
+    if text == "-0.0" {
+        text.clear();
+        text.push_str("0.0");
+    }
+    Ok(text)
+}
+
 /// Group codes and handles, in file order.
 struct Out {
     s: String,
     next: u64,
+    limit: Option<usize>,
+    failure: Option<&'static str>,
 }
 
 impl Out {
+    fn new(next: u64, limit: Option<usize>) -> Self {
+        Self { s: String::new(), next, limit, failure: None }
+    }
+    fn check(&self) -> Result<()> {
+        match self.failure {
+            Some(message) => Err(IoError::Invalid(message.into())),
+            None => Ok(()),
+        }
+    }
     fn code(&mut self, c: i32, v: impl std::fmt::Display) {
-        let _ = write!(self.s, "{c:>3}\n{v}\n");
+        if self.failure.is_some() {
+            return;
+        }
+        if let Some(limit) = self.limit {
+            let mut sink = BoundedDxfString { text: &mut self.s, limit, failure: None };
+            if write!(sink, "{c:>3}\n{v}\n").is_err() {
+                self.failure = Some(sink.failure.unwrap_or("DXF file formatting failed"));
+            }
+        } else {
+            let _ = write!(self.s, "{c:>3}\n{v}\n");
+        }
     }
     /// A real number: up to twelve decimals, at least one.
     fn num(&mut self, c: i32, v: f64) {
-        let text = format!("{:.12}", if v.is_finite() { v } else { 0.0 });
-        let text = text.trim_end_matches('0');
-        let text = if text.ends_with('.') { format!("{text}0") } else { text.to_string() };
-        self.code(c, if text == "-0.0" { "0.0" } else { text.as_str() });
+        if self.failure.is_some() {
+            return;
+        }
+        if self.limit.is_some() && !v.is_finite() {
+            self.failure = Some("DXF file contains a non-finite output number");
+            return;
+        }
+        match number_value(if v.is_finite() { v } else { 0.0 }) {
+            Ok(text) => self.code(c, text),
+            Err(error) => self.failure = Some(error),
+        }
     }
     /// A point in the plane at height 0: codes `c`, `c + 10`, `c + 20`.
     fn point(&mut self, c: i32, p: Vec2) {
@@ -275,7 +355,16 @@ impl Out {
     }
     fn handle(&mut self) -> String {
         let h = format!("{:X}", self.next);
-        self.next += 1;
+        if self.limit.is_some() {
+            match self.next.checked_add(1) {
+                Some(next) => self.next = next,
+                None => {
+                    self.failure.get_or_insert("DXF file handle space exhausted");
+                }
+            }
+        } else {
+            self.next += 1;
+        }
         h
     }
     /// The start of a symbol table; returns its handle.
@@ -348,18 +437,6 @@ fn text_value(s: &str) -> Result<String> {
 /// (layer `0` is always there). A TEXT character beyond U+FFFF returns an error naming the
 /// character, its position, the entity and its layer; no drawing is returned on failure.
 pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<String> {
-    let mut pts = Vec::new();
-    for e in entities {
-        e.shape.sample(&mut pts);
-    }
-    pts.retain(|p| p.is_finite());
-    let (lo, hi) = pts
-        .iter()
-        .fold(None, |acc: Option<(Vec2, Vec2)>, p| {
-            Some(acc.map_or((*p, *p), |(lo, hi)| (Vec2::new(lo.x.min(p.x), lo.y.min(p.y)), Vec2::new(hi.x.max(p.x), hi.y.max(p.y)))))
-        })
-        .unwrap_or((Vec2::ZERO, Vec2::ZERO));
-
     let mut layer_list = vec![DxfLayer::new("0", 7)];
     for l in layers {
         if !layer_list.iter().any(|x| x.name == l.name) {
@@ -367,8 +444,279 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
         }
     }
 
+    let layers = layer_list.iter().map(|layer| LayerView { name: &layer.name, color: layer.color, linetype: layer.linetype, weight: None });
+    let entities = entities.iter().map(|entity| Ok(EntityView { layer: &entity.layer, shape: &entity.shape, weight: None }));
+    write_drawing_views(layers, entities, None, None)
+}
+
+// These limits bound work in the owned-file entry point, not the legacy writer.
+// A unit is one sampled extent point or one additional SPLINE knot/weight.
+const MAX_DXF_FILE_VALUES: usize = 1_000_000;
+
+#[derive(Clone, Copy)]
+struct LayerView<'a> {
+    name: &'a str,
+    color: i16,
+    linetype: DxfLinetype,
+    weight: Option<DxfStandardWeight>,
+}
+
+#[derive(Clone, Copy)]
+struct EntityView<'a> {
+    layer: &'a str,
+    shape: &'a DxfShape,
+    weight: Option<DxfEntityWeight>,
+}
+
+/// Write the currently supported owned-file subset as AutoCAD 2000 (`AC1015`).
+/// Layers, entities and their stored optional lineweights retain declaration order and
+/// presence: omitted, ByLayer, ByBlock, Default and an explicit physical weight stay distinct.
+/// This uses the same geometry, handles, tables and numeric/text spelling as
+/// [`write_dxf_drawing`]; it does not implement X3 import or X4 alignment/transform policy.
+///
+/// Unlike that legacy entry point, this refuses invalid or non-finite geometry rather than
+/// replacing numbers with zero. It accepts positive-radius circles/arcs, nondegenerate
+/// ellipses, polylines of at least two points and positive-weight clamped splines of supported
+/// degree. TEXT is limited to 250 BMP characters and is refused rather than truncated.
+/// Geometry whose required positive values or distinct points/knot spans collapse under
+/// the existing twelve-decimal spelling is refused; legacy numeric spelling is unchanged.
+/// Extents retain the existing sampled/control-polygon approximation, not analytic bounds.
+///
+/// Work is bounded to 1,024 layers, 1,000,000 entities and 1,000,000 cumulative sampled
+/// extent points plus spline knots/weights. Output, including its header, is limited to the
+/// existing 64 MiB drawing-byte budget. Allocation/budget failure returns no partial file.
+pub fn write_dxf_file(file: &DxfFile<DxfShape>) -> Result<String> {
+    write_dxf_file_limited(file, crate::MAX_DRAWING_BYTES, MAX_DXF_FILE_VALUES)
+}
+
+// Private tightening seam lets the resource boundary be checked with tiny original cases.
+fn write_dxf_file_limited(file: &DxfFile<DxfShape>, bytes: usize, values: usize) -> Result<String> {
+    let bytes = bytes.min(crate::MAX_DRAWING_BYTES);
+    let values = values.min(MAX_DXF_FILE_VALUES);
+    if file.layers().len() > 1_024 || file.entities().len() > 1_000_000 {
+        return Err(IoError::Invalid("DXF file metadata count exceeds the supported limit".into()));
+    }
+    let mut total = 0usize;
+    let mut samples = Vec::new();
+    let mut extents = None;
+    for (index, entity) in file.entities().iter().enumerate() {
+        // Resolve the file-scoped handle even though normal model insertion already checks it.
+        let layer = file.layer(entity.layer())?;
+        let shape = entity.geometry();
+        // Charge lengths before scanning any input-derived vector or sampling a curve.
+        let count = shape_work(shape)?;
+        total = total
+            .checked_add(count)
+            .filter(|n| *n <= values)
+            .ok_or_else(|| IoError::Invalid("DXF file geometry payload exceeds the supported limit".into()))?;
+        shape_preflight(shape)
+            .and_then(|()| shape_emission_preflight(shape))
+            .map_err(|error| IoError::Invalid(format!("DXF entity {} on layer {:?}: {error}", index + 1, layer.name())))?;
+        samples.clear();
+        samples.try_reserve(count).map_err(|_| IoError::Invalid("DXF extent allocation failed".into()))?;
+        shape.sample(&mut samples);
+        for point in &samples {
+            if !point.is_finite() {
+                return Err(IoError::Invalid(format!("DXF entity {} has non-finite derived extents", index + 1)));
+            }
+            extents = Some(extend_extents(extents, *point));
+        }
+    }
+    let layers =
+        file.layers().iter().map(|layer| LayerView { name: layer.name(), color: layer.color(), linetype: layer.linetype(), weight: layer.weight() });
+    let entities = file
+        .entities()
+        .iter()
+        .map(|entity| Ok(EntityView { layer: file.layer(entity.layer())?.name(), shape: entity.geometry(), weight: entity.weight() }));
+    write_drawing_views(layers, entities, Some(bytes), Some(extents.unwrap_or((Vec2::ZERO, Vec2::ZERO))))
+}
+
+fn shape_preflight(shape: &DxfShape) -> Result<()> {
+    let invalid = || IoError::Invalid("invalid or unsupported DXF geometry".into());
+    let finite = match shape {
+        DxfShape::Line(a, b) => a.is_finite() && b.is_finite(),
+        DxfShape::Polyline { points } => points.len() >= 2 && points.len() <= MAX_DXF_FILE_VALUES && points.iter().all(|p| p.is_finite()),
+        DxfShape::Circle { c, r } => c.is_finite() && r.is_finite() && *r > 0.0,
+        DxfShape::Arc { c, r, a0, a1 } => {
+            c.is_finite()
+                && r.is_finite()
+                && *r > 0.0
+                && a0.is_finite()
+                && a1.is_finite()
+                && (a1 - a0).is_finite()
+                && a0.to_radians().is_finite()
+                && a1.to_radians().is_finite()
+        }
+        DxfShape::Ellipse { c, major, ratio, t0, t1 } => {
+            c.is_finite()
+                && major.is_finite()
+                && major.len().is_finite()
+                && major.len() > 0.0
+                && ratio.is_finite()
+                && *ratio > 0.0
+                && *ratio <= 1.0
+                && t0.is_finite()
+                && t1.is_finite()
+                && (t1 - t0).is_finite()
+        }
+        DxfShape::Spline { degree, knots, ctrl, weights } => {
+            let degree = usize::from(*degree);
+            if degree == 0
+                || degree > MAX_BEZIER_DEGREE
+                || ctrl.len() <= degree
+                || ctrl.len() > MAX_DXF_FILE_VALUES
+                || ctrl.len().checked_add(degree + 1) != Some(knots.len())
+                || knots.len() > MAX_DXF_FILE_VALUES
+                || weights.as_ref().is_some_and(|w| w.len() != ctrl.len())
+            {
+                return Err(invalid());
+            }
+            let first = knots.first().copied().ok_or_else(invalid)?;
+            let last = knots.last().copied().ok_or_else(invalid)?;
+            ctrl.iter().all(|p| p.is_finite())
+                && knots.iter().all(|k| k.is_finite())
+                && knots.windows(2).all(|pair| matches!(pair, [a, b] if a <= b))
+                && first < last
+                && knots.iter().take(degree + 1).all(|k| *k == first)
+                && knots.iter().rev().take(degree + 1).all(|k| *k == last)
+                && weights.as_ref().is_none_or(|w| w.iter().all(|v| v.is_finite() && *v > 0.0))
+        }
+        DxfShape::Text { at, height, angle_deg, text } => {
+            if text.len() > 1_000 || text.chars().count() > 250 || text.chars().any(|c| u32::from(c) > 0xffff) {
+                return Err(IoError::Invalid("DXF owned TEXT supports at most 250 BMP characters; no text was truncated".into()));
+            }
+            at.is_finite() && height.is_finite() && *height > 0.0 && angle_deg.is_finite() && angle_deg.to_radians().is_finite()
+        }
+    };
+    if !finite {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
+fn shape_work(shape: &DxfShape) -> Result<usize> {
+    match shape {
+        DxfShape::Line(..) | DxfShape::Circle { .. } => Ok(2),
+        DxfShape::Polyline { points } => Ok(points.len()),
+        DxfShape::Arc { .. } => Ok(65),
+        DxfShape::Ellipse { .. } => Ok(129),
+        DxfShape::Text { .. } => Ok(4),
+        DxfShape::Spline { knots, ctrl, weights, .. } => ctrl
+            .len()
+            .checked_add(knots.len())
+            .and_then(|n| n.checked_add(weights.as_ref().map_or(0, Vec::len)))
+            .ok_or_else(|| IoError::Invalid("DXF spline payload size overflow".into())),
+    }
+}
+
+fn emitted_number(value: f64) -> Result<f64> {
+    let text = number_value(value).map_err(|message| IoError::Invalid(message.into()))?;
+    text.parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite())
+        .ok_or_else(|| IoError::Invalid("DXF number cannot be represented by the existing spelling".into()))
+}
+
+fn emitted_point(point: Vec2) -> Result<Vec2> {
+    Ok(Vec2::new(emitted_number(point.x)?, emitted_number(point.y)?))
+}
+
+// This is admission to the existing writer, not a new number-format policy.
+fn shape_emission_preflight(shape: &DxfShape) -> Result<()> {
+    let collapse = || IoError::Invalid("DXF geometry loses a required positive value or distinct point/knot span at twelve decimals".into());
+    let positive = |value| -> Result<()> { if emitted_number(value)? > 0.0 { Ok(()) } else { Err(collapse()) } };
+    match shape {
+        DxfShape::Line(a, b) => {
+            if emitted_point(*a)? == emitted_point(*b)? {
+                return Err(collapse());
+            }
+        }
+        DxfShape::Polyline { points } => {
+            let mut previous = None;
+            let mut distinct = false;
+            for point in points {
+                let emitted = emitted_point(*point)?;
+                if let Some((old, last)) = previous {
+                    if old != *point && last == emitted {
+                        return Err(collapse());
+                    }
+                    distinct |= last != emitted;
+                }
+                previous = Some((*point, emitted));
+            }
+            if !distinct {
+                return Err(collapse());
+            }
+        }
+        DxfShape::Circle { r, .. } => positive(*r)?,
+        DxfShape::Arc { r, a0, a1, .. } => {
+            positive(*r)?;
+            let span = emitted_number(*a1)? - emitted_number(*a0)?;
+            if !span.is_finite() || span.rem_euclid(360.0) == 0.0 {
+                return Err(collapse());
+            }
+        }
+        DxfShape::Ellipse { major, ratio, t0, t1, .. } => {
+            positive(*ratio)?;
+            if emitted_point(*major)? == Vec2::ZERO || emitted_number(*t0)? == emitted_number(*t1)? {
+                return Err(collapse());
+            }
+        }
+        DxfShape::Spline { knots, ctrl, weights, .. } => {
+            let mut previous = None;
+            for knot in knots {
+                let emitted = emitted_number(*knot)?;
+                if let Some((old, last)) = previous
+                    && old < *knot
+                    && last >= emitted
+                {
+                    return Err(collapse());
+                }
+                previous = Some((*knot, emitted));
+            }
+            let mut first = None;
+            let mut distinct = false;
+            for point in ctrl {
+                let emitted = emitted_point(*point)?;
+                distinct |= first.is_some_and(|first| first != emitted);
+                first.get_or_insert(emitted);
+            }
+            if !distinct {
+                return Err(collapse());
+            }
+            for weight in weights.iter().flatten() {
+                positive(*weight)?;
+            }
+        }
+        DxfShape::Text { height, .. } => positive(*height)?,
+    }
+    Ok(())
+}
+
+fn extend_extents(extents: Option<(Vec2, Vec2)>, point: Vec2) -> (Vec2, Vec2) {
+    extents.map_or((point, point), |(lo, hi)| (Vec2::new(lo.x.min(point.x), lo.y.min(point.y)), Vec2::new(hi.x.max(point.x), hi.y.max(point.y))))
+}
+
+fn write_drawing_views<'a, L, E>(layers: L, entities: E, limit: Option<usize>, extents: Option<(Vec2, Vec2)>) -> Result<String>
+where
+    L: Iterator<Item = LayerView<'a>> + Clone + ExactSizeIterator,
+    E: Iterator<Item = Result<EntityView<'a>>> + Clone,
+{
+    let (lo, hi) = match extents {
+        Some(extents) => extents,
+        None => {
+            // Legacy path retains its existing permissive sampled extents.
+            let mut pts = Vec::new();
+            for e in entities.clone() {
+                e?.shape.sample(&mut pts);
+            }
+            pts.retain(|p| p.is_finite());
+            pts.iter().fold(None, |acc, point| Some(extend_extents(acc, *point))).unwrap_or((Vec2::ZERO, Vec2::ZERO))
+        }
+    };
+
     // Everything but the header, which needs the handle seed.
-    let mut o = Out { s: String::new(), next: 0x20 };
+    let mut o = Out::new(0x20, limit);
     let (model, paper) = (o.handle(), o.handle());
     let root = o.handle();
 
@@ -420,7 +768,7 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
         ("Continuous", "Solid line", &[]),
         ("DASHED", "Dashed __ __ __ __ __ __ __ __ __ __", &[12.7, -6.35]),
     ];
-    if layer_list.iter().any(|l| l.linetype == DxfLinetype::Hidden) {
+    if layers.clone().any(|l| l.linetype == DxfLinetype::Hidden) {
         linetypes.push(("HIDDEN", "Hidden edges", &[2.0, -1.0]));
     }
     let t = o.table("LTYPE", linetypes.len());
@@ -438,13 +786,16 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
         }
     }
     o.code(0, "ENDTAB");
-    let t = o.table("LAYER", layer_list.len());
-    for l in &layer_list {
+    let t = o.table("LAYER", layers.len());
+    for l in layers {
         o.record("LAYER", "AcDbLayerTableRecord", &t);
-        o.code(2, &l.name);
+        o.code(2, l.name);
         o.code(70, 0);
         o.code(62, l.color);
         o.code(6, l.linetype.name());
+        if let Some(weight) = l.weight {
+            o.code(370, weight.code());
+        }
     }
     o.code(0, "ENDTAB");
     // The one text style, which a TEXT entity uses when it names none.
@@ -503,8 +854,9 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
 
     o.code(0, "SECTION");
     o.code(2, "ENTITIES");
-    for (index, e) in entities.iter().enumerate() {
-        let kind = match &e.shape {
+    for (index, e) in entities.enumerate() {
+        let e = e?;
+        let kind = match e.shape {
             DxfShape::Line(..) => "LINE",
             DxfShape::Polyline { .. } => "LWPOLYLINE",
             DxfShape::Circle { .. } => "CIRCLE",
@@ -518,8 +870,11 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
         o.code(5, h);
         o.code(330, &model);
         o.code(100, "AcDbEntity");
-        o.code(8, if e.layer.trim().is_empty() { "0" } else { e.layer.as_str() });
-        match &e.shape {
+        o.code(8, if e.layer.trim().is_empty() { "0" } else { e.layer });
+        if let Some(weight) = e.weight {
+            o.code(370, weight.group370());
+        }
+        match e.shape {
             DxfShape::Polyline { points } => {
                 o.code(100, "AcDbPolyline");
                 o.code(90, points.len());
@@ -597,6 +952,7 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
                 o.code(73, 0);
             }
         }
+        o.check()?;
     }
     o.code(0, "ENDSEC");
 
@@ -619,7 +975,8 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
     o.code(0, "ENDSEC");
     o.code(0, "EOF");
 
-    let mut head = Out { s: String::new(), next: 0 };
+    o.check()?;
+    let mut head = Out::new(0, limit);
     head.code(0, "SECTION");
     head.code(2, "HEADER");
     head.code(9, "$ACADVER");
@@ -639,7 +996,17 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
     head.code(9, "$EXTMAX");
     head.point(10, hi);
     head.code(0, "ENDSEC");
-    Ok(head.s + &o.s)
+    head.check()?;
+    if let Some(limit) = limit {
+        if head.s.len().checked_add(o.s.len()).is_none_or(|n| n > limit) {
+            return Err(IoError::Invalid("DXF file output exceeds the drawing-byte limit".into()));
+        }
+        head.s.try_reserve_exact(o.s.len()).map_err(|_| IoError::Invalid("DXF file output allocation failed".into()))?;
+        head.s.push_str(&o.s);
+        Ok(head.s)
+    } else {
+        Ok(head.s + &o.s)
+    }
 }
 
 #[cfg(test)]
@@ -1126,5 +1493,284 @@ mod tests {
         let after = |var: &str| &p[p.iter().position(|(c, v)| (*c, v.as_str()) == (9, var)).unwrap() + 1..];
         assert_eq!(&after("$EXTMIN")[..2], &[(10, "27.0".to_string()), (20, "6.0".to_string())]);
         assert_eq!(&after("$EXTMAX")[..2], &[(10, "30.0".to_string()), (20, "18.0".to_string())]);
+    }
+    #[test]
+    fn owned_file_and_legacy_drawing_have_identical_bytes_without_weights() {
+        assert_eq!(write_dxf_file(&DxfFile::new().unwrap()).unwrap(), write_dxf_drawing(&[], &[]).unwrap());
+        let shapes = vec![
+            DxfShape::Line(Vec2::new(-0.0, -1.25), Vec2::new(1e-15, 8.0)),
+            DxfShape::Polyline { points: vec![Vec2::ZERO, Vec2::X, Vec2::new(4.0, -2.0)] },
+            DxfShape::Circle { c: Vec2::new(3.0, 2.0), r: 2.0 },
+            DxfShape::Arc { c: Vec2::ZERO, r: 3.0, a0: 350.0, a1: 20.0 },
+            DxfShape::Ellipse { c: Vec2::new(-2.0, 3.0), major: Vec2::new(4.0, 2.0), ratio: 0.5, t0: 0.0, t1: TAU },
+            bezier_spline(&[Vec2::ZERO, Vec2::new(1.0, 2.0), Vec2::X], None),
+            bezier_spline(&[Vec2::ZERO, Vec2::new(1.0, 2.0), Vec2::X], Some(vec![1.0, 0.5, 1.0])),
+            DxfShape::Text { at: Vec2::new(5.0, 6.0), height: 2.0, angle_deg: 90.0, text: "中 ° %%d\nA".into() },
+        ];
+        for linetype in [DxfLinetype::Continuous, DxfLinetype::Dashed, DxfLinetype::Hidden] {
+            let layers = [DxfLayer { name: "CUT".into(), color: 3, linetype }];
+            let legacy: Vec<_> = shapes.iter().cloned().map(|shape| DxfEntity { layer: "CUT".into(), shape }).collect();
+            let mut file = DxfFile::new().unwrap();
+            let cut = file.declare_layer("CUT", 3, linetype, None).unwrap();
+            for shape in &shapes {
+                file.push(cut, shape.clone(), None).unwrap();
+            }
+            assert_eq!(write_dxf_file(&file).unwrap(), write_dxf_drawing(&layers, &legacy).unwrap());
+        }
+    }
+
+    #[test]
+    fn owned_layer_table_preserves_order_weight_zero_and_omission() {
+        let mut file = DxfFile::<DxfShape>::new().unwrap();
+        for (name, code, linetype) in
+            [("CUT", Some(50), DxfLinetype::Dashed), ("ZERO", Some(0), DxfLinetype::Hidden), ("NOTES", None, DxfLinetype::Continuous)]
+        {
+            file.declare_layer(name, 3, linetype, code.map(|c| DxfStandardWeight::from_code(c).unwrap())).unwrap();
+        }
+        let output = write_dxf_file(&file).unwrap();
+        let p = pairs(&output);
+        let records = table_records(&p, "LAYER");
+        assert_eq!(records.iter().map(|r| field(r, 2)).collect::<Vec<_>>(), ["0", "CUT", "ZERO", "NOTES"]);
+        let weights: Vec<Vec<_>> = records.iter().map(|r| r.iter().filter(|(c, _)| *c == 370).map(|(_, v)| v.as_str()).collect()).collect();
+        assert_eq!(weights, [vec![], vec!["50"], vec!["0"], vec![]]);
+        assert_eq!(records.iter().map(|r| field(r, 6)).collect::<Vec<_>>(), ["Continuous", "DASHED", "HIDDEN", "Continuous"]);
+        assert!(table_records(&p, "LTYPE").iter().any(|r| field(r, 2) == "HIDDEN"));
+        let layer_table = p.windows(2).position(|w| w[0] == (0, "TABLE".into()) && w[1] == (2, "LAYER".into())).unwrap();
+        assert!(p[layer_table..].iter().take_while(|(c, v)| (*c, v.as_str()) != (0, "ENDTAB")).any(|pair| pair == &(70, "4".into())));
+    }
+
+    #[test]
+    fn owned_entities_keep_every_stored_weight_distinct_from_inheritance() {
+        let mut file = DxfFile::new().unwrap();
+        let cut = file.declare_layer("CUT", 1, DxfLinetype::Continuous, Some(DxfStandardWeight::from_code(50).unwrap())).unwrap();
+        for weight in [
+            None,
+            Some(DxfEntityWeight::ByLayer),
+            Some(DxfEntityWeight::ByBlock),
+            Some(DxfEntityWeight::Default),
+            Some(DxfEntityWeight::Explicit(DxfStandardWeight::from_code(0).unwrap())),
+            Some(DxfEntityWeight::Explicit(DxfStandardWeight::from_code(211).unwrap())),
+        ] {
+            file.push(cut, DxfShape::Line(Vec2::ZERO, Vec2::X), weight).unwrap();
+        }
+        let output = write_dxf_file(&file).unwrap();
+        let records = entities(&output);
+        let weights: Vec<Vec<_>> = records.iter().map(|r| r.1.iter().filter(|(c, _)| *c == 370).map(|(_, v)| v.as_str()).collect()).collect();
+        assert_eq!(weights, [vec![], vec!["-1"], vec!["-2"], vec!["-3"], vec!["0"], vec!["211"]]);
+        assert!(records.iter().all(|r| field(&r.1, 8) == "CUT"));
+        assert_eq!(file.entities()[0].weight(), None);
+        assert_eq!(file.entities()[1].weight(), Some(DxfEntityWeight::ByLayer));
+    }
+
+    #[test]
+    fn rational_spline_weights_and_entity_lineweight_are_independent() {
+        let mut file = DxfFile::new().unwrap();
+        file.push(
+            file.default_layer(),
+            bezier_spline(&[Vec2::ZERO, Vec2::new(1.0, 2.0), Vec2::X], Some(vec![1.0, 0.5, 1.0])),
+            Some(DxfEntityWeight::ByBlock),
+        )
+        .unwrap();
+        let output = write_dxf_file(&file).unwrap();
+        let records = entities(&output);
+        assert_eq!(records[0].0, "SPLINE");
+        assert_eq!(values(&records[0], 41), [1.0, 0.5, 1.0]);
+        assert_eq!(values(&records[0], 370), [-2.0]);
+    }
+
+    #[test]
+    fn owned_geometry_refuses_nonfinite_fields_instead_of_zeroing_them() {
+        for shape in [
+            DxfShape::Line(Vec2::new(f64::NAN, 0.0), Vec2::X),
+            DxfShape::Polyline { points: vec![Vec2::ZERO, Vec2::new(0.0, f64::INFINITY)] },
+            DxfShape::Circle { c: Vec2::ZERO, r: f64::INFINITY },
+            DxfShape::Arc { c: Vec2::ZERO, r: 1.0, a0: 0.0, a1: f64::NAN },
+            DxfShape::Ellipse { c: Vec2::ZERO, major: Vec2::X, ratio: f64::NAN, t0: 0.0, t1: TAU },
+            DxfShape::Spline { degree: 1, knots: vec![0.0, 0.0, f64::INFINITY, f64::INFINITY], ctrl: vec![Vec2::ZERO, Vec2::X], weights: None },
+            bezier_spline(&[Vec2::ZERO, Vec2::X], Some(vec![1.0, f64::NAN])),
+            DxfShape::Text { at: Vec2::ZERO, height: 1.0, angle_deg: f64::INFINITY, text: "A".into() },
+        ] {
+            let mut file = DxfFile::new().unwrap();
+            file.push(file.default_layer(), shape, None).unwrap();
+            let error = write_dxf_file(&file).unwrap_err().to_string();
+            assert!(error.contains("DXF entity 1 on layer \"0\""), "{error}");
+        }
+    }
+
+    #[test]
+    fn owned_geometry_checks_structural_requirements_and_derived_extents() {
+        for shape in [
+            DxfShape::Polyline { points: vec![Vec2::ZERO] },
+            DxfShape::Circle { c: Vec2::ZERO, r: -1.0 },
+            DxfShape::Arc { c: Vec2::ZERO, r: 0.0, a0: 0.0, a1: 10.0 },
+            DxfShape::Ellipse { c: Vec2::ZERO, major: Vec2::ZERO, ratio: 0.5, t0: 0.0, t1: TAU },
+            DxfShape::Ellipse { c: Vec2::ZERO, major: Vec2::X, ratio: 2.0, t0: 0.0, t1: TAU },
+            DxfShape::Spline { degree: 1, knots: vec![0.0, 0.0, 1.0], ctrl: vec![Vec2::ZERO, Vec2::X], weights: None },
+            DxfShape::Spline { degree: 1, knots: vec![0.0, 1.0, 0.0, 1.0], ctrl: vec![Vec2::ZERO, Vec2::X], weights: None },
+            bezier_spline(&[Vec2::ZERO, Vec2::X], Some(vec![1.0])),
+            bezier_spline(&[Vec2::ZERO, Vec2::X], Some(vec![1.0, 0.0])),
+            DxfShape::Text { at: Vec2::ZERO, height: 0.0, angle_deg: 0.0, text: "A".into() },
+            DxfShape::Circle { c: Vec2::new(f64::MAX, 0.0), r: f64::MAX },
+            DxfShape::Text { at: Vec2::ZERO, height: f64::MAX, angle_deg: 0.0, text: "AAAA".into() },
+        ] {
+            let mut file = DxfFile::new().unwrap();
+            file.push(file.default_layer(), shape, None).unwrap();
+            assert!(write_dxf_file(&file).is_err());
+        }
+    }
+
+    #[test]
+    fn owned_text_accepts_250_bmp_characters_and_refuses_truncation() {
+        for text in ["中".repeat(250), "A\tB\n%%d °".into()] {
+            let shape = DxfShape::Text { at: Vec2::ZERO, height: 1.0, angle_deg: 0.0, text };
+            let mut file = DxfFile::new().unwrap();
+            file.push(file.default_layer(), shape.clone(), None).unwrap();
+            assert_eq!(write_dxf_file(&file).unwrap(), write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape }]).unwrap());
+        }
+        for text in ["A".repeat(251), "中".repeat(251), "😀".into(), format!("{}😀", "A".repeat(250))] {
+            let mut file = DxfFile::new().unwrap();
+            file.push(file.default_layer(), DxfShape::Text { at: Vec2::ZERO, height: 1.0, angle_deg: 0.0, text }, None).unwrap();
+            assert!(write_dxf_file(&file).unwrap_err().to_string().contains("250 BMP characters"));
+        }
+        let shape = DxfShape::Text { at: Vec2::ZERO, height: 1.0, angle_deg: 0.0, text: "A".repeat(251) };
+        let legacy = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape }]).unwrap();
+        assert_eq!(field(&entities(&legacy)[0].1, 1), "A".repeat(250));
+    }
+
+    #[test]
+    fn owned_work_budget_charges_curve_samples_and_spline_payload() {
+        for (shape, work) in [
+            (DxfShape::Arc { c: Vec2::ZERO, r: 1.0, a0: 0.0, a1: 90.0 }, 65),
+            (DxfShape::Ellipse { c: Vec2::ZERO, major: Vec2::X, ratio: 0.5, t0: 0.0, t1: TAU }, 129),
+            (bezier_spline(&[Vec2::ZERO, Vec2::new(1.0, 2.0), Vec2::X], Some(vec![1.0, 0.5, 1.0])), 12),
+        ] {
+            let mut file = DxfFile::new().unwrap();
+            file.push(file.default_layer(), shape, None).unwrap();
+            assert!(write_dxf_file_limited(&file, crate::MAX_DRAWING_BYTES, work).is_ok());
+            assert!(write_dxf_file_limited(&file, crate::MAX_DRAWING_BYTES, work - 1).unwrap_err().to_string().contains("geometry payload"));
+        }
+        let mut file = DxfFile::new().unwrap();
+        file.push(file.default_layer(), DxfShape::Arc { c: Vec2::ZERO, r: 1.0, a0: 0.0, a1: 90.0 }, None).unwrap();
+        file.push(file.default_layer(), DxfShape::Ellipse { c: Vec2::ZERO, major: Vec2::X, ratio: 0.5, t0: 0.0, t1: TAU }, None).unwrap();
+        assert!(write_dxf_file_limited(&file, crate::MAX_DRAWING_BYTES, 194).is_ok());
+        assert!(write_dxf_file_limited(&file, crate::MAX_DRAWING_BYTES, 193).is_err());
+    }
+
+    #[test]
+    fn owned_work_budget_is_admitted_before_large_geometry_is_scanned() {
+        let mut file = DxfFile::new().unwrap();
+        file.push(file.default_layer(), DxfShape::Polyline { points: vec![Vec2::new(f64::NAN, 0.0); 3] }, None).unwrap();
+        let error = write_dxf_file_limited(&file, crate::MAX_DRAWING_BYTES, 2).unwrap_err().to_string();
+        assert!(error.contains("geometry payload"), "{error}");
+        let mut file = DxfFile::new().unwrap();
+        for _ in 0..2 {
+            file.push(file.default_layer(), DxfShape::Line(Vec2::ZERO, Vec2::X), None).unwrap();
+        }
+        assert!(write_dxf_file_limited(&file, crate::MAX_DRAWING_BYTES, 4).is_ok());
+        assert!(write_dxf_file_limited(&file, crate::MAX_DRAWING_BYTES, 3).is_err());
+    }
+
+    #[test]
+    fn owned_byte_budget_includes_header_and_body_at_the_exact_boundary() {
+        let file = DxfFile::<DxfShape>::new().unwrap();
+        let full = write_dxf_file(&file).unwrap();
+        assert_eq!(write_dxf_file_limited(&file, full.len(), 0).unwrap(), full);
+        assert!(write_dxf_file_limited(&file, full.len() - 1, 0).unwrap_err().to_string().contains("drawing-byte limit"));
+        assert!(write_dxf_file_limited(&file, 0, 0).is_err());
+    }
+
+    #[test]
+    fn bounded_out_keeps_first_error_and_never_repairs_nonfinite_values() {
+        let mut out = Out::new(0x20, Some(0));
+        out.code(0, "SECTION");
+        let first = out.check().unwrap_err().to_string();
+        out.num(40, f64::NAN);
+        out.code(0, "EOF");
+        assert_eq!(out.check().unwrap_err().to_string(), first);
+        assert!(out.s.is_empty());
+        let mut out = Out::new(0x20, Some(100));
+        out.num(40, f64::NAN);
+        assert!(out.check().unwrap_err().to_string().contains("non-finite output number"));
+        assert!(out.s.is_empty());
+        let mut out = Out::new(u64::MAX, Some(100));
+        out.handle();
+        assert!(out.check().unwrap_err().to_string().contains("handle space"));
+    }
+
+    #[test]
+    fn bounded_and_legacy_numbers_have_identical_finite_spelling() {
+        for value in [-0.0, -1e-15, 1e-15, -1.25, 2.0, 12345.6789012345, f64::MIN_POSITIVE, f64::MAX, -f64::MAX] {
+            // Frozen legacy expression is a spelling compatibility check, not a geometry oracle.
+            let expected = format!("{value:.12}");
+            let expected = expected.trim_end_matches('0');
+            let expected = if expected.ends_with('.') { format!("{expected}0") } else { expected.to_string() };
+            let expected = if expected == "-0.0" { "0.0" } else { expected.as_str() };
+            let mut old = Out::new(0, None);
+            let mut bounded = Out::new(0, Some(1024));
+            old.num(10, value);
+            bounded.num(10, value);
+            bounded.check().unwrap();
+            assert_eq!(old.s, bounded.s);
+            assert_eq!(bounded.s, format!(" 10\n{expected}\n"));
+        }
+    }
+
+    #[test]
+    fn owned_geometry_refuses_literal_positive_values_rounded_to_zero() {
+        assert_eq!(number_value(1e-20).unwrap(), "0.0");
+        let mut representable = DxfFile::new().unwrap();
+        representable.push(representable.default_layer(), DxfShape::Circle { c: Vec2::ZERO, r: 1e-12 }, None).unwrap();
+        assert_eq!(number_value(1e-12).unwrap(), "0.000000000001");
+        assert!(write_dxf_file(&representable).is_ok());
+        for shape in [
+            DxfShape::Circle { c: Vec2::ZERO, r: 1e-20 },
+            DxfShape::Arc { c: Vec2::ZERO, r: 1e-20, a0: 0.0, a1: 90.0 },
+            DxfShape::Ellipse { c: Vec2::ZERO, major: Vec2::X, ratio: 1e-20, t0: 0.0, t1: TAU },
+            DxfShape::Text { at: Vec2::ZERO, height: 1e-20, angle_deg: 0.0, text: "A".into() },
+            bezier_spline(&[Vec2::ZERO, Vec2::X], Some(vec![1.0, 1e-20])),
+        ] {
+            let mut file = DxfFile::new().unwrap();
+            file.push(file.default_layer(), shape.clone(), None).unwrap();
+            assert!(write_dxf_file(&file).unwrap_err().to_string().contains("twelve decimals"));
+            // This stricter admission is exclusive to the owned API.
+            assert!(write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape }]).is_ok());
+        }
+    }
+
+    #[test]
+    fn owned_geometry_refuses_distinct_points_axes_and_knot_spans_that_collapse() {
+        for shape in [
+            DxfShape::Line(Vec2::ZERO, Vec2::new(1e-20, 0.0)),
+            DxfShape::Polyline { points: vec![Vec2::ZERO, Vec2::new(1e-20, 0.0), Vec2::X] },
+            DxfShape::Ellipse { c: Vec2::ZERO, major: Vec2::new(1e-20, 0.0), ratio: 0.5, t0: 0.0, t1: TAU },
+            DxfShape::Arc { c: Vec2::ZERO, r: 1.0, a0: 0.0, a1: 1e-20 },
+            DxfShape::Spline { degree: 1, ctrl: vec![Vec2::ZERO, Vec2::X], knots: vec![0.0, 0.0, 1e-20, 1e-20], weights: None },
+            DxfShape::Spline {
+                degree: 1,
+                ctrl: vec![Vec2::ZERO, Vec2::X, Vec2::new(2.0, 0.0)],
+                knots: vec![0.0, 0.0, 1e-20, 1.0, 1.0],
+                weights: None,
+            },
+            bezier_spline(&[Vec2::ZERO, Vec2::new(1e-20, 0.0)], None),
+        ] {
+            let mut file = DxfFile::new().unwrap();
+            file.push(file.default_layer(), shape, None).unwrap();
+            assert!(write_dxf_file(&file).unwrap_err().to_string().contains("twelve decimals"));
+        }
+    }
+
+    #[test]
+    fn legacy_layer_deduplication_and_permissive_numbers_stay_unchanged() {
+        let layers = [DxfLayer::new("0", 1), DxfLayer::new("中", 3), DxfLayer::new("中", 5), DxfLayer::new("cut", 1), DxfLayer::new("CUT", 2)];
+        let output =
+            write_dxf_drawing(&layers, &[DxfEntity { layer: " \t".into(), shape: DxfShape::Line(Vec2::new(f64::NAN, 0.0), Vec2::X) }]).unwrap();
+        let p = pairs(&output);
+        let layers = table_records(&p, "LAYER");
+        assert_eq!(layers.iter().map(|r| field(r, 2)).collect::<Vec<_>>(), ["0", "中", "cut", "CUT"]);
+        assert_eq!(layers.iter().map(|r| field(r, 62)).collect::<Vec<_>>(), ["7", "3", "1", "2"]);
+        assert!(!p.iter().any(|(code, _)| *code == 370));
+        let records = entities(&output);
+        assert_eq!(field(&records[0].1, 8), "0");
+        assert_eq!(values(&records[0], 10), [0.0]);
     }
 }
