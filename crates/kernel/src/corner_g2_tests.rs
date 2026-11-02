@@ -344,10 +344,11 @@ fn a_mixed_convexity_corner_is_refused() {
 }
 
 /// Curvature-continuous rounds (`fillet_g2`, equivalent radius 5) of the three edges at the box
-/// corner: SMLib's own corner patch between them is only tangent to the rounds, its curvature
-/// jumping across their seams (it showed as a dome on the corner), so the corner is the G2 patch
-/// instead, filled between the curvature rounds' setback sections: one closed valid solid, the
-/// patch curvature-continuous to every round and face round it clear of the hole's corners.
+/// corner: SMLib's own corner between them is its setback corner, whose fill for curvature
+/// sections meets the rounds and faces curvature-continuously (SmBlendSetback.h: G2 for an order
+/// 2 section), as the G2 patch filled between the curvature rounds' setback sections does: each
+/// one closed valid solid, curvature-continuous across every seam round the corner clear of the
+/// hole's corners.
 #[test]
 fn curvature_rounds_meet_at_a_g2_corner() {
     let (body, edges) = box_corner();
@@ -357,9 +358,9 @@ fn curvature_rounds_meet_at_a_g2_corner() {
     let v = crate::validity::validity(&g2);
     assert!(v.ok(), "{:?}", v);
     let (_, clear, n) = corner_seams(&g2, 0.15);
-    let (_, smlib_clear, _) = corner_seams(&smlib_corner, 0.15);
+    let (_, smlib_clear, smlib_n) = corner_seams(&smlib_corner, 0.15);
     assert!(n > 0 && clear <= CURVATURE_SHARE / 5.0, "{clear} over {n} stations");
-    assert!(smlib_clear > 10.0 * CURVATURE_SHARE / 5.0, "SMLib's own corner patch: {smlib_clear}");
+    assert!(smlib_n > 0 && smlib_clear <= CURVATURE_SHARE / 5.0, "SMLib's own corner: {smlib_clear} over {smlib_n} stations");
     // Both differ only within the setback cube (side 1.5 r = 7.5) at the corner.
     let (a, b) = (measure(&g2).unwrap().volume, measure(&smlib_corner).unwrap().volume);
     assert!((a - b).abs() < 7.5f64.powi(3), "{a} vs {b}");
