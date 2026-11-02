@@ -40,6 +40,14 @@ xattr -dr com.apple.quarantine /Applications/SolidCraft.app
 When updating from a build released under the previous product name, follow the
 [macOS upgrade notes](https://github.com/tangency-labs/solidcraft/blob/main/docs/compatibility.md#macos) so you replace it rather than install a second copy.
 
+Tip: For command line convenience, symlink the executable to your `usr/local/bin`, or other location in your `PATH`.
+
+```
+sudo ln -s /Applications/SolidCraft.app/Contents/MacOS/SolidCraft /usr/local/bin/SolidCraft
+sudo ln -s /Applications/SolidCraft.app/Contents/MacOS/solidcraft-cli /usr/local/bin/solidcraft-cli
+```
+`SolidCraft` and `solidcraft-cli` will now work natively in the terminal.
+
 ### Linux AppImage
 
 The first time you open the AppImage it adds a menu entry and icons under `~/.local/share`
