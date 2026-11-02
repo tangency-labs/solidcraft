@@ -750,6 +750,12 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::AnglePlane { angle } => {
             enter |= expr_row(ui, "Angle", angle);
         }
+        // The angle turns the plane from its reference, so it shows once one is picked.
+        Kind::TangentPlane { angle } => {
+            if d.inputs.get(1).is_some_and(|inp| !inp.items.is_empty()) {
+                enter |= expr_row(ui, "Angle", angle);
+            }
+        }
         Kind::PathPlane { t, .. } => {
             enter |= expr_row(ui, "Position (0 to 1)", t);
         }
