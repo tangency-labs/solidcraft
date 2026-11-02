@@ -180,6 +180,67 @@ fn a_family_paper_cant_use_is_set_in_the_built_in_font_and_named() {
     }
 }
 
+/// A font collection of `files`, one face each, in order: each file's table directory and tables
+/// as they are, after the collection's header, their offsets moved to match.
+fn collection(files: &[Vec<u8>]) -> Vec<u8> {
+    let mut starts = Vec::new();
+    let mut at = 12 + 4 * files.len();
+    for file in files {
+        starts.push(at);
+        at += file.len().next_multiple_of(4);
+    }
+    let mut out = [*b"ttcf", 0x0001_0000u32.to_be_bytes(), (files.len() as u32).to_be_bytes()].concat();
+    out.extend(starts.iter().flat_map(|&s| (s as u32).to_be_bytes()));
+    for (file, &start) in files.iter().zip(&starts) {
+        let mut file = file.clone();
+        for r in (0..usize::from(u16::from_be_bytes([file[4], file[5]]))).map(|i| 12 + 16 * i) {
+            let offset = u32::from_be_bytes(file[r + 8..r + 12].try_into().unwrap()) + start as u32;
+            file[r + 8..r + 12].copy_from_slice(&offset.to_be_bytes());
+        }
+        file.resize(file.len().next_multiple_of(4), 0);
+        out.extend(file);
+    }
+    out
+}
+
+/// A font's family is its own face's (#4890, for a DXF text style): in a collection the face's, not
+/// the first one's, also when text is set in it by family; two faces of one family share it and
+/// keep their own ids; the typographic family comes before the family; a face with no names has
+/// none.
+#[test]
+fn a_fonts_family_is_its_own_faces() {
+    let read = |file: &str| std::fs::read(repo_fonts()[0].join(file)).unwrap();
+    let mono = read("ibm-plex-mono/IBMPlexMono-Regular.ttf");
+    // The collection alone in its folder: a family is looked for there.
+    let folder = Patched::new("collection", |_| {});
+    std::fs::remove_file(folder.0.join("patched.ttf")).unwrap();
+    let path = folder.0.join("three.ttc");
+    std::fs::write(&path, collection(&[read("liberation-sans/LiberationSans-Regular.ttf"), mono.clone(), mono])).unwrap();
+    let face = |index: u32| {
+        let mut data = font_data(Some(&path.to_string_lossy())).unwrap();
+        data.index = index;
+        super::admit(&data).unwrap()
+    };
+    let [sans, first, second] = [0, 1, 2].map(face);
+    assert_eq!([sans.family.as_str(), &first.family, &second.family], ["Liberation Sans", "IBM Plex Mono", "IBM Plex Mono"]);
+    assert!(sans.id != first.id && first.id != second.id);
+    let set = paper_text_in(std::slice::from_ref(&folder.0), "Title", Some("IBM Plex Mono"), AT, 5.0, 0.0, &TextStyle::default());
+    let (_, font) = one(set.unwrap().unwrap());
+    assert_eq!((font.face, font.family.as_str(), font.id), (1, "IBM Plex Mono", first.id));
+    // The subfamily's record renamed the typographic family's: it comes first.
+    let typographic = Patched::new("typographic-family", |b| {
+        let at = table(b, b"name");
+        for i in 0..usize::from(u16::from_be_bytes([b[at + 2], b[at + 3]])) {
+            let id = at + 6 + 12 * i + 6;
+            if u16::from_be_bytes([b[id], b[id + 1]]) == 2 {
+                b[id..id + 2].copy_from_slice(&16u16.to_be_bytes());
+            }
+        }
+    });
+    assert_eq!(typographic.admitted().unwrap().family, "Regular");
+    assert_eq!(Patched::new("no-names", |b| without(b, b"name")).admitted().unwrap().family, "");
+}
+
 /// IBM Plex Mono's file with `patch` applied, alone in a folder of its own, removed at the end of
 /// the test.
 struct Patched(PathBuf);

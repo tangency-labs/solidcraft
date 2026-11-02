@@ -184,6 +184,7 @@ fn text_is_refused_by_name_until_the_writer_learns_it() {
         bytes: std::sync::Arc::from(vec![1u8]),
         face: 0,
         postscript_name: "MadeUp".into(),
+        family: "Made Up".into(),
         embed: Embed::Subset,
         num_glyphs: 2,
         units_per_em: 1000,

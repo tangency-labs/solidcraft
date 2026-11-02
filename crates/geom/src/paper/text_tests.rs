@@ -29,6 +29,7 @@ fn font() -> Font {
         bytes: Arc::from(vec![1u8, 2, 3]),
         face: 0,
         postscript_name: "MadeUp-Regular".into(),
+        family: "Made Up".into(),
         embed: Embed::Subset,
         num_glyphs: 3,
         units_per_em: 1000,
@@ -126,6 +127,8 @@ fn each_rule_is_refused() {
         ("a font's PostScript name", e(|_, f| f.postscript_name = "Made%Up".into())),
         ("a font's PostScript name", e(|_, f| f.postscript_name = "M".repeat(128))),
         ("a font's PostScript name", e(|_, f| f.postscript_name = String::new())),
+        ("a font's family is at most 255 characters", e(|_, f| f.family = "é".repeat(MAX_FONT_FAMILY + 1))),
+        ("a font's family is at most 255 characters", e(|_, f| f.family = "Made\nUp".into())),
         ("a font has glyphs, and 16 to 16384 units per em", e(|_, f| f.units_per_em = 15)),
         ("a font's cap height is above 0", e(|_, f| f.metrics.cap_height = 0)),
         ("a font's cap height is above 0", e(|_, f| f.metrics.italic_angle = f64::NAN)),
@@ -159,10 +162,13 @@ fn each_rule_is_refused() {
         let refusal = refused(edit);
         assert!(refusal.starts_with(rule), "{rule}: {refusal}");
     }
-    // At the bounds: 4096 pieces in all, 127-byte names, 16 units per em, a turn either way, a lean of 1.
+    // At the bounds: 4096 pieces in all, 127-byte names, 255-character families (or none), 16 units
+    // per em, a turn either way, a lean of 1.
     let at_bounds: Vec<Box<dyn FnOnce(&mut TextRun, &mut Font)>> = vec![
         e(|_, f| f.glyphs.get_mut(&1).unwrap().outline.push(ring(MAX_GLYPH_PIECES - 4))),
         e(|_, f| f.postscript_name = "M".repeat(127)),
+        e(|_, f| f.family = "é".repeat(MAX_FONT_FAMILY)),
+        e(|_, f| f.family = String::new()),
         e(|_, f| f.units_per_em = 16),
         e(|r, _| (r.angle, r.slant) = (-TAU, -1.0)),
     ];

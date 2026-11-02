@@ -31,7 +31,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use sha2::{Digest, Sha256};
 use solidcraft_geom::paper::text::{
-    Cluster, Embed, Font, FontFlags, FontGlyph, FontMetrics, MAX_POSTSCRIPT_NAME, PlacedGlyph, TextRun, is_postscript_char,
+    Cluster, Embed, Font, FontFlags, FontGlyph, FontMetrics, MAX_FONT_FAMILY, MAX_POSTSCRIPT_NAME, PlacedGlyph, TextRun, is_postscript_char,
 };
 use solidcraft_geom::{Loop2, Vec2};
 
@@ -216,6 +216,7 @@ fn admit(data: &FontData) -> std::result::Result<Font, String> {
         bytes: Arc::from(data.bytes()),
         face: data.index,
         postscript_name: postscript_name(&face, &id),
+        family: family(&face),
         embed: embed(&face),
         num_glyphs: face.number_of_glyphs(),
         units_per_em: face.units_per_em(),
@@ -236,7 +237,7 @@ fn admit(data: &FontData) -> std::result::Result<Font, String> {
 /// family and style, else `Font-` and the first 4 bytes of its id in hex.
 fn postscript_name(face: &ttf_parser::Face, id: &[u8; 32]) -> String {
     use ttf_parser::name_id::{FAMILY, POST_SCRIPT_NAME, SUBFAMILY, TYPOGRAPHIC_FAMILY, TYPOGRAPHIC_SUBFAMILY};
-    let name = |ids: &[u16]| ids.iter().find_map(|&want| face.names().into_iter().filter(|n| n.name_id == want).find_map(|n| n.to_string()));
+    let name = |ids: &[u16]| name(face, ids);
     let held = |s: String| -> Option<String> {
         let kept: String = s.chars().filter(|c| is_postscript_char(*c)).take(MAX_POSTSCRIPT_NAME).collect();
         Some(kept.trim_matches('-').to_string()).filter(|n| !n.is_empty())
@@ -244,6 +245,20 @@ fn postscript_name(face: &ttf_parser::Face, id: &[u8; 32]) -> String {
     let made = || held(format!("{}-{}", name(&[TYPOGRAPHIC_FAMILY, FAMILY])?, name(&[TYPOGRAPHIC_SUBFAMILY, SUBFAMILY]).unwrap_or_default()));
     let hex: String = id.iter().take(4).map(|b| format!("{b:02X}")).collect();
     name(&[POST_SCRIPT_NAME]).and_then(held).or_else(made).unwrap_or_else(|| format!("Font-{hex}"))
+}
+
+/// The face's family as a reader that picks fonts by family names it: its typographic family, else
+/// its family, without control characters and at most [`MAX_FONT_FAMILY`] characters; empty when it
+/// has neither.
+fn family(face: &ttf_parser::Face) -> String {
+    use ttf_parser::name_id::{FAMILY, TYPOGRAPHIC_FAMILY};
+    let named = name(face, &[TYPOGRAPHIC_FAMILY, FAMILY]).unwrap_or_default();
+    named.trim().chars().filter(|c| !c.is_control()).take(MAX_FONT_FAMILY).collect()
+}
+
+/// The face's first name of the kinds `ids` lists, in that order, that reads as text.
+fn name(face: &ttf_parser::Face, ids: &[u16]) -> Option<String> {
+    ids.iter().find_map(|&want| face.names().into_iter().filter(|n| n.name_id == want).find_map(|n| n.to_string()))
 }
 
 /// How a PDF may carry the face: not at all when its licence restricts it (fsType 0x0002) or allows

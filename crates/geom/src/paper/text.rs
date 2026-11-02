@@ -48,6 +48,8 @@ pub const MAX_FONT_BYTES: usize = 64 << 20;
 pub const MAX_GLYPH_PIECES: usize = 4096;
 /// The longest name a PDF takes.
 pub const MAX_POSTSCRIPT_NAME: usize = 127;
+/// The longest family name a font carries, in characters.
+pub const MAX_FONT_FAMILY: usize = 255;
 /// The cap heights sketch text may be set at, in millimetres: above a micrometre, below a
 /// kilometre.
 const CAP_HEIGHT_MM: (f64, f64) = (1e-6, 1e6);
@@ -65,6 +67,10 @@ pub struct Font {
     pub face: u32,
     /// What a PDF names it by ([`is_postscript_char`]).
     pub postscript_name: String,
+    /// Its family, as the face's own name table gives it (typographic family, else family), for a
+    /// reader that picks fonts by family (a DXF text style); empty when it has neither. Faces of
+    /// one family share it: `id` tells them apart.
+    pub family: String,
     /// How a PDF may carry it.
     pub embed: Embed,
     /// How many glyphs the face has: every glyph id is below it.
@@ -216,6 +222,8 @@ impl Font {
         require(bytes, "a font has its bytes, at most 64 MiB: a scene read from JSON takes them from the font of its id")?;
         let name = &self.postscript_name;
         require((1..=MAX_POSTSCRIPT_NAME).contains(&name.len()) && name.chars().all(is_postscript_char), NAMES)?;
+        let family = self.family.chars().count() <= MAX_FONT_FAMILY && !self.family.chars().any(char::is_control);
+        require(family, "a font's family is at most 255 characters, none of them control characters")?;
         require(self.num_glyphs > 0 && (16..=16384).contains(&self.units_per_em), "a font has glyphs, and 16 to 16384 units per em")?;
         require(self.metrics.cap_height > 0 && self.metrics.italic_angle.is_finite(), "a font's cap height is above 0 and its italic angle finite")?;
         for (id, glyph) in &self.glyphs {
