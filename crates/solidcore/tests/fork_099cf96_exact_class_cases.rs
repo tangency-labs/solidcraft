@@ -28,9 +28,11 @@
 //! vertex on the sphere's seam (the ball). Only the status is checked here: which step of
 //! the fillet returned it isn't visible through `fillet_edges`.
 //!
-//! The left column is checked on the default kernel and the right one with every fix
-//! SolidCraft turns on and with `fillet_exact_round_classes` alone. One difference from the
-//! fork: the two pipes' union itself fails 1001 here without
+//! The left column is checked on the default kernel and the right one with
+//! `fillet_exact_round_classes` alone. With every current SolidCraft fix enabled,
+//! the exact cases keep their marks, while the tee must be a valid procedural
+//! round within 1e-9 mm of its rolling ball, rather than the old fitted surface.
+//! One difference from the fork: the two pipes' union itself fails 1001 here without
 //! `ssi_split_curves_at_singular_points` (WR-77), so the pipes get that flag wherever the
 //! fork's mark is about their round.
 //!
@@ -119,6 +121,8 @@ enum RoundKind {
     Revolved,
     /// A B-spline within the fillet's tolerance of the canal surface.
     Fitted,
+    /// A later round evaluated by its rolling-ball definition, not a fitted net.
+    Procedural,
 }
 
 /// One case: the fork's body, edge points, radius, volume, surface kind and faces.
@@ -456,16 +460,18 @@ fn grade(case: &Case, k: &mut Kernel) -> Graded {
         let Some(s) = face::surface(&b, f).unwrap() else {
             continue;
         };
-        let (spline, revolved, degrees, rational) = match s.kind() {
+        let (spline, revolved, procedural, degrees, rational) = match s.kind() {
             SurfaceKind::BSpline(bs) => (
                 true,
+                false,
                 false,
                 (bs.degree(SurfParamType::U), bs.degree(SurfParamType::V)),
                 bs.is_rational(),
             ),
             SurfaceKind::SurfOfRevolution(_) | SurfaceKind::Torus(_) => {
-                (false, true, (0, 0), false)
+                (false, true, false, (0, 0), false)
             }
+            SurfaceKind::ProceduralBlend(_) => (false, false, true, (0, 0), false),
             _ => continue,
         };
         rounds += 1;
@@ -475,6 +481,7 @@ fn grade(case: &Case, k: &mut Kernel) -> Graded {
             }
             RoundKind::Revolved => revolved,
             RoundKind::Fitted => spline,
+            RoundKind::Procedural => procedural,
         };
         if !kind_ok {
             problems.push(format!(
@@ -548,12 +555,24 @@ fn mark_after(name: &str) -> Mark {
     }
 }
 
+/// Current procedural rounds improve on the historical fitted tee.
+fn mark_current(name: &str) -> Mark {
+    if name == "tee_is_fitted" {
+        Mark::Passes
+    } else {
+        mark_after(name)
+    }
+}
+
 const PIPES: &str = "cylinders_touching_at_a_point";
 
 fn check_all(mark: fn(&str) -> Mark, kernel: fn() -> Kernel) {
     let mut wrong = Vec::new();
-    for case in cases() {
+    for mut case in cases() {
         let mut k = kernel();
+        if case.kind == RoundKind::Fitted && k.fixes.fillet_round_as_definition {
+            case.kind = RoundKind::Procedural;
+        }
         if case.name == PIPES {
             k.fixes.ssi_split_curves_at_singular_points = true;
         }
@@ -570,7 +589,7 @@ fn check_all(mark: fn(&str) -> Mark, kernel: fn() -> Kernel) {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
-/// SolidCraft's fixes: every `UpstreamFixes` field on except `geometric_g2_continuity`.
+/// All current fixes, including the later procedural representation.
 fn solidcraft_kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
@@ -595,8 +614,8 @@ fn without_the_flag_the_cases_have_the_fork_s_marks_before_the_exact_classes() {
 }
 
 #[test]
-fn with_solidcraft_s_fixes_the_cases_have_the_fork_s_marks_after_the_exact_classes() {
-    check_all(mark_after, solidcraft_kernel);
+fn with_current_fixes_exact_classes_keep_their_marks_and_the_tee_is_procedural() {
+    check_all(mark_current, solidcraft_kernel);
 }
 
 #[test]
@@ -632,6 +651,7 @@ fn the_grading_refuses_a_wrong_volume_and_a_wrong_kind() {
         graded(1.00001, RoundKind::Revolved),
         graded(1.0, RoundKind::Rational(4, 2)),
         graded(1.0, RoundKind::Fitted),
+        graded(1.0, RoundKind::Procedural),
     ] {
         assert!(!holds(Mark::Passes, &got), "{got:?}");
         assert!(!holds(Mark::Status1001, &got), "{got:?}");

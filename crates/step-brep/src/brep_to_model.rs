@@ -335,13 +335,37 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
     let mut face_by_id = BTreeMap::new();
     let mut pcurves = BTreeMap::new();
     let pcurve_kernel = &kernel;
+    let mut material_faceuses = BTreeMap::new();
+    for shell_id in brep.shells().ids() {
+        let shell = brep.shell(shell_id).map_err(|e| err(e.to_string()))?;
+        let Some(region_id) = shell.region else {
+            continue;
+        };
+        if brep
+            .region(region_id)
+            .map_err(|e| err(e.to_string()))?
+            .is_void()
+            != 0
+        {
+            continue;
+        }
+        for faceuse in shell.get_faceuses().map_err(|e| err(e.to_string()))? {
+            if let Some(face) = brep.faceuse(faceuse).map_err(|e| err(e.to_string()))?.face {
+                material_faceuses.insert(face, faceuse);
+            }
+        }
+    }
     for id in brep.face_list() {
         let face = brep.face(*id).map_err(|e| err(e.to_string()))?;
         let surf = face
             .surface
             .as_ref()
             .ok_or_else(|| err("face has no surface"))?;
-        let faceuse = face.faceuse.ok_or_else(|| err("face has no faceuse"))?;
+        let faceuse = material_faceuses
+            .get(id)
+            .copied()
+            .or(face.faceuse)
+            .ok_or_else(|| err("face has no faceuse"))?;
         let loops =
             eu::faceuse_loopuses(brep, faceuse, false, None).map_err(|e| err(e.to_string()))?;
         let mut bounds = Vec::new();
@@ -445,20 +469,27 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
                     forward,
                 });
             }
-            let orientation = solidcore::topology::loopuse::orientation(brep, *loopuse)
-                .map_err(|e| err(e.to_string()))?
-                == solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType::Same;
             bounds.push(Loop {
                 outer: loop_index == 0,
-                orientation,
+                // Edgeuses already traverse the oriented boundary, including
+                // clockwise inner loops. Do not reverse that traversal again.
+                orientation: true,
                 bound: Bound::Edges(oriented),
             });
         }
-        let same_sense = brep
+        let mut same_sense = brep
             .faceuse(faceuse)
             .map_err(|e| err(e.to_string()))?
             .orientation
             == solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType::Same;
+        // STEP cones/cylinders use the canonical outward parameterisation. The
+        // kernel also permits swapped UV directions and inside-out cones; each
+        // reverses its normal without changing the exported axis and radius.
+        // Keep the directed boundary and express that reversal in ADVANCED_FACE.
+        if let solidcore::surface::surface::SurfaceKind::Cone(cone) = surf.kind() {
+            let canonical = cone.canonical();
+            same_sense ^= canonical.swap_uv ^ canonical.inside_out;
+        }
         face_indices.push(faces.len());
         face_by_id.insert(*id, faces.len());
         faces.push(Face {
