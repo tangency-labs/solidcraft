@@ -2601,20 +2601,31 @@ fn offset_group(sk: &mut Sketch, ids: &[String], eligible: &std::collections::Ha
         sel.clone()
     };
     let (order, closed) = chain(sk, first, &pool);
-    // Side: toward `side` (compare both offsets' distance to it), else the sign. Compared a
-    // hair from the curve, where both offsets exist: at the full distance an arc smaller than
-    // it has no offset toward its centre, and the other one won however close `side` was.
+    // Side: toward `side`, else the sign. A positive distance offsets to the left of the walk.
+    // A line or an arc says directly which side `side` is on (the half-plane; inside or outside
+    // the circle, as for a circle above), so neither rounding of a tiny step nor an arc too small
+    // for the distance can turn it round; other curves compare both offsets' distance to it.
     let d = match side {
         Some(q) => {
-            let dist = |dd: f64| {
-                offset_piece(sk, first, order.iter().find(|x| x.0 == first).is_none_or(|x| x.1), dd).map(|pc| piece_dist(&pc, q)).unwrap_or(f64::MAX)
+            let forward = order.iter().find(|x| x.0 == first).is_none_or(|x| x.1);
+            let left = match sk.curves.get(first).map(|c| c.kind.clone()) {
+                Some(CurveKind::Line { a, b }) => {
+                    let (a, b) = (sk.point(a).unwrap_or_default(), sk.point(b).unwrap_or_default());
+                    let (from, along) = if forward { (a, b - a) } else { (b, a - b) };
+                    Some(along.x * (q - from).y - along.y * (q - from).x >= 0.0)
+                }
+                Some(CurveKind::Arc { c, a, .. }) => {
+                    let (c, a) = (sk.point(c).unwrap_or_default(), sk.point(a).unwrap_or_default());
+                    // Followed forward an arc turns anticlockwise, its centre on the left.
+                    Some((q.dist(c) <= c.dist(a)) == forward)
+                }
+                _ => None,
             };
-            let hair = d0.abs() * 1e-3;
-            let (toward, away) = match (dist(hair), dist(-hair)) {
-                (a, b) if a < f64::MAX && b < f64::MAX => (a, b),
-                _ => (dist(d0.abs()), dist(-d0.abs())),
-            };
-            if toward <= away { d0.abs() } else { -d0.abs() }
+            let toward = left.unwrap_or_else(|| {
+                let dist = |dd: f64| offset_piece(sk, first, forward, dd).map(|pc| piece_dist(&pc, q)).unwrap_or(f64::MAX);
+                dist(d0.abs()) <= dist(-d0.abs())
+            });
+            if toward { d0.abs() } else { -d0.abs() }
         }
         None => d0,
     };
