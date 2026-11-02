@@ -175,3 +175,33 @@ fn wr_533_lip_swept_flush_round_a_corner_joins_only_with_the_fix() {
         );
     }
 }
+
+/// The fix's observable at the topology level (#1954): with the definition split with its
+/// edge, the union is a body of the block's and the lip's faces, edges and vertices. Off,
+/// the union produces no body to count (the test above pins its refusal). Pins the exact
+/// counts, so a result that agrees in volume but leaves the rim arc and the lip's edge
+/// joined differently still fails.
+#[test]
+fn wr_533_lip_swept_flush_round_a_corner_has_the_block_and_lip_topology() {
+    let mut k = Kernel::default();
+    k.fixes.boolean_splits_definition_across_split = true;
+    let a = block(&mut k);
+    let b = lip(&mut k);
+    let mut r = boolean_union(&mut k, a, b).unwrap();
+    let counts = (
+        r.face_list().len(),
+        r.edge_list().len(),
+        r.vertex_list().len(),
+    );
+    let got = volume(&k, &mut r);
+    let check = check_brep(&mut k, &mut r, CheckLevel::Level2).unwrap();
+    eprintln!("faces, edges, vertices {counts:?}, volume {got}");
+    assert_eq!(counts, (22, 50, 30));
+    assert!(
+        (got - closed_form()).abs() <= 1e-6 * closed_form(),
+        "volume {got}, the block and the lip {}",
+        closed_form()
+    );
+    assert!(check.is_valid(), "{:?}", check.lines());
+    assert_eq!(check.assert_valid, Some(true));
+}
