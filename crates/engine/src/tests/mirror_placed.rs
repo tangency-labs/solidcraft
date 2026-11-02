@@ -232,3 +232,171 @@ fn a_placement_leading_to_another_component_is_reported_lost() {
     assert!(e.contains("no longer exists"), "{e}");
     assert!(s.world_state().body(&copy).is_none());
 }
+
+/// A carriage-like part (a bored block and a ring) placed once, free to move: its occurrence and
+/// body names.
+fn curved_part(s: &mut Session) -> (u64, Vec<String>) {
+    let c = run(s, "component.create", json!({"name": "Carriage", "grounded": false}));
+    run(s, "solid.box", json!({"length": 20, "width": 10, "height": 10, "corner": [10, 5, 0], "body_name": "Block"}));
+    run(s, "solid.cylinder", json!({"base": [20, 10, -1], "radius": 3, "height": 12, "operation": "cut", "targets": ["Block"]}));
+    run(s, "solid.torus", json!({"center": [20, 10, 20], "major": 6, "minor": 2, "operation": "new", "body_name": "Ring"}));
+    run(s, "component.activate", json!({"component": 0}));
+    run(s, "occurrence.move", json!({"occurrence": c["occurrence"], "translate": [0, 7, 3]}));
+    (c["occurrence"].as_u64().unwrap(), vec!["Block".into(), "Ring".into()])
+}
+
+/// The shown bodies drawn, as a viewport does, and the tessellation that took.
+fn drawn(s: &Session) -> f64 {
+    let world = s.world_state();
+    let (_, work) = solidcraft_kernel::profile::capture(|| {
+        for b in &world.bodies {
+            b.mesh_in_place();
+            b.display_plan();
+            b.mesh();
+        }
+    });
+    work.tessellate_ms
+}
+
+/// What the viewport shows is what a fresh evaluation of the design shows: where the triangles
+/// are, which way they face and which faces and edges they belong to.
+fn assert_as_evaluated_afresh(s: &Session) {
+    let mut fresh = solidcraft_doc::Model::new();
+    fresh.no_cache = true;
+    fresh.evaluate(&s.doc);
+    assert!(fresh.results.iter().all(|r| r.error.is_none()));
+    let (shown, want) = (s.world_state(), solidcraft_doc::world_state(&s.doc, &fresh.state()));
+    assert_eq!(shown.bodies.len(), want.bodies.len());
+    for (a, b) in shown.bodies.iter().zip(&want.bodies) {
+        assert_eq!(a.name, b.name);
+        let (x, y) = (a.mesh(), b.mesh());
+        assert_eq!(x.triangles, y.triangles, "{}", a.name);
+        assert_eq!(x.tri_face, y.tri_face, "{}", a.name);
+        assert_eq!(x.edge_faces, y.edge_faces, "{}", a.name);
+        assert_eq!(x.seams, y.seams, "{}", a.name);
+        assert_eq!(x.positions.len(), y.positions.len(), "{}", a.name);
+        assert!(x.edges.iter().flatten().zip(y.edges.iter().flatten()).all(|(p, q)| p.dist(*q) < 1e-7), "{}: edges", a.name);
+        assert_same_surface(&x, &y, &a.name);
+        // A plan's ties fall by the pose it was made at.
+        let (x, y) = (a.display_plan().unwrap().evaluate(), b.display_plan().unwrap().evaluate());
+        assert_eq!(x.triangles.len(), y.triangles.len(), "{}: plan", a.name);
+        assert_same_surface(&x, &y, &a.name);
+    }
+}
+
+/// Two meshes of one surface, facing the same way. Their points can differ: a revolved face is
+/// turned by where it stands when it is made, which only moves where the surface is sampled.
+fn assert_same_surface(x: &solidcraft_geom::Mesh, y: &solidcraft_geom::Mesh, name: &str) {
+    let enclosed = |m: &solidcraft_geom::Mesh| {
+        m.triangles.iter().fold((0.0, 0.0), |(v, s), t| {
+            let [a, b, c] = t.map(|i| m.positions[i as usize]);
+            (v + a.dot(b.cross(c)) / 6.0, s + (b - a).cross(c - a).len() / 2.0)
+        })
+    };
+    let ((v, s), (w, t)) = (enclosed(x), enclosed(y));
+    assert!(v > 0.0 && (v - w).abs() < 1e-4 * w && (s - t).abs() < 1e-4 * t, "{name}: encloses {v}, {s} against {w}, {t}");
+    let (a, b) = (x.bounds(), y.bounds());
+    assert!(a.min.dist(b.min) < 0.05 && a.max.dist(b.max) < 0.05, "{name}: {a:?} against {b:?}");
+}
+
+/// Dragging a part with a mirrored copy moved the copy too, and every frame meshed the copy from
+/// nothing: a design with a few dozen curved mirrored bodies dragged at a frame or two a second.
+#[test]
+fn dragging_a_mirrored_part_meshes_its_copies_once() {
+    let mut s = Session::default();
+    let (occurrence, bodies) = curved_part(&mut s);
+    let first = run(&mut s, "solid.mirror", json!({"bodies": bodies, "plane": "XZ"}));
+    // Mirrored again, as four carriages from one are: the source of these copies moves as well.
+    run(&mut s, "solid.mirror", json!({"bodies": first["created_bodies"], "plane": "YZ"}));
+    drawn(&s);
+    for k in 1..=4 {
+        let at = f64::from(k) * 3.5;
+        run(&mut s, "occurrence.drag", json!({"occurrence": occurrence, "at": [0, 0, 0], "point": [1, at, 2], "continuous": true}));
+        assert!(s.model.last_recomputed > 0, "the copies follow the part");
+        assert_eq!(drawn(&s), 0.0, "frame {k}: the copies are drawn from triangles already made");
+    }
+    assert_as_evaluated_afresh(&s);
+    run(&mut s, "edit.undo", json!({}));
+    assert_as_evaluated_afresh(&s);
+}
+
+/// What the viewport draws of a copy doesn't reach what the model reads: a later feature finds
+/// the copy's own triangles, as it does in a design opened afresh.
+#[test]
+fn a_mirrored_copys_shared_triangles_are_display_only() {
+    let mut s = Session::default();
+    let (occurrence, bodies) = curved_part(&mut s);
+    let r = run(&mut s, "solid.mirror", json!({"bodies": bodies, "plane": "XZ"}));
+    run(&mut s, "occurrence.drag", json!({"occurrence": occurrence, "at": [0, 0, 0], "point": [0, 3, 0], "continuous": true}));
+    drawn(&s);
+    let (state, world) = (s.model.state(), s.world_state());
+    for copy in r["created_bodies"].as_array().unwrap().iter().map(|n| n.as_str().unwrap()) {
+        assert!(world.body(copy).is_some_and(|b| b.cached_mesh().is_some()), "{copy} was drawn");
+        assert!(state.body(copy).unwrap().cached_mesh().is_none(), "{copy}: the model's own mesh is its own");
+    }
+}
+
+/// A source changed is mirrored from what it is now, not from the triangles of what it was.
+#[test]
+fn a_changed_source_gives_its_copy_new_triangles() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "side", "expression": "10 mm"}));
+    let c = run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": "side", "width": 10, "height": 10, "corner": [10, 0, 0], "body_name": "Block"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.move", json!({"occurrence": c["occurrence"], "translate": [0, 20, 0]}));
+    let copy = created(&run(&mut s, "solid.mirror", json!({"bodies": ["Block"], "plane": "XZ"})));
+    assert_box(world_box(&s, &copy), (Vec3::new(10.0, -30.0, 0.0), Vec3::new(20.0, -20.0, 10.0)));
+    run(&mut s, "parameters.change", json!({"name": "side", "expression": "15 mm"}));
+    assert_box(world_box(&s, &copy), (Vec3::new(10.0, -30.0, 0.0), Vec3::new(25.0, -20.0, 10.0)));
+    assert_as_evaluated_afresh(&s);
+}
+
+/// Copies nothing builds on skip the search that readies their revolved faces for a boolean.
+/// A feature added later that does build on them gets them readied, as a design opened with that
+/// feature has them, whether or not they were mirrored first.
+#[test]
+fn a_cut_added_after_a_mirror_finds_its_copies_readied() {
+    let cut = |s: &mut Session, copy: &str| {
+        run(s, "solid.cylinder", json!({"base": [20, -17, 15], "radius": 3, "height": 12, "operation": "cut", "targets": [copy]}));
+    };
+    let mut s = Session::default();
+    let (_, bodies) = curved_part(&mut s);
+    let copies = run(&mut s, "solid.mirror", json!({"bodies": bodies, "plane": "XZ"}));
+    let ring = copies["created_bodies"][1].as_str().unwrap().to_string();
+    let evaluated = s.model.recomputed;
+    cut(&mut s, &ring);
+    assert!(s.model.results.iter().all(|r| r.error.is_none()));
+    assert!(s.model.recomputed - evaluated >= 2, "the mirror is evaluated again with the cut");
+    let measured = |s: &Session| {
+        let v = run(&mut s.scratch(), "inspect.measure", json!({"bodies": [ring]}));
+        v["total"]["volume_mm3"].as_f64().unwrap()
+    };
+    let volume = measured(&s);
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(measured(&reopened), volume, "what evaluates here is what opens");
+}
+
+/// A part inserted after the mirror keeps its meshes while the mirror moves: evaluating the
+/// insert again gives the same solids, and meshing them was as slow as meshing the copies.
+#[test]
+fn an_insert_after_a_mirror_keeps_its_meshes_through_a_drag() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-mirror-insert-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("insert.step").to_string_lossy().replace('\\', "/");
+    let mut part = Session::default();
+    run(&mut part, "solid.sphere", json!({"radius": 5}));
+    run(&mut part, "file.export", json!({"path": file}));
+    let mut s = Session::default();
+    let (occurrence, bodies) = curved_part(&mut s);
+    run(&mut s, "solid.mirror", json!({"bodies": bodies, "plane": "XZ"}));
+    run(&mut s, "file.insert_step", json!({"path": file, "name": "After"}));
+    let _ = std::fs::remove_dir_all(&dir);
+    run(&mut s, "component.activate", json!({"component": 0}));
+    drawn(&s);
+    for k in 1..=3 {
+        run(&mut s, "occurrence.drag", json!({"occurrence": occurrence, "at": [0, 0, 0], "point": [0, f64::from(k), 0], "continuous": true}));
+        assert_eq!(drawn(&s), 0.0, "frame {k}");
+    }
+    assert_as_evaluated_afresh(&s);
+}

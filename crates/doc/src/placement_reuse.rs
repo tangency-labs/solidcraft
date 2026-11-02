@@ -68,6 +68,21 @@ fn local_plane(plane: &PlaneRef, depth: usize) -> bool {
     }
 }
 
+/// Whether no feature after the mirror `f` can cut, join or otherwise build on bodies: only
+/// features that read none, and further mirrors, which copy them. A boolean depends on how a
+/// copy's revolved faces are turned, so a copy it may reach is made with
+/// [`solidcraft_kernel::transform_matrix`]; one that is only shown needs no search for that. It
+/// depends on the design alone, so a design evaluates the same however it was reached.
+pub(super) fn copies_only_shown(doc: &Document, f: &Feature) -> bool {
+    let mut later = doc.features.iter().skip_while(|g| g.id != f.id).skip(1);
+    let mut components = std::collections::HashMap::with_capacity(doc.features.len());
+    for g in &doc.features {
+        components.entry(g.id).or_insert(g.component);
+    }
+    let copies = |g: &Feature| matches!(&g.kind, FeatureKind::Mirror { features, combine: false, .. } if features.is_empty());
+    later.all(|g| copies(g) || local_geometry(g, &components))
+}
+
 pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap<u64, u64>) -> bool {
     // Persistent picked-face/edge attachments can move an otherwise literal input.
     if !f.face_names.is_empty() || !f.edge_names.is_empty() || !f.edge_refs.is_empty() {

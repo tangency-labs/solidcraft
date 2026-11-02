@@ -40,6 +40,11 @@ pub struct ModelBody {
     joint_faces: Arc<OnceLock<JointFaces>>,
     /// Lazy canonical reference triangles for a proper rigid occurrence placement.
     mesh_placement: Option<Arc<placed_mesh::PlacedMesh>>,
+    /// For a mirrored copy: its faces as a world state shows them, a rigid move of the source's
+    /// [`placed_mesh::OppositeHand`]. Display only: the model reads the copy's own triangles.
+    mirrored_mesh: Option<Arc<placed_mesh::PlacedMesh>>,
+    /// The first mirrored copy made of this body, shared by its clones.
+    opposite_hand: Arc<OnceLock<placed_mesh::OppositeHand>>,
     /// The display plan (none when the body has no plan: a mesh body, or one the planner
     /// refuses), shared like the mesh. A GPU viewport draws it.
     plan: Arc<[OnceLock<Option<Arc<TessPlan>>>; 4]>,
@@ -86,6 +91,8 @@ impl ModelBody {
             mesh: Arc::new(OnceLock::new()),
             joint_faces: Arc::new(OnceLock::new()),
             mesh_placement: None,
+            mirrored_mesh: None,
+            opposite_hand: Arc::new(OnceLock::new()),
             plan: Arc::new(Default::default()),
             plan_mesh: Arc::new(Default::default()),
             key: 0,
@@ -993,6 +1000,7 @@ impl ModelState {
                         && let Some(lines) = olds.first().and_then(|x| x.body.split_lines())
                     {
                         b.body = b.body.clone().with_split_lines(Some(lines.clone()));
+                        b.mirrored_mesh = None;
                     }
                     // An imported look outlives the operations on the body.
                     if b.body.paint().is_none()
@@ -1810,6 +1818,8 @@ fn hash_placement(m: &Mat, h: &mut impl Hasher) {
 fn mirror_placements_digest(doc: &Document, f: &Feature, placements: &[Vec<u64>], bodies: &[crate::BodyName]) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     doc.component_transform(f.component).iter().flatten().for_each(|x| x.to_bits().hash(&mut h));
+    // A feature added after the mirror that builds on its copies needs them made for that.
+    placement_reuse::copies_only_shown(doc, f).hash(&mut h);
     for placed in placements.iter().map(|path| mirror_copy_frame(doc, path)) {
         placed.is_some().hash(&mut h);
         if let Some((component, frame, picked)) = placed {
@@ -2413,6 +2423,16 @@ impl Model {
                         _ => mats,
                     };
                     next.stamp(&state, f, key, mats);
+                    // Evaluated again only for what came before it (a mirror moved by a drag).
+                    if let Some(old) = self.results.get(i).filter(|old| old.id == f.id) {
+                        let made = old.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| (b.name.as_str(), b));
+                        let made: std::collections::HashMap<&str, &ModelBody> = made.collect();
+                        for b in next.bodies.iter_mut().filter(|b| b.feature == f.id) {
+                            if let Some(old) = made.get(b.name.as_str()) {
+                                b.keep_meshes_of(old);
+                            }
+                        }
+                    }
                     for b in &mut next.bodies {
                         if !b.transferred {
                             b.component = match doc.body_components.get(&b.name) {
@@ -7849,6 +7869,9 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             let m = mirror_matrix(&pl);
             let mut output = 0;
+            // Copies evaluated on each frame a placement is dragged, which nothing cuts or joins:
+            // searching their revolved faces again was nearly all that took.
+            let shown_only = !*combine && !placements.is_empty() && placement_reuse::copies_only_shown(doc, f);
             for (k, n) in bodies.iter().enumerate() {
                 let i = st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
                 let Some(mb) = st.bodies.get(i).cloned() else { continue };
@@ -7865,7 +7888,12 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                     }
                     None => (None, m, m),
                 };
-                let mirrored = moved_copy(&mb, kernel::transform_matrix(&mb.body, if *combine { own } else { copy })?, 1);
+                let copied = if shown_only {
+                    kernel::place_matrix(&mb.body, copy)
+                } else {
+                    kernel::transform_matrix(&mb.body, if *combine { own } else { copy })
+                };
+                let mirrored = moved_copy(&mb, copied?, 1);
                 if *combine {
                     let joined = kernel::boolean(&mb.body, &mirrored.body, BoolOp::Union)?
                         .ok_or_else(|| DocError::Invalid("the mirror join produced nothing".into()))?;
@@ -7887,6 +7915,9 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                     let name = copy_body_name(st, f, output, &mb.name);
                     copy_sheet(st, &mb.name, &name, &copy);
                     let mut body = ModelBody::traced_new(name, mirrored, f.id);
+                    if !placements.is_empty() {
+                        body.mirrored_mesh = placed_mesh::PlacedMesh::mirrored(&mb, &body.body, &copy).map(Arc::new);
+                    }
                     if let Some(c) = component.filter(|c| *c != f.component) {
                         // Kept in that component as a moved body is (and through later features).
                         body.component = c;
@@ -8565,7 +8596,8 @@ impl PlacedBodies {
         if let Some(placed) = self.taken(b, m, &name) {
             return placed;
         }
-        match kernel::place_matrix(&b.body, *m) {
+        let body = if crate::is_identity(m) { Ok(b.body.clone()) } else { kernel::place_matrix(&b.body, *m) };
+        match body {
             Ok(body) => {
                 let mut fresh = ModelBody::new(name, body, b.feature);
                 fresh.mesh_placement = placed_mesh::PlacedMesh::new(b, m).map(Arc::new);
@@ -8671,6 +8703,12 @@ fn placed_key(b: &ModelBody, m: &crate::Mat) -> (usize, [u64; 16]) {
     (Arc::as_ptr(&b.mesh) as usize, bits)
 }
 
+/// Whether a world state shows `b`, placed by `m`, apart from the model's body. A mirrored copy
+/// always is: it is drawn from its source's opposite hand, and the model keeps its own triangles.
+fn placed_apart(b: &ModelBody, m: &crate::Mat) -> bool {
+    !crate::is_identity(m) || b.mirrored_mesh.is_some()
+}
+
 /// [`world_state`], reusing the bodies `placed` holds from an earlier call and leaving it holding
 /// this call's.
 pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut PlacedBodies) -> ModelState {
@@ -8725,7 +8763,7 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
     for (comp, path, m) in &placements {
         for b in bodies_of(*comp) {
             let bm = body_matrix(b, m);
-            if !crate::is_identity(&bm) {
+            if placed_apart(b, &bm) {
                 jobs.push((b, bm, names.name(&b.name, *comp, path)));
             }
         }
@@ -8743,7 +8781,7 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
             let bm = body_matrix(b, &m);
             // Identical geometry also shares its display mesh cell with the definition.
             // A changed placement keeps a distinct mesh, at that placement's coordinates.
-            let mut placed = if crate::is_identity(&bm) {
+            let mut placed = if !placed_apart(b, &bm) {
                 let mut placed = b.clone();
                 placed.name = names.name(&b.name, comp, &path);
                 placed
