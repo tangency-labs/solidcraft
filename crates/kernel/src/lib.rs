@@ -165,7 +165,7 @@ pub use boundary_network::{BoundaryCurve, CurveSource, MAX_CHAIN_CURVES, MAX_EDG
 pub use bridge::{Continuity, Frame, blend_between, bridge, chain, chain_closes, frames, frames_across, sample_grid};
 pub use build::{
     PathSeg, box_solid, canonical_revolve_axis, cylinder, extrude, extrude_tapered, extrude_tapered_between, extrude_whole_sides, loft, loft_regions,
-    loft_with_rails, path_polyline, revolve, revolve_whole, sphere, sweep, sweep_with, torus,
+    loft_with_rails, multi_lump, path_polyline, revolve, revolve_whole, sphere, sweep, sweep_with, torus,
 };
 pub use clearance::{Clearance, Occupancy};
 pub use coaxial_overlap::{CoaxialOverlap, coaxial_candidate, coaxial_overlap};

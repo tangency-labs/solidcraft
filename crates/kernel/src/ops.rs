@@ -964,6 +964,23 @@ fn conical_cut_junction(a: &Body, b: &Body) -> bool {
     .unwrap_or(false)
 }
 
+/// A body's pieces: its lumps, or, when its shells touch (a sweep tool split into pieces at a
+/// shared section so the Boolean can cut them one by one), one body per shell.
+fn pieces_of(b: &Body) -> Result<Vec<Body>> {
+    match b.lumps() {
+        Ok(lumps) => Ok(lumps),
+        Err(_) if b.solid.boundaries().len() > 1 => {
+            let mut out = Vec::with_capacity(b.solid.boundaries().len());
+            for shell in b.solid.boundaries() {
+                let solid = mt::Solid::try_new(vec![shell.clone()]).map_err(|e| KernelError::Failed(format!("boolean pieces: {e}")))?;
+                out.push(Body::new(solid)?);
+            }
+            Ok(out)
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// [`boolean`], the boolean of the whole bodies taken by `whole`.
 fn boolean_via(a: &Body, b: &Body, op: BoolOp, whole: &dyn Fn(&Body, &Body, BoolOp) -> Result<Option<Body>>) -> Result<Option<Body>> {
     let (mut r, mut diagnostics) = capture_boolean_diagnostics(|| whole(a, b, op));
@@ -974,7 +991,7 @@ fn boolean_via(a: &Body, b: &Body, op: BoolOp, whole: &dyn Fn(&Body, &Body, Bool
         Ok(Some(_)) => false,
     };
     if retry && (a.solid.boundaries().len() > 1 || b.solid.boundaries().len() > 1) {
-        let (la, lb) = (a.lumps()?, b.lumps()?);
+        let (la, lb) = (pieces_of(a)?, pieces_of(b)?);
         if la.len() > 1 || lb.len() > 1 {
             let (pieces, report) = capture_boolean_diagnostics(|| by_lumps(a, b, la, lb, op));
             if let Ok(Some(x)) = pieces {

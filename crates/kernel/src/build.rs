@@ -2402,6 +2402,19 @@ pub fn sweep(plane: &Plane, region: &Region2, path: &[PathSeg]) -> Result<Body> 
     })
 }
 
+/// The pieces of a sweep as one body with one shell per piece; a Boolean cuts the lumps apart.
+pub fn multi_lump(bodies: Vec<Body>) -> Result<Body> {
+    if bodies.is_empty() {
+        return Err(KernelError::Invalid("the sweep produced no pieces".into()));
+    }
+    let mut shells = Vec::new();
+    for b in &bodies {
+        shells.extend(b.solid.boundaries().iter().cloned());
+    }
+    let solid = mt::Solid::try_new(shells).map_err(|e| KernelError::Failed(format!("sweeping the path pieces: {e}")))?;
+    Body::new(solid)
+}
+
 /// A connected, single turn about one centre and axis, possibly split into sketch arcs.
 fn full_circle(path: &[PathSeg]) -> Option<(Vec3, Vec3, f64)> {
     let PathSeg::Arc { a: first, center, axis, .. } = *path.first()? else { return None };
