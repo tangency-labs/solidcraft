@@ -1,0 +1,35 @@
+{
+  "ar": {
+    "prefs.command_dialog_values": "مربعات حوار الأوامر",
+    "prefs.remember_dialog_values": "تذكّر قيم مربعات حوار الأوامر"
+  },
+  "de": {
+    "prefs.command_dialog_values": "Befehlsdialoge",
+    "prefs.remember_dialog_values": "Befehlsdialogwerte merken"
+  },
+  "en": {
+    "prefs.command_dialog_values": "Command dialogs",
+    "prefs.remember_dialog_values": "Remember command dialog values",
+    "prefs.remember_dialog_values.help": "Off by default. When on, after a command succeeds, its safe values and options are reused the next time you open the same command, until SolidCraft closes."
+  },
+  "he": {
+    "prefs.command_dialog_values": "תיבות דו-שיח של פקודות",
+    "prefs.remember_dialog_values": "זכור ערכים בתיבות דו-שיח של פקודות"
+  },
+  "ja": {
+    "prefs.command_dialog_values": "コマンドダイアログ",
+    "prefs.remember_dialog_values": "コマンドダイアログの値を記憶"
+  },
+  "ko": {
+    "prefs.command_dialog_values": "명령 대화 상자",
+    "prefs.remember_dialog_values": "명령 대화 상자 값 기억"
+  },
+  "vi": {
+    "prefs.command_dialog_values": "Hộp thoại lệnh",
+    "prefs.remember_dialog_values": "Ghi nhớ giá trị hộp thoại lệnh"
+  },
+  "zh": {
+    "prefs.command_dialog_values": "命令对话框",
+    "prefs.remember_dialog_values": "记住命令对话框的值"
+  }
+}

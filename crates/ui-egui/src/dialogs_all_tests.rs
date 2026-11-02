@@ -84,6 +84,93 @@ fn point_at_edge_and_plane_picks_a_construction_axis() {
     }
 }
 
+#[test]
+fn command_dialog_remembers_values_for_the_same_command_only_in_this_session() {
+    let mut h = Harness::new();
+    h.app.preferences.remember_dialog_values = true;
+    let mut pattern = Dialog::for_command(&h.app, "solid.pattern.rectangular").unwrap();
+    if let Kind::PatternRect { count, spacing, count2, spacing2 } = &mut pattern.kind {
+        *count = "7".into();
+        *spacing = "12 mm".into();
+        *count2 = "3".into();
+        *spacing2 = "8 mm".into();
+    } else {
+        panic!("rectangular pattern dialog has the wrong kind");
+    }
+    remember(&mut h.app, &pattern);
+
+    let recalled = Dialog::for_command(&h.app, "solid.pattern.rectangular").unwrap();
+    assert!(matches!(
+        &recalled.kind,
+        Kind::PatternRect { count, spacing, count2, spacing2 }
+            if count == "7" && spacing == "12 mm" && count2 == "3" && spacing2 == "8 mm"
+    ));
+
+    let fresh_app = Harness::new();
+    let fresh = Dialog::for_command(&fresh_app.app, "solid.pattern.rectangular").unwrap();
+    assert!(matches!(
+        &fresh.kind,
+        Kind::PatternRect { count, count2, .. } if count == "3" && count2 == "1"
+    ));
+}
+
+#[test]
+fn primitive_dialog_remembers_values_without_reusing_its_picked_placement() {
+    let mut h = Harness::new();
+    h.app.preferences.remember_dialog_values = true;
+    let mut box_dialog = Dialog::for_command(&h.app, "solid.box").unwrap();
+    if let Kind::Primitive { fields, operation, at, .. } = &mut box_dialog.kind {
+        fields[0].1 = "42 mm".into();
+        *operation = 2;
+        *at = Some((Vec3::ZERO, None));
+    } else {
+        panic!("box dialog has the wrong kind");
+    }
+    remember(&mut h.app, &box_dialog);
+
+    let recalled = Dialog::for_command(&h.app, "solid.box").unwrap();
+    assert!(matches!(
+        &recalled.kind,
+        Kind::Primitive { fields, operation: 2, at: None, .. } if fields[0].1 == "42 mm"
+    ));
+
+    let different_command = Dialog::for_command(&h.app, "solid.cylinder").unwrap();
+    assert!(matches!(
+        &different_command.kind,
+        Kind::Primitive { fields, operation: 0, .. } if fields[0].1 == "20 mm"
+    ));
+}
+
+#[test]
+fn command_dialog_remembers_option_fields() {
+    let mut h = Harness::new();
+    h.app.preferences.remember_dialog_values = true;
+    let mut shell = Dialog::for_command(&h.app, "solid.shell").unwrap();
+    shell.extra.insert("direction".into(), json!("outside"));
+    shell.extra.insert("tangent_chain".into(), json!(false));
+    remember(&mut h.app, &shell);
+
+    let recalled = Dialog::for_command(&h.app, "solid.shell").unwrap();
+    assert_eq!(recalled.extra.get("direction"), Some(&json!("outside")));
+    assert_eq!(recalled.extra.get("tangent_chain"), Some(&json!(false)));
+}
+
+#[test]
+fn command_dialog_value_memory_is_off_by_default_and_resets_each_time() {
+    let mut h = Harness::new();
+    assert!(!h.app.preferences.remember_dialog_values);
+    let mut pattern = Dialog::for_command(&h.app, "solid.pattern.rectangular").unwrap();
+    if let Kind::PatternRect { count, .. } = &mut pattern.kind {
+        *count = "7".into();
+    } else {
+        panic!("rectangular pattern dialog has the wrong kind");
+    }
+    remember(&mut h.app, &pattern);
+
+    let recalled = Dialog::for_command(&h.app, "solid.pattern.rectangular").unwrap();
+    assert!(matches!(&recalled.kind, Kind::PatternRect { count, .. } if count == "3"));
+}
+
 fn fixture() -> Harness {
     let mut h = Harness::new();
     for (name, x) in [("A", 0), ("B", 30), ("C", 60), ("D", 90)] {

@@ -555,6 +555,8 @@ pub struct SolveApp {
     pub render_workspace: render_workspace::State,
     pub tool: Option<tools::Tool>,
     pub dialog: Option<dialogs::Dialog>,
+    /// Each command dialog's options and values as last applied (this session only).
+    pub(crate) remembered_commands: Vec<dialogs::RememberedCommand>,
     /// The Change Parameters window, when open.
     pub params: Option<params_dialog::ParamsDialog>,
     /// The Design Properties window, when open.
@@ -819,6 +821,7 @@ impl SolveApp {
             render_workspace,
             tool: None,
             dialog: None,
+            remembered_commands: Vec::new(),
             params: None,
             design_properties: None,
             sketch_report: None,
