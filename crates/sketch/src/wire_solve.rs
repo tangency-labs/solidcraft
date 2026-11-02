@@ -307,20 +307,19 @@ impl WireConstraintKind {
                 out.push(if *reversed { -d } else { d } - T::num(*value));
             }
             WireConstraintKind::Angle { a_reversed, b_reversed, value, .. } => {
-                let unit = |v: V<T>| {
-                    let n = v.len();
-                    v.scale(T::num(1.0) / if n.val() > 1e-12 { n } else { T::num(1e-12) })
-                };
-                let (u, v) = (unit(directed(p(0), p(1), *a_reversed)), unit(directed(p(2), p(3), *b_reversed)));
+                // Weighed by the lines' size (a constant of the step, so shrinking a line gains
+                // nothing): residuals in mm, so the angle weighs as much as a length at any size.
+                let (du, dv) = (directed(p(0), p(1), *a_reversed), directed(p(2), p(3), *b_reversed));
+                let (u, v, w) = (unit(du), unit(dv), size(du, dv));
                 if *value <= PARALLEL_ANGLE {
                     // The same direction: smooth where the lines are parallel, unlike the angle.
-                    out.extend((u - v).xyz());
+                    out.extend((u - v).scale(w).xyz());
                 } else if *value >= std::f64::consts::PI - PARALLEL_ANGLE {
-                    out.extend((u + v).xyz());
+                    out.extend((u + v).scale(w).xyz());
                 } else {
                     // The angle itself: smooth everywhere but where the lines are parallel, which
                     // this value is not (a solve that starts there is nudged off it).
-                    out.push(u.cross(v).len().atan2(u.dot(v)) - T::num(*value));
+                    out.push((u.cross(v).len().atan2(u.dot(v)) - T::num(*value)) * w);
                 }
             }
             WireConstraintKind::Radius { value, .. } => {
@@ -370,6 +369,23 @@ impl WireConstraintKind {
             _ => false,
         }
     }
+}
+
+/// The weight two directions are compared with in mm: the geometric mean of their lengths, as a
+/// constant ([`weight`]).
+fn size<T: Num>(u: V<T>, v: V<T>) -> T {
+    weight((u.len() * v.len()).sqrt())
+}
+
+/// A length used as a weight: its value, without derivatives.
+fn weight<T: Num>(l: T) -> T {
+    T::num(l.val().max(1e-9))
+}
+
+/// `v` scaled to length 1 (a vector of nothing stays one, pointing nowhere).
+fn unit<T: Num>(v: V<T>) -> V<T> {
+    let n = v.len();
+    v.scale(T::num(1.0) / if n.val() > 1e-12 { n } else { T::num(1e-12) })
 }
 
 /// A line's direction from `a` to `b`, or from `b` to `a` when `reversed`.
