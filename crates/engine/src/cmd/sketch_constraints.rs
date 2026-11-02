@@ -498,6 +498,8 @@ fn anchor(sk: &Sketch, k: &ConstraintKind) -> Option<Vec2> {
         PatternPoint { q, center, .. } => pt(center.unwrap_or(q)),
         PatternRadius { b, .. } => mid(b),
         Coincident { p, .. } | Fix { p } | Midpoint { p, .. } => pt(p),
+        // A pierce is drawn at the point it holds.
+        Pierce { p, .. } => pt(p),
         PointOnCurve { p, .. } => pt(p),
         HorizontalPoints { p, q } | VerticalPoints { p, q } | Symmetric { p, q, .. } => Some((pt(p)? + pt(q)?) * 0.5),
         Horizontal { l } | Vertical { l } => mid(l),
