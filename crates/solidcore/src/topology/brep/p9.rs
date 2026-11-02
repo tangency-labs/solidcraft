@@ -47,6 +47,9 @@
 //! WR-527, #1527): on two planes, `MakeEdgeInFaceWithVU` leaves an inner loop whose
 //! test point lies outside the new face's outer loop box (at the retry tolerance)
 //! in place without classifying it, as the fork's tangency-labs/smlib@60b1c6a.
+//! Each inner loop it goes on to classify adds one to
+//! [`WorkCounters::loops_classified`](crate::kernel::WorkCounters::loops_classified)
+//! (the fork's work count, tangency-labs/smlib@edf7414); it changes no result.
 
 use crate::curve::curve::Curve;
 use crate::error::{ignore_status, Result, SolidError, SM_ERR};
@@ -2290,6 +2293,8 @@ fn redistribute_inner_loops(
             i += 1;
             continue;
         }
+        // (the SolidCraft fork's work count)
+        k.work_counters.add_loop_classified();
         let target = if classify_to_original { face } else { new_face };
         let other = if classify_to_original { new_face } else { face };
         let mut pc = PointClassification::<EntityRef>::new(tolerance);

@@ -21,6 +21,7 @@
 //! | [`Kernel::fillet_point_step`], [`Kernel::latch_fillet_point_step`] | the function-static `sdStaticStep` of `SmFilletSolver::ComputePointValues` |
 //! | [`Kernel::upstream_ub_passed`], [`Kernel::note_upstream_ub`] | (none: upstream undefined behaviour the port went past) |
 //! | [`CancelToken`], [`Kernel::cancel`], [`Kernel::set_cancel_token`], [`Kernel::check_cancelled`] | (none: cooperative cancellation for worker-thread jobs) |
+//! | [`WorkCounters`], [`Kernel::work_counters`] | the SolidCraft fork's `SmWorkCounters` (process-wide there) |
 //!
 //! Upstream seeds `rand()` from the clock in a few places; the port replaces that with
 //! [`Rng`], seeded from [`KernelOptions::seed`], so runs are reproducible. Results that
@@ -139,6 +140,57 @@ impl Caches {
     /// Drops all cached data.
     pub fn clear(&mut self) {
         *self = Self::default();
+    }
+}
+
+/// Counts of the work done by the steps of a boolean whose cost once grew with the square
+/// of the body's size, so a test can check how that work grows: the same on every
+/// machine, where a ratio of times is not (the SolidCraft fork's `SmWorkCounters`,
+/// tangency-labs/smlib@2e9e6b2 and @edf7414).
+///
+/// Each count is added where its work is done; counting changes no result. The fork's
+/// counters are process-wide atomics; these belong to their [`Kernel`] (no global state)
+/// and are [`Cell`]s, so operations that take `&Kernel` can add to them and the kernel
+/// stays `Send`. Only [`WorkCounters::reset`] zeroes them.
+#[derive(Debug, Default)]
+pub struct WorkCounters {
+    face_pairs: Cell<u64>,
+    loops_classified: Cell<u64>,
+}
+
+impl WorkCounters {
+    /// Pairs of faces of the two B-reps examined for intersection
+    /// (`SmWorkCounters::eFacePairs`): each pair the face loop of
+    /// `TopologyIntersector::intersect_topology` visits.
+    #[must_use]
+    pub fn face_pairs(&self) -> u64 {
+        self.face_pairs.get()
+    }
+
+    /// Inner loops of a face classified against the new face that a closed loop
+    /// imprinted in it makes (`SmWorkCounters::eLoopsClassified`): each inner loop
+    /// `make_edge_in_face_with_vu` goes on to classify after the box test of
+    /// [`UpstreamFixes::boolean_skips_faces_apart`] (every inner loop with that flag off).
+    #[must_use]
+    pub fn loops_classified(&self) -> u64 {
+        self.loops_classified.get()
+    }
+
+    /// Zeroes every count (`SmWorkCounters::Reset`).
+    pub fn reset(&self) {
+        self.face_pairs.set(0);
+        self.loops_classified.set(0);
+    }
+
+    /// Counts one face pair examined for intersection.
+    pub(crate) fn add_face_pair(&self) {
+        self.face_pairs.set(self.face_pairs.get().saturating_add(1));
+    }
+
+    /// Counts one inner loop classified against a new face.
+    pub(crate) fn add_loop_classified(&self) {
+        self.loops_classified
+            .set(self.loops_classified.get().saturating_add(1));
     }
 }
 
@@ -1585,6 +1637,10 @@ pub struct Kernel {
         std::sync::Weak<()>,
         crate::topology::topology::NotifyRecords,
     ),
+    /// Not upstream (the SolidCraft fork's `SmWorkCounters`): counts of the work done by
+    /// the steps of a boolean whose cost once grew with the square of the body's size, for
+    /// tests and profiling. They change no result.
+    pub work_counters: WorkCounters,
 }
 
 impl Default for Kernel {
@@ -1612,6 +1668,7 @@ impl Kernel {
                 std::sync::Weak::new(),
                 crate::topology::topology::NotifyRecords::new(),
             ),
+            work_counters: WorkCounters::default(),
         }
     }
 
@@ -1741,6 +1798,21 @@ mod tests {
         assert_eq!(k.latch_fillet_point_step(1.0e-3), 1.0e-5);
         k.fillet_point_step.set(Some(1.0e-3));
         assert_eq!(k.latch_fillet_point_step(1.0e-5), 1.0e-3);
+    }
+
+    #[test]
+    fn work_counters_count_until_reset() {
+        let k = Kernel::default();
+        let w = &k.work_counters;
+        assert_eq!((w.face_pairs(), w.loops_classified()), (0, 0));
+        w.add_face_pair();
+        w.add_face_pair();
+        w.add_loop_classified();
+        assert_eq!((w.face_pairs(), w.loops_classified()), (2, 1));
+        // each kernel counts its own work
+        assert_eq!(Kernel::default().work_counters.face_pairs(), 0);
+        w.reset();
+        assert_eq!((w.face_pairs(), w.loops_classified()), (0, 0));
     }
 
     #[test]

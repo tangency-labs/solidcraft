@@ -72,6 +72,8 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
             std::sync::Weak::new(),
             crate::topology::topology::NotifyRecords::new(),
         ),
+        // (building cache trees does none of the counted work)
+        work_counters: crate::kernel::WorkCounters::default(),
     }
 }
 

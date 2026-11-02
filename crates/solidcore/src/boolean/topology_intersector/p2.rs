@@ -62,6 +62,10 @@
 //!   pairs processed and their order are the same, and a join of two bodies of n faces
 //!   no longer walks all n^2 pairs to skip them. With an intersection table registered
 //!   every pair is still visited (its lookup copies curves before the box test).
+//! - **Work count** (the SolidCraft fork's `SmWorkCounters`, tangency-labs/smlib@2e9e6b2):
+//!   each face pair the face loop of `IntersectTopology` visits adds one to
+//!   [`WorkCounters::face_pairs`](crate::kernel::WorkCounters::face_pairs). It changes no
+//!   result.
 //! - **Opt-in (WR-528).** With `Kernel::fixes.close_loop_relates_only_coincident_edges`,
 //!   `CloseIntersectionLoop` relates the target edge to the sole other edge between the
 //!   mated vertices only when its midpoint drops within the edges' tolerance (the
@@ -1448,6 +1452,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 let Some(&f2) = faces2.get(jj) else {
                     continue;
                 };
+                // (the SolidCraft fork's work count)
+                k.work_counters.add_face_pair();
                 let s1 = brep
                     .face_surface(f1)
                     .ok_or(invalid(OP_INTERSECT_TOPOLOGY, "face handle is unknown"))?;
