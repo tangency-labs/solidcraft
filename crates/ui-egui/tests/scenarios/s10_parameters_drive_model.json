@@ -99,6 +99,18 @@
   }
  },
  {
+  "click": {"handle": "param:comment:d1:expand"}
+ },
+ {
+  "text": "Overall mounting width including the clearance required for installation and later adjustment."
+ },
+ {
+  "shot": "s10_comment_expanded"
+ },
+ {
+  "click": {"handle": "dialog:Filter"}
+ },
+ {
   "click": {"handle": "params:close"}
  },
  {
