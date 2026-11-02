@@ -13,6 +13,7 @@ solidcraft-geom = { workspace = true }
 solidcraft-sketch = { workspace = true }
 solidcraft-kernel = { workspace = true }
 solidcraft-render = { workspace = true }
+solidcraft-manufacture = { workspace = true }
 solidcraft-derive = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
