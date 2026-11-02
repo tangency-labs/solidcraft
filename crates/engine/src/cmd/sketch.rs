@@ -316,19 +316,31 @@ pub(super) fn edit_solved<T>(
     // The constraints the sketch has before the edit: a conflict message must not name one the
     // edit itself adds (the trial already holds it under the id it would get, #9735).
     let pre: Vec<String> = sk.constraints.iter().map(|c| c.id.clone()).chain(sk.wire_constraints.iter().map(|c| c.id.clone())).collect();
-    // Whether the 3D constraints held before the edit: only then does one that leaves them
-    // failing count as over-constraining (#10608).
-    let wires_held = sk.wire_constraints_hold();
     // What the edit changes: a strict edit is refused for breaking the planar sketch only when
-    // it changed the planar sketch, and for breaking the 3D constraints only when it changed
-    // the 3D curves or their constraints (#10608).
-    let planar_before = (sk.points.clone(), sk.curves.clone(), sk.constraints.clone());
-    let wires_before = (sk.wires.clone(), sk.wire_constraints.clone());
+    // it changed the planar sketch, and for breaking 3D constraints only when it changed the 3D
+    // curves or their constraints, and only constraints that held before it or that it adds
+    // (#10608). A 3D sketch too large to solve refuses only an edit that makes it so.
+    let before = strict.then(|| {
+        let big = s.model.state().sketch(id).and_then(|k| k.report.wires.as_ref()).is_some_and(|w| w.oversized.is_some() || w.out_of_time);
+        (
+            sk.points.clone(),
+            sk.curves.clone(),
+            sk.constraints.clone(),
+            sk.wires.clone(),
+            sk.wire_constraints.clone(),
+            sk.wire_constraints_holding(),
+            big,
+        )
+    });
     let (out, left) = f(&mut sk, &mut doc)?;
-    let strictness = Strict {
-        planar: strict && (sk.points != planar_before.0 || sk.curves != planar_before.1 || sk.constraints != planar_before.2),
-        wires: strict && (sk.wires != wires_before.0 || sk.wire_constraints != wires_before.1),
-        wires_held,
+    let strictness = match before {
+        Some((points, curves, constraints, wires, wire_constraints, held, was_big)) => Strict {
+            planar: sk.points != points || sk.curves != curves || sk.constraints != constraints,
+            wires: sk.wires != wires || sk.wire_constraints != wire_constraints,
+            held,
+            was_big,
+        },
+        None => Strict::default(),
     };
     // A curve that took an offset spline's generated node (drawn from its end) gets its own point there.
     sk.detach_offset_points()?;
@@ -365,6 +377,10 @@ pub(super) fn edit_solved<T>(
             Some(settle(strictness, rep, &mut sk, unsolved, &pre)?)
         }
     };
+    let mut rep = rep;
+    if let Some(r) = rep.as_mut() {
+        doc.discount_traces(id, &sk, r);
+    }
     sketch_store::checked(&sk)?;
     sketch_store::write(&mut doc, id, sk)?;
     s.set_doc(doc);
@@ -380,19 +396,33 @@ pub(super) fn edit_solved<T>(
 /// The 3D constraints (#10608) are settled apart, see [`Strict`]. A 3D group that fails moves
 /// none of its curves; a planar solve that fails keeps the 3D curves as the 3D solve left them.
 fn settle(strict: Strict, mut rep: SolveReport, sk: &mut Sketch, unsolved: Sketch, pre: &[String]) -> Result<SolveReport> {
-    let Strict { planar: strict, wires: strict_wires, wires_held } = strict;
-    if strict_wires && let Some(why) = wire_collapse(&unsolved, sk) {
+    let Strict { planar: strict, wires: strict_wires, held, was_big } = strict;
+    let collapse = wire_collapse(&unsolved, sk);
+    if strict_wires && let Some(why) = collapse.clone() {
         return Err(EngineError::Other(why));
     }
-    if let Some(w) = rep.wires.as_ref().filter(|w| strict_wires && wires_held && !w.ok) {
-        let had: Vec<String> = w.failing.iter().filter(|id| pre.iter().any(|p| p == *id)).cloned().collect();
-        if w.oversized.is_none() && had.is_empty() {
-            return Err(EngineError::Other(
-                "that would over-constrain the 3D sketch (it conflicts with what its other 3D constraints already determine)".into(),
-            ));
+    if let Some(w) = rep.wires.as_ref().filter(|w| strict_wires && !w.ok) {
+        if w.oversized.is_some() || w.out_of_time {
+            if !was_big {
+                return Err(EngineError::Other(w.failure(|f| f.to_string())));
+            }
+        } else {
+            // What it breaks: a constraint that held before the edit, or one the edit adds.
+            let broken: Vec<&String> = w.failing.iter().filter(|id| held.contains(*id) || !pre.contains(*id)).collect();
+            let had: Vec<String> = broken.iter().filter(|id| pre.contains(**id)).map(|id| (*id).clone()).collect();
+            if !broken.is_empty() && had.is_empty() {
+                return Err(EngineError::Other(
+                    "that would over-constrain the 3D sketch (it conflicts with what its other 3D constraints already determine)".into(),
+                ));
+            }
+            if !had.is_empty() {
+                return Err(EngineError::Other(format!("that would over-constrain the 3D sketch (conflicts with {})", had.join(", "))));
+            }
         }
-        let w = solidcraft_sketch::WireReport { failing: had, ..w.clone() };
-        return Err(EngineError::Other(w.failure(|f| format!("that would over-constrain the 3D sketch (conflicts with {f})"))));
+    }
+    // A non-strict edit's 3D solve that squeezed a curve away keeps the curves as the edit left them.
+    if !strict_wires && collapse.is_some() {
+        sk.wires.clone_from(&unsolved.wires);
     }
     if strict && !rep.keeps_orientation() {
         if rep.folded.is_empty() && rep.oversized.is_none() && !rep.failing.is_empty() {
@@ -432,17 +462,18 @@ fn settle(strict: Strict, mut rep: SolveReport, sk: &mut Sketch, unsolved: Sketc
 /// Which failures refuse an edit's solve: the planar sketch's when the edit changed it
 /// (`planar`), the 3D constraints' when it changed the 3D curves or their constraints (`wires`)
 /// and they held before it (`wires_held`). An edit is not refused for a failure it did not touch.
-#[derive(Clone, Copy)]
+#[derive(Clone, Default)]
 pub(super) struct Strict {
     planar: bool,
     wires: bool,
-    wires_held: bool,
+    held: std::collections::HashSet<String>,
+    was_big: bool,
 }
 
 /// Why solving `before` into `after` collapsed a drawn 3D curve (#10608), as `shrunk` and
 /// `flung` judge planar geometry: a line or arc from longer (or wider) than 1e-3 to shorter
 /// than 1e-5, or a point thrown further than [`FLUNG`] times the 3D curves' size.
-fn wire_collapse(before: &Sketch, after: &Sketch) -> Option<String> {
+pub(super) fn wire_collapse(before: &Sketch, after: &Sketch) -> Option<String> {
     let size = |w: &solidcraft_sketch::Wire| match (w.arc, w.fit.as_slice()) {
         (Some(a), _) => Some(a.radius),
         (None, [p, q]) => Some(p.dist(*q)),
@@ -456,7 +487,8 @@ fn wire_collapse(before: &Sketch, after: &Sketch) -> Option<String> {
             .collect::<std::collections::HashMap<_, _>>()
     };
     let (old, new) = (drawn(before), drawn(after));
-    for (id, w) in &new {
+    for w in after.wires.iter().filter(|w| w.link.is_none() && !w.fit.is_empty()) {
+        let id = &w.id;
         if let Some(o) = old.get(id)
             && matches!((size(o), size(w)), (Some(b), Some(a)) if b > 1e-3 && a < 1e-5)
         {

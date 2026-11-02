@@ -780,6 +780,11 @@ pub struct Sketch {
     /// Constraints among the drawn 3D curves' fit points, solved after the planar sketch.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wire_constraints: Vec<crate::wire_solve::WireConstraint>,
+    /// The drawn 3D curves that met were joined (once, at the sketch's first 3D constraint or
+    /// the first curve drawn after it could take one): later edits join only new curves, so a
+    /// joint deleted stays deleted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub wires_joined: bool,
     /// Curves drawn from formulas (#8352): the fit point splines they place, with their formulas.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub equations: Vec<crate::equation::EquationCurve>,
@@ -813,6 +818,7 @@ impl Sketch {
             freeform_offsets: Vec::new(),
             wires: Vec::new(),
             wire_constraints: Vec::new(),
+            wires_joined: false,
             equations: Vec::new(),
             counters: Default::default(),
             view: SketchView::default(),
