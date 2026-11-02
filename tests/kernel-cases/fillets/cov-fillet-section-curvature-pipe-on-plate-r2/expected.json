@@ -1,13 +1,35 @@
 {
  "sources": [],
- "what": "the concave edge where a pipe dips into a plate rounded curvature-continuous size 2: the order-2 section meets the plane with curvature 0 and the pipe with its curvature 1/10",
+ "what": "the concave edge where a pipe dips into a plate rounded curvature-continuous size 2: the order-2 section meets the plane G2 (curvature 0) and the pipe G3 (its curvature 1/10 and that curvature's rate, 0)",
  "source": "analytic",
- "method": "plate 60x40x10 (z 0..10) joined to a pipe R10 along x (0..60) whose axis is at (y, z) = (20, 16): the pipe dips 4 into the plate and leaves it along y = 20 +- 8, z = 10, the edges ending on the planar faces x = 0 and 60. V0 = 24000 + 60 (100 pi - (100 acos 0.6 - 48)) = 40165.7846. The concave edge y = 28: in a plane x = const, the point at distance d from both faces is (20 + g, 10 + d), g = sqrt(64 + 32 d); its feet are F1 = (20 + g, 10) on the plate and F2 = (20 + 10 g / (10 + d), 26 - 160 / (10 + d)) on the pipe. The order-2 section between the r = 2 ball's contacts: S(t) = f(t) T1(1 - p1(t)) + (1 - f(t)) T2(p2(t)), f = (1-t)^3 / ((1-t)^3 + t^3), p1 = t / (1 - w + w t), p2 = t (1 - w) / (1 - w t), w = -0.8544103493 (the equal-area default: the wedge at the middle station is 70.52878 degrees), T_i(u) = sum_{k<=2} 2^k / k! F_i^(k)(2) (u - 1)^k (g' = 16 / g, g'' = -256 / g^3). It adds the area between it, the plate and the pipe, 1.54598304589003 (Green's theorem): V = 40165.7846 + 60 * 1.545983 = 40258.5436. The pipe's feet are not linear in d: the t^3 term of the standoff does not vanish, and both seams are G2, not G3. [the curvature section at the equal-area thumbweight (the default): on the same rails it takes off what the ball's circle does, so between square planes w = -0.5252123889 and it cuts A = (1 - pi/4) s^2 = 0.214601836603 s^2, first moment about either face M = 0.0474559669443 s^3 (Green's theorem on S); V = 40302.590786]",
+ "method": "plate 60x40x10 (z 0..10) joined to a pipe R10 along x (0..60) whose axis is at (y, z) = (20, 16): the pipe dips 4 into the plate and leaves it along y = 20 +- 8, z = 10, the edges ending on the planar faces x = 0 and 60. V0 = 24000 + 60 (100 pi - (100 acos 0.6 - 48)) = 40165.7846135. The concave edge y = 28: in a plane x = const, the point at distance d from both faces is (20 + g, 10 + d), g = sqrt(64 + 32 d); its feet are F1 = (20 + g, 10) on the plate and F2 = (20 + 10 g / (10 + d), 26 - 160 / (10 + d)) on the pipe. The order-2 section between the r = 2 ball's contacts F1(2) = (31.313708, 10) and F2(2) = (29.428090, 12.666667): S(t) = f(t) T1(1 - p1(t)) + (1 - f(t)) T2(p2(t)), f = (1-t)^3 / ((1-t)^3 + t^3), p1 = t / (1 - w + w t), p2 = t (1 - w) / (1 - w t), w = -0.8544103493 (the equal-area thumbweight: the wedge at the middle station is 70.52878 degrees), T_i(u) = c_i0 + c_i1 (u - 1) + c_i2 (u - 1)^2 with c_i0 = F_i(2), c_i1 = 2 F_i'(2) (g' = 16 / g) and c_i2 the part of 2 F_i''(2) along face i's normal (g'' = -256 / g^3): 0 on the plate, N (N . 2 F2'') on the pipe, N = (F2 - (20, 16)) / 10. It adds the area between it, the plate and the pipe, 2.36835029463 (Green's theorem, Gauss-Legendre 64 panels of 40 points in t): V = 40165.7846135 + 60 * 2.36835029463 = 40307.8856312. Contact with the plate is order 3 (G2): the t^3 term of the standoff, (T2(0) - F1(2)) . (0, 1), is not zero. With the pipe it is order 4 (G3): the plate's jets put T1(0) at V(2) - 2 V'(2), whose offset from F2(2) along the pipe's normal is r - 2 V'(2) . N = 0 (the distance from the pipe grows at the rate 1), and on the circle the face curve's second coefficient lies along the normal and its third along the circle (SMLib's capi pipe_on_plate case).",
  "body_count": 1,
- "volume_mm3": 40302.59078634818,
+ "volume_mm3": 40307.8856312,
  "continuity": {
-  "order": "g2",
-  "exact": true
+  "seams": [
+   {
+    "edges": [
+     [
+      30,
+      31.31370849898476,
+      10
+     ]
+    ],
+    "order": "g2",
+    "exact": true
+   },
+   {
+    "edges": [
+     [
+      30,
+      29.428090415820634,
+      12.666666666666666
+     ]
+    ],
+    "order": "g3",
+    "exact": true
+   }
+  ]
  },
  "tolerance": {
   "rel": 1e-07
