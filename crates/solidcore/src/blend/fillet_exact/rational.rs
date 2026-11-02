@@ -1305,6 +1305,7 @@ mod tests {
             radius: 4.0,
             angle: 0.0,
             side: 1.0,
+            tube: 0.0,
         };
         let kc = plane_section(Point3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, 1.0), &q).unwrap();
         assert_eq!(kc.kind, ConicKind::Ellipse);
@@ -1331,6 +1332,7 @@ mod tests {
             radius,
             angle: 0.0,
             side: 1.0,
+            tube: 0.0,
         };
         let a = cyl(Point3::ZERO, Vec3::new(0.0, 0.0, 1.0), 3.5);
         let b = cyl(Point3::new(0.0, 2.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 1.5);

@@ -12,6 +12,7 @@
 //! | [`FilletSolver::calc_torus_fillet_geom`], [`FilletSolver::torus_fillet_geom_parts`]       | `SmFilletSolver::CalcTorusFilletGeom`    |
 //! | [`FilletSolver::calc_line_spine_fillet_geom`]            | `SmFilletSolver::CalcLineSpineFilletGeom` (fork) |
 //! | [`FilletSolver::calc_circle_spine_fillet_geom`]          | `SmFilletSolver::CalcCircleSpineFilletGeom` (fork) |
+//! | [`FilletSolver::calc_ball_triangle_fillet_geom`], [`FilletSolver::ball_triangle_fillet_geom_parts`] | none (solidcore #2403) |
 //! | [`FilletSolver::point_on_plane_solve`]                   | `SmFilletSolver::PointOnPlaneSolve`          |
 //! | [`FilletSolver::rail_edgeuse_intersect`]                 | `SmFilletSolver::RailEdgeuseIntersect`       |
 //! | [`FilletSolver::rail_rail_intersect`]                    | `SmFilletSolver::RailRailIntersect`          |
@@ -84,9 +85,14 @@
 //!   start angle: the span from the start section) and no blend-curve section; the point
 //!   spine's is [`FilletSolver::calc_sphere_fillet_geom`] as it is (the fork's ignores the
 //!   class). The bodies' own fork-fix flags apply unchanged.
+//! - **The ball's triangle (solidcore #2403, not in the fork).** A point spine whose one
+//!   face's offset collapsed onto a line or circle (a round of the ball's radius) and the
+//!   other's not ([`crate::blend::fillet_exact::classify_ball_on_collapsed_offset`], with
+//!   `fillet_blend_corner`) is [`FilletSolver::calc_ball_triangle_fillet_geom`]: the blend
+//!   corner's Ball patch (`sm_BallTrianglePatch`) on the ball's sphere.
 
 use crate::blend::fillet_custom_solver::OffsetSurface;
-use crate::blend::fillet_exact::ExactBlend;
+use crate::blend::fillet_exact::{BlendQuadric, ExactBlend, QuadricKind};
 use crate::blend::fillet_executive::p3::ErrorInfo;
 use crate::blend::fillet_geom::p1::{
     FilletBrep, FilletCornerId, FilletEdgeType, FilletErrorType, FilletGeom, FilletGeomId,
@@ -1780,6 +1786,149 @@ impl FilletSolver {
 
         Ok(FilletGeomParts {
             surface: sphere,
+            rails: [rail_crv0, rail_crv1],
+            rail_intervals: [Some(crv_ivl0), Some(crv_ivl1)],
+            center_line: None,
+        })
+    }
+
+    /// Not in the fork (solidcore #2403; with `fillet_blend_corner`): the round of a point
+    /// spine one of whose faces is a round of the ball's radius
+    /// ([`crate::blend::fillet_exact::classify_ball_on_collapsed_offset`]), built
+    /// ([`FilletSolver::ball_triangle_fillet_geom_parts`]) and stored into `fillet_geom`
+    /// (`m_vFilletGeoms[0]` for `None`) of the pseudo B-rep `pseudo`.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`FilletSolver::ball_triangle_fillet_geom_parts`] and of the store.
+    pub fn calc_ball_triangle_fillet_geom(
+        ops: &mut dyn FilletSolverOps,
+        k: &Kernel,
+        pseudo: &mut FilletBrep,
+        blend: &ExactBlend,
+        tsects: &[TsectPnt],
+        fillet_geom: Option<FilletGeomId>,
+    ) -> Result<()> {
+        let parts = Self::ball_triangle_fillet_geom_parts(ops, k, blend, tsects)?;
+        store_parts(ops.solver(), pseudo, fillet_geom, parts)
+    }
+
+    /// The geometry of [`FilletSolver::calc_ball_triangle_fillet_geom`]. Every ball touching
+    /// both faces is the one about `blend.point` (`C`): it touches the face whose offset
+    /// collapsed (a cylinder or torus as wide as the ball) along that face's section through
+    /// `C`, the great circle of the ball square to the face's spine there, and the other
+    /// face at one point `P`, the foot of `C` on it. The round is the ball's triangle with
+    /// the pole at `P` and its third side the arc of that great circle between the rail
+    /// ends the corners placed (the feet on the collapsed face at the first and last trace
+    /// points, put on the circle), one rational patch of degree `(4, 2)` exactly on the
+    /// sphere: the blend corner's Ball patch (`sm_BallTrianglePatch`, an `SmBallPatch`
+    /// carrying the sphere as its definition). Its two other sides are the ball's great circles through
+    /// `P`, the end sections of the rounds it joins. `u` runs along the edge from the first
+    /// trace point, `v` from rail 0 to rail 1 (the pole's side a point), and the rails are
+    /// its `v` = min and max iso curves, as for the other exact classes.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when the generator is not circular, the class is not one face collapsed
+    /// and one not, the radius is tiny or changes, a foot on the collapsed face is off the
+    /// ball, or the triangle has no patch (its side through the pole, its arc half a turn
+    /// or more); those of `SetupOffsetValues`, the evaluations and the patch.
+    pub fn ball_triangle_fillet_geom_parts(
+        ops: &mut dyn FilletSolverOps,
+        k: &Kernel,
+        blend: &ExactBlend,
+        tsects: &[TsectPnt],
+    ) -> Result<FilletGeomParts> {
+        use crate::blend::blend_corner::ball::ball_triangle_patch;
+        use crate::surface::ball_patch::BallPatch;
+        if !is_circular_fsg(ops.solver())? {
+            return Err(sm_err());
+        }
+        let (t_first, t_last) = first_last(tsects)?;
+
+        // the face whose offset collapsed (its contact a great circle) and the other (the pole)
+        let collapsed =
+            |q: &BlendQuadric| matches!(q.kind, QuadricKind::Line | QuadricKind::Circle);
+        let [o0, o1] = blend.offsets;
+        let (ring, pole) = match (collapsed(&o0), collapsed(&o1)) {
+            (false, true) => (1, 0),
+            (true, false) => (0, 1),
+            _ => return Err(sm_err()),
+        };
+        let ring_spine = if ring == 0 { o0 } else { o1 };
+        let pole_offset = if pole == 0 { o0 } else { o1 };
+        let pole_contact = *blend.contact.get(pole).ok_or_else(sm_err)?;
+
+        // constant radius, the class's
+        let centre = blend.point;
+        let radius = blend.radius;
+        let radius0 = offset_radius(ops, t_first)?.abs();
+        let radius1 = offset_radius(ops, t_last)?.abs();
+        if radius < EFF_ZERO
+            || (radius0 - radius).abs() > EFF_ZERO
+            || (radius1 - radius).abs() > EFF_ZERO
+        {
+            return Err(sm_err());
+        }
+        let tol = ops.solver().approx_tol_3d;
+
+        // the pole: the ball touches the face at its centre plus the radius times the contact
+        // sign times the face's normal there, the offset's normal at the centre
+        let to_pole = (pole_offset.normal(centre) * pole_contact).unitize()?;
+
+        // the collapsed face's spine's tangent at the centre: its contact circle is the
+        // ball's great circle square to it
+        let tangent = if ring_spine.kind == QuadricKind::Line {
+            ring_spine.dir
+        } else {
+            let radial = centre - ring_spine.point;
+            let radial = radial - ring_spine.dir * radial.dot(ring_spine.dir);
+            ring_spine.dir.cross(radial).unitize()?
+        };
+        let index = if ring == 0 {
+            SrfIndex::First
+        } else {
+            SrfIndex::Second
+        };
+        let mut ends = [Vec3::ZERO; 2];
+        for (end, t) in ends.iter_mut().zip([t_first, t_last]) {
+            let foot = ops
+                .solver()
+                .surface(ring)?
+                .ok_or_else(|| invalid("no offset surface"))?
+                .surface
+                .base_surface()
+                .evaluate_point(k, t.uv_pos(index))?;
+            let off = foot - centre;
+            if (off.length() - radius).abs() > tol {
+                return Err(sm_err());
+            }
+            *end = (off - tangent * off.dot(tangent)).unitize()?;
+        }
+
+        // the ball's triangle: the pole at v = 0, its third side (the arc) at v = 1, u from the
+        // first trace point to the last; v turned round when rail 0 is the arc
+        let (net, _, _) =
+            ball_triangle_patch(centre, radius, &[to_pole, ends[0], ends[1]], 0, false)?;
+        // the face's surface carries its sphere as its definition, as the corner's does
+        let mut patch = Surface::from(BallPatch::create(&net, centre, radius)?);
+        if ring == 0 {
+            patch.reverse(k, SurfParamType::V)?;
+        }
+
+        // rails: the patch's v = min and v = max isoparameter curves
+        let uv_domain = patch.natural_uv_domain_with_nurb(k)?;
+        let rail_crv0 = patch
+            .create_iso_parametric_curve(k, SurfParamType::V, uv_domain.min.y, 0.0, None, false)?
+            .curve;
+        let crv_ivl0 = rail_crv0.natural_interval();
+        let rail_crv1 = patch
+            .create_iso_parametric_curve(k, SurfParamType::V, uv_domain.max.y, 0.0, None, false)?
+            .curve;
+        let crv_ivl1 = rail_crv1.natural_interval();
+
+        Ok(FilletGeomParts {
+            surface: patch,
             rails: [rail_crv0, rail_crv1],
             rail_intervals: [Some(crv_ivl0), Some(crv_ivl1)],
             center_line: None,

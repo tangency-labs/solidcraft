@@ -18,8 +18,14 @@
 //! | [`FilletBrep::rail_index_of_vertex`]              | `SmFilletGeom::GetRailIndexOfVertex`         |
 //! | [`FilletBrep::insert_intersection_topology_with_context`] | `SmFilletGeom::InsertIntersectionTopology` |
 //! | [`FilletBrep::calc_blending_geom`]                | `SmFilletGeom::CalcBlendingGeom`             |
+//! | `degenerate_side_at` (private)                    | none (solidcore #2403)                       |
 //!
 //! Deviations:
+//! - **Degenerate sides (solidcore #2403, not in the fork).** With `fillet_blend_corner`,
+//!   `sm_CreateUVCurve` takes an end that drops to one solution on a degenerate side of
+//!   the surface (a patch's pole, `degenerate_side_at`) onto the iso-curve through the
+//!   other end, as its rule for an end with more than two solutions does: the global
+//!   solve reports such an end once, anywhere along the side.
 //! - **Object model.** As in `blend.fillet_geom_p1`, a fillet vertex, edge or geometry
 //!   is an id of the [`FilletBrep`] (`self`). `GetFilletSolver()` is an opaque
 //!   [`FilletSolverId`] resolved in the caller's `solvers` table (index `id.0`); an id
@@ -843,6 +849,21 @@ pub fn create_uv_curve_on_face(
     let mut start_uv1 = Point2::UNDEF;
     let mut end_uv1 = Point2::UNDEF;
 
+    // fillet_blend_corner: an end on a degenerate side of the surface (a patch's pole,
+    // one point for every value of the side's free parameter) drops to one solution
+    // anywhere along that side, where the multi-solution rule below needs more than two
+    // to know it. The curve is the iso-curve through the other end, as that rule makes
+    // it: the end takes the other end's free parameter.
+    if k.fixes.fillet_blend_corner && num_solutions1 == 1 && num_solutions2 == 1 {
+        let on_side1 = degenerate_side_at(k, surface, &uv_domain, start_uv, start_pnt, approx_tol)?;
+        let on_side2 = degenerate_side_at(k, surface, &uv_domain, end_uv, end_pnt, approx_tol)?;
+        match (on_side1, on_side2) {
+            (Some(side), None) => start_uv = side.through(end_uv),
+            (None, Some(side)) => end_uv = side.through(start_uv),
+            _ => {}
+        }
+    }
+
     // when start point still dropped to surface multiple times
     if num_solutions1 > 1 {
         start_uv1 = solution_uv(&solutions1, 1, OP_UV)?;
@@ -1023,6 +1044,57 @@ pub fn create_uv_curve_on_face(
 
     // all done
     Ok(out)
+}
+
+/// A degenerate side of a surface's domain: its constant parameter and value.
+#[derive(Clone, Copy)]
+struct DegenerateSide {
+    iso: SurfParamType,
+    value: f64,
+}
+
+impl DegenerateSide {
+    /// The point of the side on the iso-curve through `other` (the side's free
+    /// parameter is `other`'s).
+    const fn through(self, other: Point2) -> Point2 {
+        match self.iso {
+            SurfParamType::U => Point2::new(self.value, other.y),
+            _ => Point2::new(other.x, self.value),
+        }
+    }
+}
+
+/// `fillet_blend_corner` (#2403): the side of `uv_domain` a drop of `point` at `uv` lies
+/// on when that side is degenerate, one point (`IsDegenerate` of its iso-curve at
+/// `SM_EFF_ZERO`, as `CreateNaturalUVTrimCurves` culls such sides): the side's point
+/// under `uv` is `point` to `tol`. `None` off every degenerate side.
+fn degenerate_side_at(
+    k: &Kernel,
+    surface: &Surface,
+    uv_domain: &Extent2d,
+    uv: Point2,
+    point: Point3,
+    tol: f64,
+) -> Result<Option<DegenerateSide>> {
+    let (lo, hi) = (uv_domain.min(), uv_domain.max());
+    for (iso, value) in [
+        (SurfParamType::U, lo.x),
+        (SurfParamType::U, hi.x),
+        (SurfParamType::V, lo.y),
+        (SurfParamType::V, hi.y),
+    ] {
+        let side = DegenerateSide { iso, value };
+        if surface.evaluate_point(k, side.through(uv))?.distance(point) > tol {
+            continue;
+        }
+        let curve = surface
+            .create_iso_parametric_curve(k, iso, value, 0.0, Some(uv_domain), false)?
+            .curve;
+        if curve.is_degenerate(k, EFF_ZERO, None)? {
+            return Ok(Some(side));
+        }
+    }
+    Ok(None)
 }
 
 // ---- vertex calculators -----------------------------------------------------------------
@@ -2797,6 +2869,54 @@ mod tests {
         );
         let e = create_uv_curve(&k, &fb, v[0], v[1], true, &srf, 1e-6).unwrap_err();
         assert!(matches!(e, SolidError::Upstream { .. }));
+    }
+
+    /// `fillet_blend_corner` (#2403): a curve from a patch's pole (a ball's triangle, the
+    /// pole its `v = min` side) to a corner of its other side is that corner's `u` iso-curve;
+    /// pinned, the pole drops to one point anywhere along its side.
+    #[test]
+    fn uv_curve_from_a_pole_is_the_iso_curve_through_its_other_end() {
+        use crate::blend::blend_corner::ball::ball_triangle_patch;
+        let dirs = [
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        ];
+        let (net, _, _) = ball_triangle_patch(Point3::ZERO, 2.0, &dirs, 0, false).unwrap();
+        let srf = Surface::from(net);
+        let mut k = kernel();
+        let dom = srf.natural_uv_domain_with_nurb(&k).unwrap();
+        let (lo, hi) = (dom.min(), dom.max());
+        let pole = Point3::new(0.0, 0.0, 2.0);
+        for t in [0.0, 0.3, 1.0] {
+            let at = Point2::new(lo.x + (hi.x - lo.x) * t, lo.y);
+            assert!(srf.evaluate_point(&k, at).unwrap().distance(pole) < 1e-12);
+        }
+        let isos = |k: &Kernel| -> Vec<bool> {
+            [lo.x, hi.x]
+                .iter()
+                .map(|&u| {
+                    let end = srf.evaluate_point(k, Point2::new(u, hi.y)).unwrap();
+                    let (fb, v) = fb_with_points(k, &[pole, end]);
+                    let Ok(r) = create_uv_curve(k, &fb, v[0], v[1], false, &srf, 1e-6) else {
+                        return false;
+                    };
+                    let c = r.uv_curve1.unwrap();
+                    let ivl = c.natural_interval();
+                    let s = c.evaluate_point(k, ivl.min()).unwrap();
+                    let e = c.evaluate_point(k, ivl.max()).unwrap();
+                    r.curve_3d.is_none()
+                        && (s.x - u).abs() < 1e-12
+                        && (s.y - lo.y).abs() < 1e-12
+                        && (e.x - u).abs() < 1e-12
+                        && (e.y - hi.y).abs() < 1e-12
+                })
+                .collect()
+        };
+        k.fixes.fillet_blend_corner = true;
+        assert_eq!(isos(&k), [true, true]);
+        k.fixes.fillet_blend_corner = false;
+        assert!(isos(&k).contains(&false));
     }
 
     #[test]
