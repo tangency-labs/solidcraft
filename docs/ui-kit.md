@@ -263,6 +263,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `settings_card` | Full-width settings detail group; uses Container chrome and preserves its width with empty or changing content | `dialog_footer`, `border`, `radius_md`, `space_12/10` |
 | `mirrored_icon_button_at` | Directional counterpart of an existing icon master, sharing icon-button presentation and accessible label | Shared icon-button tokens |
 | `icon_button_at` | Icon action inside a supplied rectangle | `form_icon_inset`, `text/dim`, icon palette |
+| `quiet_icon_toggle_at` | Quiet icon action with an on state, for a control that shows or hides something; reports the state to assistive technology | `selected_bg`, `form_primary`, `control_radius`, `space_12` |
 | `button_pair`, `PairButton` | Equal secondary actions, optional icons and selected state | `form_button_height`, control/selection/icon tokens |
 | `footer`, `Footer`, `Action`, `HeaderActions` | OK/Cancel with optional Apply, compute status or selected action; `HeaderActions` puts the same buttons in a header row | `form_footer/button_height`, `dialog_footer/rule`, `control_*`, `accent`, spacing |
 | `keyboard` | Esc cancels, unowned Enter submits when valid | none |

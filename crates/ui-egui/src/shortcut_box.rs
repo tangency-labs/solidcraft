@@ -1124,7 +1124,14 @@ mod tests {
         let fields: Vec<_> = nodes
             .iter()
             .filter(|(_, n)| n.role() == egui::accesskit::Role::TextInput)
-            .filter(|(_, n)| n.bounds().is_some_and(|b| b.y0 >= f64::from(field.top()) && b.y1 <= f64::from(sheet.bottom())))
+            .filter(|(_, n)| {
+                n.bounds().is_some_and(|b| {
+                    b.y0 >= f64::from(field.top())
+                        && b.y1 <= f64::from(sheet.bottom())
+                        && b.x0 >= f64::from(field.left())
+                        && b.x1 <= f64::from(field.right())
+                })
+            })
             .collect();
         assert_eq!(fields.len(), 1, "one editor in the field and sheet: {fields:?}");
         assert!(field.contains_rect(search_edit));

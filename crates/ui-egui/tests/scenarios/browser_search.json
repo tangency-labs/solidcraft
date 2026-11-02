@@ -1,0 +1,385 @@
+[
+ {
+  "note": "The browser's search (#1413): the bar is always there by default, with no magnifier; typing keeps the matches with their parents, and Esc or the × ends the search and leaves the bar. With the Preferences' row on the magnifier, the magnifier shows the bar, the list narrows the matches to one kind, and Esc or the second click on the magnifier ends the search with the tree as it was."
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "component.create",
+   "params": {
+    "name": "Frame"
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 20,
+    "height": 5,
+    "body_name": "Plate"
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "component.create",
+   "params": {
+    "name": "Pin"
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "solid.box",
+   "params": {
+    "length": 4,
+    "width": 4,
+    "height": 20,
+    "corner": [
+     0,
+     40,
+     0
+    ],
+    "body_name": "Shaft"
+   }
+  }
+ },
+ {
+  "call": "engine.execute",
+  "params": {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  }
+ },
+ {
+  "expect": {
+   "bodies": 2,
+   "browser_has": [
+    "Frame:1",
+    "Plate",
+    "Pin:1",
+    "Shaft",
+    "Origin"
+   ]
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "browser:search",
+    "browser:search:kinds"
+   ],
+   "hidden_handles": [
+    "browser:search:show",
+    "browser:search:clear",
+    "browser:search:select-all"
+   ],
+   "prefs": {
+    "browser_search_bar": "always"
+   }
+  }
+ },
+ {
+  "click": {
+   "handle": "browser:search"
+  }
+ },
+ {
+  "text": "plate"
+ },
+ {
+  "frames": 3
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Plate"
+   ],
+   "browser_lacks": [
+    "Shaft"
+   ],
+   "shown_handles": [
+    "browser:search:clear",
+    "browser:search:select-all"
+   ]
+  }
+ },
+ {
+  "note": "Esc clears the text and the bar stays."
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "frames": 3
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Plate",
+    "Shaft",
+    "Origin"
+   ],
+   "shown_handles": [
+    "browser:search"
+   ],
+   "hidden_handles": [
+    "browser:search:clear"
+   ]
+  }
+ },
+ {
+  "note": "So does the ×."
+ },
+ {
+  "click": {
+   "handle": "browser:search"
+  }
+ },
+ {
+  "text": "shaft"
+ },
+ {
+  "frames": 3
+ },
+ {
+  "click": {
+   "handle": "browser:search:clear"
+  }
+ },
+ {
+  "frames": 3
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Plate",
+    "Shaft",
+    "Origin"
+   ],
+   "shown_handles": [
+    "browser:search"
+   ],
+   "hidden_handles": [
+    "browser:search:clear"
+   ]
+  }
+ },
+ {
+  "note": "The Preferences' row: the bar waits for the magnifier."
+ },
+ {
+  "call": "ui.prefs",
+  "params": {
+   "browser_search_bar": "magnifier"
+  }
+ },
+ {
+  "frames": 3
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "browser:search:show"
+   ],
+   "hidden_handles": [
+    "browser:search",
+    "browser:search:kinds"
+   ],
+   "prefs": {
+    "browser_search_bar": "magnifier"
+   }
+  }
+ },
+ {
+  "call": "ui.prefs",
+  "params": {
+   "browser_search_bar": "sometimes"
+  },
+  "fail": true
+ },
+ {
+  "expect": {
+   "prefs": {
+    "browser_search_bar": "magnifier"
+   }
+  }
+ },
+ {
+  "note": "The magnifier gives the field the keyboard."
+ },
+ {
+  "click": {
+   "handle": "browser:search:show"
+  }
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "browser:search",
+    "browser:search:clear",
+    "browser:search:kinds"
+   ],
+   "hidden_handles": [
+    "browser:search:select-all"
+   ]
+  }
+ },
+ {
+  "text": "sha"
+ },
+ {
+  "frames": 3
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Frame:1",
+    "Pin:1",
+    "Shaft"
+   ],
+   "browser_lacks": [
+    "Plate",
+    "Origin"
+   ],
+   "shown_handles": [
+    "browser:search:select-all",
+    "browser:search:hide-others"
+   ]
+  }
+ },
+ {
+  "note": "A kind with no match: nothing listed and nothing to act on."
+ },
+ {
+  "click": {
+   "handle": "browser:search:kinds"
+  }
+ },
+ {
+  "frames": 2
+ },
+ {
+  "click": {
+   "handle": "browser:search:kind:component"
+  }
+ },
+ {
+  "frames": 3
+ },
+ {
+  "expect": {
+   "browser_lacks": [
+    "Shaft",
+    "Frame:1"
+   ],
+   "hidden_handles": [
+    "browser:search:select-all"
+   ],
+   "shown": "No matches"
+  }
+ },
+ {
+  "click": {
+   "handle": "browser:search:kinds"
+  }
+ },
+ {
+  "frames": 2
+ },
+ {
+  "click": {
+   "handle": "browser:search:kind:all"
+  }
+ },
+ {
+  "frames": 3
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Shaft"
+   ],
+   "browser_lacks": [
+    "Plate"
+   ]
+  }
+ },
+ {
+  "note": "Esc in the field ends the search and the bar goes."
+ },
+ {
+  "click": {
+   "handle": "browser:search"
+  }
+ },
+ {
+  "key": "Escape"
+ },
+ {
+  "frames": 3
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Plate",
+    "Shaft",
+    "Origin"
+   ],
+   "hidden_handles": [
+    "browser:search"
+   ]
+  }
+ },
+ {
+  "note": "The magnifier's second click does too."
+ },
+ {
+  "click": {
+   "handle": "browser:search:show"
+  }
+ },
+ {
+  "text": "plate"
+ },
+ {
+  "frames": 3
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Plate"
+   ],
+   "browser_lacks": [
+    "Shaft"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "browser:search:show"
+  }
+ },
+ {
+  "frames": 3
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Plate",
+    "Shaft",
+    "Origin"
+   ],
+   "hidden_handles": [
+    "browser:search"
+   ]
+  }
+ }
+]

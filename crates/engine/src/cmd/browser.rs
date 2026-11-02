@@ -14,8 +14,13 @@ use serde_json::{Value, json};
 use solidcraft_doc::{BrowserEntry, FeatureKind, MAX_GROUP_NESTING};
 
 use super::CommandSpec;
+use crate::browser_find::{Kind, MAX_PATTERN_CHARS, Pattern};
 use crate::params::{bad, bool_, str_};
+use crate::schema::browser::{FindParams, FindResult};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
+
+const FIND_CONTRACT: TypedContract<FindParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("body.rename", "Rename Body", rename_body).icon("rename").params("body: its name, name: the new name (features that use the body follow)"),
@@ -58,6 +63,17 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("browser.collapse_all", "Collapse All", collapse_all).icon("folder").noundo().params(
         "path?: [occurrence ids]; component?: id; omit both for the whole tree. The row it starts from (the design row for the whole tree) stays open, so its first level remains visible. \
          Display only; not an undo step → open, open_by_default, closed_by_default",
+    ),
+    CommandSpec::new("browser.find", "Search the Browser", crate::checked!("browser.find", find))
+        .icon("filter")
+        .noundo()
+        .contract(&FIND_CONTRACT)
+        .output(output_schema_for::<FindResult>)
+        .params(
+        "text?: what the names hold, ignoring case (with * for any text or ? for any one character it must match the whole name: *:1 ends in :1; at most 256 characters); \
+         kinds?: [component|body|sketch|construction|joint] (default every kind; give text, kinds or both) \
+         → {found: [{kind, name, key, path, item?}], total, incomplete}: every placement of a component is its own match, path is the placement it is in, \
+         item is what select.set takes (a joint has none; its key is its id); at most 10000 listed, total counts them all",
     ),
 ];
 
@@ -405,6 +421,40 @@ fn shown_feature(s: &Session, f: &solidcraft_doc::Feature, key: &str) -> Option<
         return Some(Shown::Origin(f.name.clone()));
     }
     None
+}
+
+fn find(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "browser.find";
+    let pattern = find_text(p.get("text")).map_err(|e| bad(cmd, e))?;
+    let kinds = find_kinds(p.get("kinds")).map_err(|e| bad(cmd, e))?;
+    if pattern.is_none() && kinds.is_empty() {
+        return Err(bad(cmd, "give `text` (not blank), `kinds` or both"));
+    }
+    let reply = FindResult { search: crate::browser_find::find(s, pattern.as_ref(), &kinds), param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
+}
+
+/// `browser.find`'s `text`: none when absent, `null` or blank; the handler's message otherwise.
+pub(crate) fn find_text(v: Option<&Value>) -> std::result::Result<Option<Pattern>, String> {
+    match v {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(text)) if text.chars().count() > MAX_PATTERN_CHARS => Err(format!("`text` is longer than {MAX_PATTERN_CHARS} characters")),
+        Some(Value::String(text)) => Ok(Pattern::new(text)),
+        Some(_) => Err("`text` must be a string".into()),
+    }
+}
+
+/// `browser.find`'s `kinds`: none when absent or `null`; the handler's message otherwise.
+pub(crate) fn find_kinds(v: Option<&Value>) -> std::result::Result<Vec<Kind>, String> {
+    match v {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Array(a)) if a.len() <= Kind::ALL.len() => a
+            .iter()
+            .map(|k| k.as_str().and_then(Kind::from_id))
+            .collect::<Option<Vec<Kind>>>()
+            .ok_or_else(|| "`kinds` takes component, body, sketch, construction and joint".into()),
+        Some(_) => Err("`kinds` must list at most 5 of component, body, sketch, construction and joint".into()),
+    }
 }
 
 /// A browser folder or group key (`Visibility::hidden_folders`): `c0` or `o:<ids>`, then
