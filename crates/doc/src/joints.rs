@@ -1361,9 +1361,10 @@ fn one_loop(tree: &Tree, id: u64, asm: &Assembly, linked: &BTreeSet<(u64, usize)
 
 /// The values to move in a group of loops with more than the solver moves at once (a frame of
 /// profiles held by many planar joints, #9687): those of the loops that need to move, open at the
-/// start (beyond what the conflict check lets pass) or reading a held value that moves, when they
-/// are few enough. Every loop of the group is still kept closed. None when no loop needs to move,
-/// or those that do have too many values themselves.
+/// start (beyond what the conflict check lets pass) or reading a held value that moves, and the
+/// closing joints' of the closed loops those values move, when they are few enough. Every loop of
+/// the group is still kept closed. None when no loop needs to move, or those that do have too
+/// many values themselves.
 fn moving_loops_values(
     tree: &Tree,
     closing: &[u64],
@@ -1378,15 +1379,30 @@ fn moving_loops_values(
     let mut gaps = Vec::with_capacity(closing.len() * 9);
     closure_gaps(&mut PlacementWorkspace::new(tree), closing, vals, scale, &mut gaps)?;
     let loose = loose_gap(scale);
-    let mut around = BTreeSet::new();
+    let (mut around, mut others) = (BTreeSet::new(), Vec::new());
     for (id, gap) in closing.iter().zip(gaps.chunks(9)) {
         let Some((joints, touches)) = one_loop(tree, *id, asm, linked) else { continue };
         if largest(gap) > loose || !touches.is_disjoint(&moved) {
             around.extend(joints);
+        } else {
+            others.push((*id, touches));
         }
     }
-    let vars = unknowns(tree, &around, asm, linked, held);
-    (!vars.is_empty() && vars.len() <= MAX_LOOP_VALUES).then_some(vars)
+    let mut vars = unknowns(tree, &around, asm, linked, held);
+    if vars.is_empty() {
+        return None;
+    }
+    // A closed loop through a value that moves stays closed by its own closing joint's values
+    // (a part slid on one planar joint slides on its second): they are on no tree path, so no other
+    // loop runs through them.
+    let moving: BTreeSet<(u64, usize)> = vars.iter().copied().collect();
+    let follow: BTreeSet<u64> = others.into_iter().filter(|(_, touches)| !touches.is_disjoint(&moving)).map(|(id, _)| id).collect();
+    for v in unknowns(tree, &follow, asm, linked, held) {
+        if !vars.contains(&v) {
+            vars.push(v);
+        }
+    }
+    (vars.len() <= MAX_LOOP_VALUES).then_some(vars)
 }
 
 /// The values a solve of the loops `around` moves: every value of their joints but the `held`
