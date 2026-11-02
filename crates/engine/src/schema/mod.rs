@@ -84,6 +84,7 @@ pub mod sketch_equation;
 pub mod sketch_inspect;
 pub mod surface_analysis;
 pub mod surface_boundary;
+pub mod surface_match;
 pub mod ui_prefs;
 pub mod view_navigation;
 

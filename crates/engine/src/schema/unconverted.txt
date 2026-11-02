@@ -332,7 +332,6 @@ surface.extend
 surface.extrude
 surface.fair
 surface.loft
-surface.match
 surface.offset
 surface.patch
 surface.reverse_normal
