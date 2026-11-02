@@ -212,15 +212,20 @@ fn move3d(s: &mut Session, p: &Value) -> Result<Value> {
         if sk.wire_point_fixed(&point) {
             return Err(bad(cmd, format!("`{wire}` point {index} is fixed, or joined to a fixed point (unfix it to move it)")));
         }
-        // The 3D constraints follow the move, the moved point held where it was put. A failure
-        // elsewhere in a sketch whose 3D constraints already failed does not stop it.
-        let held_before = sk.wire_constraints_hold();
+        // The 3D constraints follow the move, the moved point held where it was put. Refused when
+        // it breaks a constraint that held before it (a failure elsewhere does not stop it), or
+        // squeezes a curve away.
+        let held_before = sk.wire_constraints_holding();
         let n = sk.move_drawn_point(&wire, index, to)?;
         if !sk.wire_constraints.is_empty() {
+            let moved = sk.clone();
             let rep = sk.solve_wires_with(Some(&point), false);
             let held = sk.wire_point_at(&point).is_some_and(|at| at.dist(to) < 1e-6);
-            if !held || (!rep.ok && held_before) {
+            if !held || rep.failing.iter().any(|id| held_before.contains(id)) {
                 return Err(bad(cmd, "the sketch's 3D constraints cannot hold the point there"));
+            }
+            if let Some(why) = super::sketch::wire_collapse(&moved, sk) {
+                return Err(bad(cmd, why));
             }
         }
         Ok(n)
@@ -343,13 +348,14 @@ fn add_3d(s: &mut Session, p: &Value, cmd: &str, kinds: Vec<WireConstraintKind>)
     })
 }
 
-/// The first 3D constraint of a sketch joins every pair of drawn 3D curve ends that meet (curves
-/// drawn before 3D constraints were joined by nothing). Later ones join nothing: a joint deleted
-/// since stays deleted, and curves drawn since joined as they were drawn.
+/// Once per sketch (`Sketch::wires_joined`), every pair of drawn 3D curve ends that meet is
+/// joined: curves drawn before 3D constraints were joined by nothing. After that only new curves
+/// are joined, as they are drawn, so a joint deleted stays deleted.
 fn join_all(sk: &mut solidcraft_sketch::Sketch, doc: &solidcraft_doc::Document, id: u64) -> Result<Vec<String>> {
-    if !sk.wire_constraints.is_empty() {
+    if sk.wires_joined {
         return Ok(Vec::new());
     }
+    sk.wires_joined = true;
     let ids: Vec<String> = sk.wires.iter().filter(|w| w.link.is_none() && !w.fit.is_empty()).map(|w| w.id.clone()).collect();
     join_in(sk, doc, id, &ids)
 }
@@ -372,7 +378,9 @@ fn off_traces<'a>(doc: &solidcraft_doc::Document, id: u64, mut wires: impl Itera
 /// [`solidcraft_sketch::Sketch::join_drawn_ends`] for curves `ids`, leaving out the joins to a
 /// motion trace's curve (a solve would move it, and the motion would put it back).
 fn join_in(sk: &mut solidcraft_sketch::Sketch, doc: &solidcraft_doc::Document, id: u64, ids: &[String]) -> Result<Vec<String>> {
-    let joints = sk.join_drawn_ends(ids)?;
+    // A sketch's curves drawn before 3D constraints are joined with the first one drawn after.
+    let mut joints = join_all(sk, doc, id)?;
+    joints.extend(sk.join_drawn_ends(ids)?);
     let traces = trace_wires(doc, id);
     if traces.is_empty() {
         return Ok(joints);

@@ -138,9 +138,18 @@ pub fn rref_counted(a: &mut Mat, tol: f64, ops: &mut f64, budget: f64) -> Option
             if *ops > budget {
                 return None;
             }
-            for c in 0..a.cols {
-                let v = a.get(row, c);
-                a.add(r, c, -f * v);
+            // Row by row on slices: the same operations in the same order as element by element.
+            let cols = a.cols;
+            let (lo, hi) = (row.min(r), row.max(r));
+            let (head, tail) = a.data.split_at_mut(hi * cols);
+            let (pivot, target) = if row < r {
+                (head.get(lo * cols..lo * cols + cols)?, tail.get_mut(..cols)?)
+            } else {
+                let (p, t) = (tail.get(..cols)?, head.get_mut(lo * cols..lo * cols + cols)?);
+                (p, t)
+            };
+            for (x, v) in target.iter_mut().zip(pivot) {
+                *x += -f * v;
             }
         }
         pivots.push(col);
