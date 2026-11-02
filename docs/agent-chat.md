@@ -292,7 +292,8 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   `http://localhost:1234/v1`, OpenClaw `http://localhost:18789/v1`, OpenAI, Mistral AI
   `https://api.mistral.ai/v1`, Mammouth AI `https://api.mammouth.ai/v1`,
   OpenCode Go `https://opencode.ai/zen/go/v1`, DeepSeek `https://api.deepseek.com`,
-  Qwen `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`, OpenRouter
+  Qwen `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`, Cheaper Inference
+  `https://api.cheaperinference.com/v1`, OpenRouter
   `https://openrouter.ai/api/v1`) or a custom URL, the model name, and an optional key.
   OpenCode Go models are routed to their endpoint by themselves (`/responses`,
   `/messages` or Gemini for those families, `/chat/completions` for the rest),
