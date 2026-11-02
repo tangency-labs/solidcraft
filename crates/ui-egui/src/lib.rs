@@ -521,15 +521,15 @@ pub struct SolveApp {
     pub cam_anim: Option<CameraAnim>,
     /// Seconds since start, as of this frame.
     pub now: f64,
-    /// The history marker before Edit Sketch rolled the timeline to the sketch; Finish Sketch
-    /// restores it.
-    pub pre_sketch_marker: Option<Option<usize>>,
     /// The views around opening the open sketch. Leaving it goes back to the earlier one as the
     /// "When a sketch ends" preference says (#7038).
     pub pre_sketch_cam: Option<PreSketchView>,
     /// The view from before Extrude turned it to isometric (#9176); the view goes back to it when
     /// the dialog closes, as the "and back when it closes" preference says.
     pub pre_extrude_cam: Option<Camera>,
+    /// The view a command that ends an open sketch was clicked in (#10571), taken before the
+    /// sketch's own end turns the view: that turn must not become the view Extrude goes back to.
+    pre_command_cam: Option<Camera>,
     /// The component active before Edit Sketch activated the one the sketch is in (#8127);
     /// leaving the sketch makes it active again.
     pub pre_sketch_component: Option<PreSketchComponent>,
@@ -790,9 +790,9 @@ impl SolveApp {
             cam: Camera::default(),
             cam_anim: None,
             now: 0.0,
-            pre_sketch_marker: None,
             pre_sketch_cam: None,
             pre_extrude_cam: None,
+            pre_command_cam: None,
             pre_sketch_component: None,
             services,
             file_picker: None,
@@ -1200,14 +1200,12 @@ impl SolveApp {
         // Render focus already applies its semantic selection after clearing object picks.
         // A tab switch brings in the other design's own Render selection.
         if done.is_ok() && !matches!(id, "view.render_select" | "view.next_tab" | "view.previous_tab") && selection_changed {
-            if self.session.selection.is_empty() && render_workspace::active(self) {
-                render_workspace::selection_editor(self, &render_workspace::RenderSelection::Nothing);
-            }
-            self.render_workspace.view.selection = if self.session.selection.is_empty() {
-                render_workspace::RenderSelection::Nothing
+            let selection = render_workspace::object_selection(self);
+            if render_workspace::active(self) {
+                render_workspace::selection_editor(self, &selection);
             } else {
-                render_workspace::RenderSelection::Object(self.session.selection.clone())
-            };
+                self.render_workspace.view.selection = selection;
+            }
         }
         if let Ok(v) = &done {
             if matches!(id, "render.lights.solo" | "render.lights.mute") {
@@ -1231,6 +1229,7 @@ impl SolveApp {
         };
         if let Ok(v) = &r {
             match id {
+                "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64)),
                 "view.fit" | "view.home" => self.frame_view(id == "view.home"),
                 "view.tool" => {
                     self.viewport.nav = match v.get("tool").and_then(Value::as_str) {
@@ -1281,23 +1280,16 @@ impl SolveApp {
                 let selected = match v.get("kind").and_then(Value::as_str) {
                     Some("environment") => RenderSelection::Environment,
                     Some("wear") => RenderSelection::Wear,
-                    Some("lighting") => {
-                        render_workspace::select_lighting(self);
-                        RenderSelection::Lighting
-                    }
+                    Some("lighting") => RenderSelection::Lighting,
                     Some("output") => RenderSelection::Output,
                     Some("sampling") => RenderSelection::Sampling,
                     Some("effects") => RenderSelection::Effects,
                     Some("check") => RenderSelection::Check,
-                    Some("light") => {
-                        render_workspace::select_lighting(self);
-                        RenderSelection::Light(v.get("id").and_then(Value::as_str).unwrap_or_default().into())
-                    }
+                    Some("light") => RenderSelection::Light(v.get("id").and_then(Value::as_str).unwrap_or_default().into()),
                     Some("shot") => RenderSelection::Shot(v.get("id").and_then(Value::as_str).unwrap_or_default().into()),
                     _ => RenderSelection::Nothing,
                 };
                 render_workspace::selection_editor(self, &selected);
-                self.render_workspace.view.selection = selected;
             }
             if id == "view.layout" {
                 let layout =
@@ -1911,6 +1903,9 @@ impl SolveApp {
             dialogs::cancel(self);
         }
         let finished_sketch = self.session.active_sketch.filter(|_| ends_sketch(id) && self.interactive(id));
+        // The sketch's end may turn the view (Preferences › Sketch); Extrude goes back to the view
+        // it was clicked in, so take that one before the turn starts (#10571).
+        self.pre_command_cam = finished_sketch.is_some().then(|| self.settled_cam());
         if finished_sketch.is_some() {
             self.finish_sketch();
             // A feature committed before the marker is back would go in where the sketch was.
@@ -2161,22 +2156,19 @@ impl SolveApp {
         if self.session.active_sketch == Some(id) {
             return;
         }
-        let Some(idx) = self.session.doc.feature_index(id) else { return };
+        if self.session.doc.feature_index(id).is_none() {
+            return;
+        }
         let marker = self.finish_sketch_for_edit();
         let before = self.settled_cam();
         let context = (self.session.active_component, self.session.active_occurrence_path.clone());
         self.tool = None;
         self.dialog = None;
         activate(self);
-        let rolled = self.session.doc.marker != Some(idx + 1) && self.run("timeline.roll_to", json!({ "position": idx + 1 })).is_ok();
-        if self.run("sketch.edit", json!({ "sketch": id })).is_err() {
-            if rolled || marker != self.session.doc.marker {
-                self.restore_marker(marker);
-            }
+        if self.run("sketch.edit", json!({ "sketch": id, "restore_marker": marker })).is_err() {
             self.restore_component(context.0, context.1);
             return;
         }
-        self.pre_sketch_marker = (rolled || marker != self.session.doc.marker).then_some(marker);
         // `sketch.edit` itself activates the component a face-attached sketch was drawn in.
         let opened_in = self.session.active_component;
         let moved = (opened_in, &self.session.active_occurrence_path) != (context.0, &context.1);
@@ -2215,7 +2207,7 @@ impl SolveApp {
         if !self.preferences.extrude_view_isometric {
             return;
         }
-        let before = self.settled_cam();
+        let before = self.pre_command_cam.take().unwrap_or_else(|| self.settled_cam());
         let mut to = before;
         to.set_view(StandardView::Iso);
         self.pre_extrude_cam = self.preferences.extrude_view_return.then_some(before);
@@ -2245,9 +2237,11 @@ impl SolveApp {
             .pending_feature_edit
             .take()
             .map(|pending| pending.marker)
-            .unwrap_or_else(|| self.pre_sketch_marker.take().unwrap_or(self.session.doc.marker));
+            .unwrap_or_else(|| self.session.sketch_restore_marker().unwrap_or(self.session.doc.marker));
         if self.session.active_sketch.is_some() {
-            self.finish_sketch();
+            let command = self.take_sketch_exit().unwrap_or_else(|| "sketch.finish".into());
+            self.prepare_sketch_exit();
+            let _ = self.run(&command, json!({"restore_marker": false}));
         }
         marker
     }
@@ -2266,19 +2260,30 @@ impl SolveApp {
     }
 
     fn leave_sketch(&mut self, command: &str) {
+        self.prepare_sketch_exit();
+        if self.session.sketch_restore_marker().is_some() {
+            // Finishing now restores the marker in the engine: evaluate the complete
+            // command ahead so rebuilding later features stays off the window thread.
+            let _ = self.run_heavy(command, json!({}));
+        } else {
+            let _ = self.run(command, json!({}));
+        }
+    }
+
+    fn prepare_sketch_exit(&mut self) {
         sketch_text_move::cancel_drag(self);
         if sketch_text::editing(self) || self.dialog.as_ref().is_some_and(|d| matches!(d.kind, dialogs::Kind::TextMove(_))) {
             dialogs::cancel(self);
         }
         dim_view::cancel();
         self.tool = None;
-        let open = self.session.active_sketch;
-        if self.run(command, json!({})).is_err() && command != "sketch.finish" {
-            return;
-        }
-        if let Some(marker) = self.pre_sketch_marker.take() {
-            self.restore_marker(marker);
-        }
+    }
+
+    /// Successful UI and programmatic exits share the same window cleanup.
+    fn sketch_closed(&mut self, open: Option<u64>) {
+        self.take_sketch_exit();
+        self.tool = None;
+        dim_view::cancel();
         // Unless another component was activated meanwhile: that one stays.
         if let Some(pre) = self.pre_sketch_component.take().filter(|pre| Some(pre.sketch) == open && pre.opened_in == self.session.active_component) {
             self.restore_component(pre.component, pre.path);
@@ -2289,12 +2294,6 @@ impl SolveApp {
         {
             self.animate_to(to);
         }
-    }
-
-    fn restore_marker(&mut self, marker: Option<usize>) {
-        // Rolling forward past the features after the sketch recomputes them (an edited sketch
-        // under a text cut): off the window thread when it takes a while.
-        let _ = self.run_heavy("timeline.roll_to", marker.map(|m| json!({ "position": m })).unwrap_or_else(|| json!({})));
     }
 
     /// Visibility in the editor's scene: hidden face-profile sources are temporarily shown

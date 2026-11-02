@@ -17,7 +17,8 @@ use crate::*;
 
 /// Work counted on this thread: bodies moved, STEP texts digested, joint faces and bodies
 /// measured, bodies searched for by name, features searched for by id, bodies a cut (or
-/// intersect) ran its booleans on, and bodies searched for the cylinder a tap marking lies on.
+/// intersect) ran its booleans on, bodies searched for the cylinder a tap marking lies on, and
+/// bodies whose faces a tapped hole read for its wall.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
@@ -28,6 +29,7 @@ pub(super) struct Counts {
     pub feature_searches: usize,
     pub cut: usize,
     pub cylinder_search: usize,
+    pub tapped_wall: usize,
 }
 
 thread_local! {
@@ -41,6 +43,7 @@ thread_local! {
             feature_searches: 0,
             cut: 0,
             cylinder_search: 0,
+            tapped_wall: 0,
         })
     };
 }
@@ -1297,6 +1300,7 @@ fn a_tap_marking_searches_only_the_bodies_near_it() {
     };
     let (work, threads) = marking_work(&mut doc, hole);
     assert_eq!(work.cylinder_search, 1, "only the plate is searched");
+    assert_eq!(work.tapped_wall, 1, "only the plate's faces are read for the wall");
     assert_eq!(threads.len(), 1);
     assert_eq!(threads[0].body, "Plate");
     assert!(threads[0].internal && (threads[0].radius - 2.5).abs() < 1e-6);
@@ -1343,4 +1347,115 @@ fn a_tap_marking_still_searches_the_bodies_within_its_reach() {
         assert_eq!(threads[0].body, body);
         assert_eq!(threads[0].internal, internal);
     }
+}
+
+/// A flat sheet of the default rule (2.5 mm steel) on a `w` x `h` rectangle from `corner` on XY.
+fn flat_sheet(doc: &mut Document, corner: Vec2, w: f64, h: f64) {
+    let mut sk = Sketch::new();
+    let p = [corner, corner + Vec2::new(w, 0.0), corner + Vec2::new(w, h), corner + Vec2::new(0.0, h)].map(|q| sk.add_point(q, None).unwrap());
+    for k in 0..4 {
+        sk.add_line_pts(p[k], p[(k + 1) % 4], None).unwrap();
+    }
+    let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+    doc.add_feature(FeatureKind::SheetBase { sketch: SketchId(sketch), profiles: ProfileSel::All, rule: None, flip: false }, None).unwrap();
+}
+
+/// A hole of `diameter` at `position`, drilling along `direction` through all.
+fn hole(position: Vec3, direction: Vec3, diameter: f64) -> FeatureKind {
+    serde_json::from_value(serde_json::json!({
+        "type": "hole", "position": [position.x, position.y, position.z], "direction": [direction.x, direction.y, direction.z],
+        "diameter": diameter.to_string(),
+    }))
+    .unwrap()
+}
+
+/// The sheet metal bodies of a model.
+fn sheet_bodies(model: &Model) -> Vec<String> {
+    model.state().sheets.iter().map(|s| s.body.clone()).collect()
+}
+
+/// A cut leaves the sheets it cannot reach as they were, without checking that it would leave
+/// each one unchanged (#10226).
+#[test]
+fn a_cut_leaves_sheets_it_cannot_reach_as_they_were() {
+    let mut doc = Document::new("far sheets");
+    for i in 0..5 {
+        flat_sheet(&mut doc, Vec2::new(200.0 * i as f64, 0.0), 150.0, 100.0);
+    }
+    block(&mut doc, "Plate", Vec3::new(0.0, -200.0, 0.0), [60.0, 60.0, 12.0]);
+    let work = cut_work(&mut doc, cutter(Vec3::new(30.0, -170.0, -1.0), 3.0, 20.0));
+    assert_eq!(work.cut, 1, "only the plate goes through a boolean");
+    assert_eq!(work.kept, sheet_bodies(&work.model), "every sheet is left as it was");
+    assert!(volume(&work.model, "Plate") < 43_200.0 - 300.0, "and the plate is cut");
+}
+
+/// A tapped hole reads for its wall the faces of the bodies its drill line comes near: the plate
+/// it is drilled in, a block far below on the same line, and one whose side lies a radius off the
+/// line; not a block beside it. The marking stays in the plate's hole.
+#[test]
+fn a_tapped_hole_reads_the_bodies_along_its_drill_line() {
+    let mut doc = Document::new("line");
+    block(&mut doc, "Plate", Vec3::ZERO, [60.0, 60.0, 12.0]);
+    block(&mut doc, "Below", Vec3::new(20.0, 20.0, -150.0), [20.0, 20.0, 20.0]);
+    block(&mut doc, "Grazing", Vec3::new(32.5, 20.0, -60.0), [20.0, 20.0, 20.0]);
+    block(&mut doc, "Beside", Vec3::new(50.0, 20.0, -60.0), [20.0, 20.0, 20.0]);
+    let hole = FeatureKind::Hole {
+        position: FacePick(Vec3::new(30.0, 30.0, 12.0)),
+        at: None,
+        direction: Dir(-Vec3::Z),
+        diameter: "5".into(),
+        depth: Some("10".into()),
+        hole: HoleKind::default(),
+        points: None,
+        thread: Some("M6".into()),
+        thread_depth: None,
+        handedness: ThreadHandedness::Right,
+        to: None,
+        references: Vec::new(),
+    };
+    let (work, threads) = marking_work(&mut doc, hole);
+    assert_eq!(work.tapped_wall, 3, "Plate, Below and Grazing are read");
+    assert_eq!(threads.len(), 1);
+    assert_eq!(threads[0].body, "Plate");
+    assert!(threads[0].internal && (threads[0].radius - 2.5).abs() < 1e-6);
+}
+
+/// A hole leaves the sheets it cannot reach as they were, without drilling, checking or cutting
+/// each one: in a design of many sheet parts that was most of a hole's time (#10226).
+#[test]
+fn a_hole_leaves_sheets_it_cannot_reach_as_they_were() {
+    let mut doc = Document::new("far sheets");
+    for i in 0..5 {
+        flat_sheet(&mut doc, Vec2::new(200.0 * i as f64, 0.0), 150.0, 100.0);
+    }
+    block(&mut doc, "Plate", Vec3::new(0.0, -200.0, 0.0), [60.0, 60.0, 12.0]);
+    let work = cut_work(&mut doc, hole(Vec3::new(30.0, -170.0, 12.0), Vec3::new(0.0, 0.0, -1.0), 6.0));
+    let sheets = sheet_bodies(&work.model);
+    assert_eq!(sheets.len(), 5);
+    assert_eq!(work.cut, 1, "only the plate goes through a boolean");
+    assert_eq!(work.kept, sheets, "every sheet is left as it was");
+    assert!(volume(&work.model, "Plate") < 43_200.0 - 300.0, "and the plate is drilled");
+}
+
+/// A hole drilled into a sheet's rim still bores that sheet, beside sheets it cannot reach.
+#[test]
+fn a_hole_into_a_rim_still_bores_its_sheet_beside_far_ones() {
+    let mut doc = Document::new("rim");
+    for i in 0..4 {
+        flat_sheet(&mut doc, Vec2::new(200.0 * i as f64, 0.0), 60.0, 40.0);
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let near = sheet_bodies(&model)[0].clone();
+    let whole = volume(&model, &near);
+    let d = 1.5;
+    let work = cut_work(&mut doc, hole(Vec3::new(60.0, 20.0, 1.25), Vec3::new(-1.0, 0.0, 0.0), d));
+    assert_eq!(work.cut, 1, "only the sheet the drill meets is bored");
+    assert_eq!(work.kept, sheet_bodies(&work.model)[1..]);
+    let state = work.model.state();
+    let sheet = state.sheets.iter().find(|s| s.body == near).unwrap();
+    assert_eq!(sheet.bores.len(), 1, "kept as a bore of the sheet");
+    let removed = whole - volume(&work.model, &near);
+    let bore = std::f64::consts::PI * (d / 2.0).powi(2) * 60.0;
+    assert!((removed - bore).abs() < 0.02 * bore, "removed {removed} of {bore}");
 }

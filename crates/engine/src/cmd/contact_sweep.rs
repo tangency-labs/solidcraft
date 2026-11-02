@@ -94,6 +94,7 @@ fn contact_mesh(body: &solidcraft_doc::ModelBody) -> Result<ContactMesh> {
 /// A member of a contact set: (occurrence id, name).
 pub(super) type Member = (u64, String);
 
+#[derive(Clone)]
 pub(super) struct ContactGeometry {
     bodies: Vec<CachedBody>,
     /// Body indices, and the set members (occurrence id, name) they are under.
@@ -211,6 +212,12 @@ impl ContactGeometry {
         ContactGeometry { bodies: self.bodies.clone(), pairs: taken, step: self.step }
     }
 
+    /// The diagonal of the box the bodies fill in `s`: past it, a part moving in a straight
+    /// line meets nothing it has not met.
+    pub(super) fn reach(&self, s: &Session) -> Result<f64> {
+        Ok(self.bounds(s)?.size().len())
+    }
+
     /// How many mesh points are placed for each check.
     pub(super) fn vertex_count(&self) -> usize {
         self.bodies.iter().map(|b| b.mesh.positions.len()).fold(0, usize::saturating_add)
@@ -315,38 +322,12 @@ impl ContactGeometry {
         let meshes = self.placed(s)?;
         // Each mesh's box once, not once per pair it is in.
         let boxes: Vec<Aabb3> = meshes.iter().map(Mesh::bounds).collect();
-        for (a, b, oa, ob) in &self.pairs {
+        for (i, (_, _, oa, ob)) in self.pairs.iter().enumerate() {
             // Members already found colliding need no more of their bodies tested.
             if found.contains(&(oa.0.min(ob.0), oa.0.max(ob.0))) {
                 continue;
             }
-            let (Some(ma), Some(mb), Some(ba), Some(bb)) = (meshes.get(*a), meshes.get(*b), self.bodies.get(*a), self.bodies.get(*b)) else {
-                return Err(limit("invalid contact geometry pair"));
-            };
-            let (Some(aabb), Some(bbb)) = (boxes.get(*a), boxes.get(*b)) else {
-                return Err(limit("invalid contact geometry pair"));
-            };
-            if aabb.max.x < bbb.min.x
-                || bbb.max.x < aabb.min.x
-                || aabb.max.y < bbb.min.y
-                || bbb.max.y < aabb.min.y
-                || aabb.max.z < bbb.min.z
-                || bbb.max.z < aabb.min.z
-            {
-                continue;
-            }
-            let cost = ma
-                .positions
-                .len()
-                // 4 sample points and 3 edges to probe per triangle of `a` against each triangle of `b` (#3323), and the other way round.
-                .saturating_add(ma.triangles.len().saturating_mul(7))
-                .saturating_mul(mb.triangles.len())
-                .saturating_add(mb.positions.len().saturating_add(mb.triangles.len().saturating_mul(7)).saturating_mul(ma.triangles.len()));
-            *work = work.saturating_add(cost);
-            if *work > budget {
-                return Err(limit("motion exceeds contact sweep collision budget; simplify the contact set or use smaller increments"));
-            }
-            if let Some(depth) = super::mesh_overlap(ma, mb, 1e-4 * ba.size.max(bb.size).max(1.0)) {
+            if let Some(depth) = self.depth(i, &meshes, &boxes, work, budget)? {
                 found.insert((oa.0.min(ob.0), oa.0.max(ob.0)));
                 out.push((oa.clone(), ob.clone(), depth));
                 if !all {
@@ -355,6 +336,66 @@ impl ContactGeometry {
             }
         }
         Ok(out)
+    }
+
+    /// How deep the bodies of each pair pass into each other in `s` (0 where they don't), in
+    /// the order of the pairs. `work` adds up the cost, refused past `budget`.
+    pub(super) fn depths(&self, s: &Session, work: &mut usize, budget: usize) -> Result<Vec<f64>> {
+        let meshes = self.placed(s)?;
+        let boxes: Vec<Aabb3> = meshes.iter().map(Mesh::bounds).collect();
+        (0..self.pairs.len()).map(|i| Ok(self.depth(i, &meshes, &boxes, work, budget)?.unwrap_or(0.0))).collect()
+    }
+
+    /// The set members pair `i` is between.
+    pub(super) fn members(&self, i: usize) -> Option<(Member, Member)> {
+        self.pairs.get(i).map(|(_, _, a, b)| (a.clone(), b.clone()))
+    }
+
+    /// How far the meshes of pair `i` may stray from their faces (see [`ContactGeometry::chord`]).
+    pub(super) fn pair_chord(&self, i: usize) -> f64 {
+        let chord = |b: usize| self.bodies.get(b).map_or(0.0, |b| b.chord);
+        self.pairs.get(i).map_or(0.0, |(a, b, _, _)| chord(*a).max(chord(*b)))
+    }
+
+    /// Pair `i` alone (with the same bodies).
+    pub(super) fn only(&self, i: usize) -> ContactGeometry {
+        ContactGeometry { bodies: self.bodies.clone(), pairs: self.pairs.get(i).cloned().into_iter().collect(), step: self.step }
+    }
+
+    /// How deep the bodies of pair `i` (placed as `meshes`, in `boxes`) pass into each other,
+    /// when more than a touch.
+    fn depth(&self, i: usize, meshes: &[Mesh], boxes: &[Aabb3], work: &mut usize, budget: usize) -> Result<Option<f64>> {
+        let Some((a, b, _, _)) = self.pairs.get(i) else { return Err(limit("invalid contact geometry pair")) };
+        let (Some(ma), Some(mb), Some(ba), Some(bb)) = (meshes.get(*a), meshes.get(*b), self.bodies.get(*a), self.bodies.get(*b)) else {
+            return Err(limit("invalid contact geometry pair"));
+        };
+        let (Some(aabb), Some(bbb)) = (boxes.get(*a), boxes.get(*b)) else {
+            return Err(limit("invalid contact geometry pair"));
+        };
+        // Boxes apart, or only touching (parts end to end): `mesh_overlap` finds nothing there,
+        // so it costs nothing (#5968).
+        let tol = 1e-4 * ba.size.max(bb.size).max(1.0);
+        if aabb.max.x < bbb.min.x + tol
+            || bbb.max.x < aabb.min.x + tol
+            || aabb.max.y < bbb.min.y + tol
+            || bbb.max.y < aabb.min.y + tol
+            || aabb.max.z < bbb.min.z + tol
+            || bbb.max.z < aabb.min.z + tol
+        {
+            return Ok(None);
+        }
+        let cost = ma
+            .positions
+            .len()
+            // 4 sample points and 3 edges to probe per triangle of `a` against each triangle of `b` (#3323), and the other way round.
+            .saturating_add(ma.triangles.len().saturating_mul(7))
+            .saturating_mul(mb.triangles.len())
+            .saturating_add(mb.positions.len().saturating_add(mb.triangles.len().saturating_mul(7)).saturating_mul(ma.triangles.len()));
+        *work = work.saturating_add(cost);
+        if *work > budget {
+            return Err(limit("motion exceeds contact sweep collision budget; simplify the contact set or use smaller increments"));
+        }
+        Ok(super::mesh_overlap(ma, mb, tol))
     }
 }
 

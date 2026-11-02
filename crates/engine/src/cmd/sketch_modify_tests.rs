@@ -196,6 +196,87 @@ fn analytic_trim_and_break_use_freeform_cutters() {
     assert!(sk.shape(ci).unwrap().dist(Vec2::new(-5.0, 0.0)) < 1e-6);
 }
 
+/// #10851: an endpoint's tangent must stay with the arc piece that owns that endpoint,
+/// including when the endpoints are separate points joined by a Coincident constraint.
+#[test]
+fn trim_keeps_endpoint_tangency_on_its_arc_piece() {
+    for path in [false, true] {
+        for separate in [false, true] {
+            for at_start in [false, true] {
+                for reverse in [false, true] {
+                    let mut s = new_sketch();
+                    run(&mut s, "sketch.arc.center_point", json!({"center": [0,0], "start": [50,0], "end": [-50,0]}));
+                    let endpoint = if at_start { "a1.start" } else { "a1.end" };
+                    let x = if at_start { 50 } else { -50 };
+                    let start = if separate { json!([x, 0]) } else { json!(endpoint) };
+                    run(&mut s, "sketch.line", json!({"points": [start, [x,-30]], "connect": false, "infer": false}));
+                    if separate {
+                        run(&mut s, "sketch.constraint.coincident", json!({"a": "l1.start", "b": endpoint}));
+                    }
+                    let (a, b) = if reverse { ("a1", "l1") } else { ("l1", "a1") };
+                    let tangent = run(&mut s, "sketch.constraint.tangent", json!({"a": a, "b": b}))["constraint"].as_str().unwrap().to_string();
+                    run(&mut s, "sketch.dimension", json!({"entities": ["a1"], "type": "radius", "value": "50"}));
+                    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "30"}));
+                    run(&mut s, "sketch.constraint.horizontal_vertical", json!({"points": ["origin", "a1.start"], "mode": "horizontal"}));
+                    for x in [-10, 10] {
+                        run(&mut s, "sketch.line", json!({"points": [[x,40],[x,60]]}));
+                    }
+                    run(&mut s, "sketch.constraint.fix", json!({"entities": ["l2", "l3"]}));
+                    assert_eq!(run(&mut s, "sketch.solve", json!({}))["dof"], 1);
+                    let before = sketch(&s);
+                    let undo = s.undo.len();
+                    let result = if path {
+                        run(&mut s, "sketch.trim.path", json!({"points": [[0,45],[0,55]]}))
+                    } else {
+                        run(&mut s, "sketch.trim", json!({"curve": "a1", "at": [0,50]}))
+                    };
+                    assert_eq!(result["sketch"]["dof"], 1, "path={path}, separate={separate}, at_start={at_start}, reverse={reverse}: {result}");
+                    assert_eq!(s.undo.len(), undo + 1);
+                    let after = sketch(&s);
+                    let ci = after.curve_index(if at_start { "a1" } else { "a3" }).unwrap();
+                    let li = after.curve_index("l1").unwrap();
+                    assert!(after.constraints.iter().any(
+                        |k| k.id == tangent && matches!(k.kind, ConstraintKind::Tangent { a, b } if (a == ci && b == li) || (a == li && b == ci))
+                    ));
+                    let at = |id: &str| after.point(after.resolve_point(id).unwrap()).unwrap();
+                    assert!(at(endpoint).dist(at("l1.start")) < 1e-8);
+                    let radius = at("l1.start") - at("a1.center");
+                    let line = at("l1.end") - at("l1.start");
+                    assert!(radius.dot(line).abs() < 1e-6, "the line stays tangent to the circle");
+                    run(&mut s, "edit.undo", json!({}));
+                    assert_eq!(sketch(&s), before);
+                    run(&mut s, "edit.redo", json!({}));
+                    assert_eq!(sketch(&s), after);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn trim_keeps_or_removes_tangency_with_the_original_end() {
+    for remove_tangent_end in [false, true] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.arc.center_point", json!({"center": [0,0], "start": [50,0], "end": [-50,0]}));
+        run(&mut s, "sketch.line", json!({"points": ["a1.end", [-50,-30]]}));
+        let tangent = run(&mut s, "sketch.constraint.tangent", json!({"a": "l1", "b": "a1"}))["constraint"].as_str().unwrap().to_string();
+        run(&mut s, "sketch.line", json!({"points": [[0,40],[0,60]]}));
+        let before = sketch(&s);
+        let x = if remove_tangent_end { -40 } else { 40 };
+        run(&mut s, "sketch.trim", json!({"curve": "a1", "at": [x,30]}));
+        let after = sketch(&s);
+        assert!(after.curve_index("a1").is_some(), "the original curve ID survives either end trim");
+        assert_eq!(after.constraints.iter().any(|k| k.id == tangent), !remove_tangent_end);
+        if !remove_tangent_end {
+            let arc = after.curve_index("a1").unwrap();
+            let line = after.curve_index("l1").unwrap();
+            assert!(after.constraints.iter().any(|k| k.id == tangent && matches!(k.kind, ConstraintKind::Tangent { a, b } if a == line && b == arc)));
+        }
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(sketch(&s), before);
+    }
+}
+
 #[test]
 fn trim_extend_break() {
     let mut s = new_sketch();
@@ -280,6 +361,43 @@ fn an_arc_extended_from_an_end_a_tangent_line_ends_on_adds_no_arc_of_no_length()
             assert!(p != q && pa.dist(pb) > 1e-6, "{} runs from {pa:?} to {pb:?}: {:?}", c.id, c.kind);
         }
     }
+}
+
+/// #7410: two lines drawn as one chain share their corner point. Break at that point gives the
+/// picked line its own end there: both stay in place, and each can move without the other.
+#[test]
+fn break_at_a_shared_point_separates_the_curves_that_meet_there() {
+    let mut s = new_sketch();
+    let chain = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0], [20, 10]]}))["curves"]);
+    let (first, second) = (chain[0].clone(), chain[1].clone());
+    let ends = |s: &Session, id: &str| {
+        let sk = sketch(s);
+        let (a, b) = sk.curves[sk.curve_index(id).unwrap()].kind.ends().unwrap();
+        (a, b, sk.point(a).unwrap(), sk.point(b).unwrap())
+    };
+    let (_, shared, ..) = ends(&s, &first);
+    assert_eq!(ends(&s, &second).0, shared, "the chain shares its corner");
+    let points = sketch(&s).points.len();
+
+    let out = run(&mut s, "sketch.break", json!({"curve": second, "at": [20, 0]}));
+    assert_eq!(ids(&out["curves"]), vec![second.clone()], "{out}");
+    let (own, _, at, far) = ends(&s, &second);
+    let (_, kept, ..) = ends(&s, &first);
+    assert_eq!(kept, shared, "the first line keeps the point");
+    assert_ne!(own, shared, "the second line has its own end");
+    assert_eq!(sketch(&s).points.len(), points + 1);
+    assert!(at.dist(Vec2::new(20.0, 0.0)) < 1e-9 && far.dist(Vec2::new(20.0, 10.0)) < 1e-9, "the second line stays put: {at:?} {far:?}");
+    let own_id = sketch(&s).points[own].id.clone();
+    assert_eq!(own_id, format!("{second}.start"));
+
+    // Moving the second line's new end leaves the first line where it was.
+    run(&mut s, "sketch.move_point", json!({"point": own_id, "to": [25, 0]}));
+    let (_, _, a, b) = ends(&s, &first);
+    assert!(a.dist(Vec2::new(0.0, 0.0)) < 1e-9 && b.dist(Vec2::new(20.0, 0.0)) < 1e-9, "{a:?} {b:?}");
+
+    // A point only one curve ends at has nothing to separate: Break there still refuses.
+    let lone = s.execute("sketch.break", &json!({"curve": second, "at": [20, 10]}));
+    assert!(lone.is_err(), "{lone:?}");
 }
 
 #[test]
@@ -2567,6 +2685,59 @@ fn offset_instances_stop_where_the_shape_runs_out() {
     assert_eq!(o["sides"].as_array().map(Vec::len), Some(2), "{o}");
 }
 
+/// Instances picked from an arc keep going inward: a slot with r5 ends, stepped 2 mm in three
+/// times from an end arc. The third step would pass that arc's centre, so the command is
+/// refused there, where the third instance used to turn round onto the first (its side was
+/// read past the centre, outside the arc).
+#[test]
+fn offset_instances_from_an_arc_stop_where_the_arc_runs_out() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[-10, -5], [10, -5]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [10, 0], "start": [10, -5], "end": [10, 5]}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 5], [-10, 5]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [-10, 0], "start": [-10, 5], "end": [-10, -5]}));
+    let before = s.doc.to_json();
+    let error = s.execute("sketch.offset", &json!({"curves": ["a1"], "distance": 2, "side": [10, 0], "instances": 3})).unwrap_err().to_string();
+    assert!(error.contains("instance 3 of 3"), "{error}");
+    assert_eq!(s.doc.to_json(), before, "a refused instance leaves the design alone");
+    let o = run(&mut s, "sketch.offset", json!({"curves": ["a1"], "distance": 2, "side": [10, 0], "instances": 2}));
+    let sk = sketch(&s);
+    let radii: Vec<f64> = o["sides"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|side| {
+            let id = side["curves"].as_array().unwrap().iter().filter_map(|v| v.as_str()).find(|id| id.starts_with('a')).unwrap();
+            let CurveKind::Arc { c, a, .. } = sk.curves[sk.curve_index(id).unwrap()].kind else { panic!("{id} is no arc") };
+            sk.points[c].pos.dist(sk.points[a].pos)
+        })
+        .collect();
+    assert!(radii.len() == 2 && (radii[0] - 3.0).abs() < 1e-6 && (radii[1] - 1.0).abs() < 1e-6, "{radii:?}");
+}
+
+/// `side` is read off the picked curve itself: an arc's end of a slot left a hair of radius by
+/// the first instance still makes the second go on inward, and run out of room, and a tiny
+/// distance far from the origin still goes the way `side` says (a step a thousandth of it is
+/// lost to rounding there).
+#[test]
+fn offset_side_is_read_off_the_picked_curve() {
+    let mut s = new_sketch();
+    let r = 2.0005;
+    run(&mut s, "sketch.line", json!({"points": [[-10, -r], [10, -r]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [10, 0], "start": [10, -r], "end": [10, r]}));
+    run(&mut s, "sketch.line", json!({"points": [[10, r], [-10, r]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [-10, 0], "start": [-10, r], "end": [-10, -r]}));
+    let error = s.execute("sketch.offset", &json!({"curves": ["a1"], "distance": 2, "side": [10, 0], "instances": 2})).unwrap_err().to_string();
+    assert!(error.contains("instance 2 of 2"), "{error}");
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 1e8], [20, 1e8]]}));
+    let o = run(&mut s, "sketch.offset", json!({"curves": ["l1"], "distance": 0.000001, "side": [10, 99999999]}));
+    let sk = sketch(&s);
+    let out = o["curves"][0].as_str().unwrap();
+    let CurveKind::Line { a, .. } = sk.curves[sk.curve_index(out).unwrap()].kind else { panic!("{out} is no line") };
+    assert!(sk.points[a].pos.y < 1e8, "below, toward `side`: {:?}", sk.points[a].pos);
+}
+
 #[test]
 fn offset_instances_count_must_be_a_whole_number_within_the_cap() {
     let mut s = new_sketch();
@@ -4636,4 +4807,60 @@ fn trim_keeps_offset_distances_driving_after_trims_drag_and_reopen() {
         run(&mut reopened, "edit.undo", json!({}));
         verify(&reopened, 3.0, &parameter);
     }
+}
+
+/// Breaking a piece again where it was already broken adds nothing: no zero-length piece and
+/// no new constraints, however often it is clicked.
+#[test]
+fn breaking_again_where_a_curve_was_broken_adds_nothing() {
+    let mut s = new_sketch();
+    let a = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0]]}))["curves"])[0].clone();
+    // A circle tangent to A (as the slot's end arc is to its side): a tangent touch is a double
+    // root, found as two cuts a hair apart.
+    let x = 20.0 / 3.0 + 0.123_456_789;
+    run(&mut s, "sketch.circle.center", json!({"center": [x, 3.0], "radius": 3.0}));
+    run(&mut s, "sketch.dimension", json!({"entities": [a.clone()], "value": 20}));
+    run(&mut s, "sketch.break", json!({"curve": a, "at": [5, 0]}));
+    let count = |s: &Session| {
+        let k = sketch(s);
+        (k.curves.len(), k.constraints.len())
+    };
+    let first = count(&s);
+    let shown = |s: &Session| {
+        let k = sketch(s);
+        k.curves
+            .iter()
+            .map(|c| match c.kind {
+                CurveKind::Line { a, b } => format!("line {:?}-{:?}", k.point(a), k.point(b)),
+                _ => "other".into(),
+            })
+            .collect::<Vec<_>>()
+    };
+    eprintln!("after the first break: {:?}", shown(&s));
+    for _ in 0..5 {
+        let k = sketch(&s);
+        let left = k
+            .curves
+            .iter()
+            .find(|c| {
+                matches!(c.kind, CurveKind::Line { .. })
+                    && k.shape(k.curve_index(&c.id).unwrap()).is_some_and(|sh| sh.project(Vec2::new(5.0, 0.0)).dist(Vec2::new(5.0, 0.0)) < 1e-9)
+            })
+            .map(|c| c.id.clone());
+        let Some(left) = left else { panic!("no piece through (5, 0): {:?}", shown(&s)) };
+        let _ = s.execute("sketch.break", &json!({"curve": left, "at": [5, 0]}));
+        let _ = s.execute("sketch.break", &json!({"curve": left, "at": [x - 1e-7, 0]}));
+    }
+    let k = sketch(&s);
+    eprintln!("first {first:?} now {:?}; constraints {:?}", count(&s), k.constraints.iter().map(|c| format!("{:?}", c.kind)).collect::<Vec<_>>());
+    assert_eq!(count(&s), first, "repeated breaks added curves or constraints");
+    // The line stays where it was, 20 long: the length became the distance between its old ends.
+    let k = sketch(&s);
+    for c in &k.curves {
+        if let CurveKind::Line { a, b } = c.kind {
+            let (pa, pb) = (k.point(a).unwrap(), k.point(b).unwrap());
+            assert!(pa.y.abs() < 1e-9 && pb.y.abs() < 1e-9 && pa.dist(pb) > 1e-3, "{:?}", shown(&s));
+        }
+    }
+    assert!(k.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Distance { value, .. } if close(value, 20.0))), "{:?}", k.constraints);
 }

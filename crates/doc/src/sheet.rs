@@ -1942,6 +1942,11 @@ impl SheetBody {
         Ok(body)
     }
 
+    /// Whether the sheet holds all the bores it may: [`Self::add_bore`] refuses any more.
+    pub(crate) fn bores_full(&self) -> bool {
+        self.bores.len() >= MAX_BORES
+    }
+
     /// Record a round bore drilled along the sheet (a hole into a rim): the world cylinder from
     /// `base` along `axis`, one record per panel whose material it meets. Ok(false) when it
     /// meets no material; an error when it meets a bend, or crosses a panel other than along
@@ -1951,7 +1956,7 @@ impl SheetBody {
         if ![base.x, base.y, base.z, radius, height].iter().all(|v| v.is_finite()) || !(radius > 0.0) || height == 0.0 {
             return Err(DocError::Invalid("invalid sheet bore".into()));
         }
-        if self.bores.len() >= MAX_BORES {
+        if self.bores_full() {
             return Err(flat_budget_error());
         }
         let mut work = FlatWork::new();
@@ -2625,6 +2630,31 @@ impl SheetBody {
         best
     }
 
+    /// Where the base's outline already runs along the bend line (through `o`, along `d`) beside a
+    /// picked edge that spans [ua, ub] along d: the end of the nearest such run before it and the
+    /// start of the nearest after it (none: unbounded). Trimmed back to that line, the picked edge
+    /// merges with those runs, as beside the steps of a stepped outline; the flange stays off them.
+    fn bend_line_runs(&self, o: Vec2, d: Vec2, ua: f64, ub: f64) -> (f64, f64) {
+        let n = Vec2::new(-d.y, d.x);
+        let pts = self.base.outer.ccw().polyline(1e-3);
+        let m = pts.len();
+        let (mut lo, mut hi) = (f64::MIN, f64::MAX);
+        for i in 0..m {
+            let (Some(&p), Some(&q)) = (pts.get(i), pts.get((i + 1) % m)) else { continue };
+            if (p - o).dot(n).abs() > 1e-6 || (q - o).dot(n).abs() > 1e-6 {
+                continue;
+            }
+            let (u0, u1) = (p.dot(d).min(q.dot(d)), p.dot(d).max(q.dot(d)));
+            if u1 <= ua + 1e-9 {
+                lo = lo.max(u1);
+            }
+            if u0 >= ub - 1e-9 {
+                hi = hi.min(u0);
+            }
+        }
+        (lo, hi)
+    }
+
     /// What `cuts` (the sheet's cut-outs) leave of a panel's edge a→b: the stretch nearest `pick`
     /// (a world point), as distances from `a` along the edge; of two as near, the first. `None`
     /// where they have taken the edge whole.
@@ -2968,17 +2998,23 @@ impl SheetBody {
             let (s0, s1) = self
                 .edge_left(panel, a, b, e.pick, &cuts)
                 .ok_or_else(|| DocError::Invalid(format!("{}a cut-out has taken that edge away; pick an edge the sheet still has", on(k))))?;
+            // Where the base already runs along the bend line beside this edge (a stepped outline):
+            // the flange stays off it, though trimming merges the two.
+            let run = match panel {
+                None => self.bend_line_runs(a - outward * setback, d, a.dot(d), b.dot(d)),
+                Some(_) => (f64::MIN, f64::MAX),
+            };
             let cut = (s0 > 1e-9, s1 < a.dist(b) - 1e-9);
             let (a, b) = (if cut.0 { a + d * s0 } else { a }, if cut.1 { a + d * s1 } else { b });
-            found.push((panel, a, b, d, top, setback, leg, e.angle, cut));
+            found.push((panel, a, b, d, top, setback, leg, e.angle, cut, run));
         }
-        for (panel, a, b, _, _, setback, _, _, cut) in &found {
+        for (panel, a, b, _, _, setback, _, _, cut, _) in &found {
             self.trim(*panel, *a, *b, *setback, *cut)?;
         }
         let mut made = Vec::new();
         // Whether a cut-out has freed each new bend's ends (start, end) of the base beside them.
         let mut freed = Vec::new();
-        for (panel, a, b, d, top, setback, leg, angle, cut) in found {
+        for (panel, a, b, d, top, setback, leg, angle, cut, run) in found {
             let outward = Vec2::new(d.y, -d.x);
             let line_o = a - outward * setback;
             // The trimmed edge: along d, on the moved line.
@@ -3026,6 +3062,16 @@ impl SheetBody {
                         .find(|(p0, len)| (p0.dot(d) + len).min(b.dot(d)) - p0.dot(d).max(a.dot(d)) > 1e-9)
                         .ok_or_else(|| DocError::Invalid("the flange's edge was trimmed away".into()))?
                 }
+            };
+            // Not over the base's own edge where it already ran along the bend line (beyond a
+            // step of the outline): the flange stops where the picked edge did.
+            let (start, len) = {
+                let u = start.dot(d);
+                let (u0, u1) = (u.max(run.0), (u + len).min(run.1));
+                if !(u1 - u0 > 1e-9) {
+                    return Err(DocError::Invalid("the flange's edge was trimmed away".into()));
+                }
+                (start + d * (u0 - u), u1 - u0)
             };
             // Where a cut-out ends the edge, the flange ends with it.
             let (start, len) = if cut.0 || cut.1 {

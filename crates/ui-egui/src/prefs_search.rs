@@ -741,6 +741,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn appearance_controls_keep_one_search_result_and_their_page() {
+        use egui::accesskit::Role;
+        for width in [520, 1600] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", serde_json::json!({"width":width,"height":1100}));
+            h.call("ui.prefs", serde_json::json!({"language":"en","open":"Appearance"}));
+            for (query, label, native) in [
+                ("3D view colors", "3D view colors", None),
+                ("Interface scale", "Interface scale", Some((Role::Slider, "Interface scale", "prefs:scale"))),
+                ("Follow a theme file", "Follow a theme file", None),
+                ("Background", "Background", Some((Role::Button, "Color", "dialog:Background:Color"))),
+                ("Font", "Font", Some((Role::ComboBox, "Interface font", "prefs:ui_font"))),
+            ] {
+                h.app.prefs_window.filter = query.into();
+                h.frames(5);
+                let (_, _, hits) = nav(&h.ctx);
+                let matching: Vec<_> = hits.iter().filter(|hit| hit.label == label).collect();
+                assert_eq!(matching.len(), 1, "width={width}: {query} needs exactly one real navigation hit");
+                assert_eq!(matching[0].page, crate::prefs::PAGE_APPEARANCE);
+                let at = h.widget(label).unwrap();
+                let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+                assert!(body.contains(egui::pos2(at[0] as f32, at[1] as f32)));
+                if let Some((role, name, target)) = native {
+                    let tree = h.output.accesskit_update.as_ref().unwrap();
+                    let controls: Vec<_> =
+                        tree.nodes.iter().filter(|(_, node)| !node.is_disabled() && node.role() == role && node.label() == Some(name)).collect();
+                    assert_eq!(controls.len(), 1, "width={width}: {query} must expose one enabled native {name} control");
+                    let bounds = controls[0].1.bounds().unwrap();
+                    let centre = egui::pos2(((bounds.x0 + bounds.x1) / 2.0) as f32, ((bounds.y0 + bounds.y1) / 2.0) as f32);
+                    let rect = crate::scenario::rect_of(target).unwrap();
+                    assert!(body.contains_rect(rect) && rect.contains(centre), "width={width}: {name} is visible at its real target");
+                    if name == "Interface scale" {
+                        let row = crate::scenario::rect_of("dialog:row:Interface scale").unwrap();
+                        assert!((rect.left() - row.left()).abs() <= 1.0, "accessible-only name reserves no label column");
+                    }
+                    if name == "Color" {
+                        h.step(&serde_json::json!({"click":{"handle":target}})).unwrap();
+                        h.frames(2);
+                        assert_eq!(h.app.preferences.viewport_background, Some([255, 255, 255]), "the search hit edits the real setting");
+                    }
+                    if name == "Interface font" {
+                        h.step(&serde_json::json!({"click":{"handle":target}})).unwrap();
+                        h.frames(2);
+                        assert!(crate::scenario::handle_at("prefs:font_builtin").is_some(), "real searchable font picker opens at either width");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn search_matches_a_label_a_subsequence_and_the_english_source() {
         assert!(matches_text("zoom", &["Reverse zoom direction"]));
         assert!(matches_text("zo", &["Reverse zoom direction"]));
@@ -779,6 +831,108 @@ mod tests {
         for id in ["prefs.search", "prefs.search_empty"] {
             let text = crate::i18n::tr(id).to_lowercase();
             assert!(text.contains(&name), "`{text}` should name the window `{name}`");
+        }
+    }
+
+    #[test]
+    fn general_redesigned_controls_remain_searchable_without_duplicate_settings() {
+        use egui::accesskit::Role;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
+        for (query, label) in [
+            ("reopen the designs", "Reopen the designs that were open last time"),
+            ("autosave every", "Autosave every"),
+            ("largest file to open: step", "Largest file to open: STEP and import"),
+            ("largest file to open: design", "Largest file to open: Design"),
+            ("allow network locations", "Allow network locations in designs"),
+            ("slicer that is already running", "Open files in a slicer that is already running"),
+            ("print face highlight", "Print face highlight"),
+            ("interface language", "Interface language"),
+        ] {
+            h.app.prefs_window.filter = query.into();
+            h.frames(4);
+            let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+            let at = h.widget(label).unwrap_or_else(|| panic!("{label} must match {query}"));
+            assert!(body.contains(egui::pos2(at[0] as f32, at[1] as f32)), "{label} is drawn in the results");
+            assert!(h.widget(h.app.tr("prefs.search_empty")).is_none(), "{query} has a real result instead of the empty-results message");
+            let (_, _, hits) = nav(&h.ctx);
+            let matching: Vec<_> = hits.iter().filter(|hit| hit.label == label).collect();
+            assert_eq!(matching.len(), 1, "{label} must have one real search result");
+            assert_eq!(matching[0].page, crate::prefs::PAGE_GENERAL);
+            let control = match label {
+                "Autosave every" => Some(("prefs:autosave_minutes", Role::SpinButton, "Minutes", h.app.autosave_minutes)),
+                "Largest file to open: STEP and import" => {
+                    Some(("prefs:max_step_file_mb", Role::SpinButton, label, h.app.preferences.max_step_file_mb as f64))
+                }
+                "Largest file to open: Design" => {
+                    Some(("prefs:max_design_file_mb", Role::SpinButton, label, h.app.preferences.max_design_file_mb as f64))
+                }
+                "Print face highlight" => {
+                    Some(("prefs:print_face_highlight", Role::Slider, label, f64::from(h.app.preferences.print_face_highlight)))
+                }
+                _ => None,
+            };
+            if let Some((identity, role, accessible_label, value)) = control {
+                let field = crate::scenario::rect_of(identity).expect("the matching field retains its stable identity");
+                assert!(body.contains_rect(field), "{identity} is drawn in the results");
+                let tree = h.output.accesskit_update.as_ref().unwrap();
+                // Search also measures invisible, disabled probe UIs. Count the live control.
+                let controls: Vec<_> = tree
+                    .nodes
+                    .iter()
+                    .filter(|(_, node)| !node.is_disabled() && node.role() == role && node.label() == Some(accessible_label))
+                    .collect();
+                assert_eq!(controls.len(), 1, "{identity} must have one real searchable control");
+                let node = &controls[0].1;
+                assert_eq!(node.numeric_value(), Some(value), "{identity} exposes its actual setting value");
+                let bounds = node.bounds().unwrap();
+                assert!(field.contains(egui::pos2(((bounds.x0 + bounds.x1) / 2.0) as f32, ((bounds.y0 + bounds.y1) / 2.0) as f32)));
+            }
+        }
+        // An unavailable control is still a real result. Invisible search probes are also
+        // disabled, so require the live navigation hit and painted label as well as metadata.
+        h.app.updater.kind = Some(crate::update::InstallKind::Dev);
+        assert!(!crate::update::available(&mut h.app));
+        let label = "Check at start and once a day";
+        h.app.prefs_window.filter = label.into();
+        for checked in [false, true] {
+            h.app.preferences.check_updates = checked;
+            h.frames(4);
+            let (_, _, hits) = nav(&h.ctx);
+            let matching: Vec<_> = hits.iter().filter(|hit| hit.label == label).collect();
+            assert_eq!(matching.len(), 1, "the disabled setting has one live result");
+            assert_eq!(matching[0].page, crate::prefs::PAGE_GENERAL);
+            assert!(h.widget(h.app.tr("prefs.search_empty")).is_none());
+            let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+            let field = crate::scenario::rect_of("prefs:check_updates").expect("the real scheduling control");
+            assert!(body.contains_rect(field));
+            let tree = h.output.accesskit_update.as_ref().unwrap();
+            let (_, node) = tree
+                .nodes
+                .iter()
+                .rev()
+                .find(|(_, node)| {
+                    node.role() == Role::CheckBox
+                        && node.label() == Some(label)
+                        && node.bounds().is_some_and(|bounds| {
+                            field.contains(egui::pos2(((bounds.x0 + bounds.x1) / 2.0) as f32, ((bounds.y0 + bounds.y1) / 2.0) as f32))
+                        })
+                })
+                .expect("the disabled checkbox exposes its real state at the rendered control");
+            assert!(node.is_disabled());
+            assert_eq!(node.toggled(), Some(if checked { egui::accesskit::Toggled::True } else { egui::accesskit::Toggled::False }));
+            let painted = h
+                .shapes
+                .iter()
+                .filter(|shape| {
+                    matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == label && body.contains(text.pos) && shape.clip_rect.contains(text.pos))
+                })
+                .count();
+            assert_eq!(painted, 1, "one visible disabled control is painted, beyond probe metadata");
+            h.step(&serde_json::json!({"click":{"handle":"prefs:check_updates"}})).unwrap();
+            assert_eq!(h.app.preferences.check_updates, checked, "the search result cannot edit an unavailable setting");
         }
     }
 
@@ -836,9 +990,13 @@ mod tests {
         h.app.home.open = false;
         crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
         h.frames(2);
+        crate::prefs::reveal_preference(&mut h, "prefs:max_step_file_mb");
         let field = crate::scenario::rect_of("prefs:max_step_file_mb").expect("STEP limit field");
+        assert!(crate::scenario::rect_of("prefs:page_body").expect("Preferences body").contains_rect(field));
         h.step(&serde_json::json!({"click": [field.center().x, field.center().y]})).expect("click the field");
         h.frames(2);
+        let focused = h.ctx.memory(|memory| memory.focused()).expect("the number editor has focus");
+        assert!(field.contains_rect(h.ctx.read_response(focused).expect("focused editor response").rect));
         h.step(&serde_json::json!({"text": "7"})).expect("type");
         h.frames(2);
         assert!(h.app.prefs_window.filter.is_empty(), "typed `{}` into the search", h.app.prefs_window.filter);

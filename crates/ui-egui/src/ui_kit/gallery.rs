@@ -472,6 +472,33 @@ const ELEMENTS: &[Element] = &[
             });
         });
     }),
+    element!("below_row_control", |ui, state| {
+        settings_form(ui, Tokens::get().form_label_width, |ui| {
+            row(ui, "Autosave every", |ui| {
+                field(ui, &mut state.value);
+            });
+            below_row_control(ui, "Autosave every", 260.0, |ui| settings_autosave_timeline(ui, 5.0));
+        });
+    }),
+    element!("named_control", "dialog:widget:Profile name", Some("dialog:Profile name"), |ui, state| {
+        named_control(ui, "Profile name", |ui| {
+            text_field(ui, &mut state.value, "Name this setup");
+        });
+    }),
+    element!("settings_row_card", |ui, _| {
+        let t = Tokens::get();
+        for selected in [true, false] {
+            settings_row_card(ui, selected, t.control_height + t.space_14, |ui| {
+                text(ui, "Default", if selected { Text::SelectedNameCell } else { Text::NameCell(false) });
+                if selected {
+                    settings_badge(ui, "Active", false);
+                } else {
+                    button(ui, "Apply", Button::Normal);
+                }
+            });
+            ui.add_space(t.space_8);
+        }
+    }),
     element!("settings_composition", |ui, _| {
         settings_heading(ui, "Interface", "Appearance and workspace");
         settings_section(ui, "gallery_settings", "Layout", |ui| {
@@ -511,25 +538,34 @@ const ELEMENTS: &[Element] = &[
         );
         settings_pointer_preview(ui, true, "Normal", true);
     }),
-    element!("preference_theme_rail", |ui, _| {
-        theme_rail(
-            ui,
-            |ui| {
-                for label in ["Light", "Dark", "System"] {
-                    option_card(
-                        ui,
-                        label,
-                        Some("Built in"),
-                        label == "Light",
-                        true,
-                        PreferenceFigure::Theme { palette: Tokens::light().into(), system: label == "System" },
-                    );
-                }
-            },
-            |ui| {
+    element!("preference_theme_carousel", |ui, _| {
+        let light = ThemeSample::from_tokens(&Tokens::light());
+        let dark = ThemeSample::from_tokens(&Tokens::dark());
+        carousel(ui, "gallery_theme_carousel", 4, 88.0, 96.0, |ui, index| {
+            if index == 3 {
                 theme_import_tile(ui, "Import…", "theme file");
-            },
-        );
+            } else {
+                let label = ["Light", "Dark", "System"][index];
+                picture_card(
+                    ui,
+                    &Card {
+                        label,
+                        sub: Some(if index == 2 { "Follows the OS" } else { "Built in" }),
+                        selected: index == 0,
+                        enabled: true,
+                        options: None,
+                        check: false,
+                        aspect: 124.0 / 76.0,
+                        figure: &|p, rect| match index {
+                            0 => paint_theme_thumbnail(p, rect, &light),
+                            1 => paint_theme_thumbnail(p, rect, &dark),
+                            _ => paint_theme_system(p, rect, &light, &dark),
+                        },
+                    },
+                    88.0,
+                );
+            }
+        });
     }),
     element!("picture_card", |ui, _| {
         use super::preferences_figure_data as figures;
@@ -705,7 +741,6 @@ const ELEMENTS: &[Element] = &[
     element!("preference_option_cards", |ui, _| {
         ui.horizontal_wrapped(|ui| {
             for figure in [
-                PreferenceFigure::Theme { palette: Tokens::light().into(), system: true },
                 PreferenceFigure::Pivot(2),
                 PreferenceFigure::Quality(24),
                 PreferenceFigure::Antialiasing(8),
@@ -716,8 +751,22 @@ const ELEMENTS: &[Element] = &[
             }
         });
     }),
+    element!("settings_font_row", |ui, sample| {
+        settings_page(ui, |ui| {
+            settings_font_row(ui, "Font", |ui, part| {
+                if part == 0 {
+                    named_control(ui, "Interface font", |ui| {
+                        dropdown(ui, "gallery_preferences_font", &mut sample.selected, &["IBM Plex Sans (built in)", "Custom font"]);
+                    });
+                } else {
+                    button(ui, "Choose font file…", Button::Normal);
+                    button(ui, "Reset", Button::Ghost);
+                }
+            });
+            font_specimen(ui, "The quick brown fox · 0123456789");
+        });
+    }),
     element!("preference_specimens", |ui, _| {
-        tab_accent_strip(ui);
         scale_specimen(ui, 1.1);
         status_palette_sample(ui, crate::theme::ColorVision::Deutan);
         colour_vision_sample(ui, &Tokens::get());

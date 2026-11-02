@@ -107,6 +107,9 @@ Tool calls read, write and delete files only inside the server's folders:
 - every `--allow-path DIR` (repeat it for more). A folder named here is reached in full,
   hidden files included.
 
+The CLI removes its own scratch folder if it is empty when the MCP command returns, including
+after a startup error. A nonempty scratch folder is kept, so saved files are not deleted.
+
 The working folder the server was started in does not count by itself, so `~/.ssh`, `~/.aws`,
 `~/.bashrc` and other dotfiles are never in reach by default. stderr lists the folders at
 start-up and says when the `--in` design's folder was left out; `--allow-path` adds it back.

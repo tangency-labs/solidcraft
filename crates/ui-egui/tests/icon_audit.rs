@@ -10,6 +10,7 @@ use solidcraft_ui_egui::{icon_svg, scenario::Harness, workspace};
 fn harness() -> Harness {
     let mut h = Harness::new();
     h.app.preferences.auto_operation = false;
+    h.app.preferences.browser_components_open = true;
     h
 }
 

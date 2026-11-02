@@ -10,7 +10,14 @@ use solidcraft_sketch::CurveKind;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list};
+use crate::schema::inspect::{
+    BodyListParams, FaceCylinder, ModelEdge, ModelEdges, ModelFace, ModelFaces, ModelThread, ModelThreads, ModelThreadsParams,
+};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
+
+const BODY_LIST_CONTRACT: TypedContract<BodyListParams> = TypedContract::new();
+const THREADS_CONTRACT: TypedContract<ModelThreadsParams> = TypedContract::new();
 
 #[path = "appearance_chain.rs"]
 mod appearance_chain;
@@ -35,14 +42,28 @@ pub static COMMANDS: &[CommandSpec] = &[
          never on a selection or a view; from one counter for the whole run, so it never repeats). Read-only",
     ),
     CommandSpec::new("sketch.inspect", "Inspect Sketch", sketch_inspect).at("SKETCH", "INSPECT").icon("inspect").noundo().params("sketch?: id|name (default active)"),
-    CommandSpec::new("model.edges", "List Edges", model_edges).icon("inspect").noundo().params("body: name"),
-    CommandSpec::new("model.faces", "List Faces", model_faces).icon("inspect").noundo().params(
+    CommandSpec::new("model.edges", "List Edges", crate::checked!("model.edges", model_edges))
+        .icon("inspect")
+        .noundo()
+        .contract(&BODY_LIST_CONTRACT)
+        .output(output_schema_for::<ModelEdges>)
+        .params("body: name"),
+    CommandSpec::new("model.faces", "List Faces", crate::checked!("model.faces", model_faces))
+        .icon("inspect")
+        .noundo()
+        .contract(&BODY_LIST_CONTRACT)
+        .output(output_schema_for::<ModelFaces>)
+        .params(
         "body: name → per face: index, name (what face.delete, sheet.convert `face`, solid.shell … take in place of a point), exact, area, centroid (not always on the face), \
          plane_normal, point (a point on the face that picks it), cylinder? ({origin, axis, radius} of a cylindrical face), \
          sheet_face? (a folded sheet's face: `sheet:<body>:<panel>:<side>`, panel base or a flange's tag F<feature>.<k>, side top | bottom | rim.<edge> | bend.inner | bend.outer; \
          taken wherever a face name is, and it holds while sizes change and flanges come and go)",
     ),
-    CommandSpec::new("model.threads", "List Threads", model_threads).icon("inspect").noundo(),
+    CommandSpec::new("model.threads", "List Threads", crate::checked!("model.threads", model_threads))
+        .icon("inspect")
+        .noundo()
+        .contract(&THREADS_CONTRACT)
+        .output(output_schema_for::<ModelThreads>),
     CommandSpec::new("material.assign", "Physical Material", physical_material)
         .at("SOLID", "MODIFY")
         .icon("material")
@@ -395,13 +416,24 @@ fn model_edges(s: &mut Session, p: &Value) -> Result<Value> {
     let b = body_of(&st, p, "model.edges")?;
     let tol = (b.body.size() * 2e-3).max(1e-3);
     let names = solidcraft_doc::naming::edge_names(b);
-    let edges: Vec<Value> = b
+    let edges = b
         .body
         .edges(tol)?
         .iter()
-        .map(|e| json!({"index": e.index, "name": names.get(e.index), "mid": e.mid, "length": e.length, "start": e.points.first(), "end": e.points.last()}))
+        .map(|e| ModelEdge {
+            index: e.index,
+            name: names.get(e.index).cloned(),
+            mid: e.mid.into(),
+            length: e.length,
+            start: e.points.first().map(|&p| p.into()),
+            end: e.points.last().map(|&p| p.into()),
+        })
         .collect();
-    Ok(json!({"body": b.name, "edges": edges}))
+    reply("model.edges", ModelEdges { body: b.name.clone(), edges, param_warnings: Vec::new() })
+}
+
+fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
@@ -414,26 +446,32 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
     // the body's own coordinates.
     let model = s.model.state();
     let sheet_names = model.body(&b.name).map(|own| solidcraft_doc::sheet::body_sheet_face_names(&model, own)).unwrap_or_default();
-    let faces: Vec<Value> = b
+    let faces = b
         .body
         .faces(tol)?
         .iter()
         .map(|f| {
             let spot = spots.get(f.index).copied().flatten();
-            let mut v = json!({"index": f.index, "name": names.get(f.index), "exact": solidcraft_doc::naming::face_name_exact(b, f.index),
-                   "area": f.area, "centroid": f.centroid, "plane_normal": f.plane_normal, "point": spot.map(|x| x.point)});
-            if let (Some(Some(name)), Some(o)) = (sheet_names.get(f.index), v.as_object_mut()) {
-                o.insert("sheet_face".into(), json!(name));
+            let cylinder = match spot.and_then(|x| x.surface) {
+                Some(solidcraft_kernel::FaceSurface::Cylinder { origin, axis, radius }) => {
+                    Some(FaceCylinder { origin: origin.into(), axis: solidcraft_geom::Vec3::from(axis).into(), radius })
+                }
+                _ => None,
+            };
+            ModelFace {
+                index: f.index,
+                name: names.get(f.index).cloned(),
+                exact: solidcraft_doc::naming::face_name_exact(b, f.index),
+                area: f.area,
+                centroid: f.centroid.into(),
+                plane_normal: f.plane_normal.map(Into::into),
+                point: spot.map(|x| x.point.into()),
+                cylinder,
+                sheet_face: sheet_names.get(f.index).and_then(|n| n.as_ref().map(|n| n.to_string())),
             }
-            if let (Some(solidcraft_kernel::FaceSurface::Cylinder { origin, axis, radius }), Some(o)) =
-                (spot.and_then(|x| x.surface), v.as_object_mut())
-            {
-                o.insert("cylinder".into(), json!({"origin": origin, "axis": axis, "radius": radius}));
-            }
-            v
         })
         .collect();
-    Ok(json!({"body": b.name, "faces": faces}))
+    reply("model.faces", ModelFaces { body: b.name.clone(), faces, param_warnings: Vec::new() })
 }
 
 const DESCRIBE_CONTRACT: crate::schema::TypedContract<crate::schema::inspect::DescribeParams> = crate::schema::TypedContract::new();
@@ -459,7 +497,7 @@ fn commands(s: &mut Session, _p: &Value) -> Result<Value> {
 
 fn model_threads(s: &mut Session, _p: &Value) -> Result<Value> {
     let st = s.world_state();
-    Ok(json!({ "threads": st.threads }))
+    reply("model.threads", ModelThreads { threads: st.threads.iter().map(ModelThread::from).collect(), param_warnings: Vec::new() })
 }
 
 fn physical_material(s: &mut Session, p: &Value) -> Result<Value> {

@@ -1582,7 +1582,7 @@ impl Dialog {
     fn extrude_target(&self, s: &Session, h: &Hit) -> Option<Sel> {
         let Kind::Extrude { thin: false, smart, .. } = &self.kind else { return None };
         let to_active = self.active_input().is_some_and(|i| i.label == TO_OBJECT);
-        if !to_active && (self.active != 0 || !smart.auto_to_object) {
+        if !to_active && (self.active != 0 || !smart.auto_to_object || smart.profiles_chosen) {
             return None;
         }
         let reference = profile_plane(s, self.inputs.first()?.items.first()?)?;
@@ -1607,7 +1607,10 @@ impl Dialog {
     /// To Object with it. False when the pick is not one.
     fn take_extrude_target(&mut self, s: &Session, sel: &Sel) -> bool {
         if self.active != 0
-            || !matches!(self.kind, Kind::Extrude { thin: false, smart: crate::smart_extrude::Smart { auto_to_object: true, .. }, .. })
+            || !matches!(
+                self.kind,
+                Kind::Extrude { thin: false, smart: crate::smart_extrude::Smart { auto_to_object: true, profiles_chosen: false, .. }, .. }
+            )
         {
             return false;
         }
@@ -2831,6 +2834,10 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     }
     if let Some(i) = activate {
         d.active = i;
+        // A click into the Profiles box is a choice to add profiles by pick (Extrude's automatic To Object).
+        if let Kind::Extrude { smart, .. } = &mut d.kind {
+            smart.profiles_chosen = i == 0;
+        }
     }
     if let Some(i) = clear {
         if let Some(key) = stored_input_reference_key(d, i) {
@@ -6085,6 +6092,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                         .and_then(|ss| ss.sketch.points.iter().find(|p| p.id == id).map(|p| ss.plane.to_world(p.pos)))
                         .unwrap_or(position.0);
                     if let Some(inp) = d.inputs.first_mut() {
+                        // Editing a Single hole places it at exactly one point: a pick replaces.
+                        inp.multi = false;
                         inp.items = vec![face_sel(s, at).unwrap_or(Sel::Face { body: String::new(), index: 0, point: at })];
                     }
                     d.extra.insert("direction".into(), pt3(direction.0));
@@ -6106,6 +6115,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     // when the pick is still that point (a moved face drops them for numbers).
                     let on_face = solidcraft_engine::doc::hole_on_surface(&s.world_state(), position.0, direction.0, &[]);
                     if let Some(inp) = d.inputs.first_mut() {
+                        // Editing a Single hole places it at exactly one point: a pick replaces.
+                        inp.multi = false;
                         inp.items = vec![face_sel(s, on_face).unwrap_or(Sel::Face { body: String::new(), index: 0, point: on_face })];
                     }
                     d.extra.insert("direction".into(), pt3(direction.0));

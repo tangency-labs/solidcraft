@@ -78,6 +78,8 @@ fn f2_on_a_clicked_browser_group_renames_the_group() {
             h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Body1"})).unwrap();
             (h, 0)
         };
+        // The group's row sits inside a placement, which starts closed (#9274).
+        h.app.preferences.browser_components_open = true;
         let body = h.app.session.model.state().bodies[0].name.clone();
         let group = h.app.run("browser.group", json!({"component":component,"folder":"bodies","items":[body],"name":"Group"})).unwrap()["group"]
             .as_u64()
@@ -104,6 +106,31 @@ fn f2_on_a_clicked_browser_group_renames_the_group() {
         assert_eq!(names, ["Fasteners"], "component {inside_component}: Enter renames the group; status {:?}", h.app.status);
         assert!(h.app.session.world_state().body(&world_body).is_some(), "the body keeps its name");
     }
+}
+
+/// #10654: a refused inline rename keeps the editor open and says why, instead of closing
+/// silently and leaving the old name.
+#[test]
+fn a_refused_inline_rename_keeps_the_editor_and_shows_the_error() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"A"})).unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"B"})).unwrap();
+    h.app.preferences.browser_bodies_folders = crate::prefs::BodiesFolders::Always;
+    h.settle();
+    h.app.menu.rename = Some(crate::context_menu::Rename {
+        what: crate::context_menu::RenameWhat::Body("B".into()),
+        text: "A".into(),
+        at: egui::Pos2::ZERO,
+        focused: true,
+        inline: true,
+    });
+    h.frames(2);
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.frames(2);
+    assert!(h.app.menu.rename.is_some(), "the editor stays open after a refused rename");
+    let (text, _, error) = h.app.status.clone().expect("the refusal is shown");
+    assert!(error && text.contains("another body is called"), "{text}");
+    assert!(h.app.session.world_state().body("B").is_some(), "the body keeps its name");
 }
 
 #[test]
@@ -765,6 +792,8 @@ fn browser_occurrence_clicks_fill_align_components_input() {
 #[test]
 fn row_eyes_line_up_at_the_right_end_unless_the_preference_keeps_them_left() {
     let mut h = Harness::new();
+    // These rows are read with every placement open, as placements started before #9274.
+    h.app.preferences.browser_components_open = true;
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Top"})).unwrap();
     let part = h.app.run("component.create", json!({"name":"Part"})).unwrap()["occurrence"].as_u64().unwrap();
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[20,0,0],"body_name":"Inner"})).unwrap();
