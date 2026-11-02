@@ -58,6 +58,7 @@ pub mod appearance;
 pub mod bom;
 pub mod browser;
 pub mod clearance;
+pub mod compare;
 pub mod component;
 pub mod config;
 pub mod construct;
