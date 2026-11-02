@@ -187,6 +187,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 crate::scenario::publish_target("prefs:cut_preview_tint", cut_tint.rect);
                 setting::sketch_halo(app, left);
                 setting::vertex_markers(app, left);
+                let feature = setting::hover_feature_outline(app, left).on_hover_text(app.tr("prefs.hover_feature_outline_help"));
+                crate::scenario::publish_target("prefs:hover_feature_outline", feature.rect);
             }
             if let Some(right) = columns.get_mut(1) {
                 ui_kit::checkbox(right, crate::i18n::tr_label("Ground shadow"), &mut app.ui.ground_shadow);

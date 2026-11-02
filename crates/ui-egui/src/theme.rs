@@ -1080,6 +1080,8 @@ pub struct Tokens {
     pub hover_edge_halo: Color32,
     /// How much lighter a hovered face is (grey levels).
     pub hover_face_lift: u8,
+    /// The outline of the feature that made the face under the pointer (Preferences › Graphics).
+    pub hover_feature_edge: Color32,
     /// Selected profile fill and outline.
     pub sel_profile: Color32,
     pub sel_profile_edge: Color32,
@@ -1363,6 +1365,7 @@ impl Tokens {
             hover_edge: view.hover_edge,
             hover_edge_halo: view.hover_edge_halo,
             hover_face_lift: view.hover_face_lift,
+            hover_feature_edge: view.hover_feature_edge,
             sel_profile: view.sel_profile,
             sel_profile_edge: view.sel_profile_edge,
             hover_profile: view.hover_profile,
