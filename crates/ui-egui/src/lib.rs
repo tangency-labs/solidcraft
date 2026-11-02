@@ -530,6 +530,9 @@ pub struct SolveApp {
     /// The view from before Extrude turned it to isometric (#9176); the view goes back to it when
     /// the dialog closes, as the "and back when it closes" preference says.
     pub pre_extrude_cam: Option<Camera>,
+    /// The view a command that ends an open sketch was clicked in (#10571), taken before the
+    /// sketch's own end turns the view: that turn must not become the view Extrude goes back to.
+    pre_command_cam: Option<Camera>,
     /// The component active before Edit Sketch activated the one the sketch is in (#8127);
     /// leaving the sketch makes it active again.
     pub pre_sketch_component: Option<PreSketchComponent>,
@@ -793,6 +796,7 @@ impl SolveApp {
             pre_sketch_marker: None,
             pre_sketch_cam: None,
             pre_extrude_cam: None,
+            pre_command_cam: None,
             pre_sketch_component: None,
             services,
             file_picker: None,
@@ -1911,6 +1915,9 @@ impl SolveApp {
             dialogs::cancel(self);
         }
         let finished_sketch = self.session.active_sketch.filter(|_| ends_sketch(id) && self.interactive(id));
+        // The sketch's end may turn the view (Preferences › Sketch); Extrude goes back to the view
+        // it was clicked in, so take that one before the turn starts (#10571).
+        self.pre_command_cam = finished_sketch.is_some().then(|| self.settled_cam());
         if finished_sketch.is_some() {
             self.finish_sketch();
             // A feature committed before the marker is back would go in where the sketch was.
@@ -2215,7 +2222,7 @@ impl SolveApp {
         if !self.preferences.extrude_view_isometric {
             return;
         }
-        let before = self.settled_cam();
+        let before = self.pre_command_cam.take().unwrap_or_else(|| self.settled_cam());
         let mut to = before;
         to.set_view(StandardView::Iso);
         self.pre_extrude_cam = self.preferences.extrude_view_return.then_some(before);
