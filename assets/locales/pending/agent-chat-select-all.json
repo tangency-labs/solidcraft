@@ -1,0 +1,10 @@
+{
+  "en": { "ui.agent_chat_transcript_assistant": "Assistant:", "ui.agent_chat_transcript_user": "User:" },
+  "ar": { "ui.agent_chat_transcript_assistant": "المساعد:", "ui.agent_chat_transcript_user": "المستخدم:" },
+  "de": { "ui.agent_chat_transcript_assistant": "Assistent:", "ui.agent_chat_transcript_user": "Benutzer:" },
+  "he": { "ui.agent_chat_transcript_assistant": "עוזר:", "ui.agent_chat_transcript_user": "משתמש:" },
+  "ja": { "ui.agent_chat_transcript_assistant": "アシスタント:", "ui.agent_chat_transcript_user": "ユーザー:" },
+  "ko": { "ui.agent_chat_transcript_assistant": "어시스턴트:", "ui.agent_chat_transcript_user": "사용자:" },
+  "vi": { "ui.agent_chat_transcript_assistant": "Trợ lý:", "ui.agent_chat_transcript_user": "Người dùng:" },
+  "zh": { "ui.agent_chat_transcript_assistant": "助手：", "ui.agent_chat_transcript_user": "用户：" }
+}

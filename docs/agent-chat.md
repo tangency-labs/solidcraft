@@ -58,6 +58,11 @@ bottom edge and hold it there: the conversation scrolls, faster the further past
 go, and the selection grows with it. It stays when its start scrolls out of view, and Copy takes
 all of it.
 
+In Assistant, outside the message box, Ctrl+A (Cmd+A on macOS) selects the whole conversation:
+every prompt and answer, including those scrolled out of view, but not thoughts, tool cards, plans or
+notices. Ctrl+C then copies them in order as plain text, each under who wrote it. Esc or a
+click ends the selection; in the message box Ctrl+A selects only the draft.
+
 - **Docking:** on the left, Assistant is the first panel, before vertical history and the browser.
   The drag highlight shows the actual destination bounds. Drag the panel's header (the dotted grip and the title) to the other half of the
   window and let go. The side it would land on lights up while you drag. You can also pick
