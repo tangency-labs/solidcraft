@@ -66,6 +66,8 @@ pub const MAX_SIDE_MM: f64 = 5000.0;
 pub const MAX_RECORDS: usize = 100_000;
 /// The largest coordinate and radius either way, in millimetres: twenty times the longest side.
 pub const MAX_COORDINATE_MM: f64 = 1e5;
+/// The most pixels an image file on a sheet may have: 64 megapixels, 8,000 × 8,000.
+pub const MAX_IMAGE_PIXELS: u64 = 64_000_000;
 
 /// One sheet's marks, in paint order.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

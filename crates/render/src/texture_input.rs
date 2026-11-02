@@ -81,17 +81,19 @@ fn admitted_format(bytes: &[u8], capacity: usize) -> Result<ImageFormat> {
     if !matches!(format, ImageFormat::Png | ImageFormat::Jpeg) {
         return Err(invalid("texture must be PNG or JPEG; HDR uses the Radiance input utility"));
     }
-    // Whole-image codecs may return pixels before noticing a missing trailer. This
-    // marker check rejects that truncation; it is not a general container validator.
-    let complete = match format {
-        ImageFormat::Png => bytes.ends_with(b"\x00\x00\x00\x00IEND\xae\x42\x60\x82"),
-        ImageFormat::Jpeg => bytes.ends_with(b"\xff\xd9"),
-        _ => false,
-    };
-    if !complete {
+    if !is_whole(bytes, format) {
         return Err(invalid("texture is missing its final terminator"));
     }
     Ok(format)
+}
+/// Whether a PNG or JPEG ends with its final marker. Whole-image codecs may return pixels before
+/// noticing a missing trailer; this rejects that truncation. It is not a general container check.
+pub(crate) fn is_whole(bytes: &[u8], format: ImageFormat) -> bool {
+    match format {
+        ImageFormat::Png => bytes.ends_with(b"\x00\x00\x00\x00IEND\xae\x42\x60\x82"),
+        ImageFormat::Jpeg => bytes.ends_with(b"\xff\xd9"),
+        _ => false,
+    }
 }
 impl TextureSource {
     #[cfg(test)]
