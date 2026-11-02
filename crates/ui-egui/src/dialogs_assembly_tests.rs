@@ -356,7 +356,16 @@ fn edit_joint_shows_components_for_point_and_frame_origins() {
         assert_eq!((&after.a, &after.b), (&before.a, &before.b), "{command}");
 
         // Replacing just B with a face still edits only B, preserving A's point/frame.
-        let body = app.session.world_state().unwrap().bodies.iter().find(|body| occurrence_of_body(&app.session, &body.name) == Some(b)).unwrap().name.clone();
+        let body = app
+            .session
+            .world_state()
+            .unwrap()
+            .bodies
+            .iter()
+            .find(|body| occurrence_of_body(&app.session, &body.name) == Some(b))
+            .unwrap()
+            .name
+            .clone();
         let picked = Sel::Face { body, index: 0, point: Vec3::new(40.0, 10.0, 10.0) };
         d.active = 1;
         d.pick(&app.session, picked);

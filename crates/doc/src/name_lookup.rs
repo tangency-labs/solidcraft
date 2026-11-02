@@ -184,7 +184,11 @@ enum Miss {
 impl FaceHit {
     /// What a feature says about how it found a face by its stored name `name` (`None`: exactly).
     pub fn note(&self, name: &str) -> Option<String> {
-        if !self.verified && !self.on_point { Some(format!("face `{}` was found by geometry, not exact history; check it", quoted(name))) } else { None }
+        if !self.verified && !self.on_point {
+            Some(format!("face `{}` was found by geometry, not exact history; check it", quoted(name)))
+        } else {
+            None
+        }
     }
 }
 
@@ -306,7 +310,11 @@ pub(crate) fn quoted(name: &str) -> String {
 impl EdgeHit {
     /// What a feature says about how it found an edge by its stored name `name` (`None`: exactly).
     pub fn note(&self, name: &str) -> Option<String> {
-        if !self.verified && !self.on_point { Some(format!("edge `{}` was found by geometry, not exact history; check it", quoted(name))) } else { None }
+        if !self.verified && !self.on_point {
+            Some(format!("edge `{}` was found by geometry, not exact history; check it", quoted(name)))
+        } else {
+            None
+        }
     }
 }
 
