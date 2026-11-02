@@ -73,15 +73,13 @@ pub(crate) fn guard(app: &mut SolveApp, raw: &mut RawInput) {
                 drop.push(i);
             }
             PointerButton::Secondary => st.menu_at = None,
-            PointerButton::Primary => {
-                if st.menu_at.is_some() {
-                    if st.menu_rect.is_some_and(|r| r.contains(*pos)) {
-                        // The labels answer this frame while the selection is still alive.
-                        copy = true;
-                        drop.push(i);
-                    } else {
-                        st.menu_at = None;
-                    }
+            PointerButton::Primary if st.menu_at.is_some() => {
+                if st.menu_rect.is_some_and(|r| r.contains(*pos)) {
+                    // The labels answer this frame while the selection is still alive.
+                    copy = true;
+                    drop.push(i);
+                } else {
+                    st.menu_at = None;
                 }
             }
             _ => {}

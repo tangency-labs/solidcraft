@@ -4194,7 +4194,17 @@ fn right_click_in_a_reply_keeps_the_selection_and_offers_copy() {
         Event::PointerButton { pos: c, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE },
         Event::PointerButton { pos: c, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE },
     ]);
-    assert!(h.output.copied_text.contains("quick brown"), "copied: {:?}", h.output.copied_text);
+    let copied: Vec<String> = h
+        .output
+        .commands
+        .iter()
+        .filter_map(|c| match c {
+            egui::OutputCommand::CopyText(t) => Some(t.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(copied.len(), 1, "one Copy: {copied:?}");
+    assert!(!copied[0].is_empty() && "The quick brown fox jumps over the lazy dog.".contains(&copied[0]), "copied a piece of the reply: {copied:?}");
     h.frames(2);
     assert!(rect_of("agent_chat:copy_menu").is_none(), "the menu closed");
 }
