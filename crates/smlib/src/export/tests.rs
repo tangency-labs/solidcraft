@@ -64,8 +64,7 @@ mod native_tests {
     fn a_rounded_cubes_ball_patches_go_round_with_their_spheres() {
         let (a, r) = (20.0, 2.0);
         let h = a / 2.0;
-        let mids: Vec<[f64; 3]> =
-            [(0.0, 0.0), (a, 0.0), (0.0, a), (a, a)].iter().flat_map(|&(p, q)| [[h, p, q], [p, h, q], [p, q, h]]).collect();
+        let mids: Vec<[f64; 3]> = [(0.0, 0.0), (a, 0.0), (0.0, a), (a, a)].iter().flat_map(|&(p, q)| [[h, p, q], [p, h, q], [p, q, h]]).collect();
         let f = Brep::make_box([0.0; 3], [a; 3]).unwrap().fillet(&mids, 0.1, r).unwrap();
         let record = f.to_native().unwrap();
         record.validate().unwrap();
