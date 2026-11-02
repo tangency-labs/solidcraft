@@ -65,7 +65,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.emboss" => &[("face", Make)],
         "solid.draft" => &[("faces", Picks), ("neutral", Plane), ("pull", Dir), ("body", Body)],
         "solid.press_pull" => &[("face", Pick), ("edges", Picks)],
-        "solid.replace_face" => &[("faces", Picks), ("target_face", Pick), ("target", Plane), ("body", Body)],
+        "solid.replace_face" => &[("faces", Picks), ("target_face", Pick), ("target", Plane), ("target_body", Body), ("body", Body)],
         // Align finds its picks where they are shown and takes both ends into the moved bodies'
         // frame itself: a pick mapped into the frame of the body under it would put the two ends
         // in different frames when they lie on separately placed components.

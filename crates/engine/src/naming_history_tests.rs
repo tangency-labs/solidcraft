@@ -623,3 +623,24 @@ fn one_fillet_over_stacked_boxes_rounds_the_upper_box_s_edge_even_when_saved_nam
     s.refresh();
     check(&s, "saved by an older build");
 }
+
+/// A face whose history cannot be told apart can still keep a reference, as an NX face
+/// reference does: the plane is found by the face's name on every rebuild, says so when only
+/// geometry found it, and follows the face when a parameter moves it.
+#[test]
+fn a_plane_on_a_face_without_exact_history_is_kept_and_follows_the_face() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "len", "expression": "40 mm"}));
+    run(&mut s, "solid.box", json!({"length": "len", "width": 30, "height": 20, "body_name": "A"}));
+    // Align reports no history, so every face is named from geometry alone.
+    run(&mut s, "solid.align", json!({"bodies": ["A"], "from": [0, 0, 0], "to": [2, 0, 0]}));
+    assert!(names(&s, "A").iter().all(|(_, exact)| !*exact));
+    run(&mut s, "construct.plane.offset", json!({"base": {"face": [42, 15, 10], "body": "A", "index": 2}, "offset": 9, "name": "P"}));
+    run(&mut s, "sketch.create", json!({"plane": "P", "name": "S"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let origin = |s: &mut Session| run(s, "sketch.inspect", json!({"sketch": "S"}))["plane"]["origin"][0].as_f64().unwrap();
+    assert!((origin(&mut s) - 51.0).abs() < 1e-6);
+    run(&mut s, "parameters.change", json!({"name": "len", "expression": "50 mm"}));
+    assert_eq!(error(&s, "S"), None);
+    assert!((origin(&mut s) - 61.0).abs() < 1e-6);
+}
