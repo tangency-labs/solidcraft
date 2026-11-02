@@ -2,9 +2,9 @@
 
 # Contributing to solidcore
 
-Thank you for helping. solidcore is a port of the SMLib B-rep kernel to safe, deterministic Rust,
-following the SolidCraft fork of SMLib (tangency-labs/smlib) and its pattern: clean, procedural
-constructions, each built from the geometry of its case. This page is the short version;
+Thank you for helping. solidcore is a B-rep kernel in safe, deterministic Rust. It is based on
+SMLib and goes its own way: clean, procedural constructions, each built from the geometry of its
+case, replacing the code they supersede. This page is the short version;
 [AGENTS.md](AGENTS.md) has the full rules, which apply to people and agents alike.
 
 ## Before you start
@@ -40,8 +40,8 @@ constructions, each built from the geometry of its case. This page is the short 
 
 ## The new construction replaces the old
 
-- **The fork is the reference.** Where the fork has replaced SMLib's construction (the generic
-  blend), solidcore matches the fork bit for bit.
+- **SMLib is the base, not the limit.** Where a construction has been redesigned (the generic
+  blend), the new one is what solidcore builds, and its steps keep their results bit for bit.
 - **Flags are temporary.** A port lands behind an opt-in flag only while it's in progress. Once its
   construction is ported and parity is shown, the flag becomes the default and the old code is
   deleted, together with the patches made to it.
@@ -52,7 +52,11 @@ constructions, each built from the geometry of its case. This page is the short 
 Fillet and chamfer cases from SolidCraft's kernel rig are listed in
 [docs/generic-blend.md §7](docs/generic-blend.md#7-case-gallery), each with its state: passes,
 refused as expected (with the size that fits), or known failing (with its reason). When your change
-makes a case pass, or fixes a known failure, update its row in the same pull request.
+makes a case pass, or fixes a known failure, update its row **and its image** in the same pull
+request: a new render of the result (`docs/generic-blend/cases/<case>.jpg`) whose view shows the
+case's issue (the corner, the seam, the spot refused or fixed), framed close on it, not a fixed
+angle. Agents: choose the view from the case's geometry. A changed row without a new image is not
+accepted.
 
 ## Concurrency and parallelism
 

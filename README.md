@@ -4,8 +4,12 @@
 
 **📊 Live progress: [tangency-labs.github.io/solidcore](https://tangency-labs.github.io/solidcore/)**: every unit's port status and difftest results, the upstream-issues log, and the surface/surface intersection corpus scores, regenerated on every merge.
 
-solidcore is a Rust port of NVIDIA's SMLib: a boundary-representation (B-rep) solid
-modeling kernel in safe Rust (SMLib is from [USD BRep](https://github.com/NVIDIA-Omniverse/usd-brep), Apache-2.0).
+solidcore is a boundary-representation (B-rep) solid modeling kernel in safe Rust. It is based
+on NVIDIA's SMLib (from [USD BRep](https://github.com/NVIDIA-Omniverse/usd-brep), Apache-2.0)
+and goes its own way from there: it started as a port, and its new constructions, such as the
+generic rolling-ball blend ([docs/generic-blend.md](docs/generic-blend.md)), are designed and built
+here as clean, procedural constructions that replace the code they supersede. Contributing:
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 Solids are exact: shells, faces, loops, edges and vertices bound to analytic and NURBS
 curves and surfaces. solidcore's first consumer is **SolidCraft**.
@@ -21,12 +25,13 @@ Out of scope: upstream's OCCT translators, USD/Hydra integration and Python bind
 See [ATTRIBUTION.md](ATTRIBUTION.md).
 
 Goals: no `unsafe` in the kernel, no panics on bad input, deterministic results, no
-global state, builds for `wasm32-unknown-unknown`, and numerical agreement with the
-C++ to `1e-9` relative with identical topology, verified unit by unit.
+global state (one `Kernel` per thread), builds for `wasm32-unknown-unknown`, and exact or
+certified geometry. Its own tests and SolidCraft's operation cases are the gate; the difftest
+against the C++ reference is a tool the maintainers run where parity matters (AGENTS.md §1).
 
 ## Status
 
-The planned kernel modules have Rust ports, and primitive construction is exercised
+Every SMLib kernel module has a Rust counterpart, and primitive construction is exercised
 end to end. Integration remains in progress: partial units, deferred paths and known
 mismatches still limit coverage. The API is experimental (0.0.x).
 

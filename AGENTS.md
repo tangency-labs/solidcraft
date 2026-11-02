@@ -1,11 +1,11 @@
 # AGENTS.md — solidcore
 
-solidcore is a port of NVIDIA's SMLib B-rep kernel (C++, Apache-2.0) to idiomatic safe
-Rust. Upstream is cloned (gitignored) at `upstream/`, pinned to v1.0.1, commit `3fd5b95`
+solidcore is a B-rep kernel in idiomatic safe Rust, based on NVIDIA's SMLib (C++, Apache-2.0)
+and going its own way from there: it started as a port, and new constructions are designed and
+built here. Upstream is cloned (gitignored) at `upstream/`, pinned to v1.0.1, commit `3fd5b95`
 (`scripts/upstream-pin.env` is the single source of truth for scripts, CI and the site). Many
-agents work here at once: read this whole file before your first change. Where the SMLib
-fork (tangency-labs/smlib) has replaced a construction, the fork is the reference, not upstream
-(§4b). People: [CONTRIBUTING.md](CONTRIBUTING.md) has the same principles in short.
+agents work here at once: read this whole file before your first change. Where a construction has been
+redesigned (the generic blend), the new design is what solidcore builds, not upstream's (§4b). People: [CONTRIBUTING.md](CONTRIBUTING.md) has the same principles in short.
 
 ```
 crates/solidcore       the kernel (pure Rust, no unsafe, wasm-ok)        owner: unit porters
@@ -356,21 +356,27 @@ The kernel core is one big call cycle, so the plan dropped ~2,300 calls as *back
 
 ## 4b. Fixing upstream defects
 
-Every unit is ported; most new work fixes SMLib defects in the port or ports the fork's new
-constructions. The policy (owner, 2026-11-02; supersedes the interim rule of #1018):
+Every SMLib unit has a Rust counterpart; most new work fixes SMLib defects or builds solidcore's
+own constructions. The policy (owner, 2026-11-02; supersedes the interim rule of #1018):
 
-- **The fork is the reference.** solidcore's default behaviour is the SMLib fork's
-  (tangency-labs/smlib), not upstream usd-brep v1.0.1's. The difftest still builds the pinned
-  upstream, the fork's base. Where the fork hasn't changed a path, the two agree. Where it has
-  replaced a construction (the generic blend: `docs/generic-blend.md` §9), the port matches the
-  fork bit for bit, and its divergence from upstream is recorded as the fork's change, not as
-  a port defect.
-- **Flags only while a port is in progress.** A change of result lands behind its
+- **Redesigned constructions are the reference, not upstream.** solidcore's default behaviour is
+  no longer upstream usd-brep v1.0.1's where a construction has been redesigned (the generic blend,
+  `docs/generic-blend.md`). Those steps were first built in the SolidCraft fork of SMLib, and their
+  results there are the baseline they keep, bit for bit; the difftest shows it when the
+  maintainers run it, against the reference set in `scripts/upstream-pin.env`. New construction
+  is designed on its solidcore issue and built here.
+- **Flags only while a step is being brought over.** A change of result lands behind its
   `Kernel::fixes` (`UpstreamFixes`) field with a regression test of its case and an addendum in
   `plan/upstream-issues/`. Once its construction's ports are in and parity is shown, the flag
   becomes the default and is removed, and the old path is **deleted** together with the
   solidcore-only `WR-` patches made to it. No flag is permanent, and nothing is kept as a
   fallback.
+- **Cases with images.** A pull request that makes a SolidCraft rig case pass, or turns a known
+  failure into a correct refusal, updates its row in `docs/generic-blend.md` §7 and its render
+  (`docs/generic-blend/cases/<case>.jpg`) in the same change. No row changes without its image.
+  Choose the render's view from the case's geometry so it shows the issue (the corner, the seam,
+  the spot refused or fixed), framed close on it, with an inset of the whole part where it helps;
+  never a fixed angle.
 - **Don't extend code that is going away.** Fix an old path only when a parity gate needs it
   before its replacement lands; say so in the PR, and it is deleted with the code.
 - **Crash, UB, hang and nondeterminism fixes are unconditional**, e.g. #1160 for UB-87.
