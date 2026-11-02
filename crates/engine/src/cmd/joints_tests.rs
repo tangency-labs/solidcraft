@@ -778,6 +778,60 @@ fn any_two_sides_of_turned_boards_meet_on_a_second_planar_joint() {
     }
 }
 
+/// #9687: a second planar joint left as a conflict, as a design saved before joint.create turned
+/// its part a half turn keeps it, meets when Edit Joint's OK places it again, and one unsuppressed
+/// after its part was turned away on the first joint meets too. A rename alone moves nothing.
+#[test]
+fn editing_or_unsuppressing_a_conflicting_second_planar_joint_turns_its_part_to_meet() {
+    let conflicts = |r: &Value| r["conflicts"].as_array().map(Vec::len);
+    let values = |s: &Session, name: &str| s.doc.assembly.joints.iter().find(|j| j.name == name).map(|j| j.values.clone()).unwrap_or_default();
+    let pose = |s: &Session| [Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z].map(|p| place(s, "Red", p));
+    let mut s = boards();
+    let planar = |s: &mut Session, name: &str, yellow: [f64; 3], red: [f64; 3]| {
+        run(
+            s,
+            "joint.create",
+            json!({"type": "planar", "a": {"occurrence": "Yellow", "face": yellow}, "b": {"occurrence": "Red", "face": red}, "name": name}),
+        )
+    };
+    planar(&mut s, "Top", [200.0, 50.0, 20.0], [200.0, 350.0, 0.0]);
+    let on_top = values(&s, "Top");
+    // The fronts point the same way: Side meets with Red turned a half turn on Top.
+    let r = planar(&mut s, "Side", [200.0, 0.0, 10.0], [200.0, 0.0, 30.0]);
+    assert_eq!(conflicts(&r), Some(0), "{r}");
+    let met = pose(&s);
+    // Red as it met, slid along the line the two planes share (X) at most.
+    let meets = |s: &Session| {
+        let now = pose(s);
+        let dx = Vec3::new(now[0].x - met[0].x, 0.0, 0.0);
+        now.iter().zip(&met).all(|(p, q)| near(*p, *q + dx))
+    };
+    // As a design saved before joint.create turned Red: Top's values from before Side.
+    if let Some(j) = s.doc_mut().assembly.joints.iter_mut().find(|j| j.name == "Top") {
+        j.values = on_top;
+    }
+    let r = run(&mut s, "joint.solve", json!({}));
+    assert_eq!(conflicts(&r), Some(1), "{r}");
+    let saved = pose(&s);
+    assert!(!meets(&s), "{saved:?}");
+    let r = run(&mut s, "joint.edit", json!({"joint": "Side", "name": "Front"}));
+    assert_eq!(conflicts(&r), Some(1), "a rename: {r}");
+    assert!(pose(&s).iter().zip(&saved).all(|(p, q)| near(*p, *q)), "a rename moved Red: {:?}", pose(&s));
+    // Edit Joint's OK sends the type, flip and offset.
+    let r = run(&mut s, "joint.edit", json!({"joint": "Front", "type": "planar", "flip": false, "offset": 0}));
+    assert_eq!(conflicts(&r), Some(0), "Edit Joint's OK: {r}");
+    assert!(meets(&s), "Edit Joint's OK: {:?}", pose(&s));
+    assert_eq!(dof_of(&mut s, "Red"), 1);
+    // Suppressed, Red turned a half turn away on Top, then unsuppressed.
+    run(&mut s, "joint.edit", json!({"joint": "Front", "suppressed": true}));
+    let angle = values(&s, "Top").get(2).copied().unwrap_or(f64::NAN).to_degrees();
+    run(&mut s, "joint.drive", json!({"joint": "Top", "index": 2, "value": angle + 180.0}));
+    assert!(!meets(&s), "turned away: {:?}", pose(&s));
+    let r = run(&mut s, "joint.edit", json!({"joint": "Front", "suppressed": false}));
+    assert_eq!(conflicts(&r), Some(0), "unsuppressed: {r}");
+    assert!(meets(&s), "unsuppressed: {:?}", pose(&s));
+}
+
 /// A slider-crank: crank 15 about the origin, rod 40, a piston sliding along X. Returns the crank
 /// pin and the wrist pin.
 fn slider_crank() -> (Session, Vec3, Vec3) {
