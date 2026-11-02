@@ -323,6 +323,29 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     if !solidcraft_io::is_step_path(path) && !solidcraft_io::is_gltf_path(path) && p.get("up").is_some_and(|v| !v.is_null()) {
         return Err(bad("doc.open", "`up` applies to STEP, IGES and glTF files only"));
     }
+    // History is rebuilt only from admitted Apache-licensed neutral records.
+    // Explicit STEP placement/name options continue through the geometry path.
+    let mut inventor_warning = None;
+    if solidcraft_io::is_inventor_path(path) && p.get("names").is_none() && p.get("up").is_none() {
+        let bytes = solidcraft_io::vfs::read(path, solidcraft_io::MAX_STEP_BYTES).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+        match solidcraft_io::import_inventor(&bytes, path) {
+            Ok((doc, warnings)) => {
+                let mut fresh = Session::new(doc);
+                if fresh.model.results.iter().all(|r| r.error.is_none()) && !fresh.model.state().bodies.is_empty() {
+                    fresh.undo.clear();
+                    let component = fresh.doc.components.first().map(|c| c.id).unwrap_or(0);
+                    fresh.active_component = component;
+                    fresh.active_occurrence_path = Some(fresh.doc.first_path(component));
+                    s.replace_design(fresh);
+                    s.path = Some(path.to_string());
+                    return Ok(json!({"path":path, "features":s.doc.features.len(), "errors":0,
+                        "bodies":s.model.state().bodies.len(), "warnings":warnings, "editable_history_imported":true}));
+                }
+                inventor_warning = Some("Inventor history did not regenerate; imported the available geometry instead".to_string());
+            }
+            Err(e) => inventor_warning = Some(format!("{e}; imported the available geometry instead")),
+        }
+    }
     if let Some(command) = super::drawing_import_command(path) {
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
         let mut fresh = Session::new(Document::new(&stem));
@@ -357,11 +380,16 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         // A new, unsaved design holding the file's bodies.
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
         let mut fresh = Session::new(Document::new(&stem));
-        let r = if solidcraft_io::is_step_path(path) {
+        let mut r = if solidcraft_io::is_step_path(path) {
             add_step(&mut fresh, path, None, &step_options(p, "doc.open")?)?
         } else {
             add_mesh(&mut fresh, path, None, mesh_up(p, path, "doc.open")?)?
         };
+        if let Some(warning) = inventor_warning
+            && let Some(warnings) = r.get_mut("warnings").and_then(Value::as_array_mut)
+        {
+            warnings.push(json!(warning));
+        }
         // The design is the file: its component is the one being worked in.
         if let Some(c) = r["component"].as_u64() {
             fresh.active_component = c;

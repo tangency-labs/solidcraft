@@ -218,6 +218,14 @@ pub static FORMATS: &[FormatSpec] = &[
         export: None,
     },
     FormatSpec {
+        id: "inventor",
+        label: "Inventor",
+        extensions: &["ipt", "iam"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::Brep, options: BREP_IMPORT, native_only: true }),
+        export: None,
+    },
+    FormatSpec {
         id: "stl",
         label: "STL",
         extensions: &["stl"],
@@ -397,7 +405,7 @@ pub fn import_filters(native: bool) -> Vec<(&'static str, Vec<&'static str>)> {
         let Some(import) = f.import.as_ref() else { continue };
         match import.target {
             ImportTarget::Design => add("SolidCraft design (container or JSON)", f.extensions),
-            ImportTarget::Brep if import.native_only => add("FreeCAD and Rhino", f.extensions),
+            ImportTarget::Brep if import.native_only => add("FreeCAD, Rhino and Inventor", f.extensions),
             ImportTarget::Brep => add(f.label, f.extensions),
             ImportTarget::Mesh => add("Mesh (3MF, STL, OBJ, glTF)", f.extensions),
             ImportTarget::PointCloud => add("Point cloud (PLY, XYZ, PTS)", f.extensions),
@@ -510,10 +518,10 @@ mod tests {
         assert_eq!(find("SolidCraft design (container or JSON)"), vec!["sc", "solidcraft", "solvecraft", "json"]);
         assert_eq!(find("STEP"), vec!["step", "stp"]);
         assert_eq!(find("IGES"), vec!["igs", "iges"]);
-        assert_eq!(find("FreeCAD and Rhino"), vec!["fcstd", "3dm"]);
+        assert_eq!(find("FreeCAD, Rhino and Inventor"), vec!["fcstd", "3dm", "ipt", "iam"]);
         assert_eq!(find("Mesh (3MF, STL, OBJ, glTF)"), vec!["stl", "3mf", "obj", "glb", "gltf"]);
         assert_eq!(find("Point cloud (PLY, XYZ, PTS)"), vec!["ply", "xyz", "pts"]);
         assert_eq!(find("Sketch drawings (DXF, SVG)"), vec!["dxf", "svg"]);
-        assert!(import_filters(false).iter().all(|(l, _)| *l != "FreeCAD and Rhino"));
+        assert!(import_filters(false).iter().all(|(l, _)| *l != "FreeCAD, Rhino and Inventor"));
     }
 }

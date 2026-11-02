@@ -1,0 +1,1 @@
+| crates/io/src/inventor.rs | SolidCraft contributors | Original translation of the public neutral-record interfaces of [cadmpeg 0.6.5](https://github.com/cadmpeg/cadmpeg) (Apache-2.0); no Corliss code or corpus fixtures used; tests generate original records and analytic expectations in memory | MIT OR Apache-2.0 |
