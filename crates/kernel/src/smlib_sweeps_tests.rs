@@ -287,3 +287,65 @@ fn a_sweep_follows_a_free_form_path_as_a_curve() {
     let b = smlib_sweeps::sweep_controlled(&Plane::XY, &numbered(&sq), &path, &ctl).unwrap();
     close(volume(&b), 16.0 * 46.220575543, 1e-3, "twisted square along a Bézier");
 }
+
+/// A ring about the origin: `outer` radius with a hole of radius `bore`.
+fn ring(outer: f64, bore: f64) -> Region2 {
+    Region2 { outer: Loop2::circle(Vec2::ZERO, outer), holes: vec![Loop2::circle(Vec2::ZERO, bore)] }
+}
+
+/// The faces of `b` on a cylinder about the z axis of radius `r`.
+fn z_cylinders(b: &Body, r: f64) -> usize {
+    (0..b.face_count())
+        .filter(|&f| match crate::face_surface(b, f) {
+            Some(crate::FaceSurface::Cylinder { origin, axis, radius }) => {
+                (radius - r).abs() <= 1e-9 && axis.cross(Vec3::Z).len() <= 1e-12 && origin.x.hypot(origin.y) <= 1e-9
+            }
+            _ => false,
+        })
+        .count()
+}
+
+#[test]
+fn a_twisted_sweep_builds_circles_about_its_path_as_exact_cylinders() {
+    // solidcore#2184: a tube r 2 / 1.5 extruded over z -2..3, joined with a tube r 2.5 / 1.5 swept
+    // 1.25 up z with a twist. The twist turns each circle onto itself, so both of the swept tube's
+    // walls are the exact cylinders, and its bore lies on the extruded tube's: one body,
+    // pi (1.75 x 5 + 4 x 1.25 - 1.75 x 1.25) = 11.5625 pi. Skinned, the bore stayed within 4e-9
+    // of the cylinder and the join failed at 16, 20 and 30 degrees.
+    let a = crate::extrude(&Plane::XY, &[ring(2.0, 1.5)], -2.0, 3.0).unwrap().pop().unwrap();
+    let up = [crate::PathSeg::Line { a: Vec3::ZERO, b: Vec3::new(0.0, 0.0, 1.25) }];
+    let want = PI * (1.75 * 5.0 + 4.0 * 1.25 - 1.75 * 1.25);
+    for deg in [10.0f64, 16.0, 18.0, 20.0, 30.0] {
+        let ctl = crate::SweepControl { twist: deg.to_radians(), ..Default::default() };
+        let b = crate::sweep_with(&Plane::XY, &ring(2.5, 1.5), &up, &ctl).unwrap();
+        assert_eq!((z_cylinders(&b, 1.5), z_cylinders(&b, 2.5)), (1, 1), "{deg} deg: the walls are cylinders");
+        let mut want_b = vec![cap(false), cap(true), profile(0), profile(1)];
+        want_b.sort();
+        assert_eq!(origins(&b), want_b, "{deg} deg");
+        let joined = crate::boolean(&a, &b, crate::BoolOp::Union).unwrap().unwrap();
+        assert_eq!((joined.shell_count(), joined.validity()), (1, Vec::<String>::new()), "{deg} deg");
+        close(volume(&joined), want, 1e-8, &format!("{deg} deg join"));
+        assert!(z_cylinders(&joined, 1.5) >= 1, "{deg} deg: the bore is a cylinder");
+    }
+    // A hexagon (circumradius 2.5, across flats 4.33, clear of the extruded tube's r 2) with the
+    // same bore, twisted 30 degrees: the hexagon's walls are skinned, the bore cut as the exact
+    // cylinder and named by its circle. The join is A + B less A's ring over 1.25.
+    let hex =
+        Loop2::polygon(&(0..6).map(|i| Vec2::new(2.5 * (f64::from(i) * PI / 3.0).cos(), 2.5 * (f64::from(i) * PI / 3.0).sin())).collect::<Vec<_>>());
+    let hexed = Region2 { outer: hex, holes: vec![Loop2::circle(Vec2::ZERO, 1.5)] };
+    let ctl = crate::SweepControl { twist: 30f64.to_radians(), ..Default::default() };
+    let b = crate::sweep_with(&Plane::XY, &hexed, &up, &ctl).unwrap();
+    let hex_area = 1.5 * 3f64.sqrt() * 6.25;
+    close(volume(&b), (hex_area - PI * 2.25) * 1.25, 1e-5, "twisted hexagon");
+    assert_eq!(z_cylinders(&b, 1.5), 1, "the bore is a cylinder");
+    let o = origins(&b);
+    assert!(o.contains(&cap(false)) && o.contains(&cap(true)) && (0..7).all(|k| o.contains(&profile(k))), "{o:?}");
+    let joined = crate::boolean(&a, &b, crate::BoolOp::Union).unwrap().unwrap();
+    assert_eq!((joined.shell_count(), joined.validity()), (1, Vec::<String>::new()));
+    close(volume(&joined), PI * 1.75 * 5.0 + (hex_area - PI * 2.25) * 1.25 - PI * 1.75 * 1.25, 1e-5, "hexagon join");
+    // A circle off the path's line is skinned as before.
+    let off = region(Loop2::circle(Vec2::new(0.5, 0.0), 1.0));
+    let b = crate::sweep_with(&Plane::XY, &off, &up, &ctl).unwrap();
+    assert!((0..b.face_count()).all(|f| !matches!(crate::face_surface(&b, f), Some(crate::FaceSurface::Cylinder { .. }))));
+    close(volume(&b), PI * 1.25, 1e-6, "twisted circle off the axis");
+}
