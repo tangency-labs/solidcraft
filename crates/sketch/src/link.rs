@@ -134,10 +134,10 @@ impl LinkSource {
     /// Short description for messages and the browser.
     pub fn describe(&self) -> String {
         match self {
-            LinkSource::Edge { body, .. } => format!("edge of {body}"),
-            LinkSource::Face { body, .. } => format!("face of {body}"),
+            LinkSource::Edge { body, .. } => of_body("edge", body),
+            LinkSource::Face { body, .. } => of_body("face", body),
             LinkSource::Body { body } => body.clone(),
-            LinkSource::Vertex { body, .. } => format!("vertex of {body}"),
+            LinkSource::Vertex { body, .. } => of_body("vertex", body),
             LinkSource::SketchCurve { curve, .. } => format!("sketch curve {curve}"),
             LinkSource::SketchPoint { point, .. } => format!("sketch point {point}"),
             LinkSource::Origin => "origin".into(),
@@ -146,8 +146,8 @@ impl LinkSource {
             LinkSource::Plane { name } => format!("{name} plane"),
             LinkSource::OnSurface { curve, .. } => format!("{curve} on a face"),
             LinkSource::Intersection { a, b } => format!("intersection of {} and {}", a.describe(), b.describe()),
-            LinkSource::Spun { body, .. } => format!("spun profile of {body}"),
-            LinkSource::Iso { body, .. } => format!("isoparametric curve of {body}"),
+            LinkSource::Spun { body, .. } => of_body("spun profile", body),
+            LinkSource::Iso { body, .. } => of_body("isoparametric curve", body),
             LinkSource::Text { text, .. } => format!("text \"{}\"", text.chars().take(20).collect::<String>()),
         }
     }
@@ -176,6 +176,13 @@ impl LinkSource {
             | LinkSource::Text { .. } => Vec::new(),
         }
     }
+}
+
+/// The description of a source that names a body: "face of Body1", or the kind alone when the
+/// reference names no body (a picked face is found by its geometry, and the body it belongs
+/// to is not named in the reference).
+fn of_body(kind: &str, body: &str) -> String {
+    if body.is_empty() { kind.to_string() } else { format!("{kind} of {body}") }
 }
 
 /// Half length of the line a sketch axis link produces.
