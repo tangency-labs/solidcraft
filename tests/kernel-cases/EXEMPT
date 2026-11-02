@@ -181,7 +181,14 @@ sketch.constraint.polygon         2D sketch only (the sketch solver and engine t
 sketch.constraint.symmetry        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.construction               2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.construction_line          2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.construction_line.angle    2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.construction_line.bisector  2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.construction_line.horizontal  2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.construction_line.parallel  2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.construction_line.perpendicular  2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.construction_line.tangent_at  2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.construction_line.tangent_external  2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.construction_line.tangent_two  2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.construction_line.vertical 2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.copy                       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.cut                        2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -192,6 +199,7 @@ sketch.drag_end                   2D sketch only (the sketch solver and engine t
 sketch.draw.dimensioned           2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.drawing_bounds             2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.edit_text                  2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.equation_curve             2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.export_dxf                 2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.extend                     2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.fillet                     2D sketch only (the sketch solver and engine tests); no kernel operation

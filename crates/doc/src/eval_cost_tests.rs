@@ -1182,17 +1182,19 @@ fn a_cut_leaves_bodies_it_cannot_reach_as_they_were() {
     assert!(volume(&work.model, "Near") < 60_000.0 - 800.0, "and it is cut");
 }
 
-/// A cut still goes through the boolean wherever its tool reaches a body or comes close: on a
-/// face, along a line, a hair beside it, into a dome above its edge circle. (Bodies its tool
-/// cannot reach are left out of it: `a_cut_leaves_bodies_it_cannot_reach_as_they_were`.)
+/// A cut still goes through the boolean wherever its tool reaches a body: on a face, along a
+/// line, into a dome above its edge circle. The boxes are exact, so a tool clear of a body by
+/// more than their tolerances leaves it out. (Bodies its tool cannot reach are left out of it:
+/// `a_cut_leaves_bodies_it_cannot_reach_as_they_were`.)
 #[test]
 fn a_cut_still_runs_where_its_tool_touches_grazes_or_meets_a_curved_face() {
-    // A cylinder whose side is tangent to the face x = 50, one a hair clear of it, one 0.1 mm in.
-    for (x, cuts) in [(53.0, false), (53.0005, false), (52.9, true)] {
+    // A cylinder whose side is tangent to the face x = 50, one 0.5 µm clear of it (far past the
+    // bodies' tolerances, so left out), one 0.1 mm in.
+    for (x, cuts, boolean) in [(53.0, false, 1), (53.0005, false, 0), (52.9, true, 1)] {
         let mut doc = Document::new("graze");
         block(&mut doc, "A", Vec3::ZERO, [50.0, 40.0, 30.0]);
         let work = cut_work(&mut doc, cutter(Vec3::new(x, 20.0, 0.0), 3.0, 30.0));
-        assert_eq!(work.cut, 1, "the tool at x = {x} goes through the boolean");
+        assert_eq!(work.cut, boolean, "the tool at x = {x} goes through the boolean {boolean} time(s)");
         let v = volume(&work.model, "A");
         assert_eq!(v < 60_000.0 - 1.0, cuts, "the tool at x = {x} cuts material: {v}");
         assert!(!cuts || work.kept.is_empty(), "a body cut is a new body");

@@ -11,12 +11,12 @@
 solidcraft-cli::action_matrix::action_matrix_sample 2 baseline actions fail on SMLib: 2 shells (Bad Loop Orient on issue-616-lid-ribs; status 1001 on filleted-shelled-box, shelled again open at an inner wall)
 solidcraft-cli::naming_corpus::corpus_designs_name_alike_every_build_and_fail_where_a_reference_is_gone oracle/83-boundary-loop-thicken does not load: step 8, SMLib thicken status 1001
 solidcraft-doc::eval::chain_tests::a_propagated_chain_that_cannot_build_says_how_to_blend_the_edge_alone the propagated chain now builds a round (9 faces), so there is no refusal to read, on SMLib v1.1.0-alpha (a18bbe5), passed on f916a8d; cause being established
-solidcraft-doc::eval::cost_tests::a_cut_leaves_bodies_it_cannot_reach_as_they_were main's mesh-based version (#10303) not taken; the exact replacement is to come
-solidcraft-doc::eval::cost_tests::a_tap_marking_searches_only_the_bodies_near_it main's mesh-based version (#10303) not taken; the exact replacement is to come
-solidcraft-doc::eval::cost_tests::a_tap_marking_still_searches_the_bodies_within_its_reach main's mesh-based version (#10303) not taken; the exact replacement is to come
+solidcraft-doc::eval::cost_tests::a_tap_marking_searches_only_the_bodies_near_it main's mesh-based tap-marking cull (#10303, beyond_cylinder_reach) not taken; the exact replacement is to come
+solidcraft-doc::eval::cost_tests::a_tap_marking_still_searches_the_bodies_within_its_reach main's mesh-based tap-marking cull (#10303, beyond_cylinder_reach) not taken; the exact replacement is to come
 solidcraft-engine::cmd::file::tests::each_format_has_an_export_command_of_its_own SMLib meshes a box's planar faces into 124 triangles, not 12 (the STL is 6284 bytes, the test counts 84 + 50 x 12)
 solidcraft-engine::cmd::sketch_project::tests::intersection_curve_of_picked_faces_spans_the_whole_surface main's mesh-based version (#9107) not taken; the exact replacement is to come
 solidcraft-engine::extent_tests::cut_to_the_far_side_of_a_curved_wall main's mesh-based version (#8634) not taken; the exact replacement is to come
+solidcraft-engine::face_name_tests::a_join_that_makes_the_body_bigger_leaves_round_walls_it_never_touched_alone main's edge lookup by a stored point (#11286) finds the edge on the display mesh (edge_near on the body's mesh), not taken; the exact replacement is to come
 solidcraft-engine::hole_face_tests::a_hole_wider_than_the_part_says_it_removes_all_of_it a 40 mm hole at (10, 10) touches the plate's edge y = 30 at one point; SMLib parts the plate there into 2 bodies, the test wants truck's 1
 solidcraft-engine::measure_centre_tests::a_fillet_round_a_boss_reports_its_radius SMLib's round at the foot of a boss is not an analytic torus of minor radius 3, so no face of the body is (the test finds none to measure)
 solidcraft-engine::tests::fillet_fit_taper_closes_to_a_point SMLib fillet status 1001 on the taper fit (radius 16 closing to 0)
@@ -27,6 +27,7 @@ solidcraft-kernel::blend::corner_tests::corner_blends_hold_at_any_scale at 0.01x
 solidcraft-kernel::blend_corner::tests::a_round_next_to_a_round_of_another_radius the face count is 9, not the expected count, on SMLib v1.1.0-alpha (a18bbe5), passed on f916a8d; cause being established
 solidcraft-kernel::blend_corner::tests::issue2422_vertical_after_separate_bottom_rounds SMLib's check refuses the fillet: edge and vertex tolerance 0.97 against the body's 0.01 (#2422)
 solidcraft-kernel::blend_smlib::tests::smooth_edges_and_unfinished_tangent_chains_are_refused_saying_why the smooth edge builds (volume 7957.723) where a refusal is expected, on SMLib v1.1.0-alpha (a18bbe5), passed on f916a8d; cause being established
+solidcraft-kernel::blend_wrong_way_tests::a_chamfer_that_would_grow_the_part_on_a_convex_edge_is_refused SMLib refuses the chamfer for another reason first: status 1001, the picked edge runs on tangentially into an unblended edge (tangent_chain is on)
 solidcraft-kernel::corner_g2::tests::a_concave_corner_takes_the_g2_patch_too the concave G2 corner's curvature jump clear of the corners is 5.5e-2, above the bound, on SMLib v1.1.0-alpha (a18bbe5), passed on f916a8d; cause being established
 solidcraft-kernel::corner_g2::tests::a_long_setback_keeps_the_g2_patch_inside_the_box at set backs 11 to 15 the G2 corner patch bulges 2.6e-6 to 1.33e-3 past the box (the explicit corner is in progress)
 solidcraft-kernel::corner_g2::tests::curvature_rounds_meet_at_a_g2_corner the corner loop's fill misses its neighbours' curvature by 1.6e-3 (tolerance 1e-3), on SMLib v1.1.0-alpha (a18bbe5), passed on f916a8d; cause being established
