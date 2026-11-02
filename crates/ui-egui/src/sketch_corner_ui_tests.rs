@@ -293,10 +293,11 @@ fn retype(h: &mut crate::scenario::Harness, handle: &str, text: &str) {
 fn apply(h: &mut crate::scenario::Harness) {
     // Lay the window out once before reading its OK handle. An error line that wraps onto a
     // second row moves the button, and a click on the handle from the frame before then
-    // lands above it and commits nothing.
-    h.frames(2);
+    // lands above it and commits nothing. Settling rather than counting frames also lets the
+    // click's press and release, one pointer event per frame, reach the button whole.
+    h.settle();
     h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
-    h.frames(2);
+    h.settle();
 }
 
 /// Is there a point of the active sketch at `at`?
@@ -578,7 +579,15 @@ fn an_impossible_size_keeps_the_window_open_with_its_reason() {
     h.step(&json!({"start":"sketch.chamfer.equal_distance"})).unwrap();
     h.frames(2);
     h.step(&json!({"click":{"world":[0,0,0]}})).unwrap();
-    h.frames(2);
+    // The pick comes back through the input queue: let it land before typing, so the window is
+    // not left with nothing picked (OK is then refused as "select the corner to cut first").
+    h.settle();
+    assert_eq!(
+        h.app.dialog.as_ref().map(|d| crate::sketch_modify_ui::dialog_rows(&h.app.session, d).len()),
+        Some(1),
+        "the corner shows as one row: {:?}",
+        h.app.status
+    );
     for size in ["500", "0", "-3", "not a number"] {
         set_size(&mut h.app, size);
         apply(&mut h);
