@@ -47,7 +47,12 @@ pub(crate) fn solid_feature(objects: &[MeshObject], file: &str) -> Result<crate:
             .skip(i + 1)
             .all(|b| a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y || a.max.z < b.min.z || b.max.z < a.min.z)
     });
-    let separate = if disjoint { objects.iter().map(solid_object).collect::<Result<Vec<_>>>() } else { Err(invalid("overlapping colour groups")) };
+    let mut remaining = MAX_SOLID_TRIANGLES;
+    let separate = if disjoint {
+        objects.iter().map(|o| solid_object(o, &mut remaining)).collect::<Result<Vec<_>>>()
+    } else {
+        Err(invalid("overlapping colour groups"))
+    };
     match separate {
         Ok(parts) => {
             for (object, body) in objects.iter().zip(parts) {
@@ -72,7 +77,8 @@ pub(crate) fn solid_feature(objects: &[MeshObject], file: &str) -> Result<crate:
                 }
             }
             let name = std::path::Path::new(file).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "OSD".into());
-            bodies.push((name, solid_object(&merged)?));
+            remaining = MAX_SOLID_TRIANGLES;
+            bodies.push((name, solid_object(&merged, &mut remaining)?));
             warnings.push("OSD colour groups were joined to close the solid; individual face colours were not retained. Import with osd_mode=mesh to retain them.".into());
         }
     }
@@ -93,12 +99,59 @@ pub(crate) fn solid_feature(objects: &[MeshObject], file: &str) -> Result<crate:
     Ok(crate::MeshFeature { name: feature.name, kind: feature.kind, body_names: feature.body_names, warnings })
 }
 
-fn solid_object(object: &MeshObject) -> Result<solidcraft_kernel::Body> {
+fn solid_object(object: &MeshObject, remaining: &mut usize) -> Result<solidcraft_kernel::Body> {
     use solidcraft_kernel::{EdgeSpec, FaceSpec, SurfSpec};
-    let mesh = solidcraft_kernel::mesh_body(&object.positions, &object.triangles)?;
-    if !mesh.is_closed_mesh() {
-        return Err(invalid("the triangles do not form a closed manifold shell"));
+    if object.triangles.len() > *remaining {
+        return Err(invalid("solid reconstruction exceeds its triangle budget"));
     }
+    let mut mesh = solidcraft_kernel::mesh_body(&object.positions, &object.triangles)?;
+    if !mesh.is_closed_mesh() {
+        let (positions, triangles) = mesh.triangle_mesh().ok_or_else(|| invalid("missing triangle geometry"))?;
+        let tags: Vec<_> = (0..triangles.len()).map(|i| i as u32).collect();
+        let (v, t, tags) = crate::threemf::weld_tagged_bounded(positions, triangles, &tags, 1e-6, *remaining, 8_000_000)?;
+        let repaired = solidcraft_kernel::mesh_body(&v, &t)?;
+        if !repaired.is_closed_mesh() {
+            let mut edges = BTreeMap::<_, usize>::new();
+            for &[a, b, c] in triangles {
+                for (a, b) in [(a, b), (b, c), (c, a)] {
+                    *edges.entry((a.min(b), a.max(b))).or_default() += 1;
+                }
+            }
+            let open = edges.values().filter(|&&n| n == 1).count();
+            let multiple = edges.values().filter(|&&n| n > 2).count();
+            return Err(invalid(format!(
+                "the triangles do not form a closed manifold shell ({open} boundary edges, {multiple} edges shared by more than two triangles before repair); bounded seam repair could not close it"
+            )));
+        }
+        let mut retained = vec![false; triangles.len()];
+        for (face, tag) in t.iter().zip(tags) {
+            let [a, b, c] = face.map(|i| v.get(i as usize).copied());
+            let (Some(a), Some(b), Some(c)) = (a, b, c) else { return Err(invalid("invalid repaired triangle")) };
+            if (b - a).cross(c - a).len2() == 0. {
+                return Err(invalid("seam repair would collapse a triangle"));
+            }
+            let original = triangles.get(tag as usize).ok_or_else(|| invalid("missing repaired triangle source"))?;
+            let [p, q, r] = original.map(|i| positions.get(i as usize).copied());
+            let (Some(p), Some(q), Some(r)) = (p, q, r) else { return Err(invalid("invalid repair source")) };
+            if (b - a).cross(c - a).dot((q - p).cross(r - p)) <= 0. {
+                return Err(invalid("seam repair would invert a triangle"));
+            }
+            if let Some(kept) = retained.get_mut(tag as usize) {
+                *kept = true;
+            }
+        }
+        if retained.iter().any(|kept| !kept) {
+            return Err(invalid("seam repair would remove a triangle"));
+        }
+        let before = solidcraft_kernel::measure(&mesh)?.area;
+        let after = solidcraft_kernel::measure(&repaired)?.area;
+        if !before.is_finite() || !after.is_finite() || (after - before).abs() > (before * 1e-7).max(1e-6) {
+            return Err(invalid("seam repair changed the surface area"));
+        }
+        mesh = repaired;
+    }
+    let count = mesh.triangle_mesh().map_or(0, |(_, t)| t.len());
+    *remaining = remaining.checked_sub(count).ok_or_else(|| invalid("solid reconstruction exceeds its triangle budget"))?;
     // Prefer the existing certified prism reconstruction: it removes internal
     // triangulation edges and can recover analytic cylindrical walls.
     if let Ok(body) = solidcraft_kernel::convert_prismatic_mesh(&mesh, 0.001) {
@@ -122,7 +175,7 @@ fn solid_object(object: &MeshObject) -> Result<solidcraft_kernel::Body> {
     }
     let before = solidcraft_kernel::measure(&mesh)?.volume;
     let after = solidcraft_kernel::measure(&body)?.volume;
-    if !before.is_finite() || before <= 0. || (after - before).abs() > (before.abs() * 1e-7).max(1e-6) {
+    if !before.is_finite() || !after.is_finite() || before <= 0. || (after - before).abs() > (before.abs() * 1e-7).max(1e-6) {
         return Err(invalid("sewing changed the enclosed volume"));
     }
     Ok(body)
@@ -610,7 +663,7 @@ mod tests {
 
     #[test]
     fn mutations_never_panic() {
-        crate::mutate::survives("OSD", &crate::mutate::mutations(&square(6), false, 0x05d2), MAX_TRIANGLES, |b| {
+        solidcraft_testkit::survives("OSD", &solidcraft_testkit::mutations(&square(6), false, 0x05d2), MAX_TRIANGLES, |b| {
             read_osd(b, "mutation").ok().map(|(objects, _)| objects.iter().map(|o| o.triangles.len()).sum())
         });
     }
@@ -705,6 +758,69 @@ mod tests {
     }
 
     #[test]
+    fn osd_triangle_seams_are_stitched_without_capping_missing_faces() {
+        let mut source = pyramid();
+        source.positions.push(Vec3::new(5., 0., 0.));
+        source.triangles[2] = [0, 5, 4];
+        source.triangles.push([5, 1, 4]);
+        let mut budget = 15;
+        solid_object(&source, &mut budget).unwrap();
+        assert!(solid_object(&source, &mut budget).unwrap_err().to_string().contains("budget"));
+        let bytes = write_osd(&[source.clone()]).unwrap();
+        let raw = crate::mesh_import_feature_with_osd_mode(&bytes, "Seams.osd", OsdImportMode::Mesh).unwrap();
+        assert!(matches!(raw.kind, solidcraft_doc::FeatureKind::MeshImport { .. }));
+        let f = crate::mesh_import_feature_with_osd_mode(&bytes, "Seams.osd", OsdImportMode::Solid).unwrap();
+        let mut doc = solidcraft_doc::Document::new("Seams");
+        doc.add_feature(f.kind, Some(&f.name)).unwrap();
+        let mut model = solidcraft_doc::Model::new();
+        model.evaluate(&doc);
+        let state = model.state();
+        assert_eq!(state.bodies.len(), 1);
+        let body = &state.bodies[0].body;
+        assert!(!body.is_mesh());
+        assert!(body.validity().is_empty());
+        assert!((solidcraft_kernel::measure(body).unwrap().volume - 1000. / 3.).abs() < 1e-6);
+        let tool = solidcraft_kernel::box_solid(Vec3::new(-1., -1., 5.), Vec3::new(11., 11., 11.)).unwrap();
+        let edited = solidcraft_kernel::boolean(body, &tool, solidcraft_kernel::BoolOp::Cut).unwrap().unwrap();
+        assert!((solidcraft_kernel::measure(&edited).unwrap().volume - 875. / 3.).abs() < 1e-6);
+        let step = crate::export(&state, &[], crate::Format::Step, "Seams").unwrap();
+        let reopened = crate::step_import_feature(&step, "Seams.step").unwrap();
+        assert!((solidcraft_kernel::measure(&reopened.import.bodies[0].body).unwrap().volume - 1000. / 3.).abs() < 1e-6);
+        let mut first = source.clone();
+        let mut second = source.clone();
+        first.triangles.truncate(2);
+        second.triangles.drain(..2);
+        second.color = Some([1., 0., 0.]);
+        let bytes = write_osd(&[first, second]).unwrap();
+        let joined = crate::mesh_import_feature_with_osd_mode(&bytes, "Colour-seams.osd", OsdImportMode::Solid).unwrap();
+        assert!(joined.warnings.iter().any(|w| w.contains("face colours were not retained")));
+        source.triangles.remove(3);
+        let bytes = write_osd(&[source]).unwrap();
+        assert!(crate::mesh_import_feature_with_osd_mode(&bytes, "Hole.osd", OsdImportMode::Solid).is_err());
+        let auto = crate::mesh_import_feature(&bytes, "Hole.osd").unwrap();
+        assert!(matches!(auto.kind, solidcraft_doc::FeatureKind::MeshImport { .. }));
+        assert!(auto.warnings.iter().any(|w| w.contains("boundary edges")));
+    }
+
+    #[test]
+    fn osd_seam_tolerance_does_not_bridge_large_gaps_or_erase_thin_faces() {
+        for (gap, succeeds) in [(5e-7, true), (0.01, false)] {
+            let mut source = pyramid();
+            source.positions.push(Vec3::new(gap, 0., 0.));
+            source.triangles[2][0] = 5;
+            let bytes = write_osd(&[source]).unwrap();
+            let f = crate::mesh_import_feature_with_osd_mode(&bytes, "Gap.osd", OsdImportMode::Solid);
+            assert_eq!(f.is_ok(), succeeds);
+        }
+        let mut thin = pyramid();
+        thin.positions.push(Vec3::new(5e-7, 0., 0.));
+        thin.triangles[2] = [0, 5, 4];
+        thin.triangles.push([5, 1, 4]);
+        let error = solid_feature(&[thin], "Thin.osd").err().unwrap().to_string();
+        assert!(error.contains("remove a triangle"), "{error}");
+    }
+
+    #[test]
     fn non_prismatic_osd_opens_as_editable_solid_and_survives_cold_reopen() {
         use solidcraft_kernel::{BoolOp, boolean, box_solid, measure};
         let source = pyramid();
@@ -774,10 +890,17 @@ mod tests {
             MeshObject { name: "Box".into(), positions: mesh.positions, triangles: mesh.triangles, color: Some(color), ..Default::default() }
         };
         let outer = box_mesh(Vec3::ZERO, Vec3::new(10., 10., 10.), [0., 1., 0.]);
-        for colour in [[0., 1., 0.], [1., 0., 0.]] {
+        for (colour, seam) in [([0., 1., 0.], false), ([1., 0., 0.], false), ([0., 1., 0.], true), ([1., 0., 0.], true)] {
             let mut inner = box_mesh(Vec3::new(2., 2., 2.), Vec3::new(8., 8., 8.), colour);
             for t in &mut inner.triangles {
                 t.swap(1, 2);
+            }
+            if seam {
+                let [a, b, c] = inner.triangles[0];
+                let mid = inner.positions.len() as u32;
+                inner.positions.push((inner.positions[a as usize] + inner.positions[b as usize]) * 0.5);
+                inner.triangles[0] = [a, mid, c];
+                inner.triangles.push([mid, b, c]);
             }
             let bytes = write_osd(&[outer.clone(), inner]).unwrap();
             let feature = crate::mesh_import_feature_with_osd_mode(&bytes, "Hollow.osd", OsdImportMode::Solid).unwrap();

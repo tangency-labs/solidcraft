@@ -23,6 +23,16 @@ sketches, dimensions, feature history, machining operations or assembly semantic
 curved regions can remain faceted, and operations such as fillets depend on that
 topology and the kernel's capabilities. Save new editing history as `.sc`.
 
+Before refusing an open mesh, import tries the existing tessellation seam repair:
+vertices within 0.000001 mm may be joined and triangle sides subdivided at existing
+vertices within 0.000004 mm. Missing faces are never capped. Repair is refused if
+an original triangle disappears, collapses or reverses, or surface area changes
+by more than max(0.000001 mm², 0.00001%). It has an eight-million-comparison budget
+and the same 20,000-triangle output limit. Already closed meshes and explicit
+`mesh` imports bypass repair. Unresolved shell warnings include the original
+boundary-edge and non-manifold-edge counts; larger gaps still require a corrected
+source model. Auto fallback keeps the original parsed mesh, not a partial repair.
+
 Reconstruction is bounded to 20,000 triangles per file. If geometry is open,
 non-manifold, too detailed or cannot pass the reconstruction checks, **Auto keeps
 the mesh and reports why**, rather than inventing missing faces. The `osd_mode`

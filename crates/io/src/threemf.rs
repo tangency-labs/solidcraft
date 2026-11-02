@@ -135,6 +135,27 @@ pub fn weld(positions: &[Vec3], triangles: &[[u32; 3]], eps: f64) -> (Vec<Vec3>,
 /// [`weld`] keeping a tag per triangle (pieces of a split triangle keep its tag; missing tags
 /// are 0).
 pub fn weld_tagged(positions: &[Vec3], triangles: &[[u32; 3]], tags: &[u32], eps: f64) -> (Vec<Vec3>, Vec<[u32; 3]>, Vec<u32>) {
+    weld_tagged_bounded(positions, triangles, tags, eps, usize::MAX, usize::MAX)
+        .unwrap_or_else(|_| (positions.to_vec(), triangles.to_vec(), (0..triangles.len()).map(|i| tags.get(i).copied().unwrap_or(0)).collect()))
+}
+
+/// Import repair must bound both candidate comparisons and output before allocation.
+pub(crate) fn weld_tagged_bounded(
+    positions: &[Vec3],
+    triangles: &[[u32; 3]],
+    tags: &[u32],
+    eps: f64,
+    max_triangles: usize,
+    mut checks: usize,
+) -> Result<(Vec<Vec3>, Vec<[u32; 3]>, Vec<u32>)> {
+    let budget = || IoError::Invalid("mesh seam repair exceeds its work or triangle budget".into());
+    if triangles.len() > max_triangles || positions.len() > max_triangles.saturating_mul(3) {
+        return Err(budget());
+    }
+    if !eps.is_finite() || eps <= 0. || positions.iter().any(|p| !p.is_finite()) || triangles.iter().flatten().any(|&i| i as usize >= positions.len())
+    {
+        return Err(IoError::Invalid("invalid mesh seam repair input".into()));
+    }
     // Merge on a grid of cell `eps` (a vertex joins one already in its own or a neighbour cell).
     let cell = |p: Vec3| [(p.x / eps).round() as i64, (p.y / eps).round() as i64, (p.z / eps).round() as i64];
     let mut grid: HashMap<[i64; 3], Vec<u32>> = HashMap::new();
@@ -147,6 +168,7 @@ pub fn weld_tagged(positions: &[Vec3], triangles: &[[u32; 3]], tags: &[u32], eps
             for dy in -1..=1 {
                 for dz in -1..=1 {
                     for &i in grid.get(&[c[0].saturating_add(dx), c[1].saturating_add(dy), c[2].saturating_add(dz)]).into_iter().flatten() {
+                        checks = checks.checked_sub(1).ok_or_else(budget)?;
                         if verts.get(i as usize).is_some_and(|q| q.dist(*p) <= eps) {
                             found = Some(i);
                             break 'search;
@@ -189,6 +211,7 @@ pub fn weld_tagged(positions: &[Vec3], triangles: &[[u32; 3]], tags: &[u32], eps
         let mut cand: Vec<u32> = open.iter().flat_map(|(a, b)| [*a, *b]).collect();
         cand.sort_unstable();
         cand.dedup();
+        checks = checks.checked_sub(open.len().checked_mul(cand.len()).ok_or_else(budget)?).ok_or_else(budget)?;
         // Vertices on each open side, ordered from its start.
         let mut splits: HashMap<(u32, u32), Vec<(f64, u32)>> = HashMap::new();
         for &(a, b) in &open {
@@ -215,7 +238,11 @@ pub fn weld_tagged(positions: &[Vec3], triangles: &[[u32; 3]], tags: &[u32], eps
         if splits.is_empty() {
             break;
         }
-        let mut next = Vec::with_capacity(tris.len() + splits.len() * 2);
+        let count = tris.iter().try_fold(0usize, |n, t| {
+            let split = [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])].iter().find_map(|edge| splits.get(edge));
+            n.checked_add(1 + split.map_or(0, Vec::len)).filter(|&n| n <= max_triangles).ok_or_else(budget)
+        })?;
+        let mut next = Vec::with_capacity(count);
         let mut next_tags = Vec::with_capacity(next.capacity());
         for (t, tag) in tris.iter().zip(&tags) {
             // Rotate so the split side (if any) is (t0, t1); split one side per pass.
@@ -240,7 +267,7 @@ pub fn weld_tagged(positions: &[Vec3], triangles: &[[u32; 3]], tags: &[u32], eps
         tris = next;
         tags = next_tags;
     }
-    (verts, tris, tags)
+    Ok((verts, tris, tags))
 }
 
 /// The model part's XML.
@@ -1635,5 +1662,22 @@ pub(crate) mod tests {
         let triangles = [[0, 2, 1], [0, 1, 3], [1, 2, 3], [2, 0, 3]];
         let (v, t) = weld(&positions, &triangles, 1e-7);
         assert_eq!((v.len(), t.len()), (4, 4));
+    }
+
+    #[test]
+    fn bounded_weld_preserves_tags_and_refuses_growth_and_work_before_allocation() {
+        let v = [Vec3::ZERO, Vec3::new(2., 0., 0.), Vec3::new(0., 2., 0.), Vec3::new(1., 0., 0.), Vec3::new(1., -1., 0.)];
+        let t = [[0, 1, 2], [1, 3, 4], [3, 0, 4]];
+        let (p, faces, tags) = weld_tagged_bounded(&v, &t, &[7, 8, 9], 1e-6, 4, 1000).unwrap();
+        assert_eq!(faces.len(), 4);
+        assert_eq!(tags, [7, 7, 8, 9]);
+        assert_eq!(weld(&v, &t, 1e-6), (p.clone(), faces.clone()));
+        assert_eq!(weld(&p, &faces, 1e-6), (p, faces));
+        assert!(weld_tagged_bounded(&v, &t, &[], 1e-6, 3, 1000).unwrap_err().to_string().contains("budget"));
+        assert!(weld_tagged_bounded(&v, &t, &[], 1e-6, 4, 0).unwrap_err().to_string().contains("budget"));
+        for eps in [0., -1., f64::NAN, f64::INFINITY] {
+            assert!(weld_tagged_bounded(&v, &t, &[], eps, 4, 1000).is_err());
+        }
+        assert!(weld_tagged_bounded(&v, &[[0, 1, 99]], &[], 1e-6, 4, 1000).is_err());
     }
 }
