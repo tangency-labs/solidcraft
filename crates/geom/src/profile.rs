@@ -601,6 +601,32 @@ impl Seg2 {
             }
         }
     }
+    /// Map segment control/sample points by a 2D function `f(p)`.
+    pub fn map_points(&self, f: &impl Fn(Vec2) -> Vec2) -> Seg2 {
+        match *self {
+            Seg2::Line { a, b } => Seg2::Line { a: f(a), b: f(b) },
+            Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic { p0: f(p0), p1: f(p1), p2: f(p2), p3: f(p3) },
+            Seg2::Conic { a, apex, b, w } => Seg2::Conic { a: f(a), apex: f(apex), b: f(b), w },
+            Seg2::Bezier { n, p } => {
+                let mut np = p;
+                for i in 0..=(n as usize).min(MAX_BEZIER_DEGREE) {
+                    np[i] = f(p[i]);
+                }
+                Seg2::Bezier { n, p: np }
+            }
+            Seg2::Arc { center, radius, start, sweep } => {
+                // If f is an affine or near-affine map, convert arc to cubic Bézier approximation before mapping
+                let p0 = center + Vec2::from_angle(start) * radius;
+                let p3 = center + Vec2::from_angle(start + sweep) * radius;
+                let k = 4.0 / 3.0 * (sweep / 4.0).tan() * radius;
+                let t0 = Vec2::from_angle(start).perp() * sweep.signum();
+                let t3 = Vec2::from_angle(start + sweep).perp() * sweep.signum();
+                let p1 = p0 + t0 * k;
+                let p2 = p3 - t3 * k;
+                Seg2::Cubic { p0: f(p0), p1: f(p1), p2: f(p2), p3: f(p3) }
+            }
+        }
+    }
 }
 
 /// A closed loop of segments, each starting where the previous one ends.
@@ -680,6 +706,10 @@ impl Loop2 {
             c += (*p + *q) * k;
         }
         if a2.abs() < 1e-15 { poly.first().copied().unwrap_or_default() } else { c / (3.0 * a2) }
+    }
+    /// Transform all boundary curves by a 2D mapping function `f(p)`.
+    pub fn map_points(&self, f: &impl Fn(Vec2) -> Vec2) -> Loop2 {
+        Loop2 { segs: self.segs.iter().map(|s| s.map_points(f)).collect() }
     }
     /// Closed within `tol`?
     pub fn is_closed(&self, tol: f64) -> bool {
@@ -876,6 +906,10 @@ impl Region2 {
             a -= ah;
         }
         if a.abs() < 1e-15 { self.outer.centroid() } else { c / a }
+    }
+    /// Transform all boundary curves by a 2D mapping function `f(p)`.
+    pub fn map_points(&self, f: &impl Fn(Vec2) -> Vec2) -> Region2 {
+        Region2 { outer: self.outer.map_points(f), holes: self.holes.iter().map(|h| h.map_points(f)).collect() }
     }
 }
 

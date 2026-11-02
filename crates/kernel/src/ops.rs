@@ -1851,7 +1851,14 @@ where
                 record(event);
                 return Ok(None);
             }
-            Err(e) => last = format!("{last}; nudged: {e}"),
+            Err(e) => {
+                let e_msg = e.to_string();
+                if e_msg.contains(&last) {
+                    last = format!("{last}; nudge failed with same error");
+                } else {
+                    last = format!("{last}; nudged: {e_msg}");
+                }
+            }
         }
     }
     // A join whose coincident planar faces cannot be pushed apart because the neighbours of one of them curve (a flange

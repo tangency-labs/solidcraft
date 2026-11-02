@@ -175,7 +175,10 @@ pub use continuity::{
 pub use corner_g2::{corner_g2_patch, seam_error};
 pub use delete_face::delete_faces;
 pub use distance::{BodyDistance, DistanceShape, body_distance};
-pub use emboss::{cylinder_emboss_anchor, emboss_cylinder, emboss_cylinder_at, has_cylinder_emboss_wall, infer_cylinder_emboss};
+pub use emboss::{
+    cylinder_emboss_anchor, emboss_anchor, emboss_cylinder, emboss_cylinder_at, emboss_project, emboss_project_face, emboss_project_mapped,
+    emboss_project_mapped_face, has_cylinder_emboss_wall, infer_cylinder_emboss,
+};
 pub use fair::{
     FairCurve, FairNet, FairOptions, FairReport, MAX_FAIR_ITERATIONS, MAX_FAIR_POINTS, fair_bspline_curve, fair_bspline_surface, fair_curve,
     fair_faces, fair_net, fair_nurbs_curve, fair_nurbs_surface, fair_surface,
@@ -214,8 +217,8 @@ pub use surface_ruled::{Ruled, RuledCorners, RuledMode, ruled_surface};
 pub use surface_trim::{TrimKeep, mutual_trim, trim, trim_keep};
 pub use surface_untrim::{UntrimHoles, untrim};
 pub use surfaces::{
-    copy_faces, extend, extrude_sheet, loft_sheet, loft_sheet_with_rails, patch_edges, patch_region, remove_faces, reverse_faces, revolve_sheet,
-    stitch, sweep_sheet, sweep_sheet_points, sweep_sheet_points_with, sweep_sheet_with, thicken, unstitch,
+    copy_face_indices, copy_faces, extend, extrude_sheet, loft_sheet, loft_sheet_with_rails, patch_edges, patch_region, remove_faces, reverse_faces,
+    revolve_sheet, stitch, sweep_sheet, sweep_sheet_points, sweep_sheet_points_with, sweep_sheet_with, thicken, thicken_between, unstitch,
 };
 pub use sweep_path::{RailFit, SweepControl, SweepOrientation, sweep_path, sweep_path_with};
 pub use topo::{CylinderFace, cylinder_end_at, cylinder_face, cylinder_face_at};
