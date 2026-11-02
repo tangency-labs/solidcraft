@@ -1375,7 +1375,7 @@
   "dialog.selection_external_curve": "{sketch} · منحنى {id}",
   "dialog.selection_guidance": "حدد مُدخلًا لتغييره. انقر على العناصر المحددة لإزالتها؛ Ctrl/Cmd مع النقر يبدّل تحديدها أيضًا. راجع المعاينة ثم اضغط موافق.",
   "dialog.selection_midpoint": "نقطة المنتصف · {id}",
-  "dialog.selection_profile": "{sketch} · المقطع {number}",
+  "dialog.selection_profile": "{sketch} · مقطع {number}",
   "dialog.selection_step": "{step} من {total}: حدد {input}",
   "dialog.step": "الخطوة",
   "document.changed_on_disk": "تغيّر {name} على القرص",
