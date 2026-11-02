@@ -1400,6 +1400,83 @@ fn models_reply(current: &str) -> Event {
     Event::Models { current: current.into(), available: vec![m("fast"), m("smart")] }
 }
 
+/// An endpoint's listing whose ids read `vendor/model` and whose names (the descriptions here) read
+/// `Vendor: Model`, as OpenRouter's, names its providers; the rows then read the model's name with
+/// the id as the tooltip. One vendor is one flat list.
+#[test]
+fn an_endpoints_vendor_named_listing_names_its_providers() {
+    let m = |id: &str, description: &str| acp::ModelInfo { id: id.into(), name: id.into(), description: description.into() };
+    assert_eq!(model_provider(&m("openai/gpt-6.1-terra", "OpenAI: GPT-6.1 Terra")), Some(("OpenAI".into(), "GPT-6.1 Terra".into())));
+    assert_eq!(model_provider(&m("openai/gpt-6.1-terra", "OpenAI: GPT-6.1 Terra\nmore")), Some(("OpenAI".into(), "GPT-6.1 Terra".into())));
+    assert_eq!(model_provider(&m("gpt-6.1-terra", "OpenAI: GPT-6.1 Terra")), None, "no vendor in the id");
+    assert_eq!(model_provider(&m("openai/gpt-6.1-terra", "OpenAI: ")), None, "no name");
+    assert_eq!(model_provider(&m("openai/gpt-6.1-terra", "")), None);
+    assert_eq!(
+        model_provider(&m("openai/gpt-6.1-terra", "Provider: Host • current")),
+        Some(("Host".into(), "openai/gpt-6.1-terra".into())),
+        "an agent's own word first"
+    );
+    let rows = model_rows(&[m("openai/gpt-6.1-terra", "OpenAI: GPT-6.1 Terra"), m("qwen/qwen3.8-flash", "Qwen: Qwen3.8 Flash"), m("free-model", "")]);
+    assert_eq!(
+        rows,
+        [
+            ("GPT-6.1 Terra".to_string(), Some("OpenAI".to_string()), "openai/gpt-6.1-terra".to_string()),
+            ("Qwen3.8 Flash".to_string(), Some("Qwen".to_string()), "qwen/qwen3.8-flash".to_string()),
+            ("free-model".to_string(), Some(tr("ui.agent_chat_provider_other").to_string()), String::new()),
+        ]
+    );
+    let rows = model_rows(&[m("openai/gpt-6.1-terra", "OpenAI: GPT-6.1 Terra"), m("openai/gpt-5.6-luna", "OpenAI: GPT-5.6 Luna")]);
+    assert_eq!(rows[0], ("openai/gpt-6.1-terra".to_string(), None, "OpenAI: GPT-6.1 Terra".to_string()), "one vendor is one flat list");
+}
+
+/// Models from several providers fold under their providers inside the picker: the current model's
+/// provider is open and the others folded; a header opens or folds its group; a typed search opens
+/// every group with a match but one folded by hand; the provider asked for over the control channel
+/// is open at the next opening.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_header_groups_models_by_provider_and_folds_them() {
+    use crate::scenario::handle_at;
+    let mut h = narrow_chat();
+    let script = Script::default();
+    h.app.agent_chat.backend = Some(Box::new(script.clone()));
+    h.app.agent_chat.state = Some(State::Ready);
+    h.app.agent_chat.running_id = "claude".into();
+    let m = |id: &str, name: &str| acp::ModelInfo { id: id.into(), name: name.into(), description: String::new() };
+    script.report(Event::Models {
+        current: "a".into(),
+        available: vec![m("a", "Host · Alpha"), m("c", "Nous Portal · Gamma"), m("b", "Host · Beta"), m("d", "Nous Portal · Delta")],
+    });
+    h.frames(4);
+    assert!(handle_at("agent_chat:provider").is_none(), "no provider drop-down of its own");
+    h.step(&json!({"click": {"handle": "agent_chat:model"}})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:group:Host").is_some() && handle_at("agent_chat:model:group:Nous Portal").is_some());
+    assert!(handle_at("agent_chat:model:a").is_some() && handle_at("agent_chat:model:b").is_some(), "the current model's provider is open");
+    assert!(handle_at("agent_chat:model:c").is_none() && handle_at("agent_chat:model:d").is_none(), "the other provider is folded");
+    h.step(&json!({"click": {"handle": "agent_chat:model:group:Nous Portal"}})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:c").is_some(), "a header opens its group");
+    h.step(&json!({"click": {"handle": "agent_chat:model:group:Host"}})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:a").is_none(), "and folds it");
+    h.step(&json!({"text": "ta"})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:b").is_none(), "a fold made by hand stays while searching, Beta or not");
+    assert!(handle_at("agent_chat:model:d").is_some() && handle_at("agent_chat:model:c").is_none(), "Delta matches, Gamma does not");
+    h.step(&json!({"click": {"handle": "agent_chat:model:d"}})).unwrap();
+    h.frames(3);
+    assert_eq!(script.calls(), ["set_model: d"]);
+    assert_eq!(h.app.agent_chat.model, "d");
+    assert!(handle_at("agent_chat:model:search").is_none(), "a choice closes it");
+
+    control(&mut h.app, &h.ctx, &json!({"provider": "Host"})).unwrap();
+    h.step(&json!({"click": {"handle": "agent_chat:model"}})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:a").is_some(), "the provider asked for is open");
+    assert!(handle_at("agent_chat:model:d").is_some(), "and the current model's");
+}
+
 /// Choosing a model tells the agent, shows it as current and remembers it for this agent; a model
 /// the agent did not offer is ignored.
 #[test]
@@ -1421,6 +1498,388 @@ fn choosing_a_model_sets_it_and_remembers_it() {
     poll(&mut app, &ctx);
     assert_eq!(app.agent_chat.model, "fast");
     assert_eq!(app.agent_chat.models.len(), 2, "the list stays");
+}
+
+/// A scripted endpoint: its agent is configured, and it is running with these models.
+#[cfg(not(target_arch = "wasm32"))]
+fn endpoint_with_script() -> (SolveApp, Script, egui::Context) {
+    let (mut app, script, ctx) = app_with_script();
+    let endpoint = "http://localhost:11434/v1";
+    app.agent_chat.running_id = "api-1".into();
+    app.agent_chat.running_endpoint = endpoint.into();
+    app.preferences.agents.push(agents::AgentConfig {
+        id: "api-1".into(),
+        kind: agents::Kind::Api,
+        base_url: endpoint.into(),
+        model: "fast".into(),
+        ..Default::default()
+    });
+    script.report(models_reply("fast"));
+    poll(&mut app, &ctx);
+    (app, script, ctx)
+}
+
+/// A typed model goes straight to an endpoint, joins the list for the next connection and becomes
+/// the agent's default.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_typed_model_goes_to_an_endpoint_and_is_remembered() {
+    let (mut app, script, _ctx) = endpoint_with_script();
+    assert!(custom_models_accepted(&app));
+    assert!(set_custom_model(&mut app, "  openai/gpt-x "));
+    assert_eq!(script.calls(), ["set_model: openai/gpt-x"]);
+    assert_eq!(app.agent_chat.models.first().map(|m| m.id.as_str()), Some("openai/gpt-x"));
+    assert_eq!(app.agent_chat.models_cache.get("http://localhost:11434/v1").and_then(|l| l.first()).map(|m| m.id.as_str()), Some("openai/gpt-x"));
+    assert_eq!(app.preferences.agents.iter().find(|a| a.id == "api-1").unwrap().model, "openai/gpt-x");
+    assert_eq!(app.preferences.agent_models.get("api-1").map(String::as_str), Some("openai/gpt-x"));
+    assert_eq!(status(&app)["model"], "openai/gpt-x");
+    assert_eq!(status(&app)["customModels"], true);
+    let listed = app.agent_chat.models.len();
+    assert!(set_custom_model(&mut app, "smart"));
+    assert_eq!(app.agent_chat.models.len(), listed, "a listed id goes the usual way");
+    assert_eq!(app.agent_chat.model, "smart");
+}
+
+/// A typed model is only sent when it could be a model at all, and the list stays within its cap.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_typed_model_that_cannot_be_one_is_not_sent() {
+    let (mut app, script, _ctx) = endpoint_with_script();
+    for text in ["", "   ", "x".repeat(MODEL_ID_CAP + 1).as_str(), "bell\u{7}", "two\nlines"] {
+        assert!(!set_custom_model(&mut app, text), "{text:?}");
+    }
+    assert!(script.calls().is_empty());
+    assert!(set_custom_model(&mut app, &"x".repeat(MODEL_ID_CAP)));
+    app.agent_chat.models =
+        (0..MODEL_LIST_CAP).map(|i| acp::ModelInfo { id: format!("m{i}"), name: String::new(), description: String::new() }).collect();
+    assert!(set_custom_model(&mut app, "one-more"));
+    assert_eq!(app.agent_chat.models.len(), MODEL_LIST_CAP);
+    assert_eq!(app.agent_chat.models.first().map(|m| m.id.as_str()), Some("one-more"));
+}
+
+/// An agent with a model option gets a typed model through it. Nothing changes until it answers,
+/// and a refusal leaves the old model with the agent's reason in the chat.
+#[test]
+fn a_typed_model_is_sent_to_a_modern_agent_and_a_rejection_keeps_the_old_one() {
+    let (mut app, script, ctx) = app_with_script();
+    app.agent_chat.running_id = "modern".into();
+    script.report(Event::ConfigOptions(modern_options("fast")));
+    poll(&mut app, &ctx);
+    assert!(custom_models_accepted(&app));
+    assert!(set_custom_model(&mut app, "claude-x"));
+    assert_eq!(script.calls(), ["set_config_option: some.provider.model=claude-x"]);
+    assert!(app.agent_chat.config_pending);
+    assert_eq!(app.agent_chat.model, "fast");
+    assert!(!set_custom_model(&mut app, "claude-y"), "one request at a time");
+
+    script.report(Event::ConfigOptionFinished { id: "some.provider.model".into(), result: Err("no such model".into()) });
+    poll(&mut app, &ctx);
+    assert!(!app.agent_chat.config_pending);
+    assert_eq!(app.agent_chat.model, "fast");
+    assert!(
+        app.agent_chat
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Notice { text, error: true } if text.contains("claude-x") && text.contains("no such model"))),
+        "the notice names the model and the reason"
+    );
+    assert!(!app.preferences.agent_models.contains_key("modern"));
+    assert_eq!(app.agent_chat.typed_model, None);
+
+    // An agent that takes it says so in its snapshot, and that is what is remembered.
+    assert!(set_custom_model(&mut app, "claude-x"));
+    script.report(Event::ConfigOptionFinished { id: "some.provider.model".into(), result: Ok(modern_options("claude-x")) });
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.model, "claude-x");
+    assert_eq!(app.preferences.agent_models.get("modern").map(String::as_str), Some("claude-x"));
+}
+
+/// A legacy agent shows a typed model at once; a refusal puts everything back and says why.
+#[test]
+fn a_typed_model_is_sent_to_a_legacy_agent_and_a_rejection_reverts_it() {
+    let (mut app, script, ctx) = app_with_script();
+    app.agent_chat.running_id = "claude".into();
+    app.preferences.agent_models.insert("claude".into(), "fast".into());
+    script.report(models_reply("fast"));
+    poll(&mut app, &ctx);
+    assert!(set_custom_model(&mut app, "zzz"));
+    assert_eq!(script.calls(), ["set_model: zzz"]);
+    assert_eq!(app.agent_chat.model, "zzz");
+    assert_eq!(app.preferences.agent_models.get("claude").map(String::as_str), Some("zzz"));
+
+    script.report(Event::ModelRejected("no such model".into()));
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.model, "fast");
+    assert_eq!(app.agent_chat.models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["fast", "smart"]);
+    assert_eq!(app.preferences.agent_models.get("claude").map(String::as_str), Some("fast"));
+    assert!(
+        app.agent_chat
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Notice { text, error: true } if text.contains("zzz") && text.contains("no such model"))),
+        "the notice names the model and the reason"
+    );
+
+    // A listed model the agent refuses goes back too, and nothing was remembered before it here.
+    app.preferences.agent_models.remove("claude");
+    set_model(&mut app, "smart");
+    script.report(Event::ModelRejected("x".repeat(MODELS_NOTE_CAP * 2)));
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.model, "fast");
+    assert_eq!(app.agent_chat.models.len(), 2);
+    assert!(!app.preferences.agent_models.contains_key("claude"));
+    let Some(Item::Notice { text, .. }) = app.agent_chat.items.last() else { panic!("no notice") };
+    assert_eq!(text.chars().count(), MODELS_NOTE_CAP);
+
+    // The agent confirming its model ends the wait: a later refusal has nothing to put back.
+    assert!(set_custom_model(&mut app, "zzz"));
+    script.report(Event::Models { current: "zzz".into(), available: vec![] });
+    script.report(Event::ModelRejected("late".into()));
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.model, "zzz");
+}
+
+/// An agent that lists no models and has no model option cannot be sent one; a stopped one neither.
+#[test]
+fn an_agent_without_models_takes_no_typed_model() {
+    let (mut app, script, ctx) = app_with_script();
+    app.agent_chat.running_id = "other".into();
+    script.report(Event::Ready { agent: "fake".into(), images: false });
+    poll(&mut app, &ctx);
+    assert!(!custom_models_accepted(&app));
+    assert_eq!(status(&app)["customModels"], false);
+    assert!(!set_custom_model(&mut app, "zzz"));
+    assert!(script.calls().is_empty());
+    script.report(Event::ConfigOptions(vec![]));
+    poll(&mut app, &ctx);
+    assert!(!custom_models_accepted(&app), "its options name no model");
+
+    let (mut app, script, ctx) = app_with_script();
+    script.report(models_reply("fast"));
+    poll(&mut app, &ctx);
+    assert!(custom_models_accepted(&app));
+    app.agent_chat.backend = None;
+    assert!(!custom_models_accepted(&app));
+    assert!(!set_custom_model(&mut app, "zzz"));
+}
+
+/// The control channel's `model`: a listed one as before, an unlisted one when the agent takes
+/// typed models, otherwise ignored as before.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_control_channel_sends_an_unlisted_model_where_it_can_go() {
+    let (mut app, script, ctx) = endpoint_with_script();
+    let reply = control(&mut app, &ctx, &json!({"model": "smart"})).unwrap();
+    assert_eq!(reply["model"], "smart");
+    let reply = control(&mut app, &ctx, &json!({"model": "unlisted"})).unwrap();
+    assert_eq!(reply["model"], "unlisted");
+    assert_eq!(reply["customModels"], true);
+    assert_eq!(reply["modelsNote"], Value::Null);
+    assert_eq!(script.calls(), ["set_model: smart", "set_model: unlisted"]);
+
+    let (mut app, script, ctx) = app_with_script();
+    let reply = control(&mut app, &ctx, &json!({"model": "unlisted"})).unwrap();
+    assert_eq!(reply["model"], "");
+    assert_eq!(reply["customModels"], false);
+    assert!(script.calls().is_empty());
+}
+
+/// The header's picker on an agent that lists models: it searches, a row chooses, and what was typed
+/// can be chosen too. The control and the popup stay in a narrow chat's window.
+#[test]
+fn the_header_model_picker_searches_and_takes_a_typed_model() {
+    use crate::scenario::{handle_at, rect_of};
+    let mut h = narrow_chat();
+    let script = Script::default();
+    h.app.agent_chat.backend = Some(Box::new(script.clone()));
+    h.app.agent_chat.state = Some(State::Ready);
+    h.app.agent_chat.running_id = "claude".into();
+    script.report(models_reply("fast"));
+    h.frames(4);
+    let panel = rect_of("agent_chat:panel").expect("the panel");
+    let control = rect_of("agent_chat:model").expect("the picker");
+    assert!(control.left() >= panel.left() && control.right() <= panel.right(), "{control:?} in {panel:?}");
+    assert!(handle_at("agent_chat:model:search").is_none(), "closed");
+
+    h.step(&json!({"click": {"handle": "agent_chat:model"}})).unwrap();
+    h.frames(3);
+    for name in ["search", "fast", "smart"] {
+        assert!(handle_at(&format!("agent_chat:model:{name}")).is_some(), "{name}");
+    }
+    assert!(handle_at("agent_chat:model:custom").is_none(), "nothing typed");
+    let search = rect_of("agent_chat:model:search").expect("the search box");
+    assert!(search.left() >= 0.0 && search.right() <= 1600.0, "inside the harness's window: {search:?}");
+
+    h.step(&json!({"text": "SMA"})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:fast").is_none() && handle_at("agent_chat:model:smart").is_some());
+    assert!(handle_at("agent_chat:model:custom").is_some(), "the typed text is not a listed model");
+    h.step(&json!({"click": {"handle": "agent_chat:model:smart"}})).unwrap();
+    h.frames(3);
+    assert_eq!(script.calls(), ["set_model: smart"]);
+    assert_eq!(h.app.agent_chat.model, "smart");
+    assert!(handle_at("agent_chat:model:search").is_none(), "a choice closes it");
+
+    h.step(&json!({"click": {"handle": "agent_chat:model"}})).unwrap();
+    h.frames(3);
+    h.step(&json!({"text": "zzz"})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click": {"handle": "agent_chat:model:custom"}})).unwrap();
+    h.frames(3);
+    assert_eq!(script.calls(), ["set_model: smart", "set_model: zzz"]);
+    assert_eq!(h.app.agent_chat.model, "zzz");
+    disconnect(&mut h.app);
+}
+
+/// The picker on an agent with a model option goes by the same names. A row and a typed model both
+/// go through the option, and other options stay plain dropdowns.
+#[test]
+fn the_header_model_option_searches_and_takes_a_typed_model() {
+    use crate::scenario::handle_at;
+    let mut h = narrow_chat();
+    let script = Script::default();
+    h.app.agent_chat.backend = Some(Box::new(script.clone()));
+    h.app.agent_chat.state = Some(State::Ready);
+    script.report(Event::ConfigOptions(modern_options("fast")));
+    h.frames(4);
+    assert_eq!(handle_at("agent_chat:model"), handle_at("agent_chat:config:some.provider.model"));
+
+    h.step(&json!({"click": {"handle": "agent_chat:model"}})).unwrap();
+    h.frames(3);
+    for name in ["search", "fast", "smart"] {
+        assert!(handle_at(&format!("agent_chat:model:{name}")).is_some(), "{name}");
+        assert_eq!(handle_at(&format!("agent_chat:model:{name}")), handle_at(&format!("agent_chat:config:some.provider.model:{name}")));
+    }
+    h.step(&json!({"click": {"handle": "agent_chat:model:smart"}})).unwrap();
+    h.frames(3);
+    assert_eq!(script.calls(), ["set_config_option: some.provider.model=smart"]);
+    script.report(Event::ConfigOptionFinished { id: "some.provider.model".into(), result: Ok(modern_options("smart")) });
+    h.frames(3);
+    assert_eq!(h.app.agent_chat.model, "smart");
+
+    h.step(&json!({"click": {"handle": "agent_chat:model"}})).unwrap();
+    h.frames(3);
+    h.step(&json!({"text": "zzz"})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:custom").is_some());
+    h.step(&json!({"click": {"handle": "agent_chat:model:custom"}})).unwrap();
+    h.frames(3);
+    assert_eq!(script.calls().last().map(String::as_str), Some("set_config_option: some.provider.model=zzz"));
+    assert_eq!(h.app.agent_chat.model, "smart", "not until the agent says so");
+    assert!(h.app.agent_chat.config_pending);
+    disconnect(&mut h.app);
+}
+
+/// Nothing typed can be chosen where it could not be sent, and the reason a listing failed shows
+/// in the popup.
+#[test]
+fn the_header_model_picker_offers_no_typed_model_it_cannot_send_and_shows_why_listing_failed() {
+    use crate::scenario::handle_at;
+    let mut h = narrow_chat();
+    h.app.agent_chat.state = Some(State::Ready);
+    h.app.agent_chat.models = vec![acp::ModelInfo { id: "fast".into(), name: "fast".into(), description: String::new() }];
+    h.app.agent_chat.model = "fast".into();
+    h.app.agent_chat.models_note = Some("Couldn't list models: offline".into());
+    h.frames(4);
+    assert!(!custom_models_accepted(&h.app));
+    h.step(&json!({"click": {"handle": "agent_chat:model"}})).unwrap();
+    h.frames(3);
+    assert!(h.widget("Couldn't list models: offline").is_some());
+    h.step(&json!({"text": "zzz"})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:search").is_some());
+    assert!(handle_at("agent_chat:model:custom").is_none());
+}
+
+/// A running endpoint's card uses the chat's list and changes the chat's model.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_card_of_a_running_endpoint_changes_the_chats_model() {
+    use crate::scenario::handle_at;
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.ai_features = true;
+    h.app.agent_chat.detection = Some(Default::default());
+    let script = Script::default();
+    h.app.agent_chat.backend = Some(Box::new(script.clone()));
+    h.app.agent_chat.state = Some(State::Ready);
+    h.app.agent_chat.running_id = "api-1".into();
+    h.app.agent_chat.running_endpoint = "http://localhost:1/v1".into();
+    h.app.preferences.agents.push(agents::AgentConfig {
+        id: "api-1".into(),
+        name: "Endpoint".into(),
+        kind: agents::Kind::Api,
+        base_url: "http://localhost:1/v1".into(),
+        model: "fast".into(),
+        ..Default::default()
+    });
+    script.report(models_reply("fast"));
+    h.step(&json!({"call": "ui.prefs", "params": {"open": "AI"}})).unwrap();
+    h.frames(4);
+    h.step(&json!({"click": {"handle": "prefs:ai_model:api-1"}})).unwrap();
+    h.frames(3);
+    assert!(handle_at("prefs:ai_model:api-1:smart").is_some());
+    h.step(&json!({"click": {"handle": "prefs:ai_model:api-1:smart"}})).unwrap();
+    h.frames(3);
+    assert_eq!(script.calls(), ["set_model: smart"]);
+    assert_eq!(h.app.agent_chat.model, "smart");
+    h.step(&json!({"click": {"handle": "prefs:ai_model:api-1"}})).unwrap();
+    h.frames(3);
+    h.step(&json!({"text": "zzz"})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click": {"handle": "prefs:ai_model:api-1:custom"}})).unwrap();
+    h.frames(3);
+    assert_eq!(script.calls(), ["set_model: smart", "set_model: zzz"]);
+    assert_eq!(h.app.preferences.agents.iter().find(|a| a.id == "api-1").map(|a| a.model.as_str()), Some("zzz"));
+    disconnect(&mut h.app);
+}
+
+/// A listing that fails says why and leaves last time's list, with the configured model in it; the
+/// next connection starts without the note.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_listing_that_fails_says_why_and_keeps_the_list_of_last_time() {
+    let (mut app, script, ctx) = app_with_script();
+    let endpoint = "http://localhost:11434/v1";
+    app.agent_chat.running_endpoint = endpoint.into();
+    script.report(Event::ModelsNote(None));
+    script.report(models_reply("fast"));
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.models_note, None);
+    let ids = |app: &SolveApp| app.agent_chat.models.iter().map(|m| m.id.clone()).collect::<Vec<_>>();
+    assert_eq!(ids(&app), ["fast", "smart"]);
+
+    let only = |id: &str| acp::ModelInfo { id: id.into(), name: id.into(), description: String::new() };
+    script.report(Event::ModelsNote(Some("x".repeat(MODELS_NOTE_CAP + 10))));
+    script.report(Event::Models { current: "local".into(), available: vec![only("local")] });
+    poll(&mut app, &ctx);
+    let note = app.agent_chat.models_note.clone().unwrap();
+    assert!(note.starts_with(&trf("ui.agent_chat_models_failed", &[("error", "x")])), "{note}");
+    assert_eq!(note.chars().count(), MODELS_NOTE_CAP);
+    assert_eq!(ids(&app), ["local", "fast", "smart"]);
+    assert_eq!(app.agent_chat.model, "local");
+    assert_eq!(app.agent_chat.models_cache.get(endpoint).map(Vec::len), Some(2), "the failed listing is not remembered");
+
+    script.report(Event::ModelsNote(Some("again".into())));
+    script.report(Event::Models { current: "fast".into(), available: vec![only("fast")] });
+    poll(&mut app, &ctx);
+    assert_eq!(ids(&app), ["local", "fast", "smart"], "a model already listed is not listed twice");
+
+    // A real listing on an endpoint that cannot be reached.
+    let mut app = app_with_endpoints();
+    app.agent_chat.models_note = Some("from before".into());
+    app.agent_chat.agent_id = Some("api-1".into());
+    connect(&mut app, &ctx);
+    assert_eq!(app.agent_chat.models_note, None);
+    let start = std::time::Instant::now();
+    while app.agent_chat.models.is_empty() && start.elapsed() < std::time::Duration::from_secs(10) {
+        poll(&mut app, &ctx);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(app.agent_chat.models_note.as_deref().is_some_and(|note| note.contains("offline")), "{:?}", app.agent_chat.models_note);
+    assert_eq!(ids(&app), ["m"]);
+    assert!(models_shown(&app));
+    disconnect(&mut app);
 }
 
 /// The next session puts back the model chosen last time, when the agent offers it.
@@ -1944,7 +2403,8 @@ done
 }
 
 /// An agent that lists `models` but does not serve the unstable `session/set_model` answers
-/// "method not found": the choice stays and no error shows (#9970). Other errors still show.
+/// "method not found": the choice stays and no error shows (#9970). Other errors still show, as
+/// the refusal of the model they were about.
 #[cfg(unix)]
 #[test]
 fn set_model_method_not_found_shows_no_error() {
@@ -1986,12 +2446,13 @@ done
     set_model(&mut app, "fast");
     // Replies come in order: once the second one's error shows, the first reply was handled too.
     let t = std::time::Instant::now();
-    while !errors(&app).iter().any(|e| e == "model unavailable") {
+    let refused = trf("ui.agent_chat_model_rejected", &[("model", "fast"), ("error", "model unavailable")]);
+    while !errors(&app).contains(&refused) {
         poll(&mut app, &ctx);
         assert!(t.elapsed() < std::time::Duration::from_secs(20), "no error for the second choice: {:?}", errors(&app));
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    assert_eq!(errors(&app), ["model unavailable"], "method not found is no error to show");
+    assert_eq!(errors(&app), [refused], "method not found is no error to show");
     assert!(app.agent_chat.state().running(), "the chat goes on");
     assert_eq!(std::fs::read_to_string(&log).unwrap().matches("session/set_model").count(), 2);
     disconnect(&mut app);
@@ -3702,4 +4163,102 @@ fn tool_room_beside_the_docked_assistant_survives_an_inside_out_view() {
         let free = tool_space(&app, inside_out);
         assert!(free.min.x.is_finite() && free.max.x.is_finite(), "{side}: {free:?}");
     }
+}
+
+// ---- Copy message (#10675) ----
+
+/// A chat with a multi-paragraph prompt and a Markdown reply, both drawn.
+fn chat_with_copiable_messages() -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.frames(3);
+    h.app.agent_chat.items.push(Item::User {
+        text: "make a plate\n\nwith two holes:\n- 6 mm\n- 8 mm".into(),
+        image: false,
+        pictures: Vec::new(),
+        files: Vec::new(),
+        context: Context::default(),
+    });
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "# Result\n\nA plate with holes.\n\n```rust\nlet x = 1;\n```".into() });
+    h.frames(3);
+    h
+}
+
+/// The text the last frame copied to the clipboard, if any.
+fn copied_text(h: &crate::scenario::Harness) -> Option<String> {
+    h.output.commands.iter().rev().find_map(|c| match c {
+        egui::OutputCommand::CopyText(t) => Some(t.clone()),
+        _ => None,
+    })
+}
+
+fn click_at(h: &mut crate::scenario::Harness, at: egui::Pos2, button: egui::PointerButton) {
+    h.frame_with(vec![egui::Event::PointerMoved(at)]);
+    h.frame_with(vec![egui::Event::PointerButton { pos: at, button, pressed: true, modifiers: egui::Modifiers::NONE }]);
+    h.frame_with(vec![egui::Event::PointerButton { pos: at, button, pressed: false, modifiers: egui::Modifiers::NONE }]);
+}
+
+/// The visible button on a sent prompt copies the whole prompt, as entered.
+#[test]
+fn the_copy_message_button_copies_the_prompt_as_entered() {
+    let mut h = chat_with_copiable_messages();
+    let at = crate::scenario::handle_at("agent_chat:copy:0").expect("the prompt's Copy message button");
+    click_at(&mut h, at, egui::PointerButton::Primary);
+    assert_eq!(copied_text(&h).as_deref(), Some("make a plate\n\nwith two holes:\n- 6 mm\n- 8 mm"), "the whole prompt, paragraphs and list items");
+}
+
+/// The visible button on a reply copies its original Markdown: heading, paragraphs, list and
+/// fenced code, not the laid-out text.
+#[test]
+fn the_copy_message_button_copies_the_reply_as_original_markdown() {
+    let mut h = chat_with_copiable_messages();
+    let at = crate::scenario::handle_at("agent_chat:copy:1").expect("the reply's Copy message button");
+    click_at(&mut h, at, egui::PointerButton::Primary);
+    assert_eq!(copied_text(&h).as_deref(), Some("# Result\n\nA plate with holes.\n\n```rust\nlet x = 1;\n```"));
+}
+
+/// Right-clicking a message opens its menu, and its row copies the same whole reply.
+#[test]
+fn right_clicking_a_message_offers_copy_message() {
+    let mut h = chat_with_copiable_messages();
+    let msg = crate::scenario::rect_of("agent_chat:msg:1").expect("the reply's message area");
+    click_at(&mut h, msg.center(), egui::PointerButton::Secondary);
+    h.frames(1); // let the popup settle at its final place before clicking its row
+    let item = crate::scenario::handle_at("agent_chat:copy_menu:1").expect("the right-click menu's Copy message row");
+    click_at(&mut h, item, egui::PointerButton::Primary);
+    assert_eq!(copied_text(&h).as_deref(), Some("# Result\n\nA plate with holes.\n\n```rust\nlet x = 1;\n```"));
+}
+
+/// A reply that is still streaming copies the stable text received so far.
+#[test]
+fn a_streaming_reply_copies_the_text_received_so_far() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.frames(3);
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "half a repl".into() });
+    h.frames(3);
+    let at = crate::scenario::handle_at("agent_chat:copy:0").expect("the streaming reply's button");
+    click_at(&mut h, at, egui::PointerButton::Primary);
+    assert_eq!(copied_text(&h).as_deref(), Some("half a repl"));
+}
+
+/// A picture-only prompt has no text to copy: no button, no menu, and a thought has none
+/// either — the clipboard is never overwritten with an empty string.
+#[test]
+fn a_picture_only_prompt_and_a_thought_have_no_copy_message_action() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.frames(3);
+    h.app.agent_chat.items.push(Item::User {
+        text: String::new(),
+        image: true,
+        pictures: Vec::new(),
+        files: Vec::new(),
+        context: Context::default(),
+    });
+    h.app.agent_chat.items.push(Item::Agent { thought: true, text: "pondering".into() });
+    h.frames(3);
+    assert!(crate::scenario::handle_at("agent_chat:copy:0").is_none(), "a picture-only prompt hides the text-copy action");
+    assert!(crate::scenario::handle_at("agent_chat:copy:1").is_none(), "a thought has no copy action");
+    assert!(h.widget("Copy message").is_none(), "nothing to click");
 }

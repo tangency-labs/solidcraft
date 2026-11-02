@@ -60,6 +60,7 @@ pub mod construct;
 pub mod diagnostics;
 pub mod edit;
 pub mod features;
+pub mod file;
 pub mod inspect;
 pub mod joints;
 pub mod mass_properties;

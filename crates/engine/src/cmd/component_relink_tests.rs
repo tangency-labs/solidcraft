@@ -162,6 +162,90 @@ fn reused_design_insertion_is_free_even_before_a_link_exists() {
 }
 
 #[test]
+fn reused_design_insertion_uses_the_requested_position_and_survives_undo_and_reopen() {
+    let dir = folder("reuse-position");
+    let file = dir.join("part.sc");
+    part(&file, 30);
+    for first_reuses in [false, true] {
+        let mut s = Session::default();
+        let first = run(&mut s, "component.insert_design", json!({"path": file, "translate": [20, 0, 0], "reuse": first_reuses}));
+        let before = s.doc.to_json();
+        let undo = s.undo.len();
+        let second = run(&mut s, "component.insert_design", json!({"path": file, "translate": [40, 5, 7], "reuse": true}));
+        assert_eq!(first["component"], second["component"]);
+        assert_eq!(s.doc.links.len(), 1);
+        assert_eq!(s.doc.features.len(), 1);
+        assert_eq!(s.undo.len(), undo + 1);
+        let occurrence = second["occurrence"].as_u64().unwrap();
+        assert_linked_bounds(&mut s, occurrence, [40.0, 5.0, 7.0], [50.0, 25.0, 37.0]);
+        assert_linked_bounds(&mut s, first["occurrence"].as_u64().unwrap(), [20.0, 0.0, 0.0], [30.0, 20.0, 30.0]);
+        assert!(!s.doc.occurrences.iter().find(|o| o.id == occurrence).unwrap().grounded);
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc.to_json(), before);
+        run(&mut s, "edit.redo", json!({}));
+        assert_linked_bounds(&mut s, occurrence, [40.0, 5.0, 7.0], [50.0, 25.0, 37.0]);
+        let assembly = dir.join("assembly.sc");
+        run(&mut s, "file.save", json!({"path": assembly}));
+        let mut cold = Session::default();
+        run(&mut cold, "doc.open", json!({"path": assembly}));
+        assert_linked_bounds(&mut cold, occurrence, [40.0, 5.0, 7.0], [50.0, 25.0, 37.0]);
+        let at_origin = run(&mut cold, "component.insert_design", json!({"path": file, "reuse": true}))["occurrence"].as_u64().unwrap();
+        assert_linked_bounds(&mut cold, at_origin, [0.0, 0.0, 0.0], [10.0, 20.0, 30.0]);
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+fn assert_linked_bounds(s: &mut Session, occurrence: u64, min: [f64; 3], max: [f64; 3]) {
+    let p = run(s, "occurrence.properties", json!({"occurrence": occurrence}));
+    assert_eq!(p["body_count"], 1);
+    assert!((p["total"]["volume_mm3"].as_f64().unwrap() - 6000.0).abs() < 1e-6, "{p}");
+    for (key, expected) in [("min", min), ("max", max)] {
+        for (axis, expected) in expected.into_iter().enumerate() {
+            assert!((p["total"]["bbox"][key][axis].as_f64().unwrap() - expected).abs() < 1e-6, "{key}[{axis}] != {expected}: {p}");
+        }
+    }
+}
+
+#[test]
+fn reused_design_insertion_ignores_existing_moves_and_uses_the_destination_parent() {
+    let dir = folder("reuse-parent");
+    let file = dir.join("part.sc");
+    part(&file, 30);
+    for capture in [false, true] {
+        let mut s = Session::default();
+        let first = run(&mut s, "component.insert_design", json!({"path": file, "translate": [20, 0, 0]}));
+        run(
+            &mut s,
+            "occurrence.move",
+            json!({"occurrence": first["occurrence"], "translate": [0, 10, 0], "axis": [0, 0, 1], "angle": "90 deg", "capture": capture, "move_grounded": true}),
+        );
+        let original = s.doc.occurrences.clone();
+        let pending = s.pending_moves.clone();
+        let parent = run(&mut s, "component.create", json!({"name": "Parent", "activate": false}));
+        run(&mut s, "occurrence.move", json!({"occurrence": parent["occurrence"], "translate": [100, 0, 0], "axis": [0, 0, 1], "angle": "90 deg"}));
+        for explicit_parent in [true, false] {
+            let mut params = json!({"path": file, "translate": [40, 5, 7], "reuse": true});
+            if explicit_parent {
+                params["parent"] = json!("Parent");
+            } else {
+                run(&mut s, "component.activate", json!({"component": parent["component"]}));
+            }
+            let inserted = run(&mut s, "component.insert_design", params);
+            assert_eq!(inserted["component"], first["component"]);
+            assert_linked_bounds(&mut s, inserted["occurrence"].as_u64().unwrap(), [75.0, 40.0, 7.0], [95.0, 50.0, 37.0]);
+            assert_eq!(s.doc.occurrences.first(), original.first());
+            assert_eq!(s.pending_moves, pending);
+        }
+        let before = s.doc.to_json();
+        for parent in [json!("missing"), first["component"].clone()] {
+            assert!(s.execute("component.insert_design", &json!({"path": file, "parent": parent, "reuse": true})).is_err());
+            assert_eq!(s.doc.to_json(), before);
+        }
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn linked_design_properties_update_density_without_geometry_and_keep_edited_cards() {
     let dir = folder("properties-density");
     let file = dir.join("source.solidcraft");

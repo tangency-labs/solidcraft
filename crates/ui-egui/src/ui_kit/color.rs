@@ -205,8 +205,11 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
                 Spin { max: 255.0, step: 1.0, speed: 0.5, decimals: 0 }
             };
             ui.columns(3, |columns| {
-                for ((ui, channel), name) in columns.iter_mut().zip(channels.iter_mut()).zip(["R", "G", "B"]) {
-                    edited |= spin_channel(ui, name, None, channel, spin);
+                // Named like H, S and V: "R" alone doesn't say red in every language (#10201).
+                for ((ui, channel), (name, tip)) in
+                    columns.iter_mut().zip(channels.iter_mut()).zip([("R", "color.red"), ("G", "color.green"), ("B", "color.blue")])
+                {
+                    edited |= spin_channel(ui, name, Some(i18n::tr(tip)), channel, spin);
                 }
             });
         }
@@ -436,7 +439,10 @@ fn spin_buttons(ui: &mut Ui, key: &str, height: f32) -> i32 {
     let mut steps = 0;
     for (direction, half, label, end) in [(1, top, "color.step_up", "up"), (-1, bottom, "color.step_down", "down")] {
         let id = ui.id().with(("color_spin", key, end));
-        let response = ui.interact(half, id, Sense::click());
+        // Sensing drags too keeps a long press down on the button: a press that senses clicks
+        // only stops counting once it outlasts egui's longest click (0.8 s), and the repeat with
+        // it, after 8 steps (#10201).
+        let response = ui.interact(half, id, Sense::click_and_drag());
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), i18n::tr(label)));
         publish(&format!("color:spin:{key}:{end}"), &response);
         let held = response.is_pointer_button_down_on();

@@ -260,6 +260,26 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
     super::text(ui, crate::i18n::tr("prefs.preview_choices"), super::Text::Note("preview"));
 }
 
+#[allow(unused_imports, reason = "painted by the Preferences pages of #9875 to #9883")]
+pub(crate) use super::preferences_figure_ops::ThemeSample;
+use super::preferences_figure_ops::paint;
+
+#[allow(dead_code, reason = "painted by the Preferences pages of #9875 to #9883")]
+/// A theme card's miniature application window, drawn with the theme's own `sample` colours.
+pub(crate) fn paint_theme_thumbnail(p: &Painter, rect: Rect, sample: &ThemeSample) {
+    paint(p, rect, &super::preferences_figure_data::THEME_THUMBNAIL, Some(sample), None);
+}
+
+#[allow(dead_code, reason = "painted by the Preferences pages of #9875 to #9883")]
+/// The "System" theme card: `light` with `dark` over a slanted band of it (the board clips the dark
+/// half to the polygon 56 %,0 / 100 %,0 / 100 %,100 % / 40 %,100 %).
+pub(crate) fn paint_theme_system(p: &Painter, rect: Rect, light: &ThemeSample, dark: &ThemeSample) {
+    const BAND: [[f32; 2]; 4] = [[69.44, 0.0], [124.0, 0.0], [124.0, 76.0], [49.6, 76.0]];
+    let figure = &super::preferences_figure_data::THEME_THUMBNAIL;
+    paint(p, rect, figure, Some(light), None);
+    paint(p, rect, figure, Some(dark), Some(&BAND));
+}
+
 #[cfg(test)]
 mod tests {
     use super::orientation_axes;
@@ -279,6 +299,103 @@ mod tests {
                 let cross = a.0 * b.1 - a.1 * b.0;
                 assert!(cross < 0.0, "y_up {y_up}: {} to {} turns clockwise (mirrored figure)", axes[i].3, axes[i + 1].3);
             }
+        }
+    }
+
+    use super::{ThemeSample, paint_theme_system, paint_theme_thumbnail};
+    use crate::theme::Tokens;
+    use crate::ui_kit::preferences_figure_data::FIGURES;
+    use egui::{Pos2, Rect, vec2};
+
+    /// Shapes a figure paints into `rect` on a fresh frame, in the given theme.
+    fn shapes(rect: Rect, paint: impl Fn(&egui::Painter, Rect)) -> Vec<egui::epaint::ClippedShape> {
+        let ctx = crate::fonts::test_context();
+        let mut output =
+            ctx.run_ui(egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0))), ..Default::default() }, |ui| {
+                paint(ui.painter(), rect);
+            });
+        output.textures_delta.clear();
+        output.shapes
+    }
+
+    fn rects() -> Vec<Rect> {
+        let nan = f32::NAN;
+        vec![
+            Rect::from_min_size(Pos2::ZERO, vec2(0.0, 0.0)),
+            Rect::from_min_size(Pos2::ZERO, vec2(0.2, 0.2)),
+            Rect::from_min_size(Pos2::new(5.0, 5.0), vec2(1.0, 1.0)),
+            Rect::from_min_size(Pos2::new(5.0, 5.0), vec2(3.0, 200.0)),
+            Rect::from_min_size(Pos2::new(5.0, 5.0), vec2(120.0, 64.0)),
+            Rect::from_min_size(Pos2::new(-50.0, -50.0), vec2(300.0, 300.0)),
+            Rect::from_min_size(Pos2::ZERO, vec2(1.0e5, 1.0e5)),
+            Rect::from_min_size(Pos2::ZERO, vec2(f32::INFINITY, 10.0)),
+            Rect::from_min_size(Pos2::new(nan, 0.0), vec2(10.0, 10.0)),
+            Rect::from_min_size(Pos2::ZERO, vec2(-40.0, 30.0)),
+            Rect::from_min_size(Pos2::ZERO, vec2(nan, nan)),
+        ]
+    }
+
+    /// Every figure, in both themes, paints at size zero, tiny, normal, huge and non-finite without
+    /// panicking, and at a normal size stays inside its rectangle with a bounded number of shapes.
+    #[test]
+    fn every_preference_figure_paints_safely_at_any_size_in_both_themes() {
+        let previous = crate::theme::is_dark();
+        for dark in [false, true] {
+            crate::theme::set_dark(dark);
+            assert!(!FIGURES.is_empty());
+            for (name, size, paint) in FIGURES {
+                for rect in rects() {
+                    let _ = shapes(rect, paint);
+                }
+                let rect = Rect::from_min_size(Pos2::new(20.0, 10.0), vec2(size[0] * 2.0, size[1] * 2.0));
+                let painted = shapes(rect, paint);
+                assert!(!painted.is_empty() && painted.len() < 700, "{name}: {} shapes", painted.len());
+                for shape in &painted {
+                    let bounds = shape.shape.visual_bounding_rect().intersect(shape.clip_rect);
+                    if bounds.is_positive() {
+                        assert!(rect.expand(1.0).contains_rect(bounds), "{name}: {bounds:?} outside {rect:?}");
+                    }
+                }
+            }
+        }
+        crate::theme::set_dark(previous);
+    }
+
+    /// The figures read the theme: the same figure paints different colours in light and dark.
+    #[test]
+    fn preference_figures_follow_the_theme() {
+        let previous = crate::theme::is_dark();
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(120.0, 64.0));
+        let colours = |dark: bool| {
+            crate::theme::set_dark(dark);
+            let mut all = Vec::new();
+            for shape in shapes(rect, super::super::preferences_figure_data::paint_orbit_origin) {
+                if let egui::Shape::Rect(r) = shape.shape {
+                    all.push(r.fill);
+                }
+            }
+            all
+        };
+        let (light, dark) = (colours(false), colours(true));
+        assert!(!light.is_empty() && light != dark);
+        crate::theme::set_dark(previous);
+    }
+
+    #[test]
+    fn theme_thumbnails_paint_with_the_sample_colours_and_a_slanted_system_band() {
+        let (light, dark) = (ThemeSample::from_tokens(&Tokens::light()), ThemeSample::from_tokens(&Tokens::dark()));
+        assert_ne!(light, dark);
+        let rect = Rect::from_min_size(Pos2::new(4.0, 4.0), vec2(124.0, 76.0));
+        for rect in rects().into_iter().chain([rect]) {
+            let _ = shapes(rect, |p, r| paint_theme_thumbnail(p, r, &light));
+            let _ = shapes(rect, |p, r| paint_theme_system(p, r, &light, &dark));
+        }
+        let single = shapes(rect, |p, r| paint_theme_thumbnail(p, r, &light)).len();
+        let system = shapes(rect, |p, r| paint_theme_system(p, r, &light, &dark)).len();
+        assert!(system > single, "the dark band adds shapes over the light card");
+        for shape in shapes(rect, |p, r| paint_theme_system(p, r, &light, &dark)) {
+            let bounds = shape.shape.visual_bounding_rect().intersect(shape.clip_rect);
+            assert!(!bounds.is_positive() || rect.expand(1.0).contains_rect(bounds), "{bounds:?}");
         }
     }
 }

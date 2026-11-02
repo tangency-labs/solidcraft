@@ -160,6 +160,21 @@ fn results_kept_ahead_outlive_the_cache() {
     assert!(rel(measure(&m.state().bodies[0].body).unwrap().volume, 30000.0) < 1e-9);
 }
 
+/// A warning quotes a long generated name by its start and end (#8541: fourteen split edges'
+/// full names made one chamfer warning 122,701 characters long); a short name stays whole.
+#[test]
+fn warnings_quote_long_names_by_their_ends() {
+    let face = |i: usize| format!("Extrude{i}.side(Sketch{i}.l{i})·Fillet{i}.blend(Chamfer{i}.cap)");
+    let long = (0..40).map(face).collect::<Vec<_>>().join("|");
+    let q = crate::name_lookup::quoted(&long);
+    assert!(q.chars().count() <= 80, "{q}");
+    assert!(q.starts_with("Extrude0.side") && q.ends_with(&long[long.len() - 10..]) && q.contains('…'), "{q}");
+    assert_eq!(crate::name_lookup::quoted("Extrude1.side|Box1.top"), "Extrude1.side|Box1.top");
+    // Characters, not bytes: a name of non-ASCII characters is cut between characters.
+    let wide = "Ü".repeat(200);
+    assert_eq!(crate::name_lookup::quoted(&wide).chars().count(), 73);
+}
+
 /// A saved model whose feature warning is longer than 65,536 characters is still taken on open
 /// (#8541): Save writes it, so Open reads it.
 #[test]
@@ -660,6 +675,28 @@ fn new_names_take_the_first_free_number() {
 }
 
 #[test]
+fn construction_plane_name_collisions_leave_the_document_unchanged() {
+    let plane = || FeatureKind::ConstructionPlane { plane: PlaneRef::Origin { name: "XY".into() } };
+    let sketch = || FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() };
+    for (first, second) in [(plane(), plane()), (plane(), sketch()), (sketch(), plane())] {
+        let mut doc = Document::new("names");
+        let id = doc.add_feature(first, Some("Mid")).unwrap();
+        // A suppressed feature beyond the marker still owns its name.
+        doc.feature_mut(id).unwrap().suppressed = true;
+        doc.marker = Some(0);
+        let before = doc.clone();
+        for name in ["Mid", " Mid "] {
+            let error = doc.add_feature(second.clone(), Some(name)).unwrap_err().to_string();
+            assert!(error.contains("another feature is called `Mid`"), "{error}");
+            assert_eq!(doc, before, "a refused name must not consume an id or change the timeline");
+        }
+        let other = doc.add_feature(second, Some("Upper")).unwrap();
+        assert_eq!(doc.feature(other).unwrap().name, "Upper");
+        assert_eq!(other, before.next_id);
+    }
+}
+
+#[test]
 fn empty_boolean_targets_name_overlapping_component() {
     for (operation, offset) in [(Operation::Cut, 0.0), (Operation::Intersect, 0.0), (Operation::Cut, 40.0)] {
         let (mut doc, sketch) = plate_doc();
@@ -973,4 +1010,20 @@ fn browser_data_survives_a_save_and_old_designs_read_unchanged() {
         let resaved: serde_json::Value = serde_json::from_str(&loaded.to_json()).unwrap();
         assert_eq!(resaved["browser_groups"], groups, "{order}");
     }
+}
+
+/// #10748: verify that type names map to their canonical design-file kind keys.
+#[test]
+fn feature_kind_key_and_type_name_mappings() {
+    assert_eq!(FeatureKind::type_name_to_kind_key("HoleFeature"), Some("hole"));
+    assert_eq!(FeatureKind::type_name_to_kind_key("BoxFeature"), Some("box"));
+    assert_eq!(FeatureKind::type_name_to_kind_key("EdgeFlangeFeature"), Some("sheet_flange"));
+    assert_eq!(FeatureKind::type_name_to_kind_key("RectangularPatternFeature"), Some("pattern"));
+    assert_eq!(FeatureKind::type_name_to_kind_key("PathPatternFeature"), Some("pattern"));
+    assert_eq!(FeatureKind::type_name_to_kind_key("CircularPatternFeature"), Some("pattern"));
+    assert_eq!(FeatureKind::type_name_to_kind_key("ExtrudeFeature"), Some("extrude"));
+    assert_eq!(FeatureKind::type_name_to_kind_key("SplitBodyFeature"), Some("split"));
+    assert_eq!(FeatureKind::type_name_to_kind_key("BaseFeature"), Some("import"));
+    assert_eq!(FeatureKind::type_name_to_kind_key("MeshFeature"), Some("mesh_import"));
+    assert_eq!(FeatureKind::type_name_to_kind_key("NonExistent"), None);
 }

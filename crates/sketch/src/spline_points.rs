@@ -1,6 +1,6 @@
 //! New points on an existing fit spline (#6533): a fit point inserted where the curve already
-//! runs, or a new first or last point the spline runs on to. Also a spline's direction reversed
-//! (#8224).
+//! runs, or a new first or last point the spline runs on to. One point taken out of a spline
+//! (#10783). Also a spline's direction reversed (#8224).
 //!
 //! The spline keeps its curve index and every point it had (the new point is appended to
 //! `Sketch::points`), so constraints on its points and on the curve stay as they were.
@@ -85,6 +85,77 @@ impl Sketch {
             }
         }
         Ok(p)
+    }
+
+    /// Take point `p` out of spline `ci` (#10783), and return whether the point itself went too.
+    /// The spline runs through (or over) its other points, and keeps its curve index, so
+    /// constraints on the curve and on its other points stay. The point goes with the constraints
+    /// on it, unless another curve uses it (it stays, for that curve) or it is the origin.
+    ///
+    /// The spline keeps at least 2 points (a closed one 3 besides its closing point, which stays).
+    /// An end of an open spline joined to other geometry stays, as for [`Sketch::extend_spline`]:
+    /// the spline would no longer end where it is joined.
+    pub fn remove_spline_point(&mut self, ci: usize, p: usize) -> Result<bool> {
+        let curve = self.curves.get(ci).ok_or_else(|| SketchError::Unknown(format!("curve {ci}")))?;
+        let CurveKind::Spline { pts, periodic, .. } = &curve.kind else {
+            return Err(SketchError::WrongKind(curve.id.clone(), "only a spline has points to remove".into()));
+        };
+        let (pts, periodic) = (pts.clone(), *periodic);
+        if curve.link.is_some() {
+            return Err(SketchError::Invalid("a projected spline follows its source; its points can't be removed".into()));
+        }
+        if self.freeform_offsets.iter().any(|o| o.output == curve.id) {
+            return Err(SketchError::Invalid("an offset spline follows its source; break the offset association first".into()));
+        }
+        if self.freeform_offsets.iter().any(|o| o.source == curve.id) {
+            return Err(SketchError::Invalid(
+                "not supported yet: removing a point from a spline that has an offset; break the offset association first".into(),
+            ));
+        }
+        if self.patterns.iter().any(|pattern| pattern.contains(&curve.id)) {
+            return Err(SketchError::Invalid("not supported yet: removing a point from a patterned spline".into()));
+        }
+        let at = match pts.iter().enumerate().filter(|(_, q)| **q == p).map(|(i, _)| i).collect::<Vec<_>>().as_slice() {
+            [] => return Err(SketchError::Invalid(format!("that point isn't one of {}'s points", curve.id))),
+            [at] => *at,
+            _ => return Err(SketchError::Invalid("that point closes the spline; remove another one".into())),
+        };
+        let last = pts.len().saturating_sub(1);
+        if periodic && (at == 0 || at == last) {
+            return Err(SketchError::Invalid("a closed spline's closing point stays; remove another one".into()));
+        }
+        if pts.len() < if periodic { 5 } else { 3 } {
+            return Err(SketchError::Invalid(format!("a spline keeps at least {} points", if periodic { 3 } else { 2 })));
+        }
+        if !periodic && (at == 0 || at == last) {
+            let joined = self.curves.iter().enumerate().any(|(i, c)| i != ci && c.kind.uses(p))
+                || self.constraints.iter().any(|k| {
+                    let (points, curves) = k.kind.indices();
+                    points.contains(&p) || (curves.contains(&ci) && matches!(k.kind, ConstraintKind::Tangent { .. } | ConstraintKind::Smooth { .. }))
+                });
+            if joined {
+                return Err(SketchError::Invalid(
+                    "that end of the spline is joined to other geometry or held by a constraint; remove those first".into(),
+                ));
+            }
+        }
+        let mut left = pts;
+        left.remove(at);
+        if periodic {
+            let pos: Vec<Vec2> =
+                left.iter().map(|i| self.point(*i).ok_or_else(|| SketchError::Unknown(format!("point {i}")))).collect::<Result<_>>()?;
+            crate::periodic::validate_periodic_points(&pos)?;
+        }
+        if let Some(CurveKind::Spline { pts, .. }) = self.curves.get_mut(ci).map(|c| &mut c.kind) {
+            *pts = left;
+        }
+        // The origin (point 0) is never removed.
+        if p == 0 || self.point_used_by_curve(p) {
+            return Ok(false);
+        }
+        self.keep_ties_through(&[p]);
+        self.remove_points(&[p]);
+        Ok(true)
     }
 
     /// Reverse spline `ci`'s direction: its last point becomes its first and the curve runs the

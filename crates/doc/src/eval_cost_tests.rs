@@ -174,6 +174,25 @@ fn joint_face_measurements_never_follow_a_replaced_body_or_stale_offset() {
     assert_eq!(work.joint_faces, 0, "offsets are applied after the shared face measurements");
 }
 
+/// Every solve of a drag resolves its edge origins again: they share the joint faces' one
+/// measurement, as a face origin does, instead of tessellating the whole body each time.
+#[test]
+fn an_edge_origin_measures_its_faces_once() {
+    use crate::joints::{JointOrigin, Snap};
+    let doc = Document::new("edge origin");
+    let mut state = ModelState::default();
+    state.bodies.push(ModelBody::new("Block".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap(), 0));
+    let pick = Vec3::new(5.0, 0.0, 10.0);
+    let origin = JointOrigin { occurrence: 0, snap: Snap::Edge { pick, edge: None, face: None, corner: None, axis: None } };
+    let work = counted(|| {
+        for _ in 0..8 {
+            let frame = joints::resolve_origin(&doc, &state.clone(), &origin).unwrap();
+            assert!(apply_point(&frame, Vec3::ZERO).dist(pick) < 1e-9);
+        }
+    });
+    assert_eq!(work.joint_faces, 1, "a solve must not measure the faces again: {work:?}");
+}
+
 /// `parts` imported files of two boxes each, every one in its own component placed away from
 /// the origin (as inserted parts are).
 fn placed_imports(parts: usize) -> Document {
