@@ -5065,6 +5065,36 @@ fn perforated_sheet_takes_a_thousand_round_holes() {
     assert!((removed - expected).abs() / expected < 0.05, "removed {removed:.1} mm³, 1000 holes are {expected:.1} mm³");
 }
 
+/// A cut of 400 holes into an unfolded sheet whose outline has a thousand edges, then refolded. Each hole was clipped
+/// against the whole outline, which the flat budget charged once per hole: the cut was refused ("sheet metal flat
+/// geometry exceeds the bounded processing budget"), as on a tray's flat with torn corner reliefs.
+#[test]
+fn an_unfolded_sheet_with_a_long_outline_takes_four_hundred_holes_in_one_cut() {
+    let (l, w, t, r) = (500.0, 300.0, 0.8, 1.5);
+    let mut s = Session::default();
+    // A serrated far edge: 500 teeth of 1 x 0.5 mm.
+    let mut outline = vec![json!([0, 0]), json!([l, 0]), json!([l, w])];
+    for k in (0..500).rev() {
+        let x = k as f64;
+        outline.push(json!([x + 0.5, w + 0.5]));
+        outline.push(json!([x, w]));
+    }
+    outline_blank(&mut s, json!(outline));
+    run(&mut s, "sheet.fold", json!({"points": [[0, 40, t], [l, 40, t]], "angle": "90 deg", "fixed": [l / 2.0, w / 2.0, t]}));
+    let folded = volume(&mut s);
+    run(&mut s, "sheet.unfold", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 2], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Holes"}));
+    for k in 0..400 {
+        run(&mut s, "sketch.circle.center", json!({"center": [20.0 + (k % 40) as f64 * 11.5, 80.0 + (k / 40) as f64 * 20.0], "radius": r}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Holes", "distance": "4", "direction": "negative", "operation": "cut"}));
+    run(&mut s, "sheet.refold", json!({}));
+    let removed = folded - volume(&mut s);
+    let expected = 400.0 * PI * r * r * t;
+    assert!((removed - expected).abs() / expected < 1e-2, "removed {removed:.1} mm³, 400 holes are {expected:.1} mm³");
+}
+
 // ---- #732 sheet.perforate: a perforation field stored on the sheet, not cut into the B-rep ----------------------
 
 /// Hole centres of a staggered (60 deg) perforation over a w x h rectangle at z 0, as `sheet.perforate` places them:
