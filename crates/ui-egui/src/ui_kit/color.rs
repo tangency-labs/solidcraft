@@ -120,31 +120,43 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
     let mut hex = ui.ctx().data(|d| d.get_temp::<HexEdit>(hex_id)).unwrap_or_else(|| HexEdit::new(*rgb, before_opacity));
     hex.sync(*rgb, before_opacity);
     let format_id = egui::Id::new("color_hex_format");
+    let percent_id = egui::Id::new("color_percent_format");
     let mut hexadecimal = ui.ctx().data(|d| d.get_temp::<bool>(format_id)).unwrap_or(false);
+    let mut percent = ui.ctx().data(|d| d.get_temp::<bool>(percent_id)).unwrap_or(false);
     let mut linear = ui.global_style().visuals.numeric_color_space == egui::style::NumericColorSpace::Linear;
     let mut accepted_mixed = false;
     let mut picked_recent = false;
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = t.space_10;
         ui.horizontal(|ui| {
-            let mut selected = if hexadecimal { 2 } else { usize::from(linear) };
-            ui.allocate_ui(vec2(t.control_height * 4.0 + t.space_12, t.control_height), |ui| {
+            // U8 / F / % / Hex (#10201). Hex and % are mutually exclusive; F shares egui's global
+            // numeric colour space with every other picker.
+            let mut selected = if hexadecimal {
+                3
+            } else if percent {
+                2
+            } else {
+                usize::from(linear)
+            };
+            ui.allocate_ui(vec2(t.control_height * 5.0 + t.space_12, t.control_height), |ui| {
                 super::segmented(
                     ui,
                     &mut selected,
-                    &["U8", "F", i18n::tr("color.hex")],
+                    &["U8", "F", "%", i18n::tr("color.hex")],
                     super::Segments { compact: true, primary: true, ..Default::default() },
                 );
                 let rect = ui.min_rect();
-                for (index, (key, name)) in [("color.gamma", "U8"), ("color.linear", "F"), ("color.hex_help", "Hex")].iter().enumerate() {
+                let tips = [("color.gamma", "U8"), ("color.linear", "F"), ("color.percent_help", "Percent"), ("color.hex_help", "Hex")];
+                for (index, (key, name)) in tips.iter().enumerate() {
                     let rect =
-                        egui::Rect::from_min_size(rect.min + vec2(index as f32 * rect.width() / 3.0, 0.0), vec2(rect.width() / 3.0, rect.height()));
+                        egui::Rect::from_min_size(rect.min + vec2(index as f32 * rect.width() / 4.0, 0.0), vec2(rect.width() / 4.0, rect.height()));
                     ui.interact(rect, ui.id().with(("format_tip", index)), Sense::hover()).on_hover_text(i18n::tr(key));
                     scenario::publish_handle(&format!("color:format:{name}"), rect.center());
                 }
             });
-            hexadecimal = selected == 2;
-            if !hexadecimal && (selected == 1) != linear {
+            hexadecimal = selected == 3;
+            percent = selected == 2;
+            if selected <= 1 && (selected == 1) != linear {
                 linear = selected == 1;
                 ui.ctx().all_styles_mut(|s| {
                     s.visuals.numeric_color_space =
@@ -160,6 +172,9 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
                     let [lr, lg, lb, _] = egui::Rgba::from(color).to_array();
                     ui.ctx().copy_text(if hexadecimal {
                         hex.accepted.clone()
+                    } else if percent {
+                        let pct = |c: u8| (f64::from(c) / 255.0 * 100.0).round();
+                        format!("{:.0}%, {:.0}%, {:.0}%", pct(r), pct(g), pct(b))
                     } else if linear {
                         format!("{lr:.03}, {lg:.03}, {lb:.03}")
                     } else {
@@ -168,7 +183,9 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
                 }
             });
         });
-        let mut channels = if linear {
+        let mut channels = if percent {
+            rgb.map(|c| f64::from(c) / 255.0 * 100.0)
+        } else if linear {
             let [r, g, b, _] = egui::Rgba::from(color).to_array();
             [r as f64, g as f64, b as f64]
         } else {
@@ -199,7 +216,9 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
                 }
             });
         } else {
-            let spin = if linear {
+            let spin = if percent {
+                Spin { max: 100.0, step: 1.0, speed: 0.5, decimals: 0 }
+            } else if linear {
                 Spin { max: 1.0, step: 0.01, speed: 0.003, decimals: 3 }
             } else {
                 Spin { max: 255.0, step: 1.0, speed: 0.5, decimals: 0 }
@@ -214,8 +233,10 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
             });
         }
         if edited {
-            let [r, g, b] = channels;
-            *rgb = if linear {
+            *rgb = if percent {
+                channels.map(|v| ((v / 100.0) * 255.0).round().clamp(0.0, 255.0) as u8)
+            } else if linear {
+                let [r, g, b] = channels;
                 let color = Color32::from(egui::Rgba::from_rgb(r as f32, g as f32, b as f32));
                 [color.r(), color.g(), color.b()]
             } else {
@@ -225,18 +246,27 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
         }
         // Only graphical edits convert HSV back to RGB. Typed byte values stay exact.
         let mut graphical_edit = false;
-        // Hue in degrees, saturation and value in percent, of the same gamma HSV the square shows.
-        const HSV: [(&str, &str, f64); 3] = [("H", "color.hue", 360.0), ("S", "color.saturation", 100.0), ("V", "color.value", 100.0)];
-        let mut hsv_fields = [hsv.h, hsv.s, hsv.v].iter().zip(HSV).map(|(v, (_, _, max))| f64::from(*v) * max).collect::<Vec<_>>();
+        // Hue stays in degrees. Saturation and value use the same number format as RGB in U8, F
+        // and % (#10201); Hex keeps the familiar 0–100 percent scale for S/V.
+        let sv = if hexadecimal || percent {
+            Spin { max: 100.0, step: 1.0, speed: 0.5, decimals: 0 }
+        } else if linear {
+            Spin { max: 1.0, step: 0.01, speed: 0.003, decimals: 3 }
+        } else {
+            Spin { max: 255.0, step: 1.0, speed: 0.5, decimals: 0 }
+        };
+        let h_spin = Spin { max: 360.0, step: 1.0, speed: 0.5, decimals: 0 };
+        let hsv_meta: [(&str, &str, Spin); 3] = [("H", "color.hue", h_spin), ("S", "color.saturation", sv), ("V", "color.value", sv)];
+        let mut hsv_fields = [hsv.h, hsv.s, hsv.v].iter().zip(hsv_meta).map(|(v, (_, _, spin))| f64::from(*v) * spin.max).collect::<Vec<_>>();
         let mut hsv_edited = false;
         ui.columns(3, |columns| {
-            for ((ui, value), (name, tip, max)) in columns.iter_mut().zip(hsv_fields.iter_mut()).zip(HSV) {
-                hsv_edited |= spin_channel(ui, name, Some(i18n::tr(tip)), value, Spin { max, step: 1.0, speed: 0.5, decimals: 0 });
+            for ((ui, value), (name, tip, spin)) in columns.iter_mut().zip(hsv_fields.iter_mut()).zip(hsv_meta) {
+                hsv_edited |= spin_channel(ui, name, Some(i18n::tr(tip)), value, spin);
             }
         });
         if hsv_edited {
             let unit = |at: usize| {
-                let (value, max) = (hsv_fields.get(at).copied().unwrap_or(0.0), HSV.get(at).map_or(1.0, |h| h.2));
+                let (value, max) = (hsv_fields.get(at).copied().unwrap_or(0.0), hsv_meta.get(at).map_or(1.0, |h| h.2.max));
                 if value.is_finite() { (value / max).clamp(0.0, 1.0) as f32 } else { 0.0 }
             };
             (hsv.h, hsv.s, hsv.v) = (unit(0), unit(1), unit(2));
@@ -315,6 +345,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
     ui.ctx().data_mut(|d| {
         d.insert_temp(hex_id, hex);
         d.insert_temp(format_id, hexadecimal);
+        d.insert_temp(percent_id, percent);
     });
     scenario::publish_rect("color:popover", ui.min_rect());
     *rgb != before_rgb || opacity.as_deref().copied() != before_opacity || hsv != before || accepted_mixed
