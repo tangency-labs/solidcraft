@@ -128,7 +128,7 @@ fn a_refused_inline_rename_keeps_the_editor_and_shows_the_error() {
     assert!(h.app.menu.rename.is_some(), "the editor stays open after a refused rename");
     let (text, _, error) = h.app.status.clone().expect("the refusal is shown");
     assert!(error && text.contains("another body is called"), "{text}");
-    assert!(h.app.session.world_state().body("B").is_some(), "the body keeps its name");
+    assert!(h.app.session.world_state().unwrap().body("B").is_some(), "the body keeps its name");
 }
 
 #[test]

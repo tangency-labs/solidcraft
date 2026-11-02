@@ -1320,7 +1320,7 @@ fn reparent_carries_a_sketch_on_a_face_inside_the_moved_part() {
     run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 3}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch": "Sketch2", "distance": -3, "operation": "cut"}));
-    let volume = |s: &Session| s.world_state().bodies.iter().map(|b| b.mesh().measure().volume.abs()).sum::<f64>();
+    let volume = |s: &Session| s.world_state().unwrap().bodies.iter().map(|b| b.mesh().measure().volume.abs()).sum::<f64>();
     let before = volume(&s);
     let r = run(&mut s, "occurrence.reparent", json!({"occurrence": "Component2:1", "parent": "Component1"}));
     assert_eq!(r["path"].as_array().map(Vec::len), Some(2), "{r}");
