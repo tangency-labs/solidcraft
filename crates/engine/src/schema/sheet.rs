@@ -1,5 +1,5 @@
-//! Contracts for the sheet metal feature commands in `cmd/sheet.rs`. They all return
-//! [`FeatureResult`](super::features::FeatureResult).
+//! Contracts for sheet metal feature and rule commands in `cmd/sheet.rs`. Feature commands
+//! return [`FeatureResult`](super::features::FeatureResult); rule commands have their own replies.
 //!
 //! A sheet metal rule sets the sheet's thickness, K-factor, bend radius and reliefs: the
 //! commands refuse those keys with a pointer to `sheet.manage_rules`, so they are no keys of
@@ -543,6 +543,201 @@ pub struct ConvertParams {
     pub rule: Option<String>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
+}
+
+/// List the design's sheet metal rules (the built-in steel rule if none are saved).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct RulesParams {}
+
+/// Create or edit a sheet metal rule, activate it, or delete it. Expressions may use design
+/// parameters; `Thickness` inside a rule's other expressions is that rule's thickness.
+/// The handler evaluates dimensions and ranges against the design after checking the contract.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ManageRulesParams {
+    /// The rule's name (trimmed, nonempty, at most 128 bytes). A new rule inherits the active
+    /// rule's fields; an existing rule keeps fields not given here.
+    pub name: RuleName,
+    /// Thickness, more than 0 and less than 10000 mm. Ignored when deleting.
+    pub thickness: Option<LengthExpr>,
+    /// Neutral-axis fraction, from 0 to 1. Ignored when deleting.
+    pub k_factor: Option<super::types::NumberExpr>,
+    /// Inner bend radius, nonnegative. Ignored when deleting.
+    pub bend_radius: Option<LengthExpr>,
+    /// Bend relief width. Ignored when deleting.
+    pub relief_width: Option<LengthExpr>,
+    /// Bend relief depth. Ignored when deleting.
+    pub relief_depth: Option<LengthExpr>,
+    /// Corner relief size across. Ignored when deleting.
+    pub corner_relief: Option<LengthExpr>,
+    /// Corner relief shape. Ignored when deleting.
+    pub corner_relief_shape: Option<ReliefShapeParam>,
+    /// Inner radius of flat hems. Ignored when deleting.
+    pub hem_gap: Option<LengthExpr>,
+    /// Gap between meeting flanges. Ignored when deleting.
+    pub gap: Option<LengthExpr>,
+    /// How DXF bend notes show angles: bend or included, ignoring case and surrounding blanks.
+    /// Ignored when deleting.
+    pub angle_display: Option<AngleDisplayParam>,
+    /// Make this the active rule. Default: true if there is no saved active rule, otherwise false.
+    /// False leaves the active choice unchanged; ignored when deleting.
+    pub active: Option<bool>,
+    /// Delete the named saved rule instead of editing it. Default: false. Deleting the active
+    /// rule clears that choice; listing then uses the first remaining rule, else built-in steel.
+    pub delete: Option<bool>,
+}
+
+/// A rule name, checked by the handler's reader.
+#[derive(Debug)]
+pub struct RuleName(pub String);
+
+impl<'de> Deserialize<'de> for RuleName {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        crate::cmd::sheet_rule_name(&v).map(|n| RuleName(n.to_string())).map_err(|why| D::Error::custom(whole(why)))
+    }
+}
+
+impl JsonSchema for RuleName {
+    fn schema_name() -> Cow<'static, str> {
+        "SheetRuleName".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"type": "string", "description": "Trimmed, nonempty rule name, at most 128 bytes after trimming."})
+    }
+}
+
+/// A rule's bend-note angle display, checked by the same parser as the handler.
+#[derive(Debug)]
+pub struct AngleDisplayParam(pub solidcraft_doc::sheet::AngleDisplay);
+
+impl<'de> Deserialize<'de> for AngleDisplayParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d)?
+            .as_str()
+            .and_then(solidcraft_doc::sheet::AngleDisplay::parse)
+            .map(AngleDisplayParam)
+            .ok_or_else(|| D::Error::custom("must be bend or included"))
+    }
+}
+
+impl JsonSchema for AngleDisplayParam {
+    fn schema_name() -> Cow<'static, str> {
+        "SheetAngleDisplay".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"type": "string", "description": "bend or included, ignoring case and surrounding blanks.",
+            "pattern": format!("^{blank}([Bb][Ee][Nn][Dd]|[Ii][Nn][Cc][Ll][Uu][Dd][Ee][Dd]){blank}$", blank = blanks())})
+    }
+}
+
+/// A saved rule's expressions, including the default bend-angle display which the saved
+/// design omits. These are expressions, not evaluated values.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct RuleReply {
+    pub name: String,
+    pub thickness: String,
+    pub k_factor: String,
+    pub bend_radius: String,
+    pub relief_width: String,
+    pub relief_depth: String,
+    pub corner_relief: String,
+    pub corner_relief_shape: String,
+    pub hem_gap: String,
+    pub gap: String,
+    pub angle_display: String,
+}
+
+impl From<&solidcraft_doc::sheet::SheetRule> for RuleReply {
+    fn from(r: &solidcraft_doc::sheet::SheetRule) -> Self {
+        Self {
+            name: r.name.clone(),
+            thickness: r.thickness.clone(),
+            k_factor: r.k_factor.clone(),
+            bend_radius: r.bend_radius.clone(),
+            relief_width: r.relief_width.clone(),
+            relief_depth: r.relief_depth.clone(),
+            corner_relief: r.corner_relief.clone(),
+            corner_relief_shape: r.corner_relief_shape.clone(),
+            hem_gap: r.hem_gap.clone(),
+            gap: r.gap.clone(),
+            angle_display: r.angle_display.clone(),
+        }
+    }
+}
+
+/// Evaluated rule values: lengths in millimetres, dimensionless K-factor and canonical choices.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct RuleValuesReply {
+    pub thickness: f64,
+    pub k_factor: f64,
+    pub bend_radius: f64,
+    pub relief_width: f64,
+    pub relief_depth: f64,
+    pub corner_relief: f64,
+    pub corner_relief_shape: String,
+    pub hem_gap: f64,
+    pub gap: f64,
+    pub angle_display: String,
+}
+
+impl From<solidcraft_doc::sheet::RuleValues> for RuleValuesReply {
+    fn from(r: solidcraft_doc::sheet::RuleValues) -> Self {
+        Self {
+            thickness: r.thickness,
+            k_factor: r.k_factor,
+            bend_radius: r.bend_radius,
+            relief_width: r.relief_width,
+            relief_depth: r.relief_depth,
+            corner_relief: r.corner_relief,
+            corner_relief_shape: r.corner_relief_shape.name().into(),
+            hem_gap: r.hem_gap,
+            gap: r.gap,
+            angle_display: r.angle_display.name().into(),
+        }
+    }
+}
+
+/// A rule and its evaluated values, or null values if its expressions no longer evaluate.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct ListedRule {
+    pub rule: RuleReply,
+    pub values: Option<RuleValuesReply>,
+}
+
+/// The rule list and effective active name.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct RulesResult {
+    pub rules: Vec<ListedRule>,
+    pub active: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// A feature that failed to rebuild after a rule was edited.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct RuleFeatureError {
+    pub feature: String,
+    pub error: String,
+}
+
+/// A successful rule edit or deletion, preserving the existing reply alternatives.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ManageRulesResult {
+    Changed {
+        rule: Box<RuleReply>,
+        values: RuleValuesReply,
+        errors: Vec<RuleFeatureError>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        param_warnings: Vec<String>,
+    },
+    Deleted {
+        deleted: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        param_warnings: Vec<String>,
+    },
 }
 
 #[cfg(test)]

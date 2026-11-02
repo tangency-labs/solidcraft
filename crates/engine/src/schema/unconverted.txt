@@ -225,9 +225,7 @@ selection.delete
 sheet.export_bend_table
 sheet.export_dxf
 sheet.flat_pattern
-sheet.manage_rules
 sheet.path_flange
-sheet.rules
 sketch.arc.center_point
 sketch.arc.tangent
 sketch.arc.three_point

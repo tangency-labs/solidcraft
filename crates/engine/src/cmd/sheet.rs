@@ -13,7 +13,10 @@ use super::CommandSpec;
 use super::features::{add_feature, check_expr, feature_sketch, profiles, sketch_id};
 use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list, vec3};
 use crate::schema::features::FeatureResult;
-use crate::schema::sheet::{ConvertParams, FlangeParams, FoldParams, HemParams, PerforateParams, UnfoldParams};
+use crate::schema::sheet::{
+    ConvertParams, FlangeParams, FoldParams, HemParams, ListedRule, ManageRulesParams, ManageRulesResult, PerforateParams, RuleFeatureError,
+    RuleReply, RulesParams, RulesResult, UnfoldParams,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
@@ -23,6 +26,9 @@ const HEM_CONTRACT: TypedContract<HemParams> = TypedContract::new();
 const FOLD_CONTRACT: TypedContract<FoldParams> = TypedContract::new();
 const UNFOLD_CONTRACT: TypedContract<UnfoldParams> = TypedContract::new();
 const CONVERT_CONTRACT: TypedContract<ConvertParams> = TypedContract::new();
+
+const RULES_CONTRACT: TypedContract<RulesParams> = TypedContract::new();
+const MANAGE_RULES_CONTRACT: TypedContract<ManageRulesParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sheet.flange", "Flange", crate::checked!("sheet.flange", flange))
@@ -101,7 +107,8 @@ pub static COMMANDS: &[CommandSpec] = &[
              two flat faces tangent to it, either skin), makes it one bend of the rule's radius at their virtual sharp; \
              the faces' holes become cut-outs and their engravings, up to half the thickness deep, pockets)",
         ),
-    CommandSpec::new("sheet.manage_rules", "Sheet Metal Rules", rules).at("SHEET METAL", "MODIFY").icon("sheet_rules").params(
+    CommandSpec::new("sheet.manage_rules", "Sheet Metal Rules", crate::checked!("sheet.manage_rules", rules))
+        .contract(&MANAGE_RULES_CONTRACT).output(output_schema_for::<ManageRulesResult>).at("SHEET METAL", "MODIFY").icon("sheet_rules").params(
         "name (new or existing); thickness?, k_factor?, bend_radius?, relief_width?, relief_depth?, corner_relief?, hem_gap?, gap? (expressions; `Thickness` is the rule's; \
          gap: between flanges that meet at a corner, whose ends are closed toward each other at any angle); \
          corner_relief_shape?: notch|round|rectangular|tear (what is cut where two bends meet at a corner of the base: round and rectangular a relief \
@@ -110,7 +117,8 @@ pub static COMMANDS: &[CommandSpec] = &[
          left between the bend's sides, 180° less it; the bend table gives both, and a flange's `angle` is always the bend angle); \
          active?: bool; delete?: bool",
     ),
-    CommandSpec::new("sheet.rules", "List Sheet Metal Rules", list_rules).icon("sheet_rules").noundo().doc_only().params("→ rules with their expressions and values, and the active one"),
+    CommandSpec::new("sheet.rules", "List Sheet Metal Rules", crate::checked!("sheet.rules", list_rules))
+        .contract(&RULES_CONTRACT).output(output_schema_for::<RulesResult>).icon("sheet_rules").noundo().doc_only().params("→ rules with their expressions and values, and the active one"),
     CommandSpec::new("sheet.flat_pattern", "Create Flat Pattern", flat_pattern)
         .at("SHEET METAL", "CREATE")
         .icon("flat")
@@ -617,9 +625,13 @@ fn convert(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
+pub(crate) fn sheet_rule_name(v: &Value) -> std::result::Result<&str, &'static str> {
+    v.as_str().map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or("`name` is required")
+}
+
 fn rules(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sheet.manage_rules";
-    let name = str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` is required"))?.to_string();
+    let name = sheet_rule_name(p.get("name").unwrap_or(&Value::Null)).map_err(|why| bad(cmd, why))?.to_string();
     if bool_(p, "delete").unwrap_or(false) {
         let doc = s.doc_mut();
         let before = doc.sheet.rules.len();
@@ -630,7 +642,7 @@ fn rules(s: &mut Session, p: &Value) -> Result<Value> {
         if doc.sheet.active.as_deref() == Some(name.as_str()) {
             doc.sheet.active = None;
         }
-        return Ok(json!({"deleted": name}));
+        return serde_json::to_value(ManageRulesResult::Deleted { deleted: name, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()));
     }
     let mut rule =
         s.doc.sheet.rules.iter().find(|r| r.name == name).cloned().unwrap_or_else(|| SheetRule { name: name.clone(), ..s.doc.sheet_rule(None) });
@@ -663,18 +675,15 @@ fn rules(s: &mut Session, p: &Value) -> Result<Value> {
         doc.sheet.active = Some(name.clone());
     }
     s.refresh();
-    let errors: Vec<Value> = s.model.results.iter().filter_map(|r| r.error.as_ref().map(|e| json!({"feature": r.name, "error": e}))).collect();
-    Ok(json!({"rule": rule_json(&rule), "values": values, "errors": errors}))
-}
-
-/// A rule as the rule commands list it: as saved, and with its `angle_display` also while it is
-/// the `bend` a design leaves out.
-fn rule_json(r: &SheetRule) -> Value {
-    let mut v = json!(r);
-    if let Value::Object(m) = &mut v {
-        m.insert("angle_display".into(), json!(r.angle_display));
-    }
-    v
+    let errors =
+        s.model.results.iter().filter_map(|r| r.error.as_ref().map(|e| RuleFeatureError { feature: r.name.clone(), error: e.clone() })).collect();
+    serde_json::to_value(ManageRulesResult::Changed {
+        rule: Box::new(RuleReply::from(&rule)),
+        values: values.into(),
+        errors,
+        param_warnings: Vec::new(),
+    })
+    .map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn list_rules(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -683,9 +692,9 @@ fn list_rules(s: &mut Session, _p: &Value) -> Result<Value> {
     if all.is_empty() {
         all.push(SheetRule::steel());
     }
-    let rules: Vec<Value> = all.iter().map(|r| json!({"rule": rule_json(r), "values": s.doc.rule_values(&vals, r).ok()})).collect();
+    let rules = all.iter().map(|r| ListedRule { rule: r.into(), values: s.doc.rule_values(&vals, r).ok().map(Into::into) }).collect();
     let active = s.doc.sheet_rule(None).name;
-    Ok(json!({"rules": rules, "active": active}))
+    serde_json::to_value(RulesResult { rules, active, param_warnings: Vec::new() }).map_err(|e| bad("sheet.rules", e.to_string()))
 }
 
 fn no_sheet_body(cmd: &str) -> EngineError {
