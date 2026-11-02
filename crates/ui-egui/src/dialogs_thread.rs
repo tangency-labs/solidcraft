@@ -2,7 +2,7 @@
 //! Browsing choices does not edit the model or freeze an automatic Thread feature.
 
 use solidcraft_engine::doc::{
-    Document, TappedThreadFamily, ThreadHandedness, metric_thread_sizes, parse_metric_thread, parse_tapped_thread, tapped_thread_sizes,
+    Document, TappedThread, TappedThreadFamily, ThreadHandedness, metric_thread_sizes, parse_metric_thread, parse_tapped_thread, tapped_thread_sizes,
 };
 
 use crate::dialogs::{combo, form_row};
@@ -138,7 +138,10 @@ pub(crate) fn hole_rows(ui: &mut egui::Ui, doc: &Document, designation: &mut Str
     form_row(ui, "Tap drill diameter", |ui| {
         match parse_tapped_thread(designation).filter(|_| custom.as_ref().is_none_or(|draft| draft.error.is_none())) {
             Some(size) => {
-                ui.label(format!("{} mm", size.tap_drill));
+                let response = ui.label(tap_drill_label(&size));
+                if matches!(size.family, TappedThreadFamily::Unc | TappedThreadFamily::Unf) {
+                    response.on_hover_text(format!("{} mm", size.tap_drill));
+                }
             }
             None => {
                 ui.label(tr("thread.select_size"));
@@ -146,6 +149,18 @@ pub(crate) fn hole_rows(ui: &mut egui::Ui, doc: &Document, designation: &mut Str
         }
     });
     enter || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+}
+
+/// A Unified size is chosen by someone working in inches, and its catalogued drill is an
+/// inch drill (#10353), so it reads in inches. The catalogue stays in millimetres and the row
+/// shows the millimetre bore on hover: both values side by side do not fit the form's value
+/// column (`0.4219 in (10.715625 mm)` was cut off). Metric and the G/Rp pipe sizes keep
+/// millimetres: their drill tables are metric.
+fn tap_drill_label(size: &TappedThread) -> String {
+    match size.family {
+        TappedThreadFamily::Unc | TappedThreadFamily::Unf => crate::prefs::format_length(size.tap_drill, "in", 3),
+        TappedThreadFamily::Metric | TappedThreadFamily::G | TappedThreadFamily::Rp => format!("{} mm", size.tap_drill),
+    }
 }
 
 pub(crate) fn handedness_row(ui: &mut egui::Ui, handedness: &mut ThreadHandedness, id: &str) {
@@ -447,7 +462,7 @@ mod contribution_tests {
         h.frames(3);
         assert_eq!(apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1["thread"], "1/4-20 UNC");
         assert!(crate::scenario::handle_at("dialog:Nominal diameter").is_none());
-        assert!(h.widget("5.1054 mm").is_some());
+        assert!(h.widget("0.201 in").is_some(), "a UNC size's tap drill must read in inches (#10353)");
         h.step(&json!({"click":{"handle":"dialog:Profile"}})).unwrap();
         h.step(&json!({"click":{"handle":"dialog:Profile:UNF"}})).unwrap();
         h.step(&json!({"click":{"handle":"dialog:Size"}})).unwrap();
@@ -469,6 +484,24 @@ mod contribution_tests {
         h.frames(3);
         assert!(h.widget("Custom").is_some());
         assert!(crate::scenario::handle_at("dialog:Nominal diameter").is_some());
+    }
+
+    #[test]
+    fn unified_tap_drills_read_in_inches_and_other_profiles_in_millimetres() {
+        // #10353: 1/4-20 UNC is a #7 drill (0.201 in), 1/2-13 UNC a 27/64 in drill.
+        for (name, label) in [("1/4-20 UNC", "0.201 in"), ("1/2-13 UNC", "0.4219 in"), ("#10-32 UNF", "0.159 in")] {
+            assert_eq!(tap_drill_label(&parse_tapped_thread(name).unwrap()), label);
+        }
+        for family in [TappedThreadFamily::Unc, TappedThreadFamily::Unf] {
+            for size in tapped_thread_sizes(family) {
+                let label = tap_drill_label(&size);
+                let inches: f64 = label.strip_suffix(" in").unwrap().parse().unwrap();
+                assert!((inches * 25.4 - size.tap_drill).abs() < 0.0005 * 25.4, "{}: {label}", size.designation);
+            }
+        }
+        for (name, label) in [("M8", "6.75 mm"), ("G 1/4", "11.75 mm"), ("Rp 1/4", "11.4 mm")] {
+            assert_eq!(tap_drill_label(&parse_tapped_thread(name).unwrap()), label);
+        }
     }
 
     #[test]

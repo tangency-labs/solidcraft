@@ -14,7 +14,9 @@ labels: G 1/4 has a basic major diameter of 13.157 mm, not 6.35 mm.
 
 For UNC/UNF, the proposed pilot diameter comes from Guhring's **CUT TAPS,
 approximately 75% theoretical thread** column. Fractional, letter and numbered
-drills are converted to millimetres without rounding away the recommendation.
+drills are converted to millimetres without rounding away the recommendation. The
+Hole dialog shows a Unified size's drill in inches, for example `0.201 in` for
+1/4-20 UNC, and the millimetre bore when the pointer rests on it.
 These are starting recommendations for cutting taps, not form taps. Material,
 depth, tolerances, drilling accuracy and the tap manufacturer's process guidance
 still determine the appropriate drill; the command's explicit `diameter` can
