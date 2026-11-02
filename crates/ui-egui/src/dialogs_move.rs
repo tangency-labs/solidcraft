@@ -98,7 +98,7 @@ pub(crate) fn chained(app: &SolveApp) -> Option<(Vec<String>, Mat)> {
         (Some(s), None) => s,
         (None, c) => c?,
     };
-    (!is_identity(&m)).then(|| (items(d, 0).body_names(), m))
+    (!is_identity(&m)).then(|| (bodies_of(app, d), m))
 }
 
 /// Whether the triad is being dragged in a Move dialog (`drag` keeps the values it began from).
@@ -117,7 +117,7 @@ fn made(app: &SolveApp, d: &Dialog) -> Option<Mat> {
 /// Where a point a pick keeps on moved body `body` (see [`from_shown`]) shows: moved on by the
 /// current type's own move.
 pub(crate) fn shown_point(app: &SolveApp, body: &str, p: Vec3) -> Vec3 {
-    let Some(d) = app.dialog.as_ref().filter(|d| matches!(d.kind, Kind::Move { .. }) && items(d, 0).body_names().iter().any(|n| n == body)) else {
+    let Some(d) = app.dialog.as_ref().filter(|d| matches!(d.kind, Kind::Move { .. }) && bodies_of(app, d).iter().any(|n| n == body)) else {
         return p;
     };
     made(app, d).map_or(p, |m| apply_point(&m, p))
@@ -128,7 +128,7 @@ pub(crate) fn shown_point(app: &SolveApp, body: &str, p: Vec3) -> Vec3 {
 /// own move. Kept there, a pivot or From point picked mid-move doesn't move with the move it
 /// sets.
 pub(crate) fn from_shown(app: &SolveApp, sel: Sel) -> Sel {
-    let Some(d) = app.dialog.as_ref().filter(|d| matches!(d.kind, Kind::Move { .. }) && on_moved(d, &sel)) else { return sel };
+    let Some(d) = app.dialog.as_ref().filter(|d| matches!(d.kind, Kind::Move { .. }) && on_moved(&bodies_of(app, d), &sel)) else { return sel };
     let Some(back) = made(app, d).and_then(|m| mat_inverse(&m)) else { return sel };
     match sel {
         Sel::Edge { body, index, point } => Sel::Edge { body, index, point: apply_point(&back, point) },
@@ -138,12 +138,84 @@ pub(crate) fn from_shown(app: &SolveApp, sel: Sel) -> Sel {
     }
 }
 
-/// Whether a pick is on one of the bodies being moved.
-fn on_moved(d: &Dialog, s: &Sel) -> bool {
+/// Whether a pick is on one of the bodies being moved (`moved`, see [`bodies_of`]).
+fn on_moved(moved: &[String], s: &Sel) -> bool {
     match s {
-        Sel::Edge { body, .. } | Sel::Face { body, .. } | Sel::Vertex { body, .. } => items(d, 0).body_names().contains(body),
+        Sel::Edge { body, .. } | Sel::Face { body, .. } | Sel::Vertex { body, .. } => moved.contains(body),
         _ => false,
     }
+}
+
+/// The bodies the picks stand for: the bodies picked, and the bodies of each picked component
+/// (the bodies its placement shows, as a Browser row lists them).
+fn bodies_of(app: &SolveApp, d: &Dialog) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for sel in items(d, 0) {
+        let names = match sel {
+            Sel::Body { name } => vec![name.clone()],
+            Sel::Occurrence { path } => app.session.occurrence_bodies(path, true).unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        for name in names {
+            if !out.contains(&name) {
+                out.push(name);
+            }
+        }
+    }
+    out
+}
+
+/// Whether Create Copy is ticked.
+fn copies(d: &Dialog) -> bool {
+    d.extra.get("copy").and_then(Value::as_bool).unwrap_or(false)
+}
+
+/// Whether a Move dialog takes the components picked (not their bodies) into its bodies input: a
+/// click on a component in the component pick mode, or a Browser row. Not when it edits a move
+/// that is already a feature (its picks stay bodies). Without Create Copy the components still
+/// move their bodies (`targets`).
+pub(crate) fn picks_components(app: &SolveApp) -> bool {
+    app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::Move { .. }) && d.active == 0 && d.editing.is_none())
+}
+
+/// What a click picks in a Move dialog: with the component pick mode on, the component a body
+/// belongs to (copied as a component with Create Copy, see `targets`), otherwise the pick as it was.
+pub(crate) fn component_pick(app: &SolveApp, hit: &crate::viewport::Hit, sel: Sel) -> Sel {
+    let (crate::viewport::Hit::Face { body, .. }, Sel::Body { .. }) = (hit, &sel) else { return sel };
+    if app.ui.pick_components && picks_components(app) {
+        let occurrence = crate::viewport::component_selection(app, body);
+        if matches!(occurrence, Sel::Occurrence { .. }) {
+            return occurrence;
+        }
+    }
+    sel
+}
+
+/// What the move moves and copies, as solid.move takes them: the bodies, and with Create Copy the
+/// components picked (copied as components, see `occurrences`).
+fn targets(app: &SolveApp, d: &Dialog) -> (Vec<String>, Vec<Vec<u64>>) {
+    if !copies(d) {
+        return (bodies_of(app, d), Vec::new());
+    }
+    let components = items(d, 0)
+        .iter()
+        .filter_map(|s| match s {
+            Sel::Occurrence { path } => Some(path.clone()),
+            _ => None,
+        })
+        .collect();
+    (items(d, 0).body_names(), components)
+}
+
+/// The solid.move parameters that name what the move moves (`bodies`, and `occurrences` when
+/// there are components to copy).
+fn targets_json(app: &SolveApp, d: &Dialog) -> Value {
+    let (bodies, components) = targets(app, d);
+    let mut p = json!({ "bodies": bodies });
+    if !components.is_empty() {
+        p["occurrences"] = json!(components);
+    }
+    p
 }
 
 /// A point of the model before this move where the earlier types' move puts it: on a moved body
@@ -193,7 +265,7 @@ fn sel_point(app: &SolveApp, d: &Dialog, s: Option<&Sel>) -> Option<Vec3> {
                 None => app.session.world_state(),
             };
             // The centre is found where the body was modelled; the picked point is where it stands.
-            Some(crate::dialogs::edge_circle_in(&st, body, *index).map_or(*point, |(c, ..)| carried(d, on_moved(d, s), c)))
+            Some(crate::dialogs::edge_circle_in(&st, body, *index).map_or(*point, |(c, ..)| carried(d, on_moved(&bodies_of(app, d), s), c)))
         }
         Sel::Vertex { point, .. } | Sel::Face { point, .. } => Some(*point),
         _ => None,
@@ -211,7 +283,7 @@ fn bodies_center(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
         None => app.session.model.state(),
     };
     let mut bb: Option<(Vec3, Vec3)> = None;
-    for n in items(d, 0).body_names() {
+    for n in bodies_of(app, d) {
         let Some(b) = st.body(&n) else { continue };
         let x = b.mesh().bounds();
         bb = Some(match bb {
@@ -271,7 +343,7 @@ pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
             let made = transform(app, &p)?;
             with_transform(p, &mat_mul(&made, &c))
         }
-        (Step::Needs(_), Some(c)) => with_transform(json!({ "bodies": items(d, 0).body_names() }), &c),
+        (Step::Needs(_), Some(c)) => with_transform(targets_json(app, d), &c),
     };
     if d.extra.get("copy").and_then(Value::as_bool).unwrap_or(false) {
         p["copy"] = json!(true);
@@ -323,13 +395,13 @@ fn with_transform(mut p: Value, m: &Mat) -> Value {
 /// The current type's own move, from where the earlier types leave the bodies.
 fn step(app: &SolveApp, d: &Dialog) -> Result<Step, String> {
     let Kind::Move { mode, x, y, z, rx, ry, rz, angle } = &d.kind else { return Err("not a move".into()) };
-    let bodies = items(d, 0).body_names();
-    if bodies.is_empty() {
+    let (bodies, components) = targets(app, d);
+    if bodies.is_empty() && components.is_empty() {
         return Err("select bodies first".into());
     }
     let need_point = |i: usize, what: &str| sel_point(app, d, items(d, i).first()).ok_or(format!("select {what} first"));
     let num = |t: Vec3| json!([mm(t.x), mm(t.y), mm(t.z)]);
-    let mut p = json!({ "bodies": bodies });
+    let mut p = targets_json(app, d);
     match *mode {
         TRANSLATE => p["translate"] = json!([x, y, z]),
         FREE => {
@@ -398,7 +470,7 @@ fn step(app: &SolveApp, d: &Dialog) -> Result<Step, String> {
 fn axis_line(app: &SolveApp, d: &Dialog, s: &Sel) -> Option<(Vec3, Vec3)> {
     let (o, a) = modelled_axis(app, s)?;
     match chain(d) {
-        Some(c) if on_moved(d, s) => Some((apply_point(&c, o), apply_vector(&c, a))),
+        Some(c) if on_moved(&bodies_of(app, d), s) => Some((apply_point(&c, o), apply_vector(&c, a))),
         _ => Some((o, a)),
     }
 }
