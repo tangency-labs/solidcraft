@@ -1,0 +1,304 @@
+{
+ "description": "Acceptance case 84 (#4894), the drawing milestone's plate: 100 x 80 x 20 mm with two bores of 10 mm, sized from the parameters length, width, thickness, bore1_d and bore2_d; then a drawing of it with a top view at 1:2 on its A3 sheet.",
+ "commands": [
+  {
+   "command": "parameters.change",
+   "params": {
+    "expression": "100 mm",
+    "name": "length",
+    "unit": "mm"
+   }
+  },
+  {
+   "command": "parameters.change",
+   "params": {
+    "expression": "80 mm",
+    "name": "width",
+    "unit": "mm"
+   }
+  },
+  {
+   "command": "parameters.change",
+   "params": {
+    "expression": "20 mm",
+    "name": "thickness",
+    "unit": "mm"
+   }
+  },
+  {
+   "command": "parameters.change",
+   "params": {
+    "expression": "10 mm",
+    "name": "bore1_d",
+    "unit": "mm"
+   }
+  },
+  {
+   "command": "parameters.change",
+   "params": {
+    "expression": "10 mm",
+    "name": "bore2_d",
+    "unit": "mm"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "name": "StockSketch",
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "construction": false,
+    "ids": [
+     "l1"
+    ],
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      100,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "construction": false,
+    "ids": [
+     "l2"
+    ],
+    "points": [
+     "l1.end",
+     [
+      100,
+      80
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "construction": false,
+    "ids": [
+     "l3"
+    ],
+    "points": [
+     "l2.end",
+     [
+      0,
+      80
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "construction": false,
+    "ids": [
+     "l4"
+    ],
+    "points": [
+     "l3.end",
+     "l1.start"
+    ]
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     20,
+     20
+    ],
+    "construction": true,
+    "id": "bore_circle_1",
+    "radius": 5
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     60,
+     50
+    ],
+    "construction": true,
+    "id": "bore_circle_2",
+    "radius": 5
+   }
+  },
+  {
+   "command": "sketch.constraint.coincident",
+   "params": {
+    "a": "l1.start",
+    "b": "origin"
+   }
+  },
+  {
+   "command": "sketch.constraint.horizontal_vertical",
+   "params": {
+    "line": "l1",
+    "mode": "horizontal"
+   }
+  },
+  {
+   "command": "sketch.constraint.horizontal_vertical",
+   "params": {
+    "line": "l2",
+    "mode": "vertical"
+   }
+  },
+  {
+   "command": "sketch.constraint.horizontal_vertical",
+   "params": {
+    "line": "l3",
+    "mode": "horizontal"
+   }
+  },
+  {
+   "command": "sketch.constraint.horizontal_vertical",
+   "params": {
+    "line": "l4",
+    "mode": "vertical"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l1.start",
+     "l1.end"
+    ],
+    "orientation": "horizontal",
+    "type": "distance",
+    "value": "length"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l2.start",
+     "l2.end"
+    ],
+    "orientation": "vertical",
+    "type": "distance",
+    "value": "width"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "bore_circle_1"
+    ],
+    "type": "diameter",
+    "value": "bore1_d"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "bore_circle_2"
+    ],
+    "type": "diameter",
+    "value": "bore2_d"
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "body_names": [
+     "Plate"
+    ],
+    "direction": "positive",
+    "distance": "thickness",
+    "name": "Stock",
+    "operation": "new",
+    "profiles": [
+     {
+      "loops": [
+       {
+        "curves": [
+         "l1",
+         "l2",
+         "l3",
+         "l4"
+        ],
+        "outer": true
+       }
+      ],
+      "sketch": "StockSketch"
+     }
+    ],
+    "sketch": "StockSketch"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "diameter": "bore1_d",
+    "direction": [
+     -0.0,
+     -0.0,
+     -1.0
+    ],
+    "name": "Bore1",
+    "position": [
+     20,
+     20,
+     20
+    ],
+    "type": "simple"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "diameter": "bore2_d",
+    "direction": [
+     -0.0,
+     -0.0,
+     -1.0
+    ],
+    "name": "Bore2",
+    "position": [
+     60,
+     50,
+     20
+    ],
+    "type": "simple"
+   }
+  },
+  {
+   "command": "drawing.create",
+   "params": {}
+  },
+  {
+   "command": "drawing.view.base",
+   "params": {
+    "sheet": "Sheet 1",
+    "view": "top",
+    "scale": "1:2",
+    "position_mm": [
+     150,
+     180
+    ]
+   }
+  }
+ ]
+}
