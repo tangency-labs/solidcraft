@@ -2361,7 +2361,6 @@
   "prefs.render_previous_geometry_budget_help": "恢复先前的固定几何内存上限（64位桌面为512 MiB，其他平台为128 MiB），替代基于设备的预算。",
   "prefs.reports_saved": "已保存 {n} 份",
   "prefs.restore_page_defaults": "恢复本页默认值",
-  "prefs.revision_history": "修订快照",
   "prefs.revision_history_note": "默认关闭。无论是否开启，保存都会记录修订。开启后会在大小和修订数量限制内保留可恢复的模型。",
   "prefs.revision_history_on": "每次保存保留快照",
   "prefs.revision_history_size": "最大大小",

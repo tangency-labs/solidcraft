@@ -2361,7 +2361,6 @@
   "prefs.render_previous_geometry_budget_help": "Restore the previous fixed geometry limit (512 MiB on 64-bit desktop, 128 MiB elsewhere) instead of the device-based budget.",
   "prefs.reports_saved": "{n} saved",
   "prefs.restore_page_defaults": "Restore page defaults",
-  "prefs.revision_history": "Revision snapshots",
   "prefs.revision_history_note": "Off by default. A save records the revision either way. Turn this on to keep a restorable model, within the size and revision limits.",
   "prefs.revision_history_on": "Keep a snapshot of each save",
   "prefs.revision_history_size": "Maximum size",

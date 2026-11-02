@@ -2361,7 +2361,6 @@
   "prefs.render_previous_geometry_budget_help": "デバイスに基づく予算の代わりに、以前の固定ジオメトリ上限（64ビットデスクトップでは512 MiB、その他では128 MiB）に戻します。",
   "prefs.reports_saved": "{n} 件保存済み",
   "prefs.restore_page_defaults": "このページを既定値に戻す",
-  "prefs.revision_history": "リビジョンのスナップショット",
   "prefs.revision_history_note": "既定ではオフです。保存はいずれにしてもリビジョンを記録します。オンにすると、サイズと件数の上限内で復元できるモデルを保持します。",
   "prefs.revision_history_on": "保存ごとにスナップショットを保持",
   "prefs.revision_history_size": "最大サイズ",
