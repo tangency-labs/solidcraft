@@ -427,11 +427,12 @@ A named list of rules that says which commands and abilities a member may use.
 
 A rule allows or denies an ability or the commands a pattern names, on the whole design or only
 on some of it. A denial wins, and anything not allowed is refused. Three roles are built in:
-*Creator* may do anything; *Worker* edits the design but doesn't merge, manage people and roles,
-or present; *Viewer* sees the model only, and never edits, saves or exports it.
+*Creator* may do anything; *Worker* edits the design but doesn't merge or manage people and
+roles, and presents only when a Creator allows it; *Viewer* sees the model only, and never edits,
+saves, exports or presents it.
 
-- **In SolidCraft:** a member's `role` in `collaboration/members.json`; the built-in roles
-  `Creator`, `Worker` and `Viewer`.
+- **In SolidCraft:** a member's `role` in `collaboration/members.json`, and their `may_present`
+  switch; the built-in roles `Creator`, `Worker` and `Viewer`.
 - **Don't use:** permission (for the whole role), access level, group.
 - **Elsewhere:** role, permission set, access level.
 - **For translators:** *Viewer* is the role, not a view of the model or a program that shows

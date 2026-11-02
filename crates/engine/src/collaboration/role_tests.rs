@@ -35,8 +35,8 @@ fn the_built_in_roles_are_creator_worker_and_viewer() {
 
 #[test]
 fn a_viewer_cannot_change_the_design_and_a_creator_can() {
-    assert_eq!(command(&Access::new(&viewer()), "solid.extrude"), Err("Viewers can't change the design".into()));
-    assert_eq!(command(&Access::new(&creator()), "solid.extrude"), Ok(()));
+    assert_eq!(command(&Access::new(&viewer(), false), "solid.extrude"), Err("Viewers can't change the design".into()));
+    assert_eq!(command(&Access::new(&creator(), false), "solid.extrude"), Ok(()));
 }
 
 /// The save, export and copy commands of the roles design (Q3) and the slicer and Printables
@@ -64,7 +64,7 @@ const SAVE_EXPORT_COPY: [&str; 18] = [
 
 #[test]
 fn a_viewer_runs_listed_reads_and_refuses_saves_exports_copies_and_hidden_edits() {
-    let viewer = Access::new(&viewer());
+    let viewer = Access::new(&viewer(), false);
     for id in ["inspect.measure", "view.fit", "select.set", "parameters.list", "browser.expand_all"] {
         assert_eq!(command(&viewer, id), Ok(()), "{id} is a read");
     }
@@ -101,7 +101,7 @@ fn a_viewer_runs_listed_reads_and_refuses_saves_exports_copies_and_hidden_edits(
 #[test]
 fn every_command_is_decided_for_the_viewer() {
     let role = viewer();
-    let viewer = Access::new(&role);
+    let viewer = Access::new(&role, false);
     let denied: Vec<&Pattern> = role
         .rules
         .iter()
@@ -141,7 +141,7 @@ fn the_viewer_names_registered_commands_one_by_one() {
 /// file when given a path.
 #[test]
 fn nothing_a_viewer_runs_writes_a_file() {
-    let viewer = Access::new(&viewer());
+    let viewer = Access::new(&viewer(), false);
     for spec in crate::cmd::command_specs().into_iter().filter(|spec| viewer.allows(Ask::Command(spec)).is_ok()) {
         let effect = crate::control_pending::command_effect(spec.id, &json!({"path": "out.file"}));
         assert_ne!(effect, crate::control_pending::Effect::WritesFile, "the Viewer may run {}, which writes a file", spec.id);
@@ -151,7 +151,7 @@ fn nothing_a_viewer_runs_writes_a_file() {
 #[test]
 fn creators_and_workers_run_every_command() {
     for role in [creator(), worker()] {
-        let access = Access::new(&role);
+        let access = Access::new(&role, false);
         for spec in crate::cmd::command_specs() {
             assert_eq!(access.allows(Ask::Command(spec)), Ok(()), "{} {}", role.name, spec.id);
         }
@@ -170,7 +170,7 @@ fn getting_the_design_means_seeing_it() {
 }
 
 fn custom(rules: Vec<Rule>) -> Access {
-    Access::new(&Role { name: "Supplier".into(), rules })
+    Access::new(&Role { name: "Supplier".into(), rules }, false)
 }
 
 fn allow(what: What) -> Rule {
@@ -234,13 +234,50 @@ fn a_command_outside_the_registry_is_refused() {
     // A registered command under an id the registry doesn't have (not a spec of its own, which the
     // icon check would count as a command without an icon).
     let stray = CommandSpec { id: "stray.command", ..*command_specs()[0] };
-    assert!(Access::new(&creator()).allows(Ask::Command(&stray)).is_err());
+    assert!(Access::new(&creator(), false).allows(Ask::Command(&stray)).is_err());
+}
+
+/// A Creator may let a Worker present (X7): the switch gives a Worker presenting and nothing else;
+/// a Creator presents either way; a Viewer never does, even handed the switch.
+#[test]
+fn a_worker_presents_only_when_a_creator_lets_them() {
+    let present = |role: Role, on: bool| Access::new(&role, on).allows(Ask::Ability(Ability::Present)).map_err(|why| why.to_string());
+    assert_eq!(present(worker(), false), Err("Workers can't present".into()));
+    assert_eq!(present(worker(), true), Ok(()));
+    assert_eq!((present(creator(), false), present(creator(), true)), (Ok(()), Ok(())));
+    assert_eq!((present(viewer(), false), present(viewer(), true)), (Err("Viewers can't present".into()), Err("Viewers can't present".into())));
+    // Nothing else changes: the other abilities, what the host sends, and every command but
+    // presenting's own (none until A2).
+    for role in [creator(), worker(), viewer()] {
+        let (off, on) = (Access::new(&role, false), Access::new(&role, true));
+        for spec in command_specs().into_iter().filter(|spec| !Ability::Present.covers(spec)) {
+            assert_eq!(off.allows(Ask::Command(spec)), on.allows(Ask::Command(spec)), "{} {}", role.name, spec.id);
+        }
+        for ability in Ability::ALL.into_iter().filter(|a| *a != Ability::Present) {
+            assert_eq!(off.allows(Ask::Ability(ability)), on.allows(Ask::Ability(ability)), "{} {ability:?}", role.name);
+        }
+        for what in [Receive::Design, Receive::Meshes] {
+            assert_eq!(off.allows(Ask::Receive(what)), on.allows(Ask::Receive(what)), "{} {what:?}", role.name);
+        }
+    }
+}
+
+/// Each ability a built-in role has, asked anywhere.
+#[test]
+fn each_built_in_role_has_its_abilities() {
+    let has = |role: Role| Ability::ALL.into_iter().filter(|a| Access::new(&role, false).allows(Ask::Ability(*a)).is_ok()).collect::<Vec<_>>();
+    use Ability::*;
+    assert_eq!(has(creator()), [Design, See, Edit, Merge, Manage, Comment, Ping, Present, Watch]);
+    assert_eq!(has(worker()), [Design, See, Edit, Comment, Ping, Watch]);
+    assert_eq!(has(viewer()), [Meshes, See, Comment, Ping, Watch]);
+    assert_eq!(Access::new(&worker(), false).allows(Ask::Ability(Merge)).map_err(|why| why.to_string()), Err("Workers can't merge changes".into()));
 }
 
 #[test]
 fn creators_and_workers_get_the_design_and_viewers_meshes_only() {
-    let gets =
-        |role: Role| [Receive::Design, Receive::Meshes].map(|what| Access::new(&role).allows(Ask::Receive(what)).map_err(|why| why.to_string()));
+    let gets = |role: Role| {
+        [Receive::Design, Receive::Meshes].map(|what| Access::new(&role, false).allows(Ask::Receive(what)).map_err(|why| why.to_string()))
+    };
     assert_eq!(gets(creator()), [Ok(()), Err("Creators can't get meshes only".into())]);
     assert_eq!(gets(worker()), [Ok(()), Err("Workers can't get meshes only".into())]);
     assert_eq!(gets(viewer()), [Err("Viewers can't get the design".into()), Ok(())]);
@@ -500,6 +537,30 @@ fn a_member_is_added_by_a_member() {
     refused(&with(|v| v["members"][0]["added_by"] = json!("ssh-ed25519 !!!!")), why);
 }
 
+/// `may_present` is off when left out, may be on for a Creator (who presents anyway) or a Worker,
+/// and on a Viewer refuses the whole list; off on a Viewer is read. Only `true` and `false` are
+/// read.
+#[test]
+fn a_viewer_is_never_let_present() {
+    let list = read(&good()).unwrap();
+    assert!(list.members.iter().all(|m| !m.may_present));
+    let list = read(&with(|v| v["members"][0]["may_present"] = json!(true))).unwrap();
+    assert!(list.members[0].may_present);
+    let worker = |on: bool| {
+        with(|v| {
+            v["members"][1]["role"] = json!("Worker");
+            v["members"][1]["may_present"] = json!(on);
+        })
+    };
+    assert!(read(&worker(true)).unwrap().members[1].may_present);
+    assert!(!read(&worker(false)).unwrap().members[1].may_present);
+    refused(&with(|v| v["members"][1]["may_present"] = json!(true)), "member 2: Viewers can't be allowed to present");
+    assert!(!read(&with(|v| v["members"][1]["may_present"] = json!(false))).unwrap().members[1].may_present);
+    for bad in [json!("true"), json!(1), json!(null), json!([true])] {
+        assert!(read(&with(|v| v["members"][0]["may_present"] = bad.clone())).is_err(), "{bad}");
+    }
+}
+
 #[test]
 fn a_list_where_nobody_can_manage_people_and_roles_is_refused() {
     let why = "nobody in it can manage people and roles";
@@ -513,14 +574,16 @@ fn a_list_where_nobody_can_manage_people_and_roles_is_refused() {
 /// roles.
 #[test]
 fn mutated_member_lists_are_refused_whole_or_read() {
-    let mut repeated = 0;
+    let (mut repeated, mut viewers_let_present) = (0, 0);
     for seed in 1..=20u8 {
         let count = usize::from(seed);
         let members: Vec<Value> = (0..count)
             .map(|i| {
                 let role = ["Creator", "Worker", "Viewer"][i % 3];
                 let kind = ["person", "agent"][i % 2];
-                json!({"key": key(i as u8 + 1, ["", "a@b"][i % 2]), "name": format!("Member {i}"), "colour": "#a0b1c2", "role": role, "kind": kind, "added_by": key(1, "")})
+                // Workers are let present, so a mutation can make one a Viewer that is.
+                let may_present = role == "Worker";
+                json!({"key": key(i as u8 + 1, ["", "a@b"][i % 2]), "name": format!("Member {i}"), "colour": "#a0b1c2", "role": role, "kind": kind, "added_by": key(1, ""), "may_present": may_present})
             })
             .collect();
         let list = json!({"format": "solidcraft-members/1", "version": seed, "members": members});
@@ -528,8 +591,16 @@ fn mutated_member_lists_are_refused_whole_or_read() {
         assert!(MemberList::read(&bytes).is_ok(), "list {seed} is valid");
         let cases = solidcraft_testkit::mutations(&bytes, true, u64::from(seed));
         solidcraft_testkit::survives(&format!("member list {seed}"), &cases, MAX_MEMBERS, |b| {
-            MemberList::read(b).ok().map(|l| {
+            let l = match MemberList::read(b) {
+                Ok(l) => l,
+                Err(e) => {
+                    viewers_let_present += usize::from(e.to_string().contains("can't be allowed to present"));
+                    return None;
+                }
+            };
+            Some({
                 assert!(l.members.iter().all(|m| Role::built_in(&m.role).is_some()), "a list naming another role was read");
+                assert!(l.members.iter().all(|m| !(m.may_present && m.role == "Viewer")), "a Viewer let present was read");
                 // Exactly the members whose name, ignoring case, someone earlier has.
                 let earlier = |i: usize| l.members[..i].iter().any(|m| m.name.to_lowercase() == l.members[i].name.to_lowercase());
                 let renames = l.renames_needed();
@@ -539,6 +610,8 @@ fn mutated_member_lists_are_refused_whole_or_read() {
             })
         });
     }
-    // The mutator must reach a repeated name, not only lists whose names all differ.
+    // The mutator must reach a repeated name, not only lists whose names all differ, and a Viewer
+    // let present.
     assert!(repeated > 0, "no mutated list repeated a name");
+    assert!(viewers_let_present > 0, "no mutated list let a Viewer present");
 }

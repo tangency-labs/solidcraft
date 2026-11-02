@@ -114,6 +114,22 @@ impl Ability {
         Ability::Watch,
     ];
 
+    /// What it lets someone do, as a refusal ends: "Viewers can't *get the design*".
+    fn verb(self) -> &'static str {
+        match self {
+            Ability::Design => "get the design",
+            Ability::Meshes => "get meshes only",
+            Ability::See => "see the design",
+            Ability::Edit => "change the design",
+            Ability::Merge => "merge changes",
+            Ability::Manage => "manage people and roles",
+            Ability::Comment => "comment",
+            Ability::Ping => "ping",
+            Ability::Present => "present",
+            Ability::Watch => "watch",
+        }
+    }
+
     /// Whether this ability is a group of commands, and so covered by the pattern `*`.
     fn is_commands(self) -> bool {
         !matches!(self, Ability::Design | Ability::Meshes | Ability::See)
@@ -135,6 +151,11 @@ impl Ability {
 /// Printables). A role refused one is told it can't save or export the design.
 const SAVES_OR_EXPORTS: &[&str] = &[
     "file.export",
+    "file.export_3mf",
+    "file.export_obj",
+    "file.export_step",
+    "file.export_stl",
+    "file.export_urdf",
     "file.export_view_dxf",
     "file.open_in_easyprint",
     "file.save",
@@ -168,6 +189,7 @@ const VIEWER_READS: &[&str] = &[
     "appearance.library",
     "appearance.list",
     "appearance.pick_up",
+    "assembly.mass_properties",
     "browser.collapse_all",
     "browser.expand_all",
     "component.copies",
@@ -191,6 +213,7 @@ const VIEWER_READS: &[&str] = &[
     "frame.profile.list",
     "frame.profile.properties",
     "inspect.accessibility",
+    "inspect.analysis",
     "inspect.center_of_mass",
     "inspect.clearance",
     "inspect.colored_components",
@@ -207,8 +230,13 @@ const VIEWER_READS: &[&str] = &[
     "inspect.section",
     "inspect.silhouette",
     "inspect.zebra",
+    "joint.find_limits",
     "joint.inspect",
     "joint.list",
+    "layout.apply",
+    "layout.get",
+    "layout.reset",
+    "layout.workspace.select",
     "library.inspect",
     "material.inspect",
     "material.list",
@@ -222,6 +250,21 @@ const VIEWER_READS: &[&str] = &[
     "motion.plot",
     "motion.trace",
     "occurrence.properties",
+    "panel.activate",
+    "panel.close",
+    "panel.collapse",
+    "panel.dismiss",
+    "panel.float",
+    "panel.focus",
+    "panel.list",
+    "panel.move",
+    "panel.native_close",
+    "panel.open",
+    "panel.peek",
+    "panel.popout",
+    "panel.reset_pair",
+    "panel.resize",
+    "panel.resize_pair",
     "parameters.complete",
     "parameters.graph",
     "parameters.list",
@@ -247,6 +290,7 @@ const VIEWER_READS: &[&str] = &[
     "render.scene",
     "render.settings.get",
     "render.status",
+    "render.texture.list",
     "select.clear",
     "select.filter",
     "select.same_look",
@@ -280,6 +324,7 @@ const VIEWER_READS: &[&str] = &[
     "view.list",
     "view.navigate",
     "view.navigation_bar",
+    "view.navigator",
     "view.next_tab",
     "view.normal_to",
     "view.perspective",
@@ -291,9 +336,11 @@ const VIEWER_READS: &[&str] = &[
     "view.render_inspector",
     "view.render_select",
     "view.render_stage",
+    "view.ribbon_tabs_only",
     "view.right",
     "view.shots_strip",
     "view.spin",
+    "view.status_details",
     "view.status_items",
     "view.tool",
     "view.top",
@@ -306,11 +353,13 @@ const VIEWER_REFUSES: &[&str] = &[
     "file.slicers",
     // Reads that also write a file through `path`.
     "assembly.bom",
+    "diagnostics.profile",
     // Change the design, its history or what is being edited, without an undo step.
     "component.activate",
     "component.edit_in_place",
     "component.finish_edit",
     "component.revert_position",
+    "diagnostics.validation",
     "edit.checkpoint",
     "edit.redo",
     "edit.repeat",
@@ -324,6 +373,8 @@ const VIEWER_REFUSES: &[&str] = &[
     "timeline.play",
     // Start an editing tool, whose every step is an edit.
     "appearance.paint",
+    // Assistant reads the design and runs commands of its own.
+    "ui.assistant",
     // Crash reports can hold other designs and file paths (the agent chat's gate refuses them
     // too, `ui-egui/src/agent_chat/gate.rs`).
     "diagnostics.crash_report",
@@ -336,6 +387,7 @@ const VIEWER_REFUSES: &[&str] = &[
     "doc.recovery_discard",
     "doc.recovery_list",
     "file.new",
+    "inspect.compare_picture",
     // Change or move this computer's settings profiles.
     "settings.profile.apply",
     "settings.profile.delete",
@@ -343,6 +395,8 @@ const VIEWER_REFUSES: &[&str] = &[
     "settings.profile.import",
     "settings.profile.rename",
     "settings.profile.save",
+    // Save a window layout to this computer's catalogue.
+    "layout.save",
     // Render jobs and render settings, until the Render workspace is decided for meshes-only
     // roles (A5).
     "render.camera.fit",
@@ -350,6 +404,7 @@ const VIEWER_REFUSES: &[&str] = &[
     "render.cancel",
     "render.batch",
     "render.compare",
+    "render.compare.divider",
     "render.library.physical.prepare",
     "render.library.studio.prepare",
     "render.library.surface.prepare",
@@ -357,8 +412,10 @@ const VIEWER_REFUSES: &[&str] = &[
     "render.preflight",
     "render.preflight.copy",
     "render.quality.prepare",
+    "render.result.discard",
     "render.result.pin",
     "render.result.regrade",
+    "render.result.select",
     "render.settings.apply",
     "render.start",
 ];
@@ -401,6 +458,20 @@ impl Role {
     pub fn built_in(name: &str) -> Option<Role> {
         BUILT_IN.iter().find(|(n, _)| *n == name).map(|(n, rules)| Role { name: (*n).into(), rules: rules() })
     }
+
+    /// Whether a Creator may let a member with this role present (X7): only a role that gets the
+    /// design. A Viewer may not.
+    fn may_be_let_present(&self) -> bool {
+        has(self, Ability::Design)
+    }
+
+    /// This role for a member a Creator lets present: its refusals to present give way.
+    fn presenting(&self) -> Role {
+        let refuses = |rule: &Rule| rule.effect == Effect::Deny && rule.what == What::Ability(Ability::Present);
+        let mut rules: Vec<Rule> = self.rules.iter().filter(|rule| !refuses(rule)).cloned().collect();
+        rules.push(allow(Ability::Present));
+        Role { name: self.name.clone(), rules }
+    }
 }
 
 /// Why something was refused: the English text the UI shows ("Viewers can't change the design").
@@ -427,6 +498,9 @@ pub enum Ask<'a> {
     Command(&'a CommandSpec),
     /// May the host send this?
     Receive(Receive),
+    /// May this collaborator do this anywhere (present, ping, watch: their buttons, before their
+    /// commands come with A2)?
+    Ability(Ability),
 }
 
 /// A role compiled once. Cost: building it matches every rule against every registered command
@@ -442,7 +516,17 @@ pub struct Access {
 }
 
 impl Access {
-    pub fn new(role: &Role) -> Access {
+    /// `role` compiled for one member. `may_present`: a Creator lets them present though their
+    /// role doesn't (a Worker); it changes nothing for a Creator, who presents anyway, nor for a
+    /// role that doesn't get the design, which [`MemberList::read`] refuses it on.
+    pub fn new(role: &Role, may_present: bool) -> Access {
+        let presenting;
+        let role = if may_present && role.may_be_let_present() {
+            presenting = role.presenting();
+            &presenting
+        } else {
+            role
+        };
         let commands = command_specs().into_iter().map(|spec| (spec.id, decide_command(role, spec))).collect();
         let abilities = Ability::ALL.into_iter().filter(|&a| has(role, a)).collect();
         Access { role: role.name.clone(), commands, abilities }
@@ -450,16 +534,16 @@ impl Access {
 
     /// Deny wins; anything not allowed is denied. The error is the reason the UI shows.
     pub fn allows(&self, ask: Ask) -> Result<(), Reason> {
-        let people = || who(&self.role);
-        match ask {
+        let ability = match ask {
             // A command outside the registry (made by a test or a plugin) isn't allowed.
             Ask::Command(spec) => {
-                self.commands.get(spec.id).cloned().unwrap_or_else(|| Err(Reason(format!("{} can't use {}", people(), spec.label))))
+                return self.commands.get(spec.id).cloned().unwrap_or_else(|| Err(Reason(format!("{} can't use {}", who(&self.role), spec.label))));
             }
-            Ask::Receive(Receive::Design) if !self.abilities.contains(&Ability::Design) => Err(Reason(format!("{} can't get the design", people()))),
-            Ask::Receive(Receive::Meshes) if !self.abilities.contains(&Ability::Meshes) => Err(Reason(format!("{} can't get meshes only", people()))),
-            Ask::Receive(_) => Ok(()),
-        }
+            Ask::Receive(Receive::Design) => Ability::Design,
+            Ask::Receive(Receive::Meshes) => Ability::Meshes,
+            Ask::Ability(ability) => ability,
+        };
+        if self.abilities.contains(&ability) { Ok(()) } else { Err(Reason(format!("{} can't {}", who(&self.role), ability.verb()))) }
     }
 }
 
@@ -485,7 +569,7 @@ fn decide_command(role: &Role, spec: &CommandSpec) -> Result<(), Reason> {
         What::Commands(p) => p.matches(spec.id),
     };
     verdict(role, covers).map_err(|why| match why {
-        Some(What::Ability(Ability::Edit)) => Reason(format!("{} can't change the design", who(&role.name))),
+        Some(What::Ability(Ability::Edit)) => Reason(format!("{} can't {}", who(&role.name), Ability::Edit.verb())),
         _ if SAVES_OR_EXPORTS.contains(&spec.id) => Reason(format!("{} can't save or export the design", who(&role.name))),
         _ => Reason(format!("{} can't use {}", who(&role.name), spec.label)),
     })
@@ -547,6 +631,11 @@ pub struct Member {
     pub kind: MemberKind,
     /// The key of the member who added this one (the first member adds themself).
     pub added_by: String,
+    /// A Creator lets this member present though their role doesn't (X7); off when left out.
+    /// Refused on a Viewer; a Creator presents anyway. Like every change to the list, only a
+    /// member who may manage people sets it (the list's signatures are checked by A1b).
+    #[serde(default)]
+    pub may_present: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -595,8 +684,9 @@ impl MemberList {
         if self.members.len() > MAX_MEMBERS {
             return Err(bad(format!("more than {MAX_MEMBERS} members")));
         }
-        // Whether each built-in role may manage, worked out once, not once per member.
-        let manages = BUILT_IN.map(|(n, _)| Role::built_in(n).is_some_and(|r| has(&r, Ability::Manage)));
+        // Whether each built-in role may manage, and may be let present, worked out once, not once
+        // per member.
+        let can = BUILT_IN.map(|(n, _)| Role::built_in(n).map_or((false, false), |r| (has(&r, Ability::Manage), r.may_be_let_present())));
         // One key is one member, however its text is written (another comment, say).
         let mut keys = HashSet::new();
         let mut someone_manages = false;
@@ -619,7 +709,11 @@ impl MemberList {
                 .iter()
                 .position(|(n, _)| *n == m.role)
                 .ok_or_else(|| at(format!("`{}` isn't a role (one of {})", m.role, BUILT_IN.map(|(n, _)| n).join(", "))))?;
-            someone_manages |= manages.get(role).is_some_and(|&m| m);
+            let (manages, may_be_let_present) = can.get(role).copied().unwrap_or_default();
+            if m.may_present && !may_be_let_present {
+                return Err(at(format!("{} can't be allowed to present", who(&m.role))));
+            }
+            someone_manages |= manages;
         }
         for (i, m) in self.members.iter().enumerate() {
             if !ed25519_key(&m.added_by).is_some_and(|k| keys.contains(&k)) {
@@ -627,7 +721,7 @@ impl MemberList {
             }
         }
         if !someone_manages {
-            return Err(bad("nobody in it can manage people and roles"));
+            return Err(bad(format!("nobody in it can {}", Ability::Manage.verb())));
         }
         Ok(())
     }
