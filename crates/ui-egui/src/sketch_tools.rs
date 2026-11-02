@@ -3,9 +3,9 @@
 //! tools for free-form curves and slots, text placement, and constraint glyphs. Like `tools`,
 //! these are UI state only: every action runs a command.
 
+use crate::i18n::{tr, tr_engine_error};
 use crate::icons::markers::glyph_icon;
 use crate::icons::markers::glyph_letter;
-use crate::i18n::{tr, tr_engine_error};
 use std::cell::{Cell, RefCell};
 
 use egui::{Pos2, Stroke};
