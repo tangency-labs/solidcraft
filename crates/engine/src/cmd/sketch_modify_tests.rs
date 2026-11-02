@@ -1955,6 +1955,38 @@ fn chamfer_two_lines_drawn_to_meet_at_a_point() {
     assert!(ends[0].dist(Vec2::new(35.0, 0.0)) < 1e-6 && ends[1].dist(Vec2::new(40.0, 5.0)) < 1e-6, "{ends:?}");
 }
 
+/// #10865: the chamfer's window values become dimensions from a virtual corner kept on both
+/// lines' extensions, so a chamfer takes no freedom away from the sketch.
+#[test]
+fn a_chamfer_leaves_the_sketch_as_constrained_as_it_was() {
+    let quarter = std::f64::consts::FRAC_PI_2;
+    let angle = 60f64.to_radians();
+    let cases = [
+        ("sketch.chamfer.equal_distance", json!({"distance": 5}), 5.0, 5.0),
+        ("sketch.chamfer.two_distance", json!({"distance": 5, "distance2": 8}), 5.0, 8.0),
+        (
+            "sketch.chamfer.distance_angle",
+            json!({"distance": 5, "angle": 60}),
+            5.0,
+            5.0 * angle.sin() / (std::f64::consts::PI - angle - quarter).sin(),
+        ),
+    ];
+    for (cmd, mut p, da, db) in cases {
+        let mut s = new_sketch();
+        let l = ids(&run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}))["curves"]);
+        let dof = run(&mut s, "sketch.inspect", json!({}))["dof"].as_i64().unwrap();
+        assert_eq!(dof, 2, "a rectangle leaves its width and height to place");
+        p["a"] = json!(l[0]);
+        p["b"] = json!(l[1]);
+        let out = run(&mut s, cmd, p);
+        assert_eq!(out["sketch"]["dof"].as_i64(), Some(dof), "{cmd}: {out}");
+        assert_eq!(ids(&out["virtual_corners"]).len(), 1, "{cmd}: the corner stays to measure from: {out}");
+        let dims = out["created"]["dimensions"].as_array().map_or(0, Vec::len);
+        assert!(dims >= 2, "{cmd}: the window's values are dimensions: {out}");
+        assert!(close(profiles(&s)[0], 1200.0 - 0.5 * da * db), "{cmd}: the cut is the same: {out}");
+    }
+}
+
 #[test]
 fn offset_free_form_curves() {
     let mut s = new_sketch();
