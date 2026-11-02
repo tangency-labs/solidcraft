@@ -338,7 +338,7 @@ fn uv_surface(k: &Kernel, s: &UvSurface) -> Result<solidcore::Result<Surface>, H
 fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
     let h = |e: SolidError| harness(e.to_string());
     let mut rm = RustModel::build(&i.model)?;
-    let mut solvers: Vec<FilletSolver> = i
+    let solvers: Vec<FilletSolver> = i
         .solvers
         .iter()
         .map(|s| FilletSolver::new(s.approx, s.ang, s.tang))
@@ -406,7 +406,7 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
             let r = match &i.query {
                 Query::RailIntExtended { .. } => rm
                     .fb
-                    .calc_rail_int_extended_edgeuse(&k, vid, CornerLookup::default(), &mut solvers, &mut target),
+                    .calc_rail_int_extended_edgeuse(&k, vid, CornerLookup::default(), &solvers, &mut target),
                 Query::Int2Fillets { .. } => {
                     rm.fb.calc_fillet_int_2_fillets(&k, vid, CornerLookup::default(), &solvers, &target)
                 }

@@ -645,7 +645,7 @@ fn live_corner_vert_geom(
                 k,
                 fv,
                 CornerLookup::table(corners),
-                &mut SessionEdgeLookup {
+                &SessionEdgeLookup {
                     solvers,
                     extended_surfaces,
                 },
@@ -1129,18 +1129,6 @@ impl FilletEdgeContext for SessionEdgeLookup<'_> {
             .ok_or_else(not_live)?;
         let (a, b) = (live_solver_ops(a), live_solver_ops(b));
         Ok(if i < j { (a, b) } else { (b, a) })
-    }
-    fn calc_rail_int_edgeuse(
-        &mut self,
-        k: &Kernel,
-        fb: &mut FilletBrep,
-        v: VertexId,
-        corners: CornerLookup<'_>,
-        target: &mut Brep,
-    ) -> Result<()> {
-        // as the RailXEdgeuse dispatch of `live_corner_vert_geom`
-        let live = live_vertex_solvers(fb, self.solvers, v)?;
-        fb.calc_rail_int_edgeuse_with_live_solvers(k, v, None, corners, live, target)
     }
 }
 
