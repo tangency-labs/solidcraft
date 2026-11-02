@@ -137,9 +137,14 @@ fn point(h: &Harness, id: &str) -> Vec2 {
 
 /// Press at `path[0]` and move through the rest, one frame per event.
 fn press_and_move(h: &mut Harness, path: &[egui::Pos2]) {
+    press_and_move_holding(h, path, Default::default());
+}
+
+/// [`press_and_move`] with `modifiers` held from the press to the release.
+fn press_and_move_holding(h: &mut Harness, path: &[egui::Pos2], modifiers: egui::Modifiers) {
     let Some(&a) = path.first() else { return };
     h.app.synthetic.push(egui::Event::PointerMoved(a));
-    h.app.synthetic.push(egui::Event::PointerButton { pos: a, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() });
+    h.app.synthetic.push(egui::Event::PointerButton { pos: a, button: egui::PointerButton::Primary, pressed: true, modifiers });
     h.app.synthetic.extend(path.iter().skip(1).map(|&p| egui::Event::PointerMoved(p)));
     play(h);
 }
@@ -414,28 +419,99 @@ fn dragging_a_selected_line_moves_the_whole_selection() {
     }
 }
 
+/// A circle grabbed on its edge moves whole; with Ctrl the edge takes its radius, and so it does
+/// without Ctrl with Preferences › Sketch › Dragging an edge moves the curve off, as before. Also
+/// when a window picked it with its centre: that is the circle, not a group to move.
 #[test]
-fn a_window_selected_circle_still_takes_its_radius_from_a_drag_on_its_edge() {
+fn a_circle_moves_by_its_edge_and_takes_its_radius_with_ctrl() {
+    let (moved, resized) = ((Vec2::new(25.0, 20.0), 10.0), (Vec2::new(20.0, 20.0), 15.0));
+    for (ctrl, moves, (centre, radius)) in [(false, true, moved), (true, true, resized), (false, false, resized)] {
+        let mut h = Harness::new();
+        h.app.preferences.sketch_edge_drag_moves = moves;
+        run(&mut h, "sketch.create", json!({"plane": "XY"}));
+        run(&mut h, "sketch.circle.center", json!({"center": [20, 20], "radius": 10, "id": "c1"}));
+        h.app.session.selection = vec![Sel::SketchCurve { id: "c1".into(), sketch: None }, Sel::SketchPoint { id: "c1.center".into() }];
+        h.call("ui.view", json!({"view": "top"}));
+        h.app.cam.distance = 150.0;
+        h.frames(3);
+        let a = screen(&mut h, 30.0, 20.0);
+        let b = screen(&mut h, 35.0, 20.0);
+        let mut path = vec![a];
+        path.extend(steps(a, b, 6));
+        press_and_move_holding(&mut h, &path, if ctrl { egui::Modifiers::COMMAND } else { egui::Modifiers::NONE });
+        release(&mut h, b);
+        assert!(point(&h, "c1.center").dist(centre) < 0.05, "ctrl {ctrl}, preference {moves}: {:?}", point(&h, "c1.center"));
+        let sid = h.app.session.active_sketch.expect("sketch mode");
+        let st = h.app.session.world_state();
+        let sk = &st.sketch(sid).expect("the sketch").sketch;
+        let r = sk.radius(sk.curve_index("c1").expect("the circle")).expect("a radius");
+        assert!((r - radius).abs() < 0.05, "ctrl {ctrl}, preference {moves}: {r}");
+    }
+}
+
+/// A rectangle's side dragged on a slant moves only across itself: the right side goes right,
+/// not up, and the rest of the rectangle stays where it was. It snaps to nothing on the way.
+#[test]
+fn a_rectangles_side_moves_only_across_itself() {
     let mut h = Harness::new();
     run(&mut h, "sketch.create", json!({"plane": "XY"}));
-    run(&mut h, "sketch.circle.center", json!({"center": [20, 20], "radius": 10, "id": "c1"}));
-    // A window around the circle picks it and its centre: not a group to move.
-    h.app.session.selection = vec![Sel::SketchCurve { id: "c1".into(), sketch: None }, Sel::SketchPoint { id: "c1.center".into() }];
+    run(&mut h, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [40, 30]}));
+    // Just off where the top right corner goes: a snap to it would pull the side up.
+    run(&mut h, "sketch.point", json!({"point": [50.3, 30.4]}));
+    run(&mut h, "sketch.options", json!({"show_dimensions": false, "show_constraints": false}));
     h.call("ui.view", json!({"view": "top"}));
     h.app.cam.distance = 150.0;
     h.frames(3);
-    let a = screen(&mut h, 30.0, 20.0);
-    let b = screen(&mut h, 35.0, 20.0);
+    let sid = h.app.session.active_sketch.expect("sketch mode");
+    let ends = |h: &Harness, line: &str| {
+        let st = h.app.session.world_state();
+        let sk = &st.sketch(sid).expect("the sketch").sketch;
+        let c = &sk.curves[sk.curve_index(line).expect("the side")];
+        c.kind.point_ids().into_iter().map(|p| sk.points[p].pos).collect::<Vec<_>>()
+    };
+    let left = ends(&h, "l4");
+    let a = screen(&mut h, 40.0, 20.0);
+    let b = screen(&mut h, 50.0, 28.0);
     let mut path = vec![a];
     path.extend(steps(a, b, 6));
     press_and_move(&mut h, &path);
     release(&mut h, b);
-    assert!(point(&h, "c1.center").dist(Vec2::new(20.0, 20.0)) < 1e-9);
+    let mut right = ends(&h, "l2");
+    right.sort_by(|p, q| p.y.total_cmp(&q.y));
+    assert!(right[0].dist(Vec2::new(50.0, 10.0)) < 0.05 && right[1].dist(Vec2::new(50.0, 30.0)) < 0.05, "the right side went to {right:?}");
+    for (p, was) in ends(&h, "l4").into_iter().zip(left) {
+        assert!(p.dist(was) < 1e-6, "the left side moved from {was:?} to {p:?}");
+    }
+}
+
+/// A slanted side of a free polygon dragged straight right takes the polygon straight right.
+/// Held to moving across that side, the polygon went a different way for every side.
+#[test]
+fn a_polygons_side_takes_it_where_the_pointer_goes() {
+    let mut h = Harness::new();
+    run(&mut h, "sketch.create", json!({"plane": "XY"}));
+    run(&mut h, "sketch.polygon.inscribed", json!({"center": [30, 10], "radius": 20, "sides": 7}));
+    h.call("ui.view", json!({"view": "top"}));
+    h.app.cam.distance = 150.0;
+    h.frames(3);
     let sid = h.app.session.active_sketch.expect("sketch mode");
-    let st = h.app.session.world_state();
-    let sk = &st.sketch(sid).expect("the sketch").sketch;
-    let r = sk.radius(sk.curve_index("c1").expect("the circle")).expect("a radius");
-    assert!((r - 15.0).abs() < 0.05, "{r}");
+    let ends = |h: &Harness| {
+        let st = h.app.session.world_state();
+        let sk = &st.sketch(sid).expect("the sketch").sketch;
+        let c = &sk.curves[sk.curve_index("l2").expect("a side")];
+        c.kind.point_ids().into_iter().map(|p| sk.points[p].pos).collect::<Vec<_>>()
+    };
+    let was = ends(&h);
+    let mid = (was[0] + was[1]) * 0.5;
+    let a = screen(&mut h, mid.x, mid.y);
+    let b = screen(&mut h, mid.x + 8.0, mid.y);
+    let mut path = vec![a];
+    path.extend(steps(a, b, 6));
+    press_and_move(&mut h, &path);
+    release(&mut h, b);
+    for (p, w) in ends(&h).into_iter().zip(was) {
+        assert!(p.dist(w + Vec2::new(8.0, 0.0)) < 0.05, "moved by {:?}", p - w);
+    }
 }
 
 /// A circle drawn on the origin and freed from it (its Coincident deleted) moves by its centre:

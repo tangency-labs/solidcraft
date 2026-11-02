@@ -1550,6 +1550,11 @@ preference_settings! {
     /// is smaller than `sketch_tools::MIN_GLYPH_PX_PER_MM` on screen (#8980). Off: glyphs stay at a
     /// fixed screen size at every zoom, as before.
     hide_constraint_glyphs_zoomed_out: bool = true, PAGE_SKETCH => check_id("prefs.hide_constraint_glyphs_zoomed_out");
+    /// A curve dragged by its edge keeps its shape: a circle, arc, ellipse or conic moves whole,
+    /// and a horizontal or vertical side of a shape moves only across itself; Ctrl/Cmd at the
+    /// press changes the shape instead (`viewport::EdgeDrag`). Off: the edge changes a circle's
+    /// radius and a side slides with the pointer, as before.
+    sketch_edge_drag_moves: bool = true, PAGE_SKETCH => check_id("prefs.sketch_edge_drag_moves");
     /// Drive Joints shows the moved parts' old place as a ghost (its Show ghost box, #5905).
     drive_joints_ghost: bool = true, PAGE_TOOLS;
     /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.

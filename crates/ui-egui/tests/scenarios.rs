@@ -68,9 +68,10 @@ fn angle_dimension_both_interactive_workflows() {
 }
 
 /// The conic tool still places a curve in three clicks (start, end, apex), the way it always
-/// has, defaulting to a parabola (`rho` 0.5). A further drag on the curve itself (not on one of
-/// its three points) reads `rho` off where the drag lands between the chord's midpoint and the
-/// apex, so an ellipse or a hyperbola is a drag away rather than a fourth click away. The apex
+/// has, defaulting to a parabola (`rho` 0.5). A further Ctrl drag on the curve itself (not on one
+/// of its three points; without Ctrl that moves the conic whole) reads `rho` off where the drag
+/// lands between the chord's midpoint and the apex, so an ellipse or a hyperbola is a drag away
+/// rather than a fourth click away. The apex
 /// stays an ordinary, separately draggable point: dragging it slides the curve's tangent point
 /// and leaves `rho` alone. Both drags are tried after leaving the tool with Escape, the way a
 /// person reshapes anything else they have just drawn (the tool is sticky, placing more conics
@@ -105,10 +106,10 @@ fn dragging_a_conic_after_the_tool_sets_rho_and_its_apex_stays_separately_dragga
     let apex_before = sk.point(apex_idx).expect("apex point resolves");
     assert!(apex_before.dist(solidcraft_engine::geom::Vec2::new(20.0, 20.0)) < 1e-6);
 
-    // Grabbed on the curve itself, at its default-rho midpoint (20, 10): the chord's midpoint
-    // is (20, 0), the apex (20, 20), so (20, 14) is 0.7 of the way from one to the other.
+    // Grabbed on the curve itself with Ctrl, at its default-rho midpoint (20, 10): the chord's
+    // midpoint is (20, 0), the apex (20, 20), so (20, 14) is 0.7 of the way from one to the other.
     h.run(&json!([
-        {"drag": [{"sketch": [20, 10]}, {"sketch": [20, 14]}], "steps": 4},
+        {"drag": [{"sketch": [20, 10]}, {"sketch": [20, 14]}], "ctrl": true, "steps": 4},
         {"expect": {"errors": 0}}
     ]))
     .unwrap();
