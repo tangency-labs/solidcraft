@@ -3455,6 +3455,7 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     app.viewport.hover_feature.hash(&mut h);
     app.viewport.hover_bodies.hash(&mut h);
     app.viewport.hover_plane.hash(&mut h);
+    lights_hovered_edge(app).hash(&mut h);
     // Which mesh lights a face follows how the model draws its body (see `shown_mesh`), and at
     // which display quality its plan and edges are made.
     solidcraft_engine::doc::display_quality::current().hash(&mut h);
@@ -3716,6 +3717,25 @@ fn light_whole_body(
     }
     let colour = feedback.color(lit.colour);
     instances.add(app, b, colour)
+}
+
+/// How wide an edge lit in `hover_edge_lit` is drawn: thin, the colour sets it apart.
+const LIT_EDGE_W: f32 = 1.0;
+
+/// The palette entries of an edge lit in `hover_edge_lit`. Where the model hides it (a hidden edge
+/// Select Other offers), it stays clear to see: most hidden highlights are dimmed to 45%.
+fn lit_edge_colours(sc: &mut GpuScene, t: &Tokens) -> EdgeColours {
+    let mut c = EdgeColours::new(sc, t.hover_edge_lit, t.hover_edge_halo);
+    c.hidden = sc.color(c4(t.hover_edge_lit.gamma_multiply(0.8)));
+    c
+}
+
+/// Whether an edge under the pointer is lit in `hover_edge_lit`: in Fillet and Chamfer, whose
+/// edge input also takes faces, so the edge a click takes stands out from the face around it, and
+/// a face under the pointer lights the edges a click on it takes instead of itself. Off in
+/// Preferences › Graphics, both are drawn as everywhere else.
+fn lights_hovered_edge(app: &SolveApp) -> bool {
+    app.preferences.hover_edge_lit && app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Fillet { .. }))
 }
 
 /// The highlight scene: origin widget, construction planes, selection and hover.
@@ -4061,6 +4081,22 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     }
     // Hover (pre-highlight).
     match hover {
+        // In Fillet and Chamfer a face stands for its edges (`dialogs::apply_commands`): those light
+        // up, not the face, also on a body the preview stands in for.
+        Some(Hit::Face { body, index, .. }) if lights_hovered_edge(app) && !moving(body) => {
+            if let Some(b) = st.body(body) {
+                let lit = lit_edge_colours(&mut feedback, &t);
+                let m = drawn(b);
+                for e in m.face_edges(u32::try_from(*index).unwrap_or(u32::MAX)) {
+                    if !m.seams.get(e).copied().unwrap_or(false)
+                        && m.edge_pickable(e)
+                        && let Some(p) = m.edges.get(e)
+                    {
+                        edge_lines(&mut feedback, p, lit, LIT_EDGE_W, &[]);
+                    }
+                }
+            }
+        }
         Some(Hit::Face { body, index, .. })
             if body_hover.as_ref() != Some(body)
                 && !replaced(body)
@@ -4087,11 +4123,12 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         Some(Hit::Edge { body, index, mid, .. }) if !moving(body) => {
             if let Some(b) = st.body(body) {
                 // Lit over the drawn edges (finer away from Normal display quality).
+                let (lit, w) = if lights_hovered_edge(app) { (lit_edge_colours(&mut feedback, &t), LIT_EDGE_W) } else { (hover_edge, 2.0) };
                 let m = drawn(b);
                 for i in m.circular_rim(*index) {
                     let selected = sel.iter().any(|x| matches!(x, Sel::Edge { body: b, index: j, .. } if b == body && *j == i));
                     if !selected && let Some(e) = if i == *index { edge_of(&m, i, *mid) } else { m.edges.get(i) } {
-                        edge_lines(&mut feedback, e, hover_edge, 2.0, &edge_normals(&m, e));
+                        edge_lines(&mut feedback, e, lit, w, &edge_normals(&m, e));
                     }
                 }
             }
@@ -9953,6 +9990,42 @@ mod tests {
         assert_eq!(sc.xray.len(), planes * 6 * crate::gpu::TRI_SIZE);
         assert!(sc.trans.is_empty() && sc.guide_trans.is_empty() && sc.guide_lines.is_empty());
         assert!(sc.overlay.len() >= (planes * 4 + 3) * crate::gpu::LINE_SIZE);
+    }
+
+    /// In Fillet and Chamfer an edge under the pointer is lit in `hover_edge_lit`, so it stands
+    /// out from the face around it (Preferences › Graphics). Elsewhere, or off, it is drawn as before.
+    #[test]
+    fn fillet_and_chamfer_light_the_hovered_edge_in_its_own_colour() {
+        let mut app = cylinder_app();
+        let st = app.session.world_state();
+        let b = &st.bodies[0];
+        let m = b.mesh();
+        let top = m.edges.iter().position(|e| e.len() > 3 && e.iter().all(|p| (p.z - 20.0).abs() < 1e-6)).unwrap();
+        let mid = polyline_mid(&m.edges[top]);
+        app.viewport.hover = Some(Hit::Edge { body: b.name.clone(), index: top, mid, point: mid });
+        let t = Tokens::get();
+        assert_ne!(t.hover_edge_lit, t.hover_edge, "the lit colour is not the old hover colour");
+        let has = |app: &SolveApp, c: Color32| build_highlight(app).palette.entries().contains(&c4(c));
+        assert!(app.preferences.hover_edge_lit, "on by default");
+        let lines = build_highlight(&app).merged().lines.len();
+        assert!(!has(&app, t.hover_edge_lit), "with no command the edge is drawn as before");
+        for command in ["solid.fillet", "solid.chamfer"] {
+            app.dialog = crate::dialogs::Dialog::for_command(&app, command);
+            assert!(app.dialog.is_some(), "{command}");
+            app.preferences.hover_edge_lit = true;
+            assert!(has(&app, t.hover_edge_lit), "{command}");
+            assert!(has(&app, t.hover_edge_lit.gamma_multiply(0.8)), "{command}: where hidden, still clear to see");
+            assert_eq!(build_highlight(&app).merged().lines.len(), lines, "{command}: the same edge, only its colour and width differ");
+            app.preferences.hover_edge_lit = false;
+            assert!(!has(&app, t.hover_edge_lit), "{command}: off, the edge is drawn as before");
+        }
+        // A face under the pointer lights the edges a click on it takes, not itself.
+        let face = m.edge_faces[top][0] as usize;
+        app.viewport.hover = Some(Hit::Face { body: b.name.clone(), index: face, point: mid });
+        app.preferences.hover_edge_lit = true;
+        assert!(has(&app, t.hover_edge_lit), "the face's edges are lit");
+        app.preferences.hover_edge_lit = false;
+        assert!(!has(&app, t.hover_edge_lit), "off: the face lights up as before");
     }
 
     #[test]

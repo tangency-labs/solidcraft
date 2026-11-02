@@ -577,6 +577,7 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("sel_edge_rim", "selection highlight"),
     ("hover_edge", "hover highlight"),
     ("hover_edge_halo", "hover highlight"),
+    ("hover_edge_lit", "hover highlight"),
     ("sel_profile", "selection highlight"),
     ("sel_profile_edge", "selection highlight"),
     ("hover_profile", "hover highlight"),

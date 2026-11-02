@@ -155,6 +155,7 @@ impl Tokens {
             sel_edge_rim: Color32::from_rgb(127, 191, 255),
             hover_edge: Color32::from_rgb(0, 0, 0),
             hover_edge_halo: Color32::from_rgb(203, 203, 203),
+            hover_edge_lit: Color32::from_rgb(255, 128, 0),
             hover_face_lift: 40,
             sel_profile: Color32::from_rgb(26, 84, 167),
             sel_profile_edge: Color32::from_rgb(47, 109, 198),
