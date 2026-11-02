@@ -115,12 +115,13 @@ fn inverse_owner_frame(s: &Session, p: &Value, cmd: &str) -> Result<solidcraft_d
 fn line3d(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.line3d";
     let inverse = inverse_owner_frame(s, p, cmd)?;
+    let target = sketch_store::target(s, p, cmd)?;
     let pts: Vec<Vec3> = points(cmd, p, 2)?.into_iter().map(|at| solidcraft_doc::apply_point(&inverse, at)).collect();
-    let ((ids, joints), info) = edit(s, p, cmd, false, |sk, _| {
+    let ((ids, joints), info) = edit(s, p, cmd, false, |sk, doc| {
         needs_3d(sk, cmd)?;
         let ids = pts.windows(2).map(|w| sk.add_drawn_wire_in(w, WireSpace::Component).map_err(Into::into)).collect::<Result<Vec<String>>>()?;
         // Joined end to end, and to the drawn ends they start or end on (#10608).
-        let joints = sk.join_drawn_ends(&ids)?;
+        let joints = join_in(sk, doc, target, &ids)?;
         Ok((ids, joints))
     })?;
     Ok(json!({"curves": ids, "constraints": joints, "sketch": info}))
@@ -129,11 +130,12 @@ fn line3d(s: &mut Session, p: &Value) -> Result<Value> {
 fn spline3d(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.spline3d";
     let inverse = inverse_owner_frame(s, p, cmd)?;
+    let target = sketch_store::target(s, p, cmd)?;
     let pts: Vec<Vec3> = points(cmd, p, 2)?.into_iter().map(|at| solidcraft_doc::apply_point(&inverse, at)).collect();
-    let ((id, joints), info) = edit(s, p, cmd, false, |sk, _| {
+    let ((id, joints), info) = edit(s, p, cmd, false, |sk, doc| {
         needs_3d(sk, cmd)?;
         let id = sk.add_drawn_wire_in(&pts, WireSpace::Component)?;
-        let joints = sk.join_drawn_ends(std::slice::from_ref(&id))?;
+        let joints = join_in(sk, doc, target, std::slice::from_ref(&id))?;
         Ok((id, joints))
     })?;
     Ok(json!({"curves": [id], "constraints": joints, "sketch": info}))
@@ -142,6 +144,7 @@ fn spline3d(s: &mut Session, p: &Value) -> Result<Value> {
 fn arc3d(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.arc3d";
     let inverse = inverse_owner_frame(s, p, cmd)?;
+    let target = sketch_store::target(s, p, cmd)?;
     let pts: Vec<Vec3> = ["start", "through", "end"]
         .iter()
         .map(|k| req_vec3(cmd, p, k))
@@ -149,10 +152,10 @@ fn arc3d(s: &mut Session, p: &Value) -> Result<Value> {
         .into_iter()
         .map(|at| solidcraft_doc::apply_point(&inverse, at))
         .collect();
-    let ((id, joints), info) = edit(s, p, cmd, false, |sk, _| {
+    let ((id, joints), info) = edit(s, p, cmd, false, |sk, doc| {
         needs_3d(sk, cmd)?;
         let id = sk.add_drawn_arc_in(&pts, WireSpace::Component)?;
-        let joints = sk.join_drawn_ends(std::slice::from_ref(&id))?;
+        let joints = join_in(sk, doc, target, std::slice::from_ref(&id))?;
         Ok((id, joints))
     })?;
     Ok(json!({"curves": [id], "constraints": joints, "sketch": info}))
@@ -161,11 +164,12 @@ fn arc3d(s: &mut Session, p: &Value) -> Result<Value> {
 fn point3d(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.point3d";
     let inverse = inverse_owner_frame(s, p, cmd)?;
+    let target = sketch_store::target(s, p, cmd)?;
     let at = solidcraft_doc::apply_point(&inverse, req_vec3(cmd, p, "point")?);
-    let ((id, joints), info) = edit(s, p, cmd, false, |sk, _| {
+    let ((id, joints), info) = edit(s, p, cmd, false, |sk, doc| {
         needs_3d(sk, cmd)?;
         let id = sk.add_drawn_wire_in(&[at], WireSpace::Component)?;
-        let joints = sk.join_drawn_ends(std::slice::from_ref(&id))?;
+        let joints = join_in(sk, doc, target, std::slice::from_ref(&id))?;
         Ok((id, joints))
     })?;
     Ok(json!({"point": id, "constraints": joints, "sketch": info}))
@@ -205,18 +209,17 @@ fn move3d(s: &mut Session, p: &Value) -> Result<Value> {
             _ => return Err(bad(cmd, "give `to` or `by`")),
         };
         let point = WirePoint { wire: wire.clone(), index };
-        if sk.wire_constraints.iter().any(|c| matches!(&c.kind, WireConstraintKind::Fix { p, .. } if *p == point)) {
-            return Err(bad(cmd, format!("`{wire}` point {index} is fixed (unfix it to move it)")));
+        if sk.wire_point_fixed(&point) {
+            return Err(bad(cmd, format!("`{wire}` point {index} is fixed, or joined to a fixed point (unfix it to move it)")));
         }
-        // The 3D constraints follow the move, the moved point held where it was put.
-        if !sk.wire_constraints.is_empty() {
-            join_all(sk)?;
-        }
+        // The 3D constraints follow the move, the moved point held where it was put. A failure
+        // elsewhere in a sketch whose 3D constraints already failed does not stop it.
+        let held_before = sk.wire_constraints_hold();
         let n = sk.move_drawn_point(&wire, index, to)?;
         if !sk.wire_constraints.is_empty() {
             let rep = sk.solve_wires_with(Some(&point), false);
             let held = sk.wire_point_at(&point).is_some_and(|at| at.dist(to) < 1e-6);
-            if !rep.ok || !held {
+            if !held || (!rep.ok && held_before) {
                 return Err(bad(cmd, "the sketch's 3D constraints cannot hold the point there"));
             }
         }
@@ -286,8 +289,9 @@ pub(super) fn fix_3d(s: &mut Session, p: &Value, cmd: &str, refs: &[String], wan
         sk.wire_constraints.iter().any(|c| matches!(&c.kind, WireConstraintKind::Fix { p, .. } if p == q))
     };
     let fix = want.unwrap_or(!points.iter().all(|q| fixed(sk, q)));
-    let (n, info) = edit(s, p, cmd, true, |sk, _| {
-        join_all(sk)?;
+    let (n, info) = edit(s, p, cmd, true, |sk, doc| {
+        off_traces(doc, id, points.iter().map(|q| q.wire.as_str()), cmd)?;
+        join_all(sk, doc, id)?;
         let mut n = 0;
         for q in &points {
             let has = fixed(sk, q);
@@ -331,16 +335,56 @@ fn along_axis(s: &mut Session, p: &Value) -> Result<Value> {
 /// before 3D constraints, #10608) are joined first, so constraining one does not tear it from
 /// the next.
 fn add_3d(s: &mut Session, p: &Value, cmd: &str, kinds: Vec<WireConstraintKind>) -> Result<(Vec<String>, Value)> {
-    edit(s, p, cmd, true, |sk, _| {
-        join_all(sk)?;
+    let id = sketch_store::target(s, p, cmd)?;
+    edit(s, p, cmd, true, |sk, doc| {
+        off_traces(doc, id, kinds.iter().flat_map(WireConstraintKind::wires), cmd)?;
+        join_all(sk, doc, id)?;
         kinds.into_iter().map(|k| sk.add_wire_constraint(k).map_err(|e| bad(cmd, e.to_string()))).collect::<Result<Vec<String>>>()
     })
 }
 
-/// Join every pair of drawn 3D curve ends that meet and are not joined yet.
-fn join_all(sk: &mut solidcraft_sketch::Sketch) -> Result<Vec<String>> {
+/// The first 3D constraint of a sketch joins every pair of drawn 3D curve ends that meet (curves
+/// drawn before 3D constraints were joined by nothing). Later ones join nothing: a joint deleted
+/// since stays deleted, and curves drawn since joined as they were drawn.
+fn join_all(sk: &mut solidcraft_sketch::Sketch, doc: &solidcraft_doc::Document, id: u64) -> Result<Vec<String>> {
+    if !sk.wire_constraints.is_empty() {
+        return Ok(Vec::new());
+    }
     let ids: Vec<String> = sk.wires.iter().filter(|w| w.link.is_none() && !w.fit.is_empty()).map(|w| w.id.clone()).collect();
-    Ok(sk.join_drawn_ends(&ids)?)
+    join_in(sk, doc, id, &ids)
+}
+
+/// The drawn 3D curves of sketch `id` that motion traces generate: the motion rewrites their
+/// points, so they take no 3D constraints.
+fn trace_wires(doc: &solidcraft_doc::Document, id: u64) -> std::collections::HashSet<&str> {
+    doc.assembly.traces.iter().filter(|t| t.sketch == id).map(|t| t.wire.as_str()).collect()
+}
+
+/// Refused when any of `wires` is a motion trace's curve.
+fn off_traces<'a>(doc: &solidcraft_doc::Document, id: u64, mut wires: impl Iterator<Item = &'a str>, cmd: &str) -> Result<()> {
+    let traces = trace_wires(doc, id);
+    match wires.find(|w| traces.contains(w)) {
+        Some(w) => Err(bad(cmd, format!("`{w}` is a motion trace's curve, which the motion places: draw a curve on it and constrain that"))),
+        None => Ok(()),
+    }
+}
+
+/// [`solidcraft_sketch::Sketch::join_drawn_ends`] for curves `ids`, leaving out the joins to a
+/// motion trace's curve (a solve would move it, and the motion would put it back).
+fn join_in(sk: &mut solidcraft_sketch::Sketch, doc: &solidcraft_doc::Document, id: u64, ids: &[String]) -> Result<Vec<String>> {
+    let joints = sk.join_drawn_ends(ids)?;
+    let traces = trace_wires(doc, id);
+    if traces.is_empty() {
+        return Ok(joints);
+    }
+    let on_traces: Vec<String> = sk
+        .wire_constraints
+        .iter()
+        .filter(|c| joints.contains(&c.id) && c.kind.wires().iter().any(|w| traces.contains(w)))
+        .map(|c| c.id.clone())
+        .collect();
+    sk.remove_wire_constraints(&on_traces);
+    Ok(joints.into_iter().filter(|j| !on_traces.contains(j)).collect())
 }
 
 #[cfg(test)]

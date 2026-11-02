@@ -218,8 +218,9 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// The sketch's degrees of freedom as a command reported them.
+/// The planar sketch's, where the reply gives it apart from its 3D curves' (#10608).
 fn dof_of(reply: &Value) -> Option<u64> {
-    reply.get("sketch").and_then(|s| s.get("dof")).and_then(Value::as_u64)
+    reply.get("sketch").and_then(|s| s.get("planar_dof").or_else(|| s.get("dof"))).and_then(Value::as_u64)
 }
 
 /// More points than any creator makes: a cap on the work `locate` does.
