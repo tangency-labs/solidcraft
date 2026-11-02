@@ -284,6 +284,14 @@ impl Locale {
     /// Evaluation errors stay English for scripts; the empty Cut/Intersect hint that names
     /// another component is translated where it is shown. Other text is returned unchanged.
     pub fn diagnostic(self, text: &str) -> String {
+        // Localize only known diagnostics at the presentation boundary. Prefixes can contain
+        // command labels or custom names; preserve those and keep engine/report text unchanged.
+        for id in ["diagnostic.face_attachment_unstable", "diagnostic.boolean_cut_empty"] {
+            let english = Locale::for_language("en").text(id);
+            if let Some((before, after)) = text.split_once(english) {
+                return format!("{before}{}{after}", self.text(id));
+            }
+        }
         const PREFIX: &str = "there is no body to cut or intersect in component '";
         if let Some((before, detail)) = text.split_once(PREFIX)
             && let Some((component, detail)) = detail.split_once("'; the tool may overlap '")
@@ -576,6 +584,23 @@ mod tests {
                 assert_ne!(hint, english, "{language}: the hint must be translated");
             }
         }
+    }
+
+    #[test]
+    fn collected_dialog_diagnostics_are_localized() {
+        let de = Locale::for_language("de");
+        let en = Locale::for_language("en");
+        for id in ["diagnostic.face_attachment_unstable", "diagnostic.boolean_cut_empty"] {
+            let raw = en.text(id);
+            let original = format!("Custom part {{1}}: {raw}");
+            assert_eq!(en.diagnostic(&original), original);
+            let translated = de.diagnostic(&original);
+            assert!(translated.starts_with("Custom part {1}: "), "{translated}");
+            assert!(translated.ends_with(de.text(id)), "{translated}");
+            assert_ne!(translated, original);
+        }
+        assert_eq!(de.diagnostic("Unknown diagnostic for custom Body2"), "Unknown diagnostic for custom Body2");
+        assert_eq!(de.format("dialog.selection_face", &[("body", "My Body {1}"), ("index", "69")]), "My Body {1} · Fläche 69");
     }
 
     #[test]

@@ -1,0 +1,1 @@
+| assets/locales/pending/modeling-dialog-translations.json | SolidCraft contributors | Original English, German, Japanese, Korean and Simplified Chinese modeling dialog labels and sketch-state messages | MIT OR Apache-2.0 |

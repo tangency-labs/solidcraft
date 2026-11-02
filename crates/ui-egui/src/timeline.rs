@@ -864,7 +864,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 // A toggle ahead of the features: this part only, or the whole design.
                 let label = match only {
                     Some(c) => app.session.doc.components.iter().find(|k| k.id == c).map_or_else(|| "Component".to_string(), |k| k.name.clone()),
-                    None => "All components".to_string(),
+                    None => crate::i18n::tr_label("All components").to_string(),
                 };
                 let galley = ui.painter().layout_no_wrap(label.clone(), egui::FontId::proportional(t.font_label), t.text);
                 let br = Rect::from_min_size(pos2(x, r.top() + 9.0), vec2(galley.size().x + 12.0, 22.0));
