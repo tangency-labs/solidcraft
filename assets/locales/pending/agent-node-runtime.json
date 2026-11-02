@@ -1,0 +1,10 @@
+{
+  "en": { "ui.agent_chat_node_too_old": "Node.js {version} is too old for this agent. Install Node.js 20.10 or newer, then press Refresh." },
+  "ar": { "ui.agent_chat_node_too_old": "إصدار Node.js ‏{version} قديم جدًا لهذا الوكيل. ثبّت Node.js 20.10 أو أحدث، ثم اضغط على تحديث." },
+  "de": { "ui.agent_chat_node_too_old": "Node.js {version} ist für diesen Agenten zu alt. Installieren Sie Node.js 20.10 oder neuer und klicken Sie dann auf Aktualisieren." },
+  "he": { "ui.agent_chat_node_too_old": "גרסת Node.js ‏{version} ישנה מדי עבור סוכן זה. יש להתקין Node.js 20.10 ומעלה, ואז ללחוץ על רענון." },
+  "ja": { "ui.agent_chat_node_too_old": "Node.js {version} はこのエージェントには古すぎます。Node.js 20.10 以降をインストールしてから、更新を押してください。" },
+  "ko": { "ui.agent_chat_node_too_old": "Node.js {version}은 이 에이전트에 사용하기에는 너무 오래된 버전입니다. Node.js 20.10 이상을 설치한 후 새로 고침을 누르세요." },
+  "vi": { "ui.agent_chat_node_too_old": "Node.js {version} quá cũ đối với tác nhân này. Hãy cài đặt Node.js 20.10 trở lên, rồi nhấn Làm mới." },
+  "zh": { "ui.agent_chat_node_too_old": "Node.js {version} 版本过旧，无法运行此代理。请安装 Node.js 20.10 或更新版本，然后点击刷新。" }
+}
