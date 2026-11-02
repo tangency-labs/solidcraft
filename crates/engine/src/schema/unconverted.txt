@@ -5,7 +5,6 @@
 appearance.assign
 appearance.library
 appearance.list
-assembly.bom
 body.rename
 browser.collapse_all
 browser.expand_all
