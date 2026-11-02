@@ -256,127 +256,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::EditParam { name, expr } => {
             enter |= ui_kit::row(ui, name, |ui| ui_kit::focused_field(ui, expr));
         }
-        Kind::Extrude {
-            distance,
-            direction,
-            operation,
-            auto_op,
-            smart,
-            distance2,
-            taper,
-            taper_present,
-            to_offset,
-            start,
-            all,
-            thin,
-            wall,
-            wall_side,
-            wall2,
-        } => {
-            form_row(ui, "Direction", |ui| {
-                // One Side, Two Sides, Symmetric (a flip is a negative distance).
-                let order = [0usize, TWO_SIDES, 2];
-                let reversed = *direction == 1 || *direction == TWO_SIDES_REVERSED;
-                let shown = match *direction {
-                    1 => 0,
-                    TWO_SIDES_REVERSED => TWO_SIDES,
-                    d => d,
-                };
-                let mut pos = order.iter().position(|o| *o == shown).unwrap_or(0);
-                combo(ui, "ex_dir", &["One Side", "Two Sides", "Symmetric"], &mut pos);
-                if pos != order.iter().position(|o| *o == shown).unwrap_or(0) {
-                    *direction = match (order.get(pos).copied().unwrap_or(0), reversed) {
-                        (0, true) => 1,
-                        (TWO_SIDES, true) => TWO_SIDES_REVERSED,
-                        (d, _) => d,
-                    };
-                    // Selecting Symmetric applies the current total-distance semantics.
-                    d.extra.insert("convention".into(), json!(solidcraft_engine::doc::ExtrudeConvention::TotalDistance));
-                    // An explicit direction ends the automatic choices (#1257).
-                    smart.manual_dir = true;
-                    *auto_op = false;
-                }
-            });
-            let cur = if to_object_on(&d.inputs) { 1 } else { usize::from(*all) * 2 };
-            let mut ext = cur;
-            form_row(ui, "Extent Type", |ui| {
-                combo(ui, "ex_ext", &["Distance", "To Object", "All"], &mut ext);
-                *all = ext == 2;
-                set_to_object(&mut d.inputs, &mut d.active, ext == 1);
-            });
-            if ext == 0 {
-                enter |= expr_row(ui, "Distance", distance);
-            }
-            if ext == 1 {
-                enter |= expr_row(ui, "To Offset", to_offset);
-            }
-            if two_sided(*direction) {
-                enter |= expr_row(ui, "Distance 2", distance2);
-            }
-            // A choice made by hand sticks, the shown one included (#6901): Extrude's own choice
-            // stops before the next frame makes it.
-            if crate::op_auto::op_row(ui, "ex_op", operation) {
-                *auto_op = false;
-            }
-            ui_kit::section(ui, "extrude_options", "Options", true, |ui| {
-                let was_thin = *thin;
-                let was_direction = *direction;
-                let mut reverse = *direction == 1 || *direction == TWO_SIDES_REVERSED;
-                if *direction < 2 || two_sided(*direction) {
-                    ui_kit::checkbox_grid(ui, &mut [("Thin Extrude", thin), ("Reverse Direction", &mut reverse)], 2);
-                    *direction = match (two_sided(*direction), reverse) {
-                        (true, true) => TWO_SIDES_REVERSED,
-                        (true, false) => TWO_SIDES,
-                        (false, r) => usize::from(r),
-                    };
-                    if *direction != was_direction {
-                        smart.manual_dir = true;
-                        *auto_op = false;
-                    }
-                } else {
-                    ui_kit::checkbox_grid(ui, &mut [("Thin Extrude", thin)], 2);
-                }
-                if *thin != was_thin {
-                    set_thin(&mut d.inputs, *thin);
-                }
-                if *thin {
-                    choice_row(ui, "Wall Location", "ex_wall", wall_side, &WALL_LABELS);
-                    enter |= expr_row(ui, "Wall Thickness", wall);
-                    if *wall_side == 3 {
-                        enter |= expr_row(ui, "Thickness Outside", wall2);
-                    }
-                }
-            });
-            let advanced = !start.is_empty() || object_on(&d.inputs, FROM_OBJECT) || *taper_present;
-            ui_kit::section(ui, "extrude_advanced", "Advanced", advanced, |ui| {
-                let old = if object_on(&d.inputs, FROM_OBJECT) { 2 } else { usize::from(!start.is_empty()) };
-                let mut st = old;
-                form_row(ui, "Start", |ui| {
-                    combo(ui, "ex_start", &["Profile Plane", "Offset", "From Object"], &mut st);
-                    if st != old {
-                        set_object(&mut d.inputs, &mut d.active, FROM_OBJECT, st == 2);
-                        if st == 1 && start.is_empty() {
-                            *start = length_default(&app.session, "5");
-                        }
-                        if st == 0 {
-                            start.clear();
-                        }
-                    }
-                });
-                if st != 0 {
-                    enter |= expr_row(ui, "Offset", start);
-                }
-                if *direction < 2 {
-                    form_row(ui, "Taper Angle", |ui| {
-                        let before = taper.clone();
-                        enter |= field(ui, taper);
-                        if *taper != before {
-                            *taper_present = !taper.trim().is_empty();
-                        }
-                    });
-                }
-            });
-        }
+        Kind::Extrude { .. } => enter |= extrude_rows(app, d, ui),
         Kind::Fillet { radius, chamfer, chain, ctype, distance2, angle, flip } => {
             if *chamfer {
                 choice_row(ui, "Chamfer Type", "ch_type", ctype, &CHAMFER_TYPES);
@@ -1263,3 +1143,141 @@ mod all_tests;
 #[cfg(test)]
 #[path = "dialogs_sketch_tests.rs"]
 mod sketch_tests;
+
+/// The Extrude form. To Object's pick shows under Extent Type, From Object's under Start: the
+/// choices that add them.
+fn extrude_rows(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
+    let mut enter = false;
+    let Kind::Extrude { direction, auto_op, smart, all, .. } = &mut d.kind else { return false };
+    form_row(ui, "Direction", |ui| {
+        // One Side, Two Sides, Symmetric (a flip is a negative distance).
+        let order = [0usize, TWO_SIDES, 2];
+        let reversed = *direction == 1 || *direction == TWO_SIDES_REVERSED;
+        let shown = match *direction {
+            1 => 0,
+            TWO_SIDES_REVERSED => TWO_SIDES,
+            d => d,
+        };
+        let mut pos = order.iter().position(|o| *o == shown).unwrap_or(0);
+        combo(ui, "ex_dir", &["One Side", "Two Sides", "Symmetric"], &mut pos);
+        if pos != order.iter().position(|o| *o == shown).unwrap_or(0) {
+            *direction = match (order.get(pos).copied().unwrap_or(0), reversed) {
+                (0, true) => 1,
+                (TWO_SIDES, true) => TWO_SIDES_REVERSED,
+                (d, _) => d,
+            };
+            // Selecting Symmetric applies the current total-distance semantics.
+            d.extra.insert("convention".into(), json!(solidcraft_engine::doc::ExtrudeConvention::TotalDistance));
+            // An explicit direction ends the automatic choices (#1257).
+            smart.manual_dir = true;
+            *auto_op = false;
+        }
+    });
+    let cur = if to_object_on(&d.inputs) { 1 } else { usize::from(*all) * 2 };
+    let mut ext = cur;
+    form_row(ui, "Extent Type", |ui| {
+        combo(ui, "ex_ext", &["Distance", "To Object", "All"], &mut ext);
+        *all = ext == 2;
+        set_object_input(&mut d.inputs, &mut d.active, TO_OBJECT, ext == 1);
+    });
+    if ext == 1 {
+        input_row(d, ui, &app.session, app.preferences.origin_plane_names, TO_OBJECT);
+    }
+    let Kind::Extrude {
+        distance,
+        direction,
+        operation,
+        auto_op,
+        smart,
+        distance2,
+        taper_present,
+        to_offset,
+        start,
+        thin,
+        wall,
+        wall_side,
+        wall2,
+        ..
+    } = &mut d.kind
+    else {
+        return enter;
+    };
+    if ext == 0 {
+        enter |= expr_row(ui, "Distance", distance);
+    }
+    if ext == 1 {
+        enter |= expr_row(ui, "To Offset", to_offset);
+    }
+    if two_sided(*direction) {
+        enter |= expr_row(ui, "Distance 2", distance2);
+    }
+    // A choice made by hand sticks, the shown one included (#6901): Extrude's own choice
+    // stops before the next frame makes it.
+    if crate::op_auto::op_row(ui, "ex_op", operation) {
+        *auto_op = false;
+    }
+    ui_kit::section(ui, "extrude_options", "Options", true, |ui| {
+        let was_thin = *thin;
+        let was_direction = *direction;
+        let mut reverse = *direction == 1 || *direction == TWO_SIDES_REVERSED;
+        if *direction < 2 || two_sided(*direction) {
+            ui_kit::checkbox_grid(ui, &mut [("Thin Extrude", thin), ("Reverse Direction", &mut reverse)], 2);
+            *direction = match (two_sided(*direction), reverse) {
+                (true, true) => TWO_SIDES_REVERSED,
+                (true, false) => TWO_SIDES,
+                (false, r) => usize::from(r),
+            };
+            if *direction != was_direction {
+                smart.manual_dir = true;
+                *auto_op = false;
+            }
+        } else {
+            ui_kit::checkbox_grid(ui, &mut [("Thin Extrude", thin)], 2);
+        }
+        if *thin != was_thin {
+            set_thin(&mut d.inputs, *thin);
+        }
+        if *thin {
+            choice_row(ui, "Wall Location", "ex_wall", wall_side, &WALL_LABELS);
+            enter |= expr_row(ui, "Wall Thickness", wall);
+            if *wall_side == 3 {
+                enter |= expr_row(ui, "Thickness Outside", wall2);
+            }
+        }
+    });
+    let advanced = !start.is_empty() || object_on(&d.inputs, FROM_OBJECT) || *taper_present;
+    ui_kit::section(ui, "extrude_advanced", "Advanced", advanced, |ui| {
+        let Kind::Extrude { start, .. } = &mut d.kind else { return };
+        let old = if object_on(&d.inputs, FROM_OBJECT) { 2 } else { usize::from(!start.is_empty()) };
+        let mut st = old;
+        form_row(ui, "Start", |ui| {
+            combo(ui, "ex_start", &["Profile Plane", "Offset", "From Object"], &mut st);
+            if st != old {
+                set_object_input(&mut d.inputs, &mut d.active, FROM_OBJECT, st == 2);
+                if st == 1 && start.is_empty() {
+                    *start = length_default(&app.session, "5");
+                }
+                if st == 0 {
+                    start.clear();
+                }
+            }
+        });
+        if st == 2 {
+            input_row(d, ui, &app.session, app.preferences.origin_plane_names, FROM_OBJECT);
+        }
+        let Kind::Extrude { start, direction, taper, taper_present, .. } = &mut d.kind else { return };
+        if st != 0 {
+            enter |= expr_row(ui, "Offset", start);
+        }
+        if *direction < 2 {
+            form_row(ui, "Taper Angle", |ui| {
+                let before = taper.clone();
+                enter |= field(ui, taper);
+                if *taper != before {
+                    *taper_present = !taper.trim().is_empty();
+                }
+            });
+        }
+    });
+    enter
+}

@@ -73,6 +73,40 @@ fn extrude_to_a_planar_face_boundary_follows_it_after_reload() {
     }
 }
 
+/// A post from the side of one block, To Object a face of a second block that runs along the
+/// extrusion (its top or its side, the block only partly in front of the profile): the post ends
+/// where that face begins, at the block's near side, and the To offset moves the end. It used to
+/// run on past the whole block, trimmed only where the block was, and the offset did nothing.
+#[test]
+fn extrude_to_a_face_along_the_direction_ends_where_the_face_begins() {
+    for (to, offset, end) in [([35, 18, 7], 0.0, 25.0), ([35, 18, 7], 2.0, 27.0), ([38, 8, 0], 0.0, 25.0), ([38, 8, 0], -1.5, 23.5)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "A"}));
+        run(&mut s, "solid.box", json!({"corner": [25, 8, -13], "length": 20, "width": 20, "height": 20, "operation": "new", "body_name": "B"}));
+        run(&mut s, "sketch.create", json!({"plane": {"face": [20, 10, 10]}}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [18, 18]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"to": to, "to_offset": offset, "operation": "new", "body_name": "Post"}));
+        let b = body(&mut s, "Post");
+        let reach = b["bbox"]["max"][0].as_f64().unwrap();
+        assert!((reach - end).abs() < 1e-6, "To {to:?} offset {offset}: x max {reach}");
+        assert!((b["volume_mm3"].as_f64().unwrap() - 256.0 * (end - 20.0)).abs() < 1e-3, "To {to:?} offset {offset}: {b}");
+    }
+}
+
+/// A column To Object the side wall of the step it stands beside, a wall that starts at the
+/// profile's plane: it goes the wall's height, to the step's top.
+#[test]
+fn extrude_to_a_wall_rising_from_the_profile_goes_its_height() {
+    let mut s = stepped_block();
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.circle.center", json!({"center": [8, 0], "radius": 1.5}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"to": [5, 0, 14], "operation": "new", "body_name": "Post"}));
+    let b = body(&mut s, "Post");
+    assert!((b["bbox"]["max"][2].as_f64().unwrap() - 20.0).abs() < 1e-6, "{b}");
+}
+
 /// A square post extruded up to a horizontal cylinder (axis along x, r 10, centre z 30): its
 /// top takes the cylinder's shape, so the post is shortest in the middle.
 #[test]
@@ -180,4 +214,142 @@ fn extrude_to_a_cylinder_beside_another_body() {
     let end = b["bbox"]["max"][0].as_f64().unwrap_or(f64::MAX);
     assert!((end + (2.75f64 * 2.75 - 1.5 * 1.5).sqrt()).abs() < 1e-3, "{b}");
     assert!((b["bbox"]["min"][0].as_f64().unwrap_or(0.0) + 98.0).abs() < 1e-6, "{b}");
+}
+
+/// A 10 × 10 square on XY around the origin, as sketch `P`.
+fn square_on_xy(s: &mut Session) {
+    run(s, "sketch.create", json!({"plane": "XY", "name": "P"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [-5, -5], "p1": [5, 5]}));
+    run(s, "sketch.finish", json!({}));
+}
+
+/// The body's lowest and highest z, rounded to a nanometre.
+fn z_range(s: &mut Session, b: &str) -> (f64, f64) {
+    let b = body(s, b);
+    let z = |k: &str| (b["bbox"][k][2].as_f64().unwrap_or(f64::NAN) * 1e6).round() / 1e6 + 0.0;
+    (z("min"), z("max"))
+}
+
+/// To Object a sketch point (#8527): the end is the plane through it, and follows it when it
+/// moves, also once saved and opened again.
+#[test]
+fn extrude_to_a_sketch_point_follows_it() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "top", "expression": "30 mm"}));
+    let marks = run(&mut s, "sketch.create", json!({"plane": "YZ"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.point", json!({"point": [12, "top"], "id": "tip"}));
+    run(&mut s, "sketch.finish", json!({}));
+    square_on_xy(&mut s);
+    run(&mut s, "solid.extrude", json!({"sketch": "P", "to": {"sketch": marks, "point": "tip"}, "body_name": "Post"}));
+    assert_eq!(z_range(&mut s, "Post"), (0.0, 30.0));
+    run(&mut s, "parameters.change", json!({"name": "top", "expression": "45 mm"}));
+    assert_eq!(z_range(&mut s, "Post"), (0.0, 45.0));
+    let restored = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
+    let mut cold = Session { doc: restored.into(), ..Default::default() };
+    cold.refresh();
+    assert_eq!(z_range(&mut cold, "Post"), (0.0, 45.0));
+}
+
+/// To Object a construction plane follows the plane when it moves (#7494), with To Offset past
+/// it; an origin plane is a target too (#5995), here below a profile drawn on that plane.
+#[test]
+fn extrude_to_a_construction_or_origin_plane_follows_it() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "lid", "expression": "25 mm"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "lid", "name": "Lid"}));
+    square_on_xy(&mut s);
+    run(&mut s, "solid.extrude", json!({"sketch": "P", "to": {"plane": "Lid"}, "to_offset": 2, "body_name": "Post"}));
+    assert_eq!(z_range(&mut s, "Post"), (0.0, 27.0));
+    run(&mut s, "parameters.change", json!({"name": "lid", "expression": "40 mm"}));
+    assert_eq!(z_range(&mut s, "Post"), (0.0, 42.0));
+    run(&mut s, "sketch.create", json!({"plane": "Lid", "name": "Up"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [20, 0], "radius": 2}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Up", "to": {"plane": "XY"}, "operation": "new", "body_name": "Pin"}));
+    assert_eq!(z_range(&mut s, "Pin"), (0.0, 40.0));
+}
+
+/// To Object a sketch line or arc: one parallel to the profile ends it at its height; one running
+/// along the extrusion where it begins, or, from the profile's plane or across it, at its end on
+/// the side it was picked (#7781's rule for faces).
+#[test]
+fn extrude_to_a_sketch_curve_ends_at_the_right_point() {
+    let mut s = Session::default();
+    let side = run(&mut s, "sketch.create", json!({"plane": "YZ"}))["sketch"].as_u64().unwrap();
+    let mut curve = |id: &str, p: Value| run(&mut s, id, p)["created"]["curves"][0].as_str().map(String::from).unwrap();
+    let flat = curve("sketch.line", json!({"points": [[20, 18], [30, 18]]}));
+    let ahead = curve("sketch.line", json!({"points": [[20, 12], [20, 40]]}));
+    let across = curve("sketch.line", json!({"points": [[25, -6], [25, 33]]}));
+    let arc = curve("sketch.arc.three_point", json!({"start": [48, 50], "end": [32, 50], "through": [40, 58]}));
+    run(&mut s, "sketch.finish", json!({}));
+    square_on_xy(&mut s);
+    for (to, want) in [
+        (json!({"sketch": side, "curve": flat}), (0.0, 18.0)),
+        (json!({"sketch": side, "curve": ahead, "at": [0, 20, 35]}), (0.0, 12.0)),
+        (json!({"sketch": side, "curve": across, "at": [0, 25, 20]}), (0.0, 33.0)),
+        (json!({"sketch": side, "curve": across, "at": [0, 25, -2]}), (-6.0, 0.0)),
+        // An arc bulging up from z = 50: where it begins, its ends' height.
+        (json!({"sketch": side, "curve": arc}), (0.0, 50.0)),
+    ] {
+        run(&mut s, "solid.extrude", json!({"sketch": "P", "to": to.clone(), "operation": "new", "body_name": "Post"}));
+        assert_eq!(z_range(&mut s, "Post"), want, "To {to}");
+        run(&mut s, "edit.undo", json!({}));
+    }
+}
+
+/// To Object an axis or a construction point: a parallel axis gives its height, one along the
+/// extrusion no end; a construction point the plane through it.
+#[test]
+fn extrude_to_an_axis_or_construction_point() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "P"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-5, -5], "p1": [5, 5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "P", "to": {"axis": "X"}, "body_name": "Post"}));
+    assert_eq!(z_range(&mut s, "Post"), (0.0, 10.0));
+    run(&mut s, "edit.undo", json!({}));
+    let err = s.execute("solid.extrude", &json!({"sketch": "P", "to": {"axis": "Z"}})).unwrap_err().to_string();
+    assert!(err.contains("gives no end"), "{err}");
+    run(&mut s, "construct.point.vertex", json!({"point": {"point": [3, 4, 22]}, "name": "Mark"}));
+    run(&mut s, "solid.extrude", json!({"sketch": "P", "to": {"construct_point": "Mark"}, "body_name": "Post"}));
+    assert_eq!(z_range(&mut s, "Post"), (10.0, 22.0));
+}
+
+/// To Object a plane at an angle to the profile cuts the end along it, To Offset that much
+/// further along the extrusion (as past a face); From Object takes a reference too.
+#[test]
+fn extrude_to_a_slanted_plane_ends_along_it() {
+    let mut s = Session::default();
+    // z = 20 + y.
+    let pt = |x: f64, y: f64| json!({"point": [x, y, 20.0 + y]});
+    run(&mut s, "construct.plane.three_points", json!({"a": pt(0.0, 0.0), "b": pt(1.0, 0.0), "c": pt(0.0, 1.0), "name": "Roof"}));
+    square_on_xy(&mut s);
+    for (offset, volume, top) in [(0.0, 2000.0, 25.0), (2.0, 2200.0, 27.0)] {
+        run(&mut s, "solid.extrude", json!({"sketch": "P", "to": {"plane": "Roof"}, "to_offset": offset, "body_name": "Post"}));
+        let b = body(&mut s, "Post");
+        assert!((b["volume_mm3"].as_f64().unwrap() - volume).abs() < 1e-3, "offset {offset}: {b}");
+        assert!((b["bbox"]["max"][2].as_f64().unwrap() - top).abs() < 1e-6, "offset {offset}: {b}");
+        run(&mut s, "edit.undo", json!({}));
+    }
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Floor"}));
+    run(&mut s, "solid.extrude", json!({"sketch": "P", "from": {"plane": "Floor"}, "to": {"plane": "Roof"}, "body_name": "Post"}));
+    let b = body(&mut s, "Post");
+    assert!((b["volume_mm3"].as_f64().unwrap() - 1500.0).abs() < 1e-3, "{b}");
+    assert!((b["bbox"]["min"][2].as_f64().unwrap() - 5.0).abs() < 1e-6, "{b}");
+}
+
+/// A construction plane after the extrude in the timeline is refused: moving it would not
+/// recompute the extrude, which would keep the end it was first given.
+#[test]
+fn extrude_to_a_later_construction_plane_is_refused() {
+    let mut s = Session::default();
+    square_on_xy(&mut s);
+    run(&mut s, "solid.extrude", json!({"sketch": "P", "distance": 10, "name": "Post", "body_name": "Post"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 30, "name": "Reach"}));
+    let err = s
+        .execute("timeline.redefine", &json!({"feature": "Post", "command": "solid.extrude", "params": {"sketch": "P", "to": {"plane": "Reach"}}}))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("must come earlier in the timeline"), "{err}");
+    assert_eq!(z_range(&mut s, "Post"), (0.0, 10.0));
 }

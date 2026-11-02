@@ -98,17 +98,26 @@ pub struct SelInput {
     /// Face picks are places on the face, not the face: several on one face add up (a click on
     /// the very spot of one takes it out). For points that pick pieces a face is cut into.
     pub places: bool,
+    /// The form draws this input's row itself, under the choice that adds it (an extrude's To
+    /// Object under Extent Type); the list of inputs at the top leaves it out.
+    pub under_choice: bool,
     pub items: Vec<Sel>,
 }
 
 impl SelInput {
     pub fn new(label: &'static str, accept: Accept, multi: bool) -> SelInput {
-        SelInput { label, accept, multi, places: false, items: Vec::new() }
+        SelInput { label, accept, multi, places: false, under_choice: false, items: Vec::new() }
     }
 
     /// This input with face picks as places (see [`SelInput::places`]).
     pub fn places(mut self) -> SelInput {
         self.places = true;
+        self
+    }
+
+    /// This input with its row drawn by the form (see [`SelInput::under_choice`]).
+    pub fn under_choice(mut self) -> SelInput {
+        self.under_choice = true;
         self
     }
 

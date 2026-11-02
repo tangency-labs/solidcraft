@@ -15,6 +15,7 @@ use solidcraft_geom::{Mesh, Plane, Region2, UnitVec3, Vec2, Vec3, regions_apart}
 use solidcraft_kernel::{self as kernel, Body, BoolOp};
 use solidcraft_sketch::{CurveKind, Profile, SolveReport, find_profiles};
 
+use crate::construct::ExtentTarget;
 use crate::expr::{self, Kind, Value};
 use crate::lineage::Traced;
 use crate::{AxisRef, DocError, Document, Feature, FeatureId, FeatureKind, HoleKind, Operation, PlaneRef, ProfileSel, Result};
@@ -5318,30 +5319,45 @@ fn feature_tools_with_constructor(
             // The face names follow `face_points`: To, then From.
             let name = |k: usize| f.face_names.get(k).map(String::as_str);
             let (to_name, from_name) = if extent.to.is_some() { (name(0), name(1)) } else { (None, name(0)) };
-            let to_face = extent.to.and_then(|p| object_face(&tst, to_name, p.0, Some(n)));
-            // The body the extent runs to: a Join to it joins that body too (#6424).
-            *to_body = to_face.and_then(|(bi, _)| tst.bodies.get(bi)).map(|b| b.name.clone());
+            // A reference that is not a body face (a sketch point or curve, a construction plane…)
+            // is found where it is now; a face is found at its point.
+            let to_face = if extent.to_ref.is_some() { None } else { extent.to.and_then(|p| object_face(&tst, to_name, p.0, Some(n))) };
+            // The body the extent runs to: a Join to it joins that body too (#6424), a vertex's too.
+            let to_vertex = matches!(extent.to_ref, Some(crate::construct::GeoRef::Vertex { .. }));
+            let body_face = if to_vertex { extent.to.and_then(|p| object_face(&tst, None, p.0, Some(n))) } else { to_face };
+            *to_body = body_face.and_then(|(bi, _)| tst.bodies.get(bi)).map(|b| b.name.clone());
             let centre = {
                 let pts: Vec<Vec2> = regions.iter().flat_map(|r| r.outer.polyline(1e-2)).collect();
                 let c = pts.iter().fold(Vec2::default(), |a, p| a + *p) * (1.0 / pts.len().max(1) as f64);
                 ss.plane.to_world(c)
             };
             let from = match extent.from {
-                Some(p) => height_at(&tst, object_face(&tst, from_name, p.0, Some(n)), &ss.plane, centre, p.0),
+                Some(p) => match object_end(doc, vals, &tst, &ss.plane, centre, p.0, from_name, extent.from_ref.as_ref())? {
+                    (h, None) => h,
+                    (_, Some(_)) => return Err(DocError::Invalid("not supported yet: From Object on a plane at an angle to the profile".into())),
+                },
                 None => 0.0,
             };
+            // A plane at an angle to the profile: the tool runs through it and is cut along it.
+            let mut slanted: Option<Plane> = None;
             let d = match extent.to {
                 Some(p) => {
                     let off = match &extent.to_offset {
                         Some(e) => val(vals, e, Kind::Length)?,
                         None => 0.0,
                     };
-                    let h = height_at(&tst, to_face, &ss.plane, centre, p.0);
+                    let (h, slant) = object_end_on(doc, vals, &tst, &ss.plane, centre, p.0, to_face, extent.to_ref.as_ref())?;
+                    slanted = slant;
                     let start = from + extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
                     // Past the face by the offset, in the direction travelled.
                     let to = h + if h >= start { off } else { -off };
                     if (to - start).abs() < 1e-9 {
                         return Err(DocError::Invalid("the To object is where the extrude starts".into()));
+                    }
+                    // A slanted plane moves along its own normal so it is that much further along
+                    // the extrusion's.
+                    if let Some(pl) = &mut slanted {
+                        *pl = pl.offset((to - h) * n.dot(pl.normal()));
                     }
                     to - start
                 }
@@ -5350,6 +5366,9 @@ fn feature_tools_with_constructor(
             };
             if let Some(tp) = &extent.taper {
                 let taper = val(vals, tp, Kind::Angle)?;
+                if slanted.is_some() {
+                    return Err(DocError::Invalid("not supported yet: taper to a plane at an angle to the profile".into()));
+                }
                 if extent.distance2.is_some() || extent.direction == crate::Direction::Symmetric {
                     return Err(DocError::Invalid("not supported yet: taper with two-sided or symmetric extents".into()));
                 }
@@ -5469,9 +5488,13 @@ fn feature_tools_with_constructor(
             // To a curved (or slanted) face: run right through the target body, then keep what
             // lies before its surface (the tool less the body, the piece at the start).
             let curved = curved_face(&tst, to_face, Some(n));
-            if let Some(bi) = curved
-                && let Some(tb) = tst.bodies.get(bi)
-            {
+            // A slanted plane is reached as the face of a block beyond it.
+            let beyond = match &slanted {
+                Some(pl) => Some(beyond_plane(pl, &ss.plane, &regions, centre, off)?),
+                None => None,
+            };
+            let trim_target: Option<&ModelBody> = beyond.as_ref().or_else(|| curved.and_then(|bi| tst.bodies.get(bi)));
+            if let Some(tb) = trim_target {
                 let m = tb.mesh();
                 let hs: Vec<f64> = m.positions.iter().map(|q| (*q - ss.plane.origin).dot(n) - off).collect();
                 let margin = tb.body.size() * 0.05 + 1.0;
@@ -5629,7 +5652,7 @@ fn feature_tools_with_constructor(
                     tools = vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())];
                 }
             }
-            if let Some(tb) = curved.and_then(|bi| tst.bodies.get(bi)) {
+            if let Some(tb) = trim_target {
                 let start = if hi > 0.0 { lo + off } else { hi + off };
                 tools = trim_to_body(tools, tb, |q: Vec3| ((q - ss.plane.origin).dot(n) - start).abs())?;
             }
@@ -6959,10 +6982,141 @@ pub(crate) mod frame_member;
 mod surface;
 
 /// Height above `plane` (along its normal) of the object at `p` as seen from `centre`: the face
-/// there if it is planar and parallel (its plane), else where a ray from `centre` along the
-/// normal meets the body there, else the point itself.
+/// there if it is planar and parallel (its plane), its nearest edge if it is planar and runs
+/// along the normal, else where a ray from `centre` along the normal meets the body there, else
+/// the point itself.
 pub fn object_height(st: &ModelState, plane: &Plane, centre: Vec3, p: Vec3) -> f64 {
     height_at(st, face_at(st, p, Some(plane.normal())), plane, centre, p)
+}
+
+/// Where a To / From Object reference ends an extrusion from a plane.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ReferenceEnd {
+    /// This high above the plane, along its normal.
+    Height(f64),
+    /// A plane at an angle to it: the tool is cut along this plane.
+    Slanted(Plane),
+}
+
+/// A To / From Object reference (see [`crate::construct::GeoRef`]) as it is now, in the model
+/// `st` (the feature's component frame).
+pub fn extent_target(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, g: &crate::construct::GeoRef) -> Result<ExtentTarget> {
+    crate::construct::extent_target(&crate::construct::Ctx { doc, vals, st, depth: 0 }, g)
+}
+
+/// [`ReferenceEnd`] of `target` for profiles in `plane` around `centre`. A point gives the plane
+/// through it; a parallel plane, axis or curve its height. A curve running away from `plane` is
+/// reached where it begins along the way travelled; one that starts at `plane` or crosses it at
+/// its end on the side of `pick`, as [`object_height`] does for a face along the normal. A
+/// slanted axis is reached where it passes the profiles' middle.
+pub fn reference_end(target: &ExtentTarget, plane: &Plane, centre: Vec3, pick: Vec3) -> Result<ReferenceEnd> {
+    const TOL: f64 = 1e-6;
+    let n = plane.normal();
+    let h = |q: Vec3| (q - plane.origin).dot(n);
+    match target {
+        ExtentTarget::Point(q) => Ok(ReferenceEnd::Height(h(*q))),
+        ExtentTarget::Plane(p) => {
+            let pn = p.normal();
+            if pn.cross(n).len() < TOL {
+                Ok(ReferenceEnd::Height(h(p.origin)))
+            } else if pn.dot(n).abs() < TOL {
+                Err(DocError::Invalid("the plane runs along the extrusion, so it gives no end".into()))
+            } else {
+                Ok(ReferenceEnd::Slanted(*p))
+            }
+        }
+        ExtentTarget::Line(o, d) => {
+            let b = d.dot(n);
+            if b.abs() < TOL {
+                return Ok(ReferenceEnd::Height(h(*o)));
+            }
+            if d.cross(n).len() < TOL {
+                return Err(DocError::Invalid("the axis runs along the extrusion, so it gives no end".into()));
+            }
+            // The point of the axis nearest the line through the profiles' middle along the normal.
+            let w = *o - centre;
+            let s = (b * w.dot(n) - d.dot(w)) / (1.0 - b * b);
+            Ok(ReferenceEnd::Height(h(*o + *d * s)))
+        }
+        ExtentTarget::Path(pts) => {
+            let lo = pts.iter().map(|q| h(*q)).fold(f64::INFINITY, f64::min);
+            let hi = pts.iter().map(|q| h(*q)).fold(f64::NEG_INFINITY, f64::max);
+            if !lo.is_finite() || !hi.is_finite() {
+                return Err(DocError::Invalid("the curve has no points".into()));
+            }
+            // Ahead of the profile: its near end; behind: its near end on that side; from or
+            // across the profile's plane: the end on the pick's side.
+            Ok(ReferenceEnd::Height(if lo > TOL || (hi >= -TOL && h(pick) < 0.0) { lo } else { hi }))
+        }
+    }
+}
+
+/// A block on the far side of the slanted plane `pl` from the profiles' start (`centre` in
+/// `plane`, `start` above it), wide and deep enough for their tools to run into: To Object on a
+/// plane at an angle cuts them back to it as to a body's face.
+fn beyond_plane(pl: &Plane, plane: &Plane, regions: &[Region2], centre: Vec3, start: f64) -> Result<ModelBody> {
+    let n = plane.normal();
+    let pn = pl.normal();
+    let reach = regions.iter().flat_map(|r| r.outer.polyline(1e-2)).map(|q| plane.to_world(q).dist(centre)).fold(0.0, f64::max);
+    // Where the profiles' middle meets the plane, and how far along the extrusion it is from there.
+    let meet = centre + n * ((pl.origin - centre).dot(pn) / n.dot(pn));
+    let size = 4.0 * (reach + meet.dist(centre) + (start.abs())) + 10.0;
+    let c = pl.to_local(meet);
+    let square = Region2 {
+        outer: solidcraft_geom::Loop2::polygon(&[
+            c + Vec2::new(-size, -size),
+            c + Vec2::new(size, -size),
+            c + Vec2::new(size, size),
+            c + Vec2::new(-size, size),
+        ]),
+        holes: Vec::new(),
+    };
+    // Away from the start.
+    let (a, b) = if pl.height(centre + n * start) < 0.0 { (0.0, size) } else { (-size, 0.0) };
+    let body = kernel::extrude(pl, &[square], a, b)?.into_iter().next().ok_or_else(|| DocError::Invalid("the plane gives no end".into()))?;
+    Ok(ModelBody::new(String::new(), body, 0))
+}
+
+/// How far above `plane` (along its normal) a To / From Object ends profiles around `centre`,
+/// and the plane to cut the end along when it is a plane at an angle. With a `reference`
+/// ([`reference_end`]; a slanted plane where the line from `centre` along the normal meets it),
+/// else the face (or point) at `at`, found by its persistent `face_name` first ([`object_height`]).
+#[allow(clippy::too_many_arguments)]
+pub fn object_end(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    plane: &Plane,
+    centre: Vec3,
+    at: Vec3,
+    face_name: Option<&str>,
+    reference: Option<&crate::construct::GeoRef>,
+) -> Result<(f64, Option<Plane>)> {
+    let face = if reference.is_some() { None } else { object_face(st, face_name, at, Some(plane.normal())) };
+    object_end_on(doc, vals, st, plane, centre, at, face, reference)
+}
+
+/// [`object_end`] with the face at `at` already found.
+#[allow(clippy::too_many_arguments)]
+fn object_end_on(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    plane: &Plane,
+    centre: Vec3,
+    at: Vec3,
+    face: Option<(usize, usize)>,
+    reference: Option<&crate::construct::GeoRef>,
+) -> Result<(f64, Option<Plane>)> {
+    let Some(g) = reference else { return Ok((height_at(st, face, plane, centre, at), None)) };
+    let n = plane.normal();
+    Ok(match reference_end(&extent_target(doc, vals, st, g)?, plane, centre, at)? {
+        ReferenceEnd::Height(h) => (h, None),
+        ReferenceEnd::Slanted(pl) => {
+            let pn = pl.normal();
+            ((centre + n * ((pl.origin - centre).dot(pn) / n.dot(pn)) - plane.origin).dot(n), Some(pl))
+        }
+    })
 }
 
 /// [`object_height`] of the point `p` on `face` (`(body index, face index)`, see [`object_face`]).
@@ -6978,8 +7132,26 @@ fn height_at(st: &ModelState, face: Option<(usize, usize)>, plane: &Plane, centr
     {
         return h(f.centroid);
     }
-    // A curved or slanted face: where the profile's middle meets it.
     let m = b.mesh();
+    // A plane running along the normal (the top of a block ahead of the profile): where the face
+    // begins, its nearest edge. Not the pick, which is anywhere along it. A face that starts at
+    // the profile's plane or crosses it (a step's side wall) is reached at its end on the pick's side.
+    if let Some(f) = faces.iter().find(|f| f.index == fi)
+        && f.plane_normal.is_some_and(|fnrm| runs_along(fnrm, n))
+    {
+        let hs: Vec<f64> =
+            m.triangles.iter().zip(&m.tri_face).filter(|(_, x)| **x as usize == fi).filter_map(|(t, _)| m.tri(t)).flatten().map(h).collect();
+        let lo = hs.iter().copied().fold(f64::INFINITY, f64::min);
+        let hi = hs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        if !lo.is_finite() || !hi.is_finite() {
+            return h(p);
+        }
+        // Ahead of the profile: its near edge; behind: its near edge on that side; across the
+        // profile's plane: the end on the pick's side.
+        let end = if lo > tol || (hi >= -tol && h(p) < 0.0) { lo } else { hi };
+        return if end.abs() > tol { end } else { h(p) };
+    }
+    // A curved or slanted face: where the profile's middle meets it.
     for dir in [n, n * -1.0] {
         if let Some((t, tri)) = m.raycast(centre, dir)
             && m.tri_face.get(tri).is_some_and(|x| *x as usize == fi)
@@ -7060,11 +7232,17 @@ fn curved_face(st: &ModelState, face: Option<(usize, usize)>, n: Option<Vec3>) -
     let b = st.bodies.get(bi)?;
     let tol = (b.body.size() * 1e-3).max(1e-3);
     let normal = b.body.faces(tol).ok()?.into_iter().find(|f| f.index == fi).map(|f| f.plane_normal);
+    // A plane square to `n` or running along it ends the tool flat (see `height_at`).
     let planar = match n {
-        Some(n) => normal.flatten().is_some_and(|fnrm| fnrm.cross(n).len() < 1e-6),
+        Some(n) => normal.flatten().is_some_and(|fnrm| fnrm.cross(n).len() < 1e-6 || runs_along(fnrm, n)),
         None => normal.is_some_and(|fnrm| fnrm.is_some()),
     };
     (!planar).then_some(bi)
+}
+
+/// Does a plane with normal `fnrm` run along the direction `n` (contain it)?
+fn runs_along(fnrm: Vec3, n: Vec3) -> bool {
+    fnrm.dot(n).abs() < 1e-6
 }
 
 /// The body at `p` when the face there is not planar.
