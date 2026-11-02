@@ -225,18 +225,27 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
         }
         // Only graphical edits convert HSV back to RGB. Typed byte values stay exact.
         let mut graphical_edit = false;
-        // Hue in degrees, saturation and value in percent, of the same gamma HSV the square shows.
-        const HSV: [(&str, &str, f64); 3] = [("H", "color.hue", 360.0), ("S", "color.saturation", 100.0), ("V", "color.value", 100.0)];
-        let mut hsv_fields = [hsv.h, hsv.s, hsv.v].iter().zip(HSV).map(|(v, (_, _, max))| f64::from(*v) * max).collect::<Vec<_>>();
+        // Hue stays in degrees. Saturation and value use the same number format as RGB in U8 and F
+        // (#10201); Hex keeps the familiar 0–100 percent scale.
+        let sv = if hexadecimal {
+            Spin { max: 100.0, step: 1.0, speed: 0.5, decimals: 0 }
+        } else if linear {
+            Spin { max: 1.0, step: 0.01, speed: 0.003, decimals: 3 }
+        } else {
+            Spin { max: 255.0, step: 1.0, speed: 0.5, decimals: 0 }
+        };
+        let h_spin = Spin { max: 360.0, step: 1.0, speed: 0.5, decimals: 0 };
+        let hsv_meta: [(&str, &str, Spin); 3] = [("H", "color.hue", h_spin), ("S", "color.saturation", sv), ("V", "color.value", sv)];
+        let mut hsv_fields = [hsv.h, hsv.s, hsv.v].iter().zip(hsv_meta).map(|(v, (_, _, spin))| f64::from(*v) * spin.max).collect::<Vec<_>>();
         let mut hsv_edited = false;
         ui.columns(3, |columns| {
-            for ((ui, value), (name, tip, max)) in columns.iter_mut().zip(hsv_fields.iter_mut()).zip(HSV) {
-                hsv_edited |= spin_channel(ui, name, Some(i18n::tr(tip)), value, Spin { max, step: 1.0, speed: 0.5, decimals: 0 });
+            for ((ui, value), (name, tip, spin)) in columns.iter_mut().zip(hsv_fields.iter_mut()).zip(hsv_meta) {
+                hsv_edited |= spin_channel(ui, name, Some(i18n::tr(tip)), value, spin);
             }
         });
         if hsv_edited {
             let unit = |at: usize| {
-                let (value, max) = (hsv_fields.get(at).copied().unwrap_or(0.0), HSV.get(at).map_or(1.0, |h| h.2));
+                let (value, max) = (hsv_fields.get(at).copied().unwrap_or(0.0), hsv_meta.get(at).map_or(1.0, |h| h.2.max));
                 if value.is_finite() { (value / max).clamp(0.0, 1.0) as f32 } else { 0.0 }
             };
             (hsv.h, hsv.s, hsv.v) = (unit(0), unit(1), unit(2));
