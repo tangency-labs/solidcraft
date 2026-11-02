@@ -27,7 +27,78 @@ use solidcore::math::Point3;
 use solidcore::nurbs::b_spline_curve::p1::BSplineCurveForm;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
 use solidcore::primitive::api_curves::{create_canonical_curve, CanonicalCurveParams};
+use solidcore::topology::brep::{new_brep, p5::create_wire_edge_from_curve};
 use solidcore::{Kernel, Vec3};
+
+// Unlike the curve-level regressions below, these call the public whole-body
+// query. The edge retains the whole curve, but represents only `interval`.
+fn wire_body_box(curve: Curve, interval: Extent1d, fixed: bool) -> Extent3d {
+    let natural = curve.natural_interval();
+    let mut k = kernel(fixed);
+    let mut body = new_brep(&mut k, 1.0, 1e6).unwrap();
+    let edge = create_wire_edge_from_curve(&mut k, &mut body, curve, interval).unwrap();
+    assert_eq!(body.face_list().len(), 0);
+    assert_eq!(body.edge_list().len(), 1);
+    assert_eq!(body.vertex_list().len(), 2);
+    let stored = body.edge(edge).unwrap();
+    assert_eq!(stored.interval, interval);
+    assert_eq!(stored.curve.as_ref().unwrap().natural_interval(), natural);
+    solidcore::query::brep::calculate_tight_bounding_box(&k, &body).unwrap()
+}
+
+#[test]
+fn whole_body_box_of_a_wire_uses_its_arc_interval() {
+    let curve = quarter_circle();
+    let natural = curve.natural_interval();
+    let interval = Extent1d::from_min_max(natural.min(), 0.5 * (natural.min() + natural.max()));
+    assert!(interval.max() < natural.max());
+    let radius_at_45 = 50.0 / 2.0_f64.sqrt();
+    let fixed = wire_body_box(curve.clone(), interval, true);
+    assert_box_close(
+        &fixed,
+        &Extent3d::from_bounds(radius_at_45, 0.0, 0.0, 50.0, radius_at_45, 0.0),
+    );
+    let legacy = wire_body_box(curve.clone(), interval, false);
+    assert_box_close(
+        &legacy,
+        &Extent3d::from_bounds(0.0, 0.0, 0.0, 50.0, 50.0, 0.0),
+    );
+    assert!(legacy.v_max() > fixed.v_max());
+
+    // The whole quarter circle is a control, not evidence that the guard runs.
+    let expected = Extent3d::from_bounds(0.0, 0.0, 0.0, 50.0, 50.0, 0.0);
+    for enabled in [false, true] {
+        assert_box_close(&wire_body_box(curve.clone(), natural, enabled), &expected);
+    }
+}
+
+#[test]
+fn whole_body_box_keeps_an_interior_peak_but_not_outside_knots() {
+    let curve = degree_one_peaks();
+    let interval = Extent1d::from_min_max(2.5, 3.5);
+    let fixed = wire_body_box(curve.clone(), interval, true);
+    assert_eq!(fixed.min(), Point3::new(2.5, 2.0, 0.0));
+    assert_eq!(fixed.max(), Point3::new(3.5, 4.0, 0.0));
+    // Both endpoints have y=2. The interior y=4 peak must not be lost.
+    let legacy = wire_body_box(curve.clone(), interval, false);
+    assert_eq!(legacy.min(), Point3::new(1.0, 0.0, 0.0));
+    assert_eq!(legacy.max(), Point3::new(6.0, 20.0, 0.0));
+
+    // Complete-domain control: every peak belongs to the wire, including y=20.
+    for enabled in [false, true] {
+        let whole = wire_body_box(curve.clone(), curve.natural_interval(), enabled);
+        assert_eq!(whole.min(), Point3::new(0.0, 0.0, 0.0));
+        assert_eq!(whole.max(), Point3::new(6.0, 20.0, 0.0));
+    }
+}
+
+#[test]
+fn whole_body_box_keeps_knots_on_the_wire_interval_boundary() {
+    let curve = degree_one_peaks();
+    let boundary = wire_body_box(curve, Extent1d::from_min_max(2.0, 4.0), true);
+    assert_eq!(boundary.min(), Point3::new(2.0, 0.0, 0.0));
+    assert_eq!(boundary.max(), Point3::new(4.0, 4.0, 0.0));
+}
 
 fn arc(x_axis: [f64; 3], y_axis: [f64; 3], start_deg: f64, end_deg: f64) -> Curve {
     let frame = Axis2Placement::new(
