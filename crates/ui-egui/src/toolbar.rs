@@ -3698,7 +3698,10 @@ mod header_report_tests {
         let saved = h.app.session.path.clone().unwrap();
         let bytes = std::fs::read(&saved).unwrap();
         assert!(!solidcraft_engine::io::is_design_container(&bytes));
-        assert_eq!(solidcraft_engine::io::read_design(&bytes).unwrap(), *h.app.session.doc);
+        // The file is the open design plus the save history the session keeps.
+        let mut file = solidcraft_engine::io::read_design(&bytes).unwrap();
+        assert_eq!(std::mem::take(&mut file.document_history), *h.app.session.document_history);
+        assert_eq!(file, *h.app.session.doc);
         h.app.session.doc_mut().name = "Exported copy".into();
         h.frames(3);
         h.step(&json!({"click":{"handle":"appbar:folder"}})).unwrap();
@@ -4900,7 +4903,10 @@ mod app_bar_tests {
         h.step(&json!({"click":{"handle":"titlebar:save"}})).unwrap();
         wait_for_save(&mut h);
         assert_eq!(h.app.session.path.as_deref(), Some(path.as_str()));
-        let saved = solidcraft_engine::io::read_design(&std::fs::read(path).unwrap()).unwrap();
+        let mut saved = solidcraft_engine::io::read_design(&std::fs::read(path).unwrap()).unwrap();
+        // The file is the open design plus the save history the session keeps: two saves.
+        assert_eq!(std::mem::take(&mut saved.document_history), *h.app.session.document_history);
+        assert_eq!(h.app.session.document_history.revision, 2);
         assert_eq!(saved, *h.app.session.doc);
     }
 }
