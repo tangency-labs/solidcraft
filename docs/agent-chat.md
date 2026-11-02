@@ -180,6 +180,13 @@ messages go as one prompt, in order, when the turn ends normally.
   fresh session on the same agent, keeping the agent and its mode. It asks first when a message
   is running or queued, or files are waiting. The design's undo history is untouched.
 
+When you change the design yourself between two messages (a parameter, a feature, an undo, the
+History marker), your next message tells the agent so first, in a short note the conversation
+doesn't show: which parameters changed and from what to what, which features are new, edited or
+removed, and where the History marker went. The agent then reads the design again instead of
+picking edges and faces where they were before. A new chat or a new agent session has seen
+nothing yet, so its first message carries no note.
+
 ## Agents
 
 Preferences → AI → **Agents** lists every agent the chat can use, each with its kind (a program or
