@@ -1139,7 +1139,7 @@ fn vertical_group_row(
         crate::scenario::publish_handle(&format!("timeline-folder-status:{}:{}", status.icon(), group.name), mark.center());
     }
     let response = match tip {
-        Some(tip) => response.on_hover_text(tip),
+        Some(tip) => response.on_hover_ui(|ui| tip.show(ui)),
         None => response,
     };
     let renaming = timeline_group_name(app, ui, group, rect, offset, names, suppressed, &t);
@@ -1627,18 +1627,16 @@ fn feature_row_body(
             .and_then(|f| f.kind.expressions().first().map(ToString::to_string))
             .unwrap_or_else(|| elapsed.map_or_else(String::new, |ms| format!("{ms:.1} ms")));
         let kind = crate::i18n::tr_label(ty.strip_suffix("Feature").unwrap_or(ty));
-        let mut tip = format!("{name} · {kind} · {summary}");
-        if error.is_some() || warning.is_some() {
-            tip.push_str(&format!("\n{}", crate::timeline::status_text(name, ty, error.as_deref(), warning.as_deref())));
-        }
+        crate::ui_kit::text(ui, &format!("{name} · {kind} · {summary}"), crate::ui_kit::Text::Value("history", false));
+        // A value row is one line: the error, the warning and the sketch's state wrap below it.
+        crate::timeline::status_tip(String::new(), error.as_deref(), warning.as_deref()).messages(ui);
         // Greyed out says only "not shown": say why (#8100).
         if rolled {
-            tip.push_str(&format!("\n{}", crate::i18n::tr("timeline.feature_rolled_back")));
+            crate::ui_kit::text(ui, crate::i18n::tr("timeline.feature_rolled_back"), crate::ui_kit::Text::Report("history_rolled_back", false));
         }
         if let Some(state) = sketch_state {
-            tip.push_str(&format!("\n{}", state.text()));
+            crate::ui_kit::text(ui, &state.text(), crate::ui_kit::Text::Report("history_sketch_state", false));
         }
-        crate::ui_kit::text(ui, &tip, crate::ui_kit::Text::Value("history", false));
         // A value row is one line: where the sketch is listed gets a row of its own.
         if let Some(host) = listed_under.filter(|_| reference) {
             let listed = crate::i18n::format("ui.history_sketch_listed_under", &[("feature", host)]);
@@ -2711,6 +2709,13 @@ mod tests {
         harness.frames(2);
         let marks = || crate::scenario::handles("timeline-folder-status:").into_iter().map(|(name, _)| name).collect::<Vec<_>>();
         assert!(marks().is_empty(), "open folders show their features' own marks");
+        // The chip's tooltip keeps the warning on a line of its own, not cut off after the summary.
+        let chip = crate::scenario::handle_at("timeline:Warned").unwrap();
+        harness.app.synthetic.push(egui::Event::PointerMoved(chip));
+        harness.frames(90);
+        assert!(crate::scenario::handle_at("dialog:report:status_warning").is_some(), "the warning has its own line");
+        harness.app.synthetic.push(egui::Event::PointerGone);
+        harness.frames(2);
 
         harness.app.tree.collapsed.insert(format!("timeline_group:{}", id("Outer")));
         harness.frames(2);

@@ -1,7 +1,7 @@
 //! Shared Browser tree rows; feature modules supply content and dispatch commands.
 use crate::icons::glyphs::badge;
 use crate::{icons, theme::Tokens};
-use egui::{Color32, FontId, Pos2, Rect, Sense, Stroke, pos2, vec2};
+use egui::{Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
 const ROW_H: f32 = super::TREE_ROW_HEIGHT;
 const INDENT: f32 = 14.0;
 const DIM_ICON_OPACITY: f32 = 0.4;
@@ -44,6 +44,8 @@ pub(crate) struct Row<'a> {
     pub(crate) icon_ink: Option<Color32>,
     /// The row's tooltip (a sketch's solve state), after its full name when that is cut short.
     pub(crate) tip: Option<&'a str>,
+    /// A marked feature's or folder's tooltip, in place of [`Row::tip`].
+    pub(crate) status_tip: Option<&'a StatusTip>,
     /// Component rows: is it the active one?
     pub(crate) radio: Option<bool>,
     /// Trailing badges: "lock", "pin".
@@ -83,6 +85,32 @@ pub(crate) enum Mark {
 pub(crate) enum Status {
     Warning,
     Error,
+}
+
+/// The tooltip of a feature's mark: its name and type, then the error in the error colour and
+/// the warning, each wrapping on lines of their own.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct StatusTip {
+    pub(crate) head: String,
+    pub(crate) error: Option<String>,
+    pub(crate) warning: Option<String>,
+}
+
+impl StatusTip {
+    pub(crate) fn show(&self, ui: &mut Ui) {
+        super::text(ui, &self.head, super::Text::Report("status_head", false));
+        self.messages(ui);
+    }
+
+    /// The error and the warning alone, under a head of the caller's own.
+    pub(crate) fn messages(&self, ui: &mut Ui) {
+        if let Some(error) = &self.error {
+            super::text(ui, error, super::Text::Report("status_error", true));
+        }
+        if let Some(warning) = &self.warning {
+            super::text(ui, warning, super::Text::Report("status_warning", false));
+        }
+    }
 }
 
 impl Status {
@@ -407,22 +435,23 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         _ => None,
     };
     let state = row.kind_tip.map(crate::i18n::tr).or(row.tip);
-    let resp = match (tip, state) {
+    let resp = match (tip, state, row.status_tip) {
         // The eye at the row's end shows its tip there, not under the name.
-        (Some(t), _) if hover_on == 2 && eye_end => {
+        (Some(t), _, _) if hover_on == 2 && eye_end => {
             let mut at_eye = resp.clone();
             (at_eye.rect, at_eye.interact_rect) = (eye_r, eye_r);
             at_eye.on_hover_text(t);
             resp
         }
-        (Some(t), _) => resp.on_hover_text(t),
-        (None, Some(state)) if elided => resp.on_hover_text(format!("{label_display}\n{state}")),
-        (None, Some(state)) => resp.on_hover_text(state),
-        (None, None) if !row.secondary.is_empty() || !row.count.is_empty() => {
+        (Some(t), _, _) => resp.on_hover_text(t),
+        (None, _, Some(status)) => resp.on_hover_ui(|ui| status.show(ui)),
+        (None, Some(state), None) if elided => resp.on_hover_text(format!("{label_display}\n{state}")),
+        (None, Some(state), None) => resp.on_hover_text(state),
+        (None, None, None) if !row.secondary.is_empty() || !row.count.is_empty() => {
             resp.on_hover_text(format!("{label_display}\n{}\n{}", row.secondary, row.count))
         }
-        (None, None) if elided => resp.on_hover_text(label_display.to_string()),
-        (None, None) => resp,
+        (None, None, None) if elided => resp.on_hover_text(label_display.to_string()),
+        (None, None, None) => resp,
     };
     out.on_control = press_on != 0 || over_action(ui.input(|i| i.pointer.press_origin()));
     out.clicked = resp.clicked() && click_on == 0 && !action_click;

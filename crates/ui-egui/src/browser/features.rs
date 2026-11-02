@@ -105,8 +105,11 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
             .collect()
     };
     let (status, tip) = crate::timeline::worst_status(app, &ids);
-    let r =
-        draw_row(ui, ui.id().with(&key), &Row { depth, fold: Some(open), icon: "folder", label, status, tip: tip.as_deref(), ..Default::default() });
+    let r = draw_row(
+        ui,
+        ui.id().with(&key),
+        &Row { depth, fold: Some(open), icon: "folder", label, status, status_tip: tip.as_ref(), ..Default::default() },
+    );
     if r.fold || r.clicked {
         toggle(app, &key, compact);
     }
@@ -275,7 +278,7 @@ fn feature_row(
         if is_sketch { crate::browser::sketch_visible(app, id) } else { bodies.iter().any(|b| !app.session.visibility.hidden_bodies.contains(b)) };
     let eye = (is_sketch || !bodies.is_empty()).then_some(visible);
     let status = crate::timeline::feature_status(app, id);
-    let tip = status.and_then(|_| crate::timeline::feature_message(app, id));
+    let tip = status.and_then(|_| crate::timeline::feature_tip(app, id));
     // A cut feature has a dashed outline until Paste moves it.
     let cut = app.cut.features.contains(&id);
     let r = draw_row(
@@ -293,7 +296,7 @@ fn feature_row(
             action,
             mark,
             status,
-            tip: tip.as_deref(),
+            status_tip: tip.as_ref(),
             ..Default::default()
         },
     );
@@ -1076,6 +1079,13 @@ mod tests {
         h.app.tree.collapsed.insert("c0/history".into());
         h.frames(2);
         assert_eq!(marks(), ["status:error:History"], "the folded History shows its worst feature's mark");
+        // Its tooltip puts the error on a line of its own, in the error colour.
+        let row = crate::scenario::handle_at("row:History").unwrap();
+        h.app.synthetic.push(egui::Event::PointerMoved(row));
+        h.frames(90);
+        assert!(crate::scenario::handle_at("dialog:report:status_error").is_some(), "the error has its own line");
+        h.app.synthetic.push(egui::Event::PointerGone);
+        h.frames(2);
 
         h.app.tree.collapsed.remove("c0/history");
         h.app.run("timeline.suppress", json!({"feature":boxes[1],"suppressed":true})).unwrap();
