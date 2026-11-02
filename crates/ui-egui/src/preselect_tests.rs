@@ -3066,6 +3066,22 @@ fn plane_through_axis_and_point_edit_in_a_moved_component_keeps_its_fixed_point(
     assert_eq!(h.app.session.doc.to_json(), before, "editing maps saved local references through world and back once");
 }
 
+/// #11228: a plane through an axis and a snapped middle reopens to edit and keeps the snap.
+#[test]
+fn plane_through_axis_and_a_snapped_point_reopens_and_keeps_it() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    let snap = json!({"type":"snap","of":{"type":"edge","at":[10,0,20]},"kind":"middle","at":[20,0,20]});
+    let made = h.app.run("construct.plane.axis_point", json!({"axis":{"axis":"Z"},"point":snap,"name":"Fence"})).unwrap();
+    let before = h.app.session.doc.to_json();
+    h.app.edit_feature(made["feature"].as_u64().unwrap());
+    h.frames(1);
+    assert!(h.app.dialog.is_some(), "the edit opens its dialog");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    assert_eq!(h.app.session.doc.to_json(), before, "the saved snap reference is kept");
+}
+
 /// Point Along Path asks for its position too, and a missing pick names the input.
 #[test]
 fn point_along_path_has_its_position_and_missing_picks_are_named() {

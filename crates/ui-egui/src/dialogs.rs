@@ -122,7 +122,7 @@ crate::dialog_descriptor::dialog_descriptors! {
             angle: String = "5 deg".into() => shown_expr(angle, ValueKind::Angle),
         } => json!({"angle": angle});
         // A point picked as well puts the plane through it instead of at the distance.
-        OffsetPlane("construct.plane.offset", "OFFSET PLANE", [("Plane", PLANES | PLANAR_FACES, false), ("Through point", selection::VERTICES | selection::POINTS, false)],
+        OffsetPlane("construct.plane.offset", "OFFSET PLANE", [("Plane", PLANES | PLANAR_FACES, false), ("Through point", selection::VERTICES | selection::POINTS | selection::SNAP_POINTS, false)],
             FeatureKind::ConstructionPlane { plane: PlaneRef::Offset { distance, .. } }) {
             offset: String = "0 mm".into() => shown_expr(distance, ValueKind::Length),
         } => json!({"offset": offset});
@@ -5236,8 +5236,16 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let base = plane_arg(app, sels(d, 0).first())?;
             match offset_through_point(d) {
                 // A null `offset` keeps the descriptor's distance out: the plane goes through the point.
-                Some(point) => ("construct.plane.offset", json!({"base": base, "through": construct_ref(app, point)?, "offset": null})),
-                None => ("construct.plane.offset", json!({"base": base})),
+                Some(point) => {
+                    // A snap point saved before, picked again where it was: kept as saved.
+                    let through = match (point, d.extra.get("through")) {
+                        (Sel::Vertex { point, .. }, Some(saved)) if saved.get("at").and_then(vec3_of) == Some(*point) => saved.clone(),
+                        _ => construct_ref(app, point)?,
+                    };
+                    ("construct.plane.offset", json!({"base": base, "through": through, "offset": null}))
+                }
+                // A null `through` keeps a saved snap point (`extra`) out: the plane is at the distance.
+                None => ("construct.plane.offset", json!({"base": base, "through": null})),
             }
         }
         Kind::MeshConvert { tolerance } => {
@@ -6174,7 +6182,7 @@ fn emboss_face_sel(s: &Session, component: u64, face: &solidcraft_engine::doc::E
 /// Plane At Angle have dialogs of their own.
 fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&'static str, Accept, &'static str)])> {
     const PLANE: Accept = PLANES | PLANAR_FACES;
-    const POINT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS;
+    const POINT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS | selection::SNAP_POINTS;
     const LINE: Accept = EDGES | AXES;
     const CURVE: Accept = EDGES | CURVES;
     Some(match id {
@@ -6227,7 +6235,10 @@ fn construct_ref(app: &SolveApp, sel: &Sel) -> Result<Value, String> {
     Ok(match sel {
         Sel::Face { point, .. } => json!({"face": pt(*point)}),
         Sel::Edge { point, .. } => json!({"edge": pt(*point)}),
-        Sel::Vertex { point, .. } => json!({"vertex": pt(*point)}),
+        Sel::Vertex { point, .. } => match crate::snap_wake::snapped(app, *point) {
+            Some((item, snap)) => snap_ref(app, item, snap)?,
+            None => json!({"vertex": pt(*point)}),
+        },
         Sel::Plane { name } => json!({"plane": name}),
         Sel::Axis { name } => json!({"axis": name}),
         Sel::ConstructionPoint { name } => json!({"construct_point": name}),
@@ -6252,6 +6263,47 @@ fn construct_ref(app: &SolveApp, sel: &Sel) -> Result<Value, String> {
         }
         _ => return Err("this pick can't be used here".into()),
     })
+}
+
+/// A snap point picked for a construction (#11228), as a reference that follows the model: a
+/// centre or middle as `{type: snap}` on the edge, face or sketch curve that offered it, an end
+/// as the vertex or sketch point there.
+fn snap_ref(app: &SolveApp, item: &Sel, snap: &solidcraft_engine::snap::SnapPoint) -> Result<Value, String> {
+    use solidcraft_engine::snap::SnapKind;
+    let kind = match snap.kind {
+        SnapKind::Centre => "centre",
+        SnapKind::Middle => "middle",
+        // No exact centre of a face's area yet: kept where it was picked.
+        SnapKind::FaceCentre => return Ok(json!({"point": pt(snap.at)})),
+        SnapKind::End | SnapKind::Vertex => {
+            return match item {
+                Sel::ExternalSketchCurve { sketch, .. } => sketch_point_at(app, *sketch, snap.at)
+                    .map(|point| json!({"sketch": sketch, "point": point}))
+                    .ok_or_else(|| "pick the sketch point itself".to_string()),
+                _ => Ok(json!({"vertex": pt(snap.at)})),
+            };
+        }
+    };
+    let of = match item {
+        Sel::Edge { point, .. } => json!({"type": "edge", "at": pt(*point)}),
+        Sel::Face { point, .. } => json!({"type": "face", "at": pt(*point)}),
+        Sel::ExternalSketchCurve { sketch, id } => json!({"type": "sketch_curve", "sketch": sketch, "curve": id}),
+        _ => return Err("this pick can't be used here".into()),
+    };
+    Ok(json!({"type": "snap", "of": of, "kind": kind, "at": pt(snap.at)}))
+}
+
+/// The id of the point of sketch `sketch` at world point `at`.
+fn sketch_point_at(app: &SolveApp, sketch: u64, at: Vec3) -> Option<String> {
+    let st = app.session.world_state().ok()?;
+    let ss = st.sketch(sketch)?;
+    let tol = 1e-6 * (1.0 + at.len());
+    ss.sketch
+        .points
+        .iter()
+        .enumerate()
+        .find(|(i, _)| ss.sketch.point(*i).is_some_and(|q| ss.plane.to_world(q).dist(at) <= tol))
+        .map(|(_, p)| p.id.clone())
 }
 
 /// A picked plane or planar face as `construct.plane.*` takes it.
@@ -6280,6 +6332,8 @@ fn point_sel(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Opti
             _ => None,
         },
         GeoRef::SketchPoint { sketch, point } => Some(Sel::SketchPoint { id: format!("{sketch}:{point}") }),
+        // Shown where it was picked; the dialog keeps the saved reference (`extra.through`).
+        GeoRef::Snap { at, .. } => Some(Sel::Vertex { body: String::new(), point: *at }),
         _ => None,
     }
 }
@@ -7087,6 +7141,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if let Some(inp) = d.inputs.get_mut(1) {
                 inp.items = point_sel(s, point).into_iter().collect();
             }
+            if matches!(point.as_ref(), solidcraft_engine::doc::construct::GeoRef::Snap { .. }) {
+                d.extra.insert("through".into(), serde_json::to_value(point).ok()?);
+            }
             d
         }
         FeatureKind::ConstructionPlane { plane: PlaneRef::AlongPath { path, t } } => {
@@ -7127,6 +7184,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     solidcraft_engine::doc::construct::GeoRef::Vertex { at, .. } => Sel::Vertex { body: String::new(), point: *at },
                     solidcraft_engine::doc::construct::GeoRef::Point { p } => Sel::Vertex { body: String::new(), point: *p },
                     solidcraft_engine::doc::construct::GeoRef::Origin => Sel::Vertex { body: String::new(), point: Vec3::ZERO },
+                    solidcraft_engine::doc::construct::GeoRef::Snap { at, .. } => Sel::Vertex { body: String::new(), point: *at },
                     other => model_axis_sel(s, other)?,
                 }];
             }

@@ -188,6 +188,9 @@ pub struct ViewportState {
 
     /// Snap points woken by the last edge or face hovered (`snap_wake`).
     pub woken: crate::snap_wake::Woken,
+    /// Every point woken while this dialog is open, with the item that woke it, so a pick can
+    /// be saved as the snap point it is after other points have woken (`snap_wake::snapped`).
+    pub snapped: Vec<(Sel, solidcraft_engine::snap::SnapPoint)>,
     pub mouse: Option<Pos2>,
     /// Box selection being dragged.
     pub boxsel: Option<BoxSel>,

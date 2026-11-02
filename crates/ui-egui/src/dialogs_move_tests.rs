@@ -1039,3 +1039,56 @@ fn an_axis_input_wakes_no_points() {
     h.step(&json!({ "move": { "world": [49, 20, 10] } })).unwrap();
     assert!(h.app.viewport.woken.points.is_empty(), "{:?}", h.app.viewport.woken);
 }
+
+/// Construct Point takes snap points (#11228): a hole's centre, clicked in its empty middle,
+/// is saved as the centre of the hole's rim, not as the nearest vertex.
+#[test]
+fn construct_point_saves_a_snapped_centre_as_a_reference() {
+    let mut h = holed_plate_picking_from();
+    h.app.dialog = None;
+    h.app.start("construct.point.vertex");
+    h.step(&json!({ "move": { "world": [49, 20, 10] } })).unwrap();
+    h.step(&json!({ "click": { "world": [45, 20, 10] } })).unwrap();
+    h.step(&json!({ "click": { "handle": "dialog:OK" } })).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    let f = h.app.session.doc.features.last().unwrap();
+    let saved = serde_json::to_value(&f.kind).unwrap();
+    assert_eq!(saved["def"]["point"]["type"], "snap", "{saved}");
+    assert_eq!(saved["def"]["point"]["kind"], "centre", "{saved}");
+    let at = solidcraft_engine::view::construction_points(&h.app.session).into_iter().map(|p| p.2).next().unwrap();
+    assert!(at.dist(Vec3::new(45.0, 20.0, 10.0)) < 1e-6, "{at:?}");
+}
+
+/// Offset Plane's Through point takes an edge's middle (#11228); reopened, OK keeps the saved
+/// reference, and with the point removed the plane goes back to its distance.
+#[test]
+fn offset_plane_through_a_snapped_middle_keeps_it_when_edited() {
+    use solidcraft_engine::snap::{SnapKind, SnapPoint};
+    let mut h = holed_plate_picking_from();
+    h.app.dialog = None;
+    h.app.start("construct.plane.offset");
+    h.frames(1);
+    let middle = Vec3::new(30.0, 0.0, 10.0);
+    let edge = Sel::Edge { body: "Body1".into(), index: 0, point: Vec3::new(20.0, 0.0, 10.0) };
+    h.app.viewport.snapped = vec![(edge, SnapPoint { at: middle, kind: SnapKind::Middle, body: "Body1".into() })];
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
+    d.inputs[1].items = vec![Sel::Vertex { body: "Body1".into(), point: middle }];
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["through"]["type"], "snap", "{:?}", commands);
+    h.step(&json!({ "key": "Enter" })).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    h.frames(3);
+    let (id, _, pl) = solidcraft_engine::view::construction_planes(&h.app.session).into_iter().next().expect("the plane");
+    assert!((pl.origin.z - 10.0).abs() < 1e-6, "{pl:?}");
+    let saved = serde_json::to_value(&h.app.session.doc.feature(id).unwrap().kind).unwrap();
+    assert_eq!(saved["plane"]["point"]["kind"], "middle", "{saved}");
+    // Reopened, nothing remembered: the saved reference is kept as it is.
+    h.app.viewport.snapped.clear();
+    let mut reopened = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    let commands = crate::dialogs::apply_commands(&h.app, &reopened).unwrap();
+    assert_eq!(commands[0].1["params"]["through"]["kind"], "middle", "{:?}", commands);
+    reopened.inputs[1].items.clear();
+    let commands = crate::dialogs::apply_commands(&h.app, &reopened).unwrap();
+    assert!(commands[0].1["params"]["through"].is_null(), "{:?}", commands);
+}

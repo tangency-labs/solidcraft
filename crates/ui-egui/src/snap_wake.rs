@@ -73,6 +73,9 @@ fn same_item(a: &Sel, b: &Sel) -> bool {
 /// curve itself (Move's points), so it is looked for among all the hits (`hits`), not only the
 /// hover.
 pub fn update(app: &mut SolveApp, hits: &[Hit]) {
+    if app.dialog.is_none() {
+        app.viewport.snapped.clear();
+    }
     if !wanted(app) {
         app.viewport.woken = Woken::default();
         return;
@@ -89,6 +92,7 @@ pub fn update(app: &mut SolveApp, hits: &[Hit]) {
     // Crossing a face of the rim's own body on the way to its centre keeps the rim's points and
     // adds the face's; a face of another body sleeps them and wakes its own.
     let points = snap_points(&app.session, &item);
+    remember(app, &item, &points);
     if let Sel::Face { body: face_body, .. } = &item
         && let Some(rim) = app.viewport.woken.item.clone().filter(|w| matches!(w, Sel::Edge { body, .. } if body == face_body))
     {
@@ -123,6 +127,23 @@ pub fn shown(app: &SolveApp) -> Vec<(Vec3, &SnapPoint)> {
         return Vec::new();
     }
     app.viewport.woken.points.iter().filter(|p| p.body.is_empty() || app.body_visible(&p.body)).map(|p| (at(p), p)).collect()
+}
+
+/// How many woken points a dialog remembers (the oldest are forgotten first).
+const REMEMBERED: usize = 256;
+
+/// Remember points woken by `item`, for [`snapped`].
+fn remember(app: &mut SolveApp, item: &Sel, points: &[SnapPoint]) {
+    let seen = &mut app.viewport.snapped;
+    seen.retain(|(_, p)| !points.iter().any(|q| q.at == p.at));
+    seen.extend(points.iter().map(|p| (item.clone(), p.clone())));
+    let over = seen.len().saturating_sub(REMEMBERED);
+    seen.drain(..over);
+}
+
+/// The snap point picked at `at` while this dialog was open, and the item that woke it.
+pub fn snapped(app: &SolveApp, at: Vec3) -> Option<&(Sel, SnapPoint)> {
+    app.viewport.snapped.iter().rev().find(|(_, p)| p.at == at)
 }
 
 /// The woken points within reach of `pos`, nearest first, as vertex hits (with their distance
