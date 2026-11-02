@@ -2601,13 +2601,20 @@ fn offset_group(sk: &mut Sketch, ids: &[String], eligible: &std::collections::Ha
         sel.clone()
     };
     let (order, closed) = chain(sk, first, &pool);
-    // Side: toward `side` (compare both offsets' distance to it), else the sign.
+    // Side: toward `side` (compare both offsets' distance to it), else the sign. Compared a
+    // hair from the curve, where both offsets exist: at the full distance an arc smaller than
+    // it has no offset toward its centre, and the other one won however close `side` was.
     let d = match side {
         Some(q) => {
             let dist = |dd: f64| {
                 offset_piece(sk, first, order.iter().find(|x| x.0 == first).is_none_or(|x| x.1), dd).map(|pc| piece_dist(&pc, q)).unwrap_or(f64::MAX)
             };
-            if dist(d0.abs()) <= dist(-d0.abs()) { d0.abs() } else { -d0.abs() }
+            let hair = d0.abs() * 1e-3;
+            let (toward, away) = match (dist(hair), dist(-hair)) {
+                (a, b) if a < f64::MAX && b < f64::MAX => (a, b),
+                _ => (dist(d0.abs()), dist(-d0.abs())),
+            };
+            if toward <= away { d0.abs() } else { -d0.abs() }
         }
         None => d0,
     };
@@ -2728,11 +2735,28 @@ fn offset_beyond(sk: &Sketch, rung: &[String]) -> Option<Vec2> {
     // an inward ladder round into a growing one instead of letting it run out of room. Its
     // signed distance already says which way, so leave the side to it.
     let index = sk.curve_index(rung.first()?)?;
-    if matches!(sk.curves.get(index)?.kind, CurveKind::Circle { .. }) {
+    let kind = &sk.curves.get(index)?.kind;
+    if matches!(kind, CurveKind::Circle { .. }) {
         return None;
     }
     let (from, to) = sk.offset_dimension_points(rung.first()?)?;
-    (from.dist(to) > TOL).then(|| to + (to - from))
+    if from.dist(to) <= TOL {
+        return None;
+    }
+    let step = to - from;
+    // An arc's side is inside or outside its circle, and the same trap as the ring's waits
+    // there: a whole step toward the centre past an arc smaller than the distance lands beyond
+    // the centre and reads as outside, so the ladder turned round onto an earlier instance.
+    // Stop halfway to the centre instead, still inside, and let the arc run out of room.
+    if let CurveKind::Arc { c, .. } = *kind
+        && let Some(centre) = sk.points.get(c).map(|p| p.pos)
+    {
+        let r = to.dist(centre);
+        if step.dot(centre - to) > 0.0 && step.len() >= r * 0.5 {
+            return Some(to + step.normalized()? * (r * 0.5));
+        }
+    }
+    Some(to + step)
 }
 
 /// What one side of a rung leaves for the next: the curves to offset again, its own signed
