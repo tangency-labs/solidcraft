@@ -35,6 +35,7 @@ fn near_z(c: vec4<f32>) -> f32 {
 
 @group(1) @binding(2) var acc_t: texture_2d<f32>;
 @group(2) @binding(0) var ao_depth: texture_2d<u32>;
+@group(2) @binding(1) var ao_map: texture_2d<f32>;
 
 fn clipped(p: vec3<f32>) -> bool {
     return length(u.clip.xyz) > 0.5 && dot(u.clip.xyz, p) > u.clip.w;
@@ -62,7 +63,7 @@ fn out_color(c: vec4<f32>) -> vec4<f32> {
 }
 
 struct TOut {
-    @builtin(position) pos: vec4<f32>,
+    @invariant @builtin(position) pos: vec4<f32>,
     @location(0) n: vec3<f32>,
     @location(1) c: vec4<f32>,
     @location(2) wp: vec3<f32>,
@@ -107,7 +108,7 @@ fn vs_tri_inst(
 /// stores every vertex's outputs: more of them cost more than the triangles' shared vertices
 /// save).
 struct FOut {
-    @builtin(position) pos: vec4<f32>,
+    @invariant @builtin(position) pos: vec4<f32>,
     @location(0) rp: vec3<f32>,
     @location(1) c: vec4<f32>,
 };
@@ -207,6 +208,12 @@ fn fs_tri_flat(i: FOut, @builtin(front_facing) front: bool) -> @location(0) vec4
 fn fs_ao_depth_flat(i: FOut, @builtin(front_facing) front: bool) -> AoDepth {
     let t = flat_fragment(i, front);
     return opaque_depth(t, front);
+}
+
+@fragment
+fn fs_ao_term_flat(i: FOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let t = flat_fragment(i, front);
+    return ao_term(t, front);
 }
 
 /// Opaque model surfaces: cut by the section plane/// Opaque model surfaces: cut by the section plane, the inside shows as a flat cap colour.
@@ -346,11 +353,88 @@ fn opaque_depth(i: TOut, front: bool) -> AoDepth {
     return AoDepth(depth, bitcast<u32>(depth));
 }
 
+/// The term for an opaque surface's fragment, on the prepass's depth. A section's cut face has none.
+fn ao_term(i: TOut, front: bool) -> vec4<f32> {
+    if (clipped(i.wp) || length(i.n) < 0.5) { discard; }
+    if (!front && length(u.clip.xyz) > 0.5) { return vec4<f32>(1.0); }
+    return vec4<f32>(occlusion_term(i));
+}
+
+@fragment
+fn fs_ao_term(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    return ao_term(i, front);
+}
+
+@vertex
+fn vs_ao_blur(@builtin(vertex_index) v: u32) -> @builtin(position) vec4<f32> {
+    let p = vec2<f32>(f32((v << 1u) & 2u), f32(v & 2u));
+    return vec4<f32>(p * 2.0 - 1.0, 0.0, 1.0);
+}
+
+/// The depth map at `p`, reading 0 near and 1 far whichever way the buffer runs.
+fn map_depth(p: vec2<i32>) -> f32 {
+    let at = clamp(p, vec2<i32>(0), vec2<i32>(textureDimensions(ao_depth)) - vec2<i32>(1));
+    let d = bitcast<f32>(textureLoad(ao_depth, at, 0).x);
+    return select(d, 1.0 - d, reversed());
+}
+
+/// The raw term (`ao_map` in this pass) averaged over a 4 x 4 window, which holds every turn of
+/// [`ao_turn`]'s pattern once. A neighbour counts when it lies on this pixel's plane, the slope
+/// taken from the nearer side across each axis, so no surface's shade crosses an edge.
+@fragment
+fn fs_ao_blur(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let c = vec2<i32>(pos.xy);
+    let d = map_depth(c);
+    if (d >= 1.0) { return vec4<f32>(1.0); }
+    let left = d - map_depth(c + vec2<i32>(-1, 0));
+    let right = map_depth(c + vec2<i32>(1, 0)) - d;
+    let above = d - map_depth(c + vec2<i32>(0, -1));
+    let below = map_depth(c + vec2<i32>(0, 1)) - d;
+    let dx = select(right, left, abs(left) < abs(right));
+    let dy = select(below, above, abs(above) < abs(below));
+    let tolerance = 1.5 * (abs(dx) + abs(dy)) + 1e-6;
+    let last = vec2<i32>(textureDimensions(ao_map)) - vec2<i32>(1);
+    var sum = 0.0;
+    var weight = 0.0;
+    for (var y = -2; y < 2; y = y + 1) {
+        for (var x = -2; x < 2; x = x + 1) {
+            let p = c + vec2<i32>(x, y);
+            let s = map_depth(p);
+            if (s < 1.0 && abs(s - (d + dx * f32(x) + dy * f32(y))) <= tolerance) {
+                sum = sum + textureLoad(ao_map, clamp(p, vec2<i32>(0), last), 0).x;
+                weight = weight + 1.0;
+            }
+        }
+    }
+    return vec4<f32>(sum / max(weight, 1.0));
+}
+
+/// A pixel's turn of the sample pattern: every 4 x 4 window holds each of 16 turns once.
+fn ao_turn(pos: vec2<f32>) -> f32 {
+    let x = u32(pos.x) & 3u;
+    let y = u32(pos.y) & 3u;
+    let v = ((x ^ y) & 1u) << 3u | (y & 1u) << 2u | ((x ^ y) >> 1u) << 1u | (y >> 1u);
+    return (f32(v) + 0.5) / 16.0;
+}
+
+/// The lit pass's occlusion: the blurred term where this point falls in the map, whatever the
+/// window's viewport offset and supersampling.
+fn occlusion(i: TOut) -> f32 {
+    let size = vec2<i32>(textureDimensions(ao_map));
+    // The maps are 1 × 1 stand-ins until a frame draws into them (the product preview draws no
+    // prepass, and AO off releases them): they tell nothing, so leave the surface unoccluded.
+    if (u.ao.x <= 0.0 || length(i.n) < 0.5 || size.x < 2 || size.y < 2) { return 1.0; }
+    let q = u.vp * vec4<f32>(i.wp, 1.0);
+    if (q.w <= 0.0) { return 1.0; }
+    let uv = vec2<f32>(q.x / q.w * 0.5 + 0.5, 0.5 - q.y / q.w * 0.5);
+    return textureLoad(ao_map, clamp(vec2<i32>(uv * vec2<f32>(size)), vec2<i32>(0), size - vec2<i32>(1)), 0).x;
+}
+
 // Cosine-weighted hemisphere samples, the pattern turned by a different angle at each pixel.
 // Projecting the sample and a point one radius toward the eye supplies a depth range in both
 // orthographic and perspective views; distant foreground geometry cannot cast a dark halo onto
 // a background surface.
-fn occlusion(i: TOut) -> f32 {
+fn occlusion_term(i: TOut) -> f32 {
     let radius = u.ao.x;
     if (radius <= 0.0 || length(i.n) < 0.5) { return 1.0; }
     var n = normalize(i.n);
@@ -364,10 +448,9 @@ fn occlusion(i: TOut) -> f32 {
     if (size.x < 2 || size.y < 2) { return 1.0; }
     // The same offsets at every pixel made each sample darken its own shifted copy of a nearby
     // part's outline: faint ghosts of the part where the radius is large on screen (#4167),
-    // stepped bands along contacts where it is small (#3407). Turned by interleaved gradient
-    // noise (Jimenez 2014), neighbouring pixels sample different points and the copies break up
-    // into an even grain.
-    let turn = fract(52.9829189 * fract(dot(i.pos.xy, vec2<f32>(0.06711056, 0.00583715))));
+    // stepped bands along contacts where it is small (#3407). Turned, neighbouring pixels sample
+    // different points, the copies break up into grain, and the blur takes the grain out (#9327).
+    let turn = ao_turn(i.pos.xy);
     let t = tangent * cos(turn * 6.28318531) + bitangent * sin(turn * 6.28318531);
     let b = cross(n, t);
     // One comparison for both depth directions: depths read as 0 near / 1 far (mirrored when

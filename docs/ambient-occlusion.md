@@ -33,12 +33,11 @@ only display preferences, without adding a modelling undo step or moving the cam
 The GPU viewport uses 32 hemisphere samples per shaded pixel against an opaque depth
 prepass (at most 2048 pixels on its longest side), the sample pattern turned by a
 different angle at each pixel. One pattern for every pixel drew faint shifted copies of
-nearby parts (#4167) and stepped bands along contacts (#3407); turned, they become an
-even fine grain, which 2× supersampling smooths further. While the view moves (orbit, pan,
-zoom, resize), frames take 8 samples on the same turned pattern, and the full 32 follow once
-the view has held still for 0.25 s, the settling time adaptive supersampling uses (#7165).
-The AO grain changes when the full count arrives, as the edges do when adaptive supersampling
-does. `ui.screenshot` waits for that full-quality frame (at most half a second). The radius follows
+nearby parts (#4167) and stepped bands along contacts (#3407); turned, they become a grain,
+which a 4 × 4 blur by depth takes out: the term has its own texture, worked out once for each
+pixel of the prepass (#9327). While the view moves (orbit, pan, zoom, resize), frames take 8
+samples, and the full 32 follow once the view has held still for 0.25 s, the settling time
+adaptive supersampling uses (#7165). `ui.screenshot` waits for that full-quality frame (at most half a second). The radius follows
 model size, and depth-range rejection avoids shadows from distant foreground objects.
 It supports orthographic and perspective cameras and respects section clipping.
 Wireframe, transparent bodies, overlays and surface-analysis colours are unaffected.
