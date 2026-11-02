@@ -44,8 +44,10 @@ fn a_setback_off_the_rounded_corner_is_refused() {
 }
 
 /// A setback that does not reach past where the corner's rounds meet without one (on faces square
-/// to each other, the radius) is refused before SMLib runs, naming that least setback; a setback
-/// just past it builds.
+/// to each other, the radius) is refused before SMLib runs, naming that least setback. Past it, a
+/// setback still too short for SMLib's corner fill (certified convex only from a setback on,
+/// smlib_blend_fit_size's SMLIB_FIT_SETBACK_AT_LEAST) is refused naming the smallest that builds,
+/// at most twice the one asked for (the certificate scales the setbacks up to 2); that one builds.
 #[test]
 fn a_setback_not_past_the_radius_is_refused_naming_the_least() {
     for s in [2.0, 5.0] {
@@ -54,7 +56,16 @@ fn a_setback_not_past_the_radius_is_refused_naming_the_least() {
             other => panic!("setback {s}: {:?}", other.map(|b| b.face_count())),
         }
     }
-    let out = corner_case(Some(5.5)).unwrap();
+    let least = match corner_case(Some(5.5)) {
+        Err(KernelError::Invalid(why)) => {
+            let named = why.split_once(SETBACK_AT_LEAST).and_then(|(_, rest)| rest.split_once(" mm")).and_then(|(n, _)| n.parse::<f64>().ok());
+            named.unwrap_or_else(|| panic!("no least setback named: {why}"))
+        }
+        other => panic!("setback 5.5: {:?}", other.map(|b| b.face_count())),
+    };
+    eprintln!("setback 5.5 refused: the smallest that builds is {least}");
+    assert!(least > 5.5 && least <= 11.0, "{least}");
+    let out = corner_case(Some(least)).unwrap();
     assert!(out.validity().is_empty(), "{:?}", out.validity());
     // The least the refusal names, for a form to show before it runs; none at no vertex.
     let b = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(60.0, 40.0, 20.0)).unwrap();

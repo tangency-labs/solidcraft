@@ -1,5 +1,5 @@
 //! The operations block of `capi/include/smlib.h` (`smlib_boolean`, `smlib_boolean_union_all`, `smlib_boolean2d`, `smlib_fillet`,
-//! `smlib_chamfer`, `smlib_blend`, `smlib_blend_dropping`, `smlib_blend_setback`, `smlib_blend_setback_open`, `smlib_fillet_variable`, `smlib_chamfer_sides`, `smlib_shell`, `smlib_offset_faces`,
+//! `smlib_chamfer`, `smlib_blend`, `smlib_blend_dropping`, `smlib_blend_setback`, `smlib_blend_setback_open`, `smlib_blend_fit_size`, `smlib_fillet_variable`, `smlib_chamfer_sides`, `smlib_shell`, `smlib_offset_faces`,
 //! `smlib_thicken`, `smlib_draft`, `smlib_merge_faces`, `smlib_brep_solid_count`, `smlib_imprint`; the fork's `capi/src/smlib_ops.cpp`), declared by
 //! hand. Part of the FFI boundary, like its parent: called only through
 //! [`crate::ops`].
@@ -30,6 +30,11 @@ pub const BLEND_ROUND: i32 = 0;
 pub const BLEND_CURVATURE: i32 = 1;
 pub const BLEND_CHORD: i32 = 2;
 pub const BLEND_CHAMFER: i32 = 3;
+
+pub const FIT_SIZE: i32 = 0;
+pub const FIT_SETBACK: i32 = 1;
+pub const FIT_SCALE: i32 = 2;
+pub const FIT_SETBACK_AT_LEAST: i32 = 3;
 
 /// Which selection operation: the C functions share one signature.
 #[derive(Clone, Copy)]
@@ -95,6 +100,7 @@ unsafe extern "C" {
         out: *mut *mut RawBrep,
         out_failed_point: *mut i64,
     ) -> i32;
+    fn smlib_blend_fit_size(out_size: *mut f64, out_what: *mut i32) -> i32;
     fn smlib_blend_dropping(
         brep: *const RawBrep,
         kind: i32,
@@ -249,6 +255,19 @@ pub fn pick_op(kind: Pick, b: &Handle, points: &[[f64; 3]], tolerance: f64, size
         let at = (s == ERR_PICK_NONE || s == ERR_PICK_AMBIGUOUS).then(|| usize::try_from(failed).ok()).flatten();
         (s, at)
     })
+}
+
+/// `smlib_blend_fit_size`: the size that builds, and what it sizes (`FIT_*`), for the last blend
+/// call SMLib refused as too large or a setback as too short; `None` where it names none.
+#[cfg(feature = "native")]
+pub fn blend_fit_size() -> Option<(f64, i32)> {
+    let (mut size, mut what) = (0.0f64, -1i32);
+    (unsafe { smlib_blend_fit_size(&mut size, &mut what) } == OK).then_some((size, what))
+}
+
+#[cfg(not(feature = "native"))]
+pub fn blend_fit_size() -> Option<(f64, i32)> {
+    None
 }
 
 #[cfg(feature = "native")]
