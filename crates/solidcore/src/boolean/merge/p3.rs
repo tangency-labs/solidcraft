@@ -1080,6 +1080,10 @@ pub(crate) fn copy_component(
             edge_source_key: &|e: EdgeId| source_ref(EntityRef::Edge(e)),
             edge_destination_key: &|e: EdgeId| notify_ref(EntityRef::Edge(e)),
             face_source_key: &|f: FaceId| source_ref(EntityRef::Face(f)),
+            // (`result`'s lists, a surface's included, are under `source_ref` here, so
+            // the surface copy's read under a surface owner's own name could only find a
+            // list of the component's: none of the result surface's own)
+            surface_attributes: false,
             face_destination_key: face_ref,
         };
         ignored(bp7::copy_faces_with_merge(

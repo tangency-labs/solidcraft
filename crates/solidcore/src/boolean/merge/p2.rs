@@ -249,6 +249,13 @@ pub struct TopologyCopy<'a> {
     pub face_source_key: &'a dyn Fn(FaceId) -> ObjectRef,
     /// Notification identity of each primary face, including freshly created ids.
     pub face_destination_key: &'a dyn Fn(FaceId) -> ObjectRef,
+    /// Whether `MakeFaceuse` copies the other face's surface attributes
+    /// ([`copy_surface_attributes`], upstream's surface copy in `CopyAndAddAnalytics`).
+    /// `false` for a copy between two B-reps' own attribute stores
+    /// (`topology::brep::p7::copy_faces_from`): there a surface goes by its owner face's
+    /// name, which names the destination face of the same arena id, and the source's
+    /// surfaces have no lists of their own.
+    pub surface_attributes: bool,
 }
 
 impl TopologyCopy<'_> {
@@ -927,13 +934,15 @@ pub fn make_faceuse_attempt_with(
         .ok_or(dangling(OP_FACEUSE, "MakeFace made no face"))?;
 
     // the surface copy's attributes (`CopyAndAddAnalytics`)
-    copy_surface_attributes(
-        &mut *copy.vertices.attributes,
-        other,
-        face_to_make,
-        brep,
-        new_face,
-    )?;
+    if copy.surface_attributes {
+        copy_surface_attributes(
+            &mut *copy.vertices.attributes,
+            other,
+            face_to_make,
+            brep,
+            new_face,
+        )?;
+    }
 
     relations.relate_faces(brep, new_face, other, face_to_make)?;
 
@@ -2260,6 +2269,7 @@ mod tests {
             edge_source_key: &edge_key,
             edge_destination_key: &edge_key,
             face_source_key: &face_key,
+            surface_attributes: true,
             face_destination_key: &face_key,
         };
         let curve = Line::create_line_segment(3, Vec3::ZERO, Vec3::X, None).unwrap();
@@ -2385,6 +2395,7 @@ mod tests {
             edge_source_key: &edge_key,
             edge_destination_key: &edge_key,
             face_source_key: &face_key,
+            surface_attributes: true,
             face_destination_key: &face_key,
         };
         let r = merge_edge(

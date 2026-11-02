@@ -517,6 +517,7 @@ impl UnitDiff for Runner {
                 key: ObjectKey(5_000_000 + u64::from(f.index())),
                 type_code: 16002,
             },
+            surface_attributes: true,
             face_destination_key: &|f| ObjectRef {
                 key: ObjectKey(4_000_000 + u64::from(f.index())),
                 type_code: 16002,

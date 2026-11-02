@@ -537,6 +537,7 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
             edge_source_key: &|e| keys.object(true, EntityRef::Edge(e)),
             edge_destination_key: &|e| keys.object(false, EntityRef::Edge(e)),
             face_source_key: &|f| keys.object(true, EntityRef::Face(f)),
+            surface_attributes: true,
             face_destination_key: &|f| keys.object(false, EntityRef::Face(f)),
         };
         action(&mut self.merge.intersector, &mut copy)
@@ -1146,6 +1147,7 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
                 edge_source_key: &|e| source_key(EntityRef::Edge(e)),
                 edge_destination_key: &|e| destination_key(EntityRef::Edge(e)),
                 face_source_key: &|f| source_key(EntityRef::Face(f)),
+                surface_attributes: true,
                 face_destination_key: &|f| destination_key(EntityRef::Face(f)),
             };
             crate::topology::brep::p7::copy_faces_with_merge(
@@ -1314,6 +1316,7 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
             edge_source_key: &edge_source,
             edge_destination_key: &edge_destination,
             face_source_key: &face_source,
+            surface_attributes: true,
             face_destination_key: &face_destination,
         };
         p5::process_wires_and_shell_vertices_with_kernels(
@@ -1358,6 +1361,7 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
             edge_source_key: &edge_source,
             edge_destination_key: &edge_destination,
             face_source_key: &face_source,
+            surface_attributes: true,
             face_destination_key: &face_destination,
         };
         // New topology is made with the primary context; copies notify through the

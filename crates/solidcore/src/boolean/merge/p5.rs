@@ -588,6 +588,7 @@ mod tests {
                 key: ObjectKey(7_000_000 + u64::from(f.index())),
                 type_code: 16002,
             },
+            surface_attributes: true,
             face_destination_key: &|f| ObjectRef {
                 key: ObjectKey(6_000_000 + u64::from(f.index())),
                 type_code: 16002,

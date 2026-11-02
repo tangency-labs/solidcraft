@@ -663,6 +663,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
                 edge_source_key: &edge_source,
                 edge_destination_key: &edge_dest,
                 face_source_key: &face_source,
+                surface_attributes: true,
                 face_destination_key: &face_dest,
             };
             match &i.op {
