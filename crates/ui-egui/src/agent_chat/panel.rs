@@ -2289,27 +2289,40 @@ fn tool_card(ui: &mut egui::Ui, n: usize, call: &ToolCall) {
             ui.indent(id.with("detail"), |ui| {
                 if let Some(input) = call.input {
                     let text = serde_json::to_string_pretty(input).unwrap_or_default();
-                    tool_detail(ui, tr("ui.ai_tool_arguments"), &text, id.with("in"));
+                    tool_detail(ui, tr("ui.ai_tool_arguments"), &text, id.with("in"), &format!("agent_chat:tool:{n}:copy_args"));
                 }
                 if let Some(o) = call.output {
-                    tool_detail(ui, tr("ui.ai_tool_result"), o, id.with("out"));
+                    tool_detail(ui, tr("ui.ai_tool_result"), o, id.with("out"), &format!("agent_chat:tool:{n}:copy_result"));
                 }
             });
         });
     });
 }
 
-/// One part of a card's Details: its heading and the raw text, cut short and scrolling.
+/// One part of a card's Details: heading, Copy for the full text, and selectable body (#11082).
+/// No nested ScrollArea: its drag-to-scroll stole pointer drags from label selection. Long text
+/// scrolls with the transcript instead; Copy always puts the complete value on the clipboard.
 #[cfg(not(target_arch = "wasm32"))]
-fn tool_detail(ui: &mut egui::Ui, heading: &str, text: &str, id: Id) {
+fn tool_detail(ui: &mut egui::Ui, heading: &str, text: &str, id: Id, copy_handle: &str) {
     let t = Tokens::get();
-    ui.label(RichText::new(heading).size(t.font_small).color(t.text_dim));
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(heading).size(t.font_small).color(t.text_dim));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let copy = ui_kit::button(ui, tr("ui.agent_chat_copy"), ui_kit::Button::Small).on_hover_text(tr("ui.ai_tool_copy_tip"));
+            crate::scenario::publish_handle(copy_handle, copy.rect.center());
+            if copy.clicked() {
+                ui.ctx().copy_text(text.to_owned());
+            }
+        });
+    });
     let shown: String =
         if text.chars().count() > MAX_DETAIL { text.chars().take(MAX_DETAIL).chain(std::iter::once('…')).collect() } else { text.to_string() };
     ui_kit::assistant_tool_detail(ui, |ui| {
         ui.set_min_width(ui.available_width());
-        egui::ScrollArea::vertical().id_salt(id).max_height(180.0).show(ui, |ui| {
-            ui.add(egui::Label::new(RichText::new(shown).monospace().size(t.font_small)).selectable(true).wrap());
+        // `id` keeps the selectable label's selection stable across frames.
+        ui.push_id(id, |ui| {
+            let response = ui.add(egui::Label::new(RichText::new(shown).monospace().size(t.font_small)).selectable(true).wrap());
+            crate::scenario::publish_handle(&format!("{copy_handle}:text"), response.rect.center());
         });
     });
 }
