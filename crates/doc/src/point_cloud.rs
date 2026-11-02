@@ -11,6 +11,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use solidcraft_geom::Vec3;
 
 use crate::canvas::{base64_decode, base64_encode};
+pub use crate::point_cloud_complex::{Column, Complex, Filter, Floats, Keep, MAX_COLUMNS, MAX_NAMES, Names};
 use crate::{DocError, IDENTITY, Mat, Result};
 
 /// Most points one cloud may hold.
@@ -19,6 +20,10 @@ pub const MAX_POINTS: usize = 20_000_000;
 pub const MAX_COORD: f64 = 1e9;
 /// Point sizes on screen (pixels).
 pub const POINT_SIZE: std::ops::RangeInclusive<f64> = 0.5..=16.0;
+/// Most filters on one cloud.
+pub const MAX_FILTERS: usize = 8;
+/// Properties every cloud has besides its file's: the coordinates in the design.
+pub const COORDINATES: [&str; 3] = ["x", "y", "z"];
 /// Length units a point cloud file may be in, and millimetres per unit.
 pub const UNITS: [(&str, f64); 5] = [("mm", 1.0), ("cm", 10.0), ("m", 1000.0), ("in", 25.4), ("ft", 304.8)];
 
@@ -65,6 +70,24 @@ pub struct PointCloud {
     pub height_range: Option<[f64; 2]>,
     #[serde(default = "yes")]
     pub visible: bool,
+    /// The file's other properties of the points.
+    #[serde(default, skip_serializing_if = "Complex::is_empty")]
+    pub complex: Complex,
+    /// The property `color_by: property` colours by.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_property: Option<String>,
+    /// Only the points every filter keeps are shown.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filters: Vec<Filter>,
+}
+
+/// Where a property's values come from.
+#[derive(Clone, Copy, Debug)]
+pub enum Source<'a> {
+    /// A coordinate of each point in the design.
+    Coordinate(usize),
+    /// A column of the file: each point's.
+    Column(&'a [f32]),
 }
 
 /// How a cloud's points are coloured.
@@ -78,6 +101,8 @@ pub enum ColorBy {
     Single,
     /// By height in the design: blue low, through cyan, green and yellow, to red high.
     Height,
+    /// By `color_property`: the height ramp over its range or, for whole numbers, a palette.
+    Property,
 }
 
 impl ColorBy {
@@ -90,6 +115,7 @@ impl ColorBy {
             "file" => Some(ColorBy::File),
             "single" => Some(ColorBy::Single),
             "height" => Some(ColorBy::Height),
+            "property" => Some(ColorBy::Property),
             _ => None,
         }
     }
@@ -98,6 +124,7 @@ impl ColorBy {
             ColorBy::File => "file",
             ColorBy::Single => "single",
             ColorBy::Height => "height",
+            ColorBy::Property => "property",
         }
     }
 }
@@ -118,6 +145,27 @@ pub fn height_ramp(t: f64) -> [u8; 3] {
     let f = k - i as f64;
     let (a, b) = (STOPS[i], STOPS[i + 1]);
     std::array::from_fn(|c| (a[c] * (1.0 - f) + b[c] * f).round().clamp(0.0, 255.0) as u8)
+}
+
+/// Colours of whole-number labels, the label modulo their count; negative labels are grey.
+pub const PALETTE: [[u8; 3]; 10] = [
+    [240, 140, 40],
+    [245, 205, 65],
+    [230, 65, 65],
+    [165, 75, 190],
+    [65, 190, 115],
+    [75, 150, 220],
+    [240, 120, 180],
+    [140, 105, 75],
+    [120, 215, 215],
+    [190, 190, 80],
+];
+
+pub fn label_color(v: f64) -> [u8; 3] {
+    if !(v.is_finite() && v >= 0.0) {
+        return PLAIN.map(byte);
+    }
+    PALETTE[(v.round() as usize) % PALETTE.len()]
 }
 
 /// A colour channel (0..1) as a byte.
@@ -182,20 +230,70 @@ impl PointCloud {
         let (lo, hi) = (at(HEIGHT_TAIL)?, at(1.0 - HEIGHT_TAIL)?);
         Some(if hi - lo > 1e-9 { [lo, hi] } else { [lo - 0.5, lo + 0.5] })
     }
+    /// The property colours come from: a column, or a coordinate (`z` for the height ramp).
+    pub fn colored_property(&self) -> Option<&str> {
+        match self.color_by {
+            ColorBy::Height => Some("z"),
+            ColorBy::Property => self.color_property.as_deref(),
+            ColorBy::File | ColorBy::Single => None,
+        }
+    }
+    /// Where the values of `name` are: a coordinate of each point or a column of the file.
+    pub fn source(&self, name: &str) -> Option<Source<'_>> {
+        if let Some(k) = COORDINATES.iter().position(|n| *n == name) {
+            return Some(Source::Coordinate(k));
+        }
+        self.complex.column(name).map(|col| Source::Column(&col.values.0))
+    }
+    /// Every property the cloud can be coloured and filtered by: its coordinates, then its columns.
+    pub fn property_names(&self) -> impl Iterator<Item = &str> {
+        COORDINATES.into_iter().chain(self.complex.columns.iter().map(|c| c.name.as_str()))
+    }
+    /// The smallest and largest value of a property, the coordinates in the design.
+    pub fn span(&self, property: &str) -> Option<[f64; 2]> {
+        if let Some(span) = self.complex.span(property) {
+            return Some(span);
+        }
+        let k = COORDINATES.iter().position(|n| *n == property)?;
+        let v = self.world_corners()?.map(|p| [p.x, p.y, p.z][k]);
+        Some([v.iter().copied().fold(f64::INFINITY, f64::min), v.iter().copied().fold(f64::NEG_INFINITY, f64::max)])
+    }
+    /// The ramp's range as far as it can be told without the elements: the one set, or else the
+    /// coloured property's span within every range filtering it. The automatic range colouring
+    /// by a property is exactly what the filters keep
+    /// ([`crate::point_cloud_distribution::color_range`]), which this bounds.
+    pub fn color_range(&self) -> Option<[f64; 2]> {
+        if self.height_range.is_some() {
+            return self.height_range;
+        }
+        let property = self.colored_property()?;
+        let span = if self.color_by == ColorBy::Height { self.auto_height_range() } else { self.span(property) }?;
+        let shown =
+            self.filters.iter().filter(|f| f.property == property).filter_map(Filter::range).fold(span, |[lo, hi], [a, b]| [lo.max(a), hi.min(b)]);
+        Some(if shown[0] <= shown[1] { crate::point_cloud_distribution::ramp_range(shown) } else { span })
+    }
     /// The heights the height ramp runs between now: the cloud's own, else the automatic ones.
     pub fn height_range_now(&self) -> Option<[f64; 2]> {
         self.height_range.or_else(|| self.auto_height_range())
     }
-    /// The colour of each point (by index) as the cloud is shown.
-    pub fn shade(&self) -> impl Fn(usize) -> [u8; 3] + '_ {
+    /// The colour of each point (by index) as the cloud is shown, the ramp over `range`.
+    pub fn shade(&self, range: Option<[f64; 2]>) -> impl Fn(usize) -> [u8; 3] + '_ {
         let single = self.color.unwrap_or(PLAIN).map(byte);
         let plain = PLAIN.map(byte);
-        let range = if self.color_by == ColorBy::Height { self.height_range_now() } else { None };
+        let column = self.color_property.as_deref().and_then(|n| self.complex.column(n));
         move |i| match self.color_by {
             ColorBy::File => self.colors.get(i).unwrap_or(plain),
             ColorBy::Single => single,
             ColorBy::Height => match (range, self.points.get(i)) {
                 (Some([lo, hi]), Some(p)) => height_ramp((self.world_z(p) - lo) / (hi - lo)),
+                _ => plain,
+            },
+            ColorBy::Property => match (column, column.and_then(|c| c.values.0.get(i))) {
+                (Some(c), Some(v)) if c.integer => label_color(f64::from(*v)),
+                (Some(_), Some(v)) => match range {
+                    Some([lo, hi]) if hi > lo => height_ramp((f64::from(*v) - lo) / (hi - lo)),
+                    _ => plain,
+                },
                 _ => plain,
             },
         }
@@ -239,6 +337,18 @@ impl PointCloud {
         }
         if !rigid(&self.transform) {
             return bad("its placement is not a rigid move");
+        }
+        self.complex.check(self.points.len())?;
+        if self.filters.len() > MAX_FILTERS
+            || self.filters.iter().any(|f| match &f.keep {
+                Keep::Range { range: [lo, hi] } => !(lo.is_finite() && hi.is_finite() && lo <= hi),
+                Keep::Values { values } => values.len() > MAX_NAMES,
+            })
+        {
+            return bad("its filters are not ranges, lowest first");
+        }
+        if self.color_by == ColorBy::Property && self.color_property.is_none() {
+            return bad("it is coloured by a property without naming it");
         }
         Ok(())
     }
@@ -422,6 +532,9 @@ mod tests {
             color: None,
             height_range: None,
             visible: true,
+            complex: Complex::default(),
+            color_property: None,
+            filters: Vec::new(),
         }
     }
 
@@ -441,6 +554,20 @@ mod tests {
         assert_eq!((lo, hi), (Vec3::new(996.5, 1.0, 2.0), Vec3::new(1000.0, 4.25, 1e6)));
         check_all(&[c]).unwrap();
         assert_eq!((unit_scale("M"), unit_scale("yd")), (Some(1000.0), None));
+    }
+
+    #[test]
+    fn the_ramp_spans_what_is_shown_unless_set() {
+        let mut c = cloud(vec![0.0; 9], Vec::new());
+        c.complex.columns.push(Column { name: "t".into(), integer: false, values: Floats(vec![0.0, 10.0, 20.0].into()) });
+        (c.color_by, c.color_property) = (ColorBy::Property, Some("t".into()));
+        assert_eq!(c.color_range(), Some([0.0, 20.0]), "the whole span");
+        c.filters = vec![Filter { property: "t".into(), keep: Keep::Range { range: [5.0, 50.0] } }];
+        assert_eq!(c.color_range(), Some([5.0, 20.0]), "the span within the filter");
+        c.filters.push(Filter { property: "layer".into(), keep: Keep::Range { range: [0.0, 1.0] } });
+        assert_eq!(c.color_range(), Some([5.0, 20.0]), "another property's filter changes nothing");
+        c.height_range = Some([1.0, 2.0]);
+        assert_eq!(c.color_range(), Some([1.0, 2.0]), "a range set is kept");
     }
 
     #[test]
@@ -474,26 +601,26 @@ mod tests {
         let colors: Vec<u8> = (0..102).flat_map(|i| [i as u8, 7, 9]).collect();
         let mut c = cloud(values, colors);
         c.origin = Vec3::ZERO;
-        assert_eq!(c.shade()(3), [3, 7, 9], "the file's colours");
+        assert_eq!(c.shade(c.color_range())(3), [3, 7, 9], "the file's colours");
         c.colors = Colors::default();
-        assert_eq!(c.shade()(3), PLAIN.map(byte), "none: plain");
+        assert_eq!(c.shade(c.color_range())(3), PLAIN.map(byte), "none: plain");
         c.color_by = ColorBy::Single;
         c.color = Some([1.0, 0.5, 0.0]);
-        assert_eq!(c.shade()(50), [255, 128, 0]);
+        assert_eq!(c.shade(c.color_range())(50), [255, 128, 0]);
         // The stray point doesn't stretch the automatic range.
         c.color_by = ColorBy::Height;
         // 102 points: the 2nd and the 99th (of 0…101) once sorted.
         assert_eq!(c.auto_height_range(), Some([2.0, 99.0]));
         {
-            let shade = c.shade();
+            let shade = c.shade(c.color_range());
             assert_eq!((shade(0), shade(100), shade(101)), (height_ramp(0.0), height_ramp(1.0), height_ramp(1.0)));
             assert_eq!(shade(50), height_ramp(48.0 / 97.0));
         }
         // A range of its own; moved up 100 mm, everything is above it.
         c.height_range = Some([0.0, 50.0]);
-        assert_eq!(c.shade()(25), height_ramp(0.5));
+        assert_eq!(c.shade(c.color_range())(25), height_ramp(0.5));
         c.transform[3][2] = 100.0;
-        assert_eq!(c.shade()(0), height_ramp(1.0));
+        assert_eq!(c.shade(c.color_range())(0), height_ramp(1.0));
         assert_eq!((height_ramp(0.0), height_ramp(1.0), height_ramp(f64::NAN)), ([40, 70, 200], [230, 70, 50], [40, 70, 200]));
         let back: PointCloud = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
         assert_eq!(back, c);

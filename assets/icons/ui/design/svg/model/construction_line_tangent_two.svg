@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Common tangent to two curves</title>
+  <circle cx="20" cy="33.59" r="12" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="46" cy="33.59" r="8" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M6 19.27L58 27.36" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

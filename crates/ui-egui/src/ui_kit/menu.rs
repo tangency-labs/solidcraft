@@ -34,7 +34,11 @@ impl Menu {
         Self::button_at(ui, |ui, _| item.show(ui), add, true)
     }
 
-    fn button_with<R>(ui: &mut Ui, button: impl FnOnce(&mut Ui, bool) -> Response, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<Option<R>> {
+    pub(crate) fn button_with<R>(
+        ui: &mut Ui,
+        button: impl FnOnce(&mut Ui, bool) -> Response,
+        add: impl FnOnce(&mut Ui) -> R,
+    ) -> egui::InnerResponse<Option<R>> {
         Self::button_at(ui, button, add, false)
     }
 

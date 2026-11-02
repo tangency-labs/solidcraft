@@ -12,15 +12,17 @@ use crate::eval::ModelState;
 /// Most triangle pairs examined by one intersection.
 const MAX_PAIRS: usize = 20_000_000;
 
-/// The mesh (and face, for a face source) of a body or face reference.
-pub(crate) fn mesh_of(st: &ModelState, src: &LinkSource) -> Option<(Arc<Mesh>, Option<u32>)> {
+/// The mesh of a body or face reference and, for a face, the faces of its surface patch: the B-rep
+/// pieces joined across hidden seams, as the viewport picks and highlights it (#9009).
+pub(crate) fn mesh_of(st: &ModelState, src: &LinkSource) -> Option<(Arc<Mesh>, Option<Vec<u32>>)> {
     match src {
         LinkSource::Body { body } => Some((st.body(body)?.mesh(), None)),
         LinkSource::Face { body, at } => {
             let b = st.body(body).or_else(|| st.bodies.iter().min_by(|x, y| dist_to(&x.mesh(), *at).total_cmp(&dist_to(&y.mesh(), *at))))?;
             let m = b.mesh();
             let (f, _, _) = crate::project::nearest_face(&m, *at)?;
-            Some((m, Some(f)))
+            let patch: Vec<u32> = m.surface_patch(f as usize).into_iter().filter_map(|i| u32::try_from(i).ok()).collect();
+            Some((m, Some(patch)))
         }
         _ => None,
     }
@@ -30,8 +32,9 @@ fn dist_to(m: &Mesh, p: Vec3) -> f64 {
     crate::project::nearest_face(m, p).map(|x| x.2).unwrap_or(f64::INFINITY)
 }
 
-fn tris(m: &Mesh, face: Option<u32>) -> Vec<[Vec3; 3]> {
-    m.triangles.iter().zip(&m.tri_face).filter(|(_, f)| face.is_none_or(|x| x == **f)).filter_map(|(t, _)| m.tri(t)).collect()
+/// The triangles of the faces in `faces` (sorted ascending), or of the whole mesh for `None`.
+fn tris(m: &Mesh, faces: Option<&[u32]>) -> Vec<[Vec3; 3]> {
+    m.triangles.iter().zip(&m.tri_face).filter(|(_, f)| faces.is_none_or(|fs| fs.binary_search(f).is_ok())).filter_map(|(t, _)| m.tri(t)).collect()
 }
 
 /// Ray–triangle hit parameter (Möller–Trumbore), any sign.
@@ -60,7 +63,7 @@ fn ray_hit(o: Vec3, d: Vec3, t: &[Vec3; 3]) -> Option<f64> {
 /// miss the face split the result.
 pub(crate) fn onto_face(m: &Mesh, f: u32, pts: &[Vec3], dir: Vec3) -> Vec<Vec<Vec3>> {
     let Some(d) = dir.normalized() else { return Vec::new() };
-    let ts = tris(m, Some(f));
+    let ts = tris(m, Some(std::slice::from_ref(&f)));
     let size = m.bounds().diagonal().max(1e-9);
     // Resample so the projected curve follows the surface.
     let step = size / 200.0;
@@ -138,8 +141,8 @@ fn tri_tri(a: &[Vec3; 3], b: &[Vec3; 3]) -> Option<(Vec3, Vec3)> {
     (pr(hi) - pr(lo) > 1e-12).then_some((lo, hi))
 }
 
-/// Where two meshes (or faces of them) meet, as polylines.
-pub(crate) fn mesh_intersection(ma: &Mesh, fa: Option<u32>, mb: &Mesh, fb: Option<u32>) -> Vec<Vec<Vec3>> {
+/// Where two meshes (or face patches of them) meet, as polylines.
+pub(crate) fn mesh_intersection(ma: &Mesh, fa: Option<&[u32]>, mb: &Mesh, fb: Option<&[u32]>) -> Vec<Vec<Vec3>> {
     let (ta, tb) = (tris(ma, fa), tris(mb, fb));
     let bbox = |t: &[Vec3; 3]| (t[0].min(t[1]).min(t[2]), t[0].max(t[1]).max(t[2]));
     // Uniform grid over B.

@@ -10,6 +10,7 @@ use solidcraft_ui_egui::{icon_svg, scenario::Harness, workspace};
 fn harness() -> Harness {
     let mut h = Harness::new();
     h.app.preferences.auto_operation = false;
+    h.app.preferences.browser_components_open = true;
     h
 }
 
@@ -180,6 +181,12 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         h.call("ui.status_fixture", json!({"preset":preset}));
         h.frames(3);
         collect(&mut h, "viewport status specimens", &mut requested);
+        if preset == "kinds" {
+            click(&mut h, "viewport_status:summary");
+            h.frames(3);
+            collect(&mut h, "viewport status summary menu", &mut requested);
+            escape(&mut h);
+        }
     }
     h.call("ui.status_fixture", json!({"preset":"off"}));
     collect(&mut h, "initial browser and timeline", &mut requested);

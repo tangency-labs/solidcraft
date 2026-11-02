@@ -167,12 +167,7 @@ fn invalid_sizes_indices_opacity_and_large_work_lists_fail_without_a_frame() {
         } else {
             body.faces.push(FaceAppearance { face: 0, color: [0; 3], opacity: f64::NAN, surface: None, transmission: None });
         }
-        let mut task = ImageTask::new(scene(vec![body]), request(), CancelToken::default()).unwrap();
-        let error = loop {
-            if let Err(error) = task.step(64) {
-                break error;
-            }
-        };
+        let error = ImageTask::new(scene(vec![body]), request(), CancelToken::default()).err().unwrap();
         assert_eq!(error.code, ErrorCode::InvalidScene);
     }
     let mut body = body;
@@ -201,4 +196,65 @@ fn registered_executor_geometry_admission_excludes_the_cpu_raster_estimate() {
     assert_eq!(geometry.face_appearances, count as u64);
     // The CPU host itself keeps rejecting the source.
     assert_eq!(admit(&source, &r).unwrap_err().code, ErrorCode::LimitExceeded);
+}
+
+#[test]
+fn admission_rejects_projected_pixel_work_before_starting_a_job() {
+    let mut body = square("Overlapping glass", [100, 120, 140], 0.55, Vec3::ZERO);
+    let mesh = Arc::make_mut(&mut body.mesh);
+    mesh.triangles = vec![[0, 1, 2]; 1024];
+    mesh.tri_face = vec![0; 1024];
+    let scene = scene(vec![body]);
+    let request = ImageRequest { width: 512, height: 512, ..request() };
+    let error = admit(&scene, &request).expect_err("preflight must reject the same pixel-work limit as the rasterizer");
+    assert_eq!(error.code, ErrorCode::LimitExceeded);
+    assert!(error.message.contains("pixel tests"));
+    let request = ImageRequest { width: 64, height: 64, ..request };
+    let admission = admit(&scene, &request).unwrap();
+    assert!(admission.projected_pixel_tests.unwrap() > 0);
+    assert!(admission.projected_pixel_tests.unwrap() <= MAX_PIXEL_TESTS);
+    let png = finish(ImageTask::new(scene, request, CancelToken::default()).unwrap());
+    assert_eq!(image::load_from_memory(&png).unwrap().width(), 64);
+}
+
+#[test]
+fn pixel_work_admission_includes_the_limit_and_uses_clipped_sample_bounds() {
+    let mut body = square("Full viewport", [100; 3], 1.0, Vec3::ZERO);
+    let mesh = Arc::make_mut(&mut body.mesh);
+    // Each triangle's bounds cover all 200 * 200 supersampled pixels.
+    mesh.triangles = vec![[0, 1, 2]; 3200];
+    mesh.tri_face = vec![0; 3200];
+    let mut request = ImageRequest { width: 100, height: 100, ..request() };
+    request.camera.distance = 1.0;
+    request.camera.fov = 0.0;
+    let mut scene = scene(vec![body]);
+    assert_eq!(admit(&scene, &request).unwrap().projected_pixel_tests, Some(128_000_000));
+    let mut task = ImageTask::new(scene.clone(), request.clone(), CancelToken::default()).unwrap();
+    while task.stage != Stage::Clear {
+        task.step(1).unwrap();
+    }
+    assert_eq!(task.pixel_tests, 128_000_000);
+    Arc::make_mut(&mut scene.meshes[0].mesh).triangles.push([0, 1, 2]);
+    assert_eq!(admit(&scene, &request).unwrap_err().code, ErrorCode::LimitExceeded);
+    // Registered executors budget their own work, independently of the raster projection.
+    let geometry = admit_geometry(&scene, &request, MAX_TRIANGLES).unwrap();
+    assert_eq!(geometry.projected_pixel_tests, None);
+    assert!(serde_json::to_value(geometry).unwrap().get("projected_pixel_tests").is_none());
+}
+
+#[test]
+fn pixel_work_ignores_invisible_triangles_and_respects_the_last_face_override() {
+    let mut body = square("Hidden", [100; 3], 0.0, Vec3::ZERO);
+    let request = request();
+    assert_eq!(admit(&scene(vec![body.clone()]), &request).unwrap().projected_pixel_tests, Some(0));
+    body.faces.push(FaceAppearance { face: 0, color: [100; 3], opacity: 0.55, surface: None, transmission: None });
+    assert!(admit(&scene(vec![body.clone()]), &request).unwrap().projected_pixel_tests.unwrap() > 0);
+    body.faces.push(FaceAppearance { face: 0, color: [100; 3], opacity: 0.0, surface: None, transmission: None });
+    assert_eq!(admit(&scene(vec![body]), &request).unwrap().projected_pixel_tests, Some(0));
+
+    let offscreen = square("Offscreen", [100; 3], 1.0, Vec3::new(10_000.0, 0.0, 0.0));
+    assert_eq!(admit(&scene(vec![offscreen]), &request).unwrap().projected_pixel_tests, Some(0));
+    let mut degenerate = square("Degenerate", [100; 3], 1.0, Vec3::ZERO);
+    Arc::make_mut(&mut degenerate.mesh).triangles = vec![[0, 0, 0]];
+    assert_eq!(admit(&scene(vec![degenerate]), &request).unwrap().projected_pixel_tests, Some(0));
 }

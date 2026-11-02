@@ -232,12 +232,12 @@ fn a_half_filled_window_is_an_error_instead_of_a_command() {
     origin_axis[0].items = vec![Sel::SketchCurve { id: ids[1].clone(), sketch: None }];
     origin_axis[1].items = vec![Sel::Axis { name: "Z".into() }];
     assert!(commands(&h.app, &Mod::Mirror, &origin_axis, &serde_json::Map::new()).is_err());
-    // The line itself must not be in the entities: the old click flow could not express that
-    // either, and the engine silently dropped it.
+    // The mirror line may itself be among the entities (a chain or profile picked in one action):
+    // the command leaves the line in place and mirrors the rest.
     let mut line_in_both = mirror_inputs();
     line_in_both[0].items = vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }];
     line_in_both[1].items = vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }];
-    assert!(commands(&h.app, &Mod::Mirror, &line_in_both, &serde_json::Map::new()).is_err());
+    assert_eq!(commands(&h.app, &Mod::Mirror, &line_in_both, &serde_json::Map::new()).unwrap()[0].1, json!({"entities": [ids[0]], "line": ids[0]}));
 }
 
 #[test]

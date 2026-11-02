@@ -31,7 +31,7 @@ const POSITION_LABELS: [&str; 5] = ["Inside", "Outside", "Middle", "Material Out
 const HEIGHT_FROM: [&str; 3] = ["outer", "inner", "tangent"];
 const HEIGHT_FROM_LABELS: [&str; 3] = ["Outer Sharp", "Inner Sharp", "Tangent"];
 /// Rule fields the manager edits (parameter name, label).
-const RULE_FIELDS: [(&str, &str); 8] = [
+pub(crate) const RULE_FIELDS: [(&str, &str); 8] = [
     ("thickness", "Thickness"),
     ("k_factor", "K Factor"),
     ("bend_radius", "Bend Radius"),
@@ -42,11 +42,11 @@ const RULE_FIELDS: [(&str, &str); 8] = [
     ("gap", "Flange Gap"),
 ];
 /// The corner relief shapes the manager offers (the rule's `corner_relief_shape`) and their labels.
-const RELIEF_SHAPES: [&str; 4] = ["notch", "round", "rectangular", "tear"];
+pub(crate) const RELIEF_SHAPES: [&str; 4] = ["notch", "round", "rectangular", "tear"];
 const RELIEF_SHAPE_LABELS: [&str; 4] = ["Notch", "Round", "Rectangular", "Tear"];
 /// How the manager's rule reads bend angles in the DXF bend notes (the rule's `angle_display`)
 /// and their labels.
-const ANGLE_DISPLAYS: [&str; 2] = ["bend", "included"];
+pub(crate) const ANGLE_DISPLAYS: [&str; 2] = ["bend", "included"];
 const ANGLE_DISPLAY_LABELS: [&str; 2] = ["Bend", "Included"];
 /// The corner relief shapes an edge flange offers: the rule's (index 0, nothing of its own), then
 /// the shapes of `RELIEF_SHAPES` in order.
@@ -208,7 +208,13 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 
 /// The design's rules (the default steel rule when it has none).
 fn rule_list(app: &SolveApp) -> Vec<SheetRule> {
-    let r = &app.session.doc.sheet.rules;
+    design_rules(&app.session.doc)
+}
+
+/// The rules the manager lists for this design: its own, or the default steel rule when it has
+/// none.
+pub(crate) fn design_rules(doc: &solidcraft_engine::doc::Document) -> Vec<SheetRule> {
+    let r = &doc.sheet.rules;
     if r.is_empty() { vec![SheetRule::steel()] } else { r.clone() }
 }
 

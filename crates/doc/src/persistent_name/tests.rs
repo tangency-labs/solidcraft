@@ -236,3 +236,15 @@ fn hostile_names_never_panic() {
     // A fillet on an open boundary's edge.
     assert!(matches!(face("F1:blend:F10:start").base, Base::Blend { rounds: Rounds::Edge(ref e), .. } if e.faces.len() == 1));
 }
+
+#[test]
+fn a_text_that_cannot_be_written_into_a_name_whole_is_told() {
+    // A curve's id goes into the name of the faces the curve makes, so it has to come
+    // back out of the name as itself (#5858).
+    for good in ["c1", "l4", "s01.l4", "c-1", "c_1", "a.b", "x"] {
+        assert!(text_fits_name(good), "`{good}` fits a name");
+    }
+    for bad in ["c|1", "c,1", "c~1", "c]1", "c#1", "", "s1.l4"] {
+        assert!(!text_fits_name(bad), "`{bad}` does not fit a name");
+    }
+}

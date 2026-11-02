@@ -792,3 +792,67 @@ fn a_sketch_on_the_mirrored_half_of_a_combined_body_sits_on_that_half() {
         assert!((plane.origin - point).dot(normal).abs() < 1e-6, "{name}: origin {:?}", plane.origin);
     }
 }
+/// The sensor enclosure's lid rests on the case, and its lip, joined below it, parts its underside
+/// into a ring and a panel. The ring is named after the case's top it rests on, so the lid's cap
+/// certificate finds only the panel: the ring is another piece of the same face and takes a sketch
+/// attached by that certificate, as it did before #8278 (#9465, nightly action matrix).
+#[test]
+fn a_sketch_on_the_ring_of_a_lid_underside_parted_by_its_lip_keeps_the_cap() {
+    let mut s = Session::default();
+    let script: Value = serde_json::from_str(include_str!("../../../../examples/acceptance/sensor_enclosure.json")).unwrap();
+    s.run_script(&script).unwrap();
+    let world = s.world_state();
+    let lid = world.body("Lid").unwrap();
+    let names = solidcraft_doc::naming::face_names(lid);
+    let down: Vec<usize> = (0..names.len())
+        .filter(|index| lid.body.planar_face(*index).is_some_and(|plane| plane.normal().dot(-Vec3::Z) > 0.999 && (plane.origin.z - 25.).abs() < 1e-6))
+        .collect();
+    assert!(down.len() > 1, "the lip parts the lid's underside: {down:?}");
+    let ring = *down.iter().find(|index| names[**index] == "F2:top").unwrap_or_else(|| panic!("the ring, among {names:?}"));
+    let pick = json!({"body":"Lid","index":ring,"face":[12.0, 29.266_666_666_665, 25.0]});
+    drop(world);
+    let id = run(&mut s, "sketch.create", json!({"name":"On ring","plane":pick,"project_edges":false}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    let plane = s.model.state().sketch(id).unwrap().plane;
+    assert!(plane.normal().dot(-Vec3::Z) > 0.999 && (plane.origin.z - 25.).abs() < 1e-6, "{plane:?}");
+    // The attachment survives an edit that widens the lid.
+    run(&mut s, "parameters.change", json!({"name": "board_w", "expression": "(60 mm) * 1.1"}));
+    assert!(timeline_errors(&s).is_empty(), "{:?}", timeline_errors(&s));
+    let plane = s.model.state().sketch(id).unwrap().plane;
+    assert!(plane.normal().dot(-Vec3::Z) > 0.999 && (plane.origin.z - 25.).abs() < 1e-6, "{plane:?}");
+}
+
+/// `activate_part` (#10215): a sketch on a face of another component's body is made in that
+/// component, which stays active; without it the sketch belongs to the active component.
+#[test]
+fn activate_part_makes_the_sketch_in_the_faces_component() {
+    for activate in [true, false] {
+        let mut s = Session::default();
+        let part = run(&mut s, "component.create", json!({"name":"Part","parent":0,"grounded":false}));
+        let (component, occurrence) = (part["component"].as_u64().unwrap(), part["occurrence"].as_u64().unwrap());
+        run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Base"}));
+        run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[30,0,0]}));
+        run(&mut s, "component.activate", json!({"component":0}));
+        let mut pick = top_pick(&s, "Base");
+        pick["path"] = json!([occurrence]);
+        let out = run(&mut s, "sketch.create", json!({"name":"OnFace","plane":pick,"activate_part":activate,"project_edges":false}));
+        let id = out["sketch"].as_u64().unwrap();
+        let owner = s.doc.feature(id).unwrap().component;
+        if activate {
+            assert_eq!(owner, component);
+            assert_eq!((s.active_component, s.active_occurrence_path.clone()), (component, Some(vec![occurrence])));
+            assert_eq!(out["activated"], json!({"component": component, "path": [occurrence]}));
+            let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &s.doc.feature(id).unwrap().kind else { panic!("not sketch") };
+            assert_eq!(super::anchor(plane).unwrap().author_path, vec![occurrence]);
+        } else {
+            assert_eq!(owner, 0);
+            assert_eq!(s.active_component, 0);
+            assert!(out.get("activated").is_none());
+        }
+        let world = s.world_state();
+        let plane = world.sketch(id).unwrap().plane;
+        assert!((plane.origin.z - 10.).abs() < 1e-6 && plane.normal().z > 1. - 1e-9, "{activate}: {plane:?}");
+        draw(&mut s);
+        assert!(s.model.result(id).unwrap().error.is_none());
+    }
+}

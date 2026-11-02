@@ -283,6 +283,14 @@ impl Autosaver {
         Ok(true)
     }
 
+    /// Whether the last autosave holds `s` as it is now, with no write still running: what a
+    /// crash now would leave for the next launch to offer. A finished write counts once a
+    /// [`Self::tick`] has taken its outcome.
+    pub fn caught_up(&self, s: &Session) -> bool {
+        self.writing.is_none()
+            && self.last.as_ref().is_some_and(|(doc, visibility)| (Arc::ptr_eq(doc, &s.doc) || **doc == *s.doc) && *visibility == s.visibility)
+    }
+
     /// Autosave when the interval has passed, or right away after a big operation. The design
     /// is written on a worker thread; true when this call started a write.
     pub fn tick(&mut self, s: &Session, big: bool) -> Result<bool> {

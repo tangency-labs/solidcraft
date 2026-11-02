@@ -22,6 +22,11 @@ up straight away, and again once a day while it stays open.
 **Preferences ▸ General ▸ Updates** has **Check for updates automatically** (on by default) and
 **Check now**, which checks right away and shows the window even for a version you skipped.
 
+**Help ▸ Check for updates** runs the same check, including from the macOS menu bar. The window
+shows progress, offers the installation or download when a newer version exists, or says
+**SolidCraft is up to date.** If the check fails, it shows the error instead. Manual checks work
+even when automatic checks are turned off; builds that cannot check explain that in the window.
+
 ## Updating in one click
 
 Where SolidCraft can replace itself safely, the window also has **Update now**:

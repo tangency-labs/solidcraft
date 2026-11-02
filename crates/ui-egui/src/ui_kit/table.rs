@@ -308,6 +308,101 @@ fn header_label(ui: &mut Ui, label: &str) {
         .on_hover_text(crate::i18n::tr_label(label));
 }
 
+/// How a table orders its rows by one column. `Listed` keeps the order the owner gave them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) enum Sort {
+    #[default]
+    Listed,
+    Ascending,
+    Descending,
+}
+
+impl Sort {
+    /// A click on the header steps ascending, descending, then back to the listed order.
+    pub(crate) fn next(self) -> Self {
+        match self {
+            Sort::Listed => Sort::Ascending,
+            Sort::Ascending => Sort::Descending,
+            Sort::Descending => Sort::Listed,
+        }
+    }
+
+    /// Order `items` by `key` in natural order (stable: equal names keep their listed order).
+    pub(crate) fn apply<T>(self, items: &mut [T], key: impl Fn(&T) -> &str) {
+        match self {
+            Sort::Listed => {}
+            Sort::Ascending => items.sort_by(|a, b| natural_cmp(key(a), key(b))),
+            Sort::Descending => items.sort_by(|a, b| natural_cmp(key(b), key(a))),
+        }
+    }
+}
+
+/// Natural order for names: runs of digits compare by value ("d2" before "d10"), letters
+/// ignore case ("Alpha" between "a" and "b"); exact ties fall back to the plain comparison.
+fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let (mut x, mut y) = (a.chars().peekable(), b.chars().peekable());
+    while let (Some(&p), Some(&q)) = (x.peek(), y.peek()) {
+        let order = if p.is_ascii_digit() && q.is_ascii_digit() {
+            let run = |it: &mut std::iter::Peekable<std::str::Chars<'_>>| {
+                let mut digits = String::new();
+                while let Some(c) = it.next_if(char::is_ascii_digit) {
+                    digits.push(c);
+                }
+                digits
+            };
+            let (m, n) = (run(&mut x), run(&mut y));
+            let (m_value, n_value) = (m.trim_start_matches('0'), n.trim_start_matches('0'));
+            // Compare the values by length then digits, so no run can overflow an integer;
+            // "01" sorts after "1".
+            m_value.len().cmp(&n_value.len()).then_with(|| m_value.cmp(n_value)).then_with(|| m.len().cmp(&n.len()))
+        } else {
+            x.next();
+            y.next();
+            p.to_lowercase().cmp(q.to_lowercase())
+        };
+        if order != Ordering::Equal {
+            return order;
+        }
+    }
+    x.next().is_some().cmp(&y.next().is_some()).then_with(|| a.cmp(b))
+}
+
+/// A header that sorts the table by its column. Clicking steps through [`Sort::next`]; the
+/// chevron shows the current direction (up for ascending), and none when rows are as listed.
+/// Tokens: control_radius, hover, space_4/14, font_small, form_dim/primary.
+pub(crate) fn sort_header(ui: &mut Ui, label: &str, sort: &mut Sort) -> Response {
+    let t = Tokens::get();
+    let rect = ui.max_rect();
+    let response = ui.allocate_rect(rect, egui::Sense::click());
+    if response.hovered() {
+        ui.painter().rect_filled(rect, t.control_radius, t.hover);
+    }
+    let text = crate::i18n::tr_label(label);
+    let font = crate::fonts::semibold(t.font_small);
+    let width = ui.painter().layout_no_wrap(text.to_owned(), font.clone(), t.form_dim).size().x.ceil();
+    let text_rect = egui::Rect::from_min_max(rect.min, egui::pos2((rect.left() + width).min(rect.right() - t.space_14 - t.space_4), rect.bottom()));
+    super::text::paint_text(ui, text_rect, text, font, t.form_dim, false);
+    let icon =
+        egui::Rect::from_center_size(egui::pos2(text_rect.right() + t.space_4 + t.space_14 * 0.5, rect.center().y), vec2(t.space_14, t.space_14));
+    match *sort {
+        Sort::Ascending => crate::icons::paint_ink_flipped(ui.painter(), icon, "chevron", t.form_primary),
+        Sort::Descending => crate::icons::paint_ink(ui.painter(), icon, "chevron", t.form_primary),
+        Sort::Listed if response.hovered() => crate::icons::paint_ink(ui.painter(), icon, "chevron", t.form_dim.gamma_multiply(0.5)),
+        Sort::Listed => {}
+    }
+    if response.clicked() {
+        *sort = sort.next();
+    }
+    let tip = match *sort {
+        Sort::Listed => "Sort A to Z",
+        Sort::Ascending => "Sort Z to A",
+        Sort::Descending => "Back to the original order",
+    };
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), text));
+    response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(crate::i18n::tr_label(tip))
+}
+
 /// Column removal appears inside the hovered header only. Keeps the former × button handle.
 pub(crate) fn removable_header(ui: &mut Ui, label: &str) -> bool {
     let t = Tokens::get();

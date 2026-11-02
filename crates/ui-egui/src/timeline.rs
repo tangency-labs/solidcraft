@@ -16,6 +16,10 @@ use crate::theme::Tokens;
 /// Apply transport actions from the current marker; endpoints stay bounded, including an
 /// empty design. All orientations reach the same rollback command.
 pub(crate) fn run_transport(app: &mut SolveApp, control: crate::ui_kit::HistoryTransport) {
+    // A step moves from the marker the design has, not the one an open editor rolled to (#10688).
+    if app.close_editor_for_history().is_err() {
+        return;
+    }
     let n = app.session.doc.features.len();
     let marker = app.session.doc.marker.unwrap_or(n);
     let position = match control {
@@ -43,11 +47,18 @@ pub(crate) fn transport_response(app: &mut SolveApp, control: crate::ui_kit::His
     }
 }
 
-/// The History controls' menu: shows or hides the Play button.
+/// The History controls' menu: shows or hides the Play button, and — when the design marks any
+/// component out of the bar — shows or hides those components' entries (#10393).
 pub(crate) fn transport_items(app: &SolveApp) -> Vec<crate::context_menu::Item> {
     let show = !app.preferences.history_play_button;
     let label = crate::i18n::tr(if show { "ui.history_play_button_show" } else { "ui.history_play_button_hide" });
-    vec![crate::context_menu::Item::action("ui.historyPlayButton", label, "timeline_play").with(json!({ "show": show }))]
+    let mut items = vec![crate::context_menu::Item::action("ui.historyPlayButton", label, "timeline_play").with(json!({ "show": show }))];
+    if app.session.doc.components.iter().any(|c| c.history_hidden) {
+        let show_hidden = !app.tree.history_show_hidden;
+        let label = crate::i18n::tr(if show_hidden { "ui.history_show_hidden" } else { "ui.history_hide_hidden" });
+        items.push(crate::context_menu::Item::action("ui.historyShowHidden", label, "eye").with(json!({ "show": show_hidden })));
+    }
+    items
 }
 
 /// The feature that made a face, edge or vertex of `body` (its world name): a face's own creator,
@@ -200,6 +211,7 @@ fn construction_plane_icon(plane: &PlaneRef) -> &'static str {
         PlaneRef::AtAngle { .. } => "plane_angle",
         PlaneRef::Midplane { .. } => "plane_midplane",
         PlaneRef::TwoEdges { .. } => "plane_two_edges",
+        PlaneRef::AxisPoint { .. } => "plane_axis_point",
         PlaneRef::ThreePoints { .. } => "plane_three_points",
         PlaneRef::Tangent { .. } => "plane_tangent",
         PlaneRef::AlongPath { .. } => "plane_along_path",
@@ -231,9 +243,16 @@ pub(crate) fn timeline_component(app: &SolveApp, show_all: bool) -> Option<u64> 
 }
 
 /// Indices into the design's features that the timeline shows for `component` (all of them for
-/// `None`): the features of that component and of the components inside it.
-pub(crate) fn shown_feature_indices(doc: &solidcraft_engine::doc::Document, component: Option<u64>) -> Vec<usize> {
-    doc.features.iter().enumerate().filter(|(_, f)| component.is_none_or(|c| doc.component_within(f.component, c))).map(|(i, _)| i).collect()
+/// `None`): the features of that component and of the components inside it, leaving out the
+/// components marked out of the History bar unless `show_hidden` asks for them (#10393).
+pub(crate) fn shown_feature_indices(doc: &solidcraft_engine::doc::Document, component: Option<u64>, show_hidden: bool) -> Vec<usize> {
+    doc.features
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| component.is_none_or(|c| doc.component_within(f.component, c)))
+        .filter(|(_, f)| show_hidden || !doc.component_history_hidden(f.component))
+        .map(|(i, _)| i)
+        .collect()
 }
 
 /// The design's feature position for a slot among the shown features: before the shown feature
@@ -255,11 +274,6 @@ fn slot_at(xs: &[f32], end: f32, x: f32) -> usize {
         }
     }
     best.0
-}
-
-/// Ask before deleting a feature others depend on; delete right away otherwise.
-pub(crate) fn delete_feature(app: &mut SolveApp, id: u64) {
-    delete_features(app, vec![id]);
 }
 
 /// Check what deleting `ids` takes with it or makes fail (off the window thread when that takes a
@@ -329,21 +343,38 @@ pub(crate) fn menu_targets(app: &SolveApp, id: u64) -> Vec<u64> {
     if selected.contains(&id) { selected } else { vec![id] }
 }
 
-/// The features from timeline position `from` to the end.
-fn features_from(app: &SolveApp, from: usize) -> Vec<u64> {
-    app.session.doc.features.iter().skip(from).map(|f| f.id).collect()
+/// Delete in a feature's menu, in both timelines: the selected features when the right-clicked
+/// one is among them, labelled with how many, else that feature alone (#5005).
+pub(crate) fn delete_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
+    let targets = menu_targets(app, id);
+    let label = match targets.len() {
+        1 => crate::i18n::tr_label("Delete").to_string(),
+        n => crate::i18n::format("timeline.delete_many", &[("count", &n.to_string())]),
+    };
+    if crate::context_menu::button(ui, &label, "delete").clicked() {
+        delete_features(app, targets);
+        ui.close();
+    }
 }
 
-/// In the menu of a feature after the history marker (feature `id` at timeline position
-/// `index`): delete every feature after the marker, labelled with how many, in one delete
-/// through [`delete_features`] so the confirmation still lists what would fail. Not offered
-/// before the marker, nor when the menu acts on several selected features: an entry that acts
-/// partly on the selection and partly beyond it is hard to read.
-pub(crate) fn delete_after_marker_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, index: usize, marker: usize) {
+/// The features from design position `from` to the end, only the `shown` positions (ascending)
+/// when the timeline shows some of the design's features.
+fn features_from(app: &SolveApp, from: usize, shown: Option<&[usize]>) -> Vec<u64> {
+    let features = app.session.doc.features.iter().enumerate().skip(from);
+    features.filter(|(i, _)| shown.is_none_or(|shown| shown.binary_search(i).is_ok())).map(|(_, f)| f.id).collect()
+}
+
+/// In the menu of a feature after the history marker (feature `id` at design position
+/// `index`, `marker` a design position too): delete every feature after the marker, only the
+/// `shown` ones when the timeline is filtered to a component, labelled with how many, in one
+/// delete through [`delete_features`] so the confirmation still lists what would fail. Not
+/// offered before the marker, nor when the menu acts on several selected features: an entry
+/// that acts partly on the selection and partly beyond it is hard to read.
+pub(crate) fn delete_after_marker_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, index: usize, marker: usize, shown: Option<&[usize]>) {
     if index < marker || menu_targets(app, id).len() > 1 {
         return;
     }
-    let ids = features_from(app, marker);
+    let ids = features_from(app, marker, shown);
     let key = if ids.len() == 1 { "timeline.delete_after_marker_one" } else { "timeline.delete_after_marker_other" };
     let label = crate::i18n::format(key, &[("count", &ids.len().to_string())]);
     if crate::context_menu::button(ui, &label, "delete").clicked() {
@@ -372,7 +403,7 @@ pub(crate) fn clipboard_buttons(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) 
 
 /// Where each feature's result is in `results`, by feature id: the first result of an id, as
 /// `Model::result` finds it.
-fn result_index(results: &[solidcraft_engine::doc::FeatureResult]) -> std::collections::HashMap<u64, usize> {
+pub(crate) fn result_index(results: &[solidcraft_engine::doc::FeatureResult]) -> std::collections::HashMap<u64, usize> {
     results.iter().enumerate().rev().map(|(k, r)| (r.id, k)).collect()
 }
 
@@ -394,17 +425,37 @@ pub(crate) fn status_text(name: &str, ty: &str, error: Option<&str>, warning: Op
 /// it isn't built then.
 pub(crate) fn feature_status(app: &SolveApp, id: u64) -> Option<Status> {
     let index = app.session.doc.feature_index(id)?;
+    status_at(app, index, || app.session.model.result(id))
+}
+
+/// The mark of the feature at `index` in the history, given how to find its result.
+fn status_at<'a>(app: &SolveApp, index: usize, result: impl FnOnce() -> Option<&'a solidcraft_engine::doc::FeatureResult>) -> Option<Status> {
     let feature = app.session.doc.features.get(index)?;
     if feature.suppressed || app.session.doc.marker.is_some_and(|marker| index >= marker) {
         return None;
     }
-    let result = app.session.model.result(id)?;
+    let result = result()?;
     if result.error.is_some() { Some(Status::Error) } else { result.warning.as_ref().map(|_| Status::Warning) }
 }
 
 /// The worst mark among `ids`, with the message of the first feature that has it.
 pub(crate) fn worst_status(app: &SolveApp, ids: &[u64]) -> (Option<Status>, Option<String>) {
-    let worst = ids.iter().filter_map(|id| feature_status(app, *id).map(|status| (status, *id))).reduce(|a, b| if b.0 > a.0 { b } else { a });
+    let mark = |status: Option<Status>, id: &u64| status.map(|status| (status, *id));
+    // A long folder finds each feature's place and result in tables built once: a search per
+    // feature made a folded long history cost the square of its length every frame. A short
+    // one searches, which costs less than building the tables.
+    let marks: Vec<(Status, u64)> = if ids.len() < 16 {
+        ids.iter().filter_map(|id| mark(feature_status(app, *id), id)).collect()
+    } else {
+        let places: std::collections::HashMap<u64, usize> = app.session.doc.features.iter().enumerate().rev().map(|(i, f)| (f.id, i)).collect();
+        let results = result_index(&app.session.model.results);
+        let status = |id: &u64| {
+            let index = *places.get(id)?;
+            status_at(app, index, || results.get(id).and_then(|k| app.session.model.results.get(*k)))
+        };
+        ids.iter().filter_map(|id| mark(status(id), id)).collect()
+    };
+    let worst = marks.into_iter().reduce(|a, b| if b.0 > a.0 { b } else { a });
     match worst {
         Some((status, id)) => (Some(status), feature_message(app, id)),
         None => (None, None),
@@ -468,6 +519,10 @@ fn select_range(app: &mut SolveApp, order: &[u64], id: u64, add: bool) {
 /// Give a History feature click to a compatible active dialog input in any layout.
 /// Plain clicks keep an existing pick; Ctrl/Command clicks toggle it off.
 pub(crate) fn pick_feature_into_dialog(app: &mut SolveApp, id: u64, modifiers: egui::Modifiers) -> bool {
+    // A pattern or Mirror says why it does not take a sketch (#10057).
+    if app.dialog.as_mut().is_some_and(|d| d.refuse_sketch(&app.session, id)) {
+        return true;
+    }
     let Some(d) = app.dialog.as_mut().filter(|d| d.active_input().is_some_and(|i| i.accept & crate::selection::FEATURES != 0)) else {
         return false;
     };
@@ -632,18 +687,19 @@ pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.shell.history = Some(rect);
         crate::scenario::publish_rect("history:card", rect);
         let mut child = ui.new_child(UiBuilder::new().id_salt("sc_timeline").max_rect(rect));
-        Container::paint_frame(ui.painter(), Container::new(ui.ctx(), Surface::Panel).frame(ui.ctx(), t.timeline, crate::frame::Side::Left), rect);
+        Container::paint_panel_frame(
+            ui.painter(),
+            Container::new(ui.ctx(), Surface::Panel).frame(ui.ctx(), t.timeline, crate::frame::Side::Left),
+            rect,
+        );
         child.set_clip_rect(rect);
         timeline_contents(app, &mut child, true);
     } else {
-        let response = Container::new(ui.ctx(), Surface::Panel)
-            .edge("sc_timeline", Edge::Bottom)
-            .exact_size(40.0)
-            .frame(Container::new(ui.ctx(), Surface::Panel).edge_frame(t.timeline))
-            .show(ui, |ui| {
-                timeline_contents(app, ui, false);
-            });
-        let frame = Container::new(ui.ctx(), Surface::Panel).edge_frame(t.timeline);
+        let host = Container::new(ui.ctx(), Surface::Panel);
+        let response = host.show_edge(ui, host.edge("sc_timeline", Edge::Bottom).exact_size(40.0), host.edge_frame(t.timeline), |ui| {
+            timeline_contents(app, ui, false);
+        });
+        let frame = host.edge_frame(t.timeline);
         Container::paint_inset(ui.painter(), response.response.rect - frame.outer_margin, frame);
         app.shell.history = Some(response.response.rect);
         crate::scenario::publish_rect("history:strip", response.response.rect);
@@ -803,7 +859,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             let show_all = ui.data(|d| d.get_temp::<bool>(show_all_id)).unwrap_or(false);
             let only = timeline_component(app, show_all);
             let filtering = only.is_some() || show_all;
-            let shown = shown_feature_indices(&app.session.doc, only);
+            let shown = shown_feature_indices(&app.session.doc, only, app.tree.history_show_hidden);
             if filtering || app.session.doc.features.iter().any(|f| f.component != 0) {
                 // A toggle ahead of the features: this part only, or the whole design.
                 let label = match only {
@@ -828,6 +884,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 }
                 x = br.right() + 8.0;
             }
+            let design_marker = marker;
             let marker = shown.iter().position(|i| *i >= marker).unwrap_or(shown.len());
             let feats: Vec<_> = shown
                 .iter()
@@ -851,6 +908,19 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             // Each feature's result, found once for the strip: a search per chip made a long
             // timeline cost the square of its length every frame.
             let results = result_index(&app.session.model.results);
+            // The features picked in the design or in the open dialog, collected once for the
+            // strip: the dialog built its item list again for every chip.
+            let feature_of = |selection: &solidcraft_engine::Sel| match selection {
+                solidcraft_engine::Sel::Feature { id } => Some(*id),
+                _ => None,
+            };
+            let picked: std::collections::HashSet<u64> = app
+                .session
+                .selection
+                .iter()
+                .filter_map(feature_of)
+                .chain(app.dialog.as_ref().map(|dialog| dialog.items()).unwrap_or_default().iter().filter_map(feature_of))
+                .collect();
             for tile in folder_tiles(app, &order) {
                 let i = match tile {
                     FolderTile::Folder(id) => {
@@ -897,7 +967,19 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     ui.scroll_to_rect(br, Some(egui::Align::Center));
                 }
                 crate::scenario::publish_handle(&format!("timeline:{name}"), br.center());
-                let resp = ui.interact(br, ui.id().with(("feat", *id)), Sense::click_and_drag());
+                // A chip scrolled out of the strip is neither drawn nor interactive: a long
+                // history drew every chip each frame. Its slot above still places the marker and drops.
+                // One being dragged or focused, or under an open menu, stays alive until that ends.
+                let chip_id = ui.id().with(("feat", *id));
+                if !ui.clip_rect().intersects(br)
+                    && drag != Some(Drag::Feature(*id))
+                    && !ui.memory(|m| m.has_focus(chip_id))
+                    && !egui::Popup::is_any_open(ui.ctx())
+                {
+                    x += 32.0;
+                    continue;
+                }
+                let resp = ui.interact(br, chip_id, Sense::click_and_drag());
                 // A feature without a result has none; an index that no longer holds this id (a
                 // command run from an earlier chip evaluated again) is searched for.
                 let res =
@@ -905,8 +987,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 let err = res.and_then(|r| r.error.clone());
                 let warn = res.and_then(|r| r.warning.clone());
                 let rolled = i >= marker;
-                let is_it = |s: &solidcraft_engine::Sel| matches!(s, solidcraft_engine::Sel::Feature { id: f } if f == id);
-                let sel = app.session.selection.iter().any(is_it) || app.dialog.as_ref().is_some_and(|d| d.items().iter().any(is_it));
+                let sel = picked.contains(id);
                 if resp.hovered() {
                     hovered = Some(*id);
                 }
@@ -929,26 +1010,38 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 if floating && marker > 0 && i == marker - 1 {
                     p.circle_filled(pos2(br.center().x, br.bottom() + t.space_3), t.space_2, accent.color);
                 }
-                let mut tip = status_text(name, ty, err.as_deref(), warn.as_deref());
-                if let Some(state) = sketch_state {
-                    tip.push('\n');
-                    tip.push_str(&state.text());
-                }
-                if let Some(r) = res {
-                    tip += &format!("\n{:.1} ms", r.ms);
-                }
-                tip.push('\n');
-                tip.push_str(crate::i18n::tr("timeline.feature_hint"));
+                let ms = res.map(|r| r.ms);
                 if resp.drag_started() {
                     drag = Some(Drag::Feature(*id));
                 }
-                let resp = resp.on_hover_text(tip);
+                // The tip is written only while it shows (as `on_hover_text` would lay it out).
+                let resp = resp.on_hover_ui(|ui| {
+                    let mut tip = status_text(name, ty, err.as_deref(), warn.as_deref());
+                    // Greyed out says only "not shown": say why (#8100).
+                    if rolled {
+                        tip.push('\n');
+                        tip.push_str(crate::i18n::tr("timeline.feature_rolled_back"));
+                    }
+                    if let Some(state) = sketch_state {
+                        tip.push('\n');
+                        tip.push_str(&state.text());
+                    }
+                    if let Some(ms) = ms {
+                        tip += &format!("\n{ms:.1} ms");
+                    }
+                    tip.push('\n');
+                    tip.push_str(crate::i18n::tr("timeline.feature_hint"));
+                    ui.set_max_width(ui.spacing().tooltip_width);
+                    ui.add(egui::Label::new(tip));
+                });
                 if resp.clicked() && !pick_feature_into_dialog(app, *id, ui.input(|i| i.modifiers)) {
                     let modifiers = ui.input(|i| i.modifiers);
                     if modifiers.shift {
                         select_range(app, &order, *id, modifiers.command || modifiers.ctrl);
                     } else if modifiers.command || modifiers.ctrl {
                         toggle_feature(app, *id);
+                    } else if !modifiers.any() && crate::browser::pick_sketch_into_dialog(app, *id) {
+                        // Extrude, Revolve or Emboss took every profile of the sketch (#6106).
                     } else {
                         select_one(app, *id);
                     }
@@ -992,16 +1085,8 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     clipboard_buttons(app, ui, *id);
                     message_button(app, ui, *id);
                     ui.separator();
-                    let targets = menu_targets(app, *id);
-                    let label = match targets.len() {
-                        1 => crate::i18n::tr_label("Delete").to_string(),
-                        n => crate::i18n::format("timeline.delete_many", &[("count", &n.to_string())]),
-                    };
-                    if crate::context_menu::button(ui, &label, "delete").clicked() {
-                        delete_features(app, targets);
-                        ui.close();
-                    }
-                    delete_after_marker_button(app, ui, *id, i, marker);
+                    delete_button(app, ui, *id);
+                    delete_after_marker_button(app, ui, *id, design_position(&shown, i, n), design_marker, Some(&shown));
                 });
                 x += 32.0;
             }
@@ -1155,6 +1240,69 @@ mod tests {
     }
 
     #[test]
+    fn history_hiding_a_component_leaves_its_features_out_of_the_bar() {
+        use crate::context_menu::{self, Target};
+        use crate::scenario::handle_at;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("component.create", json!({ "name": "Copy" })).unwrap();
+        h.app.run("solid.box", json!({ "length": 10, "width": 10, "height": 10, "name": "CopyBox" })).unwrap();
+        h.app.run("component.activate", json!({ "component": "root" })).unwrap();
+        h.app.run("component.create", json!({ "name": "Part" })).unwrap();
+        h.app.run("solid.box", json!({ "length": 5, "width": 5, "height": 5, "name": "PartBox" })).unwrap();
+        h.app.run("component.activate", json!({ "component": "root" })).unwrap();
+        h.frames(4);
+        assert!(handle_at("timeline:CopyBox").is_some() && handle_at("timeline:PartBox").is_some(), "both parts' features start in the bar");
+        // The Browser menu offers to hide the copy's History, and running it leaves its entries out.
+        let copy = h.app.session.doc.components.iter().find(|c| c.name == "Copy").unwrap().id;
+        let menu = context_menu::items(&h.app, &Target::Component { id: copy });
+        let hide = menu.iter().find(|i| i.id == "component.hide_history").expect("the component menu offers Hide its History");
+        context_menu::run_item(&mut h.app, hide, egui::Pos2::ZERO);
+        h.frames(4);
+        assert!(handle_at("timeline:CopyBox").is_none(), "the hidden copy leaves the bar");
+        assert!(handle_at("timeline:PartBox").is_some(), "the rest of the design stays");
+        // The History controls' menu shows them anyway, and hides them again (#10393).
+        fn toggle(h: &Harness) -> context_menu::Item {
+            let items = context_menu::items(&h.app, &Target::HistoryControls);
+            items.into_iter().find(|i| i.id == "ui.historyShowHidden").expect("the bar offers to show hidden entries").clone()
+        }
+        let item = toggle(&h);
+        context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+        h.frames(4);
+        assert!(handle_at("timeline:CopyBox").is_some(), "the toggle brings the hidden entries back");
+        let item = toggle(&h);
+        context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+        h.frames(4);
+        assert!(handle_at("timeline:CopyBox").is_none(), "and hides them again");
+        // The component menu now offers to show its History back.
+        let menu = context_menu::items(&h.app, &Target::Component { id: copy });
+        assert!(menu.iter().any(|i| i.id == "component.show_history"), "the menu flips to Show its History");
+    }
+
+    #[test]
+    fn shown_feature_indices_leave_out_hidden_components_and_their_children() {
+        let mut h = Harness::new();
+        h.app.run("component.create", json!({ "name": "Copy" })).unwrap();
+        h.app.run("solid.box", json!({ "length": 1, "width": 1, "height": 1, "name": "CopyBox" })).unwrap();
+        h.app.run("component.create", json!({ "name": "Inner" })).unwrap();
+        h.app.run("solid.box", json!({ "length": 1, "width": 1, "height": 1, "name": "InnerBox" })).unwrap();
+        h.app.run("component.activate", json!({ "component": "root" })).unwrap();
+        h.app.run("component.create", json!({ "name": "Part" })).unwrap();
+        h.app.run("solid.box", json!({ "length": 1, "width": 1, "height": 1, "name": "PartBox" })).unwrap();
+        h.app.run("component.activate", json!({ "component": "root" })).unwrap();
+        h.app.run("component.hide_history", json!({ "component": "Copy" })).unwrap();
+        let doc = &h.app.session.doc;
+        let shown = |show_hidden: bool| super::shown_feature_indices(doc, None, show_hidden);
+        let names = |idx: Vec<usize>| idx.iter().map(|i| doc.features[*i].name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(shown(false)), ["PartBox"], "a hidden component takes its own and its children's rows out");
+        assert_eq!(names(shown(true)), ["CopyBox", "InnerBox", "PartBox"], "show-hidden lists everything again");
+        // The same filter applies when the bar narrows to one component.
+        let copy = doc.components.iter().find(|c| c.name == "Copy").unwrap().id;
+        assert!(super::shown_feature_indices(doc, Some(copy), false).is_empty(), "the component filter shows nothing of a hidden component");
+        assert_eq!(super::shown_feature_indices(doc, Some(copy), true).len(), 2, "Copy owns CopyBox and InnerBox");
+    }
+
+    #[test]
     fn history_status_translates_prefixes_and_both_diagnostics() {
         let diagnostic = "there is no body to cut or intersect in component 'Mount'; the tool may overlap 'Plate' in component 'Base' — activate that component or pick the body as a target";
         let _language = crate::i18n::scope("ja");
@@ -1259,9 +1407,10 @@ mod tests {
         }
         for (id, plane) in [
             ("midplane", PlaneRef::Midplane { a: reference(), b: reference() }),
+            ("axis_point", PlaneRef::AxisPoint { axis: reference(), point: reference() }),
             ("two_edges", PlaneRef::TwoEdges { a: reference(), b: reference() }),
             ("three_points", PlaneRef::ThreePoints { a: reference(), b: reference(), c: reference() }),
-            ("tangent", PlaneRef::Tangent { face: reference(), at: Vec3::ZERO }),
+            ("tangent", PlaneRef::Tangent { face: reference(), at: Vec3::ZERO, reference: None, angle: None }),
             ("along_path", PlaneRef::AlongPath { path: reference(), t: "0.5".into() }),
             ("perpendicular", PlaneRef::Perpendicular { plane: reference(), line: reference() }),
         ] {
@@ -1614,6 +1763,50 @@ mod tests {
         assert_eq!(moved.y, first.y);
     }
 
+    /// A long timeline paints only the chips in view, and those past the window still keep their
+    /// places: scrolled into view, the last one is drawn where its handle says.
+    #[test]
+    fn a_long_timeline_paints_only_the_chips_in_view() {
+        let mut h = Harness::new();
+        for i in 0..200 {
+            h.app.run("sketch.create", json!({"plane": "XY", "name": format!("S{i}")})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        h.frames(4);
+        let width = h.app.shell.history.unwrap().right();
+        // Past the window, only the history marker at the end of the strip.
+        let past = |h: &Harness| {
+            let marker = crate::scenario::rect_of("history:marker").unwrap().expand(2.0);
+            let drawn = h.shapes.iter().map(|s| s.shape.visual_bounding_rect()).filter(|r| r.is_finite());
+            drawn.filter(|r| r.left() > width && !marker.contains_rect(*r)).count()
+        };
+        assert!(crate::scenario::handle_at("timeline:S199").unwrap().x > width, "the last chip starts past the window");
+        assert_eq!(past(&h), 0, "nothing is painted past the window");
+        let found = h.app.session.doc.find_feature("S199").unwrap().id;
+        h.app.tree.timeline_reveal = Some(found);
+        h.frames(30);
+        let last = crate::scenario::handle_at("timeline:S199").unwrap();
+        assert!(h.app.shell.history.unwrap().contains(last), "the last chip scrolled into view: {last:?}");
+        h.step(&json!({"click": {"handle": "timeline:S199"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.selection, [solidcraft_engine::Sel::Feature { id: found }], "the drawn chip is the one clicked");
+
+        // Scrolled to the end, the chips out of view on the left still hold their slots.
+        let target = crate::scenario::handle_at("timeline:S180").unwrap();
+        let marker = crate::scenario::rect_of("history:marker").unwrap().center();
+        h.step(&json!({"drag": [[marker.x, marker.y], [target.x - 12.0, target.y]]})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.doc.marker, Some(180), "the marker dropped before S180");
+        h.app.run("timeline.roll_to", json!({})).unwrap();
+        h.settle();
+
+        // A range picked across chips out of view takes every feature between its ends.
+        h.app.tree.timeline_reveal = h.app.session.doc.find_feature("S0").map(|f| f.id);
+        h.frames(30);
+        h.step(&json!({"click": {"handle": "timeline:S0"}, "shift": true})).unwrap();
+        assert_eq!(super::selected_feature_ids(&h.app).len(), 200);
+    }
+
     /// Find in Timeline on the last body of a history longer than the timeline scrolls its
     /// feature into view, in the bottom strip and in the history on the left (#5850).
     #[test]
@@ -1807,6 +2000,58 @@ mod tests {
         assert_eq!(index.get(&twice[first].id), Some(&first), "the first result of an id wins, as in Model::result");
     }
 
+    /// A folder's mark is the worst of its features' own, searched for a short folder and found
+    /// in tables for a long one: an error over warnings, the message of the first feature with
+    /// the worst, none for a feature suppressed or rolled back, and a feature listed twice in the
+    /// history found at its first place.
+    #[test]
+    fn a_folders_mark_is_the_worst_of_its_features_own() {
+        use crate::ui_kit::Status;
+        let mut h = two_boxes(false);
+        let third =
+            json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "operation": "new_body", "name": "Third", "body_name": "Three"});
+        h.app.run("solid.box", third).unwrap();
+        h.frames(2);
+        let ids: Vec<u64> = h.app.session.doc.features.iter().map(|f| f.id).collect();
+        assert_eq!(ids.len(), 3);
+        let (a, b, c) = (ids[0], ids[1], ids[2]);
+        for (id, error, warning) in [(a, None, Some("a")), (b, Some("b"), None), (c, None, Some("c"))] {
+            let result = h.app.session.model.results.iter_mut().find(|r| r.id == id).unwrap();
+            result.error = error.map(str::to_string);
+            result.warning = warning.map(str::to_string);
+        }
+        let own = |h: &Harness, ids: &[u64]| {
+            let worst = ids.iter().filter_map(|id| super::feature_status(&h.app, *id).map(|s| (s, *id))).reduce(|a, b| if b.0 > a.0 { b } else { a });
+            (worst.map(|w| w.0), worst.and_then(|w| super::feature_message(&h.app, w.1)))
+        };
+        // Every folder short enough to be searched, then the same repeated past the length that
+        // builds the tables.
+        let check = |h: &Harness, folder: &[u64], status: Option<Status>, of: Option<u64>, why: &str| {
+            for ids in [folder.to_vec(), folder.repeat(16)] {
+                let found = super::worst_status(&h.app, &ids);
+                assert_eq!(found, (status, of.and_then(|id| super::feature_message(&h.app, id))), "{why}, {} ids", ids.len());
+                assert_eq!(found, own(h, &ids), "{why}, {} ids", ids.len());
+            }
+        };
+        check(&h, &ids, Some(Status::Error), Some(b), "the error outweighs the warnings");
+        check(&h, &[a, c], Some(Status::Warning), Some(a), "the first warned feature's message");
+        check(&h, &[c, a], Some(Status::Warning), Some(c), "the first in the folder, not in the history");
+        check(&h, &[], None, None, "an empty folder");
+        check(&h, &[u64::MAX], None, None, "an id outside the history");
+
+        let mut twice = h.app.session.doc.features[0].clone();
+        twice.suppressed = true;
+        std::sync::Arc::make_mut(&mut h.app.session.doc).features.push(twice);
+        check(&h, &[a], Some(Status::Warning), Some(a), "a feature listed twice is found at its first place");
+        std::sync::Arc::make_mut(&mut h.app.session.doc).features.pop();
+
+        std::sync::Arc::make_mut(&mut h.app.session.doc).marker = Some(1);
+        check(&h, &ids, Some(Status::Warning), Some(a), "the features after the marker have no mark");
+        std::sync::Arc::make_mut(&mut h.app.session.doc).marker = None;
+        std::sync::Arc::make_mut(&mut h.app.session.doc).features[1].suppressed = true;
+        check(&h, &ids, Some(Status::Warning), Some(a), "a suppressed feature has none");
+    }
+
     #[test]
     fn the_feature_menu_copies_a_warning_message() {
         for left in [false, true] {
@@ -1889,23 +2134,28 @@ mod tests {
     }
 
     /// Delete in the menu of a selected feature deletes the whole selection in one undo step,
-    /// and says how many; on a feature outside the selection it deletes that one (#5005).
+    /// and says how many; on a feature outside the selection it deletes that one (#5005). The
+    /// same in both timelines, and the history beside the browser no longer adds its own Delete
+    /// Selected Features… to a feature's menu (#8861).
     #[test]
     fn the_feature_menu_deletes_the_selected_features() {
-        let mut h = three_boxes(false);
-        h.step(&json!({"click": {"handle": "timeline:Third"}, "button": "right"})).unwrap();
-        assert!(h.widget("Delete").is_some());
-        h.step(&json!({"key": "Escape"})).unwrap();
+        for left in [false, true] {
+            let mut h = three_boxes(left);
+            h.step(&json!({"click": {"handle": "timeline:Third"}, "button": "right"})).unwrap();
+            assert!(h.widget("Delete").is_some(), "left: {left}");
+            h.step(&json!({"key": "Escape"})).unwrap();
 
-        h.step(&json!({"click": {"handle": "timeline:First"}})).unwrap();
-        h.step(&json!({"click": {"handle": "timeline:Second"}, "ctrl": true})).unwrap();
-        h.step(&json!({"click": {"handle": "timeline:Second"}, "button": "right"})).unwrap();
-        h.step(&json!({"widget": "Delete 2 Selected Features"})).unwrap();
-        h.settle();
-        assert!(h.app.dialog.is_none(), "nothing else depends on them");
-        assert_eq!(names(&h), ["Third"]);
-        h.app.run("edit.undo", json!({})).unwrap();
-        assert_eq!(names(&h), ["First", "Second", "Third"]);
+            h.step(&json!({"click": {"handle": "timeline:First"}})).unwrap();
+            h.step(&json!({"click": {"handle": "timeline:Second"}, "ctrl": true})).unwrap();
+            h.step(&json!({"click": {"handle": "timeline:Second"}, "button": "right"})).unwrap();
+            assert!(h.widget("Delete Selected Features…").is_none(), "left: {left}");
+            h.step(&json!({"widget": "Delete 2 Selected Features"})).unwrap();
+            h.settle();
+            assert!(h.app.dialog.is_none(), "nothing else depends on them");
+            assert_eq!(names(&h), ["Third"], "left: {left}");
+            h.app.run("edit.undo", json!({})).unwrap();
+            assert_eq!(names(&h), ["First", "Second", "Third"], "left: {left}");
+        }
     }
 
     /// The menu of a feature after the history marker deletes every feature after the marker,
@@ -1923,8 +2173,7 @@ mod tests {
             h.step(&json!({"click": {"handle": "timeline:Second"}})).unwrap();
             h.step(&json!({"click": {"handle": "timeline:Third"}, "ctrl": true})).unwrap();
             h.step(&json!({"click": {"handle": "timeline:Third"}, "button": "right"})).unwrap();
-            // (The history beside the browser has its own Delete Selected Features….)
-            assert!(left || h.widget("Delete 2 Selected Features").is_some());
+            assert!(h.widget("Delete 2 Selected Features").is_some(), "left: {left}");
             assert!(h.widget("Delete 2 Features After History Marker").is_none(), "left: {left}");
             h.step(&json!({"key": "Escape"})).unwrap();
             h.app.run("select.clear", json!({})).unwrap();
@@ -1937,6 +2186,37 @@ mod tests {
             h.app.run("edit.undo", json!({})).unwrap();
             assert_eq!(names(&h), ["First", "Second", "Third"], "left: {left}");
         }
+    }
+
+    /// With the timeline showing one component's features, the entry counts and deletes that
+    /// component's features after the marker, found by their positions in the design: none of
+    /// another component's and none before the marker (#8860).
+    #[test]
+    fn after_the_marker_a_shown_component_deletes_only_its_features() {
+        let mut h = Harness::new();
+        h.app.run("component.create", json!({"name": "C1"})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("component.create", json!({"name": "C2"})).unwrap();
+        for (k, name) in ["B1", "B2", "B3", "B4", "B5", "B6"].into_iter().enumerate() {
+            h.app.run("component.activate", json!({"component": if k % 2 == 0 { "C1" } else { "C2" }})).unwrap();
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20 * k, 0, 0], "name": name})).unwrap();
+        }
+        let before = names(&h);
+        h.app.run("timeline.roll_to", json!({"feature": "B2"})).unwrap();
+        h.app.run("component.activate", json!({"component": "C1"})).unwrap();
+        h.app.run("select.clear", json!({})).unwrap();
+        h.settle();
+        h.frames(4);
+        h.step(&json!({"click": {"handle": "timeline:B1"}, "button": "right"})).unwrap();
+        assert!(h.widget("Delete 2 Features After History Marker").is_none(), "B1 is before the marker");
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.step(&json!({"click": {"handle": "timeline:B3"}, "button": "right"})).unwrap();
+        h.step(&json!({"widget": "Delete 2 Features After History Marker"})).unwrap();
+        h.settle();
+        let kept: Vec<String> = before.iter().filter(|n| *n != "B3" && *n != "B5").cloned().collect();
+        assert_eq!(names(&h), kept, "B2 is before the marker, B4 and B6 are C2's");
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(names(&h), before);
     }
 
     /// Deleting a sketch together with the extrude that uses it asks nothing: the extrude is

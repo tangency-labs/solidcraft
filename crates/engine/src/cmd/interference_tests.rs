@@ -156,3 +156,24 @@ fn mesh_bodies_are_listed_as_unchecked_not_dropped() {
     assert_eq!(i["checked"], 1, "{i}");
     assert_eq!(i["unchecked"][0]["a"].as_str(), Some(meshes[0].as_str()), "{i}");
 }
+
+/// A name that is no body is refused, as inspect.clearance refuses it. Dropped, a misspelled or
+/// wrongly cased body was never checked and two overlapping cubes read as no interference (#9740).
+#[test]
+fn a_body_name_that_is_no_body_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [9, 0, 0], "operation": "new_body", "body_name": "B"}));
+    let i = run(&mut s, "inspect.interference", json!({"bodies": ["A", "B"]}));
+    assert_eq!((&i["count"], &i["checked"]), (&json!(1), &json!(2)), "{i}");
+    for (names, says) in
+        [(json!(["A", "Typo"]), "no body `Typo`"), (json!(["A", "b"]), "no body `b`; did you mean `B`?"), (json!(["Typo"]), "no body `Typo`")]
+    {
+        let e = s.execute("inspect.interference", &json!({"bodies": names})).map(|r| r.to_string()).unwrap_or_else(|e| e.to_string());
+        assert!(e.contains(says), "{names}: {e}");
+    }
+    assert!(
+        !s.execute("inspect.interference", &json!({"bodies": ["Typo"]})).unwrap_err().to_string().contains("did you mean"),
+        "nothing is near `Typo`"
+    );
+}

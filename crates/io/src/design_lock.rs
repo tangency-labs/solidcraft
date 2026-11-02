@@ -15,6 +15,7 @@
 //! The browser build keeps neither: it has no shared folders, and no clock in `std`.
 
 use serde::{Deserialize, Serialize};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// How often an open design's lock is written again.
@@ -109,16 +110,29 @@ fn user_name() -> String {
     ["USER", "USERNAME", "LOGNAME"].iter().find_map(|k| std::env::var(k).ok().filter(|v| !v.trim().is_empty())).unwrap_or_default()
 }
 
-/// The lock next to the design at `path`, if there is a readable one.
+/// The lock next to the design at `path`, if there is a readable one. Anything at the lock's path
+/// but a regular file (a symbolic link, a device, a FIFO) is no lock and is not opened, and no
+/// more than a lock's size is ever read.
 pub fn read(path: &Path) -> Option<Lock> {
     if cfg!(target_arch = "wasm32") {
         return None;
     }
     let file = lock_path(path);
-    if std::fs::metadata(&file).ok()?.len() > MAX_LOCK_BYTES {
+    let meta = std::fs::symlink_metadata(&file).ok().filter(std::fs::Metadata::is_file)?;
+    if meta.len() > MAX_LOCK_BYTES {
         return None;
     }
-    serde_json::from_slice(&std::fs::read(&file).ok()?).ok()
+    let opened = std::fs::File::open(&file).ok()?;
+    // The path may have been swapped between the two calls; the handle decides.
+    if !opened.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    opened.take(MAX_LOCK_BYTES + 1).read_to_end(&mut bytes).ok()?;
+    if bytes.len() as u64 > MAX_LOCK_BYTES {
+        return None;
+    }
+    serde_json::from_slice(&bytes).ok()
 }
 
 /// Another app's fresh lock on the design at `path` at `now`: it is open elsewhere.
@@ -126,10 +140,12 @@ pub fn held_elsewhere(path: &Path, now: u64) -> Option<Lock> {
     read(path).filter(|l| !l.is_mine() && !l.is_stale(now))
 }
 
-/// Write `lock` next to the design at `path` (replacing whatever lock is there).
+/// Write `lock` next to the design at `path`, replacing whatever lock is there. A symbolic link
+/// at the lock's path is refused and never followed, unlike a save, which follows a link to where
+/// the design really lives: the file a link there points to is not this app's to replace.
 pub fn write(path: &Path, lock: &Lock) -> std::io::Result<()> {
     let bytes = serde_json::to_vec_pretty(lock).map_err(std::io::Error::other)?;
-    crate::safe_write::write_atomic(&lock_path(path), &bytes, false)
+    crate::safe_write::write_atomic_no_follow(&lock_path(path), &bytes)
 }
 
 /// Remove this process's lock on the design at `path`; another app's lock is left alone.

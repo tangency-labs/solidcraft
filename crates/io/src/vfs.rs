@@ -46,6 +46,13 @@ mod imp {
         touched();
         std::fs::metadata(path).map(|m| m.len())
     }
+    /// The file's modification time and size (`None`: not there, or the platform keeps no times).
+    pub fn stamp(path: &str) -> Option<(std::time::SystemTime, u64)> {
+        check(path).ok()?;
+        touched();
+        let meta = std::fs::metadata(path).ok()?;
+        Some((meta.modified().ok()?, meta.len()))
+    }
     pub fn exists(path: &str) -> bool {
         check(path).is_ok() && {
             touched();
@@ -107,6 +114,10 @@ mod imp {
     }
     pub fn len(path: &str) -> Result<u64> {
         FILES.with(|f| f.borrow().get(path).map(|b| b.len() as u64)).ok_or_else(|| missing(path))
+    }
+    /// Browser storage keeps no modification times.
+    pub fn stamp(_path: &str) -> Option<(std::time::SystemTime, u64)> {
+        None
     }
     pub fn exists(path: &str) -> bool {
         FILES.with(|f| f.borrow().contains_key(path))
@@ -564,6 +575,12 @@ pub fn read_design_path(path: &str, design: Option<&str>, max: usize) -> Result<
 /// it, which asks nothing of the disk or the network.
 pub fn design_path_is_file(path: &str, design: Option<&str>) -> Option<bool> {
     design_path_refusal(path, design).is_none().then(|| is_file(path))
+}
+
+/// [`stamp`] of a path a design names; `None` when [`check_design_path`] refuses it, which asks
+/// nothing of the disk or the network.
+pub fn design_path_stamp(path: &str, design: Option<&str>) -> Option<(std::time::SystemTime, u64)> {
+    design_path_refusal(path, design).is_none().then(|| stamp(path)).flatten()
 }
 
 /// The checks the layers below ask before reading a file a design names (sketch text's font

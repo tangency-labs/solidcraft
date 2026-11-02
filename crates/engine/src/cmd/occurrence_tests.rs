@@ -101,6 +101,38 @@ fn renaming_a_parent_preserves_hidden_nested_copies_with_ambiguous_labels() {
     }
 }
 
+#[test]
+fn body_rename_reusing_hidden_names_preserves_each_copy() {
+    let mut s = Session::default();
+    let (component, first) = created(&mut s, "Part");
+    let retired = run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "Retired"}))["feature"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [10, 0, 0], "body_name": "Visible"}));
+    let second = run(&mut s, "occurrence.copy", json!({"component": component, "translate": [20, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let name = |s: &Session, source: &str, path: &[u64]| {
+        s.occurrence_placement(path).unwrap().bodies.iter().find(|b| b.source == source).unwrap().world.clone()
+    };
+    let retired_names = [name(&s, "Retired", &[first]), name(&s, "Retired", &[second])];
+    run(&mut s, "browser.visibility", json!({"items": retired_names, "visible": false}));
+    run(&mut s, "timeline.delete", json!({"feature": retired}));
+    let hidden = name(&s, "Visible", &[second]);
+    run(&mut s, "browser.visibility", json!({"items": [hidden], "visible": false}));
+    let before = s.visibility.clone();
+    for (command, params, source) in [
+        ("body.rename", json!({"body": "Visible", "name": "Retired"}), "Retired"),
+        ("edit.undo", json!({}), "Visible"),
+        ("edit.redo", json!({}), "Retired"),
+    ] {
+        run(&mut s, command, params);
+        assert!(s.body_visible(&name(&s, source, &[first])), "{command}: the first copy stays visible");
+        assert!(!s.body_visible(&name(&s, source, &[second])), "{command}: the second copy stays hidden");
+        if command == "edit.undo" {
+            assert_eq!(s.visibility, before);
+        } else {
+            assert_eq!(s.visibility.hidden_bodies, [name(&s, source, &[second])]);
+        }
+    }
+}
+
 /// The world name of a placed body as `Document::world_body_name` worked it out before
 /// `WorldNames` (each name scanning the whole design), kept to prove the two agree.
 fn world_name_by_scanning(doc: &crate::doc::Document, st: &crate::doc::ModelState, source: &str, component: u64, path: &[u64]) -> String {
@@ -1271,6 +1303,54 @@ fn reparent_keeps_the_world_position_and_follows_paths() {
 
 /// A component can't go inside itself or what it holds. Out of a parent placed more than once it
 /// moves from the placement named, keeping that one's place in the world.
+/// #11063: a part with a hole cut from a sketch on its disc's top face moves into another
+/// component. The sketch's face attachment was found through the part's old placement path,
+/// which no longer starts at the design once the part is inside the other component, and the
+/// move was refused ("would break Sketch2"). The attachment follows the move, and the hole stays.
+#[test]
+fn reparent_carries_a_sketch_on_a_face_inside_the_moved_part() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Component1", "activate": false}));
+    run(&mut s, "component.create", json!({"name": "Component2"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Sketch1"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Sketch1", "distance": 3, "operation": "new"}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [0, 5, 3]}, "name": "Sketch2"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Sketch2", "distance": -3, "operation": "cut"}));
+    let volume = |s: &Session| s.world_state().bodies.iter().map(|b| b.mesh().measure().volume.abs()).sum::<f64>();
+    let before = volume(&s);
+    let r = run(&mut s, "occurrence.reparent", json!({"occurrence": "Component2:1", "parent": "Component1"}));
+    assert_eq!(r["path"].as_array().map(Vec::len), Some(2), "{r}");
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "every feature still builds");
+    assert!((volume(&s) - before).abs() < 1e-6, "the disc keeps its hole: {} vs {before}", volume(&s));
+    let reopened = Session::new(crate::doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(reopened.model.results.iter().all(|r| r.error.is_none()), "and after reopening");
+}
+
+/// A parent placed twice is one definition: a sketch on the child's face made through the
+/// second placement moves along when the child is moved out through the first one, to the
+/// child's one new place.
+#[test]
+fn reparent_carries_a_face_sketch_made_through_another_placement_of_the_parent() {
+    let mut s = Session::default();
+    let (parent, first_parent) = created(&mut s, "Assembly");
+    let (_, child) = created(&mut s, "Knob");
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Knob"}));
+    let second_parent = run(&mut s, "occurrence.copy", json!({"component": parent, "translate": [20, 0, 0]}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": {"face": [25, 5, 10], "path": [second_parent, child]}, "name": "OnTop"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let out = run(&mut s, "occurrence.reparent", json!({"occurrence": child, "parent": "root", "path": [first_parent, child]}));
+    assert_eq!(out["path"], json!([child]));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "the sketch still finds its face");
+    let sketch = s.doc.features.iter().find(|f| f.name == "OnTop").unwrap();
+    let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &sketch.kind else { panic!("OnTop is no sketch") };
+    let anchor = crate::cmd::sketch::face::anchor(plane).unwrap();
+    assert_eq!(anchor.path, vec![child], "{anchor:?}");
+}
+
 #[test]
 fn reparent_refuses_cycles_and_moves_out_of_a_named_instance() {
     let mut s = Session::default();
@@ -1637,4 +1717,60 @@ fn occurrence_align_keeps_every_pick_and_reports_shared_definitions() {
     // A top-level-only alignment reports nothing shared.
     let r = run(&mut s, "occurrence.align", json!({"paths": [[b]], "from": [0, 0, 0], "to": [1, 0, 0]}));
     assert!(r.get("shared").is_none(), "{r}");
+}
+
+/// A body copied in another design pastes here as an imported body: at the world coordinates it
+/// had there, into the component asked for (placed elsewhere), named as it was or numbered when
+/// that name is taken, from one Import feature named as any import is, as one step to undo.
+#[test]
+fn a_body_copied_in_another_design_pastes_as_an_imported_body() {
+    let mut source = Session::default();
+    source.doc_mut().name = "Bracket".into();
+    let (_, holder) = created(&mut source, "Holder");
+    run(&mut source, "occurrence.move", json!({"occurrence": holder, "translate": [0,50,0]}));
+    run(&mut source, "solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"}));
+    let was = source.world_state().body("Cube").unwrap().mesh().bounds();
+    let copy = crate::ForeignCopy::of(&source, vec!["Cube".into()], Vec::new());
+
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": "Cube"}));
+    let (a, a_at) = created(&mut s, "A");
+    run(&mut s, "occurrence.move", json!({"occurrence": a_at, "translate": [100,0,0]}));
+    s.foreign_copy = Some(std::sync::Arc::new(copy));
+    let undo = s.undo.len();
+    let out = run(&mut s, "component.paste_from_design", json!({"component": a, "component_path": [a_at]}));
+    assert_eq!(out["bodies"], json!(["Cube (2)"]));
+    assert_eq!(out["feature"], "Import1");
+    assert_eq!(s.undo.len(), undo + 1);
+    let is = s.world_state().body("Cube (2)").unwrap().mesh().bounds();
+    assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
+    let state = s.model.state();
+    assert_eq!(s.doc.model_body_component(state.body("Cube (2)").unwrap()), a);
+    assert!(matches!(&s.doc.find_feature("Import1").unwrap().kind, solidcraft_doc::FeatureKind::Import { file, .. } if file == "Bracket (pasted)"));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.model.state().body("Cube (2)").is_none());
+}
+
+/// A body seen in another placement of its component ("Cube (Holder:2)") pastes into another
+/// design under its own name, at that placement's position.
+#[test]
+fn a_body_seen_in_another_placement_pastes_into_another_design_under_its_own_name() {
+    let mut source = Session::default();
+    source.doc_mut().name = "Bracket".into();
+    let (holder, first) = created(&mut source, "Holder");
+    run(&mut source, "solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"}));
+    run(&mut source, "component.activate", json!({"component": 0}));
+    let second = run(&mut source, "occurrence.copy", json!({"occurrence": first}))["occurrence"].as_u64().unwrap();
+    run(&mut source, "occurrence.move", json!({"occurrence": second, "translate": [0,40,0]}));
+    let seen = source.placed_document().world_body_name(&source.model.state(), "Cube", holder, &[second]);
+    assert_ne!(seen, "Cube");
+    let was = source.world_state().body(&seen).unwrap().mesh().bounds();
+    let copy = crate::ForeignCopy::of(&source, vec![seen], Vec::new());
+    assert_eq!(copy.names, vec!["Cube".to_string()]);
+
+    let mut s = Session { foreign_copy: Some(std::sync::Arc::new(copy)), ..Default::default() };
+    let out = run(&mut s, "component.paste_from_design", json!({}));
+    assert_eq!(out["bodies"], json!(["Cube"]));
+    let is = s.world_state().body("Cube").unwrap().mesh().bounds();
+    assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
 }

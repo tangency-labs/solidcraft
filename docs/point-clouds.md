@@ -9,7 +9,7 @@ depends on it.
 
 | Extension | What is read |
 |-----------|--------------|
-| `.ply` | ASCII, binary little-endian and binary big-endian PLY: the `vertex` element's `x`, `y`, `z` (any numeric type) and its `red`, `green`, `blue` when present (bytes, 16-bit or 0…1 floats). Other properties (normals, intensity) and elements are passed over. |
+| `.ply` | ASCII, binary little-endian and binary big-endian PLY: the `vertex` element's `x`, `y`, `z` (any numeric type) and its `red`, `green`, `blue` when present (bytes, 16-bit or 0…1 floats). Every other scalar vertex property (intensity, a class, a time…) is kept, by its name in the file, to colour and filter the cloud by; it is whole-numbered when its type is an integer. Other elements are passed over. |
 | `.xyz`, `.pts` | Text, a point per line: `x y z`, optionally followed by `r g b` (six numbers) or by an intensity and `r g b` (seven or more, as PTS files write it). Spaces, tabs, commas or semicolons separate the numbers; `#` and `//` start comments; a PTS file's first line (its count) is skipped. |
 
 A PLY file that also has faces can be inserted as a mesh body instead with **Insert Mesh**
@@ -27,9 +27,51 @@ or `pointcloud.edit` with `units`): the points are scaled from the unit they cam
 - `file` (the default): the file's colour of each point, grey when it has none.
 - `single`: one colour (`color`) for every point.
 - `height`: a ramp by design Z, blue low through cyan, green and yellow to red high. It runs
-  between two heights (`height_range`, mm). By default they are worked out from the points: all
-  but the lowest and highest 2 %, so a few stray points don't flatten the ramp. Turn
-  **Automatic Range** off in the card to set them.
+  between two heights (`color_range`, mm). By default they are worked out from the points: all
+  but the lowest and highest 2 %, so a few stray points don't flatten the ramp.
+- any property's name (`x`, `y`, `z` or one of the file's): the same ramp over the property's
+  values or, for a whole-numbered property, a palette of ten colours (its value modulo ten;
+  negative values grey). By default the ramp runs exactly over the values the property takes on
+  the points every filter keeps, so filtering re-spreads the colours over what is left.
+
+A ramp's range is a [range track](#range-tracks) in the card; touching it sets the range and
+turns **Automatic Range** off, and ticking the box (or a double click beside the range) gives
+it back. `color_range: null` does the same from a command.
+
+A whole-numbered property may name its values with a PLY comment, `property: 0 name, 1 other
+name, -1 none` (for example `comment role: 0 outer wall, 1 inner wall`). Coloured by it, the
+card shows a legend, a swatch and a name per value; clicking a name shows or hides that value.
+
+## Filters
+
+A filter keeps the points whose property lies in a range (both ends included) or, for a
+property with named values, is one of a set of values. Only what every filter keeps is shown; a
+cloud has at most 8 filters, and the view applies the first 4. **Filter by** in the card adds
+one over a property's whole span (or with all its named values); × removes it. Filters change
+what is drawn, never the points the design holds.
+
+## Range tracks
+
+Each range filter, and a ramp's range, is edited on a track, as a range is in an audio editor.
+The track draws how much of the cloud lies at each value: a histogram of the property over what
+the *other* filters keep, stacked by colour, so it is also the colour legend. A thin strip above
+it shows the property's whole span, with the part the track shows framed.
+
+- Drag an end or the band between them to move them; drag elsewhere to draw a new range.
+  Shift-click brings the nearer end to the pointer.
+- Double-click the band to fit the track to it; double-click beside it for the whole span.
+  The wheel or a pinch zooms around the pointer, a sideways scroll pans, and dragging in the
+  strip moves the framed part.
+- An end snaps to a value where the colour changes when no other change is near at this zoom;
+  a whole-numbered property's ends snap to whole numbers. ⌥ moves ten times slower, without
+  snapping.
+- Once the track is touched, ← and → bring the part touched last to the previous or next colour
+  change (one pixel with ⌥, or where there is none).
+- **Start**, **End** and **Length** are fields too; Length keeps the start. A value typed with a
+  sign is relative: `+30` moves it by 30.
+- **▶ Play** (or Space) moves the part touched last across the track in 20 seconds: an upper
+  end grows the range, the band slides it, a lower end wipes it. The track follows it, and an
+  automatic colour range follows it too. Touching the range stops it.
 
 ## Size
 
@@ -42,12 +84,17 @@ file as a binary part (12 bytes a point, 3 more with colours).
 ## Commands
 
 - `pointcloud.insert` — `path`; `name?`, `units?`, `max_points?`, `center?` (move the middle of
-  its base to the origin), `point_size?` (pixels), `color_by?` (`file`, `single`, `height`),
-  `color?` (`[r, g, b]` 0…1; alone it means `single`, `null` means `file`), `height_range?`
-  (`[low, high]` mm, or `null` for the automatic range).
+  its base to the origin), `point_size?` (pixels), `color_by?` (`file`, `single`, `height` or a
+  property's name), `color?` (`[r, g, b]` 0…1; alone it means `single`, `null` means `file`),
+  `color_range?` (`[low, high]`, or `null` for the automatic range; `height_range` is the same),
+  `filters?` (`[{"property": …, "range": [low, high]}` or `{"property": …, "values": [whole
+  numbers]}]`, or `null` for none).
 - `pointcloud.edit` — `cloud` (id or name); `name?`, `visible?`, `point_size?`, `color_by?`,
-  `color?`, `height_range?`, `units?`, `matrix?` (a rigid placement, as `occurrence.move` takes it).
-- `pointcloud.delete`, `pointcloud.list`.
+  `color?`, `color_range?`, `filters?`, `units?`, `matrix?` (a rigid placement, as
+  `occurrence.move` takes it).
+- `pointcloud.delete`.
+- `pointcloud.list` — each cloud with its properties (name, whole-numbered or not, span, named
+  values), its filters and its ramp's range as drawn (`color_range`).
 - `doc.open` opens a point cloud file as a new design holding it; dropping one on the window
   adds it to the open design.
 
@@ -55,4 +102,5 @@ file as a binary part (12 bytes a point, 3 more with colours).
 
 ```json
 {"command": "pointcloud.insert", "params": {"path": "glim-points.ply", "units": "m", "color_by": "height"}}
+{"command": "pointcloud.edit", "params": {"cloud": "glim-points", "color_by": "intensity", "filters": [{"property": "z", "range": [0, 2500]}]}}
 ```

@@ -574,6 +574,82 @@ fn an_over_constraining_dimension_is_placed_as_a_driven_one() {
     assert_eq!(h.app.session.doc.to_json(), original);
 }
 
+/// A dimension placed while a constraint fixed what it measures is driven; once that constraint
+/// is deleted, a double-click opens its value, and the value makes it driving, in one undo step
+/// (#10018). While the constraint holds it stays read-only, and a value refused leaves it driven.
+#[test]
+fn a_driven_dimension_nothing_fixes_any_more_takes_a_value() {
+    let mut h = line([20., 0.]);
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":"20 mm","text_at":[10,6]})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":15})).unwrap();
+    // The circle's centre is on the origin and the line's end on the circle: its size is fixed.
+    let coincident = h.app.run("sketch.constraint.coincident", json!({"a":"l1.end","b":"c1"})).unwrap()["constraint"].as_str().unwrap().to_owned();
+    h.app.run("sketch.dimension", json!({"entities":["c1"],"driven":true,"text_at":[-14,14]})).unwrap();
+    h.settle();
+    let sketch = h.app.session.active_sketch.unwrap();
+    let dim = |h: &Harness| {
+        let state = h.app.session.world_state();
+        let sk = &state.sketch(sketch).unwrap().sketch;
+        sk.constraints
+            .iter()
+            .find(|c| {
+                matches!(
+                    c.kind,
+                    solidcraft_engine::sketch::ConstraintKind::Diameter { .. } | solidcraft_engine::sketch::ConstraintKind::Radius { .. }
+                )
+            })
+            .cloned()
+            .unwrap()
+    };
+    let id = dim(&h).id;
+    assert!(dim(&h).driven && dim(&h).param.is_none(), "{:?}", dim(&h));
+    let double_click = |h: &mut Harness| {
+        h.frames(40);
+        h.step(&json!({"click":{"dimension":id},"double":true})).unwrap();
+    };
+
+    // The Coincident still fixes the circle: the dimension only measures.
+    let fixed = h.app.session.doc.to_json();
+    double_click(&mut h);
+    assert!(!crate::dim_view::editing(), "a dimension the sketch determines has no value to edit");
+    assert!(h.app.status.as_ref().is_some_and(|s| s.0.contains("driven")), "{:?}", h.app.status);
+    assert_eq!(h.app.session.doc.to_json(), fixed);
+
+    // Without it, the value opens at what the dimension measures, named as the parameter it gets.
+    h.app.run("sketch.delete", json!({"entities":[coincident]})).unwrap();
+    h.settle();
+    let before = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    let name = h.app.session.doc.next_d_name();
+    let measured = dim(&h).kind.value().unwrap();
+    double_click(&mut h);
+    assert!(crate::dim_view::editing(), "{:?}", h.app.status);
+    assert!(h.widget(&format!("Dimension: {name}")).is_some(), "{}", h.call("ui.inspect", json!({})));
+
+    // A value the design refuses leaves it driven, and the design and its history as they were.
+    type_value(&mut h, "nosuch * 2");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(crate::dim_view::editing(), "a refused value keeps the box open");
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert_eq!(h.app.session.undo.len(), undo);
+
+    // A value it takes makes it driving at that value.
+    type_value(&mut h, "30");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(!crate::dim_view::editing(), "{:?}", h.app.status);
+    let driving = dim(&h);
+    assert!(!driving.driven && driving.param.as_deref() == Some(name.as_str()), "{driving:?}");
+    let value = driving.kind.value().unwrap();
+    assert!((value - 30.0).abs() < 1e-6 && (measured - 30.0).abs() > 1.0, "{measured} → {value}");
+    assert!(h.app.session.world_state().sketch(sketch).unwrap().report.ok());
+
+    // One undo step puts the driven dimension back.
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.session.doc.to_json(), before);
+    crate::dim_view::cancel();
+}
+
 // ---- Type-first: D, click, type, Enter ----
 
 /// A sketch with `setup` drawn, the Top view centred on `centre`, and the Dimension tool on.
@@ -1298,4 +1374,54 @@ fn editing_a_dimension_to_a_definition_names_its_parameter() {
     assert!(h.app.status.as_ref().is_some_and(|s| !s.2 && s.0.contains("`width`")), "{:?}", h.app.status);
     let sk = doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert!(sk.constraints.iter().any(|c| c.param.as_deref() == Some("width") && c.kind.value().is_some_and(|v| (v - 30.0).abs() < 1e-6)));
+}
+
+/// The status line after a dimension is applied reads in the interface language (#8863): a
+/// new parameter (`w = 40/2`), a plain value, a renamed parameter and a driven dimension, with
+/// the parameter name kept as typed.
+#[test]
+fn the_status_after_a_dimension_is_in_the_interface_language() {
+    let pl = crate::i18n::Locale::for_language("pl");
+    let en = crate::i18n::Locale::for_language("en");
+    let status = |h: &Harness| h.app.status.as_ref().map(|s| (s.0.clone(), s.2));
+    let polish = |mut h: Harness| {
+        h.app.preferences.language = "pl".into();
+        h.frames(2);
+        h
+    };
+    // A new parameter.
+    let mut h = polish(line([25., 0.]));
+    place(&mut h, &[[12.5, 0.]], [12.5, 8.]);
+    type_value(&mut h, "w = 40/2");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.session.doc.param("w").is_some(), "{:?}", h.app.status);
+    assert_eq!(status(&h), Some(("Wymiar zastosowany; zdefiniowano parametr `w`".to_string(), false)));
+    // A plain value, then the same dimension renamed to `width = 30`.
+    let mut h = polish(line([25., 0.]));
+    place(&mut h, &[[12.5, 0.]], [12.5, 8.]);
+    type_value(&mut h, "25");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(status(&h), Some((pl.text("sketch.dimension_applied").to_string(), false)));
+    h.settle();
+    crate::dim_view::edit_param(&h.app, "d1");
+    h.settle();
+    type_value(&mut h, "width = 30");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.session.doc.param("width").is_some(), "{:?}", h.app.status);
+    assert_eq!(status(&h), Some((pl.format("sketch.dimension_applied_renamed", &[("name", "width")]), false)));
+    // A dimension the sketch already determines is added as a driven one.
+    let mut h = polish(line([20., 0.]));
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":"20 mm"})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.dimension"})).unwrap();
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    h.step(&json!({"move":{"world":[10,6,0]}})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"world":[10,6,0]}})).unwrap();
+    assert!(!crate::dim_view::editing(), "a driven dimension has no value to edit");
+    assert_eq!(status(&h), Some((pl.text("sketch.dimension_added_driven").to_string(), false)));
+    for id in ["sketch.dimension_applied", "sketch.dimension_applied_defined", "sketch.dimension_applied_renamed", "sketch.dimension_added_driven"] {
+        assert_ne!(pl.text(id), en.text(id), "{id}: the Polish catalog translates it");
+    }
+    crate::dim_view::cancel();
 }

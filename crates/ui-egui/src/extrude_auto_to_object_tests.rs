@@ -180,9 +180,7 @@ fn target_below_keeps_its_side_and_exact_length() {
 }
 
 #[test]
-fn off_by_default_a_face_off_the_profile_plane_joins_the_profiles() {
-    let h = Harness::new();
-    assert!(!h.app.preferences.extrude_auto_to_object, "the preference starts off");
+fn with_the_preference_off_a_face_off_the_profile_plane_joins_the_profiles() {
     let mut h = scene_with(false);
     assert!(click(&mut h, |h| face_hit(h, Vec3::new(40.0, 10.0, 20.0))));
     let d = dialog(&h);
@@ -208,4 +206,61 @@ fn manual_to_object_accepts_a_parallel_plane_with_automatic_switching_off() {
     let commands = apply_commands(&h.app, dialog(&h)).unwrap();
     assert_eq!(commands[0].1["to"], json!([0.0, 0.0, 25.0]));
     assert!((solidcraft_engine::extrude_reach(&h.app.session, &commands[0].1).unwrap() - 25.0).abs() < 1e-9);
+}
+
+#[test]
+fn the_preference_starts_on() {
+    assert!(Harness::new().app.preferences.extrude_auto_to_object);
+}
+
+/// The scene with the box's top face (z = 20) picked as the profile instead of the sketch.
+fn face_profile_scene() -> Harness {
+    let mut h = scene();
+    let top = face_sel(&h.app.session, Vec3::new(40.0, 10.0, 20.0)).unwrap();
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![top];
+    h.frames(2);
+    h
+}
+
+#[test]
+fn face_profile_then_the_opposite_face_is_the_target() {
+    let mut h = face_profile_scene();
+    assert!(click(&mut h, |h| face_hit(h, Vec3::new(40.0, 10.0, 0.0))));
+    let d = dialog(&h);
+    assert!(matches!(to_object(d), Some(Sel::Face { .. })), "the bottom face is where it goes to");
+    assert_eq!(d.inputs[0].items.len(), 1, "the top face stays the only profile");
+    let commands = apply_commands(&h.app, d).unwrap();
+    assert!(commands[0].1.get("to").is_some());
+    let reach = solidcraft_engine::extrude_reach(&h.app.session, &commands[0].1).unwrap();
+    assert!((reach + 20.0).abs() < 1e-9, "{reach}: 20 mm down through the body");
+}
+
+#[test]
+fn face_profile_then_a_parallel_face_of_another_body_is_the_target() {
+    let mut h = face_profile_scene();
+    assert!(click(&mut h, |h| face_hit(h, Vec3::new(70.0, 10.0, 30.0))));
+    let d = dialog(&h);
+    assert!(matches!(to_object(d), Some(Sel::Face { .. })));
+    assert_eq!(d.inputs[0].items.len(), 1);
+}
+
+#[test]
+fn a_side_face_is_a_target_at_its_picked_point() {
+    let mut h = face_profile_scene();
+    assert!(click(&mut h, |h| face_hit(h, Vec3::new(50.0, 10.0, 10.0))));
+    let d = dialog(&h);
+    assert!(matches!(to_object(d), Some(Sel::Face { .. })), "a non-parallel planar face is taken as the target");
+    assert_eq!(d.inputs[0].items.len(), 1);
+}
+
+#[test]
+fn clicking_into_the_profiles_box_adds_an_off_plane_face_as_a_profile() {
+    let mut h = scene();
+    let at = crate::scenario::rect_of("dialog:field:Profiles").expect("the Profiles field is drawn").center();
+    h.step(&json!({"click": [at.x, at.y]})).unwrap();
+    h.frames(2);
+    assert!(click(&mut h, |h| face_hit(h, Vec3::new(40.0, 10.0, 20.0))));
+    let d = dialog(&h);
+    assert!(to_object(d).is_none(), "the box was chosen, so the pick is a profile");
+    assert_eq!(d.inputs[0].items.len(), 2);
 }

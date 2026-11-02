@@ -188,6 +188,22 @@ fn a_screw_advances_its_pitch_per_turn() {
     assert!(close_to(shown(&mut s, "Lift"), 10.0), "{}", shown(&mut s, "Lift"));
 }
 
+/// A coupling's length reads a bare number as millimetres in any design, so a parameter defined
+/// in it (`lead = 1.5`) keeps that millimetre, while `parameters.add` without a unit takes the
+/// design's units (#8865): the screw advances 1.5 mm a turn in an inch design too.
+#[test]
+fn a_pitch_defined_in_an_inch_design_reads_as_the_screw_does() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    base(&mut s);
+    part(&mut s, "Nut", [-1.0, -1.0, 0.0]);
+    pin(&mut s, "cylindrical", "Thread", "Base", "Nut", Vec3::ZERO, Vec3::Z);
+    run(&mut s, "joint.screw", json!({"joint": "Thread", "pitch": "lead = 1.5"}));
+    assert_eq!(s.doc.param("lead").map(|p| (p.expr.as_str(), p.unit.as_str())), Some(("1.5", "mm")));
+    let r = run(&mut s, "joint.drive", json!({"joint": "Thread", "values": [720]}));
+    assert!(close_to(r["values"][1]["value"].as_f64().unwrap_or(f64::NAN), 3.0), "{r}");
+}
+
 /// A motor gear turns the four-bar's crank: half as fast, the other way round, and the loop
 /// follows.
 #[test]

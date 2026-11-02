@@ -20,19 +20,50 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
     let camera = camera(p)?;
     let rows = rows(p)?;
     let wanted = body_names(p)?;
+    let out = outline(s, &camera, wanted.as_deref(), rows)?;
+    let mask: Vec<Vec<[usize; 2]>> = out.mask.iter().map(|row| spans(row)).collect();
+    Ok(json!({
+        "width": out.width,
+        "height": out.height,
+        "mm_per_px": round4(out.mm_per_px),
+        "box_mm": [[round4(out.lo[0]), round4(out.lo[1])], [round4(out.hi[0]), round4(out.hi[1])]],
+        "right": [clean(out.right.x), clean(out.right.y), clean(out.right.z)],
+        "up": [clean(out.up.x), clean(out.up.y), clean(out.up.z)],
+        "projection": if out.perspective { "perspective" } else { "parallel" },
+        "bodies": out.bodies,
+        "triangles": out.triangles,
+        "mask": mask,
+    }))
+}
+
+/// A projected, tightly framed silhouette: the pixel grid, its scale and placement, and the
+/// filled mask as one row of booleans per pixel row. `inspect.silhouette` renders this as
+/// run-length rows; `inspect.compare_picture` uses the filled rows directly.
+pub(crate) struct Silhouette {
+    pub width: usize,
+    pub height: usize,
+    pub mm_per_px: f64,
+    /// The view-plane box the mask frames, in mm (u along `right`, v along `up`).
+    pub lo: [f64; 2],
+    pub hi: [f64; 2],
+    pub right: Vec3,
+    pub up: Vec3,
+    pub perspective: bool,
+    pub bodies: usize,
+    pub triangles: usize,
+    pub mask: Vec<Vec<bool>>,
+}
+
+pub(crate) fn outline(s: &Session, camera: &Camera, wanted: Option<&[String]>, rows: usize) -> Result<Silhouette> {
     let state = s.world_state();
-    if let Some(names) = &wanted {
+    if let Some(names) = wanted {
         for name in names {
             if !state.bodies.iter().any(|b| b.name == *name) {
                 return Err(bad(CMD, format!("unknown body name `{name}`")));
             }
         }
     }
-    let bodies: Vec<_> = state
-        .bodies
-        .iter()
-        .filter(|b| wanted.as_ref().map_or_else(|| s.body_visible(&b.name), |names| names.iter().any(|name| name == &b.name)))
-        .collect();
+    let bodies: Vec<_> = state.bodies.iter().filter(|b| wanted.map_or_else(|| s.body_visible(&b.name), |names| names.contains(&b.name))).collect();
     if bodies.is_empty() {
         return Err(bad(CMD, "nothing visible to outline"));
     }
@@ -133,22 +164,22 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
 
-    let mask: Vec<Vec<[usize; 2]>> = covered.chunks_exact(width).map(spans).collect();
-    Ok(json!({
-        "width": width,
-        "height": height,
-        "mm_per_px": round4(mm_per_px),
-        "box_mm": [[round4(lo[0]), round4(lo[1])], [round4(hi[0]), round4(hi[1])]],
-        "right": [clean(right.x), clean(right.y), clean(right.z)],
-        "up": [clean(up.x), clean(up.y), clean(up.z)],
-        "projection": if perspective { "perspective" } else { "parallel" },
-        "bodies": bodies.len(),
-        "triangles": triangle_count,
-        "mask": mask,
-    }))
+    Ok(Silhouette {
+        width,
+        height,
+        mm_per_px,
+        lo,
+        hi,
+        right,
+        up,
+        perspective,
+        bodies: bodies.len(),
+        triangles: triangle_count,
+        mask: covered.chunks_exact(width).map(|row| row.to_vec()).collect(),
+    })
 }
 
-fn camera(p: &Value) -> Result<Camera> {
+pub(crate) fn camera(p: &Value) -> Result<Camera> {
     if p.get("view").is_some() && p.get("camera").is_some() {
         return Err(bad(CMD, "give `view` or `camera`, not both"));
     }
@@ -171,7 +202,7 @@ fn camera(p: &Value) -> Result<Camera> {
     Ok(camera)
 }
 
-fn body_names(p: &Value) -> Result<Option<Vec<String>>> {
+pub(crate) fn body_names(p: &Value) -> Result<Option<Vec<String>>> {
     match p.get("bodies") {
         None => Ok(None),
         Some(Value::String(name)) => Ok(Some(vec![name.clone()])),
@@ -184,7 +215,7 @@ fn body_names(p: &Value) -> Result<Option<Vec<String>>> {
     }
 }
 
-fn rows(p: &Value) -> Result<usize> {
+pub(crate) fn rows(p: &Value) -> Result<usize> {
     match p.get("rows") {
         None => Ok(240),
         Some(v) => {
@@ -209,7 +240,7 @@ fn edge(a: [f64; 2], b: [f64; 2], p: [f64; 2]) -> f64 {
     (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
 }
 
-fn spans(row: &[bool]) -> Vec<[usize; 2]> {
+pub(crate) fn spans(row: &[bool]) -> Vec<[usize; 2]> {
     let mut out = Vec::new();
     let mut start = None;
     for (x, &on) in row.iter().enumerate() {

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Equation curve</title>
+  <path d="M12 8L12 56M6 32L58 32" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12 32C15.42 24.83 18.72 18 22.5 18C26.28 18 29.58 24.83 33 32C36.42 39.17 39.72 46 43.5 46C47.28 46 50.58 39.17 54 32" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="12" cy="32" r="5.8" fill="#ffffff"/>
+  <circle cx="12" cy="32" r="3.4" fill="#236ead"/>
+  <circle cx="54" cy="32" r="5.8" fill="#ffffff"/>
+  <circle cx="54" cy="32" r="3.4" fill="#236ead"/>
+</svg>

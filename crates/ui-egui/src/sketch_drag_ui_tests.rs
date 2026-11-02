@@ -461,3 +461,34 @@ fn a_freed_circle_centre_on_the_origin_drags_instead_of_the_origin() {
     assert!(point(&h, "c1.center").dist(Vec2::new(15.0, 10.0)) < 0.05, "{:?}", point(&h, "c1.center"));
     assert!(point(&h, "origin").dist(Vec2::new(0.0, 0.0)) < 1e-9);
 }
+
+/// A centre rectangle's centre held on the origin stays there when dragged, and the rectangle
+/// keeps its size. The press lands on the middle of the rectangle's diagonal as well as on the
+/// centre; the drag took the diagonal by its middle and turned and stretched it about the held
+/// centre, resizing the rectangle (#10510).
+#[test]
+fn a_centre_rectangles_centre_held_on_the_origin_keeps_the_rectangle_when_dragged() {
+    let mut h = Harness::new();
+    run(&mut h, "sketch.create", json!({"plane": "XY"}));
+    run(&mut h, "sketch.rectangle.center", json!({"center": [3, 2], "corner": [13, 9]}));
+    run(&mut h, "sketch.constraint.coincident", json!({"a": "p5", "b": "origin"}));
+    run(&mut h, "sketch.options", json!({"snap": false, "show_dimensions": false, "show_constraints": false}));
+    h.call("ui.view", json!({"view": "top"}));
+    h.app.cam.distance = 150.0;
+    h.frames(3);
+    let corners = ["p1", "p2", "p3", "p4"].map(|p| point(&h, p));
+    assert!(point(&h, "p5").len() < 1e-9, "{:?}", point(&h, "p5"));
+    // A press a little off the centre, as a hand presses.
+    let a = screen(&mut h, 0.3, 0.2);
+    let b = screen(&mut h, 12.0, 8.0);
+    let mut path = vec![a];
+    path.extend(steps(a, b, 6));
+    press_and_move(&mut h, &path);
+    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _)| id.as_str()), Some("p5"), "grabbed the centre, not the diagonal");
+    h.frames(4);
+    release(&mut h, b);
+    assert!(point(&h, "p5").len() < 1e-6, "the centre left the origin: {:?}", point(&h, "p5"));
+    for (p, was) in ["p1", "p2", "p3", "p4"].into_iter().zip(corners) {
+        assert!(point(&h, p).dist(was) < 1e-6, "{p} moved from {was:?} to {:?}", point(&h, p));
+    }
+}

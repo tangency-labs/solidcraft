@@ -353,3 +353,32 @@ fn conic_curves_take_the_n_prefix_not_the_constraints_k() {
         assert!(id.starts_with('n'), "a pattern copy keeps the conic prefix: {id}");
     }
 }
+
+/// A curve id goes into the face names of the features that use the curve, so an id with a
+/// character the name grammar reads (`|`, `,`, `~`, `]`, `#`) would split every name it
+/// lands in: an id of `c|1` gave the edges of an extrusion the names
+/// `F2:side:c|1#1|F2:side:c|1#2~1`, three separators where an edge has two faces and one
+/// separator. An id that cannot be written into a name whole is refused instead (#5858).
+#[test]
+fn a_curve_id_that_cannot_be_written_into_a_name_is_refused() {
+    let mut s = new_sketch();
+    for id in ["c|1", "c,1", "c~1", "c]1", "c#1"] {
+        let p = json!({"center": [0, 0], "radius": 5, "id": id});
+        let e = match s.execute("sketch.circle.center", &p) {
+            Ok(v) => panic!("the id `{id}` was taken: {v:?}"),
+            Err(e) => e.to_string(),
+        };
+        assert!(e.contains(id), "the error names the id: {e}");
+    }
+    // The id that can be written into a name is still taken, and the faces it makes are
+    // named with it whole.
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5, "id": "c1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10}));
+    let edges = run(&mut s, "model.edges", json!({"body": "Body1"}));
+    let names: Vec<String> = edges["edges"].as_array().unwrap().iter().filter_map(|e| e["name"].as_str().map(str::to_string)).collect();
+    assert!(!names.is_empty(), "{edges}");
+    for name in &names {
+        assert_eq!(name.matches('|').count(), 1, "an edge names two faces and separates them once: {name}");
+    }
+}

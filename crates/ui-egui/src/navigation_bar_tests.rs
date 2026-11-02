@@ -471,7 +471,7 @@ fn navigation_context_menus_customise_hide_reset_and_remove() {
         match action {
             "customise" => {
                 assert!(h.app.prefs_window.open);
-                assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_INTERFACE);
+                assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_LAYOUT);
                 assert!(crate::scenario::rect_of("prefs:navbar:preview").is_some());
             }
             "hide" => assert!(!h.app.ui.show_navigation_bar),

@@ -1800,6 +1800,55 @@ fn budget_limited_cursor_progress_requests_a_frame_with_the_same_target() {
 // ---------------------------------------------------------------------------------------------
 // Cancel Sketch (#3838)
 
+fn sketch_below_a_solid() -> (Session, u64) {
+    let mut s = Session::default();
+    let id = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5}));
+    (s, id)
+}
+
+#[test]
+fn finishing_a_temporary_sketch_edit_at_the_undo_limit_keeps_the_original_design() {
+    let (mut s, id) = sketch_below_a_solid();
+    for i in 0..crate::MAX_UNDO {
+        run(&mut s, "browser.visibility", json!({"items": ["Body1"], "visible": i % 2 != 0}));
+    }
+    assert_eq!(s.undo.len(), crate::MAX_UNDO);
+    let before = s.doc.to_json();
+    run(&mut s, "sketch.edit", json!({"sketch": id, "restore_marker": null}));
+    for y in [20, 30] {
+        run(&mut s, "sketch.line", json!({"points": [[0, y], [10, y]]}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    assert!(s.undo.len() <= crate::MAX_UNDO);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    assert_eq!(s.active_sketch, None);
+    assert_eq!(s.model.state().bodies.len(), 1);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.marker, None);
+    assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 6);
+}
+
+#[test]
+fn undoing_cancel_then_finishing_restores_the_temporary_sketch_marker() {
+    let (mut s, id) = sketch_below_a_solid();
+    run(&mut s, "sketch.edit", json!({"sketch": id, "restore_marker": null}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 20], [10, 20]]}));
+    run(&mut s, "sketch.cancel", json!({}));
+    assert_eq!(s.doc.marker, None);
+    assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 4);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.active_sketch, Some(id));
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(s.doc.marker, None);
+    assert_eq!(s.active_sketch, None);
+    assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 5);
+    assert_eq!(s.model.state().bodies.len(), 1);
+}
+
 #[test]
 fn cancel_removes_a_new_sketch_with_its_dimensions_and_undo_brings_it_back() {
     let mut s = Session::default();
@@ -1982,4 +2031,51 @@ fn a_changed_length_dimension_keeps_its_first_point() {
     let width = run(&mut s, "sketch.dimension", json!({"entities": [bottom]}))["param"].as_str().unwrap().to_string();
     run(&mut s, "parameters.change", json!({"name": width, "expression": "60 mm"}));
     assert!((at(&s, "p1").x + 30.0).abs() < 1e-6 && (at(&s, "p2").x - 30.0).abs() < 1e-6, "{:?} {:?}", at(&s, "p1"), at(&s, "p2"));
+}
+
+/// #7912: a dimension can measure a model edge: the edge is projected into the sketch and the
+/// dimension measures the distance from the sketch's point to it.
+#[test]
+fn a_dimension_measures_a_model_edge() {
+    let mut s = Session::default();
+    // A sheet-metal base flange: a 100 x 50 plate whose front edge runs along y = 0.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 50]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base", "body_name": "Flange"}));
+    // A sketch with a point 25 above the flange's front edge.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Near"}));
+    let point = run(&mut s, "sketch.point", json!({"point": [50, 25]}))["point"].as_str().unwrap().to_string();
+    let out = run(&mut s, "sketch.dimension", json!({"entities": [point, {"edge": [50, 0, 0], "body": "Flange"}]}));
+    assert!((out["measured"].as_f64().unwrap() - 25.0).abs() < 1e-6, "the distance to the edge: {out}");
+    // The edge is projected into the sketch, and the dimension measures that projection.
+    let sk = sketch(&s);
+    assert_eq!(sk.links.len(), 1, "{:?}", sk.links);
+}
+
+/// #7912: a dimension refuses a long list of entities before projecting any of them, so one
+/// request cannot make the engine resolve thousands of model edges.
+#[test]
+fn a_dimension_refuses_a_long_list_of_entities() {
+    // The most entities one call may project (the engine's `MAX_PROJECTED_ENTITIES`).
+    const MAX_PROJECTED: usize = 1_000;
+    let mut s = Session::default();
+    // A sheet-metal base flange: a 100 x 50 plate whose front edge runs along y = 0.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 50]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base", "body_name": "Flange"}));
+    // A sketch with a point 25 above the flange's front edge.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Near"}));
+    let point = run(&mut s, "sketch.point", json!({"point": [50, 25]}))["point"].as_str().unwrap().to_string();
+    // More entities than a call may project, every one of them a model edge to project.
+    let mut entities = vec![json!(point)];
+    for _ in 0..MAX_PROJECTED {
+        entities.push(json!({"edge": [50, 0, 0], "body": "Flange"}));
+    }
+    let before = serde_json::to_value(&s.doc).unwrap();
+    let error = s.execute("sketch.dimension", &json!({"entities": entities})).unwrap_err();
+    assert!(error.to_string().contains("at most"), "{error}");
+    // The refused request leaves the design as it was.
+    assert_eq!(serde_json::to_value(&s.doc).unwrap(), before);
 }

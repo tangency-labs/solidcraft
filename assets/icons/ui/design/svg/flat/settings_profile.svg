@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Settings profile</title>
+  <circle cx="32" cy="19" r="8" fill="none" stroke="currentColor" stroke-width="5.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M12 53C12 44.7157 20.9543 38 32 38C43.0457 38 52 44.7157 52 53" fill="none" stroke="currentColor" stroke-width="5.6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

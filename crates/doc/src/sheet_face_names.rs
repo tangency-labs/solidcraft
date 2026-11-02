@@ -68,8 +68,8 @@ impl SheetBody {
             let Some(inverse) = mat_inverse(&world) else { continue };
             let q = apply_point(&inverse, p) - o;
             let u = q.dot(d);
-            let (u0, u1) = self.zone_span(f);
-            if u < u0 - tol || u > u1 + tol {
+            let (lo, hi) = self.zone_reach(f);
+            if u < lo - tol || u > hi + tol {
                 continue;
             }
             let radial = q - d * u;

@@ -124,3 +124,23 @@ fn bench_generated_assembly() {
                "volume_mm3": m["total"]["volume_mm3"]})
     );
 }
+
+#[test]
+fn names_only_lists_every_world_body_without_measuring() {
+    let mut s = Session::new(generated_assembly(3));
+    let full = s.execute("inspect.measure", &json!({})).unwrap();
+    let names = s.execute("inspect.measure", &json!({"names_only": true})).unwrap();
+    assert_eq!(names["body_count"], full["body_count"]);
+    let world = s.world_state();
+    for ((n, f), b) in names["bodies"].as_array().unwrap().iter().zip(full["bodies"].as_array().unwrap()).zip(&world.bodies) {
+        assert_eq!(n["name"], f["name"]);
+        assert_eq!(n["definition"], json!(b.definition_name()));
+        assert!(n.get("volume_mm3").is_none(), "{n}");
+    }
+    assert!(names.get("total").is_none());
+    // The `bodies` filter holds, and an unknown name is still refused.
+    let first = names["bodies"][0]["name"].clone();
+    let one = s.execute("inspect.measure", &json!({"names_only": true, "bodies": [first]})).unwrap();
+    assert_eq!(one["body_count"], 1);
+    assert!(s.execute("inspect.measure", &json!({"names_only": true, "bodies": ["no such body"]})).is_err());
+}

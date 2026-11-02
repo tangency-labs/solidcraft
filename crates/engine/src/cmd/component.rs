@@ -12,29 +12,45 @@ use solidcraft_geom::Vec3;
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list, vec3};
 use crate::schema::component::{
-    EditInPlaceParams, EditInPlaceResult, FinishEditParams, FinishEditResult, OccurrenceAlignParams, OccurrenceAlignResult,
+    EditInPlaceParams, EditInPlaceResult, FinishEditParams, FinishEditResult, MoveFeaturesParams, MoveFeaturesResult, MoveSketchesToPartsParams,
+    MoveSketchesToPartsResult, OccurrenceAlignParams, OccurrenceAlignResult, ReparentItemsParams, ReparentItemsResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
 const EDIT_IN_PLACE_CONTRACT: TypedContract<EditInPlaceParams> = TypedContract::new();
 const FINISH_EDIT_CONTRACT: TypedContract<FinishEditParams> = TypedContract::new();
+const MOVE_FEATURES_CONTRACT: TypedContract<MoveFeaturesParams> = TypedContract::new();
+const MOVE_SKETCHES_TO_PARTS_CONTRACT: TypedContract<MoveSketchesToPartsParams> = TypedContract::new();
+const REPARENT_ITEMS_CONTRACT: TypedContract<ReparentItemsParams> = TypedContract::new();
 
 #[path = "component_align.rs"]
 mod align;
 #[path = "component_drag.rs"]
 mod drag;
+#[path = "component_foreign.rs"]
+mod foreign;
 #[path = "component_matrix.rs"]
 pub(super) mod matrix;
+#[path = "component_move_features.rs"]
+mod move_features;
 #[path = "component_placing.rs"]
 pub(super) mod placing;
 #[path = "component_properties.rs"]
 pub(super) mod properties;
 #[path = "component_reparent.rs"]
 mod reparent;
+#[path = "component_reparent_items.rs"]
+mod reparent_items;
+#[path = "component_sketches_to_parts.rs"]
+mod sketches_to_parts;
 #[path = "component_transfer.rs"]
 mod transfer;
 
+#[cfg(test)]
+#[path = "component_history_tests.rs"]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod history_tests;
 #[cfg(test)]
 #[path = "occurrence_tests.rs"]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
@@ -44,6 +60,12 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.cycle_color", "Cycle Component Color", cycle_color)
         .icon("colored_components").doc_only()
         .params("component: id or name; saves the next identification colour and enables Component Colors; shared by every instance, separate from appearances"),
+    CommandSpec::new("component.hide_history", "Hide Component History", hide_history)
+        .icon("eye").doc_only()
+        .params("component: id or name; keeps the component's features in the design but leaves them out of the History bar (#10393)"),
+    CommandSpec::new("component.show_history", "Show Component History", show_history)
+        .icon("eye").doc_only()
+        .params("component: id or name; puts a component's features back in the History bar after Hide Component History (#10393)"),
     CommandSpec::new("component.create", "New Component", new_component)
         .at("SOLID", "ASSEMBLE")
         .icon("component")
@@ -103,7 +125,51 @@ pub static COMMANDS: &[CommandSpec] = &[
          by (default: its only one, else the active one; a component placed more than once gets them in every instance). Each \
          copy stays where its body is in the world; the copies' names come back as `bodies`",
     ),
-    CommandSpec::new("component.move_sketches", "Move Sketches to Component", move_sketches).icon("move").params("sketches: [ids or names], component"),
+    CommandSpec::new("component.paste_from_design", "Paste from Another Design", foreign::paste_from_design).icon("paste").params(
+        "component?: where it goes (default: the active one); component_path?: its placement (default: the active one, else its \
+         only one). Pastes what was copied in another design, at the same world coordinates: its bodies as imported bodies \
+         (no history) in one Import feature, or its components as independent copies with their history, appearances, \
+         joints and motion (as `component.paste_new`); the user parameters they use come along, renamed `w_2` when taken. \
+         A component that uses what isn't in it (another body, sketch or parameter) is refused, saying what. Returns \
+         `bodies` and `feature`, or the pasted components' `paths`",
+    ),
+    CommandSpec::new("component.move_sketches", "Move Sketches to Component", move_sketches)
+        .icon("move")
+        .params("sketches: [ids or names], component; the sketches keep their own coordinates (component.move_features keeps them where they are in the world), except that a sketch on an exactly attached face stays where it is on the face"),
+    CommandSpec::new(
+        "component.move_sketches.to_parts",
+        "Move Sketches to Their Parts",
+        crate::checked!("component.move_sketches.to_parts", sketches_to_parts::to_parts),
+    )
+    .icon("move")
+    .contract(&MOVE_SKETCHES_TO_PARTS_CONTRACT)
+    .output(output_schema_for::<MoveSketchesToPartsResult>)
+    .params(
+        "sketches?: [ids or names] (default: every sketch in the design) → moved, stayed, sketches [{sketch, name, component, part}], \
+         kept [{sketch, name, code, reason}]. Each sketch whose plane is an exactly attached face of a part's body goes to that part, as \
+         component.move_sketches moves it, and stays where it is on the face; the others (on an origin, construction or fixed \
+         plane, on a body of the design itself, or already in their part) stay where they are. One undo step",
+    ),
+    CommandSpec::new("component.move_features", "Move Features to Component", crate::checked!("component.move_features", move_features::move_features))
+        .icon("move")
+        .contract(&MOVE_FEATURES_CONTRACT)
+        .output(output_schema_for::<MoveFeaturesResult>)
+        .params(
+            "features: [ids or names] (sketches too); component?: where they go (default: the active one) → moved, component, bodies. \
+             Ids, names and timeline order stay; the geometry stays where it is in the world; the bodies the features made move with \
+             them. Refused while the timeline is rolled back, for a component placed more than once, and for a move that would break \
+             a feature (nothing changes)",
+        ),
+    CommandSpec::new("browser.reparent", "Move to Component", crate::checked!("browser.reparent", reparent_items::reparent_items))
+        .icon("move")
+        .contract(&REPARENT_ITEMS_CONTRACT)
+        .output(output_schema_for::<ReparentItemsResult>)
+        .params(
+            "Moves placements, features and bodies into a component. occurrences?: [ids or paths], features?: [ids or names], bodies?: [names], component?: where they go (default: the active \
+             one), component_path?: its placement → component, occurrences, features, bodies (what moved). One undo step, all or \
+             nothing: placements move first (taking what they hold), then features (taking the bodies they made), then the bodies \
+             still elsewhere (a body transfer, which leaves its features behind)",
+        ),
     CommandSpec::new("occurrence.copy", "Paste (Instance)", copy_occurrence).icon("copy")
         .params("component (or occurrence): what to place again; path?: validates selected occurrence; parent?: component (default: the same parent); translate?: [x,y,z]; in_place?: bool (default false: the selected transform within the parent; true: where the selected placement is in the world, translate in world axes; a parent placed more than once is placed by parent_path?, else the active placement, and every instance gets the copy). Copies the selected effective transform, including pending moves"),
     CommandSpec::new("component.paste_new", "Paste New", paste_new).icon("paste").params("component: independently copy its nested definition graph and history, materials and styles; occurrence?, path?: selected source placement; parent?: component the copy goes in (default: the source placement's; not the component or one inside it); in_place?, parent_path?: as occurrence.copy; translate?: [x,y,z]. Reassigned external bodies become base geometry; retained external links and omitted boundary joints are reported"),
@@ -481,6 +547,7 @@ fn move_sketches(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`sketches` must list sketches"));
     }
     for id in &ids {
+        sketches_to_parts::reauthor(s, *id, to, cmd)?;
         if let Some(f) = s.doc_mut().feature_mut(*id) {
             f.component = to;
         }
@@ -749,4 +816,22 @@ fn cycle_color(s: &mut Session, p: &Value) -> Result<Value> {
     c.identification_color = Some(next);
     s.colored_components = Some(());
     Ok(json!({"component": id, "color": next}))
+}
+
+/// Mark a component's features out of the History bar, or back in (#10393). The features still
+/// rebuild; only the History bar leaves them out.
+fn set_history_hidden(s: &mut Session, p: &Value, hidden: bool) -> Result<Value> {
+    let cmd = if hidden { "component.hide_history" } else { "component.show_history" };
+    let id = component(s, p, "component", cmd)?;
+    let c = s.doc_mut().components.iter_mut().find(|c| c.id == id).ok_or_else(|| bad(cmd, "choose a component below the design root"))?;
+    c.history_hidden = hidden;
+    Ok(json!({"component": id, "history_hidden": hidden}))
+}
+
+fn hide_history(s: &mut Session, p: &Value) -> Result<Value> {
+    set_history_hidden(s, p, true)
+}
+
+fn show_history(s: &mut Session, p: &Value) -> Result<Value> {
+    set_history_hidden(s, p, false)
 }

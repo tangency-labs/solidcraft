@@ -1,0 +1,16 @@
+[
+ {"note": "#7247: with Preferences › Sketch › Press and drag draws one line, a press, a drag and the release in the Line tool draw one line from the press to the release and end there; the next drag starts a separate line on the first one's end."},
+ {"call": "ui.prefs", "params": {"line_drag_draws_one": true}},
+ {"call": "engine.execute", "params": {"command": "sketch.create", "params": {"plane": "XY"}}},
+ {"call": "ui.view", "params": {"view": "top"}},
+ {"call": "ui.camera", "params": {"target": [0, 10, 0], "distance": 120}},
+ {"start": "sketch.line"},
+ {"drag": [{"sketch": [-20, 0]}, {"sketch": [20, 10]}], "steps": 8},
+ {"frames": 3},
+ {"expect": {"sketch_curves": {"own": 1}}},
+ {"expect": {"tool": "sketch.line"}},
+ {"drag": [{"sketch": [20, 10]}, {"sketch": [20, 30]}], "steps": 8},
+ {"frames": 3},
+ {"expect": {"sketch_curves": {"own": 2}}},
+ {"expect": {"errors": 0}}
+]

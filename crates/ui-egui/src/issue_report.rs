@@ -1532,6 +1532,32 @@ mod tests {
         }
     }
 
+    /// #9916: the window opens at the top middle, and dragging its title band moves it off the
+    /// model, in a sketch too.
+    #[test]
+    fn issue_report_window_moves_by_its_title() {
+        for sketch in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1400,"height":800}));
+            if sketch {
+                h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+            }
+            h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
+            h.frames(10);
+            let rect = |h: &crate::scenario::Harness| egui::containers::AreaState::load(&h.ctx, egui::Id::new("sc_issue_report")).unwrap().rect();
+            let at = rect(&h);
+            assert!((at.center().x - h.ctx.content_rect().center().x).abs() < 1.0, "sketch={sketch}: it opens at the top middle: {at:?}");
+            // On the title, clear of the close button.
+            let grip = at.left_top() + egui::vec2(140.0, 18.0);
+            h.call("ui.drag", json!({"x0": grip.x, "y0": grip.y, "x1": grip.x - 250.0, "y1": grip.y, "steps": 20}));
+            h.frames(4);
+            let moved = rect(&h);
+            assert!((moved.min.x - (at.min.x - 250.0)).abs() < 2.0 && (moved.min.y - at.min.y).abs() < 2.0, "sketch={sketch}: {at:?} -> {moved:?}");
+            assert!(h.app.issue_report.draft.is_some(), "still open");
+        }
+    }
+
     /// Save screenshot… writes the PNG where the picker says, the way the web app's other saves
     /// write (#7192), and a failure reads as plain words, not a Rust value.
     #[test]

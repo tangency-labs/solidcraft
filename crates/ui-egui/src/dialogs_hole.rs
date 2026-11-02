@@ -94,12 +94,45 @@ struct Section {
     tip_half: f32,
 }
 
-/// The section and its sizes (`ui_kit::figure_rows`): the picture in the label column, the
-/// fields beside it. Returns whether Enter was accepted in a field.
-pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Kind, to_object: bool, eval: &dyn Fn(&str, ValueKind) -> Option<f64>) -> bool {
-    let Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } = k else { return false };
+/// A choice in one of the dialog's dropdowns, which [`preview`] applies to a copy of the form.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Choice {
+    /// Distance, To Object or All, by index.
+    Extents(usize),
+    /// Simple, Counterbore or Countersink, by index.
+    Type(usize),
+    Tapped(bool),
+    Angled(bool),
+}
+
+/// A small section of the hole the form would make with `choice` picked, without its sizes:
+/// what a dropdown option shows while hovered, so its name need not be known to pick it.
+pub(crate) fn preview(ui: &mut egui::Ui, form: &Kind, to_object: bool, choice: Choice, eval: &dyn Fn(&str, ValueKind) -> Option<f64>) {
+    let mut k = form.clone();
+    let mut to_object = to_object;
+    let Kind::Hole { kind, opts, .. } = &mut k else { return };
+    match choice {
+        Choice::Extents(e) => {
+            opts.all = e == 2;
+            to_object = e == 1;
+        }
+        Choice::Type(t) => *kind = t,
+        Choice::Tapped(on) => opts.tapped = on,
+        Choice::Angled(on) => opts.angled = on,
+    }
+    let Some(s) = section(&k, to_object, eval) else { return };
+    let t = Tokens::get();
+    let (r, _) = ui.allocate_exact_size(vec2(t.form_label_width, t.control_height * 3.5), egui::Sense::hover());
+    // `paint` keeps the right of its picture for dimensions; with none, the material fills `r`.
+    let w = r.width() / 0.64;
+    let pic = Rect::from_min_size(pos2(r.left() - 0.04 * w, r.top() - 6.0), vec2(w, r.height() + 6.0));
+    paint(ui.painter(), pic, &s, &[]);
+}
+
+/// What the form's hole looks like, for its picture.
+fn section(k: &Kind, to_object: bool, eval: &dyn Fn(&str, ValueKind) -> Option<f64>) -> Option<Section> {
+    let Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } = k else { return None };
     let kind = *kind;
-    let dims = dims(kind, opts, to_object);
     let len = |e: &str| eval(e, ValueKind::Length).filter(|v| v.is_finite() && *v > 0.0);
     let angle = |e: &str, lo: f64, hi: f64, or: f64| eval(e, ValueKind::Angle).filter(|v| v.is_finite()).map_or(or, |v| (v / 2.0).clamp(lo, hi));
     let top = if kind == 2 { cs_diameter.as_str() } else { cb_diameter.as_str() };
@@ -137,6 +170,16 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Kind, to_object: bool, eval: &dyn 
         cs_half: angle(cs_angle.as_str(), 0.35, 1.3, std::f64::consts::FRAC_PI_4) as f32,
         tip_half: angle(opts.tip_angle.as_str(), 0.5, 1.3, 1.03) as f32,
     };
+    Some(section)
+}
+
+/// The section and its sizes (`ui_kit::figure_rows`): the picture in the label column, the
+/// fields beside it. Returns whether Enter was accepted in a field.
+pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Kind, to_object: bool, eval: &dyn Fn(&str, ValueKind) -> Option<f64>) -> bool {
+    let Some(section) = section(k, to_object, eval) else { return false };
+    let Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } = k else { return false };
+    let kind = *kind;
+    let dims = dims(kind, opts, to_object);
     // The fields in `dims`' order, each value taken once.
     let mut fields: Vec<(&str, &mut String)> = Vec::with_capacity(dims.len());
     match kind {
@@ -476,6 +519,36 @@ mod tests {
                 opts.thread_full_depth = false;
                 opts.tapped = false;
                 assert!(!dims(kind, &opts, false).into_iter().any(|d| d.label(kind) == "Thread depth"));
+            }
+        }
+    }
+
+    #[test]
+    fn every_dropdown_option_previews_a_different_hole() {
+        let app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        let form = crate::dialogs::Dialog::for_command(&app, "solid.hole").unwrap().kind;
+        let ctx = crate::fonts::test_context();
+        let drawn = |choice: Choice| {
+            let mut size = egui::Vec2::ZERO;
+            let output = ctx.run_ui(Default::default(), |ui| {
+                let before = ui.min_rect();
+                preview(ui, &form, false, choice, &|_, _| Some(10.0));
+                size = ui.min_rect().size() - before.size();
+            });
+            assert!(size.x > 0.0 && size.y > 0.0, "{choice:?} drew nothing");
+            output.shapes.into_iter().map(|c| c.shape).collect::<Vec<_>>()
+        };
+        for options in [
+            vec![Choice::Extents(0), Choice::Extents(1), Choice::Extents(2)],
+            vec![Choice::Type(0), Choice::Type(1), Choice::Type(2)],
+            vec![Choice::Tapped(false), Choice::Tapped(true)],
+            vec![Choice::Angled(false), Choice::Angled(true)],
+        ] {
+            let pictures: Vec<_> = options.iter().map(|c| drawn(*c)).collect();
+            for (i, a) in pictures.iter().enumerate() {
+                for (j, b) in pictures.iter().enumerate().skip(i + 1) {
+                    assert_ne!(a, b, "{:?} and {:?} preview the same picture", options[i], options[j]);
+                }
             }
         }
     }

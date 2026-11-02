@@ -37,6 +37,7 @@ solidcraft-kernel = { workspace = true }
 solidcraft-doc = { workspace = true }
 solidcraft-io = { workspace = true }
 solidcraft-render = { workspace = true }
+# reference pictures for inspect.compare_picture (PNG and JPEG decode, PNG encode)
 image = { workspace = true, features = ["jpeg"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

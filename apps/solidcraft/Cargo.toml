@@ -104,5 +104,10 @@ winit = { version = "0.30", default-features = false, features = ["x11"] }
 raw-window-handle = "0.6"
 x11rb = { version = "0.13", default-features = false }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# The desktop's dark or light preference through the XDG Desktop Portal (src/desktop_theme.rs,
+# #7944); already in the tree through eframe's accessibility support (accesskit_unix).
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+
 [build-dependencies]
 embed-resource = "3.0.11"

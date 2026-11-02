@@ -202,6 +202,7 @@ fn construction_names_follow_renames_in_every_definition() {
     let planes = [
         json!({"type": "midplane", "a": plane, "b": plane}),
         json!({"type": "two_edges", "a": axis, "b": axis}),
+        json!({"type": "axis_point", "axis": axis, "point": point}),
         json!({"type": "three_points", "a": point, "b": point, "c": point}),
         json!({"type": "tangent", "face": plane, "at": [0, 0, 0]}),
         json!({"type": "along_path", "path": axis, "t": "0.5"}),

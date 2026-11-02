@@ -18,7 +18,9 @@ use solidcraft_engine::{
     },
 };
 
-use crate::{SolveApp, theme::Tokens, ui_kit};
+#[cfg(test)]
+use crate::theme::Tokens;
+use crate::{SolveApp, ui_kit};
 
 const MAX_BINDINGS: usize = 128;
 
@@ -164,7 +166,9 @@ pub(super) struct View {
     pub enabled: bool,
     pub bindings: Vec<Binding>,
     targets: Vec<Target>,
+    #[cfg(test)]
     target: Option<usize>,
+    #[cfg(test)]
     target_search: String,
     selected: Option<usize>,
     target_revision: Option<u64>,
@@ -206,6 +210,30 @@ pub(super) fn revalidate(app: &mut SolveApp, binding: &mut Binding) -> Result<()
     binding.revision = app.session.revision;
     binding.document = Arc::downgrade(&app.session.doc);
     Ok(())
+}
+
+/// Render settings may change document identity without changing the reviewed source.
+/// A changed model, material, placement or target still needs explicit revalidation.
+pub(super) fn refresh_render_revision(app: &mut SolveApp) {
+    if app.render_workspace.view.materials.bindings.is_empty() {
+        return;
+    }
+    let Ok(targets) = read_targets(app) else { return };
+    let mut sources = super::setups::SourceCache::default();
+    let eligible: Vec<bool> = app
+        .render_workspace
+        .view
+        .materials
+        .bindings
+        .iter()
+        .map(|binding| sources.same_model_source(app, &binding.document) && targets.contains(&binding.target))
+        .collect();
+    for (binding, eligible) in app.render_workspace.view.materials.bindings.iter_mut().zip(eligible) {
+        if eligible {
+            binding.revision = app.session.revision;
+            binding.document = Arc::downgrade(&app.session.doc);
+        }
+    }
 }
 
 /// Called for every Check and Start through the one shared image request builder.
@@ -315,6 +343,7 @@ fn vector(app: &SolveApp, ui: &mut egui::Ui, key: &str, values: &mut [f64; 3], r
     ui_kit::row(ui, app.tr(key), |ui| ui_kit::vector3_field(ui, values, range, suffix))
 }
 
+#[cfg(test)]
 pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let title = app.tr("render.material_title").to_string();
     ui_kit::section(ui, "render_materials", &title, false, |ui| {

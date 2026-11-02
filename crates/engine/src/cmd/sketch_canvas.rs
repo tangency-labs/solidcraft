@@ -67,7 +67,7 @@ fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
         id,
         name: name.clone(),
         format: format.into(),
-        data: base64_encode(&bytes),
+        data: base64_encode(&bytes).into(),
         pixels,
         plane,
         center,

@@ -34,6 +34,8 @@ pub struct CloudFile {
     pub colors: Vec<u8>,
     /// Points in the file.
     pub source_points: u64,
+    /// The file's other properties of the points (PLY).
+    pub complex: solidcraft_doc::point_cloud::Complex,
     pub warnings: Vec<String>,
 }
 
@@ -77,20 +79,19 @@ pub fn read_point_cloud(bytes: &[u8], file: &str, scale: f64, max_points: usize)
     let ply = crate::ply::is_ply(bytes) || (is_ply_path(file) && !bytes.is_empty());
     let stride;
     if ply {
-        let (count, _) = crate::ply::ply_counts(bytes)?;
-        stride = count.div_ceil(max as u64).max(1);
-        keep.out.points.reserve(count.div_ceil(stride).min(max as u64) as usize * 3);
-        // Colours are known once the header is read: the first vertex says.
-        let mut first = true;
-        let (count, colored) = crate::ply::read_vertices(bytes, stride, &mut |(p, rgb)| {
-            if first {
-                keep.colored = rgb.is_some();
-                first = false;
-            }
-            keep.push(p, rgb);
-        })?;
-        keep.out.source_points = count;
-        keep.colored &= colored;
+        let r = crate::ply_complex::read_ply_cloud(bytes, max)?;
+        stride = r.vertices.div_ceil(r.positions.len().max(1) as u64).max(1);
+        keep.colored = r.colors.is_some();
+        let colors = r.colors.unwrap_or_default();
+        for (i, p) in r.positions.iter().enumerate() {
+            keep.push(*p, colors.get(i).copied());
+        }
+        // A point left out would shift every number after it.
+        if keep.bad > 0 && !r.complex.is_empty() {
+            return Err(IoError::Invalid(format!("{} point(s) are not finite numbers within range", keep.bad)));
+        }
+        keep.out.source_points = r.vertices;
+        keep.out.complex = r.complex;
     } else {
         stride = read_xyz(bytes, &mut keep)?;
     }

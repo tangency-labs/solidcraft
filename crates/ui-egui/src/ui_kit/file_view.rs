@@ -1,5 +1,8 @@
 //! File/start presentation; callers retain commands, caches and recovery ownership.
-use super::{metrics::dimension, text::paint_text};
+use super::{
+    metrics::dimension,
+    text::{paint_text, paint_text_aligned},
+};
 use crate::theme::Tokens;
 use egui::{Align2, FontId, InnerResponse, Rect, Response, Sense, Stroke, TextureId, Ui, Vec2, pos2, vec2};
 
@@ -301,7 +304,15 @@ impl FileView {
                 t.form_ink,
                 false,
             );
-            paint_text(ui, Rect::from_min_max(pos2(left, half), content.max), row.path, FontId::monospace(t.font_body), t.file_dim, false);
+            paint_text_aligned(
+                ui,
+                Rect::from_min_max(pos2(left, half), content.max),
+                row.path,
+                FontId::monospace(t.font_body),
+                t.file_dim,
+                false,
+                true,
+            );
         } else {
             let when_width = t.space_24 * 5.0;
             let workspace_width = t.form_label_width * 2.0;
@@ -318,13 +329,14 @@ impl FileView {
                 t.form_ink,
                 false,
             );
-            paint_text(
+            paint_text_aligned(
                 ui,
                 Rect::from_min_max(pos2(path_left, content.top()), pos2((when_left - t.space_14).max(path_left), content.bottom())),
                 row.path,
                 FontId::monospace(t.font_body),
                 t.file_dim,
                 false,
+                true,
             );
             paint_text(
                 ui,

@@ -3,7 +3,9 @@
 
 use serde_json::{Value, json};
 use solidcraft_doc::Mat;
-use solidcraft_doc::point_cloud::{ColorBy, Colors, MAX_COORD, MAX_POINTS, POINT_SIZE, PointCloud, Points, UNITS, unit_scale};
+use solidcraft_doc::point_cloud::{
+    ColorBy, Colors, Filter, Keep, MAX_COORD, MAX_FILTERS, MAX_NAMES, MAX_POINTS, POINT_SIZE, PointCloud, Points, UNITS, unit_scale,
+};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_};
@@ -13,16 +15,16 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("pointcloud.insert", "Insert Point Cloud", insert)
         .at("SOLID", "INSERT")
         .icon("import")
-        .params("path: .ply, .xyz or .pts file (its points join the design as a point cloud: drawn as points, never a body; a PLY's red, green and blue are its colours) → cloud, name, points, source_points, bounds, warnings; name?; units?: mm|cm|m|in|ft (the file's length unit, default mm); max_points?: most points kept (default 5000000, at most 20000000; a larger file is thinned evenly); center?: bool (move the cloud so the middle of its base sits at the origin); point_size?: pixels (0.5…16, default 2); color_by?: file|single|height (the file's colours, the default; one colour; or a ramp by height, blue low to red high); color?: [r, g, b] 0…1 (the single colour; given alone it sets color_by single, null sets color_by file); height_range?: [low, high] design Z in mm for the height ramp, or null to work it out from the points (all but the lowest and highest 2 %)"),
+        .params("path: .ply, .xyz or .pts file (its points join the design as a point cloud: drawn as points, never a body; a PLY's red, green and blue are its colours, its other vertex properties can colour and filter it) → cloud, name, points, source_points, bounds, warnings; name?; units?: mm|cm|m|in|ft (the file's length unit, default mm); max_points?: most points kept (default 5000000, at most 20000000; a larger file is thinned evenly); center?: bool (move the cloud so the middle of its base sits at the origin); point_size?: pixels (0.5…16, default 2); color_by?: file|single|height or a property's name (the file's colours, the default; one colour; a ramp by height, blue low to red high; or by any property of the file, a ramp over its values or a palette for whole numbers); color?: [r, g, b] 0…1 (the single colour; given alone it sets color_by single, null sets color_by file); color_range?: [low, high] the ramp runs between (design Z in mm by height), or null for the automatic range (by height all but the lowest and highest 2 % of the points; by a property the values it takes over what the filters keep); height_range?: the same as color_range; filters?: [{property, range: [low, high]} or {property, values: [whole numbers]} for a property with named values], or null (only what every filter keeps is shown)"),
     CommandSpec::new("pointcloud.edit", "Edit Point Cloud", edit)
         .icon("edit")
-        .params("cloud: id or name; name?; visible?; point_size?: pixels (0.5…16); color_by?: file|single|height (the file's colours, the default; one colour; or a ramp by height, blue low to red high); color?: [r, g, b] 0…1 (the single colour; given alone it sets color_by single, null sets color_by file); height_range?: [low, high] design Z in mm for the height ramp, or null to work it out from the points (all but the lowest and highest 2 %); units?: mm|cm|m|in|ft (the file's length unit: the points are scaled from the unit they came in as); matrix?: [12 or 16 numbers] (where the cloud sits: a rigid row-major 3x4 or 4x4 matrix, as occurrence.move takes it); tolerance? → cloud"),
+        .params("cloud: id or name; name?; visible?; point_size?: pixels (0.5…16); color_by?: file|single|height or a property's name (the file's colours, the default; one colour; a ramp by height, blue low to red high; or by any property of the file, a ramp over its values or a palette for whole numbers); color?: [r, g, b] 0…1 (the single colour; given alone it sets color_by single, null sets color_by file); color_range?: [low, high] the ramp runs between (design Z in mm by height), or null for the automatic range (by height all but the lowest and highest 2 % of the points; by a property the values it takes over what the filters keep); height_range?: the same as color_range; units?: mm|cm|m|in|ft (the file's length unit: the points are scaled from the unit they came in as); matrix?: [12 or 16 numbers] (where the cloud sits: a rigid row-major 3x4 or 4x4 matrix, as occurrence.move takes it); tolerance?; filters?: [{property, range: [low, high]} or {property, values: [whole numbers]} for a property with named values], or null (only what every filter keeps is shown) → cloud"),
     CommandSpec::new("pointcloud.delete", "Delete Point Cloud", delete).icon("delete").params("cloud: id or name → deleted"),
     CommandSpec::new("pointcloud.list", "Point Clouds", list)
         .icon("list")
         .noundo()
         .doc_only()
-        .params("→ clouds: [{cloud, name, file, points, source_points, units, visible, point_size, color_by, color, colored, height_range (the ramp's now, its own or worked out), height_auto, bounds: [[x,y,z], [x,y,z]] in the design, matrix}]"),
+        .params("→ clouds: [{cloud, name, file, points, source_points, units, visible, point_size, color_by (file, single, height or a property's name), color, colored, properties: [{name, integer, span, names}], filters, color_range (the ramp's now, exact over what the filters keep), height_range (the ramp's own range or the automatic one by height), height_auto, bounds: [[x,y,z], [x,y,z]] in the design, matrix}]"),
 ];
 
 fn units_of(p: &Value, cmd: &str) -> Result<Option<(&'static str, f64)>> {
@@ -64,18 +66,74 @@ fn color(p: &Value, cmd: &str) -> Result<Option<Option<[f32; 3]>>> {
     }
 }
 
-/// `color_by`: absent (`None`), or file, single or height.
-fn color_by(p: &Value, cmd: &str) -> Result<Option<ColorBy>> {
+/// `color_by`: absent (`None`), file, single or height, or the name of a property.
+fn color_by(p: &Value, cmd: &str) -> Result<Option<(ColorBy, Option<String>)>> {
     match p.get("color_by") {
         None | Some(Value::Null) => Ok(None),
-        Some(v) => v.as_str().and_then(ColorBy::parse).map(Some).ok_or_else(|| bad(cmd, "`color_by` must be file, single or height")),
+        Some(Value::String(v)) => Ok(Some(match ColorBy::parse(v) {
+            Some(b) if b != ColorBy::Property => (b, None),
+            _ => (ColorBy::Property, Some(v.clone())),
+        })),
+        Some(_) => Err(bad(cmd, "`color_by` must be file, single, height or a property's name")),
     }
+}
+
+/// `filters`: absent (`None`), null for none, or [{property, range: [low, high]} or
+/// {property, values: [whole numbers]}].
+fn filters(p: &Value, cmd: &str) -> Result<Option<Vec<Filter>>> {
+    let refuse = || {
+        bad(
+            cmd,
+            format!(
+                "`filters` must be at most {MAX_FILTERS} {{property, range: [low, high]}} (lowest first) or {{property, values: [whole numbers]}}, or null"
+            ),
+        )
+    };
+    match p.get("filters") {
+        None => Ok(None),
+        Some(Value::Null) => Ok(Some(Vec::new())),
+        Some(Value::Array(a)) if a.len() <= MAX_FILTERS => a
+            .iter()
+            .map(|f| {
+                let property = f.get("property").and_then(Value::as_str).ok_or_else(refuse)?.to_string();
+                if let Some(values) = f.get("values") {
+                    let values = values.as_array().ok_or_else(refuse)?;
+                    let whole = |v: &Value| v.as_i64().and_then(|n| i32::try_from(n).ok());
+                    let values = values.iter().map(whole).collect::<Option<Vec<i32>>>().filter(|v| v.len() <= MAX_NAMES).ok_or_else(refuse)?;
+                    return Ok(Filter { property, keep: Keep::Values { values } });
+                }
+                match f.get("range").and_then(Value::as_array).map(|r| r.iter().map(Value::as_f64).collect::<Option<Vec<f64>>>()) {
+                    Some(Some(r)) if matches!(r.as_slice(), &[lo, hi] if lo.is_finite() && hi.is_finite() && lo <= hi) => {
+                        Ok(Filter { property, keep: Keep::Range { range: [r[0], r[1]] } })
+                    }
+                    _ => Err(refuse()),
+                }
+            })
+            .collect::<Result<Vec<Filter>>>()
+            .map(Some),
+        Some(_) => Err(refuse()),
+    }
+}
+
+/// A cloud colours and filters only by properties it has.
+fn check_properties(c: &PointCloud, cmd: &str) -> Result<()> {
+    let names: Vec<&str> = c.property_names().collect();
+    for n in c.color_property.iter().filter(|_| c.color_by == ColorBy::Property).chain(c.filters.iter().map(|f| &f.property)) {
+        if !names.contains(&n.as_str()) {
+            return Err(bad(cmd, format!("the point cloud has no property `{n}` (it has {})", names.join(", "))));
+        }
+    }
+    // A set of values filters a label: a property with named whole numbers.
+    if let Some(f) = c.filters.iter().find(|f| matches!(f.keep, Keep::Values { .. }) && c.complex.names(&f.property).is_none()) {
+        return Err(bad(cmd, format!("`{}` has no named values: filter it with a range", f.property)));
+    }
+    Ok(())
 }
 
 /// `height_range`: absent (`None`), null for the automatic one (`Some(None)`), or [low, high].
 fn height_range(p: &Value, cmd: &str) -> Result<Option<Option<[f64; 2]>>> {
-    let refuse = || bad(cmd, "`height_range` must be [low, high] heights in mm, lowest first, or null");
-    match p.get("height_range") {
+    let refuse = || bad(cmd, "`height_range` (or `color_range`) must be [low, high], lowest first, or null");
+    match p.get("color_range").or_else(|| p.get("height_range")) {
         None => Ok(None),
         Some(Value::Null) => Ok(Some(None)),
         Some(Value::Array(a)) => match a.iter().map(Value::as_f64).collect::<Option<Vec<f64>>>().as_deref() {
@@ -90,13 +148,18 @@ fn height_range(p: &Value, cmd: &str) -> Result<Option<Option<[f64; 2]>>> {
 
 /// Apply `color_by`, `color` and `height_range`: a colour given alone means one colour, and
 /// `color: null` the file's.
-fn set_colors(c: &mut PointCloud, by: Option<ColorBy>, color: Option<Option<[f32; 3]>>, range: Option<Option<[f64; 2]>>) {
+fn set_colors(c: &mut PointCloud, by: Option<(ColorBy, Option<String>)>, color: Option<Option<[f32; 3]>>, range: Option<Option<[f64; 2]>>) {
     if let Some(k) = color {
         c.color = k.or(c.color);
         c.color_by = if k.is_some() { ColorBy::Single } else { ColorBy::File };
     }
-    if let Some(b) = by {
+    if let Some((b, property)) = by {
+        if property != c.color_property && range.is_none() {
+            // Another property's values have another range.
+            c.height_range = None;
+        }
         c.color_by = b;
+        c.color_property = property.or(c.color_property.take().filter(|_| b == ColorBy::Property));
     }
     if let Some(r) = range {
         c.height_range = r;
@@ -172,8 +235,12 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
         color: None,
         height_range: None,
         visible: true,
+        complex: read.complex,
+        color_property: None,
+        filters: filters(p, cmd)?.unwrap_or_default(),
     };
     set_colors(&mut cloud, colors.0, colors.1, colors.2);
+    check_properties(&cloud, cmd)?;
     if center && let Some((lo, hi)) = cloud.local_bounds() {
         cloud.transform[3] = [-(lo.x + hi.x) / 2.0, -(lo.y + hi.y) / 2.0, -lo.z, 1.0];
     }
@@ -207,6 +274,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let i = find(s, p, cmd)?;
     let size = point_size(p, cmd)?;
     let colors = (color_by(p, cmd)?, color(p, cmd)?, height_range(p, cmd)?);
+    let filters = filters(p, cmd)?;
     let units = units_of(p, cmd)?;
     let placement = match p.get("matrix") {
         None | Some(Value::Null) => None,
@@ -236,6 +304,10 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         c.point_size = v;
     }
     set_colors(&mut c, colors.0, colors.1, colors.2);
+    if let Some(f) = filters {
+        c.filters = f;
+    }
+    check_properties(&c, cmd)?;
     if let Some(v) = bool_(p, "visible") {
         c.visible = v;
     }
@@ -271,7 +343,13 @@ fn list(s: &mut Session, _: &Value) -> Result<Value> {
                 "units": c.units,
                 "visible": c.visible,
                 "point_size": c.point_size,
-                "color_by": c.color_by.name(),
+                "color_by": c.colored_property().filter(|_| c.color_by == ColorBy::Property).unwrap_or(c.color_by.name()),
+                "properties": c
+                    .property_names()
+                    .map(|n| json!({"name": n, "integer": c.complex.integer(n), "span": c.span(n), "names": c.complex.names(n).map(|m| &m.values)}))
+                    .collect::<Vec<_>>(),
+                "filters": c.filters,
+                "color_range": solidcraft_doc::point_cloud_distribution::color_range(c, &solidcraft_doc::point_cloud_distribution::Geometry::of(c), &c.filters),
                 "color": c.color,
                 "colored": !c.colors.is_empty(),
                 "height_range": c.height_range_now(),

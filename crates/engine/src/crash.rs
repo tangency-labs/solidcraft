@@ -365,7 +365,20 @@ pub fn phase(step: &str) {
         j.write(&line);
         j.phase = Some(line);
         j.phase_step = Some(step.to_string());
+        j.running |= step == RUNNING;
     }
+}
+
+/// A step of getting a window's graphics up (egui-wgpu's `window surface`, `surface configure`,
+/// …): the [`phase`] until the app is [`RUNNING`], ignored after. A window opened later (the
+/// agent chat on its own, say) goes through the same steps, and must not make a crash an hour
+/// later read as a crash during startup (#8776).
+pub fn startup_step(step: &str) {
+    let Some(s) = STATE.get() else { return };
+    if s.journal.lock().is_ok_and(|j| j.running) {
+        return;
+    }
+    phase(step);
 }
 
 /// Where a native crash handler writes what it caught for this run: a small JSON file
@@ -622,6 +635,8 @@ struct Journal {
     /// The latest startup step's line and name, and the renderer's line (kept across rebases).
     phase: Option<String>,
     phase_step: Option<String>,
+    /// The app reached [`RUNNING`] once: later startup steps are not startup ([`startup_step`]).
+    running: bool,
     environment: Option<String>,
 }
 
@@ -642,6 +657,7 @@ impl Journal {
             running_at: None,
             phase: None,
             phase_step: None,
+            running: false,
             environment: None,
         };
         j.rebase(&json!("new"), 0);
@@ -889,6 +905,7 @@ fn unclean_exit(dir: &Path, build: &Build, journal: &Path) {
             running_at: None,
             phase: None,
             phase_step: None,
+            running: false,
             environment: None,
         }),
         known: Mutex::new(list(dir).into_iter().filter_map(|s| sig_of(&s.id).map(|sig| (sig, (0, s.id)))).collect()),

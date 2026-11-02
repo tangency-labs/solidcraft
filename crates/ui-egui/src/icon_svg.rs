@@ -829,7 +829,7 @@ mod tests {
                 Some("surface")
             } else if c.panel == "CONSTRAINTS" {
                 Some("constraint")
-            } else if matches!(c.id, "sketch.construction" | "sketch.centerline") {
+            } else if matches!(c.id, "sketch.construction" | "sketch.centerline") || c.id.starts_with("sketch.construction_line") {
                 Some("construction")
             } else if c.id.starts_with("sketch.") && matches!(c.panel, "CREATE" | "MODIFY" | "PATTERN" | "FINISH SKETCH") {
                 Some("sketch")
@@ -928,7 +928,8 @@ mod tests {
         }
         let construction: Vec<_> = specs.iter().filter(|c| c.panel == "CONSTRUCT").collect();
         let distinct: std::collections::HashSet<_> = construction.iter().map(|c| c.icon).collect();
-        assert_eq!(construction.len(), 19);
+        assert_eq!(construction.len(), 20);
+        assert_eq!(construction.iter().find(|c| c.id == "construct.plane.axis_point").unwrap().icon, "plane_axis_point");
         assert_eq!(distinct.len(), construction.len(), "construction methods need distinct visual identities");
     }
 
@@ -942,6 +943,7 @@ mod tests {
     #[test]
     fn sketch_construction_modes_have_distinct_icons() {
         let families: &[&[&str]] = &[
+            crate::sketch_families::family("sketch.construction_line").unwrap().commands,
             &["sketch.polygon.inscribed", "sketch.polygon.circumscribed", "sketch.polygon.edge"],
             &["sketch.slot.center_to_center", "sketch.slot.overall", "sketch.slot.center_point"],
             &["sketch.slot.arc_three_point", "sketch.slot.arc_center"],

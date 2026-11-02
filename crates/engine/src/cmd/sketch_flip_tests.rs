@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 use solidcraft_doc::{FeatureKind, PlaneRef};
-use solidcraft_geom::{Plane, Vec3};
+use solidcraft_geom::{Plane, Vec2, Vec3};
 
 use crate::Session;
 
@@ -24,6 +24,20 @@ fn measured(s: &mut Session) -> Value {
 
 fn close(a: Vec3, b: Vec3) -> bool {
     a.dist(b) < 1e-9
+}
+
+/// The origin planes' sketch axes, as `sketch.create` documents them: sketch x and y run along world +X, +Y on XY;
+/// +X, -Z on XZ; +Y, +Z on YZ.
+#[test]
+fn origin_planes_put_the_sketch_axes_where_sketch_create_says() {
+    let (x, y, z) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+    for (name, u, v) in [("XY", x, y), ("XZ", x, z * -1.0), ("YZ", y, z)] {
+        let mut s = Session::default();
+        let id = run(&mut s, "sketch.create", json!({"plane": name}))["sketch"].as_u64().unwrap();
+        let p = sketch_plane(&s, id);
+        let (su, sv) = (p.to_world(Vec2::new(1.0, 0.0)), p.to_world(Vec2::new(0.0, 1.0)));
+        assert!(close(su, u) && close(sv, v), "{name}: sketch x lands on {su:?}, sketch y on {sv:?}");
+    }
 }
 
 #[test]

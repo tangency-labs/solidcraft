@@ -422,3 +422,82 @@ fn configurations_switch_to_a_user_defined_material() {
     run(&mut s, "material.delete", json!({"material": "Black Walnut", "replace": "Default"}));
     assert!(!s.doc.materials.contains_key("Slat"));
 }
+
+/// #8706: Properties of a large assembly took minutes because every placed copy of a body was
+/// transformed and measured again (three fine tessellations each). Every placement of a body now
+/// reuses one measurement of it: 41 placements measure no placed copy afresh and tessellate
+/// each distinct body's inertia spread (#8095) once, exactly as one placement does, and the
+/// answer is the same when measured again.
+#[test]
+fn repeated_placements_reuse_one_measurement_of_their_body() {
+    let mut s = Session::default();
+    let (component, _, _) = box_in(&mut s, "Block");
+    run(&mut s, "solid.cylinder", json!({"diameter": 4, "height": 30}));
+    for i in 1..40 {
+        run(&mut s, "occurrence.copy", json!({"component": component, "translate": [20 * i, 0, 0]}));
+    }
+    let turned = run(&mut s, "occurrence.copy", json!({"component": component, "translate": [0, 50, 0]}));
+    run(&mut s, "occurrence.move", json!({"occurrence": turned["occurrence"], "translate": [0, 0, 0], "axis": [1, 1, 1], "angle": "30 deg"}));
+    let first = run(&mut s, "component.properties", json!({"component": "root"}));
+    assert_eq!(first["body_count"], 82, "{first}");
+    let (again, all) = super::work::capture(|| run(&mut s, "component.properties", json!({"component": "root"})));
+    assert_eq!(first, again);
+    let (block, one) = super::work::capture(|| run(&mut s, "occurrence.properties", json!({"occurrence": turned["occurrence"]})));
+    // Before, every placed copy was transformed and tessellated afresh (82 here); now no copy
+    // is, and the work is the same for 41 placements as for one: one spread per distinct body.
+    let per_body = super::work::Work { placed_measures: 0, spreads: 2 };
+    assert_eq!(all, per_body, "41 placements");
+    assert_eq!(one, per_body, "one placement");
+    close(&first["total"]["volume_mm3"], 41.0 * block["total"]["volume_mm3"].as_f64().unwrap());
+}
+
+/// #8706: a body measured where a rigid placement puts it, from its own measurement, matches its
+/// placed copy measured afresh: volume, area, centre and counts, and the box (to the chord of
+/// the meshes it is taken from) also when the placement turns it off the axes.
+#[test]
+fn a_placed_body_measures_as_its_placed_copy() {
+    use solidcraft_geom::Vec3;
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"diameter": 4, "height": 30}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 5}));
+    let state = s.model.state();
+    let placements = [
+        solidcraft_doc::IDENTITY,
+        solidcraft_doc::rigid(Vec3::new(5.0, -3.0, 7.0), Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2),
+        solidcraft_doc::rigid(Vec3::new(100.0, 0.0, 0.0), Vec3::new(1.0, 2.0, 3.0), Vec3::new(1.0, 1.0, 1.0), 0.5),
+    ];
+    for body in &state.bodies {
+        for m in placements {
+            let fast = super::measure_placed(body, m).unwrap();
+            let placed = solidcraft_kernel::transform_matrix(&body.body, m).unwrap();
+            let slow = solidcraft_kernel::measure(&placed).unwrap();
+            let near = |a: f64, b: f64, tol: f64| assert!((a - b).abs() <= tol * b.abs().max(1.0), "{} {a} != {b}", body.name);
+            near(fast.volume, slow.volume, 1e-4);
+            near(fast.area, slow.area, 1e-4);
+            assert!((fast.centroid - slow.centroid).len() < 1e-3, "{} centre {:?} != {:?}", body.name, fast.centroid, slow.centroid);
+            let box_near = (fast.bbox.min - slow.bbox.min).len() < 0.05 && (fast.bbox.max - slow.bbox.max).len() < 0.05;
+            assert!(box_near, "{} box {:?} != {:?}", body.name, fast.bbox, slow.bbox);
+            assert_eq!((fast.faces, fast.edges, fast.vertices), (slow.merged.faces, slow.merged.edges, slow.merged.vertices));
+            assert_eq!(fast.closed, crate::cmd::inspect::encloses_volume(&placed));
+        }
+    }
+}
+
+/// #8706: a window waiting for the properties sees how many bodies are measured and can stop the
+/// measuring part way.
+#[test]
+fn a_watcher_sees_the_bodies_measured_and_can_stop_them() {
+    use std::sync::Arc;
+    let mut s = Session::default();
+    let (component, _, _) = box_in(&mut s, "Block");
+    for i in 1..4 {
+        run(&mut s, "occurrence.copy", json!({"component": component, "translate": [20 * i, 0, 0]}));
+    }
+    let progress = Arc::new(solidcraft_doc::progress::Progress::default());
+    let r = solidcraft_doc::progress::watch(progress.clone(), || s.execute("component.properties", &json!({"component": "root"})));
+    assert_eq!(r.unwrap()["body_count"], 4);
+    assert_eq!(progress.work(), Some(("measuring", 4, 4)));
+    progress.cancel();
+    let stopped = solidcraft_doc::progress::watch(progress, || s.execute("component.properties", &json!({"component": "root"})));
+    assert!(stopped.unwrap_err().to_string().contains("cancelled"));
+}

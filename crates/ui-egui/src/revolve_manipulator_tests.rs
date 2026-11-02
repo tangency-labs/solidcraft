@@ -225,6 +225,44 @@ fn free_drag_and_invalid_expression_stay_editable_before_commit() {
     assert!((volume(&h) - expected_volume(60.0)).abs() < 0.03);
 }
 
+/// Typing 0° builds no solid, and the dialog keeps the range error. The grab point stays on
+/// the profile, and dragging it brings the angle back.
+#[test]
+fn zero_angle_keeps_the_grab_point_and_a_drag_brings_the_angle_back() {
+    for (params, handle, drag_to, entered_angle, committed) in
+        [(json!({}), "revolve", 45.0, "45 deg", 45.0), (json!({"direction": "symmetric"}), "revolve2", -45.0, "90 deg", 90.0)]
+    {
+        let mut h = fixture(Harness::new(), params.clone());
+        open(&mut h);
+        h.step(&json!({"click":{"handle":"dialog:Angle"}})).unwrap();
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        h.step(&json!({"text":"0 deg"})).unwrap();
+        h.frames(4);
+        handle_at(&mut h, "revolve", at_angle(0.0));
+        // A preview refusal stays on the preview while the angle field is still being typed in.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while h.app.preview.busy {
+            assert!(std::time::Instant::now() < deadline, "the preview did not finish");
+            h.frames(1);
+        }
+        let error = h.app.dialog.as_ref().and_then(|dialog| dialog.error.clone()).or_else(|| h.app.preview.error.clone()).unwrap_or_default();
+        assert!(error.contains("more than 0"), "{error}");
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_some(), "a zero angle still builds no solid");
+        h.step(&json!({"drag":[{"handle":handle},{"world":at_angle(drag_to)}]})).unwrap();
+        let crate::dialogs::Kind::Revolve { angle: entered, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("revolve") };
+        assert_eq!(entered, entered_angle);
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|dialog| &dialog.error));
+        assert_eq!(angle(&h), entered_angle);
+        let got = volume(&h);
+        let want = expected_volume(committed);
+        // A symmetric drag that starts with both handles stacked at 0° lands within a tenth of a
+        // cubic millimetre of the analytic quarter turn.
+        assert!((got - want).abs() < 0.1, "params={params} got={got} want={want}");
+    }
+}
+
 #[test]
 fn second_side_can_be_dragged_to_zero_without_becoming_full_turn() {
     let mut h = fixture(Harness::new(), json!({"angle":"60 deg","angle2":"30 deg"}));

@@ -64,7 +64,7 @@ fn schemas_and_the_key_check_agree() {
             "type",
         ]),
     );
-    assert_keys(input_schema_for::<PerforateParams>(), &keys(&["body", "diameter", "margin", "pattern", "pitch"]));
+    assert_keys(input_schema_for::<PerforateParams>(), &keys(&["body", "diameter", "margin", "pattern", "pitch", "profiles", "sketch"]));
     assert_keys(input_schema_for::<HemParams>(), &keys(&["body", "edges", "flip", "gap", "length"]));
     assert_keys(input_schema_for::<FoldParams>(), &keys(&["angle", "body", "curve", "fixed", "flip", "points", "position", "radius", "sketch"]));
     assert_keys(input_schema_for::<UnfoldParams>(), &keys(&["body"]));

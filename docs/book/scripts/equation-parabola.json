@@ -1,0 +1,6 @@
+{"commands": [
+  {"command": "sketch.create", "params": {"plane": "XY", "name": "Parabola"}},
+  {"command": "sketch.equation_curve", "params": {"explicit": true, "y": "x * x / 20", "start": -30, "end": 30}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "view.apply", "params": {"view": "top"}}
+]}

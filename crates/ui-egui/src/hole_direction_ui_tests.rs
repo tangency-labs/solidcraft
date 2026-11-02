@@ -124,12 +124,17 @@ fn flip_drills_holes_at_sketch_points_the_other_way() {
     assert!(h.app.dialog.is_none(), "OK closed the dialog: {:?}", h.app.dialog.as_ref().map(|d| &d.error));
     assert!(!solid_at(&h, Vec3::new(10.0, 10.0, 2.5)), "flipped: the hole comes up from the bottom");
     assert!(solid_at(&h, Vec3::new(10.0, 10.0, 17.5)), "and not down from the top");
+    assert!(!solidcraft_engine::view::sketch_shown(&h.app.session, sketch), "the Hole used its points sketch");
     // Edit Feature shows Flip on, and OK keeps it.
     let id = h.app.session.doc.features.last().unwrap().id;
     h.step(&json!({"call": "ui.editFeature", "params": {"feature": id}})).unwrap();
     h.frames(4);
     let d = h.app.dialog.as_ref().expect("the hole dialog");
     assert_eq!(d.extra.get("flip"), Some(&json!(true)));
+    assert_eq!(h.app.session.feature_edit_sketch, Some(sketch), "editing shows its points to pick");
+    assert!(solidcraft_engine::view::sketch_shown(&h.app.session, sketch), "editing shows its points to pick");
     h.step(&json!({"key": "Enter"})).unwrap();
     assert!(!solid_at(&h, Vec3::new(10.0, 10.0, 2.5)) && solid_at(&h, Vec3::new(10.0, 10.0, 17.5)));
+    assert_eq!(h.app.session.feature_edit_sketch, None);
+    assert!(!solidcraft_engine::view::sketch_shown(&h.app.session, sketch));
 }

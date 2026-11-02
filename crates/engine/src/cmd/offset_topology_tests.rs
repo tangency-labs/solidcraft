@@ -107,3 +107,44 @@ fn inset_past_corner_radius_creates_a_real_boundary_and_saved_profile_identity()
         assert_eq!(session.redo.len(), redo);
     }
 }
+
+/// #10984: a dog bone whose round ends touch at a cusp on each side. Drawn 2 mm outside, the
+/// outline meets in each notch outside the bone, where the two ends' copies cross before
+/// their ends. One notch ran both copies on to their far crossing instead, a loop into the
+/// bone, as both crossings are as far from the notch.
+#[test]
+fn an_outline_outside_a_dog_bone_meets_outside_both_notches() {
+    let mut session = Session::default();
+    run(&mut session, "sketch.create", json!({"plane":"XY","name":"Bone"}));
+    let sketch = session.active_sketch.unwrap();
+    run(&mut session, "sketch.line", json!({"points":[[-10,-10],[10,-10]]}));
+    run(&mut session, "sketch.arc.center_point", json!({"center":[20,-10],"start":[10,-10],"end":[20,0]}));
+    run(&mut session, "sketch.arc.center_point", json!({"center":[20,10],"start":[20,0],"end":[10,10]}));
+    run(&mut session, "sketch.line", json!({"points":[[10,10],[-10,10]]}));
+    run(&mut session, "sketch.arc.center_point", json!({"center":[-20,10],"start":[-10,10],"end":[-20,0]}));
+    run(&mut session, "sketch.arc.center_point", json!({"center":[-20,-10],"start":[-20,0],"end":[-10,-10]}));
+    run(&mut session, "sketch.offset", json!({"curves":["l1"],"distance":2,"side":[0,-40]}));
+    let state = session.model.state();
+    let sk = &state.sketch(sketch).unwrap().sketch;
+    let record = sk.offsets.last().unwrap();
+    assert_eq!(record.outputs.len(), 6);
+    let mut notches: Vec<f64> = Vec::new();
+    for id in &record.outputs {
+        let curve = &sk.curves[sk.curve_index(id).unwrap()];
+        let (a, b) = match curve.kind {
+            solidcraft_sketch::CurveKind::Line { a, b } | solidcraft_sketch::CurveKind::Arc { a, b, .. } => (a, b),
+            _ => panic!("{id} is no line or arc"),
+        };
+        for p in [sk.points[a].pos, sk.points[b].pos] {
+            if p.y.abs() < 1e-6 {
+                notches.push(p.x);
+            }
+        }
+    }
+    notches.sort_by(f64::total_cmp);
+    // The copies have radius 12 about centres 20 apart: they cross 12² − 10² = 44, √44 off
+    // the notch's line, outside it: x = ±(20 + √44).
+    let outside = 20.0 + 44f64.sqrt();
+    assert_eq!(notches.len(), 4, "{notches:?}");
+    assert!(notches.iter().zip([-outside, -outside, outside, outside]).all(|(x, want)| (x - want).abs() < 1e-6), "{notches:?}");
+}

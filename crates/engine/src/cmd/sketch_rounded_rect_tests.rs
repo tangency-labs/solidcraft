@@ -146,3 +146,27 @@ fn typed_width_and_height_measure_the_whole_rounded_rectangle() {
     assert!((area - want).abs() < 1e-6, "area {area}, want {want}: {si}");
     assert_eq!(si["dof"], 2, "only the position is free: {si}");
 }
+
+/// The corners take expressions over the design's parameters, as a 2-point rectangle's do: the
+/// rounded rectangle follows them, and the radius is checked against the sides they work out to.
+#[test]
+fn corners_typed_as_expressions_follow_their_parameters() {
+    let mut s = sketch();
+    run(&mut s, "parameters.add", json!({"name": "W", "expression": "40 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "H", "expression": "20 mm"}));
+    let r = run(&mut s, "sketch.rectangle.rounded", json!({"p0": ["-W / 2", "-H / 2"], "p1": ["W / 2", "H / 2"], "radius": 3}));
+    assert_eq!(ids(&r["arcs"]).len(), 4, "{r}");
+    let area = |s: &mut Session| {
+        let si = run(s, "sketch.inspect", json!({}));
+        si["profiles"][0]["area_mm2"].as_f64().unwrap_or(f64::NAN)
+    };
+    let corners = (4.0 - std::f64::consts::PI) * 9.0;
+    let a = area(&mut s);
+    assert!((a - (40.0 * 20.0 - corners)).abs() < 1e-6, "area {a}");
+    run(&mut s, "parameters.change", json!({"name": "W", "expression": "70 mm"}));
+    let a = area(&mut s);
+    assert!((a - (70.0 * 20.0 - corners)).abs() < 1e-6, "area after W = 70 mm: {a}");
+    // A radius the worked-out sides cannot take is refused, as for numbers.
+    let too_big = s.execute("sketch.rectangle.rounded", &json!({"p0": [0, 0], "p1": ["W", "H / 4"], "radius": 3}));
+    assert!(too_big.is_err(), "radius 3 mm on a 5 mm side: {too_big:?}");
+}

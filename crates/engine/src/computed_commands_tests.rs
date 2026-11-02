@@ -149,6 +149,35 @@ fn editor_visibility_changes_allow_apply_and_preserve_separate_undo_steps() {
     }
 }
 
+/// A section, an analysis or the selection changed while an editor is open changes only what is
+/// shown: OK still applies the edit and Cancel puts the design back (#10687).
+#[test]
+fn editor_display_changes_allow_apply_and_cancel() {
+    let cases: [&[(&str, serde_json::Value)]; 5] = [
+        &[("inspect.section", json!({"plane":"XZ","offset":1}))],
+        &[("inspect.section", json!({"plane":"XZ","offset":1})), ("inspect.section", json!({"clear":true}))],
+        &[("inspect.zebra", json!({"stripes":14.5}))],
+        &[("select.set", json!({"items":[{"type":"body","name":"Other"}]}))],
+        &[("select.clear", json!({}))],
+    ];
+    for display in cases {
+        let (mut session, source, original, commands) = extrusion_editor();
+        for (id, params) in display {
+            session.execute(id, params).unwrap();
+        }
+        let prepared =
+            session.scratch().compute_editor_commands(&commands, &source, original).unwrap_or_else(|e| panic!("OK after {display:?}: {e}"));
+        session.accept_commands(prepared).unwrap();
+        assert_editor_volume(&mut session, 12024.0);
+        let (mut session, source, original, _) = extrusion_editor();
+        for (id, params) in display {
+            session.execute(id, params).unwrap();
+        }
+        session.restore_editor(&source, original).unwrap_or_else(|e| panic!("Cancel after {display:?}: {e}"));
+        assert_editor_volume(&mut session, 6024.0);
+    }
+}
+
 #[test]
 fn editor_visibility_changes_allow_cancel_and_keep_undo_and_redo_at_the_original_marker() {
     for undo_hide in [false, true] {

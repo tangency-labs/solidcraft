@@ -12,6 +12,8 @@ use egui::{Ui, vec2};
 /// Text segments retain mixed states and optional compact clipping instead of dropdown fallback.
 #[derive(Default)]
 pub(crate) struct Segments<'a> {
+    /// Explicit focus requested by the owning form when a setting is opened for editing.
+    pub focus: Option<usize>,
     /// Per-option availability; omitted entries are enabled. Unavailable options stay faded.
     pub enabled: &'a [bool],
     /// Optional per-option refusal reasons. Disabled options remain visible and explain why.
@@ -33,6 +35,7 @@ pub(crate) struct Segments<'a> {
 }
 
 pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], config: Segments<'_>) -> bool {
+    crate::prefs_search::note_unlabelled(ui, options);
     if crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, options) {
         return false;
     }
@@ -40,6 +43,7 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
         crate::prefs_search::reveal(ui);
     }
     let Segments {
+        focus,
         enabled,
         disabled,
         targets,
@@ -58,7 +62,10 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
     let t = Tokens::get();
     let catalog = super::layout::in_catalog(ui);
     let font_size = if small || catalog { t.font_small } else { t.font_label };
-    let natural: Vec<_> = options
+    // Callers pass English source labels or text they translated; either way a segment shows it
+    // translated, as the dropdown it falls back to does. Handles keep the option as passed.
+    let shown: Vec<&str> = options.iter().map(|option| crate::i18n::tr_label(option)).collect();
+    let natural: Vec<_> = shown
         .iter()
         .enumerate()
         .map(|(index, option)| {
@@ -69,9 +76,9 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
         .collect();
     let total = natural.iter().sum::<f32>();
     let segment_width = dimension(ui.available_width()) / options.len().max(1) as f32;
-    let widest = options
+    let widest = shown
         .iter()
-        .map(|option| ui.painter().layout_no_wrap(crate::i18n::tr_label(option).to_string(), crate::fonts::semibold(font_size), t.form_ink).size().x)
+        .map(|option| ui.painter().layout_no_wrap((*option).to_owned(), crate::fonts::semibold(font_size), t.form_ink).size().x)
         .fold(0.0, f32::max);
     // Judged on the whole row, which is what a scrollbar narrows, not on one segment.
     let need = if intrinsic { total } else { (widest + 2.0 * t.space_8) * options.len() as f32 };
@@ -107,7 +114,7 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
     let equal_width = rect.width() / options.len().max(1) as f32;
     let mut clicked = false;
     let mut x = rect.left();
-    for (index, option) in options.iter().enumerate() {
+    for (index, (option, text)) in options.iter().zip(&shown).enumerate() {
         let width =
             if (intrinsic || proportional) && total > 0.0 { natural.get(index).copied().unwrap_or(0.0) * rect.width() / total } else { equal_width };
         let segment = egui::Rect::from_min_size(egui::pos2(x, rect.top()), vec2(width, rect.height()));
@@ -123,6 +130,9 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
         let ui = &mut segment_ui;
         let segment_enabled = ui.is_enabled();
         let response = ui.interact(segment, id, egui::Sense::click());
+        if focus == Some(index) && segment_enabled && ui.is_visible() && ui.is_rect_visible(segment) {
+            response.request_focus();
+        }
         let on = states.get(index).copied().unwrap_or(*selected == index);
         let rounding = egui::CornerRadius {
             nw: if index == 0 { t.control_radius } else { 0 },
@@ -149,7 +159,7 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
             ui.painter().vline(segment.left(), segment.y_range(), t.control_border_stroke(t.control_border));
         }
         let font = if on { crate::fonts::semibold(font_size) } else { egui::FontId::proportional(font_size) };
-        let galley = ui.painter().layout_no_wrap((*option).to_string(), font.clone(), t.form_ink);
+        let galley = ui.painter().layout_no_wrap((*text).to_string(), font.clone(), t.form_ink);
         let icon_width = if icons.get(index).is_some() { t.space_14 + t.space_6 } else { 0.0 };
         let text_rect = egui::Rect::from_min_size(
             egui::pos2(segment.center().x - (galley.size().x + icon_width) / 2.0 + icon_width, segment.top()),
@@ -166,7 +176,7 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
         paint_text(
             ui,
             text_rect,
-            option,
+            text,
             font,
             if !segment_enabled {
                 t.form_dim
@@ -182,7 +192,7 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
             false,
         );
         t.button_bevel_with_radius(ui, &response, on, rounding);
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, segment_enabled, on, *option));
+        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, segment_enabled, on, *text));
         scenario::publish_target(&format!("dialog:{}:{option}", label(ui)), segment);
         if let Some(target) = targets.get(index) {
             let visible = segment.intersect(ui.clip_rect());
@@ -190,7 +200,7 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
                 scenario::publish_target(target, visible);
             }
         }
-        let response = if let Some(reason) = reason { response.on_disabled_hover_text(reason) } else { response.on_hover_text(*option) };
+        let response = if let Some(reason) = reason { response.on_disabled_hover_text(reason) } else { response.on_hover_text(*text) };
         if response.clicked() && segment_enabled {
             *selected = index;
             clicked = true;
@@ -333,14 +343,20 @@ pub(crate) fn checkbox_row(ui: &mut egui::Ui, key: &str, label: &str, on: bool) 
 
 /// Compact bold/italic toggles for text. Tokens: scope font/control tokens.
 /// The glyphs keep the familiar B/I treatment; accessible names use translated style names.
-pub(crate) fn text_emphasis(ui: &mut Ui, bold: &mut bool, italic: &mut bool) {
+pub(crate) fn text_emphasis(ui: &mut Ui, bold: &mut bool, italic: &mut bool, bold_enabled: bool) {
     use crate::fonts::RichTextExt as _;
-    for (key, text, value, id) in [
-        ("Bold", egui::RichText::new("B").semibold(), bold, "sketch_text.bold"),
-        ("Italic", egui::RichText::new("I").italics(), italic, "sketch_text.italic"),
+    for (key, text, value, id, enabled) in [
+        ("Bold", egui::RichText::new("B").semibold(), bold, "sketch_text.bold", bold_enabled),
+        ("Italic", egui::RichText::new("I").italics(), italic, "sketch_text.italic", true),
     ] {
-        let response = ui.toggle_value(value, text).on_hover_text(crate::i18n::tr(id));
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), *value, crate::i18n::tr(id)));
+        if !enabled {
+            *value = false;
+        }
+        let mut response = ui.add_enabled_ui(enabled, |ui| ui.toggle_value(value, text).on_hover_text(crate::i18n::tr(id))).inner;
+        if !enabled {
+            response = response.on_disabled_hover_text(crate::i18n::tr("sketch_text.no_bold"));
+        }
+        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled() && enabled, *value, crate::i18n::tr(id)));
         scenario::publish_target_as(&format!("dialog:{key}"), &format!("dialog:emphasis:{key}"), response.rect);
     }
 }
@@ -605,6 +621,9 @@ pub(crate) struct PopupOption<'a> {
     pub color: egui::Color32,
 }
 
+/// Rows a completion list shows before it scrolls.
+const POPUP_LIST_ROWS: usize = 8;
+
 /// Focus-neutral suggestion popup. The owner handles navigation and completion semantics;
 /// `selected` is the highlighted row, or `None` when no row is picked yet (#3663). Its rows
 /// take no focus, and where they were drawn is kept under `id.with("rows")`, so an owner can
@@ -644,31 +663,56 @@ pub(crate) fn popup_list(
             .show(ui, |ui| {
                 super::scope(ui, |ui| {
                     ui.set_width(width);
-                    for (index, option) in options.iter().enumerate() {
-                        let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), t.control_height), egui::Sense::CLICK);
-                        rows.push(rect);
-                        let picked = selected == Some(index);
-                        if picked || response.hovered() {
-                            ui.painter().rect_filled(rect, t.control_radius, if picked { t.selected_bg } else { t.hover });
+                    // A long list (every parameter, #9246) scrolls past its first rows and keeps
+                    // the chosen row in view.
+                    let scrolls = options.len() > POPUP_LIST_ROWS;
+                    let followed = id.with("followed");
+                    let follow = scrolls && selected.is_some() && ctx.data(|d| d.get_temp::<Option<usize>>(followed)) != Some(selected);
+                    ctx.data_mut(|d| d.insert_temp(followed, selected));
+                    let scroll = egui::ScrollArea::vertical()
+                        .id_salt(id.with("scroll"))
+                        .max_height(t.control_height * POPUP_LIST_ROWS as f32)
+                        .auto_shrink([false, true])
+                        .vscroll(scrolls);
+                    scroll.show(ui, |ui| {
+                        for (index, option) in options.iter().enumerate() {
+                            let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), t.control_height), egui::Sense::CLICK);
+                            if follow && selected == Some(index) {
+                                ui.scroll_to_rect_animation(rect, None, egui::style::ScrollAnimation::none());
+                            }
+                            // A row scrolled out of view is not under the pointer.
+                            rows.push(if ui.is_rect_visible(rect) { rect.intersect(ui.clip_rect()) } else { egui::Rect::NOTHING });
+                            let picked = selected == Some(index);
+                            if picked || response.hovered() {
+                                ui.painter().rect_filled(rect, t.control_radius, if picked { t.selected_bg } else { t.hover });
+                            }
+                            let inner = rect.shrink2(vec2(t.space_8, 0.0));
+                            let kind = crate::i18n::tr_label(option.kind);
+                            let kind_width = super::metrics::label_width(ui, kind);
+                            let text_rect = egui::Rect::from_min_max(
+                                inner.min,
+                                egui::pos2((inner.right() - kind_width - t.space_8).max(inner.left()), inner.bottom()),
+                            );
+                            super::text::paint_text(
+                                ui,
+                                text_rect,
+                                option.text,
+                                mono.clone(),
+                                if picked { t.form_primary } else { option.color },
+                                false,
+                            );
+                            ui.painter().text(inner.right_center(), egui::Align2::RIGHT_CENTER, kind, kind_font.clone(), t.form_dim);
+                            response
+                                .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), picked, option.text));
+                            // Tip the full name first: long identifiers still clip inside a capped popup.
+                            let tip = if option.detail.is_empty() { option.text.to_owned() } else { format!("{}\n{}", option.text, option.detail) };
+                            let response = response.on_hover_text(tip);
+                            crate::scenario::publish_handle(&format!("dialog:suggestion:{index}"), response.rect.center());
+                            if response.clicked() {
+                                chosen = Some(index);
+                            }
                         }
-                        let inner = rect.shrink2(vec2(t.space_8, 0.0));
-                        let kind = crate::i18n::tr_label(option.kind);
-                        let kind_width = super::metrics::label_width(ui, kind);
-                        let text_rect = egui::Rect::from_min_max(
-                            inner.min,
-                            egui::pos2((inner.right() - kind_width - t.space_8).max(inner.left()), inner.bottom()),
-                        );
-                        super::text::paint_text(ui, text_rect, option.text, mono.clone(), if picked { t.form_primary } else { option.color }, false);
-                        ui.painter().text(inner.right_center(), egui::Align2::RIGHT_CENTER, kind, kind_font.clone(), t.form_dim);
-                        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), picked, option.text));
-                        // Tip the full name first: long identifiers still clip inside a capped popup.
-                        let tip = if option.detail.is_empty() { option.text.to_owned() } else { format!("{}\n{}", option.text, option.detail) };
-                        let response = response.on_hover_text(tip);
-                        crate::scenario::publish_handle(&format!("dialog:suggestion:{index}"), response.rect.center());
-                        if response.clicked() {
-                            chosen = Some(index);
-                        }
-                    }
+                    });
                     super::divider(ui, "completion_detail");
                     if let Some(option) = selected.and_then(|index| options.get(index)) {
                         super::text(ui, option.detail, super::Text::Note("completion_detail"));

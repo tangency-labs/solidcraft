@@ -173,7 +173,7 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
         }
         Surf::Loft { .. } => {
             let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
-            vec![SelInput::new("Sections (one sketch each)", PROFILES | CURVES, true), rail, rail2]
+            vec![SelInput::new("Sections", PROFILES | CURVES, true), rail, rail2]
         }
         Surf::Blend { .. } => vec![SelInput::new("From edges", EDGES, true), SelInput::new("To edges", EDGES, true)],
         Surf::Boundary { .. } => vec![SelInput::new("Curves", CURVES | EDGES, true), SelInput::new("Cross curves", CURVES | EDGES, true)],
@@ -517,30 +517,37 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             ("surface.sweep", p)
         }
         Surf::Loft { rail_fit } => {
-            need(0, "the sections, one sketch each")?;
-            // One section per sketch, in the order the sketches were first picked.
-            let sketch_of = |x: &Sel| match x {
-                Sel::Profile { sketch, .. } => Some(*sketch),
-                Sel::SketchCurve { .. } => crate::dialogs::picks_sketch(app, std::slice::from_ref(x), None),
-                _ => None,
-            };
-            let mut order: Vec<u64> = Vec::new();
-            for x in items(inputs, 0) {
-                let sk = sketch_of(x).ok_or("a picked curve is no longer in a sketch")?;
-                if !order.contains(&sk) {
-                    order.push(sk);
+            need(0, "the sections")?;
+            // Each picked profile is a section, and so is each chain of picked curves (those of
+            // one sketch that meet end to end), in the order of their first pick: two sections
+            // can come from one sketch (#8221).
+            let picks = items(inputs, 0);
+            let curves: Vec<Sel> = picks.iter().filter(|x| matches!(x, Sel::SketchCurve { .. })).cloned().collect();
+            let mut chained: Vec<Option<Chain>> = chains(app, &curves)?.into_iter().map(Some).collect();
+            let mut sections: Vec<Value> = Vec::new();
+            let mut sketches: Vec<u64> = Vec::new();
+            for x in picks {
+                match x {
+                    Sel::Profile { sketch, index } => {
+                        sections.push(json!({"sketch": sketch, "profiles": [index]}));
+                        sketches.push(*sketch);
+                    }
+                    Sel::SketchCurve { id, .. } => {
+                        let sk = crate::dialogs::picks_sketch(app, std::slice::from_ref(x), None).ok_or("a picked curve is no longer in a sketch")?;
+                        let holds = |c: &Option<Chain>| matches!(c, Some(Chain::Sketch { sketch, ids }) if *sketch == sk && ids.contains(id));
+                        if let Some(Some(Chain::Sketch { sketch, ids })) = chained.iter_mut().find(|c| holds(c)).map(Option::take) {
+                            sections.push(json!({"sketch": sketch, "curves": ids}));
+                            sketches.push(sketch);
+                        }
+                    }
+                    _ => {}
                 }
             }
-            if order.len() < 2 {
+            sketches.sort_unstable();
+            sketches.dedup();
+            if sketches.len() < 2 {
                 return Err("pick sections in two or more sketches".into());
             }
-            let sections: Vec<Value> = order
-                .iter()
-                .map(|sk| {
-                    let picks: Vec<Sel> = items(inputs, 0).iter().filter(|x| sketch_of(x) == Some(*sk)).cloned().collect();
-                    sheet_picks(app, &picks)
-                })
-                .collect::<Result<_, String>>()?;
             let mut p = json!({ "sections": sections });
             crate::dialogs_sweep::rail_params(app, *rail_fit, [items(inputs, 1), items(inputs, 2)], &mut p)?;
             ("surface.loft", p)

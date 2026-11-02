@@ -12,7 +12,8 @@ use solidcraft_geom::Vec3;
 use super::{CommandSpec, not_in_sketch};
 use crate::params::{UNKNOWN_COMMAND, bad, bool_, expr, expr_problem, req_expr, str_, string_list, string_list_or_default, vec2, vec3};
 use crate::schema::features::{
-    BoundingSolidParams, BoxParams, ConeParams, CylinderParams, ExtrudeParams, FeatureResult, PipeParams, ScaleParams, SphereParams, TorusParams,
+    BoundingSolidParams, BoxParams, ConeParams, CylinderParams, ExtrudeParams, FeatureResult, OffsetPlaneParams, PipeParams, PlaneAtAngleParams,
+    ScaleParams, SphereParams, TorusParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -26,6 +27,8 @@ const CONE_CONTRACT: TypedContract<ConeParams> = TypedContract::new();
 const PIPE_CONTRACT: TypedContract<PipeParams> = TypedContract::new();
 const BOUNDING_SOLID_CONTRACT: TypedContract<BoundingSolidParams> = TypedContract::new();
 const SCALE_CONTRACT: TypedContract<ScaleParams> = TypedContract::new();
+const OFFSET_PLANE_CONTRACT: TypedContract<OffsetPlaneParams> = TypedContract::new();
+const PLANE_AT_ANGLE_CONTRACT: TypedContract<PlaneAtAngleParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.extrude", "Extrude", crate::checked!("solid.extrude", extrude))
@@ -88,7 +91,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.pattern.circular", "Circular Pattern", pattern_circ)
         .at("SOLID", "CREATE")
         .icon("pattern_circ")
-        .params("features: [names] | bodies: [names] | components: [names]; axis: X|Y|Z | construction axis name (followed when edited) | {origin, dir} | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); count; angle? (default 360 deg; partial arcs include both ends); alignment?: left|center|right (default right; original stays fixed); reversed?: bool (Flip; selects the extra side for even centered counts)"),
+        .params("features: [names] | bodies: [names] | components: [names]; axis: X|Y|Z | construction axis name (followed when edited) | {origin, dir} (origin coordinates may be length expressions; the pattern follows them) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); count; angle? (default 360 deg; partial arcs include both ends); alignment?: left|center|right (default right; original stays fixed); reversed?: bool (Flip; selects the extra side for even centered counts)"),
     CommandSpec::new("solid.pattern.path", "Pattern on Path", pattern_path)
         .at("SOLID", "CREATE")
         .icon("pattern_path")
@@ -137,13 +140,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("draft")
         .params("faces: [[x,y,z] points, or face names from model.faces]; angle: expr; neutral: XY|XZ|YZ|plane name|{origin, normal}; pull?: [x,y,z] (default: neutral plane normal); body?"),
-    CommandSpec::new("construct.plane.offset", "Offset Plane", plane_offset)
+    CommandSpec::new("construct.plane.offset", "Offset Plane", crate::checked!("construct.plane.offset", plane_offset))
         .at("SOLID", "CONSTRUCT")
         .icon("plane")
+        .contract(&OFFSET_PLANE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; offset: expr, or through: a point ref (vertex, sketch point, construction point) the plane goes through, parallel to base; name?"),
-    CommandSpec::new("construct.plane.at_angle", "Plane at Angle", plane_angle)
+    CommandSpec::new("construct.plane.at_angle", "Plane at Angle", crate::checked!("construct.plane.at_angle", plane_angle))
         .at("SOLID", "CONSTRUCT")
         .icon("plane_angle")
+        .contract(&PLANE_AT_ANGLE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; axis: X|Y|Z|construction axis name (where it is now)|{origin, dir} | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle: expr; name?"),
     CommandSpec::new("solid.split_face", "Split Face", split_face)
         .at("SOLID", "MODIFY")
@@ -160,7 +167,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("presspull")
         .key("Q")
         .params("face: [x,y,z] and distance: expr (positive adds material, negative cuts), or edges: [[x,y,z]…] and distance (a fillet)"),
-    CommandSpec::new("solid.move", "Move/Copy", move_bodies).at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch).params("bodies: [names]; translate?: [x,y,z] (exprs or numbers); axis?: [x,y,z]; angle?: expr; copy?: bool (default false: keeps the original bodies and transforms a new copy instead of moving them in place)"),
+    CommandSpec::new("solid.move", "Move/Copy", move_bodies).at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch).params("bodies: [names]; translate?: [x,y,z] (exprs or numbers); axis?: [x,y,z]; angle?: expr; copy?: bool (default false: keeps the original bodies and transforms a new copy instead of moving them in place); occurrences?: [occurrence paths, root first] (only with copy: each component is copied as an independent component, as Paste New copies it, and the copy moves by the same translate, axis and angle in the world; the reply lists the copies in occurrences)"),
 ];
 
 /// Where an extrude starts and which way is positive: a point inside the (first) profile or
@@ -1584,8 +1591,8 @@ pub(crate) fn edge_ref_form(e: &Value) -> std::result::Result<EdgeRefForm<'_>, &
     Ok(EdgeRefForm::Index { body, index })
 }
 
-/// Press Pull: a face moves along its normal (an extrude that joins outward or cuts inward); an
-/// edge is rounded (a fillet).
+/// Press Pull: a face moves along its normal (an extrude that joins outward or cuts inward); a
+/// fillet's or chamfer's face changes that feature's size; an edge is rounded (a fillet).
 fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.press_pull";
     let distance = req_expr(cmd, p, "distance")?;
@@ -1597,10 +1604,9 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
     if d.abs() < 1e-9 {
         return Err(bad(cmd, "the distance must not be zero"));
     }
-    // A fillet's or chamfer's face: its size changes by the distance (the feature is edited).
-    if let Some(fp) = vec3(face)
-        && super::face::face_is_planar(s, fp) == Some(false)
-    {
+    // A fillet's or chamfer's face: its size changes by the distance (the feature is edited). A
+    // chamfer's face is flat, so this is asked before whether the face is planar (#4986).
+    if let Some(fp) = vec3(face) {
         let name = solidcraft_doc::naming::face_names_at(&s.model.state(), &[fp]).into_iter().next().unwrap_or_default();
         let fid = solidcraft_doc::persistent_name::made_by(&name);
         if solidcraft_doc::persistent_name::is_blend(&name) {
@@ -1618,8 +1624,10 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
             return Ok(json!({"feature": f.id, "edited": f.name, key: new, "recomputed": out.get("recomputed"), "restored": out.get("restored")}));
         }
         // Another curved face moves along its normal.
-        let r = super::find_command("solid.offset_face").ok_or_else(|| bad(cmd, "solid.offset_face"))?;
-        return (r.run)(s, &json!({"faces": [face], "distance": distance}));
+        if super::face::face_is_planar(s, fp) == Some(false) {
+            let r = super::find_command("solid.offset_face").ok_or_else(|| bad(cmd, "solid.offset_face"))?;
+            return (r.run)(s, &json!({"faces": [face], "distance": distance}));
+        }
     }
     // Pushed in: the extrude cuts the other way by as much (a bare number stays one, so it keeps
     // being read as a bare number typed into the extrude).
@@ -1796,16 +1804,73 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(paths) = copied_components(p)? {
+        return copy_components(s, p, paths);
+    }
     if let Some(plan) = crate::frames::placements_moved(s, p) {
         return move_placements(s, p, plan);
+    }
+    // Bodies in differently placed frames: one Move feature per frame, each moving its bodies
+    // by the world vector and turn mapped into that frame (#9660).
+    if let Some(moves) = crate::frames::split_move(s, p) {
+        return move_split(s, &moves);
     }
     move_body_feature(s, p)
 }
 
-/// A move of several placements of one part (`frames::placements_moved`, #4768): each placement
-/// moved in the world by the move's translation and turn (about the world origin, as the Move
-/// feature turns bodies), and the root component's bodies listed moved as bodies, in one step.
-fn move_placements(s: &mut Session, p: &Value, plan: crate::frames::PlacementMove) -> Result<Value> {
+/// The moves of `frames::split_move`, in one step, with one reply: the features made, and the
+/// bodies made, changed and removed by any of them.
+fn move_split(s: &mut Session, moves: &[Value]) -> Result<Value> {
+    let mut features = Vec::new();
+    let mut lists: [(&str, Vec<Value>); 3] = [("created_bodies", Vec::new()), ("changed_bodies", Vec::new()), ("removed_bodies", Vec::new())];
+    let mut last = Value::Null;
+    for p in moves {
+        let reply = move_body_feature(s, p)?;
+        features.push(reply.get("feature").cloned().unwrap_or(Value::Null));
+        for (key, list) in &mut lists {
+            for name in reply.get(*key).and_then(Value::as_array).into_iter().flatten() {
+                if !list.contains(name) {
+                    list.push(name.clone());
+                }
+            }
+        }
+        last = reply;
+    }
+    if let Some(out) = last.as_object_mut() {
+        if let Some(first) = features.first() {
+            out.insert("feature".into(), first.clone());
+        }
+        out.insert("features".into(), Value::Array(features));
+        for (key, list) in lists {
+            out.insert(key.into(), Value::Array(list));
+        }
+    }
+    Ok(last)
+}
+
+/// The occurrence paths a copying move copies (`occurrences`, root first), `None` when it names
+/// none. A component is only ever copied, so the move must set `copy`.
+fn copied_components(p: &Value) -> Result<Option<Vec<Vec<u64>>>> {
+    let cmd = "solid.move";
+    let Some(list) = p.get("occurrences") else { return Ok(None) };
+    let paths: Vec<Vec<u64>> = list
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|path| path.as_array().and_then(|ids| ids.iter().map(Value::as_u64).collect::<Option<Vec<u64>>>()).filter(|ids| !ids.is_empty()))
+        .collect::<Option<_>>()
+        .ok_or_else(|| bad(cmd, "`occurrences` must list occurrence paths, each a list of occurrence ids"))?;
+    if paths.is_empty() || paths.len() > 1000 {
+        return Err(bad(cmd, "`occurrences` must list 1…1000 occurrence paths"));
+    }
+    if p.get("copy").and_then(Value::as_bool) != Some(true) {
+        return Err(bad(cmd, "`occurrences` are copied: set `copy` to true"));
+    }
+    Ok(Some(paths))
+}
+
+/// The translation (mm) and turn (radians, if any) of a move in the world.
+fn world_move(s: &Session, p: &Value) -> Result<(Vec<f64>, Option<f64>)> {
     let cmd = "solid.move";
     let length = |v: &Value| -> Result<f64> {
         match v {
@@ -1823,6 +1888,79 @@ fn move_placements(s: &mut Session, p: &Value, plan: crate::frames::PlacementMov
         Some(a) => Some(s.doc.eval(&a, Kind::Angle).map_err(|e| bad(cmd, format!("angle: {e}")))?),
         None => None,
     };
+    Ok((translate, angle))
+}
+
+/// A copying move of components (`occurrences`, with `copy`): each picked placement's component is
+/// copied as an independent component, as Paste New copies it (`component.paste_new`), placed where
+/// the placement is; the copy then moves by the move's translation and turn in the world, as
+/// `occurrence.move` moves a placement. The bodies listed are copied as bodies (see
+/// `move_body_feature`) in the same command, so the whole move is one undo step.
+fn copy_components(s: &mut Session, p: &Value, paths: Vec<Vec<u64>>) -> Result<Value> {
+    let cmd = "solid.move";
+    let (translate, angle) = world_move(s, p)?;
+    let paste = super::find_command("component.paste_new").ok_or_else(|| EngineError::UnknownCommand("component.paste_new".into()))?;
+    let mover = super::find_command("occurrence.move").ok_or_else(|| EngineError::UnknownCommand("occurrence.move".into()))?;
+    // A component inside another one copied here comes with its parent's copy.
+    let mut paths: Vec<Vec<u64>> = paths.into_iter().fold(Vec::new(), |mut out, path| {
+        if !out.contains(&path) {
+            out.push(path);
+        }
+        out
+    });
+    let all = paths.clone();
+    paths.retain(|p| !all.iter().any(|q| q.len() < p.len() && p.starts_with(q)));
+    // The bodies are given in the world; their own component's frame turns them, as a move of bodies
+    // alone is turned, so they are mapped the same way, before any copy is made.
+    let has_bodies = match p.get("bodies") {
+        None => false,
+        Some(Value::Array(bodies)) => !bodies.is_empty(),
+        Some(_) => return Err(bad(cmd, "`bodies` must list bodies")),
+    };
+    let mut rest = p.clone();
+    if let Some(object) = rest.as_object_mut() {
+        object.remove("occurrences");
+    }
+    // Bodies in differently placed frames split by frame (`frames::split_move`, #9660), as a move of them alone does.
+    let split = crate::frames::split_move(s, &rest);
+    let bodies = (has_bodies && split.is_none()).then(|| crate::frames::to_local(s, cmd, &rest).unwrap_or_else(|| rest.clone()));
+    let mut copies = Vec::new();
+    for path in &paths {
+        let Some(&source) = path.last() else { continue };
+        let component =
+            s.doc.occurrences.iter().find(|o| o.id == source).map(|o| o.component).ok_or_else(|| bad(cmd, "`occurrences` names no occurrence"))?;
+        let made = paste.run_nested(s, &json!({"component": component, "occurrence": source, "path": path}))?;
+        let copy = made.get("occurrence").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "the copy has no occurrence"))?;
+        // The copy is placed by the same parent placement as its source.
+        let mut at = path[..path.len() - 1].to_vec();
+        at.push(copy);
+        let mut q = json!({"occurrence": copy, "path": at, "space": "world", "translate": translate});
+        if let Some(axis) = p.get("axis") {
+            q["axis"] = axis.clone();
+        }
+        if let Some(angle) = angle {
+            q["angle"] = json!(angle);
+        }
+        mover.run_nested(s, &q)?;
+        copies.push(copy);
+    }
+    // The reply is a solid.move reply: the bodies' feature reply, with the copies made alongside.
+    let mut out = match (split, bodies) {
+        (Some(moves), _) => move_split(s, &moves)?,
+        (None, Some(local)) => move_body_feature(s, &local)?,
+        (None, None) => json!({}),
+    };
+    if let Some(object) = out.as_object_mut() {
+        object.insert("occurrences".into(), json!(copies));
+    }
+    Ok(out)
+}
+
+/// A move of several placements of one part (`frames::placements_moved`, #4768): each placement
+/// moved in the world by the move's translation and turn (about the world origin, as the Move
+/// feature turns bodies), and the root component's bodies listed moved as bodies, in one step.
+fn move_placements(s: &mut Session, p: &Value, plan: crate::frames::PlacementMove) -> Result<Value> {
+    let (translate, angle) = world_move(s, p)?;
     let spec = super::find_command("occurrence.move").ok_or_else(|| EngineError::UnknownCommand("occurrence.move".into()))?;
     let mut moved = Vec::new();
     for path in &plan.paths {
@@ -1885,6 +2023,7 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
     )?;
     if copy {
         copy_keeps_appearance(s, &reply, &bodies, cmd)?;
+        super::print_face::copies_keep_print_faces(s, &reply, &bodies);
     }
     Ok(reply)
 }
@@ -1946,17 +2085,22 @@ fn named_axis_line(s: &Session, p: &Value, cmd: &str) -> Result<(Vec3, Vec3, Opt
             _ => Err(bad(cmd, "axis must be X, Y, Z, a construction axis, {origin, dir} or {edge|face: [x,y,z]}")),
         },
         Some(o @ Value::Object(_)) => {
-            let origin = match o.get("origin") {
-                None => Vec3::ZERO,
-                Some(v) => vec3(v).ok_or_else(|| {
-                    bad(cmd, "axis.origin must contain three finite numeric coordinates in millimetres; expressions are not supported")
-                })?,
-            };
-            let dir = o.get("dir").and_then(vec3).and_then(|d| d.normalized()).ok_or_else(|| bad(cmd, "axis needs a non-zero `dir`"))?;
+            let (origin, dir) = axis_line_object(o).map_err(|why| bad(cmd, why))?;
             Ok((origin, dir, None))
         }
         _ => Err(bad(cmd, "`axis` is required")),
     }
+}
+
+/// An axis line `{origin?, dir}` as [`named_axis_line`] reads it: the origin (default: the
+/// origin) and the unit direction.
+pub(crate) fn axis_line_object(o: &Value) -> std::result::Result<(Vec3, Vec3), &'static str> {
+    let origin = match o.get("origin") {
+        None => Vec3::ZERO,
+        Some(v) => vec3(v).ok_or("axis.origin must contain three finite numeric coordinates in millimetres; expressions are not supported")?,
+    };
+    let dir = o.get("dir").and_then(vec3).and_then(|d| d.normalized()).ok_or("axis needs a non-zero `dir`")?;
+    Ok((origin, dir))
 }
 
 /// A pattern feature, or for `components`, new occurrences of them at each placement.
@@ -2032,16 +2176,32 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
     finish_pattern(s, p, features, pattern, bodies)
 }
 
+/// The line a circular pattern turns about, as [`axis_line`] reads it, except that the origin of
+/// `{origin, dir}` may be length expressions, kept so the pattern follows them (#10852).
+fn pattern_axis(s: &Session, p: &Value, cmd: &str) -> Result<(PointExpr, Vec3, Option<solidcraft_doc::construct::GeoRef>, Option<FeatureName>)> {
+    if let Some(a @ Value::Object(o)) = p.get("axis")
+        && o.contains_key("origin")
+        && !super::is_model_axis(a)
+    {
+        // Read under its full name, so a refusal says which origin it means.
+        let origin = point_param(s, &json!({ "axis.origin": o.get("origin") }), "axis.origin", cmd)?;
+        let dir = a.get("dir").and_then(vec3).and_then(|d| d.normalized()).ok_or_else(|| bad(cmd, "axis needs a non-zero `dir`"))?;
+        return Ok((origin.unwrap_or_else(|| solidcraft_doc::point_expr(Vec3::ZERO)), dir, None, None));
+    }
+    let (origin, dir, axis_ref, axis_feature) = axis_line(s, p, cmd)?;
+    Ok((solidcraft_doc::point_expr(origin), dir, axis_ref, axis_feature))
+}
+
 fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.pattern.circular";
     let (features, bodies) = pattern_sources(s, p, cmd)?;
-    let (origin, axis, axis_ref, axis_feature) = axis_line(s, p, cmd)?;
+    let (origin, axis, axis_ref, axis_feature) = pattern_axis(s, p, cmd)?;
     let count = req_expr(cmd, p, "count")?;
     check_count(s, &count, cmd, "count")?;
     let angle = expr(p, "angle").unwrap_or_else(|| "360 deg".into());
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let pattern = solidcraft_doc::PatternKind::Circular {
-        origin: Position(origin),
+        origin,
         axis: Dir(axis),
         count,
         angle,
@@ -2086,7 +2246,12 @@ fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
     let plane = plane_param(s, p.get("plane"), cmd)?;
     let combine = bool_(p, "combine").unwrap_or(false);
     let (bodies, placements) = placed_bodies(s, bodies, cmd)?;
-    add_feature(s, p, FeatureKind::Mirror { features, plane, bodies: bodies.into_iter().map(BodyName).collect(), combine, placements })
+    let reply =
+        add_feature(s, p, FeatureKind::Mirror { features, plane, bodies: bodies.iter().cloned().map(BodyName).collect(), combine, placements })?;
+    if !combine {
+        super::print_face::copies_keep_print_faces(s, &reply, &bodies);
+    }
+    Ok(reply)
 }
 
 /// Bodies picked where the viewport shows them: each world name ("Body1", or "Body1 (Occ:2)"
@@ -2129,13 +2294,31 @@ pub(super) fn origin_plane_alias(name: &str) -> Option<&'static str> {
 /// A construction plane may not take an origin plane's name (`XY`, `Top`...): a plane
 /// parameter could then mean either.
 pub(super) fn check_plane_name(name: &str, cmd: &str) -> Result<()> {
-    if solidcraft_geom::Plane::named(name.trim()).is_some() {
-        return Err(bad(
-            cmd,
-            format!("`{}` is reserved for an origin plane (XY, XZ, YZ, Top, Front, Right); give the construction plane another name", name.trim()),
-        ));
+    match plane_name_problem(name) {
+        Some(why) => Err(bad(cmd, why)),
+        None => Ok(()),
     }
-    Ok(())
+}
+
+/// What [`check_plane_name`] says about `name`, or `None` when a construction plane may take it.
+pub(crate) fn plane_name_problem(name: &str) -> Option<String> {
+    solidcraft_geom::Plane::named(name.trim()).map(|_| {
+        format!("`{}` is reserved for an origin plane (XY, XZ, YZ, Top, Front, Right); give the construction plane another name", name.trim())
+    })
+}
+
+/// The forms [`plane_param`] takes, for its messages.
+pub(crate) const PLANE_FORMS: &str =
+    "XY, XZ, YZ, a construction plane name or id, or {origin, normal} (origin coordinates may be length expressions)";
+
+/// The plane an explicit plane object gives through `origin`, as [`plane_param`] reads it: from
+/// `x_dir` and `y_dir` when both are points, else from `normal`; `None` when they don't make one.
+pub(crate) fn explicit_plane(o: &Value, origin: Vec3) -> Option<solidcraft_geom::Plane> {
+    match (o.get("x_dir").and_then(vec3), o.get("y_dir").and_then(vec3), o.get("normal").and_then(vec3)) {
+        (Some(x), Some(y), _) => solidcraft_geom::Plane::new(origin, x, y),
+        (_, _, Some(n)) => solidcraft_geom::Plane::from_normal(origin, n),
+        _ => None,
+    }
 }
 
 /// A plane reference from a parameter: an origin plane, a construction plane (by name or
@@ -2144,7 +2327,7 @@ pub(super) fn check_plane_name(name: &str, cmd: &str) -> Result<()> {
 /// plane reads it here.
 pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<solidcraft_doc::PlaneRef> {
     use solidcraft_doc::PlaneRef;
-    const WANT: &str = "XY, XZ, YZ, a construction plane name or id, or {origin, normal} (origin coordinates may be length expressions)";
+    const WANT: &str = PLANE_FORMS;
     let construction = |r: &str| match s.doc.find_feature(r) {
         Some(f) if matches!(f.kind, FeatureKind::ConstructionPlane { .. }) => Ok(PlaneRef::Construction { feature: f.id.into() }),
         Some(f) => Err(bad(cmd, format!("`{}` is not a construction plane (a plane is {WANT})", f.name))),
@@ -2181,12 +2364,7 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
             };
             let at = |e: &str| s.doc.eval(e, Kind::Length).unwrap_or(0.0);
             let here = Vec3::new(at(&origin[0]), at(&origin[1]), at(&origin[2]));
-            let pl = match (o.get("x_dir").and_then(vec3), o.get("y_dir").and_then(vec3), o.get("normal").and_then(vec3)) {
-                (Some(x), Some(y), _) => solidcraft_geom::Plane::new(here, x, y),
-                (_, _, Some(n)) => solidcraft_geom::Plane::from_normal(here, n),
-                _ => None,
-            };
-            let plane = pl.ok_or_else(|| bad(cmd, "plane needs x_dir and y_dir, or normal"))?;
+            let plane = explicit_plane(o, here).ok_or_else(|| bad(cmd, "plane needs x_dir and y_dir, or normal"))?;
             if origin.iter().all(|e| solidcraft_doc::expr::is_literal(e)) {
                 return Ok(PlaneRef::Custom { plane });
             }

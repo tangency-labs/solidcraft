@@ -240,3 +240,28 @@ fn replace_face_takes_the_face_by_name() {
     // A's top moves up to B's, 15 high: 10 x 10 x 15.
     assert!((volume(&mut s, "A") - 1500.0).abs() < 1e-6, "{}", volume(&mut s, "A"));
 }
+
+/// A face name on two bodies, each with one such face (two bodies one extrude made, the pieces of
+/// a split body), is not a split face: a hole placed on one of them gives no warning (#10699).
+#[test]
+fn a_face_name_on_two_bodies_is_no_split_face() {
+    let said = |s: &Session, feature: &str| {
+        let r = s.model.result(s.doc.find_feature(feature).unwrap().id).unwrap();
+        format!("{}{}", r.error.clone().unwrap_or_default(), r.warning.clone().unwrap_or_default())
+    };
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [14, 0], "p1": [24, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10, "operation": "new"}));
+    run(&mut s, "solid.hole", json!({"position": [5, 5, 10], "diameter": 5, "depth": 5, "name": "Hole1"}));
+    assert_eq!(said(&s, "Hole1"), "");
+    assert!((volume(&mut s, "Body1") - (1000.0 - PI * 2.5 * 2.5 * 5.0)).abs() < 0.1);
+    assert!((volume(&mut s, "Body2") - 1000.0).abs() < 1e-6);
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
+    run(&mut s, "solid.split_body", json!({"body": "Body1", "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}}));
+    run(&mut s, "solid.hole", json!({"position": [30, 10, 10], "diameter": 5, "name": "Hole1", "targets": ["Body1"]}));
+    assert_eq!(said(&s, "Hole1"), "");
+}

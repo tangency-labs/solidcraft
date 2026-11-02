@@ -1153,7 +1153,7 @@ mod tests {
         let mut app = app();
         assert!(!active(&app), "off by default");
         app.preferences.mouse_gestures.enabled = true;
-        for nav in ["fusion", "inventor", "alias", "blender", "tinkercad", "openscad", "touchpad"] {
+        for nav in ["fusion", "creo", "inventor", "alias", "blender", "tinkercad", "openscad", "touchpad"] {
             app.preferences.nav = nav.into();
             assert!(!active(&app), "{nav}: gestures only work with the SolidWorks mouse mode");
         }

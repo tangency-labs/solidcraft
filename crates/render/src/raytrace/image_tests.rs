@@ -351,6 +351,69 @@ fn triangle_task(cancel: CancelToken) -> ImageTask {
     ImageTask::new(scene, request, cancel, Default::default()).unwrap()
 }
 #[test]
+fn face_looks_cost_one_unit_per_triangle_and_the_first_entry_wins() {
+    use std::sync::Arc;
+    let (columns, rows) = (8u32, 4u32);
+    let mut positions = Vec::new();
+    for y in 0..=rows {
+        for x in 0..=columns {
+            positions.push(Vec3::new(f64::from(x) * 5.0 - 20.0, f64::from(y) * 5.0 - 10.0, 0.0));
+        }
+    }
+    let (mut triangles, mut tri_face) = (Vec::new(), Vec::new());
+    for y in 0..rows {
+        for x in 0..columns {
+            let a = y * (columns + 1) + x;
+            triangles.extend([[a, a + 1, a + columns + 2], [a, a + columns + 2, a + columns + 1]]);
+            tri_face.extend([y * columns + x; 2]);
+        }
+    }
+    let count = positions.len();
+    let mesh = solidcraft_geom::Mesh { positions, normals: vec![Vec3::Z; count], triangles, tri_face, ..Default::default() };
+    let look = |face: u32, color: [u8; 3]| crate::FaceAppearance { face, color, opacity: 1.0, surface: None, transmission: None };
+    let mut faces: Vec<_> = (0..columns * rows).step_by(2).map(|face| look(face, [face as u8 * 8, 100, 200])).collect();
+    // Later duplicates never replace the first entry for a face.
+    faces.extend([look(2, [1, 2, 3]), look(4, [4, 5, 6])]);
+    let entries = faces.len() as u64;
+    let bounds = mesh.bounds();
+    let scene = ProductScene {
+        meshes: vec![crate::ProductMesh {
+            transmission: None,
+            name: "face look fixture".into(),
+            mesh: Arc::new(mesh),
+            color: [220; 3],
+            opacity: 1.0,
+            surface: None,
+            faces,
+        }],
+        bounds,
+    };
+    let mut request = request();
+    request.camera.distance = 60.0;
+    request.camera.set_view(crate::StandardView::Top);
+    let mut task = ImageTask::new(scene, request, CancelToken::default(), Default::default()).unwrap();
+    let before = task.work.used();
+    for _ in 0..10_000 {
+        if task.builder.is_some() || task.bvh.is_some() {
+            break;
+        }
+        assert!(matches!(task.step(1).unwrap(), TaskPoll::Pending(_)));
+    }
+    assert!(task.builder.is_some() || task.bvh.is_some(), "preparation did not finish");
+    let triangles = u64::from(2 * columns * rows);
+    // One unit per triangle and per face entry, plus the end of the body and the
+    // hand-over to the BVH builder; scanning the entries per triangle cost ~T*F.
+    assert_eq!(task.work.used() - before, triangles + entries + 2);
+    let surface =
+        |c: [u8; 3]| OpaqueSurface::new(Vec3::new(srgb8_to_linear(c[0]), srgb8_to_linear(c[1]), srgb8_to_linear(c[2])), 0.0, 0.7, 1.5).unwrap();
+    assert_eq!(task.looks.len() as u64, triangles);
+    for look in &task.looks {
+        let face = look.face.unwrap();
+        let expected = if face % 2 == 0 { [face as u8 * 8, 100, 200] } else { [220; 3] };
+        assert_eq!(look.surface, surface(expected), "face {face}");
+    }
+}
+#[test]
 fn build_primary_and_shadows_share_cumulative_work_and_exhaust_atomically() {
     let mut task = triangle_task(CancelToken::default());
     let mut previous = 0;

@@ -348,3 +348,19 @@ fn name_list_gives_the_name_the_width_the_other_cells_leave() {
         assert_eq!(scenario::count_of("dialog:name:b.step:cut"), Some(0.0));
     }
 }
+
+/// #8563: names sort in natural order: numbers by value, letters without regard to case.
+#[test]
+fn natural_order_compares_numbers_by_value_and_ignores_case() {
+    let mut names = vec!["d10", "width", "d2", "Alpha", "d1", "alpha", "Beta", "d02", "x", "x1", "p99999999999999999999999", "p100"];
+    Sort::Ascending.apply(&mut names, |s| *s);
+    assert_eq!(names, ["Alpha", "alpha", "Beta", "d1", "d2", "d02", "d10", "p100", "p99999999999999999999999", "width", "x", "x1"]);
+    Sort::Descending.apply(&mut names, |s| *s);
+    assert_eq!(names, ["x1", "x", "width", "p99999999999999999999999", "p100", "d10", "d02", "d2", "d1", "Beta", "alpha", "Alpha"]);
+    let mut listed = vec!["d10", "d2", "d1"];
+    Sort::Listed.apply(&mut listed, |s| *s);
+    assert_eq!(listed, ["d10", "d2", "d1"], "the listed order is left alone");
+    assert_eq!(natural_cmp("", ""), std::cmp::Ordering::Equal);
+    assert_eq!(natural_cmp("", "a"), std::cmp::Ordering::Less);
+    assert_eq!([Sort::Listed.next(), Sort::Ascending.next(), Sort::Descending.next()], [Sort::Ascending, Sort::Descending, Sort::Listed]);
+}

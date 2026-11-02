@@ -156,7 +156,7 @@ impl CommandSearch {
         response
     }
 
-    fn key(ui: &Ui, right: egui::Pos2, label: &str) -> f32 {
+    pub(super) fn key(ui: &Ui, right: egui::Pos2, label: &str) -> f32 {
         Self::key_with_padding(ui, right, label, Tokens::get().space_10)
     }
 

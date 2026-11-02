@@ -328,13 +328,13 @@ fn tapped_thread_depth_field_keeps_focus_and_typing_separate_from_acceptance() {
     assert_eq!(h.app.session.doc.to_json(), original, "Cancel preserves the accepted design");
 }
 
-/// The upstream Preferences split must retain both Hole controls on Design.
+/// The Preferences split must retain both Hole controls on Tools.
 #[test]
 fn hole_design_preferences_keep_both_controls_and_cancel_after_page_split() {
     let mut h = Harness::new();
-    h.call("ui.prefs", json!({"language":"en", "open":"Design"}));
+    h.call("ui.prefs", json!({"language":"en", "open":"Tools"}));
     let page = rect_of("prefs:page_body").unwrap();
-    for label in ["Snap to face and edge centres", "Move holes by clicking or dragging"] {
+    for label in ["Snap to face and edge centers", "Move holes by clicking or dragging"] {
         let mut point = None;
         for _ in 0..12 {
             point = h.output.accesskit_update.as_ref().and_then(|tree| {
@@ -353,10 +353,35 @@ fn hole_design_preferences_keep_both_controls_and_cancel_after_page_split() {
             h.call("ui.scroll", json!({"x":page.center().x,"y":page.center().y,"delta":-100}));
             h.frames(12);
         }
-        let p = point.unwrap_or_else(|| panic!("Hole preference missing from Design: {label}"));
+        let p = point.unwrap_or_else(|| panic!("Hole preference missing from Tools: {label}"));
         h.call("ui.click", json!({"x":p.x,"y":p.y}));
     }
     assert!(h.app.preferences.hole_snaps && h.app.preferences.hole_moves);
     h.call("ui.prefs", json!({"button":"cancel"}));
     assert!(!h.app.preferences.hole_snaps && !h.app.preferences.hole_moves);
+}
+
+#[test]
+fn editing_a_hole_replaces_its_face_instead_of_adding_one() {
+    // #10692: a Single hole has one place; a second face pick while editing replaces it.
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Base"})).unwrap();
+    h.app.run("solid.box", json!({"corner": [0, 0, 10], "length": 20, "width": 30, "height": 10, "operation": "new", "body_name": "Top"})).unwrap();
+    let hole = h.app.run("solid.hole", json!({"position": [30, 15, 10], "diameter": 6, "name": "Hole1"})).unwrap()["feature"].as_u64().unwrap();
+    h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
+    h.settle();
+    h.step(&json!({"call": "ui.editFeature", "params": {"feature": hole}})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "one place on opening");
+    let on_top = Vec3::new(10.0, 15.0, 20.0);
+    let at = screen(&mut h, on_top);
+    h.step(&json!({"click": at})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "the pick replaces the place, not '2 selected'");
+    assert!(matches!(places(&h).as_slice(), [p] if p.dist(on_top) < 1e-3), "{:?}", places(&h));
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    let (again, position) = last_hole(&h);
+    assert_eq!(again, hole, "the same feature");
+    assert!(position.dist(on_top) < 1e-3, "OK uses the new face: {position:?}");
 }

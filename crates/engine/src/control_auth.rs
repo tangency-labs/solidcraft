@@ -57,10 +57,15 @@ pub fn bind_with_fallback(first: u16, tries: u16) -> Result<std::net::TcpListene
 
 /// The folder of the token files: `<data folder>/control` (`SOLIDCRAFT_CONTROL_DIR` replaces it).
 fn control_dir() -> Option<PathBuf> {
-    match solidcraft_geom::env::var_os("CONTROL_DIR").filter(|d| !d.is_empty()) {
+    match custom_control_dir() {
         Some(d) => Some(PathBuf::from(d)),
         None => Some(crate::recovery::data_dir()?.join("control")),
     }
+}
+
+/// The folder `SOLIDCRAFT_CONTROL_DIR` names in place of the default one.
+fn custom_control_dir() -> Option<std::ffi::OsString> {
+    solidcraft_geom::env::var_os("CONTROL_DIR").filter(|d| !d.is_empty())
 }
 
 /// The token file of the app listening on `port`: `<data folder>/control/<port>.token`
@@ -276,9 +281,19 @@ pub fn tokens_match(a: &str, b: &str) -> bool {
 
 /// Write `token` to `path`, readable and writable only by the user: the folder is made `0700`
 /// and the file `0600` on Unix; on Windows the file's inherited permissions are replaced by one
-/// entry for the user (`icacls`) before the token goes in. A file left by an earlier launch is
-/// replaced. The process file beside it ([`pid_path`]) records this process, best effort.
+/// entry for the user (`icacls`) before the token goes in; when that fails, the still empty file
+/// is removed and no token is written. A file left by an earlier launch is replaced. The process
+/// file beside it ([`pid_path`]) records this process, best effort.
 pub fn write_token_file(path: &Path, token: &str) -> Result<()> {
+    #[cfg(windows)]
+    let restrict = restrict_to_user;
+    #[cfg(not(windows))]
+    let restrict = |_: &Path| Ok(());
+    write_token_file_with(path, token, restrict)
+}
+
+/// [`write_token_file`], with `restrict` limiting the new file to the user (Windows).
+fn write_token_file_with(path: &Path, token: &str, restrict: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
     let dir = path.parent().ok_or_else(|| Error::new(ErrorKind::InvalidInput, "no folder"))?;
     std::fs::create_dir_all(dir)?;
     let _ = std::fs::remove_file(path);
@@ -291,8 +306,11 @@ pub fn write_token_file(path: &Path, token: &str) -> Result<()> {
         opts.mode(0o600);
     }
     let mut f = opts.open(path)?;
-    #[cfg(windows)]
-    restrict_to_user(path)?;
+    if let Err(e) = restrict(path) {
+        drop(f);
+        let _ = std::fs::remove_file(path);
+        return Err(e);
+    }
     f.write_all(token.as_bytes())?;
     f.write_all(b"\n")?;
     f.sync_all()?;
@@ -332,9 +350,32 @@ fn held_by_another(path: &Path, token: &str) -> bool {
 #[cfg(windows)]
 const ICACLS_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// How a run of `icacls` ended.
+#[cfg(any(windows, test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IcaclsEnd {
+    Succeeded,
+    Failed,
+    /// It didn't finish within [`ICACLS_LIMIT`] and was ended.
+    TimedOut,
+}
+
+/// Whether a token may go into a file after `icacls` ended this way. `custom_folder`: the file is
+/// in the folder `SOLIDCRAFT_CONTROL_DIR` names. A timeout is accepted only in the default folder,
+/// the user's own local app data, which other users can't read by default; nothing is known about
+/// the permissions of any other folder.
+#[cfg(any(windows, test))]
+fn restriction_result(end: IcaclsEnd, custom_folder: bool, path: &Path) -> Result<()> {
+    match end {
+        IcaclsEnd::Succeeded => Ok(()),
+        IcaclsEnd::TimedOut if !custom_folder => Ok(()),
+        IcaclsEnd::TimedOut => Err(Error::new(ErrorKind::TimedOut, format!("icacls did not finish in time to restrict {}", path.display()))),
+        IcaclsEnd::Failed => Err(Error::other(format!("icacls failed to restrict {}", path.display()))),
+    }
+}
+
 /// Windows: drop inherited entries and grant only the current user full access. An `icacls`
-/// that doesn't finish in time is ended and the file kept as made: it is in the user's own
-/// local app data folder, which other users can't read by default.
+/// that doesn't finish in time is ended, and [`restriction_result`] decides what that means.
 #[cfg(windows)]
 fn restrict_to_user(path: &Path) -> Result<()> {
     use std::os::windows::process::CommandExt;
@@ -348,10 +389,12 @@ fn restrict_to_user(path: &Path) -> Result<()> {
         .stderr(std::process::Stdio::null())
         .creation_flags(0x0800_0000)
         .spawn()?;
-    match wait_within(child, ICACLS_LIMIT)? {
-        Some(status) if !status.success() => Err(Error::other(format!("icacls failed to restrict {}", path.display()))),
-        _ => Ok(()),
-    }
+    let end = match wait_within(child, ICACLS_LIMIT)? {
+        Some(status) if status.success() => IcaclsEnd::Succeeded,
+        Some(_) => IcaclsEnd::Failed,
+        None => IcaclsEnd::TimedOut,
+    };
+    restriction_result(end, custom_control_dir().is_some(), path)
 }
 
 /// Wait for `child` at most `limit`: its exit status, or `None` (and the child ended) when it
@@ -398,6 +441,39 @@ mod tests {
         assert!(wait_within(quick, Duration::from_secs(5)).unwrap().is_some_and(|s| s.success()));
         let failing = std::process::Command::new("false").spawn().unwrap();
         assert!(wait_within(failing, Duration::from_secs(5)).unwrap().is_some_and(|s| !s.success()));
+    }
+
+    /// #6145's freeze fix stays in the default folder, the user's own; a folder picked with
+    /// `SOLIDCRAFT_CONTROL_DIR` gets no token unless the file was really restricted.
+    #[test]
+    fn only_the_default_folder_accepts_an_icacls_that_timed_out() {
+        let path = Path::new("control/7878.token");
+        for custom in [false, true] {
+            assert!(restriction_result(IcaclsEnd::Succeeded, custom, path).is_ok());
+            assert!(restriction_result(IcaclsEnd::Failed, custom, path).is_err());
+        }
+        assert!(restriction_result(IcaclsEnd::TimedOut, false, path).is_ok());
+        let e = restriction_result(IcaclsEnd::TimedOut, true, path).unwrap_err();
+        assert_eq!(e.kind(), ErrorKind::TimedOut);
+        assert!(e.to_string().contains("7878.token"), "{e}");
+    }
+
+    /// A file that couldn't be restricted is removed, empty and with no process file beside it, and
+    /// the error goes to the caller. A restricted one gets its token.
+    #[test]
+    fn a_token_file_that_could_not_be_restricted_is_removed() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-control-restrict-{}", std::process::id()));
+        let path = dir.join("7879.token");
+        let e = write_token_file_with(&path, "secret-token", |p| {
+            assert_eq!(std::fs::read(p).unwrap(), b"", "restricted before the token goes in");
+            restriction_result(IcaclsEnd::TimedOut, true, p)
+        })
+        .unwrap_err();
+        assert_eq!(e.kind(), ErrorKind::TimedOut);
+        assert!(!path.exists() && !pid_path(&path).exists());
+        write_token_file_with(&path, "secret-token", |p| restriction_result(IcaclsEnd::TimedOut, false, p)).unwrap();
+        assert_eq!(read_token(&path).as_deref(), Some("secret-token"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

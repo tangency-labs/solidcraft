@@ -417,9 +417,9 @@ pub struct FlangeParams {
     pub common: FeatureCommon,
 }
 
-/// Add a field of round perforations over a whole flat sheet: holes in the flat pattern, the DXF
-/// (layer PERFORATION) and the measured volume, not cut into the solid. `participants` changes
-/// nothing.
+/// Add a field of round perforations over a whole flat sheet, or inside a sketch's outline: holes
+/// in the flat pattern, the DXF (layer PERFORATION) and the measured volume, not cut into the
+/// solid. `participants` changes nothing.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct PerforateParams {
@@ -427,8 +427,8 @@ pub struct PerforateParams {
     pub diameter: LengthExpr,
     /// The distance between hole centres, more than the diameter.
     pub pitch: LengthExpr,
-    /// How far the holes stay clear of the sheet's edges, cut-outs and bends, at least 0.
-    /// Default: the diameter.
+    /// How far the holes stay clear of the sheet's edges, cut-outs and bends, and of the outline,
+    /// at least 0. Default: the diameter.
     #[serde(default)]
     pub margin: Option<LengthExpr>,
     /// How the holes are laid out. Default: staggered.
@@ -437,6 +437,18 @@ pub struct PerforateParams {
     /// The sheet metal body. Default: the newest sheet.
     #[serde(default)]
     pub body: Option<String>,
+    /// The field's outline: a sketch, by id or name, on a face of the sheet (or on the flat sheet
+    /// while it is unfolded). Holes go only inside its closed profiles, out of their inner loops,
+    /// on a grid from the outline's lower-left corner; on a folded sheet only in the panels the
+    /// sketch lies on. Default: the whole sheet.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "IdOrName")]
+    pub sketch: Option<IdOrName>,
+    /// Which of the outline sketch's profiles bound the field. Needs `sketch`. Default: all of
+    /// them.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ProfilesParam")]
+    pub profiles: Option<ProfilesParam>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

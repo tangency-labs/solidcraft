@@ -231,7 +231,11 @@ fn move_cursor_towards(
                 }
                 let next = position(&trial);
                 let cost = (target - next).dot(target - next);
-                if !cost.is_finite() || cost >= old_cost - 1e-14 * old_cost.max(1.0) {
+                // The cursor itself must move. Retracting onto the constraints moves it by
+                // rounding even along freedom that can't reach it (the far end of a line held only
+                // by its direction): taking such a step for the rounding moved that end a whole
+                // step, and step after step it walked away or collapsed its line to a point (#8944).
+                if !cost.is_finite() || cost >= old_cost - 1e-14 * old_cost.max(1.0) || next.dist(at) < trial_tol {
                     continue;
                 }
                 if !within_budget(&mut budget, setup_work.saturating_mul(4)) {

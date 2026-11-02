@@ -235,6 +235,117 @@ mod tests {
         let (Some(LinkGeom::Arc { a, .. }), Some(LinkGeom::Line(p, _))) = (out.get(1), out.get(2)) else { panic!("{out:?}") };
         assert!(a.dist(*p) < 1e-9, "{out:?}");
     }
+
+    #[test]
+    fn tangent_snapping_leaves_a_line_further_along_alone() {
+        use solidcraft_geom::Vec2;
+        use solidcraft_sketch::LinkGeom;
+        let v = Vec2::new;
+        let y = |x: f64| 2.0 - (4.0 - x * x).sqrt();
+        // The arc's end at x = 0.5 already meets the next piece; the line along y = 0 ends at
+        // x = 0.3, further along the outline the other way. Snapping onto it would pull the end
+        // off the piece it meets.
+        let mut out = vec![
+            LinkGeom::Arc { c: v(0., 2.), a: v(0.5, y(0.5)), b: v(-1.5, y(-1.5)) },
+            LinkGeom::Line(v(0.3, 0.), v(10., 0.)),
+            LinkGeom::Line(v(0.5, y(0.5)), v(3., 3.)),
+        ];
+        let before = out.clone();
+        super::super::snap_tangent_arcs(&mut out, 0.05);
+        assert_eq!(out.get(1), before.get(1), "{out:?}");
+        let (Some(LinkGeom::Arc { a, .. }), Some(LinkGeom::Line(p, _))) = (out.first(), out.get(2)) else { panic!("{out:?}") };
+        assert!(a.dist(*p) < 1e-9, "{out:?}");
+    }
+
+    #[test]
+    fn tangent_snapping_gives_one_line_to_one_end_of_an_arc() {
+        use solidcraft_geom::Vec2;
+        use solidcraft_sketch::LinkGeom;
+        let v = Vec2::new;
+        let y = |x: f64| 2.0 - (4.0 - x * x).sqrt();
+        // A short arc whose two ends both lie near the end of one line: both snapping onto it
+        // would shrink the arc to the tangent point.
+        let mut out = vec![LinkGeom::Arc { c: v(0., 2.), a: v(-0.2, y(-0.2)), b: v(0.2, y(0.2)) }, LinkGeom::Line(v(-10., 0.), v(0., 0.))];
+        super::super::snap_tangent_arcs(&mut out, 0.05);
+        let Some(LinkGeom::Arc { a, b, .. }) = out.first() else { panic!("{out:?}") };
+        assert!(a.dist(*b) > 0.1, "{out:?}");
+    }
+
+    #[test]
+    fn tangent_snapping_moves_the_other_end_of_an_arc_to_its_next_line() {
+        use solidcraft_geom::Vec2;
+        use solidcraft_sketch::LinkGeom;
+        let v = Vec2::new;
+        let y = |x: f64| 2.0 - (4.0 - x * x).sqrt();
+        let (a, b) = (v(-0.2, y(-0.2)), v(0.2, y(0.2)));
+        // The line along y = 0 ends nearest both ends of the arc but nearer b, which keeps it; a
+        // takes the next line, tangent to the circle at a and ending a little past it.
+        let back = (v(0., 2.) - a).normalized().map(|n| v(-n.y, n.x)).unwrap_or(Vec2::X);
+        let mut out =
+            vec![LinkGeom::Arc { c: v(0., 2.), a, b }, LinkGeom::Line(v(0.1, 0.), v(10., 0.)), LinkGeom::Line(a + back * 10., a + back * 0.35)];
+        super::super::snap_tangent_arcs(&mut out, 0.05);
+        let (Some(LinkGeom::Arc { a, b, .. }), Some(LinkGeom::Line(p, _)), Some(LinkGeom::Line(_, q))) = (out.first(), out.get(1), out.get(2)) else {
+            panic!("{out:?}")
+        };
+        assert!(b.dist(*p) < 1e-9 && a.dist(*q) < 1e-9 && a.dist(*b) > 0.1, "{out:?}");
+    }
+
+    #[test]
+    fn tangent_snapping_closes_a_conic_corner_in_any_order() {
+        use solidcraft_geom::Vec2;
+        use solidcraft_sketch::LinkGeom;
+        // A square of side 150 with a conic round of 10 mm legs at each corner, fitted with lines
+        // and arcs the way a silhouette is, then snapped with the pieces in each order.
+        for rho in [0.1, 0.15, 0.5, 0.8, 0.9] {
+            let w = rho / (1. - rho);
+            let conic = |s: Vec2, apex: Vec2, e: Vec2, t: f64| {
+                let (b0, b1, b2) = ((1. - t) * (1. - t), 2. * t * (1. - t) * w, t * t);
+                (s * b0 + apex * b1 + e * b2) * (1. / (b0 + b1 + b2))
+            };
+            let v = Vec2::new;
+            let corners = [
+                (v(-75., 65.), v(-75., 75.), v(-65., 75.)),
+                (v(65., 75.), v(75., 75.), v(75., 65.)),
+                (v(75., -65.), v(75., -75.), v(65., -75.)),
+                (v(-65., -75.), v(-75., -75.), v(-75., -65.)),
+            ];
+            let mut chain = Vec::new();
+            for (s, apex, e) in corners {
+                chain.extend((0..=40).map(|k| conic(s, apex, e, f64::from(k) / 40.)));
+            }
+            if let Some(&first) = chain.first() {
+                chain.push(first);
+            }
+            let mut fitted = Vec::new();
+            super::super::fit_chain_with_arcs(&chain, Some(212. * 1e-5), &mut fitted, true);
+            assert!(fitted.iter().any(|g| matches!(g, LinkGeom::Arc { .. })), "{fitted:?}");
+            let ends = |g: &LinkGeom| match *g {
+                LinkGeom::Line(s, t) | LinkGeom::Arc { a: s, b: t, .. } => vec![s, t],
+                _ => Vec::new(),
+            };
+            for k in 0..fitted.len() {
+                let mut out = fitted.clone();
+                out.rotate_left(k);
+                super::super::snap_tangent_arcs(&mut out, 212. * 1e-3);
+                // Every end still meets another piece's end. An end left without a line moves a little
+                // when the arc's radius is set from the lines (well under 0.01 mm here); before, ends
+                // pulled onto lines further along left gaps of 0.25 to 0.55 mm.
+                for (i, g) in out.iter().enumerate() {
+                    for e in ends(g) {
+                        let gap = out
+                            .iter()
+                            .enumerate()
+                            .filter(|(j, _)| *j != i)
+                            .flat_map(|(_, h)| ends(h))
+                            .map(|x| x.dist(e))
+                            .fold(f64::INFINITY, f64::min);
+                        assert!(gap < 212. * 1e-3 * 0.02, "rho {rho}, rotation {k}: gap {gap} at {e:?}: {out:?}");
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn boundaries_touching_at_a_vertex_project() {
         // Two squares of one face family meet only at the corner (1, 1): four boundary edges meet

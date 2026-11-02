@@ -85,7 +85,7 @@ fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
         Stage::Look => {
             ui_kit::StageBar::caption(ui, app.tr("render.pick_label"));
             let modes = ["body", "face", "component"];
-            let mut selected = modes.iter().position(|mode| *mode == current_pick_mode(app)).unwrap_or(0);
+            let mut selected = modes.iter().position(|mode| *mode == app.ui.pick_mode()).unwrap_or(0);
             let pick = ui.add_enabled_ui(!crate::render_workspace::result_active(app), |ui| {
                 if ui_kit::segmented(
                     ui,
@@ -198,10 +198,19 @@ pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::render_workspace::assign::selection_bar(app, ui, free);
     crate::render_workspace::assign::replacement_dialog(app, ui.ctx());
     crate::navigation_bar_view::show(app, ui, viewport);
+    crate::shell::register_panel(app, "render:compare-controls", None, None);
+    if !crate::render_workspace::result_active(app) && app.session.render_selected_result().is_some() {
+        let free = if crate::render_workspace::job_busy(app) { Container::below_navigation_row(free) } else { free };
+        let card =
+            Container::navigation_card(ui.ctx(), egui::Id::new("sc_render_compare_controls"), free.center_top(), egui::Align2::CENTER_TOP, |ui| {
+                crate::render_workspace::comparison_controls(app, ui)
+            });
+        crate::shell::register_panel(app, "render:compare-controls", Some(card.response.rect), None);
+    }
     if !focused(app) {
         shots_pill(app, ui, free);
     }
-    crate::viewport::transient_messages(app, ui, viewport);
+    crate::viewport::transient_messages(app, ui, viewport, None);
 }
 
 /// Shared kit chip at the Browser's remembered side, below the stage bar.
@@ -223,16 +232,6 @@ pub(crate) fn dock_chip(app: &mut SolveApp, ui: &mut egui::Ui, id: &'static str,
             }
         });
     crate::shell::register_panel(app, id, Some(chip.response.rect), None);
-}
-
-fn current_pick_mode(app: &SolveApp) -> &'static str {
-    if app.ui.pick_components {
-        "component"
-    } else if app.ui.pick_bodies {
-        "body"
-    } else {
-        "face"
-    }
 }
 
 fn shots_pill(app: &mut SolveApp, ui: &mut egui::Ui, free: Rect) {

@@ -39,6 +39,11 @@ pub struct RenderBrowser {
     pub open: bool,
 }
 
+/// Empty input for the read-only viewport effect query.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StatusItemsParams {}
+
 /// Show or hide the View angles readout under the orientation gizmo (#6032): the view's pitch, yaw
 /// and roll in degrees (the angles of `view.apply`'s camera, which takes them in radians) and Ortho
 /// or Persp for the projection. A display setting the app keeps: not saved with the design, not an

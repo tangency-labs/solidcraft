@@ -143,6 +143,8 @@ sheet_flange
 sheet_hem
   remap_bodies: body
 sheet_perforate
+  sketches: [1]
+  remap_refs: sketch
   remap_bodies: body
 sheet_fold
   sketches: [7]

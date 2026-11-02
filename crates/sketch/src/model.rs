@@ -8,6 +8,8 @@ pub const MAX_POINTS: usize = 20_000;
 pub const MAX_CONSTRAINTS: usize = 40_000;
 /// Curves need points, so this follows the point cap.
 pub const MAX_CURVES: usize = MAX_POINTS;
+// [`SketchError::TooLarge`]'s message names this number; keep them matched (#10874).
+const _: () = assert!(MAX_POINTS == 20_000);
 
 /// Largest coordinate or dimension value (mm) a sketch accepts.
 pub const MAX_COORD: f64 = 1e9;
@@ -37,7 +39,12 @@ pub enum SketchError {
     Duplicate(String),
     #[error("invalid value: {0}")]
     Invalid(String),
-    #[error("sketch is too large")]
+    /// Cap hit on points, curves or constraints ([`MAX_POINTS`], [`MAX_CURVES`],
+    /// [`MAX_CONSTRAINTS`]). Insert SVG/DXF of a dense drawing (a floorplan) often hits this;
+    /// scale alone does not reduce how many curves the file has (#10874).
+    #[error(
+        "sketch is too large (at most 20000 points or curves); simplify the drawing or split it across sketches — changing scale does not reduce how many curves it has"
+    )]
     TooLarge,
 }
 
@@ -730,6 +737,9 @@ pub struct Sketch {
     /// 3D curves (world coordinates) carried by the sketch.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wires: Vec<crate::wire::Wire>,
+    /// Curves drawn from formulas (#8352): the fit point splines they place, with their formulas.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub equations: Vec<crate::equation::EquationCurve>,
     /// Next number per id prefix (`l` → l1, l2…).
     #[serde(default)]
     counters: std::collections::BTreeMap<String, u64>,
@@ -759,6 +769,7 @@ impl Sketch {
             offsets: Vec::new(),
             freeform_offsets: Vec::new(),
             wires: Vec::new(),
+            equations: Vec::new(),
             counters: Default::default(),
             view: SketchView::default(),
         }
@@ -823,16 +834,20 @@ impl Sketch {
     }
 
     pub fn point_index(&self, id: &str) -> Option<usize> {
+        #[cfg(test)]
+        crate::tests::count_id_search();
         self.points.iter().position(|p| p.id == id)
     }
     pub fn curve_index(&self, id: &str) -> Option<usize> {
+        #[cfg(test)]
+        crate::tests::count_id_search();
         self.curves.iter().position(|c| c.id == id)
     }
     pub fn point(&self, i: usize) -> Option<Vec2> {
         self.points.get(i).map(|p| p.pos)
     }
 
-    fn check_pos(p: Vec2) -> Result<Vec2> {
+    pub(crate) fn check_pos(p: Vec2) -> Result<Vec2> {
         if in_range(p) { Ok(p) } else { Err(SketchError::Invalid(format!("point {:?}", [p.x, p.y]))) }
     }
 
@@ -1680,7 +1695,7 @@ impl Sketch {
     /// Points held together only through points about to go stay together: two rectangles'
     /// corners made coincident with one arc end are tied to each other when a trim takes that
     /// end away, instead of coming apart where they still meet.
-    fn keep_ties_through(&mut self, gone: &[usize]) {
+    pub(crate) fn keep_ties_through(&mut self, gone: &[usize]) {
         if gone.is_empty() {
             return;
         }
@@ -1717,13 +1732,15 @@ impl Sketch {
         }
     }
 
-    fn point_used_by_curve(&self, p: usize) -> bool {
+    pub(crate) fn point_used_by_curve(&self, p: usize) -> bool {
         self.curves.iter().any(|c| c.kind.uses(p))
     }
 
     /// Remove curves only (points stay), remapping constraints.
     fn drop_curves(&mut self, which: &[usize]) {
         self.prune_offsets_for_removed_curves(which);
+        let removed: std::collections::BTreeSet<String> = which.iter().filter_map(|i| self.curves.get(*i).map(|c| c.id.clone())).collect();
+        self.prune_equations(&removed);
         let mut cmap = vec![None; self.curves.len()];
         let mut n = 0;
         for (i, slot) in cmap.iter_mut().enumerate() {

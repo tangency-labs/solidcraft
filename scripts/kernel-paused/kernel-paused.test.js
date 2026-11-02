@@ -80,6 +80,20 @@ test('a pull request outside the kernel is left alone', async () => {
   assert.deepEqual(calls, []);
 });
 
+test('a pull request with a kernel topic in its title but no kernel files is left alone', async () => {
+  const { github, calls } = fake({ files: ['crates/ui-egui/src/dialogs.rs'] });
+  const pr = { number: 10, title: 'Fillet dialog: a clearer radius field', body: '', draft: false, node_id: 'PR_3', user: { login: 'someone' } };
+  await paused.handleOpened({ github, context: { repo, payload: { pull_request: pr } } });
+  assert.deepEqual(calls, []);
+});
+
+test('a pull request that changes crates/geom is labelled', async () => {
+  const { github, calls } = fake({ files: ['crates/geom/src/lib.rs'] });
+  const pr = { number: 11, title: 'Tidy a helper', body: '', draft: false, node_id: 'PR_4', user: { login: 'someone' } };
+  await paused.handleOpened({ github, context: { repo, payload: { pull_request: pr } } });
+  assert.deepEqual(names(calls), ['addLabels']);
+});
+
 test('a kernel discussion is labelled', async () => {
   const { github, calls } = fake();
   const d = { number: 3, title: 'Ideas for better booleans', body: '', node_id: 'D_1', user: { login: 'someone' } };

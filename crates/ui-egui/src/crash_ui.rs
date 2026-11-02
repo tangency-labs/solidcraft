@@ -309,7 +309,41 @@ mod tests {
     fn inventory_actions_details_empty_state_and_keyboard_remain_reachable() {
         let d = folder("inventory");
         let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
+        h.app.home.open = false;
         h.app.crashes.folder = Some(d.clone());
+        let assert_general_count = |h: &mut crate::scenario::Harness, count: usize| {
+            // The fixture folder was assigned after startup; programmatic Preferences uses the cached inventory.
+            h.app.crashes.refresh();
+            for theme in ["light", "dark"] {
+                h.call("ui.prefs", json!({"open":"General", "theme":theme}));
+                crate::prefs::reveal_preference(h, "prefs:crash_count");
+                assert_eq!(h.app.crashes.saved_count(), count);
+                assert!(h.widget(&format!("{count} saved")).is_some());
+                let badge = crate::scenario::rect_of("prefs:crash_count").unwrap();
+                assert!((badge.height() - 18.0).abs() < 0.5);
+                assert!(crate::scenario::rect_of("prefs:page_body").unwrap().contains_rect(badge));
+                let t = crate::theme::Tokens::get();
+                let fill = if count == 0 { t.dialog_footer } else { t.pref_note_fill };
+                assert!(
+                    h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect == badge && rect.fill == fill)),
+                    "{theme}: count tone reflects reports waiting"
+                );
+                let buttons: Vec<_> = h
+                    .output
+                    .accesskit_update
+                    .as_ref()
+                    .unwrap()
+                    .nodes
+                    .iter()
+                    .filter(|(_, node)| node.role() == egui::accesskit::Role::Button && node.label() == Some(h.app.tr("prefs.crash_reports")))
+                    .collect();
+                assert_eq!(buttons.len(), 1);
+                assert!(!buttons[0].1.is_disabled(), "opening reports stays available even at zero");
+                h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
+            }
+        };
+        assert_general_count(&mut h, 1);
         super::open(&mut h.app);
         h.frames(5);
         for handle in [
@@ -349,6 +383,7 @@ mod tests {
         assert!(h.app.crashes.reports.is_empty());
         h.step(&json!({"key":"Escape"})).unwrap();
         assert!(!h.app.crashes.open);
+        assert_general_count(&mut h, 0);
         let _ = std::fs::remove_dir_all(d);
     }
 }

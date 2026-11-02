@@ -2,7 +2,8 @@
 //! as `stand_up:stand`, `stand_up:leave` and `stand_up:never`, it stays up through a camera move
 //! and a command until answered, and `ui.prefs {"stand_up": false}` leaves the file as it is.
 //! A file from a program not known to save Y up gets a small note instead by default (#7717),
-//! with `stand_up:stand`, `stand_up:never` and `stand_up:dismiss`; Preferences picks the dialog or nothing.
+//! with `stand_up:stand`, `stand_up:never` and its close (×), `toast:stand_up:close` (also published
+//! as `stand_up:dismiss`, the Close button's handle, #7971); Preferences picks the dialog or nothing.
 use serde_json::json;
 use solidcraft_ui_egui::prefs::StandUpUnknown;
 use solidcraft_ui_egui::scenario::Harness;
@@ -256,9 +257,14 @@ fn an_unknown_exporter_lying_on_its_back_gets_the_note_not_the_dialog() {
     assert!(h.app.stand_up_note, "as the note");
     assert!(painted(&h, "Did this part open the wrong way up?"));
     assert!(h.widget("Stand this part up?").is_none(), "no dialog");
-    for name in ["stand_up:stand", "stand_up:never", "stand_up:dismiss"] {
+    for name in ["stand_up:stand", "stand_up:never", "toast:stand_up:close", "stand_up:dismiss"] {
         assert!(h.at(&json!({"handle": name})).is_ok(), "{name} is published");
     }
+    // No Close button (#7971): the only control named Close is the note's ×, which the old handle finds.
+    let close = h.at(&json!({"handle": "toast:stand_up:close"})).unwrap();
+    let near = |p: [f64; 2]| (p[0] - close[0]).abs() < 1.0 && (p[1] - close[1]).abs() < 1.0;
+    assert!(h.widget("Close").is_some_and(near), "the × is the Close: {:?} at {close:?}", h.widget("Close"));
+    assert!(near(h.at(&json!({"handle": "stand_up:dismiss"})).unwrap()));
     assert!(h.at(&json!({"handle": "stand_up:leave"})).is_err(), "the dialog's buttons are not");
     // It doesn't hold anything up: the view and commands work while it shows.
     h.run(&json!([{"camera": {"yaw": 0.6, "pitch": 0.4}}, {"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 1, "width": 1, "height": 1, "corner": [100, 0, 0]}}}]))
@@ -328,7 +334,7 @@ fn the_notes_dont_ask_again_turns_the_offer_off() {
 #[test]
 fn the_note_closes_on_dismiss_and_by_itself() {
     let mut h = opened_box(ON_ITS_BACK, UNKNOWN, |_| {});
-    h.run(&json!([{"click": {"handle": "stand_up:dismiss"}}])).unwrap();
+    h.run(&json!([{"click": {"handle": "toast:stand_up:close"}}])).unwrap();
     h.frames(3);
     assert!(h.app.stand_up.is_none(), "dismissed");
     assert!(h.app.preferences.offer_stand_up, "the preference stays");

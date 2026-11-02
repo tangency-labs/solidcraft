@@ -149,3 +149,63 @@ fn play(h: &mut Harness) {
     }
     h.frames(2);
 }
+
+#[test]
+fn trimming_construction_source_and_offsets_by_click_or_drag_is_independent() {
+    for drag in [false, true] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        run(&mut h, "sketch.create", json!({"plane":"XY"}));
+        run(&mut h, "sketch.line", json!({"points":[[0,0],[40,40]],"construction":true,"infer":false,"connect":false,"ids":["source"]}));
+        let out = run(&mut h, "sketch.offset", json!({"curves":["source"],"distance":2,"symmetric":true,"chain":false}));
+        let parameter = out["param"].as_str().unwrap().to_string();
+        let mut curves = vec!["source".to_string()];
+        curves.extend(out["curves"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()));
+        run(&mut h, "sketch.line", json!({"points":[[-20,20],[60,20]],"infer":false,"connect":false}));
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 100.0;
+        h.frames(3);
+        h.call("ui.start", json!({"command":"sketch.trim"}));
+        h.frames(2);
+        let before = h.app.session.doc.to_json();
+        let undo = h.app.session.undo.len();
+        if drag {
+            let a = screen(&mut h, 4.0, 5.0);
+            let b = screen(&mut h, 15.0, 5.0);
+            let mut path = vec![a];
+            path.extend(steps(a, b, 16));
+            let c = screen(&mut h, -10.0, 5.0);
+            path.extend(steps(b, c, 16));
+            path.extend(steps(c, b, 16));
+            press_and_move(&mut h, &path);
+            assert_eq!(h.app.session.doc.to_json(), before);
+            release(&mut h, b);
+        } else {
+            let points = [[10.0, 10.0], [10.0 - 2f64.sqrt(), 10.0 + 2f64.sqrt()], [10.0 + 2f64.sqrt(), 10.0 - 2f64.sqrt()]];
+            for point in points {
+                h.step(&json!({"click":{"sketch":point}})).unwrap();
+                h.frames(2);
+            }
+        }
+        assert_eq!(h.app.session.undo.len(), undo + if drag { 1 } else { 3 }, "drag {drag}: {:?}", h.app.status);
+        let sk = sketch(&h);
+        assert_eq!(
+            sk.constraints.iter().filter(|c| c.param.as_deref() == Some(&parameter)).count(),
+            2,
+            "distance dimensions survive actual Trim gestures"
+        );
+        let Shape::Line { a: origin, b: end } = sk.shape(sk.curve_index("source").unwrap()).unwrap() else { panic!("source line") };
+        let direction = (end - origin).normalized().unwrap();
+        for id in curves {
+            let Shape::Line { a, .. } = sk.shape(sk.curve_index(&id).unwrap()).unwrap() else { panic!("line") };
+            assert!((a.y - 20.0).abs() < 1e-5, "drag {drag}: {id} {a:?}");
+            if id != "source" {
+                assert!((direction.cross(a - origin).abs() - 2.0).abs() < 1e-6, "drag {drag}: {id} keeps 2 mm");
+            }
+        }
+        for _ in 0..if drag { 1 } else { 3 } {
+            run(&mut h, "edit.undo", json!({}));
+        }
+        assert_eq!(h.app.session.doc.to_json(), before);
+    }
+}

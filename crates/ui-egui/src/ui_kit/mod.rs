@@ -7,8 +7,10 @@ mod assistant_entry;
 mod checks;
 mod choice;
 mod color;
+mod compare;
 mod confirm;
 pub mod container;
+mod details;
 mod disclosure;
 mod drag;
 mod fields;
@@ -26,7 +28,14 @@ mod navigation_settings;
 pub(crate) mod panel;
 mod preferences;
 mod preferences_assistant;
+#[allow(dead_code, reason = "composed by the Preferences pages of #9875 to #9883")]
+mod preferences_cards;
+#[allow(dead_code, reason = "painted by the Preferences pages of #9875 to #9883")]
+mod preferences_figure_data;
+#[allow(dead_code, reason = "painted by the Preferences pages of #9875 to #9883")]
+mod preferences_figure_ops;
 mod preferences_figures;
+mod preferences_layout;
 mod preferences_navigation;
 mod preferences_small;
 mod radial;
@@ -39,6 +48,7 @@ mod stages;
 mod status;
 mod table;
 mod text;
+mod text_menu;
 mod tree;
 mod value_focus;
 mod viewport_status;
@@ -54,12 +64,14 @@ pub(crate) use checks::tests::{raster as test_raster, textures_update as test_te
 pub(crate) use checks::*;
 pub(crate) use choice::*;
 pub(crate) use color::*;
+pub(crate) use compare::*;
 pub(crate) use confirm::{Confirm, Tone};
 pub use container::{Container, DockEdges, Edge, Surface};
+pub(crate) use details::*;
 pub(crate) use disclosure::*;
 pub(crate) use drag::*;
-pub use fields::cell_editor;
 pub(crate) use fields::*;
+pub use fields::{cell_editor, wide_cell_editor};
 pub(crate) use file_view::{FileView, RecentRow, RecoveryMessage, SampleCard};
 pub(crate) use framing::*;
 pub(crate) use history::*;
@@ -79,6 +91,8 @@ pub use panel::{DialogButtons, Window};
 pub(crate) use panel::{collapsible_header, header};
 pub(crate) use preferences::*;
 pub(crate) use preferences_assistant::*;
+#[allow(unused_imports, reason = "composed by the Preferences pages of #9875 to #9883")]
+pub(crate) use preferences_cards::*;
 pub(crate) use preferences_navigation::*;
 pub(crate) use preferences_small::*;
 pub(crate) use radial::{RADIAL_RADIUS, radial_menu};
@@ -93,6 +107,9 @@ pub(crate) use sphere::{SphereTile, sphere_cursor, sphere_grid, sphere_grid_drag
 pub(crate) use stages::{StageAction, StageBar};
 pub(crate) use status::*;
 pub(crate) use table::*;
+#[cfg(test)]
+pub(crate) use text::ellipsize_middle;
+pub(crate) use text_menu::menu_open as text_menu_open;
 pub(crate) use tree::*;
 pub(crate) use value_focus::*;
 pub(crate) use viewport_status::*;

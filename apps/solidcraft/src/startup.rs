@@ -137,8 +137,11 @@ pub struct AdapterChoice {
     pub compatible: bool,
 }
 
-/// Choose only surface-compatible adapters. Names saved in preferences are exact; the
-/// environment override follows wgpu's case-insensitive substring convention.
+/// Choose an adapter by name. The environment override follows wgpu's case-insensitive
+/// substring convention among surface-compatible adapters. A saved preference prefers an
+/// exact (then case-insensitive) name among compatible adapters, and if the named card is
+/// only listed as incompatible with the surface still picks it (#8341: otherwise the
+/// preference is kept in the dialog while wgpu silently uses another GPU).
 /// No match leaves selection to the normal wgpu request.
 pub fn choose_adapter(adapters: &[AdapterChoice], environment: Option<&str>, preference: Option<&str>) -> Option<usize> {
     // wgpu's environment helper panics on a missing name; an override must remain recoverable.
@@ -149,12 +152,14 @@ pub fn choose_adapter(adapters: &[AdapterChoice], environment: Option<&str>, pre
             return Some(index);
         }
     }
-    if let Some(name) = preference.filter(|s| !s.is_empty())
-        && let Some((index, _)) = compatible().find(|(_, a)| a.name == name)
-    {
-        return Some(index);
-    }
-    None
+    let name = preference.filter(|s| !s.is_empty())?;
+    let find = |pred: &dyn Fn(&AdapterChoice) -> bool, only_compatible: bool| {
+        adapters.iter().enumerate().find(|(_, a)| (!only_compatible || a.compatible) && pred(a)).map(|(i, _)| i)
+    };
+    find(&|a| a.name == name, true)
+        .or_else(|| find(&|a| a.name.eq_ignore_ascii_case(name), true))
+        .or_else(|| find(&|a| a.name == name, false))
+        .or_else(|| find(&|a| a.name.eq_ignore_ascii_case(name), false))
 }
 
 /// Leave Automatic on wgpu's normal request path; named choices may defer to it too.
@@ -292,6 +297,71 @@ pub fn window_instance_flags(flags: eframe::wgpu::InstanceFlags, intel_mac: bool
     if intel_mac && env.map(str::trim).is_none_or(str::is_empty) { flags - eframe::wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL } else { flags }
 }
 
+/// The environment variable that makes the macOS compatibility shim report an older OS
+/// version to wgpu's Metal backend. On OCLP-patched machines the Metal compiler accepts
+/// only up to the MSL standard of the original GPU, not the one the patched OS reports,
+/// so wgpu picks a standard that the compiler refuses (`invalid value 'metal3.2'`).
+/// Setting this variable before the process starts causes the OS to report the older
+/// version and wgpu selects a supported MSL standard (#3080, #4605).
+#[cfg(target_os = "macos")]
+pub const SYSTEM_VERSION_COMPAT_ENV: &str = "SYSTEM_VERSION_COMPAT";
+
+/// The NVRAM variable that OpenCore Legacy Patcher writes on every OCLP-booted system.
+/// Its presence is the primary signal that `SYSTEM_VERSION_COMPAT=1` is needed.
+#[cfg(target_os = "macos")]
+pub const OCLP_NVRAM_KEY: &str = "4D1FDA02-38C7-4A6A-9CC6-4BCCA8B30102:OCLP-Version";
+
+/// `true` if the OCLP NVRAM key is present on this system.
+///
+/// Runs `nvram <key>` and treats exit 0 as present. Any error (missing binary,
+/// permission denied, key absent) returns `false` — this is a best-effort probe.
+#[cfg(target_os = "macos")]
+pub fn oclp_nvram_present() -> bool {
+    std::process::Command::new("nvram").arg(OCLP_NVRAM_KEY).output().map(|o| o.status.success()).unwrap_or(false)
+}
+
+/// Whether to re-launch with `SYSTEM_VERSION_COMPAT=1`: it is not set yet and OCLP shows through
+/// the NVRAM key. The probe runs only when it is needed, so a re-launched process (variable
+/// set) never starts `nvram`.
+#[cfg(target_os = "macos")]
+fn compat_wanted(compat_set: bool, nvram: impl FnOnce() -> bool) -> bool {
+    !compat_set && nvram()
+}
+
+/// If this process is running under OCLP and `SYSTEM_VERSION_COMPAT` has not been set,
+/// re-launch the current binary with `SYSTEM_VERSION_COMPAT=1` added to the environment,
+/// then exit with the child's status code.
+///
+/// `SYSTEM_VERSION_COMPAT=1` must be present **before** the process starts: setting it
+/// with `std::env::set_var` inside `main` is too late because the macOS frameworks have
+/// already queried the OS version by then. Re-launching is the only safe approach that
+/// works without `unsafe` (a true `execve` replacement would require it).
+///
+/// Returns `Ok(false)` immediately when:
+/// - `SYSTEM_VERSION_COMPAT` is already set (re-launched process, no loop), or
+/// - the OCLP NVRAM key is absent.
+///
+/// Returns `Err` only when `std::env::current_exe()` fails or the child process cannot
+/// be spawned; the caller should log the error and continue normally.
+///
+/// Never returns `Ok(true)`: a successful re-launch exits the current process.
+#[cfg(target_os = "macos")]
+pub fn relaunch_with_version_compat() -> Result<bool, String> {
+    // A set variable means this is the re-launched process: no loop.
+    if !compat_wanted(std::env::var_os(SYSTEM_VERSION_COMPAT_ENV).is_some(), oclp_nvram_present) {
+        return Ok(false);
+    }
+    log::info!("startup: OCLP detected; re-launching with {}=1", SYSTEM_VERSION_COMPAT_ENV);
+    eprintln!("SolidCraft: OCLP detected; re-launching with {}=1", SYSTEM_VERSION_COMPAT_ENV);
+    let exe = std::env::current_exe().map_err(|e| format!("could not find own executable: {e}"))?;
+    let status = std::process::Command::new(&exe)
+        .args(std::env::args_os().skip(1))
+        .env(SYSTEM_VERSION_COMPAT_ENV, "1")
+        .status()
+        .map_err(|e| format!("could not re-launch with {}: {e}", SYSTEM_VERSION_COMPAT_ENV))?;
+    std::process::exit(status.code().unwrap_or(1));
+}
+
 /// Windows with OpenGL: the window keeps the system title bar (#2063). The window without OS
 /// decorations keeps its caption style while having no frame, and some OpenGL drivers (older
 /// Intel HD/UHD) then show the picture a caption's height lower than the window, so it no longer
@@ -351,7 +421,8 @@ mod tests {
         assert_eq!(choose_adapter(&cards, None, Some("removed")), None);
         assert_eq!(choose_adapter(&cards, Some("missing"), Some("Discrete small")), Some(1));
         assert_eq!(choose_adapter(&cards, Some(""), Some("Discrete small")), Some(1));
-        assert_eq!(choose_adapter(&cards, None, Some("Discrete")), None, "saved names are exact");
+        assert_eq!(choose_adapter(&cards, None, Some("discrete small")), Some(1), "preference matches without regard to case");
+        assert_eq!(choose_adapter(&cards, None, Some("Discrete")), None, "a preference is the full name, not a substring");
     }
 
     #[test]
@@ -360,9 +431,18 @@ mod tests {
         assert_eq!(choose_adapter(&cards, None, None), None);
         assert_eq!(choose_adapter(&cards, Some(""), Some("")), None);
         cards[2].compatible = false;
-        assert_eq!(choose_adapter(&cards, Some("large"), Some("Discrete large")), None);
+        // Environment still needs a compatible adapter; a preference keeps the named card (#8341).
+        assert_eq!(choose_adapter(&cards, Some("large"), Some("Discrete large")), Some(2));
         assert_eq!(choose_adapter(&cards, Some("small"), None), Some(1));
         assert_eq!(choose_adapter(&[], None, None), None);
+    }
+
+    #[test]
+    fn preference_keeps_a_named_card_even_when_surface_says_incompatible() {
+        let mut cards = cards();
+        cards[1].compatible = false;
+        assert_eq!(choose_adapter(&cards, None, Some("Discrete small")), Some(1));
+        assert_eq!(choose_adapter(&cards, None, Some("discrete SMALL")), Some(1));
     }
 
     #[test]
@@ -412,6 +492,27 @@ mod tests {
         assert_eq!(window_instance_flags(F::VALIDATION, true, Some("0")), F::VALIDATION);
         // Every other machine keeps what it had.
         assert_eq!(window_instance_flags(on, false, None), on);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn oclp_relaunch_needs_the_signal_and_no_compat_variable() {
+        use super::compat_wanted;
+        let probed = std::cell::Cell::new(false);
+        let probe = |found: bool| {
+            let probed = &probed;
+            move || {
+                probed.set(true);
+                found
+            }
+        };
+        // The re-launched process has the variable: no probe, no second re-launch.
+        assert!(!compat_wanted(true, probe(true)));
+        assert!(!probed.get());
+        // The OCLP NVRAM key is the signal.
+        assert!(compat_wanted(false, probe(true)));
+        // No signal: an ordinary Mac starts as it is.
+        assert!(!compat_wanted(false, probe(false)));
     }
 
     #[test]
