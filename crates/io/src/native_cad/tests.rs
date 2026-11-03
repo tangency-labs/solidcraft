@@ -7,6 +7,9 @@ const BLOCK_FCSTD: &[u8] = include_bytes!("fixtures/block.FCStd");
 /// (`fixtures/make_block_3dm.py`).
 const BLOCK_3DM: &[u8] = include_bytes!("fixtures/block.3dm");
 
+/// A test SolidWorks part file (`fixtures/cylinder.sldprt`).
+const CYLINDER_SLDPRT: &[u8] = include_bytes!("fixtures/cylinder.sldprt");
+
 /// STEP text, which these importers refuse.
 const STEP_TEXT: &str = "ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n";
 
@@ -29,11 +32,11 @@ fn imports_the_block(bytes: &[u8], file: &str) {
 
 #[test]
 fn extensions() {
-    assert!(is_native_cad_path("a/Part.FCStd") && is_native_cad_path("x.3DM") && is_native_cad_path("y.fcstd"));
-    for other in ["c.sat", "c.sab", "c.smt", "c.smb", "c.f3d", "c.sldprt", "c.step", "fcstd"] {
+    assert!(is_native_cad_path("a/Part.FCStd") && is_native_cad_path("x.3DM") && is_native_cad_path("y.fcstd") && is_native_cad_path("z.sldprt") && is_native_cad_path("w.SLDPRT"));
+    for other in ["c.sat", "c.sab", "c.smt", "c.smb", "c.f3d", "c.step", "fcstd", "sldprt"] {
         assert!(!is_native_cad_path(other), "{other}");
     }
-    assert!(crate::is_step_path("c.FCStd") && crate::is_step_path("c.3dm"), "read as an Import feature like STEP and IGES");
+    assert!(crate::is_step_path("c.FCStd") && crate::is_step_path("c.3dm") && crate::is_step_path("c.sldprt"), "read as an Import feature like STEP and IGES");
 }
 
 #[test]
@@ -50,22 +53,35 @@ fn rhino_box_imports_as_a_solid() {
     imports_the_block(bytes, "block.3dm");
 }
 
-/// Only FreeCAD and Rhino contents are read: STEP text, garbage, a bad ZIP and empty input are
+#[test]
+fn solidworks_cylinder_imports_as_a_solid() {
+    let bytes = CYLINDER_SLDPRT;
+    let (step, warnings) = native_cad_to_step(bytes, "cylinder.sldprt").unwrap();
+    assert!(step.contains("MANIFOLD_SOLID_BREP"), "no solid in the restated STEP: {warnings:?}");
+    let sf = crate::step_import_feature(bytes, "dir/cylinder.sldprt").unwrap();
+    assert_eq!(sf.import.bodies.len(), 1, "cylinder.sldprt");
+    let solidcraft_doc::FeatureKind::Import { file: held, step, .. } = &sf.kind else { panic!("not an Import feature") };
+    assert_eq!(held, "cylinder.sldprt");
+    assert!(step.contains("MANIFOLD_SOLID_BREP"), "the feature keeps the restated STEP");
+}
+
+/// Only FreeCAD, Rhino, and SolidWorks contents are read: STEP text, garbage, a bad ZIP and empty input are
 /// refused with a message, as are ACIS, ShapeManager and commercial formats whatever their bytes.
 #[test]
 fn other_contents_are_refused() {
     let step = STEP_TEXT;
     let fcstd = BLOCK_FCSTD;
-    let cases: [(&[u8], &str); 9] = [
+    let cases: [(&[u8], &str); 10] = [
         (step.as_bytes(), "x.3dm"),
         (step.as_bytes(), "x.fcstd"),
+        (step.as_bytes(), "x.sldprt"),
         (b"\0\0garbage", "x.3dm"),
+        (b"\0\0garbage", "x.sldprt"),
         (b"PK\x03\x04junk", "x.fcstd"),
         (b"", "x.3dm"),
         (b"700 0 1 0\n", "x.sat"),
         (b"ASM BinaryFile4", "x.smb"),
         (fcstd, "x.f3d"),
-        (fcstd, "x.sldprt"),
     ];
     for (bytes, name) in cases {
         let e = native_cad_to_step(bytes, name).expect_err(name);
@@ -75,11 +91,11 @@ fn other_contents_are_refused() {
     imports_the_block(BLOCK_3DM, "renamed.FCStd");
 }
 
-/// Truncated, bit-flipped and garbage-tailed variants of valid FreeCAD and Rhino files give an
+/// Truncated, bit-flipped and garbage-tailed variants of valid FreeCAD, Rhino, and SolidWorks files give an
 /// error or a solid, never a panic.
 #[test]
 fn hostile_native_cad_never_panics() {
-    for (good, name) in [(BLOCK_FCSTD, "hostile.FCStd"), (BLOCK_3DM, "hostile.3dm")] {
+    for (good, name) in [(BLOCK_FCSTD, "hostile.FCStd"), (BLOCK_3DM, "hostile.3dm"), (CYLINDER_SLDPRT, "hostile.sldprt")] {
         let mut cases: Vec<Vec<u8>> = (0..good.len()).step_by((good.len() / 60).max(1)).map(|n| good[..n].to_vec()).collect();
         for i in (0..good.len()).step_by((good.len() / 80).max(1)) {
             let mut b = good.to_vec();
