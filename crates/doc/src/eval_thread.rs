@@ -103,6 +103,11 @@ enum End {
     /// At (or within half a pitch of) an end of the face where material goes on past it, a
     /// shoulder, a head, a blind hole's bottom: the groove stops short, clear of it.
     Closed,
+    /// At an end of an external thread's face where a shoulder starts and stays beyond the face's
+    /// end: the groove runs on through the plane of that end and is trimmed there, so the root
+    /// reaches the shoulder at every angle, a nut bottoms out on it, and nothing past the plane
+    /// is cut.
+    Shoulder,
     /// Inside the face: the groove stops square there.
     Inside,
 }
@@ -159,6 +164,17 @@ impl FaceEnds<'_> {
             *slot = Some(free);
         }
         Ok(free)
+    }
+
+    /// Does the shoulder at this closed end stay beyond the plane of the face's end? Not where it
+    /// rises back along the face (a slanted plate, a boss on a round body), which a groove
+    /// running to that plane would cut into: there is material outside the face just inside it.
+    /// A check the kernel can't make counts as no: the groove then keeps its square stop.
+    fn clear_of_end_plane(&self, side: usize) -> bool {
+        let (p, e) = (self.pitch, self.pitch * 1e-3);
+        let inside = if side == 0 { (self.cyl.start + e, self.cyl.start + p) } else { (self.cyl.end - p, self.cyl.end - e) };
+        // Well off the face's own cylinder, which a ring nearly on it would have to intersect.
+        kernel::material_in_ring(self.body, self.cyl, self.cyl.radius + 0.01 * p, self.cyl.radius + 0.25 * p, inside).is_ok_and(|hit| !hit)
     }
 }
 
@@ -337,7 +353,9 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
         Ok(if !ask.modeled || !near(at, side) {
             End::Inside
         } else if !ends.free(side)? {
-            End::Closed
+            let at_end = (if side == 0 { at - lo } else { hi - at }) < pitch * 1e-3;
+            let square = ease.get(side).copied().unwrap_or(0.0) == 0.0;
+            if at_end && square && !cyl.internal && !form.is_taper() && ends.clear_of_end_plane(side) { End::Shoulder } else { End::Closed }
         } else if (if side == 0 { at - lo } else { hi - at }) < pitch * 1e-3 {
             End::Free
         } else {
@@ -536,7 +554,9 @@ fn thread_grooves(
     // Past a free end of the face the groove runs out into the air, a pitch beyond it. Before
     // a closed one it stops with its section clear of the face's end (its centre as far inside
     // as the section reaches that way), so it never cuts into the shoulder there; inside the
-    // face it stops square at the threaded length's end.
+    // face it stops square at the threaded length's end. At a shoulder it can be trimmed against
+    // ([`End::Shoulder`]) its whole section runs past the plane of the face's end, so every angle
+    // of the last turn is cut down to that plane ([`trim_at_shoulders`] takes off the rest).
     //
     // A runout `e` at an end (ISO 3508) fades the groove out over `e`: its section moves out of
     // the material (an external thread's away from the axis, past the surface; an internal
@@ -548,12 +568,14 @@ fn thread_grooves(
         (End::Free, false) => t.start - p,
         (End::Free, true) => t.start,
         (End::Closed, _) => (t.start - ease[0]).max(face.0 + w_lo),
+        (End::Shoulder, _) => face.0 - w_hi - 0.1 * p,
         (End::Inside, _) => t.start - ease[0],
     };
     let s1 = match (ends[1], ease[1] > 0.0) {
         (End::Free, false) => t.end + p,
         (End::Free, true) => t.end,
         (End::Closed, _) => (t.end + ease[1]).min(face.1 - w_hi),
+        (End::Shoulder, _) => face.1 + w_lo + 0.1 * p,
         (End::Inside, _) => t.end + ease[1],
     };
     if !(s1 - s0 > p * 1e-3) {
@@ -698,6 +720,19 @@ fn taper_envelope(t: &ThreadInfo, radius: f64, ends: [End; 2], (d0, from): (f64,
     Ok(ring.pop())
 }
 
+/// The groove with what runs past a shoulder's plane taken off ([`End::Shoulder`]), so cutting it
+/// leaves the shoulder whole.
+fn trim_at_shoulders(mut tool: Body, axis: Vec3, ends: [End; 2], face: (f64, f64), k: UnitVec3) -> Result<Body> {
+    for (end, at, keep_positive) in [(ends[0], face.0, true), (ends[1], face.1, false)] {
+        if end != End::Shoulder {
+            continue;
+        }
+        let plane = Plane::from_normal(axis + k * at, *k).ok_or_else(|| DocError::Invalid("thread axis".into()))?;
+        tool = kernel::half_space(&tool, &plane, keep_positive)?.0.ok_or_else(|| DocError::Invalid("the thread's groove misses its face".into()))?;
+    }
+    Ok(tool)
+}
+
 /// Evaluate a thread feature: a cosmetic thread is listed in the model's threads, a modelled
 /// one cut into its body.
 pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
@@ -768,7 +803,13 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             None => note,
         });
     }
-    cut(st, on, (*tip, angle, depth))
+    if let Some(note) = cut(st, on, (*tip, angle, depth))? {
+        *warning = Some(match warning.take() {
+            Some(w) => format!("{w}; {note}"),
+            None => note,
+        });
+    }
+    Ok(())
 }
 
 /// A runout as (mm, pitches): ISO 3508's standard 2.5 P and short 1.25 P, or a length.
@@ -783,8 +824,9 @@ pub(super) fn runout(vals: &BTreeMap<String, Value>, e: &Option<crate::ThreadRun
 
 /// Cut a modelled thread resolved on its face into its body: the grooves (SMLib's exact screw
 /// sweeps, a taper's crests by its envelope) by one B-rep boolean, then the chamfered tip
-/// (`tip`, with its angle and depth when given).
-pub(super) fn cut(st: &mut ModelState, on: ThreadOn, (tip, angle, depth): (ThreadTip, Option<f64>, Option<f64>)) -> Result<()> {
+/// (`tip`, with its angle and depth when given). What the user should be told about the result, if
+/// anything, is returned.
+pub(super) fn cut(st: &mut ModelState, on: ThreadOn, (tip, angle, depth): (ThreadTip, Option<f64>, Option<f64>)) -> Result<Option<String>> {
     let ThreadOn { info: t, cyl, ends, steep, ease, from: from_side, narrow } = on;
     let i = st.bodies.iter().position(|b| b.name == t.body).ok_or_else(|| DocError::Invalid("threaded body".into()))?;
     let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
@@ -822,21 +864,44 @@ pub(super) fn cut(st: &mut ModelState, on: ThreadOn, (tip, angle, depth): (Threa
         }
         false => None,
     };
-    let mut grooves = Vec::new();
-    for g in thread_grooves(&t, groove_radius, (cyl.start, cyl.end), ends, steep, ease, taper)? {
-        let section = Region2 { outer: solidcore_record::Loop2::polygon(&g.section), holes: Vec::new() };
-        grooves.push(kernel::sweep_helix_radial(&g.plane, &section, g.base, g.axis, g.pitch, g.turns, &g.law)?);
-    }
-    if let Some(taper) = taper
-        && let Some(envelope) = taper_envelope(&t, radius, ends, taper)?
-    {
-        grooves.push(envelope);
-    }
-    let tool = match grooves.as_slice() {
-        [one] => one.clone(),
-        many => kernel::union_all(&many.iter().collect::<Vec<_>>())?,
+    let cut_grooves = |ends: [End; 2]| -> Result<(Option<Body>, usize)> {
+        let mut grooves = Vec::new();
+        for g in thread_grooves(&t, groove_radius, (cyl.start, cyl.end), ends, steep, ease, taper)? {
+            let section = Region2 { outer: solidcore_record::Loop2::polygon(&g.section), holes: Vec::new() };
+            grooves.push(kernel::sweep_helix_radial(&g.plane, &section, g.base, g.axis, g.pitch, g.turns, &g.law)?);
+        }
+        if let Some(taper) = taper
+            && let Some(envelope) = taper_envelope(&t, radius, ends, taper)?
+        {
+            grooves.push(envelope);
+        }
+        let tool = match grooves.as_slice() {
+            [one] => one.clone(),
+            many => kernel::union_all(&many.iter().collect::<Vec<_>>())?,
+        };
+        let tool = trim_at_shoulders(tool, t.axis_point, ends, (cyl.start, cyl.end), t.axis)?;
+        let cut = kernel::boolean(&input.body, &tool, BoolOp::Cut)?;
+        // Now rather than at the feature's end, where it could only fail the feature.
+        if ends.contains(&End::Shoulder)
+            && let Some(body) = &cut
+        {
+            kernel::check_kept(body)?;
+        }
+        Ok((cut, tool.face_count()))
     };
-    let (nb, groove_faces) = (kernel::boolean(&input.body, &tool, BoolOp::Cut)?, tool.face_count());
+    // A design that built with the square stop keeps building: where the kernel can't make the
+    // trimmed cut, the groove stops clear of the shoulder as it did, and the feature says so.
+    let (mut note, mut made) = (None, cut_grooves(ends));
+    if matches!(made, Err(DocError::Kernel(_))) && ends.contains(&End::Shoulder) {
+        made = cut_grooves(ends.map(|e| if e == End::Shoulder { End::Closed } else { e }));
+        note = made.is_ok().then(|| {
+            format!(
+                "the {} thread's groove could not be run down to the shoulder here, so it stops clear of it and its last turn is left uncut",
+                t.designation
+            )
+        });
+    }
+    let (nb, groove_faces) = made?;
     let nb = nb.ok_or_else(|| DocError::Invalid("the thread removed everything".into()))?;
     // The groove's faces have no role to name them by.
     let groove = crate::lineage::Lineage::unnamed_faces(groove_faces);
@@ -854,7 +919,7 @@ pub(super) fn cut(st: &mut ModelState, on: ThreadOn, (tip, angle, depth): (Threa
     if let Some(slot) = st.bodies.get_mut(i) {
         *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
     }
-    Ok(())
+    Ok(note)
 }
 
 /// The chamfered tip of an external thread (ISO 4753, chamfered end CH) at the free ends `tip`
