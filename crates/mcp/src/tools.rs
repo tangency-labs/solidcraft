@@ -1491,6 +1491,9 @@ fn atomic_layout_refusal(count: usize, rule: solidcraft_engine::panels::Rule, de
     let mut reply = commands::sequential_failure(0, None, commands::error_text(error(rule, detail)), Vec::new());
     reply["ok"] = json!(false);
     reply["applied"] = json!([]);
+    // Only an atomic batch (a rollback asked for) is refused here, and nothing ran: the design is
+    // where the batch started, as a rollback leaves it (#10749).
+    reply["rolled_back"] = json!(true);
     reply["not_run"] = if count <= MAX_BATCH { json!((0..count).collect::<Vec<_>>()) } else { json!([]) };
     reply["not_run_count"] = json!(count);
     reply["note"] = json!("nothing was run: atomic application layout requires the authoritative backend transaction");
@@ -1544,11 +1547,12 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
             Err(e) if e == "missing `command`" => mapped.push(step.clone()),
             Err(e) => {
                 let command = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str);
+                // Nothing ran: the design is where the batch started, as a rollback leaves it (#10749).
                 let reply = json!({
                     "ok": false,
                     "completed": 0,
                     "failed": {"index": i, "command": command, "error": e},
-                    "rolled_back": false,
+                    "rolled_back": rollback,
                     "undone": 0,
                     "applied": [],
                     "not_run": (0..steps.len()).collect::<Vec<_>>(),
@@ -1567,7 +1571,7 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
     if b.in_process()
         && let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, b.param_check(), &[])
     {
-        let mut reply = refusal.reply(steps.len());
+        let mut reply = refusal.reply(steps.len(), rollback);
         if let Some(o) = reply.as_object_mut() {
             o.insert("ok".into(), Value::Bool(false));
             o.insert("applied".into(), json!([]));
