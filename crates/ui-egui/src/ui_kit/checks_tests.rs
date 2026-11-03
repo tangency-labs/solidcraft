@@ -470,3 +470,52 @@ fn checkbox_accessibility_preserves_label_checked_and_mixed_metadata() {
         assert_eq!(after.selected, Some(true));
     }
 }
+
+/// Customize Toolbar's rows (#11471): the command's icon sits between the box and the label,
+/// is drawn from its artwork, and a click on it toggles the row like a click on the label.
+#[test]
+fn checkbox_icon_draws_the_icon_between_box_and_label_and_toggles_on_it() {
+    let t = Tokens::get();
+    let icon = solidcraft_engine::find_command("solid.extrude").map(|c| c.icon).unwrap_or_default();
+    assert!(!icon.is_empty());
+    let ctx = crate::fonts::test_context();
+    let viewport = Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 120.0));
+    let run = |events: Vec<egui::Event>, on: &mut bool| {
+        let (mut plain_width, mut row) = (0.0, Rect::NOTHING);
+        let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(viewport), events, ..Default::default() }, |ui| {
+            plain_width = checkbox(ui, "Extrude", &mut false).rect.width();
+            row = checkbox_icon(ui, "Extrude", icon, on).rect;
+        });
+        output.textures_delta.clear();
+        (output, plain_width, row)
+    };
+    let mut on = false;
+    let (output, plain_width, row) = run(vec![], &mut on);
+    assert_eq!(row.width(), plain_width + t.space_6 + t.space_16, "the icon takes its own slot");
+    let slot = Rect::from_min_max(
+        egui::pos2(row.left() + t.space_14, row.top()),
+        egui::pos2(row.left() + t.space_14 + t.space_6 * 2.0 + t.space_16, row.bottom()),
+    );
+    assert!(
+        output.shapes.iter().any(|clipped| matches!(&clipped.shape,
+            Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::default() && slot.contains_rect(mesh.calc_bounds()))),
+        "the icon's artwork is drawn between the box and the label"
+    );
+    let at = slot.center();
+    run(pointer(at, true), &mut on);
+    run(pointer(at, false), &mut on);
+    assert!(on, "a click on the icon toggles the row");
+
+    // A wrapped label leaves room for the icon: the row stays inside a narrow card.
+    let (mut wrapped, mut single) = (Rect::NOTHING, Rect::NOTHING);
+    let label = "A label long enough that it has to wrap in a narrow card";
+    let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(viewport), ..Default::default() }, |ui| {
+        ui.set_max_width(120.0);
+        single = checkbox_icon(ui, "Extrude", icon, &mut false).rect;
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+        wrapped = checkbox_icon(ui, label, icon, &mut false).rect;
+    });
+    output.textures_delta.clear();
+    assert!(wrapped.width() <= 120.0, "{wrapped:?}");
+    assert!(wrapped.height() > single.height(), "{wrapped:?} {single:?}");
+}
