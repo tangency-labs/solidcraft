@@ -512,6 +512,34 @@ const ELEMENTS: &[Element] = &[
             )
         });
     }),
+    element!("settings_picture_choices", |ui, state| {
+        let choices = [
+            PictureChoice { key: "bottom", label: "Bottom", figure: super::preferences_figure_data::paint_history_bottom },
+            PictureChoice { key: "left", label: "Left", figure: super::preferences_figure_data::paint_history_left },
+        ];
+        if let Some(selected) = settings_picture_choices(ui, "gallery_history", "History", &choices, state.selected % choices.len(), true) {
+            state.selected = selected;
+        }
+        settings_picture_choices(ui, "gallery_history_disabled", "Disabled history", &choices, 0, false);
+    }),
+    element!("settings_picture_choices_sized", |ui, state| {
+        let choices = [
+            PictureChoice { key: "origin", label: "Origin", figure: super::preferences_figure_data::paint_orbit_origin },
+            PictureChoice { key: "centre", label: "View center", figure: super::preferences_figure_data::paint_orbit_centre },
+        ];
+        let t = Tokens::get();
+        if let Some(selected) = settings_picture_choices_sized(
+            ui,
+            "gallery_pivots",
+            "Orbit around",
+            &choices,
+            state.selected % choices.len(),
+            true,
+            PictureChoiceSize { width: t.space_24 * 8.0 + t.space_4, aspect: 184.0 / 99.5, caption: false },
+        ) {
+            state.selected = selected;
+        }
+    }),
     element!("settings_permission_choices", |ui, state| {
         settings_choices(
             ui,

@@ -140,6 +140,10 @@ pub(crate) struct SettingsChip<'a> {
 
 /// Bounded informational pill; an optional removal target lives inside the same outline.
 pub(crate) fn settings_chip(ui: &mut Ui, label: &str, chip: SettingsChip<'_>) -> egui::Response {
+    crate::prefs_search::note_unlabelled(ui, &[label]);
+    if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[label]) {
+        return crate::prefs_search::hidden_response(ui);
+    }
     let t = Tokens::get();
     let ink = if chip.accent { t.selected_ink } else { t.form_dim };
     let font = if chip.accent {
@@ -155,6 +159,10 @@ pub(crate) fn settings_chip(ui: &mut Ui, label: &str, chip: SettingsChip<'_>) ->
     let natural = ui.painter().layout_no_wrap(label.to_owned(), font.clone(), ink).size().x + t.space_16 + icon_width + remove_width;
     let height = if chip.compact { t.space_24 - t.space_2 } else { t.space_24 };
     let (rect, response) = ui.allocate_exact_size(vec2(natural.min(super::metrics::dimension(ui.max_rect().width())), height), Sense::hover());
+    if super::layout::label(ui).is_empty() {
+        crate::prefs_search::remember(ui, label, rect);
+        crate::prefs_search::follow(ui, label, rect);
+    }
     ui.painter().rect(
         rect,
         t.radius_xl,

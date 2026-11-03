@@ -441,6 +441,16 @@ pub(crate) fn note_current(ui: &Ui, text: &str) {
     });
 }
 
+/// Keep per-option aliases searchable when a compound row learns its choices.
+pub(crate) fn note_choices(ui: &Ui, choices: &[&str]) {
+    let mut text = choices.join(" ");
+    if texts_hit(ui, choices) {
+        text.push(' ');
+        text.push_str(&query(ui));
+    }
+    note_current(ui, &text);
+}
+
 /// After a hidden run, show the control on the next pass if its value now matches.
 pub(crate) fn recheck(ui: &Ui, texts: &[&str]) {
     if wanted(ui, texts) {
@@ -875,6 +885,99 @@ mod tests {
 
     /// The search field and its empty result name the window they search (#8318): "Search
     /// settings" under a "Preferences" title read as two names for one window.
+    #[test]
+    fn shared_standalone_cards_and_chips_filter_index_and_reveal_their_bounds() {
+        use crate::ui_kit::{self, Card};
+        for kind in 0..4 {
+            let ctx = crate::fonts::test_context();
+            let mut target = Rect::NOTHING;
+            let mut miss = Rect::NOTHING;
+            let mut draw = |filter: &str| {
+                crate::test_support::frame(&ctx, Default::default(), |ui| {
+                    let _search = begin(ui, filter);
+                    begin_page(ui, crate::prefs::PAGE_LAYOUT, "Layout");
+                    for label in ["Performance", "Quality"] {
+                        let card =
+                            Card { label, sub: None, selected: false, enabled: false, options: None, check: false, aspect: 1.0, figure: &|_, _| {} };
+                        let response = match kind {
+                            0 => ui_kit::picture_card(ui, &card, 100.0),
+                            1 => ui_kit::toggle_tile(ui, &card, 100.0),
+                            2 => ui_kit::preset_card(ui, label, "", false, false, &|_, _, _| {}, 100.0),
+                            _ => ui_kit::settings_chip(ui, label, Default::default()),
+                        };
+                        assert!(!response.clicked());
+                        if label == "Quality" {
+                            target = response.rect;
+                        } else {
+                            miss = response.rect;
+                        }
+                    }
+                    store_nav(ui);
+                });
+            };
+            draw("Quality");
+            assert!(!miss.is_positive(), "non-matching control {kind} has no layout");
+            assert!(target.is_positive());
+            let (_, _, hits) = nav(&ctx);
+            assert_eq!(hits.len(), 1, "control {kind} owns one real keyboard target");
+            assert_eq!((hits[0].page, hits[0].label.as_str()), (crate::prefs::PAGE_LAYOUT, "Quality"));
+            set_reveal(&ctx, Some(Reveal { page: crate::prefs::PAGE_LAYOUT, label: "Quality".into(), until: f64::MAX }));
+            crate::scenario::clear_handles();
+            // The search is cleared before the selected setting is revealed.
+            crate::test_support::frame(&ctx, Default::default(), |ui| {
+                let _search = begin(ui, "");
+                begin_page(ui, crate::prefs::PAGE_LAYOUT, "Layout");
+                let card = Card {
+                    label: "Quality",
+                    sub: None,
+                    selected: false,
+                    enabled: false,
+                    options: None,
+                    check: false,
+                    aspect: 1.0,
+                    figure: &|_, _| {},
+                };
+                let response = match kind {
+                    0 => ui_kit::picture_card(ui, &card, 100.0),
+                    1 => ui_kit::toggle_tile(ui, &card, 100.0),
+                    2 => ui_kit::preset_card(ui, "Quality", "", false, false, &|_, _, _| {}, 100.0),
+                    _ => ui_kit::settings_chip(ui, "Quality", Default::default()),
+                };
+                assert_eq!(crate::scenario::handle_at("prefs:revealed"), Some(response.rect.center()));
+            });
+        }
+    }
+
+    #[test]
+    fn shared_picture_choices_index_the_row_or_option_once_and_learn_aliases() {
+        use crate::ui_kit::{self, PictureChoice};
+        let choices =
+            [PictureChoice { key: "on", label: "Anti-aliasing", figure: |_, _| {} }, PictureChoice { key: "off", label: "Off", figure: |_, _| {} }];
+        for (query, expected) in [("Sampling", "Sampling"), ("Anti-aliasing", "Anti-aliasing"), ("msaa", "Anti-aliasing")] {
+            let ctx = crate::fonts::test_context();
+            for _ in 0..4 {
+                crate::test_support::frame(&ctx, Default::default(), |ui| {
+                    let _search = begin(ui, query);
+                    begin_page(ui, crate::prefs::PAGE_GRAPHICS, "Graphics");
+                    assert_eq!(ui_kit::settings_picture_choices(ui, "shared", "Sampling", &choices, 0, true), None);
+                    store_nav(ui);
+                });
+            }
+            let (_, _, hits) = nav(&ctx);
+            assert_eq!(hits.len(), 1, "{query} has one target");
+            assert_eq!(hits[0].label, expected);
+            assert_eq!(hits[0].page, crate::prefs::PAGE_GRAPHICS);
+            set_reveal(&ctx, Some(Reveal { page: crate::prefs::PAGE_GRAPHICS, label: expected.into(), until: f64::MAX }));
+            crate::test_support::frame(&ctx, Default::default(), |ui| {
+                let _search = begin(ui, "");
+                begin_page(ui, crate::prefs::PAGE_GRAPHICS, "Graphics");
+                ui_kit::settings_picture_choices(ui, "shared", "Sampling", &choices, 0, true);
+                let rect = crate::scenario::rect_of(if expected == "Sampling" { "dialog:row:Sampling" } else { "prefs:shared:on" }).unwrap();
+                assert_eq!(crate::scenario::handle_at("prefs:revealed"), Some(rect.center()));
+            });
+        }
+    }
+
     #[test]
     fn the_search_field_names_the_window_it_searches() {
         let name = crate::i18n::tr("ui.preferences").to_lowercase();

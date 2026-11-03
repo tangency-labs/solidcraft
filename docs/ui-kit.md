@@ -882,12 +882,17 @@ these shared pieces; the pages themselves arrive in later steps. Sizes follow
 | --- | --- | --- |
 | `picture_card(ui, &Card, width)` | A radio card: a figure, a label, an optional sub-label, an optional "has options" disc (its text is the hover) and an optional accent check. The figure keeps its aspect ratio and fills the card's inside width; the card sizes to the `width` its container gives it (`card_width(available, columns, gap)` divides a row). Selected: 2 pt `form_primary` border, `selected_bg` fill, `selected_ink` semibold label. Disabled: dimmed, no hover, no click, no focus ring. Keyboard focus draws a ring outside the border. Reports `RadioButton` to accessibility. | `form_primary`, `selected_bg`, `selected_ink`, `hover`, `control_fill`, `dialog_border`, `form_ink`, `form_dim`, `on_accent`, `radius_lg`, `space_*`, `font_label/small` |
 | `toggle_tile(ui, &Card, width)` | The same picture with a 15 pt checkbox in the top-right corner (`Card::selected` is "on"). Reports `Checkbox`. | as above, `control_border` |
+| `settings_picture_choices`, `settings_picture_choices_sized`, `PictureChoice`, `PictureChoiceSize` | A labelled, wrapping radio group with stable option handles and one search result for the row or matching choice. Returns the picked index. The sized variant accepts the card width, figure aspect and caption visibility used by independent Preferences pages. | card tokens, `space_10/12/16/24` |
 | `preset_card(ui, name, word, selected, enabled, &icon, width)` | A 70 pt card with a 38 pt icon box (`icon` paints into it in the ink it is given), a name, one word and an accent check. Used for Performance, Quality and Custom. | as above, `pref_well` |
 | `help_icon(ui, text)` | The (i) after a label. Shows `text` as a tooltip and exposes it as the widget's label. | `form_dim`, `form_ink` |
 | `carousel(ui, id, count, item_width, item_height, item)` | A row of items between a previous and a next arrow (both labelled from the `prefs.carousel_*` messages). `carousel_window(count, offset, available, item_width, gap, arrow)` says which items show; the arrow at an end is dimmed (0.35) and inert. The first shown index is kept in the Ui's temporary memory under `id`. | `dialog_border`, `control_fill`, `hover`, `form_ink`, `radius_lg` |
 
 `card_look(selected, enabled, hovered, focused)` holds the state rules (border width, fill, ink, weight,
 dimming, focus ring) apart from the painting so they can be tested.
+
+Standalone picture cards, toggle tiles, preset cards and settings chips participate in Preferences
+search and reveal their own bounds. Labelled rows retain ownership of their search result.
+`section_heading` is available to production callers for groups that stay expanded.
 
 ### Figures
 
