@@ -11,9 +11,9 @@
 
 use std::sync::{Arc, OnceLock};
 
-use solidcraft_geom::Region2;
+use solidcraft_geom::{Region2, Vec3};
 use solidcraft_kernel::Body;
-use solidcraft_kernel::history::{Change, FaceOrigin, FaceProv, History};
+use solidcraft_kernel::history::{BodyHistory, Change, FaceOrigin, FaceProv, History};
 
 use crate::SolvedSketch;
 
@@ -94,6 +94,24 @@ impl Lineage {
             })
             .collect();
         Lineage { history: self.history.clone(), operands }
+    }
+
+    /// Whether each face of the body this is the lineage of came, in whole or in part, from a
+    /// face or edge of `name`, a body of the model before the feature.
+    pub(crate) fn faces_from_body(&self, name: &str) -> Vec<bool> {
+        let from: Vec<bool> = self.operands.iter().map(|op| matches!(op.as_ref(), Operand::Body(n) if n == name)).collect();
+        self.history
+            .faces
+            .iter()
+            .map(|face| {
+                face.origins.iter().any(|origin| match *origin {
+                    FaceOrigin::Face { operand, .. } | FaceOrigin::Edge { operand, .. } | FaceOrigin::Offset { operand, .. } => {
+                        from.get(operand) == Some(&true)
+                    }
+                    FaceOrigin::Profile { .. } | FaceOrigin::Cap { .. } => false,
+                })
+            })
+            .collect()
     }
 
     /// A tool of `faces` faces and no edges (a mesh's triangles) whose faces have no role.
@@ -546,6 +564,150 @@ impl crate::ModelBody {
         match &self.made {
             Made::Traced(l) => Some(l.clone()),
             Made::Before | Made::Unknown => None,
+        }
+    }
+}
+
+/// The pieces feature `f` (saved before format 14) split a body into, named so the later
+/// features of the design find them. Those builds named the pieces in truck's shell order, which
+/// SMLib's need not follow, and a later feature names the piece it works on (`body`) and keeps
+/// the points it picked on it: each name goes to the piece nearest the points the features
+/// naming it picked. Pieces no later feature names keep the order they came in; so do all of
+/// them where the picks do not tell the pieces apart.
+pub(crate) fn order_legacy_lumps(bodies: &mut [crate::ModelBody], before: &crate::ModelState, doc: &crate::Document, f: &crate::Feature) {
+    for members in made_families(bodies, before) {
+        order_legacy_family(bodies, &members, doc, f);
+    }
+}
+
+/// The families of [`lump_families`] the feature that left `bodies` after `before` made: a family
+/// it left as it was keeps its names.
+fn made_families(bodies: &[crate::ModelBody], before: &crate::ModelState) -> Vec<Vec<usize>> {
+    lump_families(bodies)
+        .into_iter()
+        .filter(|members| members.iter().filter_map(|i| bodies.get(*i)).any(|b| !before.bodies.iter().any(|o| o.body.same(&b.body))))
+        .collect()
+}
+
+/// What [`order_legacy_lumps`] named the pieces of `bodies` (the state feature `f` left after
+/// `before`) by: a digest of each piece name with the points the later features of `doc` naming
+/// it picked, 0 where `f` was saved since format 14 or split nothing. Those features come after
+/// `f`, so the state is `f`'s only while this is the same: a script replays them after it, and
+/// an edit may change what they pick or name.
+pub(crate) fn legacy_picks_digest(bodies: &[crate::ModelBody], before: &crate::ModelState, doc: &crate::Document, f: &crate::Feature) -> u64 {
+    use std::hash::{Hash, Hasher};
+    if !f.shell_piece_order {
+        return 0;
+    }
+    let families = made_families(bodies, before);
+    if families.is_empty() {
+        return 0;
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for members in families {
+        let mut names: Vec<String> = members.iter().filter_map(|i| bodies.get(*i).map(|b| b.name.clone())).collect();
+        names.sort();
+        for (name, points) in names.iter().zip(later_picks(doc, f, &names)) {
+            name.hash(&mut h);
+            for p in points {
+                [p.x, p.y, p.z].map(f64::to_bits).hash(&mut h);
+            }
+        }
+    }
+    // 0 means "nothing named so"; a digest that happens to be 0 must not read as that.
+    h.finish().max(1)
+}
+
+/// The pieces each body a feature cut in two or more came out as (the bodies whose lineage is
+/// that one operand), as [`order_lumps`] finds them.
+fn lump_families(bodies: &[crate::ModelBody]) -> Vec<Vec<usize>> {
+    let mut families: Vec<(*const Operand, Vec<usize>)> = Vec::new();
+    for (i, b) in bodies.iter().enumerate() {
+        let Made::Traced(l) = &b.made else { continue };
+        let [op] = l.operands.as_slice() else { continue };
+        if !matches!(op.as_ref(), Operand::Stage(_)) {
+            continue;
+        }
+        let key = Arc::as_ptr(op);
+        match families.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, members)) => members.push(i),
+            None => families.push((key, vec![i])),
+        }
+    }
+    families.into_iter().map(|(_, m)| m).filter(|m| m.len() > 1).collect()
+}
+
+/// Per name of `names`: the points the features after `f` in `doc` that name that body picked
+/// on it.
+fn later_picks(doc: &crate::Document, f: &crate::Feature, names: &[String]) -> Vec<Vec<Vec3>> {
+    let later = doc.features.iter().skip_while(|g| g.id != f.id).skip(1);
+    let mut picks: Vec<Vec<Vec3>> = vec![Vec::new(); names.len()];
+    for g in later {
+        let Ok(kind) = serde_json::to_value(&g.kind) else { continue };
+        let Some(k) = kind.get("body").and_then(|b| b.as_str()).and_then(|b| names.iter().position(|n| n == b)) else { continue };
+        for key in ["edges", "faces", "face", "position"] {
+            let point = |v: &serde_json::Value| -> Option<Vec3> {
+                let a = v.as_array().filter(|a| a.len() == 3)?;
+                Some(Vec3::new(a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?))
+            };
+            let found: Vec<Vec3> = match kind.get(key) {
+                Some(v) => {
+                    point(v).map(|p| vec![p]).unwrap_or_else(|| v.as_array().map(|a| a.iter().filter_map(point).collect()).unwrap_or_default())
+                }
+                None => Vec::new(),
+            };
+            if let Some(slot) = picks.get_mut(k) {
+                slot.extend(found);
+            }
+        }
+    }
+    picks
+}
+
+fn order_legacy_family(bodies: &mut [crate::ModelBody], members: &[usize], doc: &crate::Document, f: &crate::Feature) {
+    if members.len() > 64 {
+        return;
+    }
+    let names: Vec<String> = members.iter().filter_map(|i| bodies.get(*i).map(|b| b.name.clone())).collect();
+    let picks = later_picks(doc, f, &names);
+    // How far piece `i` is from the points of name `k` (the mesh's nearest triangle).
+    let far = |piece: usize, pts: &[Vec3]| -> f64 {
+        let Some(b) = members.get(piece).and_then(|i| bodies.get(*i)) else { return f64::INFINITY };
+        let m = b.mesh();
+        pts.iter()
+            .map(|p| {
+                m.triangles
+                    .iter()
+                    .filter_map(|t| m.tri(t))
+                    .map(|[a, b, c]| solidcraft_geom::compare::closest_on_triangle(*p, a, b, c).dist(*p))
+                    .fold(f64::INFINITY, f64::min)
+            })
+            .fold(0.0, f64::max)
+    };
+    let mut order: Vec<Option<usize>> = vec![None; names.len()];
+    let mut taken = vec![false; members.len()];
+    for (k, pts) in picks.iter().enumerate().filter(|(_, p)| !p.is_empty()) {
+        let best =
+            (0..members.len()).filter(|i| !taken.get(*i).copied().unwrap_or(true)).map(|i| (far(i, pts), i)).min_by(|a, b| a.0.total_cmp(&b.0));
+        let Some((d, i)) = best else { return };
+        // Only a piece the points lie on: a pick off every piece tells nothing.
+        let size = members.get(i).and_then(|m| bodies.get(*m)).map_or(1.0, |b| b.body.size().max(1.0));
+        if d > size * 1e-3 {
+            return;
+        }
+        if let (Some(o), Some(t)) = (order.get_mut(k), taken.get_mut(i)) {
+            *o = Some(i);
+            *t = true;
+        }
+    }
+    let mut free = (0..members.len()).filter(|i| !taken.get(*i).copied().unwrap_or(true));
+    let order: Vec<usize> = order.into_iter().map(|o| o.or_else(|| free.next())).collect::<Option<_>>().unwrap_or_default();
+    if order.len() != names.len() {
+        return;
+    }
+    for (name, piece) in names.into_iter().zip(order) {
+        if let Some(b) = members.get(piece).and_then(|i| bodies.get_mut(*i)) {
+            b.name = name;
         }
     }
 }

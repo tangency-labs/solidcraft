@@ -1,0 +1,37 @@
+# oracle/14-combine-cut: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body A: 11 faces, 24 edges
+A face F2:bottom
+A face F2:side:l1
+A face F2:side:l2
+A face F2:side:l3
+A face F2:side:l4
+A face F2:start
+A face F4:side:a1#1
+A face F4:side:a1#2
+A face F4:side:a1#3
+A face F4:side:a1#4
+A face F4:side:a1#6
+A edge F2:bottom|F2:side:l1
+A edge F2:bottom|F2:side:l2
+A edge F2:bottom|F2:side:l3
+A edge F2:bottom|F2:side:l4
+A edge F2:side:l1|F2:side:l2
+A edge F2:side:l1|F2:side:l4
+A edge F2:side:l1|F2:start
+A edge F2:side:l2|F2:side:l3
+A edge F2:side:l2|F2:start
+A edge F2:side:l3|F2:side:l4
+A edge F2:side:l3|F2:start
+A edge F2:side:l4|F2:start
+A edge F2:start|F4:side:a1#1
+A edge F2:start|F4:side:a1#2
+A edge F2:start|F4:side:a1#3
+A edge F2:start|F4:side:a1#4
+A edge F4:side:a1#1|F4:side:a1#3
+A edge F4:side:a1#1|F4:side:a1#4
+A edge F4:side:a1#1|F4:side:a1#6
+A edge F4:side:a1#2|F4:side:a1#3
+A edge F4:side:a1#2|F4:side:a1#4
+A edge F4:side:a1#2|F4:side:a1#6
+A edge F4:side:a1#3|F4:side:a1#6
+A edge F4:side:a1#4|F4:side:a1#6

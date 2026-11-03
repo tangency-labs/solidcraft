@@ -161,7 +161,7 @@ mod tests {
         assert!(session.model.results.iter().all(|result| result.error.is_none()));
         assert!((session.model.state().sketch(boss).unwrap().plane.origin.z - 12.).abs() < 1e-6);
         assert!((session.model.state().sketch(bore).unwrap().plane.origin.z - 26.).abs() < 1e-6);
-        let world = session.world_state();
+        let world = session.world_state().unwrap();
         let plate = world.body("Plate").unwrap().mesh();
         assert!((plate.bounds().max.z - 26.).abs() < 1e-6);
         assert!(plate.contains(solidcraft_geom::Vec3::new(5., 25., 10.)));
@@ -171,23 +171,46 @@ mod tests {
         assert!(plate.contains(solidcraft_geom::Vec3::new(40., 35., 2.)));
         let reopened = crate::Session::new(solidcraft_doc::Document::from_json(&session.doc.to_json()).unwrap());
         assert!((reopened.model.state().sketch(bore).unwrap().plane.origin.z - 26.).abs() < 1e-6);
-        let reopened_world = reopened.world_state();
+        let reopened_world = reopened.world_state().unwrap();
         let reopened_plate = reopened_world.body("Plate").unwrap().mesh();
         assert!(!reopened_plate.contains(solidcraft_geom::Vec3::new(40., 25., 2.)));
         assert!(reopened_plate.contains(solidcraft_geom::Vec3::new(40., 35., 2.)));
     }
 
-    /// Every built-in sample builds without a failing feature or joint.
+    /// Every built-in sample builds without a failing feature or joint, and without a panic on
+    /// the way: panics inside the kernel are caught natively, but abort the web build (wasm
+    /// can't unwind; the Plastic Enclosure's bosses used to panic 8 times).
     #[test]
-    fn samples_build_cleanly() {
+    fn samples_build_cleanly_without_panics() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let me = std::thread::current().id();
+        let count = Arc::new(AtomicUsize::new(0));
+        let seen = count.clone();
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |_| {
+            if std::thread::current().id() == me {
+                seen.fetch_add(1, Ordering::SeqCst);
+            }
+        }));
+        let mut failed = Vec::new();
         for s in super::samples() {
             let mut session = crate::Session::default();
-            if let Err(e) = session.run_script(&(s.script)()) {
-                panic!("{}: {e}", s.name);
+            let built = session.run_script(&(s.script)());
+            let panics = count.swap(0, Ordering::SeqCst);
+            if panics > 0 {
+                failed.push(format!("{}: {panics} panic(s)", s.name));
             }
-            let failed: Vec<String> = session.model.results.iter().filter_map(|r| r.error.as_ref().map(|e| format!("{}: {e}", r.name))).collect();
-            assert!(failed.is_empty(), "{}: {failed:?}", s.name);
-            assert!(!session.model.state().bodies.is_empty(), "{}", s.name);
+            if let Err(e) = built {
+                failed.push(format!("{}: {e}", s.name));
+                continue;
+            }
+            failed.extend(session.model.results.iter().filter_map(|r| r.error.as_ref().map(|e| format!("{}: {}: {e}", s.name, r.name))));
+            if session.model.state().bodies.is_empty() {
+                failed.push(format!("{}: no bodies", s.name));
+            }
         }
+        std::panic::set_hook(prev);
+        assert!(failed.is_empty(), "{failed:?}");
     }
 }

@@ -34,7 +34,7 @@ fn measure(s: &mut Session) -> Result<(f64, i64), String> {
 }
 
 fn solid_at(s: &Session, p: Vec3) -> bool {
-    s.model.state().bodies.iter().any(|b| b.body.contains(p))
+    s.model.state().bodies.iter().any(|b| b.body.classify_point(p).unwrap() == solidcraft_kernel::PointClass::Inside)
 }
 
 fn v3(a: [f64; 3]) -> Vec3 {
@@ -802,6 +802,28 @@ fn hole_matrix() {
     );
 }
 
+/// #5041: a countersink cuts nothing outside its diameter above the face, so a wall standing
+/// just past its rim keeps its face.
+#[test]
+fn a_countersink_next_to_a_wall_leaves_the_wall_whole() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 8, "corner": [0, 0, 0], "name": "Plate"})).unwrap();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 10, "height": 30, "corner": [0, 30, 8], "operation": "join", "name": "Wall"})).unwrap();
+    let (before, _) = measure(&mut s).unwrap();
+    // A Ø13.7 countersink whose rim ends 0.15 mm short of the wall.
+    let p = json!({"position": [20, 23, 8], "direction": [0, 0, -1], "diameter": 6.4, "depth": 8, "type": "countersink", "cs_diameter": 13.7, "cs_angle": 90});
+    run(&mut s, "solid.hole", p).unwrap();
+    assert!(solid_at(&s, Vec3::new(20.0, 30.05, 8.3)), "the wall above the plate is notched");
+    assert!(solid_at(&s, Vec3::new(20.0, 30.05, 8.02)));
+    assert!(!solid_at(&s, Vec3::new(20.0, 29.0, 7.9)), "the countersink reaches its rim");
+    // Exactly the countersink and the clearance hole are taken: the frustum from Ø13.7 to the
+    // hole, and the rest of the hole down through the plate.
+    let r = 3.2;
+    let (cs, h) = csink(13.7 / 2.0, r);
+    let (after, _) = measure(&mut s).unwrap();
+    assert!(close(before - after, cs + cyl(r, 8.0 - h), cs), "{} taken, want {}", before - after, cs + cyl(r, 8.0 - h));
+}
+
 #[test]
 fn recessed_drill_point_geometry_roundtrip_preview_and_undo() {
     for kind in ["counterbore", "countersink"] {
@@ -826,7 +848,7 @@ fn recessed_drill_point_geometry_roundtrip_preview_and_undo() {
         p.as_object_mut().unwrap().remove("tip_angle");
         let redefine = json!({"feature":hole,"command":"solid.hole","params":p});
         let preview = s.preview(&[("timeline.redefine".into(), redefine.clone())]).unwrap();
-        assert!(preview.after.bodies.iter().any(|b| b.body.contains(probe)));
+        assert!(preview.after.bodies.iter().any(|b| b.body.classify_point(probe).unwrap() == solidcraft_kernel::PointClass::Inside));
         assert_eq!(s.doc.to_json(), saved, "preview cannot accept the bottom change");
         run(&mut s, "timeline.redefine", redefine).unwrap();
         assert!(solid_at(&s, probe));

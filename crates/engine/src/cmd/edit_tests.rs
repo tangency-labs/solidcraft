@@ -249,9 +249,11 @@ fn redefining_a_fillet_as_g2_on_sloped_ends_survives_undo_and_reopen() {
     let volume = |s: &Session| {
         let bodies = &s.model.state().bodies;
         assert_eq!(bodies.len(), 1);
-        bodies.first().unwrap().body.tessellate(0.0001).unwrap().measure().volume
+        bodies.first().unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.0001)).unwrap().measure().volume
     };
-    let expected = |r: f64| 12000.0 - 40.0 * 113.0 / 756.0 * r.powi(2) + 13711.0 / 486486.0 * r.powi(3);
+    // The curvature section at its equal-area thumbweight removes (1 - pi/4) r² at the square
+    // corner, first moment 0.0474559669443 r³ (Green's theorem on the section).
+    let expected = |r: f64| 12000.0 - 40.0 * (1.0 - std::f64::consts::FRAC_PI_4) * r.powi(2) + 0.0474559669443 * r.powi(3);
     let actual = volume(&s);
     assert!((actual - expected(5.0)).abs() < 0.05, "{actual} vs {}", expected(5.0));
     let edited = s.doc.clone();
@@ -489,17 +491,17 @@ fn redefine_keeps_allocator_above_component_and_occurrence_ids() {
     assert!(
         matches!(&s.doc.features[combine_index + 1].kind, solidcraft_doc::FeatureKind::BodyTransfer { bodies, to, .. } if bodies == &["Base"] && *to == destination)
     );
-    assert!((solidcraft_kernel::measure(&s.world_state().body("Base").unwrap().body).unwrap().volume - 6000.0).abs() < 1e-6);
-    assert_eq!(s.world_state().bodies.len(), 1);
+    assert!((solidcraft_kernel::measure(&s.world_state().unwrap().body("Base").unwrap().body).unwrap().volume - 6000.0).abs() < 1e-6);
+    assert_eq!(s.world_state().unwrap().bodies.len(), 1);
     run(&mut s, "timeline.rollback", json!({"position":combine_index + 1}));
-    assert_eq!(s.world_state().body("Base").unwrap().component, 0, "the result transfers only AFTER Combine");
+    assert_eq!(s.world_state().unwrap().body("Base").unwrap().component, 0, "the result transfers only AFTER Combine");
     run(&mut s, "edit.undo", json!({}));
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(*s.doc, *original);
     run(&mut s, "edit.redo", json!({}));
     let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
-    assert_eq!(reopened.world_state().body("Base").unwrap().component, destination);
-    assert!((solidcraft_kernel::measure(&reopened.world_state().body("Base").unwrap().body).unwrap().volume - 6000.0).abs() < 1e-6);
+    assert_eq!(reopened.world_state().unwrap().body("Base").unwrap().component, destination);
+    assert!((solidcraft_kernel::measure(&reopened.world_state().unwrap().body("Base").unwrap().body).unwrap().volume - 6000.0).abs() < 1e-6);
     let max_id =
         s.doc.components.iter().map(|c| c.id).chain(s.doc.occurrences.iter().map(|o| o.id)).chain(s.doc.features.iter().map(|f| f.id)).max().unwrap();
     assert!(s.doc.next_id > max_id);
@@ -531,7 +533,7 @@ fn redefine_cannot_publish_a_second_transfer_that_breaks_existing_ownership() {
         assert_eq!(s.pending_moves, pending);
     }
     let reopened = Session::new(solidcraft_doc::Document::from_json(&full).unwrap());
-    assert_eq!(reopened.world_state().body("Base").unwrap().component, reopened.doc.find_component("Original").unwrap());
+    assert_eq!(reopened.world_state().unwrap().body("Base").unwrap().component, reopened.doc.find_component("Original").unwrap());
     assert!(reopened.doc.features.iter().all(|feature| reopened.model.result(feature.id).is_some_and(|result| result.error.is_none())));
 }
 
@@ -1514,7 +1516,7 @@ fn select_same_look_uses_resolved_looks_without_document_history_edits_and_refus
     run(&mut s, "select.same_look", json!({"body":"A"}));
     assert_eq!(s.selection.len(), 3);
     let point = solidcraft_geom::Vec3::new(40.0, 5.0, 5.0);
-    let face = solidcraft_doc::appearance::face_index_at(s.world_state().body("C").unwrap(), point).unwrap();
+    let face = solidcraft_doc::appearance::face_index_at(s.world_state().unwrap().body("C").unwrap(), point).unwrap();
     run(&mut s, "select.set", json!({"items":[Sel::Face {body:"C".into(),index:face,point}]}));
     run(&mut s, "select.same_look", json!({}));
     assert_eq!(s.selection.len(), 3);

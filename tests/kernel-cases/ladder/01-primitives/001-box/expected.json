@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "a 60x40x20 box: the stock every later tier starts from",
+ "source": "analytic",
+ "method": "V = 60*40*20; A = 2(60*40 + 60*20 + 40*20); a box has 6 faces, 12 edges, 8 vertices",
+ "body_count": 1,
+ "volume_mm3": 48000,
+ "area_mm2": 8800,
+ "faces": 6,
+ "edges": 12,
+ "vertices": 8,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   20
+  ]
+ }
+}

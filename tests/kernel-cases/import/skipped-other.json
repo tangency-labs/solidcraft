@@ -1,0 +1,98 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#327",
+  "why": "document/file format or storage, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#461",
+  "why": "document/file format or storage, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#469",
+  "why": "not geometry (importer coverage, progress UI, export, timing tests or feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#626",
+  "why": "document/file format or storage, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1017",
+  "why": "document/file format or storage, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1120",
+  "why": "UI face selection on an imported STEP, no geometry spec"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1369",
+  "why": "document/file format or storage, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1452",
+  "why": "periodic cylinder trim in a two-body STEP; needs the reporter's files, not attached and not rebuildable from the description"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1600",
+  "why": "not geometry (importer coverage, progress UI, export, timing tests or feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1606",
+  "why": "not geometry (importer coverage, progress UI, export, timing tests or feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1613",
+  "why": "Fusion .f3d exchange provider (closed PR), not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1626",
+  "why": "not geometry (importer coverage, progress UI, export, timing tests or feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1777",
+  "why": "not geometry (importer coverage, progress UI, export, timing tests or feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1783",
+  "why": "FreeCAD file refused on a resource budget; needs the reporter's file"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2998",
+  "why": "not geometry (importer coverage, progress UI, export, timing tests or feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2999",
+  "why": "not geometry (importer coverage, progress UI, export, timing tests or feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3093",
+  "why": "document/file format or storage, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3102",
+  "why": "document/file format or storage, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3431",
+  "why": "not geometry (importer coverage, progress UI, export, timing tests or feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3476",
+  "why": "document/file format or storage, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3708",
+  "why": "not geometry (importer coverage, progress UI, export, timing tests or feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3713",
+  "why": "not geometry (importer coverage, progress UI, export, timing tests or feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3754",
+  "why": "document/file format or storage, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4130",
+  "why": "STL opening error with only a screenshot; no file"
+ }
+]

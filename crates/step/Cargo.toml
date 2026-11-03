@@ -1,0 +1,13 @@
+[package]
+name = "solidcraft-step"
+description = "SolidCraft STEP (ISO 10303) exchange: the Part 21 exchange structure and Part 42 geometry as plain data, with no modelling backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+solidcraft-geom = { workspace = true }
+solidcraft-profile = { workspace = true }

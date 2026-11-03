@@ -31,11 +31,11 @@ fn the_grid_fades_out_before_its_edge_and_before_the_far_plane() {
 #[test]
 fn the_headless_grid_fades_out_with_the_distance() {
     let s = Session::default();
-    let mut cam = home_camera(&s);
+    let mut cam = home_camera(&s).unwrap();
     // A top view: the ground is the XY plane and the grid is centred on the target.
     cam.pitch = std::f64::consts::FRAC_PI_2;
     cam.target = Vec3::ZERO;
-    let scene = scene(&s, &cam);
+    let scene = scene(&s, &cam).unwrap();
     assert!(!scene.grid.is_empty(), "the grid is drawn");
     // How far each piece of the grid is from the middle of the view, and the alpha it is drawn
     // with.
@@ -140,14 +140,14 @@ fn the_grid_cross_fades_between_levels_as_the_view_zooms() {
 #[test]
 fn the_headless_grid_draws_both_levels_at_a_switch() {
     let s = Session::default();
-    let mut cam = home_camera(&s);
+    let mut cam = home_camera(&s).unwrap();
     cam.pitch = std::f64::consts::FRAC_PI_2;
     cam.target = Vec3::ZERO;
     let strength = |hh: f64, x: f64| {
         let mut cam = cam;
         cam.distance *= hh / cam.half_height();
         assert!((cam.half_height() - hh).abs() < 1e-6);
-        let scene = scene(&s, &cam);
+        let scene = scene(&s, &cam).unwrap();
         assert!(scene.grid.iter().all(|l| [Palette::DEFAULT.grid, Palette::DEFAULT.grid_major].contains(&l.color)));
         // The strongest piece of the line in each grid colour, added: a line two levels share
         // with different kinds is drawn in both.
@@ -220,6 +220,8 @@ const MARK: Palette = Palette {
     sketch_centerline: Rgb(43, 44, 45),
     axes: [Rgb(46, 47, 48), Rgb(49, 50, 51), Rgb(52, 53, 54)],
     cap: Rgb(55, 56, 57),
+    hatch: [Rgb(61, 62, 63), Rgb(64, 65, 66)],
+    isocurve: Rgb(58, 59, 60),
     analysis: solidcraft_render::AnalysisColors {
         draft: [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]],
         access: [[0.11, 0.12, 0.13], [0.14, 0.15, 0.16]],
@@ -250,7 +252,7 @@ fn the_default_palette_is_the_colour_table() {
         (p.sketch_projected, p.sketch_lost, p.sketch_construction, p.sketch_centerline),
         (colors::SKETCH_PROJECTED, colors::SKETCH_LOST, colors::SKETCH_CONSTRUCTION, colors::SKETCH_CENTERLINE)
     );
-    assert_eq!((p.axes, p.cap), ([colors::AXIS_X, colors::AXIS_Y, colors::AXIS_Z], colors::SECTION_CAP));
+    assert_eq!((p.axes, p.cap, p.isocurve), ([colors::AXIS_X, colors::AXIS_Y, colors::AXIS_Z], colors::SECTION_CAP, colors::ISOCURVE));
     assert_eq!(p.analysis, solidcraft_render::AnalysisColors::DEFAULT);
 }
 
@@ -331,15 +333,17 @@ fn every_scene_colour_comes_from_its_palette_and_appearances_stay() {
     s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
     s.execute("sketch.line", &json!({"points": [[0, -20], [30, -20]]})).unwrap();
     s.execute("sketch.finish", &json!({})).unwrap();
+    // Isocurve Analysis on Plain's side face.
+    s.execute("inspect.isocurve", &json!({"faces": [[45, 0, 5]], "count": 2})).unwrap();
     s.selection = vec![Sel::Body { name: "Picked".into() }];
     s.section = Some((Vec3::new(0., 0., 5.), Vec3::Z));
-    let cam = home_camera(&s);
-    let names: Vec<String> = s.world_state().bodies.iter().filter(|b| s.body_visible(&b.name)).map(|b| b.name.clone()).collect();
+    let cam = home_camera(&s).unwrap();
+    let names: Vec<String> = s.world_state().unwrap().bodies.iter().filter(|b| s.body_visible(&b.name)).map(|b| b.name.clone()).collect();
     let mesh = |sc: &Scene, name: &str| {
         names.iter().position(|n| n == name).and_then(|i| sc.meshes.get(i)).map(|m| (m.color, m.face_colors.clone())).unwrap()
     };
 
-    let marked = scene_with_palette(&s, &cam, s.section, world_curve_parts, &MARK);
+    let marked = scene_with_palette(&s, &cam, s.section, world_curve_parts, &MARK).unwrap();
     assert_eq!((marked.background, marked.cap), (Some(MARK.background), Some(MARK.cap)));
     let allowed = [
         MARK.grid,
@@ -356,11 +360,12 @@ fn every_scene_colour_comes_from_its_palette_and_appearances_stay() {
         MARK.sketch_lost,
         MARK.sketch_construction,
         MARK.sketch_centerline,
+        MARK.isocurve,
     ];
     let all_lines = || marked.grid.iter().chain(&marked.lines);
     let stray: Vec<Rgb> = all_lines().map(|l| l.color).filter(|c| !allowed.contains(c)).collect();
     assert!(stray.is_empty(), "line colours not from the palette: {stray:?}");
-    for want in [MARK.grid, MARK.grid_major, MARK.edge, MARK.axes[0], MARK.axes[1], MARK.axes[2], MARK.sketch_done] {
+    for want in [MARK.grid, MARK.grid_major, MARK.edge, MARK.axes[0], MARK.axes[1], MARK.axes[2], MARK.sketch_done, MARK.isocurve] {
         assert!(all_lines().any(|l| l.color == want), "no line in {want:?}");
     }
     assert!(marked.grid.iter().all(|l| [MARK.grid, MARK.grid_major].contains(&l.color)), "only the grid is drawn under the model");
@@ -371,8 +376,8 @@ fn every_scene_colour_comes_from_its_palette_and_appearances_stay() {
     assert!(!faces.is_empty() && faces.iter().all(|(_, c)| *c == Rgb(0, 255, 0)), "face colours are the design's: {faces:?}");
 
     // The default palette is the scene everyone else gets, line for line.
-    let default = scene_with_palette(&s, &cam, s.section, world_curve_parts, &Palette::DEFAULT);
-    let plain_scene = scene(&s, &cam);
+    let default = scene_with_palette(&s, &cam, s.section, world_curve_parts, &Palette::DEFAULT).unwrap();
+    let plain_scene = scene(&s, &cam).unwrap();
     assert_eq!(
         (default.background, default.cap, default.clip, default.radius),
         (plain_scene.background, plain_scene.cap, plain_scene.clip, plain_scene.radius)
@@ -401,9 +406,9 @@ fn a_see_through_appearance_reaches_the_scene() {
     s.execute("appearance.assign", &json!({"bodies": ["Target"], "color": "#b0bac6", "opacity": 0.3})).unwrap();
     s.execute("appearance.assign", &json!({"bodies": ["Picked"], "color": "#b0bac6", "opacity": 0.3})).unwrap();
     s.selection = vec![Sel::Body { name: "Picked".into() }];
-    let cam = home_camera(&s);
-    let sc = scene(&s, &cam);
-    let names: Vec<String> = s.world_state().bodies.iter().filter(|b| s.body_visible(&b.name)).map(|b| b.name.clone()).collect();
+    let cam = home_camera(&s).unwrap();
+    let sc = scene(&s, &cam).unwrap();
+    let names: Vec<String> = s.world_state().unwrap().bodies.iter().filter(|b| s.body_visible(&b.name)).map(|b| b.name.clone()).collect();
     let opacity = |name: &str| names.iter().position(|n| n == name).and_then(|i| sc.meshes.get(i)).map(|m| (m.opacity, m.glass())).unwrap();
 
     assert_eq!(opacity("Target"), (0.3, true), "the design's opacity is the one the renderers draw");
@@ -412,6 +417,6 @@ fn a_see_through_appearance_reaches_the_scene() {
 
     // Clearing the appearance makes it solid again.
     s.execute("appearance.assign", &json!({"bodies": ["Target"], "color": null})).unwrap();
-    let sc = scene(&s, &cam);
+    let sc = scene(&s, &cam).unwrap();
     assert_eq!(sc.meshes.first().map(|m| m.opacity), Some(1.0));
 }

@@ -1,0 +1,45 @@
+# demo/logo-up-down-join: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Body2: 12 faces, 30 edges
+Body2 face F6:side:l1
+Body2 face F6:side:l10
+Body2 face F6:side:l4
+Body2 face F6:side:l7
+Body2 face F6:side:l8
+Body2 face F6:side:l9
+Body2 face F6:start
+Body2 face F6:top
+Body2 face F7:bottom
+Body2 face F7:side:l12
+Body2 face F7:side:l5
+Body2 face F7:start
+Body2 edge F6:side:l10|F6:side:l7
+Body2 edge F6:side:l10|F6:side:l9
+Body2 edge F6:side:l10|F6:top
+Body2 edge F6:side:l10|F7:bottom
+Body2 edge F6:side:l10|F7:start
+Body2 edge F6:side:l1|F6:side:l10
+Body2 edge F6:side:l1|F6:side:l4
+Body2 edge F6:side:l1|F6:top
+Body2 edge F6:side:l1|F7:start
+Body2 edge F6:side:l4|F6:side:l7
+Body2 edge F6:side:l4|F6:top
+Body2 edge F6:side:l4|F7:start
+Body2 edge F6:side:l7|F6:side:l8
+Body2 edge F6:side:l7|F6:top
+Body2 edge F6:side:l7|F7:bottom
+Body2 edge F6:side:l7|F7:start
+Body2 edge F6:side:l8|F6:side:l9
+Body2 edge F6:side:l8|F6:start
+Body2 edge F6:side:l8|F6:top
+Body2 edge F6:side:l8|F7:bottom
+Body2 edge F6:side:l8|F7:side:l5
+Body2 edge F6:side:l9|F6:start
+Body2 edge F6:side:l9|F6:top
+Body2 edge F6:side:l9|F7:bottom
+Body2 edge F6:side:l9|F7:side:l12
+Body2 edge F6:start|F7:side:l12
+Body2 edge F6:start|F7:side:l5
+Body2 edge F7:bottom|F7:side:l12
+Body2 edge F7:bottom|F7:side:l5
+Body2 edge F7:side:l12|F7:side:l5
+ref Shell1 (3) face 0 `F2:top` -> Body1 face F2:top

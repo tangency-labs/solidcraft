@@ -907,7 +907,8 @@ fn shared_types_keep_the_handlers_messages() {
     for (id, p, probe) in [
         ("solid.shell", json!({"thickness": 1, "faces": 5}), json!({"faces": 5})),
         ("solid.shell", json!({"thickness": 1, "faces": null}), json!({"faces": null})),
-        ("solid.shell", json!({"thickness": 1, "faces": []}), json!({"faces": []})),
+        // `solid.shell` takes no faces (a closed hollow body); the draft refuses them.
+        ("solid.draft", json!({"angle": 1, "faces": []}), json!({"faces": []})),
         ("solid.shell", json!({"thickness": 1, "faces": [true]}), json!({"faces": [true]})),
         ("solid.shell", json!({"thickness": 1, "faces": [""]}), json!({"faces": [""]})),
         ("solid.fillet", json!({"radius": 1, "edges": {}}), json!({"edges": {}})),

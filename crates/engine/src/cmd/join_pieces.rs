@@ -71,7 +71,9 @@ impl crate::Ahead {
         if inside && adds_nothing(&before, &state, &tools) {
             return (Some(Addition::Inside), None);
         }
-        after.world_state().warm_display();
+        if let Ok(world) = after.world_state() {
+            world.warm_display();
+        }
         (Some(Addition::Joins), Some(crate::Evaluated(after.model)))
     }
 }

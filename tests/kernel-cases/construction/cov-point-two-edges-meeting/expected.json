@@ -1,0 +1,15 @@
+{
+ "sources": [],
+ "what": "where two box edges meet",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin (x 0..40, y 0..30, z 0..20): y 0, z 0 along X and x 40, z 0 along Y meet at (40,0,0)",
+ "construction": {
+  "P": {
+   "point": [
+    40,
+    0,
+    0
+   ]
+  }
+ }
+}

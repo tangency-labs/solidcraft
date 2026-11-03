@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "match on a closed solid: refused, a match rebuilds a surface",
+ "source": "invariants",
+ "method": "rebuilding one face of a solid would open it",
+ "outcome": "refused",
+ "refusal": "match rebuilds a surface body: this one is closed"
+}

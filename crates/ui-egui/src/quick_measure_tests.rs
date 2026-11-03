@@ -24,7 +24,7 @@ fn block() -> Harness {
 }
 
 fn edge(h: &Harness, p: Vec3) -> Sel {
-    let st = h.app.session.world_state();
+    let st = crate::open_meshing::session_world(&h.app.session);
     let m = st.body("Body1").unwrap().mesh();
     let index = m.edges.iter().position(|e| e.windows(2).any(|w| p.dist_to_segment(w[0], w[1]) < 1e-9)).expect("an edge there");
     Sel::Edge { body: "Body1".into(), index, point: p }
@@ -32,7 +32,7 @@ fn edge(h: &Harness, p: Vec3) -> Sel {
 
 /// The face with a triangle wholly at height `z`.
 fn face_at_height(h: &Harness, z: f64) -> Sel {
-    let st = h.app.session.world_state();
+    let st = crate::open_meshing::session_world(&h.app.session);
     let m = st.body("Body1").unwrap().mesh();
     let (t, f) = m.triangles.iter().zip(&m.tri_face).find(|(t, _)| m.tri(t).is_some_and(|ps| ps.iter().all(|p| (p.z - z).abs() < 1e-9))).unwrap();
     let ps = m.tri(t).unwrap();
@@ -73,7 +73,7 @@ fn a_round_edge_shows_its_diameter_radius_and_circumference() {
     h.frames(2);
     // The top circle, by a point between two of its polyline's points (its first is on the seam).
     let on_rim = {
-        let st = h.app.session.world_state();
+        let st = crate::open_meshing::session_world(&h.app.session);
         let m = st.body("Body1").unwrap().mesh();
         let rim = m.edges.iter().find(|e| e.len() > 2 && e.iter().all(|p| (p.z - 10.0).abs() < 1e-9)).expect("the top circle");
         (rim[1] + rim[2]) * 0.5

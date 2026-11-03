@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "config.rule limiting W to 30..50 while the row Long has W = 60",
+ "source": "invariants",
+ "method": "every row is checked against the new rule: Long's 60 is outside it, so the rule is refused",
+ "outcome": "refused",
+ "refusal": "rule `Range` restricts the final value"
+}

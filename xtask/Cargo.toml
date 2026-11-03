@@ -7,6 +7,7 @@ publish = false
 
 [dependencies]
 proc-macro2 = { workspace = true, features = ["span-locations"] }
+quick-xml = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

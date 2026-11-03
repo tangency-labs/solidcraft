@@ -31,7 +31,7 @@ fn print_face(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => None,
         Some(v) => Some(crate::params::vec3(v).ok_or_else(|| bad(cmd, "`point` must be [x, y, z] of numbers"))?),
     };
-    let world = s.world_state();
+    let world = s.world_state()?;
     let body = world.body(name).ok_or_else(|| bad(cmd, format!("no body `{name}`")))?;
     let key = body.definition_name().to_string();
     let face = match point {
@@ -189,7 +189,7 @@ mod tests {
     /// Lay every body of `s` on its print face, as a slicer export does: Block's box and centre
     /// of mass afterwards, and what was reported.
     fn laid(s: &Session) -> (solidcraft_geom::Aabb3, Vec3, Laid) {
-        let mut state = s.doc.painted(&s.world_state());
+        let mut state = s.doc.painted(&s.world_state().unwrap());
         let laid = lay_on_print_faces(s, &mut state, &[], &[]);
         let block = state.bodies.iter().find(|b| b.name == "Block").expect("Block");
         let m = solidcraft_kernel::measure_mass(&block.body).expect("measure");
@@ -206,7 +206,7 @@ mod tests {
         // turning one of them on its own would pull it out of the others, so it stays as it lies.
         let mut s = block();
         run(&mut s, "body.print_face", json!({"body": "Block", "point": [20, 5, 2.5]}));
-        let mut state = s.doc.painted(&s.world_state());
+        let mut state = s.doc.painted(&s.world_state().unwrap());
         let parts = [("Bracket".to_string(), vec!["Block".to_string(), "Other".to_string()])];
         let laid = lay_on_print_faces(&s, &mut state, &[], &parts);
         assert!(laid.bodies.is_empty(), "{:?}", laid.bodies);
@@ -306,7 +306,7 @@ mod tests {
 
     /// Every body laid on its print face: (name, box, centre of mass) of those laid.
     fn all_laid(s: &Session) -> Vec<(String, solidcraft_geom::Aabb3, Vec3)> {
-        let mut state = s.doc.painted(&s.world_state());
+        let mut state = s.doc.painted(&s.world_state().unwrap());
         let laid = lay_on_print_faces(s, &mut state, &[], &[]);
         assert!(laid.warnings.is_empty(), "{:?}", laid.warnings);
         laid.bodies
@@ -341,7 +341,7 @@ mod tests {
         run(&mut s, "solid.mirror", json!({"bodies": ["Block"], "plane": "YZ"}));
         assert_eq!(s.doc.print_faces.len(), 2, "{:?}", s.doc.print_faces.keys().collect::<Vec<_>>());
         let copy = s.doc.print_faces.keys().find(|k| *k != "Block").expect("the copy's print face").clone();
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let body = world.body(&copy).expect("copy");
         let face = s.doc.print_face(&world, body).expect("marked").expect("found");
         assert!(near(face.point.x, -20.) && near(face.normal.x, -1.), "{face:?}");
