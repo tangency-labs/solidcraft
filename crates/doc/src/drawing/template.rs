@@ -19,7 +19,8 @@
 //! built-in never changes a drawing made from an earlier one: a drawing keeps copies, never names.
 //! An older name (`iso-a3`, before the built-ins came in two kinds) reads as that size's part one.
 
-use std::collections::BTreeSet;
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use solidcraft_geom::cell::Part;
@@ -167,10 +168,11 @@ pub struct Restyled {
 pub fn apply(drawing: &Drawing, template: &Drawing, id_source: &mut IdSource) -> Result<(Drawing, Vec<Restyled>)> {
     check(template)?;
     let mut d = drawing.clone();
+    let logos = logos_in(&mut d, template, id_source)?;
     let mut changed = Vec::new();
     for at in 0..d.sheets.len() {
         let Some(from) = template.sheets.get(at).or(template.sheets.last()) else { continue };
-        let block = from.title_block.as_ref().map(|block| with_logos_in(&mut d, template, block, id_source)).transpose()?;
+        let block = from.title_block.as_ref().map(|block| with_logos(block, &logos));
         let Some(sheet) = d.sheets.get_mut(at) else { continue };
         let paper = sheet.sheet != from.sheet;
         let (border, title_block) = (sheet.border != from.border, sheet.title_block != block);
@@ -190,17 +192,29 @@ pub fn apply(drawing: &Drawing, template: &Drawing, id_source: &mut IdSource) ->
     Ok((d, changed))
 }
 
-/// `template`'s `block` for `d`: each logo's file brought into `d`, and the cell naming it there.
-fn with_logos_in(d: &mut Drawing, template: &Drawing, block: &TitleBlock, id_source: &mut IdSource) -> Result<TitleBlock> {
+/// Each logo file `template` shows, brought into `d` once however many of its sheets show it: the
+/// template's id for it, to `d`'s. One only a sheet past `d`'s last shows goes with what's unused.
+fn logos_in(d: &mut Drawing, template: &Drawing, id_source: &mut IdSource) -> Result<BTreeMap<u64, u64>> {
+    let mut brought = BTreeMap::new();
+    for logo in template.logos() {
+        if let Entry::Vacant(entry) = brought.entry(logo) {
+            let file = template.images.by_id(logo).ok_or_else(|| DocError::Invalid(format!("the template has no image {}", ids::encode(logo))))?;
+            let id = d.allocate_id(id_source)?;
+            entry.insert(d.keep_file(ImageFile { id, ..file.clone() }));
+        }
+    }
+    Ok(brought)
+}
+
+/// `block` with each logo cell naming its file's id in the drawing (`logos`, from [`logos_in`]).
+fn with_logos(block: &TitleBlock, logos: &BTreeMap<u64, u64>) -> TitleBlock {
     let mut block = block.clone();
     for cell in &mut block.cells {
-        let CellKind::Text(text) = &mut cell.kind else { continue };
-        let Some(logo) = text.image else { continue };
-        let file = template.images.by_id(logo).ok_or_else(|| DocError::Invalid(format!("the template has no image {}", ids::encode(logo))))?;
-        let id = d.allocate_id(id_source)?;
-        text.image = Some(d.keep_file(ImageFile { id, ..file.clone() }));
+        if let CellKind::Text(text) = &mut cell.kind {
+            text.image = text.image.and_then(|logo| logos.get(&logo).copied());
+        }
     }
-    Ok(block)
+    block
 }
 
 /// The built-in `name`'s paper size, its title ("ISO A3") and whether it is an assembly's; none for

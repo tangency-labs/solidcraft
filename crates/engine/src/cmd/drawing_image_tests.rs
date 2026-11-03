@@ -232,12 +232,16 @@ fn a_logo_by_command() {
 }
 
 /// What is refused changes nothing: a header over the pixel cap without decoding it, a corrupt file, a
+/// path of 4096 bytes or more, a folder, a file over the byte cap or outside the folders an agent may read, a
 /// cell that isn't a text cell or isn't there, and a call that doesn't say which file.
 #[test]
 fn a_logo_refused_changes_nothing() {
     let (big_dir, big) = on_disk("logo-big", &png(9000, 9000));
     let (bad_dir, corrupt) = on_disk("logo-corrupt", b"not an image");
     let (ok_dir, ok) = on_disk("logo-ok", &png(8, 8));
+    let heavy = bad_dir.join("heavy.png");
+    std::fs::write(&heavy, vec![0; MAX_IMAGE_BYTES + 1]).unwrap();
+    let path = |p: &PathBuf| p.to_string_lossy().into_owned();
     let (mut s, _) = titled();
     let was = s.drawing("test").unwrap().clone();
     for (p, says) in [
@@ -248,11 +252,19 @@ fn a_logo_refused_changes_nothing() {
         (json!({"cell": "title"}), "file"),
         (json!({"cell": "title", "file": ok, "sheets": ["no such sheet"]}), "sheet"),
         (json!({"cell": "title", "file": ""}), "`file` is the path"),
+        (json!({"cell": "title", "file": "x".repeat(4096)}), "`file` is the path"),
+        (json!({"cell": "title", "file": path(&ok_dir)}), "not a regular file"),
+        (json!({"cell": "title", "file": path(&heavy)}), "too large"),
     ] {
         let e = s.execute(LOGO, &p).unwrap_err().to_string();
         assert!(e.contains(says), "{p}: {e}");
         assert_eq!(s.drawing("test").unwrap(), &was, "{p}");
     }
+    // Outside the folders an agent may read: the same check every other read takes.
+    let p = json!({"cell": "title", "file": ok});
+    let e = vfs::scoped(Some(PathScope::new([big_dir.clone()])), || s.execute(LOGO, &p)).unwrap_err().to_string();
+    assert!(e.contains("outside the folders"), "{e}");
+    assert_eq!(s.drawing("test").unwrap(), &was);
     for dir in [big_dir, bad_dir, ok_dir] {
         std::fs::remove_dir_all(dir).unwrap();
     }

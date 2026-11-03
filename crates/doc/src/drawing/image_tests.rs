@@ -279,20 +279,23 @@ fn a_logo_is_a_use_of_its_file() {
     d.validate().unwrap();
 }
 
+/// A logo goes only in a text cell of a block, on sheets the drawing has. Every sheet is checked
+/// before any changes, so a refusal changes nothing; a sheet named twice is set once.
 #[test]
 fn a_logo_goes_only_in_a_text_cell_of_a_block() {
     let (mut d, mut id_source) = with_blocks();
     let file = ImageFile::from_file(d.allocate_id(&mut id_source).unwrap(), &png(8, 8)).unwrap();
     let was = d.clone();
     let fails = |d: &mut Drawing, sheets: Option<&[u64]>, cell: &str| d.set_logo(sheets, cell, Some(file.clone())).unwrap_err().to_string();
-    assert!(fails(&mut d, None, "projection").contains("isn't a text cell"));
-    d = was.clone();
-    assert!(fails(&mut d, None, "nothing").contains("no sheet's title block"));
-    d = was.clone();
     let first = d.sheets[0].id;
+    assert!(fails(&mut d, None, "projection").contains("isn't a text cell"));
+    assert!(fails(&mut d, None, "nothing").contains("no sheet's title block"));
     assert!(fails(&mut d, Some(&[first]), "nothing").contains("no title block cell"));
-    d = was.clone();
-    assert!(fails(&mut d, Some(&[1]), "title").contains("no sheet"));
+    assert!(fails(&mut d, Some(&[first, 1]), "title").contains("no sheet"));
+    assert!(fails(&mut d, Some(&[]), "title").contains("names no sheet"));
+    assert_eq!(d, was, "a refusal changes nothing");
+    let (sheets, _) = d.set_logo(Some(&[first, first]), "title", Some(file.clone())).unwrap();
+    assert_eq!(sheets, [first]);
 }
 
 /// A link to a file the drawing doesn't have is refused on read, and so is a file only an emptied
@@ -376,4 +379,22 @@ fn a_template_carries_its_logos_file() {
     let mut placed_in_it = read;
     placed_in_it.sheet_images.add([Arc::new(SheetImage { id: placed, sheet: placed_in_it.sheets[0].id, rect_mm: RECT, image: id })]);
     assert!(template::check(&placed_in_it).unwrap_err().to_string().contains("images placed"));
+}
+
+/// A template brings each logo's file in once, however many of its sheets show it: one id for the
+/// file, and both sheets show it.
+#[test]
+fn a_template_brings_each_logo_file_in_once() {
+    use crate::drawing::template;
+
+    let (mut d, mut id_source) = with_blocks();
+    let id = d.allocate_id(&mut id_source).unwrap();
+    d.set_logo(None, "title", Some(ImageFile::from_file(id, &png(8, 8)).unwrap())).unwrap();
+    let saved = template::from_drawing(&d).unwrap();
+    let (target, _) = with_blocks();
+    let (mut seeded, mut once) = (IdSource::seeded(7), IdSource::seeded(7));
+    let (applied, _) = template::apply(&target, &saved, &mut seeded).unwrap();
+    let first = target.allocate_id(&mut once).unwrap();
+    assert_eq!((logo_of(&applied, 0), logo_of(&applied, 1), applied.images.iter().count()), (Some(first), Some(first), 1));
+    assert_eq!(applied.allocate_id(&mut seeded).unwrap(), applied.allocate_id(&mut once).unwrap(), "one id was taken");
 }
