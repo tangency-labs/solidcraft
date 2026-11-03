@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use super::{EditJointParams, EditJointResult};
+use super::{EditJointParams, EditJointResult, FocusJointsParams, FocusJointsResult};
 use crate::Session;
 use crate::schema::tests::{assert_keys, conforms};
 use crate::schema::{input_schema_for, output_schema_for};
@@ -8,6 +8,20 @@ use crate::schema::{input_schema_for, output_schema_for};
 #[test]
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<EditJointParams>(), &["a", "angle", "b", "flip", "joint", "name", "offset", "quiet", "suppressed", "type"]);
+    assert_keys(input_schema_for::<FocusJointsParams>(), &["path"]);
+}
+
+#[test]
+fn focus_replies_match_the_output_schema() {
+    let schema = output_schema_for::<FocusJointsResult>();
+    let schema = schema.as_value();
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name": "A"})).unwrap_or_else(|e| panic!("{e}"));
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap_or_else(|e| panic!("{e}"));
+    let on = s.execute("joint.focus", &json!({"path": [s.doc.occurrences[0].id]})).unwrap_or_else(|e| panic!("{e}"));
+    assert!(conforms(schema, schema, &on), "{on} doesn't match {schema}");
+    let off = s.execute("joint.focus", &json!({})).unwrap_or_else(|e| panic!("{e}"));
+    assert!(conforms(schema, schema, &off), "{off} doesn't match {schema}");
 }
 
 #[test]

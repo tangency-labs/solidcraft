@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use solidcraft_engine::Session;
+use solidcraft_engine::doc::joints::AttachedJoint;
 use solidcraft_engine::doc::{Document, FeatureKind, Mat, ModelState};
 use solidcraft_engine::occurrences::OccurrencePlacement;
 
@@ -22,6 +23,8 @@ pub(super) struct Model {
     placements: HashMap<Vec<u64>, Option<Arc<OccurrencePlacement>>>,
     /// Each placed body's placement path, by the body's world name (built on first use).
     body_paths: Option<HashMap<String, Vec<u64>>>,
+    /// The joints that attach each occurrence (built on first use).
+    attached_joints: Option<BTreeMap<u64, Vec<AttachedJoint>>>,
 }
 
 impl Model {
@@ -67,7 +70,15 @@ impl Model {
             children,
             placements: HashMap::new(),
             body_paths: None,
+            attached_joints: None,
         }
+    }
+
+    /// The joints that attach an occurrence, worked out once per model for all of them: every
+    /// open placement row asks on every frame.
+    pub fn attached_joints(&mut self, occurrence: u64) -> &[AttachedJoint] {
+        let doc = &self.doc;
+        self.attached_joints.get_or_insert_with(|| doc.attached_joints()).get(&occurrence).map_or(&[], Vec::as_slice)
     }
 
     pub fn matches(&self, session: &Session) -> bool {
