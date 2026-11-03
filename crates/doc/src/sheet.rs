@@ -10,7 +10,7 @@
 //! together; the flat solid is the outline extruded through the thickness.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Aabb2, LINEAR_TOL, Loop2, Plane, Region2, Ring, Seg2, Vec2, Vec3};
+use solidcraft_geom::{Aabb2, ArcMap, LINEAR_TOL, Loop2, Plane, Region2, Ring, Seg2, Vec2, Vec3};
 use solidcraft_kernel::{self as kernel, Body, EdgeSpec, FaceSpec, SurfSpec};
 
 use crate::expr::{self, Kind, Value};
@@ -4285,24 +4285,8 @@ impl SheetBody {
             Vec2::new(q.x, q.y)
         };
         // A rigid map of the plane: lines and arcs stay lines and arcs (mirrored or not).
-        let (o, ex, ey) = (map(Vec2::default()), map(Vec2::new(1.0, 0.0)), map(Vec2::new(0.0, 1.0)));
-        let (ax, ay) = (ex - o, ey - o);
-        let mirrored = ax.cross(ay) < 0.0;
-        let rot = ax.y.atan2(ax.x);
-        let seg = |sg: &Seg2| -> Seg2 {
-            match *sg {
-                Seg2::Line { a, b } => Seg2::Line { a: map(a), b: map(b) },
-                Seg2::Arc { center, radius, start, sweep } => {
-                    if mirrored {
-                        Seg2::Arc { center: map(center), radius, start: rot - start, sweep: -sweep }
-                    } else {
-                        Seg2::Arc { center: map(center), radius, start: rot + start, sweep }
-                    }
-                }
-                // Free-form segments map exactly, through their control points.
-                other => other.map_controls(map),
-            }
-        };
+        let arc = ArcMap::rigid(map);
+        let seg = |sg: &Seg2| sg.mapped(map, arc);
         let map_loop = |lp: &Loop2| Loop2 { segs: lp.segs.iter().map(seg).collect() };
         Ok(Region2 { outer: map_loop(&r.outer).ccw(), holes: r.holes.iter().map(|h| map_loop(h).ccw().reversed()).collect() })
     }
@@ -4654,16 +4638,7 @@ fn flip_x(p: Vec2) -> Vec2 {
 /// follow their control points), and run backwards so it keeps its sense: an outer loop stays
 /// counter-clockwise, a hole clockwise.
 fn flip_x_loop(l: &Loop2) -> Loop2 {
-    let segs = l
-        .segs
-        .iter()
-        .map(|s| match *s {
-            Seg2::Arc { center, radius, start, sweep } => {
-                Seg2::Arc { center: flip_x(center), radius, start: std::f64::consts::PI - start, sweep: -sweep }
-            }
-            other => other.map_controls(flip_x),
-        })
-        .collect();
+    let segs = l.segs.iter().map(|s| s.mapped(flip_x, ArcMap::turn(std::f64::consts::PI, true))).collect();
     Loop2 { segs }.reversed()
 }
 
@@ -5310,7 +5285,8 @@ mod tests {
         // right: the same ellipse on the sheet, every curve through its mirrored controls.
         let below = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Y * -1.0 };
         let mirror = |p: Vec2| Vec2::new(p.x, -p.y);
-        let seen = Region2 { outer: Loop2 { segs: hole.outer.segs.iter().map(|x| x.map_controls(mirror)).collect() }, holes: vec![] };
+        let seen =
+            Region2 { outer: Loop2 { segs: hole.outer.segs.iter().map(|x| x.mapped(mirror, ArcMap::turn(-0.0, true))).collect() }, holes: vec![] };
         let mapped = s.region_to_flat(None, &below, &seen).unwrap();
         assert!(mapped.outer.is_ccw() && mapped.outer.segs.len() == 4 && mapped.outer.segs.iter().all(|x| hole.outer.segs.contains(x)), "{mapped:?}");
         // A cubic and a quartic closed by a line, clockwise in that plane: counter-clockwise on
@@ -5331,6 +5307,48 @@ mod tests {
         let mapped = s.region_to_flat(None, &below, &Region2 { outer: drawn.clone(), holes: vec![] }).unwrap();
         assert_eq!(mapped.outer, lobe(mirror));
         assert!(mapped.holes.is_empty() && (mapped.area() + drawn.signed_area()).abs() < 1e-9 && mapped.area() > 100.0, "{}", mapped.area());
+    }
+
+    /// A half disc: an arc over the top about `c` (radius 10), closed by a line, counter-clockwise.
+    fn half_disc(c: Vec2) -> Loop2 {
+        let r = Vec2::new(10.0, 0.0);
+        Loop2 { segs: vec![Seg2::Arc { center: c, radius: 10.0, start: 0.0, sweep: std::f64::consts::PI }, Seg2::Line { a: c - r, b: c + r }] }
+    }
+
+    /// Where `lp`'s arc lands: its centre, radius and middle point.
+    fn arc_of(lp: &Loop2) -> (Vec2, f64, Vec2) {
+        let arc = |s: &Seg2| match s {
+            Seg2::Arc { center, radius, .. } => Some((*center, *radius, s.mid())),
+            _ => None,
+        };
+        lp.segs.iter().find_map(arc).unwrap()
+    }
+
+    /// Arcs map into the flat frame exactly: drawn from below (a mirror) and on a plane turned a
+    /// quarter, a half disc's arc lands where its points do and bulges the way they go.
+    #[test]
+    fn arcs_map_into_the_flat_frame_mirrored_and_turned() {
+        let s = plate(100.0, 60.0);
+        let below = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Y * -1.0 };
+        let turned = Plane { origin: Vec3::ZERO, x: Vec3::Y, y: Vec3::X * -1.0 };
+        let (c, top) = (Vec2::new(40.0, 30.0), Vec2::new(40.0, 40.0));
+        let flat_of_below = |p: Vec2| Vec2::new(p.x, -p.y);
+        let flat_of_turned = |p: Vec2| Vec2::new(-p.y, p.x);
+        for (plane, to_flat) in [(below, &flat_of_below as &dyn Fn(Vec2) -> Vec2), (turned, &flat_of_turned)] {
+            let mapped = s.region_to_flat(None, &plane, &Region2 { outer: half_disc(c), holes: vec![] }).unwrap();
+            let (center, radius, mid) = arc_of(&mapped.outer);
+            assert!(mapped.outer.is_ccw() && radius == 10.0, "{mapped:?}");
+            assert!((center - to_flat(c)).len() < 1e-9 && (mid - to_flat(top)).len() < 1e-9, "{center:?} {mid:?}");
+        }
+    }
+
+    /// A flat loop mirrored across its y axis keeps its arcs exact and its sense.
+    #[test]
+    fn a_flat_loop_mirrors_its_arcs_exactly() {
+        let mirrored = flip_x_loop(&half_disc(Vec2::new(40.0, 30.0)));
+        let (center, radius, mid) = arc_of(&mirrored);
+        assert!(mirrored.is_ccw() && radius == 10.0);
+        assert!((center - Vec2::new(-40.0, 30.0)).len() < 1e-12 && (mid - Vec2::new(-40.0, 40.0)).len() < 1e-9, "{center:?} {mid:?}");
     }
 
     #[test]

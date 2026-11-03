@@ -5,7 +5,7 @@ use super::*;
 use crate::EmbossFace;
 use crate::apply_point;
 use crate::sheet;
-use solidcraft_geom::{Aabb3, Loop2, Ring, Seg2};
+use solidcraft_geom::{Aabb3, ArcMap, Loop2, Ring, Seg2};
 
 pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
     match &f.kind {
@@ -480,14 +480,8 @@ fn on_sheet_material(st: &ModelState, i: usize, p: Vec3) -> bool {
 fn mirror_y(r: &Region2) -> Region2 {
     let f = |p: Vec2| Vec2::new(p.x, -p.y);
     let m = |l: &Loop2| {
-        let segs: Vec<Seg2> = l
-            .segs
-            .iter()
-            .map(|s| match *s {
-                Seg2::Arc { center, radius, start, sweep } => Seg2::Arc { center: f(center), radius, start: -start, sweep: -sweep },
-                other => other.map_controls(f),
-            })
-            .collect();
+        // -0.0: a start of +0.0 mirrors to -0.0, as `-start` does.
+        let segs: Vec<Seg2> = l.segs.iter().map(|s| s.mapped(f, ArcMap::turn(-0.0, true))).collect();
         Loop2 { segs }.ccw()
     };
     Region2 { outer: m(&r.outer), holes: r.holes.iter().map(|h| m(h).reversed()).collect() }
@@ -2213,5 +2207,27 @@ fn sheet_picks(sh: &crate::sheet::SheetBody, f: &Feature, edges: &[Vec3], warnin
 fn tag_flanges(sh: &mut crate::sheet::SheetBody, from: usize, feature: u64) {
     for (k, fl) in sh.flanges.iter_mut().enumerate().skip(from) {
         fl.tag = format!("F{feature}.{}", k - from);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A flipped base's sketch region mirrors in the sketch's x axis exactly: its arc stays an arc
+    /// and bulges the mirrored way, and the outline keeps its sense.
+    #[test]
+    fn a_flipped_region_mirrors_its_arcs_exactly() {
+        let c = Vec2::new(40.0, 30.0);
+        let r = Vec2::new(10.0, 0.0);
+        let half =
+            Loop2 { segs: vec![Seg2::Arc { center: c, radius: 10.0, start: 0.0, sweep: std::f64::consts::PI }, Seg2::Line { a: c - r, b: c + r }] };
+        let mirrored = mirror_y(&Region2 { outer: half, holes: vec![] }).outer;
+        let arc = mirrored.segs.iter().find(|s| matches!(s, Seg2::Arc { .. })).unwrap();
+        assert!(
+            mirrored.is_ccw()
+                && matches!(arc, Seg2::Arc { center, radius, .. } if (*center - Vec2::new(40.0, -30.0)).len() < 1e-12 && *radius == 10.0)
+        );
+        assert!((arc.mid() - Vec2::new(40.0, -40.0)).len() < 1e-9, "{:?}", arc.mid());
     }
 }
