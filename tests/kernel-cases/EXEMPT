@@ -258,6 +258,7 @@ sketch.constraint.concentric      2D sketch only (the sketch solver and engine t
 sketch.constraint.curvature       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.equal           2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.midpoint        2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.constraint.on_plane        3D sketch solve only (the 3D solver and engine tests, sketch_3d_frame_tests.rs); no kernel operation
 sketch.constraint.parallel        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.perpendicular   2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.polygon         2D sketch only (the sketch solver and engine tests); no kernel operation
