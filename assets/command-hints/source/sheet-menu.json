@@ -1,0 +1,785 @@
+{
+  "samples": [
+    {
+      "command": "sheet.flange",
+      "slug": "sheet-flange",
+      "group": "SHEET METAL",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Base"
+          }
+        },
+        {
+          "command": "sketch.rectangle.two_point",
+          "params": {
+            "p0": [
+              0,
+              0
+            ],
+            "p1": [
+              40,
+              30
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        },
+        {
+          "command": "sheet.flange",
+          "params": {
+            "sketch": "Base",
+            "body_name": "Sheet"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sheet.flange",
+          "params": {
+            "edges": [
+              [
+                20,
+                0,
+                2.5
+              ]
+            ],
+            "height": 18
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          20,
+          15,
+          7
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 150
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false,
+        "select": [
+          {
+            "type": "face",
+            "body": "Sheet",
+            "point": [
+              20,
+              0,
+              10
+            ]
+          }
+        ]
+      },
+      "after_actions": [],
+      "expected": {
+        "body_count": 1,
+        "volume_mm3": 4389.048622548086,
+        "volume_relative_tolerance": 0.001
+      },
+      "explanation": "An 18 mm native edge flange bends the front edge up. The new wall is selected in the real viewport."
+    },
+    {
+      "command": "sheet.path_flange",
+      "slug": "sheet-path_flange",
+      "group": "SHEET METAL",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Base"
+          }
+        },
+        {
+          "command": "sketch.rectangle.two_point",
+          "params": {
+            "p0": [
+              0,
+              0
+            ],
+            "p1": [
+              40,
+              30
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        },
+        {
+          "command": "sheet.flange",
+          "params": {
+            "sketch": "Base",
+            "body_name": "Sheet"
+          }
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": {
+              "origin": [
+                40,
+                0,
+                2.5
+              ],
+              "x_dir": [
+                1,
+                0,
+                0
+              ],
+              "y_dir": [
+                0,
+                0,
+                1
+              ]
+            },
+            "name": "Path"
+          }
+        },
+        {
+          "command": "sketch.line",
+          "params": {
+            "points": [
+              [
+                0,
+                0
+              ],
+              [
+                0,
+                18
+              ],
+              [
+                -14,
+                18
+              ]
+            ],
+            "ids": [
+              "l1",
+              "l2"
+            ],
+            "infer": false
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sheet.path_flange",
+          "params": {
+            "edge": [
+              40,
+              15,
+              2.5
+            ],
+            "sketch": "Path",
+            "curves": [
+              "l1",
+              "l2"
+            ]
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          20,
+          15,
+          7
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 150
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "after_actions": [],
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "The genuine cross-section path adds two right-angle bends to the base edge, as one sheet feature."
+    },
+    {
+      "command": "sheet.hem",
+      "slug": "sheet-hem",
+      "group": "SHEET METAL",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Base"
+          }
+        },
+        {
+          "command": "sketch.rectangle.two_point",
+          "params": {
+            "p0": [
+              0,
+              0
+            ],
+            "p1": [
+              40,
+              30
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        },
+        {
+          "command": "sheet.flange",
+          "params": {
+            "sketch": "Base",
+            "body_name": "Sheet"
+          }
+        },
+        {
+          "command": "sheet.flange",
+          "params": {
+            "edges": [
+              [
+                20,
+                0,
+                2.5
+              ]
+            ],
+            "height": 18
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sheet.hem",
+          "params": {
+            "edges": [
+              [
+                20,
+                0,
+                18
+              ]
+            ],
+            "length": 8
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          20,
+          15,
+          7
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 150
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "after_actions": [],
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "The existing flange end folds back into a native return hem."
+    },
+    {
+      "command": "sheet.fold",
+      "slug": "sheet-fold",
+      "group": "SHEET METAL",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Base"
+          }
+        },
+        {
+          "command": "sketch.rectangle.two_point",
+          "params": {
+            "p0": [
+              0,
+              0
+            ],
+            "p1": [
+              40,
+              30
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        },
+        {
+          "command": "sheet.flange",
+          "params": {
+            "sketch": "Base",
+            "body_name": "Sheet"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sheet.fold",
+          "params": {
+            "points": [
+              [
+                15,
+                0,
+                2.5
+              ],
+              [
+                15,
+                30,
+                2.5
+              ]
+            ],
+            "angle": "90 deg",
+            "fixed": [
+              30,
+              15,
+              2.5
+            ]
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          20,
+          15,
+          7
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 150
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "after_actions": [],
+      "expected": {
+        "body_count": 1,
+        "volume_mm3": 3017.6714586764424
+      },
+      "explanation": "The actual fold holds the larger right side fixed and turns the left side up around the chosen line."
+    },
+    {
+      "command": "sheet.unfold",
+      "slug": "sheet-unfold",
+      "group": "SHEET METAL",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Base"
+          }
+        },
+        {
+          "command": "sketch.rectangle.two_point",
+          "params": {
+            "p0": [
+              0,
+              0
+            ],
+            "p1": [
+              40,
+              30
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        },
+        {
+          "command": "sheet.flange",
+          "params": {
+            "sketch": "Base",
+            "body_name": "Sheet"
+          }
+        },
+        {
+          "command": "sheet.flange",
+          "params": {
+            "edges": [
+              [
+                20,
+                0,
+                2.5
+              ],
+              [
+                20,
+                30,
+                2.5
+              ]
+            ],
+            "height": 18
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sheet.unfold",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          20,
+          15,
+          7
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 170
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "after_actions": [],
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "Both formed flanges unfold into the real developed sheet with bend allowance."
+    },
+    {
+      "command": "sheet.refold",
+      "slug": "sheet-refold",
+      "group": "SHEET METAL",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Base"
+          }
+        },
+        {
+          "command": "sketch.rectangle.two_point",
+          "params": {
+            "p0": [
+              0,
+              0
+            ],
+            "p1": [
+              40,
+              30
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        },
+        {
+          "command": "sheet.flange",
+          "params": {
+            "sketch": "Base",
+            "body_name": "Sheet"
+          }
+        },
+        {
+          "command": "sheet.flange",
+          "params": {
+            "edges": [
+              [
+                20,
+                0,
+                2.5
+              ],
+              [
+                20,
+                30,
+                2.5
+              ]
+            ],
+            "height": 18
+          }
+        },
+        {
+          "command": "sheet.unfold",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "sheet.refold",
+          "params": {}
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          20,
+          15,
+          7
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 170
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "after_actions": [],
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "The developed sheet returns to its actual two-flange formed shape."
+    },
+    {
+      "command": "sheet.flat_pattern",
+      "slug": "sheet-flat_pattern",
+      "group": "SHEET METAL",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Base"
+          }
+        },
+        {
+          "command": "sketch.rectangle.two_point",
+          "params": {
+            "p0": [
+              0,
+              0
+            ],
+            "p1": [
+              40,
+              30
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        },
+        {
+          "command": "sheet.flange",
+          "params": {
+            "sketch": "Base",
+            "body_name": "Sheet"
+          }
+        },
+        {
+          "command": "sheet.flange",
+          "params": {
+            "edges": [
+              [
+                20,
+                0,
+                2.5
+              ],
+              [
+                20,
+                30,
+                2.5
+              ]
+            ],
+            "height": 18
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sheet.flat_pattern",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          20,
+          15,
+          7
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 150
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "after_actions": [
+        {
+          "method": "ui.start",
+          "params": {
+            "command": "sheet.flat_pattern"
+          }
+        },
+        {
+          "method": "ui.scroll",
+          "params": {
+            "x": 864,
+            "y": 516,
+            "delta": -800,
+            "unit": "point"
+          }
+        },
+        {
+          "method": "ui.drag",
+          "params": {
+            "x0": 864,
+            "y0": 516,
+            "x1": 904,
+            "y1": 496,
+            "button": "middle",
+            "steps": 8
+          }
+        }
+      ],
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "The genuine native 2D flat-pattern preview shows the developed outline and bend lines; this is not a repainted 3D plate.",
+      "crop_scale": 0.5
+    },
+    {
+      "command": "sheet.perforate",
+      "slug": "sheet-perforate",
+      "group": "SHEET METAL",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Base"
+          }
+        },
+        {
+          "command": "sketch.rectangle.two_point",
+          "params": {
+            "p0": [
+              0,
+              0
+            ],
+            "p1": [
+              40,
+              30
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        },
+        {
+          "command": "sheet.flange",
+          "params": {
+            "sketch": "Base",
+            "body_name": "Sheet"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sheet.perforate",
+          "params": {
+            "diameter": 3,
+            "pitch": 7,
+            "margin": 5,
+            "pattern": "staggered"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          20,
+          15,
+          7
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 150
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "after_actions": [
+        {
+          "method": "ui.start",
+          "params": {
+            "command": "sheet.flat_pattern"
+          }
+        },
+        {
+          "method": "ui.scroll",
+          "params": {
+            "x": 864,
+            "y": 516,
+            "delta": -800,
+            "unit": "point"
+          }
+        },
+        {
+          "method": "ui.drag",
+          "params": {
+            "x0": 864,
+            "y0": 516,
+            "x1": 904,
+            "y1": 496,
+            "button": "middle",
+            "steps": 8
+          }
+        }
+      ],
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "Perforations are shown in the actual flat-pattern preview, where the command creates them; the formed B-rep is not depicted as perforated.",
+      "crop_scale": 0.5
+    }
+  ]
+}
