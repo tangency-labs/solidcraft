@@ -867,23 +867,24 @@ mod tests {
             h.app.home.open = false;
             h.call("ui.resize", serde_json::json!({"width":width,"height":1100}));
             h.call("ui.prefs", serde_json::json!({"language":"en","open":"Appearance"}));
-            for (query, label, native) in [
-                ("3D view colors", "3D view colors", None),
-                ("Interface scale", "Interface scale", Some((Role::Slider, "Interface scale", "prefs:scale"))),
-                ("Follow a theme file", "Follow a theme file", None),
-                ("Background", "Background", Some((Role::Button, "Color", "dialog:Background:Color"))),
-                ("Font", "Font", Some((Role::ComboBox, "Interface font", "prefs:ui_font"))),
+            for (query, label, row_target, native) in [
+                ("3D view colors", "3D view colors", "dialog:row:3D view colors", None),
+                ("Interface scale", "Interface scale", "dialog:row:Interface scale", Some((Role::Slider, "Interface scale", "prefs:scale"))),
+                ("Follow a theme file", "Follow a theme file", "prefs:theme_follow_toggle", None),
+                ("Background", "Background", "dialog:row:Background", Some((Role::Button, "Color", "dialog:Background:Color"))),
+                ("Font", "Font", "dialog:row:Font", Some((Role::ComboBox, "Interface font", "prefs:ui_font"))),
             ] {
                 h.app.prefs_window.filter = query.into();
-                // Allow the real search scroll animation to settle before checking its target.
-                h.frames(20);
+                h.frames(5);
                 let (_, _, hits) = nav(&h.ctx);
                 let matching: Vec<_> = hits.iter().filter(|hit| hit.label == label).collect();
                 assert_eq!(matching.len(), 1, "width={width}: {query} needs exactly one real navigation hit");
                 assert_eq!(matching[0].page, crate::prefs::PAGE_APPEARANCE);
-                let at = h.widget(label).unwrap();
+                // The search field also contains the query as its accessible value. Use the
+                // indexed row so this check measures the result rather than the search field.
+                let row = crate::scenario::rect_of(row_target).unwrap();
                 let body = crate::scenario::rect_of("prefs:page_body").unwrap();
-                assert!(body.contains(egui::pos2(at[0] as f32, at[1] as f32)), "width={width}: {query} hit must be inside the settled page body");
+                assert!(body.contains(row.center()), "width={width}: {query} row {row:?} outside {body:?}");
                 if let Some((role, name, target)) = native {
                     let tree = h.output.accesskit_update.as_ref().unwrap();
                     let controls: Vec<_> =
