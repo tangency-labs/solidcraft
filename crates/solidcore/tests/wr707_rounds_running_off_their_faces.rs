@@ -15,15 +15,17 @@
     clippy::indexing_slicing
 )]
 
+use solidcore::blend::definition_check::surface_kind_name;
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::blend::fillet_executive::NoRoomReason;
-use solidcore::boolean::api_brep::boolean_difference;
+use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::edge_closest_point;
+use solidcore::topology::brep::mirror::transform_matrix;
 use solidcore::topology::brep::p1::regions;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::EdgeId;
@@ -84,8 +86,8 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
     brep_volume(k, b, 1e-8, &attrs).unwrap()
 }
 
-/// Builds with the flag, one lump, `check_brep` clean, to `want` within `rel`.
-fn builds(case: fn(&mut Kernel) -> (Brep, solidcore::Result<()>), want: f64, rel: f64) {
+/// Builds with the flag, one lump, `check_brep` clean, to `want` within `rel`; the result.
+fn builds(case: fn(&mut Kernel) -> (Brep, solidcore::Result<()>), want: f64, rel: f64) -> Brep {
     let mut k = kernel(true);
     let (mut b, built) = case(&mut k);
     built.unwrap();
@@ -100,6 +102,7 @@ fn builds(case: fn(&mut Kernel) -> (Brep, solidcore::Result<()>), want: f64, rel
     assert!(check.lines().is_empty(), "check_brep: {:?}", check.lines());
     let v = volume(&k, &mut b);
     assert!((v - want).abs() <= rel * want, "{v} vs {want}");
+    b
 }
 
 /// A 20 cube with three square openings 10 x 10 through it (x, y and z, 5 in from each
@@ -385,4 +388,97 @@ fn a_round_wider_than_both_its_faces_builds() {
         want,
         1e-9,
     );
+}
+
+/// `int sqrt(81 - u^2) du`, the area under the arc of radius 9.
+fn arc_area(u: f64) -> f64 {
+    0.5 * (u * (81.0 - u * u).sqrt() + 81.0 * (u / 9.0).asin())
+}
+
+/// The 20 x 4 x 10 block with the slot x 8..12 under a bridge 1 thick, and a rib 0.05
+/// thick across the slot along the chord of the r9 section arc (centre y 9, z 1) between
+/// 22.5 and 33.75 degrees, 1 longer each way (the fork's capi test
+/// `scenario_round_over_a_thin_rib_not_a_cut`, tangency-labs/smlib@02b6103). Its top
+/// front edge (y = 0, z = 10) rounded r9.
+fn thin_rib(k: &mut Kernel) -> (Brep, solidcore::Result<()>) {
+    // the round past the cliff; with `fillet_round_ends_on_outline` it ends on the body's
+    // outline, as on main (`wr730_round_ends_on_outline.rs`)
+    k.fixes.fillet_round_ends_on_outline = false;
+    let block = cuboid(k, [0.0, 0.0, 0.0], [20.0, 4.0, 10.0]);
+    let slot = cuboid(k, [8.0, -1.0, -1.0], [4.0, 6.0, 10.0]);
+    let bridged = boolean_difference(k, block, slot).unwrap();
+    let arc = |t: f64| (9.0 - 9.0 * t.cos(), 1.0 + 9.0 * t.sin());
+    let (y1, z1) = arc(22.5_f64.to_radians());
+    let (y2, z2) = arc(33.75_f64.to_radians());
+    let len = (y2 - y1).hypot(z2 - z1);
+    let (dy, dz) = ((y2 - y1) / len, (z2 - z1) / len);
+    let h = 0.05;
+    let mut rib = cuboid(k, [0.0, 0.0, 0.0], [4.0, len + 2.0, h]);
+    let m = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, dy, dz, 0.0],
+        [0.0, -dz, dy, 0.0],
+        [8.0, y1 - dy + 0.5 * h * dz, z1 - dz - 0.5 * h * dy, 1.0],
+    ];
+    transform_matrix(k, &mut rib, &m, true).unwrap();
+    let mut b = boolean_union(k, bridged, rib).unwrap();
+    let built = blend(k, &mut b, &[[2.0, 0.0, 10.0]], 9.0, 1);
+    (b, built)
+}
+
+/// #2328: over the slot the section runs void (its front rail in the slot), rib, void,
+/// rib, void (its top rail past the 4 deep top). The void between the rib's two crossings
+/// lies between islands of material, not behind a wall running to a rail: the round runs
+/// past the rib and is trimmed to its faces. Closed form: the bridged block 656, less the
+/// section past the pillars on 16, less the bridge (all of its 1 x 4 section) on 4, plus
+/// the rib's section inside the ball on 4. The section past the pillars is 40 less the
+/// area under the arc from y = 0 to 4; the rib's is a slab 0.05 about the chord, at
+/// 9 cos 5.625 deg from the centre.
+#[test]
+fn a_round_past_a_thin_rib_across_its_slot_builds() {
+    let area = 40.0 - (4.0 + arc_area(9.0) - arc_area(5.0));
+    let d = 9.0 * 5.625_f64.to_radians().cos();
+    let lens = 2.0 * (arc_area(d + 0.025) - arc_area(d - 0.025));
+    let want = 656.0 - 16.0 * area - 16.0 + 4.0 * lens;
+    assert!((want - 401.198953621465).abs() < 1e-9, "closed form {want}");
+    let b = builds(thin_rib, want, 1e-9);
+    // its one round face, trimmed at the rib's faces, is its definition, an exact round
+    let rounds: Vec<_> = b
+        .faces()
+        .ids()
+        .filter_map(|f| solidcore::topology::face::p2::surface(&b, f).unwrap())
+        .filter(|s| surface_kind_name(s) != "plane")
+        .collect();
+    assert_eq!(rounds.len(), 1, "one round face");
+    let definition = rounds[0].procedural_blend().expect("a definition");
+    assert_eq!(definition.bound(), 0.0);
+}
+
+/// The hollows of #2328 that the rule above keeps refused: each void piece lies behind a
+/// wall running from a rail, which the round would cut through. Without the flag the first
+/// two fail in `trim_at_creases` and the third builds 0.6 % short with its cavity closed.
+/// Refused with `fillet_round_ends_on_outline` too.
+#[test]
+fn hollows_behind_a_wall_stay_refused() {
+    // a closed cavity and a pocket open from below behind the cliff (r9), and a closed
+    // cavity under the top face (r3), each with and without the outline round
+    for ((o, s, r), outline) in [
+        ([5.0, 1.0, 5.0], [10.0, 1.0, 3.0], 9.0),
+        ([5.0, 1.0, -1.0], [10.0, 1.0, 9.0], 9.0),
+        ([5.0, 0.3, 7.5], [10.0, 0.7, 2.0], 3.0),
+    ]
+    .into_iter()
+    .flat_map(|case| [(case, true), (case, false)])
+    {
+        let mut k = kernel(true);
+        k.fixes.fillet_round_ends_on_outline = outline;
+        let block = cuboid(&mut k, [0.0, 0.0, 0.0], [20.0, 4.0, 10.0]);
+        let hollow = cuboid(&mut k, o, s);
+        let mut b = boolean_difference(&mut k, block, hollow).unwrap();
+        let err = blend(&mut k, &mut b, &[[2.0, 0.0, 10.0]], r, 1).expect_err("refused");
+        let SolidError::FilletRefused { reason, .. } = err else {
+            panic!("{err:?}");
+        };
+        assert_eq!(reason, Some(NoRoomReason::BreaksThrough), "{o:?} {outline}");
+    }
 }

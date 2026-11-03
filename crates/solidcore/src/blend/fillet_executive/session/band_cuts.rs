@@ -456,7 +456,11 @@ struct ThroughFaces {
 /// at an edge), neither end is on a face at the blended edge's ends (which the corners
 /// trim), and one end is on a face that shares no edge with the blended faces: an inner
 /// face of the part, bounding material behind a wall, that the blend does not reach over
-/// the blended faces' boundaries.
+/// the blended faces' boundaries; and the material beside the piece runs to a rail on one
+/// side (WR-707 addendum, 2026-11-03, #2328). That material is the wall, part of what the
+/// blend rounds. A piece between islands of material, with void on either side of each
+/// along the section (a thin rib across a slot), is not behind a wall: the blend runs past
+/// the islands and is trimmed to their faces.
 ///
 /// So a piece outside the part that reaches a rail is not a break-through: there the
 /// blend runs off its face (over a cliff, into a hole or an opening) and is trimmed to the
@@ -568,25 +572,107 @@ fn section_breaks_through(
         }
     }
     meets.sort_by(|x, y| x.t.total_cmp(&y.t));
-    for pair in meets.windows(2) {
+    // the bounds of the section's pieces: its rails and the meets between them; piece `i`
+    // runs from `at[i]` to `at[i + 1]`, so meet `j` ends piece `j` and starts piece `j + 1`
+    let mut at = Vec::with_capacity(meets.len() + 2);
+    at.push(interval.min());
+    at.extend(meets.iter().map(|m| m.t));
+    at.push(interval.max());
+    let mut pieces = Pieces {
+        section: &section,
+        at: &at,
+        classes: vec![None; at.len() - 1],
+        zone,
+    };
+    for (j, pair) in meets.windows(2).enumerate() {
         let [m0, m1] = pair else {
             continue;
         };
-        let (t0, t1) = (m0.t, m1.t);
-        if !(m0.judged && m1.judged)
-            || !(m0.inside || m1.inside)
-            || (m0.reached && m1.reached)
-            || !(t1 - t0 > 0.0)
-        // one point, met on two faces
-        {
+        if !(m0.judged && m1.judged) || !(m0.inside || m1.inside) || (m0.reached && m1.reached) {
             continue;
         }
-        let middle = section.evaluate_point(k, 0.5 * (t0 + t1))?;
-        if !point_in_material(k, body, middle, zone)? {
+        let piece = j + 1;
+        if pieces.class(k, body, piece)? != Piece::Void {
+            continue;
+        }
+        // the wall: the material beside the piece runs to a rail
+        if pieces.material_to_rail(k, body, (0..piece).rev())?
+            || pieces.material_to_rail(k, body, piece + 1..at.len() - 1)?
+        {
             return Ok(true); // a hollow behind a wall: the section breaks through
         }
     }
     Ok(false)
+}
+
+/// The pieces of a section between the points where it meets the part's boundary
+/// (`section_breaks_through`), each classified once, by its middle.
+struct Pieces<'a> {
+    /// The section.
+    section: &'a Curve,
+    /// The pieces' bounds, in the section's parameter.
+    at: &'a [f64],
+    /// Each piece's class, once classified.
+    classes: Vec<Option<Piece>>,
+    /// The body's zone tolerance.
+    zone: f64,
+}
+
+impl Pieces<'_> {
+    /// The class of piece `i`.
+    fn class(&mut self, k: &Kernel, body: &mut Brep, i: usize) -> Result<Piece> {
+        if let Some(Some(known)) = self.classes.get(i) {
+            return Ok(*known);
+        }
+        let (Some(&t0), Some(&t1)) = (self.at.get(i), self.at.get(i + 1)) else {
+            return Err(SolidError::null_pointer(OP));
+        };
+        let class = if !(t1 - t0 > 0.0) {
+            Piece::Point
+        } else if point_in_material(
+            k,
+            body,
+            self.section.evaluate_point(k, 0.5 * (t0 + t1))?,
+            self.zone,
+        )? {
+            Piece::Material
+        } else {
+            Piece::Void
+        };
+        if let Some(slot) = self.classes.get_mut(i) {
+            *slot = Some(class);
+        }
+        Ok(class)
+    }
+
+    /// Whether the pieces `run`, taken from a void piece out to a rail, all lie in the
+    /// material (a piece of no length does not interrupt them): the material beside the
+    /// void piece is the part the blend rounds, reaching the blended face at its rail, not
+    /// an island with void on both sides that the blend runs past and is trimmed to.
+    fn material_to_rail(
+        &mut self,
+        k: &Kernel,
+        body: &mut Brep,
+        run: impl Iterator<Item = usize>,
+    ) -> Result<bool> {
+        for i in run {
+            if self.class(k, body, i)? == Piece::Void {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+}
+
+/// What a piece of a section between two meets is (`section_breaks_through`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Piece {
+    /// In the part's material.
+    Material,
+    /// Outside it.
+    Void,
+    /// Of no length: one point, met on two faces.
+    Point,
 }
 
 /// Where a section meets the boundary of a face (`section_breaks_through`).
