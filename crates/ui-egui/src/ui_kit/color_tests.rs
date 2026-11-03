@@ -397,13 +397,13 @@ fn step_buttons_nudge_rgb_and_hsv_channels_by_one() {
     tall(&ctx, vec![], &mut rgb);
     tall_click(&ctx, "color:spin:G:down", &mut rgb);
     assert_eq!(rgb, [0, 0, 0]);
-    // H steps one degree, V one percent, on the same gamma HSV as the square.
+    // H steps one degree; V steps one U8 unit (default format), on the same gamma HSV as the square.
     let mut rgb = [255, 0, 0];
     tall(&ctx, vec![], &mut rgb);
     tall_click(&ctx, "color:spin:H:up", &mut rgb);
     assert_eq!(rgb, hsv_bytes(1.0 / 360.0, 1.0, 1.0));
     tall_click(&ctx, "color:spin:V:down", &mut rgb);
-    assert_eq!(rgb, hsv_bytes(1.0 / 360.0, 1.0, 0.99));
+    assert_eq!(rgb, hsv_bytes(1.0 / 360.0, 1.0, 254.0 / 255.0));
 }
 
 #[test]
@@ -412,11 +412,65 @@ fn typed_hsv_values_set_the_colour_within_their_ranges() {
     let mut rgb = [255, 0, 0];
     tall(&ctx, vec![], &mut rgb);
     tall_type(&ctx, "H", "120", &mut rgb);
-    tall_type(&ctx, "S", "50", &mut rgb);
-    assert_eq!(rgb, hsv_bytes(1.0 / 3.0, 0.5, 1.0));
+    // U8 mode: S is 0–255 like R, G and B (#10201).
+    tall_type(&ctx, "S", "128", &mut rgb);
+    assert_eq!(rgb, hsv_bytes(1.0 / 3.0, 128.0 / 255.0, 1.0));
     // A hostile typed value is bounded by the field's range.
     tall_type(&ctx, "V", "1e300", &mut rgb);
-    assert_eq!(rgb, hsv_bytes(1.0 / 3.0, 0.5, 1.0));
+    assert_eq!(rgb, hsv_bytes(1.0 / 3.0, 128.0 / 255.0, 1.0));
+}
+
+#[test]
+fn hsv_saturation_and_value_follow_the_u8_and_f_number_formats() {
+    let ctx = crate::fonts::test_context();
+    let mut rgb = [255, 0, 0];
+    tall(&ctx, vec![], &mut rgb);
+    // Default U8: S/V are 0–255.
+    tall_type(&ctx, "V", "128", &mut rgb);
+    assert_eq!(rgb, hsv_bytes(0.0, 1.0, 128.0 / 255.0));
+    tall_click(&ctx, "color:spin:S:down", &mut rgb);
+    assert_eq!(rgb, hsv_bytes(0.0, 254.0 / 255.0, 128.0 / 255.0));
+    // Stay on the tall popover so the format control is at the published handle.
+    tall_click(&ctx, "color:format:F", &mut rgb);
+    assert_eq!(ctx.style_of(egui::Theme::Light).visuals.numeric_color_space, egui::style::NumericColorSpace::Linear);
+    let before_f = rgb;
+    // F: one step is 0.01 of the unit range — colour moves, not a U8-sized jump.
+    tall_click(&ctx, "color:spin:S:down", &mut rgb);
+    assert_ne!(rgb, before_f);
+    assert_ne!(rgb, hsv_bytes(0.0, 253.0 / 255.0, 128.0 / 255.0), "F step is not another U8 unit");
+    tall_click(&ctx, "color:format:Hex", &mut rgb);
+    // Hex keeps percent for S/V.
+    tall_type(&ctx, "S", "100", &mut rgb);
+    assert_eq!(rgb, hsv_bytes(0.0, 1.0, 128.0 / 255.0));
+}
+
+#[test]
+fn percent_format_scales_rgb_and_hsv_zero_to_one_hundred() {
+    let ctx = crate::fonts::test_context();
+    let mut rgb = [255, 0, 0];
+    tall(&ctx, vec![], &mut rgb);
+    tall_click(&ctx, "color:format:Percent", &mut rgb);
+    assert!(scenario::handle_at("color:channel:R").is_some());
+    assert!(scenario::handle_at("color:hex").is_none());
+    // %: RGB and S/V are 0–100; hue stays in degrees (#10201).
+    tall_type(&ctx, "R", "50", &mut rgb);
+    assert_eq!(rgb[0], 128);
+    tall_type(&ctx, "S", "100", &mut rgb);
+    tall_type(&ctx, "V", "50", &mut rgb);
+    assert_eq!(rgb, hsv_bytes(0.0, 1.0, 0.5));
+    // Copy uses the standard (non-tall) popover layout's published handle.
+    frame(&ctx, vec![], |ui| color_popover(ui, &mut rgb));
+    let want = {
+        let pct = |c: u8| (f64::from(c) / 255.0 * 100.0).round();
+        let [r, g, b] = rgb;
+        format!("{:.0}%, {:.0}%, {:.0}%", pct(r), pct(g), pct(b))
+    };
+    assert_eq!(copy(&ctx, &mut rgb).as_deref(), Some(want.as_str()));
+    // Shared with other pickers, like Hex.
+    let mut other = [1, 2, 3];
+    frame(&ctx, vec![], |ui| ui.push_id("another_picker", |ui| color_popover(ui, &mut other)));
+    assert!(scenario::handle_at("color:channel:R").is_some(), "% selection is shared");
+    assert_eq!(other, [1, 2, 3]);
 }
 
 #[test]
