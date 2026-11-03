@@ -203,7 +203,7 @@ pub fn paper_group(lines: &Lines, object: u64) -> Group {
         let ends_meet = path.first().zip(path.last()).is_some_and(|(first, last)| last.end().dist(first.start()) <= EPS);
         // One straight line never closes on itself, however short.
         let closed = ends_meet && !matches!(path.as_slice(), [Seg2::Line { .. }]);
-        (!path.is_empty()).then_some(Item::Stroke { path, closed, width_mm })
+        (!path.is_empty()).then_some(Item::Stroke { path, closed, width_mm, pattern: None })
     };
     let strokes = |reference: bool, width_mm: f64| {
         let pieces = lines.lines.iter().filter(move |l| l.reference == reference).flat_map(|l| &l.pieces);
@@ -404,7 +404,7 @@ mod tests {
             .items
             .iter()
             .filter_map(|i| match i {
-                Item::Stroke { path, closed, width_mm } => Some((path.len(), *closed, *width_mm)),
+                Item::Stroke { path, closed, width_mm, .. } => Some((path.len(), *closed, *width_mm)),
                 Item::Fill { .. } | Item::Text(_) | Item::Picture(_) => None,
             })
             .collect();

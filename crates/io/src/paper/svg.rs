@@ -13,6 +13,8 @@
 //!   root; fills black, even-odd. Text is its glyph outlines, one `<path>` a run, filled black
 //!   nonzero (SVG's default), so it looks the same without the font and never reflows. One `<path>`
 //!   per item, so each stays one object in an editor.
+//! - **Dashes** are the stroke's own `stroke-dasharray`, and `stroke-dashoffset` when its phase
+//!   isn't 0, in millimetres: SVG runs the pattern along the whole path and round a closed one.
 //! - **Groups** are `<g data-object="…" data-kind="…">`: object ids repeat and start with a digit,
 //!   so they can't be XML ids. No background: the page stays transparent, as cutters want.
 //! - **Pictures** (#5624 S5) are `<image>`s holding a PNG as a data URI, on their own pixel grid
@@ -21,7 +23,7 @@
 
 use std::fmt::Write;
 
-use solidcraft_geom::paper::{FillRule, Grid, GridPath, GridPoint, GridReport, Paint, Picture, Pictures, Piece, Prepared};
+use solidcraft_geom::paper::{FillRule, Grid, GridDashes, GridItem, GridPath, GridPoint, GridReport, Picture, Pictures, Piece, Prepared};
 use solidcraft_geom::{Aabb2, Vec2};
 
 use super::png::{PICTURE_DPI, picture_png};
@@ -49,20 +51,19 @@ pub fn paper_svg(scene: &Prepared, pictures: &dyn Pictures, picture_dpi: f64) ->
         let kind = serde_json::to_value(group.kind).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
         let _ = writeln!(w.out, "<g data-object=\"{}\" data-kind=\"{kind}\">", group.object);
         for item in &group.items {
-            match item.paint() {
-                Paint::Stroke { width, path } => {
+            match item {
+                GridItem::Stroke { width, path, dashes } => {
                     w.out.push_str("<path stroke-width=\"");
-                    push_number(&mut w.out, width);
+                    push_number(&mut w.out, *width);
+                    if let Some(dashes) = dashes {
+                        w.dashes(dashes);
+                    }
                     w.out.push_str("\" d=\"");
                     w.path(path);
                 }
-                Paint::Fill { loops, rule } => {
-                    // Nonzero is SVG's default.
-                    let rule = if rule == FillRule::EvenOdd { " fill-rule=\"evenodd\"" } else { "" };
-                    let _ = write!(w.out, "<path fill=\"#000\" stroke=\"none\"{rule} d=\"");
-                    loops.iter().for_each(|l| w.path(l));
-                }
-                Paint::Picture(picture) => {
+                GridItem::Fill { loops } => w.fill(loops, FillRule::EvenOdd),
+                GridItem::Text { loops, .. } => w.fill(loops, FillRule::NonZero),
+                GridItem::Picture(picture) => {
                     let sheet = Aabb2 { min: Vec2::new(0.0, 0.0), max: scene.size_mm() };
                     if !w.picture(picture, sheet, picture_dpi, pictures)? {
                         continue;
@@ -108,6 +109,13 @@ struct Writer {
 }
 
 impl Writer {
+    /// Closed `loops` as one black `<path>` up to its `d`, filled by `rule` (nonzero is SVG's default).
+    fn fill(&mut self, loops: &[GridPath], rule: FillRule) {
+        let rule = if rule == FillRule::EvenOdd { " fill-rule=\"evenodd\"" } else { "" };
+        let _ = write!(self.out, "<path fill=\"#000\" stroke=\"none\"{rule} d=\"");
+        loops.iter().for_each(|l| self.path(l));
+    }
+
     /// Picture `picture`'s `<image>` up to its `href`'s closing quote: the pixels of its grid at
     /// `dpi` that meet `sheet`. False, with nothing written, when none do.
     fn picture(&mut self, picture: &Picture, sheet: Aabb2, dpi: f64, pictures: &dyn Pictures) -> Result<bool> {
@@ -147,6 +155,22 @@ impl Writer {
         push_number(&mut self.out, p.x);
         self.out.push(' ');
         push_number(&mut self.out, self.height - p.y);
+    }
+
+    /// A dashed stroke's attributes, written inside the open `stroke-width` value: it closes that
+    /// value and leaves its own last one open.
+    fn dashes(&mut self, dashes: &GridDashes) {
+        self.out.push_str("\" stroke-dasharray=\"");
+        for (i, length) in dashes.lengths.iter().enumerate() {
+            if i > 0 {
+                self.out.push(' ');
+            }
+            push_number(&mut self.out, *length);
+        }
+        if dashes.phase != 0 {
+            self.out.push_str("\" stroke-dashoffset=\"");
+            push_number(&mut self.out, dashes.phase);
+        }
     }
 
     /// A path's `d`: a closed one ends with `Z`, which draws its closing line.

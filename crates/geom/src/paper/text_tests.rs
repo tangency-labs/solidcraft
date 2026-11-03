@@ -253,7 +253,11 @@ fn fonts_count_toward_the_records() {
     let filled = |total: usize| {
         let mut scene = scene(vec![run()], vec![font()]);
         let path = (0..total - 18 - 2).map(|i| Seg2::Line { a: p(i as f64 * 1e-3, 0.0), b: p((i + 1) as f64 * 1e-3, 0.0) }).collect();
-        scene.groups.push(Group { object: 2, kind: ObjectKind::View, items: vec![Item::Stroke { path, closed: false, width_mm: 0.5 }] });
+        scene.groups.push(Group {
+            object: 2,
+            kind: ObjectKind::View,
+            items: vec![Item::Stroke { path, closed: false, width_mm: 0.5, pattern: None }],
+        });
         scene.validate()
     };
     filled(crate::paper::MAX_RECORDS).unwrap();

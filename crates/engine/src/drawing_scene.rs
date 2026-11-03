@@ -277,7 +277,9 @@ fn moved(group: &Group, by: Vec2) -> Group {
     };
     let ring = |l: &Loop2| Loop2 { segs: segs(&l.segs) };
     let items = group.items.iter().map(|item| match item {
-        Item::Stroke { path, closed, width_mm } => Item::Stroke { path: segs(path), closed: *closed, width_mm: *width_mm },
+        Item::Stroke { path, closed, width_mm, pattern } => {
+            Item::Stroke { path: segs(path), closed: *closed, width_mm: *width_mm, pattern: pattern.clone() }
+        }
         Item::Fill { region } => Item::Fill { region: Region2 { outer: ring(&region.outer), holes: region.holes.iter().map(ring).collect() } },
         Item::Text(run) => Item::Text(TextRun { origin: run.origin + by, ..run.clone() }),
         Item::Picture(picture) => Item::Picture(Picture { rect: Aabb2 { min: picture.rect.min + by, max: picture.rect.max + by }, ..*picture }),

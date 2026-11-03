@@ -1,7 +1,7 @@
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcraft_doc::canvas::base64_decode;
-use solidcraft_geom::paper::{Group, Item, NoPictures, ObjectKind, Picture, Pictures, Scene};
+use solidcraft_geom::paper::{Dashes, Group, Item, NoPictures, ObjectKind, Picture, Pictures, Scene};
 use solidcraft_geom::pixel_grid::GridWindow;
 use solidcraft_geom::{Aabb2, Loop2, Region2, Seg2, Vec2};
 
@@ -18,7 +18,7 @@ fn line(a: Vec2, b: Vec2) -> Seg2 {
 }
 
 fn stroke(path: Vec<Seg2>, closed: bool, width_mm: f64) -> Item {
-    Item::Stroke { path, closed, width_mm }
+    Item::Stroke { path, closed, width_mm, pattern: None }
 }
 
 /// Anticlockwise from `min`.
@@ -353,4 +353,17 @@ fn what_cannot_be_embedded_is_refused() {
     let e = crate::paper::png::picture_png(4, &grid, window, &Provider::default(), 1000).unwrap_err().to_string();
     assert!(e.contains("picture 4: its PNG would be over 1000 bytes"), "{e}");
     assert!(crate::paper::png::picture_png(4, &grid, window, &Provider::default(), 1 << 20).unwrap().len() > 6000);
+}
+
+/// A dashed stroke carries its pattern in millimetres, its offset only when its phase isn't 0.
+#[test]
+fn a_dashed_stroke_has_its_dasharray_and_offset() {
+    let path = |phase_mm| {
+        let pattern = Some(Dashes { lengths_mm: vec![4.2, 1.05], phase_mm });
+        let scene = sheet(vec![Item::Stroke { path: vec![line(p(5.0, 10.0), p(105.0, 10.0))], closed: false, width_mm: 1.0, pattern }]);
+        let (text, _) = svg(&scene);
+        text.lines().find(|l| l.starts_with("<path")).unwrap().to_string()
+    };
+    assert_eq!(path(0.0), "<path stroke-width=\"1\" stroke-dasharray=\"4.2 1.05\" d=\"M5 287L105 287\"/>");
+    assert_eq!(path(0.5), "<path stroke-width=\"1\" stroke-dasharray=\"4.2 1.05\" stroke-dashoffset=\"0.5\" d=\"M5 287L105 287\"/>");
 }
