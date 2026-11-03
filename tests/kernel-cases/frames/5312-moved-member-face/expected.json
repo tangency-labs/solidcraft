@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#5312"
+  ],
+  "what": "moved member face",
+  "source": "analytic",
+  "method": "Post V=2025*200; rail V=2025*(300-32.5).",
+  "body_count": 2,
+  "volume_mm3": 946687.5
+}

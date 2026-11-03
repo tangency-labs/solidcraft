@@ -190,7 +190,9 @@ impl<'a> OperandNames<'a> {
                     origins: None,
                 }
             }),
-            Operand::Inner(_) => given(&self.names).map(|n| Named { name: format!("F{fid}:inner:{}", n.name), verified: n.verified, ..Named::default() }),
+            Operand::Inner(_) => {
+                given(&self.names).map(|n| Named { name: format!("F{fid}:inner:{}", n.name), verified: n.verified, ..Named::default() })
+            }
             Operand::Made(roles) => made_face(roles, face, fid),
             Operand::Rebuilt { roles, feature } => made_face(roles, face, *feature),
             Operand::CopiedTool { roles, feature, instance } => {
@@ -219,7 +221,12 @@ impl<'a> OperandNames<'a> {
 /// The name of face `face` of a body feature `fid` built, from its roles.
 fn made_face(roles: &[Vec<String>], face: usize, fid: u64) -> Option<Named> {
     let (first, rest) = roles.get(face)?.split_first()?;
-    Some(Named { name: format!("F{fid}:{first}"), synonyms: rest.iter().map(|r| format!("F{fid}:{r}")).collect(), verified: true, ..Named::default() })
+    Some(Named {
+        name: format!("F{fid}:{first}"),
+        synonyms: rest.iter().map(|r| format!("F{fid}:{r}")).collect(),
+        verified: true,
+        ..Named::default()
+    })
 }
 
 /// A face's name from what it came from; `None` when an origin cannot be named exactly.

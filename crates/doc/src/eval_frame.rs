@@ -90,7 +90,18 @@ pub(super) fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature
     if *mirror {
         regions = regions.iter().map(frame::mirrored).collect();
     }
-    let (lo, hi) = frame::profile_bounds(&regions).ok_or_else(|| DocError::Invalid("the member profile has no area".into()))?;
+    // Trim planes and reach limits must enclose the exact section, including spline extrema.
+    // A sampled profile can miss an extremum between stations.
+    let mut lo = Vec2::new(f64::INFINITY, f64::INFINITY);
+    let mut hi = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for body in kernel::extrude(&Plane::XY, &regions, 0.0, 1.0)? {
+        let bounds = body.exact_bounds()?;
+        lo = Vec2::new(lo.x.min(bounds.min.x), lo.y.min(bounds.min.y));
+        hi = Vec2::new(hi.x.max(bounds.max.x), hi.y.max(bounds.max.y));
+    }
+    if !(lo.x <= hi.x && lo.y <= hi.y) {
+        return Err(DocError::Invalid("the member profile has no area".into()));
+    }
     let at = frame::anchor_point(&regions, *anchor);
     let turn = match angle {
         Some(e) => val(vals, e, Kind::Angle)?,

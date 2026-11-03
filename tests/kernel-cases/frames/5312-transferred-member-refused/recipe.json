@@ -1,0 +1,106 @@
+{
+  "commands": [
+    {
+      "command": "sketch.create",
+      "params": {
+        "plane": "XY",
+        "name": "BarLine"
+      }
+    },
+    {
+      "command": "sketch.options",
+      "params": {
+        "sketch_3d": true
+      }
+    },
+    {
+      "command": "sketch.line3d",
+      "params": {
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            100,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "frame.member",
+      "params": {
+        "sketch": "BarLine",
+        "profile": {
+          "kind": "bar",
+          "width": 45,
+          "height": 45
+        },
+        "body_name": "Bar"
+      }
+    },
+    {
+      "command": "component.create",
+      "params": {
+        "name": "Child",
+        "grounded": false
+      }
+    },
+    {
+      "command": "component.move_bodies",
+      "params": {
+        "component": "Child",
+        "bodies": [
+          "Bar"
+        ]
+      }
+    },
+    {
+      "command": "occurrence.move",
+      "params": {
+        "occurrence": "Child:1",
+        "translate": [
+          100,
+          0,
+          0
+        ],
+        "capture": true
+      }
+    },
+    {
+      "command": "component.activate",
+      "params": {
+        "component": "root"
+      }
+    },
+    {
+      "command": "frame.trim",
+      "params": {
+        "members": [
+          "Bar"
+        ],
+        "to": {
+          "plane": {
+            "origin": [
+              150,
+              0,
+              0
+            ],
+            "normal": [
+              1,
+              0,
+              0
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

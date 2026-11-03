@@ -1,0 +1,22 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#5312"
+  ],
+  "what": "rotated component world plane",
+  "source": "analytic",
+  "method": "Root sketch maps into component frame; world member stays on X, from 160 to 300 after trimming.",
+  "body_count": 1,
+  "volume_mm3": 283500,
+  "bbox": {
+    "min": [
+      160,
+      -22.5,
+      -22.5
+    ],
+    "max": [
+      300,
+      22.5,
+      22.5
+    ]
+  }
+}

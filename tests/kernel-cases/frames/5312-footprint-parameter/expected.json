@@ -1,0 +1,22 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#5312"
+  ],
+  "what": "footprint parameter",
+  "source": "analytic",
+  "method": "2 posts of 400 mm plus a rail of 800-90=710 mm, all section 2025 mm2.",
+  "body_count": 3,
+  "volume_mm3": 3057750,
+  "bbox": {
+    "min": [
+      0,
+      0,
+      -22.5
+    ],
+    "max": [
+      800,
+      400,
+      22.5
+    ]
+  }
+}

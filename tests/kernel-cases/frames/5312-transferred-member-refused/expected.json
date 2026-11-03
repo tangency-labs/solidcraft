@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#5312"
+  ],
+  "what": "transferred member refused",
+  "source": "analytic",
+  "method": "Transferred member cannot be rebuilt in its original component frame.",
+  "outcome": "refused",
+  "refusal": "changed after"
+}

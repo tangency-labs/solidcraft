@@ -1,0 +1,22 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#5312"
+  ],
+  "what": "extend with gap",
+  "source": "analytic",
+  "method": "10 squared section extends to x=150-2; V=100*148.",
+  "body_count": 1,
+  "volume_mm3": 14800,
+  "bbox": {
+    "min": [
+      0,
+      -5,
+      -5
+    ],
+    "max": [
+      148,
+      5,
+      5
+    ]
+  }
+}

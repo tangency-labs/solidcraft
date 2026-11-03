@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#5312"
+  ],
+  "what": "wrong side refused",
+  "source": "analytic",
+  "method": "The far side normal points away from the rail.",
+  "outcome": "refused",
+  "refusal": "faces away"
+}

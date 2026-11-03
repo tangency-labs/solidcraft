@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#5312"
+  ],
+  "what": "rotated member refused",
+  "source": "analytic",
+  "method": "A rotation changes body identity despite equal bounds of a square section.",
+  "outcome": "refused",
+  "refusal": "changed after"
+}

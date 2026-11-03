@@ -1,0 +1,126 @@
+{
+  "commands": [
+    {
+      "command": "sketch.create",
+      "params": {
+        "plane": "XY",
+        "name": "RailLine"
+      }
+    },
+    {
+      "command": "sketch.options",
+      "params": {
+        "sketch_3d": true
+      }
+    },
+    {
+      "command": "sketch.line3d",
+      "params": {
+        "points": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            100,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "frame.member",
+      "params": {
+        "sketch": "RailLine",
+        "profile": {
+          "kind": "bar",
+          "width": 45,
+          "height": 45
+        },
+        "body_name": "Rail"
+      }
+    },
+    {
+      "command": "solid.remove",
+      "params": {
+        "bodies": [
+          "Rail"
+        ]
+      }
+    },
+    {
+      "command": "sketch.create",
+      "params": {
+        "plane": "XY",
+        "name": "ReplacementLine"
+      }
+    },
+    {
+      "command": "sketch.options",
+      "params": {
+        "sketch_3d": true
+      }
+    },
+    {
+      "command": "sketch.line3d",
+      "params": {
+        "points": [
+          [
+            0,
+            200,
+            0
+          ],
+          [
+            100,
+            200,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "frame.member",
+      "params": {
+        "sketch": "ReplacementLine",
+        "profile": {
+          "kind": "bar",
+          "width": 45,
+          "height": 45
+        },
+        "body_name": "Rail"
+      }
+    },
+    {
+      "command": "frame.trim",
+      "params": {
+        "members": [
+          "Rail"
+        ],
+        "to": {
+          "plane": {
+            "origin": [
+              150,
+              0,
+              0
+            ],
+            "normal": [
+              1,
+              0,
+              0
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

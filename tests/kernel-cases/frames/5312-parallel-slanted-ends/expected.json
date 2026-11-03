@@ -1,0 +1,22 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#5312"
+  ],
+  "what": "parallel slanted ends",
+  "source": "analytic",
+  "method": "45 squared section, every section ray retains 30 mm; V=2025*30.",
+  "body_count": 1,
+  "volume_mm3": 60750,
+  "bbox": {
+    "min": [
+      -22.5,
+      -22.5,
+      -22.5
+    ],
+    "max": [
+      52.5,
+      22.5,
+      22.5
+    ]
+  }
+}

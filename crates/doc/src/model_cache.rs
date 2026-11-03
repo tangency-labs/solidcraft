@@ -493,7 +493,6 @@ impl SavedModel {
                 // legacy split's picks (`lineage::legacy_picks_digest`) finds no pieces in them
                 // and takes them as the design's evaluation they were saved as.
                 legacy_picks: BTreeMap::new(),
-
             };
             for (member, record) in st.frame_members.iter_mut().zip(s.get("frame_members").and_then(Json::as_array).into_iter().flatten()) {
                 // A pre-identity cache cannot prove a member safe to rebuild, so re-evaluate.

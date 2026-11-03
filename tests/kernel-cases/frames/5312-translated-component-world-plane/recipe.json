@@ -1,0 +1,91 @@
+{
+  "commands": [
+    {
+      "command": "sketch.create",
+      "params": {
+        "plane": "XY",
+        "name": "PostLine"
+      }
+    },
+    {
+      "command": "sketch.options",
+      "params": {
+        "sketch_3d": true
+      }
+    },
+    {
+      "command": "sketch.line3d",
+      "params": {
+        "points": [
+          [
+            100,
+            100,
+            100
+          ],
+          [
+            100,
+            100,
+            300
+          ]
+        ]
+      }
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "component.create",
+      "params": {
+        "name": "Frame",
+        "grounded": false
+      }
+    },
+    {
+      "command": "occurrence.move",
+      "params": {
+        "occurrence": "Frame:1",
+        "translate": [
+          0,
+          0,
+          100
+        ],
+        "capture": true
+      }
+    },
+    {
+      "command": "frame.member",
+      "params": {
+        "sketch": "PostLine",
+        "profile": {
+          "kind": "bar",
+          "width": 45,
+          "height": 45
+        },
+        "body_name": "Post"
+      }
+    },
+    {
+      "command": "frame.trim",
+      "params": {
+        "members": [
+          "Post"
+        ],
+        "to": {
+          "plane": {
+            "origin": [
+              0,
+              0,
+              60
+            ],
+            "normal": [
+              0,
+              0,
+              1
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

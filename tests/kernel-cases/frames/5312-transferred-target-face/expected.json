@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#5312"
+  ],
+  "what": "transferred target face",
+  "source": "analytic",
+  "method": "Transfer retains post at x=0, rail ends at x=22.5; V=2025*(200+277.5).",
+  "body_count": 2,
+  "volume_mm3": 966937.5
+}

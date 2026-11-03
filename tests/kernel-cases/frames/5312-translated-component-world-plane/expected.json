@@ -1,0 +1,22 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#5312"
+  ],
+  "what": "translated component world plane",
+  "source": "analytic",
+  "method": "The root sketch line stays at world (100,100), z=100..300. A world plane at z=60 extends the post to length 240; V=2025*240. Component translation changes only the local representation.",
+  "body_count": 1,
+  "volume_mm3": 486000,
+  "bbox": {
+    "min": [
+      77.5,
+      77.5,
+      60
+    ],
+    "max": [
+      122.5,
+      122.5,
+      300
+    ]
+  }
+}

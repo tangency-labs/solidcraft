@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#5312"
+  ],
+  "what": "renamed construction plane",
+  "source": "analytic",
+  "method": "Rail runs x=150..300; V=2025*(200+150).",
+  "body_count": 2,
+  "volume_mm3": 708750
+}

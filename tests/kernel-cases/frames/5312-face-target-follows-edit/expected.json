@@ -1,0 +1,22 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#5312"
+  ],
+  "what": "face target follows edit",
+  "source": "analytic",
+  "method": "Plate V=200*200*30; post V=2025*(300-30).",
+  "body_count": 2,
+  "volume_mm3": 1746750,
+  "bbox": {
+    "min": [
+      0,
+      0,
+      0
+    ],
+    "max": [
+      200,
+      200,
+      300
+    ]
+  }
+}
