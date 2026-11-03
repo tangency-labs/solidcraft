@@ -7288,6 +7288,8 @@ mod refused_ok_tests {
                 added: [2; 4],
                 new_body: [3; 4],
                 removed: [4; 4],
+                lost: [6; 4],
+                selected: [7; 4],
                 edge: [5; 4],
                 ghost: false,
                 tint_new: true,
