@@ -1376,7 +1376,11 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
         })
         .show(ctx, true, |ui| {
             if let Some(group) = app.docs.group.as_mut() {
-                egui::ScrollArea::vertical().max_height(Tokens::get().space_24 * 10.0).show(ui, |ui| {
+                let t = Tokens::get();
+                let row_height = t.control_height + t.font_small + t.space_8 + t.space_8;
+                let chrome = t.form_close_size + t.form_footer_height + t.space_24 * 3.0;
+                let height = (row_height * 8.0).min((ctx.content_rect().height() - chrome).max(t.control_height));
+                let list = egui::ScrollArea::vertical().max_height(height).show(ui, |ui| {
                     for (index, checked) in &mut group.rows {
                         let session = if *index == app.docs.active {
                             Some(&app.session)
@@ -1385,7 +1389,7 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
                         };
                         if let Some(session) = session {
                             ui.push_id(*index, |ui| {
-                                ui.horizontal(|ui| {
+                                ui.horizontal_top(|ui| {
                                     let tick = ui_kit::checkbox(ui, "", checked);
                                     tick.widget_info(|| {
                                         egui::WidgetInfo::selected(
@@ -1396,21 +1400,28 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
                                         )
                                     });
                                     crate::scenario::publish_target(&format!("save_many:tick:{index}"), tick.rect);
-                                    let name = ui_kit::button(ui, &crate::i18n::tr_name(&session.doc.name), ui_kit::Button::Ghost);
-                                    crate::scenario::publish_target(&format!("save_many:name:{index}"), name.rect);
-                                    if name.clicked() {
-                                        show_tab = Some(*index);
-                                    }
+                                    ui.vertical(|ui| {
+                                        ui.spacing_mut().item_spacing.y = 0.0;
+                                        ui.spacing_mut().button_padding.x = 0.0;
+                                        let name = ui_kit::button(ui, &crate::i18n::tr_name(&session.doc.name), ui_kit::Button::Ghost);
+                                        crate::scenario::publish_target(&format!("save_many:name:{index}"), name.rect);
+                                        if name.clicked() {
+                                            show_tab = Some(*index);
+                                        }
+                                        let path = ui_kit::text(
+                                            ui,
+                                            session.path.as_deref().unwrap_or(crate::i18n::tr("document.not_saved_yet")),
+                                            ui_kit::Text::Note("save_path"),
+                                        );
+                                        crate::scenario::publish_rect(&format!("save_many:path:{index}"), path.rect);
+                                    });
                                 });
-                                ui_kit::text(
-                                    ui,
-                                    session.path.as_deref().unwrap_or(crate::i18n::tr("document.not_saved_yet")),
-                                    ui_kit::Text::Report("save_path", false),
-                                );
                             });
+                            ui.add_space(t.space_8);
                         }
                     }
                 });
+                crate::scenario::publish_rect("save_many:list", list.inner_rect);
             } else {
                 ui_kit::text(
                     ui,
@@ -1909,6 +1920,11 @@ mod tests {
         let file = h.dir.join("Bracket.sc");
         h.app.run("file.save_as", json!({"path":file.to_string_lossy()})).unwrap();
         h.app.run("solid.sphere", json!({"diameter":4})).unwrap();
+        switch(&mut h.app, 1);
+        h.app.run("solid.box", json!({"length":8,"width":8,"height":8})).unwrap();
+        let second_file = h.dir.join("Housing.sc");
+        h.app.run("file.save_as", json!({"path":second_file.to_string_lossy()})).unwrap();
+        h.app.run("solid.sphere", json!({"diameter":4})).unwrap();
         switch(&mut h.app, 3);
         control(&mut h.app, &json!({"action":"close_all"}));
         // Capture the actual confirmation and its font atlas, without needing a window server.
@@ -1932,10 +1948,22 @@ mod tests {
             output.textures_delta.clear();
         }
         h.output = output.platform_output.clone();
-        assert!(h.widget("Save changes to 2 designs?").is_some());
+        assert!(h.widget("Save changes to 3 designs?").is_some());
         assert!(h.widget("Save Selected").is_some());
         assert!(h.widget("Not saved yet").is_some());
         assert!(h.widget(&file.to_string_lossy()).is_some());
+        assert!(h.widget(&second_file.to_string_lossy()).is_some());
+        let mut previous_path: Option<Rect> = None;
+        for index in 0..3 {
+            let name = crate::scenario::rect_of(&format!("save_many:name:{index}")).unwrap();
+            let path = crate::scenario::rect_of(&format!("save_many:path:{index}")).unwrap();
+            assert!((name.left() - path.left()).abs() < 1.0, "path aligns with the name");
+            assert!(path.top() >= name.bottom(), "path is below its own name");
+            if let Some(previous) = previous_path {
+                assert!(name.top() - previous.bottom() >= Tokens::get().space_8, "designs have breathing room");
+            }
+            previous_path = Some(path);
+        }
         if let Ok(dir) = std::env::var("SOLIDCRAFT_SAVE_MANY_EVIDENCE") {
             let bounds = crate::scenario::rect_of("dialog:window").unwrap().expand(Tokens::get().space_24);
             let image = ui_kit::raster_test_shapes(&h.ctx, output.shapes, output.pixels_per_point, bounds, &textures);
@@ -1954,6 +1982,30 @@ mod tests {
         h.step(&json!({"key":"ArrowLeft"})).unwrap();
         h.step(&json!({"key":"Enter"})).unwrap();
         assert!(active_is_blank(&h.app), "Enter gives Save Selected");
+    }
+
+    #[test]
+    fn grouped_prompt_twelve_unsaved_designs_stay_on_screen() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        for index in 0..12 {
+            if index > 0 {
+                new_design(&mut h.app);
+            }
+            h.app.run("solid.box", json!({"length":1,"width":1,"height":1})).unwrap();
+        }
+        request_quit(&mut h.app);
+        for (width, height) in [(1600, 1000), (1024, 600)] {
+            h.call("ui.resize", json!({"width":width,"height":height}));
+            h.frames(4);
+            let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(width as f32, height as f32));
+            let window = crate::scenario::rect_of("dialog:window").unwrap();
+            assert!(screen.contains_rect(window), "confirmation stays on screen: {window:?} in {screen:?}");
+            let list = crate::scenario::rect_of("save_many:list").unwrap();
+            let last = crate::scenario::rect_of("save_many:path:11").unwrap();
+            assert!(last.bottom() > list.bottom(), "long lists scroll inside the window");
+            assert!(window.contains(crate::scenario::handle_at("dialog:ok").unwrap()), "save remains reachable");
+        }
     }
 
     #[test]
