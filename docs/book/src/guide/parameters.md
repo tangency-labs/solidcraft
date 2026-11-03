@@ -83,7 +83,8 @@ uses it, and a parameter in use can't be deleted (the error lists its users).
 Masses, volumes and areas have units too: `50 g`, `0.5 kg`, `1 lb`, `500 ml`, `2 cm³`, `1 m³`,
 `3 mm²`, `1.5 m²` (`cm^3` works as well as `cm³`). A parameter can be a mass, a volume or an
 area, and a density times a volume is a mass: `7.85 g/cm³ * (10 mm)^3` is 7.85 g. A new mass
-parameter shows in kg, a volume in mm³ and an area in mm². A bare number in a parameter is in its
+parameter shows in kg, and a volume or an area in the cube or square of the design's length unit
+(`in³` and `in²` in an inch design). A bare number in a parameter is in its
 unit (`2` in a g parameter is 2 g), and otherwise in the unit its kind shows in: `kit + 1` beside a
 mass is 1 kg more, and `3` where a mass is expected is 3 kg. `l`, `L`, `t` and `oz` are not units
 (they are common names, or could be a mass or a volume), and neither is `m3` (an M3 screw).
@@ -93,11 +94,12 @@ The units are:
   `yd` and `mil`;
 - angles: `deg` (or `°`) and `rad`;
 - masses: `g`, `kg` and `lb`;
-- volumes: `ml`, `mm³`, `cm³` and `m³`;
-- areas: `mm²`, `cm²` and `m²`.
+- volumes: `ml`, `mm³`, `cm³`, `m³`, `in³` and `ft³`;
+- areas: `mm²`, `cm²`, `m²`, `in²` and `ft²`.
 
 No parameter can be named after a unit. When a design saved before these units opens, a
-parameter or feature input called `g`, `kg`, `lb`, `ml`, `mm³`, `cm³`, `m³`, `mm²`, `cm²` or `m²`
+parameter or feature input called `g`, `kg`, `lb`, `ml`, `mm³`, `cm³`, `m³`, `in³`, `ft³`, `mm²`, `cm²`, `m²`,
+`in²` or `ft²`
 is renamed (`g` becomes `g_param`), everything that uses it follows, and its comment says why.
 Its value doesn't change.
 

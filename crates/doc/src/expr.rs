@@ -180,9 +180,13 @@ pub const UNITS: &[(&str, Kind, f64)] = &[
     ("mm³", Kind::Volume, 1.0),
     ("cm³", Kind::Volume, 1000.0),
     ("m³", Kind::Volume, 1e9),
+    ("in³", Kind::Volume, 16_387.064),
+    ("ft³", Kind::Volume, 28_316_846.592),
     ("mm²", Kind::Area, 1.0),
     ("cm²", Kind::Area, 100.0),
     ("m²", Kind::Area, 1e6),
+    ("in²", Kind::Area, 645.16),
+    ("ft²", Kind::Area, 92_903.04),
 ];
 
 /// Functions an expression may call (name, signature) — for autocomplete and help.
@@ -266,7 +270,8 @@ impl Defaults {
     /// Defaults for a parameter with this unit (`in` reads bare numbers as inches, `kg` as
     /// kilograms); the document's length unit covers lengths for the other kinds.
     pub fn for_unit(unit: &str, doc_len: f64) -> Defaults {
-        let mut d = Defaults { len: doc_len, ..Defaults::default() };
+        // An area or a volume follows the length, as its square or cube.
+        let mut d = Defaults { len: doc_len, area: doc_len * doc_len, vol: doc_len * doc_len * doc_len, ..Defaults::default() };
         match unit_info(unit) {
             Some((Kind::Length, s)) => d.len = s,
             Some((Kind::Angle, s)) => d.ang = s,
@@ -772,6 +777,21 @@ pub fn definition(s: &str) -> Option<(&str, &str)> {
 pub fn length_unit_or_mm(units: &str) -> &str {
     let u = units.trim();
     if unit_info(u).is_some_and(|(k, _)| k == Kind::Length) { u } else { "mm" }
+}
+
+/// The unit a value of kind `k` shows in for a design in `units`: a length in the design's unit
+/// ([`length_unit_or_mm`]), an area or a volume in its square or cube when the table has one
+/// (`in²`, `ft³`), and anything else in its kind's default.
+pub fn unit_for_design(k: Kind, units: &str) -> String {
+    let length = length_unit_or_mm(units);
+    let power = match k {
+        Kind::Length => return length.into(),
+        Kind::Area => "²",
+        Kind::Volume => "³",
+        _ => return k.default_unit().into(),
+    };
+    let unit = format!("{length}{power}");
+    if unit_info(&unit).is_some_and(|(kind, _)| kind == k) { unit } else { k.default_unit().into() }
 }
 
 struct Parser<'a> {

@@ -717,8 +717,8 @@ impl Document {
     }
 
     /// The unit for a new parameter with this expression: its kind's (`50 g` is a mass, shown in
-    /// kg); a bare number, or a value of no kind, is a length in the design's units, as a typed length
-    /// reads it (#8865).
+    /// kg), a length, an area or a volume in the design's units ([`expr::unit_for_design`]); a bare
+    /// number, or a value of no kind, is a length, as a typed length reads it (#8865).
     pub(crate) fn infer_unit(&self, e: &str) -> String {
         Self::infer_unit_in(&self.param_values().0, e, &self.units)
     }
@@ -729,8 +729,8 @@ impl Document {
         let v = expr::eval_with(e, &|n| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`"))));
         match v.ok().and_then(|v| v.kind()) {
             Some(Kind::Unitless) if !expr::references(e).is_empty() => String::new(),
-            Some(Kind::Length | Kind::Unitless) | None => expr::length_unit_or_mm(units).to_string(),
-            Some(k) => k.default_unit().into(),
+            Some(Kind::Unitless) | None => expr::unit_for_design(Kind::Length, units),
+            Some(k) => expr::unit_for_design(k, units),
         }
     }
 

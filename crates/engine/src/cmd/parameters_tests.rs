@@ -1098,6 +1098,34 @@ fn a_parameter_added_without_a_unit_takes_the_design_unit() {
     close(added(&mut s, json!({"name": "v", "expression": "3"})), "cm", 30.0, 3.0);
 }
 
+/// Areas and volumes follow the design's length unit as lengths do: in an inch design an area
+/// reads in in² and a volume in in³, a bare number in such a parameter is one of those, and a unit
+/// given keeps its own.
+#[test]
+fn areas_and_volumes_take_the_design_unit() {
+    let added = |s: &mut Session, p: Value| {
+        let r = run(s, "parameters.add", p);
+        (r["unit"].as_str().unwrap_or("?").to_string(), r["value"].as_f64().unwrap_or(f64::NAN), r["display_value"].as_f64().unwrap_or(f64::NAN))
+    };
+    let close = |got: (String, f64, f64), unit: &str, val: f64, shown: f64| {
+        assert!(got.0 == unit && rel(got.1, val) < 1e-9 && rel(got.2, shown) < 1e-9, "{got:?}, expected {unit} {val} ({shown})");
+    };
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    close(added(&mut s, json!({"name": "face", "expression": "645.16 mm²"})), "in²", 645.16, 1.0);
+    close(added(&mut s, json!({"name": "pocket", "expression": "1 in * 2 in * 3 in"})), "in³", 6.0 * 16_387.064, 6.0);
+    close(added(&mut s, json!({"name": "more", "expression": "face + 1"})), "in²", 2.0 * 645.16, 2.0);
+    close(added(&mut s, json!({"name": "metric", "expression": "1 cm²", "unit": "cm²"})), "cm²", 100.0, 1.0);
+    close(added(&mut s, json!({"name": "deck", "expression": "1 ft²"})), "in²", 92_903.04, 144.0);
+    close(added(&mut s, json!({"name": "tank", "expression": "1 ft³"})), "in³", 28_316_846.592, 1728.0);
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "ft"}));
+    close(added(&mut s, json!({"name": "deck", "expression": "2 ft * 3 ft"})), "ft²", 6.0 * 92_903.04, 6.0);
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "m"}));
+    close(added(&mut s, json!({"name": "sheet", "expression": "2.5 m²"})), "m²", 2.5e6, 2.5);
+}
+
 /// Hostile parameters.add input in an inch design is refused with a reason and adds nothing.
 #[test]
 fn a_hostile_parameter_in_an_inch_design_is_refused() {
