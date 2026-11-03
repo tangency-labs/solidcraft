@@ -385,7 +385,7 @@ fn pattern_on_path_spacing_extent_and_flip() {
 
 /// Whether `body` has a hole through (x, y): no material there, material 2 mm beside it.
 fn hole_at(s: &Session, x: f64, y: f64) -> bool {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     use solidcraft_kernel::PointClass;
     let st = s.world_state().unwrap();
     let body = &st.bodies[0].body;
