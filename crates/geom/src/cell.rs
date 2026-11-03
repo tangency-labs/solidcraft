@@ -38,9 +38,9 @@ pub const MAX_PARTS: usize = 64;
 pub const MAX_TEXT_BYTES: usize = 4096;
 /// The longest name a cell or a column may have.
 const MAX_NAME_BYTES: usize = 64;
-/// What a cell shows for a field without a value: a row field its row doesn't have, a property
-/// nobody gave.
-pub const MISSING: &str = "-";
+/// What a cell shows for a field without a value, a row field its row doesn't have or a property
+/// nobody gave: nothing.
+pub const MISSING: &str = "";
 /// The space between the inner edge of a cell's lines and its text, in millimetres.
 pub const PADDING_MM: f64 = 1.0;
 /// How far a line's descenders reach below its baseline, as a share of its cap height: ISO 3098's

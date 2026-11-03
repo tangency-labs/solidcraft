@@ -34,7 +34,7 @@ fn shown(d: &Drawing, sheet: usize, component: Option<Component>, parts: Vec<Par
 }
 
 /// The drawing's own fields: its name, its number (its part number property), its organization
-/// and any property; a property taken away shows "-", never the value it had.
+/// and any property; a property taken away shows nothing, never the value it had.
 #[test]
 fn the_drawings_fields() {
     let mut d = drawing();
@@ -50,17 +50,17 @@ fn the_drawings_fields() {
     ];
     assert_eq!(shown(&d, 0, None, parts.clone()), "Bracket drawing / DRW-0042 / Tangency Labs");
     Arc::make_mut(&mut d.properties).remove("organization");
-    assert_eq!(shown(&d, 0, None, parts), "Bracket drawing / DRW-0042 / -");
-    assert_eq!(shown(&d, 0, None, vec![field(Source::Drawing, "properties.acme.finish")]), "-");
+    assert_eq!(shown(&d, 0, None, parts), "Bracket drawing / DRW-0042 / ");
+    assert_eq!(shown(&d, 0, None, vec![field(Source::Drawing, "properties.acme.finish")]), "");
     // Without a number of its own, the drawing is numbered by the component its sheet documents,
-    // by name; without either, "-".
+    // by name; without either, nothing.
     let metadata = Metadata::default();
     let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None };
     let number = || vec![field(Source::Drawing, "number")];
     assert_eq!(shown(&d, 0, Some(bracket), number()), "DRW-0042", "its own number first");
     Arc::make_mut(&mut d.properties).set(Owner::Design, "part_number", json!("")).unwrap();
     assert_eq!(shown(&d, 0, Some(bracket), number()), "Bracket");
-    assert_eq!(shown(&d, 0, None, number()), "-");
+    assert_eq!(shown(&d, 0, None, number()), "");
 }
 
 /// Sheets are numbered among the counted ones: the second of three is "2/3". A sheet left out of
@@ -71,16 +71,16 @@ fn sheets_are_numbered_among_the_counted_ones() {
     let sheet = || vec![field(Source::Sheet, "number"), Part::Text("/".into()), field(Source::Sheet, "count")];
     assert_eq!(shown(&d, 1, None, sheet()), "2/3");
     Arc::make_mut(&mut d.sheets[1]).excluded.count = true;
-    assert_eq!([0, 1, 2].map(|at| shown(&d, at, None, sheet())), ["1/2", "-/-", "2/2"]);
+    assert_eq!([0, 1, 2].map(|at| shown(&d, at, None, sheet())), ["1/2", "/", "2/2"]);
     assert_eq!(shown(&d, 1, None, vec![field(Source::Sheet, "name")]), "Sheet 2");
 }
 
-/// The revision fields read the newest row; with none, "-".
+/// The revision fields read the newest row; with none, nothing.
 #[test]
 fn revision_fields_read_the_newest_row() {
     let mut d = drawing();
     let date = || vec![field(Source::Revision, "revision"), Part::Text(" ".into()), field(Source::Revision, "date")];
-    assert_eq!(shown(&d, 0, None, date()), "- -");
+    assert_eq!(shown(&d, 0, None, date()), " ");
     let revisions = Arc::make_mut(&mut d.revisions);
     for (id, day) in [(901, "2026-10-01"), (902, "2026-10-30")] {
         revisions.add(None, id).unwrap();
@@ -90,7 +90,7 @@ fn revision_fields_read_the_newest_row() {
 }
 
 /// A component's fields: its name and part properties, its free-text properties, and the material
-/// and mass the caller worked out; without a component, or a value, or with an empty one, "-".
+/// and mass the caller worked out; without a component, or a value, or with an empty one, nothing.
 #[test]
 fn the_components_fields() {
     let d = drawing();
@@ -100,13 +100,13 @@ fn the_components_fields() {
     let bracket = Component { name: "Bracket", metadata: &metadata, properties: Some(&properties), material: Some("Steel"), mass: Some("0.39 kg") };
     let keys = ["name", "part_number", "material", "mass", "properties.finish", "description"];
     let read = |component| keys.map(|key| shown(&d, 0, component, vec![field(Source::Component, key)]));
-    assert_eq!(read(Some(bracket)), ["Bracket", "BRK-7", "Steel", "0.39 kg", "Zinc plated", "-"]);
+    assert_eq!(read(Some(bracket)), ["Bracket", "BRK-7", "Steel", "0.39 kg", "Zinc plated", ""]);
     let unweighed = Component { material: None, mass: None, properties: None, ..bracket };
-    assert_eq!(read(Some(unweighed)), ["Bracket", "BRK-7", "-", "-", "-", "-"]);
-    assert_eq!(read(None), ["-"; 6]);
+    assert_eq!(read(Some(unweighed)), ["Bracket", "BRK-7", "", "", "", ""]);
+    assert_eq!(read(None), [""; 6]);
     let blank = BTreeMap::from([("finish".to_string(), String::new())]);
     let finish = vec![field(Source::Component, "properties.finish")];
-    assert_eq!(shown(&d, 0, Some(Component { properties: Some(&blank), ..bracket }), finish), "-");
+    assert_eq!(shown(&d, 0, Some(Component { properties: Some(&blank), ..bracket }), finish), "");
 }
 
 /// A field its source doesn't have is refused when a block is given and when a drawing is read,

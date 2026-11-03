@@ -304,7 +304,7 @@ fn on_model(s: &mut Session, id: &str, p: Value) {
 
 /// The built-in block's cells read the model: the sheet's component, a steel block 100 x 50 x 10
 /// (50,000 mm³ at 7.85 g/cm³: 392.5 g), holding a steel gauge of 10 mm (7.85 g) that counts until
-/// it is a reference. A property taken away shows "-". An override shows its text and the value
+/// it is a reference. A property taken away shows nothing. An override shows its text and the value
 /// it hides, which follows the model; a new block keeps only the overrides of its text cells, and
 /// one naming a cell that shows no text, or a field its source doesn't have, is refused.
 #[test]
@@ -332,11 +332,11 @@ fn a_title_blocks_cells_read_the_model() {
     // In a design with components the built-in block has the assembly tolerances; with no number of
     // its own, the drawing is numbered by the component's name.
     let tolerances = solidcraft_doc::drawing::template::ASSEMBLY_TOLERANCES;
-    let expected = ["Block", "Block", "Steel", "Zinc plated", "0.40 kg", "1/1", tolerances, "-"];
+    let expected = ["Block", "Block", "Steel", "Zinc plated", "0.40 kg", "1/1", tolerances, ""];
     assert_eq!(shown(&mut s, &read), expected);
     on_model(&mut s, "component.metadata.set", json!({"component": "Gauge", "bom_type": "reference"}));
     on_model(&mut s, "component.metadata.set", json!({"component": "Block", "properties": {"finish": null}}));
-    assert_eq!(shown(&mut s, &["mass", "finish"]), ["0.39 kg", "-"]);
+    assert_eq!(shown(&mut s, &["mass", "finish"]), ["0.39 kg", ""]);
     // An override, and the value under it moving on.
     run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block_overrides": {"material": "See note 3"}}));
     assert_eq!(cells(&mut s)["material"], ("See note 3".to_string(), Some("Steel".to_string())));
