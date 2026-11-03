@@ -7,7 +7,7 @@ use solidcraft_geom::drawing_view::Scale;
 use super::CommandSpec;
 use crate::params::bad;
 use crate::schema::drawing_break::{BreakBand, PreviewParams, PreviewResult};
-use crate::schema::{TypedContract, output_schema_for};
+use crate::schema::{TypedContract, output_schema_for, run_checked_as};
 use crate::{Result, Session};
 
 const ID: &str = "drawing.break.preview";
@@ -36,8 +36,7 @@ fn run(session: &mut Session, value: &Value) -> Result<Value> {
         return Err(bad(ID, "scale text exceeds 64 bytes"));
     }
     // The bound applies in strict/warn schema modes too, before their typed parse.
-    let checked: super::Run = crate::checked!("drawing.break.preview", CONTRACT, preview);
-    checked(session, value)
+    run_checked_as(session, value, ID, preview)
 }
 
 fn preview(_session: &mut Session, value: &Value) -> Result<Value> {
