@@ -425,14 +425,18 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
     let flip = bool_(p, "flip").unwrap_or(false);
     let sec = SectionAnalysis { id, name, plane, offset, flip, hatch: bool_(p, "hatch").unwrap_or(true) };
     checked_cut(s, &sec, cmd)?;
-    change(s, |all| {
-        match all.get_mut(id) {
-            Some(x) => *x = sec,
-            None => all.items.push(sec),
-        }
-        all.shown = Some(id);
-        all.folder_hidden = false;
-    });
+    // The same section asked for again (a field committed twice) is no new undo step.
+    let all = &s.doc.section_analyses;
+    if all.get(id) != Some(&sec) || all.shown != Some(id) || all.folder_hidden {
+        change(s, |all| {
+            match all.get_mut(id) {
+                Some(x) => *x = sec,
+                None => all.items.push(sec),
+            }
+            all.shown = Some(id);
+            all.folder_hidden = false;
+        });
+    }
     sync(s);
     activated(s);
     reply(s, Some(id))

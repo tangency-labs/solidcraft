@@ -169,8 +169,10 @@ fn modern_details_cards_open_focus_suspend_and_close_before_effects() {
     }
 }
 
+/// A value typed in the details card runs the effect's real command. Draft and Zebra only change
+/// the view; a Section Analysis is kept in the design, so its edit is one undo step (#3977).
 #[test]
-fn details_native_value_edits_run_real_commands_without_design_history() {
+fn details_native_value_edits_run_real_commands_and_only_sections_enter_history() {
     for (command, params, field, text, expected) in [
         ("inspect.draft", json!({"pull":[-2,3,-4],"angle":3.5}), "angle", "8.25", 8.25),
         ("inspect.zebra", json!({"stripes":14.5}), "stripes", "17.25", 17.25),
@@ -199,7 +201,12 @@ fn details_native_value_edits_run_real_commands_without_design_history() {
             _ => panic!("real edited setting expected"),
         };
         assert!((value - expected).abs() < 1e-9, "native {field}: {value} instead of {expected}");
-        assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), before);
+        if command == "inspect.section" {
+            assert_ne!(h.app.session.doc.to_json(), before.0, "the edited section is saved with the design");
+            assert_eq!(h.app.session.undo.len(), before.1 + 1, "and is one undo step");
+        } else {
+            assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), before);
+        }
         assert!(h.app.dialog.is_none());
     }
 }
