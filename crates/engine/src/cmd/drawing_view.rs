@@ -793,7 +793,7 @@ fn picture(rect: Aabb2, dpi: f64) -> Result<PictureResult> {
 }
 
 /// A unit enum's name as it reads and writes (`iso_front_right`, `visible_hidden`).
-fn snake_name(value: impl Serialize) -> String {
+pub(super) fn snake_name(value: impl Serialize) -> String {
     serde_json::to_value(value).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default()
 }
 

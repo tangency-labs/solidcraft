@@ -509,3 +509,129 @@ fn drawing_steps_in_any_order_keep_the_rules() {
         }
     }
 }
+
+/// Inspect lists each sheet's views, each base view followed by those projected from it whichever way
+/// the ids sort, with what it is called and what is in it. A view whose parent is on another sheet
+/// heads its own list and still names the parent; a sheet with none lists none. Nothing is evaluated.
+#[test]
+fn inspect_lists_each_sheets_views_in_order() {
+    use solidcraft_doc::drawing::balloon::Balloon;
+    use solidcraft_doc::drawing::dimension::ModelEdge;
+    use solidcraft_doc::drawing::view::ViewPlace;
+    let (mut s, [front, right, top]) = crate::cmd::drawing_view::tests::three_views();
+    // A second view projected from the front, to its left, and a balloon in the right view.
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let mut source = ids::IdSource::seeded(4894);
+    let left = d.allocate_id(&mut source).unwrap();
+    let balloon = d.allocate_id(&mut source).unwrap();
+    let kind = ViewKind::Projected { parent: front, side: ProjectedSide::Left };
+    let sheet = d.sheets[0].id;
+    d.add_views([Arc::new(View {
+        id: left,
+        sheet,
+        kind,
+        place: ViewPlace::Aligned(50.0),
+        settings: Default::default(),
+        reference_shown_percent: 0.0,
+    })]);
+    // Inspect only lists it, so the part it numbers needn't be in the design.
+    let edge = ModelEdge { body: "Block".into(), origin_feature: s.doc.features[0].id, name: "edge".into(), path: vec![1] };
+    d.add_balloons([Arc::new(Balloon { id: balloon, view: right, edge, at: [20.0, 20.0] })]);
+    d.validate().unwrap();
+    s.doc_mut().put_drawing(Arc::new(d));
+    let [front_id, right_id, top_id, left_id] = [front, right, top, left].map(ids::encode);
+    let dimension = run(&mut s, "drawing.dimension.add", json!({"view": front_id, "kind": {"length": {"edge": [50, 0, 20]}}}));
+    let (features, evaluations) = (s.doc.features.clone(), s.evaluations);
+    let reply = run(&mut s, "drawing.inspect", json!({}));
+    let mut expected = vec![json!({"id": front_id, "kind": "base", "label": "Front", "dimensions": [dimension["record"]["id"]], "balloons": []})];
+    let right_and_top = [
+        json!({"id": right_id, "kind": "projected", "parent": front_id, "side": "right", "label": "Right of Front", "dimensions": [], "balloons": [ids::encode(balloon)]}),
+        json!({"id": top_id, "kind": "projected", "parent": right_id, "side": "above", "label": "Above Right of Front", "dimensions": [], "balloons": []}),
+    ];
+    let left_entry =
+        json!({"id": left_id, "kind": "projected", "parent": front_id, "side": "left", "label": "Left of Front", "dimensions": [], "balloons": []});
+    // The front's two views in id order, each followed by what is projected from it.
+    if right < left {
+        expected.extend(right_and_top);
+        expected.push(left_entry);
+    } else {
+        expected.push(left_entry);
+        expected.extend(right_and_top);
+    }
+    assert_eq!(reply["sheets"][0]["views"], json!(expected));
+    assert_eq!((s.evaluations, &s.doc.features), (evaluations, &features));
+
+    let other = run(&mut s, "drawing.sheet.add", json!({"name": "Other"}))["sheet"].clone();
+    let lists = |s: &mut Session| {
+        let reply = run(s, "drawing.inspect", json!({}));
+        let ids_of = |at: usize| reply["sheets"][at]["views"].as_array().unwrap().iter().map(|v| v["id"].clone()).collect::<Vec<_>>();
+        (ids_of(0), ids_of(1), reply["sheets"][1]["views"][0].clone())
+    };
+    assert_eq!(lists(&mut s).1, Vec::<Value>::new(), "{other}");
+    run(&mut s, "drawing.view.move_to_sheet", json!({"view": top_id, "sheet": "Other"}));
+    let (here, there, moved) = lists(&mut s);
+    let staying: Vec<Value> = expected.iter().map(|v| v["id"].clone()).filter(|id| *id != json!(top_id)).collect();
+    assert_eq!((here, there), (staying, vec![json!(top_id)]));
+    assert_eq!((&moved["parent"], &moved["label"]), (&json!(right_id), &json!("Above Right of Front")), "{moved}");
+}
+
+/// Base views come in id order whatever order they were added in, and a view looking any other way
+/// than a named one is `Custom`. A chain as deep as a chain goes is listed whole, top to bottom, and
+/// the many-view drawing a record allows answers.
+#[test]
+fn inspect_lists_every_view_of_a_deep_or_large_drawing() {
+    use solidcraft_doc::drawing::view::{MAX_VIEWS, ViewPlace};
+    use solidcraft_doc::drawing_view::{Looking, ViewOverrides};
+    let mut s = design();
+    run(&mut s, "drawing.create", json!({}));
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let mut source = ids::IdSource::seeded(4894);
+    let (sheet, drawn) = (d.sheets[0].id, d.sources[0].id);
+    let scale = || ViewOverrides { scale: Some("1:1".parse().unwrap()), ..ViewOverrides::default() };
+    let looking = ViewDirection::Looking(Looking { direction: [1.0, 1.0, -1.0], up: [0.0, 0.0, 1.0], origin: [0.0; 3] });
+    let mut made = vec![d.allocate_id(&mut source).unwrap()];
+    let kind = ViewKind::Base { source: drawn, view: looking };
+    d.add_views([Arc::new(View { id: made[0], sheet, kind, place: ViewPlace::At([100.0, 100.0]), settings: scale(), reference_shown_percent: 0.0 })]);
+    for _ in 1..MAX_VIEW_DEPTH {
+        let id = d.allocate_id(&mut source).unwrap();
+        let parent = *made.last().unwrap();
+        let kind = ViewKind::Projected { parent, side: ProjectedSide::Below };
+        d.add_views([Arc::new(View {
+            id,
+            sheet,
+            kind,
+            place: ViewPlace::At([100.0, 100.0]),
+            settings: ViewOverrides::default(),
+            reference_shown_percent: 0.0,
+        })]);
+        made.push(id);
+    }
+    d.validate().unwrap();
+    s.doc_mut().put_drawing(Arc::new(d.clone()));
+    let listed = run(&mut s, "drawing.inspect", json!({}))["sheets"][0]["views"].clone();
+    let order: Vec<Value> = listed.as_array().unwrap().iter().map(|v| v["id"].clone()).collect();
+    assert_eq!(order, made.iter().map(|id| json!(ids::encode(*id))).collect::<Vec<_>>());
+    assert_eq!(listed[0]["label"], json!("Custom"));
+    assert_eq!(listed[MAX_VIEW_DEPTH - 1]["label"], json!(format!("{}Custom", "Below ".repeat(MAX_VIEW_DEPTH - 1))));
+
+    let base = |id: u64| View {
+        id,
+        sheet,
+        kind: ViewKind::Base { source: drawn, view: ViewDirection::default() },
+        place: ViewPlace::At([100.0, 100.0]),
+        settings: scale(),
+        reference_shown_percent: 0.0,
+    };
+    let more: Vec<Arc<View>> = (d.views.len()..MAX_VIEWS).map(|_| Arc::new(base(d.allocate_id(&mut source).unwrap()))).collect();
+    let mut many = d.clone();
+    many.add_views(more);
+    many.validate().unwrap();
+    let bases: Vec<Value> = many.views.iter().filter(|v| matches!(v.kind, ViewKind::Base { .. })).map(|v| json!(ids::encode(v.id))).collect();
+    s.doc_mut().put_drawing(Arc::new(many));
+    let listed = run(&mut s, "drawing.inspect", json!({}))["sheets"][0]["views"].clone();
+    assert_eq!(listed.as_array().map(Vec::len), Some(MAX_VIEWS));
+    let listed_bases: Vec<Value> = listed.as_array().unwrap().iter().filter(|v| v["kind"] == "base").map(|v| v["id"].clone()).collect();
+    assert_eq!(listed_bases, bases, "base views in id order");
+    let labelled = listed.as_array().unwrap().iter().filter(|v| v["label"] == json!("Front")).count();
+    assert_eq!(labelled, MAX_VIEWS - MAX_VIEW_DEPTH);
+}

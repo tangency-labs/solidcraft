@@ -90,7 +90,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("select.set", "Select", select_set).any_part().icon("select")
         .noundo()
-        .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …}], add?: bool"),
+        .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …} or {type: drawing, drawing, object: ids of the drawing open and of a view, dimension or balloon of it}], add?: bool"),
     CommandSpec::new("select.filter", "Selection filter", select_filter).icon("select").noundo().doc_only()
         .params("mode: body|face|component → validated UI pick granularity; headless echo only, no document edits or undo"),
     CommandSpec::new("select.clear", "Clear Selection", select_clear).any_part().icon("select").noundo(),
@@ -1289,6 +1289,12 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
         let one: Sel = serde_json::from_value(it).map_err(|e| bad("select.set", e.to_string()))?;
         if let Sel::Occurrence { path } = &one {
             s.occurrence_bodies(path, true).map_err(|e| bad("select.set", e.to_string()))?;
+        }
+        if let Sel::Drawing { drawing, object } = &one
+            && !s.selectable_in_drawing(*drawing, *object)
+        {
+            let object = solidcraft_doc::ids::encode(*object);
+            return Err(bad("select.set", format!("the drawing open has no view, dimension or balloon {object}")));
         }
         sel.push(one);
     }

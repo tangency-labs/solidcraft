@@ -128,6 +128,13 @@ pub enum Sel {
     Feature {
         id: u64,
     },
+    /// A view, dimension or balloon of the drawing open.
+    Drawing {
+        #[serde(with = "solidcraft_doc::ids")]
+        drawing: u64,
+        #[serde(with = "solidcraft_doc::ids")]
+        object: u64,
+    },
     /// A sketch curve or point (by id) of the active sketch. A curve picked into a dialog also
     /// names its `sketch`: curve ids repeat from one sketch to the next (#3726).
     SketchCurve {
@@ -876,6 +883,20 @@ impl Session {
         self.open_drawing.and_then(|id| self.doc.drawing(id)).ok_or_else(|| params::bad(cmd, "open a drawing first (drawing.open)"))
     }
 
+    /// Whether `object` can be selected in `drawing`: a view, dimension or balloon of the drawing open.
+    pub(crate) fn selectable_in_drawing(&self, drawing: u64, object: u64) -> bool {
+        self.open_drawing == Some(drawing) && self.doc.drawing(drawing).is_some_and(|d| d.has_object(object))
+    }
+
+    /// Drops the selected drawing objects no longer there: an undo took them, or their drawing closed.
+    fn prune_drawing_selection(&mut self) {
+        let gone = |s: &Session, x: &Sel| matches!(x, Sel::Drawing { drawing, object } if !s.selectable_in_drawing(*drawing, *object));
+        if self.selection.iter().any(|x| gone(self, x)) {
+            let selection = std::mem::take(&mut self.selection);
+            self.selection = selection.into_iter().filter(|x| !gone(self, x)).collect();
+        }
+    }
+
     /// Change the drawing open, for `cmd`: kept when it still keeps the record's rules, and only
     /// when it changed (one undo step of the drawing, through `execute`; the design's other
     /// drawings shared).
@@ -1311,7 +1332,8 @@ impl Session {
         }
         spec.allowed(self).map_err(|why| EngineError::Disabled(spec.id.to_string(), why))?;
         let open_drawing = self.open_drawing;
-        let before = Snapshot { part: open_drawing.filter(|_| spec.part == cmd::Part::Drawing), ..Snapshot::of(self, spec.label) };
+        let before =
+            Snapshot { part: open_drawing.filter(|_| matches!(spec.part, cmd::Part::Drawing | cmd::Part::Open)), ..Snapshot::of(self, spec.label) };
         let ids = self.ids.clone();
         // Where new geometry goes: not in the design, but a replay needs it (component.activate).
         let active_before = (self.active_component, self.active_occurrence_path.clone());
@@ -1377,6 +1399,7 @@ impl Session {
         }
         // A command that closed the drawing, or opened another, ends its sheet scenes.
         drawing_scene::forget_closed(self);
+        self.prune_drawing_selection();
         let crash_outcome = if outermost && crash::enabled() {
             let failed = r.as_ref().err().map(ToString::to_string);
             // Commands that only read leave no trace (the journal keeps what a replay needs).

@@ -207,13 +207,19 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
     answer(s, cmd, None, Vec::new())
 }
 
+/// Whether `p` asks for what is in the way to go too: `contents: "delete"`, refused otherwise with
+/// `what` goes.
+pub(super) fn contents_delete(cmd: &str, p: &Value, what: &str) -> Result<bool> {
+    match p.get("contents") {
+        None => Ok(false),
+        Some(v) if v.as_str() == Some("delete") => Ok(true),
+        Some(_) => Err(bad(cmd, format!("`contents` is delete: {what}"))),
+    }
+}
+
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.sheet.delete";
-    let with_contents = match p.get("contents") {
-        None => false,
-        Some(v) if v.as_str() == Some("delete") => true,
-        Some(_) => return Err(bad(cmd, "`contents` is delete: the sheet goes with everything on it")),
-    };
+    let with_contents = contents_delete(cmd, p, "the sheet goes with everything on it")?;
     s.edit_drawing(cmd, |d| {
         let at = sheet_at(cmd, d, p, "sheet")?;
         if d.sheets.len() <= 1 {

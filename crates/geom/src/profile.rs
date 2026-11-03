@@ -2,7 +2,7 @@
 //! quadratic Béziers), and regions (an outer loop minus holes). Sketches produce them; the
 //! kernel turns them into faces.
 
-use std::f64::consts::TAU;
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use serde::{Deserialize, Serialize};
 
@@ -433,6 +433,30 @@ impl Seg2 {
                 Seg2::Arc { center: m.apply(center), radius: radius * m.scale(), start: start + m.angle(), sweep }
             }
             _ => self.map_controls(|p| m.apply(p)),
+        }
+    }
+    /// The smallest box round the piece: exact for a line and an arc, and for a curve within a
+    /// thousandth of a unit, read off its polyline.
+    pub fn bounds(&self) -> Aabb2 {
+        match *self {
+            Seg2::Line { a, b } => [a, b].into_iter().collect(),
+            Seg2::Arc { center, radius, start, sweep } => {
+                let mut bounds: Aabb2 = [self.start(), self.end()].into_iter().collect();
+                let quarters = [
+                    (0.0, Vec2::new(1.0, 0.0)),
+                    (FRAC_PI_2, Vec2::new(0.0, 1.0)),
+                    (PI, Vec2::new(-1.0, 0.0)),
+                    (3.0 * FRAC_PI_2, Vec2::new(0.0, -1.0)),
+                ];
+                for (at, way) in quarters {
+                    let along = if sweep >= 0.0 { at - start } else { start - at };
+                    if along.rem_euclid(TAU) <= sweep.abs() {
+                        bounds.add(center + way * radius);
+                    }
+                }
+                bounds
+            }
+            _ => self.polyline(1e-3).into_iter().collect(),
         }
     }
     pub fn length(&self) -> f64 {
@@ -983,6 +1007,31 @@ mod tests {
     }
 
     /// #1602: the largest circle inside a region, which bounds how far a taper can go.
+    /// A line's box is its ends'; an arc's takes each quarter point it passes, whichever way it runs
+    /// and wherever its angles start; a curve's follows it, not its control points.
+    #[test]
+    fn a_pieces_bounds_are_the_box_round_it() {
+        let v = Vec2::new;
+        let boxed = |seg: Seg2| {
+            let b = seg.bounds();
+            [b.min.x, b.min.y, b.max.x, b.max.y]
+        };
+        let near = |got: [f64; 4], want: [f64; 4]| assert!(got.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-3), "{got:?} {want:?}");
+        let arc = |start: f64, sweep: f64| Seg2::Arc { center: v(10.0, 20.0), radius: 5.0, start, sweep };
+        near(boxed(Seg2::Line { a: v(3.0, 1.0), b: v(-1.0, 2.0) }), [-1.0, 1.0, 3.0, 2.0]);
+        near(boxed(arc(0.0, FRAC_PI_2)), [10.0, 20.0, 15.0, 25.0]);
+        near(boxed(arc(FRAC_PI_2, PI)), [5.0, 15.0, 10.0, 25.0]);
+        near(boxed(arc(0.0, -FRAC_PI_2)), [10.0, 15.0, 15.0, 20.0]);
+        near(boxed(arc(0.0, TAU)), [5.0, 15.0, 15.0, 25.0]);
+        near(boxed(arc(0.0, -TAU)), [5.0, 15.0, 15.0, 25.0]);
+        near(
+            boxed(arc(TAU + 0.1, 0.2)),
+            [10.0 + 5.0 * 0.3f64.cos(), 20.0 + 5.0 * 0.1f64.sin(), 10.0 + 5.0 * 0.1f64.cos(), 20.0 + 5.0 * 0.3f64.sin()],
+        );
+        near(boxed(arc(3.0, 1.0)), [5.0, 20.0 + 5.0 * 4.0f64.sin(), 10.0 + 5.0 * 4.0f64.cos(), 20.0 + 5.0 * 3.0f64.sin()]);
+        near(boxed(Seg2::Cubic { p0: v(0.0, 0.0), p1: v(0.0, 10.0), p2: v(10.0, 10.0), p3: v(10.0, 0.0) }), [0.0, 0.0, 10.0, 7.5]);
+    }
+
     #[test]
     fn inradius_of_rectangles_circles_and_rings() {
         let close = |a: f64, b: f64| (a - b).abs() < 1e-3 * b.max(1.0);

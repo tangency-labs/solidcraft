@@ -106,6 +106,20 @@ fn views_save_what_they_set_and_read_back_as_saved() {
     assert_eq!(file(&old).get("views"), None, "no views, none written");
 }
 
+/// A view takes the views projected from it, through others and whichever way their ids sort, and
+/// nothing above it or beside it; none given, none taken.
+#[test]
+fn a_views_projected_views_are_found_down_its_chains() {
+    let (mut d, mut id_source, [front, right, top]) = three();
+    let left = add(&mut d, &mut id_source, projected(front, ProjectedSide::Left), ViewPlace::Aligned(20.0), ViewOverrides::default());
+    let set = |ids: &[u64]| ids.iter().copied().collect::<BTreeSet<u64>>();
+    assert_eq!(d.with_projected(&set(&[front])), set(&[front, right, top, left]));
+    assert_eq!(d.with_projected(&set(&[right])), set(&[right, top]));
+    assert_eq!(d.with_projected(&set(&[top, left])), set(&[top, left]));
+    assert_eq!(d.with_projected(&set(&[])), set(&[]));
+    assert_eq!(d.with_projected(&set(&[99])), set(&[99]));
+}
+
 /// A drawing lists its views by id, whatever order they were added in: the same views added the
 /// other way round make the same drawing and save as the same bytes. A file that lists them in
 /// another order (saved before views went by id, or edited by hand) reads by id and saves as those

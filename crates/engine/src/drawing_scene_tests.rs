@@ -117,7 +117,7 @@ fn same_within(a: &Group, b: &Group, tol: f64) -> bool {
 #[test]
 fn a_sheet_is_its_border_then_its_views_by_id() {
     let (mut s, sheet, [front, top]) = front_and_top();
-    let SheetScene { scene, views } = built(&s, sheet);
+    let SheetScene { scene, views, .. } = built(&s, sheet);
     let border = border(&s, sheet);
     assert_eq!(border.len(), 3);
     assert_eq!(serde_json::to_string(&scene.groups[..3]).unwrap(), serde_json::to_string(&border).unwrap());
@@ -188,7 +188,7 @@ fn a_view_of_many_lines_draws_as_its_snapshot() {
 fn a_sheet_with_no_views_is_its_border() {
     let (mut s, _, _) = front_and_top();
     let second = run(&mut s, "drawing.sheet.add", json!({}))["sheet"].as_str().and_then(ids::decode).unwrap();
-    let SheetScene { scene, views } = built(&s, second);
+    let SheetScene { scene, views, .. } = built(&s, second);
     assert_eq!((serde_json::to_string(&scene.groups).unwrap(), views.len()), (serde_json::to_string(&border(&s, second)).unwrap(), 0));
 }
 
@@ -371,13 +371,13 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
     let lines = |n: usize| {
         let path = (0..n).map(|i| Seg2::Line { a: Vec2::new(i as f64 * 1e-3, 0.0), b: Vec2::new((i + 1) as f64 * 1e-3, 0.0) }).collect();
         let items = vec![Item::Stroke { path, closed: false, width_mm: 0.5 }];
-        Drawn { group: Some(Group { object: n as u64, kind: ObjectKind::View, items }), status: Status::Drawn, stats: None }
+        Drawn { group: Some(Group { object: n as u64, kind: ObjectKind::View, items }), status: Status::Drawn, stats: None, boundary: None }
     };
     let left = MAX_RECORDS - border(&s, sheet).iter().map(Group::records).sum::<usize>();
     // The first leaves 20 records; the second needs 32; the third takes the last 20.
     let views = [lines(left - 22), lines(30), lines(18)];
     let centre = Vec2::new(100.0, 100.0);
-    let (scene, states) = assemble(record, views.iter().enumerate().map(|(i, v)| (i as u64, centre, v))).unwrap();
+    let (scene, states, _) = assemble(record, views.iter().enumerate().map(|(i, v)| (i as u64, centre, v))).unwrap();
     let statuses: Vec<&'static str> = states.iter().map(|v| v.status.name()).collect();
     assert_eq!(statuses, ["drawn", "failed", "drawn"]);
     assert_eq!((scene.groups.len(), scene.groups.iter().map(Group::records).sum::<usize>()), (5, MAX_RECORDS));
@@ -425,7 +425,9 @@ fn seeded_edits_and_steps_always_end_at_the_built_scene() {
         }
         let end = settled(&mut s, sheet);
         assert!(end.stale.is_empty(), "seed {seed}");
-        assert_eq!(bytes(&end.scene), bytes(&built(&s, sheet).scene), "seed {seed}");
+        let at_once = built(&s, sheet);
+        assert_eq!(bytes(&end.scene), bytes(&at_once.scene), "seed {seed}");
+        assert_eq!(&*end.objects, at_once.objects.as_slice(), "seed {seed}");
     }
 }
 
@@ -541,4 +543,107 @@ fn a_saved_views_reference_shown_percent_grows_only_what_it_should() {
     assert_eq!(bytes(&built(&s, sheet).scene), bytes(&after.scene), "the provider and a build draw one thing");
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&before.scene));
+}
+
+fn near(b: &Aabb2, min: [f64; 2], max: [f64; 2]) -> bool {
+    (b.min - Vec2::from(min)).len() < 1e-9 && (b.max - Vec2::from(max)).len() < 1e-9
+}
+
+/// A sheet's objects are its border, once, then each view by id. At 2:1 the block's front view is
+/// 200 x 40 mm round (150, 150) and its top view 200 x 100 mm round (150, 220); each draws up to its
+/// boundary, and inspect says the same boundary. The command answers them beside the scene, not in
+/// it, as its schema says.
+#[test]
+fn a_sheets_objects_say_where_each_one_is() {
+    let (mut s, sheet, [front, top]) = front_and_top();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "2:1"}}));
+    let objects = built(&s, sheet).objects;
+    let named: Vec<(u64, ObjectKind)> = objects.iter().map(|o| (o.object, o.kind)).collect();
+    let by_id = [front.min(top), front.max(top)];
+    assert_eq!(named, [(sheet, ObjectKind::DrawingBorder), (by_id[0], ObjectKind::View), (by_id[1], ObjectKind::View)]);
+    let border = objects[0];
+    assert_eq!(border.boundary_mm, None);
+    assert!(
+        border.bounds_mm.min.x >= 0.0 && border.bounds_mm.min.y >= 0.0 && border.bounds_mm.max.x <= 420.0 && border.bounds_mm.max.y <= 297.0,
+        "{border:?}"
+    );
+    for (id, min, max) in [(front, [50.0, 130.0], [250.0, 170.0]), (top, [50.0, 170.0], [250.0, 270.0])] {
+        let object = objects[if id == by_id[0] { 1 } else { 2 }];
+        assert!(near(&object.bounds_mm, min, max), "{object:?}");
+        assert!(near(&object.boundary_mm.unwrap(), min, max), "{object:?}");
+        let inspected = run(&mut s, "drawing.view.inspect", json!({"view": ids::encode(id)}));
+        let corner = |at: &str| Vec2::new(inspected["boundary_mm"][at][0].as_f64().unwrap(), inspected["boundary_mm"][at][1].as_f64().unwrap());
+        assert!(
+            (corner("min") - object.boundary_mm.unwrap().min).len() < 1e-9 && (corner("max") - object.boundary_mm.unwrap().max).len() < 1e-9,
+            "{inspected}"
+        );
+    }
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    let schema = output_schema_for::<SheetSceneResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    assert_eq!((&reply["objects"][1]["object"], &reply["objects"][1]["kind"]), (&json!(ids::encode(by_id[0])), &json!("view")), "{reply}");
+    assert_eq!(reply["objects"][0].get("boundary_mm"), None, "{reply}");
+    assert_eq!(reply["scene"].get("objects"), None, "{reply}");
+}
+
+/// A view that can't be drawn can still be picked: a failed one by its boundary, and a placeholder by
+/// the 20 x 20 mm round its centre.
+#[test]
+fn a_view_with_no_lines_is_an_object_at_its_boundary() {
+    let (mut s, sheet, [front, top]) = front_and_top();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": "shaded"}}));
+    let object = |s: &Session, id: u64| built(s, sheet).objects.into_iter().find(|o| o.object == id).unwrap();
+    let failed = object(&s, top);
+    assert!(near(&failed.bounds_mm, [125.0, 207.5], [175.0, 232.5]) && failed.boundary_mm == Some(failed.bounds_mm), "{failed:?}");
+    for level in 0..=MAX_PLACEMENT_DEPTH as u64 + 1 {
+        nest(&mut s, level);
+    }
+    let held = object(&s, front);
+    assert!(near(&held.bounds_mm, [140.0, 140.0], [160.0, 160.0]) && held.boundary_mm == Some(held.bounds_mm), "{held:?}");
+}
+
+/// A view's box holds what it draws, whatever that is, and one that drew nothing stands at its
+/// boundary rather than at an empty box.
+#[test]
+fn a_views_box_is_what_it_draws() {
+    let (s, ..) = front_and_top();
+    let record = s.drawing("test").unwrap().sheets[0].clone();
+    let (centre, boundary) = (Vec2::new(100.0, 100.0), Aabb2 { min: Vec2::new(-30.0, -20.0), max: Vec2::new(30.0, 20.0) });
+    let rect = Aabb2 { min: Vec2::new(1.0, 2.0), max: Vec2::new(5.0, 7.0) };
+    let corners = [rect.min, Vec2::new(rect.max.x, rect.min.y), rect.max, Vec2::new(rect.min.x, rect.max.y)];
+    let segs = (0..4).map(|i| Seg2::Line { a: corners[i], b: corners[(i + 1) % 4] }).collect();
+    let fill = Item::Fill { region: Region2 { outer: Loop2 { segs }, holes: Vec::new() } };
+    let picture = Item::Picture(Picture { source: 1, rect, opacity: 1.0 });
+    let moved = [101.0, 102.0];
+    let moved_to = [105.0, 107.0];
+    for (items, min, max) in [(vec![], [70.0, 80.0], [130.0, 120.0]), (vec![fill], moved, moved_to), (vec![picture], moved, moved_to)] {
+        let drawn =
+            Drawn { group: Some(Group { object: 7, kind: ObjectKind::View, items }), status: Status::Drawn, stats: None, boundary: Some(boundary) };
+        let (_, _, objects) = assemble(&record, [(7, centre, &drawn)].into_iter()).unwrap();
+        let object = objects.iter().find(|o| o.object == 7).unwrap();
+        assert!(near(&object.bounds_mm, min, max), "{object:?}");
+    }
+}
+
+/// The provider lists a view once it is drawn, moves its bounds with it and projects nothing for
+/// that, and a view gone from the drawing is gone from the list.
+#[test]
+fn the_providers_objects_follow_its_views() {
+    let (mut s, sheet, [front, top]) = front_and_top();
+    let first = extract(&mut s, sheet).unwrap();
+    assert_eq!(first.objects.iter().map(|o| o.object).collect::<Vec<_>>(), [sheet], "only what is drawn so far");
+    let drawn = settled(&mut s, sheet);
+    let at = |view: &SheetView, id: u64| view.objects.iter().find(|o| o.object == id).copied().unwrap();
+    let before = at(&drawn, front);
+    let projections = s.drawing_scenes.projections;
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"place": {"at": [160.0, 150.0]}}}));
+    let moved = settled(&mut s, sheet);
+    assert_eq!(s.drawing_scenes.projections, projections, "a move draws nothing");
+    let by = Vec2::new(10.0, 0.0);
+    assert!(near(&at(&moved, front).bounds_mm, (before.bounds_mm.min + by).into(), (before.bounds_mm.max + by).into()), "{moved:?}");
+    assert!(
+        near(&at(&moved, top).bounds_mm, (at(&drawn, top).bounds_mm.min + by).into(), (at(&drawn, top).bounds_mm.max + by).into()),
+        "the view lined up with it goes along"
+    );
+    assert_eq!(&*moved.objects, built(&s, sheet).objects.as_slice());
 }

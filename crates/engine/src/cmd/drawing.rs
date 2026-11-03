@@ -5,14 +5,17 @@
 //! and evaluates nothing; making and deleting one are steps of the model, whose list of drawings
 //! they change.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use serde_json::{Value, json};
+use solidcraft_doc::drawing::view::{MAX_VIEW_DEPTH, View, ViewKind};
 use solidcraft_doc::drawing::{self, Drawing, Source, Units};
+use solidcraft_doc::drawing_view::ViewDirection;
 use solidcraft_doc::ids;
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_sheet::{DrawingBorderProfile, Orientation, PaperSize, Sheet};
+use solidcraft_geom::drawing_view::ProjectedSide;
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
@@ -44,7 +47,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "drawing: id → deleted: its id; closed when it was open (one undo step of the model)",
     ),
     CommandSpec::new("drawing.inspect", "Inspect Drawing", inspect).in_drawing().icon("inspect").noundo().doc_only().params(
-        "→ {id, name, units, projection, language, font, font_note: why its text is set in the built-in font instead (the font isn't on this computer, or can't be set on paper), or null, properties, sources: [{id}], sheets: [{id, name, size_mm, orientation, dpi, documents, excluded}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
+        "→ {id, name, units, projection, language, font, font_note: why its text is set in the built-in font instead (the font isn't on this computer, or can't be set on paper), or null, properties, sources: [{id}], sheets: [{id, name, size_mm, orientation, dpi, documents, excluded, views: [{id, kind: base|projected, parent?, side?, label, dimensions: [ids], balloons: [ids]}], base views by id, each followed by those projected from it}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
     ),
     CommandSpec::new("drawing.set", "Drawing Settings", set)
         .in_drawing()
@@ -162,10 +165,86 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"deleted": ids::encode(id)}))
 }
 
+/// What view `view` is called until views have saved names: which way it looks, or where it sits of
+/// the view it is projected from (`Front`, `Right of Front`, `Above Right of Front`).
+fn view_label(d: &Drawing, view: &View) -> String {
+    let mut label = String::new();
+    let mut at = view;
+    for _ in 0..MAX_VIEW_DEPTH {
+        match at.kind {
+            ViewKind::Base { view: ViewDirection::Named(named), .. } => {
+                let name = super::drawing_view::snake_name(named).replace('_', " ");
+                let mut letters = name.chars();
+                label.extend(letters.next().map(|first| first.to_ascii_uppercase()));
+                label.push_str(letters.as_str());
+                break;
+            }
+            ViewKind::Base { .. } => {
+                label.push_str("Custom");
+                break;
+            }
+            ViewKind::Projected { parent, side } => {
+                label.push_str(match side {
+                    ProjectedSide::Left => "Left of ",
+                    ProjectedSide::Right => "Right of ",
+                    ProjectedSide::Above => "Above ",
+                    ProjectedSide::Below => "Below ",
+                });
+                let Some(next) = d.view(parent) else { break };
+                at = next;
+            }
+        }
+    }
+    label
+}
+
+/// Sheet `sheet`'s views as `drawing.inspect` lists them: those with no parent on it by id, each
+/// followed by the views projected from it. `dimensions` and `balloons` hold each view's, by its id.
+fn sheet_views(d: &Drawing, sheet: u64, dimensions: &BTreeMap<u64, Vec<String>>, balloons: &BTreeMap<u64, Vec<String>>) -> Vec<Value> {
+    let on: BTreeSet<u64> = d.views.iter().filter(|v| v.sheet == sheet).map(|v| v.id).collect();
+    let mut first = Vec::new();
+    let mut projected: BTreeMap<u64, Vec<&View>> = BTreeMap::new();
+    for view in d.views.iter().filter(|v| on.contains(&v.id)) {
+        match view.kind {
+            ViewKind::Projected { parent, .. } if on.contains(&parent) => projected.entry(parent).or_default().push(view),
+            _ => first.push(&**view),
+        }
+    }
+    let mut stack: Vec<&View> = first.into_iter().rev().collect();
+    let mut listed = Vec::with_capacity(on.len());
+    while let Some(view) = stack.pop() {
+        let mut entry = json!({
+            "id": ids::encode(view.id),
+            "kind": if matches!(view.kind, ViewKind::Base { .. }) { "base" } else { "projected" },
+            "label": view_label(d, view),
+            "dimensions": dimensions.get(&view.id).map_or(&[][..], Vec::as_slice),
+            "balloons": balloons.get(&view.id).map_or(&[][..], Vec::as_slice),
+        });
+        if let ViewKind::Projected { parent, side } = view.kind {
+            entry["parent"] = json!(ids::encode(parent));
+            entry["side"] = json!(side);
+        }
+        listed.push(entry);
+        if let Some(children) = projected.get(&view.id) {
+            stack.extend(children.iter().rev());
+        }
+    }
+    listed
+}
+
 /// The drawing open, as `drawing.inspect` answers, which making and opening one answer too.
 fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
     let cmd = "drawing.inspect";
     let d = s.drawing(cmd)?;
+    // One pass over each list for the whole drawing, however many sheets and views it has.
+    let mut dimensions: BTreeMap<u64, Vec<String>> = BTreeMap::new();
+    for dimension in &d.dimensions {
+        dimensions.entry(dimension.view).or_default().push(ids::encode(dimension.id));
+    }
+    let mut balloons: BTreeMap<u64, Vec<String>> = BTreeMap::new();
+    for balloon in &d.balloons {
+        balloons.entry(balloon.view).or_default().push(ids::encode(balloon.id));
+    }
     let mut sheets = Vec::with_capacity(d.sheets.len());
     for sheet in &d.sheets {
         let size = sheet.sheet.size_mm().map_err(|e| bad(cmd, e.to_string()))?;
@@ -177,6 +256,7 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
             "dpi": sheet.dpi,
             "documents": sheet.documents.map(|c| json!({"source": ids::encode(c.source), "component": c.component})),
             "excluded": sheet.excluded,
+            "views": sheet_views(d, sheet.id, &dimensions, &balloons),
         }));
     }
     Ok(json!({

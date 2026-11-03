@@ -8,8 +8,8 @@ use solidcraft_doc::ids;
 use solidcraft_geom::paper::ObjectKind;
 
 use super::drawing_sheet::sheet_ref;
-use super::drawing_view::{LinesStatsResult, paper_scene_schema};
-use crate::drawing_scene::{Status, ViewState};
+use super::drawing_view::{BoxResult, LinesStatsResult, paper_scene_schema};
+use crate::drawing_scene::{SheetObject, Status, ViewState};
 
 /// Draw one sheet of the open drawing. Read-only.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -61,6 +61,25 @@ impl From<ViewState> for SheetSceneView {
     }
 }
 
+/// Where one object of the scene sits on paper: the box round what it draws, along its lines' paths
+/// (with no lines, its boundary), and a view's boundary.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetObjectResult {
+    pub object: String,
+    #[schemars(with = "String")]
+    pub kind: ObjectKind,
+    pub bounds_mm: BoxResult,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub boundary_mm: Option<BoxResult>,
+}
+
+impl From<SheetObject> for SheetObjectResult {
+    fn from(o: SheetObject) -> Self {
+        let on_paper = |b: solidcraft_geom::Aabb2| BoxResult { min: b.min.into(), max: b.max.into() };
+        SheetObjectResult { object: ids::encode(o.object), kind: o.kind, bounds_mm: on_paper(o.bounds_mm), boundary_mm: o.boundary_mm.map(on_paper) }
+    }
+}
+
 /// What `drawing.scene` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct SheetSceneResult {
@@ -68,6 +87,8 @@ pub struct SheetSceneResult {
     pub scene: SheetPaperScene,
     /// Each view on the sheet, in id order.
     pub views: Vec<SheetSceneView>,
+    /// The sheet's border, then each view on it, in paint order.
+    pub objects: Vec<SheetObjectResult>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

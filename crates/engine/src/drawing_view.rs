@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 
+use solidcraft_doc::drawing::view::ResolvedView;
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
 use solidcraft_geom::drawing_view::{Scale, ViewFrame};
@@ -222,8 +223,14 @@ pub fn frame(basis: Plane, scale: Scale, model: &Aabb2, centre: Vec2, cmd: &str)
 pub fn on_sheet(s: &Session, drawing: &Drawing, id: u64, cmd: &str) -> Result<OnSheet> {
     let view = drawing.resolve_view(id).map_err(|e| bad(cmd, e.to_string()))?;
     let centre = drawing.view_centre(id).map_err(|e| bad(cmd, e.to_string()))?;
-    let scale = view.scale.value;
     let measured = shown(s).and_then(|set| measure(&set, &view.basis).map(|e| (e, shows(&set, &view.basis, &e, view.reference_shown_percent))));
+    placed(&view, measured, centre, cmd)
+}
+
+/// A view drawing as `view` does on its sheet, from what [`measure`] and [`shows`] said of it, with the
+/// model's middle on `centre`; with nothing to measure, the placeholder.
+pub fn placed(view: &ResolvedView, measured: std::result::Result<(Extents, Aabb2), Unmeasured>, centre: Vec2, cmd: &str) -> Result<OnSheet> {
+    let scale = view.scale.value;
     let (extents, shows, unmeasured) = match measured {
         Ok((extents, shows)) => (extents, shows, None),
         Err(why) => {
