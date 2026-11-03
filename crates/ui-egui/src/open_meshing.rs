@@ -161,6 +161,10 @@ pub(crate) fn progress(app: &SolveApp) -> Option<(usize, usize)> {
 /// A small "Loading parts n/N" note at the foot of the viewport while bodies are being meshed:
 /// a part not drawn yet can't be picked yet either, and this says why.
 pub(crate) fn show(app: &SolveApp, ctx: &egui::Context) {
+    // The operations panel shows it instead.
+    if app.preferences.operations_panel {
+        return;
+    }
     let (Some((done, total)), Some(view)) = (progress(app), app.viewport.rect) else { return };
     let t = crate::theme::Tokens::get();
     let at = egui::pos2(view.left() + 12.0, view.bottom() - 12.0);
