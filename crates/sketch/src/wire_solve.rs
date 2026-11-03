@@ -15,7 +15,8 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::linalg::{self, Mat};
 use crate::model::{MAX_CONSTRAINTS, Result, Sketch, SketchError, in_range3};

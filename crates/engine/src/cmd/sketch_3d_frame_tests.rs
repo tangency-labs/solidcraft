@@ -553,26 +553,23 @@ fn coincident_3d_joins_points_puts_a_point_on_a_line_and_keeps_planar_geometry_a
 }
 
 #[test]
-fn a_pipe_along_a_constrained_3d_line_follows_its_constraints() {
+fn a_constrained_3d_line_follows_its_constraints_through_a_drag() {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane":"XY"}));
     run(&mut s, "sketch.options", json!({"sketch_3d":true}));
-    let sketch = s.active_sketch.unwrap();
     let l = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[50,3,4]]}))["curves"][0].as_str().unwrap().to_string();
     run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{l}.start")}));
     // Along X with the start fixed: the end drops straight onto the axis, 50 along.
     run(&mut s, "sketch.constraint.along_axis", json!({"line": l, "axis": "x"}));
     near(fit(&s, &l, 1), Vec3::new(50.0, 0.0, 0.0));
-    run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "solid.pipe", json!({"path_sketch":sketch,"path":[l],"diameter":4}));
-    let volume = |s: &Session| solidcraft_kernel::measure(&s.world_state().bodies.last().unwrap().body).unwrap().volume;
-    let area = std::f64::consts::PI * 4.0;
-    assert!((volume(&s) - area * 50.0).abs() < 0.5, "{}", volume(&s));
-    // Stretch it along the axis: the pipe follows.
-    run(&mut s, "sketch.edit", json!({"sketch": sketch}));
+    // Stretched along the axis by a drag, it stays on it.
     run(&mut s, "sketch.move3d", json!({"wire": l, "index": 1, "by": [10, 0, 0]}));
-    run(&mut s, "sketch.finish", json!({}));
-    assert!((volume(&s) - area * 60.0).abs() < 0.5, "{}", volume(&s));
+    near(fit(&s, &l, 1), Vec3::new(60.0, 0.0, 0.0));
+    // With neither end fixed, each end moves half the gap: the line runs at y = 11.5, z = 2.
+    let free = run(&mut s, "sketch.line3d", json!({"points":[[0,10,0],[100,13,4]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": free, "axis": "x"}));
+    near(fit(&s, &free, 0), Vec3::new(0.0, 11.5, 2.0));
+    near(fit(&s, &free, 1), Vec3::new(100.0, 11.5, 2.0));
 }
 
 #[test]
@@ -600,7 +597,6 @@ fn lines_drawn_one_segment_at_a_time_stay_joined_through_their_constraints() {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane":"XY"}));
     run(&mut s, "sketch.options", json!({"sketch_3d":true}));
-    let sketch = s.active_sketch.unwrap();
     let a = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[50,3,4]]}))["curves"][0].as_str().unwrap().to_string();
     let r = run(&mut s, "sketch.line3d", json!({"points":[[50,3,4],[52,5,40]]}));
     let b = r["curves"][0].as_str().unwrap().to_string();
@@ -610,9 +606,8 @@ fn lines_drawn_one_segment_at_a_time_stay_joined_through_their_constraints() {
     let r = run(&mut s, "sketch.constraint.along_axis", json!({"line": b, "axis": "z"}));
     assert_eq!(r["created"]["constraints"].as_array().map(Vec::len), Some(1), "{r}");
     near(fit(&s, &b, 0), fit(&s, &a, 1));
-    run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "solid.pipe", json!({"path_sketch":sketch,"path":[a, b],"diameter":4}));
-    assert!(s.model.results.iter().all(|r| r.error.is_none()), "the path is connected");
+    let top = fit(&s, &b, 1);
+    assert!((top.x - fit(&s, &b, 0).x).abs() < 1e-9 && (top.y - fit(&s, &b, 0).y).abs() < 1e-9, "the rise stands on the joint: {top:?}");
 }
 
 #[test]

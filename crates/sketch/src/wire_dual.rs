@@ -5,7 +5,7 @@
 
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 /// Most unknowns one constraint reads: three coordinates of each of its points.
 pub const N: usize = 9;
