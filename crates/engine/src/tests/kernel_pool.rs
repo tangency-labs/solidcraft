@@ -158,3 +158,24 @@ fn a_design_rebuilt_beside_other_work_builds_the_same() {
         b.join().unwrap();
     }
 }
+
+/// A copy that replaces its own design leaves the design it was copied from going: the token over
+/// that design's work is stopped only when that design itself closes or is replaced.
+#[test]
+fn a_copy_replacing_its_design_does_not_stop_the_design_it_came_from() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    let token = s.stop_token();
+    let new = [("file.new".to_string(), json!({}))];
+    assert!(s.ahead().replies(&new).iter().all(Result::is_ok));
+    assert!(!token.is_stopped(), "a copy evaluating ahead");
+    let _ = s.scratch().compute_commands(&new, None);
+    assert!(!token.is_stopped(), "a copy computing a dialog's commands");
+    assert!(s.preview(&new).is_ok());
+    assert!(!token.is_stopped(), "a preview");
+    // It still works, and the design's own replacement does stop it.
+    run(&mut s, "solid.box", json!({"corner": [20, 0, 0], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "file.new", json!({}));
+    assert!(token.is_stopped(), "the design itself replaced");
+    assert!(!s.stop_token().is_stopped());
+}

@@ -2439,3 +2439,17 @@ fn a_box_cut_round_a_small_hole_of_a_long_plate_keeps_the_hole() {
         }
     }
 }
+
+/// A refusal is kept with its body for every later reader: which face it names doesn't depend on
+/// whether the job that found it had been stopped, whose probes would all be refused.
+#[test]
+fn a_stopped_job_does_not_decide_which_face_a_refusal_names() {
+    let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let why = solidcraft_smlib::Error::Argument;
+    let plain = crate::body::Refusal::of(body.record(), &why);
+    assert_eq!(plain.face, None, "every face of a box is taken on its own");
+    let stop = crate::Stop::new();
+    stop.stop();
+    let stopped = stop.within(|| crate::body::Refusal::of(body.record(), &why));
+    assert_eq!(stopped.face, plain.face);
+}
