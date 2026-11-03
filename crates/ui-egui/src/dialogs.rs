@@ -2887,7 +2887,6 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
             format!("({:.2}, {:.2}) mm", p.x, p.y)
         }
         Sel::Vertex { body, .. } => format!("{body} · vertex"),
-        _ => format!("{item:?}"),
     }
 }
 
