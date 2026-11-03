@@ -822,6 +822,7 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
     {
         return Err(DocError::Invalid("damaged design: duplicate feature, component or occurrence id".into()));
     }
+    d.section_analyses.validate().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
     let component_ids: std::collections::BTreeSet<_> = d.components.iter().map(|component| component.id).chain(std::iter::once(0)).collect();
     for feature in &d.features {
         if let crate::FeatureKind::Sketch { sketch, .. } = &feature.kind {

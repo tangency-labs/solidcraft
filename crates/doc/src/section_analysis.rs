@@ -48,6 +48,20 @@ impl SectionAnalyses {
         self.items.iter_mut().find(|s| s.id == id)
     }
 
+    /// Refuse what no command makes: more than `MAX_SECTIONS` sections, an id twice (only the
+    /// first would ever be found), or `u64::MAX` (`next_id` would hand it out again, and the next
+    /// new section would overwrite that one). A design file is untrusted input.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.items.len() > MAX_SECTIONS {
+            return Err(format!("more than {MAX_SECTIONS} section analyses"));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        match self.items.iter().find(|s| s.id == u64::MAX || !seen.insert(s.id)) {
+            Some(s) => Err(format!("invalid section analysis id {}", s.id)),
+            None => Ok(()),
+        }
+    }
+
     /// An id no section has.
     pub fn next_id(&self) -> u64 {
         self.items.iter().map(|s| s.id).max().unwrap_or(0).saturating_add(1)
@@ -156,5 +170,23 @@ mod tests {
         }
         assert_eq!(all.free_name(name), "Section 4");
         assert_eq!(all.next_id(), 3);
+    }
+
+    /// A hand-made design with too many sections, an id twice, or the last id is refused as it
+    /// opens: the next new section would otherwise overwrite one already there.
+    #[test]
+    fn a_design_with_unusable_section_ids_is_refused() {
+        let section = |id: u64| serde_json::json!({"id": id, "name": format!("Section {id}"), "plane": {"type": "origin", "name": "XY"}});
+        let open = |items: Vec<serde_json::Value>| {
+            let mut v: serde_json::Value = serde_json::from_str(&crate::Document::new("cuts").to_json()).unwrap();
+            v["section_analyses"] = serde_json::json!({"items": items});
+            crate::Document::from_json(&v.to_string())
+        };
+        let ok = open(vec![section(1), section(2)]).expect("distinct ids open");
+        assert_eq!(ok.section_analyses.next_id(), 3);
+        for items in [vec![section(u64::MAX)], vec![section(4), section(4)], (1..=MAX_SECTIONS as u64 + 1).map(section).collect()] {
+            let err = open(items).expect_err("refused").to_string();
+            assert!(err.contains("damaged design") && err.contains("section analys"), "{err}");
+        }
     }
 }
