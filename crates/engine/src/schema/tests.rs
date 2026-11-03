@@ -367,7 +367,7 @@ fn issues_are_read_from_the_commands_own_contract() {
     assert_eq!(messages(&issues), ["unknown key `operaton`; did you mean `operation`?"]);
     assert_eq!(issues, box_contract().check(&json!({"length": 1, "width": 1, "height": 1, "operaton": "cut"})));
     // No contract, or no such command: nothing to say.
-    assert!(super::issues("solid.fillet", &json!({"nonsense": 1})).is_empty());
+    assert!(super::issues("solid.chamfer", &json!({"nonsense": 1})).is_empty());
     assert!(super::issues("no.such", &json!({"nonsense": 1})).is_empty());
 }
 
