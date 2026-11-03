@@ -1,0 +1,50 @@
+{
+  "en": {
+    "prefs.sketch_3d_axis_snap": "Snap 3D lines to the X, Y and Z axes",
+    "prefs.sketch_3d_axis_snap_note": "While drawing a 3D line, a point near the X, Y or Z axis through the last point snaps onto it, and the line is held along that axis. Off: the point stays on the drawing plane under the cursor and nothing is added.",
+    "sketch3d.drawing_plane": "Drawing plane: {plane}. Tab switches it.",
+    "sketch3d.sketch_plane": "sketch plane"
+  },
+  "ar": {
+    "prefs.sketch_3d_axis_snap": "التقاط الخطوط ثلاثية الأبعاد إلى المحاور X وY وZ",
+    "prefs.sketch_3d_axis_snap_note": "أثناء رسم خط ثلاثي الأبعاد، تلتقط النقطة القريبة من المحور X أو Y أو Z المار بالنقطة الأخيرة إلى ذلك المحور، ويبقى الخط على امتداد ذلك المحور. عند الإيقاف: تبقى النقطة على مستوى الرسم الحالي تحت المؤشر ولا يُضاف شيء.",
+    "sketch3d.drawing_plane": "مستوى الرسم الحالي: {plane}. يبدّله المفتاح Tab.",
+    "sketch3d.sketch_plane": "مستوى الرسم"
+  },
+  "de": {
+    "prefs.sketch_3d_axis_snap": "3D-Linien an der X-, Y- und Z-Achse fangen",
+    "prefs.sketch_3d_axis_snap_note": "Beim Zeichnen einer 3D-Linie rastet ein Punkt nahe der X-, Y- oder Z-Achse durch den letzten Punkt auf dieser Achse ein, und die Linie bleibt entlang dieser Achse. Aus: Der Punkt bleibt unter dem Zeiger auf der Zeichenebene, und es wird nichts hinzugefügt.",
+    "sketch3d.drawing_plane": "Zeichenebene: {plane}. Tab wechselt sie.",
+    "sketch3d.sketch_plane": "Skizzenebene"
+  },
+  "he": {
+    "prefs.sketch_3d_axis_snap": "הצמדת קווים תלת־ממדיים לצירי X,‏ Y ו־Z",
+    "prefs.sketch_3d_axis_snap_note": "בזמן שרטוט קו תלת־ממדי, נקודה קרובה לציר X,‏ Y או Z העובר דרך הנקודה האחרונה נצמדת אליו, והקו נשמר לאורך אותו ציר. כבוי: הנקודה נשארת במישור השרטוט מתחת לסמן, ולא נוסף דבר.",
+    "sketch3d.drawing_plane": "מישור השרטוט: {plane}. המקש Tab מחליף אותו.",
+    "sketch3d.sketch_plane": "מישור הסקיצה"
+  },
+  "ja": {
+    "prefs.sketch_3d_axis_snap": "3D 線を X、Y、Z 軸にスナップ",
+    "prefs.sketch_3d_axis_snap_note": "3D 線を描画中、直前の点を通る X、Y、Z 軸の近くの点はその軸にスナップし、線はその軸に沿って保持されます。オフ: 点はカーソル下の描画平面上にとどまり、何も追加されません。",
+    "sketch3d.drawing_plane": "描画平面: {plane}。Tab で切り替えます。",
+    "sketch3d.sketch_plane": "スケッチ平面"
+  },
+  "ko": {
+    "prefs.sketch_3d_axis_snap": "3D 선을 X, Y, Z 축에 스냅",
+    "prefs.sketch_3d_axis_snap_note": "3D 선을 그리는 동안 마지막 점을 지나는 X, Y, Z 축 근처의 점은 그 축에 스냅되고, 선은 그 축을 따라 유지됩니다. 끄기: 점은 커서 아래 그리기 평면에 남고 아무것도 추가되지 않습니다.",
+    "sketch3d.drawing_plane": "그리기 평면: {plane}. Tab으로 전환합니다.",
+    "sketch3d.sketch_plane": "스케치 평면"
+  },
+  "vi": {
+    "prefs.sketch_3d_axis_snap": "Bắt dính đường thẳng 3D vào các trục X, Y và Z",
+    "prefs.sketch_3d_axis_snap_note": "Khi vẽ đường thẳng 3D, điểm gần trục X, Y hoặc Z đi qua điểm cuối cùng sẽ bắt dính vào trục đó, và đường thẳng được giữ dọc theo trục đó. Tắt: điểm nằm trên mặt phẳng vẽ dưới con trỏ và không thêm gì.",
+    "sketch3d.drawing_plane": "Mặt phẳng vẽ: {plane}. Nhấn Tab để đổi.",
+    "sketch3d.sketch_plane": "mặt phẳng phác thảo"
+  },
+  "zh": {
+    "prefs.sketch_3d_axis_snap": "将 3D 直线捕捉到 X、Y、Z 轴",
+    "prefs.sketch_3d_axis_snap_note": "绘制 3D 直线时，靠近经过上一点的 X、Y 或 Z 轴的点会捕捉到该轴上，直线保持沿该轴。关闭：点留在光标下的绘图平面上，不添加任何约束。",
+    "sketch3d.drawing_plane": "绘图平面：{plane}。按 Tab 切换。",
+    "sketch3d.sketch_plane": "草图平面"
+  }
+}

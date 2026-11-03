@@ -20,6 +20,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             .on_hover_text(app.tr("prefs.sketch_recent_snap_note"));
         ui_kit::checkbox(ui, app.tr("prefs.sketch_align_points"), &mut app.preferences.sketch_align_points)
             .on_hover_text(app.tr("prefs.sketch_align_points_note"));
+        ui_kit::checkbox(ui, app.tr("prefs.sketch_3d_axis_snap"), &mut app.preferences.sketch_3d_axis_snap)
+            .on_hover_text(app.tr("prefs.sketch_3d_axis_snap_note"));
         let mut auto = app.session.auto_project;
         if ui_kit::checkbox(ui, crate::i18n::tr_label("Project face edges into new sketches"), &mut auto).changed() {
             let _ = app.run("sketch.auto_project", json!({"value": auto}));

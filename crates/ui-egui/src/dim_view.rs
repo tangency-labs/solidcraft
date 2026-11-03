@@ -488,9 +488,35 @@ pub fn text_rects() -> Vec<(String, Rect)> {
     DRAWN.with(|d| d.borrow().iter().map(|x| (x.id.clone(), x.text)).collect())
 }
 
-/// A double-click on a dimension opens its value for editing (true: it was on one).
+/// A double-click on a dimension opens its value for editing (true: it was on one): a sketch
+/// dimension, or a 3D sketch's dimension (`crate::sketch3d_view`).
 pub fn double_click(app: &mut SolveApp, pos: Pos2) -> bool {
-    open_editor(app, hit(pos))
+    open_editor(app, hit(pos)) || crate::sketch3d_view::double_click(app, pos)
+}
+
+/// Open the inline editor on the value of parameter `param`, at `at` (screen): a 3D sketch's
+/// dimension. `None`: a driven dimension, which has no value to edit.
+pub(crate) fn open_param(app: &mut SolveApp, param: Option<String>, at: Pos2) {
+    let Some(param) = param else {
+        app.set_status("A driven dimension measures the sketch; it has no value to edit", false);
+        return;
+    };
+    let expr = app.session.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
+    EDIT.with(|e| {
+        *e.borrow_mut() = Some(Edit {
+            param,
+            expr,
+            at: Some(at),
+            fresh: FRESH,
+            wait: 0,
+            draft: None,
+            live: None,
+            selection: None,
+            picked: None,
+            sketch: None,
+            driven: None,
+        })
+    });
 }
 
 /// A click of the Dimension tool on an existing dimension opens its value for editing, as a
@@ -622,7 +648,17 @@ pub fn drag_end() {
 /// The text shown for a dimension: the value (R / Ø for radius and diameter, degrees for
 /// angles), "fx: value" when an expression drives it, in parentheses when driven.
 pub fn label(k: &ConstraintKind, expr: Option<&str>, driven: bool, units: &str, decimals: u8) -> String {
-    let v = k.value().unwrap_or(0.0);
+    let prefix = match k {
+        ConstraintKind::Radius { .. } => "R",
+        ConstraintKind::Diameter { .. } | ConstraintKind::LinearDiameter { .. } => "Ø",
+        _ => "",
+    };
+    value_label(k.value().unwrap_or(0.0), k.is_angle(), prefix, expr, driven, units, decimals)
+}
+
+/// [`label`] for any dimension, the 3D sketch's too: its value `v` (radians when `angle`), after
+/// `prefix` (R, Ø, or nothing).
+pub fn value_label(v: f64, angle: bool, prefix: &str, expr: Option<&str>, driven: bool, units: &str, decimals: u8) -> String {
     // Retain deliberately authored trailing zeros in a four-place inch literal too.
     let authored_four = units == "in"
         && expr.is_some_and(|e| {
@@ -633,12 +669,8 @@ pub fn label(k: &ConstraintKind, expr: Option<&str>, driven: bool, units: &str, 
         });
     let decimals = if authored_four { decimals.max(4) } else { decimals };
     // A length says its unit, as the value inputs and the pointer's coordinates do (#1155).
-    let num = if k.is_angle() { format!("{:.1}°", v.to_degrees()) } else { format!("{} {units}", crate::prefs::length_number(v, units, decimals)) };
-    let num = match k {
-        ConstraintKind::Radius { .. } => format!("R{num}"),
-        ConstraintKind::Diameter { .. } | ConstraintKind::LinearDiameter { .. } => format!("Ø{num}"),
-        _ => num,
-    };
+    let num = if angle { format!("{:.1}°", v.to_degrees()) } else { format!("{} {units}", crate::prefs::length_number(v, units, decimals)) };
+    let num = format!("{prefix}{num}");
     let plain = expr.is_none_or(|e| {
         let e = e.trim();
         let e = ["mm", "cm", "in", "ft", "m", "deg", "rad", "°"].iter().find_map(|unit| e.strip_suffix(unit)).unwrap_or(e);

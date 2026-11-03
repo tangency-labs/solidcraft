@@ -1510,6 +1510,10 @@ preference_settings! {
     /// horizontal or vertical snap to the previous point, and the click adds the alignments
     /// (#7828). Off by default: only with the previous point, one axis at a time, as before.
     sketch_align_points: bool = false, PAGE_SKETCH;
+    /// A 3D line drawn close to the X, Y or Z axis from its last point snaps onto it and is held
+    /// along it (Along Axis, #10617). Off: the point stays on the drawing plane under the
+    /// cursor and nothing is added, as before.
+    sketch_3d_axis_snap: bool = true, PAGE_SKETCH;
     /// Open Project's options before picking; off restores its previous direct-pick workflow.
     project_options_dialog: bool = true, PAGE_SKETCH;
     /// Whether Alt/Option also frees gizmo / canvas manipulator arrows (Primary always does).
@@ -5951,6 +5955,7 @@ mod tests {
             ("sketch_tracking_guides", json!(false), PAGE_SKETCH),
             ("sketch_tracking_points", json!(false), PAGE_SKETCH),
             ("sketch_align_points", json!(true), PAGE_SKETCH),
+            ("sketch_3d_axis_snap", json!(false), PAGE_SKETCH),
             ("sketch_recent_snap", json!(true), PAGE_SKETCH),
             ("line_hover_tangent_arc", json!(true), PAGE_SKETCH),
             ("ribbon_click_ends_tool", json!(false), PAGE_SKETCH),

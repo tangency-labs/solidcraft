@@ -341,3 +341,142 @@ fn point3d_tool_places_points_and_stays() {
     assert!(wires[1].fit[0].dist(Vec3::new(20.0, 10.0, 10.0)) < 1e-6, "{:?}", wires[1].fit);
     assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.point3d"), "the tool stays for the next point");
 }
+
+/// An empty 3D sketch on XY, in the home view: a click in free space lands on the drawing plane.
+fn empty_3d_sketch() -> (crate::scenario::Harness, u64) {
+    let mut h = crate::scenario::Harness::new();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Path"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.options", json!({"sketch_3d":true})).unwrap();
+    h.app.session.visibility.origin_hidden = Some(true);
+    h.call("ui.view", json!({"view":"home"}));
+    h.frames(3);
+    (h, sketch)
+}
+
+fn shown_sketch(h: &crate::scenario::Harness, sketch: u64) -> solidcraft_engine::sketch::Sketch {
+    crate::open_meshing::session_world(&h.app.session).sketch(sketch).unwrap().sketch.clone()
+}
+
+#[test]
+fn a_3d_line_drawn_close_to_an_axis_snaps_onto_it_and_is_held_along_it() {
+    use solidcraft_engine::sketch::{Axis, WireConstraintKind};
+    // On by default; off (the preference) draws where the cursor is and adds nothing, as before.
+    for snap in [true, false] {
+        let (mut h, sketch) = empty_3d_sketch();
+        assert!(h.app.preferences.sketch_3d_axis_snap, "on by default");
+        h.app.preferences.sketch_3d_axis_snap = snap;
+        h.app.start("sketch.line3d");
+        h.frames(2);
+        h.step(&json!({"click": {"world": [10, 10, 0]}})).unwrap();
+        // Three pixels off the X axis through the first point.
+        let [x, y] = h.at(&json!({"world": [50, 10, 0]})).unwrap();
+        h.step(&json!({"move": [x, y + 3.0]})).unwrap();
+        h.step(&json!({"click": [x, y + 3.0]})).unwrap();
+        h.step(&json!({"key": "Escape"})).unwrap();
+        let sk = shown_sketch(&h, sketch);
+        assert_eq!(sk.wires.len(), 1, "snap {snap}");
+        let end = sk.wires[0].fit[1];
+        let along = sk.wire_constraints.iter().filter(|c| matches!(c.kind, WireConstraintKind::AlongAxis { axis: Axis::X, .. })).count();
+        if snap {
+            let start = sk.wires[0].fit[0];
+            assert!((end.y - start.y).abs() < 1e-9 && (end.z - start.z).abs() < 1e-9 && end.x > 30.0, "on the X axis: {start:?} {end:?}");
+            assert_eq!(along, 1, "held along X");
+        } else {
+            assert!((end.y - 10.0).abs() > 1e-3 && end.z.abs() < 1e-9, "where the cursor is: {end:?}");
+            assert_eq!(along, 0);
+        }
+    }
+}
+
+#[test]
+fn tab_switches_the_drawing_plane_while_drawing_a_3d_line() {
+    let (mut h, sketch) = empty_3d_sketch();
+    h.app.preferences.sketch_3d_axis_snap = false;
+    h.app.start("sketch.line3d");
+    h.frames(2);
+    h.step(&json!({"click": {"world": [10, 10, 0]}})).unwrap();
+    // The sketch plane, then XY, then YZ through the last point: a click lands at x = 10.
+    h.step(&json!({"key": "Tab"})).unwrap();
+    h.step(&json!({"key": "Tab"})).unwrap();
+    assert!(h.app.status.as_ref().is_some_and(|s| s.0.contains("YZ")), "{:?}", h.app.status);
+    h.step(&json!({"click": {"world": [10, 30, 25]}})).unwrap();
+    // XZ through that point: y = 30.
+    h.step(&json!({"key": "Tab"})).unwrap();
+    h.step(&json!({"click": {"world": [35, 30, 40]}})).unwrap();
+    h.step(&json!({"key": "Escape"})).unwrap();
+    let sk = shown_sketch(&h, sketch);
+    let pts: Vec<Vec3> = sk.wires.iter().flat_map(|w| w.fit.clone()).collect();
+    let want = [[10.0, 10.0, 0.0], [10.0, 30.0, 25.0], [10.0, 30.0, 25.0], [35.0, 30.0, 40.0]];
+    assert_eq!(pts.len(), want.len(), "{pts:?}");
+    for (p, w) in pts.iter().zip(want) {
+        assert!(p.dist(Vec3::new(w[0], w[1], w[2])) < 1e-3, "{pts:?}");
+    }
+    // Back round to the sketch plane.
+    h.step(&json!({"key": "Tab"})).unwrap();
+    assert!(h.app.status.as_ref().is_some_and(|s| !s.0.contains("XZ")), "{:?}", h.app.status);
+    // A new tool starts on the sketch plane too: its first Tab goes to XY.
+    h.step(&json!({"key": "Tab"})).unwrap();
+    // No chain is open, so Escape ends the tool.
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert!(h.app.tool.is_none());
+    h.app.start("sketch.line3d");
+    h.frames(2);
+    h.step(&json!({"key": "Tab"})).unwrap();
+    assert!(h.app.status.as_ref().is_some_and(|s| s.0.contains("XY")), "{:?}", h.app.status);
+}
+
+#[test]
+fn a_3d_sketchs_constraints_and_dimensions_are_drawn_and_a_double_click_edits_one() {
+    let (mut h, sketch) = empty_3d_sketch();
+    let w = h.app.run("sketch.line3d", json!({"points": [[10, 10, 0], [10, 10, 40]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    let axis = h.app.run("sketch.constraint.along_axis", json!({"line": w, "axis": "z"})).unwrap()["constraints"][0].as_str().unwrap().to_string();
+    let dim = h.app.run("sketch.dimension", json!({"entities": [w], "value": 40})).unwrap()["constraint"].as_str().unwrap().to_string();
+    h.call("ui.view", json!({"view":"fit"}));
+    h.frames(3);
+    let sel = h.call("ui.selection", json!({}))["result"].clone();
+    let find = |key: &str, id: &str| {
+        sel[key].as_array().unwrap().iter().find(|g| g["id"] == id).map(|g| [g["x"].as_f64().unwrap(), g["y"].as_f64().unwrap()])
+    };
+    let glyph = find("glyphs_3d", &axis).unwrap_or_else(|| panic!("the Along Axis glyph is drawn: {sel}"));
+    let text = find("dimensions_3d", &dim).unwrap_or_else(|| panic!("the length is drawn: {sel}"));
+    // The glyph names its constraint; a click selects it.
+    h.step(&json!({"click": glyph})).unwrap();
+    assert!(h.app.status.as_ref().is_some_and(|s| s.0.contains(&axis)), "{:?}", h.app.status);
+    // A double-click on the value edits it in place: 55, Enter, one undo step. Half a second
+    // first, so the glyph's click does not make it a triple-click.
+    h.frames(30);
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"click": text, "double": true})).unwrap();
+    assert!(crate::dim_view::editing(), "the double-click opens the value: {:?} {text:?} {:?}", h.app.status, crate::sketch3d_view::drawn());
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"55"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.settle();
+    assert!(!crate::dim_view::editing());
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    let sk = shown_sketch(&h, sketch);
+    let fit = &sk.wires[sk.wire_index(&w).unwrap()].fit;
+    assert!((fit[0].dist(fit[1]) - 55.0).abs() < 1e-6, "{fit:?}");
+    // Show Constraints and Show Dimensions off hide them, as the planar sketch's.
+    h.app.run("sketch.options", json!({"show_constraints": false, "show_dimensions": false})).unwrap();
+    h.frames(2);
+    let sel = h.call("ui.selection", json!({}))["result"].clone();
+    assert!(sel["glyphs_3d"].as_array().unwrap().is_empty() && sel["dimensions_3d"].as_array().unwrap().is_empty(), "{sel}");
+    // Delete removes a selected glyph's constraint.
+    h.app.run("sketch.options", json!({"show_constraints": true})).unwrap();
+    h.frames(2);
+    // The line is longer now, so its glyph has moved.
+    let sel = h.call("ui.selection", json!({}))["result"].clone();
+    let glyph = sel["glyphs_3d"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|g| g["id"] == axis.as_str())
+        .map(|g| [g["x"].as_f64().unwrap(), g["y"].as_f64().unwrap()])
+        .unwrap_or_else(|| panic!("{sel}"));
+    h.step(&json!({"click": glyph})).unwrap();
+    assert!(h.app.status.as_ref().is_some_and(|s| s.0.contains(&axis)), "{:?}", h.app.status);
+    h.step(&json!({"key": "Delete"})).unwrap();
+    assert!(!shown_sketch(&h, sketch).wire_constraints.iter().any(|c| c.id == axis), "deleted");
+}

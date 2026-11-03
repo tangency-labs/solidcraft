@@ -5176,7 +5176,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     paint_device_pivot(app, &painter, &proj);
     crate::dim_view::show(app, ui, &painter, &proj);
     crate::sketch_text_handles::show(app, ui, &painter, &proj, hover);
+    crate::sketch3d::keys(app, ui);
     crate::sketch3d::show(app, &painter, &proj);
+    crate::sketch3d_view::show(app, ui, &painter, &proj);
     let tracking_cursor = hover.filter(|_| inside && !navigating && !app.esc_handled && !ui.input(|i| i.key_pressed(egui::Key::Escape)));
     crate::inference::track_and_show(app, &painter, &proj, tracking_cursor);
     crate::inference::show(app, &painter, &proj);

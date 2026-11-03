@@ -993,6 +993,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 .collect::<Vec<_>>(),
             "dimension_selected": crate::dim_view::selected(app),
             "dimension_editing": crate::dim_view::editing(),
+            "dimensions_3d": crate::sketch3d_view::drawn().into_iter().map(|(id, p)| json!({"id": id, "x": p.x, "y": p.y})).collect::<Vec<_>>(),
+            "glyphs_3d": crate::sketch3d_view::glyph_positions().into_iter().map(|(id, p)| json!({"id": id, "x": p.x, "y": p.y})).collect::<Vec<_>>(),
         })),
         "ui.triad" => {
             // Screen points of the 3D move triad's handles (x, y, z arrows and the plane square).

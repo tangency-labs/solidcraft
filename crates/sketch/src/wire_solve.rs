@@ -1067,6 +1067,13 @@ impl Sketch {
         self.operands(ids, k).map(|ops| ops.iter().map(Op::at).collect())
     }
 
+    /// Where every operand of a 3D constraint is now, in the order its residuals read them
+    /// ([`WireConstraintKind::points`], then a held curve's two line or three circle points),
+    /// fixed geometry included: for drawing it. `None` when one is missing.
+    pub fn wire_constraint_points(&self, k: &WireConstraintKind) -> Option<Vec<Vec3>> {
+        self.operand_positions(&Ids::of(self), k)
+    }
+
     /// Check a 3D constraint against the sketch: its curves exist, are drawn, are lines where a
     /// line is needed, and share one coordinate space.
     pub fn validate_wire_constraint(&self, k: &WireConstraintKind) -> Result<()> {

@@ -25,7 +25,7 @@ const ON_PLANE_CONTRACT: TypedContract<OnPlaneParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.line3d", "3D Line", line3d).icon("line").enabled(in_sketch_3d).params(concat!(
-        "points: [[x,y,z]…] world points (2 or more; a coordinate may be an expression over the design's parameters, the point then held where it comes to and following them, in a sketch whose component is not moved): one 3D line per segment, joined end to end with a Coincident at each joint and to the drawn 3D ends it starts or ends on (needs 3D Sketch on); constraints lists the joints and placed points",
+        "points: [[x,y,z]…] world points (2 or more; a coordinate may be an expression over the design's parameters, the point then held where it comes to and following them, in a sketch whose component is not moved): one 3D line per segment, joined end to end with a Coincident at each joint and to the drawn 3D ends it starts or ends on (needs 3D Sketch on); along?: [x|y|z|null…], one per segment: that segment is also held along that axis (Along Axis); constraints lists the joints, placed points and axes",
         created_doc!()
     )),
     CommandSpec::new("sketch.spline3d", "3D Spline", spline3d)
@@ -171,6 +171,7 @@ fn line3d(s: &mut Session, p: &Value) -> Result<Value> {
     let target = sketch_store::target(s, p, cmd)?;
     let given = point_values(cmd, p, 2)?;
     let pts = points3(s, cmd, &given, &inverse)?;
+    let along = segment_axes(cmd, p, given.len().saturating_sub(1))?;
     let ((ids, joints), info) = edit(s, p, cmd, false, |sk, doc| {
         needs_3d(sk, cmd)?;
         let at: Vec<Vec3> = pts.iter().map(|(at, _)| *at).collect();
@@ -187,9 +188,37 @@ fn line3d(s: &mut Session, p: &Value) -> Result<Value> {
             })
             .collect();
         joints.extend(place_points(sk, cmd, &placed)?);
+        // The segments drawn along an axis (the 3D Line tool's axis snap) stay along it.
+        for (line, axis) in ids.iter().zip(&along) {
+            if let Some(axis) = axis {
+                joints.push(
+                    sk.add_wire_constraint(WireConstraintKind::AlongAxis { line: line.clone(), axis: *axis }).map_err(|e| bad(cmd, e.to_string()))?,
+                );
+            }
+        }
         Ok((ids, joints))
     })?;
     Ok(json!({"curves": ids, "constraints": joints, "sketch": info}))
+}
+
+/// `along`: an axis (or null) for each of `segments` segments; none when it is left out.
+fn segment_axes(cmd: &str, p: &Value, segments: usize) -> Result<Vec<Option<Axis>>> {
+    let Some(v) = p.get("along").filter(|v| !v.is_null()) else { return Ok(Vec::new()) };
+    let list = v
+        .as_array()
+        .filter(|l| l.len() <= segments)
+        .ok_or_else(|| bad(cmd, format!("`along` must be a list of at most {segments} of x, y, z or null, one per segment")))?;
+    list.iter()
+        .map(|a| match a {
+            Value::Null => Ok(None),
+            _ => match serde_json::from_value::<AxisName>(a.clone()) {
+                Ok(AxisName::X) => Ok(Some(Axis::X)),
+                Ok(AxisName::Y) => Ok(Some(Axis::Y)),
+                Ok(AxisName::Z) => Ok(Some(Axis::Z)),
+                Err(_) => Err(bad(cmd, "each `along` entry must be x, y, z or null")),
+            },
+        })
+        .collect()
 }
 
 fn spline3d(s: &mut Session, p: &Value) -> Result<Value> {

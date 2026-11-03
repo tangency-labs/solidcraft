@@ -3,17 +3,23 @@
 //! faces and to points already drawn in 3D; segments that stay on the plane are ordinary sketch
 //! lines and arcs. The 3D Line, Arc, Spline and Point commands have their own tools: every point
 //! they take is a world point, with no on-plane downgrade.
+//! A point in free space lies on the drawing plane: the sketch's own, or (Tab steps through
+//! them) the component's XY, YZ or XZ plane through the last point drawn. A 3D line whose next
+//! point comes close to the X, Y or Z axis through its last point snaps onto it and is held
+//! along it (Along Axis; the `sketch_3d_axis_snap` preference, and the held snap-suppress
+//! modifier, turn that off) (#10617).
 //! A drawn 3D point (or curve end) clicked without a tool gets a move triad:
 //! drag an arrow to move along X, Y or Z, or the square to move parallel to the sketch plane.
 //! Everything runs `sketch.line3d`, `sketch.arc3d`, `sketch.spline3d`, `sketch.point3d`,
 //! `sketch.move3d`, `sketch.line` and `sketch.arc.three_point`.
 
 use solidcraft_engine::geom::prelude::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use egui::{Pos2, Rect, Shape, Stroke, vec2};
 use serde_json::{Value, json};
-use solidcore_record::{Vec2, Vec3};
+use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_engine::sketch::Axis;
 
 use crate::SolveApp;
 use crate::theme::Tokens;
@@ -23,16 +29,25 @@ use crate::viewport::{Hit, Proj, pick_3d};
 thread_local! {
     /// Points of the curve being drawn in 3D (with the tool they belong to).
     static CHAIN: RefCell<(Option<&'static str>, Vec<Vec3>)> = const { RefCell::new((None, Vec::new())) };
+    /// The axis each point of the chain snapped onto from the point before it (the first: none).
+    static AXES: RefCell<Vec<Option<Axis>>> = const { RefCell::new(Vec::new()) };
+    /// The drawing plane for a tool: 0 the sketch plane, 1 XY, 2 YZ, 3 XZ.
+    static PLANE: Cell<(Option<&'static str>, usize)> = const { Cell::new((None, 0)) };
     /// The drawn point with the triad: wire id and fit index.
     static TRIAD: RefCell<Option<(String, usize)>> = const { RefCell::new(None) };
     /// A triad drag: axis (None: in the sketch plane), undo depth, grab offset.
     static DRAG: RefCell<Option<(Option<Vec3>, usize, Vec3)>> = const { RefCell::new(None) };
-    /// Where the cursor would put a point (for the rubber band), and its snap label.
-    static HOVER: RefCell<Option<(Vec3, &'static str)>> = const { RefCell::new(None) };
+    /// Where the cursor would put a point (for the rubber band), its snap label, and the axis
+    /// it snapped onto.
+    static HOVER: RefCell<Option<(Vec3, &'static str, Option<Axis>)>> = const { RefCell::new(None) };
 }
 
 /// Triad arrow length (screen px).
 const ARROW: f32 = 60.0;
+/// How close (screen px) the cursor must come to an axis through the last point to snap onto it.
+const AXIS_PX: f32 = 10.0;
+/// The drawing planes' names, after the sketch plane's.
+const PLANES: [&str; 3] = ["XY", "YZ", "XZ"];
 
 /// Is the sketch being edited a 3D sketch?
 pub fn active(app: &SolveApp) -> bool {
@@ -80,6 +95,11 @@ fn seg_ray_closest(a: Vec3, b: Vec3, o: Vec3, d: Vec3) -> Vec3 {
 /// The 3D point under the cursor and what it snapped to: a drawn 3D point, a model vertex, a
 /// point on a model edge or face, a sketch point, or the sketch plane.
 pub fn point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec3, &'static str)> {
+    point_for(app, app.tool.as_ref().map(|t| t.cmd), proj, pos)
+}
+
+/// [`point_at`] for the tool `cmd` (taken out of the app while it handles a click).
+fn point_for(app: &SolveApp, cmd: Option<&'static str>, proj: &Proj, pos: Pos2) -> Option<(Vec3, &'static str)> {
     for (_, _, p) in drawn_points(app) {
         if proj.to_screen(p).is_some_and(|s| s.distance(pos) < 8.0) {
             return Some((p, "Pt"));
@@ -110,7 +130,83 @@ pub fn point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec3, &'stati
             _ => {}
         }
     }
-    ss.plane.intersect_ray(o, d).map(|w| (w, "Plane"))
+    drawing_plane(app, cmd, &ss.plane).intersect_ray(o, d).map(|w| (w, "Plane"))
+}
+
+/// The plane a point in free space lies on: the sketch plane, or the component's XY, YZ or XZ
+/// plane chosen with Tab, through the last point drawn (or the component's origin).
+fn drawing_plane(app: &SolveApp, tool: Option<&'static str>, sketch: &Plane) -> Plane {
+    let (cmd, k) = PLANE.with(Cell::get);
+    if k == 0 || cmd != tool {
+        return *sketch;
+    }
+    let frame = app.session.active_component_frame();
+    let dir = |v: Vec3| solidcraft_engine::doc::apply_vector(&frame, v);
+    let through = chain().last().copied().unwrap_or_else(|| solidcraft_engine::doc::apply_point(&frame, Vec3::ZERO));
+    let (x, y) = match k {
+        1 => (Vec3::X, Vec3::Y),
+        2 => (Vec3::Y, Vec3::Z),
+        _ => (Vec3::X, Vec3::Z),
+    };
+    Plane::new(through, dir(x), dir(y)).unwrap_or(*sketch)
+}
+
+/// The drawing plane's name for the tool `tool` when it is not the sketch plane.
+fn drawing_plane_name(tool: Option<&'static str>) -> Option<&'static str> {
+    let (cmd, k) = PLANE.with(Cell::get);
+    if cmd != tool {
+        return None;
+    }
+    k.checked_sub(1).and_then(|i| PLANES.get(i)).copied()
+}
+
+/// Tab while drawing in 3D: the next drawing plane (sketch plane, XY, YZ, XZ).
+pub fn keys(app: &mut SolveApp, ui: &egui::Ui) {
+    if !drawing(app) || ui.ctx().text_edit_focused() || !ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)) {
+        return;
+    }
+    let cmd = app.tool.as_ref().map(|t| t.cmd);
+    PLANE.with(|p| {
+        let (was, k) = p.get();
+        p.set((cmd, if was == cmd { (k + 1) % (PLANES.len() + 1) } else { 1 }));
+    });
+    let name = drawing_plane_name(cmd).unwrap_or_else(|| crate::i18n::tr("sketch3d.sketch_plane"));
+    app.set_status(crate::i18n::format("sketch3d.drawing_plane", &[("plane", name)]), false);
+}
+
+/// The axis through `from` that the cursor is close to on screen (not at `from` itself), and
+/// the point on it under the cursor: the component's X, Y or Z.
+fn axis_snap(app: &SolveApp, proj: &Proj, pos: Pos2, from: Vec3) -> Option<(Vec3, Axis)> {
+    let frame = app.session.active_component_frame();
+    let start = proj.to_screen(from)?;
+    let (o, d) = proj.ray(pos);
+    [Axis::X, Axis::Y, Axis::Z]
+        .into_iter()
+        .filter_map(|axis| {
+            let q = line_ray_closest(from, solidcraft_engine::doc::apply_vector(&frame, axis.unit()), o, d)?;
+            let s = proj.to_screen(q)?;
+            (s.distance(pos) <= AXIS_PX && s.distance(start) > AXIS_PX).then(|| (q, axis, s.distance(pos)))
+        })
+        .min_by(|a, b| a.2.total_cmp(&b.2))
+        .map(|(q, axis, _)| (q, axis))
+}
+
+/// Where a click would put the next point: [`point_at`], or, drawing a line in free space, on
+/// the axis through its last point that the cursor is close to (with that axis).
+fn drawing_point(app: &SolveApp, cmd: Option<&'static str>, proj: &Proj, pos: Pos2) -> Option<(Vec3, &'static str, Option<Axis>)> {
+    let (p, label) = point_for(app, cmd, proj, pos)?;
+    let snaps = label == "Plane"
+        && matches!(cmd, Some("sketch.line" | "sketch.line3d"))
+        && app.preferences.sketch_3d_axis_snap
+        && !crate::drag_snap::suppressed()
+        && CHAIN.with(|c| c.borrow().0) == cmd;
+    if snaps
+        && let Some(from) = chain().last().copied()
+        && let Some((q, axis)) = axis_snap(app, proj, pos, from)
+    {
+        return Some((q, crate::sketch3d_view::axis_letter(axis), Some(axis)));
+    }
+    Some((p, label, None))
 }
 
 /// The sketch-plane coordinates of `p` when it lies on the plane.
@@ -126,12 +222,29 @@ fn chain() -> Vec<Vec3> {
 }
 
 fn set_chain(cmd: Option<&'static str>, pts: Vec<Vec3>) {
+    AXES.with(|a| a.borrow_mut().truncate(pts.len()));
     CHAIN.with(|c| *c.borrow_mut() = (cmd, pts));
+}
+
+/// Add a point to the chain, with the axis it snapped onto from the one before.
+fn push_point(cmd: &'static str, p: Vec3, axis: Option<Axis>) {
+    let mut c = chain();
+    AXES.with(|a| {
+        let mut a = a.borrow_mut();
+        a.resize(c.len(), None);
+        a.push(axis);
+    });
+    c.push(p);
+    CHAIN.with(|x| *x.borrow_mut() = (Some(cmd), c));
 }
 
 /// The pointer moved: remember where a click would put the point.
 pub fn on_hover(app: &SolveApp, proj: &Proj, pos: Pos2) {
-    let h = if app.tool.as_ref().is_some_and(|t| takes(t.cmd)) && active(app) { point_at(app, proj, pos) } else { None };
+    let h = if app.tool.as_ref().is_some_and(|t| takes(t.cmd)) && active(app) {
+        drawing_point(app, app.tool.as_ref().map(|t| t.cmd), proj, pos)
+    } else {
+        None
+    };
     HOVER.with(|x| *x.borrow_mut() = h);
 }
 
@@ -140,7 +253,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) -> 
     if !takes(tool.cmd) || !active(app) {
         return false;
     }
-    let Some((p, _)) = point_at(app, proj, pos) else { return true };
+    let Some((p, _, axis)) = drawing_point(app, Some(tool.cmd), proj, pos) else { return true };
     if CHAIN.with(|c| c.borrow().0) != Some(tool.cmd) {
         set_chain(Some(tool.cmd), Vec::new());
     }
@@ -161,13 +274,11 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) -> 
             if let Some(a) = chain().last().copied() {
                 let r = match (on_plane(app, a), on_plane(app, p)) {
                     (Some(qa), Some(qb)) => app.run("sketch.line", json!({"points": [[qa.x, qa.y], [qb.x, qb.y]], "infer": true})),
-                    _ => app.run("sketch.line3d", json!({"points": [[a.x, a.y, a.z], [p.x, p.y, p.z]]})),
+                    _ => app.run("sketch.line3d", json!({"points": [[a.x, a.y, a.z], [p.x, p.y, p.z]], "along": [axis.map(Axis::name)]})),
                 };
                 report(app, r);
             }
-            let mut c = chain();
-            c.push(p);
-            set_chain(Some(tool.cmd), c);
+            push_point(tool.cmd, p, axis);
         }
         "sketch.arc.three_point" | "sketch.arc3d" => {
             let mut c = chain();
@@ -186,11 +297,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) -> 
             }
             set_chain(Some(tool.cmd), c);
         }
-        _ => {
-            let mut c = chain();
-            c.push(p);
-            set_chain(Some(tool.cmd), c);
-        }
+        _ => push_point(tool.cmd, p, axis),
     }
     true
 }
@@ -226,7 +333,13 @@ pub fn finish(app: &mut SolveApp) -> bool {
     // The dedicated 3D tools keep every point as a world point: no on-plane downgrade.
     if matches!(cmd, "sketch.line3d" | "sketch.spline3d") && pts.len() >= 2 {
         let q: Vec<Value> = pts.iter().map(|p| json!([p.x, p.y, p.z])).collect();
-        let r = app.run(cmd, json!({ "points": q }));
+        let mut params = json!({ "points": q });
+        // Each segment that snapped onto an axis, held along it.
+        let along: Vec<Option<&str>> = AXES.with(|a| a.borrow().iter().skip(1).map(|x| x.map(Axis::name)).collect());
+        if cmd == "sketch.line3d" && along.iter().any(Option::is_some) {
+            params["along"] = json!(along);
+        }
+        let r = app.run(cmd, params);
         report(app, r);
     }
     set_chain(Some(cmd), Vec::new());
@@ -244,11 +357,21 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
     let pts = if CHAIN.with(|c| c.borrow().0) == Some(t.cmd) { chain() } else { Vec::new() };
     let hover = HOVER.with(|h| *h.borrow());
     let mut all: Vec<Pos2> = pts.iter().filter_map(|p| proj.to_screen(*p)).collect();
-    if let Some((h, label)) = hover
+    if let Some(name) = drawing_plane_name(Some(t.cmd)) {
+        drawing_plane_mark(app, t.cmd, painter, proj, name);
+    }
+    if let Some((h, label, axis)) = hover
         && let Some(s) = proj.to_screen(h)
     {
         if t.cmd != "sketch.point" && !pts.is_empty() {
             all.push(s);
+        }
+        // Snapped onto an axis: a guide along it from the last point, in its colour.
+        let ink = axis.map_or(tk.text, |a| crate::sketch3d_view::axis_colour(&tk, a));
+        if axis.is_some()
+            && let Some(from) = pts.last().and_then(|p| proj.to_screen(*p))
+        {
+            painter.add(Shape::dashed_line(&[from, s + (s - from) * 0.25], Stroke::new(1.0, ink), 5.0, 4.0));
         }
         painter.circle_stroke(s, if label == "Plane" { 3.0 } else { 6.0 }, stroke);
         if label != "Plane" {
@@ -257,7 +380,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
                 egui::Align2::LEFT_BOTTOM,
                 label,
                 egui::FontId::proportional(crate::theme::Tokens::get().font_micro),
-                tk.text,
+                ink,
             );
         }
         painter.text(
@@ -270,7 +393,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
     }
     if matches!(t.cmd, "sketch.arc.three_point" | "sketch.arc3d") && pts.len() == 2 {
         // The arc the third click would finish: from the first point to the second, through the cursor.
-        let poly = match hover.map(|(h, _)| h) {
+        let poly = match hover.map(|(h, _, _)| h) {
             Some(h) => match solidcraft_engine::sketch::arc_from_3_points(pts[0], h, pts[1]) {
                 Some(a) => solidcraft_engine::sketch::arc_polyline(&a, 0.2),
                 None => vec![pts[0], h, pts[1]],
@@ -281,7 +404,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
         painter.add(Shape::line(screen, stroke));
     } else if matches!(t.cmd, "sketch.spline.fit_point" | "sketch.spline3d") && all.len() >= 2 {
         let mut w: Vec<Vec3> = pts.clone();
-        if let Some((h, _)) = hover {
+        if let Some((h, _, _)) = hover {
             w.push(h);
         }
         let poly: Vec<Pos2> = solidcraft_engine::sketch::fit_polyline(&w).into_iter().filter_map(|p| proj.to_screen(p)).collect();
@@ -290,6 +413,24 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
         painter.add(Shape::line(all, stroke));
     }
     true
+}
+
+/// The drawing plane chosen with Tab, as a dashed square about where it passes through, named.
+fn drawing_plane_mark(app: &SolveApp, cmd: &'static str, painter: &egui::Painter, proj: &Proj, name: &str) {
+    let st = crate::open_meshing::session_world(&app.session);
+    let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
+    let plane = drawing_plane(app, Some(cmd), &ss.plane);
+    let Some(mm) = crate::sketch3d_view::mm_per_px(proj, plane.origin) else { return };
+    let (x, y) = (plane.x * (40.0 * mm), plane.y * (40.0 * mm));
+    let corners: Option<Vec<Pos2>> = [x + y, x - y, -x - y, -x + y, x + y].iter().map(|c| proj.to_screen(plane.origin + *c)).collect();
+    let Some(corners) = corners else { return };
+    let tk = Tokens::view();
+    for w in corners.windows(2) {
+        painter.add(Shape::dashed_line(&[w[0], w[1]], Stroke::new(1.0, tk.text_dim), 5.0, 4.0));
+    }
+    if let Some(c) = corners.first() {
+        painter.text(*c + vec2(4.0, -4.0), egui::Align2::LEFT_BOTTOM, name, egui::FontId::proportional(Tokens::get().font_micro), tk.text_dim);
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -326,6 +467,11 @@ pub fn click(app: &mut SolveApp, proj: &Proj, pos: Pos2) -> bool {
         TRIAD.with(|t| *t.borrow_mut() = None);
         return false;
     }
+    // A constraint glyph: selected, for Delete.
+    if crate::sketch3d_view::click(app, pos) {
+        TRIAD.with(|t| *t.borrow_mut() = None);
+        return true;
+    }
     let hit = drawn_points(app).into_iter().find(|(_, _, p)| proj.to_screen(*p).is_some_and(|s| s.distance(pos) < 8.0));
     let on_handle = handles(app, proj).iter().any(|(_, tip, _)| tip.distance(pos) < 9.0);
     if on_handle {
@@ -347,8 +493,11 @@ pub fn click(app: &mut SolveApp, proj: &Proj, pos: Pos2) -> bool {
     false
 }
 
-/// The drawn curve or point with the triad, for Delete.
+/// The selected constraint glyph, or the drawn curve or point with the triad, for Delete.
 pub fn delete_selected(app: &mut SolveApp) -> bool {
+    if crate::sketch3d_view::delete_picked(app) {
+        return true;
+    }
     let Some((w, _)) = TRIAD.with(|t| t.borrow_mut().take()) else { return false };
     let r = app.run("sketch.delete", json!({ "entities": [w] }));
     report(app, r);
@@ -369,15 +518,7 @@ pub fn drag_start(app: &SolveApp, proj: &Proj, press: Pos2) -> bool {
 fn target(app: &SolveApp, proj: &Proj, pos: Pos2, axis: Option<Vec3>, p: Vec3) -> Option<Vec3> {
     let (o, d) = proj.ray(pos);
     match axis {
-        Some(u) => {
-            let w0 = p - o;
-            let (a, b, c) = (u.dot(u), u.dot(d), d.dot(d));
-            let den = a * c - b * b;
-            if den.abs() < 1e-12 {
-                return None;
-            }
-            Some(p + u * ((b * d.dot(w0) - c * u.dot(w0)) / den))
-        }
+        Some(u) => line_ray_closest(p, u, o, d),
         None => {
             let st = crate::open_meshing::session_world(&app.session);
             let n = app.session.active_sketch.and_then(|s| st.sketch(s))?.plane.normal();
@@ -385,6 +526,18 @@ fn target(app: &SolveApp, proj: &Proj, pos: Pos2, axis: Option<Vec3>, p: Vec3) -
             (den.abs() > 1e-12).then(|| o + d * ((p - o).dot(n) / den))
         }
     }
+}
+
+/// The point of the line through `p` along `u` closest to the ray (o, d); none when they are
+/// parallel.
+fn line_ray_closest(p: Vec3, u: Vec3, o: Vec3, d: Vec3) -> Option<Vec3> {
+    let w0 = p - o;
+    let (a, b, c) = (u.dot(u), u.dot(d), d.dot(d));
+    let den = a * c - b * b;
+    if den.abs() < 1e-12 {
+        return None;
+    }
+    Some(p + u * ((b * d.dot(w0) - c * u.dot(w0)) / den))
 }
 
 pub fn dragging() -> bool {
@@ -406,6 +559,11 @@ pub fn drag_end() {
 
 /// Draw the drawn 3D points and the triad.
 pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    if !drawing(app) {
+        // Ending the tool or leaving the 3D sketch puts the drawing plane back on the sketch
+        // plane: the next tool starts there.
+        PLANE.with(|p| p.set((None, 0)));
+    }
     if app.session.active_sketch.is_none() {
         return;
     }

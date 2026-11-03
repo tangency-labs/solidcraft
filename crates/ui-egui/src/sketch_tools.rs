@@ -1631,7 +1631,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
 /// Constraint glyphs of the active sketch: a small badge per constraint at its anchor
 /// (failing ones in `sketch_conflict`).
 /// Glyph size and spacing (screen pixels).
-const GLYPH: f32 = 15.0;
+pub(crate) const GLYPH: f32 = 15.0;
 
 /// Screen pixels per millimetre of the sketch plane below which constraint glyphs hide when the
 /// `hide_constraint_glyphs_zoomed_out` preference is on (#8980). About two pixels per millimetre:
@@ -1772,14 +1772,6 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
         if sp.distance(*base) > GLYPH * 1.6 {
             painter.line_segment([*base, *sp], Stroke::new(0.8, tk.text_dim.gamma_multiply(0.6)));
         }
-        let r = egui::Rect::from_center_size(*sp, egui::vec2(GLYPH, GLYPH));
-        painter.rect_filled(r, tk.radius_sm.saturating_sub(1), if lit { tk.accent_soft } else { tk.glyph_bg });
-        painter.rect_stroke(
-            r,
-            tk.radius_sm.saturating_sub(1),
-            Stroke::new(1.0, if failing || lit { col } else { tk.glyph_edge }),
-            egui::StrokeKind::Inside,
-        );
         let pattern_icon = ss.sketch.patterns.iter().find(|p| p.instances.first().and_then(|i| i.constraints.first()) == Some(id)).map(|p| {
             if matches!(p.kind, solidcraft_engine::sketch::SketchPatternKind::Circular { .. }) {
                 "sketch_circ_pattern"
@@ -1787,18 +1779,7 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
                 "sketch_rect_pattern"
             }
         });
-        match pattern_icon.or_else(|| glyph_icon(c.kind.name())) {
-            Some(icon) => crate::icons::paint_icon(painter, r.shrink(2.0), icon, f32::from(col.a()) / 255.0),
-            None => {
-                painter.text(
-                    *sp,
-                    egui::Align2::CENTER_CENTER,
-                    glyph_letter(c.kind.name()),
-                    egui::FontId::proportional(crate::theme::Tokens::get().font_panel),
-                    col,
-                );
-            }
-        }
+        paint_glyph(painter, *sp, pattern_icon.or_else(|| glyph_icon(c.kind.name())), glyph_letter(c.kind.name()), col, lit, failing);
         drawn.push((id.clone(), *sp));
     }
     if let (Some(id), Some(h)) = (hovered, hover)
@@ -1816,6 +1797,27 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
         painter.galley(at, g, tk.text);
     }
     GLYPHS.with(|g| *g.borrow_mut() = drawn);
+}
+
+/// One constraint glyph centred at `sp`: its icon, or `letter` when it has none, in `col`, on a
+/// lit (hovered or selected) or plain box, edged in `col` when lit or failing. The 3D sketch's
+/// glyphs (`crate::sketch3d_view`) look the same.
+pub(crate) fn paint_glyph(painter: &egui::Painter, sp: Pos2, icon: Option<&str>, letter: &str, col: egui::Color32, lit: bool, failing: bool) {
+    let tk = crate::theme::Tokens::get();
+    let r = egui::Rect::from_center_size(sp, egui::vec2(GLYPH, GLYPH));
+    painter.rect_filled(r, tk.radius_sm.saturating_sub(1), if lit { tk.accent_soft } else { tk.glyph_bg });
+    painter.rect_stroke(
+        r,
+        tk.radius_sm.saturating_sub(1),
+        Stroke::new(1.0, if failing || lit { col } else { tk.glyph_edge }),
+        egui::StrokeKind::Inside,
+    );
+    match icon {
+        Some(icon) => crate::icons::paint_icon(painter, r.shrink(2.0), icon, f32::from(col.a()) / 255.0),
+        None => {
+            painter.text(sp, egui::Align2::CENTER_CENTER, letter, egui::FontId::proportional(tk.font_panel), col);
+        }
+    }
 }
 
 /// The curves and points a constraint ties together.

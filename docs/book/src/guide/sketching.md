@@ -313,6 +313,20 @@ along world X, Y and Z. Scripts also supply world coordinates to `sketch.line3d`
 `sketch.spline3d`, `sketch.point3d` and `sketch.move3d`. Activate the desired occurrence before
 editing an explicit sketch belonging to a component with multiple placements.
 
+A click in empty space puts the point on the drawing plane. That is the sketch plane at first;
+press **Tab** while drawing to switch to the component's XY, YZ or XZ plane through the last
+point, and Tab again to go on round. A dashed square marks the chosen plane. While drawing a 3D
+line, a point close to the X, Y or Z axis through the last point snaps onto it: a dashed guide
+and the axis letter show it, and the line is held along that axis (Along Axis). Hold the
+snap-suppress modifier to place the point freely, or turn the snap off with **Snap 3D lines to
+the X, Y and Z axes** in Preferences > Sketch.
+
+The 3D constraints show as glyphs beside what they hold, Along Axis as its axis letter in the
+axis colour. Hover a glyph to name it; click it and press Delete to remove it. 3D dimensions
+are drawn with extension lines and their value; a distance from a plane or face is a dashed
+leader to the plane. Double-click a value to edit it in place. **Show Constraints** and **Show
+Dimensions** hide them, as they do in a planar sketch.
+
 Older drawn or detached 3D wires keep their saved world positions. Included and surface-linked
 wires with an explicit component marker keep that meaning after the link is broken. Old files
 whose links became lost after an incorrectly scoped cross-component refresh may require a

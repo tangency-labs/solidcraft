@@ -1273,3 +1273,51 @@ fn the_beam_runner_rides_the_tube_top_and_follows_len_and_shs() {
     let (a, b) = ends(&s);
     assert!((a.x - 1750.0).abs() < 1e-6 && (b.x - 3130.0).abs() < 1e-6 && (a.z - 120.0).abs() < 1e-6 && (b.z - 120.0).abs() < 1e-6, "{a:?} {b:?}");
 }
+
+#[test]
+fn a_3d_line_drawn_along_an_axis_is_held_along_it_in_the_same_step() {
+    // The 3D Line tool's axis snap: `along` names each segment's axis, in the sketch's own axes.
+    let mut s = Session::default();
+    let sketch = sketch_3d_on_xy(&mut s);
+    let undo = s.undo.len();
+    let r = run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [40, 0, 0], [40, 7, 9]], "along": ["x", null]}));
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    let a = r["curves"][0].as_str().unwrap();
+    let sk = s.doc.sketch(sketch).unwrap();
+    let along: Vec<_> = sk
+        .wire_constraints
+        .iter()
+        .filter_map(|c| match &c.kind {
+            solidcraft_sketch::WireConstraintKind::AlongAxis { line, axis } => Some((line.as_str(), *axis)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(along, vec![(a, solidcraft_sketch::Axis::X)], "only the first segment: {along:?}");
+    let listed = |id: &str| r["constraints"].as_array().unwrap().iter().any(|c| c == id);
+    assert!(sk.wire_constraints.iter().filter(|c| matches!(c.kind, solidcraft_sketch::WireConstraintKind::AlongAxis { .. })).all(|c| listed(&c.id)));
+    // Held: its end dragged off the axis takes its start along, so it still runs along X.
+    run(&mut s, "sketch.move3d", json!({"wire": a, "index": 1, "to": [40, 5, 3]}));
+    let (start, end) = (fit(&s, a, 0), fit(&s, a, 1));
+    near(end, Vec3::new(40.0, 5.0, 3.0));
+    assert!((start.y - 5.0).abs() < 1e-7 && (start.z - 3.0).abs() < 1e-7, "{start:?}");
+    // Hostile lists are refused and draw nothing.
+    let wires = s.doc.sketch(sketch).unwrap().wires.len();
+    for along in [json!(["w"]), json!(["x", "y"]), json!("x"), json!([1])] {
+        let e = s.execute("sketch.line3d", &json!({"points": [[0, 0, 5], [10, 0, 5]], "along": along})).unwrap_err().to_string();
+        assert!(e.contains("along"), "{along}: {e}");
+    }
+    assert_eq!(s.doc.sketch(sketch).unwrap().wires.len(), wires);
+}
+
+#[test]
+fn a_3d_line_drawn_along_an_axis_in_a_turned_occurrence_follows_its_component_axes() {
+    // Turned 90° about Z: the component's X runs along the world's Y (see `second_frame`).
+    let (mut s, component, _, _) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    let r = run(&mut s, "sketch.line3d", json!({"points": [[20, 30, 40], [20, 70, 40]], "along": ["x"]}));
+    let a = r["curves"][0].as_str().unwrap();
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(sk.wire_constraints_hold(), "a world Y run is along the component's X");
+    let w = &sk.wires[sk.wire_index(a).unwrap()];
+    assert!(w.fit[0].dist(Vec3::ZERO) < 1e-9 && w.fit[1].dist(Vec3::new(40.0, 0.0, 0.0)) < 1e-9, "{:?} in {component}", w.fit);
+}
