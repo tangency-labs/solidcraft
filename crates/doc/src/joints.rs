@@ -1023,7 +1023,7 @@ pub fn joint_values(asm: &Assembly) -> BTreeMap<u64, Vec<f64>> {
 
 /// The turn and offset from A's joint frame to B's: mated (B's z against A's, as faces meet)
 /// unless flipped.
-fn flip_of(j: &Joint) -> Mat {
+pub fn flip_of(j: &Joint) -> Mat {
     // An angle relation's `angle` is its tilt (`tail`); a perpendicular one has none.
     let turn = if matches!(j.kind, JointKind::Angle | JointKind::Perpendicular) { 0.0 } else { j.angle };
     let mut m = rot_z(turn);

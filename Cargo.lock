@@ -4173,6 +4173,7 @@ dependencies = [
  "serde_path_to_error",
  "solidcore-record",
  "solidcraft-doc",
+ "solidcraft-dynamics",
  "solidcraft-geom",
  "solidcraft-io",
  "solidcraft-kernel",
