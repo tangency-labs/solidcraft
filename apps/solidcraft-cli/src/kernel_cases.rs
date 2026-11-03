@@ -745,6 +745,10 @@ fn check_case_in(
     // The trace ends with the commands: grading reads the bodies through the kernel too.
     if let Some(c) = capture.as_deref_mut() {
         c.events = solidcraft_engine::kernel::smlib_trace::finish();
+        c.ran = Some(match &ran {
+            Ok(_) => s.world_state().map(|w| w.bodies.iter().map(|b| (b.name.clone(), b.body.record().clone())).collect()).map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        });
     }
     // The commands' own time, without process start or grading: the ladder's timing golden.
     out["seconds"] = json!(clock.elapsed().as_secs_f64());
@@ -796,9 +800,6 @@ fn check_case_in(
             return out;
         }
     };
-    if let Some(c) = capture.as_deref_mut() {
-        c.world = world.bodies.iter().map(|b| (b.name.clone(), b.body.record().clone())).collect();
-    }
     let mut bodies = Vec::new();
     let mut c = Checks { list: Vec::new(), pass: true };
     let want_valid = want["valid"].as_bool().unwrap_or(true);

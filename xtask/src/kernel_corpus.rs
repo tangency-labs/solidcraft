@@ -80,6 +80,8 @@ pub(crate) fn manifest(dir: &Path, results: &[Value], golden: Option<&Value>) ->
             entry = json!({
                 "case": id, "area": area, "sources": want["sources"], "what": want["what"],
                 "expressible": false,
+                "operation_expressible": false,
+                "ungraded": [],
                 "why_not": [format!("the rig's run {}: {}", r["status"].as_str().unwrap_or("?"), r["error"].as_str().unwrap_or(""))],
                 "expected": want,
                 "rig": {"status": r["status"], "error": r["error"]},
@@ -115,20 +117,30 @@ pub(crate) fn manifest(dir: &Path, results: &[Value], golden: Option<&Value>) ->
     for f in files {
         let e = read(&f);
         let area = e["area"].as_str().unwrap_or("?").to_string();
-        let a = areas.entry(area.clone()).or_insert_with(|| json!({"cases": 0, "expressible": 0, "not_expressible": 0, "chain": {}, "reasons": {}}));
-        a["cases"] = json!(a["cases"].as_u64().unwrap_or(0) + 1);
+        let a = areas.entry(area.clone()).or_insert_with(|| {
+            json!({"cases": 0, "expressible": 0, "operation_expressible": 0, "not_expressible": 0, "chain": {}, "reasons": {}, "ungraded": {}})
+        });
+        let bump = |a: &mut Value, k: &str| a[k] = json!(a[k].as_u64().unwrap_or(0) + 1);
+        bump(a, "cases");
         if e["expressible"].as_bool() == Some(true) {
-            a["expressible"] = json!(a["expressible"].as_u64().unwrap_or(0) + 1);
+            bump(a, "expressible");
+        }
+        for u in e["ungraded"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+            let k = u.split(':').next().unwrap_or(u);
+            bump(&mut a["ungraded"], k);
+        }
+        if e["operation_expressible"].as_bool() == Some(true) {
+            bump(a, "operation_expressible");
             let n = e["calls"].as_array().map_or(0, Vec::len).to_string();
-            a["chain"][&n] = json!(a["chain"][&n].as_u64().unwrap_or(0) + 1);
+            bump(&mut a["chain"], &n);
         } else {
-            a["not_expressible"] = json!(a["not_expressible"].as_u64().unwrap_or(0) + 1);
+            bump(a, "not_expressible");
             let why: Vec<&str> = e["why_not"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
             let mut kinds: Vec<&str> = why.iter().map(|w| reason_kind(w)).collect();
             kinds.sort();
             kinds.dedup();
             for k in kinds {
-                a["reasons"][k] = json!(a["reasons"][k].as_u64().unwrap_or(0) + 1);
+                bump(&mut a["reasons"], k);
             }
             not.push(json!({"case": format!("{area}/{}", e["case"].as_str().unwrap_or("?")), "why": why}));
         }
@@ -141,14 +153,10 @@ pub(crate) fn manifest(dir: &Path, results: &[Value], golden: Option<&Value>) ->
         "not_expressible": not,
     });
     write_json(&dir.join("manifest.json"), &m, true)?;
-    let mut text = String::from("area                 cases  expressible  not\n");
+    let mut text = String::from("area                        cases  operation  wholly  not\n");
     for (area, a) in &areas {
-        text += &format!(
-            "{area:<20} {:>5}  {:>11}  {:>3}\n",
-            a["cases"].as_u64().unwrap_or(0),
-            a["expressible"].as_u64().unwrap_or(0),
-            a["not_expressible"].as_u64().unwrap_or(0)
-        );
+        let n = |k: &str| a[k].as_u64().unwrap_or(0);
+        text += &format!("{area:<27} {:>5}  {:>9}  {:>6}  {:>3}\n", n("cases"), n("operation_expressible"), n("expressible"), n("not_expressible"));
     }
     Ok(text)
 }

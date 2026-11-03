@@ -3,18 +3,17 @@
 //! (`smlib_trace`); the entry holds the operation (or the chain of operations) that made the
 //! bodies the case ends with, each operand that came in as a record given as that record (the
 //! B-rep record, solidcore-record's JSON), the fix set, the case's expected values and the rig's
-//! own result. A case whose result no kernel operation alone accounts for is written too, marked
-//! not expressible with the reasons, so nothing is dropped silently.
+//! own result. A case whose result no kernel operation alone accounts for is written too, with
+//! the reasons, so nothing is dropped silently.
 //!
-//! An entry is expressible when:
-//! - the run failed in a kernel operation (the engine's error carries the operation's), or every
-//!   body the case ends with is the record a traced operation's output was written as, or an
-//!   operand some traced operation took, as its record;
-//! - its expected values are all the kernel's measures: none of `continuity`, `watertight`,
-//!   `files`, `results`, `construction` or `flat_pattern`, which SolidCraft computes;
-//! - the counts it grades (faces, edges, vertices) are the records' own: the rig counts faces and
-//!   edges merged across one analytic surface or curve (`merged_topology`, from a mesh), so an
-//!   entry where those differ is not expressible.
+//! An entry's operation is expressible (`operation_expressible`) when the run failed in a kernel
+//! operation (the last one traced failed), or when every body the case ends with is the record a
+//! traced operation's output was written as, or an operand some traced operation took, as its
+//! record. The entry is wholly expressible (`expressible`) when, besides, every value it grades is
+//! the kernel's: none of `continuity`, `watertight`, `files`, `results`, `construction` or
+//! `flat_pattern` (SolidCraft computes them), no face, edge or vertex count that the rig's merging
+//! across analytic surfaces (`merged_topology`) changes, and no refusal graded on SolidCraft's
+//! wording of the kernel's error. Those are listed in `ungraded`.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -25,11 +24,12 @@ use solidcraft_engine::kernel::smlib_trace::{self, Event};
 
 use crate::read_json;
 
-/// What a traced case leaves for its entry: the trace of its commands and the bodies it ends with.
+/// What a traced case leaves for its entry: the trace of its commands, and the bodies it ends
+/// with by name or the engine's error.
 #[derive(Default)]
 pub struct Capture {
     pub events: Vec<Event>,
-    pub world: Vec<(String, Brep)>,
+    pub ran: Option<Result<Vec<(String, Brep)>, String>>,
 }
 
 /// The expected values SolidCraft computes, never the kernel.
@@ -130,132 +130,144 @@ pub fn write(root: &Path, dir: &str, out: &Value, capture: Capture) -> Result<()
     let (area, id) = area_and_id(dir)?;
     let want = read_json(&format!("{dir}/expected.json"))?;
     let t = Trace::of(&capture.events);
+    // Why the operation is not the kernel's alone, and what the entry cannot grade without
+    // SolidCraft.
     let mut why_not: Vec<String> = Vec::new();
-    let status = out["status"].as_str().unwrap_or("");
+    let mut ungraded: Vec<String> = Vec::new();
+    let has = |k: &str| want.get(k).is_some_and(|v| !v.is_null());
 
     if let Some(missing) = want["missing"].as_str() {
         why_not.push(format!("SolidCraft has no command for it yet: {missing}"));
     }
-    let grader: Vec<&str> = GRADER_ONLY.iter().copied().filter(|k| want.get(*k).is_some_and(|v| !v.is_null())).collect();
-    if !grader.is_empty() {
-        why_not.push(format!("graded on what SolidCraft computes: {}", grader.join(", ")));
+    for k in GRADER_ONLY.iter().filter(|k| has(k)) {
+        ungraded.push(format!("{k}: SolidCraft computes it"));
     }
 
-    // The bodies the entry ends with: what each is, by name.
     let mut result: Vec<Value> = Vec::new();
     let mut ends: Vec<u64> = Vec::new();
     let mut failed_call: Option<usize> = None;
-    let error = out["refused_with"].as_str().or_else(|| out["error"].as_str()).filter(|_| out.get("checks").is_none());
-    if let Some(e) = error.filter(|_| want.get("missing").is_none()) {
-        // The run stopped: the kernel operation that failed with the message the engine gave.
-        failed_call = t.calls.iter().rposition(|c| matches!(c.3, Err(m) if !m.is_empty() && e.contains(m.as_str())));
-        match failed_call {
-            Some(i) => ends.extend(t.calls.get(i).map(|c| c.1.to_vec()).unwrap_or_default()),
-            None if t.calls.is_empty() => why_not.push(format!("no kernel operation ran before the failure: {e}")),
-            None => why_not.push(format!("the failure is SolidCraft's, not a kernel operation's: {e}")),
-        }
-    } else if want.get("missing").is_none() {
-        let operands = t.operands();
-        let mut made = 0;
-        for (name, record) in &capture.world {
-            let from_op = t.exports.iter().rev().find(|(_, r)| *r == record).map(|(id, _)| *id).filter(|id| t.producer.contains_key(id));
-            let operand = t.imports.iter().find(|(i, (r, _, _))| *r == record && operands.contains(i)).map(|(i, _)| *i);
-            match (from_op, operand) {
-                (Some(id), _) => {
-                    made += 1;
-                    ends.push(id);
-                    result.push(json!({"body": name, "made": format!("b{id}")}));
+    let mut outcome = json!({"ran": true});
+    match (&capture.ran, has("missing")) {
+        (_, true) => {}
+        (None, false) => why_not.push("the case did not run".into()),
+        (Some(Err(e)), false) => {
+            // The run stopped. It stopped in the kernel when the last operation traced failed: the
+            // engine reports that failure in its own words.
+            outcome = json!({"ran": false, "engine_error": e});
+            match t.calls.len().checked_sub(1).and_then(|i| t.calls.get(i).map(|c| (i, c))) {
+                Some((i, c)) if c.3.is_err() => {
+                    failed_call = Some(i);
+                    ends.extend(c.1.iter().copied());
+                    if let Err(k) = c.3 {
+                        outcome["kernel_error"] = json!(k);
+                        if let Some(why) = want["refusal"].as_str().filter(|w| !k.contains(*w)) {
+                            ungraded.push(format!("refusal {why:?}: SolidCraft's wording of the kernel's error"));
+                        }
+                    }
                 }
-                (None, Some(id)) => {
-                    ends.push(id);
-                    result.push(json!({"body": name, "operand": format!("b{id}")}));
-                }
-                (None, None) => why_not.push(format!(
-                    "body {name:?} is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
-                )),
+                Some(_) => why_not.push(format!("the failure is SolidCraft's, not a kernel operation's: {e}")),
+                None => why_not.push(format!("no kernel operation ran before the failure: {e}")),
             }
         }
-        if capture.world.is_empty() {
-            why_not.push("the case ends with no body".into());
-        } else if made == 0 && why_not.is_empty() {
-            why_not.push("no kernel operation made a body the case ends with".into());
-        }
-        // Counts graded as SolidCraft merges them, where that differs from the records'.
-        let raw = |k: &str| -> u64 {
-            capture
-                .world
-                .iter()
-                .map(|(_, r)| match k {
-                    "faces" => r.faces.len(),
-                    "edges" => r.edges.len(),
-                    _ => r.vertices.len(),
-                } as u64)
-                .sum()
-        };
-        for k in ["faces", "edges", "vertices"] {
-            let graded = want.get(k).is_some_and(|v| !v.is_null());
-            let merged = out["measured"][k].as_u64();
-            if graded && merged.is_some_and(|m| m != raw(k)) {
-                why_not.push(format!("{k} graded merged across analytic surfaces ({}), the records have {}", merged.unwrap_or(0), raw(k)));
+        (Some(Ok(world)), false) => {
+            let operands = t.operands();
+            let mut made = 0;
+            for (name, record) in world {
+                let from_op = t.exports.iter().rev().find(|(_, r)| *r == record).map(|(id, _)| *id).filter(|id| t.producer.contains_key(id));
+                let operand = t.imports.iter().filter(|(i, (r, _, _))| *r == record && operands.contains(i)).map(|(i, _)| *i).min();
+                match (from_op, operand) {
+                    (Some(id), _) => {
+                        made += 1;
+                        ends.push(id);
+                        result.push(json!({"body": name, "made": format!("b{id}")}));
+                    }
+                    (None, Some(id)) => {
+                        ends.push(id);
+                        result.push(json!({"body": name, "operand": format!("b{id}")}));
+                    }
+                    (None, None) => why_not.push(format!(
+                        "body {name:?} is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+                    )),
+                }
             }
+            if world.is_empty() {
+                why_not.push("the case ends with no body".into());
+            } else if made == 0 && why_not.is_empty() {
+                why_not.push("no kernel operation made a body the case ends with".into());
+            }
+            // Counts graded as SolidCraft merges them, where that differs from the records'.
+            let raw = |k: &str| -> u64 {
+                world
+                    .iter()
+                    .map(|(_, r)| match k {
+                        "faces" => r.faces.len(),
+                        "edges" => r.edges.len(),
+                        _ => r.vertices.len(),
+                    } as u64)
+                    .sum()
+            };
+            for k in ["faces", "edges", "vertices"] {
+                if let Some(merged) = out["measured"][k].as_u64().filter(|&m| has(k) && m != raw(k)) {
+                    ungraded.push(format!("{k}: graded merged across analytic surfaces ({merged}), the records have {}", raw(k)));
+                }
+            }
+            outcome["raw_counts"] = json!({"faces": raw("faces"), "edges": raw("edges"), "vertices": raw("vertices")});
         }
     }
 
     let mut unknown = BTreeSet::new();
-    let order = chain(&t, &ends, &mut unknown);
+    let mut order = chain(&t, &ends, &mut unknown);
     if !unknown.is_empty() {
         why_not.push(format!("operands made by nothing traced: {unknown:?}"));
     }
-    let order: Vec<usize> = match failed_call {
-        Some(i) if !order.contains(&i) => order.into_iter().chain([i]).collect(),
-        _ => order,
-    };
-    // Operand records: every body the chain takes that came in as a record.
+    if let Some(i) = failed_call.filter(|i| !order.contains(i)) {
+        order.push(i);
+    }
+    // Operand records: every body the chain takes, or the case ends with, that came in as a record.
     let mut bodies = BTreeMap::new();
-    let calls: Vec<Value> = order
-        .iter()
-        .filter_map(|&i| t.calls.get(i))
-        .map(|(op, inputs, params, outputs)| {
-            for id in inputs.iter() {
-                if let Some((record, trusted, splines)) = t.imports.get(id) {
-                    bodies.insert(format!("b{id}"), json!({"trusted": trusted, "keeping_splines": splines, "record": record}));
-                }
-            }
-            let mut c = json!({"op": op, "inputs": inputs.iter().map(|i| format!("b{i}")).collect::<Vec<_>>(), "params": params});
-            match outputs {
-                Ok(made) => c["outputs"] = json!(made.iter().map(|i| format!("b{i}")).collect::<Vec<_>>()),
-                Err(e) => c["error"] = json!(e),
-            }
-            c
-        })
-        .collect();
-    for (_, record) in &capture.world {
-        // An operand the case ends with, never operated on in the chain, still comes as its record.
-        if let Some(id) = t.imports.iter().find(|(_, (r, _, _))| *r == record).map(|(i, _)| *i)
-            && result.iter().any(|r| r["operand"] == json!(format!("b{id}")))
-            && let Some((record, trusted, splines)) = t.imports.get(&id)
-        {
+    let given = |id: u64, bodies: &mut BTreeMap<String, Value>| {
+        if let Some((record, trusted, splines)) = t.imports.get(&id) {
             bodies.insert(format!("b{id}"), json!({"trusted": trusted, "keeping_splines": splines, "record": record}));
+        }
+    };
+    let mut calls: Vec<Value> = Vec::new();
+    for (op, inputs, params, outputs) in order.iter().filter_map(|&i| t.calls.get(i)) {
+        for &id in inputs.iter() {
+            given(id, &mut bodies);
+        }
+        let mut c = json!({"op": op, "inputs": inputs.iter().map(|i| format!("b{i}")).collect::<Vec<_>>(), "params": params});
+        match outputs {
+            Ok(made) => c["outputs"] = json!(made.iter().map(|i| format!("b{i}")).collect::<Vec<_>>()),
+            Err(e) => c["error"] = json!(e),
+        }
+        calls.push(c);
+    }
+    for r in &result {
+        if let Some(id) = r["operand"].as_str().and_then(|b| b.strip_prefix('b')).and_then(|n| n.parse().ok()) {
+            given(id, &mut bodies);
         }
     }
     let rig = json!({
         "status": out["status"], "error": out["error"], "refused_with": out["refused_with"], "measured": out["measured"],
         "known_failing": known_failing(dir, &id),
     });
+    let operation_expressible = why_not.is_empty();
     let entry = json!({
         "case": id,
         "area": area,
         "sources": want["sources"],
         "what": want["what"],
-        "expressible": why_not.is_empty(),
+        "expressible": operation_expressible && ungraded.is_empty(),
+        "operation_expressible": operation_expressible,
         "why_not": why_not,
+        "ungraded": ungraded,
         "expected": want,
         "rig": rig,
+        "outcome": outcome,
         "calls": calls,
         "bodies": bodies,
         "result": result,
         "traced_ops": t.calls.iter().map(|c| c.0).collect::<Vec<_>>(),
-        "status": status,
     });
     let folder: PathBuf = root.join(&area);
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
