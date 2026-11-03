@@ -617,3 +617,41 @@ fn bare_uses_come_back_with_the_kernels_trims() {
         Err(Unsupported::Invalid(_))
     ));
 }
+
+/// Every face the conversion builds owns its surface (`SmFace::SetSurface`: its `GetFace()` is
+/// the face, under the body's owner identity), the surface reads the face's tolerance through
+/// it, and every use on a face whose record pcurves are its parameters keeps its record trim
+/// (solidcore#2550: an unowned surface fails any blend whose rail merges onto it with 1006,
+/// and dropped trims are re-dropped outside the blend's net scope).
+#[test]
+fn every_face_owns_its_surface_and_keeps_its_trims() {
+    use solidcore::topology::edgeuse::p1::{faceuse, mate, uv_trim_curve_pointer};
+    let mut k = kernel();
+    let mut made = primitives::create_cylinder(&mut k, Vec3::new(1.0, 2.0, 3.0), 4.0, 5.0).unwrap();
+    let (r, _) = to_record(&mut k, &mut made).unwrap();
+    let (b, _) = to_kernel(&mut k, &r, true).unwrap();
+    for &f in b.face_list() {
+        let face = b.face(f).unwrap();
+        let s = face.surface.as_ref().unwrap();
+        assert_eq!(
+            s.owner(),
+            Some(b.owner_identity(solidcore::EntityRef::Face(f))),
+            "face {f:?} owns its surface"
+        );
+        assert_eq!(
+            s.owner_zone_tol_3d(),
+            Some(face.tolerance),
+            "face {f:?}'s tolerance"
+        );
+    }
+    // the kernel keeps a mated pair's trim on one of the two
+    for eu in solidcore::topology::brep::p2::edgeuses(&b, None).unwrap() {
+        if faceuse(&b, eu).unwrap().is_some() {
+            let held = |u| uv_trim_curve_pointer(&b, u).unwrap().is_some();
+            assert!(
+                held(eu) || mate(&b, eu).unwrap().is_some_and(held),
+                "a use without its record trim"
+            );
+        }
+    }
+}
