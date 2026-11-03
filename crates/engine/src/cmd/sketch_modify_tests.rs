@@ -189,6 +189,7 @@ fn an_ellipse_moved_turned_or_scaled_alone_takes_its_axes_along() {
     let (major, _) = sk.ellipse_axis_lines(sk.curve_index(&e).unwrap()).and_then(|(major, _)| major).expect("its major axis");
     let CurveKind::Line { a, b } = sk.curves[major].kind else { panic!("a line") };
     assert!(sk.point(a).unwrap().dist(Vec2::new(-20.0, 30.0)) < 1e-6 && sk.point(b).unwrap().dist(Vec2::new(20.0, 30.0)) < 1e-6);
+    assert!(ids(&r["curves"]).contains(&sk.curves[major].id), "the reply lists the axis moved: {r}");
     for (cmd, params, centre, major) in [
         ("sketch.move", json!({"translate": [0, 30]}), Vec2::new(0.0, 30.0), Vec2::new(20.0, 30.0)),
         ("sketch.move", json!({"angle": 90, "center": [0, 0]}), Vec2::ZERO, Vec2::new(0.0, 20.0)),
@@ -207,6 +208,10 @@ fn an_ellipse_moved_turned_or_scaled_alone_takes_its_axes_along() {
         let ends: Vec<Vec2> = axes.ends.iter().map(|q| sk.point(*q).unwrap()).collect();
         assert!(ends[0].dist(major) < 1e-6 && ends[1].dist(centre * 2.0 - major) < 1e-6, "{cmd} {params}: the major axis follows: {ends:?}");
         assert!(((ends[2] + ends[3]) * 0.5).dist(centre) < 1e-6, "{cmd} {params}: the minor axis follows: {ends:?}");
+        let listed = ids(&r["curves"]);
+        for l in [axes.major, axes.minor] {
+            assert!(listed.contains(&sk.curves[l].id), "{cmd} {params}: the reply lists the axis lines: {r}");
+        }
     }
 }
 
@@ -270,6 +275,14 @@ fn an_ellipse_s_axes_cut_as_a_center_rectangle_s_diagonals_do() {
     run(&mut s, "sketch.trim", json!({"curve": line, "at": [1, 1]}));
     let ends = lines(&s);
     assert!(ends.len() == 1 && close(ends[0][0], -3.0) && close(ends[0][1], 0.0), "{ends:?}");
+
+    // Extend stops at them too: a line inside the ellipse reaches the minor axis, not the outline.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "minor_radius": 8}));
+    let line = ids(&run(&mut s, "sketch.line", json!({"points": [[-6, 1], [-3, 1]], "connect": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.extend", json!({"curve": line, "at": [-3, 1]}));
+    let ends = lines(&s);
+    assert!(ends.len() == 1 && close(ends[0][0], -6.0) && close(ends[0][1], 0.0), "{ends:?}");
 
     let mut s = new_sketch();
     run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [20, 8]}));

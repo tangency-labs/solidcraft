@@ -299,5 +299,18 @@ mod tests {
             middle[0].abs() < 1e-6 && middle[1].abs() < 1e-6 && (size[0] - 40.0).abs() < 1e-3 && (size[1] - 16.0).abs() < 1e-3,
             "{middle:?} {size:?}"
         );
+        // With its minor axis deleted, the major one that is left.
+        h.step(&serde_json::json!({"key": "Escape"})).unwrap();
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let minor = sk.curves.iter().rev().find(|c| c.construction).unwrap().id.clone();
+        h.app.run("sketch.delete", serde_json::json!({"entities": [minor]})).unwrap();
+        h.settle();
+        h.step(&serde_json::json!({"click": {"sketch": [10.0, 6.928]}})).unwrap();
+        h.step(&serde_json::json!({"start": "sketch.transform"})).unwrap();
+        h.frames(3);
+        let d = h.app.dialog.as_ref().expect("the Transform window");
+        let (lines, _, size) = picked_box(&h.app, d).expect("a box round the ellipse");
+        assert_eq!(lines.len(), 2, "the ellipse and its major axis");
+        assert!((size[0] - 40.0).abs() < 1e-3, "{size:?}");
     }
 }
