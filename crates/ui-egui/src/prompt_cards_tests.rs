@@ -220,6 +220,60 @@ fn settings_reset_notice_dismisses_or_opens_the_graphics_page() {
     assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GRAPHICS);
 }
 
+/// Graphics settings on trial (#4015): the question's Keep and Go back, and an unanswered one
+/// giving up after its time: it closes for a restart and leaves the trial for the next start to
+/// drop.
+#[test]
+fn graphics_trial_question_keeps_goes_back_or_gives_up() {
+    use crate::prefs::{GraphicsChoice, GraphicsTrial};
+    let dx12 = GraphicsChoice { api: "dx12".into(), msaa: 4 };
+    let on_trial = |h: &mut Harness| {
+        h.app.quit_requested = false;
+        h.app.graphics.restart = false;
+        h.app.graphics.saved = dx12.clone();
+        h.app.graphics.trial = Some(GraphicsTrial { previous: dx12.clone(), shown: 0.0, last_frame: None });
+        (h.app.preferences.graphics_api, h.app.preferences.msaa) = ("vulkan".into(), 8);
+    };
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    on_trial(&mut h);
+    card_is_drawn(&mut h);
+    assert!(h.app.graphics.trial.as_ref().and_then(|t| t.last_frame).is_some(), "the countdown starts when the question shows");
+    press(&mut h, "Keep");
+    assert_eq!(h.app.graphics.saved, GraphicsChoice { api: "vulkan".into(), msaa: 8 });
+    assert!(h.app.graphics.trial.is_none() && !h.app.graphics.restart && !h.app.quit_requested);
+
+    on_trial(&mut h);
+    press(&mut h, "Go back");
+    assert_eq!((h.app.preferences.graphics_api.as_str(), h.app.preferences.msaa), ("dx12", 4));
+    assert!(h.app.graphics.trial.is_none() && h.app.graphics.restart && h.app.quit_requested);
+
+    // A window that drew nothing for a long while (hidden behind others) doesn't give up the
+    // moment it draws again.
+    on_trial(&mut h);
+    h.frames(2);
+    if let Some(trial) = &mut h.app.graphics.trial {
+        trial.last_frame = trial.last_frame.map(|t| t - 1000.0);
+    }
+    h.frames(1);
+    let shown = h.app.graphics.trial.as_ref().map(|t| t.shown);
+    assert!(shown.is_some_and(|s| s < 2.0) && !h.app.quit_requested, "still asking: {shown:?}");
+
+    if let Some(trial) = &mut h.app.graphics.trial {
+        trial.shown = crate::prefs_notice::TRIAL_SECONDS;
+    }
+    h.frames(1);
+    assert!(h.app.graphics.trial.is_none() && h.app.graphics.restart && h.app.quit_requested, "gave up: closes for a restart");
+    assert_eq!(h.app.preferences.graphics_api, "vulkan", "nothing saved: the next start drops the trial");
+
+    // A start from the desktop opens on Home: the question shows there too.
+    h.app.home.open = true;
+    on_trial(&mut h);
+    card_is_drawn(&mut h);
+    press(&mut h, "Keep");
+    assert!(h.app.graphics.trial.is_none() && !h.app.graphics.restart);
+}
+
 #[test]
 fn object_properties_card_only_closes() {
     let mut h = Harness::new();

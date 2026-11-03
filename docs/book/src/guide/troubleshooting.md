@@ -143,8 +143,21 @@ starts again: on Vulkan if it was using Direct3D 12 (it keeps using Vulkan, as `
 "vulkan"` in `graphics.json`), otherwise in safe mode. Unsaved changes are offered for recovery.
 The restarted SolidCraft ignores `WGPU_BACKEND` (below); remove it if you set it with `setx`,
 or the next start uses that API again.
-To choose the graphics API yourself, in any version, open a Command Prompt and start
-SolidCraft from it:
+
+To choose the graphics API yourself, use **Preferences › Graphics › Graphics API** (Windows
+and Linux): Automatic (the order above), Direct3D 12, Vulkan or OpenGL. The graphics API and
+**Anti-aliasing** apply when SolidCraft starts, so a change is tried first: **Restart now**
+starts SolidCraft again with it (or the next start does), and it asks *Keep these graphics
+settings?* Keep saves them; **Go back**, or no answer within 15 seconds, starts again with the
+previous ones. If the new settings leave the window white or black, crash it, or hang it, the
+next start goes back to the previous settings and says so, so a choice can't leave SolidCraft
+stuck. A change made over the control channel (`ui.prefs`) is saved at once, without a trial.
+On AMD integrated graphics, Preferences warns when Direct3D 12 is chosen: there it has frozen
+the whole screen, at times until the computer was restarted, which no trial start can undo. If
+SolidCraft crashes there on Direct3D 12 after you kept it (opening a design, say), the next
+start goes back to Automatic and says so; Preferences can choose Direct3D 12 again.
+
+In any version, you can also open a Command Prompt and start SolidCraft from it:
 
 ```
 set WGPU_BACKEND=dx12
@@ -152,9 +165,11 @@ set WGPU_BACKEND=dx12
 ```
 
 `vulkan` and `gl` are the other choices. `setx WGPU_BACKEND dx12` keeps it for apps started
-from the Start menu after you sign in again. From 0.11.1 the setting can also live in
-`graphics.json` in the settings folder, as `{"msaa": 4, "backend": "dx12"}` (`auto` is the
-order above). Safe mode ignores it and always uses the software renderer.
+from the Start menu after you sign in again. While `WGPU_BACKEND` is set, it decides the API
+and Preferences shows it greyed out. From 0.11.1 the setting can also live in `graphics.json`
+in the settings folder, as `{"msaa": 4, "backend": "dx12"}` (`auto` is the order above);
+settings being tried are its `trial` entry. Safe mode ignores them and always uses the
+software renderer.
 
 With OpenGL on Windows, the window has the Windows title bar above SolidCraft's application bar
 instead of using the application bar as its title bar. Some OpenGL drivers (older Intel HD and
