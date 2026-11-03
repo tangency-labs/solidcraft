@@ -1,5 +1,212 @@
 # Control protocol
 
+The [universal panel foundation](panel-foundation.md) supplies typed layout actions
+and retained runtime guards. The application-layout commands below are registered
+engine commands reached through `engine.execute`, `engine.batch`, `engine.script`
+and MCP's existing `execute`/`batch` tools. They require an injected application
+backend; enabling the internal panel runtime remains an explicit integration step.
+Current product defaults and the production shell are unchanged.
+
+### Application panel and layout commands
+
+Every command has input and output schemas through ordinary command discovery.
+Inputs are strict at every parameter-check level: unknown fields, including nested
+placement fields, are errors. As with other engine calls, omitted/null parameters
+mean an empty object. IDs use the foundation's bounded lowercase ID domains;
+dimensions are finite positive outer logical units, at most 32768. Requests are
+bounded to 16384 encoded bytes before cloning or deserialising. No command opens a
+dialog, edits the document, changes dirty/undo/revision, evaluates or tessellates a
+model, fits a body, follows a camera request or selects a ribbon/tool/document tab.
+Layout revision is independent of document revision.
+
+Canonical existing targets are typed: `{"target":{"type":"instance","id":"log"}}`.
+`section`, `workspace` and `native_host` are the other foundation target types;
+each command accepts only the domains listed below. A legacy `id` may replace
+`target`, but both together are rejected. It first resolves an exact instance ID.
+A kind ID resolves only when its registration is single-instance and exactly one
+canonical instance exists, including retained closed state. Multi-instance kinds
+are rejected even when only one instance currently exists. No first-match guessing
+or implicit instance creation occurs. `panel.open` instead requires separate `kind`
+and `instance` fields.
+
+All mutations accept optional `expected_revision:u64`. A stale revision produces
+the foundation `revision` rule and leaves the command's layout and catalogue
+unchanged. Successful mutations return the committed `LayoutReply` (layout,
+revision, interaction, effects, capabilities and availability), never an echoed
+placement request. `layout` includes all retained instances with `requested_open`,
+ordered sections and their active tabs. Missing availability entries mean available.
+Query replies contain no new host effects.
+
+| Command | Parameters and behaviour |
+|---|---|
+| `panel.list` | `{}` → `{state:LayoutReply,kinds:[PanelSpec]}` from the live sink and registry. |
+| `panel.open` | `{kind,instance,destination?,expected_revision?}`. New instances require a destination; closed instances can reuse remembered placement. |
+| `panel.close` | `{target:instance,expected_revision?}`. Explicit guarded close retains placement and can refuse cancellation. |
+| `panel.move` | `{target:instance,destination,expected_revision?}`. Existing open instances only. |
+| `panel.resize` | `{target:section|instance,size:{width,height},expected_revision?}`. Instance must have an open section; all tab bounds intersect. |
+| `panel.collapse` | `{target:section|instance,collapsed:bool,expected_revision?}`. Keeps requested dimensions. |
+| `panel.float` | Same as move, requiring a `new_section` with `floating` location. |
+| `panel.popout` | Same as move, requiring a `new_section` with `window` location and return destination. Desktop/headless without native capability refuse; web explicitly lowers to `floating`. |
+| `panel.focus` | `{target:instance,expected_revision?}`. Reopens retained closed state, activates, expands and requests focus. |
+| `panel.activate` | `{target:instance,expected_revision?}`. Activates an open tab without expanding or requesting focus. |
+| `panel.peek` | `{target:instance,expected_revision?}`. Temporary presentation of a collapsed tab, without persistence changes to size/collapse. |
+| `panel.dismiss` | `{expected_revision?}`. Dismisses transient peek. |
+| `panel.resize_pair` | `{first:SectionId,second:SectionId,first_size:{width,height},second_size:{width,height},expected_revision?}`. Adjacent sections of one dock; conserves split-axis extent and cross-axis dimensions. |
+| `panel.reset_pair` | `{first,second,expected_revision?}`. Resets adjacent sections to the registered default ratio within intersected bounds. |
+| `panel.native_close` | `{target:{type:"native_host",id:HostId},expected_revision?}`. Native window close redocks its whole section; it does not explicitly close/cancel content. |
+| `layout.save` | `{name,overwrite?:false,expected_revision?}` → `{name,overwritten,state}`. Saves the complete current envelope in the injected catalogue. |
+| `layout.apply` | `{name,expected_revision?}`. Applies a named preset to the **current** workspace, rebinding its known layout workspace ID. |
+| `layout.reset` | `{expected_revision?}`. Applies the selected workspace's registered immutable default. User presets and other workspace histories remain. Missing defaults return a capability error. |
+| `layout.get` | `{}` → `{state,workspaces:[{id,title_key,default_preset,has_remembered_layout}]}`. Selection is only `state.layout.workspace`. |
+| `layout.workspace.select` | `{workspace:WorkspaceId,expected_revision?}` → `{previous_workspace,source:"remembered"|"default_preset"|"unchanged",state}`. Registered descriptors only; no implicit creation. |
+
+Destinations are distinct foundation operations, not aliases:
+
+```json
+{"type":"new_section","section":"logs","index":0,"location":{"type":"dock","zone":"left"},"size":{"width":280,"height":240}}
+{"type":"join_tab","section":"logs","index":1}
+```
+
+New-section indices address the global section order after detachment; join indices
+address the destination's tab list after detachment. Joining keeps the destination's
+activation, collapse and dimensions. Locations are `dock` (left/right/bottom),
+`floating` (`origin:{x,y}`), or `window` (`host`, `origin`, `return_to`). Native
+`return_to` contains `{zone,index,size,collapsed,join?:{section,index}}`; it never
+recursively contains another native host. Pins and placement/size intersections
+retain the foundation's structured refusal rules.
+
+Preset names trim surrounding whitespace, require 1..64 Unicode scalar values and
+reject controls anywhere in the supplied name. Raw input is capped at 1024 UTF-8
+bytes before trimming; the trimmed name is at most 256 bytes. Names are case-sensitive.
+There are at most 64 user presets. Collisions reject unless `overwrite:true` is
+explicit; built-ins are immutable. No production kinds, preset contents or workspace
+descriptors are invented. Headless starts with an empty registry/catalogue and an
+internal current-layout identity, not a registered product workspace. Fixtures and
+peer integrations can inject synthetic or real registrations. Missing capabilities
+return errors rather than guessed defaults or disk/native success.
+
+Workspace selection stages the outgoing full envelope, destination and selected
+workspace together, then uses one guarded `Replace` on the retained runtime.
+Same-workspace selection is a true no-op, preserving revision, focus, peek and
+effects even if storage staging is unavailable. Applying/resetting a preset never
+selects a workspace. Replacements hide omitted content without implicit Close or
+Cancel; retained editors, conversations and hidden services survive A→B→A.
+
+Catalogue preparation uses encoded full `LayoutEnvelope` records and explicit
+aggregate caps: 64 registered workspaces, 64 built-ins, 64 remembered envelopes,
+64 user presets, 16384 metadata bytes, and 4194304 aggregate envelope/recovery bytes.
+Each envelope/rejected recovery buffer remains at most 262144 bytes and obeys the
+foundation node/depth/collection caps. Quarantine, retained data, shared section
+snapshots including projected sections, complete section order and bounded rejected
+recovery intent survive save/apply/reset. Conflicting opaque identities, snapshots,
+retained data or recovery intent reject atomically. Restoration uses the foundation
+decoder and reappearance logic. Storage preparation finishes before live dispatch;
+catalogue publication is infallible after successful native/controller guards.
+Revision changes during staging reject the staged catalogue. No fallible storage
+write after live commit is treated as an atomic success. The shipped catalogue is
+in-memory; production preference durability and migrations remain peer work.
+
+Atomic layout batches contain 1..64 commands, using the same parser/executor and
+one final guarded Apply or Replace plus one catalogue publication. Queries and
+saves may accompany mutations; save/apply/reset/workspace sequences can stage
+together. Replies describe the **final committed** state, not hypothetical
+intermediate live states. Every `expected_revision` in an atomic batch refers to
+the initial live revision. Explicit Close/Open conflicts remain `lifecycle` errors.
+Atomic batches cannot combine a snapshot replacement with explicit panel mutations,
+or mix document commands with application layout; they return `capability` before
+publishing anything. This preserves the foundation's explicit lifecycle intents.
+Use `rollback:false` for sequential per-command transactions across these domains;
+failures report `rolled_back:false`, `undone:0` and completed results. Scripts use
+the same injected backend sequentially and stop at the first failure. A Session-only
+executor (including ordinary CLI design scripts without an injected backend)
+returns a structured missing-capability error for layout commands.
+
+The GUI route uses the enabled runtime's actual content-service provider and an
+injected `NativeHostAdapter`, never a reconstructed LayoutService. Headless MCP
+owns one persistent application backend distinct from Session; Remote forwards to
+the app and keeps no mirrored layout. Auto mode does not discard headless layout
+work when an app appears. Foundation errors retain `{rule,detail}` with bounded
+details: control replies add `panel_error` alongside the existing error string;
+MCP tool errors add `structuredContent.panel_error`. The error string also encodes
+that object, preserving identity through older string-only backend boundaries.
+Rust integrations implement `ActionSink::project(LayoutAction)` as a pure
+projection on the authoritative service. Its default returns `capability` so an
+older inspect/dispatch-only sink cannot accidentally publish unstaged commands.
+`LayoutService` and `RuntimeActionSink` provide it using the foundation's own
+preparation path. `with_live_layout` refreshes the envelope's shared section memory
+and projections without discarding opaque fields, then encodes against the same
+foundation limits before publication.
+
+Storage consumers can enumerate `CatalogueState::user_presets()` read-only and
+round-trip a complete validated catalogue with `export()` and
+`CatalogueState::hydrate(bytes,registry)` or `InMemoryCatalogue::from_snapshot`.
+Hydration is independent of live commands; restored users remain explicitly
+overwritable users, while built-ins remain immutable. Workspace descriptors,
+remembered full envelopes, and rejected recovery bytes are included. The versioned
+snapshot uses `SCPCAT01`, then length-prefixed little-endian u32 counts/UTF-8 names
+and raw byte records, in built-ins/users/workspaces/remembered order. Each envelope
+record contains length-prefixed envelope JSON, a recovery-presence byte (0/1), and,
+when present, length-prefixed exact recovery bytes. Workspace descriptors contain
+ID/title-key/default-name strings. The snapshot has an additional 8192-byte framing
+allowance above the existing aggregate payload/metadata caps (4218880 bytes total).
+Every count/string/record is bounded before allocation, and hydration rejects
+duplicate names across users/built-ins, duplicate workspace keys, corrupt framing,
+trailing data, invalid envelope identities and all existing aggregate/node/depth
+limits before a candidate can be published. This seam performs no disk storage.
+
+Reading a retained envelope does not consume quarantine merely because the registry
+has grown. `decode_retained_record` validates an already-retained record exactly;
+`decode_retained` additionally checks its workspace. Neither reader generates
+section order/projections or performs quarantine migration/reappearance. Hydration
+preserves the original validated record bytes and rejected binary data, including
+records at the per-envelope or aggregate cap when optional panel kinds disappear
+or return. Missing registrations do not invalidate unrelated users, built-ins or
+workspace memories. Retained validation checks structural ownership, placement
+bounds and all applicable known-kind constraints, without invented descriptors.
+An exact retained layout can still contain absent kinds and is not live admission.
+`StoredEnvelope::project_envelope` (or foundation `project_retained_record`) stages
+missing-kind quarantine before a guarded live use, preserving full section order,
+activation and opaque records. This staging does not consume existing quarantine;
+ordinary save/live overlays therefore keep reappearance retryable after registry
+growth. Foundation `decode` also stages migration and attempts restoration, with
+its existing fallback/rejected-input result contract.
+Materialization may legitimately exceed a cap and reject its staged candidate;
+reading/hydrating the accepted original record does not materialize it.
+Apply/reset/workspace replacement
+explicitly stage restoration, and consume it only with a successful authoritative
+Replace and catalogue publication. A failed action leaves the restore obligation
+retryable. `panel.popout` requires the panel's `features.popout` on both web and
+native policies before any enabled web fallback; `panel.float` remains separate.
+
+Application command, atomic-batch and GUI action boundaries refresh the current
+read-only provider/document environment and availability. A document or contextual
+model change earlier in a sequential batch/script is visible to the next panel
+step without a tick. Queries and failed actions cannot borrow the previous
+document's context. No content tick, document edit, geometry work or camera tail is
+added to this boundary. All application GUI and command routes use one stored
+native adapter, installed once; redock its native sections before disabling it.
+Unsupported atomic intent mixtures are rejected by pure structural preflight
+before any context/controller publication as well as before layout/native effects.
+
+At MCP tool level, an atomic batch containing any panel/layout command must reach
+the authoritative batch transaction. If the endpoint is unavailable or the encoded
+request exceeds its transport margin, a structured zero-effect capability/size
+refusal replaces the old sequential fallback. No document checkpoint or individual
+layout command is sent. Explicit `rollback:false` keeps the sequential fallback
+and reports completed layout changes honestly. Document-only batch fallback keeps
+its existing checkpoint/rollback behaviour. Explicit null parameters normalize to
+an empty object in single, atomic, sequential and script routes for GUI/headless.
+
+Compatibility: `view.layout` still means Floating/Compact **surface styling**.
+History-in-Browser, History Bodies/Origin and Render search/options remain content
+preferences. Existing `view.history_layout`/`view.render_dock` controls continue to
+serve the existing shell. There is no safe universal alias without registered
+instance identities: `browser`/`under_browser` combine content with placement, and
+Render dock changes can affect a pair. They are not silently mapped to universal
+instances. Integrations with explicit identities can issue typed `panel.move`,
+`panel.resize` and `panel.collapse` requests for safe placement changes. No command
+implicitly selects a layout workspace on a document, ribbon, tool or context change.
+
 For UI-kit review, `ui.status_fixture {"preset":"mode"}` shows bounded status
 specimens in the real viewport. Presets are `off`, `mode`, `result`, `attention`,
 `row`, `kinds`, `many` and `key`; the reply carries the preset and item count. This
