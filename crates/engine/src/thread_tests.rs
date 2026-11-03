@@ -998,7 +998,7 @@ fn m10_stock(z0: f64, z1: f64, rmax: impl Fn(f64) -> f64) -> f64 {
 }
 
 /// ISO 4753's chamfered end on both free ends of an M10 stud: a 45° cone down to the external
-/// minor diameter d3 (ISO 724), cut after the groove; the volume as the stock's chamfered section
+/// minor diameter d3 (ISO 724); the volume as the stock's chamfered section
 /// with the thread's material fraction (as ladder 06/006). d3 lies below the modelled root, so
 /// each end face is the whole disk of d3, with the cone a whole ring around it, not pinched
 /// where the groove reaches the end.
@@ -1140,48 +1140,48 @@ fn a_runout_fades_the_groove_out_before_the_shoulder() {
     assert!(e.err().map(|e| e.to_string()).unwrap_or_default().contains("`ease_in` is gone"));
 }
 
-/// A modelled M10 thread's flanks are several B-spline faces per turn (spans of one sweep); where
-/// two of them meet with one tangent plane and one curvature the join is left out of the shaded
-/// view (still pickable and in the wireframe), so the flank reads as one surface. The normal angle across each join is measured
-/// independently (`seam_diagnostics`, projecting stations onto both surfaces).
+/// A modelled M10 thread keeps each flank as one B-spline face across all turns. Cylinder seams
+/// must not split either flank into separate faces for selection, meshing or STEP export.
 #[test]
-fn a_modelled_threads_flank_joins_are_not_drawn() {
+fn a_modelled_thread_keeps_each_flank_as_one_face() {
     use solidcore_record::brep::Surface;
-    let mut s = Session::default();
-    run(&mut s, "solid.cylinder", json!({"radius": 5.0, "height": 12, "body_name": "Shaft"}));
-    run(&mut s, "solid.thread", json!({"face": [5.0, 0, 6.0], "designation": "M10x1.5", "modeled": true}));
-    let st = s.model.state();
-    let body = &st.body("Shaft").unwrap().body;
-    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
-    let record = body.record();
-    let free_form = |f: u32| {
-        record
+    // Include a partial final turn and a chamfered stock: neither may fragment the flanks.
+    for (height, tip) in [(12.0, "none"), (12.345, "none"), (12.345, "both")] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 5.0, "height": height, "body_name": "Shaft"}));
+        run(&mut s, "solid.thread", json!({"face": [5.0, 0, height / 2.0], "designation": "M10x1.5", "modeled": true, "tip": tip}));
+        let st = s.model.state();
+        let shaft = st.body("Shaft").unwrap();
+        let body = &shaft.body;
+        let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
+        let record = body.record();
+        let flanks: Vec<usize> = record
             .faces
-            .get(f as usize)
-            .is_some_and(|f| f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
-    };
-    let tolerances = solidcraft_kernel::ContinuityTolerances { gap_mm: 1e-3, angle_deg: 0.5, curvature_per_mm: 1.0, ..Default::default() };
-    let report = solidcraft_kernel::seam_diagnostics(body, &[], 33, tolerances).unwrap();
-    let mut flank_joins = 0;
-    let mut worst: f64 = 0.0;
-    for seam in &report.seams {
-        let e = seam.edge;
-        let uses = &record.edges[e].uses;
-        if uses.len() != 2 || !uses.iter().all(|u| free_form(u.face)) {
-            continue;
-        }
-        let angle = seam.normal_angle_deg.value;
-        if angle < 0.5 {
-            flank_joins += 1;
-            worst = worst.max(angle);
-            assert!(mesh.smooth_edges[e] && !mesh.shaded_edge_visible(e), "join {e} at {angle} deg is drawn");
-            assert!(mesh.edge_visible(e) && mesh.edge_pickable(e), "join {e} stays in the wireframe and pickable");
-        } else {
-            assert!(mesh.shaded_edge_visible(e), "crease {e} at {angle} deg is hidden");
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(flanks.len(), 2, "one selectable face per flank, independent of the turn count");
+        let names = solidcraft_doc::naming::face_names(shaft);
+        let picks: Vec<_> = flanks
+            .iter()
+            .map(|&flank| {
+                assert!(mesh.tri_face.iter().any(|f| *f as usize == flank), "flank {flank} must tessellate");
+                (names[flank].clone(), solidcraft_doc::naming::face_spot(shaft, flank).unwrap().point)
+            })
+            .collect();
+        // The named picks downstream face commands store must still find the same kind of face
+        // after the history is serialized and rebuilt, including the reordered chamfer cuts.
+        let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        let rebuilt = reopened.model.state();
+        let shaft = rebuilt.body("Shaft").unwrap();
+        for (name, point) in picks {
+            let (face, found) = solidcraft_doc::naming::face_on_body(shaft, &name, point).unwrap();
+            assert!(found.dist(point) < 1e-6, "the saved flank pick must remain on its named face: {name}");
+            assert!(matches!(shaft.body.record().faces[face].surface, Surface::Spline { .. } | Surface::RationalSpline { .. }));
         }
     }
-    // SMLib's flank pieces meet with normals about 1.5e-6 degrees apart (measured).
-    assert!(flank_joins >= 32 && worst < 1e-4, "{flank_joins} flank joins, the worst {worst} deg apart");
 }
 
 /// A pipe thread's profile for [`pipe_material`]: (flank half angle, thread height h, flat at crest
