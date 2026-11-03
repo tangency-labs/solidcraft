@@ -10,17 +10,9 @@ fn made(name: &str) -> Drawing {
     built_in(name).unwrap_or_else(|| panic!("no built-in {name}")).unwrap()
 }
 
-/// The built-in `name` with the built-in block on its sheet.
-fn titled(name: &str) -> Drawing {
-    let mut d = made(name);
-    Arc::make_mut(&mut d.sheets[0]).set_title_block(Some(title_block::default_block()));
-    check(&d).unwrap();
-    d
-}
-
 /// The built-in `name` with a block whose general tolerances are `text`: a shop's own template.
 fn shop(name: &str, text: &str) -> Drawing {
-    let mut d = titled(name);
+    let mut d = made(name);
     let block = Arc::make_mut(&mut d.sheets[0]).title_block.as_mut().unwrap();
     let cell = block.cells.iter_mut().find(|cell| cell.name == "general_tolerances").unwrap();
     let CellKind::Text(cell) = &mut cell.kind else { panic!("the tolerances cell shows text") };
@@ -30,7 +22,7 @@ fn shop(name: &str, text: &str) -> Drawing {
 }
 
 /// Every built-in is a template on its ISO paper (A4 upright, the rest flat) with the ISO border
-/// and nothing more, the same bytes each time it is made. Another name is none.
+/// and the built-in title block, the same bytes each time it is made. Another name is none.
 #[test]
 fn every_built_in_is_a_template_on_its_paper() {
     let mut seen = BTreeSet::new();
@@ -45,7 +37,7 @@ fn every_built_in_is_a_template_on_its_paper() {
         assert_eq!(serde_json::to_value(paper).unwrap(), serde_json::json!(size), "{name}");
         let upright = if size == "a4" { Orientation::Portrait } else { Orientation::Landscape };
         assert_eq!((sheet.sheet.orientation, &sheet.border), (upright, &Some(DrawingBorderProfile::iso())), "{name}");
-        assert_eq!(sheet.title_block, None, "{name}: a border only");
+        assert_eq!(sheet.title_block, Some(title_block::default_block()), "{name}: the built-in block");
         assert_eq!(d.name, format!("ISO {}", size.to_uppercase()));
         assert_eq!(title(name), Some(d.name.clone()), "{name}: its title without making it");
         assert_eq!(d.to_json().unwrap(), made(name).to_json().unwrap(), "{name}: the same bytes");
@@ -73,11 +65,11 @@ fn a_template_names_no_model() {
     let refusal = check(&plate()).unwrap_err().to_string();
     let all = "a template draws no design, and this one has a source, views, dimensions, balloons, a sheet that documents a component";
     assert_eq!(refusal, all);
-    let mut d = titled("iso-a3");
+    let mut d = made("iso-a3");
     Arc::make_mut(&mut d.revisions).add(None, 77).unwrap();
     assert_eq!(check(&d).unwrap_err().to_string(), "a template draws no design, and this one has revision rows");
     // A drawing's own rules come first.
-    let mut d = titled("iso-a3");
+    let mut d = made("iso-a3");
     d.sheets.clear();
     assert!(check(&d).unwrap_err().to_string().contains("a drawing has 1 to 1000 sheets"));
 }
@@ -87,13 +79,13 @@ fn a_template_names_no_model() {
 /// changes for the same template; a drawing with a model is no template.
 #[test]
 fn a_template_applied_gives_each_sheet_its_format() {
-    let mut d = instantiate(&titled("iso-a3"), "Bracket drawing", &BTreeSet::new(), &mut IdSource::seeded(1)).unwrap();
+    let mut d = instantiate(&made("iso-a3"), "Bracket drawing", &BTreeSet::new(), &mut IdSource::seeded(1)).unwrap();
     let id = d.allocate_id(&mut IdSource::seeded(2)).unwrap();
     d.sheets.push(Arc::new(Sheet { id, name: "Sheet 2".into(), ..(*d.sheets[0]).clone() }));
     for (cell, text) in [("material", "See note 3"), ("finish", "Black oxide")] {
         Arc::make_mut(&mut d.sheets[0]).title_block_overrides.insert(cell.into(), text.into());
     }
-    assert_eq!(apply(&d, &titled("iso-a3")).unwrap(), (d.clone(), Vec::new()), "the same template changes nothing");
+    assert_eq!(apply(&d, &made("iso-a3")).unwrap(), (d.clone(), Vec::new()), "the same template changes nothing");
     let (applied, changed) = apply(&d, &shop("iso-a2", "ISO 13920-B")).unwrap();
     let ids: Vec<u64> = d.sheets.iter().map(|s| s.id).collect();
     let restyled = |sheet| Restyled { sheet, paper: true, border: false, title_block: true, lost: Vec::new() };
@@ -105,7 +97,7 @@ fn a_template_applied_gives_each_sheet_its_format() {
     assert_eq!(applied.sheets[0].title_block_overrides, d.sheets[0].title_block_overrides, "every cell is still there");
     assert_eq!((applied.id, applied.name.as_str(), &applied.sources), (d.id, "Bracket drawing", &d.sources));
     // A block without a finish cell: its typed text is lost, and said so.
-    let mut renamed = titled("iso-a3");
+    let mut renamed = made("iso-a3");
     let block = Arc::make_mut(&mut renamed.sheets[0]).title_block.as_mut().unwrap();
     block.cells.iter_mut().find(|cell| cell.name == "finish").unwrap().name = "surface".into();
     let (applied, changed) = apply(&d, &renamed).unwrap();
@@ -148,7 +140,7 @@ fn a_drawing_saved_as_a_template_keeps_only_its_format() {
 /// a panic.
 #[test]
 fn a_damaged_template_file_never_panics() {
-    let text = titled("iso-a3").to_json().unwrap();
+    let text = made("iso-a3").to_json().unwrap();
     let mut read_back = 0;
     for at in (0..text.len()).step_by(7) {
         let _ = text.get(..at).map(read);
@@ -168,7 +160,7 @@ fn a_damaged_template_file_never_panics() {
 /// typed over its cells too.
 #[test]
 fn a_drawing_from_a_template_has_ids_of_its_own() {
-    let mut template = titled("iso-a1");
+    let mut template = made("iso-a1");
     let first = (*template.sheets[0]).clone();
     template.sheets.push(Arc::new(Sheet { id: 5, name: "Sheet 2".into(), ..first }));
     Arc::make_mut(&mut template.sheets[1]).title_block_overrides.insert("material".into(), "See note 3".into());
