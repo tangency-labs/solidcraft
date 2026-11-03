@@ -185,7 +185,7 @@ pub(crate) fn sync(s: &mut Session) {
             s.section_derived = false;
             if s.section.is_some() {
                 s.section = None;
-                s.revision += 1;
+                s.refresh_display();
             }
             s.status_slot(StatusId::Section, false);
         }
@@ -200,7 +200,8 @@ pub(crate) fn sync(s: &mut Session) {
     if s.section != cut || s.section_hatch != hatch {
         s.section = cut;
         s.section_hatch = hatch;
-        s.revision += 1;
+        // Only the view changes: an open feature editor stays valid (#10822).
+        s.refresh_display();
     }
     // The viewport's status list keeps effects in the order they were turned on (#8545): a
     // section shown keeps its slot when another one replaces it, and leaves it when none is.

@@ -1783,6 +1783,9 @@ impl Session {
                     // edit kept its model and joints valid, and a new session has had none.
                     let render_only = self.replacements == replacements && self.render_only_change(&before);
                     let display_only = !changed && hidden;
+                    // Section Analyses are kept in the design, with undo (#3977), but cut only the
+                    // view: like hiding a body, they leave an open feature editor valid (#10822).
+                    let sections_only = render_only && self.doc.section_analyses != before.doc.section_analyses;
                     let previous_doc = before.doc.clone();
                     if spec.undoable {
                         self.undo.push(before);
@@ -1797,6 +1800,10 @@ impl Session {
                             let sketch = edit.sketch;
                             self.refresh_live(edit);
                             self.live_links = Some((sketch, self.doc.clone(), self.revision));
+                        }
+                        None if sections_only => {
+                            self.refresh_render(&previous_doc);
+                            self.visibility_revision += 1;
                         }
                         None if render_only => self.refresh_render(&previous_doc),
                         None if display_only => self.refresh_display(),
@@ -2123,6 +2130,15 @@ impl Session {
         if let Some(original) = &prepared.editor_original {
             self.restore_editor_history(&prepared.source.doc, original);
         }
+        // Sections made or changed while the editor was open stay, also when its edit is undone.
+        if prepared.computed.doc.section_analyses != self.doc.section_analyses {
+            let computed_doc = prepared.computed.doc.clone();
+            prepared.computed.doc = with_sections_of(&computed_doc, &self.doc);
+            prepared.computed.retarget_world_cache(&computed_doc);
+            for snapshot in prepared.computed.undo.iter_mut().chain(&mut prepared.computed.redo) {
+                snapshot.doc = with_sections_of(&snapshot.doc, &self.doc);
+            }
+        }
         // Visibility may have changed while the worker ran. Undoing its first command must
         // restore that current view, including sketches, folders and joint glyphs.
         if let Some(before) = prepared.computed.undo.first_mut() {
@@ -2140,7 +2156,7 @@ impl Session {
     }
 
     fn same_document_context(&self, source: &Session) -> bool {
-        Arc::ptr_eq(&self.doc, &source.doc)
+        same_design(&self.doc, &source.doc)
             && self
                 .revision
                 .checked_sub(source.revision)
@@ -2157,9 +2173,16 @@ impl Session {
         if !self.same_document_context(source) {
             return Err(EngineError::Other("the design changed while the feature editor was open; its current timeline was preserved".into()));
         }
+        // The history goes back to the design as it was; sections made or changed while the
+        // editor was open stay after Cancel (#3977).
+        self.restore_editor_history(&source.doc, &original.doc);
+        if original.doc.section_analyses != self.doc.section_analyses {
+            let original_doc = original.doc.clone();
+            original.doc = with_sections_of(&original_doc, &self.doc);
+            original.retarget_world_cache(&original_doc);
+        }
         let params = original.doc.marker.map(|position| serde_json::json!({"position":position})).unwrap_or_else(|| serde_json::json!({}));
         crash::accepted_command(self, &self.doc, &original.doc, "timeline.roll_to", &params, !Arc::ptr_eq(&self.doc, &original.doc));
-        self.restore_editor_history(&source.doc, &original.doc);
         let undo = std::mem::take(&mut self.undo);
         let redo = std::mem::take(&mut self.redo);
         let selection = std::mem::take(&mut self.selection);
@@ -2177,6 +2200,9 @@ impl Session {
         for snapshot in self.undo.iter_mut().chain(&mut self.redo) {
             if Arc::ptr_eq(&snapshot.doc, source) {
                 snapshot.doc = original.clone();
+            } else if snapshot.doc.marker == source.marker && snapshot.doc.differs_only_in_sections(source) {
+                // A step on a Section Analysis taken in the editor keeps its sections (#3977).
+                snapshot.doc = with_sections_of(original, &snapshot.doc);
             }
         }
     }
@@ -2473,6 +2499,23 @@ fn image_host_availability(host: Option<&render::job::ImageHost>, expected: &ren
 
 /// Whether two designs differ at most in their features. Every field is named, so a new one has
 /// to be decided on here.
+/// The same design apart from its Section Analyses: they are saved with it (#3977) but cut only
+/// the view, so making or changing one while a feature editor is open keeps the editor's OK and
+/// Cancel, as hiding a body does (#10822).
+fn same_design(a: &Arc<Document>, b: &Arc<Document>) -> bool {
+    Arc::ptr_eq(a, b) || a.differs_only_in_sections(b)
+}
+
+/// `doc` with the Section Analyses of `from`.
+fn with_sections_of(doc: &Arc<Document>, from: &Document) -> Arc<Document> {
+    if doc.section_analyses == from.section_analyses {
+        return doc.clone();
+    }
+    let mut d = (**doc).clone();
+    d.section_analyses = from.section_analyses.clone();
+    Arc::new(d)
+}
+
 fn same_but_features(a: &Document, b: &Document) -> bool {
     let Document {
         newer_file: _,
