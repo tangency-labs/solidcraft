@@ -31,7 +31,7 @@ fn front() -> (Drawing, IdSource, u64) {
 fn add(d: &mut Drawing, id_source: &mut IdSource, kind: ViewKind, place: ViewPlace, settings: ViewOverrides) -> u64 {
     let id = d.allocate_id(id_source).unwrap();
     let sheet = d.sheets[0].id;
-    d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0 })]);
+    d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, centre_marks: None })]);
     id
 }
 
@@ -327,4 +327,107 @@ fn a_views_centre_is_its_point_or_lined_up_with_its_parent() {
         assert_eq!(d.view_centre(id).unwrap_err().to_string(), format!("base view {} isn't placed at a point", ids::encode(front)));
     }
     assert_eq!(d.view_centre(99).unwrap_err().to_string(), format!("the drawing has no view {}", ids::encode(99)));
+}
+
+#[test]
+fn automatic_centre_mark_rule_round_trips_and_keeps_missing_references() {
+    let (mut d, _, id) = front();
+    assert!(file(&d)["views"][0].get("centre_marks").is_none());
+    let edge = ModelEdge { body: "Plate".into(), origin_feature: 1, name: "top|hole".into(), path: vec![7, 9] };
+    view_mut(&mut d, id).centre_marks = Some(AutoMarks { exclude: vec![edge.clone()] });
+    let saved = d.to_json().unwrap();
+    let reopened = Drawing::from_json(&saved).unwrap();
+    assert_eq!(reopened.view(id).unwrap().centre_marks.as_ref().unwrap().exclude, vec![edge]);
+    assert_eq!(reopened.to_json().unwrap(), saved);
+    let mut old = file(&d);
+    old["views"][0].as_object_mut().unwrap().remove("centre_marks");
+    let old = Drawing::from_json(&old.to_string()).unwrap();
+    assert!(old.view(id).unwrap().centre_marks.is_none());
+    // No model lookup is required to read a lost exclusion.
+    assert!(reopened.validate().is_ok());
+}
+
+#[test]
+fn automatic_centre_mark_rule_refuses_invalid_or_duplicate_exclusions() {
+    let (mut d, _, id) = front();
+    let edge = ModelEdge { body: "Plate".into(), origin_feature: 1, name: "top|hole".into(), path: vec![7] };
+    view_mut(&mut d, id).centre_marks = Some(AutoMarks { exclude: vec![edge.clone()] });
+    assert!(d.validate().is_ok());
+    let mut other = edge.clone();
+    other.path = vec![8];
+    view_mut(&mut d, id).centre_marks.as_mut().unwrap().exclude.push(other);
+    assert!(d.validate().is_ok(), "different occurrences are distinct");
+    view_mut(&mut d, id).centre_marks.as_mut().unwrap().exclude.push(edge);
+    assert!(d.validate().unwrap_err().to_string().contains("listed twice"));
+    view_mut(&mut d, id).centre_marks.as_mut().unwrap().exclude =
+        vec![ModelEdge { body: String::new(), origin_feature: 0, name: "edge".into(), path: vec![] }];
+    assert!(d.validate().is_err());
+    view_mut(&mut d, id).centre_marks.as_mut().unwrap().exclude =
+        vec![ModelEdge { body: "Plate".into(), origin_feature: 1, name: "edge".into(), path: vec![1] }; MAX_MARK_EXCLUSIONS + 1];
+    assert!(d.validate().unwrap_err().to_string().contains("at most"));
+}
+
+#[test]
+fn complete_rim_uses_angular_union_not_sum() {
+    use crate::drawing::auto_marks::full_rim;
+    use std::f64::consts::{FRAC_PI_2, PI, TAU};
+
+    let tol = 1e-8;
+    assert!(full_rim(&[(0.0, PI), (PI, PI)], tol));
+    assert!(full_rim(&[(PI, -PI), (0.0, -PI)], tol));
+    assert!(full_rim(&[(FRAC_PI_2, PI), (3.0 * FRAC_PI_2, PI)], tol));
+    assert!(full_rim(&[(0.3, TAU)], tol));
+    assert!(!full_rim(&[(0.0, PI), (0.0, PI)], tol), "overlapping halves do not cover a circle");
+    assert!(!full_rim(&[(0.0, FRAC_PI_2)], tol));
+    assert!(full_rim(&[(0.0, PI), (PI + tol / 2.0, PI - tol)], tol));
+    assert!(!full_rim(&[(0.0, PI), (PI + 2.0 * tol, PI - 2.0 * tol)], tol));
+    assert!(!full_rim(&[(tol * 0.75, TAU - tol * 1.5)], tol), "both ends form one gap across the seam");
+    assert!(!full_rim(&[(0.0, PI), (f64::NAN, PI)], tol));
+    assert!(!full_rim(&[(0.0, f64::INFINITY)], tol));
+    assert!(!full_rim(&[(0.0, 2.0 * TAU)], tol));
+    assert!(!full_rim(&[], tol));
+    assert!(!full_rim(&[(0.0, TAU)], f64::NAN));
+    assert!(!full_rim(&vec![(0.0, TAU); crate::drawing::auto_marks::MAX_RIM_ARCS + 1], tol));
+}
+
+#[test]
+fn auto_mark_grouping_requires_complete_rims_and_topological_association() {
+    use crate::drawing::auto_marks::{CircularEdge, group_candidates};
+    use crate::drawing::dimension::ModelEdge;
+    use solidcraft_geom::Vec2;
+    use std::f64::consts::{PI, TAU};
+
+    let edge = |name: &str, radius, depth, faces: &[u32], path: &[u64], spans: Vec<(f64, f64)>| CircularEdge {
+        edge: ModelEdge { body: "Part".into(), origin_feature: 1, name: name.into(), path: path.to_vec() },
+        index: name.as_bytes().first().copied().unwrap_or_default() as usize,
+        faces: faces.to_vec(),
+        center: Vec2::new(10.0, 20.0),
+        radius,
+        depth,
+        spans,
+        exact: true,
+    };
+    let candidates = vec![
+        edge("a", 6.0, 0.0, &[1, 2], &[], vec![(0.0, PI)]),
+        edge("b", 6.0, 0.0, &[1, 3], &[], vec![(PI, PI)]),
+        edge("c", 6.0, 40.0, &[2, 9], &[], vec![(0.0, TAU)]),
+        edge("d", 10.0, 0.0, &[9, 4], &[], vec![(0.0, TAU)]),
+        edge("e", 6.0, 0.0, &[90], &[], vec![(0.0, TAU)]),
+        edge("f", 6.0, 0.0, &[1, 2], &[5], vec![(0.0, TAU)]),
+        edge("g", 3.0, 0.0, &[80], &[], vec![(0.0, PI / 2.0)]),
+        edge("h", 4.0, 0.0, &[70], &[], vec![(0.0, PI)]),
+        edge("i", 4.0, 0.0, &[70], &[], vec![(0.0, PI)]),
+    ];
+    let grouped = group_candidates(&candidates).unwrap();
+    assert_eq!(grouped.len(), 3);
+    let bore = grouped.iter().find(|mark| mark.radius == 10.0).unwrap();
+    assert_eq!(bore.sources.iter().map(|edge| edge.name.as_str()).collect::<Vec<_>>(), ["a", "b", "c", "d"]);
+    assert!(grouped.iter().any(|mark| mark.sources.len() == 1 && mark.sources[0].name == "e"));
+    assert!(grouped.iter().any(|mark| mark.sources.len() == 1 && mark.sources[0].path == [5]));
+    let mut reversed = candidates.clone();
+    reversed.reverse();
+    assert_eq!(group_candidates(&reversed).unwrap(), grouped);
+    let mut invalid = candidates.clone();
+    invalid[0].spans[0].0 = f64::NAN;
+    assert!(group_candidates(&invalid).is_err());
 }

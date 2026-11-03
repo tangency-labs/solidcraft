@@ -1,0 +1,56 @@
+{
+  "en": {
+    "cmd.drawing.auto_center_mark.exclude": "Exclude Automatic Center Mark",
+    "cmd.drawing.auto_center_mark.include": "Include Automatic Center Mark",
+    "cmd.drawing.auto_center_mark.inspect": "Inspect Automatic Center Marks",
+    "cmd.drawing.auto_center_mark.set": "Set Automatic Center Marks"
+  },
+  "en-GB": {
+    "cmd.drawing.auto_center_mark.exclude": "Exclude Automatic Centre Mark",
+    "cmd.drawing.auto_center_mark.include": "Include Automatic Centre Mark",
+    "cmd.drawing.auto_center_mark.inspect": "Inspect Automatic Centre Marks",
+    "cmd.drawing.auto_center_mark.set": "Set Automatic Centre Marks"
+  },
+  "ar": {
+    "cmd.drawing.auto_center_mark.exclude": "استبعاد علامة مركز تلقائية",
+    "cmd.drawing.auto_center_mark.include": "تضمين علامة مركز تلقائية",
+    "cmd.drawing.auto_center_mark.inspect": "فحص علامات المركز التلقائية",
+    "cmd.drawing.auto_center_mark.set": "ضبط علامات المركز التلقائية"
+  },
+  "he": {
+    "cmd.drawing.auto_center_mark.exclude": "החרגת סימון מרכז אוטומטי",
+    "cmd.drawing.auto_center_mark.include": "הכללת סימון מרכז אוטומטי",
+    "cmd.drawing.auto_center_mark.inspect": "בדיקת סימוני מרכז אוטומטיים",
+    "cmd.drawing.auto_center_mark.set": "הגדרת סימוני מרכז אוטומטיים"
+  },
+  "ja": {
+    "cmd.drawing.auto_center_mark.exclude": "自動中心マークを除外",
+    "cmd.drawing.auto_center_mark.include": "自動中心マークを含める",
+    "cmd.drawing.auto_center_mark.inspect": "自動中心マークを確認",
+    "cmd.drawing.auto_center_mark.set": "自動中心マークを設定"
+  },
+  "vi": {
+    "cmd.drawing.auto_center_mark.exclude": "Loại trừ dấu tâm tự động",
+    "cmd.drawing.auto_center_mark.include": "Bao gồm dấu tâm tự động",
+    "cmd.drawing.auto_center_mark.inspect": "Kiểm tra dấu tâm tự động",
+    "cmd.drawing.auto_center_mark.set": "Thiết lập dấu tâm tự động"
+  },
+  "zh": {
+    "cmd.drawing.auto_center_mark.exclude": "排除自动中心标记",
+    "cmd.drawing.auto_center_mark.include": "包含自动中心标记",
+    "cmd.drawing.auto_center_mark.inspect": "检查自动中心标记",
+    "cmd.drawing.auto_center_mark.set": "设置自动中心标记"
+  },
+  "de": {
+    "cmd.drawing.auto_center_mark.exclude": "Automatische Mittelpunktmarkierung ausschließen",
+    "cmd.drawing.auto_center_mark.include": "Automatische Mittelpunktmarkierung einschließen",
+    "cmd.drawing.auto_center_mark.inspect": "Automatische Mittelpunktmarkierungen prüfen",
+    "cmd.drawing.auto_center_mark.set": "Automatische Mittelpunktmarkierungen festlegen"
+  },
+  "ko": {
+    "cmd.drawing.auto_center_mark.exclude": "자동 중심 마크 제외",
+    "cmd.drawing.auto_center_mark.include": "자동 중심 마크 포함",
+    "cmd.drawing.auto_center_mark.inspect": "자동 중심 마크 검사",
+    "cmd.drawing.auto_center_mark.set": "자동 중심 마크 설정"
+  }
+}

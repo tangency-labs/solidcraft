@@ -64,6 +64,7 @@ use crate::format::DRAWING;
 use crate::ids::{self, IdSource};
 use crate::{DocError, Metadata, Result, expr};
 
+pub mod auto_marks;
 pub mod balloon;
 pub mod by_id;
 pub mod centre_line;

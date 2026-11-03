@@ -53,7 +53,7 @@ pub(crate) fn plate() -> Drawing {
     let (assembly, bolt_sheet) = (d.sheets[0].id, d.sheets[1].id);
     let mut add = |d: &mut Drawing, sheet, kind, place, settings, reference_shown_percent| {
         let id = d.allocate_id(&mut id_source).unwrap();
-        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent, centre_marks: None })]);
         id
     };
     let half = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };

@@ -31,6 +31,7 @@ fn fixture() -> (Session, u64, usize) {
         place: ViewPlace::At([200.0, 150.0]),
         settings: ViewOverrides { scale: Some("1:1".parse().unwrap()), ..ViewOverrides::default() },
         reference_shown_percent: 0.0,
+        centre_marks: None,
     })]);
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));

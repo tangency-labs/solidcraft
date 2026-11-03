@@ -44,6 +44,11 @@ use crate::{EngineError, Result, Session};
 #[path = "drawing_scene_marks.rs"]
 mod marks;
 
+/// Eligible automatic-mark sources on one view, before exclusions.
+pub(crate) fn automatic_mark_candidates(s: &Session, view: u64) -> Result<Vec<solidcraft_doc::drawing::auto_marks::MarkCandidate>> {
+    marks::candidates(s, view)
+}
+
 /// The command the sheet scene answers for, in its errors.
 pub const CMD: &str = "drawing.scene";
 
@@ -148,7 +153,7 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     let shown = crate::drawing_view::shown(s);
     let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(s, &shown, *id, view)));
     let (mut scene, views, mut objects) = assemble(record, drawing.projection, &crate::drawing_pictures::groups(drawing, sheet), drawn)?;
-    append_marks(&mut scene, &mut objects, marks::groups(s, drawing, &on)?)?;
+    append_marks(&mut scene, &mut objects, marks::groups(s, drawing, &on)?, drawing)?;
     Ok(SheetScene { scene, views, objects })
 }
 
@@ -279,8 +284,12 @@ fn assemble<D: Borrow<Drawn>>(
 }
 
 /// Add annotations to both the paper scene and the picking/inspection bounds.
-fn append_marks(scene: &mut Scene, objects: &mut Vec<SheetObject>, groups: Vec<Group>) -> Result<()> {
+fn append_marks(scene: &mut Scene, objects: &mut Vec<SheetObject>, groups: Vec<Group>, drawing: &Drawing) -> Result<()> {
     for group in &groups {
+        // Automatic marks are derived from a view and use its id, not a saved selectable id.
+        if group.kind == ObjectKind::CentreMark && drawing.view(group.object).is_some() {
+            continue;
+        }
         let bounds_mm = group_bounds(group);
         if !bounds_mm.is_empty() {
             objects.push(SheetObject { object: group.object, kind: group.kind, bounds_mm, boundary_mm: None });
@@ -391,6 +400,7 @@ struct Inputs {
     views: Vec<(u64, u64, Vec2)>,
     marks: Vec<Arc<solidcraft_doc::drawing::centre_mark::CentreMark>>,
     lines: Vec<Arc<solidcraft_doc::drawing::centre_line::CentreLine>>,
+    automatic: Vec<(u64, solidcraft_doc::drawing::view::AutoMarks)>,
 }
 
 /// The last answer of [`extract`], for the sheet, drawing, world state and serial it was for: the
@@ -416,9 +426,11 @@ impl Cache {
         let ids: BTreeSet<_> = on.iter().map(|(id, _, _)| *id).collect();
         let marks = d.centre_marks.iter().filter(|mark| ids.contains(&mark.view)).cloned().collect();
         let lines = d.centre_lines.iter().filter(|line| ids.contains(&line.view)).cloned().collect();
+        let automatic =
+            d.views.iter().filter(|view| ids.contains(&view.id)).filter_map(|view| view.centre_marks.clone().map(|rule| (view.id, rule))).collect();
         let images = crate::drawing_pictures::groups(d, record.id);
         let views = on.iter().map(|(id, _, centre)| (*id, serial(id), *centre)).collect();
-        Inputs { sheet: record.clone(), projection: d.projection, images, views, marks, lines }
+        Inputs { sheet: record.clone(), projection: d.projection, images, views, marks, lines, automatic }
     }
 
     /// The views of the last scene assembled, while it is still its sheet's scene: the sheet as `d`
@@ -487,7 +499,10 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     let stale = on.iter().filter(|(id, view, _)| !cache.fresh(*id, &state, view)).map(|(id, ..)| *id).collect();
     let inputs = cache.inputs(&d, record, &on);
     let (scene, views, objects, generation) = match cache.last.take() {
-        Some(last) if last.inputs == inputs && ((inputs.marks.is_empty() && inputs.lines.is_empty()) || Arc::ptr_eq(&last.state, &state)) => {
+        Some(last)
+            if last.inputs == inputs
+                && ((inputs.marks.is_empty() && inputs.lines.is_empty() && inputs.automatic.is_empty()) || Arc::ptr_eq(&last.state, &state)) =>
+        {
             (last.answer.scene, last.answer.views, last.answer.objects, last.answer.generation)
         }
         _ => {
@@ -496,7 +511,7 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
             cache.views.retain(|id, _| kept.contains(id));
             let drawn = on.iter().filter_map(|(id, _, centre)| cache.views.get(id).map(|e| (*id, *centre, &e.drawn)));
             let (mut scene, views, mut objects) = assemble(record, d.projection, &inputs.images, drawn)?;
-            append_marks(&mut scene, &mut objects, mark_groups)?;
+            append_marks(&mut scene, &mut objects, mark_groups, &d)?;
             (Arc::new(scene), views, objects.into(), GENERATION.fetch_add(1, Ordering::Relaxed).wrapping_add(1))
         }
     };

@@ -58,6 +58,7 @@ pub mod bom;
 pub mod component;
 pub mod construct;
 pub mod drawing;
+pub mod drawing_auto_mark;
 pub mod drawing_balloon;
 pub mod drawing_centre_line;
 pub mod drawing_centre_mark;

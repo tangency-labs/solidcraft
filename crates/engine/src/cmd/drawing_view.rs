@@ -675,7 +675,8 @@ fn base(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let place = ViewPlace::At([position.x, position.y]);
     let kind = ViewKind::Base { source, view: direction };
-    let mut view = View { id, sheet, kind, place, settings, reference_shown_percent: request.reference_shown_percent.unwrap_or(0.0) };
+    let mut view =
+        View { id, sheet, kind, place, settings, reference_shown_percent: request.reference_shown_percent.unwrap_or(0.0), centre_marks: None };
     let mut fitted = false;
     if view.settings.scale.is_none() {
         // The record's rules first, at 1:1, so a bad direction, percent or place is refused as the
@@ -716,7 +717,7 @@ fn projected(s: &mut Session, p: &Value) -> Result<Value> {
         None => ViewPlace::Aligned(side.along(parent_centre)),
     };
     let kind = ViewKind::Projected { parent, side };
-    let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0 };
+    let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, centre_marks: None };
     if request.place.is_none() {
         // Staged on its parent's centre to measure it, then moved along the free axis until its
         // boundary is the gap past its parent's.

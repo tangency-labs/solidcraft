@@ -578,6 +578,7 @@ mod tests {
             place: ViewPlace::At([100.0, 100.0]),
             settings: ViewOverrides::default(),
             reference_shown_percent: 0.0,
+            centre_marks: None,
         };
         d.add_views([Arc::new(on_other)]);
         s.doc_mut().put_drawing(Arc::new(d));
