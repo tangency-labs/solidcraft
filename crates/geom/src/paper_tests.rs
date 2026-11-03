@@ -415,6 +415,46 @@ fn text_on_the_grid_is_its_placed_outlines() {
     assert_eq!(*loops, walked);
 }
 
+/// Each placed glyph is its whole outline on the grid, though the scene's records count it once:
+/// glyphs of 4,096 pieces (4,095 walked, the closing line left to the writer) fill the grid's pieces
+/// to within one glyph, and a glyph more is refused. A stroke's lines or a fill's sides make up the
+/// rest to the cap exactly, and one piece past it, of either, is refused too.
+#[test]
+fn text_past_the_grids_pieces_is_refused() {
+    let (mut run, mut font) = boxed_text();
+    let ring: Vec<Vec2> = (0..text::MAX_GLYPH_PIECES)
+        .map(|i| {
+            let a = i as f64 * TAU / text::MAX_GLYPH_PIECES as f64;
+            p(250.0 + 250.0 * a.cos(), 350.0 + 250.0 * a.sin())
+        })
+        .collect();
+    font.glyphs.insert(1, text::FontGlyph { advance: 600, outline: vec![Loop2::polygon(&ring)] });
+    let walked = text::MAX_GLYPH_PIECES - 1;
+    let on_grid = |run: &text::TextRun, glyphs: usize, mut with: Vec<Item>| {
+        let mut run = run.clone();
+        run.glyphs = (0..glyphs).map(|i| text::PlacedGlyph { id: 1, x: i as f64 * 3.0, rise: 0.0, advance: 3.0 }).collect();
+        run.text = "A".repeat(glyphs);
+        run.clusters = (0..glyphs as u32).map(|i| text::Cluster { glyphs: i..i + 1, text: i..i + 1 }).collect();
+        with.insert(0, Item::Text(run));
+        let scene = Scene { fonts: vec![font.clone()], ..sheet(with) };
+        scene.prepare().unwrap().on_grid(Grid::NANOMETRE).map(|on| on.groups[0].items.len())
+    };
+    run.angle = 0.0;
+    let fit = grid::MAX_GRID_PIECES / walked;
+    assert_eq!(on_grid(&run, fit, vec![]), Ok(1), "{fit} glyphs make {} pieces", fit * walked);
+    // An open stroke of `n` lines is `n` pieces; a square fill, three (its closing side left).
+    let lines = |n: usize| stroke((0..n).map(|i| line(p(i as f64 * 0.1, 5.0), p((i + 1) as f64 * 0.1, 5.0))).collect(), false, 0.35);
+    let square = || fill(rectangle(p(1.0, 1.0), p(2.0, 2.0)), vec![]);
+    let rest = grid::MAX_GRID_PIECES - fit * walked;
+    assert_eq!(on_grid(&run, fit, vec![lines(rest)]), Ok(2));
+    assert_eq!(on_grid(&run, fit, vec![lines(rest - 3), square()]), Ok(3));
+    for past in [vec![], vec![lines(rest + 1)], vec![lines(rest - 2), square()]] {
+        let glyphs = if past.is_empty() { fit + 1 } else { fit };
+        let e = on_grid(&run, glyphs, past).unwrap_err();
+        assert!(e.to_string().contains("on another sheet"), "{e}");
+    }
+}
+
 /// Slivers are measured in the grid's own steps: a 5 mm piece goes straight on to the next on a
 /// 1 mm grid, and stays on the nanometre grid. An arc's quarters keep its radius and turn, in
 /// steps; a width under half a step is one step. An ellipse comes as counted cubics.

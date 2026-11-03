@@ -16,6 +16,9 @@
 //!   ([`super::text::TextRun::outlines`]), each loop walked as a fill's, filled nonzero (B2). It
 //!   keeps its item's place in the group, so a writer that sets real text (PDF) finds the run in
 //!   paint order.
+//! - A scene makes at most [`MAX_GRID_PIECES`] pieces on the grid ([`place`]). A run's glyphs are
+//!   counted once in the scene's records, for a writer that embeds its font, but each placed glyph
+//!   is its whole outline here.
 
 use super::cubic_pieces::cubic_pieces;
 use super::{Clip, Invalid, Item, ObjectKind, Picture, Prepared, Result, arc_pieces, require};
@@ -29,6 +32,23 @@ pub const SLIVER_STEPS: i64 = 10;
 pub const CURVE_ERROR_MM: f64 = 1e-4;
 /// The most cubics a scene's conics and higher Béziers may become.
 pub const MAX_CURVE_CUBICS: usize = 1_000_000;
+/// The most pieces a scene makes on a grid: 56 bytes each, so about 235 MB. It is past what a sheet
+/// dense with text makes: measured, a Latin letter is 15 pieces on average and a Japanese one 74
+/// (171 at most), so a sheet of 20,000 Japanese letters makes about 1.5 million.
+pub const MAX_GRID_PIECES: usize = 1 << 22;
+
+/// Counts `n` more pieces into `placed`, refused past [`MAX_GRID_PIECES`]: for every writer that
+/// places outlines (the walk here, a PDF that draws its text as outlines).
+pub fn place(placed: &mut usize, n: usize) -> Result<()> {
+    *placed = placed.saturating_add(n);
+    if *placed <= MAX_GRID_PIECES {
+        Ok(())
+    } else {
+        Err(Invalid(
+            "a sheet's lines, fills and letters are more than 4,194,304 pieces on paper: put some of them (its text, most likely) on another sheet",
+        ))
+    }
+}
 
 /// A writer's number grid: `per_mm` steps a millimetre.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -178,13 +198,14 @@ impl Prepared<'_> {
     pub fn on_grid(&self, grid: Grid) -> Result<OnGrid> {
         let mut report = GridReport::default();
         let sheet = Aabb2 { min: Vec2::new(0.0, 0.0), max: self.size_mm() };
+        let mut placed = 0;
         let mut groups = Vec::with_capacity(self.groups().len());
         for group in self.groups() {
             let mut items = Vec::with_capacity(group.items.len());
             for (at, item) in group.items.iter().enumerate() {
                 match item {
                     Item::Stroke { path, closed, width_mm, pattern } => {
-                        let Some(path) = walk(grid, path, *closed, &mut report)? else { continue };
+                        let Some(path) = walk(grid, path, *closed, &mut report, &mut placed)? else { continue };
                         let width = at_least_one(grid.steps(*width_mm)?, &mut report.widths_snapped);
                         let dashes = match pattern {
                             Some(d) => {
@@ -203,7 +224,7 @@ impl Prepared<'_> {
                     Item::Fill { region } => {
                         let mut loops = Vec::new();
                         for l in region.loops() {
-                            loops.extend(walk(grid, &l.segs, true, &mut report)?);
+                            loops.extend(walk(grid, &l.segs, true, &mut report, &mut placed)?);
                         }
                         items.push(GridItem::Fill { loops });
                     }
@@ -217,7 +238,7 @@ impl Prepared<'_> {
                         let font = self.font(run).ok_or(Invalid("a run's font is in the scene's table"))?;
                         let mut loops = Vec::new();
                         for l in run.outlines(font) {
-                            loops.extend(walk(grid, &l.segs, true, &mut report)?);
+                            loops.extend(walk(grid, &l.segs, true, &mut report, &mut placed)?);
                         }
                         items.push(GridItem::Text { item: at, loops });
                     }
@@ -238,8 +259,8 @@ fn at_least_one(steps: i64, snapped: &mut usize) -> i64 {
     steps
 }
 
-/// `segs` on the grid (`None` when it has no pieces).
-fn walk(grid: Grid, segs: &[Seg2], closed: bool, report: &mut GridReport) -> Result<Option<GridPath>> {
+/// `segs` on the grid (`None` when it has no pieces), its pieces counted into `placed` ([`place`]).
+fn walk(grid: Grid, segs: &[Seg2], closed: bool, report: &mut GridReport, placed: &mut usize) -> Result<Option<GridPath>> {
     let (Some(first), Some((last, body))) = (segs.first(), segs.split_last()) else { return Ok(None) };
     let start = grid.point(first.start())?;
     let mut w = Walk { grid, start, at: start, pieces: Vec::with_capacity(segs.len()), report };
@@ -251,6 +272,7 @@ fn walk(grid: Grid, segs: &[Seg2], closed: bool, report: &mut GridReport) -> Res
     } else if !matches!(last, Seg2::Line { .. }) {
         w.piece(last, true, true)?;
     }
+    place(placed, w.pieces.len())?;
     Ok(Some(GridPath { start, pieces: w.pieces, closed }))
 }
 
