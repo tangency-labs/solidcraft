@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "011's flat refolded: 010's part again",
+ "source": "analytic",
+ "method": "T = 2, R = 1, K = 0.5, the corner gap g = 0.5. A bend zone is BA = theta (R + K T) wide in the flat; folded it is an annular sector holding theta T (R + T/2) a mm of bend, T BA with K = 0.5, and every panel moves rigidly, so V = T x the flat area. An edge flange's outer virtual sharp is on the picked edge: the base is cut back s0 = (R + T) tan(theta/2), the bend starts there, and its panel is H - s0 long (H from the sharp along the outer face). A fold (sheet.rs add_fold) takes its bend zone out of the sheet, so the flat stays 100 x 60 and V = 2 x 6000 = 12000. Centred on the line x = 70 the zone runs from 70 - pi/2; the larger side stays, the 30 mm side folds up 90 deg about the axis at x = 70 - pi/2, z = T + R: its outer face (the flat bottom) stands at x = 70 - pi/2 + R + T = 71.429204 and its panel, 30 - pi/2 long, rises from z = R + T to 31.429204. Refolding gives the folded part back: 010's numbers",
+ "body_count": 1,
+ "volume_mm3": 12000.0,
+ "faces": 10,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   71.42920367320511,
+   60.0,
+   31.4292036732051
+  ]
+ }
+}

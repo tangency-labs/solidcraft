@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "plastic.boss 2 across and 12 high with a 5 degree draft: the taper closes the post before its top",
+ "source": "invariants",
+ "method": "top radius r0 - h tan(draft) = 1 - 12 tan 5 deg = -0.049864 < 0: no post, a clean refusal",
+ "outcome": "refused",
+ "refusal": "the draft closes the boss before its top"
+}

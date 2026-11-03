@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a plane through three points on one line",
+ "source": "analytic",
+ "method": "(0,0,0), (10,10,10), (20,20,20) are on one line: every plane through it holds them: refused",
+ "outcome": "refused",
+ "refusal": "the three points are on one line"
+}

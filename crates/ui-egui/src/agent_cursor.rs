@@ -279,7 +279,7 @@ pub fn picks(app: &SolveApp, command: &str, params: &Value) -> Vec<Vec3> {
     {
         out.push((q[0] + q[1] + q[2] + q[3]) / 4.0);
     }
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let sketch = app.session.active_sketch.and_then(|s| st.sketch(s)).map(|ss| ss.plane);
     walk(params, None, &mut |key, v| {
         let num = |i: usize| v.get(i).and_then(Value::as_f64).filter(|x| x.is_finite());
@@ -629,7 +629,7 @@ mod tests {
         assert!(h.app.dialog.is_none(), "programmatic commands do not open interactive tools");
         h.frames(120);
         assert_eq!(rx.try_recv().unwrap()["ok"], true);
-        assert_eq!(h.app.session.world_state().bodies.len(), 1);
+        assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 1);
         assert!(!h.app.agent.busy());
         assert!(h.widget("Box").is_none(), "the command label ends with the animation");
     }

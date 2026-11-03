@@ -57,7 +57,7 @@ fn a_pipeline_the_device_rejects_is_an_error_not_a_crash() {
     // The same device then builds the real pipeline and evaluates on it.
     let gpu = ok(TessGpu::new(name, device, queue));
     let body = ok(solidcraft_kernel::torus(Vec3::ZERO, 6.0, 1.5));
-    let plan = ok(body.display_plan(0.01));
+    let plan = ok(body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.01)));
     assert_eq!(ok(gpu.evaluate(&plan)).positions.len(), plan.evaluate().positions.len());
 }
 
@@ -96,6 +96,106 @@ fn the_hlsl_for_fxc_has_no_arrays_fxc_must_unroll_loops_for() {
     }
 }
 
+/// The shader's basis slots hold the highest degree the CPU evaluator takes, so every surface
+/// the CPU evaluates the GPU evaluates too.
+#[test]
+fn the_shader_takes_every_degree_the_cpu_evaluator_does() {
+    let slots = format!("const W: u32 = {}u;", solidcraft_geom::bspline::MAX_SPLINE_DEGREE + 1);
+    assert!(SHADER.contains(&slots), "tess.wgsl must declare `{slots}`");
+}
+
+/// Browsers compile WGSL with Tint, which keeps a rule of the WGSL grammar that naga doesn't: a
+/// shift, `&`, `|` and `^` don't mix in one expression without parentheses (`a << 3u | b` is
+/// refused, `(a << 3u) | b` isn't). A shader that breaks it runs on the desktop and leaves the
+/// web app's 3D view black (#11080). Every shader in the repository keeps to it.
+#[test]
+fn no_shader_mixes_shifts_and_bitwise_operators_without_parentheses() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut shaders = Vec::new();
+    let mut dirs = vec![root.join("assets"), root.join("crates"), root.join("vendor")];
+    while let Some(dir) = dirs.pop() {
+        for entry in ok(std::fs::read_dir(&dir)) {
+            let path = ok(entry).path();
+            if path.is_dir() {
+                if !path.ends_with("target") {
+                    dirs.push(path);
+                }
+            } else if path.extension().is_some_and(|e| e == "wgsl") {
+                shaders.push(path);
+            }
+        }
+    }
+    assert!(shaders.iter().any(|p| p.ends_with("assets/shaders/viewport.wgsl")), "{shaders:?}");
+    let mut found = Vec::new();
+    for path in &shaders {
+        for (n, line) in ok(std::fs::read_to_string(path)).lines().enumerate() {
+            if let Some(ops) = mixed_bitwise(line) {
+                found.push(format!("{}:{}: {ops}: {}", path.display(), n + 1, line.trim()));
+            }
+        }
+    }
+    assert!(found.is_empty(), "{}", found.join("\n"));
+    // The check finds the line #11080 reported, and takes it parenthesized.
+    assert_eq!(mixed_bitwise("let v = ((x ^ y) & 1u) << 3u | (y & 1u) << 2u;").as_deref(), Some("shift and |"));
+    assert_eq!(mixed_bitwise("let v = (((x ^ y) & 1u) << 3u) | ((y & 1u) << 2u);"), None);
+    assert_eq!(mixed_bitwise("let a = f(&p, x & 1u, y | 2u) && b || c; // x << 1u | y"), None);
+    assert_eq!(mixed_bitwise("var<storage> m: array<vec2<f32>>; let b = a & 1u ^ c;").as_deref(), Some("& and ^"));
+}
+
+/// The bitwise operators (a shift, `&`, `|`, `^`) that one parenthesized group of a WGSL line
+/// mixes, when it mixes more than one: what WGSL needs parentheses for. `&&`, `||`, an
+/// address-of `&` and a `>>` closing two generic brackets (`vec2<f32>>`) aren't counted.
+fn mixed_bitwise(line: &str) -> Option<String> {
+    let chars: Vec<char> = line.split("//").next().unwrap_or("").chars().collect();
+    let at = |i: usize| chars.get(i).copied().unwrap_or(' ');
+    let mixed = |g: &Vec<&str>| (g.len() > 1).then(|| g.join(" and "));
+    let mut groups: Vec<Vec<&str>> = vec![Vec::new()];
+    let (mut i, mut prev) = (0, ' ');
+    while i < chars.len() {
+        let (c, next) = (at(i), at(i + 1));
+        let mut op = None;
+        match c {
+            '(' | '[' => groups.push(Vec::new()),
+            ')' | ']' | ',' | ';' | '{' | '}' => {
+                if let Some(m) = groups.last().and_then(mixed) {
+                    return Some(m);
+                }
+                if matches!(c, ')' | ']') && groups.len() > 1 {
+                    groups.pop();
+                } else if let Some(g) = groups.last_mut() {
+                    g.clear();
+                }
+            }
+            '<' if next == '<' => {
+                op = Some("shift");
+                i += 1;
+            }
+            '>' if next == '>' => {
+                let after = at(i + 2);
+                if after == ' ' || after == '_' || after.is_alphanumeric() {
+                    op = Some("shift");
+                }
+                i += 1;
+            }
+            '&' | '|' if next == c => i += 1,
+            '&' if prev == '_' || prev == ')' || prev == ']' || prev.is_alphanumeric() => op = Some("&"),
+            '|' => op = Some("|"),
+            '^' => op = Some("^"),
+            _ => {}
+        }
+        if let (Some(op), Some(g)) = (op, groups.last_mut())
+            && !g.contains(&op)
+        {
+            g.push(op);
+        }
+        if !at(i).is_whitespace() {
+            prev = at(i);
+        }
+        i += 1;
+    }
+    groups.iter().find_map(mixed)
+}
+
 fn ok<T, E: std::fmt::Debug>(r: std::result::Result<T, E>) -> T {
     match r {
         Ok(v) => v,
@@ -125,7 +225,7 @@ fn bodies() -> Vec<(&'static str, Body)> {
 fn gpu_evaluation_matches_the_cpu() {
     let Some(gpu) = gpu() else { return };
     for (name, body) in bodies() {
-        let plan = ok(body.display_plan(0.01));
+        let plan = ok(body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.01)));
         let cpu = plan.evaluate();
         let got = ok(gpu.evaluate(&plan));
         assert_eq!(got.triangles, cpu.triangles, "{name}");
@@ -155,7 +255,7 @@ fn gpu_evaluation_matches_the_cpu() {
 fn a_resident_mesh_matches_the_cpu() {
     let Some(gpu) = gpu() else { return };
     for (name, body) in bodies() {
-        let plan = ok(body.display_plan_angular(0.01, std::f64::consts::PI / 9.0));
+        let plan = ok(body.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: 0.01, angle: Some(std::f64::consts::PI / 9.0) }));
         let cpu = plan.evaluate();
         let mesh = ok(gpu.prepare(&plan));
         assert_eq!(mesh.vertex_count as usize, cpu.positions.len(), "{name}");
@@ -196,7 +296,10 @@ fn a_resident_mesh_matches_the_cpu() {
 #[test]
 fn a_scene_in_one_dispatch_matches_each_body_on_the_cpu() {
     let Some(gpu) = gpu() else { return };
-    let plans: Vec<TessPlan> = bodies().iter().map(|(_, b)| ok(b.display_plan_angular(0.01, std::f64::consts::PI / 9.0))).collect();
+    let plans: Vec<TessPlan> = bodies()
+        .iter()
+        .map(|(_, b)| ok(b.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: 0.01, angle: Some(std::f64::consts::PI / 9.0) })))
+        .collect();
     let refs: Vec<&TessPlan> = plans.iter().collect();
     let mesh = ok(gpu.prepare_many(&refs));
     assert_eq!(mesh.parts.len(), plans.len());
@@ -300,11 +403,11 @@ fn bench_plate() {
         let (mut nr, mut np) = (0, 0);
         for _ in 0..5 {
             let t = std::time::Instant::now();
-            let m = ok(plate.tessellate(tol));
+            let m = ok(plate.mesh(&solidcraft_kernel::MeshTolerance::chord(tol)));
             r.push(ms(t));
             nr = m.triangles.len();
             let t = std::time::Instant::now();
-            let plan = ok(plate.display_plan(tol));
+            let plan = ok(plate.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(tol)));
             p.push(ms(t));
             let t = std::time::Instant::now();
             let m = plan.evaluate();

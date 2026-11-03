@@ -128,7 +128,7 @@ pub fn upright(z_down: f64, y_either: f64, size: [f64; 3]) -> Upright {
 /// Which axis the bodies named `bodies` in the current design seem to have up. Looks at most
 /// `MAX_BODIES` bodies and `MAX_TRIANGLES` triangles; a body that can't be meshed adds nothing.
 pub fn estimate(app: &SolveApp, bodies: &[String]) -> Upright {
-    let world = app.session.world_state();
+    let world = crate::open_meshing::session_world(&app.session);
     let mut areas = [0.0_f64; 3];
     let mut bounds = solidcraft_engine::geom::Aabb3::EMPTY;
     let mut budget = MAX_TRIANGLES;
@@ -159,7 +159,8 @@ pub fn offer(app: &mut SolveApp, path: &str, before: &[String], result: Option<&
     if text("system") == Some("SolidCraft") || text("exporter_up") == Some("z") {
         return;
     }
-    let bodies: Vec<String> = app.session.world_state().bodies.iter().map(|b| b.name.clone()).filter(|n| !before.contains(n)).collect();
+    let bodies: Vec<String> =
+        crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).filter(|n| !before.contains(n)).collect();
     if bodies.is_empty() {
         return;
     }

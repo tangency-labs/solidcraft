@@ -183,6 +183,7 @@ mod tests {
     #[test]
     fn edit_canvas_is_a_card_whose_close_keeps_the_live_edits() {
         let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
         h.app.home.open = false;
         let id = canvas(&mut h);
         h.app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(&h.app, id, false));

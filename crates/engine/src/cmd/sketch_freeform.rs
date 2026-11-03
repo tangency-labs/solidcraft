@@ -156,7 +156,7 @@ fn add_pieces(sk: &mut Sketch, segs: &[Seg2], start: Option<usize>, end: Option<
             Seg2::Line { .. } => CurveKind::Line { a: prev, b: to },
             Seg2::Cubic { p1, p2, .. } => {
                 let (c1, c2) = (sk.add_point(p1, None)?, sk.add_point(p2, None)?);
-                CurveKind::Spline { pts: vec![prev, c1, c2, to], control: true, degree: 3, periodic: false }
+                CurveKind::Spline { pts: vec![prev, c1, c2, to], control: true, degree: 3, periodic: false, nurbs: None }
             }
             Seg2::Conic { apex, w, .. } => {
                 let x = sk.add_point(apex, None)?;
@@ -169,7 +169,7 @@ fn add_pieces(sk: &mut Sketch, segs: &[Seg2], start: Option<usize>, end: Option<
                     pts.push(sk.add_point(*q, None)?);
                 }
                 pts.push(to);
-                CurveKind::Spline { pts, control: true, degree: n, periodic: false }
+                CurveKind::Spline { pts, control: true, degree: n, periodic: false, nurbs: None }
             }
             Seg2::Arc { .. } => return Err(bad("trim", "unexpected arc piece")),
         };

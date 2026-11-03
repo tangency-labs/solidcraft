@@ -7,6 +7,16 @@ not in a profile). Not shown on the board: everything in the
 
 Page title and tag: "General", "In profile" (hover "Saved in settings profiles").
 
+Layout clarification from the supplied HTML version of the same design: saved profiles are
+42 px rounded, bordered cards with 8 px gaps and a selected fill/accent border on the active
+card. Export, Rename and Delete are quiet compact icon actions. The save row starts with the
+220 px independent name field (placeholder "Name this setup"), then primary Save as new and
+Import. Held and This computer use aligned 84 px label columns: Held pills have accent outlines
+and page icons; machine pills and removable host pills have neutral outlines, with lock icons
+on machine pills. Section heads have no pictograms. Autosave's 260 px timeline sits under its
+control column, not across the page. Search sits in the window title bar; the shared footer
+retains Apply alongside Cancel and OK for the existing transaction behavior.
+
 ## Profiles (3 saved)
 
 Source: today's General > Profiles section (`crates/ui-egui/src/settings_profiles.rs`, #6237). Section
@@ -16,7 +26,7 @@ title "Profiles", with the count "3 saved" at the right of the title.
 |---|---|---|---|---|---|---|
 | Profile rows (Laptop, Large monitor, Presentation) | List | `app.settings_profiles` (saved list) | none saved | Icon buttons: "Export", "Rename", "Delete" | none (17 px profile icon) | The active row shows badges "Edited" (when changed since saved) and "Active", and no Apply. Other rows show "Apply". Names are sample. |
 | Apply | Small button per row | settings profile apply | n/a | none | none | Applying replaces what a profile holds (see README). |
-| Profile name | Text field (220 wide) | the name for "Save as new" | empty | none | none | aria-label "Profile name". |
+| Profile name | Text field (220 wide) | the name for "Save as new" | empty | none | none | Placeholder "Name this setup"; aria-label "Profile name"; no separate label column. |
 | Save as new | Button | settings profile save | n/a | none | none | |
 | Import... | Button | settings profile import | n/a | none | none | |
 | Held / This computer chips | Two chip rows | none (information) | n/a | none | none | "Held": Appearance, Layout, Navigation, Sketch, Shortcuts, Language. "This computer": 3D mouse, Graphics, Assistant. Matches `settings_profiles::PAGES` plus language, shortcuts, toolbar, S-box favourites and the imported theme; mismatch: the board lists page names, the code lists the Interface, Navigation and Sketch pages (`settings_profiles::PAGES`), so after the page split map Appearance and Layout to the old Interface fields. |
@@ -25,7 +35,7 @@ title "Profiles", with the count "3 saved" at the right of the title.
 
 | Label | Control | Edits | Default | Hover | Figure | Notes |
 |---|---|---|---|---|---|---|
-| Interface language | Dropdown, 280 wide ("English (United Kingdom)") | `Prefs.language` | `"en"` | none | none | The dropdown lists `i18n::LOCALES`. Page: 0 (General). |
+| Interface language | Dropdown, 280 wide ("English (United Kingdom)") | `Prefs.language` | `"system"` (System) | none | none | The dropdown includes System and `i18n::LOCALES`; the effective language follows the operating system when System is selected. Page: 0 (General). |
 
 ## Start and save
 
@@ -38,8 +48,7 @@ title "Profiles", with the count "3 saved" at the right of the title.
 
 | Label | Control | Edits | Default | Hover | Figure | Notes |
 |---|---|---|---|---|---|---|
-| Largest file to open: STEP and import | Number field, "MB" (72 wide) | `Prefs.max_step_file_mb` | `DEFAULT_STEP_MB` | none | none | Moves here from Design/General. |
-| Largest file to open: Design | Number field, "MB" | `Prefs.max_design_file_mb` | `DEFAULT_DESIGN_MB` | none | none | |
+| Largest file to open | Two side-by-side 72 px number fields, each with MB | `Prefs.max_step_file_mb`, `Prefs.max_design_file_mb` | `DEFAULT_STEP_MB`, `DEFAULT_DESIGN_MB` | existing file-size guidance | none | One group label; short captions "STEP and import" and "Design" above the controls. Wrap on narrow pages. Each editor retains its full independent accessible name and search result. |
 | Allow network locations in designs | Checkbox | `Prefs.network_locations` | `false` | "For organisations that keep designs on file servers. Off: only servers you allow." | none | Moves from Design (`PAGE_DESIGN`). |
 | `\\files.studio`, `\\nas01` | Chip list with a remove icon (11 px) | `Prefs.network_hosts` | empty | none | none | Shown only when network locations is on. Names are sample. |
 | Open files in a slicer that is already running | Checkbox | `Prefs.slicer_single_instance` | `true` | "For slicers that load a file into a running window." | none | |

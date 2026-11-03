@@ -8,7 +8,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
-use solidcraft_doc::{Expr, Operation, ThinSide};
+use solidcraft_doc::{Expr, Operation, ThinSide, Touching};
 use solidcraft_geom::{Vec2, Vec3};
 
 use super::check::{keyed, whole};
@@ -268,6 +268,40 @@ impl JsonSchema for AxisDir {
     }
 }
 
+/// A camera, as the view commands read it (`cmd::view_navigation::camera_form`): the render
+/// `Camera`, with finite fields, a positive distance and a field of view in [0, π), and the
+/// handlers' message, "invalid camera", for anything else (#10898).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CameraParam(pub solidcraft_render::Camera);
+
+impl<'de> Deserialize<'de> for CameraParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::camera_form(&Value::deserialize(d)?).map(CameraParam).ok_or_else(|| D::Error::custom(whole("invalid camera")))
+    }
+}
+
+impl JsonSchema for CameraParam {
+    fn schema_name() -> Cow<'static, str> {
+        "Camera".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A camera orbiting a target point, as the view commands give it back. Angles are in radians, measured in the frame of the up axis.",
+            "type": "object",
+            "properties": {
+                "target": {"description": "The point the camera looks at, in mm: [x, y, z].", "type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                "yaw": {"description": "Turn about the up axis; 0 looks along +Y, from the front.", "type": "number"},
+                "pitch": {"description": "Elevation above the ground plane, from -π/2 (looking up) to π/2 (looking down).", "type": "number"},
+                "roll": {"description": "Turn about the viewing direction; 0 keeps the up axis upright. Default: 0.", "type": "number", "default": 0.0},
+                "distance": {"description": "From the target to the eye, in mm.", "type": "number", "exclusiveMinimum": 0},
+                "fov": {"description": "Vertical field of view; 0 is orthographic.", "type": "number", "minimum": 0, "exclusiveMaximum": std::f64::consts::PI},
+                "up": {"description": "The world's up axis. Default: z.", "enum": ["z", "y"], "default": "z"}
+            },
+            "required": ["target", "yaw", "pitch", "distance", "fov"]
+        })
+    }
+}
+
 /// A sketch point in mm: `[x, y]` or `{x, y}` of finite numbers (read by `params::vec2`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Point2(pub Vec2);
@@ -449,6 +483,34 @@ impl JsonSchema for OperationParam {
         enum_schema(
             OPERATIONS,
             "How the feature combines with existing bodies: new, join, cut or intersect. The others are aliases. Matching ignores case, spaces, '_' and '-'.",
+        )
+    }
+}
+
+/// What a join makes of pieces that share no face, as `Touching::parse` reads it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TouchingParam(pub Touching);
+
+/// The feature commands' message for a `touching` they don't know.
+const TOUCHING_MESSAGE: &str = "`touching` must be separate or one_body";
+
+impl<'de> Deserialize<'de> for TouchingParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(s) => Touching::parse(&s).map(TouchingParam).ok_or_else(|| D::Error::custom(whole(TOUCHING_MESSAGE))),
+            _ => Err(D::Error::custom(whole(TOUCHING_MESSAGE))),
+        }
+    }
+}
+
+impl JsonSchema for TouchingParam {
+    fn schema_name() -> Cow<'static, str> {
+        "Touching".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        enum_schema(
+            &["separate", "one_body"],
+            "What a join makes of pieces that share no face: separate (the default) makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body.",
         )
     }
 }
@@ -776,8 +838,8 @@ macro_rules! pick_list {
 
 pick_list!(
     /// The `faces` of `solid.shell`, `solid.draft`, `solid.offset_face`, `solid.split_face` and
-    /// `face.delete`, as `features::face_points` reads them. (Extrude's `faces` is a
-    /// [`FacesParam`].)
+    /// `face.delete`, as `features::face_points` reads them; `solid.shell` also takes an empty
+    /// list (a closed hollow body). (Extrude's `faces` is a [`FacesParam`].)
     FaceRefs,
     FaceRef,
     "`faces` must be a list of points or face names",

@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "a motion link b = 2a + 10 between two revolutes",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); Gear: box 10x10x10 from (60,-5,0), centre (65,0,5), on revolute G2 about z through (50,0,0); G2 = 2\u00b7Hinge + 10 deg: Hinge 20 puts G2 at 50: Gear centre (50 + 15 cos50, 15 sin50, 5)",
+ "body_count": 3,
+ "volume_mm3": 9000.0,
+ "results": [
+  {
+   "step": 15,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      59.641814,
+      11.490667,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

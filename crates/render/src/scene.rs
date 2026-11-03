@@ -7,6 +7,7 @@ use std::sync::Arc;
 use solidcraft_geom::{Mesh, Vec3};
 
 use crate::SceneAnalysis;
+use crate::hatch::{HATCH_COLOURS, Hatch};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rgb(pub u8, pub u8, pub u8);
@@ -27,12 +28,17 @@ pub struct SceneMesh {
     /// drawn see-through, so what lies inside it shows, as the viewport draws glass. A body
     /// without an appearance of its own is solid.
     pub opacity: f32,
+    /// The body encloses a volume (a solid, a closed mesh); an open one (a surface body, a solid
+    /// with faces left out) has no inside, so a section gives it no cap.
+    pub closed: bool,
+    /// The hatch of its cut face when the scene hatches by part ([`Scene::part_hatch`]).
+    pub hatch: Hatch,
 }
 
 impl SceneMesh {
     /// A solid body in `color`, with no face of its own look.
     pub fn solid(mesh: Arc<Mesh>, color: Rgb) -> SceneMesh {
-        SceneMesh { mesh, color, face_colors: Vec::new(), opacity: 1.0 }
+        SceneMesh { mesh, color, face_colors: Vec::new(), opacity: 1.0, closed: true, hatch: Hatch(0) }
     }
 
     /// Is the body drawn see-through? (Its opacity is below [`SEE_THROUGH`].)
@@ -84,12 +90,19 @@ pub struct Scene {
     pub cap: Option<Rgb>,
     /// The section cap without its hatch: plain, in the body's own colour.
     pub plain_cap: bool,
+    /// Each cut body hatched its own way ([`SceneMesh::hatch`]), in these colours (the first
+    /// the cap's own); `None`: every cut face in [`Scene::cap`] at 45 degrees.
+    pub part_hatch: Option<[Rgb; HATCH_COLOURS]>,
     /// A surface analysis shading the meshes (zebra, draft, curvature map, ...).
     pub analysis: Option<SceneAnalysis>,
 }
 
 /// The section cap's default tint, as in the viewport.
 pub const SECTION_CAP: Rgb = Rgb(214, 128, 72);
+
+/// The section hatch's other colours by default, as in the viewport: a steel and a sage that tint
+/// a cut face about as strongly as the cap does, so the cut stays calm.
+pub const SECTION_HATCH: [Rgb; HATCH_COLOURS - 1] = [Rgb(84, 138, 168), Rgb(108, 180, 126)];
 
 /// RGBA pixels (`w × h`) to PNG bytes.
 pub fn png(w: usize, h: usize, rgba: Vec<u8>) -> Option<Vec<u8>> {

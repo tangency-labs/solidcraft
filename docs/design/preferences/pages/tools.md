@@ -12,7 +12,7 @@ Each group is a 120x64 figure at the left of its checkboxes, with a group name u
 |---|---|---|---|---|---|---|
 | Hole: Snap to centres | Checkbox | `Prefs.hole_snaps` | `false` | "The middle of a face and the centres of its round edges." | `tool-hole` | Today's label "Snap to face and edge centres". |
 | Hole: Move by click or drag | Checkbox | `Prefs.hole_moves` | `false` | "Picking the face again moves the hole instead of removing it." | `tool-hole` | Today's label "Move holes by clicking or dragging". |
-| Extrude: Extrude to a picked target | Checkbox | `Prefs.extrude_auto_to_object` | `false` | "A face, vertex or parallel plane switches the extent to To Object." | `tool-extrude` | |
+| Extrude: Extrude to a picked target | Checkbox | `Prefs.extrude_auto_to_object` | `true` | "A face, vertex or parallel plane switches the extent to To Object." | `tool-extrude` | |
 | Extrude: Choose the operation automatically | Checkbox | `Prefs.auto_operation` | `true` | "Join, New Body or Cut, from what the material touches." | `tool-extrude` | |
 | Rest, Boss, Snap Fit: Placement handles | Checkbox | `Prefs.placement_handles` | `false` | "A marker to drag the feature across the model and a ring to turn it." | `tool-placement` | |
 

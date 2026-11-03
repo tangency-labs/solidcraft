@@ -26,7 +26,7 @@ fn bearing(kind: &str) -> (Harness, u64) {
         h.app.run("joint.create", json!({"type":kind,"a":at("Housing"),"b":at("Bearing"),"flip":true,"angle":0,"name":"Guide"})).unwrap()["joint"]
             .as_u64()
             .unwrap();
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let body = st.bodies.iter().find(|b| h.app.session.doc.model_body_component(b) == part["component"].as_u64().unwrap()).unwrap();
     let mesh = body.mesh();
     let face = mesh

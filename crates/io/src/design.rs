@@ -259,6 +259,7 @@ pub fn write_design_container_with_thumbnail(
     geometry: Option<&solidcraft_doc::SavedModel>,
     thumbnail: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
+    let _span = solidcraft_profile::span("io", "write_design_container_with_thumbnail");
     write_container(doc, compression, preview, geometry, thumbnail, max_design())
 }
 
@@ -752,6 +753,7 @@ pub(super) fn read(bytes: &[u8]) -> Result<Document> {
 /// keeps one seekable file handle instead of buffering the complete archive. JSON continues
 /// through the normal migrations.
 pub fn read_design_file(path: &str, notify: Option<impl FnOnce(DesignPreview)>) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
+    let _span = solidcraft_profile::span("io", "read_design_file");
     let mut source = open_regular_file(path)?;
     if is_container_source(&mut source)? {
         let mut reader = DesignContainerReader::new(source)?;
@@ -1085,8 +1087,8 @@ mod tests {
         assert!(result.is_err_and(|e| e.to_string().contains("not a regular file")));
     }
 
-    /// A saved model of one state holding `bodies` (no document evaluated it: enough for the
-    /// container, which stores whatever model it is given).
+    /// A saved model of one state holding `bodies`, none made by rounds (no document evaluated
+    /// it: enough for the container, which stores whatever model it is given).
     fn saved_model(bodies: Vec<solidcraft_kernel::Body>) -> solidcraft_doc::SavedModel {
         let records: Vec<Value> = (0..bodies.len())
             .map(|i| json!({"name": format!("Body{i}"), "feature": 1, "component": 0, "key": "0000000000000001", "names": 0, "body": i}))
@@ -1098,7 +1100,8 @@ mod tests {
         solidcraft_doc::SavedModel {
             records: json!({
                 "features": [{"id": 1, "fingerprint": "0000000000000000", "ms": 0.0, "skipped": false, "state": 0}],
-                "states": [state], "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [], "sheets": [], "sketch_key_sets": [{"set": [], "drop": []}],
+                "states": [state], "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [], "sheets": [],
+                "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}],
             }),
             bodies,
         }
@@ -1212,7 +1215,7 @@ mod tests {
         let tree: Value = serde_json::from_slice(manifest).unwrap();
         assert_eq!(serde_json::to_vec(&tree).unwrap(), *manifest);
         assert_eq!(tree["model"], model.records);
-        assert_eq!(tree.as_object().unwrap().len(), 11, "{:?}", tree.as_object().unwrap().keys().collect::<Vec<_>>());
+        assert_eq!(tree.as_object().unwrap().len(), 12, "{:?}", tree.as_object().unwrap().keys().collect::<Vec<_>>());
     }
 
     /// #9170: a mesh body (an imported STL) is kept in the model cache with the rest of the
@@ -1351,7 +1354,10 @@ mod tests {
             .map(|(i, ms)| json!({"id": i + 1, "fingerprint": "0000000000000000", "ms": ms, "skipped": false, "state": i}))
             .collect();
         solidcraft_doc::SavedModel {
-            records: json!({"features": features, "states": states, "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [], "sheets": [], "sketch_key_sets": [{"set": [], "drop": []}]}),
+            records: json!({
+                "features": features, "states": states, "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [],
+                "sheets": [], "validation": "each_feature", "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}],
+            }),
             bodies,
         }
     }
@@ -1377,6 +1383,7 @@ mod tests {
         let (states, kept, all, within) = thinned(40);
         assert_eq!((states, kept.len(), within), (vec![true; 4], 40, true));
         assert_eq!(all.records, model.records);
+        assert_eq!(thinned(16).2.records["validation"], "each_feature", "the check mode it was evaluated under");
         // The final state and the slowest other (50 ms): the shared bodies count once, else
         // these two states would need 32 bodies' room.
         for bodies in [24, 31] {
@@ -1467,7 +1474,7 @@ mod tests {
         let doc = document();
         let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&native_geometry())).unwrap();
         let original = parts(&bytes);
-        for key in ["format", "producer", "evaluation", "document", "payload"] {
+        for key in ["format", "producer", "evaluation", "kernel", "document", "payload"] {
             let mut entries = original.clone();
             let mut manifest: Value = serde_json::from_slice(&entries["cache/model.json"]).unwrap();
             manifest[key] = json!("unsupported-or-stale");
@@ -1539,6 +1546,17 @@ mod tests {
         let mut entries = original.clone();
         let mut manifest = written(&entries);
         manifest.as_object_mut().unwrap().remove("evaluation");
+        entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
+        assert!(read_design_geometry(&package(&entries)).is_none());
+        // The kernel that computed it is recorded, and a model the C++ kernel computed (an earlier
+        // build's) is evaluated again (a cache without one is a miss too).
+        assert_eq!(written(&original)["kernel"], json!(native_cache::KERNEL));
+        let bytes = with(&[("kernel", "smlib")]);
+        assert!(read_design_geometry(&bytes).is_none(), "the C++ kernel's cache");
+        assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
+        let mut entries = original.clone();
+        let mut manifest = written(&entries);
+        manifest.as_object_mut().unwrap().remove("kernel");
         entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
         assert!(read_design_geometry(&package(&entries)).is_none());
     }

@@ -24,6 +24,22 @@ not modelling a part through MCP.
   draft PR titled `<summary> (#N)`. The lowest-numbered open PR for an issue wins; close yours if it
   lost. The bot assigns you and labels the issue `in progress`. Do not claim by editing files; comment
   `/claim` only to stake a claim before you have a branch.
+- **Write the title and first sentence for a reader who has seen nothing else.** Not your chat, not the
+  issue, not the code. Maintainers pick what to review from the title, and it becomes the commit on
+  `main`. Say which part of the app changes and what a user now sees or can do, in everyday words. Don't
+  paste the issue's title unless it passes this too. Before opening the PR, and again before marking it
+  ready, read both with everything else closed: if "there", "it", "this" or "that" has nothing to point
+  at, or a term only makes sense after reading the diff, rewrite it. Keep the terms a user sees in the
+  app and explain the others.
+  - Unclear: `Send to Slicer: pick one print face per body there, and show print faces only while it is open`
+  - Clear: `3D printing: choose the face each body rests on in the Send to Slicer window, not the face menu`
+- **Write PR text in plain, literal English.** This follows the spirit of Simplified Technical English,
+  not its approved-word list. Keep the names a user sees in the app, even if they aren't everyday words.
+  - One idea per sentence, and about 20 words at most.
+  - Use active voice: "The view tints the face", not "The face is tinted".
+  - Use one word for one thing, and don't switch to a synonym partway through.
+  - Repeat the noun when "it" or "this" could be unclear.
+  - Don't stack nouns: "the option for picking in the face menu", not "face menu picking option".
 - **Push daily.** A draft with no pushes for 72 hours may be taken over: comment first, then open your
   own claim (you may start from its branch). The bot's automatic cleanup deadlines in CONTRIBUTING.md
   are separate.

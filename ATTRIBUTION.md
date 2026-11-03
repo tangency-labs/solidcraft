@@ -103,6 +103,22 @@ Editable drawing code, native projects and shipped exports are collected under `
 | tests/step-conformance/tiny_pin.step | step-conformance contributors | generated from formulas by https://github.com/dan335/step-conformance (corpus/generated, 96f30bb); import regression fixture | CC0-1.0 |
 | tests/step-conformance/torus_ring_nurbs.step | step-conformance contributors | generated from formulas by https://github.com/dan335/step-conformance (corpus/generated, 96f30bb); import regression fixture | CC0-1.0 |
 | tests/step-conformance/washer.step | step-conformance contributors | generated from formulas by https://github.com/dan335/step-conformance (corpus/generated, 96f30bb); import regression fixture | CC0-1.0 |
+| tests/kernel-cases/import/1721-closed-bspline-tube-face/input.step | step-conformance contributors | copy of tests/step-conformance/cylinder_nurbs.step (generated from formulas by https://github.com/dan335/step-conformance, corpus/generated, 96f30bb); kernel regression case for tangency-labs/solidcraft#1721 | CC0-1.0 |
+| tests/kernel-cases/import/2043-outer-bound-opposing-surface-sense/input.step | SolidCraft contributors | synthetic STEP file written by hand from ISO 10303-21 for the kernel regression case of tangency-labs/solidcraft#2043 | MIT OR Apache-2.0 |
+| tests/kernel-cases/import/258-cone-point-vertex/input.step | step-conformance contributors | copy of tests/step-conformance/cone_point_vertex.step (generated from formulas by https://github.com/dan335/step-conformance, corpus/generated, 96f30bb); kernel regression case for tangency-labs/solidcraft#258 | CC0-1.0 |
+| tests/kernel-cases/import/258-cone-to-point/input.step | step-conformance contributors | copy of tests/step-conformance/cone_point.step (generated from formulas by https://github.com/dan335/step-conformance, corpus/generated, 96f30bb); kernel regression case for tangency-labs/solidcraft#258 | CC0-1.0 |
+| tests/kernel-cases/import/258-tiny-pin/input.step | step-conformance contributors | copy of tests/step-conformance/tiny_pin.step (generated from formulas by https://github.com/dan335/step-conformance, corpus/generated, 96f30bb); kernel regression case for tangency-labs/solidcraft#258 | CC0-1.0 |
+| tests/kernel-cases/import/3098-bspline-edges-over-tiny-knot-span/input.step | SolidCraft contributors | synthetic STEP file written by hand from ISO 10303-21 for the kernel regression case of tangency-labs/solidcraft#3098 | MIT OR Apache-2.0 |
+| tests/kernel-cases/import/3208-extruded-ellipse-face-over-parameter-seam/input.step | SolidCraft contributors | synthetic STEP file written by hand from ISO 10303-21 for the kernel regression case of tangency-labs/solidcraft#3208 | MIT OR Apache-2.0 |
+| tests/kernel-cases/import/3352-vertex-off-its-edge-curve/input.step | SolidCraft contributors | synthetic STEP file written by hand from ISO 10303-21 for the kernel regression case of tangency-labs/solidcraft#3352 | MIT OR Apache-2.0 |
+| tests/kernel-cases/import/3730-void-oriented-shell-false/input.step | SolidCraft contributors | synthetic STEP file written by hand from ISO 10303-21 for the kernel regression case of tangency-labs/solidcraft#3730 | MIT OR Apache-2.0 |
+| tests/kernel-cases/import/3880-cylinder-seam-edge/input.step | step-conformance contributors | copy of tests/step-conformance/cylinder_seam.step (generated from formulas by https://github.com/dan335/step-conformance, corpus/generated, 96f30bb); kernel regression case for tangency-labs/solidcraft#3880 | CC0-1.0 |
+| tests/kernel-cases/import/3880-nurbs-hemisphere-dome/input.step | step-conformance contributors | copy of tests/step-conformance/dome_nurbs.step (generated from formulas by https://github.com/dan335/step-conformance, corpus/generated, 96f30bb); kernel regression case for tangency-labs/solidcraft#3880 | CC0-1.0 |
+| tests/kernel-cases/import/3963-closed-spline-edge-vertex-past-start/input.step | SolidCraft contributors | synthetic STEP file written by hand from ISO 10303-21 for the kernel regression case of tangency-labs/solidcraft#3963 | MIT OR Apache-2.0 |
+| tests/kernel-cases/import/4005-cylinder-written-as-near-zero-cone/input.step | SolidCraft contributors | synthetic STEP file written by hand from ISO 10303-21 for the kernel regression case of tangency-labs/solidcraft#4005 | MIT OR Apache-2.0 |
+| tests/kernel-cases/import/4006-plane-written-as-cone-of-nearly-right-angle/input.step | SolidCraft contributors | synthetic STEP file written by hand from ISO 10303-21 for the kernel regression case of tangency-labs/solidcraft#4006 | MIT OR Apache-2.0 |
+| tests/ssi-corpus/cases/*.json.gz, tests/ssi-corpus/LICENSE-MIT, tests/ssi-corpus/LICENSE-APACHE | ssi-corpus contributors (jyviko) | 119 surface/surface intersection cases with exact ground truth from https://github.com/jyviko/ssi-corpus (cases/data, b04c8a6), gzip-compressed, unchanged; SSI scorer fixtures (tests/ssi-corpus/README.md) | MIT OR Apache-2.0 |
+| tests/ssi-corpus/cases/y23_*.json.gz | Yang, Jia and Yan (paper authors: published surfaces, figures and topology); ssi-corpus contributors (reconstructions and truth) | 25 cases built from Yang, Jia & Yan 2023, "Topology Guaranteed B-Spline Surface/Surface Intersection", ACM Transactions on Graphics 42(6), Article 211; each cites the paper in its `source` field | CC-BY 4.0 (paper); MIT OR Apache-2.0 (case files) |
 | tests/step-regressions/rod_doubled_edge.step | SolidCraft contributors | written by SolidCraft from the commands of #4598 (a bored rod moved 100 mm and exported); import regression fixture | MIT OR Apache-2.0 |
 | tests/oracle/17-loft/reference.stl | SolidCraft contributors | triangulation of our own recipe (tests/oracle/17-loft/recipe.json) built with FreeCAD as an external tool by tools/freecad-oracle | MIT OR Apache-2.0 |
 | tests/oracle/23-bracket-multifeature/reference.stl | SolidCraft contributors | triangulation of our own recipe (tests/oracle/23-bracket-multifeature/recipe.json) built with FreeCAD as an external tool by tools/freecad-oracle | MIT OR Apache-2.0 |
@@ -754,6 +770,8 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | docs/design/preferences/figures/view-shadow.dark.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
 | docs/design/preferences/figures/view-shadow.light.svg | SolidCraft contributors | original SolidCraft artwork drawn for the Preferences redesign (tracker #9863), extracted from the design board as a standalone SVG | MIT OR Apache-2.0 |
 | `assets/locales/pending/sketch-offset-instances.json` | SolidCraft contributors | Original offset instance-count label and translations | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/settings_profile.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original analytic head and shoulder geometry for settings profiles | MIT OR Apache-2.0 |
+| tests/kernel-cases/import/4561-convert-box-mesh-with-a-zero-area-triangle/box-degenerate.stl | SolidCraft contributors | synthetic ASCII STL written by hand: a box with one zero-area triangle, for the kernel regression case of tangency-labs/solidcraft#4561 | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 
@@ -793,6 +811,15 @@ in THIRD-PARTY-LICENSES.txt; no images or artwork from that project are copied.
 The glTF test files are built by the tests themselves (crates/io/src/gltf_in_tests.rs,
 crates/engine/src/tests/gltf_import.rs); no third-party models are committed.
 
+## Geometry kernel crates
+
+| Crate | Used for | Licence |
+|---|---|---|
+| solidcore (https://github.com/tangency-labs/solidcore, pinned by rev in Cargo.toml) | the Rust port of NVIDIA's SMLib: the B-rep kernel behind crates/smlib | Apache-2.0 (its NOTICE credits NVIDIA's USD BRep) |
+
+Linked as a crate; no code from it is copied into SolidCraft. Its licence text and NOTICE go
+into THIRD-PARTY-LICENSES.txt when `main` regenerates it.
+
 ## FreeCAD and Rhino import library
 
 FreeCAD `.FCStd` and Rhino `.3dm` files are read with [cadmpeg](https://github.com/cadmpeg/cadmpeg)
@@ -808,17 +835,13 @@ copied into SolidCraft.
 | SolidCraft file | Original contribution | Licence |
 |---|---|---|
 | crates/ui-egui/src/viewport.rs (`nearest_quarter_turn`, `axis_view_orbit`) | N3MI-DG's [PR #101](https://github.com/bherbruck/solidcraft/pull/101): [minimal TOP/BOTTOM turns](https://github.com/bherbruck/solidcraft/commit/c28e780f52490784ef5886f094b9d3f6d10c3e3f) and [drag-to-orbit](https://github.com/bherbruck/solidcraft/commit/f30b30be6ecc4e2e6544a851243137c01a354934), adapted to the axis gizmo | MIT OR Apache-2.0 |
+| crates/smlib/src/core/offset.rs (`draft`: the tilted planes and `SmBrep::LocalOperation`, the tail of the capi's `draft_faces`) | ablasik's `draft` in `crates/smlib/src/ffi/rs_ops2.rs` on [ablasik/solidcraft `app/solidcore-backend-on-develop`](https://github.com/ablasik/solidcraft/blob/9c7e8e31565e1823f0591b58e2967351c32af13f/crates/smlib/src/ffi/rs_ops2.rs), adapted to `core::offset`'s errors and checks | MIT OR Apache-2.0 |
 
 ## Vendored third-party code
 
 | Directory | Source | Licence | Changes |
 |---|---|---|---|
 | vendor/accesskit_macos | accesskit_macos 0.26.3, https://github.com/AccessKit/accesskit (The AccessKit contributors) | MIT OR Apache-2.0 | the subclassing adapter and its tests from 0.27.2: dropping the adapter keeps AppKit's key-value observers (vendor/README.md) |
-| vendor/truck-meshalgo | truck-meshalgo 0.4.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | meshing: bounded parameter searches, collapsed-boundary projection, subdivision and provisional fixed-grid previews (vendor/README.md) |
-| vendor/truck-stepio | truck-stepio 0.3.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | STEP writer: intersection-curve surfaces written at unique ids (vendor/README.md) |
-| vendor/truck-shapeops | truck-shapeops 0.4.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | robust meshing and nearest-parameter fallback in booleans; degenerate intersection-curve rejection; face and edge history of booleans; trace macro; corner choice at vertices several intersection curves end on; reuse of an operand's meshes (vendor/README.md) |
-| vendor/truck-geometry | truck-geometry 0.5.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | intersection curves divided from their neighbours' surface parameters; surface second derivatives (vendor/README.md) |
-| vendor/matext4cgmath | matext4cgmath 0.1.0, https://github.com/ricosjp/matext4cgmath (RICOS Co. Ltd.) | Apache-2.0 | root refinement stops after 100 Newton steps (vendor/README.md) |
 
 ## Vendored renderer compatibility fix
 

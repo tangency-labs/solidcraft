@@ -1,0 +1,70 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.spline.fit_point",
+   "params": {
+    "periodic": true,
+    "points": [
+     [
+      -11.4,
+      -15.85
+     ],
+     [
+      8.76,
+      -18.38
+     ],
+     [
+      25.67,
+      -12.81
+     ],
+     [
+      32.16,
+      3.86
+     ],
+     [
+      16.49,
+      26.89
+     ],
+     [
+      -9.75,
+      30.42
+     ],
+     [
+      -23.79,
+      7.12
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 10
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "distance": "1 mm",
+    "distance2": "7 mm",
+    "edges": [
+     [
+      -23.79,
+      7.12,
+      10
+     ]
+    ]
+   }
+  }
+ ]
+}

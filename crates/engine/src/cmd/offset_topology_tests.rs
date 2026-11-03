@@ -18,7 +18,7 @@ fn breaking_offset_preserves_downstream_material_history_and_source_independence
         let curves = session.model.state().sketch(sketch).unwrap().sketch.offset_boundary(&association).unwrap();
         run(&mut session, "sketch.finish", json!({}));
         run(&mut session, "solid.extrude", json!({"sketch":sketch,"profiles":{"offset_boundaries":[association]},"distance":2,"operation":"new"}));
-        let before_volume = session.world_state().bodies.last().unwrap().mesh().measure().volume.abs();
+        let before_volume = session.world_state().unwrap().bodies.last().unwrap().mesh().measure().volume.abs();
         run(&mut session, "sketch.edit", json!({"sketch":sketch}));
         let before = session.doc.to_json();
         let history = session.undo.len();
@@ -29,17 +29,17 @@ fn breaking_offset_preserves_downstream_material_history_and_source_independence
             matches!(&session.doc.features.last().unwrap().kind, FeatureKind::Extrude { profiles: ProfileSel::Curves { loops }, .. } if loops == &vec![curves.clone()])
         );
         let frozen = session.doc.to_json();
-        assert!((session.world_state().bodies.last().unwrap().mesh().measure().volume.abs() - before_volume).abs() < 1e-6);
+        assert!((session.world_state().unwrap().bodies.last().unwrap().mesh().measure().volume.abs() - before_volume).abs() < 1e-6);
         run(&mut session, "edit.undo", json!({}));
         assert_eq!(session.doc.to_json(), before);
         run(&mut session, "edit.redo", json!({}));
         assert_eq!(session.doc.to_json(), frozen);
         run(&mut session, "parameters.change", json!({"name":radius,"expression":"2 mm"}));
         assert!(session.model.results.iter().all(|result| result.error.is_none()));
-        assert!((session.world_state().bodies.last().unwrap().mesh().measure().volume.abs() - before_volume).abs() < 1e-6);
+        assert!((session.world_state().unwrap().bodies.last().unwrap().mesh().measure().volume.abs() - before_volume).abs() < 1e-6);
         let reopened = Session::new(solidcraft_doc::Document::from_json(&session.doc.to_json()).unwrap());
         assert!(reopened.model.results.iter().all(|result| result.error.is_none()));
-        assert!((reopened.world_state().bodies.last().unwrap().mesh().measure().volume.abs() - before_volume).abs() < 1e-6);
+        assert!((reopened.world_state().unwrap().bodies.last().unwrap().mesh().measure().volume.abs() - before_volume).abs() < 1e-6);
     }
 }
 
@@ -76,7 +76,7 @@ fn inset_past_corner_radius_creates_a_real_boundary_and_saved_profile_identity()
     assert!(matches!(&feature.kind, FeatureKind::Extrude { profiles: ProfileSel::OffsetBoundaries { associations }, .. } if associations.len() == 1));
     let check = |session: &Session| {
         assert!(session.model.results.iter().all(|result| result.error.is_none()));
-        let state = session.world_state();
+        let state = session.world_state().unwrap();
         let body = state.bodies.last().unwrap();
         // The exact inward parallel set is a sharp 73.2 by 63.2 rectangle.
         let mesh = body.mesh();
@@ -106,4 +106,45 @@ fn inset_past_corner_radius_creates_a_real_boundary_and_saved_profile_identity()
         assert_eq!(session.undo.len(), undo);
         assert_eq!(session.redo.len(), redo);
     }
+}
+
+/// #10984: a dog bone whose round ends touch at a cusp on each side. Drawn 2 mm outside, the
+/// outline meets in each notch outside the bone, where the two ends' copies cross before
+/// their ends. One notch ran both copies on to their far crossing instead, a loop into the
+/// bone, as both crossings are as far from the notch.
+#[test]
+fn an_outline_outside_a_dog_bone_meets_outside_both_notches() {
+    let mut session = Session::default();
+    run(&mut session, "sketch.create", json!({"plane":"XY","name":"Bone"}));
+    let sketch = session.active_sketch.unwrap();
+    run(&mut session, "sketch.line", json!({"points":[[-10,-10],[10,-10]]}));
+    run(&mut session, "sketch.arc.center_point", json!({"center":[20,-10],"start":[10,-10],"end":[20,0]}));
+    run(&mut session, "sketch.arc.center_point", json!({"center":[20,10],"start":[20,0],"end":[10,10]}));
+    run(&mut session, "sketch.line", json!({"points":[[10,10],[-10,10]]}));
+    run(&mut session, "sketch.arc.center_point", json!({"center":[-20,10],"start":[-10,10],"end":[-20,0]}));
+    run(&mut session, "sketch.arc.center_point", json!({"center":[-20,-10],"start":[-20,0],"end":[-10,-10]}));
+    run(&mut session, "sketch.offset", json!({"curves":["l1"],"distance":2,"side":[0,-40]}));
+    let state = session.model.state();
+    let sk = &state.sketch(sketch).unwrap().sketch;
+    let record = sk.offsets.last().unwrap();
+    assert_eq!(record.outputs.len(), 6);
+    let mut notches: Vec<f64> = Vec::new();
+    for id in &record.outputs {
+        let curve = &sk.curves[sk.curve_index(id).unwrap()];
+        let (a, b) = match curve.kind {
+            solidcraft_sketch::CurveKind::Line { a, b } | solidcraft_sketch::CurveKind::Arc { a, b, .. } => (a, b),
+            _ => panic!("{id} is no line or arc"),
+        };
+        for p in [sk.points[a].pos, sk.points[b].pos] {
+            if p.y.abs() < 1e-6 {
+                notches.push(p.x);
+            }
+        }
+    }
+    notches.sort_by(f64::total_cmp);
+    // The copies have radius 12 about centres 20 apart: they cross 12² − 10² = 44, √44 off
+    // the notch's line, outside it: x = ±(20 + √44).
+    let outside = 20.0 + 44f64.sqrt();
+    assert_eq!(notches.len(), 4, "{notches:?}");
+    assert!(notches.iter().zip([-outside, -outside, outside, outside]).all(|(x, want)| (x - want).abs() < 1e-6), "{notches:?}");
 }

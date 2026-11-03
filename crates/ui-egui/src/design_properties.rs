@@ -546,6 +546,7 @@ mod tests {
             assert_ne!(english.text(k.label), k.label, "`{}`'s label is in the English catalog", k.name);
         }
         let mut h = Harness::new();
+        h.app.preferences.language = "en".into();
         // A key a newer SolidCraft might read: kept as another tool's data, never labelled as one of ours.
         h.app.session.doc_mut().metadata.0.insert("future_key".into(), json!("kept"));
         h.step(&json!({"start": "document.metadata"})).unwrap();

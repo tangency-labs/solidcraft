@@ -89,7 +89,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "joint; a?, b?: joint origins as joint.create takes them (a side left out keeps its place; the two must stay on different occurrences); \
              type?, flip?, offset?, angle? (a number, or an expression the joint then follows), suppressed?, name?; the joint re-solves, keeping \
-             its limits and expressions (a relation's values start again where its parts are)",
+             its limits and expressions (a relation's values start again where its parts are); an edit that places it again (not a rename alone) \
+             meets a loop it closes as joint.create does, turning an angle a half turn where only that meets it",
         ),
     CommandSpec::new("joint.delete", "Delete Joint", delete).icon("delete").params("joint: id|name (or origin: name, link: index)"),
     CommandSpec::new("joint.list", "List Joints", list).icon("list").noundo().params(
@@ -107,7 +108,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("joint.solve", "Solve Joints", solve_cmd).icon("compute").params("re-place the occurrences from the joints → conflicts, errors, dof"),
     CommandSpec::new("inspect.interference", "Interference", super::interference::interference).at("SOLID", "INSPECT").icon("interference").noundo().params(
-        "bodies?: [names] (default: all, in world placement; a name that is no body is refused); budget_s?: seconds (default 240, at most 86400: pairs not finished by then are listed in unchecked as \"not checked: the time budget … ran out\" and the call returns) → interferences: pairs that overlap with the overlap volume, area, bounding box and centre (a pin a hair off the axis of a hole of its size also has near_coaxial: {offset_mm, length_mm}, its volume the crescent the walls share); unchecked: [{a, b, reason}], the pairs that could not be checked, with the reason, and each mesh body (STL, 3MF or OBJ import: not intersected) as {a: name, b: null, reason: \"mesh body: not checked\"}, so count: 0 is not read as no overlap (checked counts the solid bodies). Bodies are pruned by bounding box first, then by their display meshes (pairs whose meshes stay apart by more than their chord tolerances, neither inside the other, are clear without a boolean), so any number of bodies is fine; the pairs left are intersected exactly, in parallel on desktop, the slowest first; at most 20000 pairs whose boxes overlap are intersected per call (truncated: true and skipped_pairs: n say when more were left out). Also: pairs_candidate (boxes overlap), pairs_cleared (by the meshes), pairs_intersected, pairs_not_checked, budget_exceeded, threads (worker threads; 0: on the calling thread), boolean_ms and tessellate_ms (kernel time summed over the pairs), slowest: [{a, b, ms, boolean_ms, tessellate_ms}] and ms",
+        "bodies?: [names] (default: all, in world placement; a name that is no body is refused); budget_s?: seconds (default 240, at most 86400: pairs not finished by then are listed in unchecked as \"not checked: the time budget … ran out\" and the call returns) → interferences: pairs that overlap with the overlap volume, area, bounding box and centre; unchecked: [{a, b, reason}], the pairs that could not be checked, with the reason, and each mesh body (STL, 3MF or OBJ import: not intersected) as {a: name, b: null, reason: \"mesh body: not checked\"}, so count: 0 is not read as no overlap (checked counts the solid bodies). Bodies are pruned by bounding box first, then by their display meshes (pairs whose meshes stay apart by more than their chord tolerances, neither inside the other, are clear without a boolean), so any number of bodies is fine; the pairs left are intersected exactly, in parallel on desktop, the slowest first; at most 20000 pairs whose boxes overlap are intersected per call (truncated: true and skipped_pairs: n say when more were left out). Also: pairs_candidate (boxes overlap), pairs_cleared (by the meshes), pairs_intersected, pairs_not_checked, budget_exceeded, threads (worker threads; 0: on the calling thread), boolean_ms and tessellate_ms (kernel time summed over the pairs), slowest: [{a, b, ms, boolean_ms, tessellate_ms}] and ms",
     ),
 ];
 
@@ -792,7 +793,8 @@ const HALF_TURN_TRIALS: usize = 16;
 /// on the shortest joint path between its two parts, or one of each, a half turn, and keep the
 /// first that meets it with no new conflict or error elsewhere than `before` had (stored, for
 /// the caller's resolve). False, and nothing changed, when none does. Values a motion link or an
-/// expression sets, and turns their limits stop short, are left alone.
+/// expression sets, and turns their limits stop short, are left alone. `joint.edit` does the same
+/// for a joint it places again (#9687).
 fn close_by_half_turn(s: &mut Session, id: u64, before: &joints::Solution) -> bool {
     let asm = &s.doc.assembly;
     let Some(new) = asm.joints.iter().find(|j| j.id == id) else { return false };
@@ -1644,7 +1646,14 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
             j.values = q;
         }
     }
-    let sol = resolve(s);
+    let mut sol = resolve(s);
+    // An edit that places the joint again (Edit Joint's OK, Unsuppress) meets a loop it closes as
+    // joint.create does: a joint saved as a conflict before create turned its part (#9687), or
+    // unsuppressed after its part was turned away, is met then. A rename alone moves nothing.
+    let placed = reseat || bool_(p, "suppressed") == Some(false);
+    if placed && sol.conflicts.iter().any(|(c, ..)| *c == id) && close_by_half_turn(s, id, &sol) {
+        sol = resolve(s);
+    }
     Ok(sol_json(&sol, p))
 }
 

@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2003"
+ ],
+ "what": "mirror a feature with Join: the image meets its original along the mirror plane and the join was refused for its volume",
+ "source": "analytic",
+ "method": "base 20x20x10 = 4000; pad 10x10x5 on top at x 0..10 flush with the mirror plane x=0; its image (x -10..0) shares the x=0 face with it. Union pad+image = 20x10x5 = 1000; V = 5000",
+ "body_count": 1,
+ "volume_mm3": 5000.0
+}

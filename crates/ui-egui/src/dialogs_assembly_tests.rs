@@ -356,7 +356,16 @@ fn edit_joint_shows_components_for_point_and_frame_origins() {
         assert_eq!((&after.a, &after.b), (&before.a, &before.b), "{command}");
 
         // Replacing just B with a face still edits only B, preserving A's point/frame.
-        let body = app.session.world_state().bodies.iter().find(|body| occurrence_of_body(&app.session, &body.name) == Some(b)).unwrap().name.clone();
+        let body = app
+            .session
+            .world_state()
+            .unwrap()
+            .bodies
+            .iter()
+            .find(|body| occurrence_of_body(&app.session, &body.name) == Some(b))
+            .unwrap()
+            .name
+            .clone();
         let picked = Sel::Face { body, index: 0, point: Vec3::new(40.0, 10.0, 10.0) };
         d.active = 1;
         d.pick(&app.session, picked);
@@ -511,7 +520,7 @@ fn straight_edge_snap_follows_a_rotated_occurrence() {
     let transform = app.session.doc.occurrence_of(b).unwrap().transform;
     let mid = solidcraft_engine::doc::apply_point(&transform, Vec3::new(30.0, 10.0, 10.0));
     let axis = solidcraft_engine::doc::apply_vector(&transform, Vec3::Y);
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let mesh = st.body("Body2").unwrap().mesh();
     let index = mesh.edges.iter().position(|e| polyline_mid(e).dist(mid) < 1e-6).unwrap();
     let snap = snap_of(&app.session, &Sel::Edge { body: "Body2".into(), index, point: mid }).unwrap();
@@ -699,7 +708,7 @@ fn face_snaps_mate_face_to_face() {
     for (id, p) in c {
         app.run(&id, p).unwrap();
     }
-    let st = app.session.world_state();
+    let st = app.session.world_state().unwrap();
     let b = st.body("Body2").unwrap().mesh().bounds();
     assert!((b.min.z - 10.0).abs() < 1e-6 && (b.max.z - 20.0).abs() < 1e-6, "{b:?}");
     // Edit Joint shows the mate unflipped; Flip puts B back into A's volume.
@@ -712,7 +721,7 @@ fn face_snaps_mate_face_to_face() {
     for (id, p) in apply_commands(&app, &e).unwrap() {
         app.run(&id, p).unwrap();
     }
-    let b = app.session.world_state().body("Body2").unwrap().mesh().bounds();
+    let b = app.session.world_state().unwrap().body("Body2").unwrap().mesh().bounds();
     assert!((b.max.z - 10.0).abs() < 1e-6, "{b:?}");
 }
 
@@ -1230,4 +1239,101 @@ fn components_from_bodies_dialog_select_all_cancel_and_ok() {
     }
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(h.app.session.doc, before, "the dialog applies one undoable command");
+}
+
+/// Edit Joint's Find Limits on a door hinged at the origin with a block in its way: clicked in
+/// the Limits section, it fills both limits from where the door meets the block each way round
+/// (rounded toward the door's value, so they stay clear), says what stopped each side under the
+/// row, and OK keeps them. The design is not changed until then.
+#[test]
+fn find_limits_fills_the_limits_from_where_the_door_meets_the_block() {
+    let mut s = Session::default();
+    for (name, corner, size) in [("Door", [0, 0, 0], [100, 4, 50]), ("Block", [60, 30, 0], [20, 20, 50])] {
+        for (id, p) in [
+            ("component.activate", json!({"component": "root"})),
+            ("component.create", json!({"name": name, "grounded": false})),
+            ("solid.box", json!({"length": size[0], "width": size[1], "height": size[2], "corner": corner})),
+        ] {
+            s.execute(id, &p).unwrap();
+        }
+    }
+    let hinge = json!({"type": "revolute", "a": {"occurrence": 0, "point": [0, 0, 0]}, "b": {"occurrence": "Door", "point": [0, 0, 0]}, "flip": true, "name": "Hinge"});
+    s.execute("joint.create", &hinge).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    let id = app.session.doc.assembly.joints[0].id;
+    app.dialog = edit_joint(&app, id);
+    let before = app.session.doc.clone();
+    let ctx = crate::fonts::test_context();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    let frame = |app: &mut SolveApp, events: Vec<egui::Event>| {
+        let input = egui::RawInput { screen_rect: Some(screen), events, ..Default::default() };
+        let mut out = ctx.run_ui(input, |ui| crate::dialogs::show(app, ui.ctx()));
+        // Nothing is painted: drop the texture changes (an unapplied delta panics on drop).
+        out.textures_delta.clear();
+        out
+    };
+    let click = |app: &mut SolveApp, text: &str| {
+        // The auto-sized dialog takes a few frames to settle.
+        for _ in 0..3 {
+            frame(app, vec![]);
+        }
+        let out = frame(app, vec![]);
+        let at = text_at(&out, text).unwrap_or_else(|| panic!("no `{text}` to click"));
+        let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        frame(app, vec![egui::Event::PointerMoved(at)]);
+        frame(app, vec![button(true)]);
+        frame(app, vec![button(false)]);
+    };
+    click(&mut app, &crate::i18n::tr_label("Limits").to_uppercase());
+    click(&mut app, crate::i18n::tr("joint.find_limits"));
+    assert_eq!(*app.session.doc, *before, "nothing changes until OK");
+    let Some(Kind::Assembly(Asm::Joint(f))) = app.dialog.as_ref().map(|d| &d.kind) else { panic!("the dialog stays open") };
+    // The door's face 4 mm off its hinge line meets the block's corner (80, 30) opening, and the
+    // face through its hinge line the corner (60, 50) a turn back the other way.
+    let max = (30f64.atan2(80.0) - (4.0 / 80f64.hypot(30.0)).asin()).to_degrees();
+    let min = 50f64.atan2(60.0).to_degrees() - 360.0;
+    let (lo, hi) = (((min * 10.0) - 1e-6).ceil() / 10.0, ((max * 10.0) + 1e-6).floor() / 10.0);
+    assert_eq!(f.limits[0], (true, num(lo, "deg"), num(hi, "deg")), "{:?}", f.found);
+    assert!(f.found[0].contains("Door:1") && f.found[0].contains("Block:1") && f.found[0].lines().count() == 2, "{:?}", f.found);
+    assert!(f.found_note.is_none(), "{:?}", f.found_note);
+    let d = app.dialog.as_ref().unwrap();
+    for (id, p) in apply_commands(&app, d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    let (a, b) = app.session.doc.assembly.joints[0].limits[0].unwrap();
+    assert!((a.to_degrees() - lo).abs() < 1e-9 && (b.to_degrees() - hi).abs() < 1e-9, "{a} {b}");
+}
+
+/// The search runs on the joint as the dialog has it, not as saved: a door edited to swing the
+/// other way (flipped) before Find Limits gets that door's limits, which OK then applies with it.
+/// A slider whose way out is free leaves that side's field as it was and the row unticked.
+#[test]
+fn find_limits_searches_the_joint_as_edited_and_leaves_a_free_side() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    app.run("joint.create", json!({"type": "slider", "a": {"occurrence": a, "face": [20, 10, 5]}, "b": {"occurrence": b, "face": [30, 10, 5]}}))
+        .unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut d = edit_joint(&app, id).unwrap();
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("no edit") };
+    let untouched = f.limits[0].clone();
+    // With the sides as the dialog opened on them (Edit Joint's side picks).
+    assert_eq!(d.inputs.len(), 2);
+    find_limits(&app, f, id, &d.inputs);
+    // B slides into A one way (they touch face to face already: it can't go further) and away
+    // from it the other, where nothing is in its way.
+    assert_eq!(f.limits[0].0, untouched.0, "one side found: the row stays as it was: {:?}", f.found);
+    assert!(f.limits[0].1 == untouched.1 || f.limits[0].2 == untouched.2, "{:?} {:?}", f.limits, f.found);
+    assert!(f.found[0].contains(crate::i18n::tr_label("Minimum")) && f.found[0].contains(crate::i18n::tr_label("Maximum")), "{:?}", f.found);
+    assert!(f.found_note.is_none(), "{:?}", f.found_note);
+    // Edited after the search, the joint is no longer the one searched (its notes then go).
+    let searched = f.searched.clone().expect("what was searched");
+    assert!(searched.current(&app, f, &d.inputs));
+    f.flip = !f.flip;
+    assert!(!searched.current(&app, f, &d.inputs), "a flipped joint is not the one searched");
+    f.flip = !f.flip;
+    // A form that can't be applied says why instead.
+    f.offset[2] = "nonsense".into();
+    find_limits(&app, f, id, &d.inputs);
+    assert!(f.found_note.is_some() && f.found.is_empty(), "{:?}", f.found_note);
 }

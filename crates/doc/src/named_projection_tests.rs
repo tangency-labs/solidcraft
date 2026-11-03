@@ -28,7 +28,7 @@ fn named_manual_projection_keeps_its_body_and_face_at_shared_boundaries() {
     sketch.links[0].source = LinkSource::Face { body: "Source".into(), at: Vec3::new(0., 0., 10.) };
     let mut current = ModelState::default();
     current.bodies.extend([named_box("Source", 20., 20.), named_box("Control", 5., 10.)]);
-    assert!(crate::project::refresh_links(&doc, &BTreeMap::new(), &current, &plane, &mut sketch).is_empty());
+    assert!(crate::project::refresh_links(&doc, &BTreeMap::new(), &current, &plane, &mut sketch).unwrap().is_empty());
     assert!(!sketch.links[0].lost);
     assert!(sketch.points.iter().any(|point| point.pos.x > 19.));
     assert!(sketch.points.iter().any(|point| point.pos.y > 19.));
@@ -40,9 +40,9 @@ fn named_manual_projection_keeps_its_body_and_face_at_shared_boundaries() {
     let saved = sketch.clone();
     let mut missing = ModelState::default();
     missing.bodies.push(named_box("Control", 5., 10.));
-    let warnings = crate::project::refresh_links(&doc, &BTreeMap::new(), &missing, &plane, &mut sketch);
-    assert!(sketch.links[0].lost);
-    assert!(!warnings.is_empty());
+    // Its body gone, the named face finds nothing: the sketch fails, asking for it again.
+    let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &missing, &plane, &mut sketch).unwrap_err();
+    assert!(matches!(&error, crate::DocError::Reselect { reference, .. } if reference == "shared:top"), "{error}");
     assert_eq!(sketch.curves, saved.curves);
     assert_eq!(sketch.points, saved.points);
     assert_eq!(sketch.links[0].id, link);

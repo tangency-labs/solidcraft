@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1040"
+ ],
+ "what": "a 1200 x 100 x 1 strip (diagonal over 1000 times its thickness) converted to sheet metal: refused with no outline on that face",
+ "source": "analytic",
+ "method": "V = 1200*100*1 = 120000 mm3, area 2*1200*100 + 2*(1200+100)*1 = 242600 mm2",
+ "body_count": 1,
+ "volume_mm3": 120000.0,
+ "area_mm2": 242600.0
+}

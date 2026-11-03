@@ -47,7 +47,7 @@ nix = { workspace = true }
 winreg = "0.56"
 
 [dev-dependencies]
-solidcraft-engine = { workspace = true, features = ["bundled-render-library"] }
+solidcraft-engine = { workspace = true, features = ["bundled-render-library", "profile"] }
 # Parse the source guard structurally, including code after inline test modules.
 syn = { workspace = true, features = ["visit"] }
 # The catalog guard reads every UI source file as Rust tokens; already in the tree through

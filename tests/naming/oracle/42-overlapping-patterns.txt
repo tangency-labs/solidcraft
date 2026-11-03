@@ -1,0 +1,300 @@
+# oracle/42-overlapping-patterns: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Plate: 76 faces, 222 edges
+Plate face F2:side:l1
+Plate face F2:side:l2
+Plate face F2:side:l3
+Plate face F2:side:l4
+Plate face F2:start
+Plate face F2:top
+Plate face F4:side:c1#1
+Plate face F4:side:c1#2
+Plate face F4:side:c1@F5.1#1
+Plate face F4:side:c1@F5.1#2
+Plate face F4:side:c1@F5.10#1#1 [geometric]
+Plate face F4:side:c1@F5.10#1#2 [geometric]
+Plate face F4:side:c1@F5.10#2
+Plate face F4:side:c1@F5.11#1
+Plate face F4:side:c1@F5.11#2#1 [geometric]
+Plate face F4:side:c1@F5.11#2#2 [geometric]
+Plate face F4:side:c1@F5.12#1
+Plate face F4:side:c1@F5.12#2
+Plate face F4:side:c1@F5.13#1#1 [geometric]
+Plate face F4:side:c1@F5.13#1#2 [geometric]
+Plate face F4:side:c1@F5.13#2
+Plate face F4:side:c1@F5.14#1
+Plate face F4:side:c1@F5.14#2#1 [geometric]
+Plate face F4:side:c1@F5.14#2#2 [geometric]
+Plate face F4:side:c1@F5.15#1
+Plate face F4:side:c1@F5.15#2
+Plate face F4:side:c1@F5.16#1
+Plate face F4:side:c1@F5.16#2
+Plate face F4:side:c1@F5.17#1
+Plate face F4:side:c1@F5.17#2
+Plate face F4:side:c1@F5.18#1
+Plate face F4:side:c1@F5.18#2
+Plate face F4:side:c1@F5.19#1
+Plate face F4:side:c1@F5.19#2
+Plate face F4:side:c1@F5.2#1
+Plate face F4:side:c1@F5.2#2
+Plate face F4:side:c1@F5.20#1
+Plate face F4:side:c1@F5.20#2
+Plate face F4:side:c1@F5.21#1
+Plate face F4:side:c1@F5.21#2
+Plate face F4:side:c1@F5.22#1
+Plate face F4:side:c1@F5.22#2
+Plate face F4:side:c1@F5.23#1
+Plate face F4:side:c1@F5.23#2
+Plate face F4:side:c1@F5.24#1
+Plate face F4:side:c1@F5.24#2
+Plate face F4:side:c1@F5.3#1
+Plate face F4:side:c1@F5.3#2
+Plate face F4:side:c1@F5.4#1
+Plate face F4:side:c1@F5.4#2
+Plate face F4:side:c1@F5.5#1
+Plate face F4:side:c1@F5.5#2
+Plate face F4:side:c1@F5.6#1
+Plate face F4:side:c1@F5.6#2
+Plate face F4:side:c1@F5.7#1
+Plate face F4:side:c1@F5.7#2
+Plate face F4:side:c1@F5.8#1
+Plate face F4:side:c1@F5.8#2
+Plate face F4:side:c1@F5.9#1
+Plate face F4:side:c1@F5.9#2
+Plate face F7:side:c1#1
+Plate face F7:side:c1#2
+Plate face F7:side:c1@F8.1#1
+Plate face F7:side:c1@F8.1#2
+Plate face F7:side:c1@F8.2#1
+Plate face F7:side:c1@F8.2#2
+Plate face F7:side:c1@F8.3#1
+Plate face F7:side:c1@F8.3#2
+Plate face F7:side:c1@F8.4#1
+Plate face F7:side:c1@F8.4#2
+Plate face F7:side:c1@F8.5#1
+Plate face F7:side:c1@F8.5#2
+Plate face F7:side:c1@F8.6#1
+Plate face F7:side:c1@F8.6#2
+Plate face F7:side:c1@F8.7#1
+Plate face F7:side:c1@F8.7#2
+Plate edge F2:side:l1|F2:side:l2
+Plate edge F2:side:l1|F2:side:l4
+Plate edge F2:side:l1|F2:start
+Plate edge F2:side:l1|F2:top
+Plate edge F2:side:l2|F2:side:l3
+Plate edge F2:side:l2|F2:start
+Plate edge F2:side:l2|F2:top
+Plate edge F2:side:l3|F2:side:l4
+Plate edge F2:side:l3|F2:start
+Plate edge F2:side:l3|F2:top
+Plate edge F2:side:l4|F2:start
+Plate edge F2:side:l4|F2:top
+Plate edge F2:start|F4:side:c1#1
+Plate edge F2:start|F4:side:c1#2
+Plate edge F2:start|F4:side:c1@F5.1#1
+Plate edge F2:start|F4:side:c1@F5.1#2
+Plate edge F2:start|F4:side:c1@F5.10#1#1 [geometric]
+Plate edge F2:start|F4:side:c1@F5.10#1#2 [geometric]
+Plate edge F2:start|F4:side:c1@F5.10#2
+Plate edge F2:start|F4:side:c1@F5.11#1
+Plate edge F2:start|F4:side:c1@F5.11#2#1 [geometric]
+Plate edge F2:start|F4:side:c1@F5.11#2#2 [geometric]
+Plate edge F2:start|F4:side:c1@F5.12#1
+Plate edge F2:start|F4:side:c1@F5.12#2
+Plate edge F2:start|F4:side:c1@F5.13#1#1 [geometric]
+Plate edge F2:start|F4:side:c1@F5.13#1#2 [geometric]
+Plate edge F2:start|F4:side:c1@F5.13#2
+Plate edge F2:start|F4:side:c1@F5.14#1
+Plate edge F2:start|F4:side:c1@F5.14#2#1 [geometric]
+Plate edge F2:start|F4:side:c1@F5.14#2#2 [geometric]
+Plate edge F2:start|F4:side:c1@F5.15#1
+Plate edge F2:start|F4:side:c1@F5.15#2
+Plate edge F2:start|F4:side:c1@F5.16#1
+Plate edge F2:start|F4:side:c1@F5.16#2
+Plate edge F2:start|F4:side:c1@F5.17#1
+Plate edge F2:start|F4:side:c1@F5.17#2
+Plate edge F2:start|F4:side:c1@F5.18#1
+Plate edge F2:start|F4:side:c1@F5.18#2
+Plate edge F2:start|F4:side:c1@F5.19#1
+Plate edge F2:start|F4:side:c1@F5.19#2
+Plate edge F2:start|F4:side:c1@F5.2#1
+Plate edge F2:start|F4:side:c1@F5.2#2
+Plate edge F2:start|F4:side:c1@F5.20#1
+Plate edge F2:start|F4:side:c1@F5.20#2
+Plate edge F2:start|F4:side:c1@F5.21#1
+Plate edge F2:start|F4:side:c1@F5.21#2
+Plate edge F2:start|F4:side:c1@F5.22#1
+Plate edge F2:start|F4:side:c1@F5.22#2
+Plate edge F2:start|F4:side:c1@F5.23#1
+Plate edge F2:start|F4:side:c1@F5.23#2
+Plate edge F2:start|F4:side:c1@F5.24#1
+Plate edge F2:start|F4:side:c1@F5.24#2
+Plate edge F2:start|F4:side:c1@F5.3#1
+Plate edge F2:start|F4:side:c1@F5.3#2
+Plate edge F2:start|F4:side:c1@F5.4#1
+Plate edge F2:start|F4:side:c1@F5.4#2
+Plate edge F2:start|F4:side:c1@F5.5#1
+Plate edge F2:start|F4:side:c1@F5.5#2
+Plate edge F2:start|F4:side:c1@F5.6#1
+Plate edge F2:start|F4:side:c1@F5.6#2
+Plate edge F2:start|F4:side:c1@F5.7#1
+Plate edge F2:start|F4:side:c1@F5.7#2
+Plate edge F2:start|F4:side:c1@F5.8#1
+Plate edge F2:start|F4:side:c1@F5.8#2
+Plate edge F2:start|F4:side:c1@F5.9#1
+Plate edge F2:start|F4:side:c1@F5.9#2
+Plate edge F2:start|F7:side:c1#1
+Plate edge F2:start|F7:side:c1#2
+Plate edge F2:start|F7:side:c1@F8.1#1
+Plate edge F2:start|F7:side:c1@F8.1#2
+Plate edge F2:start|F7:side:c1@F8.2#1
+Plate edge F2:start|F7:side:c1@F8.2#2
+Plate edge F2:start|F7:side:c1@F8.3#1
+Plate edge F2:start|F7:side:c1@F8.3#2
+Plate edge F2:start|F7:side:c1@F8.4#1
+Plate edge F2:start|F7:side:c1@F8.4#2
+Plate edge F2:start|F7:side:c1@F8.5#1
+Plate edge F2:start|F7:side:c1@F8.5#2
+Plate edge F2:start|F7:side:c1@F8.6#1
+Plate edge F2:start|F7:side:c1@F8.6#2
+Plate edge F2:start|F7:side:c1@F8.7#1
+Plate edge F2:start|F7:side:c1@F8.7#2
+Plate edge F2:top|F4:side:c1#1
+Plate edge F2:top|F4:side:c1#2
+Plate edge F2:top|F4:side:c1@F5.1#1
+Plate edge F2:top|F4:side:c1@F5.1#2
+Plate edge F2:top|F4:side:c1@F5.10#1#1 [geometric]
+Plate edge F2:top|F4:side:c1@F5.10#1#2 [geometric]
+Plate edge F2:top|F4:side:c1@F5.10#2
+Plate edge F2:top|F4:side:c1@F5.11#1
+Plate edge F2:top|F4:side:c1@F5.11#2#1 [geometric]
+Plate edge F2:top|F4:side:c1@F5.11#2#2 [geometric]
+Plate edge F2:top|F4:side:c1@F5.12#1
+Plate edge F2:top|F4:side:c1@F5.12#2
+Plate edge F2:top|F4:side:c1@F5.13#1#1 [geometric]
+Plate edge F2:top|F4:side:c1@F5.13#1#2 [geometric]
+Plate edge F2:top|F4:side:c1@F5.13#2
+Plate edge F2:top|F4:side:c1@F5.14#1
+Plate edge F2:top|F4:side:c1@F5.14#2#1 [geometric]
+Plate edge F2:top|F4:side:c1@F5.14#2#2 [geometric]
+Plate edge F2:top|F4:side:c1@F5.15#1
+Plate edge F2:top|F4:side:c1@F5.15#2
+Plate edge F2:top|F4:side:c1@F5.16#1
+Plate edge F2:top|F4:side:c1@F5.16#2
+Plate edge F2:top|F4:side:c1@F5.17#1
+Plate edge F2:top|F4:side:c1@F5.17#2
+Plate edge F2:top|F4:side:c1@F5.18#1
+Plate edge F2:top|F4:side:c1@F5.18#2
+Plate edge F2:top|F4:side:c1@F5.19#1
+Plate edge F2:top|F4:side:c1@F5.19#2
+Plate edge F2:top|F4:side:c1@F5.2#1
+Plate edge F2:top|F4:side:c1@F5.2#2
+Plate edge F2:top|F4:side:c1@F5.20#1
+Plate edge F2:top|F4:side:c1@F5.20#2
+Plate edge F2:top|F4:side:c1@F5.21#1
+Plate edge F2:top|F4:side:c1@F5.21#2
+Plate edge F2:top|F4:side:c1@F5.22#1
+Plate edge F2:top|F4:side:c1@F5.22#2
+Plate edge F2:top|F4:side:c1@F5.23#1
+Plate edge F2:top|F4:side:c1@F5.23#2
+Plate edge F2:top|F4:side:c1@F5.24#1
+Plate edge F2:top|F4:side:c1@F5.24#2
+Plate edge F2:top|F4:side:c1@F5.3#1
+Plate edge F2:top|F4:side:c1@F5.3#2
+Plate edge F2:top|F4:side:c1@F5.4#1
+Plate edge F2:top|F4:side:c1@F5.4#2
+Plate edge F2:top|F4:side:c1@F5.5#1
+Plate edge F2:top|F4:side:c1@F5.5#2
+Plate edge F2:top|F4:side:c1@F5.6#1
+Plate edge F2:top|F4:side:c1@F5.6#2
+Plate edge F2:top|F4:side:c1@F5.7#1
+Plate edge F2:top|F4:side:c1@F5.7#2
+Plate edge F2:top|F4:side:c1@F5.8#1
+Plate edge F2:top|F4:side:c1@F5.8#2
+Plate edge F2:top|F4:side:c1@F5.9#1
+Plate edge F2:top|F4:side:c1@F5.9#2
+Plate edge F2:top|F7:side:c1#1
+Plate edge F2:top|F7:side:c1#2
+Plate edge F2:top|F7:side:c1@F8.1#1
+Plate edge F2:top|F7:side:c1@F8.1#2
+Plate edge F2:top|F7:side:c1@F8.2#1
+Plate edge F2:top|F7:side:c1@F8.2#2
+Plate edge F2:top|F7:side:c1@F8.3#1
+Plate edge F2:top|F7:side:c1@F8.3#2
+Plate edge F2:top|F7:side:c1@F8.4#1
+Plate edge F2:top|F7:side:c1@F8.4#2
+Plate edge F2:top|F7:side:c1@F8.5#1
+Plate edge F2:top|F7:side:c1@F8.5#2
+Plate edge F2:top|F7:side:c1@F8.6#1
+Plate edge F2:top|F7:side:c1@F8.6#2
+Plate edge F2:top|F7:side:c1@F8.7#1
+Plate edge F2:top|F7:side:c1@F8.7#2
+Plate edge F4:side:c1#1|F4:side:c1#2~1 [geometric]
+Plate edge F4:side:c1#1|F4:side:c1#2~2 [geometric]
+Plate edge F4:side:c1@F5.1#1|F4:side:c1@F5.1#2~1 [geometric]
+Plate edge F4:side:c1@F5.1#1|F4:side:c1@F5.1#2~2 [geometric]
+Plate edge F4:side:c1@F5.10#1#1|F4:side:c1@F5.10#2 [geometric]
+Plate edge F4:side:c1@F5.10#1#1|F7:side:c1@F8.6#1 [geometric]
+Plate edge F4:side:c1@F5.10#1#2|F4:side:c1@F5.10#2 [geometric]
+Plate edge F4:side:c1@F5.10#1#2|F7:side:c1@F8.6#2 [geometric]
+Plate edge F4:side:c1@F5.11#1|F4:side:c1@F5.11#2#1 [geometric]
+Plate edge F4:side:c1@F5.11#1|F4:side:c1@F5.11#2#2 [geometric]
+Plate edge F4:side:c1@F5.11#2#1|F4:side:c1@F5.11#2#2 [geometric]
+Plate edge F4:side:c1@F5.12#1|F4:side:c1@F5.12#2~1 [geometric]
+Plate edge F4:side:c1@F5.12#1|F4:side:c1@F5.12#2~2 [geometric]
+Plate edge F4:side:c1@F5.13#1#1|F4:side:c1@F5.13#1#2 [geometric]
+Plate edge F4:side:c1@F5.13#1#1|F4:side:c1@F5.13#2 [geometric]
+Plate edge F4:side:c1@F5.13#1#2|F4:side:c1@F5.13#2 [geometric]
+Plate edge F4:side:c1@F5.14#1|F4:side:c1@F5.14#2#1 [geometric]
+Plate edge F4:side:c1@F5.14#1|F4:side:c1@F5.14#2#2 [geometric]
+Plate edge F4:side:c1@F5.14#2#1|F7:side:c1@F8.2#1 [geometric]
+Plate edge F4:side:c1@F5.14#2#2|F7:side:c1@F8.2#2 [geometric]
+Plate edge F4:side:c1@F5.15#1|F4:side:c1@F5.15#2~1 [geometric]
+Plate edge F4:side:c1@F5.15#1|F4:side:c1@F5.15#2~2 [geometric]
+Plate edge F4:side:c1@F5.16#1|F4:side:c1@F5.16#2
+Plate edge F4:side:c1@F5.16#1|F7:side:c1@F8.7#1
+Plate edge F4:side:c1@F5.16#2|F7:side:c1@F8.7#2
+Plate edge F4:side:c1@F5.17#1|F4:side:c1@F5.17#2~1 [geometric]
+Plate edge F4:side:c1@F5.17#1|F4:side:c1@F5.17#2~2 [geometric]
+Plate edge F4:side:c1@F5.18#1|F4:side:c1@F5.18#2
+Plate edge F4:side:c1@F5.18#1|F7:side:c1@F8.1#1
+Plate edge F4:side:c1@F5.18#2|F7:side:c1@F8.1#2
+Plate edge F4:side:c1@F5.19#1|F4:side:c1@F5.19#2~1 [geometric]
+Plate edge F4:side:c1@F5.19#1|F4:side:c1@F5.19#2~2 [geometric]
+Plate edge F4:side:c1@F5.2#1|F4:side:c1@F5.2#2
+Plate edge F4:side:c1@F5.2#1|F7:side:c1@F8.4#2
+Plate edge F4:side:c1@F5.2#2|F7:side:c1@F8.4#1
+Plate edge F4:side:c1@F5.20#1|F4:side:c1@F5.20#2~1 [geometric]
+Plate edge F4:side:c1@F5.20#1|F4:side:c1@F5.20#2~2 [geometric]
+Plate edge F4:side:c1@F5.21#1|F4:side:c1@F5.21#2~1 [geometric]
+Plate edge F4:side:c1@F5.21#1|F4:side:c1@F5.21#2~2 [geometric]
+Plate edge F4:side:c1@F5.22#1|F4:side:c1@F5.22#2
+Plate edge F4:side:c1@F5.22#1|F7:side:c1#1
+Plate edge F4:side:c1@F5.22#2|F7:side:c1#2
+Plate edge F4:side:c1@F5.23#1|F4:side:c1@F5.23#2~1 [geometric]
+Plate edge F4:side:c1@F5.23#1|F4:side:c1@F5.23#2~2 [geometric]
+Plate edge F4:side:c1@F5.24#1|F4:side:c1@F5.24#2~1 [geometric]
+Plate edge F4:side:c1@F5.24#1|F4:side:c1@F5.24#2~2 [geometric]
+Plate edge F4:side:c1@F5.3#1|F4:side:c1@F5.3#2~1 [geometric]
+Plate edge F4:side:c1@F5.3#1|F4:side:c1@F5.3#2~2 [geometric]
+Plate edge F4:side:c1@F5.4#1|F4:side:c1@F5.4#2~1 [geometric]
+Plate edge F4:side:c1@F5.4#1|F4:side:c1@F5.4#2~2 [geometric]
+Plate edge F4:side:c1@F5.5#1|F4:side:c1@F5.5#2~1 [geometric]
+Plate edge F4:side:c1@F5.5#1|F4:side:c1@F5.5#2~2 [geometric]
+Plate edge F4:side:c1@F5.6#1|F4:side:c1@F5.6#2
+Plate edge F4:side:c1@F5.6#1|F7:side:c1@F8.5#2
+Plate edge F4:side:c1@F5.6#2|F7:side:c1@F8.5#1
+Plate edge F4:side:c1@F5.7#1|F4:side:c1@F5.7#2~1 [geometric]
+Plate edge F4:side:c1@F5.7#1|F4:side:c1@F5.7#2~2 [geometric]
+Plate edge F4:side:c1@F5.8#1|F4:side:c1@F5.8#2
+Plate edge F4:side:c1@F5.8#1|F7:side:c1@F8.3#2
+Plate edge F4:side:c1@F5.8#2|F7:side:c1@F8.3#1
+Plate edge F4:side:c1@F5.9#1|F4:side:c1@F5.9#2~1 [geometric]
+Plate edge F4:side:c1@F5.9#1|F4:side:c1@F5.9#2~2 [geometric]
+Plate edge F7:side:c1#1|F7:side:c1#2
+Plate edge F7:side:c1@F8.1#1|F7:side:c1@F8.1#2
+Plate edge F7:side:c1@F8.2#1|F7:side:c1@F8.2#2
+Plate edge F7:side:c1@F8.3#1|F7:side:c1@F8.3#2
+Plate edge F7:side:c1@F8.4#1|F7:side:c1@F8.4#2
+Plate edge F7:side:c1@F8.5#1|F7:side:c1@F8.5#2
+Plate edge F7:side:c1@F8.6#1|F7:side:c1@F8.6#2
+Plate edge F7:side:c1@F8.7#1|F7:side:c1@F8.7#2

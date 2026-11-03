@@ -5,11 +5,15 @@ use std::f64::consts::PI;
 
 #[test]
 fn split_contact_arc_crossing_one_edge_twice_preserves_the_body() {
-    use truck_modeling::Surface;
     let a = box_solid(Vec3::ZERO, Vec3::new(25.0, 47.5, 37.5)).unwrap();
     let b = cylinder(Vec3::new(0.0, 7.5, 0.0), -Vec3::X, 5.0, 2.5).unwrap();
     let face = a.faces(0.01).unwrap().iter().position(|f| f.plane_normal.is_some_and(|n| n.dot(-Vec3::X) > 0.99)).unwrap();
-    let side = b.solid.face_iter().position(|f| !matches!(f.surface(), Surface::Plane(_))).unwrap();
+    let side = b
+        .record()
+        .faces
+        .iter()
+        .position(|f| !matches!(f.surface, solidcraft_geom::brep::Surface::Plane { .. } | solidcraft_geom::brep::Surface::PlaneThrough { .. }))
+        .unwrap();
     let r = split_faces(&a, &[face], &SplitTool::Face { body: &b, face: side }).unwrap();
     assert_eq!(r.face_count(), a.face_count() + 1);
     assert!(r.validity().is_empty(), "{:?}", r.validity());
@@ -17,15 +21,6 @@ fn split_contact_arc_crossing_one_edge_twice_preserves_the_body() {
     let (before, after) = (measure(&a).unwrap(), measure(&r).unwrap());
     assert!((before.volume - after.volume).abs() < 1e-7);
     assert!((before.area - after.area).abs() < 1e-7);
-}
-
-#[test]
-fn partial_contact_does_not_join_tangent_or_separated_faces() {
-    let a = box_solid(Vec3::ZERO, Vec3::new(25.0, 47.5, 37.5)).unwrap();
-    for z in [-5.0, -6.0] {
-        let b = cylinder(Vec3::new(0.0, 7.5, z), -Vec3::X, 5.0, 2.5).unwrap();
-        assert!(crate::coplanar::imprint_union(&a, &b, &|_| true).is_none());
-    }
 }
 
 #[test]

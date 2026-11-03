@@ -34,7 +34,7 @@ mod component_clone;
 mod component_clone_assembly;
 mod construct;
 mod delete;
-mod diagnostics;
+pub(crate) mod diagnostics;
 mod edit;
 mod face;
 mod features;
@@ -58,6 +58,7 @@ pub use sketch_create::{tangent_arc_preview, tangent_arc_starts_at};
 pub use sketch_import::drawing_import_command;
 pub use sketch_modify::{extend_arc_preview, extend_preview, trim_piece};
 pub use view_dxf::sketch::exportable as view_dxf_exportable;
+pub(crate) use view_navigation::camera_form;
 pub use view_navigation::standard_view;
 mod component_link;
 pub use component_link::resolve_design_links;
@@ -97,7 +98,7 @@ mod script_tests;
 mod sheet;
 pub(crate) use sheet::{
     FlangeType, ThenStep, flange_edge, flange_edge_list, flange_position, flange_type, fold_points, fold_position, perforation_pattern, sheet_points,
-    then_list,
+    sheet_rule_name, then_list,
 };
 mod silhouette;
 mod sketch;

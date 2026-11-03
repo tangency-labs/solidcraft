@@ -1080,7 +1080,7 @@ impl Sketch {
                             pts.push(candidate.add_point(*p, None)?);
                         }
                         pts.push(end);
-                        CurveKind::Spline { pts, control: false, degree: 3, periodic: false }
+                        CurveKind::Spline { pts, control: false, degree: 3, periodic: false, nurbs: None }
                     }
                     Out::Arc { center, sweep, .. } => {
                         let c = candidate.add_point(*center, None)?;
@@ -1111,7 +1111,7 @@ mod tests {
     fn spline(coords: &[(f64, f64)], periodic: bool) -> (Sketch, usize) {
         let mut sk = Sketch::new();
         let pts = coords.iter().map(|(x, y)| sk.add_point(Vec2::new(*x, *y), None).unwrap()).collect();
-        let source = sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic }, None).unwrap();
+        let source = sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic, nurbs: None }, None).unwrap();
         (sk, source)
     }
 
@@ -1210,8 +1210,9 @@ mod tests {
         for (k, b) in beziers.iter().enumerate() {
             let mid = [1, 2].map(|i| sk.add_point(Vec2::new(b[i].0, b[i].1), None).unwrap());
             let end = if k + 1 == beziers.len() { first } else { sk.add_point(Vec2::new(b[3].0, b[3].1), None).unwrap() };
-            let c =
-                sk.add_curve(CurveKind::Spline { pts: vec![start, mid[0], mid[1], end], control: true, degree: 3, periodic: false }, None).unwrap();
+            let c = sk
+                .add_curve(CurveKind::Spline { pts: vec![start, mid[0], mid[1], end], control: true, degree: 3, periodic: false, nurbs: None }, None)
+                .unwrap();
             order.push((c, true));
             start = end;
         }

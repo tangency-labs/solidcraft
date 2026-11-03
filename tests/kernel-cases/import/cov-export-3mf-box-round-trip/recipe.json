@@ -1,0 +1,49 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 30,
+    "width": 20,
+    "height": 10,
+    "corner": [
+     5,
+     -10,
+     0
+    ],
+    "operation": "new",
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "file.export_3mf",
+   "params": {
+    "path": "$OUT/cov-export-3mf-box.3mf"
+   }
+  },
+  {
+   "command": "file.new",
+   "params": {
+    "name": "Reimported"
+   }
+  },
+  {
+   "command": "file.insert_mesh",
+   "params": {
+    "path": "$OUT/cov-export-3mf-box.3mf"
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "cov-export-3mf-box"
+   }
+  },
+  {
+   "command": "mesh.convert",
+   "params": {
+    "body": "Block"
+   }
+  }
+ ]
+}
