@@ -2971,7 +2971,10 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
             }
             ((None, Some(c)), None) if is_line(c) => {
                 let (a, b) = line_pts(sk, c).unwrap_or_default();
-                match auto_orientation(&ty, a, b, text_at) {
+                // An ellipse's axis is a construction axis, not a free line: its length, the
+                // whole axis, wherever the text is.
+                let ty = if ty == "auto" && sk.is_ellipse_axis(c) { "length" } else { ty.as_str() };
+                match auto_orientation(ty, a, b, text_at) {
                     "angle" => {
                         let angle = (b - a).angle();
                         (ConstraintKind::LineAngle { l: c, value: angle }, angle)

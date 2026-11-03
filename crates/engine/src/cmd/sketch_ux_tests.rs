@@ -1602,6 +1602,19 @@ fn an_ellipse_half_axis_dimension_follows_where_its_text_is_pulled() {
     let (_, major, minor) = ellipse_with_axes(&mut s, true);
     assert_eq!(run(&mut s, "sketch.dimension", json!({"entities": [major]}))["measured"], json!(40.0));
     assert_eq!(run(&mut s, "sketch.dimension", json!({"entities": [minor]}))["measured"], json!(16.0));
+    // Also with the text beside or above the box a turned axis spans, where a free line gives
+    // its horizontal or vertical distance; and it holds that half-axis, so D on the outline
+    // then gives the other one.
+    for (axis, at, whole) in [("major", [30.0, 0.0], 40.0), ("major", [0.0, -30.0], 40.0), ("minor", [20.0, 0.0], 16.0), ("minor", [0.0, 20.0], 16.0)]
+    {
+        let mut s = new_sketch();
+        let (e, major, minor) = ellipse_with_axes(&mut s, true);
+        let line = if axis == "major" { major } else { minor };
+        let r = run(&mut s, "sketch.dimension", json!({"entities": [line], "text_at": at}));
+        assert!(r["measured"].as_f64().is_some_and(|v| (v - whole).abs() < 1e-6), "{axis} axis, text at {at:?}: {r}");
+        let r = run(&mut s, "sketch.dimension", json!({"entities": [e], "text_at": [3, 16]}));
+        assert_ne!(r["axis"], json!(axis), "{axis} axis, text at {at:?}: {r}");
+    }
     // With one axis deleted the half-axis is still chosen by where the text is, as if the axis
     // were there: the major half-axis to the major end, the minor one to what is left of its axis
     // or, with that gone, as the minor radius.

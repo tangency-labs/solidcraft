@@ -1337,6 +1337,13 @@ impl Sketch {
         (major.is_some() || minor.is_some()).then_some((major, minor))
     }
 
+    /// Whether line `l` is one of an ellipse's axes (see [`Sketch::ellipse_axis_lines`]).
+    pub fn is_ellipse_axis(&self, l: usize) -> bool {
+        (0..self.curves.len())
+            .filter_map(|e| self.ellipse_axis_lines(e))
+            .any(|(major, minor)| major.is_some_and(|(line, _)| line == l) || minor.is_some_and(|(line, ..)| line == l))
+    }
+
     /// The curves joined end to end with curve `ci` (through shared or coincident end points),
     /// `ci` first, then the others in sketch order: what a double-click selects. An ellipse and
     /// its construction axes count as joined, as a rectangle's edges and its diagonals are.
