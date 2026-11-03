@@ -4508,7 +4508,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.viewport.hover = cand.as_ref().map(|c| c.0.clone());
     wake_centre(app, &hits);
 
-    crate::snap_wake::update(app);
+    let keep = crate::tool_modifiers::keep_snap_points(crate::tool_modifiers::Held::new(
+        ui.input(|i| i.modifiers),
+        crate::tool_modifiers::Platform::of(ui.ctx()),
+    ));
+    crate::snap_wake::update(app, keep, hover.filter(|_| inside).map(|p| (&proj, p)));
     // Select Other: a press held still opens the list of everything under it; while the list is
     // open its row under the pointer is what lights up. A mode lit in the navigation bar or a
     // held Space owns drags, not a still press, so only a navigation that has started cancels

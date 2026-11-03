@@ -9,6 +9,7 @@
 use egui::{Painter, Pos2, Stroke};
 use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::snap::{SnapKind, SnapPoint, snap_points};
 
 use crate::SolveApp;
@@ -25,6 +26,9 @@ pub const ON: f32 = 4.0;
 pub struct Woken {
     pub item: Option<Sel>,
     pub points: Vec<SnapPoint>,
+    /// The last item hovered that offered nothing the woken points lack: it is not asked again
+    /// while it stays under the pointer.
+    pub kept_over: Option<Sel>,
 }
 
 /// Whether snap points are on and the active dialog input takes them.
@@ -53,25 +57,72 @@ fn same_item(a: &Sel, b: &Sel) -> bool {
     }
 }
 
-/// After the hover was found this frame: a newly hovered edge or curve wakes its points (and the
-/// earlier ones sleep); a face does too unless an edge's or curve's points are awake, so the
-/// pointer can cross the faces between a rim and its centre. Anything else keeps them. All sleep
-/// when the input doesn't take them.
-pub fn update(app: &mut SolveApp) {
+/// After the hover was found this frame: a newly hovered edge, face or curve wakes its points
+/// and the earlier ones sleep, with these exceptions, so the pointer can travel to a point it
+/// was shown:
+/// - an item that offers nothing the woken points lack keeps them (a woken face's own edges, on
+///   the way to its corners and centres);
+/// - a face keeps an edge's or curve's points, so the pointer can cross the faces between a rim
+///   and its centre;
+/// - nothing changes them while the pointer is within reach of one of them (`near`: within
+///   [`REACH`] of a point, or inside a woken rim's circle on its way to the centre), or while
+///   `keep` is held (the Keep Snap Points binding, Shift by default).
+///
+/// Empty space keeps them; a vertex of another body, or an input that doesn't take them, puts
+/// them to sleep.
+pub fn update(app: &mut SolveApp, keep: bool, near: Option<(&Proj, Pos2)>) {
     if !wanted(app) {
         app.viewport.woken = Woken::default();
         return;
     }
-    let Some(item) = app.viewport.hover.as_ref().and_then(item_of) else { return };
-    if app.viewport.woken.item.as_ref().is_some_and(|w| same_item(w, &item)) {
+    if keep && app.viewport.woken.item.is_some() {
         return;
     }
-    let face = matches!(item, Sel::Face { .. });
-    if face && app.viewport.woken.item.as_ref().is_some_and(|w| !matches!(w, Sel::Face { .. })) {
+    if let Some(Hit::Vertex { body, .. }) = app.viewport.hover.as_ref()
+        && app.viewport.woken.points.first().is_some_and(|p| !p.body.is_empty() && p.body != *body)
+    {
+        app.viewport.woken = Woken::default();
+        return;
+    }
+    let Some(item) = app.viewport.hover.as_ref().and_then(item_of) else { return };
+    let woken = &app.viewport.woken;
+    if [&woken.item, &woken.kept_over].into_iter().flatten().any(|w| same_item(w, &item)) {
+        return;
+    }
+    // On the way to a woken point (within reach of one), nothing else takes over: not a rim seen
+    // through a hole at its centre, nor the next face at a corner they share.
+    if near.is_some_and(|(proj, pos)| in_reach(proj, pos, woken)) {
+        return;
+    }
+    if matches!(item, Sel::Face { .. }) && woken.item.as_ref().is_some_and(|w| !matches!(w, Sel::Face { .. })) {
         return;
     }
     let points = snap_points(&app.session, &item);
-    app.viewport.woken = Woken { item: Some(item), points };
+    // An item that offers nothing the woken points lack (a hole's rim after its wall) keeps them;
+    // it is remembered, so it is not asked again while it stays under the pointer.
+    let within = |a: &[SnapPoint], b: &[SnapPoint]| a.iter().all(|x| b.iter().any(|y| y.at.dist(x.at) <= 1e-6 * (1.0 + x.at.len())));
+    if !woken.points.is_empty() && within(&points, &woken.points) {
+        app.viewport.woken.kept_over = Some(item);
+        return;
+    }
+    app.viewport.woken = Woken { item: Some(item), points, kept_over: None };
+}
+
+/// Whether the pointer is still where the woken points lead it: within reach of one of them, or
+/// inside the circle a woken rim spans about its centre on screen (a hole's opening).
+fn in_reach(proj: &Proj, pos: Pos2, w: &Woken) -> bool {
+    if w.points.iter().filter_map(|p| proj.to_screen(p.at)).any(|p| p.distance(pos) <= REACH) {
+        return true;
+    }
+    let centre = w.points.iter().find(|p| p.kind == SnapKind::Centre).and_then(|p| proj.to_screen(p.at));
+    let on_edge = match &w.item {
+        Some(Sel::Edge { point, .. }) => proj.to_screen(*point),
+        _ => None,
+    };
+    match (centre, on_edge) {
+        (Some(c), Some(e)) => pos.distance(c) <= c.distance(e) + ON,
+        _ => false,
+    }
 }
 
 /// The woken points within reach of `pos`, nearest first, as vertex hits (with their distance).
