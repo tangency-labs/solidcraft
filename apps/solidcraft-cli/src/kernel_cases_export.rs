@@ -151,11 +151,15 @@ pub fn write(root: &Path, dir: &str, out: &Value, capture: Capture) -> Result<()
         (_, true) => {}
         (None, false) => why_not.push("the case did not run".into()),
         (Some(Err(e)), false) => {
-            // The run stopped. It stopped in the kernel when the last operation traced failed: the
-            // engine reports that failure in its own words.
+            // The run stopped. It stopped in the kernel when the last operation that failed is
+            // followed by no operation but copies (a copy or a tagged copy, which build nothing):
+            // nothing was built after it, so the engine's error reports that failure in its own
+            // words. An operation that ran after it means the engine went on and failed itself.
             outcome = json!({"ran": false, "engine_error": e});
-            match t.calls.len().checked_sub(1).and_then(|i| t.calls.get(i).map(|c| (i, c))) {
-                Some((i, c)) if c.3.is_err() => {
+            let last_failed = t.calls.iter().rposition(|c| c.3.is_err());
+            let built_after = |i: usize| t.calls.iter().skip(i + 1).any(|c| !matches!(c.0, "copy" | "tagged"));
+            match last_failed.filter(|&i| !built_after(i)).and_then(|i| t.calls.get(i).map(|c| (i, c))) {
+                Some((i, c)) => {
                     failed_call = Some(i);
                     ends.extend(c.1.iter().copied());
                     if let Err(k) = c.3 {
@@ -165,15 +169,15 @@ pub fn write(root: &Path, dir: &str, out: &Value, capture: Capture) -> Result<()
                         }
                     }
                 }
-                Some(_) => why_not.push(format!("the failure is SolidCraft's, not a kernel operation's: {e}")),
-                None => why_not.push(format!("no kernel operation ran before the failure: {e}")),
+                None if t.calls.is_empty() => why_not.push(format!("no kernel operation ran before the failure: {e}")),
+                None => why_not.push(format!("the failure is SolidCraft's, not a kernel operation's: {e}")),
             }
         }
         (Some(Ok(world)), false) => {
             let operands = t.operands();
             let mut made = 0;
             for (name, record) in world {
-                let from_op = t.exports.iter().rev().find(|(_, r)| *r == record).map(|(id, _)| *id).filter(|id| t.producer.contains_key(id));
+                let from_op = t.exports.iter().rev().find(|(id, r)| *r == record && t.producer.contains_key(id)).map(|(id, _)| *id);
                 let operand = t.imports.iter().filter(|(i, (r, _, _))| *r == record && operands.contains(i)).map(|(i, _)| *i).min();
                 match (from_op, operand) {
                     (Some(id), _) => {
@@ -274,8 +278,12 @@ pub fn write(root: &Path, dir: &str, out: &Value, capture: Capture) -> Result<()
     let path = folder.join(format!("{id}.json"));
     let text = serde_json::to_string(&entry).map_err(|e| e.to_string())?;
     std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+    // Cases run in parallel processes: each writes its own file and renames it over the shared
+    // one, so no reader sees a torn file (every process writes the same fix set).
     let fixes = serde_json::to_string_pretty(&smlib_trace::fixes()).map_err(|e| e.to_string())?;
-    std::fs::write(root.join("fixes.json"), fixes).map_err(|e| format!("{}: {e}", root.display()))
+    let own = root.join(format!("fixes.json.{}", std::process::id()));
+    std::fs::write(&own, fixes).map_err(|e| format!("{}: {e}", own.display()))?;
+    std::fs::rename(&own, root.join("fixes.json")).map_err(|e| format!("{}: {e}", root.display()))
 }
 
 #[cfg(test)]

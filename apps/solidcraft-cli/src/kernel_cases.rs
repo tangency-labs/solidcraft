@@ -743,7 +743,7 @@ fn check_case_in(
     }
     let ran = s.run_script(&commands);
     // The trace ends with the commands: grading reads the bodies through the kernel too.
-    if let Some(c) = capture.as_deref_mut() {
+    if let Some(c) = &mut capture {
         c.events = solidcraft_engine::kernel::smlib_trace::finish();
         c.ran = Some(match &ran {
             Ok(_) => s.world_state().map(|w| w.bodies.iter().map(|b| (b.name.clone(), b.body.record().clone())).collect()).map_err(|e| e.to_string()),

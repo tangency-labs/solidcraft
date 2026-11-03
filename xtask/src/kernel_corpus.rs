@@ -20,10 +20,6 @@ use crate::root;
 fn reason_kind(why: &str) -> &'static str {
     if why.starts_with("SolidCraft has no command") {
         "SolidCraft has no command for it yet"
-    } else if why.starts_with("graded on what SolidCraft computes") {
-        "graded on SolidCraft's own measures (continuity, mesh, files, command answers, construction, flat pattern)"
-    } else if why.contains("graded merged across analytic surfaces") {
-        "counts graded merged across analytic surfaces (SolidCraft's merged_topology)"
     } else if why.starts_with("no kernel operation ran before the failure") || why.starts_with("the failure is SolidCraft's") {
         "refused or failed in SolidCraft, not in a kernel operation"
     } else if why.contains("is no kernel operation's output nor an operand") {
@@ -143,9 +139,9 @@ pub(crate) fn manifest(dir: &Path, results: &[Value], golden: Option<&Value>) ->
     for f in files {
         let e = read(&f);
         let area = e["area"].as_str().unwrap_or("?").to_string();
-        let a = areas.entry(area.clone()).or_insert_with(|| {
-            json!({"cases": 0, "expressible": 0, "operation_expressible": 0, "not_expressible": 0, "chain": {}, "reasons": {}, "ungraded": {}})
-        });
+        let a = areas.entry(area.clone()).or_insert_with(
+            || json!({"cases": 0, "expressible": 0, "operation_expressible": 0, "not_expressible": 0, "chain": {}, "reasons": {}, "ungraded": {}}),
+        );
         let bump = |a: &mut Value, k: &str| a[k] = json!(a[k].as_u64().unwrap_or(0) + 1);
         bump(a, "cases");
         if e["expressible"].as_bool() == Some(true) {
@@ -172,7 +168,8 @@ pub(crate) fn manifest(dir: &Path, results: &[Value], golden: Option<&Value>) ->
         }
     }
     let m = json!({
-        "solidcraft": git(&["rev-parse", "HEAD"]),
+        // A copy without git (synced to a build machine) names no commit: say so, never "".
+        "solidcraft": Some(git(&["rev-parse", "HEAD"])).filter(|c| !c.is_empty()),
         "solidcore": solidcore_pin(),
         "fixes": "fixes.json",
         "areas": areas,
@@ -194,8 +191,6 @@ mod tests {
     #[test]
     fn every_reason_the_export_gives_has_its_kind() {
         for (why, kind) in [
-            ("graded on what SolidCraft computes: continuity", "graded on SolidCraft's own measures"),
-            ("faces graded merged across analytic surfaces (6), the records have 8", "counts graded merged"),
             ("the failure is SolidCraft's, not a kernel operation's: x", "refused or failed in SolidCraft"),
             ("body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it", "a final body built or changed"),
             ("the rig's run hang: no result", "the rig's run hung"),

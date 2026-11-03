@@ -105,9 +105,16 @@ pub(crate) fn maybe(op: &'static str, inputs: &[&Brep], r: &Result<Option<Brep>>
 /// What a pick by points is of.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PickKind {
+    /// The edge nearest each point, unambiguous (`pick_edges`, the blends' picker).
     Edge,
+    /// The face nearest each point, unambiguous (`pick_faces`, the offsets' picker).
     Face,
+    /// The vertex nearest each point, unambiguous (`pick_vertices`, the setbacks' picker).
     Vertex,
+    /// The nearest edge (`nearest_edge`, an extension's picker).
+    NearestEdge,
+    /// The nearest face (`face_at`, an untrim's picker).
+    NearestFace,
 }
 
 /// What one point picked: the entity's index in the body's list of its kind, and where it is
@@ -140,8 +147,8 @@ pub(crate) fn picks(body: &Brep, kind: PickKind, points: &[[f64; 3]], tolerance:
         Err(e) => json!({"error": e.to_string()}),
     };
     let kind = match kind {
-        PickKind::Edge => "edge",
-        PickKind::Face => "face",
+        PickKind::Edge | PickKind::NearestEdge => "edge",
+        PickKind::Face | PickKind::NearestFace => "face",
         PickKind::Vertex => "vertex",
     };
     json!({"kind": kind, "points": points, "tolerance": tolerance, "picked": picked})

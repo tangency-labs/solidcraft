@@ -77,7 +77,7 @@ const ONE: BrepId = BrepId::from_index(0);
 
 /// `face_at`: the face of `b` nearest `p`, within `tol` (`SmApiFaceClosestPoint`; a face whose
 /// query fails is skipped).
-fn face_at(k: &mut Kernel, b: &mut Brep, p: Point3, tol: f64) -> solidcore::Result<Option<FaceId>> {
+pub(super) fn face_at(k: &mut Kernel, b: &mut Brep, p: Point3, tol: f64) -> solidcore::Result<Option<FaceId>> {
     let all = brep_p1::faces(b, None)?;
     let mut shapes = Vec::with_capacity(all.len());
     for &f in &all {
@@ -503,7 +503,7 @@ fn edge_distance(k: &Kernel, b: &Brep, e: EdgeId, p: Vec3) -> f64 {
 }
 
 /// `nearest_edge`: the distance to the nearest of `edges`, with that edge.
-fn nearest_edge(k: &Kernel, b: &Brep, edges: &[EdgeId], p: Vec3) -> (f64, Option<EdgeId>) {
+pub(super) fn nearest_edge(k: &Kernel, b: &Brep, edges: &[EdgeId], p: Vec3) -> (f64, Option<EdgeId>) {
     let (mut best, mut which) = (f64::INFINITY, None);
     for &e in edges {
         let d = edge_distance(k, b, e, p);

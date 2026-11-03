@@ -41,7 +41,7 @@ impl Brep {
             "untrim_face",
             &[self],
             &r,
-            || json!({"face": trace::picks(self, trace::PickKind::Face, &[point], tolerance), "holes": holes, "outer": outer, "in_place": in_place}),
+            || json!({"face": trace::picks(self, trace::PickKind::NearestFace, &[point], tolerance), "holes": holes, "outer": outer, "in_place": in_place}),
         );
         r
     }
@@ -58,7 +58,7 @@ impl Brep {
                 Continuation::Tangent => "tangent",
                 Continuation::Curvature => "curvature",
             };
-            json!({"edge": trace::picks(self, trace::PickKind::Edge, &[point], tolerance), "distance": distance, "how": how})
+            json!({"edge": trace::picks(self, trace::PickKind::NearestEdge, &[point], tolerance), "distance": distance, "how": how})
         });
         r
     }

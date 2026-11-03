@@ -159,6 +159,20 @@ fn run_case(o: &Options, case: &Path) -> Value {
         cmd.arg(format!("--validation={v}"));
     }
     if let Some(d) = &o.export {
+        // This run's entry replaces the last one's; a case that hangs or crashes now leaves none,
+        // so the manifest marks it, never an entry from an earlier run.
+        if let Ok(under) = case.strip_prefix(root().join("tests/kernel-cases")) {
+            // Case ids hold dots (`m5x0.7`): the names are built whole, never by extension.
+            let entry = d.join(under);
+            let id = entry.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            for stale in [entry.with_file_name(format!("{id}.json")), entry.with_file_name(format!("{id}.bodies.json.gz"))] {
+                if let Err(e) = std::fs::remove_file(&stale)
+                    && e.kind() != std::io::ErrorKind::NotFound
+                {
+                    eprintln!("kernel-cases: {}: {e}", stale.display());
+                }
+            }
+        }
         let mut export = std::ffi::OsString::from("--export=");
         export.push(d);
         cmd.arg(export);
