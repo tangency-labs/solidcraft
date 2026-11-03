@@ -12,8 +12,13 @@
 //! and side-edge run-on fixes), every depth but -9 builds. At -9 the rail meets the
 //! side edge's run-on line exactly at the end of its extended interval (top 1, rail
 //! at z -2, run-on reach 2 at the doubled extension factor), and the put-back fails;
-//! the fork (2fc375f) builds it with 6 faces and V 1006.320632128887. That stays open
-//! (#2020). With the flags off, the put-back fails at -7.5 (a corner edge) and at -9
+//! the put-back is refused, typed `OffsetFacesRefusal::NotPutBack`. The fork refuses it too:
+//! 2fc375f built it (6 faces, V 1006.32063218278 through `SmApiFilletEdges`; 1006.320632128887
+//! through SolidCraft's capi), and 779cb9b, which evaluates the side edge's UV trim past its
+//! ends while the run-on widens it, refuses it, as the fork's tip does. Solidcore's line trims
+//! evaluate past their ends already, so the port refuses it as the fork does from 779cb9b on;
+//! with `fillet_trace_reaches_rails` (WR-610's run-on) off it builds, at 5e-12 relative to
+//! 2fc375f. Building it is left to the generic-blend construction (#2020). With the flags off, the put-back fails at -7.5 (a corner edge) and at -9
 //! (a rollover). Each such failure is now a typed refusal,
 //! `OffsetFacesRefusal::NotPutBack`, where it had none.
 #![allow(
@@ -35,7 +40,7 @@ use solidcore::topology::face::p2 as face2;
 use solidcore::topology::{edge, vertex, Brep, EdgeId, FaceId};
 use solidcore::Kernel;
 
-/// The fork's volume at d = -9 (2fc375f, `smlib_offset_faces`): 6 faces.
+/// The fork's volume at d = -9 before 779cb9b (2fc375f, `smlib_offset_faces`): 6 faces.
 const FORK_VOLUME_D9: f64 = 1006.320632128887;
 
 /// The edge whose midpoint is `p`.
@@ -162,7 +167,7 @@ fn solidcraft_flags_build_the_depths_below_the_rounds() {
 
 #[test]
 fn solidcraft_flags_refuse_minus_nine_typed() {
-    // #2020 stays open here: the fork builds it (FORK_VOLUME_D9)
+    // the current behaviour, as the fork's since 779cb9b (an untyped 1001 there); #2020
     let k = &mut Kernel::default();
     solidcraft_flags(k);
     let (_, ex, r) = moved(k, -9.0);
@@ -181,7 +186,7 @@ fn solidcraft_flags_refuse_minus_nine_typed() {
 }
 
 #[test]
-#[ignore = "#2020: the fork builds d = -9; the port refuses it (see the module docs)"]
+#[ignore = "#2020: refused since fork 779cb9b (fork tip too); fork 2fc375f built it (see the module docs)"]
 fn solidcraft_flags_build_minus_nine_as_the_fork() {
     let k = &mut Kernel::default();
     solidcraft_flags(k);
