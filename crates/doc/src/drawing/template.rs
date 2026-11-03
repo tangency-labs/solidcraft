@@ -12,29 +12,26 @@
 //!
 //! The built-ins ([`BUILT_INS`]) are made in code when asked for, never stored: ISO A4 to A0, each
 //! one sheet with the ISO border and nothing more. A title block, tables and text are added to a
-//! drawing, and a template saved from it keeps them; the built-in block ([`built_in_block`]) is one
-//! a sheet can take. A later built-in never changes a drawing made from an earlier one: a drawing
-//! keeps copies, never names.
+//! drawing, and a template saved from it keeps them; the built-in block
+//! ([`default_block`](solidcraft_geom::title_block::default_block)) is one a sheet can take. A
+//! later built-in never changes a drawing made from an earlier one: a drawing keeps copies, never
+//! names.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use solidcraft_geom::cell::{Content, Part};
+use solidcraft_geom::cell::Part;
 use solidcraft_geom::drawing_sheet::{self, DrawingBorderProfile, Orientation, PaperSize};
 use solidcraft_geom::revision::RevisionRecord;
-use solidcraft_geom::title_block::{self, CellKind, TitleBlock};
+use solidcraft_geom::title_block::CellKind;
 
 use super::Drawing;
 use crate::format::DRAWING;
 use crate::ids::IdSource;
-use crate::{DocError, Document, Result};
+use crate::{DocError, Result};
 
 /// The built-in templates, by name: each ISO size, with its border only.
 pub const BUILT_INS: &[&str] = &["iso-a4", "iso-a3", "iso-a2", "iso-a1", "iso-a0"];
-/// A part's general tolerances, by decimal places: a shop's own convention, which no standard sets.
-pub const PART_TOLERANCES: &str = "0.X ±0.1, 0.XX ±0.05, 0.XXX ±0.005; angles ±0.5°";
-/// An assembly's general tolerances, by size range: ISO 13920's class B for welded structures.
-pub const ASSEMBLY_TOLERANCES: &str = "ISO 13920-B";
 /// Where every built-in's ids come from, so one built-in is always the same bytes.
 const BUILT_IN_SEED: u64 = 3875;
 /// The ISO sizes the built-ins come in, as their names and titles write them.
@@ -43,23 +40,6 @@ const SIZES: [(PaperSize, &str); 5] =
 
 /// The built-in a new drawing starts from when nothing else is chosen.
 pub const DEFAULT: &str = "iso-a3";
-
-/// Whether a drawing of `design` is a drawing of an assembly: a design with components is one.
-pub fn for_assembly(design: &Document) -> bool {
-    !design.components.is_empty()
-}
-
-/// The built-in title block, its general tolerances an assembly's or a part's.
-pub fn built_in_block(assembly: bool) -> TitleBlock {
-    let tolerances = if assembly { ASSEMBLY_TOLERANCES } else { PART_TOLERANCES };
-    let mut block = title_block::default_block();
-    for cell in block.cells.iter_mut().filter(|cell| cell.name == "general_tolerances") {
-        if let CellKind::Text(text) = &mut cell.kind {
-            text.content = Content(vec![Part::Text(tolerances.into())]);
-        }
-    }
-    block
-}
 
 /// The template rules: a drawing's ([`Drawing::validate`]), and nothing of a model. A template
 /// with anything of one is refused, naming all it has.

@@ -165,7 +165,7 @@ pub fn projection_symbol(projection: Projection, h: f64, centre: Vec2) -> [Item;
 /// The built-in block, 180 x 49 mm: the twelve cells of the layout approved on #3875, each under a
 /// 2.5 mm label, and no type, status or scale cell. Values come from the component the sheet
 /// documents, the drawing, its newest revision and the sheet; the legal owner is the drawing's
-/// `organization`, and the general tolerances are text to change.
+/// `organization`, and the general tolerances start empty, for a shop's own.
 pub fn default_block() -> TitleBlock {
     use HAlign::{Centre, Left};
     use Source::{Component, Drawing, Revision};
@@ -175,7 +175,6 @@ pub fn default_block() -> TitleBlock {
     let (whole, wrap) = (Fit::default(), Fit { wrap: true, ..Fit::default() });
     let title = Fit { max_chars: Some(25), wide_max_chars: Some(30), wrap: false };
     let sheet = vec![field(Source::Sheet, "number"), Part::Text("/".into()), field(Source::Sheet, "count")];
-    let tolerances = vec![Part::Text("ISO 2768-m".into())];
     let cells = [
         ("title", [-180.0, 0.0, -68.0, 14.0], "Title", text(5.0, Left, title, vec![field(Component, "name")])),
         ("identification_number", [-68.0, 0.0, 0.0, 14.0], "Identification number", text(5.0, Left, most(16), vec![field(Drawing, "number")])),
@@ -187,7 +186,7 @@ pub fn default_block() -> TitleBlock {
         ("finish", [-100.0, 24.0, -30.0, 34.0], "Finish", text(3.5, Left, whole, vec![field(Component, "properties.finish")])),
         ("mass", [-30.0, 24.0, 0.0, 34.0], "Mass", text(3.5, Centre, whole, vec![field(Component, "mass")])),
         ("legal_owner", [-180.0, 34.0, -100.0, 49.0], "Legal owner", text(3.5, Left, wrap, vec![field(Drawing, "organization")])),
-        ("general_tolerances", [-100.0, 34.0, -30.0, 49.0], "General tolerances", text(2.5, Left, wrap, tolerances)),
+        ("general_tolerances", [-100.0, 34.0, -30.0, 49.0], "General tolerances", text(2.5, Left, wrap, Vec::new())),
         ("projection", [-30.0, 34.0, 0.0, 49.0], "Projection", CellKind::ProjectionSymbol),
     ];
     let label = |text: &str| Some(Label { text: text.into(), cap_mm: 2.5 });

@@ -66,7 +66,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&TEMPLATE_LIST_CONTRACT)
         .output(output_schema_for::<TemplateListResult>)
         .params(
-            "→ templates: [{name, title, default: whether drawing.create starts from it for this design}], the built-ins: ISO A4 to A0 for a part and for an assembly",
+            "→ templates: [{name, title, default: whether drawing.create starts from it for this design}], the built-ins: ISO A4 to A0, the border only",
         ),
     CommandSpec::new("drawing.list", "List Drawings", list)
         .any_part()

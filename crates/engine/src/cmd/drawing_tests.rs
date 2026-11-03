@@ -27,7 +27,7 @@ fn tolerances(made: &Value) -> Value {
 /// A drawing starts from the template named, else ISO A3 with its border only, which
 /// `drawing.template.list` marks; it keeps the template's projection unless given one. An unknown
 /// template is refused with nothing changed, and undo takes the drawing away whole. The built-in
-/// block is added by name, with a part's tolerances or, for a design with components, an assembly's.
+/// block is added by name, its general tolerances empty for a part and an assembly alike.
 #[test]
 fn a_drawing_starts_from_a_template() {
     let mut s = design();
@@ -51,9 +51,9 @@ fn a_drawing_starts_from_a_template() {
     assert!(s.doc.drawings.is_empty(), "undo takes the drawing away whole");
     run(&mut s, "drawing.create", json!({}));
     run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": "built-in"}));
-    assert_eq!(tolerances(&run(&mut s, "drawing.inspect", json!({}))), json!(template::PART_TOLERANCES));
+    assert_eq!(tolerances(&run(&mut s, "drawing.inspect", json!({}))), json!(""));
     run(&mut s, "drawing.close", json!({}));
-    // A design with components: the same template, and the assembly's tolerances in the built-in block.
+    // A design with components: the same template, and the same empty tolerances.
     run(&mut s, "component.create", json!({"name": "Bracket"}));
     run(&mut s, "component.activate", json!({"component": 0}));
     let marked =
@@ -62,7 +62,7 @@ fn a_drawing_starts_from_a_template() {
     let made = run(&mut s, "drawing.create", json!({}));
     assert_eq!((&made["sheets"][0]["size_mm"], &made["projection"]), (&json!([420.0, 297.0]), &json!("third")));
     run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": "built-in"}));
-    assert_eq!(tolerances(&run(&mut s, "drawing.inspect", json!({}))), json!(template::ASSEMBLY_TOLERANCES));
+    assert_eq!(tolerances(&run(&mut s, "drawing.inspect", json!({}))), json!(""));
 }
 
 /// A template applied to the drawing open: a dry run answers what would change and changes nothing;

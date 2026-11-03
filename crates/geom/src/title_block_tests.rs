@@ -533,7 +533,7 @@ fn fuzzed_definitions_never_panic_and_an_accepted_one_lays_out_inside_its_outlin
 }
 
 /// The built-in block's twelve cells, by name: no type, status or scale cell. The legal owner is the
-/// drawing's `organization`, and the general tolerances are text to change.
+/// drawing's `organization`, and the general tolerances start empty, for a shop's own.
 #[test]
 fn the_built_in_blocks_cells() {
     let block = default_block();
@@ -555,7 +555,7 @@ fn the_built_in_blocks_cells() {
     assert_eq!(names, expected);
     let content = |name: &str| text_of(block.cells.iter().find(|c| c.name == name).unwrap()).content.clone();
     assert_eq!(content("legal_owner"), Content(vec![field(Source::Drawing, "organization")]));
-    assert_eq!(content("general_tolerances"), Content(vec![Part::Text("ISO 2768-m".into())]));
+    assert_eq!(content("general_tolerances"), Content(Vec::new()));
 }
 
 /// The built-in block's lines on A3 landscape, worked out by hand: the outline (230, 10) to
