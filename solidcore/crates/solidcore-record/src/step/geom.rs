@@ -1,12 +1,13 @@
-//! STEP curves (ISO 10303-42) as plain data: the curves a file defines, exactly as it defines
-//! them, with lengths in millimetres and angles in radians. Nothing is approximated, bounded,
-//! normalised or turned into another kind on the way in: a circle stays a circle with its
-//! placement, a line stays unbounded, a B-spline keeps its own knots and form, and a direction
-//! keeps the ratios the file writes. Every curve keeps STEP's own parameterisation. Surfaces,
-//! surface curves and pcurves follow in the next slice (#2578, slice 2c).
+//! STEP geometry (ISO 10303-42) as plain data: the curves and surfaces a file defines, exactly
+//! as it defines them, with lengths in millimetres and angles in radians. Nothing is
+//! approximated, bounded, normalised or turned into another kind on the way in: a circle stays a
+//! circle with its placement, an unbounded cylinder stays unbounded, a B-spline keeps its own
+//! knots and form, and a direction keeps the ratios the file writes. Every curve and surface keeps
+//! STEP's own parameterisation, so a 2D curve in a surface's parameter space means the same thing
+//! here as in the file.
 //!
-//! Entities the file shares (one basis curve under many trimmed curves) are shared here too,
-//! through `Arc`, so reading is linear in the file however often an entity is referenced.
+//! Entities the file shares (one surface under many edges' pcurves) are shared here too, through
+//! `Arc`, so reading is linear in the file however often an entity is referenced.
 //!
 //! The record computes no geometric quantity (docs/layers.md §1, §4): a direction is not made a
 //! unit vector, a placement's reference direction is not made orthogonal to its axis (nor chosen
@@ -19,11 +20,11 @@
 //!
 //! Deviations from SolidCraft: [`Placement`] keeps `axis` and `ref_direction` as the file gives
 //! them (each optional, neither normalised; was: both unit and orthogonal, a missing reference
-//! direction chosen perpendicular to the axis). A `VECTOR` is a [`Vector`] of the written
-//! orientation, magnitude and unit factors (was: a unit direction and the vector's length), in
-//! [`Curve::Line`]. Removed, to come back as kernel primitives in slice 4: `Placement::y`,
-//! `Placement::at` and the vector helpers `add`, `sub`, `scale`, `dot`, `cross`, `norm`. Doc
-//! comments on every public item and field.
+//! direction chosen perpendicular to the axis), and [`Axis1::direction`] likewise. A `VECTOR` is
+//! a [`Vector`] of the written orientation, magnitude and unit factors (was: a unit direction
+//! and the vector's length), in [`Curve::Line`] and [`Surface::Extrusion`]. Removed, to come back
+//! as kernel primitives in slice 4: `Placement::y`, `Placement::at` and the vector helpers `add`,
+//! `sub`, `scale`, `dot`, `cross`, `norm`. Doc comments on every public item and field.
 
 use std::sync::Arc;
 
@@ -46,6 +47,16 @@ pub struct Placement {
     /// Local X as the file gives it (not normalised, not made orthogonal to `axis`); `None` when
     /// the file omits it.
     pub ref_direction: Option<P3>,
+}
+
+/// `AXIS1_PLACEMENT`: an origin and a direction, as the file writes them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Axis1 {
+    /// The location, in millimetres.
+    pub origin: P3,
+    /// The direction as the file gives it (not normalised); `None` when the file omits it, which
+    /// ISO 10303-42 defines as +Z.
+    pub direction: Option<P3>,
 }
 
 /// `VECTOR`: an orientation and a magnitude, as the file writes them, and the unit factors of
@@ -93,8 +104,36 @@ pub enum CurveForm {
     Unspecified,
 }
 
+/// `b_spline_surface_form`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SurfaceForm {
+    /// `.PLANE_SURF.`
+    PlaneSurf,
+    /// `.CYLINDRICAL_SURF.`
+    CylindricalSurf,
+    /// `.CONICAL_SURF.`
+    ConicalSurf,
+    /// `.SPHERICAL_SURF.`
+    SphericalSurf,
+    /// `.TOROIDAL_SURF.`
+    ToroidalSurf,
+    /// `.SURF_OF_REVOLUTION.`
+    SurfOfRevolution,
+    /// `.RULED_SURF.`
+    RuledSurf,
+    /// `.GENERALISED_CONE.`
+    GeneralisedCone,
+    /// `.QUADRIC_SURF.`
+    QuadricSurf,
+    /// `.SURF_OF_LINEAR_EXTRUSION.`
+    SurfOfLinearExtrusion,
+    /// `.UNSPECIFIED.`, or anything else.
+    Unspecified,
+}
+
 /// `knot_type`. A B-spline given without knots (`BEZIER_CURVE`, `UNIFORM_CURVE`,
-/// `QUASI_UNIFORM_CURVE`) has them laid out on reading, and keeps the matching type here.
+/// `QUASI_UNIFORM_CURVE` and their surfaces) has them laid out on reading, and keeps the
+/// matching type here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KnotSpec {
     /// `.UNIFORM_KNOTS.`
@@ -130,6 +169,37 @@ pub struct BSplineCurve {
     pub knot_spec: KnotSpec,
 }
 
+/// A B-spline surface; `points[i][j]` runs along u with `i`, along v with `j`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BSplineSurface {
+    /// The degree in u.
+    pub u_degree: usize,
+    /// The degree in v.
+    pub v_degree: usize,
+    /// The control net, rows along u, every row the same length.
+    pub points: Vec<Vec<P3>>,
+    /// Present for a rational surface: one positive weight per control point.
+    pub weights: Option<Vec<Vec<f64>>>,
+    /// The distinct u knots, increasing.
+    pub u_knots: Vec<f64>,
+    /// Each u knot's multiplicity.
+    pub u_multiplicities: Vec<usize>,
+    /// The distinct v knots, increasing.
+    pub v_knots: Vec<f64>,
+    /// Each v knot's multiplicity.
+    pub v_multiplicities: Vec<usize>,
+    /// The surface form.
+    pub form: SurfaceForm,
+    /// `u_closed`.
+    pub u_closed: Logical,
+    /// `v_closed`.
+    pub v_closed: Logical,
+    /// `self_intersect`.
+    pub self_intersect: Logical,
+    /// The knot type.
+    pub knot_spec: KnotSpec,
+}
+
 /// One end of a `TRIMMED_CURVE`: a point on the basis curve or its parameter (a trim lists one
 /// or both).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -149,6 +219,49 @@ pub enum TrimPreference {
     Parameter,
     /// `.UNSPECIFIED.`, or anything else.
     Unspecified,
+}
+
+/// `preferred_surface_curve_representation`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreferredRep {
+    /// `.CURVE_3D.`, or anything else.
+    Curve3d,
+    /// `.PCURVE_S1.`
+    PcurveS1,
+    /// `.PCURVE_S2.`
+    PcurveS2,
+}
+
+/// Which `SURFACE_CURVE` subtype.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SurfaceCurveKind {
+    /// `SURFACE_CURVE`.
+    Surface,
+    /// `SEAM_CURVE`.
+    Seam,
+    /// `INTERSECTION_CURVE`.
+    Intersection,
+    /// `BOUNDED_SURFACE_CURVE`.
+    BoundedSurface,
+}
+
+/// `PCURVE`: a 2D curve in the parameter space of `surface`. Its coordinates are the surface's
+/// own parameters (lengths in mm, angles in radians).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Pcurve {
+    /// The surface.
+    pub surface: Arc<Surface>,
+    /// A 2D curve: every point and placement has z = 0 and no placement has an axis.
+    pub curve: Arc<Curve>,
+}
+
+/// An item of a `SURFACE_CURVE`'s `associated_geometry`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Associated {
+    /// A `PCURVE`.
+    Pcurve(Pcurve),
+    /// A surface.
+    Surface(Arc<Surface>),
 }
 
 /// A STEP curve.
@@ -210,6 +323,17 @@ pub enum Curve {
         /// `master_representation`.
         preference: TrimPreference,
     },
+    /// `SURFACE_CURVE`, `SEAM_CURVE`, `INTERSECTION_CURVE`, `BOUNDED_SURFACE_CURVE`.
+    SurfaceCurve {
+        /// Which subtype.
+        kind: SurfaceCurveKind,
+        /// `curve_3d`.
+        curve_3d: Arc<Curve>,
+        /// `associated_geometry` (at most two items).
+        associated: Vec<Associated>,
+        /// `master_representation`.
+        master: PreferredRep,
+    },
     /// `OFFSET_CURVE_3D`.
     OffsetCurve3d {
         /// `basis_curve`.
@@ -220,5 +344,101 @@ pub enum Curve {
         self_intersect: Logical,
         /// `ref_direction` as the file gives it (not normalised).
         ref_direction: P3,
+    },
+}
+
+/// A STEP surface.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Surface {
+    /// `PLANE`: `origin + u·X + v·Y`.
+    Plane {
+        /// The placement.
+        position: Placement,
+    },
+    /// `CYLINDRICAL_SURFACE`: `origin + r·(cos u·X + sin u·Y) + v·Z`.
+    Cylinder {
+        /// The placement.
+        position: Placement,
+        /// `r` (positive).
+        radius: f64,
+    },
+    /// `CONICAL_SURFACE`: `origin + (r + v·tan a)·(cos u·X + sin u·Y) + v·Z`.
+    Cone {
+        /// The placement.
+        position: Placement,
+        /// `r` (not negative).
+        radius: f64,
+        /// `a`, in radians, its size in (0, π/2).
+        semi_angle: f64,
+    },
+    /// `SPHERICAL_SURFACE`: `origin + r·cos v·(cos u·X + sin u·Y) + r·sin v·Z`.
+    Sphere {
+        /// The placement.
+        position: Placement,
+        /// `r` (positive).
+        radius: f64,
+    },
+    /// `TOROIDAL_SURFACE`: `origin + (R + r·cos v)·(cos u·X + sin u·Y) + r·sin v·Z`.
+    Torus {
+        /// The placement.
+        position: Placement,
+        /// `R` (may be negative: some writers use that for a spindle torus).
+        major_radius: f64,
+        /// `r` (positive).
+        minor_radius: f64,
+    },
+    /// `DEGENERATE_TOROIDAL_SURFACE`: a torus whose minor radius reaches the axis;
+    /// `select_outer` keeps the outer part.
+    DegenerateTorus {
+        /// The placement.
+        position: Placement,
+        /// `R`.
+        major_radius: f64,
+        /// `r` (positive).
+        minor_radius: f64,
+        /// `select_outer`.
+        select_outer: bool,
+    },
+    /// `B_SPLINE_SURFACE` and its subtypes.
+    BSpline(Box<BSplineSurface>),
+    /// `SURFACE_OF_REVOLUTION`: the profile at `v` turned by the angle `u` about the axis.
+    Revolution {
+        /// `swept_curve`.
+        profile: Arc<Curve>,
+        /// `axis_position`.
+        axis: Axis1,
+    },
+    /// `SURFACE_OF_LINEAR_EXTRUSION`: `profile(u) + v·w`, with `w` the [`Vector`].
+    Extrusion {
+        /// `swept_curve`.
+        profile: Arc<Curve>,
+        /// `extrusion_axis`.
+        vector: Vector,
+    },
+    /// `OFFSET_SURFACE`.
+    Offset {
+        /// `basis_surface`.
+        basis: Arc<Surface>,
+        /// `distance`, in millimetres.
+        distance: f64,
+        /// `self_intersect`.
+        self_intersect: Logical,
+    },
+    /// `RECTANGULAR_TRIMMED_SURFACE`, its bounds in the basis surface's parameter units.
+    RectangularTrimmed {
+        /// `basis_surface`.
+        basis: Arc<Surface>,
+        /// `u1`.
+        u1: f64,
+        /// `u2`.
+        u2: f64,
+        /// `v1`.
+        v1: f64,
+        /// `v2`.
+        v2: f64,
+        /// `usense`.
+        u_sense: bool,
+        /// `vsense`.
+        v_sense: bool,
     },
 }

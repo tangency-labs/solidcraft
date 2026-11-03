@@ -3,7 +3,7 @@
 //! file ([`native`]), and the plain data of vectors ([`Vec2`], [`Vec3`]), sketch planes
 //! ([`Plane`]) and planar profiles ([`Seg2`], [`Loop2`], [`Region2`]), and STEP's Part 21
 //! exchange structure as parsed from a file with the units of its representation contexts and
-//! its Part 42 curves ([`step`]).
+//! its Part 42 curves and surfaces ([`step`]).
 //!
 //! The record computes no geometric quantity: no square roots, trigonometry, dot or cross
 //! products, normalising or solves (clippy `disallowed-methods`, this crate's `clippy.toml`). It

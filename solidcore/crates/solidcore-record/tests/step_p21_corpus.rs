@@ -23,10 +23,10 @@
 //! with Part 21 short names (`SUNT`, `LNGUNT`, `GMRPCN`, …) or one without geometry has none.
 //!
 //! `corpus_geometry` (ignored too, same variable, `corpus_geometry` as the filter) reads every
-//! model-space curve entity of each file with `step::read::Reader::curve`, in the units of the
-//! file's first geometric context (the curves of a parameter space, read through their pcurves,
-//! and the surfaces come with slice 2c). It prints one line per file and, per entity kind, how
-//! many were read and how many refused, with the reasons.
+//! curve and surface entity of each file with `step::read::Reader`, in the units of the file's
+//! first geometric context: curves in model space with `curve`, the curves of a parameter space
+//! through their `PCURVE` with `pcurve`, surfaces with `surface`. It prints one line per file
+//! and, per group and entity kind, how many were read and how many refused, with the reasons.
 //! It also lists the entities where a check the record no longer makes (a direction shorter than
 //! 1e-12, unit factors equal within 1e-12) would have decided otherwise. It fails when a file
 //! does not parse; refusals are counted, not failed.
@@ -429,7 +429,7 @@ fn corpus_geometry() {
     files(root, &mut paths);
     assert!(!paths.is_empty(), "no STEP files under {dir:?}");
     let mut failures = Vec::new();
-    // (group, kind) -> tally; the group is "curve" (surfaces and pcurves come with slice 2c).
+    // (group, kind) -> tally, groups "curve", "surface", "pcurve" (by its 2D curve's kind).
     let mut kinds: BTreeMap<(&str, String), Tally> = BTreeMap::new();
     let mut mixed_units = Vec::new();
     let mut removed = Vec::new();
@@ -485,24 +485,47 @@ fn corpus_geometry() {
         }
         let flat = curves_2d(&ex);
         let mut reader = Reader::new(&ex, u);
-        let mut here = Tally::default();
+        let mut here = (Tally::default(), Tally::default(), Tally::default());
         for (&id, e) in &ex.entities {
+            if e.name() == "PCURVE" {
+                let kind = e
+                    .params()
+                    .get(2)
+                    .and_then(p21::Param::as_ref_id)
+                    .and_then(|r| ex.get(r))
+                    .and_then(|r| r.params().get(1)?.as_list()?.first()?.as_ref_id())
+                    .and_then(|c| ex.get(c))
+                    .and_then(geometry_kind)
+                    .map_or_else(|| "?".to_string(), |k| k.1);
+                let r = reader.pcurve(id);
+                here.2.add(&r);
+                kinds.entry(("pcurve", kind)).or_default().add(&r);
+                continue;
+            }
             let Some((is_curve, kind)) = geometry_kind(e) else {
                 continue;
             };
-            // Surfaces, and the curves of a parameter space (read through their pcurves), come
-            // with slice 2c.
-            if !is_curve || flat.contains(&id) {
-                continue;
+            if is_curve {
+                if flat.contains(&id) {
+                    continue;
+                }
+                let r = reader.curve(id);
+                here.0.add(&r);
+                kinds.entry(("curve", kind)).or_default().add(&r);
+            } else {
+                let r = reader.surface(id);
+                here.1.add(&r);
+                kinds.entry(("surface", kind)).or_default().add(&r);
             }
-            let r = reader.curve(id);
-            here.add(&r);
-            kinds.entry(("curve", kind)).or_default().add(&r);
         }
         println!(
-            "{name}: curves {} read, {} refused",
-            here.read,
-            here.refused()
+            "{name}: curves {} read, {} refused; surfaces {} read, {} refused; pcurves {} read, {} refused",
+            here.0.read,
+            here.0.refused(),
+            here.1.read,
+            here.1.refused(),
+            here.2.read,
+            here.2.refused()
         );
     }
     println!("by kind (group, kind: read / refused, with reasons):");

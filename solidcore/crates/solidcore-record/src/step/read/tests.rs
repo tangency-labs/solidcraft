@@ -1,5 +1,5 @@
-//! STEP curves, one entity at a time: what the reader stores for each kind, in file units and in
-//! inches and degrees, and what it refuses. Expected values are the file's numbers times the
+//! STEP geometry, one entity at a time: what the reader stores for each kind, in file units and
+//! in inches and degrees, and what it refuses. Expected values are the file's numbers times the
 //! unit factors, written as the same products, so every comparison is exact.
 //!
 //! Origin: SolidCraft's `crates/step/src/geom_tests.rs` at `a5b71ca2`, without the parts that
@@ -12,7 +12,8 @@ use std::sync::Arc;
 
 use super::{MAX_GEOM_DEPTH, Reader};
 use crate::step::geom::{
-    Curve, CurveForm, KnotSpec, Logical, Placement, Trim, TrimPreference, Vector,
+    Associated, Axis1, Curve, CurveForm, KnotSpec, Logical, Placement, PreferredRep, Surface,
+    SurfaceCurveKind, SurfaceForm, Trim, TrimPreference, Vector,
 };
 use crate::step::p21::{self, Exchange};
 use crate::step::units::Units;
@@ -53,6 +54,15 @@ fn curve_err(data: &str, id: u64, units: Units) -> Result<Arc<Curve>, String> {
 
 fn curve(data: &str, id: u64, units: Units) -> Arc<Curve> {
     curve_err(data, id, units).unwrap_or_else(|e| panic!("{e}"))
+}
+
+fn surface_err(data: &str, id: u64, units: Units) -> Result<Arc<Surface>, String> {
+    let ex = file(&format!("{BASE}{data}"));
+    Reader::new(&ex, units).surface(id)
+}
+
+fn surface(data: &str, id: u64, units: Units) -> Arc<Surface> {
+    surface_err(data, id, units).unwrap_or_else(|e| panic!("{e}"))
 }
 
 // Curves.
@@ -407,7 +417,8 @@ fn placements_keep_the_directions_the_file_gives() {
         "{BASE}#10=DIRECTION('',(0.,0.,2.));#11=DIRECTION('',(1.,0.,1.));\
          #12=AXIS2_PLACEMENT_3D('',#1,#10,#11);#13=AXIS2_PLACEMENT_3D('',#1,$,$);\
          #14=CARTESIAN_POINT('',(1.,2.));#15=DIRECTION('',(0.,3.));#16=AXIS2_PLACEMENT_2D('',#14,#15);\
-         #17=DIRECTION('',(1.E-13,0.,0.));#18=AXIS2_PLACEMENT_3D('',#1,#2,#17);"
+         #17=DIRECTION('',(1.E-13,0.,0.));#18=AXIS2_PLACEMENT_3D('',#1,#2,#17);\
+         #19=AXIS1_PLACEMENT('',#14,$);#20=AXIS1_PLACEMENT('',#1,#10);"
     ));
     let r = Reader::new(&ex, MM);
     assert_eq!(
@@ -449,6 +460,20 @@ fn placements_keep_the_directions_the_file_gives() {
         Ok(Some([1e-13, 0.0, 0.0]))
     );
     assert_eq!(r.direction(17), Ok([1e-13, 0.0, 0.0]));
+    assert_eq!(
+        r.axis1(19),
+        Ok(Axis1 {
+            origin: [1.0, 2.0, 0.0],
+            direction: None
+        })
+    );
+    assert_eq!(
+        r.axis1(20),
+        Ok(Axis1 {
+            origin: [0.0; 3],
+            direction: Some([0.0, 0.0, 2.0])
+        })
+    );
     // A point with three coordinates where a 2D placement is read.
     assert_eq!(
         r.frame(14).map(|_| ()),
@@ -614,4 +639,503 @@ fn refusals_say_why() {
     ] {
         assert_eq!(curve_err(data, id, MM), Err(why.to_string()), "{data}");
     }
+}
+
+// Surfaces.
+
+#[test]
+// The values the file writes, which are near π/4 and 2π, not those constants.
+#[allow(clippy::approx_constant)]
+fn analytic_surfaces() {
+    assert_eq!(
+        *surface("#10=PLANE('',#4);", 10, MM),
+        Surface::Plane { position: WORLD }
+    );
+    assert_eq!(
+        *surface("#10=CYLINDRICAL_SURFACE('',#4,5.);", 10, MM),
+        Surface::Cylinder {
+            position: WORLD,
+            radius: 5.0
+        }
+    );
+    assert_eq!(
+        *surface("#10=CONICAL_SURFACE('',#4,5.,0.785398163397448);", 10, MM),
+        Surface::Cone {
+            position: WORLD,
+            radius: 5.0,
+            semi_angle: 0.785398163397448
+        }
+    );
+    // A cone may start at its apex (radius 0).
+    assert!(matches!(
+        *surface("#10=CONICAL_SURFACE('',#4,0.,0.5);", 10, MM),
+        Surface::Cone { radius, .. } if radius == 0.0
+    ));
+    assert_eq!(
+        *surface("#10=SPHERICAL_SURFACE('',#4,3.);", 10, MM),
+        Surface::Sphere {
+            position: WORLD,
+            radius: 3.0
+        }
+    );
+    assert_eq!(
+        *surface("#10=TOROIDAL_SURFACE('',#4,10.,2.);", 10, MM),
+        Surface::Torus {
+            position: WORLD,
+            major_radius: 10.0,
+            minor_radius: 2.0
+        }
+    );
+    // A negative major radius (a spindle torus some writers write) is read as written.
+    assert!(matches!(
+        *surface("#10=TOROIDAL_SURFACE('',#4,-1.,2.);", 10, MM),
+        Surface::Torus { major_radius, .. } if major_radius == -1.0
+    ));
+    assert_eq!(
+        *surface("#10=DEGENERATE_TOROIDAL_SURFACE('',#4,1.,2.,.T.);", 10, MM),
+        Surface::DegenerateTorus {
+            position: WORLD,
+            major_radius: 1.0,
+            minor_radius: 2.0,
+            select_outer: true
+        }
+    );
+}
+
+#[test]
+fn units_scale_surface_lengths_and_angles() {
+    let k = surface("#10=CONICAL_SURFACE('',#4,1.,45.);", 10, INCH_DEG);
+    assert!(matches!(*k, Surface::Cone { radius, semi_angle, .. }
+        if radius == 25.4 && semi_angle == 45.0 * DEG));
+    let t = surface("#10=TOROIDAL_SURFACE('',#4,4.,1.);", 10, INCH_DEG);
+    assert!(
+        matches!(*t, Surface::Torus { major_radius, minor_radius, .. }
+        if major_radius == 4.0 * 25.4 && minor_radius == 25.4)
+    );
+}
+
+#[test]
+fn bspline_surfaces() {
+    // A bilinear patch over the unit square, then the same as a rational complex entity.
+    let pts = "#10=CARTESIAN_POINT('',(0.,0.,0.));#11=CARTESIAN_POINT('',(0.,1.,0.));\
+               #12=CARTESIAN_POINT('',(1.,0.,0.));#13=CARTESIAN_POINT('',(1.,1.,1.));";
+    let net = vec![
+        vec![[0.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        vec![[1.0, 0.0, 0.0], [1.0, 1.0, 1.0]],
+    ];
+    let s = surface(
+        &format!(
+            "{pts}#14=B_SPLINE_SURFACE_WITH_KNOTS('',1,1,((#10,#11),(#12,#13)),.PLANE_SURF.,.F.,.T.,\
+             .F.,(2,2),(2,2),(0.,1.),(0.,2.),.UNSPECIFIED.);"
+        ),
+        14,
+        MM,
+    );
+    let Surface::BSpline(b) = &*s else {
+        panic!("{s:?}")
+    };
+    assert_eq!((b.u_degree, b.v_degree), (1, 1));
+    assert_eq!(b.points, net);
+    assert_eq!(b.weights, None);
+    assert_eq!(
+        (b.u_knots.clone(), b.u_multiplicities.clone()),
+        (vec![0.0, 1.0], vec![2, 2])
+    );
+    assert_eq!(
+        (b.v_knots.clone(), b.v_multiplicities.clone()),
+        (vec![0.0, 2.0], vec![2, 2])
+    );
+    assert_eq!(b.form, SurfaceForm::PlaneSurf);
+    assert_eq!(
+        (b.u_closed, b.v_closed, b.self_intersect),
+        (Logical::False, Logical::True, Logical::False)
+    );
+    let r = surface(
+        &format!(
+            "{pts}#14=(BOUNDED_SURFACE()B_SPLINE_SURFACE(1,1,((#10,#11),(#12,#13)),.UNSPECIFIED.,.F.,.F.,.F.)\
+             B_SPLINE_SURFACE_WITH_KNOTS((2,2),(2,2),(0.,1.),(0.,1.),.UNSPECIFIED.)GEOMETRIC_REPRESENTATION_ITEM()\
+             RATIONAL_B_SPLINE_SURFACE(((1.,2.),(3.,4.)))REPRESENTATION_ITEM('')SURFACE());"
+        ),
+        14,
+        MM,
+    );
+    let Surface::BSpline(b) = &*r else {
+        panic!("{r:?}")
+    };
+    assert_eq!(b.points, net);
+    assert_eq!(b.weights, Some(vec![vec![1.0, 2.0], vec![3.0, 4.0]]));
+    // Implied knots in both directions.
+    let q = surface(
+        &format!(
+            "{pts}#14=BEZIER_SURFACE('',1,1,((#10,#11),(#12,#13)),.UNSPECIFIED.,.F.,.F.,.F.);"
+        ),
+        14,
+        MM,
+    );
+    let Surface::BSpline(b) = &*q else {
+        panic!("{q:?}")
+    };
+    assert_eq!(b.knot_spec, KnotSpec::PiecewiseBezierKnots);
+    assert_eq!(
+        (b.u_knots.clone(), b.u_multiplicities.clone()),
+        (vec![0.0, 1.0], vec![2, 2])
+    );
+    assert_eq!(
+        (b.v_knots.clone(), b.v_multiplicities.clone()),
+        (vec![0.0, 1.0], vec![2, 2])
+    );
+}
+
+#[test]
+fn swept_surfaces() {
+    // A circle of radius 2 about the Z axis, centred at x = 10.
+    let rev = surface(
+        "#10=CARTESIAN_POINT('',(10.,0.,0.));#11=AXIS2_PLACEMENT_3D('',#10,#5,#3);#12=CIRCLE('',#11,2.);\
+         #13=AXIS1_PLACEMENT('',#1,#2);#14=SURFACE_OF_REVOLUTION('',#12,#13);",
+        14,
+        MM,
+    );
+    let Surface::Revolution { profile, axis } = &*rev else {
+        panic!("{rev:?}")
+    };
+    assert_eq!(
+        **profile,
+        Curve::Circle {
+            position: Placement {
+                origin: [10.0, 0.0, 0.0],
+                axis: Some([0.0, 1.0, 0.0]),
+                ref_direction: Some([1.0, 0.0, 0.0]),
+            },
+            radius: 2.0,
+        }
+    );
+    assert_eq!(
+        *axis,
+        Axis1 {
+            origin: [0.0; 3],
+            direction: Some([0.0, 0.0, 1.0])
+        }
+    );
+    let ext = surface(
+        "#10=CIRCLE('',#4,3.);#11=VECTOR('',#2,4.);#12=SURFACE_OF_LINEAR_EXTRUSION('',#10,#11);",
+        12,
+        INCH_DEG,
+    );
+    let Surface::Extrusion { profile, vector } = &*ext else {
+        panic!("{ext:?}")
+    };
+    assert!(matches!(**profile, Curve::Circle { radius, .. } if radius == 3.0 * 25.4));
+    assert_eq!(
+        *vector,
+        Vector {
+            orientation: [0.0, 0.0, 1.0],
+            magnitude: 4.0,
+            scale: [25.4; 3]
+        }
+    );
+}
+
+#[test]
+fn offset_and_trimmed_surfaces() {
+    let o = surface(
+        "#10=CYLINDRICAL_SURFACE('',#4,5.);#11=OFFSET_SURFACE('',#10,1.5,.F.);",
+        11,
+        MM,
+    );
+    let Surface::Offset {
+        basis,
+        distance,
+        self_intersect,
+    } = &*o
+    else {
+        panic!("{o:?}")
+    };
+    assert!(matches!(**basis, Surface::Cylinder { radius, .. } if radius == 5.0));
+    assert_eq!((*distance, *self_intersect), (1.5, Logical::False));
+    // A cylinder's u is an angle and its v a length.
+    let t = surface(
+        "#10=CYLINDRICAL_SURFACE('',#4,5.);#11=RECTANGULAR_TRIMMED_SURFACE('',#10,0.,90.,0.,10.,.T.,.F.);",
+        11,
+        INCH_DEG,
+    );
+    let Surface::RectangularTrimmed {
+        u1,
+        u2,
+        v1,
+        v2,
+        u_sense,
+        v_sense,
+        ..
+    } = *t
+    else {
+        panic!("{t:?}")
+    };
+    assert_eq!((u1, u2, v1, v2), (0.0, 90.0 * DEG, 0.0, 10.0 * 25.4));
+    assert_eq!((u_sense, v_sense), (true, false));
+    // A B-spline's parameters are plain numbers.
+    let t = surface(
+        "#10=CARTESIAN_POINT('',(1.,1.,0.));#11=B_SPLINE_SURFACE_WITH_KNOTS('',1,1,((#1,#1),(#10,#10)),\
+         .UNSPECIFIED.,.F.,.F.,.F.,(2,2),(2,2),(0.,1.),(0.,1.),.UNSPECIFIED.);\
+         #12=RECTANGULAR_TRIMMED_SURFACE('',#11,0.,0.5,0.25,1.,.T.,.T.);",
+        12,
+        INCH_DEG,
+    );
+    assert!(matches!(*t, Surface::RectangularTrimmed { u2, v1, .. } if u2 == 0.5 && v1 == 0.25));
+}
+
+/// A cylinder `#10` of radius 5 with a seam: the line x = 5, with pcurves u = 0 and u = 2π.
+const SEAM: &str = "#10=CYLINDRICAL_SURFACE('',#4,5.);#11=CARTESIAN_POINT('',(5.,0.,0.));\
+#12=VECTOR('',#2,1.);#13=LINE('',#11,#12);#20=CARTESIAN_POINT('',(0.,0.));#21=DIRECTION('',(0.,1.));\
+#22=VECTOR('',#21,1.);#23=LINE('',#20,#22);\
+#24=(GEOMETRIC_REPRESENTATION_CONTEXT(2)PARAMETRIC_REPRESENTATION_CONTEXT()REPRESENTATION_CONTEXT('2D SPACE',''));\
+#25=DEFINITIONAL_REPRESENTATION('',(#23),#24);#26=PCURVE('',#10,#25);\
+#27=CARTESIAN_POINT('',(6.28318530717959,0.));#28=LINE('',#27,#22);\
+#29=DEFINITIONAL_REPRESENTATION('',(#28),#24);#30=PCURVE('',#10,#29);\
+#31=SEAM_CURVE('',#13,(#26,#30),.PCURVE_S1.);";
+
+#[test]
+// The values the file writes, which are near π/4 and 2π, not those constants.
+#[allow(clippy::approx_constant)]
+fn surface_curve_with_pcurves_shares_its_surface() {
+    let c = curve(SEAM, 31, MM);
+    let Curve::SurfaceCurve {
+        kind,
+        associated,
+        master,
+        curve_3d,
+    } = &*c
+    else {
+        panic!("{c:?}")
+    };
+    assert_eq!(
+        (*kind, *master),
+        (SurfaceCurveKind::Seam, PreferredRep::PcurveS1)
+    );
+    assert!(matches!(**curve_3d, Curve::Line { origin, .. } if origin == [5.0, 0.0, 0.0]));
+    let [Associated::Pcurve(a), Associated::Pcurve(b)] = associated.as_slice() else {
+        panic!("{associated:?}")
+    };
+    assert!(
+        Arc::ptr_eq(&a.surface, &b.surface),
+        "one surface entity, read once"
+    );
+    let up = Vector {
+        orientation: [0.0, 1.0, 0.0],
+        magnitude: 1.0,
+        scale: [1.0; 3],
+    };
+    assert_eq!(
+        *a.curve,
+        Curve::Line {
+            origin: [0.0, 0.0, 0.0],
+            vector: up
+        }
+    );
+    assert_eq!(
+        *b.curve,
+        Curve::Line {
+            origin: [6.28318530717959, 0.0, 0.0],
+            vector: up
+        }
+    );
+    // A PCURVE read on its own is the same data, sharing the surface read before.
+    let ex = file(&format!("{BASE}{SEAM}"));
+    let mut r = Reader::new(&ex, MM);
+    let seam = r.curve(31).unwrap();
+    let p = r.pcurve(26).unwrap();
+    let Curve::SurfaceCurve { associated, .. } = &*seam else {
+        panic!("{seam:?}")
+    };
+    assert_eq!(associated.first(), Some(&Associated::Pcurve(p.clone())));
+    assert!(
+        matches!(associated.first(), Some(Associated::Pcurve(q)) if Arc::ptr_eq(&q.surface, &p.surface))
+    );
+    assert_eq!(r.pcurve(13), Err("#13: expected PCURVE, found LINE".into()));
+}
+
+#[test]
+fn pcurves_scale_with_the_surface_parameters() {
+    // Inches and degrees: a cylinder pcurve's u is an angle, v a length.
+    let c = curve(
+        "#10=CYLINDRICAL_SURFACE('',#4,1.);#11=CARTESIAN_POINT('',(1.,0.,0.));#12=VECTOR('',#2,1.);#13=LINE('',#11,#12);\
+         #20=CARTESIAN_POINT('',(90.,0.));#21=DIRECTION('',(0.,1.));#22=VECTOR('',#21,1.);#23=LINE('',#20,#22);\
+         #24=(GEOMETRIC_REPRESENTATION_CONTEXT(2)PARAMETRIC_REPRESENTATION_CONTEXT()REPRESENTATION_CONTEXT('2D SPACE',''));\
+         #25=DEFINITIONAL_REPRESENTATION('',(#23),#24);#26=PCURVE('',#10,#25);#27=SURFACE_CURVE('',#13,(#26),.CURVE_3D.);",
+        27,
+        INCH_DEG,
+    );
+    let Curve::SurfaceCurve {
+        kind,
+        associated,
+        master,
+        ..
+    } = &*c
+    else {
+        panic!("{c:?}")
+    };
+    assert_eq!(
+        (*kind, *master),
+        (SurfaceCurveKind::Surface, PreferredRep::Curve3d)
+    );
+    let Some(Associated::Pcurve(pc)) = associated.first() else {
+        panic!("{associated:?}")
+    };
+    assert!(matches!(*pc.surface, Surface::Cylinder { radius, .. } if radius == 25.4));
+    assert_eq!(
+        *pc.curve,
+        Curve::Line {
+            origin: [90.0 * DEG, 0.0 * 25.4, 0.0],
+            vector: Vector {
+                orientation: [0.0, 1.0, 0.0],
+                magnitude: 1.0,
+                scale: [DEG, 25.4, 1.0],
+            },
+        }
+    );
+}
+
+/// A pcurve `#26` on `surface` (`#10`) whose curve is `#23`, defined in `curve`.
+fn pcurve_on(surface: &str, curve: &str) -> String {
+    format!(
+        "{surface}{curve}\
+         #24=(GEOMETRIC_REPRESENTATION_CONTEXT(2)PARAMETRIC_REPRESENTATION_CONTEXT()REPRESENTATION_CONTEXT('2D SPACE',''));\
+         #25=DEFINITIONAL_REPRESENTATION('',(#23),#24);#26=PCURVE('',#10,#25);"
+    )
+}
+
+#[test]
+fn conics_in_parameter_space() {
+    // A circle in a plane's parameter space: both parameters lengths, so the radius is too, and
+    // a 2D placement's direction ratios take the parameters' units.
+    let circle = "#20=CARTESIAN_POINT('',(1.,2.));#21=DIRECTION('',(1.,1.));\
+                  #22=AXIS2_PLACEMENT_2D('',#20,#21);#23=CIRCLE('',#22,3.);";
+    let ex = file(&format!("{BASE}{}", pcurve_on("#10=PLANE('',#4);", circle)));
+    let p = Reader::new(&ex, INCH_DEG).pcurve(26).unwrap();
+    assert_eq!(
+        *p.curve,
+        Curve::Circle {
+            position: Placement {
+                origin: [25.4, 2.0 * 25.4, 0.0],
+                axis: None,
+                ref_direction: Some([25.4, 25.4, 0.0]),
+            },
+            radius: 3.0 * 25.4,
+        }
+    );
+    // On a cylinder in degrees, u is an angle and v a length: not a conic in mm and rad.
+    let ex = file(&format!(
+        "{BASE}{}",
+        pcurve_on("#10=CYLINDRICAL_SURFACE('',#4,5.);", circle)
+    ));
+    assert_eq!(
+        Reader::new(&ex, INCH_DEG).pcurve(26),
+        Err("not supported yet: a conic in a parameter space with mixed units".into())
+    );
+    // In millimetres and radians both factors are 1.
+    assert!(matches!(*Reader::new(&ex, MM).pcurve(26).unwrap().curve,
+        Curve::Circle { radius, .. } if radius == 3.0));
+    // A 3D-only curve in parameter space.
+    let ex = file(&format!(
+        "{BASE}{}",
+        pcurve_on(
+            "#10=PLANE('',#4);",
+            "#20=CIRCLE('',#4,1.);#23=OFFSET_CURVE_3D('',#20,1.,.F.,#2);"
+        )
+    ));
+    assert_eq!(
+        Reader::new(&ex, MM).pcurve(26),
+        Err("not supported yet: curve OFFSET_CURVE_3D in parameter space".into())
+    );
+}
+
+#[test]
+fn nesting_in_parameter_space_is_bounded() {
+    // A 2D trimmed curve that is its own basis: refused at the depth bound (was a recursion
+    // without bound: the bound was checked only where the 2D curve was entered).
+    let ex = file(&format!(
+        "{BASE}{}",
+        pcurve_on(
+            "#10=PLANE('',#4);",
+            "#23=TRIMMED_CURVE('',#23,(PARAMETER_VALUE(0.)),(PARAMETER_VALUE(1.)),.T.,.PARAMETER.);"
+        )
+    ));
+    assert_eq!(
+        Reader::new(&ex, MM).pcurve(26),
+        Err("curve definitions nested too deeply".into())
+    );
+    // A surface that is its own basis.
+    assert_eq!(
+        surface_err("#10=OFFSET_SURFACE('',#10,1.,.F.);", 10, MM),
+        Err("surface definitions nested too deeply".into())
+    );
+}
+
+#[test]
+fn surface_refusals_say_why() {
+    for (data, why) in [
+        (
+            "#10=CYLINDRICAL_SURFACE('',#4,0.);",
+            "cylinder radius must be positive",
+        ),
+        (
+            "#10=SPHERICAL_SURFACE('',#4,-3.);",
+            "sphere radius must be positive",
+        ),
+        (
+            "#10=CONICAL_SURFACE('',#4,1.,2.);",
+            "cone with a negative radius or a semi angle outside (0, 90°)",
+        ),
+        (
+            "#10=CONICAL_SURFACE('',#4,-1.,0.5);",
+            "cone with a negative radius or a semi angle outside (0, 90°)",
+        ),
+        (
+            "#10=CONICAL_SURFACE('',#4,1.,0.);",
+            "cone with a negative radius or a semi angle outside (0, 90°)",
+        ),
+        (
+            "#10=TOROIDAL_SURFACE('',#4,1.,-2.);",
+            "torus minor radius must be positive",
+        ),
+        (
+            "#10=B_SPLINE_SURFACE_WITH_KNOTS('',1,1,((#1,#1),(#1)),.UNSPECIFIED.,.F.,.F.,.F.,(2,2),(2,2),(0.,1.),(0.,1.),.UNSPECIFIED.);",
+            "ragged B-spline control net",
+        ),
+        (
+            "#10=B_SPLINE_SURFACE_WITH_KNOTS('',1,1,((#1,#1),(#1,#1)),.UNSPECIFIED.,.F.,.F.,.F.,(2,2),(2,1),(0.,1.),(0.,1.),.UNSPECIFIED.);",
+            "knot multiplicities do not match the control points",
+        ),
+        (
+            "#10=(B_SPLINE_SURFACE(1,1,((#1,#1),(#1,#1)),.UNSPECIFIED.,.F.,.F.,.F.)B_SPLINE_SURFACE_WITH_KNOTS((2,2),(2,2),(0.,1.),(0.,1.),.UNSPECIFIED.)RATIONAL_B_SPLINE_SURFACE(((1.,1.))));",
+            "weights do not match the control net",
+        ),
+        (
+            "#10=SURFACE_OF_REVOLUTION('',#10,#4);",
+            "not supported yet: curve SURFACE_OF_REVOLUTION",
+        ),
+        (
+            "#10=PLANE('',#3);",
+            "placement location: expected a reference",
+        ),
+        ("#10=PLANE('',#99);", "missing entity #99"),
+        (
+            "#10=CURVE_BOUNDED_SURFACE('',#4,(),.F.);",
+            "not supported yet: surface CURVE_BOUNDED_SURFACE",
+        ),
+    ] {
+        assert_eq!(
+            surface_err(data, 10, MM).map(|_| ()),
+            Err(why.to_string()),
+            "{data}"
+        );
+    }
+    // A revolution whose axis is the wrong kind of placement.
+    assert_eq!(
+        surface_err(
+            "#10=CIRCLE('',#4,1.);#11=SURFACE_OF_REVOLUTION('',#10,#4);",
+            11,
+            MM
+        ),
+        Err("#4: expected AXIS1_PLACEMENT, found AXIS2_PLACEMENT_3D".into())
+    );
 }
