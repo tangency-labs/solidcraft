@@ -3774,3 +3774,7 @@ mod redundant_tests;
 #[cfg(test)]
 #[path = "sketch_symmetry_point_tests.rs"]
 mod symmetry_point_tests;
+
+#[cfg(test)]
+#[path = "sketch_pierce_tests.rs"]
+mod pierce_tests;
