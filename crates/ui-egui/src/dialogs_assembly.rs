@@ -986,19 +986,23 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 }
             }
             enter |= expr_row(ui, "Clearance", clearance);
-            let started = check.as_ref().map(|c| c.started);
-            form_row(ui, "", |ui| {
-                if let Some(started) = started {
-                    let t = Tokens::get();
+            // While it checks: the seconds so far, and Cancel where Compute was.
+            if let Some(started) = check.as_ref().map(|c| c.started) {
+                let t = Tokens::get();
+                form_row(ui, "", |ui| {
                     ui.horizontal(|ui| {
                         let seconds = ((crate::now_ms() - started) / 1000.0).floor().max(0.0);
                         ui.add(egui::Spinner::new().size(t.font_small));
                         ui.label(RichText::new(crate::i18n::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))])).color(t.text_dim));
-                        if crate::ui_kit::button(ui, crate::i18n::tr("ui.cancel"), crate::ui_kit::Button::Normal).clicked() {
-                            // Its thread finishes the check; the reply is left unread.
-                            *check = None;
-                        }
                     });
+                });
+            }
+            form_row(ui, "", |ui| {
+                if check.is_some() {
+                    if crate::ui_kit::button(ui, crate::i18n::tr("ui.cancel"), crate::ui_kit::Button::Normal).clicked() {
+                        // Its thread finishes the check; the reply is left unread.
+                        *check = None;
+                    }
                     return;
                 }
                 let stale = result.is_some() && *of != picked;
