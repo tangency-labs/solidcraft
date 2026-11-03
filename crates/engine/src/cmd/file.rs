@@ -1458,7 +1458,7 @@ mod tests {
         assert!(!s.is_dirty());
         let arm = s.doc.occurrences.iter().find(|o| o.name.starts_with("ArmB")).unwrap().name.clone();
         let arm_x = |s: &Session| {
-            let world = s.world_state();
+            let world = s.world_state().unwrap();
             let body = world.bodies.iter().find(|b| b.name.starts_with("ArmB")).unwrap();
             solidcraft_kernel::measure(&body.body).unwrap().centroid.x
         };
