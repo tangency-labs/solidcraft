@@ -1,5 +1,14 @@
 # SolidCraft UI kit
 
+The internal opt-in [universal panel foundation](panel-foundation.md) separates
+engine layout/specs from retained UI controllers and host-local services.
+`panel_runtime::EguiPanelHost` mounts bounded Header/Body/Footer slots through one
+existing `ui_kit::Container`; content controls its own scrolling. This reference
+adapter requires a full rectangular paint/input surface, rejects sparse geometry,
+and preserves parent clipping. `SolveApp::mount_panels` uses the enabled runtime's
+injected services. It adds no default
+placement/content change. Production docking and panel migrations remain separate.
+
 `viewport_status_item` and `viewport_status_row` draw persistent viewport pills on
 `Surface::ViewportStatus`. Callers supply translated names, formatted settings,
 kind, stable identity and key availability, and dispatch returned clear/edit actions.

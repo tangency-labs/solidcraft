@@ -21,6 +21,7 @@ pub mod frames;
 pub mod fuzz;
 pub mod licences;
 pub mod occurrences;
+pub mod panels;
 pub mod params;
 pub mod product_scene;
 pub mod recovery;
