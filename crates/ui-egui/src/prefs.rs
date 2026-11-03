@@ -6034,7 +6034,7 @@ mod tests {
             h.frames(2);
             assert_eq!((h.app.preferences.extrude_view_isometric, h.app.preferences.extrude_view_return), (isometric, returns));
             assert!(h.app.preferences.auto_operation);
-            assert!(!h.app.preferences.extrude_auto_to_object);
+            assert!(h.app.preferences.extrude_auto_to_object);
         }
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert!(!h.app.preferences.extrude_view_isometric && !h.app.preferences.extrude_view_return);

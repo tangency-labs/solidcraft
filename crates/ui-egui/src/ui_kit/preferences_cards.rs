@@ -110,10 +110,19 @@ pub(crate) fn settings_row_card<R>(ui: &mut Ui, selected: bool, height: f32, add
 }
 
 fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
+    crate::prefs_search::note_unlabelled(ui, &[card.label]);
+    if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[card.label, card.sub.unwrap_or("")]) {
+        return crate::prefs_search::hidden_response(ui);
+    }
     let t = Tokens::get();
     let width = dimension(width);
     let enabled = card.enabled && ui.is_enabled();
     let (rect, response) = ui.allocate_exact_size(vec2(width, card_height(&t, width, card)), if enabled { Sense::click() } else { Sense::hover() });
+    // Standalone cards and tiles are settings; compound rows own their search index.
+    if super::layout::label(ui).is_empty() {
+        crate::prefs_search::remember(ui, card.label, rect);
+        crate::prefs_search::follow(ui, card.label, rect);
+    }
     let look = card_look(card.selected, enabled, response.hovered(), response.has_focus());
     let p = ui.painter();
     let dim = |c: Color32| c.gamma_multiply(look.alpha);

@@ -1168,11 +1168,13 @@ mod tests {
                 set_cursor(&h.ctx, matches[0].0);
                 h.frames(2);
                 h.step(&serde_json::json!({"key":"Enter"})).unwrap();
-                h.frames(3);
+                // Let the normal scroll animation settle after opening the longer Design page.
+                h.frames(20);
                 assert_eq!(h.app.prefs_window.section, page);
                 assert!(h.app.prefs_window.filter.is_empty());
                 let body = crate::scenario::rect_of("dialog:page_body").unwrap();
-                assert!(body.contains_rect(crate::scenario::rect_of(handle).unwrap()), "{language}: {query} reveals {handle}");
+                let target = crate::scenario::rect_of(handle).unwrap();
+                assert!(body.contains_rect(target), "{language}: {query} reveals {handle}: body={body:?}, target={target:?}");
             }
         }
     }

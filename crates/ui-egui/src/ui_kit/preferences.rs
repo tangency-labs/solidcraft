@@ -609,7 +609,9 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
     }
     let figure_rect = if matches!(figure, PreferenceFigure::UpAxis(_)) {
         Rect::from_center_size(preview.center(), vec2(preview.width(), preview.width() * 80.0 / 120.0))
-    } else { preview };
+    } else {
+        preview
+    };
     paint_preference_figure(ui.painter(), figure_rect, figure, enabled);
     let label_rect =
         Rect::from_min_size(pos2(rect.left() + t.space_4, preview.bottom() + t.space_4), vec2((rect.width() - t.space_8).max(0.0), label_height));
