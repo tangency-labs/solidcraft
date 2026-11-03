@@ -1653,17 +1653,47 @@ pub fn constraint_glyphs_visible_at_scale(px_per_mm: f32, hide_when_zoomed_out: 
     !hide_when_zoomed_out || px_per_mm >= MIN_GLYPH_PX_PER_MM || span_px() >= MIN_GLYPH_SPAN_PX
 }
 
-/// The larger side, in screen pixels, of the bounds of the active sketch's glyph anchors.
+/// The larger side, in screen pixels, of the bounds of the glyphs the active sketch draws. It
+/// stops measuring once that reaches `MIN_GLYPH_SPAN_PX`, so a large sketch costs no more.
 fn glyph_span_px(ss: &solidcraft_engine::doc::SolvedSketch, proj: &Proj) -> f32 {
     let mut r = egui::Rect::NOTHING;
-    for c in ss.sketch.constraints.iter().filter(|c| !c.kind.is_dimension()) {
+    for c in glyph_constraints(&ss.sketch) {
         for (at, _) in glyph_anchors(&ss.sketch, &c.kind) {
             if let Some(p) = proj.to_screen(ss.plane.to_world(at)) {
                 r.extend_with(p);
+                if r.width().max(r.height()) >= MIN_GLYPH_SPAN_PX {
+                    return r.width().max(r.height());
+                }
             }
         }
     }
     if r.min.x <= r.max.x { r.width().max(r.height()) } else { 0.0 }
+}
+
+/// The constraints that draw a glyph: no dimensions, one MidPoint glyph where lines' midpoints
+/// meet, and a pattern's constraints once, on its first instance.
+fn glyph_constraints(sk: &solidcraft_engine::sketch::Sketch) -> Vec<&solidcraft_engine::sketch::Constraint> {
+    let mut midpoints: Vec<usize> = Vec::new();
+    sk.constraints
+        .iter()
+        .filter(|c| {
+            if c.kind.is_dimension() {
+                return false;
+            }
+            if let solidcraft_engine::sketch::ConstraintKind::Midpoint { p, .. } = c.kind
+                && !c.driven
+            {
+                if midpoints.contains(&p) {
+                    return false;
+                }
+                midpoints.push(p);
+            }
+            !(matches!(
+                c.kind,
+                solidcraft_engine::sketch::ConstraintKind::PatternPoint { .. } | solidcraft_engine::sketch::ConstraintKind::PatternRadius { .. }
+            ) && !sk.patterns.iter().any(|p| p.instances.first().and_then(|i| i.constraints.first()) == Some(&c.id)))
+        })
+        .collect()
 }
 
 /// Pixels on screen for one millimetre along the sketch plane's U axis, near the plane origin.
@@ -1700,27 +1730,7 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
         dim_texts.iter().any(|d| d.intersects(r))
     };
     let mut placed: Vec<(String, Pos2, Pos2)> = Vec::new();
-    // The point of each MidPoint glyph drawn so far: lines whose midpoints meet share one glyph.
-    let mut midpoints: Vec<usize> = Vec::new();
-    for c in &ss.sketch.constraints {
-        if c.kind.is_dimension() {
-            continue;
-        }
-        if let solidcraft_engine::sketch::ConstraintKind::Midpoint { p, .. } = c.kind
-            && !c.driven
-        {
-            if midpoints.contains(&p) {
-                continue;
-            }
-            midpoints.push(p);
-        }
-        if matches!(
-            c.kind,
-            solidcraft_engine::sketch::ConstraintKind::PatternPoint { .. } | solidcraft_engine::sketch::ConstraintKind::PatternRadius { .. }
-        ) && !ss.sketch.patterns.iter().any(|p| p.instances.first().and_then(|i| i.constraints.first()) == Some(&c.id))
-        {
-            continue;
-        }
+    for c in glyph_constraints(&ss.sketch) {
         for (at, dir) in glyph_anchors(&ss.sketch, &c.kind) {
             let Some(base) = proj.to_screen(ss.plane.to_world(at)) else { continue };
             // The entity's direction on screen, and its side.
