@@ -959,6 +959,10 @@ pub enum FeatureKind {
         /// Buttress forms: which way the steep flank of the screw's teeth faces.
         #[serde(default, skip_serializing_if = "crate::thread_forms::is_default")]
         steep_flank: crate::thread_forms::SteepFlank,
+        /// Set on threads saved before holes were sized by their nominal diameter, whose size
+        /// was left to the tap drill: a 12 mm hole stays M14 there. New threads leave it off.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        old_auto_size: bool,
     },
     /// Ruled loft through profiles of several sketches, in order.
     Loft {
