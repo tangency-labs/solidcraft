@@ -1,0 +1,68 @@
+{
+  "en": {
+    "2D Contour": "2D Contour",
+    "2D Pocket": "2D Pocket",
+    "Adaptive Clear": "Adaptive Clear",
+    "CAM Setup": "CAM Setup",
+    "Define Tool": "Define Tool",
+    "List CAM": "List CAM",
+    "Post Process": "Post Process",
+    "Remove CAM Operation": "Remove CAM Operation",
+    "Remove Tool": "Remove Tool"
+  },
+  "ar": {
+    "2D Contour": "كنتور ثنائي الأبعاد",
+    "2D Pocket": "تجويف ثنائي الأبعاد",
+    "Adaptive Clear": "تفريغ تكيفي",
+    "CAM Setup": "إعداد CAM",
+    "Define Tool": "تعريف أداة",
+    "List CAM": "سرد CAM",
+    "Post Process": "معالجة لاحقة",
+    "Remove CAM Operation": "إزالة عملية CAM",
+    "Remove Tool": "إزالة الأداة"
+  },
+  "he": {
+    "2D Contour": "קונטור דו־ממד",
+    "2D Pocket": "כיס דו־ממד",
+    "Adaptive Clear": "פינוי אדפטיבי",
+    "CAM Setup": "הגדרת CAM",
+    "Define Tool": "הגדרת כלי",
+    "List CAM": "רשימת CAM",
+    "Post Process": "עיבוד לאחר",
+    "Remove CAM Operation": "הסרת פעולת CAM",
+    "Remove Tool": "הסרת כלי"
+  },
+  "ja": {
+    "2D Contour": "2Dコンター",
+    "2D Pocket": "2Dポケット",
+    "Adaptive Clear": "アダプティブクリア",
+    "CAM Setup": "CAMセットアップ",
+    "Define Tool": "工具を定義",
+    "List CAM": "CAMを一覧表示",
+    "Post Process": "ポストプロセス",
+    "Remove CAM Operation": "CAM工程を削除",
+    "Remove Tool": "工具を削除"
+  },
+  "vi": {
+    "2D Contour": "Contour 2D",
+    "2D Pocket": "Pocket 2D",
+    "Adaptive Clear": "Adaptive Clear",
+    "CAM Setup": "Thiết lập CAM",
+    "Define Tool": "Định nghĩa công cụ",
+    "List CAM": "Liệt kê CAM",
+    "Post Process": "Hậu xử lý",
+    "Remove CAM Operation": "Loại bỏ thao tác CAM",
+    "Remove Tool": "Loại bỏ công cụ"
+  },
+  "zh": {
+    "2D Contour": "2D 轮廓",
+    "2D Pocket": "2D 挖槽",
+    "Adaptive Clear": "自适应清除",
+    "CAM Setup": "CAM 设置",
+    "Define Tool": "定义刀具",
+    "List CAM": "列出 CAM",
+    "Post Process": "后处理",
+    "Remove CAM Operation": "移除 CAM 操作",
+    "Remove Tool": "移除刀具"
+  }
+}

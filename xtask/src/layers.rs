@@ -51,6 +51,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("step", Class::Layer(1)),
     ("kernel", Class::Layer(1)),
     ("render", Class::Layer(1)),
+    // manufacturing: toolpaths and G-code from 2D regions (no document, no kernel)
+    ("cam", Class::Layer(1)),
     ("doc", Class::Layer(2)),
     ("io", Class::Layer(3)),
     ("engine", Class::Layer(4)),

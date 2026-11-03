@@ -57,6 +57,7 @@ mod tests;
 pub mod appearance;
 pub mod bom;
 pub mod browser;
+pub mod cam;
 pub mod component;
 pub mod config;
 pub mod construct;
