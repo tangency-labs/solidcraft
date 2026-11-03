@@ -11,6 +11,12 @@
 //! A corner with no side edge use (upstream then reads `m_vVertices[0]` of an empty
 //! list) and a closed corner with more than two edge uses but fewer than two fillet
 //! vertices are input errors. There is no recursion.
+//!
+//! With `fixes.fillet_blend_corner` (WR-697; the fork's smlib#113 caa67d0) the corner does
+//! not test its edge for G1: `FilletCorner::create` makes a closed edge meeting itself G1
+//! the blend corner's Join (543d25a), so this corner only sees an edge meeting itself at
+//! an angle. Its G1 branches (the mate vertex, the `CROSS_SECTION` edge, blending) are the
+//! pinned default's alone, and go when the flag becomes the default.
 
 use super::{need, new_corner_vertex, Nx1TopologyEnv};
 use crate::blend::fillet_corner::p1::test_g1_continuity;
@@ -79,17 +85,20 @@ impl FilletCorner {
         let total = all.len();
         let mut seam_edgeuse = None;
 
-        // Test if the filleted edge is G1-closed
+        // Test if the filleted edge is G1-closed. With `fillet_blend_corner` it is not:
+        // `FilletCorner::create` made an edge that is the blend corner's Join, with this
+        // same test at this same tolerance (WR-697; smlib#113 caa67d0)
         let filleted_edge = eu1::edge(target, fil_edgeuse)?;
-        self.g1_case = test_g1_continuity(
-            k,
-            target,
-            self.vertex,
-            filleted_edge,
-            filleted_edge,
-            rad_to_deg(self.tangency_tol_radians),
-        )?
-        .0;
+        self.g1_case = !k.fixes.fillet_blend_corner
+            && test_g1_continuity(
+                k,
+                target,
+                self.vertex,
+                filleted_edge,
+                filleted_edge,
+                rad_to_deg(self.tangency_tol_radians),
+            )?
+            .0;
 
         // for all edges connected to this corner
         for &eu in &all {

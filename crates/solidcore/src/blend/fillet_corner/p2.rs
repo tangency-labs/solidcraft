@@ -214,6 +214,12 @@ impl FilletCorner {
         fs: S,
         mut solver_of: impl FnMut(EdgeuseId) -> Option<S>,
     ) -> Result<Option<S>> {
+        // With `fillet_blend_corner` the edge meets itself at an angle (a G1 one is the blend
+        // corner's Join), so there is no tangent solver: the fork has no override here, and
+        // the base class answers NULL (WR-697; smlib#113 caa67d0)
+        if k.fixes.fillet_blend_corner {
+            return Ok(None);
+        }
         let solver_eus = self
             .solver_eus
             .as_deref()
@@ -1074,6 +1080,13 @@ impl FilletCorner {
         env: &mut TangentSplitEnv<'_>,
     ) -> Result<()> {
         const OP: &str = OP_NX1_TANGENT;
+        // With `fillet_blend_corner` the closed corner makes no tangent adjustment: the fork
+        // has no override here, and the base class's is a success. The adjustment acts only
+        // where the edge's end tangents are parallel within 2 degrees, which `create` made a
+        // Join at any tolerance of 2 degrees or more (WR-697; smlib#113 caa67d0)
+        if env.k.fixes.fillet_blend_corner {
+            return Ok(());
+        }
         let Some((orig_fg, this_fv_use)) =
             self.nx1_closed_tangent_split(env.k, env.target, env.pseudo)?
         else {
@@ -2780,6 +2793,57 @@ mod tests {
         let (mut pseudo, mut c) = loop_corner(FilletCornerKind::NByOneClosed, 2);
         with_env(&mut pseudo, |env| c.adjust_tangent_corner(env)).unwrap();
         assert_eq!(c.edges.len(), 2);
+    }
+
+    /// A cylinder's top rim, a closed edge meeting itself G1 at its vertex, as the one
+    /// filleted edge use of a closed Nx1 corner there (tangency tolerance 10 degrees).
+    fn closed_g1_rim_corner(k: &mut Kernel) -> (Brep, FilletCorner) {
+        let b = crate::primitive::api_primitives::create_cylinder(
+            k,
+            Point3::new(0.0, 0.0, 0.0),
+            5.0,
+            8.0,
+        )
+        .unwrap();
+        let rim = crate::topology::brep::p1::edges(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|&e| {
+                edge::is_closed(&b, e).unwrap()
+                    && vertex::point(&b, edge::vertex(&b, e).unwrap().unwrap())
+                        .unwrap()
+                        .z
+                        > 4.0
+            })
+            .unwrap();
+        let v = edge::vertex(&b, rim).unwrap();
+        let eu = edge::edgeuses(&b, rim, None, None).unwrap()[0];
+        let c = FilletCorner::new(
+            FilletCornerKind::NByOneClosed,
+            v,
+            Some(vec![eu]),
+            None,
+            1e-3,
+            10.0_f64.to_radians(),
+        );
+        (b, c)
+    }
+
+    /// `SmFilletNx1ClosedCorner::GetTangentFilletSolver`: at a closed edge meeting itself
+    /// G1 the corner's one solver continues itself; with `fillet_blend_corner` there is none.
+    #[test]
+    fn a_closed_g1_corner_s_tangent_solver_is_its_own() {
+        for blend in [false, true] {
+            let mut k = Kernel::default();
+            k.fixes.fillet_blend_corner = blend;
+            let (b, c) = closed_g1_rim_corner(&mut k);
+            let fs = c
+                .tangent_fillet_solver_nx1_closed_with_lookup(&k, &b, 7_u8, |_| Some(7))
+                .unwrap();
+            // with the flag the edge would have been the blend corner's Join, and the
+            // closed corner has no tangent solver (smlib#113 caa67d0)
+            assert_eq!(fs, (!blend).then_some(7), "fillet_blend_corner {blend}");
+        }
     }
 
     #[test]

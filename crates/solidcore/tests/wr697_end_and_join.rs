@@ -496,3 +496,80 @@ fn a_closed_convex_rim_meeting_itself_at_an_angle_is_rounded() {
         assert!((v - want).abs() <= 1e-6 * want, "{v} vs {want}");
     }
 }
+
+/// A teardrop boss 6 high on a 40 x 40 x 4 plate. The boss's profile is one closed cubic
+/// B-spline from its tip (0, 0) round through (15.5, 0) and back, swept up z, so the boss's
+/// foot is one closed edge that meets itself at a right angle at the tip, where the boss's
+/// side face meets itself along its seam.
+fn teardrop_boss(k: &mut Kernel) -> Brep {
+    use solidcore::curve::curve::Curve;
+    use solidcore::nurbs::b_spline_curve::p1::{
+        BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
+    };
+    use solidcore::sweep::api_brep::create_linear_sweep;
+    let control = TEARDROP.map(|[x, y]| Vec3::new(x, y, 0.0));
+    let profile = Curve::from(
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 3,
+            control_points: &control,
+            form: BSplineCurveForm::default(),
+            knot_multiplicities: &[4, 1, 1, 4],
+            knots: &[0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0],
+            knot_type: KnotType::default(),
+            weights: None,
+            trim: None,
+        })
+        .unwrap(),
+    );
+    let boss = create_linear_sweep(k, &[Some(&profile)], Vec3::Z, 6.0, true).unwrap();
+    let plate = create_box(k, Point3::new(-10.0, -20.0, -4.0), 40.0, 40.0, 4.0).unwrap();
+    boolean_union(k, plate, boss).unwrap()
+}
+
+/// The closed-edge corner where a closed edge meets itself at an angle: the teardrop boss's
+/// foot, rounded r 0.5 and r 1, is the closed Nx1 corner at the tip with and without the
+/// flag (543d25a makes only a closed edge meeting itself G1 the Join). With the flag the
+/// fork's corner there is the angle case alone (smlib#113 caa67d0, 2ac7a17). The volumes
+/// are the port's own (no closed form; the fork was not run on this body): they pin the
+/// results across that change, each body clean with the boss's round and the plate's.
+#[test]
+fn a_closed_edge_meeting_itself_at_an_angle_is_the_closed_corner() {
+    let foot = [[15.5, 0.0, 0.0]];
+    for blend in [true, false] {
+        for (r, want) in [
+            (
+                0.5,
+                if blend {
+                    7133.840112885839517
+                } else {
+                    7133.840112799233793
+                },
+            ),
+            (
+                1.0,
+                if blend {
+                    7140.722103719867846
+                } else {
+                    7140.722104405596838
+                },
+            ),
+        ] {
+            let mut k = all_fixes(blend);
+            let mut b = teardrop_boss(&mut k);
+            let cs = corners(&mut k, &mut b.clone(), &foot, r);
+            assert_eq!(cs.len(), 1);
+            assert!(cs[0].0.distance(Point3::new(0.0, 0.0, 0.0)) <= 1e-12);
+            assert_eq!(
+                (cs[0].1, cs[0].2, cs[0].3),
+                (FilletCornerKind::NByOneClosed, None, 12)
+            );
+            round(&mut k, &mut b, &foot, r);
+            let v = volume(&k, &mut b);
+            eprintln!("blend {blend} r {r}: volume {v:.15}, {} faces", faces(&b));
+            clean(&mut k, &mut b);
+            assert_eq!(faces(&b), 10);
+            assert!((v - want).abs() <= 1e-12 * want, "{v} vs {want}");
+        }
+    }
+}
