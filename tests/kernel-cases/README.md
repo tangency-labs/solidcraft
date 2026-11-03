@@ -5,6 +5,12 @@ crash report, is a use case here with its own right answer. The kernel, solidcor
 of them. `cargo xtask kernel-cases` runs them and writes
 [`docs/kernel-cases.md`](../../docs/kernel-cases.md).
 
+**This folder takes no new cases.** New kernel cases go to solidcore's corpus,
+`crates/solidcore/tests/kernel_cases/<area>/` in
+[tangency-labs/solidcore](https://github.com/tangency-labs/solidcore) (see
+[Exporting to solidcore](#exporting-to-solidcore)). `CASES` lists every case here and only
+shrinks: `cargo xtask lists` fails on a case it does not list, and on a listed case that is gone.
+
 ```sh
 cargo xtask kernel-cases                                    # every case
 cargo xtask kernel-cases --cli target/release/solidcraft-cli --out /tmp/run   # with a CLI already built
@@ -148,8 +154,9 @@ request, so the list only shrinks and never goes stale:
 
 - a fix (yours, or a solidcore pin bump): remove the line of each case the shard reports as
   `FIXED`;
-- a new case that fails today: add its line, sorted, with the cause from its result
-  (`results.json` in the shard's `kernel-rig-results-<area>` artifact, or a local run);
+- a case here that starts failing for a reason the kernel owns (a solidcore pin bump): add its
+  line, sorted, with the cause from its result (`results.json` in the shard's
+  `kernel-rig-results-<area>` artifact, or a local run);
 - a regression: fix it in the same pull request.
 
 To check a list locally before pushing: `cargo xtask kernel-cases --area <area> --cli
@@ -174,10 +181,9 @@ The workflow's trigger paths are whole folders that hold every `PATHS` glob (a s
 starts no job at all. To see what a change would run:
 `git diff --name-only -z origin/develop... | python3 scripts/ci/kernel_rig_plan.py --paths -`.
 
-**A new area** joins with its folder: its cases, a `KNOWN_FAILING` (empty but for its header
-when every case passes), and a `PATHS` listing the files its commands go through. The plan finds
-the areas from the folders, so the workflow needs no edit (unless a `PATHS` glob lies outside
-the trigger paths, which the self-test reports). Add a row to the table under Layout.
+The plan finds the areas from the folders, so the workflow needs no edit when an area's `PATHS`
+changes (unless a glob lies outside the trigger paths, which the self-test reports). No new area
+joins: new kernel cases go to solidcore's corpus.
 
 ### Every command has a case
 
@@ -188,8 +194,9 @@ has no case>`, each section sorted. Lines before `[to cover]` have no geometry t
 view, rendering, appearance, files, component and parameter bookkeeping, ...). Lines after it
 make geometry and wait for a case: that section only shrinks. The check also fails on a listed
 command that a case now uses (remove its line in the same pull request) or that the registry no
-longer has. A new geometry command gets a case, not an `EXEMPT` line. The build job runs for this
-check on any change to `crates/engine/src/cmd/`, a recipe or `EXEMPT`, even when no area does.
+longer has. A new command gets an `EXEMPT` line before `[to cover]` whose reason names where it
+is tested: its kernel case in solidcore's corpus, or its test in its area's test file. The build
+job runs for this check on any change to `crates/engine/src/cmd/`, a recipe or `EXEMPT`, even when no area does.
 
 ## The complexity ladder
 
@@ -233,6 +240,16 @@ the timeout).
 
 ## Exporting to solidcore
 
-solidcore#349 proposes a graded case format for the Rust port. The cases here are SolidCraft's
-copy and the source; each one maps onto it field by field (`sources`, the derivation, the
-graded quantities and invariants), so an exporter can write them out for solidcore unchanged.
+solidcore holds the kernel cases as a corpus of kernel operations,
+`crates/solidcore/tests/kernel_cases/<area>/<case>.json`, described in that folder's README.
+`cargo xtask kernel-cases [--ladder] [--area AREA] --export DIR` writes each case here as such
+an entry: the kernel operations that made its result, their operand records
+(`<case>.bodies.json.gz`), the fix set and the expected values, with `DIR/manifest.json` listing
+every case that is not expressible as kernel input and why.
+
+A new kernel case: draft it here as `<area>/<id>/recipe.json` and `expected.json` (the format
+above, answers in closed form or exact), export it with `--area <area> --export DIR`, add
+`DIR/<area>/<id>.json` and its `.bodies.json.gz` to solidcore's corpus in a pull request there,
+and delete the draft (it is not in `CASES`, so it cannot be committed here). An entry can also be
+written by hand as solidcore's README describes. A case about a command, the UI or a product
+rule stays in SolidCraft as a test in its area's existing test file.
