@@ -787,7 +787,7 @@ fn a_motion_trace_curve_takes_no_constraints_and_counts_no_freedoms() {
 
 /// Where a fit point of 3D curve `wire` lands once the model is evaluated (parameters applied).
 fn solved_fit(s: &Session, sketch: u64, wire: &str, index: usize) -> Vec3 {
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let sk = &world.sketch(sketch).unwrap().sketch;
     sk.wires[sk.wire_index(wire).unwrap()].fit[index]
 }
