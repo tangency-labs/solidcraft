@@ -6,7 +6,7 @@ use egui::Ui;
 
 #[test]
 fn every_text_input_centres_its_galley_for_mono_and_proportional_fonts() {
-    for case in ["expression", "plain", "cell", "invalid", "library", "placement", "password", "multiline", "area", "message"] {
+    for case in ["expression", "plain", "cell", "invalid", "library", "placement", "password", "multiline", "area", "message", "search"] {
         let ctx = crate::fonts::test_context();
         let mut value = "Centred".to_owned();
         let mut rect = egui::Rect::NOTHING;
@@ -16,6 +16,7 @@ fn every_text_input_centres_its_galley_for_mono_and_proportional_fonts() {
                 let id = ui.id().with(case);
                 rect = match case {
                     "expression" | "plain" => super::editor(ui, &mut value, "", case == "expression").2.rect,
+                    "search" => search_field(ui, id, &mut value, "Search").rect,
                     "cell" | "invalid" => cell_editor(ui, id, &mut value, "", case == "invalid").rect,
                     "library" => library_cell(ui, id, &mut value, "", |_| {}).rect,
                     "placement" => placement_field(ui, id, &mut value, "").rect,
@@ -37,6 +38,9 @@ fn every_text_input_centres_its_galley_for_mono_and_proportional_fonts() {
             .unwrap_or_else(|| panic!("{case}: missing text"));
         let center = galley.pos.y + galley.galley.rect.center().y;
         assert!((center - rect.center().y).abs() < 0.01, "{case}: galley centre {center} differs from field {rect:?}");
+        if case == "search" {
+            assert!(galley.pos.x >= rect.left() + crate::theme::Tokens::get().space_24, "search text leaves room for its icon");
+        }
         if case == "placement" {
             let font = egui::FontId::proportional(crate::theme::Tokens::get().font_body);
             let native = ctx.fonts_mut(|fonts| fonts.row_height(&font))

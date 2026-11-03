@@ -220,6 +220,14 @@ const ELEMENTS: &[Element] = &[
     element!("section_heading", |ui, _| {
         section_heading(ui, "Edit");
     }),
+    element!("checkbox_at", |ui, sample| {
+        let side = Tokens::get().space_16;
+        let (rect, _) = ui.allocate_exact_size(vec2(side, side), egui::Sense::hover());
+        checkbox_at(ui, rect, "Enabled", &mut sample.checked);
+    }),
+    element!("settings_plugin_card", |ui, sample| {
+        settings_plugin_card(ui, "sample", "Gear generator", "1.2.0", "Adds a parametric gear feature.", &mut sample.checked);
+    }),
     element!("text_button", |ui, _| {
         text_button(ui, "Reset", true);
     }),
@@ -237,7 +245,11 @@ const ELEMENTS: &[Element] = &[
         progress_action(ui, "Rendering · 62%", 0.62, "Cancel");
     }),
     element!("settings_choice_row", |ui, _| {
-        settings_choice_row(ui, &SettingsChoice { key: "gallery:radio_row", title: "Preview", summary: "1280 × 720", detail: "Preview size" }, true);
+        settings_choice_row(
+            ui,
+            &SettingsChoice { icon: None, key: "gallery:radio_row", title: "Preview", summary: "1280 × 720", detail: "Preview size" },
+            true,
+        );
     }),
     element!("icon_label_action", |ui, _| {
         icon_label_action(ui, "Render Image", Some("play"), true, true);
@@ -517,18 +529,21 @@ const ELEMENTS: &[Element] = &[
             ui,
             &[
                 SettingsChoice {
+                    icon: None,
                     key: "gallery:ask",
                     title: "Ask first",
                     summary: "Confirm changes before they run.",
                     detail: "Full permission details",
                 },
                 SettingsChoice {
+                    icon: None,
                     key: "gallery:edits",
                     title: "Allow edits",
                     summary: "Ask before running other tools.",
                     detail: "Full permission details",
                 },
                 SettingsChoice {
+                    icon: Some("warning"),
                     key: "gallery:all",
                     title: "Allow all",
                     summary: "Run supported tools without asking.",
@@ -1220,7 +1235,8 @@ const ELEMENTS: &[Element] = &[
         });
     }),
     element!("add_prompt", "dialog:table:add_prompt:add", Some("dialog:table:add_prompt:add"), |ui, _| {
-        table(ui, "add_prompt", &[Column::new("Name", 1.0).flex()], "Empty", |ui, table| {
+        table_custom(ui, "add_prompt", &[Column::new("Name", 1.0).flex()], "Empty", |ui, table| {
+            table.headers(ui, |_, _| false);
             table.add_prompt(ui, "Add configuration", "Add configuration");
         });
     }),
@@ -1262,12 +1278,13 @@ const ELEMENTS: &[Element] = &[
         text(ui, "Invalid expression", Text::Error("gallery"));
     }),
     element!("table_flex", |ui, s| {
-        table(
+        table_custom(
             ui,
             "flex",
             &[Column::new("Name", 1.0).flex(), Column::new("Expression", 1.5).flex(), Column::new("Actions", 0.0).icon_only()],
             "Empty",
             |ui, table| {
+                table.headers(ui, |_, _| false);
                 table.row(ui, "row", false, |row| {
                     row.cell(|ui| {
                         text(ui, "Width", Text::Cell);
@@ -1364,7 +1381,8 @@ const ELEMENTS: &[Element] = &[
         });
     }),
     element!("table", "dialog:table:gallery:row", None, |ui, s| {
-        table(ui, "gallery", &[Column::new("Name", 1.0), Column::new("Expression", 1.5)], "No rows", |ui, table| {
+        table_custom(ui, "gallery", &[Column::new("Name", 1.0), Column::new("Expression", 1.5)], "No rows", |ui, table| {
+            table.headers(ui, |_, _| false);
             table.row(ui, "row", true, |row| {
                 row.cell(|ui| {
                     text(ui, "Width", Text::Cell);
@@ -1808,6 +1826,14 @@ const ELEMENTS: &[Element] = &[
         let (rect, _) = ui.allocate_exact_size(vec2(row_height(), row_height()), egui::Sense::hover());
         quiet_icon_button_at(ui, rect, "plus", "Add shortcut");
     }),
+    element!("shortcut_binding", |ui, _| {
+        ui.horizontal(|ui| {
+            shortcut_binding(ui, "Ctrl+Shift+PageDown", true);
+            shortcut_binding(ui, "Option+Enter", false);
+            shortcut_binding(ui, "Ctrl++", true);
+        });
+        shortcut_binding(ui, "", true);
+    }),
     element!("keyboard", |ui, _| {
         assert_eq!(keyboard(ui.ctx(), true), Action::None);
         ui.allocate_space(vec2(row_height(), row_height()));
@@ -2154,25 +2180,32 @@ fn table_cells_keep_alignment_fixed_rows_editing_and_action_targets() {
         let mut removed = false;
         let mut draw = |ui: &mut Ui| {
             scope(ui, |ui| {
-                table(ui, "cells", &[Column::new("Name", 1.0), Column::new("Expression", 1.5), Column::new("Actions", 0.7)], "Empty", |ui, table| {
-                    for (name, value) in [("Width", &mut first), ("Height", &mut second)] {
-                        table.row(ui, name, name == "Height", |row| {
-                            row.cell(|ui| {
-                                text(ui, name, Text::Cell);
+                table_custom(
+                    ui,
+                    "cells",
+                    &[Column::new("Name", 1.0), Column::new("Expression", 1.5), Column::new("Actions", 0.7)],
+                    "Empty",
+                    |ui, table| {
+                        table.headers(ui, |_, _| false);
+                        for (name, value) in [("Width", &mut first), ("Height", &mut second)] {
+                            table.row(ui, name, name == "Height", |row| {
+                                row.cell(|ui| {
+                                    text(ui, name, Text::Cell);
+                                });
+                                row.cell(|ui| {
+                                    let response = cell_editor(ui, ui.id().with("expression"), value, "Expression", false);
+                                    scenario::publish_handle(&format!("gallery:cell:{name}"), response.rect.center());
+                                    scenario::publish_rect(&format!("gallery:cell:{name}"), response.rect);
+                                });
+                                row.cell(|ui| {
+                                    if button(ui, "Delete", Button::Small).clicked() {
+                                        removed = true;
+                                    }
+                                });
                             });
-                            row.cell(|ui| {
-                                let response = cell_editor(ui, ui.id().with("expression"), value, "Expression", false);
-                                scenario::publish_handle(&format!("gallery:cell:{name}"), response.rect.center());
-                                scenario::publish_rect(&format!("gallery:cell:{name}"), response.rect);
-                            });
-                            row.cell(|ui| {
-                                if button(ui, "Delete", Button::Small).clicked() {
-                                    removed = true;
-                                }
-                            });
-                        });
-                    }
-                });
+                        }
+                    },
+                );
             });
         };
         for _ in 0..3 {
@@ -2293,7 +2326,7 @@ fn gallery_covers_every_inline_element() {
             {
                 let name = item.sig.ident.to_string();
                 // Inherited labels, state keys and size measurements do not render elements.
-                if !matches!(name.as_str(), "eye_drag_id" | "label" | "placement_field_content_size") {
+                if !matches!(name.as_str(), "eye_drag_id" | "icon_label_width" | "label" | "placement_field_content_size") {
                     assert!(names.contains(name.as_str()), "{file}: {name} needs a gallery entry");
                 }
             }

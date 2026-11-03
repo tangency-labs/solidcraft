@@ -94,3 +94,15 @@ pub(crate) fn checkbox_indeterminate(ui: &mut Ui, label: &str, value: &mut bool,
 #[cfg(test)]
 #[path = "checks_tests.rs"]
 pub(super) mod tests;
+
+/// A checkbox at an explicit square, for vertically centred settings-card actions.
+pub(crate) fn checkbox_at(ui: &mut Ui, rect: Rect, label: &str, value: &mut bool) -> Response {
+    let mut response = ui.interact(rect, ui.make_persistent_id(("checkbox", label)), egui::Sense::click());
+    if response.clicked() {
+        *value = !*value;
+        response.mark_changed();
+    }
+    paint_box(ui, rect, &response, *value, false);
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *value, label));
+    response.on_hover_text(label)
+}

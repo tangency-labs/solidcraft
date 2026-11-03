@@ -357,3 +357,81 @@ fn carousel_arrow(ui: &mut Ui, size: egui::Vec2, direction: f32, enabled: bool, 
     scenario::publish_target(&format!("prefs:carousel:{label}"), rect);
     if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
 }
+
+/// Installed add-on row: 12 pt padding, 36 pt mark and centred, unframed folder action.
+pub(crate) fn settings_plugin_card(
+    ui: &mut Ui,
+    key: &str,
+    name: &str,
+    version: &str,
+    description: &str,
+    enabled: &mut bool,
+) -> egui::InnerResponse<(Response, Response)> {
+    let t = Tokens::get();
+    let container = super::Container::new(ui.ctx(), super::Surface::Navigation);
+    let frame = container
+        .frame(ui.ctx(), t.control_fill, crate::frame::Side::Left)
+        .stroke(Stroke::new(1.0, t.dialog_border))
+        .corner_radius(t.radius_lg)
+        .inner_margin(t.space_12);
+    container.show_frame(ui, frame, ui.max_rect(), |ui| {
+        ui.set_min_width(dimension(ui.available_width()));
+        if !*enabled {
+            ui.multiply_opacity(0.55);
+        }
+        let width = dimension(ui.available_width());
+        let tile_side = t.space_24 + t.space_12;
+        let folder_label = crate::i18n::tr_label("Show in folder");
+        let folder_font = FontId::proportional(t.font_body);
+        let folder_galley = ui.painter().layout_no_wrap(folder_label.into(), folder_font, t.form_dim);
+        let folder_width = folder_galley.size().x + t.space_8 * 2.0 + t.space_14 + t.space_6;
+        let actions_width = folder_width + t.space_12 + t.space_16;
+        let beside = width >= tile_side + t.space_12 * 2.0 + actions_width + t.form_label_width;
+        let text_width = (width - tile_side - t.space_12 - if beside { actions_width + t.space_12 } else { 0.0 }).max(1.0);
+        let version_galley = ui.painter().layout_no_wrap(version.into(), FontId::proportional(t.font_small), t.form_dim);
+        let title = ui.painter().layout(
+            name.into(),
+            crate::fonts::semibold(t.font_button),
+            t.form_ink,
+            (text_width - version_galley.size().x - t.space_8).max(1.0),
+        );
+        let header_height = title.size().y.max(t.space_16 + t.space_2);
+        let body = ui.painter().layout(description.into(), FontId::proportional(t.font_body), t.form_dim, text_width);
+        let text_height = header_height + if description.is_empty() { 0.0 } else { t.space_2 + body.size().y };
+        let content_height = tile_side.max(text_height);
+        let height = content_height + if beside { 0.0 } else { t.space_8 + t.space_24 };
+        let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+        let header_center = rect.top() + content_height / 2.0;
+        let tile = Rect::from_center_size(pos2(rect.left() + tile_side / 2.0, header_center), vec2(tile_side, tile_side));
+        ui.painter().rect_filled(tile, t.radius_lg, t.selected_bg);
+        crate::icons::paint_ink(ui.painter(), tile.shrink(t.space_8), "settings_plug", t.form_primary);
+        scenario::publish_rect(&format!("prefs:plugin:{key}:icon"), tile);
+        let at = pos2(tile.right() + t.space_12, header_center - text_height / 2.0);
+        let title_rect = Rect::from_min_size(at, title.size());
+        scenario::publish_rect(&format!("prefs:plugin:{key}:title"), title_rect);
+        let version_at = pos2(at.x + title.size().x + t.space_8, at.y + (header_height - version_galley.size().y) / 2.0);
+        ui.painter().galley(pos2(at.x, at.y + (header_height - title.size().y) / 2.0), title, t.form_ink);
+        ui.painter().galley(version_at, version_galley, t.form_dim);
+        if !description.is_empty() {
+            ui.painter().galley(at + vec2(0.0, header_height + t.space_2), body, t.form_dim);
+        }
+        let center_y = if beside { rect.center().y } else { rect.bottom() - t.space_12 };
+        let check_rect = Rect::from_center_size(pos2(rect.right() - t.space_8, center_y), vec2(t.space_16, t.space_16));
+        let folder_rect =
+            Rect::from_min_size(pos2(check_rect.left() - t.space_12 - folder_width, center_y - t.space_12), vec2(folder_width, t.space_24));
+        let folder = ui.interact(folder_rect, ui.make_persistent_id("plugin_folder"), Sense::click());
+        // Quiet actions retain their focus affordance without a button surface.
+        if folder.has_focus() {
+            ui.painter().rect_stroke(folder_rect, t.control_radius, Stroke::new(1.0, t.form_primary), StrokeKind::Inside);
+        }
+        let icon = Rect::from_center_size(pos2(folder_rect.left() + t.space_8 + t.space_14 / 2.0, center_y), vec2(t.space_14, t.space_14));
+        crate::icons::paint_ink(ui.painter(), icon, "folder", t.form_dim);
+        ui.painter().galley(pos2(icon.right() + t.space_6, center_y - folder_galley.size().y / 2.0), folder_galley, t.form_dim);
+        folder.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), folder_label));
+        if folder.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        let check = super::checkbox_at(ui, check_rect, &format!("{name}: {}", crate::i18n::tr("prefs.plugins_enabled")), enabled);
+        (folder, check)
+    })
+}

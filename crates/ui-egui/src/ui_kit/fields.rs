@@ -1124,23 +1124,35 @@ pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &st
 
 /// Search input with native accessibility and a stable caller ID. Tokens: cell_editor tokens.
 pub(crate) fn search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -> Response {
-    if !super::layout::in_catalog(ui) {
-        return cell_editor(ui, id, value, hint, false);
-    }
     let t = Tokens::get();
+    let catalog = super::layout::in_catalog(ui);
+    let height = if catalog { t.space_16 + t.space_2 } else { t.control_height };
+    let limit = if catalog { 128 } else { usize::MAX };
     let editor = text_input(egui::TextEdit::singleline(value))
         .id(id)
-        .char_limit(128)
+        .char_limit(limit)
         .hint_text(hint)
-        .min_size(vec2(0.0, t.space_16 + t.space_2))
+        .min_size(vec2(0.0, height))
         .margin(egui::Margin { left: t.space_24 as i8, right: t.space_8 as i8, top: 0, bottom: 0 })
         .font(egui::FontId::proportional(t.font_small))
+        .background_color(t.input_fill())
+        .clip_text(true)
         .text_color(t.form_ink);
-    let mut response = ui.add_sized(vec2(dimension(ui.available_width()), t.space_16 + t.space_2), editor);
-    super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE.limited(128));
+    let mut response = ui.add_sized(vec2(dimension(ui.available_width()), height), editor);
+    super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE.limited(limit));
     let icon = egui::Rect::from_center_size(egui::pos2(response.rect.left() + t.space_12, response.rect.center().y), vec2(t.space_12, t.space_12));
     crate::icons::paint_ink(ui.painter(), icon, "zoom", t.form_dim);
     super::layout::publish_geometry(ui, &response);
+    response.widget_info(|| {
+        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), hint);
+        info.current_text_value = Some(value.clone());
+        info
+    });
+    if response.has_focus() {
+        crate::prefs_search::note_key_sink(ui.ctx());
+    }
+    crate::theme::TabAccent::number_focus(ui, &response);
+    t.input_bevel(ui, &response);
     response
 }
 
