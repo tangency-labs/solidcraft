@@ -194,6 +194,7 @@ pub mod network_prompt;
 pub mod op_auto;
 pub mod open_elsewhere;
 pub(crate) mod open_meshing;
+pub mod panel_runtime;
 pub mod params_dialog;
 pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
@@ -509,6 +510,8 @@ pub(crate) enum EscapeOwner {
 }
 
 pub struct SolveApp {
+    /// Common panel foundation, internal opt-in; stays on the app across document tabs.
+    pub(crate) panel_runtime: Option<panel_runtime::AppPanelRuntime>,
     pub blur: blur::State,
     pub(crate) viewport_status: ui_kit::StatusPresentation,
     pub(crate) viewport_status_fixture: viewport_status_fixture::Fixture,
@@ -784,6 +787,7 @@ impl SolveApp {
         #[cfg(not(target_arch = "wasm32"))]
         solidcraft_engine::slicer_files::clean_old();
         let mut app = SolveApp {
+            panel_runtime: None,
             viewport_status: Default::default(),
             blur: Default::default(),
             viewport_status_fixture: Default::default(),
@@ -1159,6 +1163,9 @@ impl SolveApp {
 
     /// Run a command programmatically (JSON parameters, no dialogs).
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        if solidcraft_engine::panels::commands::is_command(id) {
+            return self.run_panel_command(id, &params).map_err(solidcraft_engine::panels::commands::error_text);
+        }
         if self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() {
             return Err("a file operation is in progress".into());
         }
@@ -1550,6 +1557,12 @@ impl SolveApp {
     }
 
     fn start_with_variant_memory(&mut self, id: &str, remember_variant: bool, opener: Option<egui::Rect>, section_edit: bool) {
+        if solidcraft_engine::panels::commands::is_command(id) {
+            if let Err(why) = self.run(id, json!({})) {
+                self.set_status(why, true);
+            }
+            return;
+        }
         self.tree.clear_folder_pick();
         if id == "timeline.play" {
             if let Err(why) = self.run(id, json!({})) {
@@ -2794,6 +2807,7 @@ impl SolveApp {
 
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
+        panel_runtime::tick_app(self);
         // Sleep/wake often skips frames without a device-lost signal; refresh egui GPU textures
         // when the frame clock jumps so the chrome is not stuck blank (#8749).
         let frame_time = ctx.input(|i| i.time);

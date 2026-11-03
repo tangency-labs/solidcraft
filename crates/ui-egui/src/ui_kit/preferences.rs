@@ -651,7 +651,7 @@ fn point(r: Rect, x: f32, y: f32) -> Pos2 {
     pos2(r.left() + r.width() * x, r.top() + r.height() * y)
 }
 
-fn paint_preference_figure(p: &egui::Painter, rect: Rect, figure: PreferenceFigure, enabled: bool) {
+pub(crate) fn paint_preference_figure(p: &egui::Painter, rect: Rect, figure: PreferenceFigure, enabled: bool) {
     if !p.clip_rect().intersects(rect) {
         return;
     }
