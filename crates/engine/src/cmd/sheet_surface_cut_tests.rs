@@ -189,6 +189,46 @@ fn half_roll() -> Session {
     s
 }
 
+/// A roll's flat has its lines, as a bend's has: along its rulings where it starts and ends, and
+/// halfway between, each the roll's length; the DXF draws them on a layer of their own.
+#[test]
+fn a_rolls_flat_has_lines_where_it_starts_and_ends_and_halfway_between() {
+    let mut s = half_roll();
+    let flat = run(&mut s, "sheet.flat_pattern", json!({}));
+    let lines: Vec<(String, [f64; 2], [f64; 2])> = flat["roll_lines"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|l| {
+            let p = |k: &str| [l[k][0].as_f64().unwrap_or(f64::NAN), l[k][1].as_f64().unwrap_or(f64::NAN)];
+            (l["line"].as_str().unwrap_or_default().to_string(), p("start"), p("end"))
+        })
+        .collect();
+    let mut kinds: Vec<&str> = lines.iter().map(|l| l.0.as_str()).collect();
+    kinds.sort_unstable();
+    assert_eq!(kinds, ["end", "middle", "start"], "{flat}");
+    let length = |l: &(String, [f64; 2], [f64; 2])| (l.2[0] - l.1[0]).hypot(l.2[1] - l.1[1]);
+    assert!(lines.iter().all(|l| (length(l) - 40.0).abs() < 1e-6), "{lines:?}");
+    // The middle line lies halfway across the roll's flat, which is half a turn round its neutral
+    // surface wide.
+    let line = |k: &str| lines.iter().find(|l| l.0 == k).map(|l| Vec2::new(0.5 * (l.1[0] + l.2[0]), 0.5 * (l.1[1] + l.2[1]))).unwrap_or_default();
+    let (a, m, b) = (line("start"), line("middle"), line("end"));
+    let wide = PI * (48.0 + 0.44 * T);
+    assert!((a.dist(b) - wide).abs() < 1e-6 && (a.dist(m) - wide / 2.0).abs() < 1e-6, "{a:?} {m:?} {b:?}");
+    let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
+    assert_eq!(
+        dxf.matches(
+            "
+ROLL
+"
+        )
+        .count()
+            - 1,
+        3,
+        "the layer and its three lines"
+    );
+}
+
 /// Simpson's rule for `f` over `a` to `b` in `n` (even) steps.
 fn simpson(f: impl Fn(f64) -> f64, a: f64, b: f64, n: usize) -> f64 {
     let h = (b - a) / n as f64;

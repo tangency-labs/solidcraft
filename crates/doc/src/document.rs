@@ -1383,9 +1383,10 @@ pub enum FeatureKind {
     },
     /// Convert a body to sheet metal (#6748): every face of a solid, or of one
     /// side of a shell or a plate, less the faces at `skip`. The sharp edges at `bends` become
-    /// bends and every other sharp edge between two faces of the sheet is cut open; cylinders
-    /// and cones become rolls. No face is fixed. The body becomes the folded sheet and the model
-    /// keeps its flat pattern.
+    /// bends and every other sharp edge between two faces of the sheet is cut open; a cylinder
+    /// modelled between two planes is a bend of its own inside radius short of 10^0.7 thicknesses
+    /// (DIN 6935) and a roll from there, and other cylinders and cones are rolls. No face is
+    /// fixed. The body becomes the folded sheet and the model keeps its flat pattern.
     SheetSurfaceConvert {
         body: BodyName,
         #[serde(default, skip_serializing_if = "Option::is_none")]

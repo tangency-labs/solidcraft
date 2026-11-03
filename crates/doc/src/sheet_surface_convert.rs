@@ -488,6 +488,105 @@ struct BendCorner {
     at: [f64; 2],
 }
 
+/// Region `r` run on past its edge from `a` to `z` (a line of its outline) by `by`, square across
+/// it, out to a modelled bend's sharp. At each end, the line before or after the edge is carried
+/// on to the sharp where it heads out across the edge; elsewhere (it runs on along the edge's
+/// line, or is round) the end steps out square to the edge, a step the bend's setback takes up
+/// again.
+fn to_sharp(r: &Region2, (a, z): (Vec2, Vec2), by: f64, tol: f64) -> std::result::Result<Region2, String> {
+    let segs = &r.outer.segs;
+    let n = segs.len();
+    let near = tol * 100.0;
+    // The line of the outline the edge lies along (the outline may run on along it past the
+    // edge's ends), and the edge's ends in the line's own order.
+    let along = |s: &Seg2, x: Vec2| -> Option<f64> {
+        let Seg2::Line { a: p, b: q } = *s else { return None };
+        let d = (q - p).normalized()?;
+        let u = (x - p).dot(d);
+        ((x - p - d * u).len() <= near && u >= -near && u <= p.dist(q) + near).then_some(u)
+    };
+    let k = (0..n)
+        .find(|k| along(&segs[*k], a).is_some() && along(&segs[*k], z).is_some())
+        .ok_or("meets a modelled bend along an edge that is not on a line of its outline")?;
+    let (ua, uz) = (along(&segs[k], a).unwrap_or(0.0), along(&segs[k], z).unwrap_or(0.0));
+    let (p, q) = if ua <= uz { (a, z) } else { (z, a) };
+    let d = (q - p).normalized().ok_or("meets a modelled bend along an edge with no length")?;
+    let extent = r.outer.polyline(1e-3).bounds().size().len().max(1e-9);
+    let out = if r.contains(p.lerp(q, 0.5) + d.perp() * (extent * 1e-4)) { -d.perp() } else { d.perp() };
+    // Where the edge ends at an end of the line, the line before or after it may carry on.
+    let (p_end, q_end) = (p.dist(segs[k].start()) <= near, q.dist(segs[k].end()) <= near);
+    // The line `s`, from `from` to the end `at`, carried on past `at` to the sharp, where it
+    // heads out across the edge.
+    let carried = |s: &Seg2, at: Vec2, from: Vec2| -> Option<Vec2> {
+        let Seg2::Line { .. } = s else { return None };
+        let w = (at - from).normalized()?;
+        (w.dot(out) > 1e-6 && w.cross(d).abs() > 1e-6).then(|| at + w * (by / w.dot(out)))
+    };
+    let (before, after) = (&segs[(k + n - 1) % n], &segs[(k + 1) % n]);
+    let p_out = carried(before, p, before.start()).filter(|_| p_end).unwrap_or(p + out * by);
+    let q_out = carried(after, q, after.end()).filter(|_| q_end).unwrap_or(q + out * by);
+    let band = Region2 { outer: Loop2::polygon(&[p, q, q_out, p_out]).ccw(), holes: Vec::new() };
+    let joined =
+        solidcraft_kernel::planar_regions_boolean(std::slice::from_ref(r), std::slice::from_ref(&band), solidcraft_kernel::BoolOp::Union, tol)
+            .map_err(|e| e.to_string())?;
+    match <[Region2; 1]>::try_from(joined) {
+        Ok([one]) => Ok(one),
+        Err(_) => Err("run on to a modelled bend's sharp is not one piece".into()),
+    }
+}
+
+/// Each roll's lines in the flat (see [`RollLine`]): its rulings where its angle is least and
+/// greatest, and halfway between, each across the roll's region and then where the flat
+/// `regions` have material, folded flat by `fold`.
+fn roll_lines(sheet: &Sheet, fold: &Fold, regions: &[Region2]) -> Vec<RollLine> {
+    let mut out = Vec::new();
+    for (i, p) in sheet.panels.iter().enumerate() {
+        if matches!(p.surface, Surface::Plane | Surface::Spline(_)) {
+            continue;
+        }
+        let pts = p.region.outer.polyline(1e-3);
+        let (lo, hi) = (&pts).into_iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), q| (l.min(q.y), h.max(q.y)));
+        let left = (&pts).into_iter().fold(f64::INFINITY, |l, q| l.min(q.x));
+        if !(hi > lo && left.is_finite()) {
+            continue;
+        }
+        // The rulings at its least and greatest angle are read a hair inside it.
+        let hair = (hi - lo) * 1e-6;
+        for (kind, at, read) in
+            [(RollEdge::Start, lo, lo + hair), (RollEdge::End, hi, hi - hair), (RollEdge::Middle, 0.5 * (lo + hi), 0.5 * (lo + hi))]
+        {
+            let Some((a, b)) = extent_across(&p.region, (Vec2::new(left, read), Vec2::X)) else { continue };
+            let (Some(s), Some(e)) = (fold.flat_point(i, Vec2::new(left + a, at)), fold.flat_point(i, Vec2::new(left + b, at))) else { continue };
+            out.extend(on_material(s, e, regions).into_iter().map(|(start, end)| RollLine { panel: i, kind, start, end }));
+        }
+    }
+    out
+}
+
+/// The pieces of the line from `s` to `e` where `regions` have material: cut where it crosses
+/// their outlines, each piece kept where the material lies beside its middle.
+fn on_material(s: Vec2, e: Vec2, regions: &[Region2]) -> Vec<(Vec2, Vec2)> {
+    let line = [Seg2::Line { a: s, b: e }];
+    let mut cuts: Vec<f64> = vec![0.0, 1.0];
+    for r in regions {
+        for l in std::iter::once(&r.outer).chain(&r.holes) {
+            cuts.extend(solidcraft_develop::crossings(&line, &l.segs).iter().map(|c| c.1));
+        }
+    }
+    cuts.sort_by(f64::total_cmp);
+    cuts.dedup_by(|x, y| (*x - *y).abs() <= 1e-12);
+    let Some(d) = (e - s).normalized() else { return Vec::new() };
+    let hair = s.dist(e) * 1e-6;
+    cuts.windows(2)
+        .map(|w| (s.lerp(e, w[0]), s.lerp(e, w[1])))
+        .filter(|(a, b)| a.dist(*b) > 1e-9)
+        .filter(|(a, b)| {
+            let mid = a.lerp(*b, 0.5);
+            [mid, mid + d.perp() * hair, mid - d.perp() * hair].iter().any(|m| regions.iter().any(|r| r.contains(*m)))
+        })
+        .collect()
+}
+
 /// Where a region's outline crosses a line (a point and a unit direction), as lengths along the
 /// line from its point: the least and the greatest. `None` where it doesn't.
 fn extent_across(r: &Region2, (p, u): (Vec2, Vec2)) -> Option<(f64, f64)> {
@@ -681,6 +780,26 @@ enum Role {
     Seam,
     Bend,
     Rip,
+}
+
+/// The inside radius, in thicknesses, from which a cylinder modelled between two planes is a
+/// roll, not a bend: 10^0.7, where DIN 6935's k(R/T) = 0.65 + 0.5 lg(R/T) reaches 1 and the
+/// neutral fiber lies halfway through the sheet. Below it the fiber moves toward the inside, as a
+/// bend's K-factor takes it.
+const ROLL_FROM: f64 = 5.011_872_336_272_722;
+
+/// A bend modelled with its radius: a cylinder of the sheet between two of its planes, each
+/// tangent to it along a straight edge parallel to its axis. The cylinder is no panel; the two
+/// planes run on to where they cross, the bend's virtual sharp, and bend there with the
+/// cylinder's inside radius.
+struct Modelled {
+    roll: usize,
+    /// Each plane, the edge it meets the cylinder along, and how far it runs on past that edge,
+    /// square across it, to the sharp.
+    sides: [(usize, usize, f64); 2],
+    /// The sharp's ends, square across from the cylinder's ends.
+    sharp: (Vec3, Vec3),
+    inside: f64,
 }
 
 /// The faces of a body that become the sheet.
@@ -1059,6 +1178,65 @@ pub fn convert_surfaces(
         };
     }
 
+    // The bends modelled with their radius (see `Modelled`): a cylinder whose inside radius is
+    // short of ROLL_FROM thicknesses, between two planes of the sheet that cross. Their cylinders
+    // leave the sheet's faces.
+    let mut modelled: Vec<Modelled> = Vec::new();
+    for (&f, sf) in &shaped {
+        let Shape::Cylinder { origin, axis, radius, inward, .. } = *sf else { continue };
+        let inside = if inward { radius - t } else { radius };
+        if !(inside >= 0.0 && inside < ROLL_FROM * t) {
+            continue;
+        }
+        let mut sides: Vec<(usize, usize)> = Vec::new();
+        for e in 0..edge_count {
+            let Some((x, y)) = pair(e) else { continue };
+            let g = if x == f && y != f {
+                y
+            } else if y == f && x != f {
+                x
+            } else {
+                continue;
+            };
+            let Some(sg @ Shape::Plane { .. }) = shaped.get(&g) else { continue };
+            let Some([t0, t1]) = q.edge_interval(e) else { continue };
+            let (Some((p0, _)), Some((p1, _))) = (q.edge_at(e, t0), q.edge_at(e, t1)) else { continue };
+            let along = (p1 - p0).normalized().is_some_and(|d| d.cross(axis).len() <= 1e-6);
+            if along && smooth(e, sf, sg) && !sides.iter().any(|(h, _)| *h == g) {
+                sides.push((g, e));
+            }
+        }
+        let &[(a, ea), (bb, eb)] = sides.as_slice() else { continue };
+        let (Some(Shape::Plane { plane: pa, out: na }), Some(Shape::Plane { plane: pb, out: nb })) = (shaped.get(&a), shaped.get(&bb)) else {
+            continue;
+        };
+        if na.cross(*nb).len() <= 1e-9 {
+            continue;
+        }
+        // Each plane's tangent line is the axis's foot on it; it runs on square across that line
+        // to where the other plane crosses it, the sharp, as far as the cylinder runs along its
+        // axis.
+        let run_on = |plane: &Plane, n: Vec3, m: Vec3, o: Vec3| -> Option<(f64, Vec3)> {
+            let foot = origin - n * (origin - plane.origin).dot(n);
+            let w = n.cross(axis).normalized()?;
+            let by = (o - foot).dot(m) / w.dot(m);
+            by.is_finite().then(|| (by.abs(), foot + w * by))
+        };
+        let (Some((sa, on)), Some((sb, _))) = (run_on(pa, *na, *nb, pb.origin), run_on(pb, *nb, *na, pa.origin)) else { continue };
+        let along: Vec<f64> = [ea, eb].iter().filter_map(|e| q.edge_points(*e, sag)).flatten().map(|(_, p)| (p - origin).dot(axis)).collect();
+        let (lo, hi) = along.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), x| (l.min(*x), h.max(*x)));
+        if !(hi > lo) {
+            continue;
+        }
+        let at = |x: f64| on + axis * (x - (on - origin).dot(axis));
+        let (s0, s1) = (at(lo), at(hi));
+        modelled.push(Modelled { roll: f, sides: [(a, ea, sa), (bb, eb, sb)], sharp: (s0, s1), inside });
+    }
+    for m in &modelled {
+        shaped.remove(&m.roll);
+        sheet_faces.remove(&m.roll);
+    }
+
     // Each edge between two faces of the sheet: a seam where it runs on smoothly, a bend where
     // the user picked it, and cut open everywhere else, as a roll's own seam is.
     let mut roles: Vec<(usize, usize, usize, Role)> = Vec::new();
@@ -1080,7 +1258,13 @@ pub fn convert_surfaces(
     // from it, is; or on a roll of the sheet.
     let between = |p: &Vec3| {
         let edge = (0..edge_count).filter(|e| on_edge(*p, *e)).filter_map(on_side_edge).any(|e| roles.iter().any(|(f, ..)| *f == e));
-        edge || q.faces_at(*p, near).first().and_then(|(_, g)| on_side(*g)).is_some_and(|g| rolled.contains(&g))
+        // On a modelled bend: its cylinder, or an edge of it.
+        let modelled_at = (0..edge_count)
+            .filter(|e| on_edge(*p, *e))
+            .filter_map(on_side_edge)
+            .filter_map(pair)
+            .any(|(x, y)| modelled.iter().any(|m| m.roll == x || m.roll == y));
+        edge || modelled_at || q.faces_at(*p, near).first().and_then(|(_, g)| on_side(*g)).is_some_and(|g| rolled.contains(&g))
     };
     if let Some(p) = bends.iter().find(|p| !between(p)) {
         // A shell's or a plate's bend onto a wall of another thickness: no sheet of one thickness.
@@ -1124,6 +1308,21 @@ pub fn convert_surfaces(
                     queue.push_back(g);
                 }
             }
+            for m in &modelled {
+                let [(x, ..), (y, ..)] = m.sides;
+                let g = if x == f {
+                    y
+                } else if y == f {
+                    x
+                } else {
+                    continue;
+                };
+                if left.remove(&g) {
+                    parent.insert(g, f);
+                    order.push(g);
+                    queue.push_back(g);
+                }
+            }
         }
     }
     if order.is_empty() {
@@ -1158,6 +1357,12 @@ pub fn convert_surfaces(
                     Opening::Through | Opening::Open => {}
                 }
             }
+        }
+        // Along a modelled bend, the panel runs on to the bend's sharp.
+        for (g, e, by) in modelled.iter().flat_map(|m| m.sides) {
+            let Some(u) = uses.iter().find(|u| u.edge == e).filter(|_| g == f) else { continue };
+            let (Some(&a), Some(&z)) = (u.chart.first(), u.chart.last()) else { continue };
+            region = to_sharp(&region, (a, z), by, tol).map_err(|e| DocError::Invalid(format!("the face at {} {e}", at(point))))?;
         }
         uses_of.insert(f, uses);
         panels.push(Panel { name: format!("face {f}"), surface: shape.surface(), region });
@@ -1303,6 +1508,49 @@ pub fn convert_surfaces(
         };
         joints.push(Joint { a: anchor_a, b: anchor_b, kind });
         edges.push(mid);
+    }
+
+    // Each modelled bend, at its sharp, with its cylinder's inside radius.
+    for m in &modelled {
+        let [(x, ..), (y, ..)] = m.sides;
+        let (a, b) = if parent.get(&x) != Some(&y) { (x, y) } else { (y, x) };
+        let (Some(&ia), Some(&ib), Some(Shape::Plane { plane: pa, out: na }), Some(Shape::Plane { plane: pb, out: nb })) =
+            (index.get(&a), index.get(&b), shaped.get(&a), shaped.get(&b))
+        else {
+            continue;
+        };
+        let Some(ra) = panels.get(ia).map(|p| p.region.clone()) else { continue };
+        // Run so that `a`'s material lies to the left.
+        let (mut s0, mut s1) = m.sharp;
+        let (c0, c1) = (pa.to_local(s0), pa.to_local(s1));
+        let extent = ra.outer.polyline(1e-3).bounds().size().len().max(1e-9);
+        if !(c1 - c0).normalized().is_some_and(|d| ra.contains(c0.lerp(c1, 0.5) + d.perp() * (extent * 1e-4))) {
+            (s0, s1) = (s1, s0);
+        }
+        let (a0, a1, b0, b1) = (pa.to_local(s0), pa.to_local(s1), pb.to_local(s0), pb.to_local(s1));
+        let (Some(da), Some(db)) = ((a1 - a0).normalized(), (b1 - b0).normalized()) else { continue };
+        // The bend turns toward the material where `b` rises behind `a`'s face.
+        let lift = panels.get(ib).map_or(0.0, |p| {
+            let pts = p.region.outer.polyline(1e-3);
+            (&pts).into_iter().map(|q| (pb.to_world(*q) - s0).dot(*na)).fold(0.0, |m: f64, h| if h.abs() > m.abs() { h } else { m })
+        });
+        let len = s0.dist(s1);
+        let bend = Bend {
+            angle: na.dot(*nb).clamp(-1.0, 1.0).acos(),
+            radius: m.inside,
+            toward_material: lift < 0.0,
+            datum: Datum::Sharp,
+            length: len,
+            ends: ZoneEnds { near: (0.0, len), far: (0.0, len) },
+            tails: (Tail::Keep, Tail::Keep),
+            relief: (Relief::None, Relief::None),
+        };
+        joints.push(Joint {
+            a: Anchor { panel: ia, origin: a0, dir: da },
+            b: Anchor { panel: ib, origin: b0, dir: db },
+            kind: JointKind::Bend(bend),
+        });
+        edges.push(s0.lerp(s1, 0.5));
     }
 
     let mut model = Sheet { thickness: t, k_factor: rule.k_factor, panels, joints, corners: Vec::new(), cuts: Vec::new() };
@@ -1713,6 +1961,9 @@ pub struct SurfaceSheet {
     pub stretch: f64,
     /// How many of the panels are rolls.
     pub rolls: usize,
+    /// The rolls' lines in the flat (see [`RollLine`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub roll_lines: Vec<RollLine>,
     /// What the sheet's bends end with, as its rule had it.
     pub reliefs: Reliefs,
     /// A feature's own corner relief, in place of the rule's, for a bend it made: the bend's
@@ -1729,6 +1980,36 @@ pub struct SurfaceSheet {
     /// The recesses in the flat, as pockets measured from its face on the sheet's surface.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pockets: Vec<crate::sheet::SheetPocket>,
+}
+
+/// A line across a roll in a sheet's flat, along its rulings, as a bend has its tangent and
+/// center lines: where the roll starts, where it ends, or its middle; `panel` is the roll's.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RollLine {
+    pub panel: usize,
+    pub kind: RollEdge,
+    pub start: Vec2,
+    pub end: Vec2,
+}
+
+/// Which of a roll's lines a [`RollLine`] is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RollEdge {
+    Start,
+    End,
+    Middle,
+}
+
+impl RollEdge {
+    /// Its name, as `sheet.flat_pattern` gives it.
+    pub fn name(self) -> &'static str {
+        match self {
+            RollEdge::Start => "start",
+            RollEdge::End => "end",
+            RollEdge::Middle => "middle",
+        }
+    }
 }
 
 /// A bend in a sheet's flat: its zone, its center line, how far it turns (radians), its inside
@@ -1764,13 +2045,14 @@ impl SurfaceSheet {
             bends: Vec::new(),
             stretch: 0.0,
             rolls: 0,
+            roll_lines: Vec::new(),
             reliefs: c.reliefs,
             corner_reliefs: Vec::new(),
             notes: c.notes.clone(),
             recesses: Vec::new(),
             pockets: Vec::new(),
         };
-        sheet.laid_out(&c.development, c.pieces()?, c.flat()?);
+        sheet.laid_out(&c.development, c.pieces()?, c.flat()?)?;
         Ok((sheet, c.solid()?))
     }
 
@@ -1788,7 +2070,7 @@ impl SurfaceSheet {
         let mut work = FlatWork::new();
         let pieces = crate::sheet_surface::pieces(&dev, &mut work)?;
         let regions = crate::sheet_surface::join_pieces(&pieces, &mut work)?;
-        self.laid_out(&dev, &pieces, regions);
+        self.laid_out(&dev, &pieces, regions)?;
         if self.unfolded {
             let base = self.places.first().copied().flatten().ok_or_else(|| DocError::Invalid("the sheet's first panel has no place".into()))?;
             let frames: Vec<Option<Rigid3>> = dev.placements.iter().map(|p| p.map(|r| crate::sheet_surface_cuts::lift(&base, &r))).collect();
@@ -1878,8 +2160,8 @@ impl SurfaceSheet {
     }
 
     /// Keeps the flat `regions` of the development `dev` (joined from its `pieces`), with its
-    /// bends and their tabs, stretch and rolls.
-    fn laid_out(&mut self, dev: &Development, pieces: &[(Piece, Region2)], regions: Vec<Region2>) {
+    /// bends and their tabs, stretch, and rolls and their lines.
+    fn laid_out(&mut self, dev: &Development, pieces: &[(Piece, Region2)], regions: Vec<Region2>) -> Result<()> {
         self.bends = dev
             .zones
             .iter()
@@ -1901,6 +2183,8 @@ impl SurfaceSheet {
         self.regions = regions;
         self.stretch = dev.panels.iter().flatten().map(|p| p.stretch).fold(0.0, f64::max);
         self.rolls = self.sheet.panels.iter().filter(|p| p.surface != Surface::Plane).count();
+        self.roll_lines =
+            if self.rolls > 0 { roll_lines(&self.sheet, &fold_onto(&self.sheet, dev, &self.places)?, &self.regions) } else { Vec::new() };
         self.thickness = self.sheet.thickness;
         self.k_factor = self.sheet.k_factor;
         let t = self.thickness;
@@ -1913,5 +2197,6 @@ impl SurfaceSheet {
                 Some(crate::sheet::SheetPocket { region: place.region(&r.region), z0, z1 })
             })
             .collect();
+        Ok(())
     }
 }

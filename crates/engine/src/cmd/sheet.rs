@@ -837,8 +837,10 @@ fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
         })
         .collect();
     let pockets: Vec<Value> = sk.pockets.iter().map(|p| pocket_json(p, sk.thickness)).collect();
+    let roll_lines: Vec<Value> =
+        sk.roll_lines.iter().map(|l| json!({"panel": l.panel, "line": l.kind.name(), "start": pt(&l.start), "end": pt(&l.end)})).collect();
     json!({"body": sk.body, "rule": sk.rule, "thickness": sk.thickness, "k_factor": sk.k_factor, "flat_size_mm": [size.x, size.y, sk.thickness],
-        "outline": outline, "cutouts": holes, "cutout_shapes": hole_shapes, "pockets": pockets, "bends": bends, "unfolded": sk.unfolded,
+        "outline": outline, "cutouts": holes, "cutout_shapes": hole_shapes, "pockets": pockets, "bends": bends, "roll_lines": roll_lines, "unfolded": sk.unfolded,
         "perforations": [], "bend_zones": bend_zones, "surfaces": true, "rolls": sk.rolls, "stretch": sk.stretch})
 }
 
@@ -1037,6 +1039,7 @@ pub fn flat_dxf(sh: &SheetBody, o: &DxfOptions) -> Result<String> {
         letters: sh.letters(),
         perforation,
         bends: sh.bends(),
+        rolls: Vec::new(),
         display: sh.angle_display,
         thickness: sh.t,
     };
@@ -1053,6 +1056,7 @@ fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions) -
         letters: sheet::Letters::none(),
         perforation: Vec::new(),
         bends: sk.bend_infos(),
+        rolls: sk.roll_lines.iter().map(|l| (l.start, l.end)).collect(),
         display,
         thickness: sk.thickness,
     };
@@ -1060,13 +1064,15 @@ fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions) -
 }
 
 /// What a flat pattern's DXF draws: the flat material, the pockets machined in it, which of its
-/// loops are text, the perforation's holes, and the bends, their notes' angles read as `display`.
+/// loops are text, the perforation's holes, the bends, their notes' angles read as `display`, and
+/// the rolls' lines (where each starts and ends, and its middle).
 struct FlatDrawing {
     regions: Vec<solidcore_record::Region2>,
     pockets: Vec<solidcraft_doc::sheet::SheetPocket>,
     letters: sheet::Letters,
     perforation: Vec<(Vec2, f64)>,
     bends: Vec<solidcraft_doc::sheet::BendInfo>,
+    rolls: Vec<(Vec2, Vec2)>,
     display: sheet::AngleDisplay,
     thickness: f64,
 }
@@ -1162,6 +1168,13 @@ impl FlatDrawing {
         }
         for (c, r) in &self.perforation {
             entities.push(DxfEntity { layer: "PERFORATION".into(), shape: DxfShape::Circle { c: *c, r: *r } });
+        }
+        // A roll's lines on a layer of their own, so that a reader of the bend layers doesn't
+        // take a roll for bends.
+        if !o.no_bend_lines {
+            for (a, b) in &self.rolls {
+                entities.push(DxfEntity { layer: "ROLL".into(), shape: DxfShape::Line(*a, *b) });
+            }
         }
         // One layer: every entity on layer 0, which every drawing has.
         if o.one_layer {

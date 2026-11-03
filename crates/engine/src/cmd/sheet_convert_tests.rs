@@ -137,7 +137,8 @@ fn rotated_component_bend_picks_follow_connected_panels() {
         let world = |p: [f64; 3]| if rotated { [p[0], -p[2], p[1]] } else { p };
         let bends: Vec<_> = bends.into_iter().map(world).collect();
         run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Section", "face": world([30.0, 0.0, 50.0]), "bends": bends}));
-        assert_eq!(flat(&mut s)["rolls"], 2);
+        let f = flat(&mut s);
+        assert!(f["rolls"] == 0 && f["bends"].as_array().map(Vec::len) == Some(2), "{f}");
         sizes.push(flat_size(&mut s));
     }
     assert!(same_size(sizes[0], sizes[1], 1e-6), "{sizes:?}");
@@ -512,14 +513,14 @@ fn bent_section(s: &mut Session, outer: &[(f64, f64)], t: f64, ri: f64, len: f64
     corners.iter().map(|&(.., (m, mi))| ([m.0, m.1, z], [mi.0, mi.1, z])).collect()
 }
 
-/// A bend modelled with its radius keeps it (#6748): the corner is a roll at the model's radius
-/// whatever the rule's, picked on either cylinder, from either side of the sheet. An L: a base 60
-/// and a leg 40 to the sharp corner outside, 2 thick and 100 long, its corner bent R 2 inside and
-/// R 4 outside, under a rule that bends R 3.
+/// A bend modelled with its radius keeps it (#6748): the corner, an inside radius of one thickness,
+/// is a bend at the model's radius whatever the rule's, picked on either cylinder, from either
+/// side of the sheet. An L: a base 60 and a leg 40 to the sharp corner outside, 2 thick and 100
+/// long, its corner bent R 2 inside and R 4 outside, under a rule that bends R 3.
 #[test]
-fn a_bend_modelled_with_its_radius_is_a_roll_of_that_radius() {
+fn a_bend_modelled_with_its_radius_is_a_bend_of_that_radius() {
     let (t, k, r) = (2.0, 0.5, 3.0);
-    // The outside lengths less the corner's R + T each way, and the roll on its neutral radius
+    // The outside lengths less the corner's R + T each way, and the bend on its neutral radius
     // R + K T; from the inside, the inside lengths less R each way, the same blank.
     let across = 60.0 + 40.0 - 2.0 * (2.0 + t) + FRAC_PI_2 * (2.0 + k * t);
     assert!((58.0 + 38.0 - 2.0 * 2.0 + FRAC_PI_2 * (2.0 + k * t) - across).abs() < 1e-9);
@@ -531,9 +532,31 @@ fn a_bend_modelled_with_its_radius_is_a_roll_of_that_radius() {
         let bend = if inner_pick { inner } else { outer };
         run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Section", "face": face, "bends": [bend]}));
         let f = flat(&mut s);
-        assert!(f["rolls"] == 1 && f["bends"].as_array().is_some_and(Vec::is_empty), "{face:?} {bend:?}: {f}");
+        let radii: Vec<f64> = f["bends"].as_array().into_iter().flatten().filter_map(|b| b["radius"].as_f64()).collect();
+        assert!(f["rolls"] == 0 && radii.len() == 1 && (radii[0] - 2.0).abs() < 1e-9, "{face:?} {bend:?}: {f}");
         assert!(same_size(flat_size(&mut s), (across, 100.0), 1e-6), "{face:?} {bend:?}: {:?} vs {across}", flat_size(&mut s));
         assert!((volume(&mut s) - solid).abs() < 1e-6 * solid, "{face:?} {bend:?}: {} vs {solid}", volume(&mut s));
+    }
+}
+
+/// Whether a cylinder modelled between two planes is a bend or a roll is its inside radius in
+/// thicknesses, as DIN 6935 has the neutral fiber: short of 10^0.7 (about 5) the fiber moves
+/// toward the inside, a bend's; from there it lies halfway through the sheet, a roll's, which keeps
+/// its lines in the flat. Either way the sheet is the body.
+#[test]
+fn a_modelled_corner_is_a_bend_short_of_about_five_thicknesses_and_a_roll_from_there() {
+    let t = 2.0;
+    for (inside, bend) in [(10.0, true), (10.05, false)] {
+        let mut s = Session::default();
+        rule(&mut s, "Test", t, 0.5, 2.0, 0.5);
+        let (outer, _) = bent_section(&mut s, &[(0.0, 60.0), (0.0, 0.0), (80.0, 0.0)], t, inside, 50.0)[0];
+        let solid = volume(&mut s);
+        run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Section", "face": [40.0, 0.0, 25.0], "bends": [outer]}));
+        let f = flat(&mut s);
+        let (bends, rolls, lines) =
+            (f["bends"].as_array().map_or(0, Vec::len), f["rolls"].as_u64().unwrap_or(0), f["roll_lines"].as_array().map_or(0, Vec::len));
+        assert_eq!((bends, rolls, lines), if bend { (1, 0, 0) } else { (0, 1, 3) }, "{inside}: {f}");
+        assert!((volume(&mut s) - solid).abs() < 1e-6 * solid, "{inside}: {} vs {solid}", volume(&mut s));
     }
 }
 
@@ -555,7 +578,7 @@ fn a_channel_with_its_bends_modelled_folds_back_into_itself_under_its_own_radius
     // One bend picked on its outer cylinder, the other on its inner one.
     run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Section", "face": [20, 0, 50], "bends": [corners[0].0, corners[1].1]}));
     let f = flat(&mut s);
-    assert!(f["rolls"] == 2 && f["bends"].as_array().is_some_and(Vec::is_empty), "{f}");
+    assert!(f["rolls"] == 0 && f["bends"].as_array().map(Vec::len) == Some(2), "{f}");
     // 30 + 40 + 30 less two deductions, 2 (R + T) - π/2 (R + K T) each.
     let across = 100.0 - 2.0 * deduction(FRAC_PI_2, r, t, k);
     assert!(same_size(flat_size(&mut s), (across, 100.0), 1e-6), "{:?} vs {across}", flat_size(&mut s));
@@ -577,7 +600,7 @@ fn a_channel_with_its_bends_modelled_folds_back_into_itself_under_its_own_radius
 
 /// A rule's values follow the sheet's own thickness (#4328): an L shell 2 thick, its bend
 /// modelled R 2 inside, converted under the default rule (2.5 thick, bends R `Thickness`) is a
-/// sheet 2 thick rolled R 2, the solid unchanged; an edge flange added to it bends R 2.
+/// sheet 2 thick bent R 2, the solid unchanged; an edge flange added to it bends R 2.
 #[test]
 fn a_converted_shell_takes_its_rules_values_at_its_own_thickness() {
     let mut s = Session::default();
@@ -586,17 +609,21 @@ fn a_converted_shell_takes_its_rules_values_at_its_own_thickness() {
     run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Section", "face": [30, 0, 50], "bends": [outer]}));
     assert!((volume(&mut s) - solid).abs() < 1e-6 * solid, "{} vs {solid}", volume(&mut s));
     let f = flat(&mut s);
-    assert!(f["thickness"].as_f64() == Some(2.0) && f["rolls"] == 1, "{f}");
+    assert!(
+        f["thickness"].as_f64() == Some(2.0) && f["rolls"] == 0 && f["bends"][0]["radius"].as_f64().is_some_and(|r| (r - 2.0).abs() < 1e-9),
+        "{f}"
+    );
     run(&mut s, "sheet.flange", json!({"edges": [[0, 40, 50]], "height": 10}));
     let f = flat(&mut s);
-    assert_eq!(f["bends"][0]["radius"].as_f64(), Some(2.0), "{f}");
+    let radii: Vec<f64> = f["bends"].as_array().into_iter().flatten().filter_map(|b| b["radius"].as_f64()).collect();
+    assert!(radii.len() == 2 && radii.iter().all(|r| (r - 2.0).abs() < 1e-9), "{f}");
 }
 
-/// A block's filleted edge is a roll at the fillet's radius (#6748): its bottom edge rounded R 5,
-/// the rule's thickness taken inward, an L with a 100 base and a 30 wall outside, rolled R 3
-/// inside.
+/// A block's filleted edge is a bend at the fillet's radius (#6748): its bottom edge rounded R 5,
+/// the rule's thickness taken inward, an L with a 100 base and a 30 wall outside, bent R 3 inside
+/// (one and a half thicknesses, short of a roll's).
 #[test]
-fn a_filleted_edge_of_a_solid_block_is_a_roll() {
+fn a_filleted_edge_of_a_solid_block_is_a_bend_of_its_radius() {
     let (t, k, r) = (2.0, 0.44, 2.0);
     let mut s = Session::default();
     rule(&mut s, "Test", t, k, r, 0.5);
@@ -605,8 +632,8 @@ fn a_filleted_edge_of_a_solid_block_is_a_roll() {
     let h = 5.0 * (1.0 - 0.5f64.sqrt());
     run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Block", "face": [50, 30, 0], "bends": [[100.0 - h, 30.0, h]]}));
     let f = flat(&mut s);
-    assert!(f["rolls"] == 1 && f["bends"].as_array().is_some_and(Vec::is_empty), "{f}");
-    // The faces up to the fillet, and the roll on its neutral radius 5 - T + K T.
+    assert!(f["rolls"] == 0 && f["bends"][0]["radius"].as_f64().is_some_and(|r| (r - 3.0).abs() < 1e-9), "{f}");
+    // The faces up to the fillet, and the bend on its neutral radius 5 - T + K T.
     let across = 95.0 + 25.0 + FRAC_PI_2 * (5.0 - t + k * t);
     assert!(same_size(flat_size(&mut s), (across, 60.0), 1e-6), "{:?} vs {across}", flat_size(&mut s));
 }
@@ -1410,9 +1437,9 @@ fn pocket_box(p: &Value) -> ([f64; 2], [f64; 2]) {
 /// bent R 2 inside and R 4 outside, with a 6 mm hole 18 up its right leg, a label 20 x 10
 /// engraved 0.5 deep into the outside of its web and one 10 x 20 into the inside of its left leg.
 /// Converted from the outside of the web by its outer cylinders under a rule of the model's
-/// radius, the sheet is the model again, its corners rolls of their own radius (#6748): the hole
-/// is a cut-out where the rolls' neutral lengths put it, and each label is a pocket in its own
-/// face of the sheet.
+/// radius, the sheet is the model again, its corners bends of their own radius (#6748): the hole
+/// is a cut-out where the bends' allowances put it, and each label is a pocket in its own face of
+/// the sheet.
 #[test]
 fn a_channel_with_its_bends_modelled_keeps_its_hole_and_engravings_on_either_face() {
     let (t, k, r) = (2.0, 0.4, 2.0);
@@ -1437,9 +1464,8 @@ fn a_channel_with_its_bends_modelled_keeps_its_hole_and_engravings_on_either_fac
     assert!((solid - model).abs() < 2e-3 * model, "{solid} vs {model}");
     run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Section", "face": [65, 0, 10], "bends": [corners[0].0, corners[1].0]}));
     let f = flat(&mut s);
-    assert!(bend_rows(&mut s).is_empty() && f["rolls"].as_u64() == Some(2), "{f}");
-    // 30 + 80 + 30 less two deductions (a roll of the rule's radius flattens as its bend would);
-    // the sheet is the solid again.
+    assert!(bend_rows(&mut s).len() == 2 && f["rolls"].as_u64() == Some(0), "{f}");
+    // 30 + 80 + 30 less two deductions; the sheet is the solid again.
     let bd = deduction(FRAC_PI_2, r, t, k);
     let across = 140.0 - 2.0 * bd;
     assert!(same_size(flat_size(&mut s), (across, 60.0), 1e-6), "{:?} vs {across}", flat_size(&mut s));

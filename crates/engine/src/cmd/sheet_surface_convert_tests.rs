@@ -71,19 +71,19 @@ const TEST: ConvertRule = ConvertRule {
     relief_depth: 1.0,
 };
 
-/// A channel whose bends are modeled with the rule's radius: converted, its round
-/// corners are rolls joined to the flat walls by seams, with no pick at all, and the flat is the
-/// one `sheet.convert` makes picking those corners as bends: 30 + 80 + 30 less two deductions.
+/// A channel whose bends are modeled with the rule's radius, one thickness inside: converted, its
+/// round corners are bends of that radius with no pick at all, and the flat is the one
+/// `sheet.convert` makes picking those corners as bends: 30 + 80 + 30 less two deductions.
 #[test]
-fn a_channel_converts_with_its_corners_as_rolls_to_the_bends_flat() {
+fn a_channel_converts_with_its_modelled_corners_as_bends() {
     let (t, k, r) = (2.0, 0.4, 2.0);
     let mut s = Session::default();
     rule(&mut s, "Test", t, k, r, 0.5);
     let corners = bent_section(&mut s, &[(0.0, 30.0), (0.0, 0.0), (80.0, 0.0), (80.0, 30.0)], t, r, 60.0);
     let c =
         convert(&s, "Section", ConvertRule { thickness: t, k_factor: k, bend_radius: r, ..TEST }, &[], &[], false).unwrap_or_else(|e| panic!("{e}"));
-    assert_eq!(c.sheet.panels.len(), 5, "the web, its two corners and its two legs");
-    assert!(c.thickness == t && c.development.zones.is_empty(), "a shell's own thickness, and rolls rather than bends");
+    assert_eq!(c.sheet.panels.len(), 3, "the web and its two legs");
+    assert!(c.thickness == t && c.development.zones.len() == 2, "a shell's own thickness, and two bends");
     let across = 140.0 - 2.0 * deduction(std::f64::consts::FRAC_PI_2, r, t, k);
     let got = size(&c);
     assert!(same_size(got, (across, 60.0), 1e-6), "{got:?} vs {across}");
@@ -210,12 +210,12 @@ fn a_ring_of_bends_is_refused_and_opens_where_a_corner_is_left_unpicked() {
 }
 
 /// Through the commands, as the app runs them: `sheet.convert` makes the body
-/// its folded sheet, which this channel already is, rolls and all, so it keeps its volume; and
-/// `sheet.flat_pattern` shows its flat, its rolls counted. The flat survives saving and
-/// reopening the design.
+/// its folded sheet, which this channel already is, rolls and all (its corners six thicknesses
+/// inside, past a bend's), so it keeps its volume; and `sheet.flat_pattern` shows its flat, its
+/// rolls counted with their lines. The flat survives saving and reopening the design.
 #[test]
 fn a_conversion_shows_in_the_flat_pattern() {
-    let (t, k, r) = (2.0, 0.4, 10.0);
+    let (t, k, r) = (2.0, 0.4, 12.0);
     let mut s = Session::default();
     rule(&mut s, "Test", t, k, 2.0, 0.5);
     bent_section(&mut s, &[(0.0, 30.0), (0.0, 0.0), (80.0, 0.0), (80.0, 30.0)], t, r, 60.0);
@@ -231,6 +231,7 @@ fn a_conversion_shows_in_the_flat_pattern() {
     let (w, h) = size(&flat);
     assert!(same_size((w.max(h), w.min(h)), (across, 60.0), 1e-6), "{flat}");
     assert!(flat["surfaces"] == json!(true) && flat["rolls"] == json!(2) && flat["bends"] == json!([]), "{flat}");
+    assert_eq!(flat["roll_lines"].as_array().map(Vec::len), Some(6), "each roll's start, end and middle: {flat}");
     let saved = s.doc.to_json();
     assert!(saved.contains("\"sheet_surface_convert\""), "the feature saves as a conversion");
     let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap_or_else(|e| panic!("{e}")));
