@@ -2362,6 +2362,9 @@ impl SolveApp {
     /// The camera goes where the "When a sketch ends" preference says (#7038); by default it
     /// stays where it is, however the sketch is left.
     pub fn finish_sketch(&mut self) {
+        if self.session.active_sketch.is_some() && self.dialog.as_mut().is_some_and(dialogs::Dialog::request_sketch_finish) {
+            return;
+        }
         self.leave_sketch("sketch.finish");
     }
 
@@ -2394,6 +2397,10 @@ impl SolveApp {
     /// Successful UI and programmatic exits share the same window cleanup.
     fn sketch_closed(&mut self, open: Option<u64>) {
         self.take_sketch_exit();
+        if self.dialog.as_ref().is_some_and(|d| matches!(d.kind, dialogs::Kind::SketchModify(sketch_modify_ui::Mod::Corner { .. }))) {
+            dialogs::cancel(self);
+            self.preview.reset();
+        }
         self.tool = None;
         dim_view::cancel();
         // Unless another component was activated meanwhile: that one stays.

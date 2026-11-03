@@ -521,6 +521,8 @@ pub struct Dialog {
     pub preview_enabled: bool,
     /// Preserve Apply intent across asynchronous evaluation; never a command parameter.
     repeat_after_apply: bool,
+    /// Finish Sketch waits for this corner operation's OK to succeed before leaving.
+    finish_sketch_after_apply: bool,
     /// Parameters the dialog doesn't show but the command needs (kept when editing).
     pub extra: serde_json::Map<String, Value>,
     /// What the inputs were when OK was refused: `error` stays only while they still are.
@@ -776,8 +778,22 @@ impl Dialog {
         dense::command(&self.kind)
     }
 
+    /// A pending sketch corner is part of Finish Sketch, through the same OK path as its
+    /// button. An unused corner dialog has nothing to keep and closes with the sketch.
+    pub(crate) fn request_sketch_finish(&mut self) -> bool {
+        if !matches!(self.kind, Kind::SketchModify(crate::sketch_modify_ui::Mod::Corner { .. }))
+            || self.inputs.iter().all(|input| input.items.is_empty())
+        {
+            return false;
+        }
+        self.finish_sketch_after_apply = true;
+        self.repeat_after_apply = false;
+        true
+    }
+
     /// Show why OK (or starting the sketch) was refused, for as long as the inputs stay as they are.
     fn refuse(&mut self, app: &SolveApp, error: String) {
+        self.finish_sketch_after_apply = false;
         self.refused = Some(Refused::now(app, self));
         self.error = Some(error);
     }
@@ -799,6 +815,7 @@ impl Dialog {
             reset_scroll: true,
             preview_enabled: true,
             repeat_after_apply: false,
+            finish_sketch_after_apply: false,
             extra: serde_json::Map::new(),
             refused: None,
             then_start: None,
@@ -3741,7 +3758,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         (drag_key, moved, docked, drag_bounds, crate::frame::offset_anchor(docked, moved, drag_bounds, side))
     };
     let mut keep = true;
-    let mut ok = false;
+    let mut ok = d.finish_sketch_after_apply;
     let mut applied = false;
     let mut apply_again = app.applying.is_some() && d.repeat_after_apply;
     let mut adopted = false;
@@ -3988,6 +4005,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     cancel |= !keep;
     // A window still choosing its operation applies once its check is in (#6901).
+    if d.finish_sketch_after_apply {
+        apply_again = false;
+    }
     let ok = crate::op_auto::hold_ok(&mut d, ok, &mut apply_again, cancel);
     if ok && !cancel && app.applying.is_none() {
         d.repeat_after_apply = apply_again;
@@ -4085,6 +4105,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // The edited text's outlines are new curves: the old selection would name stale ids.
     if applied && matches!(d.kind, Kind::Text(_) | Kind::TextMove(_)) {
         let _ = app.session.execute("select.clear", &json!({}));
+    }
+    if applied && d.finish_sketch_after_apply {
+        then_start = Some("sketch.finish");
     }
     if keep && !cancel {
         // The canvas follows Edit Text's fields.

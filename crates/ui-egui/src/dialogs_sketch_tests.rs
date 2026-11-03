@@ -120,6 +120,145 @@ form_case!(chamfer_two, "sketch.chamfer.two_distance", ["Chamfer Type", "Distanc
 form_case!(chamfer_angle, "sketch.chamfer.distance_angle", ["Chamfer Type", "Distance 1", "Angle"]);
 form_case!(equation_curve, "sketch.equation_curve", ["Form", "x(t)", "y(t)", "Start", "End", "Tolerance"]);
 
+/// Finish Sketch must keep the corners shown by the pending Fillet preview (#11480).
+#[test]
+fn finish_sketch_applies_pending_corners_before_closing() {
+    for command in ["sketch.fillet", "sketch.chamfer.equal_distance"] {
+        let mut h = fixture();
+        let sketch = h.app.session.active_sketch.unwrap();
+        let mut d = picked(&h, command);
+        d.inputs[0].items = h
+            .app
+            .session
+            .doc
+            .sketch(sketch)
+            .unwrap()
+            .points
+            .iter()
+            .filter(|p| p.id != "origin")
+            .map(|p| Sel::SketchPoint { id: p.id.clone() })
+            .collect();
+        h.app.dialog = Some(d);
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"button:sketch.finish"}})).unwrap();
+        h.settle();
+        assert!(h.app.session.active_sketch.is_none());
+        assert!(h.app.dialog.is_none(), "{command}: its dialog must close with the sketch");
+        assert_eq!(h.app.session.doc.sketch(sketch).unwrap().curves.len(), 8, "{command}: all four corners must be kept");
+        assert!(h.app.preview.error.is_none());
+    }
+}
+
+#[test]
+fn finish_sketch_keeps_a_refused_corner_open_for_correction() {
+    let mut h = fixture();
+    let sketch = h.app.session.active_sketch;
+    let before = h.app.session.doc.to_json();
+    let mut d = picked(&h, "sketch.fillet");
+    let Kind::SketchModify(Mod::Corner { size, .. }) = &mut d.kind else { panic!("no corner dialog") };
+    *size = "-2 mm".into();
+    h.app.dialog = Some(d);
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"button:sketch.finish"}})).unwrap();
+    h.settle();
+    assert_eq!(h.app.session.active_sketch, sketch, "a refused fillet must not finish the sketch");
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert!(h.app.dialog.as_ref().unwrap().error.is_some());
+    let Kind::SketchModify(Mod::Corner { size, .. }) = &mut h.app.dialog.as_mut().unwrap().kind else { panic!("no corner dialog") };
+    *size = "2 mm".into();
+    h.frames(4);
+    assert_eq!(h.app.session.doc.to_json(), before, "correcting the value must not silently retry Finish Sketch");
+    h.step(&json!({"click":{"handle":"button:sketch.finish"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none() && h.app.session.active_sketch.is_none());
+    assert_eq!(h.app.session.doc.sketch(sketch.unwrap()).unwrap().curves.len(), 5);
+}
+
+#[test]
+fn direct_sketch_exit_closes_pending_corners_without_applying_them() {
+    for command in ["sketch.finish", "sketch.cancel"] {
+        let mut h = fixture();
+        let sketch = h.app.session.active_sketch.unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.edit_sketch(sketch);
+        let before = h.app.session.doc.sketch(sketch).unwrap().clone();
+        h.app.dialog = Some(picked(&h, "sketch.fillet"));
+        h.frames(4);
+        h.app.run(command, json!({})).unwrap();
+        h.settle();
+        assert!(h.app.session.active_sketch.is_none());
+        assert!(h.app.dialog.is_none(), "{command}: no stale corner dialog");
+        assert_eq!(h.app.session.doc.sketch(sketch).unwrap(), &before, "{command}: do not apply the preview");
+        assert!(h.app.preview.error.is_none());
+    }
+}
+
+#[test]
+fn finish_sketch_closes_an_unused_corner_dialog() {
+    let mut h = fixture();
+    let sketch = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.sketch(sketch).unwrap().clone();
+    h.app.start("sketch.fillet");
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"button:sketch.finish"}})).unwrap();
+    h.settle();
+    assert!(h.app.session.active_sketch.is_none() && h.app.dialog.is_none());
+    assert_eq!(h.app.session.doc.sketch(sketch).unwrap(), &before);
+    assert!(h.app.preview.error.is_none());
+}
+
+/// Hold a real computed corner transaction behind a channel: Finish must wait for success,
+/// and neither Cancel nor a failed computation may leave an automatic finish queued.
+#[test]
+fn finish_sketch_waits_for_corner_apply_and_respects_cancel_or_failure() {
+    for outcome in ["success", "cancel", "failure"] {
+        let mut h = fixture();
+        let sketch = h.app.session.active_sketch.unwrap();
+        h.app.dialog = Some(picked(&h, "sketch.fillet"));
+        h.frames(4);
+        let before = h.app.session.doc.to_json();
+        let cmds = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        let prepared = h.app.session.scratch().compute_commands(&cmds, None).map_err(|e| e.to_string());
+        assert!(prepared.is_ok());
+        let (send, done) = std::sync::mpsc::channel();
+        h.app.applying = Some(Applying {
+            done,
+            ready: None,
+            seen: true,
+            started: crate::now_ms(),
+            cmds,
+            progress: Default::default(),
+            quality: Default::default(),
+        });
+        h.step(&json!({"click":{"handle":"button:sketch.finish"}})).unwrap();
+        h.frames(4);
+        assert_eq!(h.app.session.active_sketch, Some(sketch));
+        assert_eq!(h.app.session.doc.to_json(), before, "Finish must wait for the computation");
+        match outcome {
+            "cancel" => {
+                h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+                assert!(send.send(prepared).is_err(), "a cancelled result must be discarded");
+            }
+            "failure" => send.send(Err("corner computation failed".into())).unwrap(),
+            _ => send.send(prepared).unwrap(),
+        }
+        h.frames(6);
+        assert!(h.app.applying.is_none());
+        if outcome == "success" {
+            assert!(h.app.session.active_sketch.is_none() && h.app.dialog.is_none());
+            assert_eq!(h.app.session.doc.sketch(sketch).unwrap().curves.len(), 5);
+        } else {
+            assert_eq!(h.app.session.active_sketch, Some(sketch));
+            assert_eq!(h.app.session.doc.to_json(), before);
+            if outcome == "failure" {
+                assert_eq!(h.app.dialog.as_ref().unwrap().error.as_deref(), Some("corner computation failed"));
+            } else {
+                assert!(h.app.dialog.is_none());
+            }
+        }
+    }
+}
+
 /// Equation Curve (#8352): OK draws the curve from the window's formulas; its context menu
 /// reopens the window on them, and OK then edits that curve instead of drawing another.
 #[test]
