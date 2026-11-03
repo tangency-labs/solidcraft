@@ -303,6 +303,21 @@ component changes every copy. The browser names occurrences with a number, such 
 - **Elsewhere:** occurrence, instance, component instance.
 - **For translators:** not a *pattern instance*.
 
+### operations panel
+
+The panel in the view's bottom-right corner that lists each long operation under way, with its
+progress and a button that cancels it.
+
+An operation is work that takes long enough to run beside the window: opening or inserting a file,
+a feature dialog's OK computing, an undo or a history marker move recomputing the timeline, an
+agent's command. A new one goes on top; one that ends fades out.
+
+- **In SolidCraft:** the `ui.operations` control method; the `operations_panel` preference.
+- **Don't use:** job, task, activity.
+- **Elsewhere:** progress panel, background tasks.
+- **For translators:** an operation is work under way, not a feature's *operation* (join, cut,
+  intersect).
+
 ### part number
 
 A design property that holds the identifier an organisation gives a design.

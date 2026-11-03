@@ -1,0 +1,50 @@
+{
+  "en": {
+    "file_load.opened_behind": "{name} opened in a new tab",
+    "operations.waiting": "Ready",
+    "prefs.file_operations_wait": "Wait for files to open",
+    "prefs.file_operations_wait_note": "While a file opens or is inserted, or links are read again, the design waits behind a card with the file's progress and Cancel. Off: the file shows in the operations panel and you can keep working; an insert lands once you finish what you are doing, and a file opened meanwhile goes in a new tab."
+  },
+  "de": {
+    "file_load.opened_behind": "{name} in einem neuen Tab geöffnet",
+    "operations.waiting": "Bereit",
+    "prefs.file_operations_wait": "Auf das Öffnen von Dateien warten",
+    "prefs.file_operations_wait_note": "Während eine Datei geöffnet oder eingefügt wird oder Verknüpfungen neu gelesen werden, wartet die Konstruktion hinter einer Karte mit dem Fortschritt und Abbrechen. Aus: Die Datei erscheint im Vorgangsbereich und Sie können weiterarbeiten; ein Einfügen wird übernommen, sobald Sie fertig sind, und eine inzwischen geöffnete Datei kommt in einen neuen Tab."
+  },
+  "ja": {
+    "file_load.opened_behind": "{name} を新しいタブで開きました",
+    "operations.waiting": "準備完了",
+    "prefs.file_operations_wait": "ファイルを開く間は待つ",
+    "prefs.file_operations_wait_note": "ファイルを開く・挿入する・リンクを読み直す間、デザインは進行状況とキャンセルを示すカードの後ろで待機します。オフ：ファイルは処理パネルに表示され、作業を続けられます。挿入は作業が終わってから反映され、その間に開いたファイルは新しいタブに入ります。"
+  },
+  "ko": {
+    "file_load.opened_behind": "{name}을(를) 새 탭에서 열었습니다",
+    "operations.waiting": "준비됨",
+    "prefs.file_operations_wait": "파일이 열릴 때까지 기다리기",
+    "prefs.file_operations_wait_note": "파일을 열거나 삽입하거나 링크를 다시 읽는 동안 디자인이 진행 상황과 취소가 있는 카드 뒤에서 기다립니다. 끄면: 파일이 작업 패널에 표시되고 계속 작업할 수 있습니다. 삽입은 하던 작업을 마친 뒤 반영되고, 그 사이에 연 파일은 새 탭에 열립니다."
+  },
+  "zh": {
+    "file_load.opened_behind": "已在新标签页中打开{name}",
+    "operations.waiting": "就绪",
+    "prefs.file_operations_wait": "等待文件打开",
+    "prefs.file_operations_wait_note": "打开或插入文件、重新读取链接时，设计会在显示进度和取消按钮的卡片后等待。关闭：文件显示在操作面板中，您可以继续工作；插入会在您完成当前操作后生效，期间打开的文件会放在新标签页中。"
+  },
+  "ar": {
+    "file_load.opened_behind": "فُتح {name} في علامة تبويب جديدة",
+    "operations.waiting": "جاهز",
+    "prefs.file_operations_wait": "انتظار فتح الملفات",
+    "prefs.file_operations_wait_note": "أثناء فتح ملف أو إدراجه أو إعادة قراءة الروابط، ينتظر التصميم خلف بطاقة تعرض التقدم وزر الإلغاء. عند الإيقاف: يظهر الملف في لوحة العمليات ويمكنك متابعة العمل؛ يُطبَّق الإدراج بعد أن تنتهي مما تفعله، ويُفتح الملف المفتوح في الأثناء في علامة تبويب جديدة."
+  },
+  "he": {
+    "file_load.opened_behind": "{name} נפתח בכרטיסייה חדשה",
+    "operations.waiting": "מוכן",
+    "prefs.file_operations_wait": "המתנה לפתיחת קבצים",
+    "prefs.file_operations_wait_note": "בזמן שקובץ נפתח או מוכנס, או שקישורים נקראים מחדש, התכנון ממתין מאחורי כרטיס עם ההתקדמות וביטול. כבוי: הקובץ מוצג בחלונית הפעולות ואפשר להמשיך לעבוד; הוספה נכנסת לאחר שתסיימו את מה שאתם עושים, וקובץ שנפתח בינתיים נפתח בכרטיסייה חדשה."
+  },
+  "vi": {
+    "file_load.opened_behind": "Đã mở {name} trong thẻ mới",
+    "operations.waiting": "Sẵn sàng",
+    "prefs.file_operations_wait": "Chờ tệp mở xong",
+    "prefs.file_operations_wait_note": "Khi một tệp đang mở, đang chèn hoặc các liên kết được đọc lại, thiết kế chờ sau một thẻ hiện tiến độ và nút Hủy. Tắt: tệp hiện trong bảng thao tác và bạn có thể tiếp tục làm việc; phần chèn được áp dụng khi bạn làm xong việc đang làm, và tệp mở trong lúc đó được đặt vào thẻ mới."
+  }
+}
