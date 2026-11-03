@@ -22,7 +22,7 @@
 //! | [`ProceduralBlend::read_from_db`], `read_curve` (private) | `ReadFromDB`, `sm_ReadCurve`     |
 //! | [`ProceduralBlend::evaluate_definition`]     | `EvaluateDefinition` ([`crate::blend::fillet_section::definition`]) |
 //! | [`PROCEDURAL_BLEND_TYPE`], [`BLEND_MAX_DEPTH`] | `SmProceduralBlend_TYPE`, `SM_BLEND_MAX_DEPTH` |
-//! | [`NetScope`], [`NetScope::is_active`]        | `SmBlendNetScope`, `IsActive`                |
+//! | [`NetScope`], [`NetScope::is_active`]        | `SmBlendNetScope`, `IsActive` (#2510: with the caller's tolerance, [`NetScope::within`]) |
 //! | [`ProceduralBlend::recertify`], [`recertify_faces`] | not in the fork (#2388; the Ball's `SmBallPatch::IsOnSphere` is its counterpart) |
 //! | [`record`], [`convert`]                      | not in the fork (#2388: the definition as plain data) |
 //! | [`chamfer`], order 0                         | not in the fork (#2486: a chamfer, the chord, its sizes kept) |
@@ -30,11 +30,17 @@
 //!
 //! Deviations:
 //! - **Kernel state.** The fork's `thread_local` net-scope depth and its process-wide
-//!   evaluation counts are fields of [`crate::kernel::Kernel`] (`blend_net_scope`,
+//!   evaluation counts are fields of [`crate::kernel::Kernel`] (`blend_net_tolerance`,
 //!   `blend_counts`). They are `Cell`s: the evaluators that read the scope and count their
 //!   work take `&Kernel` (every surface evaluation does), so they cannot take
 //!   `&mut Kernel`. A `Cell` keeps the kernel `Send`, and the values are deterministic
 //!   (one kernel, one thread at a time).
+//! - **The scope's tolerance (#2510).** The fork's scope is a depth: inside it every blend
+//!   is its net. Here a scope carries the tolerance its caller needs, and a blend is its
+//!   net where its certified bound is at most that tolerance ([`ProceduralBlend::net_answers`]),
+//!   its definition elsewhere; [`NetScope::new`] is the fork's scope (any bound). A
+//!   definition's station solve evaluates its supports as their definitions
+//!   ([`NetScope::exact`]), so S stays exact to rounding inside any scope.
 //! - **Identity.** The fork's serial (`m_lSerial`, from the process-wide `s_lLastSerial`)
 //!   is a [`DefinitionIdentity`] the definition holds, compared by identity: unique
 //!   among every definition alive in any kernel, so the station memo of one kernel never
@@ -122,36 +128,102 @@ pub struct BlendCounts {
     /// `I(w) = target(u)` on the kernel's first meeting of that order and u in an
     /// operation; fbba0e2, smlib#109).
     pub area_roots: u64,
+    /// Not the fork's (#2510): evaluations a blend's net answered for its definition
+    /// ([`ProceduralBlend::net_answers`]), each a B-spline evaluation.
+    pub net_evaluations: u64,
 }
 
-/// `SmBlendNetScope`: while one lives, every procedural blend's `Evaluate`,
-/// `EvaluateSimple` and `EvaluatePoint` on the kernel are its net's, within the net's
-/// certified bound of the definition. The tessellator and the surface cache hold one.
-/// Scopes nest; the kernel leaves the net's evaluation when the last one ends.
+/// `SmBlendNetScope`, with the tolerance its caller asks for (#2510): while one lives, a
+/// procedural blend's `Evaluate`, `EvaluateSimple` and `EvaluatePoint` on the kernel are
+/// its net's wherever the net's certified bound is at most that tolerance
+/// ([`ProceduralBlend::net_answers`]), the definition's elsewhere. The net is within its
+/// bound of the definition, so it answers a request at or above the bound; a request
+/// below it is answered by S, at the points asked for only. [`NetScope::new`] asks for no
+/// accuracy (meshing, display, the surface cache and a solver's first guess take the net
+/// whatever its bound); [`NetScope::within`] asks for a tolerance; [`NetScope::exact`]
+/// asks for S. Scopes nest, the innermost deciding, and a scope's end restores the one
+/// around it.
 #[derive(Debug)]
 pub struct NetScope<'k> {
-    depth: &'k Cell<u32>,
+    tolerance: &'k Cell<f64>,
+    outer: f64,
 }
 
 impl<'k> NetScope<'k> {
-    /// Enters a scope on `k` (`SmBlendNetScope()`).
+    /// Enters a scope on `k` that takes every blend's net (`SmBlendNetScope()`).
     #[must_use]
     pub fn new(k: &'k Kernel) -> Self {
-        let depth = &k.blend_net_scope;
-        depth.set(depth.get().saturating_add(1));
-        Self { depth }
+        Self::within(k, f64::INFINITY)
     }
 
-    /// `IsActive`: whether `k` is inside a scope.
+    /// Enters a scope on `k` whose evaluations are needed to `tolerance` (a length at
+    /// part scale): a blend whose net's bound is at most `tolerance` evaluates as its
+    /// net. A tolerance that is not a positive number asks for S.
+    #[must_use]
+    pub fn within(k: &'k Kernel, tolerance: f64) -> Self {
+        let cell = &k.blend_net_tolerance;
+        let outer = cell.replace(requested(tolerance));
+        Self {
+            tolerance: cell,
+            outer,
+        }
+    }
+
+    /// Enters a scope on `k` in which every blend evaluates as its definition, S, inside
+    /// any scope around it (a definition's own station solve on its supports).
+    #[must_use]
+    pub fn exact(k: &'k Kernel) -> Self {
+        Self::within(k, 0.0)
+    }
+
+    /// `f` run inside [`NetScope::new`] on `k`.
+    pub fn with_net<R>(k: &Kernel, f: impl FnOnce() -> R) -> R {
+        let _scope = NetScope::new(k);
+        f()
+    }
+
+    /// `f` run inside [`NetScope::within`] `tolerance` on `k`.
+    pub fn with_tolerance<R>(k: &Kernel, tolerance: f64, f: impl FnOnce() -> R) -> R {
+        let _scope = NetScope::within(k, tolerance);
+        f()
+    }
+
+    /// `f` run on `k` with the tolerance of [`NetScope::within`], for an operation that
+    /// changes the kernel (a scope holds the kernel borrowed). The scope around it is
+    /// restored when `f` returns.
+    pub fn within_mut<R>(k: &mut Kernel, tolerance: f64, f: impl FnOnce(&mut Kernel) -> R) -> R {
+        let outer = k.blend_net_tolerance.replace(requested(tolerance));
+        let r = f(k);
+        k.blend_net_tolerance.set(outer);
+        r
+    }
+
+    /// `IsActive`: whether `k` is inside a scope that takes some blend's net.
     #[must_use]
     pub fn is_active(k: &Kernel) -> bool {
-        k.blend_net_scope.get() > 0
+        k.blend_net_tolerance.get() > 0.0
+    }
+
+    /// The tolerance the innermost scope on `k` asks for: 0 outside every scope (S),
+    /// infinite inside [`NetScope::new`].
+    #[must_use]
+    pub fn tolerance(k: &Kernel) -> f64 {
+        k.blend_net_tolerance.get()
+    }
+}
+
+/// The tolerance a scope asks for: NaN, zero and a negative number ask for S (0).
+fn requested(tolerance: f64) -> f64 {
+    if tolerance > 0.0 {
+        tolerance
+    } else {
+        0.0
     }
 }
 
 impl Drop for NetScope<'_> {
     fn drop(&mut self) {
-        self.depth.set(self.depth.get().saturating_sub(1));
+        self.tolerance.set(self.outer);
     }
 }
 
@@ -303,6 +375,13 @@ fn support_depth(surface: &Surface) -> u32 {
 pub(crate) fn count_evaluation(k: &Kernel) {
     let mut c = k.blend_counts.get();
     c.evaluations = c.evaluations.wrapping_add(1);
+    k.blend_counts.set(c);
+}
+
+/// One evaluation the net answered (#2510).
+fn count_net_evaluation(k: &Kernel) {
+    let mut c = k.blend_counts.get();
+    c.net_evaluations = c.net_evaluations.wrapping_add(1);
     k.blend_counts.set(c);
 }
 
@@ -942,10 +1021,28 @@ impl ProceduralBlend {
         )
     }
 
+    /// Whether the net answers an evaluation on `k` (#2510): the innermost [`NetScope`]
+    /// asks for a tolerance at or above the net's certified bound, `|B - S| <= bound`.
+    /// Outside every scope, or where the scope asks for less than the bound, S answers.
+    #[must_use]
+    pub fn net_answers(&self, k: &Kernel) -> bool {
+        NetScope::tolerance(k) >= self.def.bound
+    }
+
+    /// [`ProceduralBlend::net_answers`] for one evaluation, counted when it does.
+    fn evaluated_by_net(&self, k: &Kernel) -> bool {
+        let answers = self.net_answers(k);
+        if answers {
+            count_net_evaluation(k);
+        }
+        answers
+    }
+
     /// `Evaluate`: the definition's partials at `uv` in the surface's parameters (the
-    /// net's inside a [`NetScope`]). `uv` is clamped to the domain as the net's
-    /// evaluation clamps it; with `non_zero_tangents`, a first partial that vanishes
-    /// (a degenerate section) is replaced by the net's.
+    /// net's where it answers the [`NetScope`], [`ProceduralBlend::net_answers`]). `uv`
+    /// is clamped to the domain as the net's evaluation clamps it; with
+    /// `non_zero_tangents`, a first partial that vanishes (a degenerate section) is
+    /// replaced by the net's.
     ///
     /// # Errors
     ///
@@ -959,8 +1056,8 @@ impl ProceduralBlend {
         highest_v_deriv: usize,
         flags: EvaluateFlags,
     ) -> Result<Vec<Vec<Vec3>>> {
-        // meshing and display (SmBlendNetScope) take the net, the approximation made for them
-        if NetScope::is_active(k) {
+        // the net, within its bound of S, where the caller's scope asks for no more (#2510)
+        if self.evaluated_by_net(k) {
             return self
                 .net
                 .evaluate(uv, highest_u_deriv, highest_v_deriv, flags);
@@ -1004,8 +1101,8 @@ impl ProceduralBlend {
         Ok(d)
     }
 
-    /// `EvaluateSimple`: the definition's partials at `uv` (the net's inside a
-    /// [`NetScope`]), `uv` clamped to the natural domain.
+    /// `EvaluateSimple`: the definition's partials at `uv` (the net's where it answers
+    /// the [`NetScope`]), `uv` clamped to the natural domain.
     ///
     /// # Errors
     ///
@@ -1019,7 +1116,7 @@ impl ProceduralBlend {
         highest_v_deriv: usize,
         flags: EvaluateFlags,
     ) -> Result<Vec<Vec<Vec3>>> {
-        if NetScope::is_active(k) {
+        if self.evaluated_by_net(k) {
             return self.net.evaluate_simple(
                 uv,
                 highest_u_deriv,
@@ -1081,13 +1178,14 @@ impl ProceduralBlend {
         Ok(out)
     }
 
-    /// `EvaluatePoint`: the definition's point at `uv` (the net's inside a [`NetScope`]).
+    /// `EvaluatePoint`: the definition's point at `uv` (the net's where it answers the
+    /// [`NetScope`]).
     ///
     /// # Errors
     ///
     /// Those of the definition's and the net's evaluations.
     pub fn evaluate_point(&self, k: &Kernel, uv: Point2) -> Result<Point3> {
-        if NetScope::is_active(k) {
+        if self.evaluated_by_net(k) {
             return self.net.evaluate_point(uv);
         }
         let st = self.definition_parameters(uv);
@@ -1685,6 +1783,52 @@ mod tests {
         let _scope = NetScope::new(&k);
         let p = b.evaluate_point(&k, uv).unwrap();
         assert!((p.z - 0.5).abs() < 1e-12);
+    }
+
+    /// #2510: a scope's tolerance decides. Two parallel planes 1 apart hold no ball of
+    /// radius 2, so the definition's station does not solve: an evaluation that goes to S
+    /// fails, one the net answers is the net's point. A request at or above the bound is
+    /// the net's, one below it S's; the innermost scope decides and its end restores the
+    /// one around it; an exact scope takes S inside any.
+    #[test]
+    fn the_scope_s_tolerance_against_the_bound_picks_the_net_or_s() {
+        let k = Kernel::default();
+        let bound = 1e-6;
+        let b = Surface::from(blend(&k, 1, [1.0, 1.0], [2.0, 2.0], bound).unwrap());
+        let uv = Point2::new(0.5, 0.5);
+        let on_net = |k: &Kernel| b.evaluate_point(k, uv).is_ok();
+        assert!(!on_net(&k), "outside every scope: S");
+        k.blend_counts.set(BlendCounts::default());
+        {
+            let _at = NetScope::within(&k, bound);
+            assert!(on_net(&k), "a request at the bound: the net");
+            {
+                let _below = NetScope::within(&k, 0.5 * bound);
+                assert!(!on_net(&k), "a request below the bound: S");
+                let _above = NetScope::within(&k, 2.0 * bound);
+                assert!(on_net(&k), "the innermost decides");
+            }
+            assert!(on_net(&k), "an inner scope's end restores the outer");
+            let _exact = NetScope::exact(&k);
+            assert!(!on_net(&k), "exact: S");
+        }
+        assert!(!on_net(&k), "every scope ended: S");
+        let c = k.blend_counts.get();
+        assert_eq!((c.net_evaluations, c.evaluations), (3, 3));
+        // a tolerance that is no positive number asks for S
+        for t in [0.0, -1.0, f64::NAN] {
+            let _s = NetScope::within(&k, t);
+            assert!(!on_net(&k), "{t}");
+        }
+        // the kernel-changing form restores the scope around it
+        let mut k = k;
+        let inside = NetScope::within_mut(&mut k, bound, |k| {
+            (NetScope::tolerance(k), b.evaluate_point(k, uv).is_ok())
+        });
+        assert_eq!(inside, (bound, true));
+        assert_eq!(NetScope::tolerance(&k), 0.0);
+        assert!(NetScope::with_net(&k, || on_net(&k)));
+        assert!(!NetScope::with_tolerance(&k, 0.5 * bound, || on_net(&k)));
     }
 
     /// `TurnToNURBS`'s `new SmBSplineSurface(*pBSS)` slices a blend to its net (fork

@@ -40,7 +40,9 @@ use crate::blend::fillet_executive::p3::{
 use crate::blend::fillet_geom::p1::FilletErrorType;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::object::NotifyOperation;
+use crate::geom::tol::approx_tol3d;
 use crate::kernel::Kernel;
+use crate::surface::procedural_blend::NetScope;
 use crate::topology::brep::{p1, p3};
 use crate::topology::{BrepId, EdgeId};
 
@@ -494,7 +496,19 @@ impl FilletSession<'_> {
     /// With `fixes.fillet_vertex_error_diagnostics`, a missing-corner note from the
     /// corner stage is kept in [`FilletSession::error_info`] across the later failure;
     /// the returned error is still the later stage's own status.
+    ///
+    /// Not upstream (#2510): the fillet is built to the target's approximation tolerance
+    /// (`SmTol::GetApproxTol3d`, its solvers' and its merge's), so a face it rolls on that
+    /// is a blend by its definition evaluates as its certified net wherever the net's
+    /// bound is within that tolerance ([`NetScope::within`]); a step that asks for more
+    /// (a station of a definition) takes S.
     pub fn do_fillet(&mut self, k: &mut Kernel) -> Result<()> {
+        let tolerance = approx_tol3d(k, 0.5 * self.objects.target.tolerance());
+        NetScope::within_mut(k, tolerance, |k| self.do_fillet_within(k))
+    }
+
+    /// The body of [`Self::do_fillet`], in its tolerance's [`NetScope`].
+    fn do_fillet_within(&mut self, k: &mut Kernel) -> Result<()> {
         if !self.executive.initialized {
             // The generic NoteError overload changes exactly these two members.
             self.executive.error.code = 1; // SM_FILERR_EXEC_UNINITIALIZED

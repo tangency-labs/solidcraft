@@ -1680,11 +1680,14 @@ pub struct Kernel {
     /// to the records of a fresh seeding, so it never carries state between edits.
     #[doc(hidden)]
     pub notify_records: crate::topology::topology::NotifyRecords,
-    /// Not upstream: the fork's `SmBlendNetScope` depth (a `thread_local` there): while it
-    /// is above 0, procedural blends evaluate as their nets
-    /// ([`crate::surface::procedural_blend::NetScope`]). A [`Cell`]: the scope is
-    /// entered and read on paths that hold `&Kernel` (every surface evaluation).
-    pub blend_net_scope: Cell<u32>,
+    /// Not upstream: the tolerance the innermost
+    /// [`crate::surface::procedural_blend::NetScope`] asks for (the fork's
+    /// `SmBlendNetScope` depth, a `thread_local` there, with the caller's tolerance,
+    /// #2510): a procedural blend whose net's certified bound is at most it evaluates as
+    /// its net. 0 outside every scope (every blend is its definition), infinite in a scope
+    /// that takes every net. A [`Cell`]: the scope is entered and read on paths that hold
+    /// `&Kernel` (every surface evaluation).
+    pub blend_net_tolerance: Cell<f64>,
     /// Not upstream: the fork's process-wide `SmBlendCounts` (diagnostics only, no
     /// result reads them). A [`Cell`]: the definition's evaluators count through `&Kernel`.
     pub blend_counts: Cell<crate::surface::procedural_blend::BlendCounts>,
@@ -1745,7 +1748,7 @@ impl Kernel {
             fixes: UpstreamFixes::default(),
             cancel: None,
             notify_records: crate::topology::topology::NotifyRecords::new(),
-            blend_net_scope: Cell::new(0),
+            blend_net_tolerance: Cell::new(0.0),
             blend_counts: Cell::new(crate::surface::procedural_blend::BlendCounts::default()),
             blend_station_memo: RefCell::new(
                 crate::blend::fillet_section::definition::StationMemo::default(),

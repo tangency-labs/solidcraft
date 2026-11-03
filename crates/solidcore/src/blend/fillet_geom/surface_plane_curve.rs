@@ -11,7 +11,8 @@
 //!
 //! Deviations: out-params become return values; the context argument is dropped; `UVRate`'s
 //! `(void)Eval` becomes `?`, where upstream would read an unset derivative array after a
-//! failed evaluation.
+//! failed evaluation. A blend by its definition is evaluated as its certified net where the
+//! net's bound is within the tenth of `tol` the curve is held to (#2510).
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // a NaN must take the failing branch, as upstream
 
@@ -24,6 +25,7 @@ use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
+use crate::surface::procedural_blend::NetScope;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
@@ -205,6 +207,9 @@ pub fn surface_plane_curve(
     ang_tol: f64,
 ) -> Result<SurfacePlaneCurves> {
     let fail = || SolidError::sm_err(OP);
+    // the curve is held to a tenth of `tol` of the exact one: a blend by its definition
+    // whose net's bound is within that evaluates as its net (#2510)
+    let _scope = NetScope::within(k, 0.1 * tol);
     // the plane: O + u Pu + v Pv
     let (origin, plane_u, plane_v) = first_derivs(k, plane, Point2::new(0.0, 0.0))?;
     let normal = plane_u.cross(plane_v).unitize()?;

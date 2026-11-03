@@ -57,6 +57,9 @@
 //!   `pSurfaceNode->GetOwnerObject()`) instead of the node and the unused patch.
 //!   `LocalCurveSolve`'s `cpdOptTargetDistance` (`NotUsed` upstream) and
 //!   `CreateParallelProjectionCurves`' context are dropped.
+//! - **A blend's net for averages (#2510).** `ApproxDerivativeLengths`, an average that
+//!   scales tolerances, evaluates a procedural blend as its certified net
+//!   ([`crate::surface::procedural_blend::NetScope::new`]).
 //! - **Debug-only work** compiled out of the release build (drawing, dumps, the
 //!   `SM_ASSERT`s, `EvaluateNormal`'s static list of bad surfaces) is not ported, nor
 //!   is `FindDegenParamForDirection`'s angle bookkeeping (`dBestRad`,
@@ -141,6 +144,7 @@ use crate::nurbs::b_spline_surface::{
 };
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
+use crate::surface::procedural_blend::NetScope;
 use crate::surface::surface_cache::SurfaceCache;
 use crate::topology::BrepId;
 
@@ -2206,6 +2210,8 @@ pub fn approx_derivative_lengths<S: SurfaceEvaluate + ?Sized>(
     // none does (WR-663, tangency-labs/smlib 21dcf69)
     let only_evaluated = k.fixes.query_statuses_pass_on;
     let mut num_evaluated: u32 = 0;
+    // an average, a scale for tolerances: a procedural blend's net answers it (#2510)
+    let _net = NetScope::new(k);
 
     for &si in &samples {
         for &sj in &samples {

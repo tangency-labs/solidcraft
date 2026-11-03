@@ -51,6 +51,11 @@
 //! - **Unported callees.** `SmSurface::LocalPointSolve` (`surface.surface_p5`) for
 //!   every surface and `SmSurfaceEval::Normal` (`surface.surface_p4`, through `p1`) return
 //!   [`SolidError::Unported`].
+//! - **Guesses on a blend's net (#2510).** `Solve`'s rough guess and its refinement only
+//!   start the local solve, which meets the solve's tolerance on the surface itself: they
+//!   evaluate a procedural blend as its certified net
+//!   ([`crate::surface::procedural_blend::NetScope::new`]), the local solve as the
+//!   scope around the solve asks.
 //! - The stepper's `IsLocalMin` / `IsLocalMax` are not used upstream and are not
 //!   ported. Debug-only drawing and `SM_ASSERT`s are omitted.
 
@@ -66,6 +71,7 @@ use crate::geom::vector3d::Point3;
 use crate::kernel::Kernel;
 use crate::math::{min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQ, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
+use crate::surface::procedural_blend::NetScope;
 use crate::surface::surface::p2::SurfaceEval;
 use crate::surface::surface::{Surface, SurfaceKind};
 
@@ -1017,7 +1023,8 @@ impl SurfPtGlobalSolver<'_> {
         sol.num_variables = 2;
         let mut found_answer = false;
 
-        let rough = match self.find_rough_guess(k) {
+        // (a guess: a procedural blend's net answers it, #2510)
+        let rough = match NetScope::with_net(k, || self.find_rough_guess(k)) {
             Ok(r) => r,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Err(SolidError::sm_err(OP_SOLVE)),
@@ -1041,7 +1048,7 @@ impl SurfPtGlobalSolver<'_> {
 
             // Refine the guess (status ignored, as upstream).
             let mut uv_guess = rough.uv;
-            if let Err(e) = self.refine_guess(k, &mut uv_guess) {
+            if let Err(e) = NetScope::with_net(k, || self.refine_guess(k, &mut uv_guess)) {
                 if e.is_unported_or_cancelled() {
                     return Err(e);
                 }

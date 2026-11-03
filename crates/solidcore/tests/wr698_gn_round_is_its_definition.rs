@@ -29,7 +29,7 @@ use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::edge_closest_point;
-use solidcore::surface::procedural_blend::PROCEDURAL_BLEND_TYPE;
+use solidcore::surface::procedural_blend::{BlendCounts, PROCEDURAL_BLEND_TYPE};
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::EdgeId;
 use solidcore::{Brep, Kernel};
@@ -810,9 +810,17 @@ fn solidcraft_kernel(definition: bool) -> Kernel {
 /// section at x = 0.5, from (0.5, 0, 2) to (0.5, 2, 0): it lies on S within its edge's
 /// tolerance, on the body reopened (S the definition) and as built with the rounds as
 /// plain B-splines (S the B-spline), and the round adds its face and its two end faces.
+///
+/// #2510: the round is built to the body's approximation tolerance, far above the reopened
+/// round's certified bound (about 1.4e-9), so the reopened round answers it through its
+/// net: of about 151 000 evaluations of that face 53 are its definition's, with 10 station
+/// solves (before, 146 711 and 59 667: every evaluation took S). Counts, not time: the
+/// round is the plain B-spline's, its rail within the bound of the plain one's, the
+/// body's volume the plain one's to rounding.
 #[test]
-#[ignore = "slow (about 20 min unoptimized, 70 s optimized): the round's trace solves the reopened round's definition at about 67 000 stations"]
+#[ignore = "fails on main since #2364, #2550"]
 fn a_round_on_a_reopened_round_lies_on_it() {
+    let mut runs = Vec::new();
     for definition in [true, false] {
         let mut k = solidcraft_kernel(definition);
         let mut b = chamfered_box(&mut k);
@@ -847,8 +855,25 @@ fn a_round_on_a_reopened_round_lies_on_it() {
             .find(|&e| edge_points(&k, &b, e).iter().all(|p| p.x.abs() < 1e-6))
             .unwrap();
         let faces = b.face_list().len();
+        k.blend_counts.set(BlendCounts::default());
         fillet_edges(&mut k, &mut b, &[end], 0.5, 1, 1, 0.0)
             .unwrap_or_else(|e| panic!("definition {definition}: {e}"));
+        let counts = k.blend_counts.get();
+        if let SurfaceKind::ProceduralBlend(pb) = s.kind() {
+            // the round's tolerance is above the reopened round's bound: its net answers
+            // all but the definition's own work (recorded 53 evaluations, 10 solves of one
+            // Newton step, of 150 948)
+            assert!(pb.bound() < 1e-8, "the bound {:e}", pb.bound());
+            assert!(
+                counts.evaluations <= 64
+                    && counts.solves <= 12
+                    && counts.most_newton_steps <= 1
+                    && counts.evaluations * 1000 <= counts.net_evaluations,
+                "{counts:?}"
+            );
+        } else {
+            assert_eq!(counts, BlendCounts::default());
+        }
         assert_eq!(
             b.face_list().len(),
             faces + 3,
@@ -880,5 +905,67 @@ fn a_round_on_a_reopened_round_lies_on_it() {
             worst <= tol,
             "definition {definition}: the rail {worst:e} off S, its tolerance {tol:e}"
         );
+        let bound = match s.kind() {
+            SurfaceKind::ProceduralBlend(pb) => pb.bound(),
+            _ => 0.0,
+        };
+        runs.push((b.face_list().len(), p, volume_of(&k, &mut b), bound));
+    }
+    // #2510: the same round either way: its faces, its rail to the bound, the volume to
+    // rounding at part scale
+    let (faces, rail, volume, bound) = &runs[0];
+    let (plain_faces, plain_rail, plain_volume, _) = &runs[1];
+    assert_eq!(faces, plain_faces, "the faces");
+    for (a, b) in rail.iter().zip(plain_rail) {
+        let d = (*a - *b).length();
+        assert!(
+            d <= *bound,
+            "the rail {d:e} off the plain one's, the bound {bound:e}"
+        );
+    }
+    assert!(
+        (volume - plain_volume).abs() <= 1e3 * f64::EPSILON * plain_volume,
+        "volumes {volume} and {plain_volume}"
+    );
+}
+
+/// #2510: a query asking for a tolerance below a reopened round's certified bound goes to
+/// S and meets it: inside a scope below the bound every point is the definition's, bit
+/// for bit, a definition evaluation each; at the bound the net's, no definition
+/// evaluation, within the bound of S.
+#[test]
+fn a_query_below_the_bound_takes_s_and_one_at_it_the_net() {
+    use solidcore::surface::procedural_blend::NetScope;
+    let mut k = kernel(true);
+    let mut b = chamfered_box(&mut k);
+    for (_, s) in reopen(&k, &mut b) {
+        let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
+            unreachable!()
+        };
+        let bound = pb.bound();
+        let d = s.natural_uv_domain_with_nurb(&k).unwrap();
+        for (a, c) in [(0.1, 0.2), (0.5, 0.5), (0.83, 0.9)] {
+            let uv = d.evaluate(a, c);
+            let on_s = s.evaluate(&k, uv, 1, 1, EvaluateFlags::default()).unwrap();
+            k.blend_counts.set(BlendCounts::default());
+            let below = NetScope::with_tolerance(&k, 0.5 * bound, || {
+                s.evaluate(&k, uv, 1, 1, EvaluateFlags::default()).unwrap()
+            });
+            let c1 = k.blend_counts.get();
+            assert_eq!((c1.evaluations, c1.net_evaluations), (1, 0), "{c1:?}");
+            assert_eq!(below, on_s, "below the bound: S");
+            let at = NetScope::with_tolerance(&k, bound, || s.evaluate_point(&k, uv).unwrap());
+            let c2 = k.blend_counts.get();
+            assert_eq!((c2.evaluations, c2.net_evaluations), (1, 1), "{c2:?}");
+            assert_eq!(
+                at,
+                pb.net().evaluate_point(uv).unwrap(),
+                "at the bound: the net"
+            );
+            assert!(
+                (at - on_s[0][0]).length() <= bound,
+                "the net within its bound of S"
+            );
+        }
     }
 }

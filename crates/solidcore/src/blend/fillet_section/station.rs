@@ -21,6 +21,7 @@ use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::NOW;
+use crate::surface::procedural_blend::NetScope;
 use crate::surface::surface::{Surface, SurfaceKind};
 
 const OP: &str = "blend::fillet_section::station";
@@ -461,7 +462,8 @@ pub const STATION_STEP: f64 = 1.0e-12;
 /// `sm_SurfacePartials`: the partials of a face's surface at `uv` up to total order `lk`:
 /// a NURBS (every analytic surface is one, evaluated in its net's parameters) by its net,
 /// continued past its knots; any other surface, and a blend by its definition (whose net
-/// is only its approximation, 014f66f), by its own evaluator.
+/// is only its approximation, 014f66f), by its own evaluator, a definition as S whatever
+/// [`NetScope`] the caller is in (#2510).
 ///
 /// # Errors
 ///
@@ -503,7 +505,12 @@ pub fn surface_partials_sided(
         only_upper_half: true,
         non_zero_tangents: false,
     };
-    let d = s.evaluate(k, uv, lk, lk, flags)?;
+    // a station is its definition's, exact to rounding inside any caller's scope: a face
+    // that is a definition is solved on S, never its net (#2510)
+    let d = {
+        let _exact = NetScope::exact(k);
+        s.evaluate(k, uv, lk, lk, flags)?
+    };
     let mut out = Partials::default();
     for a in 0..=lk {
         for b in 0..=(lk - a) {

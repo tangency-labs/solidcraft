@@ -22,6 +22,10 @@
 //! | [`FilletBrep::destroy_geom`]                      | `SmFilletGeom::~SmFilletGeom`                |
 //!
 //! Deviations:
+//! - **A blend's net to the intersection's tolerance (#2510).** `SrfSrfIntersection`
+//!   evaluates a blend by its definition as its certified net where the net's bound is
+//!   within its approximation tolerance
+//!   ([`crate::surface::procedural_blend::NetScope::within`]).
 //! - **Rail end on the continued surface (WR-630, #960).** With
 //!   `fixes.fillet_rail_end_on_continued_surface`, `CalcRailIntEdgeuse` evaluates the
 //!   rail's end on its base surface with out-of-bounds evaluation on (the fork's
@@ -148,6 +152,7 @@ use crate::nurbs::crv_fit::p1::ParamMethod;
 use crate::nurbs::knots::Side;
 use crate::query::brep::BrepFaceServices;
 use crate::surface::plane::Plane;
+use crate::surface::procedural_blend::NetScope;
 use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::SurfaceIntersection;
 use crate::surface::surface::p4::NoObject;
@@ -1004,6 +1009,9 @@ pub fn srf_srf_intersection_with_context(
 ) -> Result<SrfSrfCurves> {
     // SmApproxTol3d dApproxTol: the double converts at the call
     let approx_tol = approx_tol3d(k, approx_tol);
+    // the intersection is to `approx_tol`: a blend by its definition whose net's bound is
+    // within it evaluates as its net (#2510)
+    let _scope = NetScope::within(k, approx_tol);
 
     // surface and surf/surf intersection locals
     let mut curves_3d: Vec<Curve> = Vec::new();
