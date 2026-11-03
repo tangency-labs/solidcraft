@@ -29,9 +29,9 @@
 //!   so the window never waits for it: [`paper_text_now`] asks a thread (`font-search`) and refuses
 //!   with [`SketchError::FontPending`] until the answers are in. Answers, misses too, are kept for
 //!   the process. [`paper_text`] does the search where it is called.
-//! - The browser has no font folders: there the web covers Japanese for now ([`fallback`]). Its text
-//!   is refused with [`SketchError::FontPending`], whichever way it's asked for, until the font the web
-//!   app fetches comes.
+//! - The browser has no font folders: there the web covers Arabic, Chinese, Japanese and Korean, a
+//!   font each ([`fallback`]). Text is refused with [`SketchError::FontPending`], whichever way it's
+//!   asked for, until each font it asked the web app for has come or failed.
 //! - Lines break at `\n`, a line pitch apart, and are aligned as sketch text's are. A line with
 //!   right-to-left characters is a run per direction, shaped. Every run of a line starts where the
 //!   line does, its glyphs placed along the whole line.
@@ -229,7 +229,7 @@ fn mixed_line(
     let invalid = || SketchError::Invalid("a run of text the font can't shape".into());
     let spans = font_spans(line, faces, found).map_err(|missing| {
         let chars: String = missing.iter().map(|c| format!(" {c:?}")).collect();
-        let web = if on_the_web { ": the web covers Japanese for now" } else { "" };
+        let web = if on_the_web { format!(": {}", fallback::WEB_COVERS) } else { String::new() };
         SketchError::Invalid(format!("the font {family} has no glyph for{chars}, and no other font here has one{web}"))
     })?;
     let info = unicode_bidi::BidiInfo::new(line, None);

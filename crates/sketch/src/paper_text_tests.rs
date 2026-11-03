@@ -197,8 +197,8 @@ fn a_right_to_left_line_is_a_run_per_direction_with_marks_in_their_letters_clust
 
 #[test]
 fn a_character_no_font_has_is_refused_by_name() {
-    let e = err("Size \u{d55c}", None, &TextStyle::default());
-    assert!(e.contains("no glyph for '\u{d55c}'") && !e.contains("the web"), "{e}");
+    let e = err("Size \u{1200}", None, &TextStyle::default());
+    assert!(e.contains("no glyph for '\u{1200}'") && !e.contains("the web"), "{e}");
     let e = err("a\tb", None, &TextStyle::default());
     assert!(e.contains("'\\t'"), "{e}");
 }
@@ -466,39 +466,87 @@ fn the_status_names_what_fell_back_and_looks_for_nothing() {
     );
 }
 
-/// No font folders, as in the browser: Japanese waits for the font the web app fetches, then is
-/// set by it, and what it lacks is refused by name. The one test, as the font's state is the process's.
+/// No font folders, as in the browser: each script the web covers waits for its own font, is set by
+/// it once it comes, and is refused by name while its fetch has failed. Han takes the font of whose
+/// Han the text wants, as on the desktop. A text in two scripts waits for both. The one test, as the
+/// fonts' state is the process's.
 #[test]
-fn on_the_web_japanese_waits_for_the_fetched_font() {
-    use crate::fonts::fallback::{provide_web_font, web_font_failed, web_font_wanted};
+fn on_the_web_each_script_waits_for_its_own_font() {
+    use crate::fonts::fallback::{WEB_COVERS, WebFont, provide_web_font, web_font_failed, web_fonts_wanted};
     let plain = TextStyle::default();
-    let set = |text: &str| paper_text_in(&[], text, None, "", AT, 5.0, 0.0, &plain);
-    // Nothing that font could set doesn't ask for it.
-    let e = set("\u{628}").unwrap_err().to_string();
-    assert!(e.contains("no glyph for") && e.contains("the web covers Japanese for now"), "{e}");
-    assert!(!web_font_wanted());
-    assert!(set("A").unwrap().is_some());
-    assert!(!web_font_wanted(), "text with its own font asks for nothing");
-    // Waiting, whichever way it's asked.
-    assert!(matches!(set("A\u{30c6}"), Err(SketchError::FontPending)));
-    assert!(web_font_wanted());
-    assert!(matches!(paper_text_now(&[], "\u{4e2d}", None, "", AT, 5.0, 0.0, &plain), Err(SketchError::FontPending)));
-    assert!(paper_fallback_notes(&[], "", "", ["\u{30c6}"]).is_empty(), "nothing to say yet");
-    // The fetch failed: refused by name, and it stays wanted no more.
-    web_font_failed();
-    assert!(!web_font_wanted());
-    let e = set("\u{30c6}").unwrap_err().to_string();
-    assert!(e.contains("the web covers Japanese for now"), "{e}");
-    // It came (a later try): set, in that font, under the name a face of it has.
-    provide_web_font(gothic());
-    assert!(!web_font_wanted());
-    let (runs, fonts) = mixed(set("A\u{30c6}").unwrap().unwrap());
-    assert_eq!((runs.len(), fonts.len()), (2, 2));
-    assert!(fonts.iter().any(|f| f.postscript_name.starts_with("BIZ")));
-    assert_eq!(paper_fallback_notes(&[], "", "", ["\u{30c6}"]), ["Kana set in BIZ UDPGothic"]);
-    // What it lacks: Hangul and Arabic, refused by name, with no font asked for.
-    let e = set("\u{d55c}").unwrap_err().to_string();
-    assert!(e.contains("no glyph for") && e.contains("the web covers Japanese for now"), "{e}");
+    let set = |text: &str, language: &str| paper_text_in(&[], text, None, language, AT, 5.0, 0.0, &plain);
+    let pending = |text: &str, language: &str| matches!(set(text, language), Err(SketchError::FontPending));
+    let refused = |text: &str, language: &str| set(text, language).unwrap_err().to_string();
+    // The font each run is set in, by its PostScript name, in the runs' order.
+    let fonts_of = |text: &str, language: &str| {
+        let (runs, fonts) = mixed(set(text, language).unwrap().unwrap());
+        runs.iter().map(|run| fonts.iter().find(|f| f.id == run.font).unwrap().postscript_name.clone()).collect::<Vec<_>>()
+    };
+    let provide = |font: WebFont| {
+        let asset = if font == WebFont::Japanese { "biz-udp-gothic/BIZUDPGothic-Regular.ttf" } else { font.file() };
+        provide_web_font(font, std::fs::read(repo_fonts()[0].join(asset)).unwrap());
+    };
+    // A script the web has no font for asks for nothing, and text its own font sets neither.
+    let e = refused("\u{e01}", "");
+    assert!(e.contains("no glyph for") && e.contains(WEB_COVERS), "{e}");
+    assert!(set("A", "").unwrap().is_some());
+    assert!(web_fonts_wanted().is_empty());
+
+    // Arabic and Hangul in one text wait for both fonts, whichever way it's asked.
+    let both = "\u{644}\u{648}\u{62d} \u{d55c}";
+    assert!(pending(both, ""));
+    assert_eq!(web_fonts_wanted(), [WebFont::Korean, WebFont::Arabic]);
+    assert!(matches!(paper_text_now(&[], both, None, "", AT, 5.0, 0.0, &plain), Err(SketchError::FontPending)));
+    assert!(paper_fallback_notes(&[], "", "", [both]).is_empty(), "nothing to say yet");
+    provide(WebFont::Korean);
+    assert!(pending(both, ""), "still waiting for the Arabic font");
+    assert_eq!(web_fonts_wanted(), [WebFont::Arabic]);
+    // Its fetch failed: the Arabic is refused by name, and the Hangul alone sets.
+    web_font_failed(WebFont::Arabic);
+    assert!(web_fonts_wanted().is_empty());
+    let e = refused(both, "");
+    assert!(e.contains("'\u{644}'") && !e.contains("'\u{d55c}'") && e.contains(WEB_COVERS), "{e}");
+    assert_eq!(fonts_of("\u{d55c}", ""), ["NotoSansKR-Regular"]);
+    // It came (a later try): both set, the Arabic from right to left.
+    provide(WebFont::Arabic);
+    let (runs, fonts) = mixed(set(both, "").unwrap().unwrap());
+    let arabic = fonts.iter().find(|f| f.postscript_name == "NotoSansArabic-Regular").unwrap();
+    assert!(runs.iter().filter(|run| run.font == arabic.id).all(|run| run.rtl), "{runs:?}");
+    let mut names = fonts_of(both, "");
+    names.sort();
+    names.dedup();
+    assert_eq!(names, ["NotoSansArabic-Regular", "NotoSansKR-Regular"]);
+    assert_eq!(paper_fallback_notes(&[], "", "", [both]), ["Arabic set in Noto Sans Arabic", "Hangul set in Noto Sans KR"]);
+
+    // Han by the drawing's language: Chinese simplified or traditional, Japanese, and with no
+    // language, the simplified Chinese a desktop picks too. Kana is Japanese's.
+    let han =
+        [("zh", WebFont::SimplifiedChinese), ("zh-TW", WebFont::TraditionalChinese), ("ja", WebFont::Japanese), ("en", WebFont::SimplifiedChinese)];
+    for (language, _) in han {
+        assert!(pending("\u{4e2d}", language), "{language}");
+    }
+    assert!(pending("\u{30c6}", ""));
+    assert_eq!(web_fonts_wanted(), [WebFont::Japanese, WebFont::SimplifiedChinese, WebFont::TraditionalChinese]);
+    // The Japanese fetch failed: its Han and kana are refused by name; Chinese still waits.
+    web_font_failed(WebFont::Japanese);
+    assert!(refused("\u{30c6}", "").contains(WEB_COVERS));
+    assert!(pending("\u{4e2d}", "zh"));
+    for font in [WebFont::Japanese, WebFont::SimplifiedChinese, WebFont::TraditionalChinese] {
+        provide(font);
+    }
+    assert!(web_fonts_wanted().is_empty());
+    let names = |font: WebFont| match font {
+        WebFont::Japanese => "BIZUDPGothic-Regular",
+        WebFont::SimplifiedChinese => "NotoSansSC-Regular",
+        WebFont::TraditionalChinese => "NotoSansTC-Regular",
+        WebFont::Korean => "NotoSansKR-Regular",
+        WebFont::Arabic => "NotoSansArabic-Regular",
+    };
+    for (language, font) in han {
+        assert_eq!(fonts_of("A\u{4e2d}", language)[1], names(font), "{language}");
+    }
+    assert_eq!(fonts_of("\u{30c6}", "")[0], names(WebFont::Japanese));
+    assert_eq!(paper_fallback_notes(&[], "", "zh-TW", ["\u{4e2d}"]), ["Han set in Noto Sans TC for traditional Chinese"]);
 }
 
 /// The same text and fonts give the same runs and fonts, however the answers came.
