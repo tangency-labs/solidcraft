@@ -636,7 +636,7 @@ fn plane_perpendicular_to_a_plane_through_a_line() {
 }
 
 /// The signed distance of `p` from `pl`, along its normal.
-fn above(pl: &Plane, p: Vec3) -> f64 {
+fn height_above_plane(pl: &Plane, p: Vec3) -> f64 {
     (p - pl.origin).dot(pl.normal().normalized().unwrap_or(Vec3::Z))
 }
 
@@ -649,7 +649,7 @@ fn plane_normal_to_axis_is_square_to_the_axis_through_the_point() {
     assert!(near(end.origin, Vec3::new(40.0, 30.0, 20.0)) && parallel(end.normal(), Vec3::X), "{end:?}");
     // The box's right face lies in it, and the left face 40 mm behind it.
     assert!(on_plane(&end, Vec3::new(40.0, 7.0, 3.0)), "{end:?}");
-    assert!((above(&end, Vec3::new(0.0, 7.0, 3.0)).abs() - 40.0).abs() < 1e-6, "{end:?}");
+    assert!((height_above_plane(&end, Vec3::new(0.0, 7.0, 3.0)).abs() - 40.0).abs() < 1e-6, "{end:?}");
     // World Z through a fixed point: the horizontal plane at that height.
     run(&mut s, "construct.plane.normal_to_axis", json!({"axis": {"axis": "Z"}, "point": {"point": [10, 20, 30]}, "name": "Shelf"}));
     let shelf = plane(&s, "Shelf");
@@ -664,13 +664,61 @@ fn plane_normal_to_axis_is_square_to_the_axis_through_the_point() {
     let cross = plane(&s, "Cross");
     let n = Vec3::new(1.0, 2.0, 2.0) / 3.0;
     assert!(near(cross.origin, Vec3::new(3.0, 0.0, 0.0)) && near(cross.normal().normalized().unwrap(), n), "{cross:?}");
-    assert!((above(&cross, Vec3::ZERO) + 1.0).abs() < 1e-9, "{cross:?}");
+    assert!((height_above_plane(&cross, Vec3::ZERO) + 1.0).abs() < 1e-9, "{cross:?}");
     // Something that is not a line, or not a point, is refused and changes nothing.
     let before = s.doc.to_json();
     assert!(s.execute("construct.plane.normal_to_axis", &json!({"axis": "XY", "point": {"point": [0, 0, 0]}})).is_err());
     assert!(s.execute("construct.plane.normal_to_axis", &json!({"axis": {"axis": "Z"}, "point": {"plane": "XY"}})).is_err());
     assert!(s.execute("construct.plane.normal_to_axis", &json!({"axis": {"axis": "Z"}})).is_err());
     assert_eq!(s.doc.to_json(), before, "a refused plane leaves the design unchanged");
+}
+
+#[test]
+fn plane_normal_to_axis_takes_round_edges_faces_and_sketch_lines() {
+    let mut s = part();
+    // The cylinder's top circular edge and its side face both give its vertical axis.
+    run(&mut s, "construct.plane.normal_to_axis", json!({"axis": {"edge": [65, 0, 10]}, "point": {"point": [60, 0, 10]}, "name": "Lid"}));
+    let lid = plane(&s, "Lid");
+    assert!(near(lid.origin, Vec3::new(60.0, 0.0, 10.0)) && parallel(lid.normal(), Vec3::Z), "{lid:?}");
+    run(&mut s, "construct.plane.normal_to_axis", json!({"axis": {"face": [65, 0, 5]}, "point": {"point": [60, 0, 4]}, "name": "Waist"}));
+    let waist = plane(&s, "Waist");
+    assert!(near(waist.origin, Vec3::new(60.0, 0.0, 4.0)) && parallel(waist.normal(), Vec3::Z), "{waist:?}");
+    // Sketch lines along X, drawn either way: both planes are square to X, their normals along
+    // the line as drawn.
+    let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    let ahead = run(&mut s, "sketch.line", json!({"points": [[0, 80], [10, 80]]}))["curves"][0].as_str().unwrap().to_string();
+    let back = run(&mut s, "sketch.line", json!({"points": [[10, 90], [0, 90]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "construct.plane.normal_to_axis", json!({"axis": {"sketch": sk, "curve": ahead}, "point": {"point": [5, 0, 0]}, "name": "Ahead"}));
+    run(&mut s, "construct.plane.normal_to_axis", json!({"axis": {"sketch": sk, "curve": back}, "point": {"point": [5, 0, 0]}, "name": "Back"}));
+    let (ahead, back) = (plane(&s, "Ahead"), plane(&s, "Back"));
+    assert!(near(ahead.origin, Vec3::new(5.0, 0.0, 0.0)) && near(back.origin, Vec3::new(5.0, 0.0, 0.0)));
+    assert!(near(ahead.normal().normalized().unwrap(), Vec3::X), "{ahead:?}");
+    assert!(near(back.normal().normalized().unwrap(), -Vec3::X), "{back:?}");
+}
+
+#[test]
+fn plane_normal_to_axis_in_a_moved_component_keeps_its_world_picks() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [50, 0, 0]}));
+    run(&mut s, "construct.axis.two_points", json!({"a": {"point": [50, 0, 0]}, "b": {"point": [50, 0, 10]}, "name": "Mast"}));
+    run(&mut s, "construct.plane.normal_to_axis", json!({"axis": {"axis": "Mast"}, "point": {"point": [60, 0, 4]}, "name": "Deck"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [0, 20, 0]}));
+    let pl = plane(&s, "Deck");
+    assert!(parallel(pl.normal(), Vec3::Z), "{pl:?}");
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": "Deck", "command": "construct.plane.normal_to_axis", "params": {"axis": {"axis": "Mast"}, "point": {"point": [70, 20, 4]}}}),
+    );
+    let definition = run(&mut s, "timeline.inspect", json!({"feature": "Deck"}));
+    assert_eq!(
+        definition["definition"]["plane"]["point"],
+        json!({"type": "point", "p": [20., 0., 4.]}),
+        "redefine uses the feature's authoring frame, not the active root"
+    );
 }
 
 #[test]
@@ -690,7 +738,7 @@ fn plane_normal_to_axis_on_a_sloped_edge_follows_the_model() {
         assert!(parallel(pl.normal(), Vec3::new(-3.0, 4.0, 0.0)), "{pl:?}");
         // The edge's other end, (0,40), is the edge's length from the plane; the vertical edge
         // at (30,0) lies in it.
-        assert!((above(&pl, Vec3::new(0.0, 40.0, 0.0)).abs() - 50.0).abs() < 1e-6, "{pl:?}");
+        assert!((height_above_plane(&pl, Vec3::new(0.0, 40.0, 0.0)).abs() - 50.0).abs() < 1e-6, "{pl:?}");
         assert!(on_plane(&pl, Vec3::new(30.0, 0.0, height / 2.0)), "{pl:?}");
     };
     check(&s, 10.0);

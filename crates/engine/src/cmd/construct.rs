@@ -446,7 +446,15 @@ fn plane_perpendicular(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn plane_normal_to_axis(s: &mut Session, p: &Value) -> Result<Value> {
+    let kind = plane_normal_to_axis_kind(s, p)?;
+    add_feature(s, p, kind)
+}
+
+/// Shared parser for the constructor and its world-to-authoring-frame boundary, as
+/// `plane_axis_point_kind`.
+pub(crate) fn plane_normal_to_axis_kind(s: &Session, p: &Value) -> Result<FeatureKind> {
     let cmd = "construct.plane.normal_to_axis";
-    let (axis, at) = (geo(s, p.get("axis"), cmd, "axis")?, geo(s, p.get("point"), cmd, "point")?);
-    plane(s, p, PlaneRef::NormalToAxis { axis: Box::new(axis), point: Box::new(at) })
+    let axis = geo(s, p.get("axis"), cmd, "axis")?;
+    let point = geo(s, p.get("point"), cmd, "point")?;
+    Ok(FeatureKind::ConstructionPlane { plane: PlaneRef::NormalToAxis { axis: Box::new(axis), point: Box::new(point) } })
 }

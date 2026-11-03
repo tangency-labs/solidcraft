@@ -2797,7 +2797,7 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::pref
 
 /// Saved vectors/axes are real inputs even when they have no origin-axis selection chip.
 fn stored_input_reference_key(d: &Dialog, index: usize) -> Option<&'static str> {
-    if let Kind::Construct { command: "construct.plane.axis_point", keys, .. } = &d.kind {
+    if let Kind::Construct { command: "construct.plane.axis_point" | "construct.plane.normal_to_axis", keys, .. } = &d.kind {
         return keys.get(index).copied();
     }
     if matches!(d.kind, Kind::Section { .. }) && index == 0 {
@@ -6800,11 +6800,19 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::ConstructionPlane { plane: PlaneRef::AxisPoint { .. } } => {
+        FeatureKind::ConstructionPlane { plane: PlaneRef::AxisPoint { .. } | PlaneRef::NormalToAxis { .. } } => {
+            let command = match &f.kind {
+                FeatureKind::ConstructionPlane { plane: PlaneRef::NormalToAxis { .. } } => "construct.plane.normal_to_axis",
+                _ => "construct.plane.axis_point",
+            };
             let mut world = f.kind.clone();
             world.transform_geometry(&feature_frame(s, f.component));
-            let FeatureKind::ConstructionPlane { plane: PlaneRef::AxisPoint { axis, point } } = world else { return None };
-            let mut d = start("construct.plane.axis_point")?;
+            let (FeatureKind::ConstructionPlane { plane: PlaneRef::AxisPoint { axis, point } }
+            | FeatureKind::ConstructionPlane { plane: PlaneRef::NormalToAxis { axis, point } }) = world
+            else {
+                return None;
+            };
+            let mut d = start(command)?;
             for (input, reference) in d.inputs.iter_mut().zip([&axis, &point]) {
                 // Keep the exact saved references when no new pick has replaced them.
                 // Fixed points also need a visible pick to keep the shared form complete.
