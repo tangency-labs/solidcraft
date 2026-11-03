@@ -15,10 +15,15 @@ fn check(s: &mut Session, want: f64, hole: bool, height: f64) {
     let got: f64 = state.bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum();
     // Legacy linked outlines fit tessellated curves; enforce the existing 1e-4 material envelope.
     assert!((got - want).abs() < want * 1e-4, "{got} vs {want}");
-    assert!(state.bodies.iter().any(|b| b.body.contains(Vec3::new(5.0, 5.0, height - 1.0))));
-    assert!(!state.bodies.iter().any(|b| b.body.contains(Vec3::new(5.0, 5.0, height + 1.0))));
+    assert!(state.bodies.iter().any(|b| b.body.classify_point(Vec3::new(5.0, 5.0, height - 1.0)).unwrap() == solidcraft_kernel::PointClass::Inside));
+    assert!(!state.bodies.iter().any(|b| b.body.classify_point(Vec3::new(5.0, 5.0, height + 1.0)).unwrap() == solidcraft_kernel::PointClass::Inside));
     if hole {
-        assert!(!state.bodies.iter().any(|b| b.body.contains(Vec3::new(20.0, 15.0, height - 1.0))));
+        assert!(
+            !state
+                .bodies
+                .iter()
+                .any(|b| b.body.classify_point(Vec3::new(20.0, 15.0, height - 1.0)).unwrap() == solidcraft_kernel::PointClass::Inside)
+        );
     }
 }
 #[test]
@@ -48,8 +53,12 @@ fn generated_face_profiles_keep_exact_links_live_after_edit_and_reopen() {
         let area = 1500.0 - if hole { 25.0 * PI } else { 0.0 };
         check(&mut s, area * 35.0, hole, 35.0);
         let edited = s.model.state();
-        assert!(edited.bodies.iter().any(|body| body.body.contains(Vec3::new(49.0, 5.0, 34.0))));
-        assert!(!edited.bodies.iter().any(|body| body.body.contains(Vec3::new(51.0, 5.0, 34.0))));
+        assert!(
+            edited.bodies.iter().any(|body| body.body.classify_point(Vec3::new(49.0, 5.0, 34.0)).unwrap() == solidcraft_kernel::PointClass::Inside)
+        );
+        assert!(
+            !edited.bodies.iter().any(|body| body.body.classify_point(Vec3::new(51.0, 5.0, 34.0)).unwrap() == solidcraft_kernel::PointClass::Inside)
+        );
         assert!(edited.sketch(sketch.0).unwrap().sketch.links.iter().all(|link| link.auto_face && !link.lost));
         let solved = edited.sketch(sketch.0).unwrap().plane;
         assert!((solved.origin.z - 25.0).abs() < 1e-6);
@@ -67,6 +76,108 @@ fn generated_face_profiles_keep_exact_links_live_after_edit_and_reopen() {
         }
     }
 }
+#[test]
+fn a_component_extruded_from_another_components_face_moves_independently() {
+    let mut s = Session::default();
+    let reference = run(&mut s, "component.create", json!({"name":"Reference","grounded":false}));
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":20,"name":"Base","body_name":"Stock"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    let part = run(&mut s, "component.create", json!({"name":"Part"}));
+    run(&mut s, "solid.extrude", json!({"face":[10,10,20],"distance":10,"operation":"new","body_name":"Pad"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    let measure = |s: &mut Session, center: [f64; 3], volume: f64| {
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+        let got = run(s, "inspect.center_of_mass", json!({"bodies":["Pad"]}));
+        for (i, want) in center.iter().enumerate() {
+            assert!((got["center"][i].as_f64().unwrap() - want).abs() < 1e-6, "{got}; expected {center:?}");
+        }
+        assert!((got["volume"].as_f64().unwrap() - volume).abs() < 1e-6, "{got}");
+    };
+    measure(&mut s, [10., 10., 25.], 4000.);
+    run(&mut s, "occurrence.move", json!({"occurrence":part["occurrence"],"translate":[40,0,0],"capture":true}));
+    measure(&mut s, [50., 10., 25.], 4000.);
+    run(&mut s, "edit.undo", json!({}));
+    measure(&mut s, [10., 10., 25.], 4000.);
+    run(&mut s, "edit.redo", json!({}));
+    measure(&mut s, [50., 10., 25.], 4000.);
+    // Moving the reference is an assembly placement, not an edit to its shape.
+    run(&mut s, "occurrence.move", json!({"occurrence":reference["occurrence"],"translate":[0,50,0],"capture":true}));
+    measure(&mut s, [50., 10., 25.], 4000.);
+    // Both the attached plane and its projected outline still follow source dimensions.
+    run(&mut s, "timeline.edit", json!({"feature":"Base","set":{"length":"30","height":"25"}}));
+    measure(&mut s, [55., 10., 30.], 6000.);
+    let mut reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    measure(&mut reopened, [55., 10., 30.], 6000.);
+    run(&mut reopened, "occurrence.move", json!({"occurrence":part["occurrence"],"translate":[0,0,10],"capture":true}));
+    measure(&mut reopened, [55., 10., 40.], 6000.);
+    run(&mut reopened, "timeline.copy", json!({"features":["Base","Sketch1","Extrude1"]}));
+    run(&mut reopened, "timeline.paste", json!({"translate":[0,0,50]}));
+    let copy = run(&mut reopened, "inspect.center_of_mass", json!({"bodies":["Pad (2)"]}));
+    for (i, want) in [55., 10., 90.].iter().enumerate() {
+        assert!((copy["center"][i].as_f64().unwrap() - want).abs() < 1e-6, "{copy}");
+    }
+    assert!((copy["volume"].as_f64().unwrap() - 6000.).abs() < 1e-6);
+    // Reorganizing the feature definitions must preserve the captured context too.
+    run(&mut reopened, "component.move_features", json!({"features":["Base","Sketch1","Extrude1"],"component":0}));
+    measure(&mut reopened, [55., 10., 40.], 6000.);
+}
+
+#[test]
+fn a_cross_component_face_profile_keeps_its_rotated_creation_context() {
+    let mut s = Session::default();
+    let source = run(&mut s, "component.create", json!({"name":"Reference","grounded":false}));
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":20,"body_name":"Stock"}));
+    run(&mut s, "occurrence.move", json!({"occurrence":source["occurrence"],"translate":[30,20,0],"angle":"90 deg"}));
+    let part = run(&mut s, "component.create", json!({"name":"Part","parent":0}));
+    run(&mut s, "occurrence.move", json!({"occurrence":part["occurrence"],"translate":[-20,10,0],"angle":"-90 deg","capture":false}));
+    run(&mut s, "solid.extrude", json!({"face":[20,30,20],"distance":10,"operation":"new","body_name":"Pad"}));
+    assert!(s.pending_moves.is_empty(), "face capture records the author's pending placement");
+    run(&mut s, "component.activate", json!({"component":0}));
+    let center = |s: &mut Session, want: [f64; 3]| {
+        let got = run(s, "inspect.center_of_mass", json!({"bodies":["Pad"]}));
+        for (i, want) in want.iter().enumerate() {
+            assert!((got["center"][i].as_f64().unwrap() - want).abs() < 1e-6, "{got}");
+        }
+        assert!((got["volume"].as_f64().unwrap() - 4000.).abs() < 1e-6);
+    };
+    center(&mut s, [20., 30., 25.]);
+    run(&mut s, "occurrence.move", json!({"occurrence":part["occurrence"],"translate":[50,0,5],"angle":"90 deg","capture":false}));
+    center(&mut s, [20., 20., 30.]);
+    run(&mut s, "component.capture_position", json!({}));
+    center(&mut s, [20., 20., 30.]);
+    let mut reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    center(&mut reopened, [20., 20., 30.]);
+}
+
+#[test]
+fn moving_the_original_face_derived_component_does_not_move_its_copies_backwards() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name":"Reference"}));
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":20}));
+    let part = run(&mut s, "component.create", json!({"name":"Part","parent":0}));
+    run(&mut s, "solid.extrude", json!({"face":[10,10,20],"distance":10,"operation":"new","body_name":"Pad"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    let copy = run(&mut s, "occurrence.copy", json!({"component":part["component"],"translate":[0,40,0]}));
+    run(&mut s, "occurrence.copy", json!({"component":part["component"],"translate":[0,80,0]}));
+    run(&mut s, "occurrence.move", json!({"occurrence":copy["occurrence"],"translate":[10,0,0],"capture":true}));
+    let centers = |s: &mut Session, original: [f64; 3]| {
+        for (body, want) in [("Pad", original), ("Pad (Part:2)", [20., 50., 25.]), ("Pad (Part:3)", [10., 90., 25.])] {
+            let got = run(s, "inspect.center_of_mass", json!({"bodies":[body]}));
+            for (i, want) in want.iter().enumerate() {
+                assert!((got["center"][i].as_f64().unwrap() - want).abs() < 1e-6, "{body}: {got}");
+            }
+            assert!((got["volume"].as_f64().unwrap() - 4000.).abs() < 1e-6, "{got}");
+        }
+    };
+    centers(&mut s, [10., 10., 25.]);
+    run(&mut s, "occurrence.move", json!({"occurrence":part["occurrence"],"translate":[40,0,0],"capture":true}));
+    centers(&mut s, [50., 10., 25.]);
+    let mut reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    centers(&mut reopened, [50., 10., 25.]);
+    run(&mut reopened, "occurrence.move", json!({"occurrence":part["occurrence"],"angle":"90 deg","capture":true}));
+    centers(&mut reopened, [-10., 50., 25.]);
+}
+
 #[test]
 fn internal_capture_does_not_bypass_missing_ambiguous_or_invalid_path_picks() {
     let mut s = Session::default();
@@ -113,19 +224,24 @@ fn generated_profiles_and_press_pull_convert_rotated_occurrence_picks_once() {
         run(&mut s, "edit.redo", json!({}));
         assert_eq!(s.doc.to_json(), after_cut);
         check(&mut s, area * height, hole, height);
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let occupied = Vec3::new(35.0, 21.0 - height, 15.0);
         let absent = Vec3::new(35.0, 19.0 - height, 15.0);
-        assert!(world.bodies.iter().any(|body| body.body.contains(occupied)));
-        assert!(!world.bodies.iter().any(|body| body.body.contains(absent)));
+        assert!(world.bodies.iter().any(|body| body.body.classify_point(occupied).unwrap() == solidcraft_kernel::PointClass::Inside));
+        assert!(!world.bodies.iter().any(|body| body.body.classify_point(absent).unwrap() == solidcraft_kernel::PointClass::Inside));
         if hole {
-            assert!(!world.bodies.iter().any(|body| body.body.contains(Vec3::new(50.0, 21.0 - height, 25.0))));
+            assert!(
+                !world
+                    .bodies
+                    .iter()
+                    .any(|body| body.body.classify_point(Vec3::new(50.0, 21.0 - height, 25.0)).unwrap() == solidcraft_kernel::PointClass::Inside)
+            );
         }
         let before_volume: f64 = world.bodies.iter().map(|body| solidcraft_kernel::measure(&body.body).unwrap().volume).sum();
         let before_bounds: Vec<_> = world.bodies.iter().map(|body| (body.name.clone(), body.mesh().bounds())).collect();
         let reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
-        let after = reopened.world_state();
-        assert!(after.bodies.iter().any(|body| body.body.contains(occupied)));
+        let after = reopened.world_state().unwrap();
+        assert!(after.bodies.iter().any(|body| body.body.classify_point(occupied).unwrap() == solidcraft_kernel::PointClass::Inside));
         let v: f64 = after.bodies.iter().map(|body| solidcraft_kernel::measure(&body.body).unwrap().volume).sum();
         assert!((v - area * height).abs() < area * height * 1e-4);
         assert!((v - before_volume).abs() < 1e-6);
@@ -137,20 +253,23 @@ fn generated_profiles_and_press_pull_convert_rotated_occurrence_picks_once() {
 }
 
 /// A 40 x 30 x 20 box whose top is split at x = 20 and its left half raised 5 by Offset Face:
-/// the raised top has no construction certificate and no exact history name yet (#494).
+/// the raised top has no construction certificate, and an exact history name from SMLib's
+/// offset history.
 fn raised_half(s: &mut Session, body: &str) {
     run(s, "solid.box", json!({"length":40,"width":30,"height":20,"body_name":body}));
     run(s, "solid.split_face", json!({"faces":[[10,15,20]],"plane":{"origin":[20,0,0],"normal":[1,0,0]}}));
     run(s, "solid.offset_face", json!({"faces":[[10,15,20]],"distance":5}));
 }
 
+/// Internal capture of a face in another component whose occurrence has an uncaptured move:
+/// the raised top has no construction certificate, but its exact history name keeps it, so the
+/// capture is an exact (lineage) anchor on that occurrence's path, whose pending position is
+/// captured when the attachment is made (`capture_positions`). Capturing changes nothing.
 #[test]
-fn legacy_internal_capture_refuses_an_uncaptured_source_in_another_component() {
+fn internal_capture_in_another_component_anchors_an_offset_face_by_its_history_name() {
     let mut s = Session::default();
     let component = run(&mut s, "component.create", json!({"name":"Source","grounded":false}));
     let occurrence = component["occurrence"].as_u64().unwrap();
-    // A face Offset Face raised has no construction certificate or exact history name yet:
-    // the legacy path.
     raised_half(&mut s, "Stock");
     run(&mut s, "component.activate", json!({"component":0}));
     run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[30,0,0],"capture":false}));
@@ -165,15 +284,41 @@ fn legacy_internal_capture_refuses_an_uncaptured_source_in_another_component() {
         .into_iter()
         .find(|face| face.plane_normal.is_some_and(|normal| normal.z > 0.999) && (face.centroid.z - 25.0).abs() < 1e-6)
         .unwrap();
+    assert!(state.body("Stock").unwrap().body.face_plane(end.index).is_none(), "the raised top has no construction certificate");
     let before = s.doc.to_json();
-    let error = super::super::sketch::face::capture_internal(
+    let pending = s.pending_moves.clone();
+    let plane = super::super::sketch::face::capture_internal(
         &s,
         &json!({"face":[40,15,25],"body":"Stock","index":end.index,"path":[occurrence]}),
         "internal",
     )
-    .unwrap_err();
+    .unwrap();
+    let anchor = super::super::sketch::face::anchor(&plane).expect("an exact attachment");
+    assert_eq!(anchor.target.certificate, Some(solidcraft_doc::config::FaceCertificate::Lineage));
+    assert_eq!(anchor.path, vec![occurrence]);
+    assert_eq!(s.doc.to_json(), before);
+    assert_eq!(s.pending_moves, pending);
+}
+
+/// Extrude from a face in another component whose occurrence has an uncaptured move, where the
+/// face has neither a construction certificate nor an exact history name: a half of a box's top
+/// that Split Face divided. The face profile would take the legacy path, which can't capture the
+/// source's pending position, so the extrude is refused and changes nothing.
+#[test]
+fn face_extrude_of_a_split_face_in_another_component_refuses_an_uncaptured_source() {
+    let mut s = Session::default();
+    let component = run(&mut s, "component.create", json!({"name":"Source","grounded":false}));
+    let occurrence = component["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Stock"}));
+    run(&mut s, "solid.split_face", json!({"faces":[[10,15,20]],"plane":{"origin":[20,0,0],"normal":[1,0,0]}}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[30,0,0],"capture":false}));
+    let before = s.doc.to_json();
+    let pending = s.pending_moves.clone();
+    let error = s.execute("solid.extrude", &json!({"face":[40,15,20],"distance":5,"operation":"new"})).unwrap_err();
     assert!(error.to_string().contains("capture the source occurrence position"), "{error}");
     assert_eq!(s.doc.to_json(), before);
+    assert_eq!(s.pending_moves, pending);
 }
 
 #[test]
@@ -191,10 +336,10 @@ fn repeated_source_face_profile_requires_and_uses_the_exact_active_occurrence() 
     assert_eq!(s.doc.to_json(), before);
     run(&mut s, "component.activate", json!({"component":cid,"occurrence":occurrence}));
     run(&mut s, "solid.extrude", json!({"face":[55,5,10],"distance":5,"operation":"new"}));
-    let state = s.world_state();
+    let state = s.world_state().unwrap();
     for x in [5.0, 55.0] {
-        assert!(state.bodies.iter().any(|body| body.body.contains(Vec3::new(x, 5.0, 14.0))));
-        assert!(!state.bodies.iter().any(|body| body.body.contains(Vec3::new(x, 5.0, 16.0))));
+        assert!(state.bodies.iter().any(|body| body.body.classify_point(Vec3::new(x, 5.0, 14.0)).unwrap() == solidcraft_kernel::PointClass::Inside));
+        assert!(!state.bodies.iter().any(|body| body.body.classify_point(Vec3::new(x, 5.0, 16.0)).unwrap() == solidcraft_kernel::PointClass::Inside));
     }
 }
 

@@ -86,7 +86,7 @@ const PLACEHOLDER: &str = "Text";
 /// Resolve an outline or filled letter only when all its boundaries belong to one text.
 pub(crate) fn entity_for_selection(app: &SolveApp, selection: &Sel) -> Option<String> {
     let sid = app.session.active_sketch?;
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let ss = state.sketch(sid)?;
     let ids = match selection {
         Sel::SketchCurve { id, .. } => vec![id.clone()],
@@ -132,7 +132,7 @@ pub(crate) fn one_letter() -> bool {
 /// letter is picked whole. The letters' counters (the inside of an O) are left out; inside one,
 /// a letter is a letter again. The picked profile comes first when it is a letter.
 pub(crate) fn text_profiles(s: &solidcraft_engine::Session, sketch: u64, index: usize) -> Option<Vec<usize>> {
-    let state = s.world_state();
+    let state = crate::open_meshing::session_world(s);
     let ss = state.sketch(sketch)?;
     // The text bounding a profile, with or without other curves; whether only it bounds it.
     let text_of = |profile: &solidcraft_engine::sketch::Profile| -> Option<(String, bool)> {
@@ -493,6 +493,13 @@ pub(crate) fn refresh(app: &SolveApp, k: &mut Tx) -> bool {
     true
 }
 
+/// Whether the font (or built-in font when empty) has a bold face.
+fn font_has_bold_face(name: &str) -> bool {
+    let trimmed = name.trim();
+    let font = if trimmed.is_empty() { None } else { Some(trimmed) };
+    solidcraft_engine::sketch::font_data_styled(font, true, false).is_ok()
+}
+
 /// The dialog's rows; true when Enter was pressed in a value field or in the text (Shift+Enter
 /// starts a new line there). `inputs` and `active`: the dialog's Path input.
 pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], active: &mut usize) -> bool {
@@ -511,8 +518,12 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
         state.store(ui.ctx(), id);
         k.focus = false;
     }
+    let font_has_bold = font_has_bold_face(&k.font);
+    if !font_has_bold && k.style.bold {
+        k.style.bold = false;
+    }
     ui_kit::row(ui, "Font", |ui| font_row(ui, k));
-    ui_kit::row(ui, "Style", |ui| ui_kit::text_emphasis(ui, &mut k.style.bold, &mut k.style.italic));
+    ui_kit::row(ui, "Style", |ui| ui_kit::text_emphasis(ui, &mut k.style.bold, &mut k.style.italic, font_has_bold));
     ui_kit::row(ui, "Alignment", |ui| {
         let mut selected = match k.style.align {
             TextAlign::Left => 0,
@@ -692,9 +703,10 @@ fn edit_params(app: &SolveApp, k: &Tx) -> Result<Value, String> {
         TextAlign::Center => "center",
         TextAlign::Right => "right",
     };
+    let bold = k.style.bold && font_has_bold_face(&k.font);
     let mut params = json!({
         "link": k.link, "at": [sent_x, sent_y], "height": sent_height,
-        "bold": k.style.bold, "italic": k.style.italic, "align": align,
+        "bold": bold, "italic": k.style.italic, "align": align,
         "letter_spacing": letter_spacing, "line_spacing": line_spacing,
         "path": k.style.path.clone().unwrap_or_default(), "reverse": k.style.reverse,
     });
@@ -743,7 +755,7 @@ mod tests {
         h.app.cam.distance = 25.0;
         h.frames(3);
         let sid = h.app.session.active_sketch.unwrap();
-        let at = h.app.session.world_state().sketch(sid).unwrap().profiles[0].centroid;
+        let at = h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles[0].centroid;
         let [x, y] = h.at(&json!({"sketch":[at.x,at.y]})).unwrap();
         h.call("ui.menu", json!({"x":x,"y":y}));
         h.frames(3);
@@ -778,7 +790,7 @@ mod tests {
         };
         let before = outline(&h);
         assert!(before.len() > 4 && before.iter().all(|(_, l)| l.as_deref() == Some(link.as_str())));
-        let profiles = h.app.session.world_state().sketch(sid).unwrap().profiles.len();
+        let profiles = h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles.len();
         h.app.session.selection = vec![Sel::SketchCurve { id: before[0].0.clone(), sketch: None }];
         let undo = h.app.session.undo.len();
         let item = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport)
@@ -793,7 +805,7 @@ mod tests {
         assert!(after.iter().all(|(_, l)| l.is_none()), "no outline belongs to the text");
         let sk = h.app.session.doc.sketch(sid).unwrap();
         assert!(sk.link(&link).is_none(), "the text is gone");
-        assert_eq!(h.app.session.world_state().sketch(sid).unwrap().profiles.len(), profiles, "the letters still make the same profiles");
+        assert_eq!(h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles.len(), profiles, "the letters still make the same profiles");
         assert_eq!(h.app.session.undo.len(), undo + 1);
         // No longer text: nothing to edit or explode.
         assert!(selected_entity(&h.app).is_none());
@@ -810,7 +822,7 @@ mod tests {
         h.app.cam.distance = 25.0;
         h.frames(3);
         let sid = h.app.session.active_sketch.unwrap();
-        let at = h.app.session.world_state().sketch(sid).unwrap().profiles[0].centroid;
+        let at = h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles[0].centroid;
         h.step(&json!({"start":"sketch.edit_text"})).unwrap();
         h.step(&json!({"click":{"sketch":[at.x,at.y]}})).unwrap();
         assert_eq!(tx(&h.app).link, link);
@@ -821,12 +833,12 @@ mod tests {
         let (mut h, link, _) = setup();
         h.app.run("sketch.edit_text", json!({"link":link,"text":"O"})).unwrap();
         let sid = h.app.session.active_sketch.unwrap();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let profile = state.sketch(sid).unwrap().profiles.iter().position(|p| !p.hole_curves.is_empty()).unwrap();
         let selection = Sel::Profile { sketch: sid, index: profile };
         assert!(entity_for_selection(&h.app, &selection).is_some());
         h.app.run("sketch.text", json!({"text":"I","at":[20,0],"height":10})).unwrap();
-        let profiles = h.app.session.world_state().sketch(sid).unwrap().profiles.len();
+        let profiles = h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles.len();
         h.app.session.selection = (0..profiles).map(|index| Sel::Profile { sketch: sid, index }).collect();
         assert!(selected_entity(&h.app).is_none());
         assert!(entity_for_selection(&h.app, &Sel::Profile { sketch: sid + 1, index: 0 }).is_none());
@@ -837,7 +849,7 @@ mod tests {
         let (mut h, _, _) = setup();
         h.app.run("sketch.line", json!({"points":[[-10,3],[10,3]]})).unwrap();
         let sid = h.app.session.active_sketch.unwrap();
-        let count = h.app.session.world_state().sketch(sid).unwrap().profiles.len();
+        let count = h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles.len();
         assert!(count >= 2);
         for index in 0..count {
             assert!(entity_for_selection(&h.app, &Sel::Profile { sketch: sid, index }).is_none());
@@ -890,7 +902,7 @@ mod tests {
             exprs: Default::default(),
         };
         assert_eq!(sk.link(&link).unwrap().source, expected);
-        assert!(!h.app.session.world_state().sketch(sid).unwrap().profiles.is_empty());
+        assert!(!h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles.is_empty());
         let changed = h.app.session.doc.to_json();
         let reopened = solidcraft_engine::Session::new(solidcraft_engine::doc::Document::from_json(&changed).unwrap());
         assert_eq!(reopened.doc.sketch(sid).unwrap().link(&link).unwrap().source, expected);
@@ -951,7 +963,7 @@ mod tests {
         };
         let area = |h: &Harness| -> f64 {
             let sid = h.app.session.active_sketch.unwrap();
-            h.app.session.world_state().sketch(sid).unwrap().profiles.iter().map(|p| p.area).sum()
+            h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles.iter().map(|p| p.area).sum()
         };
         assert!((area(&h) - 13.5557).abs() < 2e-3);
         h.app.start("sketch.edit_text");
@@ -1391,7 +1403,7 @@ mod tests {
         h.app.cam.distance = 60.0;
         h.frames(3);
         let sid = h.app.session.active_sketch.unwrap();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let profiles = &state.sketch(sid).unwrap().profiles;
         assert_eq!(profiles.len(), 3);
         let sorted = |v: &[String]| {
@@ -1427,15 +1439,15 @@ mod tests {
     fn a_text_crossed_by_an_edge_is_picked_whole() {
         let (mut h, sid, i, _, _) = letters();
         let area = |h: &Harness, picked: &[usize]| {
-            let state = h.app.session.world_state();
+            let state = h.app.session.world_state().unwrap();
             let profiles = &state.sketch(sid).unwrap().profiles;
             picked.iter().map(|&k| profiles[k].region.area()).sum::<f64>()
         };
         let whole = area(&h, &text_profiles(&h.app.session, sid, i).unwrap());
         // The I's stem, below where the rectangle's top will cross it.
-        let stem = solidcraft_engine::geom::Vec2::new(h.app.session.world_state().sketch(sid).unwrap().profiles[i].centroid.x, 2.0);
+        let stem = solidcraft_engine::geom::Vec2::new(h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles[i].centroid.x, 2.0);
         h.app.run("sketch.rectangle.two_point", json!({"p0":[-5,-5],"p1":[40,8]})).unwrap();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let profiles = &state.sketch(sid).unwrap().profiles;
         let below = solidcraft_engine::sketch::profile_at_point(profiles, stem).unwrap();
         let picked = text_profiles(&h.app.session, sid, below).unwrap();
@@ -1449,7 +1461,7 @@ mod tests {
     #[test]
     fn clicking_a_letter_selects_the_whole_text_for_an_extrude() {
         let (mut h, sid, i, ring, _) = letters();
-        let at = h.app.session.world_state().sketch(sid).unwrap().profiles[i].centroid;
+        let at = h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles[i].centroid;
         h.step(&json!({"click":{"sketch":[at.x,at.y]}})).unwrap();
         h.frames(2);
         let has = |sel: &[Sel], index: usize| sel.iter().any(|s| matches!(s, Sel::Profile { sketch, index: x } if *sketch == sid && *x == index));
@@ -1477,7 +1489,7 @@ mod tests {
     #[test]
     fn shift_clicking_a_letter_selects_that_letter_alone() {
         let (mut h, sid, i, ring, _) = letters();
-        let at = h.app.session.world_state().sketch(sid).unwrap().profiles[i].centroid;
+        let at = h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles[i].centroid;
         h.step(&json!({"click":{"sketch":[at.x,at.y]},"shift":true})).unwrap();
         h.frames(2);
         assert_eq!(h.app.session.selection, vec![Sel::Profile { sketch: sid, index: i }]);
@@ -1528,30 +1540,30 @@ mod tests {
         assert_eq!(tx(&h.app).values[5], "1.25");
     }
 
+    /// #9940: built-in font has no bold face; Bold toggle is disabled so clicking it
+    /// does not set bold or trigger errors, and alignment and other options succeed.
     #[test]
-    fn bold_in_a_font_without_a_bold_face_is_refused_with_the_reason() {
+    fn bold_in_a_font_without_a_bold_face_is_disabled() {
         let (mut h, link, _) = setup();
         let before = (h.app.session.doc.to_json(), h.app.session.undo.len());
         h.app.start("sketch.edit_text");
         h.frames(3);
+        assert!(!font_has_bold_face(&tx(&h.app).font));
+        assert!(!tx(&h.app).style.bold);
+        // Clicking disabled bold does not toggle it, preview stays clean without errors.
         h.step(&json!({"click":{"handle":"dialog:Bold"}})).unwrap();
         h.frames(2);
-        assert!(!style_of(&h, &link).bold, "the canvas keeps the last text it could make");
-        let error = h.app.dialog.as_ref().unwrap().error.clone().unwrap_or_default();
-        assert!(error.contains("no bold face"), "the preview must explain the unchanged text before OK: {error}");
+        assert!(!tx(&h.app).style.bold);
+        assert!(!style_of(&h, &link).bold);
+        assert!(h.app.dialog.as_ref().unwrap().error.is_none());
+        // Changing alignment succeeds without error.
+        h.step(&json!({"click":{"handle":"dialog:Align center"}})).unwrap();
         h.frames(2);
-        assert_eq!(h.app.dialog.as_ref().unwrap().error.as_deref(), Some(error.as_str()), "the reason stays visible on unchanged frames");
-        h.step(&json!({"click":{"handle":"dialog:Bold"}})).unwrap();
-        h.frames(2);
-        assert!(h.app.dialog.as_ref().unwrap().error.is_none(), "a valid preview clears the refusal");
-        h.step(&json!({"click":{"handle":"dialog:Bold"}})).unwrap();
-        h.frames(2);
+        assert_eq!(tx(&h.app).style.align, TextAlign::Center);
         ok(&mut h);
-        assert!(editing(&h.app));
-        let error = h.app.dialog.as_ref().unwrap().error.clone().unwrap_or_default();
-        assert!(error.contains("no bold face"), "{error}");
-        h.step(&json!({"widget":"Cancel"})).unwrap();
-        assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), before);
+        assert!(!editing(&h.app));
+        assert_eq!(style_of(&h, &link).align, TextAlign::Center);
+        assert_eq!(h.app.session.undo.len(), before.1 + 1);
     }
 
     #[test]
@@ -1576,7 +1588,7 @@ mod tests {
         h.frames(3);
         assert_eq!(tx(&h.app).style.path.as_deref(), Some(line.as_str()));
         assert_eq!(style_of(&h, &link).path.as_deref(), Some(line.as_str()));
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sk = &state.sketch(sid).unwrap().sketch;
         let low = sk.link_curves(&link).into_iter().flat_map(|ci| sk.polyline(ci)).map(|p| p.y).fold(f64::MAX, f64::min);
         assert!((low + 30.0).abs() < 1e-6, "on the line: {low}");

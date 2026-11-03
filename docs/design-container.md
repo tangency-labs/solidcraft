@@ -126,13 +126,19 @@ the final state fits.
 The model is the whole evaluation: every feature's result (warning, boolean
 diagnostics, whether it was skipped, its fingerprint) and the state after it
 (bodies, solved sketches, construction geometry, sheet metal bodies, threads and
-the blend records later features read). States share what they share: a body that
+the blend records later features read), and the body check mode it was evaluated
+under (`each_step`, `each_feature` or `off`): a design opened under another mode is
+evaluated again. A body made by constant-radius rounds is recorded with the edges they
+rounded and their radii, and the body they were made on (stored like any other body,
+once, though no state holds it): a later round at a corner where those rounds meet
+blends them again with it, in a design opened from the file as in one evaluated anew
+(a thinned cache keeps those bodies with the bodies made from them). States share what they share: a body that
 later features pass through unchanged, its face names and a solved sketch are each
 recorded once. Face names are kept as worked out (saving works out any not asked
 for yet), so a body taken from the file is named exactly as when it was saved.
-A design whose stored names predate format 14 (marked `?`) finds them through
-names worked out from geometry on demand, which the cache does not keep: it saves
-without a model.
+A design whose stored names predate format 14 (marked `?`) saves without a model:
+those names find no face or edge, and the features holding them ask for their
+references to be picked again.
 
 Both entries are Deflate-compressed (level one) under either compression policy: the
 encoded bodies shrink about fourfold (an imported assembly) to tenfold (modelled parts),
@@ -155,8 +161,8 @@ Before #9170 one mesh body left the cache out for the whole model. As for a B-re
 mesh body is kept only when its slice reads back as the same vertices, bit for bit, the
 same triangles, colour and paint; the picture shown while opening draws its triangles.
 
-`cache/model.json` records `solidcraft-model-cache/5`, the producer revision
-`solidcraft-truck-adapter/3`, the application version, the build (source commit,
+`cache/model.json` records `solidcraft-model-cache/8`, the producer revision
+`solidcraft-truck-adapter/4`, the application version, the build (source commit,
 CPU architecture and OS), the evaluation source (below, with the CPU architecture
 and OS), the SHA-256 of the exact `document.json` (whose blob references pin every
 STEP, mesh and image payload) and of `cache/bodies.bin`, the slices, each kernel

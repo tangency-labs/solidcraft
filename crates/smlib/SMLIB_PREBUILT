@@ -1,0 +1,10 @@
+# Rust target, SHA-256 of smlib-<target>.tar.gz in the release prebuilt-<SMLIB_REV> of
+# tangency-labs/smlib. Written by scripts/fetch-smlib.sh --pin; never edited by hand.
+aarch64-apple-darwin b045d887901556d6c8f60a38fbbecdda765d8dafa6f7a5f72100a7deba3d1d6b
+aarch64-pc-windows-msvc c5dbd7dc9221e8638cc9e09273f9e2fe19720f0a02dd40c66d709c3d8effe0c0
+aarch64-unknown-linux-gnu f3ad86d6cd79570c428905548fabdb92005a78a9fc8d200d12047a2e972894ed
+i686-pc-windows-msvc 1e4e3999663f4cae113149bcf84d970264b776cd762fd2b7d2dfcf49f9f35772
+wasm32-unknown-unknown 33702afaa8af13e38c9aa8b894fa38f8e69b147c5cda0606c16b0c786dd46389
+x86_64-apple-darwin b41d081c90d0028d76d92c08c72465da39d52976ab416c878d5ff0ecb6eccb73
+x86_64-pc-windows-msvc 10252e3cd701be53697eea11ce68d29b244a2d25b677b57abf632f9f00bbc05b
+x86_64-unknown-linux-gnu e6a81eb955405c815e3efc05ac3ab6bd78df83e43d244a6b33bbb390a197c2db

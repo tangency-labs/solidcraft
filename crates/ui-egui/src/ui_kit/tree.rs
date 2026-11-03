@@ -225,7 +225,8 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     let radio_x = x + 14.0 + slot + 6.0;
     let radio_r = Rect::from_center_size(pos2(radio_x, cy), vec2(t.space_12 + t.space_3, r.height()));
     // The button right after the name takes room from the label; it is placed once the label is laid out.
-    let name_action_width = if row.action.is_some() { 22.0 } else { 0.0 };
+    let (name_action_gap, name_action_size) = (t.space_8, t.space_16 + t.space_4);
+    let name_action_width = if row.action.is_some() { name_action_gap + name_action_size } else { 0.0 };
     let at = |p: Pos2| -> u8 {
         if !row.actions.is_empty() && p.x >= action_left {
             4
@@ -380,7 +381,10 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         bx += 15.0;
     }
     // The name's action button sits right after the label; a press on it is not a press on the row.
-    let action_r = Rect::from_min_size(pos2(x + lw + 2.0, r.top()), vec2(t.space_16 + t.space_4, r.height()));
+    // The gap before it belongs to the row: a click that lands just past the end of the name, or
+    // a press on the name that slips a few points before its release, selects the row instead of
+    // opening the feature's sketch (#10079). The gap is wider than egui's click slop (6 points).
+    let action_r = Rect::from_min_size(pos2(x + lw + name_action_gap, r.top()), vec2(name_action_size, r.height()));
     let over_action = |p: Option<Pos2>| row.action.is_some() && p.is_some_and(|p| action_r.contains(p));
     let action_hover = over_action(resp.hover_pos());
     let action_click = over_action(resp.interact_pointer_pos());

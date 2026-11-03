@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2969",
+  "tangency-labs/solidcraft#1018",
+  "tangency-labs/solidcraft#2853"
+ ],
+ "what": "a modelled thread on a hole that isn't the thread's size: refused with the size to use, never a silent change of the hole",
+ "source": "analytic",
+ "method": "Decision (#1018, #2853): a modelled thread never changes the size of the hole it is on; one that isn't the thread's size is refused, naming the size to use. A fill-to-tap-drill or turn-down option would be opt-in, off by default (see #3060), and get its own case. The refusal's numbers, from ISO 68-1 (H = P sqrt3/2, basic depth 5H/8): M48x0.75: tap drill = 48 - 0.75 = 47.25 mm; depth 5H/8 = 5/8 x 0.75 x sqrt3/2 = 0.406 mm; the 48 mm hole is at the major diameter. Expected message: \"this 48 mm hole is too wide for a modelled M48x0.75 thread: it would cut 0.00 mm of the thread's 0.41 mm depth; drill 47.25 mm for M48x0.75, or thread this hole M56\".",
+ "outcome": "refused",
+ "refusal": "this 48 mm hole is too wide for a modelled M48x0.75 thread: it would cut 0.00 mm of the thread's 0.41 mm depth; drill 47.25 mm for M48x0.75, or thread this hole M56"
+}

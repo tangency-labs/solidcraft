@@ -1,0 +1,57 @@
+{
+ "commands": [
+  {
+   "command": "solid.sphere",
+   "params": {
+    "radius": 4,
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "operation": "new",
+    "body_name": "Balls"
+   }
+  },
+  {
+   "command": "solid.sphere",
+   "params": {
+    "radius": 4,
+    "center": [
+     30,
+     0,
+     0
+    ],
+    "operation": "join",
+    "targets": [
+     "Balls"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 50,
+    "width": 20,
+    "height": 10,
+    "corner": [
+     -10,
+     -10,
+     -10
+    ],
+    "operation": "new",
+    "body_name": "Box"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Balls",
+    "tools": [
+     "Box"
+    ],
+    "operation": "intersect"
+   }
+  }
+ ]
+}

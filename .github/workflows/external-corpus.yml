@@ -29,6 +29,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@stable
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - name: Build the CLI
         run: cargo build --profile ci -p solidcraft-cli
       - name: Import and check every entry

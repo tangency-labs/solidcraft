@@ -18,12 +18,16 @@ pub(crate) fn configuration(app: &SolveApp, component: u64) -> Option<String> {
     if size.is_empty() {
         return None;
     }
-    Some(configuration_name(size, part.length))
+    Some(configuration_name(&part.family, size, part.length))
 }
 
-fn configuration_name(size: &str, length: Option<f64>) -> String {
+/// An inch family's length is in fractional inches (`1/2-13 UNC×2 in`), a metric one's in mm.
+fn configuration_name(family: &str, size: &str, length: Option<f64>) -> String {
     match length.filter(|length| length.is_finite() && *length > 0.0) {
-        Some(length) => format!("{size}×{length}"),
+        Some(length) => match solidcraft_engine::cmd::part_length_label(family, length) {
+            Some(label) => format!("{size}×{label}"),
+            None => format!("{size}×{length}"),
+        },
         None => size.to_owned(),
     }
 }
@@ -58,7 +62,7 @@ impl std::fmt::Debug for Resize {
 
 /// Resolve a whole definition, including bodies displayed through an occurrence path.
 pub fn component_for_bodies(app: &SolveApp, bodies: &[String]) -> Option<u64> {
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let mut component = None;
     for name in bodies {
         let body = state.bodies.iter().find(|b| b.name == *name)?;
@@ -183,14 +187,14 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Resize) -> bool {
     choice_row(ui, "Size", "part_resize_size", &mut k.size, &sizes);
     if let Some(lengths) = k.lengths() {
         let mut index = k.length.and_then(|l| lengths.iter().position(|x| *x == l)).unwrap_or(0);
-        let labels: Vec<String> = lengths.iter().map(|l| crate::prefs::show_mm(app, *l, 1)).collect();
+        let labels: Vec<String> = lengths.iter().map(|l| crate::dialogs_parts::length_label(app, &k.family.id, *l)).collect();
         let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
         choice_row(ui, "Length", "part_resize_length", &mut index, &labels);
         k.length = lengths.get(index).copied();
     }
     if let Some((size, _)) = k.family.sizes.get(k.size) {
         row(ui, "Configuration", |ui| {
-            ui.label(configuration_name(size, k.length));
+            ui.label(configuration_name(&k.family.id, size, k.length));
         });
     }
     crate::ui_kit::text(ui, crate::i18n::tr("ui.part_size_shared"), crate::ui_kit::Text::Hint("part_size_shared"));
@@ -369,7 +373,7 @@ mod tests {
         apply(&mut app);
         assert_eq!(app.session.doc.assembly.joints, joints);
         assert_eq!(app.session.doc.occurrences, occurrences);
-        let state = app.session.world_state();
+        let state = app.session.world_state().unwrap();
         let body = state.bodies.iter().find(|b| app.session.doc.model_body_component(b) == id).unwrap();
         let bounds = body.mesh().bounds();
         assert!((bounds.max.z - 18.0).abs() < 1e-6 && (bounds.min.z + 15.0).abs() < 1e-6);
@@ -378,7 +382,7 @@ mod tests {
     #[test]
     fn part_size_resolves_body_face_and_occurrence_contexts_and_rejects_mixed_targets() {
         let (mut app, id) = part("hex_nut", "M5", None);
-        let body = app.session.world_state().bodies.iter().find(|b| app.session.doc.model_body_component(b) == id).unwrap().name.clone();
+        let body = app.session.world_state().unwrap().bodies.iter().find(|b| app.session.doc.model_body_component(b) == id).unwrap().name.clone();
         menu(&mut app, Target::Body { name: body.clone() });
         assert_eq!(editor(&app).component, id);
         crate::dialogs::cancel(&mut app);
@@ -403,7 +407,7 @@ mod tests {
     fn part_size_without_a_part_explains_itself_and_standard_parts_opens_the_library() {
         let mut app = SolveApp::new(Session::default(), crate::Services::default());
         app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
-        let body = app.session.world_state().bodies.first().map(|b| b.name.clone()).unwrap();
+        let body = crate::open_meshing::session_world(&app.session).bodies.first().map(|b| b.name.clone()).unwrap();
         for selection in [vec![], vec![Sel::Body { name: body }]] {
             app.session.selection = selection;
             app.status = None;
@@ -479,6 +483,10 @@ mod tests {
             ("set_screw", "M5", Some(10.0)),
             ("dowel_pin", "6", Some(20.0)),
             ("bearing", "608", None),
+            ("hex_cap_screw_inch", "1/2-13 UNC", Some(2.0 * 25.4)),
+            ("hex_nut_inch", "1/2-13 UNC", None),
+            ("washer_sae", "1/2", None),
+            ("washer_uss", "1/2", None),
         ] {
             let (app, id) = part(family, size, length);
             let k = Resize::new(&app, id).unwrap();
@@ -539,6 +547,23 @@ mod tests {
         change(&mut h.app, "M6", Some(20.5));
         let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
         assert_eq!(commands[0].1["length"], 20.5);
+    }
+
+    /// #10316: an inch part's lengths are fractional inches in a millimetre design too, and the
+    /// command still takes millimetres.
+    #[test]
+    fn part_size_shows_an_inch_part_in_fractional_inches() {
+        let (app, id) = part("hex_cap_screw_inch", "1/2-13 UNC", Some(1.5 * 25.4));
+        assert_eq!(configuration(&app, id).as_deref(), Some("1/2-13 UNC×1-1/2 in"));
+        let mut h = crate::scenario::Harness::new();
+        h.app = app;
+        h.app.home.open = false;
+        menu(&mut h.app, Target::Component { id });
+        h.frames(3);
+        assert!(h.widget_near("1-1/2 in", "Length").is_some());
+        change(&mut h.app, "5/8-11 UNC", Some(2.0 * 25.4));
+        let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        assert_eq!((commands[0].1["size"].as_str(), commands[0].1["length"].as_f64()), (Some("5/8-11 UNC"), Some(50.8)));
     }
 
     #[test]

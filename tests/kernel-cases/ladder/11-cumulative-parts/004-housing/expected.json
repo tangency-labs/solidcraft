@@ -1,0 +1,23 @@
+{
+ "sources": [],
+ "what": "the running part with every tier: back wall, boss, slot, spline window, tapped holes, rounds, chamfers, shell, vents, and a modelled M16 thread on the boss",
+ "source": "analytic",
+ "method": "10/008 less the M16 groove on the boss: its cylinder runs from the r1 root round (z 21, a shoulder: the groove stops w = 0.932735 clear of it) to the 1 mm top chamfer (z 29, run out through it, a free end); the groove's root r 6.917 stays outside the boss's 1.5 wall's inside (r 6.5), so it cuts the wall only. Bbox: the part's",
+ "body_count": 1,
+ "volume_mm3": 15138.532607554,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   35
+  ]
+ },
+ "tolerance": {
+  "rel": 0.0001
+ }
+}

@@ -89,6 +89,24 @@ makes as you unwind it from the circle. The sides of most gear teeth have this s
 Change `r` in the Parameters dialog and the curve redraws itself to match: the rule is kept, not
 just the shape.
 
+## A variable with its range's unit
+
+Normally the variable is a plain number, even when **Start** and **End** are lengths. That stops a
+rule from mixing it with a length parameter: with `a` a length, `a ^ 2 / (4 * t)` comes out as a
+length squared.
+
+Tick **Variable has the range's unit** and the variable is a length, so the rule reads as the
+maths does:
+
+| Rule in **x(t)** | Rule in **y(t)** | Start | End |
+|---|---|---|---|
+| `t` | `a ^ 2 / (4 * t)` | `a` | `3 * a` |
+
+**Start** and **End** must then both be lengths, or one a length and the other a plain number,
+which is in your design's unit (`0` to `a` starts at 0). A length and an angle are refused: they
+have no unit in common. A rule that needs a plain number divides the variable by a length, such
+as `sin(t / a)`.
+
 ## From curve to part
 
 An equation curve is an ordinary sketch curve, so you can build with it:

@@ -35,17 +35,33 @@ enum Extent {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 struct ThreadOptions {
+    /// `right` or `left`, under the name v0.24.0 saved it with.
     handedness: String,
     full_length: bool,
     depth: Option<String>,
+    /// The thread cut into the wall, not only listed.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    modeled: bool,
+    /// A modelled thread's inner end: none is square; `standard` or `short` is ISO 3508's
+    /// runout, any other text a fade length.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ease_out: Option<String>,
+    /// A drill other than the tap maker's for the size; none: the tap maker's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    drill: Option<String>,
     #[serde(flatten)]
     unknown: BTreeMap<String, serde_json::Value>,
 }
 
 impl Default for ThreadOptions {
     fn default() -> Self {
-        Self { handedness: "right".into(), full_length: true, depth: None, unknown: BTreeMap::new() }
+        Self { handedness: "right".into(), full_length: true, depth: None, modeled: false, ease_out: None, drill: None, unknown: BTreeMap::new() }
     }
+}
+
+/// ISO 3508's runouts by name, not a typed length.
+fn named_runout(text: &str) -> bool {
+    matches!(text, "standard" | "short")
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -106,8 +122,11 @@ impl Preset {
             }
         }
         if required.into_iter().any(|text| text.trim().is_empty())
-            || !["right", "left"].contains(&self.thread_options.handedness.as_str())
             || self.thread_options.depth.as_ref().is_some_and(|text| !valid_text(text, MAX_EXPRESSION))
+            || self.thread_options.ease_out.as_ref().is_some_and(|text| text.trim().is_empty() || !valid_text(text, MAX_EXPRESSION))
+            || self.thread_options.drill.as_ref().is_some_and(|text| text.trim().is_empty() || !valid_text(text, MAX_EXPRESSION))
+            || (self.thread_options.ease_out.is_some() && !(self.tapped && self.thread_options.modeled))
+            || !["right", "left"].contains(&self.thread_options.handedness.as_str())
             || self.thread_options.unknown.len() > 8
             || self.thread_options.unknown.iter().any(|(key, value)| {
                 key.is_empty()
@@ -185,9 +204,17 @@ impl Preset {
             thread: opts.thread.clone(),
             thread_options: if opts.tapped {
                 ThreadOptions {
-                    handedness: if opts.handedness.is_right() { "right".into() } else { "left".into() },
+                    handedness: if opts.hand == solidcraft_engine::doc::thread_forms::ThreadHand::Left { "left".into() } else { "right".into() },
                     full_length: opts.thread_full_depth,
                     depth: if opts.thread_full_depth { None } else { Some(portable_length(&opts.thread_depth, true)?) },
+                    modeled: opts.modeled,
+                    // The runout as the command takes it: a named one, or the fade's length.
+                    ease_out: match opts.ease_out.param() {
+                        Some(serde_json::Value::String(text)) if opts.modeled && named_runout(&text) => Some(text),
+                        Some(_) if opts.modeled => Some(portable_length(&opts.ease_out.length, true)?),
+                        _ => None,
+                    },
+                    drill: opts.drill.as_deref().filter(|d| !d.trim().is_empty()).map(|d| portable_length(d, true)).transpose()?,
                     unknown: BTreeMap::new(),
                 }
             } else {
@@ -230,7 +257,12 @@ impl Preset {
             || (!self.tapped && !length(&self.diameter))
             || (self.extent == Extent::Distance && !length(&self.depth))
             || (self.extent != Extent::All && (self.angled_bottom || self.style == Style::Drilled) && !angle(&self.tip_angle))
-            || (self.tapped && solidcraft_engine::doc::parse_metric_thread(&self.thread).is_none())
+            || (self.tapped && solidcraft_engine::doc::parse_tapped_thread(&self.thread).is_none())
+            || self.thread_options.ease_out.as_deref().is_some_and(|text| !named_runout(text) && !length(text))
+            || self.thread_options.drill.as_deref().is_some_and(|text| {
+                !solidcraft_engine::doc::parse_tapped_thread(&self.thread)
+                    .is_some_and(|t| doc.eval(text, expr::Kind::Length).is_ok_and(|v| t.check_drill(v).is_ok()))
+            })
             || (self.tapped && !self.thread_options.full_length && self.thread_options.depth.as_deref().is_none_or(|text| !length(text)))
         {
             return Err("hole_presets.invalid_parameters");
@@ -264,13 +296,20 @@ impl Preset {
         opts.tapped = self.tapped;
         opts.thread.clone_from(&self.thread);
         opts.custom_thread = None;
-        opts.handedness = if self.thread_options.handedness == "left" {
-            solidcraft_engine::doc::ThreadHandedness::Left
-        } else {
-            solidcraft_engine::doc::ThreadHandedness::Right
-        };
         opts.thread_full_depth = self.thread_options.full_length;
+        opts.hand = if self.thread_options.handedness == "left" {
+            solidcraft_engine::doc::thread_forms::ThreadHand::Left
+        } else {
+            solidcraft_engine::doc::thread_forms::ThreadHand::Right
+        };
         opts.thread_depth = self.thread_options.depth.clone().unwrap_or_else(|| crate::dialogs::HoleOpts::default().thread_depth);
+        opts.modeled = self.thread_options.modeled;
+        opts.drill.clone_from(&self.thread_options.drill);
+        opts.ease_out = match self.thread_options.ease_out.as_deref() {
+            None => crate::dialogs_thread::Ease::default(),
+            Some(text) if named_runout(text) => crate::dialogs_thread::Ease { fade: true, short: text == "short", ..Default::default() },
+            Some(text) => crate::dialogs_thread::Ease { fade: true, length: text.into(), short: false },
+        };
         // Existing placement picks stay with this dialog. To Object stores its mode only:
         // recalling it always asks for a fresh destination in the current design.
         crate::dialogs::preset_to_object(d, self.extent == Extent::ToObject);
@@ -549,5 +588,62 @@ mod tests {
         let Kind::Hole { opts, .. } = &dialog.kind else { panic!("expected Hole") };
         assert_eq!(*opts.refs, *references);
         assert_eq!(dialog.inputs, inputs);
+    }
+
+    /// A tapped preset keeps the thread's form and options: an Rc and an NPT size, modelled,
+    /// with a typed fade length or ISO 3508's short runout, and a square end; saved, read back
+    /// and recalled into a fresh dialog, each comes back as it was captured.
+    #[test]
+    fn hole_presets_round_trip_modelled_taper_threads_and_their_ends() {
+        use crate::dialogs_thread::Ease;
+        use solidcraft_engine::doc::thread_forms::ThreadHand;
+        let harness = crate::scenario::Harness::new();
+        let doc = Document::default();
+        for (thread, modeled, ease, saved) in [
+            ("Rc 1/2", true, Ease { fade: true, length: "1.5 mm".into(), short: false }, Some("1.5 mm")),
+            ("1/2-14 NPT", true, Ease { fade: true, length: String::new(), short: true }, Some("short")),
+            ("Rc 3/4", true, Ease::default(), None),
+            ("G 1/4", false, Ease::default(), None),
+        ] {
+            let mut dialog = Dialog::for_command(&harness.app, "solid.hole").unwrap();
+            let Kind::Hole { opts, .. } = &mut dialog.kind else { panic!("expected Hole") };
+            opts.tapped = true;
+            opts.thread = thread.into();
+            opts.hand = ThreadHand::Left;
+            opts.thread_full_depth = false;
+            opts.thread_depth = "8 mm".into();
+            opts.modeled = modeled;
+            opts.ease_out = ease.clone();
+            // An Rc 1/2 drilled 17.8 mm, inside its 17.6 to 18.48 mm.
+            opts.drill = (thread == "Rc 1/2").then(|| "17.8 mm".to_string());
+            let captured = opts.clone();
+            let preset = Preset::capture(&dialog, "Pipe", &doc).unwrap();
+            let row = serde_json::to_value(&preset).unwrap();
+            assert_eq!(row["thread_options"].get("ease_out").and_then(|v| v.as_str()), saved, "{thread}: {row}");
+            assert_eq!(row["thread_options"].get("modeled").is_some(), modeled, "{thread}: {row}");
+            let read: Preset = serde_json::from_value(row).unwrap();
+            assert_eq!(read, preset);
+            read.validate_active(&doc).unwrap_or_else(|e| panic!("{thread}: {e}"));
+            let mut fresh = Dialog::for_command(&harness.app, "solid.hole").unwrap();
+            read.recall(&mut fresh).unwrap();
+            let Kind::Hole { opts, .. } = &fresh.kind else { panic!("expected Hole") };
+            assert_eq!(
+                (&opts.thread, opts.hand, opts.thread_full_depth, &opts.thread_depth, opts.modeled, &opts.ease_out, &opts.drill),
+                (&captured.thread, captured.hand, false, &captured.thread_depth, modeled, &ease, &captured.drill),
+                "{thread}"
+            );
+        }
+        // A runout without a modelled thread is no preset's.
+        let mut dialog = Dialog::for_command(&harness.app, "solid.hole").unwrap();
+        let Kind::Hole { opts, .. } = &mut dialog.kind else { panic!("expected Hole") };
+        opts.tapped = true;
+        opts.thread = "M8".into();
+        let mut preset = Preset::capture(&dialog, "Square", &doc).unwrap();
+        preset.thread_options.ease_out = Some("standard".into());
+        assert!(preset.validate().is_err());
+        // A drill outside the size's range is no preset to recall.
+        preset.thread_options.ease_out = None;
+        preset.thread_options.drill = Some("7.5 mm".into());
+        assert!(preset.validate().is_ok() && preset.validate_active(&doc).is_err(), "M8 takes 6.647 to 7.14 mm");
     }
 }

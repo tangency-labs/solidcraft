@@ -60,7 +60,9 @@ fn width_follows_an_expression() {
     run(&mut s, "parameters.change", json!({"name": "len", "expression": "5", "unit": "in"}));
     assert!(rel(volume(&mut s), 40.0 * 63.5 * 10.0) < 1e-9);
     let l = run(&mut s, "parameters.list", json!({}));
-    assert_eq!(row(&l, "len")["value"], 5.0, "{l}");
+    // `value` is mm in every reply; the own-unit number is `display_value` (#10747).
+    assert_eq!(row(&l, "len")["value"], 127.0, "{l}");
+    assert_eq!(row(&l, "len")["display_value"], 5.0, "{l}");
     assert_eq!(row(&l, "len")["unit"], "in");
     // A failing parameter fails the features using it, with its error.
     let e = err(&mut s, "parameters.change", json!({"name": "len", "expression": "5 deg"}));
@@ -389,7 +391,8 @@ fn text_parameter_imports_accept_mixed_case_units() {
                 assert_eq!(label["comment"], "quoted label");
                 assert!(label["value"].is_null());
                 assert_eq!(row(&list, "width")["unit"], "in");
-                assert_eq!(row(&list, "width")["value"], 1.0);
+                assert_eq!(row(&list, "width")["value"], 25.4);
+                assert_eq!(row(&list, "width")["display_value"], 1.0);
                 assert_eq!(s.doc.param_values().0["width"].v, 25.4);
             }
             // Export still uses the canonical marker and round-trips the unquoted text.
@@ -933,8 +936,8 @@ fn a_parameter_added_without_a_unit_takes_the_design_unit() {
         let r = run(s, "parameters.add", p);
         (r["unit"].as_str().unwrap_or("?").to_string(), r["value"].as_f64().unwrap_or(f64::NAN), r["display_value"].as_f64().unwrap_or(f64::NAN))
     };
-    let close = |got: (String, f64, f64), unit: &str, mm: f64, shown: f64| {
-        assert!(got.0 == unit && rel(got.1, mm) < 1e-9 && rel(got.2, shown) < 1e-9, "{got:?}, expected {unit} {mm} mm ({shown})");
+    let close = |got: (String, f64, f64), unit: &str, val: f64, shown: f64| {
+        assert!(got.0 == unit && rel(got.1, val) < 1e-9 && rel(got.2, shown) < 1e-9, "{got:?}, expected {unit} {val} ({shown})");
     };
     // A millimetre design is as it was.
     let mut s = Session::default();
@@ -951,8 +954,8 @@ fn a_parameter_added_without_a_unit_takes_the_design_unit() {
     // One that refers to another parameter: its bare number is an inch too.
     close(added(&mut s, json!({"name": "more", "expression": "v + 1"})), "in", 533.4, 21.0);
     close(added(&mut s, json!({"name": "half", "expression": "v / 2"})), "in", 254.0, 10.0);
-    // An angle stays in degrees, a unit-less count stays unit-less.
-    close(added(&mut s, json!({"name": "turn", "expression": "30 deg"})), "deg", 30f64.to_radians(), 30.0);
+    // An angle reports degrees like every other reply, a unit-less count stays unit-less.
+    close(added(&mut s, json!({"name": "turn", "expression": "30 deg"})), "deg", 30.0, 30.0);
     close(added(&mut s, json!({"name": "n", "expression": "4", "unit": ""})), "", 4.0, 4.0);
     close(added(&mut s, json!({"name": "twice", "expression": "n * 2"})), "", 8.0, 8.0);
     // parameters.change and parameters.import make a new parameter the same way.
@@ -1194,4 +1197,52 @@ fn a_configuration_row_that_shrinks_a_dimensioned_line_to_a_point_is_refused() {
     // The Default row still activates and the line is untouched.
     run(&mut s, "config.activate", json!({"row": "Default"}));
     assert!((far_x(&s, feature) - 30.0).abs() < 1e-6);
+}
+
+/// #10747: `value` means millimetres (and degrees) in every reply — add, change and list —
+/// with the parameter's own unit in `display_value`. Reported numbers carry no float noise;
+/// stored values keep full precision.
+#[test]
+fn value_means_the_same_unit_in_every_reply() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    let a = run(&mut s, "parameters.add", json!({"name": "L", "expression": "2"}));
+    assert_eq!((a["value"].as_f64(), a["display_value"].as_f64()), (Some(50.8), Some(2.0)), "{a}");
+    // The change reply is rounded too: 3 in is 76.2, not 76.19999999999999.
+    let c = run(&mut s, "parameters.change", json!({"name": "L", "expression": "3"}));
+    assert_eq!((c["value"].as_f64(), c["display_value"].as_f64()), (Some(76.2), Some(3.0)), "{c}");
+    run(&mut s, "parameters.add", json!({"name": "d1", "expression": "L"}));
+    run(&mut s, "parameters.add", json!({"name": "d2", "expression": "1 in"}));
+    let l = run(&mut s, "parameters.list", json!({}));
+    // Every row's `value` is mm, whatever the parameter's own unit (#10747).
+    for (name, mm) in [("L", 76.2), ("d1", 76.2), ("d2", 25.4)] {
+        assert_eq!(row(&l, name)["value"], mm, "{name}: {l}");
+    }
+    assert_eq!(row(&l, "L")["display_value"], 3.0, "{l}");
+    assert_eq!(row(&l, "d2")["display_value"], 1.0, "{l}");
+    // An angle reports degrees like every other reply, without the noise.
+    let a = run(&mut s, "parameters.add", json!({"name": "ang", "expression": "30 deg"}));
+    assert_eq!((a["value"].as_f64(), a["display_value"].as_f64()), (Some(30.0), Some(30.0)), "{a}");
+    // Only what is reported is rounded: the stored value keeps full precision — the raw
+    // own-unit conversion still says 29.999999999999996.
+    let (vals, _) = s.doc.param_values();
+    assert_eq!(s.doc.param_display_value(&vals, "ang"), Some(29.999999999999996), "the stored angle keeps its bits");
+}
+
+/// #10747: exports carry the numbers a person would read, not float noise. The `value`
+/// column keeps the number in the parameter's own unit, as it always did.
+#[test]
+fn exports_round_reported_numbers() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "ang", "expression": "30 deg"}));
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "1.2 in"}));
+    run(&mut s, "parameters.add", json!({"name": "s", "expression": "0.1 + 0.2"}));
+    let csv = run(&mut s, "parameters.export", json!({"format": "csv"}))["text"].as_str().unwrap_or_default().to_string();
+    assert!(csv.contains("ang,deg,30 deg,30,,false"), "{csv}");
+    assert!(csv.contains("w,mm,1.2 in,30.48,,false"), "{csv}");
+    assert!(csv.contains("s,mm,0.1 + 0.2,0.3,,false"), "{csv}");
+    let json_text = run(&mut s, "parameters.export", json!({"format": "json"}))["text"].as_str().unwrap_or_default().to_string();
+    let rows: Vec<Value> = serde_json::from_str(&json_text).unwrap_or_default();
+    let vals: Vec<f64> = rows.iter().filter_map(|r| r["value"].as_f64()).collect();
+    assert_eq!(vals, vec![30.0, 30.48, 0.3], "{json_text}");
 }

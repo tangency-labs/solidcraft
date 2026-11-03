@@ -43,7 +43,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.align", "Align", align)
         .at("SOLID", "MODIFY")
         .icon("align")
-        .params("bodies: [names]; from: [x,y,z] | \"origin\" | {snap: vertex|edge_mid|face_center|circle_center, at: [x,y,z]} | from_face: [x,y,z] | from_plane: XY|XZ|YZ|construction or offset plane name or id|{origin, normal}; to: (the same) | to_face: [x,y,z] | to_plane: (a plane as from_plane; the point or face goes onto it along its normal, and the plane may move later: the bodies follow); faces and planes also turn to meet; flip?: bool"),
+        .params("bodies: [names]; from: [x,y,z] | \"origin\" | {snap: vertex|edge_mid|face_center|circle_center, at: [x,y,z]} | from_face: [x,y,z] | from_plane: XY|XZ|YZ|construction or offset plane name or id|{origin, normal}; to: (the same) | to_face: [x,y,z] | to_plane: (a plane as from_plane; the point or face goes onto it along its normal, and the plane may move later: the bodies follow); faces and planes also turn to meet; flip?: bool; axes?: [x, y, z] (point-to-point only: which world axes the offset moves along; default all three, at least one true)"),
     CommandSpec::new("solid.remove", "Remove", remove).at("SOLID", "MODIFY").icon("delete").params("bodies: [names] (removed from here on in the timeline)"),
 ];
 
@@ -189,7 +189,7 @@ fn emboss(s: &mut Session, p: &Value) -> Result<Value> {
     let face = if let Some(value) = p.get("face") {
         let local = vec3(value).ok_or_else(|| bad(cmd, "`face` must be a finite point [x,y,z]"))?;
         let at = solidcraft_doc::apply_point(&s.active_component_frame(), local);
-        let state = s.world_state();
+        let state = s.world_state()?;
         let mut candidates = Vec::new();
         // The nearest face off the point: (distance, body), for the error when none holds it.
         let mut nearest: Option<(f64, &str)> = None;
@@ -328,7 +328,7 @@ fn infer_emboss_selection(
     let regions = solidcraft_doc::select_profiles(ss, profiles).map_err(|e| bad(cmd, e.to_string()))?;
     let sketch_owner = s.doc.feature(sketch).map(|f| f.component).ok_or_else(|| bad(cmd, "profile sketch no longer exists"))?;
     let d = s.doc.eval(&s.doc.with_design_unit(depth, Kind::Length), Kind::Length).map_err(|e| bad(cmd, e.to_string()))?;
-    let world = s.world_state();
+    let world = s.world_state()?;
     let placed = s.placed_document();
     let mut chosen = None;
     let mut faces = 0usize;
@@ -398,6 +398,21 @@ fn replace_face(s: &mut Session, p: &Value) -> Result<Value> {
     add_feature(s, p, FeatureKind::ReplaceFace { faces: faces.into_iter().map(FacePick).collect(), target, body: body.map(BodyName) })
 }
 
+/// `axes`: three booleans, one per world axis, for a point-to-point Align.
+/// `None` when the call does not restrict the move.
+fn axes_param(p: &Value, cmd: &str) -> Result<Option<[bool; 3]>> {
+    let Some(v) = p.get("axes").filter(|v| !v.is_null()) else { return Ok(None) };
+    let a = v.as_array().filter(|a| a.len() == 3).ok_or_else(|| bad(cmd, "`axes` must be [x, y, z] booleans"))?;
+    let mut mask = [false; 3];
+    for (slot, v) in mask.iter_mut().zip(a) {
+        *slot = v.as_bool().ok_or_else(|| bad(cmd, "`axes` must be [x, y, z] booleans"))?;
+    }
+    if !mask.iter().any(|on| *on) {
+        return Err(bad(cmd, "`axes` must enable at least one of X, Y and Z"));
+    }
+    Ok((mask != [true; 3]).then_some(mask))
+}
+
 fn align(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.align";
     let bodies = string_list(cmd, p, "bodies")?;
@@ -448,7 +463,7 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(o) = p.get(pk).filter(|v| v.is_object()) {
             let at = o.get("at").and_then(vec3).ok_or_else(|| bad(cmd, format!("`{pk}.at` must be [x, y, z]")))?;
             let kind = o.get("snap").and_then(Value::as_str).unwrap_or("vertex");
-            return snap_point(s, kind, at).map(|q| (q, None)).ok_or_else(|| bad(cmd, format!("no {kind} to snap to near `{pk}`")));
+            return snap_point(&*s.world_state()?, kind, at).map(|q| (q, None)).ok_or_else(|| bad(cmd, format!("no {kind} to snap to near `{pk}`")));
         }
         p.get(pk)
             .and_then(vec3)
@@ -470,6 +485,18 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
         (a, b) if from_plane.is_some() || to_plane.is_some() => (a, b),
         _ => (None, None),
     };
+    let axes = axes_param(p, cmd)?;
+    if axes.is_some() && (from_plane.is_some() || to_plane.is_some() || from_normal.is_some() || to_normal.is_some()) {
+        return Err(bad(cmd, "`axes` applies to point-to-point alignment: leave out `from_face`, `to_face`, `from_plane` and `to_plane`"));
+    }
+    // The directions are stored in the same frame as `from`/`to` (the first moved body's frame).
+    let axes = axes.map(|mask| {
+        mask.into_iter()
+            .zip([Vec3::X, Vec3::Y, Vec3::Z])
+            .filter(|&(on, _)| on)
+            .map(|(_, world)| Dir(solidcraft_doc::apply_vector(&inverse, world).normalized().unwrap_or(world)))
+            .collect::<Vec<_>>()
+    });
     let flip = bool_(p, "flip").unwrap_or(false);
     add_feature(
         s,
@@ -483,6 +510,7 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
             flip,
             from_plane,
             to_plane,
+            axes,
         },
     )
 }
@@ -505,9 +533,8 @@ fn remove(s: &mut Session, p: &Value) -> Result<Value> {
 mod tests;
 
 /// A snap point near `at` on the model: the nearest vertex, edge midpoint, planar face's centre
-/// or circular edge's centre (the end of a cylindrical face).
-pub(crate) fn snap_point(s: &Session, kind: &str, at: Vec3) -> Option<Vec3> {
-    let st = s.world_state();
+/// or circular edge's centre (the end of a cylindrical face) of the placed model `st`.
+pub(crate) fn snap_point(st: &solidcraft_doc::ModelState, kind: &str, at: Vec3) -> Option<Vec3> {
     let near = |pts: Vec<Vec3>| pts.into_iter().min_by(|a, b| a.dist(at).total_cmp(&b.dist(at)));
     match kind {
         "vertex" => near(

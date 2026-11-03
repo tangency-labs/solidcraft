@@ -40,12 +40,12 @@ fn a_clover_of_typed_10_by_10_rectangles_is_drawn_and_fully_constrained() {
         if let Some((message, _, true)) = &h.app.status {
             panic!("rectangle {i} was refused: {message}");
         }
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let solved = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
         assert_eq!(solved.sketch.curves.iter().filter(|c| !c.construction).count(), 4 * (i + 1), "rectangle {i} was not added");
         assert!(solved.report.ok());
     }
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let solved = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert_eq!(solved.profiles.len(), 4);
     assert!(solved.profiles.iter().all(|p| (p.area - 100.0).abs() < 1e-6), "{:?}", solved.profiles.iter().map(|p| p.area).collect::<Vec<_>>());
@@ -64,7 +64,7 @@ fn a_clover_drawn_by_clicks_snaps_every_corner_without_redundant_constraints() {
         rectangle(&mut h, a, b, false);
     }
     assert!(h.app.status.as_ref().is_none_or(|(_, _, error)| !error), "{:?}", h.app.status);
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let solved = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert_eq!(solved.profiles.len(), 4);
     assert!(solved.report.ok() && solved.report.redundant.is_empty(), "{:?}", solved.report);

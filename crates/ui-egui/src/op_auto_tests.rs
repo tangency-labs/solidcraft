@@ -215,6 +215,29 @@ fn hidden_bodies_take_no_part() {
 }
 
 #[test]
+fn into_a_hidden_body_with_nothing_shown_is_a_new_body_until_it_is_shown() {
+    // The profile on the hidden cube's base, extruded into it (#9919).
+    let mut h = cube();
+    h.app.run("browser.visibility", json!({"items": ["Base"], "visible": false})).unwrap();
+    rect_sketch(&mut h, [0.0, 0.0], [10.0, 10.0]);
+    h.step(&json!({"start": "solid.extrude"})).unwrap();
+    checked(&mut h);
+    assert_eq!(op(&mut h), NEW, "nothing shown to cut");
+    let preview = h.app.dialog.as_ref().map(|d| crate::dialogs::apply_commands(&h.app, d));
+    assert!(preview.is_some_and(|c| c.is_ok_and(|c| !c.is_empty())), "the extrude runs");
+    // Shown while the window is open: the extrude goes into it, a Cut.
+    h.app.run("browser.visibility", json!({"items": ["Base"], "visible": true})).unwrap();
+    checked(&mut h);
+    assert_eq!(op(&mut h), CUT, "the shown cube is cut");
+    // Hidden again: New Body again.
+    h.app.run("browser.visibility", json!({"items": ["Base"], "visible": false})).unwrap();
+    checked(&mut h);
+    assert_eq!(op(&mut h), NEW);
+    ok(&mut h);
+    assert_eq!(bodies(&h).len(), 2, "{:?}", bodies(&h));
+}
+
+#[test]
 fn an_edited_feature_keeps_its_operation() {
     let mut h = cube();
     rect_sketch(&mut h, [30.0, 0.0], [40.0, 10.0]);

@@ -19,7 +19,17 @@ fn enter(h: &mut Harness) {
     h.step(&json!({"key":"Enter"})).unwrap();
 }
 fn constraints(h: &Harness) -> Vec<ConstraintKind> {
-    h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.constraints.iter().map(|c| c.kind.clone()).collect()
+    h.app
+        .session
+        .world_state()
+        .unwrap()
+        .sketch(h.app.session.active_sketch.unwrap())
+        .unwrap()
+        .sketch
+        .constraints
+        .iter()
+        .map(|c| c.kind.clone())
+        .collect()
 }
 
 #[test]
@@ -42,7 +52,7 @@ fn typed_arc_radius_and_signed_sweep_survive_stages_parameter_edit_and_reopen() 
     let path = h.dir.join("typed-arc.solidcraft");
     h.app.run("file.save", json!({"path":path})).unwrap();
     h.app.run("doc.open", json!({"path":path})).unwrap();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sketch = &state.sketches[0].sketch;
     let curve = &sketch.curves[0];
     assert!(curve.reversed, "negative typed sweep must remain clockwise");
@@ -181,7 +191,7 @@ fn polygon_radius_is_persistent_and_fractional_sides_are_rejected() {
     type_value(&mut h, "5");
     enter(&mut h);
     assert!(constraints(&h).iter().any(|c| matches!(c,ConstraintKind::Radius{value,..} if (*value-10.0).abs()<1e-7)));
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     assert_eq!(sketch.curves.iter().filter(|c| !c.construction).count(), 5);
 }
@@ -199,7 +209,7 @@ fn line_angle_survives_drag_and_one_undo_removes_geometry_and_dimensions() {
     h.step(&json!({"key":"Escape"})).unwrap();
     h.step(&json!({"key":"Escape"})).unwrap();
     h.step(&json!({"drag":[{"world":[8.660254037844386,5,0]},{"world":[16,14,0]}]})).unwrap();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     let CurveKind::Line { a, b } = sketch.curves[0].kind else { panic!("expected line") };
     let vector = sketch.points[b].pos - sketch.points[a].pos;
@@ -211,7 +221,7 @@ fn line_angle_survives_drag_and_one_undo_removes_geometry_and_dimensions() {
     }
     h.app.run("edit.undo", json!({})).unwrap();
     assert!(constraints(&h).is_empty());
-    assert!(h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty());
+    assert!(h.app.session.world_state().unwrap().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty());
 }
 
 #[test]
@@ -226,12 +236,12 @@ fn typed_drawing_preserves_construction_and_centerline_modes_at_undo_limit() {
         type_value(&mut h, "30 deg");
         enter(&mut h);
         assert_eq!(h.app.session.undo.len(), 200);
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert_eq!(sketch.curves[0].construction, mode == 1);
         assert_eq!(sketch.curves[0].centerline, mode == 2);
         h.app.run("edit.undo", json!({})).unwrap();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert!(sketch.curves.is_empty());
         assert!(sketch.constraints.is_empty());
@@ -270,7 +280,7 @@ fn the_arc_end_pick_snaps_to_a_point_under_the_value_box() {
         if command != "sketch.arc.center_point" {
             continue;
         }
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         let line_end = sketch.curves.iter().find(|c| c.id == "l1").and_then(|c| match c.kind {
             CurveKind::Line { b, .. } => Some(b),

@@ -105,7 +105,7 @@ fn world_pick(
         if p.get(pk).is_some() || p.get(fk).is_some() {
             return Err(bad(cmd, format!("give `{pk}_plane` or `{pk}`/`{fk}`, not both")));
         }
-        let world = s.world_state();
+        let world = s.world_state()?;
         let pl = s.placed_document().resolve_plane_in(vals, pl_ref, 0, Some(&*world)).map_err(|e| bad(cmd, e.to_string()))?;
         return Ok((pl.origin, Some(pl.normal())));
     }
@@ -129,7 +129,7 @@ fn world_pick(
             Some(Value::String(k)) if matches!(k.as_str(), "vertex" | "edge_mid" | "face_center" | "circle_center") => k.as_str(),
             _ => return Err(bad(cmd, format!("`{pk}.snap` must be vertex, edge_mid, face_center or circle_center"))),
         };
-        return super::super::features_more::snap_point(s, kind, at)
+        return super::super::features_more::snap_point(&*s.world_state()?, kind, at)
             .map(|q| (q, None))
             .ok_or_else(|| bad(cmd, format!("no {kind} to snap to near `{pk}`")));
     }

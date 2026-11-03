@@ -1,0 +1,52 @@
+# oracle/66-sketch-linkage: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Link: 14 faces, 36 edges
+Link face F2:side:a1
+Link face F2:side:a2
+Link face F2:side:h1#1
+Link face F2:side:h1#2
+Link face F2:side:h2#1
+Link face F2:side:h2#2
+Link face F2:side:h3#1
+Link face F2:side:h3#2
+Link face F2:side:h4#1
+Link face F2:side:h4#2
+Link face F2:side:l1
+Link face F2:side:l2
+Link face F2:start
+Link face F2:top
+Link edge F2:side:a1|F2:side:l1
+Link edge F2:side:a1|F2:side:l2
+Link edge F2:side:a1|F2:start
+Link edge F2:side:a1|F2:top
+Link edge F2:side:a2|F2:side:l1
+Link edge F2:side:a2|F2:side:l2
+Link edge F2:side:a2|F2:start
+Link edge F2:side:a2|F2:top
+Link edge F2:side:h1#1|F2:side:h1#2~1 [geometric]
+Link edge F2:side:h1#1|F2:side:h1#2~2 [geometric]
+Link edge F2:side:h1#1|F2:start
+Link edge F2:side:h1#1|F2:top
+Link edge F2:side:h1#2|F2:start
+Link edge F2:side:h1#2|F2:top
+Link edge F2:side:h2#1|F2:side:h2#2~1 [geometric]
+Link edge F2:side:h2#1|F2:side:h2#2~2 [geometric]
+Link edge F2:side:h2#1|F2:start
+Link edge F2:side:h2#1|F2:top
+Link edge F2:side:h2#2|F2:start
+Link edge F2:side:h2#2|F2:top
+Link edge F2:side:h3#1|F2:side:h3#2~1 [geometric]
+Link edge F2:side:h3#1|F2:side:h3#2~2 [geometric]
+Link edge F2:side:h3#1|F2:start
+Link edge F2:side:h3#1|F2:top
+Link edge F2:side:h3#2|F2:start
+Link edge F2:side:h3#2|F2:top
+Link edge F2:side:h4#1|F2:side:h4#2~1 [geometric]
+Link edge F2:side:h4#1|F2:side:h4#2~2 [geometric]
+Link edge F2:side:h4#1|F2:start
+Link edge F2:side:h4#1|F2:top
+Link edge F2:side:h4#2|F2:start
+Link edge F2:side:h4#2|F2:top
+Link edge F2:side:l1|F2:start
+Link edge F2:side:l1|F2:top
+Link edge F2:side:l2|F2:start
+Link edge F2:side:l2|F2:top

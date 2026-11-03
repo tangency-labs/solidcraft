@@ -1,0 +1,28 @@
+# oracle/24-user-parameters: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Block: 8 faces, 18 edges
+Block face F2:side:c1#1
+Block face F2:side:c1#2
+Block face F2:side:l1
+Block face F2:side:l2
+Block face F2:side:l3
+Block face F2:side:l4
+Block face F2:start
+Block face F2:top
+Block edge F2:side:c1#1|F2:side:c1#2~1 [geometric]
+Block edge F2:side:c1#1|F2:side:c1#2~2 [geometric]
+Block edge F2:side:c1#1|F2:start
+Block edge F2:side:c1#1|F2:top
+Block edge F2:side:c1#2|F2:start
+Block edge F2:side:c1#2|F2:top
+Block edge F2:side:l1|F2:side:l2
+Block edge F2:side:l1|F2:side:l4
+Block edge F2:side:l1|F2:start
+Block edge F2:side:l1|F2:top
+Block edge F2:side:l2|F2:side:l3
+Block edge F2:side:l2|F2:start
+Block edge F2:side:l2|F2:top
+Block edge F2:side:l3|F2:side:l4
+Block edge F2:side:l3|F2:start
+Block edge F2:side:l3|F2:top
+Block edge F2:side:l4|F2:start
+Block edge F2:side:l4|F2:top

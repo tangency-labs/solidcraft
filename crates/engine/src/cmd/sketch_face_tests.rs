@@ -6,7 +6,7 @@ fn run(s: &mut Session, command: &str, params: Value) -> Value {
     s.execute(command, &params).unwrap_or_else(|error| panic!("{command} {params}: {error}"))
 }
 fn top_pick(s: &Session, body: &str) -> Value {
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let body = world.body(body).unwrap();
     let face = body
         .body
@@ -35,11 +35,11 @@ fn exact_selected_base_follows_height_and_never_retargets_control() {
     let height = s.doc.find_feature("BaseFeature").unwrap().param_names[2].clone();
     run(&mut s, "parameters.change", json!({"name":height,"expression":"20 mm"}));
     assert!((s.model.state().sketch(sketch).unwrap().plane.origin.z - 20.).abs() < 1e-6);
-    assert!((s.world_state().body("Badge").unwrap().mesh().bounds().max.z - 22.).abs() < 1e-6);
+    assert!((s.world_state().unwrap().body("Badge").unwrap().mesh().bounds().max.z - 22.).abs() < 1e-6);
     run(&mut s, "timeline.delete", json!({"features":["BaseFeature"]}));
     assert!(s.model.result(sketch).unwrap().error.is_some());
     assert!(s.model.state().body("Badge").is_none());
-    assert!((s.world_state().body("Control").unwrap().mesh().bounds().max.z - 30.).abs() < 1e-6);
+    assert!((s.world_state().unwrap().body("Control").unwrap().mesh().bounds().max.z - 30.).abs() < 1e-6);
     let before = s.doc.to_json();
     let reopened = Session::new(solidcraft_doc::Document::from_json(&before).unwrap());
     assert!(reopened.model.result(sketch).unwrap().error.is_some());
@@ -75,11 +75,26 @@ fn explicit_rebind_preserves_geometry_dimensions_context_and_one_undo() {
 #[test]
 fn unsupported_face_has_explicit_fixed_alternative_and_no_live_projection() {
     let mut s = Session::default();
-    // A top half Offset Face raised: no construction certificate and no exact history name yet.
-    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Base"}));
-    run(&mut s, "solid.split_face", json!({"faces":[[10,15,20]],"plane":{"origin":[20,0,0],"normal":[1,0,0]}}));
-    run(&mut s, "solid.offset_face", json!({"faces":[[10,15,20]],"distance":5}));
-    let mut pick = top_pick(&s, "Base");
+    // A rib's wall: a rib reports no roles for the faces it builds (Traced::unnamed), so the
+    // wall has no construction certificate and no exact history name to attach by.
+    run(&mut s, "solid.box", json!({"length":40,"width":20,"height":5,"corner":[0,0,0],"body_name":"L"}));
+    run(&mut s, "solid.box", json!({"length":5,"width":20,"height":40,"corner":[0,0,0],"operation":"join"}));
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,10,0],"x_dir":[1,0,0],"y_dir":[0,0,1]},"name":"RibSketch"}));
+    run(&mut s, "sketch.line", json!({"points":[[5,25],[25,5]],"ids":["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch":"RibSketch","curves":["l1"],"thickness":4}));
+    let mut pick = {
+        let world = s.world_state().unwrap();
+        let body = world.body("L").unwrap();
+        let face = body
+            .body
+            .faces(0.01)
+            .unwrap()
+            .into_iter()
+            .find(|face| face.plane_normal.is_some_and(|n| n.dot(Vec3::Y) > 0.999) && (face.centroid.y - 12.0).abs() < 1e-6)
+            .unwrap();
+        json!({"body":"L","index":face.index,"face":[face.centroid.x,face.centroid.y,face.centroid.z]})
+    };
     let before = s.doc.to_json();
     let error = s.execute("sketch.create", &json!({"plane":pick})).unwrap_err();
     assert!(error.to_string().contains("fixed"), "{error}");
@@ -163,7 +178,7 @@ fn exact_nested_source_and_cross_owner_pending_paths_capture_only_involved_posit
     run(&mut s, "occurrence.move", json!({"occurrence":unrelated["occurrence"],"translate":[300,0,0],"capture":false}));
     let author = run(&mut s, "component.create", json!({"name":"Author","parent":0}));
     run(&mut s, "occurrence.move", json!({"occurrence":author["occurrence"],"translate":[100,0,0],"angle":"90 deg","capture":false}));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let key = s
         .placed_document()
         .body_frames_with_source(&s.model.state())
@@ -353,6 +368,10 @@ fn freezing_rebuilt_arc_borders_keeps_authored_dimension_entity_indices() {
     run(&mut s, "sketch.line", json!({"points":[format!("{arc}.end"),format!("{arc}.start")],"infer":false}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch":profile,"distance":10,"operation":"new","body_name":"Sector"}));
+    // A notch clear of the sector until `notch` moves it across the arc at 90°: then the top face's
+    // arc border is rebuilt in two arcs and the notch's sides.
+    run(&mut s, "parameters.add", json!({"name":"notch","expression":"30 mm"}));
+    run(&mut s, "solid.box", json!({"corner":["-1 mm","notch","-1 mm"],"length":2,"width":2,"height":12,"operation":"cut","targets":["Sector"]}));
     let pick = top_pick(&s, "Sector");
     let id = run(&mut s, "sketch.create", json!({"plane":pick}))["sketch"].as_u64().unwrap();
     let circle = run(&mut s, "sketch.circle.center", json!({"center":[20,20],"radius":2}))["curves"][0].as_str().unwrap().to_owned();
@@ -360,7 +379,8 @@ fn freezing_rebuilt_arc_borders_keeps_authored_dimension_entity_indices() {
     run(&mut s, "sketch.finish", json!({}));
     let before_count = s.model.state().sketch(id).unwrap().sketch.curves.len();
     run(&mut s, "parameters.change", json!({"name":"turn","expression":"300 deg"}));
-    assert!(s.model.result(id).unwrap().error.is_none());
+    run(&mut s, "parameters.change", json!({"name":"notch","expression":"9 mm"}));
+    assert!(s.model.result(id).unwrap().error.is_none(), "{:?}", s.model.result(id).unwrap().error);
     let visible = s.model.state().sketch(id).unwrap().sketch.clone();
     assert_ne!(visible.curves.len(), before_count, "fixture must rebuild projected topology");
     let mut pick = top_pick(&s, "Sector");
@@ -487,7 +507,7 @@ fn rounded_enclosure_shell_side_and_floor_attach_through_width_wall_and_reopen()
         assert!((state.sketch(side).unwrap().plane.origin.x - 50.).abs() < 1e-6);
         assert!((state.sketch(floor).unwrap().plane.origin.z - 3.).abs() < 1e-6);
         assert!(state.sketch(floor).unwrap().plane.normal().dot(Vec3::Z) > 0.999);
-        let mesh = state.body("Case").unwrap().body.tessellate_with(1e-4, true).unwrap();
+        let mesh = state.body("Case").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap();
         let case = &state.body("Case").unwrap().body;
         let corners: Vec<_> = (0..case.face_count()).filter(|i| matches!(solidcraft_kernel::face_surface(case, *i), Some(solidcraft_kernel::FaceSurface::Cylinder { radius, .. }) if (radius - 6.).abs() < 1e-6)).collect();
         assert_eq!(corners.len(), 4, "later port/boss features must not subdivide untouched outer corners");
@@ -552,7 +572,7 @@ fn offset_rectangle_pocket_has_one_logical_outer_wall_and_closed_face_projection
     assert_eq!(solidcraft_kernel::step_export(&[&control], "control snapshot").unwrap(), before_control);
     let state = s.model.state();
     let body = state.body("Stock").unwrap();
-    let display = body.body.display_mesh(0.01).unwrap();
+    let display = body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
     let face = body
         .body
         .faces(0.01)
@@ -573,14 +593,14 @@ fn offset_rectangle_pocket_has_one_logical_outer_wall_and_closed_face_projection
         let sketch = &state.sketch(attached).unwrap().sketch;
         assert!(sketch.links.iter().all(|link| !link.lost));
         assert_eq!(sketch.curves.len(), 4, "whole outer-wall rectangle has no floor-height stations");
-        let mesh = state.body("Stock").unwrap().body.display_mesh(0.01).unwrap();
+        let mesh = state.body("Stock").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
         assert!(mesh.contains(Vec3::new(0., 0., 0.5)));
         assert!(!mesh.contains(Vec3::new(0., 0., 5.)));
         assert!(mesh.contains(Vec3::new(28., 0., 5.)));
         let control = &state.body("Control").unwrap().body;
         assert_eq!(control.faces(0.01).unwrap().len(), 6);
         assert_eq!(control.edges(0.01).unwrap().len(), 12);
-        let control_mesh = control.tessellate(0.01).unwrap();
+        let control_mesh = control.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
         assert!((control_mesh.measure().volume - 160.).abs() < 1e-6);
         assert!(control_mesh.contains(Vec3::new(102., 102., 0.5)));
         assert!(control_mesh.contains(Vec3::new(102., 102., 5.)));
@@ -592,7 +612,7 @@ fn offset_rectangle_pocket_has_one_logical_outer_wall_and_closed_face_projection
 /// Every flat face of every body: (body, face index, a point well inside it, its normal). The
 /// middle of the face's largest triangle, so an L-shaped face is picked on itself.
 fn flat_faces(s: &Session) -> Vec<(String, usize, Vec3, Vec3)> {
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let mut out = Vec::new();
     for body in &world.bodies {
         let mesh = body.mesh();
@@ -673,7 +693,7 @@ fn every_flat_face_of_one_sketch_extruded_up_and_down_takes_an_attached_sketch()
     let script: Value = serde_json::from_str(&std::fs::read_to_string(root.join("up-down-join.json")).unwrap()).unwrap();
     let mut s = Session::default();
     s.run_script(&script).unwrap();
-    assert_eq!(s.world_state().bodies.len(), 1, "the two extrudes join into one body");
+    assert_eq!(s.world_state().unwrap().bodies.len(), 1, "the two extrudes join into one body");
     assert_eq!(sketch_and_extrude_on_every_flat_face(&s, &dir, "synthetic"), 12, "8 side walls, top, bottom, 2 at the sketch plane");
     let reopened = save_and_reopen(&mut s, &dir, "synthetic.solidcraft");
     assert_eq!(sketch_and_extrude_on_every_flat_face(&reopened, &dir, "synthetic-reopened"), 12);
@@ -744,17 +764,29 @@ fn a_sketch_on_a_face_meshes_its_body_once() {
     assert!(s.model.state().body("Base").unwrap().cached_mesh().is_some(), "the sketch's projection meshed a copy of the body");
 }
 /// Issue 6720: a face picked by its point alone was refused on a body with many faces. The
-/// search charged the whole mesh once per face, and the 5 000 facets a modelled thread leaves
-/// put a plain block past the limit. The search reads each face's own triangles now.
+/// search charged the whole mesh once per face, and the 5 000 facets a modelled thread left put a
+/// plain block past the limit. The search reads each face's own triangles now. A modelled thread
+/// is a few exact helical faces on SMLib, so the many faces are a block drilled with 256 holes:
+/// the old charge (every face times the whole mesh) is past the 2 000 000 budget, the new one
+/// (the mesh once, plus a test per face) well inside it.
 #[test]
-fn a_face_picked_by_point_on_a_block_with_a_modelled_thread_is_found() {
+fn a_face_picked_by_point_on_a_block_with_many_faces_is_found() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"corner":[-20,-20,0],"length":40,"width":40,"height":20,"body_name":"Block"}));
-    run(&mut s, "solid.cylinder", json!({"base":[0,0,-1],"radius":3.4,"height":22,"body_name":"Bore"}));
-    run(&mut s, "solid.combine", json!({"target":"Block","tools":["Bore"],"operation":"cut"}));
-    run(&mut s, "solid.thread", json!({"face":[3.4,0,10],"designation":"M8","modeled":true}));
-    assert!(s.model.state().body("Block").unwrap().body.face_count() > 1000);
-    run(&mut s, "sketch.create", json!({"plane":{"face":[15,15,20],"fixed":true}}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","offset":20,"name":"Drills"}));
+    for i in 0..16 {
+        for j in 0..16 {
+            run(&mut s, "sketch.point", json!({"point":[-15.0 + 2.0 * f64::from(i), -15.0 + 2.0 * f64::from(j)]}));
+        }
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch":"Drills","diameter":0.8}));
+    let body = s.model.state().body("Block").unwrap().body.clone();
+    // The search's own mesh (sketch_face: the tolerance it meshes the body at).
+    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord((body.size() * 1e-4).max(1e-5))).unwrap();
+    let (faces, triangles) = (body.face_count(), mesh.triangles.len());
+    assert!(faces > 256 && faces * triangles > 2_000_000 && faces + triangles < 2_000_000, "{faces} faces, {triangles} triangles");
+    run(&mut s, "sketch.create", json!({"plane":{"face":[19,19,20],"fixed":true}}));
     let plane = run(&mut s, "sketch.inspect", json!({}))["plane"].clone();
     assert!((plane["origin"][2].as_f64().unwrap() - 20.0).abs() < 1e-6, "{plane}");
 }
@@ -767,7 +799,7 @@ fn a_sketch_on_the_mirrored_half_of_a_combined_body_sits_on_that_half() {
     run(&mut s, "solid.mirror", json!({"bodies":["Part"],"plane":"XY","combine":true,"name":"Mirror1"}));
     assert_eq!(s.model.state().bodies.len(), 1, "the mirror combined");
     let pick = |s: &Session, normal: Vec3, point: Vec3| {
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let body = world.body("Part").unwrap();
         let face = body
             .body
@@ -793,23 +825,27 @@ fn a_sketch_on_the_mirrored_half_of_a_combined_body_sits_on_that_half() {
     }
 }
 /// The sensor enclosure's lid rests on the case, and its lip, joined below it, parts its underside
-/// into a ring and a panel. The ring is named after the case's top it rests on, so the lid's cap
-/// certificate finds only the panel: the ring is another piece of the same face and takes a sketch
-/// attached by that certificate, as it did before #8278 (#9465, nightly action matrix).
+/// into a ring and a panel. Where the join names the ring after the case's top it rests on, the
+/// lid's cap certificate finds only the panel: the ring is another piece of the same face and takes
+/// a sketch attached by that certificate, as it did before #8278 (#9465, nightly action matrix).
+/// Where the join's history names it a piece of the lid's own start (SMLib), the certificate finds
+/// it directly. Either way the ring is the underside piece under the pick, whatever its name.
 #[test]
 fn a_sketch_on_the_ring_of_a_lid_underside_parted_by_its_lip_keeps_the_cap() {
     let mut s = Session::default();
     let script: Value = serde_json::from_str(include_str!("../../../../examples/acceptance/sensor_enclosure.json")).unwrap();
     s.run_script(&script).unwrap();
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let lid = world.body("Lid").unwrap();
     let names = solidcraft_doc::naming::face_names(lid);
     let down: Vec<usize> = (0..names.len())
         .filter(|index| lid.body.planar_face(*index).is_some_and(|plane| plane.normal().dot(-Vec3::Z) > 0.999 && (plane.origin.z - 25.).abs() < 1e-6))
         .collect();
     assert!(down.len() > 1, "the lip parts the lid's underside: {down:?}");
-    let ring = *down.iter().find(|index| names[**index] == "F2:top").unwrap_or_else(|| panic!("the ring, among {names:?}"));
-    let pick = json!({"body":"Lid","index":ring,"face":[12.0, 29.266_666_666_665, 25.0]});
+    let at = Vec3::new(12.0, 29.266_666_666_665, 25.0);
+    let under = solidcraft_doc::naming::face_name_at_body(lid, at);
+    let ring = *down.iter().find(|index| under.as_ref() == Some(&names[**index])).unwrap_or_else(|| panic!("the ring ({under:?}), among {names:?}"));
+    let pick = json!({"body":"Lid","index":ring,"face":[at.x, at.y, at.z]});
     drop(world);
     let id = run(&mut s, "sketch.create", json!({"name":"On ring","plane":pick,"project_edges":false}))["sketch"].as_u64().unwrap();
     run(&mut s, "sketch.finish", json!({}));
@@ -820,4 +856,39 @@ fn a_sketch_on_the_ring_of_a_lid_underside_parted_by_its_lip_keeps_the_cap() {
     assert!(timeline_errors(&s).is_empty(), "{:?}", timeline_errors(&s));
     let plane = s.model.state().sketch(id).unwrap().plane;
     assert!(plane.normal().dot(-Vec3::Z) > 0.999 && (plane.origin.z - 25.).abs() < 1e-6, "{plane:?}");
+}
+
+/// `activate_part` (#10215): a sketch on a face of another component's body is made in that
+/// component, which stays active; without it the sketch belongs to the active component.
+#[test]
+fn activate_part_makes_the_sketch_in_the_faces_component() {
+    for activate in [true, false] {
+        let mut s = Session::default();
+        let part = run(&mut s, "component.create", json!({"name":"Part","parent":0,"grounded":false}));
+        let (component, occurrence) = (part["component"].as_u64().unwrap(), part["occurrence"].as_u64().unwrap());
+        run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Base"}));
+        run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[30,0,0]}));
+        run(&mut s, "component.activate", json!({"component":0}));
+        let mut pick = top_pick(&s, "Base");
+        pick["path"] = json!([occurrence]);
+        let out = run(&mut s, "sketch.create", json!({"name":"OnFace","plane":pick,"activate_part":activate,"project_edges":false}));
+        let id = out["sketch"].as_u64().unwrap();
+        let owner = s.doc.feature(id).unwrap().component;
+        if activate {
+            assert_eq!(owner, component);
+            assert_eq!((s.active_component, s.active_occurrence_path.clone()), (component, Some(vec![occurrence])));
+            assert_eq!(out["activated"], json!({"component": component, "path": [occurrence]}));
+            let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &s.doc.feature(id).unwrap().kind else { panic!("not sketch") };
+            assert_eq!(super::anchor(plane).unwrap().author_path, vec![occurrence]);
+        } else {
+            assert_eq!(owner, 0);
+            assert_eq!(s.active_component, 0);
+            assert!(out.get("activated").is_none());
+        }
+        let world = s.world_state().unwrap();
+        let plane = world.sketch(id).unwrap().plane;
+        assert!((plane.origin.z - 10.).abs() < 1e-6 && plane.normal().z > 1. - 1e-9, "{activate}: {plane:?}");
+        draw(&mut s);
+        assert!(s.model.result(id).unwrap().error.is_none());
+    }
 }

@@ -28,7 +28,6 @@ pub const RESERVED: &[&str] = &[
     "Ctrl+O",
     "Ctrl+W",
     "Ctrl+Comma",
-    "Ctrl+Shift+A",
     "Ctrl+C",
     "Ctrl+X",
     "Ctrl+V",
@@ -380,14 +379,14 @@ pub fn commands_for(app: &SolveApp, key: &str) -> Vec<&'static str> {
 /// Where a command's shortcut works: in a sketch (the SKETCH tab's tools), in the model (the
 /// other tabs), or everywhere (commands on no tab: undo, views, files).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Scope {
+pub(crate) enum Scope {
     Render,
     Sketch,
     Model,
     Everywhere,
 }
 
-fn scope(id: &str) -> Scope {
+pub(crate) fn scope(id: &str) -> Scope {
     if id.starts_with("render.") || matches!(id, "appearance.paint" | "appearance.pick_up") {
         return Scope::Render;
     }
@@ -406,8 +405,17 @@ fn clash(a: &str, b: &str) -> bool {
     x == y || x == Scope::Everywhere || y == Scope::Everywhere
 }
 
+/// Whether a command's key runs in a sketch and in the model alike when the two keep their keys
+/// apart: one of no tab, and inspecting, views and files wherever their buttons sit (Measure's I).
+fn runs_everywhere(id: &str) -> bool {
+    scope(id) == Scope::Everywhere || ["inspect.", "view.", "file."].iter().any(|p| id.starts_with(p))
+}
+
 /// The enabled command a key press runs, if any: one of the mode the view is in (a sketch tool
-/// while a sketch is open, a model command otherwise) before any other.
+/// while a sketch is open, a model command otherwise) before any other. With Preferences ›
+/// Shortcuts › Keep model keys out of sketches on, only one of that mode or one that works
+/// everywhere: a model command's key pressed in a sketch (E, F) runs nothing, nor a sketch
+/// tool's in the model.
 pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
     let here = if crate::render_workspace::active(app) {
         Scope::Render
@@ -424,7 +432,12 @@ pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
                 && solidcraft_engine::find_command(id).is_some_and(|c| crate::render_workspace::interactive_command_info(app, c).enabled)
         })
         .collect();
-    enabled.iter().find(|id| scope(id) == here).or(enabled.first()).copied()
+    let mine = enabled.iter().find(|id| scope(id) == here);
+    if app.preferences.sketch_keys_only && here != Scope::Render {
+        mine.or_else(|| enabled.iter().find(|id| runs_everywhere(id))).copied()
+    } else {
+        mine.or(enabled.first()).copied()
+    }
 }
 
 /// Run a shortcut key: its enabled command; outside a sketch, a sketch tool's key opens Create
@@ -548,10 +561,15 @@ pub fn reset(app: &mut SolveApp, id: Option<&str>) {
 pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     let filtering = crate::prefs_search::querying(ui);
+    // A Preferences search lists the matching shortcuts too, and one recorded from there takes
+    // the key like one on this page (#10043). Only a search field that has the keyboard keeps
+    // its keys: going back to it to type stops the recording.
+    if ctx.memory(|m| m.has_focus(egui::Id::new("prefs_search"))) && app.keymap.capturing.is_some() {
+        stop_capture(app);
+    }
     // Keep a pending chord until it has settled and all keys are released. Modifier-only
     // input never starts the timer, so modifiers can be assembled at the user's own pace.
-    // A Preferences search is using the keyboard; don't swallow those keys to finish a capture.
-    if !filtering && let Some(id) = app.keymap.capturing.clone() {
+    if let Some(id) = app.keymap.capturing.clone() {
         match ctx.input(|i| app.keymap.recorder.update(i)) {
             Recording::Waiting => {
                 if app.keymap.recorder.key.is_some() {
@@ -627,22 +645,12 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                     },
                 ));
             }
-            if let Some(m) = &app.keymap.message {
-                ui_kit::text(ui, m, ui_kit::Text::Report("keymap_message", true));
-            }
-            if let Some((_, key, _, _)) = app.keymap.conflict.clone() {
-                ui.horizontal_wrapped(|ui| {
-                    let replace = ui_kit::button(ui, crate::i18n::format("keymap.use_anyway", &[("key", &display(&key))]), ui_kit::Button::Normal);
-                    crate::scenario::publish_target("keymap:replace", replace.rect);
-                    if replace.clicked() {
-                        action = Some((String::new(), "replace"));
-                    }
-                    if ui_kit::button(ui, app.tr_label("Cancel"), ui_kit::Button::Normal).clicked() {
-                        action = Some((String::new(), "cancel"));
-                    }
-                });
+            if let Some(chosen) = outcome(app, ui) {
+                action = Some((String::new(), chosen));
             }
             ui_kit::text(ui, app.tr_label("Select Other: hold the left button still on the model (or right-click › Select Other…) to list everything under the cursor; click again on the same spot to select the next thing there. Double-click the middle button to go Home (Preferences › Navigation)."), ui_kit::Text::Note("navigation"));
+            ui_kit::checkbox(ui, app.tr("ui.sketch_keys_only"), &mut app.preferences.sketch_keys_only)
+                .on_hover_text(app.tr("ui.sketch_keys_only_tip"));
         }
         // The list Help and Home open looks like the Shortcuts page of Preferences: say it can't
         // be changed here, and lead to the page where it can (#7409).
@@ -702,6 +710,16 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::Column::new("Keyboard Shortcuts", 1.0).flex().min_content_width(key_width),
                 ui_kit::Column::new("", 0.0).icon_only().min_content_width(action_width),
             ];
+            // A search shows a recording's outcome and its next step above the shortcuts it found.
+            if filtering {
+                if let Some(chosen) = outcome(app, ui) {
+                    action = Some((String::new(), chosen));
+                }
+                if app.keymap.capturing.is_some() {
+                    let hint = ctx.input(|input| app.keymap.recorder.hint(input));
+                    ui_kit::text(ui, app.tr(hint), ui_kit::Text::Hint("shortcut_capture_state"));
+                }
+            }
             ui_kit::table(ui, "keymap", &columns, crate::i18n::tr("keymap.empty"), |ui, table| {
                 for (c, keys, translated_label) in commands {
                     table.row_visible(ui, c.id, app.keymap.capturing.as_deref() == Some(c.id), false, |row| {
@@ -826,6 +844,28 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
+/// A recording's outcome: its message, and for a key another command uses, Replace and Cancel
+/// (the one chosen).
+fn outcome(app: &SolveApp, ui: &mut egui::Ui) -> Option<&'static str> {
+    let mut chosen = None;
+    if let Some(m) = &app.keymap.message {
+        ui_kit::text(ui, m, ui_kit::Text::Report("keymap_message", true));
+    }
+    if let Some((_, key, _, _)) = app.keymap.conflict.clone() {
+        ui.horizontal_wrapped(|ui| {
+            let replace = ui_kit::button(ui, crate::i18n::format("keymap.use_anyway", &[("key", &display(&key))]), ui_kit::Button::Normal);
+            crate::scenario::publish_target("keymap:replace", replace.rect);
+            if replace.clicked() {
+                chosen = Some("replace");
+            }
+            if ui_kit::button(ui, app.tr_label("Cancel"), ui_kit::Button::Normal).clicked() {
+                chosen = Some("cancel");
+            }
+        });
+    }
+    chosen
+}
+
 /// Stop waiting for a key (the dialog closed).
 pub fn stop_capture(app: &mut SolveApp) {
     app.keymap.capturing = None;
@@ -834,14 +874,104 @@ pub fn stop_capture(app: &mut SolveApp) {
     app.keymap.message = None;
 }
 
-/// Is the page waiting for a key (so the key must not also run a command)?
+/// Is the page waiting for a key (so the key must not also run a command)? On the Shortcuts page,
+/// or in a Preferences search, which shows the matching shortcuts on the page it started from
+/// (#10043).
 pub fn capturing(app: &SolveApp) -> bool {
-    app.prefs_window.open && app.prefs_window.section == crate::prefs::PAGE_SHORTCUTS && app.keymap.capturing.is_some()
+    app.prefs_window.open
+        && app.keymap.capturing.is_some()
+        && (app.prefs_window.section == crate::prefs::PAGE_SHORTCUTS || !app.prefs_window.filter.trim().is_empty())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn assistant_shortcut_can_be_rebound_cleared_saved_and_reset() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.frames(2);
+        assert_eq!(effective(&h.app, "ui.assistant").as_deref(), Some("Ctrl+Shift+A"));
+        bind(&mut h.app, "ui.assistant", "Ctrl+Shift+J", false).unwrap();
+        h.step(&json!({"key":"A", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.agent_chat.open, "the old key no longer opens Assistant");
+        let held_key = |pressed, repeat| egui::Event::Key {
+            key: egui::Key::J,
+            physical_key: None,
+            pressed,
+            repeat,
+            modifiers: egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+        };
+        h.frame_with(vec![held_key(true, false)]);
+        assert!(h.app.agent_chat.open, "the custom key opens Assistant");
+        h.frame_with(vec![held_key(true, true)]);
+        assert!(h.app.agent_chat.open, "holding the key does not repeatedly toggle");
+        h.frame_with(vec![held_key(false, false)]);
+        h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.agent_chat.open, "the custom key also hides Assistant");
+        let saved = h.app.keymap.prefs();
+        let mut restored = app();
+        restored.keymap.load(&saved);
+        assert_eq!(keys(&restored, "ui.assistant"), ["Ctrl+Shift+J"]);
+        assert!(bind(&mut h.app, "solid.box", "Ctrl+Shift+J", false).is_err(), "conflicts are reported");
+        bind(&mut h.app, "ui.assistant", "", false).unwrap();
+        h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.agent_chat.open, "clearing disables the shortcut");
+        reset(&mut h.app, Some("ui.assistant"));
+        h.step(&json!({"key":"A", "cmd":true, "shift":true})).unwrap();
+        assert!(h.app.agent_chat.open, "reset restores the original shortcut");
+    }
+
+    #[test]
+    fn a_released_unbound_assistant_chord_does_not_start_a_plain_letter_command() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+        bind(&mut h.app, "ui.assistant", "Ctrl+Shift+J", false).unwrap();
+        h.frames(2);
+        let modifiers = egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT);
+        h.frame_with(vec![
+            egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers },
+            egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: false, repeat: false, modifiers },
+            egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+        ]);
+        assert!(!h.app.agent_chat.open, "the old chord is unbound");
+        assert!(h.app.dialog.is_none() && h.app.tool.is_none(), "Ctrl+Shift+A must not become plain A (Appearance) after release");
+    }
+
+    #[test]
+    fn assistant_shortcut_respects_text_focus_ai_switch_and_capture() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        bind(&mut h.app, "ui.assistant", "Ctrl+Shift+J", false).unwrap();
+        h.app.preferences.ai_features = false;
+        h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.agent_chat.open);
+        h.app.preferences.ai_features = true;
+        h.step(&json!({"key":"J", "cmd":true, "shift":true, "alt":true})).unwrap();
+        assert!(!h.app.agent_chat.open, "extra modifiers do not match");
+        h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
+        assert!(h.app.agent_chat.open);
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("sc_agent_chat_input")));
+        h.frames(2);
+        h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.agent_chat.open, "a chord can hide Assistant from its input field");
+        bind(&mut h.app, "ui.assistant", "J", true).unwrap();
+        h.call("ui.palette", json!({}));
+        h.frames(3);
+        h.step(&json!({"key":"J"})).unwrap();
+        assert!(!h.app.agent_chat.open, "a bare letter in a text field remains text");
+        h.call("ui.palette", json!({"open":false}));
+        h.frames(2);
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_SHORTCUTS);
+        h.app.keymap.capturing = Some("solid.box".into());
+        h.step(&json!({"key":"J"})).unwrap();
+        assert!(!h.app.agent_chat.open, "recording a shortcut must not activate it");
+        assert!(crate::agent_chat::assistant_tip(&h.app, crate::agent_chat::AssistantMark::Ready).contains("(J)"));
+        bind(&mut h.app, "ui.assistant", "", false).unwrap();
+        assert!(!crate::agent_chat::assistant_tip(&h.app, crate::agent_chat::AssistantMark::Ready).contains("(J)"));
+    }
 
     fn app() -> SolveApp {
         SolveApp::new(solidcraft_engine::Session::default(), Default::default())
@@ -1160,6 +1290,47 @@ mod tests {
         h.frames(1);
         h.step(&json!({"text": "z"})).expect("key while recording");
         assert!(h.app.prefs_window.filter.is_empty(), "a shortcut being recorded keeps the key");
+    }
+
+    /// A shortcut recorded from a Preferences search result takes the key, as on the Shortcuts
+    /// page (#10043): the search keeps its query, and the key runs no command behind
+    /// Preferences (P is Project's, which would open Create Sketch). P being Project's is
+    /// reported there with the choice to use it anyway, as on the page. Going back to the search
+    /// field to type stops a recording.
+    #[test]
+    fn a_shortcut_recorded_from_a_preferences_search_takes_the_key() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"open": "General"}));
+        h.frames(3);
+        h.step(&json!({"text": "fix"})).expect("search");
+        h.frames(3);
+        h.step(&json!({"click": {"handle": "prefs:search:shortcuts"}})).expect("unfold the shortcut matches");
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "shortcut:sketch.constraint.fix"}})).expect("record Fix/UnFix's key");
+        assert!(capturing(&h.app), "recording from a search result");
+        h.step(&json!({"key": "P", "pressed": true})).unwrap();
+        h.step(&json!({"text": "p"})).unwrap();
+        h.step(&json!({"key": "P", "pressed": false})).unwrap();
+        h.frames(65);
+        assert_eq!(h.app.prefs_window.filter, "fix", "the key went to the search");
+        assert!(h.app.dialog.is_none() && h.app.session.active_sketch.is_none(), "the key ran a command");
+        assert!(h.app.keymap.capturing.is_none());
+        let conflict = h.app.keymap.conflict.as_ref().map(|(id, key, ..)| (id.as_str(), key.as_str()));
+        assert_eq!(conflict, Some(("sketch.constraint.fix", "P")), "{:?}", h.app.keymap.message);
+        // The search shows why, and the choice, above the shortcuts it found.
+        let message = h.app.keymap.message.clone().unwrap_or_default();
+        assert!(h.widget(&message).is_some() && h.widget("Use P here anyway").is_some(), "{message}");
+        h.step(&json!({"click": {"handle": "keymap:replace"}})).expect("use P anyway");
+        assert_eq!(effective(&h.app, "sketch.constraint.fix").as_deref(), Some("P"));
+
+        h.step(&json!({"click": {"handle": "shortcut:sketch.constraint.fix:1"}})).expect("record a second key");
+        assert!(capturing(&h.app));
+        h.step(&json!({"click": {"handle": "prefs:search"}})).expect("back to the search");
+        h.step(&json!({"text": "x"})).unwrap();
+        h.frames(2);
+        assert!(h.app.keymap.capturing.is_none(), "typing in the search stops the recording");
+        assert_eq!(h.app.prefs_window.filter, "fixx");
     }
 
     #[test]

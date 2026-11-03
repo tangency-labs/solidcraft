@@ -1,0 +1,39 @@
+{
+ "sources": [],
+ "what": "occurrence.copy in place of an arm turned 90 degrees, 20 mm up",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); hinge at 90 puts Arm at (0,20,5); in_place copies where it is in the world, translate in world axes: Arm:2 at (0,20,25)",
+ "body_count": 3,
+ "volume_mm3": 12000.0,
+ "center_of_mass": [
+  0,
+  13.333333,
+  8.333333
+ ],
+ "results": [
+  {
+   "step": 11,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      0.0,
+      20.0,
+      25.0
+     ],
+     "bbox": {
+      "min": [
+       -5.0,
+       0.0,
+       20.0
+      ],
+      "max": [
+       5.0,
+       40.0,
+       30.0
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

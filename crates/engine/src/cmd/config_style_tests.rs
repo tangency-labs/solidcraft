@@ -23,11 +23,11 @@ fn component_appearance_shared_definition_inheritance_and_delete() {
     let key = table["columns"][0].as_str().unwrap().to_string();
     run(&mut s, "config.row", json!({"name":"Red","values":{key.clone():"ABS - Red"}}));
     run(&mut s, "config.activate", json!({"row":"Red"}));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     assert_eq!(world.bodies.len(), 2);
     assert!(world.bodies.iter().all(|body| s.doc.model_body_look(body).unwrap().name == "ABS - Red"));
     run(&mut s, "appearance.assign", json!({"bodies":[body],"appearance":"ABS - Yellow"}));
-    assert!(s.world_state().bodies.iter().all(|body| s.doc.model_body_look(body).unwrap().name == "ABS - Yellow"));
+    assert!(s.world_state().unwrap().bodies.iter().all(|body| s.doc.model_body_look(body).unwrap().name == "ABS - Yellow"));
     run(&mut s, "config.activate", json!({"row":"Default"}));
     assert!(!s.doc.appearances.components.contains_key(&component));
     assert_eq!(s.doc.appearances.bodies[&body].name, "ABS - Yellow");
@@ -147,7 +147,7 @@ fn face_occurrence_pick_uses_definition_identity_and_coordinates() {
     let component = run(&mut s, "component.create", json!({"name":"Part"}))["component"].as_u64().unwrap();
     let body = block(&mut s);
     run(&mut s, "occurrence.copy", json!({"component":component,"translate":[30,0,0]}));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let placed = world.bodies.iter().find(|body| body.name != body.definition_name()).unwrap();
     let placed_name = placed.name.clone();
     let point = solidcraft_doc::apply_point(&placed.source_transform, solidcraft_geom::Vec3::new(5., 5., 10.));
@@ -157,7 +157,7 @@ fn face_occurrence_pick_uses_definition_identity_and_coordinates() {
     assert!(target.point.dist(solidcraft_geom::Vec3::new(5., 5., 10.)) < 1e-8);
     run(&mut s, "config.row", json!({"name":"Paint","values":{key:"ABS - Blue"}}));
     run(&mut s, "config.activate", json!({"row":"Paint"}));
-    assert!(s.world_state().bodies.iter().all(|body| s.doc.face_colors(body).len() == 1));
+    assert!(s.world_state().unwrap().bodies.iter().all(|body| s.doc.face_colors(body).len() == 1));
 }
 
 #[test]

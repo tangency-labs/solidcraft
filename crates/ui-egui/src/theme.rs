@@ -964,6 +964,8 @@ pub struct Tokens {
     pub font_subtitle: f32,
     /// Introductory text on the home page.
     pub font_intro: f32,
+    /// Preferences page title, independent of dialog and article headings.
+    pub font_page_heading: f32,
     /// Top-level headings in assistant Markdown.
     pub font_article_heading: f32,
     /// Application title in the About dialog.
@@ -1158,6 +1160,9 @@ pub struct Tokens {
     pub chip: Color32,
     /// Inside of bodies cut by a section.
     pub section_cap: Color32,
+    /// The section hatch's other colours by part, after `section_cap` (Preferences > Graphics >
+    /// Section hatch): of its family and lightness, so a cut stays calm.
+    pub section_hatch: [Color32; 2],
     /// Closed sketch profiles (translucent fill).
     pub profile_fill: Color32,
     /// Constraint glyph boxes.
@@ -1187,6 +1192,56 @@ pub struct Tokens {
     pub dialog_label: Color32,
     pub selected_ink: Color32,
     pub selected_bg: Color32,
+    /// Ground under every Preferences figure.
+    pub figure_ground: Color32,
+    /// Outlines and reference lines of Preferences figures.
+    pub figure_line: Color32,
+    /// Neutral light reflected by a model in a Preferences figure, independent of theme polarity.
+    pub figure_highlight: Color32,
+    /// Neutral shadow cast by a model in a Preferences figure, independent of theme polarity.
+    pub figure_shadow: Color32,
+    /// Top face of the Preferences figure cube.
+    pub figure_face_top: Color32,
+    /// Left face of the Preferences figure cube.
+    pub figure_face_left: Color32,
+    /// Right face of the Preferences figure cube.
+    pub figure_face_right: Color32,
+    /// Paper, panels and pads drawn inside Preferences figures.
+    pub figure_card: Color32,
+    /// Fixed white label and highlight ink inside Preferences illustrations.
+    pub figure_white: Color32,
+    /// Fixed black hatch and shadow ink inside Preferences illustrations.
+    pub figure_black: Color32,
+    /// What a Preferences figure or selected card acts on.
+    pub figure_accent: Color32,
+    /// Reference point in a Preferences figure: pivot, origin, pointer.
+    pub figure_reference: Color32,
+    /// X axis in a Preferences figure.
+    pub figure_axis_x: Color32,
+    /// Y axis in a Preferences figure.
+    pub figure_axis_y: Color32,
+    /// Z axis in a Preferences figure.
+    pub figure_axis_z: Color32,
+    /// Done or fully constrained mark in a Preferences figure.
+    pub figure_ok: Color32,
+    /// Under-constrained sketch mark in a Preferences figure.
+    pub figure_warn: Color32,
+    /// Conflicting sketch geometry or state glyph in a Preferences figure.
+    pub figure_conflict: Color32,
+    /// Segmented control well and tint behind figures in Preferences.
+    pub pref_well: Color32,
+    /// Warning badge text and stroke in Preferences.
+    pub pref_note: Color32,
+    /// Warning badge fill in Preferences.
+    pub pref_note_fill: Color32,
+    /// Ink on a Preferences accent fill.
+    pub pref_on_accent: Color32,
+    /// Success badge text in Preferences.
+    pub pref_ok: Color32,
+    /// Success badge fill in Preferences.
+    pub pref_ok_fill: Color32,
+    /// Ink of a dimmed Preferences control.
+    pub pref_disabled: Color32,
     /// Timeline items: normal and failed.
     pub timeline_item: Color32,
     pub timeline_item_error: Color32,
@@ -1208,6 +1263,10 @@ pub struct Tokens {
     pub bend_down: Color32,
     /// Interference: the clash fill, before its shading.
     pub interference: Color32,
+    /// Curvature Comb: the envelope through the teeth tips (purple) and the teeth, the scaled
+    /// normals (orange).
+    pub comb_envelope: Color32,
+    pub comb_teeth: Color32,
     /// Continuity Analysis seams, best to worst as `inspect.continuity` judges them: smooth (G2),
     /// tangent with a curvature jump (G1), a crease (G0) and a gap. Bluish green, blue, yellow
     /// and reddish purple stay apart in every colour vision mode, so no mode changes them.
@@ -1360,6 +1419,7 @@ impl Tokens {
             sketch_point: view.sketch_point,
             sketch_point_free: view.sketch_point_free,
             section_cap: view.section_cap,
+            section_hatch: view.section_hatch,
             profile_fill: view.profile_fill,
             glyph_bg: view.glyph_bg,
             glyph_edge: view.glyph_edge,
@@ -1374,6 +1434,8 @@ impl Tokens {
             bend_up: view.bend_up,
             bend_down: view.bend_down,
             interference: view.interference,
+            comb_envelope: view.comb_envelope,
+            comb_teeth: view.comb_teeth,
             continuity: view.continuity,
             analysis: view.analysis,
             ..self
@@ -1400,11 +1462,20 @@ impl Tokens {
     /// These tokens with a colour vision mode's values on top (the tables in `palettes.rs`); Off
     /// gives them back unchanged.
     pub fn with_vision(self, dark: bool, mode: ColorVision) -> Tokens {
-        match mode {
-            ColorVision::Off => self,
+        let mut t = match mode {
+            ColorVision::Off => return self,
             ColorVision::Protan | ColorVision::Deutan => self.red_green(dark),
             ColorVision::Tritan => self.blue_yellow(dark),
-        }
+        };
+        // Figure axes carry the same X/Y/Z meanings as the viewport and its navigation triad.
+        t.figure_axis_x = t.axis_x;
+        t.figure_axis_y = t.axis_y;
+        t.figure_axis_z = t.axis_z;
+        // Match SketchState::ink: fully constrained, under constrained, and conflicting.
+        t.figure_ok = t.sketch_fixed;
+        t.figure_warn = t.sketch;
+        t.figure_conflict = t.error;
+        t
     }
 
     /// Fade idle cube colours into the viewport while retaining opaque facets.
@@ -1746,6 +1817,27 @@ mod tests {
         assert!(ctx.has_requested_repaint(), "a theme change must leave a repaint pending");
         let theme = if dark { egui::Theme::Dark } else { egui::Theme::Light };
         assert_eq!(ctx.style_of(theme).visuals, expected, "the new theme's visuals must be in place");
+    }
+
+    #[test]
+    fn preferences_foreground_pairs_hold_small_text_contrast() {
+        for dark in [false, true] {
+            for vision in ColorVision::ALL {
+                let t = Tokens::themed(dark, vision);
+                for (ink_name, ink, surface_name, surface) in [
+                    ("pref_note", t.pref_note, "pref_note_fill", t.pref_note_fill),
+                    ("pref_ok", t.pref_ok, "pref_ok_fill", t.pref_ok_fill),
+                    ("pref_on_accent", t.pref_on_accent, "figure_accent", t.figure_accent),
+                    ("figure_accent", t.figure_accent, "figure_card", t.figure_card),
+                    ("figure_accent", t.figure_accent, "selected_bg", t.selected_bg),
+                ] {
+                    let contrast = contrast_ratio(ink, surface);
+                    assert!(contrast >= 4.5, "dark={dark} {vision:?}: {ink_name} on {surface_name}: {contrast:.2}");
+                }
+                assert_eq!(t.figure_highlight, Color32::WHITE, "a model highlight stays light in either theme");
+                assert_eq!(t.figure_shadow, Color32::BLACK, "a model shadow stays dark in either theme");
+            }
+        }
     }
 
     #[test]

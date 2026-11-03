@@ -93,7 +93,7 @@ fn frames(s: &mut Session, n: usize, live: bool) -> Vec<Value> {
 }
 
 fn body_contains(s: &Session, p: Vec3) -> bool {
-    s.model.state().bodies.first().expect("a body").body.contains(p)
+    s.model.state().bodies.first().expect("a body").body.classify_point(p).unwrap() == solidcraft_kernel::PointClass::Inside
 }
 
 fn pt(s: &Session, id: &str) -> solidcraft_geom::Vec2 {
@@ -103,7 +103,7 @@ fn pt(s: &Session, id: &str) -> solidcraft_geom::Vec2 {
 
 fn corner(s: &Session) -> solidcraft_geom::Vec2 {
     let id = s.active_sketch.expect("sketch mode");
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     let sk = &st.sketch(id).expect("the shown sketch").sketch;
     sk.resolve_point("l1.start").and_then(|i| sk.point(i)).expect("the corner")
 }
@@ -124,6 +124,23 @@ fn a_live_frame_solves_once_and_leaves_the_features_after_the_sketch_stale() {
     let result = s.model.result(extrude).expect("the extrude's result");
     assert!(result.stale);
     assert!(s.model.state().bodies.first().expect("a body").body.same(&body), "the body is not rebuilt");
+}
+
+/// A frame copies the design once, to edit it: its undo step holds the design as it was, and a
+/// second copy for storing the edited one would double the work on a large design.
+#[test]
+fn a_live_frame_copies_the_design_once_and_its_undo_step_keeps_the_design_before() {
+    let (mut s, _) = extruded();
+    let before = s.doc.clone();
+    let undo = s.undo.len();
+    crate::tests::doc_copies::take();
+    frames(&mut s, 1, true);
+    assert_eq!(crate::tests::doc_copies::take(), 0, "the edited design is stored, not copied again");
+    assert!(corner(&s).dist(solidcraft_geom::Vec2::new(4.0, 5.0)) < 1e-9);
+    assert_eq!(s.undo.len(), undo + 1);
+    assert!(s.undo.last().is_some_and(|u| std::sync::Arc::ptr_eq(&u.doc, &before)), "undo goes back to the design before");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(std::sync::Arc::ptr_eq(&s.doc, &before));
 }
 
 #[test]

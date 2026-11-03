@@ -53,6 +53,9 @@ jobs:
         with:
           key: docker-web
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh wasm32-unknown-unknown
       - name: Install trunk
         run: |
           mkdir -p "$HOME/.local/bin"

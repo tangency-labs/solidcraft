@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{EquationCurve, MAX_COORD, MAX_EQUATION_TEXT, MAX_SPLINE_POINTS, Sketch, fit_beziers_mode};
+use solidcraft_sketch::{EquationCurve, MAX_COORD, MAX_EQUATION_TEXT, MAX_SPLINE_POINTS, Sketch, VariableUnit, fit_beziers_mode};
 
 use crate::expr::{self, Defaults, Kind, Value};
 use crate::{DocError, Result};
@@ -36,8 +36,13 @@ pub struct EquationFit {
     pub deviation: f64,
 }
 
-/// How bare numbers read in the formulas: angles in radians (the variable is a plain number,
-/// `sin(t)` its sine), lengths in the design's unit.
+/// Why a range cannot give the variable its unit (#9333): a length and an angle have no unit in
+/// common, and two plain numbers have none to give.
+const RANGE_UNIT_REFUSED: &str =
+    "with the variable in its range's unit, start and end must both be lengths, or one a length and the other a plain number";
+
+/// How bare numbers read in the formulas: angles in radians (a plain variable's `sin(t)` is its
+/// sine), lengths in the design's unit.
 fn defaults(vals: &BTreeMap<String, Value>) -> Defaults {
     let len = vals.get(crate::eval::DESIGN_LEN).map(|v| v.v).filter(|v| v.is_finite() && *v > 0.0).unwrap_or(1.0);
     Defaults { len, ang: 1.0 }
@@ -54,31 +59,45 @@ fn checked_text<'a>(what: &str, e: &'a str) -> Result<&'a str> {
     Ok(e)
 }
 
+/// The variable as the formulas see it, where it is `at` (a number, or the design's unit).
+fn variable_value(eq: &EquationCurve, at: f64, d: Defaults) -> Value {
+    match eq.variable_unit {
+        VariableUnit::Number => Value::num(at),
+        VariableUnit::Range => Value::length(at * d.len),
+    }
+}
+
 /// A formula's value (mm) where the variable is `at`. The variable hides a parameter of its name.
-fn formula(vals: &BTreeMap<String, Value>, e: &str, variable: &str, at: f64, d: Defaults) -> Result<f64> {
+fn formula(vals: &BTreeMap<String, Value>, e: &str, variable: &str, at: Value, d: Defaults) -> Result<f64> {
     let lookup = |n: &str| {
-        if n == variable { Ok(Value::num(at)) } else { vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`"))) }
+        if n == variable { Ok(at) } else { vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`"))) }
     };
     let v = expr::eval_with_defaults(e, &lookup, d)?.to_kind_in(Kind::Length, d)?;
     if v.is_finite() && v.abs() < MAX_COORD { Ok(v) } else { Err(DocError::Expr("the curve goes out of range".into())) }
 }
 
-/// Where the variable starts or ends, as the plain number the formulas see: a number, an angle
-/// (in radians) or a length (in the design's unit).
-fn range_end(vals: &BTreeMap<String, Value>, e: &str, d: Defaults) -> Result<f64> {
+/// Where the variable starts or ends, as a number: a number, an angle (in radians) or a length
+/// (in the design's unit); and which of them it is.
+fn range_end(vals: &BTreeMap<String, Value>, e: &str, d: Defaults) -> Result<(f64, Kind)> {
     let v = expr::eval_with_defaults(e, &|n| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`"))), d)?;
-    let out = match v.kind() {
-        Some(Kind::Unitless | Kind::Angle) => v.v,
-        Some(Kind::Length) => v.v / d.len,
+    let (out, kind) = match v.kind() {
+        Some(kind @ (Kind::Unitless | Kind::Angle)) => (v.v, kind),
+        Some(Kind::Length) => (v.v / d.len, Kind::Length),
         None => return Err(DocError::Expr(format!("expected a number, an angle or a length, got {}", v.describe()))),
     };
-    if out.is_finite() { Ok(out) } else { Err(DocError::Expr("not a finite number".into())) }
+    if out.is_finite() { Ok((out, kind)) } else { Err(DocError::Expr("not a finite number".into())) }
 }
 
 /// The variable's range, checked.
 fn range(vals: &BTreeMap<String, Value>, eq: &EquationCurve, d: Defaults) -> Result<(f64, f64)> {
-    let a = range_end(vals, checked_text("the start", &eq.start)?, d).map_err(|e| DocError::Expr(format!("start: {e}")))?;
-    let b = range_end(vals, checked_text("the end", &eq.end)?, d).map_err(|e| DocError::Expr(format!("end: {e}")))?;
+    let (a, start) = range_end(vals, checked_text("the start", &eq.start)?, d).map_err(|e| DocError::Expr(format!("start: {e}")))?;
+    let (b, end) = range_end(vals, checked_text("the end", &eq.end)?, d).map_err(|e| DocError::Expr(format!("end: {e}")))?;
+    // A plain number beside a length is in the design's unit, as `range_end` already reads it.
+    if eq.variable_unit == VariableUnit::Range
+        && !matches!((start, end), (Kind::Length, Kind::Length | Kind::Unitless) | (Kind::Unitless, Kind::Length))
+    {
+        return Err(DocError::Invalid(RANGE_UNIT_REFUSED.into()));
+    }
     if (b - a).abs() <= 1e-12 * a.abs().max(b.abs()).max(1.0) {
         return Err(DocError::Invalid("the start and the end of the range must differ".into()));
     }
@@ -91,8 +110,9 @@ fn range(vals: &BTreeMap<String, Value>, eq: &EquationCurve, d: Defaults) -> Res
 /// The curve's point where the variable is `at`.
 fn point_at(vals: &BTreeMap<String, Value>, eq: &EquationCurve, at: f64, d: Defaults) -> Result<Vec2> {
     let variable = eq.variable();
+    let value = variable_value(eq, at, d);
     let x = match &eq.x {
-        Some(e) => formula(vals, e, variable, at, d).map_err(|e| DocError::Expr(format!("x: {e}")))?,
+        Some(e) => formula(vals, e, variable, value, d).map_err(|e| DocError::Expr(format!("x: {e}")))?,
         // The explicit form: x is the variable, in the design's unit.
         None => {
             let x = at * d.len;
@@ -102,7 +122,7 @@ fn point_at(vals: &BTreeMap<String, Value>, eq: &EquationCurve, at: f64, d: Defa
             x
         }
     };
-    let y = formula(vals, &eq.y, variable, at, d).map_err(|e| DocError::Expr(format!("y: {e}")))?;
+    let y = formula(vals, &eq.y, variable, value, d).map_err(|e| DocError::Expr(format!("y: {e}")))?;
     Ok(Vec2::new(x, y))
 }
 
@@ -286,7 +306,22 @@ mod tests {
             start: start.into(),
             end: end.into(),
             tolerance: DEFAULT_TOLERANCE,
+            variable_unit: VariableUnit::Number,
         }
+    }
+
+    /// The same curve with its variable in its range's unit.
+    fn with_range_unit(eq: EquationCurve) -> EquationCurve {
+        EquationCurve { variable_unit: VariableUnit::Range, ..eq }
+    }
+
+    fn with_a(mm: f64, design_len: Option<f64>) -> BTreeMap<String, Value> {
+        let mut vals = BTreeMap::new();
+        vals.insert("a".to_string(), Value::length(mm));
+        if let Some(len) = design_len {
+            vals.insert(crate::eval::DESIGN_LEN.to_string(), Value::num(len));
+        }
+        vals
     }
 
     #[test]
@@ -359,5 +394,93 @@ mod tests {
         }
         let long = "t + ".repeat(400) + "t";
         assert!(fit(&vals, &eq(Some(&long), "t", "0", "1")).is_err());
+    }
+
+    /// The issue's parabola (#9333): y = a^2 / (4 t) over t from a to 3a, where t is a length.
+    /// Every point is exact, and the curve is the same in millimetres whatever the design's unit.
+    #[test]
+    fn a_variable_in_its_ranges_unit_gives_the_exact_parabola_in_any_design_unit() {
+        for design_len in [None, Some(25.4)] {
+            let vals = with_a(10.0, design_len);
+            let e = with_range_unit(eq(Some("t"), "a ^ 2 / (4 * t)", "a", "3 * a"));
+            let fit = fit(&vals, &e).unwrap();
+            let (first, last) = (fit.points[0], *fit.points.last().unwrap());
+            assert!((first - Vec2::new(10.0, 2.5)).len() < 1e-9, "{design_len:?} {first:?}");
+            assert!((last - Vec2::new(30.0, 100.0 / 120.0)).len() < 1e-9, "{design_len:?} {last:?}");
+            for p in &fit.points {
+                assert!((p.y - 100.0 / (4.0 * p.x)).abs() < 1e-9 && (10.0 - 1e-9..=30.0 + 1e-9).contains(&p.x), "{design_len:?} {p:?}");
+            }
+            assert!(fit.deviation <= DEFAULT_TOLERANCE);
+        }
+    }
+
+    /// The explicit form names its variable x; bare numbers beside it are in the design's unit.
+    #[test]
+    fn the_explicit_form_and_bare_numbers_follow_the_design_unit() {
+        let vals = with_a(25.4, Some(25.4));
+        let fit = fit(&vals, &with_range_unit(eq(None, "x + 1", "0", "a"))).unwrap();
+        let (first, last) = (fit.points[0], *fit.points.last().unwrap());
+        assert!((first - Vec2::new(0.0, 25.4)).len() < 1e-9, "{first:?}");
+        assert!((last - Vec2::new(25.4, 50.8)).len() < 1e-9, "{last:?}");
+    }
+
+    /// The rule the issue settled for the range's two ends (#9333).
+    #[test]
+    fn a_range_gives_its_unit_only_from_lengths_and_plain_numbers_beside_them() {
+        // A plain number beside a length is in the design's unit, on either side.
+        for (design_len, unit) in [(None, 1.0), (Some(25.4), 25.4)] {
+            let vals = with_a(100.0, design_len);
+            let up = fit(&vals, &with_range_unit(eq(Some("t"), "t / 2", "1", "a"))).unwrap();
+            assert!((up.points[0] - Vec2::new(unit, unit / 2.0)).len() < 1e-9, "{:?}", up.points[0]);
+            assert!((*up.points.last().unwrap() - Vec2::new(100.0, 50.0)).len() < 1e-9);
+            let down = fit(&vals, &with_range_unit(eq(Some("t"), "t / 2", "a", "1"))).unwrap();
+            assert!((down.points[0] - Vec2::new(100.0, 50.0)).len() < 1e-9);
+            assert!((*down.points.last().unwrap() - Vec2::new(unit, unit / 2.0)).len() < 1e-9);
+        }
+        // Nothing else: a length and an angle, and ends with no length to give.
+        let vals = with_a(10.0, None);
+        for (a, b) in [("a", "90 deg"), ("90 deg", "a"), ("0 deg", "90 deg"), ("0", "90 deg"), ("90 deg", "0"), ("0", "1")] {
+            let why = fit(&vals, &with_range_unit(eq(Some("t"), "t", a, b))).unwrap_err().to_string();
+            assert!(
+                why.contains(
+                    "with the variable in its range's unit, start and end must both be lengths, or one a length and the other a plain number"
+                ),
+                "{a}..{b}: {why}"
+            );
+        }
+        // Off, the same ranges build, with the variable a plain number.
+        assert!(fit(&vals, &eq(Some("t"), "t", "a", "90 deg")).is_ok());
+    }
+
+    /// Off (#9333): the variable is a plain number over a length range, as saved curves expect.
+    #[test]
+    fn without_the_flag_the_variable_stays_a_plain_number() {
+        let vals = with_a(10.0, None);
+        let plain = fit(&vals, &eq(Some("t"), "t * t / 20", "0 mm", "40 mm")).unwrap();
+        let last = *plain.points.last().unwrap();
+        assert!((last - Vec2::new(40.0, 80.0)).len() < 1e-9, "{last:?}");
+        assert!(fit(&vals, &eq(Some("t"), "a ^ 2 / (4 * t)", "a", "3 * a")).unwrap_err().to_string().contains("length^2"));
+        // On, that plain-number formula is a length squared, and is refused rather than misread.
+        assert!(fit(&vals, &with_range_unit(eq(Some("t"), "t * t / 20", "0 mm", "40 mm"))).is_err());
+    }
+
+    #[test]
+    fn hostile_formulas_with_the_variable_in_its_ranges_unit_are_refused() {
+        let vals = with_a(10.0, Some(25.4));
+        for (x, y, a, b) in [
+            ("t", "a ^ 2 / (4 * t)", "0", "a"),
+            ("t", "sqrt(t)", "a", "3 * a"),
+            ("t", "t ^ 1000", "a", "3 * a"),
+            ("t", "t", "a", "a"),
+            ("t", "t", "0", "1e300 mm"),
+            ("t", "t", "a", "1e308 in"),
+            ("t", "t", "a", "nan"),
+            ("t", "t", "a * a", "3 * a"),
+            ("1e300 * t", "t", "a", "3 * a"),
+            ("sin(t)", "t", "a", "3 * a"),
+            ("t", "unknown_name * t", "a", "3 * a"),
+        ] {
+            assert!(fit(&vals, &with_range_unit(eq(Some(x), y, a, b))).is_err(), "{x} {y} {a}..{b}");
+        }
     }
 }

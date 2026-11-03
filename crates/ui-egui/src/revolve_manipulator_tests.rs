@@ -29,7 +29,7 @@ fn handle_at(h: &mut Harness, name: &str, world: Value) {
     assert!((actual[0] - expected[0]).hypot(actual[1] - expected[1]) < 1.0, "{actual:?} != {expected:?}");
 }
 fn volume(h: &Harness) -> f64 {
-    kernel::measure(&h.app.session.world_state().body("Main").unwrap().body).unwrap().volume
+    kernel::measure(&h.app.session.world_state().unwrap().body("Main").unwrap().body).unwrap().volume
 }
 fn angle(h: &Harness) -> String {
     let FeatureKind::Revolve { angle, .. } = &h.app.session.doc.find_feature("Turn").unwrap().kind else { panic!("revolve") };
@@ -89,7 +89,7 @@ fn symmetric_boundary_drags_edit_included_angle_and_cancel_is_lossless() {
         assert_eq!(entered, "90 deg", "second {handle} drag");
         h.step(&json!({"widget":"OK"})).unwrap();
         assert!((volume(&h) - expected_volume(90.0)).abs() < 0.1, "{handle}: {} angle {}", volume(&h), angle(&h));
-        let bounds = h.app.session.world_state().body("Main").unwrap().mesh().bounds();
+        let bounds = h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds();
         assert!((bounds.max.z - 15.0 / 2.0f64.sqrt()).abs() < 0.03 && (bounds.min.z + 15.0 / 2.0f64.sqrt()).abs() < 0.03);
         let path = h.dir.join("symmetric.solidcraft");
         h.app.run("file.save", json!({"path":path})).unwrap();
@@ -139,7 +139,7 @@ fn two_side_boundary_preserves_other_angle_and_parameter_binding() {
     assert_eq!(angle, "60 deg");
     assert_eq!(angle2.as_deref(), Some("45 deg"));
     assert_eq!(h.app.session.doc.find_feature("Turn").unwrap().param_names, names);
-    assert!((h.app.session.world_state().body("Dependent").unwrap().mesh().bounds().max.z - std::f64::consts::FRAC_PI_4).abs() < 1e-8);
+    assert!((h.app.session.world_state().unwrap().body("Dependent").unwrap().mesh().bounds().max.z - std::f64::consts::FRAC_PI_4).abs() < 1e-8);
     assert!((volume(&h) - expected_volume(105.0)).abs() < 0.03);
 }
 
@@ -225,6 +225,44 @@ fn free_drag_and_invalid_expression_stay_editable_before_commit() {
     assert!((volume(&h) - expected_volume(60.0)).abs() < 0.03);
 }
 
+/// Typing 0° builds no solid, and the dialog keeps the range error. The grab point stays on
+/// the profile, and dragging it brings the angle back.
+#[test]
+fn zero_angle_keeps_the_grab_point_and_a_drag_brings_the_angle_back() {
+    for (params, handle, drag_to, entered_angle, committed) in
+        [(json!({}), "revolve", 45.0, "45 deg", 45.0), (json!({"direction": "symmetric"}), "revolve2", -45.0, "90 deg", 90.0)]
+    {
+        let mut h = fixture(Harness::new(), params.clone());
+        open(&mut h);
+        h.step(&json!({"click":{"handle":"dialog:Angle"}})).unwrap();
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        h.step(&json!({"text":"0 deg"})).unwrap();
+        h.frames(4);
+        handle_at(&mut h, "revolve", at_angle(0.0));
+        // A preview refusal stays on the preview while the angle field is still being typed in.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while h.app.preview.busy {
+            assert!(std::time::Instant::now() < deadline, "the preview did not finish");
+            h.frames(1);
+        }
+        let error = h.app.dialog.as_ref().and_then(|dialog| dialog.error.clone()).or_else(|| h.app.preview.error.clone()).unwrap_or_default();
+        assert!(error.contains("more than 0"), "{error}");
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_some(), "a zero angle still builds no solid");
+        h.step(&json!({"drag":[{"handle":handle},{"world":at_angle(drag_to)}]})).unwrap();
+        let crate::dialogs::Kind::Revolve { angle: entered, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("revolve") };
+        assert_eq!(entered, entered_angle);
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|dialog| &dialog.error));
+        assert_eq!(angle(&h), entered_angle);
+        let got = volume(&h);
+        let want = expected_volume(committed);
+        // A symmetric drag that starts with both handles stacked at 0° lands within a tenth of a
+        // cubic millimetre of the analytic quarter turn.
+        assert!((got - want).abs() < 0.1, "params={params} got={got} want={want}");
+    }
+}
+
 #[test]
 fn second_side_can_be_dragged_to_zero_without_becoming_full_turn() {
     let mut h = fixture(Harness::new(), json!({"angle":"60 deg","angle2":"30 deg"}));
@@ -267,19 +305,19 @@ fn legacy_reversed_axis_symmetric_interval_is_shown_and_preserved_exactly() {
     let FeatureKind::Revolve { convention, .. } = &h.app.session.doc.find_feature("Turn").unwrap().kind else { panic!("revolve") };
     assert_eq!(*convention, solidcraft_engine::doc::RevolveConvention::LegacyAxisStart);
     let original = serde_json::to_value(&h.app.session.doc.find_feature("Turn").unwrap().kind).unwrap();
-    let before = h.app.session.world_state().body("Main").unwrap().mesh().bounds();
+    let before = h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds();
     assert!(before.min.x < -14.9 && before.max.x < 7.6 && before.min.z > -1e-6 && before.max.z > 14.9);
     open(&mut h);
     handle_at(&mut h, "revolve", at_angle(180.0));
     handle_at(&mut h, "revolve2", at_angle(60.0));
     h.step(&json!({"widget":"OK"})).unwrap();
     assert_eq!(serde_json::to_value(&h.app.session.doc.find_feature("Turn").unwrap().kind).unwrap(), original);
-    assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds(), before);
+    assert_eq!(h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds(), before);
     open(&mut h);
     h.step(&json!({"drag":[{"handle":"revolve"},{"world":at_angle(135.0)}]})).unwrap();
     h.step(&json!({"widget":"OK"})).unwrap();
     assert_eq!(angle(&h), "90 deg");
-    let after = h.app.session.world_state().body("Main").unwrap().mesh().bounds();
+    let after = h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds();
     assert!((after.min.x + 15.0 / 2.0f64.sqrt()).abs() < 0.03 && (after.max.x - 15.0 / 2.0f64.sqrt()).abs() < 0.03);
     assert!(after.min.z > 7.0 && after.max.z > 14.9);
     assert!((volume(&h) - expected_volume(90.0)).abs() < 0.1);
@@ -307,8 +345,8 @@ fn canonical_symmetric_ring_preview_drag_and_reopen_match_material() {
         let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
         let preview = h.app.session.preview_world(&commands).unwrap();
         let body = &preview.after.body("Main").unwrap().body;
-        assert!(body.contains(solidcraft_engine::geom::Vec3::new(3.0, 5.0, 0.0)));
-        assert!(!body.contains(solidcraft_engine::geom::Vec3::new(0.0, 5.0, 3.0)));
+        assert_eq!(body.classify_point(solidcraft_engine::geom::Vec3::new(3.0, 5.0, 0.0)).unwrap(), solidcraft_engine::kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(solidcraft_engine::geom::Vec3::new(0.0, 5.0, 3.0)).unwrap(), solidcraft_engine::kernel::PointClass::Outside);
         let bounds = preview.after.body("Main").unwrap().mesh().bounds();
         assert!((bounds.min.x - 2.0f64.sqrt()).abs() < 0.02 && (bounds.max.x - 4.0).abs() < 0.02, "{bounds:?}");
         assert!((bounds.min.z + 2.0 * 2.0f64.sqrt()).abs() < 0.02 && (bounds.max.z - 2.0 * 2.0f64.sqrt()).abs() < 0.02);
@@ -337,7 +375,7 @@ fn reversed_axis_to_object_canvas_sweep_and_preview_follow_the_quarter_target() 
     let mut h = fixture(Harness::new(), json!({"axis":{"origin":[0,0,0],"dir":[0,-2,0]},"to":[0,2,12],"angle":"45 deg"}));
     let original = serde_json::to_value(&h.app.session.doc.find_feature("Turn").unwrap().kind).unwrap();
     let names = h.app.session.doc.find_feature("Turn").unwrap().param_names.clone();
-    let before = h.app.session.world_state().body("Main").unwrap().mesh().bounds();
+    let before = h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds();
     let p = 12.5 / 2.0f64.sqrt();
     open(&mut h);
     assert!(h.widget("Sweep 90.0°").is_some());
@@ -347,9 +385,12 @@ fn reversed_axis_to_object_canvas_sweep_and_preview_follow_the_quarter_target() 
     let preview = h.app.session.preview_world(&commands).unwrap();
     let result = preview.after.body("Main").unwrap();
     assert_eq!(result.mesh().bounds(), before);
-    assert!(result.body.contains(solidcraft_engine::geom::Vec3::new(p, 2.5, p)));
+    assert_eq!(result.body.classify_point(solidcraft_engine::geom::Vec3::new(p, 2.5, p)).unwrap(), solidcraft_engine::kernel::PointClass::Inside);
     for (x, z) in [(-p, p), (-p, -p), (p, -p)] {
-        assert!(!result.body.contains(solidcraft_engine::geom::Vec3::new(x, 2.5, z)));
+        assert_eq!(
+            result.body.classify_point(solidcraft_engine::geom::Vec3::new(x, 2.5, z)).unwrap(),
+            solidcraft_engine::kernel::PointClass::Outside
+        );
     }
     assert!((kernel::measure(&result.body).unwrap().volume - expected_volume(90.0)).abs() < 0.03);
     h.step(&json!({"widget":"OK"})).unwrap();
@@ -362,5 +403,5 @@ fn reversed_axis_to_object_canvas_sweep_and_preview_follow_the_quarter_target() 
     assert!(h.widget("Sweep 90.0°").is_some());
     h.step(&json!({"widget":"OK"})).unwrap();
     assert_eq!(serde_json::to_value(&h.app.session.doc.find_feature("Turn").unwrap().kind).unwrap(), original);
-    assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds(), before);
+    assert_eq!(h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds(), before);
 }

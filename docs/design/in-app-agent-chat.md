@@ -26,7 +26,7 @@ What the prototype uses:
 | Direction | Message | Use |
 |---|---|---|
 | → agent | `initialize {protocolVersion: 1, clientCapabilities, clientInfo}` | We declare no file system and no terminal (`fs.readTextFile/writeTextFile: false`, `terminal: false`), and terminal login (`auth.terminal: true`, plus the older `_meta["terminal-auth"]`). The reply carries `agentInfo` and `authMethods`. |
-| → agent | `session/new {cwd, mcpServers}` | `mcpServers` holds one stdio server: `solidcraft-cli mcp --connect 127.0.0.1:PORT`. `cwd` is the open design's folder (else SolidCraft's own `agent` folder). |
+| → agent | `session/new {cwd, mcpServers}` | `mcpServers` holds one stdio server: `solidcraft-cli mcp --connect 127.0.0.1:PORT`. `cwd` is the open design's folder (else SolidCraft's own `agent` folder). The system note goes in the standard `systemPrompt` field when the agent offers `sessionCapabilities.systemPrompt`, in `_meta.antigravity.systemPrompt.append` when Antigravity offers that, and always in `_meta.systemPrompt.append` for the Claude adapter. An agent with none of these doesn't get it. |
 | → agent | `session/set_config_option {sessionId, configId, value}` | Set an advertised select option, including a model, reasoning effort or mode. The complete returned `configOptions` snapshot confirms the state; rejection leaves the previous confirmed snapshot intact. |
 | → agent | `session/prompt {sessionId, prompt: [content]}` | One text block. The reply comes at the end of the turn with `stopReason` (`end_turn`, `cancelled`, `refusal`, …). |
 | → agent | `session/cancel {sessionId}` (notification) | Cancel button. Open permission prompts are answered `cancelled` first, as the spec asks. |
@@ -126,8 +126,10 @@ requests, for a backend that runs tools in process). Two backends exist:
   that speaks the Messages API), and runs the tool loop itself: it starts the same
   `solidcraft-cli mcp --connect` server an ACP agent would get and is its MCP client
   (`tools/list` becomes the endpoint's tools, `crash_reports` left out), so its calls pass the
-  same gate, limits, questions and undo as an ACP agent's. At most 24 model requests per
-  message. The HTTP request is the desktop host's (`Services::agent_http`, ureq with no
+  same gate, limits, questions and undo as an ACP agent's. There is no cap on model requests
+  per message; Stop ends it. It lists the endpoint's models at each connection (`Event::Models`),
+  and when it can't, `Event::ModelsNote` says why and only the configured model is offered. The
+  HTTP request is the desktop host's (`Services::agent_http`, ureq with no
   redirects); the key comes from the system keychain (`Services::secrets`, the keyring crate)
   for the connection only and is refused over plain HTTP to another computer. The two protocols
   differ only in their wire shape: OpenAI sends the system note as a message, function tools
@@ -187,8 +189,18 @@ parks that state alongside its `Session`; switching restores both together. Pane
 placement, agent discovery, the latest sign-in evidence per agent, endpoint model cache,
 settings dialogs and the desktop endpoint starter remain window state. A new tab gets a fresh conversation. Closing a tab drops its
 backend; closing the last tab or replacing its design (including programmatic New, Open and
-Recover commands or scripts) clears its conversation.
+Recover commands or scripts from external callers) clears its conversation.
 Conversation state is in memory only and does not change the design file format.
+
+An admitted request from the current chat carries its turn's validity flag through direct
+dispatch, cursor animation and asynchronous file loading. Only while that request applies,
+`with_tool_request` marks its document changes as agent-initiated. New/Recover replacements
+retain the chat and reset its undo boundary to the new design. Opening a new tab groups the
+old design's completed changes, moves the conversation and its endpoint into the new tab,
+and starts a new undo segment without resetting the turn's limits. A failed batch that
+restores its original design also restores its original turn boundary. Opening an already
+active file is unchanged; opening a file owned by another tab is refused, preserving both
+conversations. The marker is never taken from JSON and does not persist between requests.
 
 Leaving a tab cancels its running turn, declines outstanding approvals, and merges completed
 changes into that design's undo history before swapping sessions. Its backend conversation
@@ -254,7 +266,7 @@ returns the whole state, for tests and screenshots.
 | Area | Work |
 |---|---|
 | Conversation | Diffs, persisted conversation history, resume (`session/load`) |
-| Session controls | Model and mode pickers from `configOptions` / `modes`, slash commands |
+| Session controls | Slash commands |
 | Auth | An embedded terminal or "open a terminal here" for terminal logins on each OS; logout |
 | Discovery | Read the ACP registry; keychain-aware login check on macOS |
 | Packaging | Make sure every desktop package ships `solidcraft-cli` next to `solidcraft` (Flatpak, AppImage, macOS bundle, Windows zip), or serve MCP from the app binary itself |

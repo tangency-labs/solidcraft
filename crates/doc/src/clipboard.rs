@@ -207,6 +207,7 @@ impl crate::Feature {
             K::Draft { neutral, .. } => checked_plane(neutral, 0)?,
             K::ReplaceFace { target, .. } => checked_plane(target, 0)?,
             K::SurfaceExtend { up_to: Some(crate::ExtendTo::Plane(plane)), .. } => checked_plane(plane, 0)?,
+            K::Thread { up_to: Some(crate::ThreadLimit::Plane(plane)), .. } => checked_plane(plane, 0)?,
             K::ConstructionAxis { def } => {
                 for r in def.refs() {
                     checked_geo(r, 0)?;
@@ -276,6 +277,7 @@ impl crate::Feature {
             K::Draft { neutral, .. } => remap_plane(neutral, ids, bodies, 0)?,
             K::ReplaceFace { target, .. } => remap_plane(target, ids, bodies, 0)?,
             K::SurfaceExtend { up_to: Some(crate::ExtendTo::Plane(plane)), .. } => remap_plane(plane, ids, bodies, 0)?,
+            K::Thread { up_to: Some(crate::ThreadLimit::Plane(plane)), .. } => remap_plane(plane, ids, bodies, 0)?,
             K::ConstructionAxis { def } => {
                 for r in def.refs_mut() {
                     remap_geo(r, ids, bodies, 0)?;
@@ -316,7 +318,7 @@ fn checked_plane(p: &PlaneRef, depth: usize) -> crate::Result<()> {
                 checked_geo(g, depth + 1)?;
             }
         }
-        PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } => {
+        PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } | PlaneRef::AxisPoint { axis: a, point: b } => {
             checked_geo(a, depth + 1)?;
             checked_geo(b, depth + 1)?;
         }
@@ -333,7 +335,12 @@ fn checked_plane(p: &PlaneRef, depth: usize) -> crate::Result<()> {
             checked_geo(b, depth + 1)?;
             checked_geo(c, depth + 1)?;
         }
-        PlaneRef::Tangent { face, .. } => checked_geo(face, depth + 1)?,
+        PlaneRef::Tangent { face, reference, .. } => {
+            checked_geo(face, depth + 1)?;
+            if let Some(r) = reference {
+                checked_geo(r, depth + 1)?;
+            }
+        }
         PlaneRef::AlongPath { path, .. } => checked_geo(path, depth + 1)?,
         _ => {}
     }

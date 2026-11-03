@@ -21,6 +21,8 @@
 # releases/latest/download/<name> links in the README keep working across releases.
 #
 # A dry run: dispatch with draft=false (the default). Only the release branch may create drafts.
+# The release gate (release-gate.yml) calls it as such a dry run, without secrets (unsigned) and
+# without the release job (packages_only).
 # A dry run from any branch also test-signs the Windows files when SIGNPATH_API_TOKEN exists:
 #   gh workflow run release.yml --ref <branch> -f draft=false [-f signpath_signing_policy=test-signing]
 name: Release
@@ -33,6 +35,25 @@ on:
     branches: [release]
   workflow_dispatch:
     inputs:
+      draft:
+        description: "Create/update a draft (release branch only; off: build artifacts only)"
+        type: boolean
+        default: false
+      signpath_signing_policy:
+        description: "SignPath signing policy for the Windows files (empty: the repository variable, else test-signing)"
+        type: string
+        default: ""
+  # The release gate (release-gate.yml): a dry run (draft false) of every package and its checks.
+  # The event stays the caller's (workflow_dispatch), so a call runs as a dispatched dry run does.
+  # The gate passes no secrets, so nothing is signed (the signing steps skip without their
+  # secrets, as on a fork), and packages_only skips the release job (checksums, update signing,
+  # publishing).
+  workflow_call:
+    inputs:
+      packages_only:
+        description: "Build and check every package only: no release job"
+        type: boolean
+        default: false
       draft:
         description: "Create/update a draft (release branch only; off: build artifacts only)"
         type: boolean
@@ -105,6 +126,9 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-icons
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - run: cargo build --release --locked -p solidcraft-cli
       - run: |
           . packaging/env.sh
@@ -144,6 +168,9 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-linux-${{ matrix.arch }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - name: Build and package (AppImage, deb, rpm, tar.gz)
         run: packaging/linux/package.sh
       - name: Check the packages
@@ -368,6 +395,9 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-macos-${{ matrix.arch }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh ${{ matrix.target }}
       - name: Build
         run: packaging/macos/package.sh --build-only ${{ matrix.target }}
       # Not named release-*: the release job collects every release-* artifact as an asset.
@@ -466,6 +496,9 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-windows-${{ matrix.arch }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh ${{ matrix.target }}
       - name: Install WiX
         shell: pwsh
         run: |
@@ -597,6 +630,9 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-web
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh wasm32-unknown-unknown
       - name: Install trunk
         run: |
           curl -fsSL "https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" \
@@ -612,7 +648,8 @@ jobs:
   release:
     name: GitHub Release or dry-run artifacts
     needs: [version, linux, flatpak, arch, snap, freebsd, macos, windows, web]
-    if: needs.version.outputs.build == 'true'
+    # Not for the release gate (packages_only): it builds and checks the packages, nothing more.
+    if: needs.version.outputs.build == 'true' && !inputs.packages_only
     runs-on: ubuntu-latest
     permissions:
       contents: write

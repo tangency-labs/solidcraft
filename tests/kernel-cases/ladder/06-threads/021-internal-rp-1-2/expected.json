@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "a modelled Rp 1/2 parallel internal pipe thread (ISO 7-1) in a d18.631 (its minor) bore through a 40x40 block six turns thick",
+ "source": "analytic",
+ "method": "groove volume per turn 2 pi int r w(r) dr over the material it cuts (Pappus on the axial section; a screw motion), w(r) = P - flat - depth (tan a + tan b); six whole turns through the block, both ends free, so V = stock - 6 x that. Tolerance 0.01%: SMLib's exact screw sweep. the space between the teeth is a groove of straight flanks, its tooth (H - h) tan(half angle) wide at the crest and its groove as wide at the root (the truncations split equally); the standard's crest and root rounds are flats here. ISO 7-1 Rp 1/2, the parallel internal thread an R screws into: the ISO 228-1 profile (H = 0.960491 P, h = 0.640327 P) at the gauge diameters, d = 20.955, D1 = d - 2h = 18.631, the bore; the groove from the bore wall out to r 10.4775, w(r) = P - 0.16667 P - (r - 9.3155) 2 tan27.5",
+ "body_count": 1,
+ "volume_mm3": 14061.219568064,
+ "tolerance": {
+  "rel": 0.0001
+ }
+}

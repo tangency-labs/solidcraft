@@ -1,0 +1,67 @@
+# corpus/m0-revolve-primitives: persistent names after a rebuild (apps/solidcraft-cli/tests/naming_corpus.rs)
+body Body1: 10 faces, 24 edges
+Body1 face F2:end
+Body1 face F2:side:l1
+Body1 face F2:side:l2
+Body1 face F2:side:l2#[F2:end]
+Body1 face F2:side:l2#[F2:start]
+Body1 face F2:side:l3
+Body1 face F2:side:l4
+Body1 face F2:side:l4#[F2:end]
+Body1 face F2:side:l4#[F2:start]
+Body1 face F2:start
+Body1 edge F2:end|F2:side:l1
+Body1 edge F2:end|F2:side:l2#[F2:end]
+Body1 edge F2:end|F2:side:l3
+Body1 edge F2:end|F2:side:l4#[F2:end]
+Body1 edge F2:side:l1|F2:side:l2
+Body1 edge F2:side:l1|F2:side:l2#[F2:end]
+Body1 edge F2:side:l1|F2:side:l2#[F2:start]
+Body1 edge F2:side:l1|F2:side:l4
+Body1 edge F2:side:l1|F2:side:l4#[F2:end]
+Body1 edge F2:side:l1|F2:side:l4#[F2:start]
+Body1 edge F2:side:l1|F2:start
+Body1 edge F2:side:l2#[F2:end]|F2:side:l3
+Body1 edge F2:side:l2#[F2:start]|F2:side:l3
+Body1 edge F2:side:l2#[F2:start]|F2:start
+Body1 edge F2:side:l2|F2:side:l2#[F2:end]
+Body1 edge F2:side:l2|F2:side:l2#[F2:start]
+Body1 edge F2:side:l2|F2:side:l3
+Body1 edge F2:side:l3|F2:side:l4
+Body1 edge F2:side:l3|F2:side:l4#[F2:end]
+Body1 edge F2:side:l3|F2:side:l4#[F2:start]
+Body1 edge F2:side:l3|F2:start
+Body1 edge F2:side:l4#[F2:start]|F2:start
+Body1 edge F2:side:l4|F2:side:l4#[F2:end]
+Body1 edge F2:side:l4|F2:side:l4#[F2:start]
+body Body2: 9 faces, 21 edges
+Body2 face F3:+x
+Body2 face F3:+y
+Body2 face F3:+z
+Body2 face F3:-x
+Body2 face F3:-y
+Body2 face F3:-z
+Body2 face F4:side#1
+Body2 face F4:side#2
+Body2 face F6:blend:F3:+z|F3:-x
+Body2 edge F3:+x|F3:+y
+Body2 edge F3:+x|F3:+z
+Body2 edge F3:+x|F3:-y
+Body2 edge F3:+x|F3:-z
+Body2 edge F3:+y|F3:+z
+Body2 edge F3:+y|F3:-x
+Body2 edge F3:+y|F3:-z
+Body2 edge F3:+y|F6:blend:F3:+z|F3:-x
+Body2 edge F3:+z|F3:-y
+Body2 edge F3:+z|F4:side#1
+Body2 edge F3:+z|F4:side#2
+Body2 edge F3:+z|F6:blend:F3:+z|F3:-x
+Body2 edge F3:-x|F3:-y
+Body2 edge F3:-x|F3:-z
+Body2 edge F3:-x|F6:blend:F3:+z|F3:-x
+Body2 edge F3:-y|F3:-z
+Body2 edge F3:-y|F6:blend:F3:+z|F3:-x
+Body2 edge F3:-z|F4:side#1
+Body2 edge F3:-z|F4:side#2
+Body2 edge F4:side#1|F4:side#2~1 [geometric]
+Body2 edge F4:side#1|F4:side#2~2 [geometric]

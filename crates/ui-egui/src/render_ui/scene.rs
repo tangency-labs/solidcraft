@@ -25,7 +25,7 @@ pub(crate) fn decoration(app: &SolveApp, names: &[String]) -> Decoration {
     if !super::active(app) {
         return Decoration::default();
     }
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let bodies: Vec<_> = names.iter().filter_map(|name| state.body(name)).collect();
     let Some(body) = bodies.first() else { return Decoration::default() };
     let look = object_look(app, body);
@@ -51,7 +51,7 @@ fn object_look(app: &SolveApp, body: &ModelBody) -> Option<Look> {
 }
 
 pub(crate) fn same_look(app: &SolveApp, names: &[String]) -> bool {
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let mut looks = names.iter().filter_map(|name| state.body(name)).map(|body| app.session.doc.model_display_look(body));
     let Some(first) = looks.next() else { return false };
     looks.all(|look| look == first)
@@ -92,7 +92,7 @@ fn section(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) -> bool {
             secondary: &match key {
                 "lights" => light_types(app).len(),
                 "shots" => app.session.doc.render.setups.len(),
-                _ => app.session.world_state().bodies.len(),
+                _ => crate::open_meshing::session_world(&app.session).bodies.len(),
             }
             .to_string(),
             fold: Some(open),
@@ -105,13 +105,13 @@ fn section(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) -> bool {
         crate::scenario::publish_target(&id, rect);
     }
     if row.actions.iter().any(|r| r.clicked()) {
-        // The existing Shots manager owns naming and saving. This navigation never saves.
+        // Shot naming and saving use the existing Save shot prompt.
         if key == "lights" {
             if let Err(error) = super::light::edit(app, "render.lights.add", None, Some(json!({"kind":"area"}))) {
                 app.set_status(error, true);
             }
         } else {
-            app.start("render.settings.get");
+            app.start("render.settings.set");
         }
     }
     if row.clicked && key == "lights" {
@@ -200,7 +200,6 @@ pub(crate) fn sections(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if row.clicked {
         select(app, "environment", None);
-        app.render_workspace.view.inspector.page = inspector::Page::Environment;
     }
     if section(app, ui, "lights") {
         for (index, light) in super::light::rows(app).unwrap_or_default().iter().enumerate() {
@@ -243,7 +242,6 @@ pub(crate) fn sections(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             if row.clicked {
                 select(app, "light", Some(id));
-                app.render_workspace.view.inspector.page = inspector::Page::Lighting;
             }
         }
     }
@@ -353,7 +351,7 @@ pub(crate) struct LookGroup {
 
 pub(crate) fn groups(app: &SolveApp) -> Vec<LookGroup> {
     let mut groups: Vec<LookGroup> = Vec::new();
-    for body in &app.session.world_state().bodies {
+    for body in &crate::open_meshing::session_world(&app.session).bodies {
         for look in app.session.doc.model_used_looks(body) {
             if let Some(group) = groups.iter_mut().find(|g| g.look == look) {
                 group.objects.push(body.name.clone());
@@ -443,7 +441,7 @@ pub(crate) fn objects(app: &mut SolveApp, ui: &mut egui::Ui, hover_bodies: &mut 
             browser::toggle(app, &key, true);
         }
         let source = group.objects.first().and_then(|name| {
-            let state = app.session.world_state();
+            let state = crate::open_meshing::session_world(&app.session);
             let body = state.body(name)?;
             let face = if app.session.doc.model_display_look(body) == group.look {
                 None

@@ -95,7 +95,7 @@ fn edge_points(s: &Session, sel: &Sel) -> Vec<(Vec3, SnapKind)> {
 /// same circle, in order: the whole arc when the kernel split it.
 fn whole_arc(s: &Session, sel: &Sel, center: Vec3, axis: UnitVec3, radius: f64) -> Option<Vec<Vec3>> {
     let Sel::Edge { body, index, .. } = sel else { return None };
-    let st = s.world_state();
+    let st = s.world_state().ok()?;
     let m = st.body(body)?.mesh();
     let tol = (radius * 1e-6).max(1e-9);
     let on = |e: &Vec<Vec3>| e.iter().all(|p| (p.dist(center) - radius).abs() <= tol * 10.0 && (*p - center).dot(axis).abs() <= tol * 10.0);
@@ -157,7 +157,7 @@ fn along(pts: &[Vec3], f: f64) -> Option<Vec3> {
 /// ends on the axis; a sphere or torus its centre.
 fn face_points(s: &Session, sel: &Sel) -> Vec<(Vec3, SnapKind)> {
     let Sel::Face { body, index, .. } = sel else { return Vec::new() };
-    let st = s.world_state();
+    let Ok(st) = s.world_state() else { return Vec::new() };
     let Some(b) = st.body(body) else { return Vec::new() };
     let Some((shape, _, tris)) = crate::cmd::shape_of(s, sel) else { return Vec::new() };
     let verts: Vec<Vec3> = tris.iter().flat_map(|t| t.iter().copied()).collect();

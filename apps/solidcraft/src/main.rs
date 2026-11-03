@@ -895,6 +895,8 @@ fn main() -> eframe::Result {
     if let Err(e) = startup::relaunch_with_version_compat() {
         log::warn!("startup: OCLP check failed (continuing normally): {e}");
     }
+    // SOLIDCRAFT_PROFILE=1: the profiler records from the start (diagnostics.profile reads it).
+    solidcraft_engine::timing::profile_from_env();
     // Validate before legacy adoption, crash markers or any user preference read.
     let settings = settings_dir().map_err(|error| eframe::Error::AppCreation(error.into()))?;
     if std::env::var_os("SOLIDCRAFT_SETTINGS_DIR").is_none() {
@@ -1126,6 +1128,12 @@ fn main() -> eframe::Result {
                     })
                     .collect();
                 let info = rs.adapter.get_info();
+                if !app.preferences.graphics_adapter.is_empty() && !info.name.eq_ignore_ascii_case(app.preferences.graphics_adapter.as_str()) {
+                    eprintln!(
+                        "SolidCraft graphics: preferred adapter {:?} was not used; using {:?} instead",
+                        app.preferences.graphics_adapter, info.name
+                    );
+                }
                 let samples = scene_msaa_request(saved_samples);
                 let supported = scene_sample_choices(depth_bits, STENCIL_BITS, |depth| {
                     eframe::egui_wgpu::supported_msaa_samples(&rs.adapter, &rs.device, rs.target_format, depth)

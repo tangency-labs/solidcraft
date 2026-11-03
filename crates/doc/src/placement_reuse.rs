@@ -31,6 +31,7 @@ impl Model {
             return false;
         }
         self.evaluate(doc);
+        self.mark_fingerprinted(doc);
         if !self.no_cache && self.primed.is_none() && self.placement_local {
             self.placement_inputs = Some(Inputs { document: doc.clone(), state: Arc::downgrade(&self.state()) });
         }
@@ -38,13 +39,16 @@ impl Model {
     }
 
     /// [`Model::refingerprint`] for a shared document: a proof that held for the results before
-    /// is kept for `doc`, since nothing was built differently (pinned body names, say).
-    pub fn refingerprint_shared(&mut self, doc: &Arc<Document>) {
+    /// is kept for `doc`, since nothing was built differently (pinned body names, say). The
+    /// first `keep` results keep their fingerprints: [`Model::pinned_prefix`] of the document
+    /// before the pins, or 0.
+    pub fn refingerprint_shared(&mut self, doc: &Arc<Document>, keep: usize) {
         let proven = !self.no_cache
             && self.primed.is_none()
             && self.placement_inputs.as_ref().is_some_and(|inputs| inputs.state.upgrade().is_some_and(|state| Arc::ptr_eq(&state, &self.state())))
             && !self.is_stale();
-        self.refingerprint(doc);
+        self.refingerprint_from(doc, keep);
+        self.mark_fingerprinted(doc);
         if proven && self.placement_local {
             self.placement_inputs = Some(Inputs { document: doc.clone(), state: Arc::downgrade(&self.state()) });
         }
@@ -62,6 +66,21 @@ fn local_plane(plane: &PlaneRef, depth: usize) -> bool {
         | PlaneRef::AtAngle { base, axis_origin: _, axis_dir: _, angle: _, line: None } => local_plane(base, depth + 1),
         _ => false,
     }
+}
+
+/// Whether no feature after the mirror `f` can cut, join or otherwise build on bodies: only
+/// features that read none, and further mirrors, which copy them. A boolean depends on how a
+/// copy's revolved faces are turned, so a copy it may reach is made with
+/// [`solidcraft_kernel::transform_matrix`]; one that is only shown needs no search for that. It
+/// depends on the design alone, so a design evaluates the same however it was reached.
+pub(super) fn copies_only_shown(doc: &Document, f: &Feature) -> bool {
+    let mut later = doc.features.iter().skip_while(|g| g.id != f.id).skip(1);
+    let mut components = std::collections::HashMap::with_capacity(doc.features.len());
+    for g in &doc.features {
+        components.entry(g.id).or_insert(g.component);
+    }
+    let copies = |g: &Feature| matches!(&g.kind, FeatureKind::Mirror { features, combine: false, .. } if features.is_empty());
+    later.all(|g| copies(g) || local_geometry(g, &components))
 }
 
 pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap<u64, u64>) -> bool {
@@ -91,6 +110,8 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
                 to,
                 to_offset: _,
                 from,
+                corner: _,
+                to_body_apart: _,
             } = extent;
             to.is_none() && from.is_none() && !through_all && components.get(&sketch.0) == Some(&f.component)
         }
@@ -190,6 +211,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
         edge_names,
         face_names,
         participants,
+        touching,
         shell_piece_order,
         kernel_piece_order,
         inserted,
@@ -206,6 +228,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
         && *edge_names == b.edge_names
         && *face_names == b.face_names
         && *participants == b.participants
+        && *touching == b.touching
         && *shell_piece_order == b.shell_piece_order
         && *kernel_piece_order == b.kernel_piece_order
         && *inserted == b.inserted
