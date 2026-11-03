@@ -767,10 +767,13 @@ impl AnalyticSupport {
 
     /// The analytic surface on the NURB `form`: refused unless `form` lies on it
     /// ([`lies_on`]) and its placement's axes are orthonormal. A plane keeps its placement
-    /// as given; a cylinder, cone, sphere or torus is the one the kernel recognises in
-    /// `form` ([`recognise`]), which must be this one, and must evaluate as `form` at the
-    /// form's own parameters: it is the form's parametrisation, its frame, sweep, generator
-    /// range and swap the form's. The surface takes `form` as its NURB.
+    /// as given; a cylinder, cone, sphere or torus is parametrised as the kernel recognises
+    /// it in `form` ([`recognise`]: the sweep angles, generator range, swap and inside-out
+    /// are the form's), must be of this support's kind, and carries this support's own
+    /// placement, radii and semi-angle on that parametrisation, so that
+    /// [`AnalyticSupport::of`] reads the support back unchanged. It must evaluate as `form`
+    /// at the form's own parameters ([`evaluates_as`]), which together with [`lies_on`] is
+    /// what proves the support and the form agree. The surface takes `form` as its NURB.
     ///
     /// # Errors
     ///
@@ -820,13 +823,52 @@ impl AnalyticSupport {
             )
         };
         let mut surface = recognise(k, self.kind(), &form)?.ok_or_else(not_form)?;
-        if Self::of(&surface) != Some(*self) {
+        // the recognised surface must be of this support's kind; the numbers recognition
+        // recomputed are not compared with the support's, because it recomputes them from
+        // the control points and so reproduces a support's own numbers only to rounding
+        // (#2554) -- `lies_on` above and `evaluates_as` below are what prove the two agree
+        if Self::of(&surface).map(|a| a.kind()) != Some(self.kind()) {
             return Err(not_form());
         }
-        match surface.kind_mut() {
-            SurfaceKind::Cone(c) => c.rev.base = form.copy(),
-            SurfaceKind::Sphere(sp) => sp.base.base = form.copy(),
-            SurfaceKind::Torus(t) => t.base.base = form.copy(),
+        // this support's own numbers on the recognised parametrisation, which the generator
+        // and the sweep converter carry, so that `of` reads the support back unchanged
+        match (surface.kind_mut(), *self) {
+            (SurfaceKind::Cone(c), Self::Cylinder { placement, radius }) => {
+                c.rev.position = placement;
+                c.base_radius = radius;
+                c.rev.base = form.copy();
+            }
+            (
+                SurfaceKind::Cone(c),
+                Self::Cone {
+                    placement,
+                    base_radius,
+                    semi_angle_deg,
+                },
+            ) => {
+                c.rev.position = placement;
+                c.base_radius = base_radius;
+                c.semi_angle_deg = semi_angle_deg;
+                c.rev.base = form.copy();
+            }
+            (SurfaceKind::Sphere(sp), Self::Sphere { placement, radius }) => {
+                sp.base.position = placement;
+                sp.radius = radius;
+                sp.base.base = form.copy();
+            }
+            (
+                SurfaceKind::Torus(t),
+                Self::Torus {
+                    placement,
+                    major_radius,
+                    minor_radius,
+                },
+            ) => {
+                t.base.position = placement;
+                t.major_radius = major_radius;
+                t.minor_radius = minor_radius;
+                t.base.base = form.copy();
+            }
             _ => return Err(not_form()),
         }
         if !evaluates_as(k, &surface, &form)? {
