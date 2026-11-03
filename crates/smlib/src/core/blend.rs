@@ -24,6 +24,7 @@ use std::sync::PoisonError;
 
 use solidcore::EntityRef;
 use solidcore::SolidError;
+use solidcore::blend::blend_corner::BlendCornerEvent;
 use solidcore::blend::fillet_corner::p3::MIXED_CORNER_RAILS_CROSS;
 use solidcore::blend::fillet_executive::p1::{FilletLaw, FilletLawKind};
 use solidcore::blend::fillet_executive::p3::{ErrorInfo, FitKind, NoRoomReason};
@@ -426,6 +427,14 @@ fn blend_edges_stopping(
             (Section::Chord, _) => s.prepare_per_edge_constant_distance(k, edges, sizes, &[FilletSurfaceGeneratorType::Circular], 1, 1.0),
             (Section::Chamfer(second), _) => chamfer_parameters(k, &mut s, edges, sizes, second),
         };
+        // `AddSetBackVertex` for each set-back vertex, before the corners are made: a set-back
+        // vertex is no Ball (`IsSetBackVertex`, read by `ClassifyBall`), so its corner is the one
+        // the setback is set on.
+        if !matches!(section, Section::Chamfer(_)) {
+            for sb in setbacks {
+                s.add_set_back_vertex(sb.vertex);
+            }
+        }
         let mut step = prepared.and_then(|()| s.create_corners(k, None)).map(|()| Ok(Vec::new()));
         // A vertex `CreateFilletCorners` made no corner for, noted before a later step notes its
         // own failure over it ([`blend_failure`]).
@@ -522,8 +531,9 @@ fn chamfer_parameters(k: &mut Kernel, s: &mut FilletSession<'_>, edges: &[EdgeId
 
 /// The corners' part of `round_edges` / `chamfer_offsets`: a chamfer's corners bevelled; each
 /// setback set on its vertex's corner (`GetFilletCornerOfVertex`), which must be an
-/// `SM_FCR_N_x_N_CONVEX` corner. Each set-back corner's index in the session's corners, in
-/// `setbacks`' order.
+/// `SM_FCR_N_x_N_CONVEX` corner or a blend corner whose event is the setback (`SM_FCR_BLEND` with
+/// `SM_BCE_SETBACK`, as the fork's capi `round_edges` takes it; `fixes.fillet_blend_corner`).
+/// Each set-back corner's index in the session's corners, in `setbacks`' order.
 fn corners(
     s: &mut FilletSession<'_>,
     section: Section<'_>,
@@ -548,7 +558,9 @@ fn corners(
         let Some((i, id)) = found else {
             return Ok(Err(Err(Error::Argument)));
         };
-        if s.corner(id)?.corner_type() != FilletCornerType::NByNConvex {
+        let corner = s.corner(id)?;
+        let setback_blend = corner.blend.is_some_and(|b| b.event == BlendCornerEvent::Setback);
+        if corner.corner_type() != FilletCornerType::NByNConvex && !setback_blend {
             return Ok(Err(Ok(j)));
         }
         s.set_corner_setback(id, sb.distance)?;
