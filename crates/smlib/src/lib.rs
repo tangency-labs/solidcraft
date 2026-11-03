@@ -19,6 +19,7 @@ pub mod pcurves;
 mod sheets;
 mod split;
 pub mod ssi;
+pub mod stop;
 pub mod sweeps;
 pub mod trace;
 pub mod trim;
@@ -230,6 +231,13 @@ pub fn set_dump_dir(dir: Option<&Path>) {
 /// The kernel call running right now, if any: for crash reports. Takes no lock.
 pub fn current_call() -> Option<String> {
     core::dump::current()
+}
+
+/// Keeps one of the kernels calls run on out of use until dropped: the next calls run on another.
+/// For tests of what happens when a design's bodies come from a kernel that is busy elsewhere.
+#[doc(hidden)]
+pub fn hold_a_kernel() -> core::HeldKernel {
+    core::hold_a_kernel()
 }
 
 /// Is this thread inside a solidcore call? A panic there is caught and becomes

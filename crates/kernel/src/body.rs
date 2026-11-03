@@ -545,7 +545,10 @@ impl Body {
     pub fn smlib(&self) -> Result<&solidcraft_smlib::Brep> {
         self.require_brep("an SMLib operation")?;
         self.smlib
-            .get_or_init(|| solidcraft_smlib::Brep::from_record(&self.record, true).map_err(|e| Refusal::of(&self.record, &e)))
+            .get_or_init(|| {
+                solidcraft_smlib::stop::unstoppable(|| solidcraft_smlib::Brep::from_record(&self.record, true))
+                    .map_err(|e| Refusal::of(&self.record, &e))
+            })
             .as_ref()
             .map_err(
                 |r| if r.internal { KernelError::Internal(format!("SMLib: {}", r.why)) } else { KernelError::Failed(format!("SMLib: {}", r.why)) },

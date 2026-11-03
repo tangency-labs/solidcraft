@@ -438,8 +438,10 @@ fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, V
     // Watched by `progress`, so a job left behind for other inputs skips its remaining features.
     let watched = progress.clone();
     let spawned = std::thread::Builder::new().name("preview".into()).spawn(move || {
-        let job = solidcraft_engine::doc::progress::watch(watched, || {
-            if tool { compute_tool(&scratch, &cmds, colors) } else { compute(&scratch, &cmds, colors) }
+        let job = scratch.stop_token().within(|| {
+            solidcraft_engine::doc::progress::watch(watched, || {
+                if tool { compute_tool(&scratch, &cmds, colors) } else { compute(&scratch, &cmds, colors) }
+            })
         });
         let _ = tx.send(job);
     });

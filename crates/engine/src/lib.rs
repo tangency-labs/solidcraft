@@ -349,16 +349,20 @@ impl Ahead {
     /// [`Ahead::evaluate`], setting `step` to the number of the command running (from 1), so a
     /// front end can say how far a batch has got.
     pub fn evaluate_counting(self, commands: &[(String, Value)], step: &std::sync::atomic::AtomicUsize) -> Result<Evaluated> {
-        let (after, _) = self.0.preview_in_place(commands, Some(step))?;
-        after.world_state()?.warm_display();
-        Ok(Evaluated(after.model))
+        let stop = self.0.stop.clone();
+        stop.within(|| {
+            let (after, _) = self.0.preview_in_place(commands, Some(step))?;
+            after.world_state()?.warm_display();
+            Ok(Evaluated(after.model))
+        })
     }
 
     /// Run `commands` one after another, each reply or error in turn (what they evaluate stays
     /// in the shared evaluation cache): the checks a front end makes before a command, such as
     /// what a delete takes with it (#2678), computed off its window thread.
     pub fn replies(mut self, commands: &[(String, Value)]) -> Vec<Result<Value>> {
-        commands.iter().map(|(id, params)| self.0.execute(id, params)).collect()
+        let stop = self.0.stop.clone();
+        stop.within(|| commands.iter().map(|(id, params)| self.0.execute(id, params)).collect())
     }
 }
 
@@ -534,6 +538,8 @@ pub struct Session {
     /// not a move of the design's, so the placements the design reports and Capture Position
     /// keeps leave it out ([`Session::uncaptured_moves`]).
     pub exploded: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    /// Stops the work computing off the window thread for this design, shared with its copies.
+    stop: solidcraft_kernel::Stop,
     world_cache: std::sync::Mutex<Option<WorldCache>>,
     /// The design the joints were last solved for, as the solve left it, and the model it read
     /// (see [`Session::solve_joints`]).
@@ -794,6 +800,7 @@ impl Session {
     /// A session on `doc` evaluated as `model`, with what it hides.
     pub(crate) fn with_model(doc: Arc<Document>, visibility: Visibility, model: Model) -> Self {
         Session {
+            stop: Default::default(),
             saved: doc.clone(),
             doc,
             model,
@@ -874,6 +881,8 @@ impl Session {
     /// design before the batch, which is what the batch promised (#3242). The design is what a
     /// checkpoint keeps, not the replaced session's file path (docs/mcp.md).
     pub fn replace_design(&mut self, fresh: Session) {
+        // Nothing still computing for the design that leaves has anywhere to go.
+        self.stop_computing();
         let auto_project = self.auto_project;
         let validation = self.validation();
         let single_surface_analysis = self.single_surface_analysis;
@@ -903,6 +912,19 @@ impl Session {
         self.checkpoints = checkpoints;
         self.next_checkpoint = next_checkpoint;
         self.replacements = replacements;
+    }
+
+    /// The token over the work running off the window thread for this design, on any of its
+    /// copies: a job started from a copy runs [`solidcraft_kernel::Stop::within`] it.
+    pub fn stop_token(&self) -> solidcraft_kernel::Stop {
+        self.stop.clone()
+    }
+
+    /// This design is going away: the work still computing for it stops at the kernel's next
+    /// check, and its results go nowhere (they are only ever for this design's evaluation cache).
+    /// A kernel call that doesn't check runs to its end, on a kernel of its own, holding up nothing.
+    pub fn stop_computing(&self) {
+        self.stop.stop();
     }
 
     /// Install (or with `None` remove) the check [`Session::execute`] runs before every command,
@@ -1871,6 +1893,7 @@ impl Session {
     /// commands on without touching this one.
     pub fn scratch(&self) -> Session {
         Session {
+            stop: self.stop.clone(),
             doc: self.doc.clone(),
             model: self.model.clone(),
             undo: Vec::new(),
@@ -1968,6 +1991,16 @@ impl Session {
     }
 
     fn compute_commands_inner(
+        self,
+        commands: &[(String, Value)],
+        marker: Option<Option<usize>>,
+        original: Option<Session>,
+    ) -> Result<ComputedCommands> {
+        let stop = self.stop.clone();
+        stop.within(|| self.compute_commands_under(commands, marker, original))
+    }
+
+    fn compute_commands_under(
         self,
         commands: &[(String, Value)],
         marker: Option<Option<usize>>,
