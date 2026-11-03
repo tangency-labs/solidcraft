@@ -127,6 +127,42 @@ fn a_taller_box_has_a_slab_only_it_has() {
     assert_eq!(r["warnings"], json!([]), "{r}");
 }
 
+/// A 32 x 32 x 4 peg sunk into the rounded wall of a 95 x 60 x 26 block with every edge rounded
+/// by 6 (#11354). `a − only_in_a` and `b − only_in_b` are both the volume the two share, so they
+/// must agree, at any spacing. The block ends at x = 41.5 + s(z) at height z, with
+/// s(z) = √(36 − (6 − z)²), and its corners start at y = ±24, beyond the peg, so the peg shares
+/// 32 · ∫₀⁴ (13.5 + s(z)) dz = 32 · (54 + 9π − √32 − 18 asin(1/3)) mm³ with it.
+#[test]
+fn both_sides_state_the_same_shared_volume() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 95, "width": 60, "height": 26, "center": [0, 0, 13], "body_name": "Block"}));
+    let edges = json!([
+        [0, 30, 0],
+        [0, -30, 0],
+        [0, 30, 26],
+        [0, -30, 26],
+        [47.5, 0, 0],
+        [-47.5, 0, 0],
+        [47.5, 0, 26],
+        [-47.5, 0, 26],
+        [47.5, 30, 13],
+        [47.5, -30, 13],
+        [-47.5, 30, 13],
+        [-47.5, -30, 13]
+    ]);
+    run(&mut s, "solid.fillet", json!({"body": "Block", "edges": edges, "radius": 6}));
+    run(&mut s, "solid.box", json!({"length": 32, "width": 32, "height": 4, "center": [44, 0, 2], "body_name": "Peg"}));
+    let shared = 32.0 * (54.0 + 9.0 * std::f64::consts::PI - 32f64.sqrt() - 18.0 * (1.0f64 / 3.0).asin());
+    assert!((shared - 2256.013).abs() < 1e-3);
+    for spacing in [0.5, 0.25] {
+        let r = run(&mut s, "inspect.compare", json!({"a": "Peg", "b": "Block", "spacing": spacing}));
+        let from_a = f(&r["a"]["volume_mm3"]) - f(&r["only_in_a"]["volume_mm3"]);
+        let from_b = f(&r["b"]["volume_mm3"]) - f(&r["only_in_b"]["volume_mm3"]);
+        assert!(close(from_a, shared, 1e-6) && close(from_b, shared, 1e-6), "spacing {spacing}: {from_a} and {from_b}, want {shared}: {r}");
+        assert_eq!(r["warnings"], json!([]), "{r}");
+    }
+}
+
 /// A 100 x 60 sheet-metal plate with a 20 mm flange along y = 0 and a 5 mm hole at (x, 40).
 fn bracket(s: &mut Session, name: &str, x: f64) {
     run(s, "sketch.create", json!({"plane": "XY", "name": format!("{name} base")}));
