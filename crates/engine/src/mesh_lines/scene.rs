@@ -12,18 +12,18 @@ use solidcore_record::Vec3;
 use solidcraft_doc::{apply_point, apply_vector};
 use solidcraft_geom::{Aabb3, Mesh};
 
+use super::Refused;
 use super::meshes::{Placement, Scene, WORKERS, claim, transformed_bounds};
 use super::progress::Stage;
 use super::projection::{Drawing, Line, Origin, Owner, Part, Path, View, bounds, clip, key, merge_lines, occluded, overlap, xy};
 
-const TOO_COMPLEX: &str = "view exceeds export work budget; hide bodies or increase tolerance";
 const MAX_LINES: usize = 1_000_000;
 const MAX_SEGMENTS: usize = 4_000_000;
 const MAX_SHARED_TRIANGLES: usize = 2_000_000;
 const MAX_VIEW_NODES: usize = 256 * 1024 * 1024 / std::mem::size_of::<Aabb3>();
 const WORK: usize = 200_000_000;
 
-fn parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> Result<R, &'static str> + Sync) -> Result<Vec<R>, &'static str> {
+fn parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> Result<R, Refused> + Sync) -> Result<Vec<R>, Refused> {
     solidcraft_kernel::map_on_threads(items, WORKERS, f).into_iter().map(|r| r.ok_or("export worker failed")?).collect()
 }
 
@@ -96,7 +96,7 @@ struct Shared {
     incident: Vec<usize>,
 }
 impl Shared {
-    fn new(mesh: &Arc<Mesh>, eps: f64, progress: &Stage) -> Result<Self, &'static str> {
+    fn new(mesh: &Arc<Mesh>, eps: f64, progress: &Stage) -> Result<Self, Refused> {
         let welded = weld(&mesh.positions, eps, progress)?;
         let mut boxes = Vec::with_capacity(mesh.triangles.len());
         let mut sides = Vec::new();
@@ -106,15 +106,15 @@ impl Shared {
             }
             let points = mesh.tri(indices).ok_or("invalid export triangle")?;
             if points.iter().any(|p| !p.is_finite()) {
-                return Err("model contains invalid coordinates");
+                return Err(Refused::Invalid("the model contains invalid coordinates"));
             }
             boxes.push(bounds(points));
             for (a, b) in [(0, 1), (1, 2), (2, 0)] {
                 let (Some(ia), Some(ib)) = (indices.get(a), indices.get(b)) else {
-                    return Err("invalid export edge");
+                    return Err(Refused::Invalid("invalid export edge"));
                 };
                 let (Some(ka), Some(kb)) = (welded.get(*ia as usize).copied(), welded.get(*ib as usize).copied()) else {
-                    return Err("invalid export edge");
+                    return Err(Refused::Invalid("invalid export edge"));
                 };
                 if ka == kb {
                     continue;
@@ -145,7 +145,7 @@ impl Shared {
 /// Each position's weld key. Positions within `eps` of one another are one point: a position takes
 /// the key of the first one near it, in its own rounding cell or a neighbouring one, so two copies
 /// of a vertex either side of a cell boundary still meet.
-fn weld(positions: &[Vec3], eps: f64, progress: &Stage) -> Result<Vec<[i64; 3]>, &'static str> {
+fn weld(positions: &[Vec3], eps: f64, progress: &Stage) -> Result<Vec<[i64; 3]>, Refused> {
     let mut first: HashMap<[i64; 3], Vec3> = HashMap::with_capacity(positions.len());
     let mut keys = Vec::with_capacity(positions.len());
     for (i, p) in positions.iter().enumerate() {
@@ -171,7 +171,7 @@ fn weld(positions: &[Vec3], eps: f64, progress: &Stage) -> Result<Vec<[i64; 3]>,
 }
 
 /// A placed triangle in the view.
-fn triangle(view: &View, shared: &Shared, placed: &Placement, id: usize) -> Result<[Vec3; 3], &'static str> {
+fn triangle(view: &View, shared: &Shared, placed: &Placement, id: usize) -> Result<[Vec3; 3], Refused> {
     let indices = shared.mesh.triangles.get(id).ok_or("invalid export triangle")?;
     let [a, b, c] = shared.mesh.tri(indices).ok_or("invalid export triangle")?;
     Ok([
@@ -212,7 +212,7 @@ impl Projected {
         eps: f64,
         segments: &AtomicUsize,
         progress: &Stage,
-    ) -> Result<Self, &'static str> {
+    ) -> Result<Self, Refused> {
         let mut nodes = vec![Aabb3::EMPTY; shared.tree.nodes.len()];
         // Exact projected leaf bounds avoid false near-eye errors from empty corners of a
         // rotated model-space box. Interior bounds are just unions of the child bounds.
@@ -244,11 +244,11 @@ impl Projected {
             }
         }
         let mut result = Vec::new();
-        let mut add = |a: Vec3, b: Vec3, origin: Origin| -> Result<(), &'static str> {
+        let mut add = |a: Vec3, b: Vec3, origin: Origin| -> Result<(), Refused> {
             let (a, b) = (view.project(apply_point(&placed.transform, a))?, view.project(apply_point(&placed.transform, b))?);
             if xy(a).dist(xy(b)) > eps {
                 if !claim(segments, 1, MAX_SEGMENTS) {
-                    return Err(TOO_COMPLEX);
+                    return Err(Refused::Work);
                 }
                 result.push((a, b, index.map(|placement| Owner { placement, origin })));
             }
@@ -258,7 +258,7 @@ impl Projected {
             if !placed.visibility.get(i).copied().unwrap_or(false) {
                 continue;
             }
-            let origin = Origin::Edge(u32::try_from(i).map_err(|_| TOO_COMPLEX)?);
+            let origin = Origin::Edge(u32::try_from(i).map_err(|_| Refused::Work)?);
             for w in edge.windows(2) {
                 if let (Some(a), Some(b)) = (w.first(), w.get(1)) {
                     add(*a, *b, origin)?;
@@ -307,7 +307,7 @@ impl Coverage {
     fn contains(&self, lo: f64, hi: f64) -> bool {
         self.spans.iter().any(|(a, b)| *a <= lo && *b >= hi)
     }
-    fn add(&mut self, mut lo: f64, mut hi: f64) -> Result<(), &'static str> {
+    fn add(&mut self, mut lo: f64, mut hi: f64) -> Result<(), Refused> {
         let first = self.spans.partition_point(|(_, b)| *b + 1e-9 < lo);
         let mut end = first;
         while let Some((a, b)) = self.spans.get(end) {
@@ -319,7 +319,7 @@ impl Coverage {
             end += 1;
         }
         if first == end && self.spans.len() >= MAX_LINES / 2 {
-            return Err(TOO_COMPLEX);
+            return Err(Refused::Work);
         }
         self.spans.splice(first..end, [(lo, hi)]);
         Ok(())
@@ -351,14 +351,14 @@ impl<'a> Budget<'a> {
     fn new(global: &'a AtomicUsize, progress: &'a Stage) -> Self {
         Self { global, progress, local: 0, spent: 0 }
     }
-    fn spend(&mut self) -> Result<(), &'static str> {
+    fn spend(&mut self) -> Result<(), Refused> {
         if self.local == 0 {
             self.progress.check()?;
             let mut old = self.global.load(Ordering::Relaxed);
             loop {
                 let granted = old.min(4096);
                 if granted == 0 {
-                    return Err(TOO_COMPLEX);
+                    return Err(Refused::Work);
                 }
                 match self.global.compare_exchange_weak(old, old - granted, Ordering::Relaxed, Ordering::Relaxed) {
                     Ok(_) => {
@@ -397,7 +397,7 @@ impl Query<'_, '_> {
         }
         rectangle(self.a, self.b, b).is_some_and(|(lo, hi)| !self.covered.contains(lo, hi))
     }
-    fn instance_node(&mut self, index: usize) -> Result<(), &'static str> {
+    fn instance_node(&mut self, index: usize) -> Result<(), Refused> {
         self.budget.spend()?;
         let node = self.instances.nodes.get(index).ok_or("invalid instance tree")?;
         if !self.relevant(&node.bounds) {
@@ -423,7 +423,7 @@ impl Query<'_, '_> {
         }
         Ok(())
     }
-    fn mesh_node(&mut self, instance: usize, index: usize) -> Result<(), &'static str> {
+    fn mesh_node(&mut self, instance: usize, index: usize) -> Result<(), Refused> {
         self.budget.spend()?;
         let placed = self.scene.placements.get(instance).ok_or("invalid instance")?;
         let shared = self.shared.get(placed.mesh).ok_or("invalid shared geometry")?;
@@ -462,7 +462,7 @@ fn is_reference(scene: &Scene, owner: Owner) -> bool {
 }
 
 /// The lines of `scene`'s placed meshes and of the `sketch` runs, seen from `view`.
-pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Drawing, &'static str> {
+pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Drawing, Refused> {
     let start = Instant::now();
     let scale = scene
         .placements
@@ -473,14 +473,14 @@ pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Dra
         .diagonal()
         .max(1.);
     if !scale.is_finite() {
-        return Err("model contains invalid coordinates");
+        return Err(Refused::Invalid("the model contains invalid coordinates"));
     }
     let eps = scale * 1e-8;
     // Indexed input can have many triangles but very few positions. Bound adjacency/sort
     // scratch space as well as the retained mesh bytes before starting parallel builders.
     let unique_triangles = scene.meshes.iter().try_fold(0usize, |n, m| n.checked_add(m.triangles.len()));
     if unique_triangles.is_none_or(|n| n > MAX_SHARED_TRIANGLES) {
-        return Err("view exceeds export memory budget; hide bodies or increase tolerance");
+        return Err(Refused::Memory);
     }
     let progress = Stage::new("dxf_index", scene.meshes.len());
     let shared = parallel(&scene.meshes, |m| {
@@ -491,14 +491,14 @@ pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Dra
     })?;
     let count = scene.placements.iter().try_fold(0usize, |n, p| n.checked_add(shared.get(p.mesh)?.tree.nodes.len()));
     if count.is_none_or(|n| n > MAX_VIEW_NODES) {
-        return Err("view exceeds export memory budget; hide bodies or increase tolerance");
+        return Err(Refused::Memory);
     }
     let count = AtomicUsize::new(0);
     let progress = Stage::new("dxf_projection", scene.placements.len());
     let indexed: Vec<(usize, &Placement)> = scene.placements.iter().enumerate().collect();
     let projected = parallel(&indexed, |(i, p)| {
         progress.check()?;
-        let index = if scene.sources { Some(u32::try_from(*i).map_err(|_| TOO_COMPLEX)?) } else { None };
+        let index = if scene.sources { Some(u32::try_from(*i).map_err(|_| Refused::Work)?) } else { None };
         let projected = Projected::new(shared.get(p.mesh).ok_or("missing shared geometry")?, p, index, view, eps, &count, &progress)?;
         progress.advance(1)?;
         Ok(projected)
@@ -548,11 +548,11 @@ pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Dra
             };
             query.instance_node(0)?;
             let mut cursor = 0.;
-            let mut emit = |lo: f64, hi: f64, hidden: bool| -> Result<(), &'static str> {
+            let mut emit = |lo: f64, hi: f64, hidden: bool| -> Result<(), Refused> {
                 let (p, q) = (xy(a + (b - a) * lo), xy(a + (b - a) * hi));
                 if p.dist(q) > eps {
                     if !claim(&output, 1, MAX_LINES) {
-                        return Err(TOO_COMPLEX);
+                        return Err(Refused::Work);
                     }
                     let depth = a.z + (b.z - a.z) * (lo + hi) / 2.;
                     lines.push(Line { a: p, b: q, hidden, owner, covered: false, depth });
@@ -592,7 +592,7 @@ pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Dra
                 continue;
             }
             if !claim(&count, 1, MAX_SEGMENTS) {
-                return Err(TOO_COMPLEX);
+                return Err(Refused::Work);
             }
             let mut covered = Coverage::default();
             if !part.on_top && !instances.nodes.is_empty() {
@@ -615,7 +615,7 @@ pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Dra
                 covered = query.covered;
             }
             let mut cursor = 0.;
-            let mut emit = |lo: f64, hi: f64, hidden: bool| -> Result<(), &'static str> {
+            let mut emit = |lo: f64, hi: f64, hidden: bool| -> Result<(), Refused> {
                 let (p, q) = (xy(a + (b - a) * lo), xy(a + (b - a) * hi));
                 if p.dist(q) <= eps {
                     return Ok(());
@@ -624,7 +624,7 @@ pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Dra
                     path.points.push(q);
                 } else {
                     if !claim(&output, 1, MAX_LINES) {
-                        return Err(TOO_COMPLEX);
+                        return Err(Refused::Work);
                     }
                     paths.push(Path { points: vec![p, q], hidden });
                 }

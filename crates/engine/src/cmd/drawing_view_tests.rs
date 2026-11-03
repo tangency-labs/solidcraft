@@ -861,6 +861,27 @@ fn each_copys_lines_name_its_occurrence() {
     assert_eq!(paths, want, "{v}");
 }
 
+/// A view cancelled while its lines are made says so in a drawing's words, never as a DXF export.
+#[test]
+fn a_view_cancelled_while_its_lines_are_made_says_so_on_a_drawing() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct CancelOcclusion(AtomicBool);
+    impl solidcraft_kernel::watch::Watch for CancelOcclusion {
+        fn cancelled(&self) -> bool {
+            self.0.load(Ordering::Relaxed)
+        }
+        fn progress(&self, stage: &'static str, _done: usize, _total: usize) {
+            if stage == "dxf_occlusion" {
+                self.0.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+    let mut s = block();
+    let watch = Arc::new(CancelOcclusion(AtomicBool::new(false)));
+    let e = solidcraft_kernel::watch::watching(watch, || s.execute(CMD, &json!({}))).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("drawing the view was cancelled") && !e.contains("DXF"), "{e}");
+}
+
 /// The mesh's chord is `chord_mm` on paper over the scale. Below 1:100 it passes 1 mm and is still
 /// taken, while the view DXF keeps its own 1 mm limit; at 1000:1 the default is finer than the
 /// mesh's 0.0001 mm floor and is refused with the chord that would do.

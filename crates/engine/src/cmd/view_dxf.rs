@@ -13,7 +13,7 @@ use solidcraft_io::{DxfEntity, DxfLayer, DxfLinetype, DxfShape};
 use solidcraft_render::Camera;
 
 use super::CommandSpec;
-use crate::mesh_lines::{self, Stage, View};
+use crate::mesh_lines::{self, Refused, Stage, View};
 use crate::params::{bad, str_};
 use crate::{Result, Session};
 
@@ -55,16 +55,16 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         solidcraft_io::vfs::check(path).map_err(|e| crate::EngineError::Other(e.to_string()))?;
     }
     let started = web_time::Instant::now();
-    Stage::new("dxf_meshes", 1).check().map_err(|e| bad(CMD, e))?;
-    let meshes = mesh_lines::prepare(s, CMD, tolerance, mesh_lines::Ask::default(), |b| s.body_visible(&b.name))?;
+    Stage::new("dxf_meshes", 1).check().map_err(|e| bad(CMD, refused(e)))?;
+    let meshes = mesh_lines::prepare(s, CMD, tolerance, mesh_lines::Ask::default(), |b| s.body_visible(&b.name), refused)?;
     let prepare_ms = started.elapsed().as_secs_f64() * 1000.;
     // The sketch runs (up to 4,000,000 points) go once the lines are made, not through writing.
     let drawing = {
-        let sketch = sketch::parts(s, tolerance).map_err(|e| bad(CMD, e))?;
-        mesh_lines::drawing(&meshes, &sketch, &View::from_camera(&cam)).map_err(|e| bad(CMD, e))?
+        let sketch = sketch::parts(s, tolerance).map_err(|e| bad(CMD, refused(e)))?;
+        mesh_lines::drawing(&meshes, &sketch, &View::from_camera(&cam)).map_err(|e| bad(CMD, refused(e)))?
     };
     let writing = Stage::new("dxf_write", 1);
-    writing.check().map_err(|e| bad(CMD, e))?;
+    writing.check().map_err(|e| bad(CMD, refused(e)))?;
     let mut visible = 0;
     let mut hidden = 0;
     let mut entities = Vec::new();
@@ -91,7 +91,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         layers.push(DxfLayer::new("SKETCH", 5));
     }
     let text = solidcraft_io::write_dxf_drawing(&layers, &entities)?;
-    writing.check().map_err(|e| bad(CMD, e))?;
+    writing.check().map_err(|e| bad(CMD, refused(e)))?;
     let mut result = json!({"visible":visible,"hidden":hidden,"sketch":sketch,"units":"mm","tolerance":tolerance,"projection":if cam.fov > 0.0 {"perspective"} else {"orthographic"}});
     result["stats"] = json!({"bodies":meshes.placements.len(),"shared_meshes":meshes.meshes.len(),"triangles":meshes.triangles,
         "mesh_bytes":meshes.bytes,"worker_limit":mesh_lines::WORKERS,"segments":drawing.segments,"occlusion_work":drawing.work,
@@ -104,6 +104,16 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         result["dxf"] = json!(text);
     }
     Ok(result)
+}
+
+/// What a refusal of the view's lines says here, with what to do about it in a DXF's terms.
+fn refused(e: Refused) -> String {
+    match e {
+        Refused::Cancelled => "DXF export cancelled".into(),
+        Refused::Work | Refused::Memory => format!("{e}: hide bodies or sketches, or increase tolerance"),
+        Refused::EyePlane => format!("{e}: zoom out before exporting"),
+        Refused::Invalid(_) => e.to_string(),
+    }
 }
 
 /// Sketch runs as entities: visible ones on SKETCH, hidden ones dashed on HIDDEN or omitted.
