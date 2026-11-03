@@ -312,8 +312,8 @@ drawing and answering while it runs:
   design changes, from any connection, wait their turn and run in the order they arrived.
 - A person's edit made meanwhile goes first. The agent's command is then computed again for the
   design as it is and lands after that edit, never in the middle of it. If the design was replaced
-  (another tab made active, a new file opened), the request fails with `… the design was
-  replaced … nothing was applied`.
+  (another tab made active, a new file opened, its tab closed), the request fails at once with
+  `… the design was replaced … nothing was applied`, and the requests behind it go on.
 - A chip in the view names the command, with **Stop**. Stop answers
   `{"ok": false, "stopped": true, "error": "stopped: …; nothing was applied"}` and the requests
   waiting behind it go on. The computation finishes unseen in the background.

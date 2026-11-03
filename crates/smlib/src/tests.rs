@@ -8,7 +8,6 @@ fn box_end_to_end() {
     let c = b.try_clone().unwrap();
     drop(b);
     assert!((c.volume(1e-7).unwrap() - 6000.0).abs() < 1e-6);
-    assert_eq!(current_call(), None, "no call in flight between calls");
 }
 
 #[test]
@@ -321,12 +320,8 @@ fn a_failing_solidcore_call_leaves_a_dump_and_names_itself() {
     });
     core::dump::set_dir(None);
     assert!(r.is_err());
-    assert_eq!(seen.lock().unwrap().as_deref(), Some("smlib_test_failure"));
-    {
-        // Under the kernel's lock no solidcore call is in flight.
-        let _kernel = core::KERNEL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        assert_eq!(core::dump::current(), None);
-    }
+    assert!(seen.lock().unwrap().as_deref().is_some_and(|c| c.contains("smlib_test_failure")), "{seen:?}");
+    assert!(!core::dump::current().is_some_and(|c| c.contains("smlib_test_failure")), "no longer in flight");
     let got: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
     let text = got.iter().find(|n| n.ends_with("-smlib_test_failure.txt")).unwrap_or_else(|| panic!("{got:?}"));
     assert!(std::fs::read_to_string(dir.join(text)).unwrap().contains("refused"));
@@ -403,4 +398,115 @@ fn an_edge_a_few_um_past_its_patch_keeps_its_interval() {
     assert_eq!(pc.interval(), Some([0.0, 1.0]));
     let [u, v] = solidcraft_geom::brep::pcurve::eval(pc, 1.0).unwrap();
     assert!((u - 1.0).abs() < 1e-9 && v.abs() < 1e-9, "{u} {v}");
+}
+
+/// A solidcore call blocked on a channel until `release`, on its own thread: a call that runs long
+/// or never returns, as one design's slow operation does.
+fn call_held_open(body: &str) -> (std::sync::mpsc::Sender<()>, std::thread::JoinHandle<Result<()>>) {
+    let call: &'static str = Box::leak(body.to_owned().into_boxed_str());
+    let (started, is_started) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let held = std::thread::spawn(move || {
+        core::run(call, |_| {
+            let _ = started.send(());
+            let _ = released.recv();
+            Ok(())
+        })
+    });
+    is_started.recv().unwrap();
+    (release, held)
+}
+
+/// Runs `f` on another thread and gives its answer; a failure here rather than a test that hangs
+/// when `f` waits for a call that does not end. The limit is no measure of speed: `f` is free to
+/// take all of it, and only a wait with no end fails.
+fn answered<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(120)).expect("this call waited for a call on another thread that has not ended")
+}
+
+/// One design's long kernel call must never hold up another's: the kernel call of a design closed
+/// or still open, blocked here on a channel, while another makes and measures a body of its own.
+#[test]
+fn a_kernel_call_that_does_not_end_holds_up_no_other_call() {
+    let (release, held) = call_held_open("held_open");
+    let volume = answered(|| {
+        let a = Brep::make_box([0.0; 3], [10.0; 3]).unwrap();
+        let b = Brep::make_box([5.0, 0.0, 0.0], [10.0; 3]).unwrap();
+        a.boolean(&b, BooleanOp::Union).unwrap().unwrap().volume(1e-7).unwrap()
+    });
+    assert!((volume - 1500.0).abs() < 1e-6, "{volume}");
+    assert!(current_call().is_some_and(|c| c.contains("held_open")), "the call still runs");
+    // And one holds up no other held open beside it.
+    let (release_too, held_too) = call_held_open("held_open_too");
+    assert!(current_call().is_some_and(|c| c.contains("held_open") && c.contains("held_open_too")));
+    for (release, held) in [(release, held), (release_too, held_too)] {
+        release.send(()).unwrap();
+        held.join().unwrap().unwrap();
+    }
+    assert!(!current_call().is_some_and(|c| c.contains("held_open")), "neither is in flight any more");
+}
+
+/// Bodies are made and used on whichever kernel is free, at the same time on several threads, and
+/// each answer is the one a single kernel gives: a body made while another call held the first
+/// kernel is used once it is free, and two bodies from different kernels go into one boolean.
+#[test]
+fn bodies_move_between_kernels_and_calls_run_side_by_side() {
+    let (release, held) = call_held_open("held_open");
+    let on_second = answered(|| Brep::make_box([5.0, 0.0, 0.0], [10.0; 3]).unwrap());
+    release.send(()).unwrap();
+    held.join().unwrap().unwrap();
+    let first = Brep::make_box([0.0; 3], [10.0; 3]).unwrap();
+    let v = first.boolean(&on_second, BooleanOp::Subtract).unwrap().unwrap().volume(1e-7).unwrap();
+    assert!((v - 500.0).abs() < 1e-6, "{v}");
+
+    let shared = std::sync::Arc::new(Brep::make_box([0.0; 3], [10.0; 3]).unwrap());
+    let workers: Vec<_> = (0..8)
+        .map(|n| {
+            let shared = shared.clone();
+            std::thread::spawn(move || {
+                for i in 0..20 {
+                    let side = 2.0 + f64::from((n + i) % 5);
+                    let tool = Brep::make_box([10.0 - side; 3], [side + 1.0; 3]).unwrap();
+                    let cut = shared.boolean(&tool, BooleanOp::Subtract).unwrap().unwrap();
+                    let rounded = Brep::make_box([0.0; 3], [10.0; 3]).unwrap().fillet(&[[5.0, 0.0, 0.0]], 1e-6, 1.0).unwrap();
+                    let lost = (1.0 - std::f64::consts::FRAC_PI_4) * 10.0;
+                    assert!((cut.volume(1e-7).unwrap() - (1000.0 - side.powi(3))).abs() < 1e-5);
+                    assert!((rounded.volume(1e-7).unwrap() - (1000.0 - lost)).abs() < 1e-4);
+                }
+            })
+        })
+        .collect();
+    for worker in workers {
+        answered(move || worker.join().unwrap());
+    }
+}
+
+/// Each kernel has its own range of blend serials: a body keeps the serials of the kernel that
+/// made it, and another kernel's memo of solved stations must not take them for its own.
+#[test]
+fn kernels_never_issue_the_same_blend_serial() {
+    let range = core::BLEND_SERIALS_PER_KERNEL as usize;
+    let ranges = core::run("outer", |outer| {
+        let inner = core::run("inner", |inner| Ok(inner.blend_last_serial.get() as usize)).unwrap_or_default();
+        Ok([outer.blend_last_serial.get() as usize / range, inner / range])
+    });
+    let [outer, inner] = ranges.unwrap();
+    assert_ne!(outer, inner);
+}
+
+/// A panic in a call running beside another costs neither: the panicking call's kernel is thrown
+/// away and the other call and later ones go on.
+#[test]
+fn a_panic_beside_a_running_call_costs_only_its_own_kernel() {
+    let (release, held) = call_held_open("held_open");
+    let r: Result<()> = core::run("panicking", |_| panic!("on purpose"));
+    assert!(matches!(r, Err(Error::Internal(_))), "{r:?}");
+    let v = answered(|| Brep::make_box([0.0; 3], [2.0; 3]).unwrap().volume(1e-7).unwrap());
+    assert!((v - 8.0).abs() < 1e-6, "{v}");
+    release.send(()).unwrap();
+    held.join().unwrap().unwrap();
 }

@@ -52,6 +52,8 @@ pub struct DocSlot {
     edit_in_place: Option<crate::edit_in_place::PartContext>,
     /// The dialog or tool it had open and its toolbar tab, kept while another design is shown.
     work: DocWork,
+    /// What it has computing off the window thread or waiting its turn.
+    jobs: crate::deferred::DocJobs,
 }
 
 /// What a design was doing when its tab was left, with the "Keep dialogs and tools open when
@@ -143,6 +145,7 @@ impl DocSlot {
             link_stamps: Vec::new(),
             edit_in_place: None,
             work: DocWork::default(),
+            jobs: Default::default(),
         }
     }
 }
@@ -248,6 +251,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
         link_stamps: std::mem::replace(&mut app.docs.link_stamps, slot.link_stamps),
         edit_in_place: std::mem::replace(&mut app.edit_in_place.active, slot.edit_in_place),
         work,
+        jobs: app.swap_jobs(slot.jobs),
     };
     // Only the displayed design owns the process-wide crash replay journal.
     app.session.crash_journal = out.session.crash_journal;
@@ -267,6 +271,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     if let Some(pending) = &mut app.pending_feature_edit {
         pending.view_changed(before, app.session.revision);
     }
+    app.jobs_view_changed(before, app.session.revision);
     put_work(app, slot.work, before);
     out
 }
@@ -544,6 +549,8 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         if let Some(a) = app.autosave.as_mut().and_then(|a| a.active.take()) {
             a.discard();
         }
+        // What it had computing goes with it: the blank design waits for none of it.
+        app.cancel_computing();
         app.big_operation = false;
         crate::sketch_text_move::cancel_drag(app);
         let rev = app.session.revision;
