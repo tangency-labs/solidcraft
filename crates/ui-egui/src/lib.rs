@@ -616,7 +616,8 @@ pub struct SolveApp {
     /// How long OK waits for a feature before computing it off the window thread, saying so;
     /// `None`: it waits as long as it takes (headless use, tests). The desktop app sets it.
     pub apply_off_thread: Option<std::time::Duration>,
-    /// Tests: the off-thread evaluation waits for this before it reports done.
+    /// Tests: work started off the window thread (a feature's evaluation, a Properties
+    /// measurement) waits for this before it reports done.
     #[cfg(test)]
     pub(crate) apply_gate: Option<std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Receiver<()>>>>,
     /// The last command started interactively (id, label), for Repeat.
