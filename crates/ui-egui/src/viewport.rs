@@ -11471,22 +11471,14 @@ mod tests {
     /// A hovered surface of many pieces is lit from the meshes' face indexes: the same
     /// triangles, in the same order and colours, and the same edges, as the scans per face it
     /// replaced (`surface_patch`, then one pass over the body's triangles per piece, then every
-    /// edge tested against the patch), on a wall of 32 pieces, as drawn
-    /// and refined finer; and the whole highlight lights every piece of the wall.
+    /// edge tested against the patch), on an imported wall of 32 pieces of one surface (a STEP
+    /// file keeps its faces; a sketch of arcs gives one face now), as drawn and refined finer;
+    /// and the whole highlight lights every piece of the wall.
     #[test]
     fn a_hovered_surface_of_many_pieces_lights_what_the_scans_per_face_lit() {
         let pieces = 32usize;
         let mut s = solidcraft_engine::Session::default();
-        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
-        let at = |i: usize| {
-            let a = std::f64::consts::TAU * (i % pieces) as f64 / pieces as f64;
-            [20.0 * a.cos(), 20.0 * a.sin()]
-        };
-        for i in 0..pieces {
-            s.execute("sketch.arc.center_point", &json!({"center": [0, 0], "start": at(i), "end": at(i + 1)})).unwrap();
-        }
-        s.execute("sketch.finish", &json!({})).unwrap();
-        s.execute("solid.extrude", &json!({"sketch": 1, "distance": 40})).unwrap();
+        s.execute("file.insert_step", &json!({"path": crate::scale_tests::split_cylinder_step_file(pieces)})).unwrap();
         let mut app = SolveApp::new(s, crate::Services::default());
         app.set_origin_shown(false);
         let colour = [200, 100, 50, 255];
