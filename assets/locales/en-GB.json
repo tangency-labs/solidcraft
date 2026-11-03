@@ -76,6 +76,7 @@
   "prefs.appearance.colour_vision_help": "Changes the colours that carry a meaning: sketch states, axes, bends, analyses and icons.",
   "prefs.appearance.viewport_colours": "3D view colours",
   "prefs.bottom_centre": "Bottom centre",
+  "prefs.design_tools.hole_snaps_help": "The middle of a face and the centres of its round edges.",
   "prefs.logo_theme": "Theme's colours",
   "prefs.max_file_size": "Largest file to open",
   "prefs.max_file_size_flag": "This run started with --max-file-size {size}, which applies until SolidCraft closes. These settings apply when it starts without it.",
