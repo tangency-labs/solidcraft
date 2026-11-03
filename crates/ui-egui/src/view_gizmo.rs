@@ -190,7 +190,10 @@ impl Shape {
             .unwrap_or_default();
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Some(Shape { name, id, mesh: Arc::new(mesh), colour, face_colours })
+        let shape = Shape { name, id, mesh: Arc::new(mesh), colour, face_colours };
+        // Keep only what saves again: a face number or bounds the packer refuses would be drawn
+        // now and dropped at the next save.
+        shape.to_json().is_object().then_some(shape)
     }
 
     /// The direction to look from to see the face of triangle `tri` straight on: a planar
@@ -623,6 +626,9 @@ mod tests {
             json!({"name": "x", "v": triangle, "t": words(&[0, 1, 2]), "f": words(&[0]), "e": "no", "en": ["no"], "ef": words(&[NO_FACE; 5])}),
             json!({"name": "x".repeat(10_000), "v": triangle, "t": words(&[0, 1, 2]), "f": words(&[0])}),
             json!({"name": "x", "v": triangle, "t": words(&[0, 1, 2]), "f": words(&[0]), "c": [300, -1, "r"], "fc": [[0], [1, 2], "no", [u64::MAX, 1, 2, 3]]}),
+            // Readable, but the packer can't write them again: a face numbered NO_FACE, one point.
+            json!({"name": "x", "v": triangle, "t": words(&[0, 1, 2]), "f": words(&[NO_FACE])}),
+            json!({"name": "x", "v": words(&[0, 0, 0]), "t": words(&[0, 0, 0]), "f": words(&[0])}),
         ];
         let mut huge = good.clone();
         huge["t"] = json!(words(&vec![0; 3 * MAX_TRIANGLES + 3]));
@@ -637,6 +643,8 @@ mod tests {
             }
             let mut state = State::default();
             state.load(Some(c));
+            // A body that loads saves again, so a profile never carries a `null` body.
+            assert_eq!(state.shape.is_some(), state.stored().is_object(), "{c}");
         }
         assert!(Shape::from_json(&json!({"name": "x", "v": [0, 0, 0], "t": [0, 1, 2], "f": [0]})).is_none());
         let mut over = good;

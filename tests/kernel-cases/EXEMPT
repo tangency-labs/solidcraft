@@ -329,6 +329,7 @@ view.left                         the view: camera, layout, display
 view.list                         the view: camera, layout, display
 view.navigate                     the view: camera, layout, display
 view.navigation_bar               the view: camera, layout, display
+view.navigator                    the view: navigator type; crates/engine/src/schema/view_navigation_tests.rs
 view.next_tab                     the view: camera, layout, display
 view.normal_to                    the view: camera, layout, display
 view.perspective                  the view: camera, layout, display

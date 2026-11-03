@@ -6828,10 +6828,14 @@ fn gizmo_menu(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     if !outer.is_positive() || !outer.is_finite() {
         return;
     }
-    let response = ui.interact(outer, ui.id().with("view_navigator_menu"), Sense::click());
-    if response.secondary_clicked()
+    // Read the pointer rather than add a widget over the navigator, which would take the
+    // primary clicks the viewport owns there when orbiting is off.
+    if ui.is_enabled()
+        && ui.input(|i| i.pointer.secondary_clicked())
         && app.dialog.is_none()
-        && let Some(at) = response.interact_pointer_pos()
+        && let Some(at) = ui.input(|i| i.pointer.interact_pos())
+        && outer.contains(at)
+        && view_gizmo_at(app, at)
     {
         crate::context_menu::open_for(app, at, crate::context_menu::Target::ViewGizmo);
     }
