@@ -697,9 +697,16 @@ fn transform_scales_about_a_picked_center() {
     let mut d = Dialog::for_command(&h.app, "sketch.transform").unwrap();
     assert_eq!(d.inputs.get(1).map(|i| i.label), Some("Center"), "the window takes a Center point");
     d.inputs[0].items = ids.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
-    d.inputs[1].items = vec![Sel::SketchPoint { id: corner.clone() }];
     h.app.dialog = Some(d);
     h.frames(4);
+    // The corner is under the box's corner handle: with Center waiting for a pick, a click there
+    // picks the point instead of starting a scale.
+    h.step(&json!({"call": "ui.dialogInput", "params": {"index": 1}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click": {"sketch": [10, 10]}})).unwrap();
+    h.frames(3);
+    let picked = h.app.dialog.as_ref().unwrap().inputs[1].items.clone();
+    assert_eq!(picked, vec![Sel::SketchPoint { id: corner.clone() }], "the corner is the Center");
     if let Some(Kind::SketchModify(Mod::Transform { factor, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
         *factor = "2".into();
     }

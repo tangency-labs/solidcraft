@@ -224,6 +224,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
         parts.push((egui::Rect::from_center_size(*c, Screen::splat(HANDLE * 3.0)), Part::Corner(u, v), egui::CursorIcon::ResizeNwSe));
     }
     parts.push((egui::Rect::from_center_size(knob, Screen::splat(HANDLE * 3.0)), Part::Turn, egui::CursorIcon::Crosshair));
+    // While Center waits for a pick, a click goes to the sketch: a rectangle's corner, the
+    // point most often picked there, is under a corner handle (#11718).
+    if d.active == 1 && app.viewport.transform_drag.is_none() {
+        return;
+    }
     for (i, (rect, part, cursor)) in parts.into_iter().enumerate() {
         let response = ui.interact(rect, egui::Id::new(("sc_transform_handle", i)), Sense::drag()).on_hover_cursor(cursor);
         crate::scenario::publish_handle(&format!("transform:handle:{i}"), rect.center());
