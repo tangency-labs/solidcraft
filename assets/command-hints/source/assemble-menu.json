@@ -1,0 +1,2953 @@
+{
+  "samples": [
+    {
+      "command": "joint.create",
+      "slug": "joint-create",
+      "group": "ASSEMBLE",
+      "setup": [
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Base",
+            "parent": "root",
+            "grounded": true
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "BaseBody",
+            "corner": [
+              -10,
+              -10,
+              0
+            ],
+            "length": 20,
+            "width": 20,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Lever",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "LeverBody",
+            "corner": [
+              16,
+              -4,
+              18
+            ],
+            "length": 36,
+            "width": 8,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "Lever"
+            ],
+            "color": "#4c86c7"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "browser.visibility",
+          "params": {
+            "folder": "joints",
+            "visible": true
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "joint.create",
+          "params": {
+            "type": "revolute",
+            "name": "Hinge",
+            "a": {
+              "occurrence": "Base",
+              "point": [
+                0,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "b": {
+              "occurrence": "Lever",
+              "point": [
+                20,
+                0,
+                18
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "flip": true
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          18,
+          3,
+          12
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 150
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 2,
+        "joint_values": {
+          "Hinge": [
+            0
+          ]
+        }
+      },
+      "explanation": "A real revolute joint brings the separated lever pivot onto the grounded base pivot."
+    },
+    {
+      "command": "joint.as_built",
+      "slug": "joint-as_built",
+      "group": "ASSEMBLE",
+      "setup": [
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Base",
+            "parent": "root",
+            "grounded": true
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "BaseBody",
+            "corner": [
+              -10,
+              -10,
+              0
+            ],
+            "length": 20,
+            "width": 20,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Lever",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "LeverBody",
+            "corner": [
+              -4,
+              -4,
+              4
+            ],
+            "length": 36,
+            "width": 8,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "Lever"
+            ],
+            "color": "#4c86c7"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "browser.visibility",
+          "params": {
+            "folder": "joints",
+            "visible": true
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "joint.as_built",
+          "params": {
+            "type": "revolute",
+            "a": "Base",
+            "b": "Lever",
+            "at": {
+              "occurrence": "Lever",
+              "point": [
+                0,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "name": "Hinge"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          8,
+          0,
+          6
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 100
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 2,
+        "joint_values": {
+          "Hinge": [
+            0
+          ]
+        }
+      },
+      "explanation": "The real as-built hinge is created in the existing placement. Its native pivot glyph is shown without moving either component."
+    },
+    {
+      "command": "joint.origin",
+      "slug": "joint-origin",
+      "group": "ASSEMBLE",
+      "setup": [
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Base",
+            "parent": "root",
+            "grounded": true
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "BaseBody",
+            "corner": [
+              -10,
+              -10,
+              0
+            ],
+            "length": 20,
+            "width": 20,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Lever",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "LeverBody",
+            "corner": [
+              -4,
+              -4,
+              4
+            ],
+            "length": 36,
+            "width": 8,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "Lever"
+            ],
+            "color": "#4c86c7"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "browser.visibility",
+          "params": {
+            "folder": "joints",
+            "visible": true
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "joint.origin",
+          "params": {
+            "occurrence": "Lever",
+            "point": [
+              0,
+              0,
+              8
+            ],
+            "z": [
+              0,
+              0,
+              1
+            ],
+            "x": [
+              1,
+              0,
+              0
+            ],
+            "name": "Pivot"
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          10,
+          10,
+          7
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 2
+      },
+      "explanation": "The genuine named joint-origin triad is located on the lever pivot."
+    },
+    {
+      "command": "joint.drive",
+      "slug": "joint-drive",
+      "group": "ASSEMBLE",
+      "setup": [
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Base",
+            "parent": "root",
+            "grounded": true
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "BaseBody",
+            "corner": [
+              -10,
+              -10,
+              0
+            ],
+            "length": 20,
+            "width": 20,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Lever",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "LeverBody",
+            "corner": [
+              -4,
+              -4,
+              4
+            ],
+            "length": 36,
+            "width": 8,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "Lever"
+            ],
+            "color": "#4c86c7"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "joint.create",
+          "params": {
+            "type": "revolute",
+            "name": "Hinge",
+            "a": {
+              "occurrence": "Base",
+              "point": [
+                0,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "b": {
+              "occurrence": "Lever",
+              "point": [
+                0,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "flip": true
+          }
+        },
+        {
+          "command": "browser.visibility",
+          "params": {
+            "folder": "joints",
+            "visible": true
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "joint.drive",
+          "params": {
+            "joint": "Hinge",
+            "value": 45
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          10,
+          10,
+          7
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 2,
+        "joint_values": {
+          "Hinge": [
+            45
+          ]
+        }
+      },
+      "explanation": "Driving the hinge changes the blue lever from zero to 45 degrees."
+    },
+    {
+      "command": "joint.limits",
+      "slug": "joint-limits",
+      "group": "ASSEMBLE",
+      "setup": [
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Base",
+            "parent": "root",
+            "grounded": true
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "BaseBody",
+            "corner": [
+              -10,
+              -10,
+              0
+            ],
+            "length": 20,
+            "width": 20,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Lever",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "LeverBody",
+            "corner": [
+              -4,
+              -4,
+              4
+            ],
+            "length": 36,
+            "width": 8,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "Lever"
+            ],
+            "color": "#4c86c7"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "joint.create",
+          "params": {
+            "type": "revolute",
+            "name": "Hinge",
+            "a": {
+              "occurrence": "Base",
+              "point": [
+                0,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "b": {
+              "occurrence": "Lever",
+              "point": [
+                0,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "flip": true
+          }
+        },
+        {
+          "command": "joint.drive",
+          "params": {
+            "joint": "Hinge",
+            "value": 70
+          }
+        },
+        {
+          "command": "browser.visibility",
+          "params": {
+            "folder": "joints",
+            "visible": true
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "joint.limits",
+          "params": {
+            "joint": "Hinge",
+            "min": 0,
+            "max": 30
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          10,
+          10,
+          7
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 2,
+        "joint_values": {
+          "Hinge": [
+            30
+          ]
+        }
+      },
+      "explanation": "A new 30-degree upper limit clamps the actual lever from its former 70-degree pose."
+    },
+    {
+      "command": "joint.rigid_group",
+      "slug": "joint-rigid_group",
+      "group": "ASSEMBLE",
+      "setup": [
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Base",
+            "parent": "root",
+            "grounded": true
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "BaseBody",
+            "corner": [
+              -10,
+              -10,
+              0
+            ],
+            "length": 20,
+            "width": 20,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Lever",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "LeverBody",
+            "corner": [
+              -4,
+              -4,
+              4
+            ],
+            "length": 36,
+            "width": 8,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "Lever"
+            ],
+            "color": "#4c86c7"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "joint.create",
+          "params": {
+            "type": "revolute",
+            "name": "Hinge",
+            "a": {
+              "occurrence": "Base",
+              "point": [
+                0,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "b": {
+              "occurrence": "Lever",
+              "point": [
+                0,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "flip": true
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Tip",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "TipBody",
+            "corner": [
+              24,
+              -5,
+              8
+            ],
+            "length": 8,
+            "width": 10,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "Tip"
+            ],
+            "color": "#e8a74f"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "browser.visibility",
+          "params": {
+            "folder": "joints",
+            "visible": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "joint.rigid_group",
+          "params": {
+            "occurrences": [
+              "Lever",
+              "Tip"
+            ]
+          }
+        },
+        {
+          "command": "joint.drive",
+          "params": {
+            "joint": "Hinge",
+            "value": 45
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          10,
+          10,
+          7
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 3,
+        "joint_values": {
+          "Hinge": [
+            45
+          ]
+        }
+      },
+      "explanation": "The orange tip follows the blue lever as one rigid group during a hinge drive."
+    },
+    {
+      "command": "occurrence.move",
+      "slug": "occurrence-move",
+      "group": "ASSEMBLE",
+      "setup": [
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Base",
+            "parent": "root",
+            "grounded": true
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "BaseBody",
+            "corner": [
+              -10,
+              -10,
+              0
+            ],
+            "length": 20,
+            "width": 20,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Lever",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "LeverBody",
+            "corner": [
+              -4,
+              -4,
+              4
+            ],
+            "length": 36,
+            "width": 8,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "Lever"
+            ],
+            "color": "#4c86c7"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "browser.visibility",
+          "params": {
+            "folder": "joints",
+            "visible": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "occurrence.move",
+          "params": {
+            "occurrence": "Lever:1",
+            "space": "world",
+            "translate": [
+              0,
+              18,
+              10
+            ],
+            "axis": [
+              0,
+              0,
+              1
+            ],
+            "angle": "25 deg",
+            "origin": [
+              0,
+              0,
+              4
+            ],
+            "capture": true
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          10,
+          10,
+          12
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 135
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 2
+      },
+      "explanation": "The actual free component is translated and rotated, preserving the grounded base."
+    },
+    {
+      "command": "motion.trace",
+      "slug": "motion-trace",
+      "group": "ASSEMBLE",
+      "setup": [
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Base",
+            "parent": "root",
+            "grounded": true
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "BaseBody",
+            "corner": [
+              -10,
+              -10,
+              0
+            ],
+            "length": 20,
+            "width": 20,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Lever",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "LeverBody",
+            "corner": [
+              -4,
+              -4,
+              4
+            ],
+            "length": 36,
+            "width": 8,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "Lever"
+            ],
+            "color": "#4c86c7"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "joint.create",
+          "params": {
+            "type": "revolute",
+            "name": "Hinge",
+            "a": {
+              "occurrence": "Base",
+              "point": [
+                0,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "b": {
+              "occurrence": "Lever",
+              "point": [
+                0,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "flip": true
+          }
+        },
+        {
+          "command": "browser.visibility",
+          "params": {
+            "folder": "joints",
+            "visible": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "motion.trace.keep",
+          "params": {
+            "occurrence": "Lever",
+            "point": [
+              32,
+              0,
+              6
+            ],
+            "joint": "Hinge",
+            "from": 0,
+            "to": 120,
+            "samples": 25,
+            "name": "TipPath",
+            "auto_update": false
+          }
+        },
+        {
+          "command": "joint.drive",
+          "params": {
+            "joint": "Hinge",
+            "value": 45
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          8,
+          12,
+          6
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 140
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": true,
+        "hint_capture": {
+          "emphasize_sketches": true
+        },
+        "select": [
+          {
+            "type": "feature",
+            "id": 8
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 2,
+        "joint_values": {
+          "Hinge": [
+            45
+          ]
+        }
+      },
+      "explanation": "The actual computed path of the lever tip is kept as a native 3D sketch spline, as in the Motion Trace dialog."
+    },
+    {
+      "command": "explode.create",
+      "slug": "explode-create",
+      "group": "ASSEMBLE",
+      "setup": [
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Base",
+            "parent": "root",
+            "grounded": true
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "BaseBody",
+            "corner": [
+              -10,
+              -10,
+              0
+            ],
+            "length": 20,
+            "width": 20,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Lever",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "LeverBody",
+            "corner": [
+              -4,
+              -4,
+              4
+            ],
+            "length": 36,
+            "width": 8,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "Lever"
+            ],
+            "color": "#4c86c7"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "browser.visibility",
+          "params": {
+            "folder": "joints",
+            "visible": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "explode.create",
+          "params": {
+            "name": "Apart",
+            "moves": [
+              {
+                "occurrence": "Lever",
+                "translate": [
+                  0,
+                  0,
+                  24
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "command": "explode.show",
+          "params": {
+            "view": "Apart"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          8,
+          0,
+          17
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 135
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 2
+      },
+      "explanation": "The saved exploded view is displayed using the native Explode view command."
+    },
+    {
+      "command": "motion.study",
+      "slug": "motion-study",
+      "group": "ASSEMBLE",
+      "setup": [
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Base",
+            "parent": "root",
+            "grounded": true
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "BaseBody",
+            "corner": [
+              -10,
+              -10,
+              0
+            ],
+            "length": 20,
+            "width": 20,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Lever",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "LeverBody",
+            "corner": [
+              -4,
+              -4,
+              4
+            ],
+            "length": 36,
+            "width": 8,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "Lever"
+            ],
+            "color": "#4c86c7"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "joint.create",
+          "params": {
+            "type": "revolute",
+            "name": "Hinge",
+            "a": {
+              "occurrence": "Base",
+              "point": [
+                0,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "b": {
+              "occurrence": "Lever",
+              "point": [
+                0,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "flip": true
+          }
+        },
+        {
+          "command": "browser.visibility",
+          "params": {
+            "folder": "joints",
+            "visible": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "motion.study",
+          "params": {
+            "name": "Turn",
+            "steps": 10,
+            "keys": [
+              {
+                "joint": "Hinge",
+                "points": [
+                  [
+                    0,
+                    0
+                  ],
+                  [
+                    10,
+                    90
+                  ]
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "command": "motion.play",
+          "params": {
+            "study": "Turn",
+            "step": 10
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          10,
+          10,
+          7
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 2,
+        "joint_values": {
+          "Hinge": [
+            90
+          ]
+        }
+      },
+      "explanation": "The real study plays its keyed hinge from zero to 90 degrees."
+    },
+    {
+      "command": "joint.gear",
+      "slug": "joint-gear",
+      "group": "ASSEMBLE",
+      "setup": [
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Base",
+            "parent": "root",
+            "grounded": true
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "BaseBody",
+            "corner": [
+              -28,
+              -16,
+              0
+            ],
+            "length": 56,
+            "width": 32,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "WheelA",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "solid.cylinder",
+          "params": {
+            "body_name": "WheelABody",
+            "base": [
+              -12,
+              0,
+              4
+            ],
+            "radius": 12,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "IndexA",
+            "corner": [
+              -11,
+              -1,
+              8
+            ],
+            "length": 9,
+            "width": 2,
+            "height": 1,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "WheelA"
+            ],
+            "color": "#4c86c7"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "WheelB",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "solid.cylinder",
+          "params": {
+            "body_name": "WheelBBody",
+            "base": [
+              8,
+              0,
+              4
+            ],
+            "radius": 8,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "IndexB",
+            "corner": [
+              9,
+              -1,
+              8
+            ],
+            "length": 5,
+            "width": 2,
+            "height": 1,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "WheelB"
+            ],
+            "color": "#e8a74f"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "joint.create",
+          "params": {
+            "type": "revolute",
+            "name": "SpinA",
+            "a": {
+              "occurrence": "Base",
+              "point": [
+                -12,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "b": {
+              "occurrence": "WheelA",
+              "point": [
+                -12,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "flip": true
+          }
+        },
+        {
+          "command": "joint.create",
+          "params": {
+            "type": "revolute",
+            "name": "SpinB",
+            "a": {
+              "occurrence": "Base",
+              "point": [
+                8,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "b": {
+              "occurrence": "WheelB",
+              "point": [
+                8,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "flip": true
+          }
+        },
+        {
+          "command": "browser.visibility",
+          "params": {
+            "folder": "joints",
+            "visible": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "joint.gear",
+          "params": {
+            "a": "SpinA",
+            "b": "SpinB",
+            "ra": 12,
+            "rb": 8
+          }
+        },
+        {
+          "command": "joint.drive",
+          "params": {
+            "joint": "SpinA",
+            "value": 60
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          -2,
+          0,
+          4
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 5,
+        "joint_values": {
+          "SpinA": [
+            60
+          ],
+          "SpinB": [
+            -90
+          ]
+        }
+      },
+      "explanation": "Raised native index bars expose coupled rotations of +60 and -90 degrees, at the specified 12:8 radius ratio."
+    },
+    {
+      "command": "joint.motion_link",
+      "slug": "joint-motion_link",
+      "group": "ASSEMBLE",
+      "setup": [
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Base",
+            "parent": "root",
+            "grounded": true
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "BaseBody",
+            "corner": [
+              -28,
+              -16,
+              0
+            ],
+            "length": 56,
+            "width": 32,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "WheelA",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "solid.cylinder",
+          "params": {
+            "body_name": "WheelABody",
+            "base": [
+              -12,
+              0,
+              4
+            ],
+            "radius": 12,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "IndexA",
+            "corner": [
+              -11,
+              -1,
+              8
+            ],
+            "length": 9,
+            "width": 2,
+            "height": 1,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "WheelA"
+            ],
+            "color": "#4c86c7"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "WheelB",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "solid.cylinder",
+          "params": {
+            "body_name": "WheelBBody",
+            "base": [
+              8,
+              0,
+              4
+            ],
+            "radius": 8,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "IndexB",
+            "corner": [
+              9,
+              -1,
+              8
+            ],
+            "length": 5,
+            "width": 2,
+            "height": 1,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "WheelB"
+            ],
+            "color": "#e8a74f"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "joint.create",
+          "params": {
+            "type": "revolute",
+            "name": "SpinA",
+            "a": {
+              "occurrence": "Base",
+              "point": [
+                -12,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "b": {
+              "occurrence": "WheelA",
+              "point": [
+                -12,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "flip": true
+          }
+        },
+        {
+          "command": "joint.create",
+          "params": {
+            "type": "revolute",
+            "name": "SpinB",
+            "a": {
+              "occurrence": "Base",
+              "point": [
+                8,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "b": {
+              "occurrence": "WheelB",
+              "point": [
+                8,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "flip": true
+          }
+        },
+        {
+          "command": "browser.visibility",
+          "params": {
+            "folder": "joints",
+            "visible": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "joint.motion_link",
+          "params": {
+            "a": "SpinA",
+            "b": "SpinB",
+            "ratio": 0.5
+          }
+        },
+        {
+          "command": "joint.drive",
+          "params": {
+            "joint": "SpinA",
+            "value": 60
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          -2,
+          0,
+          4
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 5,
+        "joint_values": {
+          "SpinA": [
+            60
+          ],
+          "SpinB": [
+            30
+          ]
+        }
+      },
+      "explanation": "The same indexed wheels show a general motion link: +60 degrees drives +30 degrees."
+    },
+    {
+      "command": "joint.rack_pinion",
+      "slug": "joint-rack_pinion",
+      "group": "ASSEMBLE",
+      "setup": [
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Base",
+            "parent": "root",
+            "grounded": true
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "BaseBody",
+            "corner": [
+              -28,
+              -20,
+              0
+            ],
+            "length": 64,
+            "width": 40,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Pinion",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "solid.cylinder",
+          "params": {
+            "body_name": "PinionBody",
+            "base": [
+              0,
+              0,
+              4
+            ],
+            "radius": 10,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "Index",
+            "corner": [
+              1,
+              -1,
+              8
+            ],
+            "length": 7,
+            "width": 2,
+            "height": 1,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "Pinion"
+            ],
+            "color": "#4c86c7"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Rack",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "RackBody",
+            "corner": [
+              -21,
+              -14,
+              4
+            ],
+            "length": 42,
+            "width": 4,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "Rack"
+            ],
+            "color": "#e8a74f"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "joint.create",
+          "params": {
+            "type": "revolute",
+            "name": "Spin",
+            "a": {
+              "occurrence": "Base",
+              "point": [
+                0,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "b": {
+              "occurrence": "Pinion",
+              "point": [
+                0,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "flip": true
+          }
+        },
+        {
+          "command": "joint.create",
+          "params": {
+            "type": "slider",
+            "name": "Rail",
+            "a": {
+              "occurrence": "Base",
+              "point": [
+                0,
+                -10,
+                4
+              ],
+              "z": [
+                1,
+                0,
+                0
+              ]
+            },
+            "b": {
+              "occurrence": "Rack",
+              "point": [
+                0,
+                -10,
+                4
+              ],
+              "z": [
+                1,
+                0,
+                0
+              ]
+            },
+            "flip": true
+          }
+        },
+        {
+          "command": "browser.visibility",
+          "params": {
+            "folder": "joints",
+            "visible": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "joint.rack_pinion",
+          "params": {
+            "a": "Spin",
+            "b": "Rail",
+            "radius": 10
+          }
+        },
+        {
+          "command": "joint.drive",
+          "params": {
+            "joint": "Spin",
+            "value": 45
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          4,
+          -3,
+          4
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 4,
+        "joint_values": {
+          "Spin": [
+            45
+          ],
+          "Rail": [
+            7.853981633974483
+          ]
+        }
+      },
+      "explanation": "Turning the indexed pinion by 45 degrees translates the orange rack by 10*pi/4 mm."
+    },
+    {
+      "command": "joint.screw",
+      "slug": "joint-screw",
+      "group": "ASSEMBLE",
+      "setup": [
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Base",
+            "parent": "root",
+            "grounded": true
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "BaseBody",
+            "corner": [
+              -10,
+              -10,
+              0
+            ],
+            "length": 20,
+            "width": 20,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "solid.cylinder",
+          "params": {
+            "body_name": "Shaft",
+            "base": [
+              0,
+              0,
+              4
+            ],
+            "radius": 2,
+            "height": 32,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Nut",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "NutBody",
+            "corner": [
+              -10,
+              -5,
+              6
+            ],
+            "length": 20,
+            "width": 10,
+            "height": 6,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "Nut"
+            ],
+            "color": "#4c86c7"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "joint.create",
+          "params": {
+            "type": "cylindrical",
+            "name": "Thread",
+            "a": {
+              "occurrence": "Base",
+              "point": [
+                0,
+                0,
+                6
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "b": {
+              "occurrence": "Nut",
+              "point": [
+                0,
+                0,
+                6
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "flip": true
+          }
+        },
+        {
+          "command": "browser.visibility",
+          "params": {
+            "folder": "joints",
+            "visible": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "joint.screw",
+          "params": {
+            "joint": "Thread",
+            "pitch": 12
+          }
+        },
+        {
+          "command": "joint.drive",
+          "params": {
+            "joint": "Thread",
+            "values": [
+              450
+            ]
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          18
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 105
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 3
+      },
+      "explanation": "The native screw relation couples a 450-degree turn with 15 mm of axial travel; the nut is an asymmetric indexed block."
+    },
+    {
+      "command": "joint.cam",
+      "slug": "joint-cam",
+      "group": "ASSEMBLE",
+      "setup": [
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Base",
+            "parent": "root",
+            "grounded": true
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "BaseBody",
+            "corner": [
+              -20,
+              -20,
+              0
+            ],
+            "length": 60,
+            "width": 40,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Cam",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "offset": 4,
+            "name": "CamProfile"
+          }
+        },
+        {
+          "command": "sketch.circle.center",
+          "params": {
+            "center": [
+              4,
+              0
+            ],
+            "radius": 12
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        },
+        {
+          "command": "solid.extrude",
+          "params": {
+            "sketch": "CamProfile",
+            "distance": 4,
+            "body_name": "CamDisk"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "Cam"
+            ],
+            "color": "#4c86c7"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Follower",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "FollowerBody",
+            "corner": [
+              16,
+              -2,
+              4
+            ],
+            "length": 16,
+            "width": 4,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "Follower"
+            ],
+            "color": "#e8a74f"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "joint.create",
+          "params": {
+            "type": "revolute",
+            "name": "CamTurn",
+            "a": {
+              "occurrence": "Base",
+              "point": [
+                0,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "b": {
+              "occurrence": "Cam",
+              "point": [
+                0,
+                0,
+                4
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "flip": true
+          }
+        },
+        {
+          "command": "joint.create",
+          "params": {
+            "type": "slider",
+            "name": "FollowerSlide",
+            "a": {
+              "occurrence": "Base",
+              "point": [
+                0,
+                0,
+                6
+              ],
+              "z": [
+                1,
+                0,
+                0
+              ]
+            },
+            "b": {
+              "occurrence": "Follower",
+              "point": [
+                0,
+                0,
+                6
+              ],
+              "z": [
+                1,
+                0,
+                0
+              ]
+            },
+            "flip": true
+          }
+        },
+        {
+          "command": "browser.visibility",
+          "params": {
+            "folder": "joints",
+            "visible": false
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "joint.cam",
+          "params": {
+            "a": "CamTurn",
+            "b": "FollowerSlide",
+            "profile": {
+              "sketch": "CamProfile"
+            },
+            "follower": "knife"
+          }
+        },
+        {
+          "command": "joint.drive",
+          "params": {
+            "joint": "CamTurn",
+            "value": 180
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          8,
+          0,
+          5
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 3,
+        "joint_values": {
+          "CamTurn": [
+            180
+          ],
+          "FollowerSlide": [
+            -8
+          ]
+        }
+      },
+      "explanation": "A half turn of the eccentric native disk moves the contacting knife follower 8 mm toward the center."
+    },
+    {
+      "command": "joint.reach",
+      "slug": "joint-reach",
+      "group": "ASSEMBLE",
+      "setup": [
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Base",
+            "parent": "root",
+            "grounded": true
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "BaseBody",
+            "corner": [
+              -5,
+              -5,
+              0
+            ],
+            "length": 10,
+            "width": 10,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Upper",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "UpperBody",
+            "corner": [
+              0,
+              -3,
+              4
+            ],
+            "length": 30,
+            "width": 6,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "Upper"
+            ],
+            "color": "#4c86c7"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Fore",
+            "parent": "root",
+            "grounded": false
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "body_name": "ForeBody",
+            "corner": [
+              30,
+              -3,
+              8
+            ],
+            "length": 20,
+            "width": 6,
+            "height": 4,
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "components": [
+              "Fore"
+            ],
+            "color": "#e8a74f"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "joint.create",
+          "params": {
+            "type": "revolute",
+            "name": "Shoulder",
+            "a": {
+              "occurrence": "Base",
+              "point": [
+                0,
+                0,
+                6
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "b": {
+              "occurrence": "Upper",
+              "point": [
+                0,
+                0,
+                6
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "flip": true
+          }
+        },
+        {
+          "command": "joint.create",
+          "params": {
+            "type": "revolute",
+            "name": "Elbow",
+            "a": {
+              "occurrence": "Upper",
+              "point": [
+                30,
+                0,
+                10
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "b": {
+              "occurrence": "Fore",
+              "point": [
+                30,
+                0,
+                10
+              ],
+              "z": [
+                0,
+                0,
+                1
+              ]
+            },
+            "flip": true
+          }
+        },
+        {
+          "command": "joint.drive",
+          "params": {
+            "joint": "Elbow",
+            "value": 30
+          }
+        },
+        {
+          "command": "browser.visibility",
+          "params": {
+            "folder": "joints",
+            "visible": true
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "joint.reach",
+          "params": {
+            "occurrence": "Fore",
+            "at": [
+              47.32050807568877,
+              10,
+              10
+            ],
+            "point": [
+              25,
+              25,
+              10
+            ],
+            "joints": [
+              "Shoulder",
+              "Elbow"
+            ]
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          25,
+          12,
+          6
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 130
+      },
+      "before_ui": {
+        "showSketches": false
+      },
+      "after_ui": {
+        "showSketches": false
+      },
+      "expected": {
+        "body_count": 3
+      },
+      "explanation": "The native two-link reach solver moves the tip from its actual starting pose to the reachable point [25,25,10]."
+    }
+  ]
+}

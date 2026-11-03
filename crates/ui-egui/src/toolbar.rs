@@ -1180,6 +1180,7 @@ fn persistent_hint(app: &SolveApp, command: &solidcraft_engine::CommandSpec, ena
 /// command interaction in this ribbon pass. These records never survive the current frame.
 struct PersistentRibbonPaint {
     command: &'static solidcraft_engine::CommandSpec,
+    dropdown: bool,
     response: egui::Response,
     // Keep the allocating layer, clip and opacity when replacing these deferred slots.
     painter: egui::Painter,
@@ -1245,7 +1246,9 @@ fn paint_persistent_ribbon(app: &SolveApp, ui: &egui::Ui, paints: Vec<Persistent
                 egui::WidgetInfo::labeled(egui::WidgetType::Button, paint.enabled, app.tr_label(info.label))
             }
         });
-        let _ = ribbon_tooltip(app, paint.response, paint.command, paint.disabled.as_deref());
+        if !paint.dropdown || !illustrated_grid_hint(app, ui, &paint.response, paint.command, paint.enabled, paint.disabled.as_deref()) {
+            let _ = ribbon_tooltip(app, paint.response, paint.command, paint.disabled.as_deref());
+        }
     }
     crate::scenario::publish_count(&format!("{namespace}:pressed"), count as f64);
 }
@@ -1878,6 +1881,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let label = persistent_button_name(app, selected);
                     persistent_paints.push(PersistentRibbonPaint {
                         command: selected,
+                        dropdown: false,
                         response: resp,
                         painter: painter.clone(),
                         rect: whole,
@@ -2310,6 +2314,7 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
     }
     response.on_hover_ui(|ui| {
         let t = Tokens::get();
+        let illustrated = app.preferences.illustrated_command_hints && crate::command_hint_media::available(command.id);
         let name = app.tr_label(crate::render_workspace::interactive_command_info(app, command).label);
         let name_width =
             ui.painter().layout_no_wrap(name.to_string(), crate::fonts::semibold(crate::theme::Tokens::get().font_heading), t.text).size().x;
@@ -2318,7 +2323,12 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
                 ui.painter().layout_no_wrap(key.to_string(), FontId::monospace(crate::theme::Tokens::get().font_body), t.text_dim).size().x + 24.0
             })
             .unwrap_or(0.0);
-        ui.set_width(280.0_f32.max(name_width + key_width + 12.0));
+        let width = 280.0_f32.max(name_width + key_width + 12.0);
+        ui.set_width(if illustrated {
+            width.max(t.command_hint_media_width).min((ui.ctx().content_rect().width() - t.space_24).max(1.0))
+        } else {
+            width
+        });
         ui.horizontal(|ui| {
             let (rect, _) = ui.allocate_exact_size(vec2(name_width, 20.0), Sense::hover());
             ribbon_text(ui, rect.center(), name, t.font_heading, t.text, true);
@@ -2335,6 +2345,10 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
                 });
             }
         });
+        if illustrated {
+            ui.add_space(t.space_8);
+            crate::command_hint_media::show(ui, command.id, app.ui.dark, app.preferences.animate_command_hints);
+        }
         let description = match command.id {
             "render.scene" => Some(app.tr("render.preview_help")),
             "render.start" => Some(app.tr("render.image_help")),
@@ -2487,18 +2501,28 @@ fn dropdown_tip(ui: &egui::Ui, menu: Rect, resp: &egui::Response, add: impl FnOn
     }
     let ctx = ui.ctx();
     let tip_id = resp.id.with("sc_dropdown_tip_area");
-    // Last pass's size; the first pass assumes the tip fits on the right.
+    // Keep the outer edge anchored beside the menu even before the first size is known.
     let size = ctx.read_response(tip_id).map(|r| r.rect.size()).unwrap_or(egui::Vec2::ZERO);
     let screen = ctx.content_rect();
-    let gap = 6.0;
-    let x = if menu.right() + gap + size.x <= screen.right() { menu.right() + gap } else { (menu.left() - gap - size.x).max(screen.left()) };
+    let gap = Tokens::get().space_6;
+    let right_room = (screen.right() - menu.right() - gap).max(0.0);
+    let left_room = (menu.left() - screen.left() - gap).max(0.0);
+    let on_right = if size.x > 0.0 && right_room >= size.x { true } else { right_room >= left_room };
+    let room = if on_right { right_room } else { left_room };
+    let x = if on_right { menu.right() + gap } else { menu.left() - gap };
     let y = resp.rect.top().min((screen.bottom() - size.y).max(screen.top()));
     let area = Container::new(ctx, Surface::Popup)
         .area(tip_id)
         .order(egui::Order::Tooltip)
         .interactable(false)
+        .pivot(if on_right { Align2::LEFT_TOP } else { Align2::RIGHT_TOP })
         .fixed_pos(pos2(x, y))
-        .show(ctx, |ui| Container::new(ctx, Surface::Popup).show_frame(ui, Container::menu_frame(), ui.max_rect(), add));
+        .show(ctx, |ui| {
+            Container::new(ctx, Surface::Popup).show_frame(ui, Container::menu_frame(), ui.max_rect(), |ui| {
+                ui.set_max_width((room - gap * 2.0).max(1.0));
+                add(ui);
+            })
+        });
     Some(area.inner.response.rect)
 }
 
@@ -2568,6 +2592,35 @@ mod dropdown_tip_tests {
             }
         }
         assert_eq!(tips.len(), 2, "both rows showed a tip after their own delay");
+    }
+
+    #[test]
+    fn illustrated_tip_stays_beside_a_menu_in_a_narrow_window() {
+        for x in [20.0, 400.0] {
+            let ctx = crate::fonts::test_context();
+            let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(640.0, 480.0));
+            let menu = Rect::from_min_size(pos2(x, 20.0), vec2(220.0, 64.0));
+            let mut shown = None;
+            for time in [0.0, 0.1, 0.3, 1.0, 1.2, 1.4] {
+                let raw = RawInput {
+                    screen_rect: Some(screen),
+                    events: vec![Event::PointerMoved(menu.min + vec2(10.0, 16.0))],
+                    time: Some(time),
+                    ..Default::default()
+                };
+                crate::test_support::frame(&ctx, raw, |_| {
+                    egui::Area::new(egui::Id::new("narrow_dropdown")).fixed_pos(menu.min).show(&ctx, |ui| {
+                        let resp = ui.interact(menu, egui::Id::new("illustrated_row"), Sense::hover());
+                        shown = dropdown_tip(ui, menu, &resp, |ui| {
+                            ui.allocate_exact_size(vec2(ui.available_width().min(480.0), 300.0), Sense::hover());
+                        });
+                    });
+                });
+            }
+            let tip = shown.expect("hovered media hint");
+            assert!(!tip.intersects(menu), "{tip:?} covers {menu:?}");
+            assert!(screen.contains_rect(tip), "{tip:?} leaves {screen:?}");
+        }
     }
 }
 
@@ -2652,14 +2705,8 @@ fn dropdown_row(
             ui.label(hint);
         });
     } else if let Some(tip) = crate::command_help::row_tip(c.id, &label, Some(shortcut.as_str()).filter(|k| !k.is_empty()), reason) {
-        let help = crate::command_help::help(c.id);
         dropdown_tip(ui, menu, &resp, move |ui| {
-            ui.set_max_width(300.0);
-            ui.label(tip);
-            if let Some(help) = help {
-                ui.add_space(2.0);
-                ui.label(egui::RichText::new(help).weak());
-            }
+            dropdown_command_hint(app, ui, c, &tip);
         });
     }
     if resp.secondary_clicked() {
@@ -2669,6 +2716,50 @@ fn dropdown_row(
         return RowAction::Start(rect);
     }
     RowAction::None
+}
+
+fn dropdown_command_hint(app: &SolveApp, ui: &mut egui::Ui, command: &solidcraft_engine::CommandSpec, tip: &str) {
+    let t = Tokens::get();
+    let illustrated = app.preferences.illustrated_command_hints && crate::command_hint_media::available(command.id);
+    let width = if illustrated { t.command_hint_media_width } else { 300.0 };
+    ui.set_max_width(width.min(ui.available_width()));
+    if illustrated {
+        ui.label(egui::RichText::new(tip).strong());
+        ui.add_space(t.space_8);
+        crate::command_hint_media::show(ui, command.id, app.ui.dark, app.preferences.animate_command_hints);
+    } else {
+        ui.label(tip);
+    }
+    if let Some(help) = crate::command_help::help(command.id) {
+        ui.add_space(t.space_2);
+        ui.label(egui::RichText::new(help).weak());
+    }
+}
+
+fn illustrated_grid_hint(
+    app: &SolveApp,
+    ui: &egui::Ui,
+    response: &egui::Response,
+    command: &solidcraft_engine::CommandSpec,
+    enabled: bool,
+    disabled: Option<&str>,
+) -> bool {
+    if !app.preferences.illustrated_command_hints
+        || !crate::command_hint_media::available(command.id)
+        || persistent_hint(app, command, enabled).is_some()
+    {
+        return false;
+    }
+    let menu = egui::containers::AreaState::load(ui.ctx(), ui.layer_id().id).map(|state| state.rect()).unwrap_or(response.rect);
+    let info = command.info(&app.session);
+    let label = app.tr_label(info.label);
+    let shortcut = crate::keymap::display_for(app, command.id);
+    let reason = disabled.map(|reason| app.tr_label(reason));
+    if let Some(tip) = crate::command_help::row_tip(command.id, label, shortcut.as_deref(), reason) {
+        dropdown_tip(ui, menu, response, |ui| dropdown_command_hint(app, ui, command, &tip));
+        return true;
+    }
+    false
 }
 
 /// Take up what was done in a grid drop-down, as for a list row: start the command (and close
@@ -3016,6 +3107,7 @@ fn dropdown_cell(
         // Reuse the native ribbon recipe; only responses/paint slots survive until dispatch.
         paints.push(PersistentRibbonPaint {
             command: c,
+            dropdown: true,
             response: resp.clone(),
             painter: painter.clone(),
             rect: cell,
@@ -3045,7 +3137,11 @@ fn dropdown_cell(
             return RowAction::TogglePin;
         }
     }
-    let resp = if persistent { resp } else { ribbon_tooltip(app, resp, c, info.disabled_reason.as_deref()) };
+    let resp = if persistent || illustrated_grid_hint(app, ui, &resp, c, info.enabled, info.disabled_reason.as_deref()) {
+        resp
+    } else {
+        ribbon_tooltip(app, resp, c, info.disabled_reason.as_deref())
+    };
     if resp.secondary_clicked() {
         return RowAction::Menu(resp.interact_pointer_pos().unwrap_or(rect.left_bottom()));
     }
@@ -4508,6 +4604,46 @@ mod home_tests {
 #[cfg(test)]
 mod dropdown_tests {
     use super::*;
+
+    #[test]
+    fn illustrated_ribbon_tooltips_cover_custom_pins_and_respect_the_preference() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.illustrated_command_hints = true;
+        crate::toolbar_custom::pin(&mut h.app, "MODEL", "solid.box").unwrap();
+        h.frames(3);
+        let at = crate::scenario::handle_at("button:solid.box").unwrap();
+        h.frame_with(vec![egui::Event::PointerMoved(at)]);
+        h.frames(100);
+        let media = crate::scenario::rect_of("command_hint:media:solid.box").expect("pinned Box has a graphical hint");
+        assert!(media.width() > 300.0 && media.height() > 150.0);
+        assert!(h.app.session.doc.features.is_empty(), "hovering never starts a command");
+
+        h.app.preferences.illustrated_command_hints = false;
+        h.frame_with(vec![egui::Event::PointerMoved(egui::Pos2::ZERO)]);
+        h.frame_with(vec![egui::Event::PointerMoved(at)]);
+        h.frames(100);
+        assert!(crate::scenario::rect_of("command_hint:media:solid.box").is_none());
+    }
+
+    #[test]
+    fn illustrated_ribbon_tooltips_follow_sketch_family_choices_and_fit_a_small_window() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":960,"height":600}));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.preferences.illustrated_command_hints = true;
+        h.app.preferences.sketch_variants.remember("sketch.circle.three_point");
+        crate::toolbar_custom::reorder(&mut h.app, "SKETCH", "sketch.circle.center", "CREATE", Some("sketch.line"));
+        h.frames(3);
+        let button = crate::scenario::rect_of("button:sketch.circle.center").unwrap();
+        h.frame_with(vec![egui::Event::PointerMoved(button.center_top() + vec2(0.0, 10.0))]);
+        h.frames(100);
+        let media = crate::scenario::rect_of("command_hint:media:sketch.circle.three_point").expect("family pin illustrates its chosen variant");
+        assert!(media.width() > 200.0 && media.height() > 100.0);
+        assert!(Rect::from_min_size(egui::Pos2::ZERO, vec2(960.0, 600.0)).contains_rect(media), "media stays on screen: {media:?}");
+        assert!(crate::scenario::rect_of("command_hint:media:sketch.circle.center").is_none());
+    }
 
     #[test]
     fn sketch_create_families_have_icons_and_open_their_variants() {
@@ -6236,6 +6372,54 @@ mod persistent_ribbon_tests {
         h.step(&json!({"click":{"handle":"dropdown:inspect.environment_map"}})).unwrap();
         assert!(h.app.session.status_items().is_empty());
         assert_paint(&h, "inspect.environment_map", false);
+    }
+
+    #[test]
+    fn persistent_grid_hints_illustrate_inactive_analysis_and_keep_the_active_clear_hint() {
+        let mut h = harness();
+        h.app.preferences.illustrated_command_hints = true;
+        h.app.preferences.ribbon_icon_grid = true;
+        assert!(h.app.preferences.persistent_ribbon_pressed);
+        h.step(&json!({"click":{"handle":"panel:INSPECT:SURFACE QUALITY"}})).unwrap();
+        h.frames(3);
+        let at = scenario::handle_at("dropdown:inspect.zebra").unwrap();
+        h.frame_with(vec![egui::Event::PointerMoved(at)]);
+        h.frames(100);
+        let media = scenario::rect_of("command_hint:media:inspect.zebra").expect("inactive analysis has an illustration");
+        assert!(media.width() > 300.0 && media.height() > 150.0);
+        h.app.session.execute("inspect.zebra", &json!({})).unwrap();
+        h.frame_with(vec![egui::Event::PointerMoved(egui::Pos2::ZERO)]);
+        h.frame_with(vec![egui::Event::PointerMoved(at)]);
+        h.frames(100);
+        assert!(scenario::rect_of("command_hint:media:inspect.zebra").is_none());
+        let hint = persistent_hint(&h.app, solidcraft_engine::find_command("inspect.zebra").unwrap(), true).unwrap();
+        let mut all = Vec::new();
+        for shape in &h.shapes {
+            shapes(&shape.shape, &mut all);
+        }
+        assert!(all.iter().any(|shape| matches!(shape, egui::Shape::Text(text) if text.galley.text() == hint)));
+    }
+
+    #[test]
+    fn illustrated_ribbon_tooltips_keep_active_analysis_clear_hints() {
+        let mut h = harness();
+        h.app.preferences.illustrated_command_hints = true;
+        let at = scenario::handle_at("button:inspect.zebra").unwrap();
+        h.frame_with(vec![egui::Event::PointerMoved(at)]);
+        h.frames(100);
+        let media = scenario::rect_of("command_hint:media:inspect.zebra").expect("inactive pinned analysis has an illustration");
+        assert!(media.width() > 300.0 && media.height() > 150.0);
+        h.app.session.execute("inspect.zebra", &json!({})).unwrap();
+        h.frame_with(vec![egui::Event::PointerMoved(egui::Pos2::ZERO)]);
+        h.frame_with(vec![egui::Event::PointerMoved(at)]);
+        h.frames(100);
+        assert!(scenario::rect_of("command_hint:media:inspect.zebra").is_none());
+        let hint = persistent_hint(&h.app, solidcraft_engine::find_command("inspect.zebra").unwrap(), true).unwrap();
+        let mut all = Vec::new();
+        for shape in &h.shapes {
+            shapes(&shape.shape, &mut all);
+        }
+        assert!(all.iter().any(|shape| matches!(shape, egui::Shape::Text(text) if text.galley.text() == hint)));
     }
 
     #[test]

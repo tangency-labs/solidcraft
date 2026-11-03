@@ -1,0 +1,339 @@
+{
+  "samples": [
+    {
+      "command": "sketch.create",
+      "slug": "new-sketch",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 28,
+            "width": 20,
+            "height": 12,
+            "center": [
+              0,
+              0,
+              6
+            ],
+            "body_name": "Reference"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "offset": 12,
+            "name": "New sketch"
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          7
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703874,
+        "distance": 80
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "face",
+            "body": "Reference",
+            "point": [
+              0,
+              0,
+              12
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "body_count": 1,
+        "volume_mm3": 6720
+      },
+      "explanation": "The chosen planar top face is the plane of the new sketch. No drawing or extrusion is implied."
+    },
+    {
+      "command": "sketch.line3d",
+      "slug": "line-3d",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 28,
+            "width": 20,
+            "height": 12,
+            "center": [
+              0,
+              0,
+              6
+            ],
+            "body_name": "Reference"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "bodies": [
+              "Reference"
+            ],
+            "opacity": 0.25
+          }
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Spatial curve"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "sketch_3d": true
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.line3d",
+          "params": {
+            "points": [
+              [
+                -20,
+                -16,
+                0
+              ],
+              [
+                20,
+                -16,
+                0
+              ],
+              [
+                20,
+                -16,
+                26
+              ]
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          12
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703874,
+        "distance": 110
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "body_count": 1,
+        "volume_mm3": 6720
+      },
+      "explanation": "Actual spatial sketch geometry beside a neutral reference block; the reference gives depth without a grid or origin axes."
+    },
+    {
+      "command": "sketch.arc3d",
+      "slug": "arc-3d",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 28,
+            "width": 20,
+            "height": 12,
+            "center": [
+              0,
+              0,
+              6
+            ],
+            "body_name": "Reference"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "bodies": [
+              "Reference"
+            ],
+            "opacity": 0.25
+          }
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Spatial curve"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "sketch_3d": true
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.arc3d",
+          "params": {
+            "start": [
+              -20,
+              -13,
+              0
+            ],
+            "through": [
+              0,
+              -13,
+              26
+            ],
+            "end": [
+              20,
+              -13,
+              12
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          12
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703874,
+        "distance": 110
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "body_count": 1,
+        "volume_mm3": 6720
+      },
+      "explanation": "Actual spatial sketch geometry beside a neutral reference block; the reference gives depth without a grid or origin axes."
+    },
+    {
+      "command": "sketch.spline3d",
+      "slug": "spline-3d",
+      "group": "SKETCH",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 28,
+            "width": 20,
+            "height": 12,
+            "center": [
+              0,
+              0,
+              6
+            ],
+            "body_name": "Reference"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "bodies": [
+              "Reference"
+            ],
+            "opacity": 0.25
+          }
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Spatial curve"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "sketch_3d": true
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sketch.spline3d",
+          "params": {
+            "points": [
+              [
+                -22,
+                -16,
+                0
+              ],
+              [
+                -12,
+                -10,
+                23
+              ],
+              [
+                10,
+                -16,
+                25
+              ],
+              [
+                22,
+                12,
+                16
+              ]
+            ]
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          12
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703874,
+        "distance": 110
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "body_count": 1,
+        "volume_mm3": 6720
+      },
+      "explanation": "Actual spatial sketch geometry beside a neutral reference block; the reference gives depth without a grid or origin axes."
+    }
+  ]
+}

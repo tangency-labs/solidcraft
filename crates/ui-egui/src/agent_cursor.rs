@@ -490,8 +490,14 @@ pub fn paint(app: &SolveApp, ctx: &egui::Context) {
         let k = ((app.now - t0) / 0.6).clamp(0.0, 1.0) as f32;
         painter.circle_stroke(*at, 6.0 + 22.0 * k, Stroke::new(3.0 * (1.0 - k) + 0.5, agent().gamma_multiply(1.0 - k)));
     }
-    crate::icons::pointer::paint(&painter, p);
-    if let Some((_, label)) = app.agent.job.as_ref().and_then(|job| job.stops.front()).filter(|(_, label)| !label.is_empty()) {
+    if app.viewport.hint_capture_emphasize_sketches {
+        crate::icons::pointer::paint_arrow(&painter, p);
+    } else {
+        crate::icons::pointer::paint(&painter, p);
+    }
+    if !app.viewport.hint_capture_emphasize_sketches
+        && let Some((_, label)) = app.agent.job.as_ref().and_then(|job| job.stops.front()).filter(|(_, label)| !label.is_empty())
+    {
         use crate::ui_kit::{Container, Surface};
         let t = crate::theme::Tokens::get();
         Container::new(ctx, Surface::Popup)
@@ -522,6 +528,62 @@ mod tests {
         a.viewport.rect = Some(egui::Rect::from_min_size(pos2(250.0, 120.0), vec2(1100.0, 760.0)));
         a.fit_view();
         a
+    }
+
+    #[test]
+    fn hint_capture_pointer_keeps_native_arrow_and_click_ripples_without_labels() {
+        fn collect(shape: &egui::Shape, geometry: &mut Vec<egui::Shape>, labels: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect(shape, geometry, labels);
+                    }
+                }
+                egui::Shape::Path(_) | egui::Shape::Circle(_) => geometry.push(shape.clone()),
+                egui::Shape::Text(text) => labels.push(text.galley.text().to_owned()),
+                _ => {}
+            }
+        }
+        let mut a = app();
+        a.ui.agent_cursor.show = true;
+        let p = pos2(300.0, 250.0);
+        a.agent.follow_input(p, true, 0.0);
+        a.now = 0.2;
+        let (reply, _rx) = std::sync::mpsc::channel();
+        a.agent.job = Some(Job {
+            method: "engine.execute".into(),
+            params: json!({}),
+            reply,
+            stops: VecDeque::from([(p, "Box")]),
+            chat_turn: None,
+            glide: 0.45,
+            click: 0.25,
+            from: p,
+            started: 0.0,
+            clicked: false,
+            ahead: None,
+        });
+        let ctx = crate::fonts::test_context();
+        let paint_state = |a: &SolveApp| {
+            crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| paint(a, ui.ctx()));
+            let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| paint(a, ui.ctx()));
+            let (mut geometry, mut labels) = (Vec::new(), Vec::new());
+            for shape in output.shapes {
+                collect(&shape.shape, &mut geometry, &mut labels);
+            }
+            (geometry, labels)
+        };
+        let ordinary = paint_state(&a);
+        assert!(ordinary.1.iter().any(|label| label == "Agent"));
+        assert!(ordinary.1.iter().any(|label| label == "Box"));
+        assert_eq!(ordinary.0.iter().filter(|shape| matches!(shape, egui::Shape::Path(_))).count(), 2, "native arrow fill and outline");
+        assert_eq!(ordinary.0.iter().filter(|shape| matches!(shape, egui::Shape::Circle(_))).count(), 1, "native click ripple");
+        a.viewport.hint_capture_emphasize_sketches = true;
+        let capture = paint_state(&a);
+        assert!(capture.1.is_empty(), "no identity or command label in the illustration: {:?}", capture.1);
+        assert_eq!(ordinary.0, capture.0, "the original pointer geometry and ripple are unchanged");
+        a.viewport.hint_capture_emphasize_sketches = false;
+        assert_eq!(ordinary, paint_state(&a), "ordinary pointer painting is restored");
     }
 
     #[test]

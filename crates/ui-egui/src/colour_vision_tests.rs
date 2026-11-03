@@ -645,6 +645,12 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("cube_border", "labelled"),
     ("cube_text", "labelled"),
     ("cube_hover", "hover highlight"),
+    ("command_hint_axis", "one construction axis in a captured illustration"),
+    ("command_hint_curve", "one selected curve in a captured illustration"),
+    ("command_hint_plane", "one plane fill in a captured illustration"),
+    ("command_hint_plane_edge", "one plane outline in a captured illustration"),
+    ("command_hint_media_width", "illustration width, not a colour"),
+    ("command_hint_media_height", "illustration height, not a colour"),
     // Not a colour.
     ("analysis.hatch", "a flag: stripes on the failing faces"),
     // Icon colours that are a shade of a measured one, or one mark alone.

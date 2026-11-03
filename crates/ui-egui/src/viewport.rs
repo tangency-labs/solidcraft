@@ -56,6 +56,10 @@ pub struct ViewportState {
     /// goes when nothing asks for it any more.
     pub(crate) refused_ring: Vec<(String, usize)>,
     pub(crate) refused_ring_next: Vec<(String, usize)>,
+    /// Temporary styling for native command-hint captures; never saved as a preference.
+    pub(crate) hint_capture_emphasize_axes: bool,
+    pub(crate) hint_capture_emphasize_planes: bool,
+    pub(crate) hint_capture_emphasize_sketches: bool,
     /// A drag on the handles of the drawing being placed (Insert SVG / DXF).
     pub(crate) insert_drag: Option<crate::insert_handles::Drag>,
     /// A drag on the handles of the Transform window's box.
@@ -3512,7 +3516,7 @@ pub(crate) fn profile_fill(sc: &mut GpuScene, app: &SolveApp, sketch: u64, index
 /// A reference plane's square. `through` draws it over the model (Create Sketch: a plane inside
 /// a body stays visible and pickable; or the Preferences setting to show reference geometry
 /// through bodies), else it is depth-tested like the rest of the scene.
-fn quad(sc: &mut GpuScene, q: &[Vec3; 4], fill: Color32, edge: Color32, through: bool) {
+fn quad(sc: &mut GpuScene, q: &[Vec3; 4], fill: Color32, edge: Color32, edge_width: f32, through: bool) {
     let col = sc.color(c4(fill));
     for i in [0, 1, 2, 0, 2, 3] {
         if let Some(p) = q.get(i) {
@@ -3525,7 +3529,7 @@ fn quad(sc: &mut GpuScene, q: &[Vec3; 4], fill: Color32, edge: Color32, through:
     }
     for i in 0..4 {
         let (a, b) = (q[i].to_f32(), q[(i + 1) % 4].to_f32());
-        reference_line(sc, a, b, c4(edge), 1.2, through);
+        reference_line(sc, a, b, c4(edge), edge_width, through);
     }
 }
 
@@ -3538,6 +3542,25 @@ fn reference_line(sc: &mut GpuScene, a: [f32; 3], b: [f32; 3], col: [u8; 4], wid
     } else {
         sc.guide_line(a, b, col, width);
     }
+}
+
+fn construction_axis_style(t: &Tokens, selected: bool, emphasize: bool) -> (Color32, f32) {
+    let width = if selected { 3.0 } else { 1.6 };
+    if emphasize { (t.command_hint_axis.to_opaque(), width * 3.0) } else { (if selected { t.sel_edge } else { t.construction_geom }, width) }
+}
+
+fn construction_plane_capture_style(t: &Tokens) -> (Color32, Color32) {
+    (t.command_hint_plane, t.command_hint_plane_edge.to_opaque())
+}
+
+fn sketch_capture_style(t: &Tokens, emphasize: bool) -> (Color32, f32) {
+    if emphasize { (t.command_hint_curve.to_opaque(), 5.5) } else { (t.sel_edge, 3.5) }
+}
+
+pub(crate) fn sketch_preview_stroke(app: &SolveApp, ordinary_color: Color32) -> Stroke {
+    let (color, width) =
+        if app.viewport.hint_capture_emphasize_sketches { sketch_capture_style(&Tokens::view(), true) } else { (ordinary_color, 1.5) };
+    Stroke::new(width, color)
 }
 
 /// What the highlight draws of the hovered item. A face or a plane is lit the same wherever on it
@@ -3575,6 +3598,9 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     app.viewport.hover_feature.hash(&mut h);
     app.viewport.hover_bodies.hash(&mut h);
     app.viewport.hover_plane.hash(&mut h);
+    app.viewport.hint_capture_emphasize_axes.hash(&mut h);
+    app.viewport.hint_capture_emphasize_planes.hash(&mut h);
+    app.viewport.hint_capture_emphasize_sketches.hash(&mut h);
     // Which mesh lights a face follows how the model draws its body (see `shown_mesh`), and at
     // which display quality its plan and edges are made.
     solidcraft_engine::doc::display_quality::current().hash(&mut h);
@@ -3895,11 +3921,11 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             let hovered = matches!(hover, Some(Hit::Plane { name: n, .. }) if n == name) || app.viewport.hover_plane.as_deref() == Some(name);
             (selected, hovered)
         };
-        let mut planes: Vec<(String, [Vec3; 4], Color32)> =
-            origin_planes(app).into_iter().map(|(n, _, q)| (n.to_string(), q, t.origin_plane)).collect();
-        planes.extend(construction_quads(app).into_iter().map(|(n, _, q)| (n, q, t.construction_plane)));
+        let mut planes: Vec<(String, [Vec3; 4], Color32, bool)> =
+            origin_planes(app).into_iter().map(|(n, _, q)| (n.to_string(), q, t.origin_plane, false)).collect();
+        planes.extend(construction_quads(app).into_iter().map(|(n, _, q)| (n, q, t.construction_plane, app.viewport.hint_capture_emphasize_planes)));
         let through = app.picking_plane() || app.preferences.reference_geometry_through_bodies;
-        for (name, q, base) in &planes {
+        for (name, q, base, emphasize) in &planes {
             let (selected, hovered) = plane_state(name);
             let fill = if hovered {
                 t.origin_plane_hover
@@ -3908,7 +3934,13 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             } else {
                 *base
             };
-            quad(&mut sc, q, fill, if selected { t.sel_edge } else { t.origin_plane_edge }, through);
+            let (fill, edge, width) = if *emphasize {
+                let (fill, edge) = construction_plane_capture_style(&t);
+                (fill, edge, 2.4)
+            } else {
+                (fill, if selected { t.sel_edge } else { t.origin_plane_edge }, 1.2)
+            };
+            quad(&mut sc, q, fill, edge, width, through);
         }
         // Origin axes: solid near the origin, dashed beyond.
         for (name, dir) in origin_axes(app) {
@@ -3932,14 +3964,18 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         for (name, a, b) in construction_axis_segments(app) {
             let on =
                 sel.iter().any(|x| matches!(x, Sel::Axis { name: n } if *n == name)) || matches!(hover, Some(Hit::Axis { name: n }) if *n == name);
-            let col = c4(if on { t.sel_edge } else { t.construction_geom });
-            let w = if on { 3.0 } else { 1.6 };
+            let emphasize = app.viewport.hint_capture_emphasize_axes;
+            let (col, w) = construction_axis_style(&t, on, emphasize);
             let len = a.dist(b);
             let dash = size * 0.08;
             let mut s = 0.0;
             while s < len {
                 let e = (s + dash).min(len);
-                reference_line(&mut sc, a.lerp(b, s / len).to_f32(), a.lerp(b, e / len).to_f32(), col, w, through);
+                let (start, end) = (a.lerp(b, s / len).to_f32(), a.lerp(b, e / len).to_f32());
+                if emphasize {
+                    reference_line(&mut sc, start, end, c4(t.body_edge.to_opaque()), w + 1.6, through);
+                }
+                reference_line(&mut sc, start, end, c4(col), w, through);
                 s += dash * 1.6;
             }
         }
@@ -4011,6 +4047,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         return sc;
     }
     let mut feedback = GpuScene { palette: std::sync::Arc::new((*sc.palette).clone()), ..Default::default() };
+    let (sketch_color, sketch_width) = sketch_capture_style(&t, app.viewport.hint_capture_emphasize_sketches);
     let (hover_edge, selected_edge) =
         (EdgeColours::new(&mut feedback, t.hover_edge, t.hover_edge_halo), EdgeColours::new(&mut feedback, t.sel_edge, t.sel_edge_rim));
     let mut hover_instances = HighlightInstances::default();
@@ -4081,31 +4118,31 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             Sel::Profile { sketch, index } => profile_fill(&mut feedback, app, *sketch, *index, t.sel_profile, t.sel_profile_edge),
             // A 3D sketch curve, in the sketch it names, or whichever sketch has it.
             Sel::SketchCurve { id, sketch } if st.sketches.iter().any(|ss| ss.sketch.wire_index(id).is_some()) => {
-                let sel_edge = feedback.color(c4(t.sel_edge));
+                let sel_edge = feedback.color(c4(sketch_color));
                 for ss in st.sketches.iter().filter(|ss| sketch.is_none_or(|k| ss.feature == k)) {
                     if let Some(w) = ss.sketch.wire_index(id).and_then(|i| ss.sketch.wires.get(i)) {
                         for q in w.pts.windows(2) {
-                            feedback.line(q[0].to_f32(), q[1].to_f32(), sel_edge, 3.5, true);
+                            feedback.line(q[0].to_f32(), q[1].to_f32(), sel_edge, sketch_width, true);
                         }
                     }
                 }
             }
             // A curve picked into a dialog from another sketch than the active one names it.
             Sel::ExternalSketchCurve { sketch, id } | Sel::SketchCurve { id, sketch: Some(sketch) } => {
-                let sel_edge = feedback.color(c4(t.sel_edge));
+                let sel_edge = feedback.color(c4(sketch_color));
                 if let Some(ss) = st.sketch(*sketch)
                     && let Some(ci) = ss.sketch.curve_index(id)
                 {
                     for pts in &crate::sketch_display::curve_sample(app, *sketch, ci, &ss.plane, &display_proj(app)).parts {
                         let mode = ss.sketch.curves.get(ci).map_or(0, |c| if c.centerline { 2 } else { u8::from(c.construction) });
                         for (a, b) in sketch_segments(pts, mode, grid_step(app.cam.half_height()).0) {
-                            feedback.line(a.to_f32(), b.to_f32(), sel_edge, 3.5, true);
+                            feedback.line(a.to_f32(), b.to_f32(), sel_edge, sketch_width, true);
                         }
                     }
                 } else if let Some(w) = st.sketch(*sketch).and_then(|ss| ss.sketch.wire_index(id).and_then(|i| ss.sketch.wires.get(i))) {
                     // A 3D sketch curve of that sketch.
                     for q in w.pts.windows(2) {
-                        feedback.line(q[0].to_f32(), q[1].to_f32(), sel_edge, 3.5, true);
+                        feedback.line(q[0].to_f32(), q[1].to_f32(), sel_edge, sketch_width, true);
                     }
                 }
             }
@@ -4113,11 +4150,11 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 if let Some(ss) = app.session.active_sketch.and_then(|sid| st.sketch(sid))
                     && let Some(ci) = ss.sketch.curve_index(id)
                 {
-                    let sel_edge = feedback.color(c4(t.sel_edge));
+                    let sel_edge = feedback.color(c4(sketch_color));
                     for pts in &crate::sketch_display::curve_sample(app, ss.feature, ci, &ss.plane, &display_proj(app)).parts {
                         let mode = ss.sketch.curves.get(ci).map_or(0, |c| if c.centerline { 2 } else { u8::from(c.construction) });
                         for (a, b) in sketch_segments(pts, mode, grid_step(app.cam.half_height()).0) {
-                            feedback.line(a.to_f32(), b.to_f32(), sel_edge, 3.5, true);
+                            feedback.line(a.to_f32(), b.to_f32(), sel_edge, sketch_width, true);
                         }
                     }
                 }
@@ -4128,13 +4165,13 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     // A sketch picked in the Browser or the timeline: all its curves in their line types, over
     // the model, also while the sketch is hidden or inside a body, so it is easy to find.
     let (unit, proj) = (grid_step(app.cam.half_height()).0, display_proj(app));
-    let sel_edge = feedback.color(c4(t.sel_edge));
+    let sel_edge = feedback.color(c4(sketch_color));
     for ss in sketches.iter().filter_map(|id| st.sketch(*id)) {
         for (pts, col, cons) in sketch_lines_with_sampler(&ss.sketch, &ss.plane, false, &[], |_, index, plane| {
             crate::sketch_display::curve_sample(app, ss.feature, index, plane, &proj).parts.clone()
         }) {
             for (a, b) in sketch_segments(&pts, sketch_line_mode(col, cons), unit) {
-                feedback.line(a.to_f32(), b.to_f32(), sel_edge, 3.5, true);
+                feedback.line(a.to_f32(), b.to_f32(), sel_edge, sketch_width, true);
             }
         }
     }
@@ -6925,6 +6962,140 @@ pub fn look_at_selection(app: &mut SolveApp) {
 mod tests {
     use super::*;
     use crate::navigation::*;
+
+    #[test]
+    fn hint_capture_sketches_use_opaque_legible_strokes_and_restore_the_cache_key() {
+        for t in [Tokens::light(), Tokens::dark()] {
+            assert_eq!(sketch_capture_style(&t, false), (t.sel_edge, 3.5));
+            let (color, width) = sketch_capture_style(&t, true);
+            assert_eq!(color.a(), 255);
+            assert!(width > 3.5);
+        }
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        assert!(!app.viewport.hint_capture_emphasize_sketches);
+        let ordinary = highlight_geometry_key(&app);
+        let model = scene_key(&app);
+        app.viewport.hint_capture_emphasize_sketches = true;
+        assert_ne!(highlight_geometry_key(&app), ordinary);
+        assert_eq!(scene_key(&app), model);
+        app.viewport.hint_capture_emphasize_sketches = false;
+        assert_eq!(highlight_geometry_key(&app), ordinary);
+    }
+
+    #[test]
+    fn hint_capture_sketch_previews_keep_geometry_and_pick_markers_without_coordinate_noise() {
+        fn inspect(shape: &Shape, paths: &mut Vec<(Vec<Pos2>, Stroke)>, text: &mut Vec<String>, circles: &mut usize) {
+            match shape {
+                Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        inspect(shape, paths, text, circles);
+                    }
+                }
+                Shape::Path(path) => {
+                    let egui::epaint::ColorMode::Solid(color) = &path.stroke.color else { panic!("native tool preview has a solid stroke") };
+                    paths.push((path.points.clone(), Stroke::new(path.stroke.width, *color)));
+                }
+                Shape::LineSegment { points, stroke } => paths.push((points.to_vec(), *stroke)),
+                Shape::Circle(_) => *circles += 1,
+                Shape::Text(text_shape) => text.push(text_shape.galley.text().to_owned()),
+                _ => {}
+            }
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.settle();
+        let proj = display_proj(&h.app);
+        for (command, points, hover) in [
+            ("sketch.circle.center", vec![Vec2::ZERO], Vec2::new(20.0, 10.0)),
+            ("sketch.slot.center_to_center", vec![Vec2::new(-20.0, 0.0), Vec2::new(20.0, 0.0)], Vec2::new(20.0, 10.0)),
+        ] {
+            let mut tool = crate::tools::Tool::for_command(command).unwrap();
+            tool.pts = points.into_iter().map(|point| (point, None)).collect();
+            tool.hover = Some((hover, None));
+            let ctx = crate::fonts::test_context();
+            let paint = |emphasize: bool, h: &mut crate::scenario::Harness| {
+                h.app.viewport.hint_capture_emphasize_sketches = emphasize;
+                let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+                    crate::tools::preview(&h.app, &tool, &ui.ctx().layer_painter(egui::LayerId::background()), &proj);
+                });
+                let (mut paths, mut text, mut circles) = (Vec::new(), Vec::new(), 0);
+                for shape in output.shapes {
+                    inspect(&shape.shape, &mut paths, &mut text, &mut circles);
+                }
+                (paths, text, circles)
+            };
+            let ordinary = paint(false, &mut h);
+            let capture = paint(true, &mut h);
+            assert!(!ordinary.0.is_empty(), "{command}: the native preview has a curve");
+            assert_eq!(ordinary.0.len(), capture.0.len(), "{command}: the same curve paths");
+            for ((before, old_stroke), (after, new_stroke)) in ordinary.0.iter().zip(&capture.0) {
+                assert_eq!(before, after, "{command}: capture styling preserves construction geometry");
+                assert!(new_stroke.width > old_stroke.width, "{command}: visible preview stroke");
+                assert_eq!(new_stroke.color.a(), 255, "{command}: opaque preview stroke");
+                assert_ne!(new_stroke.color, old_stroke.color, "{command}: capture accent");
+            }
+            assert!(capture.1.is_empty(), "{command}: no coordinate text in capture: {:?}", capture.1);
+            if command == "sketch.circle.center" {
+                assert!(!ordinary.1.is_empty(), "ordinary drawing retains its coordinate readout");
+            }
+            assert!(ordinary.2 > 0, "{command}: native pick marker");
+            assert_eq!(ordinary.2, capture.2, "{command}: capture keeps the pick marker");
+            let restored = paint(false, &mut h);
+            assert_eq!(ordinary, restored, "{command}: ordinary painting is restored");
+        }
+    }
+
+    #[test]
+    fn hint_capture_planes_are_more_opaque_with_solid_contrasting_edges() {
+        for t in [Tokens::light(), Tokens::dark()] {
+            let (fill, edge) = construction_plane_capture_style(&t);
+            assert!(fill.a() >= 160 && fill.a() < 255);
+            assert!(u16::from(fill.a()) > u16::from(t.construction_plane.a()) * 2);
+            assert_eq!(edge.a(), 255);
+            assert_ne!(fill.to_opaque(), edge);
+        }
+    }
+
+    #[test]
+    fn hint_capture_planes_invalidate_only_highlights_and_restore_the_key() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        assert!(!app.viewport.hint_capture_emphasize_planes);
+        let ordinary = highlight_geometry_key(&app);
+        let model = scene_key(&app);
+        app.viewport.hint_capture_emphasize_planes = true;
+        assert_ne!(highlight_geometry_key(&app), ordinary);
+        assert_eq!(scene_key(&app), model);
+        app.viewport.hint_capture_emphasize_planes = false;
+        assert_eq!(highlight_geometry_key(&app), ordinary);
+    }
+
+    #[test]
+    fn hint_capture_axes_triple_native_width_without_changing_ordinary_style() {
+        for t in [Tokens::light(), Tokens::dark()] {
+            for (selected, color, width) in [(false, t.construction_geom, 1.6), (true, t.sel_edge, 3.0)] {
+                assert_eq!(construction_axis_style(&t, selected, false), (color, width));
+                let (emphasized, capture_width) = construction_axis_style(&t, selected, true);
+                assert_eq!(capture_width, width * 3.0);
+                assert_eq!(emphasized, t.command_hint_axis);
+                assert_eq!(emphasized.a(), 255);
+                assert_ne!(emphasized, color);
+            }
+        }
+    }
+
+    #[test]
+    fn hint_capture_axes_invalidate_retained_highlights_and_restore_the_key() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        assert!(!app.viewport.hint_capture_emphasize_axes);
+        let ordinary = highlight_geometry_key(&app);
+        let model = scene_key(&app);
+        app.viewport.hint_capture_emphasize_axes = true;
+        assert_ne!(highlight_geometry_key(&app), ordinary);
+        assert_eq!(scene_key(&app), model);
+        app.viewport.hint_capture_emphasize_axes = false;
+        assert_eq!(highlight_geometry_key(&app), ordinary);
+    }
 
     #[test]
     fn ground_shadow_does_not_enter_see_through_geometry() -> Result<(), Box<dyn std::error::Error>> {

@@ -1269,6 +1269,10 @@ preference_settings! {
     /// Interface font: an installed font family (or a font file), or empty for the built-in one
     /// (#1290). Menus, dialogs and labels use it; glyphs it lacks fall back as before.
     ui_font: String = String::new(), PAGE_APPEARANCE;
+    /// Show illustrated command hover hints where an illustration is available.
+    illustrated_command_hints: bool = false, PAGE_APPEARANCE => check_id("prefs.illustrated_command_hints");
+    /// Animate illustrated command hints; off keeps their illustrations still.
+    animate_command_hints: bool = false, PAGE_APPEARANCE => check_id("prefs.animate_command_hints");
     /// While a dialog or a sketch is open, OK and Cancel in the view's top right corner, with the
     /// axis view moved down below them (#6709). Off by default.
     view_confirm_corner: bool = false, PAGE_LAYOUT;
@@ -6487,6 +6491,30 @@ mod tests {
         assert_eq!(other.preferences.ui_font, family);
         super::defaults(&mut app, super::PAGE_APPEARANCE);
         assert_eq!(app.preferences.ui_font, "");
+    }
+
+    #[test]
+    fn illustrated_command_hints_are_opt_in_saved_and_restored() {
+        use super::*;
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        assert!(!app.preferences.illustrated_command_hints);
+        assert!(!app.preferences.animate_command_hints);
+        assert!(!lenient(&json!({"theme": "light"})).illustrated_command_hints, "existing preferences keep text-only hints");
+        assert!(!lenient(&json!({"theme": "light"})).animate_command_hints, "existing preferences keep animation off");
+        assert_eq!(control(&mut app, &json!({"illustrated_command_hints": true})).unwrap()["illustrated_command_hints"], true);
+        assert!(!app.preferences.animate_command_hints, "illustrations can remain still");
+        assert_eq!(control(&mut app, &json!({"animate_command_hints": true})).unwrap()["animate_command_hints"], true);
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert!(restored.preferences.illustrated_command_hints);
+        assert!(restored.preferences.animate_command_hints);
+        assert!(set(&mut app, &json!({"illustrated_command_hints": "true"})).is_err());
+        assert!(app.preferences.illustrated_command_hints, "a refused value preserves the opt-in");
+        assert!(set(&mut app, &json!({"animate_command_hints": "true"})).is_err());
+        assert!(app.preferences.animate_command_hints, "a refused value preserves the animation opt-in");
+        control(&mut app, &json!({"open": "Interface", "button": "defaults"})).unwrap();
+        assert!(!app.preferences.illustrated_command_hints, "Interface defaults restore text-only hints");
+        assert!(!app.preferences.animate_command_hints, "Interface defaults stop animation");
     }
 
     /// The web app's open tabs share their settings (#8644): a running tab loads what another

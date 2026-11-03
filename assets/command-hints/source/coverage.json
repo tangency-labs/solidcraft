@@ -1,0 +1,787 @@
+{
+  "tabs": {
+    "ASSEMBLE": {
+      "component.capture_position": {
+        "text_only": "Records placement state; no model geometry changes."
+      },
+      "component.create": {
+        "text_only": "Creates an empty hierarchy entry rather than visible geometry."
+      },
+      "component.from_bodies": {
+        "text_only": "Changes component ownership while preserving visible geometry."
+      },
+      "component.insert_design": {
+        "text_only": "A design-file insertion workflow whose result depends on the selected file."
+      },
+      "component.revert_position": {
+        "text_only": "Restores saved placement state; the written hint explains which state returns."
+      },
+      "contact.check": {
+        "text_only": "Contact-set membership, enablement, or reports are state workflows best explained with text."
+      },
+      "contact.create": {
+        "text_only": "Contact-set membership, enablement, or reports are state workflows best explained with text."
+      },
+      "contact.disable_all": {
+        "text_only": "Contact-set membership, enablement, or reports are state workflows best explained with text."
+      },
+      "contact.edit": {
+        "text_only": "Contact-set membership, enablement, or reports are state workflows best explained with text."
+      },
+      "contact.enable_all": {
+        "text_only": "Contact-set membership, enablement, or reports are state workflows best explained with text."
+      },
+      "contact.enable_sets": {
+        "text_only": "Contact-set membership, enablement, or reports are state workflows best explained with text."
+      },
+      "contact.list": {
+        "text_only": "Contact-set membership, enablement, or reports are state workflows best explained with text."
+      },
+      "explode.create": {
+        "illustration": "explode-create"
+      },
+      "joint.as_built": {
+        "illustration": "joint-as_built"
+      },
+      "joint.cam": {
+        "illustration": "joint-cam"
+      },
+      "joint.create": {
+        "illustration": "joint-create"
+      },
+      "joint.drive": {
+        "illustration": "joint-drive"
+      },
+      "joint.gear": {
+        "illustration": "joint-gear"
+      },
+      "joint.limits": {
+        "illustration": "joint-limits"
+      },
+      "joint.motion_link": {
+        "illustration": "joint-motion_link"
+      },
+      "joint.origin": {
+        "illustration": "joint-origin"
+      },
+      "joint.rack_pinion": {
+        "illustration": "joint-rack_pinion"
+      },
+      "joint.reach": {
+        "illustration": "joint-reach"
+      },
+      "joint.rigid_group": {
+        "illustration": "joint-rigid_group"
+      },
+      "joint.screw": {
+        "illustration": "joint-screw"
+      },
+      "motion.study": {
+        "illustration": "motion-study"
+      },
+      "motion.trace": {
+        "illustration": "motion-trace"
+      },
+      "occurrence.ground": {
+        "text_only": "Locks placement without changing geometry; the lock icon and text explain it."
+      },
+      "occurrence.move": {
+        "illustration": "occurrence-move"
+      },
+      "parts.library": {
+        "text_only": "A library browsing and insertion workflow with no single representative result."
+      }
+    },
+    "INSPECT": {
+      "assembly.bom": {
+        "text_only": "A parts-list report rather than a geometric operation."
+      },
+      "component.properties": {
+        "text_only": "A property report; a model-only picture would omit the actual information."
+      },
+      "contact.check": {
+        "text_only": "Contact-set membership, enablement, or reports are state workflows best explained with text."
+      },
+      "document.inspect": {
+        "text_only": "A design report rather than a geometric operation."
+      },
+      "inspect.accessibility": {
+        "illustration": "inspect-accessibility"
+      },
+      "inspect.center_of_mass": {
+        "illustration": "inspect-center_of_mass"
+      },
+      "inspect.colored_components": {
+        "illustration": "inspect-colored_components"
+      },
+      "inspect.compare": {
+        "illustration": "inspect-compare"
+      },
+      "inspect.continuity": {
+        "illustration": "inspect-continuity"
+      },
+      "inspect.curvature_comb": {
+        "illustration": "inspect-curvature_comb"
+      },
+      "inspect.curvature_map": {
+        "illustration": "inspect-curvature_map"
+      },
+      "inspect.draft": {
+        "illustration": "inspect-draft"
+      },
+      "inspect.environment_map": {
+        "illustration": "inspect-environment_map"
+      },
+      "inspect.interference": {
+        "illustration": "inspect-interference"
+      },
+      "inspect.isocurve": {
+        "illustration": "inspect-isocurve"
+      },
+      "inspect.measure": {
+        "illustration": "inspect-measure"
+      },
+      "inspect.minimum_radius": {
+        "illustration": "inspect-minimum_radius"
+      },
+      "inspect.section": {
+        "illustration": "inspect-section"
+      },
+      "inspect.zebra": {
+        "illustration": "inspect-zebra"
+      },
+      "timeline.dependents": {
+        "text_only": "A dependency report rather than a geometric operation."
+      },
+      "timeline.play": {
+        "text_only": "A history playback workflow; a still model would omit the sequence."
+      }
+    },
+    "MODEL": {
+      "component.finish_edit": {
+        "text_only": "Explains leaving the active linked-component editing context."
+      },
+      "config.configure": {
+        "text_only": "Chooses named configuration values; an isolated model picture would obscure the choice."
+      },
+      "config.table": {
+        "text_only": "A configuration table workflow, best explained with text."
+      },
+      "construct.axis.edge": {
+        "illustration": "axis-edge"
+      },
+      "construct.axis.normal_to_face": {
+        "illustration": "axis-normal_to_face"
+      },
+      "construct.axis.through_cylinder": {
+        "illustration": "axis-through_cylinder"
+      },
+      "construct.axis.two_planes": {
+        "illustration": "axis-two_planes"
+      },
+      "construct.axis.two_points": {
+        "illustration": "axis-two_points"
+      },
+      "construct.plane.along_path": {
+        "illustration": "plane-along_path"
+      },
+      "construct.plane.at_angle": {
+        "illustration": "plane-at_angle"
+      },
+      "construct.plane.axis_point": {
+        "illustration": "plane-axis_point"
+      },
+      "construct.plane.midplane": {
+        "illustration": "plane-midplane"
+      },
+      "construct.plane.offset": {
+        "illustration": "plane-offset"
+      },
+      "construct.plane.perpendicular": {
+        "illustration": "plane-perpendicular"
+      },
+      "construct.plane.tangent": {
+        "illustration": "plane-tangent"
+      },
+      "construct.plane.three_points": {
+        "illustration": "plane-three_points"
+      },
+      "construct.plane.two_edges": {
+        "illustration": "plane-two_edges"
+      },
+      "construct.point.along_path": {
+        "illustration": "point-along_path"
+      },
+      "construct.point.center": {
+        "illustration": "point-center"
+      },
+      "construct.point.edge_plane": {
+        "illustration": "point-edge_plane"
+      },
+      "construct.point.three_planes": {
+        "illustration": "point-three_planes"
+      },
+      "construct.point.two_edges": {
+        "illustration": "point-two_edges"
+      },
+      "construct.point.vertex": {
+        "illustration": "point-vertex"
+      },
+      "face.delete": {
+        "illustration": "delete-face"
+      },
+      "parameters.change": {
+        "text_only": "A parameter editor workflow; a model-only picture would hide named expressions."
+      },
+      "plastic.boss": {
+        "illustration": "plastic-boss"
+      },
+      "plastic.lip": {
+        "illustration": "plastic-lip"
+      },
+      "plastic.rest": {
+        "illustration": "plastic-rest"
+      },
+      "plastic.snap_fit": {
+        "illustration": "plastic-snap_fit"
+      },
+      "sheet.convert": {
+        "illustration": "convert-sheet-metal"
+      },
+      "sketch.arc3d": {
+        "illustration": "arc-3d"
+      },
+      "sketch.create": {
+        "illustration": "new-sketch"
+      },
+      "sketch.edit": {
+        "text_only": "Opens an existing sketch; text explains selecting and entering that context."
+      },
+      "sketch.line3d": {
+        "illustration": "line-3d"
+      },
+      "sketch.point3d": {
+        "text_only": "The point icon and text explain placement; extra editing controls would add noise."
+      },
+      "sketch.spline3d": {
+        "illustration": "spline-3d"
+      },
+      "solid.align": {
+        "illustration": "align"
+      },
+      "solid.boundary_fill": {
+        "illustration": "boundary_fill"
+      },
+      "solid.bounding_solid": {
+        "illustration": "bounding_solid"
+      },
+      "solid.box": {
+        "illustration": "box"
+      },
+      "solid.chamfer": {
+        "illustration": "chamfer"
+      },
+      "solid.coil": {
+        "illustration": "coil"
+      },
+      "solid.combine": {
+        "illustration": "combine"
+      },
+      "solid.cone": {
+        "illustration": "cone"
+      },
+      "solid.cylinder": {
+        "illustration": "cylinder"
+      },
+      "solid.draft": {
+        "illustration": "draft"
+      },
+      "solid.emboss": {
+        "illustration": "emboss"
+      },
+      "solid.extrude": {
+        "illustration": "extrude"
+      },
+      "solid.fillet": {
+        "illustration": "fillet"
+      },
+      "solid.hole": {
+        "illustration": "hole"
+      },
+      "solid.loft": {
+        "illustration": "loft"
+      },
+      "solid.mirror": {
+        "illustration": "mirror"
+      },
+      "solid.move": {
+        "illustration": "move"
+      },
+      "solid.offset_face": {
+        "illustration": "offset-face"
+      },
+      "solid.pattern.circular": {
+        "illustration": "circular-pattern"
+      },
+      "solid.pattern.path": {
+        "illustration": "path-pattern"
+      },
+      "solid.pattern.rectangular": {
+        "illustration": "rectangular-pattern"
+      },
+      "solid.pipe": {
+        "illustration": "pipe"
+      },
+      "solid.press_pull": {
+        "illustration": "press-pull"
+      },
+      "solid.remove": {
+        "text_only": "Direct removal consequences belong in text and confirmation."
+      },
+      "solid.replace_face": {
+        "illustration": "replace-face"
+      },
+      "solid.revolve": {
+        "illustration": "revolve"
+      },
+      "solid.rib": {
+        "illustration": "rib"
+      },
+      "solid.scale": {
+        "illustration": "scale"
+      },
+      "solid.shell": {
+        "illustration": "shell"
+      },
+      "solid.sphere": {
+        "illustration": "sphere"
+      },
+      "solid.split_body": {
+        "illustration": "split-body"
+      },
+      "solid.split_face": {
+        "illustration": "split-face"
+      },
+      "solid.sweep": {
+        "illustration": "sweep"
+      },
+      "solid.thread": {
+        "illustration": "thread"
+      },
+      "solid.torus": {
+        "illustration": "torus"
+      },
+      "solid.web": {
+        "illustration": "web"
+      },
+      "timeline.delete": {
+        "text_only": "Deletion and dependent features need written explanation and confirmation."
+      }
+    },
+    "SHEET METAL": {
+      "config.configure": {
+        "text_only": "Chooses named configuration values; an isolated model picture would obscure the choice."
+      },
+      "config.table": {
+        "text_only": "A configuration table workflow, best explained with text."
+      },
+      "parameters.change": {
+        "text_only": "A parameter editor workflow; a model-only picture would hide named expressions."
+      },
+      "sheet.convert": {
+        "illustration": "convert-sheet-metal"
+      },
+      "sheet.export_bend_table": {
+        "text_only": "Explains exporting the bend data."
+      },
+      "sheet.export_dxf": {
+        "text_only": "Explains an export and its file contents."
+      },
+      "sheet.flange": {
+        "illustration": "sheet-flange"
+      },
+      "sheet.flat_pattern": {
+        "illustration": "sheet-flat_pattern"
+      },
+      "sheet.fold": {
+        "illustration": "sheet-fold"
+      },
+      "sheet.hem": {
+        "illustration": "sheet-hem"
+      },
+      "sheet.manage_rules": {
+        "text_only": "A rules editor; thickness and bend settings belong in its written guidance."
+      },
+      "sheet.path_flange": {
+        "illustration": "sheet-path_flange"
+      },
+      "sheet.perforate": {
+        "illustration": "sheet-perforate"
+      },
+      "sheet.refold": {
+        "illustration": "sheet-refold"
+      },
+      "sheet.unfold": {
+        "illustration": "sheet-unfold"
+      },
+      "sketch.create": {
+        "illustration": "new-sketch"
+      }
+    },
+    "SKETCH": {
+      "canvas.insert": {
+        "text_only": "Import and positioning depend on the chosen image; the hint explains that workflow."
+      },
+      "config.configure": {
+        "text_only": "Chooses named configuration values; an isolated model picture would obscure the choice."
+      },
+      "config.table": {
+        "text_only": "A configuration table workflow, best explained with text."
+      },
+      "parameters.change": {
+        "text_only": "A parameter editor workflow; a model-only picture would hide named expressions."
+      },
+      "sketch.arc.center_point": {
+        "illustration": "sketch-arc-center_point"
+      },
+      "sketch.arc.tangent": {
+        "illustration": "sketch-arc-tangent"
+      },
+      "sketch.arc.three_point": {
+        "illustration": "sketch-arc-three_point"
+      },
+      "sketch.auto_constrain": {
+        "text_only": "Infers multiple relations and dimensions; a clean model-only still would hide that work."
+      },
+      "sketch.auto_constrain_from_datum": {
+        "text_only": "Explains which datum drives inferred dimensions."
+      },
+      "sketch.blend_curve": {
+        "illustration": "sketch-blend_curve"
+      },
+      "sketch.break": {
+        "illustration": "sketch-break"
+      },
+      "sketch.cancel": {
+        "text_only": "Discarding edits needs explicit text about what is restored."
+      },
+      "sketch.centerline": {
+        "illustration": "sketch-centerline"
+      },
+      "sketch.chamfer.distance_angle": {
+        "illustration": "sketch-chamfer-distance_angle"
+      },
+      "sketch.chamfer.equal_distance": {
+        "illustration": "sketch-chamfer-equal_distance"
+      },
+      "sketch.chamfer.two_distance": {
+        "illustration": "sketch-chamfer-two_distance"
+      },
+      "sketch.circle.center": {
+        "illustration": "sketch-circle-center"
+      },
+      "sketch.circle.three_point": {
+        "illustration": "sketch-circle-three_point"
+      },
+      "sketch.circle.three_tangent": {
+        "illustration": "sketch-circle-three_tangent"
+      },
+      "sketch.circle.two_point": {
+        "illustration": "sketch-circle-two_point"
+      },
+      "sketch.circle.two_tangent": {
+        "illustration": "sketch-circle-two_tangent"
+      },
+      "sketch.conic": {
+        "illustration": "sketch-conic"
+      },
+      "sketch.constrainer": {
+        "text_only": "Chooses a relation from the selected geometry; no single still explains every choice."
+      },
+      "sketch.constraint.coincident": {
+        "illustration": "sketch-constraint-coincident"
+      },
+      "sketch.constraint.collinear": {
+        "illustration": "sketch-constraint-collinear"
+      },
+      "sketch.constraint.concentric": {
+        "illustration": "sketch-constraint-concentric"
+      },
+      "sketch.constraint.curvature": {
+        "text_only": "Continuity needs a detailed comb and endpoint discussion, rather than a generic smooth curve."
+      },
+      "sketch.constraint.equal": {
+        "illustration": "sketch-constraint-equal"
+      },
+      "sketch.constraint.fix": {
+        "text_only": "Locks selected geometry without changing its visible shape."
+      },
+      "sketch.constraint.horizontal_vertical": {
+        "illustration": "sketch-constraint-horizontal_vertical"
+      },
+      "sketch.constraint.midpoint": {
+        "illustration": "sketch-constraint-midpoint"
+      },
+      "sketch.constraint.parallel": {
+        "illustration": "sketch-constraint-parallel"
+      },
+      "sketch.constraint.perpendicular": {
+        "illustration": "sketch-constraint-perpendicular"
+      },
+      "sketch.constraint.polygon": {
+        "text_only": "Equal sides and the common circumcircle are better specified by the written relation."
+      },
+      "sketch.constraint.symmetry": {
+        "illustration": "sketch-constraint-symmetry"
+      },
+      "sketch.constraint.tangent": {
+        "illustration": "sketch-constraint-tangent"
+      },
+      "sketch.construction": {
+        "illustration": "sketch-construction"
+      },
+      "sketch.construction_line": {
+        "illustration": "sketch-construction_line"
+      },
+      "sketch.construction_line.angle": {
+        "illustration": "sketch-construction_line-angle"
+      },
+      "sketch.construction_line.bisector": {
+        "illustration": "sketch-construction_line-bisector"
+      },
+      "sketch.construction_line.horizontal": {
+        "illustration": "sketch-construction_line-horizontal"
+      },
+      "sketch.construction_line.parallel": {
+        "illustration": "sketch-construction_line-parallel"
+      },
+      "sketch.construction_line.perpendicular": {
+        "illustration": "sketch-construction_line-perpendicular"
+      },
+      "sketch.construction_line.tangent_at": {
+        "illustration": "sketch-construction_line-tangent_at"
+      },
+      "sketch.construction_line.tangent_external": {
+        "illustration": "sketch-construction_line-tangent_external"
+      },
+      "sketch.construction_line.tangent_two": {
+        "illustration": "sketch-construction_line-tangent_two"
+      },
+      "sketch.construction_line.vertical": {
+        "illustration": "sketch-construction_line-vertical"
+      },
+      "sketch.copy": {
+        "text_only": "Clipboard selection behavior needs text rather than a geometry change."
+      },
+      "sketch.cut": {
+        "text_only": "Clipboard selection behavior and removal need text."
+      },
+      "sketch.dimension": {
+        "illustration": "sketch-dimension"
+      },
+      "sketch.ellipse": {
+        "illustration": "sketch-ellipse"
+      },
+      "sketch.equation_curve": {
+        "text_only": "The formulas and parameter range define the workflow; a generic curve would not explain them."
+      },
+      "sketch.extend": {
+        "illustration": "sketch-extend"
+      },
+      "sketch.fillet": {
+        "illustration": "sketch-fillet"
+      },
+      "sketch.finish": {
+        "text_only": "Ends the current editing context without a characteristic geometry operation."
+      },
+      "sketch.finish_auto_constrain": {
+        "text_only": "Combines constraint inference and leaving the editor; the text explains both."
+      },
+      "sketch.fit_curves_to_section": {
+        "illustration": "sketch-fit_curves_to_section"
+      },
+      "sketch.include_3d": {
+        "illustration": "sketch-include_3d"
+      },
+      "sketch.infinite": {
+        "text_only": "A line-type toggle whose picked-line behavior is explained by text."
+      },
+      "sketch.insert_dxf": {
+        "text_only": "A file-import workflow whose result depends on the file."
+      },
+      "sketch.insert_svg": {
+        "text_only": "A file-import workflow whose result depends on the file."
+      },
+      "sketch.inspect": {
+        "text_only": "A sketch analysis report; the report is the useful content."
+      },
+      "sketch.intersect": {
+        "illustration": "sketch-intersect"
+      },
+      "sketch.intersection_curve": {
+        "illustration": "sketch-intersection_curve"
+      },
+      "sketch.isoparametric_curve": {
+        "illustration": "sketch-isoparametric_curve"
+      },
+      "sketch.line": {
+        "illustration": "sketch-line"
+      },
+      "sketch.line.midpoint": {
+        "illustration": "sketch-line-midpoint"
+      },
+      "sketch.mirror": {
+        "illustration": "sketch-mirror"
+      },
+      "sketch.move": {
+        "illustration": "sketch-move"
+      },
+      "sketch.offset": {
+        "illustration": "sketch-offset"
+      },
+      "sketch.paste": {
+        "text_only": "Placement of clipboard content depends on the copied selection."
+      },
+      "sketch.pattern.circular": {
+        "illustration": "sketch-pattern-circular"
+      },
+      "sketch.pattern.rectangular": {
+        "illustration": "sketch-pattern-rectangular"
+      },
+      "sketch.point": {
+        "text_only": "The existing point icon and placement instruction explain this direct action."
+      },
+      "sketch.polygon.circumscribed": {
+        "illustration": "sketch-polygon-circumscribed"
+      },
+      "sketch.polygon.edge": {
+        "illustration": "sketch-polygon-edge"
+      },
+      "sketch.polygon.inscribed": {
+        "illustration": "sketch-polygon-inscribed"
+      },
+      "sketch.project": {
+        "illustration": "sketch-project"
+      },
+      "sketch.project_to_surface": {
+        "illustration": "sketch-project_to_surface"
+      },
+      "sketch.rectangle.center": {
+        "illustration": "sketch-rectangle-center"
+      },
+      "sketch.rectangle.rounded": {
+        "illustration": "sketch-rectangle-rounded"
+      },
+      "sketch.rectangle.three_point": {
+        "illustration": "sketch-rectangle-three_point"
+      },
+      "sketch.rectangle.two_point": {
+        "illustration": "rectangle"
+      },
+      "sketch.scale": {
+        "illustration": "sketch-scale"
+      },
+      "sketch.slot.arc_center": {
+        "illustration": "sketch-slot-arc_center"
+      },
+      "sketch.slot.arc_three_point": {
+        "illustration": "sketch-slot-arc_three_point"
+      },
+      "sketch.slot.center_point": {
+        "illustration": "sketch-slot-center_point"
+      },
+      "sketch.slot.center_to_center": {
+        "illustration": "sketch-slot-center_to_center"
+      },
+      "sketch.slot.overall": {
+        "illustration": "sketch-slot-overall"
+      },
+      "sketch.spline.control_point": {
+        "illustration": "sketch-spline-control_point"
+      },
+      "sketch.spline.control_point_5": {
+        "illustration": "sketch-spline-control_point_5"
+      },
+      "sketch.spline.fit_point": {
+        "illustration": "sketch-spline-fit_point"
+      },
+      "sketch.spun_profile": {
+        "illustration": "sketch-spun_profile"
+      },
+      "sketch.text": {
+        "illustration": "sketch-text"
+      },
+      "sketch.transform": {
+        "illustration": "sketch-transform"
+      },
+      "sketch.trim": {
+        "illustration": "sketch-trim"
+      }
+    },
+    "SURFACE": {
+      "mesh.convert": {
+        "text_only": "Conversion and body-type choices are better explained in the written hint."
+      },
+      "sketch.create": {
+        "illustration": "new-sketch"
+      },
+      "surface.blend": {
+        "illustration": "surface-blend"
+      },
+      "surface.boundary": {
+        "illustration": "surface-boundary"
+      },
+      "surface.extend": {
+        "illustration": "surface-extend"
+      },
+      "surface.extrude": {
+        "illustration": "surface-extrude"
+      },
+      "surface.fair": {
+        "text_only": "Small curvature changes need native diagnostic inspection rather than a generic shape comparison."
+      },
+      "surface.fillet": {
+        "text_only": "Registered as planned and not implemented; do not imply a working surface fillet."
+      },
+      "surface.loft": {
+        "illustration": "surface-loft"
+      },
+      "surface.match": {
+        "text_only": "Continuity at the seam needs a detailed diagnostic view; retain the written selection guidance."
+      },
+      "surface.offset": {
+        "illustration": "surface-offset"
+      },
+      "surface.patch": {
+        "illustration": "surface-patch"
+      },
+      "surface.reverse_normal": {
+        "text_only": "A direction property; a plain shaded still would conceal its meaning."
+      },
+      "surface.revolve": {
+        "illustration": "surface-revolve"
+      },
+      "surface.ruled": {
+        "illustration": "surface-ruled"
+      },
+      "surface.stitch": {
+        "illustration": "surface-stitch"
+      },
+      "surface.sweep": {
+        "illustration": "surface-sweep"
+      },
+      "surface.thicken": {
+        "illustration": "surface-thicken"
+      },
+      "surface.trim": {
+        "illustration": "surface-trim"
+      },
+      "surface.unstitch": {
+        "illustration": "surface-unstitch"
+      },
+      "surface.untrim": {
+        "illustration": "surface-untrim"
+      }
+    }
+  }
+}
