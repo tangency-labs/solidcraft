@@ -209,11 +209,11 @@ fn face_points(s: &Session, sel: &Sel) -> Vec<Found> {
         Some(solidcraft_kernel::FaceSurface::Sphere { center, .. } | solidcraft_kernel::FaceSurface::Torus { center, .. }) => {
             return tagged(vec![(center, SnapKind::Centre)]);
         }
-        Some(solidcraft_kernel::FaceSurface::Cone { apex, axis, .. }) => return tagged(axis_ends(apex, axis, &verts)),
+        Some(solidcraft_kernel::FaceSurface::Cone { apex, axis, .. }) => return ends_out(axis_ends(apex, axis, &verts), axis, &on),
         _ => {}
     }
     match shape {
-        Shape::Round { center, axis, .. } => tagged(axis_ends(center, axis, &verts)),
+        Shape::Round { center, axis, .. } => ends_out(axis_ends(center, axis, &verts), axis, &on),
         Shape::Plane { .. } => {
             let flat = SnapSource { normal: b.body.planar_face(*index).and_then(|p| p.normal().normalized()), ..on.clone() };
             let mut v: Vec<Found> = area_centre(&tris).map(|p| vec![(p, SnapKind::FaceCentre, flat.clone())]).unwrap_or_default();
@@ -282,6 +282,12 @@ fn same_circle(a: &EdgeCircle, b: &EdgeCircle, tol: f64) -> bool {
 /// Vertex `i`'s point.
 fn vertex(record: &Brep, i: u32) -> Option<Vec3> {
     record.vertices.get(i as usize).map(|v| Vec3::from(v.point)).filter(|p| p.is_finite())
+}
+
+/// A round face's two end centres (lower along `axis` first), each with the axis pointing out of
+/// its end as the normal: the normal of the face a hole opens onto, or of a pin's end.
+fn ends_out(ends: Vec<(Vec3, SnapKind)>, axis: UnitVec3, on: &SnapSource) -> Vec<Found> {
+    ends.into_iter().zip([-axis.vec(), axis.vec()]).map(|((at, kind), out)| (at, kind, SnapSource { normal: Some(out), ..on.clone() })).collect()
 }
 
 /// The points of the axis through `origin` along `axis` level with the face's two ends.

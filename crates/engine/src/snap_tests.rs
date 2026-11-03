@@ -242,3 +242,13 @@ fn things_without_points_offer_none() {
         assert!(snap_points(&s, &sel(v.clone())).is_empty(), "{v}");
     }
 }
+
+#[test]
+fn a_round_faces_end_centres_point_out_of_their_ends() {
+    let s = plate();
+    let wall = face(&s, |p| ((p - Vec3::new(15.0, 20.0, p.z)).len() - 3.0).abs() < 1e-3);
+    let got = snap_points_from(&s, &wall);
+    let normal_at = |z: f64| got.iter().find(|(p, _)| p.at.dist(Vec3::new(15.0, 20.0, z)) < 1e-6).and_then(|(_, from)| from.normal);
+    assert!(normal_at(0.0).is_some_and(|n| n.dist(-Vec3::Z) < 1e-9), "the bottom end, out of the plate's bottom: {got:?}");
+    assert!(normal_at(10.0).is_some_and(|n| n.dist(Vec3::Z) < 1e-9), "the top end, out of its top: {got:?}");
+}
