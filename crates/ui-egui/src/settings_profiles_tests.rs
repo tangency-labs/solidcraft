@@ -795,6 +795,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "ribbon_menus_follow_hover",
         "ribbon_menus_skip_pinned",
         "ribbon_reveal",
+        "ribbon_tabs_only",
         "right_drag_orbits",
         "select_other_hidden",
         "selection_shift_add_only",

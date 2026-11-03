@@ -498,6 +498,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 app.tr("prefs.sketch_tab_always"),
                 app.tr("prefs.layout_page.active_commands"),
                 app.tr("prefs.ribbon_reveal"),
+                app.tr("prefs.ribbon_tabs_only"),
                 app.tr("prefs.layout_page.pinned_menus"),
                 app.tr("prefs.layout_page.hover_panel_menus"),
             ];
@@ -545,13 +546,22 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     3 => {
                                         layout_check(
                                             ui,
+                                            app.tr("prefs.ribbon_tabs_only"),
+                                            app.tr("prefs.ribbon_tabs_only_note"),
+                                            &mut app.preferences.ribbon_tabs_only,
+                                            "ribbon_tabs_only",
+                                        );
+                                    }
+                                    4 => {
+                                        layout_check(
+                                            ui,
                                             app.tr("prefs.layout_page.pinned_menus"),
                                             app.tr("ui.ribbon_menus_skip_pinned"),
                                             &mut app.preferences.ribbon_menus_skip_pinned,
                                             "ribbon_menus_skip_pinned",
                                         );
                                     }
-                                    4 => {
+                                    5 => {
                                         layout_check(
                                             ui,
                                             app.tr("prefs.layout_page.hover_panel_menus"),
