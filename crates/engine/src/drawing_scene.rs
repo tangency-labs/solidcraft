@@ -34,7 +34,7 @@ use solidcraft_doc::{DocError, ModelState, ids};
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::paper::text::TextRun;
 use solidcraft_geom::paper::{Group, Item, MAX_RECORDS, ObjectKind, Picture, Scene};
-use solidcraft_geom::{Aabb2, Loop2, Region2, Seg2, Vec2};
+use solidcraft_geom::{Aabb2, ArcMap, Loop2, Region2, Seg2, Vec2};
 
 use crate::drawing_picture::{picture_items, view_parts};
 use crate::drawing_view::{CHORD_MM, LineRequest, MIN_MODEL_CHORD_MM, ShownSet, Stats, Styles, Unmeasured, paper_group};
@@ -294,12 +294,8 @@ fn group_bounds(group: &Group) -> Aabb2 {
 /// centre are the same bytes however they got there.
 fn moved(group: &Group, by: Vec2) -> Group {
     let segs = |path: &[Seg2]| -> Vec<Seg2> {
-        let shift = |seg: &Seg2| match *seg {
-            // An arc's centre moves; its radius and its angles stay.
-            Seg2::Arc { center, radius, start, sweep } => Seg2::Arc { center: center + by, radius, start, sweep },
-            _ => seg.map_controls(|p| p + by),
-        };
-        path.iter().map(shift).collect()
+        // A shift keeps an arc's radius and angles: no turn, no mirror.
+        path.iter().map(|seg| seg.mapped(|p| p + by, ArcMap::turn(0.0, false))).collect()
     };
     let ring = |l: &Loop2| Loop2 { segs: segs(&l.segs) };
     let items = group.items.iter().map(|item| match item {
