@@ -44,6 +44,7 @@ use crate::kernel::Kernel;
 use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::p2::ControlPointForm;
 use crate::nurbs::b_spline_curve::BSplineCurve;
+use crate::nurbs::b_spline_surface::p2::EditNotify;
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::knots::Side;
 use crate::surface::surface::Surface;
@@ -435,6 +436,21 @@ impl BallPatch {
     /// `SM_ERR` for a scale that is not uniform and positive; those of the point curve's
     /// and the net's transforms.
     pub fn transform(&mut self, rotate_n_move: &Axis2Placement, scale: Option<Vec3>) -> Result<()> {
+        self.transform_notifying(rotate_n_move, scale, &mut |_| Ok(()))
+    }
+
+    /// [`BallPatch::transform`] with the edit notifications of the net's transform
+    /// ([`BSplineSurface::transform_notifying`]) sent through `notify`.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`BallPatch::transform`] and of `notify`.
+    pub(crate) fn transform_notifying(
+        &mut self,
+        rotate_n_move: &Axis2Placement,
+        scale: Option<Vec3>,
+        notify: &mut EditNotify<'_>,
+    ) -> Result<()> {
         let mut factor = 1.0;
         if let Some(sc) = scale {
             #[allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-refusing test
@@ -448,7 +464,7 @@ impl BallPatch {
         centre.transform(rotate_n_move, scale)?;
         self.centre = centre.evaluate_point(centre.natural_interval().min())?;
         self.radius *= factor;
-        self.net.transform(rotate_n_move, scale)
+        self.net.transform_notifying(rotate_n_move, scale, notify)
     }
 
     /// `ReadFromDB`: the definition (the centre and the radius), then the net's

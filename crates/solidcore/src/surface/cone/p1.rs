@@ -135,6 +135,7 @@ use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{max3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, INFINITE_PARAMETER, PI, UNDEF_DOUBLE};
+use crate::nurbs::b_spline_surface::p2::EditNotify;
 use crate::nurbs::b_spline_surface::{
     BSplineSurfaceForm, IsoCurveOptions, LocationType, SurfParamType,
 };
@@ -1816,6 +1817,22 @@ impl Cone {
         rotate_n_move: &Axis2Placement,
         opt_scale: Option<Vec3>,
     ) -> Result<()> {
+        self.transform_notifying(k, rotate_n_move, opt_scale, &mut |_| Ok(()))
+    }
+
+    /// [`Cone::transform`] with the edit notifications of the base surface of revolution's NURB transform sent through
+    /// `notify`.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Cone::transform`] and of `notify`.
+    pub(crate) fn transform_notifying(
+        &mut self,
+        k: &Kernel,
+        rotate_n_move: &Axis2Placement,
+        opt_scale: Option<Vec3>,
+        notify: &mut EditNotify<'_>,
+    ) -> Result<()> {
         let identity_scale = Vec3::new(1.0, 1.0, 1.0);
 
         // no work - identity transform
@@ -1839,12 +1856,13 @@ impl Cone {
         // polar-converter rebuild reaches the cone's iso curves (the virtual
         // CreateIsoParametricCurve)
         let inside_out = self.inside_out;
-        ignore_status(
-            self.rev
-                .transform_using(k, rotate_n_move, opt_scale, &|s, k, p, t| {
-                    Ok(cone_iso_curve(s, inside_out, k, p, t, None, false)?.curve)
-                }),
-        )?;
+        ignore_status(self.rev.transform_using(
+            k,
+            rotate_n_move,
+            opt_scale,
+            &|s, k, p, t| Ok(cone_iso_curve(s, inside_out, k, p, t, None, false)?.curve),
+            notify,
+        ))?;
 
         // update cone size
         self.base_radius *= scale;

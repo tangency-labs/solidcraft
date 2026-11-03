@@ -71,6 +71,7 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{Point2, EFF_ZERO};
 use crate::nurbs::b_spline_curve::BSplineCurve;
+use crate::nurbs::b_spline_surface::p2::EditNotify;
 use crate::nurbs::b_spline_surface::{
     BSplineSurface, BoundingBoxRequest, BoundingBoxes, SurfParamType,
 };
@@ -1332,6 +1333,23 @@ impl ProceduralBlend {
         scale: Option<Vec3>,
         depth: usize,
     ) -> Result<()> {
+        self.transform_notifying_at_depth(k, rotate_n_move, scale, depth, &mut |_| Ok(()))
+    }
+
+    /// [`ProceduralBlend::transform_at_depth`] with the edit notifications of the net's
+    /// transform ([`BSplineSurface::transform_notifying`]) sent through `notify`.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`ProceduralBlend::transform_at_depth`] and of `notify`.
+    pub(crate) fn transform_notifying_at_depth(
+        &mut self,
+        k: &Kernel,
+        rotate_n_move: &Axis2Placement,
+        scale: Option<Vec3>,
+        depth: usize,
+        notify: &mut EditNotify<'_>,
+    ) -> Result<()> {
         let mut factor = 1.0;
         if let Some(sc) = scale {
             #[allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-refusing test
@@ -1354,7 +1372,7 @@ impl ProceduralBlend {
         }
         self.def.chamfer = self.def.chamfer.map(|c| c.scaled(factor));
         self.renew();
-        self.net.transform(rotate_n_move, scale)?;
+        self.net.transform_notifying(rotate_n_move, scale, notify)?;
         // (#2388) the bound is taken in the round's own frame, which moves with it: it
         // scales, and takes in the motion's own rounding where the round now lies
         self.def.bound = self.def.bound * factor

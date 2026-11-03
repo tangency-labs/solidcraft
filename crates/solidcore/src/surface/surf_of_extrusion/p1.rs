@@ -144,6 +144,7 @@ use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF_ZERO_SQRT, INFINITE_PARAMETER, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+use crate::nurbs::b_spline_surface::p2::EditNotify;
 use crate::nurbs::b_spline_surface::{
     BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData, LocationType, SurfParamType,
 };
@@ -1798,16 +1799,19 @@ impl SurfOfExtrusion {
         rotate_n_move: &Axis2Placement,
         scale: Option<Vec3>,
     ) -> Result<()> {
-        self.transform_at_depth(k, rotate_n_move, scale, 0)
+        self.transform_at_depth(k, rotate_n_move, scale, 0, &mut |_| Ok(()))
     }
 
-    /// Carries the caller's whole-geometry depth into the generator transform.
+    /// Carries the caller's whole-geometry depth into the generator transform, and
+    /// sends the edit notifications of the NURB transform
+    /// ([`BSplineSurface::transform_notifying`]) through `notify`.
     pub(crate) fn transform_at_depth(
         &mut self,
         k: &Kernel,
         rotate_n_move: &Axis2Placement,
         scale: Option<Vec3>,
         depth: usize,
+        notify: &mut EditNotify<'_>,
     ) -> Result<()> {
         let identity_scale = Vec3::new(1.0, 1.0, 1.0);
 
@@ -1834,7 +1838,8 @@ impl SurfOfExtrusion {
         if self.base.gw_nurb().is_none() {
             ignore_status(self.make_nurb(k))?;
         }
-        self.base.transform(rotate_n_move, scale)?;
+        self.base
+            .transform_notifying(rotate_n_move, scale, notify)?;
 
         // transform the rest of the 3d data (status ignored)
         if let Some(gen) = self.gen_curve.as_mut() {

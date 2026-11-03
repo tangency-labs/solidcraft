@@ -3420,7 +3420,11 @@ impl Surface {
         Ok(())
     }
 
-    /// [`Surface::transform_at_depth`] of the kind alone.
+    /// [`Surface::transform_at_depth`] of the kind alone. The kind's own
+    /// `SM_NO_PRE_EDIT` (`SmBSplineSurface::Transform`'s, or `SmSrfInVolume::Transform`'s)
+    /// goes through `SmSurface::Notify`, which deletes this surface's stored trimmed
+    /// surface cache; a surface of revolution without NURB sends none, and an offset
+    /// surface's base and extended surfaces notify for themselves.
     fn transform_kind_at_depth(
         &mut self,
         k: &Kernel,
@@ -3428,22 +3432,37 @@ impl Surface {
         scale: Option<Vec3>,
         depth: usize,
     ) -> Result<()> {
-        match &mut self.kind {
-            SurfaceKind::Cone(s) => s.transform(k, rotate_n_move, scale),
-            SurfaceKind::Sphere(s) => s.transform(k, rotate_n_move, scale),
-            SurfaceKind::Torus(s) => s.transform(k, rotate_n_move, scale),
-            SurfaceKind::SurfOfRevolution(s) => {
-                s.transform_at_depth(k, rotate_n_move, scale, depth)
+        let Self {
+            kind, cache_slot, ..
+        } = self;
+        let mut own = |op| {
+            if op == NotifyOperation::PreEdit {
+                delete_stored_trim_cache(cache_slot);
             }
-            SurfaceKind::SurfOfExtrusion(s) => s.transform_at_depth(k, rotate_n_move, scale, depth),
-            SurfaceKind::BSpline(s) => s.transform(rotate_n_move, scale),
-            SurfaceKind::ProceduralBlend(s) => s.transform_at_depth(k, rotate_n_move, scale, depth),
+            Ok(())
+        };
+        match kind {
+            SurfaceKind::Cone(s) => s.transform_notifying(k, rotate_n_move, scale, &mut own),
+            SurfaceKind::Sphere(s) => s.transform_notifying(k, rotate_n_move, scale, &mut own),
+            SurfaceKind::Torus(s) => s.transform_notifying(k, rotate_n_move, scale, &mut own),
+            SurfaceKind::SurfOfRevolution(s) => {
+                s.transform_at_depth(k, rotate_n_move, scale, depth, &mut own)
+            }
+            SurfaceKind::SurfOfExtrusion(s) => {
+                s.transform_at_depth(k, rotate_n_move, scale, depth, &mut own)
+            }
+            SurfaceKind::BSpline(s) => s.transform_notifying(rotate_n_move, scale, &mut own),
+            SurfaceKind::ProceduralBlend(s) => {
+                s.transform_notifying_at_depth(k, rotate_n_move, scale, depth, &mut own)
+            }
             // the fork's SmBallPatch::Transform (f8e6709): rigid or uniform scale only
-            SurfaceKind::BallPatch(s) => s.transform(rotate_n_move, scale),
+            SurfaceKind::BallPatch(s) => s.transform_notifying(rotate_n_move, scale, &mut own),
             SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => base_edit(),
             SurfaceKind::OffsetSurface(s) => s.transform_at_depth(k, rotate_n_move, scale, depth),
-            SurfaceKind::SrfInVolume(s) => s.transform_at_depth(rotate_n_move, scale, depth),
-            SurfaceKind::Plane(s) => s.transform(k, rotate_n_move, scale),
+            SurfaceKind::SrfInVolume(s) => {
+                s.transform_at_depth(rotate_n_move, scale, depth, &mut own)
+            }
+            SurfaceKind::Plane(s) => s.transform_notifying(k, rotate_n_move, scale, &mut own),
         }
     }
 
@@ -5185,14 +5204,21 @@ fn edit_notify(
     operation: NotifyOperation,
 ) -> Result<()> {
     if operation == NotifyOperation::PreEdit {
-        cache_slot.with(|s| {
-            if matches!(s.trim, TrimCacheSlot::Stored(_)) {
-                s.trim = TrimCacheSlot::Empty;
-                s.face_modified_while_out = false;
-            }
-        });
+        delete_stored_trim_cache(cache_slot);
     }
     notify(slot, type_code, operation)
+}
+
+/// `SmCacheMgr::DeleteObjectsCache(SM_OC_TRIMSRF, this)` of `SmSurface::Notify`'s
+/// `SM_NO_PRE_EDIT`: the stored trimmed surface cache goes (a cache in use stays with
+/// its caller).
+fn delete_stored_trim_cache(cache_slot: &CacheSlot) {
+    cache_slot.with(|s| {
+        if matches!(s.trim, TrimCacheSlot::Stored(_)) {
+            s.trim = TrimCacheSlot::Empty;
+            s.face_modified_while_out = false;
+        }
+    });
 }
 
 /// `SmSurface::Notify`: drops the surface's trimmed-surface cache before an edit and

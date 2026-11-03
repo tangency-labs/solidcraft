@@ -87,6 +87,7 @@ use crate::kernel::Kernel;
 use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+use crate::nurbs::b_spline_surface::p2::EditNotify;
 use crate::nurbs::b_spline_surface::{BSplineSurface, BoundingBoxRequest};
 use crate::nurbs::knots::Side;
 use crate::surface::surf_of_revolution::SurfOfRevolution;
@@ -222,6 +223,22 @@ impl Plane {
         rotate_n_move: &Axis2Placement,
         scale: Option<Vec3>,
     ) -> Result<()> {
+        self.transform_notifying(k, rotate_n_move, scale, &mut |_| Ok(()))
+    }
+
+    /// [`Plane::transform`] with the edit notifications of its NURB transform
+    /// ([`BSplineSurface::transform_notifying`]) sent through `notify`.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Plane::transform`] and of `notify`.
+    pub(crate) fn transform_notifying(
+        &mut self,
+        k: &Kernel,
+        rotate_n_move: &Axis2Placement,
+        scale: Option<Vec3>,
+        notify: &mut EditNotify<'_>,
+    ) -> Result<()> {
         let identity_scale = Vec3::new(1.0, 1.0, 1.0);
 
         // no work - identity transform
@@ -232,7 +249,8 @@ impl Plane {
 
         // apply m_pNurb (SmBSplineSurface::Transform makes a missing NURB)
         self.ensure_nurb();
-        self.base.transform(rotate_n_move, scale)?;
+        self.base
+            .transform_notifying(rotate_n_move, scale, notify)?;
 
         // when scaling
         if let Some(s) = scale {

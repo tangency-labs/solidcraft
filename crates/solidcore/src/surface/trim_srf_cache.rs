@@ -216,6 +216,14 @@ pub trait CacheFace<O> {
     /// The implementor's (a face without B-rep).
     fn set_brep_editing_enabled(&mut self, enabled: bool) -> Result<()>;
 
+    /// Whether `BuildTree` implants the face's trims even while its B-rep is being
+    /// edited. Not upstream, which builds the tree untrimmed then: a B-rep point
+    /// classification answers against the face's current trims (WR-732, #2503). `false` by
+    /// default, as upstream.
+    fn implants_while_editing(&self) -> bool {
+        false
+    }
+
     /// `GetFace()->CreateUVTrimCurves(TRUE, NULL, NULL, ..)` (its gap statistics are
     /// not read).
     ///
@@ -777,7 +785,7 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         let editing_face = match face {
             None => None,
             Some(f) => {
-                if f.brep_editing_enabled()? {
+                if f.brep_editing_enabled()? && !f.implants_while_editing() {
                     None
                 } else {
                     Some(f)

@@ -73,6 +73,7 @@ pub struct MappedCacheFace<'a, O> {
     face_handle: O,
     handle_of: &'a dyn Fn(EntityRef) -> Result<O>,
     entity_of: &'a dyn Fn(O) -> Result<EntityRef>,
+    implants_while_editing: bool,
 }
 
 impl<O> Debug for MappedCacheFace<'_, O> {
@@ -105,7 +106,16 @@ impl<'a, O: Copy + PartialEq> MappedCacheFace<'a, O> {
             face_handle,
             handle_of,
             entity_of,
+            implants_while_editing: false,
         })
+    }
+
+    /// This adapter with the face's trims implanted even while its B-rep is being
+    /// edited ([`CacheFace::implants_while_editing`]).
+    #[must_use]
+    pub const fn implanting_while_editing(mut self) -> Self {
+        self.implants_while_editing = true;
+        self
     }
 
     fn mapping_error() -> SolidError {
@@ -147,6 +157,10 @@ impl<O: Copy + PartialEq> CacheFace<O> for MappedCacheFace<'_, O> {
 
     fn set_brep_editing_enabled(&mut self, enabled: bool) -> Result<()> {
         self.inner.set_brep_editing_enabled(enabled)
+    }
+
+    fn implants_while_editing(&self) -> bool {
+        self.implants_while_editing
     }
 
     fn create_uv_trim_curves(&mut self, k: &Kernel) -> Result<()> {

@@ -72,6 +72,7 @@ pub(crate) fn native_failure<T>(r: Result<T>) -> Result<Option<T>> {
             | SolidError::Cancelled { .. }
             | SolidError::PreparationRequired { .. }
             | SolidError::PortInvariant { .. }
+            | SolidError::FaceTrimsUnavailable { .. }
             | SolidError::NotFound { .. }),
         ) => Err(e),
         Err(_) => Ok(None),
@@ -224,6 +225,18 @@ pub enum SolidError {
         operation: &'static str,
         /// What is unsupported.
         reason: &'static str,
+    },
+
+    /// A face's current trims could not be implanted into its surface's cache while its
+    /// B-rep is being edited (an open or inconsistent loop), so a point cannot be
+    /// classified against the face as it is now. Not upstream, which classifies
+    /// against the untrimmed surface then (WR-732, #2503).
+    #[error("{operation}: the trims of {entity} cannot be implanted while it is edited")]
+    FaceTrimsUnavailable {
+        /// Operation that classified against the face.
+        operation: &'static str,
+        /// The face.
+        entity: EntityRef,
     },
 
     /// An upstream `SM_ERR_*` status with no dedicated variant, kept numerically so
@@ -590,6 +603,7 @@ impl SolidError {
             | Self::PortInvariant { .. }
             | Self::PreparationRequired { .. }
             | Self::Cancelled { .. }
+            | Self::FaceTrimsUnavailable { .. }
             | Self::Unported { .. } => None,
         }
     }
@@ -607,10 +621,14 @@ impl SolidError {
     }
 
     /// True when this error must never be swallowed or remapped by an upstream
-    /// status-ignoring fallback ([`SolidError::Unported`] or [`SolidError::Cancelled`]).
+    /// status-ignoring fallback ([`SolidError::Unported`], [`SolidError::Cancelled`]
+    /// or [`SolidError::FaceTrimsUnavailable`], which no upstream status stands for).
     #[must_use]
     pub(crate) const fn is_unported_or_cancelled(&self) -> bool {
-        matches!(self, Self::Unported { .. } | Self::Cancelled { .. })
+        matches!(
+            self,
+            Self::Unported { .. } | Self::Cancelled { .. } | Self::FaceTrimsUnavailable { .. }
+        )
     }
 
     /// [`SolidError::Unported`]: a call into `upstream` (a C++ symbol) of `unit`,
@@ -663,6 +681,7 @@ impl SolidError {
             | Self::ShellRefused { operation, .. }
             | Self::Nlib { operation, .. }
             | Self::PreparationRequired { operation }
+            | Self::FaceTrimsUnavailable { operation, .. }
             | Self::Cancelled { operation } => operation,
             Self::Unported { upstream, .. } => upstream,
         }
@@ -672,7 +691,9 @@ impl SolidError {
     #[must_use]
     pub fn entity(&self) -> Option<EntityRef> {
         match self {
-            Self::NotFound { entity, .. } => Some(*entity),
+            Self::NotFound { entity, .. } | Self::FaceTrimsUnavailable { entity, .. } => {
+                Some(*entity)
+            }
             Self::Degenerate { entity, .. }
             | Self::Upstream { entity, .. }
             | Self::FilletRefused { entity, .. }

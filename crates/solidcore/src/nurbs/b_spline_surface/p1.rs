@@ -140,6 +140,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::line_point_distance;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
+use crate::geom::object::NotifyOperation;
 use crate::geom::polar_box::{PolarBox, PolarBoxState};
 use crate::geom::pseudo_box::PseudoBox;
 use crate::geom::solution_array::SolutionObject;
@@ -150,6 +151,7 @@ use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQ};
 use crate::nurbs::b_spline_curve::p1::ExpandedKnots;
 use crate::nurbs::b_spline_curve::{BSplineCurve, KnotType, NurbCircleParam};
+use crate::nurbs::b_spline_surface::p2::EditNotify;
 use crate::nurbs::crv_basic::ConicType;
 use crate::nurbs::iges::{iges_128_surface, Entity128};
 use crate::nurbs::knots::MAX_DEGREE;
@@ -1974,6 +1976,22 @@ impl BSplineSurface {
     ///
     /// `SM_ERR` without NURB (upstream crashes).
     pub fn transform(&mut self, rotate_n_move: &Axis2Placement, scale: Option<Vec3>) -> Result<()> {
+        self.transform_notifying(rotate_n_move, scale, &mut |_| Ok(()))
+    }
+
+    /// [`BSplineSurface::transform`] with its `SM_NO_PRE_EDIT` and `SM_NO_POST_EDIT`
+    /// notifications of this surface sent through `notify` (an identity transform sends
+    /// none).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`BSplineSurface::transform`] and of `notify`.
+    pub(crate) fn transform_notifying(
+        &mut self,
+        rotate_n_move: &Axis2Placement,
+        scale: Option<Vec3>,
+        notify: &mut EditNotify<'_>,
+    ) -> Result<()> {
         let identity_scale = Vec3::new(1.0, 1.0, 1.0);
 
         // no work - identity transform
@@ -2001,12 +2019,15 @@ impl BSplineSurface {
             }
         }
 
+        notify(NotifyOperation::PreEdit)?;
+
         let sur = self
             .get_or_create_gw_nurb()
             .map_err(|_| SolidError::sm_err(OP_XFORM))?;
         // (N_SrfTransform status ignored)
         let _ = sur.transform(&rma);
-        Ok(())
+
+        notify(NotifyOperation::PostEdit)
     }
 
     /// A copy mirrored about the XY plane of `mirror_plane` (`CreateMirrorSurface`):

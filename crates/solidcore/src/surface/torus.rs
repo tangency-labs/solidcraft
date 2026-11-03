@@ -108,6 +108,7 @@ use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_DEG, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
+use crate::nurbs::b_spline_surface::p2::EditNotify;
 use crate::nurbs::b_spline_surface::{
     BSplineSurface, BSplineSurfaceForm, IsoCurveOptions, SurfParamType,
 };
@@ -1483,6 +1484,22 @@ impl Torus {
         rotate_n_move: &Axis2Placement,
         scale: Option<Vec3>,
     ) -> Result<()> {
+        self.transform_notifying(k, rotate_n_move, scale, &mut |_| Ok(()))
+    }
+
+    /// [`Torus::transform`] with the edit notifications of the base surface of revolution's NURB transform sent through
+    /// `notify`.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Torus::transform`] and of `notify`.
+    pub(crate) fn transform_notifying(
+        &mut self,
+        k: &Kernel,
+        rotate_n_move: &Axis2Placement,
+        scale: Option<Vec3>,
+        notify: &mut EditNotify<'_>,
+    ) -> Result<()> {
         let identity_scale = Vec3::new(1.0, 1.0, 1.0);
 
         // no work - identity transform
@@ -1507,12 +1524,13 @@ impl Torus {
         // finish the call in the parent function (status ignored upstream), whose
         // polar-converter rebuild reaches the torus's iso circles
         let shape = self.shape();
-        ignore_status(
-            self.base
-                .transform_using(k, rotate_n_move, scale, &|s, k, p, t| {
-                    Ok(iso_curve(s, shape, k, p, t, None, false)?.curve)
-                }),
-        )?;
+        ignore_status(self.base.transform_using(
+            k,
+            rotate_n_move,
+            scale,
+            &|s, k, p, t| Ok(iso_curve(s, shape, k, p, t, None, false)?.curve),
+            notify,
+        ))?;
 
         // all done
         Ok(())

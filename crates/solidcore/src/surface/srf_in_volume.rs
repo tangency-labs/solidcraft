@@ -101,12 +101,14 @@ use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::determinate_4x4;
+use crate::geom::object::NotifyOperation;
 use crate::geom::tol::is_zero;
 use crate::geom::transform::Transform;
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::EFF_ZERO;
+use crate::nurbs::b_spline_surface::p2::EditNotify;
 use crate::nurbs::b_spline_surface::{LocationType, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
@@ -1161,14 +1163,17 @@ impl SrfInVolume {
     ///
     /// Those of [`Volume::transform`].
     pub fn transform(&mut self, rotate_n_move: &Axis2Placement, scale: Option<Vec3>) -> Result<()> {
-        self.transform_at_depth(rotate_n_move, scale, 0)
+        self.transform_at_depth(rotate_n_move, scale, 0, &mut |_| Ok(()))
     }
 
+    /// [`SrfInVolume::transform`] at geometry depth `depth`, with this surface's
+    /// `SM_NO_PRE_EDIT` and `SM_NO_POST_EDIT` notifications sent through `notify`.
     pub(crate) fn transform_at_depth(
         &mut self,
         rotate_n_move: &Axis2Placement,
         scale: Option<Vec3>,
         depth: usize,
+        notify: &mut EditNotify<'_>,
     ) -> Result<()> {
         let identity_scale = Vec3::new(1.0, 1.0, 1.0);
 
@@ -1178,9 +1183,13 @@ impl SrfInVolume {
             return Ok(());
         }
 
+        notify(NotifyOperation::PreEdit)?;
+
         // compounding volume transform
         self.volume
-            .transform_at_depth(rotate_n_move, scale, depth + 1)
+            .transform_at_depth(rotate_n_move, scale, depth + 1)?;
+
+        notify(NotifyOperation::PostEdit)
     }
 
     /// The two halves of the surface split at `param` in `surf_param`'s direction

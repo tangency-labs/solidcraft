@@ -1586,6 +1586,20 @@ pub struct UpstreamFixes {
     /// port in progress only: at parity it becomes the default and the pinned corner's
     /// chamfer branch is deleted (WR-716's retirement plan).
     pub fillet_chamfer_corner: bool,
+    /// A B-rep point classification (`query::brep::ray`, `SmBrep::ClassifyPoint` and
+    /// its ray casts) while the body is being edited builds the face's trimmed-surface
+    /// tree with the face's current trims implanted, where upstream's
+    /// `SmTrimSrfCache::BuildTree` skips the trims while editing and answers against
+    /// the untrimmed surface, right only when it reuses a tree built before the edit
+    /// (a face trimmed mid-session is classified as its whole surface). Only a face
+    /// whose loops close is implanted (`query::brep::ray`'s `loops_close`;
+    /// vertices a stitch's glue is still merging meet within their tolerances); one
+    /// whose trims then fail to implant is [`crate::SolidError::FaceTrimsUnavailable`]
+    /// naming the face, not an answer against the untrimmed surface. A face whose loops
+    /// are open mid-edit has no boundary yet and keeps upstream's untrimmed tree (the
+    /// fillet session classifies against such faces). Classifications outside editing
+    /// are unchanged (WR-732, #2503; solidcore-native, no fork commit).
+    pub brep_ray_classifies_current_trims: bool,
 }
 }
 
