@@ -10,7 +10,7 @@ use egui::{Painter, Pos2, Stroke};
 use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
-use solidcraft_engine::snap::{SnapKind, SnapPoint, snap_points};
+use solidcraft_engine::snap::{SnapKind, SnapPoint};
 
 use crate::SolveApp;
 use crate::theme::Tokens;
@@ -29,6 +29,9 @@ pub struct Woken {
     /// The last item hovered that offered nothing the woken points lack: it is not asked again
     /// while it stays under the pointer.
     pub kept_over: Option<Sel>,
+    /// The woken holes' centres, each with a point on its rim: inside a hole's circle the pointer
+    /// is on its way to the centre, whatever shows through the hole (#11476).
+    pub rims: Vec<(Vec3, Vec3)>,
 }
 
 /// Whether snap points are on and the active dialog input takes them.
@@ -62,15 +65,19 @@ fn same_item(a: &Sel, b: &Sel) -> bool {
 /// was shown:
 /// - an item that offers nothing the woken points lack keeps them (a woken face's own edges, on
 ///   the way to its corners and centres);
-/// - a face keeps an edge's or curve's points, so the pointer can cross the faces between a rim
-///   and its centre;
+/// - a face keeps an edge's or curve's points unless it offers them all too (a hole's rim on the
+///   face: nothing is lost), so the pointer can cross the faces between a rim and its centre;
 /// - nothing changes them while the pointer is within reach of one of them (`near`: within
-///   [`REACH`] of a point, or inside a woken rim's circle on its way to the centre), or while
-///   `keep` is held (the Keep Snap Points binding, Shift by default).
+///   [`REACH`] of a point, or inside a woken rim's or a woken face's hole's circle on its way to
+///   the centre), or while `keep` is held (the Keep Snap Points binding, Shift by default).
+///
+/// In a joint origin input snap points belong to a face (#11476): an edge, or a body vertex that
+/// isn't a woken point, stands for the flat face beside it ([`face_context`]; `hits`: everything
+/// under the pointer), whose normal a pick there takes and which is lit ([`lit_face`]).
 ///
 /// Empty space keeps them; a vertex of another body, or an input that doesn't take them, puts
 /// them to sleep.
-pub fn update(app: &mut SolveApp, keep: bool, near: Option<(&Proj, Pos2)>) {
+pub fn update(app: &mut SolveApp, keep: bool, near: Option<(&Proj, Pos2)>, hits: &[Hit]) {
     if !wanted(app) {
         app.viewport.woken = Woken::default();
         return;
@@ -84,7 +91,15 @@ pub fn update(app: &mut SolveApp, keep: bool, near: Option<(&Proj, Pos2)>) {
         app.viewport.woken = Woken::default();
         return;
     }
-    let Some(item) = app.viewport.hover.as_ref().and_then(item_of) else { return };
+    let joint = joint_input(app);
+    let is_woken = |p: Vec3| app.viewport.woken.points.iter().any(|w| w.at.dist(p) <= 1e-6 * (1.0 + p.len()));
+    let item = match app.viewport.hover.as_ref() {
+        Some(h @ Hit::Edge { .. }) if joint => face_context(app, h, hits, near).or_else(|| item_of(h)),
+        Some(h @ Hit::Vertex { point, .. }) if joint && !is_woken(*point) => face_context(app, h, hits, near),
+        Some(h) => item_of(h),
+        None => None,
+    };
+    let Some(item) = item else { return };
     let woken = &app.viewport.woken;
     if [&woken.item, &woken.kept_over].into_iter().flatten().any(|w| same_item(w, &item)) {
         return;
@@ -94,24 +109,111 @@ pub fn update(app: &mut SolveApp, keep: bool, near: Option<(&Proj, Pos2)>) {
     if near.is_some_and(|(proj, pos)| in_reach(proj, pos, woken)) {
         return;
     }
-    if matches!(item, Sel::Face { .. }) && woken.item.as_ref().is_some_and(|w| !matches!(w, Sel::Face { .. })) {
+    let from = solidcraft_engine::snap::snap_points_from(&app.session, &item);
+    let rims: Vec<(Vec3, Vec3)> =
+        from.iter().filter(|(p, _)| p.kind == SnapKind::Centre).filter_map(|(p, source)| source.edge.map(|e| (p.at, e))).collect();
+    let points: Vec<SnapPoint> = from.into_iter().map(|(p, _)| p).collect();
+    let within = |a: &[SnapPoint], b: &[SnapPoint]| a.iter().all(|x| b.iter().any(|y| y.at.dist(x.at) <= 1e-6 * (1.0 + x.at.len())));
+    if matches!(item, Sel::Face { .. }) && woken.item.as_ref().is_some_and(|w| !matches!(w, Sel::Face { .. })) && !within(&woken.points, &points) {
         return;
     }
-    let points = snap_points(&app.session, &item);
-    // An item that offers nothing the woken points lack (a hole's rim after its wall) keeps them;
-    // it is remembered, so it is not asked again while it stays under the pointer.
-    let within = |a: &[SnapPoint], b: &[SnapPoint]| a.iter().all(|x| b.iter().any(|y| y.at.dist(x.at) <= 1e-6 * (1.0 + x.at.len())));
+    // An item that offers nothing the woken points lack (a hole's rim after its wall, a woken
+    // face's own edge) keeps them; it is remembered, so it is not asked again while it stays
+    // under the pointer.
     if !woken.points.is_empty() && within(&points, &woken.points) {
         app.viewport.woken.kept_over = Some(item);
         return;
     }
-    app.viewport.woken = Woken { item: Some(item), points, kept_over: None };
+    app.viewport.woken = Woken { item: Some(item), points, kept_over: None, rims };
+}
+
+/// Whether the active input takes joint origins (Joint, Joint Origin, Motion Trace).
+fn joint_input(app: &SolveApp) -> bool {
+    app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept == crate::dialogs_assembly::SNAPS)
+}
+
+/// The face an edge or a body vertex under the pointer stands for in a joint origin input: of the
+/// flat faces beside the edge (or around the vertex), the one under the pointer, else the one
+/// facing the view most. `None` when no flat face is beside it (an edge between curved faces
+/// keeps its own points).
+fn face_context(app: &SolveApp, hover: &Hit, hits: &[Hit], near: Option<(&Proj, Pos2)>) -> Option<Sel> {
+    let (body, at) = match hover {
+        Hit::Edge { body, mid, .. } => (body, *mid),
+        Hit::Vertex { body, point } => (body, *point),
+        _ => return None,
+    };
+    let st = crate::open_meshing::session_world(&app.session);
+    let b = st.body(body)?;
+    let m = b.mesh();
+    let beside: Vec<u32> = match hover {
+        Hit::Edge { index, .. } => m.edge_faces.get(*index)?.clone(),
+        _ => {
+            // The faces of the edges that end at the vertex.
+            let tol = 1e-6 * (1.0 + at.len());
+            let ends_here = |e: &Vec<Vec3>| [e.first(), e.last()].into_iter().flatten().any(|p| p.dist(at) <= tol);
+            let mut fs: Vec<u32> = m
+                .edges
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| ends_here(e))
+                .flat_map(|(i, _)| m.edge_faces.get(i).cloned().unwrap_or_default())
+                .collect();
+            fs.sort_unstable();
+            fs.dedup();
+            fs
+        }
+    };
+    let flat = |f: u32| b.body.planar_face(f as usize).and_then(|p| p.normal().normalized());
+    let under = hits.iter().find_map(|h| match h {
+        Hit::Face { body: hb, index, point } if hb == body && beside.contains(&(*index as u32)) && flat(*index as u32).is_some() => {
+            Some((*index, *point))
+        }
+        _ => None,
+    });
+    let (index, point) = match under {
+        Some(x) => x,
+        None => {
+            let back = near.map(|(proj, _)| proj.cam.back())?;
+            let (f, _) = beside.iter().filter_map(|&f| flat(f).map(|n| (f, n.dot(back)))).max_by(|x, y| x.1.total_cmp(&y.1))?;
+            // A point inside the face: the middle of its triangle nearest the edge or vertex.
+            let inside = m
+                .triangles
+                .iter()
+                .zip(&m.tri_face)
+                .filter(|(_, tf)| **tf == f)
+                .filter_map(|(t, _)| m.tri(t))
+                .map(|[a, b, c]| (a + b + c) / 3.0)
+                .min_by(|x, y| x.dist(at).total_cmp(&y.dist(at)))?;
+            (f as usize, inside)
+        }
+    };
+    Some(Sel::Face { body: body.clone(), index, point })
+}
+
+/// The face to light in a joint origin input while the pointer is on one of its woken points or
+/// edges: the face a pick there lies on, and whose normal it takes (#11476). A face under the
+/// pointer lights itself.
+pub(crate) fn lit_face(app: &SolveApp) -> Option<Hit> {
+    let Some(Sel::Face { body, index, point }) = app.viewport.woken.item.as_ref().filter(|_| wanted(app) && joint_input(app)) else {
+        return None;
+    };
+    match app.viewport.hover.as_ref()? {
+        Hit::Vertex { .. } | Hit::Edge { .. } => Some(Hit::Face { body: body.clone(), index: *index, point: *point }),
+        _ => None,
+    }
 }
 
 /// Whether the pointer is still where the woken points lead it: within reach of one of them, or
 /// inside the circle a woken rim spans about its centre on screen (a hole's opening).
 fn in_reach(proj: &Proj, pos: Pos2, w: &Woken) -> bool {
     if w.points.iter().filter_map(|p| proj.to_screen(p.at)).any(|p| p.distance(pos) <= REACH) {
+        return true;
+    }
+    let inside = |c: Vec3, rim: Vec3| match (proj.to_screen(c), proj.to_screen(rim)) {
+        (Some(c), Some(e)) => pos.distance(c) <= c.distance(e) + ON,
+        _ => false,
+    };
+    if w.rims.iter().any(|(c, rim)| inside(*c, *rim)) {
         return true;
     }
     let centre = w.points.iter().find(|p| p.kind == SnapKind::Centre).and_then(|p| proj.to_screen(p.at));

@@ -875,12 +875,12 @@ fn woken_has(h: &crate::scenario::Harness, p: Vec3) -> bool {
 fn an_item_that_offers_nothing_new_keeps_the_points() {
     let mut h = holed_plate_picking_from();
     h.app.viewport.hover = Some(face_hit(&h, Vec3::new(41.0, 20.0, 5.0)));
-    crate::snap_wake::update(&mut h.app, false, None);
+    crate::snap_wake::update(&mut h.app, false, None, &[]);
     let (top, bottom) = (Vec3::new(45.0, 20.0, 10.0), Vec3::new(45.0, 20.0, 0.0));
     assert!(woken_has(&h, top) && woken_has(&h, bottom), "{:?}", h.app.viewport.woken);
     let Some(Sel::Edge { body, index, point }) = crate::dialogs::edge_sel(&h.app.session, Vec3::new(49.0, 20.0, 10.0)) else { panic!("the rim") };
     h.app.viewport.hover = Some(crate::viewport::Hit::Edge { body, index, mid: point, point });
-    crate::snap_wake::update(&mut h.app, false, None);
+    crate::snap_wake::update(&mut h.app, false, None, &[]);
     assert!(matches!(h.app.viewport.woken.item, Some(Sel::Face { .. })) && woken_has(&h, bottom), "{:?}", h.app.viewport.woken);
 }
 
@@ -897,10 +897,10 @@ fn another_edge_within_reach_of_a_woken_point_keeps_them() {
     let Some(Sel::Edge { body, index, point }) = crate::dialogs::edge_sel(&h.app.session, Vec3::new(49.0, 20.0, 0.0)) else { panic!("the far rim") };
     h.app.viewport.hover = Some(crate::viewport::Hit::Edge { body, index, mid: point, point });
     let points = solidcraft_engine::snap::snap_points(&h.app.session, &rim);
-    h.app.viewport.woken = crate::snap_wake::Woken { item: Some(rim), points, kept_over: None };
-    crate::snap_wake::update(&mut h.app, false, Some((&proj, screen(centre))));
+    h.app.viewport.woken = crate::snap_wake::Woken { item: Some(rim), points, kept_over: None, rims: Vec::new() };
+    crate::snap_wake::update(&mut h.app, false, Some((&proj, screen(centre))), &[]);
     assert!(woken_has(&h, centre), "at the centre: {:?}", h.app.viewport.woken);
-    crate::snap_wake::update(&mut h.app, false, Some((&proj, screen(Vec3::new(10.0, 10.0, 10.0)))));
+    crate::snap_wake::update(&mut h.app, false, Some((&proj, screen(Vec3::new(10.0, 10.0, 10.0)))), &[]);
     assert!(!woken_has(&h, centre), "far from it the far rim takes over: {:?}", h.app.viewport.woken);
 }
 
@@ -911,18 +911,50 @@ fn shift_keeps_the_points_and_another_bodys_vertex_puts_them_to_sleep() {
     let mut h = holed_plate_picking_from();
     h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [80, 0, 0], "operation": "new"})).unwrap();
     h.app.viewport.hover = Some(face_hit(&h, Vec3::new(20.0, 10.0, 10.0)));
-    crate::snap_wake::update(&mut h.app, false, None);
+    crate::snap_wake::update(&mut h.app, false, None, &[]);
     let plate = h.app.viewport.woken.clone();
     assert!(plate.points.iter().any(|p| p.body == "Body1"), "{plate:?}");
 
     h.app.viewport.hover = Some(face_hit(&h, Vec3::new(85.0, 5.0, 10.0)));
-    crate::snap_wake::update(&mut h.app, true, None);
+    crate::snap_wake::update(&mut h.app, true, None, &[]);
     assert_eq!(h.app.viewport.woken, plate, "Shift held");
-    crate::snap_wake::update(&mut h.app, false, None);
+    crate::snap_wake::update(&mut h.app, false, None, &[]);
     assert!(h.app.viewport.woken.points.iter().all(|p| p.body != "Body1") && woken_has(&h, Vec3::new(85.0, 5.0, 10.0)), "{:?}", h.app.viewport.woken);
 
     h.app.viewport.woken = plate;
     h.app.viewport.hover = Some(crate::viewport::Hit::Vertex { body: "Body2".into(), point: Vec3::new(80.0, 0.0, 10.0) });
-    crate::snap_wake::update(&mut h.app, false, None);
+    crate::snap_wake::update(&mut h.app, false, None, &[]);
     assert!(h.app.viewport.woken.points.is_empty(), "{:?}", h.app.viewport.woken);
+}
+
+/// A woken face keeps its points while the pointer crosses its own edges and hole rims, which
+/// offer nothing it lacks, on the way to its corners (#11476).
+#[test]
+fn a_faces_own_edges_and_rims_keep_its_points() {
+    let mut h = holed_plate_picking_from();
+    h.step(&json!({ "move": { "world": [20, 10, 10] } })).unwrap();
+    assert!(matches!(h.app.viewport.woken.item, Some(Sel::Face { .. })), "{:?}", h.app.viewport.woken.item);
+    let (corner, centre) = (Vec3::new(60.0, 40.0, 10.0), Vec3::new(45.0, 20.0, 10.0));
+    assert!(woken_has(&h, corner) && woken_has(&h, centre), "{:?}", h.app.viewport.woken.points);
+    // Points on its edges and on the hole's rim, away from the points they offer (a pointer
+    // right on a woken point hovers that point, not the edge).
+    for edge in [[15, 0, 10], [49, 20, 10], [60, 30, 10]] {
+        h.step(&json!({ "move": { "world": edge } })).unwrap();
+        assert!(matches!(h.app.viewport.hover, Some(crate::viewport::Hit::Edge { .. })), "{edge:?}: {:?}", h.app.viewport.hover);
+        assert!(matches!(h.app.viewport.woken.item, Some(Sel::Face { .. })) && woken_has(&h, corner), "{edge:?}: {:?}", h.app.viewport.woken);
+    }
+}
+
+/// A face that offers all of a rim's points takes over from it: the plate's top face offers the
+/// hole's centre as well as its own corners (#11476).
+#[test]
+fn a_face_offering_a_rims_points_takes_over_from_it() {
+    let mut h = holed_plate_picking_from();
+    let rim = crate::dialogs::edge_sel(&h.app.session, Vec3::new(49.0, 20.0, 10.0)).unwrap();
+    let points = solidcraft_engine::snap::snap_points(&h.app.session, &rim);
+    h.app.viewport.woken = crate::snap_wake::Woken { item: Some(rim), points, kept_over: None, rims: Vec::new() };
+    h.app.viewport.hover = Some(face_hit(&h, Vec3::new(20.0, 10.0, 10.0)));
+    crate::snap_wake::update(&mut h.app, false, None, &[]);
+    assert!(matches!(h.app.viewport.woken.item, Some(Sel::Face { .. })), "{:?}", h.app.viewport.woken);
+    assert!(woken_has(&h, Vec3::new(45.0, 20.0, 10.0)) && woken_has(&h, Vec3::new(60.0, 40.0, 10.0)), "{:?}", h.app.viewport.woken.points);
 }
