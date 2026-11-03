@@ -100,6 +100,9 @@ fn bridged_block(k: &mut Kernel) -> Brep {
 #[test]
 fn a_round_through_a_bridge_is_refused_naming_the_radius_that_keeps_it_whole() {
     let mut k = kernel(true);
+    // the round on the continued wall; with `fillet_round_ends_on_outline` it ends on the
+    // body's outline (`wr730_round_ends_on_outline.rs`)
+    k.fixes.fillet_round_ends_on_outline = false;
     let mut b = bridged_block(&mut k);
     let refusal = blend(&mut k, &mut b, Point3::new(2.0, 0.0, 10.0), 9.0, 1).expect_err("refused");
     eprintln!("{} fit {:?}", refusal.comment, refusal.fit);
@@ -163,6 +166,9 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 /// manifold solid in one piece (the outside and one solid region), its volume.
 fn built_volume(r: f64, xsect: u32) -> f64 {
     let mut k = kernel(true);
+    // the round on the continued wall; with `fillet_round_ends_on_outline` it ends on the
+    // body's outline (`wr730_round_ends_on_outline.rs`)
+    k.fixes.fillet_round_ends_on_outline = false;
     let mut b = bridged_block(&mut k);
     if let Err(refusal) = blend(&mut k, &mut b, Point3::new(2.0, 0.0, 10.0), r, xsect) {
         panic!("r {r} refused: {}", refusal.comment);

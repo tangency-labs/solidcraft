@@ -18,6 +18,7 @@ pub mod fillet_exact;
 pub mod fillet_executive;
 pub mod fillet_geom;
 pub mod fillet_intersector;
+pub mod fillet_outline;
 pub mod fillet_overflow;
 pub mod fillet_removal;
 pub mod fillet_section;

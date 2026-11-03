@@ -231,6 +231,9 @@ fn a_round_of_a_hole_rim_past_the_plate_bottom_builds() {
     );
     builds(
         |k| {
+            // the round on the continued wall; with `fillet_round_ends_on_outline` it ends on
+            // the body's outline (`wr730_round_ends_on_outline.rs`)
+            k.fixes.fillet_round_ends_on_outline = false;
             let plate = cuboid(k, [0.0, 0.0, 0.0], [40.0, 40.0, 10.0]);
             let hole = post(k, [20.0, 20.0, -1.0], 5.0, 12.0);
             let mut b = boolean_difference(k, plate, hole).unwrap();
@@ -257,6 +260,9 @@ fn a_round_of_a_disc_rim_past_its_wall_builds() {
     );
     builds(
         |k| {
+            // the round on the continued wall; with `fillet_round_ends_on_outline` it ends on
+            // the body's outline (`wr730_round_ends_on_outline.rs`)
+            k.fixes.fillet_round_ends_on_outline = false;
             let mut b = post(k, [0.0, 0.0, 0.0], 13.0, 2.0);
             // a point of the rim away from the seam, which also passes through (13, 0, 2)
             let built = blend(k, &mut b, &[[0.0, 13.0, 2.0]], 2.5, 1);
@@ -369,6 +375,9 @@ fn a_round_wider_than_both_its_faces_builds() {
     assert!((want - 630.293125).abs() < 1e-3, "closed form {want}");
     builds(
         |k| {
+            // the round on the continued wall; with `fillet_round_ends_on_outline` it ends on
+            // the body's outline (`wr730_round_ends_on_outline.rs`)
+            k.fixes.fillet_round_ends_on_outline = false;
             let mut b = cuboid(k, [0.0, 0.0, 0.0], [80.0, 5.0, 5.0]);
             let built = blend(k, &mut b, &[[40.0, 0.0, 5.0]], 10.0, 1);
             (b, built)

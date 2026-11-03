@@ -110,6 +110,7 @@ pub mod fit_size;
 mod keep_features;
 mod original_merge;
 mod original_trim;
+mod outline_rims;
 mod overflow_first;
 mod piecewise;
 mod surface;
@@ -2023,6 +2024,9 @@ impl<'target> FilletSession<'target> {
         // solvers loaded since the last sync (`SetFilletParameters`) read the handler
         // during the corners' traces
         self.sync_self_intersection_handler();
+        // (not upstream, solidcore #2541) a lone round's solver takes the rims it may end
+        // on before the corners trace it
+        self.end_round_on_outline(k)?;
         let SessionObjects {
             target,
             solvers,

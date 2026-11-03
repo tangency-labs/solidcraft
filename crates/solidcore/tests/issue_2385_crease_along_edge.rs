@@ -46,6 +46,9 @@ const PI: f64 = std::f64::consts::PI;
 fn kernel(on: bool) -> Kernel {
     let mut fixes = UpstreamFixes::all();
     fixes.fillet_overflow_crease_along_edge = on;
+    // the round on the continued wall; with `fillet_round_ends_on_outline` it ends on the
+    // body's outline (`wr730_round_ends_on_outline.rs`)
+    fixes.fillet_round_ends_on_outline = false;
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = fixes;
     k

@@ -256,6 +256,9 @@ fn two_rounds_on_a_narrow_end_fit_where_their_bands_meet() {
 #[test]
 fn fillet_edges_returns_the_fit_on_the_refusal() {
     let mut k = kernel(true);
+    // the round on the continued top; with `fillet_round_ends_on_outline` it ends on the
+    // body's outline and keeps the bridge (`wr730_round_ends_on_outline.rs`)
+    k.fixes.fillet_round_ends_on_outline = false;
     let block = create_box(&mut k, Point3::ZERO, 20.0, 4.0, 10.0).unwrap();
     let slot = create_box(&mut k, Point3::new(8.0, -1.0, -1.0), 4.0, 6.0, 10.0).unwrap();
     let mut b = boolean_difference(&mut k, block, slot).unwrap();

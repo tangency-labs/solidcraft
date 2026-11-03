@@ -353,6 +353,18 @@ continued cliff face, so the rim moves down.*
 Keeping the edge instead (the ball rolling on the rim, the spine continuing as the other offset
 meeting the rim's pipe) is a possible future option, never the default.
 
+A round bigger than the wall it rolls on ends on the body's outline (#2541, opt-in
+`fillet_round_ends_on_outline`, WR-730). This applies where the round on the continued wall
+would pass inside the wall's rim, cutting into the material beyond the face it leaves. The
+ball then touches the rim and stays tangent to the face it keeps. It rolls on the surface
+tangent to it along the rim: the wall's plane turned about the rim, or its cylinder leaned
+into a cone. Where the kept face is too narrow as well, the ball touches both rims.
+
+This is built for a lone round along a straight edge between planes, or along a circular
+edge between a plane square to its axis and a coaxial cylinder
+(`crate::blend::fillet_outline`). A round that passes the rim within the tolerance, or
+whose rail stays on its wall, is trimmed at its crease as above.
+
 ### 3.5 Refusals name the size that fits
 
 ![Left: offsets of a concave face collapse at its curvature radius. Right: a ball in a slot fits up to half the width.](generic-blend/refusal-size.svg)
