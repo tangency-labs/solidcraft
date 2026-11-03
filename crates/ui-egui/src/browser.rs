@@ -6,6 +6,7 @@
 //! viewport, a double-click on a sketch edits it, and a right-click opens the item's menu
 //! ([`crate::context_menu`]).
 
+use crate::sketch_contents::{ContentsRow, GroupKind, RowKind};
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 use solidcraft_engine::geom::prelude::*;
@@ -1613,12 +1614,12 @@ fn active_bodies_origin(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Action
     let mut cache = app.tree.cache.take().unwrap_or_default();
     cache.prepare(app);
     let bodies = cache.folder(app, component, path.as_deref(), "bodies");
-    app.tree.cache = Some(cache);
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
-        folder_rows_at(app, ui, component, path.as_deref(), "bodies", 0, acts, &bodies);
+        folder_rows_at(app, ui, component, path.as_deref(), "bodies", 0, acts, &mut cache, &bodies);
         origin_rows(app, ui, 0, acts);
     });
+    app.tree.cache = Some(cache);
 }
 
 pub(crate) fn apply_content_actions(app: &mut SolveApp, acts: Actions) {
@@ -1718,7 +1719,7 @@ fn component_rows_inner(
     if id == 0 && crate::render_workspace::active(app) {
         let Some(slot) = root.folders.first_mut() else { return };
         let data = slot.get_or_insert_with(|| cache.folder(app, id, None, "bodies"));
-        folder_rows_at(app, ui, id, None, "bodies", depth.saturating_sub(1), acts, data);
+        folder_rows_at(app, ui, id, None, "bodies", depth.saturating_sub(1), acts, cache, data);
         for path in &root.children {
             occurrence_rows(app, ui, path, depth, acts, cache);
         }
@@ -1828,7 +1829,7 @@ fn component_rows_inner(
             continue;
         }
         let data = slot.get_or_insert_with(|| cache.folder(app, id, None, folder));
-        folder_rows_at(app, ui, id, None, folder, d, acts, data);
+        folder_rows_at(app, ui, id, None, folder, d, acts, cache, data);
     }
     if !render {
         features::rows(app, ui, id, &[], d, acts);
@@ -2026,7 +2027,7 @@ fn occurrence_rows_inner(
             continue;
         }
         let data = slot.get_or_insert_with(|| cache.folder(app, placement.component, Some(path), folder));
-        folder_rows_at(app, ui, placement.component, Some(path), folder, depth + 1, acts, data);
+        folder_rows_at(app, ui, placement.component, Some(path), folder, depth + 1, acts, cache, data);
     }
     if !render {
         features::rows(app, ui, placement.component, path, depth + 1, acts);
@@ -2842,6 +2843,7 @@ fn folder_rows_at(
     folder: &str,
     depth: usize,
     acts: &mut Actions,
+    cache: &mut cache::Cache,
     data: &cache::Folder,
 ) {
     if data.key.is_empty() {
@@ -2933,7 +2935,7 @@ fn folder_rows_at(
             return;
         }
     }
-    folder_level(app, ui, comp, path, fstatic, prefix, &data.rows, None, inner, &data.top_order, folder_faded, acts);
+    folder_level(app, ui, comp, path, fstatic, prefix, &data.rows, None, inner, &data.top_order, folder_faded, acts, cache);
 }
 
 /// The rows of a folder's top level, or of one group (`holder`), at `depth`; groups draw their
@@ -2952,6 +2954,7 @@ fn folder_level(
     top: &[BrowserEntry],
     faded: bool,
     acts: &mut Actions,
+    cache: &mut cache::Cache,
 ) {
     let render = crate::render_workspace::active(app);
     let start_open = rows_start_open(app);
@@ -2964,7 +2967,7 @@ fn folder_level(
     for row in rows {
         let group = match row {
             cache::Row::Item(e) => {
-                entry_row(app, ui, comp, path, fstatic, e, depth, holder, top, faded, acts);
+                entry_row(app, ui, comp, path, fstatic, e, depth, holder, top, faded, acts, cache);
                 continue;
             }
             cache::Row::Group(g) => g,
@@ -3057,7 +3060,7 @@ fn folder_level(
             }
         }
         if gopen {
-            folder_level(app, ui, comp, path, fstatic, prefix, &group.rows, Some(id), depth + 1, top, group_faded, acts);
+            folder_level(app, ui, comp, path, fstatic, prefix, &group.rows, Some(id), depth + 1, top, group_faded, acts, cache);
         }
     }
 }
@@ -3108,6 +3111,204 @@ fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, label_left: f
     }
 }
 
+/// How many rows of one contents group are drawn before a "Show all" row. Geometry groups of a
+/// large sketch can hold thousands of rows; the rest wait behind the row instead of being walked
+/// every frame.
+const CONTENTS_CAP: usize = 200;
+
+/// The rows below one expanded sketch: a group row per non-empty [`GroupKind`], geometry open by
+/// default, and the rows of each open group. Pattern rows keep their own editor and selection
+/// behaviour by drawing through [`crate::sketch_pattern_tree`].
+#[allow(clippy::too_many_arguments)]
+fn sketch_contents_rows(
+    app: &mut SolveApp,
+    ui: &mut egui::Ui,
+    cache: &mut cache::Cache,
+    e: &Entry,
+    sketch: u64,
+    contents_key: &str,
+    depth: usize,
+    occurrence: Option<(u64, &[u64])>,
+    dim: bool,
+) {
+    let contents = cache.sketch_contents(app, sketch);
+    let editable = contents.editable;
+    let dim = dim || !contents.evaluated;
+    let scope = &e.row_key;
+    for group in &contents.groups {
+        let kind = group.kind;
+        let slug = group_slug(kind);
+        let key = format!("{contents_key}/{slug}");
+        let default = group_default_open(kind);
+        let open = is_open(app, &key, default);
+        let count = group.rows.len().to_string();
+        let r = draw_row(
+            ui,
+            ui.id().with(("sketch_contents_group", scope, slug)),
+            &Row { depth, fold: Some(open), icon: group_icon(kind), label: group_title(kind), dim, count: &count, ..Default::default() },
+        );
+        if let Some(rect) = r.rect {
+            crate::scenario::publish_handle(&format!("browser:sketch-contents-group:{scope}:{slug}"), rect.center());
+        }
+        if let Some(at) = r.fold_at {
+            crate::scenario::publish_handle(&format!("browser:sketch-contents-fold:{scope}:{slug}"), at);
+        }
+        if r.fold {
+            toggle(app, &key, default);
+        }
+        if !open {
+            continue;
+        }
+        if kind == GroupKind::Patterns {
+            crate::sketch_pattern_tree::rows(app, ui, sketch, depth + 1, "browser", occurrence, dim);
+            continue;
+        }
+        let all_key = format!("{key}/all");
+        let all = is_open(app, &all_key, false);
+        let total = group.rows.len();
+        let shown = if all { total } else { total.min(CONTENTS_CAP) };
+        crate::scenario::publish_count(&format!("browser:sketch-contents-shown:{scope}:{slug}"), shown as f64);
+        for row in group.rows.iter().take(shown) {
+            let target = contents_row_target(row, sketch, editable);
+            let selected = target.as_ref().is_some_and(|sel| app.session.selection.contains(sel));
+            let rr = draw_row(
+                ui,
+                ui.id().with(("sketch_content", scope, slug, &row.id)),
+                &Row {
+                    depth: depth + 1,
+                    icon: row_icon(row.kind),
+                    label: &row.label,
+                    name: true,
+                    selected,
+                    dim,
+                    count: &row.summary,
+                    ..Default::default()
+                },
+            );
+            let handle = format!("browser:sketch-contents-row:{scope}:{slug}:{}", row.id);
+            if let Some(rect) = rr.rect {
+                crate::scenario::publish_handle(&handle, rect.center());
+            }
+            if rr.clicked {
+                app.tree.anchor = Some(handle);
+                let sel = target.unwrap_or(Sel::Feature { id: sketch });
+                let _ = app.run("select.set", json!({ "items": [sel] }));
+            }
+        }
+        if shown < total {
+            let show_all = crate::i18n::format("ui.details_show_all", &[("count", &total.to_string())]);
+            let rr = draw_row(
+                ui,
+                ui.id().with(("sketch_contents_all", scope, slug)),
+                &Row { depth: depth + 1, label: &show_all, name: true, dim, ..Default::default() },
+            );
+            let handle = format!("browser:sketch-contents-all:{scope}:{slug}");
+            if let Some(rect) = rr.rect {
+                crate::scenario::publish_handle(&handle, rect.center());
+            }
+            if rr.clicked {
+                toggle(app, &all_key, false);
+                app.tree.anchor = Some(handle);
+            }
+        }
+    }
+}
+
+/// What clicking one contents row selects. Only the active sketch can select its own entities;
+/// an inactive sketch's curves and points are external picks (Stage 3 refines constraints).
+fn contents_row_target(row: &ContentsRow, sketch: u64, editable: bool) -> Option<Sel> {
+    let id = row.id.clone();
+    match row.kind {
+        RowKind::Point if editable => Some(Sel::SketchPoint { id }),
+        RowKind::Point => Some(Sel::ExternalSketchPoint { sketch, id }),
+        RowKind::Line | RowKind::Arc | RowKind::Circle | RowKind::Spline | RowKind::Conic if editable => Some(Sel::SketchCurve { id, sketch: None }),
+        RowKind::Line | RowKind::Arc | RowKind::Circle | RowKind::Spline | RowKind::Conic => Some(Sel::ExternalSketchCurve { sketch, id }),
+        RowKind::Constraint | RowKind::Dimension if editable => Some(Sel::SketchConstraint { id }),
+        _ => None,
+    }
+}
+
+/// The stable key fragment of a group (`s:1/contents/lines`).
+fn group_slug(kind: GroupKind) -> &'static str {
+    match kind {
+        GroupKind::Points => "points",
+        GroupKind::Lines => "lines",
+        GroupKind::Arcs => "arcs",
+        GroupKind::Circles => "circles",
+        GroupKind::Splines => "splines",
+        GroupKind::Conics => "conics",
+        GroupKind::Constraints => "constraints",
+        GroupKind::Dimensions => "dimensions",
+        GroupKind::Patterns => "patterns",
+        GroupKind::Offsets => "offsets",
+        GroupKind::Links => "links",
+        GroupKind::Text => "text",
+        GroupKind::Other => "other",
+    }
+}
+
+/// The group's translated title; [`Row::name`] is false so the label is looked up as a message.
+fn group_title(kind: GroupKind) -> &'static str {
+    match kind {
+        GroupKind::Points => "sketch.contents.points",
+        GroupKind::Lines => "sketch.contents.lines",
+        GroupKind::Arcs => "sketch.contents.arcs",
+        GroupKind::Circles => "sketch.contents.circles",
+        GroupKind::Splines => "sketch.contents.splines",
+        GroupKind::Conics => "sketch.contents.conics",
+        GroupKind::Constraints => "sketch.contents.constraints",
+        GroupKind::Dimensions => "sketch.contents.dimensions",
+        GroupKind::Patterns => "sketch.contents.patterns",
+        GroupKind::Offsets => "sketch.contents.offsets",
+        GroupKind::Links => "sketch.contents.links",
+        GroupKind::Text => "sketch.contents.text",
+        GroupKind::Other => "sketch.contents.other",
+    }
+}
+
+/// Geometry groups start open; the constraint, dimension and derived groups start closed.
+fn group_default_open(kind: GroupKind) -> bool {
+    matches!(kind, GroupKind::Points | GroupKind::Lines | GroupKind::Arcs | GroupKind::Circles | GroupKind::Splines | GroupKind::Conics)
+}
+
+/// The icon of a group row: an existing command icon, as the tree uses elsewhere.
+fn group_icon(kind: GroupKind) -> &'static str {
+    match kind {
+        GroupKind::Points => "point",
+        GroupKind::Lines => "line",
+        GroupKind::Arcs => "arc3",
+        GroupKind::Circles => "circle",
+        GroupKind::Splines => "spline",
+        GroupKind::Conics => "conic",
+        GroupKind::Constraints => "constrainer",
+        GroupKind::Dimensions => "dimension",
+        GroupKind::Patterns => "pattern",
+        GroupKind::Offsets => "offset",
+        GroupKind::Links => "project",
+        GroupKind::Text => "text",
+        GroupKind::Other => "sketch",
+    }
+}
+
+/// The icon of one contents row.
+fn row_icon(kind: RowKind) -> &'static str {
+    match kind {
+        RowKind::Point => "point",
+        RowKind::Line => "line",
+        RowKind::Arc => "arc3",
+        RowKind::Circle => "circle",
+        RowKind::Spline => "spline",
+        RowKind::Conic => "conic",
+        RowKind::Constraint => "constrainer",
+        RowKind::Dimension => "dimension",
+        RowKind::Pattern => "pattern",
+        RowKind::Offset => "offset",
+        RowKind::Link => "project",
+        RowKind::Text => "text",
+        RowKind::Other => "sketch",
+    }
+}
+
 /// One item row of a folder.
 #[allow(clippy::too_many_arguments)]
 fn entry_row(
@@ -3123,6 +3324,7 @@ fn entry_row(
     // A placement or folder above is hidden: the row fades, its eye stays its own.
     parent_hidden: bool,
     acts: &mut Actions,
+    cache: &mut cache::Cache,
 ) {
     let appearance = crate::render_workspace::scene::decoration(app, &e.bodies);
     if crate::render_workspace::active(app) && !crate::render_workspace::scene::matches_query(app, &e.label, &appearance.name) {
@@ -3132,9 +3334,17 @@ fn entry_row(
     let pattern_key = e.patterns.as_deref();
     let start_open = rows_start_open(app);
     let patterns_open = pattern_key.is_some_and(|key| is_open(app, key, start_open));
+    // Every sketch folds its contents; the key follows the row's placement prefix
+    // (`o:1/s:7/contents`), so two placements of one sketch keep separate fold state.
+    let contents_key = (folder == "sketches").then(|| format!("{}/contents", e.row_key));
+    let contents_open = contents_key.as_deref().is_some_and(|key| is_open(app, key, false));
+    // The old pattern list is the folded sketch's quick view; expanding the contents replaces it
+    // with the organised Patterns group, so the two never show the same rows twice.
+    let patterns_visible = patterns_open && !contents_open;
+    let fold = contents_key.as_deref().map(|_| contents_open).or_else(|| pattern_key.map(|_| patterns_open));
     let rect = row_rect(ui);
     let revealed = folder == "bodies" && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b));
-    if !ui.is_rect_visible(rect) && !patterns_open && !revealed {
+    if !ui.is_rect_visible(rect) && !patterns_visible && !contents_open && !revealed {
         ui.allocate_space(rect.size());
         return;
     }
@@ -3157,7 +3367,7 @@ fn entry_row(
         ui.scope_id().with(("item", &e.row_key)),
         &Row {
             depth,
-            fold: pattern_key.map(|_| patterns_open),
+            fold,
             eye: Some(visible),
             icon: e.icon,
             kind_tip: e.tip,
@@ -3185,10 +3395,12 @@ fn entry_row(
     {
         crate::refused_part::ring(app, name, face);
     }
-    if r.fold
-        && let Some(key) = pattern_key
-    {
-        toggle(app, key, start_open);
+    if r.fold {
+        if let Some(key) = contents_key.as_deref() {
+            toggle(app, key, false);
+        } else if let Some(key) = pattern_key {
+            toggle(app, key, start_open);
+        }
     }
     if folder == "bodies"
         && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b))
@@ -3257,7 +3469,13 @@ fn entry_row(
         }
         acts.menu = Some((p, t));
     }
-    if patterns_open && let Some(Sel::Feature { id }) = &e.sel {
+    if contents_open && folder == "sketches" {
+        if let Ok(sketch) = e.key.parse::<u64>()
+            && let Some(key) = contents_key.as_deref()
+        {
+            sketch_contents_rows(app, ui, cache, e, sketch, key, depth + 1, path.map(|path| (comp, path)), !visible || parent_hidden);
+        }
+    } else if patterns_visible && let Some(Sel::Feature { id }) = &e.sel {
         crate::sketch_pattern_tree::rows(app, ui, *id, depth + 1, "browser", path.map(|path| (comp, path)), !visible || parent_hidden);
     }
     let Some(resp) = &r.resp else { return };

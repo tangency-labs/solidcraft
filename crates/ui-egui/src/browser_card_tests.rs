@@ -2200,3 +2200,144 @@ fn parked_reveals_are_pruned_against_their_own_document_when_the_target_is_remov
     semantic_frame(&mut h, &[], Vec::new(), egui::Modifiers::NONE);
     assert_no_pending_reveals(&h);
 }
+
+/// Stage 2: every sketch row folds its contents open in the browser. Geometry groups start open,
+/// dimensions start closed, and collapsing the sketch hides the whole subtree again.
+#[test]
+fn expanding_a_sketch_shows_its_contents_groups_and_geometry_rows() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Contents"})).unwrap();
+    let sketch = h.app.session.active_sketch.unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[20,0]],"ids":["l1"]})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[30,0],"radius":5})).unwrap();
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":20,"text_at":[10,8]})).unwrap();
+    let dimension = h.app.session.doc.sketch(sketch).unwrap().constraints.iter().find(|c| c.kind.is_dimension()).map(|c| c.id.clone()).unwrap();
+    h.app.finish_sketch();
+    h.settle();
+
+    let scope = format!("s:{sketch}");
+    let group = |slug: &str| format!("browser:sketch-contents-group:{scope}:{slug}");
+    let fold = |slug: &str| format!("browser:sketch-contents-fold:{scope}:{slug}");
+    assert!(handle_at(&group("lines")).is_none(), "a sketch starts folded");
+
+    h.step(&json!({"click":{"handle":"fold:Contents"}})).unwrap();
+    h.settle();
+    for slug in ["points", "lines", "circles", "dimensions"] {
+        assert!(handle_at(&group(slug)).is_some(), "missing {slug}: {:?}", crate::scenario::handles("browser:sketch-contents-group"));
+    }
+    assert!(handle_at(&format!("browser:sketch-contents-row:{scope}:lines:l1")).is_some(), "the line row shows with its lines group");
+    assert!(!crate::scenario::handles(&format!("browser:sketch-contents-row:{scope}:circles:")).is_empty(), "the circle row shows");
+    assert!(crate::scenario::handles(&format!("browser:sketch-contents-row:{scope}:dimensions:")).is_empty(), "dimensions start closed");
+    // What the rows say, not just what they are called internally.
+    h.frame();
+    let mut texts = Vec::new();
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+            if let egui::Shape::Text(text) = shape {
+                texts.push(text.galley.text().to_string());
+            }
+        });
+    }
+    for want in ["Points", "Lines", "Circles", "Dimensions", "Line l1"] {
+        assert!(texts.iter().any(|text| text == want), "no `{want}` in {texts:?}");
+    }
+
+    h.step(&json!({"click":{"handle":fold("dimensions")}})).unwrap();
+    h.settle();
+    assert!(
+        handle_at(&format!("browser:sketch-contents-row:{scope}:dimensions:{dimension}")).is_some(),
+        "the dimension row appears: {:?}",
+        crate::scenario::handles("browser:sketch-contents-row")
+    );
+
+    // The contents are built once and kept across frames, whatever else the browser draws.
+    let builds = h.app.tree.cache.as_ref().unwrap().builds;
+    h.frames(6);
+    assert_eq!(h.app.tree.cache.as_ref().unwrap().builds, builds, "contents are not rebuilt every frame");
+
+    h.step(&json!({"click":{"handle":"fold:Contents"}})).unwrap();
+    h.settle();
+    assert!(handle_at(&group("lines")).is_none(), "folding the sketch hides its contents again");
+}
+
+/// A sketch a feature has consumed keeps its row (and its fold arrow), and its contents still
+/// expand from the solved state.
+#[test]
+fn a_consumed_sketch_still_expands_to_its_contents() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Consumed"})).unwrap();
+    let sketch = h.app.session.active_sketch.unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    h.app.finish_sketch();
+    h.app.run("solid.extrude", json!({"sketch":"Consumed","distance":5})).unwrap();
+    h.settle();
+    assert!(!crate::browser::sketch_visible(&h.app, sketch), "the extrude consumes the sketch's own display");
+
+    h.step(&json!({"click":{"handle":"fold:Consumed"}})).unwrap();
+    h.settle();
+    let scope = format!("s:{sketch}");
+    assert!(handle_at(&format!("browser:sketch-contents-group:{scope}:lines")).is_some(), "the consumed sketch folds its contents open");
+    let lines = crate::scenario::handles(&format!("browser:sketch-contents-row:{scope}:lines:"));
+    assert_eq!(lines.len(), 4, "the rectangle's four lines are listed: {lines:?}");
+}
+
+/// Large groups are capped: the browser draws a group's first rows and a Show all row instead of
+/// walking thousands of rows every frame.
+#[test]
+fn a_large_sketch_caps_its_groups_until_show_all() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Large"})).unwrap();
+    let sketch = h.app.session.active_sketch.unwrap();
+    for i in 0..400 {
+        let x = i as f64 * 10.0;
+        h.app.run("sketch.line", json!({"points":[[x,0],[x,5]]})).unwrap();
+    }
+    h.app.finish_sketch();
+    h.settle();
+    h.step(&json!({"click":{"handle":"fold:Large"}})).unwrap();
+    h.settle();
+
+    let scope = format!("s:{sketch}");
+    let shown = |slug: &str| crate::scenario::count_of(&format!("browser:sketch-contents-shown:{scope}:{slug}"));
+    assert_eq!(shown("lines"), Some(200.0), "the lines group is capped");
+    assert_eq!(shown("points"), Some(200.0), "the points group is capped");
+
+    h.app.tree.expanded.insert(format!("s:{sketch}/contents/lines/all"));
+    h.settle();
+    assert_eq!(shown("lines"), Some(400.0), "Show all lists the whole group");
+}
+
+/// Patterns keep their row and editor when the sketch's contents are open: they move into the
+/// Patterns group instead of being listed twice beside it.
+#[test]
+fn expanding_contents_keeps_pattern_rows_in_their_group() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Patterned"})).unwrap();
+    let sketch = h.app.session.active_sketch.unwrap();
+    h.app.run("sketch.line", json!({"points":[[10,5],[15,5]],"ids":["source"]})).unwrap();
+    let pattern =
+        h.app.run("sketch.pattern.rectangular", json!({"entities":["source"],"count":4,"spacing":20,"alignment":"center","reversed":true})).unwrap()
+            ["pattern"]
+            .as_str()
+            .unwrap()
+            .to_string();
+    h.app.finish_sketch();
+    h.settle();
+    let handle = format!("browser:sketch-pattern:{sketch}:{pattern}");
+    assert!(handle_at(&handle).is_some(), "a folded sketch keeps its quick pattern list");
+
+    h.step(&json!({"click":{"handle":"fold:Patterned"}})).unwrap();
+    h.settle();
+    assert!(handle_at(&handle).is_none(), "contents replace the quick list without repeating its rows");
+    h.step(&json!({"click":{"handle":format!("browser:sketch-contents-fold:s:{sketch}:patterns")}})).unwrap();
+    h.settle();
+    assert!(handle_at(&handle).is_some(), "the Patterns group lists the pattern row");
+}
