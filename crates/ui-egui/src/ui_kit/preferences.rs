@@ -562,6 +562,11 @@ pub(crate) fn settings_badge(ui: &mut Ui, text: &str, warning: bool) {
     ui.painter().galley(r.center() - galley.size() / 2.0, galley, ink);
 }
 
+pub(crate) use super::preferences_figure_data::{
+    paint_select_bodies, paint_select_faces_edges, paint_sketch_conflict, paint_sketch_exit_keep, paint_sketch_exit_previous,
+    paint_sketch_exit_unless_turned, paint_sketch_guides, paint_sketch_hide_glyphs, paint_sketch_state_icons,
+};
+
 #[derive(Clone, Copy)]
 pub(crate) enum PreferenceFigure {
     Pivot(usize),
