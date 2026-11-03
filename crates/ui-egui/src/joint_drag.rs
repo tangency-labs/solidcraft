@@ -57,6 +57,12 @@ pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
         return false;
     };
     let s = &app.session;
+    // Moves shown but not captured (a free move, an exploded view) are display only: the frames
+    // would solve from the design's placements, not the ones shown, and after the release the
+    // move shown would cover where the reach put the part. Capture or revert them first.
+    if !s.pending_moves.is_empty() {
+        return false;
+    }
     let Some(occurrence) = crate::dialogs_assembly::occurrence_of_body(s, &body).filter(|o| *o != 0) else { return false };
     if !s.doc.assembly.joints.iter().any(|j| !j.suppressed && (j.a.occurrence == occurrence || j.b.occurrence == occurrence)) {
         return false;
@@ -391,6 +397,29 @@ mod tests {
         h.app.session.drag_preview.as_mut().expect("a frame").moves.insert(id, moved);
         h.frames(1);
         assert_eq!(filled(&mut h), Some((true, true)), "split again, the arm's layer still brings its scene");
+    }
+
+    /// #6325: while the view shows a move not captured yet (`occurrence.move` with `capture: false`,
+    /// an exploded view), a press on a jointed part starts no joint drag: its frames would solve
+    /// from where the design has the parts, not where the view shows them, and after the release
+    /// the uncaptured move would show the part again over where the reach put it.
+    #[test]
+    fn a_move_not_captured_starts_no_joint_drag() {
+        let (mut h, end, a, b) = hinged_arm();
+        let doc = &h.app.session.doc;
+        let arm = doc.find_component("Arm").and_then(|c| doc.occurrence_of(c)).map(|o| o.id).expect("the arm placed");
+        run(&mut h, "occurrence.move", json!({"occurrence": arm, "translate": [0, 0, 20], "capture": false}));
+        assert!(!h.app.session.pending_moves.is_empty(), "the move is shown, not captured");
+        h.frames(2);
+        let (doc, undo, pending) = (h.app.session.doc.clone(), h.app.session.undo.len(), h.app.session.pending_moves.clone());
+        press_and_move(&mut h, a, b);
+        let started = h.app.viewport.joint_drag.is_some();
+        release(&mut h, b);
+        let turned = arm_at(&h, end);
+        assert!(!started, "a drag began over the uncaptured move; the design's arm ended at {turned:?}, shown at y {}", shown_arm_reach(&h));
+        assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc) && h.app.session.undo.len() == undo, "the release applies nothing");
+        assert_eq!(h.app.session.pending_moves, pending, "the move shown stays");
+        assert!(turned.dist(end) < 1e-9, "{turned:?}");
     }
 
     /// With the undo history full, a drag still adds one step: it drops the oldest once, not one
