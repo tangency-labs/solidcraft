@@ -824,7 +824,7 @@ fn a_move_that_breaks_a_constraint_in_a_group_too_large_to_solve_is_refused() {
 
 /// Where a fit point of 3D curve `wire` lands once the model is evaluated (parameters applied).
 fn solved_fit(s: &Session, sketch: u64, wire: &str, index: usize) -> Vec3 {
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let sk = &world.sketch(sketch).unwrap().sketch;
     sk.wires[sk.wire_index(wire).unwrap()].fit[index]
 }

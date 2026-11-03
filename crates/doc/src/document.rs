@@ -4566,7 +4566,7 @@ impl Document {
                             None => Ok(keep),
                         }
                     };
-                    *at = solidcraft_geom::Vec3::new(value(x, at.x)?, value(y, at.y)?, value(z, at.z)?);
+                    *at = solidcore_record::Vec3::new(value(x, at.x)?, value(y, at.y)?, value(z, at.z)?);
                 }
             }
             Ok(())
