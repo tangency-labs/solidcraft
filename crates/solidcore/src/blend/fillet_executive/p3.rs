@@ -1238,10 +1238,11 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
     ) -> Result<()>;
 
     /// `SmFilletGeom::TrimOriginalSurfaces(rKept, rDeleted, rMarkLocks)`: delegate to
-    /// the already ported `blend::fillet_geom::p6::FilletBrep::trim_original_surfaces`
+    /// the already ported
+    /// `blend::fillet_geom::p6::FilletBrep::trim_original_surfaces_with_solver`
     /// (fillet geom p6) on the fillet geometry `geom` resolves to, with the fillet
     /// B-rep (`executive.fillet`), the target B-rep (`executive.target`), the
-    /// executive's topology-intersector mates and the solver table; the faces it
+    /// executive's topology-intersector mates and the geometry's solver; the faces it
     /// collects resolve back to handles in `kept_faces` / `deleted_faces`.
     fn trim_original_surfaces(
         &mut self,
