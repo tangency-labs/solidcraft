@@ -141,8 +141,9 @@ pub(crate) fn picked(s: &Session, cmd: &str, at: &mut Option<(Vec3, Option<Vec3>
 /// A Box dropped by its placement marker at `p` on a face with normal `n`: the current placement
 /// (the corner or the centre) written so the box stands on the face, centred on `p` across it
 /// (only centred on `p` on a face square to no axis), as a pre-selected face places it. `size` is
-/// the box's length, width and height (mm). Returns the point written.
-pub(crate) fn dropped(extra: &mut Map<String, Value>, p: Vec3, n: Vec3, size: Vec3) -> Option<Value> {
+/// the box's length, width and height (mm). Returns the point written, in the design's length
+/// unit as the fields show it.
+pub(crate) fn dropped(s: &Session, extra: &mut Map<String, Value>, p: Vec3, n: Vec3, size: Vec3) -> Option<Value> {
     if !p.is_finite() {
         return None;
     }
@@ -158,7 +159,7 @@ pub(crate) fn dropped(extra: &mut Map<String, Value>, p: Vec3, n: Vec3, size: Ve
     let at = if index == 0 { corner } else { corner + size * 0.5 };
     // A drop is only as exact as the pointer: to the micrometre, so the fields read 45 mm, not
     // 44.999991 mm.
-    let um = |v: f64| mm((v * 1e3).round() / 1e3);
+    let um = |v: f64| coord(s, (v * 1e3).round() / 1e3);
     let coords = [um(at.x), um(at.y), um(at.z)];
     store("solid.box", extra, index, &coords);
     Some(json!(coords))

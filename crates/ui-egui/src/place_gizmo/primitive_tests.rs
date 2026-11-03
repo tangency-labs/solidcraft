@@ -121,16 +121,33 @@ fn marker_moves_a_box_placed_by_its_centre_through_its_centre_fields() {
 
 #[test]
 fn a_dropped_box_stands_out_from_a_side_face_and_under_the_underside() {
+    let s = solidcraft_engine::Session::default();
     let mut extra = serde_json::Map::new();
     let size = Vec3::new(20.0, 10.0, 6.0);
-    let written = crate::primitive_placement::dropped(&mut extra, Vec3::new(80.0, 25.0, 5.0), Vec3::X, size);
+    let written = crate::primitive_placement::dropped(&s, &mut extra, Vec3::new(80.0, 25.0, 5.0), Vec3::X, size);
     assert_eq!(written, Some(json!(["80 mm", "20 mm", "2 mm"])), "out from the +X side, centred across it");
     assert_eq!(extra.get("corner"), written.as_ref());
     extra.remove("corner");
     extra.insert("center".into(), json!(["0", "0", "0"]));
-    let written = crate::primitive_placement::dropped(&mut extra, Vec3::new(40.0, 25.0, 0.0), -Vec3::Z, size);
+    let written = crate::primitive_placement::dropped(&s, &mut extra, Vec3::new(40.0, 25.0, 0.0), -Vec3::Z, size);
     assert_eq!(written, Some(json!(["40 mm", "25 mm", "-3 mm"])), "below the underside: the centre half the height down");
     assert!(!extra.contains_key("corner"), "the choice of Center stays");
+}
+
+/// In a metre design a drop writes the Box's fields in metres, as a picked point does, and what
+/// they say is the dropped place to the micrometre: no millimetre lost to the field's unit.
+#[test]
+fn a_dropped_box_in_a_metre_design_is_written_in_metres_at_the_dropped_place() {
+    let mut s = solidcraft_engine::Session::default();
+    s.execute("document.units", &json!({"units": "m"})).unwrap();
+    let mut extra = serde_json::Map::new();
+    let written = crate::primitive_placement::dropped(&s, &mut extra, Vec3::new(80.0123, 25.4567, 5.0), Vec3::Z, Vec3::new(20.0, 10.0, 6.0));
+    assert_eq!(written, Some(json!(["0.070012 m", "0.020457 m", "0.005 m"])), "centred across the top face, in metres");
+    let Some(serde_json::Value::Array(corner)) = extra.get("corner") else { panic!("the corner: {extra:?}") };
+    let at: Vec<f64> = corner.iter().map(|c| s.doc.eval(c.as_str().unwrap(), solidcraft_engine::doc::expr::Kind::Length).unwrap()).collect();
+    for (got, want) in at.iter().zip([70.012, 20.457, 5.0]) {
+        assert!((got - want).abs() < 1e-6, "{at:?}");
+    }
 }
 
 #[test]
