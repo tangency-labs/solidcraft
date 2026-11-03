@@ -970,6 +970,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: Backend order and probing on Windows
         run: cargo test -p solidcraft --profile ci --locked -- startup::tests native_crash::tests native_frame::tests
+      # On Windows a reset loses the reply sent before it, so only here does this test see one (#10967).
+      - name: Control channel refusals on Windows
+        run: cargo test -p solidcraft --profile ci --locked -- control_server::tests::a_connection_past_the_limit_reads_why
       - name: Build the app
         run: cargo build -p solidcraft --profile ci --locked
       - name: Start the app under different settings

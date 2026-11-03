@@ -59,6 +59,9 @@ launch's token. When the app quits or crashes mid-session, the next call says th
 that was running when it went away says the app did not answer and may have quit or crashed,
 after running the call or not, so inspect the design before sending a change again.
 A `batch` that could not be sent says the app is not running, so it is safe to send again.
+The app serves 16 connections at once, and every bridged server, CLI run or script connected to
+it holds one; a call past that says the app refused it without running it, so it is safe to send
+again once one of them has ended.
 
 stdout carries only protocol messages; errors go to stderr. Bridged screenshots are written to a
 temporary file by the app and read back by the server, so both must run on the same machine.
