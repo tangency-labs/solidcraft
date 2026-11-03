@@ -6,9 +6,6 @@
 //! so it costs no more than a walk over the sketch. It is pure data: no egui, no selection and no
 //! command is involved; the browser decides what a row does.
 
-// TODO(stage 2): remove when the browser uses these
-#![allow(dead_code)]
-
 use solidcraft_engine::{
     doc::{Document, ModelState},
     geom::Seg2,
@@ -55,7 +52,7 @@ pub(crate) enum GroupKind {
 
 impl GroupKind {
     /// Every group, in display order.
-    pub(crate) const ALL: [GroupKind; 13] = [
+    pub(crate) const ALL: &[GroupKind] = &[
         GroupKind::Points,
         GroupKind::Lines,
         GroupKind::Arcs,
@@ -216,10 +213,10 @@ pub(crate) fn build(doc: &Document, state: Option<&ModelState>, sketch: u64, act
     }
 
     let groups = GroupKind::ALL
-        .into_iter()
+        .iter()
         .filter_map(|kind| {
             let rows = std::mem::take(&mut buckets[kind.index()]);
-            (!rows.is_empty()).then_some(ContentsGroup { kind, rows })
+            (!rows.is_empty()).then_some(ContentsGroup { kind: *kind, rows })
         })
         .collect();
     SketchContents { sketch, editable: active, evaluated, groups }

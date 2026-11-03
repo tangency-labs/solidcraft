@@ -1,5 +1,6 @@
 //! Stable browser data, indexed once for an evaluated document and borrowed on redraw.
 use super::*;
+use crate::sketch_contents::{self, SketchContents};
 use solidcraft_engine::doc::{Document, ModelState};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Weak};
@@ -97,6 +98,11 @@ pub(super) struct Cache {
     pub root: Node,
     pub root_bodies: Vec<String>,
     pub occurrences: HashMap<Vec<u64>, Node>,
+    /// Sketch contents, built the first time a sketch is expanded and kept until the document,
+    /// its evaluated state or the active sketch changes (`prepare` clears this).
+    contents: HashMap<u64, SketchContents>,
+    #[cfg(test)]
+    pub(super) builds: usize,
 }
 
 impl Cache {
@@ -114,6 +120,7 @@ impl Cache {
         self.components.clear();
         self.ids.clear();
         self.occurrences.clear();
+        self.contents.clear();
         for (i, component) in app.session.doc.components.iter().enumerate() {
             self.components.entry(component.id).or_default().definition = Some(i);
         }
@@ -134,6 +141,25 @@ impl Cache {
         self.model = Arc::downgrade(&state);
         self.sketch = app.session.active_sketch;
         self.colors = colors;
+    }
+
+    /// The contents of one sketch, built on first use and kept for this document, evaluated
+    /// state and active sketch. `prepare` clears it when any of those changes, so a frame never
+    /// walks the whole sketch to draw an already expanded row.
+    pub fn sketch_contents(&mut self, app: &SolveApp, sketch: u64) -> &SketchContents {
+        use std::collections::hash_map::Entry;
+        let active = app.session.active_sketch == Some(sketch);
+        match self.contents.entry(sketch) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                #[cfg(test)]
+                {
+                    self.builds += 1;
+                }
+                let state = app.session.model.state();
+                entry.insert(sketch_contents::build(&app.session.doc, Some(state.as_ref()), sketch, active))
+            }
+        }
     }
 
     fn children(&self, app: &SolveApp, component: u64, path: &[u64], remaining: usize) -> Vec<Vec<u64>> {
