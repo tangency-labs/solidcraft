@@ -1,13 +1,12 @@
 //! Programs as G-code: [`emit`] writes one through a [`Post`], [`parse`] reads the motion
 //! back (the subset `emit` writes), which is how the output is checked.
 
-use serde::{Deserialize, Serialize};
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 
-use crate::path::{Move, Toolpath, arc_sweep};
+use crate::path::{Move, arc_sweep};
 use crate::post::{CommentStyle, Post, Values, fill};
-use crate::tool::Tool;
+use crate::program::Program;
 use crate::{CamError, Result, invalid};
 
 /// Most operations in one program.
@@ -16,26 +15,6 @@ const MAX_OPERATIONS: usize = 10_000;
 const MAX_LINES: usize = 5_000_000;
 /// Longest comment written.
 const MAX_COMMENT: usize = 80;
-
-/// One operation of a program: a tool, how it turns, and where it goes.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Operation {
-    pub name: String,
-    pub tool: Tool,
-    /// Spindle speed (rev/min), clockwise.
-    pub spindle_rpm: f64,
-    pub coolant: bool,
-    pub path: Toolpath,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Program {
-    pub name: String,
-    pub operations: Vec<Operation>,
-    /// Work offset 1 to 6 (`G54` to `G59`); left out, the first.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub work_offset: Option<u8>,
-}
 
 /// The code of work offset `n` (1 to 6): `G54` to `G59`.
 pub fn work_offset_code(n: u8) -> Result<String> {

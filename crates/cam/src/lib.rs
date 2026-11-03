@@ -23,16 +23,18 @@ mod path;
 mod piece;
 mod planner;
 mod post;
+mod program;
 mod readback;
 mod tool;
 
 pub use check::verify;
-pub use gcode::{Operation, Program, emit, parse, work_offset_code};
+pub use gcode::{emit, parse, work_offset_code};
 pub use offset::offset_regions;
 pub use ops::{adaptive, contour, pocket};
 pub use params::{AdaptiveParams, ContourParams, Cut, Feeds, Heights, PocketParams, Side};
 pub use path::{Move, PathStats, Toolpath, arc_sweep};
 pub use post::{CommentStyle, LineNumbers, Post, Units};
+pub use program::{MachineCode, MachineOutput, Operation, Program};
 pub use readback::{Readback, allowed_deviation, readback};
 pub use tool::{Tool, ToolKind};
 

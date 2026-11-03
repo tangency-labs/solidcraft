@@ -9,9 +9,10 @@ use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
 
-use crate::gcode::{Program, parse};
+use crate::gcode::parse;
 use crate::path::Toolpath;
 use crate::post::Post;
+use crate::program::Program;
 use crate::{CamError, Result};
 
 /// Most grid entries the comparison builds.
