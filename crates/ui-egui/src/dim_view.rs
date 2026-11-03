@@ -107,6 +107,8 @@ struct DimensionDraft {
     /// A dimension that would over-constrain the sketch, placed as a driven (reference) one:
     /// it has no parameter and no value to edit (#320).
     driven: bool,
+    /// Draw ellipses with their axes, when the draft was made (see [`ellipse_as_before`]).
+    half_axes: bool,
 }
 
 impl DimensionDraft {
@@ -124,6 +126,7 @@ impl DimensionDraft {
             params["text_at"] = json!([at.x, at.y]);
         }
         previous_axis(self.sketch, &self.entities, &mut params);
+        ellipse_as_before(self.half_axes, &mut params);
         params
     }
     fn evaluate(&self, app: &SolveApp, expr: &str) -> Result<solidcraft_engine::Session, String> {
@@ -162,6 +165,23 @@ pub fn cancel() {
     AXIS.with(|axis| *axis.borrow_mut() = None);
 }
 
+/// With Draw ellipses with their axes off, D on an ellipse gives its minor radius wherever
+/// the text is, as before half-axes (`sketch.dimension`'s `half_axes`).
+pub(crate) fn ellipse_as_before(half_axes: bool, params: &mut serde_json::Value) {
+    if !half_axes {
+        params["half_axes"] = json!(false);
+    }
+}
+
+/// How a dimension is drawn: with Draw ellipses with their axes off, a radius on an ellipse
+/// is drawn as a radius, as before, instead of to its minor axis end.
+pub(crate) fn shown_frame(half_axes: bool, sk: &solidcraft_engine::sketch::Sketch, k: &ConstraintKind) -> Option<DimFrame> {
+    match dim_frame(sk, k)? {
+        DimFrame::HalfAxis { center, len, .. } if !half_axes => Some(DimFrame::Radial { center, radius: len, diameter: false, arc: None }),
+        frame => Some(frame),
+    }
+}
+
 /// Near the boundary between an ellipse's two half-axes, a dimension being placed keeps the
 /// one it had (`sketch.dimension`'s `previous_axis`), so the preview does not flip.
 fn previous_axis(sketch: u64, entities: &[String], params: &mut serde_json::Value) {
@@ -194,6 +214,7 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
         PLACEMENT.with(|preview| *preview.borrow_mut() = None);
         let mut params = json!({"entities": entities_value(&draft.entities), "text_at": [at.x, at.y], "driven": true});
         previous_axis(draft.sketch, &draft.entities, &mut params);
+        ellipse_as_before(draft.half_axes, &mut params);
         AXIS.with(|axis| *axis.borrow_mut() = None);
         app.run("sketch.dimension", params)?;
         app.set_status(crate::i18n::tr("sketch.dimension_added_driven"), false);
@@ -346,6 +367,7 @@ fn draft_of(app: &SolveApp, sketch: u64, entities: &[String], at: Option<Vec2>, 
         params["text_at"] = json!([at.x, at.y]);
     }
     previous_axis(sketch, entities, &mut params);
+    ellipse_as_before(app.preferences.ellipse_axes, &mut params);
     let result = scratch.execute("sketch.dimension", &params).map_err(|e| e.to_string())?;
     remember_axis(sketch, entities, &params, &result);
     let (param, expr) = if driven {
@@ -372,6 +394,7 @@ fn draft_of(app: &SolveApp, sketch: u64, entities: &[String], at: Option<Vec2>, 
         preview_doc: scratch.doc.clone(),
         error: None,
         driven,
+        half_axes: app.preferences.ellipse_axes,
     };
     if !draft.preview.sketch(sketch).is_some_and(|solved| solved.report.ok()) {
         return Err("That dimension conflicts with the sketch constraints".into());
@@ -809,7 +832,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         let sk = &source.sketch;
         let centres = if is_draft { draft_centres.as_ref().unwrap_or(&centres) } else { &centres };
         let to = |p: Vec2| proj.to_screen(source.plane.to_world(p));
-        let Some(frame) = dim_frame(sk, &c.kind) else { continue };
+        let Some(frame) = shown_frame(app.preferences.ellipse_axes, sk, &c.kind) else { continue };
         let anchor = match frame {
             DimFrame::Linear { p0, p1, .. } => (p0 + p1) * 0.5,
             DimFrame::Radial { center, .. } | DimFrame::ArcLength { center, .. } | DimFrame::HalfAxis { center, .. } => center,
@@ -1550,6 +1573,48 @@ mod tests {
         }
         assert!(texts.iter().any(|t| t == "8.00 mm"), "{texts:?}");
         assert!(!texts.iter().any(|t| t.starts_with("R8")), "{texts:?}");
+        cancel();
+    }
+
+    /// With Draw ellipses with their axes off, D on an ellipse gives its minor radius wherever
+    /// the text is pulled, as before half-axes, drawn and labelled as a radius (R); on an
+    /// ellipse drawn with its axes too.
+    #[test]
+    fn an_ellipse_gives_its_minor_radius_with_the_axes_preference_off() {
+        cancel();
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.ellipse_axes = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.ellipse", json!({"center":[0,0],"major":[20,0],"minor_radius":8,"axes":true})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.step(&json!({"start":"sketch.dimension"})).unwrap();
+        h.step(&json!({"click":{"sketch":[14.142,-5.657]}})).unwrap();
+        h.frames(4);
+        h.step(&json!({"key":"Tab"})).unwrap();
+        // Across the major axis, where the half-axes give the major one.
+        for at in [[3., 16.], [30., 3.]] {
+            h.step(&json!({"move":{"sketch":at}})).unwrap();
+            h.settle();
+            let (param, draft) = placement_preview(&h.app).expect("an ellipse has a dimension preview");
+            let sk = &draft.preview.sketch(draft.sketch).unwrap().sketch;
+            let c = sk.constraints.iter().find(|c| c.param.as_deref() == Some(&param)).unwrap();
+            assert!(matches!(c.kind, ConstraintKind::Radius { value, .. } if (value - 8.).abs() < 1e-6), "text at {at:?}: {:?}", c.kind);
+        }
+        h.step(&json!({"click":{"sketch":[30,3]}})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.settle();
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Radius { .. })), "{:?}", sk.constraints);
+        h.frames(4);
+        let mut texts = Vec::new();
+        for clipped in &h.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                if let Shape::Text(t) = shape {
+                    texts.push(t.galley.text().to_string());
+                }
+            });
+        }
+        assert!(texts.iter().any(|t| t == "R8.00 mm"), "{texts:?}");
         cancel();
     }
 

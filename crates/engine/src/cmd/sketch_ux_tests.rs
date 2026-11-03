@@ -1597,6 +1597,15 @@ fn an_ellipse_half_axis_dimension_follows_where_its_text_is_pulled() {
     assert_eq!(dimension(false, json!({"type": "radius", "text_at": [3, 16]})).0, "radius");
     assert_eq!(dimension(false, json!({"type": "diameter", "text_at": [3, 16]})).0, "radius");
     assert_eq!(dimension(false, json!({"type": "horizontal", "text_at": [3, 16]})).0, "radius");
+    // With half_axes false (Draw ellipses with their axes off), auto is the minor radius
+    // wherever the text is, as before half-axes; an explicit type still gives its half-axis.
+    for at in [[3.0, 16.0], [30.0, 3.0]] {
+        assert_eq!(dimension(false, json!({"half_axes": false, "text_at": at})).0, "radius", "text at {at:?}");
+    }
+    assert_eq!(dimension(false, json!({"half_axes": false, "type": "major"})).0, "major");
+    let mut s = new_sketch();
+    let (e, ..) = ellipse_with_axes(&mut s, false);
+    assert!(s.execute("sketch.dimension", &json!({"entities": [e], "half_axes": "no"})).is_err());
     // An axis line is a line: its length is the whole axis.
     let mut s = new_sketch();
     let (_, major, minor) = ellipse_with_axes(&mut s, true);

@@ -3489,7 +3489,7 @@ pub(crate) fn occurrence_triad(app: &mut SolveApp, ui: &mut egui::Ui, painter: &
 /// value edits it in place without editing the sketch (`crate::dim_view::model_double_click`).
 pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
     use solidcore_record::Vec2;
-    use solidcraft_engine::sketch::{DimFrame, chain_centres, default_text, dim_frame, dim_layout_reaching, dim_reach};
+    use solidcraft_engine::sketch::{DimFrame, chain_centres, default_text, dim_layout_reaching, dim_reach};
     crate::dim_view::set_model_drawn(Vec::new());
     let Some(rect) = app.viewport.rect else { return };
     if app.session.visibility.shown_dimensions.is_empty() {
@@ -3515,7 +3515,7 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
         let n = centres.len().max(1) as f64;
         let middle = centres.iter().fold(Vec2::ZERO, |a, p| a + *p) * (1.0 / n);
         for c in &sk.constraints {
-            let Some(frame) = dim_frame(sk, &c.kind) else { continue };
+            let Some(frame) = crate::dim_view::shown_frame(app.preferences.ellipse_axes, sk, &c.kind) else { continue };
             let anchor = match frame {
                 DimFrame::Linear { p0, p1, .. } => (p0 + p1) * 0.5,
                 DimFrame::Radial { center, .. } | DimFrame::ArcLength { center, .. } | DimFrame::HalfAxis { center, .. } => center,
