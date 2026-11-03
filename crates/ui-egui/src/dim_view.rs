@@ -632,6 +632,44 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
     true
 }
 
+/// Open the value editor on dimension `constraint` of `sketch` by id, as a contents row's Edit does
+/// (true: there was a dimension to act on). The sketch being edited uses the drawn dimension, so
+/// its text is known; a finished sketch edits the parameter of its stored dimension without
+/// editing the sketch, as [`model_double_click`] does. A driven dimension has no value to edit.
+pub(crate) fn open_for(app: &mut SolveApp, sketch: u64, constraint: &str) -> bool {
+    if app.session.active_sketch == Some(sketch) {
+        return open_editor(app, Some(constraint.to_string()));
+    }
+    let Ok(stored) = app.session.doc.sketch(sketch) else { return false };
+    let Some(c) = stored.constraints.iter().find(|c| c.id == constraint) else { return false };
+    let Some(param) = c.param.clone() else {
+        app.set_status("A driven dimension measures the sketch; it has no value to edit", false);
+        return true;
+    };
+    let expr = app.session.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
+    // The shown dimension's text when it is drawn; otherwise the viewport's middle keeps the box
+    // reachable.
+    let at = MODEL
+        .with(|m| m.borrow().iter().find(|d| d.sketch == sketch && d.id == constraint).map(|d| d.text.center()))
+        .or_else(|| app.viewport.rect.map(|r| r.center()));
+    EDIT.with(|e| {
+        *e.borrow_mut() = Some(Edit {
+            param,
+            expr,
+            at,
+            fresh: FRESH,
+            wait: 0,
+            draft: None,
+            live: None,
+            selection: None,
+            picked: None,
+            sketch: Some(sketch),
+            driven: None,
+        })
+    });
+    true
+}
+
 /// A driven dimension that nothing else fixes any more, such as one placed while a Tangent
 /// held its circle and left driven when the Tangent was deleted (#10018): the parameter it gets
 /// as a driving one and its measured value, from making it driving on a scratch copy. None
@@ -1870,5 +1908,38 @@ mod tests {
         assert_eq!(label(&ConstraintKind::Diameter { c: 0, value: 10.0 }, Some("10"), false, "mm", 2), "Ø10.00 mm");
         let a = ConstraintKind::Angle { a: 0, b: 1, value: std::f64::consts::FRAC_PI_4, flip: false };
         assert_eq!(label(&a, Some("45 deg"), false, "mm", 2), "45.0°");
+    }
+
+    /// A contents row's Edit opens the value editor on the dimension with that id: the drawn one
+    /// for the sketch being edited, and the stored parameter for a finished sketch, whose value
+    /// changes without editing the sketch (as its shown dimension's double-click does).
+    #[test]
+    fn open_for_opens_the_named_dimension_and_its_parameter() {
+        cancel();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let sketch = h.app.session.active_sketch.unwrap();
+        let line = h.app.run("sketch.line", json!({"points":[[0,0],[20,0]],"connect":false,"infer":false})).unwrap()["curves"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let made = h.app.run("sketch.dimension", json!({"entities":[line],"value":20})).unwrap();
+        let dim = made["created"]["dimensions"][0].as_str().unwrap().to_owned();
+        let param = made["param"].as_str().unwrap().to_owned();
+        h.call("ui.view", json!({"view":"top"}));
+        h.settle();
+        h.frames(2);
+        assert!(open_for(&mut h.app, sketch, &dim));
+        assert!(editing());
+        let open = EDIT.with(|e| e.borrow().as_ref().map(|e| (e.param.clone(), e.sketch)));
+        assert_eq!(open, Some((param.clone(), None)), "the drawn dimension of the sketch being edited");
+        cancel();
+
+        h.app.finish_sketch();
+        assert!(open_for(&mut h.app, sketch, &dim));
+        let open = EDIT.with(|e| e.borrow().as_ref().map(|e| (e.param.clone(), e.sketch)));
+        assert_eq!(open, Some((param, Some(sketch))), "a finished sketch's stored dimension");
+        cancel();
     }
 }

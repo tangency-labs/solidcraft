@@ -2310,3 +2310,58 @@ fn the_history_bar_feature_menu_is_reported_and_picked() {
     h.frames(2);
     assert!(h.app.session.doc.feature(id).is_none(), "the features after the marker are deleted");
 }
+
+/// Stage 4: a browser contents row's menu is its sketch's own entity menu, built from the row ids.
+/// The active sketch's rows edit it; a finished sketch's rows only read it (Delete and its own
+/// `sketch.*` commands disabled) and its curves feed Project into the sketch being edited.
+#[test]
+fn sketch_contents_rows_get_the_entity_menu_of_their_sketch() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    let first = h.app.session.active_sketch.unwrap();
+    let line =
+        h.app.run("sketch.line", json!({"points":[[0,0],[20,0]],"connect":false,"infer":false})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+    let made = h.app.run("sketch.dimension", json!({"entities":[line],"value":20})).unwrap();
+    let dim = made["created"]["dimensions"][0].as_str().unwrap().to_owned();
+    let contents = |rows: Vec<String>, editable: bool| Target::SketchContents { sketch: first, rows, editable };
+
+    // The sketch being edited: its dimension row edits the value and toggles driven; the curve row
+    // offers construction and fix; both can be deleted.
+    let menu = context_menu::items(&h.app, &contents(vec![dim.clone()], true));
+    let edit = find(&menu, "Edit");
+    assert!(edit.enabled);
+    assert_eq!(edit.params.as_ref().unwrap()["sketch"], json!(first));
+    assert_eq!(edit.params.as_ref().unwrap()["constraint"], json!(dim));
+    assert!(find(&menu, "Toggle Driven Dimension").enabled);
+    assert!(find(&menu, "Delete").enabled);
+
+    let menu = context_menu::items(&h.app, &contents(vec![line.clone()], true));
+    assert!(find(&menu, "Normal / Construction").enabled);
+    assert!(find(&menu, "Fix/Unfix").enabled);
+    assert!(find(&menu, "Delete").enabled);
+    assert!(!menu.iter().any(|i| i.id == "sketch.project"), "the active sketch's own row cannot project itself");
+
+    // A finished sketch (another one is active): read-only, but its curves can feed Project.
+    h.app.finish_sketch();
+    h.app.run("sketch.create", json!({"plane":"YZ"})).unwrap();
+    let menu = context_menu::items(&h.app, &contents(vec![line.clone()], false));
+    let project = find(&menu, "Project");
+    assert!(project.enabled);
+    assert_eq!(project.params.as_ref().unwrap()["refs"], json!([{"sketch": first, "curve": line}]));
+    assert!(find(&menu, "Edit Sketch").enabled);
+    assert!(menu.iter().any(|i| i.id == "ui.properties"));
+    assert!(!find(&menu, "Fix/Unfix").enabled);
+    assert!(!find(&menu, "Normal / Construction").enabled, "sketch.* commands of another sketch stay off");
+    assert!(!find(&menu, "Delete").enabled, "a finished sketch's rows cannot be deleted");
+    act(&mut h.app, &contents(vec![line], false), "Properties");
+    assert_eq!(h.app.sketch_report.as_ref().and_then(|r| r.sketch), Some(first), "Properties reads the row's sketch");
+
+    // Its dimension row: Edit stays off (the sketch is not being edited), and Toggle Driven cannot
+    // reach the active sketch's ids.
+    let menu = context_menu::items(&h.app, &contents(vec![dim], false));
+    let edit = menu.iter().find(|i| i.id == "ui.editDimensionValue").expect("the row is still a dimension");
+    assert!(!edit.enabled);
+    assert!(!menu.iter().find(|i| i.id == "sketch.toggle_driven").unwrap().enabled);
+    assert!(!find(&menu, "Delete").enabled);
+}
