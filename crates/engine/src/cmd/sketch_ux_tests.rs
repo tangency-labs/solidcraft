@@ -2103,6 +2103,61 @@ fn the_first_dimension_leaves_a_separate_shape_alone() {
     }
 }
 
+/// #11438: a lone circle has no proportions to keep, so its first dimension sizes it in place.
+/// Scaling the sketch about its origin would only move the circle's centre.
+#[test]
+fn the_first_dimension_of_a_lone_circle_keeps_its_centre() {
+    for ty in ["diameter", "radius"] {
+        let mut s = new_sketch();
+        let out = run(&mut s, "sketch.circle.center", json!({"center": [-9, 40.5], "radius": 5.852349955359813}));
+        let circle = out["curves"][0].as_str().unwrap().to_string();
+        let out = run(&mut s, "sketch.dimension", json!({"entities": [circle], "type": ty, "value": "6.5 mm", "scale_sketch": true}));
+        assert!(out.get("scaled").is_none(), "{ty}: {out}");
+        let sk = sketch(&s);
+        let c = sk.curves.iter().position(|c| c.id == circle).unwrap();
+        let centre = sk.center(c).unwrap();
+        assert!(centre.dist(solidcore_record::Vec2::new(-9.0, 40.5)) < 1e-6, "{ty}: the centre moved to {centre:?}");
+        let want = if ty == "diameter" { 3.25 } else { 6.5 };
+        assert!((sk.radius(c).unwrap() - want).abs() < 1e-6, "{ty}: radius {:?}", sk.radius(c));
+    }
+    // A size far below the drawn one is taken too, and the centre still stays where it is.
+    for (ty, value, want) in [("radius", "0.000003 mm", 0.000003), ("diameter", "0.000006 mm", 0.000003)] {
+        let mut s = new_sketch();
+        let out = run(&mut s, "sketch.circle.center", json!({"center": [12, -7], "radius": 2}));
+        let circle = out["curves"][0].as_str().unwrap().to_string();
+        let out = run(&mut s, "sketch.dimension", json!({"entities": [circle], "type": ty, "value": value, "scale_sketch": true}));
+        assert!(out.get("scaled").is_none(), "{ty}: {out}");
+        let sk = sketch(&s);
+        let c = sk.curves.iter().position(|c| c.id == circle).unwrap();
+        let centre = sk.center(c).unwrap();
+        assert!(centre.dist(solidcore_record::Vec2::new(12.0, -7.0)) < 1e-9, "{ty}: the centre moved to {centre:?}");
+        assert!((sk.radius(c).unwrap() - want).abs() < 1e-12, "{ty}: radius {:?}", sk.radius(c));
+    }
+    // A first distance from the origin to the centre still scales the lone circle (#1365).
+    let mut s = new_sketch();
+    let out = run(&mut s, "sketch.circle.center", json!({"center": [30, 40], "radius": 5}));
+    let circle = out["curves"][0].as_str().unwrap().to_string();
+    let out = run(&mut s, "sketch.dimension", json!({"entities": ["origin", format!("{circle}.center")], "value": "100 mm", "scale_sketch": true}));
+    assert!((out["scaled"].as_f64().unwrap() - 2.0).abs() < 1e-6, "{out}");
+    let sk = sketch(&s);
+    let c = sk.curves.iter().position(|c| c.id == circle).unwrap();
+    let centre = sk.center(c).unwrap();
+    assert!(centre.dist(solidcore_record::Vec2::new(60.0, 80.0)) < 1e-6, "the centre is at {centre:?}");
+    assert!((sk.radius(c).unwrap() - 10.0).abs() < 1e-6, "radius {:?}", sk.radius(c));
+    // A sketch axis the centre is held on is not a second curve: the diameter sizes the circle in place.
+    let mut s = new_sketch();
+    let out = run(&mut s, "sketch.circle.center", json!({"center": [0, 40], "radius": 5}));
+    let circle = out["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{circle}.center"), "b": "y"}));
+    let out = run(&mut s, "sketch.dimension", json!({"entities": [circle], "type": "diameter", "value": "20 mm", "scale_sketch": true}));
+    assert!(out.get("scaled").is_none(), "{out}");
+    let sk = sketch(&s);
+    let c = sk.curves.iter().position(|c| c.id == circle).unwrap();
+    let centre = sk.center(c).unwrap();
+    assert!(centre.dist(solidcore_record::Vec2::new(0.0, 40.0)) < 1e-6, "the centre moved to {centre:?}");
+    assert!((sk.radius(c).unwrap() - 10.0).abs() < 1e-6, "radius {:?}", sk.radius(c));
+}
+
 /// #1365 still holds for one drawing: shapes joined by a constraint scale together.
 #[test]
 fn the_first_dimension_scales_shapes_joined_by_a_constraint() {

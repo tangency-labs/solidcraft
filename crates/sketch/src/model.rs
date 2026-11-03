@@ -1246,20 +1246,16 @@ impl Sketch {
     /// projected or patterned, no offsets and no 3D curves. A linked sketch axis can give a
     /// direction or symmetry line through the origin without giving the drawing a size. Every
     /// geometric constraint and angle holds on the scaled sketch as it held before.
-    /// `None` when the sketch does not qualify, also
-    /// when its curves form several separate chains (#3786): the dimension sizes only its own.
-    pub fn scaled_for_first_dimension(&self, factor: f64) -> Option<Sketch> {
+    /// `None` when the sketch does not qualify, also when its curves form several separate
+    /// chains (#3786): the dimension sizes only its own, and when `dimension` is a radius or
+    /// diameter and the sketch's only drawn curve is a circle (#11438): a radius or diameter
+    /// cannot distort a circle, so scaling would only move its centre. Any other first
+    /// dimension on a lone circle scales it as before.
+    pub fn scaled_for_first_dimension(&self, factor: f64, dimension: &ConstraintKind) -> Option<Sketch> {
         if !(factor.is_finite() && (1e-6..=1e6).contains(&factor)) {
             return None;
         }
-        let sizes = self.constraints.iter().any(|c| match c.kind {
-            ConstraintKind::Fix { .. } | ConstraintKind::PatternPoint { .. } | ConstraintKind::PatternRadius { .. } => true,
-            // A pierce holds its point where another sketch's curve crosses this plane:
-            // scaling the sketch would move it off the crossing.
-            ConstraintKind::Pierce { .. } => true,
-            ref k => k.is_dimension() && !k.is_angle() && !c.driven,
-        });
-        if sizes || !self.patterns.is_empty() || !self.offsets.is_empty() || !self.freeform_offsets.is_empty() || !self.wires.is_empty() {
+        if self.lone_circle_for(dimension).is_some() || self.has_size() {
             return None;
         }
         let mut axes = BTreeMap::new();
@@ -1343,6 +1339,61 @@ impl Sketch {
             *t = *t * factor;
         }
         Some(out)
+    }
+
+    /// The sketch with its lone circle's radius scaled by `factor` and its centre where it is,
+    /// for a first radius or diameter `dimension` that [`Sketch::scaled_for_first_dimension`]
+    /// leaves to the solver (#11438). The solve then starts at the requested size, however far
+    /// it is from the drawn one, instead of squeezing the circle there. `None` when the sketch
+    /// is not one lone circle sized by nothing else, when anything is fixed or projected (a
+    /// sketch axis too: the solver then sizes the circle against it), or the new radius is out
+    /// of range.
+    pub fn lone_circle_sized_for_first_dimension(&self, factor: f64, dimension: &ConstraintKind) -> Option<Sketch> {
+        if !(factor.is_finite() && (1e-6..=1e6).contains(&factor))
+            || self.has_size()
+            || !self.links.is_empty()
+            || self.curves.iter().any(|c| c.fixed || c.link.is_some())
+            || self.points.iter().enumerate().any(|(i, p)| (p.fixed || p.link.is_some()) && (i != 0 || p.pos != Vec2::ZERO))
+        {
+            return None;
+        }
+        let i = self.lone_circle_for(dimension)?;
+        let mut out = self.clone();
+        if let Some(CurveKind::Circle { r, .. }) = out.curves.get_mut(i).map(|c| &mut c.kind) {
+            *r *= factor;
+            if !radius_in_range(*r) {
+                return None;
+            }
+        }
+        Some(out)
+    }
+
+    /// The index of the sketch's only drawn curve when it is a circle and `dimension` is a
+    /// radius or diameter: one that cannot distort the circle. A projected sketch axis is not
+    /// drawn and does not count.
+    fn lone_circle_for(&self, dimension: &ConstraintKind) -> Option<usize> {
+        if !matches!(dimension, ConstraintKind::Radius { .. } | ConstraintKind::Diameter { .. }) {
+            return None;
+        }
+        let mut drawn = self.curves.iter().enumerate().filter(|(_, c)| c.link.is_none());
+        match (drawn.next(), drawn.next()) {
+            (Some((i, c)), None) if matches!(c.kind, CurveKind::Circle { .. }) => Some(i),
+            _ => None,
+        }
+    }
+
+    /// Does something already fix a size of the sketch: a driving length dimension, a fix,
+    /// pattern or pierce constraint, a pattern, an offset or a 3D curve? Fixed and projected
+    /// geometry is left to the callers, since a linked sketch axis gives no size.
+    fn has_size(&self) -> bool {
+        let sizes = self.constraints.iter().any(|c| match c.kind {
+            ConstraintKind::Fix { .. } | ConstraintKind::PatternPoint { .. } | ConstraintKind::PatternRadius { .. } => true,
+            // A pierce holds its point where another sketch's curve crosses this plane:
+            // scaling the sketch would move it off the crossing.
+            ConstraintKind::Pierce { .. } => true,
+            ref k => k.is_dimension() && !k.is_angle() && !c.driven,
+        });
+        sizes || !self.patterns.is_empty() || !self.offsets.is_empty() || !self.freeform_offsets.is_empty() || !self.wires.is_empty()
     }
 
     /// Is point `i` held in place: fixed, projected (linked), fixed by a Fix constraint or a
