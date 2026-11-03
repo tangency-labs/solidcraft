@@ -1100,7 +1100,7 @@ changes. Only tabs in the addressed window participate. Each row starts selected
 Read with `ui.documents {}`; change all ticks and answer in one call:
 `ui.documents {"save_indices":[0,2],"answer":"save"}`. Indices must belong to the
 pending list; invalid lists return an error without answering. An empty list saves
-nothing. Without `save_indices`, `answer:"save"` saves the current ticks.
+nothing and still closes every target, discarding their unsaved changes. Without `save_indices`, `answer:"save"` saves the current ticks.
 
 Selected designs save in tab order through the existing interactive save flow;
 never-saved designs ask for a location. Cancelling a picker or failing a save stops
