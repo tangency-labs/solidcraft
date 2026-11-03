@@ -443,9 +443,9 @@
       }
     },
     "sweeps": {
-      "cases": 97,
+      "cases": 98,
       "chain": {
-        "1": 35,
+        "1": 36,
         "10": 2,
         "109": 1,
         "13": 1,
@@ -456,9 +456,9 @@
         "7": 43,
         "8": 2
       },
-      "expressible": 89,
+      "expressible": 90,
       "not_expressible": 7,
-      "operation_expressible": 90,
+      "operation_expressible": 91,
       "reasons": {
         "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 3,
         "refused or failed in SolidCraft, not in a kernel operation": 4
