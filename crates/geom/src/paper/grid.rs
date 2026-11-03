@@ -16,8 +16,8 @@
 //!   keeps its item's place in the group, so a writer that sets real text (PDF) finds the run in
 //!   paint order.
 
-use super::{Invalid, Item, ObjectKind, Picture, Prepared, Result, arc_pieces};
-use crate::{Seg2, Vec2};
+use super::{Clip, Invalid, Item, ObjectKind, Picture, Prepared, Result, arc_pieces};
+use crate::{Aabb2, Seg2, Vec2};
 
 /// The largest number put on a grid, in millimetres either way: far past any scene's 2e5.
 const MAX_NUMBER_MM: f64 = 9e9;
@@ -112,7 +112,9 @@ pub enum GridItem {
     /// A fill's loops, each closed, filled even-odd.
     Fill { loops: Vec<GridPath> },
     /// A picture as the scene has it: its pixels are placed by [`crate::pixel_grid`], not this grid.
-    Picture(Picture),
+    /// When it crosses its object's clip, `clip` is what the writer draws it inside. `visible` is
+    /// what of it can show, the same for every writer: its rectangle on the sheet, inside its clip.
+    Picture { picture: Picture, clip: Option<Clip>, visible: Aabb2 },
     /// A text run's glyph outlines, each loop closed, filled nonzero; `item` is the run's index
     /// among its group's items.
     Text { item: usize, loops: Vec<GridPath> },
@@ -167,6 +169,7 @@ impl Prepared<'_> {
     /// The scene on `grid`, by the rules in this module's notes: what every writer formats.
     pub fn on_grid(&self, grid: Grid) -> Result<OnGrid> {
         let mut report = GridReport::default();
+        let sheet = Aabb2 { min: Vec2::new(0.0, 0.0), max: self.size_mm() };
         let mut groups = Vec::with_capacity(self.groups().len());
         for group in self.groups() {
             let mut items = Vec::with_capacity(group.items.len());
@@ -196,7 +199,11 @@ impl Prepared<'_> {
                         }
                         items.push(GridItem::Fill { loops });
                     }
-                    Item::Picture(picture) => items.push(GridItem::Picture(*picture)),
+                    Item::Picture(picture) => {
+                        let clip = self.clips.get(&group.object).filter(|clip| !clip.holds_all(&picture.rect)).copied();
+                        let shown = clip.map_or(sheet, |clip| sheet.intersection(&clip.bounds()));
+                        items.push(GridItem::Picture { picture: *picture, clip, visible: picture.rect.intersection(&shown) });
+                    }
                     Item::Text(run) => {
                         // `validate` holds every run's font in the scene.
                         let font = self.font(run).ok_or(Invalid("a run's font is in the scene's table"))?;

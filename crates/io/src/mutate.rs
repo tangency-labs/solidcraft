@@ -596,6 +596,36 @@ outer
         survives("paper scene to SVG", &mutations(&json, true, 0x5a3), usize::MAX, write);
     }
 
+    /// A clipped object's JSON, a line and a picture crossing its rectangle or circle, mutated, read,
+    /// prepared and written by both writers: an error or a file, never a panic.
+    #[test]
+    fn paper_scenes_with_clips_survive_mutation() {
+        use solidcraft_geom::paper::{Clip, Group, Item, ObjectKind, Picture, Scene};
+        use solidcraft_geom::{Aabb2, Seg2, Vec2};
+        let p = Vec2::new;
+        let clips =
+            [(0x5a5, Clip::Rect { min: p(180.0, 90.0), max: p(220.0, 130.0) }), (0x5a6, Clip::Circle { center: p(200.0, 110.0), radius: 25.0 })];
+        for (seed, clip) in clips {
+            let items = vec![
+                Item::Stroke { path: vec![Seg2::Line { a: p(150.0, 110.0), b: p(250.0, 110.0) }], closed: false, width_mm: 0.35, pattern: None },
+                Item::Picture(Picture { source: 3, rect: Aabb2 { min: p(150.0, 100.0), max: p(250.0, 150.0) }, opacity: 0.8 }),
+            ];
+            let scene = Scene { clips: vec![(7, clip)], ..Scene::new(p(420.0, 297.0), vec![Group { object: 7, kind: ObjectKind::View, items }]) };
+            let json = serde_json::to_vec(&scene).unwrap();
+            let options = crate::paper::PngOptions { dpi: 25.0, colour: crate::paper::PngColour::Grey };
+            let write = |b: &[u8]| -> Option<usize> {
+                let scene: Scene = serde_json::from_slice(b).ok()?;
+                let prepared = scene.prepare().ok()?;
+                let svg = crate::paper::paper_svg(&prepared, &Grey, 25.0).ok()?.0.len();
+                let mut out = Vec::new();
+                crate::paper::paper_png(&prepared, options, &Grey, &mut out).ok()?;
+                Some(svg + out.len())
+            };
+            assert!(write(&json).is_some());
+            survives("clipped paper scene", &mutations(&json, true, seed), usize::MAX, write);
+        }
+    }
+
     /// The same scene's JSON with a picture, mutated, read, prepared and written as a 25 dpi sheet
     /// PNG: an error or an image, never a panic.
     #[test]

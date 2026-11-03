@@ -67,6 +67,13 @@ fn ring(n: usize) -> Loop2 {
     Loop2 { segs: (0..n).map(|i| Seg2::Line { a: at(i), b: at(i + 1) }).collect() }
 }
 
+/// Text isn't cut by a clip yet.
+#[test]
+fn text_in_a_clipped_object_is_refused() {
+    let clipped = Scene { clips: vec![(1, crate::paper::Clip::Circle { center: p(20.0, 30.0), radius: 2.0 })], ..scene(vec![run()], vec![font()]) };
+    assert_eq!(clipped.prepare().unwrap_err().0, "not supported yet: text in a clipped object (#4890 A8)");
+}
+
 /// An edit of the run and its font, for a list of them.
 fn e(edit: impl FnOnce(&mut TextRun, &mut Font) + 'static) -> Box<dyn FnOnce(&mut TextRun, &mut Font)> {
     Box::new(edit)
@@ -85,6 +92,14 @@ fn a_run_and_its_font_pass_and_count_toward_the_records() {
     // The group, its item, two glyphs and two clusters; the font, two glyphs, a loop each, 4 + 3 pieces.
     assert_eq!(scene.groups[0].records(), 6);
     assert_eq!(font().records(), 1 + (1 + 1 + 4) + (1 + 1 + 3));
+    assert!(scene.prepare().unwrap().font(&run()).is_some_and(|f| f.id == [7; 32]));
+}
+
+/// A clip on another object leaves the text and its fonts: the scene it makes keeps them.
+#[test]
+fn a_clip_elsewhere_keeps_the_fonts() {
+    let mut scene = scene(vec![run()], vec![font()]);
+    scene.clips = vec![(u64::MAX, crate::paper::Clip::Circle { center: Vec2::ZERO, radius: 1.0 })];
     assert!(scene.prepare().unwrap().font(&run()).is_some_and(|f| f.id == [7; 32]));
 }
 

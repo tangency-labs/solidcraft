@@ -26,7 +26,7 @@ use std::io::Write;
 use std::ops::RangeInclusive;
 
 use solidcraft_geom::Vec2;
-use solidcraft_geom::paper::{self, Grid, GridDashes, GridItem, GridPath, GridReport, Picture, Pictures, Prepared};
+use solidcraft_geom::paper::{self, Clip, Grid, GridDashes, GridItem, GridPath, GridReport, Picture, Pictures, Prepared};
 use solidcraft_geom::pixel_grid::{GridWindow, MAX_SIDE_PX, PixelGrid, PixelGridError};
 use tiny_skia::{Color, FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, PremultipliedColorU8, Stroke, StrokeDash, Transform};
 
@@ -132,7 +132,9 @@ fn write(scene: &Prepared, options: PngOptions, pictures: &dyn Pictures, out: im
                 }
                 shapes.extend(builder.finish().map(Shape::EvenOdd));
             }
-            GridItem::Picture(picture) => shapes.extend(grid.window(picture.rect).map(|window| Shape::Picture(*picture, window))),
+            GridItem::Picture { picture, clip, visible } => {
+                shapes.extend(grid.window(*visible).map(|window| Shape::Picture(*picture, window, *clip)))
+            }
             GridItem::Text { .. } => return Err(IoError::Invalid("not supported yet: text in a sheet PNG (#4890 B2)".into())),
         }
     }
@@ -154,7 +156,7 @@ fn write(scene: &Prepared, options: PngOptions, pictures: &dyn Pictures, out: im
         .iter()
         .map(|shape| match shape {
             Shape::Fill(path) | Shape::EvenOdd(path) | Shape::Thin(path, _) => (path.bounds().top(), path.bounds().bottom()),
-            Shape::Picture(_, window) => (window.y0 as f32, window.y1 as f32),
+            Shape::Picture(_, window, _) => (window.y0 as f32, window.y1 as f32),
         })
         .collect();
     let mut paint = Paint { anti_alias: colour != PngColour::BlackWhite, ..Paint::default() };
@@ -172,11 +174,12 @@ fn write(scene: &Prepared, options: PngOptions, pictures: &dyn Pictures, out: im
                     Shape::Fill(path) => band.fill_path(path, &paint, FillRule::Winding, shift, None),
                     Shape::EvenOdd(path) => band.fill_path(path, &paint, FillRule::EvenOdd, shift, None),
                     Shape::Thin(line, stroke) => band.stroke_path(line, &paint, stroke, shift, None),
-                    Shape::Picture(picture, window) => {
+                    Shape::Picture(picture, window, clip) => {
                         let (r0, r1) = (window.y0.max(top), window.y1.min(top + n));
                         if r0 < r1 {
                             let cut = GridWindow { y0: r0, y1: r1, ..*window };
-                            dithered |= composite(&mut band, top, picture, cut, pictures, &asked, k, colour)?;
+                            let inside = |x: u32, y: u32| clip.is_none_or(|clip| clip.holds(pixel_centre(&grid, x, y)));
+                            dithered |= composite(&mut band, top, picture, cut, &inside, pictures, &asked, k, colour)?;
                         }
                     }
                 }
@@ -303,8 +306,15 @@ const BAYER: [[u8; 8]; 8] = [
     [63, 31, 55, 23, 61, 29, 53, 21],
 ];
 
-/// Picture `picture`'s pixels in `window` (sheet rows inside the band that starts at row `top`)
-/// over what the band holds: source-over in sRGB, its alpha times its opacity. They are asked for
+/// The middle of a pixel of `grid`, in millimetres.
+fn pixel_centre(grid: &PixelGrid, x: u32, y: u32) -> Vec2 {
+    let ((x0, x1), (y0, y1)) = (grid.column(x), grid.row(y));
+    Vec2::new((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+}
+
+/// Picture `picture`'s pixels in `window` (sheet rows inside the band that starts at row `top`),
+/// those that are `inside`, over what the band holds: source-over in sRGB, its alpha times its
+/// opacity. They are asked for
 /// on `asked`, the sheet's grid or one `k` times coarser, each of whose pixels covers k × k of the
 /// sheet's. In black and white each pixel is dithered at its place on the sheet; true when one was.
 #[allow(clippy::too_many_arguments)]
@@ -313,6 +323,7 @@ fn composite(
     top: u32,
     picture: &Picture,
     window: GridWindow,
+    inside: &dyn Fn(u32, u32) -> bool,
     pictures: &dyn Pictures,
     asked: &PixelGrid,
     k: u32,
@@ -327,6 +338,9 @@ fn composite(
     let pixels = band.pixels_mut();
     for y in window.y0..window.y1 {
         for x in window.x0..window.x1 {
+            if !inside(x, y) {
+                continue;
+            }
             let at = ((y / k - coarse.y0) as usize * columns + (x / k - coarse.x0) as usize) * 4;
             let (Some(&[r, g, b, a]), Some(under)) = (rgba.get(at..at + 4), pixels.get_mut((y + MARGIN - top) as usize * width + x as usize)) else {
                 continue;
@@ -354,8 +368,9 @@ enum Shape {
     EvenOdd(Path),
     /// A line under a pixel wide, stroked as a hairline.
     Thin(Path, Stroke),
-    /// A picture, and the pixels of the sheet it covers.
-    Picture(Picture, GridWindow),
+    /// A picture, the pixels of the sheet it covers, and the clip it is cut at, by whether a pixel's
+    /// middle is inside: its edge isn't smoothed.
+    Picture(Picture, GridWindow, Option<Clip>),
 }
 
 /// The luma of an sRGB pixel, Rec. 709's weights in 256ths.
