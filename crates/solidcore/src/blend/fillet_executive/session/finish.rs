@@ -599,10 +599,12 @@ impl FilletSession<'_> {
     ) -> Result<()> {
         let status = self.do_filleting_steps(k, error_out);
         let joined = self.join_blended_vertex_fans();
-        match status {
+        let status = match status {
             Ok(()) => joined,
             Err(e) => Err(e),
-        }
+        };
+        let logged = self.take_blend_faces(k, status.is_ok());
+        status.and(logged)
     }
 
     /// `JoinBlendedVertexFans` (the fork's, tangency-labs/smlib@e418750, WR-665): the
@@ -677,6 +679,9 @@ impl FilletSession<'_> {
             // The fork's SetMarkCornerPatches (60af574): mark the set-back corners'
             // patch faces, which the merge copies into the target with their marks.
             session.mark_corner_patches()?;
+            // (not upstream, #2489) with `Kernel::blend_face_log` on: mark every face made,
+            // with what made it, read back from the target after filleting
+            session.mark_blend_faces(k)?;
             let editing = session.objects.target.editing_enabled();
             session.objects.target.set_editing_enabled(true);
             // The fork's (WR-703, `eb883ad`): a feature standing inside a round's band is kept:

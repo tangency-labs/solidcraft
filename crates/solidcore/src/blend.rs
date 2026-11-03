@@ -8,6 +8,7 @@
 
 pub mod blend_corner;
 pub mod blend_setback;
+pub mod definition_check;
 pub mod feature_executive;
 pub mod fillet_classification;
 pub mod fillet_cliff_overflow;

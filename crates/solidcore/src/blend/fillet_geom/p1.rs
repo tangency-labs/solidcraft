@@ -1290,6 +1290,11 @@ pub struct FilletGeom {
     pub ref_eus: Vec<EdgeuseId>,
     /// `m_vSideEUs`: the side curves' edge uses (excluding rails).
     pub side_eus: Vec<EdgeuseId>,
+    /// Not upstream (tangency-labs/solidcore#2489): the surface was built by the round's
+    /// exact class ([`crate::blend::fillet_exact::calc_exact_fillet_geom`]), not traced.
+    /// Read only by the check that every blend face is a definition
+    /// ([`crate::blend::definition_check`]).
+    pub exact_class: bool,
 }
 
 impl FilletGeom {
@@ -1340,6 +1345,7 @@ impl FilletGeom {
             vertices: Vec::new(),
             ref_eus: Vec::new(),
             side_eus: Vec::new(),
+            exact_class: false,
         })
     }
 
@@ -1514,6 +1520,8 @@ impl FilletGeom {
     /// `SetFilletSurface`.
     pub fn set_fillet_surface(&mut self, surface: Option<Surface>) {
         self.fillet_surface = surface.map(|surface| FilletSurfaceStorage::Owned(Box::new(surface)));
+        // (not upstream, #2489) a new surface is traced unless its exact class marks it
+        self.exact_class = false;
     }
 
     /// `SetFilletGeomType`.

@@ -1725,6 +1725,11 @@ pub struct Kernel {
     /// the steps of a boolean whose cost once grew with the square of the body's size, for
     /// tests and profiling. They change no result.
     pub work_counters: WorkCounters,
+    /// Not upstream (tangency-labs/solidcore#2489): while `Some`, each fillet session that
+    /// finishes filleting appends the faces it made in its target, each with what made it
+    /// ([`crate::blend::definition_check`]), for the check that every blend face is a
+    /// definition. `None` (the default) marks and keeps nothing; it changes no result.
+    pub blend_face_log: Option<crate::blend::definition_check::BlendFaceLog>,
 }
 
 impl Default for Kernel {
@@ -1760,6 +1765,7 @@ impl Kernel {
             blend_w_memo: RefCell::default(),
             blend_operation_scopes: Arc::default(),
             work_counters: WorkCounters::default(),
+            blend_face_log: None,
         }
     }
 

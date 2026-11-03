@@ -98,6 +98,7 @@ use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 pub mod ball_regular;
 pub mod band_cuts;
 mod big_radius;
+mod blend_face_log;
 mod classification;
 mod cliff_overflow;
 mod concave_nxn;
@@ -320,6 +321,9 @@ struct SessionObjects<'target> {
     /// asked to be set back, before the corners are made. Read only with
     /// `Kernel::fixes.fillet_blend_corner`.
     set_back_fills: Vec<crate::blend::blend_corner::setback::SetBackFill>,
+    /// (not upstream, #2489) The marks of the faces the session made, while
+    /// `Kernel::blend_face_log` is on (`blend_face_log`).
+    blend_face_marks: Vec<AttributeHandle>,
 }
 
 impl SessionObjects<'_> {
@@ -1518,6 +1522,7 @@ impl<'target> FilletSession<'target> {
                 swept_turns: false,
                 set_back_vertices: Vec::new(),
                 set_back_fills: Vec::new(),
+                blend_face_marks: Vec::new(),
             },
             _gn_scope: gn_scope,
         })

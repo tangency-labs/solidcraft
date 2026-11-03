@@ -1724,6 +1724,9 @@ fn end_runs_on(b: &Brep, e: EdgeId, at: Point3, tol: f64, joined: &[EdgeId]) -> 
 /// ball's piece between two contact circles (not rebuilt on a recalc), or with one face's
 /// offset collapsed and the other's not, the ball's triangle (solidcore #2403, rebuilt).
 ///
+/// A geometry built here is marked [`FilletGeom::exact_class`](crate::blend::fillet_geom::p1::FilletGeom::exact_class)
+/// (not upstream, #2489).
+///
 /// # Errors
 ///
 /// Those of the builders (a failure in them is an error, not a trace), of
@@ -1740,8 +1743,15 @@ pub fn calc_exact_fillet_geom(
     recalc: bool,
 ) -> Result<bool> {
     let built = exact_fillet_geom_of_class(ops, k, b, pseudo, blend, tsects, fillet_geom, recalc)?;
-    if built && k.fixes.fillet_round_as_definition {
-        keep_definition(ops, k, pseudo, blend, fillet_geom)?;
+    if built {
+        let g = match fillet_geom {
+            Some(g) => g,
+            None => ops.solver().first_fillet_geom()?,
+        };
+        pseudo.geom_mut(g)?.exact_class = true;
+        if k.fixes.fillet_round_as_definition {
+            keep_definition(ops, k, pseudo, blend, fillet_geom)?;
+        }
     }
     Ok(built)
 }
