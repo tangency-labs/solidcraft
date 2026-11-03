@@ -44,6 +44,13 @@ fn headless_panel_single_batch_and_script_keep_one_backend_and_never_change_the_
     one.call("engine.script", json!({"commands":[{"command":"layout.save","params":{"name":"MCP saved"}},{"command":"layout.reset"}]})).unwrap();
     one.call("engine.execute", json!({"command":"layout.apply","params":{"name":"MCP saved"}})).unwrap();
     assert_eq!(one.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"], state["state"]["layout"]);
+    // A layout batch refused before its first step ran nothing: `rolled_back` as a rollback that
+    // went back reports it (#10749).
+    let refused = json!([panel_mcp_steps()[1], {"command":"solid.boxx","params":{}}]);
+    let reply = one.call("engine.batch", json!({"commands":refused})).unwrap();
+    assert_eq!((&reply["completed"], &reply["rolled_back"]), (&json!(0), &json!(true)), "{reply}");
+    assert_eq!(one.call("engine.batch", json!({"commands":refused,"rollback":false})).unwrap()["rolled_back"], false);
+    assert_eq!(one.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"], state["state"]["layout"]);
 }
 #[test]
 fn mcp_panel_tools_publish_structured_errors_and_committed_state_through_shared_backend() {
@@ -247,7 +254,8 @@ fn atomic_tool_layout_batches_never_emulate_an_unavailable_backend_with_document
         assert_eq!(tool["structuredContent"]["panel_error"]["rule"], "capability");
         assert_eq!(body["completed"], 0);
         assert_eq!(body["applied"], json!([]));
-        assert_eq!(body["rolled_back"], false);
+        // Nothing ran, so the design is where the batch started (#10749).
+        assert_eq!(body["rolled_back"], true);
         assert_eq!(backend.calls, vec![("engine.batch".into(), String::new())], "no checkpoint, inspection or single layout call");
         assert_eq!(backend.headless.panels.as_ref().unwrap().service.inspect(), before);
         assert_eq!(backend.headless.panels.as_ref().unwrap().catalogue.state(), &catalogue);
@@ -1138,6 +1146,12 @@ fn batch_refuses_an_unknown_command_before_the_first_step() {
     assert_eq!((body["completed"].clone(), body["failed"]["index"].clone(), body["undone"].clone()), (json!(0), json!(20), json!(0)), "{body}");
     assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("closest: `solid.extrude`")), "{body}");
     assert_eq!((body["applied"].clone(), body["not_run"].as_array().map(Vec::len)), (json!([]), Some(21)), "{body}");
+    // Nothing ran, so the design is where the batch started (#10749); without `rollback` the
+    // reply claims no rollback, as at a step's turn.
+    assert_eq!(body["rolled_back"], true, "{body}");
+    let r = raw_tool(&mut s, "batch", json!({"commands": steps, "rollback": false}));
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((&body["completed"], &body["rolled_back"]), (&json!(0), &json!(false)), "{body}");
     assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 0, "no step ran");
     assert_eq!(tool(&mut s, "inspect_design", json!({"measure": false}))["undo"], 0);
 }
@@ -1156,6 +1170,7 @@ fn batch_refuses_a_step_with_an_unknown_key() {
     let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!((body["completed"].clone(), body["failed"]["index"].clone()), (json!(0), json!(1)), "{body}");
     assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("unknown key `args`") && e.contains("`params`")), "{body}");
+    assert_eq!(body["rolled_back"], true, "nothing ran (#10749): {body}");
     assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 0, "no step ran");
 }
 
@@ -3599,6 +3614,11 @@ fn a_bridged_server_checks_calls_at_its_param_check_level() {
     let reply: Value = serde_json::from_str(&text(&r)).unwrap();
     assert_eq!((&reply["failed"]["index"], &reply["completed"], &reply["not_run"]), (&json!(1), &json!(0), &json!([0, 1])), "{reply}");
     assert!(reply["failed"]["error"].as_str().unwrap_or_default().contains(warning), "{reply}");
+    // Nothing was sent, so the design is where the batch started (#10749).
+    assert_eq!((&reply["rolled_back"], &reply["applied"]), (&json!(true), &json!([])), "{reply}");
+    let r = raw_tool(&mut s, "batch", json!({"commands": [good, misspelt], "rollback": false}));
+    let reply: Value = serde_json::from_str(&text(&r)).unwrap();
+    assert_eq!(reply["rolled_back"], json!(false), "no rollback asked for: {reply}");
     assert_eq!(sent("engine.batch"), 0, "refused unsent");
 
     let mut s = bridged(ParamCheck::Warn);

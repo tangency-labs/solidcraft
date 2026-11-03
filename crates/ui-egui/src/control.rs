@@ -320,10 +320,10 @@ fn batch(app: &mut SolveApp, p: &Value) -> Outcome {
         if let Some(why) = batch_refusal(steps) {
             return err(why);
         }
-        if let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, app.session.param_check, &["view.pick"]) {
-            return ok(refusal.reply(steps.len()));
-        }
         let rollback = p.get("rollback").and_then(Value::as_bool).unwrap_or(true);
+        if let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, app.session.param_check, &["view.pick"]) {
+            return ok(refusal.reply(steps.len(), rollback));
+        }
         if rollback {
             if panels != steps.len() {
                 return err(solidcraft_engine::panels::commands::error_text(solidcraft_engine::panels::error(
@@ -350,11 +350,11 @@ fn batch(app: &mut SolveApp, p: &Value) -> Outcome {
     if let Some(why) = batch_refusal(steps) {
         return err(why);
     }
+    let rollback = p.get("rollback").and_then(Value::as_bool).unwrap_or(true);
     // A step the batch would refuse at its turn refuses it now, before anything runs (#5853).
     if let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, app.session.param_check, &["view.pick"]) {
-        return ok(refusal.reply(steps.len()));
+        return ok(refusal.reply(steps.len(), rollback));
     }
-    let rollback = p.get("rollback").and_then(Value::as_bool).unwrap_or(true);
     let profile = p.get("profile").and_then(Value::as_bool).unwrap_or(false);
     let timed = profile || p.get("timings").and_then(Value::as_bool).unwrap_or(false);
     let mut rows = Vec::new();
@@ -1638,6 +1638,14 @@ mod tests {
         );
         assert_eq!(reply["ok"], false);
         assert_eq!(reply["panel_error"]["rule"], "lifecycle");
+        assert_eq!(app.panel_runtime().unwrap().layout().inspect(), before);
+        // Refused before its first step, nothing ran: `rolled_back` as a rollback that went back
+        // reports it (#10749).
+        let refused = json!([panel_steps()[1].clone(), {"command":"solid.boxx","params":{}}]);
+        let reply = panel_control(&mut app, "engine.batch", json!({"commands":refused.clone()}));
+        assert_eq!((&reply["result"]["completed"], &reply["result"]["rolled_back"]), (&json!(0), &json!(true)), "{reply}");
+        let reply = panel_control(&mut app, "engine.batch", json!({"commands":refused,"rollback":false}));
+        assert_eq!(reply["result"]["rolled_back"], false, "{reply}");
         assert_eq!(app.panel_runtime().unwrap().layout().inspect(), before);
     }
     #[test]
@@ -3018,6 +3026,15 @@ mod tests {
         let v = batch(&mut h, json!({"commands": steps, "rollback": false}));
         assert_eq!((&v["result"]["rolled_back"], &v["result"]["undone"]), (&json!(false), &json!(0)), "{v}");
         assert_eq!(inspect(&mut h)["bodies"].as_array().map(Vec::len), Some(1));
+        // Refused before its first step (#10749): nothing ran, so the design is where the batch
+        // started, which `rolled_back` says as it does after a rollback that went back.
+        let refused = json!([{"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5}}, {"command": "solid.boxx", "params": {}}]);
+        let v = batch(&mut h, json!({"commands": refused.clone()}));
+        assert_eq!((&v["result"]["completed"], &v["result"]["not_run"]), (&json!(0), &json!([0, 1])), "{v}");
+        assert_eq!((&v["result"]["rolled_back"], &v["result"]["undone"]), (&json!(true), &json!(0)), "{v}");
+        let v = batch(&mut h, json!({"commands": refused, "rollback": false}));
+        assert_eq!(v["result"]["rolled_back"], json!(false), "{v}");
+        assert_eq!(inspect(&mut h)["bodies"].as_array().map(Vec::len), Some(1), "nothing ran");
     }
 
     /// Every step of a batch from an MCP server stays inside the agent's folders (#205), as an
