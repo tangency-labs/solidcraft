@@ -1,0 +1,201 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  10.0,
+                  10.0,
+                  5.0
+                ],
+                [
+                  30.0,
+                  10.0,
+                  5.0
+                ]
+              ],
+              "index": 19
+            },
+            {
+              "at": [
+                [
+                  30.0,
+                  10.0,
+                  5.0
+                ],
+                [
+                  30.0,
+                  20.0,
+                  5.0
+                ]
+              ],
+              "index": 20
+            },
+            {
+              "at": [
+                [
+                  30.0,
+                  20.0,
+                  5.0
+                ],
+                [
+                  10.0,
+                  20.0,
+                  5.0
+                ]
+              ],
+              "index": 17
+            },
+            {
+              "at": [
+                [
+                  10.0,
+                  20.0,
+                  5.0
+                ],
+                [
+                  10.0,
+                  10.0,
+                  5.0
+                ]
+              ],
+              "index": 21
+            }
+          ],
+          "points": [
+            [
+              20.0,
+              10.0,
+              5.0
+            ],
+            [
+              30.0,
+              15.0,
+              5.0
+            ],
+            [
+              20.0,
+              20.0,
+              5.0
+            ],
+            [
+              10.0,
+              15.0,
+              5.0
+            ]
+          ],
+          "tolerance": 2.5505097567963926
+        },
+        "kind": "round",
+        "sizes": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    }
+  ],
+  "case": "cov-fillet-turn-swept-pocket-sharp-corner-refused-r1",
+  "expected": {
+    "method": "a swept turn sweeps the round's section along the corner's own rounding; a sharp concave corner (R 0 < r 1) has none the ball can follow: refused, naming R >= 1",
+    "outcome": "refused",
+    "refusal": "at least 1",
+    "source": "analytic",
+    "sources": [],
+    "what": "the same pocket's floor rounds asked to turn Swept at sharp concave corners: the ball cannot pass a concave corner rounded less than its radius, so it is refused, naming the corner radius that works"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 32,
+      "faces": 15,
+      "vertices": 20
+    }
+  },
+  "records": "cov-fillet-turn-swept-pocket-sharp-corner-refused-r1.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": "succeeded where the case expects a refusal",
+    "known_failing": "[fail] as on SMLib: solid.fillet has no `turn`, so the sharp concave corners are mitred, not refused",
+    "measured": null,
+    "refused_with": null,
+    "status": "fail"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "the same pocket's floor rounds asked to turn Swept at sharp concave corners: the ball cannot pass a concave corner rounded less than its radius, so it is refused, naming the corner radius that works",
+  "why_not": []
+}

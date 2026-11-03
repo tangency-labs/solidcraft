@@ -1,0 +1,175 @@
+{
+  "area": "assemblies",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                10.0,
+                -10.0,
+                -10.0
+              ],
+              "start": [
+                -10.0,
+                -10.0,
+                -10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                10.0,
+                10.0,
+                -10.0
+              ],
+              "start": [
+                10.0,
+                -10.0,
+                -10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -10.0,
+                10.0,
+                -10.0
+              ],
+              "start": [
+                10.0,
+                10.0,
+                -10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -10.0,
+                -10.0,
+                -10.0
+              ],
+              "start": [
+                -10.0,
+                10.0,
+                -10.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-joint-planar-move-and-turn",
+  "expected": {
+    "body_count": 2,
+    "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); planar with frame z = +z, x = +x: M = T(3,4,0)·Rz(90): (20,0,5) -> (0,20,5) -> (3,24,5)",
+    "results": [
+      {
+        "json": {
+          "values": [
+            {
+              "value": 3.0
+            },
+            {
+              "value": 4.0
+            },
+            {
+              "value": 90.0
+            }
+          ]
+        },
+        "step": 9
+      },
+      {
+        "json": {
+          "total": {
+            "bbox": {
+              "max": [
+                8.0,
+                44.0,
+                10.0
+              ],
+              "min": [
+                -2.0,
+                4.0,
+                0.0
+              ]
+            },
+            "center_of_mass": [
+              3.0,
+              24.0,
+              5.0
+            ]
+          }
+        },
+        "step": 10
+      }
+    ],
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 8000.0,
+    "what": "a planar joint driven to x 3, y 4 and 90 degrees"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 12,
+      "vertices": 16
+    }
+  },
+  "result": [
+    {
+      "body": "BaseBox",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3400.0,
+      "body_count": 2,
+      "edges": 24,
+      "faces": 12,
+      "vertices": 16,
+      "volume_mm3": 8000.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude"
+  ],
+  "ungraded": [
+    "results: SolidCraft computes it"
+  ],
+  "what": "a planar joint driven to x 3, y 4 and 90 degrees",
+  "why_not": [
+    "body \"ArmBox\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

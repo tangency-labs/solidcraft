@@ -1,0 +1,229 @@
+{
+  "area": "assemblies",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                10.0,
+                -10.0,
+                -10.0
+              ],
+              "start": [
+                -10.0,
+                -10.0,
+                -10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                10.0,
+                10.0,
+                -10.0
+              ],
+              "start": [
+                10.0,
+                -10.0,
+                -10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -10.0,
+                10.0,
+                -10.0
+              ],
+              "start": [
+                10.0,
+                10.0,
+                -10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -10.0,
+                -10.0,
+                -10.0
+              ],
+              "start": [
+                -10.0,
+                10.0,
+                -10.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                40.0,
+                -5.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                -5.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                40.0,
+                5.0,
+                0.0
+              ],
+              "start": [
+                40.0,
+                -5.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                5.0,
+                0.0
+              ],
+              "start": [
+                40.0,
+                5.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                -5.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                5.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-component-move-bodies-into-a-moved-part",
+  "expected": {
+    "body_count": 3,
+    "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); Holder (empty) moved by (100,0,0), then a box 10x10x10 from (0,20,0) moved into it: the body keeps its world place, centre (5,25,5)",
+    "results": [
+      {
+        "json": {
+          "total": {
+            "center_of_mass": [
+              5.0,
+              25.0,
+              5.0
+            ],
+            "volume_mm3": 1000.0
+          }
+        },
+        "step": 12
+      }
+    ],
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 9000.0,
+    "what": "a root body moved into a component placed 100 mm along x"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 36,
+      "faces": 18,
+      "vertices": 24
+    }
+  },
+  "result": [
+    {
+      "body": "BaseBox",
+      "made": "b1"
+    },
+    {
+      "body": "ArmBox",
+      "made": "b2"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 4000.0,
+      "body_count": 3,
+      "edges": 36,
+      "faces": 18,
+      "vertices": 24,
+      "volume_mm3": 9000.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "extrude"
+  ],
+  "ungraded": [
+    "results: SolidCraft computes it"
+  ],
+  "what": "a root body moved into a component placed 100 mm along x",
+  "why_not": [
+    "body \"Cube\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

@@ -1,0 +1,159 @@
+{
+  "area": "assemblies",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                10.0,
+                -10.0,
+                -10.0
+              ],
+              "start": [
+                -10.0,
+                -10.0,
+                -10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                10.0,
+                10.0,
+                -10.0
+              ],
+              "start": [
+                10.0,
+                -10.0,
+                -10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -10.0,
+                10.0,
+                -10.0
+              ],
+              "start": [
+                10.0,
+                10.0,
+                -10.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -10.0,
+                -10.0,
+                -10.0
+              ],
+              "start": [
+                -10.0,
+                10.0,
+                -10.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-joint-reach-out-of-reach",
+  "expected": {
+    "body_count": 2,
+    "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); the tip moves on a circle of radius 40: the nearest it gets is (0,40,5), 20 mm short",
+    "results": [
+      {
+        "json": {
+          "error_mm": 20.0,
+          "point": [
+            0.0,
+            40.0,
+            5.0
+          ],
+          "reached": false
+        },
+        "step": 9
+      },
+      {
+        "json": {
+          "total": {
+            "center_of_mass": [
+              0.0,
+              20.0,
+              5.0
+            ]
+          }
+        },
+        "step": 10
+      }
+    ],
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 8000.0,
+    "what": "joint.reach asked to take the arm's tip to (0,60,5), 60 from the hinge"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 12,
+      "vertices": 16
+    }
+  },
+  "result": [
+    {
+      "body": "BaseBox",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3400.0,
+      "body_count": 2,
+      "edges": 24,
+      "faces": 12,
+      "vertices": 16,
+      "volume_mm3": 8000.000000000002
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude"
+  ],
+  "ungraded": [
+    "results: SolidCraft computes it"
+  ],
+  "what": "joint.reach asked to take the arm's tip to (0,60,5), 60 from the hinge",
+  "why_not": [
+    "body \"ArmBox\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

@@ -1,0 +1,144 @@
+{
+  "area": "inspect",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.0,
+                  0.0,
+                  20.0
+                ],
+                [
+                  40.0,
+                  0.0,
+                  20.0
+                ]
+              ],
+              "index": 1
+            }
+          ],
+          "points": [
+            [
+              20.0,
+              0.0,
+              20.0
+            ]
+          ],
+          "tolerance": 2.693582403567252
+        },
+        "kind": "round",
+        "sizes": [
+          3.0
+        ]
+      }
+    }
+  ],
+  "case": "cov-minimum-radius-of-a-fillet",
+  "expected": {
+    "method": "box 40 x 30 x 20 with a corner at the origin, its top-front edge (y 0, z 20) rounded r 3: the flat faces have none, the round is a cylinder of r 3: the smallest radius is 3",
+    "results": [
+      {
+        "json": 3.0,
+        "pointer": "/min_radius",
+        "step": 3
+      }
+    ],
+    "source": "analytic",
+    "sources": [],
+    "what": "the smallest radius over every face of a box with one rounded edge"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10
+    }
+  },
+  "records": "cov-minimum-radius-of-a-fillet.bodies.json.gz",
+  "result": [
+    {
+      "body": "Box",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5144.6327261601555,
+      "body_count": 1,
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10,
+      "volume_mm3": 23922.743338853543
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "results: SolidCraft computes it"
+  ],
+  "what": "the smallest radius over every face of a box with one rounded edge",
+  "why_not": []
+}

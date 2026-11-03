@@ -1,0 +1,174 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "error": "SMLib's result is not a closed solid",
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.0,
+                  -8.0,
+                  0.0
+                ],
+                [
+                  6.5429455452638186,
+                  4.60324489808139,
+                  6.542945545263839
+                ]
+              ],
+              "index": 5
+            },
+            {
+              "at": [
+                [
+                  6.5429455452638186,
+                  4.60324489808139,
+                  6.542945545263839
+                ],
+                [
+                  4.603244898081378,
+                  6.5429455452638186,
+                  4.60324489808139
+                ]
+              ],
+              "index": 4
+            },
+            {
+              "at": [
+                [
+                  4.603244898081378,
+                  6.5429455452638186,
+                  4.60324489808139
+                ],
+                [
+                  -5.164310507811523e-15,
+                  7.999999999999999,
+                  0.0
+                ]
+              ],
+              "index": 1
+            }
+          ],
+          "points": [
+            [
+              6.553430166420971,
+              -4.463814605413056,
+              6.553430166420983
+            ],
+            [
+              5.573095221672599,
+              5.573095221672604,
+              5.573095221672615
+            ],
+            [
+              2.360299198511475,
+              7.6403446216178486,
+              2.3602991985114943
+            ]
+          ],
+          "tolerance": 3.483440743814415
+        },
+        "kind": "round",
+        "sizes": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    }
+  ],
+  "case": "cov-junction-tee-equal-round",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "no closed form for the round on these quadrics' intersection: one valid closed body whose round meets its faces G1",
+    "source": "invariants",
+    "sources": [],
+    "what": "equal pipes R8 tee, rounded 1"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "engine_error": "step 3 (solid.fillet): SMLib fillet: operation: SMLib's result is not a closed solid (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",
+    "kernel_error": "SMLib's result is not a closed solid",
+    "ran": false
+  },
+  "records": "cov-junction-tee-equal-round.bodies.json.gz",
+  "result": [],
+  "rig": {
+    "error": "step 3 (solid.fillet): SMLib fillet: operation: SMLib's result is not a closed solid (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",
+    "known_failing": "[fail] the result is not a closed solid, as on SMLib: equal pipes' intersection is two plane ellipses crossing, a corner the old corner code cannot join (the corner step)",
+    "measured": null,
+    "refused_with": null,
+    "status": "fail"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "equal pipes R8 tee, rounded 1",
+  "why_not": []
+}

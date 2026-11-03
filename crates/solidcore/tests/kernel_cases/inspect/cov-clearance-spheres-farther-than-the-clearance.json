@@ -1,0 +1,99 @@
+{
+  "area": "inspect",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "make_sphere",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "center": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "radius": 5.0
+      }
+    },
+    {
+      "inputs": [],
+      "op": "make_sphere",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "center": [
+          20.0,
+          0.0,
+          0.0
+        ],
+        "radius": 5.0
+      }
+    }
+  ],
+  "case": "cov-clearance-spheres-farther-than-the-clearance",
+  "expected": {
+    "method": "spheres r 5 on (0,0,0) and (20,0,0) are 10 apart; closer than 5 asked: none",
+    "results": [
+      {
+        "json": [],
+        "pointer": "/overlaps",
+        "step": 3
+      },
+      {
+        "json": [],
+        "pointer": "/near",
+        "step": 3
+      }
+    ],
+    "source": "analytic",
+    "sources": [],
+    "what": "two spheres farther apart than the clearance asked"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 2,
+      "faces": 2,
+      "vertices": 4
+    }
+  },
+  "result": [
+    {
+      "body": "A",
+      "made": "b1"
+    },
+    {
+      "body": "B",
+      "made": "b2"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 628.3185307242538,
+      "body_count": 2,
+      "edges": 2,
+      "faces": 2,
+      "vertices": 4,
+      "volume_mm3": 1047.1975512528547
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "make_sphere",
+    "make_sphere"
+  ],
+  "ungraded": [
+    "results: SolidCraft computes it"
+  ],
+  "what": "two spheres farther apart than the clearance asked",
+  "why_not": []
+}

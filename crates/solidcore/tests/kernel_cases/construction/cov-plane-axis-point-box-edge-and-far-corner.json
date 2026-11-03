@@ -1,0 +1,144 @@
+{
+  "area": "construction",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 20.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                40.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                40.0,
+                30.0,
+                0.0
+              ],
+              "start": [
+                40.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                30.0,
+                0.0
+              ],
+              "start": [
+                40.0,
+                30.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                30.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-plane-axis-point-box-edge-and-far-corner",
+  "expected": {
+    "construction": {
+      "P": {
+        "plane": {
+          "normal": [
+            0.0,
+            -0.5547,
+            0.83205
+          ],
+          "through": [
+            0,
+            30,
+            20
+          ]
+        }
+      }
+    },
+    "method": "box 40 x 30 x 20 with a corner at the origin: the edge y 0, z 0 is the X axis and the far corner is (40,30,20); the plane holds the origin and its normal is X x (0,30,20) = (0,-20,30), i.e. (0,-2,3)/sqrt(13): the plane 3z = 2y, which also holds the opposite edge's other end (0,30,20)",
+    "source": "analytic",
+    "sources": [],
+    "what": "the plane through a box edge and the corner farthest from it"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8
+    }
+  },
+  "result": [
+    {
+      "body": "Box",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5200.0,
+      "body_count": 1,
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8,
+      "volume_mm3": 24000.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [
+    "construction: SolidCraft computes it"
+  ],
+  "what": "the plane through a box edge and the corner farthest from it",
+  "why_not": []
+}

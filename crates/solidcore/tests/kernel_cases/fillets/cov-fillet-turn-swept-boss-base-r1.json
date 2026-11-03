@@ -1,0 +1,216 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  15.0,
+                  10.0,
+                  10.0
+                ],
+                [
+                  25.0,
+                  10.0,
+                  10.0
+                ]
+              ],
+              "index": 5
+            },
+            {
+              "at": [
+                [
+                  25.0,
+                  10.0,
+                  10.0
+                ],
+                [
+                  25.0,
+                  20.0,
+                  10.0
+                ]
+              ],
+              "index": 4
+            },
+            {
+              "at": [
+                [
+                  25.0,
+                  20.0,
+                  10.0
+                ],
+                [
+                  15.0,
+                  20.0,
+                  10.0
+                ]
+              ],
+              "index": 7
+            },
+            {
+              "at": [
+                [
+                  15.0,
+                  20.0,
+                  10.0
+                ],
+                [
+                  15.0,
+                  10.0,
+                  10.0
+                ]
+              ],
+              "index": 6
+            }
+          ],
+          "points": [
+            [
+              20.0,
+              10.0,
+              10.0
+            ],
+            [
+              25.0,
+              15.0,
+              10.0
+            ],
+            [
+              20.0,
+              20.0,
+              10.0
+            ],
+            [
+              15.0,
+              15.0,
+              10.0
+            ]
+          ],
+          "tolerance": 2.6110766272276376
+        },
+        "kind": "round",
+        "sizes": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    }
+  ],
+  "case": "cov-fillet-turn-swept-boss-base-r1",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "V0 = 12500. Straight rounds 40 A; each corner the spandrel revolved a quarter turn about the corner edge, at distance u from it: (pi/2) M (Pappus). V = 12500 + 40 A + 2 pi M = 12508.885259020. Every seam G1. Graded to 1e-7 relative: the Mitre and Swept turns differ by (8 - 2 pi) M = 0.0823 mm^3 at these four corners, 6.6e-6 of the volume.",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 1e-7
+    },
+    "volume_mm3": 12508.88525901954,
+    "what": "the same boss's base rounds turned Swept: at each convex corner the section is revolved about the vertical corner edge through the corner's 90 degrees, a torus piece G1 to both rounds"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 32,
+      "faces": 15,
+      "vertices": 20
+    }
+  },
+  "records": "cov-fillet-turn-swept-boss-base-r1.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": "[fail] as on SMLib: solid.fillet has no `turn`; the corners are mitred (12508.9675, the Mitre case's volume)",
+    "measured": {
+      "area_mm2": 3983.3982236817183,
+      "body_count": 1,
+      "edges": 32,
+      "faces": 15,
+      "vertices": 20,
+      "volume_mm3": 12508.967554825027
+    },
+    "refused_with": null,
+    "status": "fail"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "the same boss's base rounds turned Swept: at each convex corner the section is revolved about the vertical corner edge through the corner's 90 degrees, a torus piece G1 to both rounds",
+  "why_not": []
+}

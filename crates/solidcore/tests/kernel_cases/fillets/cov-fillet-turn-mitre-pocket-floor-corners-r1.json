@@ -1,0 +1,211 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  10.0,
+                  10.0,
+                  5.0
+                ],
+                [
+                  30.0,
+                  10.0,
+                  5.0
+                ]
+              ],
+              "index": 19
+            },
+            {
+              "at": [
+                [
+                  30.0,
+                  10.0,
+                  5.0
+                ],
+                [
+                  30.0,
+                  20.0,
+                  5.0
+                ]
+              ],
+              "index": 20
+            },
+            {
+              "at": [
+                [
+                  30.0,
+                  20.0,
+                  5.0
+                ],
+                [
+                  10.0,
+                  20.0,
+                  5.0
+                ]
+              ],
+              "index": 17
+            },
+            {
+              "at": [
+                [
+                  10.0,
+                  20.0,
+                  5.0
+                ],
+                [
+                  10.0,
+                  10.0,
+                  5.0
+                ]
+              ],
+              "index": 21
+            }
+          ],
+          "points": [
+            [
+              20.0,
+              10.0,
+              5.0
+            ],
+            [
+              30.0,
+              15.0,
+              5.0
+            ],
+            [
+              20.0,
+              20.0,
+              5.0
+            ],
+            [
+              10.0,
+              15.0,
+              5.0
+            ]
+          ],
+          "tolerance": 2.5505097567963926
+        },
+        "kind": "round",
+        "sizes": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    }
+  ],
+  "case": "cov-fillet-turn-mitre-pocket-floor-corners-r1",
+  "expected": {
+    "body_count": 1,
+    "method": "plate 40x30x10 less the pocket 20x10x5: V0 = 11000. Each floor round adds the spandrel A = (1 - pi/4) r^2 along its edge; at a corner the bisector plane cuts it where x - 10 = u, u its distance from its own wall, so an edge of length L adds the integral of (L - 2u) dA = L A - 2 M, M = r^3 (5/6 - pi/4) the spandrel's first moment about its wall. Four edges (20, 10, 20, 10): 60 A - 8 M = 12.492628837. V = 11012.492628837. The rounds meet each other at the mitre G0 and their faces G1. Graded to 1e-7 relative: the Mitre and Swept turns differ by (8 - 2 pi) M = 0.0823 mm^3 at these four corners, 6.6e-6 of the volume.",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 1e-7
+    },
+    "volume_mm3": 11012.492628836666,
+    "what": "a pocket 20 x 10 x 5 in a plate, its floor edges rounded R1 and its vertical corners left sharp: the default turn, Mitre: at each corner the two floor rounds run on to the corner's bisector plane and meet there"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 32,
+      "faces": 15,
+      "vertices": 20
+    }
+  },
+  "records": "cov-fillet-turn-mitre-pocket-floor-corners-r1.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 4073.681408993309,
+      "body_count": 1,
+      "edges": 32,
+      "faces": 15,
+      "vertices": 20,
+      "volume_mm3": 11012.49262884001
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "a pocket 20 x 10 x 5 in a plate, its floor edges rounded R1 and its vertical corners left sharp: the default turn, Mitre: at each corner the two floor rounds run on to the corner's bisector plane and meet there",
+  "why_not": []
+}

@@ -1,0 +1,157 @@
+{
+  "area": "plastic",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "cov-plastic-manage-rules-deleted-rule-leaves-no-draft",
+  "expected": {
+    "body_count": 1,
+    "method": "deleting a design rule also clears it as the active rule, so the rest (16 x 10 x 3, no draft of its own) is straight: V = 60*40*3 + 16*10*3 = 7680",
+    "results": [
+      {
+        "json": {
+          "deleted": "Steep"
+        },
+        "step": 3
+      }
+    ],
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 7680.0,
+    "what": "plastic.manage_rules makes an active 5 degree rule, then deletes it; a rest after that has no rule and no draft"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 11,
+      "vertices": 16
+    }
+  },
+  "records": "cov-plastic-manage-rules-deleted-rule-leaves-no-draft.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5556.0,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 11,
+      "vertices": 16,
+      "volume_mm3": 7680.000000000001
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [
+    "results: SolidCraft computes it"
+  ],
+  "what": "plastic.manage_rules makes an active 5 degree rule, then deletes it; a rest after that has no rule and no draft",
+  "why_not": []
+}

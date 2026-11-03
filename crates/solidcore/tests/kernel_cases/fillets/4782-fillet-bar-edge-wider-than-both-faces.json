@@ -1,0 +1,149 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.0,
+                  0.0,
+                  5.0
+                ],
+                [
+                  80.0,
+                  0.0,
+                  5.0
+                ]
+              ],
+              "index": 1
+            }
+          ],
+          "points": [
+            [
+              40.0,
+              0.0,
+              5.0
+            ]
+          ],
+          "tolerance": 4.016594601052253
+        },
+        "kind": "round",
+        "sizes": [
+          10.0
+        ]
+      }
+    }
+  ],
+  "case": "4782-fillet-bar-edge-wider-than-both-faces",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "a convex round past its faces' far edges is built on the faces continued and its removal subtracted (smlib_fillet): the section keeps the bar's 5x5 square [0,5]x[0,5] (y,z) within the round's circle, centre (10,-5), radius 10. The circle crosses z=0 at y = 10-sqrt(75) and y=5 at z = sqrt(75)-5, and contains the corner (5,0), so with u = 10-y the area is integral from 5 to sqrt(75) of (sqrt(100-u^2) - 5) du = 50 (pi/3 - pi/6) - 5 (sqrt(75) - 5) = 25 pi/3 - 5 sqrt(75) + 25 = 7.8786686; V = 80 area = 2000 pi/3 - 400 sqrt(75) + 2000 = 630.2934873",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4782"
+    ],
+    "tolerance": {
+      "rel": 1e-6
+    },
+    "volume_mm3": 630.2934873,
+    "what": "the long top edge of a 5x5 bar rounded r10, wider than both faces it rounds"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 9,
+      "faces": 5,
+      "vertices": 6
+    }
+  },
+  "records": "4782-fillet-bar-edge-wider-than-both-faces.bodies.json.gz",
+  "result": [
+    {
+      "body": "Box",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": "[fail] continuity_order: got Box: no null seams want >= g1 at every blend seam",
+    "measured": {
+      "area_mm2": 1020.2770037157246,
+      "body_count": 1,
+      "edges": 9,
+      "faces": 5,
+      "vertices": 6,
+      "volume_mm3": 630.2934869232424
+    },
+    "refused_with": null,
+    "status": "fail"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4782"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "the long top edge of a 5x5 bar rounded r10, wider than both faces it rounds",
+  "why_not": []
+}

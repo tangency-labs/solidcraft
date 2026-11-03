@@ -1,0 +1,106 @@
+{
+  "area": "construction",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "revolve",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "angle": 6.283185307179586,
+        "cap": true,
+        "direction": [
+          -0.0,
+          -0.0,
+          1.0
+        ],
+        "origin": [
+          0.0,
+          60.0,
+          0.0
+        ],
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                -0.0,
+                1.0,
+                0.0
+              ],
+              "center": [
+                10.0,
+                60.0,
+                0.0
+              ],
+              "end": 6.283185307179586,
+              "radius": 2.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.0
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-point-center-of-a-torus",
+  "expected": {
+    "construction": {
+      "C": {
+        "point": [
+          0,
+          60,
+          0
+        ]
+      }
+    },
+    "method": "torus major 10, minor 2 on (0,60,0)",
+    "source": "analytic",
+    "sources": [],
+    "what": "the centre of a torus"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 2,
+      "faces": 1,
+      "vertices": 1
+    }
+  },
+  "result": [
+    {
+      "body": "Ring",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 789.5683520958365,
+      "body_count": 1,
+      "edges": 1,
+      "faces": 1,
+      "vertices": 1,
+      "volume_mm3": 789.5683521189258
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "revolve"
+  ],
+  "ungraded": [
+    "construction: SolidCraft computes it"
+  ],
+  "what": "the centre of a torus",
+  "why_not": []
+}

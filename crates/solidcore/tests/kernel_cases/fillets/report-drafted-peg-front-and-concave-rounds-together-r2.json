@@ -1,0 +1,152 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "error": "SMLib failed (status 1001)",
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.87488663525924,
+                  0.8748866352592405,
+                  10.0
+                ],
+                [
+                  40.0,
+                  0.87488663525924,
+                  10.0
+                ]
+              ],
+              "index": 10
+            },
+            {
+              "at": [
+                [
+                  40.0,
+                  15.12511336474076,
+                  10.0
+                ],
+                [
+                  40.0,
+                  0.87488663525924,
+                  10.0
+                ]
+              ],
+              "index": 14
+            }
+          ],
+          "points": [
+            [
+              20.43744331762962,
+              0.8748866352592402,
+              10.0
+            ],
+            [
+              32.874886635259244,
+              7.999999999999999,
+              9.999999999997844
+            ]
+          ],
+          "tolerance": 2.721294101747089
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "report-drafted-peg-front-and-concave-rounds-together-r2",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "the peg (a bar 40 x 16 whose far end is a half disc R8 about (40, 8)) extruded 10 with a 5 deg inward taper, then the top's end circle (R 8 - 10 tan 5 deg about (40, 8)) extruded 10 up with the same taper and joined: the bar's drafted front face runs tangent into the cone along its generator through x = 40, and the top's concave arc meets the front top edge where the two are tangent, as on the straight peg; the front top edge and the concave arc rounded r2 in one fillet, tangent chain on; no closed form: one valid body, every seam a round or the corner patch makes G1",
+    "source": "invariants",
+    "what": "as report-peg-front-and-concave-rounds-together-r2 on the drafted peg, whose front face runs tangent into a cone"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "engine_error": "step 13 (solid.fillet): SMLib fillet: operation: SMLib failed (status 1001)",
+    "kernel_error": "SMLib failed (status 1001)",
+    "ran": false
+  },
+  "records": "report-drafted-peg-front-and-concave-rounds-together-r2.bodies.json.gz",
+  "result": [],
+  "rig": {
+    "error": "step 13 (solid.fillet): SMLib fillet: operation: SMLib failed (status 1001)",
+    "known_failing": "[unsupported] step 13 (solid.fillet): invalid input: not supported yet: the fillet meets a corner of this kind, which SMLib's blends do not handle yet (where its ed",
+    "measured": null,
+    "refused_with": null,
+    "status": "fail"
+  },
+  "sources": null,
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "as report-peg-front-and-concave-rounds-together-r2 on the drafted peg, whose front face runs tangent into a cone",
+  "why_not": []
+}

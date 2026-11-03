@@ -1,0 +1,157 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "error": "SMLib failed (status 1001)",
+      "inputs": [
+        "b15"
+      ],
+      "op": "chamfer_sides",
+      "params": {
+        "distance": 1.0,
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  15.590169943749444,
+                  5.442335510134743e-14,
+                  10.0
+                ],
+                [
+                  6.783384840878406,
+                  4.089340965789887,
+                  9.99999999999999
+                ]
+              ],
+              "index": 3
+            },
+            {
+              "at": [
+                [
+                  6.783384840878406,
+                  4.089340965789887,
+                  9.99999999999999
+                ],
+                [
+                  15.590169943749444,
+                  5.442335510134743e-14,
+                  10.0
+                ]
+              ],
+              "index": 0
+            }
+          ],
+          "points": [
+            [
+              12.397279543126551,
+              4.505296518190091,
+              9.999999999999998
+            ],
+            [
+              7.602194600606031,
+              -4.505901858302108,
+              9.999999999999998
+            ]
+          ],
+          "tolerance": 1.5312107661995031
+        },
+        "first": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "second": {
+          "distance": 2.0
+        }
+      }
+    }
+  ],
+  "case": "2893-chamfer-two-distances-elliptical-rim",
+  "expected": {
+    "body_count": 1,
+    "method": "the axis (1, 0, 2)/sqrt5 through (0, 0, -10) meets z = 10 at (10, 0, 10); the rim is the ellipse there with semi-axes 5 (along y) and 5 sqrt5/2 (along x); (10, 5, 10) is on it. An unequal chamfer of an ellipse has no closed-form volume: one closed valid solid (the owner, 2026-10-31: it builds).",
+    "outcome": "solid",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#2893"
+    ],
+    "what": "a cylinder r5 tilted 26.6 deg from Z cut flat at z = 10, its elliptical rim chamfered 1 and 2: one closed valid solid"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "engine_error": "step 3 (solid.chamfer): SMLib chamfer: operation: SMLib failed (status 1001) (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",
+    "kernel_error": "SMLib failed (status 1001)",
+    "ran": false
+  },
+  "records": "2893-chamfer-two-distances-elliptical-rim.bodies.json.gz",
+  "result": [],
+  "rig": {
+    "error": "step 3 (solid.chamfer): SMLib chamfer: operation: SMLib failed (status 1001) (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",
+    "known_failing": "[fail] refused, but not because \"not supported yet\": step 3 (solid.chamfer): SMLib chamfer: operation: SMLib failed (status 1001) (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain:",
+    "measured": null,
+    "refused_with": null,
+    "status": "fail"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2893"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "chamfer_sides"
+  ],
+  "ungraded": [],
+  "what": "a cylinder r5 tilted 26.6 deg from Z cut flat at z = 10, its elliptical rim chamfered 1 and 2: one closed valid solid",
+  "why_not": []
+}

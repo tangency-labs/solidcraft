@@ -1,0 +1,281 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b22": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b50"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b50"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b51"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b51"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b52"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "error": "there is no room for it: an offset leaves none inside the body, or a blend is larger than its faces allow",
+      "inputs": [
+        "b52"
+      ],
+      "op": "blend_dropping",
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  -1.9984014443252818e-15,
+                  -3.7775713718511295,
+                  2.301622449040695
+                ],
+                [
+                  2.5821552539057613e-16,
+                  5.016844378075238e-32,
+                  -3.999999999999999
+                ]
+              ],
+              "index": 7
+            },
+            {
+              "at": [
+                [
+                  2.5821552539057613e-16,
+                  5.016844378075238e-32,
+                  -3.999999999999999
+                ],
+                [
+                  3.2714727726319106,
+                  1.8887856859255627,
+                  2.301622449040695
+                ]
+              ],
+              "index": 3
+            },
+            {
+              "at": [
+                [
+                  -3.2714727726319093,
+                  1.888785685925564,
+                  2.301622449040695
+                ],
+                [
+                  2.5821552539057613e-16,
+                  5.016844378075238e-32,
+                  -3.999999999999999
+                ]
+              ],
+              "index": 4
+            },
+            {
+              "at": [
+                [
+                  3.873232880858642e-16,
+                  -5.016844378075238e-32,
+                  3.999999999999999
+                ],
+                [
+                  -1.9984014443252818e-15,
+                  -3.7775713718511295,
+                  2.301622449040695
+                ]
+              ],
+              "index": 9
+            },
+            {
+              "at": [
+                [
+                  3.2714727726319106,
+                  1.8887856859255627,
+                  2.301622449040695
+                ],
+                [
+                  3.873232880858642e-16,
+                  -5.016844378075238e-32,
+                  3.999999999999999
+                ]
+              ],
+              "index": 2
+            },
+            {
+              "at": [
+                [
+                  3.873232880858642e-16,
+                  -5.016844378075238e-32,
+                  3.999999999999999
+                ],
+                [
+                  -3.2714727726319093,
+                  1.888785685925564,
+                  2.301622449040695
+                ]
+              ],
+              "index": 6
+            }
+          ],
+          "points": [
+            [
+              -1.4524005934121125e-15,
+              -3.971418933367358,
+              -2.000570595975599
+            ],
+            [
+              3.4393496853666297,
+              1.9857094666836783,
+              -2.0005705959756
+            ],
+            [
+              -3.4393496853666305,
+              1.9857094666836796,
+              -2.000570595975599
+            ],
+            [
+              -2.1895810941553715e-15,
+              -2.0760324427242676,
+              3.5611219107430676
+            ],
+            [
+              1.7978968344798791,
+              1.038016221362133,
+              3.561121910743068
+            ],
+            [
+              -1.797896834479878,
+              1.0380162213621327,
+              3.561121910743068
+            ]
+          ],
+          "tolerance": 3.67615201241567
+        },
+        "kind": "round",
+        "sizes": [
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001
+        ]
+      }
+    }
+  ],
+  "case": "cov-junction-y-junction-120-round",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "no closed form for the round on these quadrics' intersection: one valid closed body whose round meets its faces G1",
+    "source": "invariants",
+    "sources": [],
+    "what": "three pipes R4 at 120 degrees in a plane, their intersection edges rounded 1"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "engine_error": "step 4 (solid.fillet): not supported yet: the fillet is larger than the faces beside its edges allow (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",
+    "kernel_error": "there is no room for it: an offset leaves none inside the body, or a blend is larger than its faces allow",
+    "ran": false
+  },
+  "records": "cov-junction-y-junction-120-round.bodies.json.gz",
+  "result": [],
+  "rig": {
+    "error": "step 4 (solid.fillet): not supported yet: the fillet is larger than the faces beside its edges allow (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",
+    "known_failing": "[unsupported] refused as on SMLib: the faces between the three intersection curves narrow to nothing at the two triple points, so the room check trips (the corner step)",
+    "measured": null,
+    "refused_with": null,
+    "status": "unsupported"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "three pipes R4 at 120 degrees in a plane, their intersection edges rounded 1",
+  "why_not": []
+}

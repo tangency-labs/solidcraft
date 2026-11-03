@@ -1,0 +1,156 @@
+{
+  "area": "inspect",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 20.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                40.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                40.0,
+                30.0,
+                0.0
+              ],
+              "start": [
+                40.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                30.0,
+                0.0
+              ],
+              "start": [
+                40.0,
+                30.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                30.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-continuity-box-edge-is-sharp",
+  "expected": {
+    "method": "box 40 x 30 x 20 with a corner at the origin: the faces y = 0 and z = 0 meet at 90 deg along their edge: g0, sharp, normal angle 90",
+    "results": [
+      {
+        "json": 1,
+        "pointer": "/summary/edges",
+        "step": 2
+      },
+      {
+        "json": "g0",
+        "pointer": "/bodies/0/edges/0/order",
+        "step": 2
+      },
+      {
+        "json": "sharp",
+        "pointer": "/bodies/0/edges/0/verdict",
+        "step": 2
+      },
+      {
+        "json": 90.0,
+        "pointer": "/bodies/0/edges/0/normal_angle_deg/value",
+        "step": 2
+      },
+      {
+        "json": 0.0,
+        "pointer": "/bodies/0/edges/0/gap_mm/value",
+        "rel": 1e-6,
+        "step": 2
+      }
+    ],
+    "source": "analytic",
+    "sources": [],
+    "what": "the order at a box's square edge"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8
+    }
+  },
+  "result": [
+    {
+      "body": "Box",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5200.0,
+      "body_count": 1,
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8,
+      "volume_mm3": 24000.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [
+    "results: SolidCraft computes it"
+  ],
+  "what": "the order at a box's square edge",
+  "why_not": []
+}

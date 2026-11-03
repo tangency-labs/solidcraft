@@ -1,0 +1,183 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b23": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b26": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b24"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b25"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b26"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b27"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b27"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b28"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b29"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b28"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b30"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b29",
+        "b30"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b31"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "4623-join-crossing-pleated-loft-skins",
+  "expected": {
+    "bbox": {
+      "max": [
+        120.0,
+        120.0,
+        88.3
+      ],
+      "min": [
+        -120.0,
+        -120.0,
+        -1.0
+      ]
+    },
+    "body_count": 1,
+    "method": "the narrowing cone skin and the flaring lip skin cross at z = -0.3, so their union is one connected solid: one valid closed body, no panic. The reporter's own script (pleated_union.py, 24 pleats). Every outline has its 48 vertices on the same rays (every 7.5 deg), and a ruled loft takes vertex to vertex, so at each z every loft is the star polygon with radii linear in z on those rays (a convex combination of two points on a ray stays on it), and each inner loft lies inside its outer one at every z (the radii are smaller on every ray). Skin volumes: the section area is quadratic in z (wedge areas r_i r_i+1 sin(7.5 deg) / 2), so Simpson is exact: cone 39321.32 (z -1..88.3), lip 5571.95 (z -1..6). Their overlap, by integrating over z -1..6 and each wedge's angle the radial intersection of the two skins' intervals (1/2 (r1^2 - r0^2) dtheta, converged to 0.3): 449.76. Join: 39321.32 + 5571.95 - 449.76 = 44443.5 (the two skins' plain sum, 44893.3, and either skin alone fall outside the tolerance). Box: the lip's top outline (r 120 on the axes) and the skins' z -1..88.3",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4623",
+      "tangency-labs/solidcraft#4180",
+      "tangency-labs/solidcraft#4881"
+    ],
+    "volume_mm3": 44443.5,
+    "what": "a join of two pleated skins (lofts between 24-pleat star outlines, less the same loft moved in 1.1 mm) that cross along a ring near their bottoms: truck panicked ('tolerance must be no less than 1e-6') or gave no result"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 1096,
+      "faces": 388,
+      "vertices": 712
+    }
+  },
+  "records": "4623-join-crossing-pleated-loft-skins.bodies.json.gz",
+  "result": [
+    {
+      "body": "Cone",
+      "made": "b31"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 121420.35250958949,
+      "body_count": 1,
+      "edges": 1096,
+      "faces": 388,
+      "vertices": 584,
+      "volume_mm3": 44443.490940549775
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4623",
+    "tangency-labs/solidcraft#4180",
+    "tangency-labs/solidcraft#4881"
+  ],
+  "traced_ops": [
+    "loft",
+    "loft",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "loft",
+    "loft",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a join of two pleated skins (lofts between 24-pleat star outlines, less the same loft moved in 1.1 mm) that cross along a ring near their bottoms: truck panicked ('tolerance must be no less than 1e-6') or gave no result",
+  "why_not": []
+}
