@@ -3,7 +3,7 @@
 //! does: SVG, or PNG at a chosen dpi and colour. DXF comes with the shared DXF writer (#5319). A
 //! sheet with a view that failed, an image that won't decode or a picture that can't be drawn isn't
 //! written; the refusal names them. Without a path the reply holds the document, as text or as
-//! base64.
+//! base64. Both can be on a blue paper (#10679).
 
 use std::path::Path;
 
@@ -12,13 +12,13 @@ use solidcraft_doc::canvas::base64_encode;
 use solidcraft_doc::drawing::DEFAULT_DPI;
 use solidcraft_doc::ids;
 use solidcraft_io::MAX_DRAWING_BYTES;
-use solidcraft_io::paper::{DPI, PngOptions};
+use solidcraft_io::paper::{DPI, PaperColour, PngColour, PngOptions};
 
 use super::CommandSpec;
 use crate::drawing_pictures::SheetPictures;
 use crate::drawing_scene::{Status, sheet_id};
 use crate::params::bad;
-use crate::schema::drawing_export::{ExportFormat, ExportParams, ExportReport, ExportResult};
+use crate::schema::drawing_export::{ExportColour, ExportFormat, ExportParams, ExportReport, ExportResult};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
@@ -34,7 +34,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Export Sheet", cr
     .doc_only()
     .contract(&CONTRACT)
     .output(output_schema_for::<ExportResult>)
-    .params("sheet: id or name; format?: svg (default) | png (dxf is not supported yet); path?: a file with the format's extension (else the reply holds the document: text for svg, base64 data for png, at most 64 MiB); png only: dpi?: 25 to 2400 (default the sheet's own), colour?: grey (default) | black_white | rgb | transparent → {sheet, format, bytes, path | text | data, report: {widths_snapped, pieces_merged, pixels?: [width, height]}, views: [{view, status: drawn|placeholder|failed, reason?, stats?}]}. The sheet as drawing.scene draws it: its drawing border, each image on it, then each view's lines, then its title block's lines. Refused, naming them, while any view on the sheet failed or any image won't decode; a placeholder view draws nothing. No model is evaluated.")];
+    .params("sheet: id or name; format?: svg (default) | png (dxf is not supported yet); path?: a file with the format's extension (else the reply holds the document: text for svg, base64 data for png, at most 64 MiB); png only: dpi?: 25 to 2400 (default the sheet's own), colour?: grey (default) | black_white | rgb | transparent; paper?: white (default) | blueprint | prussian_blue, whose png is rgb → {sheet, format, bytes, path | text | data, report: {widths_snapped, pieces_merged, pixels?: [width, height]}, views: [{view, status: drawn|placeholder|failed, reason?, stats?}]}. The sheet as drawing.scene draws it: its drawing border, each image on it, then each view's lines, then its title block's lines. Refused, naming them, while any view on the sheet failed or any image won't decode; a placeholder view draws nothing. No model is evaluated.")];
 
 /// A document held for the reply, refused once it passes `limit` bytes: a larger one goes to a file.
 struct Held {
@@ -60,6 +60,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let request: ExportParams = crate::schema::read(CMD, p)?;
     let d = s.drawing(CMD)?.clone();
     let sheet = sheet_id(&d, &request.sheet, CMD)?;
+    let paper: Option<PaperColour> = request.paper.into();
     let png = match request.format {
         ExportFormat::Svg => None,
         ExportFormat::Png => {
@@ -69,7 +70,12 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
             if !DPI.contains(&dpi) {
                 return Err(bad(CMD, "`dpi` is 25 to 2400"));
             }
-            Some(PngOptions { dpi, colour: request.colour.unwrap_or_default().into() })
+            let colour = match (paper, request.colour) {
+                (None, colour) => colour.unwrap_or_default().into(),
+                (Some(paper), None | Some(ExportColour::Rgb)) => PngColour::On(paper),
+                (Some(_), Some(_)) => return Err(bad(CMD, "a blue `paper` is rgb: `grey`, `black_white` and `transparent` are for white paper")),
+            };
+            Some(PngOptions { dpi, colour })
         }
         ExportFormat::Dxf => return Err(bad(CMD, "not supported yet: DXF needs the shared DXF writer (#5319)")),
     };
@@ -100,7 +106,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let pictures = SheetPictures::new(s, &d, sheet).map_err(|e| bad(CMD, e))?;
     let (document, grid, pixels) = match png {
         None => {
-            let (svg, grid) = solidcraft_io::paper::paper_svg(&prepared, &pictures, DEFAULT_DPI).map_err(|e| bad(CMD, e.to_string()))?;
+            let (svg, grid) = solidcraft_io::paper::paper_svg_on(&prepared, paper, &pictures, DEFAULT_DPI).map_err(|e| bad(CMD, e.to_string()))?;
             (svg, grid, None)
         }
         Some(options) => {
