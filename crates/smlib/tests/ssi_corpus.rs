@@ -616,16 +616,18 @@ fn global_intersect_scores() -> Vec<Score> {
     scores
 }
 
-/// solidcore passes every case SMLib passed ([`GSI_1E6_PASS`]). The self-crossing
-/// curves it missed (Viviani's figure eight, the crossing loops) are split at their crossings
-/// since solidcore's `ssi_split_curves_at_singular_points` (tangency-labs/solidcore#2110).
+/// solidcore passes exactly the cases [`GSI_1E6_PASS`] lists: a case that starts passing is
+/// added there, one that stops is a regression. The self-crossing curves (Viviani's figure eight,
+/// the crossing loops) are split at their crossings since solidcore's
+/// `ssi_split_curves_at_singular_points` (tangency-labs/solidcore#2110).
 #[test]
 fn solidcore_global_intersect_at_1e_6() {
     let scores = global_intersect_scores();
     let passed: std::collections::BTreeSet<&str> = scores.iter().filter(|s| s.verdict == Verdict::Pass).map(|s| s.id.as_str()).collect();
     let listed: std::collections::BTreeSet<&str> = GSI_1E6_PASS.iter().copied().collect();
     assert_eq!(listed.len(), GSI_1E6_PASS.len(), "GSI_1E6_PASS lists a case twice");
-    let lost: Vec<&str> = listed.difference(&passed).copied().collect();
-    let extra: Vec<_> = passed.difference(&listed).collect();
-    assert!(lost.is_empty(), "solidcore misses what SMLib passed: {lost:?}; extra passes: {extra:?}");
+    let newly: Vec<_> = passed.difference(&listed).collect();
+    let lost: Vec<_> = listed.difference(&passed).collect();
+    assert!(newly.is_empty() && lost.is_empty(), "now pass (add to GSI_1E6_PASS): {newly:?}; no longer pass: {lost:?}");
+    assert_eq!(passed.len(), 111);
 }
