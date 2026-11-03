@@ -15,9 +15,12 @@ pub struct BreakBand {
 pub struct PreviewParams {
     /// Angle of all break lines, anticlockwise in radians.
     pub angle_rad: f64,
+    /// Alignment/shortening axis, normalized by the map. Defaults to horizontal.
+    #[serde(default = "horizontal_axis")]
+    pub shortening_axis: [f64; 2],
     /// Paper:model scale, such as 1:2.
     pub scale: String,
-    /// At most 64 disjoint bands, in unbroken view-plane mm, with paper-mm gaps.
+    /// At most 64 disjoint bands along the cut normal; gaps are paper mm along the shortening axis.
     #[serde(default)]
     pub breaks: Vec<BreakBand>,
     /// At most 2,000 original straight segments. Curves must not be silently approximated.
@@ -31,9 +34,15 @@ pub struct PreviewParams {
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct PreviewResult {
     pub normal: [f64; 2],
+    pub shortening_axis: [f64; 2],
     pub shortening_mm: f64,
     pub breaks: Vec<BreakBand>,
+    /// Displayed intervals along `normal`, rather than distances along `shortening_axis`.
     pub gaps: Vec<[f64; 2]>,
     pub lines: Vec<[[f64; 2]; 2]>,
     pub model_points: Vec<Option<[f64; 2]>>,
+}
+
+fn horizontal_axis() -> [f64; 2] {
+    [1.0, 0.0]
 }

@@ -10,6 +10,14 @@ view in the application. W36 remains open for that integration.
 cargo run --profile ci -p solidcraft --example broken_view
 ```
 
+For the reproducible oblique sample, append `-- --oblique-sample`. Its two holes
+and both long edges remain horizontally aligned. The cut angle controls the
+boundary lines; this horizontal fixture always shortens along X.
+
+`cargo test --profile ci -p solidcraft-ui-egui --test broken_view_preview`
+renders that actual preview UI without a desktop window to
+`target/broken-view-review/aligned-oblique.png` for visual review.
+
 1. Choose the line angle before placing a pair. The initial angle is -90 degrees.
 2. Start Broken View, then click the first and second lines on the sample view.
    The tool stays active for further pairs; all pairs share one angle.
@@ -37,13 +45,17 @@ ignored. The example uses temporary state and has no save/load.
 
 ## Geometry contract
 
-`solidcraft_geom::drawing_break::BreakMap::new(angle_rad, scale, bands)` takes
+`solidcraft_geom::drawing_break::BreakMap::new(angle_rad, shortening_axis, scale, bands)` takes
 parallel bands in original view-plane model millimetres. The line angle is
 anticlockwise; its normal is `(-sin(angle), cos(angle))`. Each band's `start` and
-`end` are coordinates along that normal. `gap_mm` is in paper millimetres.
+`end` are coordinates along that normal. The independent shortening vector is
+normalized; `(1, 0)` preserves y and `(0, 1)` preserves x. `gap_mm` is measured
+in paper millimetres along that axis. Cuts parallel or nearly parallel to the
+shortening axis (`abs(normal dot axis) < 1e-6`) are refused.
 
 The map scales uniformly, removes each open band interior, and translates the
-retained pieces along the normal to leave the requested paper gap. Both boundary
+retained pieces only along the shortening axis to leave the requested paper gap.
+Oblique cuts therefore preserve alignment across that axis. Both boundary
 lines remain drawable. `to_paper` returns no point inside a removed span;
 `to_model` returns no point inside a paper gap. `line` clips straight segments
 at the band boundaries before translating each retained piece. Measure original
@@ -65,6 +77,7 @@ design unchanged and creates no undoable document entry. For example:
 ```json
 {
   "angle_rad": -1.5707963267948966,
+  "shortening_axis": [1, 0],
   "scale": "1:2",
   "breaks": [{"start": 60, "end": 140, "gap_mm": 5}],
   "lines": [[[0, 0], [200, 0]]],
@@ -75,7 +88,11 @@ design unchanged and creates no undoable document entry. For example:
 The result has two retained segments, ending at paper x=30 and starting at x=35,
 and a total shortening of 35 paper mm. The first pick is in the gap and returns
 `null`; the second maps back to model x=200 (within floating-point roundoff).
-The result also reports the normal, normalized bands and paper gap intervals.
+The result also reports the normal, normalized shortening axis, normalized bands
+and paper gap intervals along the normal. `shortening_axis` defaults to `[1, 0]`.
+For an oblique cut, a requested axis gap `g` occupies `g * abs(normal dot axis)`
+in those normal-coordinate intervals. Forward mapping, clipping and inverse
+picking all use the same directional translation.
 
 Unknown fields and invalid input return errors. Input is capped before typed
 parsing in every parameter-check mode: 64 bands, 2,000 segments, 2,000 picks and

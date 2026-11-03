@@ -66,6 +66,13 @@ fn fixture() -> Vec<[[f64; 2]; 2]> {
 }
 
 impl BreakPreview {
+    /// Original sample configured for reproducible oblique-break review evidence.
+    pub fn oblique_sample() -> Self {
+        let mut preview = Self { angle: -42.0, ..Default::default() };
+        preview.edit(vec![BreakBand { start: 75.0, end: 130.0, gap_mm: 8.0 }]);
+        preview
+    }
+
     fn scale_text(&self) -> &'static str {
         if self.scale == 0 { "1:1" } else { "1:2" }
     }
@@ -73,12 +80,13 @@ impl BreakPreview {
     fn map(&self) -> Result<BreakMap, String> {
         let scale: Scale = self.scale_text().parse().map_err(|e: solidcraft_engine::geom::drawing_view::Invalid| e.to_string())?;
         let bands: Vec<_> = self.bands.iter().map(|b| Band { start: b.start, end: b.end, gap_mm: b.gap_mm }).collect();
-        BreakMap::new(self.angle.to_radians(), scale, &bands).map_err(|e| e.to_string())
+        BreakMap::new(self.angle.to_radians(), Vec2::new(1.0, 0.0), scale, &bands).map_err(|e| e.to_string())
     }
 
     fn refresh(&mut self) -> bool {
         let params = PreviewParams {
             angle_rad: self.angle.to_radians(),
+            shortening_axis: [1.0, 0.0],
             scale: self.scale_text().into(),
             breaks: self.bands.clone(),
             lines: fixture(),
@@ -314,7 +322,6 @@ impl BreakPreview {
             .filter(|p| (0.0..=240.0).contains(&p.x) && (0.0..=70.0).contains(&p.y));
         if self.active {
             if let Ok(map) = self.map() {
-                let factor = if self.scale == 0 { 1.0 } else { 0.5 };
                 for coordinate in self.pending.into_iter().chain(hover_model.map(|p| p.dot(n))) {
                     // Intersect the preview line with the original fixture's four edges.
                     let mut hits = Vec::new();
@@ -329,16 +336,12 @@ impl BreakPreview {
                             }
                         }
                     }
-                    if let Some(p) = hits.first() {
-                        let lo = hits.iter().map(|p| p.dot(tangent)).fold(f64::INFINITY, f64::min);
-                        let hi = hits.iter().map(|p| p.dot(tangent)).fold(f64::NEG_INFINITY, f64::max);
-                        if let Ok(Some(mapped)) = map.to_paper(*p) {
-                            let q = mapped.dot(n);
-                            painter.line_segment(
-                                [screen(n * q + tangent * lo * factor), screen(n * q + tangent * hi * factor)],
-                                Stroke::new(2.0, t.accent),
-                            );
-                        }
+                    let lo = hits.iter().map(|p| p.dot(tangent)).fold(f64::INFINITY, f64::min);
+                    let hi = hits.iter().map(|p| p.dot(tangent)).fold(f64::NEG_INFINITY, f64::max);
+                    if lo < hi
+                        && let (Ok(Some(a)), Ok(Some(b))) = (map.to_paper(n * coordinate + tangent * lo), map.to_paper(n * coordinate + tangent * hi))
+                    {
+                        painter.line_segment([screen(a), screen(b)], Stroke::new(2.0, t.accent));
                     }
                 }
             }

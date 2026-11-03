@@ -31,7 +31,9 @@ fn main() -> eframe::Result {
         eframe::NativeOptions { viewport: egui::ViewportBuilder::default().with_inner_size([1180.0, 820.0]), ..Default::default() },
         Box::new(|cc| {
             solidcraft_ui_egui::theme::apply(&cc.egui_ctx);
-            Ok(Box::<App>::default())
+            let preview =
+                if std::env::args().any(|arg| arg == "--oblique-sample") { BreakPreview::oblique_sample() } else { BreakPreview::default() };
+            Ok(Box::new(App { preview }))
         }),
     )
 }
