@@ -90,6 +90,13 @@ pub(super) enum Op {
         grad: Option<G>,
         line: Option<L>,
     },
+    /// A straight line whose opacity runs from `a[0]` at the first point to `a[1]` at the second.
+    Gradient {
+        pts: [[f32; 2]; 2],
+        w: f32,
+        ink: Ink,
+        a: [f32; 2],
+    },
     /// A soft black ellipse: opaque `a` at the centre, clear at the edge.
     Glow {
         c: [f32; 4],
@@ -309,10 +316,12 @@ fn draw(p: &Painter, ctx: &Ctx, op: &Op, clip: Option<&[Pos2]>) {
         Op::Circle { c, fill, line } => {
             let centre = ctx.at([c[0], c[1]]);
             let radius = c[2] * ctx.scale;
-            if clip.is_some() {
-                let pts: Vec<Pos2> = (0..24)
+            let dashed = line.as_ref().is_some_and(|l| l.dash[0] > 0.0 && l.dash[1] > 0.0);
+            if clip.is_some() || dashed {
+                let steps = if dashed { 72 } else { 24 };
+                let pts: Vec<Pos2> = (0..steps)
                     .map(|i| {
-                        let a = i as f32 * std::f32::consts::TAU / 24.0;
+                        let a = i as f32 * std::f32::consts::TAU / steps as f32;
                         centre + vec2(a.cos(), a.sin()) * radius
                     })
                     .collect();
@@ -329,6 +338,23 @@ fn draw(p: &Painter, ctx: &Ctx, op: &Op, clip: Option<&[Pos2]>) {
         Op::Poly { pts, closed, fill, grad, line } => {
             let points: Vec<Pos2> = pts.iter().map(|&q| ctx.at(q)).collect();
             poly(p, ctx, &points, *closed, fill, grad.as_ref(), line, clip);
+        }
+        Op::Gradient { pts, w, ink, a } => {
+            let (from, to) = (ctx.at(pts[0]), ctx.at(pts[1]));
+            let along = to - from;
+            if clip.is_some() || !along.length().is_finite() || along.length() < 1e-3 {
+                return;
+            }
+            let normal = vec2(-along.y, along.x).normalized() * ((w * ctx.scale).clamp(0.0, 64.0) * 0.5);
+            let (start, end) = (ctx.ink(*ink, a[0]), ctx.ink(*ink, a[1]));
+            let mut mesh = Mesh::default();
+            mesh.colored_vertex(from + normal, start);
+            mesh.colored_vertex(from - normal, start);
+            mesh.colored_vertex(to - normal, end);
+            mesh.colored_vertex(to + normal, end);
+            mesh.add_triangle(0, 1, 2);
+            mesh.add_triangle(0, 2, 3);
+            p.add(Shape::mesh(mesh));
         }
         Op::Glow { c, a } => {
             let centre = ctx.at([c[0], c[1]]);
