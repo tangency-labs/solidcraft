@@ -1,12 +1,15 @@
 {
   "en": { "document.tab_unsaved_changes": "Unsaved changes" },
+  "ar": { "document.tab_unsaved_changes": "تغييرات غير محفوظة" },
   "de": { "document.tab_unsaved_changes": "Ungespeicherte Änderungen" },
   "es": { "document.tab_unsaved_changes": "Cambios sin guardar" },
   "fr": { "document.tab_unsaved_changes": "Modifications non enregistrées" },
+  "he": { "document.tab_unsaved_changes": "שינויים שלא נשמרו" },
   "it": { "document.tab_unsaved_changes": "Modifiche non salvate" },
   "ja": { "document.tab_unsaved_changes": "未保存の変更" },
   "nl": { "document.tab_unsaved_changes": "Niet-opgeslagen wijzigingen" },
   "pl": { "document.tab_unsaved_changes": "Niezapisane zmiany" },
   "sv": { "document.tab_unsaved_changes": "Osparade ändringar" },
+  "vi": { "document.tab_unsaved_changes": "Thay đổi chưa lưu" },
   "zh": { "document.tab_unsaved_changes": "未保存的更改" }
 }
