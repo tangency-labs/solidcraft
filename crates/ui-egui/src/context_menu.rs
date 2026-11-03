@@ -3067,7 +3067,7 @@ mod tests {
         h.frames(90);
         assert!(h.app.cam.back().dist(flat.plane_normal.unwrap()) < 2e-6);
         h.app.session.selection = vec![Sel::Face { body: body.name.clone(), index: curved.index, point: curved.centroid }];
-        assert!(items(&h.app, &Target::Viewport).iter().any(|i| i.id == "view.normal_to" && !i.enabled));
+        assert!(!items(&h.app, &Target::Viewport).iter().any(|i| i.id == "view.normal_to"));
     }
 
     #[test]
