@@ -9,9 +9,9 @@
 
 use std::collections::BTreeSet;
 
+use solidcore_record::brep::{Brep, Curve, Loop, OrientedEdge, Shell, Surface};
 use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
-use solidcraft_geom::brep::{Brep, Curve, Loop, OrientedEdge, Shell, Surface};
 
 use crate::body::Body;
 use crate::{KernelError, Result};

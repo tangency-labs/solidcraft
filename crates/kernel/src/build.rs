@@ -872,8 +872,9 @@ fn smlib_tapered(plane: &Plane, region: &Region2, from: f64, to: f64, foot: f64,
 /// counter-clockwise and the holes clockwise, each sketch segment one edge of its exact record
 /// curve ([`crate::point_path::sketch_record_curve`]) with its exact pcurve on the plane. The record
 /// equivalent of a profile face: SMLib takes it with `Brep::from_record`.
-pub fn planar_face_record(plane: &Plane, r: &Region2) -> Result<solidcraft_geom::brep::Brep> {
-    use solidcraft_geom::brep::{self as rec, pcurve};
+pub fn planar_face_record(plane: &Plane, r: &Region2) -> Result<solidcore_record::brep::Brep> {
+    use solidcore_record::brep::{self as rec};
+    use solidcraft_geom::brep::pcurve;
     if !frame_ok(plane) {
         return Err(KernelError::Invalid("the face's plane is not finite and orthonormal".into()));
     }
@@ -948,7 +949,7 @@ pub fn planar_face_record(plane: &Plane, r: &Region2) -> Result<solidcraft_geom:
         edges,
         vertices,
     };
-    brep.validate().map_err(|e| KernelError::Failed(format!("profile face: {e}")))?;
+    solidcraft_geom::brep::check::validate(&brep).map_err(|e| KernelError::Failed(format!("profile face: {e}")))?;
     Ok(brep)
 }
 

@@ -118,7 +118,7 @@ fn solid_part(solid: &solidcraft_step::topology::Solid) -> std::result::Result<P
     let mut reversed = vec![false; r.faces.len()];
     if solid.sheet {
         for s in &r.shells {
-            if let solidcraft_geom::brep::Shell::Faces { faces, .. } = s {
+            if let solidcore_record::brep::Shell::Faces { faces, .. } = s {
                 for f in faces.iter().filter(|f| !f.forward) {
                     if let Some(slot) = reversed.get_mut(f.face as usize) {
                         *slot = true;
@@ -155,7 +155,7 @@ fn renumbered() -> Failure {
 }
 
 /// The body SMLib makes of `record` as given, and the record's face each of its faces is.
-fn smlib_body(record: &solidcraft_geom::brep::Brep) -> std::result::Result<(Body, Vec<usize>), Failure> {
+fn smlib_body(record: &solidcore_record::brep::Brep) -> std::result::Result<(Body, Vec<usize>), Failure> {
     let failed = |e: KernelError| Failure { read: false, msg: e.to_string().trim_start_matches("the operation failed: ").to_string() };
     let (brep, smlib_order) = crate::native::smlib_record_ordered(record).map_err(failed)?;
     let (body, body_order) = crate::native::body_from_smlib_ordered(&brep).map_err(failed)?;

@@ -459,7 +459,7 @@ fn path_segs(ctx: &Ctx, g: &GeoRef) -> Result<Vec<kernel::PathSeg>> {
         GeoRef::Edge { at, name } => {
             let (b, i, pts) = edge_pick(ctx.st, *at, name)?;
             let procedural =
-                b.body.record().edges.get(i).is_some_and(|e| matches!(e.parameters(), solidcraft_geom::brep::Curve::SurfaceIntersection { .. }));
+                b.body.record().edges.get(i).is_some_and(|e| matches!(e.parameters(), solidcore_record::brep::Curve::SurfaceIntersection { .. }));
             if procedural {
                 return Ok(lines(&pts));
             }

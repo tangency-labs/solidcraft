@@ -14,8 +14,8 @@
 //! display-only: the edge keeps its identity, stays pickable and stays in the wireframe, and its
 //! faces stay apart (pieces of one surface are [`crate::topo::seam_flags`]'s business). Unknown
 //! geometry (a station that does not evaluate) keeps its existing presentation.
+use solidcore_record::brep::{Brep, Loop, Shell};
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
-use solidcraft_geom::brep::{Brep, Loop, Shell};
 use solidcraft_geom::{Mesh, Vec3};
 
 use crate::body::Body;
@@ -163,7 +163,7 @@ fn join(record: &Brep, faces: &[Option<FaceEval>], e: usize, length: f64, work: 
     let unknown = Join::default();
     let Some(edge) = record.edges.get(e) else { return unknown };
     let [a, b] = edge.uses.as_slice() else { return unknown };
-    let side = |u: &solidcraft_geom::brep::EdgeUseRef| {
+    let side = |u: &solidcore_record::brep::EdgeUseRef| {
         let face = faces.get(u.face as usize)?.as_ref()?;
         let Loop::Edges { edges } = record.faces.get(u.face as usize)?.loops.get(u.r#loop as usize)? else { return None };
         let used = edges.get(u.position as usize)?;
@@ -180,7 +180,7 @@ fn join(record: &Brep, faces: &[Option<FaceEval>], e: usize, length: f64, work: 
         let Some(left) = work.checked_sub(2) else { return unknown };
         *work = left;
         let t = t0 + (t1 - t0) * (k as f64 + 0.5) / STATIONS as f64;
-        let (Some(ua), Some(ub)) = (pa.eval(t), pb.eval(t)) else { return unknown };
+        let (Some(ua), Some(ub)) = (solidcraft_geom::brep::pcurve::eval(pa, t), solidcraft_geom::brep::pcurve::eval(pb, t)) else { return unknown };
         let (Some(sa), Some(sb)) = (station(fa, ua), station(fb, ub)) else { return unknown };
         let (Some(sa), Some(sb)) = (sa, sb) else { continue };
         let angle = sa.normal.cross(sb.normal).len().atan2(sa.normal.dot(sb.normal));
@@ -344,7 +344,7 @@ fn whole_joins(record: &Brep, measured: &[usize], smooth: &mut [bool], mut work:
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use solidcraft_geom::brep::Surface;
+    use solidcore_record::brep::Surface;
     use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
 
     fn circle(radius: f64, count: usize) -> Loop2 {
@@ -584,7 +584,7 @@ mod tests {
     fn a_degenerate_normal_says_nothing() {
         let face = FaceEval {
             surface: SurfaceEval::new(&Surface::Sphere {
-                frame: solidcraft_geom::brep::Frame { origin: [0.; 3], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] },
+                frame: solidcore_record::brep::Frame { origin: [0.; 3], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] },
                 radius: 2.,
             })
             .unwrap(),

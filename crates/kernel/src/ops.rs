@@ -2,8 +2,9 @@
 //! from each other join without any intersection work, their records side by side.
 
 use serde::{Deserialize, Serialize};
+use solidcore_record::brep::part;
 use solidcraft_geom::Vec3;
-use solidcraft_geom::brep::{part, placement::Rigid};
+use solidcraft_geom::brep::placement::Rigid;
 
 use crate::body::Body;
 use crate::history::{BodyHistory, History};
@@ -136,7 +137,7 @@ pub(crate) fn join_pieces(pieces: Vec<Body>) -> Result<Option<Body>> {
 
 /// The records of `bodies` side by side, as one body, and where its items come from.
 fn joined(bodies: &[Body]) -> Result<(Body, part::Part)> {
-    let records: Vec<&solidcraft_geom::brep::Brep> = bodies.iter().map(Body::record).collect();
+    let records: Vec<&solidcore_record::brep::Brep> = bodies.iter().map(Body::record).collect();
     let part = part::compound(&records).map_err(|e| KernelError::Failed(format!("pieces: {e}")))?;
     // Each face's source, numbered as `compound` numbers the inputs: one after another.
     let sources: Vec<Option<crate::FaceSource>> =
@@ -166,7 +167,7 @@ pub fn transform_matrix(body: &Body, m: [[f64; 4]; 4]) -> Result<Body> {
     let sources = body.transformed_sources(m)?;
     let (placed, sources, paint) = match Rigid::of_matrix(&m) {
         Some(motion) => {
-            let moved = Body::from_record(body.record().moved(&motion))?;
+            let moved = Body::from_record(solidcraft_geom::brep::placement::moved(body.record(), &motion))?;
             let history = History::identity(&moved);
             (moved.with_history(history, &[body])?, sources, body.paint().cloned())
         }

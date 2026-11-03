@@ -20,9 +20,10 @@
 //! the join, and backs the engine's `inspect.continuity`.
 
 use serde::Serialize;
+use solidcore_record::brep::{self as b};
 use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::normal_section::{SectionJet, normal_section};
-use solidcraft_geom::brep::{self as b, eval::CurveEval, eval::SurfaceEval};
+use solidcraft_geom::brep::{eval::CurveEval, eval::SurfaceEval};
 
 use crate::body::Body;
 use crate::continuity_order::Continuity;

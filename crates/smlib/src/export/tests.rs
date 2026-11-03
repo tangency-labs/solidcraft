@@ -27,8 +27,8 @@ mod native_tests {
             let v = b.mass_properties(MEASURE_ACCURACY).unwrap().volume;
             assert!((v - exact).abs() < 1e-6 * exact, "{name}: SMLib volume {v}, closed form {exact}");
             let (native, report) = b.to_native_report().unwrap_or_else(|e| panic!("{name}: {e}"));
-            native.validate().unwrap();
-            native.check_geometry().unwrap_or_else(|e| panic!("{name}: {e}"));
+            solidcraft_geom::brep::check::validate(&native).unwrap();
+            solidcraft_geom::brep::geometry::check(&native).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert_eq!(report, Report { nurbs_edges: report.nurbs_edges, ..Report::default() }, "{name}: every face agrees");
             let [f, e, n] = b.counts().unwrap();
             assert_eq!((native.faces.len(), native.edges.len(), native.vertices.len()), (f, e, n), "{name}");
@@ -63,7 +63,7 @@ mod native_tests {
         let mids: Vec<[f64; 3]> = [(0.0, 0.0), (a, 0.0), (0.0, a), (a, a)].iter().flat_map(|&(p, q)| [[h, p, q], [p, h, q], [p, q, h]]).collect();
         let f = Brep::make_box([0.0; 3], [a; 3]).unwrap().fillet(&mids, 0.1, r).unwrap();
         let record = f.to_native().unwrap();
-        record.validate().unwrap();
+        solidcraft_geom::brep::check::validate(&record).unwrap();
         let corners: Vec<([f64; 3], f64)> = record
             .faces
             .iter()
@@ -105,10 +105,10 @@ mod native_tests {
             assert_eq!((order.faces.len(), order.edges.len()), (record.faces.len(), record.edges.len()), "{name}");
             let h = t.history().unwrap().history(std::slice::from_ref(&order), &order).unwrap();
             for (i, f) in h.faces.iter().enumerate() {
-                assert_eq!(f.origins, vec![solidcraft_geom::brep::history::FaceOrigin::Face { operand: 0, face: i }], "{name}: face {i}");
+                assert_eq!(f.origins, vec![solidcore_record::brep::history::FaceOrigin::Face { operand: 0, face: i }], "{name}: face {i}");
             }
             for (i, e) in h.edges.iter().enumerate() {
-                assert_eq!(e.origins, vec![solidcraft_geom::brep::history::EdgeOrigin::Edge { operand: 0, edge: i }], "{name}: edge {i}");
+                assert_eq!(e.origins, vec![solidcore_record::brep::history::EdgeOrigin::Edge { operand: 0, edge: i }], "{name}: edge {i}");
                 // The faces it bounds, as the record's uses say.
                 let mut faces: Vec<usize> = record.edges[i].uses.iter().map(|u| u.face as usize).collect();
                 faces.sort();
@@ -124,7 +124,7 @@ mod native_tests {
         let side = cyl.faces.iter().find(|f| matches!(f.surface, b::Surface::Cylinder { .. })).unwrap();
         // The side is on SMLib's NURBS form of the cylinder (its domain is the form's): the whole
         // turn, so its domain's two u ends meet, from the base to the top.
-        let form = b::eval::SurfaceEval::new(side.parameters()).unwrap();
+        let form = solidcraft_geom::brep::eval::SurfaceEval::new(side.parameters()).unwrap();
         let [[u0, u1], [v0, v1]] = side.domain;
         for v in [v0, v1] {
             let (a, z) = (form.point([u0, v]).unwrap(), form.point([u1, v]).unwrap());
@@ -134,7 +134,7 @@ mod native_tests {
         assert!(heights.iter().any(|h| h.abs() < 1e-9) && heights.iter().any(|h| (h - 10.0).abs() < 1e-9), "{heights:?}");
         for e in &cyl.edges {
             // Evaluated on the curve its interval is on (a circle's NURBS form).
-            let eval = b::eval::CurveEval::new(e.parameters()).unwrap();
+            let eval = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()).unwrap();
             let [a, z] = e.interval;
             // Ends on the edge's vertices.
             for (t, v) in [(a, e.vertices[0]), (z, e.vertices[1])] {
@@ -143,7 +143,7 @@ mod native_tests {
                 assert!((p - Vec3::new(q[0], q[1], q[2])).len() < 1e-9, "{:?} at {t}", e.curve);
             }
             if let b::Curve::Circle { radius, .. } = e.curve {
-                let [a, z] = e.curve_interval().unwrap();
+                let [a, z] = solidcraft_geom::brep::label::edge_curve_interval(e).unwrap();
                 assert!((radius - 5.0).abs() < 1e-12 && (z - a - TAU).abs() < 1e-9);
             }
         }
@@ -160,7 +160,7 @@ mod native_tests {
         let near = Brep::make_cone([0.0; 3], 4.0, 4.0 - 1e-12, 10.0).unwrap().to_native().unwrap();
         assert!(near.faces.iter().any(|f| matches!(f.surface, b::Surface::Cylinder { .. })));
         assert!(!near.faces.iter().any(|f| matches!(f.surface, b::Surface::Cone { .. })));
-        near.validate().unwrap();
+        solidcraft_geom::brep::check::validate(&near).unwrap();
     }
 
     /// A hole tangent to the block's outline from inside: the material touches itself along the
@@ -179,7 +179,7 @@ mod native_tests {
         assert_eq!((record.faces.len(), record.edges.len(), record.vertices.len()), (f, e + 1, v));
         assert_eq!((record.shells.len(), record.regions.len()), (1, 2));
         assert!(record.edges.iter().all(|e| e.uses.len() == 2));
-        record.check_geometry().unwrap();
+        solidcraft_geom::brep::geometry::check(&record).unwrap();
         let on_line = |e: &b::Edge| {
             e.vertices.iter().all(|v| {
                 let p = record.vertices[*v as usize].point;
@@ -187,7 +187,8 @@ mod native_tests {
             })
         };
         // On the curve the interval is on (a circle's NURBS form).
-        let middle = |e: &b::Edge| b::eval::CurveEval::new(e.parameters()).unwrap().point(0.5 * (e.interval[0] + e.interval[1])).unwrap();
+        let middle =
+            |e: &b::Edge| solidcraft_geom::brep::eval::CurveEval::new(e.parameters()).unwrap().point(0.5 * (e.interval[0] + e.interval[1])).unwrap();
         let copies: Vec<&b::Edge> = record.edges.iter().filter(|e| on_line(e)).collect();
         assert_eq!(copies.len(), 2);
         for copy in copies {
@@ -226,7 +227,7 @@ mod native_tests {
         let r = block.boolean(&hole, crate::BooleanOp::Subtract).unwrap().unwrap();
         let (record, _) = r.to_native_ordered().unwrap();
         assert!(record.edges.iter().all(|e| e.uses.len() == 2));
-        record.check_geometry().unwrap();
+        solidcraft_geom::brep::geometry::check(&record).unwrap();
         let on_line = |e: &b::Edge| {
             e.vertices.iter().all(|v| {
                 let p = record.vertices[*v as usize].point;
@@ -278,7 +279,7 @@ mod native_tests {
         assert_eq!(record.regions.len(), 3);
         assert!(record.regions.iter().all(|g| !g.void));
         assert_eq!(record.regions[0].shells.len(), 2, "the infinite region lists both solids");
-        record.check_geometry().unwrap();
+        solidcraft_geom::brep::geometry::check(&record).unwrap();
         // V = 180000 - h/6 (A0 + 4 Am + A1), h = 9, Am = 55 x 35.
         let want = 180000.0 - 9.0 / 6.0 * (100.0 + 4.0 * 55.0 * 35.0 + 6000.0);
         let back = Brep::from_record(&record, true).unwrap();
@@ -326,9 +327,12 @@ mod native_tests {
             a
         };
         let (record, _) = native(&shifted(7e-15)).unwrap();
-        record.validate().unwrap();
+        solidcraft_geom::brep::check::validate(&record).unwrap();
         assert!(record.edges.iter().any(|x| x.interval[0] == first && x.interval[1] <= last), "an interval on the NURBS's first knot");
-        assert!(native(&shifted(1e-3)).map(|(r, _)| r.validate()).map_or(true, |v| v.is_err()), "a real overshoot is not moved");
+        assert!(
+            native(&shifted(1e-3)).map(|(r, _)| solidcraft_geom::brep::check::validate(&r)).map_or(true, |v| v.is_err()),
+            "a real overshoot is not moved"
+        );
     }
 
     /// [`outer_area`] as it was: every edge of the body copied into a record for each face.

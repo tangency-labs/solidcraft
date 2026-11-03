@@ -137,7 +137,7 @@ pub(crate) enum Checked {
 /// at the end is the step's own, of the result the step made.
 #[derive(Debug)]
 pub(crate) struct Unchecked {
-    record: std::sync::Weak<solidcraft_geom::brep::Brep>,
+    record: std::sync::Weak<solidcore_record::brep::Brep>,
     /// The step, as its own refusal names it (`SMLib fillet`).
     what: String,
     how: Checked,
@@ -145,12 +145,12 @@ pub(crate) struct Unchecked {
 }
 
 impl Unchecked {
-    pub(crate) fn new(record: &Arc<solidcraft_geom::brep::Brep>, what: &str, how: Checked, result: solidcraft_smlib::Brep) -> Unchecked {
+    pub(crate) fn new(record: &Arc<solidcore_record::brep::Brep>, what: &str, how: Checked, result: solidcraft_smlib::Brep) -> Unchecked {
         Unchecked { record: Arc::downgrade(record), what: what.to_string(), how, result: std::sync::Mutex::new(Some(result)) }
     }
 
     /// The step's result, taken (once), when this is `record`'s.
-    fn take(&self, record: &Arc<solidcraft_geom::brep::Brep>) -> Option<solidcraft_smlib::Brep> {
+    fn take(&self, record: &Arc<solidcore_record::brep::Brep>) -> Option<solidcraft_smlib::Brep> {
         if !std::ptr::eq(self.record.as_ptr(), Arc::as_ptr(record)) {
             return None;
         }

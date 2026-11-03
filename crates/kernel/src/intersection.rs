@@ -5,8 +5,8 @@
 //! tolerance, or the line, circle or ellipse it is) on its interval. Which edges are new comes from
 //! the imprint's own history: an edge no edge of either operand became.
 
+use solidcore_record::brep::Curve;
 use solidcraft_geom::Vec3;
-use solidcraft_geom::brep::Curve;
 
 use crate::body::{Body, MeshTolerance};
 use crate::{KernelError, Result};

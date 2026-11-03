@@ -1,8 +1,8 @@
 //! What surface a face lies on (plane, cylinder, cone, sphere, torus), for construction
 //! geometry: axes through round faces, centres of spheres and tori.
 
+use solidcore_record::brep::{Brep, Curve};
 use solidcraft_geom::brep::eval::CurveEval;
-use solidcraft_geom::brep::{Brep, Curve};
 use solidcraft_geom::{UnitVec3, Vec3};
 
 use crate::Body;
@@ -91,7 +91,7 @@ pub fn edge_circle(b: &Body, edge: usize) -> Option<EdgeCircle> {
         // angles of its interval on the circle itself (a NURBS form is parameterised otherwise).
         let axis = Vec3::from(frame.x_axis).cross(Vec3::from(frame.y_axis)).unit()?;
         let closed = e.vertices[0] == e.vertices[1];
-        let [a0, a1] = e.curve_interval()?;
+        let [a0, a1] = solidcraft_geom::brep::label::edge_curve_interval(e)?;
         let angle = if closed { std::f64::consts::TAU } else { (a1 - a0).min(std::f64::consts::TAU) };
         return Some(EdgeCircle { center: Vec3::from(frame.origin), axis, radius: *radius, start, end, angle });
     }

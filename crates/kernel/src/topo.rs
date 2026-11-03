@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::Serialize;
-use solidcraft_geom::brep::{Brep, Loop};
+use solidcore_record::brep::{Brep, Loop};
 use solidcraft_geom::{Mesh, UnitVec3, Vec3};
 
 use crate::Result;

@@ -1,8 +1,8 @@
 //! Independent current-geometry intervals for uniform prisms, read off the body's schema 4
 //! record. These are not mesh measurements or certificates of construction history.
 use crate::prism_curve::{Run, segment};
+use solidcore_record::brep::{Brep, Curve, Loop, Shell, Surface};
 use solidcraft_geom::brep::eval::CurveEval;
-use solidcraft_geom::brep::{Brep, Curve, Loop, Shell, Surface};
 use solidcraft_geom::{Plane, Ring, Seg2, Vec2, Vec3};
 
 fn v3(p: [f64; 3]) -> Vec3 {

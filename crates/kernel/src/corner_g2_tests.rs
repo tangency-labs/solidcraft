@@ -1,5 +1,5 @@
+use solidcore_record::brep as b;
 use solidcraft_geom::Vec3;
-use solidcraft_geom::brep as b;
 
 use crate::*;
 
@@ -135,7 +135,8 @@ fn past_the_box(rec: &b::Brep, face: usize) -> (f64, f64, [f64; 2]) {
         let mut ring = Vec::new();
         for oe in edges {
             let [t0, t1] = oe.pcurve.interval().unwrap();
-            let mut seg: Vec<[f64; 2]> = (0..=400).map(|k| oe.pcurve.eval(t0 + (t1 - t0) * f64::from(k) / 400.0).unwrap()).collect();
+            let mut seg: Vec<[f64; 2]> =
+                (0..=400).map(|k| solidcraft_geom::brep::pcurve::eval(&oe.pcurve, t0 + (t1 - t0) * f64::from(k) / 400.0).unwrap()).collect();
             if !oe.forward {
                 seg.reverse();
             }

@@ -17,8 +17,8 @@
 
 use std::collections::BTreeSet;
 
+use solidcore_record::brep::{self as b, Brep, Curve2};
 use solidcraft_geom::brep::eval::CurveEval;
-use solidcraft_geom::brep::{self as b, Brep, Curve2};
 use solidcraft_geom::bspline::{HPoint, NurbsSurface};
 use solidcraft_geom::{Plane, Region2, Seg2, Vec2, Vec3};
 
@@ -686,7 +686,8 @@ fn without_t_junctions(c: Canonical, offsets: &Offsets, tol: f64) -> Result<Cano
     if splits.is_empty() {
         return Ok(c);
     }
-    let split = r.split_edges(&splits).map_err(|e| failed(format!("stitch: splitting edges at the other sheets' vertices: {e}")))?;
+    let split =
+        solidcraft_geom::brep::split_edges(r, &splits).map_err(|e| failed(format!("stitch: splitting edges at the other sheets' vertices: {e}")))?;
     let faces =
         split.faces.iter().map(|f| c.faces.get(*f as usize).copied().ok_or_else(|| failed("stitch: a face reference"))).collect::<Result<_>>()?;
     let edges =
@@ -856,7 +857,7 @@ pub fn extend(body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
         .iter()
         .enumerate()
         .map(|(i, e)| {
-            Ok(b::pcurve::EdgeUse {
+            Ok(solidcraft_geom::brep::pcurve::EdgeUse {
                 edge: index(i)?,
                 curve: e.parameters(),
                 interval: e.interval,
@@ -867,7 +868,7 @@ pub fn extend(body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
         })
         .collect::<Result<Vec<_>>>()?;
     let surface = b::Surface::Plane { origin: a3(origin), u_axis: a3(du), v_axis: a3(dv) };
-    let pcurves = b::pcurve::pcurves(&surface, &[uses], r.tolerance).map_err(|e| failed(format!("extend: {e}")))?;
+    let pcurves = solidcraft_geom::brep::pcurve::pcurves(&surface, &[uses], r.tolerance).map_err(|e| failed(format!("extend: {e}")))?;
     let edges = pcurves
         .into_iter()
         .flatten()

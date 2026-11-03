@@ -278,7 +278,7 @@ impl Cause for str {}
 impl Cause for String {}
 impl Cause for solidcraft_smlib::CheckReport {}
 impl Cause for solidcraft_smlib::export::ExportError {}
-impl Cause for solidcraft_geom::brep::history::Failed {}
+impl Cause for solidcore_record::brep::history::Failed {}
 impl Cause for solidcraft_geom::brep::pcurve::Error {}
 impl<T: Cause + ?Sized> Cause for &T {
     fn panic(&self) -> Option<&str> {

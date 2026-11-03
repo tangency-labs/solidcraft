@@ -69,7 +69,7 @@ fn extruded_circles_go_as_cylinders() {
     use solidcraft_smlib::flat;
     let body = cylinder(v(0., 50., -60.), v(0., 0., 1.), 40.0, 120.0).unwrap();
     let record = super::brep_record(&body).unwrap();
-    let walls = record.faces.iter().filter(|f| matches!(f.surface, solidcraft_geom::brep::Surface::Cylinder { .. })).count();
+    let walls = record.faces.iter().filter(|f| matches!(f.surface, solidcore_record::brep::Surface::Cylinder { .. })).count();
     assert_eq!((walls, record.faces.len()), (1, 3));
     let arrays = solidcraft_smlib::import::arrays(&record, true).unwrap();
     let kinds = &arrays.ints[&flat::FACE_SURFACE_TYPE];

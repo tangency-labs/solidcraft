@@ -7,8 +7,8 @@
 
 use std::collections::HashMap;
 
+use solidcore_record::brep::{Curve, Loop, Surface};
 use solidcraft_geom::Vec3;
-use solidcraft_geom::brep::{Curve, Loop, Surface};
 
 use crate::body::Body;
 use crate::sew::{PartEdge, PartFace, PartUse, Parts, assemble};

@@ -2,7 +2,7 @@
 //! No tessellated face names, centroids, or nearest-plane choices are used.
 use super::{Body, FaceSource};
 use crate::{KernelError, Result, guard};
-use solidcraft_geom::brep::{self, Surface};
+use solidcore_record::brep::{self, Surface};
 use solidcraft_geom::{Plane, Vec3};
 use std::collections::HashMap;
 use std::sync::Arc;

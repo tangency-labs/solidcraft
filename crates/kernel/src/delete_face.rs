@@ -12,7 +12,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use solidcraft_geom::brep::Curve;
+use solidcore_record::brep::Curve;
 use solidcraft_geom::{Aabb3, Vec3};
 
 use crate::assemble::{AFace, AUse, Assembly};

@@ -480,8 +480,8 @@ fn output_checks(c: &mut Checks, want: &Value, out: &str, results: &[Value], rel
 /// The word a `surface_types` check names a face's surface by, as the record holds it: an
 /// analytic kind, `ball_patch` (a corner's patch on a sphere), `bspline` (a B-spline or NURBS
 /// surface) or `revolution` (a revolved curve).
-fn surface_word(s: &solidcraft_engine::geom::brep::Surface) -> &'static str {
-    use solidcraft_engine::geom::brep::Surface as S;
+fn surface_word(s: &solidcore_record::brep::Surface) -> &'static str {
+    use solidcore_record::brep::Surface as S;
     match s {
         S::Plane { .. } | S::PlaneThrough { .. } => "plane",
         S::Cylinder { .. } => "cylinder",
@@ -497,8 +497,8 @@ fn surface_word(s: &solidcraft_engine::geom::brep::Surface) -> &'static str {
 /// A B-spline face's two directions as `[degree, spans]` (spans: the distinct knot intervals of
 /// the modelled range), the lower first, so a surface parameterised the other way round reads the
 /// same. `None` for a surface that is not a B-spline.
-fn spline_shape(s: &solidcraft_engine::geom::brep::Surface) -> Option<[[u64; 2]; 2]> {
-    use solidcraft_engine::geom::brep::Surface as S;
+fn spline_shape(s: &solidcore_record::brep::Surface) -> Option<[[u64; 2]; 2]> {
+    use solidcore_record::brep::Surface as S;
     let (u, v, nu, nv) = match s {
         S::Spline { u_knots, v_knots, points } => (u_knots, v_knots, points.len(), points.first().map_or(0, Vec::len)),
         S::RationalSpline { u_knots, v_knots, homogeneous } => (u_knots, v_knots, homogeneous.len(), homogeneous.first().map_or(0, Vec::len)),
@@ -1027,7 +1027,7 @@ mod tests {
     /// either order of directions, spans only where given, and every face must be accounted for.
     #[test]
     fn splines_match_degrees_and_spans_in_either_order() {
-        use solidcraft_engine::geom::brep::Surface;
+        use solidcore_record::brep::Surface;
         let knots = |p: usize, spans: usize| -> Vec<f64> {
             let mut k = vec![0.0; p + 1];
             k.extend((1..spans).map(|i| i as f64));

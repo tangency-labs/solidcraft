@@ -118,7 +118,7 @@ fn factorial(n: usize) -> f64 {
 mod tests {
     use super::*;
     use crate::brep::eval::SurfaceEval;
-    use crate::brep::{Frame, Surface};
+    use solidcore_record::brep::{Frame, Surface};
 
     fn frame() -> Frame {
         Frame { origin: [1., 2., 3.], x_axis: [0., 1., 0.], y_axis: [0., 0., 1.] }

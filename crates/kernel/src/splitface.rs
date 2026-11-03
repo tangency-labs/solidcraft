@@ -19,8 +19,8 @@
 
 use std::f64::consts::TAU;
 
+use solidcore_record::brep::{self, Frame, Surface};
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
-use solidcraft_geom::brep::{self, Frame, Surface};
 use solidcraft_geom::tess::uv::Starts;
 use solidcraft_geom::{Aabb3, Plane, Seg2, Vec2, Vec3};
 

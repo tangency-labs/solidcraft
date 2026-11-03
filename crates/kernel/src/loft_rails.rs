@@ -42,8 +42,8 @@ impl Section {
 }
 
 /// A record line or (rational) B-spline as a homogeneous NURBS curve.
-fn nurbs(c: &solidcraft_geom::brep::Curve) -> Result<CurveN<4>> {
-    use solidcraft_geom::brep::Curve;
+fn nurbs(c: &solidcore_record::brep::Curve) -> Result<CurveN<4>> {
+    use solidcore_record::brep::Curve;
     let degree = |knots: &[f64], n: usize| knots.len().checked_sub(n + 1).ok_or_else(|| KernelError::Invalid("spline degree".into()));
     Ok(match c {
         Curve::Line { start, end } => {

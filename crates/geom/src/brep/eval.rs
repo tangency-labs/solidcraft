@@ -613,7 +613,7 @@ pub fn face_flux(s: &SurfaceEval, v0: f64, loops: &[Vec<(&Curve2, bool)>], field
         let at = |k: f64| {
             let f = k / FLUX_PIECES as f64;
             // Exactly the ends at f = 0 and 1, whatever the interval's rounding.
-            c.eval(if *forward { t0 * (1.0 - f) + t1 * f } else { t1 * (1.0 - f) + t0 * f })
+            super::pcurve::eval(c, if *forward { t0 * (1.0 - f) + t1 * f } else { t1 * (1.0 - f) + t0 * f })
         };
         for k in 0..FLUX_PIECES {
             let (a, m, z) = (at(k as f64)?, at(k as f64 + 0.5)?, at(k as f64 + 1.0)?);

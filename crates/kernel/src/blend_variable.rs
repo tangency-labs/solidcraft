@@ -504,8 +504,8 @@ mod tests {
                 f.loops
                     .iter()
                     .map(|l| match l {
-                        solidcraft_geom::brep::Loop::Edges { edges } => edges.len(),
-                        solidcraft_geom::brep::Loop::Vertex { .. } => 0,
+                        solidcore_record::brep::Loop::Edges { edges } => edges.len(),
+                        solidcore_record::brep::Loop::Vertex { .. } => 0,
                     })
                     .sum()
             })

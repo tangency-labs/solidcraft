@@ -24,7 +24,7 @@
 
 use std::sync::Arc;
 
-use solidcraft_geom::brep::{Brep, Curve as BCurve, Curve2, Edge, Face, Frame, Loop, Shell, Surface as BSurface};
+use solidcore_record::brep::{Brep, Curve as BCurve, Curve2, Edge, Face, Frame, Loop, Shell, Surface as BSurface};
 
 use super::{GeomWriter, boolean, list, r, s};
 use crate::geom::{
@@ -422,7 +422,7 @@ pub fn outer_loop(b: &Brep, face: &Face) -> Option<usize> {
                 let [t0, t1] = edge_of(b, u.edge).ok()?.interval;
                 for k in 0..AREA_SAMPLES {
                     let f = k as f64 / AREA_SAMPLES as f64;
-                    ring.push(u.pcurve.eval(if u.forward { t0 + (t1 - t0) * f } else { t1 - (t1 - t0) * f })?);
+                    ring.push(solidcraft_geom::brep::pcurve::eval(&u.pcurve, if u.forward { t0 + (t1 - t0) * f } else { t1 - (t1 - t0) * f })?);
                 }
             }
             (signed_area(&ring) > 0.0).then_some(li)

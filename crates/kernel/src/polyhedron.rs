@@ -6,8 +6,8 @@
 
 use std::collections::HashMap;
 
+use solidcore_record::brep::{self as rec, Curve2, EdgeUseRef, Loop, OrientedEdge, OrientedFace};
 use solidcraft_geom::Vec3;
-use solidcraft_geom::brep::{self as rec, Curve2, EdgeUseRef, Loop, OrientedEdge, OrientedFace};
 
 use crate::body::Body;
 use crate::{KernelError, Result};
@@ -180,7 +180,7 @@ fn polyhedron_record(hs: &[HalfSpace], verts: &[Vec3], faces: &[(usize, Vec<usiz
         edges,
         vertices,
     };
-    brep.validate().map_err(|e| KernelError::Failed(format!("polyhedron: {e}")))?;
+    solidcraft_geom::brep::check::validate(&brep).map_err(|e| KernelError::Failed(format!("polyhedron: {e}")))?;
     Ok(brep)
 }
 

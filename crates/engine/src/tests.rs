@@ -563,7 +563,7 @@ fn rounds_on_a_bar_running_tangent_into_a_cylinder() {
     let state = s.model.state();
     let rec = state.bodies[0].body.record();
     let p0 = solidcraft_geom::Vec3::new(32.0, 8.0, 15.0);
-    let on: Vec<&solidcraft_geom::brep::Surface> = rec
+    let on: Vec<&solidcore_record::brep::Surface> = rec
         .faces
         .iter()
         .map(|f| &f.surface)
@@ -574,7 +574,7 @@ fn rounds_on_a_bar_running_tangent_into_a_cylinder() {
         .collect();
     let kinds: Vec<String> = on.iter().map(|s| format!("{s:?}").chars().take(48).collect()).collect();
     assert!(
-        !on.is_empty() && on.iter().all(|s| matches!(s, solidcraft_geom::brep::Surface::Cylinder { radius, .. } if (radius - 8.0).abs() < 1e-9)),
+        !on.is_empty() && on.iter().all(|s| matches!(s, solidcore_record::brep::Surface::Cylinder { radius, .. } if (radius - 8.0).abs() < 1e-9)),
         "{kinds:?}"
     );
 }

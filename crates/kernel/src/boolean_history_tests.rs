@@ -464,7 +464,7 @@ mod smlib {
     /// how the two meet.
     #[test]
     fn cubes_touching_along_an_edge_or_at_a_vertex_unite_into_two_solids() {
-        use solidcraft_geom::brep::part::{Contact, RegionContact};
+        use solidcore_record::brep::part::{Contact, RegionContact};
         let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
         for (name, b, contact) in [
             ("edge", boxed(10.0, 10.0, 0.0, 20.0, 20.0, 10.0), Contact::Edge),

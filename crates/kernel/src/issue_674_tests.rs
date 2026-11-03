@@ -12,7 +12,7 @@ fn split_contact_arc_crossing_one_edge_twice_preserves_the_body() {
         .record()
         .faces
         .iter()
-        .position(|f| !matches!(f.surface, solidcraft_geom::brep::Surface::Plane { .. } | solidcraft_geom::brep::Surface::PlaneThrough { .. }))
+        .position(|f| !matches!(f.surface, solidcore_record::brep::Surface::Plane { .. } | solidcore_record::brep::Surface::PlaneThrough { .. }))
         .unwrap();
     let r = split_faces(&a, &[face], &SplitTool::Face { body: &b, face: side }).unwrap();
     assert_eq!(r.face_count(), a.face_count() + 1);

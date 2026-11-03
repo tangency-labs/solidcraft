@@ -6,7 +6,7 @@
 //! [`PathSeg::Bezier`] ([`SpaceBezier`]); [`PointPath::points`] is its polyline, for what takes
 //! points (rails, curve networks).
 
-use solidcraft_geom::brep;
+use solidcore_record::brep;
 use solidcraft_geom::bspline::{HPoint, bezier_point, segment};
 use solidcraft_geom::catmull_rom;
 use solidcraft_geom::{MAX_BEZIER_CTRL, MAX_BEZIER_DEGREE, Plane, Region2, Vec3};

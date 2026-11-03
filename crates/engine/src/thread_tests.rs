@@ -1031,7 +1031,7 @@ fn a_runout_fades_the_groove_out_before_the_shoulder() {
 /// independently (`seam_diagnostics`, projecting stations onto both surfaces).
 #[test]
 fn a_modelled_threads_flank_joins_are_not_drawn() {
-    use solidcraft_geom::brep::Surface;
+    use solidcore_record::brep::Surface;
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"radius": 5.0, "height": 12, "body_name": "Shaft"}));
     run(&mut s, "solid.thread", json!({"face": [5.0, 0, 6.0], "designation": "M10x1.5", "modeled": true}));

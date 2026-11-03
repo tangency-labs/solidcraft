@@ -43,7 +43,7 @@
 //! control point that does not change the geometry at all — is reported as an error and the
 //! geometry is left alone.
 
-use solidcraft_geom::brep as b;
+use solidcore_record::brep as b;
 use solidcraft_geom::bspline::{HPoint, MAX_SPLINE_DEGREE, NurbsSurface, Side, SplineError, check_knots, local_basis};
 use solidcraft_geom::{Grid, Vec3};
 

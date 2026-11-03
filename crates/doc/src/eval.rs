@@ -10,7 +10,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Arc, OnceLock};
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::brep::part::Contact;
+use solidcore_record::brep::part::Contact;
 use solidcraft_geom::tess::TessPlan;
 use solidcraft_geom::{Mesh, Plane, Region2, UnitVec3, Vec2, Vec3, regions_apart};
 use solidcraft_kernel::{self as kernel, Body, BoolOp};
@@ -3418,7 +3418,7 @@ fn groups_from_body(mb: &ModelBody, groups: &[Vec<usize>]) -> Option<Vec<bool>> 
     let holds = |k: usize| {
         let shells = regions.get(k).and_then(|&r| record.regions.get(r)).map(|r| r.shells.as_slice()).unwrap_or_default();
         shells.iter().any(|&s| match record.shells.get(s as usize) {
-            Some(solidcraft_geom::brep::Shell::Faces { faces, .. }) => faces.iter().any(|f| from.get(f.face as usize) == Some(&true)),
+            Some(solidcore_record::brep::Shell::Faces { faces, .. }) => faces.iter().any(|f| from.get(f.face as usize) == Some(&true)),
             _ => false,
         })
     };
@@ -5585,8 +5585,8 @@ fn path_points(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Option<
                 Some(solidcraft_sketch::Wire { arc: Some(arc), .. }) => {
                     let x = (arc.start - arc.center).normalized().ok_or_else(|| DocError::Invalid("a 3D arc of no radius".into()))?;
                     let y = arc.normal.cross(x);
-                    let frame = solidcraft_geom::brep::Frame { origin: arc.center.into(), x_axis: x.into(), y_axis: y.into() };
-                    let circle = solidcraft_geom::brep::Curve::Circle { frame, radius: arc.radius };
+                    let frame = solidcore_record::brep::Frame { origin: arc.center.into(), x_axis: x.into(), y_axis: y.into() };
+                    let circle = solidcore_record::brep::Curve::Circle { frame, radius: arc.radius };
                     kernel::PathPiece::Segs(kernel::curve_path(&circle, [0.0, solidcraft_sketch::arc_sweep(arc)])?)
                 }
                 Some(w) if w.fit.len() >= 3 => kernel::PathPiece::Spline { fit: w.fit.clone(), reversed: false },

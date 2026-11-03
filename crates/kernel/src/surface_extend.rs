@@ -31,8 +31,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use solidcore_record::brep::{self};
 use solidcraft_geom::Vec3;
-use solidcraft_geom::brep::{self, eval::CurveEval};
+use solidcraft_geom::brep::eval::CurveEval;
 use solidcraft_smlib::trim::Continuation;
 
 use crate::body::Body;

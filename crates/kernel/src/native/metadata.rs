@@ -1,7 +1,8 @@
 //! Explicit conversions between runtime metadata and the versioned wire records.
 use super::{Result, invalid};
 use crate::{Body, FaceSource, history as h};
-use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3, brep::envelope as w};
+use solidcore_record::brep::envelope as w;
+use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 fn index(n: usize) -> Result<u32> {
     u32::try_from(n).map_err(invalid)

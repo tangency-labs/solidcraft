@@ -4060,6 +4060,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcore-record"
+version = "0.1.0"
+source = "git+https://github.com/tangency-labs/solidcore?rev=a976a40c24844607f1b989a74fc0d36331510076#a976a40c24844607f1b989a74fc0d36331510076"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "solidcraft"
 version = "0.40.0-rc.1"
 dependencies = [
@@ -4107,6 +4117,7 @@ dependencies = [
  "image",
  "log",
  "serde_json",
+ "solidcore-record",
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-kernel",
@@ -4130,6 +4141,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "solidcore-record",
  "solidcraft-derive",
  "solidcraft-geom",
  "solidcraft-kernel",
@@ -4150,6 +4162,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_path_to_error",
+ "solidcore-record",
  "solidcraft-doc",
  "solidcraft-geom",
  "solidcraft-io",
@@ -4168,6 +4181,7 @@ version = "0.40.0-rc.1"
 dependencies = [
  "serde",
  "serde_json",
+ "solidcore-record",
  "thiserror 2.0.21",
 ]
 
@@ -4226,6 +4240,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "solidcore-record",
  "solidcraft-geom",
  "solidcraft-profile",
  "solidcraft-smlib",
@@ -4275,6 +4290,7 @@ dependencies = [
  "harfrust",
  "serde",
  "serde_json",
+ "solidcore-record",
  "solidcraft-geom",
  "thiserror 2.0.21",
  "ttf-parser",
@@ -4289,6 +4305,7 @@ dependencies = [
  "log",
  "serde_json",
  "solidcore",
+ "solidcore-record",
  "solidcraft-geom",
  "solidcraft-profile",
 ]
@@ -4304,6 +4321,7 @@ dependencies = [
 name = "solidcraft-step"
 version = "0.40.0-rc.1"
 dependencies = [
+ "solidcore-record",
  "solidcraft-geom",
  "solidcraft-profile",
 ]

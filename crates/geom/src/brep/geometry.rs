@@ -12,8 +12,8 @@
 //! an edge's for its pcurves, an edge's and its vertex's together where they meet, a vertex's on
 //! its surface. A point that cannot be evaluated is an error, never a panic.
 use super::eval::{CurveEval, SurfaceEval};
-use super::{Brep, Curve2, Loop};
 use crate::Vec3;
+use solidcore_record::brep::{Brep, Curve2, Loop};
 
 /// Where a record disagrees with itself.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,7 +89,7 @@ fn unevaluable(record: Record, what: impl std::fmt::Display) -> Mismatch {
 /// the pcurve's end.
 fn on_pcurve(pc: &Curve2, t: f64) -> Option<[f64; 2]> {
     let [a, b] = pc.interval()?;
-    pc.eval(t.clamp(a.min(b), a.max(b)))
+    super::pcurve::eval(pc, t.clamp(a.min(b), a.max(b)))
 }
 
 /// `gap` within `tolerance` (a non-finite gap never is).
@@ -105,129 +105,127 @@ const EMPTY_AREA: f64 = 1e-9;
 const PCURVE_POINTS: [&str; 3] =
     ["pcurve start lifts off its edge's curve", "pcurve middle lifts off its edge's curve", "pcurve end lifts off its edge's curve"];
 
-impl Brep {
-    /// Check that the record's geometry agrees with its topology, within its tolerances (module
-    /// docs). Call on a record [`Brep::validate`] accepted: this checks geometry, not structure,
-    /// though a malformed record is refused, never a panic.
-    pub fn check_geometry(&self) -> Result<()> {
-        // Each edge's curve at its interval's start, middle and end, shared by all its uses.
-        let mut points = Vec::with_capacity(self.edges.len());
-        for (i, e) in self.edges.iter().enumerate() {
-            let at = Record::Edge(index(i));
-            let curve = CurveEval::new(e.parameters()).map_err(|err| unevaluable(at, err))?;
-            let [t0, t1] = e.interval;
-            let p = [t0, 0.5 * (t0 + t1), t1].map(|t| curve.point(t).ok_or(t));
-            let p = match p {
-                [Ok(a), Ok(m), Ok(z)] => [a, m, z],
-                [Err(t), ..] | [_, Err(t), _] | [.., Err(t)] => return Err(unevaluable(at, format!("the curve has no point at {t}"))),
-            };
-            for (end, what) in [(0, "curve start misses its start vertex"), (1, "curve end misses its end vertex")] {
-                let v = e.vertices.get(end).and_then(|&v| self.vertices.get(v as usize)).ok_or_else(|| unevaluable(at, "edge vertices"))?;
-                let q = if end == 0 { p[0] } else { p[2] };
-                within(at, what, q.dist(v3(v.point)), v.tolerance + e.tolerance)?;
-            }
-            points.push(p);
+/// Check that the record's geometry agrees with its topology, within its tolerances (module
+/// docs). Call on a record [`Brep::validate`] accepted: this checks geometry, not structure,
+/// though a malformed record is refused, never a panic.
+pub fn check(brep: &Brep) -> Result<()> {
+    // Each edge's curve at its interval's start, middle and end, shared by all its uses.
+    let mut points = Vec::with_capacity(brep.edges.len());
+    for (i, e) in brep.edges.iter().enumerate() {
+        let at = Record::Edge(index(i));
+        let curve = CurveEval::new(e.parameters()).map_err(|err| unevaluable(at, err))?;
+        let [t0, t1] = e.interval;
+        let p = [t0, 0.5 * (t0 + t1), t1].map(|t| curve.point(t).ok_or(t));
+        let p = match p {
+            [Ok(a), Ok(m), Ok(z)] => [a, m, z],
+            [Err(t), ..] | [_, Err(t), _] | [.., Err(t)] => return Err(unevaluable(at, format!("the curve has no point at {t}"))),
+        };
+        for (end, what) in [(0, "curve start misses its start vertex"), (1, "curve end misses its end vertex")] {
+            let v = e.vertices.get(end).and_then(|&v| brep.vertices.get(v as usize)).ok_or_else(|| unevaluable(at, "edge vertices"))?;
+            let q = if end == 0 { p[0] } else { p[2] };
+            within(at, what, q.dist(v3(v.point)), v.tolerance + e.tolerance)?;
         }
-        for (fi, f) in self.faces.iter().enumerate() {
-            let face = index(fi);
-            let surface = SurfaceEval::new(f.parameters()).map_err(|err| unevaluable(Record::Face(face), err))?;
-            let period = surface.domain().period;
-            // Each edge loop's signed (u, v) area.
-            let mut areas: Vec<(u32, f64)> = Vec::with_capacity(f.loops.len());
-            for (li, l) in f.loops.iter().enumerate() {
-                let r#loop = index(li);
-                match l {
-                    Loop::Vertex { vertex } => {
-                        let at = Record::VertexLoop { face, r#loop };
-                        let v = self.vertices.get(*vertex as usize).ok_or_else(|| unevaluable(at, "vertex reference"))?;
-                        let p = v3(v.point);
-                        let on = surface.project(p, None, f64::INFINITY).and_then(|q| surface.point(q));
-                        let gap = on.map_or(f64::INFINITY, |s| s.dist(p));
-                        within(at, "vertex lies off its face's surface", gap, v.tolerance)?;
+        points.push(p);
+    }
+    for (fi, f) in brep.faces.iter().enumerate() {
+        let face = index(fi);
+        let surface = SurfaceEval::new(f.parameters()).map_err(|err| unevaluable(Record::Face(face), err))?;
+        let period = surface.domain().period;
+        // Each edge loop's signed (u, v) area.
+        let mut areas: Vec<(u32, f64)> = Vec::with_capacity(f.loops.len());
+        for (li, l) in f.loops.iter().enumerate() {
+            let r#loop = index(li);
+            match l {
+                Loop::Vertex { vertex } => {
+                    let at = Record::VertexLoop { face, r#loop };
+                    let v = brep.vertices.get(*vertex as usize).ok_or_else(|| unevaluable(at, "vertex reference"))?;
+                    let p = v3(v.point);
+                    let on = surface.project(p, None, f64::INFINITY).and_then(|q| surface.point(q));
+                    let gap = on.map_or(f64::INFINITY, |s| s.dist(p));
+                    within(at, "vertex lies off its face's surface", gap, v.tolerance)?;
+                }
+                Loop::Edges { edges } => {
+                    // Where each use starts and ends in (u, v), in the loop's direction.
+                    let mut ends: Vec<[[f64; 2]; 2]> = Vec::with_capacity(edges.len());
+                    for (position, u) in edges.iter().enumerate() {
+                        let at = Record::Use { face, r#loop, position: index(position) };
+                        let i = u.edge as usize;
+                        let (e, p) = brep.edges.get(i).zip(points.get(i)).ok_or_else(|| unevaluable(at, "edge reference"))?;
+                        let [t0, t1] = e.interval;
+                        let mut uv = [[0.0; 2]; 3];
+                        for (k, t) in [t0, 0.5 * (t0 + t1), t1].into_iter().enumerate() {
+                            let q = on_pcurve(&u.pcurve, t).ok_or_else(|| unevaluable(at, format!("the pcurve has no point at {t}")))?;
+                            let s = surface.point(q).ok_or_else(|| unevaluable(at, format!("the surface has no point at {q:?}")))?;
+                            let (Some(c), Some(what), Some(slot)) = (p.get(k), PCURVE_POINTS.get(k), uv.get_mut(k)) else {
+                                return Err(unevaluable(at, "pcurve sample"));
+                            };
+                            within(at, what, s.dist(*c), e.tolerance)?;
+                            *slot = q;
+                        }
+                        ends.push(if u.forward { [uv[0], uv[2]] } else { [uv[2], uv[0]] });
                     }
-                    Loop::Edges { edges } => {
-                        // Where each use starts and ends in (u, v), in the loop's direction.
-                        let mut ends: Vec<[[f64; 2]; 2]> = Vec::with_capacity(edges.len());
-                        for (position, u) in edges.iter().enumerate() {
-                            let at = Record::Use { face, r#loop, position: index(position) };
-                            let i = u.edge as usize;
-                            let (e, p) = self.edges.get(i).zip(points.get(i)).ok_or_else(|| unevaluable(at, "edge reference"))?;
-                            let [t0, t1] = e.interval;
-                            let mut uv = [[0.0; 2]; 3];
-                            for (k, t) in [t0, 0.5 * (t0 + t1), t1].into_iter().enumerate() {
-                                let q = on_pcurve(&u.pcurve, t).ok_or_else(|| unevaluable(at, format!("the pcurve has no point at {t}")))?;
-                                let s = surface.point(q).ok_or_else(|| unevaluable(at, format!("the surface has no point at {q:?}")))?;
-                                let (Some(c), Some(what), Some(slot)) = (p.get(k), PCURVE_POINTS.get(k), uv.get_mut(k)) else {
-                                    return Err(unevaluable(at, "pcurve sample"));
-                                };
-                                within(at, what, s.dist(*c), e.tolerance)?;
-                                *slot = q;
-                            }
-                            ends.push(if u.forward { [uv[0], uv[2]] } else { [uv[2], uv[0]] });
-                        }
-                        // Each use continues the one before it (the last closes the loop), except
-                        // along a direction that collapses there (a pole): at the vertex where
-                        // they meet, to within the vertex's tolerance.
-                        for (position, pair) in ends.iter().enumerate() {
-                            let before = ends.get(position.checked_sub(1).unwrap_or(ends.len().saturating_sub(1)));
-                            let (Some([_, end]), [start, _]) = (before, pair) else { continue };
-                            let reach = edges
-                                .get(position)
-                                .and_then(|u| self.edges.get(u.edge as usize).map(|e| e.vertices[if u.forward { 0 } else { 1 }]))
-                                .and_then(|v| self.vertices.get(v as usize))
-                                .map_or(0.0, |v| v.tolerance);
-                            let pole = surface.pole_within(*start, reach);
-                            for d in 0..2 {
-                                let (Some(Some(p)), Some(false)) = (period.get(d), pole.get(d)) else { continue };
-                                let gap = (start[d] - end[d]).abs();
-                                if !(gap < 0.5 * p) {
-                                    let record = Record::Use { face, r#loop, position: index(position) };
-                                    return Err(Mismatch { record, problem: Problem::Period { gap, period: *p } });
-                                }
+                    // Each use continues the one before it (the last closes the loop), except
+                    // along a direction that collapses there (a pole): at the vertex where
+                    // they meet, to within the vertex's tolerance.
+                    for (position, pair) in ends.iter().enumerate() {
+                        let before = ends.get(position.checked_sub(1).unwrap_or(ends.len().saturating_sub(1)));
+                        let (Some([_, end]), [start, _]) = (before, pair) else { continue };
+                        let reach = edges
+                            .get(position)
+                            .and_then(|u| brep.edges.get(u.edge as usize).map(|e| e.vertices[if u.forward { 0 } else { 1 }]))
+                            .and_then(|v| brep.vertices.get(v as usize))
+                            .map_or(0.0, |v| v.tolerance);
+                        let pole = surface.pole_within(*start, reach);
+                        for d in 0..2 {
+                            let (Some(Some(p)), Some(false)) = (period.get(d), pole.get(d)) else { continue };
+                            let gap = (start[d] - end[d]).abs();
+                            if !(gap < 0.5 * p) {
+                                let record = Record::Use { face, r#loop, position: index(position) };
+                                return Err(Mismatch { record, problem: Problem::Period { gap, period: *p } });
                             }
                         }
-                        // The signed area the loop encloses (positive for the outer loop). Where
-                        // uses meet at a pole the ring runs straight along the pole's line.
-                        let at = Record::Loop { face, r#loop };
-                        let mut ring: Vec<[f64; 2]> = Vec::with_capacity(edges.len().saturating_mul(AREA_SAMPLES));
-                        for u in edges {
-                            let [t0, t1] = self.edges.get(u.edge as usize).ok_or_else(|| unevaluable(at, "edge reference"))?.interval;
-                            for k in 0..AREA_SAMPLES {
-                                let f = k as f64 / AREA_SAMPLES as f64;
-                                let t = if u.forward { t0 + (t1 - t0) * f } else { t1 - (t1 - t0) * f };
-                                ring.push(on_pcurve(&u.pcurve, t).ok_or_else(|| unevaluable(at, format!("the pcurve has no point at {t}")))?);
-                            }
-                        }
-                        let area = signed_area(&ring);
-                        let extent = (0..2)
-                            .map(|d| {
-                                let (lo, hi) = ring.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q[d]), b.max(q[d])));
-                                hi - lo
-                            })
-                            .fold(0.0, f64::max);
-                        if !(area.abs() > EMPTY_AREA * extent * extent) {
-                            return Err(Mismatch { record: at, problem: Problem::Empty { area } });
-                        }
-                        areas.push((r#loop, area));
                     }
+                    // The signed area the loop encloses (positive for the outer loop). Where
+                    // uses meet at a pole the ring runs straight along the pole's line.
+                    let at = Record::Loop { face, r#loop };
+                    let mut ring: Vec<[f64; 2]> = Vec::with_capacity(edges.len().saturating_mul(AREA_SAMPLES));
+                    for u in edges {
+                        let [t0, t1] = brep.edges.get(u.edge as usize).ok_or_else(|| unevaluable(at, "edge reference"))?.interval;
+                        for k in 0..AREA_SAMPLES {
+                            let f = k as f64 / AREA_SAMPLES as f64;
+                            let t = if u.forward { t0 + (t1 - t0) * f } else { t1 - (t1 - t0) * f };
+                            ring.push(on_pcurve(&u.pcurve, t).ok_or_else(|| unevaluable(at, format!("the pcurve has no point at {t}")))?);
+                        }
+                    }
+                    let area = signed_area(&ring);
+                    let extent = (0..2)
+                        .map(|d| {
+                            let (lo, hi) = ring.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q[d]), b.max(q[d])));
+                            hi - lo
+                        })
+                        .fold(0.0, f64::max);
+                    if !(area.abs() > EMPTY_AREA * extent * extent) {
+                        return Err(Mismatch { record: at, problem: Problem::Empty { area } });
+                    }
+                    areas.push((r#loop, area));
                 }
             }
-            // One loop runs counter-clockwise, the outer; every other one clockwise. Which is
-            // which comes from the areas, not the loops' order: the truck adapter writes a face's
-            // wires in truck's order, which need not put the outer one first.
-            let by_size = |a: &(u32, f64), b: &(u32, f64)| a.1.abs().total_cmp(&b.1.abs());
-            let ccw: Vec<(u32, f64)> = areas.iter().copied().filter(|a| a.1 > 0.0).collect();
-            let wrong = match ccw.len() {
-                0 => areas.into_iter().max_by(by_size).map(|(l, area)| (l, true, area)),
-                1 => None,
-                _ => ccw.into_iter().min_by(by_size).map(|(l, area)| (l, false, area)),
-            };
-            if let Some((r#loop, outer, area)) = wrong {
-                return Err(Mismatch { record: Record::Loop { face, r#loop }, problem: Problem::Turn { outer, area } });
-            }
         }
-        Ok(())
+        // One loop runs counter-clockwise, the outer; every other one clockwise. Which is
+        // which comes from the areas, not the loops' order: the truck adapter writes a face's
+        // wires in truck's order, which need not put the outer one first.
+        let by_size = |a: &(u32, f64), b: &(u32, f64)| a.1.abs().total_cmp(&b.1.abs());
+        let ccw: Vec<(u32, f64)> = areas.iter().copied().filter(|a| a.1 > 0.0).collect();
+        let wrong = match ccw.len() {
+            0 => areas.into_iter().max_by(by_size).map(|(l, area)| (l, true, area)),
+            1 => None,
+            _ => ccw.into_iter().min_by(by_size).map(|(l, area)| (l, false, area)),
+        };
+        if let Some((r#loop, outer, area)) = wrong {
+            return Err(Mismatch { record: Record::Loop { face, r#loop }, problem: Problem::Turn { outer, area } });
+        }
     }
+    Ok(())
 }
 
 /// Signed area of a closed polygon in (u, v): positive counter-clockwise.

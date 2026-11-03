@@ -1,5 +1,5 @@
 use serde::Serialize;
-use solidcraft_geom::brep::{self, Brep, Curve, Loop, Shell, Surface};
+use solidcore_record::brep::{self, Brep, Curve, Loop, Shell, Surface};
 use solidcraft_geom::{Aabb3, Mesh, Vec3};
 
 use crate::history::BodyHistory;
@@ -147,7 +147,7 @@ fn placed_mesh(m: &Mesh, t: &[[f64; 4]; 4]) -> Option<Mesh> {
             t[0][2] * v.x + t[1][2] * v.y + t[2][2] * v.z + w * t[3][2],
         )
     };
-    brep::placement::Rigid::of_matrix(t)?;
+    solidcraft_geom::brep::placement::Rigid::of_matrix(t)?;
     Some(Mesh {
         positions: m.positions.iter().map(|p| r(*p, 1.0)).collect(),
         normals: m.normals.iter().map(|n| r(*n, 0.0)).collect(),
@@ -361,7 +361,7 @@ fn coarse_tolerance(span: f64) -> f64 {
 fn span_of(record: &Brep) -> f64 {
     let mut bounds: Aabb3 = record.vertices.iter().map(|v| v3(v.point)).collect();
     for e in &record.edges {
-        if let Ok(c) = brep::eval::CurveEval::new(e.parameters()) {
+        if let Ok(c) = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()) {
             let [t0, t1] = e.interval;
             for i in 1..4 {
                 if let Some(p) = c.point(t0 + (t1 - t0) * f64::from(i) / 4.0)
@@ -389,7 +389,7 @@ fn same_shared<T: PartialEq>(a: &Option<std::sync::Arc<T>>, b: &Option<std::sync
 /// canonical order) and at least one face. A solid's faces bound material; a surface body's lie
 /// in open shells.
 fn solid_record(record: Brep) -> Result<Brep> {
-    record.validate_built().map_err(|e| KernelError::Invalid(e.to_string()))?;
+    solidcraft_geom::brep::check::validate_built(&record).map_err(|e| KernelError::Invalid(e.to_string()))?;
     if record.faces.is_empty() {
         return Err(KernelError::Failed("empty result".into()));
     }
@@ -467,8 +467,8 @@ impl Refusal {
 }
 
 impl SurfaceKind {
-    pub(crate) fn of(surface: &solidcraft_geom::brep::Surface) -> SurfaceKind {
-        use solidcraft_geom::brep::Surface as S;
+    pub(crate) fn of(surface: &solidcore_record::brep::Surface) -> SurfaceKind {
+        use solidcore_record::brep::Surface as S;
         match surface {
             S::Plane { .. } | S::PlaneThrough { .. } => SurfaceKind::Plane,
             S::Cylinder { .. } => SurfaceKind::Cylinder,
@@ -1139,7 +1139,7 @@ impl Body {
         // A placed copy is planned as its original, moved (as `Body::mesh` shows the original's
         // mesh): the part is planned once for every copy.
         if let Some((shared, m)) = self.display_of.as_deref()
-            && brep::placement::Rigid::of_matrix(m).is_some()
+            && solidcraft_geom::brep::placement::Rigid::of_matrix(m).is_some()
         {
             return Ok(remembered(&shared.plans, t, || shared.original.mesh_plan_untimed(t))?.transformed(m));
         }
@@ -1531,7 +1531,7 @@ impl Body {
 /// rest at the evaluator's points (capped).
 fn edge_points(e: &brep::Edge, chord: f64) -> Result<Vec<Vec3>> {
     const MAX_POINTS: usize = 4096;
-    let curve = brep::eval::CurveEval::new(e.parameters()).map_err(|err| KernelError::Invalid(err.to_string()))?;
+    let curve = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()).map_err(|err| KernelError::Invalid(err.to_string()))?;
     let [t0, t1] = e.interval;
     let at = |t: f64| curve.point(t).ok_or_else(|| KernelError::Invalid(format!("edge curve has no point at {t}")));
     if let Curve::Line { .. } = e.curve {
@@ -1559,7 +1559,7 @@ fn edge_points(e: &brep::Edge, chord: f64) -> Result<Vec<Vec3>> {
 fn curve_hull(c: &Curve, interval: [f64; 2], b: &mut Aabb3) {
     match c {
         Curve::Line { .. } | Curve::Circle { .. } | Curve::Ellipse { .. } => {
-            if let Ok(e) = brep::eval::CurveEval::new(c) {
+            if let Ok(e) = solidcraft_geom::brep::eval::CurveEval::new(c) {
                 let [t0, t1] = interval;
                 for i in 0..=16 {
                     if let Some(p) = e.point(t0 + (t1 - t0) * f64::from(i) / 16.0) {

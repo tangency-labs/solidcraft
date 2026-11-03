@@ -2,8 +2,8 @@
 //! record edges. A record's lines and circles are read as they are; a spline is read span by
 //! span (its Bézier pieces): samples propose a circle, and only positive rational Bernstein
 //! bounds accept it.
+use solidcore_record::brep::{Brep, Curve};
 use solidcraft_geom::brep::eval::CurveEval;
-use solidcraft_geom::brep::{Brep, Curve};
 use solidcraft_geom::bspline::{self, HPoint};
 use solidcraft_geom::{Plane, Seg2, Vec2, Vec3};
 
@@ -755,8 +755,8 @@ mod tests {
     /// `c` over its whole domain, run forward (or back).
     fn run(c: &Curve, forward: bool) -> Run<'_> {
         let interval = match c.natural() {
-            solidcraft_geom::brep::Natural::Range(a, b) => [a, b],
-            solidcraft_geom::brep::Natural::Periodic => [0., std::f64::consts::TAU],
+            solidcore_record::brep::Natural::Range(a, b) => [a, b],
+            solidcore_record::brep::Natural::Periodic => [0., std::f64::consts::TAU],
         };
         let ends = [at(c, interval[0]), at(c, interval[1])];
         Run { curve: c, interval, forward, ends: if forward { ends } else { [ends[1], ends[0]] } }

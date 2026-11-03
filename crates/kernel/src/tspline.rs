@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use solidcraft_geom::brep as b;
+use solidcore_record::brep as b;
 use solidcraft_geom::bspline::{BezierPatch, HPoint, NurbsSurface, SplineError, bezier_segment};
 use solidcraft_geom::tspline::TSpline;
 

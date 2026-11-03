@@ -16,9 +16,9 @@
 //! Nothing is moved: a face rebuilt keeps its surface, a sewn edge keeps its curve (SMLib keeps
 //! one of the pair), a patch is a new face. What was done comes back in [`RepairReport`].
 
+use solidcore_record::brep::{self as b, Brep};
 use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::eval::CurveEval;
-use solidcraft_geom::brep::{self as b, Brep};
 
 use crate::body::{Body, SurfaceKind};
 use crate::{Continuity, KernelError, Result};
@@ -250,12 +250,12 @@ fn rebuild_refused(record: &mut Brep, report: &mut RepairReport) -> Result<()> {
 
 /// Face `f` of `r` rebuilt on its own surface: a cylinder, cone, sphere or torus face on a
 /// NURBS form of the surface laid on arcs from where the face starts
-/// ([`b::form::surface_on_own_arcs`]) instead of its frame's quarter grid, the same surface
+/// ([`solidcraft_geom::brep::form::surface_on_own_arcs`]) instead of its frame's quarter grid, the same surface
 /// exactly, with SMLib's own trims of the face's edges on it (`SmlibTrims`, as the import makes the
 /// trims it has no closed form for). The face's edges and loops stay as they were. `None` for a
 /// face on another surface.
 fn rebuilt_face(r: &Brep, f: usize) -> Result<Option<b::Face>> {
-    use b::pcurve::{TrimEdge, TrimFace, TrimUse, Trims};
+    use solidcraft_geom::brep::pcurve::{TrimEdge, TrimFace, TrimUse, Trims};
     let face = r.faces.get(f).ok_or_else(|| invalid(format!("no face {f}")))?;
     if !matches!(face.surface, b::Surface::Cylinder { .. } | b::Surface::Cone { .. } | b::Surface::Sphere { .. } | b::Surface::Torus { .. }) {
         return Ok(None);
@@ -304,8 +304,8 @@ fn rebuilt_face(r: &Brep, f: usize) -> Result<Option<b::Face>> {
         .iter()
         .map(|&v| r.vertices.get(v as usize).map(|v| v.point).ok_or_else(|| invalid(format!("no vertex {v}"))))
         .collect::<Result<Vec<_>>>()?;
-    let extent = b::form::extent(&face.surface, &boundary).ok_or_else(|| invalid("its boundary does not lie on its surface"))?;
-    let (form, domain) = b::form::surface_on_own_arcs(
+    let extent = solidcraft_geom::brep::form::extent(&face.surface, &boundary).ok_or_else(|| invalid("its boundary does not lie on its surface"))?;
+    let (form, domain) = solidcraft_geom::brep::form::surface_on_own_arcs(
         &face.surface,
         extent,
         local.iter().filter_map(|&e| r.edges.get(e as usize)).map(|e| e.tolerance).fold(r.tolerance, f64::max),

@@ -18,10 +18,10 @@
 //! undefined; there it is taken from the nearest sample where it is defined, so a pcurve runs
 //! straight into the pole, and where two uses meet at a pole the loop runs along the pole's line.
 use super::eval::{CurveEval, SurfaceEval};
-use super::{Budget, Curve, Curve2, Surface, curve, curve_natural, interval, surface};
 use crate::Vec3;
 use crate::bspline::{HPoint, segment};
 use crate::tess::uv::{self, Domain};
+use solidcore_record::brep::{Budget, Curve, Curve2, Surface, check_curve, check_curve2, check_interval, check_surface};
 
 /// Why no pcurves: the records are malformed or out of bounds (`Invalid`), no pcurve within
 /// the tolerance was found or the geometry is not supported (`Failed`), or the fit would exceed
@@ -132,7 +132,7 @@ fn check_size(loops: &[Vec<EdgeUse<'_>>], tolerance: f64) -> Result<()> {
 /// error, any other error fails the face.
 fn each_pcurve(surface_record: &Surface, on: &On, loops: &[Vec<EdgeUse<'_>>], tolerance: f64) -> Result<Vec<Vec<Result<Curve2>>>> {
     let mut budget = Budget::input();
-    surface(surface_record, 0, &mut budget).map_err(|e| Error::Invalid(e.to_string()))?;
+    check_surface(surface_record, &mut budget).and_then(|()| super::check::surface(surface_record)).map_err(|e| Error::Invalid(e.to_string()))?;
     // A seam edge used twice is worked out once.
     let mut done: Vec<(u32, Result<Curve2>)> = Vec::new();
     let mut out = Vec::with_capacity(loops.len());
@@ -147,8 +147,10 @@ fn each_pcurve(surface_record: &Surface, on: &On, loops: &[Vec<EdgeUse<'_>>], to
                 pcs.push(pc.clone());
                 continue;
             }
-            curve(u.curve, 0, &mut budget).map_err(|e| Error::Invalid(format!("loop {w} use {i}: {e}")))?;
-            interval(&u.interval, curve_natural(u.curve)).map_err(|e| Error::Invalid(format!("loop {w} use {i}: {e}")))?;
+            check_curve(u.curve, &mut budget)
+                .and_then(|()| super::check::curve(u.curve))
+                .map_err(|e| Error::Invalid(format!("loop {w} use {i}: {e}")))?;
+            check_interval(&u.interval, u.curve.natural()).map_err(|e| Error::Invalid(format!("loop {w} use {i}: {e}")))?;
             let c = CurveEval::new(u.curve)?;
             // An edge record that holds a looser tolerance than the face's (another kernel's
             // approximated edge) is checked against its own, up to the same cap.
@@ -218,7 +220,7 @@ pub trait Trims {
 /// A producer's own pcurve, checked as a record: a valid 2D B-spline on the use's interval
 /// (within 10⁻⁹ of its magnitude, the schema's slack for a linear remap's rounding).
 fn own_pcurve(c: &Curve2, [t0, t1]: [f64; 2], budget: &mut Budget) -> Result<Curve2> {
-    super::curve2::curve2(c, budget).map_err(|e| Error::Invalid(format!("given pcurve: {e}")))?;
+    check_curve2(c, budget).map_err(|e| Error::Invalid(format!("given pcurve: {e}")))?;
     let [a, b] = c.interval().ok_or_else(|| Error::Invalid("given pcurve: no interval".into()))?;
     let slack = 1e-9 * t0.abs().max(t1.abs()).max(1.0);
     if (a - t0).abs() > slack || (b - t1).abs() > slack {
@@ -501,7 +503,7 @@ impl On {
         let even = (0..=CHECKS).map(|k| if k == CHECKS { t1 } else { t0 + (t1 - t0) * k as f64 / CHECKS as f64 });
         let spans = knots.windows(2).filter_map(|k| Some((*k.first()?, *k.get(1)?))).filter(|(a, b)| a < b).take(1 << 12).map(|(a, b)| 0.5 * (a + b));
         even.chain(spans).all(|t| {
-            let lifted = pc.eval(t).and_then(|q| self.surface.point(q));
+            let lifted = eval(pc, t).and_then(|q| self.surface.point(q));
             matches!((lifted, curve.point(t)), (Some(a), Some(b)) if a.dist(b) <= target)
         })
     }
@@ -546,7 +548,7 @@ impl On {
         let mut ends = Vec::with_capacity(n);
         for (c, fwd) in uses.iter() {
             let [a, b] = c.interval().ok_or_else(|| Error::Failed("pcurve interval".into()))?;
-            let (Some(s), Some(e)) = (c.eval(a), c.eval(b)) else { return Err(Error::Failed("pcurve ends".into())) };
+            let (Some(s), Some(e)) = (eval(c, a), eval(c, b)) else { return Err(Error::Failed("pcurve ends".into())) };
             ends.push(if *fwd { (s, e) } else { (e, s) });
         }
         for d in 0..2 {
@@ -640,7 +642,7 @@ fn area(uses: &[(Curve2, bool)], shift: &[f64], d: usize) -> f64 {
         for k in 0..16 {
             let f = k as f64 / 16.0;
             let t = if *fwd { a + (b - a) * f } else { b - (b - a) * f };
-            if let Some(mut q) = c.eval(t) {
+            if let Some(mut q) = eval(c, t) {
                 if let Some(x) = q.get_mut(d) {
                     *x += s;
                 }
@@ -673,6 +675,51 @@ fn move_by(c: &mut Curve2, d: usize, by: f64) {
             }
         }
     }
+}
+
+/// The point of pcurve `c` at `t` (`None` outside its interval or for a malformed record).
+pub fn eval(c: &Curve2, t: f64) -> Option<[f64; 2]> {
+    let (knots, h): (&[f64], Vec<[f64; 3]>) = match c {
+        Curve2::Spline { knots, points } => (knots, points.iter().map(|&[u, v]| [u, v, 1.0]).collect()),
+        Curve2::RationalSpline { knots, homogeneous } => (knots, homogeneous.clone()),
+    };
+    let p = knots.len().checked_sub(h.len() + 1)?;
+    let span = crate::bspline::find_span(knots, p, h.len(), t)?;
+    let n = basis(knots, p, span, t)?;
+    let mut s = [0.0; 3];
+    for (j, nj) in n.iter().enumerate() {
+        let q = h.get(span + j - p)?;
+        for (a, x) in s.iter_mut().zip(q) {
+            *a += nj * x;
+        }
+    }
+    (s[2].abs() > 0.0).then(|| [s[0] / s[2], s[1] / s[2]])
+}
+
+/// The `p + 1` basis functions non-zero on knot span `span` at `t`, of any degree (NURBS Book
+/// A2.2).
+fn basis(knots: &[f64], p: usize, span: usize, t: f64) -> Option<Vec<f64>> {
+    if span < p || span + p >= knots.len() {
+        return None;
+    }
+    let k = |i: usize| knots.get(i).copied().unwrap_or(0.0);
+    let mut n = vec![0.0; p + 1];
+    let (mut left, mut right) = (vec![0.0; p + 1], vec![0.0; p + 1]);
+    *n.first_mut()? = 1.0;
+    for j in 1..=p {
+        *left.get_mut(j)? = t - k(span + 1 - j);
+        *right.get_mut(j)? = k(span + j) - t;
+        let mut saved = 0.0;
+        for r in 0..j {
+            let (rr, lj) = (*right.get(r + 1)?, *left.get(j - r)?);
+            let den = rr + lj;
+            let tmp = if den != 0.0 { n.get(r)? / den } else { 0.0 };
+            *n.get_mut(r)? = saved + rr * tmp;
+            saved = lj * tmp;
+        }
+        *n.get_mut(j)? = saved;
+    }
+    Some(n)
 }
 
 #[cfg(test)]

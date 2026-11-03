@@ -5,7 +5,7 @@
 //! cubic and higher Béziers B-splines on their own control points; conics rational quadratic
 //! Béziers (exact ellipses, parabolas and hyperbolas).
 
-use solidcraft_geom::brep::{Curve, Curve2, Surface};
+use solidcore_record::brep::{Curve, Curve2, Surface};
 use solidcraft_geom::{Plane, Seg2, Vec2, Vec3};
 
 use crate::{KernelError, Result};

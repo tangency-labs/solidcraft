@@ -172,7 +172,7 @@ mod imp {
 
     /// The body (a solid or a sheet) a schema 4 record describes, taken by SMLib as a
     /// modeller's own record (no healing) and checked there.
-    pub(crate) fn body_from_record(record: &solidcraft_geom::brep::Brep, what: &str) -> Result<Body> {
+    pub(crate) fn body_from_record(record: &solidcore_record::brep::Brep, what: &str) -> Result<Body> {
         let brep = Brep::from_record(record, true).map_err(|e| failed(what, e))?;
         body_of(brep, what)
     }
@@ -187,7 +187,7 @@ mod imp {
         plane: &Plane,
         segs: &[Seg2],
         direction: Vec3,
-    ) -> Result<Vec<(solidcraft_geom::brep::Curve, [f64; 2])>> {
+    ) -> Result<Vec<(solidcore_record::brep::Curve, [f64; 2])>> {
         let c = segs.iter().map(|s| curve(plane, s)).collect::<Result<Vec<_>>>()?;
         let out = body
             .smlib()?
@@ -198,7 +198,12 @@ mod imp {
 
     /// The face of `body` at `face_at` cut by the plane through `plane_point` square to `normal`,
     /// SMLib's section curves on that face, as record curves on their intervals.
-    pub(crate) fn face_section(body: &Body, face_at: Vec3, plane_point: Vec3, normal: Vec3) -> Result<Vec<(solidcraft_geom::brep::Curve, [f64; 2])>> {
+    pub(crate) fn face_section(
+        body: &Body,
+        face_at: Vec3,
+        plane_point: Vec3,
+        normal: Vec3,
+    ) -> Result<Vec<(solidcore_record::brep::Curve, [f64; 2])>> {
         let out = body
             .smlib()?
             .face_section(p(face_at), pick_reach(body), p(plane_point), p(normal), curve_tolerance(body))
@@ -226,12 +231,12 @@ mod imp {
     }
 
     /// SMLib's NURBS curves as record curves (rational splines) on their intervals.
-    fn record_curves(out: Vec<(Curve, [f64; 2])>, what: &str) -> Result<Vec<(solidcraft_geom::brep::Curve, [f64; 2])>> {
+    fn record_curves(out: Vec<(Curve, [f64; 2])>, what: &str) -> Result<Vec<(solidcore_record::brep::Curve, [f64; 2])>> {
         out.into_iter()
             .map(|(c, interval)| match c {
                 Curve::Nurbs { points, knots, .. } => {
                     let homogeneous = points.iter().map(|q| [q[0] * q[3], q[1] * q[3], q[2] * q[3], q[3]]).collect();
-                    Ok((solidcraft_geom::brep::Curve::RationalSpline { knots, homogeneous }, interval))
+                    Ok((solidcore_record::brep::Curve::RationalSpline { knots, homogeneous }, interval))
                 }
                 _ => Err(failed(what, "a curve SMLib made is not a B-spline")),
             })

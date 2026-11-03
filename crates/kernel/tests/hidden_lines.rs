@@ -2,8 +2,9 @@
 
 use std::f64::consts::{FRAC_PI_3, PI};
 
+use solidcore_record::brep;
 use solidcraft_geom::hlr::{Line, Options, Placement, Source, View, Visibility, hidden_lines, prepare};
-use solidcraft_geom::{Seg2, Vec2, Vec3, brep};
+use solidcraft_geom::{Seg2, Vec2, Vec3};
 use solidcraft_kernel::*;
 
 const TOLERANCE: f64 = 1e-3;

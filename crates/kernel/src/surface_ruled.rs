@@ -22,9 +22,9 @@
 
 use std::collections::HashMap;
 
+use solidcore_record::brep::{self as b, Brep};
 use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::eval::SurfaceEval;
-use solidcraft_geom::brep::{self as b, Brep};
 use solidcraft_geom::bspline::{CurveN, HPoint, NurbsSurface};
 
 use crate::body::Body;
@@ -362,7 +362,8 @@ fn normal_at(surface: &SurfaceEval, forward: bool, p: Vec3) -> Option<Vec3> {
 fn base_curve(r: &Brep, e: usize, forward: bool) -> Result<CurveN<4>> {
     let edge = r.edges.get(e).ok_or_else(|| KernelError::Invalid("an edge reference".into()))?;
     // On the curve itself: a conic's angles (its NURBS form, if any, is parameterised otherwise).
-    let [t0, t1] = edge.curve_interval().ok_or_else(|| KernelError::Invalid("an edge's NURBS form cannot be evaluated".into()))?;
+    let [t0, t1] = solidcraft_geom::brep::label::edge_curve_interval(edge)
+        .ok_or_else(|| KernelError::Invalid("an edge's NURBS form cannot be evaluated".into()))?;
     let c = match &edge.curve {
         b::Curve::Line { start, end } => {
             let at = |t: f64| [start[0] + (end[0] - start[0]) * t, start[1] + (end[1] - start[1]) * t, start[2] + (end[2] - start[2]) * t, 1.0];
@@ -1050,10 +1051,18 @@ fn face_of(mut parts: Parts, surface: b::Surface, uses: Vec<(b::Curve, [f64; 2],
         .enumerate()
         .map(|(i, (e, (forward, pc)))| {
             let edge = u32::try_from(i).map_err(|_| KernelError::Failed("ruled surface: an edge".into()))?;
-            Ok(b::pcurve::EdgeUse { edge, curve: e.parameters(), interval: e.interval, forward: *forward, tolerance, given: pc.as_ref() })
+            Ok(solidcraft_geom::brep::pcurve::EdgeUse {
+                edge,
+                curve: e.parameters(),
+                interval: e.interval,
+                forward: *forward,
+                tolerance,
+                given: pc.as_ref(),
+            })
         })
         .collect::<Result<Vec<_>>>()?;
-    let pcurves = b::pcurve::pcurves(&surface, &[loop_uses], tolerance).map_err(|e| KernelError::Failed(format!("ruled surface: {e}")))?;
+    let pcurves =
+        solidcraft_geom::brep::pcurve::pcurves(&surface, &[loop_uses], tolerance).map_err(|e| KernelError::Failed(format!("ruled surface: {e}")))?;
     let edges = given
         .iter()
         .zip(pcurves.into_iter().flatten())
@@ -1358,7 +1367,7 @@ mod tests {
     fn on_edges_of(s: &Body, b: &Body) -> usize {
         let on = |p: Vec3| {
             b.record().edges.iter().any(|e| match e.curve {
-                solidcraft_geom::brep::Curve::Line { start, end } => {
+                solidcore_record::brep::Curve::Line { start, end } => {
                     let (a, z) = (Vec3::new(start[0], start[1], start[2]), Vec3::new(end[0], end[1], end[2]));
                     p.dist_to_segment(a, z) < 1e-6
                 }

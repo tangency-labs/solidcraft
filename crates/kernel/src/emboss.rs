@@ -8,8 +8,9 @@ use crate::history::Change;
 use crate::numbered::NumberedRegion;
 use crate::offset::{Surf, face_edges, surf_of};
 use crate::{KernelError, Result, guard};
+use solidcore_record::brep::{Brep, Curve, Frame, Loop, Surface};
 use solidcraft_geom::brep::eval::CurveEval;
-use solidcraft_geom::brep::{Brep, Curve, Frame, Loop, Surface, form};
+use solidcraft_geom::brep::form;
 use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 fn fail(s: &str) -> KernelError {
@@ -44,7 +45,7 @@ fn wall_angles(b: &Brep, face: usize, o: Vec3, axis: Vec3, radial: Vec3, tangent
         // (`interval` is on its NURBS form where it has one) about the angle of its middle (a
         // whole turn, from the seam, for a wall in one piece).
         let c = CurveEval::new(&e.curve).ok()?;
-        let [t0, t1] = e.curve_interval()?;
+        let [t0, t1] = solidcraft_geom::brep::label::edge_curve_interval(e)?;
         let am = angle(c.point(0.5 * (t0 + t1))?, o, axis, radial, tangent);
         let half = 0.5 * (t1 - t0);
         return Some((am - half, am + half));

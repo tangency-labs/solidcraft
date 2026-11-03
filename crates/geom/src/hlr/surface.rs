@@ -7,8 +7,9 @@ use super::HlrError;
 use super::curve::{C3, as_circle, frame_axes, v3};
 use crate::Vec3;
 use crate::brep::eval::SurfaceEval;
-use crate::brep::{Curve, Face, Frame, Surface, form, placement::Rigid};
+use crate::brep::{form, placement::Rigid};
 use crate::bspline::{HPoint, NurbsSurface};
+use solidcore_record::brep::{Curve, Face, Frame, Surface};
 
 const TAU: f64 = std::f64::consts::TAU;
 

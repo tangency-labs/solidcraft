@@ -3,7 +3,8 @@
 //! against the analytic surface the loop was cut from, or against a quadrature of the fitted
 //! surface itself, never against the mesher alone.
 
-use solidcraft_geom::brep::{self as b, eval::CurveEval, eval::SurfaceEval};
+use solidcore_record::brep::{self as b};
+use solidcraft_geom::brep::{eval::CurveEval, eval::SurfaceEval};
 use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
 
 use super::{PATCH_ANGLE_TOL_DEG, PatchReport, PatchSpec, face_tolerance, patch_edges_report};
@@ -35,7 +36,11 @@ impl Faces {
                                     let [t0, t1] = r.edges[u.edge as usize].interval;
                                     (0..64).map(move |k| {
                                         let x = k as f64 / 64.0;
-                                        u.pcurve.eval(if u.forward { t0 + (t1 - t0) * x } else { t1 - (t1 - t0) * x }).unwrap()
+                                        solidcraft_geom::brep::pcurve::eval(
+                                            &u.pcurve,
+                                            if u.forward { t0 + (t1 - t0) * x } else { t1 - (t1 - t0) * x },
+                                        )
+                                        .unwrap()
                                     })
                                 })
                                 .collect(),

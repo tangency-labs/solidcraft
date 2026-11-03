@@ -6,8 +6,8 @@
 
 use std::collections::HashSet;
 
+use solidcore_record::brep::{self as b, Curve2, EdgeUseRef, Loop, OrientedEdge, OrientedFace, Region, Shell, Vertex};
 use solidcraft_geom::brep::pcurve::{SURFACE_GAP_MARGIN, TrimFace, Trims};
-use solidcraft_geom::brep::{self as b, Curve2, EdgeUseRef, Loop, OrientedEdge, OrientedFace, Region, Shell, Vertex};
 
 /// [`Trims`] by SMLib.
 #[derive(Clone, Copy, Debug, Default)]

@@ -779,7 +779,7 @@ fn moving_a_body_with_an_intersection_curve_edge_ends() {
         cut.record()
             .edges
             .iter()
-            .any(|e| !matches!(e.curve, solidcraft_geom::brep::Curve::Line { .. } | solidcraft_geom::brep::Curve::Circle { .. }))
+            .any(|e| !matches!(e.curve, solidcore_record::brep::Curve::Line { .. } | solidcore_record::brep::Curve::Circle { .. }))
     );
     let t = Vec3::new(0.6911, -0.3337, -0.6127) * 2.334;
     let moved = crate::ops::transform(&cut, t, Vec3::ZERO, Vec3::Z, 0.0).unwrap();

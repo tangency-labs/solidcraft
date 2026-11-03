@@ -27,7 +27,7 @@ fn assert_watertight(m: &Mesh, name: &str) {
 }
 
 /// The body's schema 4 record, which the planner takes.
-fn record(b: &Body) -> solidcraft_geom::brep::Brep {
+fn record(b: &Body) -> solidcore_record::brep::Brep {
     ok(crate::brep_record(b))
 }
 
@@ -816,7 +816,7 @@ fn a_face_bounded_by_two_short_arcs_keeps_an_area_to_mesh() {
     // inside a 0.5 mm tolerance, so each samples as one segment and the two chords lie on one
     // line, a boundary of no area. Its loop's segments are split until it encloses one.
     use crate::sew::{PartEdge, PartFace, PartUse, Parts, assemble};
-    use solidcraft_geom::brep::{Curve, Frame, Surface};
+    use solidcore_record::brep::{Curve, Frame, Surface};
     use std::f64::consts::{PI, TAU};
     let (r, half) = (1000.0f64, 10.0f64);
     let c = (r * r - half * half).sqrt();
@@ -873,8 +873,8 @@ fn a_face_bounded_by_two_short_arcs_keeps_an_area_to_mesh() {
 /// base to u = 2 and up again, then across the top back to the corner it started at, half a
 /// period along. Taken for no pole, that step is taken as the nearest copy, and the loop winds
 /// once round the surface with no partner to cut it along.
-fn pyramid_past_a_near_pole(pole_tolerance: f64) -> solidcraft_geom::brep::Brep {
-    use solidcraft_geom::brep::{self as b, Curve, Curve2, Surface};
+fn pyramid_past_a_near_pole(pole_tolerance: f64) -> solidcore_record::brep::Brep {
+    use solidcore_record::brep::{self as b, Curve, Curve2, Surface};
     let top = 1e-7;
     let corner = |u: usize, r: f64, z: f64| {
         let [x, y] = [[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]][u % 4];
