@@ -152,3 +152,6 @@ pub(crate) fn fits_steadily(ui: &egui::Ui, key: impl std::hash::Hash + std::fmt:
 // Share the existing CPU rasteriser with page-level artwork regressions.
 #[cfg(test)]
 pub(crate) use checks::tests::raster as raster_test_shapes;
+
+#[cfg(test)]
+pub(crate) use checks::tests::textures_update;

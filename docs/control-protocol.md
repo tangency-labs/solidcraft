@@ -784,7 +784,7 @@ no box selection.
 | `ui.render` | `path`, `width?`, `height?`, `grid?`, `axes?` | Render of the model with the current camera (no window needed), drawn on the app's GPU device with the viewport's pipelines (the reply's `renderer`: `gpu`, or `gpu-software` on a software adapter), in the window's theme (light or dark; `solidcraft-cli snapshot` keeps the light colours); cut by the section the viewport shows (`inspect.section`, an open Section Analysis dialog's preview, a sketch's Slice), with the cut face capped. The ground grid and the origin's axes are drawn as the window shows them (`ui.set` `showGrid` and `showOrigin`, `hiddenOrigin`); `grid` and `axes` (booleans) say otherwise for this render |
 | `ui.confirm` | `accept?`: bool | answers the Delete confirmation (shown when a delete takes other features with it or makes some fail); without `accept`, what it lists |
 | `ui.messages` | `clear?`: `true` (empty the list), `open?`: bool (show or hide the Messages window) | every status message of this run, oldest first (the last 200; a message repeated in a row is one entry with a `count`): `messages` `[{text, error, at, count}]` (`at` in ms since the Unix epoch), and whether the window is `open` (#2763) |
-| `ui.documents` | `action?`: `new`, `switch`, `close`, `quit`; `index?`; `force?` (close without asking); `answer?`: `save`, `dont_save`, `cancel` (answers "save changes?"); `open_elsewhere?`: `read_only`, `anyway`, `cancel` (answers "open elsewhere" for the first Open waiting); `changed_on_disk?`: `save_copy`, `overwrite`, `cancel` (answers "changed on disk" before a Save) | the open designs (tabs): names, unsaved flags, the active one, a pending "save changes?" prompt, whether a quit is asking, whether the active design is `read_only`, the Opens waiting for "open elsewhere" (`open_elsewhere`) and a waiting "changed on disk" (`changed_on_disk`) |
+| `ui.documents` | `action?`: `new`, `switch`, `close`, `close_all`, `close_others`, `move`, `quit`; `index?`; `from?`, `to?` (move); `save_indices?`: array of tab indices to tick in the grouped save prompt; `force?` (close without asking); `answer?`: `save`, `dont_save`, `cancel` (answers "save changes?"); `open_elsewhere?`: `read_only`, `anyway`, `cancel` (answers "open elsewhere" for the first Open waiting); `changed_on_disk?`: `save_copy`, `overwrite`, `cancel` (answers "changed on disk" before a Save) | the open designs (tabs): names, unsaved flags, the active one, a pending "save changes?" prompt, `save_prompt` (null or rows with `index`, `name`, `path` (null if never saved), `selected`), whether a quit is asking, whether the active design is `read_only`, the Opens waiting for "open elsewhere" (`open_elsewhere`) and a waiting "changed on disk" (`changed_on_disk`) |
 | `ui.file` | `path`; `insert?`: bool | starts an interactive background Open or Insert; poll `ui.inspect.file_busy` for completion; the window stays responsive |
 | `ui.home` | `open?`: bool; `sample?`: index | the start page: show or hide it, open a built-in sample (once built); returns `open` and the recent designs |
 | `ui.shortcut` | `command`, `key?`, `slot?`, `replace?` | a command's keys (`key`: the first, shown in menus; `keys`: all), or rebinds it: `key` becomes its only key, or with `slot` replaces its key there (one past the last adds a key, `""` there removes that key); `""` without `slot` clears them; key names are case-insensitive and modifiers are normalized (`shift+ctrl+t` becomes `Ctrl+Shift+T`); unknown and reserved keys are refused; a key another command uses is refused unless `replace` |
@@ -1091,3 +1091,22 @@ name, and Esc closes. Typing `command.id {"parameter": value}` validates JSON li
 through the same engine entry as `engine.execute`. Shift+Enter runs JSON and keeps the query
 open. Invalid JSON stays editable and reports the parser's error. Feature results open their
 existing edit tools; parameter results open Change Parameters filtered to that name.
+
+### Saving several designs before closing
+
+`ui.documents {"action":"close_all"}` (or `close_others` with the tab `index` to keep,
+or `quit`) returns one `save_prompt` list when more than one target design has unsaved
+changes. Only tabs in the addressed window participate. Each row starts selected.
+Read with `ui.documents {}`; change all ticks and answer in one call:
+`ui.documents {"save_indices":[0,2],"answer":"save"}`. Indices must belong to the
+pending list; invalid lists return an error without answering. An empty list saves
+nothing. Without `save_indices`, `answer:"save"` saves the current ticks.
+
+Selected designs save in tab order through the existing interactive save flow;
+never-saved designs ask for a location. Cancelling a picker or failing a save stops
+the close and keeps every tab open, including tabs already saved successfully.
+`answer:"dont_save"` discards all target changes and completes the close;
+`answer:"cancel"` keeps every tab open. This is an explicit UI workflow;
+`engine.execute` save commands continue to require paths and never open pickers.
+With `ui.prefs {"save_prompt_one_at_a_time":true}`, the previous individual prompts
+are used instead (default: false). One unsaved target always uses the original prompt.
