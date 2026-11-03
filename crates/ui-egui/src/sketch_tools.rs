@@ -1638,28 +1638,29 @@ const GLYPH: f32 = 15.0;
 /// a 10 mm feature is then smaller than a glyph.
 pub const MIN_GLYPH_PX_PER_MM: f32 = 2.0;
 
-/// Below `MIN_GLYPH_PX_PER_MM`, glyphs still draw while their anchors span at least this many
-/// screen pixels (the larger side of their bounds), twenty glyphs across (#10518): a large sketch
-/// that still fills the view keeps its glyphs; a small one far away loses them, as before.
+/// Below `MIN_GLYPH_PX_PER_MM`, glyphs still draw while the sketch's points and curves span at
+/// least this many screen pixels (the larger side of their bounds), twenty glyphs across (#10518):
+/// a large sketch that still fills the view keeps its glyphs; a small one far away loses them, as
+/// before.
 pub const MIN_GLYPH_SPAN_PX: f32 = 20.0 * GLYPH;
 
-/// Whether constraint glyphs should draw at this sketch-plane scale (#8980), given how far apart
-/// their anchors are on screen (`span_px`, only measured when zoomed out, #10518).
+/// Whether constraint glyphs should draw at this sketch-plane scale (#8980), given how large the
+/// sketch is on screen (`span_px`, only measured when zoomed out, #10518).
 pub fn constraint_glyphs_visible_at_scale(px_per_mm: f32, hide_when_zoomed_out: bool, span_px: impl FnOnce() -> f32) -> bool {
     !hide_when_zoomed_out || px_per_mm >= MIN_GLYPH_PX_PER_MM || span_px() >= MIN_GLYPH_SPAN_PX
 }
 
-/// The larger side, in screen pixels, of the bounds of the glyphs the active sketch draws. It
+/// The larger side, in screen pixels, of the bounds of the active sketch's points and curves. It
 /// stops measuring once that reaches `MIN_GLYPH_SPAN_PX`, so a large sketch costs no more.
-fn glyph_span_px(ss: &solidcraft_engine::doc::SolvedSketch, proj: &Proj) -> f32 {
+fn sketch_span_px(ss: &solidcraft_engine::doc::SolvedSketch, proj: &Proj) -> f32 {
+    let sk = &ss.sketch;
+    let at = sk.points.iter().map(|p| p.pos).chain((0..sk.curves.len()).flat_map(|c| sk.polyline(c)));
     let mut r = egui::Rect::NOTHING;
-    for c in glyph_constraints(&ss.sketch) {
-        for (at, _) in glyph_anchors(&ss.sketch, &c.kind) {
-            if let Some(p) = proj.to_screen(ss.plane.to_world(at)) {
-                r.extend_with(p);
-                if r.width().max(r.height()) >= MIN_GLYPH_SPAN_PX {
-                    return r.width().max(r.height());
-                }
+    for q in at {
+        if let Some(p) = proj.to_screen(ss.plane.to_world(q)) {
+            r.extend_with(p);
+            if r.width().max(r.height()) >= MIN_GLYPH_SPAN_PX {
+                return r.width().max(r.height());
             }
         }
     }
@@ -1706,7 +1707,7 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
     // Zoomed out far enough: fixed-size glyphs would dominate the sketch (#8980), unless the
     // sketch still spreads them across the view (#10518).
     if let Some(scale) = sketch_px_per_mm(&ss.plane, proj)
-        && !constraint_glyphs_visible_at_scale(scale, app.preferences.hide_constraint_glyphs_zoomed_out, || glyph_span_px(ss, proj))
+        && !constraint_glyphs_visible_at_scale(scale, app.preferences.hide_constraint_glyphs_zoomed_out, || sketch_span_px(ss, proj))
     {
         GLYPHS.with(|g| g.borrow_mut().clear());
         return;
@@ -1950,7 +1951,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
 mod glyph_zoom_tests {
     use super::{MIN_GLYPH_PX_PER_MM, MIN_GLYPH_SPAN_PX, constraint_glyphs_visible_at_scale};
 
-    /// A sketch whose glyph anchors sit close together on screen.
+    /// A sketch that is small on screen.
     fn small() -> f32 {
         40.0
     }

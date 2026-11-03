@@ -1576,7 +1576,7 @@ preference_settings! {
     /// glyphs and dimensions are red, in `error`, as before.
     sketch_conflict_colour: bool = true, PAGE_SKETCH;
     /// Hide constraint glyphs when the sketch is zoomed out so far that a millimetre of the plane
-    /// is smaller than `sketch_tools::MIN_GLYPH_PX_PER_MM` on screen (#8980) and the glyphs span
+    /// is smaller than `sketch_tools::MIN_GLYPH_PX_PER_MM` on screen (#8980) and the sketch spans
     /// less than `sketch_tools::MIN_GLYPH_SPAN_PX` (#10518). Off: glyphs stay at a fixed screen
     /// size at every zoom, as before.
     hide_constraint_glyphs_zoomed_out: bool = true, PAGE_SKETCH;
