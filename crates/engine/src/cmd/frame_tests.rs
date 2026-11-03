@@ -664,22 +664,8 @@ fn groups_place_and_name_their_members_their_own_way() {
     run(&mut s, "frame.member", grouped(&rails, &posts));
     let bs = boxes(&mut s);
     assert_eq!(bs.keys().collect::<Vec<_>>(), ["Post", "Post (2)", "Rail", "Rail (2)"], "{bs:?}");
-    // Each member's extent across its line: a rail lies with its 40 mm leg up, a post is turned
-    // a quarter, its 60 mm leg up.
-    let size = |name: &str| {
-        let (lo, hi) = bs[name];
-        [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]
-    };
-    for (name, want) in
-        [("Rail", [600.0, 60.0, 40.0]), ("Rail (2)", [600.0, 60.0, 40.0]), ("Post", [40.0, 400.0, 60.0]), ("Post (2)", [40.0, 400.0, 60.0])]
-    {
-        assert!(near3(size(name), want), "{name}: {:?} {bs:?}", size(name));
-    }
-    // The anchor puts the heel on the line: every member starts on z = 0.
-    assert!(bs.values().all(|(lo, _)| lo[2].abs() < 1e-6), "{bs:?}");
-    let area = f(&run(&mut s, "frame.profile.properties", json!({"profile": {"kind": "angle", "width": 60, "height": 40, "thickness": 5}}))["area"]);
-    let v = total_volume(&mut s);
-    assert!(rel(v, area * 2000.0) < MEASURED, "{v} vs {}", area * 2000.0);
+    // Where each group puts its members is graded in tests/kernel-cases/frames
+    // (cov-frame-member-groups-turned-their-own-way).
 }
 
 #[test]
