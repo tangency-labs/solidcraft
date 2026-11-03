@@ -238,7 +238,7 @@ pub(crate) fn drag_to(s: &Session, d: &mut Dialog, i: usize, near: Vec3) -> bool
         return false;
     }
     let Kind::Hole { opts, .. } = &d.kind else { return false };
-    let values: Option<Vec<f64>> = picked.iter().map(|k| opts.refs.distance.get(*k).and_then(|e| s.doc.eval(e, ValueKind::Length).ok())).collect();
+    let values: Option<Vec<f64>> = picked.iter().map(|k| model_text(&opts.refs, *k).and_then(|e| s.doc.eval(e, ValueKind::Length).ok())).collect();
     let Some(to) = values.and_then(|v| f.place(near, &v).ok()).filter(|c| on_reference_face(&crate::open_meshing::session_world(s), &f, *c)) else {
         return false;
     };
