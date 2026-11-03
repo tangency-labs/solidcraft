@@ -83,10 +83,6 @@ pub fn decode(bytes: &[u8]) -> Result<Saved> {
     check_value(&value)?;
     let saved: Saved = serde_json::from_value(value).map_err(invalid)?;
     check(&saved)?;
-    let size = saved.runtime.size;
-    if !(size.is_finite() && size >= 0.0) {
-        return Err(invalid("runtime values"));
-    }
     Ok(saved)
 }
 
@@ -102,10 +98,11 @@ pub fn write_value(value: &Value, out: &mut Vec<u8>) -> Result<()> {
     binary::write(value, out, 0)
 }
 
-/// The record's structure ([`Brep::validate`]) and the metadata's agreement with it.
+/// The record's structure ([`Brep::validate`]), metadata agreement and finite nonnegative runtime size.
 pub fn check(saved: &Saved) -> Result<()> {
     saved.solid.validate().map_err(invalid)?;
     let (faces, edges) = (saved.solid.faces.len(), saved.solid.edges.len());
+    let size = saved.runtime.size;
     let saved = &saved.metadata;
     if saved.version != envelope::VERSION {
         return Err(invalid("metadata version"));
@@ -148,6 +145,9 @@ pub fn check(saved: &Saved) -> Result<()> {
             }))
     {
         return Err(invalid("face paint"));
+    }
+    if !(size.is_finite() && size >= 0.0) {
+        return Err(invalid("runtime values"));
     }
     Ok(())
 }
@@ -249,6 +249,57 @@ mod tests {
             serde_json::to_value(&saved).unwrap()
         );
         assert!(raw.is_empty());
+    }
+
+    macro_rules! invalid_runtime_size {
+        ($name:ident, $size:expr) => {
+            #[test]
+            fn $name() {
+                let mut saved = point();
+                saved.runtime.size = $size;
+                let expected = Some("native B-rep: runtime values".to_owned());
+                assert_eq!(
+                    (
+                        check(&saved).err().map(|e| e.to_string()),
+                        encode(&saved).err().map(|e| e.to_string())
+                    ),
+                    (expected.clone(), expected)
+                );
+            }
+        };
+    }
+
+    invalid_runtime_size!(runtime_size_negative_refused, -1.0);
+    invalid_runtime_size!(runtime_size_nan_refused, f64::NAN);
+    invalid_runtime_size!(runtime_size_positive_infinity_refused, f64::INFINITY);
+    invalid_runtime_size!(runtime_size_negative_infinity_refused, f64::NEG_INFINITY);
+
+    #[test]
+    fn runtime_size_valid_bits_and_bytes_roundtrip() {
+        for size in [0.0_f64, -0.0, 2.5, 1e12] {
+            let mut saved = point();
+            saved.runtime.size = size;
+            check(&saved).unwrap();
+            let bytes = encode(&saved).unwrap();
+            let mut value_bytes = MAGIC.to_vec();
+            write_value(&serde_json::to_value(&saved).unwrap(), &mut value_bytes).unwrap();
+            assert_eq!(bytes, value_bytes);
+            let back = decode(&bytes).unwrap();
+            assert_eq!(back.runtime.size.to_bits(), size.to_bits());
+            assert_eq!(encode(&back).unwrap(), bytes);
+        }
+    }
+
+    #[test]
+    fn runtime_size_negative_file_refused() {
+        let mut saved = point();
+        saved.runtime.size = -1.0;
+        let mut bytes = MAGIC.to_vec();
+        write_value(&serde_json::to_value(&saved).unwrap(), &mut bytes).unwrap();
+        assert_eq!(
+            decode(&bytes).err().map(|e| e.to_string()),
+            Some("native B-rep: runtime values".into())
+        );
     }
 
     #[test]
