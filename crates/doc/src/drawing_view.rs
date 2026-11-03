@@ -81,7 +81,7 @@ pub struct ViewSettings {
     /// written when None: a snapshot refuses a null scale.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scale: Option<Scale>,
-    pub display_style: VisualStyle,
+    pub visual_style: VisualStyle,
     /// How reference parts draw (bill of materials type `reference`).
     pub reference_style: VisualStyle,
     /// Whether reference parts hide the model's lines behind them.
@@ -100,7 +100,7 @@ pub struct ViewOverrides {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scale: Option<Scale>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub display_style: Option<VisualStyle>,
+    pub visual_style: Option<VisualStyle>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reference_style: Option<VisualStyle>,
     #[serde(skip_serializing_if = "Option::is_none")]

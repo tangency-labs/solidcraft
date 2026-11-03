@@ -79,7 +79,7 @@ fn a_view_with_hidden_lines_exports_dashed() {
     run(&mut s, "solid.box", json!({"length": 40, "width": 10, "height": 10, "corner": [30, 40, 5], "operation": "cut", "targets": ["Block"]}));
     run(&mut s, "drawing.open", json!({"drawing": drawing}));
     assert!(!String::from_utf8(scene_svg(&s, sheet)).unwrap().contains("stroke-dasharray"));
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"display_style": "visible_hidden"}}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"visual_style": "visible_hidden"}}));
     let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
     let statuses: Vec<_> = reply["views"].as_array().unwrap().iter().map(|v| v["status"].clone()).collect();
     assert_eq!(statuses, [json!("drawn"), json!("drawn")], "{reply}");
@@ -95,11 +95,11 @@ fn a_failed_view_is_named_and_nothing_is_written() {
     let (mut s, sheet, [front, top]) = front_and_top();
     let folder = Folder::new("drawing-export-failed");
     let path = folder.path("sheet.svg");
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": "shaded_visible"}}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "shaded_visible"}}));
     let why = refused(&mut s, json!({"sheet": ids::encode(sheet), "path": path}));
     assert!(why.contains(&format!("views on the sheet failed: {} (not supported yet: shaded views with lines", ids::encode(top))), "{why}");
     assert!(!why.contains(&ids::encode(front)) && !std::path::Path::new(&path).exists(), "{why}");
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": "visible"}}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "visible"}}));
     for level in 0..=MAX_PLACEMENT_DEPTH as u64 + 1 {
         nest(&mut s, level);
     }
@@ -146,7 +146,7 @@ fn a_shaded_view_exports_its_picture() {
     let (mut s, sheet, [front, _]) = front_and_top();
     let plain = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}))["svg"].as_str().unwrap().to_owned();
     assert!(!plain.contains("<image"), "lines only: {}", plain.len());
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"display_style": "shaded"}}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"visual_style": "shaded"}}));
     let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
     let svg = reply["svg"].as_str().unwrap();
     assert_eq!(svg.matches("<image").count(), 2, "the front view's, and the top view's, which follows it: {reply}");
@@ -164,7 +164,7 @@ fn a_shaded_view_exports_its_picture() {
 #[test]
 fn a_shaded_views_picture_follows_the_parts_colour() {
     let (mut s, sheet, [front, _]) = front_and_top();
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"display_style": "shaded"}}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"visual_style": "shaded"}}));
     let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
     let coloured = |s: &mut Session, color: &str| {
         run(s, "drawing.close", json!({}));

@@ -10,7 +10,6 @@ fn schemas_and_the_key_check_agree() {
     let keys = [
         "chord_mm",
         "decimals",
-        "display_style",
         "hide",
         "max_error_mm",
         "measure",
@@ -25,10 +24,10 @@ fn schemas_and_the_key_check_agree() {
         "tangent_edges",
         "units",
         "view",
+        "visual_style",
     ];
     assert_keys(input_schema_for::<SnapshotParams>(), &keys);
     let base = [
-        "display_style",
         "position_mm",
         "reference_hides_model",
         "reference_shown_percent",
@@ -37,6 +36,7 @@ fn schemas_and_the_key_check_agree() {
         "sheet",
         "tangent_edges",
         "view",
+        "visual_style",
     ];
     assert_keys(input_schema_for::<BaseParams>(), &base);
     assert_keys(input_schema_for::<InspectParams>(), &["view"]);
@@ -52,7 +52,7 @@ fn schemas_and_the_key_check_agree() {
 fn the_edit_contract_lists_a_saved_views_settings() {
     let all = solidcraft_doc::drawing_view::ViewOverrides {
         scale: "1:2".parse().ok(),
-        display_style: Some(Default::default()),
+        visual_style: Some(Default::default()),
         reference_style: Some(Default::default()),
         reference_hides_model: Some(false),
         tangent_edges: Some(Default::default()),
@@ -89,7 +89,7 @@ fn strict_keeps_todays_errors() {
     assert_strict_keeps_todays_errors(&[
         ("drawing.view.snapshot", json!({"scale": "0:1"})),
         ("drawing.view.snapshot", json!({"view": "Front"})),
-        ("drawing.view.snapshot", json!({"display_style": "shaded_visible"})),
+        ("drawing.view.snapshot", json!({"visual_style": "shaded_visible"})),
         ("drawing.view.snapshot", json!({"sheet": {"dpi": 1e9}})),
     ]);
 }

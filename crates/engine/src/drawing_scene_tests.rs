@@ -262,7 +262,7 @@ fn a_view_with_hidden_lines_draws_them_as_its_snapshot_does() {
     run(&mut s, "solid.box", json!({"length": 40, "width": 10, "height": 10, "corner": [30, 40, 5], "operation": "cut", "targets": ["Block"]}));
     run(&mut s, "drawing.open", json!({"drawing": drawing.clone()}));
     let outline = settled(&mut s, sheet);
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"display_style": "visible_hidden"}}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"visual_style": "visible_hidden"}}));
     let waiting = extract(&mut s, sheet).unwrap();
     assert_eq!((waiting.stale.contains(&front), bytes(&waiting.scene)), (true, bytes(&outline.scene)));
     let scene = settled(&mut s, sheet).scene;
@@ -274,7 +274,7 @@ fn a_view_with_hidden_lines_draws_them_as_its_snapshot_does() {
     let v = run(
         &mut s,
         "drawing.view.snapshot",
-        json!({"view": "front", "scale": "1:2", "position_mm": [150, 150], "scene": true, "display_style": "visible_hidden"}),
+        json!({"view": "front", "scale": "1:2", "position_mm": [150, 150], "scene": true, "visual_style": "visible_hidden"}),
     );
     let snapped: Scene = serde_json::from_value(v["scene"].clone()).unwrap();
     assert!(same_within(&ours, &snapped.groups[0], 1e-9), "{ours:?} {:?}", snapped.groups[0]);
@@ -299,7 +299,7 @@ fn a_sheets_view_dashes_each_parts_hidden_lines_by_its_own_style() {
     run(&mut design, "occurrence.bom_type", json!({"occurrence": behind, "bom_type": "reference"}));
     let (mut s, sheet, [front, _]) = front_and_top_of(design);
     let mut dashed = |display: &str, reference: &str| {
-        run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"display_style": display, "reference_style": reference}}));
+        run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"visual_style": display, "reference_style": reference}}));
         let scene = settled(&mut s, sheet).scene;
         let ours = scene.groups.iter().find(|g| g.object == front).unwrap();
         ours.items.iter().filter(|item| matches!(item, Item::Stroke { pattern: Some(_), .. })).count()
@@ -317,7 +317,7 @@ fn a_view_that_cant_be_drawn_leaves_out_only_itself() {
     let (mut s, sheet, [front, top]) = front_and_top();
     let status = |s: &Session, id: u64| built(s, sheet).views.into_iter().find(|v| v.view == id).map(|v| v.status);
     let why = "not supported yet: shaded views with lines need the view's exact lines (W06)";
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": "shaded_visible"}}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "shaded_visible"}}));
     assert_eq!((status(&s, front), status(&s, top)), (Some(Status::Drawn), Some(Status::Failed(why.into()))));
     let objects: Vec<u64> = built(&s, sheet).scene.groups.iter().map(|g| g.object).collect();
     assert_eq!(objects, [sheet, sheet, sheet, front]);
@@ -718,7 +718,7 @@ fn a_sheets_objects_say_where_each_one_is() {
 #[test]
 fn a_view_with_no_lines_is_an_object_at_its_boundary() {
     let (mut s, sheet, [front, top]) = front_and_top();
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": "shaded"}}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "shaded"}}));
     let object = |s: &Session, id: u64| built(s, sheet).objects.into_iter().find(|o| o.object == id).unwrap();
     let failed = object(&s, top);
     assert!(near(&failed.bounds_mm, [125.0, 207.5], [175.0, 232.5]) && failed.boundary_mm == Some(failed.bounds_mm), "{failed:?}");
@@ -846,7 +846,7 @@ fn status_says_which_views_are_out_of_date() {
 #[test]
 fn status_says_why_a_view_has_no_lines() {
     let (mut s, sheet, [front, top]) = front_and_top();
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": "shaded_visible"}}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "shaded_visible"}}));
     settled(&mut s, sheet);
     let (reply, words) = status_of(&mut s);
     assert_eq!((words[&front].as_str(), words[&top].as_str()), ("current", "failed"), "{reply}");
@@ -855,7 +855,7 @@ fn status_says_why_a_view_has_no_lines() {
     assert_eq!(failed["sheet"], json!(ids::encode(sheet)), "{reply}");
 
     run(&mut s, "drawing.sheet.add", json!({"name": "Other"}));
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": null}}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": null}}));
     run(&mut s, "drawing.view.move_to_sheet", json!({"view": ids::encode(top), "sheet": "Other", "break_alignment": true}));
     settled(&mut s, sheet);
     let (reply, words) = status_of(&mut s);
@@ -1063,7 +1063,7 @@ fn delete_hole(s: &mut Session, drawing: &str) {
 fn a_lost_dimension_leaves_the_sheet_drawn_and_is_listed() {
     let (mut s, sheet, [front, top]) = front_and_top();
     let on_top = top_edge(&mut s, top);
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": "shaded_visible"}}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "shaded_visible"}}));
     let view_failed = settled(&mut s, sheet);
     let held = view_failed.dimensions.iter().find(|d| d.dimension == on_top).unwrap();
     assert!(!held.drawn && held.why.as_deref() == Some("its view isn't drawn"), "{held:?}");

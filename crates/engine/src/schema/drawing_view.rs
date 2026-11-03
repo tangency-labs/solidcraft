@@ -38,7 +38,7 @@ pub struct SnapshotParams {
     #[serde(deserialize_with = "super::present")]
     #[schemars(with = "ScaleParam")]
     pub scale: Option<ScaleParam>,
-    pub display_style: StyleParam,
+    pub visual_style: StyleParam,
     pub reference_style: StyleParam,
     /// Whether reference parts hide the model's lines behind them (false when not given).
     pub reference_hides_model: bool,
@@ -131,7 +131,7 @@ impl SnapshotParams {
         ViewSettings {
             view: self.view.0,
             scale: self.scale.map(|s| s.0),
-            display_style: self.display_style.0,
+            visual_style: self.visual_style.0,
             reference_style: self.reference_style.0,
             reference_hides_model: self.reference_hides_model,
             reference_shown_percent: self.reference_shown_percent,
@@ -341,7 +341,7 @@ pub struct ViewSet {
     #[serde(deserialize_with = "super::present")]
     pub scale: Option<Option<ScaleParam>>,
     #[serde(deserialize_with = "super::present")]
-    pub display_style: Option<Option<StyleParam>>,
+    pub visual_style: Option<Option<StyleParam>>,
     #[serde(deserialize_with = "super::present")]
     pub reference_style: Option<Option<StyleParam>>,
     #[serde(deserialize_with = "super::present")]
@@ -391,7 +391,7 @@ pub struct SettingResult<T> {
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct SettingsResult {
     pub scale: SettingResult<String>,
-    pub display_style: SettingResult<String>,
+    pub visual_style: SettingResult<String>,
     pub reference_style: SettingResult<String>,
     pub reference_hides_model: SettingResult<bool>,
     pub tangent_edges: SettingResult<String>,
@@ -400,7 +400,7 @@ pub struct SettingsResult {
 /// The values a window offers for a view's settings.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ChoicesResult {
-    pub display_style: Vec<String>,
+    pub visual_style: Vec<String>,
     /// ISO 5455's preset scales, largest first.
     pub scale: Vec<String>,
 }
@@ -518,7 +518,7 @@ pub struct BaseParams {
     pub position_mm: Option<Point2>,
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "StyleParam")]
-    pub display_style: Option<StyleParam>,
+    pub visual_style: Option<StyleParam>,
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "StyleParam")]
     pub reference_style: Option<StyleParam>,
@@ -878,7 +878,7 @@ pub struct SnapshotResult {
     pub position_mm: [f64; 2],
     /// The sheet the view is placed on, its defaults filled in.
     pub sheet: SheetParam,
-    pub display_style: String,
+    pub visual_style: String,
     pub reference_style: String,
     pub extents: ExtentsResult,
     /// The view's box on the sheet: `position_mm` at its centre, the extents at the scale.

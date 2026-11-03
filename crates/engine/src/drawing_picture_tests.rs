@@ -78,7 +78,7 @@ fn notched(scale: &str) -> (Session, u64, u64) {
     let view = run(
         &mut s,
         "drawing.view.base",
-        json!({"sheet": "Sheet 1", "view": "front", "scale": scale, "position_mm": [200, 150], "display_style": "shaded"}),
+        json!({"sheet": "Sheet 1", "view": "front", "scale": scale, "position_mm": [200, 150], "visual_style": "shaded"}),
     );
     let id = ids::decode(view["view"].as_str().unwrap()).unwrap();
     let sheet = s.drawing("test").unwrap().sheets[0].id;
@@ -176,7 +176,7 @@ fn references_grow_a_picture_and_it_stays_on_the_lines() {
     run(&mut s, "occurrence.move", json!({"occurrence": over, "translate": [10, 0, 10]}));
     run(&mut s, "occurrence.bom_type", json!({"occurrence": over, "bom_type": "reference"}));
     run(&mut s, "drawing.create", json!({}));
-    let p = json!({"sheet": "Sheet 1", "view": "front", "scale": "1:1", "position_mm": [200, 150], "display_style": "shaded",
+    let p = json!({"sheet": "Sheet 1", "view": "front", "scale": "1:1", "position_mm": [200, 150], "visual_style": "shaded",
                    "reference_style": "shaded", "reference_shown_percent": 100});
     let id = ids::decode(run(&mut s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap();
     let sheet = s.drawing("test").unwrap().sheets[0].id;
@@ -211,7 +211,7 @@ fn a_reference_with_lines_only_hides_the_model_and_draws_nothing() {
     run(&mut s, "occurrence.move", json!({"occurrence": over, "translate": [10, -30, 0]}));
     run(&mut s, "occurrence.bom_type", json!({"occurrence": over, "bom_type": "reference"}));
     run(&mut s, "drawing.create", json!({}));
-    let p = json!({"sheet": "Sheet 1", "view": "front", "scale": "1:1", "position_mm": [200, 150], "display_style": "shaded",
+    let p = json!({"sheet": "Sheet 1", "view": "front", "scale": "1:1", "position_mm": [200, 150], "visual_style": "shaded",
                    "reference_style": "visible", "reference_hides_model": true});
     let id = ids::decode(run(&mut s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap();
     let sheet = s.drawing("test").unwrap().sheets[0].id;
@@ -257,7 +257,7 @@ fn a_view_wider_than_a_task_is_drawn() {
     let view = run(
         &mut s,
         "drawing.view.base",
-        json!({"sheet": "Sheet 1", "view": "front", "scale": "1:1", "position_mm": [210, 150], "display_style": "shaded"}),
+        json!({"sheet": "Sheet 1", "view": "front", "scale": "1:1", "position_mm": [210, 150], "visual_style": "shaded"}),
     );
     let id = ids::decode(view["view"].as_str().unwrap()).unwrap();
     let sheet = s.drawing("test").unwrap().sheets[0].id;
@@ -316,12 +316,12 @@ fn a_views_pictures_lie_under_its_lines_and_each_other() {
         assert!(group.items.iter().skip(sources.len()).all(|i| matches!(i, Item::Stroke { .. })), "{:?}", group.items);
         (sources, group.items.len())
     };
-    let (two, count) = items(&mut s, json!({"display_style": "shaded", "reference_style": "shaded", "reference_hides_model": false}));
+    let (two, count) = items(&mut s, json!({"visual_style": "shaded", "reference_style": "shaded", "reference_hides_model": false}));
     assert_eq!((two, count), (vec![id ^ UNDER, id], 2));
     assert_eq!(items(&mut s, json!({"reference_hides_model": true})), (vec![id], 1));
     let (model, count) = items(&mut s, json!({"reference_style": "visible", "reference_hides_model": false}));
     assert!(model == [id] && count > 1, "{model:?} {count}");
-    let (reference, count) = items(&mut s, json!({"display_style": "visible", "reference_style": "shaded"}));
+    let (reference, count) = items(&mut s, json!({"visual_style": "visible", "reference_style": "shaded"}));
     assert!(reference == [id] && count > 1, "{reference:?} {count}");
     assert_eq!(items(&mut s, json!({"reference_style": "visible"})).0, Vec::<u64>::new());
 }

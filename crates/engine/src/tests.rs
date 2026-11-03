@@ -1085,7 +1085,7 @@ fn hostile_params_never_panic() {
         "stitch",
         "extend",
         "view",
-        "display_style",
+        "visual_style",
         "reference_style",
         "reference_hides_model",
         "reference_shown_percent",
