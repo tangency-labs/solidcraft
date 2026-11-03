@@ -130,7 +130,8 @@ impl Shape {
         let mut corners: Vec<([Vec3; 3], u32)> = Vec::new();
         for (t, face) in tris.as_chunks::<3>().0.iter().zip(faces.iter().chain(std::iter::repeat(&0))) {
             let at = |i: u16| points.get(usize::from(i)).map(point);
-            let (Some(a), Some(b), Some(c)) = (at(t[0]), at(t[1]), at(t[2])) else { continue };
+            // A corner past the points is a damaged snapshot: refuse it rather than draw part of it.
+            let (Some(a), Some(b), Some(c)) = (at(t[0]), at(t[1]), at(t[2])) else { return None };
             corners.push(([a, b, c], u32::from(*face)));
         }
         if corners.is_empty() {
@@ -648,6 +649,9 @@ mod tests {
             assert_eq!(state.shape.is_some(), state.stored().is_object(), "{c}");
         }
         assert!(Shape::from_json(&json!({"name": "x", "v": [0, 0, 0], "t": [0, 1, 2], "f": [0]})).is_none());
+        let mut damaged = good.clone();
+        damaged["t"] = json!(words(&[0, 1, 2, 0, 1, 9999]));
+        assert!(Shape::from_json(&damaged).is_none(), "one triangle past the points refuses the whole snapshot");
         let mut over = good;
         over["t"] = json!(words(&vec![0; 3 * MAX_TRIANGLES + 3]));
         assert!(Shape::from_json(&over).is_none(), "more triangles than the limit are refused");
