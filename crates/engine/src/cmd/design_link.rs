@@ -174,20 +174,25 @@ pub(super) fn link_presence(file: &Path, design: Option<&str>) -> Option<LinkPro
 
 /// The bytes of the linked design at `file`, linked from the design saved at `design`, read
 /// through the folders the caller may use, or why they can't be: a network location not allowed
-/// or a device (judged from the path's text before anything is read), not a design file name,
-/// missing, larger than the design size limit, or outside an agent's folders. Each with the
+/// or a device (judged from the path's text before anything is read), not a design or STEP file
+/// name, missing, larger than the design (or STEP) size limit, or outside an agent's folders. Each with the
 /// reason to show. Every kind of link reads its file here.
 pub(super) fn read_linked_file(file: &Path, design: Option<&str>) -> Result<Vec<u8>, LinkProblem> {
     let shown = file.display().to_string();
     if let Some(why) = refusal(&shown, design) {
         return Err(why);
     }
-    if !solidcraft_io::is_design_path(&shown) {
+    // A linked STEP file is read under the STEP size limit; every other link is a design.
+    let step = super::component_link::is_step_source(&shown);
+    if !step && !solidcraft_io::is_design_path(&shown) {
         return Err(problem(LinkState::Unreadable, format!("{shown}: not a .{} design", solidcraft_io::DESIGN_EXT)));
     }
-    let limit = solidcraft_io::limits::max_design_bytes();
-    solidcraft_io::vfs::read_design_path(&shown, design, limit)
-        .map_err(|e| io_problem(&shown, &solidcraft_io::limits::explain(solidcraft_io::limits::Kind::Design, e)))
+    let (kind, limit) = if step {
+        (solidcraft_io::limits::Kind::Step, solidcraft_io::limits::max_step_bytes())
+    } else {
+        (solidcraft_io::limits::Kind::Design, solidcraft_io::limits::max_design_bytes())
+    };
+    solidcraft_io::vfs::read_design_path(&shown, design, limit).map_err(|e| io_problem(&shown, &solidcraft_io::limits::explain(kind, e)))
 }
 
 #[cfg(test)]
