@@ -47,6 +47,7 @@
 
 pub mod chamfer;
 pub mod convert;
+pub mod corner;
 pub mod exact;
 pub mod record;
 
@@ -1318,33 +1319,77 @@ pub enum BlendRef<'a> {
         /// The surface, its net.
         net: &'a Surface,
     },
+    /// A blend corner's face (#2488) and its surface.
+    Corner {
+        /// The definition.
+        corner: &'a corner::CornerDefinition,
+        /// The surface, its net.
+        net: &'a Surface,
+    },
+}
+
+/// The definition a surface keeps beside its kind ([`Surface::procedural_blend`]): a round
+/// of an exact class (#2485) or a blend corner's face (#2488).
+#[derive(Debug, Clone)]
+pub enum KeptDefinition {
+    /// An exact round's.
+    Round(exact::ExactRound),
+    /// A blend corner face's.
+    Corner(corner::CornerDefinition),
+}
+
+impl KeptDefinition {
+    /// Moves the definition with its net ([`exact::ExactRound::transform`],
+    /// [`corner::CornerDefinition::transform`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of the two motions.
+    pub fn transform(
+        &mut self,
+        k: &Kernel,
+        rotate_n_move: &Axis2Placement,
+        scale: Option<Vec3>,
+        depth: usize,
+    ) -> Result<()> {
+        match self {
+            Self::Round(r) => r.transform(k, rotate_n_move, scale, depth),
+            Self::Corner(c) => c.transform(k, rotate_n_move, scale, depth),
+        }
+    }
 }
 
 impl<'a> BlendRef<'a> {
     /// The net.
     #[must_use]
-    pub const fn net(&self) -> BlendNet<'a> {
+    pub fn net(&self) -> BlendNet<'a> {
         match *self {
             Self::Procedural(p) => BlendNet::Approx(&p.net),
             Self::Exact { net, .. } => BlendNet::Exact(net),
+            Self::Corner { corner, net } => match (corner.is_exact(), net.kind()) {
+                (false, SurfaceKind::BSpline(b)) => BlendNet::Approx(b),
+                _ => BlendNet::Exact(net),
+            },
         }
     }
 
     /// The net's certified distance from the definition (0 for an exact round).
     #[must_use]
-    pub const fn bound(&self) -> f64 {
+    pub fn bound(&self) -> f64 {
         match *self {
             Self::Procedural(p) => p.def.bound,
             Self::Exact { round, .. } => round.bound(),
+            Self::Corner { corner, .. } => corner.bound(),
         }
     }
 
-    /// The section's order.
+    /// The section's order; for a corner's face, the order it meets its neighbours to (1: G1).
     #[must_use]
-    pub const fn order(&self) -> u32 {
+    pub fn order(&self) -> u32 {
         match *self {
             Self::Procedural(p) => p.def.order,
             Self::Exact { round, .. } => round.order(),
+            Self::Corner { corner, .. } => corner.order(),
         }
     }
 
@@ -1354,6 +1399,7 @@ impl<'a> BlendRef<'a> {
         match *self {
             Self::Procedural(p) => p.support(i),
             Self::Exact { round, .. } => round.support(i),
+            Self::Corner { corner, .. } => corner.support(i),
         }
     }
 
@@ -1361,8 +1407,17 @@ impl<'a> BlendRef<'a> {
     #[must_use]
     pub const fn exact(&self) -> Option<&'a exact::ExactRound> {
         match *self {
-            Self::Procedural(_) => None,
             Self::Exact { round, .. } => Some(round),
+            Self::Procedural(_) | Self::Corner { .. } => None,
+        }
+    }
+
+    /// The corner face's definition, for a blend corner's face (#2488).
+    #[must_use]
+    pub const fn corner(&self) -> Option<&'a corner::CornerDefinition> {
+        match *self {
+            Self::Corner { corner, .. } => Some(corner),
+            Self::Procedural(_) | Self::Exact { .. } => None,
         }
     }
 
@@ -1376,6 +1431,7 @@ impl<'a> BlendRef<'a> {
         match *self {
             Self::Procedural(p) => p.recertify(k),
             Self::Exact { round, net } => round.recertify(k, net),
+            Self::Corner { corner, net } => corner.recertify(k, net),
         }
     }
 }

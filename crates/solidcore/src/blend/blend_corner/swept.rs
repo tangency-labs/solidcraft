@@ -50,6 +50,7 @@ use crate::kernel::Kernel;
 use crate::math::{rad_to_deg, Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::surface::procedural_blend::corner::CornerDefinition;
 use crate::surface::surface::Surface;
 use crate::surface::torus::{Torus, TorusOptions};
 use crate::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
@@ -502,7 +503,19 @@ pub fn swept_corner_edge_geom(
             return Err(err());
         }
     }
-    let surface = Surface::from(torus);
+    let mut surface = Surface::from(torus);
+    if k.fixes.fillet_round_as_definition {
+        keep_definition(
+            k,
+            target,
+            corner,
+            &mut surface,
+            (line_pt, axis),
+            centre,
+            minor,
+            tol,
+        )?;
+    }
     let natural = surface.natural_uv_domain_with_nurb(k)?;
     let trims = surface.create_natural_uv_trim_curves(k, &natural, SurfParamType::V, true)?;
     if trims.curves_3d.len() != 3 || trims.uv_curves.len() != 3 || trims.orients.len() != 3 {
@@ -542,6 +555,42 @@ pub fn swept_corner_edge_geom(
     swept.curves_3d = trims.curves_3d;
     swept.uv_curves = trims.uv_curves.into_iter().map(Curve::from).collect();
     swept.orients = trims.orients;
+    Ok(())
+}
+
+/// Not the fork (#2488, with `fillet_round_as_definition`): the Swept turn's torus keeps
+/// its definition ([`CornerDefinition::swept`]): the rounds' common face, the side edge's
+/// line, the balls' centres at the side vertex and their radius, re-certified at once
+/// ([`CornerDefinition::recertify`]: the net a torus, the torus the end section's about the
+/// side edge, on the common face).
+///
+/// # Errors
+///
+/// [`SolidError::null_pointer`] without the rounds' edge uses, their common face or its
+/// surface; those of the definition and its re-certification.
+#[allow(clippy::too_many_arguments)]
+fn keep_definition(
+    k: &Kernel,
+    target: &Brep,
+    corner: &FilletCorner,
+    surface: &mut Surface,
+    (axis_point, axis): (Point3, Vec3),
+    centres: [Point3; 2],
+    radius: f64,
+    tol: f64,
+) -> Result<()> {
+    let nul = || SolidError::null_pointer(OP_BUILD);
+    let swept = corner.swept.as_ref().ok_or_else(nul)?;
+    let eus = corner.solver_eus.as_deref().ok_or_else(nul)?;
+    let (Some(&eu1_), Some(&eu2_)) = (eus.first(), eus.get(1)) else {
+        return Err(nul());
+    };
+    let common = face_by_two_edgeuses(target, Some(eu1_), Some(eu2_), Some(swept.side_eu))?
+        .ok_or_else(nul)?;
+    let common = face2::surface(target, common)?.ok_or_else(nul)?;
+    let definition = CornerDefinition::swept(k, common, axis_point, axis, centres, radius, tol)?;
+    definition.recertify(k, surface)?;
+    surface.set_corner_definition(definition);
     Ok(())
 }
 

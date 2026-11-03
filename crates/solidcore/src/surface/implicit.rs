@@ -725,7 +725,7 @@ impl AnalyticSupport {
     }
 
     /// Its implicit equation's data.
-    fn implicit(&self) -> Implicit {
+    pub(crate) fn implicit(&self) -> Implicit {
         let axis = |p: &Axis2Placement| p.x_axis().cross(p.y_axis());
         match self {
             Self::Plane { placement, .. } => Implicit::Plane {

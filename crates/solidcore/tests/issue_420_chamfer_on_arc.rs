@@ -155,6 +155,7 @@ fn definitions(b: &Brep) -> Vec<ProceduralBlend> {
             |&f| match b.face(f).unwrap().surface.as_ref()?.procedural_blend()? {
                 BlendRef::Procedural(pb) => Some(pb.clone()),
                 BlendRef::Exact { .. } => panic!("a chamfer on a cylinder is certified"),
+                BlendRef::Corner { .. } => None,
             },
         )
         .collect()

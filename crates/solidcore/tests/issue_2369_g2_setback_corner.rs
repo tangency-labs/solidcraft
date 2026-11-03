@@ -134,7 +134,18 @@ type Made = (FilletCornerType, Option<BlendCornerEvent>);
 /// with the G2 section at the equal-area thumbweight, the corners created, then filleted
 /// and stitched.
 fn round(blend: bool, file: &str, picks: &[[f64; 3]]) -> (Kernel, Brep, Made) {
+    round_kept(blend, true, file, picks)
+}
+
+/// [`round`], with `definition` (`fillet_round_as_definition`, #2488) set.
+fn round_kept(
+    blend: bool,
+    definition: bool,
+    file: &str,
+    picks: &[[f64; 3]],
+) -> (Kernel, Brep, Made) {
     let mut k = kernel(blend);
+    k.fixes.fillet_round_as_definition = definition;
     let mut b = read(&mut k, file);
     let es: Vec<EdgeId> = picks.iter().map(|p| pick(&k, &b, *p)).collect();
     let vtx = corner_vertex(&b, &es);
@@ -267,4 +278,174 @@ fn pocket_corner_without_the_flag_is_the_pinned_corner() {
     let (mut k, mut b, made) = round(false, "issue_2369_g2_pocket_corner.smb", &POCKET);
     assert_pinned(made);
     assert_built(&mut k, &mut b, 15, 21046.181316782);
+}
+
+// ---- #2488: a Setback's fill patches keep the fill's definition ----
+
+use solidcore::surface::procedural_blend::convert::{corner_rebuild, corner_to_record};
+use solidcore::surface::procedural_blend::corner::CornerKind;
+use solidcore::surface::procedural_blend::record::{CornerRecord, SupportRecord};
+use solidcore::surface::procedural_blend::BlendNet;
+use solidcore::surface::surface::{Surface, SurfaceKind};
+use solidcore::topology::face::p2 as face2;
+
+/// The faces' surfaces whose definition is a corner's of `kind`.
+fn corner_faces(b: &Brep, kind: CornerKind) -> Vec<Surface> {
+    b.faces()
+        .ids()
+        .filter_map(|f| face2::surface(b, f).unwrap().cloned())
+        .filter(|s| {
+            s.procedural_blend()
+                .and_then(|d| d.corner())
+                .is_some_and(|c| c.kind() == kind)
+        })
+        .collect()
+}
+
+/// Every face's surface over a 9 x 9 grid of its natural domain, as bits; a round that is
+/// a procedural blend by its net (its own definition is #2480's, and evaluates by solving
+/// it).
+fn face_bits(k: &Kernel, b: &Brep) -> Vec<Vec<[u64; 3]>> {
+    b.faces()
+        .ids()
+        .filter_map(|f| face2::surface(b, f).unwrap())
+        .map(|s| {
+            let s = match s.kind() {
+                SurfaceKind::ProceduralBlend(pb) => Surface::from(pb.net().copy()),
+                _ => s.clone(),
+            };
+            let d = s.natural_uv_domain_with_nurb(k).unwrap();
+            let mut pts = Vec::new();
+            for i in 0..=8 {
+                for j in 0..=8 {
+                    let u = d.min().x + (d.max().x - d.min().x) * f64::from(i) / 8.0;
+                    let v = d.min().y + (d.max().y - d.min().y) * f64::from(j) / 8.0;
+                    let p = s
+                        .evaluate_point(k, solidcore::geom::vector2d::Point2::new(u, v))
+                        .unwrap();
+                    pts.push([p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]);
+                }
+            }
+            pts
+        })
+        .collect()
+}
+
+const CASES: [(&str, &[[f64; 3]]); 2] = [
+    ("issue_2369_g2_bar_corner.smb", &BAR),
+    ("issue_2369_g2_pocket_corner.smb", &POCKET),
+];
+
+#[test]
+fn the_setback_fills_are_their_definitions() {
+    for (file, picks) in CASES {
+        let (k, mut b, made) = round_kept(true, true, file, picks);
+        assert_setback(made);
+        let patches = corner_faces(&b, CornerKind::Setback);
+        assert_eq!(patches.len(), 6, "{file}");
+        for s in &patches {
+            let d = s.procedural_blend().unwrap();
+            assert!(matches!(d.net(), BlendNet::Approx(_)));
+            // the fill's tolerance bounds it; where built, the net is the rule's patch
+            assert!(d.bound() > 0.0 && d.bound() < 1e-3, "{}", d.bound());
+            assert_eq!(d.order(), 2);
+            assert!((0..3).all(|i| d.support(i).is_some()));
+            assert_eq!(d.recertify(&k).unwrap(), 0.0);
+        }
+        // the volume and every surface as without the definition, to the rounding of the part
+        // (the flag also makes the G2 rounds procedural blends, #2480, evaluated by their
+        // definitions, and the fill reads the rounds' own evaluations; the corner's definition
+        // itself changes no number: its build makes the fill again and requires it bit for bit)
+        let (k0, mut b0, _) = round_kept(true, false, file, picks);
+        assert!(corner_faces(&b0, CornerKind::Setback).is_empty());
+        let (v, v0) = (volume(&k, &mut b), volume(&k0, &mut b0));
+        eprintln!("{file}: volume {v:.17e}, without the definition {v0:.17e}");
+        assert!((v - v0).abs() <= 1e-12 * v0, "{v} against {v0}");
+        let (on, off) = (face_bits(&k, &b), face_bits(&k0, &b0));
+        assert_eq!(on.len(), off.len());
+        let kinds: Vec<String> = b
+            .faces()
+            .ids()
+            .filter_map(|f| face2::surface(&b, f).unwrap())
+            .map(|s| format!("{:?}", std::mem::discriminant(s.kind())))
+            .collect();
+        for (i, (x, y)) in on.iter().zip(&off).enumerate() {
+            let worst = x
+                .iter()
+                .zip(y)
+                .map(|(p, q)| {
+                    (0..3)
+                        .map(|c| (f64::from_bits(p[c]) - f64::from_bits(q[c])).abs())
+                        .fold(0.0, f64::max)
+                })
+                .fold(0.0, f64::max);
+            // (64 ulps of the part's size, 40)
+            let tol = 64.0 * f64::EPSILON * 40.0;
+            assert!(
+                worst <= tol,
+                "{file}: face {i} ({}) differs by {worst:e}",
+                kinds[i]
+            );
+        }
+    }
+}
+
+#[test]
+fn a_setback_fill_round_trips_through_its_record() {
+    let (k, b, _) = round_kept(true, true, "issue_2369_g2_bar_corner.smb", &BAR);
+    for s in corner_faces(&b, CornerKind::Setback) {
+        let rec = corner_to_record(&k, &s).unwrap();
+        let json = serde_json::to_string(&rec).unwrap();
+        let back = corner_rebuild(&k, &serde_json::from_str(&json).unwrap()).unwrap();
+        assert_eq!(corner_to_record(&k, &back).unwrap(), rec);
+        let d = back.procedural_blend().unwrap().recertify(&k).unwrap();
+        eprintln!("rebuilt: {d:e} from the fill made again");
+    }
+}
+
+#[test]
+fn a_moved_setback_fill_is_certified_again() {
+    let (k, b, _) = round_kept(true, true, "issue_2369_g2_bar_corner.smb", &BAR);
+    for s in corner_faces(&b, CornerKind::Setback) {
+        let mut s = s.copy(&k).unwrap();
+        let mut place = solidcore::geom::axis2_placement::Axis2Placement::default();
+        place.rotate_about_axis(
+            0.3,
+            solidcore::math::Vec3::new(1.0, 2.0, 3.0).unitize().unwrap(),
+        );
+        place.translate(solidcore::math::Vec3::new(1e2, -2e2, 5e1));
+        s.transform(&k, &place, None).unwrap();
+        let d = s.procedural_blend().unwrap();
+        let proved = d.recertify(&k).unwrap();
+        eprintln!("moved: {proved:e}");
+        assert!(proved <= d.bound());
+    }
+}
+
+#[test]
+fn a_setback_fill_off_its_rounds_is_refused() {
+    let (k, b, _) = round_kept(true, true, "issue_2369_g2_bar_corner.smb", &BAR);
+    let s = &corner_faces(&b, CornerKind::Setback)[0];
+    let CornerRecord::Setback(rec) = corner_to_record(&k, s).unwrap() else {
+        panic!("not a setback's record");
+    };
+    // a round's surface moved: the rule makes another fill
+    let mut off = rec.clone();
+    let moved = match &mut off.rounds[0].surface {
+        SupportRecord::Nurbs { form, .. } => &mut form.points,
+        SupportRecord::Blend(b) => &mut b.net.points,
+    };
+    for p in moved.iter_mut() {
+        p[0] += 1e-3;
+    }
+    assert!(corner_rebuild(&k, &CornerRecord::Setback(off)).is_err());
+    // the net moved off its fill
+    let mut off = rec;
+    for p in &mut off.net.points {
+        p[2] += 1e-3;
+    }
+    let why = corner_rebuild(&k, &CornerRecord::Setback(off))
+        .unwrap_err()
+        .to_string();
+    assert!(why.contains("not its fill's"), "{why}");
 }

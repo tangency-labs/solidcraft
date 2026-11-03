@@ -249,17 +249,13 @@ fn a_mixed_convexity_end_s_rail_ends_on_the_end_face_s_surface() {
     }
 }
 
-/// The same End on a plane wall sloped back (the upper block's profile (0, 10), (20, 10),
-/// (17, 20), (0, 20) swept along y): the rail ends at (20.6, 0, 8), and the round takes
-/// 20 (4 - pi) - 0.3 (20/3 - 2 pi) = 78 - 19.4 pi. The fork 5e8c9c1 prints
-/// 17532.946897573881870 (9.4e-8 off the closed form) with the same rail end and counts.
-#[test]
-fn a_mixed_convexity_end_on_a_sloped_wall_has_its_closed_form() {
+/// The step with its upper block's profile (0, 10), (20, 10), (17, 20), (0, 20) swept
+/// along y: a plane wall sloped back.
+fn sloped_wall(k: &mut Kernel) -> Brep {
     use solidcore::curve::curve::Curve;
     use solidcore::primitive::api_curves::create_line_segment;
     use solidcore::sweep::api_brep::create_linear_sweep;
-    let mut k = all_fixes(true);
-    let a = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 10.0).unwrap();
+    let a = create_box(k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 10.0).unwrap();
     let pts = [
         Point3::new(0.0, 0.0, 10.0),
         Point3::new(20.0, 0.0, 10.0),
@@ -270,8 +266,18 @@ fn a_mixed_convexity_end_on_a_sloped_wall_has_its_closed_form() {
         .map(|i| Curve::from(create_line_segment(pts[i], pts[(i + 1) % 4]).unwrap()))
         .collect();
     let refs: Vec<Option<&Curve>> = sides.iter().map(Some).collect();
-    let c = create_linear_sweep(&mut k, &refs, Vec3::Y, 30.0, true).unwrap();
-    let mut b = boolean_union(&mut k, a, c).unwrap();
+    let c = create_linear_sweep(k, &refs, Vec3::Y, 30.0, true).unwrap();
+    boolean_union(k, a, c).unwrap()
+}
+
+/// The same End on a plane wall sloped back (the upper block's profile (0, 10), (20, 10),
+/// (17, 20), (0, 20) swept along y): the rail ends at (20.6, 0, 8), and the round takes
+/// 20 (4 - pi) - 0.3 (20/3 - 2 pi) = 78 - 19.4 pi. The fork 5e8c9c1 prints
+/// 17532.946897573881870 (9.4e-8 off the closed form) with the same rail end and counts.
+#[test]
+fn a_mixed_convexity_end_on_a_sloped_wall_has_its_closed_form() {
+    let mut k = all_fixes(true);
+    let mut b = sloped_wall(&mut k);
     round(&mut k, &mut b, &[[30.0, 0.0, 10.0]], 2.0);
     let v = volume(&k, &mut b);
     let want = 17550.0 - 78.0 + 19.4 * PI;
@@ -571,5 +577,138 @@ fn a_closed_edge_meeting_itself_at_an_angle_is_the_closed_corner() {
             assert_eq!(faces(&b), 10);
             assert!((v - want).abs() <= 1e-12 * want, "{v} vs {want}");
         }
+    }
+}
+
+// ---- #2488: an End's patch keeps its definition ----
+
+use solidcore::surface::procedural_blend::convert::{corner_rebuild, corner_to_record};
+use solidcore::surface::procedural_blend::corner::CornerKind;
+use solidcore::surface::procedural_blend::record::{CornerRecord, SupportRecord};
+use solidcore::surface::procedural_blend::BlendNet;
+use solidcore::surface::surface::Surface;
+use solidcore::topology::face::p2 as face2;
+
+/// The step's front edge rounded r 2 into an End on `wall`, with or without
+/// `fillet_round_as_definition`.
+fn end_on(wall: fn(&mut Kernel) -> Brep, definition: bool) -> (Kernel, Brep) {
+    let mut k = all_fixes(true);
+    k.fixes.fillet_round_as_definition = definition;
+    let mut b = wall(&mut k);
+    round(&mut k, &mut b, &[[30.0, 0.0, 10.0]], 2.0);
+    (k, b)
+}
+
+/// The faces' surfaces whose definition is a corner's of `kind`.
+fn corner_faces(b: &Brep, kind: CornerKind) -> Vec<Surface> {
+    get_faces(b)
+        .unwrap()
+        .into_iter()
+        .filter_map(|f| face2::surface(b, f).unwrap().cloned())
+        .filter(|s| {
+            s.procedural_blend()
+                .and_then(|d| d.corner())
+                .is_some_and(|c| c.kind() == kind)
+        })
+        .collect()
+}
+
+/// Every face's surface over a 9 x 9 grid of its natural domain, as bits.
+fn face_bits(k: &Kernel, b: &Brep) -> Vec<Vec<[u64; 3]>> {
+    get_faces(b)
+        .unwrap()
+        .into_iter()
+        .filter_map(|f| face2::surface(b, f).unwrap())
+        .map(|s| {
+            let d = s.natural_uv_domain_with_nurb(k).unwrap();
+            let mut pts = Vec::new();
+            for i in 0..=8 {
+                for j in 0..=8 {
+                    let u = d.min().x + (d.max().x - d.min().x) * f64::from(i) / 8.0;
+                    let v = d.min().y + (d.max().y - d.min().y) * f64::from(j) / 8.0;
+                    let p = s
+                        .evaluate_point(k, solidcore::geom::vector2d::Point2::new(u, v))
+                        .unwrap();
+                    pts.push([p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]);
+                }
+            }
+            pts
+        })
+        .collect()
+}
+
+/// `rec`'s NURBS form moved by `by` along x, y and z.
+fn moved(rec: &SupportRecord, by: f64) -> SupportRecord {
+    let mut rec = rec.clone();
+    if let SupportRecord::Nurbs { form, .. } = &mut rec {
+        let w = form.weights.clone();
+        for (i, p) in form.points.iter_mut().enumerate() {
+            let wi = w.as_ref().map_or(1.0, |w| w[i]);
+            for x in p.iter_mut() {
+                *x += by * wi;
+            }
+        }
+    }
+    rec
+}
+
+#[test]
+fn the_end_patches_are_their_definitions() {
+    for wall in [cylinder_wall as fn(&mut Kernel) -> Brep, sloped_wall] {
+        let (k, mut b) = end_on(wall, true);
+        let ends = corner_faces(&b, CornerKind::End);
+        assert_eq!(ends.len(), 1);
+        for s in &ends {
+            let d = s.procedural_blend().unwrap();
+            assert!(matches!(d.net(), BlendNet::Exact(_)));
+            assert_eq!(d.bound(), 0.0);
+            assert!(d.support(0).is_some());
+            assert_eq!(d.recertify(&k).unwrap(), 0.0);
+        }
+        // the volume and every surface bit for bit as without the definition
+        let (k0, mut b0) = end_on(wall, false);
+        assert!(corner_faces(&b0, CornerKind::End).is_empty());
+        assert_eq!(volume(&k, &mut b).to_bits(), volume(&k0, &mut b0).to_bits());
+        assert_eq!(face_bits(&k, &b), face_bits(&k0, &b0));
+    }
+}
+
+#[test]
+fn an_end_patch_round_trips_through_its_record() {
+    for wall in [cylinder_wall as fn(&mut Kernel) -> Brep, sloped_wall] {
+        let (k, b) = end_on(wall, true);
+        for s in corner_faces(&b, CornerKind::End) {
+            let rec = corner_to_record(&k, &s).unwrap();
+            let json = serde_json::to_string(&rec).unwrap();
+            let back = corner_rebuild(&k, &serde_json::from_str(&json).unwrap()).unwrap();
+            assert_eq!(
+                std::mem::discriminant(back.kind()),
+                std::mem::discriminant(s.kind())
+            );
+            assert_eq!(corner_to_record(&k, &back).unwrap(), rec);
+        }
+    }
+}
+
+#[test]
+fn an_end_patch_off_its_support_is_refused() {
+    for wall in [cylinder_wall as fn(&mut Kernel) -> Brep, sloped_wall] {
+        let (k, b) = end_on(wall, true);
+        let s = &corner_faces(&b, CornerKind::End)[0];
+        let CornerRecord::End(rec) = corner_to_record(&k, s).unwrap() else {
+            panic!("not an end's record");
+        };
+        let mut off = rec.clone();
+        off.support = moved(&rec.support, 1e-3);
+        let why = corner_rebuild(&k, &CornerRecord::End(off))
+            .unwrap_err()
+            .to_string();
+        assert!(why.contains("off its support face"), "{why}");
+        let mut off = rec;
+        off.net = moved(&off.net, 1e-3);
+        let why = corner_rebuild(&k, &CornerRecord::End(off))
+            .unwrap_err()
+            .to_string();
+        assert!(why.contains("off its support face"), "{why}");
     }
 }

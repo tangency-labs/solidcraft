@@ -43,6 +43,8 @@
 //!
 //! [`FilletCorner::setback`]: crate::blend::fillet_corner::p3::FilletCorner::setback
 
+use std::sync::Arc;
+
 use crate::blend::blend_corner::ball::{solver_of_edgeuse_or_mate, BallSolvers};
 use crate::blend::blend_corner::swept::fmt_g;
 use crate::blend::blend_corner::BlendCornerEvent;
@@ -70,6 +72,7 @@ use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::b_spline_surface::p2::IsoCurveOptions;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::surface::procedural_blend::corner::{CornerDefinition, SetbackFill};
 use crate::surface::surface::Surface;
 use crate::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
 use crate::topology::edgeuse::p1 as eu1;
@@ -95,6 +98,9 @@ pub struct SetbackCorner {
     pub overflows: bool,
     /// `m_pFill`: the fill, from the edge geometry until the patches take it.
     pub fill: Option<Fill>,
+    /// Not the fork (#2488, with `fillet_round_as_definition`): the fill's definition, which
+    /// its patches keep.
+    pub definition: Option<Arc<SetbackFill>>,
 }
 
 impl Default for SetbackCorner {
@@ -107,6 +113,7 @@ impl Default for SetbackCorner {
             convex: true,
             overflows: false,
             fill: None,
+            definition: None,
         }
     }
 }
@@ -1078,10 +1085,53 @@ pub fn build_setback_fill(
             set_edge_curve(pseudo.brep_mut(), e, Some(Curve::from(best)))?;
         }
     }
+    let definition = if k.fixes.fillet_round_as_definition {
+        Some(keep_definition(
+            k,
+            &planes.planes,
+            &rounds,
+            order,
+            tol,
+            convex,
+            worst,
+            &fill,
+        )?)
+    } else {
+        None
+    };
     if let Some(sb) = corner.setback.as_mut() {
         sb.fill = Some(fill);
+        sb.definition = definition;
     }
     Ok(Ok(()))
+}
+
+/// Not the fork (#2488, with `fillet_round_as_definition`): the fill's definition
+/// ([`SetbackFill`]: the faces' planes, the rounds at their end sections, the rule's order
+/// and tolerance, the corner's convexity and its containment), certified at once: the rule
+/// run again from the definition makes this fill, number for number, with its
+/// certificates ([`SetbackFill::refill`]).
+///
+/// # Errors
+///
+/// `SM_ERR` where the rule run again does not make this fill; those of the definition and
+/// of the rule.
+#[allow(clippy::too_many_arguments)]
+fn keep_definition(
+    k: &Kernel,
+    faces: &[Face],
+    rounds: &[Round<'_>],
+    order: usize,
+    tol: f64,
+    convex: bool,
+    worst: f64,
+    fill: &Fill,
+) -> Result<Arc<SetbackFill>> {
+    let definition = SetbackFill::create(k, faces, rounds, order, tol, convex, worst)?;
+    if !definition.is_fill(&definition.refill(k)?, &fill.patches) {
+        return Err(SolidError::sm_err(OP_FILL));
+    }
+    Ok(Arc::new(definition))
 }
 
 /// `SmBlendCorner::CreateSetBackPatches` (the fork's 61547af): the fill's patches as faces
@@ -1109,6 +1159,7 @@ pub fn create_setback_patches(
     if fill.patches.len() != 2 * n {
         return Err(SolidError::sm_err(OP_PATCHES));
     }
+    let definition = corner.setback.as_ref().and_then(|sb| sb.definition.clone());
     let fillet = env.fillet.as_mut().ok_or_else(nul)?;
     for (p, patch) in fill.patches.into_iter().enumerate() {
         let dom = patch.natural_uv_domain();
@@ -1169,7 +1220,10 @@ pub fn create_setback_patches(
             orientations: orients,
             loop_points: Vec::new(),
         };
-        let surface = Surface::from(patch);
+        let mut surface = Surface::from(patch);
+        if let Some(d) = &definition {
+            surface.set_corner_definition(CornerDefinition::setback(Arc::clone(d), p)?);
+        }
         let region = fillet.brep.infinite_region();
         let key_of = fillet.notify.key_of;
         let face_ref = |f| key_of(EntityRef::Face(f));

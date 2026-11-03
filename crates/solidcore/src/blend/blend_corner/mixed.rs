@@ -69,6 +69,7 @@ use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::crv_adv::p1::CurveEnd;
 use crate::nurbs::knots::Side as KnotSide;
+use crate::surface::procedural_blend::corner::CornerDefinition;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
 use crate::topology::edgeuse::p1 as eu1;
@@ -1358,7 +1359,40 @@ pub fn calc_mixed_edge_geom(
             of2m(&mut state.uv_curves, f).push(Curve::from(uv));
             of2m(&mut state.orients, f).push(*nth(&orients, kk, OP_EDGE)?);
         }
-        *of2m(&mut state.surfaces, f) = Some(Surface::from(patch));
+        let mut patch_surface = Surface::from(patch);
+        if k.fixes.fillet_round_as_definition {
+            // (#2488) the face keeps its rule: its sides from the trimmed blends and the
+            // conic in T; L's trimline is its side c0 on B1 and the conic its d0, U's the
+            // conic its c0 and the trimline its d0 on B2
+            let blends = [
+                pseudo
+                    .geom(geoms[0])?
+                    .fillet_surface(None)?
+                    .ok_or_else(nul)?
+                    .clone(),
+                pseudo
+                    .geom(geoms[1])?
+                    .fillet_surface(None)?
+                    .ok_or_else(nul)?
+                    .clone(),
+            ];
+            let common = crate::topology::face::p2::surface(target, ring.t)?.ok_or_else(nul)?;
+            let local: [Side; 4] = [s(0)?.clone(), s(1)?.clone(), s(2)?.clone(), s(3)?.clone()];
+            let (trim_side, conic_side) = if f == 0 { (0, 2) } else { (2, 0) };
+            let definition = CornerDefinition::mixed(
+                k,
+                [&blends[0], &blends[1]],
+                common,
+                local,
+                (chamfer, turn),
+                (f, trim_side, of2(&pcs, f).clone()),
+                conic_side,
+                tol,
+            )?;
+            definition.recertify(k, &patch_surface)?;
+            patch_surface.set_corner_definition(definition);
+        }
+        *of2m(&mut state.surfaces, f) = Some(patch_surface);
     }
 
     // the edges' curves, from the faces' isos: X-A L c0, A-P L d1, P-V L c1 reversed,

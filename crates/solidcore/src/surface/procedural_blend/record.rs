@@ -568,3 +568,309 @@ impl ExactRoundRecord {
         self.net.form.validate("net.form")
     }
 }
+
+/// A face of a blend corner's (#2488): its corner kind's definition and its net.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum CornerRecord {
+    /// A Swept turn's torus.
+    Swept(SweptCornerRecord),
+    /// An End's patch on its support face.
+    End(EndCornerRecord),
+    /// A Setback's fill patch.
+    Setback(SetbackCornerRecord),
+    /// A Mixed corner's face.
+    Mixed(Box<MixedCornerRecord>),
+}
+
+/// A Swept turn (#2488): the end section of its two rounds revolved about the side edge,
+/// its net the exact torus.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SweptCornerRecord {
+    /// The face both rounds meet, a plane.
+    pub common: SupportRecord,
+    /// A point of the side edge's line.
+    pub axis_point: [f64; 3],
+    /// The side edge's unit direction.
+    pub axis: [f64; 3],
+    /// The two rounds' balls' centres at the side vertex.
+    pub centres: [[f64; 3]; 2],
+    /// The balls' radius.
+    pub radius: f64,
+    /// The tolerance the construction decided the turn within.
+    pub tol: f64,
+    /// The net, the torus: its label and NURBS form.
+    pub net: SupportRecord,
+}
+
+/// An End's patch (#2488): its support face's surface and the patch's boundary, its net
+/// the support's surface.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EndCornerRecord {
+    /// The support face's surface.
+    pub support: SupportRecord,
+    /// The patch's loop's curves.
+    pub boundary: Vec<NurbsCurveRecord>,
+    /// The net: its label and NURBS form.
+    pub net: SupportRecord,
+}
+
+/// A face's plane at a Setback, its normal out of the material.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PlaneRecord {
+    /// A point of the plane.
+    pub point: [f64; 3],
+    /// Its unit normal.
+    pub normal: [f64; 3],
+}
+
+/// A round at a Setback as its fill reads it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetbackRoundRecord {
+    /// Its surface: a NURBS form with its label, or a procedural blend.
+    pub surface: SupportRecord,
+    /// Whether its rails run along u (else along v).
+    pub along_u: bool,
+    /// The rail parameter of its end section.
+    pub end: f64,
+    /// Whether the corner lies at rail parameters above `end`.
+    pub corner_above: bool,
+}
+
+/// A Setback's fill patch (#2488): the fill's definition (the faces' planes, the rounds at
+/// their end sections, the rule's order and tolerance, the corner's convexity and its
+/// certified containment), the patch's index in the fill, and its net.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetbackCornerRecord {
+    /// The faces' planes.
+    pub faces: Vec<PlaneRecord>,
+    /// The rounds, one per face.
+    pub rounds: Vec<SetbackRoundRecord>,
+    /// The fill's order: 1 (G1) or 2 (G2).
+    pub order: u32,
+    /// The length the faces and the rounds' ends are matched to.
+    pub tol: f64,
+    /// Whether the corner's edges are convex.
+    pub convex: bool,
+    /// The most the fill stands past a face, certified (at most `tol`).
+    pub containment: f64,
+    /// The patch's index: setback patches first, then the interior parts.
+    pub patch: u32,
+    /// The net, the patch.
+    pub net: NurbsSurfaceRecord,
+}
+
+/// A piecewise Bezier curve in R^4 (homogeneous), segment s on `[brk[s], brk[s + 1]]`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BezierCurveRecord {
+    /// The breaks.
+    pub brk: Vec<f64>,
+    /// The segments' control points, all of one degree.
+    pub seg: Vec<Vec<[f64; 4]>>,
+}
+
+/// A side of a Mixed face and its ribbon, as the Coons rule reads it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MixedSideRecord {
+    /// The side.
+    pub c: BezierCurveRecord,
+    /// Its transversal direction field.
+    pub dir: BezierCurveRecord,
+    /// Whether the field is the one shared along X-V.
+    pub shared: bool,
+    /// alpha, beta, gamma at its ends.
+    pub val: [[f64; 3]; 2],
+    /// Their derivatives.
+    pub der: [[f64; 3]; 2],
+    /// The field at its ends.
+    pub dir_val: [[f64; 4]; 2],
+    /// The field's derivative at its ends.
+    pub dir_der: [[f64; 4]; 2],
+    /// The derivative's part per unit of the inflection's rate at its ends.
+    pub dir_k: [[f64; 4]; 2],
+    /// The cross field in the side's tangent's place.
+    pub t: BezierCurveRecord,
+    /// Whether it has one.
+    pub has_t: bool,
+}
+
+/// A Mixed corner's face (#2488): its rule (the Coons patch of its four sides, bilinear for
+/// chamfers, turned or not), its supports (the two trimmed blends and T), its trimline's
+/// blend, side and uv, its conic's side, the construction's tolerance and its net.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MixedCornerRecord {
+    /// The two blends B1, B2.
+    pub blends: [SupportRecord; 2],
+    /// T.
+    pub common: SupportRecord,
+    /// The four sides c0, c1, d0, d1.
+    pub sides: Vec<MixedSideRecord>,
+    /// Whether the rule is the bilinear Coons patch.
+    pub bilinear: bool,
+    /// Whether the patch is turned.
+    pub transposed: bool,
+    /// The trimline's blend (0 or 1).
+    pub blend: u32,
+    /// The trimline's side.
+    pub trim_side: u32,
+    /// The trimline's uv on its blend.
+    pub trim_uv: BezierCurveRecord,
+    /// The conic's side.
+    pub conic_side: u32,
+    /// The construction's tolerance.
+    pub tol: f64,
+    /// The net.
+    pub net: NurbsSurfaceRecord,
+}
+
+impl BezierCurveRecord {
+    fn validate(&self, field: &'static str) -> Result<(), RecordError> {
+        // (an empty curve is a field the rule does not read)
+        if !(self.brk.is_empty() && self.seg.is_empty()) && self.brk.len() != self.seg.len() + 1 {
+            return Err(refuse(field, "a curve has one break more than segments"));
+        }
+        let degree = self.seg.first().map_or(0, Vec::len);
+        if self.seg.iter().any(|s| s.len() != degree)
+            || !all_finite(&self.brk)
+            || self.seg.iter().flatten().any(|q| !all_finite(q))
+        {
+            return Err(refuse(
+                field,
+                "a curve's segments are of one degree and finite",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// A support or net of a corner's: a NURBS form (corners' faces are not blends here).
+fn corner_surface(s: &SupportRecord, field: &'static str) -> Result<(), RecordError> {
+    match s {
+        SupportRecord::Nurbs { form, .. } => form.validate(field),
+        SupportRecord::Blend(_) => Err(refuse(field, "a corner's face is a NURBS form")),
+    }
+}
+
+impl CornerRecord {
+    /// The structural check: every curve and surface as their own checks, its numbers
+    /// finite, a positive radius and tolerance, a torus label on a Swept turn's net, a
+    /// bounded End.
+    ///
+    /// # Errors
+    ///
+    /// The first [`RecordError`] met.
+    pub fn validate(&self) -> Result<(), RecordError> {
+        match self {
+            Self::Swept(r) => {
+                corner_surface(&r.common, "common")?;
+                corner_surface(&r.net, "net")?;
+                if !matches!(
+                    r.net,
+                    SupportRecord::Nurbs {
+                        kind: SupportKindRecord::Torus,
+                        ..
+                    }
+                ) {
+                    return Err(refuse("net", "a swept turn's net is a torus"));
+                }
+                let [c0, c1] = r.centres;
+                if !points_finite(&[r.axis_point, r.axis, c0, c1])
+                    || !all_finite(&[r.radius, r.tol])
+                {
+                    return Err(refuse("swept", "a swept turn's numbers are finite"));
+                }
+                if !(r.radius > 0.0 && r.tol > 0.0) {
+                    return Err(refuse(
+                        "radius",
+                        "a swept turn's radius and tolerance are positive",
+                    ));
+                }
+                Ok(())
+            }
+            Self::End(r) => {
+                corner_surface(&r.support, "support")?;
+                corner_surface(&r.net, "net")?;
+                if r.boundary.is_empty() {
+                    return Err(refuse("boundary", "an end's patch is bounded"));
+                }
+                for c in &r.boundary {
+                    c.validate("boundary")?;
+                }
+                Ok(())
+            }
+            Self::Setback(r) => {
+                let n = r.rounds.len();
+                if n < 3 || r.faces.len() != n {
+                    return Err(refuse(
+                        "rounds",
+                        "a setback's fill has a round per face, three or more",
+                    ));
+                }
+                for round in &r.rounds {
+                    match &round.surface {
+                        SupportRecord::Nurbs { form, .. } => form.validate("rounds")?,
+                        SupportRecord::Blend(b) => b.validate()?,
+                    }
+                    if !round.end.is_finite() {
+                        return Err(refuse("rounds", "a round's end is finite"));
+                    }
+                }
+                for f in &r.faces {
+                    if !points_finite(&[f.point, f.normal]) {
+                        return Err(refuse("faces", "a face's plane is finite"));
+                    }
+                }
+                if !(r.order == 1 || r.order == 2) {
+                    return Err(refuse("order", "a setback's fill is G1 or G2"));
+                }
+                if !(r.tol.is_finite() && r.tol > 0.0 && r.containment.is_finite()) {
+                    return Err(refuse(
+                        "tol",
+                        "a setback's tolerance is finite and positive",
+                    ));
+                }
+                if (r.patch as usize) >= 2 * n {
+                    return Err(refuse(
+                        "patch",
+                        "a setback's fill has two patches per round",
+                    ));
+                }
+                r.net.validate("net")
+            }
+            Self::Mixed(r) => {
+                for b in &r.blends {
+                    match b {
+                        SupportRecord::Nurbs { form, .. } => form.validate("blends")?,
+                        SupportRecord::Blend(b) => b.validate()?,
+                    }
+                }
+                corner_surface(&r.common, "common")?;
+                if r.sides.len() != 4 || r.blend > 1 || r.trim_side > 3 || r.conic_side > 3 {
+                    return Err(refuse("sides", "a mixed face has four sides on two blends"));
+                }
+                for side in &r.sides {
+                    side.c.validate("sides")?;
+                    side.dir.validate("sides")?;
+                    side.t.validate("sides")?;
+                    let numbers = side.val.iter().chain(&side.der).flatten();
+                    let fields = side
+                        .dir_val
+                        .iter()
+                        .chain(&side.dir_der)
+                        .chain(&side.dir_k)
+                        .flatten();
+                    if !numbers.chain(fields).all(|x| x.is_finite()) {
+                        return Err(refuse("sides", "a side's numbers are finite"));
+                    }
+                }
+                r.trim_uv.validate("trim_uv")?;
+                if !(r.tol.is_finite() && r.tol > 0.0) {
+                    return Err(refuse(
+                        "tol",
+                        "a mixed face's tolerance is finite and positive",
+                    ));
+                }
+                r.net.validate("net")
+            }
+        }
+    }
+}

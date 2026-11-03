@@ -183,6 +183,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::query::brep::{BrepFaceServices, FaceCaches};
 use crate::surface::plane::Plane;
+use crate::surface::procedural_blend::corner::CornerDefinition;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
@@ -1310,6 +1311,59 @@ const OP_VERT_GEOM: &str = "blend::fillet_corner::p1::calc_corner_vert_geom";
 const OP_EDGE_GEOM: &str = "blend::fillet_corner::p1::calc_corner_edge_geom";
 const OP_DEGENERACY: &str = "blend::fillet_corner::p1::check_and_fix_degeneracy";
 const OP_END_PATCH: &str = "blend::fillet_corner::p1::create_end_patch";
+
+/// Not upstream (#2488, with `fillet_round_as_definition`): an End's patch keeps its
+/// definition ([`CornerDefinition::end`]): its support face's surface `support` (the face's
+/// or its extension) and the patch's boundary, the corner's edges' curves; re-certified at
+/// once ([`CornerDefinition::recertify`]: the net on its support).
+///
+/// # Errors
+///
+/// [`SolidError::invalid_input`] for an edge without a curve; `Unsupported` for a boundary
+/// curve with no NURBS form; those of the definition and its re-certification.
+fn keep_end_definition(
+    k: &Kernel,
+    pseudo: &Brep,
+    edges: &[EdgeId],
+    support: &Surface,
+    net: &mut Surface,
+) -> Result<()> {
+    if !k.fixes.fillet_round_as_definition {
+        return Ok(());
+    }
+    let mut boundary = Vec::with_capacity(edges.len());
+    for &e in edges {
+        let curve = pseudo
+            .edge(e)?
+            .curve
+            .as_ref()
+            .ok_or_else(|| SolidError::invalid_input(OP_END_PATCH, NULL_DEREF))?;
+        boundary.push(nurbs_curve(curve)?.clone());
+    }
+    let definition = CornerDefinition::end(k, support, boundary)?;
+    definition.recertify(k, net)?;
+    net.set_corner_definition(definition);
+    Ok(())
+}
+
+/// The NURBS form of a curve that is one or is based on one (a line, conic or B-spline).
+///
+/// # Errors
+///
+/// `Unsupported` for a curve of another kind.
+pub(crate) fn nurbs_curve(c: &Curve) -> Result<&BSplineCurve> {
+    match c.kind() {
+        CurveKind::BSpline(b) => Ok(b),
+        CurveKind::Line(l) => Ok(l.base()),
+        CurveKind::Ellipse(e) => Ok(e.base()),
+        CurveKind::Hyperbola(h) => Ok(h.base()),
+        CurveKind::Parabola(p) => Ok(p.base()),
+        _ => Err(SolidError::Unsupported {
+            operation: OP_END_PATCH,
+            reason: "a corner's boundary curve has no NURBS form",
+        }),
+    }
+}
 const OP_MAKE_FACE: &str = "blend::fillet_corner::p1::make_face_brep";
 const OP_CONST_RAD: &str = "blend::fillet_corner::p1::make_constant_radius_fillet";
 const OP_INSERT: &str = "blend::fillet_corner::p1::insert_intersection_topology";
@@ -2230,7 +2284,14 @@ impl FilletCorner {
 
             // Add a copy of this surface to the FilletCorner->m_vSurfaces array
             // Copy pSurface, when possible as an analytic surface
-            let new_surface = surface.copy_and_add_analytics(env.k)?;
+            let mut new_surface = surface.copy_and_add_analytics(env.k)?;
+            keep_end_definition(
+                env.k,
+                env.pseudo.brep(),
+                &self.edges,
+                &surface,
+                &mut new_surface,
+            )?;
             self.surfaces.push(new_surface);
 
             // Create Face (and Edges and Verts) in m_pFilletBrep from m_vSurfaces with call m_pFilletBrep->MakeFaceWithCurves()
@@ -2302,7 +2363,14 @@ impl FilletCorner {
             };
 
             // Copy pSurface, when possible as an analytic surface
-            let new_surface = surface.copy_and_add_analytics(env.k)?;
+            let mut new_surface = surface.copy_and_add_analytics(env.k)?;
+            keep_end_definition(
+                env.k,
+                env.pseudo.brep(),
+                &self.edges,
+                &surface,
+                &mut new_surface,
+            )?;
             self.surfaces.push(new_surface);
 
             // Create Face (and Edges and Verts) in m_pFilletBrep from m_vSurfaces
