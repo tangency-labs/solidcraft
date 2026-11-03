@@ -41,7 +41,7 @@ fn copy(s: &mut Session, p: &Value) -> Result<Value> {
 pub(in crate::cmd) fn explicit_planes(p: &mut PlaneRef) {
     match p {
         PlaneRef::Origin { name } => {
-            if let Some(plane) = solidcraft_geom::Plane::named(name) {
+            if let Some(plane) = solidcore_record::Plane::named(name) {
                 *p = PlaneRef::Custom { plane };
             }
         }
@@ -243,6 +243,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
+    use solidcraft_geom::prelude::*;
 
     use crate::Session;
 
@@ -309,7 +310,7 @@ mod tests {
 
     #[test]
     fn foreign_sketch_paste_preserves_world_position_in_a_placed_component() {
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
 
         let mut source = dimensioned_sketch();
         let arc = [Vec3::new(1., 0., 0.), Vec3::new(0., 0., 1.), Vec3::new(-1., 0., 0.)];

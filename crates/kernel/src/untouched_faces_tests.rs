@@ -1,7 +1,8 @@
 //! A cut or a join never splits faces it doesn't touch: a flat wall with an opening cut into
 //! it stays one face with an inner loop, whatever is cut or joined elsewhere afterwards.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::{Body, BoolOp, FaceSurface, boolean, box_solid, face_surface, fillet, shell};
 

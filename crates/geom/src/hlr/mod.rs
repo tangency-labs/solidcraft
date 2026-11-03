@@ -19,12 +19,13 @@ mod silhouette;
 pub(crate) mod surface;
 mod trim;
 
+use crate::prelude::*;
 use serde::Serialize;
 
 use crate::section::CurveAccuracy;
-use crate::{Seg2, Vec2, Vec3};
 use curve::{C3, as_circle};
 use solidcore_record::brep::Brep;
+use solidcore_record::{Seg2, Vec2, Vec3};
 use surface::{Analytic, Hit, S3};
 use trim::Trim;
 

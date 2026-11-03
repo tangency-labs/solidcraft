@@ -25,10 +25,11 @@
 //! pipe's cylinder meeting the tube), which labels it on its own grid: the tube start is then
 //! the one of the two that puts the tube's grid on that face's.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
+use solidcore_record::Vec3;
 use solidcore_record::brep::{self, Curve as BCurve};
-use solidcraft_geom::Vec3;
 
 use super::{Builder, LoopB, R};
 

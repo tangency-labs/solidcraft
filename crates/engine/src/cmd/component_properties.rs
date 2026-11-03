@@ -1,10 +1,12 @@
 //! Physical properties of an assembly placement, with original body material assignments.
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::{Document, Mat};
+use solidcraft_geom::Aabb3;
 use solidcraft_geom::inertia::{self, Tensor3};
-use solidcraft_geom::{Aabb3, Vec3};
 
 use crate::params::bad;
 use crate::{Result, Session};

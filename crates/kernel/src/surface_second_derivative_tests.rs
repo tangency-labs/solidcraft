@@ -3,9 +3,10 @@
 //! every curvature the kernel reads (continuity, the G2 fill's frames) comes from them (#763: a G2
 //! boundary surface once measured half the cylinder's curvature it does carry).
 
+use solidcore_record::Vec3;
 use solidcore_record::brep::Surface;
-use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::eval::SurfaceEval;
+use solidcraft_geom::prelude::*;
 
 /// A degree-`p` × degree-`q` surface on a net of `p + 3` × `q + 3` points with interior knots each
 /// way, bent in z: its knots and points (`rows[i][j]`, i along u).

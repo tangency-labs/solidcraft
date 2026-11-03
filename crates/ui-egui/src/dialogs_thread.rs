@@ -723,7 +723,8 @@ mod contribution_tests {
         dialogs::{Dialog, Kind, apply_commands},
     };
     use serde_json::json;
-    use solidcraft_engine::{Sel, Session, geom::Vec3};
+    use solidcore_record::Vec3;
+    use solidcraft_engine::{Sel, Session};
     fn hole() -> (SolveApp, Dialog) {
         let mut app = SolveApp::new(Session::default(), Services::default());
         app.run("solid.box", json!({"length":20,"width":20,"height":10,"body_name":"Plate"})).unwrap();

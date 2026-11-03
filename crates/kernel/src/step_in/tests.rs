@@ -1,4 +1,5 @@
-use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use super::*;
 use crate::{BoolOp, boolean, box_solid, cylinder, extrude, fillet, measure, revolve, sphere, step_export, torus};
@@ -451,7 +452,7 @@ fn shelled_three_quarter_tube_round_trips() {
 /// which SMLib does not take for a torus: the part came in as a mesh of its faces.
 #[test]
 fn half_tube_a_hair_off_its_torus_imports_as_a_solid() {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     use std::f64::consts::PI;
     let (major, minor) = (10.75, 1.25);
     let d = Loop2 {
@@ -1442,7 +1443,7 @@ fn glued_halves_export_as_whole_faces() {
 /// Read back, the part has its exact volume.
 #[test]
 fn rounded_slot_exports_cylinders() {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     use std::f64::consts::{FRAC_PI_2, PI};
     let outer = Loop2 {
         segs: vec![
@@ -1477,7 +1478,7 @@ fn rounded_slot_exports_cylinders() {
 /// by its surfaces saw a 60 mm part as 130 mm long), and the part reads back whole.
 #[test]
 fn ramp_cut_slot_exports_sheets_bounded_by_their_faces() {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     use std::f64::consts::{FRAC_PI_2, PI};
     let outer = Loop2 {
         segs: vec![

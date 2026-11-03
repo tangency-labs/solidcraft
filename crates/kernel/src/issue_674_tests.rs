@@ -1,6 +1,7 @@
 //! Partial planar contact must sew a solid without displacing or inventing material.
 use crate::*;
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
 #[test]
@@ -27,7 +28,7 @@ fn split_contact_arc_crossing_one_edge_twice_preserves_the_body() {
 fn partial_contact_retains_an_authored_split_away_from_the_contact() {
     let a = box_solid(Vec3::ZERO, Vec3::new(25.0, 47.5, 37.5)).unwrap();
     let face = a.faces(0.01).unwrap().iter().position(|f| f.plane_normal.is_some_and(|n| n.dot(Vec3::X) > 0.99)).unwrap();
-    let a = split_faces(&a, &[face], &SplitTool::Plane(solidcraft_geom::Plane { origin: Vec3::new(0.0, 0.0, 15.0), ..solidcraft_geom::Plane::XY }))
+    let a = split_faces(&a, &[face], &SplitTool::Plane(solidcore_record::Plane { origin: Vec3::new(0.0, 0.0, 15.0), ..solidcore_record::Plane::XY }))
         .unwrap();
     let b = cylinder(Vec3::new(0.0, 7.5, 0.0), -Vec3::X, 5.0, 2.5).unwrap();
     let r = boolean(&a, &b, BoolOp::Union).unwrap().unwrap();

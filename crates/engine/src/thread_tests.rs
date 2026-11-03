@@ -1,10 +1,11 @@
 //! Modelled threads: the ISO metric profile cut along a helix, inside and outside,
 //! including fine pitches on large shafts and the sample flange.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::Session;
 
@@ -154,8 +155,8 @@ fn tapped_thread_depth_rejects_invalid_or_excessive_values_atomically() {
 /// threads now use more stations. The same cut polygons must rebuild as a closed solid.
 #[test]
 fn faceted_flange_thread_preserves_thin_crest_boundaries() {
-    use crate::geom::{Plane, Vec2, Vec3};
     use crate::kernel;
+    use solidcore_record::{Plane, Vec2, Vec3};
 
     let mut s = Session::default();
     let sample = crate::sample::samples().into_iter().find(|s| s.name == "Bolted Flange").unwrap();

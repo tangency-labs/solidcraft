@@ -1,4 +1,5 @@
 use super::*;
+use crate::prelude::*;
 use solidcore_record::brep::*;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
@@ -634,7 +635,7 @@ fn analytic_partials_are_the_derivatives_of_the_order_below() {
         Surface::Torus { frame: f.clone(), major_radius: 5., minor_radius: 1.5, tube_start: 0.0 },
     ];
     let (u, v, h) = (0.8, 0.4, 1e-4);
-    let close = |a: crate::Vec3, b: crate::Vec3, tol: f64| a.dist(b) <= tol * (1.0 + a.len().max(b.len()));
+    let close = |a: solidcore_record::Vec3, b: solidcore_record::Vec3, tol: f64| a.dist(b) <= tol * (1.0 + a.len().max(b.len()));
     for s in &surfaces {
         let e = eval::SurfaceEval::new(s).unwrap();
         let d = e.partials(u, v).unwrap();
@@ -660,7 +661,7 @@ fn analytic_partials_are_the_derivatives_of_the_order_below() {
 /// sphere of radius 5 about the origin, traced from a rough leader, has radius 4.
 #[test]
 fn curve_jets_are_exact_on_every_record() {
-    use crate::Vec3;
+    use solidcore_record::Vec3;
     let near = |a: Vec3, b: Vec3| a.dist(b) <= 1e-9 * (1.0 + b.len());
     let jet = |c: &Curve, t: f64| eval::CurveEval::new(c).unwrap().jet(t).unwrap();
     let flat = Frame { origin: [1., 2., 3.], x_axis: [0.6, 0.8, 0.], y_axis: [-0.8, 0.6, 0.] };
@@ -727,7 +728,7 @@ fn a_form_on_arcs_of_its_own_is_the_surface_and_does_not_close_around_an_open_fa
     for i in 0..=8 {
         for j in 0..=12 {
             let uv = [domain[0][0] + (domain[0][1] - domain[0][0]) * i as f64 / 8., v0 + (v1 - v0) * j as f64 / 12.];
-            let p = own_at.point(uv).unwrap() - crate::Vec3::new(1., 2., 3.);
+            let p = own_at.point(uv).unwrap() - solidcore_record::Vec3::new(1., 2., 3.);
             let off = ((p.x.hypot(p.y) - 5.).powi(2) + p.z.powi(2)).sqrt() - 1.5;
             assert!(off.abs() < 1e-12, "{uv:?}: {off}");
         }

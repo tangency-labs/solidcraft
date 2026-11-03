@@ -1,5 +1,6 @@
 //! Transient body-level optical overrides for the captured GPU image request.
 //! The model's appearances, physical material cards and saved setups are not changed.
+use solidcore_record::Vec3;
 use std::sync::{Arc, Weak};
 
 use serde::Deserialize;
@@ -9,7 +10,6 @@ use solidcraft_engine::{
         Document,
         appearance_pack::{self, GlassBoundary, Recipe},
     },
-    geom::Vec3,
     render::{
         clear_coat::ClearCoat,
         job::textures::{BaseColorMode, PlanarFrame},

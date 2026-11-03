@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use solidcraft_geom::{Mesh, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::Mesh;
 
 use super::*;
 use crate::{Body, BoolOp};
@@ -271,7 +272,7 @@ fn draw(m: &Mesh, x0: f64) -> String {
 /// such a triangle carried a boundary side of the cone.
 #[test]
 fn a_drill_point_apex_leaves_no_zero_area_triangles() {
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
     // (box size, hole position, radius, depth)
     let cases =
         [(Vec3::new(40.0, 30.0, 15.0), Vec3::new(20.0, 15.0, 15.0), 3.4, 8.0), (Vec3::new(60.0, 40.0, 15.0), Vec3::new(50.0, 20.0, 15.0), 3.0, 10.0)];
@@ -423,14 +424,14 @@ fn an_smlib_torus_stays_within_the_chord_tolerance() {
 /// A groove of trapezoid `section` (radius, axial offset) in the plane through the z axis along
 /// y, carried `turns` turns of `pitch` about z from `base`, as an SMLib solid.
 fn smlib_groove(section: [(f64, f64); 4], base: f64, pitch: f64, turns: f64) -> solidcraft_smlib::Brep {
-    use solidcraft_geom::{Loop2, Vec2};
+    use solidcore_record::{Loop2, Vec2};
     smlib_screw(Loop2::polygon(&section.map(|(r, z)| Vec2::new(r, z))), base, pitch, turns)
 }
 
 /// The `section` (radius, axial offset) in the plane through the z axis along y, carried
 /// `turns` turns of `pitch` about z from `base`, as an SMLib solid.
-fn smlib_screw(section: solidcraft_geom::Loop2, base: f64, pitch: f64, turns: f64) -> solidcraft_smlib::Brep {
-    use solidcraft_geom::{Plane, Region2};
+fn smlib_screw(section: solidcore_record::Loop2, base: f64, pitch: f64, turns: f64) -> solidcraft_smlib::Brep {
+    use solidcore_record::{Plane, Region2};
     let origin = Vec3::new(0.0, 0.0, base);
     let plane = Plane { origin, x: Vec3::Y, y: Vec3::Z };
     let region = Region2 { outer: section, holes: Vec::new() };
@@ -580,7 +581,7 @@ fn a_thread_root_band_running_out_through_an_end_face_lies_on_its_surface() {
 /// halves measured 1.5% short of the whole). The cut grid now thins its lines to fit.
 #[test]
 fn the_halves_of_a_split_smlib_coil_measure_as_the_whole() {
-    use solidcraft_geom::{Loop2, Vec2};
+    use solidcore_record::{Loop2, Vec2};
     use solidcraft_smlib::{BooleanOp, Brep as S};
     let coil = smlib_screw(Loop2::circle(Vec2::new(20.0, 0.0), 1.0), 0.0, 4.0, 6.0);
     let Ok(top) = S::make_box([-30.0, -30.0, 12.5], [60.0, 60.0, 30.0]) else { panic!("box") };
@@ -701,7 +702,7 @@ fn a_slit_in_a_trimmed_face_has_the_face_on_both_sides() {
 /// halved on their edges until none cross.
 #[test]
 fn a_thin_lune_whose_chords_cross_meshes() {
-    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
     let (r, gap, h, tol) = (2.5, 0.03, 5.0, 0.1);
     // The inner circle: centre (−d, 0) and radius r + d·…, through (0, ±r), its middle at r − gap.
     let d = (r * r - (r - gap) * (r - gap)) / (2.0 * (r - gap));
@@ -1043,7 +1044,7 @@ fn triangles_standing_across_a_curved_sheet_are_flipped_along_it() {
 /// halved, and the ring meshes strictly, to its area (300 pi), not the inner disc's.
 #[test]
 fn a_ring_touching_itself_at_a_vertex_meshes_strictly() {
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
     let prism = |c: Vec2, r: f64, z0: f64, z1: f64| {
         ok(crate::extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(c, r), holes: vec![] }], z0, z1)).pop().unwrap()
     };

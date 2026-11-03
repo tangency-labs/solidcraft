@@ -246,7 +246,8 @@ mod smlib_import_tests;
 mod tests {
     use super::*;
     use serde_json::Value;
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
+    use solidcraft_geom::prelude::*;
     use std::sync::Arc;
     fn equal(a: &Body, b: &Body) {
         assert_eq!(a.face_count(), b.face_count());
@@ -318,7 +319,7 @@ mod tests {
     /// along lines, round (spline forms), open, and placed far off.
     #[test]
     fn the_encoding_is_the_bytes_of_the_record_as_a_json_value() {
-        use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+        use solidcore_record::{Loop2, Plane, Region2, Vec2};
         let cube = crate::box_solid(Vec3::ZERO, Vec3::new(40., 30., 10.)).unwrap();
         let rounded = crate::fillet(&cube, &[Vec3::new(20., 0., 10.)], 2.).unwrap();
         let bore = crate::cylinder(Vec3::new(10., 10., -1.), Vec3::Z, 3., 12.).unwrap();

@@ -4,10 +4,11 @@
 //! planes (vertices are triple-plane intersections, edges lines, faces planes, pcurves exact),
 //! taken by SMLib and checked there.
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
+use solidcore_record::Vec3;
 use solidcore_record::brep::{self as rec, Curve2, EdgeUseRef, Loop, OrientedEdge, OrientedFace};
-use solidcraft_geom::Vec3;
 
 use crate::body::Body;
 use crate::{KernelError, Result};
@@ -196,7 +197,7 @@ pub fn shell(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
 
 /// Tilt the faces near `faces` by `angle` about their line on the neutral plane, so that they
 /// lean in (positive angle) going along `pull` (SMLib's draft).
-pub fn draft(b: &Body, faces: &[Vec3], neutral: &solidcraft_geom::Plane, pull: Vec3, angle: f64) -> Result<Body> {
+pub fn draft(b: &Body, faces: &[Vec3], neutral: &solidcore_record::Plane, pull: Vec3, angle: f64) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "draft");
     b.require_brep("draft")?;
     crate::offset_backend::draft(b, faces, neutral, pull, angle)

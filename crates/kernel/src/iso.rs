@@ -10,9 +10,10 @@
 //! box's side, where the outer loop's polygon closes. Every iso line of a closed surface is
 //! therefore one line across the box, cut where it crosses the loops.
 
+use solidcore_record::Vec3;
 use solidcore_record::brep;
-use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::eval::SurfaceEval;
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::point_path::{MAX_CURVE_POINTS, curve_path};

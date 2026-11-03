@@ -10,7 +10,9 @@
 //! ([`crate::DocError::Reselect`]). A face whose name was worked out from geometry, found where
 //! the reference's point no longer lies, is reported: only geometry decided.
 
-use solidcraft_geom::{Mesh, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::Mesh;
+use solidcraft_geom::prelude::*;
 
 use crate::history_names::{Match, Names};
 use crate::naming::{self, closest, edge_names, face_names, strip_piece};

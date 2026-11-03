@@ -995,7 +995,7 @@ fn hydrate_hdr_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut Pack
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_geom::Vec2;
+    use solidcore_record::Vec2;
 
     struct CountingReader {
         source: Cursor<Vec<u8>>,
@@ -1108,7 +1108,7 @@ mod tests {
     }
 
     fn native_geometry() -> solidcraft_doc::SavedModel {
-        saved_model(vec![solidcraft_kernel::box_solid(solidcraft_geom::Vec3::ZERO, solidcraft_geom::Vec3::new(10., 20., 30.)).unwrap()])
+        saved_model(vec![solidcraft_kernel::box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(10., 20., 30.)).unwrap()])
     }
 
     #[test]
@@ -1173,7 +1173,7 @@ mod tests {
 
     #[test]
     fn model_cache_stores_repeated_parts_once_and_keeps_placed_copies() {
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
         let part = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
         let share = solidcraft_kernel::DisplayShare::new(part.clone());
         let mut bodies = vec![part.clone(), part.clone()];
@@ -1204,7 +1204,7 @@ mod tests {
     /// same (sorted) order, the same numbers.
     #[test]
     fn the_model_cache_manifest_is_what_a_json_tree_writes() {
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
         let part = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
         let share = solidcraft_kernel::DisplayShare::new(part.clone());
         let t = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [50.5, -0.25, 1e-7, 1.]];
@@ -1223,7 +1223,7 @@ mod tests {
     /// opening the design evaluated every feature again.
     #[test]
     fn model_cache_keeps_mesh_bodies_with_the_rest_of_the_model() {
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
         let corners = [Vec3::ZERO, Vec3::new(10., 0., 0.), Vec3::new(0., 10., 0.), Vec3::new(0., 0., 10.)];
         let tetra = solidcraft_kernel::mesh_body(&corners, &[[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]])
             .unwrap()
@@ -1333,7 +1333,7 @@ mod tests {
     /// document evaluated it.
     fn timeline_model() -> solidcraft_doc::SavedModel {
         let bodies: Vec<_> = (0..40)
-            .map(|i| solidcraft_kernel::box_solid(solidcraft_geom::Vec3::ZERO, solidcraft_geom::Vec3::new(10. + f64::from(i), 20., 30.)).unwrap())
+            .map(|i| solidcraft_kernel::box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(10. + f64::from(i), 20., 30.)).unwrap())
             .collect();
         let records: Vec<Value> = (0..40)
             .map(|i| json!({"name": format!("Body{i}"), "feature": 1 + i / 8, "component": 0, "key": "0000000000000001", "names": 0, "body": i}))
@@ -1913,7 +1913,7 @@ mod tests {
     /// A valid STEP cube, padded with a comment to `length` bytes. `noisy` padding barely
     /// compresses; otherwise it is repetitive like the text of a real large export.
     fn padded_step(length: usize, noisy: bool) -> String {
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
         let cube = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
         let step = solidcraft_kernel::step_export(&[&cube], "padded").unwrap();
         let (head, tail) = step.split_at(step.find("DATA;").unwrap() + 5);
@@ -2312,7 +2312,7 @@ mod tests {
     #[test]
     #[ignore = "manual IO performance measurement"]
     fn benchmark_step_storage() {
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
         let bodies: Vec<_> = (0..512)
             .map(|i| {
                 let corner = Vec3::new((i % 32) as f64 * 12.0, (i / 32) as f64 * 12.0, 0.0);

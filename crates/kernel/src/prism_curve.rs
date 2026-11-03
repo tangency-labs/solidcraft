@@ -3,9 +3,10 @@
 //! span (its Bézier pieces): samples propose a circle, and only positive rational Bernstein
 //! bounds accept it.
 use solidcore_record::brep::{Brep, Curve};
+use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::brep::eval::CurveEval;
 use solidcraft_geom::bspline::{self, HPoint};
-use solidcraft_geom::{Plane, Seg2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 const MAX_DEGREE: usize = 32;
 /// How far an arc read off a curve may end from the curve's end (mm): half the gap a profile
@@ -587,7 +588,7 @@ fn off_chord(pts: &[Vec2]) -> f64 {
 
 /// One Bézier span that is neither a line nor an arc, as the exact free-form segment it is
 /// (a font's quadratic or cubic, a conic), its ends `a` and `b`. `None` for several spans (a
-/// curve that may wind about more than once), degrees past [`solidcraft_geom::MAX_BEZIER_DEGREE`],
+/// curve that may wind about more than once), degrees past [`solidcore_record::MAX_BEZIER_DEGREE`],
 /// rational spans other than conics, and control polygons with no area (a curve doubling back
 /// along a line).
 fn free_form(spans: &[Vec<H>], a: Vec2, b: Vec2, tol: f64) -> Option<Vec<Seg2>> {

@@ -10,12 +10,13 @@
 //! and holes clockwise there; [`Assembly::finish`] stores them relative to the surface's natural
 //! normal, as the record does.
 
+use solidcore_record::Vec3;
 use solidcore_record::brep::{
     Brep, Curve, Curve2, Edge, Face, Frame, Loop, Natural, OrientedEdge, OrientedFace, Region, Shell, Surface, VERSION, Vertex,
 };
-use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::form;
 use solidcraft_geom::brep::pcurve::{EdgeUse, pcurves_within};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::history::{EdgeOrigin, FaceProv};

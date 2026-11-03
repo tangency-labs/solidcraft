@@ -20,10 +20,11 @@
 //! edge's own curve as a NURBS where it stands on the body), and the faces are stitched by SMLib
 //! along the side edges they share.
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
+use solidcore_record::Vec3;
 use solidcore_record::brep::{self as b, Brep};
-use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::eval::SurfaceEval;
 use solidcraft_geom::bspline::{CurveN, HPoint, NurbsSurface};
 
@@ -1022,8 +1023,8 @@ impl Strip {
         let side = top_start - bs;
         let Some(x) = side.normalized() else { return Ok(None) };
         let Some(y) = (flat(bs) - x * flat(bs).dot(x)).normalized().or_else(|| (axis - x * axis.dot(x)).normalized()) else { return Ok(None) };
-        let plane = solidcraft_geom::Plane { origin: bs, x, y };
-        let line = solidcraft_geom::Seg2::Line { a: solidcraft_geom::Vec2::ZERO, b: solidcraft_geom::Vec2::new(side.len(), 0.0) };
+        let plane = solidcore_record::Plane { origin: bs, x, y };
+        let line = solidcore_record::Seg2::Line { a: solidcore_record::Vec2::ZERO, b: solidcore_record::Vec2::new(side.len(), 0.0) };
         // SMLib turns right-handed about the axis it is given.
         let (axis, turn) = if turn < 0.0 { (axis * -1.0, -turn) } else { (axis, turn) };
         Ok(Some(crate::surfaces::revolved_record(&plane, &[line], c, axis, turn)?))
@@ -1331,8 +1332,8 @@ impl Joint {
                 let side = incoming - at;
                 let x = side.normalized().ok_or_else(|| KernelError::Failed("ruled surface: a round corner".into()))?;
                 let y = (axis - x * axis.dot(x)).normalized().ok_or_else(|| KernelError::Failed("ruled surface: a round corner".into()))?;
-                let plane = solidcraft_geom::Plane { origin: at, x, y };
-                let line = solidcraft_geom::Seg2::Line { a: solidcraft_geom::Vec2::ZERO, b: solidcraft_geom::Vec2::new(side.len(), 0.0) };
+                let plane = solidcore_record::Plane { origin: at, x, y };
+                let line = solidcore_record::Seg2::Line { a: solidcore_record::Vec2::ZERO, b: solidcore_record::Vec2::new(side.len(), 0.0) };
                 Ok(vec![crate::surfaces::revolved_record(&plane, &[line], at, axis, turn)?])
             }
         }
@@ -1344,7 +1345,7 @@ mod tests {
     use std::collections::HashMap;
     use std::f64::consts::{FRAC_1_SQRT_2, PI};
 
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
 
     use super::*;
     use crate::history::FaceOrigin;

@@ -4062,7 +4062,7 @@ dependencies = [
 [[package]]
 name = "solidcore-record"
 version = "0.1.0"
-source = "git+https://github.com/tangency-labs/solidcore?rev=a976a40c24844607f1b989a74fc0d36331510076#a976a40c24844607f1b989a74fc0d36331510076"
+source = "git+https://github.com/tangency-labs/solidcore?rev=b21eb123ee989bd708726080b5d2298a1f2573b5#b21eb123ee989bd708726080b5d2298a1f2573b5"
 dependencies = [
  "serde",
  "serde_json",
@@ -4196,6 +4196,7 @@ dependencies = [
  "robust",
  "serde",
  "serde_json",
+ "solidcore-record",
  "solidcraft-engine",
  "solidcraft-geom",
  "solidcraft-io",
@@ -4222,6 +4223,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "solidcore-record",
  "solidcraft-doc",
  "solidcraft-geom",
  "solidcraft-kernel",
@@ -4278,6 +4280,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "solidcore-record",
  "solidcraft-geom",
  "web-time",
  "weezl",
@@ -4347,6 +4350,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "solidcore-record",
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-space-mouse",

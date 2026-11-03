@@ -1,6 +1,7 @@
 // Exact occurrence workflows through the same commands used by the Browser.
 use crate::Session;
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 
 fn run(s: &mut Session, command: &str, p: Value) -> Value {
     s.execute(command, &p).unwrap()
@@ -529,7 +530,7 @@ fn isolate_nested_child_hides_ancestor_material_and_sibling() {
         .add_occurrence(
             child_component,
             parent_component,
-            solidcraft_doc::rigid(crate::geom::Vec3::new(20.0, 0.0, 0.0), crate::geom::Vec3::ZERO, crate::geom::Vec3::Z, 0.0),
+            solidcraft_doc::rigid(solidcore_record::Vec3::new(20.0, 0.0, 0.0), solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0),
         )
         .unwrap();
     s.refresh();
@@ -615,7 +616,7 @@ fn instance_styles_follow_source_identity_after_collision_rename_and_pending_mov
         assert!((measured["bodies"][0]["mass_g"].as_f64().unwrap() - 0.068).abs() < 1e-8);
     }
     let definition = s.model.state();
-    assert_eq!(solidcraft_kernel::measure(&definition.body("Shared Renamed").unwrap().body).unwrap().bbox.min, crate::geom::Vec3::ZERO);
+    assert_eq!(solidcraft_kernel::measure(&definition.body("Shared Renamed").unwrap().body).unwrap().bbox.min, solidcore_record::Vec3::ZERO);
     let painted = s.doc.painted(&world);
     let secondname = s.occurrence_bodies(&[second], false).unwrap()[0].clone();
     let body = painted.body(&secondname).unwrap();
@@ -766,7 +767,7 @@ fn a_cut_or_join_from_the_top_level_into_a_linked_part_is_refused() {
             _ => None,
         })
         .unwrap();
-    let c = plane.to_local(solidcraft_geom::Vec3::new(55.0, 10.0, 30.0));
+    let c = plane.to_local(solidcore_record::Vec3::new(55.0, 10.0, 30.0));
     run(&mut s, "sketch.circle.center", json!({"center": [c.x, c.y], "radius": 2}));
     run(&mut s, "sketch.finish", json!({}));
     let features = s.doc.features.len();
@@ -886,7 +887,7 @@ fn a_stood_up_nested_step_part_is_cut_and_joined_from_its_face() {
     run(&mut src, "occurrence.move", json!({"occurrence": carrier, "translate": [12, 7, 5], "axis": [0, 0, 1], "angle": "30 deg"}));
     run(&mut src, "occurrence.move", json!({"occurrence": nested, "translate": [3, 11, 2], "axis": [0, 1, 0], "angle": "20 deg"}));
     // The middle of the top face, in the file's frame: the imported root's.
-    let top = solidcraft_doc::apply_point(&src.doc.component_transform(part), solidcraft_geom::Vec3::new(20.0, 12.0, 10.0));
+    let top = solidcraft_doc::apply_point(&src.doc.component_transform(part), solidcore_record::Vec3::new(20.0, 12.0, 10.0));
     run(&mut src, "file.export", json!({"path": path, "format": "step"}));
 
     // #5679: the same from the top level, where the part is two moved and turned levels down
@@ -1092,7 +1093,7 @@ fn component_delete_removes_joints_to_its_occurrences_and_undo_restores_them() {
 /// opened with its imported root active, and a sketch on the part's top face. Returns the
 /// session, the sketch, the middle of the top face in the root's frame, the face's outward
 /// normal and that middle in the sketch's coordinates.
-fn nested_part_face_sketch() -> (Session, u64, solidcraft_geom::Vec3, solidcraft_geom::Vec3, solidcraft_geom::Vec2) {
+fn nested_part_face_sketch() -> (Session, u64, solidcore_record::Vec3, solidcore_record::Vec3, solidcore_record::Vec2) {
     let dir = std::env::temp_dir().join(format!("solidcraft-nested-scope-{}-{:?}", std::process::id(), std::thread::current().id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("nested.step");
@@ -1102,7 +1103,7 @@ fn nested_part_face_sketch() -> (Session, u64, solidcraft_geom::Vec3, solidcraft
     run(&mut src, "solid.box", json!({"length": 40, "width": 24, "height": 10, "body_name": "NestedBlock"}));
     run(&mut src, "occurrence.move", json!({"occurrence": carrier, "translate": [12, 7, 5], "axis": [0, 0, 1], "angle": "30 deg"}));
     run(&mut src, "occurrence.move", json!({"occurrence": nested, "translate": [3, 11, 2], "axis": [0, 1, 0], "angle": "20 deg"}));
-    let top = solidcraft_doc::apply_point(&src.doc.component_transform(part), solidcraft_geom::Vec3::new(20.0, 12.0, 10.0));
+    let top = solidcraft_doc::apply_point(&src.doc.component_transform(part), solidcore_record::Vec3::new(20.0, 12.0, 10.0));
     run(&mut src, "file.export", json!({"path": path, "format": "step"}));
     let mut s = Session::default();
     run(&mut s, "doc.open", json!({"path": path, "up": "y"}));
@@ -1541,7 +1542,7 @@ fn join_extrude_to_a_body_of_another_component_leaves_that_body_alone() {
     run(&mut s, "solid.cylinder", json!({"radius":6,"height":10,"body_name":"Connector"}));
     let sketch = run(&mut s, "sketch.create", json!({"plane":{"face":[0,0,10]},"project_edges":false}))["sketch"].as_u64().unwrap();
     let plane = s.model.state().sketch(sketch).unwrap().plane;
-    let centre = plane.to_local(solidcraft_geom::Vec3::new(0.0, 0.0, 10.0));
+    let centre = plane.to_local(solidcore_record::Vec3::new(0.0, 0.0, 10.0));
     run(&mut s, "sketch.circle.center", json!({"center":[centre.x, centre.y],"radius":4}));
     run(&mut s, "sketch.finish", json!({}));
     // The boss runs up to the shell's underside and joins the connector it was sketched on.
@@ -1672,7 +1673,7 @@ fn occurrence_align_supports_snaps_planes_flip_nested_paths_and_pending_capture(
         }),
     );
     let at_origin = s.world_state().unwrap().body("Plate").unwrap().mesh().bounds();
-    assert!(at_origin.min.dist(solidcraft_geom::Vec3::ZERO) < 1e-5, "{at_origin:?}");
+    assert!(at_origin.min.dist(solidcore_record::Vec3::ZERO) < 1e-5, "{at_origin:?}");
 
     // Hostile / invalid parameters never panic.
     for bad_params in [
@@ -1697,7 +1698,7 @@ fn occurrence_align_keeps_every_pick_and_reports_shared_definitions() {
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 4, "body_name": "Plate"}));
     run(&mut s, "component.activate", json!({"component": "root"}));
     let b = run(&mut s, "occurrence.copy", json!({"component": frame, "translate": [0, 50, 0]}))["occurrence"].as_u64().unwrap();
-    let origin = |s: &Session, path: &[u64]| solidcraft_doc::apply_point(&s.occurrence_placement(path).unwrap().world, solidcraft_geom::Vec3::ZERO);
+    let origin = |s: &Session, path: &[u64]| solidcraft_doc::apply_point(&s.occurrence_placement(path).unwrap().world, solidcore_record::Vec3::ZERO);
     let (a0, ab0, b0, bb0) = (origin(&s, &[a]), origin(&s, &[a, bracket]), origin(&s, &[b]), origin(&s, &[b, bracket]));
 
     assert!(!s.occurrence_shared(&[a]) && !s.occurrence_shared(&[b]), "top-level placements are their own");
@@ -1707,7 +1708,7 @@ fn occurrence_align_keeps_every_pick_and_reports_shared_definitions() {
     assert_eq!(r["paths"], json!([[a, bracket], [b]]), "{r}");
     assert_eq!(r["shared"], json!([[a, bracket]]), "{r}");
 
-    let shift = solidcraft_geom::Vec3::new(5.0, 0.0, 0.0);
+    let shift = solidcore_record::Vec3::new(5.0, 0.0, 0.0);
     assert!(origin(&s, &[a]).dist(a0) < 1e-9, "A itself stays");
     assert!(origin(&s, &[a, bracket]).dist(ab0 + shift) < 1e-9, "the picked Bracket moves");
     assert!(origin(&s, &[b]).dist(b0 + shift) < 1e-9, "B moves");

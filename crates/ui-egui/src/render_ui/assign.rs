@@ -504,7 +504,7 @@ pub(crate) fn selection_bar(app: &mut SolveApp, ui: &mut egui::Ui, free: egui::R
     for x in [bounds.min.x, bounds.max.x] {
         for y in [bounds.min.y, bounds.max.y] {
             for z in [bounds.min.z, bounds.max.z] {
-                if let Some(p) = proj.to_screen(solidcraft_engine::geom::Vec3::new(x, y, z)).filter(|p| p.is_finite()) {
+                if let Some(p) = proj.to_screen(solidcore_record::Vec3::new(x, y, z)).filter(|p| p.is_finite()) {
                     screen.extend_with(p);
                 }
             }

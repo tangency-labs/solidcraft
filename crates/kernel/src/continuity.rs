@@ -20,10 +20,11 @@
 //! the join, and backs the engine's `inspect.continuity`.
 
 use serde::Serialize;
+use solidcore_record::Vec3;
 use solidcore_record::brep::{self as b};
-use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::normal_section::{SectionJet, normal_section};
 use solidcraft_geom::brep::{eval::CurveEval, eval::SurfaceEval};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::continuity_order::Continuity;
@@ -494,7 +495,7 @@ impl FaceSurface {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use solidcraft_geom::{Plane, Seg2};
+    use solidcore_record::{Plane, Seg2};
 
     fn tolerances() -> ContinuityTolerances {
         ContinuityTolerances::default()
@@ -549,7 +550,7 @@ mod tests {
 
     #[test]
     fn a_line_tangent_into_an_arc_reports_one_over_its_radius() {
-        use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
+        use solidcore_record::{Loop2, Region2, Seg2, Vec2};
         let v = |x: f64, y: f64| Vec2::new(x, y);
         let outer = Loop2 {
             segs: vec![
@@ -576,7 +577,7 @@ mod tests {
     /// into `transition` (starting at the origin, leaving along +x), and back straight to
     /// (-20, 20): its one tangent wall seam is the line meeting the transition.
     fn line_into(transition: Seg2) -> Body {
-        use solidcraft_geom::{Loop2, Region2, Vec2};
+        use solidcore_record::{Loop2, Region2, Vec2};
         let end = match transition {
             Seg2::Cubic { p3, .. } => p3,
             Seg2::Bezier { n, p } => p[usize::from(n)],
@@ -608,7 +609,7 @@ mod tests {
     /// L = H = 10, 2 / 900 per mm².
     #[test]
     fn a_plane_into_a_g2_transition_is_curvature_continuous_but_not_g3() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         let v = Vec2::new;
         let body = line_into(Seg2::Cubic { p0: v(0.0, 0.0), p1: v(10.0, 0.0), p2: v(20.0, 0.0), p3: v(30.0, 10.0) });
         let seam = tangent_seam(&body);
@@ -626,8 +627,8 @@ mod tests {
     /// with L = 5, H = 10, 3 / 2000 per mm³.
     #[test]
     fn a_plane_into_a_g3_transition_holds_the_change_of_curvature_but_not_g4() {
-        use solidcraft_geom::Vec2;
-        let mut p = [Vec2::new(0.0, 0.0); solidcraft_geom::MAX_BEZIER_CTRL];
+        use solidcore_record::Vec2;
+        let mut p = [Vec2::new(0.0, 0.0); solidcore_record::MAX_BEZIER_CTRL];
         for (k, q) in [(5.0, 0.0), (10.0, 0.0), (15.0, 0.0), (20.0, 10.0)].into_iter().enumerate() {
             p[k + 1] = Vec2::new(q.0, q.1);
         }

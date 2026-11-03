@@ -2,9 +2,10 @@
 //! from each other join without any intersection work, their records side by side.
 
 use serde::{Deserialize, Serialize};
+use solidcore_record::Vec3;
 use solidcore_record::brep::part;
-use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::placement::Rigid;
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::history::{BodyHistory, History};
@@ -249,7 +250,7 @@ pub fn transform(body: &Body, translate: Vec3, origin: Vec3, axis: Vec3, angle: 
 
 /// Split a body with a plane: the parts on the positive and the negative side of the plane
 /// (only the non-empty ones).
-pub fn split_by_plane(body: &Body, plane: &solidcraft_geom::Plane) -> Result<Vec<Body>> {
+pub fn split_by_plane(body: &Body, plane: &solidcore_record::Plane) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "split_by_plane");
     let mut out = Vec::new();
     for positive in [true, false] {
@@ -262,7 +263,7 @@ pub fn split_by_plane(body: &Body, plane: &solidcraft_geom::Plane) -> Result<Vec
 /// cut with: the part is the body's intersection with [`half_box`] (the tool), whose history it
 /// carries, over the body and the box. The box's face in the plane, the part's cut face, is its
 /// start cap on the positive side and its end cap on the negative side.
-pub fn half_space(body: &Body, plane: &solidcraft_geom::Plane, positive: bool) -> Result<(Option<Body>, Body)> {
+pub fn half_space(body: &Body, plane: &solidcore_record::Plane, positive: bool) -> Result<(Option<Body>, Body)> {
     let _span = solidcraft_profile::span("kernel", "half_space");
     // The box's own construction roles describe no face of the design: the cut face has none.
     let tool = half_box(body, plane, positive)?.with_face_sources(None);
@@ -270,17 +271,17 @@ pub fn half_space(body: &Body, plane: &solidcraft_geom::Plane, positive: bool) -
 }
 
 /// A box covering everything of `body` on one side of a plane, its start cap in the plane.
-pub(crate) fn half_box(body: &Body, plane: &solidcraft_geom::Plane, positive: bool) -> Result<Body> {
+pub(crate) fn half_box(body: &Body, plane: &solidcore_record::Plane, positive: bool) -> Result<Body> {
     body.require_brep("split")?;
     let bb = body.exact_bounds()?;
     let reach = (bb.diagonal() + plane.origin.dist(bb.center())) * 2.0 + body.size();
     let c = plane.to_local(bb.center());
-    let sq = solidcraft_geom::Region2 {
-        outer: solidcraft_geom::Loop2::polygon(&[
-            solidcraft_geom::Vec2::new(c.x - reach, c.y - reach),
-            solidcraft_geom::Vec2::new(c.x + reach, c.y - reach),
-            solidcraft_geom::Vec2::new(c.x + reach, c.y + reach),
-            solidcraft_geom::Vec2::new(c.x - reach, c.y + reach),
+    let sq = solidcore_record::Region2 {
+        outer: solidcore_record::Loop2::polygon(&[
+            solidcore_record::Vec2::new(c.x - reach, c.y - reach),
+            solidcore_record::Vec2::new(c.x + reach, c.y - reach),
+            solidcore_record::Vec2::new(c.x + reach, c.y + reach),
+            solidcore_record::Vec2::new(c.x - reach, c.y + reach),
         ]),
         holes: vec![],
     };

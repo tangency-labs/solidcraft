@@ -3,13 +3,15 @@
 //! into each other at a sample ([`ContactGeometry::overlaps`]) and closes in on where they first
 //! touch through placements known to be clear ([`ContactGeometry::gap`]); gaps and interference
 //! depths are measured on the bodies' contact meshes.
+use solidcraft_geom::prelude::*;
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
+use solidcore_record::Vec3;
 use solidcraft_doc::joints;
 use solidcraft_doc::{Document, IDENTITY, Mat, apply_point, mat_mul};
-use solidcraft_geom::{Aabb3, Bvh, Mesh, Vec3};
+use solidcraft_geom::{Aabb3, Bvh, Mesh};
 
 use crate::params::bad;
 use crate::{Result, Session};

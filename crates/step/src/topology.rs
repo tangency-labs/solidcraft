@@ -34,14 +34,15 @@
 //! Input is hostile: every reference is checked, nesting and counts are capped, and the work of
 //! a whole file is bounded (shared shells count each time a solid uses them).
 
+use solidcraft_geom::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::f64::consts::TAU;
 
+use solidcore_record::Vec3;
 use solidcore_record::brep::{
     self, Brep, Curve as BCurve, Curve2, Edge, EdgeUseRef, Face, Frame, Loop, Natural, OrientedEdge, OrientedFace, Region, Shell,
     Surface as BSurface, Vertex,
 };
-use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval, face_flux};
 use solidcraft_geom::brep::pcurve::{self, EdgeUse, TrimEdge, TrimFace, TrimUse, Trims};
 

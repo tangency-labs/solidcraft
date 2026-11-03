@@ -2,6 +2,7 @@
 //! `examples/regressions/` (each script's description says what went wrong).
 
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -228,10 +229,10 @@ fn shallow_cuts_rebuild_after_inserting_an_earlier_pocket() {
         let actual = volume(&session, "Plate");
         assert!((actual - expected).abs() < 0.02, "{actual} vs {expected}");
         let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.001)).unwrap();
-        assert!(!mesh.contains(solidcraft_geom::Vec3::new(12.0, 14.0, 9.0)));
-        assert!(mesh.contains(solidcraft_geom::Vec3::new(12.0, 14.0, 8.0)));
-        assert!(!mesh.contains(solidcraft_geom::Vec3::new(20.0, 20.0, 9.5)));
-        assert!(mesh.contains(solidcraft_geom::Vec3::new(20.0, 20.0, 9.0)));
+        assert!(!mesh.contains(solidcore_record::Vec3::new(12.0, 14.0, 9.0)));
+        assert!(mesh.contains(solidcore_record::Vec3::new(12.0, 14.0, 8.0)));
+        assert!(!mesh.contains(solidcore_record::Vec3::new(20.0, 20.0, 9.5)));
+        assert!(mesh.contains(solidcore_record::Vec3::new(20.0, 20.0, 9.0)));
     }
 }
 
@@ -256,7 +257,7 @@ fn eighteen_tabs_join_the_ribs_of_a_chamfered_base() {
         println!("#2059 volume {got:.6} / {expected:.6} mm³; one valid shell, eighteen tabs");
         for k in 0..6 {
             let angle = k as f64 * std::f64::consts::TAU / 6.0;
-            let p = |x: f64, y: f64, z| solidcraft_geom::Vec3::new(x * angle.cos() - y * angle.sin(), x * angle.sin() + y * angle.cos(), z);
+            let p = |x: f64, y: f64, z| solidcore_record::Vec3::new(x * angle.cos() - y * angle.sin(), x * angle.sin() + y * angle.cos(), z);
             for x in [15.5, 25.5, 35.5] {
                 assert!(mesh.contains(p(x, 0.0, 12.0)), "tab {k} at {x}");
                 assert!(!mesh.contains(p(x, 1.2, 12.0)), "tab {k} grew sideways at {x}");
@@ -799,7 +800,7 @@ fn closed_sweep_redefines_to_a_half_turn_torus_cut() {
     let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.02)).unwrap();
     let expected = (std::f64::consts::PI * 64.0 - 64.0) * std::f64::consts::TAU * 30.0;
     assert!((mesh.measure().volume - expected).abs() < expected * 0.015);
-    for (point, material) in [(solidcraft_geom::Vec3::new(30.0, 0.0, 0.0), false), (solidcraft_geom::Vec3::new(30.0, 0.0, 7.0), true)] {
+    for (point, material) in [(solidcore_record::Vec3::new(30.0, 0.0, 0.0), false), (solidcore_record::Vec3::new(30.0, 0.0, 7.0), true)] {
         assert_eq!(mesh.contains(point), material, "material at {point:?}");
     }
 }
@@ -831,7 +832,7 @@ fn many_extrusion_profiles_preserve_material_and_body_identity() {
         assert!((volume(&s, "Stock") - expected).abs() < 1e-6);
         let stock = state.body("Stock").unwrap();
         for (point, present) in [([3.0, 3.0, 22.0], operation == "join"), ([3.0, 3.0, 18.0], operation != "cut"), ([7.0, 3.0, 18.0], true)] {
-            assert_eq!(stock.mesh().contains(solidcraft_geom::Vec3::from(point)), present, "{operation}: {point:?}");
+            assert_eq!(stock.mesh().contains(solidcore_record::Vec3::from(point)), present, "{operation}: {point:?}");
         }
         assert!(stock.body.validity().is_empty());
         assert!(s.revision > before);
@@ -864,10 +865,10 @@ fn many_circular_extrusion_profiles_cut_a_curved_target() {
     let stock = state.body("Stock").unwrap();
     assert!(stock.body.validity().is_empty());
     let mesh = stock.mesh();
-    assert!(mesh.contains(solidcraft_geom::Vec3::new(0.0, 0.0, 10.0)));
+    assert!(mesh.contains(solidcore_record::Vec3::new(0.0, 0.0, 10.0)));
     for x in [-9.0, -3.0, 3.0, 9.0] {
         for y in [-9.0, -3.0, 3.0, 9.0] {
-            assert!(!mesh.contains(solidcraft_geom::Vec3::new(x, y, 10.0)), "hole at {x}, {y}");
+            assert!(!mesh.contains(solidcore_record::Vec3::new(x, y, 10.0)), "hole at {x}, {y}");
         }
     }
 }
@@ -927,7 +928,7 @@ fn unsupported_face_groups_are_atomic() {
 
 #[test]
 fn imported_rotated_face_extrusions_preserve_other_operations_and_bodies() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     let mut source = Session::default();
     source.execute("solid.box", &json!({"corner":[-16,-16,-3],"length":32,"width":32,"height":1,"body_name":"Other"})).unwrap();
     source.execute("solid.cylinder", &json!({"radius":14,"height":8,"body_name":"Stock"})).unwrap();

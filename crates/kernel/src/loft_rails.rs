@@ -12,8 +12,9 @@
 //! Sections are exact NURBS curves ([`Section`], from the sketch segments' record curves); a
 //! station is the plain loft's control points moved by an affine map, so each is exact too.
 
+use solidcore_record::{Plane, Seg2, Vec3};
 use solidcraft_geom::bspline::CurveN;
-use solidcraft_geom::{Plane, Seg2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::sweep_path::RailFit;
 use crate::{KernelError, Result};

@@ -14,10 +14,11 @@
 //! surfaces' parameters may differ from STEP's (an extrusion's v, a conic's rational
 //! parameter); pcurves and domains come from the records, never from STEP's parameters.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
+use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve as BCurve, Surface as BSurface};
-use solidcraft_geom::Vec3;
 
 use super::{MAX_NESTING, R, frame, map_bspline_curve, unsupported, v3};
 use crate::geom::{Axis1, Curve, P3, Placement, Surface};

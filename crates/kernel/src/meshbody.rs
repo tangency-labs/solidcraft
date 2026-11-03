@@ -1,9 +1,11 @@
 //! Mesh bodies: triangles without a B-rep (imported 3MF/STL). They render, measure, move and
 //! export; B-rep features refuse them.
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
-use solidcraft_geom::{Mesh, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::Mesh;
 
 use crate::body::Body;
 use crate::{KernelError, Result};

@@ -3,7 +3,8 @@
 use super::{Body, FaceSource};
 use crate::{KernelError, Result, guard};
 use solidcore_record::brep::{self, Surface};
-use solidcraft_geom::{Plane, Vec3};
+use solidcore_record::{Plane, Vec3};
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -735,7 +736,7 @@ mod tests {
 
     #[test]
     fn pocket_cut_removes_internal_wall_faces_in_actual_topology() {
-        use solidcraft_geom::{Loop2, Region2, Vec2};
+        use solidcore_record::{Loop2, Region2, Vec2};
         let region = Region2 {
             outer: Loop2::polygon(&[Vec2::new(-30., -27.), Vec2::new(30., -27.), Vec2::new(30., 27.), Vec2::new(-30., 27.)]),
             holes: vec![],

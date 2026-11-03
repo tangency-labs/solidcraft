@@ -10,7 +10,8 @@
 //! own edges. The body goes to SMLib tagged as operand 0, so the result's history comes from
 //! SMLib's tags: the untrimmed face is the face it was, trimmed differently.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 use solidcraft_smlib::trim::Holes;
 
 use crate::body::Body;
@@ -124,7 +125,7 @@ pub(crate) fn face_point(body: &Body, face: usize) -> Result<Vec3> {
 mod tests {
     use super::*;
     use crate::{extrude, measure};
-    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
     use std::f64::consts::PI;
 
     fn rel(a: f64, b: f64) -> f64 {

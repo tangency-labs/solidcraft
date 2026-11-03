@@ -2,7 +2,8 @@
 //! through SMLib ([`crate::smlib_sweeps`]); a profile face as its schema 4 record
 //! ([`planar_face_record`]).
 
-use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::draft_corners::DraftCorner;
@@ -50,7 +51,7 @@ fn seg_ok(s: &Seg2) -> bool {
         }
         Seg2::Cubic { p0, p1, p2, p3 } => p0.is_finite() && p1.is_finite() && p2.is_finite() && p3.is_finite(),
         Seg2::Conic { a, apex, b, w } => a.is_finite() && apex.is_finite() && b.is_finite() && w.is_finite() && w > 1e-9,
-        Seg2::Bezier { n, p } => (4..=solidcraft_geom::MAX_BEZIER_DEGREE as u8).contains(&n) && p.iter().all(|q| q.is_finite()),
+        Seg2::Bezier { n, p } => (4..=solidcore_record::MAX_BEZIER_DEGREE as u8).contains(&n) && p.iter().all(|q| q.is_finite()),
     }
 }
 
@@ -494,7 +495,7 @@ fn offset_curve(s: &Seg2, a: Vec2, b: Vec2, d: f64) -> Option<Seg2> {
             q
         }
         Seg2::Bezier { n, p } => {
-            let k = (n as usize).clamp(1, solidcraft_geom::MAX_BEZIER_DEGREE);
+            let k = (n as usize).clamp(1, solidcore_record::MAX_BEZIER_DEGREE);
             let mut q = offset_polygon(p.get(..=k)?, n0, n1, d)?;
             let mut all = p;
             for (dst, src) in all.iter_mut().zip(&q) {
@@ -730,7 +731,7 @@ fn with_end(s: &Seg2, x: Vec2) -> Seg2 {
         Seg2::Conic { a, apex, w, .. } => Seg2::Conic { a, apex, b: x, w },
         Seg2::Bezier { n, p } => {
             let mut q = p;
-            if let Some(last) = q.get_mut((n as usize).clamp(1, solidcraft_geom::MAX_BEZIER_DEGREE)) {
+            if let Some(last) = q.get_mut((n as usize).clamp(1, solidcore_record::MAX_BEZIER_DEGREE)) {
                 *last = x;
             }
             Seg2::Bezier { n, p: q }

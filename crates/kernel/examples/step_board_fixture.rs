@@ -17,7 +17,7 @@ fn main() {
 }
 
 mod run {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     use solidcraft_kernel::{Body, ExportBody, ExportProduct, StepHeader, box_solid, cylinder, fillet, step_export_products};
 
     /// A count from `SOLIDCRAFT_<name>`, or `default` when it is unset.

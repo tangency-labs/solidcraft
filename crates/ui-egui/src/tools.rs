@@ -3,7 +3,8 @@
 
 use egui::{Pos2, Stroke};
 use serde_json::{Value, json};
-use solidcraft_engine::geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::tool_modifiers::{Audit, Scope, ToolModifiers};
@@ -803,7 +804,7 @@ pub(crate) fn projection_preselection(selection: &[solidcraft_engine::Sel]) -> O
 /// `x` or `y` when the origin axis `name` is the active sketch's own x or y axis: along it, and
 /// through the sketch's origin.
 pub(crate) fn sketch_axis_of(app: &SolveApp, name: &str) -> Option<&'static str> {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     let dir = match name {
         "X" => Vec3::X,
         "Y" => Vec3::Y,
@@ -912,7 +913,7 @@ pub fn finish(app: &mut SolveApp) {
 /// Rubber-band preview of the shape being drawn.
 pub(crate) fn paint_preview_curve(
     mut sketch: solidcraft_engine::sketch::Sketch,
-    plane: &solidcraft_engine::geom::Plane,
+    plane: &solidcore_record::Plane,
     painter: &egui::Painter,
     proj: &Proj,
     stroke: Stroke,
@@ -931,7 +932,7 @@ pub(crate) fn paint_preview_curve(
     crate::scenario::publish_count("tool_preview_curves", sketch.curves.len() as f64);
 }
 
-pub(crate) fn paint_sketch_path(points: &[solidcraft_engine::geom::Vec3], mode: u8, painter: &egui::Painter, proj: &Proj, stroke: Stroke) {
+pub(crate) fn paint_sketch_path(points: &[solidcore_record::Vec3], mode: u8, painter: &egui::Painter, proj: &Proj, stroke: Stroke) {
     if mode == 0 {
         let screen: Vec<_> = points.iter().filter_map(|point| proj.to_screen(*point)).collect();
         if screen.len() >= 2 {
@@ -950,7 +951,7 @@ pub(crate) fn paint_sketch_path(points: &[solidcraft_engine::geom::Vec3], mode: 
 pub(crate) fn paint_curve(
     sketch: &solidcraft_engine::sketch::Sketch,
     index: usize,
-    plane: &solidcraft_engine::geom::Plane,
+    plane: &solidcore_record::Plane,
     painter: &egui::Painter,
     proj: &Proj,
     stroke: Stroke,

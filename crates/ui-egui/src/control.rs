@@ -41,6 +41,7 @@
 //!   and replies once the command has run (`"animate": false` skips that one call)
 //! - `ui.resize {width, height}`, `app.quit`
 
+use solidcraft_engine::geom::prelude::*;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
@@ -1061,13 +1062,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             let proj = crate::viewport::projection(app, rect);
             let num = |v: &Value, i: usize| v.get(i).and_then(Value::as_f64).unwrap_or(0.0);
             let world = if let Some(w) = p.get("world") {
-                Some(solidcraft_engine::geom::Vec3::new(num(w, 0), num(w, 1), num(w, 2)))
+                Some(solidcore_record::Vec3::new(num(w, 0), num(w, 1), num(w, 2)))
             } else if let Some(s) = p.get("sketch") {
                 let st = crate::open_meshing::session_world(&app.session);
-                app.session
-                    .active_sketch
-                    .and_then(|id| st.sketch(id))
-                    .map(|ss| ss.plane.to_world(solidcraft_engine::geom::Vec2::new(num(s, 0), num(s, 1))))
+                app.session.active_sketch.and_then(|id| st.sketch(id)).map(|ss| ss.plane.to_world(solidcore_record::Vec2::new(num(s, 0), num(s, 1))))
             } else if let Some(n) = p.get("plane").and_then(Value::as_str) {
                 crate::viewport::origin_plane_target(app, &proj, n)
             } else if let Some(n) = p.get("axis").and_then(Value::as_str) {
@@ -1077,7 +1075,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             } else if let Some(n) = p.get("gizmo").and_then(Value::as_str) {
                 // A handle of the move triad ("x", "xy", "rz", "ball"), moved `by` [x,y,z] mm or
                 // turned `turn` degrees (rings).
-                let by = p.get("by").map(|b| solidcraft_engine::geom::Vec3::new(num(b, 0), num(b, 1), num(b, 2))).unwrap_or_default();
+                let by = p.get("by").map(|b| solidcore_record::Vec3::new(num(b, 0), num(b, 1), num(b, 2))).unwrap_or_default();
                 crate::gizmo::handle_point(n, by, p.get("turn").and_then(Value::as_f64).unwrap_or(0.0))
             } else {
                 None
@@ -1098,7 +1096,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 .take(1000)
                 .map(|v| {
                     let c = |i: usize| v.get(i).and_then(Value::as_f64).unwrap_or(0.0);
-                    proj.to_screen(solidcraft_engine::geom::Vec3::new(c(0), c(1), c(2))).map_or(Value::Null, |q| json!([q.x, q.y]))
+                    proj.to_screen(solidcore_record::Vec3::new(c(0), c(1), c(2))).map_or(Value::Null, |q| json!([q.x, q.y]))
                 })
                 .collect();
             ok(json!(pts))
@@ -1118,7 +1116,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 .take(1000)
                 .map(|v| {
                     let c = |i: usize| v.get(i).and_then(Value::as_f64).unwrap_or(0.0);
-                    let q = solidcraft_engine::geom::Vec2::new(c(0), c(1));
+                    let q = solidcore_record::Vec2::new(c(0), c(1));
                     proj.to_screen(ss.plane.to_world(q)).map_or(Value::Null, |p| json!([p.x, p.y]))
                 })
                 .collect();
@@ -2601,8 +2599,7 @@ mod tests {
         );
 
         // What is under the pointer is a selection-like item, not the viewport's Debug text.
-        h.app.viewport.hover =
-            Some(crate::viewport::Hit::Face { body: "Body1".into(), index: 2, point: solidcraft_engine::geom::Vec3::new(1.0, 2.0, 3.0) });
+        h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: "Body1".into(), index: 2, point: solidcore_record::Vec3::new(1.0, 2.0, 3.0) });
         let hover = json!({"type": "face", "body": "Body1", "index": 2, "point": [1.0, 2.0, 3.0]});
         assert_eq!(h.call("ui.selection", json!({}))["result"]["hover"], hover);
     }

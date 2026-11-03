@@ -18,9 +18,10 @@
 //! undefined; there it is taken from the nearest sample where it is defined, so a pcurve runs
 //! straight into the pole, and where two uses meet at a pole the loop runs along the pole's line.
 use super::eval::{CurveEval, SurfaceEval};
-use crate::Vec3;
 use crate::bspline::{HPoint, segment};
+use crate::prelude::*;
 use crate::tess::uv::{self, Domain};
+use solidcore_record::Vec3;
 use solidcore_record::brep::{Budget, Curve, Curve2, Surface, check_curve, check_curve2, check_interval, check_surface};
 
 /// Why no pcurves: the records are malformed or out of bounds (`Invalid`), no pcurve within
@@ -44,7 +45,7 @@ type Result<T> = std::result::Result<T, Error>;
 /// the use's exact pcurve where the producer holds one (`given`, on the use's interval in its
 /// curve's direction: a kernel's own UV trim mapped exactly into the record's parameters). A
 /// given pcurve is taken as it is, only moved by whole periods with its loop; it is never
-/// checked against the edge or replaced here (`Brep::check_geometry` checks it).
+/// checked against the edge or replaced here (`brep::geometry::check` checks it).
 #[derive(Clone, Copy, Debug)]
 pub struct EdgeUse<'a> {
     pub edge: u32,

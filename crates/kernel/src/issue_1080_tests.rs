@@ -5,7 +5,7 @@
 //! large, and the largest size that fits is found by searching ([`crate::fillet_max`],
 //! [`crate::chamfer_max`]).
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::{Body, BoolOp, ChamferSide, KernelError, build::box_solid, ops::boolean};
 

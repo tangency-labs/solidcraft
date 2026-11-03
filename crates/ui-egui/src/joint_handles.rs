@@ -1,5 +1,7 @@
 //! Explicit assembly Move: only the selected part's allowed joint axes are shown. Distances
 //! and angles are relative to the current drag, and each drag is one cancellable undo step.
+use solidcore_record::Vec3;
+use solidcraft_engine::geom::prelude::*;
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
@@ -10,7 +12,6 @@ use serde_json::json;
 use solidcraft_engine::{
     Sel,
     doc::{Document, apply_point, joints, mat_inverse, mat_mul},
-    geom::Vec3,
 };
 
 use crate::{

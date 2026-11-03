@@ -38,7 +38,7 @@ solidcraft-3dx-client = { path = "crates/threedx-client" }
 solidcore = { git = "https://github.com/tangency-labs/solidcore", rev = "8ddce901671f1cebd9214a31d21895d725e886c8" }
 # Geometry as data (solidcore's layers §1, "Record"): the B-rep record, its structural validation
 # and the native body file. Pinned like solidcore; for a local checkout, patch it as above.
-solidcore-record = { git = "https://github.com/tangency-labs/solidcore", rev = "a976a40c24844607f1b989a74fc0d36331510076" }
+solidcore-record = { git = "https://github.com/tangency-labs/solidcore", rev = "b21eb123ee989bd708726080b5d2298a1f2573b5" }
 # test tooling: a dev-dependency only (xtask/src/layers.rs)
 solidcraft-testkit = { path = "crates/testkit" }
 

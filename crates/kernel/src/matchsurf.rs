@@ -16,9 +16,10 @@
 //! of the target meet, with shapes that part company, is a seam the target itself does not hold
 //! beyond that order, and no surface can be told to carry a condition the target has not got.
 
+use solidcore_record::Vec3;
 use solidcore_record::brep::{self as b};
-use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::{eval::CurveEval, eval::SurfaceEval};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::bridge::{self, Continuity, Frame};

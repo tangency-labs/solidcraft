@@ -2,8 +2,10 @@
 //! record. These are not mesh measurements or certificates of construction history.
 use crate::prism_curve::{Run, segment};
 use solidcore_record::brep::{Brep, Curve, Loop, Shell, Surface};
+use solidcore_record::{Plane, Seg2, Vec2, Vec3};
+use solidcraft_geom::Ring;
 use solidcraft_geom::brep::eval::CurveEval;
-use solidcraft_geom::{Plane, Ring, Seg2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
@@ -645,7 +647,7 @@ pub struct PrismSection {
     pub lo: f64,
     pub hi: f64,
     /// Its section, exact: lines and arcs, the outer loop counter-clockwise, the holes clockwise.
-    pub region: solidcraft_geom::Region2,
+    pub region: solidcore_record::Region2,
     /// How far the levels may be off the body's caps (the caps' vertices lie within it of them).
     pub tolerance: f64,
 }
@@ -668,7 +670,7 @@ pub fn certified_prism_section(body: &crate::Body, plane: &Plane) -> crate::Resu
         let mut holes = Vec::new();
         for lp in c.loops {
             let positive = lp.area.lo > 0.;
-            let lp = solidcraft_geom::Loop2 { segs: lp.segments.into_vec() };
+            let lp = solidcore_record::Loop2 { segs: lp.segments.into_vec() };
             if positive {
                 if outer.replace(lp).is_some() {
                     return Ok(None);
@@ -681,7 +683,7 @@ pub fn certified_prism_section(body: &crate::Body, plane: &Plane) -> crate::Resu
         // The caps' vertices are within twice the tolerance of their levels (`certificate`), and
         // the levels are worked out from the plane's origin.
         let tolerance = 2. * tol + 128. * f64::EPSILON * (plane.origin.len() + c.lo.abs() + c.hi.abs()).max(1.);
-        Ok(Some(PrismSection { lo: c.lo, hi: c.hi, region: solidcraft_geom::Region2 { outer, holes }, tolerance }))
+        Ok(Some(PrismSection { lo: c.lo, hi: c.hi, region: solidcore_record::Region2 { outer, holes }, tolerance }))
     })
 }
 
@@ -850,7 +852,7 @@ mod tests {
     use super::*;
 
     fn drilled(radius: f64, shift: f64) -> crate::Body {
-        use solidcraft_geom::{Loop2, Region2};
+        use solidcore_record::{Loop2, Region2};
         let region = Region2 {
             outer: Loop2::polygon(&[Vec2::ZERO, Vec2::new(20., 0.), Vec2::new(20., 20.), Vec2::new(0., 20.)]),
             holes: vec![Loop2::circle(Vec2::new(10. + shift, 10.), radius)],
@@ -877,7 +879,7 @@ mod tests {
     /// above it steps (the pin stands up through it) and is no prism.
     #[test]
     fn a_trimmed_tool_reads_as_the_prism_of_its_current_section() {
-        use solidcraft_geom::{Loop2, Region2};
+        use solidcore_record::{Loop2, Region2};
         let pin = crate::cylinder(Vec3::new(25., 25., 0.), Vec3::Z, 2., 20.).unwrap();
         let stop = crate::box_solid(Vec3::new(19., 19., 1.), Vec3::new(31., 31., 2.)).unwrap();
         let roof = crate::boolean(&pin, &stop, crate::BoolOp::Union).unwrap().unwrap();
@@ -1026,7 +1028,7 @@ mod tests {
         let retraced =
             CapLoop { segments: Ring::from([arc, arc.reversed(), arc]), area: Interval::enclosing(36. * std::f64::consts::PI, 1e-8).unwrap() };
         assert!(circle(&retraced, 1e-6).is_none());
-        let region = solidcraft_geom::Loop2::polygon(&[Vec2::ZERO, Vec2::new(20., 0.), Vec2::new(20., 20.), Vec2::new(0., 20.)]);
+        let region = solidcore_record::Loop2::polygon(&[Vec2::ZERO, Vec2::new(20., 0.), Vec2::new(20., 20.), Vec2::new(0., 20.)]);
         let doubled = CapLoop { segments: region.segs.iter().chain(&region.segs).copied().collect(), area: Interval::enclosing(800., 1e-8).unwrap() };
         assert!(separated_material(&[doubled], 1e-6, &mut 16_000_000).is_none());
         // Thinner than a body's tolerance (2e-5): SMLib refuses it as a solid; built, it gets none.

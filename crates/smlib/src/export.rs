@@ -35,12 +35,13 @@
 //!   `VERTEX_TOLERANCE`), never below a floor of 10⁻⁶ of the body's size (at least 10⁻⁵ mm),
 //!   which is the body's; from a library without them, SMLib's intersection tolerance (or the
 //!   floor where larger) for the body, every edge and every vertex.
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
 use std::collections::HashMap;
 
+use solidcore_record::Vec3;
 use solidcore_record::brep as b;
-use solidcraft_geom::Vec3;
 
 use crate::flat::{self, *};
 use crate::history::{Order, Piece};

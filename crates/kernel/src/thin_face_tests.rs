@@ -5,10 +5,11 @@
 //! So does a face pinched to a point, where its boundary touches itself within the tolerance (a
 //! sphere touching a box's edge leaves one on the box, #1648).
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
+use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve, Loop, Surface};
-use solidcraft_geom::Vec3;
 
 use crate::body::Body;
 use crate::sew::{PartEdge, PartFace, PartUse, Parts, assemble};

@@ -43,9 +43,10 @@
 //! control point that does not change the geometry at all — is reported as an error and the
 //! geometry is left alone.
 
+use solidcore_record::Vec3;
 use solidcore_record::brep as b;
+use solidcraft_geom::Grid;
 use solidcraft_geom::bspline::{HPoint, MAX_SPLINE_DEGREE, NurbsSurface, Side, SplineError, check_knots, local_basis};
-use solidcraft_geom::{Grid, Vec3};
 
 use crate::body::Body;
 use crate::history::Change;
@@ -962,6 +963,7 @@ fn held_face(surface: &b::Surface, opts: &FairOptions) -> Result<Option<FairRepo
 mod tests {
     use super::*;
     use solidcraft_geom::brep::eval::CurveEval;
+    use solidcraft_geom::prelude::*;
 
     /// A clamped uniform knot vector over `[0, spans]` of degree `degree`: `spans + degree`
     /// control points.

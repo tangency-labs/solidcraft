@@ -14,14 +14,15 @@
 //! order asked: the neighbour as a height over its tangent plane to that order
 //! (`solidcraft_geom::linkage`).
 
+use solidcore_record::Vec3;
 use solidcore_record::brep::{self as b, Curve2};
-use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::eval::CurveEval;
 use solidcraft_geom::brep::eval::SurfaceEval;
 use solidcraft_geom::bspline::{HPoint, SplineError};
 use solidcraft_geom::fill_general::{Across, MAX_FILL_POINTS, Station};
 use solidcraft_geom::fill_iso::{IsoEdge, IsoFill, IsoSpec};
 use solidcraft_geom::fill_matched::{MatchedFill, MatchedSpec};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::bridge::Continuity;
@@ -1032,8 +1033,9 @@ pub(crate) fn face_tolerance(body: &Body) -> f64 {
 #[cfg(test)]
 mod tests {
     use solidcore_record::brep::{self as b};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
     use solidcraft_geom::brep::{eval::CurveEval, eval::SurfaceEval};
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
+    use solidcraft_geom::prelude::*;
 
     use crate::body::Body;
     use crate::boolean_record::tests::{Reach, checked};

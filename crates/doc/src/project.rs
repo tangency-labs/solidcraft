@@ -10,9 +10,11 @@
 //! lines and circular arcs are recovered exactly, the rest (an ellipse from a tilted circle,
 //! a spline edge running out of the plane) becomes a chain of lines.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
-use solidcraft_geom::{Mesh, Plane, Seg2, Vec2, Vec3};
+use solidcore_record::{Plane, Seg2, Vec2, Vec3};
+use solidcraft_geom::Mesh;
 use solidcraft_sketch::{CurveKind, LinkGeom, LinkKind, LinkSource, Sketch, WireCurve};
 
 use crate::eval::ModelState;

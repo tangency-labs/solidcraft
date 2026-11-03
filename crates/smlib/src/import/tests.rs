@@ -2,6 +2,7 @@ use super::*;
 use solidcore_record::brep::{
     Brep as Record, Curve, Curve2, Edge, EdgeUseRef, Face, Loop, OrientedEdge, OrientedFace, Region, Shell, Surface, Vertex,
 };
+use solidcraft_geom::prelude::*;
 
 /// A closed polyhedron record from its corner points and its faces, each a cycle of corner
 /// indices counter-clockwise seen from outside: planar faces, straight edges, canonical order.

@@ -12,7 +12,8 @@
 //! an edge's for its pcurves, an edge's and its vertex's together where they meet, a vertex's on
 //! its surface. A point that cannot be evaluated is an error, never a panic.
 use super::eval::{CurveEval, SurfaceEval};
-use crate::Vec3;
+use crate::prelude::*;
+use solidcore_record::Vec3;
 use solidcore_record::brep::{Brep, Curve2, Loop};
 
 /// Where a record disagrees with itself.

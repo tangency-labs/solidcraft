@@ -25,10 +25,11 @@
 //! of the pcurve, isolated by subdividing its Bernstein coefficients (no sign change: no root;
 //! one: exactly one) and found to rounding by bisection.
 
+use solidcore_record::Vec3;
 use solidcore_record::brep::{Brep, Curve2, Face, Surface};
-use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::eval::SurfaceEval;
 use solidcraft_geom::bspline::{HPoint, segment};
+use solidcraft_geom::prelude::*;
 
 use crate::{KernelError, Result};
 

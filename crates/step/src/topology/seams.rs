@@ -15,10 +15,11 @@
 //! on a closed surface is all of that surface less a cut of none: its slit is made its seams
 //! ([`Builder::complete_slits`]), so the loop bounds the surface's whole (u, v) domain.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{PI, TAU};
 
+use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve as BCurve, Frame, Surface as BSurface, Vertex};
-use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 
 use super::{Builder, EdgeB, LoopB, R, index, unsupported};

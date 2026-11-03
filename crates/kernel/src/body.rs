@@ -1,6 +1,8 @@
 use serde::Serialize;
+use solidcore_record::Vec3;
 use solidcore_record::brep::{self, Brep, Curve, Loop, Shell, Surface};
-use solidcraft_geom::{Aabb3, Mesh, Vec3};
+use solidcraft_geom::prelude::*;
+use solidcraft_geom::{Aabb3, Mesh};
 
 use crate::history::BodyHistory;
 use crate::{KernelError, Result, guard};
@@ -159,20 +161,20 @@ fn placed_mesh(m: &Mesh, t: &[[f64; 4]; 4]) -> Option<Mesh> {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum FaceSource {
     ExtrudeSide {
-        segment: solidcraft_geom::Seg2,
-        plane: Option<solidcraft_geom::Plane>,
+        segment: solidcore_record::Seg2,
+        plane: Option<solidcore_record::Plane>,
         coalesced: bool,
     },
     CertifiedExtrudeSide {
         producer: u64,
         sketch: u64,
         curve: String,
-        plane: Option<solidcraft_geom::Plane>,
+        plane: Option<solidcore_record::Plane>,
     },
     ExtrudeCap {
         high: bool,
-        region: solidcraft_geom::Region2,
-        plane: solidcraft_geom::Plane,
+        region: solidcore_record::Region2,
+        plane: solidcore_record::Plane,
     },
     CertifiedExtrudeCap {
         producer: u64,
@@ -180,25 +182,25 @@ pub enum FaceSource {
         high: bool,
         outer: Vec<String>,
         holes: Vec<Vec<String>>,
-        plane: solidcraft_geom::Plane,
+        plane: solidcore_record::Plane,
     },
     Box {
         producer: Option<u64>,
         axis: u8,
         high: bool,
-        plane: solidcraft_geom::Plane,
+        plane: solidcore_record::Plane,
     },
     /// A cylinder primitive's cap: `high` at the far end (its `top`), else at the base.
     CylinderCap {
         producer: u64,
         high: bool,
-        plane: solidcraft_geom::Plane,
+        plane: solidcore_record::Plane,
     },
     ShellPlanar {
         producer: Option<u64>,
         source: Box<FaceSource>,
         inner: bool,
-        plane: solidcraft_geom::Plane,
+        plane: solidcore_record::Plane,
     },
     Imported {
         item: u64,
@@ -212,7 +214,7 @@ pub type CapSignature = (Vec<String>, Vec<Vec<String>>);
 type FaceSources = std::sync::Arc<Vec<Option<FaceSource>>>;
 
 impl FaceSource {
-    fn plane_mut(&mut self) -> Option<&mut solidcraft_geom::Plane> {
+    fn plane_mut(&mut self) -> Option<&mut solidcore_record::Plane> {
         match self {
             Self::ExtrudeSide { plane, .. } | Self::CertifiedExtrudeSide { plane, .. } => plane.as_mut(),
             Self::ExtrudeCap { plane, .. }
@@ -714,7 +716,7 @@ impl Body {
     }
 
     /// An exact construction/import plane; never inferred from tessellation.
-    pub fn face_plane(&self, index: usize) -> Option<solidcraft_geom::Plane> {
+    pub fn face_plane(&self, index: usize) -> Option<solidcore_record::Plane> {
         if index >= 50_000 {
             return None;
         }
@@ -732,7 +734,7 @@ impl Body {
 
     /// Exact current planar surface for an explicitly fixed snapshot, without source lineage: the
     /// face's plane as the face faces (out of the material in a closed shell).
-    pub fn planar_face(&self, index: usize) -> Option<solidcraft_geom::Plane> {
+    pub fn planar_face(&self, index: usize) -> Option<solidcore_record::Plane> {
         let face = self.record.faces.get(index)?;
         let (o, u, v) = match &face.surface {
             Surface::Plane { origin, u_axis, v_axis } => (v3(*origin), v3(*u_axis), v3(*v_axis)),
@@ -743,7 +745,7 @@ impl Body {
             _ => return None,
         };
         let v = if self.face_forward(index) { v } else { -v };
-        solidcraft_geom::Plane::new(o, u, v)
+        solidcore_record::Plane::new(o, u, v)
     }
 
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
@@ -853,7 +855,7 @@ impl Body {
         let mut sources = sources.as_ref().clone();
         for source in sources.iter_mut().flatten() {
             if let Some(plane) = source.plane_mut() {
-                *plane = solidcraft_geom::Plane::new(
+                *plane = solidcore_record::Plane::new(
                     vector(plane.origin) + translation,
                     vector(plane.x),
                     vector(plane.y) * if reflected { -1. } else { 1. },
@@ -1298,7 +1300,7 @@ impl Body {
     /// B-spline it is, for a sketch to project them. `None` for an edge that doesn't lie in a
     /// plane parallel to `plane`, isn't read exactly or isn't there, and for every edge of a mesh
     /// body.
-    pub fn planar_edges(&self, plane: &solidcraft_geom::Plane, indices: &[usize]) -> Vec<Option<Vec<crate::PlanarPiece>>> {
+    pub fn planar_edges(&self, plane: &solidcore_record::Plane, indices: &[usize]) -> Vec<Option<Vec<crate::PlanarPiece>>> {
         if self.is_mesh() {
             return vec![None; indices.len()];
         }

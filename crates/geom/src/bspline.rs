@@ -13,7 +13,7 @@
 
 use std::ops::{Add, AddAssign, Mul, Sub};
 
-use crate::Vec3;
+use solidcore_record::Vec3;
 
 /// Highest polynomial degree accepted in either direction: the B-rep record's own bound
 /// (`Brep::validate`), so every spline a record may hold can be evaluated. A G4 blend is of
@@ -707,6 +707,7 @@ impl NurbsSurface {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::prelude::*;
 
     /// A small deterministic generator for test data.
     pub(crate) struct Lcg(pub(crate) u64);

@@ -2,10 +2,11 @@
 
 use egui::RichText;
 use serde_json::{Value, json};
+use solidcore_record::{Plane, Vec3};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::face_anchor::plane_face_anchor;
 use solidcraft_engine::doc::{EmbossFace, FaceAttachmentStatus, FeatureKind, PlaneRef, mat_inverse};
-use solidcraft_engine::geom::{Plane, Vec3};
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::theme::Tokens;

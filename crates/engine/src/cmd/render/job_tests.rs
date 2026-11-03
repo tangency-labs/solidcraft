@@ -924,7 +924,7 @@ fn native_spatial_aa_preflight_and_host_forwarding_change_actual_edge_png() {
     let center = scene.bounds.center();
     let mut camera = solidcraft_render::Camera { distance: 2.0, fov: 0.0, ..Default::default() };
     camera.set_view(solidcraft_render::StandardView::Top);
-    camera.target = solidcraft_geom::Vec3::new(scene.bounds.min.x, center.y, center.z);
+    camera.target = solidcore_record::Vec3::new(scene.bounds.min.x, center.y, center.z);
     let doc = s.doc.clone();
     let before = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len());
     let mut legacy: Option<Vec<u8>> = None;

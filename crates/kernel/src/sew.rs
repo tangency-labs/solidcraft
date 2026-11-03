@@ -10,13 +10,15 @@
 //! body from. No tolerance stitching is involved: two sheets of material meeting along one
 //! geometric edge keep an edge each.
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use solidcore_record::Vec3;
 use solidcore_record::brep::{self as b, Curve2};
+use solidcraft_geom::Ring;
 use solidcraft_geom::brep::eval::{SurfaceEval, face_flux};
 use solidcraft_geom::brep::pcurve;
-use solidcraft_geom::{Ring, Vec3};
 
 use crate::body::Body;
 use crate::{KernelError, Result, guard};

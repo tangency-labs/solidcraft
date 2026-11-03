@@ -724,8 +724,8 @@ fn collapsed_rail_shares_header_hover_inset_and_expands_from_its_whole_card() {
 /// #6907: a mesh body's row has its own icon and tooltip, so it can be told from a solid one.
 #[test]
 fn mesh_and_solid_body_rows_have_different_icons_and_tooltips() {
+    use solidcore_record::Vec3;
     use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
-    use solidcraft_engine::geom::Vec3;
     let solid = solidcraft_engine::kernel::box_solid(Vec3::ZERO, Vec3::new(10., 10., 10.)).unwrap();
     let mesh = solid.mesh(&solidcraft_engine::kernel::MeshTolerance::chord(0.01)).unwrap();
     let mut doc = Document::default();

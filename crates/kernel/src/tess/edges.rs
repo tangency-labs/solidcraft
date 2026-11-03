@@ -1,9 +1,10 @@
 //! Edge nodes: every edge of a body sampled once, so the faces on either side share the very
 //! same boundary points (watertight by construction).
 
+use solidcore_record::Vec3;
 use solidcore_record::brep::{self, Curve};
-use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::eval::CurveEval;
+use solidcraft_geom::prelude::*;
 
 use super::size::Rules;
 use crate::{KernelError, Result};

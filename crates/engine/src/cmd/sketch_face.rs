@@ -2,8 +2,9 @@
 use crate::params::{bad, vec3};
 use crate::{Result, Session};
 use serde_json::Value;
+use solidcore_record::Plane;
 use solidcraft_doc::{EmbossFace, PlaneRef, apply_point, apply_vector, mat_inverse, mat_mul};
-use solidcraft_geom::Plane;
+use solidcraft_geom::prelude::*;
 
 pub(in crate::cmd) fn is_face(p: &Value) -> bool {
     p.get("plane").and_then(|plane| plane.get("face")).is_some()
@@ -22,7 +23,7 @@ pub(in crate::cmd) fn capture_internal(s: &Session, value: &Value, cmd: &str) ->
 /// looks at the design.
 pub(crate) struct FacePickForm<'a> {
     /// The picked point, in world coordinates.
-    pub point: solidcraft_geom::Vec3,
+    pub point: solidcore_record::Vec3,
     /// Keep the plane as it is now instead of following the face.
     pub fixed: bool,
     /// The exact pick: the world body and the face's index, given together.

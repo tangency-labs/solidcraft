@@ -14,9 +14,11 @@
 //! display-only: the edge keeps its identity, stays pickable and stays in the wireframe, and its
 //! faces stay apart (pieces of one surface are [`crate::topo::seam_flags`]'s business). Unknown
 //! geometry (a station that does not evaluate) keeps its existing presentation.
+use solidcore_record::Vec3;
 use solidcore_record::brep::{Brep, Loop, Shell};
+use solidcraft_geom::Mesh;
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
-use solidcraft_geom::{Mesh, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 
@@ -345,7 +347,7 @@ fn whole_joins(record: &Brep, measured: &[usize], smooth: &mut [bool], mut work:
 mod tests {
     use super::*;
     use solidcore_record::brep::Surface;
-    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
 
     fn circle(radius: f64, count: usize) -> Loop2 {
         let step = std::f64::consts::TAU / count as f64;

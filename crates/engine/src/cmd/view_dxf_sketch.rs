@@ -3,7 +3,8 @@
 //! curves, text outlines and drawn 3D-sketch curves. Construction geometry, centerlines,
 //! projected references, points, dimensions and constraints are viewport overlays and are left
 //! out. The active sketch is drawn on top, as the viewport draws it.
-use solidcraft_geom::{Plane, Vec3};
+use solidcore_record::{Plane, Vec3};
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::Sketch;
 
 use super::progress::Stage;

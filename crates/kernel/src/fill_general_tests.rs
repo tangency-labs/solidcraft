@@ -4,8 +4,9 @@
 //! surface itself, never against the mesher alone.
 
 use solidcore_record::brep::{self as b};
+use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 use solidcraft_geom::brep::{eval::CurveEval, eval::SurfaceEval};
-use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use super::{PATCH_ANGLE_TOL_DEG, PatchReport, PatchSpec, face_tolerance, patch_edges_report};
 use crate::body::Body;

@@ -1,7 +1,9 @@
 //! Inertia tensors (#8095): built from how a body's volume spreads about its centre of mass,
 //! taken about another point (parallel axes), and their principal moments and axes.
 
-use crate::{MassProperties, Vec3};
+use crate::MassProperties;
+use crate::prelude::*;
+use solidcore_record::Vec3;
 
 /// A symmetric 3 × 3 tensor, row by row.
 pub type Tensor3 = [[f64; 3]; 3];

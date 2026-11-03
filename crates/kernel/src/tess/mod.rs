@@ -38,10 +38,11 @@ pub(crate) mod surface;
 pub(crate) mod tangle;
 pub(crate) mod uv;
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
+use solidcore_record::Vec3;
 use solidcore_record::brep::{self, Curve, Loop, Shell};
-use solidcraft_geom::Vec3;
 use solidcraft_geom::tess::{EvalSurface, FacePlan, TessPlan};
 
 use crate::{KernelError, Result};

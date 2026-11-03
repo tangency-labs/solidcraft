@@ -17,7 +17,8 @@
 //! revolutions); the face in the start plane is the start cap, the one in the end plane (or,
 //! where the sweep has no end plane, the planar face left over) the end cap.
 
-use solidcraft_geom::{Plane, Region2, Seg2, Vec3};
+use solidcore_record::{Plane, Region2, Seg2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::numbered::{NumberedLoop, NumberedRegion};
@@ -86,7 +87,7 @@ mod imp {
     use solidcraft_smlib::sweeps::{Affine, Curve, DraftCorner, Ends, SweepFrame};
     use solidcraft_smlib::{Brep, CheckLevel};
 
-    use solidcraft_geom::Vec2;
+    use solidcore_record::Vec2;
 
     use super::*;
     use crate::history::FaceProv;
@@ -1088,7 +1089,7 @@ mod imp {
 
     /// The centre and radius of `lp` when it is one circle (in one or several arcs) centred on the
     /// line through `start` along the unit `k`.
-    fn circle_on_axis(plane: &Plane, lp: &solidcraft_geom::Loop2, start: Vec3, k: Vec3) -> Option<(Vec3, f64)> {
+    fn circle_on_axis(plane: &Plane, lp: &solidcore_record::Loop2, start: Vec3, k: Vec3) -> Option<(Vec3, f64)> {
         let mut circle: Option<(Vec3, f64)> = None;
         let mut turn = 0.0;
         for s in &lp.segs {

@@ -2,9 +2,11 @@
 //! of the operands (in tests only: the history itself is recorded, never sampled), and the exact
 //! origins asserted where the outcome is known.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
 
-use solidcraft_geom::{Mesh, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::Mesh;
 
 use crate::body::Body;
 use crate::history::BodyHistory;
@@ -347,7 +349,7 @@ fn faceted_tool() {
 /// one face each past the cutter's floor, untouched (Kept).
 #[test]
 fn stepped_cut_keeps_the_stock_walls_whole() {
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
     for curved in [true, false] {
         let (outer, inner) = if curved {
             (Loop2::circle(Vec2::ZERO, 10.0), Loop2::circle(Vec2::ZERO, 5.0))

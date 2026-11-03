@@ -288,7 +288,7 @@ fn a_snapshot_shows_the_part_where_the_camera_puts_it() {
         let vp = c.view_proj(f64::from(SIZE.0) / f64::from(SIZE.1), 1000.0);
         let (mut elo, mut ehi) = ([f64::MAX; 2], [f64::MIN; 2]);
         for k in 0..8 {
-            let p = solidcraft_engine::geom::Vec3::new(
+            let p = solidcore_record::Vec3::new(
                 corner[0] + size[0] * f64::from(k & 1),
                 corner[1] + size[1] * f64::from((k >> 1) & 1),
                 corner[2] + size[2] * f64::from((k >> 2) & 1),

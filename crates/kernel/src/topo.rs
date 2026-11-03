@@ -6,11 +6,13 @@
 //! are merged, edges between merged faces disappear, and chains of edges through vertices that
 //! only join two pieces of one edge are counted once.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::Serialize;
+use solidcore_record::Vec3;
 use solidcore_record::brep::{Brep, Loop};
-use solidcraft_geom::{Mesh, UnitVec3, Vec3};
+use solidcraft_geom::{Mesh, UnitVec3};
 
 use crate::Result;
 use crate::body::Body;
@@ -360,7 +362,7 @@ impl CylinderFace {
 /// A thread asks this past a face's end: a free end has nothing there (a cap, a chamfer the
 /// groove runs out through), a shoulder, a head or a blind hole's bottom has.
 pub fn material_in_ring(b: &Body, c: &CylinderFace, r_in: f64, r_out: f64, along: (f64, f64)) -> Result<bool> {
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
     let (a0, a1) = along;
     if !(r_in >= 0.0 && r_out > r_in && a1 > a0 && r_out.is_finite() && a0.is_finite() && a1.is_finite()) {
         return Err(crate::KernelError::Invalid(format!("ring r {r_in}..{r_out} over {a0}..{a1}")));

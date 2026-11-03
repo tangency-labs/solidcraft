@@ -5,8 +5,9 @@
 
 use super::curve::C3;
 use super::surface::S3;
-use crate::Vec3;
 use crate::brep::eval::SurfaceEval;
+use crate::prelude::*;
+use solidcore_record::Vec3;
 use solidcore_record::brep::{Face, Loop, OrientedEdge};
 
 #[derive(Clone, Debug)]

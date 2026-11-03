@@ -4,9 +4,10 @@
 //! `breaks` are the edge's.
 
 use super::HlrError;
-use crate::Vec3;
 use crate::brep::eval::{CurveEval, SurfaceEval};
+use crate::prelude::*;
 use crate::section::CurveAccuracy;
+use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve, Edge, Frame};
 
 #[derive(Clone, Debug)]

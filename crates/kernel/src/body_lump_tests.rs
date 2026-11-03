@@ -161,7 +161,7 @@ fn spheres_apart_join_as_two_lumps() {
 }
 
 fn certified_lump_witness() -> Body {
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
     // The current trimmed lower prism: a rectangular tool with a circular stop
     // removed. Its cap footprint differs materially from the original sketch.
     let region = Region2 {
@@ -249,7 +249,7 @@ fn grouping_lumps_does_not_infer_absent_or_misaligned_sources() {
 /// It must still come out outward, or a Cut with it removes the wrong side (#559).
 #[test]
 fn a_long_thin_cylinder_comes_out_outward() {
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
     let plane = Plane::from_normal(Vec3::new(0., 24., 30.), Vec3::Z).unwrap();
     for (lo, seam) in [(-181.0, 0.613), (-100.0, 0.613), (-10.0, 0.613), (-181.0, 0.0)] {
         let disc = Region2 { outer: Loop2::circle_from(Vec2::ZERO, 0.5, seam), holes: vec![] };

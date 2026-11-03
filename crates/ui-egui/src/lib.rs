@@ -596,7 +596,7 @@ pub struct SolveApp {
     pub edit_in_place: edit_in_place::EditInPlace,
     pub(crate) pending_feature_edit: Option<feature_edit::PendingFeatureEdit>,
     /// The feature being reopened from a click and where, until its dialog opens (UI state only).
-    edit_anchor_hint: Option<(u64, solidcraft_engine::geom::Vec3)>,
+    edit_anchor_hint: Option<(u64, solidcore_record::Vec3)>,
     /// The open feature window's check of what its material does (#6901).
     pub op_check: op_auto::OpCheck,
     /// A command recomputing the history (the marker moved, undo) computing off the window
@@ -2074,7 +2074,7 @@ impl SolveApp {
 
     /// [`Self::edit_feature`] opened from a click at `at` on what the feature made: the dialog's
     /// arrow sits by that point (a fillet's or chamfer's edge nearest it).
-    pub(crate) fn edit_feature_at(&mut self, id: u64, at: Option<solidcraft_engine::geom::Vec3>) {
+    pub(crate) fn edit_feature_at(&mut self, id: u64, at: Option<solidcore_record::Vec3>) {
         use solidcraft_engine::doc::FeatureKind;
         // A non-finite point (over the control channel) keeps the first edge.
         self.edit_anchor_hint = at.filter(|p| p.is_finite()).map(|p| (id, p));
@@ -2513,7 +2513,7 @@ impl SolveApp {
     pub fn fitted(&self, mut cam: Camera) -> Camera {
         let b = viewport::view_bounds(self);
         if b.is_empty() {
-            cam.target = solidcraft_engine::geom::Vec3::ZERO;
+            cam.target = solidcore_record::Vec3::ZERO;
             cam.distance = 150.0;
         } else {
             cam = self.fitted_bounds(cam, &b);
@@ -2551,7 +2551,7 @@ impl SolveApp {
         let radius = (bounds.diagonal() * 0.5).max(0.5);
         // A cube around the sphere, seen square-on from any axis, projects to the sphere's own
         // square, so the layout fit of that cube is the sphere's.
-        let offset = solidcraft_engine::geom::Vec3::new(radius, radius, radius);
+        let offset = solidcore_record::Vec3::new(radius, radius, radius);
         let sphere = solidcraft_engine::geom::Aabb3 { min: centre - offset, max: centre + offset };
         let mut probe = Camera::default();
         probe.set_view(StandardView::Front);

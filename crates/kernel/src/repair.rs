@@ -16,9 +16,10 @@
 //! Nothing is moved: a face rebuilt keeps its surface, a sewn edge keeps its curve (SMLib keeps
 //! one of the pair), a patch is a new face. What was done comes back in [`RepairReport`].
 
+use solidcore_record::Vec3;
 use solidcore_record::brep::{self as b, Brep};
-use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::eval::CurveEval;
+use solidcraft_geom::prelude::*;
 
 use crate::body::{Body, SurfaceKind};
 use crate::{Continuity, KernelError, Result};

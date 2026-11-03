@@ -3,7 +3,7 @@
 use std::{error::Error, io::Write, path::PathBuf, time::Instant};
 
 use serde::Serialize;
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 use solidcraft_sketch::{
     Analysis, ConstraintKind, DrivingValues, Hold, Sketch, SolveReport,
     profiling::{Counters, SolveProfile, Timings, capture},

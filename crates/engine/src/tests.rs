@@ -121,8 +121,8 @@ fn a_later_round_at_a_mitred_corner_is_blended_with_the_rounds_there() {
     let first = run(&mut s, "solid.fillet", json!({"edges": [[20, 10, 20], [10, 0, 20]], "radius": 2}))["feature"].as_u64().unwrap();
     // A point halfway along each r2 round, at 45° between its faces.
     let k = 2.0 - 2.0_f64.sqrt();
-    let rounds = [solidcraft_geom::Vec3::new(20.0 - k, 10.0, 20.0 - k), solidcraft_geom::Vec3::new(10.0, k, 20.0 - k)];
-    let named = |s: &mut Session, at: solidcraft_geom::Vec3| {
+    let rounds = [solidcore_record::Vec3::new(20.0 - k, 10.0, 20.0 - k), solidcore_record::Vec3::new(10.0, k, 20.0 - k)];
+    let named = |s: &mut Session, at: solidcore_record::Vec3| {
         let st = s.model.state();
         let (d, index) = solidcraft_doc::appearance::nearest_face(st.body("Box").unwrap(), at).unwrap();
         // Found on the display mesh, whose facets lie within its chord of the faces.
@@ -142,7 +142,7 @@ fn a_later_round_at_a_mitred_corner_is_blended_with_the_rounds_there() {
     assert_eq!(after, before);
     // The r3 round (halfway up, at 45°) and the corner's patches: the faces the second fillet made.
     let k3 = 3.0 - 4.5_f64.sqrt();
-    assert!(named(&mut s, solidcraft_geom::Vec3::new(20.0 - k3, k3, 10.0)).starts_with(&format!("F{second}:blend:")));
+    assert!(named(&mut s, solidcore_record::Vec3::new(20.0 - k3, k3, 10.0)).starts_with(&format!("F{second}:blend:")));
     let made = faces.iter().filter(|f| f["name"].as_str().is_some_and(|n| n.starts_with(&format!("F{second}:")))).count();
     // the r3 round and the corner's patch
     assert_eq!(made, 2, "{faces:?}");
@@ -192,14 +192,14 @@ fn join_extrude_from_a_chamfered_top_face() {
             assert!((solved.plane.origin.z - height).abs() < 1e-8);
             assert!(solved.sketch.links.iter().all(|link| link.auto_face && !link.lost));
             let body = &state.bodies[0];
-            assert_eq!(body.body.classify_point(solidcraft_geom::Vec3::new(0., 0., height + 4.)).unwrap(), solidcraft_kernel::PointClass::Inside);
-            assert_eq!(body.body.classify_point(solidcraft_geom::Vec3::new(0., 0., height + 6.)).unwrap(), solidcraft_kernel::PointClass::Outside);
+            assert_eq!(body.body.classify_point(solidcore_record::Vec3::new(0., 0., height + 4.)).unwrap(), solidcraft_kernel::PointClass::Inside);
+            assert_eq!(body.body.classify_point(solidcore_record::Vec3::new(0., 0., height + 6.)).unwrap(), solidcraft_kernel::PointClass::Outside);
             assert_eq!(
-                body.body.classify_point(solidcraft_geom::Vec3::new(10. - bevel - 0.5, 0., height + 4.)).unwrap(),
+                body.body.classify_point(solidcore_record::Vec3::new(10. - bevel - 0.5, 0., height + 4.)).unwrap(),
                 solidcraft_kernel::PointClass::Inside
             );
             assert_eq!(
-                body.body.classify_point(solidcraft_geom::Vec3::new(10. - bevel + 0.5, 0., height + 4.)).unwrap(),
+                body.body.classify_point(solidcore_record::Vec3::new(10. - bevel + 0.5, 0., height + 4.)).unwrap(),
                 solidcraft_kernel::PointClass::Outside
             );
         }
@@ -562,7 +562,7 @@ fn rounds_on_a_bar_running_tangent_into_a_cylinder() {
     // through (32, 8, 15) is a cylinder of radius 8.
     let state = s.model.state();
     let rec = state.bodies[0].body.record();
-    let p0 = solidcraft_geom::Vec3::new(32.0, 8.0, 15.0);
+    let p0 = solidcore_record::Vec3::new(32.0, 8.0, 15.0);
     let on: Vec<&solidcore_record::brep::Surface> = rec
         .faces
         .iter()
@@ -1307,7 +1307,7 @@ fn sample_edges_chain_and_faces() {
     let chain = m.tangent_chain(e, 2f64.to_radians());
     // The plate's top outline: 4 lines and 4 corner arcs (a boolean may leave an edge twice,
     // once per face; count distinct ones).
-    let mut mids: Vec<solidcraft_geom::Vec3> = Vec::new();
+    let mut mids: Vec<solidcore_record::Vec3> = Vec::new();
     for i in &chain {
         let p = &m.edges[*i];
         let mid = p[p.len() / 2];
@@ -1806,7 +1806,7 @@ fn auto_extrude_joins_side_contact_elbow_and_keeps_new_body_explicit() {
             assert!(body.validity().is_empty());
             assert_eq!(body.lumps().unwrap().len(), 1);
             assert_eq!(body.face_count(), 8, "the two flat elbow sides must be single faces");
-            assert_eq!(body.classify_point(geom::Vec3::new(5.0, 10.0, 25.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
+            assert_eq!(body.classify_point(solidcore_record::Vec3::new(5.0, 10.0, 25.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
         }
     }
 }
@@ -1828,7 +1828,11 @@ fn auto_extrude_joins_corner_screw_boss() {
     let body = &st.bodies.first().unwrap().body;
     assert_eq!(body.lumps().unwrap().len(), 1);
     assert!(body.validity().is_empty());
-    assert_eq!(body.classify_point(geom::Vec3::new(10.0, 10.0, 32.0)).unwrap(), solidcraft_kernel::PointClass::Outside, "the screw hole stays open");
+    assert_eq!(
+        body.classify_point(solidcore_record::Vec3::new(10.0, 10.0, 32.0)).unwrap(),
+        solidcraft_kernel::PointClass::Outside,
+        "the screw hole stays open"
+    );
 }
 
 #[test]
@@ -4006,7 +4010,7 @@ fn side_face_pick(s: &Session, body: &str) -> Value {
         .faces(0.01)
         .unwrap()
         .into_iter()
-        .filter(|f| f.plane_normal.is_some_and(|n| n.dot(solidcraft_geom::Vec3::X) > 0.999))
+        .filter(|f| f.plane_normal.is_some_and(|n| n.dot(solidcore_record::Vec3::X) > 0.999))
         .max_by(|a, b| a.centroid.x.total_cmp(&b.centroid.x))
         .unwrap();
     json!({"body": b.name, "index": face.index, "face": [face.centroid.x, face.centroid.y, face.centroid.z]})
@@ -4078,7 +4082,7 @@ fn an_exact_pick_of_a_region_cut_by_the_face_outline_takes_only_that_region() {
     let state = s.model.state();
     let ss = state.sketch(id).unwrap();
     assert_eq!(ss.profiles.len(), 3, "the lens, the crescent past the face and the rest of the face");
-    let at = |x: f64| ss.profiles.iter().position(|p| p.region.contains(solidcraft_geom::Vec2::new(x, 0.0))).unwrap();
+    let at = |x: f64| ss.profiles.iter().position(|p| p.region.contains(solidcore_record::Vec2::new(x, 0.0))).unwrap();
     let (on_face, past_face) = (at(7.0), at(14.0));
     // The volume of the new body, and how many profiles its extrude is built from.
     let extrude = |extra: Value| -> (f64, usize) {
@@ -4761,7 +4765,7 @@ fn a_side_drawn_in_two_collinear_pieces_extrudes_into_one_face() {
     let st = s.model.state();
     let body = st.body("Body1").unwrap();
     let edge = format!("F2:side:{}|F2:top", pieces[1]);
-    let at = solidcraft_doc::naming::find_edge(body, &edge, geom::Vec3::new(15.0, 0.0, 5.0)).unwrap();
+    let at = solidcraft_doc::naming::find_edge(body, &edge, solidcore_record::Vec3::new(15.0, 0.0, 5.0)).unwrap();
     assert!(at.y.abs() < 1e-9 && (at.z - 5.0).abs() < 1e-9, "{edge} at {at:?}");
     // A sketch attaches to the joined side as to any side.
     assert_eq!(run(&mut s, "sketch.create", json!({"plane": {"face": [15, 0, 2.5]}}))["attachment"], "exact_face");

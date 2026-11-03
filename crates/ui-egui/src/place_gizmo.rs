@@ -28,8 +28,9 @@ use egui::{Pos2, vec2};
 use look::{
     CrossStyle, DIM, DIM_S, MARKER_ACTIVE, MARKER_HOT, RING_ACTIVE, RING_OPEN, RING_PX, RingStyle, angle_label, compass, crosshair, footprint, ring,
 };
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::dialogs::Dialog;

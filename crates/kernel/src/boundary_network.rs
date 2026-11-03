@@ -12,10 +12,11 @@
 //! general case: three or four sides, interior curves, 3D curves and edges.
 
 use solidcore_record::brep::Brep;
+use solidcore_record::{Plane, Seg2, Vec3};
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::bspline::{CurveN, NurbsSurface, SplineError};
 use solidcraft_geom::network::{self, CrossFace, FaceFrame, NetCurve, NetworkCurve, PointCurve, Tolerances};
-use solidcraft_geom::{Plane, Seg2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::continuity_order::{Construction, Continuity};
@@ -513,7 +514,7 @@ fn index(i: usize) -> Result<u32> {
 mod tests {
     use super::*;
     use crate::patch_region;
-    use solidcraft_geom::{Loop2, Region2, Vec2};
+    use solidcore_record::{Loop2, Region2, Vec2};
 
     fn sketch(label: &str, plane: Plane, segs: Vec<Seg2>) -> BoundaryCurve<'static> {
         BoundaryCurve { label: label.into(), source: CurveSource::Sketch { plane, segs }, continuity: Continuity::G0 }

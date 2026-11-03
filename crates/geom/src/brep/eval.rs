@@ -11,11 +11,12 @@
 use super::normal_section::normal_section;
 use super::pcurve::Error;
 use super::{Curve, Curve2, Frame, Surface};
-use crate::Vec3;
 use crate::bspline::MAX_SPLINE_DEGREE;
+use crate::prelude::*;
 use crate::tess::partials::{Partials, tabulate, trig_derivative};
 use crate::tess::uv::{self, Domain};
 use crate::tess::{EvalCurve, EvalSurface, MAX_EVAL_KNOTS, MAX_EVAL_POINTS};
+use solidcore_record::Vec3;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 /// Newton steps of one intersection point.
