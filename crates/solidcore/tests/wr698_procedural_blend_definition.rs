@@ -1124,3 +1124,104 @@ fn a_support_builds_from_its_own_label() {
         "a cone label 1e-9 off its form was taken"
     );
 }
+
+/// `label` with its placement's x and y axes turned by `angle` radians about its own z
+/// axis, its origin and axis unchanged. The implicit equation of a cylinder, cone, sphere
+/// or torus does not depend on that frame, and neither does the NURBS form, so a turned
+/// label is off its form only in the parametrisation.
+fn turned_about_its_axis(label: AnalyticSupport, angle: f64) -> AnalyticSupport {
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    let mut turned = label;
+    let p = match &mut turned {
+        AnalyticSupport::Plane { placement, .. }
+        | AnalyticSupport::Cylinder { placement, .. }
+        | AnalyticSupport::Cone { placement, .. }
+        | AnalyticSupport::Sphere { placement, .. }
+        | AnalyticSupport::Torus { placement, .. } => placement,
+    };
+    let (c, s) = (angle.cos(), angle.sin());
+    *p = Axis2Placement::new(
+        p.origin(),
+        p.x_axis() * c + p.y_axis() * s,
+        p.y_axis() * c - p.x_axis() * s,
+    );
+    turned
+}
+
+/// #2588: the frame a support imposes is read. `AnalyticSupport::build` puts the label's
+/// own placement on the parametrisation it recognises in the form, and `evaluates_as` is
+/// what proves label and form agree. Turning the label about its own axis leaves the
+/// implicit equation (so `lies_on`) and the form untouched, and the recognised sweep
+/// angles are the form's, so the turned label parametrises the same point set with its
+/// u offset by the turn: only the analytic evaluation of the imposed frame can refuse it.
+/// A sphere's implicit equation holds for every orientation, so its tilted axis must be
+/// refused the same way. The turn is 1e-6 rad, which moves a point at distance `r` from
+/// the axis by about `r * 1e-6`: on the forms below between 1e-6 (the cone's base) and
+/// 6.5e-6 (the torus's outer circle), orders of magnitude above the `gamma_K` rounding
+/// bound `evaluates_as` allows.
+#[test]
+fn a_support_s_turned_frame_is_refused() {
+    use solidcore::blend::fillet_section::station::as_b_spline;
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::primitive::api_primitives::{create_cylinder, create_sphere, create_torus};
+    use solidcore::surface::cone::Cone;
+    use solidcore::topology::face::p2 as face;
+    let mut k = kernel();
+
+    let o = Point3::new(1.0, -2.0, 3.0);
+    let bodies = [
+        create_cylinder(&mut k, o, 2.0, 5.0).unwrap(),
+        create_sphere(&mut k, o, 2.5).unwrap(),
+        create_torus(&mut k, o, 5.0, 1.5).unwrap(),
+    ];
+
+    // the #2554 cone: radius 1 at the placement's origin, 2 at height 3
+    let pl = Axis2Placement::new(Vec3::new(1.0, -2.0, 0.5), Vec3::X, Vec3::Y);
+    let cone = Surface::from(Cone::create_canonical(&k, &pl, 1.0, 2.0, 3.0, false, false).unwrap());
+
+    // the cone above, and the cylinder, sphere and torus of the primitives' own faces
+    let mut surfaces = vec![&cone];
+    for b in &bodies {
+        for f in b.faces().ids() {
+            let s = face::surface(b, f).unwrap().unwrap();
+            if AnalyticSupport::of(s).is_some_and(|a| a.kind() != SupportKind::Plane) {
+                surfaces.push(s);
+            }
+        }
+    }
+    assert_eq!(surfaces.len(), 4, "the cone, cylinder, sphere and torus");
+
+    for s in surfaces {
+        let label = AnalyticSupport::of(s).unwrap();
+        let kind = label.kind();
+        let form = as_b_spline(&k, s).unwrap().unwrap().into_owned();
+
+        // the label as the surface carries it builds
+        label.build(&k, form.copy()).unwrap();
+
+        for angle in [1e-6, -1e-6] {
+            let turned = turned_about_its_axis(label, angle);
+            assert!(
+                turned.build(&k, form.copy()).is_err(),
+                "a {kind:?} label turned by {angle:e} rad about its own axis was taken"
+            );
+        }
+
+        // a sphere's axis is unconstrained by its implicit equation too
+        if let AnalyticSupport::Sphere { placement, radius } = label {
+            let (c, si) = (1e-6_f64.cos(), 1e-6_f64.sin());
+            let tilted = AnalyticSupport::Sphere {
+                placement: Axis2Placement::new(
+                    placement.origin(),
+                    placement.x_axis(),
+                    placement.y_axis() * c + placement.z_axis() * si,
+                ),
+                radius,
+            };
+            assert!(
+                tilted.build(&k, form.copy()).is_err(),
+                "a sphere label whose axis is tilted by 1e-6 rad was taken"
+            );
+        }
+    }
+}
