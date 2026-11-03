@@ -8,7 +8,7 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use solidcraft_geom::Vec3;
-use solidcraft_kernel::Continuity;
+use solidcraft_kernel::{Construction, Continuity};
 
 use super::check::whole;
 use super::types::{Point3, StringList, present};
@@ -134,18 +134,17 @@ impl JsonSchema for MatchEdges {
     }
 }
 
-/// A match's continuity, as `Continuity::parse` reads it, with the handler's message.
+/// A match's continuity, as `params::continuity` reads it for a match (g1 to g3), with its messages.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MatchOrder(pub Continuity);
 
 impl<'de> Deserialize<'de> for MatchOrder {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        Value::deserialize(d)?
-            .as_str()
-            .and_then(Continuity::parse)
-            .filter(|o| *o != Continuity::G0)
-            .map(MatchOrder)
-            .ok_or_else(|| D::Error::custom("must be g1, g2 or g3"))
+        let v = Value::deserialize(d)?;
+        params::continuity("surface.match", Some(&v), "`order`", Construction::Match).map(MatchOrder).map_err(|e| match e {
+            crate::EngineError::BadParams { msg, .. } => D::Error::custom(whole(msg)),
+            other => D::Error::custom(whole(other.to_string())),
+        })
     }
 }
 

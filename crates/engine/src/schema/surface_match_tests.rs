@@ -13,7 +13,7 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
 
 /// Two points on the cylinder's straight vertical wall seam, as the command's own tests pick it.
 fn picks(s: &Session) -> Vec<Vec3> {
-    let boss = s.world_state().body("Boss").map(|b| b.body.clone()).unwrap_or_else(|| panic!("no Boss"));
+    let boss = s.world_state().ok().and_then(|st| st.body("Boss").map(|b| b.body.clone())).unwrap_or_else(|| panic!("no Boss"));
     let e = boss
         .edges(boss.size() * 1e-2)
         .unwrap_or_default()
