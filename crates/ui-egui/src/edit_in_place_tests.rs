@@ -390,7 +390,17 @@ fn finish_editing_is_a_model_tab_button_only_while_a_part_is_edited_in_place() {
     settle(&mut h.app);
     h.frames(3);
     assert!(crate::scenario::rect_of("panel:MODEL:FINISH EDITING").is_some(), "the part's MODEL tab ends with Finish Edit");
-    h.app.start("component.finish_edit");
+    // Under a press Finish Edit stays plain, as Finish Sketch does; the release finishes.
+    let button = crate::scenario::rect_of("button:component.finish_edit").unwrap();
+    h.frame_with(crate::test_support::pointer(button.center(), true));
+    let soft = crate::theme::Tokens::get().accent_soft;
+    let lit = h.shapes.iter().any(|s| match &s.shape {
+        egui::Shape::Rect(r) => r.rect == button && r.fill == soft,
+        egui::Shape::Vec(v) => v.iter().any(|s| matches!(s, egui::Shape::Rect(r) if r.rect == button && r.fill == soft)),
+        _ => false,
+    });
+    assert!(!lit, "a press does not show Finish Edit pressed");
+    h.frame_with(crate::test_support::pointer(button.center(), false));
     settle(&mut h.app);
     h.frames(3);
     assert!(h.app.edit_in_place.active.is_none());

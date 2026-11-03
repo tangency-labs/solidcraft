@@ -5072,7 +5072,8 @@ mod dropdown_toggle_tests {
     }
 
     /// A tool pinned into the Finish Sketch group, the one at the ribbon's right edge, shows
-    /// pressed while it runs like any other tool button; only Finish and Cancel never do.
+    /// pressed while it runs like any other tool button; only Finish and Cancel never do, not
+    /// even under a press.
     #[test]
     fn a_tool_pinned_into_the_finish_group_shows_pressed_while_it_runs() {
         fn flat(shape: &egui::Shape, out: &mut Vec<egui::Shape>) {
@@ -5097,7 +5098,17 @@ mod dropdown_toggle_tests {
             all.iter().any(|s| matches!(s, egui::Shape::Rect(s) if s.rect == r && s.fill == soft))
         };
         assert!(pressed(&h, "sketch.ellipse"), "the running tool's button is pressed");
-        assert!(!pressed(&h, "sketch.finish"), "Finish is not");
+        // A press lights any other button while the pointer is down; Finish and Cancel stay
+        // plain. Neither runs as a tool or leaves a dialog, so a press is how they would light.
+        for exit in ["sketch.finish", "sketch.cancel"] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.settle();
+            let at = crate::scenario::handle_at(&format!("button:{exit}")).unwrap();
+            h.frame_with(crate::test_support::pointer(at, true));
+            assert!(!pressed(&h, exit), "a press on {exit} does not show it pressed");
+        }
     }
 
     /// A drop-down row's help tooltip names the key the command runs from now, not its default.
