@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use serde_json::{Value, json};
-use solidcraft_geom::brep as b;
+use solidcore_record::brep as b;
 
 use crate::sweeps::{Affine, Curve};
 use crate::{Brep, Result};
