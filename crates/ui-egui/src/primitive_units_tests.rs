@@ -631,13 +631,14 @@ fn a_point_picked_in_the_box_dialog_reads_in_the_design_unit() {
     h.app.start("solid.box");
     h.frames(3);
     let mut d = h.app.dialog.take().unwrap();
-    d.pick(&h.app.session, Sel::Face { body: "Base".into(), index: 0, point: Vec3::new(25.4, 50.8, 12.7) });
+    d.pick(&h.app.session, Sel::Face { body: "Base".into(), index: 0, point: Vec3::new(25.4, 38.1, 12.7) });
     h.app.dialog = Some(d);
     h.frames(2);
-    assert_shown(&h, &[("X", "1 in".into()), ("Y", "2 in".into()), ("Z", "0.5 in".into())]);
-    assert_eq!(sent(&h)["corner"], json!(["1 in", "2 in", "0.5 in"]));
+    // 38.1 / 25.4 is 1.5000000000000002 in floating point: the field reads 1.5 in.
+    assert_shown(&h, &[("X", "1 in".into()), ("Y", "1.5 in".into()), ("Z", "0.5 in".into())]);
+    assert_eq!(sent(&h)["corner"], json!(["1 in", "1.5 in", "0.5 in"]));
     ok(&mut h);
-    assert_near(bounds(&mut h.app.session)[1].0, [25.4, 50.8, 12.7]);
+    assert_near(bounds(&mut h.app.session)[1].0, [25.4, 38.1, 12.7]);
 }
 
 #[test]
