@@ -123,8 +123,8 @@ mod imp {
     use crate::native::{body_from_smlib_ordered, smlib_body_ordered};
     use crate::{KernelError, Result, guard, record};
 
-    fn failed(what: &str, step: &str, e: impl std::fmt::Display) -> KernelError {
-        KernelError::Failed(format!("SMLib {what}: {step}: {e}"))
+    fn failed(what: &str, step: &str, e: impl crate::Cause) -> KernelError {
+        KernelError::smlib(format!("SMLib {what}: {step}"), e)
     }
 
     /// How far a pick may lie from its edge.
@@ -444,15 +444,24 @@ mod imp {
                     "not supported yet: the {what} meets a corner of this kind, which SMLib's blends do not handle yet (where its edges \
                      run on tangentially into each other, or meet in a way no blend corner builds)"
                 )),
-                // A setback too short for its corner's fill (SMLib certifies it convex only from
-                // its least on) names that least; any other is a blend too large for its room.
-                SmError::NoRoom => match solidcraft_smlib::blend_fit() {
-                    Some(solidcraft_smlib::Fit::SetbackAtLeast(least)) => KernelError::Invalid(format!(
-                        "the setback is too short for its corner: {}{least:.4} mm (the corner's patch is convex only from there)",
-                        crate::SETBACK_AT_LEAST
-                    )),
-                    _ => KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow")),
-                },
+                SmError::NoRoom => KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow")),
+                SmError::TooLarge { size, kind, at, why } => {
+                    let mut beside = match at {
+                        Some([x, y, z]) => format!(", at the edge at ({x:.3}, {y:.3}, {z:.3})"),
+                        None => String::new(),
+                    };
+                    if let Some(why) = why {
+                        beside = format!("{beside}: {}", why.words());
+                    }
+                    let fits = match kind {
+                        solidcraft_smlib::FitKind::Scale => {
+                            format!("the largest that fits is {} times the distances given", crate::blend::trimmed_mm(size))
+                        }
+                        kind => crate::blend::largest_fit_note(kind.word(), size),
+                    };
+                    KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow{beside}; {fits}"))
+                }
+                SmError::Unported(why) => KernelError::Invalid(format!("not supported yet: {why}")),
                 e => failed(what, "operation", e),
             })?;
             // Checked here unless the evaluation's validation mode leaves it to the feature's end

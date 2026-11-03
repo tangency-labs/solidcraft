@@ -1236,7 +1236,7 @@ mod imp {
     use super::*;
 
     fn sm(what: &'static str) -> impl Fn(solidcraft_smlib::Error) -> KernelError {
-        move |e| failed(format!("SMLib {what}: {e}"))
+        move |e| KernelError::smlib(format!("SMLib {what}"), e)
     }
 
     pub(super) fn refuse(what: &str) -> KernelError {

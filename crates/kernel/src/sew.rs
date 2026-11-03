@@ -1221,7 +1221,7 @@ fn sew_impl(faces: &[FaceSpec], touching: bool, sources: Option<&[Option<crate::
             }
         }
         let made = assemble(Parts { vertices, edges, faces: out, tolerance: tol }, true)?;
-        let smlib = solidcraft_smlib::Brep::from_record(&made.brep, true).map_err(|e| KernelError::Failed(format!("sew: SMLib: {e}")))?;
+        let smlib = solidcraft_smlib::Brep::from_record(&made.brep, true).map_err(|e| KernelError::smlib("sew: SMLib", e))?;
         let (body, order) = crate::native::body_from_smlib_ordered(&smlib)?;
         // The face of `faces` each face of the body was built from: record face `c` is SMLib's
         // face `c`, which the order places in the body.

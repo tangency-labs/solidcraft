@@ -9,9 +9,9 @@ use serde_json::{Value, json};
 use crate::oracle::{ABS_FRAC, Checks, REL_TOL, totals, v3};
 use crate::{read_json, recipe};
 
-/// The kernel the cases run on: SMLib, the only one.
+/// The kernel the cases run on: solidcore, the only one.
 fn kernel() -> String {
-    "smlib".into()
+    "solidcore".into()
 }
 
 /// How many cases a chain of `base` recipes may go through (a ladder case builds on the one
@@ -692,28 +692,21 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>, validation: solidcraft
             return out;
         }
     };
-    if !solidcraft_engine::kernel::smlib_built() {
-        out["status"] = json!("unsupported");
-        out["error"] = json!("this build has no SMLib: build solidcraft-cli with --features smlib");
-        return out;
-    }
     // `refused`: only a clean refusal is right; `solid_or_refused`: a clean refusal, or a result
     // graded as usual (where the geometry has no manifold answer, such as bodies touching along a
     // curve only).
     let outcome = want["outcome"].as_str().unwrap_or("solid");
     let refused = outcome == "refused";
     let may_refuse = refused || outcome == "solid_or_refused";
-    // The SMLib calls that fail in this case leave their inputs in its own folder.
+    // The kernel calls that fail in this case leave their inputs in its own folder.
     if let Some(root) = dumps {
         let folder = root.join(format!("{area}-{name}"));
-        if let Err(e) = std::fs::create_dir_all(&folder)
-            .map_err(|e| e.to_string())
-            .and_then(|()| solidcraft_engine::kernel::smlib_dump_dir(Some(&folder)).map_err(|e| e.to_string()))
-        {
+        if let Err(e) = std::fs::create_dir_all(&folder) {
             out["status"] = json!("fail");
             out["error"] = json!(format!("--dumps: {}: {e}", folder.display()));
             return out;
         }
+        solidcraft_engine::kernel::smlib_dump_dir(Some(&folder));
     }
     let mut s = solidcraft_engine::Session::default();
     s.set_validation(validation);
@@ -985,7 +978,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     };
     let results: Vec<Value> = dirs.iter().map(|d| check_case(d, dumps.as_deref(), validation)).collect();
     if dumps.is_some() {
-        solidcraft_engine::kernel::smlib_dump_dir(None).map_err(|e| format!("kernel-cases: --dumps: {e}"))?;
+        solidcraft_engine::kernel::smlib_dump_dir(None);
     }
     report(args, &results);
     let bad = results.iter().filter(|r| matches!(r["status"].as_str(), Some("fail" | "crash"))).count();

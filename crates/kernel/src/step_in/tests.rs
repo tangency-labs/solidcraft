@@ -540,17 +540,6 @@ fn offset_surface_cube_import_is_closed_and_editable() {
     assert!(rel(measure(&result).unwrap().volume, 1000.0 - 40.0 * std::f64::consts::PI) < 1e-3);
 }
 
-/// A solid whose B-rep SMLib refuses, its faces too (here every SMLib call: the build has no
-/// SMLib), is refused with the kernel's reason, naming the solid. It once came in as a mesh of
-/// its faces, which the planner could still triangulate.
-#[cfg(not(feature = "smlib"))]
-#[test]
-fn a_solid_smlib_refuses_with_its_faces_is_refused_not_meshed() {
-    let text = format!("{HEAD}{}#60=SHAPE_REPRESENTATION('',(#101),$);\n{TAIL}", cube_entities());
-    let why = step_import(&text).map(|imp| imp.warnings).unwrap_err().to_string();
-    assert!(why.contains("solid 'Cube': not imported: ") && why.contains("SMLib"), "{why}");
-}
-
 /// A hand-written unit cube brep (`#100`…) in a representation with the given unit and items.
 fn cube_entities() -> String {
     let mut s = String::new();
@@ -2013,11 +2002,10 @@ pub(super) fn schema_4_volume(text: &str) -> f64 {
     measure(&Body::from_record(r.solids[0].brep.clone()).unwrap()).unwrap().volume
 }
 
-/// The step-conformance parts read into SMLib (`SOLIDCRAFT_KERNEL=smlib`): the STEP reader's
+/// The step-conformance parts read into the kernel: the STEP reader's
 /// schema 4 record, SMLib's body of it, back as a kernel body. Each has its exact volume and
 /// face count, and every face is traced to a face of the file (the NURBS cylinder, dome and
 /// torus ring among them: their faces wind around a spline closed on itself, and get a seam).
-#[cfg(feature = "smlib")]
 #[test]
 fn step_conformance_parts_read_into_smlib() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");

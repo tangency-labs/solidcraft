@@ -1,20 +1,20 @@
 # Kernel regression rig
 
 Every geometry case the old kernel (truck) got wrong, recorded in an issue, a pull request or a
-crash report, is a use case here with its own right answer. The kernel, SMLib, is held to all of
-them. `cargo xtask kernel-cases` runs them and writes [`docs/kernel-cases.md`](../../docs/kernel-cases.md).
+crash report, is a use case here with its own right answer. The kernel, solidcore, is held to all
+of them. `cargo xtask kernel-cases` runs them and writes
+[`docs/kernel-cases.md`](../../docs/kernel-cases.md).
 
 ```sh
 cargo xtask kernel-cases                                    # every case
 cargo xtask kernel-cases --cli target/release/solidcraft-cli --out /tmp/run   # with a CLI already built
-cargo run -p solidcraft-cli --features smlib -- kernel-cases tests/kernel-cases/booleans/<id>   # one case
+cargo run -p solidcraft-cli -- kernel-cases tests/kernel-cases/booleans/<id>   # one case
 ```
 
-The CLI links SMLib by default (`scripts/fetch-smlib.sh` fetches the prebuilt library first);
-built with `--no-default-features`, every operation answers that SMLib is not built. The run's output folder (`--out`, default `target/kernel-cases`)
+The run's output folder (`--out`, default `target/kernel-cases`)
 gets `results.json`, every case's full result, and `dumps/<area>-<case>/`: the inputs of each
-SMLib call a case failed in, for replay (the CLI's `--dumps=DIR`, which the rig always passes).
-`--validation MODE` runs the cases' features under that mode of SMLib's check
+kernel call a case failed in, for replay (the CLI's `--dumps=DIR`, which the rig always passes).
+`--validation MODE` runs the cases' features under that mode of the kernel's check
 (`diagnostics.validation`): `each_feature` (the default: the bodies each feature keeps are checked
 once), `each_step` (after every sweep, boolean and blend, as before) or `off`; the
 `KNOWN_FAILING` lists are each_feature's.
@@ -126,7 +126,7 @@ the frozen truck-geometry PRs, a `kernel-paused` PR), for the report's coverage 
 Every area is a regression suite: each case is one small case of one issue, with its exact
 answer. `.github/workflows/kernel-rig.yml` runs them, and the ladder, on pull requests (not
 drafts). A plan job (`scripts/ci/kernel_rig_plan.py`) picks the areas from the changed files, one
-job builds `solidcraft-cli` (release, SMLib) and the rig's runner, and a matrix of shards, one per
+job builds `solidcraft-cli` (release) and the rig's runner, and a matrix of shards, one per
 selected area plus the ladder, runs them in parallel; the `kernel-rig` check passes when every
 selected shard does (and when none was selected). Pushes to main and develop, merge groups, the
 release gate (`release-gate.yml`) and a run by hand run every area. Each area's shard runs:
@@ -138,7 +138,7 @@ cargo xtask kernel-cases --area <area> --cli target/release/solidcraft-cli \
 
 `<area>/KNOWN_FAILING` lists the cases of that area that fail today, sorted, one a line with its
 cause (`<case> <why it fails today>`; `#` starts a comment; the header names the baseline: the
-develop commit and SMLib revision it was taken from). The gate fails on a **regression**, a
+solidcore pin it was taken from). The gate fails on a **regression**, a
 case that fails (or crashes, hangs, or is not supported yet) and is not listed, and on a
 **fixed** case, one listed that passes. With `--known-failing` the run writes no report;
 `docs/kernel-cases.md` stays the full run's.
@@ -146,7 +146,7 @@ case that fails (or crashes, hangs, or is not supported yet) and is not listed, 
 **Updating a list.** The pull request that changes an outcome changes the list in the same pull
 request, so the list only shrinks and never goes stale:
 
-- a fix (yours, or an SMLib pin bump): remove the line of each case the shard reports as
+- a fix (yours, or a solidcore pin bump): remove the line of each case the shard reports as
   `FIXED`;
 - a new case that fails today: add its line, sorted, with the cause from its result
   (`results.json` in the shard's `kernel-rig-results-<area>` artifact, or a local run);
@@ -161,9 +161,9 @@ target/release/solidcraft-cli --known-failing tests/kernel-cases/<area>/KNOWN_FA
   (`*` within a folder, `**` across folders; `#` starts a comment): the engine command modules,
   doc evaluation and kernel files its commands go through. Only the area's own files: never a
   file `PATHS-ALL` covers, nor a whole crate (the self-test fails on either).
-- `PATHS-ALL`: the shared core, whose change reruns every area: SMLib (`crates/smlib/**`, its pin
-  included) and `scripts/fetch-smlib.sh`, `crates/geom/**`, the kernel's core (bodies, extrude and
-  revolve, booleans, the SMLib bridge, tessellation, what the grader measures), timeline
+- `PATHS-ALL`: the shared core, whose change reruns every area: the kernel's wrapper
+  (`crates/smlib/**`), `crates/geom/**`, the kernel's core (bodies, extrude and
+  revolve, booleans, the kernel bridge, tessellation, what the grader measures), timeline
   evaluation, the solid feature commands, the grader, the runner and the workflow.
 - A change under `<area>/` (a case, its `KNOWN_FAILING`, its `PATHS`) reruns that area.
 - The ladder spans every operation: it runs whenever any area does, and on a change under

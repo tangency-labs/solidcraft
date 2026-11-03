@@ -102,7 +102,7 @@ pub fn trim_keep(body: &Body, tool: &SplitTool, keep: TrimKeep) -> Result<Body> 
 fn face_sides(body: &Body, side: &ToolSide) -> Result<Vec<f64>> {
     let (sm, order) = crate::native::smlib_body_ordered(body)?;
     let order = order.ok_or_else(|| KernelError::Failed("trim: SMLib numbers the pieces' faces differently from their record".into()))?;
-    let points = sm.face_points().map_err(|e| KernelError::Failed(format!("SMLib trim: a point inside each piece: {e}")))?;
+    let points = sm.face_points().map_err(|e| KernelError::smlib("SMLib trim: a point inside each piece", e))?;
     let mut sides = vec![f64::NAN; points.len()];
     for (i, p) in points.iter().enumerate() {
         let face = if order.faces.is_empty() { i } else { order.faces.get(i).copied().unwrap_or(usize::MAX) };

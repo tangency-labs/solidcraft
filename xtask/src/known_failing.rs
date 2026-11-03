@@ -1,6 +1,7 @@
 //! `cargo xtask known-failing --junit PATH... [--list FILE]`: grades a nextest run (its junit
-//! report) against the tests known to fail today, `tests/KNOWN_FAILING_TESTS`. CI's test jobs
-//! run it after nextest, in place of failing on any failed test. It fails on a test that failed
+//! report) against the tests known to fail today,
+//! `tests/KNOWN_FAILING_TESTS` (or `--list FILE`). CI's test jobs run it after nextest, in place of
+//! failing on any failed test. It fails on a test that failed
 //! and is not listed, and on a listed test that passed (fixed: its line comes off in the same
 //! pull request); a listed test that did not run (a pull request tests only the packages it
 //! touches) is neither. The list has the kernel rig's format (`kernel_cases::known_failing`):
@@ -62,7 +63,8 @@ fn add(all: &mut BTreeMap<String, bool>, xml: &str) -> Result<(), String> {
 pub fn check_list(root: &Path) -> Result<(), String> {
     let file = root.join(LIST);
     let text = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
-    crate::kernel_cases::known_failing(&text).map(|_| ()).map_err(|e| format!("{LIST}: {e}"))
+    crate::kernel_cases::known_failing(&text).map_err(|e| format!("{LIST}: {e}"))?;
+    Ok(())
 }
 
 /// `path` itself, or every `.xml` file under it (sorted), into `out`.

@@ -387,8 +387,8 @@ fn back_to_bounds(body: &Body, faces: &[usize]) -> Result<Body> {
     Ok(back)
 }
 
-fn failed(what: &str, e: impl std::fmt::Display) -> KernelError {
-    KernelError::Failed(format!("SMLib extend: {what}: {e}"))
+fn failed(what: &str, e: impl crate::Cause) -> KernelError {
+    KernelError::smlib(format!("SMLib extend: {what}"), e)
 }
 
 #[cfg(test)]

@@ -168,8 +168,10 @@ fn child() {
             }
             assert_eq!(s.doc.features.len(), 1, "the design is unchanged");
         }
+        // A panic inside a solidcore call: caught there, an internal error of the command.
         "kernel" => {
-            assert!(s.execute("diagnostics.crash_test", &json!({"mode": "kernel"})).is_err());
+            let r = s.execute("diagnostics.crash_test", &json!({"mode": "kernel"}));
+            assert!(matches!(&r, Err(crate::EngineError::Internal(id, _)) if id == "diagnostics.crash_test"), "{r:?}");
         }
         // `thread_dies`: the panic ends the app, as one on the window's thread does.
         "thread" | "thread_dies" => {

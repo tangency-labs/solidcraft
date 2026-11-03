@@ -22,8 +22,8 @@ use crate::history::{Change, EdgeOrigin, FaceOrigin, History};
 use crate::native::{body_from_smlib_ordered, smlib_body_ordered};
 use crate::{KernelError, Result, record};
 
-fn failed(op: &str, what: &str, e: impl std::fmt::Display) -> KernelError {
-    KernelError::Failed(format!("SMLib {op}: {what}: {e}"))
+fn failed(op: &str, what: &str, e: impl crate::Cause) -> KernelError {
+    KernelError::smlib(format!("SMLib {op}: {what}"), e)
 }
 
 /// The error for SMLib's refusal of `op`, in the words of the operation; `wall` is its wall's
@@ -38,6 +38,11 @@ fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
                 "{op}: the{wall} walls would meet along a line (between a hole and the side, for example), which leaves no solid there; \
                  use a thinner or thicker wall, or move the feature"
             ))
+        }
+        // solidcore's one construction: a face curves tighter than the wall is thick.
+        SmError::WallFolds { largest } => {
+            let largest = largest.map(|w| format!("; the largest wall that works is {} mm", crate::blend::trimmed_mm(w))).unwrap_or_default();
+            KernelError::Invalid(format!("{op}: the wall is thicker than a face curves, so the face's offset would fold{largest}"))
         }
         SmError::NoMatch { point } => KernelError::Invalid(format!("{op}: no face at selection point {}", point + 1)),
         SmError::Ambiguous { point } => KernelError::Invalid(format!("{op}: selection point {} is as near to two faces", point + 1)),

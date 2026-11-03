@@ -324,7 +324,7 @@ fn run_ordered(jobs: Vec<Job>, budget: std::time::Duration) -> (Vec<Option<Done>
     let mut threads = 0;
     for _ in 0..want {
         let (jobs, next, stop, tx) = (jobs.clone(), next.clone(), stop.clone(), tx.clone());
-        let spawned = std::thread::Builder::new().name("solidcraft-interference".into()).spawn(move || {
+        let spawned = solidcraft_kernel::kernel_thread("solidcraft-interference").spawn(move || {
             while !stop.load(Ordering::Relaxed) {
                 let k = next.fetch_add(1, Ordering::Relaxed);
                 let Some(job) = jobs.get(k) else { break };

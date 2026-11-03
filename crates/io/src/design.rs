@@ -1215,7 +1215,7 @@ mod tests {
         let tree: Value = serde_json::from_slice(manifest).unwrap();
         assert_eq!(serde_json::to_vec(&tree).unwrap(), *manifest);
         assert_eq!(tree["model"], model.records);
-        assert_eq!(tree.as_object().unwrap().len(), 11, "{:?}", tree.as_object().unwrap().keys().collect::<Vec<_>>());
+        assert_eq!(tree.as_object().unwrap().len(), 12, "{:?}", tree.as_object().unwrap().keys().collect::<Vec<_>>());
     }
 
     /// #9170: a mesh body (an imported STL) is kept in the model cache with the rest of the
@@ -1474,7 +1474,7 @@ mod tests {
         let doc = document();
         let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&native_geometry())).unwrap();
         let original = parts(&bytes);
-        for key in ["format", "producer", "evaluation", "document", "payload"] {
+        for key in ["format", "producer", "evaluation", "kernel", "document", "payload"] {
             let mut entries = original.clone();
             let mut manifest: Value = serde_json::from_slice(&entries["cache/model.json"]).unwrap();
             manifest[key] = json!("unsupported-or-stale");
@@ -1546,6 +1546,17 @@ mod tests {
         let mut entries = original.clone();
         let mut manifest = written(&entries);
         manifest.as_object_mut().unwrap().remove("evaluation");
+        entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
+        assert!(read_design_geometry(&package(&entries)).is_none());
+        // The kernel that computed it is recorded, and a model the C++ kernel computed (an earlier
+        // build's) is evaluated again (a cache without one is a miss too).
+        assert_eq!(written(&original)["kernel"], json!(native_cache::KERNEL));
+        let bytes = with(&[("kernel", "smlib")]);
+        assert!(read_design_geometry(&bytes).is_none(), "the C++ kernel's cache");
+        assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
+        let mut entries = original.clone();
+        let mut manifest = written(&entries);
+        manifest.as_object_mut().unwrap().remove("kernel");
         entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
         assert!(read_design_geometry(&package(&entries)).is_none());
     }

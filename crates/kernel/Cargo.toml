@@ -1,18 +1,12 @@
 [package]
 name = "solidcraft-kernel"
-description = "SolidCraft B-rep kernel boundary: solids, extrude/revolve/booleans/fillets, meshes, measures and STEP, behind our own API (implemented with SMLib)"
+description = "SolidCraft B-rep kernel boundary: solids, extrude/revolve/booleans/fillets, meshes, measures and STEP, behind our own API (implemented with solidcore)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [lints]
 workspace = true
-
-[features]
-# Link NVIDIA's SMLib (tangency-labs/smlib) into the kernel; needs a C++ toolchain and
-# scripts/fetch-smlib.sh (ADR 0002). Without it every geometric operation answers that SMLib
-# was not built.
-smlib = ["solidcraft-smlib/native"]
 
 [dependencies]
 solidcraft-geom = { workspace = true }

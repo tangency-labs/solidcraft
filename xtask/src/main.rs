@@ -51,14 +51,14 @@ commands:
                   already built, instead of cargo run --release)
   kernel-cases [--area AREA] [--cli BIN] [--timeout S] [--jobs N] [--out DIR] [--known-failing FILE] [--validation MODE] [--coverage]
                   the kernel regression rig: run every case in tests/kernel-cases/<area>/<id>/ on
-                  SMLib (one process each, killed after --timeout, default 180 s), grade it against
+                  solidcore (one process each, killed after --timeout, default 180 s), grade it against
                   the case's own answer and write docs/kernel-cases.md; DIR (default
                   target/kernel-cases) gets results.json and dumps/<area>-<case>/, the inputs of
-                  each failing SMLib call (--cli: a solidcraft-cli built with --features smlib)
+                  each failing kernel call (--cli: a solidcraft-cli already built);
                   --known-failing FILE: a regression gate instead of the report: fails on a case
                   that fails and FILE does not list, and on a listed case that passes
                   (tests/kernel-cases/<area>/KNOWN_FAILING, CI's Kernel rig workflow)
-                  --validation MODE: when SMLib's full check runs on the cases' features:
+                  --validation MODE: when the kernel's full check runs on the cases' features:
                   each_step, each_feature (the default) or off (solidcraft-cli kernel-cases
                   --validation=MODE); with --ladder too
                   --ladder [--record REASON | --gate]: the complexity ladder instead
@@ -72,7 +72,8 @@ commands:
                   uses and tests/kernel-cases/EXEMPT does not list, and on a stale EXEMPT line
   known-failing --junit PATH... [--list FILE]
                   grade a nextest run's junit report (a file, or every .xml under a directory)
-                  against the tests known to fail today, tests/KNOWN_FAILING_TESTS (FILE): fails
+                  against the tests known to fail today on the default kernel,
+                  tests/KNOWN_FAILING_TESTS (or FILE): fails
                   on a test that failed and is not listed, and on a listed test that passed
                   (fixed: take its line off); a listed test that did not run is neither. CI's
                   test jobs run it after nextest

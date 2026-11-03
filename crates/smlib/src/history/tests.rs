@@ -1,49 +1,32 @@
 use super::*;
+use crate::Error;
 use solidcraft_geom::brep::history::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, History};
 
 fn face(operand: usize, face: usize) -> FaceOrigin {
     FaceOrigin::Face { operand, face }
 }
 
-/// Two boxes joined across a face, as `smlib_history_read` lays it out: face 0 is operand 0's
-/// face 2 kept, face 1 operand 1's face 4 trimmed, face 2 both boxes' coplanar faces 0 merged.
-/// Edge 0 is new between faces 0 and 1, edge 1 is operand 0's edge 7, edge 2 joins edge 3 of
-/// each box and bounds faces 1 and 2.
-const RECORDS: &[i64] = &[
-    1, 3, 3, //
-    0, 1, 0, 2, //
-    1, 1, 1, 4, //
-    3, 2, 0, 0, 1, 0, //
-    2, 0, 1, 0, //
-    2, 0, 2, 1, 0, 7, //
-    2, 1, 2, 2, 0, 3, 1, 3,
-];
-
-#[test]
-fn decodes_the_c_layout() {
-    let raw = Raw::decode(RECORDS).unwrap();
-    assert_eq!(raw.faces.len(), 3);
-    assert_eq!(raw.faces[2], RawFace { change: Change::Merged, origins: vec![(0, 0), (1, 0)] });
-    assert_eq!(raw.edges[0], RawEdge { faces: vec![0, 1], origins: vec![] });
-    assert_eq!(raw.edges[2].origins, vec![(0, 3), (1, 3)]);
-}
-
-#[test]
-fn hostile_records_are_refused() {
-    // Wrong version, truncated, trailing values, counts far past the data, an unknown change.
-    assert_eq!(Raw::decode(&[2, 0, 0]), None);
-    assert_eq!(Raw::decode(&RECORDS[..RECORDS.len() - 1]), None);
-    assert_eq!(Raw::decode(&[RECORDS, &[0]].concat()), None);
-    assert_eq!(Raw::decode(&[1, i64::MAX, 0]), None);
-    assert_eq!(Raw::decode(&[1, 1, 0, 0, i64::MAX]), None);
-    assert_eq!(Raw::decode(&[1, 1, 0, 9, 0]), None);
-    assert_eq!(Raw::decode(&[1, 1, 0, 0, -1]), None);
-    assert_eq!(Raw::decode(&[]), None);
+/// Two boxes joined across a face: face 0 is operand 0's face 2 kept, face 1 operand 1's face 4
+/// trimmed, face 2 both boxes' coplanar faces 0 merged. Edge 0 is new between faces 0 and 1, edge
+/// 1 is operand 0's edge 7, edge 2 joins edge 3 of each box and bounds faces 1 and 2.
+fn joined() -> Raw {
+    Raw {
+        faces: vec![
+            RawFace { change: Change::Kept, origins: vec![(0, 2)] },
+            RawFace { change: Change::Modified, origins: vec![(1, 4)] },
+            RawFace { change: Change::Merged, origins: vec![(0, 0), (1, 0)] },
+        ],
+        edges: vec![
+            RawEdge { faces: vec![0, 1], origins: vec![] },
+            RawEdge { faces: vec![0, 2], origins: vec![(0, 7)] },
+            RawEdge { faces: vec![1, 2], origins: vec![(0, 3), (1, 3)] },
+        ],
+    }
 }
 
 #[test]
 fn new_edges_are_where_their_faces_meet() {
-    let raw = Raw::decode(RECORDS).unwrap();
+    let raw = joined();
     let h = raw.history(&[Order::default(), Order::default()], &Order::default()).unwrap();
     assert_eq!(h.operands, 2);
     assert_eq!(h.faces[0].origins, vec![face(0, 2)]);
@@ -59,7 +42,8 @@ fn new_edges_are_where_their_faces_meet() {
 /// pieces of one face, where nothing met, so it comes from nothing.
 #[test]
 fn a_split_line_comes_from_nothing() {
-    let raw = Raw::decode(&[1, 2, 1, 2, 1, 0, 0, 2, 1, 0, 0, 2, 0, 1, 0]).unwrap();
+    let piece = RawFace { change: Change::Split, origins: vec![(0, 0)] };
+    let raw = Raw { faces: vec![piece.clone(), piece], edges: vec![RawEdge { faces: vec![0, 1], origins: vec![] }] };
     let h = raw.history(&[Order::default()], &Order::default()).unwrap();
     assert_eq!(h.faces.iter().map(|f| (f.origins.clone(), f.change)).collect::<Vec<_>>(), vec![(vec![face(0, 0)], Change::Split); 2]);
     assert_eq!(h.edges[0].faces, vec![0, 1]);
@@ -68,7 +52,7 @@ fn a_split_line_comes_from_nothing() {
 
 #[test]
 fn renumbers_into_canonical_order() {
-    let raw = Raw::decode(RECORDS).unwrap();
+    let raw = joined();
     // Operand 0's SMLib face 2 is its canonical face 5, edge 7 its edge 0; the result's faces
     // and edges are listed backwards.
     let a = Order { faces: vec![1, 2, 5, 0, 3, 4], edges: vec![1, 2, 3, 4, 5, 6, 7, 0], pieces: vec![] };
@@ -85,7 +69,7 @@ fn renumbers_into_canonical_order() {
 
 #[test]
 fn bad_orders_are_errors() {
-    let raw = Raw::decode(RECORDS).unwrap();
+    let raw = joined();
     let ok = Order::default();
     // An origin on an operand that isn't there.
     assert!(raw.history(std::slice::from_ref(&ok), &ok).is_err());
@@ -112,7 +96,6 @@ fn a_fillet_face_comes_from_its_edge() {
     assert!(h.faces[..6].iter().all(|f| f.origins.len() == 1));
 }
 
-#[cfg(feature = "native")]
 #[test]
 fn a_tagged_body_is_its_own_history() {
     let b = Brep::make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap();
