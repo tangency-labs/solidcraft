@@ -38,12 +38,13 @@ pub mod status_items;
 pub mod timing;
 pub mod view;
 
+use solidcraft_geom::prelude::*;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use solidcore_record::Vec3;
 use solidcraft_doc::{Document, Model, ModelState};
-use solidcraft_geom::Vec3;
 
 pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
 pub use cmd::{
@@ -1174,7 +1175,7 @@ impl Session {
                 for sketch in w.sketches.iter_mut().filter(|sk| self.doc.feature(sk.feature).is_some_and(|f| f.component == self.active_component)) {
                     let sketch = Arc::make_mut(sketch);
                     let plane = sketch.plane;
-                    sketch.plane = solidcraft_geom::Plane::new(
+                    sketch.plane = solidcore_record::Plane::new(
                         solidcraft_doc::apply_point(&delta, plane.origin),
                         solidcraft_doc::apply_vector(&delta, plane.x),
                         solidcraft_doc::apply_vector(&delta, plane.y),

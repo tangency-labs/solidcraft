@@ -13,7 +13,7 @@
 //! The history is SMLib's tags, renumbered into the body's orders; a blend face, which SMLib
 //! leaves untagged, comes from the edge it replaces ([`solidcraft_smlib::history::blends`]).
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::blend_variable::RadiusSpline;
 use crate::body::Body;
@@ -111,9 +111,10 @@ enum Kind {
 }
 
 mod imp {
+    use solidcraft_geom::prelude::*;
     use std::collections::BTreeSet;
 
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
     use solidcraft_smlib::{Blend, Brep, ChamferSecond, CheckLevel, Error as SmError};
 
     use super::Kind;
@@ -562,7 +563,7 @@ mod imp {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
 
     use super::*;
     use crate::history::{Change, FaceOrigin};

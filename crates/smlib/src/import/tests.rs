@@ -1,7 +1,8 @@
 use super::*;
-use solidcraft_geom::brep::{
+use solidcore_record::brep::{
     Brep as Record, Curve, Curve2, Edge, EdgeUseRef, Face, Loop, OrientedEdge, OrientedFace, Region, Shell, Surface, Vertex,
 };
+use solidcraft_geom::prelude::*;
 
 /// A closed polyhedron record from its corner points and its faces, each a cycle of corner
 /// indices counter-clockwise seen from outside: planar faces, straight edges, canonical order.
@@ -73,7 +74,7 @@ fn polyhedron(corners: &[[f64; 3]], cycles: &[&[usize]]) -> Record {
         })
         .collect();
     Record {
-        version: solidcraft_geom::brep::VERSION,
+        version: solidcore_record::brep::VERSION,
         tolerance: 1e-6,
         regions: vec![Region { shells: vec![0], void: false }, Region { shells: vec![0], void: false }],
         shells: vec![Shell::Faces { faces: (0..cycles.len() as u32).map(|face| OrientedFace { face, forward: true }).collect(), wires: vec![] }],
@@ -91,7 +92,7 @@ fn cube(s: f64) -> Record {
 #[test]
 fn a_cube_record_is_valid_and_maps_to_two_shells() {
     let r = cube(10.0);
-    r.validate().unwrap();
+    solidcraft_geom::brep::check::validate(&r).unwrap();
     let a = arrays(&r, true).unwrap();
     // The infinite region (a void in SMLib) and the solid, one shell each, every face once per side.
     assert_eq!(a.ints[&flat::REGION_SHELL_COUNT], vec![1, 1]);
@@ -143,7 +144,7 @@ fn a_plane_on_other_axes_goes_as_smlibs_plane() {
             }
         }
     }
-    r.validate().unwrap();
+    solidcraft_geom::brep::check::validate(&r).unwrap();
     let a = arrays(&r, true).unwrap();
     assert_eq!(a.ints[&flat::FACE_SURFACE_TYPE][0], i64::from(flat::SURFACE_PLANE));
     let b = crate::Brep::from_record(&r, true).unwrap();
@@ -225,7 +226,7 @@ fn revolutions_become_the_same_surface_as_a_rational_spline() {
 #[test]
 fn arcs_past_a_turn_come_a_turn_back() {
     use std::f64::consts::{FRAC_PI_2, TAU};
-    let frame = solidcraft_geom::brep::Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] };
+    let frame = solidcore_record::brep::Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] };
     let circle = Curve::Circle { frame, radius: 2.0 };
     assert_eq!(turned(&circle, [TAU, TAU + FRAC_PI_2]), ([0.0, FRAC_PI_2], -TAU));
     assert_eq!(turned(&circle, [-TAU - FRAC_PI_2, -TAU]), ([-FRAC_PI_2, 0.0], TAU));
@@ -242,7 +243,7 @@ fn arcs_past_a_turn_come_a_turn_back() {
 #[test]
 fn only_a_tube_clear_of_its_axis_is_a_ring_torus() {
     let ring = |major: f64| {
-        let frame = solidcraft_geom::brep::Frame { origin: [major, 0.0, 0.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 0.0, 1.0] };
+        let frame = solidcore_record::brep::Frame { origin: [major, 0.0, 0.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 0.0, 1.0] };
         let (profile, _) = solidcraft_geom::brep::form::curve(&Curve::Circle { frame, radius: 1.0 }, [-1.0, 1.0]).unwrap();
         let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
         let surface =

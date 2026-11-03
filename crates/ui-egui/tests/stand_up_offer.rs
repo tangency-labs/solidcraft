@@ -5,6 +5,7 @@
 //! with `stand_up:stand`, `stand_up:never` and its close (×), `toast:stand_up:close` (also published
 //! as `stand_up:dismiss`, the Close button's handle, #7971); Preferences picks the dialog or nothing.
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_ui_egui::prefs::StandUpUnknown;
 use solidcraft_ui_egui::scenario::Harness;
 
@@ -177,7 +178,7 @@ fn old_preferences_files_still_load() {
     assert!(empty.offer_stand_up);
 }
 
-type V3 = solidcraft_engine::geom::Vec3;
+type V3 = solidcore_record::Vec3;
 
 /// A stood-up SolidWorks file (its component still the active one), a sketch started by
 /// `start`, a rectangle far from the part at x 200..220, y 0..10 on it, extruded 15 mm: the

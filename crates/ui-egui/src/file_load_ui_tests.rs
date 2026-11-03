@@ -4,6 +4,7 @@
 use egui::{Event, PointerButton, Pos2, RawInput, Rect, ViewportCommand, ViewportId, pos2, vec2};
 use serde_json::json;
 use solidcraft_engine::Session;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 
@@ -725,7 +726,7 @@ fn an_opened_design_comes_up_at_the_home_view() {
     // The view the design before it was left at: straight down, zoomed right in.
     w.app.cam.set_view(StandardView::Top);
     w.app.cam.distance = 12.0;
-    w.app.cam.target = solidcraft_engine::geom::Vec3::new(50.0, -70.0, 3.0);
+    w.app.cam.target = solidcore_record::Vec3::new(50.0, -70.0, 3.0);
     // Opened from the Home screen, which covers the viewport while the design goes in: the
     // viewport is not drawn, so the layout a fit would be framed into is the one left over from
     // what was there before, which cannot frame anything.

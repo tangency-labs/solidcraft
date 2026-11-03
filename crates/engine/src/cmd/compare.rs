@@ -6,8 +6,10 @@
 //! the two cuts a − b and b − a that lie there, as `inspect.measure` measures a body.
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
+use solidcraft_geom::Aabb3;
 use solidcraft_geom::compare::{self, CompareOptions, Side};
-use solidcraft_geom::{Aabb3, Vec3};
+use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::bad;

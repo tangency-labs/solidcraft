@@ -32,11 +32,13 @@
 //! Writers read a [`Prepared`] scene, which only [`Scene::prepare`] makes, so none reads one that
 //! wasn't checked. Clipping will happen there too, once, before any writer (A8).
 
+use crate::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use std::f64::consts::FRAC_PI_2;
 
-use crate::{EPS, Region2, Seg2, Vec2};
+use crate::EPS;
+use solidcore_record::{Region2, Seg2, Vec2};
 
 /// The widest line a scene may draw, in millimetres.
 pub const MAX_LINE_MM: f64 = 10.0;

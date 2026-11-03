@@ -4,7 +4,7 @@
 //! point, and usable as sweep and pipe paths.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_sketch::WireSpace;
 
 use super::sketch::edit;

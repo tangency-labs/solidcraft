@@ -693,7 +693,7 @@ fn taper_envelope(t: &ThreadInfo, radius: f64, ends: [End; 2], (d0, from): (f64,
             vec![Vec2::new(rc(-e), -e), Vec2::new(rc(len), len), Vec2::new(r_out, len), Vec2::new(r_out, -e)]
         }
     };
-    let region = Region2 { outer: solidcraft_geom::Loop2::polygon(&pts), holes: Vec::new() };
+    let region = Region2 { outer: solidcore_record::Loop2::polygon(&pts), holes: Vec::new() };
     let mut ring = kernel::revolve(&plane, &[region], Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), std::f64::consts::TAU)?;
     Ok(ring.pop())
 }
@@ -800,7 +800,7 @@ pub(super) fn cut(st: &mut ModelState, on: ThreadOn, (tip, angle, depth): (Threa
         let plane = Plane { origin: t.axis_point + k * lo, x: u, y: k };
         let r_out = radius + 0.1 * t.pitch;
         let pts = [Vec2::new(r_min, 0.0), Vec2::new(r_out, 0.0), Vec2::new(r_out, hi - lo), Vec2::new(r_min, hi - lo)];
-        let region = Region2 { outer: solidcraft_geom::Loop2::polygon(&pts), holes: Vec::new() };
+        let region = Region2 { outer: solidcore_record::Loop2::polygon(&pts), holes: Vec::new() };
         let sleeve = kernel::revolve(&plane, &[region], Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), std::f64::consts::TAU)?
             .pop()
             .ok_or_else(|| DocError::Invalid("the narrowed bore".into()))?;
@@ -824,7 +824,7 @@ pub(super) fn cut(st: &mut ModelState, on: ThreadOn, (tip, angle, depth): (Threa
     };
     let mut grooves = Vec::new();
     for g in thread_grooves(&t, groove_radius, (cyl.start, cyl.end), ends, steep, ease, taper)? {
-        let section = Region2 { outer: solidcraft_geom::Loop2::polygon(&g.section), holes: Vec::new() };
+        let section = Region2 { outer: solidcore_record::Loop2::polygon(&g.section), holes: Vec::new() };
         grooves.push(kernel::sweep_helix_radial(&g.plane, &section, g.base, g.axis, g.pitch, g.turns, &g.law)?);
     }
     if let Some(taper) = taper
@@ -928,7 +928,7 @@ fn tip_cones(
         // In the plane: x radial, y outward along the axis from the end.
         let plane = Plane { origin: t.axis_point + k * at, x: u, y: out_dir };
         let pts = [Vec2::new(r_f, 0.0), Vec2::new(r_f, e), Vec2::new(r_out, e), Vec2::new(r_out, -(r_out - r_f) / slope)];
-        let region = Region2 { outer: solidcraft_geom::Loop2::polygon(&pts), holes: Vec::new() };
+        let region = Region2 { outer: solidcore_record::Loop2::polygon(&pts), holes: Vec::new() };
         let mut ring = kernel::revolve(&plane, &[region], Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), std::f64::consts::TAU)?;
         out.push(ring.pop().ok_or_else(|| DocError::Invalid("chamfer".into()))?);
     }

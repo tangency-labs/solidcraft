@@ -3,8 +3,10 @@
 //! directly on the body's schema 4 record (the band's walls continue the walls below, which a
 //! boolean union can't join: their faces would coincide).
 
-use solidcraft_geom::brep::{Brep, Curve, Frame, Surface};
-use solidcraft_geom::{Loop2, Plane, Region2, Ring, Seg2, Vec3};
+use solidcore_record::brep::{Brep, Curve, Frame, Surface};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec3};
+use solidcraft_geom::Ring;
+use solidcraft_geom::prelude::*;
 
 use crate::assemble::{AFace, AUse, Assembly};
 use crate::body::Body;
@@ -150,7 +152,7 @@ fn pieces(asm: &Assembly, lp: &[AUse], n: Vec3) -> Result<Vec<Piece>> {
             let (s, t) = asm.ends(u).ok_or_else(|| fail("edge"))?;
             let (a, b) = (asm.point(s).ok_or_else(|| fail("vertex"))?, asm.point(t).ok_or_else(|| fail("vertex"))?);
             // The arc's angles, on the circle itself (its NURBS form, if any, is parameterised otherwise).
-            let [t0, t1] = solidcraft_geom::brep::curve_interval(&e.curve, e.nurbs.as_ref(), e.interval).ok_or_else(|| fail("edge"))?;
+            let [t0, t1] = solidcraft_geom::brep::label::curve_interval(&e.curve, e.nurbs.as_ref(), e.interval).ok_or_else(|| fail("edge"))?;
             match &e.curve {
                 Curve::Line { .. } => Ok(Piece { a, b, arc: None }),
                 Curve::Circle { frame, .. } => {

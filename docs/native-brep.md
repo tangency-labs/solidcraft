@@ -1,7 +1,8 @@
 # Native B-rep, schema 4
 
-This is SolidCraft's geometry data model in `solidcraft_geom::brep`. It has no
-modelling-backend dependency. It is the body encoding of a design's model cache
+This is SolidCraft's geometry data model in `solidcore_record::brep` (solidcore's
+record crate: geometry as data, no maths). It has no modelling-backend dependency;
+its geometric checks and evaluation are the kernel's (`solidcraft_geom::brep`). It is the body encoding of a design's model cache
 ([the container format](design-container.md#model-cache)); it is not a STEP
 replacement for external interchange. The container reader, binary codec and
 kernel adapters are separate layers. The truck adapter writes it exactly: a body
@@ -260,7 +261,7 @@ and one fixture per defect, without a kernel.
 ## History
 
 The runtime history types (`FaceOrigin`, `Change`, `FaceProv`, `Side`,
-`EdgeOrigin`, `EdgeProv`, `History`) live in `solidcraft_geom::brep::history`, so
+`EdgeOrigin`, `EdgeProv`, `History`) live in `solidcore_record::brep::history`, so
 a backend can report history without the kernel crate. Indices are canonical face
 and edge indices; operands are numbered by each operation. An operation returns
 history beside the B-rep. A backend that cannot report it returns none and never

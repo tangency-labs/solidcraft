@@ -6,9 +6,11 @@
 //! looks the face up once for every point near the cursor.
 
 use serde_json::{Value, json};
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::FeatureKind;
-use solidcraft_engine::geom::{Aabb3, Vec2, Vec3};
+use solidcraft_engine::geom::Aabb3;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::{CurveKind, LinkKind, SPoint};
 
 use crate::dialogs::Kind;

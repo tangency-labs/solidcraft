@@ -4,8 +4,9 @@
 use crate::ui_kit::{Container, Surface};
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, pos2, vec2};
 use serde_json::json;
+use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::{Plane, Vec2, Vec3};
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::render::{Camera, Mat4, Rgb};
 use solidcraft_engine::sketch::CurveKind;
 use solidcraft_engine::view::{GridFade, GridPlane, colors, grid_ext, grid_lines, grid_plane, grid_step, sketch_lines_with_sampler};
@@ -2932,7 +2933,7 @@ fn feature_parts(app: &SolveApp, id: u64, shown_only: bool) -> Vec<Sel> {
 }
 
 /// A point on face `index` of `m`: the middle of its first triangle.
-fn first_triangle_point(m: &solidcraft_engine::geom::Mesh, index: usize) -> Option<solidcraft_engine::geom::Vec3> {
+fn first_triangle_point(m: &solidcraft_engine::geom::Mesh, index: usize) -> Option<solidcore_record::Vec3> {
     m.triangles.iter().zip(&m.tri_face).find_map(|(t, f)| (*f as usize == index).then(|| m.tri(t)).flatten().map(|[a, b, c]| (a + b + c) / 3.0))
 }
 
@@ -2988,7 +2989,7 @@ fn current_face(
     name: &str,
     sample: &solidcraft_engine::kernel::FaceInfo,
     tol: f64,
-) -> Option<(usize, solidcraft_engine::geom::Vec3)> {
+) -> Option<(usize, solidcore_record::Vec3)> {
     let m = now.mesh();
     let names = solidcraft_engine::doc::naming::face_names(now);
     if let Some(index) = names.iter().position(|n| n == name) {
@@ -3487,7 +3488,7 @@ pub(crate) fn profile_fill(sc: &mut GpuScene, app: &SolveApp, sketch: u64, index
     };
     // Lift toward the eye so a profile on a face shows over it.
     let lift = app.cam.back() * (app.cam.half_height() * 0.002);
-    let w = |q: solidcraft_engine::geom::Vec2| (plane.to_world(q) + lift).to_f32();
+    let w = |q: solidcore_record::Vec2| (plane.to_world(q) + lift).to_f32();
     let col = sc.color(c4(fill));
     let edge = sc.color(c4(edge));
     // In the translucent pass (after the grid and edges) so it covers them.
@@ -5189,7 +5190,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     points_2d(app, &painter, &proj);
     if let Some((plane, sketch)) = crate::sketch_attachment_ui::lost_guide(app)
         && let Some((low, high)) = sketch.bounds()
-        && let Some(at) = proj.to_screen(plane.to_world(solidcraft_engine::geom::Vec2::new((low.x + high.x) * 0.5, high.y)))
+        && let Some(at) = proj.to_screen(plane.to_world(solidcore_record::Vec2::new((low.x + high.x) * 0.5, high.y)))
     {
         painter.text(
             at - vec2(0.0, 12.0),
@@ -6653,7 +6654,7 @@ impl Conflict {
 fn loose_end_markers(
     sk: &solidcraft_engine::sketch::Sketch,
     ends: &solidcraft_engine::sketch::EndReport,
-    plane: &solidcraft_engine::geom::Plane,
+    plane: &solidcore_record::Plane,
     painter: &egui::Painter,
     proj: &Proj,
     t: &Tokens,

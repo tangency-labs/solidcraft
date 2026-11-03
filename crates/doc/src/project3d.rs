@@ -1,7 +1,9 @@
 //! 3D sketch curves from the model: curves projected onto faces (on their display meshes), the
 //! bodies and faces an intersection curve is taken on, and spun profiles.
 
-use solidcraft_geom::{Mesh, Plane, Vec2, Vec3};
+use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_geom::Mesh;
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::LinkSource;
 
 use crate::eval::ModelState;

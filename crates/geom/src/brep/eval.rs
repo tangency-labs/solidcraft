@@ -11,11 +11,12 @@
 use super::normal_section::normal_section;
 use super::pcurve::Error;
 use super::{Curve, Curve2, Frame, Surface};
-use crate::Vec3;
 use crate::bspline::MAX_SPLINE_DEGREE;
+use crate::prelude::*;
 use crate::tess::partials::{Partials, tabulate, trig_derivative};
 use crate::tess::uv::{self, Domain};
 use crate::tess::{EvalCurve, EvalSurface, MAX_EVAL_KNOTS, MAX_EVAL_POINTS};
+use solidcore_record::Vec3;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 /// Newton steps of one intersection point.
@@ -613,7 +614,7 @@ pub fn face_flux(s: &SurfaceEval, v0: f64, loops: &[Vec<(&Curve2, bool)>], field
         let at = |k: f64| {
             let f = k / FLUX_PIECES as f64;
             // Exactly the ends at f = 0 and 1, whatever the interval's rounding.
-            c.eval(if *forward { t0 * (1.0 - f) + t1 * f } else { t1 * (1.0 - f) + t0 * f })
+            super::pcurve::eval(c, if *forward { t0 * (1.0 - f) + t1 * f } else { t1 * (1.0 - f) + t0 * f })
         };
         for k in 0..FLUX_PIECES {
             let (a, m, z) = (at(k as f64)?, at(k as f64 + 0.5)?, at(k as f64 + 1.0)?);

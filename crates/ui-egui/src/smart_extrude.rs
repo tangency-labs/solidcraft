@@ -17,8 +17,9 @@
 //!   distance changes nothing. Choosing an operation by hand ends the automatic choice for
 //!   the rest of the extrude.
 
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 /// The extrude window's automatic state.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -33,7 +34,7 @@ pub struct Smart {
     pub target: Option<Sel>,
     /// The profiles the taper handle's limits were last worked out for, and their radii
     /// (`canvas::taper_radii`): too slow to work out every frame on a profile with many holes.
-    pub taper_radii: Option<(Vec<solidcraft_engine::geom::Region2>, (f64, f64))>,
+    pub taper_radii: Option<(Vec<solidcore_record::Region2>, (f64, f64))>,
     /// Where the extrude starts (its From Object and start offset) when the latch was decided.
     pub start: serde_json::Value,
     /// The bodies shown when the latch was decided (None: every one), as `shown_scope` gives them.

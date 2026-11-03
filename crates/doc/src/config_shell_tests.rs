@@ -1,7 +1,7 @@
 use super::*;
 use crate::{FeatureKind, Model, PlaneRef};
 use serde_json::json;
-use solidcraft_geom::{Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
 
 fn shell_document() -> (Document, u64, u64) {
     let mut doc = Document::new("certified shell");
@@ -43,15 +43,15 @@ fn face_index(body: &ModelBody, inner: bool) -> usize {
 
 #[test]
 fn shell_planar_raw_bounds_flat_identity_and_clone_remap() {
-    let plane = solidcraft_geom::Plane::XY;
-    let same = |planes: &[Option<solidcraft_geom::Plane>]| super::super::styles::shell_plane_family(planes.iter().copied());
+    let plane = solidcore_record::Plane::XY;
+    let same = |planes: &[Option<solidcore_record::Plane>]| super::super::styles::shell_plane_family(planes.iter().copied());
     assert!(same(&[Some(plane), Some(plane)]));
     assert!(!same(&[]));
     assert!(!same(&[Some(plane), None]));
     for different in [
-        solidcraft_geom::Plane { origin: Vec3::X, ..plane },
-        solidcraft_geom::Plane { x: -plane.x, y: -plane.y, ..plane },
-        solidcraft_geom::Plane { y: -plane.y, ..plane },
+        solidcore_record::Plane { origin: Vec3::X, ..plane },
+        solidcore_record::Plane { x: -plane.x, y: -plane.y, ..plane },
+        solidcore_record::Plane { y: -plane.y, ..plane },
     ] {
         assert!(!same(&[Some(plane), Some(different)]));
     }
@@ -355,7 +355,7 @@ fn saved_curved_strip_projection_asks_for_its_face_again_after_exact_wall_coales
     sketch.add_link(LinkKind::Project, source, &geometry).unwrap();
     sketch.links[0].face_name = Some(former);
     let sk = doc
-        .add_feature(FeatureKind::Sketch { plane: PlaneRef::Custom { plane: solidcraft_geom::Plane::YZ }, sketch }, Some("Saved corner strip"))
+        .add_feature(FeatureKind::Sketch { plane: PlaneRef::Custom { plane: solidcore_record::Plane::YZ }, sketch }, Some("Saved corner strip"))
         .unwrap();
     let boss = doc
         .add_feature(
@@ -431,7 +431,7 @@ fn saved_stepped_tab_cut_piece_projection_asks_for_its_face_again_without_expand
     // the patch y 10..20, z 0..20 by its piece name. The kernel leaves the wall one face now: the
     // patch is only that saved name and its rectangle on YZ.
     let at = Vec3::new(0., 15., 1.);
-    let plane = solidcraft_geom::Plane::YZ;
+    let plane = solidcore_record::Plane::YZ;
     let current_state = model.state();
     let current = current_state.body("Case").unwrap();
     let stem = crate::naming::face_name_at_body(current, at).unwrap();

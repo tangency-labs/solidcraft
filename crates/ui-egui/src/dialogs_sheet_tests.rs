@@ -411,7 +411,7 @@ fn rules_dialog_picks_the_corner_relief_shape() {
         // The rounds in the base of the tray, and the shape the open dialog shows.
         let rounds = |app: &SolveApp| {
             let state = app.session.model.state();
-            state.sheets.last().map(|s| s.base.outer.segs.iter().filter(|g| matches!(g, solidcraft_engine::geom::Seg2::Arc { .. })).count())
+            state.sheets.last().map(|s| s.base.outer.segs.iter().filter(|g| matches!(g, solidcore_record::Seg2::Arc { .. })).count())
         };
         let shown = |app: &SolveApp| match app.dialog.as_ref().map(|d| &d.kind) {
             Some(Kind::Sheet(Sm::Rules { relief, .. })) => Some(*relief),
@@ -605,7 +605,7 @@ fn flange_dialog_picks_a_corner_relief_of_its_own() {
                 .state()
                 .sheets
                 .last()
-                .map(|s| s.base.outer.segs.iter().filter(|g| matches!(g, solidcraft_engine::geom::Seg2::Arc { .. })).count())
+                .map(|s| s.base.outer.segs.iter().filter(|g| matches!(g, solidcore_record::Seg2::Arc { .. })).count())
         };
         assert_eq!(arcs(&h.app), Some(1), "the round is cut at the one corner the two flanges make");
         // Edit Feature shows both again; Rule and an empty size take the feature back to the rule's relief.

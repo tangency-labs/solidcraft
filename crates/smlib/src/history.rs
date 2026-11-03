@@ -1,4 +1,4 @@
-//! Face and edge history out of SMLib operations, in [`solidcraft_geom::brep::history`]'s terms.
+//! Face and edge history out of SMLib operations, in [`solidcore_record::brep::history`]'s terms.
 //!
 //! SMLib carries identity through its own edits: every split, merge, copy and coincidence an
 //! operation makes passes the attributes of what it changes on to what it makes. So each operand
@@ -12,7 +12,7 @@
 
 use std::collections::BTreeSet;
 
-use solidcraft_geom::brep::history::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, Failed, History, Side};
+use solidcore_record::brep::history::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, Failed, History, Side};
 
 use crate::{Brep, Result, core};
 

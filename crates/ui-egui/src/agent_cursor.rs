@@ -19,13 +19,14 @@
 //! settings on the navigation bar, or `ui.agent_cursor {show, speed, follow_camera}`); a call
 //! with `"animate": false` skips it.
 
+use solidcraft_engine::geom::prelude::*;
 use std::collections::VecDeque;
 use std::sync::mpsc::Sender;
 
 use egui::{Pos2, Stroke, pos2, vec2};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use solidcraft_engine::geom::{Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
 
 use crate::SolveApp;
 use crate::control::ControlResponse;

@@ -12,7 +12,8 @@
 
 use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::json;
-use solidcraft_engine::geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::render::Camera;
 
 use crate::SolveApp;
@@ -1229,6 +1230,7 @@ fn orbit_camera(app: &mut SolveApp, dx: f64, dy: f64) {
 
 #[cfg(test)]
 mod tests {
+    use solidcraft_engine::geom::prelude::*;
     fn web_wheel(unit: egui::MouseWheelUnit, delta: egui::Vec2, modifiers: egui::Modifiers) -> egui::Event {
         egui::Event::MouseWheel { unit, delta, modifiers, phase: egui::TouchPhase::Move }
     }
@@ -2532,6 +2534,7 @@ mod tests {
 mod view_key_tests {
     use crate::scenario::Harness;
     use serde_json::json;
+    use solidcraft_engine::geom::prelude::*;
 
     fn turned(h: &mut Harness, key: serde_json::Value) -> (f64, f64) {
         let before = h.app.cam;

@@ -1600,8 +1600,8 @@ mod retained_request_tests {
         request.raytrace.as_mut().unwrap().emissions = Some(values);
         let expected = retained_request_bytes(&request).unwrap();
         let mesh = solidcraft_geom::Mesh {
-            positions: vec![solidcraft_geom::Vec3::ZERO, solidcraft_geom::Vec3::X, solidcraft_geom::Vec3::Y],
-            normals: vec![solidcraft_geom::Vec3::Z; 3],
+            positions: vec![solidcore_record::Vec3::ZERO, solidcore_record::Vec3::X, solidcore_record::Vec3::Y],
+            normals: vec![solidcore_record::Vec3::Z; 3],
             triangles: vec![[0, 1, 2]],
             tri_face: vec![0],
             ..Default::default()
@@ -1786,7 +1786,7 @@ mod surface_request_metadata_tests {
                 bump_amplitude_mm: 0.0,
             });
         }
-        let scene = ProductScene { meshes, bounds: Aabb3 { min: solidcraft_geom::Vec3::ZERO, max: solidcraft_geom::Vec3::ZERO } };
+        let scene = ProductScene { meshes, bounds: Aabb3 { min: solidcore_record::Vec3::ZERO, max: solidcore_record::Vec3::ZERO } };
         let mut request = request();
         request.integrator = Integrator::Raytrace;
         request.raytrace = Some(super::super::RaytraceOptions { surface_effects: Some(effects), ..Default::default() });

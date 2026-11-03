@@ -1,5 +1,6 @@
 //! Inspection: measure bodies, describe the document, sketches and model topology.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 use std::hash::{BuildHasher, RandomState};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -464,7 +465,7 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
             let spot = spots.get(f.index).copied().flatten();
             let cylinder = match spot.and_then(|x| x.surface) {
                 Some(solidcraft_kernel::FaceSurface::Cylinder { origin, axis, radius }) => {
-                    Some(FaceCylinder { origin: origin.into(), axis: solidcraft_geom::Vec3::from(axis).into(), radius })
+                    Some(FaceCylinder { origin: origin.into(), axis: solidcore_record::Vec3::from(axis).into(), radius })
                 }
                 _ => None,
             };
@@ -554,7 +555,7 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`bodies` must list existing bodies"));
     }
     // Faces: a point on each, on the named body or the nearest one.
-    let mut faces: Vec<(String, solidcraft_geom::Vec3)> = Vec::new();
+    let mut faces: Vec<(String, solidcore_record::Vec3)> = Vec::new();
     if let Some(list) = p.get("faces") {
         let list = list.as_array().filter(|a| a.len() <= 10_000).ok_or_else(|| bad(cmd, "`faces` must list points [x, y, z]"))?;
         for v in list {
@@ -578,7 +579,7 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "give `bodies`, `faces` or `components`"));
     }
     // Persistent names of the picked faces.
-    let st_names: Vec<(String, solidcraft_geom::Vec3, Option<String>)> = faces
+    let st_names: Vec<(String, solidcore_record::Vec3, Option<String>)> = faces
         .iter()
         .map(|(b, pt)| {
             let n = st.body(b).and_then(|mb| {
@@ -715,9 +716,9 @@ pub(super) fn appearance_look(cmd: &str, p: &Value) -> Result<Option<solidcraft_
     Ok(look)
 }
 
-fn dist_to(b: &solidcraft_doc::ModelBody, p: solidcraft_geom::Vec3) -> f64 {
+fn dist_to(b: &solidcraft_doc::ModelBody, p: solidcore_record::Vec3) -> f64 {
     let bb = b.mesh().bounds();
-    let c = solidcraft_geom::Vec3::new(p.x.clamp(bb.min.x, bb.max.x), p.y.clamp(bb.min.y, bb.max.y), p.z.clamp(bb.min.z, bb.max.z));
+    let c = solidcore_record::Vec3::new(p.x.clamp(bb.min.x, bb.max.x), p.y.clamp(bb.min.y, bb.max.y), p.z.clamp(bb.min.z, bb.max.z));
     c.dist(p)
 }
 

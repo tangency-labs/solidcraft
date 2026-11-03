@@ -8,11 +8,12 @@
 //! Everything runs `sketch.line3d`, `sketch.arc3d`, `sketch.spline3d`, `sketch.point3d`,
 //! `sketch.move3d`, `sketch.line` and `sketch.arc.three_point`.
 
+use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
 
 use egui::{Pos2, Rect, Shape, Stroke, vec2};
 use serde_json::{Value, json};
-use solidcraft_engine::geom::{Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
 
 use crate::SolveApp;
 use crate::theme::Tokens;

@@ -41,7 +41,8 @@ pub fn offset_surface(body: &Body, faces: &[usize], distance: f64, tolerance: f6
 mod tests {
     use super::*;
     use crate::{box_solid, cylinder, measure, sphere};
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
+    use solidcraft_geom::prelude::*;
 
     fn rel(a: f64, b: f64) -> f64 {
         (a - b).abs() / b.abs().max(1e-9)

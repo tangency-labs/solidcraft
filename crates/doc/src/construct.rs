@@ -6,10 +6,11 @@
 //! vertex the names of the edges that meet there, so they follow the model when earlier features
 //! change; the picked point is the fallback.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Plane, Vec2, Vec3};
+use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_kernel::{self as kernel, FaceSurface};
 
 use crate::eval::{ModelBody, ModelState};
@@ -459,7 +460,7 @@ fn path_segs(ctx: &Ctx, g: &GeoRef) -> Result<Vec<kernel::PathSeg>> {
         GeoRef::Edge { at, name } => {
             let (b, i, pts) = edge_pick(ctx.st, *at, name)?;
             let procedural =
-                b.body.record().edges.get(i).is_some_and(|e| matches!(e.parameters(), solidcraft_geom::brep::Curve::SurfaceIntersection { .. }));
+                b.body.record().edges.get(i).is_some_and(|e| matches!(e.parameters(), solidcore_record::brep::Curve::SurfaceIntersection { .. }));
             if procedural {
                 return Ok(lines(&pts));
             }

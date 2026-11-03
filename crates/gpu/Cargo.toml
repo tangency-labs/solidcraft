@@ -9,6 +9,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+solidcore-record = { workspace = true }
 robust = "1.2"
 solidcraft-geom = { workspace = true }
 solidcraft-render = { workspace = true }

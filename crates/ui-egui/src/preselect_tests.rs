@@ -3,8 +3,9 @@
 
 use crate::test_support::app_with_script as app_with;
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::{Sel, Session};
 
 #[test]

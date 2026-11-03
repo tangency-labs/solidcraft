@@ -10,7 +10,8 @@
 //! whole circle).
 
 use super::EvalSurface;
-use crate::Vec3;
+use crate::prelude::*;
+use solidcore_record::Vec3;
 
 /// The parameter box of a surface and its periods.
 #[derive(Clone, Copy, Debug, PartialEq)]

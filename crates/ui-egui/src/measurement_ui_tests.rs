@@ -3,6 +3,7 @@ use crate::dialogs::Kind;
 use crate::scenario::Harness;
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
+use solidcraft_engine::geom::prelude::*;
 
 fn result(h: &Harness) -> &Value {
     match &h.app.dialog.as_ref().unwrap().kind {
@@ -33,7 +34,7 @@ fn measure_starts_with_selected_vertices_edges_and_faces() {
                     _ => {
                         let st = crate::open_meshing::session_world(&h.app.session);
                         let mesh = st.body("Box").unwrap().mesh();
-                        let point = solidcraft_engine::geom::Vec3::from(point);
+                        let point = solidcore_record::Vec3::from(point);
                         let index = if kind == "edge" {
                             mesh.edges.iter().position(|e| e.windows(2).any(|w| point.dist_to_segment(w[0], w[1]) < 1e-6)).unwrap()
                         } else {

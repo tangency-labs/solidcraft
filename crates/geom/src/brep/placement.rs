@@ -3,7 +3,7 @@
 //! they are, because a rigid motion keeps distances, angles and handedness. The moved record is
 //! the same B-rep in other coordinates, exactly. Reflections and scalings change parameters or
 //! geometry kinds; they are a kernel operation, not this.
-use super::{Brep, Curve, Frame, Surface};
+use solidcore_record::brep::{Brep, Curve, Frame, Surface};
 
 /// A rotation (rows of an orthonormal matrix with determinant +1) and a translation:
 /// `p ↦ rotation · p + translation`.
@@ -134,21 +134,19 @@ fn compose(a: &[[f64; 4]; 4], b: &[[f64; 4]; 4]) -> [[f64; 4]; 4] {
     out
 }
 
-impl Brep {
-    /// This record moved by `motion` (module docs): topology, parameters and pcurves unchanged.
-    pub fn moved(&self, motion: &Rigid) -> Brep {
-        let mut out = self.clone();
-        for f in &mut out.faces {
-            f.surface = motion.surface(&f.surface);
-            f.nurbs = f.nurbs.as_ref().map(|n| motion.surface(n));
-        }
-        for e in &mut out.edges {
-            e.curve = motion.curve(&e.curve);
-            e.nurbs = e.nurbs.as_ref().map(|n| motion.curve(n));
-        }
-        for v in &mut out.vertices {
-            v.point = motion.point(v.point);
-        }
-        out
+/// This record moved by `motion` (module docs): topology, parameters and pcurves unchanged.
+pub fn moved(brep: &Brep, motion: &Rigid) -> Brep {
+    let mut out = brep.clone();
+    for f in &mut out.faces {
+        f.surface = motion.surface(&f.surface);
+        f.nurbs = f.nurbs.as_ref().map(|n| motion.surface(n));
     }
+    for e in &mut out.edges {
+        e.curve = motion.curve(&e.curve);
+        e.nurbs = e.nurbs.as_ref().map(|n| motion.curve(n));
+    }
+    for v in &mut out.vertices {
+        v.point = motion.point(v.point);
+    }
+    out
 }

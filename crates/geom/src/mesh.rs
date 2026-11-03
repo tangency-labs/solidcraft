@@ -1,6 +1,7 @@
+use crate::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::Vec3;
+use solidcore_record::Vec3;
 
 /// Axis-aligned bounding box.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

@@ -582,8 +582,8 @@ fn the_cylinder_dialog_takes_its_base_point() {
 
 #[test]
 fn a_point_picked_in_the_box_dialog_becomes_its_corner_or_centre() {
+    use solidcore_record::Vec3;
     use solidcraft_engine::Sel;
-    use solidcraft_engine::geom::Vec3;
     let mut h = design("mm");
     // The box made here overlaps Base, which the window would join or cut (#6901): this test is
     // about where it goes, so the window keeps its New Body.
@@ -701,8 +701,8 @@ fn editing_a_sphere_torus_or_cone_shows_its_placement_and_keeps_it() {
 
 #[test]
 fn a_point_picked_in_the_sphere_or_torus_dialog_becomes_its_centre() {
+    use solidcore_record::Vec3;
     use solidcraft_engine::Sel;
-    use solidcraft_engine::geom::Vec3;
     let mut h = design("mm");
     h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Base"})).unwrap();
     h.frames(2);

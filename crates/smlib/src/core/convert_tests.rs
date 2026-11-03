@@ -4,7 +4,7 @@
 
 use std::f64::consts::PI;
 
-use solidcraft_geom::brep as b;
+use solidcore_record::brep as b;
 
 use super::boolean::boolean;
 use super::{Body, from_arrays, make_box, make_cone, make_cylinder, make_sphere, make_torus, to_arrays, volume};
@@ -38,8 +38,8 @@ fn rel(a: f64, b: f64) -> f64 {
 /// The record of solidcore's arrays, validated and its geometry checked.
 fn record(a: &Arrays) -> b::Brep {
     let (rec, _) = native(a).unwrap();
-    rec.validate().unwrap();
-    rec.check_geometry().unwrap();
+    solidcraft_geom::brep::check::validate(&rec).unwrap();
+    solidcraft_geom::brep::geometry::check(&rec).unwrap();
     rec
 }
 

@@ -31,6 +31,7 @@
 use egui::Pos2;
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 
@@ -590,7 +591,8 @@ pub fn paste_into(app: &mut SolveApp, at: Option<Pos2>, new_copy: bool, into: Op
 /// Place the copied design's origin on the pointed solid surface, otherwise its parent's
 /// XY plane. With no viewport point or a parallel/behind-camera ray, use the parent origin.
 fn paste_placement(app: &SolveApp, at: Option<Pos2>) -> (Vec<u64>, [f64; 3]) {
-    use solidcraft_engine::{doc, geom::Vec3};
+    use solidcore_record::Vec3;
+    use solidcraft_engine::doc;
     let path = app.session.active_occurrence_path.clone().unwrap_or_else(|| app.session.doc.first_path(app.session.active_component));
     let frame = app.session.occurrence_placement(&path).map(|p| p.world).unwrap_or(doc::IDENTITY);
     let origin = doc::apply_point(&frame, Vec3::ZERO);

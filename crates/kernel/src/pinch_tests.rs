@@ -3,7 +3,7 @@
 //! along a line give separate shells, and near-tangent numbers from the sketch solver (a
 //! circle 1e-13 mm past the side) behave like exact ones.
 
-use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 
 use crate::*;
 

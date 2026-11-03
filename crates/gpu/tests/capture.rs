@@ -5,8 +5,8 @@
 //! (`SOLIDCRAFT_REQUIRE_GPU=1` makes that a failure).
 
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
-use solidcraft_engine::geom::Vec3;
 use solidcraft_engine::render::{Camera, Rgb, Scene, SceneLine};
 use solidcraft_engine::view::{self, Guides, colors};
 use solidcraft_gpu::GpuError;

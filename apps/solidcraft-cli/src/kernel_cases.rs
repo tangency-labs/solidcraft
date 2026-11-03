@@ -5,6 +5,7 @@
 //! are never compared with each other. See tests/kernel-cases/README.md.
 
 use serde_json::{Value, json};
+use solidcraft_engine::geom::prelude::*;
 
 use crate::oracle::{ABS_FRAC, Checks, REL_TOL, totals, v3};
 use crate::{read_json, recipe};
@@ -62,10 +63,10 @@ const MESH_TOL: f64 = 0.01;
 /// A mesh's edges used by one triangle only (open) and by more than two (over-shared). Vertices
 /// closer than `weld` (mm) are one vertex: a mesh repeats a vertex for each face, and faces
 /// meeting at an edge may place it a rounding error apart.
-fn open_edges(positions: &[solidcraft_engine::geom::Vec3], triangles: &[[u32; 3]], weld: f64) -> (usize, usize) {
+fn open_edges(positions: &[solidcore_record::Vec3], triangles: &[[u32; 3]], weld: f64) -> (usize, usize) {
     use std::collections::HashMap;
     let weld = if weld.is_finite() && weld > 0.0 { weld } else { 1e-4 };
-    let cell = |p: &solidcraft_engine::geom::Vec3| [p.x, p.y, p.z].map(|x| (x / weld).floor() as i64);
+    let cell = |p: &solidcore_record::Vec3| [p.x, p.y, p.z].map(|x| (x / weld).floor() as i64);
     // Union-find over positions, joining each vertex with any within `weld` in the 27 cells round it.
     let mut parent: Vec<usize> = (0..positions.len()).collect();
     fn find(parent: &mut [usize], mut i: usize) -> usize {
@@ -125,7 +126,7 @@ const SEAM_ANGLE_DEG: f64 = 1.0;
 /// the patch's boundary, where its neighbours' own G1 seams end and no surface is G2 to both),
 /// with how many seams and stations clear there were. An error where the seams can't be measured.
 fn curvature_jumps(body: &solidcraft_engine::kernel::Body, near: [f64; 3], within: f64, clear: f64) -> Result<Value, String> {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     let tol =
         solidcraft_engine::kernel::ContinuityTolerances { gap_mm: 1e-3, angle_deg: SEAM_ANGLE_DEG, curvature_per_mm: 0.0, ..Default::default() };
     let report = solidcraft_engine::kernel::seam_diagnostics(body, &[], SEAM_SAMPLES, tol).map_err(|e| e.to_string())?;
@@ -182,7 +183,7 @@ fn continuity_seams(b: &solidcraft_engine::doc::ModelBody, edges: &Value) -> Res
     if let Some(points) = edges.as_array() {
         let picks = points
             .iter()
-            .map(|p| v3(p).map(|[x, y, z]| solidcraft_engine::kernel::EdgePick::Point(solidcraft_engine::geom::Vec3::new(x, y, z))))
+            .map(|p| v3(p).map(|[x, y, z]| solidcraft_engine::kernel::EdgePick::Point(solidcore_record::Vec3::new(x, y, z))))
             .collect::<Option<Vec<_>>>()
             .ok_or("continuity `edges` points must each be [x,y,z]")?;
         let picked = solidcraft_engine::kernel::pick_edges(&b.body, &picks).map_err(|e| e.to_string())?;
@@ -480,8 +481,8 @@ fn output_checks(c: &mut Checks, want: &Value, out: &str, results: &[Value], rel
 /// The word a `surface_types` check names a face's surface by, as the record holds it: an
 /// analytic kind, `ball_patch` (a corner's patch on a sphere), `bspline` (a B-spline or NURBS
 /// surface) or `revolution` (a revolved curve).
-fn surface_word(s: &solidcraft_engine::geom::brep::Surface) -> &'static str {
-    use solidcraft_engine::geom::brep::Surface as S;
+fn surface_word(s: &solidcore_record::brep::Surface) -> &'static str {
+    use solidcore_record::brep::Surface as S;
     match s {
         S::Plane { .. } | S::PlaneThrough { .. } => "plane",
         S::Cylinder { .. } => "cylinder",
@@ -497,8 +498,8 @@ fn surface_word(s: &solidcraft_engine::geom::brep::Surface) -> &'static str {
 /// A B-spline face's two directions as `[degree, spans]` (spans: the distinct knot intervals of
 /// the modelled range), the lower first, so a surface parameterised the other way round reads the
 /// same. `None` for a surface that is not a B-spline.
-fn spline_shape(s: &solidcraft_engine::geom::brep::Surface) -> Option<[[u64; 2]; 2]> {
-    use solidcraft_engine::geom::brep::Surface as S;
+fn spline_shape(s: &solidcore_record::brep::Surface) -> Option<[[u64; 2]; 2]> {
+    use solidcore_record::brep::Surface as S;
     let (u, v, nu, nv) = match s {
         S::Spline { u_knots, v_knots, points } => (u_knots, v_knots, points.len(), points.first().map_or(0, Vec::len)),
         S::RationalSpline { u_knots, v_knots, homogeneous } => (u_knots, v_knots, homogeneous.len(), homogeneous.first().map_or(0, Vec::len)),
@@ -553,7 +554,7 @@ const CONSTRUCT_DIR_TOL: f64 = 1e-6;
 /// parallel to `normal` (either way) and which passes within `tol` of `through`. An axis or plane
 /// is graded as the line or plane it is, never by the origin it happens to keep.
 fn check_construction(s: &solidcraft_engine::Session, want: &Value, tol: f64, c: &mut Checks) {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     use solidcraft_engine::view::{construction_axes, construction_planes, construction_points};
     let Some(named) = want.as_object() else {
         c.push("construction", json!("`construction` must map names to {point} | {axis} | {plane}"), json!("an object"), false);
@@ -1071,7 +1072,7 @@ mod tests {
     /// either order of directions, spans only where given, and every face must be accounted for.
     #[test]
     fn splines_match_degrees_and_spans_in_either_order() {
-        use solidcraft_engine::geom::brep::Surface;
+        use solidcore_record::brep::Surface;
         let knots = |p: usize, spans: usize| -> Vec<f64> {
             let mut k = vec![0.0; p + 1];
             k.extend((1..spans).map(|i| i as f64));

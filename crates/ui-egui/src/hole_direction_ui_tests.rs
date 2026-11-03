@@ -3,8 +3,9 @@
 //! round face), and, at sketch points, into the part unless Flip is on.
 
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::FeatureKind;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::scenario::Harness;
 

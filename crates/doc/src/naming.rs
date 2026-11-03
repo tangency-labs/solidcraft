@@ -15,9 +15,11 @@
 //! are looked up on the input's faces. Those names are marked unverified, and references that
 //! resolve through them say so. Names are worked out lazily, on first request.
 
+use solidcraft_geom::prelude::*;
 use std::sync::{Arc, OnceLock};
 
-use solidcraft_geom::{Aabb3, Mesh, Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::{Aabb3, Mesh};
 
 use crate::history_names::Names;
 use crate::lineage::Lineage;
@@ -1446,7 +1448,7 @@ mod tests {
         let ss = crate::SolvedSketch {
             feature: 1,
             name: "S".into(),
-            plane: solidcraft_geom::Plane::XY,
+            plane: solidcore_record::Plane::XY,
             sketch,
             report,
             profiles,
