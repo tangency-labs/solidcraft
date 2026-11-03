@@ -211,7 +211,8 @@ fn edge_polygon_takes_a_typed_side_length_and_side_count() {
     enter(&mut h);
     assert_eq!(h.app.session.undo.len(), undo + 1);
     assert!(constraints(&h).iter().any(|c| matches!(c, ConstraintKind::Length { value, .. } if (*value - 12.0).abs() < 1e-7)));
-    let state = h.app.session.world_state();
+    // The design's own state: this sketch is in no component, so it matches the world view.
+    let state = h.app.session.model.state();
     let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     let sides: Vec<f64> = sketch
         .curves
