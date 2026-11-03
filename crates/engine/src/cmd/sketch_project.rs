@@ -608,6 +608,7 @@ fn add_link_unless_present(
             return Ok(None);
         }
         let link = sk.add_link_with_wires(kind, r.source, &r.geom, &r.wires)?;
+        sk.set_link_wire_curves(&link, &r.exact)?;
         if let Some(l) = sk.links.iter_mut().find(|l| l.id == link) {
             l.face_name = new.face_name;
             l.edge_name = new.edge_name;

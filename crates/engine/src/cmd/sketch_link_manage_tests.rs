@@ -495,10 +495,12 @@ fn rounds(s: &Session, sketch: u64, link: &str) -> Vec<(String, Vec2)> {
 fn half_a_hole_breaks_the_rest_off_and_the_whole_hole_stays_deleted_through_a_resize() {
     let (mut s, _, sketch, face) = parametric_plate(true);
     let hole: Vec<String> = rounds(&s, sketch, &face).into_iter().map(|(id, _)| id).collect();
-    assert_eq!(hole.len(), 2, "the hole comes as two halves, one per piece of its wall");
-    // One half: its wall's two pieces are told apart only by number, so the rest is broken off.
+    assert_eq!(hole.len(), 2, "the hole comes as two halves");
+    // One half: no source edge gives just that half (a one-edge wall gives both, a split wall's
+    // pieces are told apart only by number), so the rest is broken off.
     let r = run(&mut s, "sketch.delete", json!({"entities":[hole[0]]}));
-    assert!(broken_because(&r, &face).contains("told apart only by number"), "{r}");
+    let why = broken_because(&r, &face);
+    assert!(why.contains("more curves than the ones deleted") || why.contains("told apart only by number"), "{r}");
     assert!(s.doc.sketch(sketch).unwrap().link(&face).is_none());
     run(&mut s, "edit.undo", json!({}));
     // The whole hole: kept out by its wall's family, however far the plate grows.

@@ -1239,7 +1239,7 @@ pub fn resolve_placed(
 ) -> Result<(Resolved, Mat)> {
     let (source, relative) = placed_source(doc, placed, source, None, placement)?;
     let mut r = resolve(doc, vals, placed.raw, &plane_in_source(&relative, plane)?, kind, &source)?;
-    map_wires(&mut r.wires, &relative);
+    map_wires(&mut r, &relative);
     Ok((r, relative))
 }
 
@@ -1382,12 +1382,19 @@ pub fn face_link_edges(
     Ok(out)
 }
 
-fn map_wires(wires: &mut [Vec<Vec3>], m: &Mat) {
+/// Carry a resolution's 3D wires, and their exact curves, by the rigid motion `m`. A curve the
+/// motion can't carry (an intersection curve) leaves its wire known by its points alone.
+fn map_wires(r: &mut Resolved, m: &Mat) {
     if crate::is_identity(m) {
         return;
     }
-    for p in wires.iter_mut().flatten() {
+    for p in r.wires.iter_mut().flatten() {
         *p = crate::apply_point(m, *p);
+    }
+    let point = |p: Vec3| crate::apply_point(m, p);
+    let vector = |v: Vec3| crate::apply_vector(m, v);
+    for curves in &mut r.exact {
+        *curves = curves.iter().map(|c| c.mapped(&point, &vector)).collect::<Option<Vec<_>>>().unwrap_or_default();
     }
 }
 
@@ -1494,7 +1501,7 @@ pub fn refresh_sketch_links(
         match resolved {
             Ok(mut r) => {
                 if let Some(relative) = &relative {
-                    map_wires(&mut r.wires, relative);
+                    map_wires(&mut r, relative);
                 }
                 // An edge link saved without a name takes the name of the edge it was found
                 // on. A sketch that is edited stores it; evaluation leaves the design as it is.
