@@ -4820,8 +4820,13 @@ fn centered_extrude(
     };
     // Fit cap surfaces in their own coordinates. Fitting a distant world-space
     // wire can tilt an otherwise exact planar cap through numeric cancellation.
-    // A side drawn in collinear pieces is one face (#1788).
-    let bodies = kernel::extrude_whole_sides(&Plane::XY, std::slice::from_ref(region), start, end)?;
+    // A side drawn in collinear pieces is one face (#1788), and so is a side along one ellipse
+    // or spline, whatever pieces the profile holds it in.
+    let curves = sketch.map(crate::config::ExactSketchCurves::new);
+    let one_curve = |s: &solidcore_record::Seg2, t: &solidcore_record::Seg2| {
+        curves.as_ref().is_some_and(|c| c.find_free_form(s).is_some_and(|id| c.find_free_form(t).is_some_and(|other| other == id)))
+    };
+    let bodies = kernel::extrude_whole_sides(&Plane::XY, std::slice::from_ref(region), start, end, &one_curve)?;
     if *plane == Plane::XY {
         return Ok(bodies.into_iter().map(|body| roles.tool(body, None)).collect());
     }
