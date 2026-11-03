@@ -341,6 +341,52 @@ fn polyline_and_trimmed_curve() {
     assert_eq!(*preference, TrimPreference::Unspecified);
 }
 
+/// A trimmed curve's parameters are its basis's: through an offset, a trimmed or a surface
+/// curve of a conic they are still angles, so a file in degrees gives radians (CodeRabbit on
+/// #2592). SolidCraft's reader looked at the direct basis only and kept 90 unscaled.
+#[test]
+fn trims_on_a_curve_over_a_conic_are_angles() {
+    let deg = Units { len: 1.0, ang: DEG };
+    let trims = |data: &str, id: u64| {
+        let t = curve(&format!("#10=CIRCLE('',#4,10.);{data}"), id, deg);
+        let Curve::Trimmed { trim_1, trim_2, .. } = &*t else {
+            panic!("{t:?}")
+        };
+        (trim_1.clone(), trim_2.clone())
+    };
+    let expected = (
+        vec![Trim::Parameter(0.0)],
+        vec![Trim::Parameter(90.0 * DEG)],
+    );
+    // An offset of the circle.
+    assert_eq!(
+        trims(
+            "#11=OFFSET_CURVE_3D('',#10,1.,.F.,#2);\
+             #12=TRIMMED_CURVE('',#11,(PARAMETER_VALUE(0.)),(PARAMETER_VALUE(90.)),.T.,.PARAMETER.);",
+            12
+        ),
+        expected
+    );
+    // A trimmed curve of a trimmed circle.
+    assert_eq!(
+        trims(
+            "#11=TRIMMED_CURVE('',#10,(PARAMETER_VALUE(0.)),(PARAMETER_VALUE(180.)),.T.,.PARAMETER.);\
+             #12=TRIMMED_CURVE('',#11,(PARAMETER_VALUE(0.)),(PARAMETER_VALUE(90.)),.T.,.PARAMETER.);",
+            12
+        ),
+        expected
+    );
+    // A surface curve whose 3D curve is the circle.
+    assert_eq!(
+        trims(
+            "#11=PLANE('',#4);#13=SURFACE_CURVE('',#10,(#11),.CURVE_3D.);\
+             #12=TRIMMED_CURVE('',#13,(PARAMETER_VALUE(0.)),(PARAMETER_VALUE(90.)),.T.,.PARAMETER.);",
+            12
+        ),
+        expected
+    );
+}
+
 #[test]
 fn offset_curve() {
     let c = curve(
