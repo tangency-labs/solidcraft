@@ -6,10 +6,9 @@
 //! - One record covers the whole drawing, or each sheet on its own (`per_sheet`), numbered apart.
 //! - A row holds what people type: revision, description, designer, checker and date. Adding a row
 //!   fills in only the next revision; nothing here fills in a date, a checker or an approval.
-//! - Numbers run from 1, or 0. Letters run A to Y without I, O, Q, S, X and Z, then AA, AB…
-//!   ([`LETTERS`]). The next revision follows the highest one in its scope among the rows and the
-//!   issued history, so an issued revision is never given out again. A revision typed by hand is
-//!   kept as typed; in letters one with a skipped letter is accepted with [`SkippedLetter`].
+//! - Revisions are numbered, never lettered: from 1, or 0. The next revision follows the highest
+//!   number in its scope among the rows and the issued history, so an issued revision is never given
+//!   out again. A revision typed by hand is kept as typed.
 //! - Hiding and deleting rows changes what the table shows. [`RevisionRecord::issue`] appends a
 //!   copy of a row to the issued history, once for each row and under the row's id, which nothing
 //!   here removes or changes. Release, approval and frozen snapshots build on it later.
@@ -33,10 +32,6 @@ use crate::table::{self, Column, Heading, RowKind, Table};
 pub const MAX_ROWS: usize = 1000;
 /// The most entries the issued history may hold, and the most tags.
 pub const MAX_ISSUED: usize = 10_000;
-/// The letters revisions are lettered with: A to Z without I, O, Q, S, X and Z, which read as
-/// numbers or each other.
-pub const LETTERS: &str = "ABCDEFGHJKLMNPRTUVWY";
-const SKIPPED: &str = "IOQSXZ";
 const TAG_SIZES_MM: std::ops::RangeInclusive<f64> = 1.0..=50.0;
 const DEFAULT_TAG_MM: f64 = 5.0;
 
@@ -57,19 +52,16 @@ pub struct RevisionRecord {
     tags: Vec<Tag>,
 }
 
-/// How new revisions are named.
+/// How new revisions are numbered: 1, 2, 3… from `start`, 0 or 1.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum Numbering {
-    /// 1, 2, 3… from `start`, 0 or 1.
-    Numbers { start: u8 },
-    /// A, B, C… ([`LETTERS`]).
-    Letters,
+#[serde(deny_unknown_fields)]
+pub struct Numbering {
+    pub start: u8,
 }
 
 impl Default for Numbering {
     fn default() -> Self {
-        Numbering::Numbers { start: 1 }
+        Numbering { start: 1 }
     }
 }
 
@@ -171,10 +163,6 @@ pub enum TagText {
     Lost(String),
 }
 
-/// A revision typed in letters with a letter the lettering skips.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SkippedLetter(pub char);
-
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("revision record: {0}")]
 pub struct Invalid(pub &'static str);
@@ -187,36 +175,6 @@ fn require(condition: bool, message: &'static str) -> Result<()> {
 
 fn cell_rule(e: cell::Invalid) -> Invalid {
     Invalid(e.0)
-}
-
-/// Letter label `n` from 0: A..Y, then AA, AB… (bijective base 20 over [`LETTERS`]).
-fn letters(mut n: u64) -> String {
-    let digits = LETTERS.as_bytes();
-    let base = digits.len() as u64;
-    let mut out = Vec::new();
-    loop {
-        out.push(digits.get((n % base) as usize).copied().unwrap_or(b'A'));
-        n /= base;
-        if n == 0 {
-            break;
-        }
-        n -= 1;
-    }
-    out.reverse();
-    String::from_utf8(out).unwrap_or_default()
-}
-
-/// The inverse of [`letters`], in either case (a typed "c" is C): none for a label that isn't
-/// lettering, or that counts past `u64`.
-fn letters_index(label: &str) -> Option<u64> {
-    let base = LETTERS.len() as u64;
-    label.bytes().try_fold(None, |n: Option<u64>, b| {
-        let d = LETTERS.bytes().position(|l| l == b.to_ascii_uppercase())? as u64;
-        Some(Some(match n {
-            None => d,
-            Some(n) => n.checked_add(1)?.checked_mul(base)?.checked_add(d)?,
-        }))
-    })?
 }
 
 impl RevisionRow {
@@ -270,7 +228,7 @@ impl RevisionRecord {
         require(self.rows.len() <= MAX_ROWS, "a record has at most 1000 rows")?;
         require(self.issued.len() <= MAX_ISSUED, "a record's issued history holds at most 10,000 entries")?;
         require(self.tags.len() <= MAX_ISSUED, "a record has at most 10,000 tags")?;
-        require(matches!(self.numbering, Numbering::Letters | Numbering::Numbers { start: 0 | 1 }), "numbers start at 0 or 1")?;
+        require(matches!(self.numbering.start, 0 | 1), "numbers start at 0 or 1")?;
         let mut ids = HashSet::new();
         for row in &self.rows {
             require(ids.insert(row.id), "each row and tag has its own id")?;
@@ -320,13 +278,8 @@ impl RevisionRecord {
     /// None when nothing follows the highest (past `u64`), so none is ever given out twice.
     pub fn next_revision(&self, sheet: Option<u64>) -> Option<String> {
         let labels = self.rows.iter().chain(&self.issued).filter(|r| r.sheet == sheet).map(|r| r.revision.as_str());
-        match self.numbering {
-            Numbering::Numbers { start } => {
-                let highest = labels.filter_map(|l| l.parse::<u64>().ok()).max();
-                highest.map_or(Some(u64::from(start)), |n| n.checked_add(1)).map(|n| n.to_string())
-            }
-            Numbering::Letters => labels.filter_map(letters_index).max().map_or(Some(0), |n| n.checked_add(1)).map(letters),
-        }
+        let highest = labels.filter_map(|l| l.parse::<u64>().ok()).max();
+        highest.map_or(Some(u64::from(self.numbering.start)), |n| n.checked_add(1)).map(|n| n.to_string())
     }
 
     /// Adds row `id` for `sheet` (none unless the record is kept per sheet) with the next revision
@@ -340,18 +293,15 @@ impl RevisionRecord {
         Ok(())
     }
 
-    /// Sets one of a row's texts as typed, by the cell text rules (a revision is one line). In
-    /// letters, a revision with a skipped letter is kept and warned about.
-    pub fn set(&mut self, id: u64, field: Field, text: &str) -> Result<Option<SkippedLetter>> {
+    /// Sets one of a row's texts as typed, by the cell text rules (a revision is one line).
+    pub fn set(&mut self, id: u64, field: Field, text: &str) -> Result<()> {
         if field == Field::Revision {
             check_label(text).map_err(cell_rule)?;
         } else {
             check_text([text]).map_err(cell_rule)?;
         }
-        let letters = self.numbering == Numbering::Letters;
         *self.row_mut(id)?.field_mut(field) = text.to_string();
-        let skipped = text.chars().find(|c| SKIPPED.contains(c.to_ascii_uppercase()));
-        Ok(skipped.filter(|_| letters && field == Field::Revision).map(SkippedLetter))
+        Ok(())
     }
 
     /// Hides a row from the table, or shows it again.
