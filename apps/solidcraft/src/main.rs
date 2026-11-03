@@ -784,16 +784,10 @@ fn backend_preference() -> Option<String> {
     graphics().and_then(|v| v.get("backend").and_then(serde_json::Value::as_str).map(str::to_string))
 }
 
-/// The viewport scene's sample count: the app's anti-aliasing (the window's pass is 1x), clamped
-/// by the backend's policy (OpenGL renders 1x, see `effective_msaa_samples`). A count the device
-/// cannot render with falls back to the supported default.
+/// The viewport scene's sample count, by the rule the web app shares
+/// (`solidcraft_ui_egui::gpu::scene_samples`).
 fn scene_samples(backend: eframe::wgpu::Backend, samples: u32, supported: &[u32]) -> u32 {
-    let requested = eframe::egui_wgpu::effective_msaa_samples(backend, samples.max(1));
-    if requested <= 1 || supported.is_empty() || supported.contains(&requested) {
-        requested
-    } else {
-        supported.iter().copied().filter(|&n| n <= solidcraft_ui_egui::prefs::Prefs::default().msaa).max().unwrap_or(1)
-    }
+    solidcraft_ui_egui::gpu::scene_samples(backend, samples, supported)
 }
 
 /// Keep the default until the installed renderer's startup check proves a fallback is needed.
