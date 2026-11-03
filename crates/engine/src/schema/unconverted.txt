@@ -177,9 +177,6 @@ render.settings.apply
 render.settings.capture_hdr
 render.settings.get
 render.settings.set
-render.shot.duplicate
-render.shot.remove
-render.shot.rename
 render.start
 render.status
 select.clear

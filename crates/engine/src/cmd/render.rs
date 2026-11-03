@@ -81,11 +81,17 @@ CommandSpec::new("render.preset.apply", "Apply Native Studio", studio_presets::a
     .params("Same reviewed input as render.preset.resolve, expected_revision required, replace_lighting_and_environment:true and replace_stage:true when an existing stage would change. Re-resolves the complete candidate and publishes one undo or no mutation; camera, optical bindings, geometry and engineering materials are preserved."),
 CommandSpec::new("render.quality.prepare", "Review Fixed Sampling Budget", studio_presets::quality).icon("settings").noundo().doc_only()
     .params("id: Q-*; variant:fixed_samples_png; acknowledge_omissions:true. Read-only bounded GPU still-budget projection, not full adaptive/convergence/linear-master quality acceptance. Returns dimensions/samples/depth/seed/denoise and explicit omissions. Never switches executor or mutates a shot."),
-CommandSpec::new("render.shot.duplicate", "Duplicate Render Shot", shots::duplicate).icon("copy").doc_only()
+CommandSpec::new("render.shot.duplicate", "Duplicate Render Shot", crate::checked!("render.shot.duplicate", shots::duplicate)).icon("copy").doc_only()
+    .contract(&shots::CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_shots::ShotChange>)
     .params("name, new_name, expected_revision:u64. Copies exact saved setup and resource references in one undo. Existing destinations refuse; captured jobs and camera navigation are unchanged."),
-CommandSpec::new("render.shot.rename", "Rename Render Shot", shots::rename).icon("settings").doc_only()
+CommandSpec::new("render.shot.rename", "Rename Render Shot", crate::checked!("render.shot.rename", shots::rename)).icon("settings").doc_only()
+    .contract(&shots::CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_shots::ShotChange>)
     .params("name, new_name, expected_revision:u64. Renames exact saved setup in one undo; an existing destination or stale review refuses."),
-CommandSpec::new("render.shot.remove", "Remove Render Shot", shots::remove).icon("delete").doc_only()
+CommandSpec::new("render.shot.remove", "Remove Render Shot", crate::checked!("render.shot.remove", shots::remove)).icon("delete").doc_only()
+    .contract(&shots::CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_shots::ShotChange>)
     .params("name, expected_revision:u64. Removes only that saved setup in one undo; retains resources, geometry and captured results."),
 CommandSpec::new("render.library.preview", "Inspect Original Surface Map", library::preview).icon("appearance").noundo().doc_only()
     .params("id: SURF-*. Returns bounded hash-verified original base-color PNG bytes and source-map fidelity label, not a rendered material thumbnail. No external paths, rendering or document edits."),
