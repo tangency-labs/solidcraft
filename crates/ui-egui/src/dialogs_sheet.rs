@@ -1110,8 +1110,8 @@ fn bend_colors() -> (Color32, Color32) {
     (t.bend_up, t.bend_down)
 }
 
-/// The flat pattern view: outline, cut-outs, perforations and bend lines (up and down in
-/// their colours), fitted over the viewport. True when the dialog is a flat pattern.
+/// The flat pattern view: outline, cut-outs, perforations, bend lines (up and down in their
+/// colours) and rolls' lines, fitted over the viewport. True when the dialog is a flat pattern.
 pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dialog) -> bool {
     let Kind::Sheet(Sm::FlatPattern { data, .. }) = &d.kind else { return false };
     let t = Tokens::get();
@@ -1224,6 +1224,14 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
         let col = if b["direction"] == "up" { up_col } else { down_col };
         painter.extend(egui::Shape::dashed_line(&[to(a), to(e)], Stroke::new(1.6, col), 8.0, 5.0));
     }
+    // A roll's lines (#6748): where it starts and ends along its rulings, dotted, and halfway
+    // between, dashed.
+    let rolls: Vec<&serde_json::Value> = v["roll_lines"].as_array().into_iter().flatten().collect();
+    for l in &rolls {
+        let (Some(a), Some(e)) = (read(&l["start"]), read(&l["end"])) else { continue };
+        let (dash, gap) = if l["line"] == "middle" { (8.0, 5.0) } else { (2.0, 3.0) };
+        painter.extend(egui::Shape::dashed_line(&[to(a), to(e)], Stroke::new(1.6, t.text), dash, gap));
+    }
     // Legend.
     let mut y = rect.top() + 14.0;
     painter.text(
@@ -1237,6 +1245,22 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
         y += 20.0;
         painter.line_segment([pos2(rect.left() + 14.0, y + 7.0), pos2(rect.left() + 38.0, y + 7.0)], Stroke::new(2.0, col));
         painter.text(pos2(rect.left() + 44.0, y), Align2::LEFT_TOP, label, FontId::proportional(crate::theme::Tokens::get().font_body), t.text_dim);
+    }
+    if !rolls.is_empty() {
+        y += 20.0;
+        painter.extend(egui::Shape::dashed_line(
+            &[pos2(rect.left() + 14.0, y + 7.0), pos2(rect.left() + 38.0, y + 7.0)],
+            Stroke::new(1.6, t.text),
+            2.0,
+            3.0,
+        ));
+        painter.text(
+            pos2(rect.left() + 44.0, y),
+            Align2::LEFT_TOP,
+            "Roll start and end (middle dashed)",
+            FontId::proportional(crate::theme::Tokens::get().font_body),
+            t.text_dim,
+        );
     }
     if !pockets.is_empty() {
         y += 20.0;
