@@ -16,6 +16,11 @@
 //!   it takes the disc's cone face over the bar's and the two are one face; the vertex
 //!   V = (40, 10 tan 5, 10) where the front top edge meets the concave arc has three edges.
 //!
+//! Two more cases of 3ae7bfa fail today and are held as known-failing tests named for their
+//! defect (#2497): the oblique wall that should stay ruled is refused, and a seam cut at a
+//! span end of the cone does not keep its exact pcurve. Each is turned round when its defect
+//! is fixed.
+//!
 //! Volumes in closed form (the capi test's): each wall leans in by t tan 5 at height t, so
 //! the bar's section at height t is the rectangle x in [d, 40], y in [d, 16 - d] and the half
 //! disc R 8 - d, the disc's the disc R 8 - d (d = t tan 5):
@@ -43,11 +48,12 @@ use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::query::api_queries::{get_edges, get_faces};
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::sweep::api_brep::{
-    create_taper_extrude_with_corner, OffsetCornerType, TaperExtrude,
+    create_taper_extrude_with_corner, OffsetCornerType, TaperCornerRefusal, TaperExtrude,
 };
 use solidcore::topology::brep::p1::vertices;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
-use solidcore::topology::{face, vertex};
+use solidcore::topology::edgeuse::p1::{faceuse_edgeuses, uv_trim_curve};
+use solidcore::topology::{edge, face, vertex};
 use solidcore::{Brep, Kernel};
 
 const PI: f64 = core::f64::consts::PI;
@@ -63,19 +69,29 @@ fn line(a: Point3, b: Point3) -> Curve {
 /// The circle about `c` of radius `r` from angle `from` (the frame's x axis) over
 /// `degrees`, as the capi's `arc` builds it (`SmCircle::CreateCanonical`).
 fn arc(k: &Kernel, c: Point3, r: f64, x: Vec3, degrees: f64) -> Curve {
-    let frame = Axis2Placement::new(c, x, Vec3::Z.cross(x));
+    arc_in(k, c, r, x, Vec3::Z.cross(x), degrees)
+}
+
+/// The circle about `c` of radius `r` in the plane of `x` and `y`, from `x` towards `y`
+/// over `degrees`.
+fn arc_in(k: &Kernel, c: Point3, r: f64, x: Vec3, y: Vec3, degrees: f64) -> Curve {
+    let frame = Axis2Placement::new(c, x, y);
     let ivl = Extent1d::from_min_max(0.0, degrees);
     Curve::from(Ellipse::create_canonical_circle(k, &frame, r, Some(&ivl), None).unwrap())
 }
 
 fn taper(k: &mut Kernel, cs: &[Curve]) -> Brep {
-    let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
-    match create_taper_extrude_with_corner(k, &refs, 10.0, 5.0, 3, OffsetCornerType::CurveExtension)
-        .unwrap()
-    {
+    match draft(k, cs, 5.0) {
         TaperExtrude::Solid(b) => b,
         TaperExtrude::Refused(r) => panic!("draft refused: {r:?}"),
     }
+}
+
+/// The profile `cs` drafted `deg` degrees inward over 10 with `CurveExtension` corners.
+fn draft(k: &mut Kernel, cs: &[Curve], deg: f64) -> TaperExtrude {
+    let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
+    create_taper_extrude_with_corner(k, &refs, 10.0, deg, 3, OffsetCornerType::CurveExtension)
+        .unwrap()
 }
 
 fn bar(k: &mut Kernel) -> Brep {
@@ -271,4 +287,112 @@ fn without_the_cover_the_cone_walls_stay_two_faces() {
     assert_eq!(cone_faces(&k, &b).len(), 2);
     assert_eq!(edges_at(&b, v_point()), Some(4));
     check(&mut k, &mut b);
+}
+
+/// Known failing (#2497): a wall whose height is not along its arc's axis is refused
+/// instead of staying the ruled B-spline.
+///
+/// The profile is a half disc R 8 about the origin in the plane tilted 5 degrees about x
+/// (e1 = x, e2 = (0, cos 5, sin 5)), its chord along e2, so every offset stays in that
+/// plane. `taper.rs` snaps the computed normal to Z (|n.z| > 0.98) while the arc's axis
+/// stays the plane's normal, so `draft_cone` finds no cone and the wall is ruled. The
+/// draft is refused at the arc's end, 8 e2, because the seam there does not lie on both
+/// walls (`taper_walls.rs`, "the seam must lie on both walls").
+///
+/// Right would be the solid with a ruled B-spline wall (no cone face) of volume
+/// `10 cos 5 int_0^1 A(f) df`, `A = rho^2 acos(e / rho) - e sqrt(rho^2 - e^2)`,
+/// `rho = 8 - e`, `e = 10 f tan 5 cos 5`: 832.00089957862 (Simpson's rule). When the draft
+/// builds, this test becomes that check.
+#[test]
+fn an_oblique_drafted_wall_is_refused_today() {
+    let a = 5.0_f64.to_radians();
+    let e2 = Vec3::new(0.0, a.cos(), a.sin());
+    let o = Point3::new(0.0, 0.0, 0.0);
+    let mut k = Kernel::default();
+    let cs = [
+        arc_in(&k, o, 8.0, -e2, Vec3::X, 180.0),
+        line(o + 8.0 * e2, o - 8.0 * e2),
+    ];
+    let TaperExtrude::Refused(r) = draft(&mut k, &cs, 5.0) else {
+        panic!("the oblique draft builds now: turn this test into the volume check");
+    };
+    assert_eq!(r.reason, TaperCornerRefusal::NotExact);
+    assert!(
+        r.corner.distance(o + 8.0 * e2) < 1e-9,
+        "refused at {:?}",
+        r.corner
+    );
+}
+
+/// The largest distance, over 65 points of each edge, between an edge and its stored
+/// pcurve on a cone face lifted onto the cone.
+fn cone_pcurve_gap(k: &Kernel, b: &Brep) -> f64 {
+    let mut worst: f64 = 0.0;
+    for f in get_faces(b).unwrap() {
+        let s = face::surface(b, f).unwrap().unwrap();
+        if !matches!(s.kind(), SurfaceKind::Cone(_)) {
+            continue;
+        }
+        let fu = face::p2::upward_faceuse(b, f).unwrap().unwrap();
+        for eu in faceuse_edgeuses(b, fu, false, None).unwrap() {
+            let pc = uv_trim_curve(b, eu).unwrap().0.cloned().unwrap();
+            let e = b.edgeuse(eu).unwrap().edge.unwrap();
+            let c = edge::curve(b, e).unwrap().unwrap();
+            let ivl = edge::interval(b, e).unwrap();
+            for i in 0..=64 {
+                let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 64.0;
+                let uv = pc.evaluate_point(k, t).unwrap();
+                let on = s.evaluate_point(k, Point2::new(uv.x, uv.y)).unwrap();
+                worst = worst.max(on.distance(c.evaluate_point(k, t).unwrap()));
+            }
+        }
+    }
+    worst
+}
+
+/// A 240 degree segment of R 8 about the origin, from -90 degrees counterclockwise to 150,
+/// closed by its chord, drafted `deg` with `keep_exact_pcurves`.
+fn segment_240(deg: f64) -> (Kernel, Brep) {
+    let mut k = Kernel::default();
+    k.fixes.keep_exact_pcurves = true;
+    let o = Point3::new(0.0, 0.0, 0.0);
+    let x = Vec3::new(0.0, -1.0, 0.0);
+    let at = |deg: f64| {
+        let t = deg.to_radians();
+        Point3::new(8.0 * t.cos(), 8.0 * t.sin(), 0.0)
+    };
+    let cs = [arc(&k, o, 8.0, x, 240.0), line(at(150.0), at(-90.0))];
+    let TaperExtrude::Solid(b) = draft(&mut k, &cs, deg) else {
+        panic!("the {deg} degree draft is refused");
+    };
+    (k, b)
+}
+
+/// Known failing (#2497): a seam that crosses a span end of the drafted cone does not keep
+/// its exact pcurve in the B-rep.
+///
+/// Drafted 30 degrees, the 240 degree segment's cone has 3 spans with ends near -11.4 and
+/// 71.4 degrees, and its corners move to -7.2 and 67.2 degrees, so both seams cross a span
+/// end. The solid builds (4 faces, edges on the cone to 5e-15), but the seams' pcurves
+/// stored on the cone face are cubic re-projections (knots every 1/16), 3.17e-6 off their
+/// edges, not the quartics cut at the span end that the construction built. The same
+/// profile drafted 20 degrees, where no seam crosses, keeps them to 4.5e-14.
+///
+/// Right would be the cut pcurves kept as built, on their edges to about 1e-13 as at 20
+/// degrees. When they are, this test becomes that check.
+#[test]
+fn a_seam_cut_at_a_span_end_loses_its_exact_pcurve_today() {
+    let (mut k, mut b) = segment_240(20.0);
+    let kept = cone_pcurve_gap(&k, &b);
+    assert!(kept < 1e-12, "no crossing: pcurves off by {kept:e}");
+    check(&mut k, &mut b);
+
+    let (mut k, mut b) = segment_240(30.0);
+    assert_eq!(counts(&b), (4, 6, 4));
+    check(&mut k, &mut b);
+    let lost = cone_pcurve_gap(&k, &b);
+    assert!(
+        lost > 1e-6,
+        "the cut pcurves are kept now (off by {lost:e}): turn this test into that check"
+    );
 }
