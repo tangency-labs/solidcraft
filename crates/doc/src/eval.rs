@@ -6134,7 +6134,7 @@ fn pattern_reach(
     let FeatureKind::Pattern { features, bodies, .. } = &f.kind else {
         return Err(DocError::Invalid("not a pattern".into()));
     };
-    let tst = state_in_frame(doc, st, component);
+    let tst = state_in_frame(doc, st, component)?;
     let centre = seed_centre(doc, vals, &tst, features, bodies)
         .ok_or_else(|| DocError::Invalid("To Object: what the pattern copies has no geometry to measure from".into()))?;
     let plane = Plane::from_normal(centre, d).ok_or_else(|| DocError::Invalid("pattern direction".into()))?;
