@@ -37,6 +37,7 @@
 //! | [`CurveBasedFs::is_kind_of`], [`CurveBasedFs::type_code`], [`CurveBasedFs::type_string`] | `IsKindOf`, `GetType`, `GetTypeString` |
 //! | [`VariableRadiusFs`]                                     | `SmVariableRadiusFS` (members; `Drop` is the destructor) |
 //! | [`VariableRadiusFs::fillet_law`], [`VariableRadiusFs::fillet_law_orientation`], [`VariableRadiusFs::fillet_law_interval`], [`VariableRadiusFs::set_fillet_law_interval`] | `GetFilletLaw`, `GetFilletLawOrientation`, `GetFilletLawInterval`, `SetFilletLawInterval` |
+//! | [`FilletLaw::corner_parameters`] | `SmFilletLaw::GetCornerParameters`, `SmBSplineFilletLaw::GetCornerParameters` (the fork's 6eecf04) |
 //! | [`VariableRadiusFs::offset_radii_can_change`]            | `SmVariableRadiusFS::OffsetRadiiCanChange`            |
 //! | [`VariableRadiusFs::set_extension_flags`]                | `SmVariableRadiusFS::SetExtensionFlags`               |
 //! | [`VariableRadiusFs::setup_offset_values`]                | `SmVariableRadiusFS::SetupOffsetValues`               |
@@ -1955,7 +1956,67 @@ impl FilletLaw {
     pub fn set_extended_edge_curve(&mut self, curve: Option<BSplineCurve>) {
         self.extended = curve;
     }
+
+    /// `GetCornerParameters` (the fork's 6eecf04, not upstream): the parameters inside the
+    /// fillet edge's interval `curve_interval` where the radius has a corner, ascending.
+    /// For a B-spline law (`SmBSplineFilletLaw`), an interior knot of the law curve inside
+    /// the edge map where its slope from the left and from the right differ, taken to the
+    /// edge by the inverse of the map `Evaluate` applies (running from the interval's end
+    /// when `reverse`); none for the other laws (the base's default). The fillet's centre
+    /// curve and rails turn at such a parameter.
+    ///
+    /// # Errors
+    ///
+    /// Those of the law curve's `GetKnots` and `Evaluate`.
+    pub fn corner_parameters(&self, curve_interval: &Extent1d, reverse: bool) -> Result<Vec<f64>> {
+        let FilletLawKind::BSpline { law_curve, .. } = &self.kind else {
+            return Ok(Vec::new());
+        };
+        let map_length = self.edge_map.length();
+        if curve_interval.length() <= 0.0 || map_length <= 0.0 {
+            return Ok(Vec::new());
+        }
+        let (knots, _) = law_curve.knots(None)?;
+        let ivl = law_curve.natural_interval();
+        let mut corners = Vec::new();
+        let mut previous: Option<f64> = None;
+        for &law_t in &knots {
+            let repeated = previous == Some(law_t);
+            previous = Some(law_t);
+            if repeated
+                || law_t <= ivl.min()
+                || law_t >= ivl.max()
+                || law_t <= self.edge_map.min()
+                || law_t >= self.edge_map.max()
+            {
+                continue;
+            }
+            // slopes in the lower and the upper interval at the knot
+            let left = law_curve.evaluate(law_t, 1, false, false)?;
+            let right = law_curve.evaluate(law_t, 1, true, false)?;
+            let (Some(left), Some(right)) = (left.get(1), right.get(1)) else {
+                return Err(SolidError::sm_err(OP_CORNERS));
+            };
+            let (d_left, d_right) = (left.x, right.x);
+            if (d_left - d_right).abs() <= EFF_ZERO * (1.0 + d_left.abs() + d_right.abs()) {
+                continue;
+            }
+            // the edge parameter of the knot (the inverse of the map in Evaluate)
+            let t = (law_t - self.edge_map.min()) / map_length;
+            corners.push(if reverse {
+                curve_interval.max() - t * curve_interval.length()
+            } else {
+                curve_interval.min() + t * curve_interval.length()
+            });
+        }
+        if reverse {
+            corners.reverse();
+        }
+        Ok(corners)
+    }
 }
+
+const OP_CORNERS: &str = "blend::fillet_standard_solver::p1::FilletLaw::corner_parameters";
 
 // ---- SmVariableRadiusFS -------------------------------------------------------------------
 
