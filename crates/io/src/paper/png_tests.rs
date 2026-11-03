@@ -244,8 +244,8 @@ fn bands_change_nothing_and_the_bytes_repeat() {
     }
 }
 
-/// Out of range resolutions, a curve the walk can't take yet, text (B2b) and more points than the
-/// cap are refused, never drawn some other way.
+/// Out of range resolutions, text (B2b) and more points than the cap are refused, never drawn some
+/// other way. An ellipse, which the walk once refused, draws.
 #[test]
 fn what_cannot_be_drawn_is_refused() {
     let prepared_small = small();
@@ -266,8 +266,8 @@ fn what_cannot_be_drawn_is_refused() {
             pattern: None,
         }],
     );
-    let e = paper_png(&ellipse.prepare().unwrap(), PngOptions::default(), &NoPictures, Vec::new()).unwrap_err();
-    assert!(e.to_string().contains("not supported yet"), "{e}");
+    // An ellipse draws, as cubics (A3b).
+    assert!(paper_png(&ellipse.prepare().unwrap(), PngOptions::default(), &NoPictures, Vec::new()).is_ok());
     let style = solidcraft_sketch::TextStyle::default();
     let (runs, fonts) = solidcraft_sketch::paper_text("A", None, "", p(2.0, 2.0), 3.5, 0.0, &style).unwrap().unwrap();
     let text = Scene { fonts, ..scene(p(20.0, 10.0), runs.into_iter().map(Item::Text).collect()) };
