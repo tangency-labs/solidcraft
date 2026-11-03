@@ -331,14 +331,14 @@ fn fillet_max_finds_the_largest_radius_that_works() {
     let b = box_solid(Vec3::new(14.0, 0.0, 0.0), Vec3::new(28.0, 6.0, 10.0)).unwrap();
     let mids = [Vec3::new(14.0, 0.0, 5.0), Vec3::new(28.0, 0.0, 5.0), Vec3::new(14.0, 6.0, 5.0), Vec3::new(28.0, 6.0, 5.0)];
     assert!(too_large(&b, &mids, 3.5));
-    let (r, body) = fillet_max(&b, &mids, 3.5).unwrap().unwrap();
+    let (r, body) = fillet_max(&b, &mids, 3.5, FilletTurn::Mitre).unwrap().unwrap();
     assert_eq!(r, 3.0);
     assert!(rel(measure(&body).unwrap().volume, 840.0 - (4.0 - PI) * 90.0) < 2e-4);
     // No edge there: the fillet's own error, not a smaller radius (only a refusal as too large
     // narrows the search).
     let e = fillet(&b, &[Vec3::new(500.0, 0.0, 5.0)], 1.0).unwrap_err();
     assert!(!matches!(e, KernelError::TooLarge(_)), "{e}");
-    assert_eq!(fillet_max(&b, &[Vec3::new(500.0, 0.0, 5.0)], 1.0).unwrap_err().to_string(), e.to_string());
+    assert_eq!(fillet_max(&b, &[Vec3::new(500.0, 0.0, 5.0)], 1.0, FilletTurn::Mitre).unwrap_err().to_string(), e.to_string());
 }
 
 /// Edges that share no face get their own largest radius: a 2 mm fin's top edge takes at most
@@ -360,7 +360,7 @@ fn fillet_max_each_reduces_only_where_the_radius_does_not_fit() {
     // at its edge less the quarter disc about (17, 26), inside the fin (x >= 19): 2 x 4 less the
     // disc's part, in closed form; the corner's round (1 − π/4)·16 along 20.
     let both = fillet(&body, &edges, 4.0).unwrap();
-    let (radii, b) = fillet_max_each(&body, &edges, 4.0).unwrap().unwrap();
+    let (radii, b) = fillet_max_each(&body, &edges, 4.0, FilletTurn::Mitre).unwrap().unwrap();
     assert_eq!(radii, vec![4.0, 4.0], "{radii:?}");
     assert!(b.validity().is_empty(), "{:?}", b.validity());
     let disc = |a: f64| 0.5 * (a * (16.0 - a * a).max(0.0).sqrt() + 16.0 * (a / 4.0).asin());
@@ -371,7 +371,7 @@ fn fillet_max_each_reduces_only_where_the_radius_does_not_fit() {
     // The post's four edges limit each other: one radius, as `fillet_max`.
     let post = box_solid(Vec3::new(14.0, 0.0, 0.0), Vec3::new(28.0, 6.0, 10.0)).unwrap();
     let mids = [Vec3::new(14.0, 0.0, 5.0), Vec3::new(28.0, 0.0, 5.0), Vec3::new(14.0, 6.0, 5.0), Vec3::new(28.0, 6.0, 5.0)];
-    assert_eq!(fillet_max_each(&post, &mids, 3.5).unwrap().map(|x| x.0), Some(vec![3.0; 4]));
+    assert_eq!(fillet_max_each(&post, &mids, 3.5, FilletTurn::Mitre).unwrap().map(|x| x.0), Some(vec![3.0; 4]));
 }
 
 /// R21 on an edge of a 20 mm cube overflows on its tangent sides, which a round may, taking all
