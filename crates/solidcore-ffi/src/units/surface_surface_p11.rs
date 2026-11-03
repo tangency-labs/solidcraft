@@ -3,21 +3,28 @@
 //!
 //! Each surface is a non-rational biquadratic Bezier patch (kind 0, a 3x3 net over
 //! `[0,1]^2`), an analytic `SmPlane` (kind 1: origin `net[0]`, x axis `net[1]`, y axis
-//! `net[2]`, unit scales) or a canonical analytic `SmTorus` (kind 2: centre `net[0]`,
+//! `net[2]`, unit scales), a canonical analytic `SmTorus` (kind 2: centre `net[0]`,
 //! sweep start `net[1]`, 90 degree direction `net[2]`, `(major, minor)` radii
 //! `net[3][0..2]` over the full analytic STEP domain `[0, 360]^2` degrees, its NURB
 //! domain being the case's own `[0, 1]^2`; `net[3][2]` and the remaining net values are
-//! unused). Every value must be finite; plane axes must be non-zero and not parallel
-//! (`SmAxis2Placement::SetCanonical` fails on them and leaves the axes undefined); a
-//! torus needs both radii above `SM_EFF_ZERO` (`SmTorus::CreateCanonical` refuses
-//! others). Torus placement axes are left to `SetCanonical`'s defined handling:
-//! non-unit and non-perpendicular (including parallel) axes are normalized by
-//! `Unitize` and `MakeUnitOrthoVectors`, and an axis whose squared length is below
-//! `SM_EFF_ZERO_SQ` is stored as `(0,0,1)` by `Unitize` rather than left undefined, so
-//! the placement constructor still builds a frame. The torus guard therefore applies
-//! no axis length or parallelism threshold, unlike the plane guard. Domains must not be
-//! inverted. No counts cross the FFI except the control point count of [`lift_curve`]'s
-//! inline UV curve, checked against its arrays.
+//! unused) or a canonical surface of revolution of a line generator (kind 3: axis point
+//! `net[0]`, axis direction `net[1]`, line start `net[2]`, line end `net[3]`, swap flag
+//! `net[4][0]`; the line's STEP interval is `[0, 1]`, so the surface's NURB domain is
+//! `[0, 1]` along the generator and the sweep circle's arc length along the
+//! revolution, and the reverse with `bSwapUV`). Every value must be finite; plane axes must be non-zero and not
+//! parallel (`SmAxis2Placement::SetCanonical` fails on them and leaves the axes
+//! undefined); a torus needs both radii above `SM_EFF_ZERO` (`SmTorus::CreateCanonical`
+//! refuses others); a revolution needs a line generator of non-zero length and a
+//! rotation frame (`CreateCanonical` returns `SM_ERR` for a generator on the axis).
+//! Torus placement axes and the revolution axis are left to `SetCanonical`'s and
+//! `Unitize`'s defined handling: non-unit and non-perpendicular (including parallel)
+//! axes are normalized by `Unitize` and `MakeUnitOrthoVectors`, and an axis whose
+//! squared length is below `SM_EFF_ZERO_SQ` is stored as `(0,0,1)` by `Unitize` rather
+//! than left undefined, so the placement constructor still builds a frame. Those guards
+//! therefore apply no axis length or parallelism threshold, unlike the plane guard.
+//! Domains must not be inverted. No counts cross the FFI except the control point count
+//! of [`lift_curve`]'s inline UV curve, checked against its arrays.
+
 use std::ffi::CString;
 
 use crate::{call_with_buffer, FfiError};
@@ -115,30 +122,34 @@ pub fn intersect_surface_boundaries(
 }
 
 fn check_surface(s: &SurfaceInput) -> Result<(), FfiError> {
-    if !(0..=2).contains(&s.kind)
+    if !(0..=3).contains(&s.kind)
         || s.net.iter().flatten().any(|v| !v.is_finite())
         || s.domain.iter().any(|v| !v.is_finite())
         || s.domain[0] > s.domain[2]
         || s.domain[1] > s.domain[3]
         || (s.kind == 1 && !plane_ok(&s.net))
         || (s.kind == 2 && !torus_ok(&s.net))
+        || (s.kind == 3 && !revolution_ok(&s.net))
     {
         return Err(FfiError::InvalidArgument("unsafe surface p11 input".into()));
     }
     Ok(())
 }
 
-/// One surface of a case: kind 0 (Bezier patch), 1 (plane) or 2 (canonical torus), and
-/// its 3x3 net.
+/// One surface of a case: kind 0 (Bezier patch), 1 (plane), 2 (canonical torus) or 3
+/// (canonical surface of revolution of a line generator), and its 3x3 net.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SurfaceInput {
     /// 0: biquadratic Bezier patch; 1: plane (origin, x axis, y axis in `net[0..3]`);
     /// 2: canonical torus (centre, sweep start, 90 degree direction in `net[0..3]`,
-    /// `(major, minor)` radii in `net[3][0..2]`).
+    /// `(major, minor)` radii in `net[3][0..2]`); 3: canonical surface of revolution
+    /// (axis point, axis direction, line start, line end in `net[0]`..`net[3]`,
+    /// `net[4][0]` non-zero for `bSwapUV`).
     pub kind: i32,
     /// The control net (row major, `u` rows).
     pub net: [[f64; 3]; 9],
-    /// `[umin, vmin, umax, vmax]`: the intersection domain (the torus's NURB domain).
+    /// `[umin, vmin, umax, vmax]`: the intersection domain (the torus's and the
+    /// revolution's NURB domain).
     pub domain: [f64; 4],
 }
 
@@ -168,6 +179,87 @@ const EFF_ZERO: f64 = 1.0e-12;
 /// apply here.
 fn torus_ok(net: &[[f64; 3]; 9]) -> bool {
     net[3][0] > EFF_ZERO && net[3][1] > EFF_ZERO
+}
+
+/// `SM_EFF_ZERO_SQ` (`crates/solidcore/src/math.rs`): the squared bound `Unitize` and
+/// `IsParallelTo` compare against.
+const EFF_ZERO_SQ: f64 = EFF_ZERO * EFF_ZERO;
+
+fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn length_squared(v: [f64; 3]) -> f64 {
+    dot(v, v)
+}
+
+fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+/// `Unitize()` as `SmSurfOfRevolution::CreateCanonical` uses it (its status is ignored):
+/// a vector below `SM_EFF_ZERO_SQ` becomes `(0,0,1)`.
+fn unitize_or_z(v: [f64; 3]) -> [f64; 3] {
+    let len_sq = length_squared(v);
+    if len_sq < EFF_ZERO_SQ {
+        return [0.0, 0.0, 1.0];
+    }
+    let len = len_sq.sqrt();
+    [v[0] / len, v[1] / len, v[2] / len]
+}
+
+/// `IsParallelTo(other, tol_deg)`: false when either vector is not above
+/// `SM_EFF_ZERO_SQ`; otherwise the smaller angle to the other's line is within
+/// `tol_deg`.
+fn parallel_within(v: [f64; 3], o: [f64; 3], tol_deg: f64) -> bool {
+    let (v_sq, o_sq) = (length_squared(v), length_squared(o));
+    if v_sq <= EFF_ZERO_SQ || o_sq <= EFF_ZERO_SQ {
+        return false;
+    }
+    let cos = dot(v, o) / (v_sq.sqrt() * o_sq.sqrt());
+    cos.clamp(-1.0, 1.0).abs().acos() < tol_deg.to_radians()
+}
+
+/// A canonical surface of revolution of a line generator (`CreateCanonical`): the line
+/// needs a non-zero length (`SmLine::CreateLineSegment` unitizes it and fails
+/// otherwise) and `CreateCanonical` needs a rotation frame, which it cannot build when
+/// the generator lies on the axis (its `y_vec` cross product is zero and it returns
+/// `SM_ERR`). The frame construction is repeated here exactly: the axis is unitized
+/// with `Unitize`'s `(0,0,1)` fallback, the start point at the line's STEP interval
+/// minimum is tried, then 45% of the interval when that point is on the axis or
+/// parallel to it. A zero-length axis is defined (it becomes `(0,0,1)`), so it is not
+/// rejected.
+fn revolution_ok(net: &[[f64; 3]; 9]) -> bool {
+    let step = [
+        net[3][0] - net[2][0],
+        net[3][1] - net[2][1],
+        net[3][2] - net[2][2],
+    ];
+    if length_squared(step) < EFF_ZERO_SQ {
+        return false;
+    }
+    let axis = unitize_or_z(net[1]);
+    let mut x = [
+        net[2][0] - net[0][0],
+        net[2][1] - net[0][1],
+        net[2][2] - net[0][2],
+    ];
+    if length_squared(x).sqrt() < EFF_ZERO || parallel_within(x, axis, 1.0) {
+        // CreateCanonical calls SmLine::EvaluateSTEP, which evaluates the line as
+        // start + t * unit_direction * scale. Keep that order at the frame bound.
+        let scale = length_squared(step).sqrt();
+        let unit = unitize_or_z(step);
+        x = [
+            net[2][0] + 0.45 * unit[0] * scale - net[0][0],
+            net[2][1] + 0.45 * unit[1] * scale - net[0][1],
+            net[2][2] + 0.45 * unit[2] * scale - net[0][2],
+        ];
+    }
+    length_squared(cross(axis, x)) >= EFF_ZERO_SQ
 }
 
 /// `a.LocalSurfaceIntersect(a.domain, b, b.domain, tol, guess_a, guess_b, normal,
@@ -237,8 +329,9 @@ pub enum LiftSurface {
     /// `SmBSplineSurface::ReadFromFile(path)` (an upstream test file; its contents are
     /// trusted, not validated).
     File(String),
-    /// A patch, plane or canonical torus as for [`local_surface_intersect`] (its
-    /// `domain` is not used: [`lift_curve`] takes the domain separately).
+    /// A patch, plane, canonical torus or canonical surface of revolution as for
+    /// [`local_surface_intersect`] (its `domain` is not used: [`lift_curve`] takes the
+    /// domain separately).
     Inline(Box<SurfaceInput>),
 }
 
@@ -503,5 +596,110 @@ mod tests {
         s.kind = 0;
         s.net = [[0.5; 3]; 9];
         assert!(accepted(&s));
+    }
+
+    /// A canonical surface of revolution of a line generator (kind 3): axis point
+    /// `net[0]`, axis direction `net[1]`, line start `net[2]`, line end `net[3]`,
+    /// `net[4][0]` the swap flag.
+    fn canonical_revolution() -> SurfaceInput {
+        SurfaceInput {
+            kind: 3,
+            net: [
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0, 2.0],
+                [0.0; 3],
+                [0.0; 3],
+                [0.0; 3],
+                [0.0; 3],
+                [0.0; 3],
+            ],
+            domain: [0.5, 0.1, 5.7, 0.9],
+        }
+    }
+
+    #[test]
+    fn canonical_revolution_guard_cylinder_accepted() {
+        assert!(accepted(&canonical_revolution()));
+    }
+
+    #[test]
+    fn canonical_revolution_guard_zero_axis_accepted() {
+        // `CreateCanonical` calls `Unitize()` and ignores its status; a zero axis
+        // becomes (0,0,1), so the constructor still builds a defined frame.
+        let mut s = canonical_revolution();
+        s.net[1] = [0.0; 3];
+        assert!(accepted(&s));
+    }
+
+    #[test]
+    fn canonical_revolution_guard_non_unit_and_oblique_axis_accepted() {
+        let mut s = canonical_revolution();
+        s.net[1] = [0.1, 0.2, 5.0];
+        assert!(accepted(&s));
+    }
+
+    #[test]
+    fn canonical_revolution_guard_swap_flag_accepted() {
+        let mut s = canonical_revolution();
+        s.net[4][0] = 1.0;
+        assert!(accepted(&s));
+        s.net[4][0] = -2.5;
+        assert!(accepted(&s));
+    }
+
+    #[test]
+    fn canonical_revolution_guard_start_on_axis_with_oblique_generator_accepted() {
+        // The start point lies on the axis, so `CreateCanonical` retries at 45% of
+        // the generator's STEP interval, where the line is off the axis.
+        let mut s = canonical_revolution();
+        s.net[2] = [0.0, 0.0, 0.0];
+        s.net[3] = [1.0, 0.0, 2.0];
+        assert!(accepted(&s));
+    }
+
+    #[test]
+    fn canonical_revolution_guard_retry_preserves_step_evaluation_order() {
+        // CreateCanonical retries through SmLine::EvaluateSTEP: t * unit * scale,
+        // not t * raw_step. Here the latter rounds to EFF_ZERO and accepts the
+        // frame, while the pinned operation order remains one ulp below it.
+        let mut s = canonical_revolution();
+        s.net[2] = [0.0, 0.0, 0.0];
+        s.net[3] = [2.222222222222222e-12, 0.0, 0.7];
+        assert!(!accepted(&s));
+    }
+
+    #[test]
+    fn canonical_revolution_guard_zero_length_generator_rejected() {
+        // `SmLine::CreateLineSegment` unitizes the generator vector and fails on a
+        // zero-length one, so the fixture would not construct.
+        let mut s = canonical_revolution();
+        s.net[3] = s.net[2];
+        assert!(!accepted(&s));
+    }
+
+    #[test]
+    fn canonical_revolution_guard_generator_on_axis_rejected() {
+        // A generator coincident with the axis makes `CreateCanonical` return SM_ERR
+        // before it builds a surface.
+        let mut s = canonical_revolution();
+        s.net[2] = [0.0, 0.0, 0.5];
+        s.net[3] = [0.0, 0.0, 1.5];
+        assert!(!accepted(&s));
+    }
+
+    #[test]
+    fn canonical_revolution_guard_non_finite_generator_rejected() {
+        let mut s = canonical_revolution();
+        s.net[2][0] = f64::NAN;
+        assert!(!accepted(&s));
+    }
+
+    #[test]
+    fn canonical_revolution_guard_inverted_domain_rejected() {
+        let mut s = canonical_revolution();
+        s.domain = [5.7, 0.1, 0.5, 0.9];
+        assert!(!accepted(&s));
     }
 }

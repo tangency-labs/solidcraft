@@ -4,10 +4,14 @@
 //
 // Each of the two surfaces is either a non-rational biquadratic Bezier patch (3x3 net over
 // [0,1]^2, kind 0), an analytic SmPlane (kind 1: origin net[0], x axis net[1], y axis net[2],
-// unit scales, domain [0,1]^2) or a canonical analytic SmTorus (kind 2: centre net[0], sweep
+// unit scales, domain [0,1]^2), a canonical analytic SmTorus (kind 2: centre net[0], sweep
 // start net[1], 90 degree direction net[2], (major, minor) radii net[3][0..1], full analytic
-// STEP domain [0,360]x[0,360] degrees, its NURB domain the case's own [0,1]^2). The layout is
-// documented and validated in crates/solidcore-ffi/src/units/surface_surface_p11.rs.
+// STEP domain [0,360]x[0,360] degrees, its NURB domain the case's own [0,1]^2) or a canonical
+// SmSurfOfRevolution of a real SmLine generator (kind 3: axis point net[0], axis direction
+// net[1], line start net[2], line end net[3], net[4][0] non-zero for bSwapUV; the line's STEP
+// interval is [0,1], so the NURB u is the sweep circle's arc length and v the generator
+// interval, or the reverse with bSwapUV). The layout is documented and validated in
+// crates/solidcore-ffi/src/units/surface_surface_p11.rs.
 //
 // One entry point, sc_surface_surface_p11_lsi. Output: [status, found, u, v, u2, v2, deviation]
 // (the solution values only when found).
@@ -21,10 +25,12 @@
 #include <SmCurve.h>
 #include <SmExtent1d.h>
 #include <SmExtent2d.h>
+#include <SmLine.h>
 #include <SmNurbsCrv.h>
 #include <SmPlane.h>
 #include <SmSolutionArray.h>
 #include <SmSurface.h>
+#include <SmSurfOfRevolution.h>
 #include <SmSurfTypes.h>
 #include <SmTArray.h>
 #include <SmTol.h>
@@ -60,6 +66,31 @@ static SmSurface* sc_p11_surface(SmContext& context, int32_t kind, const double*
                                      &analytic) != SM_SUCCESS)
             return NULL;
         return torus;
+    }
+    if (kind == 3)
+    {
+        // Canonical surface of revolution (SmSurfOfRevolution::CreateCanonical) of a real
+        // bounded SmLine generator: axis point net[0], axis direction net[1], line start
+        // net[2], line end net[3], bSwapUV from net[4][0]. Generators that cannot be swept
+        // (a zero-length line, or one on the rotation axis) are rejected instead of
+        // segfaulting; the FFI wrapper refuses them before the call. The surface owns the
+        // generator, so only an unconstructed generator is deleted here.
+        SmLine* gen = NULL;
+        if (SmLine::CreateLineSegment(context, 3, SmPoint3d(xyz[6], xyz[7], xyz[8]),
+                                      SmPoint3d(xyz[9], xyz[10], xyz[11]), gen) != SM_SUCCESS)
+            return NULL;
+        SmSurfOfRevolution* rev = NULL;
+        if (SmSurfOfRevolution::CreateCanonical(context, gen, SmPoint3d(xyz[0], xyz[1], xyz[2]),
+                                                SmVector3d(xyz[3], xyz[4], xyz[5]), rev,
+                                                xyz[12] != 0.0) != SM_SUCCESS)
+        {
+            if (rev != NULL)
+                delete rev;
+            else
+                delete gen;
+            return NULL;
+        }
+        return rev;
     }
     gw_CPOINT points[3][3];
     gw_CPOINT* rows[3] = {points[0], points[1], points[2]};

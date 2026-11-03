@@ -1,7 +1,8 @@
 //! Differential runner for `surface.surface_p11`: `SmSurface::LocalSurfaceIntersect`
 //! (`SmSurface.cpp:27439`). Each case intersects two surfaces, each a biquadratic
-//! Bezier patch, an analytic plane or a canonical analytic torus, from a pair of guess
-//! points, with or without a plane normal, a previous point and boundary testing.
+//! Bezier patch, an analytic plane, a canonical analytic torus or a canonical surface
+//! of revolution of a line generator (a cylinder), from a pair of guess points, with or
+//! without a plane normal, a previous point and boundary testing.
 //! Cases whose C++ path reaches `sm_IntersectSrfBndryCrv` (`surface.surface_p8`) or
 //! `LocalSurfaceSolve` (`surface.surface_p3`) are deferred.
 //!
@@ -15,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcore::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use solidcore::curve::curve::{Curve, CurveKind};
+use solidcore::curve::line::Line;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
@@ -30,6 +32,7 @@ use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::p11::LocalSurfaceIntersectOptions;
 use solidcore::surface::surface::p2::B_SPLINE_SURFACE_TYPE;
 use solidcore::surface::surface::Surface;
+use solidcore::surface::surf_of_revolution::SurfOfRevolution;
 use solidcore::surface::torus::{Torus, TorusOptions};
 use solidcore::topology::database_io::{DatabaseReader, FileType};
 use solidcore_ffi::units::surface_surface_p11 as ffi;
@@ -46,7 +49,10 @@ struct SurfaceIn {
     /// 0: biquadratic Bezier patch; 1: plane (origin, x axis, y axis in `net[0..3]`);
     /// 2: canonical analytic torus (centre `net[0]`, sweep start `net[1]`, 90 degree
     /// direction `net[2]`, `(major, minor)` radii `net[3][0..2]`; the remaining net
-    /// values are unused payload and are written as zeros).
+    /// values are unused payload and are written as zeros); 3: canonical surface of
+    /// revolution (axis point `net[0]`, axis direction `net[1]`, line start `net[2]`,
+    /// line end `net[3]`, `net[4][0]` non-zero for `bSwapUV`; the remaining values are
+    /// unused payload).
     kind: i32,
     net: [[f64; 3]; 9],
     domain: [f64; 4],
@@ -158,6 +164,26 @@ fn surface(k: &Kernel, s: &SurfaceIn) -> Result<Surface, HarnessError> {
             s.net[3][1],
             TorusOptions::default(),
             Some(&analytic),
+        )
+        .map(Surface::from)
+        .map_err(harness);
+    }
+    if s.kind == 3 {
+        // A real canonical surface of revolution of a bounded line generator (a
+        // cylinder when the line is parallel to the axis), not a B-spline stand-in:
+        // `SmSurfOfRevolution::CreateCanonical` over a real `SmLine` generator
+        // (`SmLine::CreateLineSegment`: axis point `net[0]`, axis direction `net[1]`,
+        // line start `net[2]`, line end `net[3]`, `bSwapUV` from `net[4][0]`). Its
+        // v-min iso boundaries are the typed circles the boundary-curve override
+        // builds.
+        let mut line = Line::from_points(v3(s.net[2]), v3(s.net[3]), 3);
+        line.make_nurb().map_err(harness)?;
+        return SurfOfRevolution::create_canonical(
+            k,
+            Curve::from(line),
+            v3(s.net[0]),
+            v3(s.net[1]),
+            s.net[4][0] != 0.0,
         )
         .map(Surface::from)
         .map_err(harness);
@@ -907,6 +933,76 @@ mod tests {
             let radius = (p - centre).length();
             assert!(close(radius, 0.2, 1e-9), "t={t}: radius {radius}");
             assert!(close(p.y, 0.5, 1e-12), "t={t}: point {p:?} off y=0.5");
+        }
+    }
+
+    /// The payload of a canonical surface of revolution of a line generator that is
+    /// parallel to the axis (a cylinder): axis point `net[0]`, axis direction `net[1]`,
+    /// line start `net[2]`, line end `net[3]`, swap flag `net[4][0]`. This is
+    /// `fixtures/surface.surface_p11/revolution.json`'s cylinder.
+    fn revolution_payload() -> SurfaceIn {
+        let mut net = [[0.0; 3]; 9];
+        net[0] = [0.0, 0.0, 0.0];
+        net[1] = [0.0, 0.0, 1.0];
+        net[2] = [1.0, 0.0, 0.0];
+        net[3] = [1.0, 0.0, 2.0];
+        SurfaceIn {
+            kind: 3,
+            net,
+            domain: [0.5, 0.1, 5.7, 0.9],
+        }
+    }
+
+    /// Kind 3 builds the canonical surface of revolution (`CreateCanonical`) of a real
+    /// `SmLine` generator, not a B-spline stand-in, over the analytic STEP domain
+    /// `[0, 360] x [0, 1]`; its NURB domain is the line's `[0, 1]` along the generator
+    /// and the sweep circle's arc length along the revolution. A Rust-only diagnostic
+    /// of the shared builder; it proves no native parity.
+    #[test]
+    fn kind3_builds_a_canonical_revolution_of_a_line_generator() {
+        let k = Kernel::default();
+        let s = surface(&k, &revolution_payload()).expect("canonical revolution");
+        let SurfaceKind::SurfOfRevolution(rev) = s.kind() else {
+            panic!("kind 3 must build the canonical revolution, not a B-spline stand-in");
+        };
+        let gen = rev.gen_curve().expect("generator");
+        let CurveKind::Line(_) = gen.kind() else {
+            panic!("the generator must stay the typed line");
+        };
+        assert!(!rev.swap_uv());
+        let step = s.step_uv_domain();
+        assert!(close(step.min().x, 0.0, 1e-12) && close(step.max().x, 360.0, 1e-12));
+        assert!(close(step.min().y, 0.0, 1e-12) && close(step.max().y, 1.0, 1e-12));
+        let nurb = s.natural_uv_domain_if_built();
+        // radius 1: the full sweep's arc length is 2*pi
+        assert!(close(nurb.max().x - nurb.min().x, 2.0 * std::f64::consts::PI, 1e-6));
+        assert!(close(nurb.min().y, 0.0, 1e-12) && close(nurb.max().y, 1.0, 1e-12));
+    }
+
+    /// The cylinder's v-min iso boundary (what `CreateIsoParametricCurve` hands
+    /// `IntersectSurfaceBoundaries` as the other surface's first boundary curve) is the
+    /// typed circle of the source prediction: centre `(0, 0, 0)`, radius `1`, in the
+    /// plane `z = 0`. This checks the constructed geometry only; the number of boundary
+    /// curves the native operation keeps is deliberately not asserted here.
+    #[test]
+    fn kind3_v_min_iso_boundary_is_the_predicted_circle() {
+        let k = Kernel::default();
+        let s = surface(&k, &revolution_payload()).expect("canonical revolution");
+        let (min, _) = s
+            .create_iso_boundaries(&k, SurfParamType::V, 1e-6)
+            .expect("iso boundaries")
+            .expect("both V boundaries");
+        let CurveKind::Ellipse(_) = min.kind() else {
+            panic!("the revolution v boundary must stay the typed circle");
+        };
+        let centre = Vec3::new(0.0, 0.0, 0.0);
+        let ivl = min.natural_interval();
+        for j in 0..=4 {
+            let t = ivl.evaluate(f64::from(j) / 4.0);
+            let p = min.evaluate_point(&k, t).expect("iso boundary point");
+            let radius = (p - centre).length();
+            assert!(close(radius, 1.0, 1e-9), "t={t}: radius {radius}");
+            assert!(close(p.z, 0.0, 1e-12), "t={t}: point {p:?} off z=0");
         }
     }
 }
