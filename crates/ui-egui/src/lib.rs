@@ -63,6 +63,7 @@ pub mod drag_snap;
 pub mod easyprint_ui;
 pub mod edit_clipboard;
 pub mod edit_in_place;
+mod face_index;
 mod feature_edit;
 #[cfg(test)]
 mod font_literals_tests;

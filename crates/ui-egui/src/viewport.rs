@@ -3785,7 +3785,7 @@ fn edge_of(m: &solidcraft_engine::geom::Mesh, index: usize, point: Vec3) -> Opti
     m.edges.iter().min_by(|a, b| near(a).total_cmp(&near(b))).filter(|e| near(e) < tol * 1e3)
 }
 
-/// How many meshes keep their [`FaceIndex`](solidcraft_engine::geom::FaceIndex) (the bodies lit
+/// How many meshes keep their [`FaceIndex`](crate::face_index::FaceIndex) (the bodies lit
 /// last, each with its drawn and its shown mesh).
 const FACE_INDEX_CACHE: usize = 8;
 
@@ -3796,9 +3796,9 @@ const FACE_INDEX_CACHE: usize = 8;
 /// Kept by the mesh's identity (its `Arc`) for the meshes lit last. A held `Weak` keeps the
 /// allocation, so its address is not reused by another mesh while it is cached, and an `Arc`'s
 /// mesh is not changed in place while a `Weak` to it exists (`Arc::get_mut` refuses).
-fn face_index(m: &std::sync::Arc<solidcraft_engine::geom::Mesh>) -> std::sync::Arc<solidcraft_engine::geom::FaceIndex> {
+fn face_index(m: &std::sync::Arc<solidcraft_engine::geom::Mesh>) -> std::sync::Arc<crate::face_index::FaceIndex> {
     use std::sync::{Arc, Mutex, Weak};
-    type Entry = (Weak<solidcraft_engine::geom::Mesh>, Arc<solidcraft_engine::geom::FaceIndex>);
+    type Entry = (Weak<solidcraft_engine::geom::Mesh>, Arc<crate::face_index::FaceIndex>);
     static CACHE: Mutex<Vec<Entry>> = Mutex::new(Vec::new());
     let is = |e: &Entry| std::ptr::eq(e.0.as_ptr(), Arc::as_ptr(m));
     {
@@ -3810,7 +3810,7 @@ fn face_index(m: &std::sync::Arc<solidcraft_engine::geom::Mesh>) -> std::sync::A
             return index;
         }
     }
-    let index = Arc::new(m.face_index());
+    let index = Arc::new(crate::face_index::FaceIndex::new(m));
     let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     cache.retain(|e| e.0.strong_count() > 0 && !is(e));
     cache.insert(0, (Arc::downgrade(m), index.clone()));
@@ -3824,14 +3824,7 @@ fn face_tris(sc: &mut GpuScene, m: &std::sync::Arc<solidcraft_engine::geom::Mesh
 
 /// The triangles of `faces`, face by face in that order, each face's in mesh order: what calling
 /// [`face_tris`] for each of them drew, without a pass over the whole mesh per face.
-fn faces_tris(
-    sc: &mut GpuScene,
-    m: &solidcraft_engine::geom::Mesh,
-    index: &solidcraft_engine::geom::FaceIndex,
-    faces: &[usize],
-    col: [u8; 4],
-    lit: bool,
-) {
+fn faces_tris(sc: &mut GpuScene, m: &solidcraft_engine::geom::Mesh, index: &crate::face_index::FaceIndex, faces: &[usize], col: [u8; 4], lit: bool) {
     let col = sc.color(col);
     for &face in faces {
         for t in index.triangles(m, face).iter().filter_map(|&t| m.triangles.get(t as usize)) {
@@ -11466,6 +11459,61 @@ mod tests {
                 assert_eq!(grouped_selection(&app.session, &sel).len(), 1);
             }
         }
+    }
+
+    /// The face index answers as the scans it replaces: each face's triangles in mesh order, its
+    /// edges (`Mesh::face_edges`) and its surface patch (`Mesh::surface_patch`), on random meshes
+    /// of many faces joined by seams (some sharp), with faces listed twice on an edge, tables of
+    /// unequal lengths and face numbers far beyond the mesh.
+    #[test]
+    fn face_index_matches_the_scans_it_replaces() {
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = move |n: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % n.max(1)
+        };
+        for case in 0..200 {
+            let faces = 1 + next(300) as u32;
+            let tris = next(2_000) as usize;
+            let edges = next(900) as usize;
+            let face = |next: &mut dyn FnMut(u64) -> u64| if next(50) == 0 { u32::MAX - next(3) as u32 } else { next(u64::from(faces)) as u32 };
+            let mut m = solidcraft_engine::geom::Mesh {
+                triangles: (0..tris).map(|i| [i as u32, i as u32 + 1, i as u32 + 2]).collect(),
+                tri_face: (0..tris + next(3) as usize).map(|_| face(&mut next)).collect(),
+                edge_faces: (0..edges).map(|_| (0..1 + next(3)).map(|_| face(&mut next)).collect()).collect(),
+                seams: (0..edges.saturating_sub(next(5) as usize)).map(|_| next(4) != 0).collect(),
+                sharp_edges: (0..edges).map(|_| next(10) == 0).collect(),
+                ..solidcraft_engine::geom::Mesh::default()
+            };
+            if case % 7 == 0 {
+                m.tri_face.truncate(tris / 2);
+            }
+            let index = crate::face_index::FaceIndex::new(&m);
+            let probes = (0..faces as usize + 2).chain([u32::MAX as usize, u32::MAX as usize - 1, usize::MAX]);
+            for f in probes {
+                let scan: Vec<u32> =
+                    m.triangles.iter().zip(&m.tri_face).enumerate().filter(|(_, (_, tf))| **tf as usize == f).map(|(t, _)| t as u32).collect();
+                assert_eq!(index.triangles(&m, f).as_ref(), scan.as_slice(), "case {case}, face {f}: triangles");
+                let edges_scan: Vec<u32> =
+                    if let Ok(fu) = u32::try_from(f) { m.face_edges(fu).into_iter().map(|e| e as u32).collect() } else { Vec::new() };
+                assert_eq!(index.edges(&m, f).as_ref(), edges_scan.as_slice(), "case {case}, face {f}: edges");
+                let patch = m.surface_patch(f);
+                assert_eq!(index.surface_patch(&m, f), patch, "case {case}, face {f}: patch");
+                let around: Vec<usize> =
+                    m.edge_faces.iter().enumerate().filter(|(_, fs)| fs.iter().any(|x| patch.contains(&(*x as usize)))).map(|(e, _)| e).collect();
+                assert_eq!(index.edges_of(&m, &patch), around, "case {case}, face {f}: edges of the patch");
+            }
+        }
+        // A long chain of seams: one surface of thousands of pieces is one patch.
+        let n = 5_000u32;
+        let m = solidcraft_engine::geom::Mesh {
+            edge_faces: (0..n - 1).map(|i| vec![i, i + 1]).collect(),
+            seams: vec![true; n as usize - 1],
+            ..solidcraft_engine::geom::Mesh::default()
+        };
+        assert_eq!(crate::face_index::FaceIndex::new(&m).surface_patch(&m, 1234), (0..n as usize).collect::<Vec<_>>());
     }
 
     /// A hovered surface of many pieces is lit from the meshes' face indexes: the same
