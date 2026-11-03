@@ -33,7 +33,12 @@
 //! |A_u x A_v|^2`, `H = E'n'' + G'l'' - 2F'm''`, `K = l''n'' - m''^2`, `E' = A_u.A_u`, ...
 //! and `l'' = (P_uu w - w_uu P).(A_u x A_v)`, ...: polynomials and one square root,
 //! bounded per patch and subdivided until certified, or until a point with `Q < 0` (a
-//! fold) is found. A face not certified regular is refused (D5), naming the largest
+//! fold) is found. The homogeneous normal carries a factor w, `A_u x A_v = w N'`, so
+//! `X = w X'`, `H = w H'`, `K = w^2 K'` (`X'`, `H'`, `K'` the same forms on `N'`) and
+//! `Q = w^4 (X'^4 - d X' H' + d^2 w^2 K')`: the bracket, of the same sign, is what is
+//! bounded, of degree `4 deg w` less in each parameter (#2487: a G2 round's rational
+//! bicubic-by-septic net reaches degree 112 in Q, past the Bernstein forms' cap of 96, and
+//! 80 in the bracket). A face not certified regular is refused (D5), naming the largest
 //! wall that works: the smallest radius of curvature on the displaced side.
 //!
 //! Deviations: not upstream. Bounds: at most [`MAX_ROUNDS`] refinement rounds and
@@ -259,6 +264,29 @@ fn homogeneous_tangents(patch: &Patch, b: &Binomials) -> Result<(Bernstein3, Ber
             sub3(&mul3(&pu, w, b)?, &mul3(&patch.p, &w.deriv_u(), b)?, b)?,
             sub3(&mul3(&pv, w, b)?, &mul3(&patch.p, &w.deriv_v(), b)?, b)?,
         )),
+    }
+}
+
+/// The patch's homogeneous normal with its factor `w` divided out: `A_u x A_v = w N'`,
+/// `N' = w P_u x P_v - w_v P_u x P - w_u P x P_v` (the `w_u w_v P x P` term vanishes), so
+/// `N'` is of degree `w`'s less than `A_u x A_v` in each parameter, and the regularity
+/// forms built on it four times that less ([`RegularityForms`]); `P_u x P_v` for a
+/// polynomial patch.
+fn reduced_normal(patch: &Patch, b: &Binomials) -> Result<Bernstein3> {
+    let pu = deriv_u3(&patch.p);
+    let pv = deriv_v3(&patch.p);
+    let n = cross(&pu, &pv, b)?;
+    match &patch.w {
+        None => Ok(n),
+        Some(w) => sub3(
+            &sub3(
+                &mul3(&n, w, b)?,
+                &mul3(&cross(&pu, &patch.p, b)?, &w.deriv_v(), b)?,
+                b,
+            )?,
+            &mul3(&cross(&patch.p, &pv, b)?, &w.deriv_u(), b)?,
+            b,
+        ),
     }
 }
 
@@ -687,18 +715,18 @@ pub fn certified_offset(k: &Kernel, s: &Nurb, d: f64, tol: f64) -> Result<Certif
 /// The regularity forms of one patch: `Q = q0 - X q1` with `X = sqrt(x2)`.
 #[derive(Debug, Clone)]
 struct RegularityForms {
-    /// `X^4 + d^2 w^4 K`.
+    /// `X'^4 + d^2 w^2 K'`.
     q0: Bernstein2,
-    /// `d w^2 H`.
+    /// `d H'`.
     q1: Bernstein2,
-    /// `X^2`.
+    /// `X'^2`.
     x2: Bernstein2,
 }
 
 impl RegularityForms {
     fn new(s: &Patch, d: f64, b: &Binomials) -> Result<Self> {
         let (au, av) = homogeneous_tangents(s, b)?;
-        let ax = cross(&au, &av, b)?;
+        let ax = reduced_normal(s, b)?;
         let x2 = dot(&ax, &ax, b)?;
         let second = |pdd: Bernstein3, wdd: Option<Bernstein2>| -> Result<Bernstein2> {
             let v = match (&s.w, wdd) {
@@ -726,10 +754,8 @@ impl RegularityForms {
             Some(w) => w.mul(w, b)?,
             None => Bernstein2::constant(1.0),
         };
-        let q0 = x2
-            .mul(&x2, b)?
-            .add_scaled(&w2.mul(&w2, b)?.mul(&k, b)?, d * d, b)?;
-        let q1 = w2.mul(&h, b)?.scale(d);
+        let q0 = x2.mul(&x2, b)?.add_scaled(&w2.mul(&k, b)?, d * d, b)?;
+        let q1 = h.scale(d);
         Ok(Self { q0, q1, x2 })
     }
 
@@ -1104,6 +1130,72 @@ mod tests {
         let Regularity::Folds { largest } =
             certify_regular(&Kernel::default(), &s, -10.5, None).unwrap()
         else {
+            panic!("an inset past the radius folds");
+        };
+        assert!((largest - 10.0).abs() < 1e-9, "{largest}");
+    }
+
+    /// The quarter cylinder's homogeneous net degree-elevated to (`p`, `q`) (each step
+    /// `Q_i = i/(n+1) P_(i-1) + (1 - i/(n+1)) P_i` on the weighted points): the same
+    /// surface, of a G2 round's degrees.
+    fn elevated_quarter_cylinder(p: usize, q: usize) -> Nurb {
+        let lerp = |a: CPoint, b: CPoint, t: f64| {
+            CPoint::new(
+                a.x * t + b.x * (1.0 - t),
+                a.y * t + b.y * (1.0 - t),
+                a.z * t + b.z * (1.0 - t),
+                a.w * t + b.w * (1.0 - t),
+            )
+        };
+        let elevate = |row: &[CPoint]| -> Vec<CPoint> {
+            let n = row.len() - 1;
+            let mut out = vec![row[0]];
+            for i in 1..=n {
+                let t = i as f64 / (n + 1) as f64;
+                out.push(lerp(row[i - 1], row[i], t));
+            }
+            out.push(row[n]);
+            out
+        };
+        let base = quarter_cylinder();
+        let mut net: Vec<Vec<CPoint>> = base.cpts();
+        while net.len() < p + 1 {
+            let columns: Vec<Vec<CPoint>> = (0..net[0].len())
+                .map(|j| elevate(&net.iter().map(|r| r[j]).collect::<Vec<_>>()))
+                .collect();
+            net = (0..columns[0].len())
+                .map(|i| columns.iter().map(|c| c[i]).collect())
+                .collect();
+        }
+        while net[0].len() < q + 1 {
+            net = net.iter().map(|r| elevate(r)).collect();
+        }
+        let knots = |d: usize| {
+            let mut k = vec![0.0; d + 1];
+            k.extend(vec![1.0; d + 1]);
+            k
+        };
+        Nurb::new(net, p, q, knots(p), knots(q)).unwrap()
+    }
+
+    /// #2487: a rational patch of a G2 round's degrees (septic across, cubic along: the
+    /// quarter cylinder elevated) is certified regular outside its radius and folds inside
+    /// it at that radius. Its regularity form `Q` is of degree 112 across, past the
+    /// Bernstein forms' cap, which refused it (and with it the offset of every body with a
+    /// G2 round, status 1001); with `w` divided out it is of degree 80.
+    #[test]
+    fn a_septic_rational_patch_is_certified_as_its_cylinder() {
+        let s = elevated_quarter_cylinder(7, 3);
+        let k = Kernel::default();
+        assert_eq!(
+            certify_regular(&k, &s, 2.0, None).unwrap(),
+            Regularity::Regular
+        );
+        assert_eq!(
+            certify_regular(&k, &s, -9.0, None).unwrap(),
+            Regularity::Regular
+        );
+        let Regularity::Folds { largest } = certify_regular(&k, &s, -10.5, None).unwrap() else {
             panic!("an inset past the radius folds");
         };
         assert!((largest - 10.0).abs() < 1e-9, "{largest}");

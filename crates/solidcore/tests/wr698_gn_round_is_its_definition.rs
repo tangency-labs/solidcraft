@@ -662,6 +662,12 @@ fn distance_and_volume_of_a_reopened_round_are_its_definition_s() {
 /// in an ellipse) rounded r 2 at the equal area default. The round's section turns along
 /// it, so its certified net is a measurable distance off its definition.
 fn tilted_pipe(k: &mut Kernel) -> Brep {
+    tilted_pipe_rounded(k, 2, 2, GN_DEFAULT_THUMBWEIGHT)
+}
+
+/// [`tilted_pipe`] with the root edge rounded r 2 by the cross-section `xsect` of
+/// `continuity` and `thumbweight` (`fillet_edges`'s).
+fn tilted_pipe_rounded(k: &mut Kernel, xsect: u32, continuity: u32, thumbweight: f64) -> Brep {
     use solidcore::boolean::api_brep::boolean_union;
     use solidcore::geom::axis2_placement::Axis2Placement;
     use solidcore::primitive::api_primitives::create_cylinder;
@@ -686,7 +692,7 @@ fn tilted_pipe(k: &mut Kernel) -> Brep {
         }
     }
     let e = best.1.expect("the root edge");
-    fillet_edges(k, &mut b, &[e], 2.0, 2, 2, GN_DEFAULT_THUMBWEIGHT).unwrap();
+    fillet_edges(k, &mut b, &[e], 2.0, xsect, continuity, thumbweight).unwrap();
     b
 }
 
@@ -968,4 +974,149 @@ fn a_query_below_the_bound_takes_s_and_one_at_it_the_net() {
             );
         }
     }
+}
+
+// ---- #2487: the offset of a round built from its definition S ----------------------------
+
+/// The tilted pipe's root rounded r 2 by the ball's exact circle
+/// (`fillet_exact_arc_sections`): a procedural blend of order 1 on the plate's plane and
+/// the pipe's cylinder. Its surface.
+fn circle_root(k: &mut Kernel) -> (Brep, Surface) {
+    k.fixes.fillet_exact_arc_sections = true;
+    let b = tilted_pipe_rounded(k, 1, 1, 1.0);
+    let s = rounds_of(&b)
+        .into_iter()
+        .map(|(_, s)| s)
+        .next()
+        .expect("the root round by its definition");
+    let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
+        unreachable!()
+    };
+    assert_eq!((pb.order(), pb.offset(0)), (1, Some(2.0)));
+    (b, s)
+}
+
+/// S's unit normal at `uv` (its definition's partials).
+fn unit_normal_of(k: &Kernel, s: &Surface, uv: Point2) -> (Point3, Vec3) {
+    let e = s.evaluate(k, uv, 1, 1, EvaluateFlags::default()).unwrap();
+    let n = e[1][0].cross(e[0][1]);
+    (e[0][0], n * (1.0 / n.length()))
+}
+
+/// #2487: the root round (concave: its normal points at the ball's centre) offset by
+/// d = +-0.5 is the procedural blend of radius 2 - d on the plate and the pipe offset by
+/// d, on the same leader, seeds and parameters: at every (u, v) of a 41 x 9 grid it is
+/// S + d n to rounding at part scale (the ball's circles about the same centres, scaled).
+/// Its net is certified, its bound recorded and proved again.
+#[test]
+fn the_offset_of_a_circle_round_is_the_round_of_r_minus_d_on_the_offset_faces() {
+    use solidcore::primitive::api_surface_ops::create_offset_surface;
+    let mut k = kernel(true);
+    let (_, s) = circle_root(&mut k);
+    let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
+        unreachable!()
+    };
+    for d in [0.5, -0.5] {
+        let o = create_offset_surface(&k, &s, d).unwrap();
+        let SurfaceKind::ProceduralBlend(op) = o.kind() else {
+            panic!("d {d}: the offset is a {}", o.type_code());
+        };
+        assert_eq!(op.order(), 1);
+        assert_eq!(op.offset(0), Some(2.0 - d), "d {d}: the ball's radius");
+        assert_eq!(op.definition_map(), pb.definition_map());
+        assert!(
+            op.bound() > 0.0 && op.bound() < 1e-4,
+            "d {d}: bound {:e}",
+            op.bound()
+        );
+        let proved = op.recertify(&k).unwrap();
+        assert!(proved <= op.bound(), "d {d}");
+        // each support is the face's offset by d: at the same (u, v), d along its normal
+        for i in 0..2 {
+            let (a, b) = (pb.support(i).unwrap(), op.support(i).unwrap());
+            let uv = a
+                .natural_uv_domain_with_nurb(&k)
+                .unwrap()
+                .evaluate(0.3, 0.6);
+            let (p, n) = unit_normal_of(&k, a, uv);
+            let q = b.evaluate_point(&k, uv).unwrap();
+            let moved = (q - p).dot(n);
+            assert!(
+                (moved.abs() - 0.5).abs() <= 1e-12 && (q - p).cross(n).length() <= 1e-12,
+                "d {d}: support {i} moved {moved}"
+            );
+        }
+        let dom = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let mut worst = 0.0_f64;
+        for i in 0..=40 {
+            for j in 0..=8 {
+                let uv = dom.evaluate(f64::from(i) / 40.0, f64::from(j) / 8.0);
+                let (p, n) = unit_normal_of(&k, &s, uv);
+                let q = o.evaluate_point(&k, uv).unwrap();
+                worst = worst.max((q - (p + n * d)).length());
+            }
+        }
+        assert!(worst <= 1e-9, "d {d}: the offset is {worst:e} off S + d n");
+    }
+}
+
+/// #2487: the round of radius 2 - d collapses at d >= 2 (its ball has no radius), so the
+/// offset there is no surface, as a cylinder's; short of it, it is the round.
+#[test]
+fn a_circle_round_collapses_at_its_radius() {
+    let mut k = kernel(true);
+    let (_, s) = circle_root(&mut k);
+    for (d, collapses) in [(1.5, false), (2.0, true), (2.5, true), (-2.5, false)] {
+        assert_eq!(s.offset_collapses(&k, d, 1e-3).unwrap(), collapses, "d {d}");
+        assert_eq!(
+            s.create_offset_surface(&k, d, 1e-3).unwrap().is_none(),
+            collapses,
+            "d {d}"
+        );
+    }
+}
+
+/// #2487: the body offset 0.5 (its convex edges not extended) keeps the round's offset as
+/// the round of radius 1.5 by its definition, certified.
+#[test]
+fn a_body_s_circle_round_offsets_to_its_round_of_r_minus_d() {
+    use solidcore::offset::offset_executive::p2::{offset_brep_simple, OffsetOptions};
+    let mut k = kernel(true);
+    let (mut b, _) = circle_root(&mut k);
+    let o = offset_brep_simple(
+        &mut k,
+        &mut b,
+        OffsetOptions {
+            distance: 0.5,
+            extend_convex_edges: false,
+            merge_results: true,
+        },
+    )
+    .unwrap();
+    let rounds = rounds_of(&o);
+    assert_eq!(rounds.len(), 1, "the round's offset by its definition");
+    let SurfaceKind::ProceduralBlend(op) = rounds[0].1.kind() else {
+        unreachable!()
+    };
+    assert_eq!(op.offset(0), Some(1.5));
+    assert!(op.recertify(&k).unwrap() <= op.bound());
+}
+
+/// #2487: with every fix on the chamfered box offsets (it was refused with status 1001:
+/// the offset's fold certificate, `shell_one_construction`, raised the G2 rounds' rational
+/// septic nets to degree 112, past its Bernstein forms' cap), to the same faces as with
+/// #2388's fix set.
+#[test]
+fn the_chamfered_box_offsets_with_every_fix_on() {
+    let mut faces = Vec::new();
+    for all in [false, true] {
+        let mut k = kernel(true);
+        if all {
+            k.fixes = UpstreamFixes::all();
+        }
+        let mut b = chamfered_box(&mut k);
+        let o = offset_fixture::offset_full(&mut k, &mut b, 0.5).unwrap();
+        faces.push(o.face_list().len());
+    }
+    assert_eq!(faces[0], faces[1], "{faces:?}");
 }

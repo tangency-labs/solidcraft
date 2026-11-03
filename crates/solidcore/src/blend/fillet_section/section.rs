@@ -570,6 +570,68 @@ pub(crate) const fn section_width(n: usize) -> usize {
     }
 }
 
+/// The net of a blend's Hermite spans (`Build`'s): the spans' homogeneous rows joined
+/// along s (a span's first row is the one before's last) on the stations `ss`, cubic along
+/// s, of `ld` control points across, its control points the rows divided by their weights
+/// and its weights scaled by `1 / sqrt(w_min w_max)`.
+///
+/// # Errors
+///
+/// `SM_ERR` for spans that are not the stations' (their number or size) or a weight that is
+/// not positive; those of the canonical surface.
+pub(crate) fn net_of_spans(
+    ss: &[f64],
+    spans: &[(Vec<Vec3>, Vec<f64>)],
+    ld: usize,
+) -> Result<BSplineSurface> {
+    let (u_knots, u_mult) = hermite_knots(ss);
+    let lnu = 3 * spans.len() + 1;
+    if spans.len() + 1 != ss.len() {
+        return Err(SolidError::sm_err(OP));
+    }
+    let mut homog: Vec<Vec3> = Vec::new();
+    let mut wv: Vec<f64> = Vec::new();
+    for (j, (h, w)) in spans.iter().enumerate() {
+        let skip = if j == 0 { 0 } else { ld };
+        homog.extend(h.iter().copied().skip(skip));
+        wv.extend(w.iter().copied().skip(skip));
+    }
+    if homog.len() != lnu * ld || wv.len() != lnu * ld {
+        return Err(SolidError::sm_err(OP));
+    }
+    let mut w_min = BIG_DOUBLE;
+    let mut w_max = 0.0_f64;
+    for &w in &wv {
+        w_min = if w_min < w { w_min } else { w }; // smos_Min
+        w_max = smax(w_max, w);
+    }
+    let positive = w_min > 0.0;
+    if !positive {
+        // "a weight of the section's rows is not positive"
+        return Err(SolidError::sm_err(OP));
+    }
+    let w_scale = 1.0 / crate::geom::vector3d::sqrt(w_min * w_max);
+    let mut cps: Vec<Point3> = Vec::new();
+    let mut wts: Vec<f64> = Vec::new();
+    for (&h, &w) in homog.iter().zip(&wv) {
+        cps.push(h * (1.0 / w));
+        wts.push(w * w_scale);
+    }
+    BSplineSurface::create_canonical(&CanonicalSurfaceData {
+        u_degree: 3,
+        v_degree: ld - 1,
+        control_points: &cps,
+        form: BSplineSurfaceForm::Unspecified,
+        u_multiplicities: &u_mult,
+        v_multiplicities: &[ld, ld],
+        u_knots: &u_knots,
+        v_knots: &[0.0, 1.0],
+        knot_type: KnotType::Unspecified,
+        weights: Some(&wts),
+        uv_domain: None,
+    })
+}
+
 /// How a blend's net follows its stations: the section's order, its thumbweight (the
 /// equal area one resolved per station), and whether the ball's radius follows a law. The
 /// net is the Hermite interpolant along s of the section's rows at the stations: the arc's
@@ -1484,54 +1546,15 @@ impl GnSectionFsg {
             k.check_cancelled(OP_BUILD)?;
             rows.push(net_form.station_rows(st)?);
         }
-        let mut homog: Vec<Vec3> = Vec::new();
-        let mut wv: Vec<f64> = Vec::new();
         let mut spans: Vec<(Vec<Vec3>, Vec<f64>)> = Vec::new();
-        for (j, (pair, rp)) in stations.windows(2).zip(rows.windows(2)).enumerate() {
+        for (pair, rp) in stations.windows(2).zip(rows.windows(2)) {
             k.check_cancelled(OP_BUILD)?;
             let ([a, b], [ra, rb]) = (pair, rp) else {
                 return Err(SolidError::sm_err(OP));
             };
-            let (h, w) = net_form.span(a, ra, b, rb);
-            let skip = if j == 0 { 0 } else { ld };
-            homog.extend(h.iter().copied().skip(skip));
-            wv.extend(w.iter().copied().skip(skip));
-            spans.push((h, w));
+            spans.push(net_form.span(a, ra, b, rb));
         }
-        if homog.len() != lnu * ld {
-            return Err(SolidError::sm_err(OP));
-        }
-        let mut w_min = BIG_DOUBLE;
-        let mut w_max = 0.0_f64;
-        for &w in &wv {
-            w_min = if w_min < w { w_min } else { w }; // smos_Min
-            w_max = smax(w_max, w);
-        }
-        let positive = w_min > 0.0;
-        if !positive {
-            // "a weight of the section's rows is not positive"
-            return Err(SolidError::sm_err(OP));
-        }
-        let w_scale = 1.0 / crate::geom::vector3d::sqrt(w_min * w_max);
-        let mut cps: Vec<Point3> = Vec::new();
-        let mut wts: Vec<f64> = Vec::new();
-        for (&h, &w) in homog.iter().zip(&wv) {
-            cps.push(h * (1.0 / w));
-            wts.push(w * w_scale);
-        }
-        let surface = BSplineSurface::create_canonical(&CanonicalSurfaceData {
-            u_degree: 3,
-            v_degree: ld - 1,
-            control_points: &cps,
-            form: BSplineSurfaceForm::Unspecified,
-            u_multiplicities: &u_mult,
-            v_multiplicities: &[ld, ld],
-            u_knots: &u_knots,
-            v_knots: &[0.0, 1.0],
-            knot_type: KnotType::Unspecified,
-            weights: Some(&wts),
-            uv_domain: None,
-        })?;
+        let surface = net_of_spans(&ss, &spans, ld)?;
 
         // the feet's uv curves: the Hermite interpolants of the stations' feet, the
         // definition's seeds (4a10ed8); the rails and uv curves become them with

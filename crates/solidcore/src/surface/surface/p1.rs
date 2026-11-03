@@ -2559,6 +2559,53 @@ impl Surface {
         signed_offset_distance: f64,
         approx_tol_3d: f64,
     ) -> Result<Option<Self>> {
+        // a blend by its definition (#2487): the round of the moved radius on the offset
+        // supports, built from its definition S, never an offset of its net
+        if let Some(blend) = self.procedural_blend() {
+            use crate::surface::procedural_blend::offset::{
+                exact_offset, procedural_offset, BlendOffset,
+            };
+            use crate::surface::procedural_blend::BlendRef;
+            let made = match blend {
+                BlendRef::Procedural(p) => {
+                    procedural_offset(k, self, p, signed_offset_distance, approx_tol_3d)?
+                }
+                // a chamfer between planes (#2486), the chord: its offset is the chamfer of
+                // other sizes on the offset faces, which no definition is built for yet, so
+                // the plane offsets as its net does, exactly, and keeps no definition
+                BlendRef::Exact { round, .. }
+                    if round.class()
+                        == crate::surface::procedural_blend::exact::ExactClass::Chord =>
+                {
+                    None
+                }
+                BlendRef::Exact { round, .. } => {
+                    let mut kind_only = self.clone();
+                    kind_only.set_exact_round(None);
+                    let offset = kind_only.create_offset_surface(
+                        k,
+                        signed_offset_distance,
+                        approx_tol_3d,
+                    )?;
+                    Some(exact_offset(
+                        k,
+                        self,
+                        round,
+                        offset,
+                        signed_offset_distance,
+                        approx_tol_3d,
+                    )?)
+                }
+                // a blend corner's face (#2488): no offset is built from a corner's
+                // definition, so the face offsets as its net does, keeping none
+                BlendRef::Corner { .. } => None,
+            };
+            match made {
+                Some(BlendOffset::Round(s)) => return Ok(Some(*s)),
+                Some(BlendOffset::Collapsed) => return Ok(None),
+                None => {}
+            }
+        }
         match self.kind_with_nurb(k)? {
             SurfaceKind::Plane(p) => Ok(Some(Self::from(
                 p.create_offset_surface(k, signed_offset_distance)?,
@@ -2626,6 +2673,20 @@ impl Surface {
         signed_offset_distance: f64,
         tol: f64,
     ) -> Result<bool> {
+        // a round of the ball's circle (#2487): its radius moved to zero or past it
+        if let Some(crate::surface::procedural_blend::BlendRef::Procedural(p)) =
+            self.procedural_blend()
+        {
+            if let Some(offset) = crate::surface::procedural_blend::offset::procedural_collapses(
+                k,
+                self,
+                p,
+                signed_offset_distance,
+                tol,
+            )? {
+                return Ok(offset);
+            }
+        }
         Ok(match self.kind_with_nurb(k)? {
             SurfaceKind::Cone(s) => s.offset_collapses(k, signed_offset_distance, tol),
             SurfaceKind::Sphere(s) => s.offset_collapses(signed_offset_distance, tol),

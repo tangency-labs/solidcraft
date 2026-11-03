@@ -36,14 +36,15 @@ use core::cmp::Ordering;
 
 use super::certificate::{gn_certify_span, GnLaw, NurbsCurve};
 use super::section::{
-    certificate_faces, crosses_knot, inner_knots, param, varying, NetForm, StationSystem,
-    GN_THUMBWEIGHT_EQUAL_AREA,
+    certificate_faces, crosses_knot, inner_knots, net_of_spans, param, varying, NetForm,
+    StationSystem, GN_THUMBWEIGHT_EQUAL_AREA,
 };
 use super::series::Trunc;
 use super::station::{as_b_spline, GnStation, Nurbs, STATION_STEP};
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::Vec3;
+use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::math::NOW;
 use crate::nurbs::srf_tool::p1::decompose_to_bez;
@@ -560,45 +561,7 @@ fn recertify_in_frame(k: &Kernel, pb: &ProceduralBlend, bound: f64, shift: f64) 
     }
 
     // the stations the pieces need, on the pieces after them and (but the first) before
-    let mut stations: Vec<Option<GnStation>> = vec![None; sigma.len()];
-    for (j, (&s, &needed)) in sigma.iter().zip(&used).enumerate() {
-        if !needed {
-            continue;
-        }
-        k.check_cancelled(OP)?;
-        let mut seed = [0.0_f64; 4];
-        let mut after = [0_i32; 4];
-        let mut before = [0_i32; 4];
-        for (f, sd) in [seed0, seed1].into_iter().enumerate() {
-            let p = sd.evaluate_point(s)?;
-            let right = sd.evaluate(s, 1, false, false)?;
-            let left = sd.evaluate(s, 1, true, false)?;
-            let (Some(dr), Some(dl)) = (right.get(1), left.get(1)) else {
-                return Err(SolidError::sm_err(OP));
-            };
-            for (c, (x, (r1, l1))) in [(p.x, (dr.x, dl.x)), (p.y, (dr.y, dl.y))]
-                .into_iter()
-                .enumerate()
-            {
-                let q = 2 * f + c;
-                if let (Some(sq), Some(aq), Some(bq)) =
-                    (seed.get_mut(q), after.get_mut(q), before.get_mut(q))
-                {
-                    *sq = x;
-                    *aq = sign(r1);
-                    *bq = -sign(l1);
-                }
-            }
-        }
-        let mut st = system.solve_after(k, s, seed, Some(after))?;
-        st.before = before;
-        if j > 0 {
-            system.solve_before(k, &mut st)?;
-        }
-        if let Some(slot) = stations.get_mut(j) {
-            *slot = Some(st);
-        }
-    }
+    let stations = definition_stations(k, &system, [seed0, seed1], &sigma, &used)?;
     let solved: Vec<GnStation> = stations.iter().flatten().copied().collect();
     let mut vary = varying(n, r[0] * r[1], &solved, equal_area);
 
@@ -617,21 +580,7 @@ fn recertify_in_frame(k: &Kernel, pb: &ProceduralBlend, bound: f64, shift: f64) 
         };
         // a foot crossing a face's knot line inside the span: the construction puts a
         // station there, so this net is not its
-        for (f, nf) in face_n.iter().enumerate() {
-            for c in 0..2 {
-                let q = 2 * f + c;
-                let (xa, xb) = (param(a, q, 0, 0), param(b, q, 0, 0));
-                if inner_knots(nf, c)
-                    .iter()
-                    .any(|&dk| crosses_knot(xa, xb, dk))
-                {
-                    return Err(SolidError::invalid_input(
-                        OP,
-                        "a foot crosses a face's knot line between two stations",
-                    ));
-                }
-            }
-        }
+        refuse_knot_crossing(face_n, a, b)?;
         let (ra, rb) = (net_form.station_rows(a)?, net_form.station_rows(b)?);
         let (homog, w) = net_form.span(a, &ra, b, &rb);
         let h = b.s - a.s;
@@ -698,6 +647,202 @@ fn recertify_in_frame(k: &Kernel, pb: &ProceduralBlend, bound: f64, shift: f64) 
         achieved = achieved.max(total);
     }
     Ok(achieved)
+}
+
+/// The stations of a definition at `sigma`, its seeds' knots, where `needed`: each solved
+/// from the seeds on the pieces after it and (but the first) on the pieces before it, the
+/// feet's sides there the seeds' own.
+///
+/// # Errors
+///
+/// Those of the seeds' evaluations and the station solves.
+fn definition_stations(
+    k: &Kernel,
+    system: &StationSystem<'_>,
+    seeds: [&BSplineCurve; 2],
+    sigma: &[f64],
+    needed: &[bool],
+) -> Result<Vec<Option<GnStation>>> {
+    let mut stations: Vec<Option<GnStation>> = vec![None; sigma.len()];
+    for (j, (&s, &needed)) in sigma.iter().zip(needed).enumerate() {
+        if !needed {
+            continue;
+        }
+        k.check_cancelled(OP)?;
+        let mut seed = [0.0_f64; 4];
+        let mut after = [0_i32; 4];
+        let mut before = [0_i32; 4];
+        for (f, sd) in seeds.into_iter().enumerate() {
+            let p = sd.evaluate_point(s)?;
+            let right = sd.evaluate(s, 1, false, false)?;
+            let left = sd.evaluate(s, 1, true, false)?;
+            let (Some(dr), Some(dl)) = (right.get(1), left.get(1)) else {
+                return Err(SolidError::sm_err(OP));
+            };
+            for (c, (x, (r1, l1))) in [(p.x, (dr.x, dl.x)), (p.y, (dr.y, dl.y))]
+                .into_iter()
+                .enumerate()
+            {
+                let q = 2 * f + c;
+                if let (Some(sq), Some(aq), Some(bq)) =
+                    (seed.get_mut(q), after.get_mut(q), before.get_mut(q))
+                {
+                    *sq = x;
+                    *aq = sign(r1);
+                    *bq = -sign(l1);
+                }
+            }
+        }
+        let mut st = system.solve_after(k, s, seed, Some(after))?;
+        st.before = before;
+        if j > 0 {
+            system.solve_before(k, &mut st)?;
+        }
+        if let Some(slot) = stations.get_mut(j) {
+            *slot = Some(st);
+        }
+    }
+    Ok(stations)
+}
+
+/// Refuses a span between stations `a` and `b` over which a foot crosses a knot line of
+/// its face (`face_n`): the construction puts a station there.
+///
+/// # Errors
+///
+/// `InvalidInput` naming the crossing.
+fn refuse_knot_crossing(face_n: [&Nurbs; 2], a: &GnStation, b: &GnStation) -> Result<()> {
+    for (f, nf) in face_n.iter().enumerate() {
+        for c in 0..2 {
+            let q = 2 * f + c;
+            let (xa, xb) = (param(a, q, 0, 0), param(b, q, 0, 0));
+            if inner_knots(nf, c)
+                .iter()
+                .any(|&dk| crosses_knot(xa, xb, dk))
+            {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "a foot crosses a face's knot line between two stations",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The net of a definition on its own stations, the seeds' knots (#2487): the
+/// construction's Hermite rows there ([`NetForm::span`], joined as `Build` joins them,
+/// [`net_of_spans`]) over the definition's (s, t), each span certified
+/// ([`gn_certify_span`], refined toward `target`), and the net's bound as `Build` stores
+/// it: the certificate's, the net's rounding off its rows and three floors. A definition
+/// made from another (the offset of a round, its supports offset and its radius moved)
+/// takes its net here, in its own parameters (the identity map).
+///
+/// # Errors
+///
+/// `InvalidInput` for seeds on different stations, a foot crossing a face's knot line
+/// between two of them, or a span not proved; those of [`certificate_faces`] (a support the
+/// certificate does not enclose), the station solves and the net.
+pub(crate) fn net_of_definition(
+    k: &Kernel,
+    pb: &ProceduralBlend,
+    target: f64,
+) -> Result<(BSplineSurface, f64)> {
+    let d = pb.definition();
+    let n = d.order as usize;
+    let equal_area = n >= 2 && d.thumbweight == GN_THUMBWEIGHT_EQUAL_AREA;
+    let net_form = NetForm {
+        n,
+        thumbweight: d.thumbweight,
+        equal_area,
+        law: d.law.is_some(),
+    };
+    let ld = net_form.width();
+    let faces = pb.supports();
+    let ([n0, n1], mut defs) = certificate_faces(k, faces, n, d.law.is_some())?;
+    let any_defs = defs.faces.iter().any(Option::is_some);
+    let leader_n = NurbsCurve::of(&d.leader)?;
+    let law = match &d.law {
+        Some(c) => Some(GnLaw::of(c)?),
+        None => None,
+    };
+    let [seed0, seed1] = &d.seeds;
+    let sigma = seed0.knots(None)?.0;
+    if seed1.knots(None)?.0 != sigma || sigma.len() < 2 {
+        return Err(SolidError::invalid_input(
+            OP,
+            "the seeds are not on one set of stations",
+        ));
+    }
+    let r = match &law {
+        Some(l) => {
+            let first = sigma.first().copied().unwrap_or(f64::NAN);
+            let r0 = l.curve.evaluate_point(first)?.x;
+            [r0, r0]
+        }
+        None => d.offsets,
+    };
+    let tr = Trunc::new(
+        if law.is_some() { 2 } else { 1 },
+        if n >= 2 { n } else { 0 },
+    )?;
+    let system = StationSystem {
+        faces,
+        leader: &d.leader,
+        r,
+        side: d.sides,
+        tr,
+        n,
+        equal_area,
+        law: law.as_ref(),
+    };
+    let stations =
+        definition_stations(k, &system, [seed0, seed1], &sigma, &vec![true; sigma.len()])?;
+    let solved: Vec<GnStation> = stations
+        .into_iter()
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| SolidError::sm_err(OP))?;
+    let mut vary = varying(n, r[0] * r[1], &solved, equal_area);
+    let mut spans = Vec::new();
+    let mut certified = 0.0_f64;
+    for pair in solved.windows(2) {
+        k.check_cancelled(OP)?;
+        let [a, b] = pair else {
+            return Err(SolidError::sm_err(OP));
+        };
+        refuse_knot_crossing([&n0, &n1], a, b)?;
+        let (ra, rb) = (net_form.station_rows(a)?, net_form.station_rows(b)?);
+        spans.push(net_form.span(a, &ra, b, &rb));
+        let c = gn_certify_span(
+            k,
+            [&n0, &n1],
+            &leader_n,
+            faces,
+            &d.leader,
+            a,
+            b,
+            r,
+            d.sides,
+            n,
+            target,
+            if equal_area { Some(&mut vary) } else { None },
+            law.as_ref(),
+            if any_defs { Some(&mut defs) } else { None },
+        )?;
+        if !c.is_finite() {
+            return Err(SolidError::invalid_input(
+                OP,
+                "a span of the definition's net is not proved",
+            ));
+        }
+        certified = certified.max(c);
+    }
+    let ss: Vec<f64> = solved.iter().map(|st| st.s).collect();
+    let net = net_of_spans(&ss, &spans, ld)?;
+    let bound = certified
+        + stored_net_distance(&net, &spans, ld)?
+        + 3.0 * precision_floor(k, faces, d.order, &net)?;
+    Ok((net, bound))
 }
 
 /// -1, 0 or +1.

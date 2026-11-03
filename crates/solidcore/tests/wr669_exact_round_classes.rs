@@ -484,3 +484,184 @@ fn a_moved_exact_round_is_certified_again() {
         assert!(exact_rebuild(&k, &off).is_err());
     }
 }
+
+// ---- #2487: the offset of a round built from its definition -------------------------------
+
+/// A 40 x 30 x 20 box, its top back edge (y = 30, z = 20) rounded r 2 (`xsect` 1) or
+/// chamfered 2 (`xsect` 0), every fix on.
+fn box_edge(xsect: u32) -> (Kernel, Brep) {
+    let mut k = Kernel::new(&solidcore::kernel::KernelOptions::default());
+    k.fixes = solidcore::kernel::UpstreamFixes::all();
+    let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
+    let e = edges_where(&k, &b, |m| {
+        (m.y - 30.0).abs() < 1e-9 && (m.z - 20.0).abs() < 1e-9
+    });
+    assert_eq!(e.len(), 1);
+    fillet_edges(&mut k, &mut b, &e, 2.0, xsect, 1, 1.0).unwrap();
+    (k, b)
+}
+
+/// `b` offset by `d` (outward for d > 0), its convex edges extended, merged.
+fn offset_by(k: &mut Kernel, b: &Brep, d: f64) -> Brep {
+    use solidcore::offset::offset_executive::p2::{offset_brep_simple, OffsetOptions};
+    let mut b = b.clone();
+    offset_brep_simple(
+        k,
+        &mut b,
+        OffsetOptions {
+            distance: d,
+            extend_convex_edges: true,
+            merge_results: true,
+        },
+    )
+    .unwrap()
+}
+
+/// The point at the middle of a surface's natural domain.
+fn middle_of(k: &Kernel, s: &solidcore::surface::surface::Surface) -> Point3 {
+    let d = s.natural_uv_domain_with_nurb(k).unwrap();
+    s.evaluate_point(k, d.evaluate(0.5, 0.5)).unwrap()
+}
+
+/// #2487: the box's r 2 round offset by d = +-0.5 is the exact cylinder of radius 2 + d,
+/// and that cylinder is still the round by its definition: the line class, radius 2 + d,
+/// on the box's faces y = 30 and z = 20 offset by d, re-certified (bound 0). The volume is
+/// the closed form of the offset box with its round: `(40 + 2d)(30 + 2d)(20 + 2d) - (1 -
+/// pi/4)(2 + d)^2 (40 + 2d)`.
+#[test]
+fn a_box_round_offsets_to_the_round_of_r_plus_d_on_the_offset_faces() {
+    let (mut k, b) = box_edge(1);
+    assert_eq!(assert_definitions(&k, &b), vec![ExactClass::Line]);
+    for d in [0.5, -0.5] {
+        let mut o = offset_by(&mut k, &b, d);
+        let rounds = exact_rounds(&o);
+        assert_eq!(
+            rounds.len(),
+            1,
+            "d {d}: the round's offset by its definition"
+        );
+        let s = face::surface(&o, rounds[0].0).unwrap().unwrap();
+        let SurfaceKind::Cone(c) = s.kind() else {
+            panic!("d {d}: the offset is a {:?}", s.kind());
+        };
+        assert!(c.is_cylinder());
+        // to rounding at part scale: with every fix on the round's face is swapped
+        // (`face_swap_uv_transposes_trims`), and its offset cone's radius lands 2.5e-14 off
+        assert!(
+            (c.base_radius() - (2.0 + d)).abs() <= 1e-12,
+            "d {d}: {}",
+            c.base_radius()
+        );
+        let round = s.procedural_blend().unwrap();
+        assert_eq!(round.recertify(&k).unwrap(), 0.0);
+        let exact = round.exact().unwrap();
+        assert_eq!(exact.class(), ExactClass::Line);
+        assert!((exact.radius() - (2.0 + d)).abs() <= 1e-12);
+        // the supports: the planes y = 30 + d and z = 20 + d
+        let mut at: Vec<(f64, f64)> = (0..2)
+            .map(|i| {
+                let p = middle_of(&k, round.support(i).unwrap());
+                (p.y, p.z)
+            })
+            .collect();
+        at.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let (low, high) = (at[0], at[1]);
+        assert!((low.1 - (20.0 + d)).abs() <= 1e-12, "d {d}: {low:?}");
+        assert!((high.0 - (30.0 + d)).abs() <= 1e-12, "d {d}: {high:?}");
+        let r = 2.0 + d;
+        let want = (40.0 + 2.0 * d) * (30.0 + 2.0 * d) * (20.0 + 2.0 * d)
+            - (1.0 - PI / 4.0) * r * r * (40.0 + 2.0 * d);
+        let v = volume_to(&k, &mut o, 1e-9);
+        assert!((v - want).abs() <= 1e-9 * want, "d {d}: {v} != {want}");
+    }
+}
+
+/// #2487: inward at d >= r the round collapses onto its spine (the cylinder of radius
+/// `r - d <= 0` is no surface): the offset is the box `(40 - 2d)(30 - 2d)(20 - 2d)` with a
+/// sharp edge, the faces beside the round meeting across it.
+#[test]
+fn a_box_round_collapses_inward_past_its_radius() {
+    let (mut k, b) = box_edge(1);
+    for d in [2.0, 2.5] {
+        let mut o = offset_by(&mut k, &b, -d);
+        assert!(exact_rounds(&o).is_empty(), "d {d}: no round");
+        assert_eq!(o.faces().ids().count(), 6, "d {d}: a box's faces");
+        let want = (40.0 - 2.0 * d) * (30.0 - 2.0 * d) * (20.0 - 2.0 * d);
+        let v = volume_to(&k, &mut o, 1e-9);
+        assert!((v - want).abs() <= 1e-9 * want, "d {d}: {v} != {want}");
+    }
+}
+
+/// #2487: the box's 45 degree chamfer of legs 2 (the plane y + z = 48) offset by d is the
+/// chamfer on the offset faces y = 30 + d and z = 20 + d: the plane y + z = 48 + d sqrt 2,
+/// of legs `2 + d (2 - sqrt 2)`; the volume is the offset box less that prism.
+#[test]
+fn a_box_chamfer_offsets_to_the_chamfer_on_the_offset_faces() {
+    let (mut k, b) = box_edge(0);
+    for d in [0.5, -0.5, -2.5] {
+        let mut o = offset_by(&mut k, &b, d);
+        let mut chamfers = 0;
+        for f in o.faces().ids().collect::<Vec<_>>() {
+            let s = face::surface(&o, f).unwrap().unwrap();
+            let SurfaceKind::Plane(_) = s.kind() else {
+                continue;
+            };
+            let dom = s.natural_uv_domain_with_nurb(&k).unwrap();
+            let e = s
+                .evaluate(
+                    &k,
+                    dom.evaluate(0.5, 0.5),
+                    1,
+                    1,
+                    solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags::default(),
+                )
+                .unwrap();
+            let n = e[1][0].cross(e[0][1]).unitize().unwrap();
+            if (n.y.abs() - 0.5_f64.sqrt()).abs() > 1e-12
+                || (n.z.abs() - 0.5_f64.sqrt()).abs() > 1e-12
+            {
+                continue;
+            }
+            chamfers += 1;
+            let p = e[0][0];
+            assert!(
+                (p.y + p.z - (48.0 + d * 2.0_f64.sqrt())).abs() <= 1e-12,
+                "d {d}: the chamfer's plane at y + z = {}",
+                p.y + p.z
+            );
+        }
+        assert_eq!(chamfers, 1, "d {d}: the chamfer's offset");
+        let legs = 2.0 + d * (2.0 - 2.0_f64.sqrt());
+        let want = (40.0 + 2.0 * d) * (30.0 + 2.0 * d) * (20.0 + 2.0 * d)
+            - legs * legs / 2.0 * (40.0 + 2.0 * d);
+        let v = volume_to(&k, &mut o, 1e-9);
+        assert!((v - want).abs() <= 1e-9 * want, "d {d}: {v} != {want}");
+    }
+}
+
+/// #2487: the boss's foot round (the circle class, the ball's arc turned about the axis)
+/// offset by +-0.25 keeps its definition, radius 1 +- 0.25 on the offset plate and boss,
+/// re-certified: its offset surface lies on the class's surface of the offset supports.
+#[test]
+fn the_offset_of_a_circle_round_is_its_round_of_r_plus_minus_d() {
+    let (k, b) = plate_and_boss_kept(true, true);
+    let (f, _) = exact_rounds(&b)
+        .into_iter()
+        .find(|(_, c)| *c == ExactClass::Circle)
+        .unwrap();
+    let s = face::surface(&b, f).unwrap().unwrap();
+    let mut radii = Vec::new();
+    for d in [0.25, -0.25] {
+        let off = create_offset_surface(&k, s, d).unwrap();
+        let round = off.procedural_blend().unwrap();
+        assert_eq!(round.recertify(&k).unwrap(), 0.0, "d {d}");
+        let exact = round.exact().unwrap();
+        assert_eq!(exact.class(), ExactClass::Circle);
+        radii.push(exact.radius());
+    }
+    radii.sort_by(f64::total_cmp);
+    assert!(
+        (radii[0] - 0.75).abs() <= 1e-14 && (radii[1] - 1.25).abs() <= 1e-14,
+        "{radii:?}"
+    );
+}
