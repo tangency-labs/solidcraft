@@ -225,11 +225,18 @@ fn check_args(op: Op, args: &[f64]) -> Result<(), FfiError> {
 ///
 /// # Errors
 ///
-/// [`FfiError::InvalidArgument`] for a block or arguments the wrapper rejects or a
-/// B-rep that cannot be built; the shim's status.
+/// [`FfiError::InvalidArgument`] for a block or arguments the wrapper rejects, a block
+/// value above `1e150` for an op other than [`Op::FaceFu`] (HANG-29) or a B-rep that
+/// cannot be built; the shim's status.
 pub fn eval(op: Op, path: &str, block: &[f64], args: &[f64]) -> Result<Vec<f64>, FfiError> {
     use super::topology_edgeuse_p1 as graph;
     check_args(op, args)?;
+    // The ops classify points on the faces, which creates their UV trim curves: with a
+    // coordinate above 1e150 that never returns upstream (HANG-29; nightly fuzz00201, a
+    // tight face box). `FaceFu` only reads the face uses.
+    if op != Op::FaceFu {
+        super::topology_edgeuse_p2::check_block_magnitudes(block)?;
+    }
     let export = graph::eval(graph::Op::Export, path, block)?;
     if graph::counts(&export).is_none() {
         return Err(bad("native fixture construction failed"));
@@ -287,5 +294,28 @@ mod eval_tests {
         e[2] = 2.0;
         e[1] = -2.0;
         assert!(check_args(Op::EdgeOn, &e).is_err());
+    }
+
+    /// HANG-29 (nightly fuzz00201): a block value above 1e150 is refused for every op
+    /// that classifies points on the faces, before the export or the op reaches the C++
+    /// (which does not return for the tight box from 1e155 and for both classifications
+    /// from 1e153).
+    #[test]
+    fn huge_block_values_are_refused_before_the_classifying_ops() {
+        let block = [0.0, 1.0, 1e300, -3.5];
+        let box_args = [0.0, 0.0, 1.0, 0.0];
+        let p = [
+            0.0, 1.0, 2.0, 3.0, 1e-6, 0.0, 1.0, 0.5, 0.5, 1.0, 1.0, 1.0, 4.0, 1.0, 0.0,
+        ];
+        let e = [
+            0.0, -1.0, 3.0, 0., 0., 0., 1., 1., 1., 0.5, 0.0, 1.0, 0.0, 1e-6, 1.0,
+        ];
+        for (op, args) in [(Op::Box, &box_args[..]), (Op::Point3d, &p), (Op::EdgeOn, &e)] {
+            let err = eval(op, "", &block, args).err().map(|e| e.to_string());
+            assert!(
+                err.as_deref().is_some_and(|m| m.contains("HANG-29")),
+                "{op:?}: {err:?}"
+            );
+        }
     }
 }

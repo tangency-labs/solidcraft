@@ -20,8 +20,13 @@
 //! | [`ClassifyCurveObjects`], [`LoopObjectCurves`] | the curves `ReSet` stores in an `SmCurveClassification` |
 //! | `surface_is_planar`, `surface_bounding_box` (private) | `SmSurface::IsPlanar`, `SmSurface::CalculateBoundingBox` of the face's surface |
 //! | `find_element_in_masked_array` (private)      | `SmTArray::FindElementInMaskedArray`        |
+//! | [`check_face_coordinates`]                    | none (HANG-29 guard)                        |
 //!
 //! Deviations:
+//! - **Coordinate bound (HANG-29).** [`calculate_tight_bounding_box`] and the face
+//!   point and edge-curve classifications of `query::face::p1` first refuse a face whose
+//!   vertices, loose edge boxes or loose surface box reach a coordinate above `1e150`
+//!   ([`check_face_coordinates`]); upstream does not return on such a face.
 //! - **Object model.** The face is a record of a [`Brep`]; the functions take the B-rep
 //!   and the face's id. Statuses are results: `SM_SUCCESS` is `Ok`, `SER` / `NER`
 //!   returns propagate as errors, `AERN_MSG(.., SM_ERR_INVALID_INPUT, ..)` is
@@ -345,6 +350,74 @@ pub(crate) fn surface_bounding_box(
     Ok(normal)
 }
 
+// ---- coordinate bound (HANG-29) ---------------------------------------------------------------
+
+/// The loose axis-aligned edge box [`check_face_coordinates`] reads.
+const EDGE_NORMAL_BOX: crate::nurbs::b_spline_curve::BoundingBoxRequest =
+    crate::nurbs::b_spline_curve::BoundingBoxRequest {
+        normal: true,
+        pseudo: false,
+        polar: false,
+    };
+
+/// Refuses a face whose geometry reaches a coordinate beyond
+/// [`crate::limits::MAX_COORDINATE_MAGNITUDE`] (`1e150`): its vertex points, the loose
+/// boxes of its edges and the loose box of its surface over the face's UV domain. The
+/// face queries that classify points on the face run it first
+/// ([`calculate_tight_bounding_box`], [`crate::query::face::p1::point_3d_classify`],
+/// [`crate::query::face::p1::edge_curve_on_classify`]): upstream creates the face's UV
+/// trim curves there, and with such a coordinate `GlobalCoincidenceChecker` under
+/// `CreateUVTrimCurve` does not return (HANG-29; nightly fuzz `query.face_p1`
+/// `fuzz00201`, a B-spline face with a control point of `1e300`). A lookup that fails
+/// here is left to the query itself, which reports it in upstream's order.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] (`operation`) for such a face.
+pub fn check_face_coordinates(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    operation: &'static str,
+) -> Result<()> {
+    use crate::limits::exceeds_coordinate_bound as beyond;
+    let point_beyond = |p: Point3| beyond(p.x) || beyond(p.y) || beyond(p.z);
+    let box_beyond = |e: &Extent3d| {
+        (0..3).any(|i| {
+            let (lo, hi) = (e.min_at(i), e.max_at(i));
+            lo <= hi && (beyond(lo) || beyond(hi))
+        })
+    };
+    let refuse = || {
+        Err(SolidError::invalid_input(
+            operation,
+            "face geometry coordinate above 1e150 (HANG-29)",
+        ))
+    };
+    let Ok(face) = b.face(f) else {
+        return Ok(());
+    };
+    for v in face_vertices(b, f, false, None).unwrap_or_default() {
+        if b.vertex(v).is_ok_and(|v| point_beyond(v.point)) {
+            return refuse();
+        }
+    }
+    for e in face_edges(b, f).unwrap_or_default() {
+        if let Ok(boxes) = qe::calculate_bounding_box(k, b, e, EDGE_NORMAL_BOX, false) {
+            if boxes.normal.as_ref().is_some_and(box_beyond) {
+                return refuse();
+            }
+        }
+    }
+    if let Some(s) = face.surface.as_ref() {
+        let uv_domain = face.uv_domain;
+        if surface_bounding_box(k, b, f, s, &uv_domain).is_ok_and(|e| box_beyond(&e)) {
+            return refuse();
+        }
+    }
+    Ok(())
+}
+
 // ---- SmFace::CalculateTightBoundingBox --------------------------------------------------------
 
 /// `SmFace::CalculateTightBoundingBox`: the box of the face's vertices, grown by the
@@ -358,7 +431,8 @@ pub(crate) fn surface_bounding_box(
 /// # Errors
 ///
 /// `SM_ERR_NULL_POINTER`-like [`SolidError::InvalidInput`] for a face without surface;
-/// those of [`face_vertices`], the edge boxes ([`qe::calculate_tight_bounding_box`]),
+/// [`SolidError::InvalidInput`] for a face with a coordinate above `1e150` (HANG-29,
+/// [`check_face_coordinates`]); those of [`face_vertices`], the edge boxes ([`qe::calculate_tight_bounding_box`]),
 /// the planarity test and the surface's loose box; [`SolidError::Unported`] from the
 /// global solves and point classifications.
 pub fn calculate_tight_bounding_box<'a>(
@@ -386,6 +460,8 @@ pub fn calculate_tight_bounding_box_into(
     out: &mut Extent3d,
 ) -> Result<()> {
     let b = lb.get();
+    // HANG-29: refuse coordinates the point classifications below cannot handle
+    check_face_coordinates(k, b, f, OP_TIGHT)?;
     let mut face_bbox = Extent3d::new();
 
     // (a copy that keeps the owning face: the point classifications below may edit

@@ -270,6 +270,18 @@ pub(crate) fn own_model(brep: &Value) -> Result<Result<Model, Output>, HarnessEr
 /// The model a side runs on: the C++ side's import of its export ([`model`]), or the
 /// Rust-built one ([`own_model`]).
 fn side_model(brep: &Value, cpp: bool) -> Result<Result<Model, Output>, HarnessError> {
+    // HANG-29 (nightly fuzz00201, a tight face box with a control point of 1e300): the
+    // C++ ops classify points on the faces, and creating a face's UV trim curves with a
+    // coordinate above 1e150 does not return upstream, so the FFI refuses such a block
+    // and the C++ side is a harness error (the case is `rejected`). The Rust side runs
+    // the kernel, which refuses the face itself at the entry of the tight box and the
+    // two classifications (`query::face::p3::check_face_coordinates`); the unit tests
+    // below check that both sides refuse the fuzz input.
+    if cpp {
+        let (_, block) = fixture_input(brep.clone())?;
+        solidcore_ffi::units::topology_edgeuse_p2::check_block_magnitudes(&block)
+            .map_err(|e| harness(e.to_string()))?;
+    }
     if cpp {
         model(brep).map(Ok)
     } else {
@@ -909,5 +921,40 @@ impl UnitDiff for Runner {
             5..=8 => gen_point(rng),
             _ => gen_edge_on(rng),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The nightly fuzz00201 input (`tests/fuzz_corpus/query.face_p1.json`): a tight face
+    /// box on a B-spline face with a control point of 1e300.
+    fn fuzz00201() -> BoxInput {
+        let corpus: Value = serde_json::from_str(include_str!(
+            "../../tests/fuzz_corpus/query.face_p1.json"
+        ))
+        .expect("corpus parses");
+        let inputs = corpus["cases"][0]["inputs"].clone();
+        serde_json::from_value(inputs).expect("a box input")
+    }
+
+    /// HANG-29: the C++ tight box does not return on this face (from 1e155; the
+    /// classifications from 1e153), so the FFI refuses the block; the Rust kernel
+    /// refuses the face at the query's entry, so the two sides agree. Without the kernel
+    /// guard the Rust side returns a box after an 18-31 s run instead.
+    #[test]
+    fn fuzz00201_huge_control_point_is_refused_on_both_sides() {
+        let input = fuzz00201();
+        assert!(input.tight);
+        let cpp = run_box(&input, true).err().map(|e| e.to_string());
+        assert!(
+            cpp.as_deref().is_some_and(|m| m.contains("HANG-29")),
+            "cpp: {cpp:?}"
+        );
+        assert!(side_model(&input.brep, true).is_err());
+        let rust = run_box(&input, false).expect("the Rust side runs");
+        let text = format!("{rust:?}");
+        assert!(text.contains("HANG-29") && text.contains("invalid input"), "rust: {text}");
     }
 }

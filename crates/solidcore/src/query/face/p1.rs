@@ -15,7 +15,10 @@
 //! | [`edge_curve_on_classify`], [`EdgeCurveOnOptions`], [`CurveOnClassification`] | `SmFace::EdgeCurveOnClassify` |
 //! | [`ClassifyProblem`]                   | `SmClassifyProblem` (CO-PORTED; re-exported by `query::face::p3`) |
 //!
-//! Deviations: a nullable curve is `Option<&Curve>`; `SmApiEvaluateCurve`'s three
+//! Deviations: [`point_3d_classify`] and [`edge_curve_on_classify`] first refuse a face
+//! with a coordinate above `1e150` (HANG-29,
+//! [`crate::query::face::p3::check_face_coordinates`]); upstream does not return there.
+//! A nullable curve is `Option<&Curve>`; `SmApiEvaluateCurve`'s three
 //! optional output pointers become one returned `[position, d1, d2]` (all three are
 //! evaluated upstream too). The face box returns its box (upstream writes its output
 //! only on success). The shell and region boxes initialise `output` first and keep
@@ -456,8 +459,9 @@ impl Drop for FaceSurfaceCacheGuard {
 ///
 /// # Errors
 ///
-/// [`SolidError::InvalidInput`] for a face without surface (upstream dereferences null);
-/// those of the point solves and of [`super::p2::point_classify`]. `pc` keeps what was
+/// [`SolidError::InvalidInput`] for a face without surface (upstream dereferences null)
+/// or with a coordinate above `1e150` (HANG-29); those of the point solves and of
+/// [`super::p2::point_classify`]. `pc` keeps what was
 /// written before the failure.
 pub fn point_3d_classify(
     k: &Kernel,
@@ -470,6 +474,8 @@ pub fn point_3d_classify(
     opts: Point3dClassifyOptions<'_>,
 ) -> Result<()> {
     let uv_domain = fp2::uv_domain(b, f)?;
+    // HANG-29: refuse coordinates the point classification cannot handle
+    crate::query::face::p3::check_face_coordinates(k, b, f, OP_POINT)?;
 
     // init output - SM_PC_UNKNOWN is used for OUTSIDE the face's trim boundary
     pc.set_class_object(PointClassType::Unknown, None);
@@ -725,7 +731,8 @@ fn lift_to_face(k: &Kernel, b: &Brep, f: FaceId, curve: &Curve) -> Result<Curve>
 ///
 /// # Errors
 ///
-/// `SM_ERR_NULL_POINTER` for a null `edge`; those of the edge use list, the curve lift
+/// `SM_ERR_NULL_POINTER` for a null `edge`; [`SolidError::InvalidInput`] for a face with
+/// a coordinate above `1e150` (HANG-29); those of the edge use list, the curve lift
 /// and the sector classification
 /// ([`crate::query::face::p3::sector_classify_curve_on`]).
 pub fn edge_curve_on_classify(
@@ -743,6 +750,8 @@ pub fn edge_curve_on_classify(
 
     let edgeuses = edge::edgeuses(b, edge, None, None)?;
     let upward = fp2::upward_faceuse(b, f)?;
+    // HANG-29: refuse coordinates the sector classification cannot handle
+    crate::query::face::p3::check_face_coordinates(k, b, f, OP_EDGE_CURVE)?;
 
     // work in 3d: a 2D curve is taken as an SmCrvOnSurf on this face's surface
     let mut lifted = None;
