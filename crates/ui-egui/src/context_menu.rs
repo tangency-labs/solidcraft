@@ -72,6 +72,8 @@ pub enum Target {
     VisualStyle,
     /// View › Navigation tool: Orbit, Pan, Zoom; the latched one marked (#8868).
     ViewTool,
+    /// Selection filter: Faces, Bodies, Components; the current one marked (#11505).
+    SelectionFilter,
     /// The mouse mappings (Preferences › Navigation), from the status bar (#7023).
     Navigation,
     /// An assembly joint.
@@ -481,6 +483,15 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                     });
                     item.icon = tool.into();
                     item
+                })
+                .collect()
+        }
+        Target::SelectionFilter => {
+            let mode = app.ui.pick_mode();
+            [("face", "Faces"), ("body", "Bodies"), ("component", "Components")]
+                .into_iter()
+                .map(|(choice, label)| {
+                    cmd(app, "select.filter", label).with(json!({"mode": choice})).key(if mode == choice { "current" } else { "" })
                 })
                 .collect()
         }
@@ -2830,6 +2841,42 @@ mod tests {
         h.call("ui.menuPick", json!({"item":"Pan"}));
         assert_eq!(h.app.viewport.nav, None, "picking the latched tool releases it, as its navigation-bar button does");
         assert!(!error(&h));
+    }
+
+    #[test]
+    fn selection_filter_from_command_search_offers_its_modes_not_a_missing_mode_error() {
+        // #11505: command search started select.filter with no parameters, which could only fail.
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.status = None;
+        let error = |h: &crate::scenario::Harness| h.app.status.as_ref().is_some_and(|(_, _, error)| *error);
+        h.app.start("select.filter");
+        assert!(!error(&h), "{:?}", h.app.status);
+        assert_eq!(h.app.menu.target, Target::SelectionFilter);
+        assert!(h.app.viewport.context_menu.is_some());
+        let menu = describe(&h.app);
+        let labels: Vec<_> = menu["items"].as_array().unwrap().iter().map(|i| i["label"].as_str().unwrap().to_owned()).collect();
+        assert_eq!(labels, ["Faces", "Bodies", "Components"]);
+        let current = |h: &crate::scenario::Harness| {
+            items(&h.app, &Target::SelectionFilter).into_iter().filter(|i| i.shortcut == "current").map(|i| i.label).collect::<Vec<_>>()
+        };
+        assert_eq!(current(&h), ["Faces"]);
+        h.call("ui.menuPick", json!({"item":"Bodies"}));
+        assert!(h.app.ui.pick_bodies && !h.app.ui.pick_components);
+        assert!(h.app.viewport.context_menu.is_none());
+        assert!(!error(&h), "{:?}", h.app.status);
+        h.call("ui.start", json!({"command":"select.filter"}));
+        assert_eq!(current(&h), ["Bodies"]);
+        h.call("ui.menuPick", json!({"item":"Components"}));
+        assert!(h.app.ui.pick_components && !h.app.ui.pick_bodies);
+        h.app.start("select.filter");
+        h.call("ui.menuPick", json!({"item":"Faces"}));
+        assert!(!h.app.ui.pick_components && !h.app.ui.pick_bodies);
+        assert!(!error(&h), "{:?}", h.app.status);
+        // Programmatic calls keep their contract: no parameters is still refused, and opens no menu.
+        let missing = h.call("engine.execute", json!({"command":"select.filter","params":{}}));
+        assert_eq!(missing["ok"], false);
+        assert!(h.app.viewport.context_menu.is_none());
     }
 
     #[test]
