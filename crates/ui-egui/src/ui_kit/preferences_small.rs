@@ -196,12 +196,18 @@ pub(crate) fn settings_chip(ui: &mut Ui, label: &str, chip: SettingsChip<'_>) ->
 
 /// A labelled form block whose control column can contain several natural-height rows.
 pub(crate) fn settings_block<R>(ui: &mut Ui, label: &str, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
-    settings_block_content(ui, label, None, label_width, add)
+    settings_block_hint(ui, label, None, label_width, add)
 }
 
 /// A form block whose explanatory hint belongs below its label, beside the controls.
-pub(crate) fn settings_block_hint<R>(ui: &mut Ui, label: &str, hint: &str, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
-    settings_block_content(ui, label, Some(hint), label_width, add)
+pub(crate) fn settings_block_hint<'a, R>(
+    ui: &mut Ui,
+    label: &str,
+    hint: impl Into<Option<&'a str>>,
+    label_width: f32,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    settings_block_content(ui, label, hint.into(), label_width, add)
 }
 
 fn settings_block_content<R>(ui: &mut Ui, label: &str, hint: Option<&str>, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
