@@ -375,10 +375,7 @@ fn a_ball_as_wide_as_the_round_it_rolls_on_is_refused_saying_why() {
         Err(KernelError::TooLarge(why)) => why,
         other => panic!("{:?}", other.map(|b| b.face_count())),
     };
-    assert!(
-        why.contains("the ball is as wide as a face it rolls on, so its centre stays put and the round cannot end at the edge's end"),
-        "{why}"
-    );
+    assert!(why.contains("the ball is as wide as a face it rolls on, so its centre stays put and the round cannot end at the edge's end"), "{why}");
     // 2 less solidcore's fit margin.
     let largest: f64 = why
         .split_once("the largest radius that fits is ")

@@ -51,9 +51,9 @@ use solidcore::topology::edge::NotifyEnv;
 use solidcore::topology::face::p2 as face_p2;
 use solidcore::topology::{Brep, EdgeId, FaceId};
 
+use super::Body;
 use super::blend::status;
 use super::sweep::build_faces;
-use super::Body;
 use crate::ssi::Spec;
 use crate::{Error, Result};
 use solidcore::topology::brep::p3::brep_copy;

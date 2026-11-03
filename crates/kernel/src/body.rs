@@ -545,7 +545,9 @@ impl Body {
         self.smlib
             .get_or_init(|| solidcraft_smlib::Brep::from_record(&self.record, true).map_err(|e| Refusal::of(&self.record, &e)))
             .as_ref()
-            .map_err(|r| if r.internal { KernelError::Internal(format!("SMLib: {}", r.why)) } else { KernelError::Failed(format!("SMLib: {}", r.why)) })
+            .map_err(
+                |r| if r.internal { KernelError::Internal(format!("SMLib: {}", r.why)) } else { KernelError::Failed(format!("SMLib: {}", r.why)) },
+            )
     }
 
     /// Why SMLib refuses the body, if it does: the body is sent into SMLib as an operation

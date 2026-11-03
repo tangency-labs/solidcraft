@@ -122,8 +122,7 @@ pub fn map_on_threads<T: Sync, R: Send>(items: &[T], max_threads: usize, f: impl
             let mut out: Vec<Option<R>> = std::iter::repeat_with(|| None).take(items.len()).collect();
             std::thread::scope(|scope| {
                 // A thread that cannot start leaves its share to the others.
-                let helpers: Vec<_> =
-                    (1..threads).filter_map(|_| kernel_thread("solidcraft-each").spawn_scoped(scope, work).ok()).collect();
+                let helpers: Vec<_> = (1..threads).filter_map(|_| kernel_thread("solidcraft-each").spawn_scoped(scope, work).ok()).collect();
                 let mut all = work();
                 for h in helpers {
                     // `work` never panics (every item runs under the guard).
