@@ -407,6 +407,17 @@ fn spine_on_offsets(spine: &BSplineCurve, offsets: &[QuadricEquation; 2]) -> Res
     Ok(true)
 }
 
+/// Whether the rational curve `curve` lies on both quadrics `q` (each `X.A.X + 2 b.X + c = 0`),
+/// to the rounding of checking it: an exact class's proof for a conic, on its plane and its
+/// sphere or elliptic cylinder ([`crate::curve::from_parameters`]).
+///
+/// # Errors
+///
+/// `SM_ERR` without NURB data; those of the Bezier decomposition.
+pub fn curve_on_quadrics(curve: &BSplineCurve, q: &[QuadricEquation; 2]) -> Result<bool> {
+    spine_on_offsets(curve, q)
+}
+
 /// How a net's parameter runs along its spine (#2485): the spine's parameter is
 /// `a + b w`, `w` the net's u, or its v when `along_v`. Built as the identity in u; the
 /// net's reversals, reparametrisations and swaps move it as they move the net.

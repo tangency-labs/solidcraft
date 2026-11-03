@@ -24,6 +24,7 @@ pub mod crv_on_surf;
 pub mod curve;
 pub mod curve_cache;
 pub mod ellipse;
+pub mod from_parameters;
 pub mod hermite_curve;
 pub mod hyperbola;
 pub mod iso_curve;
