@@ -1,29 +1,34 @@
-//! Reverse engineering: classify an imported dumb solid, rebuild the flat-plate case.
+//! Reverse engineering: classify an imported dumb solid, rebuild the flat-plate
+//! and turned-shaft cases.
 //!
 //! `reverse.classify` is read-only evidence: it measures one imported body and
 //! reports whether it is a flat plate (rectangular outline, uniform thickness,
-//! round through-holes) with the numbers a rebuild needs. Anything else is a
-//! refusal with the reason, never a guess. `reverse.rebuild_plate` turns that
-//! evidence into a parametric tree (`solid.box` + `solid.hole`) so the part can
-//! be edited; `dry_run` returns the recipe without building, which is the
-//! human/LLM correction hook.
-
-use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+//! round through-holes) or a turned shaft (coaxial Z cylinder steps with flat
+//! ends), with the numbers a rebuild needs. Anything else is a refusal with
+//! the reason, never a guess. `reverse.rebuild_plate` / `reverse.rebuild_turned`
+//! turn that evidence into a parametric tree so the part can be edited;
+//! `dry_run` returns the recipe without building, which is the human/LLM
+//! correction hook.
 
 use super::CommandSpec;
 use crate::params::{bad, num, string_list};
 use crate::{Result, Session};
+use serde_json::{Value, json};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("reverse.classify", "Classify Imported Part", classify).icon("inspect").noundo().params(
-        "body?: name (default: the only body, else name one) → whether it is a flat plate: \
-         category, length, width, thickness, corner, holes [{center, diameter}], reasons, unmatched faces",
+        "body?: name (default: the only body, else name one) → flat plate or turned shaft: \
+         category, dimensions, holes or segments, reasons, unmatched faces",
     ),
     CommandSpec::new("reverse.rebuild_plate", "Rebuild Plate Parametrically", rebuild_plate).icon("box").params(
         "source?: body (default: the only body); holes?: keep detected holes (default true); \
          dry_run?: return the recipe without building (default false); name?: new body name \
          → the parametric rebuild (a box plus one hole feature per hole)",
+    ),
+    CommandSpec::new("reverse.rebuild_turned", "Rebuild Shaft Parametrically", rebuild_turned).icon("cylinder").params(
+        "source?: body (default: the only body); \
+         dry_run?: return the recipe without building (default false); name?: new body name \
+         → the parametric rebuild (one cylinder feature per shaft step)",
     ),
 ];
 
@@ -59,10 +64,8 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
 
 /// The single body to work on: named, or the only one when the design holds one.
 fn target_body(s: &mut Session, cmd: &str, p: &Value) -> Result<String> {
-    let want = string_list(p, "bodies");
-    let want_one = string_list(p, "body");
-    let mut want = want;
-    want.extend(want_one);
+    let mut want = string_list(cmd, p, "bodies")?;
+    want.extend(string_list(cmd, p, "body")?);
     let measured = s.execute("inspect.measure", &json!({}))?;
     let mut names: Vec<String> = measured
         .get("bodies")
@@ -110,6 +113,12 @@ fn classify_body(s: &mut Session, body: &str, tol: f64) -> Result<Value> {
         return Ok(refuse(&reasons, &unmatched, "the body has no bounding box"));
     };
     let size = [bmax[0] - bmin[0], bmax[1] - bmin[1], bmax[2] - bmin[2]];
+
+    // A shaft is all cylinder walls plus flat ends; check it before the plate
+    // branch so a plain rod is not mistaken for a plate with one big hole.
+    if let Some(turned) = classify_turned(&faces, bmin, bmax, size, tol, body, &mut reasons) {
+        return Ok(turned);
+    }
 
     // Plate faces: the two largest planar faces with opposite normals.
     let mut normals: Vec<([f64; 3], [f64; 3], f64, usize)> = Vec::new();
@@ -226,6 +235,105 @@ fn classify_body(s: &mut Session, body: &str, tol: f64) -> Result<Value> {
               "holes": holes, "reasons": reasons, "unmatched": unmatched}))
 }
 
+/// Stepped-shaft check: every face is a Z-parallel cylinder wall or a Z-normal
+/// planar ring (flat ends and shoulders). Returns `Some` when the body has the
+/// shaft signature — supported with the step list, or refused with the reason —
+/// and `None` when it is not a shaft at all (the plate branch runs next).
+#[allow(clippy::too_many_arguments)]
+fn classify_turned(
+    faces: &[&Value],
+    bmin: [f64; 3],
+    bmax: [f64; 3],
+    size: [f64; 3],
+    tol: f64,
+    body: &str,
+    reasons: &mut Vec<Value>,
+) -> Option<Value> {
+    let axis = [0.0, 0.0, 1.0];
+    let refuse = |reasons: &mut Vec<Value>, why: &str| {
+        reasons.push(json!(why));
+        Some(json!({"body": body, "supported": false, "category": "other",
+                    "reasons": reasons, "unmatched": []}))
+    };
+    // (radius, z0, z1, centre-x, centre-y) per wall, in face order.
+    let mut walls: Vec<(f64, f64, f64, f64, f64)> = Vec::new();
+    let mut ends = 0;
+    for f in faces {
+        if let Some(n) = f.get("plane_normal").and_then(v3) {
+            if dot(n, axis).abs() < PARALLEL_DOT {
+                return None; // a side face: not a shaft
+            }
+            ends += 1;
+            continue;
+        }
+        if let Some(cyl) = f.get("cylinder") {
+            let (Some(ax), Some(org), Some(r)) =
+                (cyl.get("axis").and_then(v3), cyl.get("origin").and_then(v3), cyl.get("radius").and_then(Value::as_f64))
+            else {
+                return None;
+            };
+            let alen = (ax[0] * ax[0] + ax[1] * ax[1] + ax[2] * ax[2]).sqrt();
+            let area = f.get("area").and_then(Value::as_f64).unwrap_or(0.0);
+            if alen <= 0.0 || r <= 0.0 || area <= 0.0 || dot([ax[0] / alen, ax[1] / alen, ax[2] / alen], axis).abs() < PARALLEL_DOT {
+                return None; // degenerate or off-axis wall: not a shaft
+            }
+            let h = area / (2.0 * std::f64::consts::PI * r);
+            let c = f.get("centroid").and_then(v3).unwrap_or(org);
+            walls.push((r, c[2] - h / 2.0, c[2] + h / 2.0, c[0], c[1]));
+            continue;
+        }
+        return None; // cone, sphere, anything else: not a shaft
+    }
+    if walls.is_empty() {
+        return None;
+    }
+    if ends < 2 {
+        return refuse(reasons, "shaft walls without both flat end faces");
+    }
+    // All walls share one axis line.
+    let (r0, _, _, cx, cy) = walls[0];
+    let _ = r0;
+    for (r, _, _, x, y) in &walls {
+        let _ = r;
+        let dx = x - cx;
+        let dy = y - cy;
+        let slack = COAXIAL_SLACK * tol;
+        if dx * dx + dy * dy > slack * slack {
+            return refuse(reasons, "cylinder walls are not coaxial");
+        }
+    }
+    // Steps tile the full height with no gaps. Tessellated wall areas read a
+    // touch short, so the coverage slack grows with the part, not just `tol`.
+    let slack = tol.max(0.005 * size[2]);
+    walls.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    if (walls[0].1 - bmin[2]).abs() > slack {
+        return refuse(reasons, "lowest wall does not reach the bottom face");
+    }
+    if (walls[walls.len() - 1].2 - bmax[2]).abs() > slack {
+        return refuse(reasons, "highest wall does not reach the top face");
+    }
+    for w in walls.windows(2) {
+        if w[1].1 - w[0].2 > slack {
+            return refuse(reasons, "gap between shaft steps the recipe cannot bridge");
+        }
+    }
+    // Snap the outer bounds to the measured box and split shared joints, so the
+    // rebuild volumes match instead of carrying tessellation error.
+    walls[0].1 = bmin[2];
+    let last = walls.len() - 1;
+    walls[last].2 = bmax[2];
+    for i in 0..last {
+        let mid = (walls[i].2 + walls[i + 1].1) / 2.0;
+        walls[i].2 = mid;
+        walls[i + 1].1 = mid;
+    }
+    let segments: Vec<Value> = walls.iter().map(|(r, z0, z1, _, _)| json!({"radius": r, "z0": z0, "z1": z1})).collect();
+    reasons.push(json!(format!("{} coaxial Z wall(s), flat ends, {:.3} mm tall", walls.len(), size[2])));
+    Some(json!({"body": body, "supported": true, "category": "turned",
+                "length": size[2], "center": [cx, cy], "bottom": bmin[2],
+                "segments": segments, "reasons": reasons, "unmatched": []}))
+}
+
 fn classify(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "reverse.classify";
     let tol = tolerance_mm(p, cmd)?;
@@ -244,7 +352,7 @@ fn rebuild_plate(s: &mut Session, p: &Value) -> Result<Value> {
     let found = classify_body(s, &source, tol)?;
     if !found.get("supported").and_then(Value::as_bool).unwrap_or(false) {
         let why = found.get("reasons").and_then(Value::as_array).and_then(|r| r.first()).cloned().unwrap_or(json!("unsupported shape"));
-        return Err(crate::params::bad(cmd, &format!("not supported yet: {why}")));
+        return Err(crate::params::bad(cmd, format!("not supported yet: {why}")));
     }
     let get = |k: &str| found.get(k).and_then(Value::as_f64).unwrap_or(0.0);
     let corner = found.get("corner").and_then(v3).unwrap_or([0.0, 0.0, 0.0]);
@@ -272,6 +380,48 @@ fn rebuild_plate(s: &mut Session, p: &Value) -> Result<Value> {
         built += 1;
     }
     Ok(json!({"body": name, "holes_built": holes.len(), "steps_built": built, "recipe": recipe}))
+}
+
+fn rebuild_turned(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "reverse.rebuild_turned";
+    let tol = tolerance_mm(p, cmd)?;
+    let source = target_body(s, cmd, p)?;
+    let dry_run = p.get("dry_run").and_then(Value::as_bool).unwrap_or(false);
+    let name = p.get("name").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| format!("{source}_shaft"));
+
+    let found = classify_body(s, &source, tol)?;
+    if found.get("category").and_then(Value::as_str) != Some("turned") || !found.get("supported").and_then(Value::as_bool).unwrap_or(false) {
+        let why = found.get("reasons").and_then(Value::as_array).and_then(|r| r.last()).cloned().unwrap_or(json!("unsupported shape"));
+        return Err(crate::params::bad(cmd, format!("not supported yet: {why}")));
+    }
+    let center = found.get("center").and_then(v3).unwrap_or([0.0, 0.0, 0.0]);
+    let segments: Vec<&Value> = found.get("segments").and_then(Value::as_array).map(|a| a.iter().collect()).unwrap_or_default();
+    let mut recipe: Vec<Value> = Vec::new();
+    for (i, seg) in segments.iter().enumerate() {
+        let r = seg.get("radius").and_then(Value::as_f64).unwrap_or(0.0);
+        let z0 = seg.get("z0").and_then(Value::as_f64).unwrap_or(0.0);
+        let z1 = seg.get("z1").and_then(Value::as_f64).unwrap_or(0.0);
+        let mut params = json!(
+            {"radius": r, "height": z1 - z0, "base": [center[0], center[1], z0],
+             "axis": "Z", "body_name": name});
+        if i > 0 {
+            // Same name alone does not fuse steps: join explicitly.
+            params["operation"] = json!("join");
+            params["targets"] = json!([name]);
+        }
+        recipe.push(json!({"id": "solid.cylinder", "params": params}));
+    }
+    if dry_run {
+        return Ok(json!({"dry_run": true, "recipe": recipe, "found": found}));
+    }
+    let mut built = 0;
+    for step in &recipe {
+        let id = step.get("id").and_then(Value::as_str).unwrap_or("");
+        let params = step.get("params").cloned().unwrap_or(json!({}));
+        s.execute(id, &params)?;
+        built += 1;
+    }
+    Ok(json!({"body": name, "segments_built": segments.len(), "steps_built": built, "recipe": recipe}))
 }
 
 #[cfg(test)]
@@ -328,13 +478,85 @@ mod tests {
     }
 
     #[test]
-    fn non_plate_refuses() {
+    fn rod_is_turned() {
         let mut s = Session::default();
         run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 20, "body_name": "Rod"}));
         let found = run(&mut s, "reverse.classify", json!({"body": "Rod"}));
+        assert_eq!(found["supported"], true, "classify: {found}");
+        assert_eq!(found["category"], "turned");
+        assert_eq!(found["segments"].as_array().map(Vec::len), Some(1), "segments: {found}");
+        let dry = run(&mut s, "reverse.rebuild_turned", json!({"source": "Rod", "dry_run": true}));
+        assert_eq!(dry["recipe"].as_array().map(Vec::len), Some(1), "recipe: {dry}");
+        let done = run(&mut s, "reverse.rebuild_turned", json!({"source": "Rod", "name": "Rod2"}));
+        assert_eq!(done["segments_built"], 1, "built: {done}");
+        let back = s.execute("inspect.measure", &json!({"bodies": ["Rod2"]})).unwrap();
+        let vol = back["bodies"][0]["volume_mm3"].as_f64().unwrap_or(0.0);
+        assert!((vol - std::f64::consts::PI * 100.0 * 20.0).abs() < 1.0, "volume: {back}");
+    }
+
+    #[test]
+    fn stepped_shaft_round_trip() {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 10, "base": [0, 0, 0], "body_name": "Shaft"}));
+        run(
+            &mut s,
+            "solid.cylinder",
+            json!({"radius": 6, "height": 10, "base": [0, 0, 10], "body_name": "Shaft", "operation": "join", "targets": ["Shaft"]}),
+        );
+        let dir = std::env::temp_dir().join("reverse_shaft_trip");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("shaft.step");
+        run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "format": "step"}));
+        let mut r = Session::default();
+        let _ = run(&mut r, "file.insert_step", json!({"path": path.to_string_lossy()}));
+        let mut bodies: Vec<String> = r.execute("inspect.measure", &json!({})).unwrap()["bodies"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|b| b.get("name")?.as_str().map(str::to_string)).collect())
+            .unwrap_or_default();
+        assert!(!bodies.is_empty(), "imported nothing");
+        if bodies.len() > 1 {
+            // Face-touching steps may import as separate bodies; fuse them.
+            let tools: Vec<Value> = bodies[1..].iter().map(|b| json!(b)).collect();
+            run(&mut r, "solid.combine", json!({"target": bodies[0], "tools": tools, "touching": "one_body"}));
+            bodies = r.execute("inspect.measure", &json!({})).unwrap()["bodies"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|b| b.get("name")?.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+        }
+        assert_eq!(bodies.len(), 1, "one fused body, got {bodies:?}");
+        let found = run(&mut r, "reverse.classify", json!({"body": bodies[0]}));
+        assert_eq!(found["supported"], true, "classify: {found}");
+        assert_eq!(found["category"], "turned");
+        assert_eq!(found["segments"].as_array().map(Vec::len), Some(2), "segments: {found}");
+        let done = run(&mut r, "reverse.rebuild_turned", json!({"source": bodies[0], "name": "Shaft2"}));
+        assert_eq!(done["segments_built"], 2, "built: {done}");
+        // The shared joint re-splits at its measured midpoint: tessellation-scale
+        // shift around the exact union volume.
+        let back = r.execute("inspect.measure", &json!({})).unwrap();
+        let vols: Vec<f64> = back["bodies"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter(|b| b.get("name").and_then(Value::as_str).unwrap_or("").starts_with("Shaft2"))
+                    .filter_map(|b| b.get("volume_mm3").and_then(Value::as_f64))
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert_eq!(vols.len(), 1, "one rebuilt body, got: {back}");
+        let want = std::f64::consts::PI * (100.0 * 10.0 + 36.0 * 10.0);
+        assert!((vols[0] - want).abs() < 15.0, "volume {}, want ~{want}: {back}", vols[0]);
+    }
+
+    #[test]
+    fn non_shaft_refuses() {
+        let mut s = Session::default();
+        run(&mut s, "solid.sphere", json!({"radius": 10, "body_name": "Ball"}));
+        let found = run(&mut s, "reverse.classify", json!({"body": "Ball"}));
         assert_eq!(found["supported"], false, "classify: {found}");
-        let err = s.execute("reverse.rebuild_plate", &json!({"source": "Rod"}));
-        assert!(err.is_err(), "rebuild must refuse");
+        let err = s.execute("reverse.rebuild_plate", &json!({"source": "Ball"}));
+        assert!(err.is_err(), "plate rebuild must refuse");
+        let err = s.execute("reverse.rebuild_turned", &json!({"source": "Ball"}));
+        assert!(err.is_err(), "turned rebuild must refuse");
     }
 
     #[test]
