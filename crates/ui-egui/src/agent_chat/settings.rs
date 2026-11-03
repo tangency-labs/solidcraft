@@ -502,6 +502,10 @@ fn instructions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
         let id = egui::Id::new("prefs_agent_instructions");
         let text = &mut app.preferences.agent_instructions;
         let response = ui_kit::text_area(ui, tr("ai.prefs.instructions"), id, text, 6, acp::INSTRUCTIONS_LIMIT);
+        if response.has_focus() {
+            // Typed text belongs to the field, not to Preferences search.
+            crate::prefs_search::note_key_sink(ui.ctx());
+        }
         crate::scenario::publish_target("prefs:agent_instructions", response.rect);
         ui_kit::text(ui, tr("ai.prefs.instructions_note"), ui_kit::Text::Hint("instructions"));
     });
