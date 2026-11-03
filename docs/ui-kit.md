@@ -865,8 +865,9 @@ shared token paint and hit targets. All are exercised in the kit gallery.
 
 The compact `settings_choice_row` variant reuses the shared settings radio-card painter
 for preset lists: 40 pt rows, right-aligned summaries and the active workspace accent.
-`progress_action` keeps a status caption, bounded progress track and Cancel action on
-one row inside a Navigation card. `Container::below_navigation_row` reserves that card
+`progress_action` keeps a name, a status, a bounded progress track and a Cancel action on
+one row inside a Navigation card. Cancel and the status always show whole; a long name is
+cut first (ellipsis, full name on hover), then the track narrows. `Container::below_navigation_row` reserves that card
 and its shared gap above an inline result toolbar.
 
 `number_pair` extends the shared value-pair row to bounded numeric fields (such as

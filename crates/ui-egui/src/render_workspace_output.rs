@@ -583,7 +583,7 @@ fn render_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     );
     ui_kit::completion_text(ui, &text, app.render_workspace.view.completed.is_some());
     if super::ribbon::busy(app) {
-        super::progress_pill(app, ui);
+        super::progress_pill(app, ui, "render:output-progress");
         return;
     }
     ui.horizontal_wrapped(|ui| {

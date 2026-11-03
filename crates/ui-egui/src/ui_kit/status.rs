@@ -213,15 +213,41 @@ pub(crate) fn check_status_line(ui: &mut egui::Ui, key: &str, label: &str, statu
     response
 }
 
-/// Single-row render status for a shared Navigation card. The caller dispatches Cancel.
-pub(crate) fn progress_action(ui: &mut egui::Ui, caption: &str, fraction: f32, cancel: &str) -> egui::Response {
+/// Single-row render status for a shared Navigation card: name, status, meter and Cancel, within
+/// the width the caller's `ui` offers. Cancel and the status always show in full; a long name
+/// gives way first (cut with an ellipsis, its full text on hover), then the meter narrows
+/// (#11222). Publishes `dialog:progress:KEY`, `KEY:name` with `KEY:name:cut`, and `KEY:cancel`.
+/// The caller dispatches Cancel. Tokens: `font_label, form_ink, space_24, control_height`.
+pub(crate) fn progress_action(ui: &mut egui::Ui, key: &str, name: &str, status: &str, fraction: f32, cancel: &str) -> egui::Response {
     let t = Tokens::get();
     ui.horizontal(|ui| {
-        super::text(ui, caption, super::Text::Inline);
-        ui.allocate_ui_with_layout(vec2(t.space_24 * 6.0, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            progress(ui, "render-pill", fraction);
-        });
-        super::button(ui, cancel, super::Button::Normal)
+        let font = egui::FontId::proportional(t.font_label);
+        let measure = |ui: &egui::Ui, text: &str| ui.painter().layout_no_wrap(text.to_owned(), font.clone(), t.form_ink).size().x.ceil();
+        let gap = ui.spacing().item_spacing.x;
+        let status_width = measure(ui, status);
+        let cancel_width = measure(ui, cancel) + 2.0 * ui.spacing().button_padding.x;
+        let (meter_full, meter_min, name_min) = (t.space_24 * 6.0, t.space_24 * 2.0, t.space_24);
+        // What the name and the meter share once the status, Cancel and the gaps have their room.
+        let shared = (ui.available_width() - status_width - cancel_width - 3.0 * gap).max(0.0);
+        let name_natural = measure(ui, name);
+        // The name keeps its length while the full meter still fits beside it; past that it is
+        // cut, down to `name_min`, and only then does the meter narrow, down to `meter_min`.
+        let name_width = name_natural.min((shared - meter_full).max(name_min));
+        let meter = (shared - name_width).min(meter_full).max(meter_min);
+        let fixed = |ui: &mut egui::Ui, width: f32, add: &dyn Fn(&mut egui::Ui) -> egui::Response| {
+            ui.allocate_ui_with_layout(vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), add).inner
+        };
+        let shown = fixed(ui, name_width, &|ui| super::text(ui, name, super::Text::Inline));
+        let cut = name_natural > name_width + 0.5;
+        crate::scenario::publish_rect(&format!("{key}:name"), shown.rect);
+        crate::scenario::publish_count(&format!("{key}:name:cut"), f64::from(u8::from(cut)));
+        fixed(ui, status_width, &|ui| super::text(ui, status, super::Text::Inline));
+        fixed(ui, meter, &|ui| progress(ui, key, fraction));
+        // Cancel keeps its whole label whatever room the row has left.
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+        let response = super::button(ui, cancel, super::Button::Normal);
+        crate::scenario::publish_rect(&format!("{key}:cancel"), response.rect);
+        response
     })
     .inner
 }
