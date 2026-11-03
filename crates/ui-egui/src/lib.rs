@@ -194,6 +194,7 @@ pub mod network_prompt;
 pub mod op_auto;
 pub mod open_elsewhere;
 pub(crate) mod open_meshing;
+pub mod panel_runtime;
 pub mod params_dialog;
 pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
@@ -509,6 +510,8 @@ pub(crate) enum EscapeOwner {
 }
 
 pub struct SolveApp {
+    /// Common panel foundation, internal opt-in; stays on the app across document tabs.
+    pub(crate) panel_runtime: Option<panel_runtime::AppPanelRuntime>,
     pub blur: blur::State,
     pub(crate) viewport_status: ui_kit::StatusPresentation,
     pub(crate) viewport_status_fixture: viewport_status_fixture::Fixture,
@@ -784,6 +787,7 @@ impl SolveApp {
         #[cfg(not(target_arch = "wasm32"))]
         solidcraft_engine::slicer_files::clean_old();
         let mut app = SolveApp {
+            panel_runtime: None,
             viewport_status: Default::default(),
             blur: Default::default(),
             viewport_status_fixture: Default::default(),
@@ -2794,6 +2798,7 @@ impl SolveApp {
 
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
+        panel_runtime::tick_app(self);
         // Sleep/wake often skips frames without a device-lost signal; refresh egui GPU textures
         // when the frame clock jumps so the chrome is not stuck blank (#8749).
         let frame_time = ctx.input(|i| i.time);
