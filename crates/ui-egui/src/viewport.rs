@@ -11516,6 +11516,18 @@ mod tests {
         assert_eq!(crate::face_index::FaceIndex::new(&m).surface_patch(&m, 1234), (0..n as usize).collect::<Vec<_>>());
     }
 
+    /// The highest face number (`usize::MAX`, which is `u32::MAX` on wasm32, as `Mesh::append`
+    /// gives when its numbering saturates) gets no slot: it is neither counted into slot 0 by a
+    /// wrapping `+ 1` nor a panic, and the slot count stays bounded by the face references.
+    #[test]
+    fn face_index_takes_the_highest_face_number_without_overflow() {
+        let (start, items) = crate::face_index::csr(2, [(0, 5u32), (usize::MAX, 7), (1, 9)].into_iter());
+        assert_eq!((start, items), (vec![0, 1, 2], vec![5, 9]));
+        assert_eq!(crate::face_index::slot_count(Some(usize::MAX), 10), 11);
+        assert_eq!(crate::face_index::slot_count(Some(3), usize::MAX), 4);
+        assert_eq!(crate::face_index::slot_count(None, usize::MAX), 0);
+    }
+
     /// A hovered surface of many pieces is lit from the meshes' face indexes: the same
     /// triangles, in the same order and colours, and the same edges, as the scans per face it
     /// replaced (`surface_patch`, then one pass over the body's triangles per piece, then every

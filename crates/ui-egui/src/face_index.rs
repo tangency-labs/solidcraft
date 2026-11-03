@@ -31,11 +31,20 @@ pub(crate) struct FaceIndex {
     overflow: bool,
 }
 
-/// `start` and `items` (a CSR list) from `(slot, item)` pairs in item order.
-fn csr(slots: usize, pairs: impl Iterator<Item = (usize, u32)> + Clone) -> (Vec<usize>, Vec<u32>) {
-    let mut start = vec![0usize; slots + 1];
+/// How many face slots an index keeps, given the highest face number seen and how many face
+/// references the mesh has: enough for every honest face number, never more than the references.
+/// Saturating: a face number of `usize::MAX` (`u32::MAX` on wasm32, which `Mesh::append` can
+/// give) still lands beyond the slots and is found by a scan.
+pub(crate) fn slot_count(highest: Option<usize>, refs: usize) -> usize {
+    highest.map_or(0, |h| h.saturating_add(1).min(refs.saturating_add(1)))
+}
+
+/// `start` and `items` (a CSR list) from `(slot, item)` pairs in item order. A pair whose slot
+/// is beyond `slots` is left out.
+pub(crate) fn csr(slots: usize, pairs: impl Iterator<Item = (usize, u32)> + Clone) -> (Vec<usize>, Vec<u32>) {
+    let mut start = vec![0usize; slots.saturating_add(1)];
     for (f, _) in pairs.clone() {
-        if let Some(c) = start.get_mut(f + 1) {
+        if let Some(c) = f.checked_add(1).and_then(|n| start.get_mut(n)) {
             *c += 1;
         }
     }
@@ -59,10 +68,9 @@ fn csr(slots: usize, pairs: impl Iterator<Item = (usize, u32)> + Clone) -> (Vec<
 
 impl FaceIndex {
     pub(crate) fn new(m: &Mesh) -> FaceIndex {
-        // As many slots as the mesh has face references: enough for every honest face number.
         let refs = m.tri_face.len() + m.edge_faces.iter().map(Vec::len).sum::<usize>();
         let highest = m.tri_face.iter().chain(m.edge_faces.iter().flatten()).map(|&f| f as usize).max();
-        let slots = highest.map_or(0, |h| (h + 1).min(refs + 1));
+        let slots = slot_count(highest, refs);
         let overflow = highest.is_some_and(|h| h >= slots);
         let tri_pairs = m.tri_face.iter().take(m.triangles.len()).enumerate().filter_map(|(t, &f)| Some((f as usize, u32::try_from(t).ok()?)));
         let (tri_start, tris) = csr(slots, tri_pairs);
@@ -76,7 +84,7 @@ impl FaceIndex {
     }
 
     fn slot<'a>(start: &[usize], items: &'a [u32], face: usize) -> Option<&'a [u32]> {
-        let (&a, &b) = (start.get(face)?, start.get(face + 1)?);
+        let (&a, &b) = (start.get(face)?, start.get(face.checked_add(1)?)?);
         items.get(a..b)
     }
 
