@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>Save your SolidCraft designs as files</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 44rem; margin: 2.5rem auto; padding: 0 1rem; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th, td { text-align: left; padding: .4rem .6rem .4rem 0; border-bottom: 1px solid #8884; }
+  td:first-child { overflow-wrap: anywhere; }
+  td.size, th:nth-child(2) { white-space: nowrap; }
+  button { font: inherit; padding: .2rem .7rem; white-space: nowrap; }
+</style>
+</head>
+<body>
+<main id="page" hidden>
+  <h1>Save your SolidCraft designs as files</h1>
+  <p>This page is at the old address of the SolidCraft web app. It lists the designs this browser
+  keeps for that address, so you can save each one as a file and open it at
+  <a href="https://app.solidcraft.io/">app.solidcraft.io</a> with File &gt; Open. Nothing here is
+  sent anywhere, and nothing at the old address is changed or deleted.</p>
+  <p id="status" role="status">Looking for designs…</p>
+  <table id="table" hidden>
+    <thead><tr><th>Design</th><th>Size</th><th></th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <p>Most browsers can do this for you in one step:
+  <a href="https://app.solidcraft.io/move-designs.html">bring your designs over to the new address</a>.</p>
+  <p>The <a href="/app/">old app</a> can also do this: File &gt; Files in this browser…, then Download beside each design.</p>
+</main>
+<noscript>This page needs JavaScript to read the designs your browser keeps for this address.</noscript>
+<script src="app-transfer.js"></script>
+</body>
+</html>
