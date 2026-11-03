@@ -35,7 +35,7 @@ fn checkbox_keyboard_pointer_disabled_and_mixed() {
                     frame(&ctx, pointer(at, true), &mut draw);
                     frame(&ctx, pointer(at, false), &mut draw);
                 }
-                let toggles = enabled && activation != Some(egui::Key::Enter);
+                let toggles = enabled;
                 assert_eq!(on, toggles, "mixed={mixed}, enabled={enabled}, key={activation:?}");
                 assert_eq!(changed, toggles);
             }
@@ -483,21 +483,23 @@ fn checkbox_variants_use_space_to_toggle_and_enter_to_apply_the_dialog() {
         let mut draw = |ui: &mut Ui| {
             crate::dialog_focus::prepare_active(ui.ctx());
             let (_, action) = Window::new(egui::Id::new("checkbox_dialog"), "", "Test").show(ui.ctx(), true, |ui| {
-                let mut on = value.get();
-                match variant {
-                    0 => target.set(checkbox(ui, "Option", &mut on).rect),
-                    1 => {
-                        ui_kit::checkbox_grid(ui, &mut [("Option", &mut on)], 1);
-                        target.set(crate::scenario::rect_of("dialog:checkbox:Option").unwrap());
-                    }
-                    _ => {
-                        if ui_kit::checkbox_row(ui, "option", "Option", on) {
-                            on = !on;
+                super::super::fields::with_feature_form(ui, |ui| {
+                    let mut on = value.get();
+                    match variant {
+                        0 => target.set(checkbox(ui, "Option", &mut on).rect),
+                        1 => {
+                            ui_kit::checkbox_grid(ui, &mut [("Option", &mut on)], 1);
+                            target.set(crate::scenario::rect_of("dialog:checkbox:Option").unwrap());
                         }
-                        target.set(crate::scenario::rect_of("sketch_palette:toggle:option").unwrap());
+                        _ => {
+                            if ui_kit::checkbox_row(ui, "option", "Option", on) {
+                                on = !on;
+                            }
+                            target.set(crate::scenario::rect_of("sketch_palette:toggle:option").unwrap());
+                        }
                     }
-                }
-                value.set(on);
+                    value.set(on);
+                });
             });
             if action == Action::Ok {
                 applied.set(true);

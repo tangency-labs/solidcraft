@@ -2749,6 +2749,7 @@ pub(crate) fn prepare_tab(app: &SolveApp, ctx: &egui::Context) {
     }
     if let Some(d) = &app.dialog
         && !d.collapsed
+        && app.preferences.dialog_tab_navigation
         && selection_tab_order(&d.kind)
     {
         d.tab_through.begin(ctx, d.active, egui::Id::unique("sc_canvas_value"));
@@ -3035,7 +3036,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     let t = Tokens::get();
     let mut clear: Option<usize> = None;
     let mut activate: Option<usize> = None;
-    let tab_order = selection_tab_order(&d.kind);
+    let tab_order = selection_tab_order(&d.kind) && crate::dialog_focus::navigation_enabled(ui.ctx());
     let mut remove = None;
     // Only one field may look active at a time (#10066): while a text editor holds the keyboard,
     // no pick field draws its accent ring, and clicking a pick field takes the keyboard back.

@@ -589,7 +589,7 @@ fn section_with_badge<R>(
                 row_height()
             },
         ),
-        egui::Sense::CLICK,
+        if crate::dialog_focus::in_scope(ui.ctx()) { egui::Sense::CLICK } else { egui::Sense::click() },
     );
     crate::prefs_search::follow(ui, title, rect);
     if response.hovered() || response.has_focus() {

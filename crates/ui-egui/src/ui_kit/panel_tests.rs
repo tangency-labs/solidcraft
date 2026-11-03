@@ -2903,7 +2903,7 @@ fn dialog_keyboard_closed_dropdown_enter_applies_and_space_opens_all_variants() 
         let mut draw = |ui: &mut Ui| {
             crate::dialog_focus::prepare_active(ui.ctx());
             let (_, action) = Window::new(egui::Id::new("dropdown_enter"), "", "Test").show(ui.ctx(), true, |ui| {
-                super::super::fields::with_dropdown_enter_to_apply(ui, |ui| {
+                super::super::fields::with_feature_form(ui, |ui| {
                     row(ui, "Mode", |ui| {
                         id.set(ui.make_persistent_id(egui::IdSalt::new("mode")));
                         let mut value = selected.get();

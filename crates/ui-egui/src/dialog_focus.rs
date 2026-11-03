@@ -5,6 +5,14 @@ pub(crate) fn configure(ctx: &egui::Context, enabled: bool, folded: Option<egui:
     ctx.data_mut(|d| d.insert_temp(egui::Id::new("dialog_tab_policy"), (enabled, folded)));
 }
 
+pub(crate) fn navigation_enabled(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<(bool, Option<egui::Id>)>(egui::Id::new("dialog_tab_policy"))).is_none_or(|(enabled, _)| enabled)
+}
+
+pub(crate) fn in_scope(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<egui::Id>(current_id())).is_some()
+}
+
 fn enabled(ctx: &egui::Context, id: egui::Id) -> bool {
     ctx.data(|d| d.get_temp::<(bool, Option<egui::Id>)>(egui::Id::new("dialog_tab_policy")))
         .is_none_or(|(enabled, folded)| enabled && folded != Some(id))

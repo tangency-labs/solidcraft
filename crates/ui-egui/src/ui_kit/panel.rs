@@ -707,7 +707,7 @@ impl<'a> Panel<'a> {
     ) -> Option<egui::InnerResponse<Option<R>>> {
         let window = self.window(ctx);
         let window = if let Some(open) = open { window.open(open) } else { window };
-        window.show(ctx, |ui| super::fields::with_dropdown_enter_to_apply(ui, |ui| crate::dialog_focus::scope(ui, self.id, add)))
+        window.show(ctx, |ui| super::fields::with_feature_form(ui, |ui| crate::dialog_focus::scope(ui, self.id, add)))
     }
 
     pub(crate) fn window(&self, ctx: &egui::Context) -> super::container::FeatureWindow<'a> {

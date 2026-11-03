@@ -421,20 +421,25 @@ fn segmented_space_and_arrows_choose_while_enter_applies_the_dialog() {
         let mut draw = |ui: &mut Ui| {
             crate::dialog_focus::prepare_active(ui.ctx());
             let (_, action) = Window::new(egui::Id::new("segment_dialog"), "", "Test").show(ui.ctx(), true, |ui| {
-                row(ui, "Continuity", |ui| {
-                    target.set(ui.make_persistent_id((if icons { "icon_segment" } else { "segment" }, 1usize)));
-                    let mut value = selected.get();
-                    if icons {
-                        segmented_icons(
-                            ui,
-                            &mut value,
-                            &[IconSegment { key: "G1", icon: "line", tip: "G1".into() }, IconSegment { key: "G2", icon: "circle", tip: "G2".into() }],
-                            &[],
-                        );
-                    } else {
-                        segmented(ui, &mut value, &["G1", "G2"], Segments { compact: true, ..Default::default() });
-                    }
-                    selected.set(value);
+                super::super::fields::with_feature_form(ui, |ui| {
+                    row(ui, "Continuity", |ui| {
+                        target.set(ui.make_persistent_id((if icons { "icon_segment" } else { "segment" }, 1usize)));
+                        let mut value = selected.get();
+                        if icons {
+                            segmented_icons(
+                                ui,
+                                &mut value,
+                                &[
+                                    IconSegment { key: "G1", icon: "line", tip: "G1".into() },
+                                    IconSegment { key: "G2", icon: "circle", tip: "G2".into() },
+                                ],
+                                &[],
+                            );
+                        } else {
+                            segmented(ui, &mut value, &["G1", "G2"], Segments { compact: true, ..Default::default() });
+                        }
+                        selected.set(value);
+                    });
                 });
             });
             if action == Action::Ok {

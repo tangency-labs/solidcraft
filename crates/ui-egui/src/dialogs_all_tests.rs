@@ -1706,6 +1706,34 @@ fn keyboard_body_fixture(command: &str, placement: crate::ui_kit::DialogButtons,
 }
 
 #[test]
+fn dialog_tab_preference_off_reaches_mirror_and_pattern_clear_buttons() {
+    for command in ["solid.mirror", "solid.pattern.rectangular", "solid.pattern.circular"] {
+        let mut h = keyboard_body_fixture(command, crate::ui_kit::DialogButtons::Bottom, true);
+        h.app.preferences.dialog_tab_navigation = false;
+        h.frames(3);
+        let label = h.app.dialog.as_ref().unwrap().inputs[0].label;
+        let chip = crate::scenario::handle_at(&format!("dialog:{label}")).unwrap();
+        h.step(&json!({"click":[chip.x, chip.y]})).unwrap();
+        let mut visited = Vec::new();
+        for _ in 0..96 {
+            h.step(&json!({"key":"Tab"})).unwrap();
+            let clear = crate::scenario::handle_at(&format!("dialog:clear:{label}")).unwrap();
+            if let Some(response) = h.ctx.memory(|m| m.focused()).and_then(|id| h.ctx.read_response(id)) {
+                if response.rect.center().distance(clear) < 0.5 {
+                    h.step(&json!({"key":"Space"})).unwrap();
+                    assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty(), "{command}: Space clears the selection");
+                    break;
+                }
+                if !visited.contains(&response.rect) {
+                    visited.push(response.rect);
+                }
+            }
+        }
+        assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty(), "{command}: native Tab must reach Clear. Focused rectangles: {visited:?}");
+    }
+}
+
+#[test]
 fn dialog_keyboard_body_mirror_and_patterns_traverse_and_apply() {
     use crate::test_support::{dialog_tab_cycle, dialog_tab_to};
     for command in ["solid.mirror", "solid.pattern.rectangular", "solid.pattern.circular"] {

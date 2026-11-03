@@ -10,6 +10,10 @@ including `s30_pattern_a_hole`, remain complementary end-to-end coverage.
 The Design preferences option **Keep Tab inside dialogs** is on by default.
 Turning it off restores native Tab traversal and Tab/Shift+Tab cycling the
 floating Move editor through its axes. Other activation keys are unchanged.
+Outside feature forms, Enter retains native checkbox and segment activation.
+Outside dialog focus loops, section headings retain native keyboard activation.
+Turning off the preference restores native Tab access to selection clear and remove actions.
+
 Collapsed feature dialogs have no form Tab loop; their visible actions remain
 in native Tab order, and expanding restores the loop.
 A separate foreground window still owns its own Tab loop above a collapsed feature.
@@ -27,11 +31,11 @@ A separate foreground window still owns its own Tab loop above a collapsed featu
 | Selection chip | Enter | Apply the existing valid configuration; do not activate a different input. |
 | Numeric expression field | Tab into field | Select only a plain numeric value, leaving its unit intact. For an expression, select the whole expression. |
 | Checkbox | Space | Toggle its value, retaining the dialog. |
-| Checkbox | Enter | Apply without toggling. Works for checked, unchecked, mixed, grid, and full-row variants. |
+| Feature-form checkbox | Enter | Apply without toggling. Works for checked, unchecked, mixed, grid, and full-row variants. |
 | Text/icon segments, such as G1/G2 or alignment | Tab | Focus a choice without selecting it. |
 | Text/icon segments | Space | Select the focused choice without applying. |
 | Text/icon segments | Arrows | Select and focus an adjacent enabled choice; skip disabled choices and stay inside the group at its boundaries. |
-| Text/icon segments | Enter | Apply without selecting the focused choice. A focused G2 must not replace the already selected G1. |
+| Feature-form text/icon segments | Enter | Apply without selecting the focused choice. A focused G2 must not replace the already selected G1. |
 | Closed feature-dialog dropdown | Enter | Apply without opening the popup or changing its value. |
 | Closed dropdown | Space | Open the popup. |
 | Closed indexed dropdown | Up/Down | Choose the previous/next option, keeping focus on the field. Stop at the ends. |
@@ -45,7 +49,7 @@ A separate foreground window still owns its own Tab loop above a collapsed featu
 | Invalid or incomplete configuration | Enter | Keep the dialog open; do not create geometry or an undo step. |
 | Dialog, with no popup owning Escape | Escape | Cancel without committing preview geometry or field edits. |
 
-Tab skips section headings, the title drag area, Close icons, quantity up/down
+In dialog focus loops, Tab skips section headings, the title drag area, Close icons, quantity up/down
 arrows, and disabled controls. Quantity arrows and Close remain mouse controls.
 Pattern/Mirror auxiliary selection clear/remove targets are also pointer-only.
 Other enabled action buttons remain in the native order. The top-button layout

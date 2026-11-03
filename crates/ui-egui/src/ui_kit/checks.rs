@@ -51,9 +51,9 @@ pub(super) fn paint_box(ui: &Ui, square: Rect, response: &Response, on: bool, mi
     }
 }
 
-/// Space activates a value choice; leave Enter unconsumed for the dialog's OK handler.
+/// Feature forms reserve Enter for OK. Other controls retain native activation.
 pub(super) fn activated(response: &Response) -> bool {
-    if response.has_focus() && response.ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+    if super::fields::feature_form_active(&response.ctx) && response.has_focus() && response.ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
         response.surrender_focus();
         false
     } else {
