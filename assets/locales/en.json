@@ -2710,8 +2710,6 @@
   "prefs.zoom_stop_at_model": "Stop zoom at the model",
   "prefs.zoom_stop_at_model_tip": "The 3D mouse and device app zoom toward the surface in the middle of the view; drag-zoom holds the point where the drag began. Off: zoom can pass through the model. Wheel and pinch use Zoom to the cursor separately",
   "prefs.zoom_toward_cursor": "Zoom, toward the cursor",
-  "prefs.rounded_titlebar": "Rounded titlebar",
-  "prefs.rounded_titlebar_help": "Round the titlebar's corners facing the canvas while using floating layout.",
   "properties.title": "Properties: {name}",
   "recovery.days_ago": "{count} days ago",
   "recovery.detail": "{file} · {features} features · autosaved {when}",

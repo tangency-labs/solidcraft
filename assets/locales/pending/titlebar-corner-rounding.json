@@ -1,0 +1,6 @@
+{
+  "en": {
+    "prefs.rounded_titlebar": "Rounded titlebar",
+    "prefs.rounded_titlebar_help": "Round the titlebar's corners facing the canvas while using floating layout."
+  }
+}
