@@ -96,7 +96,9 @@ pub(crate) use preferences_cards::*;
 pub(crate) use preferences_figures::{ThemeSample, paint_theme_system, paint_theme_thumbnail};
 pub(crate) use preferences_navigation::*;
 pub(crate) use preferences_small::*;
-pub(crate) use radial::{RADIAL_RADIUS, radial_menu};
+#[cfg(test)]
+pub(crate) use radial::radial_menu;
+pub(crate) use radial::{RadialLayout, radial_menu_layers, radial_preview};
 pub(crate) use reports::*;
 pub(crate) use review::ReviewAndApply;
 pub(crate) use search::{CommandSearch, SearchBadge, SearchFieldGeometry};
