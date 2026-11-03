@@ -1,4 +1,7 @@
-use crate::display_units::{DecimalMarker, DimensionStyle, DimensionValue, NumberFormat, Ties, format_dimension};
+use crate::display_units::{
+    AlternatePlacement, AlternateUnit, AngleFormat, AngleToleranceRuns, DecimalMarker, DeviationSign, DimensionPresentation, DimensionStyle,
+    DimensionValue, NumberFormat, PresentedPrimary, Ties, format_angle_dimension_runs, format_dimension, format_presented_dimension,
+};
 use crate::expr::Kind;
 use crate::tolerance::{DimensionWarning, Frame, Indicator, Repeat, Role, Tolerance, TolerancePresentation, ToleranceText};
 use crate::{DocError, Result};
@@ -24,6 +27,205 @@ fn style() -> DimensionStyle {
         tolerance_decimals: 2,
         repeat: Repeat::Times,
     }
+}
+
+#[test]
+fn angular_minute_runs_keep_unrounded_limits_and_metadata() {
+    let mut v = value(30.5_f64.to_radians(), Tolerance::Deviations { upper: 0.25_f64.to_radians(), lower: -0.5_f64.to_radians() });
+    v.kind = Kind::Angle;
+    v.presentation = TolerancePresentation::Limits;
+    v.count = 4;
+    let mut s = style();
+    s.unit = "deg".into();
+    s.tolerance_decimals = 0;
+    let runs = format_angle_dimension_runs(&v, &s).unwrap();
+    assert_eq!(runs.nominal.plain(), "30°30′");
+    assert_eq!(runs.count.as_deref(), Some("4× "));
+    match runs.tolerance {
+        AngleToleranceRuns::Limits { upper, lower } => {
+            assert_eq!(upper.plain(), "30°45′");
+            assert_eq!(lower.plain(), "30°00′");
+        }
+        other => panic!("expected limits: {other:?}"),
+    }
+    assert_eq!(format_dimension(&v, &s).unwrap().nominal, "30", "legacy decimal output remains unchanged");
+}
+
+#[test]
+fn angular_minute_runs_keep_signs_and_use_minute_rounding_for_warning() {
+    let mut v = value(30.504_f64.to_radians(), Tolerance::Deviations { upper: 0.005_f64.to_radians(), lower: -0.005_f64.to_radians() });
+    v.kind = Kind::Angle;
+    let mut s = style();
+    s.unit = "degrees".into();
+    s.tolerance_decimals = 0;
+    assert!(!format_dimension(&v, &s).unwrap().warnings.is_empty(), "decimal-degree rounding moves the nominal by nearly half a degree");
+    let runs = format_angle_dimension_runs(&v, &s).unwrap();
+    assert_eq!(runs.nominal.plain(), "30°30′");
+    assert!(runs.warnings.is_empty(), "minute rounding is within the tolerance");
+    match runs.tolerance {
+        AngleToleranceRuns::Deviations { upper, lower } => {
+            assert_eq!(upper.sign, DeviationSign::Zero);
+            assert_eq!(lower.sign, DeviationSign::Zero);
+        }
+        other => panic!("expected deviations: {other:?}"),
+    }
+    v.tolerance = Tolerance::Symmetric { deviation: 0.001_f64.to_radians() };
+    assert_eq!(format_angle_dimension_runs(&v, &s).unwrap().warnings, [DimensionWarning::RoundingOutsideTolerance]);
+    v.role = Role::Auxiliary;
+    assert!(format_angle_dimension_runs(&v, &s).is_err());
+    v.tolerance = Tolerance::None;
+    assert_eq!(format_angle_dimension_runs(&v, &s).unwrap().frame, Frame::Parentheses);
+    v.kind = Kind::Length;
+    assert!(format_angle_dimension_runs(&v, &s).is_err());
+}
+
+#[test]
+fn angular_stacked_minutes_keep_shared_precision() {
+    let minute = |x: f64| (x / 60.0).to_radians();
+    let mut v = value(30_f64.to_radians(), Tolerance::Deviations { upper: minute(1.5), lower: -minute(1.25) });
+    v.kind = Kind::Angle;
+    let mut s = style();
+    s.unit = "deg".into();
+    s.tolerance_decimals = 2;
+    s.number.trailing_zeros = false;
+    match format_angle_dimension_runs(&v, &s).unwrap().tolerance {
+        AngleToleranceRuns::Deviations { upper, lower } => {
+            assert_eq!(upper.sign, DeviationSign::Positive);
+            assert_eq!(upper.magnitude.minutes, "01,50");
+            assert_eq!(lower.sign, DeviationSign::Negative);
+            assert_eq!(lower.magnitude.minutes, "01,25");
+        }
+        other => panic!("expected deviations: {other:?}"),
+    }
+    v.nominal = 0.0;
+    v.presentation = TolerancePresentation::Limits;
+    v.tolerance = Tolerance::Deviations { upper: minute(0.25), lower: 0.0 };
+    match format_angle_dimension_runs(&v, &s).unwrap().tolerance {
+        AngleToleranceRuns::Limits { upper, lower } => {
+            assert_eq!(upper.minutes, "00,25");
+            assert_eq!(lower.minutes, "00,00");
+        }
+        other => panic!("expected limits: {other:?}"),
+    }
+}
+
+#[test]
+fn presented_dimension_uses_separate_primary_and_alternate_units() {
+    let v = value(25.4, Tolerance::None);
+    let mut s = style();
+    s.decimals = 1;
+    let p = DimensionPresentation {
+        alternate: Some(AlternateUnit { unit: "in".into(), decimals: 3, place: AlternatePlacement::Brackets }),
+        ..DimensionPresentation::default()
+    };
+    let result = format_presented_dimension(&v, &s, &p, "mm").unwrap();
+    match result.primary {
+        PresentedPrimary::Decimal { text, unit } => {
+            assert_eq!(text.nominal, "25,4");
+            assert_eq!(unit, None);
+        }
+        other => panic!("expected decimal: {other:?}"),
+    }
+    let alternate = result.alternate.unwrap();
+    assert_eq!(alternate.number.text, "1,000");
+    assert_eq!(alternate.unit, "in");
+    assert_eq!(alternate.place, AlternatePlacement::Brackets);
+    s.unit = "inch".into();
+    let result = format_presented_dimension(&v, &s, &DimensionPresentation::default(), "mm").unwrap();
+    match result.primary {
+        PresentedPrimary::Decimal { text, unit } => {
+            assert_eq!(text.nominal, "1,0");
+            assert_eq!(unit, Some("in"));
+        }
+        other => panic!("expected decimal: {other:?}"),
+    }
+    assert!(result.alternate.is_none());
+    let with_tolerance = value(25.4, Tolerance::Symmetric { deviation: 0.1 });
+    assert!(format_presented_dimension(&with_tolerance, &s, &p, "mm").is_err());
+}
+
+#[test]
+fn presented_angle_selects_decimal_or_structured_minutes() {
+    let mut v = value(30.5_f64.to_radians(), Tolerance::None);
+    v.kind = Kind::Angle;
+    let mut s = style();
+    s.unit = "deg".into();
+    s.decimals = 1;
+    let mut p = DimensionPresentation::default();
+    match format_presented_dimension(&v, &s, &p, "mm").unwrap().primary {
+        PresentedPrimary::Decimal { text, unit } => {
+            assert_eq!(text.nominal, "30,5");
+            assert_eq!(unit, Some("°"));
+        }
+        other => panic!("expected decimal: {other:?}"),
+    }
+    p.angle = AngleFormat::DegreesMinutes;
+    s.decimals = 0;
+    match format_presented_dimension(&v, &s, &p, "mm").unwrap().primary {
+        PresentedPrimary::DegreesMinutes(runs) => assert_eq!(runs.nominal.plain(), "30°30′"),
+        other => panic!("expected degree/minute runs: {other:?}"),
+    }
+    assert!(format_presented_dimension(&v, &s, &p, "degrees").is_err());
+    s.unit = "rad".into();
+    assert!(format_presented_dimension(&v, &s, &p, "mm").is_err());
+}
+
+#[test]
+fn presented_angle_marks_every_number_in_decimal_and_minutes() {
+    let mut v = value(30_f64.to_radians(), Tolerance::Symmetric { deviation: 0.5_f64.to_radians() });
+    v.kind = Kind::Angle;
+    let mut s = style();
+    s.unit = "deg".into();
+    s.number.marker = DecimalMarker::Point;
+    s.tolerance_decimals = 1;
+    let mut p = DimensionPresentation::default();
+    assert_eq!(format_presented_dimension(&v, &s, &p, "mm").unwrap().plain(), "30° ±0.5°");
+    v.tolerance = Tolerance::Deviations { upper: 0.5_f64.to_radians(), lower: 0.0 };
+    assert_eq!(format_presented_dimension(&v, &s, &p, "mm").unwrap().plain(), "30° +0.5°/0°");
+    p.angle = AngleFormat::DegreesMinutes;
+    s.tolerance_decimals = 0;
+    v.tolerance = Tolerance::Symmetric { deviation: 0.5_f64.to_radians() };
+    assert_eq!(format_presented_dimension(&v, &s, &p, "mm").unwrap().plain(), "30°00′ ±0°30′");
+    v.presentation = TolerancePresentation::Limits;
+    assert_eq!(format_presented_dimension(&v, &s, &p, "mm").unwrap().plain(), "30°30′/29°30′");
+    v.presentation = TolerancePresentation::Deviations;
+    v.tolerance = Tolerance::Deviations { upper: 0.5_f64.to_radians(), lower: 0.0 };
+    assert_eq!(format_presented_dimension(&v, &s, &p, "mm").unwrap().plain(), "30°00′ +0°30′/0°00′");
+}
+
+#[test]
+fn presented_lengths_put_the_unit_last_and_repeat_limit_indicators() {
+    let mut s = style();
+    s.unit = "in".into();
+    s.number.marker = DecimalMarker::Point;
+    s.decimals = 3;
+    s.tolerance_decimals = 3;
+    let mut v = value(25.4, Tolerance::Symmetric { deviation: 0.127 });
+    let p = DimensionPresentation::default();
+    assert_eq!(format_presented_dimension(&v, &s, &p, "mm").unwrap().plain(), "1.000 ±0.005 in");
+    v.presentation = TolerancePresentation::Limits;
+    assert_eq!(format_presented_dimension(&v, &s, &p, "mm").unwrap().plain(), "1.005/0.995 in");
+    v.indicator = Some(Indicator::Diameter);
+    assert_eq!(format_presented_dimension(&v, &s, &p, "mm").unwrap().plain(), "Ø1.005/Ø0.995 in");
+    assert_eq!(format_dimension(&v, &s).unwrap().plain(), "Ø1.005/0.995", "the legacy formatter remains unchanged");
+    v.tolerance = Tolerance::None;
+    v.role = Role::Auxiliary;
+    assert_eq!(format_presented_dimension(&v, &s, &p, "mm").unwrap().plain(), "(Ø1.000 in)");
+}
+
+#[test]
+fn presented_alternate_placement_keeps_its_explicit_unit() {
+    let v = value(25.4, Tolerance::None);
+    let mut s = style();
+    s.number.marker = DecimalMarker::Point;
+    s.decimals = 1;
+    let mut p = DimensionPresentation {
+        alternate: Some(AlternateUnit { unit: "in".into(), decimals: 3, place: AlternatePlacement::Brackets }),
+        ..DimensionPresentation::default()
+    };
+    assert_eq!(format_presented_dimension(&v, &s, &p, "mm").unwrap().plain(), "25.4 [1.000 in]");
+    p.alternate.as_mut().unwrap().place = AlternatePlacement::Below;
+    assert_eq!(format_presented_dimension(&v, &s, &p, "mm").unwrap().plain(), "25.4\n1.000 in");
 }
 
 fn refused<T: std::fmt::Debug>(result: Result<T>, fragment: &str) {
