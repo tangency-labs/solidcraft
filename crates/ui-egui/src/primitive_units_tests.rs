@@ -639,6 +639,34 @@ fn a_point_picked_in_the_box_dialog_reads_in_the_design_unit() {
     assert_eq!(sent(&h)["corner"], json!(["1 in", "1.5 in", "0.5 in"]));
     ok(&mut h);
     assert_near(bounds(&mut h.app.session)[1].0, [25.4, 38.1, 12.7]);
+    // The Sphere and Torus centre take the point the same way.
+    for cmd in ["solid.sphere", "solid.torus"] {
+        h.app.start(cmd);
+        h.frames(3);
+        let mut d = h.app.dialog.take().unwrap();
+        d.pick(&h.app.session, Sel::Vertex { body: "Base".into(), point: Vec3::new(25.4, 38.1, 12.7) });
+        h.app.dialog = Some(d);
+        h.frames(2);
+        assert_shown(&h, &[("X", "1 in".into()), ("Y", "1.5 in".into()), ("Z", "0.5 in".into())]);
+        assert_eq!(sent(&h)["center"], json!(["1 in", "1.5 in", "0.5 in"]), "{cmd}");
+        h.app.dialog = None;
+    }
+    // In a metre design the text keeps the micrometre: a point that is not round in mm lands
+    // where it was picked, not rounded to a millionth of a metre (a millimetre).
+    let mut h = design("m");
+    h.app.preferences.auto_operation = false;
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Base"})).unwrap();
+    h.frames(2);
+    h.app.start("solid.box");
+    h.frames(3);
+    let at = [12.345678, -23.456789, 5.000123];
+    let mut d = h.app.dialog.take().unwrap();
+    d.pick(&h.app.session, Sel::Face { body: "Base".into(), index: 0, point: Vec3::new(at[0], at[1], at[2]) });
+    h.app.dialog = Some(d);
+    h.frames(2);
+    assert_eq!(sent(&h)["corner"], json!(["0.012345678 m", "-0.023456789 m", "0.005000123 m"]));
+    ok(&mut h);
+    assert_near(bounds(&mut h.app.session)[1].0, at);
 }
 
 #[test]
