@@ -239,7 +239,10 @@ impl<'a> ProfileRoles<'a> {
         // Every curve the segment is drawn on (one, or several coincident or collinear ones).
         let curve = |segment: usize| -> Vec<String> {
             let (Some(curves), Some(segment)) = (curves.as_ref(), segments.get(segment)) else { return Vec::new() };
-            let drawn: Vec<String> = curves.find_all_along(segment).into_iter().map(|id| format!("side:{id}")).collect();
+            let mut drawn: Vec<String> = curves.find_all_along(segment).into_iter().map(|id| format!("side:{id}")).collect();
+            if drawn.is_empty() {
+                drawn.extend(curves.find_free_form(segment).map(|id| format!("side:{id}")));
+            }
             match self.thin {
                 // A thin wall's side beside its curve (the other side may lie on it).
                 Some(thin) if drawn.is_empty() => curves.find_offset(segment, &thin.curves, thin.distances),

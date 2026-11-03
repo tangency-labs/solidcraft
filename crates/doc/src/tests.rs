@@ -1056,3 +1056,68 @@ fn feature_kind_key_and_type_name_mappings() {
     assert_eq!(FeatureKind::type_name_to_kind_key("MeshFeature"), Some("mesh_import"));
     assert_eq!(FeatureKind::type_name_to_kind_key("NonExistent"), None);
 }
+
+/// An extruded ellipse has one side face, and a spline in a profile one wall, each named by its
+/// sketch curve alone (no piece number): the same names on a second build and after reopening.
+#[test]
+fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
+    let extrude = |sketch: u64| FeatureKind::Extrude {
+        thin: None,
+        sketch: crate::SketchId(sketch),
+        profiles: ProfileSel::All,
+        extent: Extent {
+            convention: crate::ExtrudeConvention::LegacyPerSide,
+            distance: "20".into(),
+            direction: Direction::Positive,
+            distance2: None,
+            start_offset: None,
+            through_all: false,
+            taper: None,
+            corner: Default::default(),
+            to: None,
+            to_offset: None,
+            from: None,
+            to_body_apart: false,
+        },
+        operation: Operation::NewBody,
+        targets: vec![],
+    };
+    for spline in [false, true] {
+        let mut sk = Sketch::new();
+        let curve = if spline {
+            let pts: Vec<usize> =
+                [(0., 0.), (10., -3.), (20., 4.), (30., 0.)].iter().map(|&(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap()).collect();
+            let (a, b) = (sk.add_point(Vec2::new(30., 20.), None).unwrap(), sk.add_point(Vec2::new(0., 20.), None).unwrap());
+            let curve = sk
+                .add_curve(solidcraft_sketch::CurveKind::Spline { pts: pts.clone(), control: false, degree: 3, periodic: false, nurbs: None }, None)
+                .unwrap();
+            sk.add_line_pts(pts[3], a, None).unwrap();
+            sk.add_line_pts(a, b, None).unwrap();
+            sk.add_line_pts(b, pts[0], None).unwrap();
+            curve
+        } else {
+            let m = sk.add_point(Vec2::new(10., 0.), None).unwrap();
+            sk.add_curve(solidcraft_sketch::CurveKind::Ellipse { c: 0, m, r: 5. }, None).unwrap()
+        };
+        let id = sk.curves[curve].id.clone();
+        let mut doc = Document::new("one wall");
+        let s = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+        let f = doc.add_feature(extrude(s), None).unwrap();
+        let names = |doc: &Document| {
+            let mut m = Model::new();
+            m.evaluate(doc);
+            assert!(m.results.iter().all(|r| r.error.is_none()), "{:?}", m.results);
+            let st = m.state();
+            let mut names = crate::naming::face_names(&st.bodies[0]).as_ref().clone();
+            names.sort();
+            names
+        };
+        let first = names(&doc);
+        let wall = format!("F{f}:side:{id}");
+        assert_eq!(first.iter().filter(|n| **n == wall).count(), 1, "{first:?}");
+        assert_eq!(first.len(), if spline { 6 } else { 3 }, "{first:?}");
+        assert!(first.iter().all(|n| !n.contains('#')), "no piece names: {first:?}");
+        assert_eq!(names(&doc), first, "a second build");
+        assert_eq!(names(&Document::from_json(&doc.to_json()).unwrap()), first, "reopened");
+    }
+}
