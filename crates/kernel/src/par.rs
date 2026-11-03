@@ -4,6 +4,26 @@
 
 use crate::{Result, guard};
 
+/// The stack of a thread that runs kernel work: solidcore's algorithms recurse (subdivision,
+/// intersection, filleting), and its README asks for 8 MiB, a native main thread's stack, where
+/// Rust starts other threads with 2 MiB.
+pub const KERNEL_STACK: usize = 8 << 20;
+
+/// A thread named `name` with the kernel's stack ([`KERNEL_STACK`]), for a thread that runs
+/// kernel work (an operation, an evaluation, a mesh).
+pub fn kernel_thread(name: &str) -> std::thread::Builder {
+    std::thread::Builder::new().name(name.to_owned()).stack_size(KERNEL_STACK)
+}
+
+/// The kernel's worker pool, its threads with the kernel's stack; `None` when it cannot start
+/// (the work then runs on the calling thread).
+#[cfg(not(target_arch = "wasm32"))]
+fn pool() -> Option<&'static rayon::ThreadPool> {
+    static POOL: std::sync::OnceLock<Option<rayon::ThreadPool>> = std::sync::OnceLock::new();
+    POOL.get_or_init(|| rayon::ThreadPoolBuilder::new().thread_name(|i| format!("solidcraft-kernel-{i}")).stack_size(KERNEL_STACK).build().ok())
+        .as_ref()
+}
+
 /// `f` over `items`, results in item order: on the pool when `parallel`, else on the calling
 /// thread. Waking the pool's workers costs tens of microseconds, so callers ask for it only
 /// when the items carry more work than that (decided from the work, not the item count).
@@ -17,8 +37,18 @@ pub(crate) fn map<T: Sync, R: Send>(what: &'static str, items: &[T], parallel: b
     #[cfg(not(target_arch = "wasm32"))]
     {
         use rayon::prelude::*;
-        if parallel && items.len() > 1 && rayon::current_num_threads() > 1 {
-            return items.par_iter().map(one).collect();
+        if parallel && items.len() > 1 {
+            if rayon::current_thread_index().is_some() {
+                // On a pool's worker (the kernel's, or a one-thread pool of
+                // `map_with_local_pools`): that pool's threads, as many as it has.
+                if rayon::current_num_threads() > 1 {
+                    return items.par_iter().map(one).collect();
+                }
+            } else if let Some(pool) = pool()
+                && pool.current_num_threads() > 1
+            {
+                return pool.install(|| items.par_iter().map(one).collect());
+            }
         }
     }
     items.iter().map(one).collect()
@@ -50,6 +80,7 @@ pub fn map_with_local_pools<T: Sync, R: Send>(items: &[T], max_threads: usize, f
             if cell.get().is_none() {
                 let pool = rayon::ThreadPoolBuilder::new()
                     .num_threads(1)
+                    .stack_size(KERNEL_STACK)
                     .build()
                     .map_err(|e| crate::KernelError::Failed(format!("cannot start mesh worker: {e}")))?;
                 let _ = cell.set(pool);
@@ -92,7 +123,7 @@ pub fn map_on_threads<T: Sync, R: Send>(items: &[T], max_threads: usize, f: impl
             std::thread::scope(|scope| {
                 // A thread that cannot start leaves its share to the others.
                 let helpers: Vec<_> =
-                    (1..threads).filter_map(|_| std::thread::Builder::new().name("solidcraft-each".into()).spawn_scoped(scope, work).ok()).collect();
+                    (1..threads).filter_map(|_| kernel_thread("solidcraft-each").spawn_scoped(scope, work).ok()).collect();
                 let mut all = work();
                 for h in helpers {
                     // `work` never panics (every item runs under the guard).
@@ -153,6 +184,29 @@ mod tests {
         for (i, r) in out.iter().enumerate() {
             assert_eq!(*r, (i != 7).then_some(3 * i as u32));
         }
+    }
+
+    /// `depth` frames of recursion, each holding 64 KiB on the stack, summing their depths: 80 is
+    /// 5 MiB, past the 2 MiB Rust gives a thread and within the kernel's 8 MiB.
+    fn deep(depth: u8) -> u64 {
+        let frame = std::hint::black_box([depth; 64 * 1024]);
+        let here = u64::from(frame[usize::from(depth)]);
+        if depth == 0 { here } else { here + deep(depth - 1) }
+    }
+
+    /// Kernel work recurses as deep as solidcore's algorithms do on every thread the kernel runs
+    /// it on: a kernel thread, the pool's workers, and the helpers of `map_on_threads`.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn kernel_threads_have_the_kernels_stack() {
+        let want: u64 = (0..=80).sum();
+        let on_thread = kernel_thread("deep").spawn(|| deep(80)).unwrap().join().unwrap();
+        assert_eq!(on_thread, want);
+        let items = [80u8; 16];
+        let on_pool = kernel_thread("deep-pool").spawn(move || map("deep", &items, true, |&d| Ok(deep(d)))).unwrap().join().unwrap();
+        assert!(on_pool.iter().all(|r| r.as_ref().ok() == Some(&want)), "{on_pool:?}");
+        let on_helpers = kernel_thread("deep-helpers").spawn(move || map_on_threads(&items, 8, |&d| deep(d))).unwrap().join().unwrap();
+        assert!(on_helpers.iter().all(|r| *r == Some(want)), "{on_helpers:?}");
     }
 
     #[test]

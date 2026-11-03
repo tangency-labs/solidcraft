@@ -97,7 +97,7 @@ mod ops;
 #[cfg(test)]
 mod outline_tests;
 mod par;
-pub use par::{for_each_on_threads, map_on_threads, map_with_local_pools};
+pub use par::{KERNEL_STACK, for_each_on_threads, kernel_thread, map_on_threads, map_with_local_pools};
 #[cfg(test)]
 mod pinch_tests;
 #[cfg(test)]

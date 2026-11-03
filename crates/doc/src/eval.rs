@@ -309,7 +309,7 @@ impl ModelBody {
                 return None;
             }
             let body = self.clone();
-            let started = std::thread::Builder::new().name("plan-mesh".into()).spawn(move || {
+            let started = kernel::kernel_thread("plan-mesh").spawn(move || {
                 let _ = body.plan_mesh_at(q);
                 if let Ok(mut warming) = WARMING.lock() {
                     warming.retain(|k| *k != key);
