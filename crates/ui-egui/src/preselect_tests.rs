@@ -3604,3 +3604,32 @@ fn shell_lists_the_faces_its_chip_counts() {
     assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![back]);
     assert!(h.widget("1 selected").is_some());
 }
+
+/// #11663: a box drawn over a sketch takes its dimensions and constraint icons along with its
+/// lines and points. Fix started with that selection fixes the lines and points; it does not fall
+/// back to the pick tool. Hundreds of entities (more than the 200 a constraint pick takes) too.
+#[test]
+fn fix_takes_a_boxed_selection_with_its_dimensions_and_hundreds_of_entities() {
+    for lines in [3, 110] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        for i in 0..lines {
+            let y = 5 * i;
+            h.app.run("sketch.line", json!({"points": [[0, y], [20, y + 2]], "infer": false, "connect": false})).unwrap();
+        }
+        h.app.run("sketch.dimension", json!({"entities": ["l1"], "value": "21 mm"})).unwrap();
+        let sid = h.app.session.active_sketch.unwrap();
+        let sk = h.app.session.doc.sketch(sid).unwrap();
+        let mut selection: Vec<Sel> = sk.curves.iter().map(|c| Sel::SketchCurve { id: c.id.clone(), sketch: None }).collect();
+        selection.extend(sk.points.iter().skip(1).map(|p| Sel::SketchPoint { id: p.id.clone() }));
+        selection.extend(sk.constraints.iter().map(|c| Sel::SketchConstraint { id: c.id.clone() }));
+        assert!(selection.iter().any(|s| matches!(s, Sel::SketchConstraint { .. })), "the box holds the dimension");
+        h.app.session.selection = selection;
+        h.app.start("sketch.constraint.fix");
+        let sk = h.app.session.doc.sketch(sid).unwrap();
+        let loose: Vec<&str> = sk.curves.iter().filter(|c| !c.fixed).map(|c| c.id.as_str()).collect();
+        assert!(loose.is_empty(), "{lines} lines: not fixed {loose:?} ({:?})", h.app.status);
+        assert!(h.app.tool.is_none(), "{lines} lines: Fix applied at once, no pick tool left running");
+        assert!(h.app.session.selection.is_empty(), "{lines} lines: the selection is used up");
+    }
+}
