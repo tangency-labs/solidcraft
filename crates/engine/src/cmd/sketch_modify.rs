@@ -669,6 +669,13 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
     };
     rebind_endpoint_tangencies(sk, ci, &pieces, &tangencies);
     let keep: Vec<usize> = pieces.iter().copied().filter(|x| *x != gone).collect();
+    for &(from, to) in &welds {
+        for piece in &keep {
+            if let Some(c) = sk.curves.get_mut(*piece) {
+                c.kind.map_points(&|p| if p == from { to } else { p });
+            }
+        }
+    }
     tie(sk, &keep)?;
     if let Some((a, _)) = sk.curves.get(ci).and_then(|c| c.kind.ends()) {
         for dimension in &mut sk.constraints {
@@ -676,13 +683,6 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
                 && let ConstraintKind::PointLineDistance { p, .. } = &mut dimension.kind
             {
                 *p = a;
-            }
-        }
-    }
-    for &(from, to) in &welds {
-        for piece in &keep {
-            if let Some(c) = sk.curves.get_mut(*piece) {
-                c.kind.map_points(&|p| if p == from { to } else { p });
             }
         }
     }
