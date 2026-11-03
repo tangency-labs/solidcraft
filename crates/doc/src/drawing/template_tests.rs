@@ -140,6 +140,15 @@ fn a_drawing_saved_as_a_template_keeps_only_its_format() {
     // The drawing's number is its own; its other properties come along.
     assert_eq!((template.properties.part_number(), template.properties.project()), (None, Some("Rig")));
     assert_eq!(read(&template.to_json().unwrap()).unwrap(), template);
+    // Text typed over a cell of plain text stays; over a cell that shows a field, it goes with the
+    // design that field reads.
+    let sheet = Arc::make_mut(&mut d.sheets[0]);
+    sheet.set_title_block(Some(built_in_block(false)));
+    for (cell, text) in [("general_tolerances", "ISO 2768-m"), ("material", "See note 3"), ("title", "Plate, left")] {
+        sheet.title_block_overrides.insert(cell.into(), text.into());
+    }
+    let kept: Vec<String> = from_drawing(&d).unwrap().sheets[0].title_block_overrides.keys().cloned().collect();
+    assert_eq!(kept, ["general_tolerances"]);
     let refusal = read(&d.to_json().unwrap()).unwrap_err().to_string();
     assert!(refusal.starts_with("a template draws no design"), "{refusal}");
 }

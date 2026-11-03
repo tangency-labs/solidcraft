@@ -102,7 +102,8 @@ pub fn instantiate(template: &Drawing, name: &str, taken: &BTreeSet<u64>, id_sou
 /// `drawing` as a template: its format, and nothing it draws or documents (its sources, views,
 /// dimensions, balloons, revision rows, and the component each sheet documents), nor its number,
 /// which drawings made from it get their own of. Its other properties, its revision numbering and
-/// the text typed over its cells stay.
+/// the text typed over its cells of plain text stay; text typed over a cell that shows a field
+/// (a parameter, a value or a reference) goes with the design that field reads.
 pub fn from_drawing(drawing: &Drawing) -> Result<Drawing> {
     let mut template = drawing.clone();
     template.sources.clear();
@@ -114,9 +115,15 @@ pub fn from_drawing(drawing: &Drawing) -> Result<Drawing> {
     (revisions.numbering, revisions.per_sheet) = (template.revisions.numbering, template.revisions.per_sheet);
     template.revisions = Arc::new(revisions);
     for sheet in &mut template.sheets {
-        if sheet.documents.is_some() {
-            Arc::make_mut(sheet).documents = None;
-        }
+        let sheet = Arc::make_mut(sheet);
+        sheet.documents = None;
+        let shows_a_field = |name: &String| {
+            let cell = sheet.title_block.as_ref().and_then(|block| block.cells.iter().find(|cell| cell.name == *name));
+            cell.is_some_and(
+                |cell| matches!(&cell.kind, CellKind::Text(text) if text.content.0.iter().any(|part| matches!(part, Part::Field { .. }))),
+            )
+        };
+        sheet.title_block_overrides.retain(|name, _| !shows_a_field(name));
     }
     check(&template)?;
     Ok(template)

@@ -106,7 +106,11 @@ fn a_template_file_saves_and_starts_drawings() {
     let (mut s, _) = crate::cmd::drawing_view::tests::three_views();
     let folder = Folder::new("drawing-template");
     let path = folder.path("company-a3.json");
-    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": "built-in", "title_block_overrides": {"material": "See note 3"}}));
+    run(
+        &mut s,
+        "drawing.sheet.set",
+        json!({"sheet": "Sheet 1", "title_block": "built-in", "title_block_overrides": {"general_tolerances": "ISO 2768-m"}}),
+    );
     let saved = run(&mut s, "drawing.template.save", json!({"path": path}));
     assert_eq!(saved["bytes"].as_u64(), Some(std::fs::metadata(&path).unwrap().len()));
     let first = open_one(&s);
