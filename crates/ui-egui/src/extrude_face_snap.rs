@@ -130,7 +130,7 @@ fn bounds_2d(plane: &Plane, points: impl IntoIterator<Item = Vec3>) -> Option<(V
 
 /// What the extrude starts from, as world points: its profiles' outlines, or its faces' points.
 fn footprint(app: &SolveApp, d: &Dialog, faces: &[FlatFace]) -> Vec<Vec3> {
-    let st = app.session.world_state();
+    let Ok(st) = app.session.world_state() else { return Vec::new() };
     let mut out = Vec::new();
     for item in d.inputs.first().map(|i| i.items.as_slice()).unwrap_or_default() {
         match item {
@@ -158,7 +158,7 @@ pub(crate) fn stops(app: &SolveApp, d: &Dialog, base: Vec3, n: Vec3) -> Vec<Stop
         return Vec::new();
     }
     let Some(plane) = Plane::from_normal(base, n) else { return Vec::new() };
-    let st = app.session.world_state();
+    let Ok(st) = app.session.world_state() else { return Vec::new() };
     let faces = flat_faces(&st);
     let Some((lo, hi)) = bounds_2d(&plane, footprint(app, d, &faces)) else { return Vec::new() };
     let size = lo.dist(hi).max(1.0);
@@ -194,7 +194,7 @@ pub(crate) fn nearest<'a>(proj: &Proj, base: Vec3, n: Vec3, along: f64, stops: &
 
 /// Outlines the face the arrow stopped at, as a hovered face's edges are drawn.
 pub(crate) fn outline(app: &SolveApp, painter: &egui::Painter, proj: &Proj, stop: &Stop) {
-    let st = app.session.world_state();
+    let Ok(st) = app.session.world_state() else { return };
     let Some(b) = st.body(&stop.body) else { return };
     let m = b.mesh();
     let t = Tokens::get();
