@@ -721,7 +721,6 @@ fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<
     let body_color = sc.color(c.body);
     let new_body = sc.color(c.new_body);
     let removed = sc.color(c.removed);
-    let lost = sc.color(c.lost);
     let selected = sc.color(c.selected);
     let edge = sc.color(c.edge);
     let tint_new = c.tint_new && combine.is_none();
@@ -854,14 +853,15 @@ fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<
         // What a combine takes away: a cut, its tools whole; an intersect, its tools' material
         // outside what remains; a join, nothing. Its target's old shape is not ghosted.
         let fill = match combine {
-            None => Some(removed),
+            None => Some(c.removed),
             Some(k) => match (k.op.as_str(), tool) {
-                ("cut", true) => Some(removed),
-                ("intersect", true) => Some(lost),
+                ("cut", true) => Some(c.removed),
+                ("intersect", true) => Some(c.lost),
                 _ => None,
             },
         };
-        if cut_tint && let Some(fill) = fill {
+        if cut_tint && let Some(colour) = fill {
+            let fill = sc.color(colour);
             // A changed body's surface it keeps is not removed material: drawn as ghost there it
             // lies on the new body's face, and where that face is curved and meshed anew (its
             // boundary moved) the two triangulations cross by up to their chord error, far past the
@@ -879,8 +879,18 @@ fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<
                     }
                 }
             }
-            // Hovered, a tool drawn as a ghost of itself is outlined by its own edges.
             if tool {
+                // A tool's ghost has its outline in its own colour, depth-tested as a body's own
+                // edges (the renderer draws no on-top line of a preview).
+                let edge = sc.color([colour[0], colour[1], colour[2], 255]);
+                for (ei, e) in m.edges.iter().enumerate() {
+                    if m.shaded_edge_visible(ei) {
+                        for w in e.windows(2) {
+                            sc.line(w[0].to_f32(), w[1].to_f32(), edge, 1.3, false);
+                        }
+                    }
+                }
+                // Hovered, a tool drawn as a ghost of itself is outlined by its own edges.
                 outlines.push((b.name.clone(), m.clone()));
             }
         }
@@ -1442,6 +1452,15 @@ mod tests {
         assert!(count(&intersect.scene, &intersect.scene.ghost, 28, c.lost) > 0, "the pin's dropped material");
         assert_eq!(count(&intersect.scene, &intersect.scene.ghost, 28, c.removed), 0);
         assert_eq!(count(&intersect.scene, &intersect.scene.xray, 28, c.removed), 0, "what remains is shown as it is");
+        // Each ghosted tool has its outline in its own colour, in the lines the renderer draws for
+        // a preview (it draws no on-top ones); a join's has none.
+        let outline = |colour: [u8; 4]| [colour[0], colour[1], colour[2], 255];
+        let lines = |b: &Built, colour: [u8; 4]| count(&b.scene, &b.scene.lines, crate::gpu::LINE_SIZE, outline(colour));
+        assert!(lines(&cut, c.removed) > 0, "the red tool's outline");
+        assert!(lines(&kept, c.removed) > 0, "a kept tool's outline");
+        assert!(lines(&intersect, c.lost) > 0, "the yellow tool's outline");
+        assert_eq!(lines(&join, c.removed) + lines(&join, c.lost), 0);
+        assert!(cut.scene.overlay.is_empty() && intersect.scene.overlay.is_empty(), "nothing the renderer leaves out");
     }
 
     /// A plate in its own component, stood up by its placement (an imported part set upright)
