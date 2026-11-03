@@ -299,7 +299,8 @@ pub(super) fn same_model_source(app: &SolveApp, document: &std::sync::Weak<solid
     // Match ergonomics bind references, including vectors and point-cloud data.
     macro_rules! compare_authoring_fields {
         ($($field:ident),* $(,)?) => {{
-            let solidcraft_engine::doc::Document { render: _, $($field),* } = source.as_ref();
+            // cam: CAM settings never change what a workspace renders.
+            let solidcraft_engine::doc::Document { render: _, cam: _, $($field),* } = source.as_ref();
             true $(&& $field == &app.session.doc.$field)*
         }};
     }
